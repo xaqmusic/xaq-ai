@@ -1,0 +1,290 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 nav (3) SLOW VOTER +EXPLORE",
+    "description": "Nav-only ignition graph, variant 3/4 (matrix: fusion=VOTER x timescale=SLOW). Per-modality COARSE EPMs (scent-compass bearing + green) -> LateralVoter trust/precision-weighted consensus ('meta-EPM after voting') -> EFE ActionDecoder (consensus-only state, proprio disabled). SLOW = each EPM runs at process_every_n_ticks=30 (republishes between) so the fused belief updates at the action-commit cadence. The voter adds precision weighting the bundle lacks, at the cost of per-modality EPMs + a warming trust matrix (watch consensus cardinality). body_model=bidirectional_paddler + reflex_modular.",
+    "env_target": "cell",
+    "phase_tag": "6.9.nav.slow_voter.explore",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": true,
+    "motor_energy": true,
+    "nutrients": 12,
+    "energy_drain": 0.012,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.85,
+    "food_respawn": false
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "fast_bundle",
+      "type": "SensorBundle",
+      "params": {
+        "input_topics": [
+          "reality.proprio.imu",
+          "reality.proprio.motor_energy"
+        ],
+        "output_topic": "fast.proprio.bundle",
+        "sensor_label": "fast_bundle"
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPM",
+      "params": {
+        "proprio_topics": [
+          "fast.proprio.bundle"
+        ],
+        "action_topics": [
+          "action.left",
+          "action.right"
+        ],
+        "n_legs": 1,
+        "motor_dim": 2,
+        "seed": 1234,
+        "init_scale": 0.08,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.03,
+        "bias_lr": 0.005,
+        "sat_lr": 0.02,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.15,
+        "babble_ticks": 200,
+        "babble_scale": 0.5,
+        "explore_noise": 0.05,
+        "motor_gain": 4.0,
+        "cog_steer_topic": "cog.steer",
+        "cog_steer_gain": 1.0,
+        "boredom_topic": "cognition.boredom",
+        "boredom_noise_gain": 0.35,
+        "boredom_escalation_rate": 0.02,
+        "interest_topic": "cognition.interest",
+        "hunger_topic": "reality.proprio.hunger",
+        "coupling_gain": 0.0,
+        "cruse_gain": 0.0,
+        "cruse_rule5_gain": 0.0,
+        "balance_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "stroke_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "steer": 0.0,
+        "postural_gain": 0.0,
+        "panic_strength": 0.0,
+        "amp_seek_rate": 0.0,
+        "coord_reward_drive": 0.0,
+        "coord_stab_penalty": 0.0,
+        "coord_adapt_rate": 0.0,
+        "coord_explore": 0.0,
+        "imu_topic": "",
+        "tilt_topic": "",
+        "nav_topic": "percept.scent_compass",
+        "height_topic": "",
+        "distress_topic": "",
+        "lateral_topic": "",
+        "feet_topic": "",
+        "cog_thrust_topic": "cog.thrust",
+        "cog_thrust_gain": 1.0
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.5
+      }
+    },
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5
+      }
+    },
+    {
+      "id": "epm_bearing",
+      "_comment": "COARSE per-modality olfactory state (max 16 nodes, mitosis off). SLOW: process_every_n_ticks=30 (republishes last token between). Publishes reality.nav.bearing -> voter_nav.",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "bearing",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.scent_compass",
+        "projection_dim": 16,
+        "proprio_state_dims": 3,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.1,
+        "max_nodes": 16,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "epm_green",
+      "_comment": "COARSE per-modality vision state (green fraction). SLOW: process_every_n_ticks=30. Publishes reality.nav.color -> voter_nav.",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "color",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.green_fraction",
+        "projection_dim": 8,
+        "proprio_state_dims": 1,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.1,
+        "max_nodes": 8,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "voter_nav",
+      "_comment": "Trust/precision-weighted fusion of the two nav EPMs -> consensus.1. This is the 'meta-EPM after voting'; the EFE actor reads consensus.1 directly as its (consensus-only) state.",
+      "type": "LateralVoter",
+      "params": {
+        "level": 1,
+        "input_pattern": "reality.nav.",
+        "trust_epsilon": 0.05,
+        "group_balance": false,
+        "priority_group": "nav"
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "action_decoder",
+      "_comment": "EFE actor. consensus_level=1 + proprio_topic='' => CONSENSUS-ONLY state: the voter consensus winner IS the whole belief.",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 1,
+        "output_topic": "cog.steer",
+        "proprio_topic": "",
+        "action_bins": 3,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "pragmatic_gain": 10.0,
+        "epistemic_gain": 6.0,
+        "efe_select": true,
+        "interest_topic": "cognition.interest",
+        "efe_temperature": 1.0,
+        "td_lambda": 0.7,
+        "td_gamma": 0.9,
+        "urgency_exploit_threshold": 0.3,
+        "urgency_exploit_bias": 4.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "eligibility_lambda": 0.9,
+        "eligibility_max_len": 64,
+        "commit_ticks": 30,
+        "pref_obs_topic": "reality.proprio.scent_max",
+        "obs_value_alpha": 0.05,
+        "pref_obs_index": 0
+      }
+    },
+    {
+      "id": "action_thrust",
+      "_comment": "EFE THRUST actor: same state/preference as the steer actor, but drives cog.thrust (common-mode forward/reverse). Lets the brain move toward higher scent \u2014 the action that changes proximity.",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 1,
+        "output_topic": "cog.thrust",
+        "proprio_topic": "",
+        "action_bins": 3,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "pragmatic_gain": 10.0,
+        "epistemic_gain": 6.0,
+        "efe_select": true,
+        "interest_topic": "cognition.interest",
+        "efe_temperature": 1.0,
+        "td_lambda": 0.7,
+        "td_gamma": 0.9,
+        "urgency_exploit_threshold": 0.3,
+        "urgency_exploit_bias": 4.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "eligibility_lambda": 0.9,
+        "eligibility_max_len": 64,
+        "commit_ticks": 30,
+        "pref_obs_topic": "reality.proprio.scent_max",
+        "obs_value_alpha": 0.05,
+        "master_seed": 4321,
+        "pref_obs_index": 0
+      }
+    },
+    {
+      "id": "whisker_steer",
+      "_comment": "Transparent WALL-escape reflex (whiskers see walls only, NOT food). Weighted ipsilateral turn-away (inner whiskers stronger) + reverse-out-of-wedge. LAST module \u2192 overwrites MotorEPM paddle commands ONLY on wall contact (subsumption); silent otherwise so the brain passes through.",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "left_suffixes": [
+          "0",
+          "1",
+          "2"
+        ],
+        "right_suffixes": [
+          "3",
+          "4",
+          "5"
+        ],
+        "threshold": 0.15,
+        "steer_gain": 10.0,
+        "reverse_strength": 4.0,
+        "refractory_ticks": 0,
+        "output_topic_left": "action.left",
+        "output_topic_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

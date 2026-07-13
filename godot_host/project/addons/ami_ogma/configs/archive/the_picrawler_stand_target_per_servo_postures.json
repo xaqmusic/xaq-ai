@@ -1,0 +1,170 @@
+{
+  "metadata": {
+    "name": "PiCrawler — Whole-Body Posture Vocabulary (Phase 8 A1)",
+    "description": "Phase 8 Rung A1 — action-vocabulary test.  Replaces the 12 independent per-servo Premotors of the_picrawler_stand_target_per_servo_compass.json with ONE whole-body multi-channel Premotor (premotor_body) that selects among K=8 COORDINATED whole-body postures.  Each posture is a 12-D joint-target row (in [-1,+1] brain-command units, same as the per-servo Premotors emit).  This isolates the hypothesis: does a coordinated (discrete, whole-body) action space lift max_distance vs per-servo continuous?  (Phase 7 closed: per-servo accel cannot be shaped into coordinated translation by any reward — da_mean climbs while distance falls.)\n\nVocabulary is hand-SEEDED here (A1 is seed-only by nature — a static posture is not a temporal motif to crystallize); the hybrid seed→crystallize source lands at Rung A2 (temporal gait options).  Vocabulary is ANCHORED on the body's real tall-stand pose: the baseline learns to stand at chassis_y~0.09-0.11 with u_hip2~+0.65 (legs extended downward to lift the chassis) — NOT the all-zeros rest pose (which sits at y~0.023, below FAIL_HEIGHT).  The 8 postures (u in [-1,+1]): 0=STAND_TALL (hip2=0.7,knee=0.3), 1=crouch (hip2=0.3), 2=stand_wide (+hip1 splay), 3=push_drive (hip2=0.9,knee=0.4), 4=trotA (FL+RR lifted hip2=0.2 / FR+RL planted hip2=0.8), 5=trotB (mirror), 6=front_lift (front lifted / rear planted), 7=rear_lift (mirror).  LR-symmetric as a SET: 0/1/2/3 within-posture symmetric; trotA/trotB and front_lift/rear_lift are mirror PAIRS (a gait needs LR/AP-asymmetric instantaneous postures whose mirror is also in the set).  'Lift a leg' = reduce its hip2 (less downward push → foot rises while planted legs support).  hip1=+1 means 'splay outward' for all legs (body applies HIP1_SPLAY_OUT_SIGN).\n\nAll non-topology params identical to the per-servo baseline (MC-REINFORCE, mc_lr=0.05, gamma=0.99, advantage_normalization) so the ONLY variable is action-space topology.  use_weighted_accel=false → emit the chosen posture, not a blend (blending defeats discreteness).  No reward shaping; clean distance curriculum.",
+    "env_target": "picrawler",
+    "phase_tag": "v8.A1 posture-vocabulary",
+    "derived_from_manifest": true,
+    "episode_length": 6000,
+    "mc_episode_period": 1500,
+    "stability_gain": 0.05,
+    "stability_y_norm": 0.5,
+    "stability_speed": 0.05,
+    "reward_shape": "trapezoid",
+    "target_height": 0.085,
+    "height_penalty_grace": 0.02,
+    "height_penalty_scale": 0.03,
+    "height_penalty_gain": 0.05,
+    "leg_symmetry": "lr_pairs"
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "wall_stuck_da_drain": 0.0,
+        "wall_stuck_ht_drain": 0.0
+      }
+    },
+    {
+      "id": "epm_imu",
+      "type": "EPM",
+      "params": {
+        "modality_group": "vestibular",
+        "modality_name": "imu",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_joints",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "joints",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.joints",
+        "projection_dim": 48,
+        "proprio_state_dims": 12,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_compass",
+      "type": "EPM",
+      "params": {
+        "modality_group": "compass",
+        "modality_name": "global",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.compass",
+        "projection_dim": 48,
+        "proprio_state_dims": 2,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": true,
+        "priority_group": "vestibular"
+      }
+    },
+    {
+      "id": "descend",
+      "type": "DescendingPredictor",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "targets": [
+          "reality.vestibular.imu",
+          "reality.proprio.joints"
+        ],
+        "update_method": "sgd",
+        "learning_rate": 0.005
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "alive"
+        ],
+        "channel_kinds": [
+          "alive_pulse"
+        ],
+        "setpoints": [
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0
+        ],
+        "channel_input_topics": [
+          "events.hit"
+        ],
+        "alive_pulse_decay_per_tick": 0.005,
+        "alive_pulse_replenish_per_event": 0.5
+      }
+    },
+    {
+      "id": "premotor_body",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 8,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "output_topics": "[\"action.fl_hip1\",\"action.fl_hip2\",\"action.fl_knee\",\"action.fr_hip1\",\"action.fr_hip2\",\"action.fr_knee\",\"action.rl_hip1\",\"action.rl_hip2\",\"action.rl_knee\",\"action.rr_hip1\",\"action.rr_hip2\",\"action.rr_knee\"]",
+        "bilateral_table": "[[0.0,0.7,0.3,0.0,0.7,0.3,0.0,0.7,0.3,0.0,0.7,0.3],[0.0,0.3,0.0,0.0,0.3,0.0,0.0,0.3,0.0,0.0,0.3,0.0],[0.4,0.7,0.3,0.4,0.7,0.3,0.4,0.7,0.3,0.4,0.7,0.3],[0.0,0.9,0.4,0.0,0.9,0.4,0.0,0.9,0.4,0.0,0.9,0.4],[0.3,0.2,0.2,0.0,0.8,0.3,0.0,0.8,0.3,0.3,0.2,0.2],[0.0,0.8,0.3,0.3,0.2,0.2,0.3,0.2,0.2,0.0,0.8,0.3],[0.0,0.2,0.2,0.0,0.2,0.2,0.0,0.8,0.3,0.0,0.8,0.3],[0.0,0.8,0.3,0.0,0.8,0.3,0.0,0.2,0.2,0.0,0.2,0.2]]",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 101,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,41 @@
+[
+  {
+    "name": "stage_1_stand_permissive_knee_off",
+    "description": "2026-06-01 knee-widening A/B ablation arm. Identical to picrawler_stand_walk_gated_trot stage 1 EXCEPT knee_widening_enabled=false (restores pre-f9ab634 symmetric KNEE_RANGE=1.40 + KNEE_LIMIT_LOW=-1.70). Tests whether the 2026-06-01 knee widening had behavioral effect against the recovered Phase 7.5.R baseline.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "knee_widening_enabled": false
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 1800
+    }
+  },
+  {
+    "name": "stage_2_walk_multiplicative_gate_knee_off",
+    "description": "2026-06-01 knee-off ablation stage 2. Identical to picrawler_stand_walk_gated_trot stage 2 EXCEPT knee_widening_enabled=false.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.15,
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "radial",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.2,
+      "phase_contrast_gain": 0.7,
+      "knee_widening_enabled": false
+    }
+  }
+]

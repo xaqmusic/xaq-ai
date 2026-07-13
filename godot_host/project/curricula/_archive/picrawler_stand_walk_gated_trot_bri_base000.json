@@ -1,0 +1,23 @@
+[
+    {
+        "name": "stage_1_gated_trot_bri_base000",
+        "description": "2026-06-01 Stage 3.D calibration sweep: base_rate=0.0, bias=1.0. Tests whether reducing baseline firing eliminates the crouch artifact observed at base=0.5 (smoke 2). Range[u=0..1] = [0.0, 1.0] = [0.0, 1.0]. At u=0 (neutral), joint fires 0% of ticks; at |u|=1, fires every tick. With base=0.0 the joint is fully silent at neutral \u2014 closest to biological motor units.",
+        "overrides": {
+            "actuation_backend": "bernoulli_impulse",
+            "bri_base_rate": 0.0,
+            "bri_command_bias": 1.0,
+            "bri_impulse_per_spike": 0.05,
+            "bri_friction_per_tick": 0.05,
+            "target_height": 0.085,
+            "reward_shape": "trapezoid",
+            "standing_baseline_factor": 0.25,
+            "gated_walk_bonus_rate": 0.2,
+            "phase_contrast_gain": 0.7,
+            "walk_target_velocity": 0.15,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "height_penalty_scale": 0.03,
+            "height_penalty_grace": 0.02
+        }
+    }
+]

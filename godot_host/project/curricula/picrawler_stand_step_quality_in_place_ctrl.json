@@ -1,0 +1,42 @@
+[
+  {
+    "name": "stage_1_stand_permissive",
+    "description": "2026-06-02 step_quality A/B control arm — Stage 1 IDENTICAL to picrawler_stand_step_quality_in_place.json so paired-seed bit-equivalence is maintained up through curriculum advance.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "step_quality_reward_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 1200
+    }
+  },
+  {
+    "name": "stage_2_step_quality_ctrl",
+    "description": "Stage 2 CONTROL arm — same overrides as picrawler_stand_step_quality_in_place.json stage 2 EXCEPT step_quality_reward_gain=0.0.  Tests whether the step_quality channel has any directional effect on behaviour vs zero-gain baseline.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "phase_contrast_gain": 0.0,
+      "step_quality_reward_gain": 0.0,
+      "step_lift_scale": 0.04,
+      "step_quality_ema_alpha": 0.02
+    }
+  }
+]

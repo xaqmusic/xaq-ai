@@ -1,0 +1,126 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 INFERRED bearing on the STABLE hand-gate advance (Stage 3, isolated)",
+    "description": "Stage-3 perception de-scaffold, ISOLATED from the flaky learned-advance: inferred bearing (BearingEstimator, teacher lesioned at half) drives the STABLE hand-gate HeadingController (learn_advance=false, the 296-eat baseline). Changes ONLY perception \u2192 foraging reflects the inferred percept alone. GATE: forage ~296 (match analytic+handgate) + SUSTAINED post-lesion + corr(infer,fbear) high. A/B vs the_cell_corridor_turn_heading.json (analytic+handgate, 296).",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor.turn.heading.infer.handgate",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "corridor_bearing_max": 45.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "corridor_respawn_far": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.02,
+        "_comment": "TEACHER only now \u2014 feeds BearingEstimator.teacher_topic, not the controller."
+      }
+    },
+    {
+      "id": "bearing_estimator",
+      "type": "BearingEstimator",
+      "params": {
+        "ring_topic": "reality.proprio.scent",
+        "teacher_topic": "percept.scent_compass",
+        "output_topic": "percept.bearing_inferred",
+        "max_prototypes": 40,
+        "novelty_thresh": 0.05,
+        "proto_lr": 0.05,
+        "bearing_lr": 0.05,
+        "lesion_after_ticks": 18000,
+        "force_lesion": false,
+        "_comment": "VQ the raw ring + distill the bearing from the analytic teacher; lesion at half-run \u2192 forage on the learned percept alone."
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.bearing_inferred",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": false,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "_comment": "STABLE hand-gate advance (learn_advance=false) \u2014 isolates the perception de-scaffold from the advance orbit."
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

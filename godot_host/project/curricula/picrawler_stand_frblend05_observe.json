@@ -1,0 +1,39 @@
+[
+  {
+    "name": "stage_1_stand_symmetric",
+    "description": "E1b observe v3 (Joseph UI findings 2026-06-10, corrected).  Stand-only with: (1) leg_symmetry_fr_blend=0.5 — front-rear posture coupling that collapses the seed-random asymmetric sit (the sit is what appears when this pairing is absent — it is the real sit-fix); (2) target_height=0.09 — a MODEST up-target (just above the 0.085 the sit settles at).  NOTE: an earlier draft used target_height=1.0; that was a live 'kick' to escape an already-formed sit, but as a tabula-rasa learning target it over-drives the climb and roughly doubles falls — so the curriculum uses 0.09 + the pairing (which does the actual fixing).  (3) advance at best_cumulative_alive_ticks>=4000 (~80 s) — the 20 s/1200-tick trigger fired before the stance stabilised.  Requires the F9_W1_diag_walk config (leg_symmetry=lr_pairs).",
+    "overrides": {
+      "target_height": 0.09,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "leg_symmetry_fr_blend": 0.5
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 4000
+    }
+  },
+  {
+    "name": "stage_2_ready_stand",
+    "description": "After a stable symmetric stance is reached (~80 s), settle target_height to 0.085 while keeping the front-rear blend.  Still stand-only (no walking reward yet) — this is the gait-ready symmetric base the rhythm/coordination layer will build on.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "walk_reward_mode": "radial",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.0,
+      "leg_symmetry_fr_blend": 0.5
+    }
+  }
+]

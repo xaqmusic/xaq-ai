@@ -1,0 +1,20 @@
+{
+  "format": "OGFS",
+  "format_version": 1,
+  "filename": "maze5x5_seed42.ogfs",
+  "sha256": "f505094d823b35d0a7e11f629a631aebc8289e35b68a82224e151c0538fa0288",
+  "tick_count": 2000,
+  "image_shape": [
+    120,
+    160,
+    3
+  ],
+  "proprio_dim": 22,
+  "master_seed": 42,
+  "policy": "random_walk",
+  "policy_force_scale": 1.0,
+  "maze_native_resolution": [
+    480,
+    640
+  ]
+}

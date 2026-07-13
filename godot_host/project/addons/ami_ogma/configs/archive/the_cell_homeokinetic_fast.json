@@ -1,0 +1,89 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 homeokinetic FAST path (Motor-EPM, reward-free)",
+    "description": "Phase 6.8 Stage 1 \u2014 the picrawler's reward-free homeokinetic Motor-EPM generalized from 12 leg-joints to 2 flagella (n_legs=1, motor_dim=2), the substrate-flexibility proof. FAST path only: SensorBundle concatenates the motion self-model + collision sensors (imu[4] + whisker_0..5[6] = 10-D) into the homeokinetic state; MotorEPM learns a forward model of its own sensorimotor loop (Der-Martius motor-TLE descent) and acts via the two flagella to keep that loop controllable \u2014 alive, exploratory, collision-aware swimming, NO reward. All gait reflexes (coupling/cruse/balance/stroke/height/heading/nav/postural/agency) are OFF; only the homeokinetic core + babble warmup + explore noise run. The slow perception/steering path is added in Stage 2 (the_cell_homeokinetic.json). body_model=differential_paddler + reflex_modular so the 2 outputs are direct per-flagellum thrusts.",
+    "env_target": "cell",
+    "phase_tag": "6.8.1",
+    "reflex_modular": true,
+    "body_model": "differential_paddler",
+    "motor_baseline_beat": true,
+    "motor_energy": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "fast_bundle",
+      "type": "SensorBundle",
+      "params": {
+        "input_topics": [
+          "reality.proprio.imu",
+          "reality.proprio.whisker_0",
+          "reality.proprio.whisker_1",
+          "reality.proprio.whisker_2",
+          "reality.proprio.whisker_3",
+          "reality.proprio.whisker_4",
+          "reality.proprio.whisker_5",
+          "reality.proprio.motor_energy"
+        ],
+        "output_topic": "fast.proprio.bundle",
+        "sensor_label": "fast_bundle"
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPM",
+      "params": {
+        "proprio_topics": [
+          "fast.proprio.bundle"
+        ],
+        "action_topics": [
+          "action.left",
+          "action.right"
+        ],
+        "n_legs": 1,
+        "motor_dim": 2,
+        "seed": 1234,
+        "init_scale": 0.08,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.03,
+        "bias_lr": 0.005,
+        "sat_lr": 0.02,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.15,
+        "babble_ticks": 200,
+        "babble_scale": 0.5,
+        "explore_noise": 0.05,
+        "motor_gain": 4.0,
+        "coupling_gain": 0.0,
+        "cruse_gain": 0.0,
+        "cruse_rule5_gain": 0.0,
+        "balance_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "stroke_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "steer": 0.0,
+        "postural_gain": 0.0,
+        "panic_strength": 0.0,
+        "amp_seek_rate": 0.0,
+        "coord_reward_drive": 0.0,
+        "coord_stab_penalty": 0.0,
+        "coord_adapt_rate": 0.0,
+        "coord_explore": 0.0,
+        "imu_topic": "",
+        "tilt_topic": "",
+        "nav_topic": "",
+        "height_topic": "",
+        "distress_topic": "",
+        "lateral_topic": "",
+        "feet_topic": ""
+      }
+    }
+  ],
+  "edges": []
+}

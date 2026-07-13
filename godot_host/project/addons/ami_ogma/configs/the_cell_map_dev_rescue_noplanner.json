@@ -1,0 +1,317 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 D-VALUE RESCUE v2 (planner OFF)",
+    "description": "L-bend maze + 2D-diffusion scent. Canonical action layer: HeadingController (learned advance, HOMEOKINETIC food-decoupled reward \u2192 no policy collapse; authority-gated learning) as ONE MotorBus influencer with PROPORTIONAL turn-priority mixing (turn_brake=3 \u2192 pivot-converge, no orbit); recovery in the REFLEX layer \u2014 WhiskerSteerReflex (held-pulse kick + reverse-out-of-wedge) + StuckEscapeReflex (efference-afferent mismatch). ~57 eats/36k. Press H = scent heatmap.",
+    "env_target": "cell",
+    "phase_tag": "6.16.D.planner",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "maze": true,
+    "maze_layout": "lbend",
+    "scent_falloff_radius": 12.0,
+    "nutrients": 5,
+    "energy_drain": 0.02,
+    "room_size": 24.0,
+    "obstacle_density": 0.4,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "zone_colors": true,
+    "zone_grid": 4,
+    "nutrient_center_sigma": 0.0
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "epm_vision",
+      "type": "EPM",
+      "params": {
+        "modality_group": "video",
+        "modality_name": "color",
+        "encoder_kind": "jl",
+        "input_topic": "host.video.color",
+        "projection_dim": 64,
+        "max_nodes": 64,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "baking_threshold": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.001
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "planner",
+      "type": "PlaceGraphPlanner",
+      "params": {
+        "place_topic": "reality.cognitive.place",
+        "heading_topic": "reality.proprio.heading",
+        "scent_bearing_topic": "percept.scent_compass",
+        "scent_max_topic": "reality.proprio.scent_max",
+        "hunger_topic": "reality.proprio.hunger",
+        "hit_topic": "events.hit",
+        "output_topic": "percept.nav_bearing",
+        "gamma": 0.85,
+        "vi_sweeps": 8,
+        "food_reward": 1.0,
+        "food_decay": 0.9999,
+        "short_alpha": 0.05,
+        "long_alpha": 0.005,
+        "progress_gate": 0.001,
+        "hunger_gate": 0.3,
+        "route_eps": 0.01
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.scent_compass",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "_comment": "LEARNED advance (genuine 'act on a heading') + wedge-escape safety net + explore-on-lost. Defensible action layer.",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.cog",
+        "advance_homeokinetic": true,
+        "_comment_hk": "advance_homeokinetic: reward = max(0,vel_fwd) \u2212 effort\u00b7|vel_fwd| (food-DECOUPLED, intrinsic controllable motion). No cos(bearing) \u2192 off-axis forward not punished \u2192 off-axis forward is no longer punished into NEGATIVE; the table STILL flattens to ~0 when STUCK (reward 0 \u2192 EMA \u2192 0) \u2014 the hunger-gated escape recovers it. nav+turn-priority handle aiming.",
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "whisker_reflex",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "output_topic_left": "whisker.left",
+        "output_topic_right": "whisker.right",
+        "threshold": 0.15,
+        "reverse_strength": 4.0,
+        "_comment": "QUICK KICK away from walls: HOLD steer-away for pulse_ticks (effective impulse), then refractory release so the cog resurfaces, drives, and LEARNS the turn. pulse_ticks + refractory_ticks are live HotMutable sliders \u2014 tune the kick feel to taste.",
+        "refractory_ticks": 45,
+        "pulse_ticks": 6
+      }
+    },
+    {
+      "id": "stuck_reflex",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "severity_threshold": 0.6,
+        "window_ticks": 15,
+        "refractory_ticks": 120,
+        "enable_pulse": true,
+        "output_topic_left": "stuck.left",
+        "output_topic_right": "stuck.right",
+        "pulse_ticks": 60,
+        "pulse_rotation": 4.0,
+        "_comment": "MISMATCH stuck: commands motion but doesn't achieve it (|afferent|<<|intended|). Self-normalizing, no velocity threshold. Turning/idle (intended~0) never fires. refractory 120.",
+        "efference_topic": "reality.proprio.motor_efference",
+        "intent_floor": 0.1
+      }
+    },
+    {
+      "id": "saccade",
+      "type": "SaccadeReflex",
+      "params": {
+        "vel_topic": "reality.proprio.vel_ego",
+        "output_topic_left": "saccade.left",
+        "output_topic_right": "saccade.right",
+        "active_topic": "saccade.active",
+        "enable": true,
+        "travel_trigger": 150.0,
+        "pivot_ticks": 120,
+        "spin_rate": 4.0,
+        "refractory_ticks": 90,
+        "trigger_mode": "epistemic",
+        "scent_topic": "reality.proprio.scent_max",
+        "novelty_topic": "reality.video.color",
+        "novelty_threshold": 0.25,
+        "hunger_topic": "reality.proprio.hunger",
+        "short_alpha": 0.05,
+        "long_alpha": 0.005,
+        "progress_gate": 0.001,
+        "hunger_gate": 0.3
+      }
+    },
+    {
+      "id": "cylinder",
+      "type": "CylinderBuilder",
+      "params": {
+        "frame_topic": "host.video.color",
+        "heading_topic": "reality.proprio.heading",
+        "active_topic": "saccade.active",
+        "output_topic": "percept.cylinder",
+        "n_bins": 8
+      }
+    },
+    {
+      "id": "epm_place",
+      "type": "EPM",
+      "params": {
+        "modality_group": "cognitive",
+        "modality_name": "place",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.cylinder",
+        "proprio_state_dims": 24,
+        "dim_min": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "projection_dim": 48,
+        "min_insertion_error": 0.015,
+        "max_nodes": 24,
+        "mitosis_enabled": false,
+        "baking_threshold": 5,
+        "process_every_n_ticks": 1,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog",
+          "whisker",
+          "stuck",
+          "saccade"
+        ],
+        "kinds": [
+          "steer_thrust",
+          "lr",
+          "lr",
+          "lr"
+        ],
+        "topics_a": [
+          "cog.steer",
+          "whisker.left",
+          "stuck.left",
+          "saccade.left"
+        ],
+        "topics_b": [
+          "cog.thrust",
+          "whisker.right",
+          "stuck.right",
+          "saccade.right"
+        ],
+        "input_scale": [
+          4.0,
+          4.0,
+          4.0,
+          4.0
+        ],
+        "gains": [
+          0.75,
+          4.0,
+          4.0,
+          4.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "authority_prefix": "motor.bus.authority.",
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "proportional_mix": true,
+        "_comment": "proportional_mix = TURN-PRIORITY: cog passes linear below unity (gain 0.75 keeps it off the limiter \u2192 headroom for the steer differential + the whisker pulse, channels linked). The turn gets range first (can drive the opposite paddle negative = pivot \u2192 tight radius ~6.5 vs 8.8); forward yields. Fixes the wide-arc. cog gain is a live slider: \u2191 = faster forward/wider, \u2193 = tighter.",
+        "turn_brake": 3.0,
+        "_comment_tb": "turn_brake=3: forward yields hard to the turn so the bug pivots-in to the food (converge) instead of orbiting it \u2014 needed because the homeokinetic advance drives forward-always. Live slider."
+      }
+    }
+  ],
+  "edges": []
+}

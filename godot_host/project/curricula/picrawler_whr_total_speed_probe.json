@@ -1,0 +1,57 @@
+[
+  {
+    "name": "stage_1_baseline_whr_off",
+    "description": "Identical stage 1 to picrawler_whr_jitter_probe.json (Joseph hand-tuned params, walk_hit_rate=0) so the settled stage-2 windows are comparable across arms. Advance ~80s.",
+    "overrides": {
+      "actuation_backend": "discrete",
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "cruse_bias_gain_hip2": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "fail_tilt_rad": 1.05,
+      "gated_walk_bonus_rate": 0.0,
+      "gated_walk_velocity_mode": "body_forward",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "progress_reward_gain": 0.5,
+      "reward_shape": "trapezoid",
+      "standing_baseline_factor": 0.5,
+      "stance_y_threshold": 0.04,
+      "target_height": 0.085,
+      "target_mode": "random_pyramid",
+      "walk_hit_rate": 0.0,
+      "walk_reward_mode": "to_target",
+      "walk_target_velocity": 0.05
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 4000
+    }
+  },
+  {
+    "name": "stage_2_whr_on_005_total_speed",
+    "description": "DIRECTION-FREE control for the whr softening mechanism. walk_hit_rate=0.05 identical to the to_target treatment, but walk_reward_mode=total_speed rewards ANY sustained movement (consistent egocentric credit: 'move' is always the rewarded action). target_mode stays random_pyramid so the target_compass percept is identical across arms — only the reward MAPPING differs. Discriminates: if |knee_cmd| softens here like to_target -> generic reward-stream credit dilution; if it stays firm -> the softening is directional credit inconsistency (heading drift makes 'approach' an inconsistent egocentric action).",
+    "overrides": {
+      "actuation_backend": "discrete",
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "cruse_bias_gain_hip2": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "fail_tilt_rad": 1.05,
+      "gated_walk_bonus_rate": 0.0,
+      "gated_walk_velocity_mode": "body_forward",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "progress_reward_gain": 0.5,
+      "reward_shape": "trapezoid",
+      "standing_baseline_factor": 0.5,
+      "stance_y_threshold": 0.04,
+      "target_height": 0.085,
+      "target_mode": "random_pyramid",
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "total_speed",
+      "walk_target_velocity": 0.05
+    }
+  }
+]

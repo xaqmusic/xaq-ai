@@ -1,0 +1,148 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 corridor TURN rig + MOTIVATION (forage because hungry)",
+    "description": "Stage 2 de-scaffold: energy now DRAINS (0.012/s) so hunger is real. MotivationGate scales the food-heading magnitude by the homeostatic deficit (g=clamp((0.8-energy)/0.8)) \u2192 HUNGRY pursues+charges (learned advance), SATED (energy\u22650.8) idles (HeadingController.nav_on=false). Action layer untouched (clean separation, option i). GATE: energy SUSTAINED (no starvation) + foraging hunger-gated (idle when sated, burst when hungry). Ablation = freeze_gain=1.0 (always pursue, no need-modulation) \u2192 the_cell_corridor_turn_heading_motiv_ablate.json.",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor.turn.heading.motiv",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "corridor_bearing_max": 45.0,
+    "nutrients": 1,
+    "energy_drain": 0.012,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "corridor_respawn_far": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.02
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy"
+        ],
+        "channel_kinds": [
+          "energy"
+        ],
+        "setpoints": [
+          0.8
+        ],
+        "urgency_normalizers": [
+          0.8
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4,
+        "_comment": "energy-only (no scent_proximity channel) so urgency = pure hunger; kept for diag (gate reads energy directly)."
+      }
+    },
+    {
+      "id": "motivation_gate",
+      "type": "MotivationGate",
+      "params": {
+        "heading_topic": "percept.scent_compass",
+        "energy_topic": "reality.proprio.energy",
+        "output_topic": "percept.motivated_heading",
+        "cx_index": 0,
+        "cy_index": 1,
+        "sated_energy": 0.8,
+        "freeze_gain": -1.0,
+        "_comment": "forage because hungry: scales the food-heading by hunger; sated (energy\u22650.8) \u2192 idle. freeze_gain=1 = ablation."
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.motivated_heading",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

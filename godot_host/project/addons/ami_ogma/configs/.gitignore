@@ -1,0 +1,8 @@
+# Temporary / smoke-test configs that should never reach the launcher.
+# The launcher scans this directory for *.json and registers every file
+# found.  Any leftover tmp variant from a debug run would appear in the
+# dropdown — including with a duplicate metadata.name if copied from a
+# real config.  Ignore them here so they're also invisible to git and
+# can't be accidentally committed.
+_tmp_*.json
+_smoke_*.json

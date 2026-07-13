@@ -1,0 +1,38 @@
+[
+  {
+    "name": "stage_1_stand_symmetric",
+    "description": "Stand to a symmetric base first (E1b fr_blend on, homeo OFF), advance at ~80s.  The per-tick brain forms the dynamically-stable stance before the per-step walking signal turns on.",
+    "overrides": {
+      "target_height": 0.09,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 1.0,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 0.0,
+      "homeo_payout_norm": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 4000
+    }
+  },
+  {
+    "name": "stage_2_homeokinetic_walk_norm",
+    "description": "(a) homeo per-step reward + upright term + SELF-CALIBRATING PAYOUT NORM.  The upright multiplier alone (homeo_upright arm) suppressed the knee-fold Goodhart but halved the payout below the ~30% ignition share -> rhythm decayed to baseline.  homeo_payout_norm=1 divides the reward by the running-mean upright factor (EMA over touchdowns, floor 0.1) so steps CLEANER than the robot's recent average pay MORE than ignition level, dirtier ones pay less -> the anti-Goodhart gradient survives without de-funding the rhythm.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 0.6,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 300.0,
+      "homeo_payout_norm": 1.0
+    }
+  }
+]

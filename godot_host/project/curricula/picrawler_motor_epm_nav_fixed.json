@@ -1,0 +1,10 @@
+[
+  {
+    "name": "nav_fixed_target",
+    "description": "Active-inference signature control: places ONE random_pyramid target and never re-targets (visit_radius -100 makes arrival impossible), so the perceived bearing error and active-target distance are clean unconfounded traces. Reward-free. Closed loop (nav_gain<0) should drive both down; open loop (nav_gain=0) should not.",
+    "target_mode": "random_pyramid",
+    "visit_radius": -100.0,
+    "overrides": {},
+    "joint_backend": "g6dof"
+  }
+]

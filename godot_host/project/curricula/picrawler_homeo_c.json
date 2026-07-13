@@ -1,0 +1,40 @@
+[
+  {
+    "name": "stage_1_stand_symmetric",
+    "description": "Stand to a symmetric base first (E1b fr_blend on, homeo OFF), advance at ~80s.  The per-tick brain forms the dynamically-stable stance before the per-step walking signal turns on.",
+    "overrides": {
+      "target_height": 0.09,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 1.0,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 0.0,
+      "homeo_payout_norm": 0.0,
+      "homeo_phase_couple": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 4000
+    }
+  },
+  {
+    "name": "stage_2_homeokinetic_walk_phase_coupled",
+    "description": "(c) homeo_b + CROSS-LEG PHASE-CONSISTENCY COUPLING (reward-space inter-leg coordination).  homeo_b proved genuine per-leg knee cycling (autocorr 0.61-0.86 all seeds) but legs step at independent rates (diag_coherence ~0) with seed-dependent quality (s42 controlled vs s123/126 over-swing).  homeo_phase_couple=1 scales each touchdown's payout by the consistency of its relative phase against the other legs' cycles (per-pair circular EMA, neutral until structure exists).  ANY stable phase relation pays — no gait is imposed; incoherent stepping is taxed.  Prediction: homeo_phase_R rises over the run, diag_coherence leaves ~0, the over-swing variance collapses, clean_gait beats homeo_b's 0.099.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 0.6,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 300.0,
+      "homeo_payout_norm": 1.0,
+      "homeo_phase_couple": 1.0
+    }
+  }
+]

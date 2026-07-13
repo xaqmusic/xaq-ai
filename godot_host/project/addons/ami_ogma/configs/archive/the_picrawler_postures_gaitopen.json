@@ -1,0 +1,191 @@
+{
+  "metadata": {
+    "name": "PiCrawler — Open-Loop Trot Gait (Phase 8 A2.0 validation)",
+    "description": "Phase 8 Rung A2.0 — cheap precondition test (NO new C++).  Does a SEEDED temporal gait chunk, executed open-loop, produce a COHERENT, DIRECTED walk?  A1 (static postures, per-tick selection) was falsified: it never converges to a coherent gait (entropy stays ~1.86/2.08, lift-pattern reshuffles 52% of seconds, directionality 0.16) because per-tick credit can't discover temporal structure.  A2 makes the temporal SEQUENCE the selectable/credited unit.\n\nA2.0 reuses the existing chunk machinery to dispatch ONE trot gait open-loop: MotorRepertoire(gait_store) holds a seed chunk = intent_sequence over the A1 posture indices [trotA x10, trotB x10] (id=-1); ActionDecoder force-dispatches it every tick via manual_chunk_id=-1 (skips the falsified EFE scorer); the chunk's posture index streams on intent.override -> the A1 whole-body multi-channel Premotor (intent_channel=-1 reads IntentToken.index) emits that posture's 12 channels.  Premotor.bilateral_table is identical to A1.\n\nIf open-loop trot translates coherently (directionality high, periodic lift pattern), the posture keyframes compose into gait and the remaining problem is LEARNING which gait to select (build GaitSelector).  If it shuffles in place, the trot postures lack propulsion (stance-leg stroke) and need redesign before the selector.  Pure validation — no learning claim.",
+    "env_target": "picrawler",
+    "phase_tag": "v8.A2.0 open-loop-trot",
+    "derived_from_manifest": true,
+    "episode_length": 6000,
+    "mc_episode_period": 1500,
+    "stability_gain": 0.05,
+    "stability_y_norm": 0.5,
+    "stability_speed": 0.05,
+    "reward_shape": "trapezoid",
+    "target_height": 0.085,
+    "height_penalty_grace": 0.02,
+    "height_penalty_scale": 0.03,
+    "height_penalty_gain": 0.05,
+    "leg_symmetry": "lr_pairs"
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "wall_stuck_da_drain": 0.0,
+        "wall_stuck_ht_drain": 0.0
+      }
+    },
+    {
+      "id": "epm_imu",
+      "type": "EPM",
+      "params": {
+        "modality_group": "vestibular",
+        "modality_name": "imu",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_joints",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "joints",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.joints",
+        "projection_dim": 48,
+        "proprio_state_dims": 12,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_compass",
+      "type": "EPM",
+      "params": {
+        "modality_group": "compass",
+        "modality_name": "global",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.compass",
+        "projection_dim": 48,
+        "proprio_state_dims": 2,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": true,
+        "priority_group": "vestibular"
+      }
+    },
+    {
+      "id": "descend",
+      "type": "DescendingPredictor",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "targets": [
+          "reality.vestibular.imu",
+          "reality.proprio.joints"
+        ],
+        "update_method": "sgd",
+        "learning_rate": 0.005
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "alive"
+        ],
+        "channel_kinds": [
+          "alive_pulse"
+        ],
+        "setpoints": [
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0
+        ],
+        "channel_input_topics": [
+          "events.hit"
+        ],
+        "alive_pulse_decay_per_tick": 0.005,
+        "alive_pulse_replenish_per_event": 0.5
+      }
+    },
+    {
+      "id": "gait_store",
+      "type": "MotorRepertoire",
+      "params": {
+        "seed_chunks": [
+          "{\"intent_sequence\": [4,4,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5], \"hits_during\": 2}"
+        ]
+      }
+    },
+    {
+      "id": "action_decoder",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.vestibular.imu",
+        "use_chunks": true,
+        "intent_override_topic": "intent.override",
+        "manual_chunk_id": -1
+      }
+    },
+    {
+      "id": "premotor_body",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 8,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "intent_override_topic": "intent.override",
+        "output_topics": "[\"action.fl_hip1\",\"action.fl_hip2\",\"action.fl_knee\",\"action.fr_hip1\",\"action.fr_hip2\",\"action.fr_knee\",\"action.rl_hip1\",\"action.rl_hip2\",\"action.rl_knee\",\"action.rr_hip1\",\"action.rr_hip2\",\"action.rr_knee\"]",
+        "bilateral_table": "[[0.0,0.7,0.3,0.0,0.7,0.3,0.0,0.7,0.3,0.0,0.7,0.3],[0.0,0.3,0.0,0.0,0.3,0.0,0.0,0.3,0.0,0.0,0.3,0.0],[0.4,0.7,0.3,0.4,0.7,0.3,0.4,0.7,0.3,0.4,0.7,0.3],[0.0,0.9,0.4,0.0,0.9,0.4,0.0,0.9,0.4,0.0,0.9,0.4],[0.3,0.2,0.2,0.0,0.8,0.3,0.0,0.8,0.3,0.3,0.2,0.2],[0.0,0.8,0.3,0.3,0.2,0.2,0.3,0.2,0.2,0.0,0.8,0.3],[0.0,0.2,0.2,0.0,0.2,0.2,0.0,0.8,0.3,0.0,0.8,0.3],[0.0,0.8,0.3,0.0,0.8,0.3,0.0,0.2,0.2,0.0,0.2,0.2]]",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 101,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "name": "nav_vision_steer",
+    "description": "V2: reward-free nav where MotorEPM steers on VISION (epm_color latent -> readout -> vision_compass), not the oracle. Use with the_picrawler_motor_epm_vision_steer.json. target_compass still logged as ground truth.",
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "publish_vision": true,
+      "vision_steer": true
+    },
+    "joint_backend": "g6dof"
+  }
+]

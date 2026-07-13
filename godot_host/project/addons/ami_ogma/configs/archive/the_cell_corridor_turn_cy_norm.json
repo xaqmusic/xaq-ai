@@ -1,0 +1,177 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 corridor TURN rig + cy + NORMALIZED bearing (direction-selective EPM)",
+    "description": "FIX for the direction-blind EPM state: ScentCompass emits a confidence-gated UNIT bearing (cx,cy)/|g| so the RBF-EPM (dim range [-1,1]) clusters by ANGLE not distance. Was: raw gradient \u00b10.25 \u2192 thin sliver \u2192 magnitude-dominated nodes \u2192 48% direction-blind states + stalled GNG (15 nodes, no new bakes; operator obs). A/B vs turn_cy_stable.",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor.turn.norm",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "corridor_bearing_max": 45.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.02
+      }
+    },
+    {
+      "id": "epm_bearing",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "bearing",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.scent_compass",
+        "proprio_state_dims": 3,
+        "projection_dim": 48,
+        "dim_min": [
+          -1.0,
+          -1.0,
+          0.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0,
+          0.5
+        ],
+        "min_insertion_error": 0.05,
+        "max_nodes": 24,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "baking_threshold": 30,
+        "subtract_descending_prediction": false,
+        "_comment": "State = scent bearing (cx=lateral/which-way-to-turn, cy=forward, prox=distance)."
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "action_plan",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": -1,
+        "proprio_topic": "reality.nav.bearing",
+        "output_topic": "cog.steer",
+        "joint_action": true,
+        "thrust_output_topic": "cog.thrust",
+        "action_bins": 3,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "thrust_bins": 3,
+        "thrust_accel_min": -4.0,
+        "thrust_accel_max": 4.0,
+        "plan_horizon": 3,
+        "plan_gamma": 0.9,
+        "pref_obs_topic": "percept.scent_compass",
+        "pref_obs_index": 1,
+        "green_obs_topic": "",
+        "w_scent": 2.0,
+        "w_green": 0.0,
+        "efe_select": true,
+        "epistemic_gain": 0.1,
+        "td_gamma": 0.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "commit_ticks": 60,
+        "_comment": "TURN rig, cy objective = forward scent component (grad\u00b7cos\u03b8): nonzero off-axis, rises as the bug turns to FACE food \u2192 a steering gradient from any bearing.",
+        "plan_temperature": 0.5
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

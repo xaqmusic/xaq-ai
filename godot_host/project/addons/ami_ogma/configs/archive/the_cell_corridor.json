@@ -1,0 +1,166 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 CORRIDOR 1-D credit-assignment probe (cog-only)",
+    "description": "Reductionist diagnostic: ONE food straight ahead (\u2212Z) at corridor_distance, bug heading-LOCKED (forward/reverse only), each eat resets to start = a fresh trial. Minimal cog-only graph: scent \u2192 ScentCompass \u2192 state EPM \u2192 ActionDecoder (coxswain, thrust-only 3 bins {reverse,pause,forward}) \u2192 MotorBus (1 channel) \u2192 body. NO HK swim, NO whisker, NO baseline-beat drift \u2192 the cog's learned policy is the SOLE driver. Tests whether the actor can learn to SEQUENCE forwards toward a delayed reward; time-to-food per trial is the learning curve. body_model=bidirectional_paddler + reflex_modular.",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 6.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5
+      }
+    },
+    {
+      "id": "epm_bearing",
+      "_comment": "Coarse 1-D state from the forward scent (cy) + proximity. max 8 nodes, mitosis off \u2014 a handful of corridor states, fully readable.",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "bearing",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.scent_max",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.05,
+        "max_nodes": 12,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "subtract_descending_prediction": false,
+        "_comment": "1-D distance state: RBF on scent proximity (monotonic far\u2192near). Was 3-D scent_compass \u2192 RBF L2-norm + wide sigma washed out distance into ONE node (corridor finding)."
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "action_plan",
+      "_comment": "COXSWAIN, THRUST-ONLY: turn channel zeroed (action_bins=1, accel 0..0); thrust_bins=3 \u2192 {reverse,pause,forward}. pref_obs = scent_compass cy (forward/food-ahead). Plans H=3 over the learned forward model. Publishes cog.steer(=0) + cog.thrust.",
+      "params": {
+        "consensus_level": -1,
+        "proprio_topic": "reality.nav.bearing",
+        "output_topic": "cog.steer",
+        "joint_action": true,
+        "thrust_output_topic": "cog.thrust",
+        "action_bins": 1,
+        "accel_min": 0.0,
+        "accel_max": 0.0,
+        "thrust_bins": 3,
+        "thrust_accel_min": -4.0,
+        "thrust_accel_max": 4.0,
+        "plan_horizon": 3,
+        "plan_gamma": 0.9,
+        "pref_obs_topic": "reality.proprio.scent_max",
+        "pref_obs_index": 0,
+        "green_obs_topic": "",
+        "w_scent": 2.0,
+        "w_green": 0.0,
+        "efe_select": true,
+        "epistemic_gain": 0.1,
+        "td_gamma": 0.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "commit_ticks": 60,
+        "_comment": "COXSWAIN thrust-only. pref_obs = scent PROXIMITY (raise it = get closer); heading-locked so facing is a non-issue. Plans H=3 over the learned distance-state forward model."
+      },
+      "type": "ActionDecoder"
+    },
+    {
+      "id": "motor_bus",
+      "_comment": "Single cog channel (steer_thrust): L=thrust+steer, R=thrust\u2212steer; steer\u22480 \u2192 pure common-mode forward/reverse. gain 1, input_scale 4 (\u00b14 accel \u2192 \u00b11), limit 4.",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

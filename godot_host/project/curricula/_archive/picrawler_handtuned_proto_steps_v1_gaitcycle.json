@@ -1,0 +1,36 @@
+[
+    {
+        "name": "stage_handtuned_proto_steps_v1_gaitcycle",
+        "description": "A/B variant of picrawler_handtuned_proto_steps_v1.json — identical reward shape + walk channels, with the new GAIT-CYCLE PULSE reward enabled (gait_cycle_reward_gain=1.0). One discrete events.hit pulse fires per 4-foot touchdown cycle that also satisfies (a) net signed progress >= 5 mm in the active walk_reward_mode direction (radial outward here), and (b) max backward excursion <= 2 mm (anti-wobble / anti-reward-hacking guard). Direction-mode-aware: uses the same walk_v projection that the per-tick walk and gated channels already use, so the gait reward and the navigation reward agree on what 'forward' means. Cycle window 2 s (120 ticks @60Hz). Default no specific sequence — trot/pace/bound/wave all qualify as long as the displacement + wobble bars are met. Hypothesis: the per-tick walk channels reward forward velocity but don't reward closing an actual locomotion cycle, so the brain has no direct gradient toward limit-cycle structure (cycle = the thing that distinguishes gait from drift). Pulse magnitude 1.0 chosen to be comparable to standing density (~0.04 hits/tick) at one good cycle per second (1.0 * 1/60 = 0.017 hits/tick).",
+        "overrides": {
+            "band_width": 0.04,
+            "fail_tilt_rad": 1.0,
+            "gait_cycle_max_backward": 0.002,
+            "gait_cycle_min_progress": 0.005,
+            "gait_cycle_reward_gain": 1.0,
+            "gait_cycle_window_ticks": 120,
+            "gated_walk_bonus_rate": 0.2,
+            "gated_walk_velocity_mode": "radial",
+            "height_penalty_gain": 0.05,
+            "height_penalty_grace": 0.02,
+            "height_penalty_scale": 0.005,
+            "height_reference": "chassis",
+            "level_chassis_rate": 0.05,
+            "peak_height": 0.082,
+            "peak_height_mode": "fixed",
+            "per_leg_credit_gain": 0.0,
+            "phase_contrast_gain": 0.9,
+            "progress_reward_gain": 0.0,
+            "reward_min_height": 0.06,
+            "reward_shape": "trapezoid",
+            "stance_y_threshold": 0.04,
+            "standing_baseline_factor": 0.2,
+            "standing_reward_ema_alpha": 0.88,
+            "target_height": 0.085,
+            "tilt_target_rad": 0.0,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "walk_target_velocity": 0.55
+        }
+    }
+]

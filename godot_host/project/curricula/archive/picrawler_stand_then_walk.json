@@ -1,0 +1,108 @@
+[
+  {
+    "name": "stage_1_stand_wobbly",
+    "description": "Permissive standing reward — wobble is fine. Trapezoid cap at 0.085m (winner of the height sweep). No penalty arm, no walking reward yet. Auto-advance after the brain has stood contiguously for at least 60 sec.\n\nALL walking-derived rewards explicitly zeroed during tabula-rasa standing so the policy isn't biased toward any motion direction: walk_hit_rate gates radial / heading-consistency / PR-speed-bonus / speed-EMA tracking; walk_heading_consistency_gain belt-and-suspenders zeroes the consistency pulse even if walk_hit_rate is non-zero elsewhere; stability/antirot/energy penalty mechanisms default off and stay off.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 3600
+    }
+  },
+  {
+    "name": "stage_2_stand_stable",
+    "description": "Tighten the cap with an explicit over-height penalty. Brain must hold quiet posture, not just hit the cap. Auto-advance after a continuous 3-min stand (10800 ticks @ 60Hz). 3 min was the empirical sweet spot: 5 min pushes the brain past a frozen-attractor point where new directives like walking get inhibited (observed with prolonged Hebbian runs). Earlier injection of the walking directive while plasticity is still high yields better gait emergence.\n\nWalking rewards stay explicitly zero (see stage_1 description).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "height_penalty_gain": 0.05,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 10800
+    }
+  },
+  {
+    "name": "stage_3_walk_at_all",
+    "description": "Inject a small RADIAL-OUTWARD walking reward on top of the standing reward. v_norm = clamp(v_xz · r̂ / walk_target_velocity, 0, 1) — only motion that increases distance-from-origin is rewarded. Standing pillar stays present so the brain doesn't trade balance for speed. Auto-advance after the body has demonstrably translated (max_distance_from_origin ≥ 0.5m).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.05,
+      "walk_hit_rate": 0.05
+    },
+    "advance_when": {
+      "metric": "max_distance_from_origin",
+      "op": "ge",
+      "value": 0.5
+    }
+  },
+  {
+    "name": "stage_4_walk_far",
+    "description": "Crank up the walking gain after the brain has demonstrated directional control. Higher target velocity + double the hit rate. Standing reward still present so balance + walking compose rather than compete. Auto-advance once the body has reached 5m from origin (gets it well into the pyramid radius where terrain can take over; also avoids the wall-trap that the radial-only reward shape creates against the outer wedges).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "walk_target_velocity": 0.15,
+      "walk_hit_rate": 0.10,
+      "walk_reward_mode": "radial"
+    },
+    "advance_when": {
+      "metric": "max_distance_from_origin",
+      "op": "ge",
+      "value": 5.0
+    }
+  },
+  {
+    "name": "stage_5_walk_fast",
+    "description": "Terminal stage. Switch the walking reward from radial-only to TOTAL SPEED (|v_xz|) and raise the velocity cap from 0.15 to 0.5 m/s. Rationale: stage 4's radial-only reward saturates once the body learned to cruise outward, and creates the wall-trap failure mode (body pressed against outer wedges with zero radial velocity, no incentive to redirect). Total-speed reward credits ANY horizontal motion — circling, weaving, returning to centre, climbing pyramids. The cap is raised so faster gaits earn more reward than today's lazy cruise; combined this drives continuous variation in the policy, which empirically (Phase 6.7++) prevents the entropy-collapse calcification we observed on flat terrain.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "walk_target_velocity": 2.0,
+      "walk_hit_rate": 0.10,
+      "walk_reward_mode": "total_speed"
+    },
+    "advance_when": {
+      "metric": "best_sustained_speed_ticks",
+      "op": "ge",
+      "value": 180
+    }
+  },
+  {
+    "name": "stage_6_walk_over_there",
+    "description": "Terminal stage — directed navigation.  A random pyramid in the outer donut is selected as the target and recolored purple.  walk_reward_mode=to_target projects velocity onto chassis→target direction (approaching = hits, receding = misses).  On arrival within 0.5m the body fires a bonus events.hit pulse, increments walk_visit_count, and rotates to a new random pyramid.  First directed-navigation training signal; pays dividends once a vision channel can read the purple landmark as perceptual input.\n\nskip_reset_on_entry=true: keep momentum from stage_5_walk_fast.",
+    "skip_reset_on_entry": true,
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "walk_target_velocity": 2.0,
+      "walk_hit_rate": 0.10,
+      "walk_reward_mode": "to_target"
+    }
+  }
+]

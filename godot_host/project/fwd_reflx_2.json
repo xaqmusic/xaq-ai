@@ -1,0 +1,647 @@
+{
+  "edges": [
+    {
+      "feedback": true,
+      "from": "epm_imu",
+      "to": "neuro",
+      "topic": "reality.kinematic.imu"
+    },
+    {
+      "feedback": true,
+      "from": "epm_scent",
+      "to": "neuro",
+      "topic": "reality.proprio.scent"
+    },
+    {
+      "feedback": true,
+      "from": "epm_whisker_0",
+      "to": "neuro",
+      "topic": "reality.whisker.whisker_0"
+    },
+    {
+      "feedback": true,
+      "from": "epm_whisker_1",
+      "to": "neuro",
+      "topic": "reality.whisker.whisker_1"
+    },
+    {
+      "feedback": true,
+      "from": "epm_whisker_2",
+      "to": "neuro",
+      "topic": "reality.whisker.whisker_2"
+    },
+    {
+      "feedback": true,
+      "from": "epm_whisker_3",
+      "to": "neuro",
+      "topic": "reality.whisker.whisker_3"
+    },
+    {
+      "feedback": true,
+      "from": "epm_whisker_4",
+      "to": "neuro",
+      "topic": "reality.whisker.whisker_4"
+    },
+    {
+      "feedback": true,
+      "from": "epm_whisker_5",
+      "to": "neuro",
+      "topic": "reality.whisker.whisker_5"
+    },
+    {
+      "feedback": true,
+      "from": "epm_terrain",
+      "to": "neuro",
+      "topic": "reality.kinematic.terrain"
+    },
+    {
+      "feedback": true,
+      "from": "voter_whisker",
+      "to": "neuro",
+      "topic": "reality.fused.whisker"
+    },
+    {
+      "from": "voter_whisker",
+      "to": "neuro",
+      "topic": "consensus.0"
+    },
+    {
+      "from": "voter_0",
+      "to": "neuro",
+      "topic": "consensus.0"
+    },
+    {
+      "from": "reflex_scent_hit",
+      "to": "neuro",
+      "topic": "events.hit"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_imu",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_scent",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_whisker_0",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_whisker_1",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_whisker_2",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_whisker_3",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_whisker_4",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_whisker_5",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "neuro",
+      "to": "epm_terrain",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "epm_whisker_0",
+      "to": "voter_whisker",
+      "topic": "reality.whisker.whisker_0"
+    },
+    {
+      "from": "epm_whisker_1",
+      "to": "voter_whisker",
+      "topic": "reality.whisker.whisker_1"
+    },
+    {
+      "from": "epm_whisker_2",
+      "to": "voter_whisker",
+      "topic": "reality.whisker.whisker_2"
+    },
+    {
+      "from": "epm_whisker_3",
+      "to": "voter_whisker",
+      "topic": "reality.whisker.whisker_3"
+    },
+    {
+      "from": "epm_whisker_4",
+      "to": "voter_whisker",
+      "topic": "reality.whisker.whisker_4"
+    },
+    {
+      "from": "epm_whisker_5",
+      "to": "voter_whisker",
+      "topic": "reality.whisker.whisker_5"
+    },
+    {
+      "from": "neuro",
+      "to": "voter_whisker",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "epm_imu",
+      "to": "voter_0",
+      "topic": "reality.kinematic.imu"
+    },
+    {
+      "from": "epm_scent",
+      "to": "voter_0",
+      "topic": "reality.proprio.scent"
+    },
+    {
+      "from": "epm_whisker_0",
+      "to": "voter_0",
+      "topic": "reality.whisker.whisker_0"
+    },
+    {
+      "from": "epm_whisker_1",
+      "to": "voter_0",
+      "topic": "reality.whisker.whisker_1"
+    },
+    {
+      "from": "epm_whisker_2",
+      "to": "voter_0",
+      "topic": "reality.whisker.whisker_2"
+    },
+    {
+      "from": "epm_whisker_3",
+      "to": "voter_0",
+      "topic": "reality.whisker.whisker_3"
+    },
+    {
+      "from": "epm_whisker_4",
+      "to": "voter_0",
+      "topic": "reality.whisker.whisker_4"
+    },
+    {
+      "from": "epm_whisker_5",
+      "to": "voter_0",
+      "topic": "reality.whisker.whisker_5"
+    },
+    {
+      "from": "epm_terrain",
+      "to": "voter_0",
+      "topic": "reality.kinematic.terrain"
+    },
+    {
+      "from": "voter_whisker",
+      "to": "voter_0",
+      "topic": "reality.fused.whisker"
+    },
+    {
+      "from": "neuro",
+      "to": "voter_0",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "epm_scent",
+      "to": "drive",
+      "topic": "reality.proprio.scent"
+    },
+    {
+      "from": "reflex_scent_hit",
+      "to": "drive",
+      "topic": "events.hit"
+    },
+    {
+      "from": "voter_whisker",
+      "to": "premotor",
+      "topic": "consensus.0"
+    },
+    {
+      "from": "voter_0",
+      "to": "premotor",
+      "topic": "consensus.0"
+    },
+    {
+      "from": "drive",
+      "to": "premotor",
+      "topic": "drive.errors"
+    },
+    {
+      "from": "neuro",
+      "to": "premotor",
+      "topic": "neuro.state"
+    },
+    {
+      "from": "reflex_scent_hit",
+      "to": "premotor",
+      "topic": "events.hit"
+    },
+    {
+      "from": "voter_whisker",
+      "to": "fader_controller",
+      "topic": "consensus.0"
+    },
+    {
+      "from": "voter_0",
+      "to": "fader_controller",
+      "topic": "consensus.0"
+    },
+    {
+      "from": "premotor",
+      "to": "fader_left",
+      "topic": "action.brain.left"
+    },
+    {
+      "from": "reflex_forward",
+      "to": "fader_left",
+      "topic": "action.reflex.left"
+    },
+    {
+      "from": "reflex_steer",
+      "to": "fader_left",
+      "topic": "action.reflex.left"
+    },
+    {
+      "from": "fader_controller",
+      "to": "fader_left",
+      "topic": "motor.fader.alpha"
+    },
+    {
+      "from": "premotor",
+      "to": "fader_right",
+      "topic": "action.brain.right"
+    },
+    {
+      "from": "reflex_forward",
+      "to": "fader_right",
+      "topic": "action.reflex.right"
+    },
+    {
+      "from": "reflex_steer",
+      "to": "fader_right",
+      "topic": "action.reflex.right"
+    },
+    {
+      "from": "fader_controller",
+      "to": "fader_right",
+      "topic": "motor.fader.alpha"
+    }
+  ],
+  "modules": [
+    {
+      "id": "neuro",
+      "params": {
+        "da_baseline": 0.2,
+        "da_baseline_ema_alpha": 0.001,
+        "da_decay": 0.88,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "ht_baseline": 0.65,
+        "ht_decay": 0.93,
+        "hunger_ht_rate": 0.01,
+        "intrinsic_da_gain": 0.05,
+        "scent_da_rate": 0.25,
+        "travel_da_rate": 0.02,
+        "whisker_ht_rate": 0.02
+      },
+      "type": "NeurochemState"
+    },
+    {
+      "id": "epm_imu",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "min_insertion_error": 0.02,
+        "modality_group": "kinematic",
+        "modality_name": "imu",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_scent",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.scent",
+        "min_insertion_error": 0.02,
+        "modality_group": "proprio",
+        "modality_name": "scent",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 32,
+        "proprio_state_dims": 8,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_whisker_0",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_0",
+        "min_insertion_error": 0.02,
+        "modality_group": "whisker",
+        "modality_name": "whisker_0",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 16,
+        "proprio_state_dims": 1,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_whisker_1",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_1",
+        "min_insertion_error": 0.02,
+        "modality_group": "whisker",
+        "modality_name": "whisker_1",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 16,
+        "proprio_state_dims": 1,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_whisker_2",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_2",
+        "min_insertion_error": 0.02,
+        "modality_group": "whisker",
+        "modality_name": "whisker_2",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 16,
+        "proprio_state_dims": 1,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_whisker_3",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_3",
+        "min_insertion_error": 0.02,
+        "modality_group": "whisker",
+        "modality_name": "whisker_3",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 16,
+        "proprio_state_dims": 1,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_whisker_4",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_4",
+        "min_insertion_error": 0.02,
+        "modality_group": "whisker",
+        "modality_name": "whisker_4",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 16,
+        "proprio_state_dims": 1,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_whisker_5",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_5",
+        "min_insertion_error": 0.02,
+        "modality_group": "whisker",
+        "modality_name": "whisker_5",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 16,
+        "proprio_state_dims": 1,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "epm_terrain",
+      "params": {
+        "baking_threshold": 50,
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.terrain",
+        "min_insertion_error": 0.02,
+        "modality_group": "kinematic",
+        "modality_name": "terrain",
+        "predicted_pathway_steps": 3,
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "subtract_descending_prediction": true
+      },
+      "type": "EPM"
+    },
+    {
+      "id": "voter_whisker",
+      "params": {
+        "group_balance": false,
+        "input_pattern": "reality.whisker.",
+        "level": 0,
+        "publish_as_reality_topic": "reality.fused.whisker",
+        "publish_consensus": false,
+        "surprise_alpha": 0.1,
+        "surprise_floor": 0.05,
+        "surprise_gain": 0.5,
+        "trust_epsilon": 0.05
+      },
+      "type": "LateralVoter"
+    },
+    {
+      "id": "voter_0",
+      "params": {
+        "group_balance": true,
+        "input_exclude": "reality.whisker.",
+        "input_pattern": "reality.",
+        "level": 0,
+        "priority_group": "kinematic",
+        "surprise_alpha": 0.1,
+        "surprise_floor": 0.05,
+        "surprise_gain": 0.5,
+        "trust_epsilon": 0.05
+      },
+      "type": "LateralVoter"
+    },
+    {
+      "id": "drive",
+      "params": {
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.5,
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ]
+      },
+      "type": "HomeostaticDrive"
+    },
+    {
+      "id": "premotor",
+      "params": {
+        "accel_max": 4.0,
+        "accel_min": -4.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "level": 0,
+        "master_seed": 0,
+        "n_intents": 5,
+        "output_topic_left": "action.brain.left",
+        "output_topic_right": "action.brain.right",
+        "sample_action": true,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "update_alpha_threshold": 0.3,
+        "use_weighted_accel": true
+      },
+      "type": "Premotor"
+    },
+    {
+      "id": "reflex_forward",
+      "params": {
+        "output_topic": "",
+        "output_topic_left": "action.reflex.left",
+        "output_topic_right": "action.reflex.right",
+        "thrust": 2.0
+      },
+      "type": "ForwardDriveReflex"
+    },
+    {
+      "id": "reflex_steer",
+      "params": {
+        "accel_max": 4.0,
+        "accel_min": -4.0,
+        "base_thrust": 0.0,
+        "left_suffixes": [
+          "0",
+          "1",
+          "2"
+        ],
+        "output_topic": "",
+        "output_topic_left": "action.reflex.left",
+        "output_topic_right": "action.reflex.right",
+        "refractory_ticks": 0,
+        "right_suffixes": [
+          "3",
+          "4",
+          "5"
+        ],
+        "steer_gain": 8.0,
+        "suppression_topic": "reflex.gate.whisker_steer",
+        "threshold": 0.300000011920929,
+        "whisker_topic_prefix": "reality.proprio.whisker_"
+      },
+      "type": "WhiskerSteerReflex"
+    },
+    {
+      "id": "reflex_scent_hit",
+      "params": {
+        "alpha_long": 0.00100000004749745,
+        "alpha_short": 0.100000001490116,
+        "input_index": 0,
+        "input_topic": "reality.proprio.scent_max",
+        "motion_floor_index": 2,
+        "motion_floor_min": 0.5,
+        "motion_floor_topic": "reality.proprio.imu",
+        "output_event_name": "hit",
+        "ratio_threshold": 1.5,
+        "refractory_ticks": 0,
+        "require_long_pos": true
+      },
+      "type": "DualEMADetector"
+    },
+    {
+      "id": "scent_gate",
+      "params": {
+        "alpha_long": 0.00100000004749745,
+        "alpha_short": 0.100000001490116,
+        "cap": 1.0,
+        "enabled": true,
+        "input_index": 0,
+        "input_topic": "reality.proprio.scent_max",
+        "long_pos_min": 0.00100000004749745,
+        "output_topic": "reflex.gate.whisker_steer"
+      },
+      "type": "ScentGateReflex"
+    },
+    {
+      "id": "fader_controller",
+      "params": {
+        "alpha_fixed": 0.0,
+        "alpha_max": 1.0,
+        "alpha_min": 0.0,
+        "alpha_smoothing": 0.0500000007450581,
+        "alpha_source": "surprise",
+        "alpha_topic": "motor.fader.alpha",
+        "consensus_topic": "consensus.0",
+        "surprise_aggregation": "mean",
+        "urgency_topic": ""
+      },
+      "type": "FaderController"
+    },
+    {
+      "id": "fader_left",
+      "params": {
+        "alpha_fixed": 0.0,
+        "alpha_topic": "motor.fader.alpha",
+        "brain_topic": "action.brain.left",
+        "output_topic": "action.left",
+        "reflex_topic": "action.reflex.left"
+      },
+      "type": "MotorFader"
+    },
+    {
+      "id": "fader_right",
+      "params": {
+        "alpha_fixed": 0.0,
+        "alpha_topic": "motor.fader.alpha",
+        "brain_topic": "action.brain.right",
+        "output_topic": "action.right",
+        "reflex_topic": "action.reflex.right"
+      },
+      "type": "MotorFader"
+    }
+  ],
+  "version": 1
+}

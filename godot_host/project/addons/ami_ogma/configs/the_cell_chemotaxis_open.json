@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "name": "Cell — chemotaxis OPEN-LOOP control (nav_gain 0)",
+    "description": "Phase 6.7 — open-loop counterfactual control for the_cell_chemotaxis_ai.json. Identical two-module chain (ScentCompass → ChemotaxisAI) with ChemotaxisAI nav_gain=0: the percept.scent_compass bearing is still computed and delivered, but action is SEVERED from it (the cell drives straight forward, never steering on the gradient). Pairs with the closed-loop config to show the hit rate comes from the perception→action loop closure, not bare forward motion — the Cell analog of the picrawler A2 active-inference signature. Script-only control; NOT in the launcher allowlist.",
+    "env_target": "cell",
+    "phase_tag": "6.7",
+    "reflex_modular": true,
+    "body_model": "differential_paddler"
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8
+      }
+    },
+    {
+      "id": "chemotaxis",
+      "type": "ChemotaxisAI",
+      "params": {
+        "nav_topic": "percept.scent_compass",
+        "nav_gain": 0.0,
+        "base_thrust": 1.0,
+        "min_signal": 0.06
+      }
+    }
+  ],
+  "edges": []
+}

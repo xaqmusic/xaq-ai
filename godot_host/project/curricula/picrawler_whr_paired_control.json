@@ -1,0 +1,57 @@
+[
+  {
+    "name": "stage_1_baseline_whr_off",
+    "description": "Jitter probe baseline: Joseph hand-tuned params (Cruse hip2-only, standing 0.5, to_target/random_pyramid, progress 0.5) with walk_hit_rate=0. Establishes the DA + leg-motion baseline before the walk reward turns on. Advance ~80s.",
+    "overrides": {
+      "actuation_backend": "discrete",
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "cruse_bias_gain_hip2": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "fail_tilt_rad": 1.05,
+      "gated_walk_bonus_rate": 0.0,
+      "gated_walk_velocity_mode": "body_forward",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "progress_reward_gain": 0.5,
+      "reward_shape": "trapezoid",
+      "standing_baseline_factor": 0.5,
+      "stance_y_threshold": 0.04,
+      "target_height": 0.085,
+      "target_mode": "random_pyramid",
+      "walk_hit_rate": 0.0,
+      "walk_reward_mode": "to_target",
+      "walk_target_velocity": 0.05
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 4000
+    }
+  },
+  {
+    "name": "stage_2_whr_off_control",
+    "description": "CONTROL: identical structure to the whr=0.05 treatment but walk_hit_rate stays 0.0 in stage 2. Compare stage-2 settled window vs treatment to isolate walk_hit_rate from run-phase/settling confound.",
+    "overrides": {
+      "actuation_backend": "discrete",
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "cruse_bias_gain_hip2": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "fail_tilt_rad": 1.05,
+      "gated_walk_bonus_rate": 0.0,
+      "gated_walk_velocity_mode": "body_forward",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "progress_reward_gain": 0.5,
+      "reward_shape": "trapezoid",
+      "standing_baseline_factor": 0.5,
+      "stance_y_threshold": 0.04,
+      "target_height": 0.085,
+      "target_mode": "random_pyramid",
+      "walk_hit_rate": 0.0,
+      "walk_reward_mode": "to_target",
+      "walk_target_velocity": 0.05
+    }
+  }
+]

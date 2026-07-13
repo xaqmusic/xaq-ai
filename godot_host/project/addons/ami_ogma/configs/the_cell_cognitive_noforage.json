@@ -1,0 +1,386 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 cognitive (homeostatic active inference, survival learning)",
+    "description": "Phase 6.9 Stage A \u2014 a 'bug' that learns tabula rasa to SURVIVE (food = energy = survival; bumping a wall HURTS). FAST path = the alive homeokinetic Motor-EPM (reward-free beat-coast-drift swimming). SLOW path = a valence-driven cognitive critic: EPMs (imu/scent/whiskers) -> LateralVoter consensus; NeurochemState supplies internal valence (events.hit=dopamine reward, events.miss/wall=serotonin pain); HomeostaticDrive turns the energy deficit into urgency; ActionDecoder (TD value-map critic, td_gamma>0 = long-horizon credit) predicts future intrinsic cost and picks the steer (left/straight/right) that minimizes it -> cog.steer -> Motor-EPM differential. H-JEPA reading: hardwired Intrinsic Cost (hunger+pain) + a Trainable Critic + an Actor that acts to minimize predicted cost. NO hand-tuned task reward, NO REINFORCE (collapse), NO obstacle-avoidance reflex. Run with OGMA_SCARCITY=1 for the food-scarcity survival ramp. body_model=differential_paddler + reflex_modular.",
+    "env_target": "cell",
+    "phase_tag": "6.9.A",
+    "reflex_modular": true,
+    "body_model": "differential_paddler",
+    "motor_baseline_beat": true,
+    "motor_energy": true,
+    "nutrients": 8,
+    "energy_drain": 0.012,
+    "scent_sigma": 6.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.85
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "fast_bundle",
+      "type": "SensorBundle",
+      "params": {
+        "input_topics": [
+          "reality.proprio.imu",
+          "reality.proprio.whisker_0",
+          "reality.proprio.whisker_1",
+          "reality.proprio.whisker_2",
+          "reality.proprio.whisker_3",
+          "reality.proprio.whisker_4",
+          "reality.proprio.whisker_5",
+          "reality.proprio.motor_energy"
+        ],
+        "output_topic": "fast.proprio.bundle",
+        "sensor_label": "fast_bundle"
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPM",
+      "params": {
+        "proprio_topics": [
+          "fast.proprio.bundle"
+        ],
+        "action_topics": [
+          "action.left",
+          "action.right"
+        ],
+        "n_legs": 1,
+        "motor_dim": 2,
+        "seed": 1234,
+        "init_scale": 0.08,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.03,
+        "bias_lr": 0.005,
+        "sat_lr": 0.02,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.15,
+        "babble_ticks": 200,
+        "babble_scale": 0.5,
+        "explore_noise": 0.05,
+        "motor_gain": 4.0,
+        "cog_steer_topic": "cog.steer",
+        "cog_steer_gain": 0.6,
+        "boredom_topic": "cognition.boredom",
+        "boredom_noise_gain": 0.35,
+        "boredom_escalation_rate": 0.02,
+        "interest_topic": "cognition.interest",
+        "hunger_topic": "reality.proprio.hunger",
+        "coupling_gain": 0.0,
+        "cruse_gain": 0.0,
+        "cruse_rule5_gain": 0.0,
+        "balance_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "stroke_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "steer": 0.0,
+        "postural_gain": 0.0,
+        "panic_strength": 0.0,
+        "amp_seek_rate": 0.0,
+        "coord_reward_drive": 0.0,
+        "coord_stab_penalty": 0.0,
+        "coord_adapt_rate": 0.0,
+        "coord_explore": 0.0,
+        "imu_topic": "",
+        "tilt_topic": "",
+        "nav_topic": "percept.scent_compass",
+        "height_topic": "",
+        "distress_topic": "",
+        "lateral_topic": "",
+        "feet_topic": ""
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.5
+      }
+    },
+    {
+      "id": "epm_imu",
+      "type": "EPM",
+      "params": {
+        "modality_group": "kinematic",
+        "modality_name": "imu",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "epm_scent",
+      "type": "EPM",
+      "params": {
+        "modality_group": "olfactory",
+        "modality_name": "scent",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.scent",
+        "projection_dim": 32,
+        "proprio_state_dims": 8,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5
+      }
+    },
+    {
+      "id": "epm_compass",
+      "type": "EPM",
+      "params": {
+        "modality_group": "compass",
+        "modality_name": "compass",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.scent_compass",
+        "projection_dim": 16,
+        "proprio_state_dims": 3,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "epm_compass_coarse",
+      "type": "EPM",
+      "_comment": "Phase 6.9.B critic STATE: a CAPPED, fixed ~8-node quantizer of the egocentric scent bearing (head-direction-cell style coarse coding). mitosis OFF + max_nodes=8 + high min_insertion_error => a STABLE, low-cardinality, GENERALISING state (vs the rich epm_compass which grows to ~40 nodes and re-fragments). Used as BOTH the ActionDecoder's state (via voter_nav) and proprio so Q=(bearing x bin) ~24 keys the tabular critic CAN learn from valence.",
+      "params": {
+        "modality_group": "navc",
+        "modality_name": "bearing",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.scent_compass",
+        "projection_dim": 16,
+        "proprio_state_dims": 3,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.25,
+        "max_nodes": 16,
+        "mitosis_enabled": false,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "whisker_bundle",
+      "type": "SensorBundle",
+      "params": {
+        "input_topics": [
+          "reality.proprio.whisker_0",
+          "reality.proprio.whisker_1",
+          "reality.proprio.whisker_2",
+          "reality.proprio.whisker_3",
+          "reality.proprio.whisker_4",
+          "reality.proprio.whisker_5"
+        ],
+        "output_topic": "percept.whiskers",
+        "sensor_label": "whiskers"
+      }
+    },
+    {
+      "id": "epm_whisker",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker",
+        "modality_name": "whiskers",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.whiskers",
+        "projection_dim": 16,
+        "proprio_state_dims": 6,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "epm_vision",
+      "type": "EPM",
+      "params": {
+        "modality_group": "video",
+        "modality_name": "color",
+        "encoder_kind": "jl",
+        "input_topic": "host.video.color",
+        "projection_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": true,
+        "priority_group": "kinematic"
+      }
+    },
+    {
+      "id": "voter_nav",
+      "type": "LateralVoter",
+      "_comment": "Phase 6.9.B critic-state fix: a COARSE, compass-ONLY consensus (~4-8 bearing nodes) as the ActionDecoder's STATE. The 5-modality voter_0 fused the bearing into 90+ fragmented winners (each barely revisited) so the tabular Q-critic could not generalise 'food-right -> steer-right'. This isolates the scent bearing into a low-cardinality, GENERALISING state the critic CAN learn over from valence (still learned, not hardcoded). consensus.1 -> action_decoder.",
+      "params": {
+        "level": 1,
+        "input_pattern": "reality.navc.",
+        "trust_epsilon": 0.05,
+        "group_balance": false,
+        "priority_group": "navc"
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "action_decoder",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 1,
+        "output_topic": "cog.steer",
+        "proprio_topic": "reality.navc.bearing",
+        "action_bins": 3,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "pragmatic_gain": 10.0,
+        "epistemic_gain": 2.0,
+        "efe_temperature": 1.0,
+        "td_lambda": 0.7,
+        "td_gamma": 0.9,
+        "urgency_exploit_threshold": 0.3,
+        "urgency_exploit_bias": 4.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "eligibility_lambda": 0.9,
+        "eligibility_max_len": 64,
+        "commit_ticks": 30
+      }
+    },
+    {
+      "id": "keyframe_distress",
+      "type": "KeyframeAverager",
+      "_comment": "Phase 6.9.A distress stack: pool the fast sensor bundle (imu + 6 whiskers + motor_energy = perception + EFFORT) into a slow keyframe. The sliding-window mean averages out the flagella beat so a PINNED bug's pooled state is genuinely flat even while raw IMU twitches. NOT on a reality.* topic, so voter_0 (cognitive consensus) never sees it.",
+      "params": {
+        "input_topic": "fast.proprio.bundle",
+        "payload_kind": "proprio_token",
+        "window_size": 20,
+        "output_topic": "distress.pool",
+        "sensor_label": "distress_pool"
+      }
+    },
+    {
+      "id": "meta_epm",
+      "type": "EPM",
+      "_comment": "Slow META world-model on the pooled aggregate (H-JEPA hierarchical world model row). Its TLE spikes when the pooled state goes off-manifold (pin onset); its winner goes static when the world freezes. modality_group=consensus -> publishes consensus.distress_meta (voter-safe, NOT reality.*).",
+      "params": {
+        "modality_group": "consensus",
+        "modality_name": "distress_meta",
+        "encoder_kind": "rbf",
+        "input_topic": "distress.pool",
+        "projection_dim": 48,
+        "proprio_state_dims": 12,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.005,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "stale_meta",
+      "type": "StaleConfidenceDecay",
+      "_comment": "Playful Machine #4: ramps staleness 0->1 while the meta-EPM winner stays fixed (sustained 'world frozen' signal). publish_when_zero so DistressDrive always has a fresh value.",
+      "params": {
+        "input_topic": "consensus.distress_meta",
+        "output_topic": "cognition.meta_staleness",
+        "idle_threshold_ticks": 90,
+        "decay_window_ticks": 240,
+        "publish_when_zero": true
+      }
+    },
+    {
+      "id": "distress_drive",
+      "type": "DistressDrive",
+      "_comment": "Combines meta-TLE onset spike + sustained staleness + model-free pooled-state freeze into a 0..1 boredom signal, suppressed when dopamine is RISING (homing -> don't thrash). -> cognition.boredom, consumed by motor_epm (escalating differential escape noise + cog.steer fade).",
+      "params": {
+        "meta_topic": "consensus.distress_meta",
+        "staleness_topic": "cognition.meta_staleness",
+        "pool_topic": "distress.pool",
+        "neuro_topic": "neuro.state",
+        "imu_topic": "reality.proprio.imu",
+        "efference_topic": "reality.proprio.motor_efference",
+        "output_topic": "cognition.boredom",
+        "w_mismatch": 1.0,
+        "min_effort": 0.05,
+        "w_progress": 1.0,
+        "progress_alpha": 0.01,
+        "progress_scale": 0.2,
+        "interest_topic": "cognition.interest",
+        "scent_topic": "reality.olfactory.scent",
+        "clearance_topic": "reality.proprio.clearance",
+        "w_scent_int": 0.5,
+        "w_clear_int": 0.5,
+        "scent_nov_scale": 0.03,
+        "scent_nov_alpha": 0.01,
+        "w_tle": 0.3,
+        "w_staleness": 0.3,
+        "w_motion": 0.0,
+        "motion_alpha": 0.1,
+        "motion_scale": 0.001,
+        "suppress_gain": 5.0,
+        "green_topic": "reality.proprio.green_fraction",
+        "w_green_int": 0.5
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,24 @@
+[
+    {
+        "name": "stage_1_bri_T9_compl05",
+        "description": "2026-06-01 Stage 3.E compliance sweep on T9 base: motor_authority_scale=0.5. Motor saturates at 50% of nominal torque \u2014 when external load exceeds the cap, joint deflects against commanded position (servo-saver compliance behavior). Pair with NO-CPG config. T9 bri params: impulse=0.10, friction=0.030, base=0.0, bias=1.0.",
+        "overrides": {
+            "actuation_backend": "bernoulli_impulse",
+            "bri_base_rate": 0.0,
+            "bri_command_bias": 1.0,
+            "bri_impulse_per_spike": 0.1,
+            "bri_friction_per_tick": 0.03,
+            "target_height": 0.085,
+            "reward_shape": "trapezoid",
+            "standing_baseline_factor": 0.25,
+            "gated_walk_bonus_rate": 0.2,
+            "phase_contrast_gain": 0.7,
+            "walk_target_velocity": 0.15,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "height_penalty_scale": 0.03,
+            "height_penalty_grace": 0.02,
+            "motor_authority_scale": 0.5
+        }
+    }
+]

@@ -1,0 +1,35 @@
+[
+  {
+    "name": "stage_1_stand_permissive",
+    "description": "Permissive standing \u2014 trapezoid reward, no walking-derived rewards. Auto-advance after 30 sec CUMULATIVE upright (1800 ticks @ 60 Hz). Threshold deliberately permissive so distance signal becomes the dominant metric early in the 25-min tabula-rasa run.\n\nThis curriculum was created for the hierarchical-EPM experiment (Phase 7.2-EPM) \u2014 simplification of picrawler_stand_then_walk.json with the explicit goal of getting walking-reward injected within the first few minutes of every tabula-rasa run so cross-arm distance differentials are observable in 25-min budgets.\n\nWalking-derived rewards explicitly zeroed.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 1800
+    }
+  },
+  {
+    "name": "stage_2_walk_radial_terminal",
+    "description": "Terminal stage. Inject small RADIAL-OUTWARD walking reward on top of standing \u2014 same shape as stage_3_walk_at_all in picrawler_stand_then_walk.json but no advance_when (stay here for the rest of the run).\n\nv_norm = clamp(v_xz \u00b7 r\u0302 / walk_target_velocity, 0, 1) \u2014 only motion that increases distance-from-origin is rewarded. Standing pillar stays present so the brain doesn't trade balance for speed. walk_target_velocity=0.05 is mild \u2014 the metric we care about is max_distance_from_origin accumulated over the rest of the run, not gait speed per se.\n\nNo skip_reset_on_entry \u2014 body is reset to centre when this stage starts so distance accumulation starts from 0 for clean cross-arm comparison.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.05,
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "radial"
+    },
+    "skip_reset_on_entry": true
+  }
+]

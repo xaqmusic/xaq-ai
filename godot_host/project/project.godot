@@ -1,0 +1,32 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="ami-ogma"
+config/description="AMI-Ogma v4 — Reproducibility launcher (Cell, CartPole, MountainCar)"
+run/main_scene="res://scenes/launcher.tscn"
+config/features=PackedStringArray("4.6", "Forward Plus")
+config/icon="res://assets/icon.svg"
+
+[autoload]
+
+ExperimentConfig="*res://scripts/experiment_config.gd"
+PauseOverlay="*res://scripts/pause_overlay.gd"
+CurriculumManager="*res://scripts/curriculum_manager.gd"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+
+[physics]
+
+3d/physics_engine="Godot Physics 3D"

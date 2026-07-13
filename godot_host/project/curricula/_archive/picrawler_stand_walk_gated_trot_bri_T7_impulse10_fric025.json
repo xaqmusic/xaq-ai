@@ -1,0 +1,23 @@
+[
+    {
+        "name": "stage_1_bri_T7_impulse10_fric025",
+        "description": "2026-06-01 sweep 2: T7_impulse10_fric025. bri_impulse_per_spike=0.1 | bri_friction_per_tick=0.025",
+        "overrides": {
+            "actuation_backend": "bernoulli_impulse",
+            "bri_base_rate": 0.0,
+            "bri_command_bias": 1.0,
+            "bri_impulse_per_spike": 0.1,
+            "bri_friction_per_tick": 0.025,
+            "target_height": 0.085,
+            "reward_shape": "trapezoid",
+            "standing_baseline_factor": 0.25,
+            "gated_walk_bonus_rate": 0.2,
+            "phase_contrast_gain": 0.7,
+            "walk_target_velocity": 0.15,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "height_penalty_scale": 0.03,
+            "height_penalty_grace": 0.02
+        }
+    }
+]

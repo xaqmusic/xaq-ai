@@ -1,0 +1,89 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 heading-following ISOLATION (random commanded headings, NO food)",
+    "description": "Isolation rig for the learned action layer: HeadingProbe emits a random WORLD heading (held 300 ticks, re-randomized), converted to the egocentric bearing each tick \u2192 HeadingController.learn_advance must TURN to face it and ADVANCE. No food, no scent, no ScentCompass \u2014 the along-heading reward is food-independent, so this cleanly separates 'action learns to TRACK any heading' from 'action exploits the live-food gradient'. Decisive: does |pbearing| converge to ~0 after each switch (tracks) or stay stuck off-zero (orbits)? If it tracks here, the in-arena orbit is a live-food artifact.",
+    "env_target": "cell",
+    "phase_tag": "6.9.heading.isolation",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": false,
+    "nutrients": 0,
+    "energy_drain": 0.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": false
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "heading_probe",
+      "type": "HeadingProbe",
+      "params": {
+        "output_topic": "percept.scent_compass",
+        "heading_topic": "reality.proprio.heading",
+        "hold_ticks": 300,
+        "sign": -1.0,
+        "master_seed": 1234
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.scent_compass",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "_comment": "Same learned action layer as the in-arena learnadv config \u2014 tested here against random headings, no food.",
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,136 @@
+{
+  "metadata": {
+    "name": "Cell — corridor TURN rig + LEARNED advance policy (de-scaffold the cos gate)",
+    "description": "De-scaffold step: HeadingController.learn_advance=true replaces the hand-designed cos braking gate with a LEARNED thrust policy (UCB over thrust levels, reward = forward progress along the commanded heading = max(0,vel_fwd)*cos(bearing), food-INDEPENDENT). The turn gain k_body was already learned; now the advance/brake is too, so 'action learns how to act on a heading' is fully true and brake-turn-charge EMERGES. GATE: recover the hand-gate's foraging (~298 eats, FACING fwd_v>0, ihd~4m). A/B vs the_cell_corridor_turn_heading.json (hand gate).",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor.turn.heading.learnadv",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "corridor_bearing_max": 45.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "corridor_respawn_far": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.02
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.scent_compass",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "_comment": "Turn gain k_body learned (unchanged). Advance/brake LEARNED: UCB over 3 thrust levels per |bearing| bin, reward = forward progress along the commanded heading (food-independent)."
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

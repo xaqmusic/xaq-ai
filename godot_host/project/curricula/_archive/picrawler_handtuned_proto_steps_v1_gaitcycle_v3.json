@@ -1,0 +1,41 @@
+[
+    {
+        "name": "stage_handtuned_proto_steps_v1_gaitcycle_v3",
+        "description": "v3 of the gait-cycle A/B — adaptive thresholds (matches feedback_no_tuning: 'add the adaptive mechanism that would set [the bar] from the system's own dynamics'). The reward bar floats as a fraction of EMAs of the body's own observed cycle statistics: eff_min_progress = max(static_floor=1mm, 0.5 * progress_ema); eff_max_backward = max(static_floor=3mm, 2.0 * wobble_ema). After 20-cycle warmup (~30 sec at v1's observed cycle rate of ~40/min), the bar locks to the body's actual capability and pressures 'better-than-typical' cycles. Floor values kept tiny so adaptive takes over fast. Hypothesis: this resolves both the v1 failure (bar too tight for actual motion) and v2's open question (whether ANY static value can match a body whose cycle statistics drift as the policy learns) — the bar follows the body. Trajectory diag adds: progress_ema, wobble_ema, eff_min_progress, eff_max_backward, attempts_total.",
+        "overrides": {
+            "band_width": 0.04,
+            "fail_tilt_rad": 1.0,
+            "gait_cycle_adaptive_thresholds": true,
+            "gait_cycle_max_backward": 0.003,
+            "gait_cycle_min_progress": 0.001,
+            "gait_cycle_progress_K": 0.5,
+            "gait_cycle_reward_gain": 1.0,
+            "gait_cycle_threshold_ema_alpha": 0.02,
+            "gait_cycle_warmup_cycles": 20,
+            "gait_cycle_window_ticks": 120,
+            "gait_cycle_wobble_K": 2.0,
+            "gated_walk_bonus_rate": 0.2,
+            "gated_walk_velocity_mode": "radial",
+            "height_penalty_gain": 0.05,
+            "height_penalty_grace": 0.02,
+            "height_penalty_scale": 0.005,
+            "height_reference": "chassis",
+            "level_chassis_rate": 0.05,
+            "peak_height": 0.082,
+            "peak_height_mode": "fixed",
+            "per_leg_credit_gain": 0.0,
+            "phase_contrast_gain": 0.9,
+            "progress_reward_gain": 0.0,
+            "reward_min_height": 0.06,
+            "reward_shape": "trapezoid",
+            "stance_y_threshold": 0.04,
+            "standing_baseline_factor": 0.2,
+            "standing_reward_ema_alpha": 0.88,
+            "target_height": 0.085,
+            "tilt_target_rad": 0.0,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "walk_target_velocity": 0.55
+        }
+    }
+]

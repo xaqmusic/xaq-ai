@@ -1,0 +1,110 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/picrawler_body.gd"          id="1"]
+[ext_resource type="Script" path="res://scripts/orbit_camera.gd"            id="2"]
+[ext_resource type="Script" path="res://scripts/quadruped_hud.gd"           id="3"]
+[ext_resource type="Script" path="res://scripts/ogma_graph_panel.gd"        id="4"]
+[ext_resource type="Script" path="res://scripts/picrawler_servo_panel.gd"   id="5"]
+[ext_resource type="Script" path="res://scripts/the_picrawler_world.gd"     id="6"]
+[ext_resource type="Script" path="res://scripts/walking_trail.gd"           id="7"]
+[ext_resource type="Script" path="res://scripts/trainer_panel.gd"           id="8"]
+[ext_resource type="Script" path="res://scripts/curriculum_panel.gd"        id="9"]
+[ext_resource type="Script" path="res://scripts/reward_panel.gd"            id="10"]
+[ext_resource type="Script" path="res://scripts/motor_epm_panel.gd"         id="11"]
+
+[sub_resource type="Environment" id="Environment_picrawler"]
+background_mode = 1
+background_color = Color(0.08, 0.09, 0.12, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.7, 0.7, 0.8, 1)
+ambient_light_energy = 1.0
+
+[node name="ThePicrawler" type="Node3D"]
+script = ExtResource("6")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_picrawler")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+; DirectionalLight3D shines along local -Z.  Previous transform had
+; basis.z=(0,-1,0) which made the light shine UP into the sky → floor
+; got no direct illumination → no cast shadows.
+; New transform: basis.z = (-0.354, 0.866, 0.354) so light shines
+; (0.354, -0.866, -0.354) — 30° off vertical, slightly +X -Z, casts
+; readable shadows under the body.
+transform = Transform3D(0.707, 0.612, -0.354, 0, 0.501, 0.866, 0.707, -0.612, 0.354, 0, 8, 0)
+light_energy = 1.2
+shadow_enabled = true
+shadow_bias = 0.02
+directional_shadow_max_distance = 5.0
+
+[node name="Camera3D" type="Camera3D" parent="."]
+script = ExtResource("2")
+target_path = NodePath("../Picrawler")
+initial_distance = 0.6
+initial_yaw_deg = 25.0
+initial_pitch_deg = 24.0
+floor_lock = true
+floor_y = 0.0
+current = true
+fov = 60.0
+
+[node name="Picrawler" type="Node3D" parent="."]
+script = ExtResource("1")
+
+[node name="Brain" type="OgmaBrain" parent="Picrawler"]
+
+[node name="WalkingTrail" type="Node3D" parent="."]
+script = ExtResource("7")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Overlay" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("3")
+mouse_filter = 2
+
+[node name="OgmaGraphPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("4")
+
+[node name="ServoPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("5")
+
+[node name="TrainerPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("8")
+
+[node name="CurriculumPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("9")
+
+[node name="RewardPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("10")
+
+[node name="MotorEpmPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("11")

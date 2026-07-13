@@ -1,0 +1,10 @@
+[
+  {
+    "name": "nav_target",
+    "description": "Places a random_pyramid target so reality.proprio.target_compass is published, for the Motor-EPM perception->steering (active-inference) test. NO reward changes - the MotorEPM controller is reward-free; the target only provides the egocentric bearing percept that nav_gain steers toward. On visit, a new target is picked (continuous navigation). Substrate: joint_backend=g6dof (authoritative over the launcher; the g6dof preset then carries springs + freeplay 0.1). stroke_phase/nav_gain/height live in the motor_epm config.",
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {},
+    "joint_backend": "g6dof"
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "name": "stage_1_stand_permissive",
+    "description": "2026-06-01 walking ablation fix (ablation arm) — same stage 1 as picrawler_stand_walk_gated_trot_advance_1200 (walking already off here, cold-start standing bootstrap).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 1200
+    }
+  },
+  {
+    "name": "stage_2_stand_only_no_walking_reward",
+    "description": "2026-06-01 walking ablation fix (ablation arm) — stage 2 with walking channels disabled. Identical to stage 2 of picrawler_stand_walk_gated_trot_advance_1200 EXCEPT walk_hit_rate=0.0 and gated_walk_bonus_rate=0.0. Tests whether walking reward enabled vs disabled changes behavior under the (now-reachable) stage 2 reward regime.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.15,
+      "walk_hit_rate": 0.0,
+      "walk_reward_mode": "radial",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.0,
+      "phase_contrast_gain": 0.7
+    }
+  }
+]

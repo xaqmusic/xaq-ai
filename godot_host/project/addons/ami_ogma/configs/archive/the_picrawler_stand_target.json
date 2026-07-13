@@ -1,0 +1,369 @@
+{
+  "metadata": {
+    "name": "PiCrawler \u2014 Trapezoid 0.085m (height sweep winner)",
+    "description": "Stage C arm: trapezoidal height reward with target_height=0.085m. Winner of the n=20 paired-seed sweep (vs 0.10 baseline, 0.090, 0.095 variants at 200s/run). 0.085 ranked best on every stability metric measured: pct_upright 0.919, longest_upright_physics_ticks 6927, n_fall_events 11.9, n_tipover_events 0.0 (tied best at 200s) AND highest exploration (total_path_length 5.38m, max_distance_from_origin 1.54m).  Effect not statistically significant at 200s n=20 (paired-t p\u22481.0) because no condition produced enough tipovers to differentiate, but rank-ordering is consistent across 7 metrics.  Same A5 brain (IMU + joints EPMs + mc=1500 + linear-velocity stability) and same penalty schedule as Stage C-1 (grace=0.02m, scale=0.03, gain=0.05) \u2014 only target_height changes from 0.10 to 0.085.  Use this slot in the UI to verify the lower cap produces the expected stability-without-tipover behaviour the inverted-U arm was reaching for.",
+    "env_target": "picrawler",
+    "phase_tag": "v6.0.b.16 \u2014 Stage C trapezoid @ 0.085m (sweep winner)",
+    "episode_length": 6000,
+    "mc_episode_period": 1500,
+    "stability_gain": 0.05,
+    "stability_y_norm": 0.5,
+    "stability_speed": 0.05,
+    "reward_shape": "trapezoid",
+    "target_height": 0.085,
+    "height_penalty_grace": 0.02,
+    "height_penalty_scale": 0.03,
+    "height_penalty_gain": 0.05
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "wall_stuck_da_drain": 0.0,
+        "wall_stuck_ht_drain": 0.0
+      }
+    },
+    {
+      "id": "epm_imu",
+      "type": "EPM",
+      "params": {
+        "modality_group": "vestibular",
+        "modality_name": "imu",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_joints",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "joints",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.joints",
+        "projection_dim": 48,
+        "proprio_state_dims": 12,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": true,
+        "priority_group": "vestibular"
+      }
+    },
+    {
+      "id": "descend",
+      "type": "DescendingPredictor",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "targets": [
+          "reality.vestibular.imu",
+          "reality.proprio.joints"
+        ],
+        "update_method": "sgd",
+        "learning_rate": 0.005
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "alive"
+        ],
+        "channel_kinds": [
+          "alive_pulse"
+        ],
+        "setpoints": [
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0
+        ],
+        "channel_input_topics": [
+          "events.hit"
+        ],
+        "alive_pulse_decay_per_tick": 0.005,
+        "alive_pulse_replenish_per_event": 0.5
+      }
+    },
+    {
+      "id": "premotor_fl_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "action_output_topic": "action.fl_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 101,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true
+      }
+    },
+    {
+      "id": "premotor_fr_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "action_output_topic": "action.fr_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 201,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true
+      }
+    },
+    {
+      "id": "premotor_rl_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "action_output_topic": "action.rl_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 301,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true
+      }
+    },
+    {
+      "id": "premotor_rr_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "action_output_topic": "action.rr_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 401,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true
+      }
+    },
+    {
+      "id": "premotor_fl_pitch",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "output_topic_left": "action.fl_hip2",
+        "output_topic_right": "action.fl_knee",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 102,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "bilateral_table": "[[-1,-1],[-0.5,-0.5],[0,0],[0.5,0.5],[1,1]]"
+      }
+    },
+    {
+      "id": "premotor_fr_pitch",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "output_topic_left": "action.fr_hip2",
+        "output_topic_right": "action.fr_knee",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 202,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "bilateral_table": "[[-1,-1],[-0.5,-0.5],[0,0],[0.5,0.5],[1,1]]"
+      }
+    },
+    {
+      "id": "premotor_rl_pitch",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "output_topic_left": "action.rl_hip2",
+        "output_topic_right": "action.rl_knee",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 302,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "bilateral_table": "[[-1,-1],[-0.5,-0.5],[0,0],[0.5,0.5],[1,1]]"
+      }
+    },
+    {
+      "id": "premotor_rr_pitch",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "output_topic_left": "action.rr_hip2",
+        "output_topic_right": "action.rr_knee",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 402,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "bilateral_table": "[[-1,-1],[-0.5,-0.5],[0,0],[0.5,0.5],[1,1]]"
+      }
+    }
+  ],
+  "edges": []
+}

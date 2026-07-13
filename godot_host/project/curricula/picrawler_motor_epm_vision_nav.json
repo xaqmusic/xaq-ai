@@ -1,0 +1,12 @@
+[
+  {
+    "name": "nav_vision",
+    "description": "Reward-free nav WITH vision wired into the brain: forward raycast camera (Lambert-shaded RGB) -> epm_color (JL) -> consensus (voter_slow trusts it ~44%). Use with the_picrawler_motor_epm_vision.json (has epm_color). Substrate g6dof.",
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "publish_vision": true
+    },
+    "joint_backend": "g6dof"
+  }
+]

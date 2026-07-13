@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zanshin"
+version = "0.1.0"
+description = "Zanshin — open active-inference cognitive engine (EPM, GNG, lateral voting, active inference, motor/nav, generic audio)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Joseph Butera III" }]
+dependencies = [
+    "zanshin-core",
+    "numpy",
+    "torch",
+    "scipy",
+]
+
+[project.optional-dependencies]
+# PyQt6 desktop dashboard + cognitive observer.
+ui = ["PyQt6", "pyqtgraph"]
+
+# NOTE: audio-capable out of the box via the built-in generic STFT encoder.
+# External providers (e.g. the private AMI-Awen cochlear encoder) plug into the
+# `zanshin.encoders` entry-point group; Zanshin declares no such entry itself.
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zanshin*"]

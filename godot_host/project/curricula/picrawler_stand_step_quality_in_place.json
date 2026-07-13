@@ -1,0 +1,42 @@
+[
+  {
+    "name": "stage_1_stand_permissive",
+    "description": "2026-06-02 walking paradigm redesign Stage 2 pilot — Stage 1 unchanged from picrawler_stand_walk_gated_trot_advance_1200.json. Body learns to stand at target_height=0.085; advance to step_quality at best_cumulative_alive_ticks >= 1200 (20s continuous upright @ 60Hz).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "step_quality_reward_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 1200
+    }
+  },
+  {
+    "name": "stage_2_step_quality_in_place",
+    "description": "2026-06-02 walking paradigm redesign Stage 2 — per-leg step-quality reward (lift_ema × plant_ema × upright). Reachable in-place. No velocity, no direction, no gated_walk channel. Standing reward kept at full magnitude (factor 1.0) so step_quality is purely additive pressure. See docs/plans-and-designs/walking_paradigm_redesign.md.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "phase_contrast_gain": 0.0,
+      "step_quality_reward_gain": 0.04,
+      "step_lift_scale": 0.04,
+      "step_quality_ema_alpha": 0.02
+    }
+  }
+]

@@ -1,0 +1,191 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 corridor FUSE-DEMO 3/3: LATERAL VOTER (scent+fovea, informativeness-gated)",
+    "description": "Principled fusion: per-channel EPMs (scent, forward-loom) \u2192 informativeness-gated LateralVoter \u2192 consensus state. Same pure-scent objective. Shows the lift above naive bundling.",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor.fusedemo",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "epm_scent",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "scent",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.scent_max",
+        "proprio_state_dims": 1,
+        "projection_dim": 32,
+        "dim_min": [
+          0.0
+        ],
+        "dim_max": [
+          1.0
+        ],
+        "min_insertion_error": 0.05,
+        "max_nodes": 12,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "baking_threshold": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "epm_loom",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "loom",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.forward_loom",
+        "proprio_state_dims": 1,
+        "projection_dim": 32,
+        "dim_min": [
+          0.0
+        ],
+        "dim_max": [
+          0.2
+        ],
+        "min_insertion_error": 0.05,
+        "max_nodes": 12,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "baking_threshold": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "voter_nav",
+      "type": "LateralVoter",
+      "params": {
+        "level": 1,
+        "group_balance": false,
+        "trust_epsilon": 0.05,
+        "informativeness_gain": 1.0,
+        "info_floor": 0.0
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "action_plan",
+      "type": "ActionDecoder",
+      "params": {
+        "output_topic": "cog.steer",
+        "joint_action": true,
+        "thrust_output_topic": "cog.thrust",
+        "action_bins": 1,
+        "accel_min": 0.0,
+        "accel_max": 0.0,
+        "thrust_bins": 3,
+        "thrust_accel_min": -4.0,
+        "thrust_accel_max": 4.0,
+        "plan_horizon": 3,
+        "plan_gamma": 0.9,
+        "pref_obs_topic": "reality.proprio.scent_max",
+        "pref_obs_index": 0,
+        "green_obs_topic": "",
+        "w_scent": 2.0,
+        "w_green": 0.0,
+        "efe_select": true,
+        "epistemic_gain": 0.1,
+        "td_gamma": 0.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "commit_ticks": 60,
+        "consensus_level": 1,
+        "proprio_topic": ""
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

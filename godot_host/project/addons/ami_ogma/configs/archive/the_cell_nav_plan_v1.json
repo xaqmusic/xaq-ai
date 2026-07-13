@@ -1,0 +1,305 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 nav PLAN v1 (coxswain: joint action + receding-horizon plan)",
+    "description": "COXSWAIN + MotorBus (multichannel mixer\u2192compressor): 3 motor influencers \u2014 hk(MotorEPM pure HK swim), cog(decoder steer+thrust), whisker(reflex, fader pegged high) \u2014 summed per-flagellum + tanh-compressed to action.left/right. Faders live-tunable in the HUD MotorBus panel; whisker dominates+masks on contact, releases when idle.  arbitration: MotorEPM(brain: HK swim + cog steer/thrust) and whisker(reflex) are crossfaded per-flagellum by 2 MotorFaders sharing one \u03b1 (FaderController, HUD slider via M/\u2190/\u2192). idle_reflex_passthrough \u2192 off-contact full brain, whisker ducks only on contact. ",
+    "env_target": "cell",
+    "phase_tag": "6.9.nav.plan_v1",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": true,
+    "motor_energy": true,
+    "nutrients": 12,
+    "energy_drain": 0.012,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.85,
+    "food_respawn": false
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "fast_bundle",
+      "type": "SensorBundle",
+      "params": {
+        "input_topics": [
+          "reality.proprio.imu",
+          "reality.proprio.motor_energy"
+        ],
+        "output_topic": "fast.proprio.bundle",
+        "sensor_label": "fast_bundle"
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPM",
+      "params": {
+        "proprio_topics": [
+          "fast.proprio.bundle"
+        ],
+        "action_topics": [
+          "action.brain.left",
+          "action.brain.right"
+        ],
+        "n_legs": 1,
+        "motor_dim": 2,
+        "seed": 1234,
+        "init_scale": 0.08,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.03,
+        "bias_lr": 0.005,
+        "sat_lr": 0.02,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.15,
+        "babble_ticks": 200,
+        "babble_scale": 0.5,
+        "explore_noise": 0.05,
+        "motor_gain": 4.0,
+        "cog_steer_topic": "cog.steer",
+        "cog_steer_gain": 0.0,
+        "boredom_topic": "cognition.boredom",
+        "boredom_noise_gain": 0.35,
+        "boredom_escalation_rate": 0.02,
+        "interest_topic": "cognition.interest",
+        "hunger_topic": "reality.proprio.hunger",
+        "coupling_gain": 0.0,
+        "cruse_gain": 0.0,
+        "cruse_rule5_gain": 0.0,
+        "balance_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "stroke_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "steer": 0.0,
+        "postural_gain": 0.0,
+        "panic_strength": 0.0,
+        "amp_seek_rate": 0.0,
+        "coord_reward_drive": 0.0,
+        "coord_stab_penalty": 0.0,
+        "coord_adapt_rate": 0.0,
+        "coord_explore": 0.0,
+        "imu_topic": "",
+        "tilt_topic": "",
+        "nav_topic": "percept.scent_compass",
+        "height_topic": "",
+        "distress_topic": "",
+        "lateral_topic": "",
+        "feet_topic": "",
+        "cog_thrust_topic": "cog.thrust",
+        "cog_thrust_gain": 0.0
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.5
+      }
+    },
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5
+      }
+    },
+    {
+      "id": "epm_bearing",
+      "_comment": "COARSE per-modality olfactory state (max 16 nodes, mitosis off). SLOW: process_every_n_ticks=30 (republishes last token between). Publishes reality.nav.bearing -> voter_nav.",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "bearing",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.scent_compass",
+        "projection_dim": 16,
+        "proprio_state_dims": 3,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.1,
+        "max_nodes": 16,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "whisker_steer",
+      "_comment": "Transparent WALL-escape reflex (whiskers see walls only, NOT food). Weighted ipsilateral turn-away (inner whiskers stronger) + reverse-out-of-wedge. LAST module \u2192 overwrites MotorEPM paddle commands ONLY on wall contact (subsumption); silent otherwise so the brain passes through.",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "left_suffixes": [
+          "0",
+          "1",
+          "2"
+        ],
+        "right_suffixes": [
+          "3",
+          "4",
+          "5"
+        ],
+        "threshold": 0.15,
+        "steer_gain": 10.0,
+        "reverse_strength": 4.0,
+        "refractory_ticks": 0,
+        "output_topic_left": "action.reflex.left",
+        "output_topic_right": "action.reflex.right"
+      }
+    },
+    {
+      "id": "distress",
+      "type": "DistressDrive",
+      "params": {
+        "efference_topic": "reality.proprio.motor_efference",
+        "imu_topic": "reality.proprio.imu",
+        "scent_topic": "reality.proprio.scent",
+        "green_topic": "reality.proprio.green_fraction",
+        "neuro_topic": "neuro.state",
+        "output_topic": "cognition.boredom",
+        "interest_topic": "cognition.interest",
+        "w_mismatch": 1.0,
+        "w_progress": 1.0,
+        "w_staleness": 0.0,
+        "w_tle": 0.0,
+        "w_motion": 0.0,
+        "w_scent_int": 0.5,
+        "w_green_int": 0.5,
+        "w_clear_int": 0.0,
+        "progress_alpha": 0.01,
+        "progress_scale": 0.2,
+        "min_effort": 0.05,
+        "suppress_gain": 5.0,
+        "_comment": "Wall-trap escape source: boredom from reafference-mismatch + no-progress (meta terms zeroed \u2014 no meta-EPM in this graph). Drives MotorEPM klinokinesis escape + MotorBus sidechain."
+      }
+    },
+    {
+      "id": "action_plan",
+      "type": "ActionDecoder",
+      "_comment": "v1 COXSWAIN: one actor, JOINT (turn,thrust) action, receding-horizon plan (H=3) over the option-level forward model; targets = scent (pref_obs) + green-loom (green_obs). Reads epm_bearing directly (consensus disabled) since fusion was proven not the bottleneck. Publishes cog.steer + cog.thrust.",
+      "params": {
+        "consensus_level": -1,
+        "proprio_topic": "reality.nav.bearing",
+        "output_topic": "cog.steer",
+        "joint_action": true,
+        "thrust_output_topic": "cog.thrust",
+        "action_bins": 3,
+        "thrust_bins": 3,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "thrust_accel_min": -4.0,
+        "thrust_accel_max": 4.0,
+        "plan_horizon": 3,
+        "plan_gamma": 0.9,
+        "pref_obs_topic": "percept.scent_compass",
+        "pref_obs_index": 1,
+        "green_obs_topic": "reality.proprio.green_fraction",
+        "w_scent": 2.0,
+        "w_green": 20.0,
+        "efe_select": true,
+        "epistemic_gain": 0.1,
+        "td_gamma": 0.0,
+        "use_rollout": false,
+        "use_chunks": false,
+        "commit_ticks": 60,
+        "_comment": "2-D coxswain. Objective = cy (forward scent, far + facing) + green loom (near, magnitude-matched w_green) \u2014 both forward-facing \u2192 mouth-aware. epistemic_gain 0.1 (corridor fix). pref_obs=scent_compass cy, green_obs=green_fraction.",
+        "authority_topic": "motor.bus.authority.cog"
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "_comment": "Multichannel mixer\u2192bus-compressor. Influencers: hk(MotorEPM pure HK, lr), cog(decoder steer+thrust), whisker(reflex, lr, fader PEGGED HIGH \u2192 dominates+masks on contact). out=limit\u00b7tanh(\u03a3 gain\u00b7contrib/limit): single channel passes ~linearly (no dilution), loud channel saturates+masks, silent channel releases. Faders live via the HUD MotorBus panel.",
+      "params": {
+        "influencer_names": [
+          "hk",
+          "cog",
+          "whisker"
+        ],
+        "kinds": [
+          "lr",
+          "steer_thrust",
+          "lr"
+        ],
+        "topics_a": [
+          "action.brain.left",
+          "cog.steer",
+          "action.reflex.left"
+        ],
+        "topics_b": [
+          "action.brain.right",
+          "cog.thrust",
+          "action.reflex.right"
+        ],
+        "gains": [
+          0.05,
+          1.0,
+          4.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "input_scale": [
+          2.0,
+          4.0,
+          4.0
+        ],
+        "mod_topic": "cognition.boredom",
+        "boredom_response": [
+          5.0,
+          -1.0,
+          0.0
+        ],
+        "authority_prefix": "motor.bus.authority."
+      }
+    }
+  ],
+  "edges": []
+}

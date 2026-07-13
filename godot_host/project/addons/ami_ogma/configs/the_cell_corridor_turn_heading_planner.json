@@ -1,0 +1,164 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 corridor TURN rig + LEARNED heading planner (de-scaffold Stage 1b)",
+    "description": "De-scaffold Stage 1b: a HeadingPlanner LEARNS heading SELECTION (tabular V[belief_sector][heading_sector]=EMA(\u0394scent_max), softmax+epistemic select, commit window) instead of passing the belief gradient straight through (the reflex). GoalBelief\u2192HeadingPlanner\u2192HeadingController. GATE = recover ~298 eats in the open corridor (matches the reflex) + PROVE learning: corr(chosen-heading,true-fbear) rises early\u2192late AND a shuffle ablation (planner.shuffle=true) collapses foraging. Ablatable: point heading_controller.input_topic back at percept.goal_belief \u2192 the reflex.",
+    "env_target": "cell",
+    "phase_tag": "6.9.corridor.turn.planner",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "corridor_bearing_max": 45.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "corridor_respawn_far": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.02
+      }
+    },
+    {
+      "id": "goal_belief",
+      "type": "GoalBelief",
+      "params": {
+        "scent_topic": "percept.scent_compass",
+        "heading_topic": "reality.proprio.heading",
+        "output_topic": "percept.goal_belief",
+        "cx_index": 0,
+        "cy_index": 1,
+        "_comment": "persistent world-frame goal belief; bridges occlusion via path integration"
+      }
+    },
+    {
+      "id": "heading_planner",
+      "type": "HeadingPlanner",
+      "params": {
+        "belief_topic": "percept.goal_belief",
+        "progress_topic": "reality.proprio.scent_max",
+        "heading_topic": "reality.proprio.heading",
+        "output_topic": "plan.heading",
+        "n_state_sectors": 8,
+        "n_action_sectors": 8,
+        "commit_ticks": 30,
+        "value_lr": 0.1,
+        "epistemic_gain": 0.05,
+        "temperature": 0.05,
+        "credit_achieved": false,
+        "_comment": "learned heading selection; reward=\u0394scent_max; hit-teleport\u2192positive credit; emits [hx,hy]*confidence",
+        "r_hit": 0.5,
+        "allow_resector_abort": false
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "plan.heading",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "_comment": "learned heading-follower: desired heading = scent up-gradient bearing; gain self-adapts to the body's turn response (no hand-set P-gain).",
+        "turn_fraction": 2.5,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

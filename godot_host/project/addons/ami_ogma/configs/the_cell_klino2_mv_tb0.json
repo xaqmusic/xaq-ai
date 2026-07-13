@@ -1,0 +1,161 @@
+{
+  "metadata": {
+    "name": "klino2 kinesis motor-variant tb0",
+    "description": "RunTumbleNavV2 (methylation+KF4 floor, KF1 run integrity, KF2 efference stuck, KF6 directional belief; NO orthokinesis) -> heading_controller_klino -> MotorBus (single cog + reflexes) -> body. NO arbiter. Same env/wiring as the_cell_klino_only. Gate: BEAT the shuffle random floor across the room battery + single/saddle. ablation param: none|shuffle|kinesis|wrong_sign|shuffle_dir.",
+    "env_target": "cell",
+    "phase_tag": "loop_isolation.klino2",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "maze": true,
+    "maze_layout": "open",
+    "scent_falloff_radius": 12.0,
+    "nutrients": 1,
+    "publish_scent_ring": false,
+    "energy_drain": 0.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "food_positions": [
+      [
+        0.0,
+        0.28
+      ],
+      [
+        0.0,
+        -0.28
+      ]
+    ],
+    "zone_colors": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "klino",
+      "type": "RunTumbleNavV2",
+      "params": {
+        "scent_topic": "reality.proprio.scent_max",
+        "heading_topic": "reality.proprio.heading",
+        "vel_topic": "reality.proprio.vel_ego",
+        "eat_topic": "events.eat",
+        "output_topic": "percept.klino_heading",
+        "confidence_topic": "percept.klino_confidence",
+        "authority_topic": "motor.bus.authority.klino",
+        "ablation": "kinesis"
+      }
+    },
+    {
+      "id": "heading_controller_klino",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.klino_heading",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cogk.steer",
+        "thrust_output_topic": "cogk.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.klino",
+        "advance_homeokinetic": true,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "whisker_reflex",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "output_topic_left": "whisker.left",
+        "output_topic_right": "whisker.right",
+        "threshold": 0.15,
+        "reverse_strength": 4.0,
+        "refractory_ticks": 45,
+        "pulse_ticks": 6
+      }
+    },
+    {
+      "id": "stuck_reflex",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "severity_threshold": 0.6,
+        "window_ticks": 15,
+        "refractory_ticks": 120,
+        "enable_pulse": true,
+        "output_topic_left": "stuck.left",
+        "output_topic_right": "stuck.right",
+        "pulse_ticks": 60,
+        "pulse_rotation": 4.0,
+        "efference_topic": "reality.proprio.motor_efference",
+        "intent_floor": 0.1
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "klino",
+          "whisker",
+          "stuck"
+        ],
+        "kinds": [
+          "steer_thrust",
+          "lr",
+          "lr"
+        ],
+        "topics_a": [
+          "cogk.steer",
+          "whisker.left",
+          "stuck.left"
+        ],
+        "topics_b": [
+          "cogk.thrust",
+          "whisker.right",
+          "stuck.right"
+        ],
+        "input_scale": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "gains": [
+          0.75,
+          4.0,
+          4.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "authority_prefix": "motor.bus.authority.",
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "proportional_mix": true,
+        "turn_brake": 0.0,
+        "labels": [
+          "klino",
+          "whisker",
+          "stuck"
+        ]
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,32 @@
+[
+    {
+        "name": "stage_handtuned_proto_steps_v1",
+        "description": "Hand-tuned via reward_panel during 2026-05-30 V10 post-mortem session. Operator-observed proto-stepping + dynamic standing (occasional falls) with no stable attractor lock-in over the visible window. Single-stage, no auto-advance — sustained in this regime for full run. Key shifts vs v9c_kneerel: reward_shape=trapezoid + peak fixed at 0.082 (kills the knee_relative low-peak self-reinforcement); reward_min_height=0.06 (excludes the y=0.055 tilted-prop attractor seen in V10); level_chassis_rate=0.05 (tilt now has a cost — was 0.0 throughout V10); standing_baseline_factor=0.20 (lowest standing dominance yet, so walk bonus can compete from t=0); walk_target_velocity=0.55 (aggressive, gradient never saturates at crawler speeds); gated_walk_bonus_rate=0.20 + phase_contrast_gain=0.9 ON from t=0 (no stage-gate; walk + diagonal-alternation incentive lives from the first tick).",
+        "overrides": {
+            "band_width": 0.04,
+            "fail_tilt_rad": 1.0,
+            "gated_walk_bonus_rate": 0.2,
+            "gated_walk_velocity_mode": "radial",
+            "height_penalty_gain": 0.05,
+            "height_penalty_grace": 0.02,
+            "height_penalty_scale": 0.005,
+            "height_reference": "chassis",
+            "level_chassis_rate": 0.05,
+            "peak_height": 0.082,
+            "peak_height_mode": "fixed",
+            "per_leg_credit_gain": 0.0,
+            "phase_contrast_gain": 0.9,
+            "progress_reward_gain": 0.0,
+            "reward_min_height": 0.06,
+            "reward_shape": "trapezoid",
+            "stance_y_threshold": 0.04,
+            "standing_baseline_factor": 0.2,
+            "standing_reward_ema_alpha": 0.88,
+            "target_height": 0.085,
+            "tilt_target_rad": 0.0,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "walk_target_velocity": 0.55
+        }
+    }
+]

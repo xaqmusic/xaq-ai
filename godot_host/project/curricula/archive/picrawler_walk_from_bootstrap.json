@@ -1,0 +1,87 @@
+[
+  {
+    "name": "stage_0_preload_bootstrap",
+    "description": "Bootstrap-preload entry stage.  Loads the most recent saved brain state whose filename contains 'per_servo' (the baseline 6.17b 12-Premotor standing-trained checkpoint) and skips straight into the walking curriculum without re-paying the cold-start standing tax.  The body still ticks normally — chunks crystallise on top of pre-trained Premotors.  Auto-advances after 60 ticks (1 sim sec) so the preloaded brain has a moment to settle before walking pressure kicks in.",
+    "resume_state_path": "most_recent:per_servo_t",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "height_penalty_gain": 0.05,
+      "walk_hit_rate": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 60
+    }
+  },
+  {
+    "name": "stage_1_walk_at_all",
+    "description": "Inject a small RADIAL-OUTWARD walking reward on top of standing.  Same as stand-then-walk stage_3 but entered with preloaded Premotor weights so standing competence is already in hand.  Lets chunks crystallise from genuine walking attempts rather than from cold-start standing wobble.  Auto-advance once the body has translated 0.5m.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.05,
+      "walk_hit_rate": 0.05
+    },
+    "advance_when": {
+      "metric": "max_distance_from_origin",
+      "op": "ge",
+      "value": 0.5
+    }
+  },
+  {
+    "name": "stage_2_walk_far",
+    "description": "Higher target velocity + double the hit rate, with radial_penalize_inward so the body pays for returning toward origin (symmetric DA pressure on heading commitment).  Capped at 3.0 m — the edge of the concentric ring grid — so the body finishes its 'circular area' traversal before graduating to the open pyramid donut.\n\nwalk_target_velocity raised 0.15 → 0.5 since the EMA-smoothed speed was hitting the previous cap, leaving no remaining gradient for faster gaits to earn more reward.  Same cap as stage_3_walk_fast now; the only difference between the two is the reward mode (penalize_inward → total_speed).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "walk_target_velocity": 0.5,
+      "walk_hit_rate": 0.10,
+      "walk_reward_mode": "radial_penalize_inward"
+    },
+    "advance_when": {
+      "metric": "max_distance_from_origin",
+      "op": "ge",
+      "value": 3.0
+    }
+  },
+  {
+    "name": "stage_3_walk_fast",
+    "description": "Switch to total-speed reward and raise the velocity cap.\n\nskip_reset_on_entry=true: the body has just reached r=3m heading outward — it's on its way to the pyramid donut for important archaeological work.  Resetting it back to origin would erase the committed heading and force a fresh start.  Keep position + velocity, just swap the reward mode.\n\nwalk_target_velocity raised to 2.0 m/s — well above any baseline observed gait so the reward gradient stays open for genuine brisk locomotion.  At picrawler scale (chassis ~0.1m) 2 m/s ≈ 20 chassis lengths/sec = the 'brisk' stretch goal.\n\nAuto-advance once the body has logged any sustained brisk motion (best_sustained_speed_ticks ≥ 180 = 3 sec of motion above the speed sustained threshold) so it earns its way into the directed-navigation stage.",
+    "skip_reset_on_entry": true,
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "walk_target_velocity": 2.0,
+      "walk_hit_rate": 0.10,
+      "walk_reward_mode": "total_speed"
+    },
+    "advance_when": {
+      "metric": "best_sustained_speed_ticks",
+      "op": "ge",
+      "value": 180
+    }
+  },
+  {
+    "name": "stage_4_walk_over_there",
+    "description": "Terminal stage — directed navigation.  A random pyramid in the outer donut is selected as the target; its mesh is recolored purple so the operator can see it (and a future vision module can use it as a perceptual landmark).  Reward shape \"to_target\" projects velocity onto the chassis→target direction: approaching = hits, receding = misses (symmetric DA pressure, same shape as radial_penalize_inward but anchored to the target pyramid rather than origin).\n\nOn arrival within visit_radius=0.5m, a bonus events.hit pulse fires, walk_visit_count increments, and a new random pyramid is selected.  This is the substrate's first directed-navigation training signal — pays dividends once a vision channel can read the purple landmark as perceptual input rather than ground-truth target_pos.\n\nskip_reset_on_entry=true: continue from wherever stage_3 left the body — no re-centre.",
+    "skip_reset_on_entry": true,
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "walk_target_velocity": 2.0,
+      "walk_hit_rate": 0.10,
+      "walk_reward_mode": "to_target"
+    }
+  }
+]

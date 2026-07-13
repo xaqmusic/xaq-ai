@@ -1,0 +1,41 @@
+[
+ {
+  "name": "stage_1_stand_permissive",
+  "description": "Permissive standing stage \u2014 full legacy reward density so brain bootstraps standing pose without competing pressures.  Auto-advance after 30 sec CUMULATIVE upright (1800 ticks @ 60Hz).  standing_baseline_factor=1.0 + gated_walk_bonus_rate=0 preserves byte-identical behaviour vs the legacy stand_walk_distance curriculum during this stage.",
+  "overrides": {
+   "target_height": 0.085,
+   "reward_shape": "trapezoid",
+   "height_penalty_scale": 0.0,
+   "walk_hit_rate": 0.0,
+   "walk_heading_consistency_gain": 0.0,
+   "stability_gain": 0.0,
+   "antirot_gain": 0.0,
+   "energy_gain": 0.0,
+   "standing_baseline_factor": 1.0,
+   "gated_walk_bonus_rate": 0.0
+  },
+  "advance_when": {
+   "metric": "best_cumulative_alive_ticks",
+   "op": "ge",
+   "value": 1800
+  }
+ },
+ {
+  "name": "stage_2_walk_multiplicative_gate",
+  "description": "Phase 7.5.R terminal stage \u2014 multiplicative-gating reward shape (Option 2).\n\n  standing_baseline_factor = 0.25  \u21d2 pure-standing density = 0.20 \u00d7 0.25 = 0.05 hits/tick.\n                                     Standing alone is still rewarded (~25% of legacy), so cold-start pose isn't lost,\n                                     but it's no longer the dominant attractor.\n  walk_hit_rate            = 0.05  \u21d2 legacy radial-walk channel kept at modest density (back-compat with current\n                                     stand_walk_distance curriculum) so brains trained under either curriculum\n                                     transition consistently.\n  gated_walk_bonus_rate    = 0.20  \u21d2 NEW channel: chassis_y_norm \u00d7 v_norm \u00d7 0.20 hits/tick.  Fires densely when\n                                     brain is BOTH upright AND moving radially outward; fails closed if either\n                                     condition isn't met.  At full upright + full target velocity \u2192 0.20 hits/tick\n                                     bonus, matching legacy standing density.\n\nReward regime totals (hits/tick at the three regimes):\n  standing only:                   0.05 + 0.00 + 0.00 = 0.05  (\u00bc legacy standing density)\n  standing + radial walking:       0.05 + 0.05 + 0.20 = 0.30  (1.5\u00d7 legacy standing density)\n  walking without standing (fall): 0.00 + 0.00 + 0.00 = 0.00\n\nReward gradient: 6\u00d7 between standing-only and standing+walking.  Multiplicative coupling ensures the bonus\nstream can ONLY be earned by doing both at once \u2014 brain can't farm one channel to ignore the other.\n\nPhase 7.10b \u2014 phase_contrast_gain=0.7.  Multiplicative factor on gated bonus = (1 - 0.7) + 0.7 \u00d7 inter_diag_contrast.  Reward differential is 3.3\u00d7 between proper trot (diagonals anti-phase, contrast=1.0 \u2192 factor=1.0) and bound/pronk (all 4 legs together, contrast=0.0 \u2192 factor=0.3).  Brain learns to alternate diagonals because that's how the full gated bonus is earned.",
+  "overrides": {
+   "target_height": 0.085,
+   "reward_shape": "trapezoid",
+   "height_penalty_grace": 0.02,
+   "height_penalty_scale": 0.03,
+   "walk_target_velocity": 0.15,
+   "walk_hit_rate": 0.05,
+   "walk_reward_mode": "radial",
+   "standing_baseline_factor": 0.25,
+   "gated_walk_bonus_rate": 0.2,
+   "phase_contrast_gain": 0.9,
+   "gated_walk_velocity_mode": "body_forward",
+   "standing_reward_ema_alpha": 0.05
+  }
+ }
+]

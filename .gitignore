@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# C++ / CMake build trees
+cpp_core/build/
+godot_host/build/
+
+# Godot GDExtension binary (rebuilt from source) + editor caches
+godot_host/project/addons/ami_ogma/*.so
+godot_host/project/.godot/
+*.gd.uid
+
+# Models / large binaries never belong in this repo
+*.pt
+*.onnx
+*.onnx.data
+*.bin
+*.wav
+*.npz
+*.uid
+*.gdextension.uid

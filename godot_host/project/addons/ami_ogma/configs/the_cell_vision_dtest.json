@@ -1,0 +1,501 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 VISION (d)-TEST env: scent-poor room, denser eats for the lesion perturbation",
+    "description": "Eat-DENSE vision (d)-test env: small (16m) OPEN scent-POOR room (r=2, klino near-blind) with food_alternate ~8m apart, both visible across the room \u2192 vision drives fast foraging (many eats/phase). Lesion vision mid-episode (VisualBearing lesion_after/until) \u2192 the food-finder is removed \u2192 eat rate DROPS (fall back to a near-blind klino + random play) \u2192 RECOVERS when vision returns. The (d) bar: perturbation \u2192 degradation \u2192 recovery. Control arm (no lesion) isolates over-time drift.",
+    "env_target": "cell",
+    "phase_tag": "loop4.vision.dtest",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "maze": true,
+    "maze_layout": "open",
+    "scent_falloff_radius": 3.0,
+    "_comment_forage": "falloff 12->15 (2026-07-05 sweep): the reach fix for far-field quad foraging. At 12 the bug could not home across a 24m zone (first eat ~t13400, eat-gated reveal effectively dead); at 15 the first eat lands ~t1213 (11x faster) and the bug actually forages the revealed zones. 15 is the reach ceiling (>=16 flattens the screened-Poisson field -> no climbable gradient). Higher energy_drain, food-at-connector, and smaller room ALL tested WORSE. Honest limit: self-driven 4-zone completion is a capability limit (the bug reaches NE/NW but, full right after an eat, plays instead of foraging the far center food) -> the timed reveal (wall_drop_period) backstops hands-off completeness; the FIRST connector is eat-earned.",
+    "nutrients": 4,
+    "publish_scent_ring": false,
+    "_comment_scent": "publish_scent_ring=false \u2192 the body virtualizes scent POSITION-ONLY (a scalar sampled at the bug's centre, frame-independent 'bath'). The directional 8-nostril ring (reality.proprio.scent) is a scaffold / different sensory modality and is fully bypassed here \u2014 nothing in this config consumes it (klino=RunTumbleNav is scalar run-and-tumble, direction emerges from motion). Defensible chemotaxis: no directional read of the source.",
+    "energy_drain": 0.004,
+    "room_size": 40.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 1.0,
+    "food_respawn": true,
+    "zone_colors": true,
+    "zone_grid": 4,
+    "food_positions": [
+      [
+        -0.3,
+        -0.3
+      ],
+      [
+        0.3,
+        0.3
+      ]
+    ],
+    "food_alternate": true,
+    "spawn_pos": [
+      -0.3,
+      -0.3
+    ],
+    "_comment_quad": "QUAD adaptability env: 2x2 spiral of 4 zones (SW->SE->NE->NW) of increasing complexity, isolated by a + cross with 3 DROPPABLE connectors. Bug boxed in Z1; connectors open on wall_drop_period ticks (headless) or KEY_D (UI). One fixed food per zone. Demonstrates the planner+confinement-steer discovering new zones as they open.",
+    "quad_complexity": 0,
+    "_comment_respawn": "quad_respawn_single: eat all 4 zone foods first (one-shot, clears the board), THEN respawn one food at a time at a random zone \u2192 the bug must re-find a single moving target across the revealed maze. Exercises the 3-loop division.",
+    "obstacle_seed": 3,
+    "obstacle_scent_attenuation": 0.3
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "klino",
+      "type": "RunTumbleNavV2",
+      "params": {
+        "scent_topic": "reality.proprio.scent_max",
+        "heading_topic": "reality.proprio.heading",
+        "vel_topic": "reality.proprio.vel_ego",
+        "eat_topic": "events.eat",
+        "output_topic": "percept.klino_heading",
+        "confidence_topic": "percept.klino_confidence",
+        "authority_topic": "motor.bus.authority.klino",
+        "ablation": "none"
+      }
+    },
+    {
+      "id": "planner",
+      "type": "PlaceGraphPlanner",
+      "params": {
+        "place_topic": "reality.cognitive.place",
+        "heading_topic": "reality.proprio.heading",
+        "scent_bearing_topic": "",
+        "scent_max_topic": "reality.proprio.scent_max",
+        "hunger_topic": "reality.proprio.hunger",
+        "eat_topic": "events.eat",
+        "output_topic": "percept.nav_bearing",
+        "gamma": 0.85,
+        "vi_sweeps": 8,
+        "food_reward": 1.0,
+        "food_decay": 1.0,
+        "disconfirm": 0.1,
+        "escape_gain": 1.0,
+        "short_alpha": 0.05,
+        "long_alpha": 0.005,
+        "progress_gate": 0.001,
+        "hunger_gate": 0.3,
+        "route_eps": 0.01,
+        "wander_thrust": 0.0,
+        "pi_cell_size": 70.0,
+        "plan_value_topic": "reality.cognitive.plan_value",
+        "plan_precision_topic": "reality.cognitive.plan_precision",
+        "plan_novelty_topic": "reality.cognitive.plan_novelty",
+        "stall_factor": 4.0
+      }
+    },
+    {
+      "type": "PlayLoop",
+      "id": "play",
+      "params": {
+        "place_topic": "reality.cognitive.place",
+        "heading_topic": "reality.proprio.heading",
+        "vel_topic": "reality.proprio.vel_ego",
+        "eat_topic": "events.eat",
+        "output_topic": "percept.play_bearing",
+        "play_value_topic": "reality.cognitive.play_value",
+        "pi_cell_size": 20.0,
+        "wander_stall_ticks": 30
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.nav_bearing",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "_comment": "LEARNED advance (genuine 'act on a heading') + wedge-escape safety net + explore-on-lost. Defensible action layer.",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.planner",
+        "advance_homeokinetic": true,
+        "_comment_hk": "advance_homeokinetic: reward = max(0,vel_fwd) \u2212 effort\u00b7|vel_fwd| (food-DECOUPLED, intrinsic controllable motion). No cos(bearing) \u2192 off-axis forward not punished \u2192 off-axis forward is no longer punished into NEGATIVE; the table STILL flattens to ~0 when STUCK (reward 0 \u2192 EMA \u2192 0) \u2014 the hunger-gated escape recovers it. nav+turn-priority handle aiming.",
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "heading_controller_klino",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.klino_heading",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cogk.steer",
+        "thrust_output_topic": "cogk.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "_comment": "LEARNED advance (genuine 'act on a heading') + wedge-escape safety net + explore-on-lost. Defensible action layer.",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.klino",
+        "advance_homeokinetic": true,
+        "_comment_hk": "advance_homeokinetic: reward = max(0,vel_fwd) \u2212 effort\u00b7|vel_fwd| (food-DECOUPLED, intrinsic controllable motion). No cos(bearing) \u2192 off-axis forward not punished \u2192 off-axis forward is no longer punished into NEGATIVE; the table STILL flattens to ~0 when STUCK (reward 0 \u2192 EMA \u2192 0) \u2014 the hunger-gated escape recovers it. nav+turn-priority handle aiming.",
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "heading_controller_play",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.play_bearing",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cogp.steer",
+        "thrust_output_topic": "cogp.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "_comment": "LEARNED advance (genuine 'act on a heading') + wedge-escape safety net + explore-on-lost. Defensible action layer.",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.play",
+        "advance_homeokinetic": true,
+        "_comment_hk": "advance_homeokinetic: reward = max(0,vel_fwd) \u2212 effort\u00b7|vel_fwd| (food-DECOUPLED, intrinsic controllable motion). No cos(bearing) \u2192 off-axis forward not punished \u2192 off-axis forward is no longer punished into NEGATIVE; the table STILL flattens to ~0 when STUCK (reward 0 \u2192 EMA \u2192 0) \u2014 the hunger-gated escape recovers it. nav+turn-priority handle aiming.",
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "visual_bearing",
+      "type": "VisualBearing",
+      "params": {
+        "input_topic": "host.video.color",
+        "output_topic": "percept.visual_bearing",
+        "fov_deg": 80.0,
+        "normalize_direction": true,
+        "min_confidence": 0.0008,
+        "emit_proximity": true,
+        "proximity_gain": 1.0,
+        "learn_appearance": false,
+        "hit_topic": "events.eat",
+        "_comment": "learn_appearance: the bug LEARNS food's colour from real eats (events.eat = ground truth, NOT the overloaded events.hit); no hardcoded green. emit_proximity -> values[2]=green_frac (the reach/looming signal)."
+      }
+    },
+    {
+      "id": "epm_vision",
+      "type": "EPM",
+      "params": {
+        "modality_group": "cognitive",
+        "modality_name": "vision",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.visual_bearing",
+        "proprio_state_dims": 3,
+        "dim_min": [
+          -1.0,
+          -1.0,
+          0.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "projection_dim": 48,
+        "min_insertion_error": 0.1,
+        "max_nodes": 16,
+        "mitosis_enabled": false,
+        "baking_threshold": 5,
+        "process_every_n_ticks": 1,
+        "subtract_descending_prediction": false,
+        "_comment": "food-bearing EPM (angle-selective). Its TLE = VisualHomingNav's \u00a71 predictive error; node_count = informativeness (degenerate occluded-only node -> low trust). Output reality.cognitive.vision."
+      }
+    },
+    {
+      "id": "vision_nav",
+      "type": "VisualHomingNav",
+      "params": {
+        "vision_epm_topic": "reality.cognitive.vision",
+        "bearing_topic": "percept.visual_bearing",
+        "eat_topic": "events.eat",
+        "output_topic": "percept.vision_bearing",
+        "value_topic": "reality.cognitive.vision_value",
+        "min_conf": 0.002,
+        "node_ref": 4.0,
+        "eat_alpha": 0.2,
+        "green_bootstrap": 0.05,
+        "persist_decay": 0.0
+      }
+    },
+    {
+      "id": "heading_controller_vision",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.vision_bearing",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cogv.steer",
+        "thrust_output_topic": "cogv.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.vision",
+        "advance_homeokinetic": true,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "whisker_reflex",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "output_topic_left": "whisker.left",
+        "output_topic_right": "whisker.right",
+        "threshold": 0.15,
+        "reverse_strength": 4.0,
+        "_comment": "QUICK KICK away from walls: HOLD steer-away for pulse_ticks (effective impulse), then refractory release so the cog resurfaces, drives, and LEARNS the turn. pulse_ticks + refractory_ticks are live HotMutable sliders \u2014 tune the kick feel to taste.",
+        "refractory_ticks": 45,
+        "pulse_ticks": 6
+      }
+    },
+    {
+      "id": "stuck_reflex",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "severity_threshold": 0.6,
+        "window_ticks": 15,
+        "refractory_ticks": 120,
+        "enable_pulse": true,
+        "output_topic_left": "stuck.left",
+        "output_topic_right": "stuck.right",
+        "pulse_ticks": 60,
+        "pulse_rotation": 4.0,
+        "_comment": "MISMATCH stuck: commands motion but doesn't achieve it (|afferent|<<|intended|). Self-normalizing, no velocity threshold. Turning/idle (intended~0) never fires. refractory 120.",
+        "efference_topic": "reality.proprio.motor_efference",
+        "intent_floor": 0.1
+      }
+    },
+    {
+      "id": "cylinder",
+      "type": "CylinderBuilder",
+      "params": {
+        "frame_topic": "host.video.color",
+        "heading_topic": "reality.proprio.heading",
+        "active_topic": "",
+        "output_topic": "percept.cylinder",
+        "n_bins": 8,
+        "passive_emit_every": 90
+      }
+    },
+    {
+      "id": "epm_place",
+      "type": "EPM",
+      "params": {
+        "modality_group": "cognitive",
+        "modality_name": "place",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.cylinder",
+        "proprio_state_dims": 24,
+        "dim_min": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "projection_dim": 48,
+        "min_insertion_error": 0.1,
+        "max_nodes": 40,
+        "mitosis_enabled": false,
+        "baking_threshold": 5,
+        "process_every_n_ticks": 1,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "arbiter",
+      "type": "EFEArbiter",
+      "params": {
+        "hunger_topic": "reality.proprio.hunger",
+        "scent_topic": "reality.proprio.scent_max",
+        "plan_value_topic": "reality.cognitive.plan_value",
+        "klino_gain_topic": "arbiter.gain.klino",
+        "planner_gain_topic": "arbiter.gain.planner",
+        "scoring_mode": "efe",
+        "z_peak_decay": 0.0005,
+        "planner_epistemic": false,
+        "klino_search_floor": false,
+        "mean_alpha": 0.01,
+        "var_alpha": 0.01,
+        "std_eps": 0.02,
+        "hysteresis_k": 1.0,
+        "gap_std_alpha": 0.02,
+        "force_policy": "",
+        "master_seed": 11,
+        "_comment": "L2 active-inference policy selection. scoring_mode='efe' (ACTIVE): each policy scored as an EXPECTED FREE ENERGY G = pragmatic (hunger\u00d7reach-prob) + epistemic ((1\u2212hunger)\u00d7uncertainty-reduction). The two PRAGMATIC terms share units (hunger\u00d7reach-prob) so the klino/planner scale mismatch is gone BY CONSTRUCTION \u2014 no cede, no plan_peak self-norm, no max-of-three. klino reach-prob = its eat-calibrated capability (cap\u21921 in its own eating range); planner reach-prob = its DISCOUNTED route value (\u03b3^hops<1 to a remembered cache) \u2192 near food g_prag_klino=hunger>hunger\u00b7\u03b3^hops so klino OWNS THE CLOSE decisively. klino epistemic = the z-spike (scent rising = 'food this way', wins the approach); hunger sets the exploit\u2194explore balance (no tuned \u03bb). vs value_race (the legacy asymmetric z-score/level race). winner-take-all with margin=hysteresis_k\u00b7running_std(G_klino\u2212G_planner). Hard gains 1/0 \u2192 MotorBus arbiter.gain.<name>. Watch the four-term race + precision meters in the v4_inspector EFEArbiter widget. force_policy ablations: ''=live / 'klino' / 'planner' / 'shuffle'. seed42 300s: efe 4 eats / hunger 0.19 vs value_race 2 eats / hunger 0.26 (efe hands the fast direct forager more authority when sated \u2192 breaks the planner-crawl starvation).",
+        "klino_confidence_topic": "percept.klino_confidence",
+        "play_value_topic": "reality.cognitive.play_value",
+        "play_gain_topic": "arbiter.gain.play",
+        "play_weight": 1.0,
+        "_comment_play": "task #33 Stage 2 QUAD: play LIVE (play_weight=1). After eating a zone's one-shot food the bug is sated + scent fades \u2192 klino/planner go quiet \u2192 play (energy-surplus\u00b7novelty) wins \u2192 run-tumble WANDER beyond the mapped frontier \u2192 discovers the connector / next zone (the confinement-steer couldn't). play_weight live slider: 0=2-loop control.",
+        "vision_value_topic": "reality.cognitive.vision_value",
+        "vision_gain_topic": "arbiter.gain.vision",
+        "vision_weight": 1.0,
+        "_comment_vision": "loop #4 Stage 1: vision_weight=0 (INERT) -> 3-policy race byte-identical + 4th channel published at 0 authority (consumer fires). Set 1 for Stage 2 (the scent-blind close)."
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "planner",
+          "klino",
+          "play",
+          "vision",
+          "whisker",
+          "stuck"
+        ],
+        "kinds": [
+          "steer_thrust",
+          "steer_thrust",
+          "steer_thrust",
+          "steer_thrust",
+          "lr",
+          "lr"
+        ],
+        "topics_a": [
+          "cog.steer",
+          "cogk.steer",
+          "cogp.steer",
+          "cogv.steer",
+          "whisker.left",
+          "stuck.left"
+        ],
+        "topics_b": [
+          "cog.thrust",
+          "cogk.thrust",
+          "cogp.thrust",
+          "cogv.thrust",
+          "whisker.right",
+          "stuck.right"
+        ],
+        "input_scale": [
+          4.0,
+          4.0,
+          4.0,
+          4.0,
+          4.0,
+          4.0
+        ],
+        "gains": [
+          0.75,
+          0.75,
+          0.75,
+          0.75,
+          4.0,
+          4.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "authority_prefix": "motor.bus.authority.",
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "proportional_mix": true,
+        "_comment": "proportional_mix = TURN-PRIORITY: cog passes linear below unity (gain 0.75 keeps it off the limiter \u2192 headroom for the steer differential + the whisker pulse, channels linked). The turn gets range first (can drive the opposite paddle negative = pivot \u2192 tight radius ~6.5 vs 8.8); forward yields. Fixes the wide-arc. cog gain is a live slider: \u2191 = faster forward/wider, \u2193 = tighter.",
+        "turn_brake": 0.0,
+        "_comment_tb": "turn_brake=0 (2026-07-09 motor fix): the old turn_brake=3 turn-priority clamped forward to head=max(0,1-3|diff|) -> the body arced (tfrac->1, fwd~1 m/s), never turning-then-running; every klino variant hit this downstream wall. Removing it (keep proportional_mix) unblocks travel (fwd->3.85 m/s at 48m) and makes even the plain kinesis beat the random-walk floor across the room battery. A removal, not a magic number.",
+        "labels": [
+          "planner",
+          "klino",
+          "play",
+          "vision",
+          "whisker",
+          "stuck"
+        ],
+        "gain_mod_prefix": "arbiter.gain.",
+        "_comment_arbiter": "gain_mod_prefix wires planner\u2192arbiter.gain.planner, klino\u2192arbiter.gain.klino (whisker/stuck have no arbiter gain \u2192 default 1.0, safety layer never muted). effective_gain = base \u00b7 arbiter \u2192 mix AND authority, so the muted loop gets 0 authority and its advance learning pauses. Base gains 0.75 \u2192 a 1.0 arbiter gain passes the loop under the limiter; a 0.0 mutes it cleanly."
+      }
+    }
+  ],
+  "edges": []
+}

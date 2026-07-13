@@ -1,0 +1,39 @@
+[
+  {
+    "name": "stage_1_stand_permissive",
+    "description": "2026-06-01 walking ablation fix — same as picrawler_stand_walk_gated_trot but advance_when threshold reduced from 1800 → 1200 ticks. The cruse_v2 config sets mc_episode_period=1500 which caps best_cumulative_alive_ticks at 1500; 1800 is unreachable. 1200 = 20 sec @ 60Hz, still meaningful cold-start bootstrap but actually reachable.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 1200
+    }
+  },
+  {
+    "name": "stage_2_walk_multiplicative_gate",
+    "description": "Phase 7.5.R stage 2 (unchanged from picrawler_stand_walk_gated_trot.json).",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.15,
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "radial",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.2,
+      "phase_contrast_gain": 0.7
+    }
+  }
+]

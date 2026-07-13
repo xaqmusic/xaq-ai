@@ -1,0 +1,63 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/quadruped_body.gd"   id="1"]
+[ext_resource type="Script" path="res://scripts/orbit_camera.gd"     id="2"]
+[ext_resource type="Script" path="res://scripts/quadruped_hud.gd"    id="3"]
+[ext_resource type="Script" path="res://scripts/ogma_graph_panel.gd" id="4"]
+[ext_resource type="Script" path="res://scripts/the_quadruped_world.gd" id="5"]
+
+[sub_resource type="Environment" id="Environment_quadruped"]
+background_mode = 1
+background_color = Color(0.08, 0.09, 0.12, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.7, 0.7, 0.8, 1)
+ambient_light_energy = 1.0
+
+[node name="TheQuadruped" type="Node3D"]
+script = ExtResource("5")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_quadruped")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+; Sun: 30° off vertical, shines (0.354, -0.866, -0.354).  Previous
+; transform had basis.z=(0,-1,0) which shone UP and prevented any
+; cast shadows from reaching the floor.
+transform = Transform3D(0.707, 0.612, -0.354, 0, 0.501, 0.866, 0.707, -0.612, 0.354, 0, 8, 0)
+light_energy = 1.2
+shadow_enabled = true
+shadow_bias = 0.02
+directional_shadow_max_distance = 5.0
+
+[node name="Camera3D" type="Camera3D" parent="."]
+script = ExtResource("2")
+target_path = NodePath("../Quadruped")
+initial_distance = 3.0
+initial_yaw_deg = 25.0
+initial_pitch_deg = 24.0
+floor_lock = true
+floor_y = 0.0
+current = true
+fov = 60.0
+
+[node name="Quadruped" type="Node3D" parent="."]
+script = ExtResource("1")
+
+[node name="Brain" type="OgmaBrain" parent="Quadruped"]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Overlay" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("3")
+mouse_filter = 2
+
+[node name="OgmaGraphPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("4")

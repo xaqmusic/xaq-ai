@@ -1,0 +1,155 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 NAV de-scaffold (compass bootstrap \u2192 lesion@6k \u2192 learned)",
+    "description": "Operator's decomposition: replace the monolithic ActionDecoder (which backs away when facing food \u2014 cy value rewards FACING not REACHING) with a HeadingController that (1) reads the desired heading off the ScentCompass up-gradient bearing and (2) LEARNS the body's turn gain to null the bearing + advances when aligned (thrust coupled to PROGRESS, not a facing-value). Baseline to beat: cy+respawn-far 2.7 hits, backs-away. corridor_respawn_far=true (no reset).",
+    "env_target": "cell",
+    "phase_tag": "6.13.corridor.learned_scent",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "corridor": true,
+    "corridor_distance": 4.0,
+    "corridor_bearing_max": 45.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "scent_sigma": 6.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "corridor_respawn_far": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass"
+      }
+    },
+    {
+      "id": "scent_homing",
+      "type": "ScentHomingLearner",
+      "params": {
+        "ring_topic": "reality.proprio.scent",
+        "progress_topic": "reality.proprio.scent_max",
+        "output_topic": "percept.scent_homing",
+        "ring_dim": 8,
+        "max_prototypes": 24,
+        "novelty_thresh": 0.3,
+        "proto_lr": 0.05,
+        "center_ring": true,
+        "normalize_ring": true,
+        "n_action_sectors": 8,
+        "commit_ticks": 3,
+        "value_lr": 0.1,
+        "reward_norm": true,
+        "epistemic_gain": 0.3,
+        "temperature": 0.5,
+        "signal_floor": 0.0001,
+        "hit_drop_thresh": 0.2,
+        "r_hit": 1.0,
+        "shuffle": false,
+        "master_seed": 7,
+        "bootstrap_topic": "percept.scent_compass",
+        "lesion_after_ticks": 6000
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0,
+        "energy_replenish_per_hit": 0.4
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.scent_homing",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "_comment": "learned heading-follower: desired heading = scent up-gradient bearing; gain self-adapts to the body's turn response (no hand-set P-gain).",
+        "turn_fraction": 2.5,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog"
+        ],
+        "kinds": [
+          "steer_thrust"
+        ],
+        "topics_a": [
+          "cog.steer"
+        ],
+        "topics_b": [
+          "cog.thrust"
+        ],
+        "input_scale": [
+          4.0
+        ],
+        "gains": [
+          1.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "output_left": "action.left",
+        "output_right": "action.right"
+      }
+    }
+  ],
+  "edges": []
+}

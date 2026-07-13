@@ -1,0 +1,19 @@
+[
+  {
+    "name": "scripted_walk_from_standing_snapshot",
+    "description": "Exact reproduction of the E0 driven-dynamics walk.  Loads the pre-trained standing brain snapshot (frozen — holds posture without fighting the gait), then injects the open-loop scripted gait on top.  REQUIRES the N1_accelfix config + g6dof joint backend (the substrate the snapshot was trained on).  Walk pattern, hip1_phase=pi (best propulsion), amp hip1/hip2=0.4 knee=0.3, period 60.  Single stage — the body stands instantly from the snapshot and the gait runs immediately.  Tweak SG amps/phase/period live to explore the envelope.",
+    "brain_snapshot_load": "/home/xaqmusic/ami-ogma/results/snapshots/standing_h1v6_n1.json",
+    "overrides": {
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "_scripted_gait": true,
+      "_sg_amp_hip1": 0.4,
+      "_sg_amp_hip2": 0.4,
+      "_sg_amp_knee": 0.3,
+      "_sg_period": 60.0,
+      "_sg_hip1_phase": 3.141592653589793,
+      "_sg_offsets": [0.0, 3.141592653589793, 1.5707963267948966, 4.71238898038469]
+    }
+  }
+]

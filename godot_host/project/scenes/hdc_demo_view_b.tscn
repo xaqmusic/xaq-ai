@@ -1,0 +1,204 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/hdc_demo_view_b.gd" id="1"]
+
+[node name="HDCDemoViewB" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.07, 0.08, 0.10, 1)
+
+[node name="V" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 18.0
+offset_right = -24.0
+offset_bottom = -18.0
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="V"]
+layout_mode = 2
+text = "View B — The three HDC operations"
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+
+[node name="Subtitle" type="Label" parent="V"]
+layout_mode = 2
+text = "Binding, superposition, permutation. Three operations on 128-D unit vectors are the entire HDC vocabulary. Each strip below visualises a 128-D vector as a heatmap of its values (blue = negative, orange = positive, intensity = magnitude, auto-scaled per strip)."
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+autowrap_mode = 3
+
+[node name="BindPanel" type="VBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BindHeader" type="Label" parent="V/BindPanel"]
+layout_mode = 2
+text = "1.  Binding (⊙) — element-wise multiplication"
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+
+[node name="BindCanvas" type="Control" parent="V/BindPanel"]
+custom_minimum_size = Vector2(0, 104)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BindStats" type="Label" parent="V/BindPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+text = "(computing...)"
+
+[node name="BindControl" type="HBoxContainer" parent="V/BindPanel"]
+layout_mode = 2
+
+[node name="BindRegen" type="Button" parent="V/BindPanel/BindControl"]
+layout_mode = 2
+text = "Regenerate A, B"
+
+[node name="SuperPanel" type="VBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SuperHeader" type="Label" parent="V/SuperPanel"]
+layout_mode = 2
+text = "2.  Superposition (+) — sum then normalise"
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+
+[node name="SuperCanvas" type="Control" parent="V/SuperPanel"]
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SuperStats" type="Label" parent="V/SuperPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+text = "(computing...)"
+
+[node name="SuperControl" type="HBoxContainer" parent="V/SuperPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SuperLabel" type="Label" parent="V/SuperPanel/SuperControl"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "K ="
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="SuperSlider" type="HSlider" parent="V/SuperPanel/SuperControl"]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 2.0
+max_value = 6.0
+step = 1.0
+value = 4.0
+
+[node name="SuperValue" type="Label" parent="V/SuperPanel/SuperControl"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "4"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="SuperRegen" type="Button" parent="V/SuperPanel/SuperControl"]
+layout_mode = 2
+text = "Regenerate inputs"
+
+[node name="PermPanel" type="VBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="PermHeader" type="Label" parent="V/PermPanel"]
+layout_mode = 2
+text = "3.  Permutation (roll) — circular shift"
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+
+[node name="PermCanvas" type="Control" parent="V/PermPanel"]
+custom_minimum_size = Vector2(0, 84)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PermStats" type="Label" parent="V/PermPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+text = "(computing...)"
+
+[node name="PermControl" type="HBoxContainer" parent="V/PermPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PermLabel" type="Label" parent="V/PermPanel/PermControl"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "k ="
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="PermSlider" type="HSlider" parent="V/PermPanel/PermControl"]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 64.0
+step = 1.0
+value = 16.0
+
+[node name="PermValue" type="Label" parent="V/PermPanel/PermControl"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "16"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="PermRegen" type="Button" parent="V/PermPanel/PermControl"]
+layout_mode = 2
+text = "Regenerate A"
+
+[node name="Nav" type="HBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PrevButton" type="Button" parent="V/Nav"]
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "← View A"
+
+[node name="NavLabelSpacerL" type="Control" parent="V/Nav"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NavLabel" type="Label" parent="V/Nav"]
+layout_mode = 2
+text = "View B — 2 of 5"
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+horizontal_alignment = 1
+
+[node name="NavLabelSpacerR" type="Control" parent="V/Nav"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="V/Nav"]
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "View C →"

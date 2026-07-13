@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "name": "Cell — reward-free chemotaxis (active inference)",
+    "description": "Phase 6.7 — the Cell port of the picrawler reward-free homeokinetic NAVIGATION result, with the SAME brain wiring and only the body morphology swapped. A transparent two-module chain: ScentCompass (perception) subscribes the raw 8-nostril reality.proprio.scent and publishes the egocentric up-gradient bearing percept.scent_compass; ChemotaxisAI (control) steers the two flagella (action.left/right) to drive that bearing's lateral component to zero — Friston active-inference closure, acting to null the agent's own perceived prediction error. NO reward, NO reinforcement, NO reward shaping, NO Premotor, NO NeurochemState. The full perception→action chain (scent sensor → ScentCompass → ChemotaxisAI → Motor L/R) is visible + auditable in the brain graph; nothing crosses the body boundary that isn't a registered raw sensor. The nutrient hits the body counts (Area3D, ground-truth) are the metric, never fed back to the controller. Set body_model=differential_paddler + reflex_modular=true so al/ar are direct per-flagellum thrusts (both→forward, asymmetric→turn).",
+    "env_target": "cell",
+    "phase_tag": "6.7",
+    "reflex_modular": true,
+    "body_model": "differential_paddler"
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8
+      }
+    },
+    {
+      "id": "chemotaxis",
+      "type": "ChemotaxisAI",
+      "params": {
+        "nav_topic": "percept.scent_compass",
+        "nav_gain": 0.8,
+        "base_thrust": 1.0,
+        "min_signal": 0.06
+      }
+    }
+  ],
+  "edges": []
+}

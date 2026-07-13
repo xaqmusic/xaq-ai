@@ -1,0 +1,226 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/hdc_demo_view_d.gd" id="1"]
+
+[node name="HDCDemoViewD" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.07, 0.08, 0.10, 1)
+
+[node name="V" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 18.0
+offset_right = -24.0
+offset_bottom = -18.0
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="V"]
+layout_mode = 2
+text = "View D — The k/n property"
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+
+[node name="Subtitle" type="Label" parent="V"]
+layout_mode = 2
+text = "Two sync windows share k of n (symbol, time) pairs. Drag k from 0 to n — cos(W1, W2) tracks k/n. No learning, no training. The geometry is correct by construction."
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+autowrap_mode = 3
+
+[node name="Controls" type="VBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="NRow" type="HBoxContainer" parent="V/Controls"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="NLabel" type="Label" parent="V/Controls/NRow"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+text = "n  (tokens per window):"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="NSlider" type="HSlider" parent="V/Controls/NRow"]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 2.0
+max_value = 20.0
+step = 1.0
+value = 8.0
+
+[node name="NValue" type="Label" parent="V/Controls/NRow"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "8"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="KRow" type="HBoxContainer" parent="V/Controls"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="KLabel" type="Label" parent="V/Controls/KRow"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+text = "k  (shared pairs):"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="KSlider" type="HSlider" parent="V/Controls/KRow"]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 8.0
+step = 1.0
+value = 4.0
+
+[node name="KValue" type="Label" parent="V/Controls/KRow"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "4"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="DRow" type="HBoxContainer" parent="V/Controls"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DLabel" type="Label" parent="V/Controls/DRow"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+text = "dimension  d ="
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="DSlider" type="HSlider" parent="V/Controls/DRow"]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 6.0
+step = 1.0
+value = 3.0
+
+[node name="DValue" type="Label" parent="V/Controls/DRow"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "128"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="JitterRow" type="HBoxContainer" parent="V/Controls"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="JitterLabel" type="Label" parent="V/Controls/JitterRow"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+text = "time jitter on shared pairs:"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="JitterSlider" type="HSlider" parent="V/Controls/JitterRow"]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 0.5
+step = 0.01
+value = 0.0
+
+[node name="JitterValue" type="Label" parent="V/Controls/JitterRow"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "0.00"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="ButtonsRow" type="HBoxContainer" parent="V/Controls"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ButtonSpacer" type="Control" parent="V/Controls/ButtonsRow"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+
+[node name="Regenerate" type="Button" parent="V/Controls/ButtonsRow"]
+layout_mode = 2
+text = "Regenerate tokens (new seed)"
+
+[node name="ClearScatter" type="Button" parent="V/Controls/ButtonsRow"]
+layout_mode = 2
+text = "Clear scatter"
+
+[node name="H" type="HBoxContainer" parent="V"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="WindowsCanvas" type="Control" parent="V/H"]
+custom_minimum_size = Vector2(560, 380)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ScatterCanvas" type="Control" parent="V/H"]
+custom_minimum_size = Vector2(560, 380)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="Stats" type="Label" parent="V"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+text = "(computing...)"
+
+[node name="Nav" type="HBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PrevButton" type="Button" parent="V/Nav"]
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "← View C"
+
+[node name="NavLabelSpacerL" type="Control" parent="V/Nav"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NavLabel" type="Label" parent="V/Nav"]
+layout_mode = 2
+text = "View D — 4 of 5"
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+horizontal_alignment = 1
+
+[node name="NavLabelSpacerR" type="Control" parent="V/Nav"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="V/Nav"]
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "View E →"

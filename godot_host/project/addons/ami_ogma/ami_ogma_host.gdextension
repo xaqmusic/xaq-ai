@@ -1,0 +1,12 @@
+[configuration]
+
+entry_symbol = "ami_ogma_library_init"
+compatibility_minimum = "4.1"
+reloadable = true
+
+[libraries]
+
+; Single debug .so for Linux x86_64 development.
+; Release builds and other platforms can be added later.
+linux.debug.x86_64 = "res://addons/ami_ogma/ami_ogma_host.so"
+linux.release.x86_64 = "res://addons/ami_ogma/ami_ogma_host.so"

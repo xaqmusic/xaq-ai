@@ -1,0 +1,43 @@
+[
+  {
+    "name": "stage_1_stand_cruse_hip2_60s",
+    "description": "Cruse hip2 ON (gain=1.0) as the baby-deer 'stand up' lift-coordination prior.  Knee Cruse gated off (Move 1, commit f453cbe) so the prior stays compartmentalised to lift — doesn't leak into knee posture (the claw failure mode).  Walking-reward channels zeroed so brain doesn't get pulled by gait gradients while it consolidates standing.  No motor/spring overrides — body @export defaults govern compliance.  2026-06-08 D-ladder established this combination as the robust-standing baseline (D4 = body defaults + Cruse default gain 1.0 + knee off → 1500-tick full episode).  D9 (Cruse off + same compliance) brittle at 1297 — confirms Cruse hip2 IS the load-bearing standing scaffold.  Advances at best_cumulative_alive_ticks ≥ 3000 (60 sim sec sustained).",
+    "overrides": {
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "gait_cycle_reward_gain": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "per_leg_credit_gain": 0.0,
+      "phase_contrast_gain": 0.0,
+      "progress_reward_gain": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "target_mode": "off"
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 3000
+    }
+  },
+  {
+    "name": "stage_2_to_target_walking_pb50",
+    "description": "Walking to a purple pyramid.  Cruse continues at gain 1.0 (hip2 lift coordination same as stage 1).  Knee Cruse stays gated off (Move 1).  walk_reward_mode=to_target gives per-tick velocity-toward-active-target reward.  gated_walk_bonus (body_forward gated) requires the body to face direction of motion — separates real walking from paddling.  progress_reward_gain=50 fires events.hit at each new minimum distance to target (the F9 mechanism — the only F1-F13 arm that produced walk_visit_count>0).  standing_baseline_factor=0.25 reduces standing-reward dominance so walking has room to extract.  Still NO motor/spring overrides — those wait until gait emerges from honest Cruse rules.  Move 2 (Cruse on hip1 for swing direction) will layer here once shipped — adds `cruse_bias_gain_hip1: 1.0` override.",
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "walk_reward_mode": "to_target",
+      "walk_target_velocity": 0.7,
+      "walk_hit_rate": 0.2,
+      "gated_walk_bonus_rate": 0.2,
+      "gated_walk_velocity_mode": "body_forward",
+      "standing_baseline_factor": 0.25,
+      "progress_reward_gain": 0.0,
+      "walk_heading_consistency_gain": 1.0,
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "cruse_bias_gain_hip1": 0.2
+    }
+  }
+]

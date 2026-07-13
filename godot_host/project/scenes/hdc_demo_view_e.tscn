@@ -1,0 +1,154 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/hdc_demo_view_e.gd" id="1"]
+
+[node name="HDCDemoViewE" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.07, 0.08, 0.10, 1)
+
+[node name="V" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 18.0
+offset_right = -24.0
+offset_bottom = -18.0
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="V"]
+layout_mode = 2
+text = "View E — The Hebbian-warped metric"
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+
+[node name="Subtitle" type="Label" parent="V"]
+layout_mode = 2
+text = "Real nodes don't move. Their EFFECTIVE positions (the rings around them) drift toward the query W as the system experiences them together. Click any node to add a co-occurrence event. The nearest node by warped distance — whose ring is closest to W — is highlighted gold."
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+autowrap_mode = 3
+
+[node name="H" type="HBoxContainer" parent="V"]
+custom_minimum_size = Vector2(0, 440)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="MapCanvas" type="Control" parent="V/H"]
+custom_minimum_size = Vector2(640, 440)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PanelV" type="VBoxContainer" parent="V/H"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="FormulaLabel" type="Label" parent="V/H/PanelV"]
+layout_mode = 2
+text = "d_warped(W, k) =
+
+       ‖W − C_k‖
+    ──────────────
+    1 + λ · A(W, k)"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.85, 1.00, 1)
+
+[node name="LambdaRow" type="HBoxContainer" parent="V/H/PanelV"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LambdaLabel" type="Label" parent="V/H/PanelV/LambdaRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "λ ="
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+
+[node name="LambdaSlider" type="HSlider" parent="V/H/PanelV/LambdaRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 5.0
+step = 0.1
+value = 1.0
+
+[node name="LambdaValue" type="Label" parent="V/H/PanelV/LambdaRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "1.0"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.55, 0.78, 1.00, 1)
+horizontal_alignment = 2
+
+[node name="ResetButton" type="Button" parent="V/H/PanelV"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "↺  Reset all affinities"
+
+[node name="ScenarioButton" type="Button" parent="V/H/PanelV"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "Scenario:  pump node 3"
+
+[node name="LegendLabel" type="Label" parent="V/H/PanelV"]
+layout_mode = 2
+text = "W (yellow):  current consensus / query
+solid disk:  real node position (centroid C_k)
+ring:        ghost position = effective distance after warp
+gold:        nearest node by warped distance
+
+The real map never changes. Only the effective metric does. That is geometry-as-memory."
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+autowrap_mode = 3
+
+[node name="StatsLabel" type="Label" parent="V"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.85, 0.86, 0.90, 1)
+text = "(initialising...)"
+
+[node name="Nav" type="HBoxContainer" parent="V"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PrevButton" type="Button" parent="V/Nav"]
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "← View D"
+
+[node name="NavLabelSpacerL" type="Control" parent="V/Nav"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NavLabel" type="Label" parent="V/Nav"]
+layout_mode = 2
+text = "View E — 5 of 5"
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.70, 0.72, 0.78, 1)
+horizontal_alignment = 1
+
+[node name="NavLabelSpacerR" type="Control" parent="V/Nav"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="V/Nav"]
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "—"
+disabled = true

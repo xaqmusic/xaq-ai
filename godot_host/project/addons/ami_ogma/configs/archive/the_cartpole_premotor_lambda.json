@@ -1,0 +1,162 @@
+{
+  "metadata": {
+    "name": "CartPole \u2014 full 11-module (legacy)",
+    "description": "Original CartPole config with descend, rollout, seq_consensus, seq_action, repertoire, kinesis. Outperformed by minimal in Phase 6.5.3.5 (-18%). Kept for ablation comparison.",
+    "env_target": "cartpole",
+    "phase_tag": "6.5.2 (legacy)"
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true
+      }
+    },
+    {
+      "id": "epm_cart",
+      "type": "EPM",
+      "params": {
+        "modality_group": "kinematic",
+        "modality_name": "cart_state",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.cart_state",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "descend",
+      "type": "DescendingPredictor",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "targets": [
+          "reality.kinematic.cart_state"
+        ]
+      }
+    },
+    {
+      "id": "rollout",
+      "type": "GNGRollout",
+      "params": {
+        "K_default": 16,
+        "M_default": 4
+      }
+    },
+    {
+      "id": "seq_consensus",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "consensus.0",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 64
+      }
+    },
+    {
+      "id": "seq_action",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.out",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "context_topic": "sequence.motif.consensus.0"
+      }
+    },
+    {
+      "id": "repertoire",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 20,
+        "crystallization_min_observations": 8,
+        "crystallization_min_drive_delta": 0.03,
+        "crystallization_drive_window_ticks": 60
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": false,
+        "priority_group": "kinematic"
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "alive"
+        ],
+        "channel_kinds": [
+          "alive_pulse"
+        ],
+        "setpoints": [
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0
+        ],
+        "channel_input_topics": [
+          "events.alive"
+        ],
+        "alive_pulse_decay_per_tick": 0.005,
+        "alive_pulse_replenish_per_event": 0.5
+      }
+    },
+    {
+      "id": "premotor",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": false,
+        "use_weighted_accel": true,
+        "eligibility_lambda": 0.95,
+        "drive_reward_gain": 0.0,
+        "epistemic_gain": 0.0,
+        "master_seed": 0
+      }
+    },
+    {
+      "id": "kinesis",
+      "type": "HomeokineticExploration",
+      "params": {
+        "window_ticks": 120,
+        "long_window_ticks": 480,
+        "change_ema_alpha": 0.002,
+        "anomaly_factor": 0.5,
+        "chunk_match_eps": 0.01,
+        "episode_ticks": 60,
+        "cooldown_ticks": 30,
+        "accel_jitter": 1.0
+      }
+    }
+  ],
+  "edges": []
+}

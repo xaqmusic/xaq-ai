@@ -1,0 +1,140 @@
+{
+  "metadata": {
+    "name": "Cell — modular reflexes only",
+    "description": "Phase 6.6.D.5 — minimal graph that demonstrates the reflex-as-module architecture. NO EPM/voter/predictor/ActionDecoder brain — only the four reflex primitives that previously lived in body_controller.gd, plus NeurochemState + HomeostaticDrive (so the body's energy/drive telemetry still has subscribers). The body's own directed-escape steering still runs (it's pre-bilateral-substrate territory; see Phase 6.6.D.6). With reflex_modular=true the body suppresses its own events.* publishing and the four reflex modules emit them instead. Brain contribution to motion is zero by virtue of having no ActionDecoder — set ablation preset 'reflex-only' or brain_off=true if you want to silence the body-side brain_weight scaling too.",
+    "env_target": "cell",
+    "phase_tag": "6.6.D.5",
+    "reflex_modular": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "scent_da_rate": 0.25,
+        "travel_da_rate": 0.02,
+        "whisker_ht_rate": 0.02,
+        "hunger_ht_rate": 0.01,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": ["energy", "scent_proximity"],
+        "channel_kinds": ["energy", "proprio_passive"],
+        "setpoints": [0.8, 1.0],
+        "urgency_normalizers": [1.0, 1.0],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.5
+      }
+    },
+    {
+      "id": "reflex_whisker",
+      "type": "WhiskerAversionReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "threshold": 0.30,
+        "wall_stuck_threshold": 0.55,
+        "refractory_ticks": 30,
+        "suppression_topic": "reflex.gate.scent_aversion"
+      }
+    },
+    {
+      "id": "reflex_scent_gate",
+      "type": "ScentGateReflex",
+      "params": {
+        "input_topic": "reality.proprio.scent_max",
+        "input_index": 0,
+        "output_topic": "reflex.gate.scent_aversion",
+        "alpha_short": 0.1,
+        "alpha_long": 0.001,
+        "cap": 0.5,
+        "enabled": true,
+        "long_pos_min": 0.001
+      }
+    },
+    {
+      "id": "reflex_scent_hit",
+      "type": "DualEMADetector",
+      "params": {
+        "input_topic": "reality.proprio.scent_max",
+        "input_index": 0,
+        "output_event_name": "hit",
+        "alpha_short": 0.1,
+        "alpha_long": 0.001,
+        "ratio_threshold": 1.5,
+        "refractory_ticks": 0,
+        "require_long_pos": true,
+        "motion_floor_topic": "reality.proprio.imu",
+        "motion_floor_index": 2,
+        "motion_floor_min": 0.5
+      }
+    },
+    {
+      "id": "reflex_scent_threshold",
+      "type": "AdaptiveThresholdTracker",
+      "params": {
+        "input_topic": "reality.proprio.scent_max",
+        "input_index": 0,
+        "output_topic": "metrics.adaptive_threshold.scent_max",
+        "alpha": 0.001,
+        "n_stddev": 2.0,
+        "warmup_ticks": 1000
+      }
+    },
+    {
+      "id": "reflex_stuck",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "move_speed_reference": 3.0,
+        "severity_threshold": 0.5,
+        "window_ticks": 60,
+        "refractory_ticks": 60
+      }
+    },
+    {
+      "id": "reflex_forward",
+      "type": "ForwardDriveReflex",
+      "params": {
+        "thrust": 2.0
+      }
+    },
+    {
+      "id": "reflex_steer",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "left_suffixes":  ["0", "1", "2"],
+        "right_suffixes": ["3", "4", "5"],
+        "threshold": 0.30,
+        "base_thrust": 0.0,
+        "steer_gain": 8.0,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "refractory_ticks": 0
+      }
+    }
+  ],
+  "edges": []
+}

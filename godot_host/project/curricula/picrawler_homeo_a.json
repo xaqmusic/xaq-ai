@@ -1,0 +1,36 @@
+[
+  {
+    "name": "stage_1_stand_symmetric",
+    "description": "Stand to a symmetric base first (E1b fr_blend on, homeo OFF), advance at ~80s.  The per-tick brain forms the dynamically-stable stance before the per-step walking signal turns on.",
+    "overrides": {
+      "target_height": 0.09,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 1.0,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 4000
+    }
+  },
+  {
+    "name": "stage_2_homeokinetic_walk",
+    "description": "(a) — per-STEP homeokinetic reward turns on: events.hit fires on each touchdown with magnitude = homeo_step_gain x foot_excursion x step_regularity x upright.  Rewards SUSTAINED RHYTHMIC stepping (a lurch is irregular -> ~0 reward, so no Goodhart like the 3n gait-cycle pulse).  standing_baseline_factor reduced to 0.3 so the per-tick standing reward keeps balance but no longer dominates -> the per-step homeo signal has room to drive walking.  fr_blend stays on (symmetric base).  Test: does the brain learn to step rhythmically to earn the homeo reward (foot_autocorr climbs over the run)?",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 0.6,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 300.0
+    }
+  }
+]

@@ -1,0 +1,175 @@
+{
+  "metadata": {
+    "name": "Cell — PLANNER ISOLATION (PlaceGraphPlanner ROUTE, no arbiter)",
+    "description": "The planner strange-loop ALONE: cylinder -> epm_place -> PlaceGraphPlanner -> heading_controller -> MotorBus (single cog + safety reflexes) -> body. NO arbiter, NO klino/play, NO vision-EPM/neuro. L-bend 2-food (one direct, one occluded), energy_drain 0.004 so hunger rises and the food term activates. Isolation gate: does it (a) bootstrap food memory by TLE-exploring, then (b) ROUTE back to a remembered cache when hungry (the perturbation/(d) test)? Ablation: shuffled map / wrong-sign. Exact planner block from the_cell_arbiter_quad_play.",
+    "env_target": "cell",
+    "phase_tag": "loop_isolation.planner",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "maze": true,
+    "maze_layout": "lbend",
+    "scent_falloff_radius": 12.0,
+    "nutrients": 1,
+    "publish_scent_ring": false,
+    "energy_drain": 0.004,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "food_positions": [
+      [-0.28, 0.36],
+      [0.25, -0.2]
+    ],
+    "zone_colors": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "cylinder",
+      "type": "CylinderBuilder",
+      "params": {
+        "frame_topic": "host.video.color",
+        "heading_topic": "reality.proprio.heading",
+        "active_topic": "",
+        "output_topic": "percept.cylinder",
+        "n_bins": 8,
+        "passive_emit_every": 90
+      }
+    },
+    {
+      "id": "epm_place",
+      "type": "EPM",
+      "params": {
+        "modality_group": "cognitive",
+        "modality_name": "place",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.cylinder",
+        "proprio_state_dims": 24,
+        "dim_min": [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],
+        "dim_max": [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0],
+        "projection_dim": 48,
+        "min_insertion_error": 0.1,
+        "max_nodes": 40,
+        "mitosis_enabled": false,
+        "baking_threshold": 5,
+        "process_every_n_ticks": 1,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "planner",
+      "type": "PlaceGraphPlanner",
+      "params": {
+        "place_topic": "reality.cognitive.place",
+        "heading_topic": "reality.proprio.heading",
+        "scent_bearing_topic": "",
+        "scent_max_topic": "reality.proprio.scent_max",
+        "hunger_topic": "reality.proprio.hunger",
+        "eat_topic": "events.eat",
+        "output_topic": "percept.nav_bearing",
+        "gamma": 0.85,
+        "vi_sweeps": 8,
+        "food_reward": 1.0,
+        "food_decay": 1.0,
+        "disconfirm": 0.1,
+        "escape_gain": 1.0,
+        "short_alpha": 0.05,
+        "long_alpha": 0.005,
+        "progress_gate": 0.001,
+        "hunger_gate": 0.3,
+        "route_eps": 0.01,
+        "wander_thrust": 0.0,
+        "pi_cell_size": 70.0,
+        "plan_value_topic": "reality.cognitive.plan_value",
+        "plan_precision_topic": "reality.cognitive.plan_precision",
+        "plan_novelty_topic": "reality.cognitive.plan_novelty",
+        "stall_factor": 4.0
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.nav_bearing",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.planner",
+        "advance_homeokinetic": true,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "whisker_reflex",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "output_topic_left": "whisker.left",
+        "output_topic_right": "whisker.right",
+        "threshold": 0.15,
+        "reverse_strength": 4.0,
+        "refractory_ticks": 45,
+        "pulse_ticks": 6
+      }
+    },
+    {
+      "id": "stuck_reflex",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "severity_threshold": 0.6,
+        "window_ticks": 15,
+        "refractory_ticks": 120,
+        "enable_pulse": true,
+        "output_topic_left": "stuck.left",
+        "output_topic_right": "stuck.right",
+        "pulse_ticks": 60,
+        "pulse_rotation": 4.0,
+        "efference_topic": "reality.proprio.motor_efference",
+        "intent_floor": 0.1
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": ["planner","whisker","stuck"],
+        "kinds": ["steer_thrust","lr","lr"],
+        "topics_a": ["cog.steer","whisker.left","stuck.left"],
+        "topics_b": ["cog.thrust","whisker.right","stuck.right"],
+        "input_scale": [4.0,4.0,4.0],
+        "gains": [0.75,4.0,4.0],
+        "limit": 4.0,
+        "active_window": 2,
+        "authority_prefix": "motor.bus.authority.",
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "proportional_mix": true,
+        "turn_brake": 3.0,
+        "labels": ["planner","whisker","stuck"]
+      }
+    }
+  ],
+  "edges": []
+}

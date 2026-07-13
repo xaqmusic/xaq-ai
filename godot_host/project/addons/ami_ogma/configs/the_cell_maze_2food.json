@@ -1,0 +1,176 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 2-FOOD L-BEND (predictable measurement env)",
+    "description": "L-bend maze + 2D-diffusion scent. Canonical action layer: HeadingController (learned advance, HOMEOKINETIC food-decoupled reward \u2192 no policy collapse; authority-gated learning) as ONE MotorBus influencer with PROPORTIONAL turn-priority mixing (turn_brake=3 \u2192 pivot-converge, no orbit); recovery in the REFLEX layer \u2014 WhiskerSteerReflex (held-pulse kick + reverse-out-of-wedge) + StuckEscapeReflex (efference-afferent mismatch). ~57 eats/36k. Press H = scent heatmap.",
+    "env_target": "cell",
+    "phase_tag": "6.17.env.2food",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "maze": true,
+    "maze_layout": "lbend",
+    "scent_falloff_radius": 12.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true,
+    "food_positions": [
+      [
+        -0.28,
+        0.36
+      ],
+      [
+        0.25,
+        -0.2
+      ]
+    ],
+    "zone_colors": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.001
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.scent_compass",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "_comment": "LEARNED advance (genuine 'act on a heading') + wedge-escape safety net + explore-on-lost. Defensible action layer.",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.cog",
+        "advance_homeokinetic": true,
+        "_comment_hk": "advance_homeokinetic: reward = max(0,vel_fwd) \u2212 effort\u00b7|vel_fwd| (food-DECOUPLED, intrinsic controllable motion). No cos(bearing) \u2192 off-axis forward not punished \u2192 off-axis forward is no longer punished into NEGATIVE; the table STILL flattens to ~0 when STUCK (reward 0 \u2192 EMA \u2192 0) \u2014 the hunger-gated escape recovers it. nav+turn-priority handle aiming.",
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "whisker_reflex",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "output_topic_left": "whisker.left",
+        "output_topic_right": "whisker.right",
+        "threshold": 0.15,
+        "reverse_strength": 4.0,
+        "_comment": "QUICK KICK away from walls: HOLD steer-away for pulse_ticks (effective impulse), then refractory release so the cog resurfaces, drives, and LEARNS the turn. pulse_ticks + refractory_ticks are live HotMutable sliders \u2014 tune the kick feel to taste.",
+        "refractory_ticks": 45,
+        "pulse_ticks": 6
+      }
+    },
+    {
+      "id": "stuck_reflex",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "severity_threshold": 0.6,
+        "window_ticks": 15,
+        "refractory_ticks": 120,
+        "enable_pulse": true,
+        "output_topic_left": "stuck.left",
+        "output_topic_right": "stuck.right",
+        "pulse_ticks": 60,
+        "pulse_rotation": 4.0,
+        "_comment": "MISMATCH stuck: commands motion but doesn't achieve it (|afferent|<<|intended|). Self-normalizing, no velocity threshold. Turning/idle (intended~0) never fires. refractory 120.",
+        "efference_topic": "reality.proprio.motor_efference",
+        "intent_floor": 0.1
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog",
+          "whisker",
+          "stuck"
+        ],
+        "kinds": [
+          "steer_thrust",
+          "lr",
+          "lr"
+        ],
+        "topics_a": [
+          "cog.steer",
+          "whisker.left",
+          "stuck.left"
+        ],
+        "topics_b": [
+          "cog.thrust",
+          "whisker.right",
+          "stuck.right"
+        ],
+        "input_scale": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "gains": [
+          0.75,
+          4.0,
+          4.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "authority_prefix": "motor.bus.authority.",
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "proportional_mix": true,
+        "_comment": "proportional_mix = TURN-PRIORITY: cog passes linear below unity (gain 0.75 keeps it off the limiter \u2192 headroom for the steer differential + the whisker pulse, channels linked). The turn gets range first (can drive the opposite paddle negative = pivot \u2192 tight radius ~6.5 vs 8.8); forward yields. Fixes the wide-arc. cog gain is a live slider: \u2191 = faster forward/wider, \u2193 = tighter.",
+        "turn_brake": 3.0,
+        "_comment_tb": "turn_brake=3: forward yields hard to the turn so the bug pivots-in to the food (converge) instead of orbiting it \u2014 needed because the homeokinetic advance drives forward-always. Live slider."
+      }
+    }
+  ],
+  "edges": []
+}

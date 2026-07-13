@@ -1,0 +1,44 @@
+[
+  {
+    "name": "stage_1_stand_60s",
+    "description": "Permissive standing bootstrap. Auto-advance after 60 sec continuous upright (3600 ticks @ 60Hz). Full standing reward density, no walking signal yet \u2014 brain commits to standing pose before navigation reward kicks in.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0,
+      "progress_reward_gain": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 3600
+    }
+  },
+  {
+    "name": "stage_2_walk_over_there_progress",
+    "description": "Phase 7.12 terminal stage \u2014 walk_over_there with progress-PB reward.\n\nReward landscape:\n  standing baseline:       0.05 hits/tick  (reduced standing \u2014 body must move to earn full reward)\n  walking (to_target):     up to 0.05 hits/tick when velocity points toward target\n  gated bonus (chassis_y x v_toward_target): up to 0.10 hits/tick\n  PROGRESS-PB:             events.hit fires with intensity = (PB - new_dist) \u00d7 50\n                            ONLY when distance to target reaches a new minimum\n                            cannot be Goodharted by orbital drift \u2014 must close distance\n  visit bonus on arrival:  5.0 (existing)\n\nProgress reward at 1cm new-PB step with gain=50 \u2192 0.5 hits intensity per crossing.\nGain=50 means 0.5 hits per 1cm closer-than-ever-before progress.\n\nrandom_pyramid target_mode rotates to a new random pyramid each arrival. PB resets on rotation.\n\nPhase 7.12 A baseline: progress_reward_gain=0 \u2014 same walk_over_there + to_target setup as the test arm, but with the new mechanism OFF.  Isolates the progress-reward contribution.",
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.15,
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "to_target",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.1,
+      "progress_reward_gain": 0.0,
+      "progress_reward_min_delta": 0.01
+    },
+    "skip_reset_on_entry": true
+  }
+]

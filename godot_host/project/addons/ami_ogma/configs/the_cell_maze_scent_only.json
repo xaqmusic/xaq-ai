@@ -1,0 +1,254 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 MAZE SCENT-ONLY (ablation)",
+    "description": "Ablation arm: same fusion pipeline (VisualBearing + EPMs + voter all present for comparable trust telemetry) but the action layer follows percept.scent_compass directly. Scent routes around the L-bend but is diffuse/orbit-prone near the food peak.",
+    "env_target": "cell",
+    "phase_tag": "6.12.maze.fusion.scent_only",
+    "reflex_modular": true,
+    "body_model": "bidirectional_paddler",
+    "motor_baseline_beat": false,
+    "motor_energy": false,
+    "maze": true,
+    "maze_layout": "lbend",
+    "scent_falloff_radius": 12.0,
+    "nutrients": 1,
+    "energy_drain": 0.0,
+    "room_size": 24.0,
+    "obstacle_density": 0.0,
+    "terrain_amplitude": 0.0,
+    "vision_green_gain": 0.0,
+    "food_respawn": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "scent_compass",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "percept.scent_compass",
+        "nostril_count": 8,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "normalize_direction": true,
+        "min_signal": 0.001
+      }
+    },
+    {
+      "id": "visual_bearing",
+      "type": "VisualBearing",
+      "params": {
+        "input_topic": "host.video.color",
+        "output_topic": "percept.visual_bearing",
+        "fov_deg": 80.0,
+        "normalize_direction": true,
+        "min_confidence": 0.0008,
+        "emit_proximity": true,
+        "proximity_gain": 0.5,
+        "_comment": "Vision analog of ScentCompass: food-pixel column centroid \u2192 egocentric bearing. fov_deg MUST match the_cell.tscn Camera3D.fov (80). [0,0] when food occluded/out of view."
+      }
+    },
+    {
+      "id": "epm_scent",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "scent",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.scent_compass",
+        "proprio_state_dims": 2,
+        "dim_min": [
+          -1.0,
+          -1.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0
+        ],
+        "projection_dim": 32,
+        "min_insertion_error": 0.05,
+        "max_nodes": 16,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "baking_threshold": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "epm_vision",
+      "type": "EPM",
+      "params": {
+        "modality_group": "nav",
+        "modality_name": "vision",
+        "encoder_kind": "rbf",
+        "input_topic": "percept.visual_bearing",
+        "proprio_state_dims": 2,
+        "dim_min": [
+          -1.0,
+          -1.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0
+        ],
+        "projection_dim": 32,
+        "min_insertion_error": 0.05,
+        "max_nodes": 16,
+        "mitosis_enabled": false,
+        "process_every_n_ticks": 1,
+        "baking_threshold": 30,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.nav.",
+        "group_balance": false,
+        "trust_epsilon": 0.05,
+        "informativeness_gain": 1.0,
+        "info_baked_ref": 3.0,
+        "info_floor": 0.0,
+        "_comment": "group_balance=false + informativeness_gain=1.0: trust = precision \u00d7 info^gain L1-normalized across the two channels. An occluded vision EPM bakes ~1 node \u2192 ci\u21920 \u2192 trust stripped. This IS the fusion signal."
+      }
+    },
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "scent_da_rate": 0.5,
+        "green_da_rate": 0.0
+      }
+    },
+    {
+      "id": "bearing_fusion",
+      "type": "BearingFusion",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "scent_topic": "percept.scent_compass",
+        "vision_topic": "percept.visual_bearing",
+        "scent_trust_key": "reality.nav.scent",
+        "vision_trust_key": "reality.nav.vision",
+        "output_topic": "percept.fused_bearing",
+        "confidence_floor": 0.0001,
+        "passthrough_prox": true,
+        "renormalize": true
+      }
+    },
+    {
+      "id": "heading_controller",
+      "type": "HeadingController",
+      "params": {
+        "input_topic": "percept.scent_compass",
+        "cx_index": 0,
+        "cy_index": 1,
+        "steer_output_topic": "cog.steer",
+        "thrust_output_topic": "cog.thrust",
+        "turn_fraction": 2.5,
+        "learn_advance": true,
+        "vel_topic": "reality.proprio.vel_ego",
+        "n_err_bins": 4,
+        "n_thrust_acts": 3,
+        "advance_lr": 0.1,
+        "ucb_c": 0.4,
+        "effort_cost": 0.15,
+        "forward_only": false,
+        "reverse_brake_only": true,
+        "authority_topic": "motor.bus.authority.cog",
+        "advance_homeokinetic": true,
+        "gain_min": 1.0,
+        "gain_max": 3.0
+      }
+    },
+    {
+      "id": "whisker_reflex",
+      "type": "WhiskerSteerReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "output_topic_left": "whisker.left",
+        "output_topic_right": "whisker.right",
+        "threshold": 0.15,
+        "reverse_strength": 4.0,
+        "refractory_ticks": 45,
+        "pulse_ticks": 6
+      }
+    },
+    {
+      "id": "stuck_reflex",
+      "type": "StuckEscapeReflex",
+      "params": {
+        "imu_topic": "reality.proprio.imu",
+        "vx_index": 2,
+        "vz_index": 3,
+        "severity_threshold": 0.6,
+        "window_ticks": 15,
+        "refractory_ticks": 120,
+        "enable_pulse": true,
+        "output_topic_left": "stuck.left",
+        "output_topic_right": "stuck.right",
+        "pulse_ticks": 60,
+        "pulse_rotation": 4.0,
+        "efference_topic": "reality.proprio.motor_efference",
+        "intent_floor": 0.1
+      }
+    },
+    {
+      "id": "motor_bus",
+      "type": "MotorBus",
+      "params": {
+        "influencer_names": [
+          "cog",
+          "whisker",
+          "stuck"
+        ],
+        "kinds": [
+          "steer_thrust",
+          "lr",
+          "lr"
+        ],
+        "topics_a": [
+          "cog.steer",
+          "whisker.left",
+          "stuck.left"
+        ],
+        "topics_b": [
+          "cog.thrust",
+          "whisker.right",
+          "stuck.right"
+        ],
+        "input_scale": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "gains": [
+          0.75,
+          4.0,
+          4.0
+        ],
+        "limit": 4.0,
+        "active_window": 2,
+        "authority_prefix": "motor.bus.authority.",
+        "output_left": "action.left",
+        "output_right": "action.right",
+        "proportional_mix": true,
+        "turn_brake": 3.0
+      }
+    }
+  ],
+  "edges": []
+}

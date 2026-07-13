@@ -1,0 +1,18 @@
+[
+  {
+    "name": "stage_2_homeokinetic_walk_norm",
+    "description": "SMOKE ONLY — starts directly in the norm stage to verify homeo_payout_norm + homeo_upright_ema telemetry fire. Not for scoring.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_hit_rate": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "standing_baseline_factor": 0.6,
+      "leg_symmetry_fr_blend": 0.5,
+      "homeo_step_gain": 300.0,
+      "homeo_payout_norm": 1.0
+    }
+  }
+]

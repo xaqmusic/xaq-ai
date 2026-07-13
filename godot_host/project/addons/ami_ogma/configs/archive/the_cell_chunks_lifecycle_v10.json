@@ -1,0 +1,544 @@
+{
+  "metadata": {
+    "name": "Cell - chunk lifecycle v10: BC + certainty modulator (v5.4 Phase M)",
+    "description": "v5.4 Phase M - v9 (lr_bc=0.01) plus FaderController.alpha_source=premotor_certainty.  v9 confirmed BC breaks Premotor's uniform-policy lock (H 1.609 -> 1.471, +0.33 hits/min p~=0.073 vs v6).  v10 layers v8's certainty modulator on top: alpha = certainty_min + (certainty_max - certainty_min) * (1 - H/ln(N)).  Now that H actually varies, alpha rises with Premotor's confidence.  Replaces v9's fixed alpha=0.5 with a dynamic [0.30, 0.95] band where brain authority grows as Premotor commits.  This is the v8 design with the prerequisite (non-uniform W) finally in place.",
+    "env_target": "cell",
+    "phase_tag": "v5.4-chunk-lifecycle-v10",
+    "reflex_modular": true,
+    "body_model": "differential_paddler",
+    "episode_length": 3600
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.97,
+        "ht_decay": 0.97,
+        "intrinsic_da_gain": 0.05,
+        "scent_da_rate": 0.25,
+        "travel_da_rate": 0.02,
+        "whisker_ht_rate": 0.0,
+        "hunger_ht_rate": 0.01,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "da_aligned_gain": 0.7,
+        "aligned_event_name": "scent_aligned_with_green",
+        "wall_stuck_da_drain": 0.0,
+        "wall_stuck_ht_drain": 0.0
+      }
+    },
+    {
+      "id": "epm_imu",
+      "type": "EPM",
+      "params": {
+        "modality_group": "kinematic",
+        "modality_name": "imu",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_scent",
+      "type": "EPM",
+      "params": {
+        "modality_group": "scent",
+        "modality_name": "scent",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.scent",
+        "projection_dim": 32,
+        "proprio_state_dims": 8,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.005,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_whisker_0",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker_left",
+        "modality_name": "whisker_0",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_0",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_whisker_1",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker_left",
+        "modality_name": "whisker_1",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_1",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_whisker_2",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker_left",
+        "modality_name": "whisker_2",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_2",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_whisker_3",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker_right",
+        "modality_name": "whisker_3",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_3",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_whisker_4",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker_right",
+        "modality_name": "whisker_4",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_4",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_whisker_5",
+      "type": "EPM",
+      "params": {
+        "modality_group": "whisker_right",
+        "modality_name": "whisker_5",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.whisker_5",
+        "projection_dim": 32,
+        "proprio_state_dims": 1,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_terrain",
+      "type": "EPM",
+      "params": {
+        "modality_group": "kinematic",
+        "modality_name": "terrain",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.terrain",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_color",
+      "type": "EPM",
+      "params": {
+        "modality_group": "video",
+        "modality_name": "color",
+        "encoder_kind": "jl",
+        "input_topic": "host.video.color",
+        "projection_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.005,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_consensus_long",
+      "type": "EPM",
+      "params": {
+        "modality_group": "slow",
+        "modality_name": "consensus",
+        "encoder_kind": "identity",
+        "input_topic": "consensus.0",
+        "projection_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.001,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true,
+        "process_every_n_ticks": 50
+      }
+    },
+    {
+      "id": "descend",
+      "type": "DescendingPredictor",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "targets": [
+          "reality.kinematic.imu",
+          "reality.scent.scent",
+          "reality.whisker_left.whisker_0",
+          "reality.whisker_left.whisker_1",
+          "reality.whisker_left.whisker_2",
+          "reality.whisker_right.whisker_3",
+          "reality.whisker_right.whisker_4",
+          "reality.whisker_right.whisker_5",
+          "reality.kinematic.terrain",
+          "reality.video.color",
+          "reality.slow.consensus"
+        ]
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "input_exclude": [
+          "reality.whisker_left.",
+          "reality.whisker_right.",
+          "reality.kinematic.",
+          "reality.slow."
+        ],
+        "trust_epsilon": 0.05,
+        "group_balance": true,
+        "priority_group": "scent",
+        "surprise_gain": 0.5,
+        "surprise_alpha": 0.1,
+        "surprise_floor": 0.05,
+        "surprise_kind": "embedding"
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "scent_proximity"
+        ],
+        "channel_kinds": [
+          "energy",
+          "proprio_passive"
+        ],
+        "setpoints": [
+          0.8,
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0,
+          1.0
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "reality.proprio.scent_max"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.5
+      }
+    },
+    {
+      "id": "premotor",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "output_topic_left": "action.brain.left",
+        "output_topic_right": "action.brain.right",
+        "update_alpha_threshold": 0.3,
+        "master_seed": 0,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.01,
+        "bc_alpha_weighting": true,
+        "bc_weight_decay": 0.001,
+        "bc_reflex_left_topic": "action.reflex.left",
+        "bc_reflex_right_topic": "action.reflex.right",
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "intent_override_topic": "intent.override",
+        "aligned_event_name": "scent_aligned_with_green",
+        "aligned_reward_gain": 1.0
+      }
+    },
+    {
+      "id": "seq_intent",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "policy.intent",
+        "source_kind": "intent",
+        "window_size": 5,
+        "projection_dim": 32,
+        "prototype_per_winner_dim": 8,
+        "baking_threshold": 3,
+        "min_insertion_error": 0.1,
+        "max_nodes": 32
+      }
+    },
+    {
+      "id": "seq_consensus",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "consensus.0",
+        "source_kind": "winner",
+        "window_size": 50,
+        "projection_dim": 64,
+        "prototype_per_winner_dim": 16,
+        "baking_threshold": 30,
+        "min_insertion_error": 0.02
+      }
+    },
+    {
+      "id": "repertoire",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 20,
+        "crystallization_min_observations": 3,
+        "crystallization_min_drive_delta": 0.03,
+        "crystallization_drive_window_ticks": 50,
+        "intent_source_topic": "policy.intent",
+        "intent_motif_topic": "sequence.motif.policy.intent",
+        "accept_episodic": true,
+        "chunk_credit_lookback": 3,
+        "chunk_credit_decay": 0.5,
+        "chunk_freshness_decay_per_tick": 0.0001,
+        "chunk_prune_score_threshold": 0.3,
+        "chunk_prune_min_dispatches": 5
+      }
+    },
+    {
+      "id": "action_decoder",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.kinematic.imu",
+        "action_bins": 5,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "pragmatic_gain": 10.0,
+        "epistemic_gain": 2.0,
+        "td_lambda": 0.7,
+        "td_gamma": 0.95,
+        "use_chunks": true,
+        "use_rollout": false,
+        "intent_override_topic": "intent.override",
+        "entry_topic": "reality.slow.consensus",
+        "entry_keyframes": 2,
+        "entry_match_threshold": 0.7,
+        "entry_use_winner_prototype": true,
+        "chunk_rearm_threshold": 1.0
+      }
+    },
+    {
+      "id": "cell_reflex",
+      "type": "CellReflex",
+      "params": {
+        "whisker_topic_prefix": "reality.proprio.whisker_",
+        "left_suffixes": [
+          "0",
+          "1",
+          "2"
+        ],
+        "right_suffixes": [
+          "3",
+          "4",
+          "5"
+        ],
+        "scent_topic": "reality.proprio.scent_max",
+        "imu_topic": "reality.proprio.imu",
+        "output_topic_left": "action.reflex.left",
+        "output_topic_right": "action.reflex.right",
+        "emit_events": true,
+        "wander_thrust": 2.0,
+        "wander_noise_amplitude": 0.5,
+        "steer_amp": 2.0,
+        "stuck_window_ticks": 60,
+        "stuck_severity_threshold": 0.5,
+        "stuck_move_speed_reference": 3.0,
+        "stuck_pulse_period": 30,
+        "miss_threshold": 0.3,
+        "miss_refractory_ticks": 30,
+        "avoid_steer_gain": 0.0,
+        "avoid_threshold": 0.3,
+        "scent_alpha_short": 0.1,
+        "scent_alpha_long": 0.001,
+        "scent_long_pos_min": 0.001,
+        "scent_gate_cap": 0.5,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "master_seed": 1
+      }
+    },
+    {
+      "id": "reflex_scent_hit",
+      "type": "DualEMADetector",
+      "params": {
+        "input_topic": "reality.proprio.scent_max",
+        "input_index": 0,
+        "output_event_name": "hit",
+        "alpha_short": 0.1,
+        "alpha_long": 0.001,
+        "ratio_threshold": 1.5,
+        "refractory_ticks": 0,
+        "require_long_pos": true,
+        "motion_floor_topic": "reality.proprio.imu",
+        "motion_floor_index": 2,
+        "motion_floor_min": 0.5
+      }
+    },
+    {
+      "id": "reflex_green_visible",
+      "type": "DualEMADetector",
+      "params": {
+        "input_topic": "reality.proprio.green_fraction",
+        "input_index": 0,
+        "output_event_name": "green_visible",
+        "alpha_short": 0.1,
+        "alpha_long": 0.005,
+        "ratio_threshold": 1.5,
+        "refractory_ticks": 0,
+        "require_long_pos": true,
+        "motion_floor_topic": "reality.proprio.imu",
+        "motion_floor_index": 2,
+        "motion_floor_min": 0.3
+      }
+    },
+    {
+      "id": "event_conj_scent_green",
+      "type": "EventConjunction",
+      "params": {
+        "input_event_topics": [
+          "events.hit",
+          "events.green_visible"
+        ],
+        "output_event_name": "scent_aligned_with_green",
+        "window_ticks": 300,
+        "refractory_ticks": 60,
+        "motion_floor_topic": "reality.proprio.imu",
+        "motion_floor_index": 2,
+        "motion_floor_min": 0.3
+      }
+    },
+    {
+      "id": "fader_controller",
+      "type": "FaderController",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "alpha_topic": "motor.fader.alpha",
+        "alpha_source": "premotor_certainty",
+        "alpha_certainty_min": 0.30,
+        "alpha_certainty_max": 0.95,
+        "alpha_smoothing": 0.05,
+        "alpha_min": 0.0,
+        "alpha_max": 1.0,
+        "surprise_aggregation": "mean",
+        "pathway_alpha_coupling": 0.0,
+        "state_visit_alpha": 0.05,
+        "learned_alpha_lr": 0.0,
+        "learned_alpha_setpoint_init": 0.5,
+        "reward_alpha": 0.05,
+        "reward_weight_hit": 1.0,
+        "reward_weight_miss": 0.0,
+        "reward_weight_wall_stuck": 0.0,
+        "alpha_long_alpha": 0.005,
+        "alpha_fixed": 0.5,
+        "boredom_gain": 0.0
+      }
+    },
+    {
+      "id": "fader_left",
+      "type": "MotorFader",
+      "params": {
+        "brain_topic": "action.brain.left",
+        "reflex_topic": "action.reflex.left",
+        "output_topic": "action.left",
+        "alpha_topic": "motor.fader.alpha",
+        "alpha_fixed": 0.0
+      }
+    },
+    {
+      "id": "fader_right",
+      "type": "MotorFader",
+      "params": {
+        "brain_topic": "action.brain.right",
+        "reflex_topic": "action.reflex.right",
+        "output_topic": "action.right",
+        "alpha_topic": "motor.fader.alpha",
+        "alpha_fixed": 0.0
+      }
+    },
+    {
+      "id": "episodic_capture",
+      "type": "EpisodicCapture",
+      "params": {
+        "keyframe_topic": "reality.slow.consensus",
+        "intent_topic": "policy.intent",
+        "output_topic": "motor.episodic_proposal",
+        "reward_event_names": [
+          "hit",
+          "scent_aligned_with_green"
+        ],
+        "total_keyframes": 5,
+        "entry_keyframes": 2,
+        "mirror_augment": true,
+        "entry_use_winner_prototype": true
+      }
+    }
+  ],
+  "edges": []
+}

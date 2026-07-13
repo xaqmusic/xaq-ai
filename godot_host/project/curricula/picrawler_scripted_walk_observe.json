@@ -1,0 +1,41 @@
+[
+  {
+    "name": "stage_1_stand",
+    "description": "Stand tabula-rasa.  Cruse hip2 ON (gain=1.0) as the standing scaffold; knee+hip1 Cruse off; all walking-reward channels zeroed; scripted gait OFF.  This is the D20 standing recipe.  Advances after 60 sim-sec sustained upright (best_cumulative_alive_ticks >= 3000) — watch it learn to stand, then stage 2 turns on the gait.",
+    "overrides": {
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "gait_cycle_reward_gain": 0.0,
+      "gated_walk_bonus_rate": 0.0,
+      "per_leg_credit_gain": 0.0,
+      "phase_contrast_gain": 0.0,
+      "progress_reward_gain": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "_scripted_gait": false,
+      "target_mode": "off"
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 3000
+    }
+  },
+  {
+    "name": "stage_2_scripted_walk",
+    "description": "E0 open-loop scripted gait injected ON TOP of the standing body.  Walk pattern (lateral-sequence leg offsets [0, pi, pi/2, 3pi/2]); hip1_phase=pi (the propulsion phase that walked 6x best); amp hip1/hip2=0.4, knee=0.3; period 60 ticks.  Cruse hip2 stays on for posture.  Tweak SG amps/phase/period live to explore the drivable envelope.  This is the gait to observe — expect translation with some wander.",
+    "overrides": {
+      "cruse_bias_gain": 1.0,
+      "cruse_bias_gain_knee": 0.0,
+      "cruse_bias_gain_hip1": 0.0,
+      "_scripted_gait": true,
+      "_sg_amp_hip1": 0.4,
+      "_sg_amp_hip2": 0.4,
+      "_sg_amp_knee": 0.3,
+      "_sg_period": 60.0,
+      "_sg_hip1_phase": 3.141592653589793,
+      "_sg_offsets": [0.0, 3.141592653589793, 1.5707963267948966, 4.71238898038469]
+    }
+  }
+]

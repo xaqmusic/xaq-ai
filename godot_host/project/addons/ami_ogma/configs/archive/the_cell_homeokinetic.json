@@ -1,0 +1,109 @@
+{
+  "metadata": {
+    "name": "Cell \u2014 homeokinetic + slow-perception steering (alive chemotaxis)",
+    "description": "Phase 6.8 Stage 2 \u2014 the alive homeokinetic cell (Stage-1 fast path: SensorBundle imu+whisker+motor_energy -> MotorEPM, baseline-beat + per-paddle energy hysteresis = reward-free self-pacing swimming) MODULATED by a slow perception path for DIRECTED food-seeking. SLOW path: KeyframeAverager time-averages the raw 8-nostril scent (sliding window) -> ScentCompass reduces the smoothed gradient to an egocentric bearing (percept.scent_compass_slow) -> MotorEPM nav_topic with a SMALL nav_gain gently biases the two flagella differentially toward food. NO reward anywhere: steering is active inference (act to null the perceived goal bearing), the seeking rides on top of the homeokinetic aliveness. The slow averaging (vs the reactive baseline's instantaneous gradient) is robust to weak/noisy gradients. body_model=differential_paddler + reflex_modular.",
+    "env_target": "cell",
+    "phase_tag": "6.8.2",
+    "reflex_modular": true,
+    "body_model": "differential_paddler",
+    "motor_baseline_beat": true,
+    "motor_energy": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "fast_bundle",
+      "type": "SensorBundle",
+      "params": {
+        "input_topics": [
+          "reality.proprio.imu",
+          "reality.proprio.whisker_0",
+          "reality.proprio.whisker_1",
+          "reality.proprio.whisker_2",
+          "reality.proprio.whisker_3",
+          "reality.proprio.whisker_4",
+          "reality.proprio.whisker_5",
+          "reality.proprio.motor_energy"
+        ],
+        "output_topic": "fast.proprio.bundle",
+        "sensor_label": "fast_bundle"
+      }
+    },
+    {
+      "id": "scent_avg",
+      "type": "KeyframeAverager",
+      "params": {
+        "input_topic": "reality.proprio.scent",
+        "output_topic": "slow.scent_avg",
+        "payload_kind": "proprio_token",
+        "window_size": 30,
+        "sensor_label": "scent_avg"
+      }
+    },
+    {
+      "id": "scent_compass_slow",
+      "type": "ScentCompass",
+      "params": {
+        "input_topic": "slow.scent_avg",
+        "output_topic": "percept.scent_compass_slow",
+        "nostril_count": 8
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPM",
+      "params": {
+        "proprio_topics": [
+          "fast.proprio.bundle"
+        ],
+        "action_topics": [
+          "action.left",
+          "action.right"
+        ],
+        "n_legs": 1,
+        "motor_dim": 2,
+        "seed": 1234,
+        "init_scale": 0.08,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.03,
+        "bias_lr": 0.005,
+        "sat_lr": 0.02,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.15,
+        "babble_ticks": 200,
+        "babble_scale": 0.5,
+        "explore_noise": 0.05,
+        "motor_gain": 4.0,
+        "nav_topic": "percept.scent_compass_slow",
+        "nav_gain": 1.0,
+        "coupling_gain": 0.0,
+        "cruse_gain": 0.0,
+        "cruse_rule5_gain": 0.0,
+        "balance_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "stroke_gain": 0.0,
+        "heading_gain": 0.0,
+        "steer": 0.0,
+        "postural_gain": 0.0,
+        "panic_strength": 0.0,
+        "amp_seek_rate": 0.0,
+        "coord_reward_drive": 0.0,
+        "coord_stab_penalty": 0.0,
+        "coord_adapt_rate": 0.0,
+        "coord_explore": 0.0,
+        "imu_topic": "",
+        "tilt_topic": "",
+        "height_topic": "",
+        "distress_topic": "",
+        "lateral_topic": "",
+        "feet_topic": ""
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,71 @@
+[gd_scene format=3 uid="uid://bx4kw8mewqk5l"]
+
+[ext_resource type="Script" uid="uid://dmp2fdjp16kdd" path="res://scripts/the_cell_world.gd" id="1"]
+[ext_resource type="Script" uid="uid://cljrv2gpkpyjt" path="res://scripts/body_controller.gd" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ui.tscn" id="3"]
+
+[sub_resource type="Environment" id="Environment_cell"]
+background_mode = 1
+background_color = Color(0.08, 0.08, 0.16, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.6, 0.6, 0.7, 1)
+ambient_light_energy = 1.2
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 0.4
+height = 1.8
+
+[node name="TheCell" type="Node3D" unique_id=436202144]
+script = ExtResource("1")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=889981760]
+environment = SubResource("Environment_cell")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1703659087]
+transform = Transform3D(0.866, -0.5, 0, 0, 0, -1, 0.5, 0.866, 0, 0, 10, 0)
+light_energy = 0.8
+shadow_enabled = true
+
+[node name="Nutrients" type="Node3D" parent="." unique_id=1753729377]
+
+[node name="Body" type="CharacterBody3D" parent="." unique_id=495722086]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+script = ExtResource("2")
+body_model = "differential_paddler"
+
+[node name="ColShape" type="CollisionShape3D" parent="Body" unique_id=1216451225]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="Camera3D" type="Camera3D" parent="Body" unique_id=428146138]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+current = true
+fov = 80.0
+
+[node name="Brain" type="OgmaBrain" parent="Body" unique_id=1551490245]
+
+[node name="Whisker0" type="RayCast3D" parent="Body" unique_id=2053703554]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+target_position = Vector3(-2.898, 0, -0.776)
+
+[node name="Whisker1" type="RayCast3D" parent="Body" unique_id=575550173]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+target_position = Vector3(-2.121, 0, -2.121)
+
+[node name="Whisker2" type="RayCast3D" parent="Body" unique_id=1358019027]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+target_position = Vector3(-0.776, 0, -2.898)
+
+[node name="Whisker3" type="RayCast3D" parent="Body" unique_id=1757967627]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+target_position = Vector3(0.776, 0, -2.898)
+
+[node name="Whisker4" type="RayCast3D" parent="Body" unique_id=1072523695]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+target_position = Vector3(2.121, 0, -2.121)
+
+[node name="Whisker5" type="RayCast3D" parent="Body" unique_id=1505362603]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+target_position = Vector3(2.898, 0, -0.776)
+
+[node name="UI" parent="." unique_id=1484817057 instance=ExtResource("3")]

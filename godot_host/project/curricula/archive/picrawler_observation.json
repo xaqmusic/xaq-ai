@@ -1,0 +1,60 @@
+[
+  {
+    "name": "stage_1_stand_permissive_1min",
+    "description": "Observation curriculum stage 1.  Permissive standing — full legacy reward density so brain bootstraps standing pose without competing pressures.  Auto-advance when best continuous stand reaches 60 sec (3600 ticks @ 60 Hz).  This is best_cumulative_alive_ticks which resets every fall, so the metric tracks the longest UNBROKEN upright span — not cumulative time across falls.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_scale": 0.0,
+      "walk_hit_rate": 0.0,
+      "walk_heading_consistency_gain": 0.0,
+      "stability_gain": 0.0,
+      "antirot_gain": 0.0,
+      "energy_gain": 0.0,
+      "standing_baseline_factor": 1.0,
+      "gated_walk_bonus_rate": 0.0
+    },
+    "advance_when": {
+      "metric": "best_cumulative_alive_ticks",
+      "op": "ge",
+      "value": 3600
+    }
+  },
+  {
+    "name": "stage_2_walk_radial_to_3m",
+    "description": "Observation curriculum stage 2.  Radial-outward walking reward + multiplicative gating (standing_baseline_factor=0.25, gated_walk_bonus_rate=0.20).  Auto-advance when max_distance_from_origin reaches 3m.  walk_target_velocity=0.15 so brain has gradient up to a reasonable body-speed cap.",
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.15,
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "radial",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.20
+    },
+    "advance_when": {
+      "metric": "max_distance_from_origin",
+      "op": "ge",
+      "value": 3.0
+    }
+  },
+  {
+    "name": "stage_3_walk_over_there_terminal",
+    "description": "Observation curriculum stage 3 (terminal).  walk_over_there mode: random pyramid targets at visit_radius=0.5m, walk_target_velocity=0.1.  walk_reward_mode='to_target' projects chassis velocity onto chassis→target direction; approaching pays, receding misses.  On arrival within visit_radius the body fires a bonus hit and rotates to a new random pyramid.  Multiplicative gating stays on so brain keeps standing while pursuing targets.\n\nThis is a terminal stage — no advance_when, runs for the rest of the session.  Watch walk_visit_count in HUD to track number of pyramid visits.",
+    "target_mode": "random_pyramid",
+    "visit_radius": 0.5,
+    "overrides": {
+      "target_height": 0.085,
+      "reward_shape": "trapezoid",
+      "height_penalty_grace": 0.02,
+      "height_penalty_scale": 0.03,
+      "walk_target_velocity": 0.1,
+      "walk_hit_rate": 0.05,
+      "walk_reward_mode": "to_target",
+      "standing_baseline_factor": 0.25,
+      "gated_walk_bonus_rate": 0.20
+    }
+  }
+]

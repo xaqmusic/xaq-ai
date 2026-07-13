@@ -1,0 +1,1112 @@
+{
+  "metadata": {
+    "name": "PiCrawler \u2014 7.2-EPM per-leg chunks + Compass (Fractal JEPA + heading anchor)",
+    "description": "Phase 7.2-EPM per-leg chunk pipeline + epm_compass.  Combines the Fractal JEPA per-leg chunks (4 EPMs / 4 SeqGNGs / 4 MotorRep / 4 ActionDecoder) with the world-frame heading channel from the compass variant.  Once chunks crystallise around recurring (per-leg-consensus + heading) co-occurrences, the brain has heading-conditioned gait primitives.\n\nCrystallisation uses the v7.2-EPM per-position EMA accumulator (commit 17d0722) so chunks no longer solidify on single-hit flukes \u2014 they wait for patterns to recur across multiple events.hit firings.  Per-leg ActionDecoder unpacks combined intents into IntentToken.indices via radix encoding; the 12 Premotors each read their assigned channel.\n\nTest target: walking emergence via heading-anchored gait chunks.",
+    "env_target": "picrawler",
+    "phase_tag": "v6.17b + 7.2-EPM per-leg chunks + compass",
+    "derived_from_manifest": true,
+    "episode_length": 6000,
+    "mc_episode_period": 1500,
+    "stability_gain": 0.05,
+    "stability_y_norm": 0.5,
+    "stability_speed": 0.05,
+    "reward_shape": "trapezoid",
+    "target_height": 0.085,
+    "height_penalty_grace": 0.02,
+    "height_penalty_scale": 0.03,
+    "height_penalty_gain": 0.05,
+    "leg_symmetry": "lr_pairs"
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001,
+        "wall_stuck_da_drain": 0.0,
+        "wall_stuck_ht_drain": 0.0
+      }
+    },
+    {
+      "id": "epm_imu",
+      "type": "EPM",
+      "params": {
+        "modality_group": "vestibular",
+        "modality_name": "imu",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.imu",
+        "projection_dim": 48,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_joints",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "joints",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.joints",
+        "projection_dim": 48,
+        "proprio_state_dims": 12,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_compass",
+      "type": "EPM",
+      "params": {
+        "modality_group": "compass",
+        "modality_name": "global",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.compass",
+        "projection_dim": 48,
+        "proprio_state_dims": 2,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "input_exclude": [
+          "reality.proprio.leg."
+        ],
+        "trust_epsilon": 0.05,
+        "group_balance": true,
+        "priority_group": "vestibular"
+      }
+    },
+    {
+      "id": "joint_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.fl_hip1",
+          "action.fl_hip2",
+          "action.fl_knee",
+          "action.fr_hip1",
+          "action.fr_hip2",
+          "action.fr_knee",
+          "action.rl_hip1",
+          "action.rl_hip2",
+          "action.rl_knee",
+          "action.rr_hip1",
+          "action.rr_hip2",
+          "action.rr_knee"
+        ],
+        "output_topics": [
+          "reality.proprio.leg.fl",
+          "reality.proprio.leg.fr",
+          "reality.proprio.leg.rl",
+          "reality.proprio.leg.rr"
+        ],
+        "proprio_indices": [
+          0,
+          4,
+          8,
+          1,
+          5,
+          9,
+          2,
+          6,
+          10,
+          3,
+          7,
+          11
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "leg"
+      }
+    },
+    {
+      "id": "epm_leg_fl",
+      "type": "EPM",
+      "params": {
+        "modality_group": "leg",
+        "modality_name": "fl",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.leg.fl",
+        "projection_dim": 48,
+        "proprio_state_dims": 9,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_leg_fr",
+      "type": "EPM",
+      "params": {
+        "modality_group": "leg",
+        "modality_name": "fr",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.leg.fr",
+        "projection_dim": 48,
+        "proprio_state_dims": 9,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_leg_rl",
+      "type": "EPM",
+      "params": {
+        "modality_group": "leg",
+        "modality_name": "rl",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.leg.rl",
+        "projection_dim": 48,
+        "proprio_state_dims": 9,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "epm_leg_rr",
+      "type": "EPM",
+      "params": {
+        "modality_group": "leg",
+        "modality_name": "rr",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.leg.rr",
+        "projection_dim": 48,
+        "proprio_state_dims": 9,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "predicted_pathway_steps": 3,
+        "subtract_descending_prediction": true
+      }
+    },
+    {
+      "id": "seqgng_leg_fl",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "reality.leg.fl",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 128,
+        "prototype_per_winner_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.leg.fl",
+        "master_seed": 5401
+      }
+    },
+    {
+      "id": "seqgng_leg_fr",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "reality.leg.fr",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 128,
+        "prototype_per_winner_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.leg.fr",
+        "master_seed": 5402
+      }
+    },
+    {
+      "id": "seqgng_leg_rl",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "reality.leg.rl",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 128,
+        "prototype_per_winner_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.leg.rl",
+        "master_seed": 5403
+      }
+    },
+    {
+      "id": "seqgng_leg_rr",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "reality.leg.rr",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 128,
+        "prototype_per_winner_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.leg.rr",
+        "master_seed": 5404
+      }
+    },
+    {
+      "id": "policy_agg_fl",
+      "type": "PolicyChannelAggregator",
+      "params": {
+        "input_topics": [
+          "policy.intent.fl_hip1",
+          "policy.intent.fl_hip2",
+          "policy.intent.fl_knee"
+        ],
+        "channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "output_topic": "policy.intent.leg.fl"
+      }
+    },
+    {
+      "id": "policy_agg_fr",
+      "type": "PolicyChannelAggregator",
+      "params": {
+        "input_topics": [
+          "policy.intent.fr_hip1",
+          "policy.intent.fr_hip2",
+          "policy.intent.fr_knee"
+        ],
+        "channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "output_topic": "policy.intent.leg.fr"
+      }
+    },
+    {
+      "id": "policy_agg_rl",
+      "type": "PolicyChannelAggregator",
+      "params": {
+        "input_topics": [
+          "policy.intent.rl_hip1",
+          "policy.intent.rl_hip2",
+          "policy.intent.rl_knee"
+        ],
+        "channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "output_topic": "policy.intent.leg.rl"
+      }
+    },
+    {
+      "id": "policy_agg_rr",
+      "type": "PolicyChannelAggregator",
+      "params": {
+        "input_topics": [
+          "policy.intent.rr_hip1",
+          "policy.intent.rr_hip2",
+          "policy.intent.rr_knee"
+        ],
+        "channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "output_topic": "policy.intent.leg.rr"
+      }
+    },
+    {
+      "id": "repertoire_fl",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 12,
+        "crystallization_min_observations": 3,
+        "crystallization_min_drive_delta": 0.02,
+        "crystallization_drive_window_ticks": 50,
+        "intent_source_topic": "policy.intent.leg.fl",
+        "intent_motif_topic": "sequence.motif.leg.fl",
+        "chunk_credit_lookback": 3,
+        "chunk_credit_decay": 0.5,
+        "chunk_freshness_decay_per_tick": 0.0001,
+        "chunk_prune_score_threshold": 0.3,
+        "chunk_prune_min_dispatches": 5
+      }
+    },
+    {
+      "id": "repertoire_fr",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 12,
+        "crystallization_min_observations": 3,
+        "crystallization_min_drive_delta": 0.02,
+        "crystallization_drive_window_ticks": 50,
+        "intent_source_topic": "policy.intent.leg.fr",
+        "intent_motif_topic": "sequence.motif.leg.fr",
+        "chunk_credit_lookback": 3,
+        "chunk_credit_decay": 0.5,
+        "chunk_freshness_decay_per_tick": 0.0001,
+        "chunk_prune_score_threshold": 0.3,
+        "chunk_prune_min_dispatches": 5
+      }
+    },
+    {
+      "id": "repertoire_rl",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 12,
+        "crystallization_min_observations": 3,
+        "crystallization_min_drive_delta": 0.02,
+        "crystallization_drive_window_ticks": 50,
+        "intent_source_topic": "policy.intent.leg.rl",
+        "intent_motif_topic": "sequence.motif.leg.rl",
+        "chunk_credit_lookback": 3,
+        "chunk_credit_decay": 0.5,
+        "chunk_freshness_decay_per_tick": 0.0001,
+        "chunk_prune_score_threshold": 0.3,
+        "chunk_prune_min_dispatches": 5
+      }
+    },
+    {
+      "id": "repertoire_rr",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 12,
+        "crystallization_min_observations": 3,
+        "crystallization_min_drive_delta": 0.02,
+        "crystallization_drive_window_ticks": 50,
+        "intent_source_topic": "policy.intent.leg.rr",
+        "intent_motif_topic": "sequence.motif.leg.rr",
+        "chunk_credit_lookback": 3,
+        "chunk_credit_decay": 0.5,
+        "chunk_freshness_decay_per_tick": 0.0001,
+        "chunk_prune_score_threshold": 0.3,
+        "chunk_prune_min_dispatches": 5
+      }
+    },
+    {
+      "id": "decoder_fl",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.proprio.imu",
+        "action_bins": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "use_chunks": true,
+        "use_rollout": false,
+        "intent_override_topic": "intent.override.leg.fl",
+        "intent_channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "entry_topic": "reality.leg.fl",
+        "output_topic": "action.decoder.leg.fl"
+      }
+    },
+    {
+      "id": "decoder_fr",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.proprio.imu",
+        "action_bins": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "use_chunks": true,
+        "use_rollout": false,
+        "intent_override_topic": "intent.override.leg.fr",
+        "intent_channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "entry_topic": "reality.leg.fr",
+        "output_topic": "action.decoder.leg.fr"
+      }
+    },
+    {
+      "id": "decoder_rl",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.proprio.imu",
+        "action_bins": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "use_chunks": true,
+        "use_rollout": false,
+        "intent_override_topic": "intent.override.leg.rl",
+        "intent_channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "entry_topic": "reality.leg.rl",
+        "output_topic": "action.decoder.leg.rl"
+      }
+    },
+    {
+      "id": "decoder_rr",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.proprio.imu",
+        "action_bins": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "use_chunks": true,
+        "use_rollout": false,
+        "intent_override_topic": "intent.override.leg.rr",
+        "intent_channel_radix": [
+          5,
+          5,
+          5
+        ],
+        "entry_topic": "reality.leg.rr",
+        "output_topic": "action.decoder.leg.rr"
+      }
+    },
+    {
+      "id": "seqgng_body",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "consensus.0",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 128,
+        "prototype_per_winner_dim": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.body",
+        "master_seed": 5001
+      }
+    },
+    {
+      "id": "seqgng_act_fl_hip1",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.fl_hip1",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.fl_hip1",
+        "master_seed": 5101
+      }
+    },
+    {
+      "id": "seqgng_act_fr_hip1",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.fr_hip1",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.fr_hip1",
+        "master_seed": 5102
+      }
+    },
+    {
+      "id": "seqgng_act_rl_hip1",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.rl_hip1",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.rl_hip1",
+        "master_seed": 5103
+      }
+    },
+    {
+      "id": "seqgng_act_rr_hip1",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.rr_hip1",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.rr_hip1",
+        "master_seed": 5104
+      }
+    },
+    {
+      "id": "seqgng_act_fl_hip2",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.fl_hip2",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.fl_hip2",
+        "master_seed": 5201
+      }
+    },
+    {
+      "id": "seqgng_act_fr_hip2",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.fr_hip2",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.fr_hip2",
+        "master_seed": 5202
+      }
+    },
+    {
+      "id": "seqgng_act_rl_hip2",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.rl_hip2",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.rl_hip2",
+        "master_seed": 5203
+      }
+    },
+    {
+      "id": "seqgng_act_rr_hip2",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.rr_hip2",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.rr_hip2",
+        "master_seed": 5204
+      }
+    },
+    {
+      "id": "seqgng_act_fl_knee",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.fl_knee",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.fl_knee",
+        "master_seed": 5301
+      }
+    },
+    {
+      "id": "seqgng_act_fr_knee",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.fr_knee",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.fr_knee",
+        "master_seed": 5302
+      }
+    },
+    {
+      "id": "seqgng_act_rl_knee",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.rl_knee",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.rl_knee",
+        "master_seed": 5303
+      }
+    },
+    {
+      "id": "seqgng_act_rr_knee",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.rr_knee",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "output_topic": "sequence.motif.act.rr_knee",
+        "master_seed": 5304
+      }
+    },
+    {
+      "id": "descend",
+      "type": "DescendingPredictor",
+      "params": {
+        "consensus_topic": "consensus.0",
+        "targets": [
+          "reality.vestibular.imu",
+          "reality.proprio.joints"
+        ],
+        "update_method": "sgd",
+        "learning_rate": 0.005
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "alive"
+        ],
+        "channel_kinds": [
+          "alive_pulse"
+        ],
+        "setpoints": [
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0
+        ],
+        "channel_input_topics": [
+          "events.hit"
+        ],
+        "alive_pulse_decay_per_tick": 0.005,
+        "alive_pulse_replenish_per_event": 0.5
+      }
+    },
+    {
+      "id": "premotor_fl_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "action_output_topic": "action.fl_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 101,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "policy_output_topic": "policy.intent.fl_hip1",
+        "intent_override_topic": "intent.override.leg.fl",
+        "intent_channel": 0
+      }
+    },
+    {
+      "id": "premotor_fr_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "action_output_topic": "action.fr_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 201,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "policy_output_topic": "policy.intent.fr_hip1",
+        "intent_override_topic": "intent.override.leg.fr",
+        "intent_channel": 0
+      }
+    },
+    {
+      "id": "premotor_rl_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "action_output_topic": "action.rl_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 301,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "policy_output_topic": "policy.intent.rl_hip1",
+        "intent_override_topic": "intent.override.leg.rl",
+        "intent_channel": 0
+      }
+    },
+    {
+      "id": "premotor_rr_hip1",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "action_output_topic": "action.rr_hip1",
+        "update_alpha_threshold": 0.0,
+        "master_seed": 401,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "policy_output_topic": "policy.intent.rr_hip1",
+        "intent_override_topic": "intent.override.leg.rr",
+        "intent_channel": 0
+      }
+    },
+    {
+      "id": "premotor_fl_hip2",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 102,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.fl_hip2",
+        "policy_output_topic": "policy.intent.fl_hip2",
+        "intent_override_topic": "intent.override.leg.fl",
+        "intent_channel": 1
+      }
+    },
+    {
+      "id": "premotor_fl_knee",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 1102,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.fl_knee",
+        "policy_output_topic": "policy.intent.fl_knee",
+        "intent_override_topic": "intent.override.leg.fl",
+        "intent_channel": 2
+      }
+    },
+    {
+      "id": "premotor_fr_hip2",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 202,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.fr_hip2",
+        "policy_output_topic": "policy.intent.fr_hip2",
+        "intent_override_topic": "intent.override.leg.fr",
+        "intent_channel": 1
+      }
+    },
+    {
+      "id": "premotor_fr_knee",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 1202,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.fr_knee",
+        "policy_output_topic": "policy.intent.fr_knee",
+        "intent_override_topic": "intent.override.leg.fr",
+        "intent_channel": 2
+      }
+    },
+    {
+      "id": "premotor_rl_hip2",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 302,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.rl_hip2",
+        "policy_output_topic": "policy.intent.rl_hip2",
+        "intent_override_topic": "intent.override.leg.rl",
+        "intent_channel": 1
+      }
+    },
+    {
+      "id": "premotor_rl_knee",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 1302,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.rl_knee",
+        "policy_output_topic": "policy.intent.rl_knee",
+        "intent_override_topic": "intent.override.leg.rl",
+        "intent_channel": 2
+      }
+    },
+    {
+      "id": "premotor_rr_hip2",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 402,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.rr_hip2",
+        "policy_output_topic": "policy.intent.rr_hip2",
+        "intent_override_topic": "intent.override.leg.rr",
+        "intent_channel": 1
+      }
+    },
+    {
+      "id": "premotor_rr_knee",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": false,
+        "update_alpha_threshold": 0.0,
+        "master_seed": 1402,
+        "pathway_temp_gain": 1.0,
+        "state_visit_alpha": 0.05,
+        "output_noise_amplitude": 0.0,
+        "lr_bc": 0.0,
+        "bc_alpha_weighting": false,
+        "bc_weight_decay": 0.0,
+        "mc_lr": 0.05,
+        "mc_gamma": 0.99,
+        "advantage_normalization": true,
+        "advantage_window": 100,
+        "mc_reinforce": true,
+        "action_output_topic": "action.rr_knee",
+        "policy_output_topic": "policy.intent.rr_knee",
+        "intent_override_topic": "intent.override.leg.rr",
+        "intent_channel": 2
+      }
+    }
+  ],
+  "edges": []
+}

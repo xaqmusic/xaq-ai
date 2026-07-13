@@ -1,0 +1,23 @@
+[
+    {
+        "name": "stage_1_gated_trot_bri_tuned",
+        "description": "2026-06-01 Stage 3.D tuned defaults: bri_impulse_per_spike=0.10 (2× default), bri_friction_per_tick=0.02 (2.5× longer persistence). Operator UI observation (base_rate sweep at default impulse/friction): legs smoother but standing degraded — bri trades responsiveness for smoothness. Standing was the wrong test. Boosting impulse + reducing friction produces larger, more sustained joint motion — closer to what gait needs.\n\nMath (per joint): with friction=0.02, time-to-equilibrium ≈ 1/0.02 = 50 ticks (~0.8s @60Hz, but sim ticks at TAU=0.02 = 25 sim seconds is faster). With impulse=0.10, each spike moves the joint 10% of TARGET_RANGE. At sustained |u|=1 with bias=1.0 (rate=1.0), expected equilibrium = impulse/friction × rate = 5.0 — clamped to 1.0 (joint reaches full TARGET_RANGE). At intermittent |u|=0.5, equilibrium = 0.5 × 5.0 / 1 (clamp) = 1.0 also — joints saturate at smaller commands too. Trade-off: smoother + bigger motion vs less responsive to small balance corrections.\n\nbase_rate=0.0 (no tonic firing — joint silent at neutral). Pair with operator UI for live tuning via reward_panel sliders if needed.",
+        "overrides": {
+            "actuation_backend": "bernoulli_impulse",
+            "bri_base_rate": 0.0,
+            "bri_command_bias": 1.0,
+            "bri_impulse_per_spike": 0.10,
+            "bri_friction_per_tick": 0.02,
+            "target_height": 0.085,
+            "reward_shape": "trapezoid",
+            "standing_baseline_factor": 0.25,
+            "gated_walk_bonus_rate": 0.2,
+            "phase_contrast_gain": 0.7,
+            "walk_target_velocity": 0.15,
+            "walk_hit_rate": 0.05,
+            "walk_reward_mode": "radial",
+            "height_penalty_scale": 0.03,
+            "height_penalty_grace": 0.02
+        }
+    }
+]
