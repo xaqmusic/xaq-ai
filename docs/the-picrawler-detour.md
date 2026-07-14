@@ -52,3 +52,6 @@ them encode exactly the scaffolded, reward-shaped setups the discipline now warn
 against — that is what they are for. If you are new here, **start with the Cell.** The
 picrawler is where this framework went before it learned to be careful; the Cell is
 where it learned.
+
+The simulation and environments built for the picrawler are solid. We will be revisiting
+it shortly in preparation for moving the Zanshin framework onto the Raspberry Pi.
