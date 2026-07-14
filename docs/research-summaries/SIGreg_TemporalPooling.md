@@ -3,6 +3,8 @@
 **Objective:** Upgrade the EPM latent processing pipeline to prevent anisotropic representation collapse (via SIGReg) and achieve temporal shift invariance for transient events (via Temporal TLE Pooling).
 **Prerequisites:** Frozen audio encoders (STFT filterbank) are implemented and actively broadcasting latent streams.
 
+> **Status: speculative design proposal — not yet built.** This document is a forward-looking design sketch informed by external work (LeJEPA; Balestriero & LeCun, 2025), not a description of shipped Zanshin behaviour. None of it is implemented in the current substrate.
+
 ---
 
 ## 1. Sketched Isotropic Gaussian Regularization (Rolling SIGReg)
@@ -23,10 +25,12 @@ To avoid the $O(D^2)$ computational explosion of standard covariance-matrix regu
 3.  **Distribution Matching Loss:** Apply a regularization loss (e.g., 1D Wasserstein distance or standard Mean Squared Error on the sorted distributions) that penalizes the deviation of $S_{proj}$ from a standard 1D normal distribution $\mathcal{N}(0,1)$.
 4.  **Gradient Update:** Backpropagate this regularization loss through the EPM's localized projection head to continuously "inflate" the latent space into a perfect sphere.
 
+> *Caveat: this step assumes backpropagation. Zanshin's current C++ substrate is not backprop-based, so gradient-based regularization as written here is aspirational — it is not how the shipped substrate learns.*
+
 ---
 
 ## 2. Temporal Pooling of the Time-Loop Error (TLE)
-**Reference:** AMI Ogma Homeokinetic Predictor / The Playful Machine (Der & Martius).
+**Reference:** Zanshin Homeokinetic Predictor / The Playful Machine (Der & Martius).
 **Goal:** Achieve "Temporal Shift Invariance." The clustering mechanism (Concept Crystallization) must cluster the *prediction error delta* rather than the raw latent state $S_t$. This isolates transient transient events (e.g., a bark) regardless of their temporal placement within the rolling window.
 
 

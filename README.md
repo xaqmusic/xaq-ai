@@ -20,6 +20,15 @@ coordinated by a shared, trust-weighted state bus and a single policy selector.
 | **`python/zanshin_core/`** | Shared substrate: the socket/ZeroMQ message bus, a torch predictor + episodic memory, export-parity checks, and the logging protocol. |
 | **`python/zanshin/`** | The Python engine: EPM nodes, GNG, lateral voting, active inference / global workspace, motor & navigation, and a **generic STFT audio modality** so multi-modal fusion is demonstrable out of the box. |
 
+## A note on the name
+
+You will see `ami_ogma` and `ogma` in the code — the C++ namespace `ami_ogma::`,
+the Godot addon `addons/ami_ogma/` and `ami_ogma_host.so`, and `OGMA_*` env vars.
+That is Zanshin's **original internal codename**, kept in those identifiers so
+existing builds and saved configs stay stable. **`ami_ogma` and Zanshin are the
+same project.** New Python code lives in the `zanshin` / `zanshin_core` packages.
+See [docs/NAMING.md](docs/NAMING.md).
+
 ## Start here
 
 - **[docs/reports/cell_markov_blanket_loops_report.md](docs/reports/cell_markov_blanket_loops_report.md)** —
@@ -30,6 +39,8 @@ coordinated by a shared, trust-weighted state bus and a single policy selector.
 - **[docs/brain_building_doctrine.md](docs/brain_building_doctrine.md)** — the
   method the report tests: how to compose predictive loops without fooling
   yourself.
+- **[docs/](docs/)** — full documentation index, including
+  [research summaries](docs/research-summaries/) of the papers Zanshin builds on.
 
 ## Build
 

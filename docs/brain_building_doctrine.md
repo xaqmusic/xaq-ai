@@ -1,8 +1,8 @@
 # Brain-Building Doctrine
 
-*The reusable principles for building a new AMI-Ogma brain. Distilled from the
-picrawler locomotion work and the Cell navigator. This is the "bible" — read it
-before standing up a new capability. The Cell maze-navigator is the running
+*The reusable principles for building a new Zanshin brain, distilled from
+building embodied active-inference agents. This is the "bible" — read it
+before standing up a new capability. The Cell navigator is the running
 example, but the principles are creature-agnostic.*
 
 ---
@@ -267,8 +267,9 @@ each ALONE. Let them become emergently complementary.**
   L2-VQ underperformed the EPM's encoding on the same signal.)
 - **Clock / CPG → EPM → LateralVoter = shared temporal context. LOAD-BEARING.** A simple
   oscillator's reality token, voted alongside everything else, stamps every contribution
-  with *phase / when*. Proven on picrawler: RL standing **only worked with it; ablation
-  broke it.** Phase is the shared coordinate that lets downstream bind events in time.
+  with *phase / when*. In a legged-standing build this was decisive — a
+  controller **only worked with it; the ablation broke it.** Phase is the shared
+  coordinate that lets downstream bind events in time.
   Deeper role: the CPG is also a **demodulation reference**. When a signal cannot be read
   instantaneously (a scalar gradient's *direction*), a self-generated rhythm lets the agent
   ACT to reveal it — weave at the CPG frequency, then **lock-in detect** (correlate the
@@ -418,5 +419,5 @@ recurs at every layer.
 ---
 
 *Living document. When a new principle is proven (or falsified) on a build, fold it back
-here. See `docs/plans-and-designs/cell_active_inference_navigator_plan.md` for the current
-build that exercises this doctrine.*
+here. See [`docs/reports/cell_markov_blanket_loops_report.md`](reports/cell_markov_blanket_loops_report.md)
+for the Cell build that exercises — and stress-tests — this doctrine.*

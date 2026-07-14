@@ -3,9 +3,9 @@
 **Date:** 2026-05-15
 **Author:** Joseph Butera III
 **Status:** Reference / presentation prep
-**Companion:** `docs/active_inference.md` (the production spec), `docs/v4_position.md` (the broader signal-flow argument), `docs/ogma_in_context.md` (layman framing + landscape position vs. pretrained encoders / VLAs / world-model thesis), `godot_host/project/scenes/hdc_demo_view_a.tscn` (interactive demo)
+**Companion:** `godot_host/project/scenes/hdc_demo_view_a.tscn` (interactive demo)
 
-This is the canonical explanation of the HDC superposition + temporal binding layer used in the Ami-Ogma consensus pipeline. It is written for two audiences: future-Joseph who needs to defend the design without re-deriving it, and an outside reader (e.g. OpenAI-class technical audience) who needs to grok the construction in 10 minutes. Geometric intuition only; no probability theory or matrix calculus.
+This is the canonical explanation of the HDC superposition + temporal binding layer used in the Zanshin consensus pipeline. It is written for a reader who needs to grok the construction in about ten minutes, using geometric intuition only — no probability theory or matrix calculus.
 
 ---
 
@@ -25,7 +25,7 @@ The dot product of two random unit vectors has expected value zero, and its stan
 
 In 768D, if you generate 100,000 random unit vectors, essentially all pairs are "nearly orthogonal" to all others. You have effectively unlimited room for distinct symbols. This is the only piece of math the rest of the construction needs.
 
-The interactive demo (View A, §8) is precisely a visualisation of this fact. Drag the dimension slider from 2 to 768 and watch the histogram of pairwise dot products collapse to a needle at zero.
+The interactive demo (View A, §7) is precisely a visualisation of this fact. Drag the dimension slider from 2 to 768 and watch the histogram of pairwise dot products collapse to a needle at zero.
 
 ---
 
@@ -63,7 +63,7 @@ Shift the elements of A by k positions, wrapping around. The result is nearly or
 
 ## 3. Why we need two different binding operations
 
-Tokens in Ogma's consensus layer have two distinct kinds of "position" that must be encoded without interfering with each other:
+Tokens in Zanshin's consensus layer have two distinct kinds of "position" that must be encoded without interfering with each other:
 
 | kind of position | operation used | why |
 |---|---|---|
@@ -74,7 +74,7 @@ These two binding modes are themselves nearly orthogonal in the dimension space 
 
 ---
 
-## 4. The Ogma construction, step by step
+## 4. The Zanshin construction, step by step
 
 Every token published by an EPM goes through these four steps to contribute to the sync-window consensus vector.
 
@@ -134,7 +134,7 @@ This is guaranteed by construction, with no training. Shared `(symbol, time)` pa
 
 This is the property the previous implementation (a learned weighted average of EPM embeddings) could not give us. With weighted averaging, two windows containing completely different symbols could land near each other in latent space if their embeddings happened to cancel arithmetically. After the HDC rewrite, the geometric link between symbol overlap and vector overlap is mathematically forced.
 
-The downstream meta-EPM's knowledge graph asks "which existing concept does this window look most like?" For that question to give a useful answer from the first session, the consensus space must already be compositional. HDC gives compositional geometry on tick one; Hebbian-warped distance (see `docs/active_inference.md` §3.B) then warps this base geometry with experience.
+The downstream meta-EPM's knowledge graph asks "which existing concept does this window look most like?" For that question to give a useful answer from the first session, the consensus space must already be compositional. HDC gives compositional geometry on tick one; Hebbian-warped distance then warps this base geometry with experience.
 
 **Slogan:** HDC gives you compositional geometry for free; Hebbian warping gives you experience-shaped geometry on top of it.
 
@@ -142,7 +142,7 @@ The downstream meta-EPM's knowledge graph asks "which existing concept does this
 
 ## 6. Why the C++ core uses 128D, not 768D
 
-The production substrate (v4/v5, `cpp_core/`) uses `projection_dim = 128` across encoders, EPM latents, fused embeddings, and GNG inputs. The 768D figure that appears in `docs/active_inference.md` is from an earlier Python prototype and should be read as historical.
+The production substrate (`cpp_core/`) uses `projection_dim = 128` across encoders, EPM latents, fused embeddings, and GNG inputs. The 768D figure comes from an earlier Python prototype and should be read as historical.
 
 ### What you lose at 128D vs 768D
 
@@ -168,7 +168,7 @@ A sync window typically carries on the order of 10 token firings, not 100. The c
 
 ## 7. Interactive demo tool (Godot)
 
-A standalone Godot 4 scene at `godot_host/project/scenes/hdc_demo_view_a.tscn` visualises the foundational claim of §1. Pure GDScript, no dependency on the rest of the Ogma substrate, runs in the editor or via the CLI.
+A standalone Godot 4 scene at `godot_host/project/scenes/hdc_demo_view_a.tscn` visualises the foundational claim of §1. Pure GDScript, no dependency on the rest of the Zanshin substrate, runs in the editor or via the CLI.
 
 ### How to run
 
@@ -242,7 +242,7 @@ Step-by-step walk through the construction in §4 of this doc. Four tokens at d 
 
 `godot_host/project/scenes/hdc_demo_view_e.tscn`
 
-Visual demonstration of the experience-warped distance from §3.B of `docs/active_inference.md` and §4 of `docs/ogma_in_context.md`. Six knowledge-graph nodes sit at fixed positions on a ring around the query W. Each node has a Hebbian affinity that the user can grow by clicking. Real positions never move — but each node's **ghost ring** (its effective position under the warp `lerp(real, W, λA/(1+λA))`) drifts toward W as affinity accumulates. The nearest node by warped distance is highlighted gold.
+Visual demonstration of the experience-warped distance (see §5). Six knowledge-graph nodes sit at fixed positions on a ring around the query W. Each node has a Hebbian affinity that the user can grow by clicking. Real positions never move — but each node's **ghost ring** (its effective position under the warp `lerp(real, W, λA/(1+λA))`) drifts toward W as affinity accumulates. The nearest node by warped distance is highlighted gold.
 
 Controls:
 - Click any node → +0.5 affinity (animated)
@@ -266,26 +266,7 @@ All five views are wired into a slideshow chain (`A → B → C → D → E`) vi
 
 ---
 
-## 8. How to present this in the OpenAI talk
-
-If you have three minutes for this section, hit three beats:
-
-1. **The dimension claim** (slide + live View A): high-d unit vectors are nearly orthogonal. *"This is the only piece of math the rest of the layer needs."*
-2. **The three operations** (one slide): binding (⊙), superposition (+), permutation (roll). One sentence each.
-3. **The emergent property** (slide + planned View D, or a static plot if D isn't built): `cos(W₁, W₂) ≈ k/n` without learning.
-
-If you have six minutes, add:
-
-4. **The full construction** (formula slide): walk through the four-step pipeline of §4. One pass, slow.
-5. **The 128D production setting** (§6): brief mention of the tradeoff for credibility.
-
-The pitch line for the slide deck:
-
-> "We replaced a learned, brittle weighted average with a deterministic, compositional construction. The consensus layer does not need to be trained. The geometry it gives the meta-EPM is correct from tick one — and the math says it will stay correct as we add modalities."
-
----
-
-## 9. Anticipated questions, brief defensible answers
+## 8. Anticipated questions, brief defensible answers
 
 - **"Why not learn the consensus mapping with an autoencoder?"** — You could. It requires training data the system doesn't have at startup, and the resulting space has no guarantees of compositional structure. HDC gives compositional geometry by construction. We use learned representations *inside* the EPMs; the consensus layer is intentionally architectural.
 
@@ -305,10 +286,8 @@ The pitch line for the slide deck:
 
 ---
 
-## 10. References
+## 9. References
 
-- `docs/active_inference.md` — production spec, including §2 (Structural Consensus Fusion), §3.B (Hebbian-warped distance), §7 (token contracts).
-- `docs/v4_position.md` — the broader signal-flow argument the consensus layer sits inside.
 - `cpp_core/include/ogma/Topics.hpp:134` — `fused_embedding` declared as `Eigen::VectorXf // typically 128-D`.
 - `cpp_core/include/ogma/modules/EPM.hpp:94`, `cpp_core/include/ogma/modules/SequenceGNG.hpp:76` — `projection_dim_ = 128`.
 - `godot_host/project/scenes/hdc_demo_view_a.tscn`, `scripts/hdc_demo_view_a.gd` — the interactive demo.
