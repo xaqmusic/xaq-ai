@@ -68,13 +68,22 @@ python -c "from zanshin.encoders import make_encoder; import numpy as np; \
            print(make_encoder('audio').encode(np.zeros(4800,'float32')).shape)"
 ```
 
-## Audio and extensibility
+## Extending perception: the encoder registry
 
-Zanshin ships a **generic, dependency-free STFT audio encoder** so the
-multi-modal fusion story works with nothing else installed. Encoders are
-resolved through a registry (`zanshin.encoders`); third-party packages can
-contribute higher-fidelity encoders through the `zanshin.encoders` setuptools
-entry-point group without any change to Zanshin. See `python/zanshin/zanshin/encoders/`.
+Perception in Zanshin is pluggable. Every sensory modality — vision, touch,
+proprioception, audio, or something you invent — enters the system through a
+*frozen encoder* that maps raw input to a latent vector, and encoders are
+resolved through a small registry (`zanshin.encoders`) keyed by modality name
+and group.
+
+Zanshin ships generic, dependency-free encoders out of the box (Johnson–
+Lindenstrauss projections for visual modalities, a proprioceptive encoder, and a
+plain STFT encoder for audio), so multi-modal fusion works with nothing else
+installed. Any package can register additional encoders — a new sensor, a
+higher-fidelity front-end, or an entirely new modality — through the
+`zanshin.encoders` setuptools entry-point group, with **no change to Zanshin
+itself**; `make_encoder("<modality>")` then resolves to whatever is registered.
+See `python/zanshin/zanshin/encoders/`.
 
 ## Intended use and ethical stance
 
