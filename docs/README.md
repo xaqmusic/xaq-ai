@@ -11,5 +11,9 @@
   papers Zanshin draws on (active inference, JEPA / fractal-JEPA, hyperdimensional
   consensus, morphodynamics, homeokinesis / the playful machine, SIGReg). These
   summarize outside work and note where Zanshin uses, defers, or diverges from it.
+- **[the-picrawler-detour.md](the-picrawler-detour.md)** — the honest origin story:
+  the framework was first pushed into a complex quadruped body too early, ended up a
+  fragile RL mess, and that failure is why the Cell was rebuilt with rigour. Explains
+  the `the_picrawler_*` configs still in the repo.
 - **[NAMING.md](NAMING.md)** — why the code says `ami_ogma`/`ogma` (Zanshin's
   original internal codename).
