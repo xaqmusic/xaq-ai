@@ -36,7 +36,7 @@ Eigen::VectorXf FrozenSTFTEncoder::encode_mono(const float* samples, int n) {
     }
     const float fs = static_cast<float>(cfg_.sample_rate);
     // Per-band magnitude via a direct DFT evaluation at the band centre.
-    // TODO(zanshin-audio): windowed STFT frames + mel filterbank + JL projection.
+    // TODO(xaq-audio): windowed STFT frames + mel filterbank + JL projection.
     for (int b = 0; b < F; ++b) {
         const float w = kTwoPi * center_freqs_[b] / fs;
         float re = 0.0f, im = 0.0f;

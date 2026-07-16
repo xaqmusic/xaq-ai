@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-Zanshin depends on the third-party components listed below. Each remains the
+xaq depends on the third-party components listed below. Each remains the
 property of its respective authors and is governed by its own license, not by
-Zanshin's Apache-2.0 license. This file is a starting inventory; verify and
+xaq's Apache-2.0 license. This file is a starting inventory; verify and
 complete it (versions, license texts) before any public release.
 
 ## C++ runtime (`cpp_core/`)
@@ -41,7 +41,7 @@ Vendored header:
 | Component | License | Notes |
 |---|---|---|
 | NumPy | BSD-3-Clause | required |
-| PyTorch | BSD-3-Clause | required (engine); optional extra for `zanshin_core` |
+| PyTorch | BSD-3-Clause | required (engine); optional extra for `xaq_core` |
 | SciPy | BSD-3-Clause | required (engine) |
 | python-socketio | MIT | substrate bus |
 | pyzmq | BSD-3-Clause | substrate bus |

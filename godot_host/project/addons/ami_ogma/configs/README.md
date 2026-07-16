@@ -3,7 +3,7 @@
 These JSON files are launcher / brain configs for the Godot host. There are two
 lineages here, and they are not equal:
 
-- **`the_cell_*`** — the **Cell** forager, Zanshin's forward-facing example. This is
+- **`the_cell_*`** — the **Cell** forager, xaq's forward-facing example. This is
   where to start. The Cell report and doctrine describe what these run.
 
 - **`the_picrawler_*`** (and everything under `archive/`, including `BASELINES.md`) —

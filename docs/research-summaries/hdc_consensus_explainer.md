@@ -5,7 +5,7 @@
 **Status:** Reference / presentation prep
 **Companion:** `godot_host/project/scenes/hdc_demo_view_a.tscn` (interactive demo)
 
-This is the canonical explanation of the HDC superposition + temporal binding layer used in the Zanshin consensus pipeline. It is written for a reader who needs to grok the construction in about ten minutes, using geometric intuition only — no probability theory or matrix calculus.
+This is the canonical explanation of the HDC superposition + temporal binding layer used in the xaq consensus pipeline. It is written for a reader who needs to grok the construction in about ten minutes, using geometric intuition only — no probability theory or matrix calculus.
 
 ---
 
@@ -63,7 +63,7 @@ Shift the elements of A by k positions, wrapping around. The result is nearly or
 
 ## 3. Why we need two different binding operations
 
-Tokens in Zanshin's consensus layer have two distinct kinds of "position" that must be encoded without interfering with each other:
+Tokens in xaq's consensus layer have two distinct kinds of "position" that must be encoded without interfering with each other:
 
 | kind of position | operation used | why |
 |---|---|---|
@@ -74,7 +74,7 @@ These two binding modes are themselves nearly orthogonal in the dimension space 
 
 ---
 
-## 4. The Zanshin construction, step by step
+## 4. The xaq construction, step by step
 
 Every token published by an EPM goes through these four steps to contribute to the sync-window consensus vector.
 
@@ -168,7 +168,7 @@ A sync window typically carries on the order of 10 token firings, not 100. The c
 
 ## 7. Interactive demo tool (Godot)
 
-A standalone Godot 4 scene at `godot_host/project/scenes/hdc_demo_view_a.tscn` visualises the foundational claim of §1. Pure GDScript, no dependency on the rest of the Zanshin substrate, runs in the editor or via the CLI.
+A standalone Godot 4 scene at `godot_host/project/scenes/hdc_demo_view_a.tscn` visualises the foundational claim of §1. Pure GDScript, no dependency on the rest of the xaq substrate, runs in the editor or via the CLI.
 
 ### How to run
 

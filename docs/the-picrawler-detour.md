@@ -5,7 +5,7 @@ that failure is the reason the rest of this project looks the way it does.
 
 ## What we tried
 
-The **picrawler** is a twelve-servo quadruped. We pushed Zanshin's active-inference
+The **picrawler** is a twelve-servo quadruped. We pushed xaq's active-inference
 substrate straight into it, expecting the same reward-free, homeostatic machinery we
 believed in to learn to stand and walk. It was the wrong order of operations.
 
@@ -54,4 +54,4 @@ picrawler is where this framework went before it learned to be careful; the Cell
 where it learned.
 
 The simulation and environments built for the picrawler are solid. We will be revisiting
-it shortly in preparation for moving the Zanshin framework onto the Raspberry Pi.
+it shortly in preparation for moving the xaq framework onto the Raspberry Pi.

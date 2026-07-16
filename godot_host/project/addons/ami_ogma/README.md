@@ -1,14 +1,14 @@
-# addons/ami_ogma — Zanshin Godot GDExtension
+# addons/ami_ogma — xaq Godot GDExtension
 
-This addon is the Godot 4.6 GDExtension host for the Zanshin runtime.
+This addon is the Godot 4.6 GDExtension host for the xaq runtime.
 
 ## Why is this called `ami_ogma`?
 
-`ami_ogma` is Zanshin's **original internal codename**. This addon directory,
+`ami_ogma` is xaq's **original internal codename**. This addon directory,
 the built extension `ami_ogma_host.so`, and the GDExtension entry symbol
 `ami_ogma_library_init` keep the old name so existing scenes and saved configs
 that reference `res://addons/ami_ogma/...` keep working. `ami_ogma` == `ogma` ==
-**Zanshin** — same project. See [../../../../docs/NAMING.md](../../../../docs/NAMING.md).
+**xaq** — same project. See [../../../../docs/NAMING.md](../../../../docs/NAMING.md).
 
 ## Building the extension
 

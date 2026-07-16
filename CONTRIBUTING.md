@@ -1,11 +1,11 @@
-# Contributing to Zanshin
+# Contributing to xaq
 
-Thanks for your interest in Zanshin. Contributions of code, docs, tests, and
+Thanks for your interest in xaq. Contributions of code, docs, tests, and
 experiments are welcome.
 
 ## Developer Certificate of Origin (DCO)
 
-Zanshin uses the [Developer Certificate of Origin](https://developercertificate.org/)
+xaq uses the [Developer Certificate of Origin](https://developercertificate.org/)
 rather than a Contributor License Agreement. By signing off on your commits you
 certify that you wrote the patch or otherwise have the right to submit it under
 the project's Apache-2.0 license.
@@ -23,8 +23,8 @@ Signed-off-by: Your Name <you@example.com>
   code you don't have the right to relicense.
 - **No proprietary encoders:** the bio-mimetic audio front-end is developed
   separately. Audio contributions here should build on the generic STFT path in
-  `python/zanshin/zanshin/encoders/` (Python) and `cpp_core/src/v3/encoder_stft.cpp`
-  (C++), or plug in via the `zanshin.encoders` entry-point group.
+  `python/xaq/xaq/encoders/` (Python) and `cpp_core/src/v3/encoder_stft.cpp`
+  (C++), or plug in via the `xaq.encoders` entry-point group.
 - **Keep it buildable:** `cmake --build cpp_core/build` and the Python import
   smoke should pass before you open a PR.
 - **Third-party deps:** if you add a bundled or vendored dependency, list it in
@@ -35,6 +35,6 @@ Signed-off-by: Your Name <you@example.com>
 See [README.md](README.md#build). For the Python engine:
 
 ```sh
-pip install -e python/zanshin_core -e python/zanshin
-pytest python/zanshin/tests
+pip install -e python/xaq_core -e python/xaq
+pytest python/xaq/tests
 ```

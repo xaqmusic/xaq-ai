@@ -23,5 +23,5 @@ By constantly applying a baseline wandering drive to its motors (environmental n
 If an agent stays in one part of the topological graph for too long, it should slowly "forget" or degrade the confidence of that region, artificially inflating the TLE to force a renewed bout of exploration. Constant, perfect confidence breeds stagnation. 
 
 ---
-**Actionable takeaway for Zanshin's action-selection / PlayLoop:**
+**Actionable takeaway for xaq's action-selection / PlayLoop:**
 Do not disable motor babbling. Instead, gate it inversely to TLE: `exploration_v = base_noise * (1.0 - surprise)`. When surprise hits zero, the agent should become aggressively playful, acting randomly until it generates a new physical outcome.

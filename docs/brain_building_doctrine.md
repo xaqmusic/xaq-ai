@@ -1,6 +1,6 @@
 # Brain-Building Doctrine
 
-*The reusable principles for building a new Zanshin brain, distilled from
+*The reusable principles for building a new xaq brain, distilled from
 building embodied active-inference agents. This is the "bible" — read it
 before standing up a new capability. The Cell navigator is the running
 example, but the principles are creature-agnostic.*

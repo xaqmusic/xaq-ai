@@ -1,6 +1,6 @@
 # The Cell Navigator — A Falsification Testbed for Markov-Blanket-Loop Active Inference
 
-*An evidence report on the Zanshin active-inference method, tested with the Cell foraging
+*An evidence report on the xaq active-inference method, tested with the Cell foraging
 agent. Branch `cell-maze`, 2026-07. Companion to `docs/brain_building_doctrine.md` (the method
 itself). Its contribution is not a validated architecture but a discipline for building embodied
 active-inference agents — one that separates what we can measure from what we can only hope for,
@@ -13,7 +13,7 @@ properly powered.*
 
 ### The system in brief
 
-Zanshin is an embodied active-inference architecture: a "System 1" perceptual and motor
+xaq is an embodied active-inference architecture: a "System 1" perceptual and motor
 substrate rather than a language-model-style deliberator. It learns by minimizing prediction
 error, is driven by internal homeostatic needs (food restores energy; collisions are aversive)
 rather than an external reward signal, and touches the world only through its own sensors and

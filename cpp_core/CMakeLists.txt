@@ -94,8 +94,8 @@ add_library(ogma_infra
     src/video_capture.cpp
     src/control_server.cpp
 )
-# NOTE(zanshin): src/audio_capture.cpp (miniaudio mic capture) is AMI-Awen-only
-# and intentionally omitted from the open Zanshin tree.
+# NOTE(xaq): src/audio_capture.cpp (miniaudio mic capture) is AMI-Awen-only
+# and intentionally omitted from the open xaq tree.
 
 target_include_directories(ogma_infra PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -126,9 +126,9 @@ add_library(ogma_v3
     src/v3/gng.cpp
     src/v3/epm.cpp
 )
-# NOTE(zanshin): src/v3/encoder_hopf.cpp (bio-mimetic cochlear encoder) is
+# NOTE(xaq): src/v3/encoder_hopf.cpp (bio-mimetic cochlear encoder) is
 # AMI-Awen-only; encoder_stft.cpp is the generic IP-free audio front-end.
-# TODO(zanshin-audio): windowed STFT + mel + JL projection (see encoder_stft.hpp).
+# TODO(xaq-audio): windowed STFT + mel + JL projection (see encoder_stft.hpp).
 
 target_include_directories(ogma_v3 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

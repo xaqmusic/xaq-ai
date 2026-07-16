@@ -3,7 +3,7 @@
 /**
  * FrozenSTFTEncoder — generic, IP-free audio front-end for the EPM audio slot.
  *
- * This is the C++ analogue of zanshin/encoders/audio.py :: FrozenSTFTEncoder.
+ * This is the C++ analogue of xaq/encoders/audio.py :: FrozenSTFTEncoder.
  * It occupies the EPM's "audio" encoder kind so the multi-modal fusion path
  * keeps an audio modality WITHOUT shipping any bio-mimetic cochlear IP (the
  * Hopf/ERB/MOC/binaural pipeline lives in the private AMI-Awen tree).
@@ -18,7 +18,7 @@
  * Output: n_filters-D float vector, soft-normalised — same shape contract as
  * the other v3 encoders so the GNG needs no reconfiguration.
  *
- * TODO(zanshin-audio): replace the single-frame direct-DFT with a proper
+ * TODO(xaq-audio): replace the single-frame direct-DFT with a proper
  * windowed STFT (framing + hop + Hann window), a fixed mel filterbank, and a
  * seeded Johnson–Lindenstrauss projection into encoder_jl — the efficient,
  * higher-fidelity generic pipeline. This stub is deliberately minimal but
