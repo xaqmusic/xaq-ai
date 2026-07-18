@@ -4,7 +4,7 @@
 operator's decomposition of the monolithic coxswain (`ActionDecoder` in joint-action mode).
 **Header:** `cpp_core/include/ogma/modules/HeadingController.hpp`
 **Impl:** `cpp_core/src/ogma/modules/HeadingController.cpp`
-**Inspector:** `tools/v4_inspector/widgets/heading_controller_inspector.py` (heading dial +
+**Inspector:** `tools/xaq_inspector/widgets/heading_controller_inspector.py` (heading dial +
 learned-advance policy grid + `k_body`/thrust/velocity traces).
 
 ---
@@ -134,7 +134,7 @@ on this).
 
 ---
 
-## Diagnostics (`diag_snapshot` → v4_inspector / body JSONL)
+## Diagnostics (`diag_snapshot` → xaq_inspector / body JSONL)
 
 `bearing`, `gain` (effective turn gain), `k_body`, `steer` (`hc_steer`), `thrust` (`hc_thrust`),
 `nav_on`. When `learn_advance`: `err_bin`, `thrust_act`, `adv_reward`, `adv_spread`

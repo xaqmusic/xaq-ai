@@ -138,7 +138,7 @@ For the predictive-coding loop, add `reality.motor.pattern_left` and `reality.mo
 When changing this module:
 
 ```bash
-cd /home/xaqmusic/ami-ogma/cpp_core
+cd cpp_core
 cmake --build build --target test_keyframe_averager_streams && ctest -R "KeyframeAverager"
 ```
 

@@ -146,7 +146,7 @@ as a reflex taking the bus suppresses cognitive learning. Scope:
   [`v_klino` z-score, `v_planner` level], `mean_klino`, `plan_peak`, winner, gains, margin) +
   MotorBus effective-gains.
 - `godot_host/project/scripts/body_controller.gd`: JSONL emit for `EFEArbiter`.
-- NEW `tools/v4_inspector/widgets/efe_arbiter_inspector.py`: the **value race** — two bars/timeseries
+- NEW `tools/xaq_inspector/widgets/efe_arbiter_inspector.py`: the **value race** — two bars/timeseries
   (v_klino vs v_planner) with the margin band, the current winner highlighted, and the two gain
   faders. This is the demo artifact (watch the bug choose).
 

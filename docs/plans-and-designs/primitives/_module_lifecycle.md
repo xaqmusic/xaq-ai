@@ -328,9 +328,9 @@ exercises the crashing path and would catch a regression.
    metrics): add a `dynamic_cast` branch in
    `godot_host/src/OgmaBrain.cpp::get_module_metrics`.
 8. **Inspector dashboard** (only if a useful dashboard exists for this
-   module type): add a row to `tools/v4_inspector/widgets/__init__.py
+   module type): add a row to `tools/xaq_inspector/widgets/__init__.py
    ::WIDGET_REGISTRY` mapping the type name to a widget class.  See
-   `tools/v4_inspector/README.md`.
+   `tools/xaq_inspector/README.md`.
 
 ---
 
@@ -340,7 +340,7 @@ When making any change to `Module` base or to a subclass's lifecycle
 methods, run the C++ test suite:
 
 ```bash
-cd /home/xaqmusic/ami-ogma-ui/cpp_core
+cd cpp_core
 cmake --build build && ctest --output-on-failure
 ```
 

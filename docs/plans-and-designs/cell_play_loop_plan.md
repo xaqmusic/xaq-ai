@@ -186,7 +186,7 @@ ON), not a stripped one.
 `get_module_metrics` uses **accessors**, not `diag_snapshot` — new PlayLoop fields
 (novelty, play_value, wander/climb state, eat-credit EMA) and the arbiter's third
 `G_play`/`gain.play` need explicit accessor + GDScript-flattener lines or they read
-0 in the JSONL. v4_inspector: extend the arbiter widget's race to **three** stacked
+0 in the JSONL. xaq_inspector: extend the arbiter widget's race to **three** stacked
 bars; add a `play` widget (frontier novelty meter + climb↔wander gauge + coverage).
 HUD tug-of-war → three-way.
 
