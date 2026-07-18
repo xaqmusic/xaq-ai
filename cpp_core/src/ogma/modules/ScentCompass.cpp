@@ -235,7 +235,7 @@ nlohmann::json ScentCompass::snapshot_state() const {
     return nlohmann::json{{"version", 1}};   // stateless (last scent refreshed each tick)
 }
 
-// Live viz (v4_inspector ScentCompass widget): the egocentric gradient bearing
+// Live viz (xaq_inspector ScentCompass widget): the egocentric gradient bearing
 // (cx=+right, cy=+forward), its magnitude (= gradient strength / confidence),
 // the discarded common-mode (proximity), and the raw nostril ring so the widget
 // can draw a compass needle + per-nostril bars.

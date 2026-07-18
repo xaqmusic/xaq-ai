@@ -492,7 +492,7 @@ nlohmann::json HeadingController::diag_snapshot() const {
         j["adv_reward"]    = last_adv_reward_;
         j["adv_spread"]    = last_adv_spread_;
         j["adv_cov"]       = last_adv_cov_;
-        // full learned advance policy table (for the v4_inspector grid)
+        // full learned advance policy table (for the xaq_inspector grid)
         j["n_err_bins"]    = n_err_bins_;
         j["n_thrust_acts"] = n_thrust_acts_;
         j["max_thrust"]    = max_thrust_;

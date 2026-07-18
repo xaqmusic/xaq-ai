@@ -354,7 +354,7 @@ void SequenceGNG::tick(uint64_t tick_id) {
 // ---------------------------------------------------------------------------
 
 nlohmann::json SequenceGNG::diag_snapshot() const {
-    // Lightweight payload tailored to tools/v4_inspector/widgets/
+    // Lightweight payload tailored to tools/xaq_inspector/widgets/
     // seqgng_inspector.py.  The full snapshot_state() ships every
     // GNG node's prototype (cfg.dim floats — typically 128), all
     // edges (O(N^2) worst-case), and the full successor_counts map.

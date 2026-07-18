@@ -62,7 +62,7 @@ var _scent_reach_label: Label = null
 # Three stacked bars in a shared visual language so movement, its metabolic cost, and the
 # policy that drives it read together. motor & energy are single-fill bars; the arbiter is a
 # tug-of-war (klino | planner | play share) with the DRIVING loop bright and the muted ones
-# dimmed — mirrors the v4_inspector EFEArbiter widget. The arbiter row shows only when the
+# dimmed — mirrors the xaq_inspector EFEArbiter widget. The arbiter row shows only when the
 # config has an EFEArbiter.
 const _KLINO_COL := Color(0.31, 0.88, 0.44)    # green  — the near-food CLOSER
 const _PLANNER_COL := Color(0.47, 0.63, 1.0)   # blue   — the far-field SEARCHER

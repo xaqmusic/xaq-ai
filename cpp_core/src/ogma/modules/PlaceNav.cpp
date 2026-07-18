@@ -431,7 +431,7 @@ float PlaceNav::block_cost(int from, int to) const {
 float PlaceNav::hab_cur() const { return (cur_node_ >= 0 && hab_.count(cur_node_)) ? hab_.at(cur_node_) : 0.0f; }
 
 nlohmann::json PlaceNav::diag_snapshot() const {
-    // Node-parallel arrays + edge list -> the v4_inspector place-nav widget (mirrors the
+    // Node-parallel arrays + edge list -> the xaq_inspector place-nav widget (mirrors the
     // PlaceGraphPlanner snapshot so the map/route render is reused; `food` = the LOOSE food tag).
     std::vector<int>    nodes;   std::vector<double> food, val, hab;
     nlohmann::json node_pos = nlohmann::json::array();   // path-integration centroids (geometry)

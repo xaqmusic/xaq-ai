@@ -659,7 +659,7 @@ float PlaceGraphPlanner::max_hab() const {
 }
 
 nlohmann::json PlaceGraphPlanner::diag_snapshot() const {
-    // Node-parallel arrays + edge list → the v4_inspector place-graph widget.
+    // Node-parallel arrays + edge list → the xaq_inspector place-graph widget.
     std::vector<int>   nodes;   std::vector<double> food, val;
     nlohmann::json node_pos = nlohmann::json::array();   // path-integration centroids (true geometry)
     for (auto const& [n, v] : value_) {

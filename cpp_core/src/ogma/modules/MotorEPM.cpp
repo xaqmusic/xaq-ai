@@ -1403,7 +1403,7 @@ nlohmann::json MotorEPM::snapshot_state() const {
     return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
 }
 
-// Live viz (v4_inspector MotorEPM widget): the homeokinetic self-model's health
+// Live viz (xaq_inspector MotorEPM widget): the homeokinetic self-model's health
 // (motor-TLE = forward-model surprise, the one working predictive loop), the
 // cognitive drive channels the brain injects (cog_steer differential, cog_thrust
 // common-mode), the body's resulting forward velocity, the curiosity/hunger

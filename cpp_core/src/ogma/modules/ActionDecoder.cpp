@@ -1722,7 +1722,7 @@ nlohmann::json ActionDecoder::snapshot_state() const {
     };
 }
 
-// Live viz (v4_inspector ActionDecoder widget): the coxswain's decision state —
+// Live viz (xaq_inspector ActionDecoder widget): the coxswain's decision state —
 // which belief node it's in, the preferred-observation targets it scores plans by
 // (scent + green loom), the action it's currently committing, and the action its
 // H-step plan recommends.  Lets the operator SEE whether the brain is aiming at

@@ -547,7 +547,7 @@ void CPGOscillator::tick(uint64_t tick_id) {
 }
 
 nlohmann::json CPGOscillator::snapshot_state() const {
-    // Surface per-tick cached state + config params so the v4_inspector
+    // Surface per-tick cached state + config params so the xaq_inspector
     // CPGInspector widget can chart competence gate, amplitude blend,
     // and per-joint bias breakdown live.  Not used for clone/restore —
     // CPG is a stateless-modulo-phase oscillator and a future restore

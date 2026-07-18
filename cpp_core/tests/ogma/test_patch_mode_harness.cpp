@@ -532,12 +532,17 @@ void publish_full_cell_inputs(ogma::Bus* bus, uint64_t tick) {
 }
 
 TEST(PatchModeHarness, FullGraphPremotorRemove) {
-    char const* path =
-        "/home/xaqmusic/ami-ogma-ui/godot_host/project/addons/ami_ogma/"
-        "configs/the_cell_premotor.json";
-    std::ifstream f(path);
-    if (!f.good()) {
-        GTEST_SKIP() << "config not present: " << path;
+    // Resolve the config relative to the repo — no absolute/sibling-repo path,
+    // so the suite is portable and standalone from any old ami-ogma checkout.
+    std::string path;
+    for (char const* cand : {
+             "../godot_host/project/addons/ami_ogma/configs/archive/the_cell_premotor.json",
+             "../../godot_host/project/addons/ami_ogma/configs/archive/the_cell_premotor.json",
+             "godot_host/project/addons/ami_ogma/configs/archive/the_cell_premotor.json"}) {
+        if (std::ifstream(cand).good()) { path = cand; break; }
+    }
+    if (path.empty()) {
+        GTEST_SKIP() << "config not present: the_cell_premotor.json";
     }
     auto cfg = ogma::GraphConfig::load_from_file(path);
     auto inst = std::make_unique<ogma::OgmaInstance>(

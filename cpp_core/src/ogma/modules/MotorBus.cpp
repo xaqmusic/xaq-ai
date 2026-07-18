@@ -420,7 +420,7 @@ void MotorBus::tick(uint64_t tick_id) {
     }
 }
 
-// Live viz (v4_inspector meter-bridge widget): per-influencer POST-FADER level
+// Live viz (xaq_inspector meter-bridge widget): per-influencer POST-FADER level
 // on each motor channel (L,R), the bus gain reduction, and the compressed output
 // level — the console's meter bridge.  Two channels per meter (L/R) so the audio
 // stereo analogy holds; a multi-motor body would aggregate its motors into L/R
