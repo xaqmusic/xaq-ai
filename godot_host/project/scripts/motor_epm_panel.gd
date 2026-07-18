@@ -6,10 +6,10 @@ extends Control
 ## Every MotorEPM knob is HotMutable, so changes take effect on the next tick.
 ##
 ## Use case: the Motor-EPM controller is reward-free; its behaviour (gain,
-## exploration, posture, spider tuck) lives entirely in these knobs, and the
+## exploration, posture, coordination) lives entirely in these knobs, and the
 ## right regime is read by EYE (smoothness / aliveness / leg strength), not by
-## headless stats.  Drag a slider, watch the body, repeat.  Top-LEFT so it does
-## not collide with the reward panel (top-right).  T-hotkey hideable like the
+## headless stats.  Drag a slider, watch the body, repeat.  Top-RIGHT so it
+## does not overlap the HUD (which lives top-left).  T-hotkey hideable like the
 ## other HUD panels (mouse_filter PASS).
 ##
 ## Methodology: SCENE-only (headless runs never instance it).  No body-side
@@ -19,42 +19,29 @@ const _BODY_CANDIDATES: Array = ["Picrawler", "Quadruped"]
 const _MODULE_ID: String = "motor_epm"
 
 # Slider records: {key, label, min, max, step}.  key must be a HotMutable param
-# on MotorEPM.  Ordered most-impactful first.
+# on MotorEPM.  Trimmed 2026-07-18 from 33 -> 15 (dropped panic/escape, deep
+# learning-rate internals, and rarely-by-eye fine knobs).  Grouped by function.
 const _SLIDERS: Array = [
-	{"key": "amp_homeo_gain",   "label": "amp_homeo_gain (anti-stall)", "min": 0.0,  "max": 0.05, "step": 0.002},
-	{"key": "amp_target",       "label": "amp_target  (osc size)",      "min": 0.0,  "max": 1.5,  "step": 0.05},
-	{"key": "coupling_gain",    "label": "coupling_gain  (Rung3 sync)", "min": 0.0,  "max": 2.0,  "step": 0.05},
-	{"key": "stroke_gain",      "label": "stroke_gain  (fwd thrust)",   "min": 0.0,  "max": 2.0,  "step": 0.05},
-	{"key": "stroke_phase",     "label": "stroke_phase  (push timing)", "min": -3.15,"max": 3.15, "step": 0.1},
-	{"key": "steer",            "label": "steer  (turn-rate cmd)",      "min": -2.0, "max": 2.0,  "step": 0.05},
-	{"key": "nav_gain",         "label": "nav_gain  (seek target)",     "min": -4.0, "max": 4.0,  "step": 0.1},
-	{"key": "heading_gain",     "label": "heading_gain (go-straight)",  "min": -3.0, "max": 3.0,  "step": 0.05},
-	{"key": "balance_gain",     "label": "balance_gain  (vestibular)",  "min": -3.0, "max": 3.0,  "step": 0.05},
-	{"key": "height_homeo_gain","label": "height_homeo  (stand tall)",  "min": 0.0,  "max": 0.1,  "step": 0.005},
-	{"key": "height_k",         "label": "height_k  (defend frac)",     "min": 0.0,  "max": 1.0,  "step": 0.02},
-	{"key": "panic_strength",   "label": "panic  (escape wedge)",       "min": 0.0,  "max": 1.0,  "step": 0.05},
-	{"key": "panic_on",         "label": "panic_on  (distress thresh)", "min": 0.0,  "max": 1.0,  "step": 0.02},
-	{"key": "panic_motor_mult", "label": "panic_motor  (flail gain)",   "min": 1.0,  "max": 4.0,  "step": 0.1},
-	{"key": "panic_push_amp",   "label": "panic_push  (escape pump)",   "min": 0.0,  "max": 3.0,  "step": 0.1},
-	{"key": "panic_push_hz",    "label": "panic_push_hz  (pump freq)",  "min": 0.1,  "max": 3.0,  "step": 0.1},
-	{"key": "motor_gain",       "label": "motor_gain  (leg strength)", "min": 0.0,  "max": 5.0,  "step": 0.1},
-	{"key": "ctrl_lr",          "label": "ctrl_lr  (HK drive)",        "min": 0.0,  "max": 0.10, "step": 0.005},
-	{"key": "explore_noise",    "label": "explore_noise  (motion)",    "min": 0.0,  "max": 0.50, "step": 0.01},
-	{"key": "postural_gain",    "label": "postural_gain  (damp/hold)", "min": 0.0,  "max": 2.0,  "step": 0.05},
-	{"key": "knee_tuck_target", "label": "knee_tuck_target  (spider)", "min": -1.0, "max": 1.0,  "step": 0.05},
-	{"key": "sat_lr",           "label": "sat_lr  (anti-saturate)",    "min": 0.0,  "max": 0.10, "step": 0.005},
-	{"key": "bias_lr",          "label": "bias_lr",                    "min": 0.0,  "max": 0.05, "step": 0.005},
-	{"key": "model_lr",         "label": "model_lr",                   "min": 0.0,  "max": 0.10, "step": 0.005},
-	{"key": "babble_scale",     "label": "babble_scale (warmup)",      "min": 0.0,  "max": 1.0,  "step": 0.05},
-	{"key": "reg_eps",          "label": "reg_eps",                    "min": 0.001,"max": 0.10, "step": 0.001},
-	{"key": "max_dctrl",        "label": "max_dctrl  (ΔC clamp)",      "min": 0.0,  "max": 0.50, "step": 0.01},
-	# 2026-06-14 — coordination / efficiency / agency-search knobs.
-	{"key": "cruse_gain",       "label": "cruse_gain  (leg coord)",    "min": 0.0,  "max": 0.50, "step": 0.02},
-	{"key": "cruse_rule3_weight","label": "cruse_rule3  (contra load)","min": 0.0,  "max": 2.0,  "step": 0.1},
-	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0, "max": 0.60, "step": 0.05},
-	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",  "min": 0.0,  "max": 1.0,  "step": 0.05},
-	{"key": "coord_lat_penalty","label": "agency_lat  (anti-crab)",    "min": 0.0,  "max": 1.0,  "step": 0.05},
-	{"key": "amp_seek_rate",    "label": "amp_seek  (CoT search)",     "min": 0.0,  "max": 0.20, "step": 0.01},
+	# primary "by eye" levers (legs weak -> motor_gain; jerky -> ctrl_lr / noise)
+	{"key": "motor_gain",        "label": "motor_gain  (leg strength)", "min": 0.0,  "max": 5.0,  "step": 0.1},
+	{"key": "ctrl_lr",           "label": "ctrl_lr  (HK drive)",        "min": 0.0,  "max": 0.10, "step": 0.005},
+	{"key": "explore_noise",     "label": "explore_noise  (motion)",    "min": 0.0,  "max": 0.50, "step": 0.01},
+	# gait oscillation
+	{"key": "amp_target",        "label": "amp_target  (osc size)",     "min": 0.0,  "max": 1.5,  "step": 0.05},
+	{"key": "coupling_gain",     "label": "coupling_gain  (Rung3 sync)","min": 0.0,  "max": 2.0,  "step": 0.05},
+	{"key": "stroke_gain",       "label": "stroke_gain  (fwd thrust)",  "min": 0.0,  "max": 2.0,  "step": 0.05},
+	# balance / posture
+	{"key": "balance_gain",      "label": "balance_gain  (vestibular)", "min": -3.0, "max": 3.0,  "step": 0.05},
+	{"key": "height_homeo_gain", "label": "height_homeo  (stand tall)", "min": 0.0,  "max": 0.1,  "step": 0.005},
+	{"key": "postural_gain",     "label": "postural_gain  (damp/hold)", "min": 0.0,  "max": 2.0,  "step": 0.05},
+	# steering
+	{"key": "heading_gain",      "label": "heading_gain (go-straight)", "min": -3.0, "max": 3.0,  "step": 0.05},
+	# coordination / agency (reward-free homeokinetic drives, not RL)
+	{"key": "cruse_gain",        "label": "cruse_gain  (leg coord)",    "min": 0.0,  "max": 0.50, "step": 0.02},
+	{"key": "cruse_rule3_weight","label": "cruse_rule3  (contra load)", "min": 0.0,  "max": 2.0,  "step": 0.1},
+	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
+	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
+	{"key": "coord_lat_penalty", "label": "agency_lat  (anti-crab)",    "min": 0.0,  "max": 1.0,  "step": 0.05},
 ]
 
 var _body: Node = null
@@ -63,7 +50,7 @@ var _status: Label = null
 var _minimise_btn: Button = null
 var _value_labels: Dictionary = {}    # key -> Label
 var _synced: bool = false             # initial pull landed (brain ready)
-# Minimise/expand: collapse to the header row.  Mirrors reward_panel — the panel
+# Minimise/expand: collapse to the header row.  The panel
 # is anchored bottom=1.0, so we must flip anchor_bottom to 0.0 and clamp
 # offset_bottom to a one-line height (else the empty frame keeps full height).
 var _is_minimised: bool = false
@@ -72,14 +59,16 @@ var _full_offset_bottom: float = 0.0
 const _COLLAPSED_HEIGHT: float = 38.0   # header row + frame padding
 
 func _ready() -> void:
-	# Top-LEFT anchor (reward panel owns top-right).
-	anchor_left = 0.0
+	# Top-RIGHT anchor — the HUD lives top-left, so anchor to the right edge
+	# to avoid overlapping it (the reward/trainer/curriculum panels that used
+	# to own top-right are gone).  Panel is 360 wide with a 12px margin.
+	anchor_left = 1.0
 	anchor_top = 0.0
-	anchor_right = 0.0
+	anchor_right = 1.0
 	anchor_bottom = 1.0
-	offset_left = 12.0
+	offset_left = -12.0 - 360.0
 	offset_top = 12.0
-	offset_right = 12.0 + 360.0
+	offset_right = -12.0
 	offset_bottom = -12.0
 	mouse_filter = Control.MOUSE_FILTER_PASS
 
@@ -217,8 +206,7 @@ func _on_slider(key: String, v: float) -> void:
 
 func _on_minimise() -> void:
 	# Hide the content AND shrink the panel rect to the header row, so the
-	# collapsed panel is one line and frees the surrounding HUD area (matches
-	# reward_panel's collapse behaviour).
+	# collapsed panel is one line and frees the surrounding HUD area.
 	if _content_vb == null or _minimise_btn == null:
 		return
 	_is_minimised = not _is_minimised
