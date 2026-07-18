@@ -20,6 +20,9 @@
 //                                    target bearing (steers toward the target).
 //     7. PanicHysteresis           — distress latch/unlatch with no in-band chatter.
 //     8. HotParamApplication       — on_param_change round-trips via current_params.
+//     9. Gate0ResetMaskingInstruments — gait_coherence + reset counters surfaced in
+//                                    diag, driven by events.miss/reset, and
+//                                    round-tripped through snapshot (L-1a Gate 0).
 // =============================================================================
 
 #include <gtest/gtest.h>
@@ -130,7 +133,9 @@ struct Fixture {
         return pt;
     }
 
-    void run_tick(uint64_t t, Sensors s = {}) {
+    // `event` (e.g. "reset"/"miss") publishes an EnvEvent on events.<event> this
+    // tick — used to exercise the Gate 0 reset-masking hook.  Empty = no event.
+    void run_tick(uint64_t t, Sensors s = {}, std::string const& event = "") {
         bus.begin_tick(t);
         for (int leg = 0; leg < n_legs; ++leg)
             bus.publish(pre + ".p" + std::to_string(leg), proprio_frame(double(t), leg, motor_dim));
@@ -140,6 +145,11 @@ struct Fixture {
         if (s.height   >= 0.0f) bus.publish(pre + ".height",   vec_token({s.height}));
         if (s.tc_x != 0.0f || s.tc_y != 0.0f)
             bus.publish(pre + ".nav", vec_token({s.tc_x, s.tc_y}));
+        if (!event.empty()) {
+            auto ev = std::make_shared<ogma::EnvEvent>();
+            ev->name = event; ev->intensity = 1.0f;
+            bus.publish("events." + event, ev);
+        }
         m.tick(t);
         bus.end_tick();
     }
@@ -387,4 +397,59 @@ TEST(MotorEPM, HotParamApplication) {
         ASSERT_NE(it, cp.end()) << kv.k << " missing from current_params";
         EXPECT_DOUBLE_EQ(std::get<double>(it->second), kv.v) << kv.k;
     }
+}
+
+// =============================================================================
+// 9. Gate 0 (L-1a): the reset-masked gait instruments are surfaced in
+//    diag_snapshot, driven by events.miss / events.reset, and round-trip through
+//    snapshot/restore.  This is the measurement foundation for the L-1 gait work.
+// =============================================================================
+TEST(MotorEPM, Gate0ResetMaskingInstruments) {
+    auto p = base_params();
+    p["coupling_gain"] = 0.5;
+    Fixture f(p, 4, 3);
+
+    // Warm up with NO disruption.
+    for (uint64_t t = 0; t < 60; ++t) f.run_tick(t, Sensors{0.1f});
+
+    auto d = f.m.diag_snapshot();
+    ASSERT_TRUE(d.contains("gait_coherence"));
+    ASSERT_TRUE(d.contains("reset_count"));
+    ASSERT_TRUE(d.contains("ticks_since_reset"));
+    ASSERT_TRUE(d.contains("reset_rate"));
+    // gait_coherence is a Kuramoto order parameter ∈ [0,1].
+    const float coh = d["gait_coherence"].get<float>();
+    EXPECT_GE(coh, 0.0f);
+    EXPECT_LE(coh, 1.0f);
+    // No disruption yet → count 0, ticks-since advanced, rate ~0.
+    EXPECT_EQ(d["reset_count"].get<uint64_t>(), 0u);
+    EXPECT_GT(d["ticks_since_reset"].get<uint64_t>(), 0u);
+    EXPECT_NEAR(d["reset_rate"].get<float>(), 0.0f, 1e-3f);
+
+    // events.reset zeroes the masking counter, bumps the count, moves the rate.
+    f.run_tick(60, Sensors{0.1f}, /*event=*/"reset");
+    d = f.m.diag_snapshot();
+    EXPECT_EQ(d["reset_count"].get<uint64_t>(), 1u);
+    EXPECT_EQ(d["ticks_since_reset"].get<uint64_t>(), 0u) << "reset must restart the mask counter";
+    EXPECT_GT(d["reset_rate"].get<float>(), 0.0f)          << "the disruption must move the rate EMA";
+
+    // ticks_since_reset counts up again on a quiet tick.
+    f.run_tick(61, Sensors{0.1f});
+    EXPECT_EQ(f.m.diag_snapshot()["ticks_since_reset"].get<uint64_t>(), 1u);
+
+    // events.miss is treated identically (a fall is also a disruption).
+    f.run_tick(62, Sensors{0.1f}, /*event=*/"miss");
+    d = f.m.diag_snapshot();
+    EXPECT_EQ(d["reset_count"].get<uint64_t>(), 2u);
+    EXPECT_EQ(d["ticks_since_reset"].get<uint64_t>(), 0u);
+
+    // The counters + rate round-trip through snapshot/restore.
+    auto snap = f.m.snapshot_state();
+    EXPECT_EQ(snap["module"]["reset_count"].get<uint64_t>(), 2u);
+    Fixture f2(p, 4, 3);
+    f2.m.restore_state(snap);
+    auto d2 = f2.m.diag_snapshot();
+    EXPECT_EQ(d2["reset_count"].get<uint64_t>(), 2u);
+    EXPECT_EQ(d2["ticks_since_reset"].get<uint64_t>(), 0u);
+    EXPECT_FLOAT_EQ(d2["reset_rate"].get<float>(), d["reset_rate"].get<float>());
 }

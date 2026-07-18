@@ -517,6 +517,25 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
             feet_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_feet(p); }));
     }
+    // Gate 0 (L-1a) — prefix-subscribe the body's disruption events (events.miss
+    // on a fall, events.reset on a teleport/respawn) for reset-masking.
+    sub_ids_.push_back(bus_->subscribe(
+        topics::kEventsPrefix, SubscriptionKind::Direct,
+        [this](std::string_view topic, MessagePtr p){ handle_event(topic, p); }));
+}
+
+void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto e = std::dynamic_pointer_cast<const EnvEvent>(payload);
+    if (!e) return;
+    std::string name(topic.substr(std::string(topics::kEventsPrefix).size()));
+    // A catastrophic fall (miss) or a teleport/respawn (reset) both break the
+    // upright bout → reset-mask: restart ticks-since-reset and count the disruption.
+    if (name == "miss" || name == "reset") {
+        ++reset_count_;
+        ticks_since_reset_   = 0;
+        reset_hit_this_tick_ = true;
+    }
 }
 
 void MotorEPM::handle_tilt(MessagePtr payload) {
@@ -753,6 +772,19 @@ void MotorEPM::handle_proprio(int leg, MessagePtr payload) {
 
 void MotorEPM::tick(uint64_t tick_id) {
     int m = motor_dim_;
+
+    // ---- Gate 0 reset-masking bookkeeping (reward-free instrumentation) ----
+    // Slow EMA of the per-tick disruption indicator (set by handle_event when a
+    // miss/reset arrived this tick): rises while the body keeps falling/respawning,
+    // decays toward 0 as the upright prior holds the bout.  ticks_since_reset_
+    // counts up between disruptions so consumers can mask the post-reset transient.
+    {
+        const float hit = reset_hit_this_tick_ ? 1.0f : 0.0f;
+        if (!reset_rate_init_) { reset_rate_ema_ = hit; reset_rate_init_ = true; }
+        else reset_rate_ema_ += kResetRateAlpha * (hit - reset_rate_ema_);
+        if (!reset_hit_this_tick_) ++ticks_since_reset_;   // stays 0 on the reset tick itself
+        reset_hit_this_tick_ = false;
+    }
 
     // ---- Chassis-height homeostat (module-level, body-wide signal) ----
     // Slow integral drives a tuck-deepening knee bias toward height_k × the
@@ -1400,6 +1432,11 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["boredom_streak"]    = boredom_streak_;
     mod["interest_ema"]      = interest_ema_;
     mod["interest_ema_init"] = interest_ema_init_;
+    // Gate 0 reset-masking counters (reset_hit_this_tick_ is intra-tick → omitted)
+    mod["reset_count"]       = reset_count_;
+    mod["ticks_since_reset"] = ticks_since_reset_;
+    mod["reset_rate_ema"]    = reset_rate_ema_;
+    mod["reset_rate_init"]   = reset_rate_init_;
     return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
 }
 
@@ -1415,6 +1452,11 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["motor_dim"]   = motor_dim_;
     j["motor_tle"]   = tle_ema_mean();          // mean forward-model prediction error (self-model health)
     j["loop_gain"]   = gain_ema_mean();
+    // Gate 0 (L-1a) reset-masked gait instruments:
+    j["gait_coherence"]    = gait_coherence();  // Kuramoto phase-lock ∈[0,1]; rises as legs lock to the gait
+    j["reset_count"]       = reset_count_;       // cumulative fall/teleport disruptions
+    j["ticks_since_reset"] = ticks_since_reset_; // for reset-masking the coherence/TLE trend
+    j["reset_rate"]        = reset_rate_ema_;    // Gate 0 signal: FALLS as the upright prior holds
     j["out_mag"]     = outmag_ema_mean();
     j["cog_steer"]   = cog_steer_;              // brain → differential (turn)
     j["cog_steer_msgs"] = cog_steer_msgs_;
@@ -1552,6 +1594,10 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         boredom_streak_    = mod.value("boredom_streak",    boredom_streak_);
         interest_ema_      = mod.value("interest_ema",      interest_ema_);
         interest_ema_init_ = mod.value("interest_ema_init", interest_ema_init_);
+        reset_count_       = mod.value("reset_count",       reset_count_);
+        ticks_since_reset_ = mod.value("ticks_since_reset", ticks_since_reset_);
+        reset_rate_ema_    = mod.value("reset_rate_ema",    reset_rate_ema_);
+        reset_rate_init_   = mod.value("reset_rate_init",   reset_rate_init_);
     }
 }
 

@@ -369,6 +369,21 @@ private:
     float   panic_         = 0.0f;                    // smoothed panic level [0,1] (telemetry)
     bool    panic_latched_ = false;                   // hysteresis state
 
+    // ---- Gate 0 reset-masking instrumentation (L-1a) -------------------------
+    // The body's leg-phase + EMA continuity survives the fall+respawn cycle, so a
+    // coherence/TLE trend measured across a reset is fake (the "reset artifact").
+    // Subscribe to the body's disruption events — events.miss (catastrophic fall)
+    // and events.reset (teleport/respawn) — and expose an honest, reset-masked
+    // view: a cumulative count, ticks-since-last (for masking the transient), and
+    // a slow rate EMA that FALLS as the upright prior stops the body falling.
+    // Reward-free instrumentation — it does not touch the control law.
+    void handle_event(std::string_view topic, MessagePtr payload);
+    uint64_t reset_count_         = 0;      // cumulative miss/reset disruptions
+    uint64_t ticks_since_reset_   = 0;      // ticks since the last disruption (0 on the reset tick)
+    float    reset_rate_ema_      = 0.0f;   // slow EMA of the per-tick disruption indicator → falls when stable
+    bool     reset_rate_init_     = false;  // EMA seeded
+    bool     reset_hit_this_tick_ = false;  // set by handle_event, consumed in tick() (intra-tick, NOT serialized)
+
     // ---- Per-leg working state (sized n_legs_) ----
     struct Leg {
         bool                initialized = false;
@@ -410,6 +425,7 @@ private:
     static constexpr float kHeightBiasMax  =  1.5f;   // cap lift authority
     static constexpr float kHeightLiftSign = +1.0f;   // hip2 command dir that RAISES chassis (flip if inverted)
     static constexpr float kPanicRampAlpha = 0.04f;   // smoothing of panic_ toward its hysteresis target
+    static constexpr float kResetRateAlpha = 1.0f / 600.0f;  // Gate 0: ~600-tick (~10s@60Hz) smoothing of the disruption-rate EMA (a measurement constant, not a behavioral knob)
 };
 
 } // namespace ogma

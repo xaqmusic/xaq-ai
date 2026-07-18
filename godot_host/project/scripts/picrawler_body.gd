@@ -2074,6 +2074,8 @@ func _ready() -> void:
 		"fired once when chassis tips or sinks below failure threshold")
 	brain.register_event("EpisodeEnd", "events.episode_end",
 		"trajectory finalise boundary")
+	brain.register_event("Reset",      "events.reset",
+		"body teleported to the upright rest pose (hard reset / respawn) — Gate 0 reset-masking signal")
 
 	# Register 12 action channels (3 per leg × 4 legs).
 	for i in range(4):
@@ -6900,6 +6902,12 @@ func _safe_reset_xz_near(target: Vector2) -> Vector2:
 	return safe
 
 func _do_hard_reset() -> void:
+	# Gate 0 (L-1a) — announce the teleport/respawn on the bus so brain modules
+	# (MotorEPM) can reset-mask their metrics.  A hard reset is otherwise invisible
+	# to the brain (no events.* fires), which fakes rhythm continuity across the
+	# discontinuity.  Reward-free instrumentation.
+	if brain != null:
+		brain.publish_event("reset", 1.0)
 	# Apply _pending_reset_offset to every cached rest transform.  Zero
 	# offset (legacy default) reproduces the original center-spawn
 	# behaviour bit-identically.  Non-zero offset translates the entire
