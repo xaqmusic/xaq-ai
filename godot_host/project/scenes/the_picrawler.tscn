@@ -7,9 +7,6 @@
 [ext_resource type="Script" path="res://scripts/picrawler_servo_panel.gd"   id="5"]
 [ext_resource type="Script" path="res://scripts/the_picrawler_world.gd"     id="6"]
 [ext_resource type="Script" path="res://scripts/walking_trail.gd"           id="7"]
-[ext_resource type="Script" path="res://scripts/trainer_panel.gd"           id="8"]
-[ext_resource type="Script" path="res://scripts/curriculum_panel.gd"        id="9"]
-[ext_resource type="Script" path="res://scripts/reward_panel.gd"            id="10"]
 [ext_resource type="Script" path="res://scripts/motor_epm_panel.gd"         id="11"]
 
 [sub_resource type="Environment" id="Environment_picrawler"]
@@ -80,27 +77,6 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("5")
-
-[node name="TrainerPanel" type="Control" parent="HUD"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-script = ExtResource("8")
-
-[node name="CurriculumPanel" type="Control" parent="HUD"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-script = ExtResource("9")
-
-[node name="RewardPanel" type="Control" parent="HUD"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-script = ExtResource("10")
 
 [node name="MotorEpmPanel" type="Control" parent="HUD"]
 layout_mode = 3

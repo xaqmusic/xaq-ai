@@ -3430,13 +3430,13 @@ func _input(event: InputEvent) -> void:
 			push_warning("PicrawlerBody: " + fail)
 			_ui_notify(fail)
 	elif key == KEY_T:
-		# 2026-06-09 — toggle all picrawler HUD panels (curriculum / reward /
-		# trainer).  Joseph QoL: when observing the body in flight he wants
-		# clean visual access to the 3D scene without losing the panels for
-		# good.  Toggling is global — re-press T to bring them back.  HUD
-		# hint line displays current state.
+		# 2026-06-09 — toggle the picrawler HUD panels.  Joseph QoL: when
+		# observing the body in flight he wants clean visual access to the
+		# 3D scene without losing the panels for good.  Toggling is global —
+		# re-press T to bring them back.  HUD hint line displays current state.
+		# (2026-07-18 — reward / trainer / curriculum panels removed as RL cruft.)
 		_panels_hidden = not _panels_hidden
-		for panel_name in ["CurriculumPanel", "RewardPanel", "TrainerPanel", "MotorEpmPanel"]:
+		for panel_name in ["MotorEpmPanel"]:
 			var p: Node = get_tree().get_root().find_child(panel_name, true, false)
 			if p != null and p is Control:
 				(p as Control).visible = not _panels_hidden
