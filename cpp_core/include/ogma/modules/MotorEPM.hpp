@@ -109,6 +109,7 @@ private:
     // ---- Configuration (params) ----
     std::vector<std::string> proprio_topics_;   // one ProprioToken topic per leg
     std::vector<std::string> action_topics_;    // n_legs * motor_dim ActionOut topics
+    std::vector<std::string> objective_topics_; // optional per-leg PredictionToken posture-target topics; empty = socket OFF (§1.1)
     int     n_legs_      = 4;
     int     motor_dim_   = 3;                    // hip1, hip2, knee
     double  model_lr_    = 0.02;                 // η_M  forward-model rate
@@ -383,6 +384,16 @@ private:
     float    reset_rate_ema_      = 0.0f;   // slow EMA of the per-tick disruption indicator → falls when stable
     bool     reset_rate_init_     = false;  // EMA seeded
     bool     reset_hit_this_tick_ = false;  // set by handle_event, consumed in tick() (intra-tick, NOT serialized)
+
+    // ---- Objective socket (L-1b, §1.1) — a soft posture target fed by an external
+    // generator (PosturalPrior now; KeyframeGait / nav / manipulation later, arbited).
+    // The controller descends toward it (surprise-to-descend, §2.4) — NOT additive; w=0
+    // or no objective → byte-identical HK.  Transient input (repopulated each message,
+    // not serialized).
+    void handle_objective(int leg, MessagePtr payload);
+    std::vector<Eigen::VectorXf> obj_target_;   // per-leg target joint positions (motor_dim)
+    std::vector<float>           obj_weight_;    // per-leg weight w = PredictionToken.confidence ∈ [0,1]
+    std::vector<char>            obj_seen_;      // per-leg: an objective has arrived (char, not vector<bool>)
 
     // ---- Per-leg working state (sized n_legs_) ----
     struct Leg {

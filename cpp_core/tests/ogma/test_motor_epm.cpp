@@ -135,7 +135,10 @@ struct Fixture {
 
     // `event` (e.g. "reset"/"miss") publishes an EnvEvent on events.<event> this
     // tick — used to exercise the Gate 0 reset-masking hook.  Empty = no event.
-    void run_tick(uint64_t t, Sensors s = {}, std::string const& event = "") {
+    // `obj` (non-null) publishes a per-leg PredictionToken posture objective on
+    // <pre>.obj<leg> with confidence `obj_conf` — exercises the L-1b objective socket.
+    void run_tick(uint64_t t, Sensors s = {}, std::string const& event = "",
+                  Eigen::VectorXf const* obj = nullptr, float obj_conf = 1.0f) {
         bus.begin_tick(t);
         for (int leg = 0; leg < n_legs; ++leg)
             bus.publish(pre + ".p" + std::to_string(leg), proprio_frame(double(t), leg, motor_dim));
@@ -145,6 +148,15 @@ struct Fixture {
         if (s.height   >= 0.0f) bus.publish(pre + ".height",   vec_token({s.height}));
         if (s.tc_x != 0.0f || s.tc_y != 0.0f)
             bus.publish(pre + ".nav", vec_token({s.tc_x, s.tc_y}));
+        if (obj) {
+            for (int leg = 0; leg < n_legs; ++leg) {
+                auto pt = std::make_shared<ogma::PredictionToken>();
+                pt->predicted_latent = *obj;
+                pt->confidence       = obj_conf;
+                pt->target_modality  = "posture." + std::to_string(leg);
+                bus.publish(pre + ".obj" + std::to_string(leg), pt);
+            }
+        }
         if (!event.empty()) {
             auto ev = std::make_shared<ogma::EnvEvent>();
             ev->name = event; ev->intensity = 1.0f;
@@ -452,4 +464,48 @@ TEST(MotorEPM, Gate0ResetMaskingInstruments) {
     EXPECT_EQ(d2["reset_count"].get<uint64_t>(), 2u);
     EXPECT_EQ(d2["ticks_since_reset"].get<uint64_t>(), 0u);
     EXPECT_FLOAT_EQ(d2["reset_rate"].get<float>(), d["reset_rate"].get<float>());
+}
+
+// =============================================================================
+// 10. L-1b objective socket: an active posture objective retargets the controller;
+//     a zero-weight objective is a perfect no-op (Gate-0 baseline preserved).
+// =============================================================================
+TEST(MotorEPM, ObjectiveSocketRetargetsControllerZeroWeightNoOp) {
+    auto p = base_params();
+    p["coupling_gain"]    = 0.5;
+    p["objective_topics"] = std::vector<std::string>{"mt.obj0", "mt.obj1", "mt.obj2", "mt.obj3"};
+    auto pn = base_params();               // identical minus the objective socket
+    pn["coupling_gain"]   = 0.5;
+
+    Fixture A(p,  4, 3);                    // objective active (w = 0.5)
+    Fixture Z(p,  4, 3);                    // objective published at w = 0 (must be a no-op)
+    Fixture N(pn, 4, 3);                    // no objective_topics at all
+
+    Eigen::VectorXf tgt(3);                 // motor_dim target joint positions (the socket contract)
+    tgt << 0.2f, -0.1f, 0.3f;
+    auto inp = [](uint64_t t){ return Sensors{float(0.2 * std::sin(0.11 * t))}; };
+
+    for (uint64_t t = 0; t <= 150; ++t) {
+        A.run_tick(t, inp(t), "", &tgt, 0.5f);
+        Z.run_tick(t, inp(t), "", &tgt, 0.0f);
+        N.run_tick(t, inp(t));
+    }
+
+    // (i) a zero-weight objective changes nothing → Z == N byte-for-byte.
+    for (int leg = 0; leg < 4; ++leg)
+        for (int j = 0; j < 3; ++j)
+            EXPECT_FLOAT_EQ(Z.accel(leg, j), N.accel(leg, j))
+                << "zero-weight objective must be a perfect no-op (leg " << leg << " j " << j << ")";
+
+    // (ii) an active objective retargets the controller → A diverges from Z.
+    bool diverged = false;
+    for (int leg = 0; leg < 4 && !diverged; ++leg)
+        for (int j = 0; j < 3; ++j)
+            if (std::fabs(A.accel(leg, j) - Z.accel(leg, j)) > 1e-4f) { diverged = true; break; }
+    EXPECT_TRUE(diverged) << "an active posture objective must change the controller output";
+
+    // (iii) diag reflects the socket state.
+    EXPECT_TRUE(A.m.diag_snapshot()["obj_active"].get<bool>());
+    EXPECT_FALSE(Z.m.diag_snapshot()["obj_active"].get<bool>());
+    EXPECT_NEAR(A.m.diag_snapshot()["obj_weight"].get<float>(), 0.5f, 1e-4f);
 }

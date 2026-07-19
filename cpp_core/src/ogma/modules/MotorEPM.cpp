@@ -97,6 +97,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"action_topics", ParamMutability::ConstructionOnly,
          "ActionOut output topics, length n_legs*motor_dim, ordered [leg0_j0, leg0_j1, leg0_j2, leg1_j0, ...]. Drop-in for the body's action.<leg>_<joint> channels.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"objective_topics", ParamMutability::ConstructionOnly,
+         "Optional per-leg PredictionToken topics carrying a SOFT posture target (predicted_latent = motor_dim target joint positions; confidence = weight w). The controller descends toward it (objective-change, not additive — §1.1/§2.4). Empty = socket off (byte-identical HK).",
+         std::nullopt, std::nullopt, std::nullopt},
         {"n_legs", ParamMutability::ConstructionOnly, "number of legs",
          ParamValue{int64_t(4)}, ParamValue{int64_t(1)}, ParamValue{int64_t(8)}},
         {"motor_dim", ParamMutability::ConstructionOnly, "motors per leg",
@@ -290,6 +293,7 @@ ParamMap MotorEPM::current_params() const {
     std::vector<std::string> pt(proprio_topics_), at(action_topics_);
     m["proprio_topics"] = pt;
     m["action_topics"]  = at;
+    m["objective_topics"] = std::vector<std::string>(objective_topics_);
     m["n_legs"]     = int64_t(n_legs_);
     m["motor_dim"]  = int64_t(motor_dim_);
     m["model_lr"]   = model_lr_;
@@ -427,17 +431,23 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lateral_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lateral_topic_ = *p; });
     apply_param(params, "proprio_topics", [&](auto const& v){ proprio_topics_ = get_string_vec(v, "proprio_topics"); });
     apply_param(params, "action_topics",  [&](auto const& v){ action_topics_  = get_string_vec(v, "action_topics"); });
+    apply_param(params, "objective_topics", [&](auto const& v){ objective_topics_ = get_string_vec(v, "objective_topics"); });
 
     if (int(proprio_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: proprio_topics length must equal n_legs");
     if (int(action_topics_.size()) != n_legs_ * motor_dim_)
         throw std::invalid_argument("MotorEPM: action_topics length must equal n_legs*motor_dim");
+    if (!objective_topics_.empty() && int(objective_topics_.size()) != n_legs_)
+        throw std::invalid_argument("MotorEPM: objective_topics length must equal n_legs (or be empty)");
     if (int(gait_phase_.size()) != n_legs_)
         gait_phase_.assign(n_legs_, 0.0);   // fall back to in-phase if mis-sized
     if (int(stroke_signs_.size()) != n_legs_)
         stroke_signs_.assign(n_legs_, 1.0);
 
     legs_.assign(n_legs_, Leg{});
+    obj_target_.assign(n_legs_, Eigen::VectorXf());
+    obj_weight_.assign(n_legs_, 0.0f);
+    obj_seen_.assign(n_legs_, 0);
 
     // Cruse stance/swing state + leg topology.  Picrawler (n=4, order FL,FR,RL,RR):
     // anatomical anterior = [none, none, FL, FR]; contralateral = FL↔FR, RL↔RR.
@@ -522,6 +532,15 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     sub_ids_.push_back(bus_->subscribe(
         topics::kEventsPrefix, SubscriptionKind::Direct,
         [this](std::string_view topic, MessagePtr p){ handle_event(topic, p); }));
+    // Objective socket (L-1b, §1.1) — optional per-leg soft posture targets.  Feedback:
+    // a top-down objective that may lag a tick (like EPM's descending prediction); an
+    // empty list means no subscription → byte-identical HK.
+    for (int leg = 0; leg < int(objective_topics_.size()) && leg < n_legs_; ++leg) {
+        if (objective_topics_[leg].empty()) continue;
+        sub_ids_.push_back(bus_->subscribe(
+            objective_topics_[leg], SubscriptionKind::Feedback,
+            [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
+    }
 }
 
 void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
@@ -536,6 +555,15 @@ void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
         ticks_since_reset_   = 0;
         reset_hit_this_tick_ = true;
     }
+}
+
+void MotorEPM::handle_objective(int leg, MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const PredictionToken>(payload);
+    if (!pt || leg < 0 || leg >= n_legs_) return;
+    obj_target_[leg] = pt->predicted_latent;                    // motor_dim target positions
+    obj_weight_[leg] = std::clamp(pt->confidence, 0.0f, 1.0f);  // w ∈ [0,1]
+    obj_seen_[leg]   = 1;
 }
 
 void MotorEPM::handle_tilt(MessagePtr payload) {
@@ -995,7 +1023,23 @@ void MotorEPM::tick(uint64_t tick_id) {
                 Eigen::MatrixXf Lp = AG * L.C;                     // loop Jacobian
                 Eigen::MatrixXf P  = (Lp * Lp.transpose()
                                       + float(reg_eps_) * Eigen::MatrixXf::Identity(n, n)).inverse();
-                Eigen::VectorXf q  = P * xi;
+                // Objective retarget (L-1b socket, §1.1/§2.4): if a fresh soft posture
+                // target is present for this leg, the CONTROLLER descends a blended error
+                // ξ̃ = (1−w)·ξ + w·(x − x*) on the joint-POSITION components (index 3j) —
+                // it LEARNS to reach x*, an objective-change, not an additive output bias.
+                // The MODEL (A,b) above kept the raw ξ (self-model stays honest).  w=0 or
+                // no objective → ξ̃ = ξ → byte-identical HK.
+                Eigen::VectorXf xi_tilde = xi;
+                if (obj_seen_[leg] && obj_weight_[leg] > 0.0f
+                    && obj_target_[leg].size() == m && n >= 3 * m) {
+                    float w = obj_weight_[leg];
+                    for (int j = 0; j < m; ++j) {
+                        int idx = 3 * j;                                  // joint j position
+                        float goal_err = L.x[idx] - obj_target_[leg][j]; // x − x*
+                        xi_tilde[idx] = (1.0f - w) * xi[idx] + w * goal_err;
+                    }
+                }
+                Eigen::VectorXf q  = P * xi_tilde;
                 Eigen::MatrixXf dC = 2.0f * float(ctrl_lr_)
                                      * (AG.transpose() * q) * (q.transpose() * Lp);
                 float dC_norm = dC.norm();
@@ -1457,6 +1501,14 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["reset_count"]       = reset_count_;       // cumulative fall/teleport disruptions
     j["ticks_since_reset"] = ticks_since_reset_; // for reset-masking the coherence/TLE trend
     j["reset_rate"]        = reset_rate_ema_;    // Gate 0 signal: FALLS as the upright prior holds
+    // L-1b objective socket (§1.1) — is an external posture objective driving the controller?
+    {
+        bool on = false; float wsum = 0.0f; int oc = 0;
+        for (int i = 0; i < n_legs_ && i < int(obj_seen_.size()); ++i)
+            if (obj_seen_[i] && obj_weight_[i] > 0.0f) { on = true; wsum += obj_weight_[i]; ++oc; }
+        j["obj_active"] = on;
+        j["obj_weight"] = oc ? wsum / float(oc) : 0.0f;
+    }
     j["out_mag"]     = outmag_ema_mean();
     j["cog_steer"]   = cog_steer_;              // brain → differential (turn)
     j["cog_steer_msgs"] = cog_steer_msgs_;

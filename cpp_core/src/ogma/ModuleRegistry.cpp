@@ -46,6 +46,7 @@
 #include "ogma/modules/PolicyChannelAggregator.hpp"
 #include "ogma/modules/CPGOscillator.hpp"
 #include "ogma/modules/MotorEPM.hpp"
+#include "ogma/modules/PosturalPrior.hpp"
 #include "ogma/modules/KeyframeAverager.hpp"
 #include "ogma/modules/KeyframePeakDetector.hpp"
 #include "ogma/modules/LateralVoter.hpp"
@@ -183,6 +184,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         // (forward self-model + controller, learns by descending the motor TLE;
         // no reward).  docs/plans-and-designs/motor_epm_homeokinetic_plan.md
         reg.register_type("MotorEPM",            [](){ return std::make_unique<MotorEPM>(); });
+        reg.register_type("PosturalPrior",       [](){ return std::make_unique<PosturalPrior>(); });
         // Phase 7.9 — closed-loop adaptive timer.  Per-leg touchdown
         // detection + period EMA + prediction.  Reward-gated Hebbian on
         // per-(premotor, phase_bin, intent) bias table.  Output is
