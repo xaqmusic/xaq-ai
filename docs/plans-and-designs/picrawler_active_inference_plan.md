@@ -49,7 +49,7 @@ a–d control suite, proven by a mid-episode **perturbation** it re-infers throu
  INPUTS        per-input EPM     per-LOOP voter → heading generator
 
  SCALAR ─►EPM─┐   ┌ PLAY       : sensorimotor ─►voter─► homeokinesis ──┐
- VISION ─►EPM─┼─► ┤ SCENT/BEACON: scalar ──────►voter─► klino heading  ┤─►EFE ARBITER─► HEADING+SPEED ─► KEYFRAME GAIT ─► HK ─► L
+ VISION ─►EPM─┼─► ┤ SCENT/BEACON: scalar ──────►voter─► klino heading  ┤─►EFE ARBITER─► MOTOR OBJECTIVE ─► KEYFRAME GAIT ─► HK ─► L
  IMU    ─►EPM─┤   └ PLACE-PLAN : window-avg ───►voter─► place route     ┘   IMPORTANT?     command          (phase→posture)   CTRL   R
  CPG    ─►EPM─┘                                                            HEADING? GO!       │                  ▲                ▲
    ▲                                                                                          │            CPG phase clock  balance/panic
@@ -67,6 +67,43 @@ a–d control suite, proven by a mid-episode **perturbation** it re-infers throu
 The decomposition is the point (§3): **gait = "predict/stabilize my own body,"**
 **nav = "where to go."** They share no signal, so nav can never overload gait — the
 mistake that standing-reward + navigation always was.
+
+### 1.1 One substrate, many arbited objectives (keep this from becoming navigator-only)
+
+A sharpening of the layers above so the body admits **any** behavioural loop, not
+just heading. MotorEPM today fuses three roles that want to be separate:
+
+- **SUBSTRATE — keep unified (one module).** The learned forward self-model + the
+  homeokinetic controller: *"how to move coherently, alive, from proprioception."*
+  Behaviour-agnostic. The aliveness lives here; **never split the per-leg cores** —
+  coordination emerges from the shared substrate + coupling, not from splitting it.
+- **OBJECTIVES — decompose into graph modules.** Posture, gait, navigation, and
+  later **manipulation**: *"what to aim the body at now."* Each is its own module
+  proposing a **soft objective** — a target in posture/sensor space the substrate
+  *descends toward* (§2.4), never an additive output injection. The ~10 additive bias
+  terms crammed into MotorEPM today ARE these objectives, un-separated.
+- **ARBITRATION — explicit + general.** The EFE arbiter selects/weights which
+  objective(s) command the substrate now. Its currency is a **MOTOR OBJECTIVE, not a
+  heading**: heading+speed is one *kind* of objective; a reach/limb-pose is another.
+
+**The load-bearing rule this imposes:** MotorEPM exposes **ONE behaviour-agnostic
+objective socket** (a soft target it descends toward). Every loop — gait keyframe,
+nav head, a future manipulation reach — feeds THAT socket and competes at the arbiter
+on equal footing. A manipulation loop is then *"just another objective generator"*
+that takes over the legs when the arbiter says so — **no re-architecture**, and the
+substrate keeps its autonomy (it overrides any objective for balance → the aliveness
+survives). Neuro-analogy the code already reaches for: **MotorEPM = the spinal/body
+substrate; the loops = descending pathways (locomotor / navigational / manipulatory);
+the arbiter = basal-ganglia action selection** choosing which pathway drives the cord.
+Keep the cord unified; make the descending pathways many and arbited.
+
+**Build discipline (§5/§8): decompose incrementally, never by ripping out a working
+loop.** L-1b is already the first instance — it pulls *gait* out of the additive
+`coupling_gain`+`gait_phase` monolith into an external generator (**KeyframeGait**)
+feeding the socket via the **DescendingPredictor**. The remaining biases promote one
+at a time behind the same socket — starting with a **`PosturalPrior`** (the always-on
+"brainstem" upright objective = the Gate 0 prior) and the nav head — keeping Gate 0
+green throughout.
 
 ---
 
@@ -209,6 +246,45 @@ Each ships with the module:
 - **Gate 3 (aliveness / locomotor-(d)):** shove the body or drop one leg's authority →
   the gait destabilizes then **re-forms** (and, with a leg degraded, re-coordinates).
 
+### 2.10 L-1b wiring — the objective socket, behaviour-agnostic from day one (§1.1)
+
+The concrete graph, built so nav/manipulation plug into the SAME socket later with
+zero MotorEPM rework. New nodes + the topics between them:
+
+```
+  CPGOscillator ──φ──► KeyframeGait ──x*(φ)──┐
+  (clock, exists)      (NEW: phase-indexed    │
+                        keyframe map, EMA/bin) ├─► objective.posture ──► MotorEPM
+  MotorEPM proprio ───► (feeds the map)        │     (soft target)        (SUBSTRATE:
+                                               │                           self-model + HK,
+  PosturalPrior ──x*_rest (always-on, low w)──┘                           descends toward it,
+  (NEW: Gate 0 prior)                          ▲                          overrides for balance)
+                                    [ L2 EFE arbiter slots in HERE later:
+                                      gates the generators onto the socket;
+                                      a nav head + a manipulation reach publish
+                                      onto the SAME objective.posture ]
+```
+
+- **The socket** = one MotorEPM input topic, `objective.posture` — a `PredictionToken`:
+  a soft target in the body's sensor/posture space (+ a weight). MotorEPM descends toward
+  it *through its learned forward model* (surprise-to-descend, §2.4) — NOT added to the
+  joint output; the HK loop overrides it for balance (the aliveness survives).
+- **KeyframeGait (NEW)** accumulates the phase→posture map from MotorEPM's OWN recurring
+  proprioception (the `CylinderBuilder` heading-indexed trick ported to phase, §2.3) and
+  publishes the current phase's posture as the objective. This **replaces** the imposed
+  `coupling_gain`+`gait_phase` — retire them behind the Kuramoto-contrast ablation (§2.8),
+  don't delete (§5).
+- **PosturalPrior (NEW)** publishes the always-on upright target at low weight — the Gate 0
+  prior, now a first-class arbitrable objective (§1.1).
+- **DescendingPredictor (port)** is the closure primitive that turns the phase map into the
+  top-down objective — the *same* primitive that later closes the nav loop (§6): one
+  primitive, two placements.
+- **Behaviour-agnostic by construction:** `objective.posture` is written by whichever
+  generator is active. L-1b = just {KeyframeGait, PosturalPrior} with trivial composition.
+  When L2 lands, the **EFE arbiter drops onto that same topic** and gates the generators;
+  a nav head (heading→posture) and later a manipulation reach (per-limb posture) publish
+  onto the identical socket — no MotorEPM re-architecture, no MotorBus (§5).
+
 ---
 
 ## 3. L0 — Action loop (EXISTS — the socket)
@@ -246,7 +322,7 @@ is). Depth-blob bearing is nearly instantaneous (≈ an oracle) → wrong first 
 
 ---
 
-## 5. L2 — EFE arbiter (chooses a pathway into the future — §2)
+## 5. L2 — EFE arbiter (chooses a *motor objective* / pathway into the future — §2)
 
 Port `EFEArbiter` + `cell_efe_arbiter_plan.md` wholesale. It selects a loop by expected
 free energy from the agent's OWN quantities — pragmatic (divergence from the
@@ -257,6 +333,17 @@ hysteresis** so the crossover is a property of the dynamics, not a tuned constan
 loser's learning via the authority mechanism** (verify the consumer fires — §8). PLAY is
 the floor exposed under low confidence + rising hunger. This is the "chooses a future"
 layer the picrawler never had.
+
+**Its currency is a motor OBJECTIVE, not a heading (§1.1).** The arbiter selects among
+*objectives* — heading+speed is one kind, a reach/limb-pose another — and gates the
+winner onto MotorEPM's single behaviour-agnostic objective socket (winner ≈1 / loser
+≈0, learning paused via authority). This is what keeps a future **manipulation** loop
+first-class: it competes on the same EFE quantities (pragmatic divergence from the
+prior + epistemic entropy-reduction) and takes over the legs when its expected free
+energy wins — no heading required. For the picrawler's 12 fine-coordinated joints the
+gate is on *objectives* (which soft target the substrate descends toward), **not** a
+tanh-summed accel bus — the MotorBus (§9) stays the L1/L2 *mixer of competing heads*,
+not part of the gait substrate.
 
 ---
 
@@ -316,16 +403,23 @@ Never skip Gate 0 or the powered stage; lesions are *tests*, never the operating
   `no_descend`, `kuramoto_contrast`, `wrong_sign`). No tuned thresholds (§6).
 - **EDIT** `CPGOscillator`: optional adaptive frequency (PLL) tracking the body's
   dominant rhythm; default-off.
-- **EDIT** `MotorEPM`: accept the descending keyframe target as a controller objective
-  (surprise-to-descend, not additive bias); expose boredom→explore-gain neuromod path;
-  surface `gait_coherence`/keyframe-TLE in `diag_snapshot`.
+- **EDIT** `MotorEPM`: add ONE **behaviour-agnostic objective socket** — a soft target
+  (posture/sensor space) the HK loop descends toward (surprise-to-descend, not additive
+  bias — §2.4/§1.1), fed by whichever loop the arbiter selects (keyframe gait, nav head,
+  future manipulation), never a heading-only input. Expose boredom→explore-gain neuromod;
+  surface `gait_coherence`/keyframe-TLE in `diag_snapshot` (Gate 0 — done).
+- **NEW** `PosturalPrior` (extract MotorEPM's `postural_gain`/`height_homeo`/`balance`
+  into their own always-on module): the "brainstem" upright objective = the Gate 0 prior,
+  promoted out of the additive terms so it is independently arbitrable/ablatable and never
+  disabled (§5). Feeds the objective socket. Extract incrementally, keeping Gate 0 green.
 - **EDIT** `MotorBus`: subscribe `arbiter.gain.<loop>` (effective gain = base × arbiter;
   mutes + pauses learning) — same as `cell_efe_arbiter_plan.md`.
 - **EDIT** `picrawler_body.gd`: publish a **scalar** beacon signal (`reality.proprio.
   beacon`) from fixed sources; keep `target_compass` only as an oracle **measurement
   baseline**. Beacon-relocation hook for the (d) test.
 - **PORT** `EFEArbiter`, `Klinotaxis`/`RunTumbleNav`, `DescendingPredictor`, `PlayLoop`
-  into a picrawler config graph feeding `steer`/`speed`.
+  into a picrawler config graph feeding the **objective socket** (§1.1) — `steer`/`speed`
+  is the *heading* objective, one of several the socket accepts.
 - **NEW configs:** `the_picrawler_keyframe_gait.json` (+ `_abl_*` per §2.8),
   `the_picrawler_ai_nav.json` (+ oracle-baseline, shuffle, wrong-sign, severed arms).
   Default-off so existing envs stay byte-identical (§8). Add to launcher allowlist.
