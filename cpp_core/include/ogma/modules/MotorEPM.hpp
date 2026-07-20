@@ -146,6 +146,7 @@ private:
     // captured spawn knee-rest with a tuck target (pos→+1 = full 170° tuck) so
     // the postural reflex drives the body into the spider pose.  −99 = use spawn.
     double  knee_tuck_target_ = -99.0;            // postural knee-rest pos override (spider tuck)
+    double  hip2_tuck_target_ = -99.0;            // postural hip2(femur)-rest override (crouch for leverage); -99 = off
     double  motor_gain_ = 1.0;                     // output amplitude on the HK command (legs look weak → raise)
     // 2026-06-12 — Rung 3: signed inter-leg coupling.  HK reliably lights ONE leg
     // into a propulsive limit cycle (init lottery) while the others twitch; one
@@ -160,6 +161,15 @@ private:
     std::string         cpg_phase_topic_;          // optional global CPG phase to drive the rhythm from (clean, entrained)
     float               cpg_phase_ = 0.0f;
     bool                cpg_seen_  = false;
+    // CPG-as-embedding (controller-only conditioning): the HK controller learns a phase-dependent
+    // bias  y = tanh(C·x + Cphi·[cosφ,sinφ] + h)  → phase MODULATES the learned control law (context),
+    // it never commands a joint.  HK exploration + balance reflexes stay live.  Default off = byte-identical.
+    // Cphi is trained NOT on HK surprise (which damps motion) but to reduce the KEYFRAME error
+    // (x* − x) at the command phase — a phase-indexed feed-forward toward the learned posture,
+    // self-limiting as the error shrinks.
+    bool                cpg_embed_   = false;
+    double              embed_lr_    = 0.02;   // Cphi learning rate on the keyframe error
+    double              embed_decay_ = 0.001;  // L2 decay bounding the learned feed-forward
     // Gate 2 (coherent-scaffold wean): tick-scheduled fade of the rhythm drive so the LEARNED
     // keyframe takes over the gait. -1 = disabled.
     int64_t             rhythm_fade_start_ = -1;
@@ -419,6 +429,8 @@ private:
         Eigen::MatrixXf     A;                    // n x m  (motor → sensor)
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
+        Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning of the controller
+        Eigen::Vector2f     prev_phi_ctx{0.0f, 0.0f}; // [cos φ, sin φ] at command time (for the Cphi update)
         Eigen::VectorXf     h;                    // m
         Eigen::VectorXf     x;                    // latest sensor (n)
         Eigen::VectorXf     prev_x;               // sensor at command time (n)

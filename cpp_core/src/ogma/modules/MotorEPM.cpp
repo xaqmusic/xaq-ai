@@ -135,6 +135,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"knee_tuck_target", ParamMutability::HotMutable,
          "override the postural knee-rest target (proprio pos) to drive the statically-stable SPIDER stance (knees tucked, chassis suspended below). +0.7..+0.9 = strong tuck. -99 = use the captured spawn pose.",
          ParamValue{-99.0}, ParamValue{-99.0}, ParamValue{1.0}},
+        {"hip2_tuck_target", ParamMutability::HotMutable,
+         "override the postural hip2(femur)-rest target to CROUCH the femur so hip2 has leverage to lift/load (default rests at the extended spawn pose → no leverage). Sign/magnitude tune per body. -99 = off (spawn pose).",
+         ParamValue{-99.0}, ParamValue{-99.0}, ParamValue{2.0}},
         {"motor_gain", ParamMutability::HotMutable,
          "output amplitude multiplier on the HK command (tanh output, before postural+noise). 1 = raw HK; >1 = stronger/larger leg swings (the legs look weak even though servos are strong).",
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{5.0}},
@@ -153,6 +156,13 @@ ParamSchema MotorEPM::params_schema() const {
         {"cpg_phase_topic", ParamMutability::ConstructionOnly,
          "Optional global CPG phase topic (rhythm.cpg.body) to drive the rhythm from — a clean, entrained phase (leg_phase = cpg_phase + gait_phase[leg]) so the whole body locks to ONE frequency. Empty = use the proprio-derived L.phase.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"cpg_embed", ParamMutability::HotMutable,
+         "CPG-as-embedding: controller learns a phase-dependent feed-forward y=tanh(C·x + Cphi·[cosφ,sinφ] + h). Cphi is trained to reduce the KEYFRAME error (x*−x) at the command phase (not HK surprise) → a phase-indexed push toward the learned posture. Needs cpg_phase_topic + the objective socket. Cphi starts 0 (byte-identical until learned). false = off.",
+         ParamValue{false}, std::nullopt, std::nullopt},
+        {"embed_lr", ParamMutability::HotMutable, "Cphi learning rate on the keyframe error (phase-indexed feed-forward).",
+         ParamValue{0.02}, ParamValue{0.0}, ParamValue{1.0}},
+        {"embed_decay", ParamMutability::HotMutable, "L2 decay bounding the learned Cphi feed-forward.",
+         ParamValue{0.001}, ParamValue{0.0}, ParamValue{1.0}},
         {"rhythm_fade_start", ParamMutability::HotMutable,
          "Gate 2: tick to begin linearly fading the rhythm scaffold to 0 (coherent-scaffold wean: the learned keyframe takes over). -1 = disabled.",
          ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
@@ -333,12 +343,16 @@ ParamMap MotorEPM::current_params() const {
     m["postural_gain"]    = postural_gain_;
     m["explore_noise"]    = explore_noise_;
     m["knee_tuck_target"] = knee_tuck_target_;
+    m["hip2_tuck_target"] = hip2_tuck_target_;
     m["motor_gain"]       = motor_gain_;
     m["coupling_gain"]    = coupling_gain_;
     m["phase_joint"]      = int64_t(phase_joint_);
     m["rhythm_gains"]     = rhythm_gains_;
     m["rhythm_offsets"]   = rhythm_offsets_;
     m["cpg_phase_topic"]  = cpg_phase_topic_;
+    m["cpg_embed"]        = cpg_embed_;
+    m["embed_lr"]         = embed_lr_;
+    m["embed_decay"]      = embed_decay_;
     m["rhythm_fade_start"]= rhythm_fade_start_;
     m["rhythm_fade_end"]  = rhythm_fade_end_;
     m["coupling_fade_start"] = coupling_fade_start_;
@@ -411,12 +425,19 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "postural_gain", [&](auto const& v){ postural_gain_ = get_double(v, "postural_gain"); });
     apply_param(params, "explore_noise", [&](auto const& v){ explore_noise_ = get_double(v, "explore_noise"); });
     apply_param(params, "knee_tuck_target", [&](auto const& v){ knee_tuck_target_ = get_double(v, "knee_tuck_target"); });
+    apply_param(params, "hip2_tuck_target", [&](auto const& v){ hip2_tuck_target_ = get_double(v, "hip2_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
     apply_param(params, "coupling_gain", [&](auto const& v){ coupling_gain_ = get_double(v, "coupling_gain"); });
     apply_param(params, "phase_joint",   [&](auto const& v){ phase_joint_   = int(get_int(v, "phase_joint")); });
     apply_param(params, "rhythm_gains",   [&](auto const& v){ rhythm_gains_   = get_double_vec(v, "rhythm_gains"); });
     apply_param(params, "rhythm_offsets", [&](auto const& v){ rhythm_offsets_ = get_double_vec(v, "rhythm_offsets"); });
     apply_param(params, "cpg_phase_topic",[&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) cpg_phase_topic_ = *p; });
+    apply_param(params, "cpg_embed", [&](auto const& v){
+        if (auto p = std::get_if<bool>(&v)) cpg_embed_ = *p;
+        else if (auto p = std::get_if<int64_t>(&v)) cpg_embed_ = (*p != 0);
+    });
+    apply_param(params, "embed_lr",    [&](auto const& v){ embed_lr_    = get_double(v, "embed_lr"); });
+    apply_param(params, "embed_decay", [&](auto const& v){ embed_decay_ = get_double(v, "embed_decay"); });
     apply_param(params, "rhythm_fade_start", [&](auto const& v){ rhythm_fade_start_ = get_int(v, "rhythm_fade_start"); });
     apply_param(params, "rhythm_fade_end",   [&](auto const& v){ rhythm_fade_end_   = get_int(v, "rhythm_fade_end"); });
     apply_param(params, "coupling_fade_start", [&](auto const& v){ coupling_fade_start_ = get_int(v, "coupling_fade_start"); });
@@ -755,6 +776,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
     else if (key == "knee_tuck_target") knee_tuck_target_ = get_double(value, "knee_tuck_target");
+    else if (key == "hip2_tuck_target") hip2_tuck_target_ = get_double(value, "hip2_tuck_target");
     else if (key == "motor_gain") motor_gain_ = get_double(value, "motor_gain");
     else if (key == "coupling_gain") coupling_gain_ = get_double(value, "coupling_gain");
     else if (key == "coupling_fade_start") coupling_fade_start_ = get_int(value, "coupling_fade_start");
@@ -763,6 +785,12 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "rhythm_offsets") rhythm_offsets_ = get_double_vec(value, "rhythm_offsets");
     else if (key == "rhythm_fade_start") rhythm_fade_start_ = get_int(value, "rhythm_fade_start");
     else if (key == "rhythm_fade_end")   rhythm_fade_end_   = get_int(value, "rhythm_fade_end");
+    else if (key == "cpg_embed") {
+        if (auto p = std::get_if<bool>(&value)) cpg_embed_ = *p;
+        else if (auto p = std::get_if<int64_t>(&value)) cpg_embed_ = (*p != 0);
+    }
+    else if (key == "embed_lr")    embed_lr_    = get_double(value, "embed_lr");
+    else if (key == "embed_decay") embed_decay_ = get_double(value, "embed_decay");
     else if (key == "coord_adapt_rate") coord_adapt_rate_ = get_double(value, "coord_adapt_rate");
     else if (key == "coord_explore") coord_explore_ = get_double(value, "coord_explore");
     else if (key == "coord_reward_drive") coord_reward_drive_ = get_double(value, "coord_reward_drive");
@@ -817,6 +845,8 @@ void MotorEPM::ensure_leg_init(int leg, int n) {
     L.A = Eigen::MatrixXf::Zero(n, m);
     L.b = Eigen::VectorXf::Zero(n);
     L.C = Eigen::MatrixXf::Zero(m, n);
+    L.Cphi = Eigen::MatrixXf::Zero(m, 2);   // phase-conditioning starts at 0 (byte-identical until learned)
+    L.prev_phi_ctx.setZero();
     L.h = Eigen::VectorXf::Zero(m);
     // A: small random motor→sensor (model learns the real coupling quickly).
     // C: small random sensor→motor so the initial command y≈0 → body holds the
@@ -855,6 +885,10 @@ void MotorEPM::handle_proprio(int leg, MessagePtr payload) {
         // so postural tone drives the body into the statically-stable spider pose.
         if (knee_tuck_target_ > -90.0)
             L.rest_pos[motor_dim_ - 1] = float(knee_tuck_target_);
+        // Crouch the femur too: hip2 (joint 1) rests at the extended spawn pose by default, giving
+        // it no leverage to lift/load.  A hip2 tuck flexes it into a crouch so the swing can work.
+        if (hip2_tuck_target_ > -90.0 && motor_dim_ >= 2)
+            L.rest_pos[1] = float(hip2_tuck_target_);
         L.rest_captured = true;
     }
     L.fresh = true;
@@ -1092,7 +1126,9 @@ void MotorEPM::tick(uint64_t tick_id) {
             L.tle_ema = (1.0f - kTeleEmaAlpha) * L.tle_ema + kTeleEmaAlpha * xi.norm();
 
             if (!warmup) {
+                const bool embed = cpg_embed_ && cpg_seen_;
                 Eigen::VectorXf z = L.C * L.prev_x + L.h;          // operating point
+                if (embed) z.noalias() += L.Cphi * L.prev_phi_ctx; // phase-conditioned bias at command time
                 Eigen::MatrixXf G = Eigen::MatrixXf::Zero(m, m);
                 float sat = 0.0f;
                 for (int i = 0; i < m; ++i) {
@@ -1133,6 +1169,18 @@ void MotorEPM::tick(uint64_t tick_id) {
                 L.C.noalias() += dC;
                 Eigen::VectorXf mu = G * (L.A.transpose() * q);    // bias toward less surprise
                 L.h.noalias() += float(bias_lr_) * mu;
+                // Phase-conditioned feed-forward: train Cphi to REDUCE the keyframe error (x* − x)
+                // at the command phase — NOT HK surprise (which damps motion).  Self-limiting: as
+                // the bias moves the body toward x*, the error shrinks and learning stops.  Small
+                // L2 decay bounds it.  This is the "alternate learning signal".
+                if (embed && obj_seen_[leg] && obj_weight_[leg] > 0.0f
+                    && obj_target_[leg].size() == m && n >= 3 * m) {
+                    for (int j = 0; j < m; ++j) {
+                        float e = obj_target_[leg][j] - L.x[3 * j];   // x* − x toward the keyframe posture
+                        L.Cphi.row(j).noalias() += float(embed_lr_) * e * L.prev_phi_ctx.transpose();
+                    }
+                    if (embed_decay_ > 0.0) L.Cphi *= (1.0f - float(embed_decay_));
+                }
 
                 // (3) anti-saturation — surrogate for the dropped ∂G term.  Penalty
                 //     ∝ zᵢ·tanh²(zᵢ): inert in the linear band, strong at the rails,
@@ -1163,6 +1211,8 @@ void MotorEPM::tick(uint64_t tick_id) {
             // Panic boosts motor_gain for stronger escape thrust.
             float mg = float(motor_gain_) * (1.0f + pe * (float(panic_motor_mult_) - 1.0f));
             y = L.C * L.x + L.h;
+            if (cpg_embed_ && cpg_seen_)
+                y.noalias() += L.Cphi * Eigen::Vector2f(std::cos(cpg_phase_), std::sin(cpg_phase_));
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
         }
         // Postural reflex (spinal-tone analog): pull hip2+knee toward the standing
@@ -1476,6 +1526,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         }
 
         L.prev_x = L.x;
+        L.prev_phi_ctx = Eigen::Vector2f(std::cos(cpg_phase_), std::sin(cpg_phase_));  // phase at command time
         L.prev_y = y;
         L.have_prev = true;
     }
@@ -1536,6 +1587,7 @@ nlohmann::json MotorEPM::snapshot_state() const {
             std::vector<float> v(M.data(), M.data() + M.size()); return v; };
         lj["A"] = flat(L.A); lj["b"] = flat(L.b);
         lj["C"] = flat(L.C); lj["h"] = flat(L.h);
+        lj["Cphi"] = flat(L.Cphi);
         lj["prev_x"] = flat(L.prev_x); lj["prev_y"] = flat(L.prev_y);
         lj["rows_A"] = int(L.A.rows()); lj["cols_A"] = int(L.A.cols());
         legs.push_back(std::move(lj));
@@ -1622,6 +1674,11 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["cog_thrust"]  = cog_thrust_;             // brain → common-mode (fwd/reverse)
     j["cog_thrust_msgs"] = cog_thrust_msgs_;
     j["fwd_v"]       = fwd_v_;                   // chassis forward velocity (controllability)
+    j["chassis_h"]     = chassis_h_;             // chassis height norm (1=target, ~0=on the ground/collision)
+    j["chassis_h_ema"] = chassis_h_ema_;         // smoothed chassis height
+    j["chassis_h_max"] = chassis_h_max_;         // self-discovered height ceiling
+    { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
+      j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much phase-conditioning HK has learned
     j["lateral_v"]   = lateral_v_;
     j["boredom"]     = boredom_;                 // sensorimotor predictability (Playful Machine)
     j["boredom_streak"] = boredom_streak_;
@@ -1714,6 +1771,7 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
             Eigen::MatrixXf M(r, c); std::copy(v.begin(), v.end(), M.data()); return M; };
         L.A = toM(vecf(lj.at("A")), n, m);
         L.C = toM(vecf(lj.at("C")), m, n);
+        if (lj.contains("Cphi")) L.Cphi = toM(vecf(lj.at("Cphi")), m, 2);   // legacy snapshots → keep zero-init
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);

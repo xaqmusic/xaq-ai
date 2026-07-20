@@ -163,6 +163,49 @@ Remaining polish: CPG clamp sits at 48 while the body runs ~38 (a residual ~1.25
 the entrainment clamp toward the body's cadence should tighten crystallization further. Propulsion
 after a full scaffold wean still needs a residual pump or a feed-forward-command objective (above).
 
+## CORRECTION (2026-07-20, UI observation): the coherent CPG-walk is REJECTED
+
+The "coherent walk" above scores well headless but is an **open-loop servo sequencer**: driving every
+joint from a CPG clock ignores ground contact, so the chassis **slams its corners into the ground every
+step** (a flopping fish). This was invisible to fwd_v + joint-coherence and caught only after a
+`chassis_h` collision metric was added (fraction of time the chassis dips below 0.35 of target height:
+**15.6% for the CPG-walk vs 3.3% for the keyframe**). Coherent ≠ emergent; fast fwd_v ≠ walking. Lesson:
+**no gait is good if the chassis collides — always measure chassis height.**
+
+## The emergent path: CPG as an EMBEDDING (not a driver) + firm stance
+
+Back on the `keyframe` config (which showed emergent steps with some "fighting"), the audit found the
+keyframer is a phase-indexed POSTURE map fed as a soft position target — a template that *averages* the
+gait to a damped smear, so driving toward it fights the very motion it should reproduce. Tweening the
+template (smooth C0 vs 16-step staircase) only made it **stiffer** (it lowpasses out the adaptive slack
+HK/balance need) — rejected.
+
+The fix demotes the CPG phase from a COMMAND to a CONTEXT (as in the earlier RL pipeline, where a CPG
+token was LateralVoter-fused with proprio/IMU into the EPM's input):
+- **`cpg_embed` (MotorEPM, default-off)**: the HK controller learns a phase-conditioned bias
+  `y = tanh(C·x + Cphi·[cosφ,sinφ] + h)`. `Cphi` is trained NOT on HK surprise (which damps motion — the
+  least-surprising thing is a still body) but to reduce the **keyframe error** (x*−x) at the command
+  phase — a self-limiting phase-indexed feed-forward toward the learned posture. Phase modulates the
+  learned control law; it never commands a joint, so HK exploration + balance reflexes stay live.
+- **firm stance** (`postural_gain` 0.3→0.7): the weak postural reflex let the lively controller
+  over-extend the legs and sag the chassis; firming it holds the stance → 0 falls, min chassis height
+  0.19→0.28 (no collision), sharper crystallization. (`hip2_tuck_target` added as a knob but did not
+  merit on its own.)
+
+Isolated A/B vs the keyframe baseline (promote-on-merit): precision 0.255→0.30+ (crystallizes),
+keyframe_tle 0.82→0.72, falls halved then zeroed, motor_tle smoother — at a modest fwd_v cost (the
+feed-forward still pushes toward the damped *posture*, not a propulsive *trajectory*).
+
+**UI validation (the real proof):** the robot reads as ALIVE and EVOLVING (not a template), traverses
+~5 m, and — stuck on a pyramid with its legs off the ground — **discovered a NOVEL limb movement to
+dislodge itself and continued walking.** That self-rescue is the homeokinetic exploration drive working
+as designed; an open-loop sequencer cannot do it. This is the emergent, feedback-driven direction.
+Config: `the_picrawler_motor_epm_embed.json`.
+
+**Open (not blockers):** hip2 is still passive (no rhythmic role, raw amp ~0.035); a sustained/efficient
+cycle likely wants the objective to carry phase-indexed VELOCITY (a propulsive trajectory), not just
+posture — the next lever.
+
 ## Reusable pieces added
 
 - `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.
@@ -170,7 +213,10 @@ after a full scaffold wean still needs a residual pump or a feed-forward-command
 - `KeyframeGait` self-precision drive gate (`warmup_visits`, `precision_scale`).
 - `MotorEPM` `coupling_fade_start/end` + `rhythm_fade_start/end` — deterministic scaffold-retirement schedules.
 - `MotorEPM` `phase_joint` + `rhythm_gains`/`rhythm_offsets` + `cpg_phase_topic` — the coherent
-  per-joint rhythmic drive (the intra-leg-coherence fix).
+  per-joint rhythmic drive (the REJECTED open-loop sequencer).
+- `MotorEPM` `cpg_embed` (+ `embed_lr`/`embed_decay`) — CPG-as-embedding: HK controller learns a
+  phase-conditioned feed-forward from the keyframe error (the emergent, validated path).
+- `MotorEPM` `chassis_h`/`chassis_h_ema` diag + `hip2_tuck_target` — collision metric + femur-crouch knob.
 - `BodyRhythmTracker` `raw_period`/`raw_amp` diag — per-(leg,joint) frequency diagnostic.
 - `OgmaBrain` TCP `set_param` verb — live param mutation for experiments (single-connection server).
 - `gait_metrics.py` + `raw_diag.py` — quantitative gait-quality + per-joint frequency diagnostics.
