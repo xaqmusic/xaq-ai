@@ -54,6 +54,10 @@ public:
     int   n_legs()       const { return int(proprio_topics_.size()); }
     int   bins_filled()  const;
     float keyframe_tle()  const { return keyframe_tle_ema_; }
+    // Per-bin SELF-precision ∈ [0,1] (the objective's own confidence in its prediction at bin b):
+    // 0 until the bin is proven (warmup), then scaled by how consistently its posture recurs.
+    // This is the bottom-up precision the EFE arbiter will later multiply its allocation onto.
+    float self_precision(int b) const;
 
 private:
     void handle_cpg(MessagePtr payload);
@@ -67,7 +71,10 @@ private:
     int    motor_dim_      = 3;
     int    n_bins_         = 16;
     double keyframe_alpha_ = 0.02;   // cross-cycle EMA rate (slow crystallize)
-    double gain_           = 0.3;    // published objective weight w (soft — strong over-constrains)
+    double gain_           = 0.3;    // base objective weight (policy); w = gain · self_precision
+    // Self-precision gate (§2.5 "drive on consistency"): don't drive a smeared/unproven bin.
+    int    warmup_visits_  = 24;     // per-bin visits before it may drive (crystallize-then-drive)
+    double precision_scale_= 0.6;    // softness: precision = warmup_ramp · exp(−bin_dev/scale)
     // Ablation hooks (§2.8), all HotMutable:
     bool   shuffle_phase_  = false;  // feed a random bin → destroys the phase index (control)
     bool   freeze_map_     = false;  // stop updating the keyframe (proves improvement is learning)
@@ -85,6 +92,7 @@ private:
     std::vector<float>           bin_dev_ema_; // [n_bins] per-bin ‖posture-keyframe‖ EMA (consistency)
     std::vector<int64_t>         bin_count_;   // [n_bins] ticks accumulated (0 = unseen)
     float                        keyframe_tle_ema_ = 0.0f;  // aggregate crystallization signal
+    float                        last_drive_w_ = 0.0f;      // last published confidence (diag)
 };
 
 } // namespace ogma

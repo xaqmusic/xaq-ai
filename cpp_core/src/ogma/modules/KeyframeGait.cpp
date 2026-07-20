@@ -85,8 +85,14 @@ ParamSchema KeyframeGait::params_schema() const {
          "Cross-cycle EMA rate for the keyframe + its TLE (slow = crystallize over cycles).",
          ParamValue{0.02}, ParamValue{0.0}, ParamValue{1.0}},
         {"gain", ParamMutability::HotMutable,
-         "Published objective weight w (PredictionToken.confidence, clamped [0,1]). Soft — a strong objective over-constrains the HK loop.",
+         "Base objective weight (policy). Published confidence w = gain · self_precision(bin), clamped [0,1]. Soft — a strong objective over-constrains the HK loop.",
          ParamValue{0.3}, ParamValue{0.0}, ParamValue{1.0}},
+        {"warmup_visits", ParamMutability::HotMutable,
+         "Per-bin visits before it may drive (crystallize-then-drive: prevents driving on an unproven bin whose deviation-EMA hasn't converged).",
+         ParamValue{int64_t(24)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
+        {"precision_scale", ParamMutability::HotMutable,
+         "Self-precision softness: precision = warmup_ramp · exp(−bin_dev/scale). Smaller = only very consistent bins drive.",
+         ParamValue{0.6}, ParamValue{0.01}, ParamValue{100.0}},
         {"shuffle_phase", ParamMutability::HotMutable,
          "Ablation: index the keyframe by a RANDOM bin instead of the CPG phase → the map washes out. Proves the phase-index does the work.",
          ParamValue{false}, std::nullopt, std::nullopt},
@@ -110,6 +116,8 @@ ParamMap KeyframeGait::current_params() const {
     m["n_bins"]         = int64_t(n_bins_);
     m["keyframe_alpha"] = keyframe_alpha_;
     m["gain"]           = gain_;
+    m["warmup_visits"]  = int64_t(warmup_visits_);
+    m["precision_scale"]= precision_scale_;
     m["shuffle_phase"]  = shuffle_phase_;
     m["freeze_map"]     = freeze_map_;
     m["publish"]        = publish_;
@@ -127,6 +135,8 @@ void KeyframeGait::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "n_bins",         [&](auto const& v){ n_bins_    = int(get_int(v, "n_bins")); });
     apply_param(params, "keyframe_alpha", [&](auto const& v){ keyframe_alpha_ = get_double(v, "keyframe_alpha"); });
     apply_param(params, "gain",           [&](auto const& v){ gain_      = get_double(v, "gain"); });
+    apply_param(params, "warmup_visits",  [&](auto const& v){ warmup_visits_   = int(get_int(v, "warmup_visits")); });
+    apply_param(params, "precision_scale",[&](auto const& v){ precision_scale_ = get_double(v, "precision_scale"); });
     apply_param(params, "shuffle_phase",  [&](auto const& v){ shuffle_phase_ = get_bool(v, "shuffle_phase"); });
     apply_param(params, "freeze_map",     [&](auto const& v){ freeze_map_    = get_bool(v, "freeze_map"); });
     apply_param(params, "publish",        [&](auto const& v){ publish_       = get_bool(v, "publish"); });
@@ -162,10 +172,24 @@ void KeyframeGait::on_param_change(std::string_view key, ParamValue const& value
     std::string k(key);
     if      (k == "keyframe_alpha") keyframe_alpha_ = get_double(value, k);
     else if (k == "gain")           gain_          = get_double(value, k);
+    else if (k == "warmup_visits")  warmup_visits_   = int(get_int(value, k));
+    else if (k == "precision_scale")precision_scale_ = get_double(value, k);
     else if (k == "shuffle_phase")  shuffle_phase_ = get_bool(value, k);
     else if (k == "freeze_map")     freeze_map_    = get_bool(value, k);
     else if (k == "publish")        publish_       = get_bool(value, k);
     else throw std::invalid_argument("KeyframeGait: param '" + k + "' is not HotMutable");
+}
+
+float KeyframeGait::self_precision(int b) const {
+    // Objective SELF-precision (no cross-objective logic — the arbiter owns that).
+    //   warmup_ramp : 0 until a bin is seen enough that its deviation-EMA is meaningful,
+    //                 ramping to 1 (crystallize-then-drive; an unproven bin has dev≈0 and
+    //                 would otherwise look falsely confident).
+    //   consistency : exp(−bin_dev/scale) — a bin whose posture recurs tightly = high precision.
+    if (b < 0 || b >= n_bins_ || bin_count_[b] <= 0) return 0.0f;
+    float warmup = std::clamp(float(bin_count_[b]) / float(std::max(1, warmup_visits_)), 0.0f, 1.0f);
+    float cons   = std::exp(-bin_dev_ema_[b] / float(precision_scale_));
+    return std::clamp(warmup * cons, 0.0f, 1.0f);
 }
 
 int KeyframeGait::bin_of(float phi) const {
@@ -229,8 +253,12 @@ void KeyframeGait::tick(uint64_t tick_id) {
     ++bin_count_[b];
 
     // Publish the current bin's keyframe posture, sliced per leg, as the soft objective.
+    // Confidence = base gain × SELF-precision: a smeared/unproven bin drives weakly or not at
+    // all (§2.5 "drive on consistency"), so the map crystallizes on the body's own gait before
+    // it takes over — the premature-drive fix, and the precision the arbiter will later scale.
     if (publish_) {
-        float w = std::clamp(float(gain_), 0.0f, 1.0f);
+        float w = std::clamp(float(gain_) * self_precision(b), 0.0f, 1.0f);
+        last_drive_w_ = w;
         for (int leg = 0; leg < nl; ++leg) {
             auto out = std::make_shared<PredictionToken>();
             out->tick_id          = tick_id;
@@ -258,6 +286,11 @@ nlohmann::json KeyframeGait::diag_snapshot() const {
     for (int b = 0; b < n_bins_; ++b) if (bin_count_[b] > 0) { s += bin_dev_ema_[b]; ++c; }
     j["mean_bin_dev"]     = c ? s / float(c) : 0.0f;
     j["mean_consistency"] = c ? 1.0f / (1.0f + s / float(c)) : 0.0f;
+    // Self-precision drive gate: mean over filled bins + the last published confidence.
+    float ps = 0.0f; int pc = 0;
+    for (int b = 0; b < n_bins_; ++b) if (bin_count_[b] > 0) { ps += self_precision(b); ++pc; }
+    j["mean_precision"] = pc ? ps / float(pc) : 0.0f;
+    j["drive_w"]        = last_drive_w_;
     j["phi"]     = phi_;
     j["gain"]    = gain_;
     j["shuffle_phase"] = shuffle_phase_;

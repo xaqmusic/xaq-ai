@@ -162,7 +162,7 @@
       "id": "cpg_clock",
       "type": "CPGOscillator",
       "params": {
-        "period_ticks": 60,
+        "period_ticks": 70,
         "perceptual_output_topics": [
           "rhythm.cpg.body"
         ],
@@ -172,7 +172,12 @@
         "perceptual_sensor_label": "cpg_phase",
         "amplitude": 0.0,
         "amplitude_floor": 0.0,
-        "standing_bias_amplitude": 0.0
+        "standing_bias_amplitude": 0.0,
+        "entrain_topic": "rhythm.body.gait",
+        "entrain_freq_gain": 0.02,
+        "entrain_phase_gain": 0.05,
+        "entrain_period_min": 48.0,
+        "entrain_period_max": 120.0
       }
     },
     {
@@ -196,6 +201,28 @@
         "n_bins": 16,
         "keyframe_alpha": 0.02,
         "gain": 0.3
+      }
+    },
+    {
+      "id": "body_rhythm_tracker",
+      "type": "BodyRhythmTracker",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "output_topic": "rhythm.body.gait",
+        "leg_signs": [
+          1.0,
+          -1.0,
+          -1.0,
+          1.0
+        ],
+        "motor_dim": 3,
+        "swing_joint": 0,
+        "init_period": 70.0
       }
     }
   ],

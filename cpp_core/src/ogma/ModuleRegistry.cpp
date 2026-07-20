@@ -48,6 +48,7 @@
 #include "ogma/modules/MotorEPM.hpp"
 #include "ogma/modules/PosturalPrior.hpp"
 #include "ogma/modules/KeyframeGait.hpp"
+#include "ogma/modules/BodyRhythmTracker.hpp"
 #include "ogma/modules/KeyframeAverager.hpp"
 #include "ogma/modules/KeyframePeakDetector.hpp"
 #include "ogma/modules/LateralVoter.hpp"
@@ -187,6 +188,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("MotorEPM",            [](){ return std::make_unique<MotorEPM>(); });
         reg.register_type("PosturalPrior",       [](){ return std::make_unique<PosturalPrior>(); });
         reg.register_type("KeyframeGait",        [](){ return std::make_unique<KeyframeGait>(); });
+        reg.register_type("BodyRhythmTracker",   [](){ return std::make_unique<BodyRhythmTracker>(); });
         // Phase 7.9 — closed-loop adaptive timer.  Per-leg touchdown
         // detection + period EMA + prediction.  Reward-gated Hebbian on
         // per-(premotor, phase_bin, intent) bias table.  Output is

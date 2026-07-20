@@ -70,6 +70,11 @@ Eigen::VectorXf published(ogma::InProcessBus& bus, const char* topic) {
     return tok ? tok->predicted_latent : Eigen::VectorXf();
 }
 
+float published_conf(ogma::InProcessBus& bus, const char* topic) {
+    auto tok = std::dynamic_pointer_cast<const ogma::PredictionToken>(bus.last_value(topic));
+    return tok ? tok->confidence : -1.0f;
+}
+
 void drive(ogma::InProcessBus& bus, ogma::KeyframeGait& kg, int cycles, uint64_t& t) {
     for (int c = 0; c < cycles; ++c)
         for (int k = 0; k < 32; ++k, ++t) {
@@ -120,6 +125,33 @@ TEST(KeyframeGait, CrystallizesAndShufflePhaseWashesOut) {
     EXPECT_LT(normal, 0.05f)          << "phase-indexed: a consistent phase→posture crystallizes to low TLE";
     EXPECT_GT(shuffled, 0.1f)         << "shuffle_phase: bins see a random mix → keyframe stays a high-TLE mean";
     EXPECT_GT(shuffled, normal * 3.0f) << "the phase index is what does the work";
+}
+
+TEST(KeyframeGait, SelfPrecisionGatesDrive) {
+    // The published confidence = gain · self_precision: an unproven bin barely drives (warmup),
+    // and a crystallized bin drives near the base gain.  This is the premature-drive fix and the
+    // precision the EFE arbiter will later scale.
+    ogma::InProcessBus bus; ogma::KeyframeGait kg; kg.set_id("kg");
+    auto p = kg_params();
+    p["gain"]            = 0.5;
+    p["warmup_visits"]   = int64_t{64};
+    p["precision_scale"] = 0.6;
+    kg.on_setup(&bus, p);
+
+    uint64_t t = 0;
+    drive(bus, kg, 2, t);                                   // ~4 visits/bin — well under warmup
+    step(bus, kg, t++, 0.0f, bin_posture(0.0f));
+    float early = published_conf(bus, "obj.fl");
+    EXPECT_GE(early, 0.0f);
+    EXPECT_LT(early, 0.1f) << "an unproven bin must barely drive (warmup gate)";
+
+    drive(bus, kg, 40, t);                                  // ~80 visits/bin — crystallized
+    step(bus, kg, t++, 0.0f, bin_posture(0.0f));
+    float late = published_conf(bus, "obj.fl");
+    EXPECT_GT(late, early)  << "a crystallized bin must drive more than an unproven one";
+    EXPECT_GT(late, 0.3f)   << "a consistent bin should approach the base gain (0.5)";
+    // The target itself is still published throughout (only the confidence is gated).
+    EXPECT_EQ(published(bus, "obj.fl").size(), 3);
 }
 
 TEST(KeyframeGait, SnapshotRestoreRoundTripsMap) {
