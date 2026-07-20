@@ -1,8 +1,44 @@
-# Picrawler active-inference gait loop — findings (L-1b: steps 2–3 + Gate 2)
+# Picrawler active-inference gait loop — findings (L-1b: steps 2–3 + Gate 2 + emergent gait)
 
-Status as of 2026-07-19. Companion to `docs/plans-and-designs/picrawler_active_inference_plan.md`.
+Status as of 2026-07-20. Companion to `docs/plans-and-designs/picrawler_active_inference_plan.md`.
 All results are headless, reset-masked, reward-free. Verification scripts live in the session
-scratchpad (`gate1*/brt/gait_metrics/gate2*` collectors).
+scratchpad (`gait_metrics.py`/`gaith.py`/`raw_diag.py`/`gate1*`/`brt`/`gate2*` collectors).
+
+## STATUS — where we are (2026-07-20)
+
+**Milestone reached** (commit `ed3c56f`, config `the_picrawler_motor_epm_embed.json`): a gait that
+**learns a coordination it was not given, walks ~5 m, and — stuck on an obstacle with its legs off the
+ground — improvises a NOVEL limb movement to free itself and keeps going.** That self-rescue is the
+homeokinetic exploration drive working as designed; a scripted gait cannot do it. It reads as *alive*
+and *evolving* in the UI (robust over long runs, multiple stuck/escape events). First gait worth naming.
+
+**The one principle that explains every result: LEARNED cooperates, IMPOSED fights.** Every mechanism
+that *let the body discover* won; every mechanism that *dictated to the body* lost the same way (chaos,
+collision, or stiffness). This is the through-line — reach for the learned/contextual form, not the
+commanded one.
+
+### Scorecard (isolated A/B, promoted only on merit — chassis-up + adaptation + intended effect, not just fwd_v)
+
+| mechanism | verdict | why |
+|---|---|---|
+| KeyframeGait phase-indexed map + self-precision gate | **promoted** | learns coordination; drives on consistency |
+| BodyRhythmTracker PLL + CPG entrainment | **promoted** | CPG tracks the body (fixes the washout) |
+| CPG-as-**embedding** (`cpg_embed`, controller learns a phase-conditioned feed-forward from the keyframe error) | **promoted ★** | phase as CONTEXT → emergent, self-rescuing gait |
+| firm stance (`postural_gain` 0.3→0.7) | **promoted** | defends the stance → 0 falls, no collision, sharper map |
+| CPG-phase *drive* (open-loop per-joint rhythm) — "coherent walk" | **rejected** | servo sequencer; chassis slams the ground (flopping fish) |
+| keyframe **tween** (smooth the staircase) | **rejected** | lowpasses out the adaptive slack → stiff |
+| hip2 **stroke** (imposed femur lift) | **rejected** | energetic but chaotic, no stable gait, frequent falls |
+| hip2 **tuck** (femur rest override, alone) | **rejected** | didn't crouch (weak reflex) + destabilized |
+
+**Metrics lesson (a real gap I hit):** a fast-traversing *flopping* gait scored great on fwd_v +
+joint-coherence — the collision was invisible until a **`chassis_h`** (chassis height) metric was
+added. **No gait is good if the chassis collides — always measure chassis height** (and adaptation,
+not just speed).
+
+**Open levers (neither urgent):** (1) phase-indexed **velocity** in the objective — the propulsive
+push, not just the pose — the root fix for the small fwd_v cost and a more sustained cycle (bigger
+payoff); (2) **emergent hip2** — give the femur *room to be explored* (per-joint postural: firm on
+hip1/knee, loose on hip2) so HK+embedding LEARN to use it, rather than a stroke that dictates it.
 
 ## The architecture under test
 
