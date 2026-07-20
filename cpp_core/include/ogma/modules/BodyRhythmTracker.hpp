@@ -95,6 +95,12 @@ private:
     std::vector<int64_t> ticks_since_up_;   // [motor_dim]
     std::vector<float>   period_zc_ema_;    // [motor_dim]  up-crossing period estimate (unbiased)
 
+    // Per-(leg,joint) RAW oscillation diagnostic (untangles intra- vs inter-leg incoherence;
+    // the collective coordinate above confounds per-joint frequency). Flat [leg*motor_dim + joint].
+    std::vector<float>   raw_mean_, raw_amp_, raw_period_;
+    std::vector<char>    raw_below_;
+    std::vector<int64_t> raw_tsu_;
+
     // Phase-locked loop on the swing-joint coordinate.
     float omega_    = kTwoPi_ / 60.0f;      // smoothed frequency (rad/tick), fed forward from period_zc
     float phi_body_ = 0.0f;                 // integrated gait phase, [0,2π)

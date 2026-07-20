@@ -141,6 +141,24 @@ ParamSchema MotorEPM::params_schema() const {
         {"coupling_gain", ParamMutability::HotMutable,
          "Rung 3 inter-leg Kuramoto coupling strength. Couples the four legs' own emergent phases toward the gait_phase offsets (entrains the twitching legs to the active one, phase-locks all four). 0 = off (one-leg-spins regime); raise to watch the legs synchronize.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"phase_joint", ParamMutability::ConstructionOnly,
+         "Proprio joint index (0=hip1, 1=hip2, 2=knee) whose motion derives the per-leg oscillator phase L.phase (used by the Kuramoto coupling AND the stroke). -1 = knee (m-1, legacy). Set to 0 (hip1, the fore-aft locomotor joint) to lock coordination to the actual stride rhythm rather than the knee's faster flexion.",
+         ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
+        {"rhythm_gains", ParamMutability::HotMutable,
+         "Per-joint [hip1,hip2,knee] amplitude of a coherent rhythmic drive sin(L.phase+offset) that locks ALL joints to ONE leg phase/frequency (the intra-leg-coherence fix — the keyframe can only crystallize when a leg's joints share one frequency). Empty/all-0 = off (legacy: only hip1 rhythmic, joints drift to own frequencies).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"rhythm_offsets", ParamMutability::HotMutable,
+         "Per-joint [hip1,hip2,knee] phase offset (rad) for the rhythmic drive.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"cpg_phase_topic", ParamMutability::ConstructionOnly,
+         "Optional global CPG phase topic (rhythm.cpg.body) to drive the rhythm from — a clean, entrained phase (leg_phase = cpg_phase + gait_phase[leg]) so the whole body locks to ONE frequency. Empty = use the proprio-derived L.phase.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"rhythm_fade_start", ParamMutability::HotMutable,
+         "Gate 2: tick to begin linearly fading the rhythm scaffold to 0 (coherent-scaffold wean: the learned keyframe takes over). -1 = disabled.",
+         ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
+        {"rhythm_fade_end", ParamMutability::HotMutable,
+         "Gate 2: tick at which the rhythm scaffold reaches 0 (must be > rhythm_fade_start).",
+         ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
         {"coupling_fade_start", ParamMutability::HotMutable,
          "Gate 2: tick to begin linearly fading the imposed coupling to 0 (crystallize-then-wean so the learned map takes over). -1 = disabled.",
          ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
@@ -317,6 +335,12 @@ ParamMap MotorEPM::current_params() const {
     m["knee_tuck_target"] = knee_tuck_target_;
     m["motor_gain"]       = motor_gain_;
     m["coupling_gain"]    = coupling_gain_;
+    m["phase_joint"]      = int64_t(phase_joint_);
+    m["rhythm_gains"]     = rhythm_gains_;
+    m["rhythm_offsets"]   = rhythm_offsets_;
+    m["cpg_phase_topic"]  = cpg_phase_topic_;
+    m["rhythm_fade_start"]= rhythm_fade_start_;
+    m["rhythm_fade_end"]  = rhythm_fade_end_;
     m["coupling_fade_start"] = coupling_fade_start_;
     m["coupling_fade_end"]   = coupling_fade_end_;
     m["gait_phase"]       = gait_phase_;
@@ -389,6 +413,12 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "knee_tuck_target", [&](auto const& v){ knee_tuck_target_ = get_double(v, "knee_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
     apply_param(params, "coupling_gain", [&](auto const& v){ coupling_gain_ = get_double(v, "coupling_gain"); });
+    apply_param(params, "phase_joint",   [&](auto const& v){ phase_joint_   = int(get_int(v, "phase_joint")); });
+    apply_param(params, "rhythm_gains",   [&](auto const& v){ rhythm_gains_   = get_double_vec(v, "rhythm_gains"); });
+    apply_param(params, "rhythm_offsets", [&](auto const& v){ rhythm_offsets_ = get_double_vec(v, "rhythm_offsets"); });
+    apply_param(params, "cpg_phase_topic",[&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) cpg_phase_topic_ = *p; });
+    apply_param(params, "rhythm_fade_start", [&](auto const& v){ rhythm_fade_start_ = get_int(v, "rhythm_fade_start"); });
+    apply_param(params, "rhythm_fade_end",   [&](auto const& v){ rhythm_fade_end_   = get_int(v, "rhythm_fade_end"); });
     apply_param(params, "coupling_fade_start", [&](auto const& v){ coupling_fade_start_ = get_int(v, "coupling_fade_start"); });
     apply_param(params, "coupling_fade_end",   [&](auto const& v){ coupling_fade_end_   = get_int(v, "coupling_fade_end"); });
     coupling_eff_ = float(coupling_gain_);
@@ -552,6 +582,21 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
             objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
     }
+    // Coherent-scaffold phase (L-1b): an optional global CPG phase (rhythm.cpg.body,
+    // ProprioToken [cos φ, sin φ]) to drive the per-joint rhythm from — a CLEAN entrained phase,
+    // so all joints lock to ONE frequency (intra-leg coherence) vs the noisy proprio L.phase.
+    if (!cpg_phase_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(
+            cpg_phase_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_cpg_phase(p); }));
+}
+
+void MotorEPM::handle_cpg_phase(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto p = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!p || p->values.size() < 2) return;
+    cpg_phase_ = std::atan2(p->values[1], p->values[0]);
+    cpg_seen_  = true;
 }
 
 void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
@@ -714,6 +759,10 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "coupling_gain") coupling_gain_ = get_double(value, "coupling_gain");
     else if (key == "coupling_fade_start") coupling_fade_start_ = get_int(value, "coupling_fade_start");
     else if (key == "coupling_fade_end")   coupling_fade_end_   = get_int(value, "coupling_fade_end");
+    else if (key == "rhythm_gains")   rhythm_gains_   = get_double_vec(value, "rhythm_gains");
+    else if (key == "rhythm_offsets") rhythm_offsets_ = get_double_vec(value, "rhythm_offsets");
+    else if (key == "rhythm_fade_start") rhythm_fade_start_ = get_int(value, "rhythm_fade_start");
+    else if (key == "rhythm_fade_end")   rhythm_fade_end_   = get_int(value, "rhythm_fade_end");
     else if (key == "coord_adapt_rate") coord_adapt_rate_ = get_double(value, "coord_adapt_rate");
     else if (key == "coord_explore") coord_explore_ = get_double(value, "coord_explore");
     else if (key == "coord_reward_drive") coord_reward_drive_ = get_double(value, "coord_reward_drive");
@@ -826,6 +875,15 @@ void MotorEPM::tick(uint64_t tick_id) {
                      / float(coupling_fade_end_ - coupling_fade_start_);
         coupling_eff_ = float(coupling_gain_) * f;
     }
+    // Gate 2 (coherent-scaffold wean): fade the CPG-phase rhythm drive so the learned keyframe
+    // objective takes over.  Function of tick_id only → clone-deterministic.
+    rhythm_scale_ = 1.0f;
+    if (rhythm_fade_start_ >= 0 && rhythm_fade_end_ > rhythm_fade_start_) {
+        if (int64_t(tick_id) >= rhythm_fade_end_)        rhythm_scale_ = 0.0f;
+        else if (int64_t(tick_id) > rhythm_fade_start_)
+            rhythm_scale_ = 1.0f - float(int64_t(tick_id) - rhythm_fade_start_)
+                                 / float(rhythm_fade_end_ - rhythm_fade_start_);
+    }
 
     // ---- Gate 0 reset-masking bookkeeping (reward-free instrumentation) ----
     // Slow EMA of the per-tick disruption indicator (set by handle_event when a
@@ -880,8 +938,9 @@ void MotorEPM::tick(uint64_t tick_id) {
         for (int leg = 0; leg < n_legs_; ++leg) {
             Leg& L = legs_[leg];
             if (!L.initialized || L.n < 3 * m) continue;
-            float kp = L.x[3 * (m - 1)];          // knee position
-            float kd = L.x[3 * (m - 1) + 2];      // knee delta (velocity proxy)
+            int pj = (phase_joint_ >= 0 && phase_joint_ < m) ? phase_joint_ : (m - 1);
+            float kp = L.x[3 * pj];               // phase-source joint position (default knee = m-1)
+            float kd = L.x[3 * pj + 2];           // phase-source joint delta (velocity proxy)
             L.knee_ema = (1.0f - kKneeEmaAlpha) * L.knee_ema + kKneeEmaAlpha * kp;
             float vx = kp - L.knee_ema, vy = kd * kPhaseVelScale;
             L.phase = std::atan2(vy, vx);
@@ -1230,6 +1289,22 @@ void MotorEPM::tick(uint64_t tick_id) {
             float amp  = sgn * (float(stroke_gain_) * fwd + side * steer_eff);
             y[0] += (1.0f - pe) * amp * std::sin(L.phase + float(stroke_phase_));
         }
+        // --- Coherent per-joint rhythmic drive: lock hip2/knee to the SAME leg phase as the
+        // stroke (per-joint amplitude + offset) so the whole leg is ONE oscillator at ONE
+        // frequency → the keyframe map can crystallize (the intra-leg-coherence fix). Default
+        // gains 0 = off (legacy: only hip1 is rhythmically driven, joints drift to own freqs).
+        if (!warmup && int(rhythm_gains_.size()) == m) {
+            // Drive from the CLEAN global CPG phase (+ per-leg gait_phase) when available, so all
+            // legs/joints lock to one frequency; else fall back to the proprio-derived L.phase.
+            float base = (cpg_seen_ && !cpg_phase_topic_.empty())
+                       ? (cpg_phase_ + (int(gait_phase_.size()) == n_legs_ ? float(gait_phase_[leg]) : 0.0f))
+                       : L.phase;
+            for (int j = 0; j < m; ++j) {
+                if (rhythm_gains_[j] == 0.0) continue;
+                float off = (int(rhythm_offsets_.size()) == m) ? float(rhythm_offsets_[j]) : 0.0f;
+                y[j] += rhythm_scale_ * (1.0f - pe) * float(rhythm_gains_[j]) * std::sin(base + off);
+            }
+        }
         // Cell differential nav-steer (n_legs=1, motor_dim=2): a perceived goal
         // bearing biases the two flagella differentially → the alive homeokinetic
         // swimmer turns toward the goal.  Reward-free active-inference modulation
@@ -1525,6 +1600,7 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     // Gate 0 (L-1a) reset-masked gait instruments:
     j["gait_coherence"]    = gait_coherence();  // Kuramoto phase-lock ∈[0,1]; rises as legs lock to the gait
     j["coupling_eff"]      = coupling_eff_;      // Gate 2: live (faded) coupling strength
+    j["rhythm_scale"]      = rhythm_scale_;      // Gate 2: live (faded) rhythm-scaffold scale
     j["reset_count"]       = reset_count_;       // cumulative fall/teleport disruptions
     j["ticks_since_reset"] = ticks_since_reset_; // for reset-masking the coherence/TLE trend
     j["reset_rate"]        = reset_rate_ema_;    // Gate 0 signal: FALLS as the upright prior holds

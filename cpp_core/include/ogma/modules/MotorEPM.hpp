@@ -95,6 +95,7 @@ public:
 
 private:
     void handle_proprio(int leg, MessagePtr payload);
+    void handle_cpg_phase(MessagePtr payload);
     void handle_tilt(MessagePtr payload);
     void handle_imu(MessagePtr payload);
     void handle_nav(MessagePtr payload);
@@ -153,6 +154,17 @@ private:
     // coordination topology), entraining the twitchers and phase-locking all four
     // for symmetric thrust.  Rhythm emerges; only the offsets are imposed.
     double  coupling_gain_ = 0.0;                  // Kuramoto coupling strength (0 = off; live transition knob)
+    int     phase_joint_   = -1;                   // proprio joint sourcing the per-leg oscillator phase (-1 = knee = m-1)
+    std::vector<double> rhythm_gains_;             // per-joint coherent rhythmic drive amplitude (empty/0 = off)
+    std::vector<double> rhythm_offsets_;           // per-joint phase offset for the rhythmic drive
+    std::string         cpg_phase_topic_;          // optional global CPG phase to drive the rhythm from (clean, entrained)
+    float               cpg_phase_ = 0.0f;
+    bool                cpg_seen_  = false;
+    // Gate 2 (coherent-scaffold wean): tick-scheduled fade of the rhythm drive so the LEARNED
+    // keyframe takes over the gait. -1 = disabled.
+    int64_t             rhythm_fade_start_ = -1;
+    int64_t             rhythm_fade_end_   = -1;
+    float               rhythm_scale_      = 1.0f;
     // Gate 2 (Kuramoto-contrast): deterministic tick-scheduled fade of the imposed coupling so the
     // LEARNED keyframe map takes over (crystallize-then-wean). -1 = disabled (coupling stays flat).
     int64_t coupling_fade_start_ = -1;             // begin linear fade at this tick

@@ -157,6 +157,12 @@ void BodyRhythmTracker::on_setup(Bus* bus, ParamMap const& params) {
     below_.assign(motor_dim_, 1);
     ticks_since_up_.assign(motor_dim_, 0);
     period_zc_ema_.assign(motor_dim_, 0.0f);
+    int nlm = nl * motor_dim_;
+    raw_mean_.assign(nlm, 0.0f);
+    raw_amp_.assign(nlm, 0.0f);
+    raw_period_.assign(nlm, 0.0f);
+    raw_below_.assign(nlm, 1);
+    raw_tsu_.assign(nlm, 0);
 
     omega_ = kTwoPi_ / float(std::max(2.0, init_period));
     phi_body_ = 0.0f;
@@ -223,6 +229,28 @@ void BodyRhythmTracker::tick(uint64_t tick_id) {
     }
     f_swing_ = f_last_[swing_joint_];
 
+    // --- Raw per-(leg,joint) zero-crossing period + amplitude (diagnostic; NOT the diagonal
+    // coordinate) — shows whether a single leg's joints share one frequency (intra-leg coherence)
+    // and whether the same joint agrees across legs (inter-leg coherence).
+    for (int leg = 0; leg < nl; ++leg) {
+        for (int j = 0; j < motor_dim_; ++j) {
+            int idx = leg * motor_dim_ + j;
+            float raw = pos_[leg][j];
+            raw_mean_[idx] += ma * (raw - raw_mean_[idx]);
+            float f = raw - raw_mean_[idx];
+            raw_amp_[idx] = (1.0f - aa) * raw_amp_[idx] + aa * std::fabs(f);
+            float hys = 0.2f * raw_amp_[idx];
+            ++raw_tsu_[idx];
+            if (raw_below_[idx] && f > hys) {
+                if (raw_period_[idx] <= 0.0f) raw_period_[idx] = float(raw_tsu_[idx]);
+                else raw_period_[idx] = (1.0f - pa) * raw_period_[idx] + pa * float(raw_tsu_[idx]);
+                raw_tsu_[idx] = 0; raw_below_[idx] = 0;
+            } else if (!raw_below_[idx] && f < -hys) {
+                raw_below_[idx] = 1;
+            }
+        }
+    }
+
     // --- Measurement-seeded PLL locked to the swing coordinate ---
     // FEED-FORWARD frequency: the up-crossing interval is an unbiased period measurement; ω is
     // low-passed toward 2π/period so it drifts smoothly.  FEEDBACK phase: φ integrates ω and is
@@ -271,6 +299,20 @@ nlohmann::json BodyRhythmTracker::diag_snapshot() const {
     for (int jn = 0; jn < motor_dim_; ++jn) { amp.push_back(amp_ema_[jn]); pzc.push_back(period_zc_ema_[jn]); }
     j["amp_per_joint"]       = amp;
     j["period_zc_per_joint"] = pzc;
+    // Raw per-(leg,joint) period + amplitude: [leg][joint] (joint order hip1,hip2,knee).
+    int nl = int(proprio_topics_.size());
+    nlohmann::json rp = nlohmann::json::array(), ra = nlohmann::json::array();
+    for (int leg = 0; leg < nl; ++leg) {
+        nlohmann::json lp = nlohmann::json::array(), la = nlohmann::json::array();
+        for (int jt = 0; jt < motor_dim_; ++jt) {
+            int idx = leg * motor_dim_ + jt;
+            lp.push_back(idx < int(raw_period_.size()) ? raw_period_[idx] : 0.0f);
+            la.push_back(idx < int(raw_amp_.size())    ? raw_amp_[idx]    : 0.0f);
+        }
+        rp.push_back(lp); ra.push_back(la);
+    }
+    j["raw_period"] = rp;
+    j["raw_amp"]    = ra;
     return j;
 }
 

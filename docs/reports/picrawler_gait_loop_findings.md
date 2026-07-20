@@ -98,11 +98,54 @@ shows up as belly-up flips and a body that fights the imposed coordination. A st
 four-beat walk may be far easier to synchronise and keep upright — possibly dissolving the
 incoherence at its root rather than fighting it downstream.
 
+## RESOLUTION (2026-07-20): the incoherence was INTRA-leg, and a coherent CPG-phase drive fixes it
+
+A raw per-(leg,joint) diagnostic (added to `BodyRhythmTracker`) showed the incoherence is **within
+each leg**, not between legs: a single leg's three joints run at *different* frequencies
+(e.g. hip1≈61, hip2≈28, knee≈40; intra-leg period spread ~28). The knees actually sync well across
+legs (inter-leg std ~3.6) — the coupling works — but the design sourced each leg's oscillator phase
+from the **knee** (`L.phase`, MotorEPM.cpp:883) while the actual locomotor rhythm is **hip1** (the
+fore-aft stride), and only hip1 was rhythmically driven (via the stroke) — so the joints drifted to
+independent frequencies and the keyframe could never crystallize.
+
+**The fix — drive every joint from ONE clean phase.** New MotorEPM knobs (all default-off,
+byte-identical): `phase_joint` (which proprio joint sources `L.phase`), a per-joint **coherent
+rhythmic drive** `rhythm_gains`/`rhythm_offsets` (`y[j] += g_j·sin(base + off_j)`), and a
+`cpg_phase_topic` so `base` is the **clean, entrained global CPG phase** (`+ gait_phase[leg]`)
+rather than the noisy proprio-derived `L.phase`. With coupling+stroke off and all joints driven from
+the CPG phase:
+
+| | trot (before) | **CPG-phase coherent drive** |
+|---|---|---|
+| intra-leg period spread | ~28 | **0.0** (knee/hip = 1.00) |
+| inter-leg std | ~6 | **0.1** |
+| mean fwd_v | +0.041 | **+0.084** (2×) |
+| `keyframe_tle` | 0.82 (plateau) | **0.25** |
+| `mean_precision` | 0.26 (plateau) | **0.53 → 0.73** |
+| `gait_coherence` | 0.41 | **0.62–0.76** |
+| belly-up flips | 3 | 0–4 |
+
+The whole body became a **clean single-frequency limit cycle**, which broke the precision plateau and
+made the keyframe crystallize (`keyframe_tle` 0.82→0.25, precision 0.26→0.73). This was the root fix.
+
+**Gate 2 on the coherent gait (rhythm-scaffold wean).** Fading the rhythm scaffold to 0, the learned
+keyframe **holds the coordination** — the body stays a clean limit cycle (spread 1.1) and matches the
+map almost perfectly (`keyframe_tle` 0.08, precision **0.918**) — but **loses propulsion**
+(fwd_v→0). The keyframe is a phase-indexed **posture** template: it reproduces the gait's *shape* but
+not its propulsive *push*. So coordination is genuinely learnable/holdable; propulsion needs a
+rhythmic pump. Practical upshot: keep a residual CPG-phase pump (a permanent rhythm generator, as in
+animal locomotion) and let the keyframe learn/refine the coordination — or extend the objective to
+carry a phase-indexed feed-forward command, not just posture. (`rhythm_fade_start/end` provides the
+deterministic wean schedule for this study.)
+
 ## Reusable pieces added
 
 - `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.
 - `CPGOscillator` afferent entrainment (`entrain_topic`, aliasing clamp).
 - `KeyframeGait` self-precision drive gate (`warmup_visits`, `precision_scale`).
-- `MotorEPM` `coupling_fade_start/end` — deterministic scaffold-retirement schedule.
+- `MotorEPM` `coupling_fade_start/end` + `rhythm_fade_start/end` — deterministic scaffold-retirement schedules.
+- `MotorEPM` `phase_joint` + `rhythm_gains`/`rhythm_offsets` + `cpg_phase_topic` — the coherent
+  per-joint rhythmic drive (the intra-leg-coherence fix).
+- `BodyRhythmTracker` `raw_period`/`raw_amp` diag — per-(leg,joint) frequency diagnostic.
 - `OgmaBrain` TCP `set_param` verb — live param mutation for experiments (single-connection server).
-- `gait_metrics.py` — the quantitative gait-quality metric block.
+- `gait_metrics.py` + `raw_diag.py` — quantitative gait-quality + per-joint frequency diagnostics.
