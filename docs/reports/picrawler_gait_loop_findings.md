@@ -138,6 +138,31 @@ animal locomotion) and let the keyframe learn/refine the coordination — or ext
 carry a phase-indexed feed-forward command, not just posture. (`rhythm_fade_start/end` provides the
 deterministic wean schedule for this study.)
 
+## Final tuned gait (`the_picrawler_motor_epm_cpgwalk.json`)
+
+Combining the coherence fix with statically-stable walk phasing and clean propulsion signing yields
+a gait that is **3× faster, coherent, and stable** vs the original trot:
+
+- CPG-phase coherent drive (coupling + stroke off; all joints from `rhythm.cpg.body`).
+- **Walk phasing** `gait_phase = [π/2, 3π/2, 0, π]` (lateral-sequence LH→LF→RH→RF, more legs down).
+- `rhythm_gains = [1.8, 1.0, 1.6]`, `rhythm_offsets = [0, π/2, π/2]` (knee/hip2 lift 90° into swing).
+- `stroke_signs = [-1, 1, -1, 1]` — the fore-aft joint (0) carries the per-leg propulsion sign so
+  opposite sides push the body the same way → **straight, forward** walking (a MotorEPM change: the
+  rhythm drive applies `stroke_signs[leg]` to joint 0).
+
+| | original trot | **final coherent walk** |
+|---|---|---|
+| mean fwd_v | +0.041 | **+0.116 (≈3×)** |
+| joint-period spread | ~32 | **0.5** |
+| `mean_precision` | 0.26 (plateau) | **0.52** (crystallizes) |
+| `keyframe_tle` | 0.82 | 0.37 |
+| belly-up flips (90 s) | 3 | **0–2** |
+| Gate 0 (reset_rate) | 0 | 0 |
+
+Remaining polish: CPG clamp sits at 48 while the body runs ~38 (a residual ~1.25× mismatch); lowering
+the entrainment clamp toward the body's cadence should tighten crystallization further. Propulsion
+after a full scaffold wean still needs a residual pump or a feed-forward-command objective (above).
+
 ## Reusable pieces added
 
 - `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.

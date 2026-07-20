@@ -1302,7 +1302,11 @@ void MotorEPM::tick(uint64_t tick_id) {
             for (int j = 0; j < m; ++j) {
                 if (rhythm_gains_[j] == 0.0) continue;
                 float off = (int(rhythm_offsets_.size()) == m) ? float(rhythm_offsets_[j]) : 0.0f;
-                y[j] += rhythm_scale_ * (1.0f - pe) * float(rhythm_gains_[j]) * std::sin(base + off);
+                // The fore-aft joint (0) carries the propulsion sign per leg (stroke_signs) so
+                // opposite-side legs push the body the SAME way in world space → straight walking,
+                // not sideways drift. Lift joints (hip2/knee) stay unsigned (symmetric).
+                float lsgn = (j == 0 && int(stroke_signs_.size()) == n_legs_) ? float(stroke_signs_[leg]) : 1.0f;
+                y[j] += rhythm_scale_ * (1.0f - pe) * lsgn * float(rhythm_gains_[j]) * std::sin(base + off);
             }
         }
         // Cell differential nav-steer (n_legs=1, motor_dim=2): a perceived goal
