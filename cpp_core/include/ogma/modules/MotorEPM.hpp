@@ -153,6 +153,11 @@ private:
     // coordination topology), entraining the twitchers and phase-locking all four
     // for symmetric thrust.  Rhythm emerges; only the offsets are imposed.
     double  coupling_gain_ = 0.0;                  // Kuramoto coupling strength (0 = off; live transition knob)
+    // Gate 2 (Kuramoto-contrast): deterministic tick-scheduled fade of the imposed coupling so the
+    // LEARNED keyframe map takes over (crystallize-then-wean). -1 = disabled (coupling stays flat).
+    int64_t coupling_fade_start_ = -1;             // begin linear fade at this tick
+    int64_t coupling_fade_end_   = -1;             // coupling = 0 from this tick on
+    float   coupling_eff_        = 0.0f;           // effective (faded) coupling used this tick (diag)
     std::vector<double> gait_phase_ = {0.0, 3.14159265, 3.14159265, 0.0};  // per-leg target phase (trot: diagonals in-phase)
     // 2026-06-14 — ADAPTIVE COORDINATION (prototype).  gait_phase is normally a
     // FIXED imposed trot, but the body fights it (settles to antiphase diagonals).

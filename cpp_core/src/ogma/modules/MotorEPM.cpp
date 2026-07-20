@@ -141,6 +141,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"coupling_gain", ParamMutability::HotMutable,
          "Rung 3 inter-leg Kuramoto coupling strength. Couples the four legs' own emergent phases toward the gait_phase offsets (entrains the twitching legs to the active one, phase-locks all four). 0 = off (one-leg-spins regime); raise to watch the legs synchronize.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"coupling_fade_start", ParamMutability::HotMutable,
+         "Gate 2: tick to begin linearly fading the imposed coupling to 0 (crystallize-then-wean so the learned map takes over). -1 = disabled.",
+         ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
+        {"coupling_fade_end", ParamMutability::HotMutable,
+         "Gate 2: tick at which coupling reaches 0 (must be > coupling_fade_start).",
+         ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
         {"gait_phase", ParamMutability::HotMutable,
          "per-leg target phase offsets (rad), length n_legs, order [FL,FR,RL,RR]. Default trot [0,π,π,0] (diagonals in phase). The imposed coordination topology; rhythm/frequency emerge.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -311,6 +317,8 @@ ParamMap MotorEPM::current_params() const {
     m["knee_tuck_target"] = knee_tuck_target_;
     m["motor_gain"]       = motor_gain_;
     m["coupling_gain"]    = coupling_gain_;
+    m["coupling_fade_start"] = coupling_fade_start_;
+    m["coupling_fade_end"]   = coupling_fade_end_;
     m["gait_phase"]       = gait_phase_;
     m["coord_adapt_rate"] = coord_adapt_rate_;
     m["coord_explore"]    = coord_explore_;
@@ -381,6 +389,9 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "knee_tuck_target", [&](auto const& v){ knee_tuck_target_ = get_double(v, "knee_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
     apply_param(params, "coupling_gain", [&](auto const& v){ coupling_gain_ = get_double(v, "coupling_gain"); });
+    apply_param(params, "coupling_fade_start", [&](auto const& v){ coupling_fade_start_ = get_int(v, "coupling_fade_start"); });
+    apply_param(params, "coupling_fade_end",   [&](auto const& v){ coupling_fade_end_   = get_int(v, "coupling_fade_end"); });
+    coupling_eff_ = float(coupling_gain_);
     apply_param(params, "gait_phase", [&](auto const& v){ gait_phase_ = get_double_vec(v, "gait_phase"); });
     apply_param(params, "coord_adapt_rate", [&](auto const& v){ coord_adapt_rate_ = get_double(v, "coord_adapt_rate"); });
     apply_param(params, "coord_explore", [&](auto const& v){ coord_explore_ = get_double(v, "coord_explore"); });
@@ -701,6 +712,8 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "knee_tuck_target") knee_tuck_target_ = get_double(value, "knee_tuck_target");
     else if (key == "motor_gain") motor_gain_ = get_double(value, "motor_gain");
     else if (key == "coupling_gain") coupling_gain_ = get_double(value, "coupling_gain");
+    else if (key == "coupling_fade_start") coupling_fade_start_ = get_int(value, "coupling_fade_start");
+    else if (key == "coupling_fade_end")   coupling_fade_end_   = get_int(value, "coupling_fade_end");
     else if (key == "coord_adapt_rate") coord_adapt_rate_ = get_double(value, "coord_adapt_rate");
     else if (key == "coord_explore") coord_explore_ = get_double(value, "coord_explore");
     else if (key == "coord_reward_drive") coord_reward_drive_ = get_double(value, "coord_reward_drive");
@@ -800,6 +813,19 @@ void MotorEPM::handle_proprio(int leg, MessagePtr payload) {
 
 void MotorEPM::tick(uint64_t tick_id) {
     int m = motor_dim_;
+
+    // ---- Gate 2 coupling wean: deterministic tick-scheduled linear fade of the imposed
+    // Kuramoto coupling → the learned keyframe map takes over the coordination.  Function of
+    // tick_id only, so clone-determinism holds.  Disabled (fade_start<0) ⇒ coupling stays flat.
+    coupling_eff_ = float(coupling_gain_);
+    if (coupling_fade_start_ >= 0 && coupling_fade_end_ > coupling_fade_start_) {
+        float f = 1.0f;
+        if (int64_t(tick_id) >= coupling_fade_end_)        f = 0.0f;
+        else if (int64_t(tick_id) > coupling_fade_start_)
+            f = 1.0f - float(int64_t(tick_id) - coupling_fade_start_)
+                     / float(coupling_fade_end_ - coupling_fade_start_);
+        coupling_eff_ = float(coupling_gain_) * f;
+    }
 
     // ---- Gate 0 reset-masking bookkeeping (reward-free instrumentation) ----
     // Slow EMA of the per-tick disruption indicator (set by handle_event when a
@@ -1147,7 +1173,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         // c_i = K · mean_{j≠i} sin( (φ_j − φ_i) − (P_j − P_i) ) pulls each leg's
         // phase toward the gait offset relative to every other leg — entrains the
         // twitchers and phase-locks all four.
-        if (!warmup && coupling_gain_ > 0.0 && n_legs_ > 1 && int(gait_phase_.size()) == n_legs_) {
+        if (!warmup && coupling_eff_ > 0.0f && n_legs_ > 1 && int(gait_phase_.size()) == n_legs_) {
             float c = 0.0f;
             for (int j = 0; j < n_legs_; ++j) {
                 if (j == leg || !legs_[j].initialized) continue;
@@ -1156,7 +1182,7 @@ void MotorEPM::tick(uint64_t tick_id) {
                 c += std::sin(dphi);
             }
             // Panic decouples the legs (break out of the stuck phase-lock).
-            y[m - 1] += (1.0f - pe) * float(coupling_gain_) * c / float(n_legs_ - 1);
+            y[m - 1] += (1.0f - pe) * coupling_eff_ * c / float(n_legs_ - 1);
         }
         // Directional propulsion drive on hip1 (joint 0), phase-locked to the
         // leg's step phase.  stroke_signs sets the per-leg push direction
@@ -1498,6 +1524,7 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["loop_gain"]   = gain_ema_mean();
     // Gate 0 (L-1a) reset-masked gait instruments:
     j["gait_coherence"]    = gait_coherence();  // Kuramoto phase-lock ∈[0,1]; rises as legs lock to the gait
+    j["coupling_eff"]      = coupling_eff_;      // Gate 2: live (faded) coupling strength
     j["reset_count"]       = reset_count_;       // cumulative fall/teleport disruptions
     j["ticks_since_reset"] = ticks_since_reset_; // for reset-masking the coherence/TLE trend
     j["reset_rate"]        = reset_rate_ema_;    // Gate 0 signal: FALLS as the upright prior holds
