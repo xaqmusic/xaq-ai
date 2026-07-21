@@ -31,6 +31,7 @@ commanded one.
 | hip2 **tuck** (femur rest override, alone) | **rejected** | didn't crouch (weak reflex) + destabilized |
 | **learned** hip2 (per-joint postural *profile* loosens the femur spring; HK+embedding move it) | **rejected** | isolated long A/B: no gait / traversal / disengagement gain, +instability (2× stuck-time, 4 tipovers vs 0) — see learned-hip2 section |
 | phase-indexed **velocity** objective (`Cvel` propulsive pump: FF trained on velocity error v*−ẋ) | **rejected** | marginal steady gain, then **amplified a rear-leg asymmetry into circling** (embed traverses 6.1 m; velobj circles ~2 turns); the LR-symmetry fix **backfired** (~3 turns) — see velocity-lever section |
+| **gait symmetry** (amp-homeo / exploration / per-leg controller-coupling / walk-phasing / balance / heading-hold) | **rejected** | ~35 isolated A/Bs: every symmetry-forcing lever → circling (the tripod-skid asymmetry is load-bearing for straightness); the 2 stabilization reflexes are inert/mis-tuned — see gait-symmetry section |
 
 **Metrics lesson (a real gap I hit):** a fast-traversing *flopping* gait scored great on fwd_v +
 joint-coherence — the collision was invisible until a **`chassis_h`** (chassis height) metric was
@@ -39,14 +40,17 @@ not just speed).
 
 **Open levers (both former levers now refuted).** The two named levers — phase-indexed **velocity**
 in the objective (the propulsive push) and **emergent hip2** — were each built and tested in
-isolation and **both refuted** (see their sections below). What the velocity investigation surfaced as
-the *real* next threads: **(1)** straighten the gait's **rear-leg weight-bearing asymmetry** (the
-balance/posture layer — it's what the velocity pump amplified into circling, and what any propulsive
-FF needs as a symmetric base); **(2)** a **richer gym** than the open plane (the robot circles/idles
-because a flat plane gives curiosity no gradient to climb — a corridor/slope/terrain that makes
-directed motion the path of richer sensorimotor experience); **(3)** a **tooling gap** — the
-`master_seed` override rewrites **0 modules**, so no A/B here can be seed-averaged (every comparison is
-single-config; byte-perfect isolation, but generality untested).
+isolation and **both refuted** (see their sections below). Threads, after the symmetry sweep (below) also came up empty:
+**(1)** ~~straighten the rear-leg asymmetry~~ — **refuted** (the asymmetry is load-bearing; forcing
+symmetry circles). The residue is: **fix the two broken stabilization reflexes** (active-balance is
+inert+destabilizing; `heading_gain` anti-yaw is erratic) → a working closed-loop heading/attitude
+controller is the real prerequisite for both symmetry and the faster walk. **(2)** a **richer gym**
+than the open plane (the robot circles/idles because a flat plane gives curiosity no gradient — a
+corridor/slope/terrain that makes directed motion the path of richer sensorimotor experience); the most
+promising near-term move, since `embed` is a solid straight+stable base. **(3)** **tooling gaps** — the
+`master_seed` override rewrites **0 modules** (no A/B can be seed-averaged), and `publish_tilt` is off in
+headless (headless ≠ UI for the balance reflex); close both before the next quantitative gait study.
+Bonus speed lever discovered: **lateral-sequence walk phasing = +65 % distance** (needs stability first).
 
 ## The architecture under test
 
@@ -339,6 +343,54 @@ regardless of `OGMA_SEED`** (confirmed: `embed@7 ≡ embed@42` byte-for-byte). U
 byte-perfect isolations. Downside: **we cannot seed-average** — every result (this lever, hip2, the
 milestone) is single-config; generality is untested. Worth fixing before the next quantitative gait study.
 
+## Gait symmetry / straightness — autonomously explored and refuted (2026-07-21)
+
+The velocity work traced the circling to a persistent **RR (right-rear) under-plant** (`embed` plant
+`[9,9,9,3]`). An autonomous sweep (**~35 headless A/Bs**, each a *byte-perfect* isolation — seed inert)
+ran that asymmetry to ground across every plausible lever.
+
+**Diagnosis refined.** The spawn stance is a clean L/R mirror (not a body-model/rest-pose asymmetry).
+RR *moves* (hip1 stride full) but **under-flexes its knee (0.82 vs ~1.4) and over-lifts hip2** → never
+completes the plant. It develops ~20 s in and holds. Critically, this asymmetry is **load-bearing for
+straightness**: `embed` is a stable emergent **tripod-skid** (three legs walk, RR rides as a
+stabilizer) and goes straight (0.47 turns, 0 falls).
+
+**Every symmetry-forcing intervention causes circling** — the tripod is a delicate fixed point:
+- *amplitude homeostat up* equalizes the knee amplitude (imb 46%→25%) but RR then plants **1×** and it
+  circles **−7.7 turns**; *exploration / coord-adapt / coord-explore* destabilize or no-op.
+- *reflex knobs* (balance on/flipped, coupling↑, height↓): 2 no-ops + 2 destabilizers.
+- **per-leg controller symmetry coupling** — a new MotorEPM mechanism (`ctrl_symmetry_gain` +
+  `symmetry_group_of`: pull each leg's learned `C`/`h`/`Cphi` toward its group-average, sign-safe by
+  stroke-sign groups) tried at multiple gains and groupings: **all circle.** Even the root-level fix
+  (make the four legs learn one law) fails — one run hit **3 %** knee-amplitude imbalance while spinning
+  −19 turns with RR fully excluded, proving *amplitude symmetry ≠ functional symmetry*.
+
+**Walk phasing is faster but not symmetric.** Lateral-sequence walk (`gait_phase [π/2,3π/2,0,π]`) =
+**+65 % distance** (10.05 m vs 6.10), fairly straight (0.83 turns), RR participates — but it *relocates*
+the asymmetry (RL skids), costs stability (2 falls), and is fragile (every tuning knob → circling).
+
+**The deep gap — both closed-loop stabilization reflexes are broken:**
+- **Active-balance (vestibular)** is **inert by default headless** (the body's `publish_tilt` `@export`
+  defaults *false*; the brain-config `metadata.publish_tilt:true` never sets the *body* export → tilt
+  never published → MotorEPM's tilt = 0, proven by byte-identical `balance_gain` changes) **and
+  destabilizing when enabled** (`OGMA_PICRAWLER_PUBLISH_TILT=1`: both ±0.5 turn straight `embed` into
+  circling — it maps tilt→hip2 = pitch/roll leveling, not yaw).
+- **Heading-hold (anti-yaw, `heading_gain`)** is off by default and *erratic* when enabled — it makes
+  `embed` circle (even gentle 0.4 → −6.7 turns) yet straightens walk-LS (0.16 turns). A sign/coupling
+  issue makes it destructive in most contexts.
+
+**Verdict: symmetric-AND-straight-AND-stable is not reachable on this substrate by tuning.** The
+asymmetric tripod-skid *is* the stable straight solution; the reflexes that should give robust
+closed-loop heading/attitude control are inert or mis-tuned. **`embed` remains the best straight+stable
+gait** (only config with 0 falls + low turns + traversal). The real engineering lever is a **working
+closed-loop heading/balance controller** (a redesign, not a knob) — likely the prerequisite for both a
+symmetric gait *and* the faster walk. Lateral-sequence walk (+65 %) is a speed lever for once stability
+is solved.
+
+**Measurement gaps surfaced:** (a) **headless ≠ UI** — `publish_tilt` is off in headless but may be on
+via the launcher, so the balance reflex (and thus stability) differs between headless A/Bs and UI
+observation; (b) the seed-inert gap (above) still stands. Both should be closed before the next gait study.
+
 ## Reusable pieces added
 
 - `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.
@@ -366,3 +418,11 @@ milestone) is single-config; generality is untested. Worth fixing before the nex
 - `circle.py` — circling quantifier from the body-diag log (net displacement vs path length vs
   unwrapped `heading_yaw` = net turns; + per-leg plant/lift asymmetry). Distinguishes directed
   traversal from circling-in-place — the metric that caught the velocity lever's failure.
+- `MotorEPM` `ctrl_symmetry_gain`/`symmetry_group_of` — per-leg controller (C/h/Cphi) symmetry coupling
+  toward group averages (sign-safe by stroke-sign groups). Refuted for the picrawler gait; default-off /
+  byte-identical, tested inert-when-off + active-when-on (no silent no-op). Reusable on a symmetric base.
+- `gaiteval.py` (+ `seedrun.sh`/`seedrun_tilt.sh`) — symmetry/stability eval from the body log (plant
+  balance, per-leg joint amplitudes, circling, chassis height/falls); tilt-on runner for the balance reflex.
+- **Known gaps to fix before the next gait study:** the active-balance reflex is headless-inert
+  (`publish_tilt` body-export default) AND destabilizing as tuned; `heading_gain` anti-yaw is erratic;
+  both need redesign for real closed-loop heading/attitude control.

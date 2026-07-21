@@ -171,6 +171,12 @@ private:
     bool                cpg_embed_   = false;
     double              embed_lr_    = 0.02;   // Cphi learning rate on the keyframe error
     double              embed_decay_ = 0.001;  // L2 decay bounding the learned feed-forward
+    // Per-leg CONTROLLER symmetry coupling (anti-asymmetry root fix): softly pull each leg's
+    // learned controller (C, h, Cphi) toward its group's cross-leg average each tick, so the
+    // four identical legs converge to ONE control law instead of one leg specializing (the
+    // RR-skid).  Group by SAME stroke-sign (sign-safe: no fore-aft mirror conflict).
+    double              ctrl_symmetry_gain_ = 0.0;  // per-tick pull toward group-average controller (0 = off)
+    std::vector<int>    symmetry_group_of_;         // per-leg group id (length n_legs); empty = off
     // Gate 2 (coherent-scaffold wean): tick-scheduled fade of the rhythm drive so the LEARNED
     // keyframe takes over the gait. -1 = disabled.
     int64_t             rhythm_fade_start_ = -1;

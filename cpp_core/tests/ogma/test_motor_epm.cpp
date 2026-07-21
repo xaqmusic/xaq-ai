@@ -412,6 +412,33 @@ TEST(MotorEPM, HotParamApplication) {
 }
 
 // =============================================================================
+// 8b. Per-leg controller symmetry coupling: OFF (gain=0) is byte-identical (the
+//     default-off contract), ON (gain>0) actually changes the controllers (not a
+//     silent no-op — the hip2 lesson).  Refuted for the picrawler gait but kept as
+//     default-off infra; this locks the inert-when-off guarantee.
+// =============================================================================
+TEST(MotorEPM, ControllerSymmetryCouplingOffInertOnActive) {
+    auto base = base_params();
+    base["coupling_gain"] = 0.5;                              // a real gait so controllers diverge to couple
+    std::vector<double> grp{0.0, 1.0, 0.0, 1.0};             // sign-safe left/right groups
+    auto pz  = base; pz["ctrl_symmetry_gain"]  = 0.0;  pz["symmetry_group_of"]  = grp;
+    auto pon = base; pon["ctrl_symmetry_gain"] = 0.05; pon["symmetry_group_of"] = grp;
+    Fixture f0(base, 4, 3), fz(pz, 4, 3), fon(pon, 4, 3);    // independent buses, identical inputs
+    double maxdiff_z = 0.0, maxdiff_on = 0.0;
+    for (uint64_t t = 0; t < 250; ++t) {
+        f0.run_tick(t); fz.run_tick(t); fon.run_tick(t);
+        if (t < 12) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j) {
+                maxdiff_z  = std::max(maxdiff_z,  double(std::abs(f0.accel(leg, j) - fz.accel(leg, j))));
+                maxdiff_on = std::max(maxdiff_on, double(std::abs(f0.accel(leg, j) - fon.accel(leg, j))));
+            }
+    }
+    EXPECT_LT(maxdiff_z, 1e-6)  << "ctrl_symmetry_gain=0 must be byte-identical (default-off contract)";
+    EXPECT_GT(maxdiff_on, 1e-3) << "ctrl_symmetry_gain>0 must actually change the controllers (no silent no-op)";
+}
+
+// =============================================================================
 // 9. Gate 0 (L-1a): the reset-masked gait instruments are surfaced in
 //    diag_snapshot, driven by events.miss / events.reset, and round-trip through
 //    snapshot/restore.  This is the measurement foundation for the L-1 gait work.

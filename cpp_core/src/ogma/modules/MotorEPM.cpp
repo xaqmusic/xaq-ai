@@ -169,6 +169,12 @@ ParamSchema MotorEPM::params_schema() const {
          ParamValue{0.02}, ParamValue{0.0}, ParamValue{1.0}},
         {"embed_decay", ParamMutability::HotMutable, "L2 decay bounding the learned Cphi feed-forward.",
          ParamValue{0.001}, ParamValue{0.0}, ParamValue{1.0}},
+        {"ctrl_symmetry_gain", ParamMutability::HotMutable,
+         "Per-leg controller symmetry coupling: per-tick pull of each leg's learned controller (C,h,Cphi) toward its group's cross-leg average, so the four identical legs converge to ONE control law instead of one specializing into a skid (the RR asymmetry). Needs symmetry_group_of. A learning-time prior (shapes what legs LEARN), not a command. 0 = off (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"symmetry_group_of", ParamMutability::ConstructionOnly,
+         "Per-leg group id (length n_legs) for ctrl_symmetry_gain; legs sharing an id are coupled. Group by SAME stroke-sign to stay sign-safe, e.g. [0,1,0,1] for stroke_signs [1,-1,1,-1] (couples same-side legs). Empty = off.",
+         std::nullopt, std::nullopt, std::nullopt},
         {"rhythm_fade_start", ParamMutability::HotMutable,
          "Gate 2: tick to begin linearly fading the rhythm scaffold to 0 (coherent-scaffold wean: the learned keyframe takes over). -1 = disabled.",
          ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
@@ -361,6 +367,8 @@ ParamMap MotorEPM::current_params() const {
     m["cpg_embed"]        = cpg_embed_;
     m["embed_lr"]         = embed_lr_;
     m["embed_decay"]      = embed_decay_;
+    m["ctrl_symmetry_gain"] = ctrl_symmetry_gain_;
+    { std::vector<double> sg(symmetry_group_of_.begin(), symmetry_group_of_.end()); m["symmetry_group_of"] = sg; }
     m["rhythm_fade_start"]= rhythm_fade_start_;
     m["rhythm_fade_end"]  = rhythm_fade_end_;
     m["coupling_fade_start"] = coupling_fade_start_;
@@ -447,6 +455,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     });
     apply_param(params, "embed_lr",    [&](auto const& v){ embed_lr_    = get_double(v, "embed_lr"); });
     apply_param(params, "embed_decay", [&](auto const& v){ embed_decay_ = get_double(v, "embed_decay"); });
+    apply_param(params, "ctrl_symmetry_gain", [&](auto const& v){ ctrl_symmetry_gain_ = get_double(v, "ctrl_symmetry_gain"); });
+    apply_param(params, "symmetry_group_of", [&](auto const& v){
+        auto d = get_double_vec(v, "symmetry_group_of"); symmetry_group_of_.clear();
+        for (double x : d) symmetry_group_of_.push_back(int(std::lround(x)));
+    });
     apply_param(params, "rhythm_fade_start", [&](auto const& v){ rhythm_fade_start_ = get_int(v, "rhythm_fade_start"); });
     apply_param(params, "rhythm_fade_end",   [&](auto const& v){ rhythm_fade_end_   = get_int(v, "rhythm_fade_end"); });
     apply_param(params, "coupling_fade_start", [&](auto const& v){ coupling_fade_start_ = get_int(v, "coupling_fade_start"); });
@@ -824,6 +837,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     }
     else if (key == "embed_lr")    embed_lr_    = get_double(value, "embed_lr");
     else if (key == "embed_decay") embed_decay_ = get_double(value, "embed_decay");
+    else if (key == "ctrl_symmetry_gain") ctrl_symmetry_gain_ = get_double(value, "ctrl_symmetry_gain");
     else if (key == "coord_adapt_rate") coord_adapt_rate_ = get_double(value, "coord_adapt_rate");
     else if (key == "coord_explore") coord_explore_ = get_double(value, "coord_explore");
     else if (key == "coord_reward_drive") coord_reward_drive_ = get_double(value, "coord_reward_drive");
@@ -1593,6 +1607,42 @@ void MotorEPM::tick(uint64_t tick_id) {
         L.prev_phi_ctx = Eigen::Vector2f(std::cos(cpg_phase_), std::sin(cpg_phase_));  // phase at command time
         L.prev_y = y;
         L.have_prev = true;
+    }
+
+    // ---- Per-leg controller symmetry coupling (anti-asymmetry root fix) ----
+    // Softly pull each leg's learned controller (C, h, Cphi) toward the average over the legs
+    // in its group, so the four identical legs converge to ONE control law rather than one leg
+    // specializing into a skid (the RR asymmetry).  Applied AFTER all legs updated this tick.
+    // Group by SAME stroke-sign (sign-safe — no fore-aft mirror conflict).  gain 0 / no groups
+    // = off = byte-identical.  A learning-time prior, not a command: it shapes what the legs
+    // LEARN, HK exploration + balance still ride on top.
+    if (ctrl_symmetry_gain_ > 0.0 && int(symmetry_group_of_.size()) == n_legs_) {
+        const float g = float(ctrl_symmetry_gain_);
+        int maxg = 0; for (int gid : symmetry_group_of_) maxg = std::max(maxg, gid);
+        for (int grp = 0; grp <= maxg; ++grp) {
+            // collect initialized legs in this group with matching dims
+            int n = -1, cnt = 0;
+            for (int leg = 0; leg < n_legs_; ++leg)
+                if (symmetry_group_of_[leg] == grp && legs_[leg].initialized) {
+                    if (n < 0) n = legs_[leg].n;
+                    if (legs_[leg].n == n) ++cnt;
+                }
+            if (cnt < 2 || n < 0) continue;                 // need >=2 same-dim legs to average
+            Eigen::MatrixXf Cbar = Eigen::MatrixXf::Zero(motor_dim_, n);
+            Eigen::VectorXf hbar = Eigen::VectorXf::Zero(motor_dim_);
+            Eigen::MatrixXf Pbar = Eigen::MatrixXf::Zero(motor_dim_, 2);
+            for (int leg = 0; leg < n_legs_; ++leg)
+                if (symmetry_group_of_[leg] == grp && legs_[leg].initialized && legs_[leg].n == n) {
+                    Cbar += legs_[leg].C; hbar += legs_[leg].h; Pbar += legs_[leg].Cphi;
+                }
+            Cbar /= float(cnt); hbar /= float(cnt); Pbar /= float(cnt);
+            for (int leg = 0; leg < n_legs_; ++leg)
+                if (symmetry_group_of_[leg] == grp && legs_[leg].initialized && legs_[leg].n == n) {
+                    legs_[leg].C.noalias()    += g * (Cbar - legs_[leg].C);
+                    legs_[leg].h.noalias()    += g * (hbar - legs_[leg].h);
+                    legs_[leg].Cphi.noalias() += g * (Pbar - legs_[leg].Cphi);
+                }
+        }
     }
 }
 
