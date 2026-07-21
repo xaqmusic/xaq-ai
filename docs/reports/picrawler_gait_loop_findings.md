@@ -29,16 +29,17 @@ commanded one.
 | keyframe **tween** (smooth the staircase) | **rejected** | lowpasses out the adaptive slack → stiff |
 | hip2 **stroke** (imposed femur lift) | **rejected** | energetic but chaotic, no stable gait, frequent falls |
 | hip2 **tuck** (femur rest override, alone) | **rejected** | didn't crouch (weak reflex) + destabilized |
+| **learned** hip2 (per-joint postural *profile* loosens the femur spring; HK+embedding move it) | **rejected** | isolated long A/B: no gait / traversal / disengagement gain, +instability (2× stuck-time, 4 tipovers vs 0) — see learned-hip2 section |
 
 **Metrics lesson (a real gap I hit):** a fast-traversing *flopping* gait scored great on fwd_v +
 joint-coherence — the collision was invisible until a **`chassis_h`** (chassis height) metric was
 added. **No gait is good if the chassis collides — always measure chassis height** (and adaptation,
 not just speed).
 
-**Open levers (neither urgent):** (1) phase-indexed **velocity** in the objective — the propulsive
-push, not just the pose — the root fix for the small fwd_v cost and a more sustained cycle (bigger
-payoff); (2) **emergent hip2** — give the femur *room to be explored* (per-joint postural: firm on
-hip1/knee, loose on hip2) so HK+embedding LEARN to use it, rather than a stroke that dictates it.
+**Open lever:** phase-indexed **velocity** in the objective — the propulsive push, not just the pose —
+the root fix for the small fwd_v cost and a more sustained cycle (the bigger payoff). *(The other
+lever, **emergent hip2**, was built and tested in isolation — and **refuted**; see the learned-hip2
+section below.)*
 
 ## The architecture under test
 
@@ -242,6 +243,47 @@ Config: `the_picrawler_motor_epm_embed.json`.
 cycle likely wants the objective to carry phase-indexed VELOCITY (a propulsive trajectory), not just
 posture — the next lever.
 
+## Learned hip2 — tested and refuted (2026-07-20)
+
+The open "emergent hip2" lever, run to ground. **Hypothesis:** hip2 already has a *reflex* (the
+height homeostat DC-lifts the femur to raise the chassis); the uniform `postural_gain` spring pins the
+femur at its extended, no-leverage spawn pose. **Loosen the spring on hip2 alone** and the learned
+controller (HK `C` + the phase embedding `Cphi`) should be free to develop a stroke *on top of* the
+reflex — the learned form of the idea, not an imposed stroke (which we already rejected, chaotic).
+
+**Mechanism:** added `postural_gain_joints`, a per-joint spring. First cut was an *absolute* override;
+this produced a **methodological trap** worth recording. In the UI the operator raised the global
+`postural_gain` scalar to 1.0, saw the robot engage pyramids shortly after, and (naturally) attributed
+the change to the knob. But with the per-joint array active, the scalar's *magnitude* was ignored —
+**the knob-turn was a complete no-op.** The engagement was the system's own temporal evolution; a
+hand-tuned correlation had nearly been filed as a finding. **Lesson: hand-tuning manufactures false
+causation — an observed correlation under a hand-turned knob is worth nothing until isolated.** Two
+fixes followed: `postural_gain_joints` is now a **multiplier** on the scalar (so `postural_gain` is an
+honest global tone knob), and MotorEPM emits **`postural_eff`** (the effective per-joint gains applied
+each tick) so a no-op can never again hide.
+
+**Isolated A/B** (firm profile `[1,1,1]` → eff 0.70 vs loose `[1,0.3,1]` → eff 0.21, everything else
+identical):
+
+- **Gait:** firm ~18% faster forward (`fwd_v` 0.0337 vs 0.0284), **replicated** across two independent
+  short pairs. Loose *did* free the femur (raw amp 0.041 vs 0.035, coherence slightly better) — the
+  manipulation worked — but bought nothing and cost speed.
+- **Long run (60k steps, both reach the pyramids):** firm traverses **~3× faster net** (0.011 vs
+  0.003 m/s), is **stuck half as often** (10% vs 20% of the time), and **never falls**; loose tips over
+  **4×** (max tilt π vs 0.69). *(An early confound: every "long" headless run before this was secretly
+  capped at tick 6000 (~100 sim-s) by the default `max_steps`; real long runs need
+  `OGMA_PICRAWLER_MAX_STEPS` + `OGMA_RESET_MODE=continuous`.)*
+- **Disengagement** (the operator's UI hunch that hip2 helps escape): **refuted.** The body escape
+  counter is a null signal here, but the valid `stuck_deficit` fraction says loose is stuck *more*, not
+  less. The milestone self-rescue happened on the **firm** embed config — the escape is an HK+embedding
+  property on a *stable base*; hip2 was never the source.
+
+**Verdict: not promoted.** Learned-hip2 loses or ties on every functional axis and adds instability;
+its only effect is marginally more femur motion, to no benefit. The `postural_gain_joints` (multiplier)
++ `postural_eff` diag **stay** — infrastructure that makes any future per-joint experiment trustworthy.
+The clean negative is the isolate-and-promote discipline working: the idea *looked* promising by hand
+and is unambiguously negative under control.
+
 ## Reusable pieces added
 
 - `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.
@@ -253,6 +295,9 @@ posture — the next lever.
 - `MotorEPM` `cpg_embed` (+ `embed_lr`/`embed_decay`) — CPG-as-embedding: HK controller learns a
   phase-conditioned feed-forward from the keyframe error (the emergent, validated path).
 - `MotorEPM` `chassis_h`/`chassis_h_ema` diag + `hip2_tuck_target` — collision metric + femur-crouch knob.
+- `MotorEPM` `postural_gain_joints` (per-joint postural **multiplier** profile) + `postural_eff` diag —
+  loosen one joint's spring relative to a global tone; effective gains observable (no silent no-ops).
+  Used to test — and **refute** — learned hip2.
 - `BodyRhythmTracker` `raw_period`/`raw_amp` diag — per-(leg,joint) frequency diagnostic.
 - `OgmaBrain` TCP `set_param` verb — live param mutation for experiments (single-connection server).
 - `gait_metrics.py` + `raw_diag.py` — quantitative gait-quality + per-joint frequency diagnostics.

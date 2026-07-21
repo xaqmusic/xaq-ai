@@ -132,6 +132,7 @@ private:
     // (the height-setting joints); hip1=yaw is per-leg sign-flipped by the body
     // so it is left to HK.  Reward-free — a fixed feedback law, not a reward.
     double  postural_gain_ = 0.3;                 // restoring strength toward REST (0 = off)
+    std::vector<double> postural_gain_joints_;    // per-joint [hip1,hip2,knee] postural strength; empty = scalar for all
     // 2026-06-12 — persistent exploration noise.  HK learns from the prediction
     // error ξ; at ANY static fixed point the model learns to predict it, ξ→0,
     // and the controller update vanishes (froze at the postural equilibrium).

@@ -129,6 +129,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"postural_gain", ParamMutability::HotMutable,
          "postural reflex strength (spinal-tone analog): weak PD pull of the hip2+knee commands toward the standing REST pose (proprio pos=0). Gives HK a stable upright fixed point to bifurcate from. 0 = off. Reward-free.",
          ParamValue{0.3}, ParamValue{0.0}, ParamValue{2.0}},
+        {"postural_gain_joints", ParamMutability::HotMutable,
+         "per-joint [hip1,hip2,knee] RELATIVE profile (MULTIPLIER) on postural_gain — effective_gain[j] = postural_gain * profile[j]. LOOSEN one joint (e.g. profile [1,0.3,1] → hip2 at 30% tone) so the LEARNED controller (C/Cphi) can move it on top of the reflex, while hip1/knee stay at full tone for stance. postural_gain remains an honest GLOBAL knob (scales every joint). Empty/mis-sized = 1.0 for all (pure scalar). See diag postural_eff for the resulting per-joint gains.",
+         std::nullopt, std::nullopt, std::nullopt},
         {"explore_noise", ParamMutability::HotMutable,
          "persistent Gaussian motor-noise σ added every tick. Keeps the prediction error ξ nonzero at fixed points so HK does not freeze; the sensitivity-seeking controller amplifies it into oscillation (the homeokinetic exploration drive).",
          ParamValue{0.05}, ParamValue{0.0}, ParamValue{1.0}},
@@ -341,6 +344,7 @@ ParamMap MotorEPM::current_params() const {
     m["babble_scale"]  = babble_scale_;
     m["sat_lr"]        = sat_lr_;
     m["postural_gain"]    = postural_gain_;
+    m["postural_gain_joints"] = postural_gain_joints_;
     m["explore_noise"]    = explore_noise_;
     m["knee_tuck_target"] = knee_tuck_target_;
     m["hip2_tuck_target"] = hip2_tuck_target_;
@@ -423,6 +427,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "babble_scale", [&](auto const& v){ babble_scale_ = get_double(v, "babble_scale"); });
     apply_param(params, "sat_lr",       [&](auto const& v){ sat_lr_       = get_double(v, "sat_lr"); });
     apply_param(params, "postural_gain", [&](auto const& v){ postural_gain_ = get_double(v, "postural_gain"); });
+    apply_param(params, "postural_gain_joints", [&](auto const& v){ postural_gain_joints_ = get_double_vec(v, "postural_gain_joints"); });
     apply_param(params, "explore_noise", [&](auto const& v){ explore_noise_ = get_double(v, "explore_noise"); });
     apply_param(params, "knee_tuck_target", [&](auto const& v){ knee_tuck_target_ = get_double(v, "knee_tuck_target"); });
     apply_param(params, "hip2_tuck_target", [&](auto const& v){ hip2_tuck_target_ = get_double(v, "hip2_tuck_target"); });
@@ -774,6 +779,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
     else if (key == "sat_lr")       sat_lr_       = get_double(value, "sat_lr");
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
+    else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
     else if (key == "knee_tuck_target") knee_tuck_target_ = get_double(value, "knee_tuck_target");
     else if (key == "hip2_tuck_target") hip2_tuck_target_ = get_double(value, "hip2_tuck_target");
@@ -1225,8 +1231,18 @@ void MotorEPM::tick(uint64_t tick_id) {
         // their mechanical-advantage envelope (the knees were driving to max
         // hyperextension and splaying the body flat).
         if (postural_gain_ > 0.0 && n >= 3 * m && L.rest_captured) {
-            for (int j = 0; j < m; ++j)
-                y[j] -= float(postural_gain_) * (L.x[3 * j] - L.rest_pos[j]);
+            // Per-joint spring: the array is a RELATIVE profile (multiplier) on the
+            // global tone scalar postural_gain — so postural_gain stays an honest
+            // global knob (turning it up firms EVERY joint) and the array only shapes
+            // the profile.  e.g. profile [1,0.3,1] LOOSENS hip2 to 30% of the global
+            // tone so the learned C/Cphi stroke rides ON TOP of the reflex (the
+            // height-homeostat push-up stays full strength below), while hip1/knee
+            // stay at full tone for stance.  Empty/mis-sized array = 1.0 (uniform).
+            const bool pjg = int(postural_gain_joints_.size()) == m;
+            for (int j = 0; j < m; ++j) {
+                float g = float(postural_gain_) * (pjg ? float(postural_gain_joints_[j]) : 1.0f);
+                if (g > 0.0f) y[j] -= g * (L.x[3 * j] - L.rest_pos[j]);
+            }
         }
         // Chassis-height homeostat output: drive the femur-LIFT joint (hip2, index
         // 1) — NOT the knee.  The knee carries the stepping rhythm (HK + coupling);
@@ -1667,6 +1683,16 @@ nlohmann::json MotorEPM::diag_snapshot() const {
             if (obj_seen_[i] && obj_weight_[i] > 0.0f) { on = true; wsum += obj_weight_[i]; ++oc; }
         j["obj_active"] = on;
         j["obj_weight"] = oc ? wsum / float(oc) : 0.0f;
+    }
+    // Effective per-joint postural gains actually applied this tick (postural_gain ×
+    // profile).  Makes the array-vs-scalar interaction observable so a knob-turn can
+    // never silently be a no-op.
+    {
+        const bool pjg = int(postural_gain_joints_.size()) == motor_dim_;
+        std::vector<float> eff(motor_dim_);
+        for (int jj = 0; jj < motor_dim_; ++jj)
+            eff[jj] = float(postural_gain_) * (pjg ? float(postural_gain_joints_[jj]) : 1.0f);
+        j["postural_eff"] = eff;
     }
     j["out_mag"]     = outmag_ema_mean();
     j["cog_steer"]   = cog_steer_;              // brain → differential (turn)
