@@ -423,6 +423,17 @@ private:
     std::vector<float>           obj_weight_;    // per-leg weight w = PredictionToken.confidence ∈ [0,1]
     std::vector<char>            obj_seen_;      // per-leg: an objective has arrived (char, not vector<bool>)
 
+    // ---- L-1b velocity objective (§the propulsive push) ----
+    // A phase-indexed VELOCITY target on objective.velocity.<leg> (KeyframeGait's vel map).
+    // A second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the
+    // command phase → the body keeps moving THROUGH the pose (propulsion), where the posture
+    // objective (above) only holds it AT the pose.  Empty socket = Cvel stays 0 = byte-identical.
+    void handle_objective_vel(int leg, MessagePtr payload);
+    std::vector<std::string>     velocity_objective_topics_; // optional per-leg PredictionToken velocity-target topics; empty = OFF
+    std::vector<Eigen::VectorXf> obj_vel_target_;// per-leg target joint velocities (motor_dim)
+    std::vector<float>           obj_vel_weight_; // per-leg weight w ∈ [0,1]
+    std::vector<char>            obj_vel_seen_;   // per-leg: a velocity objective has arrived
+
     // ---- Per-leg working state (sized n_legs_) ----
     struct Leg {
         bool                initialized = false;
@@ -430,8 +441,9 @@ private:
         Eigen::MatrixXf     A;                    // n x m  (motor → sensor)
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
-        Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning of the controller
-        Eigen::Vector2f     prev_phi_ctx{0.0f, 0.0f}; // [cos φ, sin φ] at command time (for the Cphi update)
+        Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning (posture feed-forward)
+        Eigen::MatrixXf     Cvel;                 // m x 2  learned phase-conditioning (velocity feed-forward / propulsive pump)
+        Eigen::Vector2f     prev_phi_ctx{0.0f, 0.0f}; // [cos φ, sin φ] at command time (for the Cphi/Cvel update)
         Eigen::VectorXf     h;                    // m
         Eigen::VectorXf     x;                    // latest sensor (n)
         Eigen::VectorXf     prev_x;               // sensor at command time (n)

@@ -100,6 +100,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a SOFT posture target (predicted_latent = motor_dim target joint positions; confidence = weight w). The controller descends toward it (objective-change, not additive — §1.1/§2.4). Empty = socket off (byte-identical HK).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"velocity_objective_topics", ParamMutability::ConstructionOnly,
+         "Optional per-leg PredictionToken topics carrying a phase-indexed SOFT VELOCITY target (predicted_latent = motor_dim target joint velocities = the propulsive trajectory; confidence = w). Needs cpg_embed + cpg_phase_topic: a second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the command phase → the body keeps moving THROUGH the pose (propulsion), where the posture objective only holds it AT the pose. Empty = Cvel stays 0 = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
         {"n_legs", ParamMutability::ConstructionOnly, "number of legs",
          ParamValue{int64_t(4)}, ParamValue{int64_t(1)}, ParamValue{int64_t(8)}},
         {"motor_dim", ParamMutability::ConstructionOnly, "motors per leg",
@@ -331,6 +334,7 @@ ParamMap MotorEPM::current_params() const {
     m["proprio_topics"] = pt;
     m["action_topics"]  = at;
     m["objective_topics"] = std::vector<std::string>(objective_topics_);
+    m["velocity_objective_topics"] = std::vector<std::string>(velocity_objective_topics_);
     m["n_legs"]     = int64_t(n_legs_);
     m["motor_dim"]  = int64_t(motor_dim_);
     m["model_lr"]   = model_lr_;
@@ -499,6 +503,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "proprio_topics", [&](auto const& v){ proprio_topics_ = get_string_vec(v, "proprio_topics"); });
     apply_param(params, "action_topics",  [&](auto const& v){ action_topics_  = get_string_vec(v, "action_topics"); });
     apply_param(params, "objective_topics", [&](auto const& v){ objective_topics_ = get_string_vec(v, "objective_topics"); });
+    apply_param(params, "velocity_objective_topics", [&](auto const& v){ velocity_objective_topics_ = get_string_vec(v, "velocity_objective_topics"); });
 
     if (int(proprio_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: proprio_topics length must equal n_legs");
@@ -506,6 +511,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
         throw std::invalid_argument("MotorEPM: action_topics length must equal n_legs*motor_dim");
     if (!objective_topics_.empty() && int(objective_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: objective_topics length must equal n_legs (or be empty)");
+    if (!velocity_objective_topics_.empty() && int(velocity_objective_topics_.size()) != n_legs_)
+        throw std::invalid_argument("MotorEPM: velocity_objective_topics length must equal n_legs (or be empty)");
     if (int(gait_phase_.size()) != n_legs_)
         gait_phase_.assign(n_legs_, 0.0);   // fall back to in-phase if mis-sized
     if (int(stroke_signs_.size()) != n_legs_)
@@ -515,6 +522,9 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     obj_target_.assign(n_legs_, Eigen::VectorXf());
     obj_weight_.assign(n_legs_, 0.0f);
     obj_seen_.assign(n_legs_, 0);
+    obj_vel_target_.assign(n_legs_, Eigen::VectorXf());
+    obj_vel_weight_.assign(n_legs_, 0.0f);
+    obj_vel_seen_.assign(n_legs_, 0);
 
     // Cruse stance/swing state + leg topology.  Picrawler (n=4, order FL,FR,RL,RR):
     // anatomical anterior = [none, none, FL, FR]; contralateral = FL↔FR, RL↔RR.
@@ -608,6 +618,14 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
             objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
     }
+    // Velocity objective socket (L-1b, the propulsive push) — optional per-leg soft velocity
+    // targets, same Feedback semantics.  Empty list = no subscription → Cvel never trains.
+    for (int leg = 0; leg < int(velocity_objective_topics_.size()) && leg < n_legs_; ++leg) {
+        if (velocity_objective_topics_[leg].empty()) continue;
+        sub_ids_.push_back(bus_->subscribe(
+            velocity_objective_topics_[leg], SubscriptionKind::Feedback,
+            [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective_vel(leg, p); }));
+    }
     // Coherent-scaffold phase (L-1b): an optional global CPG phase (rhythm.cpg.body,
     // ProprioToken [cos φ, sin φ]) to drive the per-joint rhythm from — a CLEAN entrained phase,
     // so all joints lock to ONE frequency (intra-leg coherence) vs the noisy proprio L.phase.
@@ -646,6 +664,15 @@ void MotorEPM::handle_objective(int leg, MessagePtr payload) {
     obj_target_[leg] = pt->predicted_latent;                    // motor_dim target positions
     obj_weight_[leg] = std::clamp(pt->confidence, 0.0f, 1.0f);  // w ∈ [0,1]
     obj_seen_[leg]   = 1;
+}
+
+void MotorEPM::handle_objective_vel(int leg, MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const PredictionToken>(payload);
+    if (!pt || leg < 0 || leg >= n_legs_) return;
+    obj_vel_target_[leg] = pt->predicted_latent;                    // motor_dim target velocities
+    obj_vel_weight_[leg] = std::clamp(pt->confidence, 0.0f, 1.0f);  // w ∈ [0,1]
+    obj_vel_seen_[leg]   = 1;
 }
 
 void MotorEPM::handle_tilt(MessagePtr payload) {
@@ -852,6 +879,7 @@ void MotorEPM::ensure_leg_init(int leg, int n) {
     L.b = Eigen::VectorXf::Zero(n);
     L.C = Eigen::MatrixXf::Zero(m, n);
     L.Cphi = Eigen::MatrixXf::Zero(m, 2);   // phase-conditioning starts at 0 (byte-identical until learned)
+    L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // velocity feed-forward starts at 0 (byte-identical until learned)
     L.prev_phi_ctx.setZero();
     L.h = Eigen::VectorXf::Zero(m);
     // A: small random motor→sensor (model learns the real coupling quickly).
@@ -1134,7 +1162,10 @@ void MotorEPM::tick(uint64_t tick_id) {
             if (!warmup) {
                 const bool embed = cpg_embed_ && cpg_seen_;
                 Eigen::VectorXf z = L.C * L.prev_x + L.h;          // operating point
-                if (embed) z.noalias() += L.Cphi * L.prev_phi_ctx; // phase-conditioned bias at command time
+                if (embed) {
+                    z.noalias() += L.Cphi * L.prev_phi_ctx;        // posture phase-conditioned bias at command time
+                    z.noalias() += L.Cvel * L.prev_phi_ctx;        // velocity feed-forward bias (0 until the socket trains it)
+                }
                 Eigen::MatrixXf G = Eigen::MatrixXf::Zero(m, m);
                 float sat = 0.0f;
                 for (int i = 0; i < m; ++i) {
@@ -1187,6 +1218,20 @@ void MotorEPM::tick(uint64_t tick_id) {
                     }
                     if (embed_decay_ > 0.0) L.Cphi *= (1.0f - float(embed_decay_));
                 }
+                // Velocity feed-forward (the propulsive push): train Cvel to reduce the VELOCITY
+                // error (v* − ẋ) at the command phase, where ẋ = the joint delta (state index 3j+2).
+                // Same self-limiting form + L2 bound as Cphi, but the target is the phase-indexed
+                // velocity, not the pose — so it keeps driving even when the posture error is 0
+                // (moving THROUGH the pose = propulsion).  Zero + inert unless the velocity socket
+                // is wired (byte-identical HK otherwise).
+                if (embed && obj_vel_seen_[leg] && obj_vel_weight_[leg] > 0.0f
+                    && obj_vel_target_[leg].size() == m && n >= 3 * m) {
+                    for (int j = 0; j < m; ++j) {
+                        float ev = obj_vel_target_[leg][j] - L.x[3 * j + 2];  // v* − ẋ (delta component)
+                        L.Cvel.row(j).noalias() += float(embed_lr_) * ev * L.prev_phi_ctx.transpose();
+                    }
+                    if (embed_decay_ > 0.0) L.Cvel *= (1.0f - float(embed_decay_));
+                }
 
                 // (3) anti-saturation — surrogate for the dropped ∂G term.  Penalty
                 //     ∝ zᵢ·tanh²(zᵢ): inert in the linear band, strong at the rails,
@@ -1217,8 +1262,11 @@ void MotorEPM::tick(uint64_t tick_id) {
             // Panic boosts motor_gain for stronger escape thrust.
             float mg = float(motor_gain_) * (1.0f + pe * (float(panic_motor_mult_) - 1.0f));
             y = L.C * L.x + L.h;
-            if (cpg_embed_ && cpg_seen_)
-                y.noalias() += L.Cphi * Eigen::Vector2f(std::cos(cpg_phase_), std::sin(cpg_phase_));
+            if (cpg_embed_ && cpg_seen_) {
+                Eigen::Vector2f ctx(std::cos(cpg_phase_), std::sin(cpg_phase_));
+                y.noalias() += L.Cphi * ctx;   // posture feed-forward (pose)
+                y.noalias() += L.Cvel * ctx;   // velocity feed-forward (propulsive push; 0 until trained)
+            }
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
         }
         // Postural reflex (spinal-tone analog): pull hip2+knee toward the standing
@@ -1604,6 +1652,7 @@ nlohmann::json MotorEPM::snapshot_state() const {
         lj["A"] = flat(L.A); lj["b"] = flat(L.b);
         lj["C"] = flat(L.C); lj["h"] = flat(L.h);
         lj["Cphi"] = flat(L.Cphi);
+        lj["Cvel"] = flat(L.Cvel);
         lj["prev_x"] = flat(L.prev_x); lj["prev_y"] = flat(L.prev_y);
         lj["rows_A"] = int(L.A.rows()); lj["cols_A"] = int(L.A.cols());
         legs.push_back(std::move(lj));
@@ -1684,6 +1733,14 @@ nlohmann::json MotorEPM::diag_snapshot() const {
         j["obj_active"] = on;
         j["obj_weight"] = oc ? wsum / float(oc) : 0.0f;
     }
+    // L-1b velocity objective — is the phase-indexed velocity target (propulsive push) driving?
+    {
+        bool on = false; float wsum = 0.0f; int oc = 0;
+        for (int i = 0; i < n_legs_ && i < int(obj_vel_seen_.size()); ++i)
+            if (obj_vel_seen_[i] && obj_vel_weight_[i] > 0.0f) { on = true; wsum += obj_vel_weight_[i]; ++oc; }
+        j["obj_vel_active"] = on;
+        j["obj_vel_weight"] = oc ? wsum / float(oc) : 0.0f;
+    }
     // Effective per-joint postural gains actually applied this tick (postural_gain ×
     // profile).  Makes the array-vs-scalar interaction observable so a knob-turn can
     // never silently be a no-op.
@@ -1704,7 +1761,9 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["chassis_h_ema"] = chassis_h_ema_;         // smoothed chassis height
     j["chassis_h_max"] = chassis_h_max_;         // self-discovered height ceiling
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
-      j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much phase-conditioning HK has learned
+      j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much POSTURE phase-conditioning HK has learned
+    { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cvel.norm(); ++c; }
+      j["vel_embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cvel‖ — how much VELOCITY feed-forward (propulsive pump) HK has learned
     j["lateral_v"]   = lateral_v_;
     j["boredom"]     = boredom_;                 // sensorimotor predictability (Playful Machine)
     j["boredom_streak"] = boredom_streak_;
@@ -1797,7 +1856,9 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
             Eigen::MatrixXf M(r, c); std::copy(v.begin(), v.end(), M.data()); return M; };
         L.A = toM(vecf(lj.at("A")), n, m);
         L.C = toM(vecf(lj.at("C")), m, n);
+        L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // ensure valid (m,2) dims even for snapshots without a velocity map
         if (lj.contains("Cphi")) L.Cphi = toM(vecf(lj.at("Cphi")), m, 2);   // legacy snapshots → keep zero-init
+        if (lj.contains("Cvel")) L.Cvel = toM(vecf(lj.at("Cvel")), m, 2);   // legacy snapshots → keep zero-init
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);

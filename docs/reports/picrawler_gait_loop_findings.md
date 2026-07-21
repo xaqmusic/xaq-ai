@@ -1,6 +1,6 @@
 # Picrawler active-inference gait loop — findings (L-1b: steps 2–3 + Gate 2 + emergent gait)
 
-Status as of 2026-07-20. Companion to `docs/plans-and-designs/picrawler_active_inference_plan.md`.
+Status as of 2026-07-21. Companion to `docs/plans-and-designs/picrawler_active_inference_plan.md`.
 All results are headless, reset-masked, reward-free. Verification scripts live in the session
 scratchpad (`gait_metrics.py`/`gaith.py`/`raw_diag.py`/`gate1*`/`brt`/`gate2*` collectors).
 
@@ -30,16 +30,23 @@ commanded one.
 | hip2 **stroke** (imposed femur lift) | **rejected** | energetic but chaotic, no stable gait, frequent falls |
 | hip2 **tuck** (femur rest override, alone) | **rejected** | didn't crouch (weak reflex) + destabilized |
 | **learned** hip2 (per-joint postural *profile* loosens the femur spring; HK+embedding move it) | **rejected** | isolated long A/B: no gait / traversal / disengagement gain, +instability (2× stuck-time, 4 tipovers vs 0) — see learned-hip2 section |
+| phase-indexed **velocity** objective (`Cvel` propulsive pump: FF trained on velocity error v*−ẋ) | **rejected** | marginal steady gain, then **amplified a rear-leg asymmetry into circling** (embed traverses 6.1 m; velobj circles ~2 turns); the LR-symmetry fix **backfired** (~3 turns) — see velocity-lever section |
 
 **Metrics lesson (a real gap I hit):** a fast-traversing *flopping* gait scored great on fwd_v +
 joint-coherence — the collision was invisible until a **`chassis_h`** (chassis height) metric was
 added. **No gait is good if the chassis collides — always measure chassis height** (and adaptation,
 not just speed).
 
-**Open lever:** phase-indexed **velocity** in the objective — the propulsive push, not just the pose —
-the root fix for the small fwd_v cost and a more sustained cycle (the bigger payoff). *(The other
-lever, **emergent hip2**, was built and tested in isolation — and **refuted**; see the learned-hip2
-section below.)*
+**Open levers (both former levers now refuted).** The two named levers — phase-indexed **velocity**
+in the objective (the propulsive push) and **emergent hip2** — were each built and tested in
+isolation and **both refuted** (see their sections below). What the velocity investigation surfaced as
+the *real* next threads: **(1)** straighten the gait's **rear-leg weight-bearing asymmetry** (the
+balance/posture layer — it's what the velocity pump amplified into circling, and what any propulsive
+FF needs as a symmetric base); **(2)** a **richer gym** than the open plane (the robot circles/idles
+because a flat plane gives curiosity no gradient to climb — a corridor/slope/terrain that makes
+directed motion the path of richer sensorimotor experience); **(3)** a **tooling gap** — the
+`master_seed` override rewrites **0 modules**, so no A/B here can be seed-averaged (every comparison is
+single-config; byte-perfect isolation, but generality untested).
 
 ## The architecture under test
 
@@ -284,6 +291,54 @@ its only effect is marginally more femur motion, to no benefit. The `postural_ga
 The clean negative is the isolate-and-promote discipline working: the idea *looked* promising by hand
 and is unambiguously negative under control.
 
+## Phase-indexed velocity objective — tested and refuted (2026-07-21)
+
+The last named lever, run to ground. **Hypothesis** (findings above): the keyframe is a phase-indexed
+*posture* template — it holds the gait's *shape* but loses the propulsive *push* on a scaffold wean
+(`fwd_v→0`), because "be at position p" gives zero drive once you're already there. **Fix:** carry a
+phase-indexed *velocity* in the objective — a learned propulsive pump, the emergent analog of the
+(rejected-as-imposed) rhythmic sinusoid.
+
+**Mechanism built** (kept as default-off, byte-identical infrastructure): `KeyframeGait` learns a
+second **velocity map** (`vel_keyframe[bin]` = cross-cycle EMA of the body's *own* joint delta —
+proprio index 3j+2 — per CPG-phase bin) and publishes it on `objective.velocity.*`. `MotorEPM` trains
+a **separate feed-forward `Cvel`** on the velocity error `(v*−ẋ)` at the command phase (alongside the
+posture `Cphi`, so posture-pull and velocity-pump are independently learned/observable — `embed_norm`
+vs `vel_embed_norm`) and adds `Cvel·[cosφ,sinφ]` to the command.
+
+**Result — three isolated strikes** (each a *byte-perfect* isolation: the seed is inert — see below —
+so `embed` vs `velobj` differ by *exactly* the socket):
+
+1. **Steady A/B (120 s):** marginal — `fwd_v` +5.6% (0.0337→0.0356), coherence slightly up, no chassis
+   collision. But **`Cvel` self-limits to ~0.038** (vs `Cphi`'s 0.29): because `v*` is the body's *own*
+   recurring velocity, the error `(v*−ẋ)` is near-zero in steady state — the pump only supplies the
+   residual, which on the (already scaffold-free) `embed` gait is little.
+2. **Circling A/B (12 k ticks):** the socket **degrades the gait**. `embed` walks **6.1 m straight to a
+   pyramid** (0.47 net turns, 0 falls); `velobj` **circles ~1.89 turns** (3.2 m net, 1 tipover), never
+   directed. Mechanism: `Cvel` reinforces the body's *own* per-bin velocity — **including its yaw
+   asymmetry** — so a mild rear-leg imbalance (that `embed` tolerates: plant `[9,9,9,3]`) is compounded
+   into circling (`velobj` plant `[6,4,6,3]` — the front pair splits too).
+3. **The symmetry fix backfired.** An LR-pair prior equalizing paired legs' RMS push magnitude
+   (`symmetry_pairs`+`vel_symmetry_gain`) made circling **worse** — `velsym` circles **~3.19 turns**
+   (2.0 m net, never reaches a pyramid), plant `[3,13,4,3]`: it scaled the *weak* FR **up** until FR
+   *dominated*, flipping the yaw the other way. **Lesson:** yaw is a *signed, phased* quantity, not a
+   per-joint RMS magnitude; and the weak leg is a **weight-bearing/balance** asymmetry, not a
+   velocity-map one — `embed` already handles it *without* a pump, so symmetrizing the velocity map
+   fixes the wrong layer.
+
+**Verdict: not promoted.** The velocity feed-forward is not *wrong in principle* — a propulsive FF
+likely helps on a **symmetric base gait** — but it is **incompatible with the current asymmetric
+gait**, which it amplifies into circling; and the obvious fix belongs at the gait/balance layer, not
+here. The socket + symmetry prior **stay** as default-off/byte-identical infrastructure (reusable when
+a symmetric base gait exists). Same isolate-and-promote discipline as learned-hip2: looked promising by
+concept, unambiguously negative under control.
+
+**Tooling finding (affects all A/Bs):** the `master_seed` override logs **"0 modules rewritten"** — it
+does *not* reseed module RNGs, so every run reuses the config-baked seeds and is **fully deterministic
+regardless of `OGMA_SEED`** (confirmed: `embed@7 ≡ embed@42` byte-for-byte). Upside: A/Bs here are
+byte-perfect isolations. Downside: **we cannot seed-average** — every result (this lever, hip2, the
+milestone) is single-config; generality is untested. Worth fixing before the next quantitative gait study.
+
 ## Reusable pieces added
 
 - `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.
@@ -299,5 +354,15 @@ and is unambiguously negative under control.
   loosen one joint's spring relative to a global tone; effective gains observable (no silent no-ops).
   Used to test — and **refute** — learned hip2.
 - `BodyRhythmTracker` `raw_period`/`raw_amp` diag — per-(leg,joint) frequency diagnostic.
+- `KeyframeGait` phase-indexed **velocity map** (`velocity_output_topics`) + `MotorEPM` velocity
+  objective socket (`velocity_objective_topics`) + `Cvel` feed-forward (trained on v*−ẋ) — a learned
+  propulsive pump on the objective (`vel_embed_norm`/`obj_vel_active`/`vel_keyframe_tle` diag). Refuted
+  on the current gait; default-off/byte-identical, reusable on a symmetric base gait.
+- `KeyframeGait` LR-symmetry prior (`symmetry_pairs`/`vel_symmetry_gain`, `vel_lr_imbalance` diag) —
+  paired-leg RMS-energy equalization on the velocity map. The naive magnitude form backfired (see
+  velocity-lever section); kept default-off for a future phase-aware variant.
 - `OgmaBrain` TCP `set_param` verb — live param mutation for experiments (single-connection server).
 - `gait_metrics.py` + `raw_diag.py` — quantitative gait-quality + per-joint frequency diagnostics.
+- `circle.py` — circling quantifier from the body-diag log (net displacement vs path length vs
+  unwrapped `heading_yaw` = net turns; + per-leg plant/lift asymmetry). Distinguishes directed
+  traversal from circling-in-place — the metric that caught the velocity lever's failure.

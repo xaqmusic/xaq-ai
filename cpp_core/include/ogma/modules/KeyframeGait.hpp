@@ -67,7 +67,8 @@ private:
     // ---- Configuration ----
     std::string              cpg_topic_ = "rhythm.cpg.body";   // ProprioToken [cos φ, sin φ]
     std::vector<std::string> proprio_topics_;                  // per-leg [pos,act,delta]×motor_dim
-    std::vector<std::string> objective_output_topics_;         // per-leg PredictionToken outputs
+    std::vector<std::string> objective_output_topics_;         // per-leg PredictionToken outputs (posture)
+    std::vector<std::string> velocity_output_topics_;          // per-leg PredictionToken outputs (velocity); empty = off
     int    motor_dim_      = 3;
     int    n_bins_         = 16;
     double keyframe_alpha_ = 0.02;   // cross-cycle EMA rate (slow crystallize)
@@ -79,20 +80,32 @@ private:
     bool   shuffle_phase_  = false;  // feed a random bin → destroys the phase index (control)
     bool   freeze_map_     = false;  // stop updating the keyframe (proves improvement is learning)
     bool   publish_        = true;   // false = accumulate but don't drive the socket
+    // Left-right symmetry prior on the VELOCITY map (anti-circling): equalize the RMS push
+    // magnitude of paired legs' joints so the propulsive pump can't develop a yaw bias (which
+    // Cvel would otherwise amplify into circling).  Posture map untouched.  gain 0 = off.
+    std::vector<int> symmetry_pairs_;      // flat [legA,legB, legC,legD, ...] lr pairs (e.g. [0,1,2,3])
+    double vel_symmetry_gain_ = 0.0;       // per-tick pull toward equal paired-leg energy (0..1)
 
     // ---- Runtime ----
     float  phi_       = 0.0f;                  // latest CPG phase [0,2π)
     bool   phi_seen_  = false;
     std::vector<Eigen::VectorXf> posture_;     // latest per-leg positions (motor_dim)
+    std::vector<Eigen::VectorXf> vel_;         // latest per-leg deltas/velocities (motor_dim)
     std::vector<char>            posture_seen_;
     std::mt19937                 rng_;         // for shuffle_phase
 
     // Phase-indexed keyframe map: keyframe_[bin] is a whole-body posture (n_legs*motor_dim).
     std::vector<Eigen::VectorXf> keyframe_;    // [n_bins]
+    // Phase-indexed VELOCITY map: the propulsive trajectory (the "push"), complement of the
+    // posture "pose".  vel_keyframe_[bin] = cross-cycle EMA of the whole-body delta at that
+    // phase → the objective can carry a phase-indexed velocity feed-forward, not just position.
+    std::vector<Eigen::VectorXf> vel_keyframe_;// [n_bins]
     std::vector<float>           bin_dev_ema_; // [n_bins] per-bin ‖posture-keyframe‖ EMA (consistency)
     std::vector<int64_t>         bin_count_;   // [n_bins] ticks accumulated (0 = unseen)
-    float                        keyframe_tle_ema_ = 0.0f;  // aggregate crystallization signal
-    float                        last_drive_w_ = 0.0f;      // last published confidence (diag)
+    float                        keyframe_tle_ema_ = 0.0f;     // aggregate posture crystallization signal
+    float                        vel_keyframe_tle_ema_ = 0.0f; // aggregate velocity crystallization signal (diag)
+    float                        last_lr_imbalance_ = 0.0f;    // mean |eA-eB|/(eA+eB) over pairs BEFORE the last symmetry pull (diag)
+    float                        last_drive_w_ = 0.0f;         // last published confidence (diag)
 };
 
 } // namespace ogma
