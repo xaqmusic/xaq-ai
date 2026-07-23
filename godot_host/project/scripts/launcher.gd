@@ -18,15 +18,27 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # a config in the launcher, add its exact .json filename here.  Files are NOT
 # moved/deleted — every config stays loadable by path for scripts + A/B runs.
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
-	# Motor-EPM phase (current):
-	"the_picrawler_motor_epm_minimal.json",   # CANONICAL validated deploy (agency reward + stab guard + heading_gain 0)
-	"the_picrawler_motor_epm_energetic.json", # EXPERIMENTAL high-energy variant (operator screenshot params)
-	"the_picrawler_motor_epm_rung0.json",
-	"the_picrawler_motor_epm_vision.json",   # rung0 + epm_color (camera→brain, V1 vision)
-	"the_picrawler_motor_epm_vision_steer.json",  # V2: nav steers on VISION (vision_compass)
-	# Reference baselines (kept for comparison):
-	"the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2.json",
-	"the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2_target_compass_H1v6_F9_hit_reward.json",
+	# 2026-07-18 — narrowed to the ACTIVE L-1a Gate 0 config for focused
+	# observation.  The others stay loadable by path + in git; uncomment any to
+	# restore it to the dropdown.
+	"the_picrawler_motor_epm_minimal.json",   # L-1a Gate 0 — reward-free upright prior + HK loop (additive baseline)
+	"the_picrawler_motor_epm_objposture.json",# L-1b — postural via the objective.posture socket (PosturalPrior), postural_gain=0
+	"the_picrawler_motor_epm_keyframe.json",  # L-1b — KeyframeGait phase-indexed keyframe on the socket + dialed-down postural (0.3)
+	"the_picrawler_motor_epm_embed.json",     # L-1b — keyframe + CPG-EMBED (controller learns a phase-conditioned feed-forward from the keyframe error) — A/B vs plain keyframe
+	"the_picrawler_motor_epm_embed_corridor.json",  # embed milestone gait in the CORRIDOR trench gym (metadata.gym_mode=corridor) — same brain, different world
+	"the_picrawler_motor_epm_embed_corridor_propbal.json",  # SEED-REFUTED (2026-07-23): the +0.71/0.07 was one lucky seed; seed-avg (n=6) shows it's noise + anti-composes. Kept for UI A/B vs bearing-hold.
+	"the_picrawler_motor_epm_embed_corridor_bearinghold.json",  # ★ HEADING P+7 · COMMIT · RANGEFINDER: go-straight (P=7, straightness 0.53) + progress→commit=1.0 + MARKOV-COMPLIANT height (belly ToF rangefinder height_topic=ground_clearance, height_k=0.30, windup fixed so height defense fades with fwd motion). CLEARS THE HUMP (teleport final_z +4.11 all seeds, was ~2.6 stall) with flat net_z +3.48/straight 0.67/falls 0.00. Cruse REFUTED even correct-signed (grip is the wrong instinct — belly must ride LOW to climb); god's-eye chassis_y_norm is BLIND to belly grounding so it can't solve the hump.
+	"the_picrawler_motor_epm_embed_corridor_explore.json",  # ★ HEADING-HOLD P+7.0 + STUCK→EXPLORE 2.0: adds the active-inference propulsion desire (stall -> amplify exploration -> discover a push) on top of tuned heading. NOTE: stuck→explore seed-refuted as net-neutral; kept as a live lever. A/B vs the bearinghold baseline above.
+	# "the_picrawler_motor_epm_velobj.json",  # REJECTED: phase-indexed VELOCITY objective (Cvel pump) — amplified a gait asymmetry into circling (embed traverses; velobj circles ~2 turns). See findings doc.
+	# "the_picrawler_motor_epm_velsym.json",  # REJECTED: velobj + LR-symmetry prior — the fix BACKFIRED (worse circling, ~3 turns). Velocity lever refuted on the current asymmetric gait.
+	# "the_picrawler_motor_epm_hip2learn.json",  # REJECTED: learned hip2 (loose per-joint spring) — isolated A/B showed no gain + more instability (see findings doc)
+	# "the_picrawler_motor_epm_cpgwalk.json",  # REJECTED: coherent but an open-loop sequencer — chassis slams the ground (flopping fish)
+	# "the_picrawler_motor_epm_energetic.json", # EXPERIMENTAL high-energy variant (operator screenshot params)
+	# "the_picrawler_motor_epm_rung0.json",
+	# "the_picrawler_motor_epm_vision.json",   # rung0 + epm_color (camera→brain, V1 vision)
+	# "the_picrawler_motor_epm_vision_steer.json",  # V2: nav steers on VISION (vision_compass)
+	# "the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2.json",
+	# "the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2_target_compass_H1v6_F9_hit_reward.json",
 ]
 
 # 2026-06-13 — curriculum dropdown allowlist (same rationale as the config one).
@@ -87,6 +99,8 @@ const _ENV_LABEL := {
 var _configs_by_env: Dictionary = {}
 var _selected_env: String       = "cell"
 var _verbose_check: CheckBox    = null   # 2026-06-14 — picrawler verbose-diag toggle (created in code)
+var _gym_difficulty_spin: SpinBox = null       # corridor obstacle-height difficulty (created in code)
+var _gym_difficulty_row:  HBoxContainer = null
 
 # 2026-07-12 -- 4-LOOP LEAVE-ONE-OUT ablation (replaces the legacy Phase-6.5.22
 # brain_weight/scent_gate presets, which were for the OLD reflex cell). Each preset
@@ -176,6 +190,20 @@ func _ready() -> void:
 	_verbose_check.text = "Verbose diag log  (headless trajectory; leave OFF for long UI runs)"
 	_verbose_check.button_pressed = ExperimentConfig.picrawler_verbose_log
 	$Margin/V.add_child(_verbose_check)
+	# 2026-07-22 — corridor gym obstacle-height difficulty (0=trivial .. 1=hard).
+	# Created in code (.tscn untouched).  Only meaningful for the corridor gym;
+	# the donut ignores it.  Scales hump / rumble-bump / pyramid heights.
+	_gym_difficulty_row = HBoxContainer.new()
+	var _gd_label := Label.new()
+	_gd_label.text = "Corridor difficulty (0 easy .. 1 hard) "
+	_gym_difficulty_spin = SpinBox.new()
+	_gym_difficulty_spin.min_value = 0.0
+	_gym_difficulty_spin.max_value = 1.0
+	_gym_difficulty_spin.step = 0.05
+	_gym_difficulty_spin.value = 0.3
+	_gym_difficulty_row.add_child(_gd_label)
+	_gym_difficulty_row.add_child(_gym_difficulty_spin)
+	$Margin/V.add_child(_gym_difficulty_row)
 	_apply_persisted_state()
 	_env_dropdown.item_selected.connect(_on_env_changed)
 	_config_dropdown.item_selected.connect(_on_config_changed)
@@ -287,6 +315,11 @@ func _read_metadata(path: String) -> Variant:
 		# B3 leg-symmetric weight averaging — empty string means "use body
 		# default" (= "off"); set in config metadata or via env var.
 		"picrawler_leg_symmetry":         str(meta.get("leg_symmetry",            "")),
+		# Gym / world select — "" = donut arena (default), "corridor" = trench
+		# curriculum gym.  Lets a config pick its world (metadata.gym_mode).
+		"picrawler_gym_mode":             str(meta.get("gym_mode",                "")),
+		# Corridor obstacle difficulty (0..1); -1 = not declared -> spinbox default.
+		"picrawler_gym_difficulty":       float(meta.get("gym_difficulty",       -1.0)),
 	}
 
 # ---- Dropdown population ----------------------------------------------------
@@ -561,6 +594,9 @@ func _apply_persisted_state() -> void:
 	# Leg strength spinbox.  -1.0 (sentinel for "never set") → default to 1.0.
 	var ls: float = ExperimentConfig.leg_strength
 	_leg_strength_spin.value = ls if ls > 0.0 else 1.0
+	if _gym_difficulty_spin != null:
+		var gdv: float = ExperimentConfig.picrawler_gym_difficulty
+		_gym_difficulty_spin.value = gdv if gdv >= 0.0 else 0.3
 	_update_extras_visibility()
 
 func _on_env_changed(idx: int) -> void:
@@ -608,6 +644,11 @@ func _on_config_changed(idx: int) -> void:
 		if str(opt.get("id", "")) == want_backend:
 			_joint_backend_dropdown.select(i)
 			break
+	# Pre-populate the corridor-difficulty spinbox if the config declares one
+	# (metadata.gym_difficulty), so "select config -> Launch" reproduces it.
+	var cgd := float(entry.get("picrawler_gym_difficulty", -1.0))
+	if cgd >= 0.0 and _gym_difficulty_spin != null:
+		_gym_difficulty_spin.value = cgd
 
 func _on_seed_random_toggled(pressed: bool) -> void:
 	_seed_spin.editable = not pressed
@@ -648,6 +689,8 @@ func _update_extras_visibility() -> void:
 	_curriculum_row.visible = (_selected_env == "picrawler")
 	if _verbose_check != null:
 		_verbose_check.visible = (_selected_env == "picrawler")
+	if _gym_difficulty_row != null:
+		_gym_difficulty_row.visible = (_selected_env == "picrawler")
 	_start_curr_btn.visible = (_selected_env == "picrawler")
 	if _curriculum_row.visible:
 		_start_curr_btn.disabled = (_curriculum_dropdown.get_item_count() == 0
@@ -702,6 +745,10 @@ func _on_launch() -> void:
 	ExperimentConfig.picrawler_walk_target_velocity = float(entry.get("picrawler_walk_target_velocity", -1.0))
 	ExperimentConfig.picrawler_walk_hit_rate        = float(entry.get("picrawler_walk_hit_rate",        -1.0))
 	ExperimentConfig.picrawler_leg_symmetry         = str(entry.get("picrawler_leg_symmetry",            ""))
+	ExperimentConfig.picrawler_gym_mode             = str(entry.get("picrawler_gym_mode",                ""))
+	# Corridor difficulty comes from the spinbox (picrawler only); other envs -1.
+	ExperimentConfig.picrawler_gym_difficulty       = (_gym_difficulty_spin.value
+		if (_selected_env == "picrawler" and _gym_difficulty_spin != null) else -1.0)
 	if _seed_random.button_pressed:
 		ExperimentConfig.seed_value = randi() % 1000000
 	else:
