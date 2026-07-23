@@ -220,6 +220,35 @@ private:
     int64_t coord_probe_counter_ = 0;
     float   coord_fit_accum_     = 0.0f;
     int64_t coord_fit_count_     = 0;
+    // 2026-07-23 — STUCK→EXPLORE desire (active-inference-native propulsion): when the
+    // body makes ~no forward progress (fwd_v EMA below threshold) for a sustained window,
+    // AMPLIFY the exploration channels (explore_noise + the coord phase-search σ) so the
+    // gait DISCOVERS a push — curiosity down the corridor, no external goal/reward.  The
+    // bearing-hold keeps the heading straight while it searches → directed exploration.
+    // Self-terminating: the boost decays the instant forward progress resumes.  0 = off.
+    double  stuck_explore_gain_  = 0.0;         // max exploration amplification at full stall (0 = off)
+    float   fwd_progress_ema_    = 0.0f;        // slow EMA of forward velocity (the stall detector, compliant)
+    int     stuck_ticks_         = 0;           // consecutive ticks below the progress threshold
+    float   stuck_boost_         = 0.0f;        // 0..1 exploration boost (ramps when stuck, decays when moving)
+    // --- progress→COMMIT (lever C): the INVERSE twin of stuck→explore.  When forward
+    // progress is HIGH and sustained (fwd_progress_ema_ above a commit threshold), ramp a
+    // boost that (1) DAMPS the exploration channels (stop re-searching a found push) and
+    // (2) ADDS stroke thrust (drive into the committed direction).  Mutually exclusive with
+    // stuck_boost_ by construction (one needs low progress, the other high).  Egocentric,
+    // self-correcting (decays when progress falls).  0 = off → commit_boost_ pinned 0.
+    double  progress_commit_gain_ = 0.0;        // max exploration damp + thrust add at full commit (0 = off)
+    int     commit_ticks_         = 0;          // consecutive ticks above the commit threshold
+    float   commit_boost_         = 0.0f;       // 0..1 commit boost (ramps when flowing, decays when stalled)
+    // --- forward-FLOW homeostat (lever D): homeokinesis applied to locomotion.  Amplify
+    // stroke thrust ∝ the quality of forward flow, where quality = magnitude · PREDICTABILITY
+    // (strong AND steady fwd_v).  flow_vol_ema_ is the volatility (mean-abs-deviation of
+    // fwd_v); the 1/(1+k·vol) factor rewards predictable flow, not raw speed — the
+    // homeokinetic heart.  Continuous (no threshold), egocentric.  0 = off.
+    double  forward_flow_gain_   = 0.0;         // max stroke amplification at ideal (strong+steady) flow (0 = off)
+    float   flow_ema_            = 0.0f;        // EMA of fwd_v (forward-flow magnitude)
+    float   flow_vol_ema_        = 0.0f;        // EMA of |fwd_v − flow_ema_| (flow volatility = un-predictability)
+    float   flow_quality_diag_   = 0.0f;        // transient: last-tick flow_quality (diag only, not serialized)
+    float   height_rest_frac_    = 1.0f;        // transient: height-defense fade (1 at rest → 0 while moving fwd)
     // 2026-06-14 — CoT-seeking AMPLITUDE search.  Twin of the phase search but on
     // amp_target: a (1+1) hill-climb maximising fwd_v / oscillation-amplitude (speed
     // per effort = inverse cost of transport).  Lowers gait amplitude until forward
@@ -266,6 +295,16 @@ private:
     double  stroke_phase_ = 0.0;                   // phase offset knee→hip1 (push timing vs lift)
     double  steer_        = 0.0;                    // left/right differential (turn rate; 0 = straight)
     std::vector<double> stroke_signs_ = {1.0, -1.0, 1.0, -1.0};  // per-leg hip1 stroke direction (forward guess)
+    // 2026-07-22 — per-leg propulsive-credit homeostat (functional L/R propulsion
+    // balance).  Each leg's FUNCTIONAL contribution to the fore-aft power stroke —
+    // the hip1 motion component phase-aligned with the stroke waveform — is tracked
+    // as a credit; a leg below the group mean ("dragging": planted but static) gets
+    // a self-limiting boost in its stroke direction so it pulls its weight and L/R
+    // propulsion equalizes (straighter travel).  The credit is FUNCTIONAL (phase-
+    // aligned), NOT amplitude/RMS — the measure the refuted symmetry levers missed.
+    // 0 = off (byte-identical).  Boost fades to 0 as the credit deficit closes.
+    double  propulsion_balance_gain_ = 0.0;
+    float   prop_credit_mean_ = 0.0f;   // group-mean credit (recomputed each tick; telemetry)
     // 2026-06-12 — active balance (vestibular reflex).  The FIRST perception input
     // to the controller, and the right one for the fast loop (vestibulospinal is
     // spinal-level, not cortical).  Reads chassis tilt direction and pushes the
@@ -293,6 +332,22 @@ private:
     double  heading_gain_ = 0.0;                    // yaw-rate feedback strength (0 = off; sign tunable)
     std::string imu_topic_ = "reality.proprio.imu"; // 4-D [sin yaw, cos yaw, fwd_v, ang_v]
     float   yaw_rate_ = 0.0f;                       // latest signed yaw rate (IMU index 3)
+    // 2026-07-23 — HEADING-HOLD desire (the robust go-straight lever): damp the body
+    // yaw rate with a per-side hip1 differential IN-PHASE with the power stroke, so it
+    // composes with propulsion-balance / the emergent gait instead of fighting it (unlike
+    // the old heading_gain, which fed steer-magnitude and circled embed).  A "hold the
+    // bearing" prior — not a reflex kick.  0 = off; sign tunable.
+    double  heading_hold_gain_ = 0.0;
+    float   yaw_rate_ema_ = 0.0f;                   // smoothed yaw rate for the heading-hold
+    // 2026-07-23 — BEARING-HOLD (the real go-straight lever).  heading_hold_gain_ damps
+    // the yaw RATE, which resists spinning but goes to zero once the body has drifted and
+    // stopped rotating → it never corrects the accumulated bearing (proven: turn-std flat
+    // across a gain sweep).  This term instead integrates the body's OWN yaw rate into a
+    // dead-reckoned bearing (heading_bearing_, relative to spawn — Markov-compliant, a real
+    // gyro does exactly this) and drives it back to 0.  An error that GROWS with drift and
+    // keeps pushing until corrected — integral authority the rate term lacks.  0 = off.
+    double  heading_bearing_hold_gain_ = 0.0;
+    float   heading_bearing_ = 0.0f;                // integrated yaw rate = bearing rel. to spawn (π-units)
     // 2026-06-13 — PERCEPTION → STEERING (the active-inference closure).  The robot
     // perceives the egocentric bearing to a target (target_compass) and ACTS to
     // minimize it (steer until the target is dead-ahead) — Friston's loop closed
@@ -468,6 +523,8 @@ private:
         float               phase       = 0.0f;   // estimated oscillator phase (rad)
         float               amp_ema     = 0.0f;   // slow estimate of oscillation amplitude
         float               amp_gain    = 1.0f;   // homeostat output gain (regulated toward amp_target)
+        float               hip1_dc     = 0.0f;   // slow DC mean of hip1 pos (propulsive-credit baseline)
+        float               prop_credit = 0.0f;   // EMA of phase-aligned propulsive stroke (fwd contribution)
     };
     std::vector<Leg> legs_;
 
@@ -475,14 +532,35 @@ private:
     static constexpr float kKneeEmaAlpha   = 0.01f;   // slow mean for the phase reference
     static constexpr float kPhaseVelScale  = 15.0f;   // balances knee Δ vs (pos−mean) in atan2
     static constexpr float kAmpEmaAlpha    = 0.01f;   // slow amplitude estimate for the homeostat
+    static constexpr float kPropCreditAlpha = 0.01f;  // ~100-tick propulsive-credit EMA (functional balance)
     static constexpr float kAmpGainMin     = 0.1f;
     static constexpr float kAmpGainMax     = 5.0f;
     static constexpr float kAmpSeekMin     = 0.15f;   // amp_target floor for the CoT search (avoid motion collapse)
     static constexpr float kAmpSeekMax     = 0.60f;   // amp_target ceiling for the CoT search
     static constexpr float kHeightEmaAlpha = 0.01f;   // slow height estimate (spike-robust)
+    static constexpr float kYawRateEmaAlpha = 0.15f;  // ~7-tick yaw-rate smoothing for the heading-hold
+    static constexpr float kBearingIntegDt  = 1.0f/60.0f; // integrate normalized yaw rate → bearing (1.0 ≈ π rad = half turn)
+    static constexpr float kBearingClamp    = 4.0f;   // saturate the bearing integral (≈2 turns) so the term can't explode
+    static constexpr float kFwdProgressAlpha = 0.01f; // slow forward-velocity EMA (~100-tick window) for stall detection
+    static constexpr float kStuckVelThresh  = 0.012f; // fwd_v EMA below this ≈ not progressing (embed walks well at ~0.04)
+    static constexpr int   kStuckWindowTicks = 300;   // sustained stall (5 s) before the exploration boost engages
+    static constexpr float kStuckBoostRise  = 1.0f/600.0f; // ramp boost to full over ~10 s of sustained stall
+    static constexpr float kStuckBoostDecay = 1.0f/120.0f; // decay boost over ~2 s once moving (faster off = self-terminating)
+    // progress→COMMIT (lever C): the flow threshold is well above the stall threshold so
+    // commit and stuck are disjoint (a dead-band between them = neither fires).
+    static constexpr float kCommitVelThresh = 0.030f; // fwd_v EMA above this ≈ genuinely moving (embed cruises ~0.04)
+    static constexpr int   kCommitWindowTicks = 180;  // sustained flow (3 s) before commit engages (faster than stuck: seize the push)
+    static constexpr float kCommitBoostRise = 1.0f/240.0f; // ramp commit to full over ~4 s of sustained progress
+    static constexpr float kCommitBoostDecay = 1.0f/90.0f;  // decay over ~1.5 s once progress falls (release quickly, re-explore)
+    // forward-FLOW homeostat (lever D): predictability-weighted flow amplifier.
+    static constexpr float kFlowEmaAlpha    = 0.02f;  // ~50-tick EMA of fwd_v (flow magnitude + volatility base)
+    static constexpr float kFlowVelNorm     = 0.05f;  // fwd_v that counts as "full" forward flow (embed cruises ~0.04)
+    static constexpr float kFlowVolK        = 4.0f;   // volatility penalty weight in 1/(1+k·vol): mild so the flow MAGNITUDE leads (raw fwd_v oscillation inflates vol; magnitude is the cleaner discriminator)
+    static constexpr float kCommitStrokeFrac = 0.30f; // stroke thrust added per unit commit_amt (gain·boost) — +30% at gain 1, full commit
     static constexpr float kHeightBiasMin  = -0.5f;   // allow slight relax below neutral lift
     static constexpr float kHeightBiasMax  =  1.5f;   // cap lift authority
     static constexpr float kHeightLiftSign = +1.0f;   // hip2 command dir that RAISES chassis (flip if inverted)
+    static constexpr float kHeightMoveSuppVel = 0.025f; // fwd_progress_ema at which the height defense fully fades (height is a STANDING reflex; a lift bias loses traction while walking/climbing — belly must ride low on an incline)
     static constexpr float kPanicRampAlpha = 0.04f;   // smoothing of panic_ toward its hysteresis target
     static constexpr float kResetRateAlpha = 1.0f / 600.0f;  // Gate 0: ~600-tick (~10s@60Hz) smoothing of the disruption-rate EMA (a measurement constant, not a behavioral knob)
 };

@@ -62,6 +62,9 @@ public:
 private:
     void handle_cpg(MessagePtr payload);
     void handle_proprio(int leg, MessagePtr payload);
+    void handle_upright(MessagePtr payload);
+    void handle_contact(MessagePtr payload);
+    void handle_reset(std::string_view topic, MessagePtr payload);
     int  bin_of(float phi) const;
 
     // ---- Configuration ----
@@ -86,6 +89,20 @@ private:
     std::vector<int> symmetry_pairs_;      // flat [legA,legB, legC,legD, ...] lr pairs (e.g. [0,1,2,3])
     double vel_symmetry_gain_ = 0.0;       // per-tick pull toward equal paired-leg energy (0..1)
 
+    // ---- Posture-validity BAKE GATE (2026-07-22) ----
+    // The stability-plasticity fix: EXPLORE freely (the HK loop is untouched) but
+    // LEARN only from states consistent with a well-functioning agent, so an
+    // anomalous episode (flipped on a wall, sustained-airborne thrashing) can't
+    // bake detrimental keyframes.  "Sustained ALL feet off" (not "some feet off")
+    // is the airborne signature — normal swing + brief leaps still bake.  Any gate
+    // topic wired turns the gate ON; all empty = OFF (validity=1, byte-identical).
+    std::string bake_upright_topic_ = "";   // 1-D upright ∈ [-1,1] (1=upright, -1=inverted)
+    std::string bake_contact_topic_ = "";   // n-D per-leg foot contact (sum==0 → all feet off)
+    std::string bake_reset_topic_   = "";   // event prefix ("events.") → mask baking after reset/miss
+    double  bake_upright_min_        = 0.5;  // below this = flipped/on-its-side → don't bake
+    int64_t bake_airborne_max_ticks_ = 60;  // all-feet-off LONGER than this → don't bake (leaps OK)
+    int64_t bake_reset_mask_ticks_   = 30;  // suppress baking for this many ticks after a reset
+
     // ---- Runtime ----
     float  phi_       = 0.0f;                  // latest CPG phase [0,2π)
     bool   phi_seen_  = false;
@@ -106,6 +123,14 @@ private:
     float                        vel_keyframe_tle_ema_ = 0.0f; // aggregate velocity crystallization signal (diag)
     float                        last_lr_imbalance_ = 0.0f;    // mean |eA-eB|/(eA+eB) over pairs BEFORE the last symmetry pull (diag)
     float                        last_drive_w_ = 0.0f;         // last published confidence (diag)
+    // Bake-gate runtime.
+    bool    bake_gated_          = false;    // any gate topic wired → the gate is active
+    float   upright_             = 1.0f;     // latest upright signal
+    int     n_contact_           = 0;        // latest # feet in contact
+    int64_t all_off_ticks_       = 0;        // consecutive ticks with ALL feet off
+    int64_t reset_mask_ticks_    = 0;        // remaining post-reset bake-mask ticks
+    bool    bake_valid_diag_     = true;     // last tick's bake validity (diag)
+    int64_t bake_suppress_count_ = 0;        // cumulative ticks baking was suppressed (diag)
 };
 
 } // namespace ogma

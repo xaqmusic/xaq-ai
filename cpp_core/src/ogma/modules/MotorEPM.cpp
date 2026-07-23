@@ -199,6 +199,15 @@ ParamSchema MotorEPM::params_schema() const {
         {"coord_reward_drive", ParamMutability::HotMutable,
          "AGENCY-REWARD search: (1+1) hill-climb probe scale (rad) on the phase offsets, KEEPING probes that raise controllability (forward thrust fwd_v — coordinated propulsion, Goodhart-robust on flat ground). The directional drive for continuous improvement. 0 = off.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"stuck_explore_gain", ParamMutability::HotMutable,
+         "STUCK→EXPLORE desire (active-inference-native propulsion): when forward velocity (fwd_v EMA, compliant) stays below threshold for a sustained window (~5 s), AMPLIFY the exploration channels — explore_noise and the coord phase-search σ — so the gait DISCOVERS a push (curiosity, no external goal). Self-terminating: decays the instant forward progress resumes. Composes with the bearing-hold (which holds heading straight while it searches → directed exploration down the corridor). = max amplification at full stall; 0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{5.0}},
+        {"progress_commit_gain", ParamMutability::HotMutable,
+         "progress→COMMIT desire (lever C, the inverse twin of stuck→explore): when forward progress (fwd_v EMA) stays HIGH for a sustained window (~3 s), ramp a boost that (1) DAMPS the exploration channels (coord phase-search σ + explore_noise) so the gait stops re-searching a found push, and (2) ADDS stroke thrust so it drives into the committed direction. Kills the exploratory dither once a push is found; self-correcting (decays the instant progress falls, re-opening exploration). Mutually exclusive with stuck→explore by construction. Egocentric. = max exploration-damp + thrust-add at full commit; 0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
+        {"forward_flow_gain", ParamMutability::HotMutable,
+         "forward-FLOW homeostat (lever D, homeokinesis applied to locomotion): amplify stroke thrust ∝ the QUALITY of forward flow = magnitude · predictability (strong AND steady fwd_v). A predictability weight 1/(1+k·volatility) rewards smooth forward flow, not raw speed — the homeokinetic heart (predictable sensorimotor flow is intrinsically sought). Continuous (no threshold), self-easing when flow turns erratic. Egocentric. = max stroke amplification at ideal flow; 0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
         {"coord_probe_ticks", ParamMutability::HotMutable,
          "window (ticks) per agency-reward probe; fitness measured over its back half (after the gait settles to the new offsets). ~240 = 4 s.",
          ParamValue{240}, ParamValue{60}, ParamValue{1200}},
@@ -212,8 +221,8 @@ ParamSchema MotorEPM::params_schema() const {
          "SYMMETRIC CONTROLLABILITY reward. 0 = the agency search rewards FORWARD velocity (legacy). >0 = it rewards velocity toward the INTENDED direction (the target_compass bearing) — i.e. progress toward the goal, whether that needs going forward OR turning. Generalises the forward-only agency reward (forward = intent straight ahead); a substrate motivated to ACHIEVE its intent, symmetric for forward and turns. Falls back to forward when no target is present.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"cruse_gain", ParamMutability::HotMutable,
-         "CRUSE/Walknet inter-leg coordination CORRECTOR on hip2 (foot lift). Continuous bias: Rule 1 (anterior leg in swing → hold this leg in stance, +hip2 down), Rule 2 (anterior just-planted → release this leg's swing, −hip2 up), Rule 3 (contralateral in swing → hold stance). Catches per-leg co-swing / support-loss the MotorEPM rhythm alone leaves; needs the rhythm it cannot itself generate. 0 = off.",
-         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+         "CRUSE/Walknet inter-leg coordination CORRECTOR on hip2 (foot lift). Continuous bias: Rule 1 (anterior leg in swing → hold this leg in stance, +hip2 down), Rule 2 (anterior just-planted → release this leg's swing, −hip2 up), Rule 3 (contralateral in swing → hold stance). Catches per-leg co-swing / support-loss the MotorEPM rhythm alone leaves; needs the rhythm it cannot itself generate. 0 = off.  NEGATIVE allowed for the sign-flip audit (inverts plant↔lift).",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"cruse_rule3_weight", ParamMutability::HotMutable,
          "Rule 3 (contralateral load tolerance) weight relative to Rule 1 (anterior). 0.5 = contralateral hold is half-strength vs the anterior coupling.",
          ParamValue{0.5}, ParamValue{0.0}, ParamValue{2.0}},
@@ -221,8 +230,8 @@ ParamSchema MotorEPM::params_schema() const {
          "ticks after the anterior leg's touchdown during which Rule 2 actively releases this leg's swing (the constructive lift). ~15 = 0.25 s @ 60 Hz.",
          ParamValue{15}, ParamValue{1}, ParamValue{120}},
         {"cruse_rule5_gain", ParamMutability::HotMutable,
-         "CRUSE Rule 5 (load distribution): a leg in stance presses its foot down (hip2+knee) ∝ the number of OTHER legs currently in swing — redistributing the swinging legs' weight onto the planted ones. More normal force → more friction → less foot scrub (the stance feet were sliding ~3-4× the body's progress). Shifts CoG onto the support. 0 = off.",
-         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+         "CRUSE Rule 5 (load distribution): a leg in stance presses its foot down (hip2+knee) ∝ the number of OTHER legs currently in swing — redistributing the swinging legs' weight onto the planted ones. More normal force → more friction → less foot scrub (the stance feet were sliding ~3-4× the body's progress). Shifts CoG onto the support. 0 = off.  NEGATIVE allowed for the sign-flip audit.",
+         ParamValue{0.0}, ParamValue{-1.0}, ParamValue{1.0}},
         {"feet_topic", ParamMutability::ConstructionOnly,
          "4-D per-leg foot-height ProprioToken topic for Cruse stance/swing detection. The body publishes reality.proprio.feet_y every tick.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -238,6 +247,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"stroke_signs", ParamMutability::HotMutable,
          "per-leg hip1 stroke direction, length n_legs [FL,FR,RL,RR]. Parallel-caudal pattern → forward; all-same → tangential spin. Default [1,-1,1,-1] (forward guess, confirm by eye).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"propulsion_balance_gain", ParamMutability::HotMutable,
+         "per-leg propulsive-credit homeostat. Each leg's FUNCTIONAL fore-aft contribution (hip1 motion phase-aligned with the power stroke — a 'dragging' planted-but-static leg scores ~0) is tracked; a below-group-mean leg gets a self-limiting boost in its stroke direction so it pulls its weight and L/R propulsion equalizes (straighter). Functional (phase-aligned), NOT amplitude/RMS — distinct from the refuted symmetry levers. 0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
         {"balance_gain", ParamMutability::HotMutable,
          "active-balance (vestibular) reflex strength. Pushes low-side legs' hip2 to level the body from the chassis tilt direction — equalizes leg load → equal basin depth → straighter walk + fewer stalls. 0 = off; sign tunable (flip if it destabilizes).",
          ParamValue{0.0}, ParamValue{-3.0}, ParamValue{3.0}},
@@ -259,6 +271,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"heading_gain", ParamMutability::HotMutable,
          "heading-rate regulator (go-straight reflex). Feeds the body's signed yaw rate into steer to counter unwanted turning — kills the residual wander after amplitudes are equalized. steer becomes a turn-rate command (0 = hold straight). 0 = off; sign tunable.",
          ParamValue{0.0}, ParamValue{-3.0}, ParamValue{3.0}},
+        {"heading_hold_gain", ParamMutability::HotMutable,
+         "HEADING-HOLD desire (robust go-straight): damps the smoothed body yaw rate with a per-side hip1 differential IN-PHASE with the fore-aft power stroke, so it composes with propulsion-balance / the emergent gait instead of fighting it (unlike heading_gain, which modulated steer magnitude and circled embed). A 'hold the bearing' prior. 0 = off; sign tunable.",
+         ParamValue{0.0}, ParamValue{-3.0}, ParamValue{3.0}},
+        {"heading_bearing_hold_gain", ParamMutability::HotMutable,
+         "HEADING-HOLD-TO-SPAWN (P term): steers to drive the dead-reckoned bearing error (heading_bearing_ = integrated yaw rel. to spawn, Markov-compliant, reset on respawn) back to 0, ROUTED THROUGH the authoritative skid-steer channel (folds into stroke magnitude → real L/R thrust differential that turns the body), not the weak additive nudge it was before. Pairs with heading_hold_gain (D = yaw-rate damping ~0.3) for a clean non-oscillating hold. Gated off during nav. POSITIVE = go-straight (straightness climbs with P through ~5+); NEGATIVE = catastrophic positive-feedback spin. 0 = off.",
+         ParamValue{0.0}, ParamValue{-12.0}, ParamValue{12.0}},
         {"imu_topic", ParamMutability::ConstructionOnly,
          "4-D IMU ProprioToken topic [sin yaw, cos yaw, fwd_v, ang_v]; index 3 = signed yaw rate for the heading regulator.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -377,6 +395,9 @@ ParamMap MotorEPM::current_params() const {
     m["coord_adapt_rate"] = coord_adapt_rate_;
     m["coord_explore"]    = coord_explore_;
     m["coord_reward_drive"] = coord_reward_drive_;
+    m["stuck_explore_gain"] = stuck_explore_gain_;
+    m["progress_commit_gain"] = progress_commit_gain_;
+    m["forward_flow_gain"]  = forward_flow_gain_;
     m["coord_probe_ticks"]  = coord_probe_ticks_;
     m["coord_stab_penalty"] = coord_stab_penalty_;
     m["coord_lat_penalty"]  = coord_lat_penalty_;
@@ -390,6 +411,7 @@ ParamMap MotorEPM::current_params() const {
     m["stroke_phase"]     = stroke_phase_;
     m["steer"]            = steer_;
     m["stroke_signs"]     = stroke_signs_;
+    m["propulsion_balance_gain"] = propulsion_balance_gain_;
     m["balance_gain"]     = balance_gain_;
     m["tilt_topic"]       = tilt_topic_;
     m["amp_homeo_gain"]   = amp_homeo_gain_;
@@ -397,6 +419,8 @@ ParamMap MotorEPM::current_params() const {
     m["amp_seek_rate"]    = amp_seek_rate_;
     m["amp_seek_ticks"]   = amp_seek_ticks_;
     m["heading_gain"]     = heading_gain_;
+    m["heading_hold_gain"] = heading_hold_gain_;
+    m["heading_bearing_hold_gain"] = heading_bearing_hold_gain_;
     m["imu_topic"]        = imu_topic_;
     m["nav_gain"]         = nav_gain_;
     m["nav_topic"]        = nav_topic_;
@@ -469,6 +493,9 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "coord_adapt_rate", [&](auto const& v){ coord_adapt_rate_ = get_double(v, "coord_adapt_rate"); });
     apply_param(params, "coord_explore", [&](auto const& v){ coord_explore_ = get_double(v, "coord_explore"); });
     apply_param(params, "coord_reward_drive", [&](auto const& v){ coord_reward_drive_ = get_double(v, "coord_reward_drive"); });
+    apply_param(params, "stuck_explore_gain", [&](auto const& v){ stuck_explore_gain_ = get_double(v, "stuck_explore_gain"); });
+    apply_param(params, "progress_commit_gain", [&](auto const& v){ progress_commit_gain_ = get_double(v, "progress_commit_gain"); });
+    apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "coord_probe_ticks", [&](auto const& v){ coord_probe_ticks_ = get_int(v, "coord_probe_ticks"); });
     apply_param(params, "coord_stab_penalty", [&](auto const& v){ coord_stab_penalty_ = get_double(v, "coord_stab_penalty"); });
     apply_param(params, "coord_lat_penalty", [&](auto const& v){ coord_lat_penalty_ = get_double(v, "coord_lat_penalty"); });
@@ -482,6 +509,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "stroke_phase", [&](auto const& v){ stroke_phase_ = get_double(v, "stroke_phase"); });
     apply_param(params, "steer", [&](auto const& v){ steer_ = get_double(v, "steer"); });
     apply_param(params, "stroke_signs", [&](auto const& v){ stroke_signs_ = get_double_vec(v, "stroke_signs"); });
+    apply_param(params, "propulsion_balance_gain", [&](auto const& v){ propulsion_balance_gain_ = get_double(v, "propulsion_balance_gain"); });
     apply_param(params, "balance_gain", [&](auto const& v){ balance_gain_ = get_double(v, "balance_gain"); });
     apply_param(params, "tilt_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) tilt_topic_ = *p; });
     apply_param(params, "amp_homeo_gain", [&](auto const& v){ amp_homeo_gain_ = get_double(v, "amp_homeo_gain"); });
@@ -489,6 +517,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "amp_seek_rate", [&](auto const& v){ amp_seek_rate_ = get_double(v, "amp_seek_rate"); });
     apply_param(params, "amp_seek_ticks", [&](auto const& v){ amp_seek_ticks_ = get_int(v, "amp_seek_ticks"); });
     apply_param(params, "heading_gain", [&](auto const& v){ heading_gain_ = get_double(v, "heading_gain"); });
+    apply_param(params, "heading_hold_gain", [&](auto const& v){ heading_hold_gain_ = get_double(v, "heading_hold_gain"); });
+    apply_param(params, "heading_bearing_hold_gain", [&](auto const& v){ heading_bearing_hold_gain_ = get_double(v, "heading_bearing_hold_gain"); });
     apply_param(params, "imu_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) imu_topic_ = *p; });
     apply_param(params, "nav_gain", [&](auto const& v){ nav_gain_ = get_double(v, "nav_gain"); });
     apply_param(params, "nav_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) nav_topic_ = *p; });
@@ -667,6 +697,12 @@ void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
         ++reset_count_;
         ticks_since_reset_   = 0;
         reset_hit_this_tick_ = true;
+        heading_bearing_ = 0.0f;   // respawn = new bearing origin (dead-reckoning restart)
+        // respawn = fresh stall clock (don't count the post-reset settle as "stuck")
+        stuck_ticks_ = 0; stuck_boost_ = 0.0f; fwd_progress_ema_ = 0.0f;
+        // respawn = fresh commit clock + cold flow EMAs (levers C/D)
+        commit_ticks_ = 0; commit_boost_ = 0.0f;
+        flow_ema_ = 0.0f; flow_vol_ema_ = 0.0f;
     }
 }
 
@@ -702,6 +738,12 @@ void MotorEPM::handle_imu(MessagePtr payload) {
     if (!pt || pt->values.size() < 4) return;
     fwd_v_    = pt->values[2];     // forward velocity (controllability/thrust signal)
     yaw_rate_ = pt->values[3];     // signed yaw rate (ang_v / π, clamped)
+    yaw_rate_ema_ = (1.0f - kYawRateEmaAlpha) * yaw_rate_ema_ + kYawRateEmaAlpha * yaw_rate_;  // heading-hold
+    // Dead-reckoned bearing (bearing-hold): integrate our own yaw rate → heading relative
+    // to spawn.  Compliant (a real gyro does this); clamped so a wild spin can't explode
+    // the correction term.  Zeroed on respawn in handle_event (new spawn = new origin).
+    heading_bearing_ = std::clamp(heading_bearing_ + yaw_rate_ * kBearingIntegDt,
+                                  -kBearingClamp, kBearingClamp);
 }
 
 void MotorEPM::handle_nav(MessagePtr payload) {
@@ -841,6 +883,9 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "coord_adapt_rate") coord_adapt_rate_ = get_double(value, "coord_adapt_rate");
     else if (key == "coord_explore") coord_explore_ = get_double(value, "coord_explore");
     else if (key == "coord_reward_drive") coord_reward_drive_ = get_double(value, "coord_reward_drive");
+    else if (key == "stuck_explore_gain") stuck_explore_gain_ = get_double(value, "stuck_explore_gain");
+    else if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
+    else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "coord_probe_ticks") coord_probe_ticks_ = get_int(value, "coord_probe_ticks");
     else if (key == "coord_stab_penalty") coord_stab_penalty_ = get_double(value, "coord_stab_penalty");
     else if (key == "coord_lat_penalty") coord_lat_penalty_ = get_double(value, "coord_lat_penalty");
@@ -861,11 +906,14 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
         if (int(ss.size()) == n_legs_) stroke_signs_ = ss;
     }
     else if (key == "balance_gain") balance_gain_ = get_double(value, "balance_gain");
+    else if (key == "propulsion_balance_gain") propulsion_balance_gain_ = get_double(value, "propulsion_balance_gain");
     else if (key == "amp_homeo_gain") amp_homeo_gain_ = get_double(value, "amp_homeo_gain");
     else if (key == "amp_target") amp_target_ = get_double(value, "amp_target");
     else if (key == "amp_seek_rate") amp_seek_rate_ = get_double(value, "amp_seek_rate");
     else if (key == "amp_seek_ticks") amp_seek_ticks_ = get_int(value, "amp_seek_ticks");
     else if (key == "heading_gain") heading_gain_ = get_double(value, "heading_gain");
+    else if (key == "heading_hold_gain") heading_hold_gain_ = get_double(value, "heading_hold_gain");
+    else if (key == "heading_bearing_hold_gain") heading_bearing_hold_gain_ = get_double(value, "heading_bearing_hold_gain");
     else if (key == "nav_gain") nav_gain_ = get_double(value, "nav_gain");
     else if (key == "cog_steer_gain") cog_steer_gain_ = get_double(value, "cog_steer_gain");
     else if (key == "cog_thrust_gain") cog_thrust_gain_ = get_double(value, "cog_thrust_gain");
@@ -985,9 +1033,17 @@ void MotorEPM::tick(uint64_t tick_id) {
     // tallest chassis height the body has discovered.  The body finds its own
     // ceiling (no hand-set height); the bias fights the G6DOF spring sag that the
     // joint-angle postural reflex cannot see.  Applied per-leg below the loop.
+    // Height defense is a STANDING reflex: at rest it fights the G6DOF sag to stand
+    // tall (Gate 0).  But while walking/climbing a lift bias hoists the legs off the
+    // terrain and loses traction — on an incline the belly must ride LOW to climb
+    // (measured 2026-07-23: homeo OFF clears the hump z→4.1; homeo ON winds up and
+    // stalls at ~2.6, lifting the legs off the slope).  So fade the reflex out with
+    // forward progress: rest_frac 1 at rest → 0 while cruising.  This also anti-winds-up
+    // (no integration while moving), so a wound-up bias can't accumulate on the ramp.
+    height_rest_frac_ = std::clamp(1.0f - fwd_progress_ema_ / kHeightMoveSuppVel, 0.0f, 1.0f);
     if (height_homeo_gain_ > 0.0 && chassis_h_max_ > 1e-4f) {
         float tgt = float(height_k_) * chassis_h_max_;
-        height_bias_ += float(height_homeo_gain_) * (tgt - chassis_h_ema_);
+        height_bias_ += float(height_homeo_gain_) * (tgt - chassis_h_ema_) * height_rest_frac_;
         height_bias_ = std::clamp(height_bias_, kHeightBiasMin, kHeightBiasMax);
     }
 
@@ -1040,6 +1096,74 @@ void MotorEPM::tick(uint64_t tick_id) {
         }
         if (amp_n > 0) cur_amp_ = amp_sum / float(amp_n);
     }
+
+    // ---- STUCK→EXPLORE desire: detect a sustained forward-progress stall (compliant —
+    // fwd_v EMA, no god's-eye position) and ramp a boost that amplifies the exploration
+    // channels below (explore_noise + the coord phase-search σ) so the gait discovers a
+    // push.  Self-terminating: decays the instant fwd progress resumes.  0 = off (no boost
+    // → both channels use their base scale → byte-identical).
+    // progress→COMMIT (lever C) shares this fwd_progress_ema_ stall detector (inverted).
+    // The height homeostat also reads it (to fade its lift out while moving).
+    if (stuck_explore_gain_ > 0.0 || progress_commit_gain_ > 0.0 || height_homeo_gain_ > 0.0) {
+        fwd_progress_ema_ = (1.0f - kFwdProgressAlpha) * fwd_progress_ema_
+                          + kFwdProgressAlpha * fwd_v_;
+    }
+    if (stuck_explore_gain_ > 0.0) {
+        if (fwd_progress_ema_ < kStuckVelThresh) {
+            if (stuck_ticks_ < kStuckWindowTicks * 20) ++stuck_ticks_;   // cap the counter
+        } else {
+            stuck_ticks_ = 0;
+        }
+        if (stuck_ticks_ >= kStuckWindowTicks)
+            stuck_boost_ = std::min(1.0f, stuck_boost_ + kStuckBoostRise);
+        else
+            stuck_boost_ = std::max(0.0f, stuck_boost_ - kStuckBoostDecay);
+    } else {
+        stuck_boost_ = 0.0f;   // ensure inert when the lever is off
+    }
+
+    // ---- progress→COMMIT (lever C): the INVERSE of the stall detector.  Sustained HIGH
+    // forward progress ramps commit_boost_ up; it damps exploration + adds thrust below.
+    // 0 = off → commit_boost_ pinned 0 → byte-identical.
+    if (progress_commit_gain_ > 0.0) {
+        if (fwd_progress_ema_ > kCommitVelThresh) {
+            if (commit_ticks_ < kCommitWindowTicks * 20) ++commit_ticks_;
+        } else {
+            commit_ticks_ = 0;
+        }
+        if (commit_ticks_ >= kCommitWindowTicks)
+            commit_boost_ = std::min(1.0f, commit_boost_ + kCommitBoostRise);
+        else
+            commit_boost_ = std::max(0.0f, commit_boost_ - kCommitBoostDecay);
+    } else {
+        commit_boost_ = 0.0f;
+    }
+
+    // ---- forward-FLOW homeostat (lever D): track flow magnitude + volatility so the
+    // stroke can be amplified ∝ magnitude·predictability below.  0 = off (still cheap to
+    // keep the EMAs cold; guard so it stays byte-identical when disabled).
+    if (forward_flow_gain_ > 0.0) {
+        float dev = std::abs(fwd_v_ - flow_ema_);
+        flow_ema_     = (1.0f - kFlowEmaAlpha) * flow_ema_     + kFlowEmaAlpha * fwd_v_;
+        flow_vol_ema_ = (1.0f - kFlowEmaAlpha) * flow_vol_ema_ + kFlowEmaAlpha * dev;
+    } else {
+        flow_ema_ = 0.0f; flow_vol_ema_ = 0.0f;
+    }
+
+    // ---- Shared C/D factors (computed once per tick, applied at the exploration + stroke
+    // sites below).  All 1.0 / 0.0 when both levers are off → byte-identical.
+    //   commit (C): explore_mult damps the phase-search σ + noise; stroke gets a thrust add.
+    //   flow (D):   flow_quality = magnitude·predictability; amplifies stroke ∝ flow.
+    const float commit_amt   = float(progress_commit_gain_) * commit_boost_;      // 0..3
+    const float explore_mult = std::max(0.0f, 1.0f - commit_amt);                 // C: damp exploration
+    float flow_quality = 0.0f;
+    if (forward_flow_gain_ > 0.0) {
+        flow_quality = std::clamp(flow_ema_, 0.0f, kFlowVelNorm) / kFlowVelNorm;  // magnitude 0..1
+        flow_quality /= (1.0f + kFlowVolK * flow_vol_ema_);                       // × predictability
+    }
+    const float lever_stroke_mult = (1.0f + kCommitStrokeFrac * commit_amt)       // C: thrust add
+                                   * (1.0f + float(forward_flow_gain_) * flow_quality); // D: flow amp
+    flow_quality_diag_ = flow_quality;   // for the diag block
 
     // ---- Adaptive coordination: crystallise the gait_phase offsets toward the
     // body's OWN emergent phase pattern (relative to leg 0) + a persistent probe.
@@ -1107,7 +1231,11 @@ void MotorEPM::tick(uint64_t tick_id) {
                 gait_phase_ = coord_best_phase_;
             }
             coord_best_fitness_ *= 0.99f;        // slow forget (track drift / escape optima)
-            std::normal_distribution<float> pz(0.0f, float(coord_reward_drive_));
+            // stuck→explore: enlarge the probe step when forward progress has stalled, so
+            // the search jumps OUT of a slow local optimum toward a propulsive coordination.
+            float coord_sigma = float(coord_reward_drive_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_)
+                              * explore_mult;   // progress→commit (C) damps the phase-search σ
+            std::normal_distribution<float> pz(0.0f, coord_sigma);
             for (int i = 1; i < n_legs_; ++i) {   // propose a new probe around the incumbent
                 float p = float(coord_best_phase_[i]) + pz(coord_rng_);
                 while (p >  float(M_PI)) p -= 2.0f * float(M_PI);
@@ -1151,7 +1279,16 @@ void MotorEPM::tick(uint64_t tick_id) {
     }
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
-    if (cruse_gain_ > 0.0 || cruse_rule5_gain_ > 0.0) update_cruse_state();
+    if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0) update_cruse_state();
+
+    // Propulsive-credit homeostat: group-mean credit (from last tick's per-leg
+    // updates) so a below-mean "dragging" leg can be boosted this tick.
+    if (propulsion_balance_gain_ > 0.0) {
+        float s = 0.0f; int c = 0;
+        for (int j = 0; j < n_legs_; ++j)
+            if (legs_[j].initialized) { s += legs_[j].prop_credit; ++c; }
+        prop_credit_mean_ = c ? s / float(c) : 0.0f;
+    }
 
     for (int leg = 0; leg < n_legs_; ++leg) {
         Leg& L = legs_[leg];
@@ -1314,7 +1451,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         // Sign empirically confirmed (positive height_bias raises chassis_y).
         // Post-warmup so motor babble can explore upward and discover the ceiling.
         if (!warmup && height_homeo_gain_ > 0.0 && m >= 2)
-            y[1] += kHeightLiftSign * height_bias_;
+            y[1] += kHeightLiftSign * height_bias_ * height_rest_frac_;  // fade lift out while moving
         // Cruse/Walknet inter-leg coordination — v2 SEQUENCED LIFT.  Drives hip2 AND
         // knee (they share foot-height authority; either alone is too weak — measured
         // corr(foot_y,joint)≈0.27) to actually plant/clear the foot, not just DC-bias.
@@ -1322,7 +1459,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         // neighbour plants to keep the support polygon; an unheld leg in its own swing
         // lifts clear so its hip1 forward stroke is a free swing, NOT a loaded pull
         // (the operator's swing-becomes-pull → yaw observation).
-        if (!warmup && cruse_gain_ > 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_) {
+        if (!warmup && cruse_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_) {
             int ant = cruse_anterior_[leg], con = cruse_contra_[leg];
             float hold = 0.0f;                                                // Rule 1 + Rule 3
             if (ant >= 0 && in_swing_[ant]) hold += 1.0f;                     // Rule 1: anterior swinging
@@ -1339,7 +1476,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         // Rule 5 (load distribution) — independent of the v2 lift so it can be tested
         // alone.  A STANCE leg presses its foot down ∝ how many OTHER legs are swinging
         // (taking up their shed weight) → more normal force → more friction → less scrub.
-        if (!warmup && cruse_rule5_gain_ > 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
+        if (!warmup && cruse_rule5_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
             && !in_swing_[leg]) {
             int n_sw = 0;
             for (int j = 0; j < n_legs_; ++j) if (j != leg && in_swing_[j]) ++n_sw;
@@ -1350,7 +1487,10 @@ void MotorEPM::tick(uint64_t tick_id) {
         // Persistent exploration noise (post-warmup): keeps ξ alive at fixed
         // points so HK amplifies it into oscillation instead of freezing.
         // Panic adds exploration noise on top of the persistent drive (flailing).
-        float noise_sigma = float(explore_noise_) + pe * float(panic_noise_);
+        // stuck→explore: add undirected motor noise ∝ the stall boost so the whole gait
+        // shakes loose (alongside the coord phase-search enlargement above).
+        float noise_sigma = float(explore_noise_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_) * explore_mult
+                          + pe * float(panic_noise_);   // C damps explore_noise (not panic)
         if (!warmup && noise_sigma > 0.0f) {
             std::normal_distribution<float> nz(0.0f, noise_sigma);
             for (int j = 0; j < m; ++j) y[j] += nz(L.babble_rng);
@@ -1375,7 +1515,8 @@ void MotorEPM::tick(uint64_t tick_id) {
         // leg's step phase.  stroke_signs sets the per-leg push direction
         // (parallel → forward, tangential → spin); steer is a left/right
         // skid-steer differential (FL,RL = left = +1; FR,RR = right = −1).
-        if (!warmup && (stroke_gain_ > 0.0 || steer_ != 0.0 || heading_gain_ != 0.0 || nav_gain_ != 0.0) && m >= 1) {
+        if (!warmup && (stroke_gain_ > 0.0 || steer_ != 0.0 || heading_gain_ != 0.0 || nav_gain_ != 0.0
+                        || heading_bearing_hold_gain_ != 0.0 || heading_hold_gain_ != 0.0) && m >= 1) {
             float side = (leg == 0 || leg == 2) ? 1.0f : -1.0f;   // left vs right
             float sgn  = (int(stroke_signs_.size()) == n_legs_) ? float(stroke_signs_[leg]) : 1.0f;
             // Steering = manual command + perception (steer toward target,
@@ -1395,7 +1536,17 @@ void MotorEPM::tick(uint64_t tick_id) {
             // approach into an orbit (heading_gain=−2 stalled the bearing at ~50°).
             // Gate it off during nav so the bearing controller has full authority.
             float head_term = nav_on ? 0.0f : float(heading_gain_) * yaw_rate_;
-            float steer_eff = float(steer_) + float(nav_gain_) * bearing - head_term;
+            // Heading-HOLD-to-spawn (PD go-straight when UNguided): steer to drive the
+            // dead-reckoned bearing error (P = heading_bearing_, integrated yaw rel. spawn)
+            // to zero, with yaw-rate damping (D = heading_hold_gain_·yaw_rate_ema_) for a
+            // clean, non-oscillating hold.  Routed through THIS authoritative skid-steer
+            // channel (folds into the stroke magnitude → real L/R thrust differential that
+            // TURNS the body) — not the weak additive hip1 nudge it was before.  Gated off
+            // during nav (a target owns steering then).  Both gains 0 = byte-identical off.
+            float hold_steer = nav_on ? 0.0f
+                : float(heading_bearing_hold_gain_) * (-heading_bearing_)
+                + float(heading_hold_gain_)         * (-yaw_rate_ema_);
+            float steer_eff = float(steer_) + float(nav_gain_) * bearing - head_term + hold_steer;
             // Facing-gate on the FORWARD thrust (only when a target is active):
             // walk toward what you face.  fwd ∝ tc_y (forward bearing component):
             // target ahead (tc_y→1) = full thrust; target to the side/behind = turn
@@ -1414,9 +1565,31 @@ void MotorEPM::tick(uint64_t tick_id) {
             // magnitude restores a real differential that never zeroes both sides.)
             // Panic kills the directional drive (it was futilely pushing into the
             // obstacle) — let the boosted, noisy, decoupled HK output flail instead.
-            float amp  = sgn * (float(stroke_gain_) * fwd + side * steer_eff);
+            // lever_stroke_mult folds in progress→commit thrust (C) + forward-flow amp (D);
+            // applied to the propulsion term ONLY (steer stays independent).  =1 when both off.
+            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd + side * steer_eff);
             y[0] += (1.0f - pe) * amp * std::sin(L.phase + float(stroke_phase_));
         }
+        // --- Per-leg propulsive-credit homeostat (functional L/R propulsion balance).
+        // Credit = the hip1 motion component phase-aligned with the fore-aft power
+        // stroke (a static/"dragging" leg scores ~0; an in-phase stroking leg scores
+        // high — the FUNCTIONAL contribution, not raw amplitude).  A below-group-mean
+        // leg gets a self-limiting boost in its stroke direction so it pulls its
+        // weight and L/R propulsion equalizes; the boost fades to 0 as the deficit
+        // closes.  Distinct from the refuted amplitude/velocity symmetry levers.
+        // 0 = off (byte-identical).
+        if (!warmup && propulsion_balance_gain_ > 0.0 && m >= 1 && n >= 1) {
+            float sgn2 = (int(stroke_signs_.size()) == n_legs_) ? float(stroke_signs_[leg]) : 1.0f;
+            float sref = std::sin(L.phase + float(stroke_phase_));   // power-stroke waveform
+            L.hip1_dc = (1.0f - kPropCreditAlpha) * L.hip1_dc + kPropCreditAlpha * L.x[0];
+            float instant = (L.x[0] - L.hip1_dc) * sgn2 * sref;      // in-phase propulsive stroke
+            L.prop_credit = (1.0f - kPropCreditAlpha) * L.prop_credit + kPropCreditAlpha * instant;
+            float deficit = prop_credit_mean_ - L.prop_credit;       // >0 = this leg lags the group
+            if (deficit > 0.0f)
+                y[0] += float(propulsion_balance_gain_) * deficit * sgn2 * sref;
+        }
+        // (heading-hold + bearing-hold now steer through the authoritative skid-steer
+        // channel above — steer_eff — instead of a separate weak hip1 nudge here.)
         // --- Coherent per-joint rhythmic drive: lock hip2/knee to the SAME leg phase as the
         // stroke (per-joint amplitude + offset) so the whole leg is ONE oscillator at ONE
         // frequency → the keyframe map can crystallize (the intra-leg-coherence fix). Default
@@ -1693,6 +1866,8 @@ nlohmann::json MotorEPM::snapshot_state() const {
         lj["knee_ema"]    = L.knee_ema;
         lj["amp_ema"]     = L.amp_ema;
         lj["amp_gain"]    = L.amp_gain;
+        lj["hip1_dc"]     = L.hip1_dc;
+        lj["prop_credit"] = L.prop_credit;
         lj["rest_captured"] = L.rest_captured;
         if (L.rest_captured)
             lj["rest_pos"] = std::vector<float>(L.rest_pos.data(), L.rest_pos.data() + L.rest_pos.size());
@@ -1753,6 +1928,14 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["ticks_since_reset"] = ticks_since_reset_;
     mod["reset_rate_ema"]    = reset_rate_ema_;
     mod["reset_rate_init"]   = reset_rate_init_;
+    mod["heading_bearing"]   = heading_bearing_;   // integrator (yaw_rate_ema_ is transient, this is not)
+    mod["fwd_progress_ema"]  = fwd_progress_ema_;   // stuck→explore stall detector + boost state
+    mod["stuck_ticks"]       = stuck_ticks_;
+    mod["stuck_boost"]       = stuck_boost_;
+    mod["commit_ticks"]      = commit_ticks_;       // progress→commit (C) state
+    mod["commit_boost"]      = commit_boost_;
+    mod["flow_ema"]          = flow_ema_;           // forward-flow (D) state
+    mod["flow_vol_ema"]      = flow_vol_ema_;
     return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
 }
 
@@ -1791,6 +1974,26 @@ nlohmann::json MotorEPM::diag_snapshot() const {
         j["obj_vel_active"] = on;
         j["obj_vel_weight"] = oc ? wsum / float(oc) : 0.0f;
     }
+    // Propulsive-credit homeostat: per-leg functional forward contribution + the
+    // group mean, so the L/R propulsion imbalance (the drag → spin) is observable.
+    j["prop_balance_active"] = (propulsion_balance_gain_ > 0.0);
+    j["prop_credit_mean"]    = prop_credit_mean_;
+    j["heading_hold_active"] = (heading_hold_gain_ != 0.0);
+    j["yaw_rate_ema"]        = yaw_rate_ema_;   // the heading-hold's error signal
+    j["bearing_hold_active"] = (heading_bearing_hold_gain_ != 0.0);
+    j["heading_bearing"]     = heading_bearing_; // the bearing-hold's error signal (rel. spawn, π-units)
+    j["stuck_explore_active"] = (stuck_explore_gain_ != 0.0);
+    j["fwd_progress_ema"]    = fwd_progress_ema_; // stall detector (below kStuckVelThresh ≈ stuck)
+    j["stuck_boost"]         = stuck_boost_;      // current exploration amplification (0..1)
+    j["commit_active"]       = (progress_commit_gain_ != 0.0);  // lever C
+    j["commit_boost"]        = commit_boost_;     // 0..1 (ramps when flowing → damps explore + adds thrust)
+    j["flow_active"]         = (forward_flow_gain_ != 0.0);     // lever D
+    j["flow_quality"]        = flow_quality_diag_; // magnitude·predictability (drives the flow stroke amp)
+    {
+        std::vector<float> pc(n_legs_, 0.0f);
+        for (int i = 0; i < n_legs_ && i < int(legs_.size()); ++i) pc[i] = legs_[i].prop_credit;
+        j["prop_credit"] = pc;
+    }
     // Effective per-joint postural gains actually applied this tick (postural_gain ×
     // profile).  Makes the array-vs-scalar interaction observable so a knob-turn can
     // never silently be a no-op.
@@ -1810,6 +2013,8 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["chassis_h"]     = chassis_h_;             // chassis height norm (1=target, ~0=on the ground/collision)
     j["chassis_h_ema"] = chassis_h_ema_;         // smoothed chassis height
     j["chassis_h_max"] = chassis_h_max_;         // self-discovered height ceiling
+    j["height_bias"]   = height_bias_;           // integrated lift bias (hip2)
+    j["height_rest_frac"] = height_rest_frac_;   // height-defense fade: 1 at rest → 0 while moving fwd
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
       j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much POSTURE phase-conditioning HK has learned
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cvel.norm(); ++c; }
@@ -1891,6 +2096,8 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         L.knee_ema   = lj.value("knee_ema", 0.0f);
         L.amp_ema    = lj.value("amp_ema", 0.0f);
         L.amp_gain   = lj.value("amp_gain", 1.0f);
+        L.hip1_dc    = lj.value("hip1_dc", 0.0f);
+        L.prop_credit = lj.value("prop_credit", 0.0f);
         if (lj.contains("babble_rng")) {
             std::istringstream is(lj["babble_rng"].get<std::string>()); is >> L.babble_rng;
         }
@@ -1952,6 +2159,14 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         ticks_since_reset_ = mod.value("ticks_since_reset", ticks_since_reset_);
         reset_rate_ema_    = mod.value("reset_rate_ema",    reset_rate_ema_);
         reset_rate_init_   = mod.value("reset_rate_init",   reset_rate_init_);
+        heading_bearing_   = mod.value("heading_bearing",   heading_bearing_);
+        fwd_progress_ema_  = mod.value("fwd_progress_ema",   fwd_progress_ema_);
+        stuck_ticks_       = mod.value("stuck_ticks",        stuck_ticks_);
+        stuck_boost_       = mod.value("stuck_boost",        stuck_boost_);
+        commit_ticks_      = mod.value("commit_ticks",       commit_ticks_);
+        commit_boost_      = mod.value("commit_boost",       commit_boost_);
+        flow_ema_          = mod.value("flow_ema",           flow_ema_);
+        flow_vol_ema_      = mod.value("flow_vol_ema",       flow_vol_ema_);
     }
 }
 

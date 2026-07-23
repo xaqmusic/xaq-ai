@@ -58,6 +58,12 @@ std::vector<TopicSpec> KeyframeGait::input_topics() const {
     for (auto const& t : proprio_topics_)
         v.emplace_back(t, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!bake_upright_topic_.empty())
+        v.emplace_back(bake_upright_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
+    if (!bake_contact_topic_.empty())
+        v.emplace_back(bake_contact_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     return v;
 }
 
@@ -120,6 +126,24 @@ ParamSchema KeyframeGait::params_schema() const {
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"seed", ParamMutability::ConstructionOnly, "RNG seed for the shuffle_phase ablation",
          ParamValue{int64_t(12345)}, std::nullopt, std::nullopt},
+        {"bake_upright_topic", ParamMutability::ConstructionOnly,
+         "POSTURE-VALIDITY BAKE GATE: 1-D upright ProprioToken (1=upright .. -1=inverted). Below bake_upright_min -> don't bake (learn nothing from a flipped body). Empty (with the others) = gate OFF (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"bake_contact_topic", ParamMutability::ConstructionOnly,
+         "BAKE GATE: per-leg foot-contact ProprioToken. When ALL feet are off for > bake_airborne_max_ticks (sustained airborne / wall-stuck) -> don't bake. Normal swing + brief leaps still bake. Empty = that clause off.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"bake_reset_topic", ParamMutability::ConstructionOnly,
+         "BAKE GATE: event prefix (e.g. \"events.\") — a reset/miss masks baking for bake_reset_mask_ticks (don't bake the teleport/respawn discontinuity). Empty = no reset mask.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"bake_upright_min", ParamMutability::HotMutable,
+         "Bake gate: min upright to bake (0.5 ~ allow up to 60 deg lean; below = flipped/on-side).",
+         ParamValue{0.5}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"bake_airborne_max_ticks", ParamMutability::HotMutable,
+         "Bake gate: all-feet-off longer than this (ticks) suppresses baking. Leaps under it still bake.",
+         ParamValue{int64_t(60)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
+        {"bake_reset_mask_ticks", ParamMutability::HotMutable,
+         "Bake gate: ticks after a reset/miss to suppress baking (settle the discontinuity).",
+         ParamValue{int64_t(30)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
     };
 }
 
@@ -141,6 +165,12 @@ ParamMap KeyframeGait::current_params() const {
     { std::vector<double> sp(symmetry_pairs_.begin(), symmetry_pairs_.end());
       m["symmetry_pairs"] = sp; }
     m["vel_symmetry_gain"] = vel_symmetry_gain_;
+    m["bake_upright_topic"] = bake_upright_topic_;
+    m["bake_contact_topic"] = bake_contact_topic_;
+    m["bake_reset_topic"]   = bake_reset_topic_;
+    m["bake_upright_min"]   = bake_upright_min_;
+    m["bake_airborne_max_ticks"] = int64_t(bake_airborne_max_ticks_);
+    m["bake_reset_mask_ticks"]   = int64_t(bake_reset_mask_ticks_);
     return m;
 }
 
@@ -161,6 +191,12 @@ void KeyframeGait::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "freeze_map",     [&](auto const& v){ freeze_map_    = get_bool(v, "freeze_map"); });
     apply_param(params, "publish",        [&](auto const& v){ publish_       = get_bool(v, "publish"); });
     apply_param(params, "vel_symmetry_gain", [&](auto const& v){ vel_symmetry_gain_ = get_double(v, "vel_symmetry_gain"); });
+    apply_param(params, "bake_upright_topic", [&](auto const& v){ bake_upright_topic_ = get_string(v, "bake_upright_topic"); });
+    apply_param(params, "bake_contact_topic", [&](auto const& v){ bake_contact_topic_ = get_string(v, "bake_contact_topic"); });
+    apply_param(params, "bake_reset_topic",   [&](auto const& v){ bake_reset_topic_   = get_string(v, "bake_reset_topic"); });
+    apply_param(params, "bake_upright_min",   [&](auto const& v){ bake_upright_min_   = get_double(v, "bake_upright_min"); });
+    apply_param(params, "bake_airborne_max_ticks", [&](auto const& v){ bake_airborne_max_ticks_ = get_int(v, "bake_airborne_max_ticks"); });
+    apply_param(params, "bake_reset_mask_ticks",   [&](auto const& v){ bake_reset_mask_ticks_   = get_int(v, "bake_reset_mask_ticks"); });
     apply_param(params, "symmetry_pairs", [&](auto const& v){
         auto d = get_double_vec(v, "symmetry_pairs");
         symmetry_pairs_.clear();
@@ -204,6 +240,18 @@ void KeyframeGait::on_setup(Bus* bus, ParamMap const& params) {
     for (int leg = 0; leg < nl; ++leg)
         sub_ids_.push_back(bus_->subscribe(proprio_topics_[leg], SubscriptionKind::Direct,
             [this, leg](std::string_view, MessagePtr p){ handle_proprio(leg, p); }));
+    // Posture-validity bake gate wiring (any topic present → gate ON).
+    bake_gated_ = !bake_upright_topic_.empty() || !bake_contact_topic_.empty() || !bake_reset_topic_.empty();
+    n_contact_  = nl;   // assume supported until a contact message says otherwise
+    if (!bake_upright_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(bake_upright_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_upright(p); }));
+    if (!bake_contact_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(bake_contact_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_contact(p); }));
+    if (!bake_reset_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(bake_reset_topic_, SubscriptionKind::Direct,
+            [this](std::string_view topic, MessagePtr p){ handle_reset(topic, p); }));
 }
 
 void KeyframeGait::on_param_change(std::string_view key, ParamValue const& value) {
@@ -216,6 +264,9 @@ void KeyframeGait::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "freeze_map")     freeze_map_    = get_bool(value, k);
     else if (k == "publish")        publish_       = get_bool(value, k);
     else if (k == "vel_symmetry_gain") vel_symmetry_gain_ = get_double(value, k);
+    else if (k == "bake_upright_min")   bake_upright_min_   = get_double(value, k);
+    else if (k == "bake_airborne_max_ticks") bake_airborne_max_ticks_ = get_int(value, k);
+    else if (k == "bake_reset_mask_ticks")   bake_reset_mask_ticks_   = get_int(value, k);
     else throw std::invalid_argument("KeyframeGait: param '" + k + "' is not HotMutable");
 }
 
@@ -265,6 +316,26 @@ void KeyframeGait::handle_proprio(int leg, MessagePtr payload) {
     }
 }
 
+void KeyframeGait::handle_upright(MessagePtr payload) {
+    auto p = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (p && p->values.size() > 0) upright_ = p->values[0];
+}
+
+void KeyframeGait::handle_contact(MessagePtr payload) {
+    auto p = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!p) return;
+    int n = 0;
+    for (int i = 0; i < int(p->values.size()); ++i) if (p->values[i] > 0.5f) ++n;
+    n_contact_ = n;
+}
+
+void KeyframeGait::handle_reset(std::string_view topic, MessagePtr /*payload*/) {
+    // topic e.g. "events.reset" / "events.miss" — mask baking after a discontinuity.
+    std::string t(topic);
+    if (t.find("reset") != std::string::npos || t.find("miss") != std::string::npos)
+        reset_mask_ticks_ = bake_reset_mask_ticks_;
+}
+
 void KeyframeGait::tick(uint64_t tick_id) {
     int nl = int(proprio_topics_.size());
     if (!phi_seen_) return;
@@ -284,26 +355,42 @@ void KeyframeGait::tick(uint64_t tick_id) {
             : bin_of(phi_);
 
     const float a = float(keyframe_alpha_);
-    // Deviation of the current posture from the accumulated keyframe = the crystallization
-    // signal (falls as a recurring phase-posture crystallizes; stays high if it washes out).
-    // The POSTURE deviation alone feeds bin_dev_ema_/self_precision (the established gate); the
-    // velocity map rides that same gate and tracks its own aggregate TLE for observability only.
-    if (bin_count_[b] > 0) {
-        float dev = (wb - keyframe_[b]).norm();
-        keyframe_tle_ema_ = (1.0f - a) * keyframe_tle_ema_ + a * dev;
-        bin_dev_ema_[b]   = (1.0f - a) * bin_dev_ema_[b]   + a * dev;
-        float vdev = (wv - vel_keyframe_[b]).norm();
-        vel_keyframe_tle_ema_ = (1.0f - a) * vel_keyframe_tle_ema_ + a * vdev;
+    // ---- Posture-validity BAKE GATE: explore freely (the HK loop is untouched), but
+    // LEARN only from states consistent with a well-functioning agent.  Update the
+    // airborne/reset counters, then decide if this tick's posture is valid to bake. ----
+    if (reset_mask_ticks_ > 0) --reset_mask_ticks_;
+    all_off_ticks_ = (n_contact_ == 0) ? (all_off_ticks_ + 1) : 0;   // some feet off is fine; ALL off (sustained) isn't
+    bool bake_valid = true;
+    if (bake_gated_) {
+        bool upright_ok = bake_upright_topic_.empty() || (upright_ > float(bake_upright_min_));
+        bool airborne   = !bake_contact_topic_.empty() && (all_off_ticks_ > bake_airborne_max_ticks_);
+        bool masked     = !bake_reset_topic_.empty()   && (reset_mask_ticks_ > 0);
+        bake_valid = upright_ok && !airborne && !masked;   // flipped / sustained-airborne / mid-reset → skip
     }
-    // Cross-cycle EMA at matching phase (init on first visit).  Bake on RECURRENCE only.
-    if (!freeze_map_) {
-        if (bin_count_[b] == 0) { keyframe_[b] = wb; vel_keyframe_[b] = wv; }
-        else {
-            keyframe_[b]     = (1.0f - a) * keyframe_[b]     + a * wb;
-            vel_keyframe_[b] = (1.0f - a) * vel_keyframe_[b] + a * wv;
+    bake_valid_diag_ = bake_valid;
+    if (!bake_valid) ++bake_suppress_count_;
+    // The WHOLE update (deviation EMAs + bake + visit count) is gated — an invalid tick
+    // contributes nothing to the map or its consistency estimate (drive/publish below is not).
+    if (bake_valid) {
+        // Deviation of the current posture from the accumulated keyframe = the crystallization
+        // signal (falls as a recurring phase-posture crystallizes; stays high if it washes out).
+        if (bin_count_[b] > 0) {
+            float dev = (wb - keyframe_[b]).norm();
+            keyframe_tle_ema_ = (1.0f - a) * keyframe_tle_ema_ + a * dev;
+            bin_dev_ema_[b]   = (1.0f - a) * bin_dev_ema_[b]   + a * dev;
+            float vdev = (wv - vel_keyframe_[b]).norm();
+            vel_keyframe_tle_ema_ = (1.0f - a) * vel_keyframe_tle_ema_ + a * vdev;
         }
+        // Cross-cycle EMA at matching phase (init on first visit).  Bake on RECURRENCE only.
+        if (!freeze_map_) {
+            if (bin_count_[b] == 0) { keyframe_[b] = wb; vel_keyframe_[b] = wv; }
+            else {
+                keyframe_[b]     = (1.0f - a) * keyframe_[b]     + a * wb;
+                vel_keyframe_[b] = (1.0f - a) * vel_keyframe_[b] + a * wv;
+            }
+        }
+        ++bin_count_[b];
     }
-    ++bin_count_[b];
 
     // Left-right symmetry prior on the VELOCITY map (anti-circling): equalize the per-joint
     // RMS push magnitude of paired legs so the propulsive pump can't grow a yaw bias that Cvel
@@ -400,6 +487,12 @@ nlohmann::json KeyframeGait::diag_snapshot() const {
     j["shuffle_phase"] = shuffle_phase_;
     j["freeze_map"]    = freeze_map_;
     j["publish"]       = publish_;
+    // Posture-validity bake gate observability.
+    j["bake_gated"]      = bake_gated_;
+    j["bake_valid"]      = bake_valid_diag_;      // was this tick's posture baked?
+    j["upright"]         = upright_;
+    j["all_off_ticks"]   = all_off_ticks_;        // consecutive ticks with ALL feet off
+    j["bake_suppressed"] = bake_suppress_count_;  // cumulative ticks baking was skipped
     return j;
 }
 
@@ -416,13 +509,20 @@ nlohmann::json KeyframeGait::snapshot_state() const {
     }
     return nlohmann::json{{"version", 2}, {"n_bins", n_bins_},
                           {"keyframe_tle", keyframe_tle_ema_},
-                          {"vel_keyframe_tle", vel_keyframe_tle_ema_}, {"bins", bins}};
+                          {"vel_keyframe_tle", vel_keyframe_tle_ema_},
+                          {"all_off_ticks", all_off_ticks_},
+                          {"reset_mask_ticks", reset_mask_ticks_},
+                          {"bake_suppress_count", bake_suppress_count_},
+                          {"bins", bins}};
 }
 
 void KeyframeGait::restore_state(nlohmann::json const& s) {
     if (!s.contains("bins")) return;
     keyframe_tle_ema_     = s.value("keyframe_tle", keyframe_tle_ema_);
     vel_keyframe_tle_ema_ = s.value("vel_keyframe_tle", vel_keyframe_tle_ema_);
+    all_off_ticks_        = s.value("all_off_ticks", all_off_ticks_);
+    reset_mask_ticks_     = s.value("reset_mask_ticks", reset_mask_ticks_);
+    bake_suppress_count_  = s.value("bake_suppress_count", bake_suppress_count_);
     auto const& bins = s.at("bins");
     for (int b = 0; b < n_bins_ && b < int(bins.size()); ++b) {
         auto const& bj = bins[b];
