@@ -36,9 +36,16 @@ const _SLIDERS: Array = [
 	{"key": "postural_gain",     "label": "postural_gain  (damp/hold)", "min": 0.0,  "max": 2.0,  "step": 0.05},
 	# steering
 	{"key": "heading_gain",      "label": "heading_gain (go-straight)", "min": -3.0, "max": 3.0,  "step": 0.05},
+	{"key": "heading_hold_gain", "label": "heading_hold (yaw-rate)",    "min": -3.0, "max": 3.0,  "step": 0.05},
+	{"key": "heading_bearing_hold_gain", "label": "heading→spawn (go-straight, POS)", "min": 0.0, "max": 12.0, "step": 0.5},
+	{"key": "stuck_explore_gain", "label": "stuck→explore (propulsion)", "min": 0.0, "max": 5.0,  "step": 0.25},
+	{"key": "progress_commit_gain", "label": "progress→commit (drive)", "min": 0.0, "max": 3.0,  "step": 0.25},
+	{"key": "forward_flow_gain",  "label": "fwd-flow (homeokinetic)",   "min": 0.0, "max": 2.0,  "step": 0.1},
+	{"key": "propulsion_balance_gain", "label": "prop_bal (leg catch-up)", "min": 0.0, "max": 2.0, "step": 0.05},
 	# coordination / agency (reward-free homeokinetic drives, not RL)
 	{"key": "cruse_gain",        "label": "cruse_gain  (leg coord)",    "min": 0.0,  "max": 0.50, "step": 0.02},
 	{"key": "cruse_rule3_weight","label": "cruse_rule3  (contra load)", "min": 0.0,  "max": 2.0,  "step": 0.1},
+	{"key": "cruse_rule5_gain",  "label": "cruse_rule5 (load→grip)",    "min": 0.0,  "max": 0.30, "step": 0.02},
 	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
 	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
 	{"key": "coord_lat_penalty", "label": "agency_lat  (anti-crab)",    "min": 0.0,  "max": 1.0,  "step": 0.05},

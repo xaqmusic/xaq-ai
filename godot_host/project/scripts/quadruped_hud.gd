@@ -382,8 +382,6 @@ func _process(_delta: float) -> void:
 	var calib_hint: String = ""
 	if calib != null:
 		calib_hint = "   [C] calibrate: %s" % ("ON" if calib_active else "off")
-		if calib_active:
-			calib_hint += "   [N/P] step  [A] auto"
 	var mtest_v: Variant = body.get("_motor_test_mode")
 	var mtest_active: bool = (mtest_v != null and _as_bool(mtest_v))
 	var mtest_hint: String = ""
@@ -395,8 +393,20 @@ func _process(_delta: float) -> void:
 	var hud_v: Variant = body.get("hud_hidden")
 	var hud_is_hidden: bool = _as_bool(hud_v)
 	var hud_hint: String = "   [H] hud: %s" % ("hidden" if hud_is_hidden else "ON")
-	var hint_line: String = "%s%s%s%s%s%s   [`] or [F1] toggle graph   [ESC] quit" % [
-		space_hint, ragdoll_hint, calib_hint, mtest_hint, panels_hint, hud_hint]
+	# 2026-07-22 — live gym swap (KEY_1 arena / KEY_2 corridor); shows the active gym.
+	var gym_v: Variant = body.get("_gym_mode_active")
+	var gym_hint: String = ""
+	if gym_v != null:
+		var gm: String = str(gym_v)
+		if gm == "" or gm == "donut": gm = "arena"
+		gym_hint = "   [1/2] gym: %s" % gm
+	# 2026-07-23 — [P] walking-path trail (red X every metre travelled, both gyms).
+	var trail_v: Variant = body.get("_walking_trail")
+	var path_hint: String = ""
+	if trail_v != null and is_instance_valid(trail_v):
+		path_hint = "   [P] path: %s" % ("ON" if (trail_v as Node3D).visible else "hidden")
+	var hint_line: String = "%s%s%s%s%s%s%s%s   [`] or [F1] toggle graph   [ESC] quit" % [
+		space_hint, ragdoll_hint, calib_hint, mtest_hint, panels_hint, hud_hint, gym_hint, path_hint]
 	if hud_is_hidden:
 		# Hidden mode: render ONLY the hint line so the user keeps the
 		# keyboard reference but loses the diagnostic text + notifications.

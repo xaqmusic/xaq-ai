@@ -943,6 +943,13 @@ const LOOM_RES_V: int = 12                    # bumped: target subtends ~6° tal
 const LOOM_FOV_H_RAD: float = 3.1415926536   # 180° horizontal — fly-style panoramic
 const LOOM_FOV_V_RAD: float = 0.7853981634   # 45° vertical
 const LOOM_RAY_LEN: float = 8.0              # m — pyramid arena ~5 m diag
+const GROUND_CLEARANCE_RANGE: float = 0.3    # m — downward belly ToF max range (the physical sensor reach)
+const GROUND_CLEARANCE_STAND: float = 0.06   # m — standing belly clearance; the published signal is
+                                             # NORMALIZED by this (not by the ToF range) so it SATURATES at
+                                             # ~standing, exactly like chassis_y_norm.  Without this the
+                                             # height reflex's max-relative target runs away (belly pushed to
+                                             # 0.19 m → topple, 2930 falls).  A self-model calibration
+                                             # constant (the robot's own standing height) — still compliant.
 const LOOM_RECOMPUTE_EVERY: int = 6           # ticks; ~10 Hz at 60 Hz physics
 											  # 288 rays × 10 Hz = ~2880 rays/sec, cheap
 var _last_target_loom: float = 0.0
@@ -976,6 +983,21 @@ var _done: bool = false
 var step_in_episode: int = 0
 var episode_alive_ticks: int = 0
 var tick_counter: int = 0
+# Controlled belly-on-ramp test: tick at which to auto-drop the robot onto the
+# hump (env OGMA_PICRAWLER_TELEPORT_RAMP_AT; -1 = off).  Lets a headless run
+# develop the gait first (e.g. 3600 = 1 min) THEN drop, to test recovery.
+var _teleport_ramp_at: int = -1
+# Optional repeated re-teleport window (env EVERY/UNTIL) — re-fire every N ticks up
+# to UNTIL, to SUSTAIN an anomaly (e.g. keep re-flipping so it can't self-right).
+var _teleport_every: int = 0
+var _teleport_until: int = -1
+# Deferred teleport target (Vector3 ground point) applied at the TOP of the next
+# physics frame — transform writes from _input handlers get clobbered by the
+# physics step in the same frame, so KEY_3/KEY_4 must defer.  null = nothing pending.
+var _pending_teleport = null
+# Ramp-debug: last raw belly rangefinder reading (metres), cached at publish so the
+# diag can log the rangefinder output + homeostat state on the hump.
+var _dbg_gc_raw: float = 0.0
 var episode_index: int = 0
 var _episode_fell: bool = false
 var _instant_pause_tick: bool = false
@@ -1892,6 +1914,14 @@ func _ready() -> void:
 	if quit_env != "":
 		_quit_after_ticks = quit_env.to_int()
 		print("PicrawlerBody: OGMA_QUIT_AFTER_TICKS=%d" % _quit_after_ticks)
+	var tramp_env: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_RAMP_AT")
+	if tramp_env != "":
+		_teleport_ramp_at = tramp_env.to_int()
+		print("PicrawlerBody: OGMA_PICRAWLER_TELEPORT_RAMP_AT=%d" % _teleport_ramp_at)
+	var tev: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_EVERY")
+	if tev != "": _teleport_every = tev.to_int()
+	var tun: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_UNTIL")
+	if tun != "": _teleport_until = tun.to_int()
 	if OS.get_environment("OGMA_PICRAWLER_YAW_PROBE") == "1":
 		_yaw_probe_enabled = true
 	var fcb_env: String = OS.get_environment("OGMA_PICRAWLER_FORCE_COGNITIVE_BIAS")
@@ -2041,6 +2071,13 @@ func _ready() -> void:
 		"float32[1]: bucket 0..3 for RR leg target alignment (creative R4)", true)
 	brain.register_source("FeetY", "reality.proprio.feet_y",
 		"float32[4]: per-leg foot-Y height (FL, FR, RL, RR) — low = planted, high = lifted", true)
+	# 2026-07-22 — Markov-blanket-compliant posture sensors (replace absolute Y).
+	brain.register_source("FootContact", "reality.proprio.foot_contact",
+		"float32[4]: per-leg TRUE foot-contact (1=touching ground/obstacle, 0=airborne) from the foot's physics contact monitor — a hardware contact switch, NOT an absolute-Y threshold.", true)
+	brain.register_source("GroundClearance", "reality.proprio.ground_clearance",
+		"float32[1]: downward belly ToF/ultrasonic — normalized [0,1] distance from the belly to the ground beneath (0 = belly ON a surface / high-centered; higher = held up). Egocentric replacement for absolute chassis world-Y.", true)
+	brain.register_source("Upright", "reality.proprio.upright",
+		"float32[1]: chassis up-vector alignment with gravity (1 = upright, 0 = on its side, -1 = inverted) from the IMU. Gates keyframe baking on posture validity (don't learn from a flipped body).", true)
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
 	# against MAX_SERVO_TORQUE. 12-D vector ordered hip1[0..3], hip2[0..3],
 	# knee[0..3] matching the existing `Joints` topic convention. Published
@@ -2537,7 +2574,21 @@ func _resolve_env() -> void:
 # ---------------------------------------------------------------------------
 # World — minimal flat floor
 # ---------------------------------------------------------------------------
+# World geometry lives under a WorldRoot container so the gym can be swapped
+# live (KEY_1 = arena / KEY_2 = corridor) — freeing WorldRoot and rebuilding
+# drops the SAME robot + brain (an experienced agent) into a new scenario
+# WITHOUT a scene reload (the brain stays in memory, fully continuous).
+var _world_root: Node3D = null
+var _gym_mode_active: String = ""
+var _gym_mode_override: String = ""   # set by the KEY_1/KEY_2 hotkeys; wins over config/env
+
 func _build_world() -> void:
+	_world_root = Node3D.new()
+	_world_root.name = "WorldRoot"
+	add_child(_world_root)
+	_rebuild_world_contents()
+
+func _rebuild_world_contents() -> void:
 	var floor_body := StaticBody3D.new()
 	floor_body.collision_layer = _LAYER_WORLD
 	floor_body.collision_mask  = _LAYER_BODY
@@ -2557,7 +2608,19 @@ func _build_world() -> void:
 	fmat.albedo_color = Color(0.3, 0.35, 0.3, 1.0)
 	fmesh.set_surface_override_material(0, fmat)
 	floor_body.add_child(fmesh)
-	add_child(floor_body)
+	_world_root.add_child(floor_body)
+
+	# Gym mode select.  The live override (KEY_1/KEY_2 hotkeys) wins; else the
+	# ExperimentConfig resolution: launcher metadata.gym_mode > OGMA_PICRAWLER_GYM
+	# env > "" default.  Empty / "arena" / "donut" = the legacy donut arena below.
+	# "corridor" = the +Z trench curriculum (flat runway -> hump -> rumble ->
+	# pyramids) inside self-centering 30 deg walls.  See _build_corridor().
+	var mode: String = _gym_mode_override if _gym_mode_override != "" \
+		else ExperimentConfig.resolve_picrawler_gym_mode("").to_lower()
+	_gym_mode_active = mode
+	if mode == "corridor":
+		_build_corridor()
+		return
 
 	# Concentric reference rings on the floor.  Visual-only (no collision)
 	# to make body motion legible — distance from origin at a glance.
@@ -2594,7 +2657,7 @@ func _build_floor_rings() -> void:
 		m.mesh = torus
 		m.position = Vector3(0, ring_y, 0)
 		m.set_surface_override_material(0, ring_mat)
-		add_child(m)
+		_world_root.add_child(m)
 	# Small center marker so the origin is unambiguous at any zoom.
 	var center := MeshInstance3D.new()
 	var center_mesh := CylinderMesh.new()
@@ -2606,7 +2669,7 @@ func _build_floor_rings() -> void:
 	var center_mat := StandardMaterial3D.new()
 	center_mat.albedo_color = Color(0.95, 0.55, 0.30, 1.0)   # orange-red origin dot
 	center.set_surface_override_material(0, center_mat)
-	add_child(center)
+	_world_root.add_child(center)
 
 func _build_terrain() -> void:
 	# 45° wedges along the four floor edges (x=±10, z=±10).  Each wedge is
@@ -2678,7 +2741,7 @@ func _build_terrain() -> void:
 			# Wedge runs along X (i.e. it's on a +z or -z floor edge).
 			t.basis = Basis(Vector3(1,0,0), -axis_dir.z * deg_to_rad(45.0))
 		body.transform = t
-		add_child(body)
+		_world_root.add_child(body)
 
 	# Low pyramids in the outer donut (r between 3.5 m and 9.5 m).
 	# Pure-deterministic placement (no Godot RNG dependency — empirically
@@ -2784,9 +2847,413 @@ func _build_terrain() -> void:
 		pmesh.rotation = Vector3(0, deg_to_rad(45.0), 0)
 		pyr.add_child(pmesh)
 		pyr.transform.origin = Vector3(px, 0.0, pz)
-		add_child(pyr)
+		_world_root.add_child(pyr)
 
 	print("PicrawlerBody: terrain built — 4 edge ramps + %d pyramids" % placed.size())
+
+# ---------------------------------------------------------------------------
+# Corridor gym (OGMA_PICRAWLER_GYM=corridor) — a directed 1-D curriculum.
+#
+# Runs along +Z — the robot's TRUE forward: the eyes / front legs are on the +Z
+# chassis face and the locomotor forward axis fwd_v = (vx,vz)·(sin yaw, cos yaw)
+# is +Z at spawn (yaw=0).  (The IMU comment at ~1998 says "+X"; the locomotion
+# math says +Z — this gym follows the BODY, so the robot spawns facing DOWN the
+# trench and fwd_v directly measures corridor progress.)  It can travel only +Z:
+# a back wall seals the -Z end and two 30 deg walls form a self-centering
+# trench — drift into a wall and the slope + gravity nudge the body back toward
+# the middle.  That passive centering stands in for the not-yet-working heading
+# reflex.  Down the corridor the terrain ramps in difficulty: flat runway ->
+# gentle 10 deg hump -> half-buried rumble bumps -> a small pyramid field.
+# Forward distance (body diag `z`) is then a clean 1-D capability signal; the
+# zone reached = difficulty conquered.
+#
+# Deterministic placement (no RNG) -> paired-seed A/B parity, as _build_terrain.
+# Friction matches the live env: the floor + every obstacle use
+# _make_contact_mat() (mu=1.5, as the arena floor + pyramids); the sloped walls
+# use _make_wedge_mat() (mu=3.0, as the arena's containment ramps) so a grazing
+# body follows the slope instead of tumbling.
+# ---------------------------------------------------------------------------
+func _build_corridor() -> void:
+	var chan_half:    float = 0.75    # half-width of the flat channel floor -> 1.5 m walkable
+	var corridor_len: float = 9.5     # +Z extent of the curriculum (fits the 20x20 floor)
+	var slope_deg:    float = 30.0    # self-centering trench-wall angle
+	var wall_face:    float = 1.2     # sloped-face length (rise = 1.2*sin30 ~ 0.60 m)
+	var wall_thick:   float = 0.30    # wall box thickness (buried below the floor)
+	var back_wall_z:  float = -0.5    # -Z seal, just behind spawn
+	var back_wall_h:  float = 0.50
+
+	# Reset pyramid bookkeeping (corridor XOR donut — never both).
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+
+	var wall_color: Color = Color(0.25, 0.30, 0.25, 1.0)
+	var th: float = deg_to_rad(slope_deg)
+	var wall_len: float = corridor_len + 1.5           # span in Z (runway -> past pyramids + margin)
+	var wall_cz:  float = corridor_len * 0.5           # center of that span
+	# The back wall + channel-spanning obstacles (hump, rumble bumps) extend to
+	# +/-thru_half in X so they clip ALL THE WAY THROUGH the angled side walls
+	# (whose top edge sits at x ~ chan_half + wall_face*cos(slope)).  Without
+	# this the obstacle ends flush at the wall's inner base while the wall leans
+	# away above it, leaving a corner pocket a foot can wedge into.
+	var thru_half: float = chan_half + wall_face * cos(th) + 0.15
+
+	# Difficulty lever (0 = trivial .. 1 = hard) — scales obstacle HEIGHTS so the
+	# corridor matches what the current gait can surmount.  Resolved via
+	# ExperimentConfig: launcher spinbox > config metadata.gym_difficulty >
+	# OGMA_PICRAWLER_GYM_DIFFICULTY env > 0.3 default.  Walls/back-wall unaffected.
+	var diff: float = clamp(ExperimentConfig.resolve_picrawler_gym_difficulty(0.3), 0.0, 1.0)
+
+	# --- Two self-centering trench walls at x = +/-chan_half (run along Z) ---
+	# Build each from its inner-bottom edge (world x=+/-chan_half, y=0): the top
+	# face rises along u_world (up + outward) at slope_deg; the surface normal n
+	# points up + inward, so a body on the ramp slides back toward the center.
+	for xside in [1.0, -1.0]:
+		var n:         Vector3 = Vector3(-xside * sin(th), cos(th), 0.0)   # surface normal (up + inward)
+		var u_world:   Vector3 = Vector3( xside * cos(th), sin(th), 0.0)   # up-slope (up + outward)
+		var p_edge:    Vector3 = Vector3(xside * chan_half, 0.0, wall_cz)  # inner-bottom edge midpoint
+		var center:    Vector3 = p_edge + u_world * (wall_face * 0.5) - n * (wall_thick * 0.5)
+		var long_axis: Vector3 = Vector3(0, 0, 1)                          # wall runs along +Z
+		var z_axis:    Vector3 = long_axis.cross(n).normalized()
+		var wbasis:    Basis   = Basis(long_axis, n, z_axis)   # columns = images of local X/Y/Z
+		var body := StaticBody3D.new()
+		body.collision_layer = _LAYER_WORLD
+		body.collision_mask  = _LAYER_BODY
+		body.physics_material_override = _make_wedge_mat()
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(wall_len, wall_thick, wall_face)   # local X=long(Z), Y=thick, Z=face
+		var cs := CollisionShape3D.new()
+		cs.shape = bs
+		body.add_child(cs)
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = bs.size
+		mi.mesh = bm
+		var wm := StandardMaterial3D.new()
+		wm.albedo_color = wall_color
+		wm.roughness = 0.9
+		mi.set_surface_override_material(0, wm)
+		body.add_child(mi)
+		body.transform = Transform3D(wbasis, center)
+		_world_root.add_child(body)
+
+	# --- Back wall: a low vertical seal so the robot can only go +Z ---
+	var back := StaticBody3D.new()
+	back.collision_layer = _LAYER_WORLD
+	back.collision_mask  = _LAYER_BODY
+	back.physics_material_override = _make_contact_mat()
+	var bcs := CollisionShape3D.new()
+	var bbs := BoxShape3D.new()
+	bbs.size = Vector3(thru_half * 2.0, back_wall_h, 0.1)   # clip through both side walls
+	bcs.shape = bbs
+	back.add_child(bcs)
+	var bmi := MeshInstance3D.new()
+	var bbm := BoxMesh.new()
+	bbm.size = bbs.size
+	bmi.mesh = bbm
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = wall_color
+	bmi.set_surface_override_material(0, bmat)
+	back.add_child(bmi)
+	back.transform.origin = Vector3(0.0, back_wall_h * 0.5, back_wall_z)
+	_world_root.add_child(back)
+
+	# --- Zone 1: gentle hump (up then down), spanning the channel.
+	# Triangular prism: base z in [2.0, 4.0] (1.0 m run each side), apex height
+	# scales with difficulty (0.025..0.16 m -> slope ~1.4..9.1 deg) at z=3.0.
+	# PrismMesh visual (rotated 90 deg so its ridge runs across X, slopes face
+	# +/-Z) + matching 6-vert convex hull.
+	var hump_cz:   float = 3.0
+	var hump_half: float = 1.0                          # half base run (1.0 m in Z each side)
+	var hump_h:    float = lerp(0.025, 0.16, diff)      # peak; slope = atan(peak/run)
+	var hump := StaticBody3D.new()
+	hump.collision_layer = _LAYER_WORLD
+	hump.collision_mask  = _LAYER_BODY
+	hump.physics_material_override = _make_contact_mat()
+	var hverts := PackedVector3Array()
+	hverts.append(Vector3(-thru_half, -hump_h * 0.5, -hump_half))
+	hverts.append(Vector3( thru_half, -hump_h * 0.5, -hump_half))
+	hverts.append(Vector3( thru_half, -hump_h * 0.5,  hump_half))
+	hverts.append(Vector3(-thru_half, -hump_h * 0.5,  hump_half))
+	hverts.append(Vector3(-thru_half,  hump_h * 0.5, 0.0))
+	hverts.append(Vector3( thru_half,  hump_h * 0.5, 0.0))
+	var hconvex := ConvexPolygonShape3D.new()
+	hconvex.points = hverts
+	var hcs := CollisionShape3D.new()
+	hcs.shape = hconvex
+	hump.add_child(hcs)
+	var hmi := MeshInstance3D.new()
+	var prism := PrismMesh.new()
+	prism.size = Vector3(hump_half * 2.0, hump_h, thru_half * 2.0)
+	hmi.mesh = prism
+	hmi.rotation = Vector3(0, deg_to_rad(90.0), 0)   # ridge across X, slopes face +/-Z
+	var hmat := StandardMaterial3D.new()
+	hmat.albedo_color = Color(0.30, 0.33, 0.28, 1.0)
+	hmat.roughness = 0.9
+	hmi.set_surface_override_material(0, hmat)
+	hump.add_child(hmi)
+	hump.transform.origin = Vector3(0.0, hump_h * 0.5, hump_cz)
+	_world_root.add_child(hump)
+
+	# --- Zone 2: rumble strips — half-buried cylinders across the channel.
+	# Axis along X (span wall-to-wall).  Exposed height scales with difficulty;
+	# the cylinder is sunk so only `bump_exposed` pokes above the floor (well
+	# under a radius, so it is actually climbable).  Every 0.5 m in z in
+	# [4.25, 6.25] -> 5 bumps.
+	var bump_r:       float = 0.06
+	var bump_exposed: float = lerp(0.012, 0.065, diff)   # height above the floor
+	var bump_cy:      float = bump_exposed - bump_r        # cylinder center Y (< 0 = sunk)
+	var n_bumps: int = 0
+	var bz: float = 4.25
+	while bz <= 6.30:
+		var bump := StaticBody3D.new()
+		bump.collision_layer = _LAYER_WORLD
+		bump.collision_mask  = _LAYER_BODY
+		bump.physics_material_override = _make_contact_mat()
+		var bcyl := CylinderShape3D.new()
+		bcyl.radius = bump_r
+		bcyl.height = thru_half * 2.0   # span through both walls
+		var bcs2 := CollisionShape3D.new()
+		bcs2.shape = bcyl
+		bump.add_child(bcs2)
+		var bmi2 := MeshInstance3D.new()
+		var bcm := CylinderMesh.new()
+		bcm.top_radius = bump_r
+		bcm.bottom_radius = bump_r
+		bcm.height = thru_half * 2.0
+		bcm.radial_segments = 12
+		bmi2.mesh = bcm
+		var rmat := StandardMaterial3D.new()
+		rmat.albedo_color = Color(0.40, 0.32, 0.22, 1.0)
+		rmat.roughness = 0.95
+		bmi2.set_surface_override_material(0, rmat)
+		bump.add_child(bmi2)
+		# Lay the cylinder on its side (axis Y -> X), sunk so only bump_exposed shows.
+		bump.transform = Transform3D(Basis(Vector3(0, 0, 1), deg_to_rad(90.0)), Vector3(0.0, bump_cy, bz))
+		_world_root.add_child(bump)
+		n_bumps += 1
+		bz += 0.5
+
+	# --- Zone 3: pyramid field — small climbable pyramids, z in [6.5, 9.5].
+	# Deterministic staggered placement across the channel (golden-ratio
+	# quasi-random sizes, as the arena).  Kept clear of the +/-chan_half walls.
+	var phi_inv: float = 0.6180339887498949
+	var n_pyr: int = 7
+	for i in range(n_pyr):
+		var pz: float = 6.9 + float(i) * 0.38
+		var px: float = 0.35 if (i % 2 == 0) else -0.35
+		if i % 3 == 2:
+			px = 0.0
+		var bw_t: float = fmod(float(i) * phi_inv * 2.0, 1.0)
+		var base_w: float = 0.5 + bw_t * 0.35
+		var h_t: float = fmod(float(i) * phi_inv * 3.0, 1.0)
+		var height: float = (0.10 + h_t * 0.22) * lerp(0.6, 1.25, diff)
+		_add_pyramid(px, pz, base_w, height)
+
+	print("PicrawlerBody: corridor gym built (+Z, difficulty=%.2f) — hump %.3f m + %d bumps %.3f m + %d pyramids" % [diff, hump_h, n_bumps, bump_exposed, _pyramid_xz_positions.size()])
+
+# Build one square pyramid (convex-hull collision + 4-radial-segment cone mesh)
+# at (px, pz) and register it in the pyramid bookkeeping arrays so nav /
+# engagement / reset-avoidance behave the same as the arena.  Factored out of
+# the corridor builder; mirrors the inline arena pyramid in _build_terrain.
+func _add_pyramid(px: float, pz: float, base_w: float, height: float) -> void:
+	var pyr := StaticBody3D.new()
+	pyr.collision_layer = _LAYER_WORLD
+	pyr.collision_mask  = _LAYER_BODY
+	pyr.physics_material_override = _make_contact_mat()
+	var verts := PackedVector3Array()
+	var half: float = base_w * 0.5
+	verts.append(Vector3(-half, 0.0, -half))
+	verts.append(Vector3(+half, 0.0, -half))
+	verts.append(Vector3(+half, 0.0, +half))
+	verts.append(Vector3(-half, 0.0, +half))
+	verts.append(Vector3(0.0, height, 0.0))
+	var convex := ConvexPolygonShape3D.new()
+	convex.points = verts
+	var pcs := CollisionShape3D.new()
+	pcs.shape = convex
+	pyr.add_child(pcs)
+	var pmesh := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.bottom_radius = base_w * 0.5 * sqrt(2.0)   # circumscribed radius
+	cm.top_radius    = 0.001
+	cm.height        = height
+	cm.radial_segments = 4
+	cm.rings = 1
+	pmesh.mesh = cm
+	pmesh.position = Vector3(0, height * 0.5, 0)
+	var this_pyr_mat := StandardMaterial3D.new()
+	this_pyr_mat.albedo_color = Color(0.35, 0.30, 0.22, 1.0)
+	this_pyr_mat.roughness = 0.95
+	pmesh.set_surface_override_material(0, this_pyr_mat)
+	pmesh.rotation = Vector3(0, deg_to_rad(45.0), 0)
+	pyr.add_child(pmesh)
+	pyr.transform.origin = Vector3(px, 0.0, pz)
+	_world_root.add_child(pyr)
+	# Bookkeeping parity with the arena donut.
+	_pyramid_xz_positions.append(Vector2(px, pz))
+	_pyramid_xz_radii.append(base_w * 0.7071068)
+	_pyramid_meshes.append(pmesh)
+	_pyramid_default_mats.append(this_pyr_mat)
+	_pyramid_engagement_counts.append(0)
+
+# Live gym swap (KEY_1 = arena / KEY_2 = corridor).  Frees WorldRoot and rebuilds
+# the environment around the SAME robot + brain — no scene reload, so the learned
+# model stays fully continuous (an EXPERIENCED agent dropped into a new scenario).
+# The robot is teleported to the origin spawn so it starts fresh in the new world.
+func _switch_gym(mode: String) -> void:
+	if mode == _gym_mode_active:
+		_ui_notify("[gym] already in %s" % mode)
+		return
+	_gym_mode_override = mode
+	# Tear down the world (WorldRoot owns floor + rings + all obstacles/pyramids).
+	# remove_child detaches it from the tree IMMEDIATELY (no one-frame double world),
+	# then queue_free deallocates it safely.
+	if _world_root != null:
+		remove_child(_world_root)
+		_world_root.queue_free()
+		_world_root = null
+	# Pyramid bookkeeping is rebuilt by the gym builders; clear stale entries.
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+	_nearest_pyramid_idx = -1
+	# Rebuild the world in the new mode.
+	_world_root = Node3D.new()
+	_world_root.name = "WorldRoot"
+	add_child(_world_root)
+	_rebuild_world_contents()
+	# Drop the experienced robot at the new world's origin spawn (brain untouched;
+	# _do_hard_reset only publishes events.reset for Gate-0 masking, no relearning).
+	_pending_reset_offset = Vector3.ZERO
+	_do_hard_reset()
+	print("PicrawlerBody: [gym] switched -> %s" % _gym_mode_active)
+	_ui_notify("[gym] switched -> %s" % _gym_mode_active)
+
+# Controlled belly-on-ramp test (KEY_3, or headless env OGMA_PICRAWLER_TELEPORT_RAMP_AT=<tick>).
+# Drops the EXPERIENCED robot onto the corridor hump (z=3) to test the height
+# reflex's high-center recovery WITHOUT relying on the gait to navigate there.
+# Rigid-translates ALL body parts (preserves the current developed pose + the
+# brain's learned model in memory), zeroes velocity, and positions the body above
+# the peak so it drops onto the slope.  Announces a reset for Gate-0 masking only
+# (no relearning).  Corridor-only (the hump doesn't exist in the arena).
+func _teleport_to_ramp() -> void:
+	if _gym_mode_active != "corridor":
+		_ui_notify("[teleport] the ramp only exists in the corridor gym (press 2)")
+		return
+	var tx: float = 0.0
+	var tz: float = 3.0   # hump peak by default
+	var xz: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_XZ")   # "x,z" to target a wall etc.
+	if xz != "":
+		var parts := xz.split(",")
+		if parts.size() == 2:
+			tx = parts[0].to_float(); tz = parts[1].to_float()
+	# Find the surface height at (tx,tz) so tall targets (walls) drop ONTO the surface.
+	var surf_y: float = 0.0
+	var ss := get_world_3d().direct_space_state
+	if ss != null:
+		var q := PhysicsRayQueryParameters3D.new()
+		q.from = Vector3(tx, 2.0, tz); q.to = Vector3(tx, -1.0, tz); q.collision_mask = _LAYER_WORLD
+		var h := ss.intersect_ray(q)
+		if not h.is_empty():
+			surf_y = h.position.y
+	_pending_teleport = Vector3(tx, surf_y, tz)   # applied next physics frame
+
+# Drop the EXPERIENCED robot (brain + current pose preserved) onto a ground point.
+# Rigid-translates every part so the chassis lands ~0.30 m ABOVE `ground` (the
+# surface height under it, so it clears tall obstacles) and falls onto it; zeroes
+# velocity; announces a reset for Gate-0 masking only (no relearning).  MUST be
+# called from the physics step (see _pending_teleport) or the write is clobbered.
+func _teleport_to(ground: Vector3) -> void:
+	# Optional FLIP (env OGMA_PICRAWLER_TELEPORT_FLIP=1): rotate the whole assembly
+	# 180° about X → drops it upside-down (a controlled INVALID posture for the
+	# keyframe bake-gate A/B).  Rigid transform about the chassis pivot.
+	var flip: bool = OS.get_environment("OGMA_PICRAWLER_TELEPORT_FLIP") == "1"
+	var drop: Vector3 = Vector3(ground.x, ground.y + (0.35 if flip else 0.30), ground.z)
+	var pivot: Vector3 = _chassis.global_transform.origin
+	var rot: Basis = Basis(Vector3(1, 0, 0), PI) if flip else Basis.IDENTITY
+	var parts: Array = [_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array)
+	for b in parts:
+		b.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		b.freeze = true
+	for b in parts:
+		var rel: Vector3 = rot * (b.global_transform.origin - pivot)
+		b.global_transform = Transform3D(rot * b.global_transform.basis, drop + rel)
+		b.linear_velocity = Vector3.ZERO
+		b.angular_velocity = Vector3.ZERO
+	for b in parts:
+		b.freeze = false
+	if brain != null:
+		brain.publish_event("reset", 1.0)
+	print("PicrawlerBody: [teleport] dropped the experienced robot at (%.2f, %.2f)%s tick %d" % [
+		ground.x, ground.z, "  FLIPPED" if flip else "", tick_counter])
+	_ui_notify("[teleport] dropped%s at (%.1f, %.1f)" % [" (flipped)" if flip else "", ground.x, ground.z])
+
+# --- Mouse-guided teleport placement (KEY_4) --------------------------------
+# Enter placement mode: the mouse projects a marker onto the floor; LEFT-CLICK
+# drops the experienced robot there.  A general tool — reposition the agent to
+# any spot to probe recovery / behaviour from arbitrary states.
+var _place_mode: bool = false
+var _place_marker: Node3D = null
+var _place_target: Vector3 = Vector3.ZERO
+
+func _set_place_mode(on: bool) -> void:
+	_place_mode = on
+	if _place_marker == null and on:
+		_place_marker = _make_place_marker()
+		add_child(_place_marker)
+	if _place_marker != null:
+		_place_marker.visible = on
+	_ui_notify("[place] mouse-teleport %s%s" % [
+		"ON — move mouse, LEFT-CLICK to drop" if on else "off", "  (4 to toggle)"])
+
+func _make_place_marker() -> Node3D:
+	var root := Node3D.new()
+	root.name = "TeleportMarker"
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.85, 0.1, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.7, 0.0)
+	for ang in [45.0, -45.0]:   # two crossed bars = an X on the floor
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.5, 0.008, 0.06)
+		mi.mesh = bm
+		mi.rotation = Vector3(0, deg_to_rad(ang), 0)
+		mi.set_surface_override_material(0, mat)
+		root.add_child(mi)
+	return root
+
+func _place_ground_from_mouse() -> Variant:
+	# Raycast the mouse into the scene and return the SURFACE point under the cursor
+	# (floor OR the top of a ramp/pyramid), so the marker sits ON the geometry and
+	# the drop lands on whatever's there.  Falls back to the y=0 plane past geometry.
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return null
+	var mpos: Vector2 = get_viewport().get_mouse_position()
+	var from: Vector3 = cam.project_ray_origin(mpos)
+	var dir: Vector3 = cam.project_ray_normal(mpos)
+	var space := get_world_3d().direct_space_state
+	if space != null:
+		var query := PhysicsRayQueryParameters3D.new()
+		query.from = from
+		query.to = from + dir * 100.0
+		query.collision_mask = _LAYER_WORLD          # floor + obstacles (not the robot)
+		var hit := space.intersect_ray(query)
+		if not hit.is_empty():
+			return hit.position
+	# Nothing hit — project onto the y=0 floor plane.
+	if abs(dir.y) < 1e-5:
+		return null
+	var t: float = -from.y / dir.y
+	if t < 0.0:
+		return null
+	return from + dir * t
 
 # ---------------------------------------------------------------------------
 # Body construction — chassis + 4 legs
@@ -2955,6 +3422,12 @@ func _build_leg(leg_index: int) -> void:
 	# Darkest shade of leg_color for lower segment.
 	var lower := _make_capsule(LOWER_MASS, LEG_RADIUS * 0.8, L3, lower_center,
 							   leg_color.darkened(0.5), lower_dir)
+	# Markov-compliant foot-contact sensor: enable true physics contact reporting
+	# on the foot (lower leg) so we can sense TOUCH (= a hardware contact switch),
+	# not an absolute-Y threshold.  Legs mask _LAYER_WORLD only, so any reported
+	# collision is genuine ground/obstacle contact.
+	lower.contact_monitor = true
+	lower.max_contacts_reported = 4
 	_lowers.append(lower)
 
 	# Knee joint — same basis as hip2 (axis = leg-local lateral).
@@ -3301,6 +3774,23 @@ func _lock_six_dof(joint: Generic6DOFJoint3D, free_axis: String,
 # Physics loop
 # ---------------------------------------------------------------------------
 func _input(event: InputEvent) -> void:
+	# Mouse-guided teleport placement — handled BEFORE the key-only gate below.
+	# Move the mouse to slide the floor marker; left-click drops the robot there.
+	if _place_mode:
+		if event is InputEventMouseMotion:
+			var g = _place_ground_from_mouse()
+			if g != null:
+				_place_target = g
+				if _place_marker != null:
+					_place_marker.global_position = g + Vector3(0, 0.012, 0)   # float just above the surface
+			get_viewport().set_input_as_handled()
+			return
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			# Defer the actual drop to the physics step (input-frame writes get clobbered).
+			_pending_teleport = _place_target
+			_set_place_mode(false)
+			get_viewport().set_input_as_handled()
+			return
 	# R toggle on _input (fires before any Control consumer).  SPACE on
 	# _unhandled_input below (matches quadruped's working pattern; R via
 	# _input + SPACE via _input together broke after the first reset —
@@ -3450,6 +3940,25 @@ func _input(event: InputEvent) -> void:
 		# hint line when true.
 		hud_hidden = not hud_hidden
 		print("PicrawlerBody: [H] hud_hidden = %s" % hud_hidden)
+	elif key == KEY_P:
+		# 2026-07-23 — toggle the walking-path trail (red X every metre travelled,
+		# both gyms).  Node3D.visible hides the node + all spawned marks at once.
+		var t := _walking_trail as Node3D
+		if t != null and is_instance_valid(t):
+			var shown: bool = t.call("toggle_shown")
+			print("PicrawlerBody: [P] path_trail = %s" % shown)
+	elif key == KEY_1:
+		# Live gym swap — drop the experienced robot (brain intact) into the ARENA (donut).
+		_switch_gym("arena")
+	elif key == KEY_2:
+		# Live gym swap — drop the experienced robot (brain intact) into the CORRIDOR trench.
+		_switch_gym("corridor")
+	elif key == KEY_3:
+		# Controlled belly-on-ramp test — drop the experienced robot onto the corridor hump.
+		_teleport_to_ramp()
+	elif key == KEY_4:
+		# Mouse-guided teleport placement — X follows the mouse, left-click to drop.
+		_set_place_mode(not _place_mode)
 	elif key == KEY_V:
 		# 2026-06-13 — toggle the loom/vision ray overlay (camera-placement debug).
 		_ray_overlay_on = not _ray_overlay_on
@@ -3478,6 +3987,11 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if brain == null or not brain.is_brain_ready():
 		return
+	# Apply a deferred teleport (KEY_3 / KEY_4-click / env) HERE in the physics step
+	# so the transform writes stick — input-frame writes get clobbered by the solver.
+	if _pending_teleport != null:
+		_teleport_to(_pending_teleport)
+		_pending_teleport = null
 	# Turbo budget — exit the process cleanly when either:
 	#   (a) OGMA_QUIT_AFTER_TICKS is reached, OR
 	#   (b) the run is already _done (max_steps hit + reset_mode=continuous
@@ -3632,6 +4146,26 @@ func _step_one() -> void:
 
 	tick_counter += 1
 	step_in_episode += 1
+	# Controlled belly-on-ramp test: auto-drop onto the hump at the configured tick
+	# (headless; e.g. after the gait develops).  One-shot.
+	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
+		_teleport_to_ramp()
+	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \
+			and tick_counter <= _teleport_until and (tick_counter - _teleport_ramp_at) % _teleport_every == 0:
+		_teleport_to_ramp()   # re-fire to sustain the anomaly
+	# Keyframe map probe (env OGMA_PICRAWLER_KF_PROBE=1) — measures map drift +
+	# bake suppression across an anomaly for the bake-gate A/B.
+	if tick_counter % 300 == 0 and brain != null and OS.get_environment("OGMA_PICRAWLER_KF_PROBE") == "1":
+		var snap = JSON.parse_string(str(brain.get_module_snapshot("keyframe_gait")))
+		if snap is Dictionary:
+			var mnorm: float = 0.0
+			if snap.has("bins"):
+				for bj in snap["bins"]:
+					if typeof(bj) == TYPE_DICTIONARY and bj.has("kf"):
+						for val in bj["kf"]: mnorm += abs(float(val))
+			print("KF_PROBE t=%d up=%.2f keyframe_tle=%.3f suppressed=%s map_norm=%.3f" % [
+				tick_counter, _chassis.global_transform.basis.y.y,
+				float(snap.get("keyframe_tle", -1.0)), str(snap.get("bake_suppress_count", -1)), mnorm])
 
 	# 2026-06-08 — periodic Cruse trace V2 (toggled via env var or panel).
 	if _cruse_trace_enabled and tick_counter % _CRUSE_TRACE_INTERVAL_TICKS == 0:
@@ -3982,6 +4516,30 @@ func _step_one() -> void:
 	for i in range(4):
 		feet_y_arr.append(_lowers[i].global_transform.origin.y - L3 * 0.5)
 	brain.publish_proprio(feet_y_arr, "feet_y")
+
+	# ---- Markov-blanket-compliant posture sensing (2026-07-22) ----------------
+	# The old height reflex read ABSOLUTE chassis world-Y (chassis_y_norm) — god's-
+	# eye state no physical picrawler could sense.  These two topics are what the
+	# REAL robot has: per-leg foot-contact switches + a downward belly rangefinder.
+	# (1) foot_contact: TRUE physics touch per leg from the foot's contact monitor.
+	var foot_contact_arr := PackedFloat64Array()
+	for i in range(4):
+		foot_contact_arr.append(1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0)
+	brain.publish_proprio(foot_contact_arr, "foot_contact")
+	# (2) ground_clearance: body-down ToF/ultrasonic distance from the belly to the
+	# nearest ground surface, normalized [0,1].  ~0 = belly ON a surface (dragging /
+	# high-centered); higher = belly held up off the ground.  Replaces absolute Y.
+	_dbg_gc_raw = _compute_ground_clearance()   # cache raw metres for the ramp-debug diag
+	var clearance_arr := PackedFloat64Array()
+	clearance_arr.append(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0))
+	brain.publish_proprio(clearance_arr, "ground_clearance")
+	# (3) upright: the chassis up-vector's alignment with gravity (basis.y.y): 1 =
+	# perfectly upright, 0 = on its side, -1 = inverted.  A real IMU (accelerometer
+	# gravity vector) gives this — compliant, always on.  Used to gate keyframe
+	# baking on "am I in a valid posture" (don't learn from a flipped body).
+	var upright_arr := PackedFloat64Array()
+	upright_arr.append(_chassis.global_transform.basis.y.y)
+	brain.publish_proprio(upright_arr, "upright")
 
 	# 2026-06-03 — R1a per-leg foot-contact bucket signals (PremotorAI /
 	# Premotor bucket_context_topic).  Discrete swing(0)/stance(1) bit per
@@ -6556,6 +7114,38 @@ func _select_random_pyramid_target() -> void:
 	print("PicrawlerBody: walk_over_there target → pyramid #%d at xz=(%.2f, %.2f)" % [
 		walk_target_idx, walk_target_pos.x, walk_target_pos.y])
 
+func _compute_ground_clearance() -> float:
+	# Markov-compliant downward rangefinder (a belly-mounted ToF / ultrasonic).
+	# Casts along the chassis's OWN down axis (body-relative, like a real sensor on
+	# the tilting belly) from the belly surface to the nearest WORLD surface, and
+	# returns the distance in metres (GROUND_CLEARANCE_RANGE if nothing is in range).
+	# Masks _LAYER_WORLD only, so it passes THROUGH the robot's own legs (_LAYER_BODY)
+	# and reads true ground clearance.  Egocentric — no absolute world coordinate.
+	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space_state == null or _chassis == null:
+		return GROUND_CLEARANCE_RANGE
+	var down: Vector3 = -_chassis.global_transform.basis.y          # body-down
+	# Cast from the chassis CENTRE (above the belly), not the belly itself: if the
+	# belly rests ON a ramp/wall the belly-origin ray starts on the surface and
+	# intersect_ray misses it (hit_from_inside defaults false) → it read max range
+	# and the reflex thought "up high" → stuck on the belly (the observed bug).
+	# Origin: chassis centre raised a further 2 cm along body-up, so the ray always
+	# starts with clear space above whatever the belly rests on (per the operator's
+	# note) and fires down THROUGH the chassis interior — it can never clip into the
+	# obstacle.  belly is CHASSIS_Y/2 below centre → total sensor-to-belly = that + 2cm.
+	var sensor_up: float = CHASSIS_Y * 0.5 + 0.02
+	var origin: Vector3 = _chassis.global_transform.origin + (-down) * 0.02
+	var query := PhysicsRayQueryParameters3D.new()
+	query.from = origin
+	query.to = origin + down * (GROUND_CLEARANCE_RANGE + CHASSIS_Y)
+	query.collision_mask = _LAYER_WORLD
+	query.hit_from_inside = true   # detect the surface even if the origin is inside/on a collider
+	var hit := space_state.intersect_ray(query)
+	if hit.is_empty():
+		return GROUND_CLEARANCE_RANGE
+	# Sensor-to-surface distance minus the sensor-to-belly offset = belly clearance.
+	return max(0.0, origin.distance_to(hit.position) - sensor_up)
+
 func _compute_target_loom() -> float:
 	# Phase H1 V6 — proxy looming: count rays in a forward FOV grid that
 	# hit the active target pyramid.  Returns a single float ∈ [0, 1].
@@ -7368,6 +7958,27 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	#  #1 heading regulation — yaw + body-frame outward unit vector;
 	#  #3 obstacle adaptation — nearest-pyramid surface distance + per-EPM TLE.
 	line["heading_yaw"]              = snappedf(_last_yaw, 0.001)
+	# fwd_v — body-frame forward speed (same projection the IMU feeds the brain,
+	# MotorEPM.cpp reads it as the thrust/controllability signal).  Emitted for the
+	# seed-avg harness's DIRECT propulsion/anti-scrub metric (mean fwd_v).
+	line["fwd_v"]                    = snappedf(
+		Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(
+			Vector2(sin(_last_yaw), cos(_last_yaw))), 0.001)
+	# ---- RAMP DEBUG: belly rangefinder + height-homeostat state (2026-07-23) ----
+	# gc_raw = raw belly ToF clearance (m); gc_norm = normalized signal the brain sees
+	# (ground_clearance); cy_norm = the OLD god's-eye chassis_y_norm (absolute-Y) for
+	# comparison. h_ema/h_max/h_bias pulled from MotorEPM's snapshot = the homeostat's
+	# smoothed height, self-discovered ceiling, and the integrated lift bias driving hip2.
+	line["gc_raw"]  = snappedf(_dbg_gc_raw, 0.0001)
+	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
+	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
+		if _ms is Dictionary and _ms.has("module"):
+			var _mm = _ms["module"]
+			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
+			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
+			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
 	line["radial_compass"]           = [snappedf(_last_radial_compass.x, 0.001),
 										snappedf(_last_radial_compass.y, 0.001)]
 	line["target_compass"]           = [snappedf(_last_target_compass.x, 0.001),
