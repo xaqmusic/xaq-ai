@@ -244,6 +244,12 @@ private:
     // (strong AND steady fwd_v).  flow_vol_ema_ is the volatility (mean-abs-deviation of
     // fwd_v); the 1/(1+k·vol) factor rewards predictable flow, not raw speed — the
     // homeokinetic heart.  Continuous (no threshold), egocentric.  0 = off.
+    // --- STANCE-LIFT (belly-up while walking): a knee bias on PLANTED (stance) legs only
+    // — raises the chassis off the feet it can push against (traction preserved, unlike
+    // hip2 lift which rotates the feet off the ground) while swing legs cycle freely (no
+    // DC clamp on the rhythm).  Held constant (NOT faded) so the belly rides high during
+    // fast flat walking to protect the chassis.  0 = off.  Sign set empirically.
+    double  stance_lift_gain_    = 0.0;
     double  forward_flow_gain_   = 0.0;         // max stroke amplification at ideal (strong+steady) flow (0 = off)
     float   flow_ema_            = 0.0f;        // EMA of fwd_v (forward-flow magnitude)
     float   flow_vol_ema_        = 0.0f;        // EMA of |fwd_v − flow_ema_| (flow volatility = un-predictability)

@@ -208,6 +208,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"forward_flow_gain", ParamMutability::HotMutable,
          "forward-FLOW homeostat (lever D, homeokinesis applied to locomotion): amplify stroke thrust ∝ the QUALITY of forward flow = magnitude · predictability (strong AND steady fwd_v). A predictability weight 1/(1+k·volatility) rewards smooth forward flow, not raw speed — the homeokinetic heart (predictable sensorimotor flow is intrinsically sought). Continuous (no threshold), self-easing when flow turns erratic. Egocentric. = max stroke amplification at ideal flow; 0 = off.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"stance_lift_gain", ParamMutability::HotMutable,
+         "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"coord_probe_ticks", ParamMutability::HotMutable,
          "window (ticks) per agency-reward probe; fitness measured over its back half (after the gait settles to the new offsets). ~240 = 4 s.",
          ParamValue{240}, ParamValue{60}, ParamValue{1200}},
@@ -398,6 +401,7 @@ ParamMap MotorEPM::current_params() const {
     m["stuck_explore_gain"] = stuck_explore_gain_;
     m["progress_commit_gain"] = progress_commit_gain_;
     m["forward_flow_gain"]  = forward_flow_gain_;
+    m["stance_lift_gain"]   = stance_lift_gain_;
     m["coord_probe_ticks"]  = coord_probe_ticks_;
     m["coord_stab_penalty"] = coord_stab_penalty_;
     m["coord_lat_penalty"]  = coord_lat_penalty_;
@@ -496,6 +500,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "stuck_explore_gain", [&](auto const& v){ stuck_explore_gain_ = get_double(v, "stuck_explore_gain"); });
     apply_param(params, "progress_commit_gain", [&](auto const& v){ progress_commit_gain_ = get_double(v, "progress_commit_gain"); });
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
+    apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
     apply_param(params, "coord_probe_ticks", [&](auto const& v){ coord_probe_ticks_ = get_int(v, "coord_probe_ticks"); });
     apply_param(params, "coord_stab_penalty", [&](auto const& v){ coord_stab_penalty_ = get_double(v, "coord_stab_penalty"); });
     apply_param(params, "coord_lat_penalty", [&](auto const& v){ coord_lat_penalty_ = get_double(v, "coord_lat_penalty"); });
@@ -886,6 +891,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "stuck_explore_gain") stuck_explore_gain_ = get_double(value, "stuck_explore_gain");
     else if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
+    else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "coord_probe_ticks") coord_probe_ticks_ = get_int(value, "coord_probe_ticks");
     else if (key == "coord_stab_penalty") coord_stab_penalty_ = get_double(value, "coord_stab_penalty");
     else if (key == "coord_lat_penalty") coord_lat_penalty_ = get_double(value, "coord_lat_penalty");
@@ -1279,7 +1285,7 @@ void MotorEPM::tick(uint64_t tick_id) {
     }
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
-    if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0) update_cruse_state();
+    if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0 || stance_lift_gain_ != 0.0) update_cruse_state();
 
     // Propulsive-credit homeostat: group-mean credit (from last tick's per-leg
     // updates) so a below-mean "dragging" leg can be boosted this tick.
@@ -1483,6 +1489,14 @@ void MotorEPM::tick(uint64_t tick_id) {
             float load = float(cruse_rule5_gain_) * float(n_sw);
             y[1]     += load;    // +hip2 = press foot down (load for grip)
             y[m - 1] += -load;   // knee extends down with it
+        }
+        // STANCE-LIFT (belly-up while walking): a constant KNEE bias on PLANTED legs
+        // only — raise the chassis off the feet it can push against without touching the
+        // swing legs' rhythm.  Knee-only (no hip2 → no foot-lift traction loss).  Sign
+        // set empirically (which knee dir raises the chassis on a planted foot).
+        if (!warmup && stance_lift_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
+            && !in_swing_[leg]) {
+            y[m - 1] += float(stance_lift_gain_);
         }
         // Persistent exploration noise (post-warmup): keeps ξ alive at fixed
         // points so HK amplifies it into oscillation instead of freezing.
@@ -1988,6 +2002,7 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["commit_active"]       = (progress_commit_gain_ != 0.0);  // lever C
     j["commit_boost"]        = commit_boost_;     // 0..1 (ramps when flowing → damps explore + adds thrust)
     j["flow_active"]         = (forward_flow_gain_ != 0.0);     // lever D
+    j["stance_lift_active"]  = (stance_lift_gain_ != 0.0);      // knee stance-lift (belly-up)
     j["flow_quality"]        = flow_quality_diag_; // magnitude·predictability (drives the flow stroke amp)
     {
         std::vector<float> pc(n_legs_, 0.0f);

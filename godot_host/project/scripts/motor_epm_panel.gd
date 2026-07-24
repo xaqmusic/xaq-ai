@@ -46,6 +46,7 @@ const _SLIDERS: Array = [
 	{"key": "cruse_gain",        "label": "cruse_gain  (leg coord)",    "min": 0.0,  "max": 0.50, "step": 0.02},
 	{"key": "cruse_rule3_weight","label": "cruse_rule3  (contra load)", "min": 0.0,  "max": 2.0,  "step": 0.1},
 	{"key": "cruse_rule5_gain",  "label": "cruse_rule5 (load→grip)",    "min": 0.0,  "max": 0.30, "step": 0.02},
+	{"key": "stance_lift_gain",  "label": "stance_lift (belly-up knee)", "min": -1.5, "max": 1.5, "step": 0.1},
 	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
 	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
 	{"key": "coord_lat_penalty", "label": "agency_lat  (anti-crab)",    "min": 0.0,  "max": 1.0,  "step": 0.05},
