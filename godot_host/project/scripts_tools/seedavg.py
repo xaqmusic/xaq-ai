@@ -10,7 +10,11 @@ Usage:  python3 seedavg.py <config_basename.json> [n_seeds] [max_steps] [difficu
 import json, math, os, subprocess, sys, statistics, concurrent.futures as cf
 
 PROJ = "/home/xaqmusic/xaq-ai/godot_host/project"
-SP   = "/tmp/claude-1000/-home-xaqmusic-xaq-ai/bafa8ee8-d32b-4c11-a95d-b82a24945708/scratchpad"
+# Scratch dir for the per-seed body logs. Defaults to a stable tmp dir; override with
+# SEEDAVG_OUT=<dir> (e.g. an agent session scratchpad). Must NOT be a hardcoded
+# session path — those go stale and the runs then fail to write.
+SP   = os.environ.get("SEEDAVG_OUT", "/tmp/xaq_seedavg")
+os.makedirs(SP, exist_ok=True)
 
 def run_one(cfg, seed, max_steps, difficulty, extra):
     out = f"{SP}/sa_{os.path.splitext(cfg)[0]}_s{seed}.log"
