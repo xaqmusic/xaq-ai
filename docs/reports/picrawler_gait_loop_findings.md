@@ -369,6 +369,21 @@ stabilizer) and goes straight (0.47 turns, 0 falls).
 **+65 % distance** (10.05 m vs 6.10), fairly straight (0.83 turns), RR participates — but it *relocates*
 the asymmetry (RL skids), costs stability (2 falls), and is fragile (every tuning knob → circling).
 
+> **⚠️ CORRECTION (2026-07-25) — read this before citing the +65 %.** Here "walk" / "walk-LS" means
+> `the_picrawler_motor_epm_cpgwalk.json` (see "Final tuned gait" above) — the **open-loop CPG servo
+> sequencer that was REJECTED** one day earlier on UI observation (chassis collision 15.6 % vs 3.3 %,
+> "flopping fish"). It is the only config carrying this phasing, and it carries `rhythm_gains` with **no
+> `cpg_embed`**. So the +65 % is *the sequencer's* speed, measured on a body already judged
+> non-viable — and the operator's recollection of the behaviour is the decisive datum: it **looked
+> sequenced and paddle-like, low on aliveness.** This section carried the number forward without
+> re-flagging that, which is how it later got mis-recorded as a banked speed lever.
+>
+> **The lesson is one this document already teaches, recurring one section later:** distance certified a
+> degenerate paddling behaviour. *Coherent ≠ emergent; fast fwd_v ≠ walking* — and neither is far.
+> **Lateral-sequence phasing has never been tested on the emergent `embed` base**; isolating it from the
+> open-loop drive is a legitimate open experiment, judged on chassis height and adaptation, starting from
+> zero. See [`picrawler_lever_ledger.md`](picrawler_lever_ledger.md) §2.
+
 **The deep gap — both closed-loop stabilization reflexes are broken:**
 - **Active-balance (vestibular)** is **inert by default headless** (the body's `publish_tilt` `@export`
   defaults *false*; the brain-config `metadata.publish_tilt:true` never sets the *body* export → tilt
@@ -384,8 +399,10 @@ asymmetric tripod-skid *is* the stable straight solution; the reflexes that shou
 closed-loop heading/attitude control are inert or mis-tuned. **`embed` remains the best straight+stable
 gait** (only config with 0 falls + low turns + traversal). The real engineering lever is a **working
 closed-loop heading/balance controller** (a redesign, not a knob) — likely the prerequisite for both a
-symmetric gait *and* the faster walk. Lateral-sequence walk (+65 %) is a speed lever for once stability
-is solved.
+symmetric gait *and* the faster walk. ~~Lateral-sequence walk (+65 %) is a speed lever for once stability
+is solved.~~ **Retracted 2026-07-25** — that framing banks a number measured on the rejected open-loop
+sequencer (see the correction above). Phasing on the *emergent* base is an untested experiment, not a
+pending win. *(The heading controller called for here was subsequently built: bearing-hold P+7.)*
 
 **Measurement gaps surfaced:** (a) **headless ≠ UI** — `publish_tilt` is off in headless but may be on
 via the launcher, so the balance reflex (and thus stability) differs between headless A/Bs and UI

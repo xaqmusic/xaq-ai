@@ -1,5 +1,11 @@
 # AGENTS.md — orientation for coding agents
 
+> **Start with [`CLAUDE.md`](CLAUDE.md).** This file covers repo layout, naming, and the
+> generic build. CLAUDE.md covers *how to actually build in this project* — the rewrite
+> rule (the design habit this framework requires and that a coding agent's defaults get
+> wrong), the A/B protocol, and the picrawler build/run recipe. Then
+> [`docs/brain_building_doctrine.md`](docs/brain_building_doctrine.md) for the method.
+
 ## Naming: `ami_ogma` == `ogma` == xaq
 
 xaq began as an internal project codenamed **AMI-Ogma** ("ogma" /
@@ -44,6 +50,3 @@ pip install -e python/xaq_core -e python/xaq && pytest python/xaq/tests
 
 - Contributions are under Apache-2.0 with DCO sign-off (`git commit -s`). See
   [CONTRIBUTING.md](CONTRIBUTING.md).
-- The bio-mimetic audio encoder is developed separately (private); audio work
-  here builds on the generic STFT path or plugs in via the `xaq.encoders`
-  entry-point group. Do not add proprietary audio code to this repo.

@@ -16,6 +16,53 @@ goal-stumbling is cheating. The bar is *reasoning*.
 
 ---
 
+## 0.5 The rewrite rule — how to turn a wanted behavior into a legal build
+
+*Everything below this section says what NOT to do. This section says what to do instead.
+It is the positive form of the whole doctrine, and it is the step most often skipped.*
+
+The universal wrong instinct — for a human engineer and for a coding agent alike — is
+*"I want behavior X, so I will write something that produces X."* That yields a script:
+it works once, generalizes to nothing, cannot improve, and cannot be de-scaffolded. The
+correction:
+
+> **Never implement a behavior. Implement the error the behavior minimizes.**
+
+Given a desired behavior X:
+
+1. **Name the error X descends.** What prediction, held by which module, would be *less
+   wrong* if X happened? If X is not the descent direction of some module's own error, you
+   are writing a trajectory, not a brain — stop.
+2. **Check the SENSORY channel before designing any POLICY** (§2.1). Does an egocentric
+   observation actually carry the signal that error needs? If not, **the fix is a new
+   sensor — a new blanket channel — not a smarter policy.** A hidden state the blanket
+   carries no observation of cannot be reached by a better policy, only stumbled onto.
+3. **Give the owning module the observation AND the objective — never the motion.** A
+   drive, a reflex, or a soft predictive target the controller descends toward; never a
+   trajectory, a joint bias, or a schedule (§2.4: objective, not injection).
+4. **Gate the term by the state it exploits — the gate is the design; the magnitude is
+   only tuning.** An ungated bias fights the loop it rides on; the same term, gated on the
+   state that makes it valid, is absorbed by the existing rhythm.
+5. **Ship it gain-0-guarded and A/B it** (§8) — off must be byte-identical.
+
+**Three worked examples, all of which began as the wrong instinct** (legged build, 2026-07):
+
+| Goal | The script instinct (wrong) | What worked, and why |
+|---|---|---|
+| Hold a heading | a steering script / waypoint follower | **PD on the dead-reckoned OWN yaw** (integrated egocentric rotation — Markov-compliant, no external compass) routed through the *authoritative* locomotion channel. Straightness 0.05→0.53. Step 1: the error was "my believed bearing vs my intended bearing," which the agent can measure itself. |
+| Climb a ridge the body high-centres on | a climb policy; imposing inter-leg timing (Cruse rules) | **A new sensory channel** — a belly-mounted rangefinder — plus removing a homeostat windup that fought locomotion. Step 2 was the whole answer: this looked like a policy problem and was a **missing-observation** problem. The imposed leg-timing was refuted twice (flat *and* incline). |
+| Get the belly off the ground | a scripted lift; a constant knee bias | **A stance-gated knee tuck** — the bias applied only to *planted* legs (swing legs untouched). A blind DC knee bias destroys the gait; **the stance-gating is the entire trick** (step 4). Belly clearance doubled, ~20 % faster, zero falls, and it still cleared the ridge. |
+
+**The through-line — LEARNED cooperates, IMPOSED fights.** Across the whole legged build,
+every mechanism that let the body *discover* was promoted, and every mechanism that
+*dictated to* the body failed in one of three signatures: **chaos, collision, or
+stiffness.** When a contextual/learned form and a commanded form are both available, the
+commanded one is the one that will be refuted. This is the compressed statement of §5
+(imposed rhythms), §4 (teacher-distillation), and §6 (tuned constants) — three faces of the
+same error.
+
+---
+
 ## 1. Prime directive — always be predicting
 
 Every module is a **predictive model**. The EPM's dual-TLE (forward + backward
@@ -94,6 +141,14 @@ ever touches the world through this interface.
   bearing) is what moved eats. Improving a policy is wasted effort if the observation it needs never
   crosses the blanket. (Corollary to the honesty test: a *missing* channel and a *smuggled* channel
   are the two blanket failures — one starves inference, the other fakes it.)
+  **Independently re-confirmed on a SECOND creature (2026-07-23, legged).** A body that high-centred
+  on a ridge looked like a locomotion-policy failure; several policies (imposed inter-leg timing,
+  stuck→explore, a forward-flow homeostat) were built and all refuted. The actual fix was a **new
+  blanket channel** — a belly-mounted rangefinder giving an egocentric ground-clearance observation,
+  replacing a god's-eye chassis height that was blind to belly grounding and could not represent
+  terrain at all. Two creatures, two modalities, same verdict: **check the sensory channel BEFORE
+  designing a policy.** Because it now holds across creatures, treat this as a first-order rule
+  (§0.5 step 2), not a special case.
 
 ### 2.2 How expected free energy is actually scored — the arbiter's honest ledger
 
@@ -254,6 +309,18 @@ each ALONE. Let them become emergently complementary.**
 
 ## 5. Proven substrate patterns — reuse, don't reinvent
 
+- **Add DRIVES, REFLEXES and OBJECTIVES that motion EMERGES from — never scripted
+  TRAJECTORIES.** The operational form of "learned cooperates, imposed fights" (§0.5).
+  A term that specifies *what to achieve* is absorbed and improved by the loops below it;
+  a term that specifies *what to do* fights them. Imposing inter-leg timing on an emergent
+  gait was refuted twice; the same energy spent as a *predictive target* was promoted.
+- **Gate a bias by the state that makes it valid — the gate IS the design.** An always-on
+  additive term rides on top of the loop and fights it; the identical term, gated on the
+  state it is meant to exploit, is absorbed by the existing rhythm and compounds with it.
+  Proven 2026-07-24: a constant knee-tuck bias destroyed a working gait, while the *same
+  bias gated to planted (stance) legs only* — leaving the swing phase untouched — raised
+  the body clear of the ground, moved ~20 % faster, and cost nothing elsewhere. When a
+  bias fails, ask what state should have gated it before concluding the idea is dead.
 - **Layered, additive construction — "strange loops" (Friston).** A closed sensorimotor
   loop, once it works, is FOUNDATIONAL substrate — it is **never disabled**. Build the next
   layer ON it; do not replace it or switch it off. The brain grows in layers and every
@@ -379,6 +446,69 @@ recurs at every layer.
   bootstrap CI, AND the (d) perturbation** (§2). Until then, report "signal," not "result" — most
   current Cell loop numbers (a +2.5× discovery, a +170% eats, a persistence NULL) are signals
   pending powering. Peer-review honesty is refusing to promote a signal to the doctrine as a finding.
+- **Judge on the FULL metric set, never one number — hunt the BLIND METRIC.** A metric that
+  a *degenerate* behavior can satisfy will certify that degenerate behavior. This trap has
+  been hit repeatedly, at every layer, and each time the fix was adding the metric that
+  *sees* the failure — not re-tuning against the blind one:
+  - net-rotation is **blind to a body that swings its heading and nets ~0** → use
+    straightness (net displacement / path length).
+  - chassis height is **blind to belly-drag** (the chassis rides high while the belly
+    grinds) → measure the ground clearance of the part that actually contacts.
+  - a mean forward speed is **oscillation-dominated** → read it *with* net displacement;
+    high speed + low displacement is fast circling.
+  - a fast-traversing gait scored well on speed + joint-coherence while **slamming the
+    chassis into the ground** — the collision was invisible until a chassis-height metric
+    was added.
+  The rule: before trusting a result, ask *what degenerate behavior would also score well
+  here?* If one exists, you have a blind metric — add its complement first. Corollary: a
+  metric set is only honest once no single number can be Goodharted alone.
+- **A NUMBER OUTLIVES THE BODY IT WAS MEASURED ON — carry provenance, or a rejected result
+  will be re-promoted.** When a configuration is rejected, its *metrics do not die with it*:
+  they survive in summary tables, scorecards and handoff notes, detached from the verdict on
+  the thing that produced them. One layer of summarization later, nobody can see that the
+  headline number came from a body already judged non-viable. Observed 2026-07-25 (legged): a
+  "+65 % distance" speed lever was carried forward as a banked win for months — it had been
+  measured on an **open-loop servo sequencer that was rejected the previous day** on operator
+  observation (it slammed the chassis into the ground every step). The number was real; the body
+  was not viable; and the *operator's memory of how the gait looked* — sequenced and
+  paddle-like, not alive — was what caught it, long after the metric had passed unchallenged.
+  Two rules follow: **(i) every recorded number names the configuration it was measured on**,
+  so a rejection can be propagated to everything downstream of it; and **(ii) when a config is
+  rejected, sweep its metrics** — anything still circulating from it is now a claim without a
+  body. Corollary: this is the strongest argument for §8's operator/UI diagnosis being
+  first-class. A qualitative memory of *how the thing moved* is a durable check that aggregate
+  metrics, once detached from provenance, cannot provide.
+- **A NULL IS A CLAIM ABOUT THE MEASUREMENT AS MUCH AS THE MECHANISM — validate the
+  BASELINE before believing one.** *When the control sits at a degenerate attractor, "the
+  mechanism didn't lift the mean" is a fact about the control, not the mechanism.* This is
+  the most expensive lesson in this project's history. A systematic audit (2026-05-31) found
+  **84 % of analyzable historical runs had a single channel taking >60 % of the signal** —
+  the controls themselves were degenerate — which put an entire era of "this mechanism is
+  null" verdicts back in question. Two were re-tested against a recovered baseline; one null
+  held, and the framing "we can't make the body do X" turned out to be a *measurement*
+  problem, not a substrate problem. Corollaries, each earned:
+  - **Check the control is HEALTHY before interpreting a null.** A degenerate control makes
+    every mechanism look inert.
+  - **A negative result can be a TAUTOLOGY (the knob was already on — the variant was
+    byte-identical) or DEAD CODE (the path wasn't live in that config).** Neither is a
+    verdict on the idea. Read the running params and verify the consumer fires *first*.
+  - **A weakened slice is not the mechanism.** A structural-prior null once rested on an
+    implementation carrying 1 of the theory's 6 rules; that falsifies the slice.
+  - **A silent confound invalidates wholesale and invisibly.** A harness flag that never got
+    set meant an entire family of A/Bs silently ran the wrong stage for weeks. When a result
+    family looks strangely flat, suspect the harness before the substrate.
+  The operating consequence: **no mechanism here is ever "dead" — only refuted in the
+  context, at the power, and against the baseline it was tried with.** Record all three with
+  every verdict, and record the *re-use context* that would justify trying it again.
+- **Refutation is SCENARIO-SCOPED — "refuted" without a regime is not a verdict.** A lever
+  falsified in one regime may be load-bearing in another, so a refutation must name the
+  scenario it was run in and be re-tested when the regime changes. (Inter-leg-timing rules
+  were refuted on flat ground, then deliberately **re-tested on the incline** where their
+  premise — grip — should have applied, and refuted again; that second test is what made
+  the verdict trustworthy. Conversely a stuck→explore lever was "refuted" on flat, which was
+  simply the wrong scenario to test it in.) Treat every idea as valid until falsified **in a
+  similar scenario**; keep a ledger of verdicts *with their regimes*, or the same idea will
+  be re-proposed and re-killed indefinitely.
 - **Verify the CONSUMER fires, not just the producer.** A published topic nobody acts on
   is a silent dead channel.
 - **Running the (d) perturbation test — two techniques that make it measurable.** (i) When the
@@ -419,5 +549,16 @@ recurs at every layer.
 ---
 
 *Living document. When a new principle is proven (or falsified) on a build, fold it back
-here. See [`docs/reports/cell_markov_blanket_loops_report.md`](reports/cell_markov_blanket_loops_report.md)
-for the Cell build that exercises — and stress-tests — this doctrine.*
+here — the principle stated abstractly (§8), the creature as the illustration. Two builds
+currently exercise and stress-test this doctrine:*
+
+- [`reports/cell_markov_blanket_loops_report.md`](reports/cell_markov_blanket_loops_report.md)
+  *— the Cell (swimmer): where the method was learned, and where two of its own headline
+  results are overturned once properly powered.*
+- [`reports/picrawler_gait_loop_findings.md`](reports/picrawler_gait_loop_findings.md) +
+  [`reports/picrawler_lever_ledger.md`](reports/picrawler_lever_ledger.md) *— the picrawler
+  (quadruped): the method applied to a hard body, and the per-lever verdict ledger. **Read
+  the ledger before proposing a lever** — most plausible ideas here have already been tried.*
+
+*Operating procedure for working in this repo — build recipe, the A/B protocol, the
+vocabulary — is in [`CLAUDE.md`](../CLAUDE.md).*

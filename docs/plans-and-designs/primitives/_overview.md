@@ -1,8 +1,22 @@
 # Module Primitives — Overview & Taxonomy
 
-_Last updated: 2026-05-23, after the Phase 7.2-EPM hierarchical experiment closed._
-_Companion to `docs/phase7_arc_findings.md` (the substrate-architecture lesson)
-and `~/.claude/projects/-home-xaqmusic-ami-ogma/memory/project_walking_not_emergent_from_perception.md`._
+> ⚠️ **HISTORICAL SNAPSHOT — last updated 2026-05-23** (after the Phase 7.2-EPM hierarchical
+> experiment closed), i.e. **before** the Cell rebuild and before the picrawler
+> active-inference port. The module taxonomy and per-module descriptions are still broadly
+> accurate and this remains the best single map of the substrate — but the **Status column,
+> the "active picrawler configs" column, and §6's gap list are stale**, and several
+> cross-referenced documents are **not in this repo**: `docs/phase7_arc_findings.md`,
+> `docs/action_side_plan.md`, and a memory path under the `ami-ogma` project dir. Those are
+> not lost — they live in the **pre-split `ami-ogma` repo** (`docs/findings/` and
+> `docs/plans-and-designs/` respectively), which was not carried over wholesale when xaq was
+> extracted for public release. Follow them there if you need what the reasoning rested on.
+>
+> For the **current** picture: [`../../../CLAUDE.md`](../../../CLAUDE.md) (how to work here),
+> [`../../brain_building_doctrine.md`](../../brain_building_doctrine.md) (the method),
+> [`../picrawler_active_inference_plan.md`](../picrawler_active_inference_plan.md) (the live
+> architecture), and [`../../reports/picrawler_lever_ledger.md`](../../reports/picrawler_lever_ledger.md)
+> (what is promoted vs refuted). Verify any status claim below against
+> `cpp_core/include/ogma/modules/*.hpp` and the config actually in use before relying on it.
 
 This doc is the single map of every Module subclass in the substrate, what
 it does, what category it belongs to, and what's currently load-bearing vs
