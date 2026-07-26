@@ -308,6 +308,32 @@ recovery curve, since self-righting is stochastic (1 of 3 seeds even on an angle
 
 ---
 
+### 2026-07-26 — the PLASTICITY / FORGETTING family (nothing promoted; `homeo_leak_cycles=0`)
+
+The forgetting-after-inversion failure is an **integrator-windup** bug, not a learned-weights
+one (see the entry above). Four mechanisms were built and measured. **None is promoted** — at
+`homeo_leak_cycles=0` the stack performs as well as it ever has, and the operator's read is
+that recovery does happen after a stuck period, just slower than wanted.
+
+| Lever | Verdict |
+|---|---|
+| **`homeo_upright_gate`** — freeze the integrators while not upright | **`REGRESSION`.** Stops the latch (amp_gain 2.53→0.100, height_bias +1.50→−0.09) and normal walking is byte-identical — but self-righted **0/8 vs 1/8** ungated. **`amp_gain` winding 40× IS the flail amplitude that rights the robot**, so freezing it lesions the escape (§5.4). Do not use |
+| **`height_unwind_free`** — asymmetric windup fade so a railed bias can unwind while moving | **`NULL`/`REGRESSION`.** Addresses recovery from a wind the leak/gate prevents anyway, and cost ~8 % net_z and ~12 % hump. Default-off infra |
+| **`homeo_leak_cycles`** — leaky homeostats, rate in stride cycles off the body's own ω | **`PARTIAL`.** At 5 cycles FREE on flat (net_z 4.78 ± 0.16 vs 4.75; tilt_sd 0.068 identical) and bounds the amp_gain excursion by half (2.53→1.18). **But a CONSTANT leak blocks escape entirely: 0/4 off the operator's wall vs 2/4 with the leak off.** 2 cycles is too aggressive. Target matters — leaking toward *unity* (semantically neutral for a gain) cost net_z 4.75→3.6 because normal walking pins the integrator at its FLOOR; retargeted to minimum authority. **Semantically neutral ≠ behaviourally neutral** |
+| **`homeo_leak_upright_only`** — posture-gate the leak: forget while upright, accumulate while not | **Best variant, still not promoted.** Escape restored (**2/4 @ 72 s** vs baseline 2/4 @ 96 s), free on flat (4.78, tilt_sd 0.068, 0 falls), hump 5.68 vs 6.09 (−7 %). The **inverse** of `homeo_upright_gate` — which is exactly why it works: accumulate while inverted (escape), forget once upright (fast recovery) |
+| **`homeo_leak_progress_gate`** — also stop forgetting while stalled | **`REGRESSION`, two attempts.** Second operator observation: upright but BLOCKED at a slanted wall, the robot "no longer learns how to climb, it stays in the same gait it used on the flat" — a posture gate cannot catch that. Gating *both* integrators on stall cost hump 6.09→4.84 (stalling on a hill readmits the height windup). Gating *only* amp_gain: net_z 4.33, **falls 0.25**, hump 4.90, escape 1/3 @ 228 s. **Cause: `height_rest_frac` is INSTANTANEOUS progress, so it fires on ordinary gait pauses.** The signal wanted is a SUSTAINED stall — `stuck_ticks_`/`stuck_boost_` (~5 s) — which must first be decoupled from `stuck_explore_gain` |
+
+**Two principles earned here.** (1) *Forgetting is a luxury of success; escalation is the
+response to failure* — the wind-up is not only damage, it is how the body gets out of trouble,
+so any mechanism that bounds it must not bound it while the body is failing. (2) **The leak had
+to become per-integrator**, because `amp_gain` is EFFORT (may escalate when failing) and
+`height_bias` is POSTURE BIAS (must never accumulate on a slope — that is the refuted windup).
+*Which state may escalate depends on what that state means.*
+
+**Open:** the upright-but-blocked case. Two failed attempts; needs the sustained-stall signal.
+
+---
+
 ## 3. Substrate decisions (retired, with reasons)
 
 - **God's-eye `chassis_y_norm` → RETIRED** as the height observation. Absolute world-Y reads
