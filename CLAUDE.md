@@ -114,6 +114,7 @@ the learned one.
 | Building/extending any perceptual or coarse-graining path | [`docs/plans-and-designs/primitives/EPM.md`](docs/plans-and-designs/primitives/EPM.md) — the full EPM contract (params, invariants, failure modes, VV&A) |
 | Before any design decision | [`docs/brain_building_doctrine.md`](docs/brain_building_doctrine.md) — the method ("the bible") |
 | Before proposing a picrawler lever | [`docs/reports/picrawler_lever_ledger.md`](docs/reports/picrawler_lever_ledger.md) — **what is already refuted** |
+| Before trusting ANY picrawler sensor | [`docs/plans-and-designs/sensor_legitimacy_and_the_feet_y_oracle.md`](docs/plans-and-designs/sensor_legitimacy_and_the_feet_y_oracle.md) — **per-topic legality audit + a LIVE god's-eye dependency in the deployed gait.** `feet_y` is absolute world-Y |
 | Working on the picrawler | [`plan`](docs/plans-and-designs/picrawler_active_inference_plan.md) + [`gait findings`](docs/reports/picrawler_gait_loop_findings.md) |
 | Working on the Cell | [`cell report`](docs/reports/cell_markov_blanket_loops_report.md) |
 | Repo layout, naming, licence | [`AGENTS.md`](AGENTS.md) — **`ami_ogma` == `ogma` == xaq**, intentionally |

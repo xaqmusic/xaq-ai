@@ -18,28 +18,33 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # a config in the launcher, add its exact .json filename here.  Files are NOT
 # moved/deleted — every config stays loadable by path for scripts + A/B runs.
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
-	# 2026-07-18 — narrowed to the ACTIVE L-1a Gate 0 config for focused
-	# observation.  The others stay loadable by path + in git; uncomment any to
-	# restore it to the dropdown.
-	"the_picrawler_motor_epm_minimal.json",   # L-1a Gate 0 — reward-free upright prior + HK loop (additive baseline)
-	"the_picrawler_motor_epm_objposture.json",# L-1b — postural via the objective.posture socket (PosturalPrior), postural_gain=0
-	"the_picrawler_motor_epm_keyframe.json",  # L-1b — KeyframeGait phase-indexed keyframe on the socket + dialed-down postural (0.3)
-	"the_picrawler_motor_epm_embed.json",     # L-1b — keyframe + CPG-EMBED (controller learns a phase-conditioned feed-forward from the keyframe error) — A/B vs plain keyframe
-	"the_picrawler_motor_epm_embed_corridor.json",  # embed milestone gait in the CORRIDOR trench gym (metadata.gym_mode=corridor) — same brain, different world
-	"the_picrawler_motor_epm_embed_corridor_propbal.json",  # SEED-REFUTED (2026-07-23): the +0.71/0.07 was one lucky seed; seed-avg (n=6) shows it's noise + anti-composes. Kept for UI A/B vs bearing-hold.
-	"the_picrawler_motor_epm_embed_corridor_bearinghold.json",  # ★ HEADING P+7 · COMMIT · RANGEFINDER (belly-DRAG baseline): go-straight (P=7, straightness 0.53) + progress→commit=1.0 + MARKOV-COMPLIANT height (belly ToF rangefinder height_topic=ground_clearance, height_k=0.30, windup fixed so height defense fades with fwd motion). CLEARS THE HUMP (teleport final_z +4.11) but the belly DRAGS low on flat (chassis_y 0.036, clearance dips to 0.003 = scraping). A/B target for stance-lift below.
-	"the_picrawler_motor_epm_embed_corridor_stancelift.json",  # ★★ STANCE-LIFT +0.5 (belly-up + FAST): bearinghold + a knee-tuck bias on PLANTED legs only (Cruse-gated; swing legs free) that levers the chassis UP off the planted feet — traction-preserving, held constant. Seed-avg: belly clearance 0.015->0.030 (off the ground, min 0.003->0.008), net_z +1.46->+1.75 (~20% FASTER), 0 falls, STILL clears the hump belly-up (final_z +4.11). Live-tune 'stance_lift (belly-up knee)' in the panel. THE flat-traversal candidate — observe vs the belly-drag bearinghold above.
-	"the_picrawler_motor_epm_embed_corridor_explore.json",  # ★ HEADING-HOLD P+7.0 + STUCK→EXPLORE 2.0: adds the active-inference propulsion desire (stall -> amplify exploration -> discover a push) on top of tuned heading. NOTE: stuck→explore seed-refuted as net-neutral; kept as a live lever. A/B vs the bearinghold baseline above.
-	# "the_picrawler_motor_epm_velobj.json",  # REJECTED: phase-indexed VELOCITY objective (Cvel pump) — amplified a gait asymmetry into circling (embed traverses; velobj circles ~2 turns). See findings doc.
-	# "the_picrawler_motor_epm_velsym.json",  # REJECTED: velobj + LR-symmetry prior — the fix BACKFIRED (worse circling, ~3 turns). Velocity lever refuted on the current asymmetric gait.
-	# "the_picrawler_motor_epm_hip2learn.json",  # REJECTED: learned hip2 (loose per-joint spring) — isolated A/B showed no gain + more instability (see findings doc)
+	# 2026-07-25 — DEMO-CLEAN: narrowed to the current config + one baseline, so the
+	# dropdown is presentable and an A/B is unambiguous.  Everything else stays
+	# loadable by path (scripts, seedavg/humpavg/recoveravg arms) and in git —
+	# nothing is deleted.  To restore one to the dropdown, uncomment it.
+	"the_picrawler_motor_epm_embed_corridor_stancelift.json",  # ── BASELINE ── the deployed stack: heading P+7 · progress-commit · Markov belly-rangefinder height · stance_lift 0.5 (belly-up). Clears the hump; net_z 3.62, straight 0.67, tilt_sd 0.078, 0 falls.
+	"the_picrawler_motor_epm_embed_corridor_imufused.json",  # ── CURRENT ── FULLY HARDWARE-HONEST: commanded-angle IK ⊕ gyro-fused IMU attitude (no exact sim attitude anywhere). IMU sampled/filtered at the 240 Hz PHYSICS rate, not the 50 Hz brain tick — real IMUs run 1-8 kHz and the physics oversampling is free sensor bandwidth. Attitude error 3.17° mean. BEST ARM: net_z 3.76 (oracle) → 4.75, flat_v 0.04 → 0.05, straight 0.70 → 0.74, tilt_sd 0.067 → 0.068 (wobble gap CLOSED), hump 5.21 → 6.09, 0 falls. Beats even the exact-attitude arm (4.36).
+	# "the_picrawler_motor_epm_embed_corridor_gravcmd.json",  # same but EXACT sim attitude — uncomment to A/B what the honest IMU model costs (it gains). HARDWARE-HONEST: feet_topic = FK from COMMANDED servo angles ⊕ accelerometer gravity-up. Buildable on the real PiCrawler (hobby servos report no position, so commanded angles are all it has). Servo deflection measured at 22mm mean/38mm max; FK validated to 1.1mm. THE HARDWARE'S POORER INFORMATION IS THE BETTER SIGNAL: net_z 3.76 oracle → 3.95 achieved → 4.36 commanded (±0.28); straight 0.70 → 0.62 → 0.74 (±0.01); hump final_z 5.21 → 5.35 → 6.10; 0 falls. Deflection is noise to the gate. STILL UNMODELLED: attitude uses the exact sim transform, not gyro/accel fusion.
+	# "the_picrawler_motor_epm_embed_corridor_gravfeet.json",  # same but FK from ACHIEVED pose (sim-privileged) — uncomment to A/B the sim-to-real gap. ORACLE REMOVED. feet_topic = feet_y_gravity (encoder-FK foot position · accelerometer gravity-up = IK ⊕ IMU) replacing feet_y, which was absolute WORLD-Y and unsensable by a real robot. n=4: net_z 3.76→3.95 and flat_v 0.04→0.05 — the FIRST flat-speed movement across 10+ levers; step_bal 0.25→0.42, steps 74→113. Hump gate improves (5.21→5.35, 0 falls). Costs straightness (0.70→0.62) and wobble (0.067→0.095) — livelier, less controlled. Three other legal signals lost badly and two phase hypotheses died at chance; gravity reference was the missing property.
+	# "the_picrawler_motor_epm_embed_corridor_rewardfree.json",  # the ORACLE arm — identical but feet_topic=feet_y (absolute world-Y). Uncomment to A/B the legitimacy question directly. baseline + coord_adapt 0.001 + the coordination search made REWARD-FREE (coord_fitness_mode=1): probes ranked by coherence·activity/(1+tle) instead of forward velocity. No distance/velocity term anywhere. vs the fwd_v-reward arm: net_z 3.52→3.76, straight 0.67→0.70, tilt_sd 0.069→0.067, hump gate IDENTICAL (5.21), and coordination RECOVERS BETTER after perturbation (0.30→0.48) — a thrash can't win, it has high tle and low coherence. Removing the reward cost nothing; removing the search entirely costs net_z→2.36.
+	# --- everything below is parked, not deleted ---
+	# "the_picrawler_motor_epm_embed_corridor_coordadapt.json",  # the fwd_v-REWARD comparison arm for the above (coord_fitness_mode=0). Uncomment to A/B the reward question directly in the UI.
+	# "the_picrawler_motor_epm_minimal.json",   # L-1a Gate 0 — reward-free upright prior + HK loop (additive baseline)
+	# "the_picrawler_motor_epm_objposture.json",# L-1b — postural via the objective.posture socket (PosturalPrior), postural_gain=0
+	# "the_picrawler_motor_epm_keyframe.json",  # L-1b — KeyframeGait phase-indexed keyframe on the socket + dialed-down postural (0.3)
+	# "the_picrawler_motor_epm_embed.json",     # L-1b — the embed MILESTONE gait (arena): keyframe + CPG-EMBED
+	# "the_picrawler_motor_epm_embed_corridor.json",  # embed milestone in the CORRIDOR trench gym
+	# "the_picrawler_motor_epm_embed_corridor_propbal.json",  # SEED-REFUTED (2026-07-23): noise + anti-composes
+	# "the_picrawler_motor_epm_embed_corridor_bearinghold.json",  # the belly-DRAG predecessor to stance-lift (clearance dips to 0.003 = scraping)
+	# "the_picrawler_motor_epm_embed_corridor_explore.json",  # heading-hold + stuck→explore 2.0 (seed-refuted as net-neutral)
+	# "the_picrawler_motor_epm_velobj.json",  # REJECTED: phase-indexed VELOCITY objective (Cvel pump) — amplified a gait asymmetry into circling
+	# "the_picrawler_motor_epm_velsym.json",  # REJECTED: velobj + LR-symmetry prior — the fix BACKFIRED (worse circling)
+	# "the_picrawler_motor_epm_hip2learn.json",  # REJECTED: learned hip2 — no gain + more instability
 	# "the_picrawler_motor_epm_cpgwalk.json",  # REJECTED: coherent but an open-loop sequencer — chassis slams the ground (flopping fish)
-	# "the_picrawler_motor_epm_energetic.json", # EXPERIMENTAL high-energy variant (operator screenshot params)
+	# "the_picrawler_motor_epm_energetic.json", # EXPERIMENTAL high-energy variant
 	# "the_picrawler_motor_epm_rung0.json",
 	# "the_picrawler_motor_epm_vision.json",   # rung0 + epm_color (camera→brain, V1 vision)
 	# "the_picrawler_motor_epm_vision_steer.json",  # V2: nav steers on VISION (vision_compass)
-	# "the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2.json",
-	# "the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2_target_compass_H1v6_F9_hit_reward.json",
 ]
 
 # 2026-06-13 — curriculum dropdown allowlist (same rationale as the config one).

@@ -998,6 +998,30 @@ var _pending_teleport = null
 # Ramp-debug: last raw belly rangefinder reading (metres), cached at publish so the
 # diag can log the rangefinder output + homeostat state on the hump.
 var _dbg_gc_raw: float = 0.0
+var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
+var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
+var _dbg_fk_valid_err: float = 0.0    # mean |measured-FK − achieved-pose| = FK wiring check
+var _dbg_att_err_acc: float = 0.0     # accel-only attitude error vs exact (deg)
+var _dbg_att_err_imu: float = 0.0     # gyro-fused attitude error vs exact (deg)
+var _dbg_acc_mag: float = 0.0         # |accelerometer| m/s^2 (should hover near 9.81)
+var _dbg_acc_trust: float = 0.0       # adaptive correction gain actually applied
+var _prev_lin_vel: Vector3 = Vector3.ZERO   # for finite-differencing body acceleration
+var _up_est_body: Vector3 = Vector3.ZERO    # complementary-filter gravity-up estimate (body frame)
+var _up_acc_last: Vector3 = Vector3.ZERO    # last accel-only gravity-up (body frame)
+var _accel_body_last: Vector3 = Vector3.ZERO  # last modelled accelerometer reading
+var _gyro_body_last: Vector3 = Vector3.ZERO   # last modelled gyro reading
+var _accel_lp: Vector3 = Vector3.ZERO         # DLPF state
+# How much the complementary filter trusts the accelerometer per tick.  Small = trust the
+# gyro short-term (rejects bounce contamination) and let the accel correct drift slowly.
+const IMU_ACC_TRUST: float = 0.02
+# Models the accelerometer's on-chip anti-alias low-pass (datasheet DLPF), which a raw
+# finite difference lacks.  ~0.25 at 240 Hz ≈ a few tens of Hz cutoff.
+const IMU_DLPF_ALPHA: float = 0.25
+# Accelerometer full-scale range (±4 g), as a real part would clip at.
+const IMU_RANGE_MS2: float = 4.0 * 9.81
+# Accelerometer trust falls to zero once ‖a‖ deviates from g by this FRACTION of g.
+# Quasi-static samples correct fully; footfall impacts contribute nothing.
+const IMU_ACC_GATE_FRAC: float = 0.5
 var episode_index: int = 0
 var _episode_fell: bool = false
 var _instant_pause_tick: bool = false
@@ -2070,7 +2094,36 @@ func _ready() -> void:
 	brain.register_source("TgtAlignRR", "reality.proprio.tgt_align_rr",
 		"float32[1]: bucket 0..3 for RR leg target alignment (creative R4)", true)
 	brain.register_source("FeetY", "reality.proprio.feet_y",
-		"float32[4]: per-leg foot-Y height (FL, FR, RL, RR) — low = planted, high = lifted", true)
+		"float32[4]: per-leg foot-Y height (FL, FR, RL, RR) — low = planted, high = lifted. " +
+		"WARNING: absolute WORLD-Y = god's-eye (the violation that retired chassis_y_norm). " +
+		"Markov-compliant twin below.", true)
+	brain.register_source("Imu6", "reality.proprio.imu6",
+		"float32[6]: body-frame [ax,ay,az] specific force (accelerometer) + [gx,gy,gz] angular " +
+		"rate (gyro) — the full 6-axis IMU the real robot has and which the legacy imu topic omits.", true)
+	brain.register_source("FeetYGravityCmdAcc", "reality.proprio.feet_y_gravity_cmd_acc",
+		"float32[4]: commanded-FK foot height on an ACCELEROMETER-ONLY gravity estimate — shows " +
+		"the linear-acceleration contamination a bare accelerometer suffers.", true)
+	brain.register_source("FeetYGravityCmdImu", "reality.proprio.feet_y_gravity_cmd_imu",
+		"float32[4]: commanded-FK foot height on a GYRO-FUSED gravity estimate (complementary " +
+		"filter) — fully hardware-realizable, no exact attitude anywhere.", true)
+	brain.register_source("FeetYGravityCmd", "reality.proprio.feet_y_gravity_cmd",
+		"float32[4]: feet_y_gravity computed from COMMANDED servo angles instead of achieved " +
+		"pose — what a hobby-servo robot can actually compute (no position feedback).", true)
+	brain.register_source("FeetYGravityFk", "reality.proprio.feet_y_gravity_fk",
+		"float32[4]: feet_y_gravity via analytic FK from MEASURED angles — validation twin; " +
+		"should track feet_y_gravity closely, confirming the FK chain is wired correctly.", true)
+	brain.register_source("FeetYGravity", "reality.proprio.feet_y_gravity",
+		"float32[4]: per-leg foot height below the chassis measured ALONG GRAVITY " +
+		"(FL, FR, RL, RR) = encoder-FK foot position · accelerometer gravity-up. IK ⊕ IMU; " +
+		"the only legal signal sharing the god's-eye feet_y's gravity reference.", true)
+	brain.register_source("FeetYGround", "reality.proprio.feet_y_ground",
+		"float32[4]: per-leg foot height above the ground the body stands on = " +
+		"feet_y_body (encoder FK) + belly ToF clearance. Markov-compliant AND " +
+		"terrain-relative — the legal reconstruction of what god's-eye feet_y provides.", true)
+	brain.register_source("FeetYBody", "reality.proprio.feet_y_body",
+		"float32[4]: per-leg foot height relative to the CHASSIS (FL, FR, RL, RR) — the " +
+		"Markov-compliant twin of feet_y. Derivable from joint encoders + link lengths by " +
+		"forward kinematics, so a real picrawler can compute it.", true)
 	# 2026-07-22 — Markov-blanket-compliant posture sensors (replace absolute Y).
 	brain.register_source("FootContact", "reality.proprio.foot_contact",
 		"float32[4]: per-leg TRUE foot-contact (1=touching ground/obstacle, 0=airborne) from the foot's physics contact monitor — a hardware contact switch, NOT an absolute-Y threshold.", true)
@@ -3968,11 +4021,23 @@ func _input(event: InputEvent) -> void:
 			_update_ray_overlay()   # immediate refresh, don't wait for the loom tick
 		print("PicrawlerBody: [V] ray_overlay = %s" % _ray_overlay_on)
 	elif key == KEY_M:
+		# 2026-07-26 — toggle JUST the MOTOR-EPM slider panel.  It is a full-rect Control
+		# that sits over the top-right corner even when collapsed, which covered the IMU
+		# scope.  [T] still hides all panels together; this is the single-panel version.
+		# (The vision-panel toggle moved from M to N to free this key — the current
+		# picrawler configs carry no vision module, so that binding was inert here.)
+		var mp: Node = get_tree().get_root().find_child("MotorEpmPanel", true, false)
+		if mp != null and mp is Control:
+			var c := mp as Control
+			c.visible = not c.visible
+			print("PicrawlerBody: [M] motor_epm_panel = %s" % c.visible)
+	elif key == KEY_N:
 		# 2026-06-13 — toggle the camera+LiDAR vision pixel panels (no camera
 		# switch — the normal orbit camera is easy to drive by hand).
+		# Moved from [M] on 2026-07-26 so M can toggle the MOTOR-EPM slider panel.
 		_vision_panel_on = not _vision_panel_on
 		_update_vision_panel()
-		print("PicrawlerBody: [M] vision_panel = %s" % _vision_panel_on)
+		print("PicrawlerBody: [N] vision_panel = %s" % _vision_panel_on)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
@@ -4014,6 +4079,9 @@ func _physics_process(delta: float) -> void:
 				% [_done, tick_counter, _quit_after_ticks])
 		get_tree().quit()
 		return
+	# Sensor rate ≠ control rate: sample + filter the IMU every PHYSICS tick (240 Hz)
+	# before the 50 Hz brain steps consume it.  See _imu_substep().
+	_imu_substep(delta)
 	_accum += delta
 	if _accum > 0.2:
 		_accum = 0.2
@@ -4021,6 +4089,86 @@ func _physics_process(delta: float) -> void:
 		_accum -= TAU
 		if _done: return
 		_step_one()
+
+# ---------------------------------------------------------------------------
+# IMU substep — runs at the PHYSICS rate (physics_hz, default 240), NOT at the
+# brain's TAU rate.  This is what a real IMU does: MPU-6050-class parts sample
+# 1-8 kHz, a BNO085 fuses on-chip at ~400 Hz, and attitude filters on legged
+# machines run 200-1000 Hz.  Sampling at the 50 Hz control rate instead both
+# understates the hardware and starves the filter (aliasing footfall impacts),
+# and the physics is ALREADY oversampled here to stop feet tunnelling through
+# the floor — so this bandwidth costs nothing.
+# ---------------------------------------------------------------------------
+# IMU state for the HUD scope.  Split deliberately into signals a REAL PiCrawler can
+# observe and signals only the simulator knows: on hardware there is no ground-truth
+# attitude, so the honest health check is the DISAGREEMENT between the accelerometer-only
+# estimate and the fused one — both computable on-robot.  The scope surfaces that as the
+# quantity to watch during bring-up, and marks the sim-only rows as such.
+func get_imu_debug() -> Dictionary:
+	var up_exact: Vector3 = _chassis.global_transform.basis.transposed() * Vector3.UP \
+		if _chassis != null else Vector3.UP
+	return {
+		# --- hardware-observable ---
+		"up_fused": _up_est_body,          # complementary-filter gravity-up (body frame)
+		"up_accel": _up_acc_last,          # accelerometer-only gravity-up (body frame)
+		"accel":    _accel_body_last,      # modelled accelerometer, m/s^2, body frame
+		"gyro":     _gyro_body_last,       # modelled gyro, rad/s, body frame
+		"trust":    _dbg_acc_trust,        # adaptive correction gain actually applied
+		"disagree_deg": rad_to_deg(_up_est_body.angle_to(_up_acc_last)) \
+			if _up_acc_last.length() > 0.5 else 0.0,
+		# --- simulator ground truth (NOT available on the real robot) ---
+		"up_exact":    up_exact,
+		"err_fused_deg": _dbg_att_err_imu,
+		"err_accel_deg": _dbg_att_err_acc,
+		"imu_hz": float(physics_hz),
+	}
+
+func _imu_substep(dt: float) -> void:
+	if _chassis == null or dt <= 0.0:
+		return
+	var basis_w: Basis = _chassis.global_transform.basis
+	var w2b: Basis = basis_w.transposed()          # world → body (orthonormal)
+	# Accelerometer = proper acceleration in the BODY frame: at rest it points along
+	# body-frame up with magnitude g; under acceleration it tilts by −a_world.
+	var a_world: Vector3 = (_chassis.linear_velocity - _prev_lin_vel) / dt
+	_prev_lin_vel = _chassis.linear_velocity
+	var accel_body: Vector3 = w2b * (a_world + Vector3.UP * 9.81)
+	# A real accelerometer has an ANALOG anti-alias filter ahead of its ADC; a raw
+	# finite difference has none, so model the datasheet DLPF as a first-order low-pass.
+	if _accel_lp.length() < 1e-6:
+		_accel_lp = accel_body
+	_accel_lp = _accel_lp.lerp(accel_body, IMU_DLPF_ALPHA)
+	# ...and it CLIPS at its configured full scale (±4 g here) rather than reporting
+	# unbounded impulse.
+	var accel_meas: Vector3 = _accel_lp
+	if accel_meas.length() > IMU_RANGE_MS2:
+		accel_meas = accel_meas.normalized() * IMU_RANGE_MS2
+	var gyro_body: Vector3 = w2b * _chassis.angular_velocity
+	_accel_body_last = accel_meas
+	_gyro_body_last  = gyro_body
+	_up_acc_last = accel_meas.normalized() if accel_meas.length() > 1e-4 else _up_acc_last
+
+	# --- complementary filter -------------------------------------------------
+	if _up_est_body.length() < 0.5:
+		_up_est_body = _up_acc_last
+	# Gyro propagation: a WORLD-fixed direction seen from the body frame rotates by
+	# −ω·dt.  Use an EXACT rotation — the first-order `v -= ω×v·dt` form leaves
+	# O((ω·dt)²) error per step, which integrates to radians over a run.
+	var w_mag: float = gyro_body.length()
+	if w_mag > 1e-6:
+		_up_est_body = (Basis(gyro_body / w_mag, -w_mag * dt) * _up_est_body).normalized()
+	# Adaptive-gain correction: the accelerometer only indicates "down" when the body is
+	# quasi-static; during a footfall it is measuring the impact.  Weight its trust by how
+	# close ‖a‖ is to g rather than accepting/rejecting outright (a hard gate starved it).
+	var acc_dev: float = absf(accel_meas.length() - 9.81) / 9.81
+	var trust: float = IMU_ACC_TRUST * clampf(1.0 - acc_dev / IMU_ACC_GATE_FRAC, 0.0, 1.0)
+	if trust > 0.0:
+		_up_est_body = (_up_est_body * (1.0 - trust) + _up_acc_last * trust).normalized()
+	_dbg_acc_mag = accel_meas.length()
+	_dbg_acc_trust = trust
+	var up_exact: Vector3 = w2b * Vector3.UP
+	_dbg_att_err_acc = rad_to_deg(_up_acc_last.angle_to(up_exact))
+	_dbg_att_err_imu = rad_to_deg(_up_est_body.angle_to(up_exact))
 
 func _step_one() -> void:
 	# Pending chassis suspend / unfreeze from C-key (queued in
@@ -4517,6 +4665,135 @@ func _step_one() -> void:
 		feet_y_arr.append(_lowers[i].global_transform.origin.y - L3 * 0.5)
 	brain.publish_proprio(feet_y_arr, "feet_y")
 
+	# ---- Markov-compliant twin of feet_y (2026-07-25) -------------------------
+	# feet_y above is ABSOLUTE WORLD-Y of the foot — a god's-eye quantity no real
+	# picrawler can sense, and the same violation that retired chassis_y_norm.  It is
+	# nonetheless what MotorEPM's swing detector has always consumed (gating stance_lift
+	# and every Cruse rule).
+	#
+	# This is the identical formula evaluated in the CHASSIS frame instead of the world
+	# frame.  The resulting quantity — where the foot sits relative to the body — is one
+	# the real robot CAN compute: the foot's pose relative to the chassis is fully
+	# determined by the three joint encoder angles plus known link lengths (L1/L2/L3), so
+	# this is forward kinematics from proprioception.  The chassis-transform inverse is
+	# used only as an exact shortcut for that FK chain, not as extra information.
+	#
+	# Deliberately mirrors feet_y's own toe approximation (centre minus L3*0.5) rather
+	# than a better one, so an A/B between the two isolates EXACTLY the god's-eye
+	# component and nothing else.  Absolute offset/sign are irrelevant to the consumer:
+	# the swing detector only ever compares this signal against its own moving average.
+	#
+	# CAVEAT: encoders would see commanded joint angles; this sees the achieved rigid-body
+	# pose, so it includes joint compliance/slop the real encoders would miss.
+	var _ch_inv: Transform3D = _chassis.global_transform.affine_inverse()
+	var feet_y_body_arr := PackedFloat64Array()
+	for i in range(4):
+		feet_y_body_arr.append((_ch_inv * _lowers[i].global_transform.origin).y - L3 * 0.5)
+	brain.publish_proprio(feet_y_body_arr, "feet_y_body")
+
+	# ---- feet_y_gravity: IK ⊕ IMU ATTITUDE (2026-07-25) ----------------------------
+	# The one property the god's-eye feet_y has that every legal replacement so far lacks:
+	# it is GRAVITY-REFERENCED.  feet_y_body above is in the CHASSIS frame, so a foot at a
+	# fixed body-frame position sits at different GRAVITATIONAL heights as the chassis
+	# pitches and rolls; feet_y_ground inherits the same error because the belly ToF points
+	# along the chassis down-axis.  Phase references were measured and came out at chance
+	# (see the oracle design note), leaving gravity alignment as the live explanation.
+	#
+	# Gravity alignment is exactly what an accelerometer measures.  `up_body` is the
+	# world-up axis expressed in the CHASSIS frame — i.e. the (negated) gravity vector a
+	# body-mounted accelerometer reads directly.  Projecting the encoder-FK foot position
+	# onto it gives the foot's height below the body measured ALONG GRAVITY:
+	#   feet_y_gravity[i] = (foot position in body frame) · (gravity-up in body frame)
+	# Both inputs are physically available (IMU + joint angles + link lengths), so this is
+	# IK ⊕ IMU and nothing else.  It differs from the oracle by exactly the ABSOLUTE
+	# chassis height, which is the god's-eye part and the only part we drop.
+	var up_body: Vector3 = _ch_inv.basis * Vector3.UP
+	var feet_y_grav_arr := PackedFloat64Array()
+	for i in range(4):
+		var foot_body: Vector3 = _ch_inv * _lowers[i].global_transform.origin
+		feet_y_grav_arr.append(foot_body.dot(up_body) - L3 * 0.5)
+	brain.publish_proprio(feet_y_grav_arr, "feet_y_gravity")
+
+	# ---- feet_y_gravity_cmd / _fk: the SIM-TO-REAL test (2026-07-25) ----------------
+	# feet_y_gravity above reads the ACHIEVED rigid-body pose.  The physical PiCrawler uses
+	# hobby servos, which take an angle and report NOTHING — so real FK must run on the
+	# COMMANDED angles, which are blind to load deflection (a planted leg sags while its
+	# command still says "I am here").  The sim signal is therefore better-informed than the
+	# hardware signal, in the dangerous direction, and this is what tests whether the win
+	# survives what the robot can actually know.
+	#
+	# Both variants run through the SAME known-correct chain (_fk_leg, which calibrate mode
+	# depends on being exact) so the FK's own conventions CANCEL out of the comparison:
+	#   _fk  ← measured joint angles  → validation twin; must track feet_y_gravity closely,
+	#                                    which is the self-check that the FK is wired right
+	#   _cmd ← commanded servo targets → the hardware-honest signal
+	# Attitude stays exact in both (modelling accelerometer error is a SEPARATE experiment,
+	# kept separate so this is one lever).
+	if _chassis_rest_xform != Transform3D():
+		var rest_inv: Transform3D = _chassis_rest_xform.affine_inverse()
+		var fk_arr := PackedFloat64Array()
+		var cmd_arr := PackedFloat64Array()
+		for i in range(4):
+			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
+			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
+				+ servo_origins[servo_idx(i, 0)]
+			var c2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
+				+ servo_origins[servo_idx(i, 1)]
+			var c3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
+				+ servo_origins[servo_idx(i, 2)]
+			var lower_fk:  Transform3D = _fk_leg(i, hip1_angles[i], hip2_angles[i], knee_angles[i])[2]
+			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
+			fk_arr.append((rest_inv * lower_fk.origin).dot(up_body) - L3 * 0.5)
+			cmd_arr.append((rest_inv * lower_cmd.origin).dot(up_body) - L3 * 0.5)
+		brain.publish_proprio(fk_arr,  "feet_y_gravity_fk")
+		brain.publish_proprio(cmd_arr, "feet_y_gravity_cmd")
+		# Mean |commanded − achieved| foot height: the servo tracking error in metres, i.e.
+		# exactly the information the hardware does not have.  Diagnostic only.
+		var e_sum: float = 0.0
+		for i in range(4):
+			e_sum += absf(cmd_arr[i] - fk_arr[i])
+		_dbg_fk_cmd_err = e_sum / 4.0
+		# VALIDATION: the measured-angle FK must reproduce the achieved-pose signal.  If this
+		# is NOT small, the FK chain is miswired and fk_cmd_err above is measuring MY error
+		# rather than the servos'.  Checked before drawing any conclusion from it.
+		var v_sum: float = 0.0
+		for i in range(4):
+			v_sum += absf(fk_arr[i] - feet_y_grav_arr[i])
+		_dbg_fk_valid_err = v_sum / 4.0
+
+		# ---- HONEST IMU ATTITUDE (2026-07-26) ----------------------------------------
+		# The attitude estimate is computed in _imu_substep() at the PHYSICS rate (240 Hz),
+		# not here.  _step_one runs at TAU=50 Hz, and a real IMU samples far faster than a
+		# control loop does — MPU-6050-class parts run 1-8 kHz, BNO085 fuses on-chip at
+		# ~400 Hz — so sampling the sensor at the brain's rate both understates the hardware
+		# and starves the filter.  The physics is already oversampled to 240 Hz to stop foot
+		# tunnelling, and that headroom is free sensor bandwidth: 240 Hz sits squarely in the
+		# realistic ODR band.  This block only CONSUMES the estimate.
+		#   _cmd      exact attitude       (upper bound; NOT physically available)
+		#   _cmd_acc  accelerometer ONLY   (shows the contamination)
+		#   _cmd_imu  accel + gyro fused   (what the real robot can actually do)
+		var up_acc: Vector3 = _up_acc_last if _up_acc_last.length() > 0.5 else up_body
+		var imu6 := PackedFloat64Array()
+		imu6.append(_accel_body_last.x); imu6.append(_accel_body_last.y); imu6.append(_accel_body_last.z)
+		imu6.append(_gyro_body_last.x);  imu6.append(_gyro_body_last.y);  imu6.append(_gyro_body_last.z)
+		brain.publish_proprio(imu6, "imu6")
+
+		var acc_arr := PackedFloat64Array()
+		var imu_arr := PackedFloat64Array()
+		for i in range(4):
+			var d1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
+				+ servo_origins[servo_idx(i, 0)]
+			var d2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
+				+ servo_origins[servo_idx(i, 1)]
+			var d3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
+				+ servo_origins[servo_idx(i, 2)]
+			var foot_b: Vector3 = rest_inv * _fk_leg(i, d1, d2, d3)[2].origin
+			acc_arr.append(foot_b.dot(up_acc) - L3 * 0.5)
+			imu_arr.append(foot_b.dot(_up_est_body) - L3 * 0.5)
+		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
+		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
+		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
+
 	# ---- Markov-blanket-compliant posture sensing (2026-07-22) ----------------
 	# The old height reflex read ABSOLUTE chassis world-Y (chassis_y_norm) — god's-
 	# eye state no physical picrawler could sense.  These two topics are what the
@@ -4526,6 +4803,15 @@ func _step_one() -> void:
 	for i in range(4):
 		foot_contact_arr.append(1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0)
 	brain.publish_proprio(foot_contact_arr, "foot_contact")
+	# Cache the TRUE swing fraction (legs touching nothing) for the diag line.  This is
+	# the ground truth for "is the foot on the ground".  It is NOT interchangeable with
+	# the two proxies that have been used as if it were: `feet_y < stance_y_threshold` is
+	# a WORLD-HEIGHT test (neither terrain- nor chassis-relative), and MotorEPM's
+	# foot-height EMA is self-referential.  Any duty-factor claim must be checked here.
+	var _n_air: int = 0
+	for i in range(4):
+		if foot_contact_arr[i] < 0.5: _n_air += 1
+	_dbg_contact_swing = float(_n_air) / 4.0
 	# (2) ground_clearance: body-down ToF/ultrasonic distance from the belly to the
 	# nearest ground surface, normalized [0,1].  ~0 = belly ON a surface (dragging /
 	# high-centered); higher = belly held up off the ground.  Replaces absolute Y.
@@ -4533,6 +4819,25 @@ func _step_one() -> void:
 	var clearance_arr := PackedFloat64Array()
 	clearance_arr.append(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0))
 	brain.publish_proprio(clearance_arr, "ground_clearance")
+
+	# ---- feet_y_ground: the LEGAL reconstruction of what feet_y smuggles in ----------
+	# A/B showed the god's-eye feet_y (absolute world-Y) beats its body-relative twin
+	# (net_z 3.76 vs 2.52).  The two differ by exactly the chassis's own vertical motion,
+	# so what the world-frame signal carries — and the body-frame one loses — is the
+	# BODY'S BOUNCE: a whole-body vertical phase reference.  Gating a knee push on that
+	# synchronises it with when the body is actually loading its legs.
+	#
+	# Both halves of this sum are Markov-compliant, so the fusion is too:
+	#   feet_y_body   — foot pose relative to the chassis (joint encoders + link lengths)
+	#   _dbg_gc_raw   — belly ToF rangefinder, the sensor that already replaced the
+	#                   god's-eye chassis_y_norm and solved the hump
+	# Sum ≈ foot height above the ground the body is actually standing on — and unlike
+	# world-Y it is TERRAIN-RELATIVE, so it should survive a slope where world-Y cannot.
+	# Absolute offset is irrelevant: the swing detector only compares against its own mean.
+	var feet_y_ground_arr := PackedFloat64Array()
+	for i in range(4):
+		feet_y_ground_arr.append(_dbg_gc_raw + feet_y_body_arr[i])
+	brain.publish_proprio(feet_y_ground_arr, "feet_y_ground")
 	# (3) upright: the chassis up-vector's alignment with gravity (basis.y.y): 1 =
 	# perfectly upright, 0 = on its side, -1 = inverted.  A real IMU (accelerometer
 	# gravity vector) gives this — compliant, always on.  Used to gate keyframe
@@ -7972,6 +8277,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	line["gc_raw"]  = snappedf(_dbg_gc_raw, 0.0001)
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
+	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against
+	# which any duty-factor claim must be checked, and which disagrees with BOTH proxies
+	# previously used for it (see where it is computed).
+	line["contact_swing"] = snappedf(_dbg_contact_swing, 0.001)
+	# Servo tracking error in foot-height metres = the information hobby servos do NOT
+	# report. If this is large, commanded-angle FK is a materially different signal.
+	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
+	line["fk_valid_err"] = snappedf(_dbg_fk_valid_err, 0.00001)
+	line["att_err_acc"] = snappedf(_dbg_att_err_acc, 0.01)
+	line["att_err_imu"] = snappedf(_dbg_att_err_imu, 0.01)
+	line["acc_mag"] = snappedf(_dbg_acc_mag, 0.01)
+	line["acc_trust"] = snappedf(_dbg_acc_trust, 0.0001)
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
@@ -7979,6 +8296,34 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
 			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
 			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# swing_frac = fraction of legs MotorEPM's foot-height detector calls
+			# "swinging" — the gate stance_lift and the Cruse rules ride on.  Read it
+			# against this body's OWN absolute planted test (feet_y < stance_y_threshold):
+			# a detector reporting ~0.5 while the feet are genuinely down ~80% of the
+			# time is measuring gait phase, not ground contact.
+			line["swing_frac"] = snappedf(float(_mm.get("swing_frac", 0.0)), 0.001)
+			# cruse_bias = mean |MotorEPM's OWN Cruse contribution|.  EXACTLY 0 means
+			# MotorEPM's Cruse block never ran, so any Cruse-looking motion is coming
+			# from elsewhere.  NOTE there are TWO Rule-3 knobs: MotorEPM's
+			# `cruse_rule3_weight` (inert unless `cruse_gain` != 0 — this is the one the
+			# MOTOR-EPM panel writes) and CruseCoordinator's separate `rule3_weight`
+			# (gated by `cruse_bias_gain`, which defaults to 1.0 = ON).
+			line["cruse_bias"] = snappedf(float(_mm.get("cruse_bias", 0.0)), 0.0001)
+			# phase_agree: does a LEGAL body-rhythm phase gate reproduce the god's-eye swing
+			# detector? ~0.5 = no information; ~1.0 = the detector is really a phase gate and
+			# the oracle can be replaced by a signal a real robot has.
+			line["phase_agree"] = snappedf(float(_mm.get("phase_agree", 0.0)), 0.001)
+			line["legphase_agree"] = snappedf(float(_mm.get("legphase_agree", 0.0)), 0.001)
+			# gait_phase = the LIVE Kuramoto target offsets [FL,FR,RL,RR].  Constant
+			# unless coord_adapt_rate (leaky tracker) or coord_reward_drive (fitness
+			# ratchet) is on.  Surfaced so "did the coordination recover after the robot
+			# got stuck, or did it lock in a destructive pattern?" is a MEASUREMENT.
+			# A leaky tracker must drift under perturbation and RETURN; a ratchet won't.
+			var _gp = _mm.get("gait_phase", null)
+			if _gp is Array:
+				var _gpo: Array = []
+				for _v in _gp: _gpo.append(snappedf(float(_v), 0.001))
+				line["gait_phase"] = _gpo
 	line["radial_compass"]           = [snappedf(_last_radial_compass.x, 0.001),
 										snappedf(_last_radial_compass.y, 0.001)]
 	line["target_compass"]           = [snappedf(_last_target_compass.x, 0.001),

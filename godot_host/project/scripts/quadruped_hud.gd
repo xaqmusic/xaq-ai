@@ -36,6 +36,11 @@ var _prev_tilt_above_tipover: bool = false  # for tipover-event edge detection
 var _below_fail_ticks: int = 0           # cumulative below-FAIL count
 var _tipover_ticks: int = 0              # cumulative tilt>π/2 count
 var _hud_sample_ticks: int = 0           # increments per _process call
+# IMU scope — a live view of the modelled accelerometer/gyro + the attitude filter, and
+# the reference panel for bringing the real PiCrawler IMU up.  Created lazily only for a
+# body that actually models an IMU (get_imu_debug), so the quadruped is unaffected.
+var _imu_scope: Control = null
+var _imu_scope_on: bool = true
 
 func _as_bool(v: Variant) -> bool:
 	if v == null:
@@ -93,6 +98,14 @@ const _LEG_COLORS: Array = [
 	Color(0.30, 0.50, 0.95, 1.0),
 	Color(0.95, 0.85, 0.20, 1.0),
 ]
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_I:
+		_imu_scope_on = not _imu_scope_on
+		if _imu_scope != null:
+			_imu_scope.visible = _imu_scope_on
+		print("QuadrupedHUD: [I] imu_scope = %s" % _imu_scope_on)
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -164,6 +177,21 @@ func _process(_delta: float) -> void:
 			log(max(1.0, float(pm.get("n_intents", 5))))
 		]
 
+	# IMU scope — created on first sight of a body that models an IMU.  [I] toggles it.
+	if _imu_scope == null and body != null and body.has_method("get_imu_debug"):
+		_imu_scope = (load("res://scripts/imu_scope.gd") as Script).new()
+		_imu_scope.set("body", body)
+		_imu_scope.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		_imu_scope.position = Vector2(-266, 8)
+		# MotorEpmPanel is a SIBLING of this HUD Control under the HUD CanvasLayer and is
+		# declared after it in the scene, so it draws over everything here — including a
+		# collapsed panel's full-rect Control.  An absolute z_index lifts the scope clear
+		# without depending on scene child order.
+		_imu_scope.z_as_relative = false
+		_imu_scope.z_index = 100
+		_imu_scope.visible = _imu_scope_on
+		add_child(_imu_scope)
+
 	# Chassis kinematics for situational awareness while watching.
 	var y_str: String    = "—"
 	var tilt_str: String = "—"
@@ -178,7 +206,17 @@ func _process(_delta: float) -> void:
 			var pos: Vector3 = (ch as RigidBody3D).global_transform.origin
 			y_str = "%.2fm" % pos.y
 			var tilt_rad: float = _tilt(ch.global_transform.basis)
-			tilt_str = "%.0f°" % rad_to_deg(tilt_rad)
+			# Report tilt from the IMU-FUSED estimate when the body has one — a number the
+			# real robot can actually produce — and mark the god's-eye value as such so the
+			# two can be compared at a glance.  (The fall/tipover accounting below keeps
+			# using ground truth on purpose: it is bookkeeping, not an observation.)
+			if body.has_method("get_imu_debug"):
+				var imud: Dictionary = body.get_imu_debug()
+				var uf: Vector3 = imud.get("up_fused", Vector3.UP)
+				var imu_tilt: float = acos(clampf(uf.y, -1.0, 1.0))
+				tilt_str = "%.0f° imu (%.0f° true)" % [rad_to_deg(imu_tilt), rad_to_deg(tilt_rad)]
+			else:
+				tilt_str = "%.0f°" % rad_to_deg(tilt_rad)
 			# Sample stability metrics for the end-run summary.
 			_hud_sample_ticks += 1
 			var y_above_fail: bool = pos.y >= _FAIL_HEIGHT and tilt_rad <= _FAIL_TILT
@@ -405,8 +443,36 @@ func _process(_delta: float) -> void:
 	var path_hint: String = ""
 	if trail_v != null and is_instance_valid(trail_v):
 		path_hint = "   [P] path: %s" % ("ON" if (trail_v as Node3D).visible else "hidden")
-	var hint_line: String = "%s%s%s%s%s%s%s%s   [`] or [F1] toggle graph   [ESC] quit" % [
-		space_hint, ragdoll_hint, calib_hint, mtest_hint, panels_hint, hud_hint, gym_hint, path_hint]
+	# 2026-07-26 — EVERY bound hotkey is listed, split across two lines: run/mode controls
+	# then view toggles.  Keys that carry live state show it, so the hint doubles as a
+	# status readout.  If a binding is added to picrawler_body._handle_key, add it here too.
+	var mpanel_hint: String = ""
+	var mpanel: Node = get_tree().get_root().find_child("MotorEpmPanel", true, false)
+	if mpanel != null and mpanel is Control:
+		mpanel_hint = "   [M] sliders: %s" % ("ON" if (mpanel as Control).visible else "hidden")
+	var imu_hint: String = ""
+	if _imu_scope != null:
+		imu_hint = "   [I] imu: %s" % ("ON" if _imu_scope.visible else "hidden")
+	# Remaining body toggles that were never surfaced: place-mode, ray overlay, vision panel.
+	var place_v: Variant = body.get("_place_mode")
+	var place_hint: String = ""
+	if place_v != null:
+		place_hint = "   [4] place: %s" % ("ON" if _as_bool(place_v) else "off")
+	var rays_v: Variant = body.get("_ray_overlay_on")
+	var rays_hint: String = ""
+	if rays_v != null:
+		rays_hint = "   [V] rays: %s" % ("ON" if _as_bool(rays_v) else "off")
+	var vis_v: Variant = body.get("_vision_panel_on")
+	var vis_hint: String = ""
+	if vis_v != null:
+		vis_hint = "   [N] vision: %s" % ("ON" if _as_bool(vis_v) else "off")
+
+	# Line 1 — run + mode controls.  Line 2 — view toggles + persistence.
+	var hint_run: String = "%s%s%s%s%s   [3] hump%s" % [
+		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint]
+	var hint_view: String = "%s%s%s%s%s%s%s   [`/F1] graph   [F5] save   [F9] load   [ESC] quit" % [
+		panels_hint, mpanel_hint, imu_hint, hud_hint, path_hint, rays_hint, vis_hint]
+	var hint_line: String = hint_run + "\n" + hint_view
 	if hud_is_hidden:
 		# Hidden mode: render ONLY the hint line so the user keeps the
 		# keyboard reference but loses the diagnostic text + notifications.
