@@ -223,6 +223,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"swing_hyst_frac", ParamMutability::HotMutable,
          "SWING-DETECTOR DEADBAND, in units of the foot's own running mean-absolute-deviation from its height EMA. The bare `foot_y > foot_y_ema` test has NO deadband, so it splits ~50/50 by construction — it reports gait PHASE, not ground contact — and it closes a positive feedback loop with any consumer that moves the foot (stance_lift, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. That relaxation oscillator runs at the EMA's ~50-tick timescale and competes with the body's own ~70-tick stride, so its cost scales with the consumer's gain. The band stays RELATIVE (foot_y is world-Y; an absolute threshold would call a planted foot on raised terrain permanently swinging — the blindness that retired chassis_y_norm) and self-scales to the gait's own amplitude rather than being tuned. ~1.0 ≈ one mean deviation of hold. 0 = legacy no-deadband detector (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
+        {"homeo_leak_upright_only", ParamMutability::HotMutable,
+         "POSTURE-GATE the homeostat leak: forget fast while upright, STOP forgetting while uprightness is below this, so the integrators can accumulate and escalate out of a bad posture. This is the INVERSE of homeo_upright_gate (which froze the integrators while inverted and removed the 40x escalation that rights the robot) and a cleaner reading of the same operator finding than homeo_leak_progress_gate, which cannot distinguish CLIMBING from STUCK — gating on forward progress switches the leak off on the hump where the robot legitimately slows, readmitting the height windup (measured hump 6.09 -> 4.84). Requires upright_topic. ~0.5 = stop forgetting past ~60 deg of tilt. 0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"homeo_leak_progress_gate", ParamMutability::HotMutable,
+         "PROGRESS-GATE the homeostat leak: scale it by forward progress, so the integrators forget fast while the body is getting somewhere and stop forgetting entirely while stalled. A CONSTANT leak is wrong for the same reason a freeze is — the wind-up is not only damage, it is the escalation that escapes a bad posture. Found by hand and replicated: with leak=5 the robot could NOT get off a 30-degree wall; leak=0 let it accumulate until it escaped, then leak=5 restored the walk quickly. This automates that two-position law on height_rest_frac (1 at rest, 0 cruising), which the module already maintains. Forgetting is a luxury of success. 0 = constant leak (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"homeo_leak_cycles", ParamMutability::HotMutable,
          "HOMEOSTAT LEAK, in STRIDE CYCLES: the time constant over which height_bias and amp_gain forget toward neutral (0 lift / unity gain). Makes their memory finite by construction, which is the fix for the inversion-forgetting failure — that was not excess plasticity but ASYMMETRIC plasticity: both wound fast in one direction and could not return (amp_gain only unwinds when amp_ema EXCEEDS target; height_bias is multiplied by height_rest_frac which -> 0 while moving, so walking froze it). A leak needs no regime classifier, no uprightness signal and no snapshot, and unlike a freeze it never blocks the wind itself — so the 40x amplitude escalation that rights an inverted robot is preserved, it just does not persist. Rate is derived from the body's own measured omega (rhythm_topic), so it tracks the actual gait frequency instead of being a tuned tick count. SMALL values are the useful regime: a persistent error balances the leak at x ~ k*err/lambda, so ~2-3 cycles bounds an excursion AND forgets it in a couple of seconds, whereas ~10 cycles barely bounds it at all. 0 = off (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{60.0}},
@@ -439,6 +445,8 @@ ParamMap MotorEPM::current_params() const {
     m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
     m["homeo_upright_gate"] = homeo_upright_gate_;
     m["homeo_leak_cycles"] = homeo_leak_cycles_;
+    m["homeo_leak_progress_gate"] = homeo_leak_progress_gate_;
+    m["homeo_leak_upright_only"]  = homeo_leak_upright_only_;
     m["rhythm_topic"]      = rhythm_topic_;
     m["height_unwind_free"] = height_unwind_free_;
     m["coord_probe_ticks"]  = coord_probe_ticks_;
@@ -543,6 +551,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
+    apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
+    apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
     apply_param(params, "homeo_leak_cycles", [&](auto const& v){ homeo_leak_cycles_ = get_double(v, "homeo_leak_cycles"); });
     apply_param(params, "rhythm_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) rhythm_topic_ = *p; });
     apply_param(params, "homeo_upright_gate", [&](auto const& v){ homeo_upright_gate_ = get_double(v, "homeo_upright_gate"); });
@@ -1091,6 +1101,8 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
+    else if (key == "homeo_leak_upright_only") homeo_leak_upright_only_ = get_double(value, "homeo_leak_upright_only");
+    else if (key == "homeo_leak_progress_gate") homeo_leak_progress_gate_ = get_double(value, "homeo_leak_progress_gate");
     else if (key == "homeo_leak_cycles") homeo_leak_cycles_ = get_double(value, "homeo_leak_cycles");
     else if (key == "homeo_upright_gate") homeo_upright_gate_ = get_double(value, "homeo_upright_gate");
     else if (key == "height_unwind_free") height_unwind_free_ = get_double(value, "height_unwind_free");
@@ -1268,12 +1280,42 @@ void MotorEPM::tick(uint64_t tick_id) {
     // The rate is expressed in STRIDE CYCLES off the body's own measured omega, so it
     // tracks whatever frequency the body settles at instead of being a tuned tick count.
     float homeo_leak = 0.0f;
+    leak_amp_ = 0.0f; leak_h_ = 0.0f;
     if (homeo_leak_cycles_ > 0.0) {
         const float period = (std::fabs(body_omega_) > 1e-4f)
                            ? (2.0f * float(M_PI) / std::fabs(body_omega_))
                            : kLeakFallbackPeriod;   // no rhythm token yet — measured stride
         homeo_leak = std::clamp(1.0f / (float(homeo_leak_cycles_) * period), 0.0f, 0.5f);
+        // WHEN TO STOP FORGETTING (2026-07-26, operator-discovered, two observations).
+        // A constant leak is wrong: the integrator wind-up is not only damage, it is the
+        // ESCALATION that gets the body out of trouble.  Two separate cases were found by
+        // hand, and they need DIFFERENT treatment per integrator:
+        //
+        //  (1) INVERTED on a 30-degree wall.  With leak=5 the robot could not escape at all
+        //      (measured 0/4 vs 2/4 with the leak off); setting leak=0 let effort accumulate
+        //      until it got out, then leak=5 restored the walk quickly.  Both integrators
+        //      should accumulate here — the posture itself is invalid.
+        //  (2) UPRIGHT but BLOCKED at a slanted wall.  The robot "no longer learns how to
+        //      climb — it stays in the same gait it was using on the flat."  Here a posture
+        //      gate alone does nothing, because the body IS upright.  Effort must escalate.
+        //      BUT height_bias must NOT accumulate on a slope: that is precisely the refuted
+        //      windup where hip2 lifts the legs off the incline (measured: progress-gating
+        //      BOTH integrators cost hump traversal 6.09 -> 4.84).
+        //
+        // Hence two effective rates.  amp_gain (effort) stops forgetting whenever the agent
+        // is FAILING — bad posture or no progress.  height_bias (posture bias) stops
+        // forgetting only when the posture is invalid, so a stall on a hill cannot readmit
+        // the windup.  Forgetting is a luxury of success; escalation is the response to
+        // failure; and which state may escalate depends on what that state means.
+        leak_amp_ = homeo_leak;   // effort escalation
+        leak_h_   = homeo_leak;   // posture bias
+        const bool bad_posture = (homeo_leak_upright_only_ > 0.0
+                                  && upright_ < float(homeo_leak_upright_only_));
+        if (bad_posture) { leak_amp_ = 0.0f; leak_h_ = 0.0f; }
+        // Stall suppresses ONLY the effort leak (see case 2).
+        if (homeo_leak_progress_gate_ > 0.0) leak_amp_ *= (1.0f - height_rest_frac_);
     }
+    homeo_leak_eff_ = leak_amp_;   // diag: the EFFORT forgetting rate actually applied
 
     if (height_homeo_gain_ > 0.0 && chassis_h_max_ > 1e-4f) {
         float tgt = float(height_k_) * chassis_h_max_;
@@ -1296,7 +1338,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         } else {
             height_bias_ += dh * height_rest_frac_;                 // legacy
         }
-        height_bias_ -= homeo_leak * height_bias_;    // forget toward neutral lift
+        height_bias_ -= leak_h_ * height_bias_;       // forget toward neutral lift
         height_bias_ = std::clamp(height_bias_, kHeightBiasMin, kHeightBiasMax);
     }
 
@@ -1362,7 +1404,7 @@ void MotorEPM::tick(uint64_t tick_id) {
                     // right target is the least-intervention end of the range, where the leak
                     // AGREES with the homeostat in normal operation and only bites after an
                     // excursion.  Applied even when gated so a wound value always decays.
-                    L.amp_gain -= homeo_leak * (L.amp_gain - kAmpGainMin);
+                    L.amp_gain -= leak_amp_ * (L.amp_gain - kAmpGainMin);
                     L.amp_gain = std::clamp(L.amp_gain, kAmpGainMin, kAmpGainMax);
                 }
             }
@@ -2357,6 +2399,7 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["coord_best_fitness"]  = coord_best_fitness_;
     j["coord_activity"]      = amp_ema_mean();   // the anti-freeze factor of mode 1
     j["upright"]             = upright_;         // ~basis.y.y; drives the homeostat gate
+    j["homeo_leak_eff"]      = homeo_leak_eff_;  // forgetting rate actually applied
     j["homeo_gated"]         = (homeo_upright_gate_ > 0.0 && upright_ < float(homeo_upright_gate_));
     j["flow_quality"]        = flow_quality_diag_; // magnitude·predictability (drives the flow stroke amp)
     {

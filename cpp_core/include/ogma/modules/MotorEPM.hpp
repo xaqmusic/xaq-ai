@@ -205,6 +205,11 @@ private:
     float   upright_ = 1.0f;
     double  homeo_upright_gate_ = 0.0;   // 0 = off (byte-identical)
     double  homeo_leak_cycles_  = 0.0;   // homeostat forgetting time constant, in strides
+    double  homeo_leak_progress_gate_ = 0.0;  // 1 = only forget while making progress
+    double  homeo_leak_upright_only_  = 0.0;  // stop forgetting below this uprightness
+    float   homeo_leak_eff_ = 0.0f;      // diag: effort leak rate after the gates
+    float   leak_amp_ = 0.0f;            // amp_gain (effort) forgetting rate this tick
+    float   leak_h_   = 0.0f;            // height_bias (posture) forgetting rate this tick
     std::string rhythm_topic_;           // rhythm.body.gait — supplies omega for the leak
     float   body_omega_ = 0.0f;          // body gait rate (rad/tick) from that topic
     void    handle_rhythm(MessagePtr payload);
