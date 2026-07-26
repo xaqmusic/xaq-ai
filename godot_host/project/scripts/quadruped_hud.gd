@@ -457,7 +457,10 @@ func _process(_delta: float) -> void:
 	var place_v: Variant = body.get("_place_mode")
 	var place_hint: String = ""
 	if place_v != null:
-		place_hint = "   [4] place: %s" % ("ON" if _as_bool(place_v) else "off")
+		# While placement is armed, say which button does what — LEFT drops upright,
+		# RIGHT drops INVERTED (the inversion-recovery probe).
+		place_hint = ("   [4] place: ON — LMB=upright RMB=INVERTED"
+			if _as_bool(place_v) else "   [4] place: off")
 	var rays_v: Variant = body.get("_ray_overlay_on")
 	var rays_hint: String = ""
 	if rays_v != null:

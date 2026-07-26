@@ -995,6 +995,10 @@ var _teleport_until: int = -1
 # physics frame — transform writes from _input handlers get clobbered by the
 # physics step in the same frame, so KEY_3/KEY_4 must defer.  null = nothing pending.
 var _pending_teleport = null
+# Per-drop flip intent for the NEXT pending teleport: -1 = fall back to the
+# OGMA_PICRAWLER_TELEPORT_FLIP env (scripted runs), 0 = upright, 1 = inverted.  Lets the
+# mouse placement pick orientation per click instead of needing an env restart.
+var _pending_teleport_flip: int = -1
 # Ramp-debug: last raw belly rangefinder reading (metres), cached at publish so the
 # diag can log the rangefinder output + homeostat state on the hump.
 var _dbg_gc_raw: float = 0.0
@@ -3225,7 +3229,9 @@ func _teleport_to(ground: Vector3) -> void:
 	# Optional FLIP (env OGMA_PICRAWLER_TELEPORT_FLIP=1): rotate the whole assembly
 	# 180° about X → drops it upside-down (a controlled INVALID posture for the
 	# keyframe bake-gate A/B).  Rigid transform about the chassis pivot.
-	var flip: bool = OS.get_environment("OGMA_PICRAWLER_TELEPORT_FLIP") == "1"
+	# Per-drop intent (mouse placement) wins; scripted/env runs fall through to the env var.
+	var flip: bool = (_pending_teleport_flip == 1) if _pending_teleport_flip >= 0 \
+		else OS.get_environment("OGMA_PICRAWLER_TELEPORT_FLIP") == "1"
 	var drop: Vector3 = Vector3(ground.x, ground.y + (0.35 if flip else 0.30), ground.z)
 	var pivot: Vector3 = _chassis.global_transform.origin
 	var rot: Basis = Basis(Vector3(1, 0, 0), PI) if flip else Basis.IDENTITY
@@ -3256,6 +3262,8 @@ var _place_target: Vector3 = Vector3.ZERO
 
 func _set_place_mode(on: bool) -> void:
 	_place_mode = on
+	if on:
+		_ui_notify("[4] place mode — LEFT-click = drop upright, RIGHT-click = drop INVERTED")
 	if _place_marker == null and on:
 		_place_marker = _make_place_marker()
 		add_child(_place_marker)
@@ -3838,9 +3846,17 @@ func _input(event: InputEvent) -> void:
 					_place_marker.global_position = g + Vector3(0, 0.012, 0)   # float just above the surface
 			get_viewport().set_input_as_handled()
 			return
-		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		elif event is InputEventMouseButton and event.pressed \
+				and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+			# LEFT = drop upright, RIGHT = drop INVERTED.  Inversion recovery is a thing we
+			# probe constantly (does it self-right, and does the walk survive afterwards),
+			# and it used to require setting an env var and restarting.  Now it is a click.
 			# Defer the actual drop to the physics step (input-frame writes get clobbered).
+			var inverted: bool = (event.button_index == MOUSE_BUTTON_RIGHT)
 			_pending_teleport = _place_target
+			_pending_teleport_flip = 1 if inverted else 0
+			_ui_notify("[place] dropping %s at (%.1f, %.1f)" % [
+				"INVERTED" if inverted else "upright", _place_target.x, _place_target.z])
 			_set_place_mode(false)
 			get_viewport().set_input_as_handled()
 			return
@@ -4057,6 +4073,7 @@ func _physics_process(delta: float) -> void:
 	if _pending_teleport != null:
 		_teleport_to(_pending_teleport)
 		_pending_teleport = null
+		_pending_teleport_flip = -1      # consumed — later drops fall back to the env again
 	# Turbo budget — exit the process cleanly when either:
 	#   (a) OGMA_QUIT_AFTER_TICKS is reached, OR
 	#   (b) the run is already _done (max_steps hit + reset_mode=continuous
