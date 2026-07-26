@@ -31,8 +31,19 @@ def run_one(cfg, seed, max_steps, difficulty, extra):
                        stdout=f, stderr=subprocess.STDOUT)
     return parse(out)
 
+# Foot is PLANTED when feet_y < stance_y_threshold (same test the body uses at
+# picrawler_body.gd:4556).  Override with OGMA_PICRAWLER_STANCE_Y_THRESHOLD to match
+# a run that moved it, or the planted/unstable columns silently measure the wrong body.
+STANCE_TH = float(os.environ.get("OGMA_PICRAWLER_STANCE_Y_THRESHOLD", 0.04))
+# The robot SPAWNS tucked (belly ~9 mm off the deck) and settles over the first
+# seconds.  Postural metrics (clearance, planted, tilt, scrub) must skip that
+# transient or bellyc_min just reports the spawn pose on every seed and is blind to
+# what walking actually does.  Displacement metrics still use the WHOLE run.
+WARMUP_TICKS = int(os.environ.get("SEEDAVG_WARMUP", 900))
+
 def parse(path):
-    zs=[];xs=[];hy=[];ar=[];fv=[]
+    zs=[];xs=[];hy=[];ar=[];fv=[];ts=[]
+    gc=[];cy=[];planted=[];tilt=[];lat=[];lifts=None;lifts0=None
     for line in open(path):
         line=line.strip()
         if '"x":' not in line or not line.startswith('{'): continue
@@ -40,7 +51,29 @@ def parse(path):
         except: continue
         if 'x' in d:
             xs.append(d['x']);zs.append(d['z']);hy.append(d.get('heading_yaw',0))
-            ar.append(d.get('auto_reset_count',0));fv.append(d.get('fwd_v',0.0))
+            ar.append(d.get('auto_reset_count',0));ts.append(d.get('t',0))
+            if d.get('t', 0) < WARMUP_TICKS:   # postural metrics: steady state only
+                continue
+            fv.append(d.get('fwd_v',0.0))
+            # BELLY-UP: gc_raw = belly ToF rangefinder in METRES (the Markov-compliant
+            # sensor).  y = chassis height.  Both needed: chassis height is BLIND to
+            # belly-drag on raised terrain, clearance is what would grind a real chassis.
+            if 'gc_raw' in d: gc.append(d['gc_raw'])
+            cy.append(d.get('y',0.0))
+            tilt.append(d.get('tilt',0.0))
+            lat.append(abs(d.get('lateral_v',0.0)))
+            # STATIC STABILITY: how many feet are actually on the ground.  A trot
+            # targets 2, a crawl 3+.  Belly clearance is blind to HOW the support is
+            # achieved — this is its complement.
+            fy=d.get('feet_y')
+            if isinstance(fy,list) and fy: planted.append(sum(1 for v in fy if v < STANCE_TH))
+            # RHYTHM COALESCENCE: cumulative per-leg lift events.  Total = steps taken;
+            # min/max across legs = whether all four participate or one leg is dragged
+            # (the tripod-skid signature).  fwd_v is oscillation-dominated and can't see this.
+            ll=d.get('leg_lifted_counts')
+            if isinstance(ll,list) and ll:
+                if lifts0 is None: lifts0=list(ll)   # subtract the warmup's lifts
+                lifts=ll
     if len(zs)<5: return None
     acc=hy[0];prev=hy[0]
     for h in hy[1:]:
@@ -61,8 +94,36 @@ def parse(path):
     # propulsion / anti-scrub proxy: more effective thrust → higher forward speed.
     # Read WITH net_disp — high fwd_v + low net_disp = fast but circling.
     fwd_v_mean = statistics.mean(fv) if fv else 0.0
+    # FLAT speed, isolated from the hump.  The corridor hump's base starts at z=2, so
+    # progress up to z=1.8 is pure flat traversal — the operator's stated deficit.
+    # Reporting only whole-corridor net_z would let a good climb mask a slow walk.
+    HUMP_Z = 1.8
+    flat_v = 0.0; t_flat = -1.0
+    for t, z in zip(ts, zs):
+        if z - zs[0] >= HUMP_Z:
+            t_flat = t - ts[0]
+            flat_v = (z - zs[0]) / t_flat * 60.0 if t_flat > 0 else 0.0
+            break
+    else:                                   # never got there — honest partial rate
+        span = (ts[-1] - ts[0]) or 1
+        flat_v = (zs[-1] - zs[0]) / span * 60.0
+    lp = [a-b for a,b in zip(lifts, lifts0)] if (lifts and lifts0) else (lifts or [])
+    steps = sum(lp)
+    # step_bal = least-stepping leg / most-stepping leg.  1.0 = all four share the
+    # gait; 0.0 = a leg is being DRAGGED (the tripod-skid).  This is the metric that
+    # sees "wobbly, not coalesced into a rhythm" — fwd_v cannot.
+    step_bal = (min(lp)/max(lp)) if (lp and max(lp) > 0) else 0.0
     return dict(net_z=zs[-1]-zs[0], max_z=max(zs), net_disp=net_disp, straight=straight,
-                fwd_v=fwd_v_mean, turns=(acc-hy[0])/(2*math.pi), falls=max(ar))
+                fwd_v=fwd_v_mean, turns=(acc-hy[0])/(2*math.pi), falls=max(ar),
+                flat_v=flat_v, t_flat=t_flat,
+                bellyc=statistics.mean(gc) if gc else 0.0,
+                bellyc_min=min(gc) if gc else 0.0,
+                chassis_y=statistics.mean(cy) if cy else 0.0,
+                planted=statistics.mean(planted) if planted else 0.0,
+                unstable=(sum(1 for p in planted if p < 3)/len(planted)) if planted else 0.0,
+                steps=steps, step_bal=step_bal,
+                tilt_sd=statistics.pstdev(tilt) if len(tilt) > 1 else 0.0,
+                scrub=statistics.mean(lat) if lat else 0.0)
 
 def ms(vals): return (statistics.mean(vals), statistics.pstdev(vals))
 
@@ -77,6 +138,16 @@ if __name__=="__main__":
     ok=[r for r in res if r]
     print(f"\n{cfg}  (n={len(ok)}/{n} seeds, {steps} ticks, diff {diff})")
     if not ok: print("  no valid runs"); sys.exit()
-    for k in ("net_z","max_z","net_disp","straight","fwd_v","turns","falls"):
-        m,s=ms([r[k] for r in ok])
-        print(f"  {k:<8} mean={m:+.2f}  std={s:.2f}   [{'  '.join(f'{r[k]:+.1f}' for r in ok)}]")
+    # Grouped so no single number can carry a promote decision (CLAUDE.md §3 rule 4).
+    GROUPS = (("FLAT SPEED", ("flat_v","t_flat")),
+              ("PROGRESS", ("net_z","max_z","net_disp","straight","fwd_v")),
+              ("BELLY-UP", ("bellyc","bellyc_min","chassis_y")),
+              ("STABILITY",("planted","unstable","tilt_sd","falls","turns")),
+              ("RHYTHM",   ("steps","step_bal","scrub")))
+    for label, keys in GROUPS:
+        print(f"  -- {label}")
+        for k in keys:
+            m,s=ms([r[k] for r in ok])
+            fmt = ".3f" if k in ("bellyc","bellyc_min","chassis_y","scrub","tilt_sd") else ".2f"
+            per = '  '.join(f"{r[k]:{fmt}}" for r in ok)
+            print(f"     {k:<10} mean={m:+{fmt}}  std={s:{fmt}}   [{per}]")
