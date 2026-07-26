@@ -49,6 +49,17 @@ const _SLIDERS: Array = [
 	{"key": "stance_lift_gain",  "label": "stance_lift (belly-up knee)", "min": -1.5, "max": 1.5, "step": 0.1},
 	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
 	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
+	{"key": "coord_fitness_mode","label": "fitness: 0=fwd_v REWARD 1=free","min": 0.0, "max": 1.0, "step": 1.0},
+	# ---- plasticity / forgetting (2026-07-26) --------------------------------------
+	# homeo_leak_cycles is the "learn fast, forget fast" knob: the stride-cycle time
+	# constant over which height_bias + amp_gain forget toward minimum authority, so an
+	# inverted excursion cannot latch.  ~5 measured free; ~2 is too aggressive (wobble).
+	# NOTE it wants rhythm_topic=rhythm.body.gait in the CONFIG to read the body's real
+	# stride period; without it the leak falls back to a fixed 70-tick stride.
+	{"key": "homeo_leak_cycles", "label": "homeo_leak (forget, strides)", "min": 0.0, "max": 20.0, "step": 1.0},
+	{"key": "homeo_upright_gate","label": "upright_gate (FREEZE homeo)",  "min": 0.0, "max": 1.0,  "step": 0.05},
+	{"key": "height_unwind_free","label": "height unwind-while-moving",   "min": 0.0, "max": 1.0,  "step": 1.0},
+	{"key": "swing_hyst_frac",   "label": "swing deadband (MAD units)",   "min": 0.0, "max": 3.0,  "step": 0.25},
 	{"key": "coord_lat_penalty", "label": "agency_lat  (anti-crab)",    "min": 0.0,  "max": 1.0,  "step": 0.05},
 ]
 

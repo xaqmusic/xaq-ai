@@ -461,6 +461,11 @@ func _process(_delta: float) -> void:
 		# RIGHT drops INVERTED (the inversion-recovery probe).
 		place_hint = ("   [4] place: ON — LMB=upright RMB=INVERTED"
 			if _as_bool(place_v) else "   [4] place: off")
+		# Live marker XYZ while armed, so the exact target is readable BEFORE dropping.
+		if _as_bool(place_v):
+			var pt_v: Variant = body.get("_place_target")
+			if pt_v is Vector3:
+				place_hint += "  target(%.2f, %.2f, %.2f)" % [pt_v.x, pt_v.y, pt_v.z]
 	var rays_v: Variant = body.get("_ray_overlay_on")
 	var rays_hint: String = ""
 	if rays_v != null:
@@ -471,6 +476,16 @@ func _process(_delta: float) -> void:
 		vis_hint = "   [N] vision: %s" % ("ON" if _as_bool(vis_v) else "off")
 
 	# Line 1 — run + mode controls.  Line 2 — view toggles + persistence.
+	# Last teleport drop, kept on screen so a UI observation can be replayed exactly:
+	# OGMA_PICRAWLER_TELEPORT_XZ="x,z" (+ _FLIP=1) reproduces it headless.
+	var drop_v: Variant = body.get("_last_drop")
+	var drop_tick_v: Variant = body.get("_last_drop_tick")
+	if drop_v is Vector3 and drop_tick_v != null and _as_int(drop_tick_v) >= 0:
+		var flip_v: Variant = body.get("_last_drop_flip")
+		lines.append("last drop: (%.2f, %.2f, %.2f)%s @tick %d   [replay: TELEPORT_XZ=\"%.2f,%.2f\"%s]" % [
+			drop_v.x, drop_v.y, drop_v.z, "  INVERTED" if _as_bool(flip_v) else "",
+			_as_int(drop_tick_v), drop_v.x, drop_v.z,
+			" TELEPORT_FLIP=1" if _as_bool(flip_v) else ""])
 	var hint_run: String = "%s%s%s%s%s   [3] hump%s" % [
 		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint]
 	var hint_view: String = "%s%s%s%s%s%s%s   [`/F1] graph   [F5] save   [F9] load   [ESC] quit" % [

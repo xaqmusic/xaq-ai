@@ -987,6 +987,8 @@ var tick_counter: int = 0
 # hump (env OGMA_PICRAWLER_TELEPORT_RAMP_AT; -1 = off).  Lets a headless run
 # develop the gait first (e.g. 3600 = 1 min) THEN drop, to test recovery.
 var _teleport_ramp_at: int = -1
+# Scripted placement schedule from OGMA_PICRAWLER_EVENTS (see the dispatch site).
+var _events: Array = []
 # Optional repeated re-teleport window (env EVERY/UNTIL) — re-fire every N ticks up
 # to UNTIL, to SUSTAIN an anomaly (e.g. keep re-flipping so it can't self-right).
 var _teleport_every: int = 0
@@ -1946,6 +1948,14 @@ func _ready() -> void:
 	if tramp_env != "":
 		_teleport_ramp_at = tramp_env.to_int()
 		print("PicrawlerBody: OGMA_PICRAWLER_TELEPORT_RAMP_AT=%d" % _teleport_ramp_at)
+	var evs: String = OS.get_environment("OGMA_PICRAWLER_EVENTS")
+	if evs != "":
+		var parsed = JSON.parse_string(evs)
+		if parsed is Array:
+			_events = parsed
+			print("PicrawlerBody: OGMA_PICRAWLER_EVENTS — %d scheduled placement(s)" % _events.size())
+		else:
+			push_error("OGMA_PICRAWLER_EVENTS is not a JSON array: %s" % evs)
 	var tev: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_EVERY")
 	if tev != "": _teleport_every = tev.to_int()
 	var tun: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_UNTIL")
@@ -3198,6 +3208,15 @@ func _switch_gym(mode: String) -> void:
 # brain's learned model in memory), zeroes velocity, and positions the body above
 # the peak so it drops onto the slope.  Announces a reset for Gate-0 masking only
 # (no relearning).  Corridor-only (the hump doesn't exist in the arena).
+# Surface height under (x,z) — so a drop lands ON a hump/wall rather than inside it.
+func _surface_y_at(x: float, z: float) -> float:
+	var ss := get_world_3d().direct_space_state
+	if ss == null:
+		return 0.0
+	var q := PhysicsRayQueryParameters3D.create(Vector3(x, 5.0, z), Vector3(x, -1.0, z))
+	var h := ss.intersect_ray(q)
+	return float(h.position.y) if not h.is_empty() else 0.0
+
 func _teleport_to_ramp() -> void:
 	if _gym_mode_active != "corridor":
 		_ui_notify("[teleport] the ramp only exists in the corridor gym (press 2)")
@@ -3246,6 +3265,9 @@ func _teleport_to(ground: Vector3) -> void:
 		b.angular_velocity = Vector3.ZERO
 	for b in parts:
 		b.freeze = false
+	_last_drop = drop
+	_last_drop_flip = flip
+	_last_drop_tick = tick_counter
 	if brain != null:
 		brain.publish_event("reset", 1.0)
 	print("PicrawlerBody: [teleport] dropped the experienced robot at (%.2f, %.2f)%s tick %d" % [
@@ -3259,6 +3281,12 @@ func _teleport_to(ground: Vector3) -> void:
 var _place_mode: bool = false
 var _place_marker: Node3D = null
 var _place_target: Vector3 = Vector3.ZERO
+# Last actually-dropped teleport target + whether it was inverted.  Surfaced on the HUD so
+# a placement can be reported back verbatim and replayed headless via
+# OGMA_PICRAWLER_TELEPORT_XZ / _FLIP — otherwise a UI observation is not reproducible.
+var _last_drop: Vector3 = Vector3.ZERO
+var _last_drop_flip: bool = false
+var _last_drop_tick: int = -1
 
 func _set_place_mode(on: bool) -> void:
 	_place_mode = on
@@ -4313,6 +4341,23 @@ func _step_one() -> void:
 	step_in_episode += 1
 	# Controlled belly-on-ramp test: auto-drop onto the hump at the configured tick
 	# (headless; e.g. after the gait develops).  One-shot.
+	# ---- SCRIPTED EVENT TIMELINE (2026-07-26) ----------------------------------------
+	# OGMA_PICRAWLER_EVENTS = JSON array of timed placements, e.g.
+	#   [{"at":3600,"xz":[0,3.0]},{"at":7200,"xz":[0.4,2.6],"flip":true}]
+	# "let it walk straight for a minute, then drop it HERE inverted, then there" — the
+	# thing the UI placement tool does by hand, made reproducible.  Deliberately NOT a
+	# revival of CurriculumManager: that carries reward/trainer machinery this substrate
+	# does not want.  This is just a schedule of teleports, reusing the same drop path (so
+	# the HUD "last drop" line and the replay hint apply identically).
+	for ev in _events:
+		if int(ev.get("at", -1)) == tick_counter:
+			var xz: Array = ev.get("xz", [0.0, 0.0])
+			var surf: float = _surface_y_at(float(xz[0]), float(xz[1]))
+			_pending_teleport = Vector3(float(xz[0]), surf, float(xz[1]))
+			_pending_teleport_flip = 1 if bool(ev.get("flip", false)) else 0
+			print("PicrawlerBody: [events] tick %d -> drop at (%.2f, %.2f)%s" % [
+				tick_counter, float(xz[0]), float(xz[1]),
+				"  INVERTED" if bool(ev.get("flip", false)) else ""])
 	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
 		_teleport_to_ramp()
 	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \
