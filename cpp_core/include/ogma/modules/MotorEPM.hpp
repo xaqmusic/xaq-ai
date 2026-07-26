@@ -105,6 +105,7 @@ private:
     void ensure_leg_init(int leg, int state_dim);      // lazy alloc once n known
     float tle_ema_mean()    const;
     float amp_ema_mean()    const;   // mean per-leg oscillation amplitude (activity)
+    float amp_gain_mean_val() const; // mean per-leg amplitude-homeostat integrator
     float gain_ema_mean()   const;
     float outmag_ema_mean() const;
 
@@ -199,6 +200,11 @@ private:
     // Which fitness the (1+1) coordination search ranks probes by.  0 = legacy fwd_v
     // (a TASK REWARD — see §5.1); 1 = reward-free coherence·activity/(1+tle).  Default
     // 0 keeps every existing config byte-identical.
+    // Uprightness (cos_pitch*cos_roll ~ basis.y.y): +1 upright, 0 on its side, -1 on its
+    // back.  Gates the homeostat integrators — see homeo_upright_gate.
+    float   upright_ = 1.0f;
+    double  homeo_upright_gate_ = 0.0;   // 0 = off (byte-identical)
+    double  height_unwind_free_ = 0.0;   // 0 = legacy symmetric windup fade
     int     coord_fitness_mode_ = 0;
     double  coord_adapt_rate_ = 0.0;   // crystallisation rate toward the emergent pattern (0 = fixed)
     double  coord_explore_    = 0.0;   // persistent phase-offset exploration noise (rad/tick)
@@ -344,6 +350,9 @@ private:
     std::vector<float>   foot_contact_;
     bool                 have_contact_ = false;
     void handle_contact(MessagePtr payload);
+    std::string          upright_topic_;   // reality.proprio.upright (basis.y.y)
+    bool                 have_upright_ = false;
+    void handle_upright(MessagePtr payload);
     void update_cruse_state();
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays

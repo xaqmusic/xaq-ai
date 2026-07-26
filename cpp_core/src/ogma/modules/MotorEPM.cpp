@@ -74,6 +74,9 @@ std::vector<TopicSpec> MotorEPM::input_topics() const {
     if (!lateral_topic_.empty())
         v.emplace_back(lateral_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!upright_topic_.empty())
+        v.emplace_back(upright_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     if (!contact_topic_.empty())
         v.emplace_back(contact_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -217,6 +220,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"swing_hyst_frac", ParamMutability::HotMutable,
          "SWING-DETECTOR DEADBAND, in units of the foot's own running mean-absolute-deviation from its height EMA. The bare `foot_y > foot_y_ema` test has NO deadband, so it splits ~50/50 by construction — it reports gait PHASE, not ground contact — and it closes a positive feedback loop with any consumer that moves the foot (stance_lift, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. That relaxation oscillator runs at the EMA's ~50-tick timescale and competes with the body's own ~70-tick stride, so its cost scales with the consumer's gain. The band stays RELATIVE (foot_y is world-Y; an absolute threshold would call a planted foot on raised terrain permanently swinging — the blindness that retired chassis_y_norm) and self-scales to the gait's own amplitude rather than being tuned. ~1.0 ≈ one mean deviation of hold. 0 = legacy no-deadband detector (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
+        {"homeo_upright_gate", ParamMutability::HotMutable,
+         "UPRIGHT GATE for the homeostat integrators (height_bias, amp_gain): freeze them whenever uprightness (cos_pitch*cos_roll, ~basis.y.y from the accelerometer) falls below this. Both integrate toward setpoints that are MEANINGLESS when the body is not upright — the belly rangefinder is not looking at the ground it stands on, and amp_target is unreachable — so an inverted episode rails both and they never return. Measured 2026-07-26: after a self-righting from inversion, forward progress stayed NEGATIVE for 7200+ ticks with height_bias pinned at its clamp and amp_gain stuck 30-40x high, while the LEARNED structures (HK self-model, phase search) recovered fine. So this forgetting is an integrator-windup bug, not a learned-weights problem. ~0.5 = freeze past ~60 deg of tilt. 0 = off (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"height_unwind_free", ParamMutability::HotMutable,
+         "ASYMMETRIC WINDUP FADE for height_bias. The windup fix multiplies the height integration by height_rest_frac (which -> 0 while moving forward), so a bias cannot wind up while walking — but it equally cannot UNWIND while walking, so a value railed during a disruption is latched for as long as the robot keeps trying to walk. Non-zero fades ONLY the winding direction, preserving the incline fix while letting a railed bias recover. 0 = legacy symmetric fade (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"coord_fitness_mode", ParamMutability::HotMutable,
          "Which fitness the (1+1) coordination search (coord_reward_drive) ranks probes by. 0 = LEGACY forward-velocity — a TASK REWARD, which §5.1 forbids and which is what gives the ratchet something destructive to lock in (a thrash that momentarily scores high fwd_v while escaping becomes the incumbent, and every normal probe afterwards is reverted back to it). 1 = REWARD-FREE: coherence · activity / (1 + tle) — phase-lock quality × oscillation amplitude ÷ forward-model error, containing no position/distance/velocity term. All three factors are needed: coherence alone is maximal on a FROZEN body (φ=atan2(0,0)=0 for every leg → Kuramoto R=1), 1/(1+tle) alone also favours freezing (a still body is trivially predictable), and the activity factor is the homeokinetic normalisation that kills both. 0 = byte-identical legacy.",
          ParamValue{int64_t(0)}, ParamValue{int64_t(0)}, ParamValue{int64_t(1)}},
@@ -244,6 +253,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"cruse_rule5_gain", ParamMutability::HotMutable,
          "CRUSE Rule 5 (load distribution): a leg in stance presses its foot down (hip2+knee) ∝ the number of OTHER legs currently in swing — redistributing the swinging legs' weight onto the planted ones. More normal force → more friction → less foot scrub (the stance feet were sliding ~3-4× the body's progress). Shifts CoG onto the support. 0 = off.  NEGATIVE allowed for the sign-flip audit.",
          ParamValue{0.0}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"upright_topic", ParamMutability::ConstructionOnly,
+         "Uprightness topic (reality.proprio.upright = chassis basis.y.y): +1 upright, 0 on its side, -1 inverted. Required for homeo_upright_gate to do anything. Do NOT rely on tilt_topic for this — the body's publish_tilt defaults FALSE, so tilt never arrives headless and the gate becomes silent dead code. Empty = no subscription.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
         {"contact_topic", ParamMutability::ConstructionOnly,
          "TRUE per-leg ground-contact topic (reality.proprio.foot_contact) — the physics touch flag, and the sensor a REAL picrawler has (a foot switch). When set, a leg is in SWING iff it is not touching: a MEASUREMENT, with none of the chatter or latching the height proxy suffers. When empty, MotorEPM falls back to INFERRING contact from foot height vs that foot's own moving average, which measured 40.3 % 'swinging' while the feet were genuinely down 99.3 % of the time — and every consumer of the swing state (stance_lift, all Cruse rules) gated on that error. This topic was already being published every tick and was simply never wired. Empty = legacy inference (byte-identical).",
          ParamValue{std::string("")}, std::nullopt, std::nullopt},
@@ -416,6 +428,8 @@ ParamMap MotorEPM::current_params() const {
     m["stance_lift_gain"]   = stance_lift_gain_;
     m["swing_hyst_frac"]    = swing_hyst_frac_;
     m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
+    m["homeo_upright_gate"] = homeo_upright_gate_;
+    m["height_unwind_free"] = height_unwind_free_;
     m["coord_probe_ticks"]  = coord_probe_ticks_;
     m["coord_stab_penalty"] = coord_stab_penalty_;
     m["coord_lat_penalty"]  = coord_lat_penalty_;
@@ -426,6 +440,7 @@ ParamMap MotorEPM::current_params() const {
     m["cruse_rule5_gain"]   = cruse_rule5_gain_;
     m["feet_topic"]         = feet_topic_;
     m["contact_topic"]      = contact_topic_;
+    m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
     m["steer"]            = steer_;
@@ -517,6 +532,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
+    apply_param(params, "homeo_upright_gate", [&](auto const& v){ homeo_upright_gate_ = get_double(v, "homeo_upright_gate"); });
+    apply_param(params, "height_unwind_free", [&](auto const& v){ height_unwind_free_ = get_double(v, "height_unwind_free"); });
     apply_param(params, "coord_fitness_mode", [&](auto const& v){ coord_fitness_mode_ = int(get_int(v, "coord_fitness_mode")); });
     apply_param(params, "coord_probe_ticks", [&](auto const& v){ coord_probe_ticks_ = get_int(v, "coord_probe_ticks"); });
     apply_param(params, "coord_stab_penalty", [&](auto const& v){ coord_stab_penalty_ = get_double(v, "coord_stab_penalty"); });
@@ -527,6 +544,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "cruse_rule2_window", [&](auto const& v){ cruse_rule2_window_ = get_int(v, "cruse_rule2_window"); });
     apply_param(params, "cruse_rule5_gain", [&](auto const& v){ cruse_rule5_gain_ = get_double(v, "cruse_rule5_gain"); });
     apply_param(params, "feet_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) feet_topic_ = *p; });
+    apply_param(params, "upright_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) upright_topic_ = *p; });
     apply_param(params, "contact_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) contact_topic_ = *p; });
     apply_param(params, "stroke_gain", [&](auto const& v){ stroke_gain_ = get_double(v, "stroke_gain"); });
     apply_param(params, "stroke_phase", [&](auto const& v){ stroke_phase_ = get_double(v, "stroke_phase"); });
@@ -665,6 +683,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
             lateral_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_lateral(p); }));
     }
+    if (!upright_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            upright_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_upright(p); }));
+    }
     if (!contact_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(
             contact_topic_, SubscriptionKind::Direct,
@@ -752,12 +775,32 @@ void MotorEPM::handle_objective_vel(int leg, MessagePtr payload) {
     obj_vel_seen_[leg]   = 1;
 }
 
+// Uprightness straight from the body's dedicated `upright` topic (basis.y.y): +1 upright,
+// 0 on its side, −1 inverted.  Accelerometer-derivable, so legal.
+//
+// This exists because deriving it from `tilt` DOES NOT WORK headless: the body's
+// publish_tilt @export defaults FALSE, so the tilt topic never arrives and upright_ sat at
+// its 1.0 init — the homeostat gate was silently DEAD CODE, verified by amp_gain winding
+// identically with the gate on and off.  The `upright` topic is published unconditionally.
+void MotorEPM::handle_upright(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 1) return;
+    upright_ = pt->values[0];
+    have_upright_ = true;
+}
+
 void MotorEPM::handle_tilt(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
     if (!pt || pt->values.size() < 4) return;
     tilt_pitch_ = pt->values[0];   // sin(pitch) — signed fore-aft tilt
     tilt_roll_  = pt->values[2];   // sin(roll)  — signed left-right tilt
+    // The cos components were RECEIVED and DISCARDED, which left this module unable to
+    // distinguish upright from inverted at all — sin(180°) == sin(0°) == 0.  Their product
+    // is ~basis.y.y: +1 upright, 0 on its side, −1 on its back.  Accelerometer-derived, so
+    // legal.  Needed by the homeostat upright gate below.
+    if (!have_upright_) upright_ = pt->values[1] * pt->values[3];  // fallback only
 }
 
 void MotorEPM::handle_imu(MessagePtr payload) {
@@ -1018,6 +1061,8 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
+    else if (key == "homeo_upright_gate") homeo_upright_gate_ = get_double(value, "homeo_upright_gate");
+    else if (key == "height_unwind_free") height_unwind_free_ = get_double(value, "height_unwind_free");
     else if (key == "coord_fitness_mode") coord_fitness_mode_ = int(get_int(value, "coord_fitness_mode"));
     else if (key == "coord_probe_ticks") coord_probe_ticks_ = get_int(value, "coord_probe_ticks");
     else if (key == "coord_stab_penalty") coord_stab_penalty_ = get_double(value, "coord_stab_penalty");
@@ -1176,7 +1221,25 @@ void MotorEPM::tick(uint64_t tick_id) {
     height_rest_frac_ = std::clamp(1.0f - fwd_progress_ema_ / kHeightMoveSuppVel, 0.0f, 1.0f);
     if (height_homeo_gain_ > 0.0 && chassis_h_max_ > 1e-4f) {
         float tgt = float(height_k_) * chassis_h_max_;
-        height_bias_ += float(height_homeo_gain_) * (tgt - chassis_h_ema_) * height_rest_frac_;
+        float dh = float(height_homeo_gain_) * (tgt - chassis_h_ema_);
+        // (a) UPRIGHT GATE.  While the body is not upright the height setpoint is
+        // meaningless — the belly rangefinder is not looking at the ground the robot
+        // stands on — so integrating here only poisons a reflex that will be needed
+        // later.  MEASURED (2026-07-26 inversion repro): an inverted episode rails
+        // height_bias to a clamp and it NEVER returns, and forward progress after
+        // self-righting stays negative for 7200+ ticks.
+        if (homeo_upright_gate_ > 0.0 && upright_ < float(homeo_upright_gate_)) dh = 0.0f;
+        // (b) ASYMMETRIC WINDUP FADE.  height_rest_frac was applied to the whole
+        // integration: that stopped windup while moving (the incline fix, kept) but ALSO
+        // made a railed bias unable to UNWIND while walking — so the more the robot tried
+        // to walk, the longer it stayed broken.  Fade only the winding direction.
+        if (height_unwind_free_ > 0.0) {
+            const bool winding = (dh * height_bias_) > 0.0f
+                              || std::fabs(height_bias_) < 1e-6f;   // from neutral = winding
+            height_bias_ += winding ? dh * height_rest_frac_ : dh;
+        } else {
+            height_bias_ += dh * height_rest_frac_;                 // legacy
+        }
         height_bias_ = std::clamp(height_bias_, kHeightBiasMin, kHeightBiasMax);
     }
 
@@ -1206,6 +1269,8 @@ void MotorEPM::tick(uint64_t tick_id) {
     if (coupling_gain_ > 0.0 || stroke_gain_ > 0.0 || steer_ != 0.0
         || amp_homeo_gain_ > 0.0 || amp_seek_rate_ > 0.0 || heading_gain_ != 0.0 || nav_gain_ != 0.0) {
         float amp_sum = 0.0f; int amp_n = 0;
+        const bool homeo_gated = (homeo_upright_gate_ > 0.0
+                                  && upright_ < float(homeo_upright_gate_));
         for (int leg = 0; leg < n_legs_; ++leg) {
             Leg& L = legs_[leg];
             if (!L.initialized || L.n < 3 * m) continue;
@@ -1222,8 +1287,16 @@ void MotorEPM::tick(uint64_t tick_id) {
                 amp_sum += amp; ++amp_n;          // for the CoT amplitude search
                 if (amp_homeo_gain_ > 0.0) {
                     L.amp_ema = (1.0f - kAmpEmaAlpha) * L.amp_ema + kAmpEmaAlpha * amp;
-                    L.amp_gain += float(amp_homeo_gain_) * (float(amp_target_) - L.amp_ema);
-                    L.amp_gain = std::clamp(L.amp_gain, kAmpGainMin, kAmpGainMax);
+                    // UPRIGHT GATE.  While not upright the body cannot reach amp_target at
+                    // all, so this integrator winds to its rail and STAYS there — measured
+                    // 0.10 (its floor) -> 2.9..4.3 across an inverted episode, never
+                    // returning, which is the "movements are exaggerated" symptom.  Freeze
+                    // the integrator; the measurement EMA above keeps tracking so it is
+                    // current the moment the body is upright again.
+                    if (!homeo_gated) {
+                        L.amp_gain += float(amp_homeo_gain_) * (float(amp_target_) - L.amp_ema);
+                        L.amp_gain = std::clamp(L.amp_gain, kAmpGainMin, kAmpGainMax);
+                    }
                 }
             }
         }
@@ -2018,6 +2091,11 @@ float MotorEPM::tle_ema_mean() const {
     for (auto const& L : legs_) if (L.initialized) { s += L.tle_ema; ++c; }
     return c ? s / float(c) : 0.0f;
 }
+float MotorEPM::amp_gain_mean_val() const {
+    if (legs_.empty()) return 0.0f; float s = 0; int c = 0;
+    for (auto const& L : legs_) if (L.initialized) { s += L.amp_gain; ++c; }
+    return c ? s / float(c) : 0.0f;
+}
 float MotorEPM::amp_ema_mean() const {
     if (legs_.empty()) return 0.0f; float s = 0; int c = 0;
     for (auto const& L : legs_) if (L.initialized) { s += L.amp_ema; ++c; }
@@ -2102,6 +2180,18 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["swing_frac"]     = swing_frac_ema_;
     mod["cruse_bias"]     = cruse_bias_mean_;
     mod["phase_agree"]    = phase_agree_ema_;
+    // Ratchet observability for the forgetting diagnosis (2026-07-26).  These three are
+    // the state that does NOT recover after an inverted episode, so they must be readable
+    // from the body's diag stream, not just the inspector:
+    //   coord_best_fitness — the stored winner of the (1+1) phase search (decays 0.99 per
+    //                        probe window, tau ~400 s; NOT cleared on a disruption)
+    //   amp_gain_mean      — the amplitude homeostat's integrator, which winds to its rail
+    //                        while the body is tucked and barely moving
+    //   motor_tle          — self-model error, to see when the HK model has re-adapted
+    mod["coord_best_fitness"] = coord_best_fitness_;
+    mod["amp_gain_mean"]      = amp_gain_mean_val();
+    mod["upright"]            = upright_;
+    mod["motor_tle"]          = tle_ema_mean();
     mod["legphase_agree"] = legphase_agree_ema_;
     // panic pathway (push-oscillator phase + smoothed level + hysteresis latch)
     mod["panic_phase"]   = panic_phase_;
@@ -2199,6 +2289,8 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["coord_fitness_mode"]  = coord_fitness_mode_;
     j["coord_best_fitness"]  = coord_best_fitness_;
     j["coord_activity"]      = amp_ema_mean();   // the anti-freeze factor of mode 1
+    j["upright"]             = upright_;         // ~basis.y.y; drives the homeostat gate
+    j["homeo_gated"]         = (homeo_upright_gate_ > 0.0 && upright_ < float(homeo_upright_gate_));
     j["flow_quality"]        = flow_quality_diag_; // magnitude·predictability (drives the flow stroke amp)
     {
         std::vector<float> pc(n_legs_, 0.0f);

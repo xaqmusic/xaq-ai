@@ -225,6 +225,59 @@ works" claim should carry the caveat that its swing gate is not physically reali
 
 ---
 
+### ★ 2026-07-26 — CATASTROPHIC FORGETTING AFTER INVERSION WAS AN INTEGRATOR-WINDUP BUG
+
+**Operator observation:** placed on angled/complex surfaces the robot flips onto its back,
+lies tucked, then homeokinesis breaks the lock and it **self-rights** (~27 s measured, ~1 min
+observed) — a large emergent win. But afterwards the walk never recovers: exaggerated
+movements, wrong phasing, no forward traversal.
+
+**Measured** (`forgetavg.py`, deterministic flip via the pre-existing
+`OGMA_PICRAWLER_TELEPORT_FLIP=1`, `AUTO_RESET_INVERSION=0`): after self-righting, forward
+progress stayed **NEGATIVE for 7200+ ticks** against a `+0.892` pre-flip baseline, with **zero
+recovery trend** across six 1200-tick bins.
+
+**Per-variable attribution — and it overturned the expected diagnosis:**
+
+| variable | pre-flip | after righting | verdict |
+|---|---|---|---|
+| `chassis_h_max` | 0.999 | 0.999→1.000 | **not the mechanism** — the height signal is clamped to [0,1] so the "monotonic max" is already saturated and cannot ratchet |
+| **`height_bias`** | −0.191 | **−0.500, all six bins** | **LATCHED at its clamp** |
+| **`amp_gain`** | 0.100 | **2.9–4.3, never returns** | **LATCHED 30–40× high** ⇒ "movements are exaggerated" |
+| `coord_best_fitness` | 0.336 | decays normally | not implicated |
+| `motor_tle` | 0.278 | returns to band | **HK self-model re-adapts fine** |
+
+**The learned structures recover; only the two homeostat INTEGRATORS latch.** So this is not
+the "monolithic weights get overwritten, we need capacity allocation" problem it was first
+framed as — it is two unbounded integrators accumulating in a regime where their setpoint is
+meaningless, then being unable to unwind. Far smaller and entirely local.
+
+**The general shape, worth keeping:** *an integrator must not accumulate where its error
+signal is invalid, and it must be able to unwind anywhere it can wind.* `height_bias` violated
+both — it integrates while inverted, and `height_rest_frac` (the incline windup fix) then
+freezes it while the robot walks, so **the more it tried to walk the longer it stayed broken.**
+
+**FIX — `homeo_upright_gate=0.5` on `reality.proprio.upright`, and it is FREE.** Normal walking
+is byte-identical (net_z 4.75, flat_v 0.05, straight 0.74, tilt_sd 0.068, 0 falls) because
+`upright` stays ~1.0 while walking so the gate never engages; inverted, `height_bias` holds
+(−0.093 vs +1.497) and `amp_gain` **does not move at all** (0.100 → 0.100).
+
+**Two process notes.** (1) The gate was initially wired to `tilt_topic` and was **silent dead
+code** — the body's `publish_tilt` defaults FALSE so tilt never arrives headless and `upright_`
+sat at its 1.0 init. Caught only by checking that the consumer fired (`amp_gain` wound
+*identically* gate-on and gate-off). §3.2 rule 5, again. (2) `height_unwind_free` (asymmetric
+windup fade, so a railed bias can unwind while moving) was also built and is **NOT promoted**:
+it addresses recovery from a wind the gate prevents, and it cost ~8 % net_z and ~12 % hump.
+Kept default-off as infrastructure.
+
+**Also learned:** inverted on **flat** ground the robot never self-rights (0/3 seeds, 16 000
+ticks) and `motor_tle` **falls** 0.24→0.08 — inverted-on-flat is a *low-surprise attractor*, so
+homeokinesis has no pressure to escape. The self-righting win depends on the terrain's ongoing
+disturbance keeping TLE high. **Still unmeasured at power:** the end-to-end post-righting
+recovery curve, since self-righting is stochastic (1 of 3 seeds even on an angled surface).
+
+---
+
 ## 3. Substrate decisions (retired, with reasons)
 
 - **God's-eye `chassis_y_norm` → RETIRED** as the height observation. Absolute world-Y reads

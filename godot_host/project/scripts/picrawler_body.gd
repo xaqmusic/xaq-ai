@@ -8296,6 +8296,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
 			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
 			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
+			# recovering after an inverted episode.  h_max above is the worst: a monotonic
+			# max with no decay and no reset, and it sets the height setpoint.
+			line["amp_gain"] = snappedf(float(_mm.get("amp_gain_mean", 0.0)), 0.001)
+			line["coord_best_fit"] = snappedf(float(_mm.get("coord_best_fitness", 0.0)), 0.0001)
+			line["motor_tle"] = snappedf(float(_mm.get("motor_tle", 0.0)), 0.0001)
 			# swing_frac = fraction of legs MotorEPM's foot-height detector calls
 			# "swinging" — the gate stance_lift and the Cruse rules ride on.  Read it
 			# against this body's OWN absolute planted test (feet_y < stance_y_threshold):
