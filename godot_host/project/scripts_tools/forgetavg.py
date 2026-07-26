@@ -46,7 +46,7 @@ os.makedirs(SP, exist_ok=True)
 INVERTED_TILT = 1.57      # rad — past horizontal = on its back
 UPRIGHT_TILT  = 0.60      # rad — recovered
 BIN = 1200                # ticks per post-recovery bin (20 s at 60 Hz)
-NBINS = 6
+NBINS = 10                # longer post-righting window: a LATE recovery must not be missed
 
 def run_one(cfg, seed, flip_at, max_steps, difficulty, flip_xz):
     out = f"{SP}/fg_{os.path.splitext(cfg)[0]}_s{seed}.log"

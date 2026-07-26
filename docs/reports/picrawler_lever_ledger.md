@@ -257,7 +257,37 @@ signal is invalid, and it must be able to unwind anywhere it can wind.* `height_
 both — it integrates while inverted, and `height_rest_frac` (the incline windup fix) then
 freezes it while the robot walks, so **the more it tried to walk the longer it stayed broken.**
 
-**FIX — `homeo_upright_gate=0.5` on `reality.proprio.upright`, and it is FREE.** Normal walking
+> #### ⚠️ CORRECTION (same day) — the gate is NOT promoted: it may disable the escape
+>
+> Follow-up at n=8 on an angled surface: **the gated arm self-righted 0/8, the ungated arm
+> 1/8.** 1-vs-0 is not significant alone, but the mechanism is specific and strong:
+> **`amp_gain` winding 0.100 → 4.0 is a 40× amplitude escalation, and that violent flailing
+> is WHAT RIGHTS THE ROBOT.** Freezing the integrator removes the escape drive. The poison
+> and the capability are the same mechanism — so the gate protects the walk by lesioning a
+> working loop, exactly what CLAUDE.md §5.4 forbids.
+>
+> **Reverted:** the launcher CURRENT is back to `..._imufused.json` (the forgetting flaw
+> documented and unfixed) and `..._uprightgate.json` is parked as an UNRESOLVED TRADE.
+> `homeo_upright_gate` stays in the code default-off.
+>
+> **The redesign the evidence points to — intervene on the TRANSITION, not the state:**
+> *snapshot the homeostat integrators when uprightness is lost and restore them when it is
+> regained*, making the inverted excursion scratch space. Full wind allowed (escape
+> untouched), posture restored exactly rather than slowly unwound. That is "plastic" in the
+> operator's sense; a freeze is the opposite.
+>
+> **Also — a power fix for any retest.** Self-righting runs ~10–30 %, so n=8 buys one event.
+> `_teleport_to` applies a RELATIVE 180° rotation, so with `TELEPORT_EVERY` a second flip
+> turns an inverted robot upright again — making recovery deterministic and giving full n on
+> the post-recovery walk. That separates "does the fix restore the walk" (fully powered) from
+> "does the fix preserve self-righting" (stochastic, needs its own larger run).
+>
+> **What the ungated n=8 curve added:** the latch does eventually release — `height_bias` sat
+> at −0.500 for six bins then crept to −0.256 by 12 000 ticks — and progress partially
+> recovers (+31 % of baseline at ~7 000 ticks) before collapsing to −63 % and drifting back
+> to +14 %. So it is a ~200 s erratic degradation, not a permanent flatline.
+
+**Mechanism fix (measured, but see the correction above) — `homeo_upright_gate=0.5` on `reality.proprio.upright`:** Normal walking
 is byte-identical (net_z 4.75, flat_v 0.05, straight 0.74, tilt_sd 0.068, 0 falls) because
 `upright` stays ~1.0 while walking so the gate never engages; inverted, `height_bias` holds
 (−0.093 vs +1.497) and `amp_gain` **does not move at all** (0.100 → 0.100).
