@@ -48,7 +48,7 @@ UPRIGHT_TILT  = 0.60      # rad — recovered
 BIN = 1200                # ticks per post-recovery bin (20 s at 60 Hz)
 NBINS = 10                # longer post-righting window: a LATE recovery must not be missed
 
-def run_one(cfg, seed, flip_at, max_steps, difficulty, flip_xz):
+def run_one(cfg, seed, flip_at, max_steps, difficulty, flip_xz, every):
     out = f"{SP}/fg_{os.path.splitext(cfg)[0]}_s{seed}.log"
     env = dict(os.environ, OGMA_PICRAWLER_GYM="corridor", OGMA_SEED=str(seed),
                OGMA_INSPECTOR_PORT=str(7800+seed),
@@ -56,6 +56,11 @@ def run_one(cfg, seed, flip_at, max_steps, difficulty, flip_xz):
                OGMA_PICRAWLER_CONFIG=f"res://addons/ami_ogma/configs/{cfg}",
                OGMA_PICRAWLER_TELEPORT_RAMP_AT=str(flip_at),
                OGMA_PICRAWLER_TELEPORT_FLIP="1",
+               # Optional FORCED recovery: _teleport_to applies a RELATIVE 180 deg rotation,
+               # so a second flip turns an inverted robot UPRIGHT again.  That makes recovery
+               # deterministic instead of waiting on stochastic self-righting (~10-30%), which
+               # is the only way to get real n on the post-recovery walk.
+               OGMA_PICRAWLER_TELEPORT_EVERY=str(every),
                OGMA_PICRAWLER_TELEPORT_XZ=flip_xz,
                OGMA_PICRAWLER_AUTO_RESET_INVERSION="0",     # let it self-right
                OGMA_RESET_MODE="continuous", OGMA_PICRAWLER_MAX_STEPS=str(max_steps))
@@ -129,8 +134,9 @@ if __name__ == "__main__":
     # inverted-on-flat is a LOW-SURPRISE attractor, so homeokinesis has no pressure to move.
     # The corridor hump (z~3) is the angled surface, and the flip hook already works there.
     flip_xz = sys.argv[6] if len(sys.argv) > 6 else "0,3.0"
+    every   = int(sys.argv[7]) if len(sys.argv) > 7 else 0   # 0 = wait for self-righting
     with cf.ThreadPoolExecutor(max_workers=min(4, n)) as ex:
-        res = list(ex.map(lambda s: run_one(cfg, s, flip, steps, diff, flip_xz), range(1, n+1)))
+        res = list(ex.map(lambda s: run_one(cfg, s, flip, steps, diff, flip_xz, every), range(1, n+1)))
     ok = [r for r in res if r and r.get("flipped")]
     print(f"\nFORGETTING DIAGNOSIS  {cfg}")
     print(f"  n={n} seeds · flip@{flip} · {steps} ticks · diff {diff} · auto-reset-on-inversion OFF")

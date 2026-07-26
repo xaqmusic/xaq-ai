@@ -204,6 +204,12 @@ private:
     // back.  Gates the homeostat integrators — see homeo_upright_gate.
     float   upright_ = 1.0f;
     double  homeo_upright_gate_ = 0.0;   // 0 = off (byte-identical)
+    double  homeo_leak_cycles_  = 0.0;   // homeostat forgetting time constant, in strides
+    std::string rhythm_topic_;           // rhythm.body.gait — supplies omega for the leak
+    float   body_omega_ = 0.0f;          // body gait rate (rad/tick) from that topic
+    void    handle_rhythm(MessagePtr payload);
+    // Stride period used only until the rhythm token arrives; the measured value is ~70.
+    static constexpr float kLeakFallbackPeriod = 70.0f;
     double  height_unwind_free_ = 0.0;   // 0 = legacy symmetric windup fade
     int     coord_fitness_mode_ = 0;
     double  coord_adapt_rate_ = 0.0;   // crystallisation rate toward the emergent pattern (0 = fixed)

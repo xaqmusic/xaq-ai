@@ -77,6 +77,9 @@ std::vector<TopicSpec> MotorEPM::input_topics() const {
     if (!upright_topic_.empty())
         v.emplace_back(upright_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!rhythm_topic_.empty())
+        v.emplace_back(rhythm_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     if (!contact_topic_.empty())
         v.emplace_back(contact_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -220,6 +223,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"swing_hyst_frac", ParamMutability::HotMutable,
          "SWING-DETECTOR DEADBAND, in units of the foot's own running mean-absolute-deviation from its height EMA. The bare `foot_y > foot_y_ema` test has NO deadband, so it splits ~50/50 by construction — it reports gait PHASE, not ground contact — and it closes a positive feedback loop with any consumer that moves the foot (stance_lift, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. That relaxation oscillator runs at the EMA's ~50-tick timescale and competes with the body's own ~70-tick stride, so its cost scales with the consumer's gain. The band stays RELATIVE (foot_y is world-Y; an absolute threshold would call a planted foot on raised terrain permanently swinging — the blindness that retired chassis_y_norm) and self-scales to the gait's own amplitude rather than being tuned. ~1.0 ≈ one mean deviation of hold. 0 = legacy no-deadband detector (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
+        {"homeo_leak_cycles", ParamMutability::HotMutable,
+         "HOMEOSTAT LEAK, in STRIDE CYCLES: the time constant over which height_bias and amp_gain forget toward neutral (0 lift / unity gain). Makes their memory finite by construction, which is the fix for the inversion-forgetting failure — that was not excess plasticity but ASYMMETRIC plasticity: both wound fast in one direction and could not return (amp_gain only unwinds when amp_ema EXCEEDS target; height_bias is multiplied by height_rest_frac which -> 0 while moving, so walking froze it). A leak needs no regime classifier, no uprightness signal and no snapshot, and unlike a freeze it never blocks the wind itself — so the 40x amplitude escalation that rights an inverted robot is preserved, it just does not persist. Rate is derived from the body's own measured omega (rhythm_topic), so it tracks the actual gait frequency instead of being a tuned tick count. SMALL values are the useful regime: a persistent error balances the leak at x ~ k*err/lambda, so ~2-3 cycles bounds an excursion AND forgets it in a couple of seconds, whereas ~10 cycles barely bounds it at all. 0 = off (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{60.0}},
+        {"rhythm_topic", ParamMutability::ConstructionOnly,
+         "Body-rhythm topic (rhythm.body.gait from BodyRhythmTracker: [cos, sin, omega]). Only omega is read, to express homeo_leak_cycles in stride cycles. The CPG's own phase token carries no omega, hence a separate input. Empty = fall back to a default stride period.",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
         {"homeo_upright_gate", ParamMutability::HotMutable,
          "UPRIGHT GATE for the homeostat integrators (height_bias, amp_gain): freeze them whenever uprightness (cos_pitch*cos_roll, ~basis.y.y from the accelerometer) falls below this. Both integrate toward setpoints that are MEANINGLESS when the body is not upright — the belly rangefinder is not looking at the ground it stands on, and amp_target is unreachable — so an inverted episode rails both and they never return. Measured 2026-07-26: after a self-righting from inversion, forward progress stayed NEGATIVE for 7200+ ticks with height_bias pinned at its clamp and amp_gain stuck 30-40x high, while the LEARNED structures (HK self-model, phase search) recovered fine. So this forgetting is an integrator-windup bug, not a learned-weights problem. ~0.5 = freeze past ~60 deg of tilt. 0 = off (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -429,6 +438,8 @@ ParamMap MotorEPM::current_params() const {
     m["swing_hyst_frac"]    = swing_hyst_frac_;
     m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
     m["homeo_upright_gate"] = homeo_upright_gate_;
+    m["homeo_leak_cycles"] = homeo_leak_cycles_;
+    m["rhythm_topic"]      = rhythm_topic_;
     m["height_unwind_free"] = height_unwind_free_;
     m["coord_probe_ticks"]  = coord_probe_ticks_;
     m["coord_stab_penalty"] = coord_stab_penalty_;
@@ -532,6 +543,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
+    apply_param(params, "homeo_leak_cycles", [&](auto const& v){ homeo_leak_cycles_ = get_double(v, "homeo_leak_cycles"); });
+    apply_param(params, "rhythm_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) rhythm_topic_ = *p; });
     apply_param(params, "homeo_upright_gate", [&](auto const& v){ homeo_upright_gate_ = get_double(v, "homeo_upright_gate"); });
     apply_param(params, "height_unwind_free", [&](auto const& v){ height_unwind_free_ = get_double(v, "height_unwind_free"); });
     apply_param(params, "coord_fitness_mode", [&](auto const& v){ coord_fitness_mode_ = int(get_int(v, "coord_fitness_mode")); });
@@ -688,6 +701,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
             upright_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_upright(p); }));
     }
+    if (!rhythm_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            rhythm_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_rhythm(p); }));
+    }
     if (!contact_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(
             contact_topic_, SubscriptionKind::Direct,
@@ -727,6 +745,18 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             cpg_phase_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_cpg_phase(p); }));
+}
+
+// The body's own measured gait rhythm (BodyRhythmTracker: [cos, sin, omega rad/tick]).
+// Only omega is used here, to express the homeostat LEAK as a number of STRIDE CYCLES
+// rather than a tuned tick constant — the leak rate then tracks whatever frequency the body
+// actually settles at (CLAUDE.md §5.5: adapt it from the system's own dynamics).  Note the
+// CPG's own token is resize(2) and carries no omega, which is why this is a separate input.
+void MotorEPM::handle_rhythm(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto p = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!p || p->values.size() < 3) return;
+    body_omega_ = p->values[2];
 }
 
 void MotorEPM::handle_cpg_phase(MessagePtr payload) {
@@ -1061,6 +1091,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
+    else if (key == "homeo_leak_cycles") homeo_leak_cycles_ = get_double(value, "homeo_leak_cycles");
     else if (key == "homeo_upright_gate") homeo_upright_gate_ = get_double(value, "homeo_upright_gate");
     else if (key == "height_unwind_free") height_unwind_free_ = get_double(value, "height_unwind_free");
     else if (key == "coord_fitness_mode") coord_fitness_mode_ = int(get_int(value, "coord_fitness_mode"));
@@ -1219,6 +1250,31 @@ void MotorEPM::tick(uint64_t tick_id) {
     // forward progress: rest_frac 1 at rest → 0 while cruising.  This also anti-winds-up
     // (no integration while moving), so a wound-up bias can't accumulate on the ramp.
     height_rest_frac_ = std::clamp(1.0f - fwd_progress_ema_ / kHeightMoveSuppVel, 0.0f, 1.0f);
+    // ---- HOMEOSTAT LEAK (2026-07-26) -------------------------------------------------
+    // The inversion-forgetting failure was NOT excess plasticity — it was ASYMMETRIC
+    // plasticity.  height_bias and amp_gain both wound fast in one direction and could not
+    // come back: amp_gain only unwinds when amp_ema EXCEEDS its target (which after an
+    // excursion it may never do), and height_bias is multiplied by height_rest_frac, which
+    // goes to 0 while moving — so walking literally froze it.  Both are rectifying.
+    //
+    // A leak makes their memory FINITE BY CONSTRUCTION: x += k*err - lambda*x.  No regime
+    // classifier, no uprightness signal, no snapshot, no supervisor deciding which state is
+    // worth keeping — just a forgetting rate.  For low-level motor state that is the right
+    // property: learn fast, forget fast.  (An earlier upright-GATE attempt froze these
+    // instead, which also froze the 40x amplitude escalation that is what rights the robot
+    // — protecting the walk by lesioning the escape.  A leak has no such failure mode: the
+    // wind is never blocked, it just does not persist.)
+    //
+    // The rate is expressed in STRIDE CYCLES off the body's own measured omega, so it
+    // tracks whatever frequency the body settles at instead of being a tuned tick count.
+    float homeo_leak = 0.0f;
+    if (homeo_leak_cycles_ > 0.0) {
+        const float period = (std::fabs(body_omega_) > 1e-4f)
+                           ? (2.0f * float(M_PI) / std::fabs(body_omega_))
+                           : kLeakFallbackPeriod;   // no rhythm token yet — measured stride
+        homeo_leak = std::clamp(1.0f / (float(homeo_leak_cycles_) * period), 0.0f, 0.5f);
+    }
+
     if (height_homeo_gain_ > 0.0 && chassis_h_max_ > 1e-4f) {
         float tgt = float(height_k_) * chassis_h_max_;
         float dh = float(height_homeo_gain_) * (tgt - chassis_h_ema_);
@@ -1240,6 +1296,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         } else {
             height_bias_ += dh * height_rest_frac_;                 // legacy
         }
+        height_bias_ -= homeo_leak * height_bias_;    // forget toward neutral lift
         height_bias_ = std::clamp(height_bias_, kHeightBiasMin, kHeightBiasMax);
     }
 
@@ -1295,8 +1352,18 @@ void MotorEPM::tick(uint64_t tick_id) {
                     // current the moment the body is upright again.
                     if (!homeo_gated) {
                         L.amp_gain += float(amp_homeo_gain_) * (float(amp_target_) - L.amp_ema);
-                        L.amp_gain = std::clamp(L.amp_gain, kAmpGainMin, kAmpGainMax);
                     }
+                    // Forget toward kAmpGainMin, i.e. MINIMUM AUTHORITY.  Unity (1.0) was
+                    // tried first as the "semantically neutral" value for a gain and it cost
+                    // real performance (net_z 4.75 -> 3.6, straight 0.74 -> 0.56-0.61,
+                    // tilt_sd up, and falls at a 2-cycle rate): normal walking pins this
+                    // integrator at its floor, so a pull toward unity fights the regulator
+                    // every tick.  Semantically neutral is not behaviourally neutral — the
+                    // right target is the least-intervention end of the range, where the leak
+                    // AGREES with the homeostat in normal operation and only bites after an
+                    // excursion.  Applied even when gated so a wound value always decays.
+                    L.amp_gain -= homeo_leak * (L.amp_gain - kAmpGainMin);
+                    L.amp_gain = std::clamp(L.amp_gain, kAmpGainMin, kAmpGainMax);
                 }
             }
         }
