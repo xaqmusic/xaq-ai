@@ -74,6 +74,9 @@ std::vector<TopicSpec> MotorEPM::input_topics() const {
     if (!lateral_topic_.empty())
         v.emplace_back(lateral_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!contact_topic_.empty())
+        v.emplace_back(contact_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     if (!feet_topic_.empty())
         v.emplace_back(feet_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -211,6 +214,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"stance_lift_gain", ParamMutability::HotMutable,
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"swing_hyst_frac", ParamMutability::HotMutable,
+         "SWING-DETECTOR DEADBAND, in units of the foot's own running mean-absolute-deviation from its height EMA. The bare `foot_y > foot_y_ema` test has NO deadband, so it splits ~50/50 by construction — it reports gait PHASE, not ground contact — and it closes a positive feedback loop with any consumer that moves the foot (stance_lift, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. That relaxation oscillator runs at the EMA's ~50-tick timescale and competes with the body's own ~70-tick stride, so its cost scales with the consumer's gain. The band stays RELATIVE (foot_y is world-Y; an absolute threshold would call a planted foot on raised terrain permanently swinging — the blindness that retired chassis_y_norm) and self-scales to the gait's own amplitude rather than being tuned. ~1.0 ≈ one mean deviation of hold. 0 = legacy no-deadband detector (byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
+        {"coord_fitness_mode", ParamMutability::HotMutable,
+         "Which fitness the (1+1) coordination search (coord_reward_drive) ranks probes by. 0 = LEGACY forward-velocity — a TASK REWARD, which §5.1 forbids and which is what gives the ratchet something destructive to lock in (a thrash that momentarily scores high fwd_v while escaping becomes the incumbent, and every normal probe afterwards is reverted back to it). 1 = REWARD-FREE: coherence · activity / (1 + tle) — phase-lock quality × oscillation amplitude ÷ forward-model error, containing no position/distance/velocity term. All three factors are needed: coherence alone is maximal on a FROZEN body (φ=atan2(0,0)=0 for every leg → Kuramoto R=1), 1/(1+tle) alone also favours freezing (a still body is trivially predictable), and the activity factor is the homeokinetic normalisation that kills both. 0 = byte-identical legacy.",
+         ParamValue{int64_t(0)}, ParamValue{int64_t(0)}, ParamValue{int64_t(1)}},
         {"coord_probe_ticks", ParamMutability::HotMutable,
          "window (ticks) per agency-reward probe; fitness measured over its back half (after the gait settles to the new offsets). ~240 = 4 s.",
          ParamValue{240}, ParamValue{60}, ParamValue{1200}},
@@ -227,14 +236,17 @@ ParamSchema MotorEPM::params_schema() const {
          "CRUSE/Walknet inter-leg coordination CORRECTOR on hip2 (foot lift). Continuous bias: Rule 1 (anterior leg in swing → hold this leg in stance, +hip2 down), Rule 2 (anterior just-planted → release this leg's swing, −hip2 up), Rule 3 (contralateral in swing → hold stance). Catches per-leg co-swing / support-loss the MotorEPM rhythm alone leaves; needs the rhythm it cannot itself generate. 0 = off.  NEGATIVE allowed for the sign-flip audit (inverts plant↔lift).",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"cruse_rule3_weight", ParamMutability::HotMutable,
-         "Rule 3 (contralateral load tolerance) weight relative to Rule 1 (anterior). 0.5 = contralateral hold is half-strength vs the anterior coupling.",
+         "Rule 3 (contralateral load tolerance) weight relative to Rule 1 (anterior). 0.5 = contralateral hold is half-strength vs the anterior coupling. ⚠️ INERT UNLESS cruse_gain != 0 — this is a sub-weight INSIDE the cruse_gain block, not an independent lever, so its non-zero default DISPLAYS AS ENABLED in the panel while doing nothing. Check cruse_gain before crediting or blaming this knob (see the ledger's `postural_gain_joints` silent-no-op case: a knob that cannot act still looks causal).",
          ParamValue{0.5}, ParamValue{0.0}, ParamValue{2.0}},
         {"cruse_rule2_window", ParamMutability::HotMutable,
-         "ticks after the anterior leg's touchdown during which Rule 2 actively releases this leg's swing (the constructive lift). ~15 = 0.25 s @ 60 Hz.",
+         "ticks after the anterior leg's touchdown during which Rule 2 actively releases this leg's swing (the constructive lift). ~15 = 0.25 s @ 60 Hz. ⚠️ INERT UNLESS cruse_gain != 0 (sub-parameter of the cruse_gain block, same trap as cruse_rule3_weight).",
          ParamValue{15}, ParamValue{1}, ParamValue{120}},
         {"cruse_rule5_gain", ParamMutability::HotMutable,
          "CRUSE Rule 5 (load distribution): a leg in stance presses its foot down (hip2+knee) ∝ the number of OTHER legs currently in swing — redistributing the swinging legs' weight onto the planted ones. More normal force → more friction → less foot scrub (the stance feet were sliding ~3-4× the body's progress). Shifts CoG onto the support. 0 = off.  NEGATIVE allowed for the sign-flip audit.",
          ParamValue{0.0}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"contact_topic", ParamMutability::ConstructionOnly,
+         "TRUE per-leg ground-contact topic (reality.proprio.foot_contact) — the physics touch flag, and the sensor a REAL picrawler has (a foot switch). When set, a leg is in SWING iff it is not touching: a MEASUREMENT, with none of the chatter or latching the height proxy suffers. When empty, MotorEPM falls back to INFERRING contact from foot height vs that foot's own moving average, which measured 40.3 % 'swinging' while the feet were genuinely down 99.3 % of the time — and every consumer of the swing state (stance_lift, all Cruse rules) gated on that error. This topic was already being published every tick and was simply never wired. Empty = legacy inference (byte-identical).",
+         ParamValue{std::string("")}, std::nullopt, std::nullopt},
         {"feet_topic", ParamMutability::ConstructionOnly,
          "4-D per-leg foot-height ProprioToken topic for Cruse stance/swing detection. The body publishes reality.proprio.feet_y every tick.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -402,6 +414,8 @@ ParamMap MotorEPM::current_params() const {
     m["progress_commit_gain"] = progress_commit_gain_;
     m["forward_flow_gain"]  = forward_flow_gain_;
     m["stance_lift_gain"]   = stance_lift_gain_;
+    m["swing_hyst_frac"]    = swing_hyst_frac_;
+    m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
     m["coord_probe_ticks"]  = coord_probe_ticks_;
     m["coord_stab_penalty"] = coord_stab_penalty_;
     m["coord_lat_penalty"]  = coord_lat_penalty_;
@@ -411,6 +425,7 @@ ParamMap MotorEPM::current_params() const {
     m["cruse_rule2_window"] = cruse_rule2_window_;
     m["cruse_rule5_gain"]   = cruse_rule5_gain_;
     m["feet_topic"]         = feet_topic_;
+    m["contact_topic"]      = contact_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
     m["steer"]            = steer_;
@@ -501,6 +516,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "progress_commit_gain", [&](auto const& v){ progress_commit_gain_ = get_double(v, "progress_commit_gain"); });
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
+    apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
+    apply_param(params, "coord_fitness_mode", [&](auto const& v){ coord_fitness_mode_ = int(get_int(v, "coord_fitness_mode")); });
     apply_param(params, "coord_probe_ticks", [&](auto const& v){ coord_probe_ticks_ = get_int(v, "coord_probe_ticks"); });
     apply_param(params, "coord_stab_penalty", [&](auto const& v){ coord_stab_penalty_ = get_double(v, "coord_stab_penalty"); });
     apply_param(params, "coord_lat_penalty", [&](auto const& v){ coord_lat_penalty_ = get_double(v, "coord_lat_penalty"); });
@@ -510,6 +527,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "cruse_rule2_window", [&](auto const& v){ cruse_rule2_window_ = get_int(v, "cruse_rule2_window"); });
     apply_param(params, "cruse_rule5_gain", [&](auto const& v){ cruse_rule5_gain_ = get_double(v, "cruse_rule5_gain"); });
     apply_param(params, "feet_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) feet_topic_ = *p; });
+    apply_param(params, "contact_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) contact_topic_ = *p; });
     apply_param(params, "stroke_gain", [&](auto const& v){ stroke_gain_ = get_double(v, "stroke_gain"); });
     apply_param(params, "stroke_phase", [&](auto const& v){ stroke_phase_ = get_double(v, "stroke_phase"); });
     apply_param(params, "steer", [&](auto const& v){ steer_ = get_double(v, "steer"); });
@@ -646,6 +664,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             lateral_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_lateral(p); }));
+    }
+    if (!contact_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            contact_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){ handle_contact(p); }));
     }
     if (!feet_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(
@@ -838,6 +861,22 @@ void MotorEPM::handle_feet(MessagePtr payload) {
     for (int i = 0; i < k; ++i) foot_y_[i] = float(pt->values[i]);
 }
 
+// TRUE per-leg ground contact (`reality.proprio.foot_contact`) — the physics touch flag,
+// which is also the sensor a REAL picrawler has (a foot switch).  It was already being
+// published every tick and simply was not wired here: MotorEPM instead INFERRED contact
+// from foot HEIGHT relative to that foot's own moving average, which measured 40.3 %
+// "swinging" while the feet were genuinely down 99.3 % of the time.  Every consumer of
+// in_swing_ (stance_lift, all the Cruse rules) was gating on that error.
+void MotorEPM::handle_contact(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt) return;
+    int k = std::min<int>(int(pt->values.size()), n_legs_);
+    if (int(foot_contact_.size()) != n_legs_) foot_contact_.assign(n_legs_, 1.0f);
+    for (int i = 0; i < k; ++i) foot_contact_[i] = float(pt->values[i]);
+    have_contact_ = true;
+}
+
 // Per-tick Cruse stance/swing bookkeeping: a leg is in SWING when its foot is above
 // its own self-calibrating height EMA; a touchdown (swing→stance) resets its
 // since-plant counter (used by Rule 2's release window).
@@ -848,13 +887,99 @@ void MotorEPM::update_cruse_state() {
         in_swing_.assign(n_legs_, 0);
         ticks_since_plant_.assign(n_legs_, 1000);
     }
+    // TRUE-CONTACT path: when the real foot-contact sensor is wired, a leg is in swing
+    // iff it is not touching anything.  No EMA, no deadband, no self-reference — the
+    // whole class of chatter/latching failure the height proxy had simply does not
+    // arise, because this is a measurement rather than an inference.
+    if (have_contact_ && int(foot_contact_.size()) == n_legs_) {
+        if (int(in_swing_.size()) != n_legs_) {
+            in_swing_.assign(n_legs_, 0);
+            ticks_since_plant_.assign(n_legs_, 1000);
+        }
+        int n_sw = 0;
+        for (int i = 0; i < n_legs_; ++i) {
+            bool sw = foot_contact_[i] < 0.5f;            // not touching → swinging
+            if (in_swing_[i] && !sw) ticks_since_plant_[i] = 0;   // touchdown
+            else ticks_since_plant_[i] += 1;
+            in_swing_[i] = sw ? 1 : 0;
+            if (sw) ++n_sw;
+        }
+        swing_frac_ema_ = (1.0f - kSwingFracAlpha) * swing_frac_ema_
+                        + kSwingFracAlpha * (float(n_sw) / float(std::max(1, n_legs_)));
+        cruse_bias_mean_ = cruse_bias_n_ ? (cruse_bias_acc_ / float(cruse_bias_n_)) : 0.0f;
+        cruse_bias_acc_ = 0.0f; cruse_bias_n_ = 0;
+        return;
+    }
+    if (int(foot_y_mad_.size()) != n_legs_) foot_y_mad_.assign(n_legs_, 0.0f);
+    int n_sw_now = 0;
     for (int i = 0; i < n_legs_; ++i) {
         foot_y_ema_[i] = (1.0f - kFootYEmaAlpha) * foot_y_ema_[i] + kFootYEmaAlpha * foot_y_[i];
-        bool sw = foot_y_[i] > foot_y_ema_[i];
+        const float dev = foot_y_[i] - foot_y_ema_[i];
+        foot_y_mad_[i] = (1.0f - kFootYMadAlpha) * foot_y_mad_[i]
+                       + kFootYMadAlpha * std::fabs(dev);
+        // Deadband (see the header note).  The frac == 0 path is the LEGACY
+        // comparison verbatim, not an equivalent-looking rewrite: with a band the
+        // detector holds its state inside the band, and at dev == 0 exactly (which
+        // happens on the first tick, since the EMA is seeded from foot_y) holding
+        // differs from the legacy `>` returning false.  Branch explicitly so the
+        // gain-0 guard is byte-identical by construction, not by argument.
+        const float band = float(swing_hyst_frac_) * foot_y_mad_[i];
+        bool sw;
+        if (band <= 0.0f) {
+            sw = foot_y_[i] > foot_y_ema_[i];        // legacy: no deadband
+        } else {
+            sw = in_swing_[i] != 0;                 // hold state inside the band
+            if (dev >  band) sw = true;             // clearly above → swinging
+            else if (dev < -band) sw = false;       // clearly below → planted
+        }
         if (in_swing_[i] && !sw) ticks_since_plant_[i] = 0;   // touchdown
         else ticks_since_plant_[i] += 1;
         in_swing_[i] = sw ? 1 : 0;
+        if (sw) ++n_sw_now;
     }
+    // Diagnostic: what fraction of legs this detector calls "swinging".  Without it
+    // the gate stance_lift / Cruse rely on is invisible, so a lever built on it
+    // cannot be verified to have fired (CLAUDE.md §3.2 rule 5).
+    swing_frac_ema_ = (1.0f - kSwingFracAlpha) * swing_frac_ema_
+                    + kSwingFracAlpha * (float(n_sw_now) / float(std::max(1, n_legs_)));
+    // Does a LEGAL phase reference reproduce this detector's output?  Compares the sign of
+    // sin(cpg_phase + gait_phase[leg]) — the body-entrained rhythm, which a real robot has —
+    // against in_swing_ from the god's-eye foot-height signal.  Pure diagnostic; decides
+    // whether the oracle can be swapped for a phase gate before that gate is built.
+    if (cpg_seen_ && int(gait_phase_.size()) == n_legs_ && int(in_swing_.size()) == n_legs_) {
+        int agree = 0;
+        for (int i = 0; i < n_legs_; ++i) {
+            const bool phase_says_swing = std::sin(cpg_phase_ + float(gait_phase_[i])) > 0.0f;
+            if (phase_says_swing == (in_swing_[i] != 0)) ++agree;
+        }
+        phase_agree_ema_ = (1.0f - kPhaseAgreeAlpha) * phase_agree_ema_
+                         + kPhaseAgreeAlpha * (float(agree) / float(std::max(1, n_legs_)));
+    }
+    // Second, sharper comparison: the GLOBAL body phase measured ~0.50 (chance), but the
+    // oracle detector is a PER-LEG oscillation threshold, so the matching legal candidate is
+    // each leg's OWN phase, L.phase = atan2(joint velocity, joint pos − mean) — derived from
+    // joint encoders, hence legal.  The structural analogue of `foot_y > foot_y_ema` on that
+    // signal is cos(L.phase) > 0 (position above its own mean).  If THIS agrees, the oracle
+    // has a drop-in legal replacement that needs no new sensor at all.
+    if (int(in_swing_.size()) == n_legs_) {
+        int agree2 = 0, n = 0;
+        for (int i = 0; i < n_legs_; ++i) {
+            if (!legs_[i].initialized) continue;
+            const bool leg_phase_says_swing = std::cos(legs_[i].phase) > 0.0f;
+            if (leg_phase_says_swing == (in_swing_[i] != 0)) ++agree2;
+            ++n;
+        }
+        if (n > 0)
+            legphase_agree_ema_ = (1.0f - kPhaseAgreeAlpha) * legphase_agree_ema_
+                                + kPhaseAgreeAlpha * (float(agree2) / float(n));
+    }
+    // Fold the PREVIOUS tick's Cruse-contribution accumulator (the leg loop runs after
+    // this function, so one tick of lag — irrelevant for a diagnostic).  Publishing the
+    // mean rather than the sum keeps it comparable across leg counts; it decays to
+    // exactly 0 within a tick of cruse_gain being zeroed, which is the whole point.
+    cruse_bias_mean_ = cruse_bias_n_ ? (cruse_bias_acc_ / float(cruse_bias_n_)) : 0.0f;
+    cruse_bias_acc_ = 0.0f;
+    cruse_bias_n_   = 0;
 }
 
 void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
@@ -892,6 +1017,8 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
+    else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
+    else if (key == "coord_fitness_mode") coord_fitness_mode_ = int(get_int(value, "coord_fitness_mode"));
     else if (key == "coord_probe_ticks") coord_probe_ticks_ = get_int(value, "coord_probe_ticks");
     else if (key == "coord_stab_penalty") coord_stab_penalty_ = get_double(value, "coord_stab_penalty");
     else if (key == "coord_lat_penalty") coord_lat_penalty_ = get_double(value, "coord_lat_penalty");
@@ -1219,14 +1346,50 @@ void MotorEPM::tick(uint64_t tick_id) {
             // (target_compass · body velocity), so going forward and turning-toward-goal
             // are rewarded symmetrically.  body velocity = (lateral_v, fwd_v); intent =
             // (tc_x, tc_y) is already a body-frame unit vector toward the target.
-            float reward_v = fwd_v_;
-            if (coord_intent_nav_ > 0.0) {
-                float tc_mag = std::sqrt(tc_x_ * tc_x_ + tc_y_ * tc_y_);
-                if (tc_mag > 0.1f)                                   // target present
-                    reward_v = lateral_v_ * tc_x_ + fwd_v_ * tc_y_;  // velocity toward intent
+            if (coord_fitness_mode_ == 1) {
+                // ---- REWARD-FREE fitness (2026-07-25).  Mode 0 below ranks probes by
+                // FORWARD VELOCITY — a task reward, which §5.1 forbids and which gives the
+                // ratchet something destructive to lock in (a thrash that scores high while
+                // escaping becomes the incumbent).  This mode ranks the SAME probes by a
+                // purely intrinsic quantity: how well the body's own sensorimotor loop works
+                // under those offsets.  No position, distance, or velocity term appears.
+                //
+                //   fitness = coherence · activity / (1 + self-model error)
+                //
+                // Every factor is load-bearing, because the two obvious signals are BOTH
+                // degenerate on their own and degenerate in the SAME direction:
+                //   * coherence alone → a FROZEN body wins.  φ = atan2(0,0) = 0 for every
+                //     leg, so the Kuramoto order parameter reads 1.0 on a corpse.
+                //   * 1/(1+tle) alone → a frozen body wins again: a still body is the
+                //     least surprising thing a forward model can predict (this is exactly
+                //     why Cphi was deliberately NOT trained on HK surprise — see the header).
+                //   * activity (mean per-leg oscillation amplitude) is the homeokinetic
+                //     normalisation that kills both: it → 0 when the body stops, so no
+                //     frozen solution can win however predictable or "coherent" it looks.
+                // A thrash loses too: high activity but scattered phases (low coherence) and
+                // high prediction error. What wins is COHERENT, WELL-MODELLED MOTION.
+                //
+                // Precision form 1/(tle+ε) is the same weighting the LateralVoter fuses on
+                // (§0) — trust earned from predictive accuracy.
+                const float coh = gait_coherence();          // ∈[0,1] phase-lock quality
+                const float act = amp_ema_mean();            // oscillation amplitude
+                const float tle = tle_ema_mean();            // forward-model error
+                // Wobble stays penalised: tilt is a VIABILITY/homeostatic term, not a task
+                // reward, and it keeps the search on the alive side of the frontier.  The
+                // lateral-velocity penalty is dropped here — "don't crab" is a task
+                // preference, not an intrinsic one.
+                coord_fit_accum_ += coh * act / (1.0f + tle)
+                                  - float(coord_stab_penalty_) * wob;
+            } else {
+                float reward_v = fwd_v_;
+                if (coord_intent_nav_ > 0.0) {
+                    float tc_mag = std::sqrt(tc_x_ * tc_x_ + tc_y_ * tc_y_);
+                    if (tc_mag > 0.1f)                                   // target present
+                        reward_v = lateral_v_ * tc_x_ + fwd_v_ * tc_y_;  // velocity toward intent
+                }
+                coord_fit_accum_ += reward_v - float(coord_stab_penalty_) * wob
+                                             - float(coord_lat_penalty_) * std::fabs(lateral_v_);
             }
-            coord_fit_accum_ += reward_v - float(coord_stab_penalty_) * wob
-                                         - float(coord_lat_penalty_) * std::fabs(lateral_v_);
             coord_fit_count_++;
         }
         if (coord_probe_counter_ >= coord_probe_ticks_) {
@@ -1478,6 +1641,8 @@ void MotorEPM::tick(uint64_t tick_id) {
             else                                 cmd =  0.0f;   // unconstrained stance
             y[1]     += float(cruse_gain_) * cmd;    // hip2: +foot down (plant), −foot up (lift)
             y[m - 1] += -float(cruse_gain_) * cmd;   // knee reinforces the same foot-height move
+            cruse_bias_acc_ += std::fabs(float(cruse_gain_) * cmd);
+            ++cruse_bias_n_;
         }
         // Rule 5 (load distribution) — independent of the v2 lift so it can be tested
         // alone.  A STANCE leg presses its foot down ∝ how many OTHER legs are swinging
@@ -1853,6 +2018,11 @@ float MotorEPM::tle_ema_mean() const {
     for (auto const& L : legs_) if (L.initialized) { s += L.tle_ema; ++c; }
     return c ? s / float(c) : 0.0f;
 }
+float MotorEPM::amp_ema_mean() const {
+    if (legs_.empty()) return 0.0f; float s = 0; int c = 0;
+    for (auto const& L : legs_) if (L.initialized) { s += L.amp_ema; ++c; }
+    return c ? s / float(c) : 0.0f;
+}
 float MotorEPM::gain_ema_mean() const {
     if (legs_.empty()) return 0.0f; float s = 0; int c = 0;
     for (auto const& L : legs_) if (L.initialized) { s += L.gain_ema; ++c; }
@@ -1927,6 +2097,12 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["chassis_h_max"]  = chassis_h_max_;
     mod["height_bias"]    = height_bias_;
     mod["chassis_h_seen"] = chassis_h_seen_;
+    // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
+    // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
+    mod["swing_frac"]     = swing_frac_ema_;
+    mod["cruse_bias"]     = cruse_bias_mean_;
+    mod["phase_agree"]    = phase_agree_ema_;
+    mod["legphase_agree"] = legphase_agree_ema_;
     // panic pathway (push-oscillator phase + smoothed level + hysteresis latch)
     mod["panic_phase"]   = panic_phase_;
     mod["panic"]         = panic_;
@@ -2003,6 +2179,26 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["commit_boost"]        = commit_boost_;     // 0..1 (ramps when flowing → damps explore + adds thrust)
     j["flow_active"]         = (forward_flow_gain_ != 0.0);     // lever D
     j["stance_lift_active"]  = (stance_lift_gain_ != 0.0);      // knee stance-lift (belly-up)
+    // Fraction of legs the swing detector calls "swinging".  ~0.5 with no deadband
+    // means it is reporting phase, not contact — compare against the body's own
+    // absolute planted test before trusting any lever gated on it.
+    j["swing_frac"]          = swing_frac_ema_;
+    // Mean |MotorEPM's own Cruse contribution|.  EXACTLY 0 ⇒ this module's Cruse block
+    // never executed, so any Cruse-looking motion is coming from somewhere else
+    // (CruseCoordinator's independent rule3_weight/cruse_bias_gain, or the emergent
+    // gait).  Resolves the two-Rule-3 ambiguity by measurement, not inference.
+    j["cruse_bias"]          = cruse_bias_mean_;
+    // Agreement between a LEGAL body-rhythm phase gate and the god's-eye swing detector.
+    // ~0.5 = the phase says nothing about it; ~1.0 = the detector IS a phase gate and can
+    // be replaced by one. Decides the oracle refactor BEFORE the replacement is built.
+    j["phase_agree"]         = phase_agree_ema_;      // global body phase vs the oracle
+    j["legphase_agree"]      = legphase_agree_ema_;   // per-leg joint phase vs the oracle
+    // The coordination search, made observable: which fitness is ranking probes, and the
+    // incumbent's score.  Without these, "is the phase search locked onto something" is
+    // unanswerable — and this search stores a winner, so it CAN lock in.
+    j["coord_fitness_mode"]  = coord_fitness_mode_;
+    j["coord_best_fitness"]  = coord_best_fitness_;
+    j["coord_activity"]      = amp_ema_mean();   // the anti-freeze factor of mode 1
     j["flow_quality"]        = flow_quality_diag_; // magnitude·predictability (drives the flow stroke amp)
     {
         std::vector<float> pc(n_legs_, 0.0f);
@@ -2161,6 +2357,10 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         chassis_h_ema_  = mod.value("chassis_h_ema",  chassis_h_ema_);
         chassis_h_max_  = mod.value("chassis_h_max",  chassis_h_max_);
         height_bias_    = mod.value("height_bias",    height_bias_);
+        swing_frac_ema_ = mod.value("swing_frac",     swing_frac_ema_);
+        cruse_bias_mean_ = mod.value("cruse_bias",    cruse_bias_mean_);
+        phase_agree_ema_ = mod.value("phase_agree",  phase_agree_ema_);
+        legphase_agree_ema_ = mod.value("legphase_agree", legphase_agree_ema_);
         chassis_h_seen_ = mod.value("chassis_h_seen", chassis_h_seen_);
         panic_phase_   = mod.value("panic_phase",   panic_phase_);
         panic_         = mod.value("panic",         panic_);

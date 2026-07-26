@@ -99,6 +99,9 @@ struct Sensors {
     float fwd_v = 0, yaw = 0, tc_x = 0, tc_y = 0;
     float distress = -1, height = -1;     // <0 → not published this tick
     float tilt_pitch = 0, tilt_roll = 0;
+    // Keep `feet` LAST: existing tests brace-initialize Sensors positionally, so a
+    // new leading member would silently land in the wrong field.
+    std::vector<float> feet;              // per-leg foot height; empty → not published
 };
 
 struct Fixture {
@@ -144,6 +147,7 @@ struct Fixture {
             bus.publish(pre + ".p" + std::to_string(leg), proprio_frame(double(t), leg, motor_dim));
         bus.publish(pre + ".imu",  vec_token({0, 0, s.fwd_v, s.yaw}));
         bus.publish(pre + ".tilt", vec_token({s.tilt_pitch, 1.0f, s.tilt_roll, 1.0f}));
+        if (!s.feet.empty()) bus.publish(pre + ".feet", vec_token(s.feet));
         if (s.distress >= 0.0f) bus.publish(pre + ".distress", vec_token({s.distress}));
         if (s.height   >= 0.0f) bus.publish(pre + ".height",   vec_token({s.height}));
         if (s.tc_x != 0.0f || s.tc_y != 0.0f)
@@ -436,6 +440,156 @@ TEST(MotorEPM, ControllerSymmetryCouplingOffInertOnActive) {
     }
     EXPECT_LT(maxdiff_z, 1e-6)  << "ctrl_symmetry_gain=0 must be byte-identical (default-off contract)";
     EXPECT_GT(maxdiff_on, 1e-3) << "ctrl_symmetry_gain>0 must actually change the controllers (no silent no-op)";
+}
+
+// =============================================================================
+// 8b. Swing-detector deadband (`swing_hyst_frac`, 2026-07-25).
+//
+// The legacy detector was `foot_y > foot_y_ema` with no deadband.  A signal sits
+// above its own moving average about half the time, so that test SPLITS ~50/50 by
+// construction — it reports gait phase, not ground contact — and it chatters on any
+// small ripple.  Measured on the live robot: 40.3 % of legs called "swinging" while
+// the body's own absolute contact test said the feet were down 99.3 %.
+//
+// WHAT IS AND IS NOT ASSERTED HERE — measured 2026-07-25, and narrower than the first
+// draft of this change claimed.  Two unit experiments were run and both are recorded
+// because together they bound the mechanism:
+//
+//  (a) Given a REAL duty cycle (80 ticks planted + a 20-tick lift arc), the legacy
+//      no-deadband detector is essentially CORRECT: it reported 0.18 swing against a
+//      true duty of 0.20.  The planted phase sits decisively below the EMA (which the
+//      lift excursions pull upward), so there is nothing to chatter on.
+//  (b) In that same regime a band of 1.0·MAD is too WIDE: the stance deviation
+//      (≈0.006) never clears −band (≈0.010), so the detector LATCHES in whatever state
+//      it entered — 0.58 swing.  This is the failure mode behind the live `frac=2.0`
+//      arm degrading (steps 92, tilt_sd 0.139, 0.25 falls) after `frac=0.5` helped.
+//
+// So the defect is CONDITIONAL, and the condition is the absence of stepping.  On the
+// live robot the feet are down 99.3 % of the time with only micro-excursions — there
+// is no duty cycle — and there the legacy detector chattered to a measured 40.3 %
+// "swinging", which a 0.5·MAD band cut back substantially.  The detector is therefore
+// an AMPLIFIER of the no-stepping problem, not an independent root cause; see the
+// ledger's open frontier.
+//
+// Also note what a MAD-scaled band structurally cannot do.  It is scale-invariant by
+// design, so there is no tuned constant (CLAUDE.md §5.5) — but it therefore cannot
+// separate jitter from a step by AMPLITUDE: a pure sinusoid has peak/MAD ≈ 1.57 at any
+// size, so no frac below that suppresses it and any frac above it suppresses all of
+// it.  Genuinely answering "is this foot loaded" needs a contact/load observation, and
+// there is none on the bus — a height signal cannot settle it without a reference that
+// is either god's-eye or self-referential.
+//
+// Only the two contract properties are asserted below: the gain-0 guard, and that a
+// nonzero band really moves the gate.  The regime-dependent behavioral claim is left
+// to the seed-averaged corridor A/Bs, which is where it was actually measured.
+// =============================================================================
+
+// The gain-0 guard: swing_hyst_frac=0 must leave the actions byte-identical, and a
+// nonzero band must actually change them (no silent no-op in either direction).
+TEST(MotorEPM, SwingDeadbandZeroIsByteIdenticalNonzeroActs) {
+    auto base = base_params();
+    base["feet_topic"]       = std::string("mt.feet");
+    base["stance_lift_gain"] = 0.5;          // the consumer whose gate the band moves
+    base["coupling_gain"]    = 0.5;
+    auto pz  = base; pz["swing_hyst_frac"]  = 0.0;
+    auto pon = base; pon["swing_hyst_frac"] = 1.0;
+    Fixture f0(base, 4, 3), fz(pz, 4, 3), fon(pon, 4, 3);
+    // A real stepping motion, so the detector has genuine transitions to gate.
+    auto stepping_feet = [](uint64_t t) {
+        std::vector<float> feet(4);
+        for (int i = 0; i < 4; ++i)
+            feet[i] = -0.01f + 0.05f * float(std::sin(0.09 * double(t) + i * 1.57));
+        return feet;
+    };
+    double maxdiff_z = 0.0, maxdiff_on = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        Sensors s; s.feet = stepping_feet(t);
+        f0.run_tick(t, s); fz.run_tick(t, s); fon.run_tick(t, s);
+        if (t < 12) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j) {
+                maxdiff_z  = std::max(maxdiff_z,  double(std::abs(f0.accel(leg, j) - fz.accel(leg, j))));
+                maxdiff_on = std::max(maxdiff_on, double(std::abs(f0.accel(leg, j) - fon.accel(leg, j))));
+            }
+    }
+    EXPECT_LT(maxdiff_z, 1e-6)  << "swing_hyst_frac=0 must be byte-identical to the "
+                                   "legacy detector (default-off contract)";
+    EXPECT_GT(maxdiff_on, 1e-3) << "swing_hyst_frac>0 must actually move the stance gate";
+}
+
+// =============================================================================
+// 8c. Reward-free coordination fitness (`coord_fitness_mode=1`, 2026-07-25).
+//
+// The (1+1) phase search ranks probes and KEEPS the winner.  Mode 0 ranks by forward
+// velocity — a task reward (§5.1), and the thing that lets a destructive escape thrash
+// become a permanent incumbent.  Mode 1 ranks by coherence·activity/(1+tle).
+//
+// The property that matters is ANTI-DEGENERACY: a frozen body must not win.
+//
+// The coherence trap is real but SUBTLER than first written, and the correction is worth
+// keeping.  `gait_coherence` is R = |mean_j e^{i(φ_j − P_j)}| — it subtracts the offsets.
+// On a frozen body every φ_j = atan2(0,0) = 0, so R = |mean_j e^{−iP_j}|, which depends
+// entirely on WHICH OFFSETS ARE BEING PROBED: with the default trot [0,π,π,0] it is 0,
+// but with all-equal offsets it is 1.0.  And the (1+1) search MUTATES those offsets — so
+// it can walk itself into the self-consistent optimum "all-equal offsets + frozen body",
+// scoring a perfect 1.0 on a corpse.  This test therefore pins the trap at the offsets
+// where it bites, and shows the activity factor defusing it there.
+// =============================================================================
+TEST(MotorEPM, RewardFreeCoordFitnessRejectsAFrozenBody) {
+    auto p = base_params();
+    p["coupling_gain"] = 0.5;
+    // All-equal offsets: the corner of the search space where coherence is maximal on a
+    // still body.  This is reachable BY THE SEARCH, so it must not be a winning probe.
+    p["gait_phase"] = std::vector<double>{0.0, 0.0, 0.0, 0.0};
+    Fixture f(p, 4, 3);
+    // A frozen body: publish an unchanging proprio frame so every leg's phase vector is
+    // (0,0) and the oscillation amplitude decays to nothing.
+    for (uint64_t t = 0; t < 400; ++t) {
+        f.bus.begin_tick(t);
+        for (int leg = 0; leg < f.n_legs; ++leg) {
+            auto pt = std::make_shared<ogma::ProprioToken>();
+            pt->values = Eigen::VectorXf::Zero(3 * f.motor_dim);   // dead still
+            pt->sensor = "proprio";
+            f.bus.publish(f.pre + ".p" + std::to_string(leg), pt);
+        }
+        f.bus.publish(f.pre + ".imu",  Fixture::vec_token({0, 0, 0, 0}));
+        f.bus.publish(f.pre + ".tilt", Fixture::vec_token({0, 1.0f, 0, 1.0f}));
+        f.m.tick(t);
+        f.bus.end_tick();
+    }
+    auto d = f.m.diag_snapshot();
+    const double coherence = d.value("gait_coherence", -1.0);
+    const double activity  = d.value("coord_activity", -1.0);
+    // The trap, demonstrated rather than asserted away: at these offsets coherence is
+    // MAXIMAL on a corpse, so ranking probes on coherence alone would reward freezing.
+    EXPECT_GT(coherence, 0.9) << "at all-equal offsets a frozen body should score maximal "
+                                 "Kuramoto coherence (the trap); got " << coherence;
+    // The guard: the activity factor collapses, so coherence·activity/(1+tle) → ~0 and
+    // no frozen probe can out-score a moving one.
+    EXPECT_LT(activity, 0.02) << "activity must collapse on a frozen body — it is the ONLY "
+                                 "factor preventing a still-body optimum; got " << activity;
+}
+
+// Gain-0 guard: coord_fitness_mode=0 must reproduce the legacy fwd_v-ranked search
+// exactly, so every existing config is untouched and mode 1 is a clean single lever.
+TEST(MotorEPM, CoordFitnessModeZeroIsByteIdentical) {
+    auto base = base_params();
+    base["coupling_gain"]      = 0.5;
+    base["coord_reward_drive"] = 0.3;      // the search must actually be running
+    base["coord_probe_ticks"]  = int64_t{60};
+    auto pz = base; pz["coord_fitness_mode"] = int64_t{0};
+    Fixture f0(base, 4, 3), fz(pz, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        Sensors s; s.fwd_v = 0.05f * float(std::sin(0.02 * double(t)));
+        f0.run_tick(t, s); fz.run_tick(t, s);
+        if (t < 12) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff, double(std::abs(f0.accel(leg, j) - fz.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-6) << "coord_fitness_mode=0 must be byte-identical to the legacy "
+                                "fwd_v-ranked search (default-off contract)";
 }
 
 // =============================================================================

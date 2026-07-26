@@ -104,6 +104,7 @@ private:
     void handle_lateral(MessagePtr payload);
     void ensure_leg_init(int leg, int state_dim);      // lazy alloc once n known
     float tle_ema_mean()    const;
+    float amp_ema_mean()    const;   // mean per-leg oscillation amplitude (activity)
     float gain_ema_mean()   const;
     float outmag_ema_mean() const;
 
@@ -195,6 +196,10 @@ private:
     // a persistent exploration (coord_explore) so the coordination never fully
     // freezes — the homeokinetic "keep probing" meant to give continuous gait
     // improvement.  Leg 0 is the phase reference (offset pinned at 0).
+    // Which fitness the (1+1) coordination search ranks probes by.  0 = legacy fwd_v
+    // (a TASK REWARD — see §5.1); 1 = reward-free coherence·activity/(1+tle).  Default
+    // 0 keeps every existing config byte-identical.
+    int     coord_fitness_mode_ = 0;
     double  coord_adapt_rate_ = 0.0;   // crystallisation rate toward the emergent pattern (0 = fixed)
     double  coord_explore_    = 0.0;   // persistent phase-offset exploration noise (rad/tick)
     std::mt19937 coord_rng_{0xC007Du}; // coordination exploration stream
@@ -289,7 +294,56 @@ private:
     std::vector<int>     cruse_anterior_;       // per-leg anatomical anterior idx (−1 = none)
     std::vector<int>     cruse_contra_;         // per-leg contralateral idx (−1 = none)
     static constexpr float kFootYEmaAlpha = 0.02f;  // ~50-tick foot-height mean
+    // 2026-07-25 — DEADBAND on the swing detector.  The bare `foot_y > foot_y_ema`
+    // test has no deadband, so it splits ~50/50 by construction (a signal is above
+    // its own moving average about half the time) — it is a PHASE test, not a
+    // contact test.  Worse, any consumer that moves the foot (stance_lift, Cruse)
+    // closes a positive feedback loop through it: bias raises the foot → foot goes
+    // above its EMA → declared swing → bias removed → foot drops → declared stance →
+    // bias returns.  That is a relaxation oscillator running at the EMA's ~50-tick
+    // timescale, competing with the body's own ~70-tick stride.
+    //
+    // The band must stay RELATIVE to the EMA: foot_y is world-Y, so an absolute
+    // threshold is a god's-eye quantity that would read a planted foot on raised
+    // terrain as permanently swinging (the same blindness that retired
+    // chassis_y_norm).  And it must not be a tuned constant — it is scaled by the
+    // foot's OWN running mean-absolute-deviation, so it tracks whatever amplitude
+    // the gait happens to have (CLAUDE.md §5.5: adapt it, don't tune it).
+    // 2026-07-25 — "did MotorEPM's Cruse block actually contribute?"  There are TWO
+    // Rule-3 parameters in this codebase: MotorEPM's `cruse_rule3_weight` (a sub-weight
+    // INSIDE the cruse_gain block — inert when cruse_gain == 0) and CruseCoordinator's
+    // own `rule3_weight` (a separate module, gated by `cruse_bias_gain` which defaults
+    // to 1.0, i.e. ON).  The MOTOR-EPM panel writes the FORMER.  Zeroing MotorEPM's
+    // cruse_gain therefore says nothing about the latter, and the two are easy to
+    // confuse by eye.  This accumulator makes MotorEPM's own contribution observable so
+    // the question is answered by a number instead of an inference.
+    float    cruse_bias_acc_ = 0.0f;            // Σ|cruse contribution| since last diag
+    uint64_t cruse_bias_n_   = 0;               // samples in that sum
+    float    cruse_bias_mean_ = 0.0f;           // published mean (0 ⇒ block never ran)
+    // 2026-07-25 — can a LEGAL phase reference reproduce what the god's-eye swing detector
+    // outputs?  `feet_y` is absolute world-Y (see the oracle design note); the detector
+    // built on it behaves like a phase gate rather than a contact gate.  If the body's own
+    // rhythm phase (already subscribed as cpg_phase_, entrained to the body by
+    // BodyRhythmTracker) agrees with that detector, the oracle can be replaced by a signal
+    // a real robot has.  Measured BEFORE building the replacement.
+    //   ≈0.5 → the phase carries no information about the detector's output
+    //   ≈1.0 → the detector IS a phase gate and the phase can stand in for it
+    float    phase_agree_ema_    = 0.5f;   // vs the GLOBAL body/CPG phase
+    float    legphase_agree_ema_ = 0.5f;   // vs each leg's OWN joint-derived phase
+    static constexpr float kPhaseAgreeAlpha = 0.002f;   // ~500-tick mean (several strides)
+    std::vector<float>   foot_y_mad_;           // running mean |foot_y − ema|, per leg
+    double  swing_hyst_frac_ = 0.0;             // deadband in units of MAD (0 = legacy)
+    float   swing_frac_ema_  = 0.0f;            // diag: smoothed fraction of legs in swing
+    static constexpr float kFootYMadAlpha  = 0.02f;  // MAD tracks on the EMA's timescale
+    static constexpr float kSwingFracAlpha = 0.01f;  // slow, for a readable diagnostic
     void handle_feet(MessagePtr payload);
+    // TRUE ground contact per leg (`reality.proprio.foot_contact`) — already published by
+    // the body every tick, and the sensor a real picrawler actually has.  Empty topic =
+    // fall back to the legacy foot-height inference (byte-identical).
+    std::string          contact_topic_;
+    std::vector<float>   foot_contact_;
+    bool                 have_contact_ = false;
+    void handle_contact(MessagePtr payload);
     void update_cruse_state();
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays
