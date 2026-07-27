@@ -456,6 +456,111 @@ within a leg.**
 
 ---
 
+### ★ 2026-07-27 — THE ROBOT WALKS STRAIGHT-LEGGED, AND THE CORRIDOR WAS HIDING IT
+
+Operator UI observation (arena gym): *"hip1 is appropriately doing the work to swing the leg
+forward, but hip2 and knee stay fairly horizontal to the chassis."* Measured, and it is worse
+than it looks.
+
+#### The sprawl, quantified (arena, n=3, 1032 leg-frames, post-warmup)
+
+| | measured | design rest pose |
+|---|---|---|
+| `hip2` angle | **−3.6° ± 4.4** (range −23…+6) | 0° = femur PARALLEL TO GROUND |
+| `knee` angle | −49.3° ± 15.8 (range −98…+15) | −80° |
+| **tibia off vertical** | **37.5° ± 15.3** (range 0…**101°**) | **10°** |
+| **planted foot radius** | **170 mm** (range 136…179) | total leg reach **166 mm** |
+
+**The femur never leaves neutral for an entire run**, so hip2 contributes nothing but a fixed
+53.6 mm horizontal offset; the knee carries the whole gait alone and sweeps the shank to
+**~4× the design rest angle**; and the feet plant **at the limb's full reach** — straight-legged,
+maximum moment arm, minimum mechanical advantage. Corroborating waste: **`scrub` 0.100 against
+`fwd_v` 0.050 — the body slides sideways twice as fast as it advances**, which is what sprawled
+legs do (the lateral components largely cancel left-to-right and that work is thrown away).
+
+#### ⚠️ THE CORRIDOR MASKS THIS FAMILY — measure heading effects in the ARENA
+
+`_build_corridor()` places the curriculum *"inside self-centering 30° walls"*
+(`picrawler_body.gd:2684`). That geometry **actively re-centers the body**, so a yaw excursion
+is corrected by the wall before it reaches `straight` or `turns`. Every tool in
+`scripts_tools/` hardcoded `OGMA_PICRAWLER_GYM="corridor"`, so this whole family was being
+scored in the one gym where its target failure is suppressed. New `scripts_tools/arenaavg.py`
+(open floor; `net_disp`/`straight` since `net_z` is meaningless off-axis; boundary guard;
+`tib_off` and `foot_r` posture columns).
+
+**The two gyms disagree materially, so a corridor verdict does not transfer.** Baseline
+`steps` 53 → **25** and `step_bal` 0.44 → **0.07** in the arena: the tripod-skid is far more
+severe on open ground. The load-gated stroke likewise reads differently (corridor: `step_bal`
+0.44→0.54; arena: `tilt_sd` 0.088→**0.063** and `planted` 3.87→**3.99**, but `steps` 25→14).
+
+#### The proposed MECHANISM was refuted while the proposed ACTION worked
+
+The operator's hypothesis was that sweeping an extended limb dumps yaw into the chassis. A new
+instrument (`|Δyaw rate|` split by support state, per limb) says **no**: `yawd_swing_excess` is
+**negative in every arm** (−0.035 baseline) and grows *more* negative as lifting rises. The
+chassis takes **less** yaw impulse while a foot is airborne than during full support — the
+larger source appears to be the skid-steer heading controller pushing through four planted legs
+that fight each other. *(A first version of this instrument used mean |yaw rate| and was blind:
+intentional steering acts through planted feet and swamped the reaction torque. A reaction
+torque is an impulse; differencing separates them.)*
+
+**The likelier reading is foot CLEARANCE, not angular momentum:** the arena baseline takes 25
+steps in 85 s with `step_bal` 0.07 — a limb that is not clearing the ground to complete a step.
+
+#### ★ KINEMATIC CONFLICT — tibia-vertical and belly-up cannot both be won by femur angle
+
+`hip2_tuck_target` sweep (arena, n=3) splits the two goals exactly as the CAD predicts, because
+the femur angle sets ride height and shank angle in *opposite* directions:
+
+| | base | −0.2 (femur UP) | +0.2 (femur DOWN) |
+|---|---|---|---|
+| tibia off vertical | 37.5° | **32.9°** | 43.7° |
+| belly clearance | 0.0221 | **0.0134** ⚠️ | **0.0335** |
+| foot radius (mm) | 170.3 | 170.8 | **167.9** |
+| net_disp | 4.85 | **6.16 (+27 %)** | 4.56 |
+| straight | 0.71 | **0.80** | 0.65 |
+| falls | 0 | 0 | **0.33** ⚠️ |
+
+Femur up plumbs the shank and buys **+27 % distance and +13 % straightness** — while dropping
+belly clearance **39 %**, a regression on a promoted invariant. Femur down raises the belly
+**52 %** and shortens the moment arm, while making the shank *more* oblique, slower, and adding
+falls. **Neither is promotable, and the trade is kinematic, not a tuning miss.** Note also that
+the +27 % arm did NOT shorten the moment arm (`foot_r` 170.3→170.8), so its gain is not the
+gear ratio — it is shank verticality plus a lower CoG.
+
+**Re-use context stands and is now sharper:** the original refutation was *"didn't crouch (weak
+reflex)"* at `postural_gain=0.3`; at the promoted 0.7 the parameter now bites hard in both
+directions. The failure is no longer authority, it is the conflict above.
+
+#### Swing-phase leg fold (`swing_tuck_hip2` / `swing_tuck_knee`) — the KNEE half carries it
+
+The mirror of the promoted `stance_lift` (which biases the knee of PLANTED legs), gated on
+**true contact** rather than the foot-height detector — that detector fires ~2× per real step,
+and a tuck on a chattering gate would retract the limb mid-stance, i.e. lift a loaded foot.
+Wiring true contact as a swing gate is refuted (§2) but for a consumer that wanted gait *phase*;
+this one wants "is the foot off the ground", which the re-use context names ("step-over foot
+placement"). This is also `hip2_tuck_target` **with the gate it was missing** — doctrine §5:
+*ask what state should have gated a failed bias before calling the idea dead.*
+
+Sign probe (n=3, arena): **−hip2 LIFTS** the limb (airborne fraction 0.30–0.47 vs a 0.20
+baseline), **+hip2 SUPPRESSES** lifting (0.11–0.17, `steps` collapse 25→4). Magnitude sweep:
+
+| arm | net_disp | straight | tilt_sd | step_bal | steps | bellyc |
+|---|---|---|---|---|---|---|
+| base | 4.85 | 0.71 | 0.0877 | **0.07** | 25 | 0.0221 |
+| h−0.1 / k+0.1 | **5.26** | **0.75** | 0.0713 | 0.28 | 26 | 0.0226 |
+| h−0.2 / k+0.2 | 4.96 | 0.68 | 0.0710 | 0.47 | 35 | — |
+| h−0.4 / k+0.4 | 4.20 | 0.65 | 0.0804 | 0.18 | 91 | 0.0237 |
+| h−0.2 only | 4.68 | 0.71 | 0.0868 | 0.20 | 47 | 0.0221 |
+| **k+0.2 only** | **5.08** | 0.72 | **0.0731** | **0.49** | 27 | **0.0229** |
+
+**`step_bal` 0.07 → 0.49 (7×) on the KNEE HALF ALONE**, with distance +5 %, wobble −17 %, belly
+preserved, 0 falls. Folding the shank during swing carries the effect; lifting the femur does
+not. `IN_FLIGHT` — n=3 single-gym is a signal, and it needs the corridor + hump + recovery +
+inversion gates before any promotion.
+
+---
+
 ## 5. Open frontier
 
 - **Fast flat traversal, belly-up** — the active thread. `stance_lift=0.5` is the current

@@ -8430,6 +8430,29 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# once already (CLAUDE.md 3.2 rule 5).
 			line["sgate"]    = snappedf(float(_mm.get("stroke_gate_mean", 1.0)), 0.0001)
 			line["sgate_spr"] = snappedf(float(_mm.get("stroke_gate_spread", 0.0)), 0.0001)
+			# SWING DYNAMICS.  yaw_swing_excess = mean |yaw rate| while ANY foot is
+			# airborne minus the all-four-down reference -- i.e. "does swinging a limb
+			# spin the chassis?", which is the operator's UI observation as a number.
+			# yaw_per_leg attributes it per limb so "it's the back legs" is checkable.
+			# swing_tuck_frac is the did-it-fire number for the swing_tuck lever; 0 with
+			# the gains non-zero means contact_topic is unwired.
+			line["yaw_allplant"] = snappedf(float(_mm.get("yaw_allplant", 0.0)), 0.00001)
+			line["yaw_anyswing"] = snappedf(float(_mm.get("yaw_anyswing", 0.0)), 0.00001)
+			line["yaw_swing_excess"] = snappedf(float(_mm.get("yaw_swing_excess", 0.0)), 0.00001)
+			line["swing_tuck_frac"] = snappedf(float(_mm.get("swing_tuck_frac", 0.0)), 0.001)
+			# Mean |shank off vertical| as the CONTROLLER sees it (radians). The collector
+			# also reconstructs this from hip2/knee; they should agree.
+			line["tib_off_ctl"] = snappedf(float(_mm.get("tibia_off_mean", 0.0)), 0.0001)
+			var _yl: Array = _mm.get("yaw_per_leg", [])
+			if _yl is Array and not _yl.is_empty(): line["yaw_per_leg"] = _yl
+			# |delta yaw rate| split the same way. THIS is the one that can see a swing
+			# reaction torque: mean yaw RATE is dominated by intentional steering (which
+			# acts through planted feet), so a limb impulse is invisible under it.
+			line["yawd_allplant"] = snappedf(float(_mm.get("yawd_allplant", 0.0)), 0.000001)
+			line["yawd_anyswing"] = snappedf(float(_mm.get("yawd_anyswing", 0.0)), 0.000001)
+			line["yawd_swing_excess"] = snappedf(float(_mm.get("yawd_swing_excess", 0.0)), 0.000001)
+			var _yd: Array = _mm.get("yawd_per_leg", [])
+			if _yd is Array and not _yd.is_empty(): line["yawd_per_leg"] = _yd
 			# (gait_phase — has the imposed trot [0, pi, pi, 0] drifted? — is already
 			#  emitted a few lines below; do not duplicate it here.)
 			# gait_phase = the LIVE Kuramoto target offsets [FL,FR,RL,RR].  Constant

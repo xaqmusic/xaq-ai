@@ -403,6 +403,21 @@ ParamSchema MotorEPM::params_schema() const {
         {"stroke_load_gain", ParamMutability::HotMutable,
          "PURCHASE GATE on the power stroke: scale each leg's propulsion by its share of measured hip1 load, so a leg pushes in proportion to the ground it actually has. Requires torque_topic. 0 = off (gate identically 1, byte-identical). The stroke is the one major bias in this stack that is ungated, and Phase 0 measured the cost: the fraction of STANCE spent in the stroke's positive half is 0.512 and over SWING 0.513, i.e. push direction is statistically INDEPENDENT of ground contact and half the power stroke is spent in the air. hip1 is the load signal because Phase 0 measured it to be (stance/swing torque ratio 1.368 hip1, 1.124 hip2, 1.011 knee): hip2 and the knee hold a near-static posture in both phases, while hip1's torque IS the ground reaction to the sweep. The gate is normalized to a mean of 1 across legs, so it REDISTRIBUTES thrust toward the legs with purchase instead of merely attenuating it. It is applied to the propulsion term only, never to the steering term (heading_bearing_hold rides the same channel). Values are an AMPLIFICATION of the ~15% raw load contrast, so useful settings are >1.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{8.0}},
+        {"tibia_plumb_gain", ParamMutability::HotMutable,
+         "TIBIA-PLUMB REFLEX: hip2 rotates to null the shank's deviation from VERTICAL, so the knee's gait drive TRANSLATES the foot instead of arcing it about the knee axis. 0 = off (byte-identical). hip2 and the knee are a planar 2-link arm; with hip2 pinned at its horizontal rest the knee alone must set both the foot's height AND its fore-aft position, which forces a circular foot path and a large shank sweep. MEASURED (arena, n=3, 1032 leg-frames): hip2 sits at -3.6 +/- 4.4 deg and never leaves neutral, the tibia swings to 37.5 +/- 15.3 deg off vertical (design rest 10, extremes 101), and the feet plant at a 170 mm radius against a 166 mm total leg reach -- straight-legged, maximum moment arm, and scrub 0.100 vs fwd_v 0.050 (sliding sideways twice as fast as it advances). This is the rewrite rule applied to that: implement the ERROR (shank off plumb), not a hip2 trajectory. Distinct from the refuted 'learned hip2', which merely LOOSENED hip2's spring and hoped the HK controller would discover the coordination -- an unconstrained joint is a wobble dimension, not an IK solver; this gives hip2 an objective. Specifies nothing about timing, so the rhythm stays emergent.",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"tibia_plumb_scale", ParamMutability::HotMutable,
+         "Kinematic constant, NOT a tuned gain: converts hip2's proprio units to radians. = HIP2_LIMIT = 1.40 for the picrawler (hip2 proprio is published as angle / HIP2_LIMIT).",
+         ParamValue{1.40}, ParamValue{0.0}, ParamValue{10.0}},
+        {"tibia_plumb_offset", ParamMutability::HotMutable,
+         "Kinematic constant, NOT a tuned gain: where 'plumb' sits in the joint encoding. = KNEE_REST + pi/2 = -1.6 + 1.5708 = -0.0292 rad for the picrawler (knee proprio is published as angle - KNEE_REST). Validated against the CAD rest pose, which reads 10 deg off vertical.",
+         ParamValue{-0.0292}, ParamValue{-3.2}, ParamValue{3.2}},
+        {"swing_tuck_hip2", ParamMutability::HotMutable,
+         "SWING TUCK (hip2 half): bias on the femur of legs that are OFF THE GROUND, folding the limb inboard so sweeping it forward stops dumping yaw into the chassis. The MIRROR of stance_lift (which biases the knee of PLANTED legs). Requires contact_topic; 0 = off (byte-identical). This is `hip2_tuck_target` with the gate it was missing: that parameter is an UNGATED postural rest-override applied to every leg all the time and is refuted (\"didn't crouch + destabilized\"), and doctrine §5 says to ask what state should have gated a failed bias before calling the idea dead. hip2's known liability is that it rotates feet OFF THE GROUND and loses traction -- during swing the foot is already off the ground, so the state gate turns that failure mode into the mechanism. Sign is left to the sweep, as stance_lift's was.",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"swing_tuck_knee", ParamMutability::HotMutable,
+         "SWING TUCK (knee half): bias on the shank of legs that are OFF THE GROUND, folding it under so the foot rides closer to the body through the swing. Pairs with swing_tuck_hip2. Requires contact_topic; 0 = off (byte-identical). Deliberately gated on TRUE contact rather than the foot-height detector stance_lift uses -- that detector was measured firing ~2x per real step, and a tuck on a chattering gate would retract the limb MID-STANCE, i.e. lift a loaded foot, which is the traction-loss failure that made the height homeostat wreck climbing.",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"gait_align_diag", ParamMutability::HotMutable,
          "DIAGNOSTIC ONLY (>0 = on, 0 = off and the whole block is skipped, so the build stays byte-identical). Measures whether the propulsive stroke is phase-locked to ground contact at all. The stroke rides L.phase (derived from the KNEE by default) while the stance gate rides the FOOT-HEIGHT cycle; legphase_agree already reads ~0.5 between them. Publishes a phase-locking value accumulated at each touchdown (stroke_td_plv: ~0 = touchdown lands at a uniformly random stroke phase, i.e. the two clocks are unlocked and half the power stroke is spent in the air), the signed continuous alignment, the stance/swing split of the stroke waveform, cycle periods for hip1/knee/foot, and whether joint_torque separates stance from swing. Feeds no command.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -478,6 +493,11 @@ ParamMap MotorEPM::current_params() const {
     m["contact_instrument_only"] = contact_instrument_only_;
     m["gait_align_diag"]    = gait_align_diag_;
     m["stroke_load_gain"]   = stroke_load_gain_;
+    m["tibia_plumb_gain"]   = tibia_plumb_gain_;
+    m["tibia_plumb_scale"]  = tibia_plumb_scale_;
+    m["tibia_plumb_offset"] = tibia_plumb_offset_;
+    m["swing_tuck_hip2"]    = swing_tuck_hip2_;
+    m["swing_tuck_knee"]    = swing_tuck_knee_;
     m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
@@ -592,6 +612,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "contact_instrument_only", [&](auto const& v){ contact_instrument_only_ = get_double(v, "contact_instrument_only"); });
     apply_param(params, "gait_align_diag", [&](auto const& v){ gait_align_diag_ = get_double(v, "gait_align_diag"); });
     apply_param(params, "stroke_load_gain", [&](auto const& v){ stroke_load_gain_ = get_double(v, "stroke_load_gain"); });
+    apply_param(params, "tibia_plumb_gain", [&](auto const& v){ tibia_plumb_gain_ = get_double(v, "tibia_plumb_gain"); });
+    apply_param(params, "tibia_plumb_scale", [&](auto const& v){ tibia_plumb_scale_ = get_double(v, "tibia_plumb_scale"); });
+    apply_param(params, "tibia_plumb_offset", [&](auto const& v){ tibia_plumb_offset_ = get_double(v, "tibia_plumb_offset"); });
+    apply_param(params, "swing_tuck_hip2", [&](auto const& v){ swing_tuck_hip2_ = get_double(v, "swing_tuck_hip2"); });
+    apply_param(params, "swing_tuck_knee", [&](auto const& v){ swing_tuck_knee_ = get_double(v, "swing_tuck_knee"); });
     apply_param(params, "stroke_gain", [&](auto const& v){ stroke_gain_ = get_double(v, "stroke_gain"); });
     apply_param(params, "stroke_phase", [&](auto const& v){ stroke_phase_ = get_double(v, "stroke_phase"); });
     apply_param(params, "steer", [&](auto const& v){ steer_ = get_double(v, "steer"); });
@@ -1099,6 +1124,38 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
     ensure(ga_con_per_,      0.0f);
 
     const bool truth = have_contact_ && int(foot_contact_.size()) == n_legs_;
+    // Yaw disturbance attributed to swinging: is the body being spun BY its own swing legs?
+    // Split |yaw rate| by support state so the operator's "the extended rear leg sweeps
+    // forward and spins the chassis" is a number, not only a UI impression.
+    if (truth) {
+        if (int(ga_yaw_leg_.size()) != n_legs_) {
+            ga_yaw_leg_.assign(n_legs_, 0.0); ga_yaw_leg_n_.assign(n_legs_, 0);
+        }
+        if (int(ga_yawd_leg_.size()) != n_legs_) {
+            ga_yawd_leg_.assign(n_legs_, 0.0); ga_yawd_leg_n_.assign(n_legs_, 0);
+        }
+        const double ay = std::fabs(double(yaw_rate_));
+        // |Δyaw rate| — the impulse a limb's reaction torque actually produces.  The plain
+        // rate is swamped by the steering controller (see the header note).
+        const double ad = ga_yaw_prev_init_ ? std::fabs(double(yaw_rate_ - ga_prev_yaw_rate_)) : 0.0;
+        const bool have_d = ga_yaw_prev_init_;
+        ga_prev_yaw_rate_ = yaw_rate_; ga_yaw_prev_init_ = true;
+        int n_air = 0;
+        for (int i = 0; i < n_legs_; ++i) {
+            if (foot_contact_[i] <= 0.5f) {
+                ++n_air;
+                ga_yaw_leg_[i] += ay; ++ga_yaw_leg_n_[i];
+                if (have_d) { ga_yawd_leg_[i] += ad; ++ga_yawd_leg_n_[i]; }
+            }
+        }
+        if (n_air == 0) {
+            ga_yaw_allplant_ += ay; ++ga_yaw_allplant_n_;
+            if (have_d) { ga_yawd_allplant_ += ad; ++ga_yawd_allplant_n_; }
+        } else {
+            ga_yaw_anyswing_ += ay; ++ga_yaw_anyswing_n_;
+            if (have_d) { ga_yawd_anyswing_ += ad; ++ga_yawd_anyswing_n_; }
+        }
+    }
 
     for (int i = 0; i < n_legs_; ++i) {
         Leg const& L = legs_[i];
@@ -1345,6 +1402,11 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
     else if (key == "stroke_load_gain") stroke_load_gain_ = get_double(value, "stroke_load_gain");
+    else if (key == "tibia_plumb_gain") tibia_plumb_gain_ = get_double(value, "tibia_plumb_gain");
+    else if (key == "tibia_plumb_scale") tibia_plumb_scale_ = get_double(value, "tibia_plumb_scale");
+    else if (key == "tibia_plumb_offset") tibia_plumb_offset_ = get_double(value, "tibia_plumb_offset");
+    else if (key == "swing_tuck_hip2") swing_tuck_hip2_ = get_double(value, "swing_tuck_hip2");
+    else if (key == "swing_tuck_knee") swing_tuck_knee_ = get_double(value, "swing_tuck_knee");
     else if (key == "homeo_leak_upright_only") homeo_leak_upright_only_ = get_double(value, "homeo_leak_upright_only");
     else if (key == "homeo_leak_progress_gate") homeo_leak_progress_gate_ = get_double(value, "homeo_leak_progress_gate");
     else if (key == "homeo_leak_cycles") homeo_leak_cycles_ = get_double(value, "homeo_leak_cycles");
@@ -1875,12 +1937,16 @@ void MotorEPM::tick(uint64_t tick_id) {
     }
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
+    float tib_off_acc = 0.0f; int tib_off_n = 0;   // diag for the tibia-plumb reflex
     if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0 || stance_lift_gain_ != 0.0) update_cruse_state();
     // Measurement only, and skipped entirely at the default 0 — see the function header.
     if (gait_align_diag_ > 0.0) update_gait_align_diag(tick_id);
     // Purchase gate for the power stroke (needs the cross-leg mean, so once per tick,
     // before the per-leg loop).  Self-guards to gate ≡ 1 when the gain is 0.
     update_stroke_load_gate();
+    // "did the consumer fire?" as a number — a gate has shipped here as silent dead code
+    // before (CLAUDE.md §3.2 rule 5).  0 with the gains non-zero ⇒ contact_topic is unwired.
+    swing_tuck_frac_ = swing_tuck_ticks_ ? float(double(swing_tuck_hits_) / double(swing_tuck_ticks_)) : 0.0f;
 
     // Propulsive-credit homeostat: group-mean credit (from last tick's per-leg
     // updates) so a below-mean "dragging" leg can be boosted this tick.
@@ -2094,6 +2160,29 @@ void MotorEPM::tick(uint64_t tick_id) {
         if (!warmup && stance_lift_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
             && !in_swing_[leg]) {
             y[m - 1] += float(stance_lift_gain_);
+        }
+        // TIBIA-PLUMB — hip2 nulls the shank's deviation from vertical, so the knee's
+        // gait drive TRANSLATES the foot instead of arcing it.  See the header.  Applied to
+        // every leg, stance and swing alike: it is a postural constraint, not a phase gate.
+        if (!warmup && tibia_plumb_gain_ != 0.0 && m >= 3 && L.n >= 3 * m) {
+            const float th = float(tibia_plumb_scale_) * L.x[3] + L.x[6]
+                           + float(tibia_plumb_offset_);
+            y[1] -= float(tibia_plumb_gain_) * th;
+            tib_off_acc += std::fabs(th); ++tib_off_n;
+        }
+        // SWING TUCK — the mirror of the block above.  stance_lift biases the KNEE on
+        // PLANTED legs; this folds hip2 + knee on LIFTED ones so the limb's mass comes
+        // inboard and sweeping it forward stops dumping yaw into the chassis.  See the
+        // header for why the gate is TRUE CONTACT and not the foot-height detector.
+        // Both gains 0 = byte-identical; unwired contact_topic = inert (and observable).
+        if (!warmup && (swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && m >= 3
+            && have_contact_ && int(foot_contact_.size()) == n_legs_) {
+            ++swing_tuck_ticks_;
+            if (foot_contact_[leg] <= 0.5f) {          // this foot is off the ground
+                y[1]     += float(swing_tuck_hip2_);   // fold the femur up
+                y[m - 1] += float(swing_tuck_knee_);   // fold the shank under
+                ++swing_tuck_hits_;
+            }
         }
         // Persistent exploration noise (post-warmup): keeps ξ alive at fixed
         // points so HK amplifies it into oscillation instead of freezing.
@@ -2399,6 +2488,7 @@ void MotorEPM::tick(uint64_t tick_id) {
         L.have_prev = true;
     }
 
+    tibia_off_mean_ = tib_off_n ? (tib_off_acc / float(tib_off_n)) : 0.0f;
     // ---- Per-leg controller symmetry coupling (anti-asymmetry root fix) ----
     // Softly pull each leg's learned controller (C, h, Cphi) toward the average over the legs
     // in its group, so the four identical legs converge to ONE control law rather than one leg
@@ -2624,6 +2714,31 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["torque_stance"]     = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
     mod["torque_swing"]      = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
     mod["explore_mult"]      = explore_mult_diag_;
+    mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
+    mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
+    mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
+    mod["swing_tuck_frac"] = swing_tuck_frac_;
+    mod["tibia_off_mean"]  = tibia_off_mean_;
+    {
+        const double ap = ga_yaw_allplant_n_ ? ga_yaw_allplant_ / double(ga_yaw_allplant_n_) : 0.0;
+        const double sw = ga_yaw_anyswing_n_ ? ga_yaw_anyswing_ / double(ga_yaw_anyswing_n_) : 0.0;
+        mod["yaw_allplant"] = ap; mod["yaw_anyswing"] = sw; mod["yaw_swing_excess"] = sw - ap;
+        std::vector<double> per(ga_yaw_leg_.size(), 0.0);
+        for (size_t k = 0; k < per.size(); ++k)
+            per[k] = ga_yaw_leg_n_[k] ? ga_yaw_leg_[k] / double(ga_yaw_leg_n_[k]) : 0.0;
+        mod["yaw_per_leg"] = per;
+        const double apd = ga_yawd_allplant_n_ ? ga_yawd_allplant_ / double(ga_yawd_allplant_n_) : 0.0;
+        const double swd = ga_yawd_anyswing_n_ ? ga_yawd_anyswing_ / double(ga_yawd_anyswing_n_) : 0.0;
+        mod["yawd_allplant"] = apd; mod["yawd_anyswing"] = swd;
+        mod["yawd_swing_excess"] = swd - apd;
+        std::vector<double> perd(ga_yawd_leg_.size(), 0.0);
+        for (size_t k = 0; k < perd.size(); ++k)
+            perd[k] = ga_yawd_leg_n_[k] ? ga_yawd_leg_[k] / double(ga_yawd_leg_n_[k]) : 0.0;
+        mod["yawd_per_leg"] = perd;
+    }
+    mod["ga_yawd_leg"] = ga_yawd_leg_;  mod["ga_yawd_leg_n"] = ga_yawd_leg_n_;
+    mod["ga_yawd_allplant"] = ga_yawd_allplant_; mod["ga_yawd_allplant_n"] = ga_yawd_allplant_n_;
+    mod["ga_yawd_anyswing"] = ga_yawd_anyswing_; mod["ga_yawd_anyswing_n"] = ga_yawd_anyswing_n_;
     mod["stroke_gate_mean"]   = stroke_gate_mean_;
     mod["stroke_gate_spread"] = stroke_gate_spread_;
     mod["stroke_load_ema"]    = stroke_load_ema_;
@@ -2766,6 +2881,34 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["stroke_gate_mean"]    = stroke_gate_mean_;
     j["stroke_gate_spread"]  = stroke_gate_spread_;
     j["stroke_gate"]         = stroke_gate_;
+    // Swing tuck: fired-or-not as a number, and the yaw disturbance it targets.
+    // yaw_swing_excess is the headline — mean |yaw rate| while ANY foot is airborne minus
+    // the all-four-down reference.  If folding the limb works, this falls.
+    j["tibia_plumb_active"]  = (tibia_plumb_gain_ != 0.0);
+    j["tibia_off_mean"]      = tibia_off_mean_;   // mean |shank off vertical|, radians
+    j["swing_tuck_active"]   = ((swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && have_contact_);
+    j["swing_tuck_frac"]     = swing_tuck_frac_;
+    {
+        const double ap = ga_yaw_allplant_n_ ? ga_yaw_allplant_ / double(ga_yaw_allplant_n_) : 0.0;
+        const double sw = ga_yaw_anyswing_n_ ? ga_yaw_anyswing_ / double(ga_yaw_anyswing_n_) : 0.0;
+        j["yaw_allplant"]      = ap;
+        j["yaw_anyswing"]      = sw;
+        j["yaw_swing_excess"]  = sw - ap;
+        std::vector<double> per(ga_yaw_leg_.size(), 0.0);
+        for (size_t k = 0; k < per.size(); ++k)
+            per[k] = ga_yaw_leg_n_[k] ? ga_yaw_leg_[k] / double(ga_yaw_leg_n_[k]) : 0.0;
+        j["yaw_per_leg"]       = per;   // [FL,FR,RL,RR] — which limb spins the body most
+        // The impulse split — this is the one that can see a swing reaction torque.
+        const double apd = ga_yawd_allplant_n_ ? ga_yawd_allplant_ / double(ga_yawd_allplant_n_) : 0.0;
+        const double swd = ga_yawd_anyswing_n_ ? ga_yawd_anyswing_ / double(ga_yawd_anyswing_n_) : 0.0;
+        j["yawd_allplant"]     = apd;
+        j["yawd_anyswing"]     = swd;
+        j["yawd_swing_excess"] = swd - apd;
+        std::vector<double> perd(ga_yawd_leg_.size(), 0.0);
+        for (size_t k = 0; k < perd.size(); ++k)
+            perd[k] = ga_yawd_leg_n_[k] ? ga_yawd_leg_[k] / double(ga_yawd_leg_n_[k]) : 0.0;
+        j["yawd_per_leg"]      = perd;
+    }
     j["explore_mult"]        = explore_mult_diag_;
     j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
     j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to
@@ -2984,6 +3127,18 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         ga_tq_agree_    = mod.value("ga_tq_agree",    ga_tq_agree_);
         ga_tq_agree_n_  = mod.value("ga_tq_agree_n",  ga_tq_agree_n_);
         if (mod.contains("stroke_load_ema")) stroke_load_ema_ = mod["stroke_load_ema"].get<std::vector<float>>();
+        if (mod.contains("ga_yaw_leg"))   ga_yaw_leg_   = mod["ga_yaw_leg"].get<std::vector<double>>();
+        if (mod.contains("ga_yaw_leg_n")) ga_yaw_leg_n_ = mod["ga_yaw_leg_n"].get<std::vector<int64_t>>();
+        ga_yaw_allplant_   = mod.value("ga_yaw_allplant",   ga_yaw_allplant_);
+        ga_yaw_allplant_n_ = mod.value("ga_yaw_allplant_n", ga_yaw_allplant_n_);
+        ga_yaw_anyswing_   = mod.value("ga_yaw_anyswing",   ga_yaw_anyswing_);
+        ga_yaw_anyswing_n_ = mod.value("ga_yaw_anyswing_n", ga_yaw_anyswing_n_);
+        if (mod.contains("ga_yawd_leg"))   ga_yawd_leg_   = mod["ga_yawd_leg"].get<std::vector<double>>();
+        if (mod.contains("ga_yawd_leg_n")) ga_yawd_leg_n_ = mod["ga_yawd_leg_n"].get<std::vector<int64_t>>();
+        ga_yawd_allplant_   = mod.value("ga_yawd_allplant",   ga_yawd_allplant_);
+        ga_yawd_allplant_n_ = mod.value("ga_yawd_allplant_n", ga_yawd_allplant_n_);
+        ga_yawd_anyswing_   = mod.value("ga_yawd_anyswing",   ga_yawd_anyswing_);
+        ga_yawd_anyswing_n_ = mod.value("ga_yawd_anyswing_n", ga_yawd_anyswing_n_);
         if (mod.contains("ga_tq_ema"))      ga_tq_ema_      = mod["ga_tq_ema"].get<std::vector<float>>();
         if (mod.contains("ga_tq_j_stance")) ga_tq_j_stance_ = mod["ga_tq_j_stance"].get<std::vector<double>>();
         if (mod.contains("ga_tq_j_swing"))  ga_tq_j_swing_  = mod["ga_tq_j_swing"].get<std::vector<double>>();

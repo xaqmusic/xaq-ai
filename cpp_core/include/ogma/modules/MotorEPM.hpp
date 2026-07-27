@@ -435,6 +435,27 @@ private:
     // self-referential threshold that any foot-moving bias rings, so a fast ga_foot_per_
     // next to a slow ga_con_per_ is chatter, not stepping.
     std::vector<float>   ga_hip1_per_, ga_knee_per_, ga_foot_per_, ga_con_per_;
+    // Yaw disturbance attributed to swinging.  The operator's UI observation (2026-07-27):
+    // the rear legs sweep forward with hip2 and the knee held near-horizontal, so the limb's
+    // yaw inertia about the body axis is near maximal and the reaction torque spins the
+    // chassis, which the heading controller then has to fight.  These accumulate |yaw rate|
+    // separately for "all four feet down" vs "this leg is off the ground", so the claim is
+    // testable on its own mechanism instead of only on downstream distance.
+    std::vector<double>  ga_yaw_leg_;           // Σ|yaw| while leg i is airborne
+    std::vector<int64_t> ga_yaw_leg_n_;
+    double  ga_yaw_allplant_ = 0.0; int64_t ga_yaw_allplant_n_ = 0;
+    double  ga_yaw_anyswing_ = 0.0; int64_t ga_yaw_anyswing_n_ = 0;
+    // ...and the same split on |Δyaw rate|, which is the metric that can actually SEE the
+    // mechanism.  Measured 2026-07-27: mean |yaw rate| is dominated by INTENTIONAL steering
+    // — heading_bearing_hold yaws the body by differencing stroke magnitude per side, which
+    // only bites through PLANTED feet — so the aggregate reads *lower* during swing and the
+    // reaction torque is invisible under it.  A limb's reaction torque is an IMPULSE: it
+    // changes the yaw rate rather than sustaining one.  Differencing separates the two.
+    std::vector<double>  ga_yawd_leg_;
+    std::vector<int64_t> ga_yawd_leg_n_;
+    double  ga_yawd_allplant_ = 0.0; int64_t ga_yawd_allplant_n_ = 0;
+    double  ga_yawd_anyswing_ = 0.0; int64_t ga_yawd_anyswing_n_ = 0;
+    float   ga_prev_yaw_rate_ = 0.0f; bool ga_yaw_prev_init_ = false;
     float   explore_mult_diag_ = 1.0f;          // progress→commit damping actually applied
     static constexpr float kGaEmaAlpha  = 0.02f;   // ~50-tick mean, matches kFootYEmaAlpha
     static constexpr float kGaPerAlpha  = 0.10f;   // period smoothing (~10 cycles)
@@ -474,6 +495,74 @@ private:
     static constexpr float kStrokeLoadAlpha = 0.2f;
     static constexpr float kStrokeGateMin   = 0.0f;   // saturation guards, not the mechanism
     static constexpr float kStrokeGateMax   = 2.0f;
+
+    // ------------------------------------------------------------------
+    // SWING TUCK (2026-07-27) — the MIRROR of stance_lift, and the gate `hip2_tuck_target`
+    // was missing.  That parameter is an UNGATED postural rest-override applied to every
+    // leg all the time, and it is in the refuted table ("didn't crouch + destabilized").
+    // Doctrine §5: *when a bias fails, ask what state should have gated it before concluding
+    // the idea is dead.*  The state is SWING.  It is the same shape that made stance_lift
+    // work: a blind knee bias kills the gait, the same bias gated to planted legs only gave
+    // belly-up and ~20 % faster walking.
+    //
+    //   stance_lift : KNEE bias on PLANTED legs  (push the body up off the feet)
+    //   swing_tuck  : hip2 + KNEE bias on LIFTED legs (fold the limb inboard)
+    //
+    // The error it minimizes: sweeping an extended limb forward transfers angular momentum
+    // into the chassis.  Retracting the limb cuts its yaw inertia about the body axis, so
+    // the disturbance is prevented rather than corrected after the fact by heading-hold.
+    //
+    // Note the inversion that makes hip2 usable here at all: hip2's known liability is that
+    // it rotates feet OFF THE GROUND and loses traction (this is why the height-homeostat
+    // lift wrecked climbing).  During swing the foot is already off the ground, so there is
+    // no traction to lose — the state gate turns hip2's failure mode into its use.
+    //
+    // GATED ON TRUE CONTACT, deliberately, not on the foot-height detector that stance_lift
+    // uses: that detector was measured firing ~2x per real step (12-15 ticks vs a 26-30 tick
+    // step), and a swing tuck on a chattering gate would retract the limb MID-STANCE, i.e.
+    // lift a loaded foot — exactly the traction-loss failure above.  Wiring true contact as
+    // a *swing-phase* gate is refuted (§2), but for a consumer that wanted gait PHASE; this
+    // one wants "is the foot off the ground", and the ledger's re-use context names the case:
+    // "for a consumer that truly needs contact (load distribution, step-over foot placement)".
+    // Both signs are left to the sweep rather than assumed, as stance_lift's was.
+    // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // TIBIA-PLUMB REFLEX (2026-07-27) — the operator's inverse-kinematics framing, written
+    // as an ERROR rather than a trajectory.
+    //
+    // hip2 and the knee are a planar 2-link arm (femur L2 = 53.6 mm, tibia L3 = 75.5 mm).
+    // With hip2 pinned at its horizontal rest, the KNEE ALONE must produce both the foot's
+    // height and its fore-aft position — so the foot is forced along a circular arc about
+    // the knee axis, and the shank has to sweep through a large angle to translate the foot
+    // at all.  Measured over a whole run (arena, n=3, 1032 leg-frames): hip2 sits at
+    // −3.6° ± 4.4 and never leaves neutral, while the tibia swings to 37.5° ± 15.3 off
+    // vertical (the design rest pose is 10°, extremes reach 101°) and the feet plant at a
+    // 170 mm radius against a 166 mm total leg reach — straight-legged, maximum moment arm.
+    //
+    // Rewrite rule (§1): implement the error the behaviour minimizes.  The error is "the
+    // shank is off plumb"; the action is hip2.  Whatever the knee does to drive the gait,
+    // hip2 rotates to re-plumb the shank — which IS the 2-link coordination that translates
+    // the foot at constant height instead of arcing it.  Nothing about timing is specified,
+    // so the gait's rhythm and inter-leg pattern stay emergent (§5.7).
+    //
+    // Why this is not the refuted "learned hip2": that lever LOOSENED hip2's postural spring
+    // and hoped HK would find the coordination.  It did not, and got less stable — an
+    // unconstrained joint is a wobble dimension, not an IK solver.  Here hip2 is given an
+    // OBJECTIVE (a measured error to null), which is the form the doctrine prefers.
+    //
+    //   θ_tibia_from_vertical = hip2_scale·x[hip2] + x[knee] + offset      [radians]
+    // for the picrawler's encoding: hip2 proprio = angle / HIP2_LIMIT(1.40), knee proprio =
+    // angle − KNEE_REST(−1.6), so offset = KNEE_REST + π/2 = −0.0292.  Both are KINEMATIC
+    // constants of the body, not tuned gains — only `tibia_plumb_gain` is swept.
+    // ------------------------------------------------------------------
+    double  tibia_plumb_gain_  = 0.0;           // 0 = off (byte-identical)
+    double  tibia_plumb_scale_ = 1.40;          // = HIP2_LIMIT (body kinematic constant)
+    double  tibia_plumb_offset_ = -0.0292;      // = KNEE_REST + pi/2 (body kinematic constant)
+    float   tibia_off_mean_ = 0.0f;             // diag: mean |θ_tibia| in radians
+    double  swing_tuck_hip2_ = 0.0;             // 0 = off (byte-identical)
+    double  swing_tuck_knee_ = 0.0;
+    float   swing_tuck_frac_ = 0.0f;            // diag: frac of leg-ticks the bias applied
+    int64_t swing_tuck_hits_ = 0, swing_tuck_ticks_ = 0;
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays
     // HK-driven and pointed tangentially → the four thrusts sum to a torque

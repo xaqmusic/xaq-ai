@@ -50,6 +50,13 @@ const _SLIDERS: Array = [
 	# Purchase gate on the power stroke. Needs torque_topic wired (ConstructionOnly, so
 	# this slider cannot supply it -- use a loadstroke config arm). 0 = off.
 	{"key": "stroke_load_gain",  "label": "stroke_load (purchase gate)", "min": 0.0, "max": 8.0, "step": 0.5},
+	# Swing tuck: the mirror of stance_lift -- folds hip2+knee on legs that are OFF the
+	# ground so sweeping them forward stops spinning the chassis. Needs contact_topic.
+	# Tibia-plumb: hip2 nulls the shank's deviation from vertical so the knee's drive
+	# translates the foot instead of arcing it. Needs no extra topics.
+	{"key": "tibia_plumb_gain",  "label": "tibia_plumb (hip2 -> shank vert)", "min": -1.5, "max": 1.5, "step": 0.1},
+	{"key": "swing_tuck_hip2",   "label": "swing_tuck hip2 (fold femur)", "min": -1.5, "max": 1.5, "step": 0.1},
+	{"key": "swing_tuck_knee",   "label": "swing_tuck knee (fold shank)", "min": -1.5, "max": 1.5, "step": 0.1},
 	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
 	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
 	{"key": "coord_fitness_mode","label": "fitness: 0=fwd_v REWARD 1=free","min": 0.0, "max": 1.0, "step": 1.0},
