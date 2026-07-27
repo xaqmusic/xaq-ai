@@ -447,6 +447,22 @@ private:
     // can ever be well-locked, and step regularity is the thing to fix first.
     std::vector<double>  ga_con_iv_sum_, ga_con_iv_sq_;
     std::vector<int64_t> ga_con_iv_n_;
+    // CHATTER vs APERIODICITY — the two readings of a high step_cv, told apart by BOUT
+    // duration.  Chatter = many very short stance/swing bouts (a foot flickering while
+    // essentially planted); genuine irregularity = normal-length bouts arriving at
+    // irregular times.  Identical in step_cv, opposite in what to do next.
+    std::vector<int32_t> ga_bout_run_;          // length of the current bout, ticks
+    std::vector<char>    ga_bout_state_;        // contact state of the current bout
+    double  ga_st_bout_sum_ = 0.0; int64_t ga_st_bout_n_ = 0, ga_st_bout_short_ = 0;
+    double  ga_sw_bout_sum_ = 0.0; int64_t ga_sw_bout_n_ = 0, ga_sw_bout_short_ = 0;
+    static constexpr int kShortBoutTicks = 4;   // < this = too brief to be a real phase
+    // ...and the same interval moments counting ONLY touchdowns preceded by a genuine
+    // swing (>= kRealSwingTicks).  If the raw CV is ~1.0 because micro-lifts are being
+    // pooled with real steps, this filtered CV is where a hidden rhythm would show up.
+    std::vector<double>  ga_rs_iv_sum_, ga_rs_iv_sq_;
+    std::vector<int64_t> ga_rs_iv_n_;
+    std::vector<int64_t> ga_rs_last_;
+    static constexpr int kRealSwingTicks = 4;
     // Yaw disturbance attributed to swinging.  The operator's UI observation (2026-07-27):
     // the rear legs sweep forward with hip2 and the knee held near-horizontal, so the limb's
     // yaw inertia about the body axis is near maximal and the reaction torque spins the

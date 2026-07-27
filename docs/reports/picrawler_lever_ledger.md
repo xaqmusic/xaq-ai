@@ -670,6 +670,46 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-07-27 — THE BODY HAS NO STEP PERIOD, AND THAT INVALIDATES THE PREMISE OF THE WHOLE TIMING FAMILY
+
+**The single most consequential measurement of the session, and it was never taken before.**
+New instrument `step_cv` — the cycle-to-cycle coefficient of variation of the TRUE
+inter-touchdown interval, computed in the diagnostic block so it reports on the **deployed
+baseline**, not only on lever arms.
+
+| deployed baseline, corridor, 6000 ticks | |
+|---|---|
+| `step_cv` — all touchdowns | **0.984** |
+| `step_cv_real` — micro-lifts (<4-tick swings) filtered out | **0.882** |
+| real-step period | **61.9 ticks** (~1 s per leg) |
+| `stance_bout` / `swing_bout` | 21.3 / **5.58** ticks |
+| `short_bouts` — bouts under 4 ticks | **0.399** |
+| `contact_duty` | 0.793 |
+
+**A CV near 1.0 means the interval's standard deviation equals its mean — an essentially
+memoryless process.** Filtering out the micro-lifts barely helps (0.98 → 0.88), so this is
+not a sensor artifact and there is no rhythm hiding underneath. The picture: feet planted
+~79 % of the time, ~80 % of lifts lasting only 1–3 ticks, and a genuine step roughly once
+per second per leg at irregular intervals.
+
+**⇒ There is no step phase to lock anything to.** Every timing lever in this ledger — nine of
+them now — presupposes a rhythm the contact signal does not have. That is a far better
+explanation for their uniform failure than any of the per-lever diagnoses recorded against
+them, and it should be checked before another one is proposed.
+
+**It also reframes the 2026-07-26 "three clocks beating at ~2.5 s" finding.** There are not
+three clocks. There is one oscillator (`L.phase`, the knee) and an **aperiodic contact
+process**; `td_plv ≈ 0.2` was reported as "the stroke is mistimed relative to the step" when
+it also reads as "there is no step timing to be mistimed against."
+
+**And it is the operator's stated goal, as a number.** The target has been "a good,
+repetitive, efficient stepping gait" — `step_cv` measures exactly the *repetitive* part, and
+it currently says the gait is not repetitive at all. **Drive `step_cv` down first; only then
+does locking a stroke to it mean anything.** That is a concrete, cheap, and previously
+unmeasured objective.
+
+---
+
 ### ★★ 2026-07-27 — LOCKING THE STROKE TO THE STEP: the CLOCK NEVER ENTRAINED, so the lever is `DEFERRED`, not refuted
 
 > #### ⚠️ READ THIS FIRST — the verdict below was written as `REGRESSION` and is CORRECTED
@@ -912,6 +952,13 @@ the fix protects **fast** arms, i.e. exactly the ones a propulsion lever exists 
   is reset rather than left to thrash — meaning **the protection may be the auto-reset, not
   the fitness penalties.** If so it is a fragile dependency: disabling auto-reset could bring
   the old failure straight back. Worth testing directly before trusting the ratchet.
+- **★★ GAIT REGULARITY IS THE BLOCKING PREREQUISITE — `step_cv` = 0.98 on the deployed
+  baseline (0.88 with micro-lifts filtered out).** The body has NO step period: real steps
+  arrive about once per second per leg at near-memoryless intervals. Every timing lever here
+  presupposes a rhythm the contact signal does not have, which is a better explanation for
+  their uniform failure than any per-lever diagnosis recorded against them. **This is also
+  the operator's goal as a number** ("repetitive stepping" = low `step_cv`) and it had never
+  been measured. Drive it down before proposing another phase lever. See the boxed entry in §2.
 - **★ LOCK THE STROKE TO THE STEP — BUILT 2026-07-27; the build is `DEFERRED`, the IDEA is
   still open.** Driving the stroke from a per-leg touchdown-referenced clock costs net_z
   **4.58 → 0.20** (one parameter, full circle vs a matched control row) — **but the clock was

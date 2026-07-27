@@ -1405,6 +1405,12 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
     ensure(ga_con_iv_sum_,   0.0);
     ensure(ga_con_iv_sq_,    0.0);
     ensure(ga_con_iv_n_,     int64_t(0));
+    ensure(ga_bout_run_,     int32_t(0));
+    ensure(ga_bout_state_,   char(1));
+    ensure(ga_rs_iv_sum_,    0.0);
+    ensure(ga_rs_iv_sq_,     0.0);
+    ensure(ga_rs_iv_n_,      int64_t(0));
+    ensure(ga_rs_last_,      int64_t(-1));
 
     const bool truth = have_contact_ && int(foot_contact_.size()) == n_legs_;
     // Yaw disturbance attributed to swinging: is the body being spun BY its own swing legs?
@@ -1477,6 +1483,33 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
         // ---- vs TRUE contact (only when the sensor is wired as an instrument)
         if (truth) {
             const bool con = foot_contact_[i] > 0.5f;
+            // Bout bookkeeping: close the run whenever contact flips, and record how long
+            // it lasted.  Short bouts on BOTH sides are the signature of chatter.
+            if ((ga_bout_state_[i] != 0) != con) {
+                const int32_t len = ga_bout_run_[i];
+                if (len > 0) {
+                    if (ga_bout_state_[i]) { ga_st_bout_sum_ += len; ++ga_st_bout_n_;
+                                             if (len < kShortBoutTicks) ++ga_st_bout_short_; }
+                    else                   { ga_sw_bout_sum_ += len; ++ga_sw_bout_n_;
+                                             if (len < kShortBoutTicks) ++ga_sw_bout_short_; }
+                }
+                // A REAL STEP is a touchdown whose preceding SWING lasted long enough to
+                // be a stride rather than a micro-lift.  Measured on the healthy baseline:
+                // ~80 % of lifts last 1-3 ticks, so pooling them with real swings is what
+                // drives the raw interval CV to ~1.0.
+                if (con && !ga_bout_state_[i] && len >= kRealSwingTicks) {
+                    if (ga_rs_last_[i] >= 0) {
+                        const double d = double(int64_t(tick_id) - ga_rs_last_[i]);
+                        if (d > 2.0 && d < 600.0) {
+                            ga_rs_iv_sum_[i] += d; ga_rs_iv_sq_[i] += d * d; ++ga_rs_iv_n_[i];
+                        }
+                    }
+                    ga_rs_last_[i] = int64_t(tick_id);
+                }
+                ga_bout_state_[i] = con ? 1 : 0;
+                ga_bout_run_[i]   = 0;
+            }
+            ++ga_bout_run_[i];
             ga_contact_acc_ += con ? 1.0 : 0.0; ++ga_contact_n_;
             ga_align_acc_   += double(s) * (con ? 1.0 : -1.0); ++ga_align_n_;
             if (con) { ga_stance_pos_ += (s > 0.0f) ? 1.0 : 0.0; ++ga_stance_n_; }
@@ -3114,6 +3147,23 @@ nlohmann::json MotorEPM::snapshot_state() const {
             if (mu > 1e-9) { pooled += std::sqrt(var) / mu; ++pn; }
         }
         mod["step_cv"] = pn ? pooled / double(pn) : 0.0;
+    {   // real-step (micro-lift filtered) interval CV — see kRealSwingTicks
+        double pooled = 0.0; int pn = 0; double permean = 0.0;
+        for (int i = 0; i < n_legs_ && i < int(ga_rs_iv_n_.size()); ++i) {
+            if (ga_rs_iv_n_[i] < 3) continue;
+            const double n = double(ga_rs_iv_n_[i]);
+            const double mu = ga_rs_iv_sum_[i] / n;
+            const double var = std::max(0.0, ga_rs_iv_sq_[i] / n - mu * mu);
+            if (mu > 1e-9) { pooled += std::sqrt(var) / mu; permean += mu; ++pn; }
+        }
+        mod["step_cv_real"]  = pn ? pooled / double(pn) : 0.0;
+        mod["step_per_real"] = pn ? permean / double(pn) : 0.0;
+    }
+        mod["stance_bout"] = ga_st_bout_n_ ? ga_st_bout_sum_ / double(ga_st_bout_n_) : 0.0;
+        mod["swing_bout"]  = ga_sw_bout_n_ ? ga_sw_bout_sum_ / double(ga_sw_bout_n_) : 0.0;
+        mod["short_bout_frac"] = (ga_st_bout_n_ + ga_sw_bout_n_)
+            ? double(ga_st_bout_short_ + ga_sw_bout_short_)
+              / double(ga_st_bout_n_ + ga_sw_bout_n_) : 0.0;
     }
     mod["torque_stance"]     = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
     mod["torque_swing"]      = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
@@ -3301,6 +3351,11 @@ nlohmann::json MotorEPM::diag_snapshot() const {
                 cv[i] = (mu > 1e-9) ? std::sqrt(var) / mu : 0.0;
                 pooled_cv += cv[i]; ++pooled_n;
             }
+            j["stance_bout"]   = ga_st_bout_n_ ? ga_st_bout_sum_ / double(ga_st_bout_n_) : 0.0;
+            j["swing_bout"]    = ga_sw_bout_n_ ? ga_sw_bout_sum_ / double(ga_sw_bout_n_) : 0.0;
+            j["short_bout_frac"] = (ga_st_bout_n_ + ga_sw_bout_n_)
+                ? double(ga_st_bout_short_ + ga_sw_bout_short_)
+                  / double(ga_st_bout_n_ + ga_sw_bout_n_) : 0.0;
             j["step_cv_legs"] = cv;
             j["step_cv"]      = pooled_n ? pooled_cv / double(pooled_n) : 0.0;
         }

@@ -8613,6 +8613,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# rhythm whose period wanders.  Reported for EVERY instrumented arm, including
 			# the control, so "is the gait periodic at all?" is answerable on the baseline.
 			line["step_cv"]     = snappedf(float(_mm.get("step_cv", 0.0)), 0.0001)
+			# CHATTER vs APERIODICITY: mean stance/swing BOUT length and the fraction of
+			# bouts too short to be a real gait phase.  A high step_cv with a high
+			# short_bout_frac is a contact-signal problem; a high step_cv with normal bouts
+			# is a genuinely irregular gait.  Same statistic, opposite next lever.
+			line["stance_bout"] = snappedf(float(_mm.get("stance_bout", 0.0)), 0.01)
+			line["swing_bout"]  = snappedf(float(_mm.get("swing_bout", 0.0)), 0.01)
+			line["short_bouts"] = snappedf(float(_mm.get("short_bout_frac", 0.0)), 0.0001)
+			# ...and the interval CV counting ONLY real steps (touchdowns preceded by a
+			# swing long enough to be a stride).  If step_cv is ~1.0 because micro-lifts are
+			# pooled with real steps, THIS is where the hidden rhythm shows up.
+			line["step_cv_real"]  = snappedf(float(_mm.get("step_cv_real", 0.0)), 0.0001)
+			line["step_per_real"] = snappedf(float(_mm.get("step_per_real", 0.0)), 0.01)
 			line["mv_stance"]   = snappedf(float(_mm.get("mv_stance", 0.0)), 0.000001)
 			line["mv_swing"]    = snappedf(float(_mm.get("mv_swing", 0.0)), 0.000001)
 			# explore_mult = the progress->commit damping actually applied to the
