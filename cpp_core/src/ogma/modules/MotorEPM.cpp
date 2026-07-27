@@ -891,7 +891,7 @@ void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
         // returns the stroke to L.phase until two real touchdowns are seen again, which
         // is the same safe fallback a cold start takes.
         for (auto& L : legs_) {
-            L.last_td_tick = -1; L.td_count = 0; L.td_run = 0;
+            L.last_td_tick = -1; L.td_count = 0; L.td_run = 0; L.td_cand_tick = -1;
             L.step_locked  = false; L.td_contact = true;
             L.step_phase   = 0.0f;  L.step_omega = 0.0f;
             // step_per_ema is DELIBERATELY kept: the body's stride period is a property
@@ -1157,16 +1157,57 @@ void MotorEPM::update_step_phase(uint64_t tick_id) {
             con_now = (foot_contact_[i] > 0.5f);
         }
 
-        // ---- debounce, then accept a touchdown on a confirmed swing->stance edge
-        if (con_now == L.td_contact) {
+        // ---- REFRACTORY debounce: trigger on the RAW rising edge, then ignore further
+        // edges for `debounce` ticks.
+        //
+        // The first version confirmed an edge by requiring N consecutive differing ticks
+        // before accepting it.  That is a delay-AND-MERGE filter, and it biased the period
+        // estimate badly: contacts shorter than N were swallowed entirely, so the accepted
+        // touchdowns were a SUBSET of the real ones and the measured interval read long.
+        // Measured: `step_period` 23.6 against a raw contact period of 19.1 — a 24 %
+        // frequency error, which no phase pull can close (the loop-gain sweep confirmed it:
+        // td_plv stayed at 0.04-0.10 from gain 0.1 to 0.7 while the true phase error sat
+        // flat at ~1.55 rad).
+        //
+        // A refractory window fixes both faults at once: the ANCHOR is the raw edge, so
+        // touchdown timing is unbiased, and re-triggers within the window are dropped, so
+        // contact bounce still cannot reset the phase twice per step.  This is the standard
+        // shape for debouncing a real switch, and it is the shape a foot switch on the
+        // physical robot would need.
+        // CANDIDATE -> CONFIRM -> BACK-DATE.  Three properties are needed at once and the
+        // first two versions each had only one:
+        //   * reject a BRIEF spurious touch (a foot brushing something mid-swing must not
+        //     count as a footfall) -- the confirm-N-ticks version did this;
+        //   * do not BIAS the touchdown time, since that time is the phase anchor -- the
+        //     refractory version did this;
+        //   * never MERGE two real footfalls into one, which is what silently corrupted the
+        //     frequency estimate: confirm-N flipped its state only after N consecutive
+        //     ticks, so a contact shorter than N was swallowed whole AND the next rising
+        //     edge was no longer seen as rising. Accepted touchdowns became a subset of the
+        //     real ones and the measured period read long -- 23.6 ticks against a raw
+        //     contact period of 19.1, a 24 % frequency error that no phase pull can close
+        //     (measured: td_plv stuck at 0.04-0.10 across loop gains 0.1..0.7).
+        //
+        // The fix keeps `td_contact` tracking RAW contact, so every real rising edge starts
+        // a candidate; the candidate is only ACCEPTED after `debounce` ticks of sustained
+        // contact, and is then timed at the edge that started it.  Brief touches are
+        // dropped, timing is exact, and nothing is ever merged.
+        const bool rising = (con_now && !L.td_contact);
+        L.td_contact = con_now;
+        if (rising && L.td_cand_tick < 0) {              // start a candidate footfall
+            L.td_cand_tick = int64_t(tick_id);
             L.td_run = 0;
-        } else if (++L.td_run >= debounce) {
-            const bool was = L.td_contact;
-            L.td_contact = con_now;
-            L.td_run     = 0;
-            if (!was && con_now) {                       // TOUCHDOWN
+        } else if (L.td_cand_tick >= 0 && !con_now) {    // contact broke before confirming
+            L.td_cand_tick = -1;                         // -> it was a brush, not a footfall
+            L.td_run = 0;
+        }
+        {
+            if (L.td_cand_tick >= 0 && con_now && ++L.td_run >= debounce) {
+                const int64_t td_tick = L.td_cand_tick;  // BACK-DATE to the raw edge
+                L.td_cand_tick = -1;
+                L.td_run = 0;
                 if (L.last_td_tick >= 0) {
-                    float d = float(int64_t(tick_id) - L.last_td_tick);
+                    float d = float(td_tick - L.last_td_tick);
                     d = std::clamp(d, float(step_period_min_), float(step_period_max_));
                     L.step_per_ema = (L.step_per_ema <= 0.0f)
                                    ? d
@@ -1174,7 +1215,7 @@ void MotorEPM::update_step_phase(uint64_t tick_id) {
                                      + float(step_period_alpha_) * d;
                     if (L.td_count < 1000000) ++L.td_count;
                 }
-                L.last_td_tick = int64_t(tick_id);
+                L.last_td_tick = td_tick;
                 if (L.td_count < 1) L.td_count = 1;      // first touchdown: no interval yet
                 td_now = true;
             }
@@ -1361,6 +1402,9 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
     ensure(ga_knee_per_,     0.0f);
     ensure(ga_foot_per_,     0.0f);
     ensure(ga_con_per_,      0.0f);
+    ensure(ga_con_iv_sum_,   0.0);
+    ensure(ga_con_iv_sq_,    0.0);
+    ensure(ga_con_iv_n_,     int64_t(0));
 
     const bool truth = have_contact_ && int(foot_contact_.size()) == n_legs_;
     // Yaw disturbance attributed to swinging: is the body being spun BY its own swing legs?
@@ -1456,9 +1500,14 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
                 ga_td_cos_ += std::cos(th); ga_td_sin_ += std::sin(th); ++ga_td_n_;
                 if (ga_con_last_[i] >= 0) {                 // the REAL step period
                     const float d = float(int64_t(tick_id) - ga_con_last_[i]);
-                    if (d > 2.0f && d < 600.0f)
+                    if (d > 2.0f && d < 600.0f) {
                         ga_con_per_[i] = (ga_con_per_[i] <= 0.0f) ? d
                                        : (1.0f - kGaPerAlpha) * ga_con_per_[i] + kGaPerAlpha * d;
+                        // ...and the RAW interval moments, for the regularity CV.
+                        ga_con_iv_sum_[i] += double(d);
+                        ga_con_iv_sq_[i]  += double(d) * double(d);
+                        ++ga_con_iv_n_[i];
+                    }
                 }
                 ga_con_last_[i] = int64_t(tick_id);
             }
@@ -2903,6 +2952,7 @@ nlohmann::json MotorEPM::snapshot_state() const {
         lj["last_td_tick"] = L.last_td_tick;
         lj["td_count"]     = L.td_count;
         lj["td_run"]       = L.td_run;
+        lj["td_cand_tick"] = L.td_cand_tick;
         lj["td_contact"]   = L.td_contact;
         lj["step_locked"]  = L.step_locked;
         lj["rest_captured"] = L.rest_captured;
@@ -3054,6 +3104,17 @@ nlohmann::json MotorEPM::snapshot_state() const {
     // soft PLL exists to prevent — so this number decides whether a collapse is "the clock
     // is wrong" or "the clock keeps being taken away".
     mod["step_lock_flips"]   = step_lock_flips_;
+    {   // footfall regularity (see diag_snapshot) — the harness reads THIS dict, not diag.
+        double pooled = 0.0; int pn = 0;
+        for (int i = 0; i < n_legs_ && i < int(ga_con_iv_n_.size()); ++i) {
+            if (ga_con_iv_n_[i] < 3) continue;
+            const double n = double(ga_con_iv_n_[i]);
+            const double mu = ga_con_iv_sum_[i] / n;
+            const double var = std::max(0.0, ga_con_iv_sq_[i] / n - mu * mu);
+            if (mu > 1e-9) { pooled += std::sqrt(var) / mu; ++pn; }
+        }
+        mod["step_cv"] = pn ? pooled / double(pn) : 0.0;
+    }
     mod["torque_stance"]     = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
     mod["torque_swing"]      = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
     mod["explore_mult"]      = explore_mult_diag_;
@@ -3226,6 +3287,23 @@ nlohmann::json MotorEPM::diag_snapshot() const {
         j["period_knee_legs"]   = ga_knee_per_;
         j["period_foot_legs"]   = ga_foot_per_;
         j["period_contact_legs"] = ga_con_per_;
+        // Footfall REGULARITY: cycle-to-cycle coefficient of variation of the true
+        // inter-touchdown interval, per leg and pooled.  This is the prerequisite for ANY
+        // touchdown-referenced phase: a PLL cannot lock to a rhythm whose period wanders.
+        {
+            std::vector<double> cv(n_legs_, 0.0);
+            double pooled_cv = 0.0; int pooled_n = 0;
+            for (int i = 0; i < n_legs_ && i < int(ga_con_iv_n_.size()); ++i) {
+                if (ga_con_iv_n_[i] < 3) continue;
+                const double n  = double(ga_con_iv_n_[i]);
+                const double mu = ga_con_iv_sum_[i] / n;
+                const double var = std::max(0.0, ga_con_iv_sq_[i] / n - mu * mu);
+                cv[i] = (mu > 1e-9) ? std::sqrt(var) / mu : 0.0;
+                pooled_cv += cv[i]; ++pooled_n;
+            }
+            j["step_cv_legs"] = cv;
+            j["step_cv"]      = pooled_n ? pooled_cv / double(pooled_n) : 0.0;
+        }
     }
     // STROKE-TO-STEP LOCK observability (CLAUDE.md §3.2 rule 5).  `step_lock` is the
     // consumer check: 0 with stroke_phase_src > 0 means the clock never locked, which on
@@ -3425,6 +3503,7 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         L.last_td_tick = lj.value("last_td_tick", int64_t(-1));
         L.td_count     = lj.value("td_count",     int32_t(0));
         L.td_run       = lj.value("td_run",       int32_t(0));
+        L.td_cand_tick = lj.value("td_cand_tick", int64_t(-1));
         L.td_contact   = lj.value("td_contact",   true);
         L.step_locked  = lj.value("step_locked",  false);
         if (lj.contains("babble_rng")) {

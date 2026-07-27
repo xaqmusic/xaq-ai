@@ -8608,6 +8608,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# L.phase fallback.  Intermittent locking is worse than never locking: each swap
 			# is a discontinuity in the driven command.
 			line["step_flips"]  = int(_mm.get("step_lock_flips", 0))
+			# FOOTFALL REGULARITY — cycle-to-cycle CV of the true inter-touchdown interval.
+			# The prerequisite for any touchdown-referenced phase: a PLL cannot lock to a
+			# rhythm whose period wanders.  Reported for EVERY instrumented arm, including
+			# the control, so "is the gait periodic at all?" is answerable on the baseline.
+			line["step_cv"]     = snappedf(float(_mm.get("step_cv", 0.0)), 0.0001)
 			line["mv_stance"]   = snappedf(float(_mm.get("mv_stance", 0.0)), 0.000001)
 			line["mv_swing"]    = snappedf(float(_mm.get("mv_swing", 0.0)), 0.000001)
 			# explore_mult = the progress->commit damping actually applied to the

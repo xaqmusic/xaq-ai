@@ -440,6 +440,13 @@ private:
     // self-referential threshold that any foot-moving bias rings, so a fast ga_foot_per_
     // next to a slow ga_con_per_ is chatter, not stepping.
     std::vector<float>   ga_hip1_per_, ga_knee_per_, ga_foot_per_, ga_con_per_;
+    // FOOTFALL REGULARITY — the prerequisite nobody measured before trying to lock a stroke
+    // to the step.  Sum / sum-of-squares of TRUE inter-touchdown intervals per leg, so the
+    // coefficient of variation (sd/mean) is reportable.  A PLL cannot lock to a rhythm whose
+    // period wanders: if CV is large on the HEALTHY gait then no touchdown-referenced clock
+    // can ever be well-locked, and step regularity is the thing to fix first.
+    std::vector<double>  ga_con_iv_sum_, ga_con_iv_sq_;
+    std::vector<int64_t> ga_con_iv_n_;
     // Yaw disturbance attributed to swinging.  The operator's UI observation (2026-07-27):
     // the rear legs sweep forward with hip2 and the knee held near-horizontal, so the limb's
     // yaw inertia about the body axis is near maximal and the reaction torque spins the
@@ -926,7 +933,8 @@ private:
         float               step_per_ema = 0.0f;  // EMA of the inter-touchdown interval, ticks
         int64_t             last_td_tick = -1;    // tick of the most recent accepted touchdown
         int32_t             td_count     = 0;     // accepted touchdowns (>= 2 ⇒ locked)
-        int32_t             td_run       = 0;     // consecutive ticks of the current contact state
+        int32_t             td_run       = 0;     // ticks of sustained contact on the candidate
+        int64_t             td_cand_tick = -1;    // raw rising edge awaiting confirmation (-1 = none)
         bool                td_contact   = true;  // debounced contact state
         bool                step_locked  = false; // false ⇒ the stroke falls back to L.phase
     };
