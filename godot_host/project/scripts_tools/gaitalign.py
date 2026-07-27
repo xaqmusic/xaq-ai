@@ -55,7 +55,8 @@ WARMUP_TICKS = int(os.environ.get("SEEDAVG_WARMUP", 900))
 
 # Fields carried straight through from the last diag line (they are already run means).
 LAST = ("td_plv", "sd_plv", "pos_stance", "pos_swing", "contact_duty",
-        "tq_agree", "tq_stance", "tq_swing", "legphase_agree", "phase_agree",
+        "tq_agree", "tq_agree_hip1", "tq_stance", "tq_swing", "legphase_agree", "phase_agree",
+        "step_lock", "step_period", "step_td_err", "mv_stance", "mv_swing",
         "swing_frac", "cruse_bias", "motor_tle")
 
 
@@ -153,8 +154,29 @@ if __name__ == "__main__":
     row("foot (detector)", [r["p_foot"] for r in ok], "{:6.1f}", "the phase the stance gate rides")
     row("contact (REAL)", [r["p_con"] for r in ok], "{:6.1f}", "true step period; << foot => detector chatter")
 
+    # The stroke-to-step lock's own readouts.  step_lock is the CONSUMER CHECK (0 with
+    # stroke_phase_src>0 means the clock never locked, i.e. the arm you think you ran did
+    # not load).  step_td_err and mv_* are the NON-tautological reads: td_plv/pos_stance
+    # above are satisfied BY CONSTRUCTION once the phase is touchdown-referenced, whereas
+    # mv_* is computed on ACHIEVED hip1 motion and cannot be faked by re-referencing.
+    if any(r.get("step_lock") for r in ok) or any(r.get("mv_stance") for r in ok):
+        print("\n  ── STROKE-TO-STEP LOCK ───────────────────────────────────────────")
+        row("step_lock", [r.get("step_lock", 0.0) for r in ok],
+            note="frac of legs with a locked step clock; 0 = lever off or sensor unwired")
+        row("step_period", [r.get("step_period", 0.0) for r in ok], note="measured step period, ticks")
+        row("step_td_err", [r.get("step_td_err", 0.0) for r in ok],
+            note="mean |phase err| at touchdown, rad; 0 = clock predicts footfall")
+        row("mv_stance", [r.get("mv_stance", 0.0) for r in ok],
+            note="ACHIEVED hip1 travel while PLANTED (want negative = pushing)")
+        row("mv_swing", [r.get("mv_swing", 0.0) for r in ok],
+            note="...while AIRBORNE (want positive = carried forward)")
+        row("mv_sep", [r.get("mv_swing", 0.0) - r.get("mv_stance", 0.0) for r in ok],
+            note="separation; ~0 = the leg scrubs whatever the command says")
+
     print("\n  ── LOAD: can joint_torque separate stance from swing? ────────────")
     row("tq_agree", [r["tq_agree"] for r in ok], note="0.5 = chance = no load lever is possible")
+    row("tq_agree_hip1", [r.get("tq_agree_hip1", 0.0) for r in ok],
+        note="same on hip1 ALONE — what a load-derived step clock would threshold")
     row("tq_sep", [r["tq_sep"] for r in ok], note="mean stance load / mean swing load (>1 wanted)")
     row("tq_stance", [r["tq_stance"] for r in ok], "{:6.4f}")
     row("tq_swing", [r["tq_swing"] for r in ok], "{:6.4f}")

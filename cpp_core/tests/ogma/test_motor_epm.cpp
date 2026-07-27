@@ -118,6 +118,9 @@ struct Sensors {
     // ... and `torque` after it, for the same reason.  Joint-major, exactly as the body
     // publishes it: [hip1 x n_legs, hip2 x n_legs, knee x n_legs].
     std::vector<float> torque;            // empty → not published
+    // ... and `contact` after THAT, same reason again.  Per-leg physics touch flag
+    // (1 = foot down), as `reality.proprio.foot_contact` publishes it.
+    std::vector<float> contact;           // empty → not published
 };
 
 struct Fixture {
@@ -165,6 +168,7 @@ struct Fixture {
         bus.publish(pre + ".tilt", vec_token({s.tilt_pitch, 1.0f, s.tilt_roll, 1.0f}));
         if (!s.feet.empty()) bus.publish(pre + ".feet", vec_token(s.feet));
         if (!s.torque.empty()) bus.publish(pre + ".torque", vec_token(s.torque));
+        if (!s.contact.empty()) bus.publish(pre + ".contact", vec_token(s.contact));
         if (s.distress >= 0.0f) bus.publish(pre + ".distress", vec_token({s.distress}));
         if (s.height   >= 0.0f) bus.publish(pre + ".height",   vec_token({s.height}));
         if (s.tc_x != 0.0f || s.tc_y != 0.0f)
@@ -767,4 +771,302 @@ TEST(MotorEPM, StrokeLoadGateZeroIsByteIdenticalNonzeroDiscriminates) {
     EXPECT_LT(gated_ratio, ref_ratio * 0.9)
         << "with the gate on, the UNLOADED leg's hip1 stroke must shrink relative to a "
            "LOADED leg's (ungated ratio " << ref_ratio << ", gated " << gated_ratio << ")";
+}
+
+// =============================================================================
+// 11. STROKE-TO-STEP LOCK (`stroke_phase_src`, 2026-07-27).
+//
+// Phase 0 measured three per-leg clocks that nothing forced to agree: the stroke rides a
+// 22-24 tick knee-derived phase while the leg steps every 26-30, and the fraction of
+// STANCE spent in the stroke's positive half is 0.512 against 0.513 over SWING — push
+// direction statistically INDEPENDENT of whether the foot is down.  This lever gives the
+// stroke a touchdown-referenced step clock instead.
+//
+// The properties locked down here are the ones a future edit could silently break, and
+// each corresponds to a specific failure this project has already paid for:
+//   (a) src 0 is BYTE-IDENTICAL even with contact wired and the clock running;
+//   (b) phi = 0 AT touchdown and ramps toward 2*pi across the step (the mechanism);
+//   (c) an un-debounced contact bounce does NOT reset the phase (the chatter that makes
+//       the incumbent foot-height detector unusable);
+//   (d) before two touchdowns, and for a leg that stops stepping, the stroke FALLS BACK
+//       to L.phase rather than freezing — a frozen phase would silently turn the stroke
+//       into a DC bias, which is the refuted "blind knee bias kills the gait" shape;
+//   (e) the period rails clamp an anomalous stride out of the EMA.
+// =============================================================================
+namespace {
+// A clean periodic footfall: `duty` of every `period` ticks in contact, one leg only
+// (leg 0), the rest permanently planted so nothing else moves the clock.
+std::vector<float> contact_train(uint64_t t, int n_legs, int period, int duty) {
+    std::vector<float> c(n_legs, 1.0f);
+    c[0] = (int(t % uint64_t(period)) < duty) ? 1.0f : 0.0f;
+    return c;
+}
+ParamMap steplock_params() {
+    auto p = base_params();
+    p["stroke_gain"]    = 1.0;
+    p["stroke_phase"]   = 0.0;
+    p["contact_topic"]  = std::string("mt.contact");
+    p["contact_instrument_only"] = 1.0;   // the stance-gate swap is separately REFUTED
+    return p;
+}
+} // namespace
+
+TEST(MotorEPM, StepPhaseSrcZeroIsByteIdentical) {
+    // The gain-0 guard, and deliberately the HARD version of it: contact is on the bus and
+    // the legs really are stepping, so the clock would run if anything read the parameter
+    // wrong.  Byte-identity must come from the explicit branch at the stroke site, not
+    // from the clock happening to be idle.
+    auto p0 = steplock_params(); p0["stroke_phase_src"] = 0.0;
+    auto pref = steplock_params(); pref["contact_topic"] = std::string("");
+    Fixture f0(p0, 4, 3), fref(pref, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        Sensors s; s.contact = contact_train(t, 4, 26, 20);
+        Sensors sref;                                   // reference gets no contact at all
+        f0.run_tick(t, s); fref.run_tick(t, sref);
+        if (t < 20) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff, double(std::abs(f0.accel(leg, j) - fref.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-9)
+        << "stroke_phase_src=0 must be byte-identical to an unwired contact_topic, even "
+           "while the feet are visibly stepping on the bus (the gain-0 guard)";
+}
+
+TEST(MotorEPM, StepPhaseIsZeroAtTouchdownAndRampsAcrossTheStep) {
+    auto p = steplock_params(); p["stroke_phase_src"] = 1.0;
+    Fixture f(p, 4, 3);
+    const int period = 26, duty = 20;
+    // Warm up past babble and past the two touchdowns the clock needs to lock.
+    for (uint64_t t = 0; t < 200; ++t) f.run_tick(t, {.contact = contact_train(t, 4, period, duty)});
+
+    auto phase_of_leg0 = [&]() {
+        auto d = f.m.diag_snapshot();
+        return d["step_phase_legs"][0].get<double>();
+    };
+    // Only leg 0 steps in this fixture; legs 1-3 are held permanently planted, so they
+    // never see a touchdown and must NOT lock.  That is the per-leg fallback doing its
+    // job, and asserting it here is stronger than asserting a global lock: a leg with no
+    // step data has to keep using L.phase rather than inherit a clock from its neighbours.
+    EXPECT_NEAR(f.m.diag_snapshot()["step_lock"].get<double>(), 0.25, 1e-9)
+        << "exactly the one stepping leg should lock; the three planted legs must not";
+    for (int leg = 1; leg < 4; ++leg)
+        EXPECT_LT(f.m.diag_snapshot()["step_phase_legs"][leg].get<double>(), 0.0)
+            << "planted leg " << leg << " never touched down, so it must still be on L.phase";
+    EXPECT_NEAR(f.m.diag_snapshot()["step_period"].get<double>(), double(period), 2.0)
+        << "the measured step period should recover the 26-tick contact train";
+
+    // Step through one full cycle and check phi is monotone between touchdowns and
+    // returns to ~0 at the next one.  Touchdown for leg 0 is t % period == 0.
+    std::vector<double> phases;
+    for (uint64_t t = 200; t < 200 + uint64_t(period) + 1; ++t) {
+        f.run_tick(t, {.contact = contact_train(t, 4, period, duty)});
+        phases.push_back(phase_of_leg0());
+    }
+    // t=200 is a touchdown tick (200 % 26 == 18, so find the real one).
+    int td = -1;
+    for (size_t k = 1; k + 1 < phases.size(); ++k)
+        if (phases[k] < phases[k - 1] && phases[k] < 0.5) { td = int(k); break; }
+    ASSERT_GE(td, 0) << "no phase reset observed within one step period";
+    EXPECT_LT(phases[size_t(td)], 0.5)
+        << "phi must be ~0 AT touchdown — that is the entire point of the lock";
+    // ...and rising afterwards, i.e. the clock advances rather than sitting at 0.
+    ASSERT_LT(size_t(td) + 5, phases.size());
+    EXPECT_GT(phases[size_t(td) + 5], phases[size_t(td)])
+        << "phi must advance between touchdowns (free-run on the measured period)";
+}
+
+TEST(MotorEPM, StepPhaseDebounceRejectsContactBounce) {
+    // A single-tick contact flicker mid-swing must NOT be read as a touchdown.  Without
+    // this the clock resets twice per step, which is precisely the chatter that makes the
+    // incumbent foot-height detector (12-15 ticks against a 26-30 tick step) unusable.
+    auto p = steplock_params(); p["stroke_phase_src"] = 1.0; p["step_phase_debounce"] = 3.0;
+    Fixture f(p, 4, 3);
+    const int period = 26, duty = 20;
+    for (uint64_t t = 0; t < 200; ++t) f.run_tick(t, {.contact = contact_train(t, 4, period, duty)});
+
+    // Drive a clean cycle, but inject a 1-tick bounce deep in swing (t%period == 23).
+    double min_phase_after_bounce = 1e9;
+    for (uint64_t t = 200; t < 400; ++t) {
+        auto c = contact_train(t, 4, period, duty);
+        const bool bounce = (int(t % uint64_t(period)) == 23);
+        if (bounce) c[0] = 1.0f;                       // spurious touch
+        f.run_tick(t, {.contact = c});
+        if (bounce) {
+            // Phase at a bounce is deep in the cycle (23/26 of 2pi ~ 5.6 rad).  A reset
+            // would drop it to ~0.
+            min_phase_after_bounce = std::min(min_phase_after_bounce,
+                                              f.m.diag_snapshot()["step_phase_legs"][0].get<double>());
+        }
+    }
+    EXPECT_GT(min_phase_after_bounce, 3.0)
+        << "a 1-tick contact bounce must not reset the step phase when debounce=3 "
+           "(observed min phase " << min_phase_after_bounce << " rad)";
+}
+
+TEST(MotorEPM, StepPhaseFallsBackToLegPhaseBeforeLock) {
+    // Before two touchdowns the clock has no measured period, so the stroke must keep
+    // using L.phase.  Verified against an src=0 arm over the pre-lock window: identical
+    // output there, and NOT identical later once the clock engages (otherwise this test
+    // would also pass if the lever were dead code).
+    auto plk = steplock_params(); plk["stroke_phase_src"] = 1.0;
+    auto p0  = steplock_params(); p0["stroke_phase_src"]  = 0.0;
+    Fixture flk(plk, 4, 3), f0(p0, 4, 3);
+    const int period = 60, duty = 45;         // slow steps → a long pre-lock window
+    double pre_max = 0.0, post_max = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        Sensors s; s.contact = contact_train(t, 4, period, duty);
+        flk.run_tick(t, s); f0.run_tick(t, s);
+        if (t < 20) continue;
+        double d = 0.0;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                d = std::max(d, double(std::abs(flk.accel(leg, j) - f0.accel(leg, j))));
+        // Leg 0's second touchdown lands at t=120; everything before that is pre-lock.
+        if (t < 100) pre_max = std::max(pre_max, d);
+        else         post_max = std::max(post_max, d);
+    }
+    EXPECT_LT(pre_max, 1e-9)
+        << "before the clock locks, the stroke must fall back to L.phase (identical to src=0)";
+    EXPECT_GT(post_max, 1e-4)
+        << "after the clock locks the stroke must actually change — otherwise this lever "
+           "is dead code and the pre-lock check above proves nothing";
+}
+
+TEST(MotorEPM, StepPeriodRailsRejectAnomalousStride) {
+    // One absurdly long gap must not drag the period estimate: it is clamped to
+    // step_period_max before entering the EMA.
+    auto p = steplock_params();
+    p["stroke_phase_src"] = 1.0;
+    p["step_period_max"]  = 40.0;
+    p["step_period_alpha"] = 1.0;              // worst case: the EMA takes the sample whole
+    Fixture f(p, 4, 3);
+    const int period = 26, duty = 20;
+    for (uint64_t t = 0; t < 200; ++t) f.run_tick(t, {.contact = contact_train(t, 4, period, duty)});
+    // Now hold leg 0 airborne for 300 ticks, then touch down: a 300-tick "stride".
+    for (uint64_t t = 200; t < 500; ++t) {
+        std::vector<float> c(4, 1.0f); c[0] = 0.0f;
+        f.run_tick(t, {.contact = c});
+    }
+    for (uint64_t t = 500; t < 520; ++t) {
+        std::vector<float> c(4, 1.0f);
+        f.run_tick(t, {.contact = c});
+    }
+    EXPECT_LE(f.m.diag_snapshot()["step_period"].get<double>(), 41.0)
+        << "an anomalous 300-tick gap must be clamped by step_period_max before it "
+           "enters the period EMA";
+}
+
+TEST(MotorEPM, GaitRasterZeroIsInertAndOnRecordsFootfalls) {
+    // The raster feeds no command and draws no randomness, so byte-identity is
+    // structural — but CLAUDE.md says verify a gain-0 guard by MEASUREMENT, not argument.
+    auto poff = steplock_params(); poff["gait_raster_diag"] = 0.0;
+    auto pon  = steplock_params(); pon["gait_raster_diag"]  = 1.0;
+    Fixture foff(poff, 4, 3), fon(pon, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 200; ++t) {
+        Sensors s; s.contact = contact_train(t, 4, 26, 20);
+        foff.run_tick(t, s); fon.run_tick(t, s);
+        if (t < 20) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff, double(std::abs(foff.accel(leg, j) - fon.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-9) << "gait_raster_diag must not perturb the command path";
+    EXPECT_FALSE(foff.m.diag_snapshot().contains("gait_raster"));
+    auto d = fon.m.diag_snapshot();
+    ASSERT_TRUE(d.contains("gait_raster"));
+    auto r = d["gait_raster"].get<std::vector<int>>();
+    ASSERT_FALSE(r.empty());
+    // Leg 0's contact bit must actually toggle across the window (bit 0), and legs 1-3
+    // must stay planted (bits 1-3 always set) — i.e. the raster reports the truth it was
+    // handed rather than a constant.
+    int leg0_on = 0, leg1_off = 0;
+    for (int w : r) { if (w & 1) ++leg0_on; if (!(w & 2)) ++leg1_off; }
+    EXPECT_GT(leg0_on, 0);
+    EXPECT_LT(leg0_on, int(r.size())) << "leg 0's contact bit must toggle, not latch";
+    EXPECT_EQ(leg1_off, 0) << "legs 1-3 were held planted and must read as planted";
+}
+
+// =============================================================================
+// 12. THE PLL IS CONTINUOUS; THE SNAP IS NOT (`step_phase_lock`, 2026-07-27).
+//
+// This is the regression guard for the failure that killed the first build of the
+// stroke-to-step lock.  Snapping `step_phase = 0` at every touchdown collapsed the gait
+// (corridor n=4: net_z 4.58 -> -0.16, tilt_sd 0.065 -> 0.34, the body inverting
+// repeatedly) because `sin(phi + stroke_phase)` is a CONTINUOUS motor command: stepping
+// phi steps the command every time a foot lands off-schedule.
+//
+// The property that must hold forever after: at the default lock the phase advances by
+// approximately omega per tick and NEVER jumps, even across a touchdown that arrives
+// early.  Stated as a bound on the per-tick phase increment, which is the quantity the
+// motor command actually sees.
+// =============================================================================
+TEST(MotorEPM, PhaseLockPullIsContinuousWhileSnapJumps) {
+    const int period = 26, duty = 20;
+    // An EARLY touchdown is the adversarial case: the clock expects the foot at phi=2pi
+    // and gets it at phi~pi, so a snap has the largest possible discontinuity to make.
+    auto run = [&](double lock) {
+        auto p = steplock_params();
+        p["stroke_phase_src"] = 1.0;
+        p["step_phase_lock"]  = lock;
+        Fixture f(p, 4, 3);
+        for (uint64_t t = 0; t < 200; ++t)
+            f.run_tick(t, {.contact = contact_train(t, 4, period, duty)});
+        double prev = f.m.diag_snapshot()["step_phase_legs"][0].get<double>();
+        double max_jump = 0.0;
+        for (uint64_t t = 200; t < 400; ++t) {
+            // Halve the period from here: every touchdown now arrives "early".
+            std::vector<float> c(4, 1.0f);
+            c[0] = (int(t % 13) < 9) ? 1.0f : 0.0f;
+            f.run_tick(t, {.contact = c});
+            double ph = f.m.diag_snapshot()["step_phase_legs"][0].get<double>();
+            if (ph < 0.0 || prev < 0.0) { prev = ph; continue; }   // unlocked leg
+            double d = std::fabs(ph - prev);
+            if (d > M_PI) d = 2.0 * M_PI - d;                      // ignore the 2pi wrap
+            max_jump = std::max(max_jump, d);
+            prev = ph;
+        }
+        return max_jump;
+    };
+    const double soft = run(0.10);
+    const double snap = run(1.0);
+    // omega for a 13-tick period is ~0.48 rad/tick; the soft pull adds at most 10% of the
+    // error on a touchdown tick, so ~1.0 rad is a generous ceiling that a snap blows past.
+    EXPECT_LT(soft, 1.0)
+        << "at step_phase_lock=0.10 the driven phase must advance smoothly (max per-tick "
+           "jump " << soft << " rad) — a jump here is a step discontinuity in the motor "
+           "command at every off-schedule footfall, which is what collapsed the gait";
+    EXPECT_GT(snap, soft * 1.5)
+        << "step_phase_lock=1.0 must still reproduce the hard snap (max jump " << snap
+        << " rad), so the refuted form stays reproducible rather than becoming folklore";
+}
+
+// =============================================================================
+// 13. A RESPAWN RE-ANCHORS THE STEP CLOCK (2026-07-27).
+//
+// A teleport/fall is a discontinuity in the body's contact history.  Without this the leg
+// keeps `step_locked` with `last_td_tick` pointing at a touchdown from BEFORE the
+// respawn, so the stroke drives off a stale phase through the whole post-reset settle —
+// the same shape the ledger already records once ("MotorEPM's leg-phase/EMA survived
+// fall+respawn -> any trend across a reset was fake").
+// =============================================================================
+TEST(MotorEPM, ResetReanchorsTheStepClock) {
+    auto p = steplock_params();
+    p["stroke_phase_src"] = 1.0;
+    Fixture f(p, 4, 3);
+    for (uint64_t t = 0; t < 200; ++t)
+        f.run_tick(t, {.contact = contact_train(t, 4, 26, 20)});
+    ASSERT_GT(f.m.diag_snapshot()["step_lock"].get<double>(), 0.0) << "precondition: locked";
+
+    f.run_tick(200, {.contact = contact_train(200, 4, 26, 20)}, "reset");
+    EXPECT_NEAR(f.m.diag_snapshot()["step_lock"].get<double>(), 0.0, 1e-9)
+        << "a respawn must drop the step clock to unlocked so the stroke falls back to "
+           "L.phase until two REAL touchdowns are seen again";
+    // ...and it must re-lock on its own afterwards, rather than being permanently dead.
+    for (uint64_t t = 201; t < 400; ++t)
+        f.run_tick(t, {.contact = contact_train(t, 4, 26, 20)});
+    EXPECT_GT(f.m.diag_snapshot()["step_lock"].get<double>(), 0.0)
+        << "the clock must re-lock from post-reset touchdowns";
 }

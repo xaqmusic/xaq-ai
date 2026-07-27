@@ -549,6 +549,36 @@ var _chassis: RigidBody3D
 # _do_hard_reset() can wipe its X-markers without re-traversing the tree.
 var _walking_trail: Node = null
 
+# ---------------------------------------------------------------------------
+# GOOD/BAD CLIP MARKER (2026-07-27) — the operator -> measurement channel.
+#
+# The operator can see gait quality in the UI long before any aggregate metric moves, and
+# describing it in words is lossy in a SPECIFIC way: this project has three recorded cases
+# where the reported ACTION was right and the reported MECHANISM was wrong ("the swing leg
+# spins the chassis" — yaw impulse measured LOWER during swing; "a vertical shank gives
+# mechanical advantage" — foot radius barely moved; "shorter steps bring the feet in" —
+# foot radius invariant).  Each cost a build plus a seed-averaged A/B before an instrument
+# caught it.
+#
+# So instead of describing it: MARK it.  [F1] while it looks right, [F2] while it looks
+# wrong, and `scripts_tools/clipdiff.py` reports what actually differs between those
+# windows.  The operator stays the authority on what "good" means; the numbers say what
+# good CONSISTS of, which is the part words keep getting wrong.
+#
+# The existing JSONL is emitted at the diag cadence (~1 Hz) — far too coarse for a 26-tick
+# step — so this keeps its own narrow per-tick ring.  Body-side signals only: everything
+# else (duty, periods, inter-leg phase, mv_stance) is derivable offline.
+#
+# ⚠️ THIS IS AN INSTRUMENT, NEVER A FITNESS.  Nothing here enters a loop the brain can
+# optimize; that would be reward shaping, which CLAUDE.md §5.1 prohibits outright.  It
+# selects which lever to chase.  The brain never sees it.
+const _CLIP_RING_LEN: int = 900          # ~15 s at 60 Hz
+var _clip_ring: Array = []               # ring of per-tick Dictionaries
+var _clip_head: int = 0
+var _clip_count: int = 0                 # total ticks recorded (< LEN = partial)
+var _clip_seq: int = 0                   # clip index within this run
+var _clip_dir: String = ""               # resolved lazily on first save
+
 # Trainer-pulse counters — incremented by publish_trainer_event() and
 # emitted in every _emit_jsonl line so the audit trail is complete.
 # Headless A/Bs must see 0 for both across every diag line; a non-zero
@@ -2925,14 +2955,21 @@ func _build_terrain() -> void:
 # chassis face and the locomotor forward axis fwd_v = (vx,vz)·(sin yaw, cos yaw)
 # is +Z at spawn (yaw=0).  (The IMU comment at ~1998 says "+X"; the locomotion
 # math says +Z — this gym follows the BODY, so the robot spawns facing DOWN the
-# trench and fwd_v directly measures corridor progress.)  It can travel only +Z:
-# a back wall seals the -Z end and two 30 deg walls form a self-centering
-# trench — drift into a wall and the slope + gravity nudge the body back toward
-# the middle.  That passive centering stands in for the not-yet-working heading
-# reflex.  Down the corridor the terrain ramps in difficulty: flat runway ->
-# gentle 10 deg hump -> half-buried rumble bumps -> a small pyramid field.
-# Forward distance (body diag `z`) is then a clean 1-D capability signal; the
-# zone reached = difficulty conquered.
+# trench and fwd_v directly measures corridor progress.)  It is FULLY ENCLOSED by
+# four 30 deg walls — two along Z forming a self-centering trench, two sealing
+# the -Z and +Z ends — so drift into any wall and the slope + gravity nudge the
+# body back toward the middle.  That passive centering stands in for the
+# not-yet-working heading reflex.  Down the corridor the terrain ramps in
+# difficulty: flat runway -> gentle 10 deg hump -> half-buried rumble bumps -> a
+# small pyramid field.  Forward distance (body diag `z`) is then a clean 1-D
+# capability signal; the zone reached = difficulty conquered.
+#
+# 2026-07-27 — the two END walls were a VERTICAL seal at -Z and NOTHING at +Z,
+# and both corrupted distance: a robot could park against the back wall with no
+# escape while still reading fwd_v, and a fast one walked off the +Z edge of the
+# world.  See the end-wall block below.  ANY CORRIDOR NUMBER MEASURED BEFORE
+# THIS CHANGE IS FROM A DIFFERENT GYM and must be re-measured, not compared
+# across — including the deployed baseline (net_z 4.75 +/- 0.29 @ 6000 ticks).
 #
 # Deterministic placement (no RNG) -> paired-seed A/B parity, as _build_terrain.
 # Friction matches the live env: the floor + every obstacle use
@@ -2946,8 +2983,7 @@ func _build_corridor() -> void:
 	var slope_deg:    float = 30.0    # self-centering trench-wall angle
 	var wall_face:    float = 1.2     # sloped-face length (rise = 1.2*sin30 ~ 0.60 m)
 	var wall_thick:   float = 0.30    # wall box thickness (buried below the floor)
-	var back_wall_z:  float = -0.5    # -Z seal, just behind spawn
-	var back_wall_h:  float = 0.50
+	var back_wall_z:  float = -0.5    # -Z seal, just behind spawn (sloped since 2026-07-27)
 
 	# Reset pyramid bookkeeping (corridor XOR donut — never both).
 	_pyramid_xz_positions.clear()
@@ -3006,26 +3042,66 @@ func _build_corridor() -> void:
 		body.transform = Transform3D(wbasis, center)
 		_world_root.add_child(body)
 
-	# --- Back wall: a low vertical seal so the robot can only go +Z ---
-	var back := StaticBody3D.new()
-	back.collision_layer = _LAYER_WORLD
-	back.collision_mask  = _LAYER_BODY
-	back.physics_material_override = _make_contact_mat()
-	var bcs := CollisionShape3D.new()
-	var bbs := BoxShape3D.new()
-	bbs.size = Vector3(thru_half * 2.0, back_wall_h, 0.1)   # clip through both side walls
-	bcs.shape = bbs
-	back.add_child(bcs)
-	var bmi := MeshInstance3D.new()
-	var bbm := BoxMesh.new()
-	bbm.size = bbs.size
-	bmi.mesh = bbm
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = wall_color
-	bmi.set_surface_override_material(0, bmat)
-	back.add_child(bmi)
-	back.transform.origin = Vector3(0.0, back_wall_h * 0.5, back_wall_z)
-	_world_root.add_child(back)
+	# --- End walls: 30 deg slopes sealing BOTH ends of the trench -------------
+	# 2026-07-27 (operator UI observation) — these were the two ways the corridor
+	# could corrupt a distance measurement, and they pull in opposite directions:
+	#
+	#   -Z  the back wall was a VERTICAL seal.  A robot that turned around and
+	#       walked into it stayed parked against it, facing the wall, with no
+	#       geometry able to nudge it out — while still accumulating fwd_v.  A
+	#       trapped body that reads as "walking" is the blind-metric shape
+	#       CLAUDE.md 3 rule 4 warns about, and it is invisible in net_z (which
+	#       just stops rising) unless someone is watching.
+	#   +Z  the far end simply DROPPED OFF: the curriculum runs to 9.5 m on a
+	#       20x20 floor, so a fast arm walked off the world.  Already in the
+	#       ledger — seed 1 of the load-stroke sweep posted the campaign's best
+	#       distance (net_z 10.04) with mean chassis_y -39.29 and was charged a
+	#       `fall` for it.  That bias hits the FASTEST arm first, i.e. exactly
+	#       the arm a propulsion lever exists to demonstrate.
+	#
+	# Both are fixed by the geometry the SIDE walls already use: a 30 deg ramp
+	# whose normal points up-and-inward, so gravity returns a body that reaches
+	# it to the channel.  Same rise as the side walls (1.2*sin30 ~ 0.60 m), far
+	# beyond anything this 0.085 m body can climb, so containment is absolute
+	# while the trap and the cliff are both gone.
+	#
+	# The corridor is the OBSTACLE gym; the arena is where flat distance is
+	# measured (an open floor has neither failure mode).  Containment here is
+	# about not corrupting the obstacle result, not about making this the
+	# distance gym.
+	for zside in [-1.0, 1.0]:
+		# zside = -1 seals the -Z end (behind spawn), +1 the far end.
+		# Mirrors the side-wall construction with the long axis along X:
+		# n = surface normal (up + INWARD, toward the channel), u_world = up-slope
+		# (up + OUTWARD), and the wall is built from its inner-bottom edge.
+		var edge_z: float = back_wall_z if zside < 0.0 else corridor_len + 0.3
+		var en:        Vector3 = Vector3(0.0, cos(th), -zside * sin(th))   # up + inward
+		var eu_world:  Vector3 = Vector3(0.0, sin(th),  zside * cos(th))   # up + outward
+		var ep_edge:   Vector3 = Vector3(0.0, 0.0, edge_z)
+		var ecenter:   Vector3 = ep_edge + eu_world * (wall_face * 0.5) - en * (wall_thick * 0.5)
+		var elong:     Vector3 = Vector3(1, 0, 0)                          # end wall runs along X
+		var ez_axis:   Vector3 = elong.cross(en).normalized()
+		var ebasis:    Basis   = Basis(elong, en, ez_axis)
+		var ewall := StaticBody3D.new()
+		ewall.collision_layer = _LAYER_WORLD
+		ewall.collision_mask  = _LAYER_BODY
+		ewall.physics_material_override = _make_wedge_mat()   # mu=3.0, as the side walls
+		var ebs := BoxShape3D.new()
+		ebs.size = Vector3(thru_half * 2.0, wall_thick, wall_face)   # clip through both side walls
+		var ecs := CollisionShape3D.new()
+		ecs.shape = ebs
+		ewall.add_child(ecs)
+		var emi := MeshInstance3D.new()
+		var ebm := BoxMesh.new()
+		ebm.size = ebs.size
+		emi.mesh = ebm
+		var ewm := StandardMaterial3D.new()
+		ewm.albedo_color = wall_color
+		ewm.roughness = 0.9
+		emi.set_surface_override_material(0, ewm)
+		ewall.add_child(emi)
+		ewall.transform = Transform3D(ebasis, ecenter)
+		_world_root.add_child(ewall)
 
 	# --- Zone 1: gentle hump (up then down), spanning the channel.
 	# Triangular prism: base z in [2.0, 4.0] (1.0 m run each side), apex height
@@ -4044,6 +4120,27 @@ func _input(event: InputEvent) -> void:
 		if t != null and is_instance_valid(t):
 			var shown: bool = t.call("toggle_shown")
 			print("PicrawlerBody: [P] path_trail = %s" % shown)
+	elif key == KEY_F1:
+		# 2026-07-27 — mark the last ~15 s as GOOD: "this is the gait I want."
+		# F-keys because G/C/T/H/P/M/N/V/R/1-4/SPACE are all taken.
+		_clip_save("GOOD")
+	elif key == KEY_F2:
+		# ...and BAD: "this is the failure."  clipdiff.py then reports what actually
+		# differs between the two sets, which is the part words keep getting wrong.
+		_clip_save("BAD")
+	elif key == KEY_F3:
+		# Drop the most recent clip (mis-timed press).  Deletes by index rather than by
+		# "latest file" so a concurrent run's directory can never be touched.
+		if _clip_seq > 0 and _clip_dir != "":
+			var d: DirAccess = DirAccess.open(_clip_dir)
+			if d != null:
+				for fn in d.get_files():
+					if fn.begins_with("clip_%02d_" % (_clip_seq - 1)):
+						d.remove(fn)
+						_clip_seq -= 1
+						print("PicrawlerBody: [F3] dropped clip %s" % fn)
+						_ui_notify("clip dropped")
+						break
 	elif key == KEY_1:
 		# Live gym swap — drop the experienced robot (brain intact) into the ARENA (donut).
 		_switch_gym("arena")
@@ -6216,6 +6313,9 @@ func _step_one() -> void:
 	# block to read.  See v6.0.b.7 energy-cost mechanism.
 	_motor_power_last_tick = power_acc
 
+	# ---- 5.9 Clip ring (per tick, for the [F1]/[F2] GOOD/BAD marker) ----
+	_clip_record(hip1_angles, hip2_angles, knee_angles, chassis_y)
+
 	# ---- 6. Diag emit ----
 	if verbose_logging and diag_interval_ticks > 0 and (tick_counter % diag_interval_ticks) == 0:
 		_emit_jsonl(hip1_angles, hip2_angles, knee_angles, chassis_y, chassis_tilt)
@@ -6239,11 +6339,33 @@ func _step_one() -> void:
 			# episode from a shared point.
 			if leg_symmetry_mode != "off":
 				_sync_leg_symmetry()
-		if max_steps > 0 and step_in_episode >= max_steps:
+		# 2026-07-27 — CONTINUOUS MODE TERMINATES ON tick_counter, NOT step_in_episode.
+		#
+		# The auto-reset path (inversion / belly-up) zeroes `step_in_episode` at :4380,
+		# so an arm that keeps flipping keeps RESTARTING its own countdown and never
+		# reaches max_steps: the run then ends only at `--quit-after`, tens of thousands
+		# of ticks later.  Measured on the step-lock p0 arm: seeds ended at tick 13 407
+		# and 72 043 against a 6 000-tick protocol, i.e. a 5x spread WITHIN one arm, while
+		# the healthy baseline ended at exactly 6 000.
+		#
+		# Two ways that corrupts a result, and the second is the dangerous one:
+		#   * `falls`, `steps` and every other COUNT becomes counts-per-unequal-duration,
+		#     so arms are not comparable to the baseline OR to each other;
+		#   * it costs wall-clock in proportion to how badly an arm fails, so the worse a
+		#     lever is the longer it takes to find out -- which quietly discourages
+		#     running the very sweeps that would refute it.
+		#
+		# `tick_counter` is monotonic (never zeroed anywhere in this file), so it is the
+		# honest clock for a mode whose whole premise is ONE continuous run with no
+		# episode boundaries.  For any arm that never auto-resets the two counters are
+		# equal, so this is byte-identical for the baseline and every promoted lever --
+		# verified by measurement, not argument (the baseline still ends at exactly 6 000).
+		if max_steps > 0 and tick_counter >= max_steps:
 			_done = true
 			print(JSON.stringify({"event": "RUN_END",
 								  "episodes": episode_index + 1,
-								  "tick": tick_counter}))
+								  "tick": tick_counter,
+								  "step_in_episode": step_in_episode}))
 	else:
 		if fell or (max_steps > 0 and step_in_episode >= max_steps):
 			_finish_episode(fell)
@@ -7929,6 +8051,77 @@ func _do_hard_reset() -> void:
 	if _walking_trail != null and _walking_trail.has_method("clear"):
 		_walking_trail.call("clear")
 
+# ---------------------------------------------------------------------------
+# Clip ring — one compact record per brain tick.  Cheap by construction: a fixed-size
+# Array of small Dictionaries, overwritten in place, never grown, never scanned.
+# ---------------------------------------------------------------------------
+func _clip_record(h1: Array, h2: Array, kn: Array, chassis_y: float) -> void:
+	if _chassis == null or not is_instance_valid(_chassis):
+		return
+	if _clip_ring.size() != _CLIP_RING_LEN:
+		_clip_ring.resize(_CLIP_RING_LEN)
+		_clip_head = 0
+		_clip_count = 0
+	var contact: Array = []
+	for i in range(4):
+		contact.append(1 if not _lowers[i].get_colliding_bodies().is_empty() else 0)
+	var o: Vector3 = _chassis.global_transform.origin
+	var yaw: float = _chassis.global_transform.basis.get_euler().y
+	# Same locomotor-forward projection the diag path uses (see :4515) — recomputed here
+	# rather than cached, so the recorder adds no state the rest of the body must maintain.
+	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z) \
+		.dot(Vector2(sin(yaw), cos(yaw)))
+	_clip_ring[_clip_head] = {
+		"t": tick_counter,
+		"x": snappedf(o.x, 0.0001), "y": snappedf(chassis_y, 0.0001), "z": snappedf(o.z, 0.0001),
+		"yaw": snappedf(yaw, 0.0001),
+		"c": contact,
+		"h1": [snappedf(h1[0],0.0001), snappedf(h1[1],0.0001), snappedf(h1[2],0.0001), snappedf(h1[3],0.0001)],
+		"h2": [snappedf(h2[0],0.0001), snappedf(h2[1],0.0001), snappedf(h2[2],0.0001), snappedf(h2[3],0.0001)],
+		"kn": [snappedf(kn[0],0.0001), snappedf(kn[1],0.0001), snappedf(kn[2],0.0001), snappedf(kn[3],0.0001)],
+		"fwd_v": snappedf(fwd_v, 0.0001),
+	}
+	_clip_head = (_clip_head + 1) % _CLIP_RING_LEN
+	if _clip_count < _CLIP_RING_LEN:
+		_clip_count += 1
+
+
+## Write the ring to /tmp/xaq_clips/<runid>/, labelled GOOD or BAD.  Oldest-first, with a
+## `_meta` header line naming the config/gym/seed so clipdiff can refuse to compare clips
+## that came from different ARMS (a GOOD clip from one arm vs a BAD clip from another
+## measures the arm, and that confound is invisible in the output table).
+func _clip_save(label: String) -> void:
+	if _clip_count < 30:
+		print("PicrawlerBody: clip SKIPPED — only %d ticks buffered" % _clip_count)
+		return
+	if _clip_dir == "":
+		var stamp: String = Time.get_datetime_string_from_system().replace(":", "").replace("-", "")
+		_clip_dir = "/tmp/xaq_clips/run_%s" % stamp
+		DirAccess.make_dir_recursive_absolute(_clip_dir)
+	var path: String = "%s/clip_%02d_%s_t%06d.jsonl" % [_clip_dir, _clip_seq, label, tick_counter]
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		push_error("PicrawlerBody: could not open %s" % path)
+		return
+	f.store_line(JSON.stringify({"_meta": {
+		"label": label,
+		"config": OS.get_environment("OGMA_PICRAWLER_CONFIG"),
+		"gym": _gym_mode_active,
+		"tick": tick_counter,
+		"ticks": _clip_count,
+	}}))
+	# Unroll oldest-first so the file reads forward in time regardless of the ring's head.
+	var start: int = (_clip_head - _clip_count + 2 * _CLIP_RING_LEN) % _CLIP_RING_LEN
+	for k in range(_clip_count):
+		var rec = _clip_ring[(start + k) % _CLIP_RING_LEN]
+		if rec != null:
+			f.store_line(JSON.stringify(rec))
+	f.close()
+	_clip_seq += 1
+	print("PicrawlerBody: [%s] clip saved -> %s  (%d ticks)" % [label, path, _clip_count])
+	_ui_notify("clip %s saved (%d ticks)" % [label, _clip_count])
+
+
 func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				 chassis_y: float, chassis_tilt: float) -> void:
 	var metrics: Dictionary = brain.get_module_metrics()
@@ -8400,6 +8593,23 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["tq_agree"]   = snappedf(float(_mm.get("torque_agree", 0.0)), 0.0001)
 			line["tq_stance"]  = snappedf(float(_mm.get("torque_stance", 0.0)), 0.00001)
 			line["tq_swing"]   = snappedf(float(_mm.get("torque_swing", 0.0)), 0.00001)
+			# tq_agree on hip1 ALONE — the signal a load-derived step clock would actually
+			# threshold.  The summed three-servo version dilutes it (per-joint stance/swing
+			# ratio is 1.368 on hip1 vs 1.148 summed), so scope a load lever on THIS number.
+			line["tq_agree_hip1"] = snappedf(float(_mm.get("torque_agree_hip1", 0.0)), 0.0001)
+			# --- stroke-to-step lock.  step_lock is the CONSUMER CHECK; mv_* are the
+			# NON-tautological reads (td_plv/pos_stance above are satisfied by construction
+			# once the phase is touchdown-referenced, whereas mv_* is computed on ACHIEVED
+			# hip1 motion and cannot be faked by re-referencing the command).
+			line["step_lock"]   = snappedf(float(_mm.get("step_lock", 0.0)), 0.0001)
+			line["step_period"] = snappedf(float(_mm.get("step_period", 0.0)), 0.01)
+			line["step_td_err"] = snappedf(float(_mm.get("step_td_err", 0.0)), 0.0001)
+			# How often the stroke's phase reference SWAPPED between the step clock and the
+			# L.phase fallback.  Intermittent locking is worse than never locking: each swap
+			# is a discontinuity in the driven command.
+			line["step_flips"]  = int(_mm.get("step_lock_flips", 0))
+			line["mv_stance"]   = snappedf(float(_mm.get("mv_stance", 0.0)), 0.000001)
+			line["mv_swing"]    = snappedf(float(_mm.get("mv_swing", 0.0)), 0.000001)
 			# explore_mult = the progress->commit damping actually applied to the
 			# coordination probe sigma.  If this already sits at 0 on flat ground then a
 			# precision gate on the same sigma would be a TAUTOLOGY (CLAUDE.md 3.2 r1).

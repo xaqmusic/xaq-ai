@@ -21,6 +21,12 @@ def main(argv):
     if len(argv) < 3:
         print(__doc__); return 2
     base, tag, kvs = argv[0], argv[1], argv[2:]
+    # Strip flags before parsing key=value pairs.  Without this, `--allow-noop` was itself
+    # parsed as a kv (key="--allow-noop", value="") and WRITTEN INTO THE CONFIG as a bogus
+    # MotorEPM param -- a silent-confound generator in the one tool whose entire job is to
+    # prevent silent confounds (CLAUDE.md 3.2 rule 7).  Found 2026-07-27 when the printed
+    # diff showed `--allow-noop: "<unset>" -> ""` as though it were a real parameter change.
+    kvs = [kv for kv in kvs if not kv.startswith("--")]
     with open(os.path.join(CFG, base)) as f:
         d = json.load(f)
     mods = [m for m in d["modules"] if m.get("type") == "MotorEPM"]

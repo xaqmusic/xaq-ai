@@ -419,6 +419,11 @@ private:
     double  ga_tq_swing_  = 0.0; int64_t ga_tq_swing_n_  = 0;
     double  ga_tq_agree_  = 0.0; int64_t ga_tq_agree_n_  = 0;   // 0.5 = chance
     std::vector<float>   ga_tq_ema_;            // per-leg running load mean (the threshold)
+    // Same test on hip1 ALONE — what a load-derived step clock would actually threshold.
+    // The summed version measures 0.540 (near chance) while the per-joint ratios say hip1
+    // separates better than the sum (1.368 vs 1.148), so the sum may be diluting it.
+    double  ga_tq_h1_agree_ = 0.0; int64_t ga_tq_h1_agree_n_ = 0;
+    std::vector<float>   ga_tq_h1_ema_;
     // Per-JOINT stance/swing load, because summing all three servos may be diluting the
     // contrast: hip1 does fore-aft work in BOTH phases, while hip2 and the knee are the
     // ones actually holding the body up.  Whichever joint separates best is the input a
@@ -495,6 +500,115 @@ private:
     static constexpr float kStrokeLoadAlpha = 0.2f;
     static constexpr float kStrokeGateMin   = 0.0f;   // saturation guards, not the mechanism
     static constexpr float kStrokeGateMax   = 2.0f;
+
+    // ------------------------------------------------------------------
+    // STROKE-TO-STEP LOCK (2026-07-27).  The stroke has never had an observation of its
+    // own step.
+    //
+    // Phase 0 measured three per-leg clocks that nothing forced to agree: the stroke rides
+    // `L.phase` off the KNEE (22-24 ticks, `phase_joint` defaults -1), the real step is
+    // 26-30 ticks (`foot_contact`), and the incumbent foot-height detector chatters at
+    // 12-15.  Stroke and step beat at ~2-2.5 s -- the operator's "occasionally it works
+    // very well, then synchronization is lost", as a number -- and the fraction of STANCE
+    // spent in the stroke's positive half is 0.512 against 0.513 over SWING.  Push
+    // direction is statistically INDEPENDENT of whether the foot is on the ground.
+    //
+    // The fix, per the ledger's re-use context for `phase_joint=0`: derive the phase the
+    // stroke rides from a signal the stroke does NOT drive.  A touchdown-referenced step
+    // clock,
+    //
+    //     phi_step = 2*pi * (ticks since touchdown) / EMA(inter-touchdown interval)
+    //
+    // puts phi = 0 AT touchdown, so `stroke_phase` finally selects where in the step the
+    // push lands.  This is the same clock SynergyTimer.cpp:305-313 already runs (that
+    // module is not in the picrawler graph, so the algorithm is ported, not the module).
+    //
+    // WHY THIS IS NOT `phase_joint=0` AGAIN.  That refutation was a WIRING failure: the
+    // stroke drove the very hip1 it read `atan2(velocity, deviation)` from, closing an
+    // algebraic self-excited oscillator, and locomotion collapsed at all four offsets of a
+    // full-circle sweep.  Here the stroke influences touchdown only THROUGH THE WORLD --
+    // the foot leaves the ground and comes back -- which is the loop a walking animal
+    // actually has.  The premise of that refutation measured POSITIVE (step_bal 0.30 ->
+    // 0.41-0.58), so only its wiring was ever in question.
+    //
+    // ISOLATION.  `L.phase` feeds six consumers (Kuramoto coupling, the stroke, the
+    // amplitude homeostat, prop-credit, `rhythm_gains`, the alignment diagnostics), and
+    // `phase_joint` moved ALL of them at once -- part of why its collapse taught us so
+    // little.  `L.step_phase` is a SEPARATE field consumed at the stroke site only.  One
+    // lever, one consumer.
+    //
+    // WARNING FOR WHOEVER READS THE RESULT.  With phi referenced to touchdown, `td_plv`
+    // -> ~1.0 and `pos_stance` becomes a deterministic function of `stroke_phase` and the
+    // duty factor.  They are then CONSUMER VERIFICATION (CLAUDE.md 3.2 rule 5), not
+    // evidence -- judge this lever behaviourally, and on `mv_stance`/`mv_swing` below,
+    // which are computed on the ACHIEVED hip1 motion rather than the commanded waveform.
+    // ------------------------------------------------------------------
+    //   0 = legacy L.phase (byte-identical) | 1 = contact touchdown | 2 = hip1-load touchdown
+    double  stroke_phase_src_    = 0.0;
+    double  step_phase_debounce_ = 2.0;    // ticks of consistent contact before a touchdown counts
+    double  step_period_alpha_   = 0.2;    // EMA rate on the inter-touchdown interval
+    double  step_period_min_     = 8.0;    // sanity rails (the measured step is 26-30)
+    double  step_period_max_     = 200.0;
+    // Proportional pull toward phi=0 at touchdown.  BodyRhythmTracker's value (0.10),
+    // and for its reason: a phase that DRIVES a continuous command must not jump.  1.0 =
+    // the hard snap that was measured to collapse the gait -- kept reachable so that
+    // refutation stays reproducible rather than becoming folklore.
+    double  step_phase_lock_     = 0.10;
+    void    update_step_phase(uint64_t tick_id);
+    static constexpr float kTwoPi = 6.28318530717958647692f;
+    // Frequency low-pass, matching BodyRhythmTracker's omega_lp default: omega drifts
+    // SMOOTHLY toward the measured period so the driven waveform never breaks.
+    static constexpr float kStepOmegaLp = 0.05f;
+    float   step_lock_frac_ = 0.0f;        // diag: fraction of legs with a locked step clock
+    // Mean |phase error at touchdown|, radians.  The lock-quality read that does NOT go
+    // tautological: the pull is partial, so an entrained clock drives this toward 0 while
+    // a clock fighting the body's real rhythm sits high.
+    double  step_td_err_acc_ = 0.0; int64_t step_td_err_n_ = 0;
+    // Count of lock<->fallback transitions across all legs.  Intermittent locking swaps the
+    // stroke's phase reference mid-gait, and each swap is exactly the driven-command
+    // discontinuity the soft PLL exists to prevent.
+    int64_t step_lock_flips_ = 0;
+    float   step_period_mean_ = 0.0f;      // diag: mean measured step period, ticks
+    // Per-leg load EMA for src=2 (touchdown = |tau_hip1| crossing up through its own mean).
+    // Separate from stroke_load_ema_ so the purchase gate and the phase source can never
+    // be entangled by a shared filter state.
+    std::vector<float> step_load_ema_;
+
+    // The honest, NON-tautological mechanism instrument for the lock: the same stance/swing
+    // split, computed on the leg's ACHIEVED fore-aft motion (sgn * delta hip1, i.e. L.x[2])
+    // instead of on the commanded sin(theta).  A working lock means the foot really does
+    // travel backward-relative-to-body while planted and forward while airborne, which no
+    // amount of re-referencing the command can fake.  Accumulated in the diagnostic block
+    // so an instrumented CONTROL arm reports it too -- a diag accumulated inside a lever's
+    // own block reads 0 on the control, which is exactly the arm you need to compare with.
+    double  ga_mv_stance_ = 0.0; int64_t ga_mv_stance_n_ = 0;
+    double  ga_mv_swing_  = 0.0; int64_t ga_mv_swing_n_  = 0;
+
+    // ------------------------------------------------------------------
+    // FOOTFALL RASTER (2026-07-27) -- pure observation, for the live inspector.
+    //
+    // The operator can see gait quality long before any aggregate metric moves, and the
+    // stroke-to-step relation is the specific thing that is invisible in numbers and
+    // obvious in a picture.  This is a ring of per-tick bits the UI renders as a
+    // Hildebrand plot: contact per leg, the stroke's sign per leg, and the incumbent
+    // foot-height detector per leg (which makes its documented ~2x-per-step chatter
+    // visible for the first time).
+    //
+    // WHY A RING RATHER THAN CLIENT-SIDE ACCUMULATION: DiagPublisher throttles each
+    // subscription to a target Hz (default 30) against a ~52 tick/s brain, so a widget
+    // accumulating what it receives would alias exactly at the touchdown edges that matter.
+    // The ring is sampled every tick and shipped whole, so the picture is exact regardless
+    // of the stream rate.
+    //
+    // Feeds no command, draws no randomness: byte-identity is structural.  Still gated
+    // (default 0 = block skipped) and still verified by measurement, per CLAUDE.md.
+    // ------------------------------------------------------------------
+    double  gait_raster_diag_ = 0.0;                  // 0 = off (block skipped)
+    static constexpr int kRasterLen = 512;            // ~10 s at 52 tick/s
+    std::vector<uint16_t> raster_;                    // bits 0-3 contact, 4-7 stroke sign, 8-11 in_swing
+    int     raster_head_ = 0;                         // next write index (ring)
+    int64_t raster_n_    = 0;                         // total ticks written (< kRasterLen = partial)
+    void    update_gait_raster();
 
     // ------------------------------------------------------------------
     // SWING TUCK (2026-07-27) — the MIRROR of stance_lift, and the gate `hip2_tuck_target`
@@ -805,6 +919,16 @@ private:
         float               amp_gain    = 1.0f;   // homeostat output gain (regulated toward amp_target)
         float               hip1_dc     = 0.0f;   // slow DC mean of hip1 pos (propulsive-credit baseline)
         float               prop_credit = 0.0f;   // EMA of phase-aligned propulsive stroke (fwd contribution)
+        // ---- stroke-to-step lock (stroke_phase_src > 0).  A phase the stroke does not
+        // drive: phi = 0 AT touchdown, advancing on the leg's own measured step period.
+        float               step_phase   = 0.0f;  // radians, [0, 2pi)
+        float               step_omega   = 0.0f;  // rad/tick, low-passed toward 2pi/step_per_ema
+        float               step_per_ema = 0.0f;  // EMA of the inter-touchdown interval, ticks
+        int64_t             last_td_tick = -1;    // tick of the most recent accepted touchdown
+        int32_t             td_count     = 0;     // accepted touchdowns (>= 2 ⇒ locked)
+        int32_t             td_run       = 0;     // consecutive ticks of the current contact state
+        bool                td_contact   = true;  // debounced contact state
+        bool                step_locked  = false; // false ⇒ the stroke falls back to L.phase
     };
     std::vector<Leg> legs_;
 

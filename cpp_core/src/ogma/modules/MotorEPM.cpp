@@ -286,6 +286,27 @@ ParamSchema MotorEPM::params_schema() const {
         {"stroke_phase", ParamMutability::HotMutable,
          "phase offset (rad) between the knee/step phase and the hip1 fore-aft drive — tunes when the leg pushes back relative to when it lifts.",
          ParamValue{0.0}, ParamValue{-3.15}, ParamValue{3.15}},
+        {"stroke_phase_src", ParamMutability::HotMutable,
+         "STROKE-TO-STEP LOCK. Which phase the power stroke rides. 0 (default) = the legacy per-leg oscillator phase L.phase, derived from phase_joint (the KNEE) -- BYTE-IDENTICAL. 1 = a touchdown-referenced STEP CLOCK from true foot contact: phi = 2pi*(ticks since touchdown)/EMA(inter-touchdown interval), so phi=0 IS touchdown and stroke_phase finally selects where in the STEP the push lands. 2 = the same clock with touchdown detected from hip1 |joint_torque| crossing its own mean (buildable on the real robot via servo current sensing, where a foot switch is not; but measured tq_agree is only 0.540 against a 0.5 chance line, so expect a much noisier clock than source 1). WHY: Phase 0 measured the stroke riding a 22-24 tick knee clock while the leg steps every 26-30, beating at ~2.5 s, with the fraction of STANCE in the stroke's positive half at 0.512 against 0.513 over SWING -- push direction statistically INDEPENDENT of whether the foot is down. This is NOT phase_joint=0 again: that refutation was a self-excited oscillator (the stroke drove the same hip1 an atan2 read its phase from), and its premise measured POSITIVE (step_bal 0.30->0.41-0.58). Here the stroke reaches the reference only through the world. Requires contact_topic (src 1) or torque_topic (src 2); with neither wired the clock never locks and the stroke silently keeps using L.phase. NOTE FOR READING THE RESULT: with phi referenced to touchdown, td_plv -> ~1.0 and pos_stance becomes a deterministic function of stroke_phase and duty -- they become CONSUMER VERIFICATION, not evidence. Judge behaviourally and on mv_stance/mv_swing.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"step_phase_debounce", ParamMutability::HotMutable,
+         "Ticks of consistent contact required before a touchdown is accepted by the step clock (stroke_phase_src > 0). Contact is a physics touch flag and flickers on impact; an un-debounced edge would reset the phase twice per step and reintroduce exactly the chatter that makes the incumbent foot-height detector unusable (it fires every 12-15 ticks against a 26-30 tick step).",
+         ParamValue{2.0}, ParamValue{1.0}, ParamValue{20.0}},
+        {"step_period_alpha", ParamMutability::HotMutable,
+         "EMA rate on the measured inter-touchdown interval (the step clock's period estimate). Higher = tracks a changing gait faster, noisier phase.",
+         ParamValue{0.2}, ParamValue{0.01}, ParamValue{1.0}},
+        {"step_period_min", ParamMutability::HotMutable,
+         "Sanity floor (ticks) on an accepted inter-touchdown interval before it enters the period EMA, so one anomalous stride cannot drag the estimate. The measured step is 26-30 ticks.",
+         ParamValue{8.0}, ParamValue{2.0}, ParamValue{1000.0}},
+        {"step_period_max", ParamMutability::HotMutable,
+         "Sanity ceiling (ticks) on an accepted inter-touchdown interval. See step_period_min.",
+         ParamValue{200.0}, ParamValue{2.0}, ParamValue{10000.0}},
+        {"step_phase_lock", ParamMutability::HotMutable,
+         "How hard a touchdown pulls the step clock toward phi=0 (stroke_phase_src > 0). 0.10 (default) = BodyRhythmTracker's proportional phase-lock: phi integrates omega every tick and is SOFTLY pulled at each touchdown, so the driven waveform never jumps. 1.0 = a hard snap to phi=0. THE HARD SNAP WAS MEASURED AND IT COLLAPSES THE GAIT (corridor, n=4: net_z 4.58 -> -0.16, tilt_sd 0.065 -> 0.34, the body inverts repeatedly and convulses in place), for two compounding reasons: (1) the stroke can CAUSE touchdowns, so resetting phase ON touchdown is positive feedback -- a push bounces the foot, the bounce re-triggers the reset, and the period estimate runs to its rail; (2) sin(phi+stroke_phase) is a CONTINUOUS motor command, so snapping phi steps the command every time a foot lands off-schedule, which is precisely what an unlocked gait does. The generalizable rule, and the reason the first build got it wrong: a phase that DRIVES a continuous command needs a soft pull (BodyRhythmTracker), while a phase that is only READ to index a discrete bin can take a reset (SynergyTimer). 1.0 is kept reachable so that refutation stays reproducible.",
+         ParamValue{0.10}, ParamValue{0.0}, ParamValue{1.0}},
+        {"gait_raster_diag", ParamMutability::HotMutable,
+         "DIAGNOSTIC ONLY (>0 = on, 0 = off and the whole block is skipped). Maintains a 512-tick ring of per-leg footfall bits (true contact, the stroke's commanded sign, and the incumbent foot-height detector's swing state) which the live inspector renders as a Hildebrand plot. Makes the stroke-vs-step relation -- the thing that is invisible in aggregate metrics and obvious in a picture -- observable while the robot walks, and shows the incumbent detector's documented ~2x-per-step chatter next to ground truth. Shipped as a ring rather than accumulated by the UI because DiagPublisher throttles each subscription to ~30 Hz against a ~52 tick/s brain, which would alias at exactly the touchdown edges. Feeds no command and draws no randomness.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"steer", ParamMutability::HotMutable,
          "left/right hip1 drive differential — the steering lever. 0 = straight; ± = turn (the clockwise spin is steer-like). Adds side_sign·steer to each leg's stroke.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
@@ -501,6 +522,13 @@ ParamMap MotorEPM::current_params() const {
     m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
+    m["stroke_phase_src"]    = stroke_phase_src_;
+    m["step_phase_debounce"] = step_phase_debounce_;
+    m["step_period_alpha"]   = step_period_alpha_;
+    m["step_period_min"]     = step_period_min_;
+    m["step_period_max"]     = step_period_max_;
+    m["step_phase_lock"]     = step_phase_lock_;
+    m["gait_raster_diag"]    = gait_raster_diag_;
     m["steer"]            = steer_;
     m["stroke_signs"]     = stroke_signs_;
     m["propulsion_balance_gain"] = propulsion_balance_gain_;
@@ -619,6 +647,13 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "swing_tuck_knee", [&](auto const& v){ swing_tuck_knee_ = get_double(v, "swing_tuck_knee"); });
     apply_param(params, "stroke_gain", [&](auto const& v){ stroke_gain_ = get_double(v, "stroke_gain"); });
     apply_param(params, "stroke_phase", [&](auto const& v){ stroke_phase_ = get_double(v, "stroke_phase"); });
+    apply_param(params, "stroke_phase_src",    [&](auto const& v){ stroke_phase_src_    = get_double(v, "stroke_phase_src"); });
+    apply_param(params, "step_phase_debounce", [&](auto const& v){ step_phase_debounce_ = get_double(v, "step_phase_debounce"); });
+    apply_param(params, "step_period_alpha",   [&](auto const& v){ step_period_alpha_   = get_double(v, "step_period_alpha"); });
+    apply_param(params, "step_period_min",     [&](auto const& v){ step_period_min_     = get_double(v, "step_period_min"); });
+    apply_param(params, "step_period_max",     [&](auto const& v){ step_period_max_     = get_double(v, "step_period_max"); });
+    apply_param(params, "step_phase_lock",    [&](auto const& v){ step_phase_lock_     = get_double(v, "step_phase_lock"); });
+    apply_param(params, "gait_raster_diag",    [&](auto const& v){ gait_raster_diag_    = get_double(v, "gait_raster_diag"); });
     apply_param(params, "steer", [&](auto const& v){ steer_ = get_double(v, "steer"); });
     apply_param(params, "stroke_signs", [&](auto const& v){ stroke_signs_ = get_double_vec(v, "stroke_signs"); });
     apply_param(params, "propulsion_balance_gain", [&](auto const& v){ propulsion_balance_gain_ = get_double(v, "propulsion_balance_gain"); });
@@ -847,6 +882,22 @@ void MotorEPM::handle_event(std::string_view topic, MessagePtr payload) {
         // respawn = fresh commit clock + cold flow EMAs (levers C/D)
         commit_ticks_ = 0; commit_boost_ = 0.0f;
         flow_ema_ = 0.0f; flow_vol_ema_ = 0.0f;
+        // respawn = the step clock must RE-ANCHOR.  A teleport is a discontinuity in the
+        // body's contact history: without this the leg keeps `step_locked` with
+        // `last_td_tick` pointing at a touchdown from BEFORE the respawn, so the stroke
+        // drives off a stale phase all through the post-reset settle.  Exactly the shape
+        // the ledger already records once ("MotorEPM's leg-phase/EMA survived
+        // fall+respawn -> any trend across a reset was fake").  Dropping to unlocked
+        // returns the stroke to L.phase until two real touchdowns are seen again, which
+        // is the same safe fallback a cold start takes.
+        for (auto& L : legs_) {
+            L.last_td_tick = -1; L.td_count = 0; L.td_run = 0;
+            L.step_locked  = false; L.td_contact = true;
+            L.step_phase   = 0.0f;  L.step_omega = 0.0f;
+            // step_per_ema is DELIBERATELY kept: the body's stride period is a property
+            // of the morphology and gait, not of the episode, so re-measuring it from
+            // scratch after every stumble would throw away good information.
+        }
     }
 }
 
@@ -1039,6 +1090,194 @@ float MotorEPM::leg_load(int leg) const {
     return s;
 }
 
+// ---------------------------------------------------------------------------
+// STROKE-TO-STEP LOCK — the per-leg touchdown-referenced step clock.
+//
+//   phi = 2*pi * (tick - last_touchdown) / EMA(inter-touchdown interval),  wrapped
+//
+// phi = 0 AT touchdown, so `stroke_phase` selects where in the STEP the push lands
+// rather than where in the knee's own faster flexion cycle it lands.  Ported from
+// SynergyTimer.cpp:305-313, which has run this clock for a long time; that module is not
+// in the picrawler graph, so the algorithm moves and the module does not.
+//
+// Three properties the header argues for, made explicit here:
+//   * NOT SELF-EXCITED.  The stroke reaches this reference only through the world (the
+//     foot leaves the ground and comes back).  `phase_joint=0` failed because the stroke
+//     drove the same joint an atan2 read its phase from — an algebraic loop closed inside
+//     one tick.  This one is closed by physics, which is the loop a walker actually has.
+//   * IT FREE-RUNS, IT DOES NOT STALL.  Between touchdowns phi extrapolates on the
+//     measured period, so a leg mid-swing has a well-defined phase.  A leg that stops
+//     stepping keeps advancing rather than freezing at whatever phase it died on —
+//     freezing would silently convert the stroke into a DC bias, which is the refuted
+//     "blind knee bias kills the gait" shape.
+//   * IT FAILS BACK, NOT OPEN.  Before two touchdowns are seen (`step_locked`) the stroke
+//     keeps using the legacy L.phase, so warmup and any non-stepping leg are unchanged.
+//
+// DEBOUNCE: a touchdown counts only after `step_phase_debounce` consecutive ticks of the
+// new contact state.  Contact is a physics touch flag and can flicker on impact; a
+// bounce would otherwise reset phi twice per step and reintroduce exactly the chatter
+// that makes the incumbent foot-height detector unusable (12-15 ticks against a 26-30
+// tick step).  The interval is then clamped to [step_period_min, step_period_max] before
+// it enters the EMA, so one anomalous stride cannot drag the period estimate.
+// ---------------------------------------------------------------------------
+void MotorEPM::update_step_phase(uint64_t tick_id) {
+    if (int(legs_.size()) != n_legs_) return;
+    const int m = motor_dim_;
+    // Source 2 needs a per-leg load mean to threshold against; source 1 needs nothing.
+    const bool src_load = (stroke_phase_src_ >= 1.5);
+    if (src_load && int(step_load_ema_.size()) != n_legs_) step_load_ema_.assign(n_legs_, 0.0f);
+    const bool have_con = have_contact_ && int(foot_contact_.size()) == n_legs_;
+    const bool have_tq  = have_torque_  && int(joint_torque_.size()) == n_legs_ * m;
+    const int  debounce = std::max(1, int(step_phase_debounce_));
+
+    int   locked_n = 0;
+    float per_sum  = 0.0f; int per_n = 0;
+    for (int i = 0; i < n_legs_; ++i) {
+        Leg& L = legs_[i];
+        if (!L.initialized) continue;
+
+        // ---- is this foot down, by the selected source?
+        bool td_now = false;                 // an accepted touchdown landed THIS tick
+        bool con_now;
+        if (src_load) {
+            // Touchdown = hip1 |torque| rising through its own slow mean.  hip1 is the
+            // joint the ledger's measurement picked (stance/swing ratio 1.368 vs 1.124
+            // hip2 / 1.011 knee) — its torque is the ground reaction to the sweep itself.
+            // NOTE the measured ceiling on this source: tq_agree is 0.540 against a 0.5
+            // chance line, so this detector is RIGHT ABOUT HALF THE TIME.  It exists
+            // because it is buildable on the real robot (servo current sensing) where a
+            // foot switch is not; it is not expected to match source 1.
+            if (!have_tq) continue;
+            const float ld = std::fabs(joint_torque_[0 * n_legs_ + i]);   // hip1, joint-major
+            con_now = (ld > step_load_ema_[i]);
+            step_load_ema_[i] = (1.0f - kStrokeLoadAlpha) * step_load_ema_[i]
+                              + kStrokeLoadAlpha * ld;
+        } else {
+            if (!have_con) continue;
+            con_now = (foot_contact_[i] > 0.5f);
+        }
+
+        // ---- debounce, then accept a touchdown on a confirmed swing->stance edge
+        if (con_now == L.td_contact) {
+            L.td_run = 0;
+        } else if (++L.td_run >= debounce) {
+            const bool was = L.td_contact;
+            L.td_contact = con_now;
+            L.td_run     = 0;
+            if (!was && con_now) {                       // TOUCHDOWN
+                if (L.last_td_tick >= 0) {
+                    float d = float(int64_t(tick_id) - L.last_td_tick);
+                    d = std::clamp(d, float(step_period_min_), float(step_period_max_));
+                    L.step_per_ema = (L.step_per_ema <= 0.0f)
+                                   ? d
+                                   : (1.0f - float(step_period_alpha_)) * L.step_per_ema
+                                     + float(step_period_alpha_) * d;
+                    if (L.td_count < 1000000) ++L.td_count;
+                }
+                L.last_td_tick = int64_t(tick_id);
+                if (L.td_count < 1) L.td_count = 1;      // first touchdown: no interval yet
+                td_now = true;
+            }
+        }
+
+        // ---- advance.  Locked once an interval has been measured at least twice, i.e.
+        // the period estimate is a real measurement rather than one sample.
+        const bool was_locked = L.step_locked;
+        L.step_locked = (L.td_count >= 2 && L.step_per_ema > 0.0f && L.last_td_tick >= 0);
+        if (was_locked != L.step_locked) ++step_lock_flips_;
+        if (L.step_locked) {
+            // A PHASE-LOCKED LOOP, NOT A RESET — and the difference is the whole lever.
+            //
+            // The first build of this snapped `step_phase = 0` at every touchdown.  It
+            // collapsed the gait: the body convulsed in place, inverted repeatedly, and
+            // netted -0.16 m (against a 4.58 m baseline).  TWO mechanisms, both traceable
+            // to the snap:
+            //   * POSITIVE FEEDBACK.  The stroke can CAUSE touchdowns, and a touchdown
+            //     reset the phase to the point of maximum push -- so a push bounced the
+            //     foot, the bounce re-triggered the reset, and the period EMA ran down to
+            //     its rail.  Closing the loop "through the world" is only safe when the
+            //     stroke cannot trigger the phase-setting EVENT; here it could.
+            //   * A COMMAND DISCONTINUITY.  `sin(phi + stroke_phase)` is a continuous
+            //     motor command, so snapping phi steps the command every time a foot
+            //     lands off-schedule -- and off-schedule is exactly what an unlocked gait
+            //     does.  Irregular footfall then injected impulses, which made footfall
+            //     more irregular.
+            //
+            // BodyRhythmTracker already solved this, and its header says so: "PHASE is a
+            // pure integrator phi += omega, SOFTLY PULLED to the reference at each
+            // up-crossing.  Feed-forward frequency + feedback phase lock."  That module's
+            // clock DRIVES the CPG; SynergyTimer's clock (which this was ported from, and
+            // which does snap) only INDEXES a discrete phase bin, where a snap is
+            // harmless.  The generalizable rule: a phase that DRIVES a continuous command
+            // needs a soft pull; a phase that is merely READ can take a reset.
+            //
+            // step_phase_lock = 1.0 reproduces the hard snap exactly, so the refuted
+            // form stays reachable and its measurement reproducible.
+            float omega_target = kTwoPi / L.step_per_ema;
+            const float w_hi = kTwoPi / std::max(2.0f, float(step_period_min_));
+            const float w_lo = kTwoPi / std::max(2.0f, float(step_period_max_));
+            omega_target = std::clamp(omega_target, w_lo, w_hi);
+            L.step_omega = (L.step_omega <= 0.0f)
+                         ? omega_target
+                         : L.step_omega + kStepOmegaLp * (omega_target - L.step_omega);
+            L.step_omega = std::clamp(L.step_omega, w_lo, w_hi);
+            L.step_phase += L.step_omega;                     // integrate: smooth by construction
+            if (td_now) {                                     // proportional pull toward phi_ref = 0
+                const float err = (L.step_phase > kTwoPi * 0.5f)
+                                ? (kTwoPi - L.step_phase) : (-L.step_phase);
+                L.step_phase += float(step_phase_lock_) * err;
+            }
+            L.step_phase = std::fmod(L.step_phase, kTwoPi);
+            if (L.step_phase < 0.0f) L.step_phase += kTwoPi;
+            ++locked_n;
+            per_sum += L.step_per_ema; ++per_n;
+            // Phase error at touchdown, averaged: how far off phi=0 the foot is landing.
+            // This is the honest lock-quality read, and unlike td_plv it does NOT become
+            // tautological, because the pull is partial -- a perfectly entrained clock
+            // drives it to 0, a fighting one does not.
+            if (td_now) {
+                const float e = (L.step_phase > kTwoPi * 0.5f)
+                              ? (kTwoPi - L.step_phase) : L.step_phase;
+                step_td_err_acc_ += double(std::fabs(e)); ++step_td_err_n_;
+            }
+        }
+    }
+    step_lock_frac_   = n_legs_ ? float(locked_n) / float(n_legs_) : 0.0f;
+    step_period_mean_ = per_n   ? per_sum / float(per_n)           : 0.0f;
+}
+
+// Per-tick footfall raster for the live inspector.  Pure observation — see the header for
+// why this is a ring shipped whole rather than accumulated client-side (DiagPublisher
+// throttles to ~30 Hz against a ~52 tick/s brain, which would alias at exactly the
+// touchdown edges the picture exists to show).
+void MotorEPM::update_gait_raster() {
+    if (int(raster_.size()) != kRasterLen) {
+        raster_.assign(kRasterLen, 0);
+        raster_head_ = 0; raster_n_ = 0;
+    }
+    const int nl = std::min(n_legs_, 4);
+    uint16_t w = 0;
+    for (int i = 0; i < nl; ++i) {
+        Leg const& L = legs_[i];
+        if (have_contact_ && int(foot_contact_.size()) == n_legs_ && foot_contact_[i] > 0.5f)
+            w |= uint16_t(1u << i);
+        // The stroke's sign AS COMMANDED, built exactly as the stroke site builds it —
+        // including which phase reference is actually live, so the picture tracks the
+        // lever instead of a fixed assumption about it.
+        if (L.initialized) {
+            const float ph  = (stroke_phase_src_ > 0.0 && L.step_locked) ? L.step_phase : L.phase;
+            const float sgn = (int(stroke_signs_.size()) == n_legs_) ? float(stroke_signs_[i]) : 1.0f;
+            if (sgn * std::sin(ph + float(stroke_phase_)) > 0.0f)
+                w |= uint16_t(1u << (4 + i));
+        }
+        if (int(in_swing_.size()) == n_legs_ && in_swing_[i])
+            w |= uint16_t(1u << (8 + i));
+    }
+    raster_[raster_head_] = w;
+    raster_head_ = (raster_head_ + 1) % kRasterLen;
+    ++raster_n_;
+}
+
 // Per-leg PURCHASE gate for the power stroke.  See the header for why hip1 is the signal
 // (measured: stance/swing load ratio 1.368 hip1 / 1.124 hip2 / 1.011 knee) and why the
 // gate is mean-normalized rather than a plain attenuation.
@@ -1165,7 +1404,15 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
         // stroke_signs folds the per-leg push direction in, so `s` is comparable across
         // legs.  `s > 0` is one half of the stroke; which half is propulsive is what the
         // stance/swing split below reports, rather than something assumed here.
-        const float th  = L.phase + float(stroke_phase_);
+        // The phase the stroke ACTUALLY rides this tick — must follow `stroke_phase_src`,
+        // exactly as the stroke site selects it.  2026-07-27: this originally hard-coded
+        // `L.phase`, so on a step-clock arm the whole alignment diagnostic reported the
+        // LEGACY phase's alignment and `td_plv` read 0.29 where the mechanism guaranteed
+        // ~1.0.  A verification instrument that does not follow the parameter it is
+        // verifying is worse than none: it reads like evidence.  (CLAUDE.md §3.2 rule 5,
+        // one level up — not "did the consumer fire" but "is the instrument watching it".)
+        const float ph_live = (stroke_phase_src_ > 0.0 && L.step_locked) ? L.step_phase : L.phase;
+        const float th  = ph_live + float(stroke_phase_);
         const float sgn = (int(stroke_signs_.size()) == n_legs_) ? float(stroke_signs_[i]) : 1.0f;
         const float s   = sgn * std::sin(th);
 
@@ -1190,6 +1437,21 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
             ga_align_acc_   += double(s) * (con ? 1.0 : -1.0); ++ga_align_n_;
             if (con) { ga_stance_pos_ += (s > 0.0f) ? 1.0 : 0.0; ++ga_stance_n_; }
             else     { ga_swing_pos_  += (s > 0.0f) ? 1.0 : 0.0; ++ga_swing_n_;  }
+            // THE HONEST VERSION OF THE SAME SPLIT.  `s` above is the COMMANDED waveform,
+            // and once the stroke rides a touchdown-referenced clock its stance/swing
+            // split is a deterministic function of stroke_phase and the duty factor —
+            // i.e. a tautology, and useless as evidence for the lock (CLAUDE.md §3.2
+            // rule 1).  This one uses the leg's ACHIEVED fore-aft motion (sgn·Δhip1),
+            // which no amount of re-referencing the command can fake: a working lock
+            // means the foot really does travel backward-relative-to-body while planted
+            // and forward while airborne.  Accumulated for EVERY instrumented arm,
+            // including controls with the lock off — a diag computed inside a lever's own
+            // block reads 0 on exactly the arm you need to compare against.
+            if (L.n > 2) {
+                const double mv = double(sgn) * double(L.x[2]);   // hip1 delta, stroke-signed
+                if (con) { ga_mv_stance_ += mv; ++ga_mv_stance_n_; }
+                else     { ga_mv_swing_  += mv; ++ga_mv_swing_n_;  }
+            }
             if (!ga_prev_contact_[i] && con) {              // TRUE touchdown → the PLV
                 ga_td_cos_ += std::cos(th); ga_td_sin_ += std::sin(th); ++ga_td_n_;
                 if (ga_con_last_[i] >= 0) {                 // the REAL step period
@@ -1221,6 +1483,22 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
                     ++ga_tq_agree_n_;
                 }
                 ga_tq_ema_[i] = (1.0f - kGaEmaAlpha) * ga_tq_ema_[i] + kGaEmaAlpha * ld;
+                // ...and the same test on hip1 ALONE, which is what a load-derived step
+                // clock (stroke_phase_src=2) would actually threshold.  The summed
+                // three-servo `leg_load` measures 0.540 agreement — barely off the 0.5
+                // chance line — but the per-joint stance/swing ratios say hip1 separates
+                // better than the sum (1.368 vs 1.148), so the sum may be diluting the
+                // one joint that carries the signal.  Measuring this costs nothing and
+                // scopes source 2 BEFORE it is built rather than after a failed A/B.
+                if (int(ga_tq_h1_ema_.size()) != n_legs_) ga_tq_h1_ema_.assign(n_legs_, 0.0f);
+                if (int(joint_torque_.size()) == n_legs_ * m) {
+                    const float h1 = std::fabs(joint_torque_[0 * n_legs_ + i]);
+                    if (ga_tq_h1_ema_[i] > 0.0f || h1 > 0.0f) {
+                        ga_tq_h1_agree_ += ((h1 > ga_tq_h1_ema_[i]) == con) ? 1.0 : 0.0;
+                        ++ga_tq_h1_agree_n_;
+                    }
+                    ga_tq_h1_ema_[i] = (1.0f - kGaEmaAlpha) * ga_tq_h1_ema_[i] + kGaEmaAlpha * h1;
+                }
             }
             ga_prev_contact_[i] = con ? 1 : 0;
         }
@@ -1438,6 +1716,13 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     }
     else if (key == "stroke_gain") stroke_gain_ = get_double(value, "stroke_gain");
     else if (key == "stroke_phase") stroke_phase_ = get_double(value, "stroke_phase");
+    else if (key == "stroke_phase_src")    stroke_phase_src_    = get_double(value, "stroke_phase_src");
+    else if (key == "step_phase_debounce") step_phase_debounce_ = get_double(value, "step_phase_debounce");
+    else if (key == "step_period_alpha")   step_period_alpha_   = get_double(value, "step_period_alpha");
+    else if (key == "step_period_min")     step_period_min_     = get_double(value, "step_period_min");
+    else if (key == "step_period_max")     step_period_max_     = get_double(value, "step_period_max");
+    else if (key == "step_phase_lock")    step_phase_lock_     = get_double(value, "step_phase_lock");
+    else if (key == "gait_raster_diag")    gait_raster_diag_    = get_double(value, "gait_raster_diag");
     else if (key == "steer") steer_ = get_double(value, "steer");
     else if (key == "stroke_signs") {
         auto ss = get_double_vec(value, "stroke_signs");
@@ -1949,8 +2234,15 @@ void MotorEPM::tick(uint64_t tick_id) {
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
     if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0 || stance_lift_gain_ != 0.0) update_cruse_state();
+    // Stroke-to-step lock: advance each leg's touchdown-referenced step clock.  Must run
+    // BEFORE the per-leg output loop (the stroke reads L.step_phase) and AFTER the contact
+    // /torque handlers have landed this tick's sensor values.  Skipped entirely at the
+    // default 0, so L.step_phase stays at its init and nothing downstream can read it.
+    if (stroke_phase_src_ > 0.0) update_step_phase(tick_id);
     // Measurement only, and skipped entirely at the default 0 — see the function header.
     if (gait_align_diag_ > 0.0) update_gait_align_diag(tick_id);
+    // Pure observation for the live inspector; skipped entirely at the default 0.
+    if (gait_raster_diag_ > 0.0) update_gait_raster();
     // Purchase gate for the power stroke (needs the cross-leg mean, so once per tick,
     // before the per-leg loop).  Self-guards to gate ≡ 1 when the gain is 0.
     update_stroke_load_gate();
@@ -2283,7 +2575,16 @@ void MotorEPM::tick(uint64_t tick_id) {
             const float load_gate = (int(stroke_gate_.size()) == n_legs_) ? stroke_gate_[leg] : 1.0f;
             float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate
                                 + side * steer_eff);
-            y[0] += (1.0f - pe) * amp * std::sin(L.phase + float(stroke_phase_));
+            // STROKE-TO-STEP LOCK.  The ONLY consumer of L.step_phase: coupling, the
+            // amplitude homeostat and prop-credit all keep the legacy L.phase, so this is
+            // one lever on one consumer (`phase_joint` moved all six at once, which is
+            // part of why its collapse taught us so little).  An EXPLICIT branch, not a
+            // blend — at stroke_phase_src == 0 this selects L.phase and the expression is
+            // the legacy one character for character, so the gain-0 guard holds by
+            // construction rather than by floating-point luck.
+            const float stroke_ph = (stroke_phase_src_ > 0.0 && L.step_locked)
+                                  ? L.step_phase : L.phase;
+            y[0] += (1.0f - pe) * amp * std::sin(stroke_ph + float(stroke_phase_));
         }
         // --- Per-leg propulsive-credit homeostat (functional L/R propulsion balance).
         // Credit = the hip1 motion component phase-aligned with the fore-aft power
@@ -2593,6 +2894,17 @@ nlohmann::json MotorEPM::snapshot_state() const {
         lj["amp_gain"]    = L.amp_gain;
         lj["hip1_dc"]     = L.hip1_dc;
         lj["prop_credit"] = L.prop_credit;
+        // Stroke-to-step lock.  Serialized because the step clock IS control state when
+        // stroke_phase_src > 0 — a restored clone that dropped it would re-enter the
+        // pre-lock fallback and silently walk on L.phase for a couple of strides.
+        lj["step_phase"]   = L.step_phase;
+        lj["step_per_ema"] = L.step_per_ema;
+        lj["step_omega"]   = L.step_omega;
+        lj["last_td_tick"] = L.last_td_tick;
+        lj["td_count"]     = L.td_count;
+        lj["td_run"]       = L.td_run;
+        lj["td_contact"]   = L.td_contact;
+        lj["step_locked"]  = L.step_locked;
         lj["rest_captured"] = L.rest_captured;
         if (L.rest_captured)
             lj["rest_pos"] = std::vector<float>(L.rest_pos.data(), L.rest_pos.data() + L.rest_pos.size());
@@ -2692,6 +3004,12 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["ga_tq_swing"]    = ga_tq_swing_;    mod["ga_tq_swing_n"]  = ga_tq_swing_n_;
     mod["ga_tq_agree"]    = ga_tq_agree_;    mod["ga_tq_agree_n"]  = ga_tq_agree_n_;
     mod["ga_tq_ema"]      = ga_tq_ema_;
+    mod["ga_tq_h1_agree"] = ga_tq_h1_agree_; mod["ga_tq_h1_agree_n"] = ga_tq_h1_agree_n_;
+    mod["ga_tq_h1_ema"]   = ga_tq_h1_ema_;
+    mod["ga_mv_stance"]   = ga_mv_stance_;   mod["ga_mv_stance_n"] = ga_mv_stance_n_;
+    mod["ga_mv_swing"]    = ga_mv_swing_;    mod["ga_mv_swing_n"]  = ga_mv_swing_n_;
+    mod["step_td_err_acc"] = step_td_err_acc_; mod["step_td_err_n"] = step_td_err_n_;
+    mod["step_lock_flips_state"] = step_lock_flips_;
     mod["ga_tq_j_stance"] = ga_tq_j_stance_;  mod["ga_tq_j_stance_n"] = ga_tq_j_stance_n_;
     mod["ga_tq_j_swing"]  = ga_tq_j_swing_;   mod["ga_tq_j_swing_n"]  = ga_tq_j_swing_n_;
     {   // derived per-joint separation, for the body's stdout diag
@@ -2719,6 +3037,23 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["stroke_pos_swing"]  = ga_swing_n_  ? ga_swing_pos_  / double(ga_swing_n_)  : 0.0;
     mod["contact_duty"]      = ga_contact_n_ ? ga_contact_acc_ / double(ga_contact_n_) : 0.0;
     mod["torque_agree"]      = ga_tq_agree_n_ ? ga_tq_agree_ / double(ga_tq_agree_n_) : 0.0;
+    // NOTE FOR ANYONE ADDING AN INSTRUMENT: the body's stdout diag reads
+    // `brain.get_module_metrics()`, which is fed from THIS `mod` dict — NOT from
+    // diag_snapshot().  A field added only to diag_snapshot() reaches the live inspector
+    // but reads as 0.0 in every headless run and every scripts_tools/ harness, which looks
+    // exactly like "the mechanism never fired".  Add new instruments in BOTH places.
+    mod["torque_agree_hip1"] = ga_tq_h1_agree_n_ ? ga_tq_h1_agree_ / double(ga_tq_h1_agree_n_) : 0.0;
+    mod["mv_stance"]         = ga_mv_stance_n_ ? ga_mv_stance_ / double(ga_mv_stance_n_) : 0.0;
+    mod["mv_swing"]          = ga_mv_swing_n_  ? ga_mv_swing_  / double(ga_mv_swing_n_)  : 0.0;
+    mod["step_lock"]         = step_lock_frac_;
+    mod["step_period"]       = step_period_mean_;
+    mod["step_td_err"]       = step_td_err_n_ ? step_td_err_acc_ / double(step_td_err_n_) : 0.0;
+    // How often a leg's stroke phase reference SWAPS between the step clock and the
+    // L.phase fallback.  A lever that locks intermittently is worse than one that never
+    // locks: every swap is a discontinuity in the driven command, which is the failure the
+    // soft PLL exists to prevent — so this number decides whether a collapse is "the clock
+    // is wrong" or "the clock keeps being taken away".
+    mod["step_lock_flips"]   = step_lock_flips_;
     mod["torque_stance"]     = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
     mod["torque_swing"]      = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
     mod["explore_mult"]      = explore_mult_diag_;
@@ -2853,6 +3188,18 @@ nlohmann::json MotorEPM::diag_snapshot() const {
                                 ? (ga_tq_stance_ / double(ga_tq_stance_n_))
                                   / ((ga_tq_swing_ / double(ga_tq_swing_n_)) + 1e-6) : 0.0;
         j["torque_agree"]       = ga_tq_agree_n_ ? ga_tq_agree_ / double(ga_tq_agree_n_) : 0.0;
+        // The same test on hip1 ALONE — the signal a load-derived step clock
+        // (stroke_phase_src=2) would actually threshold.  Scopes that source before it is
+        // built: at chance, source 2 cannot work no matter how the rest is tuned.
+        j["torque_agree_hip1"]  = ga_tq_h1_agree_n_ ? ga_tq_h1_agree_ / double(ga_tq_h1_agree_n_) : 0.0;
+        // THE NON-TAUTOLOGICAL MECHANISM INSTRUMENT for the stroke-to-step lock: the same
+        // stance/swing split on the ACHIEVED fore-aft motion rather than the commanded
+        // waveform.  A working lock means mv_stance is negative (the planted foot travels
+        // backward relative to the body = it is pushing) while mv_swing is positive (the
+        // airborne foot is being carried forward), and their SEPARATION is the number to
+        // read.  Both ≈ 0, or equal, means the leg is scrubbing whatever the command says.
+        j["mv_stance"]          = ga_mv_stance_n_ ? ga_mv_stance_ / double(ga_mv_stance_n_) : 0.0;
+        j["mv_swing"]           = ga_mv_swing_n_  ? ga_mv_swing_  / double(ga_mv_swing_n_)  : 0.0;
         // Per-joint separation: which servo actually reports being loaded?  hip1 does
         // fore-aft work in both phases, so a whole-leg sum can dilute a clean hip2/knee
         // signal.  This picks the input for a load-gated stroke by measurement.
@@ -2879,6 +3226,35 @@ nlohmann::json MotorEPM::diag_snapshot() const {
         j["period_knee_legs"]   = ga_knee_per_;
         j["period_foot_legs"]   = ga_foot_per_;
         j["period_contact_legs"] = ga_con_per_;
+    }
+    // STROKE-TO-STEP LOCK observability (CLAUDE.md §3.2 rule 5).  `step_lock` is the
+    // consumer check: 0 with stroke_phase_src > 0 means the clock never locked, which on
+    // this stack means contact_topic (or torque_topic) is unwired and the stroke is
+    // silently still riding L.phase — i.e. the arm you think you ran did not load.
+    j["step_phase_src"]  = stroke_phase_src_;
+    j["step_lock"]       = step_lock_frac_;      // frac of legs with a locked step clock
+    j["step_period"]     = step_period_mean_;    // mean measured step period, ticks (~26-30)
+    // Mean |phase error at touchdown|, radians.  0 = the clock predicts footfall exactly;
+    // ~pi/2 = it is fighting the body.  The NON-tautological lock-quality read (the pull
+    // is partial, so this is earned rather than imposed) — unlike td_plv, which a
+    // touchdown-referenced phase satisfies by construction.
+    j["step_td_err"]     = step_td_err_n_ ? step_td_err_acc_ / double(step_td_err_n_) : 0.0;
+    j["step_lock_flips"] = step_lock_flips_;
+    {   // per-leg phase, for the UI and for spotting one leg that never locks
+        std::vector<double> sp; sp.reserve(legs_.size());
+        for (auto const& L : legs_) sp.push_back(L.step_locked ? double(L.step_phase) : -1.0);
+        j["step_phase_legs"] = sp;               // −1 = that leg is still on L.phase
+    }
+    // Footfall raster for the live inspector — shipped whole (see update_gait_raster).
+    // Unrolled OLDEST-FIRST so the widget can draw it left-to-right without knowing the
+    // ring's head, and truncated to what has actually been written.
+    if (gait_raster_diag_ > 0.0 && int(raster_.size()) == kRasterLen) {
+        const int n = int(std::min<int64_t>(raster_n_, kRasterLen));
+        std::vector<int> out; out.reserve(n);
+        for (int k = 0; k < n; ++k)
+            out.push_back(int(raster_[(raster_head_ - n + k + 2 * kRasterLen) % kRasterLen]));
+        j["gait_raster"]      = out;    // bits 0-3 contact, 4-7 stroke sign, 8-11 in_swing
+        j["gait_raster_legs"] = std::min(n_legs_, 4);
     }
     // Is the coordination probe already annealed by progress→commit?  If this sits at 0
     // on flat ground then a precision gate on the same σ would be a TAUTOLOGY, and
@@ -3040,6 +3416,17 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         L.amp_gain   = lj.value("amp_gain", 1.0f);
         L.hip1_dc    = lj.value("hip1_dc", 0.0f);
         L.prop_credit = lj.value("prop_credit", 0.0f);
+        // Stroke-to-step lock (absent in older snapshots → the Leg{} defaults, i.e. the
+        // clock re-locks from the next two touchdowns and the stroke uses L.phase until
+        // then, which is the same safe fallback a cold start takes).
+        L.step_phase   = lj.value("step_phase",   0.0f);
+        L.step_per_ema = lj.value("step_per_ema", 0.0f);
+        L.step_omega   = lj.value("step_omega",   0.0f);
+        L.last_td_tick = lj.value("last_td_tick", int64_t(-1));
+        L.td_count     = lj.value("td_count",     int32_t(0));
+        L.td_run       = lj.value("td_run",       int32_t(0));
+        L.td_contact   = lj.value("td_contact",   true);
+        L.step_locked  = lj.value("step_locked",  false);
         if (lj.contains("babble_rng")) {
             std::istringstream is(lj["babble_rng"].get<std::string>()); is >> L.babble_rng;
         }
@@ -3135,6 +3522,16 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         ga_tq_swing_n_  = mod.value("ga_tq_swing_n",  ga_tq_swing_n_);
         ga_tq_agree_    = mod.value("ga_tq_agree",    ga_tq_agree_);
         ga_tq_agree_n_  = mod.value("ga_tq_agree_n",  ga_tq_agree_n_);
+        ga_tq_h1_agree_   = mod.value("ga_tq_h1_agree",   ga_tq_h1_agree_);
+        ga_tq_h1_agree_n_ = mod.value("ga_tq_h1_agree_n", ga_tq_h1_agree_n_);
+        if (mod.contains("ga_tq_h1_ema")) ga_tq_h1_ema_ = mod["ga_tq_h1_ema"].get<std::vector<float>>();
+        ga_mv_stance_   = mod.value("ga_mv_stance",   ga_mv_stance_);
+        ga_mv_stance_n_ = mod.value("ga_mv_stance_n", ga_mv_stance_n_);
+        ga_mv_swing_    = mod.value("ga_mv_swing",    ga_mv_swing_);
+        ga_mv_swing_n_  = mod.value("ga_mv_swing_n",  ga_mv_swing_n_);
+        step_td_err_acc_ = mod.value("step_td_err_acc", step_td_err_acc_);
+        step_td_err_n_   = mod.value("step_td_err_n",   step_td_err_n_);
+        step_lock_flips_ = mod.value("step_lock_flips_state", step_lock_flips_);
         if (mod.contains("stroke_load_ema")) stroke_load_ema_ = mod["stroke_load_ema"].get<std::vector<float>>();
         if (mod.contains("ga_yaw_leg"))   ga_yaw_leg_   = mod["ga_yaw_leg"].get<std::vector<double>>();
         if (mod.contains("ga_yaw_leg_n")) ga_yaw_leg_n_ = mod["ga_yaw_leg_n"].get<std::vector<int64_t>>();

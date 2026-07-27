@@ -50,6 +50,19 @@ const _SLIDERS: Array = [
 	# Purchase gate on the power stroke. Needs torque_topic wired (ConstructionOnly, so
 	# this slider cannot supply it -- use a loadstroke config arm). 0 = off.
 	{"key": "stroke_load_gain",  "label": "stroke_load (purchase gate)", "min": 0.0, "max": 8.0, "step": 0.5},
+	# 2026-07-27 — stroke TIMING, live.  `stroke_phase` never had a slider even though it is
+	# the sharpest knob on the whole gait: the deployed -2.85 sits in a good window only
+	# ~90 deg wide, and both cardinal offsets outside it (0, pi/2) collapse the gait to
+	# net_z ~0.  Pair this with the inspector's Gait-raster tab (gait_raster_diag=1) and the
+	# push band can be slid into alignment with stance BY EYE, which is the tightest loop
+	# available for a timing lever.
+	{"key": "stroke_phase",      "label": "stroke_phase (push timing)", "min": -3.14, "max": 3.14, "step": 0.05},
+	# Phase SOURCE. 0 = the leg's own oscillator phase (deployed). 1 = a touchdown-referenced
+	# step clock, 2 = the same from hip1 load.  1 and 2 are REFUTED as gait levers (net_z
+	# 4.58 -> 0.20 at the deployed offset, refuted across the full circle against a matched
+	# control row) -- kept on the panel because flipping it live against the raster is the
+	# clearest demonstration of WHY: the legs keep stepping and the body stops moving.
+	{"key": "stroke_phase_src",  "label": "phase src: 0=leg 1=contact 2=load", "min": 0.0, "max": 2.0, "step": 1.0},
 	# Swing tuck: the mirror of stance_lift -- folds hip2+knee on legs that are OFF the
 	# ground so sweeping them forward stops spinning the chassis. Needs contact_topic.
 	# Tibia-plumb: hip2 nulls the shank's deviation from vertical so the knee's drive

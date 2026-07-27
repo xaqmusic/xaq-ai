@@ -468,6 +468,66 @@ recurs at every layer.
 
 ## 8. Process discipline
 
+- **★ IF A LEVER FORCES A SECOND PARAMETER TO BE RE-TUNED, YOU MUST SWEEP THE CONTROL ON THAT
+  PARAMETER TOO — otherwise the sweep measures the second parameter.** Changing a controller's
+  *phase reference* made its existing phase *offset* meaningless, so every arm in the sweep
+  necessarily changed two things at once. All four offsets collapsed, and the obvious reading
+  ("refuted across the circle") was **wrong**: the matched control row — the OLD reference at
+  the SAME four offsets — collapsed at two of them as well, because the deployed offset sat in
+  a good window only ~90° wide. Without that row the lever would have been recorded as refuted
+  *without ever having been tested*, and the real result (a clean one-parameter A/B at the
+  deployed offset: 4.58 → 0.20) would have been missed. **A sweep is not a control.** The rule:
+  when the treatment forces a companion parameter to move, the design is a **grid**, and the
+  comparison that isolates your lever is *treatment-best vs control-best*, or treatment vs
+  control **at matched companion values** — never treatment-swept against a single control point.
+- **★ A SWEEP THAT IS FLAT WHERE THE CONTROL'S SWEEP IS STRUCTURED MEANS THE MECHANISM NEVER
+  ENGAGED — not that it has no good setting.** A phase-offset sweep on the new mechanism read
+  0.20–0.69 at all eight offsets while the same sweep on the incumbent varied −0.13 → 4.62.
+  That was recorded as "no good region exists"; it was the signature of a **disengaged**
+  lever, because an offset does nothing when the phase it offsets is not locked. The
+  mechanism instruments later confirmed it (phase-lock value 0.04–0.10 — near-uniform — at
+  every loop gain). **Flatness across a parameter that demonstrably matters elsewhere is
+  evidence your consumer is inert**, and it is a cheaper tell than any dedicated instrument,
+  because it comes free with the sweep you were already running. Corollary: **always sweep the
+  control on the same axis**, or you have nothing to compare the flatness against.
+- **★ AN INSTRUMENT THAT MEASURES YOUR OWN CORRECTOR IS NOT A MEASURE OF THE THING.** Phase
+  error was sampled *after* the corrective pull was applied, so it understated the true error
+  by (1 − gain) and appeared to improve monotonically as loop gain rose (1.39 → 0.47 rad)
+  while the underlying error was flat (≈1.55 rad at every gain). The "improvement" was the
+  corrector being applied harder, nothing more. **Sample error BEFORE the correction, or
+  report both** — and be suspicious of any diagnostic that improves in lockstep with the knob
+  that is supposed to fix it, since that is what a tautology looks like from the inside.
+- **★ AN INSTRUMENT MUST FOLLOW THE PARAMETER IT VERIFIES, AND MUST REACH THE HARNESS THAT
+  READS IT.** Two independent versions of the same failure, one build apart. (1) The alignment
+  diagnostic hard-coded the *legacy* signal, so on an arm running the new one it faithfully
+  measured the thing that had not changed. (2) New fields were added to the live-inspector
+  snapshot but not to the metrics dict the headless harness reads, so every scripted run
+  reported them as **0.0** — indistinguishable from "the mechanism never fired", which was
+  very nearly the conclusion drawn. §3.2 rule 5 is usually read as *did the consumer fire?*;
+  it has a prior clause: ***is the instrument watching the thing you changed, in the process
+  you are running?*** Verify a new instrument reports non-zero on an arm where it must, before
+  trusting a zero anywhere else.
+- **★ WHEN FIXING A MEASURED MISALIGNMENT MAKES THINGS WORSE, LOOK FOR THE ALIGNMENT YOU
+  DESTROYED.** A quantity was measured wrong and the fix was correct on its own terms — thrust
+  and support were genuinely uncorrelated within a limb, and locking them fixed exactly that.
+  Performance fell 96 %. The broken thing had an **unmeasured virtue**: all four limbs' thrust
+  shared one reference, so their pushes were coherent *with each other*; per-limb locking made
+  them independent and they cancelled. The diagnostic signature was there in the metrics —
+  effort UP (feet planted 3.69 → 3.90, step count unchanged), output DOWN — which is
+  "everything is working and nothing is happening", the shape of cancellation rather than of
+  weakness. **Before replacing a signal that many consumers share, ask what the SHARING was
+  buying, not only what the signal was getting wrong.**
+- **★ A PHASE THAT *DRIVES* A CONTINUOUS COMMAND NEEDS A SOFT PULL; A PHASE THAT IS ONLY *READ*
+  CAN TAKE A RESET.** The same "touchdown-referenced clock" algorithm existed in two modules for
+  two purposes. The one that indexes a discrete bin SNAPS its phase to zero at each event —
+  harmless, because a lookup has no derivative. The one that drives an oscillator integrates
+  `φ += ω` and applies a **0.10 proportional pull** at the event. Porting the snapping version
+  into a driving role stepped the motor command at every off-schedule event and convulsed the
+  body. **And a second trap in the same place:** closing a control loop "through the world"
+  rather than algebraically is *not automatically safe* — here the action could itself trigger
+  the very **event** that reset the phase, which is positive feedback with a physical delay
+  instead of an instantaneous one. Ask not only "does my signal depend on my output?" but
+  "**can my output trigger the event that sets my reference?**"
 - **★ A SCENARIO CAN SUPPRESS THE FAILURE YOU ARE TRYING TO FIX — check the environment's
   geometry before trusting the metric.** Every measurement tool in a legged-robot project defaulted
   to a corridor gym, and that corridor was built *"inside self-centering 30° walls"*: the geometry
@@ -492,6 +552,24 @@ recurs at every layer.
   accumulates against them*, and *put the check in the tool*: emit a loud warning naming the
   offending seeds rather than relying on anyone to remember. A standard protocol's run length
   is often an undocumented boundary constraint — find out before you "improve" on it.
+  **★ Follow-on (same project, later): the run length was not even being ENFORCED.** The
+  episode-step counter was zeroed by the auto-reset that fires on inversion, so an arm that
+  kept flipping restarted its own countdown forever — seeds ended at ticks 13 407 and 72 043
+  against a 6 000-tick protocol while the healthy baseline ended at exactly 6 000. Every
+  *count* (falls, steps) silently became a count-per-unequal-duration, comparable neither to
+  the baseline nor between seeds. **Note the bias direction, which is the insidious part: the
+  cost lands in proportion to how badly an arm fails, so the worse a lever is the longer it
+  takes to find out** — a harness that quietly discourages running the sweeps that would refute
+  things. Rules: **terminate on a monotonic clock, never on a counter that any recovery path
+  can reset**, and **print the realized duration next to every result** so a mismatch is
+  visible rather than inferred. Verify the fix is byte-identical on an arm that never triggers
+  the recovery path.
+- **★ A TOOL THAT PREVENTS SILENT CONFOUNDS CAN BE ONE.** The A/B arm generator parsed its own
+  `--allow-noop` *flag* as a `key=value` and wrote a bogus parameter into the config; unknown
+  parameters are ignored downstream, so that arm would have run and reported normally. It was
+  caught **only because the tool prints its diff** — which is precisely why it prints one.
+  *Rigor tools need the rigor applied to themselves, and "show me what you actually changed"
+  is the cheapest form of it.*
 - **Predictable env for measurable epistemic foraging.** Epistemic foraging — acting to
   resolve uncertainty about *where food is* — is intrinsically MESSY. To measure learning,
   the environment must be PREDICTABLE: deterministic structure the agent can come to KNOW

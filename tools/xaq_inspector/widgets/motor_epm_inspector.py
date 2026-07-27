@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import QLabel, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
 from ._multi_series import MultiSeriesPlot, Series
 from .epm_pca_scatter import EpmPcaScatter
+from .gait_raster import GaitRaster
 from .motor_selfmodel_graph import MotorSelfModelGraph
 
 
@@ -172,7 +173,11 @@ class MotorEpmInspector(QWidget):
         self._pca   = EpmPcaScatter()
         self._graph = MotorSelfModelGraph()
         self._amatrix = _AMatrix()
+        self._raster = GaitRaster()
         self._model_tabs = QTabWidget()
+        # Gait first: it is the tab you want open while WATCHING the robot, and the
+        # only view that shows whether thrust is landing on the ground.
+        self._model_tabs.addTab(self._raster,  "Gait raster")
         self._model_tabs.addTab(self._pca,     "Model PCA")
         self._model_tabs.addTab(self._graph,   "Model graph")
         self._model_tabs.addTab(self._amatrix, "A matrix")
@@ -193,6 +198,7 @@ class MotorEpmInspector(QWidget):
         if not isinstance(snapshot, dict):
             return
         self._series.update_payload(snapshot)
+        self._raster.update_payload(snapshot)
         self._pca.update_payload(tick_id, snapshot)
         self._graph.update_payload(snapshot)
         self._amatrix.update_payload(snapshot)

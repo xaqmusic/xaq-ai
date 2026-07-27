@@ -10,7 +10,14 @@ narrative + architecture), [`../plans-and-designs/picrawler_active_inference_pla
 (the plan), [`../brain_building_doctrine.md`](../brain_building_doctrine.md) (the method),
 [`../../CLAUDE.md`](../../CLAUDE.md) (the A/B protocol this ledger's verdicts were produced under).*
 
-**Last updated: 2026-07-25.** Status as of `picrawler-dev` ~`92a2b47`.
+**Last updated: 2026-07-27.** Status as of `picrawler-dev` ~`ea9265b` + the stroke-to-step
+lock work below.
+
+> ⚠️ **Every corridor number recorded before 2026-07-27 is from a DIFFERENT GYM.** The
+> corridor's back wall was a vertical seal a robot could park against, and its far end
+> dropped off the world; both are now 30° self-centering ramps. Re-measured deployed
+> baseline (corridor, n=4, 6000 ticks): net_z **4.58 ± 0.27**, straight 0.73, flat_v 0.05,
+> step_bal 0.48, tilt_sd 0.065, planted 3.69, 0 falls. See the harness-defects box in §2.
 
 ---
 
@@ -663,6 +670,172 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★ 2026-07-27 — LOCKING THE STROKE TO THE STEP: the CLOCK NEVER ENTRAINED, so the lever is `DEFERRED`, not refuted
+
+> #### ⚠️ READ THIS FIRST — the verdict below was written as `REGRESSION` and is CORRECTED
+>
+> The behavioural numbers are real and reproducible: driving the stroke from this step clock
+> costs net_z **4.58 → 0.20** at the deployed offset, one parameter, n=4. **But the mechanism
+> instruments — once their own plumbing was fixed — say the clock was never phase-locked to
+> anything.** `td_plv` sits at **0.04–0.10** (near-uniform: touchdown lands at a random stroke
+> phase) at every loop gain from 0.1 to 0.7, and the true entrainment error is ≈**1.55 rad**
+> throughout. The clock RAN (`step_lock` 1.0, all four legs, only 4–15 lock/unlock flips per
+> 3 000 ticks) — it just free-ran near the right frequency while a weak pull failed to close a
+> persistent phase error.
+>
+> **So the stroke rode a phase that was neither the leg's own state nor locked to the step —
+> worst of both worlds.** That is `CLAUDE.md` §3.2 rule 6 (*faithfulness: did you build the
+> mechanism or a weakened slice of it?*), and it means **the lever as specified has not been
+> tested.** `DEFERRED`, with the strong caveat that what WAS tested is decisively bad.
+>
+> **The tell was in the sweep and I misread it.** The src=1 row is FLAT across all 8 offsets
+> (0.20–0.69) while the src=0 control row varies enormously (−0.13 → 4.62). **A sweep that is
+> flat where the control's sweep is structured means the swept parameter has no effect** — an
+> offset does nothing when the phase it offsets is not locked. I read that flatness as "no good
+> region exists"; it was the signature of a mechanism that never engaged.
+>
+> **Two instrument failures made this hard to see, both mine, both now fixed:**
+> 1. `update_gait_align_diag` hard-coded `L.phase`, so on a step-clock arm the whole alignment
+>    diagnostic reported the LEGACY phase's alignment. *Not "did the consumer fire?" but "is my
+>    verification instrument watching the thing I changed?"*
+> 2. `step_lock`/`mv_stance`/`torque_agree_hip1` were added to `diag_snapshot()` only. The body's
+>    stdout reads `get_module_metrics()`, fed from the `mod` dict in `snapshot_state()` — so they
+>    read **0.0 in every headless run**, which is indistinguishable from "the mechanism never
+>    fired." **Add a new instrument in BOTH places.**
+> 3. `step_td_err` is sampled AFTER the phase pull, so it understates the true error by
+>    (1 − gain) and *looked* like it improved monotonically with loop gain (1.39 → 0.47) when
+>    dividing the corrector out shows a flat ≈1.55 rad. **An instrument that measures your own
+>    corrector is not a measure of lock.** `td_plv` is the honest read.
+>
+> **What to do next, concretely:** make the clock actually entrain before judging the idea —
+> the frequency estimate, not the phase pull, is the suspect (`step_period` reads 23.6 ticks
+> against a true contact period of 26–28). Then re-run this sweep. Everything below stands as
+> a record of what was measured; only the *verdict* changes.
+
+**§5's headline lever, built and refuted.** The 2026-07-26 finding measured thrust and support
+unlocked *within* a leg (`pos_stance` 0.512 vs `pos_swing` 0.513, three clocks beating at
+~2.5 s) and named the fix: give the stroke a phase it does not itself drive. Built as
+`stroke_phase_src` — a per-leg touchdown-referenced step clock, φ=0 AT touchdown, consumed at
+the stroke site ONLY (coupling, amplitude homeostat and prop-credit keep the legacy
+`L.phase`, so this is one lever on one consumer — the isolation `phase_joint=0` lacked).
+
+#### The clean result: ONE parameter, 96 % of locomotion
+
+| corridor, n=4, 6000 ticks, ψ = −2.85 (the deployed offset) | net_z | straight | falls | planted |
+|---|---|---|---|---|
+| **src=0** — legacy `L.phase` (= the deployed config) | **4.58 ± 0.27** | 0.73 | 0.00 | 3.69 |
+| **src=1** — contact-referenced step clock | **0.20 ± 0.33** | 0.05 | 1.00 | 3.90 |
+
+Identical in every other respect. The consumer demonstrably fired — it destroyed the gait.
+
+#### It is not an offset miss: the FULL CIRCLE was swept, with a matched control row
+
+The first sweep was **uninterpretable and is retracted**: each arm changed *two* parameters
+(`stroke_phase_src` **and** `stroke_phase`, because −2.85 was tuned against the knee-derived
+phase and does not transfer). Adding the src=0 control row at the same offsets is what made
+the result readable, and it changed the reading completely.
+
+| `stroke_phase` | src=0 (legacy `L.phase`) | src=1 (step clock) |
+|---|---|---|
+| 0 | 0.28 | 0.38 |
+| π/2 | −0.13 | 0.33 |
+| **π** | **4.37 ± 0.30** | 0.40 |
+| **−π/2** | **4.62 ± 1.96** | 0.69 |
+| **−2.85 (deployed)** | **4.58 ± 0.27** | **0.20** |
+
+**Legacy has a BROAD good window** (π → −π/2, ~90° wide, containing −2.85); **the step clock
+never exceeds 0.69 at any offset tested.** The control row is load-bearing: at ψ=0 and ψ=π/2
+*both* sources collapse, so the cardinal-offset arms alone would have "refuted" a lever that
+had not been tested.
+
+#### Why: a hidden virtue in the thing being "fixed"
+
+`planted` rises 3.58–3.69 → **3.85–3.91** in every step-clock arm while progress collapses:
+the legs keep stepping (`steps` ≈ 48–54, as the baseline) and push, and the body does not
+move. Best reading: **the unlocked stroke's virtue was COHERENCE ACROSS LEGS.** All four
+strokes previously shared one reference — each leg's knee oscillation, mutually coupled by
+Kuramoto on `L.phase`. Locking each leg's stroke to *its own* footfall makes the four thrusts
+independent, and independent thrusts on a body whose `gait_phase` is a measured random walk
+cancel. The within-leg misalignment was real; removing it cost a between-leg alignment nobody
+had measured.
+
+**`L.phase` is not a clock — it is a STATE OBSERVATION.** `atan2(joint velocity, joint
+deviation)` is where the leg *is* in its own oscillation, re-derived every tick, so the stroke
+riding it is a resonant drive reinforcing what the leg already does. Any external timebase,
+however well locked to footfall, trades feedback for feedforward — *LEARNED cooperates,
+IMPOSED fights* (CLAUDE.md §1).
+
+#### A separate, generalizable lesson: HOW the phase is corrected, not just where it comes from
+
+The first implementation SNAPPED `step_phase = 0` at touchdown. It did not merely
+underperform — it convulsed the body (repeated inversion, `tilt_sd` 0.065 → 0.34). Two
+compounding causes: **(1)** the stroke can *cause* touchdowns, so resetting phase *on*
+touchdown is positive feedback — a push bounces the foot, the bounce re-triggers the reset,
+the period estimate runs to its rail. Closing a loop "through the world" is only safe when the
+stroke cannot trigger the phase-setting **event**. **(2)** `sin(φ + stroke_phase)` is a
+*continuous motor command*, so snapping φ steps the command at every off-schedule footfall.
+
+The repo already held the fix, in the module §6's re-use context had named: BodyRhythmTracker
+does `φ += ω` with a **0.10 proportional pull** at each crossing. SynergyTimer (which this was
+ported from) *does* snap — correctly, because its phase only INDEXES a discrete bin.
+
+> **A phase that DRIVES a continuous command needs a soft pull; a phase that is only READ to
+> index a discrete bin can take a reset.**
+
+`step_phase_lock` = 0.10 default, **1.0 reproduces the snap** so that refutation stays
+reproducible rather than becoming folklore. All numbers above are the *corrected* PLL form —
+the snap form is worse everywhere.
+
+#### Instruments added (all default-off, gain-0 guard verified byte-identical by measurement)
+
+`stroke_phase_src` · `step_phase_lock` · `step_phase_debounce` · `step_period_alpha/_min/_max`
+· `gait_raster_diag` (512-tick footfall ring → live Hildebrand plot in `xaq_inspector`, the
+picture that makes stroke-vs-step visible while the robot walks) · `mv_stance`/`mv_swing`
+(the stance/swing split on **achieved** hip1 motion — the non-tautological read, since a
+touchdown-referenced phase satisfies `td_plv`/`pos_stance` *by construction*) ·
+`step_td_err` · `torque_agree_hip1`. Unit tests 16/16 → **24/24**.
+
+**Re-use context.** Retry when the phase is contact-referenced **AND shared across legs** — a
+body-level step phase with per-leg offsets, i.e. `BodyRhythmTracker`'s `rhythm.body.gait`,
+which §6 already named as *"built for exactly this"* and which this campaign ranked last. The
+objection to it (its collective coordinate is built from hip1, the joint the stroke drives)
+now looks much weaker than the inter-leg coherence it would preserve. Also still open: leave
+the stroke on `L.phase` and instead **entrain `L.phase` itself** toward the contact rhythm
+with a weak pull, so the leg *and every consumer of its phase* lock to footfall together —
+giving the oscillator a prediction to fulfil rather than imposing a clock on one consumer
+(§5.7).
+
+---
+
+### ⚠️ 2026-07-27 — THREE HARNESS/GYM DEFECTS THAT WERE SILENTLY CORRUPTING MEASUREMENTS
+
+Found while running the above. Each is fixed, and each invalidated real numbers.
+
+| Defect | What it did | Fix |
+|---|---|---|
+| **Corridor back wall was a VERTICAL seal** | a robot that turned round parked against it with no escape, *while still accumulating `fwd_v`* — a trapped body reading as "walking" (the blind-metric shape, §3 rule 4) | 30° self-centering ramp, as the side walls; containment verified by teleport at both ends |
+| **Corridor +Z end simply DROPPED OFF** | fast arms walked off the world and were charged a `fall` (already recorded in §4) | 30° ramp; the far end is now contained rather than open |
+| **★ `auto_reset` zeroes `step_in_episode`, so continuous-mode runs never reached `max_steps`** | an arm that keeps flipping **restarts its own countdown forever**. Measured on the snap-form p0 arm: seeds ended at ticks **13 407 and 72 043** against a 6 000-tick protocol, while the healthy baseline ended at exactly 6 000. Every COUNT (`falls`, `steps`) becomes counts-per-unequal-duration, so arms are comparable neither to the baseline nor to each other | terminate on the monotonic `tick_counter`; **byte-identical for any arm that never auto-resets**, verified on the baseline (all 17 metrics, `step_in_episode == tick == 6000`) |
+
+**The third one's bias is the dangerous kind**: it costs wall-clock *in proportion to how badly
+an arm fails*, so the worse a lever is the longer it takes to find out — which quietly
+discourages running the sweeps that would refute things. It was caught only because it
+corrupted a result of ours that we then checked.
+
+**Also fixed: `mkarm.py` parsed its own `--allow-noop` FLAG as a `key=value`** and wrote a bogus
+`"--allow-noop"` param into the arm config. `MotorEPM::apply_param` ignores unknown keys, so
+that arm would have run silently — *a silent-confound generator inside the one tool whose job
+is preventing silent confounds*. Caught only because `mkarm` prints its diff, which is what
+that printing is for.
+
+**⚠️ Every corridor number in this ledger predates the wall fix and is from a different gym.**
+The deployed baseline re-measured in the fixed corridor (n=4, 6000): net_z **4.58 ± 0.27**
+(was 4.75 ± 0.29), straight 0.73, flat_v 0.05, step_bal 0.48, tilt_sd 0.065, planted 3.69,
+0 falls. The change is within ~0.6 σ because a 4.6 m walker never reaches either end wall —
+the fix protects **fast** arms, i.e. exactly the ones a propulsion lever exists to produce.
+
+---
+
 ## 5. Open frontier
 
 - **Fast flat traversal, belly-up** — still the active thread. ~~bake `stance_lift=0.5` into
@@ -739,6 +912,20 @@ reduction is the part that appears in both gyms. Not promoted.
   is reset rather than left to thrash — meaning **the protection may be the auto-reset, not
   the fitness penalties.** If so it is a fragile dependency: disabling auto-reset could bring
   the old failure straight back. Worth testing directly before trusting the ratchet.
+- **★ LOCK THE STROKE TO THE STEP — BUILT 2026-07-27; the build is `DEFERRED`, the IDEA is
+  still open.** Driving the stroke from a per-leg touchdown-referenced clock costs net_z
+  **4.58 → 0.20** (one parameter, full circle vs a matched control row) — **but the clock was
+  measured never to entrain** (`td_plv` 0.04–0.10 at every loop gain; true phase error ≈1.55
+  rad), so that number refutes *this build*, not the lever. See the boxed entry in §2 for the
+  full record and the three instrument failures that hid it.
+  **Concrete next steps, in order:** (1) fix the FREQUENCY estimate so the clock actually
+  entrains (`step_period` reads 23.6 against a true contact period of 26–28) and re-run the
+  sweep — only then is the lever tested; (2) if it still fails, try a phase that is
+  contact-referenced *and shared across legs* (`rhythm.body.gait` + `gait_phase` offsets),
+  since a per-leg clock also removes the inter-leg coherence the four strokes had via
+  Kuramoto on `L.phase` (`planted` rose 3.69 → 3.90 while progress collapsed — effort up,
+  output down); (3) or leave the stroke on `L.phase` and **entrain `L.phase` itself** toward
+  the contact rhythm, so every consumer locks together. The original entry follows.
 - **★ LOCK THE STROKE TO THE STEP — the sharpest lever the record now points at.** The
   boxed finding above measured the stroke riding a ~23-tick knee-derived clock while the leg
   steps every ~29 ticks, beating at ~2.5 s. The fix is to derive the phase the stroke rides
@@ -771,7 +958,8 @@ proposals, not dead entries.*
 | Lever | Refuted in | Try again when |
 |---|---|---|
 | **Lateral-sequence walk phasing** | ~~only ever measured inside the rejected sequencer~~ — **DONE 2026-07-25: isolated on the `embed`+stance-lift base, n=4. `NULL`/slight regression** (see §2). The support-polygon prediction held (planted 3.30→3.63) and bought nothing | **Only if the body starts genuinely stepping.** The isolation showed the win was already spent: the gait sits at 3.3/4 feet planted, so there is no support-polygon headroom for a phasing change to recover. Retry if a future lever produces real swing phases (a duty factor well under 1), which is when a swing *schedule* starts to matter at all |
-| **Phase readout on the stride joint** (`phase_joint=0`) | corridor, n=4 × full-circle `stroke_phase` sweep — locomotion collapsed at every offset because the stroke drives the same joint the phase is read from (self-excited oscillator) | **When the stroke is moved off hip1, or the phase is derived from a joint the stroke does not drive** (e.g. a multi-joint collective coordinate, or `BodyRhythmTracker`'s already-working `rhythm.body.gait` phase — which is *built* for exactly this and is already live in the config). The premise survived its own refutation: step-balance rose 0.30→0.41–0.58, so locking coordination to the stride rhythm does even out the legs. **This is a wiring refutation, not an idea refutation** |
+| **Phase readout on the stride joint** (`phase_joint=0`) | corridor, n=4 × full-circle `stroke_phase` sweep — locomotion collapsed at every offset because the stroke drives the same joint the phase is read from (self-excited oscillator) | ~~When the stroke is moved off hip1, or the phase is derived from a joint the stroke does not drive~~ — **DONE 2026-07-27 and it also failed** (`stroke_phase_src`, a per-leg contact-referenced step clock: net_z 4.58 → 0.20 at the deployed offset, refuted across the full circle against a matched control row). Both refutations now point the same way: **the problem is not which signal the phase comes from, it is that any per-leg external timebase destroys the coherence the four strokes shared.** Retry only with a phase that is contact-referenced **and shared across legs** (`rhythm.body.gait` + per-leg offsets), or by entraining `L.phase` itself rather than replacing it |
+| **★ Stroke-to-step lock, per-leg** (`stroke_phase_src=1`, touchdown-referenced step clock driving the stroke) | corridor, n=4, 6000 ticks, deployed instrumented base — **full circle swept (8 offsets) with a matched src=0 control row** | **`DEFERRED`, not refuted — THE CLOCK NEVER ENTRAINED** (`td_plv` 0.04–0.10 at every loop gain 0.1–0.7; true phase error ≈1.55 rad throughout). What was measured is decisively bad (net_z 4.58 → 0.20) but it is a *weakened slice*: the stroke rode a phase that was neither the leg's own state nor locked to the step. Fix the FREQUENCY estimate (`step_period` 23.6 vs a true contact period of 26–28) so the clock entrains, then re-run. Retry when the phase is **shared across legs**, not per-leg: `rhythm.body.gait` + `gait_phase` offsets, which preserves the inter-leg coherence this lever destroyed. The *within-leg* premise (thrust ⊥ support, measured) remains true and unaddressed — it just cannot be fixed by retargeting one consumer's phase. **Also carries a lesson independent of the idea:** the first build SNAPPED the phase at touchdown and convulsed the body; a phase that DRIVES a continuous command needs a soft proportional pull (`step_phase_lock=0.10`, BodyRhythmTracker's form), while a phase that is only READ to index a discrete bin can take a reset (SynergyTimer's form). `step_phase_lock=1.0` reproduces the snap |
 | **stuck→explore** | flat ground, where a stuck-detector has no content — *the wrong scenario for it* | A regime where the body genuinely gets stuck: terrain, corridor corners, obstacle contact. Its inverse twin (progress→commit) was promoted, so the family is not dead |
 | **Phase-indexed velocity (`Cvel`)** | on the *asymmetric* tripod-skid gait, which it amplified into circling | The base gait becomes symmetric, or the pump is gated by heading error so it cannot amplify yaw asymmetry. Explicitly "not wrong in principle" |
 | **Cruse / Walknet contact-load reflex** | flat **and** incline; out-of-phase with the emergent gait — **and now known to have been gating on a GOD'S-EYE foot-height signal, never on load** | **This verdict is weak and should be re-opened.** Every Cruse rule gates on `in_swing_`, derived from `feet_y` = **absolute world-Y** (see the §2 oracle box), via a detector that over-reports swing ~1.8× vs true contact. So "out of phase with the emergent gait" was substantially a measurement of the *detector*, not of Walknet — a §7 *weakened-slice* shape. **The deeper point: Walknet's rules are LOAD rules, and they have never once had a load signal.** ⚠️ Correction to an earlier version of this row, which claimed there is "no load observation on the bus" — **there is: `reality.proprio.joint_torque`** (servo current sensing, 12 floats, hip1/hip2/knee × 4) is published every tick and **nothing in MotorEPM has ever consumed it.** That is the honest retry: give the load rules a real load observation. Historical warning still applies — an earlier Walknet null rested on a 1-of-6-rule slice, so scope any future claim carefully |
