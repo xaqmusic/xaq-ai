@@ -40,6 +40,9 @@ STANCE_TH = float(os.environ.get("OGMA_PICRAWLER_STANCE_Y_THRESHOLD", 0.04))
 # transient or bellyc_min just reports the spawn pose on every seed and is blind to
 # what walking actually does.  Displacement metrics still use the WHOLE run.
 WARMUP_TICKS = int(os.environ.get("SEEDAVG_WARMUP", 900))
+# Past this z the robot is close enough to the end of the corridor floor that `falls` and
+# `chassis_y` stop measuring the gait.  See the guard at the bottom of __main__.
+CORRIDOR_SAFE_Z = float(os.environ.get("SEEDAVG_SAFE_Z", 8.5))
 
 def parse(path):
     zs=[];xs=[];hy=[];ar=[];fv=[];ts=[]
@@ -151,3 +154,20 @@ if __name__=="__main__":
             fmt = ".3f" if k in ("bellyc","bellyc_min","chassis_y","scrub","tilt_sd") else ".2f"
             per = '  '.join(f"{r[k]:{fmt}}" for r in ok)
             print(f"     {k:<10} mean={m:+{fmt}}  std={s:{fmt}}   [{per}]")
+    # GYM-BOUNDARY GUARD (2026-07-27).  `_build_corridor()` lays a 9.5 m curriculum on a
+    # 20x20 floor, so the walkable strip ends near z=9.5 and the world ends at z=10.  A run
+    # long enough for a FAST arm to reach that edge charges it a `fall` for walking off the
+    # map and poisons chassis_y with the drop -- which reads as "this lever destabilizes
+    # the gait" when it means "this lever ran out of gym".  It bites the fastest arm first,
+    # i.e. exactly the one a speed lever is trying to demonstrate, so the bias is toward
+    # rejecting real wins (CLAUDE.md 3.2 rule 7: you measured your harness, not your idea).
+    # This is why the standard protocol is 6000 ticks and not longer.
+    near = [(i + 1, r["max_z"]) for i, r in enumerate(ok) if r["max_z"] > CORRIDOR_SAFE_Z]
+    if near:
+        print(f"\n  !! GYM-BOUNDARY WARNING: {len(near)}/{len(ok)} seeds passed z={CORRIDOR_SAFE_Z}"
+              f" (corridor curriculum ends ~9.5, floor edge ~10.0)")
+        for sd, mz in near:
+            print(f"       seed {sd}: max_z={mz:.2f}")
+        print("     `falls` and `chassis_y` are NOT trustworthy for those seeds -- a robot that"
+              "\n     walks off the floor registers both.  Re-run shorter (6000 ticks) before"
+              "\n     reading any stability metric on this arm.")

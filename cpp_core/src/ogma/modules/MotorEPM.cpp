@@ -83,6 +83,9 @@ std::vector<TopicSpec> MotorEPM::input_topics() const {
     if (!contact_topic_.empty())
         v.emplace_back(contact_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!torque_topic_.empty())
+        v.emplace_back(torque_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     if (!feet_topic_.empty())
         v.emplace_back(feet_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
@@ -391,6 +394,18 @@ ParamSchema MotorEPM::params_schema() const {
         {"lateral_topic", ParamMutability::ConstructionOnly,
          "1-D signed lateral (sideways-slip) velocity ProprioToken topic, fed to the anti-crab coord_lat_penalty. The body publishes reality.proprio.lateral_v every tick.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"torque_topic", ParamMutability::ConstructionOnly,
+         "Per-servo LOAD ProprioToken topic (reality.proprio.joint_torque): 12 floats, layout hip1[0..3], hip2[0..3], knee[0..3] — joint-major, leg order FL,FR,RL,RR, normalized to MAX_SERVO_TORQUE and one tick delayed. On hardware this is servo current sensing, so it is a legal egocentric observation. Published by the body every tick since 2026-06-01 and, until now, consumed by nothing. Empty = off (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"contact_instrument_only", ParamMutability::HotMutable,
+         "When >0, a subscribed contact_topic is read as an INSTRUMENT only and does NOT drive the stance/swing gate — the incumbent foot-height detector keeps the control path. Needed because wiring true contact as the swing gate is separately REFUTED (net_z 3.76 -> 2.37: that consumer wanted gait PHASE, not contact), yet the alignment diagnostic needs ground truth. 0 = legacy behaviour.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"stroke_load_gain", ParamMutability::HotMutable,
+         "PURCHASE GATE on the power stroke: scale each leg's propulsion by its share of measured hip1 load, so a leg pushes in proportion to the ground it actually has. Requires torque_topic. 0 = off (gate identically 1, byte-identical). The stroke is the one major bias in this stack that is ungated, and Phase 0 measured the cost: the fraction of STANCE spent in the stroke's positive half is 0.512 and over SWING 0.513, i.e. push direction is statistically INDEPENDENT of ground contact and half the power stroke is spent in the air. hip1 is the load signal because Phase 0 measured it to be (stance/swing torque ratio 1.368 hip1, 1.124 hip2, 1.011 knee): hip2 and the knee hold a near-static posture in both phases, while hip1's torque IS the ground reaction to the sweep. The gate is normalized to a mean of 1 across legs, so it REDISTRIBUTES thrust toward the legs with purchase instead of merely attenuating it. It is applied to the propulsion term only, never to the steering term (heading_bearing_hold rides the same channel). Values are an AMPLIFICATION of the ~15% raw load contrast, so useful settings are >1.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{8.0}},
+        {"gait_align_diag", ParamMutability::HotMutable,
+         "DIAGNOSTIC ONLY (>0 = on, 0 = off and the whole block is skipped, so the build stays byte-identical). Measures whether the propulsive stroke is phase-locked to ground contact at all. The stroke rides L.phase (derived from the KNEE by default) while the stance gate rides the FOOT-HEIGHT cycle; legphase_agree already reads ~0.5 between them. Publishes a phase-locking value accumulated at each touchdown (stroke_td_plv: ~0 = touchdown lands at a uniformly random stroke phase, i.e. the two clocks are unlocked and half the power stroke is spent in the air), the signed continuous alignment, the stance/swing split of the stroke waveform, cycle periods for hip1/knee/foot, and whether joint_torque separates stance from swing. Feeds no command.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
     };
 }
 
@@ -459,6 +474,10 @@ ParamMap MotorEPM::current_params() const {
     m["cruse_rule5_gain"]   = cruse_rule5_gain_;
     m["feet_topic"]         = feet_topic_;
     m["contact_topic"]      = contact_topic_;
+    m["torque_topic"]       = torque_topic_;
+    m["contact_instrument_only"] = contact_instrument_only_;
+    m["gait_align_diag"]    = gait_align_diag_;
+    m["stroke_load_gain"]   = stroke_load_gain_;
     m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
@@ -569,6 +588,10 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "feet_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) feet_topic_ = *p; });
     apply_param(params, "upright_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) upright_topic_ = *p; });
     apply_param(params, "contact_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) contact_topic_ = *p; });
+    apply_param(params, "torque_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) torque_topic_ = *p; });
+    apply_param(params, "contact_instrument_only", [&](auto const& v){ contact_instrument_only_ = get_double(v, "contact_instrument_only"); });
+    apply_param(params, "gait_align_diag", [&](auto const& v){ gait_align_diag_ = get_double(v, "gait_align_diag"); });
+    apply_param(params, "stroke_load_gain", [&](auto const& v){ stroke_load_gain_ = get_double(v, "stroke_load_gain"); });
     apply_param(params, "stroke_gain", [&](auto const& v){ stroke_gain_ = get_double(v, "stroke_gain"); });
     apply_param(params, "stroke_phase", [&](auto const& v){ stroke_phase_ = get_double(v, "stroke_phase"); });
     apply_param(params, "steer", [&](auto const& v){ steer_ = get_double(v, "steer"); });
@@ -720,6 +743,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             contact_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_contact(p); }));
+    }
+    if (!torque_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            torque_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){ handle_torque(p); }));
     }
     if (!feet_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(
@@ -960,6 +988,216 @@ void MotorEPM::handle_contact(MessagePtr payload) {
     have_contact_ = true;
 }
 
+// Per-servo LOAD (`reality.proprio.joint_torque`).  12 floats, joint-major:
+// hip1[FL,FR,RL,RR], hip2[FL,FR,RL,RR], knee[FL,FR,RL,RR], each normalized to
+// MAX_SERVO_TORQUE and one tick delayed (the body's motor block runs after perception).
+// This is the load observation the Cruse/Walknet rules never had — on hardware it is
+// servo current sensing, so it is legal under the Markov-blanket rule.
+void MotorEPM::handle_torque(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt) return;
+    const int need = n_legs_ * motor_dim_;
+    if (int(joint_torque_.size()) != need) joint_torque_.assign(need, 0.0f);
+    int k = std::min<int>(int(pt->values.size()), need);
+    for (int i = 0; i < k; ++i) joint_torque_[i] = float(pt->values[i]);
+    have_torque_ = true;
+}
+
+// Total |load| on one leg, from the joint-major torque vector.  Sums all three servos:
+// hip2 and knee carry the vertical load, hip1 the fore-aft reaction, and a leg bearing
+// weight loads all of them relative to one waving in the air.
+float MotorEPM::leg_load(int leg) const {
+    if (!have_torque_ || int(joint_torque_.size()) != n_legs_ * motor_dim_) return 0.0f;
+    float s = 0.0f;
+    for (int j = 0; j < motor_dim_; ++j) s += std::fabs(joint_torque_[j * n_legs_ + leg]);
+    return s;
+}
+
+// Per-leg PURCHASE gate for the power stroke.  See the header for why hip1 is the signal
+// (measured: stance/swing load ratio 1.368 hip1 / 1.124 hip2 / 1.011 knee) and why the
+// gate is mean-normalized rather than a plain attenuation.
+//
+//   share_i = load_i / mean_j(load_j)            ≈ 1 when the legs are evenly loaded
+//   gate_i  = clamp(1 + g·(share_i − 1), …)      g = 0 ⇒ gate ≡ 1 ⇒ byte-identical
+//
+// g is an AMPLIFICATION of the load contrast, not a blend, because the raw contrast is
+// only ~15 %: at g = 1 the gate would swing ±7 % and the lever could not be evaluated.
+void MotorEPM::update_stroke_load_gate() {
+    if (int(stroke_gate_.size()) != n_legs_) stroke_gate_.assign(n_legs_, 1.0f);
+    if (int(stroke_load_ema_.size()) != n_legs_) stroke_load_ema_.assign(n_legs_, 0.0f);
+    if (stroke_load_gain_ == 0.0 || !have_torque_
+        || int(joint_torque_.size()) != n_legs_ * motor_dim_ || n_legs_ < 1) {
+        std::fill(stroke_gate_.begin(), stroke_gate_.end(), 1.0f);
+        stroke_gate_mean_ = 1.0f; stroke_gate_spread_ = 0.0f;
+        return;
+    }
+    // hip1 is joint 0, and the torque vector is joint-major: τ[j * n_legs + leg].
+    float sum = 0.0f;
+    for (int i = 0; i < n_legs_; ++i) {
+        const float ld = std::fabs(joint_torque_[0 * n_legs_ + i]);
+        stroke_load_ema_[i] = (1.0f - kStrokeLoadAlpha) * stroke_load_ema_[i]
+                            + kStrokeLoadAlpha * ld;
+        sum += stroke_load_ema_[i];
+    }
+    const float mean = sum / float(n_legs_);
+    if (!(mean > 1e-6f)) {              // no load anywhere (airborne / not yet settled)
+        std::fill(stroke_gate_.begin(), stroke_gate_.end(), 1.0f);
+        stroke_gate_mean_ = 1.0f; stroke_gate_spread_ = 0.0f;
+        return;
+    }
+    float gsum = 0.0f, gmin = kStrokeGateMax, gmax = kStrokeGateMin;
+    for (int i = 0; i < n_legs_; ++i) {
+        const float share = stroke_load_ema_[i] / mean;
+        const float g = std::clamp(1.0f + float(stroke_load_gain_) * (share - 1.0f),
+                                   kStrokeGateMin, kStrokeGateMax);
+        stroke_gate_[i] = g;
+        gsum += g; gmin = std::min(gmin, g); gmax = std::max(gmax, g);
+    }
+    stroke_gate_mean_   = gsum / float(n_legs_);
+    stroke_gate_spread_ = gmax - gmin;
+}
+
+// ---------------------------------------------------------------------------
+// PHASE-0 GAIT-ALIGNMENT DIAGNOSTIC — measurement only, no command is touched.
+//
+// The hypothesis under test: the gait runs on TWO uncorrelated per-leg clocks.
+//   * thrust  — the power stroke on hip1, `y[0] += amp·sin(L.phase + stroke_phase)`,
+//               where L.phase is derived from the KNEE (`phase_joint` defaults to −1)
+//   * support — the stance/swing gate, `foot_y > foot_y_ema`, the FOOT-HEIGHT cycle
+// If those are unlocked, a leg pushes backward without regard to whether its foot is
+// on the ground: half the power stroke spent in the air, half the return swing spent
+// scrubbing.  That would explain the operator's "it is always stumbling" AND the
+// ledger's standing unknown that flat speed is pinned across every timing lever tried
+// — because every one of those levers adjusted phase BETWEEN legs while the relation
+// between thrust and support WITHIN a leg stayed random.
+//
+// The headline is the phase-locking value at touchdown.  Accumulate e^{iθ} at each
+// contact onset, θ = the stroke waveform's phase.  Uniformly-distributed touchdown
+// phase ⇒ the vectors cancel ⇒ PLV → 0 ⇒ the clocks are unlocked.  A locked gait gives
+// PLV → 1, and the mean angle then says whether `stroke_phase` is merely mis-offset.
+// (Running sums rather than EMAs: this is a one-shot measurement and the run mean is
+// what we want to read.  They are serialized so a restored clone reports the same.)
+// ---------------------------------------------------------------------------
+void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
+    if (int(legs_.size()) != n_legs_ || int(in_swing_.size()) != n_legs_) return;
+    const int m = motor_dim_;
+    auto ensure = [&](auto& v, auto fill){ if (int(v.size()) != n_legs_) v.assign(n_legs_, fill); };
+    ensure(ga_tq_ema_,       0.0f);
+    ensure(ga_hip1_ema_,     0.0f);
+    ensure(ga_hip1_above_,   char(0));
+    ensure(ga_knee_above_,   char(0));
+    ensure(ga_prev_contact_, char(1));
+    ensure(ga_prev_swing_,   char(0));
+    ensure(ga_hip1_last_,    int64_t(-1));
+    ensure(ga_knee_last_,    int64_t(-1));
+    ensure(ga_foot_last_,    int64_t(-1));
+    ensure(ga_con_last_,     int64_t(-1));
+    ensure(ga_hip1_per_,     0.0f);
+    ensure(ga_knee_per_,     0.0f);
+    ensure(ga_foot_per_,     0.0f);
+    ensure(ga_con_per_,      0.0f);
+
+    const bool truth = have_contact_ && int(foot_contact_.size()) == n_legs_;
+
+    for (int i = 0; i < n_legs_; ++i) {
+        Leg const& L = legs_[i];
+        if (!L.initialized || L.n < 3 * m) continue;
+
+        // θ and the SIGNED hip1 contribution, exactly as the stroke site builds it:
+        // stroke_signs folds the per-leg push direction in, so `s` is comparable across
+        // legs.  `s > 0` is one half of the stroke; which half is propulsive is what the
+        // stance/swing split below reports, rather than something assumed here.
+        const float th  = L.phase + float(stroke_phase_);
+        const float sgn = (int(stroke_signs_.size()) == n_legs_) ? float(stroke_signs_[i]) : 1.0f;
+        const float s   = sgn * std::sin(th);
+
+        // ---- vs the INCUMBENT detector (always available: it is what stance_lift gates on)
+        const bool sw_now = (in_swing_[i] != 0);
+        if (ga_prev_swing_[i] && !sw_now) {                 // detector's touchdown
+            ga_sd_cos_ += std::cos(th); ga_sd_sin_ += std::sin(th); ++ga_sd_n_;
+            if (ga_foot_last_[i] >= 0) {                    // foot-cycle period, free
+                const float d = float(int64_t(tick_id) - ga_foot_last_[i]);
+                if (d > 2.0f && d < 600.0f)
+                    ga_foot_per_[i] = (ga_foot_per_[i] <= 0.0f) ? d
+                                    : (1.0f - kGaPerAlpha) * ga_foot_per_[i] + kGaPerAlpha * d;
+            }
+            ga_foot_last_[i] = int64_t(tick_id);
+        }
+        ga_prev_swing_[i] = sw_now ? 1 : 0;
+
+        // ---- vs TRUE contact (only when the sensor is wired as an instrument)
+        if (truth) {
+            const bool con = foot_contact_[i] > 0.5f;
+            ga_contact_acc_ += con ? 1.0 : 0.0; ++ga_contact_n_;
+            ga_align_acc_   += double(s) * (con ? 1.0 : -1.0); ++ga_align_n_;
+            if (con) { ga_stance_pos_ += (s > 0.0f) ? 1.0 : 0.0; ++ga_stance_n_; }
+            else     { ga_swing_pos_  += (s > 0.0f) ? 1.0 : 0.0; ++ga_swing_n_;  }
+            if (!ga_prev_contact_[i] && con) {              // TRUE touchdown → the PLV
+                ga_td_cos_ += std::cos(th); ga_td_sin_ += std::sin(th); ++ga_td_n_;
+                if (ga_con_last_[i] >= 0) {                 // the REAL step period
+                    const float d = float(int64_t(tick_id) - ga_con_last_[i]);
+                    if (d > 2.0f && d < 600.0f)
+                        ga_con_per_[i] = (ga_con_per_[i] <= 0.0f) ? d
+                                       : (1.0f - kGaPerAlpha) * ga_con_per_[i] + kGaPerAlpha * d;
+                }
+                ga_con_last_[i] = int64_t(tick_id);
+            }
+            // Does LOAD separate stance from swing?  Threshold-free means first (the
+            // honest comparison), then the same self-referential above-its-own-mean test
+            // the foot-height detector uses, so the number is directly comparable to
+            // legphase_agree.  0.5 = chance = a load lever has nothing to gate on.
+            if (have_torque_) {
+                const float ld = leg_load(i);
+                if (int(ga_tq_j_stance_.size()) != m) { ga_tq_j_stance_.assign(m, 0.0); ga_tq_j_swing_.assign(m, 0.0); }
+                if (int(joint_torque_.size()) == n_legs_ * m) {
+                    for (int j = 0; j < m; ++j) {
+                        const double t = std::fabs(joint_torque_[j * n_legs_ + i]);
+                        if (con) ga_tq_j_stance_[j] += t; else ga_tq_j_swing_[j] += t;
+                    }
+                    if (con) ++ga_tq_j_stance_n_; else ++ga_tq_j_swing_n_;
+                }
+                if (con) { ga_tq_stance_ += ld; ++ga_tq_stance_n_; }
+                else     { ga_tq_swing_  += ld; ++ga_tq_swing_n_;  }
+                if (ga_tq_ema_[i] > 0.0f || ld > 0.0f) {
+                    ga_tq_agree_ += ((ld > ga_tq_ema_[i]) == con) ? 1.0 : 0.0;
+                    ++ga_tq_agree_n_;
+                }
+                ga_tq_ema_[i] = (1.0f - kGaEmaAlpha) * ga_tq_ema_[i] + kGaEmaAlpha * ld;
+            }
+            ga_prev_contact_[i] = con ? 1 : 0;
+        }
+
+        // ---- cycle periods.  The knee comes free from cos(L.phase) sign flips (that is
+        // the same up-crossing the phase is built from); hip1 needs its own slow mean.
+        const bool knee_above = (std::cos(L.phase) > 0.0f);
+        if (knee_above && !ga_knee_above_[i]) {
+            if (ga_knee_last_[i] >= 0) {
+                const float d = float(int64_t(tick_id) - ga_knee_last_[i]);
+                if (d > 2.0f && d < 600.0f)
+                    ga_knee_per_[i] = (ga_knee_per_[i] <= 0.0f) ? d
+                                    : (1.0f - kGaPerAlpha) * ga_knee_per_[i] + kGaPerAlpha * d;
+            }
+            ga_knee_last_[i] = int64_t(tick_id);
+        }
+        ga_knee_above_[i] = knee_above ? 1 : 0;
+
+        const float h1 = L.x[0];
+        ga_hip1_ema_[i] = (1.0f - kGaEmaAlpha) * ga_hip1_ema_[i] + kGaEmaAlpha * h1;
+        const bool hip1_above = (h1 > ga_hip1_ema_[i]);
+        if (hip1_above && !ga_hip1_above_[i]) {
+            if (ga_hip1_last_[i] >= 0) {
+                const float d = float(int64_t(tick_id) - ga_hip1_last_[i]);
+                if (d > 2.0f && d < 600.0f)
+                    ga_hip1_per_[i] = (ga_hip1_per_[i] <= 0.0f) ? d
+                                    : (1.0f - kGaPerAlpha) * ga_hip1_per_[i] + kGaPerAlpha * d;
+            }
+            ga_hip1_last_[i] = int64_t(tick_id);
+        }
+        ga_hip1_above_[i] = hip1_above ? 1 : 0;
+    }
+}
+
 // Per-tick Cruse stance/swing bookkeeping: a leg is in SWING when its foot is above
 // its own self-calibrating height EMA; a touchdown (swing→stance) resets its
 // since-plant counter (used by Rule 2's release window).
@@ -974,7 +1212,10 @@ void MotorEPM::update_cruse_state() {
     // iff it is not touching anything.  No EMA, no deadband, no self-reference — the
     // whole class of chatter/latching failure the height proxy had simply does not
     // arise, because this is a measurement rather than an inference.
-    if (have_contact_ && int(foot_contact_.size()) == n_legs_) {
+    // `contact_instrument_only` splits the subscription from the gate: the diagnostic
+    // needs ground truth on the bus while the control path keeps the incumbent detector
+    // (wiring contact as the gate is separately refuted — that consumer wanted phase).
+    if (have_contact_ && contact_instrument_only_ <= 0.0 && int(foot_contact_.size()) == n_legs_) {
         if (int(in_swing_.size()) != n_legs_) {
             in_swing_.assign(n_legs_, 0);
             ticks_since_plant_.assign(n_legs_, 1000);
@@ -1101,6 +1342,9 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
+    else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
+    else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
+    else if (key == "stroke_load_gain") stroke_load_gain_ = get_double(value, "stroke_load_gain");
     else if (key == "homeo_leak_upright_only") homeo_leak_upright_only_ = get_double(value, "homeo_leak_upright_only");
     else if (key == "homeo_leak_progress_gate") homeo_leak_progress_gate_ = get_double(value, "homeo_leak_progress_gate");
     else if (key == "homeo_leak_cycles") homeo_leak_cycles_ = get_double(value, "homeo_leak_cycles");
@@ -1471,6 +1715,7 @@ void MotorEPM::tick(uint64_t tick_id) {
     //   flow (D):   flow_quality = magnitude·predictability; amplifies stroke ∝ flow.
     const float commit_amt   = float(progress_commit_gain_) * commit_boost_;      // 0..3
     const float explore_mult = std::max(0.0f, 1.0f - commit_amt);                 // C: damp exploration
+    explore_mult_diag_ = explore_mult;   // diag: is the coordination probe already damped to 0?
     float flow_quality = 0.0f;
     if (forward_flow_gain_ > 0.0) {
         flow_quality = std::clamp(flow_ema_, 0.0f, kFlowVelNorm) / kFlowVelNorm;  // magnitude 0..1
@@ -1631,6 +1876,11 @@ void MotorEPM::tick(uint64_t tick_id) {
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
     if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0 || stance_lift_gain_ != 0.0) update_cruse_state();
+    // Measurement only, and skipped entirely at the default 0 — see the function header.
+    if (gait_align_diag_ > 0.0) update_gait_align_diag(tick_id);
+    // Purchase gate for the power stroke (needs the cross-leg mean, so once per tick,
+    // before the per-leg loop).  Self-guards to gate ≡ 1 when the gain is 0.
+    update_stroke_load_gate();
 
     // Propulsive-credit homeostat: group-mean credit (from last tick's per-leg
     // updates) so a below-mean "dragging" leg can be boosted this tick.
@@ -1928,7 +2178,13 @@ void MotorEPM::tick(uint64_t tick_id) {
             // obstacle) — let the boosted, noisy, decoupled HK output flail instead.
             // lever_stroke_mult folds in progress→commit thrust (C) + forward-flow amp (D);
             // applied to the propulsion term ONLY (steer stays independent).  =1 when both off.
-            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd + side * steer_eff);
+            // PURCHASE GATE (stroke_load_gain).  Multiplies the PROPULSION term only —
+            // `side * steer_eff` carries heading_bearing_hold, a promoted controller on
+            // this same skid-steer channel, and gating a heading controller by leg load
+            // would corrupt it.  gate ≡ 1 when the lever is off ⇒ byte-identical.
+            const float load_gate = (int(stroke_gate_.size()) == n_legs_) ? stroke_gate_[leg] : 1.0f;
+            float amp  = sgn * (float(stroke_gain_) * lever_stroke_mult * fwd * load_gate
+                                + side * steer_eff);
             y[0] += (1.0f - pe) * amp * std::sin(L.phase + float(stroke_phase_));
         }
         // --- Per-leg propulsive-credit homeostat (functional L/R propulsion balance).
@@ -2325,6 +2581,52 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["commit_boost"]      = commit_boost_;
     mod["flow_ema"]          = flow_ema_;           // forward-flow (D) state
     mod["flow_vol_ema"]      = flow_vol_ema_;
+    // Phase-0 gait-alignment accumulators.  Serialized for two reasons: the BODY reads
+    // this snapshot to put them in its stdout diag JSON (same route as h_ema/h_bias),
+    // and a restored clone must report the same measurement as its original.
+    mod["ga_td_cos"] = ga_td_cos_;  mod["ga_td_sin"] = ga_td_sin_;  mod["ga_td_n"] = ga_td_n_;
+    mod["ga_sd_cos"] = ga_sd_cos_;  mod["ga_sd_sin"] = ga_sd_sin_;  mod["ga_sd_n"] = ga_sd_n_;
+    mod["ga_align_acc"]   = ga_align_acc_;   mod["ga_align_n"]   = ga_align_n_;
+    mod["ga_stance_pos"]  = ga_stance_pos_;  mod["ga_stance_n"]  = ga_stance_n_;
+    mod["ga_swing_pos"]   = ga_swing_pos_;   mod["ga_swing_n"]   = ga_swing_n_;
+    mod["ga_contact_acc"] = ga_contact_acc_; mod["ga_contact_n"] = ga_contact_n_;
+    mod["ga_tq_stance"]   = ga_tq_stance_;   mod["ga_tq_stance_n"] = ga_tq_stance_n_;
+    mod["ga_tq_swing"]    = ga_tq_swing_;    mod["ga_tq_swing_n"]  = ga_tq_swing_n_;
+    mod["ga_tq_agree"]    = ga_tq_agree_;    mod["ga_tq_agree_n"]  = ga_tq_agree_n_;
+    mod["ga_tq_ema"]      = ga_tq_ema_;
+    mod["ga_tq_j_stance"] = ga_tq_j_stance_;  mod["ga_tq_j_stance_n"] = ga_tq_j_stance_n_;
+    mod["ga_tq_j_swing"]  = ga_tq_j_swing_;   mod["ga_tq_j_swing_n"]  = ga_tq_j_swing_n_;
+    {   // derived per-joint separation, for the body's stdout diag
+        std::vector<double> sep(ga_tq_j_stance_.size(), 0.0);
+        for (size_t k = 0; k < sep.size(); ++k) {
+            const double a = ga_tq_j_stance_n_ ? ga_tq_j_stance_[k] / double(ga_tq_j_stance_n_) : 0.0;
+            const double b = ga_tq_j_swing_n_  ? ga_tq_j_swing_[k]  / double(ga_tq_j_swing_n_)  : 0.0;
+            sep[k] = a / (b + 1e-9);
+        }
+        mod["torque_sep_joint"] = sep;
+    }
+    mod["ga_hip1_ema"]    = ga_hip1_ema_;
+    mod["ga_hip1_per"]    = ga_hip1_per_;    mod["ga_knee_per"] = ga_knee_per_;
+    mod["ga_foot_per"]    = ga_foot_per_;     mod["ga_con_per"] = ga_con_per_;
+    mod["ga_hip1_last"]   = ga_hip1_last_;   mod["ga_knee_last"] = ga_knee_last_;
+    mod["ga_foot_last"]   = ga_foot_last_;    mod["ga_con_last"] = ga_con_last_;
+    mod["ga_hip1_above"]  = ga_hip1_above_;  mod["ga_knee_above"] = ga_knee_above_;
+    mod["ga_prev_contact"] = ga_prev_contact_; mod["ga_prev_swing"] = ga_prev_swing_;
+    // Derived readouts the body surfaces directly (so the collector needs no maths).
+    mod["stroke_td_plv"] = ga_td_n_ ? std::sqrt(ga_td_cos_ * ga_td_cos_ + ga_td_sin_ * ga_td_sin_)
+                                      / double(ga_td_n_) : 0.0;
+    mod["stroke_sd_plv"] = ga_sd_n_ ? std::sqrt(ga_sd_cos_ * ga_sd_cos_ + ga_sd_sin_ * ga_sd_sin_)
+                                      / double(ga_sd_n_) : 0.0;
+    mod["stroke_pos_stance"] = ga_stance_n_ ? ga_stance_pos_ / double(ga_stance_n_) : 0.0;
+    mod["stroke_pos_swing"]  = ga_swing_n_  ? ga_swing_pos_  / double(ga_swing_n_)  : 0.0;
+    mod["contact_duty"]      = ga_contact_n_ ? ga_contact_acc_ / double(ga_contact_n_) : 0.0;
+    mod["torque_agree"]      = ga_tq_agree_n_ ? ga_tq_agree_ / double(ga_tq_agree_n_) : 0.0;
+    mod["torque_stance"]     = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
+    mod["torque_swing"]      = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
+    mod["explore_mult"]      = explore_mult_diag_;
+    mod["stroke_gate_mean"]   = stroke_gate_mean_;
+    mod["stroke_gate_spread"] = stroke_gate_spread_;
+    mod["stroke_load_ema"]    = stroke_load_ema_;
     return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
 }
 
@@ -2392,6 +2694,81 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     // be replaced by one. Decides the oracle refactor BEFORE the replacement is built.
     j["phase_agree"]         = phase_agree_ema_;      // global body phase vs the oracle
     j["legphase_agree"]      = legphase_agree_ema_;   // per-leg joint phase vs the oracle
+    // ---- Phase-0 gait-alignment diagnostic (all 0/NaN-free when gait_align_diag = 0).
+    // stroke_td_plv is the headline: the phase-locking value of the stroke waveform at
+    // TRUE touchdown.  ~0 ⇒ the foot lands at a uniformly random point in the power
+    // stroke, i.e. thrust and support are separate, unlocked clocks.
+    {
+        auto plv = [](double c, double s, int64_t n){
+            return n > 0 ? std::sqrt(c * c + s * s) / double(n) : 0.0; };
+        auto ang = [](double c, double s, int64_t n){
+            return n > 0 ? std::atan2(s, c) : 0.0; };
+        j["gait_align_active"]  = (gait_align_diag_ > 0.0);
+        j["stroke_td_plv"]      = plv(ga_td_cos_, ga_td_sin_, ga_td_n_);
+        j["stroke_td_phase"]    = ang(ga_td_cos_, ga_td_sin_, ga_td_n_);
+        j["stroke_td_n"]        = ga_td_n_;
+        j["stroke_sd_plv"]      = plv(ga_sd_cos_, ga_sd_sin_, ga_sd_n_);   // vs the incumbent detector
+        j["stroke_sd_phase"]    = ang(ga_sd_cos_, ga_sd_sin_, ga_sd_n_);
+        j["stroke_sd_n"]        = ga_sd_n_;
+        // Signed continuous alignment, normalized so ±1 = a perfectly locked stroke
+        // (E[|sin|] = 2/π for a uniform phase, which is the scale a locked signal reaches).
+        constexpr double kTwoOverPi = 0.6366197723675814;
+        j["stroke_align"]       = ga_align_n_ ? (ga_align_acc_ / double(ga_align_n_)) / kTwoOverPi : 0.0;
+        // The most readable form: what fraction of STANCE time is spent in the positive
+        // half of the stroke waveform, vs the same over SWING.  Both ≈0.5 ⇒ no relation.
+        j["stroke_pos_stance"]  = ga_stance_n_ ? ga_stance_pos_ / double(ga_stance_n_) : 0.0;
+        j["stroke_pos_swing"]   = ga_swing_n_  ? ga_swing_pos_  / double(ga_swing_n_)  : 0.0;
+        j["contact_duty"]       = ga_contact_n_ ? ga_contact_acc_ / double(ga_contact_n_) : 0.0;
+        // Load separation.  torque_sep is threshold-free (a ratio of means); torque_agree
+        // is the same self-referential test the foot-height detector uses, so it can be
+        // read directly against legphase_agree.  Both at chance ⇒ no load lever is possible.
+        j["torque_active"]      = have_torque_;
+        j["torque_stance"]      = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
+        j["torque_swing"]       = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
+        j["torque_sep"]         = (ga_tq_swing_n_ && ga_tq_stance_n_)
+                                ? (ga_tq_stance_ / double(ga_tq_stance_n_))
+                                  / ((ga_tq_swing_ / double(ga_tq_swing_n_)) + 1e-6) : 0.0;
+        j["torque_agree"]       = ga_tq_agree_n_ ? ga_tq_agree_ / double(ga_tq_agree_n_) : 0.0;
+        // Per-joint separation: which servo actually reports being loaded?  hip1 does
+        // fore-aft work in both phases, so a whole-leg sum can dilute a clean hip2/knee
+        // signal.  This picks the input for a load-gated stroke by measurement.
+        {
+            std::vector<double> sep(ga_tq_j_stance_.size(), 0.0);
+            for (size_t k = 0; k < sep.size(); ++k) {
+                const double a = ga_tq_j_stance_n_ ? ga_tq_j_stance_[k] / double(ga_tq_j_stance_n_) : 0.0;
+                const double b = ga_tq_j_swing_n_  ? ga_tq_j_swing_[k]  / double(ga_tq_j_swing_n_)  : 0.0;
+                sep[k] = a / (b + 1e-9);
+            }
+            j["torque_sep_joint"] = sep;    // [hip1, hip2, knee]; 1.0 = that servo tells you nothing
+        }
+        // Cycle periods.  hip1 is the stride; knee is what the stroke's phase is read from;
+        // foot is what the stance gate rides.  Three different numbers ⇒ three clocks.
+        auto mean_of = [](std::vector<float> const& v){
+            double s = 0.0; int n = 0;
+            for (float x : v) if (x > 0.0f) { s += x; ++n; }
+            return n ? s / double(n) : 0.0; };
+        j["period_hip1"]        = mean_of(ga_hip1_per_);
+        j["period_knee"]        = mean_of(ga_knee_per_);
+        j["period_foot"]        = mean_of(ga_foot_per_);   // the INCUMBENT detector's cycle
+        j["period_contact"]     = mean_of(ga_con_per_);    // the REAL step period (touch flag)
+        j["period_hip1_legs"]   = ga_hip1_per_;
+        j["period_knee_legs"]   = ga_knee_per_;
+        j["period_foot_legs"]   = ga_foot_per_;
+        j["period_contact_legs"] = ga_con_per_;
+    }
+    // Is the coordination probe already annealed by progress→commit?  If this sits at 0
+    // on flat ground then a precision gate on the same σ would be a TAUTOLOGY, and
+    // CLAUDE.md §3.2 rule 1 says find that out before building it.
+    // Purchase gate observability (CLAUDE.md §3.2 rule 5 — a gate that never fired has
+    // already shipped here once as silent dead code).  mean 1.0 with spread EXACTLY 0
+    // means the gate never ran: either the gain is 0 or torque_topic is unwired.
+    j["stroke_load_active"]  = (stroke_load_gain_ != 0.0 && have_torque_);
+    j["stroke_gate_mean"]    = stroke_gate_mean_;
+    j["stroke_gate_spread"]  = stroke_gate_spread_;
+    j["stroke_gate"]         = stroke_gate_;
+    j["explore_mult"]        = explore_mult_diag_;
+    j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
+    j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to
     // The coordination search, made observable: which fitness is ranking probes, and the
     // incumbent's score.  Without these, "is the phase search locked onto something" is
     // unanswerable — and this search stores a winner, so it CAN lock in.
@@ -2584,6 +2961,47 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         commit_boost_      = mod.value("commit_boost",       commit_boost_);
         flow_ema_          = mod.value("flow_ema",           flow_ema_);
         flow_vol_ema_      = mod.value("flow_vol_ema",       flow_vol_ema_);
+        // Phase-0 gait-alignment accumulators (diagnostic; restored so a clone reports
+        // the same measurement rather than restarting its averages mid-run).
+        ga_td_cos_    = mod.value("ga_td_cos",    ga_td_cos_);
+        ga_td_sin_    = mod.value("ga_td_sin",    ga_td_sin_);
+        ga_td_n_      = mod.value("ga_td_n",      ga_td_n_);
+        ga_sd_cos_    = mod.value("ga_sd_cos",    ga_sd_cos_);
+        ga_sd_sin_    = mod.value("ga_sd_sin",    ga_sd_sin_);
+        ga_sd_n_      = mod.value("ga_sd_n",      ga_sd_n_);
+        ga_align_acc_ = mod.value("ga_align_acc", ga_align_acc_);
+        ga_align_n_   = mod.value("ga_align_n",   ga_align_n_);
+        ga_stance_pos_= mod.value("ga_stance_pos",ga_stance_pos_);
+        ga_stance_n_  = mod.value("ga_stance_n",  ga_stance_n_);
+        ga_swing_pos_ = mod.value("ga_swing_pos", ga_swing_pos_);
+        ga_swing_n_   = mod.value("ga_swing_n",   ga_swing_n_);
+        ga_contact_acc_ = mod.value("ga_contact_acc", ga_contact_acc_);
+        ga_contact_n_   = mod.value("ga_contact_n",   ga_contact_n_);
+        ga_tq_stance_   = mod.value("ga_tq_stance",   ga_tq_stance_);
+        ga_tq_stance_n_ = mod.value("ga_tq_stance_n", ga_tq_stance_n_);
+        ga_tq_swing_    = mod.value("ga_tq_swing",    ga_tq_swing_);
+        ga_tq_swing_n_  = mod.value("ga_tq_swing_n",  ga_tq_swing_n_);
+        ga_tq_agree_    = mod.value("ga_tq_agree",    ga_tq_agree_);
+        ga_tq_agree_n_  = mod.value("ga_tq_agree_n",  ga_tq_agree_n_);
+        if (mod.contains("stroke_load_ema")) stroke_load_ema_ = mod["stroke_load_ema"].get<std::vector<float>>();
+        if (mod.contains("ga_tq_ema"))      ga_tq_ema_      = mod["ga_tq_ema"].get<std::vector<float>>();
+        if (mod.contains("ga_tq_j_stance")) ga_tq_j_stance_ = mod["ga_tq_j_stance"].get<std::vector<double>>();
+        if (mod.contains("ga_tq_j_swing"))  ga_tq_j_swing_  = mod["ga_tq_j_swing"].get<std::vector<double>>();
+        ga_tq_j_stance_n_ = mod.value("ga_tq_j_stance_n", ga_tq_j_stance_n_);
+        ga_tq_j_swing_n_  = mod.value("ga_tq_j_swing_n",  ga_tq_j_swing_n_);
+        if (mod.contains("ga_hip1_ema"))    ga_hip1_ema_    = mod["ga_hip1_ema"].get<std::vector<float>>();
+        if (mod.contains("ga_hip1_per"))    ga_hip1_per_    = mod["ga_hip1_per"].get<std::vector<float>>();
+        if (mod.contains("ga_knee_per"))    ga_knee_per_    = mod["ga_knee_per"].get<std::vector<float>>();
+        if (mod.contains("ga_foot_per"))    ga_foot_per_    = mod["ga_foot_per"].get<std::vector<float>>();
+        if (mod.contains("ga_con_per"))     ga_con_per_     = mod["ga_con_per"].get<std::vector<float>>();
+        if (mod.contains("ga_hip1_last"))   ga_hip1_last_   = mod["ga_hip1_last"].get<std::vector<int64_t>>();
+        if (mod.contains("ga_knee_last"))   ga_knee_last_   = mod["ga_knee_last"].get<std::vector<int64_t>>();
+        if (mod.contains("ga_foot_last"))   ga_foot_last_   = mod["ga_foot_last"].get<std::vector<int64_t>>();
+        if (mod.contains("ga_con_last"))    ga_con_last_    = mod["ga_con_last"].get<std::vector<int64_t>>();
+        if (mod.contains("ga_hip1_above"))  ga_hip1_above_  = mod["ga_hip1_above"].get<std::vector<char>>();
+        if (mod.contains("ga_knee_above"))  ga_knee_above_  = mod["ga_knee_above"].get<std::vector<char>>();
+        if (mod.contains("ga_prev_contact"))ga_prev_contact_= mod["ga_prev_contact"].get<std::vector<char>>();
+        if (mod.contains("ga_prev_swing"))  ga_prev_swing_  = mod["ga_prev_swing"].get<std::vector<char>>();
     }
 }
 

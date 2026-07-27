@@ -47,6 +47,9 @@ const _SLIDERS: Array = [
 	{"key": "cruse_rule3_weight","label": "cruse_rule3  (contra load)", "min": 0.0,  "max": 2.0,  "step": 0.1},
 	{"key": "cruse_rule5_gain",  "label": "cruse_rule5 (load→grip)",    "min": 0.0,  "max": 0.30, "step": 0.02},
 	{"key": "stance_lift_gain",  "label": "stance_lift (belly-up knee)", "min": -1.5, "max": 1.5, "step": 0.1},
+	# Purchase gate on the power stroke. Needs torque_topic wired (ConstructionOnly, so
+	# this slider cannot supply it -- use a loadstroke config arm). 0 = off.
+	{"key": "stroke_load_gain",  "label": "stroke_load (purchase gate)", "min": 0.0, "max": 8.0, "step": 0.5},
 	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
 	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
 	{"key": "coord_fitness_mode","label": "fitness: 0=fwd_v REWARD 1=free","min": 0.0, "max": 1.0, "step": 1.0},

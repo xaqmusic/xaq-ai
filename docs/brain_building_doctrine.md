@@ -418,10 +418,44 @@ recurs at every layer.
 - **View-dependent (place+heading) nodes first; view-invariance later.** More nodes, each
   stable; the transition graph still works.
 
+- **★ Two clocks a controller ASSUMES are one will beat — and the beat looks like the
+  behaviour "keeps losing it." Measure the phase-lock between them.** A quadruped's power
+  stroke was timed by a phase read off the knee while the leg's actual step cycle ran ~25 %
+  slower. Nothing forced them to agree, so the fraction of *stance* spent in the stroke's
+  propulsive half was 0.512 and over *swing* 0.513 — push direction statistically
+  independent of ground contact, half the stroke spent in the air. The two clocks beat at
+  ~2.5 s, which is exactly the period at which the operator saw the gait alternate between
+  "that worked" and "stumbling." **Whenever one signal times an action and a different
+  signal decides when that action is valid, they are two oscillators until proven otherwise;
+  a phase-locking value at the event that matters (here: touchdown) is a cheap, decisive
+  test.** The deeper cost is silent: EIGHT successive levers re-tuned coordination *between*
+  limbs while the thrust↔support relation *within* a limb stayed random, and every one of
+  them measured null. **A coupling parameter cannot help while the thing being coupled is
+  internally incoherent** — check the within-unit relation before tuning the between-unit one.
+- **★ A magnitude gate cannot fix a timing problem.** Gating the same stroke by measured
+  per-leg load — the doctrinally correct "gate the bias by the state that makes it valid" —
+  fired cleanly across a 6.6× authority range and moved nothing: it suppresses thrust spent
+  in the air, but *during stance* it scales the push and drag halves equally, and that
+  balance was the 50/50 defect. **When a quantity is mistimed rather than mis-sized, scaling
+  it is the wrong axis, however well the gate is built.** The corollary is a useful filter:
+  before building a gain, ask whether the failure is one of AMOUNT or of WHEN.
+
 ---
 
 ## 8. Process discipline
 
+- **★ KNOW YOUR HARNESS'S MEASURABLE RANGE, AND GUARD IT — a too-long run penalizes the
+  arm that works.** A 9.5 m curriculum sat on a 20×20 floor. Run long enough and the fastest
+  arm walks off the end: it posted the best distance in the whole campaign *while its chassis
+  was 39 m below the floor*, and the harness charged it a `fall` and a poisoned height for
+  doing so. Re-run inside the gym, the same arm showed no gain and no falls — so the long run
+  would have recorded a false positive AND a false negative **on the same lever**. Note which
+  way the bias points: **the boundary is hit first by the fastest arm, i.e. precisely the one
+  a propulsion lever exists to demonstrate**, so the error systematically rejects real wins.
+  Two rules follow. *Measure the environment's limits before trusting a metric that
+  accumulates against them*, and *put the check in the tool*: emit a loud warning naming the
+  offending seeds rather than relying on anyone to remember. A standard protocol's run length
+  is often an undocumented boundary constraint — find out before you "improve" on it.
 - **Predictable env for measurable epistemic foraging.** Epistemic foraging — acting to
   resolve uncertainty about *where food is* — is intrinsically MESSY. To measure learning,
   the environment must be PREDICTABLE: deterministic structure the agent can come to KNOW

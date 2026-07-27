@@ -8382,6 +8382,56 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# the oracle can be replaced by a signal a real robot has.
 			line["phase_agree"] = snappedf(float(_mm.get("phase_agree", 0.0)), 0.001)
 			line["legphase_agree"] = snappedf(float(_mm.get("legphase_agree", 0.0)), 0.001)
+			# ---- Phase-0 gait-alignment diagnostic (2026-07-26, `gait_align_diag`) ----
+			# Is the propulsive stroke phase-locked to ground contact AT ALL?  The stroke
+			# rides L.phase (from the KNEE); the stance gate rides the FOOT-HEIGHT cycle.
+			# td_plv = phase-locking value of the stroke waveform at TRUE touchdown:
+			#   ~0 = the foot lands at a uniformly random point in the power stroke, so
+			#        half the stroke pushes air and half the return swing scrubs.
+			#   ~1 = locked (and td_phase then says whether stroke_phase is mis-offset).
+			# pos_stance vs pos_swing: fraction of each spent in the stroke's positive
+			# half.  Both ~0.5 = no relation.  torque_* answers whether joint_torque can
+			# separate stance from swing, which is the prerequisite for a load lever.
+			line["td_plv"]     = snappedf(float(_mm.get("stroke_td_plv", 0.0)), 0.0001)
+			line["sd_plv"]     = snappedf(float(_mm.get("stroke_sd_plv", 0.0)), 0.0001)
+			line["pos_stance"] = snappedf(float(_mm.get("stroke_pos_stance", 0.0)), 0.0001)
+			line["pos_swing"]  = snappedf(float(_mm.get("stroke_pos_swing", 0.0)), 0.0001)
+			line["contact_duty"] = snappedf(float(_mm.get("contact_duty", 0.0)), 0.0001)
+			line["tq_agree"]   = snappedf(float(_mm.get("torque_agree", 0.0)), 0.0001)
+			line["tq_stance"]  = snappedf(float(_mm.get("torque_stance", 0.0)), 0.00001)
+			line["tq_swing"]   = snappedf(float(_mm.get("torque_swing", 0.0)), 0.00001)
+			# explore_mult = the progress->commit damping actually applied to the
+			# coordination probe sigma.  If this already sits at 0 on flat ground then a
+			# precision gate on the same sigma would be a TAUTOLOGY (CLAUDE.md 3.2 r1).
+			line["explore_mult"] = snappedf(float(_mm.get("explore_mult", 1.0)), 0.001)
+			# Per-leg cycle periods: hip1 = the stride, knee = what the stroke's phase is
+			# read from, foot = what the stance gate rides.  Three different numbers means
+			# three clocks, and the beat between them is the stumble.
+			var _p1: Array = _mm.get("ga_hip1_per", [])
+			var _pk: Array = _mm.get("ga_knee_per", [])
+			var _pf: Array = _mm.get("ga_foot_per", [])
+			if _p1 is Array and not _p1.is_empty(): line["per_hip1"] = _p1
+			if _pk is Array and not _pk.is_empty(): line["per_knee"] = _pk
+			if _pf is Array and not _pf.is_empty(): line["per_foot"] = _pf
+			# per_con = the REAL step period from the physics touch flag.  per_foot is the
+			# INCUMBENT detector's cycle; a fast per_foot next to a slow per_con is the
+			# detector chattering (it is a self-referential threshold that stance_lift
+			# rings), not the body stepping faster.
+			var _pc: Array = _mm.get("ga_con_per", [])
+			if _pc is Array and not _pc.is_empty(): line["per_con"] = _pc
+			# Per-joint stance/swing load ratio [hip1, hip2, knee].  1.0 = that servo
+			# reports nothing about whether the foot is bearing weight.
+			var _tj: Array = _mm.get("torque_sep_joint", [])
+			if _tj is Array and not _tj.is_empty(): line["tq_sep_j"] = _tj
+			# PURCHASE GATE (stroke_load_gain): mean and spread of the per-leg stroke
+			# gate actually applied.  mean 1.0 with spread EXACTLY 0 means the gate never
+			# fired -- either the gain is 0 or torque_topic is unwired.  This is the
+			# "did the consumer fire?" number; a gate has shipped as silent dead code here
+			# once already (CLAUDE.md 3.2 rule 5).
+			line["sgate"]    = snappedf(float(_mm.get("stroke_gate_mean", 1.0)), 0.0001)
+			line["sgate_spr"] = snappedf(float(_mm.get("stroke_gate_spread", 0.0)), 0.0001)
+			# (gait_phase — has the imposed trot [0, pi, pi, 0] drifted? — is already
+			#  emitted a few lines below; do not duplicate it here.)
 			# gait_phase = the LIVE Kuramoto target offsets [FL,FR,RL,RR].  Constant
 			# unless coord_adapt_rate (leaky tracker) or coord_reward_drive (fitness
 			# ratchet) is on.  Surfaced so "did the coordination recover after the robot

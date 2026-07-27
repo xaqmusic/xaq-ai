@@ -106,6 +106,8 @@ walks, and improvises a novel limb movement to free itself when stuck).
 | **Lateral-sequence walk phasing** (`gait_phase=[π/2,3π/2,0,π]`) | flat — **but only ever measured inside the rejected open-loop `cpgwalk` config** | **Its +65 % distance is the SEQUENCER's speed, not a gait win — see the correction below.** The only config carrying this phasing is `the_picrawler_motor_epm_cpgwalk.json`, which also carries `rhythm_gains=[1.8,1.0,1.6]` and **no `cpg_embed`** — i.e. the open-loop CPG servo sequencer that was **REJECTED on UI observation** (chassis collision 15.6 % vs 3.3 %; "flopping fish"). It also relocated the asymmetry (RL skids), cost 2 falls, and was fragile to every knob |
 | **Lateral-sequence phasing, now isolated on the `embed` base** (`gait_phase=[0,π,3π/2,π/2]` on the `[FL,FR,RL,RR]` order — the vector above, rotated to make leg 0 the reference) | corridor + stance-lift base, n=4 seed-avg — **the clean isolation the correction below asked for** | `NULL`/slight `REGRESSION`. The *mechanical* prediction held exactly — de-clustering the swing targets raised feet-planted **3.30 → 3.63** — but it bought nothing behavioral: net_z 3.62→**3.16** (and variance doubled, std 0.37→0.94), straight 0.67→**0.55**, belly 0.026→0.024, 0→**0.25** falls, flat speed **unchanged**. **Diagnosis: the static-stability argument was right and irrelevant.** Trot is dynamically stable and *should* be wobbly at this body's crawl speed — but the body was already averaging 3.3 of 4 feet planted, so there was almost no support-polygon headroom to win back. The phasing question is now **closed on this base**, not deferred |
 
+| **★ LOAD-GATED POWER STROKE** (`stroke_load_gain` — scale each leg's propulsion by its share of measured hip1 load, so a leg pushes in proportion to the ground it actually has) | corridor + the deployed `..._imufused` base, n=4 seed-avg × a **5-point gain sweep {0.5, 1, 2, 4, 6}** at the standard 6 000 ticks | **`NULL` on progress, `PARTIAL` on leg participation. Not promoted.** No gain beats the baseline on distance or straightness: net_z 4.75 → {4.74, 4.33, 4.52, 4.24, 4.47}, straight 0.74 → {0.74, 0.71, 0.72, 0.69, 0.70}, and **`flat_v` stays pinned at 0.04–0.05 — the ninth lever to leave it there** (§5). 0 falls in every arm. The one real movement is **`step_bal` 0.44 ± 0.16 → 0.54 ± 0.08 at gain 2** (the legs do share the gait more evenly, and the variance halves) — but it costs `steps` 53 → 43.5 and buys no progress. **The consumer demonstrably fired**: gate spread scales monotonically 0.28 → 1.87 across the 6.6× gain range while `stroke_gate_mean` holds at 1.00 (the gate is mean-normalized, so it redistributes thrust rather than attenuating it). **Why the null is believable rather than a measurement failure: it is what the mechanism predicts.** A purchase gate removes thrust spent in the air, but *during stance* it scales the push and drag halves of the stroke equally — and the boxed finding above measured that balance at 50/50. A magnitude gate cannot fix a timing problem. Built on the honest signal the ledger asked for (§6 named `joint_torque` as the load observation Walknet never had) and on the joint that measurement — not assumption — picked |
+
 > ### ⚠️ Correction (2026-07-25) — the "+65 % walk phasing" number does not mean what it looks like
 >
 > Earlier versions of this ledger, and the closing line of
@@ -362,7 +364,95 @@ to become per-integrator**, because `amp_gain` is EFFORT (may escalate when fail
 | **TWO different Rule-3 parameters, in two different modules** (2026-07-25) | `MotorEPM::cruse_rule3_weight` is a **sub-weight inside the `cruse_gain` block** (single use site, MotorEPM.cpp:1503) — **inert whenever `cruse_gain == 0`, which is its default** — yet its own default is **0.5**, so the MOTOR-EPM panel *displays it as enabled while it does nothing*. Separately, `CruseCoordinator` has its own `rule3_weight`, gated by `cruse_bias_gain` whose default is **1.0 = ON**. The MOTOR-EPM panel slider writes the FORMER (`motor_epm_panel.gd:208` → `set_param` on `motor_epm`), so **zeroing MotorEPM's `cruse_gain` says nothing whatsoever about CruseCoordinator's Rule 3.** Verified by measurement, not inference: with `cruse_rule3_weight` at its **max (2.0)** and `cruse_gain=0`, MotorEPM's contribution is **exactly 0.00000** and `swing_frac` is bit-identical to the default arm; at `cruse_gain=0.3` it is 0.358. Instrumented with a `cruse_bias` diag (mean \|MotorEPM's own Cruse contribution\|, in diag + snapshot + the body's stdout JSON) so this is answerable by a number. **Shape: the same rule name in two modules with opposite default gating is the `postural_gain_joints` silent-no-op trap wearing a second module.** Consequence for the record: **any historical Cruse verdict must name WHICH module it tested** |
 | **Height setpoint slammed the integrator** | `height_k=0.65` (a flat-ground memory) at the tucked-spawn low clearance → 3 startup flips. Lowered to 0.30 |
 | **Reset artifact** | Auto-reset teleports fired no bus event, and MotorEPM's leg-phase/EMA survived fall+respawn → **any coherence/TLE trend across a reset was fake**. Fixed by publishing `events.reset` + reset-masking (Gate 0) |
+| **★ THE CORRIDOR GYM RUNS OUT AT ~9.5 m, AND A LONG RUN CHARGES THE FASTEST ARM A `fall` FOR IT** (2026-07-27) | `_build_corridor()` lays a **9.5 m** curriculum on a **20×20** floor (`picrawler_body.gd:2945`, `:2665`), so the walkable strip ends near z=9.5 and the world ends at z=10. At **12 000** ticks a fast arm reaches it: in the load-stroke gain-2 sweep, seed 1 posted **the best distance of the entire campaign (net_z 10.04, max_z 10.06) while its mean `chassis_y` was −39.29** — it walked off the floor and kept falling, and `falls` and `chassis_y` both recorded that as a gait failure. **The bias runs the wrong way: it hits the FASTEST arm first, i.e. exactly the arm a propulsion lever exists to demonstrate, so a long run systematically penalizes levers that work.** Re-run clean at 6 000 ticks, the same arm shows 0 falls and no distance gain at all — so the 12 000-tick reading would have recorded BOTH a false positive (net_z +10 %) and a false negative (0.5 falls) on the same lever. This is §3.2 rule 7 (silent confound) and also explains why the standard protocol is 6 000 ticks — that is the run length that fits the gym, not an arbitrary choice. **Fixed in the harness:** `seedavg.py` now prints a loud `GYM-BOUNDARY WARNING` naming every seed whose `max_z` passes `SEEDAVG_SAFE_Z` (default 8.5) and states that `falls`/`chassis_y` are untrustworthy for those seeds |
 | **Swing detector inferred contact from height instead of using the contact sensor that already existed** (2026-07-25; magnitude CORRECTED below) | `bool sw = foot_y_[i] > foot_y_ema_[i]` — no deadband. **Measured against the TRUE physics foot-contact sensor on identical runs: the detector reads 0.408 swing vs a true 0.229 — over-reporting by ~1.8×.** ⚠️ This row first claimed "40.3 % vs 0.7 %, wrong by ~50×"; that 0.7 % came from a **world-height** proxy which itself under-reports swing by ~16×, so the 50× figure was an artifact of comparing one bad proxy against another. **The real fix was not a deadband at all: `reality.proprio.foot_contact` (a physics touch flag, and the sensor a real picrawler has) was already published every tick and simply never wired into MotorEPM** — now available as `contact_topic`. Historical detail retained: | It then closes a feedback loop with any consumer that moves the foot (`stance_lift`, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. Cost scales with the consumer's gain, which is the measured `stance_lift` sweep: steps 50→84→**147** across gain 0→0.5→0.8 with **no** speed gain, tilt_sd 0.066→0.078→**0.178**, falls 0→0→**0.75**. Mitigated behind `swing_hyst_frac` (MAD-scaled deadband, default 0 = legacy; guard verified byte-identical to the per-seed digit). At gain 0.8 a 0.5 band halves the parasitic lifts (147→73), halves the wobble (0.178→0.089) and removes the falls. **⚠️ CORRECTED after unit testing — this is CONDITIONAL, and the condition is the absence of stepping.** Given a *real* duty cycle (80 planted + 20 lift) the legacy detector is essentially correct (0.18 measured vs 0.20 true): the lift excursions pull the EMA up, so the stance phase sits decisively below it and there is nothing to chatter on. And a band of 1.0·MAD in that regime is too wide — the stance deviation never clears −band, so the detector **latches** (0.58), which is the failure mode behind the live `frac=2.0` arm degrading after 0.5 helped. **So the detector is an AMPLIFIER of the no-stepping problem (§5), not an independent root cause.** Two shapes to remember: **a self-referential threshold is not a sensor, and any bias that moves what it measures will ring it** — and **a scale-invariant deadband cannot separate jitter from a step by amplitude** (a sinusoid has peak/MAD ≈ 1.57 at any size), so answering "is this foot loaded" needs a load observation, which the bus does not have |
+
+---
+
+### ★ 2026-07-26 — THE POWER STROKE IS NOT PHASE-LOCKED TO GROUND CONTACT
+
+**This is the measured cause of the pinned-flat-speed entry in §5, and it re-frames the
+whole inter-leg coordination family.** It overturns no prior verdict; it supplies the *why*
+that eight nulls were missing.
+
+**Instrument.** `gait_align_diag` in MotorEPM (diagnostic only — the block is skipped
+entirely at its default 0). Config `..._embed_corridor_alignprobe.json` subscribes the true
+`foot_contact` flag with the new `contact_instrument_only=1`, so ground truth is READ
+without being wired to the stance gate (that swap is separately refuted, §2), plus
+`joint_torque`. Collector `scripts_tools/gaitalign.py`.
+
+**Gain-0 guard verified by measurement, not argument:** the probe arm and the deployed
+`..._imufused.json` produce identical `seedavg` output on all 17 metrics, per seed, at both
+6 000 and 12 000 ticks.
+
+#### The result (n=4, corridor, diff 0.3)
+
+| | 12 000 ticks | 6 000 ticks |
+|---|---|---|
+| `pos_stance` — frac of STANCE in the stroke's positive half | **0.509 ± 0.010** | **0.512 ± 0.014** |
+| `pos_swing` — same over SWING | **0.505 ± 0.010** | **0.513 ± 0.010** |
+| `td_plv` — stroke phase-lock at true touchdown | 0.228 ± 0.022 | 0.200 ± 0.003 |
+| `contact_duty` — true stance duty | 0.752 ± 0.027 | 0.800 ± 0.010 |
+
+**The push direction is statistically independent of whether the foot is on the ground.**
+Stance and swing split the stroke waveform identically, to ±0.01 on every seed. Half the
+power stroke is spent in the air; half the return swing scrubs while planted.
+
+#### Why: three clocks, none locked to each other
+
+| clock | period (ticks) | what it drives |
+|---|---|---|
+| hip1 — the stride | 32.3 ± 1.4 / 30.7 ± 3.1 | — |
+| **knee — `L.phase`** | **23.6 ± 2.7 / 22.2 ± 2.2** | **the power stroke**, `y[0] += amp·sin(L.phase + stroke_phase)` |
+| **contact — the real step** | **29.9 ± 3.3 / 26.0 ± 0.6** | what the leg actually does |
+| foot-height — the incumbent detector | 15.3 ± 4.5 / 12.6 ± 1.2 | `stance_lift` + every Cruse rule |
+
+`phase_joint` defaults to −1 = the knee, so the stroke is timed by a ~22–24 tick clock while
+the leg steps every ~26–30. **They beat with a period of ~2–2.5 s**, which is the operator's
+report — *"occasionally the three planted legs are in a good position and the fourth steps
+forward and moves the body, but this synchronization is often lost"* — as a number.
+
+Separately: the foot-height detector runs at roughly **half** the true contact period, i.e.
+it fires about twice per real step. That is the relaxation oscillator documented at
+`MotorEPM.hpp:314-328`, measured directly for the first time. It is chatter, not stepping.
+
+#### Consequence for the coordination family
+
+All eight refuted timing levers adjusted phase **between** legs while the thrust↔support
+relation **within** a leg was uncorrelated. Re-phasing legs whose own thrust is random with
+respect to their own footfall cannot buy anything — and did not. **Re-use context for the
+whole family: do not retry an inter-leg phasing lever until thrust and support are locked
+within a leg.**
+
+#### Two follow-on questions, answered by the same run
+
+- **Load is real, and hip1 is the signal — which overturns the obvious guess.** Stance/swing
+  torque ratio: **hip1 1.368 ± 0.053**, hip2 1.124 ± 0.018, **knee 1.011 ± 0.031 (nothing)**.
+  hip2 and the knee hold a near-static posture in *both* phases; hip1's torque is the ground
+  reaction to the sweep itself, measured on the very joint the stroke acts on.
+- **A precision-gated coordination probe is NOT a tautology.** `explore_mult` = 0.87 (12 k) /
+  0.73 (6 k), so progress→commit leaves the probe σ near full most of the time.
+
+#### Also established
+
+- **`gait_phase` has left the imposed trot entirely**, to a different place per seed —
+  `[0,−2.13,2.43,−0.70]`, `[0,−2.66,1.87,−2.12]`, `[0,2.15,−3.07,−1.02]`,
+  `[0,2.58,2.15,−2.35]` vs the configured `[0,π,π,0]`. The coordination target is a random
+  walk, not an imposed topology.
+- **The §4 "which Rule 3 is live" ambiguity resolves to NEITHER** for the deployed stack:
+  `cruse_bias` is exactly 0.0000 *and* `CruseCoordinator` is not instantiated (the graph is 5
+  modules: bridge, MotorEPM, CPG, KeyframeGait, BodyRhythmTracker).
+- **`planted` = 3.69–3.79**, higher than the 3.30 previously recorded. The support constraint
+  is over-satisfied, independently re-confirming that the phasing question is closed (§2).
+- **Baseline figures are run-length-dependent and must be quoted with their tick count.**
+  `..._imufused.json` scores net_z **4.75 ± 0.29 / straight 0.74** at **6 000** ticks (the
+  standard protocol, reproduced exactly) and net_z **6.55 ± 0.56 / straight 0.61** at 12 000.
+  §8's "a number outlives the body it was measured on" applies to run length too.
+
+**New instruments, all default-off:** `gait_align_diag`, `contact_instrument_only`,
+`torque_topic`, `stroke_load_gain`, `scripts_tools/gaitalign.py`, and the body-stdout fields
+`td_plv`/`sd_plv`/`pos_stance`/`pos_swing`/`contact_duty`/`tq_agree`/`tq_sep_j`/
+`per_hip1|knee|foot|con`/`explore_mult`/`sgate`/`sgate_spr`.
 
 ---
 
@@ -375,12 +465,14 @@ to become per-integrator**, because `amp_gain` is EFFORT (may escalate when fail
 - **Genuine step-over obstacle negotiation** — deferred. Current hump clearance works by
   letting the belly ride low, which **may be a sim exploit** (frictionless belly drag); a
   real chassis could not do it. Obstacle nav is "good enough" for now.
-- **★ FLAT SPEED IS PINNED ACROSS EVERY TIMING LEVER TRIED — cause still unknown**
+- **★ FLAT SPEED IS PINNED ACROSS EVERY TIMING LEVER TRIED — ~~cause still unknown~~
+  CAUSE MEASURED 2026-07-26, see the boxed finding below**
   (2026-07-25). Eight isolated levers were seed-averaged against the stance-lift base —
   stance-lift gain (3 values), swing-detector deadband (3), lateral-sequence phasing,
   stride-joint phase readout (4 offsets), adaptive coordination (2). **`flat_v` was
   0.03–0.04 in every arm that stayed upright and 0.00 in the ones that did not.** Nothing in
-  the coordination, phasing, or phase-bookkeeping layer moved it. *That observation stands.*
+  the coordination, phasing, or phase-bookkeeping layer moved it. *That observation stands*
+  — and a ninth lever (the load-gated stroke, §2) has since joined it at 0.04–0.05.
 
   > ### ⚠️ CORRECTION (same day) — the explanation first recorded here was WRONG
   >
@@ -437,6 +529,21 @@ to become per-integrator**, because `amp_gain` is EFFORT (may escalate when fail
   is reset rather than left to thrash — meaning **the protection may be the auto-reset, not
   the fitness penalties.** If so it is a fragile dependency: disabling auto-reset could bring
   the old failure straight back. Worth testing directly before trusting the ratchet.
+- **★ LOCK THE STROKE TO THE STEP — the sharpest lever the record now points at.** The
+  boxed finding above measured the stroke riding a ~23-tick knee-derived clock while the leg
+  steps every ~29 ticks, beating at ~2.5 s. The fix is to derive the phase the stroke rides
+  from a signal the stroke does **not** drive — which is exactly the re-use context already
+  recorded in §6 for `phase_joint=0`, whose refutation was a *wiring* refutation (a
+  self-excited oscillator, because the stroke drove the same hip1 it read its phase from)
+  and whose premise measured **positive**: step-balance rose 0.30 → 0.41–0.58 and
+  feet-planted rose. Candidate phase sources, none of them hip1: the per-leg **load cycle**
+  from `joint_torque` (now subscribed and measured to carry the signal on hip1 at ratio
+  1.368), or `BodyRhythmTracker`'s `rhythm.body.gait`, already live in the config and built
+  for exactly this. Budget a full `stroke_phase` re-sweep — the previous attempt swept the
+  whole circle and still collapsed, but from self-excitation, which these sources do not
+  have. **Judge it on `td_plv` / `pos_stance` vs `pos_swing` directly** (the instruments now
+  exist), not only on the behavioural metrics — a lever that raises phase-lock without
+  raising speed is still the informative result.
 - **A working closed-loop attitude controller** — the balance reflex is a redesign, not a
   knob. ~~Prerequisite for revisiting lateral-sequence walk phasing~~ — that phasing question
   is now closed on this base (§2), so this is no longer blocking it.
@@ -458,6 +565,7 @@ proposals, not dead entries.*
 | **stuck→explore** | flat ground, where a stuck-detector has no content — *the wrong scenario for it* | A regime where the body genuinely gets stuck: terrain, corridor corners, obstacle contact. Its inverse twin (progress→commit) was promoted, so the family is not dead |
 | **Phase-indexed velocity (`Cvel`)** | on the *asymmetric* tripod-skid gait, which it amplified into circling | The base gait becomes symmetric, or the pump is gated by heading error so it cannot amplify yaw asymmetry. Explicitly "not wrong in principle" |
 | **Cruse / Walknet contact-load reflex** | flat **and** incline; out-of-phase with the emergent gait — **and now known to have been gating on a GOD'S-EYE foot-height signal, never on load** | **This verdict is weak and should be re-opened.** Every Cruse rule gates on `in_swing_`, derived from `feet_y` = **absolute world-Y** (see the §2 oracle box), via a detector that over-reports swing ~1.8× vs true contact. So "out of phase with the emergent gait" was substantially a measurement of the *detector*, not of Walknet — a §7 *weakened-slice* shape. **The deeper point: Walknet's rules are LOAD rules, and they have never once had a load signal.** ⚠️ Correction to an earlier version of this row, which claimed there is "no load observation on the bus" — **there is: `reality.proprio.joint_torque`** (servo current sensing, 12 floats, hip1/hip2/knee × 4) is published every tick and **nothing in MotorEPM has ever consumed it.** That is the honest retry: give the load rules a real load observation. Historical warning still applies — an earlier Walknet null rested on a 1-of-6-rule slice, so scope any future claim carefully |
+| **Load-gated power stroke** (`stroke_load_gain`) | corridor, n=4 × a 5-point gain sweep, on the deployed base — `NULL` on progress; the gate fired monotonically and the gait did not care | **When the stroke's TIMING is fixed first.** A magnitude gate cannot repair a push/drag balance measured at 50/50 (see the boxed finding) — it removes thrust spent in the air but scales push and drag equally during stance. Retry it *after* a lever locks thrust to support, where a purchase gate becomes a refinement of a correct stroke rather than a patch on a random one. Keep the `step_bal` 0.44→0.54 result: the load share genuinely does even out which legs take steps, so it is a candidate ingredient rather than a dead idea. The infra (`torque_topic`, `leg_load()`) stays default-off and is the load observation any Walknet retry needs |
 | **Learned hip2** | flat, against a stable base | A regime where the femur must do real work — steep terrain, step-over. It was refuted as a *gait* lever, not as a terrain lever |
 | **Gait symmetry (all forms)** | flat, ~35 A/Bs; the asymmetry is load-bearing for straightness | A different base gait exists whose straightness does not depend on the tripod-skid. Amplitude symmetry ≠ functional symmetry — any retry must target functional symmetry |
 | **Active-balance reflex** | headless (inert — `publish_tilt` off) and UI (destabilizing — maps tilt→hip2, i.e. pitch/roll, not yaw) | It is redesigned as a real closed-loop attitude controller. The existing verdict is mostly a **DEAD_CODE + wrong-target** finding, not a verdict on balance |

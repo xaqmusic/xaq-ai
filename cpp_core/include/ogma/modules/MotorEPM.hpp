@@ -361,10 +361,119 @@ private:
     std::vector<float>   foot_contact_;
     bool                 have_contact_ = false;
     void handle_contact(MessagePtr payload);
+    // 2026-07-26 — let `contact_topic` be subscribed WITHOUT letting it drive in_swing_.
+    // Wiring true contact as the swing gate is separately REFUTED (net_z 3.76→2.37: the
+    // consumer wanted gait PHASE, not contact), so the alignment diagnostic below must be
+    // able to read ground truth while the control path keeps the incumbent detector.
+    // 0 (default) = legacy: contact_topic, when set, drives the gate as before.
+    double               contact_instrument_only_ = 0.0;
+    // Per-servo LOAD (`reality.proprio.joint_torque`, 12 floats, layout hip1[0..3],
+    // hip2[0..3], knee[0..3] — joint-major, leg order FL,FR,RL,RR).  Published every tick
+    // by the body since 2026-06-01 and never consumed by anything.  On hardware this is
+    // servo current sensing, so it is a legal egocentric observation.  Empty = off.
+    std::string          torque_topic_;
+    std::vector<float>   joint_torque_;
+    bool                 have_torque_ = false;
+    void handle_torque(MessagePtr payload);
+    float leg_load(int leg) const;          // Σ|τ| over that leg's servos (0 if no signal)
     std::string          upright_topic_;   // reality.proprio.upright (basis.y.y)
     bool                 have_upright_ = false;
     void handle_upright(MessagePtr payload);
     void update_cruse_state();
+
+    // ------------------------------------------------------------------
+    // PHASE-0 GAIT-ALIGNMENT DIAGNOSTIC (2026-07-26).  DIAGNOSTIC ONLY — nothing in this
+    // block feeds a command, and `gait_align_diag_ == 0` (the default) skips it entirely.
+    //
+    // The question it answers: the propulsive stroke rides `L.phase`, derived from the
+    // KNEE (`phase_joint` default −1), while the stance gate rides the FOOT-HEIGHT cycle.
+    // Those are two different clocks, and the module's own `legphase_agree_ema_` already
+    // reads ~0.5 (chance) between them.  If they are genuinely unlocked then each leg
+    // pushes backward without regard to whether its foot is on the ground — roughly half
+    // the power stroke spent in the air and half the return swing spent scrubbing — which
+    // would explain BOTH the operator's "it is always stumbling" and the ledger's standing
+    // unknown that flat speed is pinned across every timing lever ever tried.
+    //
+    // The headline is a phase-locking value (PLV): accumulate e^{iθ} at each TOUCHDOWN,
+    // where θ is the stroke waveform's phase.  PLV≈0 ⇒ touchdown happens at a uniformly
+    // random stroke phase (unlocked clocks).  PLV≈1 ⇒ locked, and the accompanying mean
+    // angle says whether `stroke_phase` is merely offset.
+    // ------------------------------------------------------------------
+    double  gait_align_diag_ = 0.0;             // 0 = off (whole block skipped, zero cost)
+    void update_gait_align_diag(uint64_t tick_id);
+    double  ga_td_cos_ = 0.0, ga_td_sin_ = 0.0; // PLV accumulator vs TRUE contact touchdown
+    int64_t ga_td_n_   = 0;
+    double  ga_sd_cos_ = 0.0, ga_sd_sin_ = 0.0; // PLV vs the INCUMBENT detector's plant
+    int64_t ga_sd_n_   = 0;
+    double  ga_align_acc_ = 0.0;                // E[ sgn·sin θ · (contact ? +1 : −1) ]
+    int64_t ga_align_n_   = 0;
+    double  ga_stance_pos_ = 0.0;               // frac of STANCE ticks with sgn·sin θ > 0
+    int64_t ga_stance_n_   = 0;
+    double  ga_swing_pos_  = 0.0;               // same over SWING ticks (the complement)
+    int64_t ga_swing_n_    = 0;
+    double  ga_contact_acc_ = 0.0;              // true stance duty, for reference
+    int64_t ga_contact_n_   = 0;
+    // Does joint_torque separate stance from swing?  Prerequisite for a load-gated stroke:
+    // if these means do not part, a load lever dies here for the cost of one run.
+    double  ga_tq_stance_ = 0.0; int64_t ga_tq_stance_n_ = 0;
+    double  ga_tq_swing_  = 0.0; int64_t ga_tq_swing_n_  = 0;
+    double  ga_tq_agree_  = 0.0; int64_t ga_tq_agree_n_  = 0;   // 0.5 = chance
+    std::vector<float>   ga_tq_ema_;            // per-leg running load mean (the threshold)
+    // Per-JOINT stance/swing load, because summing all three servos may be diluting the
+    // contrast: hip1 does fore-aft work in BOTH phases, while hip2 and the knee are the
+    // ones actually holding the body up.  Whichever joint separates best is the input a
+    // load-gated stroke should read.
+    std::vector<double>  ga_tq_j_stance_, ga_tq_j_swing_;
+    int64_t              ga_tq_j_stance_n_ = 0, ga_tq_j_swing_n_ = 0;
+    // Cycle periods, in ticks, from up-crossings of each signal against its own mean.
+    // knee comes free from cos(L.phase) sign flips; foot comes free from in_swing_ 0→1.
+    std::vector<float>   ga_hip1_ema_;
+    std::vector<char>    ga_hip1_above_, ga_knee_above_, ga_prev_contact_, ga_prev_swing_;
+    std::vector<int64_t> ga_hip1_last_, ga_knee_last_, ga_foot_last_, ga_con_last_;
+    // ga_foot_per_ is the INCUMBENT DETECTOR's cycle; ga_con_per_ is the real step period
+    // from the physics touch flag.  They must be reported separately — the detector is a
+    // self-referential threshold that any foot-moving bias rings, so a fast ga_foot_per_
+    // next to a slow ga_con_per_ is chatter, not stepping.
+    std::vector<float>   ga_hip1_per_, ga_knee_per_, ga_foot_per_, ga_con_per_;
+    float   explore_mult_diag_ = 1.0f;          // progress→commit damping actually applied
+    static constexpr float kGaEmaAlpha  = 0.02f;   // ~50-tick mean, matches kFootYEmaAlpha
+    static constexpr float kGaPerAlpha  = 0.10f;   // period smoothing (~10 cycles)
+
+    // ------------------------------------------------------------------
+    // LOAD-GATED POWER STROKE (2026-07-26).  The stroke is the one major bias in this
+    // stack that is UNGATED, and Phase 0 measured what that costs: the fraction of STANCE
+    // spent in the stroke's positive half is 0.512, and over SWING it is 0.513 — the push
+    // direction is statistically independent of whether the foot is on the ground.  Half
+    // the power stroke is spent in the air.
+    //
+    // CLAUDE.md §1 step 4: gate the bias by the state that makes it valid — the gate is
+    // the design, the magnitude is only tuning.  Thrust is valid against PURCHASE, so the
+    // gate is per-leg load, and Phase 0 also picked the signal by measurement rather than
+    // by assumption: the stance/swing load ratio is 1.368 on **hip1**, 1.124 on hip2 and
+    // 1.011 on the knee.  hip2 and the knee hold a near-static posture in both phases and
+    // say almost nothing; hip1's torque is the ground reaction to the sweep itself.  That
+    // is the physically right quantity — it is measured on the very joint the stroke acts
+    // on, and it answers "is this leg meeting ground?"
+    //
+    // The gate is normalized to a MEAN OF 1 across legs, so it REDISTRIBUTES thrust toward
+    // the legs that have purchase rather than merely attenuating it.  That matters: flat
+    // speed has been pinned across every timing lever tried, and a gate that could only
+    // subtract would read as "slower" and teach us nothing.
+    //
+    // What this does NOT do: it scales the propulsion term only, never the steering term.
+    // heading_bearing_hold is a promoted lever riding the same skid-steer channel, and
+    // gating a heading controller by load would corrupt it.
+    // ------------------------------------------------------------------
+    double  stroke_load_gain_ = 0.0;            // 0 = off, gate ≡ 1, byte-identical
+    std::vector<float> stroke_load_ema_;        // per-leg |τ_hip1|, lightly smoothed
+    std::vector<float> stroke_gate_;            // diag: the gate actually applied
+    float   stroke_gate_mean_   = 1.0f;         // diag: 1.0 with 0 spread ⇒ never fired
+    float   stroke_gate_spread_ = 0.0f;
+    void update_stroke_load_gate();
+    // ~5-tick smoothing: rejects servo noise without blurring the ~26-tick step cycle.
+    static constexpr float kStrokeLoadAlpha = 0.2f;
+    static constexpr float kStrokeGateMin   = 0.0f;   // saturation guards, not the mechanism
+    static constexpr float kStrokeGateMax   = 2.0f;
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays
     // HK-driven and pointed tangentially → the four thrusts sum to a torque

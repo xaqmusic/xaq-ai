@@ -81,6 +81,7 @@ ParamMap base_params(int n_legs = 4, int motor_dim = 3, std::string pre = "mt") 
     p["interest_topic"] = std::string("");
     p["hunger_topic"]   = std::string("");
     p["feet_topic"]     = std::string("");
+    p["torque_topic"]   = std::string("");
     p["coupling_gain"]      = 0.0;
     p["coord_reward_drive"] = 0.0;
     p["coord_adapt_rate"]   = 0.0;
@@ -95,6 +96,18 @@ ParamMap base_params(int n_legs = 4, int motor_dim = 3, std::string pre = "mt") 
     return p;
 }
 
+
+// Same as base_params() but with torque_topic explicitly unwired — the reference arm for
+// the gain-0 guard, so "gate off" is compared against "the signal was never subscribed".
+ParamMap base_params_no_torque(int n_legs = 4, int motor_dim = 3, std::string pre = "mt") {
+    ParamMap p = base_params(n_legs, motor_dim, std::move(pre));
+    p["stroke_gain"]      = 1.0;
+    p["stroke_phase"]     = -2.85;
+    p["torque_topic"]     = std::string("");
+    p["stroke_load_gain"] = 0.0;
+    return p;
+}
+
 struct Sensors {
     float fwd_v = 0, yaw = 0, tc_x = 0, tc_y = 0;
     float distress = -1, height = -1;     // <0 → not published this tick
@@ -102,6 +115,9 @@ struct Sensors {
     // Keep `feet` LAST: existing tests brace-initialize Sensors positionally, so a
     // new leading member would silently land in the wrong field.
     std::vector<float> feet;              // per-leg foot height; empty → not published
+    // ... and `torque` after it, for the same reason.  Joint-major, exactly as the body
+    // publishes it: [hip1 x n_legs, hip2 x n_legs, knee x n_legs].
+    std::vector<float> torque;            // empty → not published
 };
 
 struct Fixture {
@@ -148,6 +164,7 @@ struct Fixture {
         bus.publish(pre + ".imu",  vec_token({0, 0, s.fwd_v, s.yaw}));
         bus.publish(pre + ".tilt", vec_token({s.tilt_pitch, 1.0f, s.tilt_roll, 1.0f}));
         if (!s.feet.empty()) bus.publish(pre + ".feet", vec_token(s.feet));
+        if (!s.torque.empty()) bus.publish(pre + ".torque", vec_token(s.torque));
         if (s.distress >= 0.0f) bus.publish(pre + ".distress", vec_token({s.distress}));
         if (s.height   >= 0.0f) bus.publish(pre + ".height",   vec_token({s.height}));
         if (s.tc_x != 0.0f || s.tc_y != 0.0f)
@@ -689,4 +706,65 @@ TEST(MotorEPM, ObjectiveSocketRetargetsControllerZeroWeightNoOp) {
     EXPECT_TRUE(A.m.diag_snapshot()["obj_active"].get<bool>());
     EXPECT_FALSE(Z.m.diag_snapshot()["obj_active"].get<bool>());
     EXPECT_NEAR(A.m.diag_snapshot()["obj_weight"].get<float>(), 0.5f, 1e-4f);
+}
+
+// =============================================================================
+// 10. LOAD-GATED POWER STROKE (`stroke_load_gain`, 2026-07-26).
+//
+// Phase 0 measured that the stroke is UNGATED with respect to ground contact: the
+// fraction of stance spent in the stroke's positive half is 0.512 and over swing 0.513,
+// so push direction is statistically independent of purchase and half the power stroke
+// is spent in the air.  This lever gates propulsion by each leg's share of hip1 load —
+// hip1 because Phase 0 measured it to be the joint that separates stance from swing
+// (ratio 1.368, vs 1.124 hip2 and 1.011 knee).
+//
+// Two properties are locked down here, and they are the two that a future edit could
+// silently break:
+//   (a) gain 0 is BYTE-IDENTICAL, even with torque_topic wired and load wildly uneven;
+//   (b) with the gain on, an UNLOADED leg's propulsion is attenuated relative to a
+//       LOADED one — i.e. the gate actually discriminates, in the right direction.
+// =============================================================================
+TEST(MotorEPM, StrokeLoadGateZeroIsByteIdenticalNonzeroDiscriminates) {
+    auto base = base_params();
+    base["stroke_gain"]  = 1.0;                 // the term being gated
+    base["stroke_phase"] = -2.85;
+    base["torque_topic"] = std::string("mt.torque");
+    auto p0 = base; p0["stroke_load_gain"] = 0.0;
+    auto pg = base; pg["stroke_load_gain"] = 4.0;
+    Fixture fref(base_params_no_torque(), 4, 3);   // no torque wired at all
+    Fixture f0(p0, 4, 3), fg(pg, 4, 3);
+
+    // Leg 0 carries no hip1 load (foot in the air); legs 1-3 are loaded.  Layout is
+    // joint-major, so hip1 occupies indices [0..3].
+    std::vector<float> tq(12, 0.10f);
+    tq[0] = 0.00f; tq[1] = 0.40f; tq[2] = 0.40f; tq[3] = 0.40f;
+
+    double maxdiff0 = 0.0;
+    double gated_leg0 = 0.0, gated_leg1 = 0.0, ref_leg0 = 0.0, ref_leg1 = 0.0;
+    for (uint64_t t = 0; t < 200; ++t) {
+        Sensors s; s.torque = tq;
+        Sensors sref;                              // reference gets no torque published
+        fref.run_tick(t, sref); f0.run_tick(t, s); fg.run_tick(t, s);
+        if (t < 20) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff0 = std::max(maxdiff0,
+                                    double(std::abs(fref.accel(leg, j) - f0.accel(leg, j))));
+        // hip1 (joint 0) is where the stroke lands.  Compare magnitudes accumulated over
+        // the run so a single zero-crossing tick cannot decide the test.
+        ref_leg0   += std::abs(f0.accel(0, 0));
+        ref_leg1   += std::abs(f0.accel(1, 0));
+        gated_leg0 += std::abs(fg.accel(0, 0));
+        gated_leg1 += std::abs(fg.accel(1, 0));
+    }
+    EXPECT_LT(maxdiff0, 1e-6)
+        << "stroke_load_gain=0 must be byte-identical to an unwired torque_topic "
+           "(the gain-0 guard), even with a wildly uneven load vector on the bus";
+    // The unloaded leg must lose stroke authority RELATIVE to a loaded one.  Stated as a
+    // ratio-of-ratios so it cannot be satisfied by simply scaling everything down.
+    const double ref_ratio   = ref_leg0   / (ref_leg1   + 1e-9);
+    const double gated_ratio = gated_leg0 / (gated_leg1 + 1e-9);
+    EXPECT_LT(gated_ratio, ref_ratio * 0.9)
+        << "with the gate on, the UNLOADED leg's hip1 stroke must shrink relative to a "
+           "LOADED leg's (ungated ratio " << ref_ratio << ", gated " << gated_ratio << ")";
 }
