@@ -1,7 +1,7 @@
 {
  "metadata": {
-  "name": "Motor-EPM \u00b7 ARENA \u00b7 stroke_gain=1.2 (shorter stride -> feet in)",
-  "description": "stroke_gain=1.2 (deployed 1.65): shorten the stride so the feet plant CLOSER IN. Measured dead end this session: the feet plant at a 170 mm radius against a 166 mm total leg reach, so the shank must angle out just to reach the ground, and NO joint angle buys both a vertical shank and a high chassis. hip2 plumbs and drops the body (hip2_tuck -0.2: tib_off 37.5 -> 32.9 but belly 0.0221 -> 0.0134); the knee raises the body and un-plumbs (hip2 -0.2 + knee_tuck 0.85: belly restored to 0.0215 but tib_off -> 44.1). Same 2-link constraint twice. The remaining free variable is the foot radius itself, which the stride sets -- the operator's prediction being 'shorter steps at higher frequency move the robot faster'. JUDGE: does foot_r fall and tib_off fall together, and does net_disp hold or rise? If foot_r falls but net_disp falls with it, the body is stride-limited rather than traction-limited and the sprawl is load-bearing for distance.",
+  "name": "ARENA CONTROL \u2014 deployed stack, instruments on, no lever",
+  "description": "The matched control for the two arena arms below: the deployed stack (..._imufused) with the MEASUREMENT instruments on and NO lever. Verified behaviourally inert -- this arm and the deployed config produce identical seedavg output on all 17 metrics, per seed, at both 6000 and 12000 ticks -- so any difference you see against the arms below is the lever, not the instruments. WHAT TO WATCH: hip2 sits at -3.6 +/- 4.4 deg and never leaves neutral, the knee alone swings the tibia to 37.5 deg off vertical (design rest is 10), the feet plant at a 170 mm radius against a 166 mm total leg reach, and the body slides sideways twice as fast as it advances (scrub 0.100 vs fwd_v 0.050). ARENA n=3: net_disp 4.85, straight 0.71, tilt_sd 0.088, steps 25, step_bal 0.07, belly 0.0221, 0 falls. [1]/[2] swap gyms live; [M] is the motor panel.",
   "env_target": "picrawler",
   "gym_mode": "arena",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -128,7 +128,7 @@
      3.14159265,
      0.0
     ],
-    "stroke_gain": 1.2,
+    "stroke_gain": 1.65,
     "stroke_phase": -2.85,
     "steer": 0.0,
     "stroke_signs": [

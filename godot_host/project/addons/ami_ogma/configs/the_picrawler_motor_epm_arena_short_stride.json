@@ -1,7 +1,7 @@
 {
  "metadata": {
-  "name": "Motor-EPM \u00b7 ARENA \u00b7 tibia_plumb_gain=0.15",
-  "description": "TIBIA-PLUMB REFLEX at gain 0.15. hip2 rotates to null the shank's deviation from VERTICAL, so the knee's gait drive TRANSLATES the foot instead of arcing it about the knee axis. hip2 and the knee are a planar 2-link arm; with hip2 pinned at its horizontal rest the knee alone must set BOTH the foot's height and its fore-aft position, which forces a circular foot path and a large shank sweep. MEASURED (arena, n=3, 1032 leg-frames): hip2 -3.6 +/- 4.4 deg, never leaves neutral; tibia 37.5 +/- 15.3 deg off vertical against a 10 deg design rest, extremes 101; feet plant at 170 mm against a 166 mm total leg reach; scrub 0.100 vs fwd_v 0.050. This is the rewrite rule applied to the operator's IK framing -- implement the ERROR (shank off plumb), not a hip2 trajectory -- and it specifies nothing about timing, so the rhythm stays emergent. Distinct from the refuted 'learned hip2', which merely LOOSENED hip2's spring and hoped HK would discover the coordination: an unconstrained joint is a wobble dimension, not an IK solver. JUDGE ON tib_off and scrub first, with BELLY CLEARANCE AS A HARD CONSTRAINT -- the hip2_tuck_target arm bought +27% distance while dropping belly 0.0221 -> 0.0134, which is a regression on a promoted invariant and not an acceptable trade.",
+  "name": "ARENA \u00b7 SHORTER STRIDE \u2014 stroke_gain 1.2 (the body is over-striding)",
+  "description": "stroke_gain=1.2 (deployed 1.65). The propulsion AMPLITUDE / stroke operating point -- the lever the ledger's open frontier named as a candidate for the pinned flat speed and which had never been swept. A SHORTER stroke walks FURTHER: ARENA n=3 net_disp 4.85 -> 5.45 (+12%), straight 0.71 -> 0.78, tilt_sd 0.088 -> 0.078, BELLY PRESERVED (0.0221 -> 0.0228), 0 falls. Sweep: 1.65 -> 4.85, 1.4 -> 5.17, 1.2 -> 5.45, 0.9 -> 4.56, so 1.2 is near the optimum. GATES: corridor n=4 is a TIE on progress (net_z 4.75 -> 4.70, straight 0.74 -> 0.75, flat_v 0.05 -> 0.05) but steps 53 -> 64 and step_bal 0.44 -> 0.52; the hump gate HOLDS (final_z 4.74 -> 4.67, variance halved, 0 falls). PARTIAL, not promoted -- a +12% in one gym and a tie in the other is not LOUD enough on metrics alone, which is why it wants an eyeball. NOTE this does NOT bring the feet closer in -- that mechanism is REFUTED. A 1.8x stroke_gain sweep left foot_r invariant at 170.3-171.2 mm because HIP1_AXIS is world +Z, a YAW joint that sweeps the foot at CONSTANT RADIUS. The gain is that a long stroke wastes effort. WHAT TO WATCH: more, shorter steps; does it look more purposeful or just busier? Live slider `stroke_gain` on the [M] panel spans 0-2.",
   "env_target": "picrawler",
   "gym_mode": "arena",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -128,7 +128,7 @@
      3.14159265,
      0.0
     ],
-    "stroke_gain": 1.65,
+    "stroke_gain": 1.2,
     "stroke_phase": -2.85,
     "steer": 0.0,
     "stroke_signs": [
@@ -170,8 +170,7 @@
     "contact_topic": "reality.proprio.foot_contact",
     "contact_instrument_only": 1.0,
     "torque_topic": "reality.proprio.joint_torque",
-    "gait_align_diag": 1.0,
-    "tibia_plumb_gain": 0.15
+    "gait_align_diag": 1.0
    }
   },
   {

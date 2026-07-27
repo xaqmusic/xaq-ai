@@ -1,7 +1,7 @@
 {
  "metadata": {
-  "name": "Motor-EPM \u00b7 ARENA \u00b7 base",
-  "description": "ARENA gym (open floor + perimeter pyramids) -- the gym the operator observes in, and the one where heading disturbance is FREE TO EXPRESS ITSELF. The corridor is built inside self-centering 30 deg walls that re-centre the body, so it masks exactly the swing-induced spin this family targets. All arena arms carry contact_topic (instrument-only, so it does NOT drive the stance gate), torque_topic and gait_align_diag=1, so the arms differ ONLY by the lever gains. Judge on yaw_swing_excess (mean |yaw rate| while any foot is airborne minus the all-planted reference) FIRST -- that is the mechanism -- then net_disp/straight/tilt_sd. BASELINE: the deployed stack, instruments on, no lever.",
+  "name": "ARENA \u00b7 IK \u2014 tibia-plumb reflex (hip2 keeps the shank vertical)",
+  "description": "tibia_plumb_gain=0.15. hip2 rotates to NULL the shank's deviation from vertical, so the knee's gait drive TRANSLATES the foot instead of arcing it about the knee axis. hip2 and the knee are a planar 2-link arm; with hip2 pinned at its horizontal rest the knee alone must set BOTH the foot's height and its fore-aft position, which forces a circular foot path and a large shank sweep. This implements the ERROR (shank off plumb) rather than a hip2 trajectory, and specifies nothing about timing, so the rhythm stays emergent. LARGEST SINGLE EFFECT MEASURED: ARENA n=3 net_disp 4.85 -> 6.38 (+32%), straight 0.71 -> 0.82 WITH STD 0.00 across three seeds (the variance-collapse signature the promoted heading-hold produced), tilt_sd 0.088 -> 0.069, tibia 37.5 -> 34.3 deg, 0 falls. NOT PROMOTED -- belly clearance falls 0.0221 -> 0.0156 (-29%), and belly-up is a promoted invariant. WHAT TO WATCH: does the shank visibly stay under the knee through the stride, and is the belly riding low enough to scrape? Live slider `tibia_plumb` on the [M] panel: 0 = off, +0.15 = this arm, +0.3 goes unstable (tilt_sd 0.266). NEGATIVE is the wrong direction (it un-plumbs: 37.5 -> 50.8 deg).",
   "env_target": "picrawler",
   "gym_mode": "arena",
   "phase_tag": "motor-epm (minimal/deploy)",
@@ -170,7 +170,8 @@
     "contact_topic": "reality.proprio.foot_contact",
     "contact_instrument_only": 1.0,
     "torque_topic": "reality.proprio.joint_torque",
-    "gait_align_diag": 1.0
+    "gait_align_diag": 1.0,
+    "tibia_plumb_gain": 0.15
    }
   },
   {

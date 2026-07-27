@@ -1225,6 +1225,17 @@ void MotorEPM::update_gait_align_diag(uint64_t tick_id) {
             ga_prev_contact_[i] = con ? 1 : 0;
         }
 
+        // Shank angle from vertical, for EVERY instrumented arm (not just the ones running
+        // the plumb reflex) -- otherwise the control reports 0 and there is nothing to
+        // compare the lever against.  theta = HIP2_LIMIT*x[hip2] + x[knee] + (KNEE_REST+pi/2)
+        // in the picrawler's proprio encoding; validated against the CAD rest pose (10 deg)
+        // and cross-checked controller-side vs the raw joint angles (51.5 vs 52.5 deg).
+        if (m >= 3) {
+            ga_tib_acc_ += std::fabs(float(tibia_plumb_scale_) * L.x[3] + L.x[6]
+                                     + float(tibia_plumb_offset_));
+            ++ga_tib_n_;
+        }
+
         // ---- cycle periods.  The knee comes free from cos(L.phase) sign flips (that is
         // the same up-crossing the phase is built from); hip1 needs its own slow mean.
         const bool knee_above = (std::cos(L.phase) > 0.0f);
@@ -1937,7 +1948,6 @@ void MotorEPM::tick(uint64_t tick_id) {
     }
 
     // Cruse stance/swing bookkeeping (once per tick, before the per-leg output).
-    float tib_off_acc = 0.0f; int tib_off_n = 0;   // diag for the tibia-plumb reflex
     if (cruse_gain_ != 0.0 || cruse_rule5_gain_ != 0.0 || stance_lift_gain_ != 0.0) update_cruse_state();
     // Measurement only, and skipped entirely at the default 0 — see the function header.
     if (gait_align_diag_ > 0.0) update_gait_align_diag(tick_id);
@@ -2168,7 +2178,6 @@ void MotorEPM::tick(uint64_t tick_id) {
             const float th = float(tibia_plumb_scale_) * L.x[3] + L.x[6]
                            + float(tibia_plumb_offset_);
             y[1] -= float(tibia_plumb_gain_) * th;
-            tib_off_acc += std::fabs(th); ++tib_off_n;
         }
         // SWING TUCK — the mirror of the block above.  stance_lift biases the KNEE on
         // PLANTED legs; this folds hip2 + knee on LIFTED ones so the limb's mass comes
@@ -2488,7 +2497,6 @@ void MotorEPM::tick(uint64_t tick_id) {
         L.have_prev = true;
     }
 
-    tibia_off_mean_ = tib_off_n ? (tib_off_acc / float(tib_off_n)) : 0.0f;
     // ---- Per-leg controller symmetry coupling (anti-asymmetry root fix) ----
     // Softly pull each leg's learned controller (C, h, Cphi) toward the average over the legs
     // in its group, so the four identical legs converge to ONE control law rather than one leg
@@ -2718,7 +2726,8 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
     mod["swing_tuck_frac"] = swing_tuck_frac_;
-    mod["tibia_off_mean"]  = tibia_off_mean_;
+    mod["tibia_off_mean"]  = ga_tib_n_ ? (ga_tib_acc_ / double(ga_tib_n_)) : 0.0;
+    mod["ga_tib_acc"] = ga_tib_acc_;  mod["ga_tib_n"] = ga_tib_n_;
     {
         const double ap = ga_yaw_allplant_n_ ? ga_yaw_allplant_ / double(ga_yaw_allplant_n_) : 0.0;
         const double sw = ga_yaw_anyswing_n_ ? ga_yaw_anyswing_ / double(ga_yaw_anyswing_n_) : 0.0;
@@ -2885,7 +2894,7 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     // yaw_swing_excess is the headline — mean |yaw rate| while ANY foot is airborne minus
     // the all-four-down reference.  If folding the limb works, this falls.
     j["tibia_plumb_active"]  = (tibia_plumb_gain_ != 0.0);
-    j["tibia_off_mean"]      = tibia_off_mean_;   // mean |shank off vertical|, radians
+    j["tibia_off_mean"]      = ga_tib_n_ ? float(ga_tib_acc_ / double(ga_tib_n_)) : 0.0f;   // mean |shank off vertical|, radians
     j["swing_tuck_active"]   = ((swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && have_contact_);
     j["swing_tuck_frac"]     = swing_tuck_frac_;
     {
@@ -3139,6 +3148,8 @@ void MotorEPM::restore_state(nlohmann::json const& s) {
         ga_yawd_allplant_n_ = mod.value("ga_yawd_allplant_n", ga_yawd_allplant_n_);
         ga_yawd_anyswing_   = mod.value("ga_yawd_anyswing",   ga_yawd_anyswing_);
         ga_yawd_anyswing_n_ = mod.value("ga_yawd_anyswing_n", ga_yawd_anyswing_n_);
+        ga_tib_acc_ = mod.value("ga_tib_acc", ga_tib_acc_);
+        ga_tib_n_   = mod.value("ga_tib_n",   ga_tib_n_);
         if (mod.contains("ga_tq_ema"))      ga_tq_ema_      = mod["ga_tq_ema"].get<std::vector<float>>();
         if (mod.contains("ga_tq_j_stance")) ga_tq_j_stance_ = mod["ga_tq_j_stance"].get<std::vector<double>>();
         if (mod.contains("ga_tq_j_swing"))  ga_tq_j_swing_  = mod["ga_tq_j_swing"].get<std::vector<double>>();

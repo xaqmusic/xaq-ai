@@ -558,7 +558,9 @@ private:
     double  tibia_plumb_gain_  = 0.0;           // 0 = off (byte-identical)
     double  tibia_plumb_scale_ = 1.40;          // = HIP2_LIMIT (body kinematic constant)
     double  tibia_plumb_offset_ = -0.0292;      // = KNEE_REST + pi/2 (body kinematic constant)
-    float   tibia_off_mean_ = 0.0f;             // diag: mean |θ_tibia| in radians
+    // Mean |θ_tibia| in radians, accumulated in the DIAGNOSTIC block so every instrumented
+    // arm reports it — including ones with the plumb reflex off, which is the comparison.
+    double  ga_tib_acc_ = 0.0; int64_t ga_tib_n_ = 0;
     double  swing_tuck_hip2_ = 0.0;             // 0 = off (byte-identical)
     double  swing_tuck_knee_ = 0.0;
     float   swing_tuck_frac_ = 0.0f;            // diag: frac of leg-ticks the bias applied
