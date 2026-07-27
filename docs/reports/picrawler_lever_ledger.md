@@ -532,6 +532,101 @@ gear ratio — it is shank verticality plus a lower CoG.
 reflex)"* at `postural_gain=0.3`; at the promoted 0.7 the parameter now bites hard in both
 directions. The failure is no longer authority, it is the conflict above.
 
+#### ★★ `tibia_plumb_gain` — the operator's INVERSE-KINEMATICS framing, as an error
+
+hip2 and the knee are a planar 2-link arm. With hip2 pinned at its horizontal rest the KNEE
+ALONE must set both the foot's height and its fore-aft position, so the foot is forced along a
+circular arc about the knee axis and the shank has to sweep through a large angle to translate
+the foot at all. The reflex gives hip2 an objective — null the shank's deviation from vertical —
+so the knee's gait drive TRANSLATES the foot instead of arcing it. Nothing about timing is
+specified, so the rhythm stays emergent (§5.7).
+
+`θ_tibia = 1.40·x[hip2] + x[knee] − 0.0292` rad, from the body's own kinematic constants
+(`HIP2_LIMIT=1.40`, `KNEE_REST=−1.6`), validated against the CAD rest pose and cross-checked
+controller-side against the raw joint angles (51.5° vs 52.5°).
+
+**Distinct from the refuted "learned hip2"**, which merely LOOSENED hip2's postural spring and
+hoped the HK controller would discover the coordination. An unconstrained joint is a wobble
+dimension, not an IK solver; this one is given an objective.
+
+| gain | net_disp | straight | tilt_sd | tib_off | bellyc | falls |
+|---|---|---|---|---|---|---|
+| base | 4.85 ± 0.50 | 0.71 ± 0.02 | 0.0877 | 37.5° | 0.0221 | 0 |
+| −0.3 | 5.17 | 0.65 | 0.1228 | 50.8° | 0.0480 | 0.33 |
+| −0.15 | 5.48 | 0.70 | 0.0834 | 43.6° | 0.0319 | 0.33 |
+| **+0.15** | **6.38 ± 0.61 (+32 %)** | **0.82 ± 0.00** | **0.0689** | 34.3° | 0.0156 ⚠️ | **0** |
+| +0.3 | 5.44 ± 1.09 | 0.75 | 0.266 ⚠️ | 33.9° | 0.0103 ⚠️ | 0 |
+
+**+0.15 is the largest single effect measured this session: +32 % distance and `straight` 0.82
+with a standard deviation of 0.00 across three seeds** — the variance-collapse signature the
+promoted heading-hold produced. It beats the static `hip2_tuck_target` shift (6.16 / 0.80) while
+moving the tibia *less* (34.3° vs 32.9°), i.e. the reflex buys more per degree than a mean
+posture shift — consistent with correcting the shank *through the stride* rather than on
+average. **Not promoted: belly clearance falls 0.0221 → 0.0156 (−29 %),** and belly-up is a
+promoted invariant. `IN_FLIGHT` — needs the corridor, hump, recovery and inversion gates.
+
+#### ★★ THE KINEMATIC DEAD END — no joint angle buys both a vertical shank and a high chassis
+
+The escape route was to plumb with hip2 and pay the ride height back with the knee (the joint
+`stance_lift` proved pushes the body up off PLANTED feet). It **closes, and informatively**:
+
+| | base | hip2 −0.2 | hip2 −0.2 + knee_tuck 0.85 |
+|---|---|---|---|
+| belly clearance | 0.0221 | 0.0134 ⚠️ | **0.0215** ✓ restored |
+| tibia off vertical | 37.5° | **32.9°** | **44.1°** ✗ worse than baseline |
+
+**The knee buys height by FOLDING the shank, which is by definition the opposite of plumbing
+it.** hip2 plumbs and drops the body; the knee raises the body and un-plumbs. Those are the same
+2-link constraint seen twice, and the reason is geometric: the feet plant at a **170 mm** radius
+against a **166 mm** total leg reach, so the shank *must* angle out simply to reach the ground.
+At that foot placement the leg is not long enough for both.
+
+**⇒ And the last escape — "shorter steps bring the feet closer in" — is REFUTED on kinematics.**
+`stroke_gain` swept 1.65 → 1.4 → 1.2 → 0.9 (a 1.8× range) leaves **`foot_r` invariant at
+170.3–171.2 mm and `tib_off` invariant at 37.4–38.2°.** The reason is structural:
+**`HIP1_AXIS` is world +Z** (`picrawler_geometry.md`) — hip1 is a *yaw* joint that sweeps the
+foot fore-aft along an arc at **CONSTANT RADIUS**. Stride length and foot radius are
+kinematically independent on this body; only hip2 + knee set the radius, and every way they
+reduce it increases shank obliquity (the `knee_tuck` column above: 170→164→162→145 mm bought
+`tib_off` 37.5→44.1→48.8→**64.5°** and collapsed the gait to net_disp 1.33).
+
+**So the "get the tibia vertical" family is closed on this geometry.** Verticality trades against
+ride height (hip2), against feet-in (knee), and is untouchable by stride. It is not a tuning
+failure — it is that the leg is not long enough for the foot placement the gait uses. Re-use
+context: a body with a longer tibia or a shorter femur, or a lever that moves the foot placement
+by some route other than these three.
+
+#### ★★ BUT THE SWEEP FOUND A REAL LEVER: the body is OVER-STRIDING
+
+The same runs answer a different question — the one §5 named and nobody had tried
+(*"propulsion amplitude / stroke operating point (never swept)"*):
+
+| `stroke_gain` | net_disp | straight | tilt_sd | bellyc | falls |
+|---|---|---|---|---|---|
+| **1.65 (deployed)** | 4.85 ± 0.50 | 0.71 ± 0.02 | 0.0877 | 0.0221 | 0 |
+| 1.4 | 5.17 ± 0.43 | 0.75 ± 0.03 | **0.0703** | 0.0232 | 0 |
+| **1.2** | **5.45 ± 0.51 (+12 %)** | **0.78 ± 0.03** | 0.0778 | 0.0228 | 0 |
+| 0.9 | 4.56 ± 0.11 | **0.79 ± 0.01** | 0.0739 | 0.0223 | 0 |
+
+**A SHORTER stroke walks FURTHER**, peaking near 1.2: +12 % distance, +10 % straightness, less
+wobble, **belly clearance preserved**, 0 falls throughout. The deployed 1.65 is past the
+optimum. This validates the operator's *conclusion* ("shorter steps move the robot faster")
+while refuting the *mechanism* they proposed for it (feet closer in — see above): the gain is
+that a long stroke wastes effort, not that it changes where the foot lands.
+
+**GATES (all run).** Corridor cross-check n=4 vs the deployed baseline at `stroke_gain=1.2`:
+net_z 4.75→4.70, straight 0.74→0.75, flat_v 0.05→0.05, belly 0.023→0.024, 0 falls — **a tie on
+progress** — but `steps` 53→**64** and `step_bal` 0.44→**0.52**. (1.4 is worse in the corridor:
+net_z 4.24.) Hump gate n=4: final_z 4.74→**4.67**, gain_z 2.13→2.03, 0 falls — **holds, with the
+variance halved** (std 0.51→0.25).
+
+**Verdict `PARTIAL`, not promoted.** No regression anywhere, belly preserved, hump intact, 0
+falls in every arm — but the +12 % is arena-only and the corridor is a tie, so by §3.3 (*a real
+capability is LOUD*) this is not loud enough to promote on metrics alone. **What appears in BOTH
+gyms is more stepping and better leg participation.** Next step is operator UI observation (§3
+rule 5) before any bake-in; the mechanism (over-striding) is worth pursuing further because it
+is the first time this campaign has moved distance at all without paying in belly or falls.
+
 #### Swing-phase leg fold (`swing_tuck_hip2` / `swing_tuck_knee`) — the KNEE half carries it
 
 The mirror of the promoted `stance_lift` (which biases the knee of PLANTED legs), gated on
@@ -556,8 +651,15 @@ baseline), **+hip2 SUPPRESSES** lifting (0.11–0.17, `steps` collapse 25→4). 
 
 **`step_bal` 0.07 → 0.49 (7×) on the KNEE HALF ALONE**, with distance +5 %, wobble −17 %, belly
 preserved, 0 falls. Folding the shank during swing carries the effect; lifting the femur does
-not. `IN_FLIGHT` — n=3 single-gym is a signal, and it needs the corridor + hump + recovery +
-inversion gates before any promotion.
+not.
+
+**CORRIDOR CROSS-CHECK (n=4, 6000 ticks) — the headline does NOT transfer.** Against a matched
+control (identical instruments, gain 0): net_z 4.75→4.80, straight 0.74→0.73, **step_bal
+0.44→0.43**, belly 0.023→0.023, 0 falls, `steps` 53→35, and the one real move is **tilt_sd
+0.068→0.059 (−13 %)**. A tie plus a modest wobble improvement. **Diagnosis: the arena's 7× gain
+was HEADROOM, not transferable mechanism** — the corridor baseline already sits at `step_bal`
+0.44 while the arena sits at 0.07. Verdict `PARTIAL`, scenario-scoped to open ground; the wobble
+reduction is the part that appears in both gyms. Not promoted.
 
 ---
 

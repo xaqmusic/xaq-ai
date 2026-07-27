@@ -432,6 +432,30 @@ recurs at every layer.
   limbs while the thrust↔support relation *within* a limb stayed random, and every one of
   them measured null. **A coupling parameter cannot help while the thing being coupled is
   internally incoherent** — check the within-unit relation before tuning the between-unit one.
+- **★ Before optimizing a posture, check whether the JOINT AXIS can even produce the change you
+  want.** A quadruped's feet planted at 170 mm against a 166 mm total leg reach — straight-legged,
+  maximum moment arm — and the obvious fix was "shorten the stride so the feet land closer in."
+  A 1.8× stride sweep moved the foot radius by **under 1 mm**, because the fore-aft joint rotates
+  about the **vertical** axis: it sweeps the foot along an arc at *constant radius*. Stride length
+  and foot radius were kinematically independent the whole time. **Read the axis before designing
+  the lever** — an hour with the CAD table would have refuted that pathway before a line of code.
+  Corollary, which is the more valuable half: **when a desired posture is blocked, enumerate every
+  joint that could produce it and check each against a measurement.** Here all three routes closed
+  and closed *differently* (hip2 trades against ride height, the knee trades against feet-in,
+  stride cannot move it at all) — and only running all three showed the constraint was the LIMB
+  GEOMETRY, not any control law. That is a body-design finding, and no amount of tuning reaches it.
+- **★ Confirming an operator's CONCLUSION is not confirming their MECHANISM — separate them, and
+  say which one survived.** Three times in one session the proposed action helped and the proposed
+  reason did not: "the swing leg spins the chassis" (yaw impulse was measured *lower* during swing
+  than during full support, yet lifting the limb still quadrupled the step rate — the real
+  mechanism was foot clearance); "a vertical shank gives mechanical advantage" (the moment arm
+  barely moved, yet verticality tracked `scrub` and straightness monotonically — the real mechanism
+  was that a vertical shank stops pushing sideways); "shorter steps bring the feet in" (foot radius
+  invariant, yet a shorter stroke walked 12 % further — the body was simply over-striding). **A
+  lever adopted for the wrong reason will be generalized in the wrong direction**, so the mechanism
+  has to be instrumented separately from the outcome, and a null on the mechanism reported even
+  when the outcome is a win.
+
 - **★ A magnitude gate cannot fix a timing problem.** Gating the same stroke by measured
   per-leg load — the doctrinally correct "gate the bias by the state that makes it valid" —
   fired cleanly across a 6.6× authority range and moved nothing: it suppresses thrust spent
@@ -444,6 +468,18 @@ recurs at every layer.
 
 ## 8. Process discipline
 
+- **★ A SCENARIO CAN SUPPRESS THE FAILURE YOU ARE TRYING TO FIX — check the environment's
+  geometry before trusting the metric.** Every measurement tool in a legged-robot project defaulted
+  to a corridor gym, and that corridor was built *"inside self-centering 30° walls"*: the geometry
+  actively re-centred the body, so a heading disturbance was corrected by the wall before it could
+  reach `straight` or `turns`. An entire family of anti-yaw levers was being scored in the one
+  arena where its target failure could not appear. The same baseline measured `step_bal` **0.44 in
+  the corridor and 0.07 on open ground** — the deficit was 6× worse in the gym nobody was
+  measuring. **Two rules: run the lever in the scenario where its failure is VISIBLE, and when two
+  scenarios disagree, that disagreement is data about the scenarios, not noise to average away.**
+  (It cuts the other way too: a 7× improvement on open ground shrank to a tie in the corridor,
+  because the corridor baseline had no headroom left. Neither number was wrong; a single-gym
+  verdict was.)
 - **★ KNOW YOUR HARNESS'S MEASURABLE RANGE, AND GUARD IT — a too-long run penalizes the
   arm that works.** A 9.5 m curriculum sat on a 20×20 floor. Run long enough and the fastest
   arm walks off the end: it posted the best distance in the whole campaign *while its chassis
