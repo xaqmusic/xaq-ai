@@ -1,15 +1,25 @@
-# xaq
+# xaq-ai
 
 **xaq** (pronounced "ex-ay-cue") is an open research framework for **embodied
 active inference**: a System-1
 "subconscious" substrate for robots and simulated agents, rather than a
-language-model deliberator. It learns online by minimising prediction error, is
+language-model deliberator. It learns online by minimizing prediction error, is
 driven by internal homeostatic needs instead of an external reward signal, and
 touches the world only through its own sensors and actuators.
 
-The core idea is that a competent agent can be assembled from several small
+The core idea is that a competent agent can be assembled from few or many small
 inference loops — each responsible for one hidden feature of the world —
-coordinated by a shared, trust-weighted state bus and a single policy selector.
+coordinated by a shared, trust-weighted state bus and a policy selector.
+
+## Why?
+
+This project began as an effort to build a self organizing smart sensor.  But my personal interests in the nature of intelligence, origin of life, and robotics took over and began the relentless pursuit of a truly hard problem: applying the principles and metaphors of Active Inference, Assembly Theory, and The Playful Machine into a working foundation for physical agents.  I am impressed yet bored with LLMs.  Reinforcement Learning works, but it's clunky.  I want to see a physical agent that is truly a member of this universe that learns by palpating its environment at every moment to build its own robust yet flexible model of its world in order to resolve internal states by acting on external states.  A key constraint is I want this substrate to use commodity computational resources (low power mobile processors, single board computers, digital signal processors) while delivering an "aliveness" and utility that extends the physical structure of the mechanism beyond what we see today in robotics.  I see behaviors in the insects that inhabit my back yard that put the capabilities of every drone and humanoid robot to shame.  I feel those behaviors are possible with the right dose of creativity, humility, and perseverance. 
+
+It is hard to quantify the advantage Nature has in solving these problems by Her use of large numbers (in all dimensions) but I feel our level of computation has reached a point where, with the proper recipe and plumbing, the analogies life has presented to us can be represented in silicon.  This project is biomimetic at high scope and von Neumann at the lowest with some modules having vague analogies to biology (EPM ~ cortical column) while others used biologic plausibility as a foundation for their architecture.  The prize is a functional agent today, not an exploration in biological simulation. 
+
+These are lofty goals but I feel the components are right in front of us.  I recognize I am standing on the shoulders of giants much taller than myself to enable this projects existence.  I am not a mathematician, a machine learning academic, or a competent coder.  I am a musician, a signal processing designer, tinkerer, builder, and in possession of a wide yet shallow body of knowledge with decades of experience in tech.  With that being said, my approach to math and statistical concepts in this project are from first principles and black-box probing to fully understand the applications and benefits for their target functions.  My current coding and academic partners are Claude and the scientific method.  I hope you can join me as I sure as hell need the help.
+
+The cool thing about very hard problems that vex the greatest minds on this planet is almost anyone can take a solid crack at them while knowing success is far from guaranteed.  There is an element of danger (looking stupid in front of people you respect) that is balanced by the lure of sweet novelty.  Therefore we go forth and build like a proper Fool.
 
 ## What's here
 
@@ -38,9 +48,23 @@ See [docs/NAMING.md](docs/NAMING.md).
   once they are properly powered.
 - **[docs/brain_building_doctrine.md](docs/brain_building_doctrine.md)** — the
   method the report tests: how to compose predictive loops without fooling
-  yourself.
+  yourself.  This is a living document.
 - **[docs/](docs/)** — full documentation index, including
   [research summaries](docs/research-summaries/) of the papers xaq builds on.
+
+## Where we are going
+
+This project is in very early stages (started at the beginning of 2026) so there are a lot of areas that need work and questions unanswered:
+
+- What is the recipe for simple loops scale automatically (mitosis) for improved reasoning?
+- How can we build an evolutionary scaffold to accelerate development?
+- How can the substrate and each module be optimized for current hardware?
+- What does an ASIC for this substrate look like?
+- How can we leverage decentralized compute for this substrate (think octopus brains)?
+- How can Reality Token fusion (lateral voting) be improved or changed for improved representations?
+- What is the best way for slow and fast loops to interact (jitter buffers etc)?
+- What is the most transferable method of action decoding?
+- How can we setup proper internal goals and rewards to give physical agents utility in human endeavors?
 
 ## Build
 
