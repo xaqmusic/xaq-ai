@@ -11,6 +11,8 @@ The core idea is that a competent agent can be assembled from few or many small
 inference loops — each responsible for one hidden feature of the world —
 coordinated by a shared, trust-weighted state bus and a policy selector.
 
+<img width="482" height="497" alt="inspector" src="https://github.com/user-attachments/assets/e21358e1-9723-4a2f-9985-696dc5302f9f" /> <img width="482" height="497" alt="picrawler3" src="https://github.com/user-attachments/assets/8b453783-1193-4d3c-8e5e-d1e746b3135a" />
+
 ## Why?
 
 This project began as an effort to build a self organizing smart sensor.  But my personal interests in the nature of intelligence, origin of life, and robotics took over and began the relentless pursuit of a truly hard problem: applying the principles and metaphors of Active Inference, Assembly Theory, and The Playful Machine into a working foundation for physical agents.  I am impressed yet bored with LLMs.  Reinforcement Learning works, but it's clunky.  I want to see a physical agent that is truly a member of this universe that learns by palpating its environment at every moment to build its own robust yet flexible model of its world in order to resolve internal states by acting on external states.  A key constraint is I want this substrate to use commodity computational resources (low power mobile processors, single board computers, digital signal processors) while delivering an "aliveness" and utility that extends the physical structure of the mechanism beyond what we see today in robotics.  I see behaviors in the insects that inhabit my back yard that put the capabilities of every drone and humanoid robot to shame.  I feel those behaviors are possible with the right dose of creativity, humility, and perseverance. 
@@ -51,6 +53,9 @@ See [docs/NAMING.md](docs/NAMING.md).
   yourself.  This is a living document.
 - **[docs/](docs/)** — full documentation index, including
   [research summaries](docs/research-summaries/) of the papers xaq builds on.
+
+  <img width="1172" height="403" alt="cel1" src="https://github.com/user-attachments/assets/1a554b9d-d21b-44c1-9e40-676e2f03c795" />
+
 
 ## Where we are going
 
