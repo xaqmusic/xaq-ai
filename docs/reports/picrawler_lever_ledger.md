@@ -670,6 +670,203 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★ 2026-08-02 — PLAYFUL MACHINE IMPORTS: `c_init` `WORKING` on activity, gravity scaffold `NULL`
+
+Source analysis: [`playful_machine_source_analysis.md`](playful_machine_source_analysis.md).
+All arms n=4, corridor, 6 000 ticks, diff 0.3. **Measured on the `pure_hk` tier**, per the
+context finding below — the deployed base cannot express a homeokinetic lever.
+
+**`c_init` (import I1)** — PM's Sox `cInit`: adds a positive own-joint position feedback to
+`C(j,3j)` so the loop starts self-exciting instead of at a dead fixed point. **Added to**, not
+replacing, the per-leg random init (that randomness is this module's inter-leg symmetry breaker).
+Effective loop gain is `motor_gain · c_init`, so PM's cInit 0.7–1.2 ⇒ `c_init` ≈ **0.23–0.40**
+at our `motor_gain=3.0`. 0 = off, byte-identical (verified by measurement + unit test).
+
+| `c_init` on `pure_hk` | net_z | chassis_y | belly | steps | step_bal | tilt_sd | falls |
+|---|---|---|---|---|---|---|---|
+| 0 (control) | −0.03 | 0.026 | 0.005 | 9.75 | **0.00** | 0.064 | 0.25 |
+| 0.25 | −0.07 | 0.038 | 0.036 | 20.0 | **0.32** | 0.567 | 2.00 |
+| 0.5 | +0.10 | 0.033 | 0.017 | 18.0 | 0.19 | 0.270 | 0.25 |
+| 1.0 | +0.11 | 0.038 | 0.030 | **32.8** | 0.22 | 0.395 | 1.00 |
+
+**`WORKING` on activity, `NULL` on locomotion, `REGRESSION` on stability.** Every non-zero value
+converts a folded, inert body into an active one — chassis up, belly clearance ×3–7, steps ×2–3,
+leg participation from literally zero to 0.19–0.32 — and none produces forward progress
+(net_z ≤ 0.11). Activity rises with `c_init`; the stability cost is non-monotonic (0.25 wobbliest,
+0.5 calmest — higher `C` pushes `z` further into `tanh` where `g'` shrinks and gain self-limits).
+**The mechanism is confirmed; activity is not locomotion.**
+
+**`scaffold_gravity_scale` (import I6)** — PM runs *every* legged experiment at gravity −6 vs
+−9.81 (snake −4), on rubber, with compliant passive distal joints. New body knob (export +
+`OGMA_PICRAWLER_GRAVITY_SCALE`), 1.0 = off, byte-identical (deployed baseline reproduces
+4.58 ± 0.27 seed-for-seed). PM equivalent 0.61.
+
+**`NULL`.** At 0.61 g the un-excited `pure_hk` body collapses to **exactly the same chassis height
+(0.026) and belly clearance (0.005)** as at 1.0 g; `turns` gets *worse* (±1.1–5.6). With
+`c_init=0.25` it buys mildly less wobble (tilt_sd 0.567→0.387, falls 2.0→1.5) and no progress.
+**Diagnosis: gravity was never the binding constraint on standing** — the servos have ~4×
+headroom over the static hip2 load already. PM's gravity reduction buys *dynamic* margin, not
+the ability to hold a pose. **Re-use context: retry as a dynamics scaffold (fast/unstable gaits),
+not as an uprightness scaffold; and the honest test it points to instead is `pure_hk` + the
+stance reflex** (`postural_gain`), since that is the one parameter separating a `pure_hk` body
+that collapses from an all-learning-ablated deployed body that stands fine (chassis 0.058).
+
+**`cmd_squash` (import I3)** — see the saturation entry below. `NULL` on the deployed base, and
+that null is a *passed prediction*, not a failed lever.
+
+**★ What the pure-HK campaign converged on: HK produces MOTION but not DIRECTED motion.** Across
+every pure-HK arm (1.0 g and 0.61 g, with and without the stance reflex, `c_init` 0 → 1.0) the
+legs move and the body does not travel — best net_z **+0.23** against a deployed 4.58. The thing
+that converts leg motion into translation in the deployed config is the hip1 stroke with its
+hand-specified per-leg `stroke_signs` `{+1,−1,+1,−1}`. **This is structural, not a tuning gap:
+MotorEPM is four independent 3×3 per-leg controllers, so `C` has no cross-leg terms and cannot
+represent an inter-leg phase relationship at all** — four uncoupled oscillators at arbitrary
+relative phase sum to no thrust. PM's dog, hexapod and humanoid all use **one Sox across every
+joint**, where inter-leg coordination lives in `C`'s off-diagonal blocks and is *learned*.
+⇒ **Whole-body `C` is promoted to the leading candidate** (the only untested import that could
+supply direction as a learned quantity rather than as `stroke_signs`); **colored sensor noise** is
+second (cheap, unbuilt, and PM's loop amplifies correlated sensory noise into motion while ours
+has none).
+
+**Also established, and it is a BODY fact:** `pure_hk` + `postural_gain=0.7` + `knee_tuck_target=0.7`
+— identical to the deployed values — holds the robot at chassis **0.029** taking **0.5 steps per
+6 000 ticks**, where the deployed config stands at **0.058**. The difference is entirely
+`height_homeo_gain` + `stance_lift_gain`. **The picrawler's standing posture is actively
+constructed by the height homeostat, not held by postural tone** — which connects to the
+kinematic dead-end entry (feet plant at 170 mm against 166 mm total leg reach). PM's robots have
+no analogue: their servos' neutral pose *is* a standing pose. That is a large part of why this
+project needed a scaffold stack and theirs did not.
+
+---
+
+### ★★★ 2026-08-02 — THE DEPLOYED GAIT SURVIVES A TOTAL ABLATION OF THE LEARNED CONTROLLER
+
+**Context:** a deep dive on the Playful Machine sources (Der/Martius, `~/Documents/PlayfulMachine`)
+prompted three cheap Phase-0 measurements on our own stack. Full analysis, source diff and import
+list: [`playful_machine_source_analysis.md`](playful_machine_source_analysis.md).
+**Protocol:** corridor, n=4 fixed seeds, 6 000 ticks, diff 0.3; every arm one `mkarm.py` config
+off the deployed `..._imufused__steplock_off.json` base with the diff printed.
+
+| arm | net_z | straight | steps | step_bal | tilt_sd | planted | falls | verdict |
+|---|---|---|---|---|---|---|---|---|
+| **baseline** (all learning on) | 4.58 ± 0.27 | 0.73 | 50.0 | **0.48** | 0.065 | 3.69 | 0 | `BASELINE` |
+| `ctrl_lr=0` (HK gradient off) | 3.78 ± 0.92 | 0.68 | 57.3 | 0.26 | 0.073 | 3.63 | 0 | see caveat |
+| `embed_lr=0` (CPG-embedding off) | 4.23 ± 0.50 | 0.71 | 41.8 | 0.29 | 0.062 | 3.60 | 0 | — |
+| **ALL controller learning off** (`ctrl_lr`+`embed_lr`+`sat_lr`+`bias_lr` = 0) | **4.75 ± 0.48** | 0.72 | 44.0 | 0.40 | 0.067 | 3.66 | 0 | **`NULL` — the ablation costs nothing** |
+
+**Turning off every learned component in MotorEPM does not reduce distance, straightness,
+stability, belly clearance or falls.** The learned layer buys `steps` 44→50 and `step_bal`
+0.40→0.48 and nothing else. ⇒ **In the deployed config, locomotion is produced by the hand-built
+scaffold stack** (stroke · Kuramoto-toward-a-specified-trot · postural · height · heading PD ·
+stance-lift), not by the homeokinetic controller or the CPG-embedding.
+
+**Verified, not assumed** (`CLAUDE.md` §3.2, all seven): `hk_share` 0.111 → **0.006** and `|C|`
+mass reverts to the flat random-init profile (consumer fired); `motor_tle` **0.2495 in both arms**
+— the forward MODEL still learns, only the controller was ablated (not dead code); baseline
+reproduces 4.58 ± 0.27 exactly; `mkarm` printed four real diffs (no tautology, no silent
+confound); this IS the faithful version — the 3-param attempt was the weakened slice (below).
+
+**Both partial ablations are worse than either extreme** (3.78 and 4.23 vs 4.58 on and 4.75 off).
+The learned components mutually compensate and the scaffold gains were hand-tuned with them
+running — the signature of a learned layer the surrounding controller was fitted **around**,
+rather than one the gait is built **on**.
+
+**Power (§3.3):** n=4 is a **signal, and this is a null**, which is the claim type that most needs
+powering. **Not yet a finding — needs n≥20 with varied world seeds before it is settled.** It is
+recorded now because it is congruent with three independent things already in this ledger:
+`hk_share`=0.11, `step_cv` identical (0.94–1.06) in *every* arm ever measured, and the nine-lever
+flat-`flat_v` record.
+
+**What it does NOT say.** It is not a verdict on the Motor-EPM. The same run shows the HK gradient
+learns something real and correct: `|C|` mass on the **velocity** columns is **0.445 with HK on
+and 0.042 with it off** — homeokinesis learning a velocity-feedback law, exactly as it should.
+It is a verdict on the **context**: a base whose scaffolds are loud enough that no homeokinetic
+lever can be read. **⇒ Every mechanism lever from here is measured on the `pure_hk` tier first;
+the deployed base stays the reference for "does this help the robot we have."**
+
+> #### ⚠️ The first attempt at this ablation was INVALID, and the new instruments caught it
+> `ctrl_lr=0`+`embed_lr=0`+`sat_lr=0` (without `bias_lr=0`) gave net_z **0.01**, `steps` **0**,
+> `tilt_sd` **0.000** — a frozen statue. Not an ablation: an **integrator windup**. `h += bias_lr·μ`
+> (`MotorEPM.cpp:2432`) is **not gated by `ctrl_lr`**, and `h -= sat_lr·z·tanh²(z)` is its only
+> restoring term. Instruments named it on sight: clip duty **0.99 on every joint**, mean pre-clamp
+> command **12.68** (baseline 1.40), `motor_tle` **0.0000** (a body pinned against its stops is
+> trivially predictable). §3.2 rule 7 — the arm you think you ran is not the arm that ran.
+
+---
+
+### ★★ 2026-08-02 — `sat_lr` IS THE ONLY BRAKE ON THE BIAS INTEGRATOR (`REGRESSION`, mechanism proven)
+
+Single parameter, `sat_lr` 0.02 → 0, deployed base, n=4 corridor:
+
+| | baseline | `sat_lr=0` |
+|---|---|---|
+| net_z | 4.58 ± 0.27 | **0.12 ± 0.41** |
+| steps | 50.0 | **20.5 ± 35.5** — `[82, 0, 0, 0]`, three seeds **zero** |
+| tilt_sd | 0.065 | **0.380 ± 0.426** (one seed 1.117 — convulsed) |
+| mean pre-clamp \|cmd\| hip1 | 1.40 | **14.27 ± 11.16** — seeds 4.2 / 9.3 / 13.6 / **30.0** |
+
+Unbounded, still-growing, seed-divergent magnitude = an integrator with no brake. **The mechanism
+is proven by the pairing with the entry above: with `bias_lr` ALSO zero, `sat_lr=0` is completely
+harmless** (net_z 4.75, the best arm measured). So the failure is **bias windup**, not saturation.
+
+**`sat_lr` is documented in-source as "anti-saturation — surrogate for the dropped ∂G term."
+Nothing recorded that it is load-bearing for stability.** ⚠️ **Live trap:** the obvious
+improvement — replacing `sat_lr` with the principled confinement term from PM's `sos_avggrad.cpp`
+— removes this brake. Any such change **must** supply an explicit bound on `h`; PM's Sox carries a
+separate `damping` parameter (dog 0.0001, humanoid 0.0001–0.0003) that we have no analogue of,
+and that is very likely what it is for. **Third unbounded-integrator failure in this campaign**
+(cf. 2026-07-26) — it is this codebase's characteristic failure shape.
+
+---
+
+### ★★ 2026-08-02 — THE STRIDE JOINT IS SATURATED 56 % OF THE TIME (new instrument)
+
+New Phase-0 instruments, report-only, in **both** `snapshot_state()`'s `mod` dict and
+`diag_snapshot()`: `clip_duty` / `clip_duty_j` (fraction of post-warmup leg-ticks the assembled
+command exceeded ±1), `pre_mag_j` / `pre_max_j`, `hk_share`, `echo_a_gain`, `c_mass_{pos,act,del}`.
+
+| deployed baseline | clip duty | mean pre-clamp \|cmd\| |
+|---|---|---|
+| **hip1 (stride)** | **0.559 ± 0.044** | **1.404** |
+| knee | 0.179 | 0.592 |
+| hip2 | 0.010 | 0.091 |
+
+`MotorEPM.cpp` computes `y = motor_gain·tanh(z)` with `motor_gain=3.0`, then adds ~7 further
+terms, then applies the **only** clamp 400 lines later. **The nonlinearity the body applies is a
+hard discontinuity; the HK loop-Jacobian `G = diag(1−tanh²)` assumes a smooth one**, so `L`
+overstates loop gain wherever the command is railed. `mean|1.65·sin|` = 1.05, so the power stroke
+alone is past the rail 42 % of every cycle: **`stroke_gain` above ~1.0 is a duty-cycle control,
+not an amplitude control**, and the heading PD (gain 7.0) has full authority on one side of the
+stroke and none on the other.
+
+**Retrodiction, tested the same day — directionally right, magnitude insufficient.**
+`stroke_gain` 1.65→1.2 (the ledger's one uncosted win) drops hip1 mean request 1.404 → **1.038**
+and clip duty 0.559 → **0.476**, and buys **`steps` 50 → 63.8 (+27 %)** with `step_bal` 0.48 →
+0.52 — but net_z is a tie (4.70 ± 0.58) and the joint is *still* railed 48 % of the time. **1.2 is
+a less-saturated operating point, not a de-saturated one**, so "shorter stride" is not simply a
+saturation result in disguise; the part it moved is step count.
+
+**`cmd_squash`** (new lever: tanh squash of the assembled command instead of the hard clamp,
+default 0 = byte-identical) on the deployed base: `NULL`/slight `REGRESSION` — net_z 4.58 → 4.17 ±
+0.50, `planted` 3.69 → 3.54, `steps` 50 → 58.5 ± 16.0, tilt_sd tied. **Exactly what the ablation
+entry predicts:** on a base where the learned controller contributes nothing, making the actuator
+honest *for the learning rule* buys nothing and costs ~11 % of the scripted stroke's peak. **Re-use
+context: it is a prerequisite for reading the HK Jacobian honestly and must be re-measured on the
+`pure_hk` tier, where it is a mechanism question rather than a stroke-amplitude question.**
+
+**Also measured — the echo channel (`[pos, action, delta]` state layout).** `echo_a_gain` =
+**0.945**: the forward model HAS latched the channel that is a copy of its own command, spending
+one of three output directions on it. But `|C|` mass on those columns is **0.159 against a
+uniform 0.333** — the controller is *not* exploiting the free-win subspace. Real, wasteful of
+model rank, **not the dominant failure**; fix when the state vector is next touched.
+
+⚠️ **Instrument caveat, learned the hard way: `hk_share` is a BLIND metric for importance.**
+It measures how loud a term is, not how much it matters — the scaffolds carry ~89 % of the
+magnitude and (per the windup arm) produce zero locomotion without the right modulation. **Read
+`hk_share` only alongside an ablation.**
+
+---
+
 ### ★★★ 2026-07-27 — THE BODY HAS NO STEP PERIOD, AND THAT INVALIDATES THE PREMISE OF THE WHOLE TIMING FAMILY
 
 **The single most consequential measurement of the session, and it was never taken before.**
@@ -878,6 +1075,31 @@ the fix protects **fast** arms, i.e. exactly the ones a propulsion lever exists 
 
 ## 5. Open frontier
 
+- **★★★ THE MEASUREMENT CONTEXT IS THE BLOCKER (2026-08-02).** Ablating *every* learned component
+  of MotorEPM costs the deployed gait nothing (4.75 ± 0.48 vs 4.58 ± 0.27, n=4). Locomotion here
+  is the scaffold stack. **Consequence for everything below: a lever tested on the deployed base
+  is being measured as a perturbation of a script.** That is the §3.1 lesson arriving from the
+  other side — we have been generating verdicts in a context that cannot express the mechanism.
+  **New protocol: every mechanism lever is measured on the `pure_hk` tier FIRST**
+  (`motor_epm_pure_hk__inst.json`, instrumented); the deployed base remains the reference for
+  "does this help the robot we have", not the place mechanisms are judged.
+  **First powering job: take the ablation null to n≥20 with varied world seeds** — it is a null
+  at n=4, which is the claim type that most needs power.
+- **★★ NOTHING HAS EVER MOVED `step_cv`.** Across every arm measured to date — deployed baseline,
+  HK-off, embed-off, full ablation, shorter stride, squash — `step_cv` sits between **0.94 and
+  1.06**. Neither the learned controller nor the hand-built scaffolds affect footfall regularity.
+  The operator's goal is untouched by the entire lever space tried so far, which argues the cause
+  is structural (actuation, body, or the absence of any mechanism that *predicts* touchdown)
+  rather than a gain anywhere in the current stack.
+- **★ The Playful Machine import list** —
+  [`playful_machine_source_analysis.md`](playful_machine_source_analysis.md) §5. Built and
+  gain-0-guarded so far: `c_init` (self-exciting controller init, PM's Sox `cInit`; PM-equivalent
+  ≈ 0.23–0.40 at our `motor_gain=3.0`) and `cmd_squash` (actuator honesty). Not yet built:
+  colored **sensor** noise (PM puts `ColorUniformNoise(0.1)` on every sensor; our proprio is
+  noiseless and our only noise is white and motor-side), the principled ∂G/`sense` confinement
+  term (**must carry an `h` bound — see the `sat_lr` entry**), `Logarithmic` scale-free error,
+  and `SERVO_KI` (PM's `ForceBoostWiring` booster 0.05 is on in every legged experiment; ours
+  is 0).
 - **Fast flat traversal, belly-up** — still the active thread. ~~bake `stance_lift=0.5` into
   the base~~ **DONE — `stance_lift_gain=0.5` + `feet_topic` are in the deployed
   `..._imufused.json`.** An alternative framing offered but never tested: express stance-lift

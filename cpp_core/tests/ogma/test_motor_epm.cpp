@@ -427,7 +427,9 @@ TEST(MotorEPM, HotParamApplication) {
     struct KV { const char* k; double v; };
     for (auto const& kv : {KV{"coord_reward_drive", 0.5}, KV{"coord_stab_penalty", 0.15},
                            KV{"nav_gain", -3.0}, KV{"panic_strength", 0.7},
-                           KV{"height_k", 0.65}}) {
+                           KV{"height_k", 0.65},
+                           // 2026-08-02 imports (Playful Machine analysis §5)
+                           KV{"cmd_squash", 1.0}}) {
         f.m.on_param_change(kv.k, ParamValue{kv.v});
         auto cp = f.m.current_params();
         auto it = cp.find(kv.k);
@@ -1069,4 +1071,76 @@ TEST(MotorEPM, ResetReanchorsTheStepClock) {
         f.run_tick(t, {.contact = contact_train(t, 4, 26, 20)});
     EXPECT_GT(f.m.diag_snapshot()["step_lock"].get<double>(), 0.0)
         << "the clock must re-lock from post-reset touchdowns";
+}
+
+// =============================================================================
+// 2026-08-02 — Playful Machine imports (docs/reports/playful_machine_source_analysis.md).
+// Both levers ship default-off; the contract is the same as every other lever here:
+// at 0 the command path is byte-identical, above 0 it demonstrably changes something.
+// CLAUDE.md §3: verify a gain-0 guard by MEASUREMENT, never by argument.
+// =============================================================================
+TEST(MotorEPM, CInitZeroIsInertAndOnSelfExcites) {
+    auto poff = base_params();               // c_init unset == 0
+    auto pon  = base_params(); pon["c_init"] = 0.5;
+    Fixture foff(poff, 4, 3), fon(pon, 4, 3);
+    double maxdiff = 0.0, onmag = 0.0, offmag = 0.0;
+    for (uint64_t t = 0; t < 200; ++t) {
+        Sensors s;
+        foff.run_tick(t, s); fon.run_tick(t, s);
+        if (t < 20) continue;               // past babble
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j) {
+                maxdiff = std::max(maxdiff,
+                    double(std::abs(foff.accel(leg, j) - fon.accel(leg, j))));
+                offmag += std::abs(double(foff.accel(leg, j)));
+                onmag  += std::abs(double(fon.accel(leg, j)));
+            }
+    }
+    // ON must differ from OFF — a silent no-op is the failure this guards (the hip2 lesson).
+    EXPECT_GT(maxdiff, 1e-6) << "c_init>0 must actually change the controller";
+    // ...and it must EXCITE: a self-exciting diagonal drives larger commands, which is
+    // the entire mechanism claim (measured on the picrawler as steps 9.75 -> 20).
+    EXPECT_GT(onmag, offmag) << "c_init>0 must raise command magnitude, not merely differ";
+}
+
+TEST(MotorEPM, CInitDefaultOffIsByteIdenticalToLegacy) {
+    auto pa = base_params();
+    auto pb = base_params(); pb["c_init"] = 0.0;   // explicit 0 == unset
+    Fixture fa(pa, 4, 3), fb(pb, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 120; ++t) {
+        Sensors s;
+        fa.run_tick(t, s); fb.run_tick(t, s);
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff,
+                    double(std::abs(fa.accel(leg, j) - fb.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-12) << "c_init=0 must be byte-identical to the legacy init";
+}
+
+TEST(MotorEPM, CmdSquashZeroIsInertAndOnBoundsSmoothly) {
+    auto poff = base_params(); poff["cmd_squash"] = 0.0;
+    auto pon  = base_params(); pon["cmd_squash"]  = 1.0;
+    // Drive the command hard so the bound is actually reached: motor_gain 3 * tanh
+    // already spans +-3 against a +-1 clamp, which is the measured deployed condition.
+    poff["motor_gain"] = 3.0; pon["motor_gain"] = 3.0;
+    poff["c_init"]     = 1.0; pon["c_init"]     = 1.0;
+    Fixture foff(poff, 4, 3), fon(pon, 4, 3);
+    int at_rail_off = 0, at_rail_on = 0, n = 0;
+    for (uint64_t t = 0; t < 200; ++t) {
+        Sensors s;
+        foff.run_tick(t, s); fon.run_tick(t, s);
+        if (t < 20) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j) {
+                if (std::abs(double(foff.accel(leg, j))) > 0.9999) ++at_rail_off;
+                if (std::abs(double(fon.accel(leg, j)))  > 0.9999) ++at_rail_on;
+                ++n;
+            }
+    }
+    ASSERT_GT(n, 0);
+    // The hard clamp parks samples exactly on the rail; tanh never reaches it.
+    EXPECT_GT(at_rail_off, 0) << "test needs a saturating drive to be meaningful";
+    EXPECT_EQ(at_rail_on, 0)  << "cmd_squash=1 must never park the command exactly on the rail";
 }

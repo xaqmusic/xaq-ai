@@ -335,6 +335,12 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # or the launcher's body-backend dropdown.
 @export var joint_backend: String = "hinge"
 
+# 2026-08-02 · IMPORT I6 — reduced-gravity SCAFFOLD (see _build_body for the full note).
+# Every Playful Machine legged experiment runs at gravity -6 vs Earth's -9.81; all of
+# their emergence results are measured under it.  1.0 = off = byte-identical.
+# PM-equivalent = 0.61.  Settable per-run via OGMA_PICRAWLER_GRAVITY_SCALE.
+@export var scaffold_gravity_scale: float = 1.0
+
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
 # spring on the free angular axis).  Joseph's gait-resonance bet:
 # passive compliance lets the body discover its own natural stride
@@ -2345,6 +2351,10 @@ func _ready() -> void:
 				push_warning("PicrawlerBody: initial stage '%s' resume_state_path='%s' → resolved='%s' — load failed" % [
 					CurriculumManager.current_name(), initial_spec, resolved])
 
+	# IMPORT I6 scaffold override — read BEFORE _build_body so it applies at construction.
+	var gscale_env: String = OS.get_environment("OGMA_PICRAWLER_GRAVITY_SCALE")
+	if gscale_env != "":
+		scaffold_gravity_scale = maxf(0.05, float(gscale_env))
 	_build_world()
 	_build_body()
 
@@ -3479,6 +3489,26 @@ func _build_body() -> void:
 	# 2026-06-03 — verify G6DOF angular params reached the joints.  Bit-
 	# identical-across-tweaks calibration sweep raised the question of
 	# whether changes are reaching the body — this print is the receipt.
+	# --- 2026-08-02 · IMPORT I6: PHYSICAL SCAFFOLD, NAMED AS A SCAFFOLD ---------------
+	# Every Playful Machine legged experiment runs at reduced gravity: the dog, the
+	# hexapod (zoo) and the humanoid all set ODE gravity to -6 against Earth's -9.81
+	# (the snake uses -4), on rubber ground, with compliant passive distal joints.
+	# Their emergence results are ALL measured under that scaffold; ours are measured
+	# at 1.0 g with rigid legs, and we bought uprightness with control-layer terms
+	# instead (postural_gain, height_homeo_gain, stance_lift_gain, balance_gain).
+	#
+	# This knob is the faithful analogue, and it exists to answer ONE question:
+	# does the homeokinetic core produce a gait when the body is as forgiving as the
+	# one PM's results come from?  It is a SCAFFOLD (docs: scaffold / de-scaffold) —
+	# a diagnostic prop that must be named as such in any claim and removed before
+	# any result stands on its own.  PM-equivalent value is 6/9.81 = 0.61.
+	#
+	# 1.0 = off = byte-identical to every historical run.
+	if not is_equal_approx(scaffold_gravity_scale, 1.0):
+		for b in ([_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array)):
+			b.gravity_scale = scaffold_gravity_scale
+		print("PicrawlerBody: ⚠ SCAFFOLD ACTIVE — gravity_scale=%.3f (PM legged sims run 0.61)"
+			% scaffold_gravity_scale)
 	if joint_backend == "hinge":
 		print("PicrawlerBody: joint_backend=hinge (legacy hobby-servo, historical baselines)  motor_force_scale=%.4f" % motor_force_scale)
 	else:
@@ -8557,6 +8587,35 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["amp_gain"] = snappedf(float(_mm.get("amp_gain_mean", 0.0)), 0.001)
 			line["coord_best_fit"] = snappedf(float(_mm.get("coord_best_fitness", 0.0)), 0.0001)
 			line["motor_tle"] = snappedf(float(_mm.get("motor_tle", 0.0)), 0.0001)
+			# --- 2026-08-02 Phase-0 instruments (report-only).  See
+			# docs/reports/playful_machine_source_analysis.md §4.
+			# clip_duty: fraction of post-warmup leg-ticks where the ASSEMBLED command
+			# (HK + stroke + postural + height + cruse + coupling + noise) exceeded ±1
+			# and was flattened by the one output clamp.  The HK loop-Jacobian assumes a
+			# tanh; the body applies a hard clip — so a high clip_duty means every timing
+			# lever downstream was measured through a saturated actuator.
+			# hk_share: HK's share of the pre-clamp command magnitude (is the learned
+			# controller driving this gait, or the additive scaffolds?).
+			# echo_a: mean self-model gain on the [pos, ACTION, delta] echo channel
+			# (→1 = the model has latched a channel it can predict perfectly and the
+			# controller can drive perfectly, i.e. HK satisfiable without moving).
+			# c_act: share of |C|'s mass sitting on those echo columns.
+			line["clip_duty"] = snappedf(float(_mm.get("clip_duty", 0.0)), 0.0001)
+			line["hk_share"]  = snappedf(float(_mm.get("hk_share", 0.0)), 0.0001)
+			line["echo_a"]    = snappedf(float(_mm.get("echo_a_gain", 0.0)), 0.0001)
+			line["c_pos"]     = snappedf(float(_mm.get("c_mass_pos", 0.0)), 0.0001)
+			line["c_act"]     = snappedf(float(_mm.get("c_mass_act", 0.0)), 0.0001)
+			line["c_del"]     = snappedf(float(_mm.get("c_mass_del", 0.0)), 0.0001)
+			var _cdj: Array = _mm.get("clip_duty_j", [])
+			if _cdj is Array and _cdj.size() >= 3:
+				line["clip_h1"] = snappedf(float(_cdj[0]), 0.0001)
+				line["clip_h2"] = snappedf(float(_cdj[1]), 0.0001)
+				line["clip_kn"] = snappedf(float(_cdj[2]), 0.0001)
+			var _pmj: Array = _mm.get("pre_mag_j", [])
+			if _pmj is Array and _pmj.size() >= 3:
+				line["pre_h1"] = snappedf(float(_pmj[0]), 0.001)
+				line["pre_h2"] = snappedf(float(_pmj[1]), 0.001)
+				line["pre_kn"] = snappedf(float(_pmj[2]), 0.001)
 			# swing_frac = fraction of legs MotorEPM's foot-height detector calls
 			# "swinging" — the gate stance_lift and the Cruse rules ride on.  Read it
 			# against this body's OWN absolute planted test (feet_y < stance_y_threshold):

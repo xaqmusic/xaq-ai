@@ -131,6 +131,24 @@ ParamSchema MotorEPM::params_schema() const {
          ParamValue{0.05}, ParamValue{0.0}, ParamValue{10.0}},
         {"init_scale", ParamMutability::ConstructionOnly, "init magnitude of C (small → starts near standing)",
          ParamValue{0.01}, ParamValue{0.0}, ParamValue{1.0}},
+        {"cmd_squash", ParamMutability::HotMutable,
+         "ACTUATOR HONESTY (import I3).  0 = today's HARD CLAMP of the assembled command to "
+         "[-1,1]; 1 = a smooth tanh squash instead.  Measured motivation: hip1 is clipped 56% "
+         "of post-warmup leg-ticks with a mean request of 1.40, so the nonlinearity the BODY "
+         "applies is a hard discontinuity while the HK loop-Jacobian G=diag(1-tanh^2) assumes a "
+         "smooth one -- L overstates the loop gain wherever the command is railed.  A squash "
+         "compresses instead of truncating, preserving the stroke's SHAPE (and therefore its "
+         "phase information) through the bound.  0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"c_init", ParamMutability::ConstructionOnly,
+         "SELF-EXCITING controller init (Playful Machine's Sox cInit).  Adds c_init to each "
+         "motor's OWN joint-position feedback weight C(j,3j), so the sensorimotor loop starts "
+         "at the edge of instability and the HK gradient SHAPES an existing oscillation instead "
+         "of having to create one from a dead fixed point.  Sox uses C=cInit·I with cInit "
+         "0.7-1.2 at UNITY output gain; here the effective loop gain is motor_gain·c_init, so "
+         "the PM-equivalent value is cInit/motor_gain.  0 = off (legacy small-random init, "
+         "byte-identical).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{4.0}},
         {"seed", ParamMutability::ConstructionOnly, "base RNG seed; per-leg seed = base ^ leg",
          ParamValue{int64_t(1234)}, std::nullopt, std::nullopt},
         {"babble_ticks", ParamMutability::ConstructionOnly,
@@ -460,6 +478,8 @@ ParamMap MotorEPM::current_params() const {
     m["reg_eps"]    = reg_eps_;
     m["max_dctrl"]  = max_dctrl_;
     m["init_scale"]   = init_scale_;
+    m["c_init"]       = c_init_;
+    m["cmd_squash"]   = cmd_squash_;
     m["seed"]         = base_seed_;
     m["babble_ticks"]  = babble_ticks_;
     m["babble_scale"]  = babble_scale_;
@@ -578,6 +598,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "reg_eps",    [&](auto const& v){ reg_eps_    = get_double(v, "reg_eps"); });
     apply_param(params, "max_dctrl",  [&](auto const& v){ max_dctrl_  = get_double(v, "max_dctrl"); });
     apply_param(params, "init_scale", [&](auto const& v){ init_scale_ = get_double(v, "init_scale"); });
+    apply_param(params, "c_init",     [&](auto const& v){ c_init_     = get_double(v, "c_init"); });
+    apply_param(params, "cmd_squash", [&](auto const& v){ cmd_squash_ = get_double(v, "cmd_squash"); });
     apply_param(params, "seed",       [&](auto const& v){ base_seed_  = get_int(v, "seed"); });
     apply_param(params, "babble_ticks", [&](auto const& v){ babble_ticks_ = get_int(v, "babble_ticks"); });
     apply_param(params, "babble_scale", [&](auto const& v){ babble_scale_ = get_double(v, "babble_scale"); });
@@ -1738,6 +1760,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     if (key == "model_lr")  model_lr_  = get_double(value, "model_lr");
     else if (key == "ctrl_lr")   ctrl_lr_   = get_double(value, "ctrl_lr");
     else if (key == "bias_lr")   bias_lr_   = get_double(value, "bias_lr");
+    else if (key == "cmd_squash") cmd_squash_ = get_double(value, "cmd_squash");
     else if (key == "reg_eps")   reg_eps_   = get_double(value, "reg_eps");
     else if (key == "max_dctrl") max_dctrl_ = get_double(value, "max_dctrl");
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
@@ -1858,6 +1881,17 @@ void MotorEPM::ensure_leg_init(int leg, int n) {
     for (int i = 0; i < m; ++i)
         for (int j = 0; j < n; ++j)
             L.C(i, j) = float(init_scale_) * nd(rng);
+    // Import I1 (Playful Machine, Sox cInit): start the loop SELF-EXCITING.  Each motor
+    // gets a positive feedback weight from its OWN joint's position (state index 3j), so
+    // the body twitches from tick 1 and the homeokinetic gradient SHAPES that oscillation
+    // rather than having to manufacture one from a dead fixed point (which is what
+    // babble_ticks / sat_lr / explore_noise were added to do).  ADDED to, not replacing,
+    // the per-leg random init — that randomness is the inter-leg symmetry breaker this
+    // module depends on (see the class header on bilateral-mirror collapse).
+    // c_init = 0 leaves this byte-identical to the legacy init.
+    if (c_init_ > 0.0)
+        for (int j = 0; j < m && 3 * j < n; ++j)
+            L.C(j, 3 * j) += float(c_init_);
     L.x      = Eigen::VectorXf::Zero(n);
     L.prev_x = Eigen::VectorXf::Zero(n);
     L.prev_y = Eigen::VectorXf::Zero(m);
@@ -2470,6 +2504,14 @@ void MotorEPM::tick(uint64_t tick_id) {
                 y.noalias() += L.Cvel * ctx;   // velocity feed-forward (propulsive push; 0 until trained)
             }
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
+            // Phase-0 saturation instrument: HK's own contribution, BEFORE any of the
+            // additive terms below and before the ±1 clamp at the end of this block.
+            if (int(sat_hk_abs_.size()) != m) {
+                sat_hk_abs_.assign(m, 0.0);   sat_pre_abs_.assign(m, 0.0);
+                sat_pre_max_.assign(m, 0.0);  sat_clip_hits_.assign(m, 0.0);
+                sat_n_ = 0.0;
+            }
+            for (int j = 0; j < m; ++j) sat_hk_abs_[j] += std::fabs(double(y[j]));
         }
         // Postural reflex (spinal-tone analog): pull hip2+knee toward the standing
         // REST pose (proprio pos=0).  State layout is [pos,act,delta] per joint, so
@@ -2862,7 +2904,23 @@ void MotorEPM::tick(uint64_t tick_id) {
             y[1]     += drive;    // hip2 + = push feet down / lift chassis
             y[m - 1] += drive;    // knee + = tuck (raises the chassis in spider stance)
         }
-        for (int j = 0; j < m; ++j) y[j] = std::clamp(y[j], -1.0f, 1.0f);
+        // Phase-0 saturation instrument: the command as ASSEMBLED (HK + every additive
+        // term), read immediately before the one and only clamp.  clip_duty is the
+        // fraction of leg-ticks the body never saw the requested command.
+        if (!warmup && int(sat_clip_hits_.size()) == m) {
+            for (int j = 0; j < m; ++j) {
+                const double a = std::fabs(double(y[j]));
+                sat_pre_abs_[j] += a;
+                if (a > sat_pre_max_[j]) sat_pre_max_[j] = a;
+                if (a > 1.0) sat_clip_hits_[j] += 1.0;
+            }
+            sat_n_ += 1.0;
+        }
+        // Import I3 (actuator honesty).  cmd_squash=0 keeps the historical hard clamp.
+        if (cmd_squash_ > 0.0)
+            for (int j = 0; j < m; ++j) y[j] = std::tanh(y[j]);
+        else
+            for (int j = 0; j < m; ++j) y[j] = std::clamp(y[j], -1.0f, 1.0f);
         L.outmag_ema = (1.0f - kTeleEmaAlpha) * L.outmag_ema + kTeleEmaAlpha * float(y.norm());
 
         for (int j = 0; j < m; ++j) {
@@ -3173,6 +3231,58 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
     mod["swing_tuck_frac"] = swing_tuck_frac_;
     mod["tibia_off_mean"]  = ga_tib_n_ ? (ga_tib_acc_ / double(ga_tib_n_)) : 0.0;
+    // ---- 2026-08-02 Phase-0 instruments (report-only; see
+    //      docs/reports/playful_machine_source_analysis.md §4) --------------------
+    // (F1) SATURATION.  How much of the assembled command the body never sees
+    // (`clip_duty`, per motor index, pooled over legs), and how much of what is sent
+    // originates in the HK branch rather than the additive scaffolds (`hk_share`).
+    {
+        const int mdim = motor_dim_;
+        std::vector<double> duty(mdim, 0.0), pmag(mdim, 0.0), pmax(mdim, 0.0), hkm(mdim, 0.0);
+        double duty_mean = 0.0, hk_sum = 0.0, pre_sum = 0.0;
+        if (sat_n_ > 0.0 && int(sat_clip_hits_.size()) == mdim) {
+            for (int j = 0; j < mdim; ++j) {
+                duty[j] = sat_clip_hits_[j] / sat_n_;
+                pmag[j] = sat_pre_abs_[j]   / sat_n_;
+                pmax[j] = sat_pre_max_[j];
+                hkm[j]  = sat_hk_abs_[j]    / sat_n_;
+                duty_mean += duty[j];
+                hk_sum    += sat_hk_abs_[j];
+                pre_sum   += sat_pre_abs_[j];
+            }
+            duty_mean /= double(mdim);
+        }
+        mod["clip_duty_j"] = duty;  mod["clip_duty"] = duty_mean;
+        mod["pre_mag_j"]   = pmag;  mod["pre_max_j"] = pmax;
+        mod["hk_mag_j"]    = hkm;   mod["hk_share"]  = pre_sum > 1e-9 ? hk_sum / pre_sum : 0.0;
+    }
+    // (F2) ECHO CHANNEL.  The per-joint state is [pos, last_action, delta], so state
+    // index 3j+1 IS the command just issued — a channel the self-model can predict
+    // exactly and the controller can drive perfectly, i.e. one on which the
+    // homeokinetic objective can be satisfied without moving the body.  `echo_a_gain`
+    // is the mean self-model gain on that channel (→1 means latched); `c_mass_*` is
+    // where the controller's weight actually sits.
+    {
+        double a_echo = 0.0; int a_n = 0;
+        double cm_pos = 0.0, cm_act = 0.0, cm_del = 0.0;
+        for (int i = 0; i < n_legs_ && i < int(legs_.size()); ++i) {
+            Leg const& LL = legs_[i];
+            if (!LL.initialized || LL.n < 3 * motor_dim_) continue;
+            for (int j = 0; j < motor_dim_; ++j) {
+                a_echo += double(LL.A(3 * j + 1, j)); ++a_n;
+                for (int r = 0; r < motor_dim_; ++r) {
+                    cm_pos += std::fabs(double(LL.C(r, 3 * j    )));
+                    cm_act += std::fabs(double(LL.C(r, 3 * j + 1)));
+                    cm_del += std::fabs(double(LL.C(r, 3 * j + 2)));
+                }
+            }
+        }
+        const double cm = cm_pos + cm_act + cm_del;
+        mod["echo_a_gain"] = a_n ? a_echo / double(a_n) : 0.0;
+        mod["c_mass_pos"]  = cm > 1e-12 ? cm_pos / cm : 0.0;
+        mod["c_mass_act"]  = cm > 1e-12 ? cm_act / cm : 0.0;
+        mod["c_mass_del"]  = cm > 1e-12 ? cm_del / cm : 0.0;
+    }
     mod["ga_tib_acc"] = ga_tib_acc_;  mod["ga_tib_n"] = ga_tib_n_;
     {
         const double ap = ga_yaw_allplant_n_ ? ga_yaw_allplant_ / double(ga_yaw_allplant_n_) : 0.0;
@@ -3213,6 +3323,25 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["motor_tle"]   = tle_ema_mean();          // mean forward-model prediction error (self-model health)
     j["loop_gain"]   = gain_ema_mean();
     // Gate 0 (L-1a) reset-masked gait instruments:
+    // Phase-0 instruments — mirrored from snapshot_state()'s `mod` dict so the live
+    // inspector and the headless harness read the SAME numbers (§4 of the PM analysis).
+    {
+        const int mdim = motor_dim_;
+        double duty_mean = 0.0, hk_sum = 0.0, pre_sum = 0.0;
+        std::vector<double> duty(mdim, 0.0);
+        if (sat_n_ > 0.0 && int(sat_clip_hits_.size()) == mdim) {
+            for (int k = 0; k < mdim; ++k) {
+                duty[k]    = sat_clip_hits_[k] / sat_n_;
+                duty_mean += duty[k];
+                hk_sum    += sat_hk_abs_[k];
+                pre_sum   += sat_pre_abs_[k];
+            }
+            duty_mean /= double(mdim);
+        }
+        j["clip_duty_j"] = duty;
+        j["clip_duty"]   = duty_mean;
+        j["hk_share"]    = pre_sum > 1e-9 ? hk_sum / pre_sum : 0.0;
+    }
     j["gait_coherence"]    = gait_coherence();  // Kuramoto phase-lock ∈[0,1]; rises as legs lock to the gait
     j["coupling_eff"]      = coupling_eff_;      // Gate 2: live (faded) coupling strength
     j["rhythm_scale"]      = rhythm_scale_;      // Gate 2: live (faded) rhythm-scaffold scale

@@ -121,6 +121,11 @@ private:
     double  reg_eps_     = 0.01;                 // ε in (L Lᵀ + εI)⁻¹
     double  max_dctrl_   = 0.05;                 // per-tick clamp on ‖ΔC‖_F (ignition guard)
     double  init_scale_  = 0.01;                 // init magnitude of C (starts near standing)
+    // 2026-08-02 (import I1 from the Playful Machine analysis): self-exciting
+    // controller init.  0 = off → legacy small-random init, byte-identical.
+    double  c_init_      = 0.0;                  // added to C(j,3j), the own-joint position feedback
+    // Import I3: 0 = hard clamp of the assembled command (historical), 1 = tanh squash.
+    double  cmd_squash_  = 0.0;
     int64_t base_seed_   = 1234;                 // per-leg seed = base ^ leg
     // 2026-06-12 — anti-freeze additions (the bare metric-gradient update
     // saturated tanh in ~2 s then froze: g'→0 kills every term of ΔC).
@@ -702,6 +707,19 @@ private:
     double  swing_tuck_knee_ = 0.0;
     float   swing_tuck_frac_ = 0.0f;            // diag: frac of leg-ticks the bias applied
     int64_t swing_tuck_hits_ = 0, swing_tuck_ticks_ = 0;
+    // ---- 2026-08-02 Phase-0 SATURATION instrument (pure diagnostic) -------------
+    // The HK branch emits motor_gain·tanh(z) (motor_gain=3.0 deployed) and ~7 further
+    // additive terms are summed onto it, while the ONLY output clamp is ±1 applied at
+    // the very end.  So the actuator nonlinearity the BODY applies is a hard clip, not
+    // the tanh the HK loop-Jacobian G=diag(1−tanh²) assumes.  These counters measure
+    // how much of the command the body never sees, and HK's share of what is sent.
+    // Accumulated post-warmup only, per motor index (0=hip1,1=hip2,2=knee), pooled
+    // over legs.  Report-only: nothing here feeds a control path.
+    std::vector<double> sat_clip_hits_;   // ticks with |y_pre-clamp| > 1
+    std::vector<double> sat_pre_abs_;     // Σ |y_pre-clamp|
+    std::vector<double> sat_pre_max_;     // max |y_pre-clamp|
+    std::vector<double> sat_hk_abs_;      // Σ |HK branch output| (mg·ag·tanh(z))
+    double              sat_n_ = 0.0;     // leg-tick samples behind the sums
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays
     // HK-driven and pointed tangentially → the four thrusts sum to a torque
