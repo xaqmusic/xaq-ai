@@ -721,8 +721,32 @@ ratio) and SHAKE (frequency sweep → resonance) plus a measured peak-to-peak re
 body damping exposed alongside the spring sliders, since the panel had been showing one of **three**
 damping sources.
 
-**Open and load-bearing: which backend is canonical.** Every result in this ledger is `hinge`. If
-`g6dof` becomes canonical, the n=20 ablation and the whole coordination series need re-running.
+**RESOLVED 2026-08-03 — `hinge` IS CANONICAL** (operator decision, after re-observing the
+configurations on the fixed substrate). Three reasons, in increasing order of weight:
+
+1. **It measures better on everything.** PLV **0.138** vs g6dof's best **0.097**; net_z 4.49 vs
+   2.79; straight 0.70 vs 0.48; 0 falls vs 0.17. No g6dof damping value reaches hinge's
+   coordination — the opposite of the prediction that compliance would help.
+2. **It is the closer model of the hardware.** A real hobby servo is a stiff position tracker on
+   a rigid gear train; its compliance is *backlash*, which hinge + `motor_freeplay_rad` models.
+   A 6DOF joint with angular springs models a series-elastic actuator the PiCrawler does not have.
+3. **Nothing needs re-running.** Every result in this ledger was measured on hinge, so the whole
+   record stands as written — the n=20 ablation, the coordination series, the `ctrl_lr` sweep.
+
+**Guard shipped:** the substrate is now ANNOUNCED at startup — `substrate = hinge (canonical)`, or
+a `push_warning` + stdout line saying results are NOT comparable to the ledger. The resolver order
+is unchanged, so g6dof stays one flag away; what changed is that it can no longer be selected
+*silently*, which is what produced the two-robots split.
+
+**g6dof is DEFERRED, not refuted** — and its verdict is now weaker than it looks, because every
+g6dof number in this ledger was measured while (a) the joint springs did nothing, (b) the preset
+clobbered env overrides, and (c) the backlash model had a limit-cycle bug. All three are fixed and
+none of the g6dof arms have been re-run since. **Re-use context:** the compliance line becomes
+live again if the physical build gains a genuinely compliant element (a springy foot, a
+series-elastic joint), or if a resonance hunt on the fixed springs finds a stiffness that changes
+the picture. Note that hinge has **no** joint-damping parameter and **no** springs, so the entire
+compliance/resonance line is inert on the canonical substrate — testing it means deliberately
+leaving canonical.
 
 ---
 

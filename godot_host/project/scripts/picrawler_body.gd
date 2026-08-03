@@ -2727,7 +2727,31 @@ func _resolve_env() -> void:
 	# g6dof at the launcher overwrites the @export defaults with Joseph's
 	# handtuned compliant-stand preset; env/config/curriculum overrides
 	# still win because they run AFTER this on the resolved baseline.
+	# 2026-08-03 — CANONICAL SUBSTRATE = "hinge" (operator decision).  Rationale: hinge
+	# beats g6dof on every measured metric (PLV 0.138 vs 0.097 at its best damping,
+	# net_z 4.49 vs 2.79, straight 0.70 vs 0.48, 0 falls vs 0.17); it is the closer model
+	# of a real hobby servo (a stiff position tracker on a rigid gear train, whose
+	# compliance is backlash — not a series-elastic suspension); and every result in the
+	# ledger was measured on it, so nothing needs re-running.
+	#
+	# The split this guards against: the launcher's PERSISTED selection silently won over
+	# the default, so UI sessions ran g6dof while every headless run ran hinge — the same
+	# config producing two different robots depending on how it was started, which is how
+	# operator observation and headless measurement disagreed for a whole session.
+	# The resolver order is unchanged (explicit env / launcher choice still wins, so
+	# g6dof stays one flag away); what is new is that the substrate is ANNOUNCED, loudly,
+	# whenever it differs from canonical.
+	var _canonical_backend: String = "hinge"
 	joint_backend = ExperimentConfig.resolve_picrawler_joint_backend(joint_backend)
+	if joint_backend != _canonical_backend:
+		push_warning("PicrawlerBody: NON-CANONICAL SUBSTRATE — joint_backend=%s (canonical is %s). "
+			% [joint_backend, _canonical_backend]
+			+ "Ledger results are all hinge; numbers from this run are NOT comparable to them.")
+		print("PicrawlerBody: ⚠⚠ NON-CANONICAL SUBSTRATE joint_backend=%s (canonical=%s) — "
+			% [joint_backend, _canonical_backend]
+			+ "results NOT comparable to the ledger")
+	else:
+		print("PicrawlerBody: substrate = hinge (canonical)")
 	# 2026-06-13 — the CURRICULUM is authoritative for the substrate, overriding
 	# the launcher's persisted dropdown.  The launcher saves the last selection,
 	# so a stale hinge memory would silently run the wrong substrate; a stage-level
