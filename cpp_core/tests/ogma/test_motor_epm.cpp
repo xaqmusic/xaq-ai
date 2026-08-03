@@ -121,6 +121,11 @@ struct Sensors {
     // ... and `contact` after THAT, same reason again.  Per-leg physics touch flag
     // (1 = foot down), as `reality.proprio.foot_contact` publishes it.
     std::vector<float> contact;           // empty → not published
+    // ... and these LAST of all, same positional-init hazard as above.  Perturb ONE leg's
+    // proprio so a test can ask whether that leg's state reaches ANOTHER leg's command —
+    // impossible by construction under per-leg blocks, which is what I7 changes.
+    int   proprio_bias_leg = -1;          // <0 → no perturbation
+    float proprio_bias     = 0.0f;
 };
 
 struct Fixture {
@@ -135,7 +140,8 @@ struct Fixture {
         m.on_setup(&bus, p);
     }
 
-    static std::shared_ptr<ogma::ProprioToken> proprio_frame(double t, int leg, int md) {
+    static std::shared_ptr<ogma::ProprioToken> proprio_frame(double t, int leg, int md,
+                                                             float bias = 0.0f) {
         auto pt = std::make_shared<ogma::ProprioToken>();
         int n = 3 * md;                                  // [pos,act,delta] per joint
         pt->values = Eigen::VectorXf::Zero(n);
@@ -145,6 +151,8 @@ struct Fixture {
             pt->values[3 * j + 1] = float(0.20 * std::cos(ph + j));        // act
             pt->values[3 * j + 2] = float(0.30 * 0.15 * std::cos(ph + j)); // delta
         }
+        if (bias != 0.0f)
+            for (int j = 0; j < md; ++j) pt->values[3 * j + 0] += bias;     // position only
         pt->sensor = "proprio";
         return pt;
     }
@@ -163,7 +171,9 @@ struct Fixture {
                   Eigen::VectorXf const* obj = nullptr, float obj_conf = 1.0f) {
         bus.begin_tick(t);
         for (int leg = 0; leg < n_legs; ++leg)
-            bus.publish(pre + ".p" + std::to_string(leg), proprio_frame(double(t), leg, motor_dim));
+            bus.publish(pre + ".p" + std::to_string(leg),
+                        proprio_frame(double(t), leg, motor_dim,
+                                      (s.proprio_bias_leg == leg) ? s.proprio_bias : 0.0f));
         bus.publish(pre + ".imu",  vec_token({0, 0, s.fwd_v, s.yaw}));
         bus.publish(pre + ".tilt", vec_token({s.tilt_pitch, 1.0f, s.tilt_roll, 1.0f}));
         if (!s.feet.empty()) bus.publish(pre + ".feet", vec_token(s.feet));
@@ -1143,4 +1153,70 @@ TEST(MotorEPM, CmdSquashZeroIsInertAndOnBoundsSmoothly) {
     // The hard clamp parks samples exactly on the rail; tanh never reaches it.
     EXPECT_GT(at_rail_off, 0) << "test needs a saturating drive to be meaningful";
     EXPECT_EQ(at_rail_on, 0)  << "cmd_squash=1 must never park the command exactly on the rail";
+}
+
+// =============================================================================
+// IMPORT I7 — whole-body C.  Same two obligations as every other lever here: at 0 the
+// command path is byte-identical, above 0 it demonstrably changes something.  The extra
+// obligation specific to THIS lever is that C must actually acquire CROSS-LEG structure —
+// a whole-body matrix that stays block-diagonal is the per-leg build wearing a bigger
+// allocation, and would be a silent no-op.
+// =============================================================================
+TEST(MotorEPM, WholeBodyCZeroIsByteIdentical) {
+    auto pa = base_params();
+    auto pb = base_params(); pb["whole_body_c"] = 0.0;
+    Fixture fa(pa, 4, 3), fb(pb, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 150; ++t) {
+        Sensors s;
+        fa.run_tick(t, s); fb.run_tick(t, s);
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff,
+                    double(std::abs(fa.accel(leg, j) - fb.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-12) << "whole_body_c=0 must be byte-identical to the per-leg build";
+}
+
+TEST(MotorEPM, WholeBodyCOnChangesTheCommandAndCouplesLegs) {
+    auto poff = base_params();
+    auto pon  = base_params(); pon["whole_body_c"] = 1.0;
+    poff["c_init"] = 0.5; pon["c_init"] = 0.5;   // give the loop something to shape
+    Fixture foff(poff, 4, 3), fon(pon, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        Sensors s;
+        foff.run_tick(t, s); fon.run_tick(t, s);
+        if (t < 20) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff,
+                    double(std::abs(foff.accel(leg, j) - fon.accel(leg, j))));
+    }
+    EXPECT_GT(maxdiff, 1e-6) << "whole_body_c=1 must actually change the controller";
+}
+
+// The load-bearing one: does a leg's command depend on ANOTHER leg's state?  Perturb one
+// leg's proprio only, and require some OTHER leg's command to move.  Under the per-leg
+// build this is impossible by construction, which is exactly the limitation I7 removes.
+TEST(MotorEPM, WholeBodyCMakesOneLegsStateReachAnotherLegsCommand) {
+    auto p = base_params(); p["whole_body_c"] = 1.0; p["c_init"] = 0.5;
+    Fixture fa(p, 4, 3), fb(p, 4, 3);
+    for (uint64_t t = 0; t < 120; ++t) {          // settle both identically
+        Sensors s; fa.run_tick(t, s); fb.run_tick(t, s);
+    }
+    double cross = 0.0;
+    for (uint64_t t = 120; t < 160; ++t) {
+        Sensors sa, sb;
+        sb.proprio_bias_leg = 0;                  // perturb LEG 0 only, in fb
+        sb.proprio_bias     = 0.35f;
+        fa.run_tick(t, sa); fb.run_tick(t, sb);
+        for (int leg = 1; leg < 4; ++leg)         // ...and look at legs 1..3
+            for (int j = 0; j < 3; ++j)
+                cross = std::max(cross,
+                    double(std::abs(fa.accel(leg, j) - fb.accel(leg, j))));
+    }
+    EXPECT_GT(cross, 1e-6)
+        << "with whole_body_c=1, perturbing ONE leg must reach the OTHER legs' commands — "
+           "if this is 0 the matrix stayed block-diagonal and the lever is a no-op";
 }

@@ -8728,7 +8728,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# ★ inter-leg phase coherence — the operator's "are the legs actually working
 			# together" number.  Lived in diag_snapshot only until 2026-08-03, so no arm in
 			# this campaign had ever reported it.
+			# coh is the INSTANTANEOUS Kuramoto order parameter: for four independent legs its
+			# distribution is mean 0.450 / sd 0.219, so a single reading is nearly meaningless
+			# and a 12-seed sweep of it looks bimodal when nothing is locked.  plv is the
+			# honest read — constant RELATIVE phase over the run, null -> 0.
 			line["coh"] = snappedf(float(_mm.get("gait_coherence", 0.0)), 0.0001)
+			line["plv"] = snappedf(float(_mm.get("interleg_plv", 0.0)), 0.0001)
 			# hip2<->knee command sign agreement — the operator's "for the first time I see
 			# hip2 and knee work together to lift the chassis".  0.5 = chance.
 			line["hk_agree"] = snappedf(float(_mm.get("hip2_knee_agree", 0.0)), 0.0001)

@@ -670,7 +670,82 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-03 (later) — RETRACTION: `gait_coherence` MEASURES NOTHING, AND NOTHING IS COORDINATED
+
+**The operator caught this by eye** — "the difference between locked and unlocked seeds is
+actually rather subtle… in both, the legs are trying to pull the robot in four different
+directions." They were right and the metric was wrong.
+
+**The defect.** `gait_coherence()` is the Kuramoto order parameter of the four leg phases **at an
+instant**. I sampled it once, at the end of each run. For four *independent* phases that
+statistic has **mean 0.450, sd 0.219** — so single readings scatter across [0, 1].
+
+| | measured | random-phase null |
+|---|---|---|
+| time-mean coherence, 12 seeds | **0.453 ± 0.035** (range 0.396–0.505) | **0.450 ± 0.219** |
+| fraction of readings > 0.7 | 4/12 = 0.33 | 0.147 (n=12: not significant) |
+
+**Time-averaged, every seed sits exactly on the null.** Seed 2's `coh = 0.999` was one lucky
+instant, not a locked gait.
+
+**Retracted in full:** "coherence is bimodal / some seeds phase-lock" (that was the sampling
+distribution of a random variable); "locked seeds are low and flat, tilt 0.071 vs 0.212" (that
+compared seeds sorted by a random number); "pure-HK out-coordinates the deployed gait, 0.484 vs
+0.419" (**both are the null**); and the locked-seed list written into the launcher label.
+⚠️ **§5 of this ledger had already warned that coherence is maximal on a frozen body.** I used it
+anyway without ever checking its null — the fifth instrument failure of the campaign and the only
+one where the instrument reported *confidently* rather than reporting zero.
+
+**Replacement instrument: `interleg_plv`** — per leg-pair `|mean_t e^{i(φᵢ−φⱼ)}|`, averaged.
+It asks whether a pair holds a **constant relative phase over time** (1 for a trot at relative
+phase π) rather than whether phases coincide at one instant, and unlike the order parameter **its
+null falls toward 0 as the run lengthens**. Same formulation `clipdiff.py` already used.
+
+> ### ★★★ THE SURVIVING FINDING, AND IT IS STARKER THAN WHAT IT REPLACES
+> **No configuration tested has ANY inter-leg coordination.** Time-mean coherence, n=12 each,
+> against a null of 0.450:
+>
+> | arm | time-mean coherence |
+> |---|---|
+> | stance · per-leg `C` | 0.436 ± 0.012 |
+> | stance · whole-body `C` | 0.453 ± 0.035 |
+> | belly-crawl · per-leg `C` | 0.435 ± 0.024 |
+> | belly-crawl · whole-body `C` | 0.439 ± 0.038 |
+>
+> Every arm is the null. **The deployed scaffold stack, pure HK, whole-body `C`, and crawling all
+> produce legs at random relative phase** — exactly what the operator sees. Inter-leg coordination
+> is not "weak" in this project; it is **absent, and has never been present**.
+
+---
+
+### 2026-08-03 — BELLY CRAWL (`postural_gain = 0`): `NULL` on coordination — the support hypothesis is refuted
+
+**Hypothesis:** PM's one clearly coherent repetitive gait is the humanoid *crawling*, where the
+support problem is free (torso on the ground) and the controller works purely on propulsion. Our
+picrawler must solve support and propulsion at once. So: drop the standing requirement
+(`postural_gain` 0.7 → 0, the single lever that makes it try to stand) and see if coordination
+appears. **Prediction: the lock rate rises.**
+
+**Refuted.** n=12, 20 k, `c_init` 0.25 / `ctrl_lr` 0.10. Time-mean coherence **0.435 ± 0.024**
+(per-leg) and **0.439 ± 0.038** (whole-body) — the null, unchanged from the standing arms.
+Removing the standing requirement makes the body *more active and less stable* (`steps` 163 → 213,
+falls 1.75 → 2.33, tilt_sd 0.279 → 0.366) and no more coordinated. **The missing ingredient is
+not support**, and the humanoid-crawl story does not transfer.
+
+**★ What DID survive, powered:** whole-body `C` reliably improves **leg participation** —
+`step_bal` **0.253 ± 0.134 → 0.444 ± 0.131, t = +3.52** at n=12 on the crawl base (and 0.29 → 0.48
+on the stance base). **The legs share the work far more evenly; they just do not time it.**
+Participation and phase-locking are different quantities and whole-body `C` buys exactly one of
+them. Verdict `PARTIAL`: kept for `step_bal`, does nothing for coordination, and costs stability
+at `ctrl_lr` 0.10 (falls 2.33 → 5.50 on the crawl base).
+
+---
+
 ### ★★★ 2026-08-03 — COORDINATION, MEASURED AT LAST: pure-HK OUT-COORDINATES THE DEPLOYED GAIT
+> **⚠️ THIS ENTRY IS RETRACTED — see the retraction immediately above.** Its coherence numbers are
+> single-instant samples of a statistic whose random-phase null is 0.450 ± 0.219. Kept for the
+> audit trail; the `hip2_knee_agree` result in it stands (that metric has a real 0.5 chance line
+> and was measured against it).
 
 With the phase estimator ungated (below), inter-leg coherence and a new intra-leg
 `hip2_knee_agree` were measured on the same arms. **Both confirm operator UI observations that

@@ -140,6 +140,15 @@ ParamSchema MotorEPM::params_schema() const {
          "compresses instead of truncating, preserving the stroke's SHAPE (and therefore its "
          "phase information) through the bound.  0 = byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"whole_body_c", ParamMutability::ConstructionOnly,
+         "IMPORT I7: 0 = four independent per-leg controllers (historical); 1 = ONE controller "
+         "spanning every joint of every leg, so inter-leg coordination becomes a learnable entry "
+         "of C instead of something that can only arrive mechanically through the body.  The "
+         "empirical case: HK discovered the hip2+knee lift synergy unaided (joints that SHARE a "
+         "C) while inter-leg coherence falls as ctrl_lr rises (joints that do not).  This is also "
+         "the structural difference from the Playful Machine, whose dog/hexapod/humanoid all run "
+         "ONE Sox across every joint.  0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"c_init", ParamMutability::ConstructionOnly,
          "SELF-EXCITING controller init (Playful Machine's Sox cInit).  Adds c_init to each "
          "motor's OWN joint-position feedback weight C(j,3j), so the sensorimotor loop starts "
@@ -479,6 +488,7 @@ ParamMap MotorEPM::current_params() const {
     m["max_dctrl"]  = max_dctrl_;
     m["init_scale"]   = init_scale_;
     m["c_init"]       = c_init_;
+    m["whole_body_c"] = whole_body_c_;
     m["cmd_squash"]   = cmd_squash_;
     m["seed"]         = base_seed_;
     m["babble_ticks"]  = babble_ticks_;
@@ -599,6 +609,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "max_dctrl",  [&](auto const& v){ max_dctrl_  = get_double(v, "max_dctrl"); });
     apply_param(params, "init_scale", [&](auto const& v){ init_scale_ = get_double(v, "init_scale"); });
     apply_param(params, "c_init",     [&](auto const& v){ c_init_     = get_double(v, "c_init"); });
+    apply_param(params, "whole_body_c", [&](auto const& v){ whole_body_c_ = get_double(v, "whole_body_c"); });
     apply_param(params, "cmd_squash", [&](auto const& v){ cmd_squash_ = get_double(v, "cmd_squash"); });
     apply_param(params, "seed",       [&](auto const& v){ base_seed_  = get_int(v, "seed"); });
     apply_param(params, "babble_ticks", [&](auto const& v){ babble_ticks_ = get_int(v, "babble_ticks"); });
@@ -1858,6 +1869,87 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "panic_push_hz") panic_push_hz_ = get_double(value, "panic_push_hz");
 }
 
+// =============================================================================
+// IMPORT I7 — whole-body controller.  One (A, C, b, h) spanning every joint of every
+// leg, so inter-leg coordination is a LEARNABLE entry of C rather than something that
+// can only arrive mechanically through the body.  The maths is identical to the per-leg
+// homeokinetic update; only the matrices are wider.
+// =============================================================================
+void MotorEPM::wb_init(int n_per_leg) {
+    const int N = n_legs_ * n_per_leg, M = n_legs_ * motor_dim_;
+    std::mt19937 rng(static_cast<uint32_t>(base_seed_ ^ 0x7B1D0057u));
+    std::normal_distribution<float> nd(0.0f, 1.0f);
+    Aw_ = Eigen::MatrixXf::Zero(N, M);
+    Cw_ = Eigen::MatrixXf::Zero(M, N);
+    bw_ = Eigen::VectorXf::Zero(N);
+    hw_ = Eigen::VectorXf::Zero(M);
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < M; ++j) Aw_(i, j) = float(init_scale_) * nd(rng);
+    for (int i = 0; i < M; ++i)
+        for (int j = 0; j < N; ++j) Cw_(i, j) = float(init_scale_) * nd(rng);
+    // c_init keeps its meaning: each motor's positive feedback from its OWN joint's
+    // position, now on the block diagonal.  The CROSS-LEG terms start at the same small
+    // random values the per-leg build used, so they are grown by the HK gradient rather
+    // than declared — which is the whole point of moving them into C.
+    if (c_init_ > 0.0)
+        for (int leg = 0; leg < n_legs_; ++leg)
+            for (int j = 0; j < motor_dim_ && 3 * j < n_per_leg; ++j)
+                Cw_(leg * motor_dim_ + j, leg * n_per_leg + 3 * j) += float(c_init_);
+    Xw_      = Eigen::VectorXf::Zero(N);
+    prevXw_  = Eigen::VectorXf::Zero(N);
+    prevYw_  = Eigen::VectorXf::Zero(M);
+    Zw_      = Eigen::VectorXf::Zero(M);
+    wb_have_prev_ = false;
+    wb_steps_ = 0;
+    wb_ready_ = true;
+}
+
+void MotorEPM::wb_learn_and_control() {
+    const int m = motor_dim_, M = n_legs_ * m;
+    const int n_per_leg = legs_[0].n, N = n_legs_ * n_per_leg;
+    for (int leg = 0; leg < n_legs_; ++leg)                       // gather
+        Xw_.segment(leg * n_per_leg, n_per_leg) = legs_[leg].x;
+    wb_steps_ += 1;
+    const bool warmup = (wb_steps_ <= babble_ticks_);
+
+    if (wb_have_prev_) {
+        Eigen::VectorXf x_hat = Aw_ * prevYw_ + bw_;
+        Eigen::VectorXf xi    = Xw_ - x_hat;                      // whole-body motor TLE
+        Aw_.noalias() += float(model_lr_) * xi * prevYw_.transpose();
+        bw_.noalias() += float(model_lr_) * xi;
+        wb_tle_ema_ = (1.0f - kTeleEmaAlpha) * wb_tle_ema_ + kTeleEmaAlpha * xi.norm();
+        if (!warmup) {
+            Eigen::VectorXf z = Cw_ * prevXw_ + hw_;
+            Eigen::MatrixXf G = Eigen::MatrixXf::Zero(M, M);
+            for (int i = 0; i < M; ++i) { float t = std::tanh(z[i]); G(i, i) = 1.0f - t * t; }
+            Eigen::MatrixXf AG = Aw_ * G;                         // N x M
+            Eigen::MatrixXf Lp = AG * Cw_;                        // N x N loop Jacobian
+            Eigen::MatrixXf P  = (Lp * Lp.transpose()
+                                  + float(reg_eps_) * Eigen::MatrixXf::Identity(N, N)).inverse();
+            Eigen::VectorXf q  = P * xi;
+            Eigen::MatrixXf dC = 2.0f * float(ctrl_lr_) * (AG.transpose() * q) * (q.transpose() * Lp);
+            float dn = dC.norm();
+            // Scale the ignition clamp with sqrt(n_legs): the same PER-ENTRY step size on a
+            // matrix with n_legs× the entries has a Frobenius norm that grows, so reusing the
+            // per-leg clamp here would silently throttle learning by ~2× and look like
+            // "whole-body C learns slower" when it is only clamped harder.
+            const float clamp_w = float(max_dctrl_) * std::sqrt(float(n_legs_));
+            if (max_dctrl_ > 0.0 && dn > clamp_w) dC *= clamp_w / dn;
+            Cw_.noalias() += dC;
+            hw_.noalias() += float(bias_lr_) * (G * (Aw_.transpose() * q));
+            if (sat_lr_ > 0.0)                                    // the h bound — see the sat_lr entry
+                for (int i = 0; i < M; ++i) {
+                    float ti = std::tanh(z[i]), gs = z[i] * ti * ti;
+                    Cw_.row(i).noalias() -= float(sat_lr_) * gs * prevXw_.transpose();
+                    hw_[i] -= float(sat_lr_) * gs;
+                }
+        }
+    }
+    Zw_     = Cw_ * Xw_ + hw_;        // pre-tanh; the per-leg loop slices and finishes it
+    prevXw_ = Xw_;
+    wb_have_prev_ = true;
+}
+
 void MotorEPM::ensure_leg_init(int leg, int n) {
     Leg& L = legs_[leg];
     if (L.initialized) return;
@@ -2384,19 +2476,38 @@ void MotorEPM::tick(uint64_t tick_id) {
         prop_credit_mean_ = c ? s / float(c) : 0.0f;
     }
 
+    // IMPORT I7: one controller across every joint, computed BEFORE the per-leg loop so
+    // each leg can slice its own commands out of it.  Requires every leg fresh this tick
+    // (they share one bridge publish, so they are) — otherwise the concatenated state
+    // would mix ticks.  Everything downstream (postural, stroke, coupling, noise, clamp)
+    // is untouched: only the source of the pre-tanh operating point changes.
+    bool wb_on = false;
+    if (whole_body_c_ > 0.0) {
+        bool all_fresh = true;
+        for (int leg = 0; leg < n_legs_; ++leg)
+            if (!legs_[leg].initialized || !legs_[leg].fresh
+                || legs_[leg].n != legs_[0].n) { all_fresh = false; break; }
+        if (all_fresh) {
+            if (!wb_ready_) wb_init(legs_[0].n);
+            wb_learn_and_control();
+            wb_on = true;
+        }
+    }
+
     for (int leg = 0; leg < n_legs_; ++leg) {
         Leg& L = legs_[leg];
         if (!L.initialized || !L.fresh) continue;
         L.fresh = false;
         L.steps_seen += 1;
         int n = L.n;
-        bool warmup = (L.steps_seen <= babble_ticks_);
+        bool warmup = (wb_on ? (wb_steps_ <= babble_ticks_)
+                             : (L.steps_seen <= babble_ticks_));
 
         // ---- Learn from the previous command's outcome (motor TLE) ----
         // The MODEL always learns (also during babble warmup, where it learns the
         // body's response to small random commands).  The CONTROLLER (HK + anti-
         // saturation) only learns after warmup, once the model can predict.
-        if (L.have_prev) {
+        if (L.have_prev && !wb_on) {
             Eigen::VectorXf x_hat = L.A * L.prev_y + L.b;          // forward-model prediction
             Eigen::VectorXf xi    = L.x - x_hat;                   // motor TLE ξ
             // (1) model descent: A += η_M ξ yᵀ ; b += η_M ξ
@@ -2506,7 +2617,8 @@ void MotorEPM::tick(uint64_t tick_id) {
             float ag = (amp_homeo_gain_ > 0.0) ? L.amp_gain : 1.0f;
             // Panic boosts motor_gain for stronger escape thrust.
             float mg = float(motor_gain_) * (1.0f + pe * (float(panic_motor_mult_) - 1.0f));
-            y = L.C * L.x + L.h;
+            y = wb_on ? Eigen::VectorXf(Zw_.segment(leg * m, m))   // I7: this leg's slice
+                      : Eigen::VectorXf(L.C * L.x + L.h);
             if (cpg_embed_ && cpg_seen_) {
                 Eigen::Vector2f ctx(std::cos(cpg_phase_), std::sin(cpg_phase_));
                 y.noalias() += L.Cphi * ctx;   // posture feed-forward (pose)
@@ -2629,7 +2741,23 @@ void MotorEPM::tick(uint64_t tick_id) {
             std::normal_distribution<float> nz(0.0f, noise_sigma);
             for (int j = 0; j < m; ++j) y[j] += nz(L.babble_rng);
         }
-        // Rung 3 inter-leg coupling (post-warmup): Kuramoto bias injected into the
+        // INTER-LEG PLV accumulation — one sample per tick per leg pair, over the whole run.
+    // Placed after the phase pre-pass so every leg's phase is current.  Report-only.
+    if (n_legs_ > 1) {
+        bool ok = true;
+        for (int i = 0; i < n_legs_; ++i) if (!legs_[i].initialized) { ok = false; break; }
+        if (ok) {
+            for (int i = 0; i < n_legs_; ++i)
+                for (int j = i + 1; j < n_legs_ && j < 4; ++j) {
+                    const float d = legs_[i].phase - legs_[j].phase;
+                    plv_cos_[i * 4 + j] += std::cos(d);
+                    plv_sin_[i * 4 + j] += std::sin(d);
+                }
+            ++plv_n_;
+        }
+    }
+
+    // Rung 3 inter-leg coupling (post-warmup): Kuramoto bias injected into the
         // knee (the propulsive joint; HK's within-leg coordination carries the rest).
         // c_i = K · mean_{j≠i} sin( (φ_j − φ_i) − (P_j − P_i) ) pulls each leg's
         // phase toward the gait offset relative to every other leg — entrains the
@@ -2950,6 +3078,9 @@ void MotorEPM::tick(uint64_t tick_id) {
             bus_->publish(action_topics_[leg * m + j], out);
         }
 
+        if (wb_on) prevYw_.segment(leg * m, m) = y;   // I7: the model learns from what the
+                                                     // body EXECUTED, not from the HK branch
+                                                     // alone — same contract as L.prev_y.
         L.prev_x = L.x;
         L.prev_phi_ctx = Eigen::Vector2f(std::cos(cpg_phase_), std::sin(cpg_phase_));  // phase at command time
         L.prev_y = y;
@@ -2996,6 +3127,22 @@ void MotorEPM::tick(uint64_t tick_id) {
 int   MotorEPM::legs_initialized() const {
     int c = 0; for (auto const& L : legs_) if (L.initialized) ++c; return c;
 }
+float MotorEPM::interleg_plv() const {
+    // Mean over leg PAIRS of |mean_t e^{i(phi_i - phi_j)}|.  Chance level for independent
+    // legs is ~sqrt(pi)/2/sqrt(N) -> 0 as the run lengthens, so unlike gait_coherence this
+    // has a null that DOES go to zero and a reading above ~0.3 is real phase locking.
+    if (plv_n_ < 50) return 0.0f;
+    double acc = 0.0; int c = 0;
+    for (int i = 0; i < n_legs_; ++i)
+        for (int j = i + 1; j < n_legs_; ++j) {
+            const int k = i * 4 + j;
+            acc += std::sqrt(plv_cos_[k] * plv_cos_[k] + plv_sin_[k] * plv_sin_[k])
+                   / double(plv_n_);
+            ++c;
+        }
+    return c ? float(acc / c) : 0.0f;
+}
+
 float MotorEPM::gait_coherence() const {
     // Kuramoto order parameter on the gait-offset-corrected phases:
     // R = |mean_j e^{i(φ_j − P_j)}|.  1 = all legs locked to the gait pattern.
@@ -3009,6 +3156,10 @@ float MotorEPM::gait_coherence() const {
     return std::sqrt(sx * sx + sy * sy) / float(c);
 }
 float MotorEPM::tle_ema_mean() const {
+    // I7: when the whole-body controller owns the model, the per-leg L.tle_ema is never
+    // updated and would report a flat 0.0000 — exactly the "exactly-round null" this
+    // ledger warns about, and self-inflicted on 2026-08-03.  Report the whole-body TLE.
+    if (whole_body_c_ > 0.0 && wb_ready_) return wb_tle_ema_;
     if (legs_.empty()) return 0.0f; float s = 0; int c = 0;
     for (auto const& L : legs_) if (L.initialized) { s += L.tle_ema; ++c; }
     return c ? s / float(c) : 0.0f;
@@ -3252,7 +3403,8 @@ nlohmann::json MotorEPM::snapshot_state() const {
     // measured distance/steps/balance and never once measured whether the legs are
     // PHASE-LOCKED TO EACH OTHER, which is the operator's actual complaint ("each leg has
     // its own directive").  |mean_j e^{i(phi_j - P_j)}| in [0,1]; 1 = locked to the gait.
-    mod["gait_coherence"] = gait_coherence();
+    mod["gait_coherence"] = gait_coherence();   // ⚠ INSTANTANEOUS — see interleg_plv
+    mod["interleg_plv"]   = interleg_plv();     // the honest coordination read
     // ★ INTRA-LEG COORDINATION (2026-08-03).  The operator observed, for the first time,
     // hip2 and knee working TOGETHER to lift the chassis — where the hand-built reflexes
     // only ever drove one or the other.  Those two joints share foot-height authority

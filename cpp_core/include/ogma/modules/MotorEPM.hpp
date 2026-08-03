@@ -722,6 +722,42 @@ private:
     double              sat_n_ = 0.0;     // leg-tick samples behind the sums
     // Intra-leg coordination: hip2 vs knee command sign agreement, pooled over legs.
     int64_t             hk_agree_ = 0, hk_agree_n_ = 0;
+    // ---- 2026-08-03 · IMPORT I7: WHOLE-BODY CONTROLLER -----------------------------
+    // The empirical case (ledger 2026-08-03): HK coordinates joints that SHARE a C — it
+    // discovered the hip2+knee lift synergy unaided, which the hand-built Cruse rule had
+    // to be explicitly told to produce.  The one coordination it cannot do is inter-leg,
+    // and that is exactly the coordination four independent per-leg blocks CANNOT
+    // REPRESENT: C has no cross-leg terms, so legs can only couple mechanically, through
+    // the body — which is slow, and which faster learning outruns (coherence 0.484 at
+    // ctrl_lr 0.01 falls to 0.408 at 0.10).  Same mechanism, wider matrix.
+    // This is also the structural difference from the Playful Machine: their dog, hexapod
+    // and humanoid all run ONE Sox across every joint.
+    // 0 = per-leg blocks (historical, byte-identical).  1 = one controller, all legs.
+    double              whole_body_c_ = 0.0;
+    Eigen::MatrixXf     Aw_, Cw_;              // N x M  and  M x N   (N = n_legs*n, M = n_legs*m)
+    Eigen::VectorXf     bw_, hw_;              // N, M
+    Eigen::VectorXf     Xw_, prevXw_, prevYw_; // concatenated state / command
+    Eigen::VectorXf     Zw_;                   // this tick's pre-tanh operating point (sliced per leg)
+    bool                wb_ready_ = false, wb_have_prev_ = false;
+    int64_t             wb_steps_ = 0;
+    float               wb_tle_ema_ = 0.0f;
+    // ---- 2026-08-03 · INTER-LEG PLV, replacing gait_coherence as the coordination read.
+    // gait_coherence() is the Kuramoto order parameter of the four phases AT AN INSTANT.
+    // Sampled once it is nearly meaningless: for four INDEPENDENT phases its distribution
+    // has mean 0.450 and sd 0.219, so single-instant readings scatter across [0,1] and look
+    // bimodal.  That is exactly what a 12-seed sweep produced, and it was misread as
+    // "some seeds phase-lock" -- the operator caught it by eye (locked and unlocked seeds
+    // look identical).  Time-averaging it gives 0.453 +- 0.035 on every seed: the random
+    // null.  It is also maximal on a FROZEN body, which the ledger already warned about.
+    //
+    // PLV measures the right thing: whether each leg PAIR holds a CONSTANT relative phase
+    // over time, |mean_t e^{i(phi_i - phi_j)}|, which is 1 for a trot (relative phase pi)
+    // and -> 0 for independent legs regardless of any instant's alignment.
+    double              plv_cos_[16] = {0}, plv_sin_[16] = {0};   // per ordered pair i<j
+    int64_t             plv_n_ = 0;
+    float               interleg_plv() const;
+    void wb_init(int n_per_leg);
+    void wb_learn_and_control();
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays
     // HK-driven and pointed tangentially → the four thrusts sum to a torque
