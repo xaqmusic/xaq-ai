@@ -1638,6 +1638,28 @@ the fix protects **fast** arms, i.e. exactly the ones a propulsion lever exists 
 
 ## 5. Open frontier
 
+- **★★★ MAKE THE REFLEX GAINS INFERENTIAL — the next direction (2026-08-03).** The deployed
+  rules are legitimate as an **innate** layer (a lamprey's swimming rhythm is a spinal CPG;
+  animals do not derive locomotion from nothing). What makes them a *script* rather than
+  *inference* is that their gains are CONSTANTS. The line that matters is not hand-written vs
+  learned — it is **does the agent's own error modulate it?**
+  ⇒ Precision-weight the reflex gains by the agent's own TLE: `g_eff = g · f(1/(tle+ε))` —
+  **couple harder when the model is uncertain, relax when it predicts well.** Same
+  precision-weighting the LateralVoter already uses, applied to `coupling_gain`, `stroke_gain`,
+  `postural_gain`. That converts the CPG from a fixed schedule into **a prior whose confidence is
+  inferred**, which is what the framework actually asks for.
+  **Why this and not a seventh mechanism:** it is the only proposal that gives the learned layer a
+  job it can measurably do — and the n=20 ablation says it currently has none. **Judge it on the
+  (d) perturbation test**, not on distance: perturb mid-episode and show the precision-modulated
+  version re-organises where fixed-gain does not. If it does, the learned layer has earned its
+  place on evidence. If it does not, that is a real result about this body.
+- **★★ SCALE THE CLAIMS TO THE MEASUREMENT.** Not supported: "the picrawler walks via active
+  inference." Supported: "the picrawler walks via an innate pattern generator and reflexes; the
+  homeokinetic layer contributes leg participation and step count." §7 already requires this; the
+  headline has been ahead of the evidence.
+- **`nav_gain=5.0` reads `target_compass`, which the plan names as its declared disqualifier.**
+  On the books as a known oracle in the deployed config — not a framing question.
+
 - **★★★ THE MEASUREMENT CONTEXT IS THE BLOCKER (2026-08-02).** Ablating *every* learned component
   of MotorEPM costs the deployed gait nothing (4.75 ± 0.48 vs 4.58 ± 0.27, n=4). Locomotion here
   is the scaffold stack. **Consequence for everything below: a lever tested on the deployed base

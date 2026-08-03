@@ -1710,6 +1710,79 @@ Instrument to be added at the `jtorque` publish site in `picrawler_body.gd` so i
 
 ---
 
+## 8z. CHAPTER CLOSE — what the Playful Machine investigation actually yielded
+
+**The question we opened with:** PM's hexapod and humanoid show louder emergence than we do —
+what is different? Two days of source reading and ~40 seed-averaged arms later, the answer is not
+the one the question expected.
+
+### The imports, scored
+
+| # | import | verdict |
+|---|---|---|
+| — | **`ctrl_lr` at PM's rate** (0.01 → 0.10) | **`WORKING` — the one real transfer.** Steps ×4, displacement ×3, seeds inside the deployed range. Found because the operator asked about learning rate; the 5–10× gap sat in §2 from day one, untested |
+| I1 | `c_init` self-exciting init | `WORKING` on activity (steps ×2–3, `step_bal` 0 → 0.32), `NULL` on locomotion, `REGRESSION` on stability |
+| I2 | the real ∂G / `sense` term | `REGRESSION` at every dose — and **blocked behind F3**: it inherits the ε⁻² blow-up of a rank-3 metric in 9 dimensions |
+| I3 | `cmd_squash` actuator honesty | `NULL` on the deployed base — a *passed prediction*, since nothing learned drives that base |
+| I4 | colored sensor noise | `REGRESSION` on transport; **`WORKING` on posture at σ≈0.03 (both channels)** — the body gets taller as it learns, unaided |
+| I5 | `ForceBoostWiring` / `SERVO_KI` | never built |
+| I6 | reduced-gravity scaffold | `NULL` — the body collapses to the identical height at 0.61 g |
+| I7 | whole-body `C` | **`PARTIAL`** — leg participation `step_bal` 0.25 → 0.44, **t = +3.52**; nothing for phase |
+| — | **DEP** (2015, reconstructed) | `REGRESSION` on both substrates. On pure-HK it amplifies the fall; on the stable deployed base it preserves stability and *still* does not coordinate |
+
+**One transfer, one partial, one posture effect. Everything else null or negative.**
+
+### The larger yield was diagnostic
+
+Reading a working implementation of the same idea did not hand us their gait. It handed us a
+list of things wrong with ours — nine, none of which raised an error:
+
+| | |
+|---|---|
+| **F1** | hip1 clipped 56 % of leg-ticks; the HK Jacobian assumes a tanh where the body applies a hard clip |
+| **F2** | the state vector contains the previous action — a channel the model predicts perfectly and the controller drives perfectly |
+| **F3** | `L` is 9×9 of rank ≤ 3, so `reg_eps` dominates two-thirds of the metric — and this **blocks I2** |
+| **F5** | **removing ALL controller learning costs the deployed gait nothing** (n=20, t = 3.26 in the ablation's favour) |
+| **F6** | `sat_lr` is the sole brake on the bias integrator; retiring it unbounded destroys the gait |
+| **S1–S4** | two different robots by launch path · `joint_angular_damping` g6dof-only and unsweepable · the g6dof preset clobbering every env override · **the joint springs never existing at all** |
+
+And six instrument defects, of which the sharpest generalises:
+
+> **An instrument must not depend on the thing being ablated.** `gait_coherence` and `amp_ema`
+> were gated on scaffold consumers, so stripping the scaffolds stripped the measurement and
+> returned a confident zero. **Corollary: beware the exactly-round null** — `0.000`, `0.5`, `1.0`
+> to full precision are more often structural than measured.
+
+### The honest verdict on the comparison itself
+
+**PM's legged emergence is measured behind an external anti-fall operator** (`LimitOrientationOperator`,
+dog and hexapod) at ~60 % gravity, on rubber, with compliant passive tarsus joints. We rejected the
+prop — correctly — and solved the same bootstrap with a *permanent internal control term* that can
+never be de-scaffolded. **Both are scaffolds; ours is the less honest kind**, and that is the single
+most useful thing this comparison surfaced about our own architecture.
+
+**We were also never chasing quite the target we thought.** Their published result is behavioural
+*variety* — an alive, exploring body. A repetitive directed gait is *low* variety. The operator's
+goal ("a good, repetitive, efficient stepping gait") may be structurally orthogonal to what
+homeokinesis optimises, which would explain why six mechanisms all returned the random-phase null.
+
+### Where it leaves the project
+
+On the canonical hinge substrate, the standing facts are:
+
+- The deployed gait's locomotion is the **innate layer** — stroke, Kuramoto-toward-a-trot, reflexes.
+- The **learned layer is inert** for distance and obstacle traversal; it buys `steps` and `step_bal`.
+- Inter-leg coordination is **0.138 with hand-written rules, ~0.045 with anything learned**, against
+  a trot's ~1.0.
+- `flat_v` and `step_cv` have never moved, by any lever, learned or scripted.
+
+**That is not a failure of the scaffolds — it is an unfinished second layer.** Animals do not derive
+locomotion from nothing; a lamprey's rhythm is a spinal CPG. The rules are a legitimate *innate*
+prior. What is missing is the part that makes them inferential rather than fixed — see the open
+frontier.
+
+---
+
 ## 9. Source index (for the next session)
 
 | What | Where |
