@@ -3229,6 +3229,19 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
+    // L-1b OBJECTIVE SOCKET — mirrored from diag_snapshot() 2026-08-02.  It existed in
+    // diag ONLY, which is the documented trap: the body's stdout reads
+    // get_module_metrics() fed from THIS dict, so the socket read 0.0 in every headless
+    // run and "the objective is driving" was never verifiable from a seedavg arm.
+    // This is the §3.2 rule-5 consumer check for any objective-vs-additive experiment.
+    {
+        bool on = false; float wsum = 0.0f; int oc = 0;
+        for (int i = 0; i < n_legs_ && i < int(obj_seen_.size()); ++i)
+            if (obj_seen_[i] && obj_weight_[i] > 0.0f) { on = true; wsum += obj_weight_[i]; ++oc; }
+        mod["obj_active"] = on;
+        mod["obj_weight"] = oc ? wsum / float(oc) : 0.0f;
+        mod["obj_legs"]   = oc;
+    }
     mod["swing_tuck_frac"] = swing_tuck_frac_;
     mod["tibia_off_mean"]  = ga_tib_n_ ? (ga_tib_acc_ / double(ga_tib_n_)) : 0.0;
     // ---- 2026-08-02 Phase-0 instruments (report-only; see

@@ -8650,6 +8650,14 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# (→1 = the model has latched a channel it can predict perfectly and the
 			# controller can drive perfectly, i.e. HK satisfiable without moving).
 			# c_act: share of |C|'s mass sitting on those echo columns.
+			# L-1b objective socket: is the posture OBJECTIVE driving the controller, or is
+			# postural_gain doing it additively?  obj_w is the mean blend weight actually
+			# applied (MotorEPM blends xi_tilde = (1-w)*xi + w*(x - x*)); obj_legs counts
+			# how many legs have a live objective.  Both 0 => the socket is not firing and
+			# any "objective replaces the additive term" claim is untestable.
+			line["obj_active"] = 1 if bool(_mm.get("obj_active", false)) else 0
+			line["obj_w"]      = snappedf(float(_mm.get("obj_weight", 0.0)), 0.0001)
+			line["obj_legs"]   = int(_mm.get("obj_legs", 0))
 			line["clip_duty"] = snappedf(float(_mm.get("clip_duty", 0.0)), 0.0001)
 			line["hk_share"]  = snappedf(float(_mm.get("hk_share", 0.0)), 0.0001)
 			line["echo_a"]    = snappedf(float(_mm.get("echo_a_gain", 0.0)), 0.0001)

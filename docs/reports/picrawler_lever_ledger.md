@@ -670,6 +670,63 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★ 2026-08-02 — "MOVE THE SCAFFOLDS ONTO THE OBJECTIVE SOCKET": `REGRESSION`, and the reason matters
+
+**The proposal** (from the competition finding below): scaffolds compete with the learned layer
+because they are *additive terms on the same output*, which is a rewrite-rule violation —
+`postural_gain·(x − x*)` added to the command **is a behavior**. MotorEPM already has the correct
+path, the L-1b objective socket (`ξ̃ = (1−w)·ξ + w·(x − x*)` blended into the HK descent), and
+posture is **double-implemented**: through the socket *and* additively at `postural_gain=0.7`.
+So delete the additive copy.
+
+**Instrument fix first (§3.2 rule 5):** `obj_active`/`obj_weight` lived **only in
+`diag_snapshot()`** — the documented trap — so they read 0.0 in every headless run and "the
+objective is driving" had never been verifiable from a seedavg arm. Now mirrored into the `mod`
+dict and the JSONL.
+
+| corridor n=6, 6 000 | net_z | straight | flat_v | chassis_y | tilt_sd | falls | steps | step_bal | **obj_w** |
+|---|---|---|---|---|---|---|---|---|---|
+| **CONTROL** postural 0.7 additive | **4.49 ± 0.53** | **0.70** | **0.044** | **0.058** | **0.065** | **0** | 54.8 | **0.52** | 0.10 |
+| **A** postural 0, obj gain 0.3 | 1.51 ± 1.17 | 0.34 | 0.016 | 0.049 | 0.124 | 0.50 | **99.2** | 0.13 | **0.06** |
+| **B** postural 0, obj gain 0.7 | 1.93 ± 1.14 | 0.41 | 0.019 | 0.047 | 0.088 | 0.17 | 97.0 | 0.11 | 0.13 |
+
+**`REGRESSION` — two-thirds of the distance, half the straightness, a third of the flat speed,
+and falls appear.** The proposal is refuted in this form.
+
+**★ WHY, and this is a design fact about the socket, not just a failed lever.** It fired in every
+arm (`obj_active`=1, 4 legs, every seed) so it is not `DEAD_CODE`. The *weight* is the problem:
+`w = gain · self_precision(bin)`, and **at gain 0.3 delivered `w` is 0.10; at gain 0.7 it is only
+0.13** — the objective path is **~5× weaker than the additive term it replaces** even at more
+than double the policy gain. Worse: **in arm A the weight FELL when the additive term was
+removed, 0.10 → 0.06** (self-precision ≈0.33 → ≈0.20).
+
+> **The objective's authority is precision-gated, and its precision is downstream of the very
+> stability it is supposed to produce.** Remove the additive term holding the body steady →
+> posture becomes inconsistent → self-precision falls → the objective weakens *exactly when it is
+> needed most*. **A precision-weighted objective can REFINE a posture something else is holding;
+> it cannot BOOTSTRAP one.**
+
+**Secondary, and it points somewhere:** removing the additive postural term **nearly doubled the
+step count** (54.8 → 99.2) while `step_bal` collapsed (0.52 → 0.13). **`postural_gain` is doing
+two jobs — holding the body up AND heavily damping the gait.** Congruent with the competition
+finding: it is both the thing keeping the robot upright and the thing suppressing its gait.
+
+**⇒ Architecture consequence.** The scaffolds that are load-bearing for *stability* cannot be
+learned in from a body that is not yet stable — a bootstrapping problem. **PM solves that
+bootstrap with an external anti-fall operator (a temporary prop, removable). We rejected the prop
+and solved the same bootstrap with a PERMANENT INTERNAL control term** — which is arguably worse,
+because it can never be de-scaffolded. **The one PM-legitimate scaffold class untried is
+MORPHOLOGY:** a body whose *passive* equilibrium is standing needs no postural term to bootstrap
+from. The kinematic dead-end entry already points there (feet plant at 170 mm against 166 mm
+total leg reach). That is a body change — permanent rather than propped — and the only route
+measured so far that **removes** the bootstrap instead of hiding it.
+
+**Re-use context:** retry the objective route with a weight that is NOT gated by the precision of
+the thing it is trying to establish (e.g. a floor on `w`, or precision measured against the
+target rather than the body's own consistency) — or after morphology removes the bootstrap need.
+
+---
+
 ### ★★★ 2026-08-02 — THE CONTROLLER LEARNING RATE WAS 5–10× BELOW THE PLAYFUL MACHINE'S, AND IT MATTERS
 
 **The operator called this one** — *"we may see more interesting results with a steeper learning

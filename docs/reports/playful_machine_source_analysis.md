@@ -1522,6 +1522,83 @@ no control-layer scaffold; we run a control-layer scaffold with a learned soluti
 
 ---
 
+## 8k. ★★ "MOVE THE SCAFFOLDS ONTO THE OBJECTIVE SOCKET" — REFUTED, and the reason is the useful part
+
+**The proposal.** §8j concluded that the learned controller and the scaffold stack are competing
+solutions. The suggested resolution: the competition exists because scaffolds are *additive terms
+on the same output*, which is a rewrite-rule violation (`postural_gain·(x − x*)` added to the
+command **is a behavior**). MotorEPM already has the correct path — the L-1b objective socket,
+where a per-leg `PredictionToken` blends the target error **into the HK descent**
+(`ξ̃ = (1−w)·ξ + w·(x − x*)`). Posture is **double-implemented**: it goes through the socket
+*and* carries `postural_gain = 0.7` additively. So: delete the additive copy, keep the objective.
+
+**Instrument fix required first (§3.2 rule 5).** `obj_active` / `obj_weight` existed **only in
+`diag_snapshot()`** — the documented trap — so they read 0.0 in every headless run and "the
+objective is driving" had never been verifiable from a seedavg arm. Mirrored into
+`snapshot_state()`'s `mod` dict and the JSONL.
+
+**Result (corridor, n=6, 6 000 ticks):**
+
+| arm | net_z | straight | flat_v | chassis_y | tilt_sd | falls | steps | step_bal | **obj_w** |
+|---|---|---|---|---|---|---|---|---|---|
+| **CONTROL** — postural 0.7 additive | **4.49 ± 0.53** | **0.70** | **0.044** | **0.058** | **0.065** | **0** | 54.8 | **0.52** | 0.10 |
+| **A** — postural 0, obj gain 0.3 | 1.51 ± 1.17 | 0.34 | 0.016 | 0.049 | 0.124 | 0.50 | **99.2** | 0.13 | **0.06** |
+| **B** — postural 0, obj gain 0.7 | 1.93 ± 1.14 | 0.41 | 0.019 | 0.047 | 0.088 | 0.17 | 97.0 | 0.11 | 0.13 |
+
+**Moving posture from additive to objective costs two-thirds of the distance**, halves
+straightness, cuts flat speed to a third, and introduces falls. `REGRESSION`. The proposal is
+refuted in this form.
+
+### Why — and this is a real finding about the socket, not just a failed lever
+
+The socket **fired correctly in every arm** (`obj_active = 1`, all 4 legs, every seed), so this is
+not `DEAD_CODE`. The problem is the *weight*:
+
+- Delivered weight is `w = gain · self_precision(bin)`. **At gain 0.3 the delivered `w` is 0.10;
+  at gain 0.7 it is only 0.13.** The objective path is **~5× weaker than the additive term it
+  replaces** even when its policy gain is more than doubled.
+- **And in arm A the weight FELL when the additive term was removed — 0.10 → 0.06**, i.e.
+  measured self-precision dropped from ≈0.33 to ≈0.20.
+
+That second number is the mechanism:
+
+> **The objective's authority is precision-gated, and its precision is downstream of the very
+> postural stability the objective is supposed to produce.** Remove the additive term that was
+> holding the body steady, the posture becomes inconsistent, self-precision falls, and the
+> objective weakens *exactly when it is needed most.* A self-defeating loop.
+
+**A precision-weighted objective can REFINE a posture something else is holding. It cannot
+BOOTSTRAP one.** That is a design fact about this socket and it was invisible until the
+instrument was mirrored.
+
+### The secondary result, which points somewhere
+
+**Removing the additive postural term nearly DOUBLED the step count** — 54.8 → 99.2 — while
+`step_bal` collapsed 0.52 → 0.13. So `postural_gain` is doing **two** jobs: holding the body up
+*and heavily damping the gait*. Releasing it releases a great deal of leg motion, but the motion
+is concentrated in one or two legs and buys nothing. That is congruent with §8j (the scaffold
+stack and the learned layer competing) and it says the postural term is a particularly costly
+scaffold — it is *both* the thing keeping the robot upright and the thing suppressing its gait.
+
+### What this means for the architecture question
+
+**The uncomfortable conclusion: the scaffolds that are load-bearing for STABILITY cannot be
+learned in from a body that is not yet stable.** That is a bootstrapping problem, and it is
+exactly the problem PM solves with an external anti-fall operator — a temporary prop, removed
+later. We rejected the prop (correctly, §6) and solved the same bootstrap with a *permanent
+internal control term* instead. **Both are scaffolds. Ours is simply permanent and internal
+rather than temporary and external**, which is arguably the worse of the two because it can never
+be de-scaffolded.
+
+⇒ **The genuinely doctrine-clean route is the one PM-legitimate scaffold class we have not
+tried: MORPHOLOGY.** A body whose *passive* equilibrium is standing needs no postural term to
+bootstrap from. The ledger's kinematic dead-end entry already points there — feet plant at 170 mm
+against 166 mm total leg reach, so the limb is at its geometric limit and the shank must splay
+just to reach the ground. **Fixing that is a body change, it is permanent rather than propped,
+and it is the only path measured so far that removes the bootstrap instead of hiding it.**
+
+---
+
 ## 9. Source index (for the next session)
 
 | What | Where |
