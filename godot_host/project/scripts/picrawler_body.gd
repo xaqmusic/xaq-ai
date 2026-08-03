@@ -341,6 +341,16 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # PM-equivalent = 0.61.  Settable per-run via OGMA_PICRAWLER_GRAVITY_SCALE.
 @export var scaffold_gravity_scale: float = 1.0
 
+# 2026-08-02 · IMPORT I4 — colored proprioceptive noise (see the publish site for the
+# full note).  PM wires every legged controller through ColorUniformNoise(0.1); our
+# proprio channel has been noiseless.  sigma = 0 (default) is byte-identical.
+# PM-equivalent sigma ≈ 0.1 of range.  tau = correlation length in ticks (1 = white).
+# Per-run overrides: OGMA_PICRAWLER_SENSOR_NOISE / OGMA_PICRAWLER_SENSOR_NOISE_TAU.
+@export var sensor_noise_sigma: float = 0.0
+@export var sensor_noise_tau:   float = 8.0
+var _sensor_noise: PackedFloat64Array = PackedFloat64Array()
+var _sensor_noise_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
 # spring on the free angular axis).  Joseph's gait-resonance bet:
 # passive compliance lets the body discover its own natural stride
@@ -2355,6 +2365,20 @@ func _ready() -> void:
 	var gscale_env: String = OS.get_environment("OGMA_PICRAWLER_GRAVITY_SCALE")
 	if gscale_env != "":
 		scaffold_gravity_scale = maxf(0.05, float(gscale_env))
+	# IMPORT I4 sensor-noise overrides.  Seeded off OGMA_SEED so the noise VARIES with
+	# the seed like every other stochastic element — otherwise every seed would share
+	# one noise trace and the seed-average would understate the spread.
+	var snoise_env: String = OS.get_environment("OGMA_PICRAWLER_SENSOR_NOISE")
+	if snoise_env != "":
+		sensor_noise_sigma = maxf(0.0, float(snoise_env))
+	var stau_env: String = OS.get_environment("OGMA_PICRAWLER_SENSOR_NOISE_TAU")
+	if stau_env != "":
+		sensor_noise_tau = maxf(1.0, float(stau_env))
+	var _seed_env: String = OS.get_environment("OGMA_SEED")
+	_sensor_noise_rng.seed = (int(_seed_env) if _seed_env != "" else 0) ^ 0x5E4501
+	if sensor_noise_sigma > 0.0:
+		print("PicrawlerBody: ⚠ IMPORT I4 ACTIVE — colored proprio noise sigma=%.3f tau=%.1f (PM uses ~0.1)"
+			% [sensor_noise_sigma, sensor_noise_tau])
 	_build_world()
 	_build_body()
 
@@ -4845,6 +4869,32 @@ func _step_one() -> void:
 	for i in range(4): joints.append(clamp(hip2_angles[i] / HIP2_LIMIT,    -1.0, 1.0))
 	for i in range(4): joints.append(clamp((knee_angles[i] - KNEE_REST) / 1.0,
 											-1.0, 1.0))
+	# --- 2026-08-02 · IMPORT I4: COLORED PROPRIOCEPTIVE NOISE --------------------------
+	# Every Playful Machine legged experiment wires its controller through
+	# ColorUniformNoise(0.1) — ~10% of range, TEMPORALLY CORRELATED — on every sensor,
+	# plus ODE-level noise 0.01.  In homeokinesis the loop AMPLIFIES its own sensory
+	# noise into behaviour: the noise is the seed of the motion, not a robustness test.
+	# Our proprio channel has been noiseless, and our only noise is white, motor-side and
+	# post-controller (explore_noise), which servo dynamics largely filter out.
+	#
+	# Measured motivation: at PM's own learning rate the pure-HK loop's activity peaks
+	# around 14-20k ticks and then decays monotonically (12.0 -> 5.2 -> 2.95 steps per
+	# 1000 ticks by 40k).  c_init sets where the loop STARTS and ctrl_lr how fast it
+	# explores; neither keeps it excited.  A persistent correlated perturbation is what
+	# PM's loop has and ours does not.
+	#
+	# Colored via a first-order (OU-like) filter: n <- (1-a)*n + a*U(-s,s), a = 1/tau.
+	# tau=1 degenerates to white noise, so the knob spans both regimes.
+	# sensor_noise_sigma = 0 (default) leaves this byte-identical.
+	if sensor_noise_sigma > 0.0:
+		var a: float = 1.0 / maxf(1.0, sensor_noise_tau)
+		if _sensor_noise.size() != joints.size():
+			_sensor_noise.resize(joints.size())
+			_sensor_noise.fill(0.0)
+		for i in range(joints.size()):
+			_sensor_noise[i] = (1.0 - a) * _sensor_noise[i] \
+				+ a * _sensor_noise_rng.randf_range(-sensor_noise_sigma, sensor_noise_sigma)
+			joints[i] = clamp(joints[i] + _sensor_noise[i], -1.0, 1.0)
 	brain.publish_proprio(joints, "joints")
 
 	# Phase 7.9 — per-leg foot-Y for SynergyTimer touchdown detection.

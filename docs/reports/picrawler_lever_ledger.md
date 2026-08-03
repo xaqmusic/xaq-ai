@@ -670,6 +670,85 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-02 — THE CONTROLLER LEARNING RATE WAS 5–10× BELOW THE PLAYFUL MACHINE'S, AND IT MATTERS
+
+**The operator called this one** — *"we may see more interesting results with a steeper learning
+rate (if that applies here)"* — after watching the pure-HK arm slowly grow its amplitude until
+it escaped an obstacle. It applies. The source comparison recorded the gap on day one and nothing
+tested it until they asked.
+
+| | PM hexapod | PM dog | **ours** |
+|---|---|---|---|
+| controller rate | `epsC` **0.1** | `epsC` **0.05** | `ctrl_lr` **0.01** |
+| model rate | `epsA` 0.05 | `epsA` 0.01 | `model_lr` 0.02 |
+
+Sweep on the pure-HK self-excite base (`c_init=0.25`), 20 k ticks, n=4. **Sweep is not flat, so
+`max_dctrl=0.05` is not binding and the mechanism engaged.**
+
+| `ctrl_lr` | net_disp | **steps** | step_bal | tilt_sd | falls | turns |
+|---|---|---|---|---|---|---|
+| **0.01** (ours) | 0.56 | 41 | 0.16 | 0.099 | 1.00 | — |
+| **0.05** (PM dog) | 0.68 | **141** | **0.42** | 0.225 | 0.75 | — |
+| **0.10** (PM hexapod) | **1.79 ± 1.53** | **163** | 0.29 | 0.279 | 1.75 | — |
+| **0.20** (past PM) | **2.17 ± 1.65** | **226** | 0.35 | 0.335 | 1.75 | **+3.58** |
+
+**Steps ×4–5, displacement ×3–4. One seed at net_z 4.36 and another at 4.78 — inside the deployed
+config's range (4.58) — from a controller with NO stroke, NO coupling, NO gait phase, NO heading
+and NO nav.** `WORKING`, on the pure-HK base, at n=4 (a signal: net_z std 1.5–1.7 exceeds the
+mean). The cost is stability (falls 1.00 → 1.75, tilt_sd 0.099 → 0.335) and, at 0.20, spin.
+
+⚠️ **Retraction within the same day:** the 20 k windows showed `ctrl_lr=0.10` as the only arm
+*improving late* (displacement rate 0.1375 → 0.1189 → **0.1524**), and I framed that as a
+continuing trend. **At 40 k it does not hold** — net_disp falls to 1.46 and the windows decay
+monotonically (steps/1000: 12.0 → 5.2 → **2.95**; disp: 0.107 → 0.080 → **0.042**). **It is a
+PEAK around 14–20 k, not a trajectory.** The surviving claim is narrower: *PM's rate raises and
+delays the activity peak by a large factor; it does not prevent the eventual decay.*
+
+**New tool: `windowavg.py`** — early/mid/late per-tick RATES within one run. Built because the
+operator watched a behaviour form at ~10 k while every whole-run aggregate said "no locomotion".
+**It is also the shape the ADAPTATION question needs** (a scripted walker shows no early-vs-late
+difference), which is the open instrument job from the obstacle-gate entry below.
+
+**★ PROTOCOL CHANGE: 6 000 ticks is the DEPLOYED config's horizon and is wrong for a stripped
+controller.** The pure-HK campaign's first 16 seed-runs measured the transient. Use ≥20 k for any
+arm that must *find* its behaviour, and read it with `windowavg.py`, not the aggregate alone.
+
+---
+
+### 2026-08-02 — I4 colored proprioceptive noise: `REGRESSION` at PM's dose
+
+PM wires every legged controller through `ColorUniformNoise(0.1)` on every sensor; our proprio
+channel was noiseless (only white, motor-side, post-controller `explore_noise`). Built as a
+first-order colored filter on `reality.proprio.joints` (`sensor_noise_sigma`/`_tau`, +
+`OGMA_PICRAWLER_SENSOR_NOISE`, seeded off `OGMA_SEED`); σ=0 byte-identical, guard verified.
+
+**σ=0.1 on the best pure-HK arm, 40 k, n=4: net_disp 1.46 → 0.45**, steps 240 → 185. Calmer
+(tilt_sd 0.208 → 0.165, falls 1.75 → 1.25) but that is what a weaker gait looks like.
+**★★ But σ=0.03 is `WORKING` ON POSTURE, and the dose response is NON-MONOTONIC.** Transport falls
+monotonically with σ (net_disp 1.46 → 0.88 → 0.45), so the transport `REGRESSION` stands. The
+window split shows what the aggregate hid:
+
+| chassis_y per window | early 0–10k | mid 13–26k | late 27–40k |
+|---|---|---|---|
+| σ = 0 | 0.0424 | 0.0374 | **0.0341** ↓ |
+| **σ = 0.03** | 0.0453 | 0.0550 | **0.0706** ↑ |
+| σ = 0.10 | 0.0443 | 0.0346 | **0.0327** ↓ |
+
+**At σ=0.03 the body progressively STANDS UP over the run** — monotone 0.045 → 0.071, ending
+**above the deployed baseline's 0.058** — while every other arm sinks, and it does so with
+`height_homeo_gain = 0` and no stance-lift (the pure-HK tier has no height mechanism at all). It
+also holds the late step rate σ=0.10 destroys (2.99 vs 1.60) on the least path per unit
+displacement of the three. **Aggregate metrics called this `chassis_y 0.059 ± 0.026` and it read
+as noise; only `windowavg.py` showed it was a monotone rise.** σ=0.03 helping where σ=0.10 hurts
+is the stochastic-resonance shape: an optimum exists and **PM's value is past it for our body** —
+consistent with our `[pos, action, delta]` state doubling the same σ into the velocity channel.
+
+**Re-use context: sweep σ ∈ [0.01, 0.05] where the optimum evidently lives, and inject on the
+POSITION channel only** so the same σ does not double into the velocity channel (`delta` is a
+difference of positions, and velocity is the channel HK weights most — 44 % of `|C|` mass).
+
+---
+
 ### ★★★ 2026-08-02 — OPERATOR OBSERVATION OVERTURNS PART OF THE SAME DAY'S ANALYSIS
 
 Both pure-HK arms watched in the UI, seed 6000. **Four corrections, three of them to claims made

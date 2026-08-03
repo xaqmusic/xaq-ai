@@ -1198,6 +1198,251 @@ this gate result is consistent with exactly that.
 
 ---
 
+## 8g. The 20 k re-measurement, and the operator's correction to their own report
+
+### The window analysis — the control DIES, the self-excited arm DOES NOT
+
+Whole-run aggregates average the transition away, so each 20 k run was split into windows and
+read as per-tick **rates** (`windowavg.py`, new tool, per 1000 ticks, n=4):
+
+| | **PURE-HK CONTROL** (`c_init=0`) | | | **SELF-EXCITE** (`c_init=0.25`) | | |
+|---|---|---|---|---|---|---|
+| window | early 0–6k | mid 7–13k | late 14–20k | early 0–6k | mid 7–13k | late 14–20k |
+| **step rate** | 0.89 | **0.00** | **0.00** | 4.80 | 1.35 | **1.43** |
+| tilt_sd | 0.208 | 0.031 | 0.027 | 0.320 | 0.084 | 0.076 |
+| path rate | 0.267 | 0.185 | 0.175 | 0.549 | 0.484 | 0.459 |
+| disp rate | 0.039 | 0.035 | 0.065 | 0.084 | 0.101 | 0.065 |
+| chassis_y | 0.031 | 0.027 | 0.027 | 0.041 | 0.033 | 0.033 |
+
+**The control converges to a frozen state.** Its step rate reaches **exactly zero by 7 k ticks and
+stays there** for the remaining 13 000. That is the dead-fixed-point failure our own source
+comments describe ("the bare metric-gradient update saturated tanh in ~2 s then froze").
+
+**The self-excited arm does not die.** Its activity falls from the violent opening (4.80 → 1.35)
+and then **holds — 1.35 → 1.43, slightly rising — through 20 k**, while tilt_sd falls
+monotonically 0.320 → 0.076. **That is the operator's "convulsions morph into a crab walk",
+quantified**, and it is precisely the failure mode PM's `cInit` exists to prevent.
+
+**Neither transports.** Late disp rate is **0.065 for both**, while the self-excited arm's path
+rate is 2.6× higher — it is churning in place. **`c_init` buys sustained activity, not transport.**
+
+**This vindicates Correction 2 concretely.** At 6 000 ticks both arms were still in transient and
+the difference was invisible; the qualitative distinction — one converges to death, the other to
+sustained activity — only appears with the long horizon *and* the window split. The 6 k protocol
+was measuring the wrong thing.
+
+### ★ Operator correction to their own report: THE ESCAPE BEHAVIOUR IS THERE, IT IS JUST SLOW
+
+> *"I should correct the 'no escape behaviors' — after writing that I placed the robot on more
+> pyramids and did observe the escape. It's just very slow. The legs take a while to find the
+> boredom point but will eventually increase their amplitude so movement can occur. We may see
+> more interesting results with a steeper learning rate (if that applies here)."*
+
+**This retracts Correction 4's premise and is consistent with the window data.** The arm that
+"increases amplitude until movement occurs" is the arm whose activity *sustains* rather than
+decays — and note **`amp_homeo_gain = 0` in `pure_hk`**, so the amplitude growth the operator
+watched is not the amplitude homeostat. It is **the homeokinetic gradient itself**, destabilizing
+the loop until the body becomes responsive again. That is homeokinesis doing exactly the job it
+is for, on the picrawler, observed directly. It is the single most positive result in this report.
+
+**"Steeper learning rate" applies directly, and the source comparison already flagged the gap:**
+
+| | PM hexapod | PM dog | **ours** |
+|---|---|---|---|
+| controller rate | `epsC` **0.1** | `epsC` **0.05** | `ctrl_lr` **0.01** |
+| model rate | `epsA` 0.05 | `epsA` 0.01 | `model_lr` 0.02 |
+
+**We are running the controller learning rate 5–10× below every Playful Machine legged
+experiment.** §2 recorded that number on day one and nothing tested it. Sweep in flight:
+`ctrl_lr` ∈ {0.05, 0.1} on the self-excite base at 20 k, read with `windowavg.py`.
+
+⚠️ **Caveat to check in the result:** `max_dctrl = 0.05` clamps ‖ΔC‖_F per tick. If that clamp
+binds, raising `ctrl_lr` changes nothing and the two arms will read *identically* — which is the
+free tell this ledger already learned to read (a flat sweep where the control's is structured
+means the mechanism never engaged). If they are flat, `max_dctrl` is the real lever.
+
+---
+
+## 8h. ★★★ THE LEARNING RATE WAS THE GAP — and the operator called it
+
+`ctrl_lr` sweep on the self-excite pure-HK base, 20 k ticks, n=4. **The sweep is not flat, so
+`max_dctrl` is not binding and the mechanism engaged.**
+
+| `ctrl_lr` | net_disp | net_z | **steps** | step_bal | tilt_sd | falls |
+|---|---|---|---|---|---|---|
+| **0.01** (ours) | 0.56 | +0.56 ± 0.32 | 41.0 | 0.16 | 0.099 | 1.00 |
+| **0.05** (PM dog) | 0.68 | +0.36 ± 0.53 | **141.5** | **0.42** | 0.225 | 0.75 |
+| **0.10** (PM hexapod) | **1.79 ± 1.53** | **+1.77 ± 1.54** | **163.3** | 0.29 | 0.279 | 1.75 |
+
+**Steps ×4. Displacement ×3.2. One seed at `net_z` = 4.36 — inside the deployed config's range
+(4.58), from a controller with no stroke, no coupling, no gait phase, no heading and no nav.**
+
+### The window split is the real result: at PM's rate, the arm is STILL IMPROVING at 20 k
+
+| late window (14–20k), per 1000 ticks | `ctrl_lr` 0.01 | 0.05 | **0.10** |
+|---|---|---|---|
+| **displacement rate** | 0.065 | 0.051 | **0.152** |
+| straightness | 0.139 | 0.083 | **0.214** |
+| **tilt_sd** | 0.076 | 0.103 | **0.069** |
+| step rate | 1.43 | 5.35 | 5.22 |
+
+| `ctrl_lr = 0.10` trajectory | early 0–6k | mid 7–13k | late 14–20k |
+|---|---|---|---|
+| displacement rate | 0.1375 | 0.1189 | **0.1524** |
+| straightness | 0.1914 | 0.1648 | **0.2142** |
+| tilt_sd | 0.5136 | 0.0800 | **0.0689** |
+
+**`ctrl_lr = 0.10` is the only arm that gets BETTER late.** Displacement rate and straightness are
+both *higher* in the final window than the first, while wobble falls monotonically to **0.069 —
+better than the deployed baseline's 0.065 is not, but comparable to it**, and calmer than the
+slower-learning arms. The other two arms decline over the run (0.084 → 0.065 and 0.070 → 0.051).
+
+**This is the closest thing to a loud result in the whole campaign**, and it belongs to the
+operator: *"we may see more interesting results with a steeper learning rate (if that applies
+here)."* It did apply. §2 recorded the 5–10× gap against PM on day one and nothing tested it
+until they asked.
+
+**Scope it honestly.** n=4 with `net_z` std 1.54 (seeds 0.40 / 4.36 / 1.32 / 0.99) is a *signal*,
+not a finding — the spread is larger than the mean. Falls rise 1.00 → 1.75. And "still improving
+at 20 k" is a three-window trend on four seeds, which is exactly the kind of shape that needs a
+longer run to confirm rather than a bigger claim. **In flight: `ctrl_lr = 0.20` at 20 k (is 0.10
+the peak, or does it keep climbing past PM's range?) and `ctrl_lr = 0.10` at 40 k (does the
+improvement continue, or plateau?).**
+
+**What it does NOT yet show:** transport is still ~1.8 m against the deployed 4.58, and
+`straight` is 0.13 against 0.73 — this is a body that moves, not a body that walks somewhere.
+
+### ⚠️ Retraction: "still improving at 20 k" does NOT survive to 40 k
+
+Both follow-ups landed and the second one corrects me.
+
+**`ctrl_lr = 0.20` at 20 k** — past PM's range: net_disp **2.17 ± 1.65** (up from 1.79),
+`steps` **226** (up from 163), but `turns` **+3.58 ± 2.30**, tilt_sd 0.335, falls 1.75. More
+distance and far more churn; the useful band is 0.10–0.20 and the cost is stability.
+
+**`ctrl_lr = 0.10` at 40 k** — net_disp **1.46 ± 1.95**, *lower* than the same arm at 20 k
+(1.79), with `turns` **± 12**. The window split shows why:
+
+| `ctrl_lr = 0.10`, 40 k | early 0–10k | mid 13–26k | late 27–40k |
+|---|---|---|---|
+| **step rate** | 12.02 | 5.21 | **2.95** |
+| path rate | 0.742 | 0.682 | **0.577** |
+| displacement rate | 0.107 | 0.080 | **0.042** |
+| straightness | 0.150 | 0.118 | **0.071** |
+| tilt_sd | 0.436 | 0.079 | 0.071 |
+
+**The arm peaks around 14–20 k and then decays monotonically.** Activity falls 12.0 → 5.2 → 2.95
+steps per 1000 ticks. **I over-read a three-window trend as a continuing one; it is a peak.**
+The claim that survives is narrower: *raising `ctrl_lr` to PM's rate raises and delays the
+activity peak by a large factor — it does not prevent the eventual decay.*
+
+### ⇒ This indicates the LAST unbuilt import, and indicates it sharply
+
+The homeokinetic loop still settles toward a fixed point; `c_init` sets where it *starts* and
+`ctrl_lr` sets how fast it explores, but neither keeps it excited indefinitely. **In PM the thing
+that does that is continuous sensory perturbation: `ColorUniformNoise(0.1)` on every sensor, in
+every legged experiment** (§2), plus ODE-level noise 0.01. Our proprio channel is **noiseless**,
+and our only noise is white, motor-side and post-controller (`explore_noise = 0.05`).
+
+That is import **I4**, it is the only §5 import still unbuilt, and the decay curve above is
+exactly the symptom it addresses: a loop with nothing to amplify runs down. It also matches the
+operator's description of the mechanism they watched — *"the legs take a while to find the
+boredom point but will eventually increase their amplitude"* — which is a loop **oscillating**
+between decay and re-excitation, i.e. what homeokinesis does when a persistent perturbation keeps
+feeding it.
+
+---
+
+## 8i. I4 — colored proprioceptive noise: `REGRESSION` at PM's dose, with the predicted mechanism faintly visible
+
+**Built:** first-order (OU-like) colored noise on `reality.proprio.joints` in
+`picrawler_body.gd` — `n ← (1−a)·n + a·U(−σ, σ)`, `a = 1/τ`, so `τ = 1` degenerates to white and
+the knob spans both regimes. Seeded off `OGMA_SEED` so the trace varies per seed rather than every
+seed sharing one. `sensor_noise_sigma = 0` (default) is byte-identical; guard verified — the
+deployed baseline reproduces net_z 4.58 ± 0.27, tilt_sd 0.065, steps 50.0, 0 falls.
+
+**σ = 0.1 (PM's value), on the best pure-HK arm (`c_init=0.25`, `ctrl_lr=0.10`), 40 k, n=4:**
+
+| | no noise | **σ = 0.1** |
+|---|---|---|
+| net_disp | 1.46 ± 1.95 | **0.45 ± 0.32** |
+| steps | 240 | 185 |
+| tilt_sd | 0.208 | 0.165 |
+| falls | 1.75 | 1.25 |
+| turns | ±12 | ±10 |
+
+**It costs about two-thirds of the transport.** Calmer and fewer falls, but that is the trade a
+weaker gait always shows. **Verdict `REGRESSION` at σ = 0.1 on this base.**
+
+**But the window split shows the predicted mechanism, faintly:**
+
+| per 1000 ticks | no noise: early → mid → late | **σ = 0.1: early → mid → late** |
+|---|---|---|
+| displacement rate | 0.107 → 0.080 → **0.042** | 0.074 → 0.044 → **0.045** |
+| path rate | 0.742 → 0.682 → **0.577** | 0.696 → 0.631 → **0.639** |
+| step rate | 12.02 → 5.21 → 2.95 | 11.79 → 3.24 → **1.60** |
+
+**Without noise, locomotor output declines all the way to 40 k. With noise it FLATTENS in the
+late window** (0.044 → 0.045 displacement, 0.631 → 0.639 path) instead of continuing to fall.
+That is the arrested-decay signature the import predicts — **at a level too low to be worth
+having, and the step rate decays faster regardless.**
+
+**Do not record this as "colored noise is refuted" (§3.1).** It is one dose on one base. The
+honest verdict is *`REGRESSION` at σ = 0.1*, with two specific reasons to think the dose rather
+than the idea is wrong:
+
+1. **Our state vector amplifies it.** PM's controller sees one sensor per motor. Ours sees
+   `[pos, action, delta]` per joint, and `delta` is a *difference of successive positions* — so
+   injecting `n_t` into position also injects `n_t − n_{t−1}` into the velocity channel. The same
+   σ therefore perturbs two of three channels per joint, and the velocity channel is the one the
+   HK gradient weights most heavily (§8b F2: 44 % of `|C|` mass).
+2. **The decay-arrest is real but under-powered**, which is what a too-large dose looks like when
+   it is simultaneously helping (persistent excitation) and hurting (drowning the signal the
+   controller is trying to model).
+
+### ★★ σ = 0.03 — the dose response is NON-MONOTONIC, and the body STANDS UP
+
+| 40 k, n=4 | net_disp | steps | falls | tilt_sd |
+|---|---|---|---|---|
+| σ = 0 | **1.46 ± 1.95** | 240 | 1.75 | 0.208 |
+| **σ = 0.03** | 0.88 ± 0.23 | 151 | **0.75** | 0.179 |
+| σ = 0.10 | 0.45 ± 0.32 | 185 | 1.25 | 0.165 |
+
+Transport still falls monotonically with σ, so **`REGRESSION` on transport stands.** But the
+window split shows the aggregate was hiding the actual effect:
+
+| chassis_y, per window | early 0–10k | mid 13–26k | late 27–40k |
+|---|---|---|---|
+| σ = 0 | 0.0424 | 0.0374 | **0.0341** ↓ |
+| **σ = 0.03** | 0.0453 | 0.0550 | **0.0706** ↑ |
+| σ = 0.10 | 0.0443 | 0.0346 | **0.0327** ↓ |
+
+| step rate, late window | σ=0: **2.95** | σ=0.03: **2.99** | σ=0.10: **1.60** |
+|---|---|---|---|
+| path rate, late | 0.577 | **0.400** | 0.639 |
+| displacement rate, late | 0.042 | **0.049** | 0.045 |
+
+**At σ = 0.03 the body progressively STANDS UP over the run** — chassis 0.045 → 0.055 → **0.071**,
+monotone, ending **above the deployed baseline's 0.058** — while every other arm sinks. And it
+does so with **`height_homeo_gain = 0` and no stance-lift**: the pure-HK tier has no height
+mechanism at all. It also holds the step rate that σ = 0.10 destroys (2.99 vs 1.60) while
+spending the *least* path per unit displacement of the three.
+
+**The dose response is non-monotonic — σ = 0.03 helps where σ = 0.10 hurts — which is the
+stochastic-resonance shape**: an optimum exists and PM's value is past it for our body. That is
+consistent with the state-vector argument above (our `[pos, action, delta]` layout doubles the
+same σ into the velocity channel, so our effective dose is roughly twice PM's nominal one).
+
+**Verdict: `REGRESSION` on transport at every σ tested; `WORKING` on posture at σ = 0.03**, where
+it produces the one thing the whole pure-HK campaign could not — a body that gets *taller* as it
+learns, unaided. Aggregate metrics called this `chassis_y 0.059 ± 0.026` and it read as noise;
+only the window split showed it was a monotone rise.
+
+**Re-use context: sweep σ ∈ [0.01, 0.05] where the optimum evidently lives, and inject on the
+POSITION channel only so the same σ does not double into the velocity channel.**
+
+---
+
 ## 9. Source index (for the next session)
 
 | What | Where |
