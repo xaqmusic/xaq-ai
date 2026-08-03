@@ -498,11 +498,43 @@ func _set_knee_widening_enabled(value: bool) -> void:
 # migration PR; until then, motor_freeplay_rad creates a deadband but no
 # centering force — joint floats freely inside the zone.
 #
+# ⚠ 2026-08-03 — THAT NOTE IS NOW HALF-STALE.  The native Generic6DOFJoint3D angular
+# spring IS enabled on the g6dof backend (FLAG_ENABLE_ANGULAR_SPRING, with the preset's
+# stiffness/damping), so there IS a restoring force.  But its equilibrium point was
+# hardcoded to 0.0 = mechanical neutral, which makes it a RETURN-TO-NEUTRAL spring
+# fighting every commanded angle, not compliance about the command.  See
+# spring_follows_target, which parks the equilibrium on the servo target instead.
+#
 # Recommended starting values:
 #   motor_freeplay_rad = 0.087  (~5°  — typical hobby-servo-saver play)
 #   motor_freeplay_rad = 0.17   (~10° — generous, lets gravity sag visibly)
 # Default 0.0 ⇒ no free play, motor engages at any error > SERVO_DEADBAND.
 @export var motor_freeplay_rad:    float = 0.0
+
+# 2026-08-03 — SPRING EQUILIBRIUM TRACKING.  The g6dof angular spring's equilibrium
+# point was hardcoded to 0.0 (mechanical neutral) both at construction and in
+# _apply_spring_to.  That makes it a SERVO-SAVER RETURN SPRING: it pulls every joint
+# toward neutral at all times, fighting whatever the controller commands, and inside
+# the freeplay deadband it drags a stance-holding leg back toward zero instead of
+# holding it compliantly.  It is almost certainly why the g6dof substrate measured
+# WORSE than rigid hinge (net_z 4.49 -> 3.51) — the springs were fighting the gait.
+#
+# What a springy JOINT should be is a series-elastic element: compliance ABOUT THE
+# COMMANDED ANGLE.  With this on, the equilibrium point tracks the servo target each
+# tick, so stiffness sets how hard the joint is pulled back to where it was TOLD to
+# be — which is the centering force in the freeplay zone that makes freeplay+springs
+# behave like a real compliant actuator rather than slop plus a return spring.
+#
+# DEFAULT CHANGED TO TRUE 2026-08-03 (operator): a spring that does not follow the
+# command is not compliance, it is a return-to-neutral bug, so the correct behaviour is
+# the default rather than a lever.  The flag is kept so the old behaviour can still be
+# reproduced for comparison.
+# ⚠ CONSEQUENCE: every g6dof result measured before this date used equilibrium=0 and is
+# NOT comparable to anything measured after.  That includes the 2026-08-03 hinge-vs-g6dof
+# comparison (net_z 4.49 -> 3.51, PLV 0.138 -> 0.083), which is now known to have been
+# measured with springs pulling every joint toward neutral and fighting the gait.  Re-run
+# before citing it.  `hinge` is unaffected — it has no springs.
+@export var spring_follows_target: bool = true
 
 # Stage 3.D (2026-06-01) — Bernoulli-impulse actuation backend.
 # Port of v4 Phase 6.0.a body-as-integrator from the_cell. Replaces the
@@ -1861,6 +1893,29 @@ var _calibrate_step_start_tick: int = 0
 # inputs are ignored; slider values map directly to joint targets via
 # t = servo_targets[k] * servo_signs[k] + servo_origins[k].
 var _motor_test_mode: bool = false
+var _brain_paused_notified: bool = false   # one-shot log when calibration pauses the brain
+# ---- 2026-08-03 · GANGED JOINT DRIVE for spring/damping characterisation -------------
+# Displacing one joint tells you little; a leg is a coupled chain and the body only
+# resonates when a JOINT GROUP moves together.  These drive all four hip2s (or all four
+# knees) as one, so the operator can PULSE (step, release, watch the ring-down → damping
+# ratio and natural frequency) or SHAKE (sinusoid at a swept frequency → find the
+# amplitude peak = resonance).  Active only in G motor-test mode.
+var _gang_hip2_base: float = 0.0
+var _gang_knee_base: float = 0.0
+var _gang_pulse_ticks: int = 0        # >0 = a pulse is being held
+var _gang_pulse_amp: float = 0.0
+var _gang_pulse_group: int = 1        # 1 = hip2, 2 = knee, 3 = both
+var _gang_shake_hz: float = 0.0       # 0 = off
+var _gang_shake_amp: float = 0.0
+var _gang_shake_phase: float = 0.0
+# ring-down readout: peak-to-peak of the measured joint angle over a rolling window
+var _gang_pp_hip2: float = 0.0
+var _gang_pp_knee: float = 0.0
+var _gang_win_hi2: float = -9.0
+var _gang_win_lo2: float = 9.0
+var _gang_win_hik: float = -9.0
+var _gang_win_lok: float = 9.0
+var _gang_win_n: int = 0
 # 2026-06-09 — HUD visibility toggles bound to T and H hotkeys.  Joseph QoL
 # ask: clean visual access to the 3D scene during UI observation.  T hides
 # all picrawler HUD panels (curriculum / reward / trainer); H hides the
@@ -2540,6 +2595,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_PYRAMID_MAX_R",
 			  "OGMA_PICRAWLER_PYRAMID_COUNT",
 			  "OGMA_PICRAWLER_JOINT_BACKEND",
+			  "OGMA_PICRAWLER_JOINT_DAMPING",
 			  "OGMA_PICRAWLER_MOTOR_FREEPLAY"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
@@ -2607,7 +2663,15 @@ func _resolve_env() -> void:
 					joint_backend = v
 				else:
 					push_warning("PicrawlerBody: ignoring OGMA_PICRAWLER_JOINT_BACKEND=%s (expected hinge/g6dof)" % v)
+			# 2026-08-03 — joint_angular_damping had NO env override, so it could never be
+			# swept headlessly.  The operator found it is the largest behavioural lever on
+			# the g6dof substrate (1.5 -> 0.5 makes the robot move "much, much faster"),
+			# and it is g6dof-ONLY: it reaches the solver solely via
+			# Generic6DOFJoint3D.PARAM_ANGULAR_DAMPING, so hinge runs never saw it.  That
+			# is why UI observation and headless measurement disagreed all session.
+			"OGMA_PICRAWLER_JOINT_DAMPING":            joint_angular_damping    = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_MOTOR_FREEPLAY":           motor_freeplay_rad       = max(0.0, v.to_float())
+			"OGMA_PICRAWLER_SPRING_FOLLOWS_TARGET":    spring_follows_target    = (v == "1")
 			"OGMA_PICRAWLER_PHASE_CONTRAST_GAIN":      phase_contrast_gain      = clamp(v.to_float(), 0.0, 1.0)
 			"OGMA_PICRAWLER_PROGRESS_REWARD_GAIN":      progress_reward_gain      = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_PROGRESS_REWARD_MIN_DELTA": progress_reward_min_delta = max(0.0001, v.to_float())
@@ -3896,9 +3960,40 @@ const _G6DOF_DEFAULT_PRESET: Dictionary = {
 	"motor_freeplay_rad":           0.1,
 }
 
+# Env var that owns each preset key.  If it is set, the preset must NOT overwrite it.
+const _G6DOF_PRESET_ENV: Dictionary = {
+	"motor_force_scale":            "OGMA_PICRAWLER_MOTOR_FORCE_SCALE",
+	"motor_authority_scale":        "OGMA_PICRAWLER_MOTOR_AUTHORITY",
+	"motor_damping_factor":         "OGMA_PICRAWLER_MOTOR_DAMP",
+	"joint_angular_damping":        "OGMA_PICRAWLER_JOINT_DAMPING",
+	"joint_angular_erp":            "OGMA_PICRAWLER_JOINT_ERP",
+	"joint_angular_limit_softness": "OGMA_PICRAWLER_JOINT_SOFTNESS",
+	"hip1_spring_stiffness":        "OGMA_PICRAWLER_HIP1_SPRING_STIFFNESS",
+	"hip1_spring_damping":          "OGMA_PICRAWLER_HIP1_SPRING_DAMPING",
+	"hip2_spring_stiffness":        "OGMA_PICRAWLER_HIP2_SPRING_STIFFNESS",
+	"hip2_spring_damping":          "OGMA_PICRAWLER_HIP2_SPRING_DAMPING",
+	"knee_spring_stiffness":        "OGMA_PICRAWLER_KNEE_SPRING_STIFFNESS",
+	"knee_spring_damping":          "OGMA_PICRAWLER_KNEE_SPRING_DAMPING",
+	"motor_freeplay_rad":           "OGMA_PICRAWLER_MOTOR_FREEPLAY",
+}
+
 func _apply_g6dof_default_preset() -> void:
+	# ⚠ 2026-08-03 — the preset used to overwrite EVERY key unconditionally.  Its own
+	# comment claimed "env vars still win because they run AFTER this baseline", but the
+	# env whitelist in _resolve_env() runs BEFORE this call, so the preset was silently
+	# clobbering every env override of a preset key.  Discovered when an
+	# OGMA_PICRAWLER_JOINT_DAMPING sweep produced four identical arms — the runs all
+	# reported damping=1.500 regardless of what was requested.  Any past headless sweep
+	# over a preset key on g6dof measured NOTHING and would have read as a clean null.
+	var skipped: Array = []
 	for key in _G6DOF_DEFAULT_PRESET:
+		var envk: String = str(_G6DOF_PRESET_ENV.get(key, ""))
+		if envk != "" and OS.get_environment(envk) != "":
+			skipped.append(key)
+			continue                       # env owns this one
 		set(key, _G6DOF_DEFAULT_PRESET[key])
+	if not skipped.is_empty():
+		print("PicrawlerBody: G6DOF preset yielded to env for: %s" % ", ".join(skipped))
 	print("PicrawlerBody: applied G6DOF default preset (hand-tuned compliant stand) — env / config / curriculum can still override")
 
 # 2026-06-03 — Backend-aware per-tick motor setter.  Caller always
@@ -3927,6 +4022,94 @@ func _apply_joint_springs() -> void:
 		_apply_spring_to(j, hip2_spring_stiffness, hip2_spring_damping)
 	for j in _knee_joints:
 		_apply_spring_to(j, knee_spring_stiffness, knee_spring_damping)
+
+# ---- 2026-08-03 · GANGED JOINT DRIVE (G mode only) ----------------------------------
+# Called once per physics tick BEFORE the servo targets are read, so it writes straight
+# into servo_targets[] and rides the normal PD/freeplay/spring path — i.e. the operator
+# is characterising the REAL actuator chain, not a bypass.
+#   PULSE  : step the group by amp, hold N ticks, release → the ring-down after release
+#            gives the damping ratio (successive peak ratio) and the natural frequency.
+#   SHAKE  : sinusoid at shake_hz → sweep it and watch the peak-to-peak readout; the
+#            frequency where pp is maximal for a fixed drive amplitude IS the resonance.
+# Indices follow the servo_targets layout: 0-3 hip1, 4-7 hip2, 8-11 knee.
+func _tick_gang_drive() -> void:
+	if not _motor_test_mode:
+		return
+	var hip2_extra: float = 0.0
+	var knee_extra: float = 0.0
+	if _gang_pulse_ticks > 0:
+		_gang_pulse_ticks -= 1
+		if _gang_pulse_group == 1 or _gang_pulse_group == 3: hip2_extra += _gang_pulse_amp
+		if _gang_pulse_group == 2 or _gang_pulse_group == 3: knee_extra += _gang_pulse_amp
+	if _gang_shake_hz > 0.0 and _gang_shake_amp > 0.0:
+		_gang_shake_phase += 2.0 * PI * _gang_shake_hz * TAU
+		if _gang_shake_phase > 2.0 * PI: _gang_shake_phase -= 2.0 * PI
+		var sv: float = sin(_gang_shake_phase) * _gang_shake_amp
+		if _gang_pulse_group == 1 or _gang_pulse_group == 3: hip2_extra += sv
+		if _gang_pulse_group == 2 or _gang_pulse_group == 3: knee_extra += sv
+	# ⚠ USE servo_idx().  Two different 12-element layouts live in this file: the proprio
+	# publish is JOINT-MAJOR (hip1x4, hip2x4, kneex4) while servo_targets is LEG-MAJOR
+	# (leg*3 + joint).  Open-coding "4+i"/"8+i" here drove hip1 on the wrong legs — the
+	# operator caught it as "hip2 base is moving rear-right hip1".
+	for i in range(4):
+		servo_targets[servo_idx(i, 1)] = _gang_hip2_base + hip2_extra   # hip2
+		servo_targets[servo_idx(i, 2)] = _gang_knee_base + knee_extra   # knee
+	# Rolling peak-to-peak of the MEASURED angles — the response, not the command.
+	# Leg 0 is representative; the gang drives all four identically.  Measured from the
+	# joint geometry with the same helper the physics step uses (hip2_angles/knee_angles
+	# are locals there, not members, so they cannot be read from here).
+	if _coxas.size() > 0 and _uppers.size() > 0 and _lowers.size() > 0:
+		var a2: float = _relative_angle_world_axis(_coxas[0], _uppers[0], _hip2_axes[0])
+		var ak: float = _relative_angle_world_axis(_uppers[0], _lowers[0], _knee_axes[0])
+		_gang_win_hi2 = maxf(_gang_win_hi2, a2); _gang_win_lo2 = minf(_gang_win_lo2, a2)
+		_gang_win_hik = maxf(_gang_win_hik, ak); _gang_win_lok = minf(_gang_win_lok, ak)
+	_gang_win_n += 1
+	if _gang_win_n >= 100:                      # ~2 s window at 50 Hz
+		_gang_pp_hip2 = _gang_win_hi2 - _gang_win_lo2
+		_gang_pp_knee = _gang_win_hik - _gang_win_lok
+		_gang_win_hi2 = -9.0; _gang_win_lo2 = 9.0
+		_gang_win_hik = -9.0; _gang_win_lok = 9.0
+		_gang_win_n = 0
+
+func gang_pulse(amp: float, hold_ticks: int, group: int) -> void:
+	_gang_pulse_amp = amp
+	_gang_pulse_ticks = max(1, hold_ticks)
+	_gang_pulse_group = group
+	print("PicrawlerBody: GANG PULSE amp=%+.3f hold=%d group=%d — watch the ring-down"
+		% [amp, hold_ticks, group])
+
+# Error BEYOND the freeplay band.  Zero inside it (motor released); outside, the residual
+# past the boundary — so the motor arrests the joint AT the slop edge rather than driving
+# it back to target and re-entering the band.  freeplay 0 ⇒ returns err unchanged, so the
+# no-freeplay path stays bit-identical to the pre-2026-08-03 behaviour.
+# Soft restoring command INSIDE the freeplay band — the spring, implemented through the
+# motor because the constraint spring is inert in Godot Physics 3D.
+#   stiffness → fraction of full servo authority applied toward the commanded angle
+#   damping   → fraction of the force limit, so a stiffer-but-undamped joint can ring
+# Returns [velocity, max_impulse].  stiffness 0 ⇒ [0, 0] = genuinely free, so the
+# all-zero ragdoll case is bit-identical to before this change.
+const SPRING_K_FULL: float = 20.0     # slider max == full servo authority
+func _soft_spring_cmd(err: float, stiffness: float, damping: float, full_imp: float) -> Array:
+	if stiffness <= 0.0:
+		return [0.0, 0.0]
+	var k: float = clampf(stiffness / SPRING_K_FULL, 0.0, 1.0)
+	var v: float = -clamp(SERVO_KP * k * err, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+	# Damping rides the force limit: low damping = the spring can overshoot and ring,
+	# high damping = it settles.  Floor keeps a stiff/undamped spring still able to act.
+	var d: float = clampf(0.25 + 0.75 * (damping / 5.0), 0.0, 1.0)
+	return [v, full_imp * k * d]
+
+func _freeplay_err(err: float) -> float:
+	if motor_freeplay_rad <= 0.0:
+		return err
+	if absf(err) <= motor_freeplay_rad:
+		return 0.0
+	return err - signf(err) * motor_freeplay_rad
+
+func _set_spring_equilibrium(j: Object, target_rad: float) -> void:
+	if j is Generic6DOFJoint3D:
+		(j as Generic6DOFJoint3D).set_param_x(
+			Generic6DOFJoint3D.PARAM_ANGULAR_SPRING_EQUILIBRIUM_POINT, target_rad)
 
 func _apply_spring_to(j: Generic6DOFJoint3D, stiffness: float, damping: float) -> void:
 	# Spring lives on the X axis (twist) since _make_g6dof_joint remaps the
@@ -6063,10 +6246,26 @@ func _step_one() -> void:
 	_hit_delta_step_quality = 0.0
 
 	# ---- 4. Tick brain (skip immediately after reset) ----
-	if _instant_pause_tick:
+	# 2026-08-03 — PAUSED IN CALIBRATION MODES.  In C (FK geometry) and G (motor test)
+	# the operator owns the servo targets, so a ticking brain is doing two harmful
+	# things: fighting the sliders for the actuators, and LEARNING FROM A BODY IT IS NOT
+	# DRIVING — its forward model gets trained on motion it did not cause, which is
+	# exactly the tautological-channel problem in a new place.  Characterising springs
+	# and damping requires the brain quiet.  Rings the pause once so it is visible in
+	# the log rather than silent.
+	if _calibrate_mode or _motor_test_mode:
+		if not _brain_paused_notified:
+			_brain_paused_notified = true
+			print("PicrawlerBody: BRAIN PAUSED (calibration mode) — operator owns the servos")
+			_ui_notify("brain PAUSED — calibration mode")
+	elif _instant_pause_tick:
 		_instant_pause_tick = false
+		_brain_paused_notified = false
 	else:
+		_brain_paused_notified = false
 		brain.tick(TAU)
+
+	_tick_gang_drive()      # G-mode ganged pulse / shake writes servo_targets first
 
 	# ---- 5. Apply servo torques (or calibrate FK) ----
 	# In C-calibration mode, bodies are frozen kinematic.  We write
@@ -6421,22 +6620,67 @@ func _step_one() -> void:
 		# motor disengage ONLY when freeplay is explicitly enabled (>0).
 		# Default 0 ⇒ motor always engages (pre-3.E++ behavior, bit-identical).
 		var use_freeplay: bool = motor_freeplay_rad > 0.0
-		var vel_hip1: float = -clamp(SERVO_KP * err_h1, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
-		var vel_hip2: float = -clamp(SERVO_KP * err_h2, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
-		var vel_knee: float = -clamp(SERVO_KP * err_kn, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		# 2026-08-03 — BACKLASH, not an on/off deadband.  The old code computed the motor
+		# velocity from the FULL error and merely zeroed it inside the band.  So a joint
+		# drifting under gravity would leave the band, the motor would engage and drive it
+		# all the way back to TARGET, overshooting into the band again, motor off, drift...
+		# a limit cycle.  The operator saw it exactly: "legs slowly drift down then twitch
+		# back up" with all stiffness and damping at zero, where the expectation is a loose
+		# floppy joint.
+		#
+		# Real mechanical slop rests AT THE EDGE of the slop zone: within the band the gear
+		# train is disengaged, and once the slop is taken up the train simply holds.  So the
+		# motor must respond only to the error BEYOND the deadband.  err_eff then decays to
+		# 0 as the joint reaches the boundary and it settles there instead of snapping back.
+		var eh1: float = _freeplay_err(err_h1)
+		var eh2: float = _freeplay_err(err_h2)
+		var ekn: float = _freeplay_err(err_kn)
+		var vel_hip1: float = -clamp(SERVO_KP * eh1, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		var vel_hip2: float = -clamp(SERVO_KP * eh2, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		var vel_knee: float = -clamp(SERVO_KP * ekn, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
 		var imp_h1: float = motor_max_impulse
 		var imp_h2: float = motor_max_impulse
 		var imp_kn: float = motor_max_impulse
 		if use_freeplay:
-			if abs(err_h1) < motor_freeplay_rad:
-				vel_hip1 = 0.0; imp_h1 = 0.0
-			if abs(err_h2) < motor_freeplay_rad:
-				vel_hip2 = 0.0; imp_h2 = 0.0
-			if abs(err_kn) < motor_freeplay_rad:
-				vel_knee = 0.0; imp_kn = 0.0
+			# Inside the band the hard motor is released.  What acts there instead is the
+			# SOFT SPRING below — see _soft_spring_cmd().
+			if is_zero_approx(eh1): vel_hip1 = 0.0; imp_h1 = 0.0
+			if is_zero_approx(eh2): vel_hip2 = 0.0; imp_h2 = 0.0
+			if is_zero_approx(ekn): vel_knee = 0.0; imp_kn = 0.0
+			# 2026-08-03 — SPRINGS IMPLEMENTED IN THE MOTOR, because the constraint spring
+			# does not exist.  MEASURED: knee_spring_stiffness 0 vs 20 gave byte-identical
+			# trajectories, so Generic6DOFJoint3D's angular spring is a NO-OP here.  The
+			# June note assumed Bullet's constraint-level spring; Godot 4 replaced Bullet
+			# with Godot Physics 3D, which does not implement it, and setting the params
+			# raises no error.  The springs have therefore never done anything.
+			#
+			# apply_torque was already tried and reverted (explicit Euler, low-inertia
+			# segments).  This instead scales the MOTOR's velocity command inside the
+			# deadband: a velocity-target motor is solved at constraint level, so it is
+			# stable where an applied torque is not.  Soft near the target, firm past the
+			# slop — which IS series-elastic behaviour.  stiffness 0 ⇒ free (unchanged).
+			if is_zero_approx(eh1):
+				var c1: Array = _soft_spring_cmd(err_h1, hip1_spring_stiffness,
+												 hip1_spring_damping, motor_max_impulse)
+				vel_hip1 = c1[0]; imp_h1 = c1[1]
+			if is_zero_approx(eh2):
+				var c2: Array = _soft_spring_cmd(err_h2, hip2_spring_stiffness,
+												 hip2_spring_damping, motor_max_impulse)
+				vel_hip2 = c2[0]; imp_h2 = c2[1]
+			if is_zero_approx(ekn):
+				var c3: Array = _soft_spring_cmd(err_kn, knee_spring_stiffness,
+												 knee_spring_damping, motor_max_impulse)
+				vel_knee = c3[0]; imp_kn = c3[1]
 		_set_motor_vf(_hip1_joints[i], vel_hip1, imp_h1)
 		_set_motor_vf(_hip2_joints[i], vel_hip2, imp_h2)
 		_set_motor_vf(_knee_joints[i], vel_knee, imp_kn)
+		# Series-elastic behaviour: park the spring's equilibrium ON the commanded
+		# angle, so within the freeplay deadband the joint is centred where it was
+		# told to be rather than dragged to mechanical zero.
+		if spring_follows_target and joint_backend != "hinge":
+			_set_spring_equilibrium(_hip1_joints[i], _eff_target_hip1[i])
+			_set_spring_equilibrium(_hip2_joints[i], _eff_target_hip2[i])
+			_set_spring_equilibrium(_knee_joints[i], _eff_target_knee[i])
 		# Motor-test diagnostic — one line per leg, twice a second, so the
 		# user can see whether sliders are reaching the motor chain.
 		# Surfaces: slider value, eff_target, measured joint angle,

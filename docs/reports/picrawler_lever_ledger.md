@@ -670,6 +670,62 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-03 — THE SUBSTRATE WAS NEVER WHAT EITHER OF US THOUGHT (four defects, one chain)
+
+**Operator-driven, from a single observation: "with stiffness and damping at zero the legs
+slowly drift down then twitch back up — that is not expected."** Chasing it exposed four
+compounding defects in the body, every one of which reported no error.
+
+**1. Two different robots.** `resolve_picrawler_joint_backend()` returns the launcher's persisted
+choice when launched from the UI, but falls through to the `@export` default `"hinge"` headless.
+**Every headless measurement in this campaign ran `hinge`; every operator UI session ran
+`g6dof`.** The same config gives a different body depending on how it is started.
+
+**2. `joint_angular_damping` is g6dof-ONLY** (reaches the solver solely via
+`Generic6DOFJoint3D.PARAM_ANGULAR_DAMPING`) and sits at **1.5** in the preset. So the operator
+observed every homeokinetic result through a heavy joint low-pass that the headless numbers never
+had. Operator: dropping it to 0.5 "allows the robot to move much, much faster" — **the largest
+behavioural lever found on this body**, and it had no env override, so it had never been swept.
+
+**3. `_apply_g6dof_default_preset()` silently clobbered EVERY env override.** Its comment claimed
+"env vars still win because they run AFTER this baseline"; the env whitelist actually runs
+**before** the preset inside `_resolve_env()`. So all thirteen preset keys — joint damping, motor
+force scale, authority, erp, softness, all six spring params, freeplay — were overwritten with no
+warning. ⇒ **Any past headless sweep over a preset key on g6dof measured NOTHING and would have
+read as a clean null.** Caught only because a joint-damping sweep produced four identical arms.
+Fixed: the preset now yields to env and prints which keys it yielded on.
+
+**4. ★ THE JOINT SPRINGS HAVE NEVER EXISTED.** Measured, not inferred: `knee_spring_stiffness`
+0 vs 20 with everything else fixed gave **byte-identical trajectories** (first −1.1800, last
+0.9200, min −1.1900, max 1.5300 in both). The June note recorded that an `apply_torque` spring was
+reverted in favour of *"`Generic6DOFJoint3D` with built-in angular spring (constraint-level
+integration in **Bullet**)"* — but **Godot 4 replaced Bullet with Godot Physics 3D, which does not
+implement angular springs.** The params and `FLAG_ENABLE_ANGULAR_SPRING` are set, nothing errors,
+and the solver ignores all of it.
+
+⇒ **Retract "the springs were fighting the gait"** — my explanation for g6dof measuring worse than
+hinge (net_z 4.49 → 3.51, PLV 0.138 → 0.083). There were no spring forces. That difference comes
+from the other preset parameters, most likely the 1.5 joint damping. **`spring_follows_target` was
+also a no-op** — there was no spring to re-centre.
+
+**Fixes shipped.** *Backlash:* the motor drove from the FULL error and merely zeroed inside the
+deadband, so a drifting joint left the band, was driven back to TARGET, overshot in, and drifted
+again — a limit cycle, exactly the operator's "drift then twitch". Now responds only to the error
+*beyond* the band, so the joint settles AT the slop edge as real slop does. *Springs:* implemented
+by scaling the MOTOR's velocity command inside the deadband — a velocity-target motor is solved at
+constraint level, so it is stable where the reverted `apply_torque` was not. Verified working:
+stiffness 0 → knee drifts to 1.41; stiffness 20 → held at 0.00, where before both read identically.
+*Tooling:* brain now PAUSES in `[C]`/`[G]` (it was fighting the sliders **and** training its
+forward model on motion it did not cause); ganged hip2/knee drive with PULSE (ring-down → damping
+ratio) and SHAKE (frequency sweep → resonance) plus a measured peak-to-peak readout; joint and
+body damping exposed alongside the spring sliders, since the panel had been showing one of **three**
+damping sources.
+
+**Open and load-bearing: which backend is canonical.** Every result in this ledger is `hinge`. If
+`g6dof` becomes canonical, the n=20 ablation and the whole coordination series need re-running.
+
+---
+
 ### ★★ 2026-08-03 — I2 (the real ∂G term) is BLOCKED BEHIND F3, not mis-dosed
 
 `sense` implemented faithfully from `sos_avggrad.cpp` (`epsrel = diag(C·Q·A) ⊙ g'·2·sense`,
