@@ -1091,6 +1091,113 @@ none.
 
 ---
 
+## 8f. ★★★ OPERATOR OBSERVATION (2026-08-02) — corrects the analysis on three points
+
+Both arms watched in the UI at seed 6000. Verbatim substance:
+
+> **PURE-HK CONTROL** — "each leg settles into a separate basic behavior. The most interesting
+> being the front right leg forming an **inchworm motion that drags the body forward** while the
+> other legs look mostly stuck."
+>
+> **SELF-EXCITE (c_init=0.25)** — "a period of slow convulsions. The convulsions do morph over
+> time into sort of a **crab walk with the chassis off the floor occasionally by 10k ticks**.
+> There is a **hint of diagonal symmetry with front-left and rear-right working together** while
+> the others drag or balance." … "the robot seems a bit **lobotomized** compared to our earlier
+> work that had good emergent climbing skills. Placing this config on obstacles after ~20k ticks
+> **does not exhibit the escape behaviors** that marked progress during our recent experiments."
+
+### Correction 1 — "the controller structurally cannot coordinate the legs" was TOO STRONG
+
+§8e argued that four independent 3×3 per-leg blocks cannot represent an inter-leg phase
+relationship, and concluded that directed motion therefore requires whole-body `C`. **The first
+half is still true; the conclusion does not follow.** The operator observed **diagonal
+coordination — front-left with rear-right — emerging with `coupling_gain = 0` and no gait phase
+in play at all.** `C` cannot *hold* a cross-leg term, but the four controllers are coupled
+**through the body**, and that coupling is evidently enough to produce a trot diagonal
+unaided.
+
+**This is precisely PM's own `armband_split` result** (§5, I7): independent per-channel
+controllers cooperating through the physical medium, with no shared state. We reproduced it and
+the metrics did not show it.
+
+⇒ **I7 (whole-body `C`) drops from "the leading candidate" to "one candidate."** The honest
+framing is now a question rather than a fix: *coordination does emerge through the body — is it
+faster/more stable if `C` can also represent it directly?* That is worth testing, but it is no
+longer the diagnosis.
+
+### Correction 2 — ★ 6 000 TICKS IS TOO SHORT FOR THIS ARM. Every pure-HK number above is pre-convergence.
+
+The operator reports convulsions **morphing into a crab walk by ~10 k ticks**. Our entire
+pure-HK campaign — the `c_init` sweep, the gravity arms, the stance arms, 16 seed-runs — ran at
+**6 000 ticks.** We were measuring the transient and reporting it as the behaviour.
+
+This is a protocol error, and it is mine: 6 000 is the *deployed* config's protocol, chosen when
+the deployed config walks from ~2 400 ticks. A stripped controller that has to *find* its
+behaviour needs a longer horizon, and nothing checked that assumption before 16 runs were spent
+on it. **Every `NULL` on locomotion in §8c–8e is provisional and must be re-measured at ≥20 k
+ticks before it means anything.**
+
+### Correction 3 — ★★ `steps` DOES NOT SEE AN INCHWORM
+
+The control arm reports **`steps` 0.5 per 6 000 ticks** and `net_z` +0.13, and the operator
+watched a front-right leg inchworm the body forward. `steps` counts foot-lift events above a
+height threshold; a leg that flexes and drags without clearing that threshold registers nothing.
+**So the arm the metrics called "essentially frozen" was in fact locomoting by a mechanism the
+instrument cannot see.** Add to the standing blind-metric list alongside `turns`, chassis height
+and `fwd_v`.
+
+### Correction 4 — ★★★ "COSTS NOTHING" WAS MEASURED ON A BLIND METRIC
+
+The headline of §8b F5 — ablating all learning costs the deployed gait nothing — rests on flat
+corridor metrics: net_z, straight, tilt_sd, planted, falls. **The operator's three aliveness
+signals are heading regulation, proto-gait steps, and obstacle-triggered adaptation, and the
+ablation was never tested against the third.** The observation that pure-HK shows *no escape
+behaviour on obstacles after 20 k ticks* is the direct warning: **flat distance can be preserved
+while the adaptive capability is gone.**
+
+That is the same blind-metric failure this ledger has already recorded twice (distance certifying
+a paddling sequencer; `turns` blind to a body that swings and nets zero). **The obstacle gate on
+the full-ablation arm is therefore a required test, not an optional one.**
+
+#### The gate ran, and F5 SURVIVES it — with a caveat that is now the sharper question
+
+`humpavg.py`, teleport onto the hump crest at tick 3 000, n=4:
+
+| | baseline (all learning on) | **ALL learning off** |
+|---|---|---|
+| final_z | 4.52 ± 0.45 | **4.50 ± 0.19** |
+| gain_z (post-teleport) | 1.91 ± 0.45 | **1.88 ± 0.20** |
+| belly clearance | 0.021 | 0.020 |
+| belly min | 0.002 | 0.004 |
+| falls | 0 | 0 |
+
+**Identical, at lower variance.** So the learned layer is not carrying hump traversal either, and
+the F5 null now stands against two of the operator's three aliveness signals rather than one.
+I expected this test to overturn the headline; it did not.
+
+**But the caveat is the more useful output.** The ledger already records that hump clearance
+"works by letting the belly ride low, which **may be a sim exploit**" — i.e. the robot may be
+*bulldozing* the hump rather than negotiating it. **A gate that a fully-scripted walker passes
+identically is not a test of adaptation.** So the correct conclusion is not "adaptation is
+intact" but:
+
+> **Our obstacle gates cannot distinguish a learned adaptive system from a scripted one.** The
+> ablation passes both, which is evidence about the *gates* as much as about the ablation.
+
+The operator's criterion is sharper than either gate: *error spikes on contact, the body feels
+around and sometimes traverses — proving plasticity is still live late in a run.* A scripted
+walker shows no exploratory variation on contact and no early-vs-late difference. **Building that
+comparison is now the open instrument job**, and `recoveravg.py` (4 perturbations per run,
+measures whether progress resumes and whether coordination returns) is the closest existing tool.
+
+**One scoping note on the operator's "lobotomized" observation:** it was made on the **pure-HK**
+arms, which have no panic reflex, no stuck→explore, no height homeostat and no amplitude
+homeostat. It does not bear directly on the ablation arm, which retains all of those. The escape
+behaviour being missed may live in those reflexes rather than in the learned controller — and
+this gate result is consistent with exactly that.
+
+---
+
 ## 9. Source index (for the next session)
 
 | What | Where |

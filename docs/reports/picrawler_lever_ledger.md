@@ -670,6 +670,65 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-02 — OPERATOR OBSERVATION OVERTURNS PART OF THE SAME DAY'S ANALYSIS
+
+Both pure-HK arms watched in the UI, seed 6000. **Four corrections, three of them to claims made
+earlier the same day. Operator/UI diagnosis is first-class (`CLAUDE.md` §4) and here it caught
+what 20 seed-runs did not.**
+
+**1. Coordination DOES emerge, through the body — with `coupling_gain=0`.** Observed: *"a hint of
+diagonal symmetry with front-left and rear-right working together"* by ~10k ticks, with no
+coupling term and no gait phase in play. The claim that four independent 3×3 per-leg blocks
+"structurally cannot coordinate" was **too strong**: `C` cannot *hold* a cross-leg term, but the
+controllers are coupled **through the body**, and that suffices for a trot diagonal unaided.
+**This is PM's own `armband_split` result reproduced** (independent per-channel controllers
+cooperating through the physical medium). ⇒ whole-body `C` drops from "the leading candidate" to
+one candidate, and the question becomes *"does representing coordination in `C` make it faster or
+more stable than letting the body do it?"* — not *"is it required?"*
+
+**2. ★ 6 000 TICKS IS TOO SHORT FOR A STRIPPED CONTROLLER.** Observed: convulsions *"morph over
+time into sort of a crab walk with the chassis off the floor occasionally by 10k ticks."* The
+entire pure-HK campaign — the `c_init` sweep, gravity arms, stance arms, 16 seed-runs — ran at
+6 000. **We measured the transient and reported it as the behaviour.** 6 000 is the *deployed*
+config's protocol (it walks from ~2 400); a controller that must FIND its behaviour needs a
+longer horizon. **Every pure-HK `NULL` on locomotion is provisional until re-measured at ≥20 k.**
+
+**3. ★★ `steps` DOES NOT SEE AN INCHWORM — new blind metric.** The control arm reports `steps`
+**0.5 / 6 000 ticks**; the operator watched *"the front right leg forming an inchworm motion that
+drags the body forward."* `steps` counts foot-lift events above a height threshold, so a leg that
+flexes and drags registers nothing. **The arm the metrics called frozen was locomoting by a
+mechanism the instrument cannot see.** Add to the blind-metric list beside `turns`, chassis
+height and `fwd_v`.
+
+**4. ★★★ "THE ABLATION COSTS NOTHING" WAS MEASURED ON A BLIND METRIC.** That headline (below)
+rests on flat corridor metrics only. Observed on pure-HK: *"the robot seems a bit lobotomized
+compared to our earlier work that had good emergent climbing skills. Placing this config on
+obstacles after ~20k ticks does not exhibit the escape behaviors that marked progress."*
+**The operator's three aliveness signals are heading regulation, proto-gait steps, and
+obstacle-triggered adaptation — and the ablation was never tested against the third.** Flat
+distance can be preserved while the adaptive capability is gone; this ledger has recorded that
+failure twice already.
+
+**The gate was then run, and the null SURVIVED it** (`humpavg.py`, teleport onto the crest at
+tick 3 000, n=4): baseline final_z **4.52 ± 0.45** / gain_z 1.91 / belly 0.021 / 0 falls vs
+all-learning-off final_z **4.50 ± 0.19** / gain_z 1.88 / belly 0.020 / 0 falls. **Identical, at
+lower variance.** I expected this to overturn the headline; it did not.
+
+⚠️ **But that makes the gate the finding.** §5 already records that hump clearance "works by
+letting the belly ride low, which may be a sim exploit" — the robot may be *bulldozing* rather
+than negotiating. **A gate a fully-scripted walker passes identically is not a test of
+adaptation.** ⇒ **Our obstacle gates cannot distinguish a learned adaptive system from a scripted
+one**, which is evidence about the gates as much as about the ablation. The operator's criterion
+is sharper than either: *error spikes on contact, the body feels around and sometimes traverses,
+late in a run.* A scripted walker shows no exploratory variation on contact and no early-vs-late
+difference. **Building that comparison is the open instrument job**; `recoveravg.py` is the
+closest existing tool. **Scoping note:** the "lobotomized" observation was made on the *pure-HK*
+arms, which have no panic reflex, no stuck→explore, no height homeostat and no amplitude
+homeostat — so it does not bear directly on the ablation arm, and the escape behaviour may live
+in those reflexes rather than in the learned controller. This gate result is consistent with that.
+
+---
+
 ### ★★ 2026-08-02 — PLAYFUL MACHINE IMPORTS: `c_init` `WORKING` on activity, gravity scaffold `NULL`
 
 Source analysis: [`playful_machine_source_analysis.md`](playful_machine_source_analysis.md).
