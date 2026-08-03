@@ -743,9 +743,29 @@ as noise; only `windowavg.py` showed it was a monotone rise.** σ=0.03 helping w
 is the stochastic-resonance shape: an optimum exists and **PM's value is past it for our body** —
 consistent with our `[pos, action, delta]` state doubling the same σ into the velocity channel.
 
-**Re-use context: sweep σ ∈ [0.01, 0.05] where the optimum evidently lives, and inject on the
-POSITION channel only** so the same σ does not double into the velocity channel (`delta` is a
-difference of positions, and velocity is the channel HK weights most — 44 % of `|C|` mass).
+⚠️ **The position-only test then RAN and REFUTED that reasoning — backwards.** Built as
+`pos_noise_sigma` in `JointSensorimotorBridge` (injected *after* `delta` is computed from clean
+positions, so the dose lands on `pos` alone), σ ∈ {0.01, 0.03, 0.05}, 40 k, n=4:
+
+| chassis_y per window | early | mid | late | |
+|---|---|---|---|---|
+| BODY-side σ=0.03 (both channels) | 0.0453 | 0.0550 | **0.0706** | **RISES** |
+| POS-only σ=0.01 | 0.0437 | 0.0366 | 0.0391 | sinks |
+| POS-only σ=0.03 | 0.0420 | 0.0439 | 0.0331 | sinks |
+| POS-only σ=0.05 | 0.0434 | 0.0401 | 0.0438 | flat |
+
+**Position-only reproduces the posture rise at no σ**; transport still declines monotonically
+(net_disp 1.46 → 1.13 → 0.87 → 0.71) and spin worsens (`turns` ±15–20 vs ±12). **The prediction
+recorded above was that the velocity channel was where the damage was; the measurement says the
+posture rise REQUIRES the velocity channel.** In hindsight that is the sensible mechanism —
+velocity is the channel the HK gradient weights most (44 % of `|C|` mass), so a persistent
+perturbation there is what it works hardest to become responsive to, and stiffening that loop is
+what lifts the body. Position-only perturbs a channel the controller largely ignores.
+
+**Revised verdict:** `REGRESSION` on transport at every σ and both injection sites; **`WORKING`
+on posture only for BOTH-channel noise at σ ≈ 0.03**, active ingredient = the velocity component.
+**Re-use / next test: velocity-channel-ONLY noise**, the exact complement, deliverable through
+the same bridge hook — it would confirm the mechanism rather than infer it.
 
 ---
 

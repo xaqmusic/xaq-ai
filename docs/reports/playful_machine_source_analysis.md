@@ -1441,6 +1441,40 @@ only the window split showed it was a monotone rise.
 **Re-use context: sweep σ ∈ [0.01, 0.05] where the optimum evidently lives, and inject on the
 POSITION channel only so the same σ does not double into the velocity channel.**
 
+### ⚠️ The position-only test ran, and it REFUTES the channel hypothesis — my reasoning was backwards
+
+Built as `pos_noise_sigma`/`_tau` in `JointSensorimotorBridge`, injected **after** `delta` is
+computed from clean positions, so the dose lands on `pos` alone. σ ∈ {0.01, 0.03, 0.05}, 40 k, n=4.
+
+| arm | chassis_y early → mid → late | | steps/1k early → late |
+|---|---|---|---|
+| no noise | 0.0424 → 0.0374 → 0.0341 | sinks | 12.0 → 3.0 |
+| **BODY-side σ = 0.03 (both channels)** | 0.0453 → 0.0550 → **0.0706** | **RISES** | 7.6 → 3.0 |
+| POS-only σ = 0.01 | 0.0437 → 0.0366 → 0.0391 | sinks | 11.9 → 3.9 |
+| POS-only σ = 0.03 | 0.0420 → 0.0439 → 0.0331 | sinks | 11.5 → 1.8 |
+| POS-only σ = 0.05 | 0.0434 → 0.0401 → 0.0438 | flat | 12.2 → 1.8 |
+
+**Position-only noise does not reproduce the posture rise at any σ.** Transport also still
+declines monotonically (net_disp 1.46 → 1.13 → 0.87 → 0.71), and spin gets much worse
+(`turns` ±15–20 vs ±12 unnoised).
+
+**I predicted the opposite.** The re-use context above argued the velocity channel was where the
+dose was doing damage, and that isolating position would recover the benefit. The measurement says
+the reverse: **the posture rise REQUIRES the noise to reach the velocity channel.** Removing it
+removes the effect.
+
+**And that is the more sensible mechanism in hindsight** — the velocity/delta channel is the one
+the HK gradient weights most heavily (44 % of `|C|` mass, §8b F2). Homeokinesis maximizes loop
+sensitivity; a persistent perturbation on the channel it cares most about is exactly what it will
+work hardest to become responsive to, and stiffening that loop is what lifts the body. Noise on
+position alone perturbs a channel the controller has largely ignored.
+
+**Revised verdict on I4:** `REGRESSION` on transport at every σ and both injection sites;
+**`WORKING` on posture only for BOTH-channel noise at σ ≈ 0.03**, and the active ingredient is
+the **velocity** component, not the position one. **Next test to close this cleanly: velocity-
+channel-ONLY noise** — the exact complement, which the same bridge hook can deliver, and which
+would confirm rather than infer the mechanism.
+
 ---
 
 ## 8j. ★★★ THE ABLATION, POWERED TO n=20 — it is not a tie, it is a win for the ablation
