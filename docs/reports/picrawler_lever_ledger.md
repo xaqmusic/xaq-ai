@@ -860,6 +860,11 @@ one of three output directions on it. But `|C|` mass on those columns is **0.159
 uniform 0.333** — the controller is *not* exploiting the free-win subspace. Real, wasteful of
 model rank, **not the dominant failure**; fix when the state vector is next touched.
 
+⚠️ **`hk_share` > 1.0 is not a bug.** It is `Σ|HK branch| / Σ|assembled command|`, and the additive
+terms partially *cancel* the HK branch (the postural reflex pulls against it), so the denominator
+can be the smaller number. Values above 1 mean **HK is being opposed**, not "HK is more than
+everything". Seen at 1.07 on the windup arm and 1.20 on pure-HK + stance.
+
 ⚠️ **Instrument caveat, learned the hard way: `hk_share` is a BLIND metric for importance.**
 It measures how loud a term is, not how much it matters — the scaffolds carry ~89 % of the
 magnitude and (per the windup arm) produce zero locomotion without the right modulation. **Read
