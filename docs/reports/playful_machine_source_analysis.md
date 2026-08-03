@@ -1647,6 +1647,69 @@ and it is the only path measured so far that removes the bootstrap instead of hi
 
 ---
 
+## 8l. ★★★ BODY DAMPING — a large effect, and it is a DIAGNOSTIC, NOT A LEVER
+
+**Measured.** PM's dog sets `dampingFactor = 0.0` — hip, knee and ankle damping all multiplied by
+zero, on backdrivable velocity servos. Ours is damped at three levels: `SERVO_KD = 8.0`,
+`BODY_ANGULAR_DAMP = 8.0` / `BODY_LINEAR_DAMP = 2.0`, `joint_angular_damping = 0.3`. New knob
+`body_damp_scale` (1.0 = off, byte-identical; guard verified) on the best pure-HK arm, 40 k, n=4:
+
+| | net_disp | seeds | steps | falls | straight |
+|---|---|---|---|---|---|
+| no change (×1.0) | 1.46 ± 1.95 | — | 240 | 1.75 | 0.06 |
+| **× 0.25** | **4.14 ± 2.67** | **[0.27, 4.62, 3.89, 7.79]** | 312 | 1.75 | 0.17 |
+| × 0.05 | 1.34 ± 1.50 | — | 371 | 1.50 | 0.05 |
+| *(deployed, for scale)* | *4.58* | | *50* | *0* | *0.73* |
+
+One seed reached **7.79 m**, past the deployed config's 4.58, from a controller with no stroke,
+coupling, gait phase, heading or nav. Non-monotonic — ×0.05 is much worse than ×0.25.
+
+### ⚠️ OPERATOR CORRECTION — this is not a lever, and the distinction is load-bearing
+
+> *"Some of the damping was to better simulate the inertia and dynamics of real hobby servos
+> which cannot twitch rapidly. This effect will be real on the physical picrawler so the
+> substrate needs to be able to handle various and changing dynamics generically. HK should give
+> us that for free."*
+
+**Correct, and it reclassifies the result.** The damping is *physically motivated* — it models
+servo gear-train inertia and bandwidth that the hardware genuinely has. **Lowering it is therefore
+a sim cheat of exactly the same class as PM's external anti-fall operator: making the problem
+easier rather than solving it.** My earlier framing ("damping was raised to stop twitching, and
+the twitch was the substrate") was wrong on the *why*, and the corrected reading is more useful:
+
+> **`body_damp_scale` must never be promoted. It is a probe that tells us the substrate's
+> performance is strongly coupled to plant damping — which is itself the finding, because a
+> homeokinetic controller learns a forward model of its plant and should adapt to that damping
+> for free.**
+
+### The real question this exposes, and the diagnostic that settles it
+
+HK descends `E = ξᵀ(LLᵀ+εI)⁻¹ξ` with `L = A·G·C`. Against a heavily damped plant the true loop
+sensitivity is genuinely low, and **the correct homeokinetic response is to raise `C` until
+responsiveness returns.** That it instead settles at low sensitivity means one of two things:
+
+1. **The controller cannot use the authority it has** — most likely the ±1 command clip (F1).
+   `C` can grow only until the command saturates; past that, more gain buys bang-bang switching
+   rather than responsiveness, so the loop has no gradient left to climb. **If so it is OUR bug,
+   fixable in the controller, and the substrate would then handle changing dynamics generically
+   exactly as the operator expects.**
+2. **The authority genuinely is not there** — `MAX_SERVO_TORQUE = 0.15 Nm` cannot supply what the
+   damping dissipates. **If so no controller change helps**, and it becomes a hardware spec
+   question that the physical measurement spec already asks for (stall torque).
+
+**The diagnostic that distinguishes them: torque headroom.** `reality.proprio.joint_torque` is
+already published every tick, **normalized to [−1, 1] against `MAX_SERVO_TORQUE`** — so
+`|torque| → 1` *is* saturation, and a saturation-duty metric answers it directly:
+
+- **Servos pinned at full damping, with headroom at ×0.25** ⇒ authority limit ⇒ hardware.
+- **Headroom in both** ⇒ the controller is failing to use available authority ⇒ our bug, and the
+  fix is the actuator-honesty work (I3), not the plant.
+
+Instrument to be added at the `jtorque` publish site in `picrawler_body.gd` so it reports for
+**every** config regardless of brain wiring (the pure-HK tier does not subscribe `torque_topic`).
+
+---
+
 ## 9. Source index (for the next session)
 
 | What | Where |

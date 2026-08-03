@@ -347,8 +347,40 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # PM-equivalent sigma ≈ 0.1 of range.  tau = correlation length in ticks (1 = white).
 # Per-run overrides: OGMA_PICRAWLER_SENSOR_NOISE / OGMA_PICRAWLER_SENSOR_NOISE_TAU.
 @export var sensor_noise_sigma: float = 0.0
+
+# 2026-08-03 · COMPLIANCE SCAFFOLD-FREE TEST — global damping multipliers.
+# PM's dog sets dampingFactor = 0.0: hip, knee and ankle damping are ALL multiplied by
+# zero, on top of backdrivable velocity servos.  Their bodies are essentially undamped.
+# Ours is damped at THREE levels — SERVO_KD=8.0 (servo velocity term), BODY_ANGULAR_DAMP
+# =8.0 / BODY_LINEAR_DAMP=2.0 (rigid-body), joint_angular_damping=0.3 (constraint).
+# Homeokinesis works by finding and amplifying the loop's OWN dynamics; a body that
+# dissipates energy this fast has no dynamics left to find.  1.0 = off (byte-identical).
+# The SERVO term already has a knob -- `motor_damping_factor` above (multiplies SERVO_KD
+# in _powered_torque); this adds the RIGID-BODY term, which had none.  Env overrides:
+# OGMA_PICRAWLER_MOTOR_DAMP (existing knob) / OGMA_PICRAWLER_BODY_DAMP_SCALE (this one).
+@export var body_damp_scale: float = 1.0: set = _set_body_damp_scale
+
+func _set_body_damp_scale(v: float) -> void:
+	body_damp_scale = maxf(0.0, v)
+	# Apply to already-built bodies so it is tunable LIVE in the UI ([ and ] keys).
+	# Guarded: the export setter can fire before _build_body has run, in which case
+	# _build_body applies the value itself.
+	if not is_instance_valid(_chassis):
+		return
+	var parts: Array = [_chassis]
+	if _coxas != null:  parts += (_coxas as Array)
+	if _uppers != null: parts += (_uppers as Array)
+	if _lowers != null: parts += (_lowers as Array)
+	for b in parts:
+		if is_instance_valid(b):
+			b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+			b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 @export var sensor_noise_tau:   float = 8.0
 var _sensor_noise: PackedFloat64Array = PackedFloat64Array()
+# Ground-force / authority accumulators (see the joint_torque publish site).
+var _tq_mag_acc: float = 0.0
+var _tq_sat_acc: float = 0.0
+var _tq_n: float = 0.0
 var _sensor_noise_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
@@ -2368,6 +2400,15 @@ func _ready() -> void:
 	# IMPORT I4 sensor-noise overrides.  Seeded off OGMA_SEED so the noise VARIES with
 	# the seed like every other stochastic element — otherwise every seed would share
 	# one noise trace and the seed-average would understate the spread.
+	var kd_env: String = OS.get_environment("OGMA_PICRAWLER_MOTOR_DAMP")
+	if kd_env != "":
+		motor_damping_factor = maxf(0.0, float(kd_env))
+	var bd_env: String = OS.get_environment("OGMA_PICRAWLER_BODY_DAMP_SCALE")
+	if bd_env != "":
+		body_damp_scale = maxf(0.0, float(bd_env))
+	if not (is_equal_approx(motor_damping_factor, 1.0) and is_equal_approx(body_damp_scale, 1.0)):
+		print("PicrawlerBody: ⚠ COMPLIANCE TEST — motor_damp=%.3f body_damp_scale=%.3f (PM runs dampingFactor=0)"
+			% [motor_damping_factor, body_damp_scale])
 	var snoise_env: String = OS.get_environment("OGMA_PICRAWLER_SENSOR_NOISE")
 	if snoise_env != "":
 		sensor_noise_sigma = maxf(0.0, float(snoise_env))
@@ -3467,8 +3508,8 @@ func _build_body() -> void:
 												# chassis never touches floor.
 	_chassis.collision_mask  = 0   # chassis ignores everything (legs are
 								   # attached via joint constraints, not collisions).
-	_chassis.angular_damp = BODY_ANGULAR_DAMP
-	_chassis.linear_damp  = BODY_LINEAR_DAMP
+	_chassis.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+	_chassis.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 	_chassis.physics_material_override = _make_contact_mat()
 	var cs := CollisionShape3D.new()
 	var cb := BoxShape3D.new()
@@ -3904,8 +3945,8 @@ func _make_segment(mass: float, radius: float, center: Vector3, color: Color) ->
 	b.transform = Transform3D(Basis.IDENTITY, center)
 	b.collision_layer = _LAYER_BODY
 	b.collision_mask  = _LAYER_WORLD
-	b.angular_damp = BODY_ANGULAR_DAMP
-	b.linear_damp  = BODY_LINEAR_DAMP
+	b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+	b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 	b.physics_material_override = _make_contact_mat()
 	var cs := CollisionShape3D.new()
 	var sp := SphereShape3D.new()
@@ -3935,8 +3976,8 @@ func _make_capsule(mass: float, radius: float, height: float, center: Vector3,
 	b.transform = Transform3D(Basis.IDENTITY, center)
 	b.collision_layer = _LAYER_BODY
 	b.collision_mask  = _LAYER_WORLD
-	b.angular_damp = BODY_ANGULAR_DAMP
-	b.linear_damp  = BODY_LINEAR_DAMP
+	b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+	b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 	b.physics_material_override = _make_contact_mat()
 	var orient: Basis = Basis.IDENTITY
 	if long_axis_dir.distance_to(Vector3.UP) > 0.001:
@@ -4025,6 +4066,24 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var key: int = (event as InputEventKey).keycode
+	# 2026-08-03 — live body-damping sweep, [ = less damped, ] = more damped.
+	# PM's dog runs dampingFactor=0; ours is damped at three levels.  ⚠ THIS IS A
+	# DIAGNOSTIC, NOT A LEVER: the damping models real hobby-servo gear-train inertia
+	# that the physical robot genuinely has, so turning it down is a sim cheat of the
+	# same class as an external anti-fall prop.  It is here to FEEL the coupling
+	# between plant damping and the homeokinetic loop, not to be promoted.
+	if key == KEY_BRACKETLEFT or key == KEY_BRACKETRIGHT:
+		var steps_: Array = [1.0, 0.5, 0.25, 0.1, 0.05]
+		var idx: int = 0
+		var best: float = 1e9
+		for i in range(steps_.size()):
+			var dd: float = absf(float(steps_[i]) - body_damp_scale)
+			if dd < best: best = dd; idx = i
+		idx = clampi(idx + (1 if key == KEY_BRACKETLEFT else -1), 0, steps_.size() - 1)
+		self.body_damp_scale = float(steps_[idx])
+		_ui_notify("body_damp x%.2f  (DIAGNOSTIC, not a lever — models real servo inertia)"
+			% body_damp_scale)
+		return
 	if key == KEY_R:
 		_ragdoll_mode = not _ragdoll_mode
 		# Wake / allow-sleep on all bodies so motors actually respond
@@ -5294,6 +5353,17 @@ func _step_one() -> void:
 	for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	brain.publish_proprio(jtorque, "joint_torque")
+	# 2026-08-03 — GROUND-FORCE / AUTHORITY instrument.  jtorque is already normalized to
+	# +-1 against MAX_SERVO_TORQUE, so |t| -> 1 IS saturation.  Two questions this answers:
+	#   tq_mag  — how hard are the legs actually pushing?  (the operator observed the pure-HK
+	#             arm exerting far MORE ground force than the deployed gait ever did)
+	#   tq_sat  — is the servo pinned?  Distinguishes "the controller is not using available
+	#             authority" (our bug, fixable) from "the authority is not there" (hardware).
+	for _ti in range(jtorque.size()):
+		var _ta: float = absf(jtorque[_ti])
+		_tq_mag_acc += _ta
+		if _ta > 0.95: _tq_sat_acc += 1.0
+		_tq_n += 1.0
 
 	# Phase 7.13 v4.2 — body-state signal for CruseCoordinator gating.
 	# chassis_y_norm in [0, 1].  CruseCoordinator subscribes optionally and
@@ -8655,9 +8725,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# applied (MotorEPM blends xi_tilde = (1-w)*xi + w*(x - x*)); obj_legs counts
 			# how many legs have a live objective.  Both 0 => the socket is not firing and
 			# any "objective replaces the additive term" claim is untestable.
+			# ★ inter-leg phase coherence — the operator's "are the legs actually working
+			# together" number.  Lived in diag_snapshot only until 2026-08-03, so no arm in
+			# this campaign had ever reported it.
+			line["coh"] = snappedf(float(_mm.get("gait_coherence", 0.0)), 0.0001)
+			# hip2<->knee command sign agreement — the operator's "for the first time I see
+			# hip2 and knee work together to lift the chassis".  0.5 = chance.
+			line["hk_agree"] = snappedf(float(_mm.get("hip2_knee_agree", 0.0)), 0.0001)
 			line["obj_active"] = 1 if bool(_mm.get("obj_active", false)) else 0
 			line["obj_w"]      = snappedf(float(_mm.get("obj_weight", 0.0)), 0.0001)
 			line["obj_legs"]   = int(_mm.get("obj_legs", 0))
+			line["tq_mag"] = snappedf(_tq_mag_acc / maxf(1.0, _tq_n), 0.0001)
+			line["tq_sat"] = snappedf(_tq_sat_acc / maxf(1.0, _tq_n), 0.0001)
 			line["clip_duty"] = snappedf(float(_mm.get("clip_duty", 0.0)), 0.0001)
 			line["hk_share"]  = snappedf(float(_mm.get("hk_share", 0.0)), 0.0001)
 			line["echo_a"]    = snappedf(float(_mm.get("echo_a_gain", 0.0)), 0.0001)

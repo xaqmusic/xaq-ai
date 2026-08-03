@@ -720,6 +720,8 @@ private:
     std::vector<double> sat_pre_max_;     // max |y_pre-clamp|
     std::vector<double> sat_hk_abs_;      // Σ |HK branch output| (mg·ag·tanh(z))
     double              sat_n_ = 0.0;     // leg-tick samples behind the sums
+    // Intra-leg coordination: hip2 vs knee command sign agreement, pooled over legs.
+    int64_t             hk_agree_ = 0, hk_agree_n_ = 0;
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).
     // The knee coupling locks step TIMING but the hip1 stroke DIRECTION stays
     // HK-driven and pointed tangentially → the four thrusts sum to a torque

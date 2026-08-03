@@ -2083,8 +2083,17 @@ void MotorEPM::tick(uint64_t tick_id) {
     // ---- PRE-PASS: per-leg oscillator phase (needed by ALL legs before the
     // coupling can be computed for any one).  Phase from the knee proprio:
     // φ = atan2(knee_Δ · scale, knee_pos − knee_ema), advancing through the cycle.
-    if (coupling_gain_ > 0.0 || stroke_gain_ > 0.0 || steer_ != 0.0
-        || amp_homeo_gain_ > 0.0 || amp_seek_rate_ > 0.0 || heading_gain_ != 0.0 || nav_gain_ != 0.0) {
+    // 2026-08-03 — UNGATED.  This pre-pass used to run only when some CONSUMER of the
+    // phase was active (coupling / stroke / steer / amp-homeostat / heading / nav).  On the
+    // pure_hk tier every one of those is 0, so L.phase never updated, stayed at 0, and
+    // gait_coherence() returned EXACTLY 0.000 — because with gait_phase=[0,pi,pi,0] the four
+    // unit vectors cancel precisely.  That reads as "the legs are perfectly uncoordinated"
+    // when in fact nothing was measured: removing the scaffolds silently removed the
+    // instrument for the operator's central question ("do the legs work together?").
+    // The pre-pass only writes L.phase / L.knee_ema (the amplitude homeostat inside stays
+    // separately gated), so running it always is behaviourally inert — VERIFIED BY
+    // MEASUREMENT on both the deployed and pure_hk arms, not by argument.
+    {
         float amp_sum = 0.0f; int amp_n = 0;
         const bool homeo_gated = (homeo_upright_gate_ > 0.0
                                   && upright_ < float(homeo_upright_gate_));
@@ -2904,6 +2913,15 @@ void MotorEPM::tick(uint64_t tick_id) {
             y[1]     += drive;    // hip2 + = push feet down / lift chassis
             y[m - 1] += drive;    // knee + = tuck (raises the chassis in spider stance)
         }
+        // Intra-leg coordination instrument: do hip2 (index 1) and the knee (index m-1)
+        // push the SAME way?  Read on the assembled command, pre-clamp, post-warmup.
+        if (!warmup && m >= 3) {
+            const float a2 = y[1], b2 = y[m - 1];
+            if (std::fabs(a2) > 1e-3f && std::fabs(b2) > 1e-3f) {
+                if ((a2 > 0.0f) == (b2 > 0.0f)) ++hk_agree_;
+                ++hk_agree_n_;
+            }
+        }
         // Phase-0 saturation instrument: the command as ASSEMBLED (HK + every additive
         // term), read immediately before the one and only clamp.  clip_duty is the
         // fraction of leg-ticks the body never saw the requested command.
@@ -3229,6 +3247,19 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
+    // ★ INTER-LEG COORDINATION — mirrored from diag_snapshot() 2026-08-03.  It lived in
+    // diag ONLY, so it has NEVER been visible to a seedavg arm: the whole campaign has
+    // measured distance/steps/balance and never once measured whether the legs are
+    // PHASE-LOCKED TO EACH OTHER, which is the operator's actual complaint ("each leg has
+    // its own directive").  |mean_j e^{i(phi_j - P_j)}| in [0,1]; 1 = locked to the gait.
+    mod["gait_coherence"] = gait_coherence();
+    // ★ INTRA-LEG COORDINATION (2026-08-03).  The operator observed, for the first time,
+    // hip2 and knee working TOGETHER to lift the chassis — where the hand-built reflexes
+    // only ever drove one or the other.  Those two joints share foot-height authority
+    // (measured corr(foot_y, joint) ~ 0.27 each; the Cruse v2 rule had to be TOLD to drive
+    // both because either alone is too weak).  This is the sign-agreement of their COMMANDS,
+    // pooled over legs: 1.0 = always pushing the same way, 0.5 = chance, 0 = always opposed.
+    mod["hip2_knee_agree"] = hk_agree_n_ ? double(hk_agree_) / double(hk_agree_n_) : 0.0;
     // L-1b OBJECTIVE SOCKET — mirrored from diag_snapshot() 2026-08-02.  It existed in
     // diag ONLY, which is the documented trap: the body's stdout reads
     // get_module_metrics() fed from THIS dict, so the socket read 0.0 in every headless

@@ -7,7 +7,7 @@ actually varies the MotorEPM RNG).
 
 Usage:  python3 seedavg.py <config_basename.json> [n_seeds] [max_steps] [difficulty] [extra_env=...]
 """
-import json, math, os, subprocess, sys, statistics, concurrent.futures as cf
+import hashlib, json, math, os, subprocess, sys, statistics, concurrent.futures as cf
 
 PROJ = "/home/xaqmusic/xaq-ai/godot_host/project"
 # Scratch dir for the per-seed body logs. Defaults to a stable tmp dir; override with
@@ -17,7 +17,15 @@ SP   = os.environ.get("SEEDAVG_OUT", "/tmp/xaq_seedavg")
 os.makedirs(SP, exist_ok=True)
 
 def run_one(cfg, seed, max_steps, difficulty, extra):
-    out = f"{SP}/sa_{os.path.splitext(cfg)[0]}_s{seed}.log"
+    # 2026-08-03 — arms differentiated ONLY by extra env vars (e.g. two damping levels on
+    # one config) previously collided on this filename and silently OVERWROTE each other's
+    # logs.  The printed summaries stayed correct (computed sequentially) but every earlier
+    # arm's per-tick log was destroyed, so windowavg/instrument reads could only ever see
+    # the LAST arm.  Suffix the log with a short hash of the extra env to keep them apart.
+    tag = ""
+    if extra:
+        tag = "_" + hashlib.sha1("|".join(sorted(extra)).encode()).hexdigest()[:6]
+    out = f"{SP}/sa_{os.path.splitext(cfg)[0]}{tag}_s{seed}.log"
     env = dict(os.environ, OGMA_PICRAWLER_GYM="corridor", OGMA_SEED=str(seed),
                OGMA_INSPECTOR_PORT=str(7400+seed),
                OGMA_PICRAWLER_GYM_DIFFICULTY=str(difficulty),

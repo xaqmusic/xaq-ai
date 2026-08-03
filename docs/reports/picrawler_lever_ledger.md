@@ -670,6 +670,54 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-03 — AN INSTRUMENT MUST NOT DEPEND ON THE THING BEING ABLATED
+
+**Four instrument defects surfaced in two days, all the same shape**, and the fourth is the one
+that names the rule:
+
+| # | instrument | defect | consequence |
+|---|---|---|---|
+| 1 | `clip_duty` · `hk_share` · `echo_a` · `c_mass_*` | did not exist | saturation, the echo channel and HK's share were unmeasurable; **hip1 turned out to be clipped 56 % of the time** |
+| 2 | `obj_active` · `obj_weight` | `diag_snapshot()` only | "is the objective driving?" read 0.0 in every headless run — **the socket's authority (w ≈ 0.10, and FALLING when the additive term was removed) was invisible** |
+| 3 | `step_cv` family (prior session) | added to `diag_snapshot()` only | read 0.0 headless, indistinguishable from "never fired" |
+| 4 | **`gait_coherence`** | `diag_snapshot()` only **AND gated on a scaffold consumer being active** | ★ see below |
+
+**The fourth in detail, because it is the worst.** The per-leg phase pre-pass runs only when
+`coupling_gain > 0 \|\| stroke_gain > 0 \|\| steer != 0 \|\| amp_homeo_gain > 0 \|\|
+amp_seek_rate > 0 \|\| heading_gain != 0 \|\| nav_gain != 0`. **On the `pure_hk` tier every one of
+those is zero**, so `L.phase` never updated and stayed at 0 — and because `gait_phase = [0, π, π, 0]`
+makes the four unit vectors cancel *exactly*, `gait_coherence()` returned **precisely 0.000 on
+every seed**.
+
+That reads as "the legs are perfectly uncoordinated." Nothing was measured. **Stripping the
+scaffolds silently stripped the instrument for the operator's central question — "do the legs
+work together?" — and the resulting null was indistinguishable from a real measurement.**
+Ungated 2026-08-03; the pre-pass writes only `L.phase` / `L.knee_ema` (the amplitude homeostat
+inside stays separately gated), so it is behaviourally inert — **verified by measurement on both
+the deployed and pure_hk arms, not argued.**
+
+> ### THE RULE
+> **When a config is stripped to isolate a mechanism, verify the INSTRUMENTS survive the
+> stripping.** An instrument gated on a consumer, a scaffold, or a topic that the ablation
+> removes will report a confident zero. Add to the §3.2 checks: *before trusting a null, confirm
+> the instrument was live in THAT arm* — a non-zero reading somewhere in the run, or a
+> deliberately perturbed control.
+>
+> **Corollary — beware the exactly-round null.** `0.000`, `0.5`, `1.0` to full precision are
+> more often structural than measured. `gait_coherence = 0.000` was an algebraic cancellation;
+> `motor_tle = 0.0000` on the windup arm was a frozen body. Both looked like data.
+
+**Reference values now that coordination is measurable at all** (deployed base, where the phase
+estimator was always live): `gait_coherence` **0.286 – 0.473** across seeds — the deployed gait is
+*partially* phase-locked, not strongly. Ground force: `tq_mag` **0.376** deployed vs **0.400**
+pure-HK at `ctrl_lr` 0.10 (only ~6 % more mean torque), but `tq_sat` **0.005 → 0.038**, an **8×
+higher saturation duty**. ⇒ **Authority was never the binding constraint** (3.8 % saturated leaves
+ample headroom); the deployed controller simply never used what it had. This corroborates the
+operator's UI observation that pure-HK legs push far harder than the deployed gait ever did, and
+localises the difference to *direction of force*, not magnitude — see the intra-leg entry below.
+
+---
+
 ### ★★ 2026-08-02 — "MOVE THE SCAFFOLDS ONTO THE OBJECTIVE SOCKET": `REGRESSION`, and the reason matters
 
 **The proposal** (from the competition finding below): scaffolds compete with the learned layer
