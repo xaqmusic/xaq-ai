@@ -18,13 +18,37 @@ All three of those were missed at least once from aggregates alone. A chart make
 and a chart that no longer exists cannot be re-read when a later result contradicts an earlier
 one — which has happened repeatedly.
 
-## Convention
+## Required format
 
-- **Generate with** [`../../../godot_host/project/scripts_tools/gaitreport.py`](../../../godot_host/project/scripts_tools/gaitreport.py):
-  ```sh
-  python3 gaitreport.py docs/reports/run_summaries/<date>_<what>.html \
-      "label=/path/sa_*_s*.log" "label2=..."
-  ```
+**Every run summary carries the same three things, in this order.** A chart without them is
+uninterpretable a month later, and unusable by anyone outside the project.
+
+1. **What is under test** — 2–4 sentences: the question, what each arm is, and what they differ
+   by. **This is the only part that cannot be scraped**, so it is a required `--concept`
+   argument; the generator warns if it is missing.
+2. **Provenance — what was actually run.** Auto-scraped from each run's own stdout, so it
+   describes the run that happened rather than the one intended:
+   - **config** — the `res://` path the brain actually loaded, its `metadata.name`, and its module list
+   - **differs by** — the headline params that differ across arms, rendered *on* (`key=value`)
+     or *off* (struck through), plus a count of any further differences **explicitly stated,
+     never silently truncated** (a hidden difference is a silent confound)
+   - **overlays** — any `⚠` body-side env override (gravity scale, damping scale, sensor
+     noise). These live in no config file, so a summary that omits them can describe the wrong
+     body entirely
+   - **body & environment** — gym + difficulty, joint backend, build line, reset mode
+   - **ticks · n seeds · seed numbers**
+3. **The charts**, per-seed thin lines under the seed-mean, then the final-value table.
+
+### Generate
+
+```sh
+python3 godot_host/project/scripts_tools/gaitreport.py \
+    docs/reports/run_summaries/YYYY-MM-DD_<slug>.html \
+    "label=/path/sa_*_s*.log" "label2=..." \
+    --title   "One line naming the comparison" \
+    --concept "2-4 sentences: the question, the arms, what they differ by."
+```
+
 - **Name** `YYYY-MM-DD_<short-slug>.html` — sortable, and the date ties it to the ledger entry.
 - **Self-contained**: no CDN, no external fonts, no network. Opens offline, survives being
   emailed, and renders in light or dark.
