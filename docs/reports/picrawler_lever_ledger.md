@@ -670,6 +670,65 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★ 2026-08-03 — I2 (the real ∂G term) is BLOCKED BEHIND F3, not mis-dosed
+
+`sense` implemented faithfully from `sos_avggrad.cpp` (`epsrel = diag(C·Q·A) ⊙ g'·2·sense`,
+subtract `(epsrel ⊙ y)·xᵀ`), plus `ctrl_damping` — PM's `damping`, mandatory because `sat_lr`
+is the only brake on the bias integrator. Both gain-0 guarded, tests pass.
+
+| 40 k, n=6 | total steps | steps/1k early → late |
+|---|---|---|
+| `sense = 0` | **289** | 13.43 → 4.12 |
+| `sense = 0.1` | **0** | 0.54 → 0.00 |
+| `sense = 0.3` | 3.2 | 0.77 → 0.00 |
+| `sense = 0.6` | 4.3 | 0.82 → 0.00 |
+| `sense = 1.5` (PM's hexapod value) | 7 | 0.24 → **0.28** |
+
+**`REGRESSION` at every dose — and at 1/15 of PM's value it still causes total paralysis, which
+says the term is MIS-SCALED, not mis-dosed.** Diagnosis: the confinement term inherits the ε⁻²
+blow-up from **F3**. PM's `epsrel` uses `Q = (L Lᵀ L)⁺`; ours uses `q qᵀ` with
+`q = (LLᵀ+εI)⁻¹ξ`, and `Lp` is 9×9 of **rank ≤ 3**, so `P` is dominated by `1/ε = 100` and
+`q qᵀ` carries that squared (~10⁴). ⇒ **F3 is not a theoretical wart: the degenerate metric makes
+the principled confinement term unusable.** I2 is blocked on squaring the loop (or normalising
+the term), which promotes F3 from "cheapest honest test" to a prerequisite.
+
+**One thing worth keeping:** at `sense = 1.5` the decay *does* stop (0.24 → 0.15 → 0.28) where
+the control keeps falling. The mechanism is real; only its scale is wrong.
+
+---
+
+### ★★ 2026-08-03 — DEP: `REGRESSION` — it amplifies the fall
+
+DEP (Der & Martius 2015) ⚠️ **postdates our 2012 sources — reconstructed from the published
+principle, not read from their code.** Replaces the HK update of `C` with the correlation of
+motor derivatives against the sensor derivatives they caused, row-normalised so `dep_gain` is the
+per-motor loop gain. Wired into the whole-body `C` (per-leg DEP has no cross-leg entries to
+write). Gain-0 guarded; 35/35 tests.
+
+| `dep_gain`, 40 k n=6 | steps | steps/1k early → late | PLV | **PLV support** | tilt |
+|---|---|---|---|---|---|
+| 0 (HK control) | 242 | 16.18 → 2.04 | 0.140 | **159 819** | **0.013–0.081** |
+| 0.5 | 74.7 ± 105.6 | 8.13 → 0.00 | 0.553 | 14 018 | 0.63–2.04 |
+| 1.0 | 5.5 | 0.96 → 0.00 | 0.736 | 5 310 | — |
+| 2.0 | 1.2 | 0.35 → 0.00 | 0.750 | 4 011 | — |
+
+**The PLV rise is the frozen-body artifact on a FALLEN body.** Per-seed at `dep 0.5`: four seeds
+take 2–3 steps at tilt **0.63–1.16 rad (36–66°)**, two take ~235 steps at tilt **0.88 and 2.04
+rad** — seed 6 is *inverted*. The HK control sits at tilt 0.013–0.081, upright. **Every DEP seed
+has fallen over**; the high PLV is measured on 3 000 ticks of a tipped body against the control's
+160 000.
+
+**Why this is coherent rather than surprising: DEP amplifies whatever the body is already doing,
+and our body falls.** On a body that cannot hold itself up, the rule's premise makes it worse —
+the bootstrap problem arriving for the fourth time from a new direction. `dep_gain` 0.1/0.25 in
+flight to bracket the low end before the verdict is final.
+
+**Instrument note that paid for itself:** `plv_support` made this readable. Support 3 588 vs
+159 820 is a 45× tell in the same table as the PLV, so the artifact announced itself instead of
+being reported as a result. That is the fix for the failure two entries below.
+
+---
+
 ### ★★★ 2026-08-03 (later) — RETRACTION: `gait_coherence` MEASURES NOTHING, AND NOTHING IS COORDINATED
 
 **The operator caught this by eye** — "the difference between locked and unlocked seeds is

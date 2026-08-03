@@ -132,6 +132,50 @@ private:
     int64_t babble_ticks_ = 200;                 // motor-babble warmup: model learns, controller idle
     double  babble_scale_ = 0.3;                 // amplitude of babble commands during warmup
     double  sat_lr_       = 0.02;                 // anti-saturation rate (surrogate for dropped ∂G term)
+    // ---- 2026-08-03 · IMPORT I2: the REAL ∂G term, and the bound it requires ---------
+    // Our HK update holds G fixed in the metric gradient (the Der-Martius approximation)
+    // and patches the omission with sat_lr, a hand-set constant standing in for a
+    // derivative.  PM's sos_avggrad.cpp carries the term in closed form:
+    //     epsrel = diag(C·Q·A) ⊙ g' · 2 · sense ;  C_update -= (epsrel ⊙ y)·xᵀ
+    // It is the CONFINING half of the homeokinetic objective — what stops the loop
+    // collapsing into the degenerate "predict nothing, move nothing" minimum, which is
+    // the decay measured at 40k (step rate 12.0 → 5.2 → 2.95).
+    // sense = 0 → off, byte-identical.  PM: hexapod 1.5, zoo's Sox generator 4.
+    double  sense_        = 0.0;
+    // ⚠ MANDATORY COMPANION.  sat_lr is not only an anti-saturation surrogate — it is the
+    // ONLY brake on the bias integrator h (h += bias_lr·μ is ungated).  Measured: sat_lr=0
+    // alone drives the pre-clamp command to 14.3 and still climbing, three of four seeds
+    // taking ZERO steps.  So retiring sat_lr in favour of sense REQUIRES an explicit
+    // bound, which PM supplies as a separate `damping` parameter (dog 0.0001, humanoid
+    // 0.0001-0.0003) that we have never had.  L2 decay on C and h.  0 = off.
+    double  ctrl_damping_ = 0.0;
+    // ---- 2026-08-03 · DEP: Differential Extrinsic Plasticity -----------------------
+    // ⚠ PROVENANCE: Der & Martius 2015 (PNAS).  This POSTDATES the 2012 sources we hold,
+    // so the rule below is reconstructed from the published principle, NOT read from the
+    // download.  Treat the implementation as our interpretation, not as their code.
+    //
+    // Why it is the candidate: every variation of the homeokinetic mechanism we have
+    // tested returns the random-phase null for inter-leg coordination (deployed stack,
+    // pure HK, whole-body C, belly crawl — all ~0.45 against a null of 0.450).  That is
+    // an argument about the MECHANISM, not the tuning.  DEP inverts the premise: instead
+    // of maximising sensitivity against an internal model, it AMPLIFIES WHATEVER THE BODY
+    // IS ALREADY DOING, by correlating motor derivatives with the sensor derivatives they
+    // caused.  Behaviour accumulates into body-resonant modes instead of being explored
+    // away from — which is the "settle into an attractor" property HK structurally lacks.
+    //
+    // It also fits two measurements: HK already puts 44% of |C| mass on the VELOCITY
+    // columns (DEP makes derivatives the whole rule), and moving a leg mechanically
+    // changes its neighbours' sensors, so on a whole-body C the rule can write cross-leg
+    // terms directly rather than waiting for slow mechanical coupling.
+    //
+    // COST, stated up front: DEP carries no forward model, so the motor loop stops being
+    // predictive.  That sits awkwardly with an EPM architecture and is a real tension,
+    // not a detail.
+    //
+    // dep_gain = 0 → off, byte-identical.  Above 0 it REPLACES the HK update of C and
+    // becomes the per-motor loop gain (row-normalised), so it is comparable to c_init.
+    double  dep_gain_ = 0.0;
+    double  dep_alpha_ = 0.05;   // EMA rate of the derivative correlation
     // 2026-06-12 — postural reflex (spinal-tone analog).  Pure HK has no "up":
     // the controller drifted the body into a folded collapse.  A weak PD pull
     // toward the standing REST pose (proprio pos=0 for every joint) gives HK a
@@ -738,6 +782,8 @@ private:
     Eigen::VectorXf     bw_, hw_;              // N, M
     Eigen::VectorXf     Xw_, prevXw_, prevYw_; // concatenated state / command
     Eigen::VectorXf     Zw_;                   // this tick's pre-tanh operating point (sliced per leg)
+    Eigen::MatrixXf     Cdepw_;                // M x N  whole-body DEP correlation
+    Eigen::VectorXf     prevPrevYw_;           // Δy needs two steps of command history
     bool                wb_ready_ = false, wb_have_prev_ = false;
     int64_t             wb_steps_ = 0;
     float               wb_tle_ema_ = 0.0f;
@@ -754,6 +800,7 @@ private:
     // over time, |mean_t e^{i(phi_i - phi_j)}|, which is 1 for a trot (relative phase pi)
     // and -> 0 for independent legs regardless of any instant's alignment.
     double              plv_cos_[16] = {0}, plv_sin_[16] = {0};   // per ordered pair i<j
+    int64_t             plv_pair_n_[16] = {0};                    // samples admitted per pair
     int64_t             plv_n_ = 0;
     float               interleg_plv() const;
     void wb_init(int n_per_leg);
@@ -982,6 +1029,8 @@ private:
         Eigen::VectorXf     x;                    // latest sensor (n)
         Eigen::VectorXf     prev_x;               // sensor at command time (n)
         Eigen::VectorXf     prev_y;               // last motor command (m)
+        Eigen::VectorXf     prev_prev_y;          // the one before it — DEP needs Δy
+        Eigen::MatrixXf     Cdep;                 // m x n  accumulated Δy·Δxᵀ correlation
         Eigen::VectorXf     rest_pos;             // standing pose captured at spawn (m pos targets)
         bool                rest_captured = false;
         bool                have_prev   = false;

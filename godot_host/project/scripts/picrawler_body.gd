@@ -8733,7 +8733,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# and a 12-seed sweep of it looks bimodal when nothing is locked.  plv is the
 			# honest read — constant RELATIVE phase over the run, null -> 0.
 			line["coh"] = snappedf(float(_mm.get("gait_coherence", 0.0)), 0.0001)
-			line["plv"] = snappedf(float(_mm.get("interleg_plv", 0.0)), 0.0001)
+			# plv is GATED on both legs of a pair actually oscillating — a frozen body has
+			# constant phases and would otherwise score ~1.  plv_n says how many ticks of
+			# genuine oscillation back the number; a low plv_n means plv is unsupported,
+			# not that the legs are uncoordinated.
+			line["plv"]   = snappedf(float(_mm.get("interleg_plv", 0.0)), 0.0001)
+			line["plv_n"] = int(_mm.get("plv_support", 0))
 			# hip2<->knee command sign agreement — the operator's "for the first time I see
 			# hip2 and knee work together to lift the chassis".  0.5 = chance.
 			line["hk_agree"] = snappedf(float(_mm.get("hip2_knee_agree", 0.0)), 0.0001)

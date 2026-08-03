@@ -11,6 +11,12 @@
 
 namespace ogma {
 
+// Oscillation amplitude a leg must exceed before its phase is admitted to the inter-leg
+// PLV.  amp_ema is the phase-vector magnitude, i.e. "is this leg actually moving?".
+// Without this floor a FROZEN body scores PLV -> 1 (constant phases => constant phase
+// difference), which is the same degeneracy that made gait_coherence unusable.
+static constexpr float kPlvAmpFloor = 0.02f;
+
 namespace {
 
 template <typename Fn>
@@ -140,6 +146,32 @@ ParamSchema MotorEPM::params_schema() const {
          "compresses instead of truncating, preserving the stroke's SHAPE (and therefore its "
          "phase information) through the bound.  0 = byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"dep_gain", ParamMutability::HotMutable,
+         "DEP (Der & Martius 2015 — reconstructed from the published principle; POSTDATES our "
+         "2012 sources, so this is our interpretation, not their code).  Replaces the HK update of "
+         "C with the correlation of MOTOR derivatives against the SENSOR derivatives they caused, "
+         "row-normalised so dep_gain IS the per-motor loop gain (comparable to c_init).  Amplifies "
+         "what the body is already doing instead of exploring away from it — the attractor-forming "
+         "property HK lacks.  Costs the forward model: the motor loop stops being predictive.  "
+         "0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{4.0}},
+        {"dep_alpha", ParamMutability::HotMutable,
+         "EMA rate of DEP's derivative correlation.  Small = long memory of what worked (slower, "
+         "more stable modes); large = tracks the last few ticks.",
+         ParamValue{0.05}, ParamValue{0.001}, ParamValue{1.0}},
+        {"sense", ParamMutability::HotMutable,
+         "IMPORT I2: weight on the CONFINING half of the homeokinetic objective — the real ∂G "
+         "term (PM's `epsrel`), which sat_lr was a hand-set surrogate for.  It is what stops the "
+         "loop collapsing into the degenerate move-nothing minimum (measured decay at 40k: step "
+         "rate 12.0 → 5.2 → 2.95).  PM: hexapod 1.5, zoo Sox generator 4.  0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{8.0}},
+        {"ctrl_damping", ParamMutability::HotMutable,
+         "IMPORT I2's MANDATORY COMPANION: L2 decay on C and h.  sat_lr is the ONLY brake on the "
+         "bias integrator h, so retiring it in favour of `sense` without a bound reproduces its "
+         "windup (pre-clamp command 14.3 and climbing, 3 of 4 seeds taking zero steps).  PM "
+         "supplies this as a separate `damping` param (dog 0.0001, humanoid 0.0001-0.0003) that "
+         "we have never had.  0 = off.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.01}},
         {"whole_body_c", ParamMutability::ConstructionOnly,
          "IMPORT I7: 0 = four independent per-leg controllers (historical); 1 = ONE controller "
          "spanning every joint of every leg, so inter-leg coordination becomes a learnable entry "
@@ -489,6 +521,10 @@ ParamMap MotorEPM::current_params() const {
     m["init_scale"]   = init_scale_;
     m["c_init"]       = c_init_;
     m["whole_body_c"] = whole_body_c_;
+    m["sense"]        = sense_;
+    m["dep_gain"]     = dep_gain_;
+    m["dep_alpha"]    = dep_alpha_;
+    m["ctrl_damping"] = ctrl_damping_;
     m["cmd_squash"]   = cmd_squash_;
     m["seed"]         = base_seed_;
     m["babble_ticks"]  = babble_ticks_;
@@ -610,6 +646,10 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "init_scale", [&](auto const& v){ init_scale_ = get_double(v, "init_scale"); });
     apply_param(params, "c_init",     [&](auto const& v){ c_init_     = get_double(v, "c_init"); });
     apply_param(params, "whole_body_c", [&](auto const& v){ whole_body_c_ = get_double(v, "whole_body_c"); });
+    apply_param(params, "sense",        [&](auto const& v){ sense_        = get_double(v, "sense"); });
+    apply_param(params, "dep_gain",     [&](auto const& v){ dep_gain_     = get_double(v, "dep_gain"); });
+    apply_param(params, "dep_alpha",    [&](auto const& v){ dep_alpha_    = get_double(v, "dep_alpha"); });
+    apply_param(params, "ctrl_damping", [&](auto const& v){ ctrl_damping_ = get_double(v, "ctrl_damping"); });
     apply_param(params, "cmd_squash", [&](auto const& v){ cmd_squash_ = get_double(v, "cmd_squash"); });
     apply_param(params, "seed",       [&](auto const& v){ base_seed_  = get_int(v, "seed"); });
     apply_param(params, "babble_ticks", [&](auto const& v){ babble_ticks_ = get_int(v, "babble_ticks"); });
@@ -1772,6 +1812,10 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "ctrl_lr")   ctrl_lr_   = get_double(value, "ctrl_lr");
     else if (key == "bias_lr")   bias_lr_   = get_double(value, "bias_lr");
     else if (key == "cmd_squash") cmd_squash_ = get_double(value, "cmd_squash");
+    else if (key == "sense")        sense_        = get_double(value, "sense");
+    else if (key == "dep_gain")     dep_gain_     = get_double(value, "dep_gain");
+    else if (key == "dep_alpha")    dep_alpha_    = get_double(value, "dep_alpha");
+    else if (key == "ctrl_damping") ctrl_damping_ = get_double(value, "ctrl_damping");
     else if (key == "reg_eps")   reg_eps_   = get_double(value, "reg_eps");
     else if (key == "max_dctrl") max_dctrl_ = get_double(value, "max_dctrl");
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
@@ -1899,6 +1943,8 @@ void MotorEPM::wb_init(int n_per_leg) {
     prevXw_  = Eigen::VectorXf::Zero(N);
     prevYw_  = Eigen::VectorXf::Zero(M);
     Zw_      = Eigen::VectorXf::Zero(M);
+    Cdepw_   = Eigen::MatrixXf::Zero(M, N);
+    prevPrevYw_ = Eigen::VectorXf::Zero(M);
     wb_have_prev_ = false;
     wb_steps_ = 0;
     wb_ready_ = true;
@@ -1926,6 +1972,20 @@ void MotorEPM::wb_learn_and_control() {
             Eigen::MatrixXf Lp = AG * Cw_;                        // N x N loop Jacobian
             Eigen::MatrixXf P  = (Lp * Lp.transpose()
                                   + float(reg_eps_) * Eigen::MatrixXf::Identity(N, N)).inverse();
+            // DEP, whole-body: the rule can now write CROSS-LEG terms directly, because
+            // moving one leg mechanically changes its neighbours' sensors and that shows up
+            // in the derivative correlation.  This is the combination the coordination
+            // evidence points at — per-leg DEP still has no cross-leg entries to write.
+            if (dep_gain_ > 0.0) {
+                const Eigen::VectorXf dxw = Xw_ - prevXw_;
+                const Eigen::VectorXf dyw = prevYw_ - prevPrevYw_;
+                const float a_dep = float(dep_alpha_);
+                Cdepw_ = (1.0f - a_dep) * Cdepw_ + a_dep * (dyw * dxw.transpose());
+                for (int i = 0; i < M; ++i) {
+                    const float rn = Cdepw_.row(i).norm();
+                    if (rn > 1e-7f) Cw_.row(i) = Cdepw_.row(i) * (float(dep_gain_) / rn);
+                }
+            }
             Eigen::VectorXf q  = P * xi;
             Eigen::MatrixXf dC = 2.0f * float(ctrl_lr_) * (AG.transpose() * q) * (q.transpose() * Lp);
             float dn = dC.norm();
@@ -1935,7 +1995,16 @@ void MotorEPM::wb_learn_and_control() {
             // "whole-body C learns slower" when it is only clamped harder.
             const float clamp_w = float(max_dctrl_) * std::sqrt(float(n_legs_));
             if (max_dctrl_ > 0.0 && dn > clamp_w) dC *= clamp_w / dn;
-            Cw_.noalias() += dC;
+            if (dep_gain_ <= 0.0) Cw_.noalias() += dC;   // DEP owns Cw when on
+            if (sense_ > 0.0) {                                   // I2, whole-body form
+                Eigen::MatrixXf CqqA = Cw_ * (q * q.transpose()) * Aw_;   // M x M
+                Eigen::VectorXf eps(M), yt(M);
+                for (int i = 0; i < M; ++i) {
+                    eps[i] = CqqA(i, i) * G(i, i) * 2.0f * float(sense_);
+                    yt[i]  = std::tanh(z[i]);
+                }
+                Cw_.noalias() -= float(ctrl_lr_) * (eps.cwiseProduct(yt)) * prevXw_.transpose();
+            }
             hw_.noalias() += float(bias_lr_) * (G * (Aw_.transpose() * q));
             if (sat_lr_ > 0.0)                                    // the h bound — see the sat_lr entry
                 for (int i = 0; i < M; ++i) {
@@ -1943,9 +2012,12 @@ void MotorEPM::wb_learn_and_control() {
                     Cw_.row(i).noalias() -= float(sat_lr_) * gs * prevXw_.transpose();
                     hw_[i] -= float(sat_lr_) * gs;
                 }
+            if (ctrl_damping_ > 0.0) { Cw_ *= (1.0f - float(ctrl_damping_));
+                                       hw_ *= (1.0f - float(ctrl_damping_)); }
         }
     }
     Zw_     = Cw_ * Xw_ + hw_;        // pre-tanh; the per-leg loop slices and finishes it
+    prevPrevYw_ = prevYw_;
     prevXw_ = Xw_;
     wb_have_prev_ = true;
 }
@@ -1960,6 +2032,8 @@ void MotorEPM::ensure_leg_init(int leg, int n) {
     L.A = Eigen::MatrixXf::Zero(n, m);
     L.b = Eigen::VectorXf::Zero(n);
     L.C = Eigen::MatrixXf::Zero(m, n);
+    L.Cdep = Eigen::MatrixXf::Zero(m, n);
+    L.prev_prev_y = Eigen::VectorXf::Zero(m);
     L.Cphi = Eigen::MatrixXf::Zero(m, 2);   // phase-conditioning starts at 0 (byte-identical until learned)
     L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // velocity feed-forward starts at 0 (byte-identical until learned)
     L.prev_phi_ctx.setZero();
@@ -2200,11 +2274,23 @@ void MotorEPM::tick(uint64_t tick_id) {
             L.phase = std::atan2(vy, vx);
             // amplitude homeostat: phase-vector magnitude = oscillation amplitude.
             // Slow integral regulator drives amp_gain so amp_ema → amp_target.
+            //
+            // ⚠ amp_ema itself is UNGATED as of 2026-08-03.  It used to update only when
+            // amp_homeo_gain>0, i.e. only when a CONSUMER wanted it — so on the pure_hk
+            // tier it stayed 0 forever.  That silently broke the inter-leg PLV, whose
+            // frozen-body gate is "is this leg actually oscillating?" and reads amp_ema:
+            // every arm reported plv support 0 and a PLV of 0.000, which looks exactly
+            // like "no coordination" and is in fact "no measurement".  Third instance of
+            // an instrument gated on the thing being ablated; the estimate is now always
+            // computed and only its CONSUMERS stay gated.
+            {
+                float amp = std::sqrt(vx * vx + vy * vy);
+                L.amp_ema = (1.0f - kAmpEmaAlpha) * L.amp_ema + kAmpEmaAlpha * amp;
+            }
             if (amp_homeo_gain_ > 0.0 || amp_seek_rate_ > 0.0) {
                 float amp = std::sqrt(vx * vx + vy * vy);
                 amp_sum += amp; ++amp_n;          // for the CoT amplitude search
                 if (amp_homeo_gain_ > 0.0) {
-                    L.amp_ema = (1.0f - kAmpEmaAlpha) * L.amp_ema + kAmpEmaAlpha * amp;
                     // UPRIGHT GATE.  While not upright the body cannot reach amp_target at
                     // all, so this integrator winds to its rail and STAYS there — measured
                     // 0.10 (its floor) -> 2.9..4.3 across an inverted episode, never
@@ -2553,13 +2639,43 @@ void MotorEPM::tick(uint64_t tick_id) {
                         xi_tilde[idx] = (1.0f - w) * xi[idx] + w * goal_err;
                     }
                 }
+                // ---- DEP: C from the correlation of MOTOR and SENSOR derivatives -----
+                // Causal pairing: the command CHANGE we made last tick (Δprev_y) and the
+                // sensor CHANGE it produced (Δx).  Row-normalised so dep_gain is the
+                // per-motor loop gain — without normalisation the correlation grows
+                // without bound and the loop diverges, which is the first thing that goes
+                // wrong with a naive Hebbian rule on a closed sensorimotor loop.
+                if (dep_gain_ > 0.0) {
+                    const Eigen::VectorXf dx = L.x - L.prev_x;
+                    const Eigen::VectorXf dy = L.prev_y - L.prev_prev_y;
+                    const float a_dep = float(dep_alpha_);
+                    L.Cdep = (1.0f - a_dep) * L.Cdep + a_dep * (dy * dx.transpose());
+                    for (int i = 0; i < m; ++i) {
+                        const float rn = L.Cdep.row(i).norm();
+                        if (rn > 1e-7f) L.C.row(i) = L.Cdep.row(i) * (float(dep_gain_) / rn);
+                    }
+                }
                 Eigen::VectorXf q  = P * xi_tilde;
                 Eigen::MatrixXf dC = 2.0f * float(ctrl_lr_)
                                      * (AG.transpose() * q) * (q.transpose() * Lp);
+                // I2 — the CONFINING term, ported from sos_avggrad.cpp's `epsrel`.
+                // Dimensions follow PM exactly with q qᵀ standing in for their averaged Q:
+                // C(m×n)·(q qᵀ)(n×n)·A(n×m) → m×m, take the diagonal, weight by g' and
+                // 2·sense, then subtract (epsrel ⊙ y)·xᵀ.  This is the term the anti-
+                // saturation hack was approximating.
+                if (sense_ > 0.0) {
+                    Eigen::MatrixXf CqqA = L.C * (q * q.transpose()) * L.A;   // m x m
+                    Eigen::VectorXf eps(m), yt(m);
+                    for (int i = 0; i < m; ++i) {
+                        eps[i] = CqqA(i, i) * G(i, i) * 2.0f * float(sense_);
+                        yt[i]  = std::tanh(z[i]);
+                    }
+                    dC.noalias() -= float(ctrl_lr_) * (eps.cwiseProduct(yt)) * L.prev_x.transpose();
+                }
                 float dC_norm = dC.norm();
                 if (max_dctrl_ > 0.0 && dC_norm > float(max_dctrl_))
                     dC *= float(max_dctrl_) / dC_norm;             // ignition clamp
-                L.C.noalias() += dC;
+                if (dep_gain_ <= 0.0) L.C.noalias() += dC;         // DEP owns C when on
                 Eigen::VectorXf mu = G * (L.A.transpose() * q);    // bias toward less surprise
                 L.h.noalias() += float(bias_lr_) * mu;
                 // Phase-conditioned feed-forward: train Cphi to REDUCE the keyframe error (x* − x)
@@ -2599,6 +2715,12 @@ void MotorEPM::tick(uint64_t tick_id) {
                         L.C.row(i).noalias() -= float(sat_lr_) * gsat * L.prev_x.transpose();
                         L.h[i] -= float(sat_lr_) * gsat;
                     }
+                }
+                // I2 companion: the explicit bound on C and h that lets sat_lr be retired
+                // without reproducing its windup.  PM's `damping`.
+                if (ctrl_damping_ > 0.0) {
+                    L.C *= (1.0f - float(ctrl_damping_));
+                    L.h *= (1.0f - float(ctrl_damping_));
                 }
                 L.gain_ema = (1.0f - kTeleEmaAlpha) * L.gain_ema + kTeleEmaAlpha * Lp.norm();
                 L.sat_ema  = (1.0f - kTeleEmaAlpha) * L.sat_ema  + kTeleEmaAlpha * (sat / float(m));
@@ -2743,17 +2865,31 @@ void MotorEPM::tick(uint64_t tick_id) {
         }
         // INTER-LEG PLV accumulation — one sample per tick per leg pair, over the whole run.
     // Placed after the phase pre-pass so every leg's phase is current.  Report-only.
+    // ⚠ GATED ON ACTUAL OSCILLATION.  PLV asks whether a leg PAIR holds a constant relative
+    // phase — and a FROZEN body satisfies that trivially: motionless legs have constant
+    // phases, so their difference is constant and PLV -> 1.  Measured 2026-08-03: the
+    // sense=1.5 arm takes 7 steps in 40k ticks and reports plv 0.72, against 0.05 for a
+    // vigorously stepping control.  That is the frozen-body degeneracy, the SAME failure
+    // that made gait_coherence useless, arriving by a different route.  So a pair is only
+    // sampled while BOTH its legs are genuinely oscillating: the phase vector's magnitude
+    // (the oscillation amplitude) must clear a floor.  plv_n_ then also reports how much
+    // support the number has — a PLV backed by few samples is not a measurement.
     if (n_legs_ > 1) {
         bool ok = true;
         for (int i = 0; i < n_legs_; ++i) if (!legs_[i].initialized) { ok = false; break; }
         if (ok) {
+            bool any = false;
             for (int i = 0; i < n_legs_; ++i)
                 for (int j = i + 1; j < n_legs_ && j < 4; ++j) {
+                    if (legs_[i].amp_ema < kPlvAmpFloor || legs_[j].amp_ema < kPlvAmpFloor)
+                        continue;                       // one of them is not moving
                     const float d = legs_[i].phase - legs_[j].phase;
                     plv_cos_[i * 4 + j] += std::cos(d);
                     plv_sin_[i * 4 + j] += std::sin(d);
+                    plv_pair_n_[i * 4 + j] += 1;
+                    any = true;
                 }
-            ++plv_n_;
+            if (any) ++plv_n_;
         }
     }
 
@@ -3083,6 +3219,7 @@ void MotorEPM::tick(uint64_t tick_id) {
                                                      // alone — same contract as L.prev_y.
         L.prev_x = L.x;
         L.prev_phi_ctx = Eigen::Vector2f(std::cos(cpg_phase_), std::sin(cpg_phase_));  // phase at command time
+        L.prev_prev_y = L.prev_y;
         L.prev_y = y;
         L.have_prev = true;
     }
@@ -3131,13 +3268,13 @@ float MotorEPM::interleg_plv() const {
     // Mean over leg PAIRS of |mean_t e^{i(phi_i - phi_j)}|.  Chance level for independent
     // legs is ~sqrt(pi)/2/sqrt(N) -> 0 as the run lengthens, so unlike gait_coherence this
     // has a null that DOES go to zero and a reading above ~0.3 is real phase locking.
-    if (plv_n_ < 50) return 0.0f;
     double acc = 0.0; int c = 0;
     for (int i = 0; i < n_legs_; ++i)
-        for (int j = i + 1; j < n_legs_; ++j) {
+        for (int j = i + 1; j < n_legs_ && j < 4; ++j) {
             const int k = i * 4 + j;
+            if (plv_pair_n_[k] < 200) continue;        // too little oscillation to judge
             acc += std::sqrt(plv_cos_[k] * plv_cos_[k] + plv_sin_[k] * plv_sin_[k])
-                   / double(plv_n_);
+                   / double(plv_pair_n_[k]);
             ++c;
         }
     return c ? float(acc / c) : 0.0f;
@@ -3405,6 +3542,7 @@ nlohmann::json MotorEPM::snapshot_state() const {
     // its own directive").  |mean_j e^{i(phi_j - P_j)}| in [0,1]; 1 = locked to the gait.
     mod["gait_coherence"] = gait_coherence();   // ⚠ INSTANTANEOUS — see interleg_plv
     mod["interleg_plv"]   = interleg_plv();     // the honest coordination read
+    mod["plv_support"]    = double(plv_n_);     // ticks with genuine oscillation behind it
     // ★ INTRA-LEG COORDINATION (2026-08-03).  The operator observed, for the first time,
     // hip2 and knee working TOGETHER to lift the chassis — where the hand-built reflexes
     // only ever drove one or the other.  Those two joints share foot-height authority

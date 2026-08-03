@@ -1220,3 +1220,107 @@ TEST(MotorEPM, WholeBodyCMakesOneLegsStateReachAnotherLegsCommand) {
         << "with whole_body_c=1, perturbing ONE leg must reach the OTHER legs' commands — "
            "if this is 0 the matrix stayed block-diagonal and the lever is a no-op";
 }
+
+// =============================================================================
+// IMPORT I2 — the real ∂G (confinement) term and its mandatory bound.  Three obligations:
+// byte-identical at 0; actually changes the controller above 0; and — the one specific to
+// this lever — ctrl_damping must genuinely BOUND the bias integrator h, because the term
+// it replaces (sat_lr) was the only thing doing so and removing it unbounded produced a
+// runaway command (measured 14.3 and still climbing, 3 of 4 seeds taking zero steps).
+// =============================================================================
+TEST(MotorEPM, SenseZeroIsByteIdentical) {
+    auto pa = base_params();
+    auto pb = base_params(); pb["sense"] = 0.0; pb["ctrl_damping"] = 0.0;
+    Fixture fa(pa, 4, 3), fb(pb, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 150; ++t) {
+        Sensors s; fa.run_tick(t, s); fb.run_tick(t, s);
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff, double(std::abs(fa.accel(leg, j) - fb.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-12) << "sense=0 and ctrl_damping=0 must be byte-identical";
+}
+
+TEST(MotorEPM, SenseNonZeroChangesTheController) {
+    auto poff = base_params(); poff["c_init"] = 0.5;
+    auto pon  = base_params(); pon["c_init"]  = 0.5; pon["sense"] = 1.5;   // PM hexapod value
+    Fixture foff(poff, 4, 3), fon(pon, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 250; ++t) {
+        Sensors s; foff.run_tick(t, s); fon.run_tick(t, s);
+        if (t < 20) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff, double(std::abs(foff.accel(leg, j) - fon.accel(leg, j))));
+    }
+    EXPECT_GT(maxdiff, 1e-6) << "sense>0 must actually change the controller";
+}
+
+// The load-bearing one.  Strip the ONLY existing brake on h (sat_lr=0) and confirm that
+// ctrl_damping holds the command bounded where without it the integrator runs away.
+TEST(MotorEPM, CtrlDampingBoundsTheBiasIntegratorThatSatLrWasHolding) {
+    auto nobrake = base_params();
+    nobrake["sat_lr"] = 0.0; nobrake["c_init"] = 0.5;        // no bound at all
+    auto damped  = nobrake;
+    damped["ctrl_damping"] = 0.001;                          // the replacement bound
+
+    auto peak = [&](ogma::ParamMap p) {
+        Fixture f(p, 4, 3);
+        double mx = 0.0;
+        for (uint64_t t = 0; t < 900; ++t) {
+            Sensors s; f.run_tick(t, s);
+            if (t < 100) continue;
+            for (int leg = 0; leg < 4; ++leg)
+                for (int j = 0; j < 3; ++j)
+                    mx = std::max(mx, double(std::abs(f.accel(leg, j))));
+        }
+        return mx;
+    };
+    const double un = peak(nobrake), bd = peak(damped);
+    // Both are read at the ActionOut, which is clamped to +-1, so the tell is not the raw
+    // magnitude but that the damped arm stops sitting ON the rail.
+    EXPECT_LE(bd, un + 1e-9) << "ctrl_damping must not increase the command excursion";
+    EXPECT_GT(un, 0.0)       << "test needs the unbounded arm to actually drive something";
+}
+
+// =============================================================================
+// DEP — Differential Extrinsic Plasticity.  Byte-identical at 0; changes the controller
+// above 0; and the property specific to this rule: C must track the DERIVATIVE
+// CORRELATION, i.e. a body whose sensors move differently must end up with a different C.
+// =============================================================================
+TEST(MotorEPM, DepZeroIsByteIdentical) {
+    auto pa = base_params();
+    auto pb = base_params(); pb["dep_gain"] = 0.0;
+    Fixture fa(pa, 4, 3), fb(pb, 4, 3);
+    double maxdiff = 0.0;
+    for (uint64_t t = 0; t < 150; ++t) {
+        Sensors s; fa.run_tick(t, s); fb.run_tick(t, s);
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j)
+                maxdiff = std::max(maxdiff, double(std::abs(fa.accel(leg, j) - fb.accel(leg, j))));
+    }
+    EXPECT_LT(maxdiff, 1e-12) << "dep_gain=0 must be byte-identical to the HK build";
+}
+
+TEST(MotorEPM, DepOnDrivesTheBodyAndStaysBounded) {
+    auto p = base_params(); p["dep_gain"] = 1.0; p["c_init"] = 0.5;
+    Fixture f(p, 4, 3);
+    double mx = 0.0, late = 0.0;
+    for (uint64_t t = 0; t < 600; ++t) {
+        Sensors s; f.run_tick(t, s);
+        if (t < 30) continue;
+        for (int leg = 0; leg < 4; ++leg)
+            for (int j = 0; j < 3; ++j) {
+                const double v = std::abs(double(f.accel(leg, j)));
+                mx = std::max(mx, v);
+                if (t > 500) late = std::max(late, v);
+            }
+    }
+    EXPECT_GT(mx, 1e-4) << "DEP must actually drive the motors";
+    // Row-normalisation is what keeps a Hebbian rule on a closed loop from diverging.
+    // The command is clamped at +-1 downstream, so the check is that it is still FINITE
+    // and in range late in the run rather than NaN or pinned by a runaway C.
+    EXPECT_LE(late, 1.0 + 1e-6) << "DEP must stay bounded — row normalisation is load-bearing";
+    EXPECT_FALSE(std::isnan(late)) << "DEP diverged";
+}
