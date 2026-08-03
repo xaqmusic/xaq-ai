@@ -1475,6 +1475,54 @@ the **velocity** component, not the position one. **Next test to close this clea
 channel-ONLY noise** — the exact complement, which the same bridge hook can deliver, and which
 would confirm rather than infer the mechanism.
 
+### ⚠️⚠️ The velocity-only test ALSO fails — so BOTH single-channel hypotheses were wrong
+
+Built as `vel_noise_sigma` (noise added to `delta` after it is computed, position left clean).
+**Dose scaling was computed, not guessed:** `delta` is a per-tick difference (~0.01–0.05), so the
+body-side σ = 0.03 arm delivers an effective delta-noise std of only ≈ 0.0022 (an OU increment
+with a = 1/8) — the equivalent velocity-channel dose is σ ≈ 0.015, not 0.03. Swept
+{0.005, 0.015, 0.04} to bracket it. 40 k, n=4.
+
+| arm | chassis_y early → mid → late | verdict |
+|---|---|---|
+| no noise | 0.0424 → 0.0374 → 0.0341 | sinks |
+| **BODY-side, BOTH channels, σ = 0.03** | 0.0453 → 0.0550 → **0.0706** | **RISES** |
+| POS-only σ = 0.03 | 0.0420 → 0.0439 → 0.0331 | sinks |
+| VEL-only σ = 0.005 | 0.0406 → 0.0337 → 0.0432 | flat |
+| VEL-only σ = 0.015 | 0.0440 → 0.0377 → 0.0418 | flat |
+| VEL-only σ = 0.04 | 0.0422 → 0.0395 → 0.0324 | sinks |
+
+**Neither channel alone reproduces the posture rise.** Velocity-only *arrests* the sink at low σ
+(flat rather than falling — half the effect) but never produces the rise. The correct statement
+is therefore neither of my two hypotheses:
+
+> **The posture rise requires noise on BOTH channels SIMULTANEOUSLY, and is not attributable to
+> either alone.**
+
+### The diagnosis — and it is a real methodological lesson
+
+Body-side noise is **physically coherent**: it perturbs the joint angle, and `delta` is then the
+*true derivative of the perturbed angle*. Position error and velocity error are the same physical
+event, correctly related. Channel-isolated noise is **physically incoherent** — a position wobble
+with no matching velocity, or a velocity with no matching position. That is a perturbation no real
+body can produce.
+
+The HK loop learns a **forward model**. A coherent perturbation is *learnable*, and the controller
+can stiffen the loop against it — which is what lifts the body. An incoherent one is unmodellable
+corruption, so the model error never resolves and there is nothing to stiffen against.
+
+⇒ **Sensor noise must be injected at the SENSOR, not at the derived feature vector, because the
+feature vector's components are not independent.** `pos_noise_sigma` / `vel_noise_sigma` were a
+mis-framing on my part; they earned their keep as the diagnostics that established this, and they
+should stay default-off as diagnostics, but **the deployable form is the body-side one**
+(`sensor_noise_sigma` in `picrawler_body.gd`).
+
+**Secondary result worth keeping:** velocity-channel noise does something the other modes do not —
+`step_bal` improves monotonically with σ (0.19 → 0.32 → 0.38) while **`turns` falls** (9.0 → 4.7 →
+3.0). It reduces spin and evens out leg participation. And σ = 0.005 gives net_disp **1.87 ± 1.15**,
+the best transport of any noise arm and nominally above the un-noised 1.46 (within variance).
+That is a *different* benefit from the posture one and worth a proper look on its own.
+
 ---
 
 ## 8j. ★★★ THE ABLATION, POWERED TO n=20 — it is not a tie, it is a win for the ablation

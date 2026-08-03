@@ -77,6 +77,13 @@ ParamSchema JointSensorimotorBridge::params_schema() const {
             "every legged controller through ColorUniformNoise(0.1); measured optimum on this "
             "body is lower (posture peaks near 0.03).  0 = off, byte-identical.",
             ParamValue{0.0}},
+        {"vel_noise_sigma",     ParamMutability::ConstructionOnly,
+            "IMPORT I4c: colored noise on the VELOCITY (delta) channel only, position left clean "
+            "-- the exact complement of pos_noise_sigma.  Confirms whether the measured posture "
+            "rise from both-channel noise comes from the velocity component (the channel the HK "
+            "gradient weights most, 44% of |C| mass).  SCALE: delta is a per-tick difference, so "
+            "the body-side sigma=0.03 equivalent here is ~0.015, not 0.03.  0 = off.",
+            ParamValue{0.0}},
         {"pos_noise_tau",       ParamMutability::ConstructionOnly,
             "Correlation length of that noise in ticks (1 = white).  Colored noise excites the "
             "low-frequency modes a leg can actually follow; white is filtered out by servo dynamics.",
@@ -118,6 +125,9 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
         sensor_label_prefix_ = get_string(v, "sensor_label_prefix"); });
     apply_param(params, "pos_noise_sigma", [&](auto const& v){
         if (auto p = std::get_if<double>(&v)) pos_noise_sigma_ = std::max(0.0, *p);
+    });
+    apply_param(params, "vel_noise_sigma", [&](auto const& v){
+        if (auto p = std::get_if<double>(&v)) vel_noise_sigma_ = std::max(0.0, *p);
     });
     apply_param(params, "pos_noise_tau", [&](auto const& v){
         if (auto p = std::get_if<double>(&v)) pos_noise_tau_ = std::max(1.0, *p);
@@ -243,6 +253,20 @@ void JointSensorimotorBridge::tick(uint64_t tick_id) {
                                                           float(pos_noise_sigma_));
                 pos_noise_[i] = (1.0f - a) * pos_noise_[i] + a * ud(pos_noise_rng_);
                 pos = std::clamp(pos + pos_noise_[i], -1.0f, 1.0f);
+            }
+            // I4c: velocity-channel-only noise.  NOTE THE SCALE -- delta is a per-tick
+            // difference (~0.01-0.05), not a position (~1.0), so the same nominal sigma
+            // is a far larger RELATIVE perturbation here.  The body-side sigma=0.03
+            // arm that produced the posture rise delivers an effective delta-noise std
+            // of only ~0.0022 (an OU increment with a=1/8), so the equivalent dose here
+            // is sigma ~= 0.015, not 0.03.
+            if (vel_noise_sigma_ > 0.0) {
+                if (int(vel_noise_.size()) != n_inputs) vel_noise_.assign(n_inputs, 0.0f);
+                const float a = 1.0f / float(std::max(1.0, pos_noise_tau_));
+                std::uniform_real_distribution<float> ud(-float(vel_noise_sigma_),
+                                                          float(vel_noise_sigma_));
+                vel_noise_[i] = (1.0f - a) * vel_noise_[i] + a * ud(pos_noise_rng_);
+                delta += vel_noise_[i];
             }
             out->values(g * dim_per + 0) = pos;
             out->values(g * dim_per + 1) = act;

@@ -77,9 +77,17 @@ private:
     // clean positions, so the dose reaches one channel rather than two.
     // sigma = 0 (default) is byte-identical.
     double                   pos_noise_sigma_    = 0.0;
+    // I4c — the COMPLEMENT: noise on the VELOCITY (delta) channel only, position clean.
+    // Measured 2026-08-02: both-channel body-side noise at sigma 0.03 makes the body
+    // progressively STAND UP (chassis 0.045 -> 0.071 over 40k) while position-only
+    // reproduces it at no sigma.  So the active ingredient is the velocity component --
+    // which is also the channel the HK gradient weights most (44% of |C| mass).  This
+    // isolates it, to CONFIRM the mechanism rather than infer it from the complement.
+    double                   vel_noise_sigma_    = 0.0;
     double                   pos_noise_tau_      = 8.0;   // correlation length in ticks; 1 = white
     uint64_t                 pos_noise_seed_     = 0;
     std::vector<float>       pos_noise_;                  // per-joint colored state
+    std::vector<float>       vel_noise_;                  // per-joint colored state (velocity channel)
     std::mt19937             pos_noise_rng_;
 
     // Working state — sized to n_joints() at setup.
