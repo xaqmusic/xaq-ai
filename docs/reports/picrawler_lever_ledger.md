@@ -909,11 +909,43 @@ The learned components mutually compensate and the scaffold gains were hand-tune
 running — the signature of a learned layer the surrounding controller was fitted **around**,
 rather than one the gait is built **on**.
 
-**Power (§3.3):** n=4 is a **signal, and this is a null**, which is the claim type that most needs
-powering. **Not yet a finding — needs n≥20 with varied world seeds before it is settled.** It is
-recorded now because it is congruent with three independent things already in this ledger:
-`hk_share`=0.11, `step_cv` identical (0.94–1.06) in *every* arm ever measured, and the nine-lever
-flat-`flat_v` record.
+> ### ★★★ POWERED TO n=20 (2026-08-02) — AND IT IS NOT A TIE, IT IS A WIN FOR THE ABLATION
+>
+> | metric | baseline n=20 | **ALL learning off n=20** | Δ | t |
+> |---|---|---|---|---|
+> | **net_z** | 4.322 ± 0.672 | **4.915 ± 0.459** | **+0.593** | **+3.26** |
+> | **flat_v** | 0.044 ± 0.012 | **0.059 ± 0.011** | **+0.014** | **+3.80** |
+> | **straight** | 0.698 ± 0.057 | **0.737 ± 0.031** | +0.039 | +2.68 |
+> | steps | 55.45 ± 11.83 | 46.30 ± 7.55 | −9.15 | −2.92 |
+> | tilt_sd / planted / belly / falls | 0.072 / 3.60 / 0.023 / 0 | 0.066 / 3.69 / 0.022 / 0 | ties | — |
+>
+> **All four \|t\| > 2.6; net_z and flat_v exceed 3.2.** At n=4 this read as "costs nothing." At
+> n=20 it is **an improvement**: removing every learned component makes the deployed gait travel
+> further, straighter and faster, **with lower variance on all three**. The learned layer buys
+> `steps` (+20 %) and a little `step_bal`, and pays for it in distance, straightness and
+> consistency.
+>
+> **★ Note what moved `flat_v`.** It has been pinned at 0.03–0.05 across *nine* isolated timing
+> levers (§5) and a tenth (the load-gated stroke). The first thing to move it — 0.044 → 0.059,
+> t = 3.8 — is **deleting the learned controller.** The eleventh lever is a subtraction.
+>
+> ⇒ The honest verdict is no longer `NULL` but a mild **`REGRESSION` for the learned layer on
+> this base**: on the deployed config the homeokinetic controller and the CPG-embedding are not
+> inert, they are slightly harmful to locomotion. **This does not generalise off this base** —
+> the same controller on the `pure_hk` tier is the *only* thing producing motion at all.
+
+**Corroborated by a second, independent arm.** Raising `ctrl_lr` **on the deployed base** (n=6)
+does nothing good and destabilises: 0.05 → net_z 4.20 ± 0.95, straight 0.64; 0.10 → net_z 4.39 ±
+0.77 but **tilt_sd 0.070 → 0.312 ± 0.504** (one seed diverged) and belly 0.023 → 0.045 ± 0.046.
+**More learning on the deployed base is worse, in the same direction the ablation points.**
+Consistent story: the scaffold stack was hand-tuned around a *weak* learned signal, and both
+strengthening it and removing it move away from that tuning — removal favourably, amplification
+not.
+
+**Original n=4 framing, kept for the audit trail:** n=4 is a signal, and this was a null, which
+is the claim type that most needs powering. It was recorded then because it was congruent with
+`hk_share`=0.11, `step_cv` identical (0.94–1.06) in every arm ever measured, and the nine-lever
+flat-`flat_v` record. Powering it strengthened rather than overturned it.
 
 **What it does NOT say.** It is not a verdict on the Motor-EPM. The same run shows the HK gradient
 learns something real and correct: `|C|` mass on the **velocity** columns is **0.445 with HK on

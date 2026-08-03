@@ -24,7 +24,19 @@ const _MODULE_ID: String = "motor_epm"
 const _SLIDERS: Array = [
 	# primary "by eye" levers (legs weak -> motor_gain; jerky -> ctrl_lr / noise)
 	{"key": "motor_gain",        "label": "motor_gain  (leg strength)", "min": 0.0,  "max": 5.0,  "step": 0.1},
-	{"key": "ctrl_lr",           "label": "ctrl_lr  (HK drive)",        "min": 0.0,  "max": 0.10, "step": 0.005},
+	# 2026-08-02 — ceiling raised 0.10 -> 0.30.  The old max sat exactly at the BOTTOM of
+	# the range that works, so this lever could not be found by eye.  Measured on the
+	# pure-HK base at 20k, n=4: steps 41 -> 141 -> 163 -> 226 and net_disp 0.56 -> 0.68
+	# -> 1.79 -> 2.17 across ctrl_lr 0.01 / 0.05 / 0.10 / 0.20, with falls rising
+	# 1.00 -> 1.75.  Playful Machine reference: hexapod epsC=0.1, dog epsC=0.05 -- we had
+	# been running 0.01, i.e. 5-10x below every legged experiment of theirs.
+	# NOTE the activity PEAKS around 14-20k ticks and then decays, so judge this slider
+	# over minutes, not seconds.
+	{"key": "ctrl_lr",           "label": "ctrl_lr  (HK drive; PM=0.05-0.1)", "min": 0.0, "max": 0.30, "step": 0.01},
+	# The model rate is the other half of the pair and has never been on the panel.
+	# PM: hexapod epsA=0.05, dog epsA=0.01.  Ours defaults to 0.02.  A model that learns
+	# too slowly makes the loop Jacobian stale, which is what the HK gradient descends.
+	{"key": "model_lr",          "label": "model_lr  (self-model; PM=0.01-0.05)", "min": 0.0, "max": 0.20, "step": 0.005},
 	{"key": "explore_noise",     "label": "explore_noise  (motion)",    "min": 0.0,  "max": 0.50, "step": 0.01},
 	# gait oscillation
 	{"key": "amp_target",        "label": "amp_target  (osc size)",     "min": 0.0,  "max": 1.5,  "step": 0.05},

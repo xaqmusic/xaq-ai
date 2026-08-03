@@ -1443,6 +1443,51 @@ POSITION channel only so the same σ does not double into the velocity channel.*
 
 ---
 
+## 8j. ★★★ THE ABLATION, POWERED TO n=20 — it is not a tie, it is a win for the ablation
+
+| metric | baseline n=20 | **ALL learning off n=20** | Δ | t |
+|---|---|---|---|---|
+| **net_z** | 4.322 ± 0.672 | **4.915 ± 0.459** | **+0.593** | **+3.26** |
+| **flat_v** | 0.044 ± 0.012 | **0.059 ± 0.011** | **+0.014** | **+3.80** |
+| **straight** | 0.698 ± 0.057 | **0.737 ± 0.031** | +0.039 | +2.68 |
+| steps | 55.45 ± 11.83 | 46.30 ± 7.55 | −9.15 | −2.92 |
+| tilt_sd · planted · belly · falls | 0.072 · 3.60 · 0.023 · 0 | 0.066 · 3.69 · 0.022 · 0 | ties | — |
+
+**At n=4 this read as "costs nothing". At n=20 it is an improvement.** Removing every learned
+component makes the deployed gait travel further, straighter and faster — **with lower variance
+on all three**. The learned layer buys `steps` (+20 %) and a little `step_bal`, and pays in
+distance, straightness and consistency.
+
+**★ Note what finally moved `flat_v`.** It sat at 0.03–0.05 across *nine* isolated timing levers
+and a tenth load-gated stroke — the longest-standing open question in the ledger. The first
+change to move it (0.044 → 0.059, t = 3.8) is **deleting the learned controller.** The eleventh
+lever is a subtraction.
+
+⇒ The verdict upgrades from `NULL` to a mild **`REGRESSION` for the learned layer on this base.**
+On the deployed config the homeokinetic controller and the CPG-embedding are not inert — they are
+slightly harmful to locomotion.
+
+**Corroborated independently.** Raising `ctrl_lr` *on the deployed base* (n=6) does nothing good
+and destabilises: 0.05 → net_z 4.20 ± 0.95; 0.10 → net_z 4.39 ± 0.77 but **tilt_sd 0.070 →
+0.312 ± 0.504** (one seed diverged) and belly 0.023 → 0.045 ± 0.046. **More learning on the
+deployed base is worse, in the same direction the ablation points** — the scaffold stack was
+hand-tuned around a *weak* learned signal, so both strengthening and removing it move away from
+that tuning; removal favourably, amplification not.
+
+**⚠️ Do not over-generalise this.** It is a statement about the deployed base only. On the
+`pure_hk` tier the same controller is the *only* thing producing motion at all (§8g–8h), and at
+PM's learning rate it produces seeds inside the deployed config's distance range. The two results
+together say something specific and useful:
+
+> **The learned controller and the hand-built scaffold stack are two competing solutions to the
+> same problem, and running them together is worse than running either alone.**
+
+That is the sharpest framing this campaign has produced, and it is what the whole Playful Machine
+comparison was pointing at from §2 onward: PM runs the learned solution with a *body* scaffold and
+no control-layer scaffold; we run a control-layer scaffold with a learned solution fighting it.
+
+---
+
 ## 9. Source index (for the next session)
 
 | What | Where |

@@ -71,6 +71,21 @@ ParamSchema JointSensorimotorBridge::params_schema() const {
         {"proprio_indices",     ParamMutability::ConstructionOnly,
             "Array of N integer indices into ProprioToken.values.  Same length as action_topics.",
             std::nullopt},
+        {"pos_noise_sigma",     ParamMutability::ConstructionOnly,
+            "IMPORT I4b: colored noise amplitude on the POSITION channel only (delta stays "
+            "computed from clean positions, so the dose reaches one channel not two).  PM wires "
+            "every legged controller through ColorUniformNoise(0.1); measured optimum on this "
+            "body is lower (posture peaks near 0.03).  0 = off, byte-identical.",
+            ParamValue{0.0}},
+        {"pos_noise_tau",       ParamMutability::ConstructionOnly,
+            "Correlation length of that noise in ticks (1 = white).  Colored noise excites the "
+            "low-frequency modes a leg can actually follow; white is filtered out by servo dynamics.",
+            ParamValue{8.0}},
+        {"seed",      ParamMutability::ConstructionOnly,
+            "RNG seed for the position-noise trace.  Deliberately named `seed` so "
+            "OgmaBrain::set_master_seed rewrites it per run; otherwise every seed shares one "
+            "noise trace and the seed-average understates the spread.",
+            ParamValue{int64_t(0)}},
         {"sensor_label_prefix", ParamMutability::ConstructionOnly,
             "Optional prefix for the published ProprioToken.sensor field (final form = <prefix>.<derived joint suffix>).  Empty = use output topic suffix only.",
             ParamValue{std::string("joint")}},
@@ -101,6 +116,16 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
         proprio_input_topic_ = get_string(v, "proprio_input_topic"); });
     apply_param(params, "sensor_label_prefix", [&](auto const& v){
         sensor_label_prefix_ = get_string(v, "sensor_label_prefix"); });
+    apply_param(params, "pos_noise_sigma", [&](auto const& v){
+        if (auto p = std::get_if<double>(&v)) pos_noise_sigma_ = std::max(0.0, *p);
+    });
+    apply_param(params, "pos_noise_tau", [&](auto const& v){
+        if (auto p = std::get_if<double>(&v)) pos_noise_tau_ = std::max(1.0, *p);
+    });
+    apply_param(params, "seed", [&](auto const& v){
+        if (auto p = std::get_if<int64_t>(&v)) pos_noise_seed_ = uint64_t(*p);
+    });
+    pos_noise_rng_.seed(static_cast<uint32_t>(pos_noise_seed_ ^ 0x5E4501u));
     apply_param(params, "group_size", [&](auto const& v){
         if (auto p = std::get_if<int64_t>(&v)) group_size_ = std::max(1, int(*p));
         else throw std::invalid_argument("JointSensorimotorBridge: group_size must be integer");
@@ -207,7 +232,18 @@ void JointSensorimotorBridge::tick(uint64_t tick_id) {
             if (i >= n_inputs) break;
             float pos   = last_position_[i];
             float act   = last_action_[i];
-            float delta = pos - prev_position_[i];
+            float delta = pos - prev_position_[i];   // from CLEAN positions — noise below
+            // Import I4b: colored noise on the POSITION channel only.  delta is already
+            // computed above from the un-noised positions, so the dose lands on one
+            // channel instead of re-entering the velocity channel as a difference.
+            if (pos_noise_sigma_ > 0.0) {
+                if (int(pos_noise_.size()) != n_inputs) pos_noise_.assign(n_inputs, 0.0f);
+                const float a = 1.0f / float(std::max(1.0, pos_noise_tau_));
+                std::uniform_real_distribution<float> ud(-float(pos_noise_sigma_),
+                                                          float(pos_noise_sigma_));
+                pos_noise_[i] = (1.0f - a) * pos_noise_[i] + a * ud(pos_noise_rng_);
+                pos = std::clamp(pos + pos_noise_[i], -1.0f, 1.0f);
+            }
             out->values(g * dim_per + 0) = pos;
             out->values(g * dim_per + 1) = act;
             out->values(g * dim_per + 2) = delta;

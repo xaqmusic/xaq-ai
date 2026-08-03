@@ -19,6 +19,7 @@
 // Module lifecycle authoring contract: per docs/primitives/_module_lifecycle.md.
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,22 @@ private:
     // action_topics.size() / group_size.  Default 1 preserves per-joint
     // output behaviour bit-identically.
     int                      group_size_         = 1;
+    // 2026-08-02 · IMPORT I4b — POSITION-CHANNEL-ONLY colored sensor noise.
+    // PM wires every legged controller through ColorUniformNoise(0.1) on every sensor.
+    // Injecting that at the BODY (picrawler_body.gd sensor_noise_sigma) lands on the raw
+    // joint angles, and because `delta` here is a DIFFERENCE of successive positions the
+    // same sigma then re-enters the velocity channel — the channel the HK gradient
+    // weights most heavily (44% of |C| mass).  Measured effect: transport falls
+    // monotonically with sigma while posture peaks at sigma=0.03, i.e. a
+    // stochastic-resonance curve whose optimum sits below PM's nominal value.
+    // Injecting HERE instead perturbs `pos` only and leaves `delta` computed from the
+    // clean positions, so the dose reaches one channel rather than two.
+    // sigma = 0 (default) is byte-identical.
+    double                   pos_noise_sigma_    = 0.0;
+    double                   pos_noise_tau_      = 8.0;   // correlation length in ticks; 1 = white
+    uint64_t                 pos_noise_seed_     = 0;
+    std::vector<float>       pos_noise_;                  // per-joint colored state
+    std::mt19937             pos_noise_rng_;
 
     // Working state — sized to n_joints() at setup.
     std::vector<float> last_position_;       // latest per-joint position seen
