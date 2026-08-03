@@ -14,10 +14,16 @@ in whole-run aggregates:
 So every metric is drawn per-seed (thin) with the seed-mean over it (thick).  If the thin
 lines fan out, the mean is not a result — that is the point of the chart.
 
+OUTPUT LOCATION: write these to docs/reports/run_summaries/ (NOT /tmp) using the
+convention YYYY-MM-DD_<slug>.html, and cite the file from the ledger entry it supports.
+The scratch logs are session-scoped and vanish; the chart is what survives to be re-read
+when a later result contradicts an earlier one.  See that directory's README for the
+naming and pruning convention.
+
 Usage:
   gaitreport.py <out.html> <label>=<log_glob> [<label>=<log_glob> ...]
 
-  gaitreport.py /tmp/r.html \
+  gaitreport.py docs/reports/run_summaries/2026-08-03_pure-hk_vs_deployed.html \
       "deployed=/tmp/xaq_seedavg/sa_the_picrawler*steplock_off_s*.log" \
       "pure-HK lr0.01=/tmp/.../sa_*stance__c025_s*.log" \
       "pure-HK lr0.10=/tmp/.../sa_*stance__c025__lr10_s*.log"

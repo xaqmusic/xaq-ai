@@ -708,7 +708,11 @@ represent (cross-leg). Same mechanism, wider matrix. Moves I7 from theoretically
 empirically demanded.
 
 **Shared-analysis tooling:** `scripts_tools/gaitreport.py` — self-contained HTML (no CDN, opens
-offline, emailable), per-seed thin lines under the seed-mean across 10 metrics. Built because two
+offline, emailable), per-seed thin lines under the seed-mean across 10 metrics. **Rendered
+summary for this entry:
+[`run_summaries/2026-08-03_pure-hk_vs_deployed_coordination.html`](run_summaries/2026-08-03_pure-hk_vs_deployed_coordination.html)**
+(see that directory's README for the naming/pruning convention — visualizations live in the repo,
+not in scratch, so they can be re-read when a later result contradicts an earlier one). Built because two
 of this campaign's largest errors were invisible in whole-run aggregates: behaviour that forms at
 ~10 k and decays after 20 k reads as a flat mean, and seed spread exceeding the between-arm
 difference reads as a confident number.
