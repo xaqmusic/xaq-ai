@@ -670,6 +670,51 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-03 — COORDINATION, MEASURED AT LAST: pure-HK OUT-COORDINATES THE DEPLOYED GAIT
+
+With the phase estimator ungated (below), inter-leg coherence and a new intra-leg
+`hip2_knee_agree` were measured on the same arms. **Both confirm operator UI observations that
+the metrics had been unable to see, and one reverses a conclusion.** Final values, n=4:
+
+| arm | **inter-leg coherence** | **hip2/knee agreement** | steps | tilt_sd | falls |
+|---|---|---|---|---|---|
+| deployed (all scaffolds) | 0.419 ± 0.089 | **0.510 ± 0.009 — CHANCE** | 50 | 0.065 | 0 |
+| pure-HK `ctrl_lr` 0.01 | **0.484 ± 0.077** | 0.465 ± 0.026 | 41 | 0.099 | 1.00 |
+| pure-HK `ctrl_lr` 0.10 | 0.408 ± 0.091 | **0.555 ± 0.015** | 163 | 0.279 | 1.75 |
+
+**1. The pure homeokinetic controller is MORE inter-leg coherent than the deployed gait**
+(0.484 vs 0.419) — with `coupling_gain = 0`, no `gait_phase` in play, and no scaffolds. The legs
+coordinate *through the body*, and they do it better than the Kuramoto term that was built to
+make them. **"Lobotomized" describes the FAST-LEARNING arm specifically, not HK.**
+
+**2. `ctrl_lr` trades inter-leg coordination for per-leg power.** 0.01 → 0.10 moves coherence
+**0.484 → 0.408** while intra-leg agreement moves **0.465 → 0.555** and `steps` 41 → 163.
+Mechanism: `C` has no cross-leg terms, so inter-leg coupling can only occur *mechanically,
+through the body*, which is slow. When each leg's own loop converges faster than the body can
+couple them, every leg settles into its own local solution first. **Exactly the operator's UI
+report** — diagonal symmetry at 0.01, powerful but uncoordinated legs at 0.10. ⇒ **`ctrl_lr` has
+NO single optimum: 0.10 for power, 0.01 for coordination. Map the trade rather than pick.**
+
+**3. The deployed config's hip2/knee agreement is at CHANCE (0.510 ± 0.009).** Its two
+foot-height joints act independently. Pure-HK at `ctrl_lr` 0.10 reaches **0.555 ± 0.015**
+(t ≈ 5.2). **The synergy is an HK product the scaffolds never produced** — and the Cruse v2 rule
+had to be explicitly hand-coded to drive both joints "because either alone is too weak"
+(measured `corr(foot_y, joint) ≈ 0.27` each). **HK discovered unaided what the scaffold had to be
+told.**
+
+⇒ **This is the empirical case for whole-body `C`.** HK coordinates joints that share a `C`
+(hip2+knee, demonstrated); the coordination it cannot do is precisely the coordination `C` cannot
+represent (cross-leg). Same mechanism, wider matrix. Moves I7 from theoretically motivated to
+empirically demanded.
+
+**Shared-analysis tooling:** `scripts_tools/gaitreport.py` — self-contained HTML (no CDN, opens
+offline, emailable), per-seed thin lines under the seed-mean across 10 metrics. Built because two
+of this campaign's largest errors were invisible in whole-run aggregates: behaviour that forms at
+~10 k and decays after 20 k reads as a flat mean, and seed spread exceeding the between-arm
+difference reads as a confident number.
+
+---
+
 ### ★★★ 2026-08-03 — AN INSTRUMENT MUST NOT DEPEND ON THE THING BEING ABLATED
 
 **Four instrument defects surfaced in two days, all the same shape**, and the fourth is the one
