@@ -670,6 +670,60 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-05 — COMMIT IS A PRECISION, AND THREE HAND-PICKED CROSSOVER POINTS LOST TO THE ORIGINAL
+
+**Operator, watching at 2× with commit ON vs OFF — the observation the metric could not make:**
+*"Without commit it takes longer to move forward at all, the pauses are longer, and during the
+pause the robot is simply SHAKING — it doesn't look like it's taking any steps. With stroke12 I
+see it at least TRYING to move forward during the pauses, with much better steps once it moves.
+So commit is definitely promoted but needs refinement."*
+
+⇒ **Commit's job is not preventing stalls — it is SUPPRESSING UNDIRECTED NOISE once directed
+motion exists.** With `progress_commit_gain = 0`, `explore_mult` pins at 1.00 and the body gets
+full exploration noise permanently: that is the shaking. `progress_commit_gain` moves from
+"marginal keeper" (+2.55→+2.62 net_z) to **promoted on behaviour**.
+
+#### Three crossover points, measured (arena, seed 6, `stroke12` base)
+
+| arm | stalled-seconds | disp/s | metres |
+|---|---|---|---|
+| **default 180/240/90** | **14 %** | 0.0734 | 29 |
+| commit OFF | 20 % | 0.0666 | 28 |
+| inverted (engage 0.5 s, release 6 s) | **22 %** | 0.0647 | 27 |
+
+**The hand-tuned original beat both directions**, including my own "the asymmetry is backwards"
+reasoning — which was plausible (bursts last 1–2 s while commit needs 3 s to engage and 4 s to
+ramp, so it arrives after the burst it protects) and **refuted**. The fourth mechanism this
+session to die on a cheap test.
+
+> #### ⇒ THE CONSTANT SHOULD BE SET BY THE MECHANISM THAT OUGHT TO SET IT
+> Commit answers *"how much do I trust my current motion vs keep searching"* — a **precision**.
+> Doctrine §2.3: precision is a CONTROLLED variable, and *"a designer picking the crossover
+> point is the anti-pattern"*. Three designers have now picked one and the original won, which
+> is precisely the signature of a knob that wants a mechanism rather than a better value.
+>
+> **`commit_prec_gain` (NEW, default 0 = byte-identical):** the commit window, ramp and release
+> scale with how well the body predicts **itself** — the forward-model residual's shortfall
+> against its **own running mean**, so it is scale-free (doctrine §6) and nothing is tuned to
+> `tle`'s magnitude. Predicting better than usual ⇒ shorter window, faster ramp, slower release.
+> **★ It can engage INSIDE a 1–2 s burst if that burst is genuinely predictable — which a fixed
+> 180-tick (3 s) window structurally cannot, and that timescale mismatch is the operator's whole
+> complaint.**
+>
+> n=1, seed 6: gain 2.5 → **stalled 11 %**, the lowest measured; disp/s and metres flat, so it
+> buys **continuity, not speed**. ⚠ **NON-MONOTONE — gain 1.0 was WORSE (19 %)**, so 2.5 may be
+> luck. A {1, 1.5, 2, 2.5, 3} sweep at n≥4 is owed before any claim. `IN_FLIGHT`, whitelisted
+> for UI observation first, because the 3-point stall metric has already been blind to the
+> shaking-vs-stepping distinction twice today.
+
+**Operator's architectural call, recorded because it is the right one:** commit's dynamics
+belong to the higher active-inference loop as a lever, not to a constant. The internal law above
+is half of that; the other half is a `commit_topic` socket mirroring `goal_bearing_topic`, so the
+EFE arbiter can command "commit hard, I know where I'm going" vs "release and search". Plan §1.1
+already says the arbiter's currency is *a motor objective, not a heading* — this is one.
+
+---
+
 ### ★★★ 2026-08-05 — `step_cv` NEVER MEANT WHAT WE READ IT TO MEAN (operator-driven)
 
 **Operator observation, from UI runs on seed 6 with the path trail on:** *"the robot will pause

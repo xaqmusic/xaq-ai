@@ -221,6 +221,18 @@ ParamSchema MotorEPM::params_schema() const {
         {"coupling_gain", ParamMutability::HotMutable,
          "Rung 3 inter-leg Kuramoto coupling strength. Couples the four legs' own emergent phases toward the gait_phase offsets (entrains the twitching legs to the active one, phase-locks all four). 0 = off (one-leg-spins regime); raise to watch the legs synchronize.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"commit_prec_gain", ParamMutability::HotMutable,
+         "COMMIT AS EARNED PRECISION. Scales the commit window/rise/decay by how well the body is predicting ITSELF right now, measured as the forward-model residual's shortfall against its own running mean (scale-free: nothing is tuned to tle's magnitude). Predicting better than usual => shorter qualifying window, faster ramp, slower release; worse => the reverse. 0 = the fixed schedule, byte-identical. WHY: commit is a precision, and three hand-picked crossover points have now been measured (180/240/90 = 14% stalled, off = 20%, inverted = 22%) -- the constant should be set by the mechanism that ought to set it. It can also engage INSIDE a 1-2 s burst, which a fixed 180-tick window cannot. Try 1.0-3.0.",
+         ParamValue{0.0}, ParamValue{-4.0}, ParamValue{4.0}},
+        {"commit_window_ticks", ParamMutability::HotMutable,
+         "Ticks of sustained forward progress before progress->commit engages at all. Default 180 (3 s). ⚠ MEASURED MISMATCH: bursts last 1-2 s, so at 180 commit arrives AFTER the burst it was meant to protect. Lower it to engage inside a burst.",
+         ParamValue{180.0}, ParamValue{1.0}, ParamValue{1200.0}},
+        {"commit_rise_ticks", ParamMutability::HotMutable,
+         "Ticks to ramp commit to full once engaged. Default 240 (~4 s).",
+         ParamValue{240.0}, ParamValue{1.0}, ParamValue{2400.0}},
+        {"commit_decay_ticks", ParamMutability::HotMutable,
+         "Ticks to release commit once progress falls. Default 90 (~1.5 s) -- tuned for 'release quickly, re-explore', which is right for escaping a stuck state and BACKWARDS for holding a found rhythm. RAISE it to stop abandoning a gait on the first faltering step.",
+         ParamValue{90.0}, ParamValue{1.0}, ParamValue{2400.0}},
         {"heading_trim_rate", ParamMutability::HotMutable,
          "THE MISSING INTEGRAL TERM on heading. The controller is P+D only, so a persistent yaw disturbance leaves a NONZERO steady-state steer and one side's stroke sits permanently near its clamp (measured: right legs request 2.10 vs a +-1 limit, 77% clip duty, against 0.70 on the left) -- which is why steering authority is direction-dependent. This learns that DC effort and hands it back. Targets FUNCTIONAL symmetry (zero net yaw), NOT amplitude symmetry, which is where the ~35-lever symmetry family died. 0 = off, byte-identical. Try 1e-4.",
          ParamValue{0.0}, ParamValue{-0.01}, ParamValue{0.01}},
@@ -552,6 +564,10 @@ ParamMap MotorEPM::current_params() const {
     m["hip2_tuck_target"] = hip2_tuck_target_;
     m["motor_gain"]       = motor_gain_;
     m["coupling_gain"]    = coupling_gain_;
+    m["commit_prec_gain"] = commit_prec_gain_;
+    m["commit_window_ticks"] = commit_window_ticks_;
+    m["commit_rise_ticks"] = commit_rise_ticks_;
+    m["commit_decay_ticks"] = commit_decay_ticks_;
     m["heading_trim_rate"] = heading_trim_rate_;
     m["heading_trim_leak"] = heading_trim_leak_;
     m["c_pair_init"] = c_pair_init_;
@@ -682,6 +698,10 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "hip2_tuck_target", [&](auto const& v){ hip2_tuck_target_ = get_double(v, "hip2_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
     apply_param(params, "coupling_gain", [&](auto const& v){ coupling_gain_ = get_double(v, "coupling_gain"); });
+    apply_param(params, "commit_prec_gain", [&](auto const& v){ commit_prec_gain_ = get_double(v, "commit_prec_gain"); });
+    apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
+    apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
+    apply_param(params, "commit_decay_ticks", [&](auto const& v){ commit_decay_ticks_ = get_double(v, "commit_decay_ticks"); });
     apply_param(params, "heading_trim_rate", [&](auto const& v){ heading_trim_rate_ = get_double(v, "heading_trim_rate"); });
     apply_param(params, "heading_trim_leak", [&](auto const& v){ heading_trim_leak_ = get_double(v, "heading_trim_leak"); });
     apply_param(params, "c_pair_init", [&](auto const& v){ c_pair_init_ = get_double(v, "c_pair_init"); });
@@ -2401,15 +2421,47 @@ void MotorEPM::tick(uint64_t tick_id) {
     // forward progress ramps commit_boost_ up; it damps exploration + adds thrust below.
     // 0 = off → commit_boost_ pinned 0 → byte-identical.
     if (progress_commit_gain_ > 0.0) {
+        // ---- 2026-08-05 · COMMIT AS EARNED PRECISION, not a schedule -------------------
+        // Commit decides "how much do I trust my current motion vs keep searching", which
+        // is a PRECISION, and doctrine §2.3 says precision is a CONTROLLED variable --
+        // "a designer picking the crossover point is the anti-pattern".  Three crossover
+        // points have now been picked by hand and MEASURED: the original 180/240/90
+        // (14% stalled), commit off (20%), and an inverted fast-engage/slow-release
+        // (22%).  The hand-tuned original won, which is exactly the situation where the
+        // constant should be replaced by the mechanism that ought to set it.
+        //
+        // The agent's own forward-model residual is that mechanism: commit is EARNED when
+        // the body is predicting itself better than it usually does, and released when it
+        // is not.  Crucially this can fire INSIDE a 1-2 s burst if the burst is genuinely
+        // predictable -- which no fixed 180-tick (3 s) window can ever do, and the
+        // mismatch between those timescales is the operator's whole complaint.
+        //
+        // SCALE-FREE by construction (doctrine §6, "whiten by its own running magnitude"):
+        // z is the residual's shortfall against ITS OWN running mean, so nothing here is
+        // tuned to tle's absolute size.  cp>1 = predicting better than usual.
+        float cp = 1.0f;
+        if (commit_prec_gain_ != 0.0) {
+            const float tle = tle_ema_mean();
+            if (tle_run_ema_ <= 0.0f) tle_run_ema_ = tle;      // seed, no cold-start spike
+            tle_run_ema_ = (1.0f - kCommitPrecAlpha) * tle_run_ema_ + kCommitPrecAlpha * tle;
+            const float z = (tle_run_ema_ - tle) / (tle_run_ema_ + 1e-6f);
+            cp = std::clamp(std::exp(float(commit_prec_gain_) * z), 0.2f, 5.0f);
+        }
+        commit_prec_diag_ = cp;
+        // Predicting well shortens the qualifying window, speeds the ramp and slows the
+        // release; predicting badly does the reverse.  cp == 1 => byte-identical.
+        const int   eff_window = std::max(1, int(commit_window_ticks_ / cp));
+        const float eff_rise   = (1.0f / float(commit_rise_ticks_))  * cp;
+        const float eff_decay  = (1.0f / float(commit_decay_ticks_)) / cp;
         if (fwd_progress_ema_ > kCommitVelThresh) {
-            if (commit_ticks_ < kCommitWindowTicks * 20) ++commit_ticks_;
+            if (commit_ticks_ < eff_window * 20) ++commit_ticks_;
         } else {
             commit_ticks_ = 0;
         }
-        if (commit_ticks_ >= kCommitWindowTicks)
-            commit_boost_ = std::min(1.0f, commit_boost_ + kCommitBoostRise);
+        if (commit_ticks_ >= eff_window)
+            commit_boost_ = std::min(1.0f, commit_boost_ + eff_rise);
         else
-            commit_boost_ = std::max(0.0f, commit_boost_ - kCommitBoostDecay);
+            commit_boost_ = std::max(0.0f, commit_boost_ - eff_decay);
     } else {
         commit_boost_ = 0.0f;
     }
@@ -3751,6 +3803,7 @@ nlohmann::json MotorEPM::snapshot_state() const {
     // gain sweep means the lever never fired ⇒ a measurement outcome, not a verdict.
     // CONSUMER CHECK for the nav setpoint: goal_bearing_msgs == 0 with a topic configured
     // means the publisher never fired and the PD is silently still holding the spawn bearing.
+    mod["commit_prec"] = double(commit_prec_diag_);   // consumer check: 1.0 = lever off
     mod["heading_trim"] = double(heading_trim_);   // consumer check for the I term
     mod["goal_bearing_msgs"] = double(gb_msgs_);
     mod["goal_bearing_err"]  = gb_seen_ ? double(std::atan2(gb_x_, gb_y_) * 0.318309886f) : 0.0;

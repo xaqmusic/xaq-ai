@@ -1151,6 +1151,28 @@ private:
     static constexpr float kStuckBoostDecay = 1.0f/120.0f; // decay boost over ~2 s once moving (faster off = self-terminating)
     // progress→COMMIT (lever C): the flow threshold is well above the stall threshold so
     // commit and stuck are disjoint (a dead-band between them = neither fires).
+    // ---- 2026-08-05 · commit TIMING is now tunable, and it is mismatched -------------
+    // Operator, watching at 2x with commit ON vs OFF: with commit the robot "at least tries
+    // to move forward during the pauses, with much better steps once it moves"; without it
+    // the robot "is simply shaking -- it doesn't look like it's taking any steps at all".
+    // So commit's job is not preventing stalls (removing it made stalling WORSE, 14%->20%)
+    // -- it is SUPPRESSING UNDIRECTED NOISE once directed motion exists.
+    //
+    // But the timescales do not match the behaviour.  Measured bursts last 1-2 s, while
+    // commit needs 180 ticks (3 s) of sustained progress before it engages AT ALL and then
+    // ~4 s to ramp -- so it arrives after the burst it was meant to protect is over -- and
+    // releases in 1.5 s, abandoning on the first faltering step.  The asymmetry is
+    // backwards for sustaining a gait: it was tuned to "release quickly, re-explore",
+    // which is right for escaping a stuck state and wrong for holding a found rhythm.
+    // Exposed so the fix can be MEASURED rather than argued.  Defaults are the historical
+    // constants, so unset = byte-identical.
+    double commit_prec_gain_ = 0.0;                // 0 = fixed schedule (byte-identical)
+    float  tle_run_ema_ = 0.0f;                    // the residual's own running scale
+    float  commit_prec_diag_ = 1.0f;
+    static constexpr float kCommitPrecAlpha = 0.002f;   // ~500-tick window on that scale
+    double commit_window_ticks_ = 180.0;
+    double commit_rise_ticks_   = 240.0;
+    double commit_decay_ticks_  = 90.0;
     static constexpr float kCommitVelThresh = 0.030f; // fwd_v EMA above this ≈ genuinely moving (embed cruises ~0.04)
     static constexpr int   kCommitWindowTicks = 180;  // sustained flow (3 s) before commit engages (faster than stuck: seize the push)
     static constexpr float kCommitBoostRise = 1.0f/240.0f; // ramp commit to full over ~4 s of sustained progress
