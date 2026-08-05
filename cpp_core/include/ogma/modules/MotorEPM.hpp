@@ -1116,6 +1116,7 @@ private:
         float               sat_ema     = 0.0f;   // mean tanh² of operating point (saturation telemetry)
         float               knee_ema    = 0.0f;   // slow mean of knee pos (phase reference)
         float               phase       = 0.0f;   // estimated oscillator phase (rad)
+        float               phase_prev  = 0.0f;   // previous tick, for the advance/retrograde metric
         float               amp_ema     = 0.0f;   // slow estimate of oscillation amplitude
         float               amp_gain    = 1.0f;   // homeostat output gain (regulated toward amp_target)
         float               hip1_dc     = 0.0f;   // slow DC mean of hip1 pos (propulsive-credit baseline)
@@ -1221,6 +1222,30 @@ private:
     float  rhythm_spread_ema_ = 0.0f;
     float  rhythm_dev_diag_   = 0.0f;
     double intent_rhythm_gain_ = 0.0;               // 0 = off, byte-identical
+    // ── fwd_v RESONANCE (operator, 2026-08-05: "find the fwd_v resonance and encourage it
+    // as a positive feedback loop ... fwd_v is the only reliable metric so far").
+    // An adaptive-frequency Hopf oscillator (Righetti/Ijspeert) entrained BY forward
+    // velocity.  It does not impose a rhythm -- it LEARNS the frequency the body already
+    // propels itself at, which is the one quantity we trust.  Its input is normalised by
+    // its own running spread, so nothing here is tuned to fwd_v's magnitude (doctrine §5).
+    static constexpr float kResGamma = 0.02f;    // amplitude relaxation toward the unit circle
+    static constexpr float kResEps   = 0.02f;    // entrainment strength (dimensionless input)
+    static constexpr float kResWAlpha = 0.0005f; // frequency adaptation (slow: ~2000 ticks)
+    float  res_x_ = 1.0f, res_y_ = 0.0f;
+    float  res_w_ = 0.0f;                        // rad/tick, seeded from the legs' own rate
+    float  res_amp_ema_ = 0.0f;
+    float  res_in_spread_ = 0.0f;
+    float  res_lock_cos_ = 0.0f, res_lock_sin_ = 0.0f;   // PLV(resonator, leg phase)
+    double fwd_resonance_gain_ = 0.0;            // 0 = off, byte-identical
+
+    // ── COUPLING AS A LIVE METRIC (operator asked to "tool up ... coupling as a metric in
+    // the running graph").  R is the Kuramoto order parameter over the gait-offset-corrected
+    // leg phases: 1 = locked, 0 = incoherent.  phase_retro is the fraction of ticks the
+    // phase runs BACKWARDS -- a real oscillator advances monotonically, so a high value
+    // means L.phase is jitter, not rhythm, and the coupling is chasing noise.
+    float  couple_R_diag_ = 0.0f;
+    float  phase_freq_diag_ = 0.0f;              // mean rad/tick advance
+    float  phase_retro_diag_ = 0.0f;
     float  ev_spread_ema_ = 0.0f;                  // running |forward| error scale (see .cpp)
     float  ew_spread_ema_ = 0.0f;                  // running |yaw| error scale -- 6.8x ev raw
     // ⚠ play never abstains: explore_mult currently reaches EXACTLY 0.000, which is what

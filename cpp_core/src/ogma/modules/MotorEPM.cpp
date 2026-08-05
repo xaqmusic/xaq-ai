@@ -227,6 +227,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"explore_floor", ParamMutability::HotMutable,
          "Lower bound on explore_mult, so commit ATTENUATES search instead of abolishing it. explore_mult currently reaches exactly 0.000 under full commit, which is the frozen-but-confident state the operator reads as indecision. 'Play never abstains' -- fix exploration's output, never its right to win. 0 = legacy. Try 0.15-0.3.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"fwd_resonance_gain", ParamMutability::HotMutable,
+         "fwd_v RESONANCE FEEDBACK. An adaptive-frequency Hopf oscillator is entrained BY forward velocity -- it LEARNS the frequency the body already propels itself at (fwd_v is the one signal we trust; foot contacts measured as a poor proxy for a step, and the knee-derived L.phase is what the coupling currently rides). This gain then couples the leg oscillators TO that measured rhythm, closing the loop: motion -> fwd_v oscillation -> resonator locks -> legs entrain -> the stroke lands where propulsion actually happens -> more motion. Nothing is injected: the reference is the body's own velocity, so it reinforces the rhythm the body FOUND. 0 = off, byte-identical. Watch couple_R, res_freq, res_lock and phase_retro in the graph. Try 0.2-1.0.",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"intent_rhythm_gain", ParamMutability::HotMutable,
          "STRIDE-PROFILE PREDICTION. Adds 'did this stride look like my strides?' to the intent error. A constant v* is a target a legged body CANNOT hold -- it advances in pulses, so a level-seeking error oscillates forever and commit chases it; measured pulse_cv 0.583 with a p90/p50 gap tail of 2.10, IDENTICAL across every commit arm, which is why they all tie. The body learns its own forward-velocity waveform indexed by gait phase (16 bins, LEARNED from what it does -- no rhythm is injected, doctrine §7) and the error becomes this stride's deviation from it. Descending that means 'make this stride like my strides' = consistent forward pulses, with the waveform's SHAPE still chosen by the body. 0 = off, byte-identical. Try 0.5-2.0.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{4.0}},
@@ -581,6 +584,7 @@ ParamMap MotorEPM::current_params() const {
     m["commit_prec_gain"] = commit_prec_gain_;
     m["intent_yaw_gain"] = intent_yaw_gain_;
     m["intent_rhythm_gain"] = intent_rhythm_gain_;
+    m["fwd_resonance_gain"] = fwd_resonance_gain_;
     m["commit_window_ticks"] = commit_window_ticks_;
     m["commit_rise_ticks"] = commit_rise_ticks_;
     m["commit_decay_ticks"] = commit_decay_ticks_;
@@ -719,6 +723,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "commit_prec_gain", [&](auto const& v){ commit_prec_gain_ = get_double(v, "commit_prec_gain"); });
     apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
     apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
+    apply_param(params, "fwd_resonance_gain", [&](auto const& v){ fwd_resonance_gain_ = get_double(v, "fwd_resonance_gain"); });
     apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
     apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
     apply_param(params, "commit_decay_ticks", [&](auto const& v){ commit_decay_ticks_ = get_double(v, "commit_decay_ticks"); });
@@ -2381,7 +2386,24 @@ void MotorEPM::tick(uint64_t tick_id) {
             float kd = L.x[3 * pj + 2];           // phase-source joint delta (velocity proxy)
             L.knee_ema = (1.0f - kKneeEmaAlpha) * L.knee_ema + kKneeEmaAlpha * kp;
             float vx = kp - L.knee_ema, vy = kd * kPhaseVelScale;
-            L.phase = std::atan2(vy, vx);
+            const float phase_new = std::atan2(vy, vx);
+            // COUPLING HEALTH (operator asked for coupling as a live metric).  A real
+            // oscillator advances monotonically; measure how much of the time this one
+            // runs BACKWARDS.  A high retrograde fraction means L.phase is jitter rather
+            // than rhythm, and the Kuramoto term is chasing noise -- which is the
+            // operator's "micro footfalls tripping the coupling too rapidly", located at
+            // the knee-derived phase rather than at the contacts.
+            {
+                float d = phase_new - L.phase_prev;
+                while (d >  float(M_PI)) d -= 2.0f * float(M_PI);
+                while (d < -float(M_PI)) d += 2.0f * float(M_PI);
+                phase_freq_diag_  = (1.0f - kCommitPrecAlpha) * phase_freq_diag_
+                                  + kCommitPrecAlpha * d;
+                phase_retro_diag_ = (1.0f - kCommitPrecAlpha) * phase_retro_diag_
+                                  + kCommitPrecAlpha * (d < 0.0f ? 1.0f : 0.0f);
+                L.phase_prev = phase_new;
+            }
+            L.phase = phase_new;
             // amplitude homeostat: phase-vector magnitude = oscillation amplitude.
             // Slow integral regulator drives amp_gain so amp_ema → amp_target.
             //
@@ -2437,6 +2459,36 @@ void MotorEPM::tick(uint64_t tick_id) {
     if (stuck_explore_gain_ > 0.0 || progress_commit_gain_ > 0.0 || height_homeo_gain_ > 0.0) {
         fwd_progress_ema_ = (1.0f - kFwdProgressAlpha) * fwd_progress_ema_
                           + kFwdProgressAlpha * fwd_v_;
+    }
+    // ── fwd_v RESONANCE.  An adaptive-frequency Hopf oscillator entrained BY forward
+    // velocity: it does not impose a rhythm, it LEARNS the frequency at which the body
+    // already propels itself.  That matters because fwd_v is the one signal the operator
+    // trusts -- foot contacts were measured to be a poor proxy for a step, and the
+    // knee-derived L.phase is what the coupling currently rides.
+    //   Input is centred (fwd_v minus its own slow mean) and divided by its own running
+    // spread, so the entrainment strength is dimensionless and nothing is tuned to fwd_v's
+    // magnitude.  Frequency adapts on a ~2000-tick timescale, far slower than a stride, so
+    // it tracks the body's rhythm rather than individual strides.
+    {
+        const float fin = fwd_v_ - fwd_progress_ema_;
+        if (res_in_spread_ <= 0.0f) res_in_spread_ = std::fabs(fin);
+        res_in_spread_ = (1.0f - kCommitPrecAlpha) * res_in_spread_
+                       + kCommitPrecAlpha * std::fabs(fin);
+        const float F = fin / (res_in_spread_ + 1e-6f);
+        // Seed the frequency from the legs' OWN measured phase rate rather than a chosen
+        // constant, so the oscillator starts in the right basin (doctrine §5).
+        if (res_w_ <= 0.0f && phase_freq_diag_ > 1e-4f) res_w_ = phase_freq_diag_;
+        if (res_w_ > 0.0f) {
+            const float r = std::sqrt(res_x_ * res_x_ + res_y_ * res_y_);
+            const float dx = kResGamma * (1.0f - r * r) * res_x_ - res_w_ * res_y_ + kResEps * F;
+            const float dy = kResGamma * (1.0f - r * r) * res_y_ + res_w_ * res_x_;
+            res_x_ += dx; res_y_ += dy;
+            // Righetti/Ijspeert frequency adaptation: the input pulls omega toward the
+            // driving frequency.  This is the "find the resonance" step.
+            res_w_ = std::clamp(res_w_ - kResWAlpha * F * res_y_ / std::max(r, 1e-3f),
+                                0.005f, 1.2f);
+            res_amp_ema_ = (1.0f - kCommitPrecAlpha) * res_amp_ema_ + kCommitPrecAlpha * r;
+        }
     }
     if (stuck_explore_gain_ > 0.0) {
         if (fwd_progress_ema_ < kStuckVelThresh) {
@@ -3190,6 +3242,17 @@ void MotorEPM::tick(uint64_t tick_id) {
         // c_i = K · mean_{j≠i} sin( (φ_j − φ_i) − (P_j − P_i) ) pulls each leg's
         // phase toward the gait offset relative to every other leg — entrains the
         // twitchers and phase-locks all four.
+        if (leg == 0 && n_legs_ > 1 && int(gait_phase_.size()) == n_legs_) {
+            // Kuramoto order parameter over gait-offset-corrected phases: 1 = phase-locked,
+            // 0 = incoherent.  Report-only.
+            float sc = 0.0f, ss = 0.0f; int nn = 0;
+            for (int j = 0; j < n_legs_; ++j) {
+                if (!legs_[j].initialized) continue;
+                const float a = legs_[j].phase - float(gait_phase_[j]);
+                sc += std::cos(a); ss += std::sin(a); ++nn;
+            }
+            couple_R_diag_ = nn ? std::sqrt(sc * sc + ss * ss) / float(nn) : 0.0f;
+        }
         if (!warmup && coupling_eff_ > 0.0f && n_legs_ > 1 && int(gait_phase_.size()) == n_legs_) {
             // couple_prec_gain (k) turns the UNIFORM neighbour mean into a PRECISION-WEIGHTED
             // one — see the header note.  k must be tested against `!= 0.0`, never `> 0.0`:
@@ -3225,6 +3288,26 @@ void MotorEPM::tick(uint64_t tick_id) {
             const float denom = prec_on ? std::max(1e-6f, wsum) : float(n_legs_ - 1);
             // Panic decouples the legs (break out of the stuck phase-lock).
             y[m - 1] += (1.0f - pe) * coupling_eff_ * c / denom;
+            // ── RESONANCE FEEDBACK (fwd_resonance_gain).  Couple the leg oscillator to the
+            // frequency the BODY ACTUALLY PROPELS AT, closing the loop the operator asked
+            // for: motion -> fwd_v oscillation -> the resonator locks -> the legs entrain to
+            // it -> the stroke lands where propulsion actually happens -> more motion.  The
+            // reference is measured from the body's own forward velocity, not injected, so
+            // this reinforces whatever rhythm the body has FOUND rather than dictating one.
+            // 0 = off, byte-identical.
+            if (fwd_resonance_gain_ != 0.0 && res_w_ > 0.0f && res_amp_ema_ > 0.1f) {
+                const float res_phase = std::atan2(res_y_, res_x_);
+                float dres = (res_phase + float(gait_phase_[leg])) - L.phase;
+                while (dres >  float(M_PI)) dres -= 2.0f * float(M_PI);
+                while (dres < -float(M_PI)) dres += 2.0f * float(M_PI);
+                y[m - 1] += (1.0f - pe) * float(fwd_resonance_gain_) * std::sin(dres);
+                if (leg == 0) {   // lock quality, report-only
+                    res_lock_cos_ = (1.0f - kCommitPrecAlpha) * res_lock_cos_
+                                  + kCommitPrecAlpha * std::cos(dres);
+                    res_lock_sin_ = (1.0f - kCommitPrecAlpha) * res_lock_sin_
+                                  + kCommitPrecAlpha * std::sin(dres);
+                }
+            }
         }
         // Directional propulsion drive on hip1 (joint 0), phase-locked to the
         // leg's step phase.  stroke_signs sets the per-leg push direction
@@ -3959,6 +4042,12 @@ nlohmann::json MotorEPM::snapshot_state() const {
     // CONSUMER CHECK for the nav setpoint: goal_bearing_msgs == 0 with a topic configured
     // means the publisher never fired and the PD is silently still holding the spawn bearing.
     mod["fwd_progress_ema"] = double(fwd_progress_ema_);
+    mod["couple_R"]    = double(couple_R_diag_);
+    mod["phase_retro"] = double(phase_retro_diag_);
+    mod["phase_freq"]  = double(phase_freq_diag_);
+    mod["res_period"]  = res_w_ > 1e-4f ? (2.0 * M_PI / double(res_w_)) : -1.0;
+    mod["res_amp"]     = double(res_amp_ema_);
+    mod["res_lock"]    = double(std::sqrt(res_lock_cos_ * res_lock_cos_ + res_lock_sin_ * res_lock_sin_));
     mod["intent_err"] = intent_seen_ ? double(intent_err_norm()) : -1.0;
     mod["commit_prec"] = double(commit_prec_diag_);   // consumer check: 1.0 = lever off
     mod["intent_msgs"] = double(intent_msgs_);   // 0 with intent_topic set = publisher never fired
@@ -4366,6 +4455,14 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["intent_err_fwd"]      = intent_seen_ ? std::fabs(fwd_progress_ema_ - intent_v_) : -1.0f;
     j["intent_err_yaw"]      = intent_seen_ ? std::fabs(yaw_rate_ema_ - intent_w_)     : -1.0f;
     j["intent_err_scale"]    = err_run_ema_;
+    j["couple_R"]            = couple_R_diag_;      // 1 = legs phase-locked, 0 = incoherent
+    j["phase_freq"]          = phase_freq_diag_;    // rad/tick advance of L.phase
+    j["phase_retro"]         = phase_retro_diag_;   // fraction of ticks running BACKWARDS
+    j["res_freq"]            = res_w_;              // learned fwd_v frequency, rad/tick
+    j["res_period"]          = res_w_ > 1e-4f ? (2.0 * M_PI / double(res_w_)) : -1.0;
+    j["res_amp"]             = res_amp_ema_;
+    j["res_lock"]            = std::sqrt(res_lock_cos_ * res_lock_cos_
+                                       + res_lock_sin_ * res_lock_sin_);
     j["rhythm_dev"]          = rhythm_dev_diag_;
     j["rhythm_spread"]       = rhythm_spread_ema_;
     j["commit_prec"]         = commit_prec_diag_;
