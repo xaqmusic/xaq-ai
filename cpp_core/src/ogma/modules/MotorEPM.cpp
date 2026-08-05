@@ -227,6 +227,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"explore_floor", ParamMutability::HotMutable,
          "Lower bound on explore_mult, so commit ATTENUATES search instead of abolishing it. explore_mult currently reaches exactly 0.000 under full commit, which is the frozen-but-confident state the operator reads as indecision. 'Play never abstains' -- fix exploration's output, never its right to win. 0 = legacy. Try 0.15-0.3.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"intent_rhythm_gain", ParamMutability::HotMutable,
+         "STRIDE-PROFILE PREDICTION. Adds 'did this stride look like my strides?' to the intent error. A constant v* is a target a legged body CANNOT hold -- it advances in pulses, so a level-seeking error oscillates forever and commit chases it; measured pulse_cv 0.583 with a p90/p50 gap tail of 2.10, IDENTICAL across every commit arm, which is why they all tie. The body learns its own forward-velocity waveform indexed by gait phase (16 bins, LEARNED from what it does -- no rhythm is injected, doctrine §7) and the error becomes this stride's deviation from it. Descending that means 'make this stride like my strides' = consistent forward pulses, with the waveform's SHAPE still chosen by the body. 0 = off, byte-identical. Try 0.5-2.0.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{4.0}},
         {"intent_yaw_gain", ParamMutability::HotMutable,
          "Weight on the YAW term of the intent error. 1.0 = the original (v*, w*) 2-vector. 0.0 = PROGRESS OVER GROUND ONLY. Operator, 2026-08-05: \"chassis yaw should not be part of this function since the chassis oscillates constantly while stepping; if heading needs adjusting that must come from some other mechanism that affects the bilateral stride symmetry, not the direction the chassis happens to be facing. The progress over ground relative to the CoG is all that matters.\" That is a separation-of-concerns argument and the other mechanism ALREADY EXISTS: goal_bearing_topic -> the heading PD -> steer_eff -> the bilateral stroke-amplitude differential. A quadruped yaws every stride BY CONSTRUCTION, so penalising instantaneous chassis yaw asks the body to stop doing the thing that moves it -- gait mechanics leaking into a goal-achievement scalar.",
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{4.0}},
@@ -577,6 +580,7 @@ ParamMap MotorEPM::current_params() const {
     m["explore_floor"] = explore_floor_;
     m["commit_prec_gain"] = commit_prec_gain_;
     m["intent_yaw_gain"] = intent_yaw_gain_;
+    m["intent_rhythm_gain"] = intent_rhythm_gain_;
     m["commit_window_ticks"] = commit_window_ticks_;
     m["commit_rise_ticks"] = commit_rise_ticks_;
     m["commit_decay_ticks"] = commit_decay_ticks_;
@@ -714,6 +718,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "explore_floor", [&](auto const& v){ explore_floor_ = get_double(v, "explore_floor"); });
     apply_param(params, "commit_prec_gain", [&](auto const& v){ commit_prec_gain_ = get_double(v, "commit_prec_gain"); });
     apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
+    apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
     apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
     apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
     apply_param(params, "commit_decay_ticks", [&](auto const& v){ commit_decay_ticks_ = get_double(v, "commit_decay_ticks"); });
@@ -2543,7 +2548,31 @@ void MotorEPM::tick(uint64_t tick_id) {
                 //     each normalized to mean |z| = 1 floors near 1.4 and spikes to 3.7,
                 //     compressing the useful region into the bottom third of the axis.
                 //     Scale still comes entirely from the running spreads; nothing added.
-                const float e  = std::log1p(zv * zv + zw * zw);
+                // (3) DID THIS STRIDE LOOK LIKE MY STRIDES?  The body's own forward-velocity
+                //     waveform, indexed by gait phase and learned online.  Nothing about the
+                //     waveform is specified here -- only that it should REPEAT.
+                float zr = 0.0f;
+                if (intent_rhythm_gain_ > 0.0 && !legs_.empty()) {
+                    auto const& L0 = legs_[0];
+                    const float ph = (stroke_phase_src_ > 0.0 && L0.step_locked)
+                                   ? L0.step_phase : L0.phase;
+                    float u = std::fmod(ph, 2.0f * float(M_PI));
+                    if (u < 0.0f) u += 2.0f * float(M_PI);
+                    const int b = std::min(kFwdProfileBins - 1,
+                        int(u / (2.0f * float(M_PI)) * kFwdProfileBins));
+                    const float dev = fwd_v_ - fwd_profile_[b];
+                    // Learn the profile with a per-bin count-annealed rate (doctrine §5:
+                    // count-annealed, not a chosen constant) so early ticks move it fast and
+                    // a settled profile stops chasing single strides.
+                    const uint32_t n = ++fwd_profile_n_[b];
+                    fwd_profile_[b] += dev / float(n < 400u ? n : 400u);
+                    if (rhythm_spread_ema_ <= 0.0f) rhythm_spread_ema_ = std::fabs(dev);
+                    rhythm_spread_ema_ = (1.0f - kCommitPrecAlpha) * rhythm_spread_ema_
+                                       + kCommitPrecAlpha * std::fabs(dev);
+                    zr = float(intent_rhythm_gain_) * dev / (rhythm_spread_ema_ + 1e-6f);
+                    rhythm_dev_diag_ = std::fabs(dev);
+                }
+                const float e  = std::log1p(zv * zv + zw * zw + zr * zr);
                 if (err_run_ema_ <= 0.0f) err_run_ema_ = e;    // seed, no cold-start spike
                 err_run_ema_ = (1.0f - kCommitPrecAlpha) * err_run_ema_ + kCommitPrecAlpha * e;
                 // z > 0 = achieving the ASSIGNED task better than its own running average.
@@ -4337,6 +4366,8 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     j["intent_err_fwd"]      = intent_seen_ ? std::fabs(fwd_progress_ema_ - intent_v_) : -1.0f;
     j["intent_err_yaw"]      = intent_seen_ ? std::fabs(yaw_rate_ema_ - intent_w_)     : -1.0f;
     j["intent_err_scale"]    = err_run_ema_;
+    j["rhythm_dev"]          = rhythm_dev_diag_;
+    j["rhythm_spread"]       = rhythm_spread_ema_;
     j["commit_prec"]         = commit_prec_diag_;
     j["commit_boost"]        = commit_boost_;
     j["explore_mult"]        = explore_mult_diag_;
