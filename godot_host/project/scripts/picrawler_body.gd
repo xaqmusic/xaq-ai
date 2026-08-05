@@ -717,6 +717,10 @@ var _burst_probe: bool = false
 var _bp_last_lifts: int = 0
 var _bp_last_lift_tick: int = 0
 const _BURST_GAP_TICKS: int = 40      # silence that qualifies as a real pause (~0.67 s)
+# Time-scale ladder for [,] slower / [.] faster / [/] reset.  Below 1.0 is exact; above 1.0
+# saturates against max_physics_steps_per_frame (see the key handler).
+const _TIME_SCALES: Array = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+var _time_scale_v: float = 1.0
 # ---- 2026-08-05 · EXPLICIT TICK WINDOW (operator) --------------------------------------
 # "the step pause cycle is about eight hundred ticks long... capture tick 2000-3000 in
 # _stroke12; for the first 1k ticks the robot is still learning to walk properly."
@@ -4760,6 +4764,36 @@ func _input(event: InputEvent) -> void:
 			if p != null and p is Control:
 				(p as Control).visible = not _panels_hidden
 		print("PicrawlerBody: [T] panels_hidden = %s" % _panels_hidden)
+	elif key == KEY_COMMA or key == KEY_PERIOD or key == KEY_SLASH:
+		# ---- 2026-08-05 · TIME SCALE (slow-motion + turbo) ------------------------------
+		# Engine.time_scale changes how many FIXED-timestep physics ticks advance per wall
+		# second — never what happens inside a tick.  So the robot walks the identical
+		# trajectory and a UI observation stays comparable to a headless run.  This is the
+		# whole reason to use time_scale and NOT Engine.physics_ticks_per_second, which
+		# would change the integration rate and hand you a different body (the same class
+		# of mistake as the launcher's g6dof default).
+		#
+		# ⚠ THE TWO DIRECTIONS ARE NOT EQUALLY SAFE, and the asymmetry is worth knowing:
+		#   SLOW (<1) is exact.  Fewer ticks per frame, nothing to drop.
+		#   TURBO (>1) needs MORE physics steps per rendered frame, and Godot caps that at
+		#     max_physics_steps_per_frame to avoid a spiral of death.  Past the cap the
+		#     engine does NOT corrupt physics — it simply stops going faster and the sim
+		#     falls behind wall clock.  So turbo has a ceiling, and the honest way to run
+		#     the sim "as fast as the system allows" is still headless (what seedavg does).
+		#   We raise the cap while in turbo so the knob does something before it saturates.
+		var idx: int = _TIME_SCALES.find(_time_scale_v)
+		if idx < 0: idx = _TIME_SCALES.find(1.0)
+		if key == KEY_SLASH: idx = _TIME_SCALES.find(1.0)
+		elif key == KEY_COMMA: idx = maxi(0, idx - 1)
+		else: idx = mini(_TIME_SCALES.size() - 1, idx + 1)
+		_time_scale_v = _TIME_SCALES[idx]
+		Engine.time_scale = _time_scale_v
+		Engine.max_physics_steps_per_frame = 8 if _time_scale_v <= 1.0 else int(clampf(_time_scale_v * 8.0, 8.0, 128.0))
+		print("PicrawlerBody: time_scale = %.2fx (%s)" % [_time_scale_v,
+			"real time" if is_equal_approx(_time_scale_v, 1.0)
+			else ("SLOW-MO — exact, nothing dropped" if _time_scale_v < 1.0
+				  else "TURBO — capped by max_physics_steps_per_frame")])
+		_ui_notify("time %.2fx" % _time_scale_v)
 	elif key == KEY_J:
 		# 2026-08-04 — flip chassis collision live.  DIAGNOSTIC: every number in the ledger
 		# was measured with this OFF, so an A/B taken across a mid-run flip is not comparable
