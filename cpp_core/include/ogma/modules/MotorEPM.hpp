@@ -98,6 +98,7 @@ private:
     void handle_cpg_phase(MessagePtr payload);
     void handle_tilt(MessagePtr payload);
     void handle_imu(MessagePtr payload);
+    void handle_intent(MessagePtr payload);
     void handle_goal_bearing(MessagePtr payload);
     void handle_nav(MessagePtr payload);
     void handle_height(MessagePtr payload);
@@ -1166,8 +1167,45 @@ private:
     // which is right for escaping a stuck state and wrong for holding a found rhythm.
     // Exposed so the fix can be MEASURED rather than argued.  Defaults are the historical
     // constants, so unset = byte-identical.
+    // ---- 2026-08-05 · INTENT-RELATIVE CONFIDENCE (operator's reframe) ----------------
+    // Everything that went wrong with commit_prec came from measuring an ABSOLUTE property
+    // ("how well do I predict myself") when the useful quantity is "am I achieving what I
+    // am currently trying to do".  Operator: "confidence and prediction is more predicated
+    // on what we want the body to be doing in this moment... if we have forward velocity
+    // then all of the other metrics should be suppressed a little so the same model can be
+    // continued without interruption. Give us a lever for the higher order loops."
+    //
+    // Two failures dissolve at once:
+    //   * THE FREEZE TRAP.  A stopped body is highly predictable, which is why commit_prec
+    //     ROSE when it stalled.  A stopped body is FAILING at "move forward", so its
+    //     goal-relative error is high exactly when it is stuck.  No activity-term patch is
+    //     needed; the objective supplies it structurally.
+    //   * THE SIGN INVERSION.  Moving fast is intrinsically less predictable (measured:
+    //     corr(motor_tle, displacement) = +0.129), so a residual-based confidence penalises
+    //     the behaviour we want.  Error-against-intent does not.
+    //
+    // This is plan §1.1's motor objective ("the arbiter's currency is a MOTOR OBJECTIVE,
+    // not a heading") getting its first real consumer.
+    std::string intent_topic_;                     // ProprioToken [v_forward*, yaw_rate*]
+    float  intent_v_ = 0.0f, intent_w_ = 0.0f;
+    bool   intent_seen_ = false;
+    int64_t intent_msgs_ = 0;                      // consumer check
+    float  err_run_ema_ = 0.0f;                    // running scale of the intent error
+    // The exact error the commit-precision loop descends, so diagnostics can never drift
+    // from the mechanism.  Uses the CURRENT spreads (read-only; the EMAs advance in step()).
+    float intent_err_norm() const {
+        const float zv = (fwd_progress_ema_ - intent_v_) / (ev_spread_ema_ + 1e-6f);
+        const float zw = (yaw_rate_ema_     - intent_w_) / (ew_spread_ema_ + 1e-6f);
+        return std::sqrt(zv * zv + zw * zw);
+    }
+    float  ev_spread_ema_ = 0.0f;                  // running |forward| error scale (see .cpp)
+    float  ew_spread_ema_ = 0.0f;                  // running |yaw| error scale -- 6.8x ev raw
+    // ⚠ play never abstains: explore_mult currently reaches EXACTLY 0.000, which is what
+    // produces the frozen-but-confident state.  Suppression must attenuate, never abolish.
+    double explore_floor_ = 0.0;                   // 0 = legacy (can reach zero)
     double commit_prec_gain_ = 0.0;                // 0 = fixed schedule (byte-identical)
-    float  tle_run_ema_ = 0.0f;                    // the residual's own running scale
+    float  q_run_ema_ = 0.0f;                      // running scale of amp/(tle+eps), the COMPETENCE signal
+    float  tle_run_ema_ = 0.0f;                    // (legacy: residual-only scale)
     float  commit_prec_diag_ = 1.0f;
     static constexpr float kCommitPrecAlpha = 0.002f;   // ~500-tick window on that scale
     double commit_window_ticks_ = 180.0;

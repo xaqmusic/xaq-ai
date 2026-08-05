@@ -713,6 +713,10 @@ var _chassis: RigidBody3D
 # Walking-trail UI helper (sibling node found at _build time); cached so
 # _do_hard_reset() can wipe its X-markers without re-traversing the tree.
 # Burst-onset probe state — see the trigger in _clip_record().
+# Scaffold motor-intent (see the publish site).  intent_fwd < 0 disables the publisher, so
+# the intent socket is unfed and commit_prec_gain stays inert — the byte-identical default.
+@export var intent_fwd: float = -1.0
+@export var intent_yaw: float = 0.0
 var _burst_probe: bool = false
 var _bp_last_lifts: int = 0
 var _bp_last_lift_tick: int = 0
@@ -2360,6 +2364,10 @@ func _ready() -> void:
 	if OS.get_environment("OGMA_PICRAWLER_BURST_PROBE") == "1":
 		_burst_probe = true
 		print("PicrawlerBody: \u26a0 BURST_PROBE on — auto-saving ONSET/GAP clips to /tmp/xaq_clips")
+	var ifw: String = OS.get_environment("OGMA_PICRAWLER_INTENT_FWD")
+	if ifw != "":
+		intent_fwd = ifw.to_float()
+		print("PicrawlerBody: \u26a0 MOTOR INTENT scaffold — v_fwd*=%.3f yaw*=%.3f" % [intent_fwd, intent_yaw])
 	var bv: String = OS.get_environment("OGMA_PICRAWLER_BEACON_VISIBLE")
 	if bv != "":
 		beacon_visible = (bv == "1" or bv.to_lower() == "true")
@@ -5351,6 +5359,18 @@ func _step_one() -> void:
 			"z": snappedf(_wp_now.y, 0.001)}))
 		_wp_last_tick = tick_counter
 		_wp_next_m += 1.0
+	# ---- 2026-08-05 · MOTOR INTENT (the higher loop's lever) ----------------------------
+	# [v_forward*, yaw_rate*] — what the body is being asked to do RIGHT NOW.  MotorEPM turns
+	# commit confidence into "am I achieving this" instead of "how well do I predict myself".
+	# ⚠ This constant-forward publisher is a SCAFFOLD, named as one: it stands in for the L1
+	# nav / EFE arbiter until that layer exists, so the mechanism can be tested before the
+	# thing that will eventually drive it.  A real intent would change with the manoeuvre
+	# (forward / turn left / turn right / stop), which is the whole point of the socket.
+	if intent_fwd >= 0.0:
+		var it := PackedFloat64Array()
+		it.append(intent_fwd)
+		it.append(intent_yaw)
+		brain.publish_proprio(it, "motor_intent")
 	brain.publish_proprio(imu, "imu")
 
 	# ---- L1 nav inputs (2026-08-04) -------------------------------------------------------
@@ -9841,6 +9861,14 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# "unwired instrument" are indistinguishable, which is exactly how this sweep first
 			# reported every arm at trim=0.000.
 			line["h_trim"] = snappedf(float(_mm.get("heading_trim", 0.0)), 0.00001)
+			# CONSUMER CHECK for commit_prec — MISSING until now, which made a whole 35-run
+			# sweep uninterpretable: the analysis read 1.00 from a .get() default and could not
+			# tell "the lever ran and did nothing" from "the lever never ran".
+			line["fprog"] = snappedf(float(_mm.get("fwd_progress_ema", -99.0)), 0.00001)
+			line["ierr"]  = snappedf(float(_mm.get("intent_err", -99.0)), 0.00001)
+			line["cprec"] = snappedf(float(_mm.get("commit_prec", -1.0)), 0.0001)
+			line["imsgs"] = int(_mm.get("intent_msgs", 0))
+			line["cboost"] = snappedf(float(_mm.get("commit_boost", -1.0)), 0.0001)
 			line["gb_msgs"] = int(_mm.get("goal_bearing_msgs", 0))
 			line["gb_err"]  = snappedf(float(_mm.get("goal_bearing_err", 0.0)), 0.0001)
 			line["cw_spr"]  = snappedf(float(_mm.get("couple_w_spr", 0.0)), 0.0001)
