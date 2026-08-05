@@ -75,7 +75,8 @@ const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
 	# question these need eyes on. n=4, so signal only.
 	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12.json",  # ── STROKE 1.20 ── the SYMPTOM treatment: less saturation → less of the commanded turn differential is rectified away by the clamp. Best BEHAVIOURAL arm: straight 0.474→0.488, net_z 4.58→4.70, asymmetry halved (1.44→0.69), 0 falls. ★ THIS ARM HAS A STANDING UI REQUEST IN THE LEDGER, unanswered since 2026-07-27: "PARTIAL awaiting operator UI observation — if the UI reads it as PURPOSEFUL rather than merely BUSIER, sweep 1.1-1.3 at n>=6." That is still the question.
 	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__cprec25.json",  # ── STROKE 1.20 · COMMIT AS EARNED PRECISION ── commit_prec_gain=2.5. Commit is a PRECISION ("how much do I trust my current motion vs keep searching"), and doctrine §2.3 says precision is a CONTROLLED variable — "a designer picking the crossover point is the anti-pattern". Three hand-picked crossover points were measured first: the original 180/240/90 = 14 % stalled, commit OFF = 20 %, inverted fast-engage/slow-release = 22 %. The hand-tuned original won, which is exactly when the constant should be replaced by the mechanism that ought to set it. Now the window/ramp/release scale with how well the body predicts ITSELF (the forward-model residual against its OWN running mean — scale-free, nothing tuned to tle's magnitude). ★ Commit can now engage INSIDE a 1–2 s burst if that burst is genuinely predictable; a fixed 180-tick (3 s) window structurally cannot, and that timescale mismatch is the operator's complaint. n=1 seed 6: stalled 14 % → 11 % (the lowest measured), disp/s and metres flat — it buys CONTINUITY, not speed. ⚠ NON-MONOTONE: gain 1.0 was WORSE (19 %), so 2.5 may be luck; a proper sweep is owed. THE QUESTION FOR THE EYE: during a pause, does it look like stroke12 ("trying to move forward, better steps once moving") or like nocommit ("simply shaking")? The 3-point stall metric has been blind to that distinction twice today.
-	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__nocommit.json",  # ── STROKE 1.20 · COMMIT OFF ── progress_commit_gain 1.0 → 0. THE INTERVENTION THAT REFUTED A GOOD STORY: the operator spotted that exploration amplitude swings in antiphase with movement, and it does — explore_mult oscillates 0.00↔1.00 with displacement leading it by ~4 s (r = −0.34, consistent across arms), a textbook delayed-negative-feedback loop. Setting commit to 0 pins explore_mult at 1.00 and removes the oscillator cleanly. ★ AND STALLING GOT WORSE: stalled-seconds 14 % → 20 %, disp/s 0.073 → 0.067, 29 → 28 m. So the loop is REAL but is NOT what gates the steps, and permanent full exploration noise stalls MORE. Load it beside stroke12 and ask whether it is more stalling or DIFFERENT stalling — the metric cannot tell those apart. Incidentally this is also the best evidence progress_commit has ever had (the ledger has it as a "marginal keeper" on +2.55→+2.62 net_z).
+	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__nocommit.json",
+	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__intent.json",  # ── STROKE 1.20 · INTENT-RELATIVE COMMIT ── the operator's ask: make confidence depend on what we WANT the body doing now, not on a self-prediction residual (which measures +0.129 against displacement — a moving body is LESS predictable, so the residual anti-indicates competence). commit_prec now descends the error between (fwd_progress_ema, yaw_rate_ema) and a declared (v*, w*) intent, giving a higher loop a real lever. ⚠ THE FIRST BUILD WAS BROKEN AND THE FIX IS WHAT YOU ARE LOADING: summing the two error terms raw made intent_err 98 % YAW variance (|ew| 0.151 vs |ev| 0.022 — the forward term is bounded by v*, yaw is not), so corr(intent_err, fwd_progress_ema) = -0.002: the scalar carried NO information about forward progress, and since skid-steer locomotion IS yaw the error rose exactly when the body walked. Each term is now normalized by its own running spread first (doctrine §5). n=4 arena: disp/s 0.1685 vs 0.1680, stalled 0.3 % vs 0.4 % — it TIES. Honest, cheap, buys nothing yet. ★ THE QUESTION FOR THE EYE, which the logs cannot answer: through a pause, does `fwd-prog-ema` (thick green, MOTOR-EPM panel) drop BEFORE `commit-prec` rises, or after? Progress-first => commit is a symptom. Commit-first => it is causal, and the repair is different. corr(commit_prec, displacement) is ~0 in every build tried, so the term you can plainly see moving with the pause/step cycle is not tracking displacement — that contradiction is the open question.  # ── STROKE 1.20 · COMMIT OFF ── progress_commit_gain 1.0 → 0. THE INTERVENTION THAT REFUTED A GOOD STORY: the operator spotted that exploration amplitude swings in antiphase with movement, and it does — explore_mult oscillates 0.00↔1.00 with displacement leading it by ~4 s (r = −0.34, consistent across arms), a textbook delayed-negative-feedback loop. Setting commit to 0 pins explore_mult at 1.00 and removes the oscillator cleanly. ★ AND STALLING GOT WORSE: stalled-seconds 14 % → 20 %, disp/s 0.073 → 0.067, 29 → 28 m. So the loop is REAL but is NOT what gates the steps, and permanent full exploration noise stalls MORE. Load it beside stroke12 and ask whether it is more stalling or DIFFERENT stalling — the metric cannot tell those apart. Incidentally this is also the best evidence progress_commit has ever had (the ledger has it as a "marginal keeper" on +2.55→+2.62 net_z).
 	"the_picrawler_motor_epm_embed_corridor_imufused__pairinit.json",  # ── PAIRED L/R INIT ── acts on the CAUSE: left/right partner legs (0&1, 2&3) get the SAME initial control law, so no side starts with an advantage. asymmetry 1.44→0.78, |turns| 0.138→0.077. ⚠ THE RISK IS VISUAL, NOT NUMERIC: the MotorEPM class header warns the per-leg random init is the "inter-leg symmetry breaker" guarding against v6-premotor-bilateral-mirror-collapse. WATCH FOR: left and right legs moving in LOCKSTEP (collapse — antiphase lost) versus mirrored-but-independent (fine). Metrics cannot see this; eyes can.
 	# --- everything below is parked, not deleted ---
 	# "the_picrawler_motor_epm_embed_corridor_coordadapt.json",  # the fwd_v-REWARD comparison arm for the above (coord_fitness_mode=0). Uncomment to A/B the reward question directly in the UI.
@@ -373,6 +374,15 @@ func _read_metadata(path: String) -> Variant:
 		# Absent => "hinge", which is what the body's @export default gives headless, so
 		# UI and harness always agree.  See the parity note at the selection handler.
 		"joint_backend":  str(meta.get("joint_backend", "hinge")),
+		# 2026-08-05 — UI/HEADLESS PARITY, generalized.  Some body scaffolds are only
+		# reachable through an env var because the harness sets one (e.g. the motor-intent
+		# publisher needs OGMA_PICRAWLER_INTENT_FWD, and without it `intent_seen_` is false,
+		# `commit_prec` pins at 1.0 and the arm loads INERT while still claiming its name).
+		# That is CLAUDE.md §3.2 rule 7 — the silent confound — waiting to happen in the UI.
+		# A config may now DECLARE that env in `metadata.body_env`, and the launcher applies
+		# it at selection.  Parity takes precedence over convenience: what you select is what
+		# the harness ran.  An explicit env var set by the operator still wins (checked below).
+		"body_env":       (meta.get("body_env", {}) if typeof(meta.get("body_env", {})) == TYPE_DICTIONARY else {}),
 		# Phase 6.8 — homeokinetic cell actuation flags (the alive-cell fast path).
 		"motor_baseline_beat": bool(meta.get("motor_baseline_beat", false)),
 		"motor_energy":        bool(meta.get("motor_energy", false)),
@@ -749,6 +759,19 @@ func _on_config_changed(idx: int) -> void:
 		if str(opt.get("id", "")) == want_backend:
 			_joint_backend_dropdown.select(i)
 			break
+	# Apply the config's declared body env (see the `body_env` note in _read_metadata).
+	# A pre-existing env var wins: an operator who exported one on the command line meant
+	# it, and silently overwriting that would be the same confound in the other direction.
+	var benv: Dictionary = entry.get("body_env", {})
+	for k in benv.keys():
+		var key := str(k)
+		if OS.get_environment(key) != "":
+			print("launcher: body_env %s kept from the environment (config wanted %s)"
+					% [key, str(benv[k])])
+			continue
+		OS.set_environment(key, str(benv[k]))
+		print("launcher: body_env %s=%s (from config metadata)" % [key, str(benv[k])])
+
 	# Pre-populate the corridor-difficulty spinbox if the config declares one
 	# (metadata.gym_difficulty), so "select config -> Launch" reproduces it.
 	var cgd := float(entry.get("picrawler_gym_difficulty", -1.0))
