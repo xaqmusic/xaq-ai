@@ -2542,8 +2542,27 @@ void MotorEPM::tick(uint64_t tick_id) {
                 if (err_run_ema_ <= 0.0f) err_run_ema_ = e;    // seed, no cold-start spike
                 err_run_ema_ = (1.0f - kCommitPrecAlpha) * err_run_ema_ + kCommitPrecAlpha * e;
                 // z > 0 = achieving the ASSIGNED task better than its own running average.
+                // NOTE z is bounded ABOVE at exactly 1: e >= 0 and err_run_ema_ > 0, so
+                // (err_run - e)/err_run <= 1, with equality only at a perfect e == 0.  It is
+                // unbounded below.  That asymmetry is real and is why the exponent matters.
                 const float z = (err_run_ema_ - e) / (err_run_ema_ + 1e-6f);
-                cp = std::clamp(std::exp(float(commit_prec_gain_) * z), 0.2f, 5.0f);
+                // ── DERIVED, NOT TUNED (doctrine §5; the operator's "this seems like a lot
+                // of tuning").  A hand-picked exponent of 2.5 reached the 5.0 clamp at
+                // z = ln(5)/2.5 = 0.64, so the top 36% of z's range collapsed onto a single
+                // value -- measured as 22% of ticks pinned at cp = 5.0.  Saturation is not a
+                // stronger signal, it is a DESTROYED one: inside the rail the mechanism can
+                // no longer tell "just achieving" from "achieving spectacularly".
+                //   The exponent is not free.  z's own upper bound of 1 must map exactly onto
+                // the output's upper bound, which fixes k = ln(kCommitPrecHi).  The clamps
+                // being reciprocal then makes the map symmetric in log space: z = +1 -> Hi,
+                // z = 0 -> 1 (byte-identical), z = -1 -> Lo.  Nothing left to choose.
+                //   commit_prec_gain_ survives ONLY as the A/B lever: 0 = off (cp == 1, the
+                // gain-0 guard), 1 = the derived map spanning the full range without ever
+                // saturating.  ⚠ Its units therefore CHANGED -- it now multiplies the
+                // derived exponent rather than being the exponent.  Pre-existing cprecNN
+                // sweep configs carry the old meaning and their numbers do not transfer.
+                const float k = float(commit_prec_gain_) * std::log(kCommitPrecHi);
+                cp = std::clamp(std::exp(k * z), kCommitPrecLo, kCommitPrecHi);
             }
         }
         commit_prec_diag_ = cp;
