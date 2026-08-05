@@ -98,6 +98,7 @@ private:
     void handle_cpg_phase(MessagePtr payload);
     void handle_tilt(MessagePtr payload);
     void handle_imu(MessagePtr payload);
+    void handle_goal_bearing(MessagePtr payload);
     void handle_nav(MessagePtr payload);
     void handle_height(MessagePtr payload);
     void handle_distress(MessagePtr payload);
@@ -207,6 +208,60 @@ private:
     // coordination topology), entraining the twitchers and phase-locking all four
     // for symmetric thrust.  Rhythm emerges; only the offsets are imposed.
     double  coupling_gain_ = 0.0;                  // Kuramoto coupling strength (0 = off; live transition knob)
+    // ---- 2026-08-04 · INFERENTIAL COUPLING.  The Kuramoto term above averages the other
+    // three legs UNIFORMLY (`c / (n_legs_-1)`).  That divisor is itself a hand-set precision:
+    // every leg is trusted exactly equally, forever, which is what makes an otherwise
+    // legitimate innate reflex a SCRIPT rather than inference (doctrine 2.3 -- precision is
+    // a CONTROLLED variable, and "a designer picking the crossover point is the anti-pattern").
+    // Replacing it with a precision-weighted mean over w_j = (amp_j/(tle_j+eps))^k is the
+    // LateralVoter's own idiom applied one layer down, and it is exact at k=0.
+    //
+    // amp_ema in the NUMERATOR is not decoration.  The voter's documented trap
+    // (LateralVoter.cpp:80) is that a flat channel is trivially predictable, so tle -> 0 wins
+    // maximum trust; the coord-fitness entry hit the same wall and the ledger records that
+    // "the activity term is the homeokinetic normalisation that kills both".  A dead leg
+    // must get w = 0 here, not w = infinity.
+    // ---- 2026-08-04 · L1 NAV SETPOINT ------------------------------------------------
+    // The heading PD's P term is `gain * (-heading_bearing_)`: the setpoint is implicitly
+    // ZERO, i.e. "hold the bearing you spawned on".  That PD is the best-measured lever in
+    // this project (straight 0.05->0.53, net_z variance 0.92->0.07), so a nav layer should
+    // STEER it, not replace it.
+    //
+    // ⚠ WHY NOT `nav_topic`: `nav_on` gates the ENTIRE heading PD off (both P and D) AND the
+    // forward facing gate.  Re-entering through nav_gain would throw away the variance
+    // collapse that makes the PD worth having, which is exactly what the oracle path does.
+    //
+    // The producer publishes an EGOCENTRIC unit vector [vx, vy] (vy = forward), so the angle
+    // atan2(vx, vy) IS the bearing error and drops straight into the P term.  Unset topic, or
+    // no token yet, => falls back to -heading_bearing_ => byte-identical.
+    // 2026-08-04 · learned DC heading effort (the missing I term) + paired L/R init.
+    double  heading_trim_rate_ = 0.0;              // 0 = off, byte-identical
+    double  heading_trim_leak_ = 0.001;            // MANDATORY: windup is this file's failure shape
+    double  c_pair_init_       = 0.0;              // 0 = per-leg random init (legacy)
+    float   heading_trim_      = 0.0f;
+    static constexpr float kHeadTrimMax = 0.5f;    // hard bound on the learned trim
+    std::string goal_bearing_topic_;
+    float   gb_x_ = 0.0f, gb_y_ = 0.0f;
+    bool    gb_seen_ = false;
+    int64_t gb_msgs_ = 0;                          // consumer check: did it ever arrive?
+    double  couple_prec_gain_ = 0.0;               // 0 = uniform mean (legacy, byte-identical)
+    static constexpr float kCouplePrecEps = 1e-4f; // divide guard only; tle_ema runs ~0.24-0.28
+    // Numerical guard on the weight RATIO, not a shaping constant: at |k| <= 2 over the
+    // measured precision band the clamp never binds, it only catches a frozen/degenerate leg
+    // in the negative (wrong-sign control) arm, where pow(->0, -k) would otherwise blow up.
+    static constexpr float kCoupleWMin = 1e-3f, kCoupleWMax = 1e3f;
+    // ---- 2026-08-04 · PER-LEG hip1 SATURATION (the skid-steer rectification test) ------
+    // steer_eff enters as `sgn*(stroke + side*steer)` with side = +1 left / -1 right, so the
+    // COMMAND is a symmetric differential.  But the clamp is per-leg and independent
+    // (`clamp(y[j],-1,1)`), and hip1 already sits at ~56 % clip duty from the stroke alone.
+    // So the OUTER side (stroke + steer) is pushed further into the rail and its speed-up is
+    // discarded, while the INNER side (stroke - steer) moves OFF the rail and its slow-down
+    // lands in full.  The differential is RECTIFIED — half the commanded turn authority is
+    // thrown away, and net thrust drops, which arcs the body instead of pivoting it.
+    // Pooled clip_duty cannot see this because it averages the two sides together.
+    std::vector<double> sat_clip_leg_, sat_pre_leg_;   // per leg, hip1 only
+    double  cw_spr_acc_ = 0.0;                     // consumer check: mean (max-min)/mean weight
+    int64_t cw_n_       = 0;
     int     phase_joint_   = -1;                   // proprio joint sourcing the per-leg oscillator phase (-1 = knee = m-1)
     std::vector<double> rhythm_gains_;             // per-joint coherent rhythmic drive amplitude (empty/0 = off)
     std::vector<double> rhythm_offsets_;           // per-joint phase offset for the rhythmic drive
@@ -803,6 +858,21 @@ private:
     int64_t             plv_pair_n_[16] = {0};                    // samples admitted per pair
     int64_t             plv_n_ = 0;
     float               interleg_plv() const;
+    // ---- 2026-08-04 · WINDOWED PLV.  interleg_plv() above accumulates over the WHOLE run,
+    // so it cannot express a before/after: a perturbation at tick 2500 is diluted by 6000
+    // ticks of history and the recovery it is supposed to measure is invisible.  This is the
+    // trailing-window form: an EMA of each pair's phasor, DECAYED EVERY TICK and added to
+    // only while both legs clear kPlvAmpFloor.  Decaying unconditionally is the point — a
+    // pair that stops oscillating decays toward 0 ("no recent evidence of locking") instead
+    // of freezing at a stale high value, which is the frozen-body degeneracy that killed
+    // gait_coherence arriving by a third route.  plv_win_sup_ is the same EMA over the
+    // admission indicator, so |z| <= sup and `plv_win / plv_win_n` reads as "locking GIVEN
+    // oscillation".  ALWAYS read plv_win beside plv_win_n (CLAUDE.md, the standing rule).
+    static constexpr double kPlvWinAlpha = 1.0 / 500.0;           // tau ~ 500 ticks ~ 10 s
+    double              plv_win_cos_[16] = {0}, plv_win_sin_[16] = {0};
+    double              plv_win_sup_[16] = {0};                   // EMA of "pair admitted"
+    float               interleg_plv_win() const;
+    float               interleg_plv_win_support() const;
     void wb_init(int n_per_leg);
     void wb_learn_and_control();
     // 2026-06-12 — directional propulsion drive on hip1 (the fore-aft joint).

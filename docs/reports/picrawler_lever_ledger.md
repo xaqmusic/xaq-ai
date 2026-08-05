@@ -670,6 +670,562 @@ reduction is the part that appears in both gyms. Not promoted.
 
 ---
 
+### ★★★ 2026-08-05 — `step_cv` NEVER MEANT WHAT WE READ IT TO MEAN (operator-driven)
+
+**Operator observation, from UI runs on seed 6 with the path trail on:** *"the robot will pause
+and fumble for about a second, then take two or three steps, up to four but never more, then
+resume fumbling — even with the most confident configs. When there is good synchronization the
+traversal speed is very good; it is the pauses that slow it down."*
+
+**Measured at 5-tick resolution, this is confirmed and it overturns a load-bearing reading.**
+
+| | value |
+|---|---|
+| step-rate CV, 5-tick bins | **5.6** |
+| CV of a memoryless (Poisson) process | **1.0** |
+| pooled `step_cv` as reported for the whole campaign | ~1.0 |
+
+⇒ **Pooled `step_cv` ≈ 1.0 does NOT mean "the intervals are memoryless".** A two-state process —
+tight clusters of steps separated by long silences — returns CV ≈ 1 *even when the rhythm inside
+each cluster is regular*. Averaging collapses the two regimes into a number indistinguishable
+from randomness. **The claim "THE BODY HAS NO STEP PERIOD", which invalidated the premise of all
+NINE timing levers, is an artefact of the statistic.** Those levers may still be refuted; the
+*reason* recorded against them ("they presuppose a rhythm the contact signal lacks") is not.
+
+#### What the stall is, and what it is not
+
+Per-tick capture (arena, seed 6, `stroke12`, ticks 3101–4000), using **true physics contact**,
+not the swing detector:
+
+- 70 swing episodes in 900 ticks, durations **3–21 ticks**, mean **3.3 feet planted**, and they
+  mostly overlap. The legs do NOT stop for 800 ticks.
+- The operator's ~1 s pauses are real and measurable as the **long** gaps: **62, 44, 30, 25,
+  20 ticks** — the 62 is almost exactly one second.
+- **The stall is genuinely stepping STOPPING, not stepping without purchase.** Across 1-second
+  windows sorted by displacement: displacement varies **5.0×** between stalled and moving, and
+  swing activity varies **2.0×** with it (0.48 → 0.96 feet airborne). Stepping-in-place would
+  have held swing activity flat. It does not. ⇒ **the "half the power stroke is spent in the
+  air" mechanism is NOT the cause of the pauses.**
+- **Nothing body-side predicts a stall.** `y`, `gc_raw`, `tilt`, `planted` all peak at lag 0 and
+  decay to noise within ±10 ticks; `amp_gain`, `swing_frac`, `clip_duty`, `motor_tle`, `scrub`
+  differ <10% between states. ⇒ the gate is controller-internal, which is what justifies putting
+  the remaining candidates (swing-gate threshold, `amp_gain`, the coordination overwrite) into
+  the per-tick ring.
+
+> #### ⚠ TWO OF MY OWN READINGS WERE WRONG, BOTH THE SAME SHAPE
+> 1. **"The pause is a crouch."** Retracted. `planted` −0.658, `y` +0.339, `gc_raw` +0.358 all
+>    peak at **lag 0** — they describe the mechanics of a footfall (a leg lifts, one fewer foot
+>    is down, the body rises slightly), not a postural cycle that ends a burst. A lag-0
+>    correlation with a state variable derived from the same event is circular.
+> 2. **The height homeostat as the cause.** Refuted before it cost anything:
+>    `corr(|fwd_v|, h_bias)` = −0.057 / +0.021 / −0.015 across arms, flat at every lag to 200
+>    ticks. `height_rest_frac` fading the postural defence out while walking was a clean story
+>    and it is not what happens.
+>
+> **And the trigger that produced the first analysis was slicing on the wrong events:**
+> `_leg_lifted_count` is the SWING DETECTOR's event, not contact, and it fired ~8× too often
+> (95-tick median "gap" against the operator's observed ~800). Any burst statistic keyed on it
+> is measuring the detector.
+
+#### Operator UI ranking (arena, seed 6, path trail, all `substrate: hinge`)
+
+`ik_plumb` (5.66 m walked) and `stroke12` (5.65 m) are the two cleanest directed paths and the
+operator's top two independently of the metrics. `nolearn2` (1.72 m) and `pairinit` (2.72 m)
+walk closed loops. **`trim3` is a wide ARC — confirmed by eye**, which is exactly the failure
+mode predicted for it: `|turns|` fell 3.3× while `straight` did not move, and a curve that nets
+near zero produces that signature. **`heading_trim_rate` 3e-4 is refuted; 1e-4 stands.**
+
+#### New instruments (all default-off)
+
+- **Per-metre timestamped waypoints** (operator's design) — the same object the red `[P]` trail
+  draws, in the log, so the analysis and the picture the operator trusts are one measurement.
+  Reveals path speed is steady (1.8–1.9× spread/metre, median ~287 ticks/m) while the robot
+  walks **29 m of path to gain 5 m of ground** — direction, not speed, is the distance cost.
+- **`OGMA_PICRAWLER_CLIP_WINDOW="a,b"`** — per-tick dump of a named interval. Makes no claim
+  about what a step is; hands over every tick and lets the analysis find the structure. The
+  primary burst instrument.
+- **`OGMA_PICRAWLER_BURST_PROBE=1`** — ring + auto-trigger saving ONSET/GAP clips for
+  `clipdiff.py`. Kept, but see the detector caveat above.
+- **Per-leg hip1 saturation** (`clip_h1_leg`, `pre_h1_leg`) — the pooled figure had been hiding a
+  3× per-side split for the whole campaign.
+- ⚠ **`[F1]` was DOUBLE-BOUND** — the graph panel and the clip recorder both claimed it, so
+  "save a GOOD clip" silently opened the brain graph and the clip machinery was unreachable by
+  its own documented key. F1 now belongs to clips; `` ` `` opens the graph.
+
+---
+
+### ★★ 2026-08-04 — L1 NAV STAGE 1: THE LOOP IS CLOSED AND VERIFIED, AND IT IS NOT YET DOING TAXIS
+
+**Built and verified.** `beacon (honest colour) → RunTumbleNavV2 → percept.klino_heading →
+MotorEPM.goal_bearing_topic → the existing heading PD → the gait (untouched)`.
+
+- **The hook.** The PD's P term was `gain·(−heading_bearing_)` — setpoint implicitly zero, "hold
+  the spawn bearing". The nav module emits an **egocentric** unit vector, so `atan2(vx,vy)` *is*
+  the bearing error and replaces that term. The D term is untouched, so the yaw damping that
+  produced the variance collapse now applies to the **new** setpoint: **the PD becomes the nav
+  layer's actuator rather than its competitor.**
+- ⚠ **Deliberately NOT via `nav_topic`** — `nav_on` gates the entire heading PD off (P *and* D)
+  plus the forward facing gate, which is how the oracle path discards the very thing the PD is
+  for.
+- **`RunTumbleNavV2`, not `Klinotaxis`** — the latter has no behavioural measurement anywhere and
+  no confidence output. The former is what the Cell deploys (n=20, 1.9 eats vs a 0.9 random-walk
+  floor) and ships its own control arms. Its `eat_topic` calibrates confidence only; the policy
+  is reward-free (§5.1 safe).
+- **Guards, all by measurement:** unit test `GoalBearingSocketSteersAndSilentIsByteIdentical`
+  (A/Z/N — a configured-but-silent socket must be byte-identical to no socket, a live one must
+  diverge, plus the consumer check); 36/36 `test_motor_epm` pass; the deployed baseline
+  reproduces **4.58 ± 0.27 per-seed** with the nav layer absent.
+- **Consumer verified live:** `gb_msgs = 5999` over a 6 000-tick run and `gb_err` varies
+  (−0.92 … −0.27) — the socket is receiving and the setpoint is moving, not latched.
+
+> #### ⚠ BUT: `ablation:"shuffle"` PRODUCES A BYTE-IDENTICAL TRAJECTORY
+> The shuffle arm is the module's own **random-walk floor**. Full taxis and shuffle give
+> identical `gb_err` traces, identical trajectories, and identical `gb_msgs` on every seed.
+> The module is instantiated and publishing, so this is not dead code — **it means the full
+> taxis is currently operating AT its kinesis floor**, i.e. it has established no directional
+> belief (R≈0) and is therefore doing exactly what the gradient-blind arm does.
+>
+> **That is what Stage 0 predicted.** The beacon is in frame ~50 % of the time, SNR only clears
+> 1 at run lengths ≥2 m, and with `pyramid_max_r = 9.5` plus an **antipodal** target router the
+> robot **starts at 10–19 m, outside the informative envelope entirely** — so there is no
+> gradient to build a belief from. The loop is wired correctly and is being fed a flat field.
+>
+> **Verdict: `DEFERRED`, not `NULL`.** Nothing here has been tested at power, and a null against
+> a field the sensor cannot resolve would be a fact about the arena, not the mechanism.
+> **Next, in order:** (1) shrink `pyramid_max_r` (or spawn nearer) so the robot begins inside the
+> ~8 m envelope; (2) confirm the module's own `R` / tumble-rate diagnostics distinguish the arms
+> once it has a gradient — right now nothing surfaces RunTumbleNavV2's internal state to the
+> JSONL, which is the next instrument to add; (3) only then run the (c) controls at power.
+
+**Also honest:** `gb_err` is one-signed for the whole run. That is consistent with "holding a run
+direction while the PD chases it" (the expected run-and-tumble shape) but is *also* what a
+wrong-sign hook would look like, and the two cannot be separated on a flat field. **Sign must be
+verified against behaviour once there is a gradient to climb** (plan trap 11) — it is not yet
+established.
+
+**New topics:** `reality.proprio.ego_heading` (dead-reckoned from the **modelled body-frame
+gyro**, so it drifts exactly as hardware dead reckoning does — honest, and RunTumbleNavV2 only
+needs the frame self-consistent), `reality.proprio.vel_ego` (⚠ **soft oracle**, world velocity
+projected — used ONLY by the module's stuck check, never by the gradient, and named rather than
+hidden), and `events.beacon_reached`.
+
+---
+
+### ★★★ 2026-08-04 — THE CAMERA WAS AN ORACLE, AND THE OPTICS WERE ARBITRARY (L1 nav, Stage 0)
+
+**Two defects in the vision path, found while scoping the nav loop. Neither errored.**
+
+**1. The camera never read the purple material.** `_capture_vision()` decided a pixel was purple
+by comparing the raycast hit's **collider node identity** against
+`_pyramid_meshes[walk_target_idx].get_parent()`. It never sampled `albedo_color`. So the
+scene-graph purple was a **human-visible HUD affordance only**, and `host.video.color` was an
+**oracle-segmented image** — the ground-truth answer to "which pyramid is the target" painted
+into the raw pixels, upstream of `epm_color` and of everything downstream. `vision_compass` was
+laundered twice: an oracle image, and a readout regressed onto `target_compass`
+(`bearing_r = 0.440` — a number that was never real). This is `plan.md` trap 6 exactly.
+**Fixed:** classification now keys on the surface's **own albedo** (a colour→bool map rebuilt
+whenever the beacon is recoloured). The pyramid reads purple *because it is purple* — which any
+camera can do — and it degrades honestly: paint two and both show; move the beacon and the
+purple moves.
+
+**2. The optics were never justified against hardware.** `VISION_RES = 32` / 90° square carried
+no citation; the path *"originated as a HUD debug panel that was promoted to a sensor"*. Compare
+`docs/servo_dynamics.md` — a cited reference, a conformance table, four argued deviations.
+**Now modelled on the real sensor** (operator): SunFounder **OV5647**, quoted 65°, which is the
+**diagonal** — its published 53.5° × 41.4° computes to a 64.4° diagonal, confirming the reading.
+The grid is now **32×24, true 4:3 with square pixels**, and a **var** (`OGMA_PICRAWLER_VIS_W/H`,
+the Cell's `OGMA_VIS_RES` precedent) rather than a const.
+
+> **★ Faithful optics were BETTER AND CHEAPER.** 768 rays against the old 1024 — **25 % fewer** —
+> for ~3× the beacon area at range, because a narrower FOV over the same budget resolves finer.
+> The arbitrary 90° was actively costing us.
+
+Also: **`LOOM_RAY_LEN` was 8.0 m**, justified as "arena ~5 m diag", against an arena of radius
+9.5 whose target router deliberately picks the **antipodal** hemisphere ⇒ **93 % of target legs
+began beyond the ray length**, so loom *and* camera were identically zero for most of every leg.
+Raised to 20 m (past the diagonal); cost is per-ray distance, not ray count.
+
+#### Stage 0 — the sensing envelope, measured before any loop was built
+
+New honest scalar `reality.proprio.beacon` = the fraction of the frame that is beacon-coloured,
+computed at **full ray resolution** and **deliberately not routed through an EPM**: a GNG
+coarse-grains into a discrete vocabulary, which is right for "what kind of place is this" and
+wrong for a gradient — node-quantising it destroys the signal run-and-tumble climbs. (It is also
+computed *before* the JL encoder's fixed `{24,24,3}` resize, `encoder_jl.cpp:26`, so raising the
+grid actually buys the nav loop range; it would not if this went via the encoder.)
+
+Measured, arena, 9 000 ticks, conditioned on the beacon being in frame:
+
+| range | beacon (32×24) | in px | σ | SNR @1 m run | **SNR @2 m** | **SNR @3 m** |
+|---|---|---|---|---|---|---|
+| 1–2 m | 0.0784 | 60.2 | 0.049 | 0.61 | 1.22 | 1.83 |
+| 2–3 m | 0.0484 | 37.2 | 0.032 | 0.59 | 1.18 | 1.76 |
+| 3–4 m | 0.0294 | 22.6 | 0.013 | 0.89 | 1.77 | 2.66 |
+| 5–6 m | 0.0151 | 11.6 | 0.005 | 1.18 | 2.36 | 3.54 |
+| 6–8 m | 0.0069 | 5.3 | 0.002 | 0.76 | 1.53 | 2.29 |
+
+**★ SNR is set by RUN LENGTH, not by resolution.** At 48×36 (2.25× the rays) the signal is
+2.25× larger *in pixels* and σ scales with it — **SNR is unchanged at ~0.5–1.1**. So the noise is
+pose/aspect variation as the body walks, **not quantisation**, and buying pixels cannot fix it.
+What resolution *does* buy is **visibility: 50 % → 65 %** of samples with the beacon in frame,
+for **+8 % wall-clock**. **Gate: PASSES provided runs are ≥2 m** — which is the regime
+run-and-tumble naturally operates in (it runs while the signal rises).
+
+**Honest caveats.** The beacon is in frame only ~50 % of the time — correct, and precisely why
+direction must be *acted out* rather than sensed. Beyond ~8 m the blob is ~1.6 px and the loop is
+effectively blind, so with antipodal targets at 10–19 m the robot **starts blind and must
+search** before it can climb; either shrink `pyramid_max_r` or accept a long search phase. And
+the `8–12 m` row reads `d_run = 0` only because it is the last band and has no neighbour to
+difference against — an artefact of the analysis, not a measurement.
+
+**Instruments:** `scripts_tools/beaconprobe.py` (the gate above; conditions on visibility,
+because pooling in-frame and out-of-frame mixes two populations and σ then exceeds the mean).
+`beacon` / `vis_wh` / `tgt_range` in the JSONL — ⚠ `tgt_range` is **god's-eye, diagnostic only**,
+and exists solely so the sensor can be characterised.
+
+**Verified byte-identical with the camera off** (`publish_vision` default false): net_z
+4.58 ± 0.27 per-seed, tilt_sd 0.065, 0 falls — three times across the change set.
+
+⚠ **A silent confound caught mid-measurement, worth recording as a shape:** the first
+resolution sweep returned **byte-identical numbers for 32×24 and 48×36** because
+`OGMA_PICRAWLER_VIS_W/H` had been added as `@export` vars but never wired to the env parser. The
+only reason it was caught is that two arms that *must* differ did not. §3.2 rule 7 again.
+
+---
+
+### ★★★ 2026-08-04 — RETRACTION: "NOTHING HERE IS COORDINATED" WAS MEASURED AGAINST AN UNREACHABLE CEILING
+
+**A scripted, open-loop, perfectly periodic TROT — phase offsets hard-coded to [0, π, π, 0],
+every leg driven from one shared 60-tick clock, coordinated BY CONSTRUCTION — scores
+`plv_w` = 0.153. The emergent deployed gait scores 0.195.** The designed gait is *less*
+phase-locked, on this instrument, than the one we have.
+
+| arm | `plv_w` | what it is |
+|---|---|---|
+| random-phase null | 0.090 ± 0.066 | 40 sims, independent legs |
+| **scripted TROT (imposed, periodic)** | **0.153 ± 0.016** | coordinated by definition |
+| scripted WALK (lateral-sequence) | 0.185 ± 0.007 | coordinated by definition |
+| **deployed emergent gait** | **0.195 ± 0.008** | — |
+| perfect lock | 0.984 | simulation; **unreachable on this body** |
+
+⇒ **`plv_w` ≈ 0.2 is at or near the practical CEILING for this body, not near the floor.**
+The whole scale was wrong: both endpoints were established by *simulation*, the top one was
+assumed to be attainable, and the middle was never filled in. **The 2026-08-03 finding — "No
+configuration tested has ANY inter-leg coordination… it is absent, and has never been
+present" — is not supported by this measurement and is RETRACTED.** So is every downstream
+reading of six mechanisms "returning the random-phase null": they were being scored against a
+ceiling nothing can reach, including a gait whose phases are literally hard-coded.
+
+**Mechanism — the phase ESTIMATOR is the bottleneck, not the gait.** `L.phase =
+atan2(knee velocity · scale, knee deviation)` is a noisy readout of knee *state*, while the
+scripted gait imposes its rhythm on the *command*; measured knee motion is dominated by ground
+reaction, the postural reflex and load. PLV computed over a noisy phase estimate is bounded
+well below 1 however coordinated the legs actually are. **Any future coordination claim must be
+calibrated against the scripted-gait line, not against 1.0.**
+
+> #### ★★ AND THERE IS REAL STRUCTURE — THE DIAGONALS, WHICH IS THE TROT SIGNATURE
+> Per-pair `plv_w` on the deployed gait (new per-pair instrument, since the pooled mean cannot
+> express this):
+>
+> | FL-FR | FL-RL | **FL-RR** | **FR-RL** | FR-RR | RL-RR |
+> |---|---|---|---|---|---|
+> | 0.126 | 0.151 | **0.314** | **0.284** | 0.168 | 0.130 |
+>
+> **The two DIAGONAL pairs are 2.3× the two LATERAL pairs.** That is a trot signature, and it
+> is the first quantitative evidence of gait *structure* this project has produced. It
+> corroborates the operator's UI observation of "diagonal symmetry" — which the pooled metric
+> had been averaging into invisibility for the whole campaign. It also survives a lesion
+> (FL-RR stays highest at 0.268 with the RL servos dead).
+
+#### The tripod — the operator saw something real, but it is the good tail, not the mean
+
+Operator observation: with one rear leg ablated the tripod "seems faster than the quadruped
+gait". Measured, deployed base, n=4, leg RL:
+
+| arm | m/s | net_z | straight | steps | survivor `plv_w` | support |
+|---|---|---|---|---|---|---|
+| intact | **0.051** | 4.58 ± 0.27 | 0.73 | 50.0 | 0.203 | 1.000 |
+| RL servos dead | 0.023 | 2.32 ± 1.32 | 0.48 | 39.2 | 0.174 | 0.999 |
+| RL limb removed | 0.010 | 0.95 ± 0.85 | 0.13 | 26.5 | 0.174 | 0.501 |
+
+**On average the tripod is 2–5× SLOWER, not faster.** But it is strongly **bimodal**: with the
+servos dead, seed 2 reached net_z **4.36 at straight 0.79** — matching the intact gait on three
+legs — while three other seeds sat at 1.1–2.6. **A competent three-legged gait exists in this
+substrate's repertoire and is found unreliably (~1 seed in 4).** That is a more interesting
+result than either "faster" or "slower", and it is a far better target than another timing
+lever: the capability is already there, and what is missing is *reliably finding it*.
+
+**Instruments:** per-pair windowed PLV (`plv_win_pairs` / `plv_win_pair_sup`), because with one
+leg dead its three pairs decay toward 0 and halve the pooled mean — visible above as
+`rear_gone` pooled 0.087 (support 0.501) against survivor-only 0.174. Tool:
+`scripts_tools/plvladder.py`.
+
+⚠ **`step_cv` reads 0.000 in every arm of this ladder and that is NOT a measurement** — the
+deployed `imufused` config leaves `gait_align_diag` unset, so the whole block is skipped. The
+exactly-round-null rule catching itself again; any `step_cv` comparison must use a config that
+sets it (`nolearn2` does).
+
+---
+
+### ★★★ 2026-08-04 — THE CHASSIS HAS NEVER COLLIDED WITH ANYTHING (operator-found)
+
+**Operator observation, from the new ablation bench: "when I lesion both rear legs the entire
+back of the robot sinks into the ground — the hip1 joints collide, but the chassis itself does
+not."** Correct. `_LAYER_CHASSIS` appears in **exactly two places** in `picrawler_body.gd` — the
+constant and the assignment. **Nothing masks it, in either direction:** the chassis carries a
+real `BoxShape3D` and passes straight through the floor, the hump, the rumble strips and the
+pyramids. Only the leg segments (`_LAYER_BODY`) ever touch the world.
+
+**It was deliberate, not an oversight** — the constant's own comment says it "prevents the
+box-on-floor rolling instability that flips the body upside-down even when `leg_strength=0`."
+A physics workaround that became a permanent property of the substrate.
+
+**Measured, the operator's exact scenario** (deployed base, both rear legs detached at hip1):
+
+| | chassis_y after | min | belly `gc_raw` |
+|---|---|---|---|
+| **ghost (every historical run)** | **−0.020** | **−0.028** | 0.000 |
+| solid | +0.043 | +0.025 | — |
+
+**The body sits 28 mm BELOW the floor plane.** It does not rest on the ground; it descends
+through it until the legs catch.
+
+#### What it costs the record
+
+**Intact flat walking is shifted, not overturned** (deployed, n=4, corridor): net_z 4.58 → 5.13,
+steps 50 → 60, tilt_sd 0.065 → 0.074, straight and belly tie, **0 falls in both — the rolling
+instability the workaround existed for did not reappear.** So lever *rankings* on healthy
+locomotion probably survive. Three things do not get off that lightly:
+
+1. **Every belly / clearance claim.** `bellyc_min` has sat at **0.000–0.004 across the entire
+   campaign** and was read as "just barely clearing". On a ghost chassis it means the belly is
+   **at or through the floor**. "Belly-up SOLVED" and the `stance_lift = 0.5` promotion were
+   measured on a body that *cannot experience belly contact*, so the invariant they defend was
+   never tested. The ToF rangefinder was honest throughout — nothing ever stopped the gap it
+   reported from reaching zero.
+2. **Hump traversal.** §5 already suspected this and named it "may be a sim exploit
+   (frictionless belly drag)". The real mechanism is worse: there is no belly contact at all.
+3. **Anything measured while the body was fallen, inverted or damaged** — exactly the regime
+   where the chassis is the part touching the ground.
+
+#### Shipped as a LEVER, default OFF
+
+`chassis_collides` (export · `OGMA_PICRAWLER_CHASSIS_COLLIDE=1` · **`[J]`** live), default
+**false** so every historical number stays reproducible — promoting it is an evidence decision,
+not a silent re-basing of the campaign. Gain-0 guard verified by measurement: OFF reproduces the
+deployed baseline 4.58 ± 0.27 per-seed. Both directions are wired (chassis masks `_LAYER_WORLD`
+*and* world bodies mask `_LAYER_CHASSIS`) rather than relying on one-sided matching, and the HUD
+always shows `[J] chassis: SOLID/ghost` — which mode a run used is a physical fact about the body
+that appears in **no config file**, the same class of silent overlay `gaitreport.py` scrapes for.
+
+**Re-run under `chassis_collides=1` before trusting, in priority order:** the belly-up /
+`stance_lift` promotion · the hump gate · the inversion + recovery gates · anything in §6 whose
+re-use context mentions belly clearance (notably `tibia_plumb_gain`, held back ONLY by belly).
+
+---
+
+### ★★★ 2026-08-04 — INFERENTIAL COUPLING (`couple_prec_gain`): `NULL` on the healthy gait, `WORKING` on the (d) test — and the two together are the result
+
+**The lever.** The Kuramoto term averaged the other three legs **uniformly** (`c / (n_legs−1)`,
+`MotorEPM.cpp:2910`). That divisor is itself a hand-set precision — every leg trusted equally,
+forever — which is what makes an otherwise legitimate *innate* reflex a **script** rather than
+inference (doctrine §2.3: precision is a CONTROLLED variable; "a designer picking the crossover
+point is the anti-pattern"). `couple_prec_gain` (`k`) replaces it with a precision-weighted mean,
+`w_j = (amp_j/(tle_j+ε))^k`, L1-normalised — the LateralVoter's own idiom one layer down.
+**Scale-free by construction:** `prec^k / Σprec^k` is invariant to a common factor, so nothing is
+tuned to the residual's magnitude; `k` is a sharpness exponent. **Gain-0 guard exact and verified
+by measurement** (`pow(x,0)=1`, and the divisor falls back to the legacy `n_legs−1`): per-seed
+byte-identical.
+
+**Base:** `..._nolearn2.json` — all controller learning off, the n=20 ablation *winner*. Chosen so
+the precision weighting is the **only inferential thing left in the controller**; if the (d) test
+moves, nothing else could have done it. (`pure_hk` is not available for this lever: `coupling_gain`
+and `stroke_gain` are both 0 there, so modulating them is a §3.2 tautology.)
+
+#### 1. Unperturbed, n=6, corridor, 6000 ticks — `NULL`, trending mildly negative
+
+| `k` | net_z | straight | `plv` | `plv_w` | `cw_spr` | steps | `step_bal` |
+|---|---|---|---|---|---|---|---|
+| **0** (control) | 4.83 ± 0.41 | 0.73 | 0.15 | 0.20 | **0.00** | 45.0 | 0.31 |
+| −1 (wrong-sign) | 4.39 ± 0.86 | 0.69 | 0.14 | 0.19 | 0.28 | 60.8 | 0.32 |
+| +0.5 | 4.95 ± 0.53 | 0.72 | 0.15 | 0.20 | 0.14 | 41.8 | 0.31 |
+| +1 | 5.10 ± 0.15 | 0.72 | 0.14 | 0.18 | 0.28 | 46.3 | **0.44** |
+| +2 | 4.93 ± 1.07 | 0.68 | 0.12 | 0.18 | 0.60 | 70.0 | **0.44** |
+
+**Consumer verified** (§3.2 rule 5): `cw_mean` = 1.00 on every `k≠0` arm and 0.00 on the control,
+and `cw_spr` scales monotonically **0.00 → 0.14 → 0.28 → 0.60** with |k|. This is not a
+measurement outcome. On a healthy body the lever does nothing good: coordination trends *down*
+with |k| and distance ties. The one positive, `step_bal` 0.31 → 0.44, is **the same
+participation-without-phase signature whole-body `C` produced** — the fourth mechanism to land on
+that exact split.
+
+#### 2. The (d) test — leg 0 killed at tick 2500 — `WORKING`, dose-dependent, and the wrong-sign control holds
+
+Commanded motion of leg 0 set to 0 and left there. The world is unchanged and nothing tells the
+brain, so it can only notice through its own prediction error. The lesion bit identically in every
+arm (`amp_cut` 0.71 → 0.02, `tle_cut` 0.24 → 0.07), so the perturbation is matched. n=6.
+
+| arm | `plv_w` recovered | support `plv_wn` | `plv_w`/support | `dz_rate` recovered | t vs control |
+|---|---|---|---|---|---|
+| **k=0 control** | 0.127 ± 0.023 | 0.669 | 0.190 | 0.011 | — |
+| **k=−1 wrong-sign** | 0.121 ± 0.025 | 0.768 | **0.158** | 0.009 | **−0.43** |
+| k=+1 | 0.167 ± 0.014 | 0.850 | 0.196 | 0.022 | **+3.64** |
+| k=+2 | **0.190 ± 0.013** | **0.914** | 0.208 | 0.023 | **+5.84** |
+
+**The control loses a third of its coordination and keeps falling (0.203 → 0.127); k=+2 ends
+ABOVE where it started (0.169 → 0.190) and holds ~2× the forward progress.** Monotone in `k`.
+
+**★ The wrong-sign arm is what makes this defensible.** `k=−1` carries a *comparable weight
+spread* (`cw_spr` 0.92 vs k=+2's 0.98 in the recovered window) and performs like the control
+(t = −0.43), with the worst locking-given-oscillation of any arm (0.158). ⇒ **The effect is not
+"unequal weights"; it is weights in the right direction.** That is the (c) loop-isolation control
+passing, and it is the check that separates this from a stiffness artifact.
+
+> #### ⚠️ THE HONEST DECOMPOSITION — most of the gap is SUPPORT, not tighter phase-locking
+> `plv_w ≤ plv_wn` by construction, and the arms differ in support, so the raw gap is partly
+> mechanical. Split out:
+>
+> | | k=+2 vs control |
+> |---|---|
+> | raw `plv_w` gap | **+50 %** |
+> | support (`plv_wn`) gap | **+37 %** |
+> | locking GIVEN oscillation | **+10 %** |
+>
+> **So the claim is resilience, not coordination quality.** After a leg dies, precision-weighted
+> coupling keeps the surviving legs oscillating and the body moving, where the uniform average
+> lets the whole gait wind down. Phase-locking *given* that the legs are moving improves only
+> slightly. **Mechanism, and it is the predicted one:** under a uniform average the dead leg's
+> frozen, meaningless phase still commands 1/3 of every survivor's coupling authority and drags
+> them down with it; the activity term collapses its weight and the survivors couple to each other.
+> Saying "coordination improved 50 %" here would be the same error as the retracted coherence
+> claim, one level subtler.
+
+#### 3. ★ IT REPLICATES ON THE FIXED SUBSTRATE — re-run with `chassis_collides=1`
+
+The (d) result above was measured on the **ghost chassis** (entry immediately below), in the one
+regime where the ghost matters most: a body that collapses after a leg dies was partly sinking
+*through* the floor rather than resting *on* it. That is a textbook §3.2 rule-7 exposure, so the
+whole test was re-run with the chassis solid, n=6, same arms.
+
+| arm | ghost `plv_w` recovered | **solid `plv_w` recovered** | solid support | solid t vs control |
+|---|---|---|---|---|
+| k=0 control | 0.127 ± 0.023 | 0.139 ± 0.018 | 0.768 | — |
+| k=−1 wrong-sign | 0.121 ± 0.025 | **0.121 ± 0.015** | 0.837 | **−1.88** |
+| k=+2 | 0.190 ± 0.013 | **0.187 ± 0.028** | 0.909 | **+3.53** |
+
+**Every conclusion holds**, and the decomposition gets *better*: raw gap +50 % → +35 %, support
+gap +37 % → **+18 %**, locking-given-oscillation +10 % → **+14 %**. So on the honest substrate a
+larger share of the effect is genuine phase-locking and less of it is bookkeeping. The wrong-sign
+arm sits slightly *below* the control (t = −1.88), which is a cleaner control result than the
+ghost run gave. **No retraction required — recorded because a result that survives a substrate
+fix is worth more than one that was never tested against it.**
+
+#### 4. On the DEPLOYED base it is worse, and that is consistent
+
+`..._imufused__cp20.json` (the CURRENT launcher entry + `couple_prec_gain=2`), n=4 unperturbed:
+net_z 4.72 ± 1.01 (ties, **4× the variance**), straight 0.69 vs 0.73, `plv_w` **0.16 vs 0.20**,
+tilt_sd 0.065 → **0.116** (one seed 0.210), steps 50 → 85, 0 falls, `cw_spr` 0.63. **Strengthening
+the learned path on the deployed base makes things worse** — the same direction as the `ctrl_lr`
+result (0.05/0.10 on the deployed base destabilised) and the same explanation: the scaffold gains
+were hand-tuned around a *weak* learned signal, so both amplifying and removing it move away from
+that tuning. The arm is allowlisted so the lever can be ablated on the robot that actually ships,
+not because it is a better walk.
+
+**Verdict: `NULL` unperturbed (mild `REGRESSION` on `plv` at high `k`, clearly worse on the
+deployed base), `WORKING` under perturbation on BOTH substrates, at n=6 = a SIGNAL, not a
+finding.** The effect is loud (t = 5.84) and dose-dependent
+with a clean wrong-sign control, which is the §3.3 bar for "promote the direction". **Not promoted
+into the deployed stack**, because on the healthy gait it costs a little coordination and buys
+nothing — this is a *damage-response* lever, and the honest place for it is default-off behind the
+case that motivates it.
+
+**To make it a finding:** n≥20 with varied world seeds; the arena as well as the corridor (the
+corridor's self-centering walls mechanically assist a hobbled body); and a second lesioned leg to
+show it is not leg-0-specific. **Also worth testing next:** the same weighting on a *recoverable*
+perturbation, once one exists — see the binary-degradation box below, which is why this had to be
+tested against a dead leg rather than a weak one.
+
+---
+
+### ★★★ 2026-08-04 — A DAMAGED LIMB IS *MORE* PREDICTABLE, WHICH INVERTS THE PREMISE OF PRECISION-WEIGHTED REFLEXES
+
+**This entry is about the substrate, not the lever, and it is the more important half of the
+day.** It was found while building the (d) test for `couple_prec_gain` (below) and it
+constrains every future proposal in the inferential-gain family.
+
+**The direction assumed** that a leg in trouble produces *more* prediction error, so
+weighting by `1/(tle+ε)` would down-weight it. **Measured, on the `nolearn2` base, cutting
+leg 0 mid-episode (n=3, tick 2500):**
+
+| lesion | `tle_cut` pre → acute → recovered | `amp_cut` pre → acute → recovered |
+|---|---|---|
+| torque ×0.2 | 0.236 → 0.232 → 0.255 | 0.708 → 0.672 → 0.719 |
+| torque ×0.0 | 0.235 → 0.217 → **0.165** | 0.725 → 0.317 → 0.189 |
+| action ×0.3 | 0.235 → 0.191 → 0.181 | 0.725 → 0.717 → 0.724 |
+| action ×0.0 | 0.235 → 0.106 → **0.061** | 0.725 → 0.124 → 0.016 |
+
+**The cut leg's own forward-model residual goes DOWN in every condition, monotonically with
+severity — to 26 % of baseline when the leg is dead.** A limb that moves less is easier to
+predict. So a precision weighting driven by prediction error alone would have *increased*
+its trust in the damaged leg: the exact opposite of the intent.
+
+⇒ **On a motor system, prediction error is not a proxy for competence — activity is.** The
+`amp_ema` numerator in `w = (amp/(tle+ε))^k` was added as a guard against the LateralVoter's
+documented flat-channel trap (`LateralVoter.cpp:80`) and against the coord-fitness lesson
+("the activity term is the homeokinetic normalisation that kills both"). It turns out not to
+be a guard against an edge case: **it is doing the entire job.** At action ×0.0 the weight
+falls 0.725/0.235 = 3.09 → 0.016/0.061 = 0.26 — a 12× down-weight, produced wholly by the
+activity term while the error term pushed the other way. **Any future `1/(tle+ε)` reflex
+weighting on this body must carry an activity term, and the burden is on the proposal to say
+what its activity term is.**
+
+> #### ⚠️ AND THE BODY HAS NO GRADED DEGRADATION REGIME — every lesion channel is binary
+>
+> Two independent channels were tried and both are all-or-nothing, for two *different*
+> reasons. This is a harness finding that any future (d) test has to design around.
+>
+> 1. **Torque ceiling — the body is not torque-limited.** At ×0.05 the cut leg's amplitude is
+>    0.720 against 0.725 untouched: unchanged. `tq_sat` = **0.009**, i.e. the servos are
+>    saturated under 1 % of the time, so the ceiling is not the binding constraint and
+>    scaling it removes headroom the body never used. Only ×0.0 does anything.
+>    **Corroborates two existing entries from a third direction:** "authority was never the
+>    binding constraint" (§4) and the gravity-scaffold `NULL` ("servos have ~4× headroom").
+> 2. **Commanded action — an existing homeostat silently absorbs it.** At ×0.3 the leg's
+>    commanded motion is cut 70 % and its *measured* amplitude does not move (0.725 → 0.717
+>    → 0.724), because `amp_homeo_gain = 0.01` is live on `nolearn2` (it is not an `*_lr`
+>    param, so the "all learning off" ablation never touched it) and drives
+>    `L.amp_gain += g·(amp_target − L.amp_ema)` until the amplitude returns to target.
+>    `kAmpGainMax = 5.0` gives it ample range to cancel a 3.3× deficit. Forward progress
+>    *does* halve (`dz_rate` 0.058 → 0.031), so the compensation is real but not free.
+>
+> **So the only severity that perturbs coordination is a dead leg, and a dead leg makes the
+> body collapse rather than adapt** (`dz_rate` 0.058 → 0.012, and `plv_win` support falls to
+> 0.90 acute / 0.66 recovered — the instrument itself starts going out from under the
+> measurement, which is the 2026-08-03 rule arriving yet again).
+>
+> **★ The positive finding hiding in (2): the body ALREADY re-organises around a degraded
+> limb, and it does it with the amplitude homeostat, not with coordination.** That is an
+> adaptive response to an un-signalled perturbation — a (d)-shaped result — produced by a
+> mechanism nobody proposed for it. It is worth measuring deliberately.
+
+**New instruments this required** (all report-only, all verified against a byte-identical
+base): per-leg `tle_leg[4]` / `amp_leg[4]` (the body-level `motor_tle` collapses exactly the
+question this direction turns on), `panic_eff`, and `interleg_plv_win` — a trailing-window
+PLV (EMA phasor, τ ≈ 500 ticks). **`interleg_plv` is a whole-run accumulator and therefore
+structurally cannot express a before/after**, so until now no perturbation could be scored on
+coordination at all. Its null was **measured, not derived** (40 sims): **0.090 ± 0.066
+random-phase, 0.984 locked, 0.200 ± 0.010 on the deployed/`nolearn2` body.** And
+`seedavg.py` now parses `plv`/`plv_n`/`step_cv`/`coh`/`motor_tle` — they have been in the
+JSONL since 2026-08-03 and the parser never read them, so **every A/B since has scored
+distance and steps while the operator's actual complaint went unmeasured.** A metric that
+exists but is unparsed is exactly as invisible as one that was never emitted.
+
+Also settled, and it removes a suspected confound rather than adding one: **`panic_duty` =
+0.00 on every seed.** Panic never fires on this base, so the `(1 − pe)` factor that already
+scales the coupling, stroke and rhythm terms is inert here and is not silently doing the work.
+
+---
+
 ### ★★★ 2026-08-03 — THE SUBSTRATE WAS NEVER WHAT EITHER OF US THOUGHT (four defects, one chain)
 
 **Operator-driven, from a single observation: "with stiffness and damping at zero the legs
@@ -1701,7 +2257,23 @@ have at the Godot-bridge layer.
 
 ## 5. Open frontier
 
-- **★★★ MAKE THE REFLEX GAINS INFERENTIAL — the next direction (2026-08-03).** The deployed
+- **★★★ MAKE THE REFLEX GAINS INFERENTIAL — FIRST LEVER MEASURED 2026-08-04, see the boxed
+  entry at the top of §2.** `couple_prec_gain` is `NULL` on the healthy gait and `WORKING` on the
+  (d) test (coordination after a leg dies: control 0.127, k=+2 **0.190**, t = 5.84, wrong-sign
+  control flat at 0.121) — but the honest decomposition says the effect is **resilience** (the
+  survivors keep oscillating) rather than tighter phase-locking. **Two things the measurement
+  changed about the direction itself, both of which any next lever in this family must absorb:**
+  (i) a damaged limb's prediction error goes **DOWN**, not up, so `1/(tle+ε)` *alone* would
+  up-weight the broken leg — the activity term is doing the work, not the error term;
+  (ii) there is no `RealityToken.tle` at the motor layer at all (no `EPM`, no `LateralVoter` in
+  any of the 139 modern picrawler configs), so this family runs on MotorEPM's own homeokinetic
+  forward-model residual and must be *reported* as that, not as an EPM dual-TLE.
+  **Still open in the family:** `postural_gain` and `stroke_gain` (note `stroke_gain` drives hip1,
+  railed 56 % of leg-ticks, so its modulation is partly eaten by the clamp), and the
+  scalar-magnitude form `g·(1 + k·tanh z)` rather than the neighbour-weight form.
+  Run summaries: [sweep](run_summaries/2026-08-04_inferential-coupling-gain-sweep.html) ·
+  [(d) test](run_summaries/2026-08-04_inferential-coupling-d-test-lesion.html).
+- **★★★ MAKE THE REFLEX GAINS INFERENTIAL — the original statement of the direction (2026-08-03).** The deployed
   rules are legitimate as an **innate** layer (a lamprey's swimming rhythm is a spinal CPG;
   animals do not derive locomotion from nothing). What makes them a *script* rather than
   *inference* is that their gains are CONSTANTS. The line that matters is not hand-written vs
@@ -1887,6 +2459,8 @@ proposals, not dead entries.*
 | **Learned hip2** | flat, against a stable base | A regime where the femur must do real work — steep terrain, step-over. It was refuted as a *gait* lever, not as a terrain lever |
 | **Gait symmetry (all forms)** | flat, ~35 A/Bs; the asymmetry is load-bearing for straightness | A different base gait exists whose straightness does not depend on the tripod-skid. Amplitude symmetry ≠ functional symmetry — any retry must target functional symmetry |
 | **Active-balance reflex** | headless (inert — `publish_tilt` off) and UI (destabilizing — maps tilt→hip2, i.e. pitch/roll, not yaw) | It is redesigned as a real closed-loop attitude controller. The existing verdict is mostly a **DEAD_CODE + wrong-target** finding, not a verdict on balance |
+| **★ `couple_prec_gain` on the HEALTHY gait** | corridor, n=6, `nolearn2` base — `NULL`, and mildly negative on `plv` at high `k` | **It is not refuted, it is SCENARIO-SCOPED, and the scope is the point: it is a DAMAGE-RESPONSE lever.** On an intact body there is nothing for a precision weighting to buy, and it costs a little coordination; on the (d) test it is worth t = 5.84. Retry as a *deployed* lever only if a regime exists where the body is routinely partly-broken (rough terrain, a real chassis with a weak servo). Meanwhile it belongs default-off, and the (d) result is the case for it |
+| **Torque-ceiling lesion** (`LESION_MODE=torque`) | as a (d) perturbation — measured not to perturb (`tq_sat` = 0.009; ×0.05 leaves amplitude at 0.720 vs 0.725) | **Refuted as a PERTURBATION, not as infrastructure** — kept default-off. Its null is itself a finding (the body is not torque-limited). Retry on a body whose servos actually saturate, or use it to model a *real* servo-saver rather than to inject damage |
 
 ---
 

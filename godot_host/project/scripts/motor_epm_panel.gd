@@ -41,6 +41,9 @@ const _SLIDERS: Array = [
 	# gait oscillation
 	{"key": "amp_target",        "label": "amp_target  (osc size)",     "min": 0.0,  "max": 1.5,  "step": 0.05},
 	{"key": "coupling_gain",     "label": "coupling_gain  (Rung3 sync)","min": 0.0,  "max": 2.0,  "step": 0.05},
+	# 0 = the legacy UNIFORM neighbour mean.  Above 0 each leg listens to its neighbours in
+	# proportion to how well each of THEM predicts itself; below 0 is the wrong-sign control.
+	{"key": "couple_prec_gain",  "label": "couple_prec_gain (trust)",   "min": -2.0, "max": 2.0,  "step": 0.1},
 	{"key": "stroke_gain",       "label": "stroke_gain  (fwd thrust)",  "min": 0.0,  "max": 2.0,  "step": 0.05},
 	# balance / posture
 	{"key": "balance_gain",      "label": "balance_gain  (vestibular)", "min": -3.0, "max": 3.0,  "step": 0.05},

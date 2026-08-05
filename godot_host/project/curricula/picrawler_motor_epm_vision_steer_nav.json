@@ -8,6 +8,6 @@
       "publish_vision": true,
       "vision_steer": true
     },
-    "joint_backend": "g6dof"
+    "joint_backend": "hinge"
   }
 ]

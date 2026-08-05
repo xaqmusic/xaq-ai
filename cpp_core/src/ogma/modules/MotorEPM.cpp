@@ -221,6 +221,21 @@ ParamSchema MotorEPM::params_schema() const {
         {"coupling_gain", ParamMutability::HotMutable,
          "Rung 3 inter-leg Kuramoto coupling strength. Couples the four legs' own emergent phases toward the gait_phase offsets (entrains the twitching legs to the active one, phase-locks all four). 0 = off (one-leg-spins regime); raise to watch the legs synchronize.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"heading_trim_rate", ParamMutability::HotMutable,
+         "THE MISSING INTEGRAL TERM on heading. The controller is P+D only, so a persistent yaw disturbance leaves a NONZERO steady-state steer and one side's stroke sits permanently near its clamp (measured: right legs request 2.10 vs a +-1 limit, 77% clip duty, against 0.70 on the left) -- which is why steering authority is direction-dependent. This learns that DC effort and hands it back. Targets FUNCTIONAL symmetry (zero net yaw), NOT amplitude symmetry, which is where the ~35-lever symmetry family died. 0 = off, byte-identical. Try 1e-4.",
+         ParamValue{0.0}, ParamValue{-0.01}, ParamValue{0.01}},
+        {"heading_trim_leak", ParamMutability::HotMutable,
+         "Per-tick leak on heading_trim (fraction). MANDATORY >0: unbounded integrator windup is this codebase's characteristic failure shape (three documented cases). tau = 1/leak ticks.",
+         ParamValue{0.001}, ParamValue{0.0}, ParamValue{0.1}},
+        {"c_pair_init", ParamMutability::ConstructionOnly,
+         "Give left/right partner legs (0&1, 2&3) the SAME initial control law instead of independent random ones. The skid handedness is seed-random (R/L hip1 demand 3.07/4.35/0.69/0.97 across 4 seeds, and it still flips with all learning off), so no side should start with an advantage. stroke_signs still mirrors the output; fore/aft partners stay different. 0 = legacy per-leg random init. ⚠ Removes half the documented inter-leg symmetry breaker -- measure, do not assume.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"goal_bearing_topic", ParamMutability::ConstructionOnly,
+         "L1 NAV SETPOINT. ProprioToken [vx,vy], an EGOCENTRIC unit vector (vy = forward) naming where the nav layer wants to go; atan2(vx,vy) becomes the heading PD's bearing error. Empty (default) = the PD holds the spawn bearing exactly as before = BYTE-IDENTICAL. Deliberately NOT nav_topic: nav_on gates the whole heading PD off (P and D) plus the forward facing gate, which discards the variance collapse the PD exists for.",
+         ParamValue{std::string("")}},
+        {"couple_prec_gain", ParamMutability::HotMutable,
+         "PRECISION-WEIGHT the Kuramoto neighbour average by each neighbour's OWN prediction error: w_j = (amp_j/(tle_j+eps))^k, L1-normalised. 0 = the legacy uniform mean over the other legs (byte-identical). 1 = the LateralVoter's plain 1/(tle+eps) trust, one layer down: a leg pulls toward its neighbours in proportion to how well each of THEM predicts itself, so a flailing leg stops dragging the other three. NEGATIVE = the wrong-sign control arm (trust the leg that predicts itself WORST). k is a sharpness exponent, not a scale: the normalised weights are invariant to a common factor on the precisions, so nothing here is tuned to the residual's magnitude.",
+         ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"phase_joint", ParamMutability::ConstructionOnly,
          "Proprio joint index (0=hip1, 1=hip2, 2=knee) whose motion derives the per-leg oscillator phase L.phase (used by the Kuramoto coupling AND the stroke). -1 = knee (m-1, legacy). Set to 0 (hip1, the fore-aft locomotor joint) to lock coordination to the actual stride rhythm rather than the knee's faster flexion.",
          ParamValue{int64_t(-1)}, std::nullopt, std::nullopt},
@@ -537,6 +552,11 @@ ParamMap MotorEPM::current_params() const {
     m["hip2_tuck_target"] = hip2_tuck_target_;
     m["motor_gain"]       = motor_gain_;
     m["coupling_gain"]    = coupling_gain_;
+    m["heading_trim_rate"] = heading_trim_rate_;
+    m["heading_trim_leak"] = heading_trim_leak_;
+    m["c_pair_init"] = c_pair_init_;
+    m["goal_bearing_topic"] = ParamValue{goal_bearing_topic_};
+    m["couple_prec_gain"] = couple_prec_gain_;
     m["phase_joint"]      = int64_t(phase_joint_);
     m["rhythm_gains"]     = rhythm_gains_;
     m["rhythm_offsets"]   = rhythm_offsets_;
@@ -662,6 +682,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "hip2_tuck_target", [&](auto const& v){ hip2_tuck_target_ = get_double(v, "hip2_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
     apply_param(params, "coupling_gain", [&](auto const& v){ coupling_gain_ = get_double(v, "coupling_gain"); });
+    apply_param(params, "heading_trim_rate", [&](auto const& v){ heading_trim_rate_ = get_double(v, "heading_trim_rate"); });
+    apply_param(params, "heading_trim_leak", [&](auto const& v){ heading_trim_leak_ = get_double(v, "heading_trim_leak"); });
+    apply_param(params, "c_pair_init", [&](auto const& v){ c_pair_init_ = get_double(v, "c_pair_init"); });
+    apply_param(params, "goal_bearing_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) goal_bearing_topic_ = *p; });
+    apply_param(params, "couple_prec_gain", [&](auto const& v){ couple_prec_gain_ = get_double(v, "couple_prec_gain"); });
     apply_param(params, "phase_joint",   [&](auto const& v){ phase_joint_   = int(get_int(v, "phase_joint")); });
     apply_param(params, "rhythm_gains",   [&](auto const& v){ rhythm_gains_   = get_double_vec(v, "rhythm_gains"); });
     apply_param(params, "rhythm_offsets", [&](auto const& v){ rhythm_offsets_ = get_double_vec(v, "rhythm_offsets"); });
@@ -784,6 +809,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     legs_.assign(n_legs_, Leg{});
     obj_target_.assign(n_legs_, Eigen::VectorXf());
     obj_weight_.assign(n_legs_, 0.0f);
+    sat_clip_leg_.assign(n_legs_, 0.0);
+    sat_pre_leg_.assign(n_legs_, 0.0);
     obj_seen_.assign(n_legs_, 0);
     obj_vel_target_.assign(n_legs_, Eigen::VectorXf());
     obj_vel_weight_.assign(n_legs_, 0.0f);
@@ -912,6 +939,10 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     // Coherent-scaffold phase (L-1b): an optional global CPG phase (rhythm.cpg.body,
     // ProprioToken [cos φ, sin φ]) to drive the per-joint rhythm from — a CLEAN entrained phase,
     // so all joints lock to ONE frequency (intra-leg coherence) vs the noisy proprio L.phase.
+    if (!goal_bearing_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(goal_bearing_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_goal_bearing(p); }));
+    }
     if (!cpg_phase_topic_.empty())
         sub_ids_.push_back(bus_->subscribe(
             cpg_phase_topic_, SubscriptionKind::Direct,
@@ -1032,6 +1063,17 @@ void MotorEPM::handle_imu(MessagePtr payload) {
     // the correction term.  Zeroed on respawn in handle_event (new spawn = new origin).
     heading_bearing_ = std::clamp(heading_bearing_ + yaw_rate_ * kBearingIntegDt,
                                   -kBearingClamp, kBearingClamp);
+}
+
+// L1 nav setpoint.  An EGOCENTRIC unit vector [vx, vy] (vy = forward) from the nav layer.
+void MotorEPM::handle_goal_bearing(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 2) return;
+    gb_x_ = pt->values[0];
+    gb_y_ = pt->values[1];
+    gb_seen_ = true;
+    ++gb_msgs_;
 }
 
 void MotorEPM::handle_nav(MessagePtr payload) {
@@ -1827,6 +1869,7 @@ void MotorEPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (key == "hip2_tuck_target") hip2_tuck_target_ = get_double(value, "hip2_tuck_target");
     else if (key == "motor_gain") motor_gain_ = get_double(value, "motor_gain");
     else if (key == "coupling_gain") coupling_gain_ = get_double(value, "coupling_gain");
+    else if (key == "couple_prec_gain") couple_prec_gain_ = get_double(value, "couple_prec_gain");
     else if (key == "coupling_fade_start") coupling_fade_start_ = get_int(value, "coupling_fade_start");
     else if (key == "coupling_fade_end")   coupling_fade_end_   = get_int(value, "coupling_fade_end");
     else if (key == "rhythm_gains")   rhythm_gains_   = get_double_vec(value, "rhythm_gains");
@@ -2026,7 +2069,19 @@ void MotorEPM::ensure_leg_init(int leg, int n) {
     Leg& L = legs_[leg];
     if (L.initialized) return;
     int m = motor_dim_;
-    std::mt19937 rng(static_cast<uint32_t>(base_seed_ ^ (0x9E3779B9u + uint32_t(leg))));
+    // ---- 2026-08-04 · c_pair_init: SHARE the init seed between left/right partners ------
+    // The handedness of this body's skid is SEED-RANDOM, not structural: across 4 seeds the
+    // right/left hip1 demand ratio measured 3.07, 4.35, 0.69, 0.97 -- seed 3 is LEFT-heavy --
+    // and it still flips with all controller learning off, so it is the 0.01*random C init
+    // locked in by the gait as a stable attractor.  This gives the L/R partners the SAME
+    // initial control law (legs 0&1, 2&3); stroke_signs still mirrors their OUTPUT, and the
+    // fore/aft partners stay different.
+    // ⚠ The class header warns that the per-leg random init is the "inter-leg symmetry
+    // breaker" that avoids v6-premotor-bilateral-mirror-collapse.  This removes HALF of it
+    // (L/R) and keeps the fore/aft difference -- an empirical question, which is why it is
+    // default-off and measured rather than argued.
+    const uint32_t init_leg = (c_pair_init_ > 0.0) ? uint32_t(leg & ~1) : uint32_t(leg);
+    std::mt19937 rng(static_cast<uint32_t>(base_seed_ ^ (0x9E3779B9u + init_leg)));
     std::normal_distribution<float> nd(0.0f, 1.0f);
     L.n = n;
     L.A = Eigen::MatrixXf::Zero(n, m);
@@ -2375,6 +2430,25 @@ void MotorEPM::tick(uint64_t tick_id) {
     //   commit (C): explore_mult damps the phase-search σ + noise; stroke gets a thrust add.
     //   flow (D):   flow_quality = magnitude·predictability; amplifies stroke ∝ flow.
     const float commit_amt   = float(progress_commit_gain_) * commit_boost_;      // 0..3
+    // ---- 2026-08-04 · THE MISSING INTEGRAL TERM ---------------------------------------
+    // The heading controller is P+D only -- a grep for an I term returns nothing.  With a
+    // persistent yaw disturbance (which this body HAS: a seed-random skid handedness) a PD
+    // settles at a NONZERO steady-state steer, so one side's stroke sits permanently closer
+    // to its clamp.  Measured: right legs request 2.10 against a +-1 limit and clip 77% of
+    // leg-ticks while the left request 0.70 -- so a turn needing MORE right thrust does
+    // nothing and steering authority becomes direction-dependent.  An integrator LEARNS that
+    // DC effort and hands it back, freeing the P term for transients.  It targets FUNCTIONAL
+    // symmetry (zero net yaw), not amplitude symmetry -- which is what the ledger says any
+    // symmetry retry must do, the ~35-lever symmetry family having died on amplitude matching.
+    // ⚠ LEAK AND CLAMP ARE MANDATORY: unbounded integrator windup is this codebase's
+    // characteristic failure shape (three documented cases).
+    if (heading_trim_rate_ != 0.0) {
+        const float berr = gb_seen_ ? std::atan2(gb_x_, gb_y_) * 0.318309886f
+                                    : -heading_bearing_;
+        heading_trim_ += float(heading_trim_rate_) * berr;
+        heading_trim_ *= (1.0f - float(heading_trim_leak_));
+        heading_trim_  = std::clamp(heading_trim_, -kHeadTrimMax, kHeadTrimMax);
+    }
     const float explore_mult = std::max(0.0f, 1.0f - commit_amt);                 // C: damp exploration
     explore_mult_diag_ = explore_mult;   // diag: is the coordination probe already damped to 0?
     float flow_quality = 0.0f;
@@ -2881,12 +2955,23 @@ void MotorEPM::tick(uint64_t tick_id) {
             bool any = false;
             for (int i = 0; i < n_legs_; ++i)
                 for (int j = i + 1; j < n_legs_ && j < 4; ++j) {
-                    if (legs_[i].amp_ema < kPlvAmpFloor || legs_[j].amp_ema < kPlvAmpFloor)
-                        continue;                       // one of them is not moving
+                    const int k = i * 4 + j;
+                    const bool admit = !(legs_[i].amp_ema < kPlvAmpFloor
+                                      || legs_[j].amp_ema < kPlvAmpFloor);
+                    // WINDOWED phasor: decay EVERY tick, add only when admitted.  A pair
+                    // that stops oscillating decays to 0 rather than freezing at a stale
+                    // value -- see the header note on the frozen-body degeneracy.
+                    plv_win_cos_[k] *= (1.0 - kPlvWinAlpha);
+                    plv_win_sin_[k] *= (1.0 - kPlvWinAlpha);
+                    plv_win_sup_[k] *= (1.0 - kPlvWinAlpha);
+                    if (!admit) continue;               // one of them is not moving
                     const float d = legs_[i].phase - legs_[j].phase;
-                    plv_cos_[i * 4 + j] += std::cos(d);
-                    plv_sin_[i * 4 + j] += std::sin(d);
-                    plv_pair_n_[i * 4 + j] += 1;
+                    plv_win_cos_[k] += kPlvWinAlpha * std::cos(d);
+                    plv_win_sin_[k] += kPlvWinAlpha * std::sin(d);
+                    plv_win_sup_[k] += kPlvWinAlpha;
+                    plv_cos_[k] += std::cos(d);
+                    plv_sin_[k] += std::sin(d);
+                    plv_pair_n_[k] += 1;
                     any = true;
                 }
             if (any) ++plv_n_;
@@ -2899,15 +2984,40 @@ void MotorEPM::tick(uint64_t tick_id) {
         // phase toward the gait offset relative to every other leg — entrains the
         // twitchers and phase-locks all four.
         if (!warmup && coupling_eff_ > 0.0f && n_legs_ > 1 && int(gait_phase_.size()) == n_legs_) {
-            float c = 0.0f;
+            // couple_prec_gain (k) turns the UNIFORM neighbour mean into a PRECISION-WEIGHTED
+            // one — see the header note.  k must be tested against `!= 0.0`, never `> 0.0`:
+            // the negative arm is this lever's wrong-sign control, and a `> 0.0` guard has
+            // already silently eaten a negative gain three times in this file (ledger 4).
+            const bool prec_on = (couple_prec_gain_ != 0.0);
+            float c = 0.0f, wsum = 0.0f, wmin = 3.4e38f, wmax = 0.0f; int wn = 0;
             for (int j = 0; j < n_legs_; ++j) {
                 if (j == leg || !legs_[j].initialized) continue;
                 float dphi = (legs_[j].phase - L.phase)
                            - (float(gait_phase_[j]) - float(gait_phase_[leg]));
-                c += std::sin(dphi);
+                float w = 1.0f;
+                if (prec_on) {
+                    // Neighbour j's OWN precision: how well it predicts itself, scaled by
+                    // whether it is actually moving.  legs_[j].tle_ema for j > leg carries
+                    // last tick's value (the leg loop is sequential) — the same one-tick
+                    // skew legs_[j].phase already has, and negligible at tau ~ 50 ticks.
+                    const float prec = legs_[j].amp_ema
+                                     / (legs_[j].tle_ema + kCouplePrecEps);
+                    w = std::pow(std::max(1e-6f, prec), float(couple_prec_gain_));
+                    w = std::clamp(w, kCoupleWMin, kCoupleWMax);
+                }
+                c += w * std::sin(dphi);
+                wsum += w; wmin = std::min(wmin, w); wmax = std::max(wmax, w); ++wn;
             }
+            if (prec_on && wn > 0) {   // report-only consumer check (CLAUDE.md 3.2 rule 5)
+                const float wmu = wsum / float(wn);
+                if (wmu > 1e-12f) { cw_spr_acc_ += double(wmax - wmin) / double(wmu); ++cw_n_; }
+            }
+            // GAIN-0 GUARD, exact: at k = 0 every w is 1, so c is the legacy sum of sines and
+            // the divisor is the legacy (n_legs_ - 1) — not wsum, which would differ from it
+            // during the transient where a leg is not yet initialised.
+            const float denom = prec_on ? std::max(1e-6f, wsum) : float(n_legs_ - 1);
             // Panic decouples the legs (break out of the stuck phase-lock).
-            y[m - 1] += (1.0f - pe) * coupling_eff_ * c / float(n_legs_ - 1);
+            y[m - 1] += (1.0f - pe) * coupling_eff_ * c / denom;
         }
         // Directional propulsion drive on hip1 (joint 0), phase-locked to the
         // leg's step phase.  stroke_signs sets the per-leg push direction
@@ -2941,9 +3051,22 @@ void MotorEPM::tick(uint64_t tick_id) {
             // channel (folds into the stroke magnitude → real L/R thrust differential that
             // TURNS the body) — not the weak additive hip1 nudge it was before.  Gated off
             // during nav (a target owns steering then).  Both gains 0 = byte-identical off.
+            // ---- 2026-08-04 · THE L1 NAV SETPOINT ----------------------------------
+            // WAS: `gain_P * (-heading_bearing_)` — the setpoint was implicitly 0, i.e.
+            // "hold the bearing you spawned on".  The nav layer publishes an EGOCENTRIC
+            // unit vector, so the angle to it IS the bearing error and simply replaces
+            // that term.  The D term is untouched, so the yaw damping that produced the
+            // variance collapse still applies to the NEW setpoint — the PD becomes the
+            // nav layer's ACTUATOR rather than its competitor.
+            // No publisher (or no token yet) => bearing_err == -heading_bearing_
+            // => BYTE-IDENTICAL.
+            constexpr float kInvPiL = 0.318309886f;
+            const float bearing_err = gb_seen_ ? std::atan2(gb_x_, gb_y_) * kInvPiL
+                                               : -heading_bearing_;
             float hold_steer = nav_on ? 0.0f
-                : float(heading_bearing_hold_gain_) * (-heading_bearing_)
-                + float(heading_hold_gain_)         * (-yaw_rate_ema_);
+                : float(heading_bearing_hold_gain_) * bearing_err
+                + float(heading_hold_gain_)         * (-yaw_rate_ema_)
+                + heading_trim_;                    // the learned DC effort (I term)
             float steer_eff = float(steer_) + float(nav_gain_) * bearing - head_term + hold_steer;
             // Facing-gate on the FORWARD thrust (only when a target is active):
             // walk toward what you face.  fwd ∝ tc_y (forward bearing component):
@@ -3189,6 +3312,13 @@ void MotorEPM::tick(uint64_t tick_id) {
         // Phase-0 saturation instrument: the command as ASSEMBLED (HK + every additive
         // term), read immediately before the one and only clamp.  clip_duty is the
         // fraction of leg-ticks the body never saw the requested command.
+        // Per-leg hip1 split — see the header: the pooled figure averages the two sides
+        // together and therefore cannot see a rectified differential.
+        if (!warmup && int(sat_clip_leg_.size()) == n_legs_ && m >= 1) {
+            const double a0 = std::fabs(double(y[0]));
+            sat_pre_leg_[leg] += a0;
+            if (a0 > 1.0) sat_clip_leg_[leg] += 1.0;
+        }
         if (!warmup && int(sat_clip_hits_.size()) == m) {
             for (int j = 0; j < m; ++j) {
                 const double a = std::fabs(double(y[j]));
@@ -3277,6 +3407,31 @@ float MotorEPM::interleg_plv() const {
                    / double(plv_pair_n_[k]);
             ++c;
         }
+    return c ? float(acc / c) : 0.0f;
+}
+
+float MotorEPM::interleg_plv_win() const {
+    // Trailing-window twin of interleg_plv().  Mean over pairs of |z_ij|, where z_ij is the
+    // EMA phasor above (tau ~ 500 ticks).  Unlike the whole-run form this CAN express a
+    // before/after, which is what any perturbation / (d) test needs.  Read beside
+    // interleg_plv_win_support(): |z| <= support by construction, so a low reading with a
+    // low support means "not moving", not "not coordinated".
+    double acc = 0.0; int c = 0;
+    for (int i = 0; i < n_legs_; ++i)
+        for (int j = i + 1; j < n_legs_ && j < 4; ++j) {
+            const int k = i * 4 + j;
+            acc += std::sqrt(plv_win_cos_[k] * plv_win_cos_[k]
+                           + plv_win_sin_[k] * plv_win_sin_[k]);
+            ++c;
+        }
+    return c ? float(acc / c) : 0.0f;
+}
+float MotorEPM::interleg_plv_win_support() const {
+    // Fraction of the trailing window in which a pair was genuinely oscillating, averaged
+    // over pairs.  0 = nothing moved, so plv_win carries no information.
+    double acc = 0.0; int c = 0;
+    for (int i = 0; i < n_legs_; ++i)
+        for (int j = i + 1; j < n_legs_ && j < 4; ++j) { acc += plv_win_sup_[i * 4 + j]; ++c; }
     return c ? float(acc / c) : 0.0f;
 }
 
@@ -3543,6 +3698,64 @@ nlohmann::json MotorEPM::snapshot_state() const {
     mod["gait_coherence"] = gait_coherence();   // ⚠ INSTANTANEOUS — see interleg_plv
     mod["interleg_plv"]   = interleg_plv();     // the honest coordination read
     mod["plv_support"]    = double(plv_n_);     // ticks with genuine oscillation behind it
+    // Trailing-window twin (2026-08-04).  The whole-run form above cannot express a
+    // before/after, so it cannot score a perturbation; this one can.  ALWAYS read beside
+    // plv_win_support.
+    mod["interleg_plv_win"]  = interleg_plv_win();
+    mod["plv_win_support"]   = interleg_plv_win_support();
+    // PER-PAIR windowed PLV, order (0,1)(0,2)(0,3)(1,2)(1,3)(2,3).  The pooled mean above
+    // cannot answer the question a LESION raises: when one leg is dead its three pairs are
+    // dragged toward 0 and swamp whatever the SURVIVORS are doing, so a three-legged gait
+    // that is perfectly coordinated still reads ~half the pooled value.  Emitted per pair so
+    // any subset can be scored — specifically "the surviving legs, among themselves".
+    {
+        std::vector<double> pw, ps;
+        for (int i = 0; i < n_legs_; ++i)
+            for (int j = i + 1; j < n_legs_ && j < 4; ++j) {
+                const int k = i * 4 + j;
+                pw.push_back(std::sqrt(plv_win_cos_[k] * plv_win_cos_[k]
+                                     + plv_win_sin_[k] * plv_win_sin_[k]));
+                ps.push_back(plv_win_sup_[k]);
+            }
+        mod["plv_win_pairs"] = pw;
+        mod["plv_win_pair_sup"] = ps;
+    }
+    // ---- 2026-08-04 · PER-LEG PREDICTION ERROR (the inferential-gain direction).
+    // tle_ema_mean() has always been reported as ONE body-level number, so the question the
+    // precision-weighting direction turns on — do the four legs differ in how well they
+    // predict themselves? — has never been answerable.  Emitted per leg, uncollapsed, so
+    // Python can window it around a perturbation.  amp_leg is its mandatory companion: a
+    // frozen leg is trivially predictable (tle -> 0) and would otherwise read as the most
+    // trustworthy leg in the body.  ⚠ An exactly-0.0000 entry means a limb that never moved
+    // or was never initialised, NOT a perfect model.
+    {
+        std::vector<double> tl, al;
+        tl.reserve(legs_.size()); al.reserve(legs_.size());
+        for (auto const& L : legs_) {
+            tl.push_back(L.initialized ? double(L.tle_ema) : -1.0);   // −1 = not initialised
+            al.push_back(L.initialized ? double(L.amp_ema) : -1.0);
+        }
+        mod["tle_leg"] = tl;
+        mod["amp_leg"] = al;
+    }
+    // Panic override.  `(1 - pe)` multiplies the coupling, stroke and rhythm terms, so the
+    // deployed stack ALREADY carries a crude surprise-modulated gain — driven by a
+    // hand-specified distress scalar rather than by the agent's own prediction error.  It
+    // was never instrumented, so it is an unmeasured confound in every gain A/B.
+    // ⚠ Instantaneous: read its DUTY over the run, not one sample (the gait_coherence trap).
+    mod["panic_eff"] = double(panic_) * panic_strength_;
+    // CONSUMER CHECK for couple_prec_gain (CLAUDE.md §3.2 rule 5, and the
+    // postural_gain_joints shape: a knob that silently does nothing).  The weights are
+    // mean-normalised, so couple_w_mean MUST read 1.00 and couple_w_spr = (max−min)/mean is
+    // the read that matters: it must scale monotonically with |k|.  A FLAT spread across a
+    // gain sweep means the lever never fired ⇒ a measurement outcome, not a verdict.
+    // CONSUMER CHECK for the nav setpoint: goal_bearing_msgs == 0 with a topic configured
+    // means the publisher never fired and the PD is silently still holding the spawn bearing.
+    mod["heading_trim"] = double(heading_trim_);   // consumer check for the I term
+    mod["goal_bearing_msgs"] = double(gb_msgs_);
+    mod["goal_bearing_err"]  = gb_seen_ ? double(std::atan2(gb_x_, gb_y_) * 0.318309886f) : 0.0;
+    mod["couple_w_spr"]  = cw_n_ ? cw_spr_acc_ / double(cw_n_) : 0.0;
+    mod["couple_w_mean"] = cw_n_ ? 1.0 : 0.0;   // 0 = never evaluated (k=0, or coupling off)
     // ★ INTRA-LEG COORDINATION (2026-08-03).  The operator observed, for the first time,
     // hip2 and knee working TOGETHER to lift the chassis — where the hand-built reflexes
     // only ever drove one or the other.  Those two joints share foot-height authority
@@ -3587,6 +3800,21 @@ nlohmann::json MotorEPM::snapshot_state() const {
             duty_mean /= double(mdim);
         }
         mod["clip_duty_j"] = duty;  mod["clip_duty"] = duty_mean;
+        {   // per-leg hip1: LEFT legs are 0,2 and RIGHT are 1,3 (the `side` pattern), so a
+            // rectified turn shows as one side's clip duty pinned while the other's falls.
+            // ⚠ sat_n_ counts LEG-ticks (it is incremented inside the per-leg loop), while
+            // these accumulate once per leg — so the per-leg divisor is sat_n_/n_legs_.
+            // Using sat_n_ directly made every figure exactly 4x too small; caught by
+            // cross-checking the mean against the pooled clip_h1/pre_h1.
+            std::vector<double> cl(n_legs_, 0.0), pl(n_legs_, 0.0);
+            const double per_leg_n = (n_legs_ > 0) ? sat_n_ / double(n_legs_) : 0.0;
+            for (int i = 0; i < n_legs_ && per_leg_n > 0.0; ++i) {
+                cl[i] = sat_clip_leg_[i] / per_leg_n;
+                pl[i] = sat_pre_leg_[i]  / per_leg_n;
+            }
+            mod["clip_h1_leg"] = cl;
+            mod["pre_h1_leg"]  = pl;
+        }
         mod["pre_mag_j"]   = pmag;  mod["pre_max_j"] = pmax;
         mod["hk_mag_j"]    = hkm;   mod["hk_share"]  = pre_sum > 1e-9 ? hk_sum / pre_sum : 0.0;
     }
@@ -3827,6 +4055,25 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     // consumer check: 0 with stroke_phase_src > 0 means the clock never locked, which on
     // this stack means contact_topic (or torque_topic) is unwired and the stroke is
     // silently still riding L.phase — i.e. the arm you think you ran did not load.
+    // 2026-08-04 — mirrored from snapshot_state()'s `mod` dict so the live inspector sees
+    // the same coordination + per-leg-error read the headless JSONL does.
+    j["interleg_plv_win"] = interleg_plv_win();
+    j["plv_win_support"]  = interleg_plv_win_support();
+    j["panic_eff"]        = double(panic_) * panic_strength_;
+    j["goal_bearing_msgs"] = double(gb_msgs_);
+    j["goal_bearing_err"]   = gb_seen_ ? double(std::atan2(gb_x_, gb_y_) * 0.318309886f) : 0.0;
+    j["couple_w_spr"]     = cw_n_ ? cw_spr_acc_ / double(cw_n_) : 0.0;
+    j["couple_w_mean"]    = cw_n_ ? 1.0 : 0.0;
+    {
+        std::vector<double> tl, al;
+        tl.reserve(legs_.size()); al.reserve(legs_.size());
+        for (auto const& L : legs_) {
+            tl.push_back(L.initialized ? double(L.tle_ema) : -1.0);
+            al.push_back(L.initialized ? double(L.amp_ema) : -1.0);
+        }
+        j["tle_leg"] = tl;
+        j["amp_leg"] = al;
+    }
     j["step_phase_src"]  = stroke_phase_src_;
     j["step_lock"]       = step_lock_frac_;      // frac of legs with a locked step clock
     j["step_period"]     = step_period_mean_;    // mean measured step period, ticks (~26-30)

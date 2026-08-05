@@ -271,7 +271,11 @@ func _ready() -> void:
 # upstream node (a focused dialog, a Control with a shortcut) eats
 # the event before our _input gets it, _unhandled_input picks it up
 # as a fallback so the toggle remains usable.
-const _TOGGLE_KEYS := [KEY_QUOTELEFT, KEY_F1]
+# 2026-08-05 — F1 REMOVED from the graph toggle.  It was double-bound: the graph panel and
+# the picrawler's clip recorder both claimed it, so [F1] "save a GOOD clip" silently opened
+# the brain graph instead and the clip machinery was unreachable by its documented key.
+# The operator uses ` for the graph anyway.  ` remains; F1 belongs to the clip recorder.
+const _TOGGLE_KEYS := [KEY_QUOTELEFT]
 
 func _input(event: InputEvent) -> void:
 	if _try_handle_toggle_or_delete(event):

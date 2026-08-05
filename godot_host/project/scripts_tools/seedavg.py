@@ -55,6 +55,15 @@ CORRIDOR_SAFE_Z = float(os.environ.get("SEEDAVG_SAFE_Z", 8.5))
 def parse(path):
     zs=[];xs=[];hy=[];ar=[];fv=[];ts=[]
     gc=[];cy=[];planted=[];tilt=[];lat=[];lifts=None;lifts0=None
+    # ---- 2026-08-04 · COORDINATION + PER-LEG ERROR.  These have been in the JSONL since
+    # 2026-08-03 (MotorEPM deliberately mirrored them out of diag_snapshot so a seedavg arm
+    # could see them) and this parser never read them, so every A/B in the campaign scored
+    # distance and steps while the operator's actual complaint -- "each leg has its own
+    # directive" -- went unmeasured.  A metric that exists but is unparsed is exactly as
+    # invisible as one that was never emitted.
+    plv=0.0;plv_n=0;coh=[];step_cv=0.0;mtle=[]
+    tleg=[[] for _ in range(4)];ameg=[[] for _ in range(4)]
+    tspr=[];plvw=[];plvwn=[];panic=[];cwspr=0.0;cwmean=0.0
     for line in open(path):
         line=line.strip()
         if '"x":' not in line or not line.startswith('{'): continue
@@ -85,6 +94,37 @@ def parse(path):
             if isinstance(ll,list) and ll:
                 if lifts0 is None: lifts0=list(ll)   # subtract the warmup's lifts
                 lifts=ll
+            # -- coordination.  plv/step_cv are whole-run accumulators inside MotorEPM, so
+            # the LAST sample is the run's value; coh/plv_w/motor_tle are instantaneous and
+            # must be TIME-AVERAGED (single-instant coherence is what produced the
+            # 2026-08-03 retraction -- its random-phase null is 0.450 +- 0.219).
+            if 'plv'    in d: plv=d['plv']
+            if 'plv_n'  in d: plv_n=d['plv_n']
+            if 'step_cv'in d: step_cv=d['step_cv']
+            if 'coh'    in d: coh.append(d['coh'])
+            if 'plv_w'  in d: plvw.append(d['plv_w'])
+            if 'plv_wn' in d: plvwn.append(d['plv_wn'])
+            if 'motor_tle' in d: mtle.append(d['motor_tle'])
+            if 'panic_eff' in d: panic.append(d['panic_eff'])
+            if 'cw_spr'  in d: cwspr=d['cw_spr']       # whole-run accumulator: last = value
+            if 'cw_mean' in d: cwmean=d['cw_mean']
+            # -- per-leg prediction error.  The inferential-gain direction turns on whether
+            # the four legs DIFFER in how well they predict themselves; motor_tle collapses
+            # exactly that.  Spread is computed PER SAMPLE and then time-averaged, because a
+            # precision weighting is computed per tick -- legs that swap rank over the run
+            # would show a near-zero spread if you averaged first and differenced after.
+            tl=d.get('tle_leg'); al=d.get('amp_leg')
+            if isinstance(tl,list) and tl:
+                live=[]
+                for i,v in enumerate(tl[:4]):
+                    if v is None or v < 0.0: continue     # -1 = leg not initialised
+                    tleg[i].append(v); live.append(v)
+                if len(live)>1:
+                    mu=sum(live)/len(live)
+                    if mu>1e-9: tspr.append((max(live)-min(live))/mu)
+            if isinstance(al,list) and al:
+                for i,v in enumerate(al[:4]):
+                    if v is not None and v >= 0.0: ameg[i].append(v)
     if len(zs)<5: return None
     acc=hy[0];prev=hy[0]
     for h in hy[1:]:
@@ -124,6 +164,14 @@ def parse(path):
     # gait; 0.0 = a leg is being DRAGGED (the tripod-skid).  This is the metric that
     # sees "wobbly, not coalesced into a rhythm" — fwd_v cannot.
     step_bal = (min(lp)/max(lp)) if (lp and max(lp) > 0) else 0.0
+    # Per-leg time-means, and the weakest leg's oscillation amplitude.  amp_min is the
+    # mandatory companion to any per-leg TLE read: a frozen leg is trivially predictable
+    # (tle -> 0) and would otherwise look like the best-modelled limb in the body.  It is
+    # also what gates PLV (kPlvAmpFloor = 0.02), so amp_min below that floor means the
+    # coordination number lost its support rather than the legs losing their coordination.
+    tl_mu=[statistics.mean(v) if v else 0.0 for v in tleg]
+    am_mu=[statistics.mean(v) if v else 0.0 for v in ameg]
+    live_am=[m for m,v in zip(am_mu,ameg) if v]
     return dict(net_z=zs[-1]-zs[0], max_z=max(zs), net_disp=net_disp, straight=straight,
                 fwd_v=fwd_v_mean, turns=(acc-hy[0])/(2*math.pi), falls=max(ar),
                 flat_v=flat_v, t_flat=t_flat,
@@ -134,7 +182,17 @@ def parse(path):
                 unstable=(sum(1 for p in planted if p < 3)/len(planted)) if planted else 0.0,
                 steps=steps, step_bal=step_bal,
                 tilt_sd=statistics.pstdev(tilt) if len(tilt) > 1 else 0.0,
-                scrub=statistics.mean(lat) if lat else 0.0)
+                scrub=statistics.mean(lat) if lat else 0.0,
+                plv=plv, plv_n=plv_n, step_cv=step_cv,
+                coh=statistics.mean(coh) if coh else 0.0,
+                plv_w=statistics.mean(plvw) if plvw else 0.0,
+                plv_wn=statistics.mean(plvwn) if plvwn else 0.0,
+                motor_tle=statistics.mean(mtle) if mtle else 0.0,
+                tle_spr=statistics.mean(tspr) if tspr else 0.0,
+                tle_legs=tl_mu, amp_legs=am_mu,
+                amp_min=min(live_am) if live_am else 0.0,
+                panic_duty=(sum(1 for p in panic if p > 0.001)/len(panic)) if panic else 0.0,
+                cw_spr=cwspr, cw_mean=cwmean)
 
 def ms(vals): return (statistics.mean(vals), statistics.pstdev(vals))
 
@@ -154,14 +212,38 @@ if __name__=="__main__":
               ("PROGRESS", ("net_z","max_z","net_disp","straight","fwd_v")),
               ("BELLY-UP", ("bellyc","bellyc_min","chassis_y")),
               ("STABILITY",("planted","unstable","tilt_sd","falls","turns")),
-              ("RHYTHM",   ("steps","step_bal","scrub")))
+              ("RHYTHM",   ("steps","step_bal","scrub","step_cv")),
+              # plv is the honest coordination read; coh's random-phase null is 0.450+-0.219,
+              # so it is printed only as a check that we are sitting on that null.  plv_w is
+              # the trailing-window twin (the only one that can score a perturbation).
+              # ALWAYS read plv beside plv_n and plv_w beside plv_wn: a frozen or fallen body
+              # scores high PLV trivially, and low support means the number is unmeasured.
+              ("COORDINATION", ("plv","plv_n","plv_w","plv_wn","coh")),
+              # The inferential-gain direction: does the agent's own prediction error DIFFER
+              # across legs?  tle_spr = (max-min)/mean over the four legs, per sample, time
+              # averaged.  ~0 means there is nothing for a precision weighting to weight.
+              # amp_min guards the freeze trap (a still leg is trivially predictable) and is
+              # also PLV's support floor (kPlvAmpFloor = 0.02).
+              ("INFERENTIAL", ("motor_tle","tle_spr","amp_min","panic_duty",
+                               "cw_spr","cw_mean")))
     for label, keys in GROUPS:
         print(f"  -- {label}")
         for k in keys:
+            if k not in ok[0]: continue
             m,s=ms([r[k] for r in ok])
-            fmt = ".3f" if k in ("bellyc","bellyc_min","chassis_y","scrub","tilt_sd") else ".2f"
+            fmt = (".3f" if k in ("bellyc","bellyc_min","chassis_y","scrub","tilt_sd")
+                   else ".0f" if k == "plv_n"
+                   else ".4f" if k in ("motor_tle","amp_min") else ".2f")
             per = '  '.join(f"{r[k]:{fmt}}" for r in ok)
             print(f"     {k:<10} mean={m:+{fmt}}  std={s:{fmt}}   [{per}]")
+    # Per-leg breakdown, printed OUTSIDE the groups because it is a vector per seed.  This is
+    # the diagnosis behind tle_spr: which leg is the outlier, and is any leg frozen.
+    if ok and ok[0].get("tle_legs"):
+        print("  -- PER-LEG  (FL FR RL RR;  tle = own forward-model residual, amp = oscillation)")
+        for nm, key in (("tle", "tle_legs"), ("amp", "amp_legs")):
+            mu = [statistics.mean([r[key][i] for r in ok]) for i in range(4)]
+            print(f"     {nm:<10} " + "  ".join(f"{v:.4f}" for v in mu)
+                  + ("   << 0.0000 = never moved, NOT a perfect model" if min(mu) < 1e-9 else ""))
     # GYM-BOUNDARY GUARD (2026-07-27).  `_build_corridor()` lays a 9.5 m curriculum on a
     # 20x20 floor, so the walkable strip ends near z=9.5.
     #
