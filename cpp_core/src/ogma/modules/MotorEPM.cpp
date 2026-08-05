@@ -4190,6 +4190,13 @@ nlohmann::json MotorEPM::diag_snapshot() const {
             perd[k] = ga_yawd_leg_n_[k] ? ga_yawd_leg_[k] / double(ga_yawd_leg_n_[k]) : 0.0;
         j["yawd_per_leg"]      = perd;
     }
+    // 2026-08-05 — the commit loop, streamed so the inspector can PLOT it.  The operator
+    // is tuning commit_prec_gain by eye and needs to see the three quantities that make up
+    // the loop, not just its behavioural residue: what the body's own prediction quality is
+    // doing (commit_prec), how far commit has ramped (commit_boost), and the exploration
+    // noise it gates (explore_mult).  commit_prec == 1.0 exactly means the lever is OFF.
+    j["commit_prec"]         = commit_prec_diag_;
+    j["commit_boost"]        = commit_boost_;
     j["explore_mult"]        = explore_mult_diag_;
     j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
     j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to

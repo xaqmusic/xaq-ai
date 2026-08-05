@@ -24,7 +24,7 @@ from typing import Iterable, Optional, Sequence, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QVBoxLayout, QWidget, QLabel
 
 
 @dataclass
@@ -74,8 +74,21 @@ class MultiSeriesPlot(QWidget):
         self._plot.showGrid(x=True, y=True, alpha=0.25)
         self._plot.setLabel("left",   y_label)
         self._plot.setLabel("bottom", "tick (recent)")
-        self._plot.addLegend(offset=(-10, 10))
+        # 2026-08-05 — the legend used to be addLegend(offset=(-10, 10)), i.e. an overlay
+        # anchored INSIDE the view box, which sat on top of the traces exactly where the
+        # recent samples are (the right-hand edge) and made the newest data — the part being
+        # read — the hardest to see.  The operator is drawing correlations BETWEEN series,
+        # so occluding one to name the others is the wrong trade.  A flat strip under the
+        # plot is always legible, never moves, and costs one text line of vertical space.
         layout.addWidget(self._plot)
+        self._legend = QLabel()
+        self._legend.setTextFormat(Qt.TextFormat.RichText)
+        self._legend.setWordWrap(True)
+        self._legend.setContentsMargins(6, 0, 6, 2)
+        self._legend.setText("  ".join(
+            f'<span style="color:rgb({s.color[0]},{s.color[1]},{s.color[2]})">'
+            f'&#9632; {s.label}</span>' for s in self._series))
+        layout.addWidget(self._legend)
 
         self._curves: list[pg.PlotDataItem] = []
         self._buffers: list[np.ndarray] = []
