@@ -1198,9 +1198,10 @@ private:
         // not an error) and a Cauchy log1p tail (a lurch must not dominate).  See the long
         // note at the use site for why each is a likelihood choice, not a tuning knob.
         const float zv = std::min(0.0f, fwd_progress_ema_ - intent_v_) / (ev_spread_ema_ + 1e-6f);
-        const float zw = (yaw_rate_ema_ - intent_w_) / (ew_spread_ema_ + 1e-6f);
+        const float zw = float(intent_yaw_gain_) * (yaw_rate_ema_ - intent_w_) / (ew_spread_ema_ + 1e-6f);
         return std::log1p(zv * zv + zw * zw);
     }
+    double intent_yaw_gain_ = 1.0;                  // 0 = progress-over-ground only
     float  ev_spread_ema_ = 0.0f;                  // running |forward| error scale (see .cpp)
     float  ew_spread_ema_ = 0.0f;                  // running |yaw| error scale -- 6.8x ev raw
     // ⚠ play never abstains: explore_mult currently reaches EXACTLY 0.000, which is what

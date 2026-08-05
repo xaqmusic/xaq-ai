@@ -227,6 +227,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"explore_floor", ParamMutability::HotMutable,
          "Lower bound on explore_mult, so commit ATTENUATES search instead of abolishing it. explore_mult currently reaches exactly 0.000 under full commit, which is the frozen-but-confident state the operator reads as indecision. 'Play never abstains' -- fix exploration's output, never its right to win. 0 = legacy. Try 0.15-0.3.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"intent_yaw_gain", ParamMutability::HotMutable,
+         "Weight on the YAW term of the intent error. 1.0 = the original (v*, w*) 2-vector. 0.0 = PROGRESS OVER GROUND ONLY. Operator, 2026-08-05: \"chassis yaw should not be part of this function since the chassis oscillates constantly while stepping; if heading needs adjusting that must come from some other mechanism that affects the bilateral stride symmetry, not the direction the chassis happens to be facing. The progress over ground relative to the CoG is all that matters.\" That is a separation-of-concerns argument and the other mechanism ALREADY EXISTS: goal_bearing_topic -> the heading PD -> steer_eff -> the bilateral stroke-amplitude differential. A quadruped yaws every stride BY CONSTRUCTION, so penalising instantaneous chassis yaw asks the body to stop doing the thing that moves it -- gait mechanics leaking into a goal-achievement scalar.",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{4.0}},
         {"commit_prec_gain", ParamMutability::HotMutable,
          "COMMIT AS EARNED PRECISION. Scales the commit window/rise/decay by how well the body is predicting ITSELF right now, measured as the forward-model residual's shortfall against its own running mean (scale-free: nothing is tuned to tle's magnitude). Predicting better than usual => shorter qualifying window, faster ramp, slower release; worse => the reverse. 0 = the fixed schedule, byte-identical. WHY: commit is a precision, and three hand-picked crossover points have now been measured (180/240/90 = 14% stalled, off = 20%, inverted = 22%) -- the constant should be set by the mechanism that ought to set it. It can also engage INSIDE a 1-2 s burst, which a fixed 180-tick window cannot. Try 1.0-3.0.",
          ParamValue{0.0}, ParamValue{-4.0}, ParamValue{4.0}},
@@ -573,6 +576,7 @@ ParamMap MotorEPM::current_params() const {
     m["intent_topic"] = ParamValue{intent_topic_};
     m["explore_floor"] = explore_floor_;
     m["commit_prec_gain"] = commit_prec_gain_;
+    m["intent_yaw_gain"] = intent_yaw_gain_;
     m["commit_window_ticks"] = commit_window_ticks_;
     m["commit_rise_ticks"] = commit_rise_ticks_;
     m["commit_decay_ticks"] = commit_decay_ticks_;
@@ -709,6 +713,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "intent_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) intent_topic_ = *p; });
     apply_param(params, "explore_floor", [&](auto const& v){ explore_floor_ = get_double(v, "explore_floor"); });
     apply_param(params, "commit_prec_gain", [&](auto const& v){ commit_prec_gain_ = get_double(v, "commit_prec_gain"); });
+    apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
     apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
     apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
     apply_param(params, "commit_decay_ticks", [&](auto const& v){ commit_decay_ticks_ = get_double(v, "commit_decay_ticks"); });
@@ -2511,7 +2516,7 @@ void MotorEPM::tick(uint64_t tick_id) {
                                + kCommitPrecAlpha * std::fabs(ev);
                 ew_spread_ema_ = (1.0f - kCommitPrecAlpha) * ew_spread_ema_
                                + kCommitPrecAlpha * std::fabs(ew);
-                const float zw = ew / (ew_spread_ema_ + 1e-6f);
+                const float zw = float(intent_yaw_gain_) * ew / (ew_spread_ema_ + 1e-6f);
                 // ── 2026-08-05, operator UI read: "the error peaks much higher than the
                 // amount of velocity lost, and the peaks happen while the robot is actually
                 // moving forward."  Both are real, and both are the LIKELIHOOD being wrong
