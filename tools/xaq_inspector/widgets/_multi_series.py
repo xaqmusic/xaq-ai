@@ -24,7 +24,7 @@ from typing import Iterable, Optional, Sequence, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QVBoxLayout, QWidget, QLabel
+from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget, QLabel
 
 
 @dataclass
@@ -80,14 +80,25 @@ class MultiSeriesPlot(QWidget):
         # read — the hardest to see.  The operator is drawing correlations BETWEEN series,
         # so occluding one to name the others is the wrong trade.  A flat strip under the
         # plot is always legible, never moves, and costs one text line of vertical space.
+        # 2026-08-05 — the strip is now CLICKABLE.  Hiding a trace is not cosmetic here:
+        # pyqtgraph's ViewBox skips invisible items when computing childrenBounds, so
+        # hiding a large-magnitude series RESCALES the Y axis for the ones left behind.
+        # That is the actual need — `intent_err` is spread-normalized and runs O(1) while
+        # `fwd_progress_ema` runs O(0.04), so on a shared axis the signal being read is a
+        # flat line pinned to the bottom.  Buffers keep filling while hidden, so a trace
+        # brought back still has its history.
+        #   click        toggle one trace
+        #   shift/ctrl   solo it (click the soloed one again to restore)
+        #   "all"        show everything
         layout.addWidget(self._plot)
+        self._visible: list[bool] = [True] * len(self._series)
         self._legend = QLabel()
         self._legend.setTextFormat(Qt.TextFormat.RichText)
         self._legend.setWordWrap(True)
         self._legend.setContentsMargins(6, 0, 6, 2)
-        self._legend.setText("  ".join(
-            f'<span style="color:rgb({s.color[0]},{s.color[1]},{s.color[2]})">'
-            f'&#9632; {s.label}</span>' for s in self._series))
+        self._legend.setOpenExternalLinks(False)
+        self._legend.setToolTip("click a name to hide/show it · shift-click to solo")
+        self._legend.linkActivated.connect(self._on_legend_click)
         layout.addWidget(self._legend)
 
         self._curves: list[pg.PlotDataItem] = []
@@ -102,12 +113,66 @@ class MultiSeriesPlot(QWidget):
             )
             self._curves.append(curve)
             self._buffers.append(np.full(self._buffer_size, np.nan))
+        self._render_legend()
 
         self._dirty = False
         self._refresh = QTimer(self)
         self._refresh.setInterval(75)
         self._refresh.timeout.connect(self._flush)
         self._refresh.start()
+
+    # ---- legend interaction ------------------------------------------------
+    def _render_legend(self) -> None:
+        parts = []
+        for i, s in enumerate(self._series):
+            r, g, b = s.color
+            if self._visible[i]:
+                style = f"color:rgb({r},{g},{b});text-decoration:none"
+                mark = "&#9632;"                    # filled square
+            else:
+                # Dim toward the background AND hollow the marker, so "off" reads at a
+                # glance without having to compare against a neighbouring colour.
+                style = (f"color:rgb({r // 3 + 40},{g // 3 + 40},{b // 3 + 40});"
+                         "text-decoration:line-through")
+                mark = "&#9633;"                    # hollow square
+            parts.append(f'<a href="{i}" style="{style}">{mark} {s.label}</a>')
+        if not all(self._visible):
+            parts.append('<a href="__all__" style="color:rgb(170,170,170)">[all]</a>')
+        self._legend.setText("&nbsp; ".join(parts))
+
+    def _apply_visibility(self) -> None:
+        for curve, vis in zip(self._curves, self._visible):
+            curve.setVisible(vis)
+        self._render_legend()
+        # Invisible items are excluded from childrenBounds, but the ViewBox only notices
+        # on the next autorange pass -- ask for one now so the axis rescales immediately.
+        try:
+            self._plot.getViewBox().autoRange()
+        except Exception:
+            pass
+
+    def _on_legend_click(self, href: str) -> None:
+        if href == "__all__":
+            self._visible = [True] * len(self._series)
+            self._apply_visibility()
+            return
+        try:
+            idx = int(href)
+        except ValueError:
+            return
+        if not (0 <= idx < len(self._series)):
+            return
+        mods = QApplication.keyboardModifiers()
+        solo = bool(mods & (Qt.KeyboardModifier.ShiftModifier
+                            | Qt.KeyboardModifier.ControlModifier))
+        if solo:
+            # Already soloed on this one => restore everything, so the same gesture undoes
+            # itself and the operator never has to hunt for [all].
+            only_this = self._visible[idx] and sum(self._visible) == 1
+            self._visible = [only_this or i == idx for i in range(len(self._series))]
+        else:
+            self._visible[idx] = not self._visible[idx]
+        self._apply_visibility()
 
     def update_payload(self, snapshot: dict) -> None:
         if not isinstance(snapshot, dict):
