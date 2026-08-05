@@ -477,6 +477,14 @@ func _process(_delta: float) -> void:
 	# were silently selecting g6dof, so a UI session could have been observing a different
 	# body than the one the measurements describe.  Loud and permanent beats a startup line
 	# that scrolls away.
+	# Time scale — shown whenever it is NOT real time, because "the legs look slow today"
+	# must never be a mystery.  Same rule as substrate: and [J] chassis:.
+	var ts_hint: String = ""
+	if body != null:
+		var tsv: Variant = body.get("_time_scale_v")
+		if tsv != null and not is_equal_approx(float(tsv), 1.0):
+			ts_hint = "   TIME %.2fx%s" % [float(tsv),
+				" (turbo — capped)" if float(tsv) > 1.0 else " (slow-mo)"]
 	var jb_hint: String = ""
 	if body != null:
 		var jbv: Variant = body.get("joint_backend")
@@ -536,8 +544,8 @@ func _process(_delta: float) -> void:
 			" TELEPORT_FLIP=1" if _as_bool(flip_v) else ""])
 	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s" % [
 		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
-		jb_hint]
-	var hint_view: String = "%s%s%s%s%s%s%s%s%s   [`] graph   [F1/F2] clip GOOD/BAD   [F5] save   [F9] load   [ESC] quit" % [
+		jb_hint + ts_hint]
+	var hint_view: String = "%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
 		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, rays_hint,
 		vis_hint]
 	var hint_line: String = hint_run + "\n" + hint_view
