@@ -221,6 +221,12 @@ ParamSchema MotorEPM::params_schema() const {
         {"coupling_gain", ParamMutability::HotMutable,
          "Rung 3 inter-leg Kuramoto coupling strength. Couples the four legs' own emergent phases toward the gait_phase offsets (entrains the twitching legs to the active one, phase-locks all four). 0 = off (one-leg-spins regime); raise to watch the legs synchronize.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+        {"intent_topic", ParamMutability::ConstructionOnly,
+         "MOTOR INTENT from the higher loop: ProprioToken [v_forward*, yaw_rate*]. Commit confidence becomes 'am I achieving what I was asked to do' instead of 'how well do I predict myself'. Empty = commit_prec_gain is INERT, deliberately: confidence has no meaning without a goal, and the residual it used to fall back on was MEASURED to anti-correlate with moving well (corr(motor_tle, displacement) = +0.129 -- a moving body is LESS predictable, so a residual-based confidence penalises exactly the behaviour we want).",
+         ParamValue{std::string("")}},
+        {"explore_floor", ParamMutability::HotMutable,
+         "Lower bound on explore_mult, so commit ATTENUATES search instead of abolishing it. explore_mult currently reaches exactly 0.000 under full commit, which is the frozen-but-confident state the operator reads as indecision. 'Play never abstains' -- fix exploration's output, never its right to win. 0 = legacy. Try 0.15-0.3.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"commit_prec_gain", ParamMutability::HotMutable,
          "COMMIT AS EARNED PRECISION. Scales the commit window/rise/decay by how well the body is predicting ITSELF right now, measured as the forward-model residual's shortfall against its own running mean (scale-free: nothing is tuned to tle's magnitude). Predicting better than usual => shorter qualifying window, faster ramp, slower release; worse => the reverse. 0 = the fixed schedule, byte-identical. WHY: commit is a precision, and three hand-picked crossover points have now been measured (180/240/90 = 14% stalled, off = 20%, inverted = 22%) -- the constant should be set by the mechanism that ought to set it. It can also engage INSIDE a 1-2 s burst, which a fixed 180-tick window cannot. Try 1.0-3.0.",
          ParamValue{0.0}, ParamValue{-4.0}, ParamValue{4.0}},
@@ -564,6 +570,8 @@ ParamMap MotorEPM::current_params() const {
     m["hip2_tuck_target"] = hip2_tuck_target_;
     m["motor_gain"]       = motor_gain_;
     m["coupling_gain"]    = coupling_gain_;
+    m["intent_topic"] = ParamValue{intent_topic_};
+    m["explore_floor"] = explore_floor_;
     m["commit_prec_gain"] = commit_prec_gain_;
     m["commit_window_ticks"] = commit_window_ticks_;
     m["commit_rise_ticks"] = commit_rise_ticks_;
@@ -698,6 +706,8 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "hip2_tuck_target", [&](auto const& v){ hip2_tuck_target_ = get_double(v, "hip2_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
     apply_param(params, "coupling_gain", [&](auto const& v){ coupling_gain_ = get_double(v, "coupling_gain"); });
+    apply_param(params, "intent_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) intent_topic_ = *p; });
+    apply_param(params, "explore_floor", [&](auto const& v){ explore_floor_ = get_double(v, "explore_floor"); });
     apply_param(params, "commit_prec_gain", [&](auto const& v){ commit_prec_gain_ = get_double(v, "commit_prec_gain"); });
     apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
     apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
@@ -959,7 +969,11 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     // Coherent-scaffold phase (L-1b): an optional global CPG phase (rhythm.cpg.body,
     // ProprioToken [cos φ, sin φ]) to drive the per-joint rhythm from — a CLEAN entrained phase,
     // so all joints lock to ONE frequency (intra-leg coherence) vs the noisy proprio L.phase.
-    if (!goal_bearing_topic_.empty()) {
+    if (!intent_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(intent_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ handle_intent(p); }));
+    }
+        if (!goal_bearing_topic_.empty()) {
         sub_ids_.push_back(bus_->subscribe(goal_bearing_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){ handle_goal_bearing(p); }));
     }
@@ -1086,6 +1100,17 @@ void MotorEPM::handle_imu(MessagePtr payload) {
 }
 
 // L1 nav setpoint.  An EGOCENTRIC unit vector [vx, vy] (vy = forward) from the nav layer.
+// Motor intent from the higher loop: [v_forward*, yaw_rate*].
+void MotorEPM::handle_intent(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 2) return;
+    intent_v_ = pt->values[0];
+    intent_w_ = pt->values[1];
+    intent_seen_ = true;
+    ++intent_msgs_;
+}
+
 void MotorEPM::handle_goal_bearing(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -2441,11 +2466,60 @@ void MotorEPM::tick(uint64_t tick_id) {
         // tuned to tle's absolute size.  cp>1 = predicting better than usual.
         float cp = 1.0f;
         if (commit_prec_gain_ != 0.0) {
-            const float tle = tle_ema_mean();
-            if (tle_run_ema_ <= 0.0f) tle_run_ema_ = tle;      // seed, no cold-start spike
-            tle_run_ema_ = (1.0f - kCommitPrecAlpha) * tle_run_ema_ + kCommitPrecAlpha * tle;
-            const float z = (tle_run_ema_ - tle) / (tle_run_ema_ + 1e-6f);
-            cp = std::clamp(std::exp(float(commit_prec_gain_) * z), 0.2f, 5.0f);
+            // ⚠ 2026-08-05 · THE ACTIVITY TERM IS NOT OPTIONAL — this was built without it
+            // and the operator caught the consequence by eye: commit_prec RISING read as
+            // "tentative/unsure" and FALLING as "stepping", the exact inverse of the intent.
+            //
+            // Because a residual alone measures PREDICTABILITY, and a body that has stopped
+            // is trivially predictable.  So: flat ground -> most predictable -> commit
+            // hardest -> explore_mult -> 0 -> the noise sustaining the oscillation dies ->
+            // it stops; and stopped it stays predictable, so it stays stopped.  A stuck leg
+            // or a chassis collision makes the body MORE predictable, not less, which is
+            // why the cycle starts exactly there.  Obstacles are unpredictable, so commit
+            // stays low and the gait works -- "falls apart on flat ground when the dynamics
+            // should be most predictable" is not a paradox, it is the mechanism.
+            //
+            // This is the freeze trap, and the doctrine entry against it was written THIS
+            // MORNING from the leg-lesion data: "on a motor system, prediction error is not
+            // a proxy for competence -- ACTIVITY is.  Every 1/(tle+eps) weighting needs an
+            // activity term, and the burden is on the proposal to name its own."
+            // Ours is amp_ema_mean(): oscillation amplitude, which goes to zero when the
+            // thing stops.  Same guard as couple_prec_gain's amp/(tle+eps).
+            // CONFIDENCE IS GOAL-RELATIVE.  Without a declared intent it has no meaning,
+            // so the lever stays inert rather than falling back on a residual we have
+            // measured to ANTI-correlate with moving well.  That is deliberate: a
+            // commit_prec_gain with no intent_topic is a no-op, and says so in its diag.
+            if (intent_seen_) {
+                const float ev = fwd_progress_ema_ - intent_v_;
+                const float ew = yaw_rate_ema_     - intent_w_;
+                // ⚠ MEASURED DEFECT, 2026-08-05.  The first build summed these RAW and the
+                // result was 98% yaw variance: |ew| ran 6.8x |ev| (0.151 vs 0.022) because
+                // the forward term is bounded by v* (~0.06) while yaw_rate_ema is unbounded
+                // (observed to 0.58).  corr(intent_err, fwd_progress_ema) was -0.002 -- the
+                // "am I achieving my intent" scalar carried NO information about forward
+                // progress.  And since skid-steer locomotion IS yaw, the error rose exactly
+                // when the body walked, so commit shortened precisely when it should hold:
+                // stalled ticks 14% -> 32%.  Normalising the SUM (below) is scale-free in
+                // aggregate and does nothing about the relative weight of two terms in
+                // different units -- that conflation was the bug.
+                // Fix per doctrine §5 / CLAUDE.md §0 rule 2: centre out the common mode and
+                // normalize each term by ITS OWN running spread before combining, so the
+                // mix is set by the body's dynamics rather than by a designer's constant.
+                if (ev_spread_ema_ <= 0.0f) ev_spread_ema_ = std::fabs(ev);
+                if (ew_spread_ema_ <= 0.0f) ew_spread_ema_ = std::fabs(ew);
+                ev_spread_ema_ = (1.0f - kCommitPrecAlpha) * ev_spread_ema_
+                               + kCommitPrecAlpha * std::fabs(ev);
+                ew_spread_ema_ = (1.0f - kCommitPrecAlpha) * ew_spread_ema_
+                               + kCommitPrecAlpha * std::fabs(ew);
+                const float zv = ev / (ev_spread_ema_ + 1e-6f);
+                const float zw = ew / (ew_spread_ema_ + 1e-6f);
+                const float e  = std::sqrt(zv * zv + zw * zw);
+                if (err_run_ema_ <= 0.0f) err_run_ema_ = e;    // seed, no cold-start spike
+                err_run_ema_ = (1.0f - kCommitPrecAlpha) * err_run_ema_ + kCommitPrecAlpha * e;
+                // z > 0 = achieving the ASSIGNED task better than its own running average.
+                const float z = (err_run_ema_ - e) / (err_run_ema_ + 1e-6f);
+                cp = std::clamp(std::exp(float(commit_prec_gain_) * z), 0.2f, 5.0f);
+            }
         }
         commit_prec_diag_ = cp;
         // Predicting well shortens the qualifying window, speeds the ramp and slows the
@@ -2501,7 +2575,10 @@ void MotorEPM::tick(uint64_t tick_id) {
         heading_trim_ *= (1.0f - float(heading_trim_leak_));
         heading_trim_  = std::clamp(heading_trim_, -kHeadTrimMax, kHeadTrimMax);
     }
-    const float explore_mult = std::max(0.0f, 1.0f - commit_amt);                 // C: damp exploration
+    // ⚠ FLOOR, not zero: "play never abstains" -- fix exploration's OUTPUT, never its right
+    // to win.  explore_mult reaching exactly 0.000 is what makes the body frozen-but-
+    // confident, and it is the state the operator reads as indecision.  0 = legacy.
+    const float explore_mult = std::max(float(explore_floor_), 1.0f - commit_amt);                 // C: damp exploration
     explore_mult_diag_ = explore_mult;   // diag: is the coordination probe already damped to 0?
     float flow_quality = 0.0f;
     if (forward_flow_gain_ > 0.0) {
@@ -3803,7 +3880,11 @@ nlohmann::json MotorEPM::snapshot_state() const {
     // gain sweep means the lever never fired ⇒ a measurement outcome, not a verdict.
     // CONSUMER CHECK for the nav setpoint: goal_bearing_msgs == 0 with a topic configured
     // means the publisher never fired and the PD is silently still holding the spawn bearing.
+    mod["fwd_progress_ema"] = double(fwd_progress_ema_);
+    mod["intent_err"] = intent_seen_ ? double(intent_err_norm()) : -1.0;
     mod["commit_prec"] = double(commit_prec_diag_);   // consumer check: 1.0 = lever off
+    mod["intent_msgs"] = double(intent_msgs_);   // 0 with intent_topic set = publisher never fired
+    mod["commit_boost"] = double(commit_boost_);
     mod["heading_trim"] = double(heading_trim_);   // consumer check for the I term
     mod["goal_bearing_msgs"] = double(gb_msgs_);
     mod["goal_bearing_err"]  = gb_seen_ ? double(std::atan2(gb_x_, gb_y_) * 0.318309886f) : 0.0;
@@ -4195,6 +4276,18 @@ nlohmann::json MotorEPM::diag_snapshot() const {
     // the loop, not just its behavioural residue: what the body's own prediction quality is
     // doing (commit_prec), how far commit has ramped (commit_boost), and the exploration
     // noise it gates (explore_mult).  commit_prec == 1.0 exactly means the lever is OFF.
+    // 2026-08-05 — the commit chain END TO END, because the operator is reading these
+    // against each other and fwd_progress_ema was the one link that was INVISIBLE despite
+    // being the INPUT to all of it: commit_ticks gates on it, and intent error is measured
+    // from it.  A chain you can only see the output of cannot be diagnosed.
+    j["fwd_progress_ema"]    = fwd_progress_ema_;
+    // Report the SPREAD-NORMALIZED error the controller actually descends, not the raw
+    // one -- reading a different quantity than the mechanism uses is how the yaw-dominance
+    // defect stayed invisible.  Raw terms are broken out so the mix stays auditable.
+    j["intent_err"]          = intent_seen_ ? intent_err_norm() : -1.0f;
+    j["intent_err_fwd"]      = intent_seen_ ? std::fabs(fwd_progress_ema_ - intent_v_) : -1.0f;
+    j["intent_err_yaw"]      = intent_seen_ ? std::fabs(yaw_rate_ema_ - intent_w_)     : -1.0f;
+    j["intent_err_scale"]    = err_run_ema_;
     j["commit_prec"]         = commit_prec_diag_;
     j["commit_boost"]        = commit_boost_;
     j["explore_mult"]        = explore_mult_diag_;

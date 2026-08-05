@@ -119,6 +119,11 @@ class _Readout(QWidget):
             # 2026-08-05 — the commit loop.  commit_prec is the EARNED precision: >1 means
             # the body is predicting itself better than its own running average, which
             # shortens the commit window and slows its release.  Exactly 1.000 = lever off.
+            # fwd_progress_ema is the INPUT to the whole commit chain: commit_ticks gates
+            # on it and intent_err is measured from it.  Read it against intent_err to see
+            # whether cprec is REGULATING or just tracking a constant offset.
+            ("fwd_prog_ema", f("fwd_progress_ema")),
+            ("intent_err",  f("intent_err")),
             ("commit_prec", f("commit_prec")),
             ("commit_boost", f("commit_boost")),
             ("explore_mult", f("explore_mult")),
@@ -170,6 +175,8 @@ class MotorEpmInspector(QWidget):
                 # explore_mult fall as commit ramps.  If commit_prec sits flat at 1.0 the
                 # lever is off; if it swings but commit_boost does not follow, the
                 # precision is being computed and not consumed.
+                Series("fwd_progress_ema", "fwd-prog-ema", (140, 255, 140), width=2.0),
+                Series("intent_err",   "intent-err",   (255, 140, 255), width=1.5),
                 Series("commit_prec",  "commit-prec",  (120, 220, 255), width=1.5),
                 Series("commit_boost", "commit-boost", (255, 210, 120), width=1.5),
                 Series("explore_mult", "explore",      (170, 170, 170), width=1.0),
