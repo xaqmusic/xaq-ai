@@ -37,6 +37,8 @@
 //
 // Module lifecycle authoring contract: docs/plans-and-designs/primitives/_module_lifecycle.md.
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -1202,6 +1204,23 @@ private:
         return std::log1p(zv * zv + zw * zw);
     }
     double intent_yaw_gain_ = 1.0;                  // 0 = progress-over-ground only
+    // ── STRIDE-PROFILE PREDICTION (intent_rhythm_gain).  A constant v* is a target a
+    // legged body physically CANNOT hold: it advances in pulses, so a level-seeking error
+    // oscillates forever and commit chases it.  Measured: pulse_cv 0.583 with a p90/p50
+    // gap tail of 2.10 -- rhythm exists but is irregular, and it is identical across every
+    // commit arm, which is why they all read as ties.
+    //   Instead of smoothing (which adds lag, and lag is what makes a delayed-feedback loop
+    // oscillate in the first place), give the body a PREDICTION TO FULFIL (doctrine §7).
+    // fwd_profile_ is the body's own average forward-velocity waveform indexed by gait
+    // phase -- LEARNED from what it actually does, never imposed.  The error is this
+    // stride's deviation from it, so descending that error means "make this stride like my
+    // strides" = consistent pulses, with the waveform's SHAPE still chosen by the body.
+    static constexpr int kFwdProfileBins = 16;
+    std::array<float, kFwdProfileBins> fwd_profile_{};
+    std::array<uint32_t, kFwdProfileBins> fwd_profile_n_{};
+    float  rhythm_spread_ema_ = 0.0f;
+    float  rhythm_dev_diag_   = 0.0f;
+    double intent_rhythm_gain_ = 0.0;               // 0 = off, byte-identical
     float  ev_spread_ema_ = 0.0f;                  // running |forward| error scale (see .cpp)
     float  ew_spread_ema_ = 0.0f;                  // running |yaw| error scale -- 6.8x ev raw
     // ⚠ play never abstains: explore_mult currently reaches EXACTLY 0.000, which is what
