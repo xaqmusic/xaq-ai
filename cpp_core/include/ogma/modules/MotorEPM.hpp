@@ -1211,6 +1211,11 @@ private:
     float  tle_run_ema_ = 0.0f;                    // (legacy: residual-only scale)
     float  commit_prec_diag_ = 1.0f;
     static constexpr float kCommitPrecAlpha = 0.002f;   // ~500-tick window on that scale
+    // The commit-precision output bounds.  They are RECIPROCAL on purpose: cp and 1/cp must
+    // be equally reachable, or "confident" and "unsure" are not symmetric modulations of the
+    // same window.  Everything below is derived from kCommitPrecHi alone.
+    static constexpr float kCommitPrecHi   = 5.0f;
+    static constexpr float kCommitPrecLo   = 1.0f / kCommitPrecHi;
     double commit_window_ticks_ = 180.0;
     double commit_rise_ticks_   = 240.0;
     double commit_decay_ticks_  = 90.0;
