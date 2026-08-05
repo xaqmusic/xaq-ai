@@ -2511,9 +2511,34 @@ void MotorEPM::tick(uint64_t tick_id) {
                                + kCommitPrecAlpha * std::fabs(ev);
                 ew_spread_ema_ = (1.0f - kCommitPrecAlpha) * ew_spread_ema_
                                + kCommitPrecAlpha * std::fabs(ew);
-                const float zv = ev / (ev_spread_ema_ + 1e-6f);
                 const float zw = ew / (ew_spread_ema_ + 1e-6f);
-                const float e  = std::sqrt(zv * zv + zw * zw);
+                // ── 2026-08-05, operator UI read: "the error peaks much higher than the
+                // amount of velocity lost, and the peaks happen while the robot is actually
+                // moving forward."  Both are real, and both are the LIKELIHOOD being wrong
+                // rather than the filter needing tuning.  Two corrections, no new constants.
+                //
+                // (1) THE GOAL IS A HALF-SPACE, NOT A POINT.  A symmetric loss about v*
+                //     penalises exceeding the intent exactly as much as falling short, so a
+                //     good stride overshoots and the error RISES -- precisely the peaks the
+                //     operator saw during forward motion.  A higher loop asking for forward
+                //     progress means AT LEAST v*.  Only the shortfall is error; going faster
+                //     than asked is not a failure to be explained.  This is the shape of the
+                //     preference, not a tuned knob.
+                const float zv = std::min(0.0f, ev) / (ev_spread_ema_ + 1e-6f);
+                // (2) HEAVY-TAILED, NOT GAUSSIAN.  A quadratic loss IS a Gaussian assumption:
+                //     it says a large deviation is near-impossible, so when one happens the
+                //     model treats it as overwhelming evidence of incompetence.  With ev
+                //     reaching -0.061 against a 0.022 spread, one backward lurch gives
+                //     |zv| ~ 2.8 and cp = exp(2.5*z) rails at the 0.2 clamp -- the operator's
+                //     "a backwards swing shouldn't hugely penalise the forward".  The robust
+                //     answer is a Cauchy/Lorentzian likelihood, whose negative log-likelihood
+                //     is log1p(z^2): quadratic near zero (small errors still inform) and
+                //     LOGARITHMIC in the tail (a lurch reads as "probably a glitch").  It
+                //     also fixes the dynamic range the graph shows -- sqrt() of two terms
+                //     each normalized to mean |z| = 1 floors near 1.4 and spikes to 3.7,
+                //     compressing the useful region into the bottom third of the axis.
+                //     Scale still comes entirely from the running spreads; nothing added.
+                const float e  = std::log1p(zv * zv + zw * zw);
                 if (err_run_ema_ <= 0.0f) err_run_ema_ = e;    // seed, no cold-start spike
                 err_run_ema_ = (1.0f - kCommitPrecAlpha) * err_run_ema_ + kCommitPrecAlpha * e;
                 // z > 0 = achieving the ASSIGNED task better than its own running average.
