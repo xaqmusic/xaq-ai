@@ -450,6 +450,54 @@ func _process(_delta: float) -> void:
 	var mpanel: Node = get_tree().get_root().find_child("MotorEpmPanel", true, false)
 	if mpanel != null and mpanel is Control:
 		mpanel_hint = "   [M] sliders: %s" % ("ON" if (mpanel as Control).visible else "hidden")
+	# 2026-08-04 — [K] ablation bench.  It reports how many of the 12 joints are broken, so
+	# the hint doubles as a "is this robot damaged right now?" readout -- which matters,
+	# because an ablation is deliberately NOT announced to the brain and is easy to forget
+	# you left on while reading a later run.
+	var abl_hint: String = ""
+	var apanel: Node = get_tree().get_root().find_child("AblationPanel", true, false)
+	if apanel != null and body != null and body.has_method("abl_kind_of"):
+		var nbroken: int = 0
+		for leg in range(4):
+			for jn in range(3):
+				if body.abl_is_detached(leg, jn) or body.abl_kind_of(leg, jn) != 0:
+					nbroken += 1
+		abl_hint = "   [K] ablate: %s" % ("intact" if nbroken == 0 else "%d/12 BROKEN" % nbroken)
+	# 2026-08-04 — [J] chassis collision.  ALWAYS shown, never blank: the chassis was a
+	# GHOST for the whole campaign (nothing masked _LAYER_CHASSIS in either direction), so
+	# which mode a run used is a physical fact about the body that lives in no config file.
+	# Measured: with both rear legs off, a ghost chassis sinks to y = -0.028, i.e. THROUGH
+	# the floor; solid, it rests at +0.025.
+	var cc_hint: String = ""
+	if body != null:
+		var ccv: Variant = body.get("chassis_collides")
+		cc_hint = "   [J] chassis: %s" % ("SOLID" if _as_bool(ccv) else "ghost")
+	# 2026-08-05 — SUBSTRATE, always shown.  hinge is CANONICAL and every number in the
+	# ledger is hinge; g6dof numbers are not comparable to any of them.  Four nav curricula
+	# were silently selecting g6dof, so a UI session could have been observing a different
+	# body than the one the measurements describe.  Loud and permanent beats a startup line
+	# that scrolls away.
+	var jb_hint: String = ""
+	if body != null:
+		var jbv: Variant = body.get("joint_backend")
+		if jbv != null:
+			var jb: String = str(jbv)
+			jb_hint = "   substrate: %s%s" % [jb, "" if jb == "hinge" else "  <<< NOT CANONICAL"]
+	# 2026-08-05 — the LEARNED heading trim, live.  This is the integral term acquiring the
+	# body's own yaw bias; watching it converge is the difference between "the lever fired"
+	# and "the lever fired AND settled".  Blank when the lever is off.
+	var trim_hint: String = ""
+	if body != null:
+		var br: Variant = body.get("brain")
+		if br != null and br.has_method("get_module_metrics"):
+			var mm: Variant = br.get_module_metrics()
+			if mm is Dictionary:
+				var me: Variant = (mm as Dictionary).get("motor_epm", {})
+				if me is Dictionary:
+					var tv: float = float((me as Dictionary).get("heading_trim", 0.0))
+					# Blank when the lever is off, so a zero can never read as "converged".
+					if abs(tv) > 1e-6:
+						trim_hint = "   learned trim %+.3f" % tv
 	var imu_hint: String = ""
 	if _imu_scope != null:
 		imu_hint = "   [I] imu: %s" % ("ON" if _imu_scope.visible else "hidden")
@@ -486,10 +534,12 @@ func _process(_delta: float) -> void:
 			drop_v.x, drop_v.y, drop_v.z, "  INVERTED" if _as_bool(flip_v) else "",
 			_as_int(drop_tick_v), drop_v.x, drop_v.z,
 			" TELEPORT_FLIP=1" if _as_bool(flip_v) else ""])
-	var hint_run: String = "%s%s%s%s%s   [3] hump%s" % [
-		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint]
-	var hint_view: String = "%s%s%s%s%s%s%s   [`/F1] graph   [F5] save   [F9] load   [ESC] quit" % [
-		panels_hint, mpanel_hint, imu_hint, hud_hint, path_hint, rays_hint, vis_hint]
+	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s" % [
+		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
+		jb_hint]
+	var hint_view: String = "%s%s%s%s%s%s%s%s%s   [`] graph   [F1/F2] clip GOOD/BAD   [F5] save   [F9] load   [ESC] quit" % [
+		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, rays_hint,
+		vis_hint]
 	var hint_line: String = hint_run + "\n" + hint_view
 	if hud_is_hidden:
 		# Hidden mode: render ONLY the hint line so the user keeps the

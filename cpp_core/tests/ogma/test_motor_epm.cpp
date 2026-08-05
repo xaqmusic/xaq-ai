@@ -684,6 +684,58 @@ TEST(MotorEPM, Gate0ResetMaskingInstruments) {
 // 10. L-1b objective socket: an active posture objective retargets the controller;
 //     a zero-weight objective is a perfect no-op (Gate-0 baseline preserved).
 // =============================================================================
+// ---- 2026-08-04 · L1 NAV SETPOINT --------------------------------------------------------
+// The heading PD's P term used an implicit setpoint of 0 ("hold the spawn bearing").  A nav
+// layer now supplies it as an EGOCENTRIC unit vector.  Three arms, the house pattern:
+//   A = a live goal bearing off to one side   (must steer differently)
+//   Z = the topic configured but NEVER published (must be byte-identical to N — this is the
+//       arm that catches a socket which silently latches or defaults to something non-zero)
+//   N = no goal_bearing_topic param at all
+// Plus the §3.2 rule-5 consumer check: goal_bearing_msgs must be 0 in Z and non-zero in A, so
+// "the publisher never fired" can never be mistaken for "the lever did nothing".
+TEST(MotorEPM, GoalBearingSocketSteersAndSilentIsByteIdentical) {
+    auto p = base_params();
+    p["heading_bearing_hold_gain"] = 7.0;      // the deployed P gain — the term under test
+    p["stroke_gain"]               = 1.0;      // steer only reaches the body through the stroke
+    p["goal_bearing_topic"]        = std::string("mt.goalb");
+    auto pn = base_params();
+    pn["heading_bearing_hold_gain"] = 7.0;
+    pn["stroke_gain"]               = 1.0;     // identical minus the socket
+
+    Fixture A(p,  4, 3, "mt");
+    Fixture Z(p,  4, 3, "mt");
+    Fixture N(pn, 4, 3, "mt");
+
+    auto inp = [](uint64_t t){ return Sensors{float(0.2 * std::sin(0.11 * t))}; };
+    for (uint64_t t = 1; t <= 200; ++t) {
+        // A gets a goal ~45 deg to the right; Z and N get nothing on that topic.  Published
+        // AFTER the tick so it is latched for the next one — the handler stores it as state,
+        // which is exactly how a real producer running in the same graph would deliver it.
+        A.run_tick(t, inp(t));
+        A.bus.publish("mt.goalb", Fixture::vec_token({0.7071f, 0.7071f}));
+        Z.run_tick(t, inp(t));
+        N.run_tick(t, inp(t));
+    }
+
+    // (i) a configured-but-silent socket must be indistinguishable from no socket
+    for (int leg = 0; leg < 4; ++leg)
+        for (int jj = 0; jj < 3; ++jj)
+            EXPECT_FLOAT_EQ(Z.accel(leg, jj), N.accel(leg, jj))
+                << "an unpublished goal_bearing_topic must be a perfect no-op (leg "
+                << leg << " j " << jj << ")";
+
+    // (ii) a live goal bearing must actually move the command
+    bool diverged = false;
+    for (int leg = 0; leg < 4 && !diverged; ++leg)
+        for (int jj = 0; jj < 3; ++jj)
+            if (std::fabs(A.accel(leg, jj) - Z.accel(leg, jj)) > 1e-4f) { diverged = true; break; }
+    EXPECT_TRUE(diverged) << "a live goal bearing changed nothing — the socket is inert";
+
+    // (iii) consumer check — the arm that fired says so, the arm that did not says so
+    EXPECT_GT(A.m.diag_snapshot()["goal_bearing_msgs"].get<double>(), 0.0);
+    EXPECT_EQ(Z.m.diag_snapshot()["goal_bearing_msgs"].get<double>(), 0.0);
+}
+
 TEST(MotorEPM, ObjectiveSocketRetargetsControllerZeroWeightNoOp) {
     auto p = base_params();
     p["coupling_gain"]    = 0.5;

@@ -40,7 +40,13 @@ DARK  = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"]
 METRICS = [
     ("_disp",     "Distance travelled (m)",      "Straight-line displacement from spawn. The headline, and the noisiest.", True),
     ("_steprate", "Step rate (lifts / 1k ticks)","How busy the legs are. Rises when damping falls; not the same as progress.", True),
-    ("coh",       "Inter-leg coherence (0-1)",   "Kuramoto phase-lock BETWEEN legs. 'Are they working together?' Deployed gait sits ~0.42.", True),
+    # ⚠ coh is kept ONLY as a null check.  Its random-phase distribution is mean 0.450 /
+    # sd 0.219, and every arm ever measured sits on it -- see the 2026-08-03 retraction.
+    # A reading near 0.45 means "nothing measured", not "partially coordinated".
+    ("coh",       "Inter-leg coherence (NULL=0.45)", "Instantaneous Kuramoto order parameter. Its random-phase null is 0.450+-0.219, so this is a CONTROL, not a result.", None),
+    ("plv_w",     "Coordination, windowed (0-1)", "Trailing-window phase-locking between legs (tau~500 ticks). Measured null 0.090, a trot 0.984, deployed 0.200. The honest coordination read, and the only one that can score a perturbation.", True),
+    ("plv_wn",    "  ^ its support (0-1)",        "Fraction of the window both legs of a pair were genuinely oscillating. plv_w <= this by construction: a low plv_w with low support means NOTHING WAS MOVING, not that the legs are uncoordinated.", None),
+    ("cw_spr",    "Coupling weight spread",       "(max-min)/mean of the precision weights on the Kuramoto neighbour average. 0 = couple_prec_gain is off or never fired -- the consumer check.", None),
     ("hk_agree",  "hip2 + knee agreement (0-1)", "Do the two lift joints push the SAME way? 0.5 = chance. Emergent intra-leg IK.", True),
     ("y",         "Chassis height (m)",          "How tall it stands. Deployed ~0.058; pure-HK sinks unless something holds it up.", True),
     ("tq_mag",    "Ground force (norm.)",        "Mean |servo torque| vs the 0.15 Nm limit. How hard the legs push.", None),

@@ -7,6 +7,6 @@
     "overrides": {
       "publish_vision": true
     },
-    "joint_backend": "g6dof"
+    "joint_backend": "hinge"
   }
 ]

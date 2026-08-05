@@ -206,6 +206,27 @@ decoration).
   earning confidence from its OWN consequences (its eats) is legitimate precision
   self-calibration; a designer picking the crossover point is the anti-pattern (the
   interim `×(1−…)` cede factor).
+- **★ ON A MOTOR SYSTEM, PREDICTION ERROR IS NOT A PROXY FOR COMPETENCE — ACTIVITY IS.
+  Every `1/(tle+ε)` weighting needs an activity term, and the burden is on the proposal to
+  name its own.** The intuition that a channel in trouble produces *more* error is false for
+  effectors, and measurably so: killing a picrawler leg mid-episode drove that leg's own
+  forward-model residual **DOWN** monotonically with severity (0.235 → 0.061, 26 % of
+  baseline), because a limb that moves less is easier to predict. Error-weighted trust alone
+  would therefore have *increased* its authority over the others at exactly the moment it
+  became useless. Weighting by `amp/(tle+ε)` instead gave a 12× down-weight — **produced
+  wholly by the activity term while the error term pushed the other way**
+  (picrawler ledger, 2026-08-04). This is the same failure the LateralVoter documents for
+  sensory channels (a flat channel is trivially predictable, so it is trivially trusted) and
+  the same one the coordination fitness hit ("the activity term is the homeokinetic
+  normalisation that kills both"). Three independent arrivals at one law: **precision must be
+  earned against a signal that GOES TO ZERO WHEN THE THING STOPS.**
+- **Precision-weighting buys nothing on a healthy system; measure it under damage.** The same
+  lever was `NULL` on an intact gait and t = 5.84 after a limb died. A weighting only has work
+  to do when the things being weighted actually differ in quality — so a precision lever whose
+  A/B is run only on a healthy body is being measured in the condition least able to express
+  it. Design the perturbation *with* the lever, and keep a **wrong-sign arm**: it is what
+  separates "weights in the right direction" from "any unevenness stiffens the system", and
+  it was the check that made the picrawler result defensible.
 - **A remembered belief must be DISCONFIRMABLE and must yield to the epistemic term — an
   over-committed belief inverts precision-weighting.** A persisted target or a cached route is a
   *prior*; when it is UNCONFIRMED, sensory precision should RISE (look again), not the stale prior

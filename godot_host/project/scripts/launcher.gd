@@ -49,6 +49,35 @@ const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
 	"motor_epm_pure_hk__inst__stance__c025.json",  # ── PURE-HK · SELF-EXCITE ── the control + ONE parameter: c_init=0.25, the Playful Machine's self-exciting controller init (Sox cInit; ≈ their 0.75 at our motor_gain=3.0). Starts the loop at the edge of instability so HK SHAPES an oscillation instead of manufacturing one. n=4: steps 0.5→21, chassis 0.029→0.040, tilt_sd 0.119, planted 3.89, unstable 0.00, net_z +0.23 (deployed 4.58). ★ THE QUESTION METRICS CANNOT ANSWER: is this a body TRYING TO WALK or twitching in place? Every leg motion here is the learned controller — nothing scripts a gait. §3 rule 5 promote-or-kill gate.
 	"motor_epm_pure_hk__inst__stance__c025__lr10.json",  # ── PURE-HK · SELF-EXCITE + PM LEARNING RATE ── THE ARM UNDER TEST (2026-08-03). Same stripped base as the pair above plus PM's hexapod learning rate: c_init=0.25 AND ctrl_lr=0.10 (we had been running 0.01, 5-10× below every legged experiment of theirs). n=4 @20k: steps 41→163, net_disp 0.56→1.79, one seed net_z 4.36 (deployed 4.58) with NO stroke/coupling/gait-phase/heading/nav. ★ WATCH OVER MINUTES, NOT SECONDS: activity peaks ~14-20k ticks then DECAYS (steps/1000: 12.0→5.2→2.95 by 40k). Expect a crab walk that travels but does not hold a heading (turns ±12) — direction is the ingredient this arm lacks. `ctrl_lr` is live on [M] (ceiling raised 0.10→0.30; the old max sat at the BOTTOM of the useful band); `c_init` is construction-only, restart to change. `[`/`]` sweep body damping live — a DIAGNOSTIC only, see the note at the hotkey.
 	"motor_epm_pure_hk__inst__stance__c025__lr10__wb.json",  # ── PURE-HK · WHOLE-BODY C ── ONE controller across all 12 joints (whole_body_c=1) instead of four per-leg blocks, so inter-leg coordination is a learnable entry of C. Still no stroke/coupling/gait-phase/heading/nav. ★ WHAT IT BUYS, powered at n=12: LEG PARTICIPATION — step_bal 0.25→0.44 (t=+3.52). The legs share the work far more evenly. ★ WHAT IT DOES NOT BUY: phase coordination. Time-mean inter-leg coherence is 0.453 against a random-phase null of 0.450 — i.e. the legs are at RANDOM relative phase, in this and every other arm tested including the deployed stack. An earlier label here listed "locked seeds"; that was RETRACTED — it sampled an instantaneous statistic whose null is 0.450 ± 0.219, and the operator caught it by eye. Expect vigorous, powerful, uncoordinated legs. Costs stability: ~4 falls per 20k.
+	# --- 2026-08-04 INFERENTIAL-COUPLING OBSERVATION SET (corridor gym) ---
+	# Precision-weighting the Kuramoto neighbour average.  The deployed term averages the
+	# other three legs UNIFORMLY (c/(n-1)) — a hand-set precision: every leg trusted equally,
+	# forever, which is what makes an otherwise legitimate INNATE reflex a script.  These arms
+	# replace it with w_j = (amp_j/(tle_j+eps))^k, the LateralVoter's idiom one layer down.
+	# ★ THESE ARE THE ARMS TO ABLATE FROM THE [K] PANEL: the whole result is a DAMAGE
+	# response — on an intact body the lever is NULL, so nothing here is visible until you
+	# break a leg.  Kill leg 0's knee or detach a segment and compare the CONTROL against k=+2.
+	# Base is `nolearn2` (all controller learning off — the n=20 ablation WINNER), so the
+	# precision weighting is the only inferential thing left in the controller.
+	"the_picrawler_motor_epm_embed_corridor_imufused__steplock_off__nolearn2.json",  # ── (d) CONTROL ── couple_prec_gain=0, the legacy UNIFORM neighbour mean. Byte-identical to the nolearn2 base, verified per-seed. Healthy: net_z 4.83 ± 0.41, plv_w 0.20. ★ AFTER A LEG DIES it loses a third of its coordination and keeps falling (plv_w 0.203 → 0.127) and forward progress collapses to 0.011 — the dead leg's frozen, meaningless phase still commands 1/3 of every survivor's coupling authority and drags them down with it. LOAD THIS FIRST.
+	"the_picrawler_motor_epm_embed_corridor_imufused__steplock_off__nolearn2__cp20.json",  # ── (d) ARM · k=+2 ── same body, ONE param: couple_prec_gain=2. Each leg now pulls toward its neighbours in proportion to how well each of THEM predicts itself. Healthy: TIES on distance, slightly WORSE coordination (plv_w 0.18) — the lever costs a little on an intact body. ★ AFTER A LEG DIES coordination ends ABOVE where it started (0.169 → 0.190, t = 5.84 vs control) and progress holds at ~2×. ⚠ READ IT HONESTLY: most of that gap is SUPPORT (the survivors keep oscillating, +37%), only +10% is tighter phase-locking. The claim is resilience, not coordination.
+	"the_picrawler_motor_epm_embed_corridor_imufused__steplock_off__nolearn2__cpm10.json",  # ── (d) WRONG-SIGN CONTROL ── couple_prec_gain=−1: trust the leg that predicts itself WORST. THE ARM THAT MAKES THE RESULT DEFENSIBLE — it carries a COMPARABLE weight spread to k=+2 (cw_spr 0.92 vs 0.98) yet performs like the plain control after a lesion (0.121, t = −0.43) with the worst locking-given-oscillation of any arm. So the effect is weights in the right DIRECTION, not merely unequal weights stiffening the system. Expect it to look like the control, not like k=+2.
+	"the_picrawler_motor_epm_embed_corridor_imufused__cp20.json",  # ── (d) ARM ON THE DEPLOYED ROBOT ── the CURRENT entry above + couple_prec_gain=2, so the lever can be seen on the stack that actually ships rather than only on the stripped research base. ⚠ IT BEHAVES WORSE HERE, and honestly so: n=4 unperturbed vs the CURRENT baseline — net_z 4.72 ± 1.01 (ties, but 4× the variance), straight 0.69 vs 0.73, plv_w 0.16 vs 0.20 (WORSE coordination), tilt_sd 0.065 → 0.116 with one seed at 0.210, steps 50 → 85. 0 falls. Consistent with the standing result that the scaffold stack was hand-tuned around a weak learned signal, so anything that strengthens the learned path moves away from that tuning. Load it to ABLATE from [K], not to admire the walk.
+	# --- 2026-08-05 STRAIGHT-GAIT OBSERVATION SET (corridor; [P] shows the path trail) ---
+	# ★ THE FINDING THESE EXIST TO TEST: this body has NO fixed handedness. The right/left
+	# hip1 demand ratio across 4 seeds is 3.07 / 4.35 / 0.69 / 0.97 — SEED 3 IS LEFT-HEAVY —
+	# and it still flips with every controller learning rate at zero. So the skid direction
+	# comes from the 0.01*random init of C, locked in by the gait as a stable attractor, and
+	# the heading PD fights it all run. That standing effort is what pins one side near its
+	# clamp (right legs request 2.10 against a +-1 limit, 77% clip duty, vs 0.70 left) and is
+	# why turn authority is DIRECTION-DEPENDENT. Load the CURRENT entry first as the control.
+	# ⚠ ALL FOUR improved the asymmetry and NONE improved `straight` — which is the open
+	# question these need eyes on. n=4, so signal only.
+	"the_picrawler_motor_epm_embed_corridor_imufused__trim1.json",  # ── I TERM 1e-4 ── the heading controller was P+D only; a grep for an integral term returned NOTHING. With a persistent yaw bias a PD settles at a permanently nonzero steer. This LEARNS that DC effort and hands it back, so the P term is freed for transients. ★ BEST MECHANISM RESULT: asymmetry |R/L-1| 1.44 → 0.31 (4.6x), per-seed 3.07/4.35/0.69/0.97 → 0.89/1.73/1.12/0.72 — every seed near 1, the handedness split GONE. Targets zero net yaw (FUNCTIONAL symmetry), never amplitude — which is where the ~35-lever symmetry family died. Costs net_z 4.58→4.08. WATCH: does the body look squarer, and does the RR-under-plant tuck relax? The HUD shows `learned trim` live — watch it converge.
+	"the_picrawler_motor_epm_embed_corridor_imufused__trim3.json",  # ── I TERM 3e-4 ── same lever, 3x the rate. ★ BEST |turns|: 0.138 → 0.042 (3.3x less net rotation). ⚠ THE ARM I MOST DISTRUST: `straight` did NOT move (0.466), and low |turns| with flat `straight` is exactly the signature of a SLOW WIDE ARC that happens to net near zero over the run — a shape aggregate metrics have certified here before. THE KEY QUESTION: on the [P] path trail, is it a straight line, a gentle arc, or a drift with no correction at all?
+	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12.json",  # ── STROKE 1.20 ── the SYMPTOM treatment: less saturation → less of the commanded turn differential is rectified away by the clamp. Best BEHAVIOURAL arm: straight 0.474→0.488, net_z 4.58→4.70, asymmetry halved (1.44→0.69), 0 falls. ★ THIS ARM HAS A STANDING UI REQUEST IN THE LEDGER, unanswered since 2026-07-27: "PARTIAL awaiting operator UI observation — if the UI reads it as PURPOSEFUL rather than merely BUSIER, sweep 1.1-1.3 at n>=6." That is still the question.
+	"the_picrawler_motor_epm_embed_corridor_imufused__trim1stroke12.json",  # ── I TERM + STROKE 1.20 ── UNMEASURED. The two levers act on different things (learned DC effort vs clamp headroom), and each was best on a different axis, so the data points here and this combination was not in the sweep. ⚠ Note the OTHER combination tried (I term + paired init) was WORSE than either alone — they interfered, because the paired init removes the very asymmetry the integrator is trying to learn. This pair should not have that conflict, but it is a prediction, not a result.
+	"the_picrawler_motor_epm_embed_corridor_imufused__pairinit.json",  # ── PAIRED L/R INIT ── acts on the CAUSE: left/right partner legs (0&1, 2&3) get the SAME initial control law, so no side starts with an advantage. asymmetry 1.44→0.78, |turns| 0.138→0.077. ⚠ THE RISK IS VISUAL, NOT NUMERIC: the MotorEPM class header warns the per-leg random init is the "inter-leg symmetry breaker" guarding against v6-premotor-bilateral-mirror-collapse. WATCH FOR: left and right legs moving in LOCKSTEP (collapse — antiphase lost) versus mirrored-but-independent (fine). Metrics cannot see this; eyes can.
 	# --- everything below is parked, not deleted ---
 	# "the_picrawler_motor_epm_embed_corridor_coordadapt.json",  # the fwd_v-REWARD comparison arm for the above (coord_fitness_mode=0). Uncomment to A/B the reward question directly in the UI.
 	# "the_picrawler_motor_epm_minimal.json",   # L-1a Gate 0 — reward-free upright prior + HK loop (additive baseline)
@@ -341,6 +370,10 @@ func _read_metadata(path: String) -> Variant:
 		# cell chemotaxis port needs differential_paddler); when present it wins
 		# over the UI dropdown at launch so "select the config → reproduce" works.
 		"body_model":     str(meta.get("body_model", "")),
+		# 2026-08-05 — the substrate is a property of the CONFIG, not of its filename.
+		# Absent => "hinge", which is what the body's @export default gives headless, so
+		# UI and harness always agree.  See the parity note at the selection handler.
+		"joint_backend":  str(meta.get("joint_backend", "hinge")),
 		# Phase 6.8 — homeokinetic cell actuation flags (the alive-cell fast path).
 		"motor_baseline_beat": bool(meta.get("motor_baseline_beat", false)),
 		"motor_energy":        bool(meta.get("motor_energy", false)),
@@ -636,17 +669,14 @@ func _apply_persisted_state() -> void:
 				cs_idx = i
 				break
 	_chassis_shape_dropdown.select(cs_idx)
-	# Joint backend dropdown — restore last selection (picrawler only;
-	# other envs ignore the field).
-	var jb_idx := 0
-	var jb: String = ExperimentConfig.picrawler_joint_backend
-	if jb != "":
-		for i in range(_joint_backend_dropdown.item_count):
-			var opt: Dictionary = _joint_backend_dropdown.get_item_metadata(i)
-			if str(opt.get("id", "")) == jb:
-				jb_idx = i
-				break
-	_joint_backend_dropdown.select(jb_idx)
+	# Joint backend — 2026-08-05: DELIBERATELY NOT RESTORED from launcher_state.
+	# Operator: "selecting a new config should set all of the appropriate parameters so
+	# ui/headless always have parity; parity takes precedence over convenience."  A sticky
+	# substrate is exactly the kind of convenience that silently decouples the two: the
+	# saved value survived config changes, so the dropdown could describe a body no config
+	# asked for.  The selection handler derives it from the chosen config every time; index
+	# 0 (hinge, the headless default) is the pre-selection state.
+	_joint_backend_dropdown.select(0)
 	# Morphology dropdown.
 	var mp_idx := 0
 	var mp: String = ExperimentConfig.body_morphology
@@ -698,13 +728,23 @@ func _on_config_changed(idx: int) -> void:
 			if str(_body_model_dropdown.get_item_metadata(i)) == cbm:
 				_body_model_dropdown.select(i)
 				break
-	# 2026-06-13 — the Motor-EPM (reward-free) configs were validated on the
-	# g6dof + freeplay-0.1 compliant-stand substrate; auto-select g6dof so
-	# pressing Launch reproduces it exactly (the body's g6dof preset then carries
-	# the springs + freeplay).  Other configs default back to hinge (historical
-	# baselines).  The user can still override the dropdown after.
-	var fname: String = str(entry.get("filename", "")) + str(entry.get("path", ""))
-	var want_backend: String = "g6dof" if fname.contains("motor_epm") else "hinge"
+	# ---- 2026-08-05 · PARITY OVER CONVENIENCE (operator) -------------------------------
+	# WAS: `"g6dof" if fname.contains("motor_epm") else "hinge"` — a FILENAME heuristic,
+	# written in 2026-06-13 for one compliant-stand experiment.  Every modern picrawler
+	# config is named `the_picrawler_motor_epm_*`, so that substring matched the ENTIRE
+	# lineage and silently forced g6dof on every UI launch.  Headless never did this
+	# (`resolve_picrawler_joint_backend` only honours the launcher value when `launched`),
+	# so the UI and the harness were running DIFFERENT BODIES from the same config — and
+	# hinge is canonical, so every number in the ledger described the body the UI was NOT
+	# showing.  Two years of "why does it look different than the numbers say" lives here.
+	#
+	# NOW: the substrate is a property of the CONFIG, never of its name.  A config that
+	# needs a non-default substrate says so in `metadata.joint_backend`; everything else
+	# gets `hinge` — the same value the body's @export default gives the headless path.
+	# Selecting a config therefore always produces UI/headless parity.
+	var want_backend: String = str(entry.get("joint_backend", "hinge"))
+	if want_backend not in ["hinge", "g6dof"]:
+		want_backend = "hinge"
 	for i in range(_joint_backend_dropdown.item_count):
 		var opt: Dictionary = _joint_backend_dropdown.get_item_metadata(i)
 		if str(opt.get("id", "")) == want_backend:
