@@ -9864,6 +9864,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# CONSUMER CHECK for commit_prec — MISSING until now, which made a whole 35-run
 			# sweep uninterpretable: the analysis read 1.00 from a .get() default and could not
 			# tell "the lever ran and did nothing" from "the lever never ran".
+			line["cR"]    = snappedf(float(_mm.get("couple_R", -1.0)), 0.001)
+			line["pretro"] = snappedf(float(_mm.get("phase_retro", -1.0)), 0.001)
+			line["resT"]  = snappedf(float(_mm.get("res_period", -1.0)), 0.1)
+			line["resA"]  = snappedf(float(_mm.get("res_amp", -1.0)), 0.001)
+			line["resL"]  = snappedf(float(_mm.get("res_lock", -1.0)), 0.001)
 			line["fprog"] = snappedf(float(_mm.get("fwd_progress_ema", -99.0)), 0.00001)
 			line["ierr"]  = snappedf(float(_mm.get("intent_err", -99.0)), 0.00001)
 			line["cprec"] = snappedf(float(_mm.get("commit_prec", -1.0)), 0.0001)

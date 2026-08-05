@@ -124,6 +124,10 @@ class _Readout(QWidget):
             # whether cprec is REGULATING or just tracking a constant offset.
             ("fwd_prog_ema", f("fwd_progress_ema")),
             ("intent_err",  f("intent_err")),
+            ("couple_R",    f("couple_R")),
+            ("phase_retro", f("phase_retro")),
+            ("res_period",  f("res_period")),
+            ("res_lock",    f("res_lock")),
             ("commit_prec", f("commit_prec")),
             ("commit_boost", f("commit_boost")),
             ("explore_mult", f("explore_mult")),
@@ -177,6 +181,10 @@ class MotorEpmInspector(QWidget):
                 # precision is being computed and not consumed.
                 Series("fwd_progress_ema", "fwd-prog-ema", (140, 255, 140), width=2.0),
                 Series("intent_err",   "intent-err",   (255, 140, 255), width=1.5),
+        Series("couple_R",    "couple-R",    (120, 200, 255), width=2.0),
+        Series("phase_retro", "phase-retro", (255, 180,  90), width=1.5),
+        Series("res_amp",     "res-amp",     (180, 255, 220), width=1.5),
+        Series("res_lock",    "res-lock",    (255, 255, 140), width=2.0),
                 Series("commit_prec",  "commit-prec",  (120, 220, 255), width=1.5),
                 Series("commit_boost", "commit-boost", (255, 210, 120), width=1.5),
                 Series("explore_mult", "explore",      (170, 170, 170), width=1.0),
