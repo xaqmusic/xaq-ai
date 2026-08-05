@@ -1194,9 +1194,12 @@ private:
     // The exact error the commit-precision loop descends, so diagnostics can never drift
     // from the mechanism.  Uses the CURRENT spreads (read-only; the EMAs advance in step()).
     float intent_err_norm() const {
-        const float zv = (fwd_progress_ema_ - intent_v_) / (ev_spread_ema_ + 1e-6f);
-        const float zw = (yaw_rate_ema_     - intent_w_) / (ew_spread_ema_ + 1e-6f);
-        return std::sqrt(zv * zv + zw * zw);
+        // Must mirror step() exactly: one-sided forward term (overshooting the intent is
+        // not an error) and a Cauchy log1p tail (a lurch must not dominate).  See the long
+        // note at the use site for why each is a likelihood choice, not a tuning knob.
+        const float zv = std::min(0.0f, fwd_progress_ema_ - intent_v_) / (ev_spread_ema_ + 1e-6f);
+        const float zw = (yaw_rate_ema_ - intent_w_) / (ew_spread_ema_ + 1e-6f);
+        return std::log1p(zv * zv + zw * zw);
     }
     float  ev_spread_ema_ = 0.0f;                  // running |forward| error scale (see .cpp)
     float  ew_spread_ema_ = 0.0f;                  // running |yaw| error scale -- 6.8x ev raw
