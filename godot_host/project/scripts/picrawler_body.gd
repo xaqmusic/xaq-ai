@@ -715,6 +715,7 @@ var _chassis: RigidBody3D
 # Burst-onset probe state — see the trigger in _clip_record().
 # Scaffold motor-intent (see the publish site).  intent_fwd < 0 disables the publisher, so
 # the intent socket is unfed and commit_prec_gain stays inert — the byte-identical default.
+var _gng_probe_printed: bool = false
 @export var intent_fwd: float = -1.0
 @export var intent_yaw: float = 0.0
 var _burst_probe: bool = false
@@ -9762,6 +9763,27 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	line["att_err_imu"] = snappedf(_dbg_att_err_imu, 0.01)
 	line["acc_mag"] = snappedf(_dbg_acc_mag, 0.01)
 	line["acc_trust"] = snappedf(_dbg_acc_trust, 0.0001)
+	# 2026-08-06 — motor-layer EPM liveness probe.  A DEAD EPM has a signature the
+	# operator named: tle 0, 2 nodes, 1 baked (the seed pair, never grown).  Printing
+	# it makes "is anything flowing?" a measurement instead of an inference.
+	if brain != null and brain.has_method("get_module_snapshot"):
+		for _gid in ["motor_gng_fl", "motor_gng_fr", "motor_gng_rl", "motor_gng_rr"]:
+			# ⚠ An EPM snapshot has NO "module" wrapper -- its diag fields sit at top
+			# level, unlike MotorEPM's.  Looking for one silently yields nothing, which
+			# is how a DEAD EPM and an UNREAD EPM became indistinguishable.
+			var _gs = JSON.parse_string(str(brain.get_module_snapshot(_gid)))
+			if _gs is Dictionary and _gs.has("gng"):
+				var _g = _gs["gng"]
+				var _nodes: int = (_g.get("nodes", []) as Array).size() if _g.has("nodes") else -1
+				var _lx: Array = _g.get("last_x", [])
+				var _mag: float = 0.0
+				for _v in _lx: _mag += abs(float(_v))
+				# last_x magnitude is the LIVENESS signal: an EPM fed nothing encodes a
+				# zero vector, so |last_x| = 0 means the input never arrived -- distinct
+				# from "arrived but uninformative", which shows nonzero mag with 2 nodes.
+				line["g_" + _gid.substr(10)] = [
+					_nodes, snappedf(float(_gs.get("ema_tle", -1.0)), 0.000001),
+					snappedf(_mag, 0.0001)]
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
