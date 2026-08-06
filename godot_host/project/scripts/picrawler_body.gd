@@ -716,6 +716,27 @@ var _chassis: RigidBody3D
 # Scaffold motor-intent (see the publish site).  intent_fwd < 0 disables the publisher, so
 # the intent socket is unfed and commit_prec_gain stays inert — the byte-identical default.
 var _gng_probe_printed: bool = false
+# ---------------------------------------------------------------------------
+# 2026-08-06 — PER-TICK ATTRIBUTION TRACE (instrument; OFF unless OGMA_PICRAWLER_TRACE
+# names an output path, so the default build is byte-identical).
+#
+# Answers two questions off one logging pass:
+#   (1) does the velocity channel (`delta`) carry stride phase, or is it noise?
+#       -> autocorrelation of per-joint d(angle) at the stride lag.
+#   (2) WHICH LEG is responsible for a given forward-velocity pulse?
+#       -> per-joint mechanical power P = tau * omega, stance-gated by contact,
+#          integrated between fwd_v zero crossings and regressed on the pulse impulse.
+#
+# ⚠ THIS IS A GOD'S-EYE INSTRUMENT AND MUST STAY ONE.  fwd_v and foot contact are
+# not egocentric; they are legal here because diagnostics may use god's-eye and
+# CONTROL MAY NOT (CLAUDE.md §5.3).  `feet_y` already became a live god's-eye
+# dependency in the deployed gait by exactly this route, so: nothing computed from
+# this trace may be fed back into the brain.  The egocentric shadow of it already
+# exists and is unconsumed -- `reality.proprio.joint_torque`, a 12-D load sensor --
+# which is the legal path to an internal mechanism once the attribution is proven.
+var _trace_file: FileAccess = null
+var _trace_ready: bool = false
+
 @export var intent_fwd: float = -1.0
 @export var intent_yaw: float = 0.0
 var _burst_probe: bool = false
@@ -894,6 +915,24 @@ var _suspend_lift_y: float = 0.0
 # Torque history for first-order lag (servo rise-time emulation).  Each
 # servo's currently-applied torque carries over and the new PD command
 # pulls it toward the target with alpha = 1-exp(-TAU/SERVO_TORQUE_RISE_TAU).
+# 2026-08-06 — TRUE LOAD PROXY (velocity-tracking deficit).
+#
+# `_prev_torque_*` is NOT a load signal despite what joint_torque's description
+# claimed.  It is the PD value used to set the motor's max IMPULSE CAP (an
+# authority budget; the code calls _powered_torque "the telemetry path"), and it
+# is tau = Kp*err - Kd*omega with Kp=20, Kd=8.  With |err| ~ 0.18 the Kp term is
+# ~3.6 while omega reaches 6 rad/s making the Kd term ~24, so the published
+# "torque" is DOMINATED BY VELOCITY DAMPING -- measured corr(tau, dtheta) =
+# -0.46..-0.56 on all three joints.  Anything load-gating on it (Cruse Rule 5,
+# a future epm_joint_torque) would have been gating on -omega.
+#
+# The motor is VELOCITY-controlled with an impulse cap, so the honest load
+# signal is the deficit between the velocity it commanded and the velocity the
+# world allowed: ~0 when free, large when the foot is planted and the motor
+# stalls against its cap.  That is a load-cell analogue rather than a damping term.
+var _prev_load_hip1: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _prev_load_hip2: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _prev_load_knee: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _prev_torque_hip1: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _prev_torque_hip2: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _prev_torque_knee: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -2597,7 +2636,9 @@ func _ready() -> void:
 	# Stage 3.A: enables Cruse Walknet Rule 5 (Coactivation — load extends
 	# stance), and a future opt-in epm_joint_torque (Stage 3.A.3).
 	brain.register_source("JointTorque", "reality.proprio.joint_torque",
-		"float32[12]: per-servo applied torque (hip1×4, hip2×4, knee×4) normalized to [-1, 1] vs MAX_SERVO_TORQUE — load proxy", true)
+		"float32[12]: per-servo PD COMMAND BUDGET (hip1×4, hip2×4, knee×4), normalized to [-1,1] vs MAX_SERVO_TORQUE. ⚠ NOT applied torque and NOT a load proxy despite its original description: it sets the motor's max-impulse cap, and with Kp=20/Kd=8 it is DOMINATED BY THE -Kd*omega damping term (measured corr with joint motion -0.46..-0.56), i.e. it is mostly a negated velocity copy. Use JointLoad for load.", true)
+	brain.register_source("JointLoad", "reality.proprio.joint_load",
+		"float32[12]: per-servo VELOCITY-TRACKING DEFICIT (commanded omega - achieved omega, angle frame) normalized to [-1,1] vs MAX_SERVO_SPEED — the honest load proxy. ~0 when the joint moves freely; large when the motor stalls against its impulse cap because the foot is planted or the limb is loaded. Egocentric, so unlike the god's-eye attribution instrument it is legal as a brain input.", true)
 	if publish_tilt:
 		# Opt-in 4-D tilt vector for a vestibular EPM that lets the
 		# brain PERCEIVE its own pitch/roll (the existing IMU only has
@@ -6047,6 +6088,11 @@ func _step_one() -> void:
 	for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	brain.publish_proprio(jtorque, "joint_torque")
+	var jload := PackedFloat64Array()
+	for i in range(4): jload.append(_prev_load_hip1[i])
+	for i in range(4): jload.append(_prev_load_hip2[i])
+	for i in range(4): jload.append(_prev_load_knee[i])
+	brain.publish_proprio(jload, "joint_load")
 	# 2026-08-03 — GROUND-FORCE / AUTHORITY instrument.  jtorque is already normalized to
 	# +-1 against MAX_SERVO_TORQUE, so |t| -> 1 IS saturation.  Two questions this answers:
 	#   tq_mag  — how hard are the legs actually pushing?  (the operator observed the pure-HK
@@ -7179,6 +7225,13 @@ func _step_one() -> void:
 		var vel_hip1: float = -clamp(SERVO_KP * eh1, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
 		var vel_hip2: float = -clamp(SERVO_KP * eh2, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
 		var vel_knee: float = -clamp(SERVO_KP * ekn, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		# Load = commanded velocity - achieved velocity, in the ANGLE frame.
+		# vel_* above is negated because Godot's motor velocity sign is inverted
+		# relative to _relative_angle_world_axis; undo that here so the deficit is
+		# expressed in the same frame as omega_* and the joint angles.
+		_prev_load_hip1[i] = clamp(((-vel_hip1) - omega_hip1) / MAX_SERVO_SPEED, -1.0, 1.0)
+		_prev_load_hip2[i] = clamp(((-vel_hip2) - omega_hip2) / MAX_SERVO_SPEED, -1.0, 1.0)
+		_prev_load_knee[i] = clamp(((-vel_knee) - omega_knee) / MAX_SERVO_SPEED, -1.0, 1.0)
 		var imp_h1: float = motor_max_impulse
 		var imp_h2: float = motor_max_impulse
 		var imp_kn: float = motor_max_impulse
@@ -9228,6 +9281,43 @@ func _do_hard_reset() -> void:
 		_walking_trail.call("clear")
 
 # ---------------------------------------------------------------------------
+# Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
+# ---------------------------------------------------------------------------
+func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float, yaw: float) -> void:
+	if not _trace_ready:
+		_trace_ready = true
+		var path: String = OS.get_environment("OGMA_PICRAWLER_TRACE")
+		if path != "":
+			_trace_file = FileAccess.open(path, FileAccess.WRITE)
+			if _trace_file == null:
+				push_error("PicrawlerBody: could not open trace path " + path)
+			else:
+				print("PicrawlerBody: attribution trace -> %s" % path)
+	if _trace_file == null:
+		return
+	# Torques are ALREADY normalised to [-1,1] against MAX_SERVO_TORQUE by the
+	# joint_torque proprio block, and are ONE TICK DELAYED (the motor runs after
+	# perception).  Both facts matter to the offline analysis, so the raw values
+	# go out unmodified and the correction is made there, not hidden here.
+	var rec := {
+		"t": tick_counter,
+		"fwd_v": snappedf(fwd_v, 0.00001),
+		"yaw": snappedf(yaw, 0.00001),
+		"c": contact,
+		"h1": h1, "h2": h2, "kn": kn,
+		"th1": [_prev_torque_hip1[0], _prev_torque_hip1[1], _prev_torque_hip1[2], _prev_torque_hip1[3]],
+		"th2": [_prev_torque_hip2[0], _prev_torque_hip2[1], _prev_torque_hip2[2], _prev_torque_hip2[3]],
+		"tkn": [_prev_torque_knee[0], _prev_torque_knee[1], _prev_torque_knee[2], _prev_torque_knee[3]],
+		"a1": [_eff_target_hip1[0], _eff_target_hip1[1], _eff_target_hip1[2], _eff_target_hip1[3]],
+		"a2": [_eff_target_hip2[0], _eff_target_hip2[1], _eff_target_hip2[2], _eff_target_hip2[3]],
+		"akn": [_eff_target_knee[0], _eff_target_knee[1], _eff_target_knee[2], _eff_target_knee[3]],
+		"lh1": [_prev_load_hip1[0], _prev_load_hip1[1], _prev_load_hip1[2], _prev_load_hip1[3]],
+		"lh2": [_prev_load_hip2[0], _prev_load_hip2[1], _prev_load_hip2[2], _prev_load_hip2[3]],
+		"lkn": [_prev_load_knee[0], _prev_load_knee[1], _prev_load_knee[2], _prev_load_knee[3]],
+	}
+	_trace_file.store_line(JSON.stringify(rec))
+
+# ---------------------------------------------------------------------------
 # Clip ring — one compact record per brain tick.  Cheap by construction: a fixed-size
 # Array of small Dictionaries, overwritten in place, never grown, never scanned.
 # ---------------------------------------------------------------------------
@@ -9247,6 +9337,7 @@ func _clip_record(h1: Array, h2: Array, kn: Array, chassis_y: float) -> void:
 	# rather than cached, so the recorder adds no state the rest of the body must maintain.
 	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z) \
 		.dot(Vector2(sin(yaw), cos(yaw)))
+	_trace_record(h1, h2, kn, contact, fwd_v, yaw)
 	_clip_ring[_clip_head] = {
 		"t": tick_counter,
 		"x": snappedf(o.x, 0.0001), "y": snappedf(chassis_y, 0.0001), "z": snappedf(o.z, 0.0001),
