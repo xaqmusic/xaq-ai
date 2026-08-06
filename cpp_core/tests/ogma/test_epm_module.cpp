@@ -611,3 +611,143 @@ TEST(EPMAutocal, RecoversDiscriminationLostAtDefaultRanges) {
         << " — conditioning must make the two states different words";
     EXPECT_GT(p_on, p_off + 0.15) << "and the gain must be large, not marginal";
 }
+
+// -- Insertion-gate self-tuning (insertion_autotune) -------------------------
+//
+// Restores a mechanism the v3 Python reference had and the C++ port dropped:
+// the GNG sets its own insertion floor from the quantile of its own recent
+// squared-TLE distribution.  A FIXED absolute threshold only means something
+// relative to the signal's typical error, so on a stream whose typical error
+// exceeds it, insertion never stops and the GNG grows until it hits max_nodes.
+
+namespace {
+ogma::ParamMap autotune_params(bool on, int64_t max_nodes) {
+    auto p = rbf_params();
+    p["max_nodes"]          = max_nodes;
+    p["baking_threshold"]   = int64_t{10};
+    p["insertion_autotune"] = on;
+    return p;
+}
+
+// A continuous, never-exactly-repeating stream — the shape that made the
+// picrawler motor GNG grow without bound.  Quantisation error never falls to
+// zero, so a fixed absolute gate keeps justifying insertion forever.
+void drive_continuous(EpmFixture& f, int ticks) {
+    for (int t = 0; t < ticks; ++t) {
+        const float u = float(t);
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu",
+            make_proprio6(std::sin(u * 0.031f), std::cos(u * 0.017f),
+                          std::sin(u * 0.0071f), std::cos(u * 0.0113f),
+                          std::sin(u * 0.0043f), std::cos(u * 0.0234f)));
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+}
+} // namespace
+
+TEST(EPMInsertionAutotune, OffByDefaultAndAbsentFromSnapshot) {
+    EpmFixture f(rbf_params());
+    drive_continuous(f, 200);
+    auto gng = f.epm.snapshot_state()["gng"];
+    EXPECT_FALSE(gng.contains("insertion_autotune"))
+        << "with the feature off the serialised GNG must be byte-identical to pre-feature";
+}
+
+TEST(EPMInsertionAutotune, ConfiguredValueIsAFloorNotAReplacement) {
+    // The documented contract ("this is the floor") and the divergence from the
+    // Python reference, which replaced the threshold outright.  A huge floor
+    // must dominate whatever the quantile computes, suppressing growth.
+    auto p = autotune_params(true, 500);
+    p["min_insertion_error"] = 1e9;
+    EpmFixture f(p);
+    drive_continuous(f, 1000);
+    EXPECT_LE(f.epm.node_count(), 3)
+        << "an enormous configured floor must still gate insertion — it is a FLOOR";
+}
+
+TEST(EPMInsertionAutotune, SnapshotRoundTripPreservesGateHistory) {
+    EpmFixture f(autotune_params(true, 500));
+    drive_continuous(f, 600);
+    auto snap = f.epm.snapshot_state();
+    ASSERT_TRUE(snap["gng"].contains("autotune_hist"));
+    EXPECT_GT(snap["gng"]["autotune_hist"].size(), 0u)
+        << "the history must round-trip, or a restored GNG re-warms with no gate "
+           "and grows unbounded for the whole warmup window";
+
+    EpmFixture g(autotune_params(true, 500));
+    g.epm.restore_state(snap);
+    auto rt = g.epm.snapshot_state()["gng"];
+    EXPECT_EQ(rt["autotune_hist"].size(), snap["gng"]["autotune_hist"].size());
+    EXPECT_FLOAT_EQ(rt["autotune_value"].get<float>(),
+                    snap["gng"]["autotune_value"].get<float>());
+}
+
+// ★ THE ACCEPTANCE TEST.
+//
+// ⚠ THE CRITERION HERE WAS WRONG THE FIRST TIME AND THE CORRECTION IS THE POINT.
+// It originally asserted "the population plateaus below max_nodes", from the
+// 2026-08-06 picrawler gate read (nodes pinned at the cap; raising the cap
+// 120 -> 400 made baking WORSE, 19-27 -> 6-11).  That framing mistook a
+// SYMPTOM for the disease, and node count is the wrong instrument for the
+// third time in this file.
+//
+// `min_insertion_error` gates TWO things, here and in the v3 Python reference:
+//    insertion   -- ema_error <  gate  =>  do not insert (converged)
+//    baking      -- ema_error >= gate  =>  demote instead of bake (inconsistent)
+// A gate sitting BELOW the signal's own error floor therefore means nodes
+// always look surprising enough to insert AND never look consistent enough to
+// bake.  Unbounded growth and near-zero baking are ONE cause, not two symptoms.
+//
+// So the honest measure is the BAKED FRACTION: is the vocabulary earned?  Node
+// count actually RISES under the fix, because baked nodes are frozen and immune
+// to pruning -- a detail that would read as a regression to anyone grading on
+// size.  The quantile cannot sit outside the error distribution by construction,
+// which is exactly why it fixes both arms of the failure at once.
+TEST(EPMInsertionAutotune, VocabularyIsEarnedNotChurned) {
+    const int ticks = 3000;
+
+    EpmFixture off(autotune_params(false, 240));
+    EpmFixture on (autotune_params(true,  240));
+    drive_continuous(off, ticks);
+    drive_continuous(on,  ticks);
+
+    const double f_off = double(off.epm.baked_count()) / std::max(1, off.epm.node_count());
+    const double f_on  = double(on.epm.baked_count())  / std::max(1, on.epm.node_count());
+    std::printf("[ BAKED ] fixed-gate %d/%d (%.0f%%)   autotune %d/%d (%.0f%%)  gate=%.5f\n",
+                off.epm.baked_count(), off.epm.node_count(), 100.0 * f_off,
+                on.epm.baked_count(),  on.epm.node_count(),  100.0 * f_on,
+                on.epm.snapshot_state()["gng"].value("autotune_value", -1.0f));
+
+    EXPECT_LT(f_off, 0.10)
+        << "control arm must fail to bake, or this test proves nothing";
+    EXPECT_GT(f_on, 0.80)
+        << "autotuned gate must let the vocabulary actually be EARNED";
+}
+
+// The gate must TRACK the signal, not merely be larger.  On a low-error stream
+// it stays at the configured floor; on a high-error stream it rises above it.
+// This is what distinguishes "adaptive" from "a bigger constant".
+TEST(EPMInsertionAutotune, GateTracksTheSignalsOwnErrorDistribution) {
+    auto p = autotune_params(true, 240);
+    p["min_insertion_error"] = 0.001;
+
+    EpmFixture busy(p);
+    drive_continuous(busy, 1500);
+    const float gate_busy = busy.epm.snapshot_state()["gng"].value("autotune_value", -1.0f);
+
+    // A near-stationary stream: quantisation error collapses, so the quantile
+    // falls below the floor and the floor is what holds.
+    EpmFixture calm(p);
+    for (int t = 0; t < 1500; ++t) {
+        calm.bus.begin_tick(uint64_t(t));
+        calm.bus.publish("reality.proprio.imu", make_proprio6(0.5f, -0.5f, 0.9f, -0.9f, 0.1f, 0.25f));
+        calm.epm.tick(uint64_t(t));
+        calm.bus.end_tick();
+    }
+    const float gate_calm = calm.epm.snapshot_state()["gng"].value("autotune_value", -1.0f);
+
+    std::printf("[ GATE ] busy=%.6f  calm=%.6f  floor=0.001\n", gate_busy, gate_calm);
+    EXPECT_GT(gate_busy, 0.001f) << "a high-error signal must lift the gate above the floor";
+    EXPECT_LT(gate_calm, gate_busy) << "a low-error signal must not";
+}
