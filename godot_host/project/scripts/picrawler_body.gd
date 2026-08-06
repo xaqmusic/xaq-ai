@@ -1284,6 +1284,29 @@ var _teleport_until: int = -1
 # would mask the very re-organisation this exists to measure.
 # _lesion_leg = -1 (the default) => every scale is 1.0 => byte-identical to no lesion.
 var _lesion_leg: int = -1
+# 2026-08-06 — PER-FOOT SLICK ABLATION.  The sufficient half of the leg-attribution
+# validation: a lesion zeroes a leg's COMMANDS, so the leg stops moving and both its
+# attributed share AND its raw sweep collapse together — a metric that merely counted
+# MOVEMENT would score identically.  Making one foot frictionless instead leaves the leg
+# sweeping normally while removing its ability to transmit thrust, so a propulsion metric
+# must lose that leg's share while its raw sweep is untouched.  -1 = off.
+# 2026-08-06 — GROUND REACTION IMPULSE per foot, accumulated every PHYSICS step.
+#
+# The kinematic attribution metric (stance-gated hip1 sweep) FAILED its sufficient
+# validation: with FL's foot slicked to mu 0.05 — physically unable to transmit thrust —
+# its attributed share did not move (0.230 -> 0.230).  A leg on a frictionless foot still
+# sweeps in stance, so stance kinematics cannot distinguish GRIP from SLIP, and the
+# correlation with fwd_v may be the body dragging the leg rather than the leg driving the
+# body.  Force is the only thing that settles the direction of causation.
+#
+# The feet already run contact_monitor with 4 contacts reported, so the solver's actual
+# contact impulses are available via body_get_direct_state.  Projected on the body-forward
+# axis this IS the propulsion each leg delivers, and it passes the slick test by
+# construction: a frictionless foot transmits no tangential force.
+var _grf_fwd: Array[float] = [0.0, 0.0, 0.0, 0.0]     # accumulated since last trace record
+var _slick_leg: int = -1
+var _slick_at: int = 0
+var _slick_done: bool = false
 var _lesion_at: int = -1
 var _lesion_until: int = 0x7FFFFFFF
 var _lesion_scale: float = 0.2
@@ -2377,6 +2400,10 @@ func _ready() -> void:
 	if lss != "": _lesion_scale = lss.to_float()
 	var lsm: String = OS.get_environment("OGMA_PICRAWLER_LESION_MODE")
 	if lsm != "": _lesion_mode = lsm
+	var skl: String = OS.get_environment("OGMA_PICRAWLER_SLICK_LEG")
+	if skl != "": _slick_leg = skl.to_int()
+	var ska: String = OS.get_environment("OGMA_PICRAWLER_SLICK_AT")
+	if ska != "": _slick_at = ska.to_int()
 	_abl_init()
 	_abl_parse_env()
 	var ccl: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_COLLIDE")
@@ -4944,6 +4971,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if brain == null or not brain.is_brain_ready():
 		return
+	_accum_grf()
 	# Apply a deferred teleport (KEY_3 / KEY_4-click / env) HERE in the physics step
 	# so the transform writes stick — input-frame writes get clobbered by the solver.
 	if _pending_teleport != null:
@@ -5218,6 +5246,13 @@ func _step_one() -> void:
 			print("PicrawlerBody: [lesion] leg %d %s at tick %d" % [
 				_lesion_leg, ("CUT to x%.2f" % _lesion_scale) if want else "RESTORED",
 				tick_counter])
+	# Per-foot slick ablation.  Announced once, loudly, for the same reason the lesion is.
+	if _slick_leg >= 0 and not _slick_done and tick_counter >= _slick_at:
+		_slick_done = true
+		if _slick_leg < _lowers.size() and is_instance_valid(_lowers[_slick_leg]):
+			_lowers[_slick_leg].physics_material_override = _make_slick_mat()
+			print("PicrawlerBody: [slick] leg %d foot -> mu 0.05 at tick %d (leg still driven)" % [
+				_slick_leg, tick_counter])
 	if _abl_env_spec != "" and not _abl_env_done and tick_counter >= _abl_env_at:
 		_abl_env_done = true
 		_abl_apply_env_spec()
@@ -9280,6 +9315,27 @@ func _do_hard_reset() -> void:
 	if _walking_trail != null and _walking_trail.has_method("clear"):
 		_walking_trail.call("clear")
 
+# Sum each foot's contact impulses along the body-forward axis, every physics step.
+# Drained by the trace recorder, so the logged value is the impulse delivered over the
+# whole brain tick rather than a single-substep snapshot.
+func _accum_grf() -> void:
+	if _trace_file == null and not _trace_ready:
+		pass    # still accumulate before the trace opens; cost is 4 direct-state reads
+	if _chassis == null or not is_instance_valid(_chassis):
+		return
+	var yaw: float = _chassis.global_transform.basis.get_euler().y
+	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
+	for i in range(_lowers.size()):
+		if not is_instance_valid(_lowers[i]):
+			continue
+		var st := PhysicsServer3D.body_get_direct_state(_lowers[i].get_rid())
+		if st == null:
+			continue
+		for j in range(st.get_contact_count()):
+			# get_contact_impulse is the impulse the SOLVER applied to this body this
+			# step; its forward component is the thrust the ground gave the foot.
+			_grf_fwd[i] += st.get_contact_impulse(j).dot(fwd)
+
 # ---------------------------------------------------------------------------
 # Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
 # ---------------------------------------------------------------------------
@@ -9314,8 +9370,10 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"lh1": [_prev_load_hip1[0], _prev_load_hip1[1], _prev_load_hip1[2], _prev_load_hip1[3]],
 		"lh2": [_prev_load_hip2[0], _prev_load_hip2[1], _prev_load_hip2[2], _prev_load_hip2[3]],
 		"lkn": [_prev_load_knee[0], _prev_load_knee[1], _prev_load_knee[2], _prev_load_knee[3]],
+		"grf": [_grf_fwd[0], _grf_fwd[1], _grf_fwd[2], _grf_fwd[3]],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
+	for k in range(4): _grf_fwd[k] = 0.0    # drain: each line reports one brain tick
 
 # ---------------------------------------------------------------------------
 # Clip ring — one compact record per brain tick.  Cheap by construction: a fixed-size
