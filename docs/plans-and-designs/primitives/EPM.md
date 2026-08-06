@@ -55,7 +55,9 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `input_topic` | string | ConstructionOnly | — | — | The single subscribed observation topic. Required. |
 | `projection_dim` | int64 | ConstructionOnly | 128 | [16, 1024] | Encoder output dim = GNG input dim. |
 | `baking_threshold` | int64 | HotMutable | 50 | [10, 500] | Visit count required to bake a node. |
-| `min_insertion_error` | double | HotMutable | 0.02 | (0, 1] | Auto-tuned each `lambda_new` ticks; this is the floor. |
+| `min_insertion_error` | double | HotMutable | 0.02 | (0, 1] | The insertion/consistency gate. **Only a floor when `insertion_autotune` is on** — see the correction below. |
+| `insertion_autotune` | bool | ConstructionOnly | false (off) | — | Set the gate from the GNG's own recent squared-TLE distribution; the value above becomes the floor. See "Insertion-gate self-tuning". |
+| `insertion_autotune_quantile` | double | ConstructionOnly | 0.30 | (0, 1) | Percentile used. A *rank*, not a scale — dimensionless, hence adaptive rather than tuned. |
 | `lambda_new` | int64 | HotMutable | 25 | [5, 200] | Steps between insertion-error reviews. |
 | `max_age` | int64 | HotMutable | 88 | [10, 500] | Edge max age before pruning. |
 | `epsilon_b` | double | HotMutable | 0.05 | (0, 1] | Winner learning rate (modulated by `neuro.state.epsilon_b_scale`). |
@@ -123,12 +125,81 @@ pixels/samples and a per-dim rescale would destroy the structure the frozen
 encoder exists to preserve. Identity is *deferred, not refused* — stacked
 heterogeneous latents plausibly want it, but nothing has measured a need.
 
+**⚠ WHEN NOT TO COMMISSION — measured the hard way, 2026-08-06.** Commissioning
+normalises a channel by its **observed range**, and a range says *nothing* about
+whether what fills it is signal or noise. Enabled on the picrawler motor layer it
+rescaled the three velocity (`delta`) channels — per-tick joint differences at
+60 Hz, small **and** noise-dominated — from ~5–12 % of the default span to 100 %,
+putting the noise on equal footing with position. Quantisation error rose
+everywhere, so nothing reached consistency and everything looked novel: **baked
+fraction 43 % → 5 %**, node count 58 → 154 and climbing. It is a `REGRESSION`
+there, recorded in the lever ledger.
+
+The unit test is not contradicted by this — it shows commissioning recovers a
+small signal that is **real** (winner purity 0.698 → 1.000). What it cannot tell
+you is whether *your* small channel is real. **So: commission a channel when you
+have reason to believe it carries information the default range is hiding — the
+smart-sensor case, where a sensor's operating range genuinely must be discovered.
+Do not commission a channel merely because it is small.** The cheap check is the
+one that caught it here: run with commissioning off and compare **baked fraction**,
+never node count.
+
 **Not in scope, deliberately:** (1) *re-calibration mid-life* — same
 moving-map-under-a-baked-vocabulary objection; if a body's dynamics change
 permanently the honest answers are mitosis or a new EPM. (2) *common-mode
 removal* — §0 rule 2 names both, but common-mode is cross-channel, and the EPM
 already has the principled version: descending-prediction subtraction. This is
 only the scale half.
+
+---
+
+## Insertion-gate self-tuning (`insertion_autotune`)
+
+⚠ **This schema row was wrong for the entire life of the C++ port**, and the error
+is instructive. It read *"Auto-tuned each `lambda_new` ticks; this is the floor"* —
+describing the **v3 Python** behaviour (`python/xaq/xaq/gng.py:105-114, 676-685`),
+where the GNG picked its own insertion floor from the 30th percentile of its recent
+squared-TLE distribution, with `freeze_min_insertion_error=True` documented as the
+*"old fixed-threshold behaviour for debugging / regression runs."* **Only the frozen
+debug branch survived the port to C++.** So every EPM in this repo has run the
+debug path while the contract advertised the adaptive one — a doc that describes a
+mechanism the code does not have is worse than no doc, because it stops anyone
+looking.
+
+`insertion_autotune` restores it, opt-in and default-off.
+
+**Why the gate matters more than it looks.** `min_insertion_error` gates **two**
+things, here and in the reference:
+
+| | condition | effect |
+|---|---|---|
+| insertion | `ema_error < gate` | converged here — do not insert |
+| baking | `ema_error >= gate` | inconsistent — demote instead of bake |
+
+A gate **below the signal's own error floor** therefore means nodes always look
+surprising enough to insert *and* never look consistent enough to bake. **Unbounded
+growth and near-zero baking are one cause, not two symptoms** — which is why the
+honest instrument for this is the **baked fraction**, never the node count. (Node
+count moves the *wrong way* under the fix: baked nodes are frozen and immune to
+pruning, so earning a vocabulary makes the population bigger.)
+
+- **Effective gate = `max(configured, quantile) * neuro_scale`.** The configured
+  value is a **floor** — a deliberate divergence from the reference, which replaced
+  the threshold outright and so lets the gate collapse toward zero in a low-error
+  regime, where growth runs away again.
+- **The neurochemical scale multiplies the auto-tuned value**, so dopamine widens or
+  narrows growth relative to the body's *current* typical surprise rather than
+  relative to a fixed constant. With autotune off the scale is folded in exactly as
+  before, bit-identically.
+- **The history round-trips** in `GNG::to_json`. A restored GNG that re-warms from an
+  empty history has no gate at all for its warmup window — same class of bug as
+  Invariant 11.
+
+**Measured, and it is not a universal win.** On a stream whose typical error exceeds
+the configured gate it is decisive: baked **0 % → 96 %**. On the picrawler motor
+signal it is a **`NULL`** — the gate lifted (0.0234 vs a 0.020 floor) but a ~1.4x lift
+was not enough, and baked fraction moved 40 % → 43 %, i.e. not at all. See the lever
+ledger for both verdicts and their re-use contexts.
 
 ---
 
