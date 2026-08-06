@@ -1138,6 +1138,19 @@ private:
     static constexpr float kTeleEmaAlpha   = 0.02f;
     static constexpr float kKneeEmaAlpha   = 0.01f;   // slow mean for the phase reference
     static constexpr float kPhaseVelScale  = 15.0f;   // balances knee Δ vs (pos−mean) in atan2
+    // ── PHASE-REFERENCE REPAIR (2026-08-05).  MEASURED: phase_retro = 0.666 -- L.phase runs
+    // BACKWARDS two ticks in three, so the quantity the Kuramoto coupling drives toward
+    // gait_phase offsets is jitter, not an oscillator.  The cause is structural: the atan2's
+    // y-arm is x[3*pj+2], a RAW per-tick joint delta, i.e. a high-pass filter.  Near the
+    // oscillation's zero crossings its noise exceeds the (pos - mean) x-arm, and the phase
+    // vector rattles instead of rotating.  A per-tick difference can never be a clean
+    // velocity estimate for a ~50-tick cycle.
+    //   phase_vel_smooth low-passes the velocity arm ONLY (the x-arm keeps its own slow-mean
+    // reference), which is the minimum change that can restore monotonic rotation.  0 = off,
+    // byte-identical.  Judge it on phase_retro directly -- that is a property of the signal,
+    // measurable without any behavioural claim.
+    float  phase_vel_ema_[8] = {0,0,0,0,0,0,0,0};
+    double phase_vel_smooth_ = 0.0;
     static constexpr float kAmpEmaAlpha    = 0.01f;   // slow amplitude estimate for the homeostat
     static constexpr float kPropCreditAlpha = 0.01f;  // ~100-tick propulsive-credit EMA (functional balance)
     static constexpr float kAmpGainMin     = 0.1f;

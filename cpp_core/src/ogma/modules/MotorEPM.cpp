@@ -227,6 +227,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"explore_floor", ParamMutability::HotMutable,
          "Lower bound on explore_mult, so commit ATTENUATES search instead of abolishing it. explore_mult currently reaches exactly 0.000 under full commit, which is the frozen-but-confident state the operator reads as indecision. 'Play never abstains' -- fix exploration's output, never its right to win. 0 = legacy. Try 0.15-0.3.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"phase_vel_smooth", ParamMutability::HotMutable,
+         "PHASE-REFERENCE REPAIR. Low-passes the velocity arm of the atan2 that produces L.phase -- the quantity the Kuramoto coupling drives toward gait_phase offsets. MEASURED DEFECT: phase_retro = 0.666, i.e. L.phase runs BACKWARDS two ticks in three, so the coordination layer has been coupling to jitter rather than to an oscillator. The cause is structural: the y-arm is a RAW per-tick joint delta (a high-pass filter), whose noise exceeds the (pos-mean) x-arm near the zero crossings of a ~50-tick cycle. Value is an averaging length: 0 = raw delta, byte-identical; 4 = ~4-tick average. JUDGE IT ON phase_retro FIRST -- that is a property of the signal and needs no behavioural claim. Try 2-8.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{32.0}},
         {"fwd_resonance_gain", ParamMutability::HotMutable,
          "fwd_v RESONANCE FEEDBACK. An adaptive-frequency Hopf oscillator is entrained BY forward velocity -- it LEARNS the frequency the body already propels itself at (fwd_v is the one signal we trust; foot contacts measured as a poor proxy for a step, and the knee-derived L.phase is what the coupling currently rides). This gain then couples the leg oscillators TO that measured rhythm, closing the loop: motion -> fwd_v oscillation -> resonator locks -> legs entrain -> the stroke lands where propulsion actually happens -> more motion. Nothing is injected: the reference is the body's own velocity, so it reinforces the rhythm the body FOUND. 0 = off, byte-identical. Watch couple_R, res_freq, res_lock and phase_retro in the graph. Try 0.2-1.0.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
@@ -585,6 +588,7 @@ ParamMap MotorEPM::current_params() const {
     m["intent_yaw_gain"] = intent_yaw_gain_;
     m["intent_rhythm_gain"] = intent_rhythm_gain_;
     m["fwd_resonance_gain"] = fwd_resonance_gain_;
+    m["phase_vel_smooth"] = phase_vel_smooth_;
     m["commit_window_ticks"] = commit_window_ticks_;
     m["commit_rise_ticks"] = commit_rise_ticks_;
     m["commit_decay_ticks"] = commit_decay_ticks_;
@@ -724,6 +728,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
     apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
     apply_param(params, "fwd_resonance_gain", [&](auto const& v){ fwd_resonance_gain_ = get_double(v, "fwd_resonance_gain"); });
+    apply_param(params, "phase_vel_smooth", [&](auto const& v){ phase_vel_smooth_ = get_double(v, "phase_vel_smooth"); });
     apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
     apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
     apply_param(params, "commit_decay_ticks", [&](auto const& v){ commit_decay_ticks_ = get_double(v, "commit_decay_ticks"); });
@@ -2385,6 +2390,14 @@ void MotorEPM::tick(uint64_t tick_id) {
             float kp = L.x[3 * pj];               // phase-source joint position (default knee = m-1)
             float kd = L.x[3 * pj + 2];           // phase-source joint delta (velocity proxy)
             L.knee_ema = (1.0f - kKneeEmaAlpha) * L.knee_ema + kKneeEmaAlpha * kp;
+            // Low-pass the velocity arm.  alpha is the smoothing WEIGHT on the new sample,
+            // so phase_vel_smooth = 0 keeps the raw delta exactly (byte-identical guard) and
+            // larger values average over more ticks.  Applied to the delta only.
+            if (phase_vel_smooth_ > 0.0 && leg < 8) {
+                const float a = 1.0f / (1.0f + float(phase_vel_smooth_));
+                phase_vel_ema_[leg] = (1.0f - a) * phase_vel_ema_[leg] + a * kd;
+                kd = phase_vel_ema_[leg];
+            }
             float vx = kp - L.knee_ema, vy = kd * kPhaseVelScale;
             const float phase_new = std::atan2(vy, vx);
             // COUPLING HEALTH (operator asked for coupling as a live metric).  A real
