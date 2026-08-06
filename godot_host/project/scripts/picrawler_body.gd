@@ -9774,16 +9774,41 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			var _gs = JSON.parse_string(str(brain.get_module_snapshot(_gid)))
 			if _gs is Dictionary and _gs.has("gng"):
 				var _g = _gs["gng"]
-				var _nodes: int = (_g.get("nodes", []) as Array).size() if _g.has("nodes") else -1
+				var _narr: Array = _g.get("nodes", [])
+				var _nodes: int = _narr.size() if _g.has("nodes") else -1
 				var _lx: Array = _g.get("last_x", [])
 				var _mag: float = 0.0
 				for _v in _lx: _mag += abs(float(_v))
-				# last_x magnitude is the LIVENESS signal: an EPM fed nothing encodes a
-				# zero vector, so |last_x| = 0 means the input never arrived -- distinct
-				# from "arrived but uninformative", which shows nonzero mag with 2 nodes.
+				# ⚠ last_x is JSON null until the first step().  ALL-ZEROS is a
+				# DIFFERENT failure -- it means step() ran on a zero encode (the
+				# dim-mismatch trap, EPM.md "The zero-encode trap").  Testing for null
+				# distinguishes them; magnitude alone cannot, and reading all-zeros as
+				# "nothing arrived" cost a session.
+				var _never_stepped: bool = (_g.get("last_x", null) == null)
+				# GATE FIELDS (§0 rule 4: never baking / never growing / growing
+				# unbounded are CONDITIONING diagnoses, not verdicts on the idea).
+				#   baked -- is the vocabulary EARNED, or is it churning?
+				#   top1  -- visit share of the single busiest node.  A high top1 next to
+				#            a large node count is premature saturation: one word absorbs
+				#            the stream while the rest are decoration.  Node count alone
+				#            cannot see this (it is the same blindness that made purity,
+				#            not node count, the EPM commissioning acceptance test).
+				var _bake_thr: int = int(_g.get("baking_threshold", 50))
+				var _baked: int = 0
+				var _visits_tot: float = 0.0
+				var _visits_max: float = 0.0
+				for _n in _narr:
+					var _v2: float = float(_n.get("visits", 0))
+					_visits_tot += _v2
+					if _v2 > _visits_max: _visits_max = _v2
+					if int(_v2) >= _bake_thr: _baked += 1
+				var _top1: float = (_visits_max / _visits_tot) if _visits_tot > 0.0 else -1.0
 				line["g_" + _gid.substr(10)] = [
-					_nodes, snappedf(float(_gs.get("ema_tle", -1.0)), 0.000001),
-					snappedf(_mag, 0.0001)]
+					_nodes, _baked, snappedf(float(_gs.get("ema_tle", -1.0)), 0.000001),
+					(-1.0 if _never_stepped else snappedf(_mag, 0.0001)),
+					int(_g.get("mitosis_count", -1)), snappedf(_top1, 0.001),
+						snappedf(float(_g.get("autotune_value", -1.0)), 0.000001),
+						snappedf(float(_g.get("min_insertion_error", -1.0)), 0.000001)]
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
