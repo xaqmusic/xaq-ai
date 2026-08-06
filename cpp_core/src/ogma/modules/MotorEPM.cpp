@@ -227,6 +227,9 @@ ParamSchema MotorEPM::params_schema() const {
         {"explore_floor", ParamMutability::HotMutable,
          "Lower bound on explore_mult, so commit ATTENUATES search instead of abolishing it. explore_mult currently reaches exactly 0.000 under full commit, which is the frozen-but-confident state the operator reads as indecision. 'Play never abstains' -- fix exploration's output, never its right to win. 0 = legacy. Try 0.15-0.3.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"phase_sym_smooth", ParamMutability::HotMutable,
+         "SYMMETRIC phase filter -- the repair for phase_vel_smooth's failure. That lever low-passed only the y-arm of atan2(vel, pos), which shrinks and phase-shifts one component, DISTORTS the ellipse, and warps the phase non-uniformly around the cycle. Because L.phase times the power stroke, the stroke then fires at the wrong point and pushes backward as often as forward: net displacement fell 57% (4.51 m -> 1.91 m, straight 0.356 -> 0.121) even while PATH length rose 21.7%. Filtering BOTH arms with the same kernel rotates the phase vector RIGIDLY -- same noise rejection, but the only phase effect is a CONSTANT offset, which stroke_phase already absorbs. 0 = off, byte-identical. ⚠ JUDGE ON net_disp AND straight, never on path length. Try 2-4.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{32.0}},
         {"phase_vel_smooth", ParamMutability::HotMutable,
          "PHASE-REFERENCE REPAIR. Low-passes the velocity arm of the atan2 that produces L.phase -- the quantity the Kuramoto coupling drives toward gait_phase offsets. MEASURED DEFECT: phase_retro = 0.666, i.e. L.phase runs BACKWARDS two ticks in three, so the coordination layer has been coupling to jitter rather than to an oscillator. The cause is structural: the y-arm is a RAW per-tick joint delta (a high-pass filter), whose noise exceeds the (pos-mean) x-arm near the zero crossings of a ~50-tick cycle. Value is an averaging length: 0 = raw delta, byte-identical; 4 = ~4-tick average. JUDGE IT ON phase_retro FIRST -- that is a property of the signal and needs no behavioural claim. Try 2-8.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{32.0}},
@@ -589,6 +592,7 @@ ParamMap MotorEPM::current_params() const {
     m["intent_rhythm_gain"] = intent_rhythm_gain_;
     m["fwd_resonance_gain"] = fwd_resonance_gain_;
     m["phase_vel_smooth"] = phase_vel_smooth_;
+    m["phase_sym_smooth"] = phase_sym_smooth_;
     m["commit_window_ticks"] = commit_window_ticks_;
     m["commit_rise_ticks"] = commit_rise_ticks_;
     m["commit_decay_ticks"] = commit_decay_ticks_;
@@ -729,6 +733,7 @@ void MotorEPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
     apply_param(params, "fwd_resonance_gain", [&](auto const& v){ fwd_resonance_gain_ = get_double(v, "fwd_resonance_gain"); });
     apply_param(params, "phase_vel_smooth", [&](auto const& v){ phase_vel_smooth_ = get_double(v, "phase_vel_smooth"); });
+    apply_param(params, "phase_sym_smooth", [&](auto const& v){ phase_sym_smooth_ = get_double(v, "phase_sym_smooth"); });
     apply_param(params, "commit_window_ticks", [&](auto const& v){ commit_window_ticks_ = get_double(v, "commit_window_ticks"); });
     apply_param(params, "commit_rise_ticks", [&](auto const& v){ commit_rise_ticks_ = get_double(v, "commit_rise_ticks"); });
     apply_param(params, "commit_decay_ticks", [&](auto const& v){ commit_decay_ticks_ = get_double(v, "commit_decay_ticks"); });
@@ -2399,6 +2404,19 @@ void MotorEPM::tick(uint64_t tick_id) {
                 kd = phase_vel_ema_[leg];
             }
             float vx = kp - L.knee_ema, vy = kd * kPhaseVelScale;
+            // Symmetric variant: the SAME kernel on both arms => rigid rotation of the
+            // phase vector, so monotonicity improves without warping where in the cycle
+            // the stroke lands.  See the header note on why the y-arm-only version failed.
+            if (phase_sym_smooth_ > 0.0 && leg < 8) {
+                const float a = 1.0f / (1.0f + float(phase_sym_smooth_));
+                if (!phase_sym_init_[leg]) {
+                    phase_pos_ema_[leg] = vx; phase_vel_ema_[leg] = vy;
+                    phase_sym_init_[leg] = true;
+                }
+                phase_pos_ema_[leg] = (1.0f - a) * phase_pos_ema_[leg] + a * vx;
+                phase_vel_ema_[leg] = (1.0f - a) * phase_vel_ema_[leg] + a * vy;
+                vx = phase_pos_ema_[leg]; vy = phase_vel_ema_[leg];
+            }
             const float phase_new = std::atan2(vy, vx);
             // COUPLING HEALTH (operator asked for coupling as a live metric).  A real
             // oscillator advances monotonically; measure how much of the time this one

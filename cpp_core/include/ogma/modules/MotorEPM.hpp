@@ -1151,6 +1151,17 @@ private:
     // measurable without any behavioural claim.
     float  phase_vel_ema_[8] = {0,0,0,0,0,0,0,0};
     double phase_vel_smooth_ = 0.0;
+    // ── SYMMETRIC phase filter.  phase_vel_smooth was RETRACTED (net displacement -57%):
+    // filtering only the y-arm of atan2(vel, pos) shrinks and phase-shifts one component,
+    // DISTORTING the ellipse so the phase warps non-uniformly around the cycle -- and since
+    // L.phase times the power stroke, the stroke then fires at the wrong point and pushes
+    // backward as often as forward (the operator's "alternating current" fwd_v).
+    //   Filtering BOTH arms with the same kernel rotates the vector RIGIDLY: identical
+    // noise rejection, but the only phase effect is a CONSTANT offset, which stroke_phase
+    // already exists to absorb.  0 = off, byte-identical.
+    float  phase_pos_ema_[8] = {0,0,0,0,0,0,0,0};
+    bool   phase_sym_init_[8] = {false,false,false,false,false,false,false,false};
+    double phase_sym_smooth_ = 0.0;
     static constexpr float kAmpEmaAlpha    = 0.01f;   // slow amplitude estimate for the homeostat
     static constexpr float kPropCreditAlpha = 0.01f;  // ~100-tick propulsive-credit EMA (functional balance)
     static constexpr float kAmpGainMin     = 0.1f;
