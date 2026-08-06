@@ -90,6 +90,26 @@ private:
     std::vector<float>       vel_noise_;                  // per-joint colored state (velocity channel)
     std::mt19937             pos_noise_rng_;
 
+    // 2026-08-06 — PER-CHANNEL RANGE PROBE (instrument, not a lever).
+    //
+    // An RBF EPM downstream normalises each input dim over a CONSTANT range
+    // (EPM `dim_min`/`dim_max`, default [-1,1]).  The three channels of this
+    // bridge's output do NOT share a scale: `pos` and `action` are ~[-1,1],
+    // but `delta` is a per-tick difference an order of magnitude smaller, so
+    // the default range crushes the velocity channels into a few percent of
+    // [0,1] and the GNG's insertion gate never sees them.  That is CLAUDE.md
+    // §0 rule 2 — the documented way EPM use goes wrong — and the only honest
+    // way to set those constants is to MEASURE the channels first.
+    //
+    // range_probe_ticks = 0 (default) accumulates nothing and prints nothing,
+    // so the off-path is byte-identical.
+    int                      range_probe_ticks_  = 0;
+    std::vector<float>       rp_min_, rp_max_;   // per output, per dim
+    std::vector<double>      rp_sum_, rp_sumsq_;
+    uint64_t                 rp_count_           = 0;
+    void                     range_probe_accum(int out_idx, int dim, float v);
+    void                     range_probe_report(uint64_t tick_id) const;
+
     // Working state — sized to n_joints() at setup.
     std::vector<float> last_position_;       // latest per-joint position seen
     std::vector<float> prev_position_;       // last tick's position (for delta)
