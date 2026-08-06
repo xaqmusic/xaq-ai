@@ -2,7 +2,9 @@
 
 **2026-08-06 · arena · seed 1 · n=1 · warmup 1000 ticks · `leg_attribution.py`**
 
-Status: **SIGNAL, not a finding** (§3 — n=1). Enough to license the UI work and
+Status: **SIGNAL, not a finding** (§3 — n=1). ⚠ The kinematic metric in the
+first version of this report FAILED validation and its ranking is retracted below;
+the force-based metric replaces it. Enough to license the UI work and
 to direct the next lever; not enough to state as fact.
 
 Instrument: per-tick trace from `picrawler_body.gd` (`OGMA_PICRAWLER_TRACE`,
@@ -39,42 +41,59 @@ force. Per-leg hip1 signs are *derived from the data*, and return
 requires. That is a validity check the torque approach never passed, and the
 script now fails loudly if the derivation is not a mirror.
 
-## Result
+## Result — from the FORCE metric (the kinematic one failed validation)
 
-| leg | mean \|share\| | corr(share, pulse impulse) | stance duty |
+**Ground reaction impulse per foot, projected on the body-forward axis.** This is
+literally the propulsion each leg delivers, and it is the only metric here that
+survived the sufficient test.
+
+| leg | mean forward GRF | share of \|forward GRF\| | sign |
 |---|---|---|---|
-| **fl** | 0.223 | **+0.424** | 0.73 |
-| fr | 0.267 | +0.195 | 0.89 |
-| rl | 0.188 | +0.153 | 0.85 |
-| **rr** | 0.323 | **+0.060** | 0.81 |
+| fl | −0.00176 | 25 % | braking |
+| fr | −0.00034 | 5 % | braking |
+| rl | −0.00050 | 7 % | braking |
+| **rr** | **+0.00446** | **63 %** | **propelling** |
 
-**`rr` holds the largest share of stance sweep and earns the least forward
-credit; `fl` is the inverse.** That is the effort-vs-credit divergence the tool
-was built to expose. It is consistent with the ledger's standing description of
-`rr` as the under-plant leg of a tripod-skid that is load-bearing for
-*straightness* — a leg that stabilises rather than propels — but this run does
-not establish that.
+**`rr` delivers ~63 % of the forward ground force and is the only leg with a net
+propulsive sign; the other three are net braking.** Summed, the body is net
+forward (+0.00186), consistent with it making progress.
+
+This is consistent with the ledger's standing description of `rr` as the
+under-plant leg of a tripod-skid that is load-bearing — but note it makes `rr`
+the *propulsor*, not merely a stabiliser.
+
+### ⚠ The kinematic metric said the OPPOSITE, and was wrong
+
+An earlier version of this report (commit `d087df2`) ranked legs by stance-gated
+hip1 sweep and reported `fl` best (+0.424) and `rr` worst (+0.060). **That
+ranking is retracted.** The force metric inverts it, and the reason is now clear:
+when the body moves forward, a planted foot's leg is necessarily swept backward
+relative to the chassis, so stance sweep correlates with `fwd_v` whether the leg
+is *driving* the body or being *dragged* by it. Stance kinematics cannot see the
+direction of causation.
 
 ## Validation
 
-| control | mean \|r\| | reading |
-|---|---|---|
-| **stance-gated (the metric)** | **0.208** | — |
-| swing-gated (moves, cannot propel) | 0.093 | at the noise floor ✓ |
-| ungated (pure movement) | 0.104 | halfway — stance gating carries the signal ✓ |
-| shuffled pulses (null) | 0.067 | noise floor |
+**The decisive test is a per-foot friction ablation** (`OGMA_PICRAWLER_SLICK_LEG`
+/ `_AT`, added for this): drop one foot to μ=0.05 so the leg still sweeps
+normally but cannot transmit thrust. A propulsion metric must lose that leg's
+share; a movement metric will not notice.
 
-Plus a **lesion test** (FL commands ×0 at t=6000): FL's attributed share
-**−91.1 %**, `corr` **+0.339 → −0.038**, and the load redistributes to `fr`
-(+0.229→+0.445) and `rl` (+0.186→+0.344) while `rr` goes negative (−0.065).
+| metric | FL share before → after slick | FL sweep | verdict |
+|---|---|---|---|
+| stance-gated hip1 sweep | 0.230 → 0.230 (**−0 %**) | +2 % | **FAILED** |
+| **forward ground reaction impulse** | **25 % → 4 %** | +2 % | **PASSED** |
 
-⚠ **The lesion test is necessary but NOT sufficient**, and this is the honest
-limit: the lesion zeroes the leg's commands, so its *raw sweep* also collapsed
-(−94.6 %). A metric that merely counted movement would score identically. The
-swing-gated control is what actually discriminates propulsion from motion, and a
-per-foot friction ablation (a leg that still sweeps but slips) would be the
-cleaner physical test — **it does not currently exist**; only chassis and limb
-friction are ablatable.
+Why the earlier controls missed it — both were degenerate against this failure
+mode. A swing leg does not sweep *in stance*, so the swing control is tautological
+under a stance gate; a lesioned leg does not move at all, so its raw signal
+collapses alongside its share. **Only a perturbation that preserves the motion and
+removes the force can separate propulsion from kinematics.**
+
+Prior (weaker) evidence, retained for the record: stance-gated mean |r| 0.208 vs
+swing-gated 0.093 vs shuffled-pulse null 0.067; lesion of FL (commands ×0) drove
+its stance-sweep share −91.1 %. Both are consistent with the kinematic metric
+tracking *motion*, which is what it turned out to measure.
 
 ## Side findings
 
