@@ -7,6 +7,8 @@
 #include <cmath>
 #include <numeric>
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace ami_ogma {
 namespace v3 {
@@ -163,6 +165,23 @@ Eigen::VectorXf FrozenRBFEncoder::encode(const float* state, int n_dims) {
     }
 
     return activations;
+}
+
+void FrozenRBFEncoder::set_dim_ranges(const std::vector<std::pair<float,float>>& ranges) {
+    if (static_cast<int>(ranges.size()) != cfg_.state_dims) {
+        throw std::invalid_argument(
+            "FrozenRBFEncoder::set_dim_ranges: expected " + std::to_string(cfg_.state_dims)
+            + " ranges, got " + std::to_string(ranges.size()));
+    }
+    for (size_t d = 0; d < ranges.size(); ++d) {
+        if (!(ranges[d].second > ranges[d].first)) {
+            throw std::invalid_argument(
+                "FrozenRBFEncoder::set_dim_ranges: dim " + std::to_string(d)
+                + " has hi <= lo");
+        }
+    }
+    cfg_.dim_ranges = ranges;
+    // Centers and sigma are in normalised space and stay untouched.
 }
 
 Eigen::VectorXf FrozenRBFEncoder::encode(const std::vector<float>& state) {

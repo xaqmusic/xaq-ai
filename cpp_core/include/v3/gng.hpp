@@ -138,6 +138,27 @@ public:
     // Prune all non-baked nodes manually (e.g. on explicit reset)
     int prune_unbaked();
 
+    /**
+     * Drop the entire topology and return to the pre-bootstrap state, as if
+     * step() had never been called — but WITHOUT recycling node IDs.
+     *
+     * The only supported caller is an owner that has just changed the meaning
+     * of its input space underneath the GNG (see EPM's `dim_autocal_ticks`:
+     * the commissioning window earns a vocabulary in provisional units, then
+     * rescales, at which point every prototype is expressed in the old units
+     * and is garbage).  Keeping such a vocabulary would leave the map moving
+     * under a topology that BAKES, which is the one thing baking assumes
+     * cannot happen.
+     *
+     * `next_id_` deliberately survives, so IDs issued after the reset can
+     * never collide with IDs a downstream consumer saw before it (EPM.md
+     * Invariant 4: "once issued, an ID is never reused even after pruning").
+     * A consumer holding a stale winner_id therefore sees an ID that no
+     * longer resolves — which is honest — rather than one silently rebound
+     * to an unrelated region of a different space.
+     */
+    void reset_topology();
+
     // ---------------------------------------------------------------------------
     // Runtime-adjustable parameters (wired to UI sliders)
     // ---------------------------------------------------------------------------
