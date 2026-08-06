@@ -14,6 +14,9 @@
 
 #include <Eigen/Dense>
 #include <memory>
+#include <array>
+#include <map>
+#include <set>
 #include <string>
 
 #include "ogma/InProcessBus.hpp"
@@ -399,4 +402,212 @@ TEST(EPM, SubRateOneIsBitIdenticalToLegacy) {
     }
     EXPECT_EQ(f_def.epm.node_count(), f_sub1.epm.node_count())
         << "sub_rate=1 must be bit-identical to default";
+}
+
+// -- Commissioning window (dim_autocal_ticks) -------------------------------
+//
+// The mechanism under test replaces hand-measured dim_min/dim_max with a
+// measured-then-frozen conditioning stage.  §0 rule 2 is the reason it exists:
+// a channel whose scale is small relative to its siblings gets collapsed by the
+// insertion gate while the encoder still shows the structure.
+
+namespace {
+
+// A stream where the ONLY channel that distinguishes states is tiny in
+// magnitude — the exact shape of the picrawler's velocity channels (delta
+// ~0.05 riding alongside position/action channels that span [-1,1]).
+// dims 0..3: large common-mode, identical in both states.
+// dim 4: the discriminating channel, +/- `amp`.
+// dim 5: large noise-free constant.
+std::shared_ptr<ogma::ProprioToken> make_tiny_signal(int state, float amp, float t) {
+    const float common = 0.8f * std::sin(t * 0.05f);
+    return make_proprio6(common, -common, 0.9f, -0.9f,
+                         (state ? amp : -amp), 0.5f);
+}
+
+ogma::ParamMap autocal_params(int64_t ticks, double k = 4.0) {
+    auto p = rbf_params();
+    p["dim_autocal_ticks"] = ticks;
+    p["dim_autocal_k"]     = k;
+    return p;
+}
+
+// Drive a stream that alternates state every 10 frames, return the EPM.
+void drive_tiny(EpmFixture& f, int n_ticks, float amp) {
+    for (int t = 0; t < n_ticks; ++t) {
+        auto pp = make_tiny_signal((t / 10) % 2, amp, float(t));
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", pp);
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+}
+
+} // namespace
+
+TEST(EPMAutocal, OffByDefaultAndAbsentFromSnapshot) {
+    EpmFixture f(rbf_params());
+    drive_tiny(f, 40, 0.03f);
+    auto snap = f.epm.snapshot_state();
+    EXPECT_FALSE(snap.contains("dim_autocal"))
+        << "with the feature off the serialised form must be byte-identical to pre-feature";
+}
+
+TEST(EPMAutocal, RejectedForNonRbfEncoders) {
+    auto p = identity_params();
+    p["dim_autocal_ticks"] = int64_t{100};
+    ogma::InProcessBus bus;
+    ogma::EPM epm;
+    epm.set_id("epm_ident");
+    // JL/STFT/Identity dims are not heterogeneous sensor channels.
+    EXPECT_THROW(epm.on_setup(&bus, p), std::invalid_argument);
+}
+
+TEST(EPMAutocal, ContradictsExplicitDimRanges) {
+    auto p = autocal_params(100);
+    p["dim_min"] = std::vector<double>{-1, -1, -1, -1, -1, -1};
+    p["dim_max"] = std::vector<double>{ 1,  1,  1,  1,  1,  1};
+    ogma::InProcessBus bus;
+    ogma::EPM epm;
+    epm.set_id("epm_contradiction");
+    EXPECT_THROW(epm.on_setup(&bus, p), std::invalid_argument);
+}
+
+TEST(EPMAutocal, DeterministicForIdenticalStreams) {
+    EpmFixture a(autocal_params(50));
+    EpmFixture b(autocal_params(50));
+    drive_tiny(a, 120, 0.03f);
+    drive_tiny(b, 120, 0.03f);
+    auto sa = a.epm.snapshot_state()["dim_autocal"];
+    auto sb = b.epm.snapshot_state()["dim_autocal"];
+    EXPECT_EQ(sa["range_lo"], sb["range_lo"]);
+    EXPECT_EQ(sa["range_hi"], sb["range_hi"]);
+    EXPECT_EQ(a.epm.node_count(), b.epm.node_count());
+}
+
+TEST(EPMAutocal, WindowRunsWarmThenResetsTopology) {
+    EpmFixture f(autocal_params(60));
+    // Warm start: the GNG is live DURING the window, so a vocabulary exists.
+    drive_tiny(f, 55, 0.03f);
+    const int nodes_before = f.epm.node_count();
+    EXPECT_GT(nodes_before, 2) << "warm start means the GNG runs during commissioning";
+    // Crossing the window must drop that vocabulary: it is expressed in the
+    // provisional units and is meaningless in the calibrated space.
+    drive_tiny(f, 10, 0.03f);
+    EXPECT_LT(f.epm.node_count(), nodes_before)
+        << "the topology must be reset when the input space is rescaled";
+    EXPECT_TRUE(f.epm.snapshot_state()["dim_autocal"]["done"].get<bool>());
+}
+
+TEST(EPMAutocal, RejectsOutlierDrivenRange) {
+    // One first-tick-style transient must not set the range: this is why the
+    // range intersects mu+/-k*sigma with the observed min/max instead of using
+    // min/max alone.  The picrawler's knee delta did exactly this (delta =
+    // pos - 0 on tick 1, ~16 sigma).
+    EpmFixture f(autocal_params(200));
+    for (int t = 0; t < 200; ++t) {
+        auto pp = (t == 0) ? make_proprio6(0, 0, 0, 0, 1.0f, 0)   // the spike
+                           : make_tiny_signal((t / 10) % 2, 0.03f, float(t));
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", pp);
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+    auto dac = f.epm.snapshot_state()["dim_autocal"];
+    const double hi = dac["range_hi"][4].get<double>();
+    EXPECT_LT(hi, 0.5) << "a single 1.0 transient must not stretch dim 4's range to it";
+    EXPECT_GT(hi, 0.0) << "but the channel's real excursion must survive";
+}
+
+TEST(EPMAutocal, SnapshotRoundTripPreservesConditioning) {
+    EpmFixture f(autocal_params(50));
+    drive_tiny(f, 150, 0.03f);
+    auto snap = f.epm.snapshot_state();
+
+    // A fresh EPM built from the SAME params has default conditioning until it
+    // restores; after restore it must be conditioned identically, or its baked
+    // vocabulary would be running against a different space.
+    EpmFixture g(autocal_params(50));
+    g.epm.restore_state(snap);
+    auto rt = g.epm.snapshot_state()["dim_autocal"];
+    EXPECT_EQ(rt["range_lo"], snap["dim_autocal"]["range_lo"]);
+    EXPECT_EQ(rt["range_hi"], snap["dim_autocal"]["range_hi"]);
+    EXPECT_TRUE(rt["done"].get<bool>());
+
+    // And one more tick must land on the same winner in both.
+    auto pp = make_tiny_signal(1, 0.03f, 200.0f);
+    for (auto* fix : {&f, &g}) {
+        fix->bus.begin_tick(500);
+        fix->bus.publish("reality.proprio.imu", pp);
+        fix->epm.tick(500);
+        fix->bus.end_tick();
+    }
+    EXPECT_EQ(f.epm.node_count(), g.epm.node_count());
+}
+
+// ★ THE ACCEPTANCE TEST.  Everything above proves the mechanism is wired
+// correctly; this one proves it DOES SOMETHING — that a state distinction
+// carried on a small-magnitude channel is discriminable with commissioning
+// and is lost without it.  If this fails to separate, the mechanism is not
+// earning its place regardless of what any behavioural number says later.
+//
+// ⚠ NODE COUNT IS A BLIND METRIC HERE and the first version of this test used
+// it: with a varying common-mode, the vocabulary size is set by the common-mode
+// sweep in BOTH arms (measured: 10 vs 10) while the channel under test changes
+// nothing either way.  The honest question is not "how many words" but "are the
+// two states different words", so this asks that directly — the unit-test form
+// of §0 rule 2's "believe the scatter, not the node count".
+namespace {
+// WINNER PURITY: for each winner id, how one-sided is its state distribution?
+// 1.0 = every word means exactly one state (the vocabulary carries the
+// distinction); 0.5 = every word is used by both states equally (the
+// distinction was discretised away).  Weighted by visit count, back half only.
+//
+// This is the measurement that matters.  Node COUNT cannot answer it — a rich
+// vocabulary built entirely on the common-mode scores well while being blind
+// to the channel under test, which is precisely the §0 rule-2 trap.
+double winner_purity(EpmFixture& f, int ticks, float amp) {
+    std::map<int, std::array<int,2>> hist;
+    for (int t = 0; t < ticks; ++t) {
+        const int state = (t / 10) % 2;
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", make_tiny_signal(state, amp, float(t)));
+        f.epm.tick(uint64_t(t));
+        auto tok = f.last_token("reality.proprio.imu");
+        if (t > ticks / 2 && tok && tok->winner_id >= 0) ++hist[tok->winner_id][state];
+        f.bus.end_tick();
+    }
+    long total = 0, pure = 0;
+    for (auto const& [id, c] : hist) {
+        total += c[0] + c[1];
+        pure  += std::max(c[0], c[1]);
+    }
+    return total ? double(pure) / double(total) : 0.0;
+}
+} // namespace
+
+TEST(EPMAutocal, RecoversDiscriminationLostAtDefaultRanges) {
+    // The §0 rule-2 shape: a small directional signal riding on a LARGE
+    // common-mode.  The common-mode dominates the distance metric, so the GNG
+    // spends its resolution there and collapses the small channel — while the
+    // encoder still shows it.  This is the picrawler's velocity channel exactly.
+    const float amp   = 0.02f;    // ~1% of the default [-1,1] span
+    const int   ticks = 400;
+
+    EpmFixture off(rbf_params());
+    const double p_off = winner_purity(off, ticks, amp);
+
+    EpmFixture on(autocal_params(100));
+    const double p_on = winner_purity(on, ticks, amp);
+
+    std::printf("[ PURITY ] default=%.3f  commissioned=%.3f  (nodes %d vs %d)\n",
+                p_off, p_on, off.epm.node_count(), on.epm.node_count());
+
+    EXPECT_LT(p_off, 0.80)
+        << "control arm must FAIL to separate (purity " << p_off
+        << ") or the test isn't testing anything";
+    EXPECT_GT(p_on, 0.95)
+        << "commissioned purity " << p_on
+        << " — conditioning must make the two states different words";
+    EXPECT_GT(p_on, p_off + 0.15) << "and the gain must be large, not marginal";
 }

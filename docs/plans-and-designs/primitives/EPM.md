@@ -73,7 +73,62 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `stale_window_factor` | double | HotMutable | 12000.0 | [100, 1e6] | Steps before a non-revisited node is prune-eligible. |
 | `subtract_descending_prediction` | bool | HotMutable | true | — | If true and `prediction.<modality>` is present, subtract before GNG. |
 | `master_seed` | int64 | ConstructionOnly | 0 | — | Seeds the JL random matrix and any GNG stochastic operations. Forwarded via `_rng.derive_rng(seed, "epm.<id>")`. |
+| `dim_autocal_ticks` | int64 | ConstructionOnly | 0 (off) | [0, ∞) | **Commissioning window**, in input frames. Measure the per-dim input ranges instead of being told them; see "Commissioning" below. RBF only (throws otherwise). Mutually exclusive with `dim_min`/`dim_max` (throws). |
+| `dim_autocal_k` | double | ConstructionOnly | 4.0 | (0, ∞) | σ-multiplier for the commissioned range: `intersect(μ ± k·σ, [min_obs, max_obs])`. |
 | Encoder-specific params (cochlear `f_min`/`f_max`/`sample_rate`/`cochlear_rta`; visual `encoder_res`/`inject_centroid`/`centroid_gain`; proprio `proprio_state_dims`/`proprio_dim_ranges`) | various | ConstructionOnly | — | — | Forwarded to the encoder constructor. See `cpp_core/include/v3/types.hpp:EPMConfig`. |
+
+---
+
+## Commissioning (`dim_autocal_ticks`)
+
+§0 rule 2 requires an EPM's input be **conditioned** before the GNG discretises
+it: a channel whose scale is small relative to its siblings is collapsed by the
+insertion gate *while the encoder still shows the structure*. Doing that by hand
+means measuring each sensor and writing `dim_min`/`dim_max` into config — a
+constant tuned to a signal's scale, which is the smell that names a missing
+adaptive mechanism. Commissioning **is** that mechanism.
+
+**Why this does not violate "frozen encoder."** The RBF encoder's centers are
+laid out in normalised `[0,1]^d` and its auto-`sigma` is derived from
+inter-center distances *in that same space* (`encoder_rbf.cpp`). Neither reads
+`dim_ranges`; the ranges are consumed in exactly one place, `normalise_state()`,
+as a per-dim affine map plus a clamp. `dim_ranges` is therefore **sensor
+conditioning upstream of the frozen encoder**, not part of it. Recalibrating it
+leaves centers, sigma and the projection untouched.
+
+**Sequence.** For the first N input frames the EPM runs *normally* (warm start)
+while accumulating per-dim statistics. On frame N it derives ranges, installs
+them, and **resets the GNG topology**, so the vocabulary is re-earned in the
+calibrated space. Frame N+1 is the first encoded in the new space.
+
+- **The reset is mandatory, not a tuning choice.** Every prototype learned during
+  the window is expressed in provisional units. Keeping them would leave the map
+  moving under a topology that *bakes* — the one thing baking assumes cannot
+  happen.
+- **Node IDs survive the reset** (`GNG::reset_topology` deliberately does not
+  reset `next_id_`), so Invariant 4 holds across the boundary: a consumer holding
+  a pre-reset `winner_id` sees an ID that no longer resolves, rather than one
+  silently rebound to an unrelated region of a different space.
+- **Range rule:** `intersect(μ ± k·σ, [min_obs, max_obs])`. Pure min/max is
+  outlier-driven — a single first-tick transient sets a range an order of
+  magnitude too wide; pure `μ ± k·σ` can invent range a bounded channel never
+  occupies. Degenerate dims (`hi − lo` below a floor) fall back to the default
+  and are reported in the `EPM_AUTOCAL` line.
+- **Window length is legitimately application-set.** It must cover the body's
+  characteristic motion — several stride cycles for a gait, a full sweep for a
+  scanning sensor. A range set by a startup transient is worse than the default.
+
+**Scope.** RBF only. JL and STFT **throw**: their dims are homogeneous
+pixels/samples and a per-dim rescale would destroy the structure the frozen
+encoder exists to preserve. Identity is *deferred, not refused* — stacked
+heterogeneous latents plausibly want it, but nothing has measured a need.
+
+**Not in scope, deliberately:** (1) *re-calibration mid-life* — same
+moving-map-under-a-baked-vocabulary objection; if a body's dynamics change
+permanently the honest answers are mitosis or a new EPM. (2) *common-mode
+removal* — §0 rule 2 names both, but common-mode is cross-channel, and the EPM
+already has the principled version: descending-prediction subtraction. This is
+only the scale half.
 
 ---
 
@@ -89,6 +144,7 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 8. When `subtract_descending_prediction == true` and a `prediction.<modality>` payload was delivered (Feedback) for the prior tick, the encoder output passed to the GNG is `encode(observation) - prediction.predicted_latent`. Otherwise the encoder output is `encode(observation)` unmodified.
 9. Hot-mutable param updates take effect on the next tick; intra-tick mutation is disallowed (Scheduler enforces the between-tick boundary).
 10. The Hopf encoder's per-band MOC EMA state is part of the EPM's serializable state; serialization round-trip preserves it bit-exactly.
+11. When `dim_autocal_ticks > 0`, both the accumulator **and** the installed ranges are part of the serializable state — same requirement, and the same reason, as Invariant 10. `on_setup` rebuilds the encoder from params, so an EPM restored after commissioning that did not re-install its ranges would run its baked vocabulary against *default* conditioning: a silent space swap. When `dim_autocal_ticks == 0` no commissioning fields are emitted at all, so the serialized form is byte-identical to a pre-feature snapshot.
 
 ---
 
@@ -97,12 +153,52 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | Trigger | Behaviour |
 |---|---|
 | First tick: GNG has fewer than 2 nodes (bootstrap not done) | Publish a token with `winner_id = -1`, `tle = 0`, `is_novel = false`. No exception. |
+| **Arriving payload length ≠ `proprio_state_dims`** (RBF) | ⚠ **CURRENTLY SILENT — see "The zero-encode trap" below.** `FrozenRBFEncoder::encode` returns `Zero(projection_dim)` on dim mismatch; the EPM's only check is `out.size() == projection_dim`, which a zero vector passes. The GNG then steps on a constant zero vector every tick, forever. The contract row below says this **should** throw; it does not yet. |
 | `params.input_topic` missing throughout run | Module logs warning every 1000 ticks, publishes the bootstrap-placeholder token. |
 | Encoder dimension mismatch with `params.projection_dim` | Throw `std::invalid_argument` at construction. |
 | `prediction.<modality>` arrives with wrong dim | Log warning, ignore the prediction this tick (do not subtract), continue. |
 | GNG step throws (e.g. NaN propagation) | Log error, reset GNG to bootstrap state, set EPM to a one-tick "warming" mode where the published token has `tle = 0` and `is_novel = false`. Recovery is per-instance, not fatal. |
 | `neuro.state` not yet published (very first tick) | Use scaling factors of 1.0 (defaults). |
 | Mitosis check would split a node beyond `max_nodes` | Skip mitosis silently this tick. |
+
+### The zero-encode trap — read this before diagnosing a dead EPM
+
+**Cost: three sessions, 2026-08-06.** Four motor-layer EPMs were configured
+without `proprio_state_dims`, so it defaulted to 22 while the bridge published
+9-value tokens. `FrozenRBFEncoder::encode` returns a **zero vector of length
+`projection_dim`** on dim mismatch instead of throwing, and `encode_pending_input`
+validates only the *output* length — which the zero vector satisfies. Result: the
+EPM reported `have_input = true` and stepped its GNG on a constant zero vector for
+the entire run.
+
+**The diagnostic signature, and the one field that disambiguates it:**
+
+| Symptom | Fed nothing | **Fed zeros (this trap)** |
+|---|---|---|
+| `gng.last_x` | `null` — `step()` never ran | **all-zeros array** — `step()` ran |
+| `history_trace` | empty | one winner, forever |
+| `nodes` / `ema_tle` | 2 / exactly 0 | 2 / a tiny decaying value (~4e-06) |
+
+`last_x` is emitted as JSON `null` until the first `step()` (`gng.cpp:567-571`).
+**`null` means the input never arrived; all-zeros means it arrived and was
+silently zeroed.** These need completely different fixes, and reading
+"`|last_x|` = 0" as "nothing arrived" sent a session chasing the subscription
+path when the subscription was fine. Check `history_trace` as the cross-check: it
+is only appended on the real path, never in `publish_bootstrap_token`.
+
+Two further traps in the same family, both of which cost a session each:
+
+- **An EPM snapshot has no `"module"` wrapper** — its diag fields sit at top
+  level, unlike MotorEPM's. A probe looking for one finds nothing and prints
+  nothing, making a *dead* EPM indistinguishable from an *unread* one.
+- **`modality_group` + `modality_name` ARE the output address**
+  (`output_topic = "reality." + group + "." + name`). Naming them after the input
+  source makes the EPM publish onto its own input topic. Nothing errors; the only
+  symptom is that nothing consumes anything.
+
+**The general rule this class teaches:** a config-shape error must fail loudly at
+construction, because every one of these is invisible at runtime and presents as
+"the module is running fine and doing nothing."
 
 ---
 
