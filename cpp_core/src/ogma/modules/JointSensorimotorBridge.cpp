@@ -1,6 +1,9 @@
 #include "ogma/modules/JointSensorimotorBridge.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <typeindex>
 
@@ -99,7 +102,57 @@ ParamSchema JointSensorimotorBridge::params_schema() const {
         {"group_size",          ParamMutability::ConstructionOnly,
             "Phase 7.2-EPM: when > 1, groups every N consecutive action_topics/proprio_indices into ONE output of length 3*N (concatenated [pos,action,delta] triples).  output_topics length must equal action_topics.size()/group_size.  Default 1 = per-joint outputs.",
             ParamValue{int64_t{1}}},
+        {"range_probe_ticks",   ParamMutability::HotMutable,
+            "INSTRUMENT, not a lever.  When > 0, accumulate per-output per-dim min/max/mean/std of the published [pos,action,delta] channels and print one `BRIDGE_RANGE` JSON line to stdout every N ticks (cumulative, so the LAST line is the whole-run answer).  Exists to set a downstream RBF EPM's `dim_min`/`dim_max` from MEASUREMENT rather than assumption: pos/action are ~[-1,1] but delta is a per-tick difference an order of magnitude smaller, and the EPM's default [-1,1] range would crush the velocity channels (CLAUDE.md §0 rule 2).  0 = off: nothing accumulated, nothing printed, byte-identical.",
+            ParamValue{int64_t{0}}},
     };
+}
+
+// --- Range probe (instrument) ------------------------------------------------
+//
+// Cumulative Welford-free accumulation: min/max plus sum/sumsq per (output, dim).
+// Cheap enough to leave in the tick path when enabled, absent entirely when not.
+
+void JointSensorimotorBridge::range_probe_accum(int out_idx, int dim, float v) {
+    const int dim_out = 3 * group_size_;
+    const size_t k    = size_t(out_idx) * size_t(dim_out) + size_t(dim);
+    if (k >= rp_min_.size()) return;
+    rp_min_[k]    = std::min(rp_min_[k], v);
+    rp_max_[k]    = std::max(rp_max_[k], v);
+    rp_sum_[k]   += double(v);
+    rp_sumsq_[k] += double(v) * double(v);
+}
+
+void JointSensorimotorBridge::range_probe_report(uint64_t tick_id) const {
+    if (rp_count_ == 0) return;
+    const int dim_out   = 3 * group_size_;
+    const int n_outputs = int(output_topics_.size());
+    const double n      = double(rp_count_);
+    // One line, all outputs, so the reader greps a single record.  Channel order
+    // within each output is [pos,action,delta] repeated group_size_ times.
+    std::printf("{\"BRIDGE_RANGE\":{\"tick\":%llu,\"n\":%llu,\"dim_out\":%d,\"legs\":{",
+                (unsigned long long)tick_id, (unsigned long long)rp_count_, dim_out);
+    for (int o = 0; o < n_outputs; ++o) {
+        std::printf("%s\"%s\":{\"min\":[", o ? "," : "", output_topics_[o].c_str());
+        for (int d = 0; d < dim_out; ++d)
+            std::printf("%s%.5f", d ? "," : "", double(rp_min_[size_t(o) * size_t(dim_out) + size_t(d)]));
+        std::printf("],\"max\":[");
+        for (int d = 0; d < dim_out; ++d)
+            std::printf("%s%.5f", d ? "," : "", double(rp_max_[size_t(o) * size_t(dim_out) + size_t(d)]));
+        std::printf("],\"mean\":[");
+        for (int d = 0; d < dim_out; ++d)
+            std::printf("%s%.5f", d ? "," : "", rp_sum_[size_t(o) * size_t(dim_out) + size_t(d)] / n);
+        std::printf("],\"std\":[");
+        for (int d = 0; d < dim_out; ++d) {
+            const size_t k  = size_t(o) * size_t(dim_out) + size_t(d);
+            const double mu = rp_sum_[k] / n;
+            const double var = std::max(0.0, rp_sumsq_[k] / n - mu * mu);
+            std::printf("%s%.5f", d ? "," : "", std::sqrt(var));
+        }
+        std::printf("]}");
+    }
+    std::printf("}}}\n");
+    std::fflush(stdout);
 }
 
 ParamMap JointSensorimotorBridge::current_params() const {
@@ -139,6 +192,9 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "group_size", [&](auto const& v){
         if (auto p = std::get_if<int64_t>(&v)) group_size_ = std::max(1, int(*p));
         else throw std::invalid_argument("JointSensorimotorBridge: group_size must be integer");
+    });
+    apply_param(params, "range_probe_ticks", [&](auto const& v){
+        if (auto p = std::get_if<int64_t>(&v)) range_probe_ticks_ = std::max(0, int(*p));
     });
 
     auto it_a = params.find("action_topics");
@@ -180,6 +236,15 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
     prev_position_.assign(n, 0.0f);
     last_action_.assign(n, 0.0f);
 
+    if (range_probe_ticks_ > 0) {
+        const size_t sz = output_topics_.size() * size_t(3 * group_size_);
+        rp_min_.assign(sz,  std::numeric_limits<float>::max());
+        rp_max_.assign(sz, -std::numeric_limits<float>::max());
+        rp_sum_.assign(sz, 0.0);
+        rp_sumsq_.assign(sz, 0.0);
+        rp_count_ = 0;
+    }
+
     sub_ids_.clear();
     sub_ids_.push_back(bus_->subscribe(proprio_input_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ this->handle_proprio(p); }));
@@ -189,7 +254,22 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
     }
 }
 
-void JointSensorimotorBridge::on_param_change(std::string_view key, ParamValue const& /*value*/) {
+void JointSensorimotorBridge::on_param_change(std::string_view key, ParamValue const& value) {
+    if (key == "range_probe_ticks") {
+        if (auto p = std::get_if<int64_t>(&value)) {
+            const bool was_off = (range_probe_ticks_ == 0);
+            range_probe_ticks_ = std::max(0, int(*p));
+            if (was_off && range_probe_ticks_ > 0) {
+                const size_t sz = output_topics_.size() * size_t(3 * group_size_);
+                rp_min_.assign(sz,  std::numeric_limits<float>::max());
+                rp_max_.assign(sz, -std::numeric_limits<float>::max());
+                rp_sum_.assign(sz, 0.0);
+                rp_sumsq_.assign(sz, 0.0);
+                rp_count_ = 0;
+            }
+            return;
+        }
+    }
     throw std::invalid_argument(
         "JointSensorimotorBridge: param '" + std::string(key) + "' is ConstructionOnly");
 }
@@ -271,9 +351,19 @@ void JointSensorimotorBridge::tick(uint64_t tick_id) {
             out->values(g * dim_per + 0) = pos;
             out->values(g * dim_per + 1) = act;
             out->values(g * dim_per + 2) = delta;
+            if (range_probe_ticks_ > 0) {
+                range_probe_accum(o, g * dim_per + 0, pos);
+                range_probe_accum(o, g * dim_per + 1, act);
+                range_probe_accum(o, g * dim_per + 2, delta);
+            }
         }
         bus_->publish(output_topics_[o], out);
         ++total_publishes_;
+    }
+
+    if (range_probe_ticks_ > 0) {
+        ++rp_count_;
+        if (rp_count_ % uint64_t(range_probe_ticks_) == 0) range_probe_report(tick_id);
     }
 
     prev_position_ = last_position_;
