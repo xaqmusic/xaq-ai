@@ -2308,6 +2308,97 @@ ControlServer's own `set_param` verb. A regression test parallel to
 have at the Godot-bridge layer.
 
 ---
+### ★★★ 2026-08-06 — THE PATH-LENGTH RETRACTION: a t=5.60, 6/6-seed, out-of-sample-replicated result that was BACKWARDS
+
+`phase_vel_smooth=2` (low-pass the velocity arm of the atan2 producing `L.phase`) was
+promoted on **+21.7 % "disp/s", t=+5.60, 6/6 seeds, then replicated on unseen seeds 7–12 at
++17.0 %**. Every statistical safeguard this project uses passed.
+
+**It was a `REGRESSION`.** `disp/s` had been computed as `sum(hypot(dx,dz))/dt` — **PATH
+LENGTH**, which counts backward motion as progress.
+
+| | path/s | **net_disp** | straight | mean fwd_v |
+|---|---|---|---|---|
+| baseline | 0.1693 | **4.51 m** | 0.356 | +0.0503 |
+| smooth 2 | 0.2059 | **1.91 m** | 0.121 | +0.0225 |
+
+Net displacement **−57.6 %**; straightness a third of baseline; forward velocity halved.
+Caught by the **operator's eye**, not by any metric: *"there is as much backward motion as
+there is forward motion … it looks like an alternating current signal."*
+
+**The lesson is not "seed-average harder".** Seed-averaging and out-of-sample replication
+are filters against *sampling* error and cannot detect a metric that scores the wrong
+quantity. CLAUDE.md §3 rule 4 names this exact trap (`fwd_v` mean is oscillation-dominated —
+read it with `net_disp`) and it was used in the blind form anyway, for a whole session.
+**Ask "what degenerate behavior scores well here?" BEFORE running the arm, not after.**
+
+Fixed in tooling: `pulsereport.py` now reports `net_m`, `straight` (= net/path, which exposes
+thrash directly) and mean `fwd_v`; the path-length number is deleted.
+
+**Every "disp/s" figure from 2026-08-05/06 was re-read on net displacement.** The corrected
+ordering (n=6, arena):
+
+| arm | net_m | straight | fwd_v | verdict |
+|---|---|---|---|---|
+| **`intent_yaw_gain=0` (ground-only intent)** | **5.11** | **0.362** | **+0.0534** | ★ session best, `PARTIAL` |
+| intent + yaw | 4.57 | 0.358 | +0.0510 | ties |
+| baseline `stroke12` | 4.92 / 4.51 | 0.351 | +0.0497 | `BASELINE` |
+| `intent_rhythm_gain=2.0` | 4.44 | 0.350 | +0.0499 | `NULL` |
+| `fwd_resonance_gain=0.5` | 3.79 | 0.302 | +0.0406 | `NULL` (failed wrong-sign) |
+| `coupling_gain=0.5` | 3.04 | 0.333 | +0.0327 | `REGRESSION` |
+| `phase_sym_smooth=2` | 2.99 | 0.165 | +0.0330 | `REGRESSION` |
+| `phase_vel_smooth=1` | 2.34 | 0.167 | +0.0244 | `REGRESSION` |
+| `coupling_gain=3.0` | 1.86 | 0.153 | +0.0180 | `REGRESSION` |
+| `phase_vel_smooth=2` | 1.91 | 0.121 | +0.0225 | `REGRESSION` (the retraction) |
+
+### ★★ 2026-08-06 — `L.phase` TIMES THE POWER STROKE, so it cannot be filtered at all
+
+New instrument: `couple_R` (Kuramoto order parameter), `phase_retro`, `res_period`,
+`res_amp`, `res_lock` — live in the inspector and JSONL.
+
+**Measured:** `L.phase` changes direction on **31 % of ticks** (directional consistency
+`max(retro, 1−retro)` = 0.680; `couple_R` = 0.453 swinging 0.02–0.98). The y-arm of
+`atan2(vel, pos)` is a **raw per-tick joint delta — a high-pass filter** — whose noise
+exceeds the position arm near the zero crossings of a ~50-tick cycle.
+
+Filtering it improves consistency (31 % → 18 % wrong-way) **and destroys locomotion**, both
+asymmetric (`phase_vel_smooth`) and symmetric (`phase_sym_smooth`, built specifically to
+test whether ellipse distortion was the cause — **refuted**, same failure). The signature is
+identical in both: pulse amplitude **up** (0.243 → 0.278), net travel **down**.
+
+⇒ **The lag is the defect and it is structural.** `L.phase` does not merely describe the
+leg, it *times the power stroke*; any delay fires the stroke late so the leg drives backward
+through part of every stride. **No filter of any shape can fix a signal whose value must be
+timely.** `phase_joint=hip1` is not the fix either (37 % wrong-way, net −28 %).
+
+**Re-use context:** the lag is *computable* — an EMA of weight `a` has group delay
+τ ≈ (1−a)/a, and `phase_freq` is already measured — so advancing the filtered phase by
+`phase_freq·τ` restores timing with both terms taken from the body's own dynamics. Superseded
+in priority by MotorEPMv2 §rung 1, which fixes *all* loop delay with one mechanism.
+
+### ★★ 2026-08-05 — commit precision has NO AUTHORITY over stride timing (a family verdict)
+
+Nine variants of the intent/commit-precision error (yaw / ground-only, three exponents,
+three rhythm gains) drove `commit_prec` from 1.00 to 2.75 and its clamp saturation from 0 %
+to 37.5 %, with the consumer verified live each time. **`pulse_cv` never moved: 0.58–0.62
+throughout.** `coupling_gain` *does* move it (0.755 at gain 3.0), so the metric is not
+insensitive — the precision pathway simply cannot reach stride timing. `NULL` for the family,
+not for any member.
+
+Sub-results worth keeping: the intent error was **98 % yaw variance** in its first build
+(`corr(intent_err, fwd_progress_ema) = −0.002`), fixed by per-term spread normalization then
+by the operator's argument to drop chassis yaw entirely (**−0.833** correlation, and the
+session's best arm). The commit exponent is **derived, not tuned**: `z` is bounded above at
+exactly 1, so `k = ln(clamp_hi)` maps its ceiling onto the output ceiling — saturation fell
+57 % → 6 % and displacement rose monotonically as it did.
+
+### ⚠️ 2026-08-05 — n=4 fixed-seed CANNOT resolve a ~5 % effect on any commit_prec arm
+
+Same exponent, same four seeds, same gym, measured twice: means **0.1770 vs 0.1617 (9.5 %
+apart)** off a **0.01 %** parameter change. The baseline's own seed-sd is 0.0019 — an order
+of magnitude tighter. Once the lever perturbs the trajectory, pinning the seed no longer
+pins the outcome. A `+5.7 %` claimed at n=4 did not replicate. **Treat sub-10 % deltas on
+these arms as unmeasured.**
 
 ## 5. Open frontier
 
