@@ -78,7 +78,8 @@
           11.0
         ],
         "group_size": 3,
-        "sensor_label_prefix": "motor_leg"
+        "sensor_label_prefix": "motor_leg",
+        "range_probe_ticks": 2000
       }
     },
     {
@@ -244,7 +245,7 @@
         "modality_name": "fl",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.fl",
-        "projection_dim": 32,
+        "proprio_state_dims": 9,
         "tle_alpha": 0.7,
         "tle_beta": 0.3,
         "mitosis_enabled": true,
@@ -259,7 +260,7 @@
         "modality_name": "fr",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.fr",
-        "projection_dim": 32,
+        "proprio_state_dims": 9,
         "tle_alpha": 0.7,
         "tle_beta": 0.3,
         "mitosis_enabled": true,
@@ -274,7 +275,7 @@
         "modality_name": "rl",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.rl",
-        "projection_dim": 32,
+        "proprio_state_dims": 9,
         "tle_alpha": 0.7,
         "tle_beta": 0.3,
         "mitosis_enabled": true,
@@ -289,7 +290,7 @@
         "modality_name": "rr",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.rr",
-        "projection_dim": 32,
+        "proprio_state_dims": 9,
         "tle_alpha": 0.7,
         "tle_beta": 0.3,
         "mitosis_enabled": true,
