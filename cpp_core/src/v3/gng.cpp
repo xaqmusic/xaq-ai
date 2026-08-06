@@ -475,6 +475,26 @@ int GNG::prune_unbaked() {
 }
 
 // ---------------------------------------------------------------------------
+// Topology reset — for an owner that has rescaled the input space
+// ---------------------------------------------------------------------------
+
+void GNG::reset_topology() {
+    nodes_.clear();
+    edges_.clear();
+    adj_.clear();
+    step_             = 0;
+    mitosis_count_    = 0;
+    last_step_baked_  = false;
+    last_pruned_ids_.clear();
+    last_death_step_  = -1000000;
+    bootstrapped_     = false;
+    bootstrap_buf_.clear();
+    last_x_.reset();
+    running_mean_error_ = 1.0f;
+    // next_id_ is NOT reset — see the header contract.
+}
+
+// ---------------------------------------------------------------------------
 // Mitosis Gatekeeper — split a saturated baked node into two daughters
 // ---------------------------------------------------------------------------
 
