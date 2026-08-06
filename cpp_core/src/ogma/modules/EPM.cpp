@@ -133,6 +133,12 @@ ParamSchema EPM::params_schema() const {
         {"dim_min",                 ParamMutability::ConstructionOnly, "RBF per-dim normalisation MIN (vector, len=proprio_state_dims). With dim_max, maps each input dim to [0,1] over its ACTUAL range so small-magnitude sensors (e.g. vision loom ~0.09) aren't washed out by the default [-1,1].  Omitted → [-1,1].", std::nullopt},
         {"dim_max",                 ParamMutability::ConstructionOnly, "RBF per-dim normalisation MAX (vector, len=proprio_state_dims).", std::nullopt},
         {"master_seed",             ParamMutability::ConstructionOnly, "RNG namespace seed",    ParamValue{int64_t{0}}},
+        {"insertion_autotune",      ParamMutability::ConstructionOnly,
+            "ECOLOGICAL SELF-TUNING OF THE INSERTION GATE.  `min_insertion_error` is an ABSOLUTE threshold and only means something relative to the typical quantisation error of the signal in front of it; held fixed on a stream whose typical error exceeds it, insertion never stops being justified and the GNG grows until it hits max_nodes.  When on, the GNG sets its own gate from the `insertion_autotune_quantile`-th percentile of its OWN recent squared-TLE distribution, and the configured `min_insertion_error` becomes the FLOOR it always claimed to be: effective = max(configured, quantile) * neuro_scale.  Restores behaviour that existed in the v3 Python reference and was lost in the C++ port.  false (default) = the fixed-threshold path, byte-identical.",
+            ParamValue{false}},
+        {"insertion_autotune_quantile", ParamMutability::ConstructionOnly,
+            "Percentile of the GNG's own recent squared-TLE distribution used as the insertion floor.  A RANK, not a scale: dimensionless and invariant to the signal's units, which is what makes this adaptive rather than another constant tuned to a signal's magnitude.  0.30 matches the v3 reference.",
+            ParamValue{0.30}},
         {"dim_autocal_ticks",       ParamMutability::ConstructionOnly,
             "COMMISSIONING WINDOW, in input frames.  When > 0, the EPM measures its own per-dim input ranges over the first N frames instead of being told them, then installs them and RESETS the GNG topology so the vocabulary is re-earned in the calibrated space.  This is the adaptive form of `dim_min`/`dim_max`: §0 rule 2 requires the input be conditioned before discretisation, and a hand-measured constant per sensor is the smell that names a missing mechanism.  Window length is legitimately application-set — it must cover the body's characteristic motion (several stride cycles for a gait, a full sweep for a sensor), because a range set by a startup transient is worse than the default.  Mutually exclusive with explicit dim_min/dim_max (throws).  RBF encoder only (throws for jl/stft, whose dims are homogeneous pixels/samples and must not be rescaled per-dim).  0 = off, byte-identical.",
             ParamValue{int64_t{0}}},
@@ -234,6 +240,9 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_check_interval",  [&](auto const& v){ gng_cfg.mitosis_check_interval  = int(get_int(v, "mitosis_check_interval")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
+    apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
+    apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
+    insertion_autotune_ = gng_cfg.insertion_autotune;
 
     base_epsilon_b_               = gng_cfg.epsilon_b;
     base_min_insertion_error_     = gng_cfg.min_insertion_error;
@@ -514,7 +523,24 @@ bool EPM::encode_pending_input(Eigen::VectorXf& out) {
 void EPM::apply_neuro_scaling() {
     if (!gng_) return;
     gng_->set_epsilon_b(              base_epsilon_b_           * epsilon_b_scale_);
-    gng_->set_min_insertion_error(    base_min_insertion_error_ * min_insertion_error_scale_);
+    // ⚠ THE SCALE IS APPLIED IN TWO DIFFERENT PLACES ON PURPOSE.
+    //
+    // Legacy path (autotune off): fold the neurochemical scale into the value
+    // handed to the GNG, exactly as before — that arithmetic must stay
+    // bit-identical or every existing config moves.
+    //
+    // Autotune path: hand the GNG the UNSCALED configured floor and pass the
+    // scale separately, so the GNG applies it to max(floor, quantile).  The
+    // scale then modulates growth relative to the body's CURRENT typical
+    // surprise rather than relative to a fixed constant, which is the only
+    // reading of "min_insertion_error_scale" that still means something once
+    // the base is no longer fixed.
+    if (insertion_autotune_) {
+        gng_->set_min_insertion_error(base_min_insertion_error_);
+        gng_->set_neuro_min_insertion_scale(min_insertion_error_scale_);
+    } else {
+        gng_->set_min_insertion_error(base_min_insertion_error_ * min_insertion_error_scale_);
+    }
     gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_);
 }
 

@@ -130,6 +130,10 @@ private:
     // The GNG.  Always present.
     std::unique_ptr<ami_ogma::v3::GNG> gng_;
 
+    // Mirrors GNG::Config::insertion_autotune so apply_neuro_scaling() knows
+    // which of its two scale-application paths is live (see its comment).
+    bool            insertion_autotune_  = false;
+
     // -------------------------------------------------------------------------
     // Commissioning window — per-dim input autocalibration (dim_autocal_ticks)
     // -------------------------------------------------------------------------
