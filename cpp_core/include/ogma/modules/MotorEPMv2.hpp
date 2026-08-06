@@ -1256,6 +1256,11 @@ private:
         const float zw = float(intent_yaw_gain_) * (yaw_rate_ema_ - intent_w_) / (ew_spread_ema_ + 1e-6f);
         return std::log1p(zv * zv + zw * zw);
     }
+    // ── RUNG 1: act on the predicted state.  See the use site in the .cpp.
+    double lookahead_gain_ = 0.0;    // 0 = off, byte-identical; <0 = wrong-sign control
+    double lookahead_mode_ = 0.0;    // 0 = fixed point (true lookahead), 1 = prev-action
+    double lookahead_null_ = 0.0;    // 1 = drop A*y (control: is it the DYNAMICS?)
+    float  la_dev_ema_     = 0.0f;   // ||x_eff - x||, the consumer check
     double intent_yaw_gain_ = 1.0;                  // 0 = progress-over-ground only
     // ── STRIDE-PROFILE PREDICTION (intent_rhythm_gain).  A constant v* is a target a
     // legged body physically CANNOT hold: it advances in pulses, so a level-seeking error
