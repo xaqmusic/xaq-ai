@@ -30,7 +30,14 @@ tiny, very regular jitter and scores a beautiful CV.  So pulse_cv is NEVER read 
                well then stalls has a fat upper tail even when the CV looks fine, because
                a few long pauses hide among many short gaps.  This is the operator's
                "good strides and pauses" made numeric.
-  disp/s       do-no-harm.  Rhythm bought by walking slower is not a win.
+  net / straight / fwd_v   ⚠ THE CORRECTION OF 2026-08-06.  This tool originally reported
+               PATH LENGTH per second and called it disp/s.  Path length counts BACKWARD
+               motion as progress, so a body thrashing in place scores brilliantly.  It
+               certified a +21.7% "win" (t=5.60, 6/6 seeds, replicated out-of-sample) that
+               was in truth a 57% LOSS of net displacement -- the operator caught it by eye
+               from the fwd_v trace being symmetric about zero.  net_disp is now the
+               headline, `straight` = net/path exposes thrash directly, and mean fwd_v must
+               stay positive.  Never report a path-length number as progress again.
 
 THE DETECTION THRESHOLD IS DERIVED, NOT TUNED (doctrine §5): a pulse must exceed the
 run's own mean positive fwd_v, so the bar scales with whatever the body is doing.  A
@@ -79,13 +86,18 @@ def run(f):
     d = [math.hypot(rows[i]["x"] - rows[i - 1]["x"], rows[i]["z"] - rows[i - 1]["z"])
          for i in range(1, len(rows))]
     raw = [ts[idx[i]] - ts[idx[i - 1]] for i in range(1, len(idx))]
+    net = math.hypot(rows[-1]["x"] - rows[0]["x"], rows[-1]["z"] - rows[0]["z"])
+    path = sum(d)
     return dict(
         cv=st.pstdev(raw) / max(1e-9, st.mean(raw)),
+        net=net,
+        straight=net / max(path, 1e-9),
+        fwdv=st.mean(fv),
         amp=st.mean(amps),
         duty=sum(1 for v in fv if v > 0) / len(fv),
         p50=gaps[len(gaps) // 2],
         p90=gaps[int(len(gaps) * 0.9)],
-        dps=sum(d) / max(1e-9, (ts[-1] - ts[0]) / 60.0),
+        dps=net / max(1e-9, (ts[-1] - ts[0]) / 60.0),   # NET per second, never path
     )
 
 
@@ -99,7 +111,7 @@ if __name__ == "__main__":
     tags = sys.argv[2:] or sorted({os.path.basename(f).rsplit("_", 1)[0]
                                    for f in glob.glob(os.path.join(d, "*_[0-9].log"))})
     print(f"\n  {'arm':<28}{'pulse_cv':>9}{'amp':>8}{'duty':>7}"
-          f"{'gap50':>7}{'gap90':>7}{'p90/p50':>9}{'disp/s':>9}{'n':>4}")
+          f"{'p90/p50':>9}{'net_m':>8}{'straight':>10}{'fwd_v':>9}{'net/s':>8}{'n':>4}")
     base = None
     for tag in tags:
         a = arm(d, tag)
@@ -115,7 +127,8 @@ if __name__ == "__main__":
         if m["dps"] < base["dps"] * 0.9:
             flag += "  << SLOWER (do-no-harm fail)"
         print(f"  {tag:<28}{m['cv']:>9.3f}{m['amp']:>8.3f}{m['duty']:>7.2f}"
-              f"{m['p50']:>7.0f}{m['p90']:>7.0f}{tail:>9.2f}{m['dps']:>9.4f}{len(a):>4}{flag}")
+              f"{tail:>9.2f}{m['net']:>8.2f}{m['straight']:>10.3f}"
+              f"{m['fwdv']:>+9.4f}{m['dps']:>8.4f}{len(a):>4}{flag}")
     print("\n  pulse_cv: 0 = metronome, ~1.0 = Poisson (no rhythm at all).")
     print("  p90/p50 is the PAUSE tail -- 'good strides then a stall' shows up here first.")
     print("  Never read pulse_cv alone: a barely-moving body emits beautifully regular twitches.")
