@@ -24,7 +24,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <optional>
 
@@ -70,6 +72,43 @@ public:
         float beta                = 0.0005f;
         int   baking_threshold    = 100;
         float min_insertion_error = 0.02f;
+
+        // ---------------------------------------------------------------------
+        // Ecological self-tuning of the insertion gate
+        // ---------------------------------------------------------------------
+        //
+        // `min_insertion_error` is an ABSOLUTE error threshold, so it only means
+        // anything relative to the typical quantisation error of the signal in
+        // front of it.  Held fixed, on a stream whose typical error sits above
+        // it, insertion never stops being justified and the GNG grows until it
+        // hits max_nodes -- measured on the picrawler motor layer 2026-08-06:
+        // nodes pinned at the cap, and RAISING the cap 120 -> 400 made baking
+        // WORSE in absolute terms (19-27 baked -> 6-11), i.e. the cap was the
+        // only thing forcing revisits.  Flat ema_tle for 12000 ticks confirmed
+        // it never converged.
+        //
+        // The fix is not a better constant.  The v3 Python reference
+        // (python/xaq/xaq/gng.py:105-114, 676-685) had the GNG pick its own
+        // floor from the 30th percentile of its recent squared-TLE distribution
+        // -- "the split between stable/don't-grow and surprising/grow tracks
+        // whatever input density the environment actually presents."  Only the
+        // frozen debug branch of that survived the port to C++, while EPM.md
+        // went on documenting the auto-tuning as present.  This restores it.
+        //
+        // The quantile is a RANK -- dimensionless, invariant to the signal's
+        // units -- which is what makes this adaptive rather than one more
+        // constant tuned to a signal's scale (doctrine rule 5).
+        //
+        // Effective gate = max(min_insertion_error, quantile) * neuro_scale.
+        // The configured value is therefore the FLOOR, which is what the EPM
+        // contract always claimed it was.  ⚠ This DIVERGES from the Python
+        // reference, which replaced the threshold outright; a pure replacement
+        // lets the gate collapse toward zero in a low-error regime and growth
+        // runs away again.
+        //
+        // false (default) = exactly the pre-2026-08-06 fixed-threshold path.
+        bool  insertion_autotune          = false;
+        float insertion_autotune_quantile = 0.30f;
         bool  stale_prune_enabled = true;
         float stale_window_factor = 12000.0f; // absolute steps (~400s at 30fps)
         // Mitosis Gatekeeper
@@ -166,6 +205,29 @@ public:
     void set_stale_prune_enabled(bool enabled) { cfg_.stale_prune_enabled = enabled; }
     void set_stale_window_factor(float factor) { cfg_.stale_window_factor = factor; }
     void set_min_insertion_error(float e)      { cfg_.min_insertion_error = e; }
+
+    // Neurochemical modulation of the insertion gate.
+    //
+    // ⚠ ONLY consulted when insertion_autotune is on.  In the legacy path the
+    // owner folds the scale into set_min_insertion_error() itself, and that
+    // must keep working byte-identically -- so with autotune off this value is
+    // ignored entirely rather than applied twice.  When autotune IS on the
+    // owner passes the UNSCALED floor above and the scale here, so the scale
+    // multiplies the auto-tuned gate: dopamine then widens or narrows growth
+    // relative to the body's CURRENT typical surprise instead of relative to a
+    // fixed constant.
+    void set_neuro_min_insertion_scale(float s) { neuro_min_insertion_scale_ = s; }
+
+    /// The threshold actually applied this step (see Config::insertion_autotune).
+    float effective_min_insertion_error() const {
+        if (!cfg_.insertion_autotune) return cfg_.min_insertion_error;
+        return std::max(cfg_.min_insertion_error, autotune_value_)
+             * neuro_min_insertion_scale_;
+    }
+
+    /// Diagnostic: the raw quantile before the floor and scale are applied.
+    /// Negative until the warmup window has filled.
+    float autotune_value() const { return autotune_value_; }
     void set_epsilon_b(float e)                { cfg_.epsilon_b = e; }
     void set_epsilon_n(float e)                { cfg_.epsilon_n = e; }
     void set_lambda_new(int l)                 { cfg_.lambda_new = l; }
@@ -242,6 +304,18 @@ private:
 
     // Running mean squared quantization error
     float running_mean_error_ = 1.0f;
+
+    // Insertion-gate self-tuning state.  History holds recent SQUARED
+    // quantisation distances, matching the units of GNGNode::ema_error (an EMA
+    // of d1_sq, gng.cpp:119) -- the quantity the gate is compared against.
+    // Sizes are sample COUNTS, not signal-scale constants, and match the v3
+    // Python reference (deque maxlen 1000, warmup 100).
+    static constexpr size_t kAutotuneHistoryMax = 1000;
+    static constexpr size_t kAutotuneWarmup     = 100;
+    std::deque<double> autotune_hist_;
+    float              autotune_value_            = -1.0f;   // < 0 = not yet warm
+    float              neuro_min_insertion_scale_ = 1.0f;
+    void               update_autotune_threshold();
 
     // Recent winner history (last 32 node IDs)
     std::vector<int> history_;
