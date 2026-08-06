@@ -2,9 +2,11 @@
 
 **2026-08-06 · arena · seed 1 · n=1 · warmup 1000 ticks · `leg_attribution.py`**
 
-Status: **SIGNAL, not a finding** (§3 — n=1). ⚠ The kinematic metric in the
-first version of this report FAILED validation and its ranking is retracted below;
-the force-based metric replaces it. Enough to license the UI work and
+Status: **n=6 seed-averaged, arena, 10k ticks, warmup 1000.** The engine identity
+is unanimous (6/6), so it is a loud structural result rather than a marginal one —
+but it is still a *signal* under §3 until it survives varied world seeds and a (d)
+perturbation. ⚠ The kinematic metric in the first version of this report FAILED
+validation and its ranking is retracted below; the force-based metric replaces it. Enough to license the UI work and
 to direct the next lever; not enough to state as fact.
 
 Instrument: per-tick trace from `picrawler_body.gd` (`OGMA_PICRAWLER_TRACE`,
@@ -61,6 +63,33 @@ forward (+0.00186), consistent with it making progress.
 This is consistent with the ledger's standing description of `rr` as the
 under-plant leg of a tripod-skid that is load-bearing — but note it makes `rr`
 the *propulsor*, not merely a stabiliser.
+
+### Seed-averaged — n=6, and the engine never changes
+
+| leg | mean forward GRF (n=6) | propelling on |
+|---|---|---|
+| fl | **−0.00238 ± 0.00113** | **0 / 6 seeds** |
+| fr | +0.00016 ± 0.00078 | 3 / 6 |
+| rl | −0.00028 ± 0.00061 | 1 / 6 |
+| **rr** | **+0.00410 ± 0.00113** | **6 / 6 seeds** |
+
+Per-seed engine (most positive forward GRF): **rr, rr, rr, rr, rr, rr**. Its share
+of |forward GRF| ranges 42–61 %. Mean `fwd_v` is +0.042…+0.053 on every seed, so
+the body genuinely makes progress throughout.
+
+**The power leg does NOT change per seed — it is `rr` every time.** `rr`'s mean is
+3.6σ from zero and `fl`'s is −2.1σ; the two middle legs straddle zero. So the
+picture is not "an asymmetric gait" in the vague sense: it is **one engine (`rr`),
+one consistent brake (`fl`), and two roughly neutral legs**. `rr` and `fl` are a
+DIAGONAL pair, and the config drives them at the SAME gait phase (`gait_phase =
+[0, π, π, 0]`) — the same command producing opposite force contributions.
+
+Number of net-propelling legs per seed: **1, 2, 3, 1, 1, 2**. The body is
+locomoting on roughly one leg.
+
+This is the physical content behind the ledger's long-standing "RR-under-plant
+tripod-skid", and behind "every symmetry-forcing lever → circling": the asymmetry
+is not incidental, it is *how this gait produces thrust at all*.
 
 ### ⚠ The kinematic metric said the OPPOSITE, and was wrong
 
