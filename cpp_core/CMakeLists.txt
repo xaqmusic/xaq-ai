@@ -225,6 +225,7 @@ add_library(ogma_core
     src/ogma/modules/PolicyChannelAggregator.cpp
     src/ogma/modules/CPGOscillator.cpp
     src/ogma/modules/MotorEPM.cpp
+    src/ogma/modules/MotorEPMv2.cpp
     src/ogma/modules/PosturalPrior.cpp
     src/ogma/modules/KeyframeGait.cpp
     src/ogma/modules/BodyRhythmTracker.cpp
