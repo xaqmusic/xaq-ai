@@ -46,6 +46,7 @@
 #include "ogma/modules/PolicyChannelAggregator.hpp"
 #include "ogma/modules/CPGOscillator.hpp"
 #include "ogma/modules/MotorEPM.hpp"
+#include "ogma/modules/MotorEPMv2.hpp"
 #include "ogma/modules/PosturalPrior.hpp"
 #include "ogma/modules/KeyframeGait.hpp"
 #include "ogma/modules/BodyRhythmTracker.hpp"
@@ -186,6 +187,9 @@ ModuleRegistry& ModuleRegistry::instance() {
         // (forward self-model + controller, learns by descending the motor TLE;
         // no reward).  docs/plans-and-designs/motor_epm_homeokinetic_plan.md
         reg.register_type("MotorEPM",            [](){ return std::make_unique<MotorEPM>(); });
+        // STAGE 0: a mechanical copy of MotorEPM.  Must stay byte-identical to it until
+        // moduledif.py passes; see docs/plans-and-designs/motor_epm_v2_plan.md.
+        reg.register_type("MotorEPMv2",          [](){ return std::make_unique<MotorEPMv2>(); });
         reg.register_type("PosturalPrior",       [](){ return std::make_unique<PosturalPrior>(); });
         reg.register_type("KeyframeGait",        [](){ return std::make_unique<KeyframeGait>(); });
         reg.register_type("BodyRhythmTracker",   [](){ return std::make_unique<BodyRhythmTracker>(); });
