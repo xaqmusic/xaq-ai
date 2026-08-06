@@ -240,7 +240,7 @@
       "id": "motor_gng_fl",
       "type": "EPM",
       "params": {
-        "modality_group": "motor_leg",
+        "modality_group": "motorgng",
         "modality_name": "fl",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.fl",
@@ -255,7 +255,7 @@
       "id": "motor_gng_fr",
       "type": "EPM",
       "params": {
-        "modality_group": "motor_leg",
+        "modality_group": "motorgng",
         "modality_name": "fr",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.fr",
@@ -270,7 +270,7 @@
       "id": "motor_gng_rl",
       "type": "EPM",
       "params": {
-        "modality_group": "motor_leg",
+        "modality_group": "motorgng",
         "modality_name": "rl",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.rl",
@@ -285,7 +285,7 @@
       "id": "motor_gng_rr",
       "type": "EPM",
       "params": {
-        "modality_group": "motor_leg",
+        "modality_group": "motorgng",
         "modality_name": "rr",
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.rr",
