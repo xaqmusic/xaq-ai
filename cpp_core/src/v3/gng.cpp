@@ -118,6 +118,14 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     s1.error     += d1_sq;
     s1.ema_error  = 0.9 * s1.ema_error + 0.1 * d1_sq;
 
+    // Insertion-gate self-tuning: remember this step's squared quantisation
+    // error so the gate can be set from the signal's OWN error distribution.
+    // Accumulated only when enabled, so the off-path allocates nothing.
+    if (cfg_.insertion_autotune) {
+        autotune_hist_.push_back(d1_sq);
+        if (autotune_hist_.size() > kAutotuneHistoryMax) autotune_hist_.pop_front();
+    }
+
     // 3. Move winner toward input — health-dampened plasticity.
     //    High-health nodes move less (consolidated). Fully consolidated
     //    (visits >= baking_threshold AND low error) are frozen.
@@ -261,7 +269,7 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     last_step_baked_ = false;
     if (!s1.bake_checked && s1.visits >= cfg_.baking_threshold) {
         s1.bake_checked = true;
-        if (s1.ema_error >= cfg_.min_insertion_error) {
+        if (s1.ema_error >= effective_min_insertion_error()) {
             // Demotion: concept not tight enough
             s1.bake_checked = false;  // allow re-check after demotion
             s1.visits     = std::max(0, cfg_.baking_threshold - 3);
@@ -339,8 +347,28 @@ void GNG::prune_stale_unbaked() {
 // Node insertion (Fritzke + baked-q extension)
 // ---------------------------------------------------------------------------
 
+// Recompute the self-tuned insertion floor from the recent squared-TLE
+// distribution.  Linear-interpolated quantile, matching numpy's default so the
+// C++ tracks the v3 Python reference rather than merely resembling it.
+void GNG::update_autotune_threshold() {
+    if (!cfg_.insertion_autotune) return;
+    if (autotune_hist_.size() < kAutotuneWarmup) return;   // stays < 0 until warm
+    std::vector<double> sorted(autotune_hist_.begin(), autotune_hist_.end());
+    std::sort(sorted.begin(), sorted.end());
+    const double q   = std::clamp(double(cfg_.insertion_autotune_quantile), 0.0, 1.0);
+    const double pos = q * double(sorted.size() - 1);
+    const size_t lo  = static_cast<size_t>(pos);
+    const size_t hi  = std::min(lo + 1, sorted.size() - 1);
+    const double frac = pos - double(lo);
+    autotune_value_ = static_cast<float>(sorted[lo] * (1.0 - frac) + sorted[hi] * frac);
+}
+
 void GNG::insert_node() {
     if (static_cast<int>(nodes_.size()) < 2) return;
+
+    // Refresh the gate at the same cadence as the insertion check itself
+    // (every lambda_new steps), which is where the reference put it.
+    update_autotune_threshold();
 
     // q = node with maximum accumulated error
     int q_id = -1;
@@ -354,7 +382,7 @@ void GNG::insert_node() {
     if (q_id < 0) return;
 
     // Convergence guard: skip if ema_error is below threshold
-    if (nodes_.at(q_id).ema_error < cfg_.min_insertion_error) return;
+    if (nodes_.at(q_id).ema_error < effective_min_insertion_error()) return;
 
     // f = neighbour of q with maximum accumulated error
     int f_id = -1;
@@ -581,6 +609,17 @@ nlohmann::json GNG::to_json() const {
     j["next_id"]             = next_id_;
     j["mitosis_count"]       = mitosis_count_;
     j["running_mean_error"]  = running_mean_error_;
+    // Insertion-gate self-tuning state.  Emitted ONLY when enabled, so a GNG
+    // with autotune off serialises byte-identically to the pre-feature form.
+    // The history MUST round-trip: a restored GNG that re-warms from an empty
+    // history has no gate for its first kAutotuneWarmup steps and grows
+    // unbounded in exactly that window -- same class of bug as EPM Invariant 11.
+    if (cfg_.insertion_autotune) {
+        j["insertion_autotune"]          = cfg_.insertion_autotune;
+        j["insertion_autotune_quantile"] = cfg_.insertion_autotune_quantile;
+        j["autotune_value"]              = autotune_value_;
+        j["autotune_hist"]               = autotune_hist_;
+    }
     j["last_step_baked"]     = last_step_baked_;
     j["last_death_step"]     = last_death_step_;
     j["history"]             = history_;
@@ -629,6 +668,8 @@ GNG GNG::from_json(const nlohmann::json& j) {
     cfg.dim                 = j.value("dim",                 128);
     cfg.baking_threshold    = j.value("baking_threshold",    100);
     cfg.min_insertion_error = j.value("min_insertion_error", 0.02f);
+    cfg.insertion_autotune          = j.value("insertion_autotune", false);
+    cfg.insertion_autotune_quantile = j.value("insertion_autotune_quantile", 0.30f);
     cfg.lambda_new          = j.value("lambda_new",          25);
     cfg.max_age             = j.value("max_age",             88);
     cfg.stale_prune_enabled = j.value("stale_prune_enabled", true);
@@ -638,6 +679,11 @@ GNG GNG::from_json(const nlohmann::json& j) {
     gng.step_          = j.value("step",          0);
     gng.next_id_       = j.value("next_id",       0);
     gng.mitosis_count_ = j.value("mitosis_count", 0);
+    gng.autotune_value_ = j.value("autotune_value", -1.0f);
+    if (j.contains("autotune_hist") && j["autotune_hist"].is_array()) {
+        auto h = j["autotune_hist"].get<std::vector<double>>();
+        gng.autotune_hist_.assign(h.begin(), h.end());
+    }
     gng.bootstrapped_  = true;
     // Schema-3 additions (Phase 6.5.4); fall back to defaults when reading
     // older snapshots so existing on-disk artifacts still load.
