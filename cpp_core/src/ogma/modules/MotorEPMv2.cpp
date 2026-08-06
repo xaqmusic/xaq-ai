@@ -240,6 +240,15 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"intent_rhythm_gain", ParamMutability::HotMutable,
          "STRIDE-PROFILE PREDICTION. Adds 'did this stride look like my strides?' to the intent error. A constant v* is a target a legged body CANNOT hold -- it advances in pulses, so a level-seeking error oscillates forever and commit chases it; measured pulse_cv 0.583 with a p90/p50 gap tail of 2.10, IDENTICAL across every commit arm, which is why they all tie. The body learns its own forward-velocity waveform indexed by gait phase (16 bins, LEARNED from what it does -- no rhythm is injected, doctrine §7) and the error becomes this stride's deviation from it. Descending that means 'make this stride like my strides' = consistent forward pulses, with the waveform's SHAPE still chosen by the body. 0 = off, byte-identical. Try 0.5-2.0.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{4.0}},
+        {"lookahead_gain", ParamMutability::HotMutable,
+         "RUNG 1 -- ACT ON THE PREDICTED STATE. lambda in x_eff = (1-lambda)*x + lambda*x_hat, fed to the controller instead of the raw sensor. The forward model x_hat = A*y + b is already learned every tick but is consumed ONLY to form the residual: today the loop predicts to LEARN and never to ACT, so the controller always acts on stale state while every loop carries delay (sensing, filtering, actuation). This compensates all of it with a quantity already computed. It also subsumes the phase-filter failures -- L.phase times the power stroke, so lag fires the stroke late and the leg drives backward through part of the stride; the fix is to act ahead, not to filter better. 0 = off, byte-identical. NEGATIVE = the wrong-sign control, which MUST regress. Try 0.2-0.6.",
+         ParamValue{0.0}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"lookahead_mode", ParamMutability::HotMutable,
+         "How x_hat resolves the circularity that x_hat_{t+1} = A*y_t + b needs y_t, the very thing being computed. 0 (default) = FIXED POINT: one Jacobi iteration -- y0 from x, x_hat from y0, y1 from x_hat. A true one-step lookahead, one extra matmul per leg. 1 = PREV-ACTION: x_hat = A*prev_y + b, assuming action continuity. Mode 1 is the CHEAP CONTROL: if it matches mode 0 then the effect is not lookahead, it is any perturbation of the controller input.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"lookahead_null", ParamMutability::HotMutable,
+         "CONTROL ARM: drop the dynamics term so x_hat := b instead of A*y + b. The prediction keeps its magnitude and its role in the equation but loses all knowledge of how the action moves the body. Separates 'acting on a PREDICTION' from 'shrinking x toward a constant', which would otherwise be a confound indistinguishable in the aggregate metrics. 0 = full model, 1 = null.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"intent_yaw_gain", ParamMutability::HotMutable,
          "Weight on the YAW term of the intent error. 1.0 = the original (v*, w*) 2-vector. 0.0 = PROGRESS OVER GROUND ONLY. Operator, 2026-08-05: \"chassis yaw should not be part of this function since the chassis oscillates constantly while stepping; if heading needs adjusting that must come from some other mechanism that affects the bilateral stride symmetry, not the direction the chassis happens to be facing. The progress over ground relative to the CoG is all that matters.\" That is a separation-of-concerns argument and the other mechanism ALREADY EXISTS: goal_bearing_topic -> the heading PD -> steer_eff -> the bilateral stroke-amplitude differential. A quadruped yaws every stride BY CONSTRUCTION, so penalising instantaneous chassis yaw asks the body to stop doing the thing that moves it -- gait mechanics leaking into a goal-achievement scalar.",
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{4.0}},
@@ -590,6 +599,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["explore_floor"] = explore_floor_;
     m["commit_prec_gain"] = commit_prec_gain_;
     m["intent_yaw_gain"] = intent_yaw_gain_;
+    m["lookahead_gain"] = lookahead_gain_;
+    m["lookahead_mode"] = lookahead_mode_;
+    m["lookahead_null"] = lookahead_null_;
     m["intent_rhythm_gain"] = intent_rhythm_gain_;
     m["fwd_resonance_gain"] = fwd_resonance_gain_;
     m["phase_vel_smooth"] = phase_vel_smooth_;
@@ -731,6 +743,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "explore_floor", [&](auto const& v){ explore_floor_ = get_double(v, "explore_floor"); });
     apply_param(params, "commit_prec_gain", [&](auto const& v){ commit_prec_gain_ = get_double(v, "commit_prec_gain"); });
     apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
+    apply_param(params, "lookahead_gain", [&](auto const& v){ lookahead_gain_ = get_double(v, "lookahead_gain"); });
+    apply_param(params, "lookahead_mode", [&](auto const& v){ lookahead_mode_ = get_double(v, "lookahead_mode"); });
+    apply_param(params, "lookahead_null", [&](auto const& v){ lookahead_null_ = get_double(v, "lookahead_null"); });
     apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
     apply_param(params, "fwd_resonance_gain", [&](auto const& v){ fwd_resonance_gain_ = get_double(v, "fwd_resonance_gain"); });
     apply_param(params, "phase_vel_smooth", [&](auto const& v){ phase_vel_smooth_ = get_double(v, "phase_vel_smooth"); });
@@ -3104,8 +3119,43 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             float ag = (amp_homeo_gain_ > 0.0) ? L.amp_gain : 1.0f;
             // Panic boosts motor_gain for stronger escape thrust.
             float mg = float(motor_gain_) * (1.0f + pe * (float(panic_motor_mult_) - 1.0f));
+            // ── RUNG 1: ACT ON THE PREDICTED STATE ──────────────────────────────
+            // The forward model x̂ = A·y + b is already learned online, but today it is
+            // consumed ONLY to form the residual: the loop predicts to LEARN and never to
+            // ACT (docs/plans-and-designs/motor_layer_is_reactive.md).  The controller
+            // reads x_t, so it always acts on stale state -- and every loop has delay
+            // (sensing, filtering, actuation).  Feeding it x̂ instead compensates ALL of
+            // that with a quantity we already compute each tick.  It also subsumes the
+            // phase-filter failures: L.phase times the power stroke, so lag there fires
+            // the stroke late; the general fix is to act ahead, not to filter better.
+            //
+            // ⚠ THE CIRCULARITY.  x̂_{t+1} = A·y_t + b needs y_t, which is what we are
+            // computing.  Two resolutions, both shipped so they can be compared:
+            //   mode 0 (default) FIXED POINT -- one Jacobi iteration: y⁰ from x, then
+            //     x̂ from y⁰, then y¹ from x̂.  A true one-step lookahead, one extra matmul.
+            //   mode 1 PREV-ACTION -- x̂ = A·prev_y + b.  Assumes action continuity; the
+            //     CHEAP CONTROL.  If it matches mode 0, the effect is not lookahead.
+            // lookahead_null drops the A·y term (x̂ := b), testing whether the benefit is
+            // the model's DYNAMICS or merely shrinking x toward a constant.
+            // gain 0 => x_eff == x exactly => byte-identical to MotorEPM.
             y = wb_on ? Eigen::VectorXf(Zw_.segment(leg * m, m))   // I7: this leg's slice
                       : Eigen::VectorXf(L.C * L.x + L.h);
+            if (!wb_on && lookahead_gain_ != 0.0 && L.A.size() > 0 && L.have_prev) {
+                const float lam = float(lookahead_gain_);
+                Eigen::VectorXf y0 = y;                       // pre-tanh operating point
+                for (int j = 0; j < m; ++j) y0[j] = std::tanh(y0[j]);
+                const Eigen::VectorXf& yref =
+                    (lookahead_mode_ >= 1.0) ? L.prev_y : y0;  // mode 1 = the cheap control
+                Eigen::VectorXf xhat = (lookahead_null_ > 0.0)
+                    ? Eigen::VectorXf(L.b)                     // null: no dynamics term
+                    : Eigen::VectorXf(L.A * yref + L.b);
+                if (xhat.size() == L.x.size()) {
+                    const Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
+                    y = L.C * x_eff + L.h;
+                    la_dev_ema_ = (1.0f - kTeleEmaAlpha) * la_dev_ema_
+                                + kTeleEmaAlpha * (x_eff - L.x).norm();
+                }
+            }
             if (cpg_embed_ && cpg_seen_) {
                 Eigen::Vector2f ctx(std::cos(cpg_phase_), std::sin(cpg_phase_));
                 y.noalias() += L.Cphi * ctx;   // posture feed-forward (pose)
@@ -4495,6 +4545,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["res_amp"]             = res_amp_ema_;
     j["res_lock"]            = std::sqrt(res_lock_cos_ * res_lock_cos_
                                        + res_lock_sin_ * res_lock_sin_);
+    j["lookahead_dev"]       = la_dev_ema_;   // ||x_eff - x||: consumer check
     j["rhythm_dev"]          = rhythm_dev_diag_;
     j["rhythm_spread"]       = rhythm_spread_ema_;
     j["commit_prec"]         = commit_prec_diag_;

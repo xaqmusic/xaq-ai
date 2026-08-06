@@ -1,0 +1,244 @@
+{
+  "metadata": {
+    "name": "ARM stroke12 (base the_picrawler_motor_epm_embed_corridor_imufused)",
+    "description": "MotorEPMv2 RUNG 1 -- WRONG-SIGN control: must regress. x_eff=(1-l)x+l*x_hat fed to the controller.",
+    "env_target": "picrawler",
+    "gym_mode": "corridor",
+    "phase_tag": "motor-epm (minimal/deploy)",
+    "derived_from_manifest": false,
+    "episode_length": 6000,
+    "mc_episode_period": 1500,
+    "stability_gain": 0.05,
+    "stability_y_norm": 0.5,
+    "stability_speed": 0.05,
+    "reward_shape": "trapezoid",
+    "target_height": 0.085,
+    "height_penalty_grace": 0.02,
+    "height_penalty_scale": 0.03,
+    "height_penalty_gain": 0.05,
+    "leg_symmetry": "lr_pairs",
+    "label": "motor_epm_rung0",
+    "publish_tilt": false,
+    "tier": "nav_oracle",
+    "reward_class": "internal_objective",
+    "scaffolds_active": [
+      "postural",
+      "coupling",
+      "stroke",
+      "balance",
+      "amp_homeostat",
+      "height_homeostat",
+      "panic",
+      "nav_oracle"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "motor_proprio_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.fl_hip1",
+          "action.fl_hip2",
+          "action.fl_knee",
+          "action.fr_hip1",
+          "action.fr_hip2",
+          "action.fr_knee",
+          "action.rl_hip1",
+          "action.rl_hip2",
+          "action.rl_knee",
+          "action.rr_hip1",
+          "action.rr_hip2",
+          "action.rr_knee"
+        ],
+        "output_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "proprio_indices": [
+          0.0,
+          4.0,
+          8.0,
+          1.0,
+          5.0,
+          9.0,
+          2.0,
+          6.0,
+          10.0,
+          3.0,
+          7.0,
+          11.0
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "motor_leg"
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "action_topics": [
+          "action.fl_hip1",
+          "action.fl_hip2",
+          "action.fl_knee",
+          "action.fr_hip1",
+          "action.fr_hip2",
+          "action.fr_knee",
+          "action.rl_hip1",
+          "action.rl_hip2",
+          "action.rl_knee",
+          "action.rr_hip1",
+          "action.rr_hip2",
+          "action.rr_knee"
+        ],
+        "n_legs": 4,
+        "motor_dim": 3,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.01,
+        "bias_lr": 0.005,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 1234,
+        "babble_ticks": 200,
+        "babble_scale": 0.3,
+        "sat_lr": 0.02,
+        "postural_gain": 0.7,
+        "explore_noise": 0.05,
+        "knee_tuck_target": 0.7,
+        "motor_gain": 3.0,
+        "coupling_gain": 1.55,
+        "gait_phase": [
+          0.0,
+          3.14159265,
+          3.14159265,
+          0.0
+        ],
+        "stroke_gain": 1.2,
+        "stroke_phase": -2.85,
+        "steer": 0.0,
+        "stroke_signs": [
+          1.0,
+          -1.0,
+          1.0,
+          -1.0
+        ],
+        "balance_gain": -0.5,
+        "tilt_topic": "reality.proprio.tilt",
+        "amp_homeo_gain": 0.01,
+        "amp_target": 0.4,
+        "heading_gain": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "nav_gain": 5.0,
+        "nav_topic": "reality.proprio.target_compass",
+        "height_homeo_gain": 0.04,
+        "height_k": 0.3,
+        "height_topic": "reality.proprio.ground_clearance",
+        "panic_motor_mult": 4.0,
+        "coord_reward_drive": 0.3,
+        "coord_probe_ticks": 240,
+        "coord_stab_penalty": 0.3,
+        "objective_topics": [
+          "objective.posture.fl",
+          "objective.posture.fr",
+          "objective.posture.rl",
+          "objective.posture.rr"
+        ],
+        "cpg_phase_topic": "rhythm.cpg.body",
+        "cpg_embed": true,
+        "heading_bearing_hold_gain": 7.0,
+        "heading_hold_gain": 0.3,
+        "progress_commit_gain": 1.0,
+        "feet_topic": "reality.proprio.feet_y_gravity_cmd_imu",
+        "stance_lift_gain": 0.5,
+        "coord_adapt_rate": 0.001,
+        "coord_fitness_mode": 1,
+        "lookahead_gain": -0.4,
+        "lookahead_mode": 0.0,
+        "lookahead_null": 0.0
+      }
+    },
+    {
+      "id": "cpg_clock",
+      "type": "CPGOscillator",
+      "params": {
+        "period_ticks": 70,
+        "perceptual_output_topics": [
+          "rhythm.cpg.body"
+        ],
+        "perceptual_leg_phase_offsets": [
+          0.0
+        ],
+        "perceptual_sensor_label": "cpg_phase",
+        "amplitude": 0.0,
+        "amplitude_floor": 0.0,
+        "standing_bias_amplitude": 0.0,
+        "entrain_topic": "rhythm.body.gait",
+        "entrain_freq_gain": 0.02,
+        "entrain_phase_gain": 0.05,
+        "entrain_period_min": 48.0,
+        "entrain_period_max": 120.0
+      }
+    },
+    {
+      "id": "keyframe_gait",
+      "type": "KeyframeGait",
+      "params": {
+        "cpg_topic": "rhythm.cpg.body",
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "objective_output_topics": [
+          "objective.posture.fl",
+          "objective.posture.fr",
+          "objective.posture.rl",
+          "objective.posture.rr"
+        ],
+        "motor_dim": 3,
+        "n_bins": 16,
+        "keyframe_alpha": 0.02,
+        "gain": 0.3
+      }
+    },
+    {
+      "id": "body_rhythm_tracker",
+      "type": "BodyRhythmTracker",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "output_topic": "rhythm.body.gait",
+        "leg_signs": [
+          1.0,
+          -1.0,
+          -1.0,
+          1.0
+        ],
+        "motor_dim": 3,
+        "swing_joint": 0,
+        "init_period": 70.0
+      }
+    }
+  ],
+  "edges": []
+}
