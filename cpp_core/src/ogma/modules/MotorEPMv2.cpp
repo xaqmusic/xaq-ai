@@ -499,6 +499,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"height_homeo_gain", ParamMutability::HotMutable,
          "chassis-height homeostat (stand-higher reflex) integral rate. The G6DOF springs let the body SAG; the postural reflex defends a joint-angle pose, not a height. This drives a tuck-deepening knee bias toward a SELF-DISCOVERED setpoint (height_k × tallest height reached) so the body stands as tall as it can. 0 = off.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.1}},
+        {"height_lift_knee", ParamMutability::HotMutable,
+         "COMPLETE THE LIFT.  Fraction of the height homeostat's hip2 lift also applied to the KNEE, same sign.  MEASURED 2026-08-07: hip2 and the knee agree on sign only 50.8% of ticks (chance), and the panic pathway's own comment records that opposite signs mean the knee UN-TUCKS and fights the hip2 lift so the chassis does not rise -- 'same sign = a coherent anti-gravity push'.  Panic already drives both joints for that reason; the height homeostat drives hip2 alone, a one-joint version of a two-joint action.  This completes it.  Not an imposed coordination topology: it adds no new coupling between joints, it extends an existing anti-gravity command to the joint the codebase already measured as necessary.  0 = off, byte-identical.",
+         ParamValue{0.0}},
         {"height_ground_gain", ParamMutability::HotMutable,
          "BELLY-GROUNDING SETPOINT ADAPTATION.  `height_k` is a hand-set fraction of the discovered max clearance, and measurement shows it sits BELOW where the body actually rides (tgt 0.30 vs chassis_h_ema 0.39-0.44), so the height homeostat integrates NEGATIVE and commands hip2 DOWN while the belly is simultaneously grounding (p1 clearance 4mm; 58-64% of the first 200 ticks under 10mm).  When > 0 the setpoint fraction RISES while the belly is grounded and decays back toward height_k when it is not, so the target is discovered from the body's own contact experience instead of asserted.  Acts mainly at rest and during stand-up, where fwd_progress is low and height_rest_frac ~ 1; the measured incline fade is left untouched.  0 = off, byte-identical.",
          ParamValue{0.0}},
@@ -853,6 +856,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "height_homeo_gain", [&](auto const& v){ height_homeo_gain_ = get_double(v, "height_homeo_gain"); });
     apply_param(params, "height_k", [&](auto const& v){ height_k_ = get_double(v, "height_k"); });
     apply_param(params, "height_ground_gain", [&](auto const& v){ height_ground_gain_ = get_double(v, "height_ground_gain"); });
+    apply_param(params, "height_lift_knee", [&](auto const& v){ height_lift_knee_ = get_double(v, "height_lift_knee"); });
     apply_param(params, "height_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) height_topic_ = *p; });
     apply_param(params, "panic_on", [&](auto const& v){ panic_on_ = get_double(v, "panic_on"); });
     apply_param(params, "panic_off", [&](auto const& v){ panic_off_ = get_double(v, "panic_off"); });
@@ -2038,6 +2042,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "height_homeo_gain") height_homeo_gain_ = get_double(value, "height_homeo_gain");
     else if (key == "height_k") height_k_ = get_double(value, "height_k");
     else if (key == "height_ground_gain") height_ground_gain_ = get_double(value, "height_ground_gain");
+    else if (key == "height_lift_knee") height_lift_knee_ = get_double(value, "height_lift_knee");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
     else if (key == "panic_strength") panic_strength_ = get_double(value, "panic_strength");
@@ -3219,8 +3224,23 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // hip (chassis) rises — height set on a joint SEPARATE from the rhythm.
         // Sign empirically confirmed (positive height_bias raises chassis_y).
         // Post-warmup so motor babble can explore upward and discover the ceiling.
-        if (!warmup && height_homeo_gain_ > 0.0 && m >= 2)
-            y[1] += kHeightLiftSign * height_bias_ * height_rest_frac_;  // fade lift out while moving
+        // ⚠ THE COMMENT ABOVE RECORDS A PRIOR REFUTATION of driving the knee from
+        // here: "a DC bias there clamps the swing and kills the gait (the body fought
+        // the dead spider pose)".  That verdict stands FOR A DC BIAS.  height_lift_knee
+        // is not one: `lift` is multiplied by height_rest_frac_, which is ~0 whenever
+        // the body is cruising (it fully fades at fwd_progress 0.025 and the body runs
+        // ~0.049), so this acts at REST and during STAND-UP and is absent from the gait
+        // it was previously found to clamp.  Same distinction that made the stance-gated
+        // knee tuck work where a blind DC knee bias killed the gait (CLAUDE.md §1).
+        // The swing metrics are therefore the ones that must be read on any A/B of it.
+        if (!warmup && height_homeo_gain_ > 0.0 && m >= 2) {
+            const float lift = kHeightLiftSign * height_bias_ * height_rest_frac_;
+            y[1] += lift;                                    // fade lift out while moving
+            // Same sign to the knee — see height_lift_knee.  knee+ tucks, which in
+            // spider stance suspends the body higher; knee- would un-tuck and cancel.
+            if (height_lift_knee_ > 0.0 && m >= 3)
+                y[m - 1] += float(height_lift_knee_) * lift;
+        }
         // Cruse/Walknet inter-leg coordination — v2 SEQUENCED LIFT.  Drives hip2 AND
         // knee (they share foot-height authority; either alone is too weak — measured
         // corr(foot_y,joint)≈0.27) to actually plant/clear the foot, not just DC-bias.
