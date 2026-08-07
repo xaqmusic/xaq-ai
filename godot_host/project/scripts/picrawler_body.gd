@@ -1304,6 +1304,29 @@ var _lesion_leg: int = -1
 # axis this IS the propulsion each leg delivers, and it passes the slick test by
 # construction: a frictionless foot transmits no tangential force.
 var _grf_fwd: Array[float] = [0.0, 0.0, 0.0, 0.0]     # accumulated since last trace record
+# 2026-08-07 — PER-LEG VERTICAL LOAD.  The missing observation.
+#
+# To push the CoG past the support polygon onto the foot that is about to plant, the
+# body must know HOW ITS WEIGHT IS DISTRIBUTED, and nothing on the bus carries that:
+# foot_contact is a binary touch with no magnitude; joint_torque is a PD command budget
+# dominated by its -Kd*omega term; joint_load (the velocity-tracking deficit) was
+# measured NOT to discriminate stance from swing (0.383 vs 0.257).  Doctrine §1 rule 2:
+# when no egocentric observation carries the signal the error needs, the fix is a NEW
+# SENSOR, not a smarter policy.
+#
+# Four load scalars ARE a centre-of-gravity sensor: if fl carries 40% of the weight the
+# CoG is over fl.  ⚠ AND UNLIKE fwd_v THIS IS EGOCENTRIC-LEGAL — a real picrawler reads
+# it from a foot FSR or servo current sense — so it is a lawful brain input, which the
+# god's-eye attribution instrument never was.
+#
+# EMA rather than a drained accumulator so the published sensor is independent of the
+# trace recorder, and because a real load cell has its own time constant anyway.
+var _grf_up: Array[float] = [0.0, 0.0, 0.0, 0.0]      # drained by the trace
+var _foot_load_ema: Array[float] = [0.0, 0.0, 0.0, 0.0]
+const _FOOT_LOAD_ALPHA: float = 0.15
+# Static weight as a PER-PHYSICS-STEP impulse (N·s), which is the unit
+# get_contact_impulse returns.  chassis + 4 legs x (coxa+upper+lower).
+const _TOTAL_MASS: float = CHASSIS_MASS + 4.0 * (COXA_MASS + UPPER_MASS + LOWER_MASS)
 var _slick_leg: int = -1
 var _slick_at: int = 0
 var _slick_done: bool = false
@@ -2664,6 +2687,8 @@ func _ready() -> void:
 	# stance), and a future opt-in epm_joint_torque (Stage 3.A.3).
 	brain.register_source("JointTorque", "reality.proprio.joint_torque",
 		"float32[12]: per-servo PD COMMAND BUDGET (hip1×4, hip2×4, knee×4), normalized to [-1,1] vs MAX_SERVO_TORQUE. ⚠ NOT applied torque and NOT a load proxy despite its original description: it sets the motor's max-impulse cap, and with Kp=20/Kd=8 it is DOMINATED BY THE -Kd*omega damping term (measured corr with joint motion -0.46..-0.56), i.e. it is mostly a negated velocity copy. Use JointLoad for load.", true)
+	brain.register_source("FootLoad", "reality.proprio.foot_load",
+		"float32[4]: per-leg VERTICAL ground reaction force (fl,fr,rl,rr), normalised by static body weight — the CoG sensor. Four load scalars locate the centre of gravity over the support polygon: if fl reads 0.4 the CoG is over fl. THE MISSING OBSERVATION for dynamic walking, where the body must push its CoG past the stable point onto the foot about to plant. Egocentric and physically realisable (foot FSR or servo current sense), so unlike the god's-eye attribution instrument it is a LAWFUL brain input. Distinct from JointLoad, which is a velocity-tracking deficit and was MEASURED not to discriminate stance from swing (0.383 vs 0.257).", true)
 	brain.register_source("JointLoad", "reality.proprio.joint_load",
 		"float32[12]: per-servo VELOCITY-TRACKING DEFICIT (commanded omega - achieved omega, angle frame) normalized to [-1,1] vs MAX_SERVO_SPEED — the honest load proxy. ~0 when the joint moves freely; large when the motor stalls against its impulse cap because the foot is planted or the limb is loaded. Egocentric, so unlike the god's-eye attribution instrument it is legal as a brain input.", true)
 	if publish_tilt:
@@ -6128,6 +6153,13 @@ func _step_one() -> void:
 	for i in range(4): jload.append(_prev_load_hip2[i])
 	for i in range(4): jload.append(_prev_load_knee[i])
 	brain.publish_proprio(jload, "joint_load")
+	# 2026-08-07 — PER-LEG VERTICAL LOAD (the CoG sensor).  Normalised by the body's
+	# static weight so 1.0 ~ "this foot carries the whole robot" and the four values sum
+	# to ~1 when all the weight is on the feet.  Egocentric and physically realisable
+	# (foot FSR / servo current), so unlike fwd_v this is a LAWFUL brain input.
+	var fload := PackedFloat64Array()
+	for i in range(4): fload.append(clamp(_foot_load_ema[i] / max(1e-6, _TOTAL_MASS * 9.81 / float(physics_hz)), -2.0, 2.0))
+	brain.publish_proprio(fload, "foot_load")
 	# 2026-08-03 — GROUND-FORCE / AUTHORITY instrument.  jtorque is already normalized to
 	# +-1 against MAX_SERVO_TORQUE, so |t| -> 1 IS saturation.  Two questions this answers:
 	#   tq_mag  — how hard are the legs actually pushing?  (the operator observed the pure-HK
@@ -9325,6 +9357,7 @@ func _accum_grf() -> void:
 		return
 	var yaw: float = _chassis.global_transform.basis.get_euler().y
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
+	var up_acc: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(_lowers.size()):
 		if not is_instance_valid(_lowers[i]):
 			continue
@@ -9334,7 +9367,12 @@ func _accum_grf() -> void:
 		for j in range(st.get_contact_count()):
 			# get_contact_impulse is the impulse the SOLVER applied to this body this
 			# step; its forward component is the thrust the ground gave the foot.
-			_grf_fwd[i] += st.get_contact_impulse(j).dot(fwd)
+			var imp: Vector3 = st.get_contact_impulse(j)
+			_grf_fwd[i] += imp.dot(fwd)
+			up_acc[i]   += imp.dot(Vector3.UP)
+	for i in range(4):
+		_grf_up[i] += up_acc[i]
+		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * up_acc[i]
 
 # ---------------------------------------------------------------------------
 # Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
@@ -9377,9 +9415,12 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"lh2": [_prev_load_hip2[0], _prev_load_hip2[1], _prev_load_hip2[2], _prev_load_hip2[3]],
 		"lkn": [_prev_load_knee[0], _prev_load_knee[1], _prev_load_knee[2], _prev_load_knee[3]],
 		"grf": [_grf_fwd[0], _grf_fwd[1], _grf_fwd[2], _grf_fwd[3]],
+		"grfup": [_grf_up[0], _grf_up[1], _grf_up[2], _grf_up[3]],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
-	for k in range(4): _grf_fwd[k] = 0.0    # drain: each line reports one brain tick
+	for k in range(4):
+		_grf_fwd[k] = 0.0    # drain: each line reports one brain tick
+		_grf_up[k]  = 0.0
 
 # ---------------------------------------------------------------------------
 # Clip ring — one compact record per brain tick.  Cheap by construction: a fixed-size
