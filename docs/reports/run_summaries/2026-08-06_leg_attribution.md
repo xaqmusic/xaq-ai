@@ -296,3 +296,65 @@ the gait. The proven third option is a **state-gated** bias (stance-gated knee
 tuck was promoted on exactly this reasoning), and the rewrite rule prefers an
 *objective whose error hip2 motion reduces* over any commanded offset. A DC hip2
 push is the one thing already known not to work.
+
+---
+
+# Addendum 3 — the belly IS on the ground, in the window every analysis excluded
+
+**Operator:** *"the chassis is constantly colliding with the ground."* Correct,
+and I could not see it because every analysis in this document discards the first
+1000 ticks (at the operator's own instruction, so the pause/step cycle can emerge).
+That window is exactly where the belly is down.
+
+## Belly clearance by phase (arena, n=3, `chassis_collides=1`)
+
+| window | mean gc | min | **% ticks < 5 mm** | **% < 10 mm** |
+|---|---|---|---|---|
+| t = 1–200 | 0.0106 | 0.0018 | **19–32 %** | **58–64 %** |
+| t = 200–500 | 0.0104–0.0206 | 0.0018 | 7–32 % | 26–59 % |
+| t = 500–1000 | 0.0208–0.0303 | 0.0020 | 0–26 % | 2–37 % |
+| t > 1000 | 0.0188–0.0240 | 0.0024 | 0–5 % | 2–19 % |
+
+**For the first ~200–500 ticks the robot is effectively belly-down** — 60 % of
+ticks under 10 mm — and it slowly works its way up. One seed (2) never fully
+clears: still 26 % under 5 mm at t=500–1000 and 5 % after. Steady-state p1 is
+4 mm, so the body stays marginal even once "up".
+
+## Two things this settles
+
+**The ghost chassis is not the cause.** Ghost vs colliding, n=3: `fwd_v` +0.0486
+vs +0.0491 (**+1.1 %, inside the ±13 % seed noise**), chassis_y 0.0461 vs 0.0478,
+and **0.0 % of ticks below y=0 in either arm**. If the belly were dragging
+continuously, making it solid would cost real speed; it costs nothing. So the
+chassis is *near* the ground, not *through* it, and `chassis_collides` is not the
+lever.
+
+**Mean clearance is the blind metric.** Mean gc ≈ 22 mm reads "fine" while 60 % of
+early ticks are under 10 mm. **Judge belly work on percentiles (p1, % under 5/10
+mm) and never on the mean** — this is the "chassis height is blind to belly-drag"
+trap in its own right.
+
+## Why the body cannot lift itself, connecting Addendum 2
+
+The joint analysis already named the mechanism: **hip2 — the chassis elevator — is
+4.5× under-driven** (`u_hip2` reaches ~±0.20 of full scale against `u_hip1`'s
+~±0.9), while the **knee does the supporting from a permanently flexed,
+low-leverage posture** (occupies −1.36…−0.44 against `KNEE_REST = −1.6` straight).
+The body is lifting itself with the wrong joint, from the wrong angle. That it
+takes ~500 ticks to stand, and stays at a 4 mm p1 afterwards, is what that
+predicts.
+
+## The lever this points at — and the one already refuted
+
+`stance_lift_gain = 0.5` is live: the **stance-gated knee tuck**, promoted
+precisely because a blind DC knee bias kills the gait while a *gated* one works
+(CLAUDE.md §1). The ledger separately refutes **hip2 stroke**, **hip2 tuck**, and
+**learned hip2** — all as imposed or DC biases.
+
+So the untried combination is the promoted *mechanism* applied to the joint the
+traces say should be doing the job: **stance-gated hip2 elevation**, gated by the
+same stance signal, on the joint with both the leverage and 4.5× of unused
+command range. Gain-0 guarded, and judged on the pair the operator named:
+**belly-clearance percentiles must improve AND `fwd_v` must not fall** — with
+`straight` and `falls` alongside, since a stiffer stance is the obvious way to buy
+clearance by destroying the gait.
