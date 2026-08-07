@@ -213,3 +213,86 @@ prohibition 7 (don't inject a rhythm) *and* it would be inert: the command alrea
 takes wildly different values per seed and produces the same near-zero-lag
 landings. **The lever, if there is one, is on the VERTICAL channel** — the body
 cannot presently choose when to put a foot down.
+
+---
+
+# Addendum 2 — joint roles: the knee is doing hip2's job, from a bad angle
+
+**Operator's model:** *"hip1 acting to swing the leg, hip2 elevates the chassis,
+and the knee (when it works) plants ... the servos are plenty powerful and have
+good individual authority but coordination is required."*
+
+Checked against 6 seeds / 6831 touchdowns. Two thirds of the model confirmed, one
+third is not happening, and the authority read is confirmed by measurement.
+
+## 1. The knee plants — clearly
+
+Touchdown-triggered average velocity (×10⁻³ rad/tick), pooled per leg. The knee
+extends toward the ground, then **reverses hard at contact**:
+
+| leg | joint | w=−10 | w=−4 | **w=0** | w=+4 |
+|---|---|---|---|---|---|
+| fl | knee | −9.9 | −8.7 | **+18.4** | +22.2 |
+| fr | knee | −7.4 | −23.4 | **+2.0** | +19.6 |
+| rl | knee | −14.2 | +4.2 | **+24.2** | +16.0 |
+| rr | knee | −5.8 | +12.9 | **+20.7** | +10.9 |
+| fl | **hip2** | +2.1 | +2.1 | **−4.0** | −1.9 |
+| rl | **hip2** | +0.1 | +0.0 | **−2.4** | −0.3 |
+
+The knee's signature is **5–10× larger than hip2's** at every leg. hip1 is
+comparable in magnitude but its reversal is not locked to contact the way the
+knee's is. **Knee = plant is confirmed.**
+
+## 2. hip2 is NOT elevating
+
+| | hip1 | hip2 | knee |
+|---|---|---|---|
+| rms velocity | 0.055–0.072 | **0.028** | 0.062–0.066 |
+| range occupied (p5–p95) | 1.00–1.28 rad | **0.23–0.27 rad** | 0.93–1.07 rad |
+| where it sits | ±0.6 | **−0.20 … +0.05** | −1.36 … −0.44 |
+
+hip2 traverses **one quarter** the angular range of the other two joints and
+lives in a narrow band biased negative. It is not idle — 43–45 % of the knee's
+rms velocity — but it is not doing a chassis-elevation stroke.
+
+## 3. ★ It is a COMMAND problem, not an authority problem
+
+The operator's read is confirmed by measurement:
+
+| leg | hip1 achieved/commanded | hip2 | knee |
+|---|---|---|---|
+| fl | 86 % | **79 %** | 91 % |
+| fr | 88 % | **83 %** | 91 % |
+| rl | 87 % | **82 %** | 92 % |
+| rr | 94 % | **88 %** | 86 % |
+
+**Every joint achieves 79–94 % of what it is told to do.** hip2 obeys; it is
+simply asked for very little. And the mapping is not the constraint —
+`t_hip2_cmd = u_hip2 * HIP_TARGET_RANGE + HIP2_REST` with **`HIP_TARGET_RANGE =
+1.40`, the same authority hip1 gets**. The controller's own output is the limit:
+`u_hip1` swings ~±0.9 of full scale, **`u_hip2` only ~±0.20 — 4.5× under-driven.**
+
+## 4. hip2 and knee do not coordinate
+
+corr(Δhip2, Δknee) across lags −8…+8: **peak |r| = 0.17**, and mostly ~0.05–0.13.
+There is a faint antisymmetric hint (positive at lag −4, negative at +2…+4) on
+fl/fr/rl but not rr — a trace, not a pattern. The two joints that should lift and
+plant together are effectively independent.
+
+## 5. The mechanical-advantage problem, quantified
+
+`KNEE_REST = −1.6 rad` is a straight leg. The knee occupies **−1.36 … −0.44**, so
+it works **0.24–1.16 rad bent, and never approaches extension**. Meanwhile hip2 —
+the joint with the leverage to raise the chassis — sits within ±0.2 of `HIP2_REST
+= 0.0`.
+
+**The knee is doing both jobs, planting and supporting, from a permanently flexed
+low-leverage posture, while hip2 idles near neutral.** That is the coordination
+failure in one sentence, and it is upstream in the controller, not in the body.
+
+⚠ **Constraint on any fix.** The ledger already refutes *hip2 stroke*, *hip2
+tuck*, and *learned hip2* — all as imposed or DC biases, all of which destabilised
+the gait. The proven third option is a **state-gated** bias (stance-gated knee
+tuck was promoted on exactly this reasoning), and the rewrite rule prefers an
+*objective whose error hip2 motion reduces* over any commanded offset. A DC hip2
+push is the one thing already known not to work.
