@@ -5,11 +5,11 @@
 
 # PiCrawler geometry — extracted from STEP + Blender measurements
 
-Source: `/home/xaqmusic/Documents/Ogma/picrawler_3d model.STEP` (~78MB,
-SolidWorks 2023, 293 solids).  Parsed via `scripts/extract_picrawler_solids.py`
-(pythonocc-core).  STEP CAF reader crashed on the file (likely CJK part
-names); fallback to the basic STEPControl reader gave geometry but no
-assembly tree.
+Source: the PiCrawler kit's `picrawler_3d model.STEP` CAD export (~78MB,
+SolidWorks 2023, 293 solids; not included in this repo). Parsed via
+`scripts/extract_picrawler_solids.py` (pythonocc-core). STEP CAF reader
+crashed on the file (likely CJK part names); fallback to the basic
+STEPControl reader gave geometry but no assembly tree.
 
 ## Coordinate system
 

@@ -24,12 +24,18 @@ add_subdirectory(../cpp_core cpp_core_build)
 #    bindings.  The dump files are committed to godot_host/ and reproduced by:
 #        godot4 --headless --dump-extension-api
 #        godot4 --headless --dump-gdextension-interface
+#
+#    GIT_TAG is pinned to a commit on `master` (not a floating branch name) for
+#    build reproducibility — this is the exact commit last verified to build
+#    cleanly and pass the picrawler headless smoke test against the 4.6.2 API
+#    files above. Re-pin deliberately (and re-verify) rather than letting this
+#    silently drift with upstream.
 # ---------------------------------------------------------------------------
 
 FetchContent_Declare(
     godot_cpp
     GIT_REPOSITORY https://github.com/godotengine/godot-cpp.git
-    GIT_TAG        master
+    GIT_TAG        7e18e40d7591429f915035a7de7cf79457d555cc
     GIT_SHALLOW    TRUE
 )
 

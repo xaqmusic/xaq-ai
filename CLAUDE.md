@@ -210,7 +210,7 @@ system/Python prerequisites (ZeroMQ dev headers, the Python venv, `pytest`) are 
 
 ```sh
 # Build (MotorEPM-only edit ≈ 30 s; the .so auto-copies into project/addons/ami_ogma/)
-cmake --build /home/xaqmusic/xaq-ai/godot_host/build --target ami_ogma_host -j8
+cmake --build godot_host/build --target ami_ogma_host -j8
 
 # Seed-averaged A/B — USE THIS FOR EVERY COMPARISON
 python3 godot_host/project/scripts_tools/seedavg.py <config.json> [n=6] [steps=12000] [diff=0.3]

@@ -26,3 +26,17 @@ godot_host/project/.godot/
 *.npz
 *.uid
 *.gdextension.uid
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
