@@ -9971,6 +9971,10 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
 			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
 			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
+			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
+			# moved" -- the consumer-fired check, which this session has needed twice.
+			line["h_keff"] = snappedf(float(_mm.get("height_k_eff", -1.0)), 0.001)
 			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.
