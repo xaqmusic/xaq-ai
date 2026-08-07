@@ -107,6 +107,28 @@ const _CELL_CONFIG_ALLOWLIST: Array = [
 	"the_cell_chemotaxis_baseline.json",          # §6 EXTERNAL BASELINE -- reactive run-and-tumble (SCALAR) in the STUDY room: ~1.9 eats, BEATS the 4-loop composition (~0.9 = random-walk floor). A single reflex, not a loop.
 ]
 
+# 2026-08-07 — CartPole/MountainCar were the ORIGINAL environments this substrate was
+# built and validated against, before the Cell and PiCrawler existed. Their configs
+# were archived and their launcher entries dropped somewhere along the way — worse,
+# `cart_body.gd`/`mc_body.gd`'s own @export config_path defaults pointed at filenames
+# that only existed in configs/archive/ (not scanned by the launcher's non-recursive
+# walk), so both scenes' brains silently failed brain.setup() even launched directly,
+# not just from this dropdown. Copied a curated set back up (archive/ keeps the
+# originals; nothing moved or deleted) and re-verified each one headless before
+# restoring it here — see the picrawler/cell allowlists above for the same convention.
+const _CARTPOLE_CONFIG_ALLOWLIST: Array = [
+	"the_cartpole_minimal.json",   # DEFAULT — CartPole-v1, manifest-derived, 5 modules. cart_body.gd's own @export default; the plainest working example.
+	"the_cartpole.json",           # ORIGINAL — the full 11-module design (descend, rollout, seq_consensus, seq_action, repertoire, kinesis). Outperformed by minimal in Phase 6.5.3.5 (-18%); kept for ablation comparison.
+	"the_cartpole_ablation.json",  # NO-EPM ABLATION — cell-state EPM removed; the control arm for the EPM-load-bearing claim (Phase 6.5.2 validation).
+	"the_cartpole_premotor.json",  # PREMOTOR SWAP — ActionDecoder replaced by Premotor, the same 5-intent softmax + Hebbian credit tested cross-env against MountainCar and the Cell below.
+]
+
+const _MOUNTAIN_CAR_CONFIG_ALLOWLIST: Array = [
+	"the_mountain_car.json",              # DEFAULT — MountainCar-v0, manifest-derived, sparse goal-reach reward. mc_body.gd's own @export default.
+	"the_mountain_car_premotor.json",     # PREMOTOR — Phase 6.5.28 cross-env A/B: does the Cell's Premotor win generalise? Base variant.
+	"the_mountain_car_premotor_efe.json", # PREMOTOR + EFE — the fullest variant of the same experiment (graded + eligibility + drive + epistemic).
+]
+
 const _ENV_TO_SCENE := {
 	"cell":         "res://scenes/the_cell.tscn",
 	"cartpole":     "res://scenes/the_cartpole.tscn",
@@ -272,6 +294,11 @@ func _scan_configs() -> void:
 		# Same curation for the cell port (empty allowlist = show all).
 		if env == "cell" and not _CELL_CONFIG_ALLOWLIST.is_empty() \
 				and not _CELL_CONFIG_ALLOWLIST.has(fname):
+			continue
+		# Same curation for the two original environments (early examples / historical work).
+		if env == "cartpole" and not _CARTPOLE_CONFIG_ALLOWLIST.has(fname):
+			continue
+		if env == "mountain_car" and not _MOUNTAIN_CAR_CONFIG_ALLOWLIST.has(fname):
 			continue
 		if not _configs_by_env.has(env):
 			_configs_by_env[env] = []
