@@ -565,3 +565,46 @@ gives contact EVENTS plus a rough quadrant, on hardware the robot already has, w
 ~3 ticks of lead. The foot sensor gives CONTINUOUS PER-LEG LOAD, which is what the CoG
 measurement actually requires and what the IMU cannot supply. Neither replaces the
 other.
+
+---
+
+# Addendum 7 — support TLE is REACTIVE, and the gait is not "failing" (2026-08-07)
+
+**Operator's hypothesis:** support-EPM TLE should spike *before* a stumble — "I am
+entering a support state I do not know" as a pre-failure alarm. Tested at 5-tick diag
+resolution, n=4 seeds, **1000-tick warmup** so gait and GNG are mature. Baseline
+support TLE = 0.1969. Three independent stumble definitions, so the answer does not
+hinge on one:
+
+| event | n | PRE (−20…−5) | AT/POST (0…+10) |
+|---|---|---|---|
+| belly strike (gc < 5 mm) | 80 | t = −0.39 | t = −0.88 |
+| backward lurch (fwd_v < −0.05) | 2054 | t = −0.20 | t = −0.85 |
+| **support loss (≤1 foot down)** | 191 | **t = +0.73** | **t = +2.43** |
+
+For support loss, TLE peaks at **+25 % over baseline at w=0** (0.2461 vs 0.1969) and
+is still elevated at +5. **But the pre-event rise is not significant.**
+
+## Two conclusions, and the second is the important one
+
+**1. The percept is real but the alarm is reactive.** The support EPM genuinely
+responds to genuine support anomalies (t = +2.43) — that validates the vocabulary as
+more than decoration. But its TLE is the quantisation error of the *current*
+observation: it says "I am somewhere unfamiliar NOW", not "I am about to be". An
+early warning requires the **predicted pathway** (`predicted_pathway_steps`, built
+into the EPM, currently 0) — predict the next support state and compare, i.e.
+transition surprise at a horizon rather than instantaneous quantisation error. **This
+test is exactly the gate that says the rollout is worth turning on.**
+
+**2. ⚠ Belly strikes and backward lurches produce NO TLE response at all.** They are
+not support-configuration anomalies. The body bellies out and lurches backward *inside
+support states it knows perfectly well*. And the lurch count is the tell: **2054 events
+in ~28 000 ticks** — a backward lurch is not an accident, it is the gait.
+
+**So the framing "predict the catastrophic failure before it happens" may not fit this
+body.** There is no catastrophic failure to predict. The crawl is stable, competent and
+unsurprising to its own model; it simply does not go anywhere. The problem is not the
+presence of failures to foresee — it is **the absence of a better attractor to move
+toward.** That distinction matters for what to build next: a pre-failure alarm has
+little to alarm about, whereas a mechanism that makes an unfamiliar-but-better support
+state *reachable* has everything to do.
