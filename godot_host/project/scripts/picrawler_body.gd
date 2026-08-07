@@ -9339,7 +9339,7 @@ func _accum_grf() -> void:
 # ---------------------------------------------------------------------------
 # Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
 # ---------------------------------------------------------------------------
-func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float, yaw: float) -> void:
+func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float, yaw: float, chassis_y: float) -> void:
 	if not _trace_ready:
 		_trace_ready = true
 		var path: String = OS.get_environment("OGMA_PICRAWLER_TRACE")
@@ -9359,6 +9359,12 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"t": tick_counter,
 		"fwd_v": snappedf(fwd_v, 0.00001),
 		"yaw": snappedf(yaw, 0.00001),
+		# 2026-08-06 — chassis height and belly clearance.  ⚠ WITH chassis_collides=false
+		# (the default) the chassis is a GHOST: it passes THROUGH the floor rather than
+		# resting on it, so a NEGATIVE-going y is the body intersecting the world, not
+		# touching it.  Every claim about belly clearance is meaningless without this.
+		"cy": snappedf(chassis_y, 0.00001),
+		"gc": snappedf(_dbg_gc_raw, 0.00001),
 		"c": contact,
 		"h1": h1, "h2": h2, "kn": kn,
 		"th1": [_prev_torque_hip1[0], _prev_torque_hip1[1], _prev_torque_hip1[2], _prev_torque_hip1[3]],
@@ -9395,7 +9401,7 @@ func _clip_record(h1: Array, h2: Array, kn: Array, chassis_y: float) -> void:
 	# rather than cached, so the recorder adds no state the rest of the body must maintain.
 	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z) \
 		.dot(Vector2(sin(yaw), cos(yaw)))
-	_trace_record(h1, h2, kn, contact, fwd_v, yaw)
+	_trace_record(h1, h2, kn, contact, fwd_v, yaw, chassis_y)
 	_clip_ring[_clip_head] = {
 		"t": tick_counter,
 		"x": snappedf(o.x, 0.0001), "y": snappedf(chassis_y, 0.0001), "z": snappedf(o.z, 0.0001),
