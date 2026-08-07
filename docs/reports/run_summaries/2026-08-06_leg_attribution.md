@@ -358,3 +358,79 @@ command range. Gain-0 guarded, and judged on the pair the operator named:
 **belly-clearance percentiles must improve AND `fwd_v` must not fall** — with
 `straight` and `falls` alongside, since a stiffer stance is the obvious way to buy
 clearance by destroying the gait.
+
+---
+
+# Addendum 4 — the controller cannot see which legs are planted (2026-08-07)
+
+**Operator, from the UI + slow motion:** *"when the diagonal legs are thrusting,
+they are thrusting at the same time, and there's always a very high likelihood that
+the other legs are planted, and that could result in backwards movement … during a
+pause you see a sinusoidal velocity across zero … when the synchronization works,
+the front plants first and then the diagonal back second, and that is what works for
+a quadruped."*
+
+Tested both halves against the traces (arm: `stancehip2`, n=6, arena+corridor).
+
+## 1. Over-planting kills progress — CONFIRMED, and it is the dominant effect
+
+| legs planted | ticks | mean fwd_v |
+|---|---|---|
+| 2 | 4 167 | **+0.0996** |
+| 3 | 14 295 | +0.0489 |
+| 4 | 11 181 | **+0.0128** |
+
+Monotonic. **With all four down, forward velocity is essentially zero; with two down
+it is 8× higher.** And the body sits at 3–4 planted **85 % of the time**.
+
+## 2. Front-leads-then-hind does NOT predict progress — here
+
+| diagonal offset | mean fwd_v after | n |
+|---|---|---|
+| front leads (≥ +2) | +0.0462 | 836 |
+| simultaneous (−1…+1) | +0.0434 | 390 |
+| hind leads (≤ −2) | +0.0484 | 603 |
+
+t(front-leads vs simultaneous) = **+0.77** — nothing. **Reconciliation: diagonal
+advanced placement is a property of a TROT, and this body is not trotting.** A trot
+has two feet down; this one has 3–4 down 85 % of the time. It is crawling and
+dragging, so diagonal phase ordering has nothing to bite on yet. The operator's
+biomechanics is right; the precondition is absent.
+
+## 3. ★★★ WHY — the stance gate is not a contact signal
+
+```cpp
+sw = foot_y_[i] > foot_y_ema_[i];   // "swinging" = foot above its OWN running mean
+```
+
+A signal sits above its own moving average ~50 % of the time **by construction**,
+which is exactly why `swing_frac` reads 0.49 on every arm and every seed.
+
+| | value |
+|---|---|
+| detector (`foot_y` > own EMA) | **0.492 ± 0.005** |
+| TRUE (physics contact flag) | **0.198 ± 0.010** |
+| | **2.49× over-report** |
+
+**Of the leg-ticks the controller calls "swing", ~60 % are legs that are actually
+planted and bearing load.** So every stance-gated mechanism — `stance_lift`,
+`stance_lift_hip2`, the Cruse rules, `swing_tuck` — is gated on a signal that is
+wrong most of the time it fires. **The controller cannot see stance overlap, which
+is why nothing manages it, which is why the body sits at 3–4 planted.**
+
+**And the true signal exists and is not wired.** The body publishes
+`reality.proprio.foot_contact` every tick; `MotorEPMv2`'s `contact_topic` is
+**unset** in every current config, so `have_contact_` is false and the true-contact
+branch never executes. The sensor is on the bus, unconsumed.
+
+⚠ The in-code note says *"wiring contact as the gate is separately refuted — that
+consumer wanted phase"*. That refutation is about a consumer that needed a PHASE
+reference, which contact cannot supply. It is not a verdict on using contact as a
+STANCE gate, which is what `stance_lift` and friends actually ask for. Check the
+ledger before re-proposing, but the two are different asks.
+
+## Where this points
+
+Not at timing. `gait_phase` already has no authority over footfalls (Addendum 1),
+and DAP has no precondition. The target is **stance overlap** — get from 3–4 feet
+down to 2 — and the first prerequisite is a gate that knows which feet are down.
