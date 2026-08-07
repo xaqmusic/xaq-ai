@@ -1321,7 +1321,8 @@ var _grf_fwd: Array[float] = [0.0, 0.0, 0.0, 0.0]     # accumulated since last t
 #
 # EMA rather than a drained accumulator so the published sensor is independent of the
 # trace recorder, and because a real load cell has its own time constant anyway.
-var _grf_up: Array[float] = [0.0, 0.0, 0.0, 0.0]      # drained by the trace
+var _grf_up: Array[float] = [0.0, 0.0, 0.0, 0.0]      # drained by the trace (world-up, for comparison)
+var _grf_nrm: Array[float] = [0.0, 0.0, 0.0, 0.0]     # drained by the trace (FSR analogue)
 var _foot_load_ema: Array[float] = [0.0, 0.0, 0.0, 0.0]
 const _FOOT_LOAD_ALPHA: float = 0.15
 # Static weight as a PER-PHYSICS-STEP impulse (N·s), which is the unit
@@ -2688,7 +2689,7 @@ func _ready() -> void:
 	brain.register_source("JointTorque", "reality.proprio.joint_torque",
 		"float32[12]: per-servo PD COMMAND BUDGET (hip1×4, hip2×4, knee×4), normalized to [-1,1] vs MAX_SERVO_TORQUE. ⚠ NOT applied torque and NOT a load proxy despite its original description: it sets the motor's max-impulse cap, and with Kp=20/Kd=8 it is DOMINATED BY THE -Kd*omega damping term (measured corr with joint motion -0.46..-0.56), i.e. it is mostly a negated velocity copy. Use JointLoad for load.", true)
 	brain.register_source("FootLoad", "reality.proprio.foot_load",
-		"float32[4]: per-leg VERTICAL ground reaction force (fl,fr,rl,rr), normalised by static body weight — the CoG sensor. Four load scalars locate the centre of gravity over the support polygon: if fl reads 0.4 the CoG is over fl. THE MISSING OBSERVATION for dynamic walking, where the body must push its CoG past the stable point onto the foot about to plant. Egocentric and physically realisable (foot FSR or servo current sense), so unlike the god's-eye attribution instrument it is a LAWFUL brain input. Distinct from JointLoad, which is a velocity-tracking deficit and was MEASURED not to discriminate stance from swing (0.383 vs 0.257).", true)
+		"float32[4]: per-leg FOOT NORMAL FORCE (fl,fr,rl,rr), normalised by static body weight — the CoG sensor. Measured as the contact impulse projected on the CONTACT NORMAL, which is exactly what an FSR / load cell in the foot reads: no world-frame or IMU up-vector is required, so this is buildable on the real picrawler as-is. Four load scalars locate the centre of gravity over the support polygon: if fl reads 0.4 the CoG is over fl. THE MISSING OBSERVATION for dynamic walking, where the body must push its CoG past the stable point onto the foot about to plant. Egocentric and physically realisable (foot FSR or servo current sense), so unlike the god's-eye attribution instrument it is a LAWFUL brain input. Distinct from JointLoad, which is a velocity-tracking deficit and was MEASURED not to discriminate stance from swing (0.383 vs 0.257).", true)
 	brain.register_source("JointLoad", "reality.proprio.joint_load",
 		"float32[12]: per-servo VELOCITY-TRACKING DEFICIT (commanded omega - achieved omega, angle frame) normalized to [-1,1] vs MAX_SERVO_SPEED — the honest load proxy. ~0 when the joint moves freely; large when the motor stalls against its impulse cap because the foot is planted or the limb is loaded. Egocentric, so unlike the god's-eye attribution instrument it is legal as a brain input.", true)
 	if publish_tilt:
@@ -9358,6 +9359,7 @@ func _accum_grf() -> void:
 	var yaw: float = _chassis.global_transform.basis.get_euler().y
 	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
 	var up_acc: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var nrm_acc: Array[float] = [0.0, 0.0, 0.0, 0.0]
 	for i in range(_lowers.size()):
 		if not is_instance_valid(_lowers[i]):
 			continue
@@ -9370,9 +9372,16 @@ func _accum_grf() -> void:
 			var imp: Vector3 = st.get_contact_impulse(j)
 			_grf_fwd[i] += imp.dot(fwd)
 			up_acc[i]   += imp.dot(Vector3.UP)
+			# HARDWARE-HONEST VARIANT — what an FSR / load cell in the foot actually
+			# reads: the NORMAL force at the contact patch.  No world-frame projection,
+			# so it needs neither a god's-eye up-vector nor the IMU's estimate of one.
+			# This is the version a real picrawler can produce; the world-up projection
+			# above is kept only to check the two agree.
+			nrm_acc[i]  += absf(imp.dot(st.get_contact_local_normal(j)))
 	for i in range(4):
-		_grf_up[i] += up_acc[i]
-		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * up_acc[i]
+		_grf_up[i]  += up_acc[i]
+		_grf_nrm[i] += nrm_acc[i]
+		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * nrm_acc[i]
 
 # ---------------------------------------------------------------------------
 # Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
@@ -9416,11 +9425,24 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"lkn": [_prev_load_knee[0], _prev_load_knee[1], _prev_load_knee[2], _prev_load_knee[3]],
 		"grf": [_grf_fwd[0], _grf_fwd[1], _grf_fwd[2], _grf_fwd[3]],
 		"grfup": [_grf_up[0], _grf_up[1], _grf_up[2], _grf_up[3]],
+		"grfn": [_grf_nrm[0], _grf_nrm[1], _grf_nrm[2], _grf_nrm[3]],
+		# 2026-08-07 — THE ACCELEROMETER RESIDUAL.  raw accel-up minus the fused estimate,
+		# in BODY frame.  The complementary filter treats this as the thing to reject (and
+		# is right to: a footfall impulse reads as a tilt to an accelerometer, so feeding
+		# raw accel into attitude would make the body think it pitches on every step).
+		# But the rejected part is not noise — the operator observes it scattering in four
+		# diagonal directions, i.e. each leg's strike has a characteristic direction.  If
+		# that holds, the IMU is already a footfall/load sensor, on hardware the real
+		# picrawler HAS, and no FSR is needed.  Logged to test exactly that.
+		"ares": [snappedf(_up_acc_last.x - _up_est_body.x, 0.00001),
+				 snappedf(_up_acc_last.y - _up_est_body.y, 0.00001),
+				 snappedf(_up_acc_last.z - _up_est_body.z, 0.00001)],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
 	for k in range(4):
 		_grf_fwd[k] = 0.0    # drain: each line reports one brain tick
 		_grf_up[k]  = 0.0
+		_grf_nrm[k] = 0.0
 
 # ---------------------------------------------------------------------------
 # Clip ring — one compact record per brain tick.  Cheap by construction: a fixed-size

@@ -499,3 +499,69 @@ observation and the objective, not a trajectory: **feed `foot_load` into the mot
 layer's proprio input** and let the unload/commit pattern be discovered. That is the
 same shape as the belly rangefinder, which is the largest win in this campaign's
 history: a missing SENSOR, not a smarter policy.
+
+---
+
+# Addendum 6 — the foot sensor is buildable, and the IMU already sees footfalls
+
+## Is `foot_load` a sensor you can build on the real picrawler? Now yes.
+
+**First derivation (rejected as unfaithful):** contact impulse projected on
+`Vector3.UP` — world up, a god's-eye reference, and a load cell does not measure a
+world-frame vector anyway.
+
+**Shipped derivation:** `imp · contact_normal`, summed per foot per physics step,
+EMA α=0.15, normalised by static weight (0.6 kg × 9.81 / physics_hz). **That is
+exactly what an FSR or load cell in the foot reads** — normal force at the contact
+patch — and it needs neither a world up-vector nor the IMU's estimate of one.
+
+The two agree closely on flat ground (the contact normal *is* up there), and the CoG
+finding is unchanged: pre-touchdown t = **−14.24** on the FSR channel vs −14.31 on
+the world-up one. **The result does not depend on the god's-eye projection.**
+
+## Is smoothing the IMU for chassis attitude appropriate? Yes — and tap the residual
+
+**Operator:** *"the current IMU/accelerometer does show footfalls in the fast pass
+(scattering in the 4 diagonal directions) while smoothed is used for chassis. Is this
+appropriate?"*
+
+**Smoothing for attitude is correct and must stay.** An accelerometer cannot separate
+gravity from linear acceleration, so a footfall impulse *reads as a tilt*; feeding raw
+accel into attitude would make the body believe it pitches on every step. That is what
+the complementary filter and the adaptive `acc_trust` are for.
+
+**But the rejected residual is a signal, not noise** — and the code already computes it
+(`disagree_deg`) purely to modulate trust, then discards it.
+
+**Does it detect footfalls?** |raw − fused| against a baseline of 0.329 over all ticks:
+
+| w | −3 | −2 | −1 | **+0** | +1 | +3 |
+|---|---|---|---|---|---|---|
+| \|residual\| | +5.9 % | +9.6 % | +15.4 % | **+16.9 %** | +8.8 % | −0.7 % |
+
+Yes — a clean peak at touchdown, **beginning ~3 ticks before contact**.
+
+**Does its direction identify the leg?** Mean unit residual at touchdown, body frame:
+
+| leg | x | y | z | consistency |
+|---|---|---|---|---|
+| fl | **+0.213** | −0.215 | **−0.327** | 0.445 |
+| fr | **−0.236** | −0.206 | **−0.297** | 0.431 |
+| rl | +0.069 | −0.199 | **+0.127** | 0.246 |
+| rr | +0.006 | −0.180 | **+0.068** | 0.193 |
+
+**x sign separates left from right; z sign separates front from rear** — the operator's
+"four diagonal directions", measured. Pairwise angles: fl–fr **61.7°**, front–rear
+**78–97°**, but **rl–rr only 18.7°**.
+
+⚠ **So it is a 3-way discriminator, not a 4-way**: front-left, front-right, and
+"a rear leg". The rear pair is both weaker (consistency 0.19–0.25 vs 0.43–0.45) and
+nearly co-directional. Plausibly because the IMU sits at the chassis centre and the
+rear legs strike more softly — consistent with `rr` being the propulsor that *pushes*
+rather than *strikes*.
+
+**Conclusion: the two sensors are complementary, not substitutes.** The IMU residual
+gives contact EVENTS plus a rough quadrant, on hardware the robot already has, with
+~3 ticks of lead. The foot sensor gives CONTINUOUS PER-LEG LOAD, which is what the CoG
+measurement actually requires and what the IMU cannot supply. Neither replaces the
+other.
