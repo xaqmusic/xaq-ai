@@ -52,6 +52,12 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     # homeokinetic self-model, and the coxswain's plan.
     "ScentCompass":         ScentCompassInspector,
     "MotorEPM":             MotorEpmInspector,
+    # MotorEPMv2 began as a byte-identical copy of MotorEPM (the differ gate) and
+    # still emits the same FLAT diag_snapshot keys — motor_tle, fwd_v, fwd_progress_ema,
+    # commit_prec, gait_coherence, ... — so it reuses the same dashboard rather than
+    # forking one.  Without this line a v2 module shows NO panel at all, which is why
+    # the picrawler's fwd_v went unreadable the moment the stack moved to v2.
+    "MotorEPMv2":           MotorEpmInspector,
     "ActionDecoder":        ActionPlanInspector,
     "MotorBus":             MotorBusInspector,
     "HeadingController":    HeadingControllerInspector,
