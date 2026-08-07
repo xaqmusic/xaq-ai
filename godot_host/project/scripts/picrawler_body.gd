@@ -6159,7 +6159,7 @@ func _step_one() -> void:
 	# to ~1 when all the weight is on the feet.  Egocentric and physically realisable
 	# (foot FSR / servo current), so unlike fwd_v this is a LAWFUL brain input.
 	var fload := PackedFloat64Array()
-	for i in range(4): fload.append(clamp(_foot_load_ema[i] / max(1e-6, _TOTAL_MASS * 9.81 / float(physics_hz)), -2.0, 2.0))
+	for i in range(4): fload.append(clamp(_foot_load_ema[i] / _fl_norm(), -2.0, 2.0))
 	brain.publish_proprio(fload, "foot_load")
 	# 2026-08-03 — GROUND-FORCE / AUTHORITY instrument.  jtorque is already normalized to
 	# +-1 against MAX_SERVO_TORQUE, so |t| -> 1 IS saturation.  Two questions this answers:
@@ -9351,6 +9351,9 @@ func _do_hard_reset() -> void:
 # Sum each foot's contact impulses along the body-forward axis, every physics step.
 # Drained by the trace recorder, so the logged value is the impulse delivered over the
 # whole brain tick rather than a single-substep snapshot.
+func _fl_norm() -> float:
+	return max(1e-6, _TOTAL_MASS * 9.81 / float(physics_hz))
+
 func _accum_grf() -> void:
 	if _trace_file == null and not _trace_ready:
 		pass    # still accumulate before the trace opens; cost is 4 direct-state reads
@@ -9426,6 +9429,11 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"grf": [_grf_fwd[0], _grf_fwd[1], _grf_fwd[2], _grf_fwd[3]],
 		"grfup": [_grf_up[0], _grf_up[1], _grf_up[2], _grf_up[3]],
 		"grfn": [_grf_nrm[0], _grf_nrm[1], _grf_nrm[2], _grf_nrm[3]],
+		# the PUBLISHED foot_load channel, exactly as a consumer EPM would receive it
+		"fload": [snappedf(_foot_load_ema[0] / _fl_norm(), 0.00001),
+				  snappedf(_foot_load_ema[1] / _fl_norm(), 0.00001),
+				  snappedf(_foot_load_ema[2] / _fl_norm(), 0.00001),
+				  snappedf(_foot_load_ema[3] / _fl_norm(), 0.00001)],
 		# 2026-08-07 — THE ACCELEROMETER RESIDUAL.  raw accel-up minus the fused estimate,
 		# in BODY frame.  The complementary filter treats this as the thing to reject (and
 		# is right to: a footfall impulse reads as a tilt to an accelerometer, so feeding
@@ -9985,7 +9993,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# operator named: tle 0, 2 nodes, 1 baked (the seed pair, never grown).  Printing
 	# it makes "is anything flowing?" a measurement instead of an inference.
 	if brain != null and brain.has_method("get_module_snapshot"):
-		for _gid in ["motor_gng_fl", "motor_gng_fr", "motor_gng_rl", "motor_gng_rr"]:
+		for _gid in ["motor_gng_fl", "motor_gng_fr", "motor_gng_rl", "motor_gng_rr", "support_epm"]:
 			# ⚠ An EPM snapshot has NO "module" wrapper -- its diag fields sit at top
 			# level, unlike MotorEPM's.  Looking for one silently yields nothing, which
 			# is how a DEAD EPM and an UNREAD EPM became indistinguishable.
@@ -10021,7 +10029,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 					if _v2 > _visits_max: _visits_max = _v2
 					if int(_v2) >= _bake_thr: _baked += 1
 				var _top1: float = (_visits_max / _visits_tot) if _visits_tot > 0.0 else -1.0
-				line["g_" + _gid.substr(10)] = [
+				line["g_" + (_gid.substr(10) if _gid.begins_with("motor_gng_") else "sup")] = [
 					_nodes, _baked, snappedf(float(_gs.get("ema_tle", -1.0)), 0.000001),
 					(-1.0 if _never_stepped else snappedf(_mag, 0.0001)),
 					int(_g.get("mitosis_count", -1)), snappedf(_top1, 0.001),
