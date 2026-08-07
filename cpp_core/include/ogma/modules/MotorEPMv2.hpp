@@ -1050,6 +1050,22 @@ private:
     float   chassis_h_ema_ = 0.0f;                    // smoothed height (spike-robust)
     float   height_k_eff_  = -1.0f;   // adapted setpoint fraction; <0 = uninitialised
     double  height_ground_gain_ = 0.0; // 0 = off, byte-identical
+    // 2026-08-07 — COMPLETE THE LIFT: drive the KNEE with the height bias too.
+    //
+    // MEASURED: hip2 and the knee agree on sign only 50.8% +- 1.1% of ticks — a coin
+    // flip, i.e. they are independent, and the panic pathway's own comment records why
+    // that matters: "knee- (extend) was UN-tucking and fighting the hip2 lift -> no
+    // lift (chassis_y barely moved).  Same sign = a coherent anti-gravity push."  So
+    // half of every lift attempt is self-cancelling.
+    //
+    // The PANIC pathway already drives BOTH (y[1] += drive; y[m-1] += drive) for
+    // exactly this reason.  The height homeostat drives hip2 ALONE — a one-joint
+    // version of an action the codebase already established needs two.  This is not a
+    // new coordination topology being imposed (prohibition 7); it is completing an
+    // existing anti-gravity action to match the pathway that was measured to work.
+    //
+    // Fraction of the hip2 lift applied to the knee.  0 = off, byte-identical.
+    double  height_lift_knee_ = 0.0;
     float   chassis_h_max_ = 0.0f;                    // running max of the EMA (the discovered ceiling)
     float   height_bias_   = 0.0f;                    // integral output → knee tuck-deepen command
     bool    chassis_h_seen_ = false;                  // EMA seeded
