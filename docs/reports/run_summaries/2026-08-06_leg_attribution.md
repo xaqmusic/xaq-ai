@@ -434,3 +434,68 @@ ledger before re-proposing, but the two are different asks.
 Not at timing. `gait_phase` already has no authority over footfalls (Addendum 1),
 and DAP has no precondition. The target is **stance overlap** — get from 3–4 feet
 down to 2 — and the first prerequisite is a gate that knows which feet are down.
+
+---
+
+# Addendum 5 — the CoG moves AWAY from the landing foot (2026-08-07)
+
+**Operator:** *"a good forward gait involves pushing the centre of gravity past the
+stable point so it can land on the foot that's about to plant."*
+
+Exactly the right question, and the body has now been asked it directly. **A new
+sensor was needed first** — no signal on the bus carried weight distribution
+(`foot_contact` is binary, `joint_torque` is a PD command budget, `joint_load` was
+measured not to discriminate stance from swing). Added
+**`reality.proprio.foot_load`**: per-leg vertical ground reaction force, normalised
+by body weight. Four load scalars *are* a CoG sensor — and it is **egocentric and
+physically realisable** (foot FSR / servo current), so unlike the god's-eye
+attribution instrument it is a lawful brain input.
+
+## The measurement
+
+Load-centroid projected onto the landing leg's own quadrant, triggered on touchdown
+(n=4 seeds, corridor, warmup excluded):
+
+| w (ticks rel. touchdown) | CoG toward the landing leg |
+|---|---|
+| −16 | −0.004 |
+| −8 | −0.054 |
+| −4 | −0.129 |
+| **−2** | **−0.216** |
+| **+0** | **+0.151** |
+| +4 | +0.028 |
+| +8 | +0.007 |
+
+- just before (w = −8…−2): **−0.121**, t = **−13.50** vs baseline
+- just after (w = +2…+8): **+0.036**, t = +4.58
+
+**The CoG moves systematically AWAY from the foot that is about to land, then snaps
+toward it at contact.** That is the inverse of the mechanism the operator described.
+
+## What it means
+
+This is a textbook **static crawl** signature: to lift a leg you must first unload
+it, so the weight shifts away; the foot is then placed and re-loaded. A **dynamic**
+gait does the opposite — the CoG keeps travelling toward the landing foot so the
+foot arrives *under already-committed weight*.
+
+It is consistent with everything else measured: with 3–4 feet down 85 % of the time
+(Addendum 4), unload-shift-place-reload is the only strategy available. The body is
+executing a correct crawl, competently, and a crawl is what it is stuck in.
+
+The diagonal handover *is* present but happens at contact, not before: the landing
+leg's share goes 0.071 → 0.220 across touchdown while its diagonal partner's drops
+0.179 → 0.145. A catch, not a fall.
+
+Weight is also more concentrated when the body is moving fast (effective legs 2.54
+at fwd_v > 0.08 vs 2.92 during pauses) — the same direction the operator predicted,
+though modest.
+
+## The lever this points at
+
+Not a scripted weight-shift. **The controller has never been able to see load at
+all** — so per doctrine §1 rule 2/3 the move is to hand the owning module the
+observation and the objective, not a trajectory: **feed `foot_load` into the motor
+layer's proprio input** and let the unload/commit pattern be discovered. That is the
+same shape as the belly rangefinder, which is the largest win in this campaign's
+history: a missing SENSOR, not a smarter policy.
