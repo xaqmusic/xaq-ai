@@ -608,3 +608,57 @@ presence of failures to foresee — it is **the absence of a better attractor to
 toward.** That distinction matters for what to build next: a pre-failure alarm has
 little to alarm about, whereas a mechanism that makes an unfamiliar-but-better support
 state *reachable* has everything to do.
+
+---
+
+# Addendum 8 — the selector criterion, and what the vocabulary is worth (2026-08-07)
+
+## The criterion had to change, and the change is an improvement
+
+My first selector proposal — "prefer support states with better forward impulse" — is
+**reward shaping on forward progress**, §5.1's prohibition, and precisely what
+`coord_reward_drive` turned out to be. The legal criterion is **homeokinetic**: prefer
+support states where the body's own actions produce the most change in its own sensors.
+
+Measured, fully egocentric (`|Δx| / |Δu|`, joint deltas over commanded deltas):
+
+| planted | \|Δx\| | \|Δu\| | **responsiveness** | fwd_v (reference only) |
+|---|---|---|---|---|
+| 1 | 0.571 | 1.211 | 0.472 | +0.0524 |
+| 2 | 0.562 | 1.196 | **0.470** | +0.0879 |
+| 3 | 0.519 | 1.202 | 0.432 | +0.0464 |
+| 4 | 0.451 | 1.229 | **0.367** | +0.0116 |
+
+**+28 % at 2 planted vs 4**, and `|Δu|` is flat across all states — the *same command*
+produces more sensory change with fewer feet down. So a homeokinetic selector prefers
+2-leg support **without ever being told forward progress is good.**
+
+⚠ And the second term is load-bearing, not decoration: **1-planted is as responsive as
+2-planted (0.472 vs 0.470) but moves less.** One foot is maximally sensitive and
+maximally *unpredictable* — falling. Value must be `responsiveness / (TLE + ε)`;
+dividing by TLE is what makes it homeokinesis rather than thrash-seeking. Both terms
+already exist, and `1/(tle+ε)` is the LateralVoter's own precision weighting.
+
+## What the 150-node vocabulary is actually worth — modest
+
+Per-node responsiveness, 171 winners with ≥40 samples, n=4 seeds:
+
+| | mean | sd | spread/mean |
+|---|---|---|---|
+| across NODES | 0.417 | 0.027 | 7 % |
+| across the 4 PLANTED-COUNTS | 0.438 | 0.049 | **11 %** |
+| node residual after removing the count effect | — | **0.020** | ~5 % |
+
+Node rank tracks the count closely (top nodes average 2.66–3.07 feet down, bottom
+3.42–3.88).
+
+**So: real extra structure exists — 74 % of node-level spread survives removing the
+count — but it is SMALL, and the trivial signal `sum(contact)` explains more of the
+variance than node identity does.**
+
+⇒ **Build the selector on `sum(contact)` first.** It is simpler, captures more of the
+available responsiveness signal, needs no EPM at all, and is trivially egocentric.
+The 150-node vocabulary should be reserved for what the count fundamentally *cannot*
+do — predicting **which support state follows which**, i.e. the transition structure
+the rollout needs. Responsiveness is only one value function over the vocabulary, and
+it happens to be the one the count already covers.
