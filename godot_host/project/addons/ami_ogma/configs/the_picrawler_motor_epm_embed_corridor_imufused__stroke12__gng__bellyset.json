@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "ARM belly-grounding height setpoint (height_ground_gain=0.02)",
-    "description": "Belly-grounding setpoint adaptation. MEASURED: the height homeostat target (height_k=0.3 x discovered max) sits BELOW where the body rides (h_ema 0.39-0.44), so height_bias integrates NEGATIVE and commands hip2 DOWN while the belly is simultaneously grounding (p1 4mm; 54% of the first 500 ticks under 10mm). This makes the setpoint rise while the belly is grounded and decay back otherwise, so it is discovered from contact rather than asserted. Judge on belly-clearance PERCENTILES (never the mean) AND fwd_v together.",
+    "name": "ARM belly-grounding height setpoint (height_ground_gain=0.01)",
+    "description": "Belly-grounding setpoint adaptation at the SWEPT gain. MEASURED corridor n=6 on a SOLID chassis: %<10mm belly 11.4 -> 5.3 (t=-3.95), gc p1 +46% (t=+1.91), net_z unchanged (t=-0.14), tilt_sd UNCHANGED at 0.076. Gain 0.02 buys marginally better clearance but nearly doubles tilt_sd (0.136) and 0.08 trebles it (0.260) while straight degrades monotonically. \u26a0 MUST be evaluated with OGMA_PICRAWLER_CHASSIS_COLLIDE=1 \u2014 seedavg.py does NOT set it, and a ghost chassis cannot touch the ground with its belly, so a ghost-body A/B of this lever is meaningless.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -168,7 +168,7 @@
         "stance_lift_gain": 0.5,
         "coord_adapt_rate": 0.001,
         "coord_fitness_mode": 1,
-        "height_ground_gain": 0.02
+        "height_ground_gain": 0.01
       }
     },
     {
