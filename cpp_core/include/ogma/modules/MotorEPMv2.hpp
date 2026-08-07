@@ -1048,6 +1048,8 @@ private:
     std::string height_topic_  = "reality.proprio.chassis_y_norm";  // 1-D chassis height (norm [0,1])
     float   chassis_h_     = 0.0f;                    // latest chassis height
     float   chassis_h_ema_ = 0.0f;                    // smoothed height (spike-robust)
+    float   height_k_eff_  = -1.0f;   // adapted setpoint fraction; <0 = uninitialised
+    double  height_ground_gain_ = 0.0; // 0 = off, byte-identical
     float   chassis_h_max_ = 0.0f;                    // running max of the EMA (the discovered ceiling)
     float   height_bias_   = 0.0f;                    // integral output → knee tuck-deepen command
     bool    chassis_h_seen_ = false;                  // EMA seeded
@@ -1333,6 +1335,32 @@ private:
     static constexpr float kHeightBiasMin  = -0.5f;   // allow slight relax below neutral lift
     static constexpr float kHeightBiasMax  =  1.5f;   // cap lift authority
     static constexpr float kHeightLiftSign = +1.0f;   // hip2 command dir that RAISES chassis (flip if inverted)
+    // 2026-08-06 — BELLY-GROUNDING SETPOINT ADAPTATION.
+    //
+    // Measured this session: the belly IS on the ground — p1 clearance 4 mm, and
+    // 58-64% of the first 200 ticks under 10 mm — while the height homeostat is
+    // pushing hip2 DOWN.  Both facts are consistent: tgt = height_k * chassis_h_max
+    // = 0.3 * 0.999 = 0.30 while chassis_h_ema runs 0.39-0.44, so the body sits ABOVE
+    // its own setpoint and height_bias integrates NEGATIVE (-0.30..-0.47 measured).
+    // Nothing is asking hip2 to lift; the one mechanism that could is asking it to
+    // lower.  hip2 is consequently 4.5x under-driven (u_hip2 ~+-0.20 of full scale
+    // against u_hip1's ~+-0.9) and the KNEE carries the support from a permanently
+    // flexed, low-leverage posture.
+    //
+    // The rewrite rule says: do not script a lift, give it the ERROR the behaviour
+    // minimises.  That error already exists and is egocentric — the belly rangefinder
+    // reports grounding directly — it simply drives nothing.  So the setpoint fraction
+    // ADAPTS: it rises while the belly is grounding and decays back toward the
+    // configured height_k when it is not.  A target that is demonstrably too low
+    // (the body's own sensor says it is touching) stops being a hand-set constant and
+    // becomes something the body discovers.
+    //
+    // Deliberately NOT touching height_rest_frac: that fade is measured (2026-07-23,
+    // homeo ON stalls on the hump at 2.6 vs 4.1 OFF) and removing it is refuted.  This
+    // acts where the problem actually is — at rest and during the stand-up phase, where
+    // fwd_progress is low, rest_frac ~ 1 and the path is already live.
+    static constexpr float kHeightGroundThresh = 0.05f;  // clearance below this = grounded
+    static constexpr float kHeightKMax         = 0.95f;  // ceiling on the adapted fraction
     static constexpr float kHeightMoveSuppVel = 0.025f; // fwd_progress_ema at which the height defense fully fades (height is a STANDING reflex; a lift bias loses traction while walking/climbing — belly must ride low on an incline)
     static constexpr float kPanicRampAlpha = 0.04f;   // smoothing of panic_ toward its hysteresis target
     static constexpr float kResetRateAlpha = 1.0f / 600.0f;  // Gate 0: ~600-tick (~10s@60Hz) smoothing of the disruption-rate EMA (a measurement constant, not a behavioral knob)

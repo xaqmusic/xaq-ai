@@ -499,6 +499,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"height_homeo_gain", ParamMutability::HotMutable,
          "chassis-height homeostat (stand-higher reflex) integral rate. The G6DOF springs let the body SAG; the postural reflex defends a joint-angle pose, not a height. This drives a tuck-deepening knee bias toward a SELF-DISCOVERED setpoint (height_k × tallest height reached) so the body stands as tall as it can. 0 = off.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.1}},
+        {"height_ground_gain", ParamMutability::HotMutable,
+         "BELLY-GROUNDING SETPOINT ADAPTATION.  `height_k` is a hand-set fraction of the discovered max clearance, and measurement shows it sits BELOW where the body actually rides (tgt 0.30 vs chassis_h_ema 0.39-0.44), so the height homeostat integrates NEGATIVE and commands hip2 DOWN while the belly is simultaneously grounding (p1 clearance 4mm; 58-64% of the first 200 ticks under 10mm).  When > 0 the setpoint fraction RISES while the belly is grounded and decays back toward height_k when it is not, so the target is discovered from the body's own contact experience instead of asserted.  Acts mainly at rest and during stand-up, where fwd_progress is low and height_rest_frac ~ 1; the measured incline fade is left untouched.  0 = off, byte-identical.",
+         ParamValue{0.0}},
         {"height_k", ParamMutability::HotMutable,
          "fraction of the self-discovered max chassis height the homeostat defends (the body finds its own ceiling; this sets how close to it to hold). ~0.9.",
          ParamValue{0.9}, ParamValue{0.0}, ParamValue{1.0}},
@@ -849,6 +852,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "boredom_escalation_rate", [&](auto const& v){ boredom_escalation_rate_ = get_double(v, "boredom_escalation_rate"); });
     apply_param(params, "height_homeo_gain", [&](auto const& v){ height_homeo_gain_ = get_double(v, "height_homeo_gain"); });
     apply_param(params, "height_k", [&](auto const& v){ height_k_ = get_double(v, "height_k"); });
+    apply_param(params, "height_ground_gain", [&](auto const& v){ height_ground_gain_ = get_double(v, "height_ground_gain"); });
     apply_param(params, "height_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) height_topic_ = *p; });
     apply_param(params, "panic_on", [&](auto const& v){ panic_on_ = get_double(v, "panic_on"); });
     apply_param(params, "panic_off", [&](auto const& v){ panic_off_ = get_double(v, "panic_off"); });
@@ -2033,6 +2037,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "boredom_escalation_rate") boredom_escalation_rate_ = get_double(value, "boredom_escalation_rate");
     else if (key == "height_homeo_gain") height_homeo_gain_ = get_double(value, "height_homeo_gain");
     else if (key == "height_k") height_k_ = get_double(value, "height_k");
+    else if (key == "height_ground_gain") height_ground_gain_ = get_double(value, "height_ground_gain");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
     else if (key == "panic_strength") panic_strength_ = get_double(value, "panic_strength");
@@ -2343,7 +2348,20 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     homeo_leak_eff_ = leak_amp_;   // diag: the EFFORT forgetting rate actually applied
 
     if (height_homeo_gain_ > 0.0 && chassis_h_max_ > 1e-4f) {
-        float tgt = float(height_k_) * chassis_h_max_;
+        // Setpoint fraction: fixed by config, or discovered from belly grounding.
+        if (height_k_eff_ < 0.0f) height_k_eff_ = float(height_k_);
+        if (height_ground_gain_ > 0.0) {
+            const bool grounded = (chassis_h_ < kHeightGroundThresh);
+            // Rise fast on contact, decay slowly back toward the configured floor.  The
+            // asymmetry is the point: grounding is evidence the target is too low, while
+            // NOT grounding is only weak evidence it is too high.
+            if (grounded) height_k_eff_ += float(height_ground_gain_) * (kHeightKMax - height_k_eff_);
+            else          height_k_eff_ -= float(height_ground_gain_) * 0.05f * (height_k_eff_ - float(height_k_));
+            height_k_eff_ = std::clamp(height_k_eff_, float(height_k_), kHeightKMax);
+        } else {
+            height_k_eff_ = float(height_k_);
+        }
+        float tgt = height_k_eff_ * chassis_h_max_;
         float dh = float(height_homeo_gain_) * (tgt - chassis_h_ema_);
         // (a) UPRIGHT GATE.  While the body is not upright the height setpoint is
         // meaningless — the belly rangefinder is not looking at the ground the robot
@@ -3923,6 +3941,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["chassis_h_ema"]  = chassis_h_ema_;
     mod["chassis_h_max"]  = chassis_h_max_;
     mod["height_bias"]    = height_bias_;
+    mod["height_k_eff"]   = height_k_eff_;
     mod["chassis_h_seen"] = chassis_h_seen_;
     // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
     // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
@@ -4588,6 +4607,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["chassis_h_ema"] = chassis_h_ema_;         // smoothed chassis height
     j["chassis_h_max"] = chassis_h_max_;         // self-discovered height ceiling
     j["height_bias"]   = height_bias_;           // integrated lift bias (hip2)
+    j["height_k_eff"]  = height_k_eff_;          // adapted setpoint fraction (belly-grounding)
     j["height_rest_frac"] = height_rest_frac_;   // height-defense fade: 1 at rest → 0 while moving fwd
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
       j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much POSTURE phase-conditioning HK has learned
