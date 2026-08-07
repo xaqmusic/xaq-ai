@@ -65,6 +65,23 @@ private:
     // action_topics.size() / group_size.  Default 1 preserves per-joint
     // output behaviour bit-identically.
     int                      group_size_         = 1;
+    // 2026-08-07 — OPTIONAL PER-LEG LOAD CHANNEL appended to each output vector.
+    //
+    // MotorEPMv2 sizes its forward model from the arriving vector (L.n = values.size();
+    // A is n x m, C is m x n), and its guards are `>= 3*m` rather than `==`, so an extra
+    // trailing element is LEARNED AUTOMATICALLY while every existing index is unchanged
+    // ([pos,act,delta] per joint, joint j position at 3j).  That is what makes this a
+    // one-element change rather than a refactor.
+    //
+    // ⚠ THE WIDTH MUST BE CONSTANT FROM THE FIRST FRAME.  MotorEPMv2 rejects any frame
+    // whose dimensionality differs from the one it initialised on ("dimensionality must
+    // be stable"), so if the bridge emitted 9 dims before the load topic arrived and 10
+    // after, every leg would latch at 9 and silently drop every later frame.  Therefore
+    // the width is decided by whether load_topic is CONFIGURED, not by whether a load
+    // value has been received yet; the slot carries 0.0 until the first one lands.
+    std::string              load_topic_;                 // empty = off, byte-identical
+    std::vector<float>       last_load_;                  // per output (leg)
+    bool                     have_load_          = false;
     // 2026-08-02 · IMPORT I4b — POSITION-CHANNEL-ONLY colored sensor noise.
     // PM wires every legged controller through ColorUniformNoise(0.1) on every sensor.
     // Injecting that at the BODY (picrawler_body.gd sensor_noise_sigma) lands on the raw
