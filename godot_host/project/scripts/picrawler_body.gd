@@ -9638,6 +9638,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# tabula-rasa runs.
 	var cpg_state: Dictionary = {}
 	var epm_tle_by_id: Dictionary = {}   # per-EPM ema_tle (aliveness signal #3)
+	var epm_win_by_id: Dictionary = {}   # per-EPM current winner id
 	# Reset population caches each diag tick before the metrics loop populates them.
 	_cog_pop_accels.clear()
 	_cog_pop_chosen.clear()
@@ -9760,6 +9761,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# OgmaBrain::get_module_metrics).  Instantaneous TLE — spikes on
 			# first obstacle contact for the joints/imu EPMs (aliveness #3).
 			epm_tle_by_id[mod_id] = snappedf(float(m.get("tle", 0.0)), 0.00001)
+			# 2026-08-07 — the WINNER too, so per-node statistics are computable
+			# offline.  The selector's gating question is whether responsiveness
+			# varies ACROSS support nodes or only with the coarse count of planted
+			# feet; without the winner id that cannot be asked.
+			epm_win_by_id[mod_id] = int(m.get("winner_id", -1))
 	# 2026-06-07 — F10/F11 Cognitive Premotor Population aggregation.
 	# When the population caches are non-empty, body aggregates the population's
 	# accels into _cognitive_bias_rad (overrides the single-Premotor path above).
@@ -10416,6 +10422,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				line["cruse_pm_bias_norms"] = bias_norms
 	line["target_loom"]              = snappedf(_last_target_loom, 0.001)
 	line["epm_tle"]                  = epm_tle_by_id
+	line["epm_win"]                  = epm_win_by_id
 	line["lateral_v"]                = snappedf(_last_lat_v, 0.0001)
 	line["speed_now"]                = snappedf(current_speed, 0.0001)
 	line["speed_ema"]                = snappedf(_speed_ema, 0.0001)
