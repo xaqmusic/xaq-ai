@@ -869,3 +869,9 @@ _GENERIC = ModuleDoc(
 def doc_for(module_type: str) -> ModuleDoc:
     """Return the ModuleDoc for a C++ module type_name (never None)."""
     return DOCS.get(module_type, _GENERIC)
+
+
+# MotorEPMv2 is the same module under the differ gate (a verified-identical copy that
+# then grew levers), so it documents identically.  Aliased rather than duplicated so the
+# two cannot drift apart.
+DOCS["MotorEPMv2"] = DOCS["MotorEPM"]

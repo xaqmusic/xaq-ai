@@ -1933,7 +1933,7 @@ func _emit_jsonl(accel: float) -> void:
 					"urg":    snappedf(float(m.get("urgency", 0.0)), 0.001),
 					"errors": errs
 				}
-			"MotorEPM":
+			"MotorEPM", "MotorEPMv2":
 				mods[mod_id] = {
 					"mtle":   snappedf(float(m.get("motor_tle", 0.0)), 0.0001),
 					"lgain":  snappedf(float(m.get("loop_gain", 0.0)), 0.0001),
