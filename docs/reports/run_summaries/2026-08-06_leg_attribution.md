@@ -145,3 +145,71 @@ tracking *motion*, which is what it turned out to measure.
 2. Seed-average before any claim is promoted from signal to finding.
 3. The UI colouring is licensed by these controls — colour by dominant leg with
    **saturation ∝ the margin**, so a near-tie reads as a near-tie.
+
+---
+
+# Addendum — the diagonal rhythm, and why `gait_phase` cannot fix it
+
+**Operator, from crawling on the floor:** *"two diagonal legs with the exact same
+phase does not work for a quadruped. The diagonal pair cannot move together, the
+front legs must lead the back leg slightly or the stance becomes unstable. That's
+why horses make the clip-clop clip-clop sound, not clop clop clop."*
+
+Correct, and the rhythm is measurably absent. But the knob that looks like the fix
+turns out to have no authority.
+
+## 1. The rhythm is absent (n=6, arena, stride ≈ 37 ticks)
+
+| pair | median offset | IQR | front leads | IQR if legs were INDEPENDENT |
+|---|---|---|---|---|
+| fl/rr | +2 ticks | −3..+6 | 64 % | 18 |
+| fr/rl | +1 tick | −4..+6 | 53 % | 20 |
+
+The pair *is* coupled — IQR 9–10 against 18–20 for an independent null — but
+coupled at **near-zero lag**. A 1–2 tick offset is 3–5 % of stride, the sign flips
+about as often as not (`fr/rl` front-leads 53 %, a coin flip), and ~30 % of
+landings fall within ±2 ticks. That is the distribution of **"clop"**. A correct
+trot would be a *tight* distribution centred on a consistent lead.
+
+## 2. ★ But `gait_phase` does not control footfall timing
+
+The config seeds `gait_phase = [0, π, π, 0]` — the diagonal pair commanded
+simultaneously, exactly the unstable pattern. **The runtime phase search has
+already moved it, far, and differently on every seed:**
+
+```
+start   [0.0,  3.113,  3.108, -0.006]     (the config seed)
+seed1   [0.0, -2.626,  1.939, -0.912]     rr-fl =  -5.4 ticks
+seed3   [0.0,  1.903,  1.640, -2.577]     rr-fl = -15.2 ticks
+```
+
+Commanded diagonal offset across the 12 pair-seeds spans **−15.2 … +8.6 ticks**
+(~65 % of a stride). The measured footfall offset spans **−1.0 … +3.0 ticks**
+(~11 %).
+
+**The command varies 6× more than the timing it supposedly sets.** Whatever
+determines when a foot lands, it is not `gait_phase`.
+
+### Why — and it is mechanical, not mysterious
+
+`gait_phase` modulates **hip1**, the fore/aft swing joint. Touchdown is a
+**vertical** event, governed by knee extension, femur lift, and body height. And
+this body has almost no authority over the vertical: **`hip2` (the lift joint) is
+commanded over ±0.5 against hip1's ±1.4, and does not track its command at all**
+(`corr(target−angle, Δθ) ≈ −0.08`, against +0.63 / +0.70 for hip1 / knee — see
+Side findings). The legs are swung fore/aft under command and dropped
+uncontrolled.
+
+## 3. What this invalidates
+
+This is the **premise of the whole timing-lever family**. The stroke-to-step lock
+that "never entrained" (`td_plv` 0.04–0.10 at every loop gain), `step_cv` ≈ 0.98,
+the nine timing levers whose premise was already known to be broken, and the
+absent stride autocorrelation measured earlier today — all of them act through, or
+are read from, a channel with no authority over footfall timing.
+
+⚠ **So the fix is NOT to inject a diagonal offset into `gait_phase`.** That is
+prohibition 7 (don't inject a rhythm) *and* it would be inert: the command already
+takes wildly different values per seed and produces the same near-zero-lag
+landings. **The lever, if there is one, is on the VERTICAL channel** — the body
+cannot presently choose when to put a foot down.
