@@ -1066,6 +1066,20 @@ private:
     //
     // Fraction of the hip2 lift applied to the knee.  0 = off, byte-identical.
     double  height_lift_knee_ = 0.0;
+    // 2026-08-07 — COMPLETE THE STANCE LIFT.  stance_lift biases the KNEE on planted
+    // legs and explicitly not hip2 ("no hip2 -> no foot-lift traction loss").  But that
+    // reasoning covers hip2 MINUS (foot up); on a PLANTED foot hip2 PLUS presses the
+    // foot down and raises the chassis -- Rule 5 says so ("+hip2 = press foot down") and
+    // the panic pathway drives hip2+ and knee+ TOGETHER for exactly this, recording that
+    // opposite signs cancel the lift.  So stance_lift is the one-joint version of a
+    // two-joint chassis raise, sitting in the one carrier that IS live during
+    // locomotion (height_lift is faded to zero while cruising; that is why extending
+    // THAT path was a NULL).
+    //
+    // Fraction of stance_lift_gain also applied to hip2, SAME sign.  Planted legs only,
+    // so no swing leg is ever hoisted off the terrain -- the measured objection to a
+    // whole-body lift does not apply.  0 = off, byte-identical.
+    double  stance_lift_hip2_ = 0.0;
     float   chassis_h_max_ = 0.0f;                    // running max of the EMA (the discovered ceiling)
     float   height_bias_   = 0.0f;                    // integral output → knee tuck-deepen command
     bool    chassis_h_seen_ = false;                  // EMA seeded
