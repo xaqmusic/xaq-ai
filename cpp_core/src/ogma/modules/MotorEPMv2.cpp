@@ -499,6 +499,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"height_homeo_gain", ParamMutability::HotMutable,
          "chassis-height homeostat (stand-higher reflex) integral rate. The G6DOF springs let the body SAG; the postural reflex defends a joint-angle pose, not a height. This drives a tuck-deepening knee bias toward a SELF-DISCOVERED setpoint (height_k × tallest height reached) so the body stands as tall as it can. 0 = off.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.1}},
+        {"support_select_gain", ParamMutability::HotMutable,
+         "HOMEOKINETIC SUPPORT SELECTOR.  Modulates EXPLORATION by how responsive the body's current support state is: value = responsiveness/(motor_tle+eps), where responsiveness is the egocentric |dx|/|du| (sensor change per unit commanded change) accumulated per COUNT OF PLANTED FEET.  Below-average value (four feet down, unresponsive, going nowhere) raises exploration; above-average commits.  MEASURED: responsiveness 0.470 at 2 planted vs 0.367 at 4 (+28%) with |du| flat, so this prefers 2-leg support WITHOUT being told forward progress is good -- the distinction between homeokinesis and reward shaping on progress (§5.1).  The TLE divisor is mandatory: 1-planted is equally responsive but is falling.  Keyed on sum(contact) rather than the support EPM because the integer measurably explains MORE of the responsiveness variance than the 150-node vocabulary does.  Requires contact_topic (with contact_instrument_only=1, so the stance gate is untouched).  Acts only on explore_mult -- no joint commanded, no coordination imposed.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{4.0}},
         {"stance_lift_hip2", ParamMutability::HotMutable,
          "COMPLETE THE STANCE LIFT.  Fraction of `stance_lift_gain` also applied to hip2, SAME sign, on PLANTED legs only.  stance_lift is currently knee-only on the reasoning 'no hip2 -> no foot-lift traction loss' -- but that covers hip2 MINUS (foot up); on a planted foot hip2 PLUS presses the foot down and raises the chassis (Rule 5: '+hip2 = press foot down'), and the panic pathway drives hip2+ and knee+ together for precisely this, recording that opposite signs cancel the lift.  MEASURED 2026-08-07: hip2 and the knee agree on sign only 50.8% of ticks, and `height_lift_knee` -- the same idea on the HEIGHT path -- was NULL because that path is faded to zero while cruising.  This one is stance-gated, so it is live exactly when the body is walking, and it can never hoist a swing leg.  0 = off, byte-identical.",
          ParamValue{0.0}},
@@ -861,6 +864,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "height_ground_gain", [&](auto const& v){ height_ground_gain_ = get_double(v, "height_ground_gain"); });
     apply_param(params, "height_lift_knee", [&](auto const& v){ height_lift_knee_ = get_double(v, "height_lift_knee"); });
     apply_param(params, "stance_lift_hip2", [&](auto const& v){ stance_lift_hip2_ = get_double(v, "stance_lift_hip2"); });
+    apply_param(params, "support_select_gain", [&](auto const& v){ support_select_gain_ = get_double(v, "support_select_gain"); });
     apply_param(params, "height_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) height_topic_ = *p; });
     apply_param(params, "panic_on", [&](auto const& v){ panic_on_ = get_double(v, "panic_on"); });
     apply_param(params, "panic_off", [&](auto const& v){ panic_off_ = get_double(v, "panic_off"); });
@@ -2048,6 +2052,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "height_ground_gain") height_ground_gain_ = get_double(value, "height_ground_gain");
     else if (key == "height_lift_knee") height_lift_knee_ = get_double(value, "height_lift_knee");
     else if (key == "stance_lift_hip2") stance_lift_hip2_ = get_double(value, "stance_lift_hip2");
+    else if (key == "support_select_gain") support_select_gain_ = get_double(value, "support_select_gain");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
     else if (key == "panic_strength") panic_strength_ = get_double(value, "panic_strength");
@@ -2783,7 +2788,57 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     // ⚠ FLOOR, not zero: "play never abstains" -- fix exploration's OUTPUT, never its right
     // to win.  explore_mult reaching exactly 0.000 is what makes the body frozen-but-
     // confident, and it is the state the operator reads as indecision.  0 = legacy.
-    const float explore_mult = std::max(float(explore_floor_), 1.0f - commit_amt);                 // C: damp exploration
+    float explore_mult = std::max(float(explore_floor_), 1.0f - commit_amt);                 // C: damp exploration
+
+    // ---- HOMEOKINETIC SUPPORT SELECTOR (support_select_gain) --------------------------
+    // Value the CURRENT support state by how much the body's own action moves its own
+    // sensors, divided by how badly it currently predicts itself.  Then explore MORE when
+    // that value is below what this body typically achieves.  See the header for why the
+    // criterion is responsiveness and not forward progress, and why the divisor matters.
+    support_mult_diag_ = 1.0f;
+    if (support_select_gain_ > 0.0 && have_contact_ && int(foot_contact_.size()) == n_legs_) {
+        int planted = 0;
+        for (int i = 0; i < n_legs_; ++i) if (foot_contact_[i] >= 0.5f) ++planted;
+        planted = std::clamp(planted, 0, kSupportBins - 1);
+        // Instantaneous responsiveness: sensor change per unit COMMANDED change, summed
+        // over every leg and joint.  Both terms egocentric; the ratio is scale-free.
+        double dx = 0.0, du = 0.0;
+        for (auto const& L : legs_) {
+            if (!L.initialized || L.x.size() != L.prev_x.size()) continue;
+            for (int k = 0; k < L.x.size(); ++k) dx += std::fabs(L.x[k] - L.prev_x[k]);
+            if (L.prev_y.size() == L.prev_prev_y.size())
+                for (int k = 0; k < L.prev_y.size(); ++k)
+                    du += std::fabs(L.prev_y[k] - L.prev_prev_y[k]);
+        }
+        if (du > 1e-6) {
+            const float inst = float(dx / du);
+            float& e = resp_ema_[planted];
+            e = (resp_seen_[planted] == 0) ? inst : (1.0f - kRespAlpha) * e + kRespAlpha * inst;
+            ++resp_seen_[planted];
+            support_resp_diag_ = inst;
+        }
+        support_bin_diag_ = planted;
+        // Value, and a SCALE-FREE comparison against what this body typically achieves --
+        // never a hand-set target (doctrine rule 5).  Only VISITED bins count, so an
+        // unentered support state cannot drag the mean.
+        const float tle = tle_ema_mean();
+        const float val = resp_ema_[planted] / (tle + 1e-3f);
+        double sum = 0.0; int nb = 0;
+        for (int k = 0; k < kSupportBins; ++k)
+            if (resp_seen_[k] > kRespWarmup) { sum += resp_ema_[k] / (tle + 1e-3f); ++nb; }
+        if (nb >= 2 && resp_seen_[planted] > kRespWarmup) {
+            const float mean = float(sum / nb);
+            const float ratio = (mean > 1e-6f) ? val / mean : 1.0f;
+            // ratio < 1 => this support state is LESS responsive than typical => explore more.
+            float mult = 1.0f + float(support_select_gain_) * (1.0f - ratio);
+            mult = std::clamp(mult, kSupportMultMin, kSupportMultMax);
+            support_mult_diag_  = mult;
+            support_value_diag_ = ratio;
+            // ⚠ FLOOR PRESERVED: "play never abstains".  Scaling can raise or lower the
+            // probe but never removes exploration's right to win.
+            explore_mult = std::max(float(explore_floor_), explore_mult * mult);
+        }
+    }
     explore_mult_diag_ = explore_mult;   // diag: is the coordination probe already damped to 0?
     float flow_quality = 0.0f;
     if (forward_flow_gain_ > 0.0) {
@@ -4107,6 +4162,10 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["torque_stance"]     = ga_tq_stance_n_ ? ga_tq_stance_ / double(ga_tq_stance_n_) : 0.0;
     mod["torque_swing"]      = ga_tq_swing_n_  ? ga_tq_swing_  / double(ga_tq_swing_n_)  : 0.0;
     mod["explore_mult"]      = explore_mult_diag_;
+    mod["support_bin"]       = support_bin_diag_;
+    mod["support_value"]     = support_value_diag_;
+    mod["support_mult"]      = support_mult_diag_;
+    mod["support_resp"]      = support_resp_diag_;
     mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
@@ -4599,6 +4658,9 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["commit_prec"]         = commit_prec_diag_;
     j["commit_boost"]        = commit_boost_;
     j["explore_mult"]        = explore_mult_diag_;
+    j["support_bin"]         = support_bin_diag_;
+    j["support_value"]       = support_value_diag_;
+    j["support_mult"]        = support_mult_diag_;
     j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
     j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to
     // The coordination search, made observable: which fitness is ranking probes, and the

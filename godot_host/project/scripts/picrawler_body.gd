@@ -10052,6 +10052,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.
 			line["h_keff"] = snappedf(float(_mm.get("height_k_eff", -1.0)), 0.001)
+			# 2026-08-07 — homeokinetic support selector telemetry.  Without these the
+			# consumer-fired check cannot distinguish "the selector moved the gait" from
+			# "the seeds moved" — the check this session has needed at every lever.
+			line["sup_bin"]  = int(_mm.get("support_bin", -1))
+			line["sup_val"]  = snappedf(float(_mm.get("support_value", 1.0)), 0.001)
+			line["sup_mult"] = snappedf(float(_mm.get("support_mult", 1.0)), 0.001)
 			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.

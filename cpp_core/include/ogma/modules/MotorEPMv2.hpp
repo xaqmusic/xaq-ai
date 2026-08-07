@@ -1080,6 +1080,43 @@ private:
     // so no swing leg is ever hoisted off the terrain -- the measured objection to a
     // whole-body lift does not apply.  0 = off, byte-identical.
     double  stance_lift_hip2_ = 0.0;
+    // 2026-08-07 — HOMEOKINETIC SUPPORT SELECTOR.
+    //
+    // MEASURED (n=4, egocentric |dx|/|du| over joint vs commanded deltas):
+    //     planted   1      2      3      4
+    //     resp      0.472  0.470  0.432  0.367      (+28% at 2 vs 4)
+    // with |du| FLAT across states -- the SAME command produces more sensory change
+    // with fewer feet down.  So preferring responsive support states prefers 2-leg
+    // support WITHOUT EVER BEING TOLD FORWARD PROGRESS IS GOOD.  That distinction is
+    // the whole point: "prefer states with better forward impulse" is reward shaping
+    // on progress (§5.1, and what coord_reward_drive turned out to be); "prefer states
+    // where my actions have the most effect on my own sensors" is homeokinesis.
+    //
+    // ⚠ THE DIVISOR IS LOAD-BEARING, NOT DECORATION.  1-planted is as responsive as
+    // 2-planted (0.472 vs 0.470) but moves less -- one foot is maximally sensitive and
+    // maximally UNPREDICTABLE, i.e. falling.  Dividing by the body's own forward-model
+    // error is what makes this homeokinesis rather than thrash-seeking.
+    //
+    // ⚠ AND IT IS KEYED ON sum(contact), NOT ON THE SUPPORT EPM.  Measured: per-node
+    // responsiveness spreads 7% across 171 vocabulary nodes vs 11% across the four
+    // planted-counts, and only ~5% of node spread survives removing the count effect.
+    // The integer explains MORE than the 150-node vocabulary, so the vocabulary is
+    // reserved for what the count cannot do (which state follows which).
+    //
+    // Acts ONLY on explore_mult -- commands no joint, imposes no coordination topology,
+    // steers machinery that already exists.  0 = off, byte-identical.
+    double  support_select_gain_ = 0.0;
+    static constexpr int   kSupportBins   = 5;      // 0..4 feet planted
+    static constexpr float kRespAlpha     = 0.01f;  // responsiveness EMA rate
+    static constexpr int   kRespWarmup    = 200;    // samples before a bin votes
+    static constexpr float kSupportMultMin = 0.5f;  // never silences the probe
+    static constexpr float kSupportMultMax = 3.0f;
+    float   resp_ema_[kSupportBins]  = {0,0,0,0,0};
+    int     resp_seen_[kSupportBins] = {0,0,0,0,0};
+    float   support_value_diag_ = 1.0f;
+    float   support_resp_diag_  = 0.0f;
+    float   support_mult_diag_  = 1.0f;
+    int     support_bin_diag_   = -1;
     float   chassis_h_max_ = 0.0f;                    // running max of the EMA (the discovered ceiling)
     float   height_bias_   = 0.0f;                    // integral output → knee tuck-deepen command
     bool    chassis_h_seen_ = false;                  // EMA seeded
