@@ -499,6 +499,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"height_homeo_gain", ParamMutability::HotMutable,
          "chassis-height homeostat (stand-higher reflex) integral rate. The G6DOF springs let the body SAG; the postural reflex defends a joint-angle pose, not a height. This drives a tuck-deepening knee bias toward a SELF-DISCOVERED setpoint (height_k × tallest height reached) so the body stands as tall as it can. 0 = off.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.1}},
+        {"stance_lift_hip2", ParamMutability::HotMutable,
+         "COMPLETE THE STANCE LIFT.  Fraction of `stance_lift_gain` also applied to hip2, SAME sign, on PLANTED legs only.  stance_lift is currently knee-only on the reasoning 'no hip2 -> no foot-lift traction loss' -- but that covers hip2 MINUS (foot up); on a planted foot hip2 PLUS presses the foot down and raises the chassis (Rule 5: '+hip2 = press foot down'), and the panic pathway drives hip2+ and knee+ together for precisely this, recording that opposite signs cancel the lift.  MEASURED 2026-08-07: hip2 and the knee agree on sign only 50.8% of ticks, and `height_lift_knee` -- the same idea on the HEIGHT path -- was NULL because that path is faded to zero while cruising.  This one is stance-gated, so it is live exactly when the body is walking, and it can never hoist a swing leg.  0 = off, byte-identical.",
+         ParamValue{0.0}},
         {"height_lift_knee", ParamMutability::HotMutable,
          "COMPLETE THE LIFT.  Fraction of the height homeostat's hip2 lift also applied to the KNEE, same sign.  MEASURED 2026-08-07: hip2 and the knee agree on sign only 50.8% of ticks (chance), and the panic pathway's own comment records that opposite signs mean the knee UN-TUCKS and fights the hip2 lift so the chassis does not rise -- 'same sign = a coherent anti-gravity push'.  Panic already drives both joints for that reason; the height homeostat drives hip2 alone, a one-joint version of a two-joint action.  This completes it.  Not an imposed coordination topology: it adds no new coupling between joints, it extends an existing anti-gravity command to the joint the codebase already measured as necessary.  0 = off, byte-identical.",
          ParamValue{0.0}},
@@ -857,6 +860,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "height_k", [&](auto const& v){ height_k_ = get_double(v, "height_k"); });
     apply_param(params, "height_ground_gain", [&](auto const& v){ height_ground_gain_ = get_double(v, "height_ground_gain"); });
     apply_param(params, "height_lift_knee", [&](auto const& v){ height_lift_knee_ = get_double(v, "height_lift_knee"); });
+    apply_param(params, "stance_lift_hip2", [&](auto const& v){ stance_lift_hip2_ = get_double(v, "stance_lift_hip2"); });
     apply_param(params, "height_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) height_topic_ = *p; });
     apply_param(params, "panic_on", [&](auto const& v){ panic_on_ = get_double(v, "panic_on"); });
     apply_param(params, "panic_off", [&](auto const& v){ panic_off_ = get_double(v, "panic_off"); });
@@ -2043,6 +2047,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "height_k") height_k_ = get_double(value, "height_k");
     else if (key == "height_ground_gain") height_ground_gain_ = get_double(value, "height_ground_gain");
     else if (key == "height_lift_knee") height_lift_knee_ = get_double(value, "height_lift_knee");
+    else if (key == "stance_lift_hip2") stance_lift_hip2_ = get_double(value, "stance_lift_hip2");
     else if (key == "panic_on") panic_on_ = get_double(value, "panic_on");
     else if (key == "panic_off") panic_off_ = get_double(value, "panic_off");
     else if (key == "panic_strength") panic_strength_ = get_double(value, "panic_strength");
@@ -3282,6 +3287,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         if (!warmup && stance_lift_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
             && !in_swing_[leg]) {
             y[m - 1] += float(stance_lift_gain_);
+            // Same sign to hip2 — see stance_lift_hip2.  On a PLANTED foot hip2+ presses
+            // down and levers the chassis up; it is the other half of the same raise.
+            if (stance_lift_hip2_ != 0.0)
+                y[1] += float(stance_lift_hip2_) * float(stance_lift_gain_);
         }
         // TIBIA-PLUMB — hip2 nulls the shank's deviation from vertical, so the knee's
         // gait drive TRANSLATES the foot instead of arcing it.  See the header.  Applied to
