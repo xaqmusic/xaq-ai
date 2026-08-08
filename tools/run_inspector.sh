@@ -13,12 +13,22 @@
 #
 # Requires an environment with PyQt6 + pyqtgraph + pyzmq + numpy
 # (see tools/xaq_inspector/requirements.txt; pyzmq is also an xaq_core dep).
+# By default that's the repo-root .venv/ (see AGENTS.md) — this script uses it
+# directly below so it works regardless of what's active in your shell (e.g. a
+# conda `base` env auto-activated in a fresh terminal), not just when you
+# remember to `source .venv/bin/activate` first.
 set -euo pipefail
 
 # This script lives in tools/, which is the directory that CONTAINS the
 # xaq_inspector package — put it on sys.path so `python -m xaq_inspector`
 # resolves regardless of the caller's CWD.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$here/.." && pwd)"
 export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
 
-exec python3 -m xaq_inspector "$@"
+py="python3"
+if [ -x "$repo_root/.venv/bin/python3" ]; then
+    py="$repo_root/.venv/bin/python3"
+fi
+
+exec "$py" -m xaq_inspector "$@"
