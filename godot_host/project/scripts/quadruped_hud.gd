@@ -621,7 +621,7 @@ func build_clipboard_text(body: Node) -> String:
 	var lines: Array[String] = []
 
 	# --- Header ---
-	lines.append("=== AMI-Ogma %s run snapshot ===" % str(body.name))
+	lines.append("=== xaq %s run snapshot ===" % str(body.name))
 	lines.append("Config:      %s" % str(ExperimentConfig.config_path))
 	lines.append("Seed:        %d" % _as_int(ExperimentConfig.seed_value))
 	var ticks: int = _as_int(body.get("tick_counter")) if body.get("tick_counter") != null else 0
