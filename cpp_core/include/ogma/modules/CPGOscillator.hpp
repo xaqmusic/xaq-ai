@@ -104,6 +104,7 @@ public:
 
 private:
     void handle_brain_action(int joint_idx, MessagePtr payload);
+    void handle_body_rhythm(MessagePtr payload);
 
     // Configuration (lengths must all match n_joints):
     //   input_topics[i]  : ActionOut topic this joint listens on (Premotor side)
@@ -128,6 +129,18 @@ private:
 
     // Cycle period in ticks (= 2π / Δφ_per_tick).
     int   period_ticks_       = 60;
+
+    // --- Afferent entrainment (CPG↔body PLL, L-1b step 3) ---
+    // Optional: track a body-rhythm reference (BodyRhythmTracker's rhythm.body.gait,
+    // ProprioToken [cos φ_body, sin φ_body, ω_body]) — slowly pull the period toward the
+    // body's measured frequency and nudge phase toward φ_body.  The CPG low-passes the
+    // (jittery, fall-corrupted) tracker into a stable clock that also DRIVES the body via
+    // the keyframe objective.  Empty topic = free-running (byte-identical to before).
+    std::string entrain_topic_;
+    double entrain_freq_gain_  = 0.02;   // integral pull of period toward the body's period
+    double entrain_phase_gain_ = 0.05;   // proportional phase nudge toward φ_body
+    double entrain_period_min_ = 48.0;   // aliasing-safe clamp (≥3 ticks/bin @ n_bins=16)
+    double entrain_period_max_ = 120.0;
     // Peak waveform amplitude (the bias added to brain command when the
     // competence-gate is fully open).  Effective per-tick amplitude is
     //   effective = amplitude_floor + (peak - floor) * gate
@@ -220,6 +233,11 @@ private:
 
     // Working state
     float phase_              = 0.0f;
+    // Entrainment runtime: period_eff_ is the (smoothly entrained) live period used for the
+    // phase advance; it equals float(period_ticks_) while free-running.
+    float   period_eff_   = 60.0f;
+    float   body_cos_ = 1.0f, body_sin_ = 0.0f, body_omega_ = 0.0f;
+    bool    body_seen_ = false;
     // Slow EMA of NeuroState.reward_signal (= dopamine − adaptive_baseline).
     // PRE-7.x: was the competence-gate signal.  Now KEPT FOR INSPECTOR
     // ONLY — surfaces a useful telemetry view of dopamine excess but no

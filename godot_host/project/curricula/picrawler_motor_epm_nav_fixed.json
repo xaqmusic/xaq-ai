@@ -5,6 +5,6 @@
     "target_mode": "random_pyramid",
     "visit_radius": -100.0,
     "overrides": {},
-    "joint_backend": "g6dof"
+    "joint_backend": "hinge"
   }
 ]

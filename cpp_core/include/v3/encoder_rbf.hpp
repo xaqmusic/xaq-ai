@@ -65,6 +65,28 @@ public:
     int output_dim()  const { return cfg_.projection_dim; }
     int state_dims()  const { return cfg_.state_dims; }
 
+    /**
+     * Replace the per-dimension input ranges after construction.
+     *
+     * This does NOT touch the frozen part of the encoder: centers are laid out
+     * in normalised [0,1]^d and sigma is derived from inter-center distances in
+     * that same space, so neither depends on dim_ranges.  The ranges are read
+     * in exactly one place — normalise_state() — where they act as a per-dim
+     * affine map into [0,1] (with a clamp).  Swapping them therefore recalibrates
+     * the SENSOR CONDITIONING upstream of the encoder while leaving the encoder
+     * itself frozen, which is what lets EPM's commissioning window exist without
+     * violating the "frozen encoder" contract.
+     *
+     * Caller is responsible for whatever downstream state was expressed in the
+     * old units (EPM resets its GNG topology).
+     *
+     * @param ranges  Exactly state_dims entries; each must have hi > lo.
+     */
+    void set_dim_ranges(const std::vector<std::pair<float,float>>& ranges);
+
+    /// The installed per-dim ranges (post-default-fill, post-set_dim_ranges).
+    const std::vector<std::pair<float,float>>& dim_ranges() const { return cfg_.dim_ranges; }
+
 private:
     Config cfg_;
 

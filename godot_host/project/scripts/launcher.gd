@@ -18,15 +18,10 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # a config in the launcher, add its exact .json filename here.  Files are NOT
 # moved/deleted — every config stays loadable by path for scripts + A/B runs.
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
-	# Motor-EPM phase (current):
-	"the_picrawler_motor_epm_minimal.json",   # CANONICAL validated deploy (agency reward + stab guard + heading_gain 0)
-	"the_picrawler_motor_epm_energetic.json", # EXPERIMENTAL high-energy variant (operator screenshot params)
-	"the_picrawler_motor_epm_rung0.json",
-	"the_picrawler_motor_epm_vision.json",   # rung0 + epm_color (camera→brain, V1 vision)
-	"the_picrawler_motor_epm_vision_steer.json",  # V2: nav steers on VISION (vision_compass)
-	# Reference baselines (kept for comparison):
-	"the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2.json",
-	"the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2_target_compass_H1v6_F9_hit_reward.json",
+	"the_picrawler_motor_epm_arena_control.json",  # ── ARENA CONTROL ── deployed stack + measurement instruments, NO lever. Verified behaviourally inert (identical seedavg on all 17 metrics, per seed, at 6000 and 12000 ticks), so any visible difference vs the two arms below is the lever. n=3: net_disp 4.85, straight 0.71, tilt_sd 0.088, steps 25, step_bal 0.07, belly 0.0221, 0 falls. The sprawl to look for: hip2 never leaves neutral, tibia 37.5° off vertical (design rest 10°), feet planted at 170mm against a 166mm total leg reach, and scrub 0.100 vs fwd_v 0.050 (sliding sideways twice as fast as it advances).
+	"the_picrawler_motor_epm_arena_ik_plumb.json",  # ── ARENA · IK ── tibia_plumb_gain=0.15. hip2 nulls the shank's deviation from vertical so the knee's drive TRANSLATES the foot instead of arcing it (hip2+knee are a planar 2-link arm; one joint of a 2-DOF pair forces a circular foot path). LARGEST EFFECT MEASURED: net_disp 4.85→6.38 (+32%), straight 0.71→0.82 with std 0.00 across 3 seeds, tilt_sd 0.088→0.069, 0 falls. NOT PROMOTED: belly 0.0221→0.0156 (−29%) and belly-up is a promoted invariant. WATCH: does the shank stay under the knee through the stride, and is the belly scraping? Live slider `tibia_plumb` on [M]; +0.3 goes unstable, NEGATIVE un-plumbs.
+	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2__supportepm.json",  # ── ★ SUPPORT-PATTERN EPM (load vocabulary) ── an EPM over the NEW 4-D `foot_load` channel (per-leg foot NORMAL force, the FSR analogue). ⚠ NOTHING CONSUMES THE TOKENS — deliberately: this answers whether weight distribution has learnable structure BEFORE load is fed anywhere. ★ GATE RESULT n=3, 12k ticks: NO COLLAPSE (top1 0.026 against 0.007 uniform), and the vocabulary PLATEAUS at ~150-165 nodes under a 400 cap (4 -> 103 -> 144 -> 149 -> 149 -> 165) instead of running to the ceiling — a self-limiting size is the signature of real structure. Bakes 18-28% and still rising at 12k (at ~160 nodes a 12k run gives ~50 visits/node against a baking_threshold of 50, so low baked% here is RUN LENGTH, not a defect). mitosis 0. ★ SENSOR VALIDATION: the four loads sum to 1.003 body-weights — the robot's whole mass is accounted for by its feet. dim ranges [0, 0.8] are MEASURED (p1 0.000 / p50 0.25 / p99 0.67), not assumed; the default [-1,1] would waste the negative half.
+	"the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2.json",  # ── ★ STANCE-GATED HIP2 LIFT (0.25) ── `stance_lift` biases the KNEE on planted legs and explicitly NOT hip2 ("no hip2 -> no foot-lift traction loss") — but that reasoning covers hip2 MINUS (foot up); on a PLANTED foot hip2 PLUS presses down and levers the chassis up (Rule 5: "+hip2 = press foot down"), and the panic pathway drives hip2+ and knee+ together for exactly this. So stance_lift was the ONE-JOINT version of a two-joint raise — in the one carrier that IS live during locomotion (the height path is faded to 0 while cruising, which is why `height_lift_knee` was a NULL). ★ RESULT n=6 corridor SOLID chassis: hip2/knee sign agreement **0.522 -> 0.601 (t=+13.5)** — the mechanism unambiguously reaches locomotion-phase disagreement — and **`fr` is RECRUITED as a propulsor (2/6 -> 5/6 seeds positive), `rr` strengthens (5/6 -> 6/6)**. net_z +1.04, straight/tilt_sd/swing_frac all ns (the old "clamps the swing" objection does NOT appear: swing_frac t=-0.17). ⚠⚠ BUT `fl` BRAKES 2.5x HARDER (-0.00165 -> -0.00407, 0/6 positive) so the NET forward force FALLS (+0.00168 -> +0.00114). **`legs+` is a BLIND COUNT — it tallies propulsors and ignores the brake.** PARTIAL: mechanism confirmed, transport not yet. Higher fracs are worse (0.5 -> tilt_sd 0.225; 1.0 -> straight t=-2.01). ★ NEXT TARGET IS `fl`: it is the consistent brake (0/6 propelling) and this lever deepens it.
 ]
 
 # 2026-06-13 — curriculum dropdown allowlist (same rationale as the config one).
@@ -67,6 +62,37 @@ const _CELL_CONFIG_ALLOWLIST: Array = [
 	"the_cell_chemotaxis_baseline.json",          # §6 EXTERNAL BASELINE -- reactive run-and-tumble (SCALAR) in the STUDY room: ~1.9 eats, BEATS the 4-loop composition (~0.9 = random-walk floor). A single reflex, not a loop.
 ]
 
+# 2026-08-07 — CartPole/MountainCar were the ORIGINAL environments this substrate was
+# built and validated against, before the Cell and PiCrawler existed. Their configs
+# were archived and their launcher entries dropped somewhere along the way — worse,
+# `cart_body.gd`/`mc_body.gd`'s own @export config_path defaults pointed at filenames
+# that only existed in configs/archive/ (not scanned by the launcher's non-recursive
+# walk), so both scenes' brains silently failed brain.setup() even launched directly,
+# not just from this dropdown. Copied a curated set back up (archive/ keeps the
+# originals; nothing moved or deleted) and re-verified each one headless before
+# restoring it here — see the picrawler/cell allowlists above for the same convention.
+const _CARTPOLE_CONFIG_ALLOWLIST: Array = [
+	"the_cartpole_minimal.json",   # DEFAULT — CartPole-v1, manifest-derived, 5 modules. cart_body.gd's own @export default; the plainest working example.
+	"the_cartpole.json",           # ORIGINAL — the full 11-module design (descend, rollout, seq_consensus, seq_action, repertoire, kinesis). Outperformed by minimal in Phase 6.5.3.5 (-18%); kept for ablation comparison.
+	"the_cartpole_ablation.json",  # NO-EPM ABLATION — cell-state EPM removed; the control arm for the EPM-load-bearing claim (Phase 6.5.2 validation).
+	"the_cartpole_premotor.json",  # PREMOTOR SWAP — ActionDecoder replaced by Premotor, the same 5-intent softmax + Hebbian credit tested cross-env against MountainCar and the Cell below.
+]
+
+const _MOUNTAIN_CAR_CONFIG_ALLOWLIST: Array = [
+	"the_mountain_car.json",              # DEFAULT — MountainCar-v0, manifest-derived, sparse goal-reach reward. mc_body.gd's own @export default.
+	"the_mountain_car_premotor.json",     # PREMOTOR — Phase 6.5.28 cross-env A/B: does the Cell's Premotor win generalise? Base variant.
+	"the_mountain_car_premotor_efe.json", # PREMOTOR + EFE — the fullest variant of the same experiment (graded + eligibility + drive + epistemic).
+]
+
+# 2026-08-08 — same story as CartPole/MountainCar above: quadruped_body.gd's own
+# @export config_path default pointed at a file that only existed in configs/archive/,
+# so the_quadruped.tscn's brain.setup() failed even launched directly. Only ONE
+# quadruped config exists at all (v6.0.a.6, 8-channel bilateral-Premotor standing
+# balance) — copied it up and re-verified headless before restoring it here.
+const _QUADRUPED_CONFIG_ALLOWLIST: Array = [
+	"the_quadruped_minimal.json",  # DEFAULT — quadruped_body.gd's own @export default. Brain-only standing balance: 4 bilateral Premotors (one per leg), 8 actuated DOFs, hip+knee both brain-controlled with weak rest-pose PD bias. Reward is per-tick events.body_alive.
+]
+
 const _ENV_TO_SCENE := {
 	"cell":         "res://scenes/the_cell.tscn",
 	"cartpole":     "res://scenes/the_cartpole.tscn",
@@ -87,6 +113,8 @@ const _ENV_LABEL := {
 var _configs_by_env: Dictionary = {}
 var _selected_env: String       = "cell"
 var _verbose_check: CheckBox    = null   # 2026-06-14 — picrawler verbose-diag toggle (created in code)
+var _gym_difficulty_spin: SpinBox = null       # corridor obstacle-height difficulty (created in code)
+var _gym_difficulty_row:  HBoxContainer = null
 
 # 2026-07-12 -- 4-LOOP LEAVE-ONE-OUT ablation (replaces the legacy Phase-6.5.22
 # brain_weight/scent_gate presets, which were for the OLD reflex cell). Each preset
@@ -176,6 +204,20 @@ func _ready() -> void:
 	_verbose_check.text = "Verbose diag log  (headless trajectory; leave OFF for long UI runs)"
 	_verbose_check.button_pressed = ExperimentConfig.picrawler_verbose_log
 	$Margin/V.add_child(_verbose_check)
+	# 2026-07-22 — corridor gym obstacle-height difficulty (0=trivial .. 1=hard).
+	# Created in code (.tscn untouched).  Only meaningful for the corridor gym;
+	# the donut ignores it.  Scales hump / rumble-bump / pyramid heights.
+	_gym_difficulty_row = HBoxContainer.new()
+	var _gd_label := Label.new()
+	_gd_label.text = "Corridor difficulty (0 easy .. 1 hard) "
+	_gym_difficulty_spin = SpinBox.new()
+	_gym_difficulty_spin.min_value = 0.0
+	_gym_difficulty_spin.max_value = 1.0
+	_gym_difficulty_spin.step = 0.05
+	_gym_difficulty_spin.value = 0.3
+	_gym_difficulty_row.add_child(_gd_label)
+	_gym_difficulty_row.add_child(_gym_difficulty_spin)
+	$Margin/V.add_child(_gym_difficulty_row)
 	_apply_persisted_state()
 	_env_dropdown.item_selected.connect(_on_env_changed)
 	_config_dropdown.item_selected.connect(_on_config_changed)
@@ -217,6 +259,13 @@ func _scan_configs() -> void:
 		if env == "cell" and not _CELL_CONFIG_ALLOWLIST.is_empty() \
 				and not _CELL_CONFIG_ALLOWLIST.has(fname):
 			continue
+		# Same curation for the two original environments (early examples / historical work).
+		if env == "cartpole" and not _CARTPOLE_CONFIG_ALLOWLIST.has(fname):
+			continue
+		if env == "mountain_car" and not _MOUNTAIN_CAR_CONFIG_ALLOWLIST.has(fname):
+			continue
+		if env == "quadruped" and not _QUADRUPED_CONFIG_ALLOWLIST.has(fname):
+			continue
 		if not _configs_by_env.has(env):
 			_configs_by_env[env] = []
 		_configs_by_env[env].append(entry)
@@ -247,6 +296,19 @@ func _read_metadata(path: String) -> Variant:
 		# cell chemotaxis port needs differential_paddler); when present it wins
 		# over the UI dropdown at launch so "select the config → reproduce" works.
 		"body_model":     str(meta.get("body_model", "")),
+		# 2026-08-05 — the substrate is a property of the CONFIG, not of its filename.
+		# Absent => "hinge", which is what the body's @export default gives headless, so
+		# UI and harness always agree.  See the parity note at the selection handler.
+		"joint_backend":  str(meta.get("joint_backend", "hinge")),
+		# 2026-08-05 — UI/HEADLESS PARITY, generalized.  Some body scaffolds are only
+		# reachable through an env var because the harness sets one (e.g. the motor-intent
+		# publisher needs OGMA_PICRAWLER_INTENT_FWD, and without it `intent_seen_` is false,
+		# `commit_prec` pins at 1.0 and the arm loads INERT while still claiming its name).
+		# That is CLAUDE.md §3.2 rule 7 — the silent confound — waiting to happen in the UI.
+		# A config may now DECLARE that env in `metadata.body_env`, and the launcher applies
+		# it at selection.  Parity takes precedence over convenience: what you select is what
+		# the harness ran.  An explicit env var set by the operator still wins (checked below).
+		"body_env":       (meta.get("body_env", {}) if typeof(meta.get("body_env", {})) == TYPE_DICTIONARY else {}),
 		# Phase 6.8 — homeokinetic cell actuation flags (the alive-cell fast path).
 		"motor_baseline_beat": bool(meta.get("motor_baseline_beat", false)),
 		"motor_energy":        bool(meta.get("motor_energy", false)),
@@ -287,6 +349,11 @@ func _read_metadata(path: String) -> Variant:
 		# B3 leg-symmetric weight averaging — empty string means "use body
 		# default" (= "off"); set in config metadata or via env var.
 		"picrawler_leg_symmetry":         str(meta.get("leg_symmetry",            "")),
+		# Gym / world select — "" = donut arena (default), "corridor" = trench
+		# curriculum gym.  Lets a config pick its world (metadata.gym_mode).
+		"picrawler_gym_mode":             str(meta.get("gym_mode",                "")),
+		# Corridor obstacle difficulty (0..1); -1 = not declared -> spinbox default.
+		"picrawler_gym_difficulty":       float(meta.get("gym_difficulty",       -1.0)),
 	}
 
 # ---- Dropdown population ----------------------------------------------------
@@ -537,17 +604,14 @@ func _apply_persisted_state() -> void:
 				cs_idx = i
 				break
 	_chassis_shape_dropdown.select(cs_idx)
-	# Joint backend dropdown — restore last selection (picrawler only;
-	# other envs ignore the field).
-	var jb_idx := 0
-	var jb: String = ExperimentConfig.picrawler_joint_backend
-	if jb != "":
-		for i in range(_joint_backend_dropdown.item_count):
-			var opt: Dictionary = _joint_backend_dropdown.get_item_metadata(i)
-			if str(opt.get("id", "")) == jb:
-				jb_idx = i
-				break
-	_joint_backend_dropdown.select(jb_idx)
+	# Joint backend — 2026-08-05: DELIBERATELY NOT RESTORED from launcher_state.
+	# Operator: "selecting a new config should set all of the appropriate parameters so
+	# ui/headless always have parity; parity takes precedence over convenience."  A sticky
+	# substrate is exactly the kind of convenience that silently decouples the two: the
+	# saved value survived config changes, so the dropdown could describe a body no config
+	# asked for.  The selection handler derives it from the chosen config every time; index
+	# 0 (hinge, the headless default) is the pre-selection state.
+	_joint_backend_dropdown.select(0)
 	# Morphology dropdown.
 	var mp_idx := 0
 	var mp: String = ExperimentConfig.body_morphology
@@ -561,6 +625,9 @@ func _apply_persisted_state() -> void:
 	# Leg strength spinbox.  -1.0 (sentinel for "never set") → default to 1.0.
 	var ls: float = ExperimentConfig.leg_strength
 	_leg_strength_spin.value = ls if ls > 0.0 else 1.0
+	if _gym_difficulty_spin != null:
+		var gdv: float = ExperimentConfig.picrawler_gym_difficulty
+		_gym_difficulty_spin.value = gdv if gdv >= 0.0 else 0.3
 	_update_extras_visibility()
 
 func _on_env_changed(idx: int) -> void:
@@ -596,18 +663,46 @@ func _on_config_changed(idx: int) -> void:
 			if str(_body_model_dropdown.get_item_metadata(i)) == cbm:
 				_body_model_dropdown.select(i)
 				break
-	# 2026-06-13 — the Motor-EPM (reward-free) configs were validated on the
-	# g6dof + freeplay-0.1 compliant-stand substrate; auto-select g6dof so
-	# pressing Launch reproduces it exactly (the body's g6dof preset then carries
-	# the springs + freeplay).  Other configs default back to hinge (historical
-	# baselines).  The user can still override the dropdown after.
-	var fname: String = str(entry.get("filename", "")) + str(entry.get("path", ""))
-	var want_backend: String = "g6dof" if fname.contains("motor_epm") else "hinge"
+	# ---- 2026-08-05 · PARITY OVER CONVENIENCE (operator) -------------------------------
+	# WAS: `"g6dof" if fname.contains("motor_epm") else "hinge"` — a FILENAME heuristic,
+	# written in 2026-06-13 for one compliant-stand experiment.  Every modern picrawler
+	# config is named `the_picrawler_motor_epm_*`, so that substring matched the ENTIRE
+	# lineage and silently forced g6dof on every UI launch.  Headless never did this
+	# (`resolve_picrawler_joint_backend` only honours the launcher value when `launched`),
+	# so the UI and the harness were running DIFFERENT BODIES from the same config — and
+	# hinge is canonical, so every number in the ledger described the body the UI was NOT
+	# showing.  Two years of "why does it look different than the numbers say" lives here.
+	#
+	# NOW: the substrate is a property of the CONFIG, never of its name.  A config that
+	# needs a non-default substrate says so in `metadata.joint_backend`; everything else
+	# gets `hinge` — the same value the body's @export default gives the headless path.
+	# Selecting a config therefore always produces UI/headless parity.
+	var want_backend: String = str(entry.get("joint_backend", "hinge"))
+	if want_backend not in ["hinge", "g6dof"]:
+		want_backend = "hinge"
 	for i in range(_joint_backend_dropdown.item_count):
 		var opt: Dictionary = _joint_backend_dropdown.get_item_metadata(i)
 		if str(opt.get("id", "")) == want_backend:
 			_joint_backend_dropdown.select(i)
 			break
+	# Apply the config's declared body env (see the `body_env` note in _read_metadata).
+	# A pre-existing env var wins: an operator who exported one on the command line meant
+	# it, and silently overwriting that would be the same confound in the other direction.
+	var benv: Dictionary = entry.get("body_env", {})
+	for k in benv.keys():
+		var key := str(k)
+		if OS.get_environment(key) != "":
+			print("launcher: body_env %s kept from the environment (config wanted %s)"
+					% [key, str(benv[k])])
+			continue
+		OS.set_environment(key, str(benv[k]))
+		print("launcher: body_env %s=%s (from config metadata)" % [key, str(benv[k])])
+
+	# Pre-populate the corridor-difficulty spinbox if the config declares one
+	# (metadata.gym_difficulty), so "select config -> Launch" reproduces it.
+	var cgd := float(entry.get("picrawler_gym_difficulty", -1.0))
+	if cgd >= 0.0 and _gym_difficulty_spin != null:
+		_gym_difficulty_spin.value = cgd
 
 func _on_seed_random_toggled(pressed: bool) -> void:
 	_seed_spin.editable = not pressed
@@ -648,6 +743,8 @@ func _update_extras_visibility() -> void:
 	_curriculum_row.visible = (_selected_env == "picrawler")
 	if _verbose_check != null:
 		_verbose_check.visible = (_selected_env == "picrawler")
+	if _gym_difficulty_row != null:
+		_gym_difficulty_row.visible = (_selected_env == "picrawler")
 	_start_curr_btn.visible = (_selected_env == "picrawler")
 	if _curriculum_row.visible:
 		_start_curr_btn.disabled = (_curriculum_dropdown.get_item_count() == 0
@@ -702,6 +799,10 @@ func _on_launch() -> void:
 	ExperimentConfig.picrawler_walk_target_velocity = float(entry.get("picrawler_walk_target_velocity", -1.0))
 	ExperimentConfig.picrawler_walk_hit_rate        = float(entry.get("picrawler_walk_hit_rate",        -1.0))
 	ExperimentConfig.picrawler_leg_symmetry         = str(entry.get("picrawler_leg_symmetry",            ""))
+	ExperimentConfig.picrawler_gym_mode             = str(entry.get("picrawler_gym_mode",                ""))
+	# Corridor difficulty comes from the spinbox (picrawler only); other envs -1.
+	ExperimentConfig.picrawler_gym_difficulty       = (_gym_difficulty_spin.value
+		if (_selected_env == "picrawler" and _gym_difficulty_spin != null) else -1.0)
 	if _seed_random.button_pressed:
 		ExperimentConfig.seed_value = randi() % 1000000
 	else:

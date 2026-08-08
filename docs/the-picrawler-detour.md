@@ -47,11 +47,33 @@ large set of `the_picrawler_*` configs (plus an `archive/` of older runs and a
 as an honest record of the detour, and as a harder problem to return to *once the
 method has earned it*.
 
-They are **not recommended baselines and not the way to learn this project.** Some of
-them encode exactly the scaffolded, reward-shaped setups the discipline now warns
-against — that is what they are for. If you are new here, **start with the Cell.** The
-picrawler is where this framework went before it learned to be careful; the Cell is
-where it learned.
+The **older** `the_picrawler_*` configs are **not recommended baselines and not the way to
+learn this project.** Some of them encode exactly the scaffolded, reward-shaped setups the
+discipline now warns against — that is what they are for. If you are reading to understand
+*the method*, **start with the Cell.** The picrawler is where this framework went before it
+learned to be careful; the Cell is where it learned.
 
-The simulation and environments built for the picrawler are solid. We will be revisiting
-it shortly in preparation for moving the xaq framework onto the Raspberry Pi.
+## The return (2026-07 — this is now live work)
+
+The revisit happened, and it went differently. The picrawler is once again an **active
+front**, but rebuilt under the discipline rather than around it: reward-free, gain-0-guarded,
+seed-averaged, and with every lever's verdict written down whether it worked or not.
+
+What the method bought, on the same hard body that defeated the first attempt:
+
+- an **emergent gait** — coordination the agent was not given, which improvises a novel limb
+  movement to free itself when stuck;
+- **heading, terrain, and belly-clearance** each solved by a *single* honest lever, twice by
+  discovering that the problem was a **missing sensory channel** rather than a missing policy;
+- and — the part that matters most — a long list of **plausible ideas that were built and
+  falsified**, recorded with the scenario each died in.
+
+So the picrawler now plays both roles: the cautionary origin story *and* the harder problem
+the method has since earned the right to attempt. The live state is in
+[`reports/picrawler_gait_loop_findings.md`](reports/picrawler_gait_loop_findings.md) and the
+per-lever verdicts in [`reports/picrawler_lever_ledger.md`](reports/picrawler_lever_ledger.md)
+— **read the ledger before proposing anything here.** The `picrawler-dev` configs are current;
+the `archive/` ones are the museum.
+
+The simulation and environments built for the picrawler are solid, and this line continues in
+preparation for moving the xaq framework onto the Raspberry Pi.

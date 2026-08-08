@@ -173,16 +173,25 @@ bool OgmaBrain::setup(String const& config_path) {
         // for golden-replay paths.
         if (master_seed_override_ != 0) {
             int rewritten = 0;
+            // Modules name their RNG seed param differently — "master_seed"
+            // (HeadingPlanner, GaitSelector, …) OR "seed" (MotorEPM base_seed_,
+            // KeyframeGait).  The old loop only rewrote "master_seed", so the
+            // picrawler's MotorEPM (which owns the gait's explore_noise RNG via
+            // "seed") NEVER got reseeded → every OGMA_SEED gave byte-identical runs
+            // and seed-averaging was impossible.  Rewrite BOTH.
+            static const char* kSeedParams[] = {"master_seed", "seed"};
             for (auto& m : cfg.modules) {
-                auto it = m.params.find("master_seed");
-                if (it == m.params.end()) continue;
-                uint64_t derived = ogma::namespace_seed(master_seed_override_, m.id);
-                it->second = ogma::ParamValue{int64_t(derived)};
-                ++rewritten;
+                for (const char* pname : kSeedParams) {
+                    auto it = m.params.find(pname);
+                    if (it == m.params.end()) continue;
+                    uint64_t derived = ogma::namespace_seed(master_seed_override_, m.id);
+                    it->second = ogma::ParamValue{int64_t(derived)};
+                    ++rewritten;
+                }
             }
             UtilityFunctions::print(
                 "OgmaBrain: applied master_seed override = ", int64_t(master_seed_override_),
-                " (", rewritten, " modules rewritten)");
+                " (", rewritten, " seed params rewritten)");
         }
         instance_ = std::make_unique<ogma::OgmaInstance>(
             std::move(cfg),
@@ -254,6 +263,30 @@ bool OgmaBrain::setup(String const& config_path) {
                         int sub_id = req.value("sub_id", 0);
                         diag_publisher_->unsubscribe(sub_id);
                         return {{"status","ok"}};
+                    }
+                    if (verb == "set_param") {
+                        // Live hot-mutation of a module param (experiments: coupling wean, gain
+                        // sweeps, ...).  Scalar values only; reuses the SetParamOp hot-patch path.
+                        std::string id  = req.value("id", std::string());
+                        std::string key = req.value("key", std::string());
+                        if (instance_->module(id) == nullptr)
+                            return {{"status","error"},{"message","unknown module: "+id}};
+                        if (!req.contains("value"))
+                            return {{"status","error"},{"message","set_param requires 'value'"}};
+                        ogma::SetParamOp s;
+                        s.target_id = id;
+                        s.key       = key;
+                        auto const& jv = req["value"];
+                        if      (jv.is_boolean())        s.value = jv.get<bool>();
+                        else if (jv.is_number_integer()) s.value = int64_t(jv.get<int64_t>());
+                        else if (jv.is_number())         s.value = jv.get<double>();
+                        else if (jv.is_string())         s.value = jv.get<std::string>();
+                        else return {{"status","error"},{"message","set_param: unsupported value type"}};
+                        ogma::GraphPatchBatch batch;
+                        batch.source = "tcp";
+                        batch.ops.emplace_back(std::move(s));
+                        auto batch_id = instance_->enqueue_hot_patch(std::move(batch));
+                        return {{"status","ok"},{"batch_id", int64_t(batch_id)},{"id",id},{"key",key}};
                     }
                     return {{"status","error"},{"message","unknown verb: "+verb}};
                 } catch (std::exception const& e) {

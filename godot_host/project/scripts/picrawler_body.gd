@@ -227,6 +227,53 @@ func _make_wedge_mat() -> PhysicsMaterial:
 		_wedge_mat.absorbent = true
 	return _wedge_mat
 
+# ---- 2026-08-04 · THE CHASSIS IS NOT A FOOT --------------------------------------------
+# `_make_contact_mat()` is a SHARED singleton (floor, hump, bumps, pyramids, every leg
+# segment, and the chassis), so once the chassis stopped being a ghost it was dragging on
+# mu = 1.5 -- rubber-grade grip, the same as the feet.  Operator, from the ablation bench:
+# "when I ablate the two rear legs the robot is not able to drag its chassis along the
+# ground... the feet should have the highest friction, not the chassis."  Physically right:
+# a smooth plastic/aluminium shell is nothing like a rubber foot pad, and a crippled robot
+# dragging its belly is exactly the case that separates them.
+#
+# NOTE this is INERT while `chassis_collides` is false -- a ghost chassis has no contacts
+# for a friction coefficient to apply to -- so it cannot disturb any historical run.
+# Verified by measurement, not argued.
+var _chassis_mat: PhysicsMaterial = null
+func _make_chassis_mat() -> PhysicsMaterial:
+	if _chassis_mat == null:
+		_chassis_mat = PhysicsMaterial.new()
+		_chassis_mat.rough     = false
+		_chassis_mat.bounce    = 0.0
+		_chassis_mat.absorbent = true
+	_chassis_mat.friction = chassis_friction   # re-read so the slider works live
+	return _chassis_mat
+
+var _limb_mat: PhysicsMaterial = null
+func _make_limb_mat() -> PhysicsMaterial:
+	if _limb_mat == null:
+		_limb_mat = PhysicsMaterial.new()
+		_limb_mat.rough     = true
+		_limb_mat.bounce    = 0.0
+		_limb_mat.absorbent = true
+	_limb_mat.friction = limb_friction    # re-read so the slider works live
+	return _limb_mat
+
+## Coxa + upper get limb_friction; the LOWER legs (the feet) keep the grippy contact
+## material.  Skipped entirely while motor_test_mode owns the leg materials.
+func _apply_limb_materials() -> void:
+	if _motor_test_mode:
+		return
+	for b in _coxas:
+		if is_instance_valid(b): b.physics_material_override = _make_limb_mat()
+	for b in _uppers:
+		if is_instance_valid(b): b.physics_material_override = _make_limb_mat()
+
+func set_limb_friction(v: float) -> void:
+	limb_friction = clampf(v, 0.0, 3.0)
+	if _limb_mat != null:
+		_limb_mat.friction = limb_friction
+
 var _slick_mat: PhysicsMaterial = null
 func _make_slick_mat() -> PhysicsMaterial:
 	if _slick_mat == null:
@@ -334,6 +381,54 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # persists for the run.  Set via OGMA_PICRAWLER_JOINT_BACKEND env var
 # or the launcher's body-backend dropdown.
 @export var joint_backend: String = "hinge"
+
+# 2026-08-02 · IMPORT I6 — reduced-gravity SCAFFOLD (see _build_body for the full note).
+# Every Playful Machine legged experiment runs at gravity -6 vs Earth's -9.81; all of
+# their emergence results are measured under it.  1.0 = off = byte-identical.
+# PM-equivalent = 0.61.  Settable per-run via OGMA_PICRAWLER_GRAVITY_SCALE.
+@export var scaffold_gravity_scale: float = 1.0
+
+# 2026-08-02 · IMPORT I4 — colored proprioceptive noise (see the publish site for the
+# full note).  PM wires every legged controller through ColorUniformNoise(0.1); our
+# proprio channel has been noiseless.  sigma = 0 (default) is byte-identical.
+# PM-equivalent sigma ≈ 0.1 of range.  tau = correlation length in ticks (1 = white).
+# Per-run overrides: OGMA_PICRAWLER_SENSOR_NOISE / OGMA_PICRAWLER_SENSOR_NOISE_TAU.
+@export var sensor_noise_sigma: float = 0.0
+
+# 2026-08-03 · COMPLIANCE SCAFFOLD-FREE TEST — global damping multipliers.
+# PM's dog sets dampingFactor = 0.0: hip, knee and ankle damping are ALL multiplied by
+# zero, on top of backdrivable velocity servos.  Their bodies are essentially undamped.
+# Ours is damped at THREE levels — SERVO_KD=8.0 (servo velocity term), BODY_ANGULAR_DAMP
+# =8.0 / BODY_LINEAR_DAMP=2.0 (rigid-body), joint_angular_damping=0.3 (constraint).
+# Homeokinesis works by finding and amplifying the loop's OWN dynamics; a body that
+# dissipates energy this fast has no dynamics left to find.  1.0 = off (byte-identical).
+# The SERVO term already has a knob -- `motor_damping_factor` above (multiplies SERVO_KD
+# in _powered_torque); this adds the RIGID-BODY term, which had none.  Env overrides:
+# OGMA_PICRAWLER_MOTOR_DAMP (existing knob) / OGMA_PICRAWLER_BODY_DAMP_SCALE (this one).
+@export var body_damp_scale: float = 1.0: set = _set_body_damp_scale
+
+func _set_body_damp_scale(v: float) -> void:
+	body_damp_scale = maxf(0.0, v)
+	# Apply to already-built bodies so it is tunable LIVE in the UI ([ and ] keys).
+	# Guarded: the export setter can fire before _build_body has run, in which case
+	# _build_body applies the value itself.
+	if not is_instance_valid(_chassis):
+		return
+	var parts: Array = [_chassis]
+	if _coxas != null:  parts += (_coxas as Array)
+	if _uppers != null: parts += (_uppers as Array)
+	if _lowers != null: parts += (_lowers as Array)
+	for b in parts:
+		if is_instance_valid(b):
+			b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+			b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
+@export var sensor_noise_tau:   float = 8.0
+var _sensor_noise: PackedFloat64Array = PackedFloat64Array()
+# Ground-force / authority accumulators (see the joint_torque publish site).
+var _tq_mag_acc: float = 0.0
+var _tq_sat_acc: float = 0.0
+var _tq_n: float = 0.0
+var _sensor_noise_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
 # spring on the free angular axis).  Joseph's gait-resonance bet:
@@ -450,11 +545,43 @@ func _set_knee_widening_enabled(value: bool) -> void:
 # migration PR; until then, motor_freeplay_rad creates a deadband but no
 # centering force — joint floats freely inside the zone.
 #
+# ⚠ 2026-08-03 — THAT NOTE IS NOW HALF-STALE.  The native Generic6DOFJoint3D angular
+# spring IS enabled on the g6dof backend (FLAG_ENABLE_ANGULAR_SPRING, with the preset's
+# stiffness/damping), so there IS a restoring force.  But its equilibrium point was
+# hardcoded to 0.0 = mechanical neutral, which makes it a RETURN-TO-NEUTRAL spring
+# fighting every commanded angle, not compliance about the command.  See
+# spring_follows_target, which parks the equilibrium on the servo target instead.
+#
 # Recommended starting values:
 #   motor_freeplay_rad = 0.087  (~5°  — typical hobby-servo-saver play)
 #   motor_freeplay_rad = 0.17   (~10° — generous, lets gravity sag visibly)
 # Default 0.0 ⇒ no free play, motor engages at any error > SERVO_DEADBAND.
 @export var motor_freeplay_rad:    float = 0.0
+
+# 2026-08-03 — SPRING EQUILIBRIUM TRACKING.  The g6dof angular spring's equilibrium
+# point was hardcoded to 0.0 (mechanical neutral) both at construction and in
+# _apply_spring_to.  That makes it a SERVO-SAVER RETURN SPRING: it pulls every joint
+# toward neutral at all times, fighting whatever the controller commands, and inside
+# the freeplay deadband it drags a stance-holding leg back toward zero instead of
+# holding it compliantly.  It is almost certainly why the g6dof substrate measured
+# WORSE than rigid hinge (net_z 4.49 -> 3.51) — the springs were fighting the gait.
+#
+# What a springy JOINT should be is a series-elastic element: compliance ABOUT THE
+# COMMANDED ANGLE.  With this on, the equilibrium point tracks the servo target each
+# tick, so stiffness sets how hard the joint is pulled back to where it was TOLD to
+# be — which is the centering force in the freeplay zone that makes freeplay+springs
+# behave like a real compliant actuator rather than slop plus a return spring.
+#
+# DEFAULT CHANGED TO TRUE 2026-08-03 (operator): a spring that does not follow the
+# command is not compliance, it is a return-to-neutral bug, so the correct behaviour is
+# the default rather than a lever.  The flag is kept so the old behaviour can still be
+# reproduced for comparison.
+# ⚠ CONSEQUENCE: every g6dof result measured before this date used equilibrium=0 and is
+# NOT comparable to anything measured after.  That includes the 2026-08-03 hinge-vs-g6dof
+# comparison (net_z 4.49 -> 3.51, PLV 0.138 -> 0.083), which is now known to have been
+# measured with springs pulling every joint toward neutral and fighting the gait.  Re-run
+# before citing it.  `hinge` is unaffected — it has no springs.
+@export var spring_follows_target: bool = true
 
 # Stage 3.D (2026-06-01) — Bernoulli-impulse actuation backend.
 # Port of v4 Phase 6.0.a body-as-integrator from the_cell. Replaces the
@@ -540,6 +667,44 @@ const _LAYER_CHASSIS: int = 1 << 2   # chassis-only layer — floor.mask does
 									 # the body upside-down even when
 									 # leg_strength=0.
 
+# ---- 2026-08-04 · THE CHASSIS IS A GHOST, AND IT IS LOAD-BEARING FOR THE RECORD ----------
+# Operator observation: "when I lesion both rear legs the entire back of the robot sinks into
+# the ground, because the chassis itself does not collide — only the legs do."  Correct, and
+# `_LAYER_CHASSIS` appears in exactly two places in this file (the const and the assignment):
+# NOTHING masks it, in either direction.  The chassis has a real BoxShape3D and passes
+# straight through the world.
+#
+# It was deliberate, not an oversight — see the comment above: it suppresses a box-on-floor
+# rolling instability that flipped the body even at leg_strength=0.  So enabling it may bring
+# that instability back, and that is itself worth knowing.
+#
+# ⚠ WHAT IT MEANS FOR THE RECORD.  Every belly/clearance result in the ledger was measured on
+# a body that CANNOT touch the ground with its belly.  `bellyc`/`gc_raw` is a downward
+# rangefinder, so it reports the gap honestly — but nothing ever stopped the gap going to
+# zero, and `bellyc_min` has been sitting at 0.000–0.004 for the whole campaign.  The ledger
+# already suspected the consequence and named it as "may be a sim exploit (frictionless belly
+# drag)" for hump traversal; the real mechanism is worse than frictionless drag — there is no
+# belly contact at all.
+#
+# DEFAULT OFF, so every historical number stays reproducible and this is a LEVER rather than a
+# silent re-basing of the whole campaign (CLAUDE.md §3: gain-0-guarded, A/B'd, then promoted
+# on evidence).  Turn it on with the export, OGMA_PICRAWLER_CHASSIS_COLLIDE=1, or [J].
+@export var chassis_collides: bool = false
+# Sliding friction of the chassis shell against the world, INDEPENDENT of the feet (mu=1.5)
+# and the climbing wedges (3.0).  0.20 ~ plastic on concrete.  Raise it to make a downed
+# robot stick where it falls; drop it toward 0 for a body that slides freely on its belly.
+# Live on the [K] panel and via OGMA_PICRAWLER_CHASSIS_FRICTION.
+@export var chassis_friction: float = 0.20
+# Sliding friction of the NON-FOOT limb segments (coxa + upper).  Measured 2026-08-04: with
+# two dead rear legs the chassis never actually touches the floor (belly gc_raw 0.057) --
+# the LEG SEGMENTS are what rests on it, and they were carrying the same mu = 1.5 as the
+# feet.  So the operator's principle ("the feet should have the highest friction, not the
+# chassis") binds here, not on the shell: a coxa and a femur are plastic linkages, not
+# rubber pads.  The lower legs / feet deliberately KEEP _make_contact_mat() at 1.5.
+# DEFAULT 1.5 = byte-identical to every historical run; lower it to let a crippled robot
+# drag itself.  Live on the [K] panel and via OGMA_PICRAWLER_LIMB_FRICTION.
+@export var limb_friction: float = 1.5
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
@@ -547,7 +712,97 @@ const _LAYER_CHASSIS: int = 1 << 2   # chassis-only layer — floor.mask does
 var _chassis: RigidBody3D
 # Walking-trail UI helper (sibling node found at _build time); cached so
 # _do_hard_reset() can wipe its X-markers without re-traversing the tree.
+# Burst-onset probe state — see the trigger in _clip_record().
+# Scaffold motor-intent (see the publish site).  intent_fwd < 0 disables the publisher, so
+# the intent socket is unfed and commit_prec_gain stays inert — the byte-identical default.
+var _gng_probe_printed: bool = false
+# ---------------------------------------------------------------------------
+# 2026-08-06 — PER-TICK ATTRIBUTION TRACE (instrument; OFF unless OGMA_PICRAWLER_TRACE
+# names an output path, so the default build is byte-identical).
+#
+# Answers two questions off one logging pass:
+#   (1) does the velocity channel (`delta`) carry stride phase, or is it noise?
+#       -> autocorrelation of per-joint d(angle) at the stride lag.
+#   (2) WHICH LEG is responsible for a given forward-velocity pulse?
+#       -> per-joint mechanical power P = tau * omega, stance-gated by contact,
+#          integrated between fwd_v zero crossings and regressed on the pulse impulse.
+#
+# ⚠ THIS IS A GOD'S-EYE INSTRUMENT AND MUST STAY ONE.  fwd_v and foot contact are
+# not egocentric; they are legal here because diagnostics may use god's-eye and
+# CONTROL MAY NOT (CLAUDE.md §5.3).  `feet_y` already became a live god's-eye
+# dependency in the deployed gait by exactly this route, so: nothing computed from
+# this trace may be fed back into the brain.  The egocentric shadow of it already
+# exists and is unconsumed -- `reality.proprio.joint_torque`, a 12-D load sensor --
+# which is the legal path to an internal mechanism once the attribution is proven.
+var _trace_file: FileAccess = null
+var _trace_ready: bool = false
+
+@export var intent_fwd: float = -1.0
+@export var intent_yaw: float = 0.0
+var _burst_probe: bool = false
+var _bp_last_lifts: int = 0
+var _bp_last_lift_tick: int = 0
+const _BURST_GAP_TICKS: int = 40      # silence that qualifies as a real pause (~0.67 s)
+# Time-scale ladder for [,] slower / [.] faster / [/] reset.  Below 1.0 is exact; above 1.0
+# saturates against max_physics_steps_per_frame (see the key handler).
+const _TIME_SCALES: Array = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+var _time_scale_v: float = 1.0
+# ---- 2026-08-05 · EXPLICIT TICK WINDOW (operator) --------------------------------------
+# "the step pause cycle is about eight hundred ticks long... capture tick 2000-3000 in
+# _stroke12; for the first 1k ticks the robot is still learning to walk properly."
+#
+# This supersedes the auto-trigger for the burst question, and the reason matters: the
+# trigger keys on _leg_lifted_count, the SWING-DETECTOR's event, which fires ~8x more often
+# than a real step (it reported a 95-tick median gap against the operator's observed ~800).
+# So it was slicing the run on the wrong events entirely.  A named window makes no claim
+# about what a step IS — it just hands over every tick in the interval and lets the analysis
+# find the structure.  OGMA_PICRAWLER_CLIP_WINDOW="2000,3000".
+var _cw_from: int = -1
+var _cw_to: int = -1
+var _cw_saved: bool = false
 var _walking_trail: Node = null
+# ---- 2026-08-05 · PER-METRE WAYPOINTS (operator) ---------------------------------------
+# "the best way to measure the path is to get a time stamped location for every meter the
+# robot traverses" — i.e. the same object the red [P] trail draws, but in the log, so the
+# headless analysis and the picture the operator trusts are THE SAME MEASUREMENT.
+# A whole-run mean hides the thing that actually characterises this gait: it moves in
+# BURSTS of 2-4 steps separated by fumbles, and the per-metre TIMING is what exposes that
+# (a fast metre = a burst held together; a slow metre = fumbles inside it).
+# Emitted as their own JSONL lines so they survive any diag_interval.
+var _wp_last_xz: Vector2 = Vector2.ZERO
+var _wp_path_len: float = 0.0
+var _wp_next_m: float = 1.0
+var _wp_last_tick: int = 0
+
+# ---------------------------------------------------------------------------
+# GOOD/BAD CLIP MARKER (2026-07-27) — the operator -> measurement channel.
+#
+# The operator can see gait quality in the UI long before any aggregate metric moves, and
+# describing it in words is lossy in a SPECIFIC way: this project has three recorded cases
+# where the reported ACTION was right and the reported MECHANISM was wrong ("the swing leg
+# spins the chassis" — yaw impulse measured LOWER during swing; "a vertical shank gives
+# mechanical advantage" — foot radius barely moved; "shorter steps bring the feet in" —
+# foot radius invariant).  Each cost a build plus a seed-averaged A/B before an instrument
+# caught it.
+#
+# So instead of describing it: MARK it.  [F1] while it looks right, [F2] while it looks
+# wrong, and `scripts_tools/clipdiff.py` reports what actually differs between those
+# windows.  The operator stays the authority on what "good" means; the numbers say what
+# good CONSISTS of, which is the part words keep getting wrong.
+#
+# The existing JSONL is emitted at the diag cadence (~1 Hz) — far too coarse for a 26-tick
+# step — so this keeps its own narrow per-tick ring.  Body-side signals only: everything
+# else (duty, periods, inter-leg phase, mv_stance) is derivable offline.
+#
+# ⚠️ THIS IS AN INSTRUMENT, NEVER A FITNESS.  Nothing here enters a loop the brain can
+# optimize; that would be reward shaping, which CLAUDE.md §5.1 prohibits outright.  It
+# selects which lever to chase.  The brain never sees it.
+const _CLIP_RING_LEN: int = 900          # ~15 s at 60 Hz
+var _clip_ring: Array = []               # ring of per-tick Dictionaries
+var _clip_head: int = 0
+var _clip_count: int = 0                 # total ticks recorded (< LEN = partial)
+var _clip_seq: int = 0                   # clip index within this run
+var _clip_dir: String = ""               # resolved lazily on first save
 
 # Trainer-pulse counters — incremented by publish_trainer_event() and
 # emitted in every _emit_jsonl line so the audit trail is complete.
@@ -660,6 +915,24 @@ var _suspend_lift_y: float = 0.0
 # Torque history for first-order lag (servo rise-time emulation).  Each
 # servo's currently-applied torque carries over and the new PD command
 # pulls it toward the target with alpha = 1-exp(-TAU/SERVO_TORQUE_RISE_TAU).
+# 2026-08-06 — TRUE LOAD PROXY (velocity-tracking deficit).
+#
+# `_prev_torque_*` is NOT a load signal despite what joint_torque's description
+# claimed.  It is the PD value used to set the motor's max IMPULSE CAP (an
+# authority budget; the code calls _powered_torque "the telemetry path"), and it
+# is tau = Kp*err - Kd*omega with Kp=20, Kd=8.  With |err| ~ 0.18 the Kp term is
+# ~3.6 while omega reaches 6 rad/s making the Kd term ~24, so the published
+# "torque" is DOMINATED BY VELOCITY DAMPING -- measured corr(tau, dtheta) =
+# -0.46..-0.56 on all three joints.  Anything load-gating on it (Cruse Rule 5,
+# a future epm_joint_torque) would have been gating on -omega.
+#
+# The motor is VELOCITY-controlled with an impulse cap, so the honest load
+# signal is the deficit between the velocity it commanded and the velocity the
+# world allowed: ~0 when free, large when the foot is planted and the motor
+# stalls against its cap.  That is a load-cell analogue rather than a damping term.
+var _prev_load_hip1: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _prev_load_hip2: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _prev_load_knee: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _prev_torque_hip1: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _prev_torque_hip2: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _prev_torque_knee: Array[float] = [0.0, 0.0, 0.0, 0.0]
@@ -942,7 +1215,20 @@ const LOOM_RES_H: int = 24                    # bumped: target subtends ~10° wi
 const LOOM_RES_V: int = 12                    # bumped: target subtends ~6° tall
 const LOOM_FOV_H_RAD: float = 3.1415926536   # 180° horizontal — fly-style panoramic
 const LOOM_FOV_V_RAD: float = 0.7853981634   # 45° vertical
-const LOOM_RAY_LEN: float = 8.0              # m — pyramid arena ~5 m diag
+# ⚠ 2026-08-04 — WAS 8.0, justified as "pyramid arena ~5 m diag", which is wrong: the arena
+# is radius 9.5 and _select_across_target_idx() deliberately picks the ANTIPODAL hemisphere,
+# so 93 % of target legs BEGAN BEYOND THE RAY LENGTH — both loom and the camera were
+# identically zero for most of every leg, and any "vision nav" result would have measured the
+# last metre only.  Now past the ~19 m arena diagonal.  Cost is per-ray distance, not ray
+# count, so this is nearly free.
+const LOOM_RAY_LEN: float = 20.0
+const GROUND_CLEARANCE_RANGE: float = 0.3    # m — downward belly ToF max range (the physical sensor reach)
+const GROUND_CLEARANCE_STAND: float = 0.06   # m — standing belly clearance; the published signal is
+                                             # NORMALIZED by this (not by the ToF range) so it SATURATES at
+                                             # ~standing, exactly like chassis_y_norm.  Without this the
+                                             # height reflex's max-relative target runs away (belly pushed to
+                                             # 0.19 m → topple, 2930 falls).  A self-model calibration
+                                             # constant (the robot's own standing height) — still compliant.
 const LOOM_RECOMPUTE_EVERY: int = 6           # ticks; ~10 Hz at 60 Hz physics
 											  # 288 rays × 10 Hz = ~2880 rays/sec, cheap
 var _last_target_loom: float = 0.0
@@ -976,6 +1262,162 @@ var _done: bool = false
 var step_in_episode: int = 0
 var episode_alive_ticks: int = 0
 var tick_counter: int = 0
+# Controlled belly-on-ramp test: tick at which to auto-drop the robot onto the
+# hump (env OGMA_PICRAWLER_TELEPORT_RAMP_AT; -1 = off).  Lets a headless run
+# develop the gait first (e.g. 3600 = 1 min) THEN drop, to test recovery.
+var _teleport_ramp_at: int = -1
+# Scripted placement schedule from OGMA_PICRAWLER_EVENTS (see the dispatch site).
+var _events: Array = []
+# Optional repeated re-teleport window (env EVERY/UNTIL) — re-fire every N ticks up
+# to UNTIL, to SUSTAIN an anomaly (e.g. keep re-flipping so it can't self-right).
+var _teleport_every: int = 0
+var _teleport_until: int = -1
+# ---- 2026-08-04 · PER-LEG LESION — the locomotor-(d) test the plan has always named
+# ("degrade a leg -> re-coordinates", picrawler_active_inference_plan.md 2.8 and 10).
+# Every perturbation this project could run until now was a TELEPORT, which relocates the
+# body without changing what the body IS; the world explains the disturbance.  A lesion
+# leaves the world untouched, so nothing external can account for a behavioural change.
+# It scales ONE leg's motor torque ceiling from a given tick.  Deliberately honest: the
+# leg still senses itself perfectly, it simply cannot push, so the brain can only notice
+# through its OWN rising prediction error — which is the (a) "inferred, not oracle" bar.
+# ⚠ It must NOT announce a reset (the teleport does, for Gate-0 masking): a reset here
+# would mask the very re-organisation this exists to measure.
+# _lesion_leg = -1 (the default) => every scale is 1.0 => byte-identical to no lesion.
+var _lesion_leg: int = -1
+# 2026-08-06 — PER-FOOT SLICK ABLATION.  The sufficient half of the leg-attribution
+# validation: a lesion zeroes a leg's COMMANDS, so the leg stops moving and both its
+# attributed share AND its raw sweep collapse together — a metric that merely counted
+# MOVEMENT would score identically.  Making one foot frictionless instead leaves the leg
+# sweeping normally while removing its ability to transmit thrust, so a propulsion metric
+# must lose that leg's share while its raw sweep is untouched.  -1 = off.
+# 2026-08-06 — GROUND REACTION IMPULSE per foot, accumulated every PHYSICS step.
+#
+# The kinematic attribution metric (stance-gated hip1 sweep) FAILED its sufficient
+# validation: with FL's foot slicked to mu 0.05 — physically unable to transmit thrust —
+# its attributed share did not move (0.230 -> 0.230).  A leg on a frictionless foot still
+# sweeps in stance, so stance kinematics cannot distinguish GRIP from SLIP, and the
+# correlation with fwd_v may be the body dragging the leg rather than the leg driving the
+# body.  Force is the only thing that settles the direction of causation.
+#
+# The feet already run contact_monitor with 4 contacts reported, so the solver's actual
+# contact impulses are available via body_get_direct_state.  Projected on the body-forward
+# axis this IS the propulsion each leg delivers, and it passes the slick test by
+# construction: a frictionless foot transmits no tangential force.
+var _grf_fwd: Array[float] = [0.0, 0.0, 0.0, 0.0]     # accumulated since last trace record
+# 2026-08-07 — PER-LEG VERTICAL LOAD.  The missing observation.
+#
+# To push the CoG past the support polygon onto the foot that is about to plant, the
+# body must know HOW ITS WEIGHT IS DISTRIBUTED, and nothing on the bus carries that:
+# foot_contact is a binary touch with no magnitude; joint_torque is a PD command budget
+# dominated by its -Kd*omega term; joint_load (the velocity-tracking deficit) was
+# measured NOT to discriminate stance from swing (0.383 vs 0.257).  Doctrine §1 rule 2:
+# when no egocentric observation carries the signal the error needs, the fix is a NEW
+# SENSOR, not a smarter policy.
+#
+# Four load scalars ARE a centre-of-gravity sensor: if fl carries 40% of the weight the
+# CoG is over fl.  ⚠ AND UNLIKE fwd_v THIS IS EGOCENTRIC-LEGAL — a real picrawler reads
+# it from a foot FSR or servo current sense — so it is a lawful brain input, which the
+# god's-eye attribution instrument never was.
+#
+# EMA rather than a drained accumulator so the published sensor is independent of the
+# trace recorder, and because a real load cell has its own time constant anyway.
+var _grf_up: Array[float] = [0.0, 0.0, 0.0, 0.0]      # drained by the trace (world-up, for comparison)
+var _grf_nrm: Array[float] = [0.0, 0.0, 0.0, 0.0]     # drained by the trace (FSR analogue)
+var _foot_load_ema: Array[float] = [0.0, 0.0, 0.0, 0.0]
+const _FOOT_LOAD_ALPHA: float = 0.15
+# Static weight as a PER-PHYSICS-STEP impulse (N·s), which is the unit
+# get_contact_impulse returns.  chassis + 4 legs x (coxa+upper+lower).
+const _TOTAL_MASS: float = CHASSIS_MASS + 4.0 * (COXA_MASS + UPPER_MASS + LOWER_MASS)
+var _slick_leg: int = -1
+var _slick_at: int = 0
+var _slick_done: bool = false
+var _lesion_at: int = -1
+var _lesion_until: int = 0x7FFFFFFF
+var _lesion_scale: float = 0.2
+# "action" (default) attenuates the leg's COMMANDED MOTION; "torque" caps its torque
+# ceiling.  Kept default-off rather than removed: the torque form is refuted as a
+# PERTURBATION on this body but is real infrastructure, and its null is itself a finding.
+var _lesion_mode: String = "action"
+var _lesion_active: bool = false
+
+# ---- 2026-08-04 · PHYSICAL ABLATION MODEL (the [K] panel) ------------------------------
+# The single-leg lesion above answers one question ("degrade a leg"). This is the general
+# instrument: ANY of the 12 servos can fail in any of three realistic ways, and ANY joint
+# can be broken clean through so the limb below it comes off. That is what a real robot
+# does when it breaks, and none of it is signalled to the brain — the only way it can
+# notice is its own rising prediction error, which is the (a) "inferred, not oracle" bar.
+#
+# The three servo failures are genuinely different mechanically and the brain should not
+# find them equivalent:
+#   DEAD   — unpowered. Motor released (velocity 0, impulse 0): the joint free-swings and
+#            is back-driveable, so the limb flops and gravity moves it.
+#   SEIZED — jammed gearbox. Velocity target 0 at FULL impulse: the joint fights any
+#            motion and holds wherever it happened to be. A rigid strut, not a limp one.
+#   WEAK   — a tired/browning-out servo. The commanded motion is attenuated but live.
+# DETACH is separate from all three: it breaks the constraint so everything DISTAL to that
+# joint separates. Detach hip1 -> the whole leg comes off; hip2 -> upper+lower; knee ->
+# the shank and foot. Reversible, so an A/B can be run without restarting.
+enum AblKind { OK = 0, DEAD = 1, SEIZED = 2, WEAK = 3 }
+const ABL_KIND_NAMES: Array = ["ok", "dead", "seized", "weak"]
+const ABL_JOINT_NAMES: Array = ["hip1", "hip2", "knee"]
+const ABL_LEG_NAMES: Array = ["FL", "FR", "RL", "RR"]
+var _abl_kind: PackedInt32Array = PackedInt32Array()        # 12, index = leg*3 + joint
+var _abl_detached: PackedByteArray = PackedByteArray()      # 12
+var _abl_weak_scale: float = 0.3
+var _abl_any: bool = false                                  # fast path: skip all of it
+# Reported angle at the moment of detachment.  A detached segment is frozen in WORLD space
+# while the chassis walks away, so the measured relative angle would diverge into garbage
+# and flood the brain with a signal no real robot produces.  A real robot's servo keeps
+# reporting its own encoder, so the honest reading is the last one before the break.
+var _abl_hold_angle: PackedFloat32Array = PackedFloat32Array()
+# Chassis-relative transforms saved at detach, so re-attaching puts the limb back in the
+# pose it came off in rather than wherever it fell.
+var _abl_saved_xform: Array = []
+var _abl_saved_nodes: Array = []                            # [node_a, node_b] per joint
+var _abl_env_spec: String = ""
+var _abl_env_at: int = 0
+var _abl_env_done: bool = false
+# Deferred teleport target (Vector3 ground point) applied at the TOP of the next
+# physics frame — transform writes from _input handlers get clobbered by the
+# physics step in the same frame, so KEY_3/KEY_4 must defer.  null = nothing pending.
+var _pending_teleport = null
+# Per-drop flip intent for the NEXT pending teleport: -1 = fall back to the
+# OGMA_PICRAWLER_TELEPORT_FLIP env (scripted runs), 0 = upright, 1 = inverted.  Lets the
+# mouse placement pick orientation per click instead of needing an env restart.
+var _pending_teleport_flip: int = -1
+# Ramp-debug: last raw belly rangefinder reading (metres), cached at publish so the
+# diag can log the rangefinder output + homeostat state on the hump.
+var _dbg_gc_raw: float = 0.0
+var _dbg_contact_swing: float = 0.0   # TRUE swing fraction from the foot-contact sensor
+var _dbg_fk_cmd_err: float = 0.0      # mean |commanded-FK − achieved-FK| foot height (m)
+var _dbg_fk_valid_err: float = 0.0    # mean |measured-FK − achieved-pose| = FK wiring check
+var _dbg_att_err_acc: float = 0.0     # accel-only attitude error vs exact (deg)
+var _dbg_att_err_imu: float = 0.0     # gyro-fused attitude error vs exact (deg)
+var _dbg_acc_mag: float = 0.0         # |accelerometer| m/s^2 (should hover near 9.81)
+var _dbg_acc_trust: float = 0.0       # adaptive correction gain actually applied
+var _prev_lin_vel: Vector3 = Vector3.ZERO   # for finite-differencing body acceleration
+var _up_est_body: Vector3 = Vector3.ZERO    # complementary-filter gravity-up estimate (body frame)
+var _up_acc_last: Vector3 = Vector3.ZERO    # last accel-only gravity-up (body frame)
+var _accel_body_last: Vector3 = Vector3.ZERO  # last modelled accelerometer reading
+var _gyro_body_last: Vector3 = Vector3.ZERO   # last modelled gyro reading
+# 2026-08-04 — DEAD-RECKONED EGO HEADING for the L1 nav loop.  Integrated from the MODELLED
+# BODY-FRAME GYRO (_gyro_body_last.y), which is what a real IMU reports — not from the chassis
+# world transform, which would be a god's-eye read.  It drifts, exactly as dead reckoning does
+# on hardware; that drift is honest and RunTumbleNavV2 only needs the frame to be SELF-
+# CONSISTENT (it accumulates run_dir_abs_ in the same frame and outputs an egocentric delta).
+var _ego_heading: float = 0.0
+var _accel_lp: Vector3 = Vector3.ZERO         # DLPF state
+# How much the complementary filter trusts the accelerometer per tick.  Small = trust the
+# gyro short-term (rejects bounce contamination) and let the accel correct drift slowly.
+const IMU_ACC_TRUST: float = 0.02
+# Models the accelerometer's on-chip anti-alias low-pass (datasheet DLPF), which a raw
+# finite difference lacks.  ~0.25 at 240 Hz ≈ a few tens of Hz cutoff.
+const IMU_DLPF_ALPHA: float = 0.25
+# Accelerometer full-scale range (±4 g), as a real part would clip at.
+const IMU_RANGE_MS2: float = 4.0 * 9.81
+# Accelerometer trust falls to zero once ‖a‖ deviates from g by this FRACTION of g.
+# Quasi-static samples correct fully; footfall impacts contribute nothing.
+const IMU_ACC_GATE_FRAC: float = 0.5
 var episode_index: int = 0
 var _episode_fell: bool = false
 var _instant_pause_tick: bool = false
@@ -1731,6 +2173,29 @@ var _calibrate_step_start_tick: int = 0
 # inputs are ignored; slider values map directly to joint targets via
 # t = servo_targets[k] * servo_signs[k] + servo_origins[k].
 var _motor_test_mode: bool = false
+var _brain_paused_notified: bool = false   # one-shot log when calibration pauses the brain
+# ---- 2026-08-03 · GANGED JOINT DRIVE for spring/damping characterisation -------------
+# Displacing one joint tells you little; a leg is a coupled chain and the body only
+# resonates when a JOINT GROUP moves together.  These drive all four hip2s (or all four
+# knees) as one, so the operator can PULSE (step, release, watch the ring-down → damping
+# ratio and natural frequency) or SHAKE (sinusoid at a swept frequency → find the
+# amplitude peak = resonance).  Active only in G motor-test mode.
+var _gang_hip2_base: float = 0.0
+var _gang_knee_base: float = 0.0
+var _gang_pulse_ticks: int = 0        # >0 = a pulse is being held
+var _gang_pulse_amp: float = 0.0
+var _gang_pulse_group: int = 1        # 1 = hip2, 2 = knee, 3 = both
+var _gang_shake_hz: float = 0.0       # 0 = off
+var _gang_shake_amp: float = 0.0
+var _gang_shake_phase: float = 0.0
+# ring-down readout: peak-to-peak of the measured joint angle over a rolling window
+var _gang_pp_hip2: float = 0.0
+var _gang_pp_knee: float = 0.0
+var _gang_win_hi2: float = -9.0
+var _gang_win_lo2: float = 9.0
+var _gang_win_hik: float = -9.0
+var _gang_win_lok: float = 9.0
+var _gang_win_n: int = 0
 # 2026-06-09 — HUD visibility toggles bound to T and H hotkeys.  Joseph QoL
 # ask: clean visual access to the 3D scene during UI observation.  T hides
 # all picrawler HUD panels (curriculum / reward / trainer); H hides the
@@ -1752,8 +2217,48 @@ const RAY_OVERLAY_SELF_OCCLUSION_M: float = 0.12   # hit nearer than this → RE
 # V1), rendered as a HUD panel.  Shown when the top-down map cam is active (same
 # UX as the Cell).  Colours: purple = active target, gray = ground, tan = object,
 # dark = sky/miss.  This IS the V1 vision sensor; the panel is its viz.
-const VISION_RES: int = 32                         # square capture resolution
-const VISION_FOV_RAD: float = 1.5707963            # 90° perspective FOV
+# ---- 2026-08-04 · THE CAMERA IS NOW MODELLED ON THE REAL SENSOR ------------------------
+# The previous values (32x32, 90 deg square) carried NO hardware citation. This whole path
+# "originated as a HUD debug panel that was promoted to a sensor": the shading exists so the
+# EPM has gradients, the capture rate is a CPU budget, the ray length is the arena diagonal,
+# and the mount was "high enough not to hit the legs". Compare docs/servo_dynamics.md, which
+# gets a cited reference, a conformance table and four argued deviations. The camera was the
+# least-specified part of the model.
+#
+# HARDWARE (operator, 2026-08-04): SunFounder PiCrawler, OmniVision **OV5647**, quoted 65 deg.
+# That 65 is the DIAGONAL: the OV5647's published 53.5 x 41.4 H x V has a computed diagonal of
+# 64.4 deg, which matches. So the faithful optics are 53.5 x 41.4, 4:3.
+# ⚠ If that reading is ever corrected to 65 HORIZONTAL, the model becomes 65 x 51.1 and every
+# range figure in the plan shifts -- change it here and re-run the Stage-0 characterisation.
+const VISION_FOV_H_RAD: float = 0.9337511          # 53.5 deg horizontal (OV5647)
+const VISION_FOV_V_RAD: float = 0.7225663          # 41.4 deg vertical   (OV5647, 4:3)
+# RESOLUTION IS THE OPTIC NERVE, NOT THE PHOTORECEPTOR ARRAY -- and it is named as such.
+# A GPU render is unavailable (Godot --headless disables the rendering server entirely, so a
+# SubViewport readback returns null pixels; the Cell hit this and documented it at
+# body_controller.gd:331-339), and 640x480 raycasts is infeasible regardless. So we model what
+# the brain RECEIVES, not what the sensor captures, and we are exact about the geometry.
+#
+# 32x24 keeps the sensor's 4:3 aspect with SQUARE pixels. It is 768 rays against the old 1024
+# -- 25% CHEAPER -- and resolves ~3x more beacon area at range, because a narrower FOV over the
+# same budget is finer. Measured blob for a 1.0 x 0.36 m pyramid at 8 m: 2.3 px at the old
+# 32x32/90deg vs 6.4 px here.
+# A VAR, not a const (the Cell's OGMA_VIS_RES precedent) so Stage 0 can raise it to 48x36.
+# ---- 2026-08-04 · THE BEACON A/B CONTROL (operator's design) ---------------------------
+# The sharpest control for "is nav affecting behaviour at all" is not a module-side ablation
+# (which depends on the module honouring a param — and our shuffle arm came back
+# byte-identical, so that assumption is exactly what is in doubt).  It is a WORLD-side one:
+# run the same seed twice, once with the target pyramid painted and once left neutral.
+#
+#   visible=1 -> the landmark exists -> beacon carries signal -> nav can steer
+#   visible=0 -> the landmark does not exist -> beacon is identically 0 -> nav has nothing
+#
+# Everything else — layout, seed, target selection, arrival detection, tgt_range logging — is
+# untouched, so ANY behavioural difference is attributable to the nav loop and nothing else.
+# This is also the honest form of the control: the world genuinely lacks the landmark, rather
+# than the perception being lesioned.
+@export var beacon_visible: bool = true
+@export var vision_res_w: int = 32
+@export var vision_res_h: int = 24
 const VISION_LIGHT_DIR: Vector3 = Vector3(0.4165, 0.8538, 0.3124)   # key-light dir (unit)
 const VISION_AMBIENT: float = 0.35                 # ambient floor so shadowed faces aren't black
 # 2026-06-13 — wire the camera/LiDAR raycast into the BRAIN (not just the HUD).
@@ -1892,6 +2397,89 @@ func _ready() -> void:
 	if quit_env != "":
 		_quit_after_ticks = quit_env.to_int()
 		print("PicrawlerBody: OGMA_QUIT_AFTER_TICKS=%d" % _quit_after_ticks)
+	var tramp_env: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_RAMP_AT")
+	if tramp_env != "":
+		_teleport_ramp_at = tramp_env.to_int()
+		print("PicrawlerBody: OGMA_PICRAWLER_TELEPORT_RAMP_AT=%d" % _teleport_ramp_at)
+	var evs: String = OS.get_environment("OGMA_PICRAWLER_EVENTS")
+	if evs != "":
+		var parsed = JSON.parse_string(evs)
+		if parsed is Array:
+			_events = parsed
+			print("PicrawlerBody: OGMA_PICRAWLER_EVENTS — %d scheduled placement(s)" % _events.size())
+		else:
+			push_error("OGMA_PICRAWLER_EVENTS is not a JSON array: %s" % evs)
+	var tev: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_EVERY")
+	if tev != "": _teleport_every = tev.to_int()
+	var tun: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_UNTIL")
+	if tun != "": _teleport_until = tun.to_int()
+	# Per-leg lesion (the locomotor-(d) test).  LEG unset or -1 leaves the body untouched.
+	var lsl: String = OS.get_environment("OGMA_PICRAWLER_LESION_LEG")
+	if lsl != "": _lesion_leg = lsl.to_int()
+	var lsa: String = OS.get_environment("OGMA_PICRAWLER_LESION_AT")
+	if lsa != "": _lesion_at = lsa.to_int()
+	var lsu: String = OS.get_environment("OGMA_PICRAWLER_LESION_UNTIL")
+	if lsu != "": _lesion_until = lsu.to_int()
+	var lss: String = OS.get_environment("OGMA_PICRAWLER_LESION_SCALE")
+	if lss != "": _lesion_scale = lss.to_float()
+	var lsm: String = OS.get_environment("OGMA_PICRAWLER_LESION_MODE")
+	if lsm != "": _lesion_mode = lsm
+	var skl: String = OS.get_environment("OGMA_PICRAWLER_SLICK_LEG")
+	if skl != "": _slick_leg = skl.to_int()
+	var ska: String = OS.get_environment("OGMA_PICRAWLER_SLICK_AT")
+	if ska != "": _slick_at = ska.to_int()
+	_abl_init()
+	_abl_parse_env()
+	var ccl: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_COLLIDE")
+	if ccl != "":
+		chassis_collides = (ccl == "1" or ccl.to_lower() == "true")
+		# Loud, and prefixed with the marker gaitreport.py scrapes for env overlays: this
+		# one lives in NO config file, so a run summary that omits it describes a body that
+		# is physically different from the one that ran.
+		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_CHASSIS_COLLIDE=%s \u2014 chassis %s" % [
+			ccl, "COLLIDES with the world" if chassis_collides else "is a ghost (historical)"])
+	var cfr: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_FRICTION")
+	if cfr != "":
+		chassis_friction = cfr.to_float()
+		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_CHASSIS_FRICTION=%.3f (feet stay at 1.5)"
+			% chassis_friction)
+	# Optic-nerve budget. A VAR, per the Cell's OGMA_VIS_RES precedent, so Stage 0 can sweep it.
+	# Burst-onset probe: auto-saves a clip at each pause->step transition (and a mid-gap
+	# control), so the analysis window is the RUN-UP to a step rather than a guessed interval.
+	var cwin: String = OS.get_environment("OGMA_PICRAWLER_CLIP_WINDOW")
+	if cwin != "":
+		var parts := cwin.split(",")
+		if parts.size() == 2:
+			_cw_from = parts[0].to_int(); _cw_to = parts[1].to_int()
+			print("PicrawlerBody: \u26a0 CLIP_WINDOW %d..%d — per-tick dump of that interval" % [_cw_from, _cw_to])
+	if OS.get_environment("OGMA_PICRAWLER_BURST_PROBE") == "1":
+		_burst_probe = true
+		print("PicrawlerBody: \u26a0 BURST_PROBE on — auto-saving ONSET/GAP clips to /tmp/xaq_clips")
+	var ifw: String = OS.get_environment("OGMA_PICRAWLER_INTENT_FWD")
+	if ifw != "":
+		intent_fwd = ifw.to_float()
+		print("PicrawlerBody: \u26a0 MOTOR INTENT scaffold — v_fwd*=%.3f yaw*=%.3f" % [intent_fwd, intent_yaw])
+	var bv: String = OS.get_environment("OGMA_PICRAWLER_BEACON_VISIBLE")
+	if bv != "":
+		beacon_visible = (bv == "1" or bv.to_lower() == "true")
+		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_BEACON_VISIBLE=%s \u2014 target pyramid is %s"
+			% [bv, "PAINTED (nav has a landmark)" if beacon_visible else "NEUTRAL (no landmark; beacon == 0)"])
+	var vw: String = OS.get_environment("OGMA_PICRAWLER_VIS_W")
+	if vw != "": vision_res_w = maxi(2, vw.to_int())
+	var vh: String = OS.get_environment("OGMA_PICRAWLER_VIS_H")
+	if vh != "": vision_res_h = maxi(2, vh.to_int())
+	if vw != "" or vh != "":
+		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_VIS_%dx%d (optic-nerve grid; OV5647 optics unchanged)"
+			% [vision_res_w, vision_res_h])
+	var lfr: String = OS.get_environment("OGMA_PICRAWLER_LIMB_FRICTION")
+	if lfr != "":
+		limb_friction = lfr.to_float()
+		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_LIMB_FRICTION=%.3f (coxa+upper; feet stay 1.5)"
+			% limb_friction)
+	if _lesion_leg >= 0 and _lesion_at > 0:
+		print("PicrawlerBody: ⚠ LESION armed — leg %d %s x%.2f from tick %d%s" % [
+			_lesion_leg, _lesion_mode, _lesion_scale, _lesion_at,
+			("" if _lesion_until >= 0x7FFFFFFF else " until tick %d" % _lesion_until)])
 	if OS.get_environment("OGMA_PICRAWLER_YAW_PROBE") == "1":
 		_yaw_probe_enabled = true
 	var fcb_env: String = OS.get_environment("OGMA_PICRAWLER_FORCE_COGNITIVE_BIAS")
@@ -1993,7 +2581,7 @@ func _ready() -> void:
 		# 2026-06-13 — forward-facing raycast camera (Lambert-shaded RGB) → an
 		# epm_color JL EPM (host.video.color → reality.video.color → consensus).
 		brain.register_source("Camera", "host.video.color",
-			"uint8[%d×%d×3]: forward raycast RGB, normal-shaded (target=purple, ground=gray, object=tan)" % [VISION_RES, VISION_RES], true)
+			"uint8[%d×%d×3]: forward raycast RGB, OV5647 optics 53.5×41.4°, normal-shaded (beacon-coloured surface=purple, ground=gray, object=tan)" % [vision_res_w, vision_res_h], true)
 	# World-frame compass: 2-D unit-circle encoding of chassis yaw,
 	# anchored to the world's +X axis (cos(yaw)=1, sin(yaw)=0 → facing +X).
 	# Redundant with IMU's first 2 channels but published as its own
@@ -2040,7 +2628,55 @@ func _ready() -> void:
 	brain.register_source("TgtAlignRR", "reality.proprio.tgt_align_rr",
 		"float32[1]: bucket 0..3 for RR leg target alignment (creative R4)", true)
 	brain.register_source("FeetY", "reality.proprio.feet_y",
-		"float32[4]: per-leg foot-Y height (FL, FR, RL, RR) — low = planted, high = lifted", true)
+		"float32[4]: per-leg foot-Y height (FL, FR, RL, RR) — low = planted, high = lifted. " +
+		"WARNING: absolute WORLD-Y = god's-eye (the violation that retired chassis_y_norm). " +
+		"Markov-compliant twin below.", true)
+	brain.register_source("Imu6", "reality.proprio.imu6",
+		"float32[6]: body-frame [ax,ay,az] specific force (accelerometer) + [gx,gy,gz] angular " +
+		"rate (gyro) — the full 6-axis IMU the real robot has and which the legacy imu topic omits.", true)
+	brain.register_source("FeetYGravityCmdAcc", "reality.proprio.feet_y_gravity_cmd_acc",
+		"float32[4]: commanded-FK foot height on an ACCELEROMETER-ONLY gravity estimate — shows " +
+		"the linear-acceleration contamination a bare accelerometer suffers.", true)
+	brain.register_source("FeetYGravityCmdImu", "reality.proprio.feet_y_gravity_cmd_imu",
+		"float32[4]: commanded-FK foot height on a GYRO-FUSED gravity estimate (complementary " +
+		"filter) — fully hardware-realizable, no exact attitude anywhere.", true)
+	brain.register_source("FeetYGravityCmd", "reality.proprio.feet_y_gravity_cmd",
+		"float32[4]: feet_y_gravity computed from COMMANDED servo angles instead of achieved " +
+		"pose — what a hobby-servo robot can actually compute (no position feedback).", true)
+	brain.register_source("FeetYGravityFk", "reality.proprio.feet_y_gravity_fk",
+		"float32[4]: feet_y_gravity via analytic FK from MEASURED angles — validation twin; " +
+		"should track feet_y_gravity closely, confirming the FK chain is wired correctly.", true)
+	brain.register_source("FeetYGravity", "reality.proprio.feet_y_gravity",
+		"float32[4]: per-leg foot height below the chassis measured ALONG GRAVITY " +
+		"(FL, FR, RL, RR) = encoder-FK foot position · accelerometer gravity-up. IK ⊕ IMU; " +
+		"the only legal signal sharing the god's-eye feet_y's gravity reference.", true)
+	brain.register_source("FeetYGround", "reality.proprio.feet_y_ground",
+		"float32[4]: per-leg foot height above the ground the body stands on = " +
+		"feet_y_body (encoder FK) + belly ToF clearance. Markov-compliant AND " +
+		"terrain-relative — the legal reconstruction of what god's-eye feet_y provides.", true)
+	brain.register_source("FeetYBody", "reality.proprio.feet_y_body",
+		"float32[4]: per-leg foot height relative to the CHASSIS (FL, FR, RL, RR) — the " +
+		"Markov-compliant twin of feet_y. Derivable from joint encoders + link lengths by " +
+		"forward kinematics, so a real picrawler can compute it.", true)
+	# 2026-07-22 — Markov-blanket-compliant posture sensors (replace absolute Y).
+	brain.register_source("FootContact", "reality.proprio.foot_contact",
+		"float32[4]: per-leg TRUE foot-contact (1=touching ground/obstacle, 0=airborne) from the foot's physics contact monitor — a hardware contact switch, NOT an absolute-Y threshold.", true)
+	# 2026-08-04 — the HONEST beacon scalar: the fraction of the camera frame occupied by a
+	# beacon-COLOURED surface.  A magnitude, never a bearing — direction has to be inferred
+	# through action, which is the whole point (plan.md §4 forbids a blob bearing as a first
+	# sensor: "nearly instantaneous ≈ an oracle").  Computed at full ray resolution in
+	# _capture_vision(), BEFORE the JL encoder's fixed 24×24 resize, and deliberately not
+	# routed through an EPM — a GNG would quantise away the very gradient this feeds.
+	brain.register_source("EgoHeading", "reality.proprio.ego_heading",
+		"float32[1]: dead-reckoned heading, integrated from the modelled body-frame gyro (drifts, as real dead reckoning does)", true)
+	brain.register_source("VelEgo", "reality.proprio.vel_ego",
+		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc", true)
+	brain.register_source("Beacon", "reality.proprio.beacon",
+		"float32[1]: fraction of the frame that is beacon-coloured (looming/LGMD analogue)", true)
+	brain.register_source("GroundClearance", "reality.proprio.ground_clearance",
+		"float32[1]: downward belly ToF/ultrasonic — normalized [0,1] distance from the belly to the ground beneath (0 = belly ON a surface / high-centered; higher = held up). Egocentric replacement for absolute chassis world-Y.", true)
+	brain.register_source("Upright", "reality.proprio.upright",
+		"float32[1]: chassis up-vector alignment with gravity (1 = upright, 0 = on its side, -1 = inverted) from the IMU. Gates keyframe baking on posture validity (don't learn from a flipped body).", true)
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
 	# against MAX_SERVO_TORQUE. 12-D vector ordered hip1[0..3], hip2[0..3],
 	# knee[0..3] matching the existing `Joints` topic convention. Published
@@ -2051,7 +2687,11 @@ func _ready() -> void:
 	# Stage 3.A: enables Cruse Walknet Rule 5 (Coactivation — load extends
 	# stance), and a future opt-in epm_joint_torque (Stage 3.A.3).
 	brain.register_source("JointTorque", "reality.proprio.joint_torque",
-		"float32[12]: per-servo applied torque (hip1×4, hip2×4, knee×4) normalized to [-1, 1] vs MAX_SERVO_TORQUE — load proxy", true)
+		"float32[12]: per-servo PD COMMAND BUDGET (hip1×4, hip2×4, knee×4), normalized to [-1,1] vs MAX_SERVO_TORQUE. ⚠ NOT applied torque and NOT a load proxy despite its original description: it sets the motor's max-impulse cap, and with Kp=20/Kd=8 it is DOMINATED BY THE -Kd*omega damping term (measured corr with joint motion -0.46..-0.56), i.e. it is mostly a negated velocity copy. Use JointLoad for load.", true)
+	brain.register_source("FootLoad", "reality.proprio.foot_load",
+		"float32[4]: per-leg FOOT NORMAL FORCE (fl,fr,rl,rr), normalised by static body weight — the CoG sensor. Measured as the contact impulse projected on the CONTACT NORMAL, which is exactly what an FSR / load cell in the foot reads: no world-frame or IMU up-vector is required, so this is buildable on the real picrawler as-is. Four load scalars locate the centre of gravity over the support polygon: if fl reads 0.4 the CoG is over fl. THE MISSING OBSERVATION for dynamic walking, where the body must push its CoG past the stable point onto the foot about to plant. Egocentric and physically realisable (foot FSR or servo current sense), so unlike the god's-eye attribution instrument it is a LAWFUL brain input. Distinct from JointLoad, which is a velocity-tracking deficit and was MEASURED not to discriminate stance from swing (0.383 vs 0.257).", true)
+	brain.register_source("JointLoad", "reality.proprio.joint_load",
+		"float32[12]: per-servo VELOCITY-TRACKING DEFICIT (commanded omega - achieved omega, angle frame) normalized to [-1,1] vs MAX_SERVO_SPEED — the honest load proxy. ~0 when the joint moves freely; large when the motor stalls against its impulse cap because the foot is planted or the limb is loaded. Egocentric, so unlike the god's-eye attribution instrument it is legal as a brain input.", true)
 	if publish_tilt:
 		# Opt-in 4-D tilt vector for a vestibular EPM that lets the
 		# brain PERCEIVE its own pitch/roll (the existing IMU only has
@@ -2074,6 +2714,8 @@ func _ready() -> void:
 		"fired once when chassis tips or sinks below failure threshold")
 	brain.register_event("EpisodeEnd", "events.episode_end",
 		"trajectory finalise boundary")
+	brain.register_event("Reset",      "events.reset",
+		"body teleported to the upright rest pose (hard reset / respawn) — Gate 0 reset-masking signal")
 
 	# Register 12 action channels (3 per leg × 4 legs).
 	for i in range(4):
@@ -2209,8 +2851,36 @@ func _ready() -> void:
 				push_warning("PicrawlerBody: initial stage '%s' resume_state_path='%s' → resolved='%s' — load failed" % [
 					CurriculumManager.current_name(), initial_spec, resolved])
 
+	# IMPORT I6 scaffold override — read BEFORE _build_body so it applies at construction.
+	var gscale_env: String = OS.get_environment("OGMA_PICRAWLER_GRAVITY_SCALE")
+	if gscale_env != "":
+		scaffold_gravity_scale = maxf(0.05, float(gscale_env))
+	# IMPORT I4 sensor-noise overrides.  Seeded off OGMA_SEED so the noise VARIES with
+	# the seed like every other stochastic element — otherwise every seed would share
+	# one noise trace and the seed-average would understate the spread.
+	var kd_env: String = OS.get_environment("OGMA_PICRAWLER_MOTOR_DAMP")
+	if kd_env != "":
+		motor_damping_factor = maxf(0.0, float(kd_env))
+	var bd_env: String = OS.get_environment("OGMA_PICRAWLER_BODY_DAMP_SCALE")
+	if bd_env != "":
+		body_damp_scale = maxf(0.0, float(bd_env))
+	if not (is_equal_approx(motor_damping_factor, 1.0) and is_equal_approx(body_damp_scale, 1.0)):
+		print("PicrawlerBody: ⚠ COMPLIANCE TEST — motor_damp=%.3f body_damp_scale=%.3f (PM runs dampingFactor=0)"
+			% [motor_damping_factor, body_damp_scale])
+	var snoise_env: String = OS.get_environment("OGMA_PICRAWLER_SENSOR_NOISE")
+	if snoise_env != "":
+		sensor_noise_sigma = maxf(0.0, float(snoise_env))
+	var stau_env: String = OS.get_environment("OGMA_PICRAWLER_SENSOR_NOISE_TAU")
+	if stau_env != "":
+		sensor_noise_tau = maxf(1.0, float(stau_env))
+	var _seed_env: String = OS.get_environment("OGMA_SEED")
+	_sensor_noise_rng.seed = (int(_seed_env) if _seed_env != "" else 0) ^ 0x5E4501
+	if sensor_noise_sigma > 0.0:
+		print("PicrawlerBody: ⚠ IMPORT I4 ACTIVE — colored proprio noise sigma=%.3f tau=%.1f (PM uses ~0.1)"
+			% [sensor_noise_sigma, sensor_noise_tau])
 	_build_world()
 	_build_body()
+	_apply_limb_materials()   # coxa+upper get limb_friction; feet stay grippy
 
 	# Phase 7.x — walk_over_there initial target selection.  Same
 	# signal-timing issue as resume_state_path: if curriculum starts
@@ -2329,6 +2999,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_PYRAMID_MAX_R",
 			  "OGMA_PICRAWLER_PYRAMID_COUNT",
 			  "OGMA_PICRAWLER_JOINT_BACKEND",
+			  "OGMA_PICRAWLER_JOINT_DAMPING",
 			  "OGMA_PICRAWLER_MOTOR_FREEPLAY"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
@@ -2396,7 +3067,15 @@ func _resolve_env() -> void:
 					joint_backend = v
 				else:
 					push_warning("PicrawlerBody: ignoring OGMA_PICRAWLER_JOINT_BACKEND=%s (expected hinge/g6dof)" % v)
+			# 2026-08-03 — joint_angular_damping had NO env override, so it could never be
+			# swept headlessly.  The operator found it is the largest behavioural lever on
+			# the g6dof substrate (1.5 -> 0.5 makes the robot move "much, much faster"),
+			# and it is g6dof-ONLY: it reaches the solver solely via
+			# Generic6DOFJoint3D.PARAM_ANGULAR_DAMPING, so hinge runs never saw it.  That
+			# is why UI observation and headless measurement disagreed all session.
+			"OGMA_PICRAWLER_JOINT_DAMPING":            joint_angular_damping    = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_MOTOR_FREEPLAY":           motor_freeplay_rad       = max(0.0, v.to_float())
+			"OGMA_PICRAWLER_SPRING_FOLLOWS_TARGET":    spring_follows_target    = (v == "1")
 			"OGMA_PICRAWLER_PHASE_CONTRAST_GAIN":      phase_contrast_gain      = clamp(v.to_float(), 0.0, 1.0)
 			"OGMA_PICRAWLER_PROGRESS_REWARD_GAIN":      progress_reward_gain      = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_PROGRESS_REWARD_MIN_DELTA": progress_reward_min_delta = max(0.0001, v.to_float())
@@ -2452,7 +3131,31 @@ func _resolve_env() -> void:
 	# g6dof at the launcher overwrites the @export defaults with Joseph's
 	# handtuned compliant-stand preset; env/config/curriculum overrides
 	# still win because they run AFTER this on the resolved baseline.
+	# 2026-08-03 — CANONICAL SUBSTRATE = "hinge" (operator decision).  Rationale: hinge
+	# beats g6dof on every measured metric (PLV 0.138 vs 0.097 at its best damping,
+	# net_z 4.49 vs 2.79, straight 0.70 vs 0.48, 0 falls vs 0.17); it is the closer model
+	# of a real hobby servo (a stiff position tracker on a rigid gear train, whose
+	# compliance is backlash — not a series-elastic suspension); and every result in the
+	# ledger was measured on it, so nothing needs re-running.
+	#
+	# The split this guards against: the launcher's PERSISTED selection silently won over
+	# the default, so UI sessions ran g6dof while every headless run ran hinge — the same
+	# config producing two different robots depending on how it was started, which is how
+	# operator observation and headless measurement disagreed for a whole session.
+	# The resolver order is unchanged (explicit env / launcher choice still wins, so
+	# g6dof stays one flag away); what is new is that the substrate is ANNOUNCED, loudly,
+	# whenever it differs from canonical.
+	var _canonical_backend: String = "hinge"
 	joint_backend = ExperimentConfig.resolve_picrawler_joint_backend(joint_backend)
+	if joint_backend != _canonical_backend:
+		push_warning("PicrawlerBody: NON-CANONICAL SUBSTRATE — joint_backend=%s (canonical is %s). "
+			% [joint_backend, _canonical_backend]
+			+ "Ledger results are all hinge; numbers from this run are NOT comparable to them.")
+		print("PicrawlerBody: ⚠⚠ NON-CANONICAL SUBSTRATE joint_backend=%s (canonical=%s) — "
+			% [joint_backend, _canonical_backend]
+			+ "results NOT comparable to the ledger")
+	else:
+		print("PicrawlerBody: substrate = hinge (canonical)")
 	# 2026-06-13 — the CURRICULUM is authoritative for the substrate, overriding
 	# the launcher's persisted dropdown.  The launcher saves the last selection,
 	# so a stale hinge memory would silently run the wrong substrate; a stage-level
@@ -2535,10 +3238,24 @@ func _resolve_env() -> void:
 # ---------------------------------------------------------------------------
 # World — minimal flat floor
 # ---------------------------------------------------------------------------
+# World geometry lives under a WorldRoot container so the gym can be swapped
+# live (KEY_1 = arena / KEY_2 = corridor) — freeing WorldRoot and rebuilding
+# drops the SAME robot + brain (an experienced agent) into a new scenario
+# WITHOUT a scene reload (the brain stays in memory, fully continuous).
+var _world_root: Node3D = null
+var _gym_mode_active: String = ""
+var _gym_mode_override: String = ""   # set by the KEY_1/KEY_2 hotkeys; wins over config/env
+
 func _build_world() -> void:
+	_world_root = Node3D.new()
+	_world_root.name = "WorldRoot"
+	add_child(_world_root)
+	_rebuild_world_contents()
+
+func _rebuild_world_contents() -> void:
 	var floor_body := StaticBody3D.new()
 	floor_body.collision_layer = _LAYER_WORLD
-	floor_body.collision_mask  = _LAYER_BODY
+	floor_body.collision_mask  = _world_collision_mask()
 	floor_body.physics_material_override = _make_contact_mat()
 	var fcs := CollisionShape3D.new()
 	var fb := BoxShape3D.new()
@@ -2555,7 +3272,19 @@ func _build_world() -> void:
 	fmat.albedo_color = Color(0.3, 0.35, 0.3, 1.0)
 	fmesh.set_surface_override_material(0, fmat)
 	floor_body.add_child(fmesh)
-	add_child(floor_body)
+	_world_root.add_child(floor_body)
+
+	# Gym mode select.  The live override (KEY_1/KEY_2 hotkeys) wins; else the
+	# ExperimentConfig resolution: launcher metadata.gym_mode > OGMA_PICRAWLER_GYM
+	# env > "" default.  Empty / "arena" / "donut" = the legacy donut arena below.
+	# "corridor" = the +Z trench curriculum (flat runway -> hump -> rumble ->
+	# pyramids) inside self-centering 30 deg walls.  See _build_corridor().
+	var mode: String = _gym_mode_override if _gym_mode_override != "" \
+		else ExperimentConfig.resolve_picrawler_gym_mode("").to_lower()
+	_gym_mode_active = mode
+	if mode == "corridor":
+		_build_corridor()
+		return
 
 	# Concentric reference rings on the floor.  Visual-only (no collision)
 	# to make body motion legible — distance from origin at a glance.
@@ -2592,7 +3321,7 @@ func _build_floor_rings() -> void:
 		m.mesh = torus
 		m.position = Vector3(0, ring_y, 0)
 		m.set_surface_override_material(0, ring_mat)
-		add_child(m)
+		_world_root.add_child(m)
 	# Small center marker so the origin is unambiguous at any zoom.
 	var center := MeshInstance3D.new()
 	var center_mesh := CylinderMesh.new()
@@ -2604,7 +3333,7 @@ func _build_floor_rings() -> void:
 	var center_mat := StandardMaterial3D.new()
 	center_mat.albedo_color = Color(0.95, 0.55, 0.30, 1.0)   # orange-red origin dot
 	center.set_surface_override_material(0, center_mat)
-	add_child(center)
+	_world_root.add_child(center)
 
 func _build_terrain() -> void:
 	# 45° wedges along the four floor edges (x=±10, z=±10).  Each wedge is
@@ -2637,7 +3366,7 @@ func _build_terrain() -> void:
 		# Ramp body
 		var body := StaticBody3D.new()
 		body.collision_layer = _LAYER_WORLD
-		body.collision_mask  = _LAYER_BODY
+		body.collision_mask  = _world_collision_mask()
 		body.physics_material_override = _make_wedge_mat()
 		var cs := CollisionShape3D.new()
 		var bs := BoxShape3D.new()
@@ -2676,7 +3405,7 @@ func _build_terrain() -> void:
 			# Wedge runs along X (i.e. it's on a +z or -z floor edge).
 			t.basis = Basis(Vector3(1,0,0), -axis_dir.z * deg_to_rad(45.0))
 		body.transform = t
-		add_child(body)
+		_world_root.add_child(body)
 
 	# Low pyramids in the outer donut (r between 3.5 m and 9.5 m).
 	# Pure-deterministic placement (no Godot RNG dependency — empirically
@@ -2745,7 +3474,7 @@ func _build_terrain() -> void:
 		# the visual mesh.
 		var pyr := StaticBody3D.new()
 		pyr.collision_layer = _LAYER_WORLD
-		pyr.collision_mask  = _LAYER_BODY
+		pyr.collision_mask  = _world_collision_mask()
 		pyr.physics_material_override = _make_contact_mat()
 		# Build square pyramid vertices (4 base corners + apex).
 		var verts := PackedVector3Array()
@@ -2782,13 +3511,521 @@ func _build_terrain() -> void:
 		pmesh.rotation = Vector3(0, deg_to_rad(45.0), 0)
 		pyr.add_child(pmesh)
 		pyr.transform.origin = Vector3(px, 0.0, pz)
-		add_child(pyr)
+		_world_root.add_child(pyr)
 
 	print("PicrawlerBody: terrain built — 4 edge ramps + %d pyramids" % placed.size())
 
 # ---------------------------------------------------------------------------
+# Corridor gym (OGMA_PICRAWLER_GYM=corridor) — a directed 1-D curriculum.
+#
+# Runs along +Z — the robot's TRUE forward: the eyes / front legs are on the +Z
+# chassis face and the locomotor forward axis fwd_v = (vx,vz)·(sin yaw, cos yaw)
+# is +Z at spawn (yaw=0).  (The IMU comment at ~1998 says "+X"; the locomotion
+# math says +Z — this gym follows the BODY, so the robot spawns facing DOWN the
+# trench and fwd_v directly measures corridor progress.)  It is FULLY ENCLOSED by
+# four 30 deg walls — two along Z forming a self-centering trench, two sealing
+# the -Z and +Z ends — so drift into any wall and the slope + gravity nudge the
+# body back toward the middle.  That passive centering stands in for the
+# not-yet-working heading reflex.  Down the corridor the terrain ramps in
+# difficulty: flat runway -> gentle 10 deg hump -> half-buried rumble bumps -> a
+# small pyramid field.  Forward distance (body diag `z`) is then a clean 1-D
+# capability signal; the zone reached = difficulty conquered.
+#
+# 2026-07-27 — the two END walls were a VERTICAL seal at -Z and NOTHING at +Z,
+# and both corrupted distance: a robot could park against the back wall with no
+# escape while still reading fwd_v, and a fast one walked off the +Z edge of the
+# world.  See the end-wall block below.  ANY CORRIDOR NUMBER MEASURED BEFORE
+# THIS CHANGE IS FROM A DIFFERENT GYM and must be re-measured, not compared
+# across — including the deployed baseline (net_z 4.75 +/- 0.29 @ 6000 ticks).
+#
+# Deterministic placement (no RNG) -> paired-seed A/B parity, as _build_terrain.
+# Friction matches the live env: the floor + every obstacle use
+# _make_contact_mat() (mu=1.5, as the arena floor + pyramids); the sloped walls
+# use _make_wedge_mat() (mu=3.0, as the arena's containment ramps) so a grazing
+# body follows the slope instead of tumbling.
+# ---------------------------------------------------------------------------
+func _build_corridor() -> void:
+	var chan_half:    float = 0.75    # half-width of the flat channel floor -> 1.5 m walkable
+	var corridor_len: float = 9.5     # +Z extent of the curriculum (fits the 20x20 floor)
+	var slope_deg:    float = 30.0    # self-centering trench-wall angle
+	var wall_face:    float = 1.2     # sloped-face length (rise = 1.2*sin30 ~ 0.60 m)
+	var wall_thick:   float = 0.30    # wall box thickness (buried below the floor)
+	var back_wall_z:  float = -0.5    # -Z seal, just behind spawn (sloped since 2026-07-27)
+
+	# Reset pyramid bookkeeping (corridor XOR donut — never both).
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+
+	var wall_color: Color = Color(0.25, 0.30, 0.25, 1.0)
+	var th: float = deg_to_rad(slope_deg)
+	var wall_len: float = corridor_len + 1.5           # span in Z (runway -> past pyramids + margin)
+	var wall_cz:  float = corridor_len * 0.5           # center of that span
+	# The back wall + channel-spanning obstacles (hump, rumble bumps) extend to
+	# +/-thru_half in X so they clip ALL THE WAY THROUGH the angled side walls
+	# (whose top edge sits at x ~ chan_half + wall_face*cos(slope)).  Without
+	# this the obstacle ends flush at the wall's inner base while the wall leans
+	# away above it, leaving a corner pocket a foot can wedge into.
+	var thru_half: float = chan_half + wall_face * cos(th) + 0.15
+
+	# Difficulty lever (0 = trivial .. 1 = hard) — scales obstacle HEIGHTS so the
+	# corridor matches what the current gait can surmount.  Resolved via
+	# ExperimentConfig: launcher spinbox > config metadata.gym_difficulty >
+	# OGMA_PICRAWLER_GYM_DIFFICULTY env > 0.3 default.  Walls/back-wall unaffected.
+	var diff: float = clamp(ExperimentConfig.resolve_picrawler_gym_difficulty(0.3), 0.0, 1.0)
+
+	# --- Two self-centering trench walls at x = +/-chan_half (run along Z) ---
+	# Build each from its inner-bottom edge (world x=+/-chan_half, y=0): the top
+	# face rises along u_world (up + outward) at slope_deg; the surface normal n
+	# points up + inward, so a body on the ramp slides back toward the center.
+	for xside in [1.0, -1.0]:
+		var n:         Vector3 = Vector3(-xside * sin(th), cos(th), 0.0)   # surface normal (up + inward)
+		var u_world:   Vector3 = Vector3( xside * cos(th), sin(th), 0.0)   # up-slope (up + outward)
+		var p_edge:    Vector3 = Vector3(xside * chan_half, 0.0, wall_cz)  # inner-bottom edge midpoint
+		var center:    Vector3 = p_edge + u_world * (wall_face * 0.5) - n * (wall_thick * 0.5)
+		var long_axis: Vector3 = Vector3(0, 0, 1)                          # wall runs along +Z
+		var z_axis:    Vector3 = long_axis.cross(n).normalized()
+		var wbasis:    Basis   = Basis(long_axis, n, z_axis)   # columns = images of local X/Y/Z
+		var body := StaticBody3D.new()
+		body.collision_layer = _LAYER_WORLD
+		body.collision_mask  = _world_collision_mask()
+		body.physics_material_override = _make_wedge_mat()
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(wall_len, wall_thick, wall_face)   # local X=long(Z), Y=thick, Z=face
+		var cs := CollisionShape3D.new()
+		cs.shape = bs
+		body.add_child(cs)
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = bs.size
+		mi.mesh = bm
+		var wm := StandardMaterial3D.new()
+		wm.albedo_color = wall_color
+		wm.roughness = 0.9
+		mi.set_surface_override_material(0, wm)
+		body.add_child(mi)
+		body.transform = Transform3D(wbasis, center)
+		_world_root.add_child(body)
+
+	# --- End walls: 30 deg slopes sealing BOTH ends of the trench -------------
+	# 2026-07-27 (operator UI observation) — these were the two ways the corridor
+	# could corrupt a distance measurement, and they pull in opposite directions:
+	#
+	#   -Z  the back wall was a VERTICAL seal.  A robot that turned around and
+	#       walked into it stayed parked against it, facing the wall, with no
+	#       geometry able to nudge it out — while still accumulating fwd_v.  A
+	#       trapped body that reads as "walking" is the blind-metric shape
+	#       CLAUDE.md 3 rule 4 warns about, and it is invisible in net_z (which
+	#       just stops rising) unless someone is watching.
+	#   +Z  the far end simply DROPPED OFF: the curriculum runs to 9.5 m on a
+	#       20x20 floor, so a fast arm walked off the world.  Already in the
+	#       ledger — seed 1 of the load-stroke sweep posted the campaign's best
+	#       distance (net_z 10.04) with mean chassis_y -39.29 and was charged a
+	#       `fall` for it.  That bias hits the FASTEST arm first, i.e. exactly
+	#       the arm a propulsion lever exists to demonstrate.
+	#
+	# Both are fixed by the geometry the SIDE walls already use: a 30 deg ramp
+	# whose normal points up-and-inward, so gravity returns a body that reaches
+	# it to the channel.  Same rise as the side walls (1.2*sin30 ~ 0.60 m), far
+	# beyond anything this 0.085 m body can climb, so containment is absolute
+	# while the trap and the cliff are both gone.
+	#
+	# The corridor is the OBSTACLE gym; the arena is where flat distance is
+	# measured (an open floor has neither failure mode).  Containment here is
+	# about not corrupting the obstacle result, not about making this the
+	# distance gym.
+	for zside in [-1.0, 1.0]:
+		# zside = -1 seals the -Z end (behind spawn), +1 the far end.
+		# Mirrors the side-wall construction with the long axis along X:
+		# n = surface normal (up + INWARD, toward the channel), u_world = up-slope
+		# (up + OUTWARD), and the wall is built from its inner-bottom edge.
+		var edge_z: float = back_wall_z if zside < 0.0 else corridor_len + 0.3
+		var en:        Vector3 = Vector3(0.0, cos(th), -zside * sin(th))   # up + inward
+		var eu_world:  Vector3 = Vector3(0.0, sin(th),  zside * cos(th))   # up + outward
+		var ep_edge:   Vector3 = Vector3(0.0, 0.0, edge_z)
+		var ecenter:   Vector3 = ep_edge + eu_world * (wall_face * 0.5) - en * (wall_thick * 0.5)
+		var elong:     Vector3 = Vector3(1, 0, 0)                          # end wall runs along X
+		var ez_axis:   Vector3 = elong.cross(en).normalized()
+		var ebasis:    Basis   = Basis(elong, en, ez_axis)
+		var ewall := StaticBody3D.new()
+		ewall.collision_layer = _LAYER_WORLD
+		ewall.collision_mask  = _world_collision_mask()
+		ewall.physics_material_override = _make_wedge_mat()   # mu=3.0, as the side walls
+		var ebs := BoxShape3D.new()
+		ebs.size = Vector3(thru_half * 2.0, wall_thick, wall_face)   # clip through both side walls
+		var ecs := CollisionShape3D.new()
+		ecs.shape = ebs
+		ewall.add_child(ecs)
+		var emi := MeshInstance3D.new()
+		var ebm := BoxMesh.new()
+		ebm.size = ebs.size
+		emi.mesh = ebm
+		var ewm := StandardMaterial3D.new()
+		ewm.albedo_color = wall_color
+		ewm.roughness = 0.9
+		emi.set_surface_override_material(0, ewm)
+		ewall.add_child(emi)
+		ewall.transform = Transform3D(ebasis, ecenter)
+		_world_root.add_child(ewall)
+
+	# --- Zone 1: gentle hump (up then down), spanning the channel.
+	# Triangular prism: base z in [2.0, 4.0] (1.0 m run each side), apex height
+	# scales with difficulty (0.025..0.16 m -> slope ~1.4..9.1 deg) at z=3.0.
+	# PrismMesh visual (rotated 90 deg so its ridge runs across X, slopes face
+	# +/-Z) + matching 6-vert convex hull.
+	var hump_cz:   float = 3.0
+	var hump_half: float = 1.0                          # half base run (1.0 m in Z each side)
+	var hump_h:    float = lerp(0.025, 0.16, diff)      # peak; slope = atan(peak/run)
+	var hump := StaticBody3D.new()
+	hump.collision_layer = _LAYER_WORLD
+	hump.collision_mask  = _world_collision_mask()
+	hump.physics_material_override = _make_contact_mat()
+	var hverts := PackedVector3Array()
+	hverts.append(Vector3(-thru_half, -hump_h * 0.5, -hump_half))
+	hverts.append(Vector3( thru_half, -hump_h * 0.5, -hump_half))
+	hverts.append(Vector3( thru_half, -hump_h * 0.5,  hump_half))
+	hverts.append(Vector3(-thru_half, -hump_h * 0.5,  hump_half))
+	hverts.append(Vector3(-thru_half,  hump_h * 0.5, 0.0))
+	hverts.append(Vector3( thru_half,  hump_h * 0.5, 0.0))
+	var hconvex := ConvexPolygonShape3D.new()
+	hconvex.points = hverts
+	var hcs := CollisionShape3D.new()
+	hcs.shape = hconvex
+	hump.add_child(hcs)
+	var hmi := MeshInstance3D.new()
+	var prism := PrismMesh.new()
+	prism.size = Vector3(hump_half * 2.0, hump_h, thru_half * 2.0)
+	hmi.mesh = prism
+	hmi.rotation = Vector3(0, deg_to_rad(90.0), 0)   # ridge across X, slopes face +/-Z
+	var hmat := StandardMaterial3D.new()
+	hmat.albedo_color = Color(0.30, 0.33, 0.28, 1.0)
+	hmat.roughness = 0.9
+	hmi.set_surface_override_material(0, hmat)
+	hump.add_child(hmi)
+	hump.transform.origin = Vector3(0.0, hump_h * 0.5, hump_cz)
+	_world_root.add_child(hump)
+
+	# --- Zone 2: rumble strips — half-buried cylinders across the channel.
+	# Axis along X (span wall-to-wall).  Exposed height scales with difficulty;
+	# the cylinder is sunk so only `bump_exposed` pokes above the floor (well
+	# under a radius, so it is actually climbable).  Every 0.5 m in z in
+	# [4.25, 6.25] -> 5 bumps.
+	var bump_r:       float = 0.06
+	var bump_exposed: float = lerp(0.012, 0.065, diff)   # height above the floor
+	var bump_cy:      float = bump_exposed - bump_r        # cylinder center Y (< 0 = sunk)
+	var n_bumps: int = 0
+	var bz: float = 4.25
+	while bz <= 6.30:
+		var bump := StaticBody3D.new()
+		bump.collision_layer = _LAYER_WORLD
+		bump.collision_mask  = _world_collision_mask()
+		bump.physics_material_override = _make_contact_mat()
+		var bcyl := CylinderShape3D.new()
+		bcyl.radius = bump_r
+		bcyl.height = thru_half * 2.0   # span through both walls
+		var bcs2 := CollisionShape3D.new()
+		bcs2.shape = bcyl
+		bump.add_child(bcs2)
+		var bmi2 := MeshInstance3D.new()
+		var bcm := CylinderMesh.new()
+		bcm.top_radius = bump_r
+		bcm.bottom_radius = bump_r
+		bcm.height = thru_half * 2.0
+		bcm.radial_segments = 12
+		bmi2.mesh = bcm
+		var rmat := StandardMaterial3D.new()
+		rmat.albedo_color = Color(0.40, 0.32, 0.22, 1.0)
+		rmat.roughness = 0.95
+		bmi2.set_surface_override_material(0, rmat)
+		bump.add_child(bmi2)
+		# Lay the cylinder on its side (axis Y -> X), sunk so only bump_exposed shows.
+		bump.transform = Transform3D(Basis(Vector3(0, 0, 1), deg_to_rad(90.0)), Vector3(0.0, bump_cy, bz))
+		_world_root.add_child(bump)
+		n_bumps += 1
+		bz += 0.5
+
+	# --- Zone 3: pyramid field — small climbable pyramids, z in [6.5, 9.5].
+	# Deterministic staggered placement across the channel (golden-ratio
+	# quasi-random sizes, as the arena).  Kept clear of the +/-chan_half walls.
+	var phi_inv: float = 0.6180339887498949
+	var n_pyr: int = 7
+	for i in range(n_pyr):
+		var pz: float = 6.9 + float(i) * 0.38
+		var px: float = 0.35 if (i % 2 == 0) else -0.35
+		if i % 3 == 2:
+			px = 0.0
+		var bw_t: float = fmod(float(i) * phi_inv * 2.0, 1.0)
+		var base_w: float = 0.5 + bw_t * 0.35
+		var h_t: float = fmod(float(i) * phi_inv * 3.0, 1.0)
+		var height: float = (0.10 + h_t * 0.22) * lerp(0.6, 1.25, diff)
+		_add_pyramid(px, pz, base_w, height)
+
+	print("PicrawlerBody: corridor gym built (+Z, difficulty=%.2f) — hump %.3f m + %d bumps %.3f m + %d pyramids" % [diff, hump_h, n_bumps, bump_exposed, _pyramid_xz_positions.size()])
+
+# Build one square pyramid (convex-hull collision + 4-radial-segment cone mesh)
+# at (px, pz) and register it in the pyramid bookkeeping arrays so nav /
+# engagement / reset-avoidance behave the same as the arena.  Factored out of
+# the corridor builder; mirrors the inline arena pyramid in _build_terrain.
+func _add_pyramid(px: float, pz: float, base_w: float, height: float) -> void:
+	var pyr := StaticBody3D.new()
+	pyr.collision_layer = _LAYER_WORLD
+	pyr.collision_mask  = _world_collision_mask()
+	pyr.physics_material_override = _make_contact_mat()
+	var verts := PackedVector3Array()
+	var half: float = base_w * 0.5
+	verts.append(Vector3(-half, 0.0, -half))
+	verts.append(Vector3(+half, 0.0, -half))
+	verts.append(Vector3(+half, 0.0, +half))
+	verts.append(Vector3(-half, 0.0, +half))
+	verts.append(Vector3(0.0, height, 0.0))
+	var convex := ConvexPolygonShape3D.new()
+	convex.points = verts
+	var pcs := CollisionShape3D.new()
+	pcs.shape = convex
+	pyr.add_child(pcs)
+	var pmesh := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.bottom_radius = base_w * 0.5 * sqrt(2.0)   # circumscribed radius
+	cm.top_radius    = 0.001
+	cm.height        = height
+	cm.radial_segments = 4
+	cm.rings = 1
+	pmesh.mesh = cm
+	pmesh.position = Vector3(0, height * 0.5, 0)
+	var this_pyr_mat := StandardMaterial3D.new()
+	this_pyr_mat.albedo_color = Color(0.35, 0.30, 0.22, 1.0)
+	this_pyr_mat.roughness = 0.95
+	pmesh.set_surface_override_material(0, this_pyr_mat)
+	pmesh.rotation = Vector3(0, deg_to_rad(45.0), 0)
+	pyr.add_child(pmesh)
+	pyr.transform.origin = Vector3(px, 0.0, pz)
+	_world_root.add_child(pyr)
+	# Bookkeeping parity with the arena donut.
+	_pyramid_xz_positions.append(Vector2(px, pz))
+	_pyramid_xz_radii.append(base_w * 0.7071068)
+	_pyramid_meshes.append(pmesh)
+	_pyramid_default_mats.append(this_pyr_mat)
+	_pyramid_engagement_counts.append(0)
+
+# Live gym swap (KEY_1 = arena / KEY_2 = corridor).  Frees WorldRoot and rebuilds
+# the environment around the SAME robot + brain — no scene reload, so the learned
+# model stays fully continuous (an EXPERIENCED agent dropped into a new scenario).
+# The robot is teleported to the origin spawn so it starts fresh in the new world.
+func _switch_gym(mode: String) -> void:
+	if mode == _gym_mode_active:
+		_ui_notify("[gym] already in %s" % mode)
+		return
+	_gym_mode_override = mode
+	# Tear down the world (WorldRoot owns floor + rings + all obstacles/pyramids).
+	# remove_child detaches it from the tree IMMEDIATELY (no one-frame double world),
+	# then queue_free deallocates it safely.
+	if _world_root != null:
+		remove_child(_world_root)
+		_world_root.queue_free()
+		_world_root = null
+	# Pyramid bookkeeping is rebuilt by the gym builders; clear stale entries.
+	_pyramid_xz_positions.clear()
+	_pyramid_xz_radii.clear()
+	_pyramid_engagement_counts.clear()
+	_pyramid_meshes.clear()
+	_pyramid_default_mats.clear()
+	_nearest_pyramid_idx = -1
+	# Rebuild the world in the new mode.
+	_world_root = Node3D.new()
+	_world_root.name = "WorldRoot"
+	add_child(_world_root)
+	_rebuild_world_contents()
+	# Drop the experienced robot at the new world's origin spawn (brain untouched;
+	# _do_hard_reset only publishes events.reset for Gate-0 masking, no relearning).
+	_pending_reset_offset = Vector3.ZERO
+	_do_hard_reset()
+	print("PicrawlerBody: [gym] switched -> %s" % _gym_mode_active)
+	_ui_notify("[gym] switched -> %s" % _gym_mode_active)
+
+# Controlled belly-on-ramp test (KEY_3, or headless env OGMA_PICRAWLER_TELEPORT_RAMP_AT=<tick>).
+# Drops the EXPERIENCED robot onto the corridor hump (z=3) to test the height
+# reflex's high-center recovery WITHOUT relying on the gait to navigate there.
+# Rigid-translates ALL body parts (preserves the current developed pose + the
+# brain's learned model in memory), zeroes velocity, and positions the body above
+# the peak so it drops onto the slope.  Announces a reset for Gate-0 masking only
+# (no relearning).  Corridor-only (the hump doesn't exist in the arena).
+# Surface height under (x,z) — so a drop lands ON a hump/wall rather than inside it.
+func _surface_y_at(x: float, z: float) -> float:
+	var ss := get_world_3d().direct_space_state
+	if ss == null:
+		return 0.0
+	var q := PhysicsRayQueryParameters3D.create(Vector3(x, 5.0, z), Vector3(x, -1.0, z))
+	var h := ss.intersect_ray(q)
+	return float(h.position.y) if not h.is_empty() else 0.0
+
+func _teleport_to_ramp() -> void:
+	if _gym_mode_active != "corridor":
+		_ui_notify("[teleport] the ramp only exists in the corridor gym (press 2)")
+		return
+	var tx: float = 0.0
+	var tz: float = 3.0   # hump peak by default
+	var xz: String = OS.get_environment("OGMA_PICRAWLER_TELEPORT_XZ")   # "x,z" to target a wall etc.
+	if xz != "":
+		var parts := xz.split(",")
+		if parts.size() == 2:
+			tx = parts[0].to_float(); tz = parts[1].to_float()
+	# Find the surface height at (tx,tz) so tall targets (walls) drop ONTO the surface.
+	var surf_y: float = 0.0
+	var ss := get_world_3d().direct_space_state
+	if ss != null:
+		var q := PhysicsRayQueryParameters3D.new()
+		q.from = Vector3(tx, 2.0, tz); q.to = Vector3(tx, -1.0, tz); q.collision_mask = _LAYER_WORLD
+		var h := ss.intersect_ray(q)
+		if not h.is_empty():
+			surf_y = h.position.y
+	_pending_teleport = Vector3(tx, surf_y, tz)   # applied next physics frame
+
+# Drop the EXPERIENCED robot (brain + current pose preserved) onto a ground point.
+# Rigid-translates every part so the chassis lands ~0.30 m ABOVE `ground` (the
+# surface height under it, so it clears tall obstacles) and falls onto it; zeroes
+# velocity; announces a reset for Gate-0 masking only (no relearning).  MUST be
+# called from the physics step (see _pending_teleport) or the write is clobbered.
+func _teleport_to(ground: Vector3) -> void:
+	# Optional FLIP (env OGMA_PICRAWLER_TELEPORT_FLIP=1): rotate the whole assembly
+	# 180° about X → drops it upside-down (a controlled INVALID posture for the
+	# keyframe bake-gate A/B).  Rigid transform about the chassis pivot.
+	# Per-drop intent (mouse placement) wins; scripted/env runs fall through to the env var.
+	var flip: bool = (_pending_teleport_flip == 1) if _pending_teleport_flip >= 0 \
+		else OS.get_environment("OGMA_PICRAWLER_TELEPORT_FLIP") == "1"
+	var drop: Vector3 = Vector3(ground.x, ground.y + (0.35 if flip else 0.30), ground.z)
+	var pivot: Vector3 = _chassis.global_transform.origin
+	var rot: Basis = Basis(Vector3(1, 0, 0), PI) if flip else Basis.IDENTITY
+	var parts: Array = [_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array)
+	for b in parts:
+		b.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		b.freeze = true
+	for b in parts:
+		var rel: Vector3 = rot * (b.global_transform.origin - pivot)
+		b.global_transform = Transform3D(rot * b.global_transform.basis, drop + rel)
+		b.linear_velocity = Vector3.ZERO
+		b.angular_velocity = Vector3.ZERO
+	for b in parts:
+		b.freeze = false
+	_last_drop = drop
+	_last_drop_flip = flip
+	_last_drop_tick = tick_counter
+	if brain != null:
+		brain.publish_event("reset", 1.0)
+	print("PicrawlerBody: [teleport] dropped the experienced robot at (%.2f, %.2f)%s tick %d" % [
+		ground.x, ground.z, "  FLIPPED" if flip else "", tick_counter])
+	_ui_notify("[teleport] dropped%s at (%.1f, %.1f)" % [" (flipped)" if flip else "", ground.x, ground.z])
+
+# --- Mouse-guided teleport placement (KEY_4) --------------------------------
+# Enter placement mode: the mouse projects a marker onto the floor; LEFT-CLICK
+# drops the experienced robot there.  A general tool — reposition the agent to
+# any spot to probe recovery / behaviour from arbitrary states.
+var _place_mode: bool = false
+var _place_marker: Node3D = null
+var _place_target: Vector3 = Vector3.ZERO
+# Last actually-dropped teleport target + whether it was inverted.  Surfaced on the HUD so
+# a placement can be reported back verbatim and replayed headless via
+# OGMA_PICRAWLER_TELEPORT_XZ / _FLIP — otherwise a UI observation is not reproducible.
+var _last_drop: Vector3 = Vector3.ZERO
+var _last_drop_flip: bool = false
+var _last_drop_tick: int = -1
+
+func _set_place_mode(on: bool) -> void:
+	_place_mode = on
+	if on:
+		_ui_notify("[4] place mode — LEFT-click = drop upright, RIGHT-click = drop INVERTED")
+	if _place_marker == null and on:
+		_place_marker = _make_place_marker()
+		add_child(_place_marker)
+	if _place_marker != null:
+		_place_marker.visible = on
+	_ui_notify("[place] mouse-teleport %s%s" % [
+		"ON — move mouse, LEFT-CLICK to drop" if on else "off", "  (4 to toggle)"])
+
+func _make_place_marker() -> Node3D:
+	var root := Node3D.new()
+	root.name = "TeleportMarker"
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.85, 0.1, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.7, 0.0)
+	for ang in [45.0, -45.0]:   # two crossed bars = an X on the floor
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.5, 0.008, 0.06)
+		mi.mesh = bm
+		mi.rotation = Vector3(0, deg_to_rad(ang), 0)
+		mi.set_surface_override_material(0, mat)
+		root.add_child(mi)
+	return root
+
+func _place_ground_from_mouse() -> Variant:
+	# Raycast the mouse into the scene and return the SURFACE point under the cursor
+	# (floor OR the top of a ramp/pyramid), so the marker sits ON the geometry and
+	# the drop lands on whatever's there.  Falls back to the y=0 plane past geometry.
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return null
+	var mpos: Vector2 = get_viewport().get_mouse_position()
+	var from: Vector3 = cam.project_ray_origin(mpos)
+	var dir: Vector3 = cam.project_ray_normal(mpos)
+	var space := get_world_3d().direct_space_state
+	if space != null:
+		var query := PhysicsRayQueryParameters3D.new()
+		query.from = from
+		query.to = from + dir * 100.0
+		query.collision_mask = _LAYER_WORLD          # floor + obstacles (not the robot)
+		var hit := space.intersect_ray(query)
+		if not hit.is_empty():
+			return hit.position
+	# Nothing hit — project onto the y=0 floor plane.
+	if abs(dir.y) < 1e-5:
+		return null
+	var t: float = -from.y / dir.y
+	if t < 0.0:
+		return null
+	return from + dir * t
+
+# ---------------------------------------------------------------------------
 # Body construction — chassis + 4 legs
 # ---------------------------------------------------------------------------
+## World-body collision mask.  Adding _LAYER_CHASSIS lets the floor/obstacles SEE the
+## chassis; the chassis must also be given _LAYER_WORLD in its own mask (see _build_body).
+## Both directions are set rather than relying on one-sided matching — a half-wired toggle
+## that silently does nothing is this codebase's characteristic failure shape.
+## Live chassis-friction setter for the [K] panel.  Mutates the shared chassis material in
+## place, so it takes effect on the next contact without a rebuild.
+func set_chassis_friction(v: float) -> void:
+	chassis_friction = clampf(v, 0.0, 3.0)
+	if _chassis_mat != null:
+		_chassis_mat.friction = chassis_friction
+
+func _world_collision_mask() -> int:
+	return _LAYER_BODY | (_LAYER_CHASSIS if chassis_collides else 0)
+
+## Re-point the chassis + every existing world body at the current toggle state, so [J] can
+## flip it live without rebuilding the gym.
+func _apply_chassis_collision() -> void:
+	if _chassis != null and is_instance_valid(_chassis):
+		_chassis.collision_mask = _LAYER_WORLD if chassis_collides else 0
+		_chassis.physics_material_override = _make_chassis_mat()
+	var wr: Node = get_tree().get_root().find_child("WorldRoot", true, false)
+	var n: int = 0
+	if wr != null:
+		var stack: Array = [wr]
+		while not stack.is_empty():
+			var nd: Node = stack.pop_back()
+			for c in nd.get_children():
+				stack.append(c)
+			if nd is StaticBody3D or nd is RigidBody3D:
+				if (nd as CollisionObject3D).collision_layer & _LAYER_WORLD:
+					(nd as CollisionObject3D).collision_mask = _world_collision_mask()
+					n += 1
+	print("PicrawlerBody: chassis_collides = %s  (%d world bodies re-masked)" % [
+		chassis_collides, n])
+	_ui_notify("[J] chassis collision: %s" % ("ON" if chassis_collides else "OFF (ghost)"))
+
 func _build_body() -> void:
 	# Chassis
 	_chassis = RigidBody3D.new()
@@ -2797,11 +4034,12 @@ func _build_body() -> void:
 	_chassis.collision_layer = _LAYER_CHASSIS   # separate layer; floor.mask
 												# doesn't include it, so the
 												# chassis never touches floor.
-	_chassis.collision_mask  = 0   # chassis ignores everything (legs are
-								   # attached via joint constraints, not collisions).
-	_chassis.angular_damp = BODY_ANGULAR_DAMP
-	_chassis.linear_damp  = BODY_LINEAR_DAMP
-	_chassis.physics_material_override = _make_contact_mat()
+	# 0 = the historical ghost chassis (legs are attached via joint constraints, not
+	# collisions, so the chassis needs no mask for the robot to hold together).
+	_chassis.collision_mask  = _LAYER_WORLD if chassis_collides else 0
+	_chassis.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+	_chassis.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
+	_chassis.physics_material_override = _make_chassis_mat()
 	var cs := CollisionShape3D.new()
 	var cb := BoxShape3D.new()
 	cb.size = Vector3(CHASSIS_X, CHASSIS_Y, CHASSIS_Z)
@@ -2845,6 +4083,26 @@ func _build_body() -> void:
 	# 2026-06-03 — verify G6DOF angular params reached the joints.  Bit-
 	# identical-across-tweaks calibration sweep raised the question of
 	# whether changes are reaching the body — this print is the receipt.
+	# --- 2026-08-02 · IMPORT I6: PHYSICAL SCAFFOLD, NAMED AS A SCAFFOLD ---------------
+	# Every Playful Machine legged experiment runs at reduced gravity: the dog, the
+	# hexapod (zoo) and the humanoid all set ODE gravity to -6 against Earth's -9.81
+	# (the snake uses -4), on rubber ground, with compliant passive distal joints.
+	# Their emergence results are ALL measured under that scaffold; ours are measured
+	# at 1.0 g with rigid legs, and we bought uprightness with control-layer terms
+	# instead (postural_gain, height_homeo_gain, stance_lift_gain, balance_gain).
+	#
+	# This knob is the faithful analogue, and it exists to answer ONE question:
+	# does the homeokinetic core produce a gait when the body is as forgiving as the
+	# one PM's results come from?  It is a SCAFFOLD (docs: scaffold / de-scaffold) —
+	# a diagnostic prop that must be named as such in any claim and removed before
+	# any result stands on its own.  PM-equivalent value is 6/9.81 = 0.61.
+	#
+	# 1.0 = off = byte-identical to every historical run.
+	if not is_equal_approx(scaffold_gravity_scale, 1.0):
+		for b in ([_chassis] + (_coxas as Array) + (_uppers as Array) + (_lowers as Array)):
+			b.gravity_scale = scaffold_gravity_scale
+		print("PicrawlerBody: ⚠ SCAFFOLD ACTIVE — gravity_scale=%.3f (PM legged sims run 0.61)"
+			% scaffold_gravity_scale)
 	if joint_backend == "hinge":
 		print("PicrawlerBody: joint_backend=hinge (legacy hobby-servo, historical baselines)  motor_force_scale=%.4f" % motor_force_scale)
 	else:
@@ -2953,6 +4211,12 @@ func _build_leg(leg_index: int) -> void:
 	# Darkest shade of leg_color for lower segment.
 	var lower := _make_capsule(LOWER_MASS, LEG_RADIUS * 0.8, L3, lower_center,
 							   leg_color.darkened(0.5), lower_dir)
+	# Markov-compliant foot-contact sensor: enable true physics contact reporting
+	# on the foot (lower leg) so we can sense TOUCH (= a hardware contact switch),
+	# not an absolute-Y threshold.  Legs mask _LAYER_WORLD only, so any reported
+	# collision is genuine ground/obstacle contact.
+	lower.contact_monitor = true
+	lower.max_contacts_reported = 4
 	_lowers.append(lower)
 
 	# Knee joint — same basis as hip2 (axis = leg-local lateral).
@@ -3161,9 +4425,40 @@ const _G6DOF_DEFAULT_PRESET: Dictionary = {
 	"motor_freeplay_rad":           0.1,
 }
 
+# Env var that owns each preset key.  If it is set, the preset must NOT overwrite it.
+const _G6DOF_PRESET_ENV: Dictionary = {
+	"motor_force_scale":            "OGMA_PICRAWLER_MOTOR_FORCE_SCALE",
+	"motor_authority_scale":        "OGMA_PICRAWLER_MOTOR_AUTHORITY",
+	"motor_damping_factor":         "OGMA_PICRAWLER_MOTOR_DAMP",
+	"joint_angular_damping":        "OGMA_PICRAWLER_JOINT_DAMPING",
+	"joint_angular_erp":            "OGMA_PICRAWLER_JOINT_ERP",
+	"joint_angular_limit_softness": "OGMA_PICRAWLER_JOINT_SOFTNESS",
+	"hip1_spring_stiffness":        "OGMA_PICRAWLER_HIP1_SPRING_STIFFNESS",
+	"hip1_spring_damping":          "OGMA_PICRAWLER_HIP1_SPRING_DAMPING",
+	"hip2_spring_stiffness":        "OGMA_PICRAWLER_HIP2_SPRING_STIFFNESS",
+	"hip2_spring_damping":          "OGMA_PICRAWLER_HIP2_SPRING_DAMPING",
+	"knee_spring_stiffness":        "OGMA_PICRAWLER_KNEE_SPRING_STIFFNESS",
+	"knee_spring_damping":          "OGMA_PICRAWLER_KNEE_SPRING_DAMPING",
+	"motor_freeplay_rad":           "OGMA_PICRAWLER_MOTOR_FREEPLAY",
+}
+
 func _apply_g6dof_default_preset() -> void:
+	# ⚠ 2026-08-03 — the preset used to overwrite EVERY key unconditionally.  Its own
+	# comment claimed "env vars still win because they run AFTER this baseline", but the
+	# env whitelist in _resolve_env() runs BEFORE this call, so the preset was silently
+	# clobbering every env override of a preset key.  Discovered when an
+	# OGMA_PICRAWLER_JOINT_DAMPING sweep produced four identical arms — the runs all
+	# reported damping=1.500 regardless of what was requested.  Any past headless sweep
+	# over a preset key on g6dof measured NOTHING and would have read as a clean null.
+	var skipped: Array = []
 	for key in _G6DOF_DEFAULT_PRESET:
+		var envk: String = str(_G6DOF_PRESET_ENV.get(key, ""))
+		if envk != "" and OS.get_environment(envk) != "":
+			skipped.append(key)
+			continue                       # env owns this one
 		set(key, _G6DOF_DEFAULT_PRESET[key])
+	if not skipped.is_empty():
+		print("PicrawlerBody: G6DOF preset yielded to env for: %s" % ", ".join(skipped))
 	print("PicrawlerBody: applied G6DOF default preset (hand-tuned compliant stand) — env / config / curriculum can still override")
 
 # 2026-06-03 — Backend-aware per-tick motor setter.  Caller always
@@ -3193,6 +4488,94 @@ func _apply_joint_springs() -> void:
 	for j in _knee_joints:
 		_apply_spring_to(j, knee_spring_stiffness, knee_spring_damping)
 
+# ---- 2026-08-03 · GANGED JOINT DRIVE (G mode only) ----------------------------------
+# Called once per physics tick BEFORE the servo targets are read, so it writes straight
+# into servo_targets[] and rides the normal PD/freeplay/spring path — i.e. the operator
+# is characterising the REAL actuator chain, not a bypass.
+#   PULSE  : step the group by amp, hold N ticks, release → the ring-down after release
+#            gives the damping ratio (successive peak ratio) and the natural frequency.
+#   SHAKE  : sinusoid at shake_hz → sweep it and watch the peak-to-peak readout; the
+#            frequency where pp is maximal for a fixed drive amplitude IS the resonance.
+# Indices follow the servo_targets layout: 0-3 hip1, 4-7 hip2, 8-11 knee.
+func _tick_gang_drive() -> void:
+	if not _motor_test_mode:
+		return
+	var hip2_extra: float = 0.0
+	var knee_extra: float = 0.0
+	if _gang_pulse_ticks > 0:
+		_gang_pulse_ticks -= 1
+		if _gang_pulse_group == 1 or _gang_pulse_group == 3: hip2_extra += _gang_pulse_amp
+		if _gang_pulse_group == 2 or _gang_pulse_group == 3: knee_extra += _gang_pulse_amp
+	if _gang_shake_hz > 0.0 and _gang_shake_amp > 0.0:
+		_gang_shake_phase += 2.0 * PI * _gang_shake_hz * TAU
+		if _gang_shake_phase > 2.0 * PI: _gang_shake_phase -= 2.0 * PI
+		var sv: float = sin(_gang_shake_phase) * _gang_shake_amp
+		if _gang_pulse_group == 1 or _gang_pulse_group == 3: hip2_extra += sv
+		if _gang_pulse_group == 2 or _gang_pulse_group == 3: knee_extra += sv
+	# ⚠ USE servo_idx().  Two different 12-element layouts live in this file: the proprio
+	# publish is JOINT-MAJOR (hip1x4, hip2x4, kneex4) while servo_targets is LEG-MAJOR
+	# (leg*3 + joint).  Open-coding "4+i"/"8+i" here drove hip1 on the wrong legs — the
+	# operator caught it as "hip2 base is moving rear-right hip1".
+	for i in range(4):
+		servo_targets[servo_idx(i, 1)] = _gang_hip2_base + hip2_extra   # hip2
+		servo_targets[servo_idx(i, 2)] = _gang_knee_base + knee_extra   # knee
+	# Rolling peak-to-peak of the MEASURED angles — the response, not the command.
+	# Leg 0 is representative; the gang drives all four identically.  Measured from the
+	# joint geometry with the same helper the physics step uses (hip2_angles/knee_angles
+	# are locals there, not members, so they cannot be read from here).
+	if _coxas.size() > 0 and _uppers.size() > 0 and _lowers.size() > 0:
+		var a2: float = _relative_angle_world_axis(_coxas[0], _uppers[0], _hip2_axes[0])
+		var ak: float = _relative_angle_world_axis(_uppers[0], _lowers[0], _knee_axes[0])
+		_gang_win_hi2 = maxf(_gang_win_hi2, a2); _gang_win_lo2 = minf(_gang_win_lo2, a2)
+		_gang_win_hik = maxf(_gang_win_hik, ak); _gang_win_lok = minf(_gang_win_lok, ak)
+	_gang_win_n += 1
+	if _gang_win_n >= 100:                      # ~2 s window at 50 Hz
+		_gang_pp_hip2 = _gang_win_hi2 - _gang_win_lo2
+		_gang_pp_knee = _gang_win_hik - _gang_win_lok
+		_gang_win_hi2 = -9.0; _gang_win_lo2 = 9.0
+		_gang_win_hik = -9.0; _gang_win_lok = 9.0
+		_gang_win_n = 0
+
+func gang_pulse(amp: float, hold_ticks: int, group: int) -> void:
+	_gang_pulse_amp = amp
+	_gang_pulse_ticks = max(1, hold_ticks)
+	_gang_pulse_group = group
+	print("PicrawlerBody: GANG PULSE amp=%+.3f hold=%d group=%d — watch the ring-down"
+		% [amp, hold_ticks, group])
+
+# Error BEYOND the freeplay band.  Zero inside it (motor released); outside, the residual
+# past the boundary — so the motor arrests the joint AT the slop edge rather than driving
+# it back to target and re-entering the band.  freeplay 0 ⇒ returns err unchanged, so the
+# no-freeplay path stays bit-identical to the pre-2026-08-03 behaviour.
+# Soft restoring command INSIDE the freeplay band — the spring, implemented through the
+# motor because the constraint spring is inert in Godot Physics 3D.
+#   stiffness → fraction of full servo authority applied toward the commanded angle
+#   damping   → fraction of the force limit, so a stiffer-but-undamped joint can ring
+# Returns [velocity, max_impulse].  stiffness 0 ⇒ [0, 0] = genuinely free, so the
+# all-zero ragdoll case is bit-identical to before this change.
+const SPRING_K_FULL: float = 20.0     # slider max == full servo authority
+func _soft_spring_cmd(err: float, stiffness: float, damping: float, full_imp: float) -> Array:
+	if stiffness <= 0.0:
+		return [0.0, 0.0]
+	var k: float = clampf(stiffness / SPRING_K_FULL, 0.0, 1.0)
+	var v: float = -clamp(SERVO_KP * k * err, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+	# Damping rides the force limit: low damping = the spring can overshoot and ring,
+	# high damping = it settles.  Floor keeps a stiff/undamped spring still able to act.
+	var d: float = clampf(0.25 + 0.75 * (damping / 5.0), 0.0, 1.0)
+	return [v, full_imp * k * d]
+
+func _freeplay_err(err: float) -> float:
+	if motor_freeplay_rad <= 0.0:
+		return err
+	if absf(err) <= motor_freeplay_rad:
+		return 0.0
+	return err - signf(err) * motor_freeplay_rad
+
+func _set_spring_equilibrium(j: Object, target_rad: float) -> void:
+	if j is Generic6DOFJoint3D:
+		(j as Generic6DOFJoint3D).set_param_x(
+			Generic6DOFJoint3D.PARAM_ANGULAR_SPRING_EQUILIBRIUM_POINT, target_rad)
+
 func _apply_spring_to(j: Generic6DOFJoint3D, stiffness: float, damping: float) -> void:
 	# Spring lives on the X axis (twist) since _make_g6dof_joint remaps the
 	# hinge axis there.
@@ -3210,8 +4593,8 @@ func _make_segment(mass: float, radius: float, center: Vector3, color: Color) ->
 	b.transform = Transform3D(Basis.IDENTITY, center)
 	b.collision_layer = _LAYER_BODY
 	b.collision_mask  = _LAYER_WORLD
-	b.angular_damp = BODY_ANGULAR_DAMP
-	b.linear_damp  = BODY_LINEAR_DAMP
+	b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+	b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 	b.physics_material_override = _make_contact_mat()
 	var cs := CollisionShape3D.new()
 	var sp := SphereShape3D.new()
@@ -3241,8 +4624,8 @@ func _make_capsule(mass: float, radius: float, height: float, center: Vector3,
 	b.transform = Transform3D(Basis.IDENTITY, center)
 	b.collision_layer = _LAYER_BODY
 	b.collision_mask  = _LAYER_WORLD
-	b.angular_damp = BODY_ANGULAR_DAMP
-	b.linear_damp  = BODY_LINEAR_DAMP
+	b.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
+	b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 	b.physics_material_override = _make_contact_mat()
 	var orient: Basis = Basis.IDENTITY
 	if long_axis_dir.distance_to(Vector3.UP) > 0.001:
@@ -3299,6 +4682,31 @@ func _lock_six_dof(joint: Generic6DOFJoint3D, free_axis: String,
 # Physics loop
 # ---------------------------------------------------------------------------
 func _input(event: InputEvent) -> void:
+	# Mouse-guided teleport placement — handled BEFORE the key-only gate below.
+	# Move the mouse to slide the floor marker; left-click drops the robot there.
+	if _place_mode:
+		if event is InputEventMouseMotion:
+			var g = _place_ground_from_mouse()
+			if g != null:
+				_place_target = g
+				if _place_marker != null:
+					_place_marker.global_position = g + Vector3(0, 0.012, 0)   # float just above the surface
+			get_viewport().set_input_as_handled()
+			return
+		elif event is InputEventMouseButton and event.pressed \
+				and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+			# LEFT = drop upright, RIGHT = drop INVERTED.  Inversion recovery is a thing we
+			# probe constantly (does it self-right, and does the walk survive afterwards),
+			# and it used to require setting an env var and restarting.  Now it is a click.
+			# Defer the actual drop to the physics step (input-frame writes get clobbered).
+			var inverted: bool = (event.button_index == MOUSE_BUTTON_RIGHT)
+			_pending_teleport = _place_target
+			_pending_teleport_flip = 1 if inverted else 0
+			_ui_notify("[place] dropping %s at (%.1f, %.1f)" % [
+				"INVERTED" if inverted else "upright", _place_target.x, _place_target.z])
+			_set_place_mode(false)
+			get_viewport().set_input_as_handled()
+			return
 	# R toggle on _input (fires before any Control consumer).  SPACE on
 	# _unhandled_input below (matches quadruped's working pattern; R via
 	# _input + SPACE via _input together broke after the first reset —
@@ -3306,6 +4714,24 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var key: int = (event as InputEventKey).keycode
+	# 2026-08-03 — live body-damping sweep, [ = less damped, ] = more damped.
+	# PM's dog runs dampingFactor=0; ours is damped at three levels.  ⚠ THIS IS A
+	# DIAGNOSTIC, NOT A LEVER: the damping models real hobby-servo gear-train inertia
+	# that the physical robot genuinely has, so turning it down is a sim cheat of the
+	# same class as an external anti-fall prop.  It is here to FEEL the coupling
+	# between plant damping and the homeokinetic loop, not to be promoted.
+	if key == KEY_BRACKETLEFT or key == KEY_BRACKETRIGHT:
+		var steps_: Array = [1.0, 0.5, 0.25, 0.1, 0.05]
+		var idx: int = 0
+		var best: float = 1e9
+		for i in range(steps_.size()):
+			var dd: float = absf(float(steps_[i]) - body_damp_scale)
+			if dd < best: best = dd; idx = i
+		idx = clampi(idx + (1 if key == KEY_BRACKETLEFT else -1), 0, steps_.size() - 1)
+		self.body_damp_scale = float(steps_[idx])
+		_ui_notify("body_damp x%.2f  (DIAGNOSTIC, not a lever — models real servo inertia)"
+			% body_damp_scale)
+		return
 	if key == KEY_R:
 		_ragdoll_mode = not _ragdoll_mode
 		# Wake / allow-sleep on all bodies so motors actually respond
@@ -3441,6 +4867,49 @@ func _input(event: InputEvent) -> void:
 			if p != null and p is Control:
 				(p as Control).visible = not _panels_hidden
 		print("PicrawlerBody: [T] panels_hidden = %s" % _panels_hidden)
+	elif key == KEY_COMMA or key == KEY_PERIOD or key == KEY_SLASH:
+		# ---- 2026-08-05 · TIME SCALE (slow-motion + turbo) ------------------------------
+		# Engine.time_scale changes how many FIXED-timestep physics ticks advance per wall
+		# second — never what happens inside a tick.  So the robot walks the identical
+		# trajectory and a UI observation stays comparable to a headless run.  This is the
+		# whole reason to use time_scale and NOT Engine.physics_ticks_per_second, which
+		# would change the integration rate and hand you a different body (the same class
+		# of mistake as the launcher's g6dof default).
+		#
+		# ⚠ THE TWO DIRECTIONS ARE NOT EQUALLY SAFE, and the asymmetry is worth knowing:
+		#   SLOW (<1) is exact.  Fewer ticks per frame, nothing to drop.
+		#   TURBO (>1) needs MORE physics steps per rendered frame, and Godot caps that at
+		#     max_physics_steps_per_frame to avoid a spiral of death.  Past the cap the
+		#     engine does NOT corrupt physics — it simply stops going faster and the sim
+		#     falls behind wall clock.  So turbo has a ceiling, and the honest way to run
+		#     the sim "as fast as the system allows" is still headless (what seedavg does).
+		#   We raise the cap while in turbo so the knob does something before it saturates.
+		var idx: int = _TIME_SCALES.find(_time_scale_v)
+		if idx < 0: idx = _TIME_SCALES.find(1.0)
+		if key == KEY_SLASH: idx = _TIME_SCALES.find(1.0)
+		elif key == KEY_COMMA: idx = maxi(0, idx - 1)
+		else: idx = mini(_TIME_SCALES.size() - 1, idx + 1)
+		_time_scale_v = _TIME_SCALES[idx]
+		Engine.time_scale = _time_scale_v
+		Engine.max_physics_steps_per_frame = 8 if _time_scale_v <= 1.0 else int(clampf(_time_scale_v * 8.0, 8.0, 128.0))
+		print("PicrawlerBody: time_scale = %.2fx (%s)" % [_time_scale_v,
+			"real time" if is_equal_approx(_time_scale_v, 1.0)
+			else ("SLOW-MO — exact, nothing dropped" if _time_scale_v < 1.0
+				  else "TURBO — capped by max_physics_steps_per_frame")])
+		_ui_notify("time %.2fx" % _time_scale_v)
+	elif key == KEY_J:
+		# 2026-08-04 — flip chassis collision live.  DIAGNOSTIC: every number in the ledger
+		# was measured with this OFF, so an A/B taken across a mid-run flip is not comparable
+		# to anything historical.  Restart for a clean arm.
+		chassis_collides = not chassis_collides
+		_apply_chassis_collision()
+	elif key == KEY_K:
+		# 2026-08-04 — toggle the ABLATION bench (break a servo / take a limb off, live).
+		# It is destructive, so it boots COLLAPSED and this is the only way to open it.
+		var ap: Node = get_tree().get_root().find_child("AblationPanel", true, false)
+		if ap != null and ap.has_method("_on_minimise"):
+			ap._on_minimise()
+			print("PicrawlerBody: [K] ablation panel toggled")
 	elif key == KEY_H:
 		# 2026-06-09 — toggle the main HUD (calibration label + diagnostic
 		# text) while keeping the hint line visible.  The quadruped_hud
@@ -3448,6 +4917,46 @@ func _input(event: InputEvent) -> void:
 		# hint line when true.
 		hud_hidden = not hud_hidden
 		print("PicrawlerBody: [H] hud_hidden = %s" % hud_hidden)
+	elif key == KEY_P:
+		# 2026-07-23 — toggle the walking-path trail (red X every metre travelled,
+		# both gyms).  Node3D.visible hides the node + all spawned marks at once.
+		var t := _walking_trail as Node3D
+		if t != null and is_instance_valid(t):
+			var shown: bool = t.call("toggle_shown")
+			print("PicrawlerBody: [P] path_trail = %s" % shown)
+	elif key == KEY_F1:
+		# 2026-07-27 — mark the last ~15 s as GOOD: "this is the gait I want."
+		# F-keys because G/C/T/H/P/M/N/V/R/1-4/SPACE are all taken.
+		_clip_save("GOOD")
+	elif key == KEY_F2:
+		# ...and BAD: "this is the failure."  clipdiff.py then reports what actually
+		# differs between the two sets, which is the part words keep getting wrong.
+		_clip_save("BAD")
+	elif key == KEY_F3:
+		# Drop the most recent clip (mis-timed press).  Deletes by index rather than by
+		# "latest file" so a concurrent run's directory can never be touched.
+		if _clip_seq > 0 and _clip_dir != "":
+			var d: DirAccess = DirAccess.open(_clip_dir)
+			if d != null:
+				for fn in d.get_files():
+					if fn.begins_with("clip_%02d_" % (_clip_seq - 1)):
+						d.remove(fn)
+						_clip_seq -= 1
+						print("PicrawlerBody: [F3] dropped clip %s" % fn)
+						_ui_notify("clip dropped")
+						break
+	elif key == KEY_1:
+		# Live gym swap — drop the experienced robot (brain intact) into the ARENA (donut).
+		_switch_gym("arena")
+	elif key == KEY_2:
+		# Live gym swap — drop the experienced robot (brain intact) into the CORRIDOR trench.
+		_switch_gym("corridor")
+	elif key == KEY_3:
+		# Controlled belly-on-ramp test — drop the experienced robot onto the corridor hump.
+		_teleport_to_ramp()
+	elif key == KEY_4:
+		# Mouse-guided teleport placement — X follows the mouse, left-click to drop.
+		_set_place_mode(not _place_mode)
 	elif key == KEY_V:
 		# 2026-06-13 — toggle the loom/vision ray overlay (camera-placement debug).
 		_ray_overlay_on = not _ray_overlay_on
@@ -3457,11 +4966,23 @@ func _input(event: InputEvent) -> void:
 			_update_ray_overlay()   # immediate refresh, don't wait for the loom tick
 		print("PicrawlerBody: [V] ray_overlay = %s" % _ray_overlay_on)
 	elif key == KEY_M:
+		# 2026-07-26 — toggle JUST the MOTOR-EPM slider panel.  It is a full-rect Control
+		# that sits over the top-right corner even when collapsed, which covered the IMU
+		# scope.  [T] still hides all panels together; this is the single-panel version.
+		# (The vision-panel toggle moved from M to N to free this key — the current
+		# picrawler configs carry no vision module, so that binding was inert here.)
+		var mp: Node = get_tree().get_root().find_child("MotorEpmPanel", true, false)
+		if mp != null and mp is Control:
+			var c := mp as Control
+			c.visible = not c.visible
+			print("PicrawlerBody: [M] motor_epm_panel = %s" % c.visible)
+	elif key == KEY_N:
 		# 2026-06-13 — toggle the camera+LiDAR vision pixel panels (no camera
 		# switch — the normal orbit camera is easy to drive by hand).
+		# Moved from [M] on 2026-07-26 so M can toggle the MOTOR-EPM slider panel.
 		_vision_panel_on = not _vision_panel_on
 		_update_vision_panel()
-		print("PicrawlerBody: [M] vision_panel = %s" % _vision_panel_on)
+		print("PicrawlerBody: [N] vision_panel = %s" % _vision_panel_on)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
@@ -3476,6 +4997,13 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if brain == null or not brain.is_brain_ready():
 		return
+	_accum_grf()
+	# Apply a deferred teleport (KEY_3 / KEY_4-click / env) HERE in the physics step
+	# so the transform writes stick — input-frame writes get clobbered by the solver.
+	if _pending_teleport != null:
+		_teleport_to(_pending_teleport)
+		_pending_teleport = null
+		_pending_teleport_flip = -1      # consumed — later drops fall back to the env again
 	# Turbo budget — exit the process cleanly when either:
 	#   (a) OGMA_QUIT_AFTER_TICKS is reached, OR
 	#   (b) the run is already _done (max_steps hit + reset_mode=continuous
@@ -3498,6 +5026,9 @@ func _physics_process(delta: float) -> void:
 				% [_done, tick_counter, _quit_after_ticks])
 		get_tree().quit()
 		return
+	# Sensor rate ≠ control rate: sample + filter the IMU every PHYSICS tick (240 Hz)
+	# before the 50 Hz brain steps consume it.  See _imu_substep().
+	_imu_substep(delta)
 	_accum += delta
 	if _accum > 0.2:
 		_accum = 0.2
@@ -3505,6 +5036,89 @@ func _physics_process(delta: float) -> void:
 		_accum -= TAU
 		if _done: return
 		_step_one()
+
+# ---------------------------------------------------------------------------
+# IMU substep — runs at the PHYSICS rate (physics_hz, default 240), NOT at the
+# brain's TAU rate.  This is what a real IMU does: MPU-6050-class parts sample
+# 1-8 kHz, a BNO085 fuses on-chip at ~400 Hz, and attitude filters on legged
+# machines run 200-1000 Hz.  Sampling at the 50 Hz control rate instead both
+# understates the hardware and starves the filter (aliasing footfall impacts),
+# and the physics is ALREADY oversampled here to stop feet tunnelling through
+# the floor — so this bandwidth costs nothing.
+# ---------------------------------------------------------------------------
+# IMU state for the HUD scope.  Split deliberately into signals a REAL PiCrawler can
+# observe and signals only the simulator knows: on hardware there is no ground-truth
+# attitude, so the honest health check is the DISAGREEMENT between the accelerometer-only
+# estimate and the fused one — both computable on-robot.  The scope surfaces that as the
+# quantity to watch during bring-up, and marks the sim-only rows as such.
+func get_imu_debug() -> Dictionary:
+	var up_exact: Vector3 = _chassis.global_transform.basis.transposed() * Vector3.UP \
+		if _chassis != null else Vector3.UP
+	return {
+		# --- hardware-observable ---
+		"up_fused": _up_est_body,          # complementary-filter gravity-up (body frame)
+		"up_accel": _up_acc_last,          # accelerometer-only gravity-up (body frame)
+		"accel":    _accel_body_last,      # modelled accelerometer, m/s^2, body frame
+		"gyro":     _gyro_body_last,       # modelled gyro, rad/s, body frame
+		"trust":    _dbg_acc_trust,        # adaptive correction gain actually applied
+		"disagree_deg": rad_to_deg(_up_est_body.angle_to(_up_acc_last)) \
+			if _up_acc_last.length() > 0.5 else 0.0,
+		# --- simulator ground truth (NOT available on the real robot) ---
+		"up_exact":    up_exact,
+		"err_fused_deg": _dbg_att_err_imu,
+		"err_accel_deg": _dbg_att_err_acc,
+		"imu_hz": float(physics_hz),
+	}
+
+func _imu_substep(dt: float) -> void:
+	if _chassis == null or dt <= 0.0:
+		return
+	var basis_w: Basis = _chassis.global_transform.basis
+	var w2b: Basis = basis_w.transposed()          # world → body (orthonormal)
+	# Accelerometer = proper acceleration in the BODY frame: at rest it points along
+	# body-frame up with magnitude g; under acceleration it tilts by −a_world.
+	var a_world: Vector3 = (_chassis.linear_velocity - _prev_lin_vel) / dt
+	_prev_lin_vel = _chassis.linear_velocity
+	var accel_body: Vector3 = w2b * (a_world + Vector3.UP * 9.81)
+	# A real accelerometer has an ANALOG anti-alias filter ahead of its ADC; a raw
+	# finite difference has none, so model the datasheet DLPF as a first-order low-pass.
+	if _accel_lp.length() < 1e-6:
+		_accel_lp = accel_body
+	_accel_lp = _accel_lp.lerp(accel_body, IMU_DLPF_ALPHA)
+	# ...and it CLIPS at its configured full scale (±4 g here) rather than reporting
+	# unbounded impulse.
+	var accel_meas: Vector3 = _accel_lp
+	if accel_meas.length() > IMU_RANGE_MS2:
+		accel_meas = accel_meas.normalized() * IMU_RANGE_MS2
+	var gyro_body: Vector3 = w2b * _chassis.angular_velocity
+	_accel_body_last = accel_meas
+	_gyro_body_last  = gyro_body
+	# Dead-reckon the ego heading from the gyro's yaw component (this runs at the IMU's own
+	# substep rate, so use that dt rather than the brain tick).
+	_ego_heading = wrapf(_ego_heading + gyro_body.y * dt, -PI, PI)
+	_up_acc_last = accel_meas.normalized() if accel_meas.length() > 1e-4 else _up_acc_last
+
+	# --- complementary filter -------------------------------------------------
+	if _up_est_body.length() < 0.5:
+		_up_est_body = _up_acc_last
+	# Gyro propagation: a WORLD-fixed direction seen from the body frame rotates by
+	# −ω·dt.  Use an EXACT rotation — the first-order `v -= ω×v·dt` form leaves
+	# O((ω·dt)²) error per step, which integrates to radians over a run.
+	var w_mag: float = gyro_body.length()
+	if w_mag > 1e-6:
+		_up_est_body = (Basis(gyro_body / w_mag, -w_mag * dt) * _up_est_body).normalized()
+	# Adaptive-gain correction: the accelerometer only indicates "down" when the body is
+	# quasi-static; during a footfall it is measuring the impact.  Weight its trust by how
+	# close ‖a‖ is to g rather than accepting/rejecting outright (a hard gate starved it).
+	var acc_dev: float = absf(accel_meas.length() - 9.81) / 9.81
+	var trust: float = IMU_ACC_TRUST * clampf(1.0 - acc_dev / IMU_ACC_GATE_FRAC, 0.0, 1.0)
+	if trust > 0.0:
+		_up_est_body = (_up_est_body * (1.0 - trust) + _up_acc_last * trust).normalized()
+	_dbg_acc_mag = accel_meas.length()
+	_dbg_acc_trust = trust
+	var up_exact: Vector3 = w2b * Vector3.UP
+	_dbg_att_err_acc = rad_to_deg(_up_acc_last.angle_to(up_exact))
+	_dbg_att_err_imu = rad_to_deg(_up_est_body.angle_to(up_exact))
 
 func _step_one() -> void:
 	# Pending chassis suspend / unfreeze from C-key (queued in
@@ -3630,6 +5244,62 @@ func _step_one() -> void:
 
 	tick_counter += 1
 	step_in_episode += 1
+	# Controlled belly-on-ramp test: auto-drop onto the hump at the configured tick
+	# (headless; e.g. after the gait develops).  One-shot.
+	# ---- SCRIPTED EVENT TIMELINE (2026-07-26) ----------------------------------------
+	# OGMA_PICRAWLER_EVENTS = JSON array of timed placements, e.g.
+	#   [{"at":3600,"xz":[0,3.0]},{"at":7200,"xz":[0.4,2.6],"flip":true}]
+	# "let it walk straight for a minute, then drop it HERE inverted, then there" — the
+	# thing the UI placement tool does by hand, made reproducible.  Deliberately NOT a
+	# revival of CurriculumManager: that carries reward/trainer machinery this substrate
+	# does not want.  This is just a schedule of teleports, reusing the same drop path (so
+	# the HUD "last drop" line and the replay hint apply identically).
+	for ev in _events:
+		if int(ev.get("at", -1)) == tick_counter:
+			var xz: Array = ev.get("xz", [0.0, 0.0])
+			var surf: float = _surface_y_at(float(xz[0]), float(xz[1]))
+			_pending_teleport = Vector3(float(xz[0]), surf, float(xz[1]))
+			_pending_teleport_flip = 1 if bool(ev.get("flip", false)) else 0
+			print("PicrawlerBody: [events] tick %d -> drop at (%.2f, %.2f)%s" % [
+				tick_counter, float(xz[0]), float(xz[1]),
+				"  INVERTED" if bool(ev.get("flip", false)) else ""])
+	# Per-leg lesion window.  Announced on each edge so a run can never silently be the
+	# arm you did not intend (§3.2 rule 7); NO reset event is published, on purpose.
+	if _lesion_leg >= 0 and _lesion_at > 0:
+		var want: bool = tick_counter >= _lesion_at and tick_counter < _lesion_until
+		if want != _lesion_active:
+			_lesion_active = want
+			print("PicrawlerBody: [lesion] leg %d %s at tick %d" % [
+				_lesion_leg, ("CUT to x%.2f" % _lesion_scale) if want else "RESTORED",
+				tick_counter])
+	# Per-foot slick ablation.  Announced once, loudly, for the same reason the lesion is.
+	if _slick_leg >= 0 and not _slick_done and tick_counter >= _slick_at:
+		_slick_done = true
+		if _slick_leg < _lowers.size() and is_instance_valid(_lowers[_slick_leg]):
+			_lowers[_slick_leg].physics_material_override = _make_slick_mat()
+			print("PicrawlerBody: [slick] leg %d foot -> mu 0.05 at tick %d (leg still driven)" % [
+				_slick_leg, tick_counter])
+	if _abl_env_spec != "" and not _abl_env_done and tick_counter >= _abl_env_at:
+		_abl_env_done = true
+		_abl_apply_env_spec()
+	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
+		_teleport_to_ramp()
+	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \
+			and tick_counter <= _teleport_until and (tick_counter - _teleport_ramp_at) % _teleport_every == 0:
+		_teleport_to_ramp()   # re-fire to sustain the anomaly
+	# Keyframe map probe (env OGMA_PICRAWLER_KF_PROBE=1) — measures map drift +
+	# bake suppression across an anomaly for the bake-gate A/B.
+	if tick_counter % 300 == 0 and brain != null and OS.get_environment("OGMA_PICRAWLER_KF_PROBE") == "1":
+		var snap = JSON.parse_string(str(brain.get_module_snapshot("keyframe_gait")))
+		if snap is Dictionary:
+			var mnorm: float = 0.0
+			if snap.has("bins"):
+				for bj in snap["bins"]:
+					if typeof(bj) == TYPE_DICTIONARY and bj.has("kf"):
+						for val in bj["kf"]: mnorm += abs(float(val))
+			print("KF_PROBE t=%d up=%.2f keyframe_tle=%.3f suppressed=%s map_norm=%.3f" % [
+				tick_counter, _chassis.global_transform.basis.y.y,
+				float(snap.get("keyframe_tle", -1.0)), str(snap.get("bake_suppress_count", -1)), mnorm])
 
 	# 2026-06-08 — periodic Cruse trace V2 (toggled via env var or panel).
 	if _cruse_trace_enabled and tick_counter % _CRUSE_TRACE_INTERVAL_TICKS == 0:
@@ -3681,6 +5351,26 @@ func _step_one() -> void:
 		hip2_angles.append(_relative_angle_world_axis(_coxas[i], _uppers[i], _hip2_axes[i]))
 		# Knee: rotation between upper and lower, projected onto same lateral.
 		knee_angles.append(_relative_angle_world_axis(_uppers[i], _lowers[i], _knee_axes[i]))
+	# A DETACHED segment is frozen in world space while the chassis walks away, so its
+	# measured relative angle diverges into garbage.  A real robot's servo keeps reporting
+	# its own encoder after the limb below it snaps off, so hold the last honest reading
+	# rather than feeding the brain a signal no physical robot could produce.
+	# A break is inherited DISTALLY: snapping at hip1 leaves hip2 and the knee with nothing
+	# to report either.  Holding only the broken joint is not enough and is actively harmful
+	# -- the freed limb is frozen in WORLD space while the chassis keeps walking and turning,
+	# so the axis each angle is projected onto sweeps past it and the joint reads a PHANTOM
+	# OSCILLATION.  Measured before this fix: a leg detached at hip1 still reported amp_ema
+	# 0.670 (vs 0.001 when detached at the knee, where the projection axis stays attached) --
+	# i.e. the brain was told a limb lying on the floor was still swinging, and that phantom
+	# feeds straight into the precision weight w = amp/(tle+eps).
+	if _abl_any:
+		for i in range(4):
+			var d0: bool = _abl_detached[abl_idx(i, 0)] != 0
+			var d1: bool = d0 or _abl_detached[abl_idx(i, 1)] != 0
+			var d2: bool = d1 or _abl_detached[abl_idx(i, 2)] != 0
+			if d0: hip1_angles[i] = _abl_hold_angle[abl_idx(i, 0)]
+			if d1: hip2_angles[i] = _abl_hold_angle[abl_idx(i, 1)]
+			if d2: knee_angles[i] = _abl_hold_angle[abl_idx(i, 2)]
 
 	var chassis_xform: Transform3D = _chassis.global_transform
 	var chassis_y: float = chassis_xform.origin.y
@@ -3759,7 +5449,51 @@ func _step_one() -> void:
 	imu.append(sin(yaw)); imu.append(cos(yaw))
 	imu.append(clamp(fwd_v / 1.0, -1.0, 1.0))
 	imu.append(clamp(ang_v / PI,  -1.0, 1.0))
+	# Per-metre waypoint (see the state block).  Uses the same path-length accumulation the
+	# red trail does, so the log and the picture cannot disagree.
+	var _wp_now := Vector2(_chassis.global_transform.origin.x, _chassis.global_transform.origin.z)
+	if tick_counter <= 1:
+		_wp_last_xz = _wp_now
+	_wp_path_len += _wp_now.distance_to(_wp_last_xz)
+	_wp_last_xz = _wp_now
+	while _wp_path_len >= _wp_next_m:
+		print(JSON.stringify({"wp": _wp_next_m, "t": tick_counter,
+			"dt": tick_counter - _wp_last_tick, "x": snappedf(_wp_now.x, 0.001),
+			"z": snappedf(_wp_now.y, 0.001)}))
+		_wp_last_tick = tick_counter
+		_wp_next_m += 1.0
+	# ---- 2026-08-05 · MOTOR INTENT (the higher loop's lever) ----------------------------
+	# [v_forward*, yaw_rate*] — what the body is being asked to do RIGHT NOW.  MotorEPM turns
+	# commit confidence into "am I achieving this" instead of "how well do I predict myself".
+	# ⚠ This constant-forward publisher is a SCAFFOLD, named as one: it stands in for the L1
+	# nav / EFE arbiter until that layer exists, so the mechanism can be tested before the
+	# thing that will eventually drive it.  A real intent would change with the manoeuvre
+	# (forward / turn left / turn right / stop), which is the whole point of the socket.
+	if intent_fwd >= 0.0:
+		var it := PackedFloat64Array()
+		it.append(intent_fwd)
+		it.append(intent_yaw)
+		brain.publish_proprio(it, "motor_intent")
 	brain.publish_proprio(imu, "imu")
+
+	# ---- L1 nav inputs (2026-08-04) -------------------------------------------------------
+	# RunTumbleNavV2 wants a scalar heading and an egocentric velocity.  Both are published
+	# unconditionally (they are cheap and honest); the nav module is what is gain-guarded.
+	var eh := PackedFloat64Array()
+	eh.append(_ego_heading)
+	brain.publish_proprio(eh, "ego_heading")
+	# [v_right, v_forward] — index 1 is forward, which is the index RunTumbleNavV2 reads.
+	# ⚠ SOFT ORACLE, recorded as such: this is world-frame chassis velocity projected into the
+	# body frame, and sensor_legitimacy_and_the_feet_y_oracle.md flags fwd_v/lateral_v as "not
+	# free — worth its own pass".  A real legged robot has no odometry; estimating body speed
+	# from an IMU alone is genuinely hard.  RunTumbleNavV2 uses it ONLY for its KF2
+	# efference-matched stuck check (achieved vs learned capable speed), never for the
+	# gradient, so the oracle does not touch the inference — but it is named, not hidden.
+	var ve := PackedFloat64Array()
+	ve.append(Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z)
+		.dot(Vector2(cos(yaw), -sin(yaw))))
+	ve.append(fwd_v)
+	brain.publish_proprio(ve, "vel_ego")
 
 	# Signed lateral (sideways-slip) velocity on its OWN topic — kept off the imu
 	# vector so epm_imu's projection_dim is untouched.  + = body drifts to its
@@ -3885,6 +5619,11 @@ func _step_one() -> void:
 		var surface_clearance: float = min_center_dist - target_radius
 		if surface_clearance < TARGET_TOUCH_MARGIN:
 			walk_visit_count += 1
+			# 2026-08-04 — arrival event for the L1 nav loop.  RunTumbleNavV2 uses it to
+			# calibrate its self-reported CONFIDENCE only (eat_scent_); the policy stays
+			# reward-free, so this is not reward shaping (CLAUDE.md §5.1).
+			if brain != null:
+				brain.publish_event("beacon_reached", 1.0)
 			print("PicrawlerBody: TARGET TOUCHED #%d (pyramid %d, surface clearance %.3f m) → new target" % [
 				walk_visit_count, walk_target_idx, surface_clearance])
 			_select_random_pyramid_target()
@@ -3958,8 +5697,11 @@ func _step_one() -> void:
 					var mag := sqrt(vx * vx + vy * vy)
 					if mag > 1e-4:
 						_vision_compass = Vector2(vx / mag, vy / mag)
-		if _last_vision_pixels.size() == VISION_RES * VISION_RES * 3:
-			brain.publish_video(_last_vision_pixels, VISION_RES, VISION_RES, 3, "color")
+		# ⚠ publish_video's signature is (pixels, HEIGHT, WIDTH, channels, modality) —
+		# height FIRST.  Square frames hid that for the whole life of this call; a 4:3
+		# frame does not.  A size mismatch push_errors and silently publishes NOTHING.
+		if _last_vision_pixels.size() == vision_res_w * vision_res_h * 3:
+			brain.publish_video(_last_vision_pixels, vision_res_h, vision_res_w, 3, "color")
 		if vision_steer:
 			# Publish the VISION-derived bearing every tick (MotorEPM nav steers on it).
 			var vcp := PackedFloat64Array()
@@ -3972,6 +5714,32 @@ func _step_one() -> void:
 	for i in range(4): joints.append(clamp(hip2_angles[i] / HIP2_LIMIT,    -1.0, 1.0))
 	for i in range(4): joints.append(clamp((knee_angles[i] - KNEE_REST) / 1.0,
 											-1.0, 1.0))
+	# --- 2026-08-02 · IMPORT I4: COLORED PROPRIOCEPTIVE NOISE --------------------------
+	# Every Playful Machine legged experiment wires its controller through
+	# ColorUniformNoise(0.1) — ~10% of range, TEMPORALLY CORRELATED — on every sensor,
+	# plus ODE-level noise 0.01.  In homeokinesis the loop AMPLIFIES its own sensory
+	# noise into behaviour: the noise is the seed of the motion, not a robustness test.
+	# Our proprio channel has been noiseless, and our only noise is white, motor-side and
+	# post-controller (explore_noise), which servo dynamics largely filter out.
+	#
+	# Measured motivation: at PM's own learning rate the pure-HK loop's activity peaks
+	# around 14-20k ticks and then decays monotonically (12.0 -> 5.2 -> 2.95 steps per
+	# 1000 ticks by 40k).  c_init sets where the loop STARTS and ctrl_lr how fast it
+	# explores; neither keeps it excited.  A persistent correlated perturbation is what
+	# PM's loop has and ours does not.
+	#
+	# Colored via a first-order (OU-like) filter: n <- (1-a)*n + a*U(-s,s), a = 1/tau.
+	# tau=1 degenerates to white noise, so the knob spans both regimes.
+	# sensor_noise_sigma = 0 (default) leaves this byte-identical.
+	if sensor_noise_sigma > 0.0:
+		var a: float = 1.0 / maxf(1.0, sensor_noise_tau)
+		if _sensor_noise.size() != joints.size():
+			_sensor_noise.resize(joints.size())
+			_sensor_noise.fill(0.0)
+		for i in range(joints.size()):
+			_sensor_noise[i] = (1.0 - a) * _sensor_noise[i] \
+				+ a * _sensor_noise_rng.randf_range(-sensor_noise_sigma, sensor_noise_sigma)
+			joints[i] = clamp(joints[i] + _sensor_noise[i], -1.0, 1.0)
 	brain.publish_proprio(joints, "joints")
 
 	# Phase 7.9 — per-leg foot-Y for SynergyTimer touchdown detection.
@@ -3980,6 +5748,197 @@ func _step_one() -> void:
 	for i in range(4):
 		feet_y_arr.append(_lowers[i].global_transform.origin.y - L3 * 0.5)
 	brain.publish_proprio(feet_y_arr, "feet_y")
+
+	# ---- Markov-compliant twin of feet_y (2026-07-25) -------------------------
+	# feet_y above is ABSOLUTE WORLD-Y of the foot — a god's-eye quantity no real
+	# picrawler can sense, and the same violation that retired chassis_y_norm.  It is
+	# nonetheless what MotorEPM's swing detector has always consumed (gating stance_lift
+	# and every Cruse rule).
+	#
+	# This is the identical formula evaluated in the CHASSIS frame instead of the world
+	# frame.  The resulting quantity — where the foot sits relative to the body — is one
+	# the real robot CAN compute: the foot's pose relative to the chassis is fully
+	# determined by the three joint encoder angles plus known link lengths (L1/L2/L3), so
+	# this is forward kinematics from proprioception.  The chassis-transform inverse is
+	# used only as an exact shortcut for that FK chain, not as extra information.
+	#
+	# Deliberately mirrors feet_y's own toe approximation (centre minus L3*0.5) rather
+	# than a better one, so an A/B between the two isolates EXACTLY the god's-eye
+	# component and nothing else.  Absolute offset/sign are irrelevant to the consumer:
+	# the swing detector only ever compares this signal against its own moving average.
+	#
+	# CAVEAT: encoders would see commanded joint angles; this sees the achieved rigid-body
+	# pose, so it includes joint compliance/slop the real encoders would miss.
+	var _ch_inv: Transform3D = _chassis.global_transform.affine_inverse()
+	var feet_y_body_arr := PackedFloat64Array()
+	for i in range(4):
+		feet_y_body_arr.append((_ch_inv * _lowers[i].global_transform.origin).y - L3 * 0.5)
+	brain.publish_proprio(feet_y_body_arr, "feet_y_body")
+
+	# ---- feet_y_gravity: IK ⊕ IMU ATTITUDE (2026-07-25) ----------------------------
+	# The one property the god's-eye feet_y has that every legal replacement so far lacks:
+	# it is GRAVITY-REFERENCED.  feet_y_body above is in the CHASSIS frame, so a foot at a
+	# fixed body-frame position sits at different GRAVITATIONAL heights as the chassis
+	# pitches and rolls; feet_y_ground inherits the same error because the belly ToF points
+	# along the chassis down-axis.  Phase references were measured and came out at chance
+	# (see the oracle design note), leaving gravity alignment as the live explanation.
+	#
+	# Gravity alignment is exactly what an accelerometer measures.  `up_body` is the
+	# world-up axis expressed in the CHASSIS frame — i.e. the (negated) gravity vector a
+	# body-mounted accelerometer reads directly.  Projecting the encoder-FK foot position
+	# onto it gives the foot's height below the body measured ALONG GRAVITY:
+	#   feet_y_gravity[i] = (foot position in body frame) · (gravity-up in body frame)
+	# Both inputs are physically available (IMU + joint angles + link lengths), so this is
+	# IK ⊕ IMU and nothing else.  It differs from the oracle by exactly the ABSOLUTE
+	# chassis height, which is the god's-eye part and the only part we drop.
+	var up_body: Vector3 = _ch_inv.basis * Vector3.UP
+	var feet_y_grav_arr := PackedFloat64Array()
+	for i in range(4):
+		var foot_body: Vector3 = _ch_inv * _lowers[i].global_transform.origin
+		feet_y_grav_arr.append(foot_body.dot(up_body) - L3 * 0.5)
+	brain.publish_proprio(feet_y_grav_arr, "feet_y_gravity")
+
+	# ---- feet_y_gravity_cmd / _fk: the SIM-TO-REAL test (2026-07-25) ----------------
+	# feet_y_gravity above reads the ACHIEVED rigid-body pose.  The physical PiCrawler uses
+	# hobby servos, which take an angle and report NOTHING — so real FK must run on the
+	# COMMANDED angles, which are blind to load deflection (a planted leg sags while its
+	# command still says "I am here").  The sim signal is therefore better-informed than the
+	# hardware signal, in the dangerous direction, and this is what tests whether the win
+	# survives what the robot can actually know.
+	#
+	# Both variants run through the SAME known-correct chain (_fk_leg, which calibrate mode
+	# depends on being exact) so the FK's own conventions CANCEL out of the comparison:
+	#   _fk  ← measured joint angles  → validation twin; must track feet_y_gravity closely,
+	#                                    which is the self-check that the FK is wired right
+	#   _cmd ← commanded servo targets → the hardware-honest signal
+	# Attitude stays exact in both (modelling accelerometer error is a SEPARATE experiment,
+	# kept separate so this is one lever).
+	if _chassis_rest_xform != Transform3D():
+		var rest_inv: Transform3D = _chassis_rest_xform.affine_inverse()
+		var fk_arr := PackedFloat64Array()
+		var cmd_arr := PackedFloat64Array()
+		for i in range(4):
+			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
+			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
+				+ servo_origins[servo_idx(i, 0)]
+			var c2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
+				+ servo_origins[servo_idx(i, 1)]
+			var c3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
+				+ servo_origins[servo_idx(i, 2)]
+			var lower_fk:  Transform3D = _fk_leg(i, hip1_angles[i], hip2_angles[i], knee_angles[i])[2]
+			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
+			fk_arr.append((rest_inv * lower_fk.origin).dot(up_body) - L3 * 0.5)
+			cmd_arr.append((rest_inv * lower_cmd.origin).dot(up_body) - L3 * 0.5)
+		brain.publish_proprio(fk_arr,  "feet_y_gravity_fk")
+		brain.publish_proprio(cmd_arr, "feet_y_gravity_cmd")
+		# Mean |commanded − achieved| foot height: the servo tracking error in metres, i.e.
+		# exactly the information the hardware does not have.  Diagnostic only.
+		var e_sum: float = 0.0
+		for i in range(4):
+			e_sum += absf(cmd_arr[i] - fk_arr[i])
+		_dbg_fk_cmd_err = e_sum / 4.0
+		# VALIDATION: the measured-angle FK must reproduce the achieved-pose signal.  If this
+		# is NOT small, the FK chain is miswired and fk_cmd_err above is measuring MY error
+		# rather than the servos'.  Checked before drawing any conclusion from it.
+		var v_sum: float = 0.0
+		for i in range(4):
+			v_sum += absf(fk_arr[i] - feet_y_grav_arr[i])
+		_dbg_fk_valid_err = v_sum / 4.0
+
+		# ---- HONEST IMU ATTITUDE (2026-07-26) ----------------------------------------
+		# The attitude estimate is computed in _imu_substep() at the PHYSICS rate (240 Hz),
+		# not here.  _step_one runs at TAU=50 Hz, and a real IMU samples far faster than a
+		# control loop does — MPU-6050-class parts run 1-8 kHz, BNO085 fuses on-chip at
+		# ~400 Hz — so sampling the sensor at the brain's rate both understates the hardware
+		# and starves the filter.  The physics is already oversampled to 240 Hz to stop foot
+		# tunnelling, and that headroom is free sensor bandwidth: 240 Hz sits squarely in the
+		# realistic ODR band.  This block only CONSUMES the estimate.
+		#   _cmd      exact attitude       (upper bound; NOT physically available)
+		#   _cmd_acc  accelerometer ONLY   (shows the contamination)
+		#   _cmd_imu  accel + gyro fused   (what the real robot can actually do)
+		var up_acc: Vector3 = _up_acc_last if _up_acc_last.length() > 0.5 else up_body
+		var imu6 := PackedFloat64Array()
+		imu6.append(_accel_body_last.x); imu6.append(_accel_body_last.y); imu6.append(_accel_body_last.z)
+		imu6.append(_gyro_body_last.x);  imu6.append(_gyro_body_last.y);  imu6.append(_gyro_body_last.z)
+		brain.publish_proprio(imu6, "imu6")
+
+		var acc_arr := PackedFloat64Array()
+		var imu_arr := PackedFloat64Array()
+		for i in range(4):
+			var d1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
+				+ servo_origins[servo_idx(i, 0)]
+			var d2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
+				+ servo_origins[servo_idx(i, 1)]
+			var d3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
+				+ servo_origins[servo_idx(i, 2)]
+			var foot_b: Vector3 = rest_inv * _fk_leg(i, d1, d2, d3)[2].origin
+			acc_arr.append(foot_b.dot(up_acc) - L3 * 0.5)
+			imu_arr.append(foot_b.dot(_up_est_body) - L3 * 0.5)
+		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
+		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
+		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
+
+	# ---- Markov-blanket-compliant posture sensing (2026-07-22) ----------------
+	# The old height reflex read ABSOLUTE chassis world-Y (chassis_y_norm) — god's-
+	# eye state no physical picrawler could sense.  These two topics are what the
+	# REAL robot has: per-leg foot-contact switches + a downward belly rangefinder.
+	# (1) foot_contact: TRUE physics touch per leg from the foot's contact monitor.
+	var foot_contact_arr := PackedFloat64Array()
+	for i in range(4):
+		foot_contact_arr.append(1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0)
+	brain.publish_proprio(foot_contact_arr, "foot_contact")
+	# Cache the TRUE swing fraction (legs touching nothing) for the diag line.  This is
+	# the ground truth for "is the foot on the ground".  It is NOT interchangeable with
+	# the two proxies that have been used as if it were: `feet_y < stance_y_threshold` is
+	# a WORLD-HEIGHT test (neither terrain- nor chassis-relative), and MotorEPM's
+	# foot-height EMA is self-referential.  Any duty-factor claim must be checked here.
+	var _n_air: int = 0
+	for i in range(4):
+		if foot_contact_arr[i] < 0.5: _n_air += 1
+	_dbg_contact_swing = float(_n_air) / 4.0
+	# (2) ground_clearance: body-down ToF/ultrasonic distance from the belly to the
+	# nearest ground surface, normalized [0,1].  ~0 = belly ON a surface (dragging /
+	# high-centered); higher = belly held up off the ground.  Replaces absolute Y.
+	_dbg_gc_raw = _compute_ground_clearance()   # cache raw metres for the ramp-debug diag
+	var clearance_arr := PackedFloat64Array()
+	clearance_arr.append(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0))
+	brain.publish_proprio(clearance_arr, "ground_clearance")
+	# Beacon magnitude.  Published every tick from the cached capture (the capture itself is
+	# sub-rated for CPU), matching how ground_clearance and the vision frame are handled.
+	# ⚠ Gated on the camera actually running.  Publishing 0.0 with no camera would be an
+	# "exactly-round null" — indistinguishable from "the beacon is not visible" — which is
+	# the failure shape that has produced false verdicts in this project repeatedly.  No
+	# camera ⇒ no topic ⇒ a consumer that needs it fails loudly instead of reading zero.
+	if publish_vision:
+		var beacon_arr := PackedFloat64Array()
+		beacon_arr.append(_beacon_frac)
+		brain.publish_proprio(beacon_arr, "beacon")
+
+	# ---- feet_y_ground: the LEGAL reconstruction of what feet_y smuggles in ----------
+	# A/B showed the god's-eye feet_y (absolute world-Y) beats its body-relative twin
+	# (net_z 3.76 vs 2.52).  The two differ by exactly the chassis's own vertical motion,
+	# so what the world-frame signal carries — and the body-frame one loses — is the
+	# BODY'S BOUNCE: a whole-body vertical phase reference.  Gating a knee push on that
+	# synchronises it with when the body is actually loading its legs.
+	#
+	# Both halves of this sum are Markov-compliant, so the fusion is too:
+	#   feet_y_body   — foot pose relative to the chassis (joint encoders + link lengths)
+	#   _dbg_gc_raw   — belly ToF rangefinder, the sensor that already replaced the
+	#                   god's-eye chassis_y_norm and solved the hump
+	# Sum ≈ foot height above the ground the body is actually standing on — and unlike
+	# world-Y it is TERRAIN-RELATIVE, so it should survive a slope where world-Y cannot.
+	# Absolute offset is irrelevant: the swing detector only compares against its own mean.
+	var feet_y_ground_arr := PackedFloat64Array()
+	for i in range(4):
+		feet_y_ground_arr.append(_dbg_gc_raw + feet_y_body_arr[i])
+	brain.publish_proprio(feet_y_ground_arr, "feet_y_ground")
+	# (3) upright: the chassis up-vector's alignment with gravity (basis.y.y): 1 =
+	# perfectly upright, 0 = on its side, -1 = inverted.  A real IMU (accelerometer
+	# gravity vector) gives this — compliant, always on.  Used to gate keyframe
+	# baking on "am I in a valid posture" (don't learn from a flipped body).
+	var upright_arr := PackedFloat64Array()
+	upright_arr.append(_chassis.global_transform.basis.y.y)
+	brain.publish_proprio(upright_arr, "upright")
 
 	# 2026-06-03 — R1a per-leg foot-contact bucket signals (PremotorAI /
 	# Premotor bucket_context_topic).  Discrete swing(0)/stance(1) bit per
@@ -4190,6 +6149,29 @@ func _step_one() -> void:
 	for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	brain.publish_proprio(jtorque, "joint_torque")
+	var jload := PackedFloat64Array()
+	for i in range(4): jload.append(_prev_load_hip1[i])
+	for i in range(4): jload.append(_prev_load_hip2[i])
+	for i in range(4): jload.append(_prev_load_knee[i])
+	brain.publish_proprio(jload, "joint_load")
+	# 2026-08-07 — PER-LEG VERTICAL LOAD (the CoG sensor).  Normalised by the body's
+	# static weight so 1.0 ~ "this foot carries the whole robot" and the four values sum
+	# to ~1 when all the weight is on the feet.  Egocentric and physically realisable
+	# (foot FSR / servo current), so unlike fwd_v this is a LAWFUL brain input.
+	var fload := PackedFloat64Array()
+	for i in range(4): fload.append(clamp(_foot_load_ema[i] / _fl_norm(), -2.0, 2.0))
+	brain.publish_proprio(fload, "foot_load")
+	# 2026-08-03 — GROUND-FORCE / AUTHORITY instrument.  jtorque is already normalized to
+	# +-1 against MAX_SERVO_TORQUE, so |t| -> 1 IS saturation.  Two questions this answers:
+	#   tq_mag  — how hard are the legs actually pushing?  (the operator observed the pure-HK
+	#             arm exerting far MORE ground force than the deployed gait ever did)
+	#   tq_sat  — is the servo pinned?  Distinguishes "the controller is not using available
+	#             authority" (our bug, fixable) from "the authority is not there" (hardware).
+	for _ti in range(jtorque.size()):
+		var _ta: float = absf(jtorque[_ti])
+		_tq_mag_acc += _ta
+		if _ta > 0.95: _tq_sat_acc += 1.0
+		_tq_n += 1.0
 
 	# Phase 7.13 v4.2 — body-state signal for CruseCoordinator gating.
 	# chassis_y_norm in [0, 1].  CruseCoordinator subscribes optionally and
@@ -4889,10 +6871,26 @@ func _step_one() -> void:
 	_hit_delta_step_quality = 0.0
 
 	# ---- 4. Tick brain (skip immediately after reset) ----
-	if _instant_pause_tick:
+	# 2026-08-03 — PAUSED IN CALIBRATION MODES.  In C (FK geometry) and G (motor test)
+	# the operator owns the servo targets, so a ticking brain is doing two harmful
+	# things: fighting the sliders for the actuators, and LEARNING FROM A BODY IT IS NOT
+	# DRIVING — its forward model gets trained on motion it did not cause, which is
+	# exactly the tautological-channel problem in a new place.  Characterising springs
+	# and damping requires the brain quiet.  Rings the pause once so it is visible in
+	# the log rather than silent.
+	if _calibrate_mode or _motor_test_mode:
+		if not _brain_paused_notified:
+			_brain_paused_notified = true
+			print("PicrawlerBody: BRAIN PAUSED (calibration mode) — operator owns the servos")
+			_ui_notify("brain PAUSED — calibration mode")
+	elif _instant_pause_tick:
 		_instant_pause_tick = false
+		_brain_paused_notified = false
 	else:
+		_brain_paused_notified = false
 		brain.tick(TAU)
+
+	_tick_gang_drive()      # G-mode ganged pulse / shake writes servo_targets first
 
 	# ---- 5. Apply servo torques (or calibrate FK) ----
 	# In C-calibration mode, bodies are frozen kinematic.  We write
@@ -4977,6 +6975,11 @@ func _step_one() -> void:
 	# by NEXT tick's reward block via _motor_power_last_tick.
 	var power_acc: float = 0.0
 	for i in range(4):
+		# PER-LEG torque ceiling.  Identical to max_torque_powered unless this leg is
+		# currently lesioned, so with no lesion armed the whole chain is byte-identical.
+		var leg_tq: float = max_torque_powered
+		if _lesion_active and i == _lesion_leg and _lesion_mode == "torque":
+			leg_tq *= _lesion_scale
 		# Relative angular velocity around each hinge axis — used for both
 		# powered Kd damping and unpowered viscous/static friction.
 		var omega_hip1: float = (_coxas[i].angular_velocity - _chassis.angular_velocity).dot(Vector3.UP)
@@ -5064,6 +7067,31 @@ func _step_one() -> void:
 					u_hip1 = clamp(brain.get_action_channel(_idx_hip1[i]), -1.0, 1.0)
 					u_hip2 = clamp(brain.get_action_channel(_idx_hip2[i]), -1.0, 1.0)
 					u_knee = clamp(brain.get_action_channel(_idx_knee[i]), -1.0, 1.0)
+					# LESION, "action" mode (the default).  Attenuates how far this leg
+					# actually MOVES rather than how hard it can push.
+					#
+					# The torque-ceiling form (mode "torque", below) was built first and
+					# MEASURED NOT TO PERTURB: at x0.05 the cut leg's oscillation amplitude
+					# was 0.720 vs 0.725 untouched, because tq_sat = 0.009 -- the servos are
+					# saturated under 1% of the time, so the ceiling is not the binding
+					# constraint and scaling it removes headroom the body never used.  Only
+					# at exactly x0.0 did anything happen, and then the body COLLAPSED
+					# (dz_rate 0.058 -> 0.006, plv support falling) rather than adapting.
+					# A (d) test needs a leg that is degraded but still live, and on this
+					# body torque authority has no such regime -- it is nearly binary.
+					# Corroborates the ledger twice over: "authority was never the binding
+					# constraint" and the gravity-scaffold null ("servos have ~4x headroom").
+					if _lesion_active and i == _lesion_leg and _lesion_mode == "action":
+						u_hip1 *= _lesion_scale
+						u_hip2 *= _lesion_scale
+						u_knee *= _lesion_scale
+					# WEAK ablation, per joint — a browning-out servo. DEAD and SEIZED are
+					# not handled here: they act on the MOTOR (below), because attenuating
+					# a command is not the same failure as releasing or jamming a gearbox.
+					if _abl_any:
+						if _abl_kind[abl_idx(i, 0)] == AblKind.WEAK: u_hip1 *= _abl_weak_scale
+						if _abl_kind[abl_idx(i, 1)] == AblKind.WEAK: u_hip2 *= _abl_weak_scale
+						if _abl_kind[abl_idx(i, 2)] == AblKind.WEAK: u_knee *= _abl_weak_scale
 			# E0/E1 — additive scripted-gait oscillation ON TOP of the base
 			# controller (brain holds posture; oscillation injects the gait).
 			# Canonical within-leg joint offsets hip1=π, hip2=π/2, knee=0 → foot
@@ -5166,9 +7194,9 @@ func _step_one() -> void:
 			_eff_target_hip1[i] = clamp(t_hip1_cmd, _eff_target_hip1[i] - max_step, _eff_target_hip1[i] + max_step)
 			_eff_target_hip2[i] = clamp(t_hip2_cmd, _eff_target_hip2[i] - max_step, _eff_target_hip2[i] + max_step)
 			_eff_target_knee[i] = clamp(t_knee_cmd, _eff_target_knee[i] - max_step, _eff_target_knee[i] + max_step)
-			tq_hip1 = _powered_torque(_eff_target_hip1[i], hip1_angles[i], omega_hip1, max_torque_powered)
-			tq_hip2 = _powered_torque(_eff_target_hip2[i], hip2_angles[i], omega_hip2, max_torque_powered)
-			tq_knee = _powered_torque(_eff_target_knee[i], knee_angles[i], omega_knee, max_torque_powered)
+			tq_hip1 = _powered_torque(_eff_target_hip1[i], hip1_angles[i], omega_hip1, leg_tq)
+			tq_hip2 = _powered_torque(_eff_target_hip2[i], hip2_angles[i], omega_hip2, leg_tq)
+			tq_knee = _powered_torque(_eff_target_knee[i], knee_angles[i], omega_knee, leg_tq)
 		# First-order lag — emulates real servo's gear+motor rise time.
 		# Without this, stiff Kp produces step-impulses that go unstable.
 		var alpha: float = 1.0 - exp(-TAU / SERVO_TORQUE_RISE_TAU)
@@ -5215,7 +7243,7 @@ func _step_one() -> void:
 		# recovers correct behaviour.  If FORCE_LIMIT is true Nm (Bullet
 		# multiplies by dt internally), motor_force_scale = 1.0 is correct.
 		# Diagnostic — drag in Inspector to find which.
-		var motor_max_impulse: float = ((max_torque_powered * 10.0) if _motor_test_mode else max_torque_powered) * motor_force_scale
+		var motor_max_impulse: float = ((leg_tq * 10.0) if _motor_test_mode else leg_tq) * motor_force_scale
 		# Use the PD torque magnitude to set motor max impulse (so the
 		# motor effectively saturates at the PD-computed torque), and
 		# convert torque sign back to velocity sign for the target.
@@ -5247,22 +7275,91 @@ func _step_one() -> void:
 		# motor disengage ONLY when freeplay is explicitly enabled (>0).
 		# Default 0 ⇒ motor always engages (pre-3.E++ behavior, bit-identical).
 		var use_freeplay: bool = motor_freeplay_rad > 0.0
-		var vel_hip1: float = -clamp(SERVO_KP * err_h1, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
-		var vel_hip2: float = -clamp(SERVO_KP * err_h2, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
-		var vel_knee: float = -clamp(SERVO_KP * err_kn, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		# 2026-08-03 — BACKLASH, not an on/off deadband.  The old code computed the motor
+		# velocity from the FULL error and merely zeroed it inside the band.  So a joint
+		# drifting under gravity would leave the band, the motor would engage and drive it
+		# all the way back to TARGET, overshooting into the band again, motor off, drift...
+		# a limit cycle.  The operator saw it exactly: "legs slowly drift down then twitch
+		# back up" with all stiffness and damping at zero, where the expectation is a loose
+		# floppy joint.
+		#
+		# Real mechanical slop rests AT THE EDGE of the slop zone: within the band the gear
+		# train is disengaged, and once the slop is taken up the train simply holds.  So the
+		# motor must respond only to the error BEYOND the deadband.  err_eff then decays to
+		# 0 as the joint reaches the boundary and it settles there instead of snapping back.
+		var eh1: float = _freeplay_err(err_h1)
+		var eh2: float = _freeplay_err(err_h2)
+		var ekn: float = _freeplay_err(err_kn)
+		var vel_hip1: float = -clamp(SERVO_KP * eh1, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		var vel_hip2: float = -clamp(SERVO_KP * eh2, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		var vel_knee: float = -clamp(SERVO_KP * ekn, -MAX_SERVO_SPEED, MAX_SERVO_SPEED)
+		# Load = commanded velocity - achieved velocity, in the ANGLE frame.
+		# vel_* above is negated because Godot's motor velocity sign is inverted
+		# relative to _relative_angle_world_axis; undo that here so the deficit is
+		# expressed in the same frame as omega_* and the joint angles.
+		_prev_load_hip1[i] = clamp(((-vel_hip1) - omega_hip1) / MAX_SERVO_SPEED, -1.0, 1.0)
+		_prev_load_hip2[i] = clamp(((-vel_hip2) - omega_hip2) / MAX_SERVO_SPEED, -1.0, 1.0)
+		_prev_load_knee[i] = clamp(((-vel_knee) - omega_knee) / MAX_SERVO_SPEED, -1.0, 1.0)
 		var imp_h1: float = motor_max_impulse
 		var imp_h2: float = motor_max_impulse
 		var imp_kn: float = motor_max_impulse
 		if use_freeplay:
-			if abs(err_h1) < motor_freeplay_rad:
-				vel_hip1 = 0.0; imp_h1 = 0.0
-			if abs(err_h2) < motor_freeplay_rad:
-				vel_hip2 = 0.0; imp_h2 = 0.0
-			if abs(err_kn) < motor_freeplay_rad:
-				vel_knee = 0.0; imp_kn = 0.0
+			# Inside the band the hard motor is released.  What acts there instead is the
+			# SOFT SPRING below — see _soft_spring_cmd().
+			if is_zero_approx(eh1): vel_hip1 = 0.0; imp_h1 = 0.0
+			if is_zero_approx(eh2): vel_hip2 = 0.0; imp_h2 = 0.0
+			if is_zero_approx(ekn): vel_knee = 0.0; imp_kn = 0.0
+			# 2026-08-03 — SPRINGS IMPLEMENTED IN THE MOTOR, because the constraint spring
+			# does not exist.  MEASURED: knee_spring_stiffness 0 vs 20 gave byte-identical
+			# trajectories, so Generic6DOFJoint3D's angular spring is a NO-OP here.  The
+			# June note assumed Bullet's constraint-level spring; Godot 4 replaced Bullet
+			# with Godot Physics 3D, which does not implement it, and setting the params
+			# raises no error.  The springs have therefore never done anything.
+			#
+			# apply_torque was already tried and reverted (explicit Euler, low-inertia
+			# segments).  This instead scales the MOTOR's velocity command inside the
+			# deadband: a velocity-target motor is solved at constraint level, so it is
+			# stable where an applied torque is not.  Soft near the target, firm past the
+			# slop — which IS series-elastic behaviour.  stiffness 0 ⇒ free (unchanged).
+			if is_zero_approx(eh1):
+				var c1: Array = _soft_spring_cmd(err_h1, hip1_spring_stiffness,
+												 hip1_spring_damping, motor_max_impulse)
+				vel_hip1 = c1[0]; imp_h1 = c1[1]
+			if is_zero_approx(eh2):
+				var c2: Array = _soft_spring_cmd(err_h2, hip2_spring_stiffness,
+												 hip2_spring_damping, motor_max_impulse)
+				vel_hip2 = c2[0]; imp_h2 = c2[1]
+			if is_zero_approx(ekn):
+				var c3: Array = _soft_spring_cmd(err_kn, knee_spring_stiffness,
+												 knee_spring_damping, motor_max_impulse)
+				vel_knee = c3[0]; imp_kn = c3[1]
+		if _abl_any:
+			# DEAD   -> release the motor entirely (vel 0, impulse 0): the joint free-swings
+			#           and is back-driveable, so gravity moves the limb. Same mechanism the
+			#           freeplay deadband uses to disengage.
+			# SEIZED -> velocity target 0 at FULL impulse: the joint fights any motion and
+			#           holds wherever it was. A rigid strut, not a limp one.
+			# DETACHED-> nothing left to drive; release so no torque is wasted on a stub.
+			var vv: Array = [vel_hip1, vel_hip2, vel_knee]
+			var ii: Array = [imp_h1, imp_h2, imp_kn]
+			for jn in range(3):
+				var kk: int = abl_idx(i, jn)
+				if _abl_detached[kk] != 0 or _abl_kind[kk] == AblKind.DEAD:
+					vv[jn] = 0.0; ii[jn] = 0.0
+				elif _abl_kind[kk] == AblKind.SEIZED:
+					vv[jn] = 0.0; ii[jn] = motor_max_impulse
+			vel_hip1 = vv[0]; vel_hip2 = vv[1]; vel_knee = vv[2]
+			imp_h1 = ii[0];   imp_h2 = ii[1];   imp_kn = ii[2]
 		_set_motor_vf(_hip1_joints[i], vel_hip1, imp_h1)
 		_set_motor_vf(_hip2_joints[i], vel_hip2, imp_h2)
 		_set_motor_vf(_knee_joints[i], vel_knee, imp_kn)
+		# Series-elastic behaviour: park the spring's equilibrium ON the commanded
+		# angle, so within the freeplay deadband the joint is centred where it was
+		# told to be rather than dragged to mechanical zero.
+		if spring_follows_target and joint_backend != "hinge":
+			_set_spring_equilibrium(_hip1_joints[i], _eff_target_hip1[i])
+			_set_spring_equilibrium(_hip2_joints[i], _eff_target_hip2[i])
+			_set_spring_equilibrium(_knee_joints[i], _eff_target_knee[i])
 		# Motor-test diagnostic — one line per leg, twice a second, so the
 		# user can see whether sliders are reaching the motor chain.
 		# Surfaces: slider value, eff_target, measured joint angle,
@@ -5289,6 +7386,9 @@ func _step_one() -> void:
 	# block to read.  See v6.0.b.7 energy-cost mechanism.
 	_motor_power_last_tick = power_acc
 
+	# ---- 5.9 Clip ring (per tick, for the [F1]/[F2] GOOD/BAD marker) ----
+	_clip_record(hip1_angles, hip2_angles, knee_angles, chassis_y)
+
 	# ---- 6. Diag emit ----
 	if verbose_logging and diag_interval_ticks > 0 and (tick_counter % diag_interval_ticks) == 0:
 		_emit_jsonl(hip1_angles, hip2_angles, knee_angles, chassis_y, chassis_tilt)
@@ -5312,11 +7412,33 @@ func _step_one() -> void:
 			# episode from a shared point.
 			if leg_symmetry_mode != "off":
 				_sync_leg_symmetry()
-		if max_steps > 0 and step_in_episode >= max_steps:
+		# 2026-07-27 — CONTINUOUS MODE TERMINATES ON tick_counter, NOT step_in_episode.
+		#
+		# The auto-reset path (inversion / belly-up) zeroes `step_in_episode` at :4380,
+		# so an arm that keeps flipping keeps RESTARTING its own countdown and never
+		# reaches max_steps: the run then ends only at `--quit-after`, tens of thousands
+		# of ticks later.  Measured on the step-lock p0 arm: seeds ended at tick 13 407
+		# and 72 043 against a 6 000-tick protocol, i.e. a 5x spread WITHIN one arm, while
+		# the healthy baseline ended at exactly 6 000.
+		#
+		# Two ways that corrupts a result, and the second is the dangerous one:
+		#   * `falls`, `steps` and every other COUNT becomes counts-per-unequal-duration,
+		#     so arms are not comparable to the baseline OR to each other;
+		#   * it costs wall-clock in proportion to how badly an arm fails, so the worse a
+		#     lever is the longer it takes to find out -- which quietly discourages
+		#     running the very sweeps that would refute it.
+		#
+		# `tick_counter` is monotonic (never zeroed anywhere in this file), so it is the
+		# honest clock for a mode whose whole premise is ONE continuous run with no
+		# episode boundaries.  For any arm that never auto-resets the two counters are
+		# equal, so this is byte-identical for the baseline and every promoted lever --
+		# verified by measurement, not argument (the baseline still ends at exactly 6 000).
+		if max_steps > 0 and tick_counter >= max_steps:
 			_done = true
 			print(JSON.stringify({"event": "RUN_END",
 								  "episodes": episode_index + 1,
-								  "tick": tick_counter}))
+								  "tick": tick_counter,
+								  "step_in_episode": step_in_episode}))
 	else:
 		if fell or (max_steps > 0 and step_in_episode >= max_steps):
 			_finish_episode(fell)
@@ -6312,6 +8434,163 @@ func _fk_leg(i: int, t1: float, t2: float, t3: float) -> Array:
 #   - Deadband around target → no torque if error is below PWM precision.
 #   - Linear torque-speed dropoff: max torque tapers to 0 as ω → MAX_SERVO_SPEED
 #     (mimics real motor's stall-torque vs no-load-speed curve).
+# ---- ABLATION API (2026-08-04) --------------------------------------------------------
+# Driven by the [K] panel and by OGMA_PICRAWLER_ABLATE for headless A/B.  Everything here
+# is a no-op until something is actually ablated (`_abl_any`), so an un-ablated body is
+# byte-identical — verified by measurement, not by argument.
+func _abl_init() -> void:
+	if _abl_kind.size() == 12:
+		return
+	_abl_kind.resize(12); _abl_detached.resize(12); _abl_hold_angle.resize(12)
+	for k in range(12):
+		_abl_kind[k] = AblKind.OK; _abl_detached[k] = 0; _abl_hold_angle[k] = 0.0
+	_abl_saved_xform.resize(12); _abl_saved_nodes.resize(12)
+
+func abl_idx(leg: int, joint: int) -> int:
+	return leg * 3 + joint
+
+func _abl_refresh_any() -> void:
+	_abl_any = false
+	for k in range(12):
+		if _abl_kind[k] != AblKind.OK or _abl_detached[k] != 0:
+			_abl_any = true; return
+
+func abl_kind_of(leg: int, joint: int) -> int:
+	_abl_init(); return _abl_kind[abl_idx(leg, joint)]
+
+func abl_is_detached(leg: int, joint: int) -> bool:
+	_abl_init(); return _abl_detached[abl_idx(leg, joint)] != 0
+
+func abl_weak_scale() -> float:
+	return _abl_weak_scale
+
+func abl_set_weak_scale(v: float) -> void:
+	_abl_weak_scale = clampf(v, 0.0, 1.0)
+
+## Set one servo's failure mode.  Announced, because a knob that can silently do nothing is
+## this codebase's characteristic trap (see postural_gain_joints in the ledger).
+func abl_set_kind(leg: int, joint: int, kind: int) -> void:
+	_abl_init()
+	if leg < 0 or leg > 3 or joint < 0 or joint > 2:
+		return
+	var k: int = abl_idx(leg, joint)
+	if _abl_kind[k] == kind:
+		return
+	_abl_kind[k] = kind
+	_abl_refresh_any()
+	print("PicrawlerBody: [ablate] %s %s servo -> %s  (tick %d)" % [
+		ABL_LEG_NAMES[leg], ABL_JOINT_NAMES[joint], ABL_KIND_NAMES[kind], tick_counter])
+	_ui_notify("[ablate] %s %s = %s" % [ABL_LEG_NAMES[leg], ABL_JOINT_NAMES[joint],
+									   ABL_KIND_NAMES[kind]])
+
+## Break the limb off at this joint (or put it back).  Everything DISTAL separates.
+func abl_set_detached(leg: int, joint: int, on: bool) -> void:
+	_abl_init()
+	if leg < 0 or leg > 3 or joint < 0 or joint > 2:
+		return
+	if _coxas.size() <= leg or _uppers.size() <= leg or _lowers.size() <= leg:
+		return
+	var k: int = abl_idx(leg, joint)
+	if (_abl_detached[k] != 0) == on:
+		return
+	var jt: Node = [_hip1_joints[leg], _hip2_joints[leg], _knee_joints[leg]][joint]
+	# Distal chain: hip1 takes the whole leg, hip2 takes upper+lower, knee takes the shank.
+	var distal: Array = []
+	match joint:
+		0: distal = [_coxas[leg], _uppers[leg], _lowers[leg]]
+		1: distal = [_uppers[leg], _lowers[leg]]
+		_: distal = [_lowers[leg]]
+	if on:
+		# Hold the reported angle BEFORE the geometry stops meaning anything.
+		var meas: Array = [
+			_relative_angle_world_axis(_chassis, _coxas[leg], Vector3.UP),
+			_relative_angle_world_axis(_coxas[leg], _uppers[leg], _hip2_axes[leg]),
+			_relative_angle_world_axis(_uppers[leg], _lowers[leg], _knee_axes[leg])]
+		for j in range(joint, 3):
+			_abl_hold_angle[abl_idx(leg, j)] = meas[j]
+		# Save the chassis-relative pose so re-attachment restores the limb where it broke
+		# rather than wherever it happened to fall.
+		var saved: Array = []
+		for b in distal:
+			saved.append(_chassis.global_transform.affine_inverse() * b.global_transform)
+		_abl_saved_xform[k] = saved
+		# BREAK THE CONSTRAINT FIRST.  Freezing a body that is still jointed to the chassis
+		# would pin the chassis to an infinite mass and wreck the whole robot.
+		_abl_saved_nodes[k] = [jt.node_a, jt.node_b]
+		jt.node_a = NodePath(); jt.node_b = NodePath()
+		for b in distal:
+			b.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+			b.freeze = true
+			b.collision_layer = 0
+			b.collision_mask = 0
+			b.visible = false
+		_abl_detached[k] = 1
+	else:
+		var saved: Array = _abl_saved_xform[k] if _abl_saved_xform[k] is Array else []
+		for bi in range(distal.size()):
+			var b: RigidBody3D = distal[bi]
+			if bi < saved.size():
+				b.global_transform = _chassis.global_transform * saved[bi]
+			b.visible = true
+			b.collision_layer = _LAYER_BODY     # leg segments live on _LAYER_BODY,
+			b.collision_mask  = _LAYER_WORLD    # colliding only with the world (:4223)
+			b.freeze = false
+			b.linear_velocity = Vector3.ZERO
+			b.angular_velocity = Vector3.ZERO
+		var nodes: Array = _abl_saved_nodes[k] if _abl_saved_nodes[k] is Array else []
+		if nodes.size() == 2:
+			jt.node_a = nodes[0]; jt.node_b = nodes[1]
+		_abl_detached[k] = 0
+	_abl_refresh_any()
+	print("PicrawlerBody: [ablate] %s %s %s  (tick %d)" % [
+		ABL_LEG_NAMES[leg], ABL_JOINT_NAMES[joint],
+		"DETACHED — limb distal to it removed" if on else "RE-ATTACHED", tick_counter])
+	_ui_notify("[ablate] %s %s %s" % [ABL_LEG_NAMES[leg], ABL_JOINT_NAMES[joint],
+									 "detached" if on else "re-attached"])
+
+## Undo everything.  Restores detachments in DISTAL-FIRST order so a leg detached at hip1
+## and again at the knee comes back in one piece.
+func abl_clear() -> void:
+	_abl_init()
+	for leg in range(4):
+		for joint in [2, 1, 0]:
+			if _abl_detached[abl_idx(leg, joint)] != 0:
+				abl_set_detached(leg, joint, false)
+		for joint in range(3):
+			abl_set_kind(leg, joint, AblKind.OK)
+	_abl_refresh_any()
+	print("PicrawlerBody: [ablate] ALL CLEARED (tick %d)" % tick_counter)
+
+## Headless entry point: OGMA_PICRAWLER_ABLATE="0:2:dead,1:0:detach,3:1:weak"
+## (leg:joint:kind, leg 0-3 = FL FR RL RR, joint 0-2 = hip1 hip2 knee).
+## Applied at OGMA_PICRAWLER_ABLATE_AT (default 0 = from the start).
+func _abl_parse_env() -> void:
+	var spec: String = OS.get_environment("OGMA_PICRAWLER_ABLATE")
+	if spec == "":
+		return
+	_abl_env_spec = spec
+	var at: String = OS.get_environment("OGMA_PICRAWLER_ABLATE_AT")
+	_abl_env_at = at.to_int() if at != "" else 0
+	var ws: String = OS.get_environment("OGMA_PICRAWLER_ABLATE_WEAK_SCALE")
+	if ws != "": _abl_weak_scale = ws.to_float()
+	print("PicrawlerBody: ⚠ ABLATE armed — \"%s\" at tick %d (weak scale %.2f)" % [
+		spec, _abl_env_at, _abl_weak_scale])
+
+func _abl_apply_env_spec() -> void:
+	for part in _abl_env_spec.split(",", false):
+		var f: PackedStringArray = part.strip_edges().split(":")
+		if f.size() != 3:
+			push_warning("ABLATE: bad term '%s' (want leg:joint:kind)" % part); continue
+		var leg: int = f[0].to_int()
+		var joint: int = f[1].to_int()
+		var kind: String = f[2].strip_edges().to_lower()
+		if kind == "detach":
+			abl_set_detached(leg, joint, true)
+		elif ABL_KIND_NAMES.has(kind):
+			abl_set_kind(leg, joint, ABL_KIND_NAMES.find(kind))
+		else:
+			push_warning("ABLATE: unknown kind '%s'" % kind)
+
 func _powered_torque(target: float, angle: float, omega: float, max_torque: float) -> float:
 	var error: float = target - angle
 	# Effective deadband = max(SERVO_DEADBAND, motor_freeplay_rad).  The
@@ -6488,7 +8767,11 @@ func _ensure_target_pyramid_color() -> void:
 	if mesh == null:
 		return
 	if mesh.get_surface_override_material(0) != _target_pyramid_mat:
-		mesh.set_surface_override_material(0, _target_pyramid_mat)
+		# beacon_visible=false leaves the target its DEFAULT material: the landmark is absent
+		# from the world, so the camera has nothing to see and beacon == 0. The A/B control.
+		if beacon_visible:
+			mesh.set_surface_override_material(0, _target_pyramid_mat)
+		_rebuild_beacon_surface_map()   # the beacon is defined by COLOUR, so recolouring redefines it
 
 func _select_across_target_idx() -> int:
 	## Routing policy for the next nav target.  Until the robot has obstacle
@@ -6550,9 +8833,45 @@ func _select_random_pyramid_target() -> void:
 	# Phase 7.12 — reset progress-PB on target rotation.
 	_min_dist_to_target_pb = 1e9
 	var new_mesh: MeshInstance3D = _pyramid_meshes[walk_target_idx]
-	new_mesh.set_surface_override_material(0, _target_pyramid_mat)
+	# beacon_visible=false leaves the target its DEFAULT material: the landmark is absent
+	# from the world, so the camera has nothing to see and beacon == 0. The A/B control.
+	if beacon_visible:
+		new_mesh.set_surface_override_material(0, _target_pyramid_mat)
+	_rebuild_beacon_surface_map()   # recolouring redefines what IS a beacon
 	print("PicrawlerBody: walk_over_there target → pyramid #%d at xz=(%.2f, %.2f)" % [
 		walk_target_idx, walk_target_pos.x, walk_target_pos.y])
+
+func _compute_ground_clearance() -> float:
+	# Markov-compliant downward rangefinder (a belly-mounted ToF / ultrasonic).
+	# Casts along the chassis's OWN down axis (body-relative, like a real sensor on
+	# the tilting belly) from the belly surface to the nearest WORLD surface, and
+	# returns the distance in metres (GROUND_CLEARANCE_RANGE if nothing is in range).
+	# Masks _LAYER_WORLD only, so it passes THROUGH the robot's own legs (_LAYER_BODY)
+	# and reads true ground clearance.  Egocentric — no absolute world coordinate.
+	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space_state == null or _chassis == null:
+		return GROUND_CLEARANCE_RANGE
+	var down: Vector3 = -_chassis.global_transform.basis.y          # body-down
+	# Cast from the chassis CENTRE (above the belly), not the belly itself: if the
+	# belly rests ON a ramp/wall the belly-origin ray starts on the surface and
+	# intersect_ray misses it (hit_from_inside defaults false) → it read max range
+	# and the reflex thought "up high" → stuck on the belly (the observed bug).
+	# Origin: chassis centre raised a further 2 cm along body-up, so the ray always
+	# starts with clear space above whatever the belly rests on (per the operator's
+	# note) and fires down THROUGH the chassis interior — it can never clip into the
+	# obstacle.  belly is CHASSIS_Y/2 below centre → total sensor-to-belly = that + 2cm.
+	var sensor_up: float = CHASSIS_Y * 0.5 + 0.02
+	var origin: Vector3 = _chassis.global_transform.origin + (-down) * 0.02
+	var query := PhysicsRayQueryParameters3D.new()
+	query.from = origin
+	query.to = origin + down * (GROUND_CLEARANCE_RANGE + CHASSIS_Y)
+	query.collision_mask = _LAYER_WORLD
+	query.hit_from_inside = true   # detect the surface even if the origin is inside/on a collider
+	var hit := space_state.intersect_ray(query)
+	if hit.is_empty():
+		return GROUND_CLEARANCE_RANGE
+	# Sensor-to-surface distance minus the sensor-to-belly offset = belly clearance.
+	return max(0.0, origin.distance_to(hit.position) - sensor_up)
 
 func _compute_target_loom() -> float:
 	# Phase H1 V6 — proxy looming: count rays in a forward FOV grid that
@@ -6612,6 +8931,7 @@ func _clear_pyramid_target() -> void:
 	if walk_target_idx >= 0 and walk_target_idx < _pyramid_meshes.size():
 		var prev_mesh: MeshInstance3D = _pyramid_meshes[walk_target_idx]
 		prev_mesh.set_surface_override_material(0, _pyramid_default_mats[walk_target_idx])
+		_rebuild_beacon_surface_map()   # recolouring redefines what IS a beacon
 	walk_target_idx = -1
 
 func _update_ray_overlay() -> void:
@@ -6685,6 +9005,41 @@ func _update_ray_overlay() -> void:
 	im.surface_end()
 	_ray_overlay_mi.mesh = im
 
+# ---- 2026-08-04 · beacon-surface lookup (the honest replacement for the identity test) --
+# Keyed on a collider's OWN albedo, not on which pyramid is the target.  Built once and
+# refreshed whenever the purple material moves, so the per-ray cost is a dictionary hit
+# rather than a material walk across ~3000 rays a frame.
+#
+# WHY THIS IS NOT JUST THE IDENTITY TEST WEARING A HAT: the map is colour -> bool, so it
+# answers "is the surface at this point purple", which a camera can do.  Paint two pyramids
+# and both register; paint none and none do; move the beacon and the purple moves with it.
+# The old test answered "is this the node the simulator designated as the goal", which no
+# sensor can answer and which no amount of learning would need to.
+var _beacon_colliders: Dictionary = {}      # collider instance_id -> true
+var _beacon_frac: float = 0.0               # fraction of the frame that is beacon-coloured
+
+func _rebuild_beacon_surface_map() -> void:
+	_beacon_colliders.clear()
+	for i in range(_pyramid_meshes.size()):
+		var mesh: MeshInstance3D = _pyramid_meshes[i]
+		if mesh == null or not is_instance_valid(mesh):
+			continue
+		var mat: Material = mesh.get_surface_override_material(0)
+		if mat is StandardMaterial3D:
+			var c: Color = (mat as StandardMaterial3D).albedo_color
+			# "Beacon-coloured" = close to the beacon hue in RGB.  A real detector would
+			# threshold in HSV; RGB distance is adequate for a flat-shaded scene and keeps
+			# this cheap.  It is a property of the SURFACE, never of the target index.
+			if c.r > 0.35 and c.b > 0.45 and c.g < 0.40 and c.b > c.g * 1.4:
+				var body: Node = mesh.get_parent()
+				if body != null:
+					_beacon_colliders[body.get_instance_id()] = true
+
+func _abl_is_beacon_surface(collider: Object) -> bool:
+	if collider == null or _beacon_colliders.is_empty():
+		return false
+	return _beacon_colliders.has(collider.get_instance_id())
+
 func _capture_vision() -> void:
 	# One forward-facing perspective raycast grid → BOTH an RGB image (camera)
 	# and a depth/range field (LiDAR/sonar).  Forward = +basis.z (the fixed
@@ -6696,11 +9051,12 @@ func _capture_vision() -> void:
 	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	if space_state == null:
 		return
-	var n: int = VISION_RES
-	if _last_vision_pixels.size() != n * n * 3:
-		_last_vision_pixels.resize(n * n * 3)
-	if _last_vision_depth.size() != n * n:
-		_last_vision_depth.resize(n * n)
+	var nw: int = maxi(2, vision_res_w)
+	var nh: int = maxi(2, vision_res_h)
+	if _last_vision_pixels.size() != nw * nh * 3:
+		_last_vision_pixels.resize(nw * nh * 3)
+	if _last_vision_depth.size() != nw * nh:
+		_last_vision_depth.resize(nw * nh)
 	var chassis_xf: Transform3D = _chassis.global_transform
 	var origin: Vector3  = chassis_xf.origin + Vector3(0.0, 0.08, 0.0)
 	var forward: Vector3
@@ -6716,21 +9072,21 @@ func _capture_vision() -> void:
 		forward = chassis_xf.basis.z
 		right   = -chassis_xf.basis.x   # = forward × up; un-mirror L/R
 		up      = chassis_xf.basis.y
-	var tan_half: float = tan(VISION_FOV_RAD * 0.5)
-	var target_collider: Node = null
-	if walk_target_idx >= 0 and walk_target_idx < _pyramid_meshes.size():
-		var tm: MeshInstance3D = _pyramid_meshes[walk_target_idx]
-		if tm != null:
-			target_collider = tm.get_parent()
+	# Separate H/V half-angles — the sensor is 4:3, not square.  Using one FOV for both
+	# axes (the old behaviour) silently stretches the image and misreports every bearing.
+	var tan_half_h: float = tan(VISION_FOV_H_RAD * 0.5)
+	var tan_half_v: float = tan(VISION_FOV_V_RAD * 0.5)
+	# ⚠ NO target_collider here any more — see the colour test below.
 	var q := PhysicsRayQueryParameters3D.new()
 	q.collision_mask = 0xFFFFFFFF
 	q.collide_with_areas = false
 	q.collide_with_bodies = true
-	for j in range(n):
-		var v: float = 1.0 - 2.0 * (float(j) + 0.5) / float(n)   # top row first
-		for i in range(n):
-			var u: float = -1.0 + 2.0 * (float(i) + 0.5) / float(n)
-			var dir: Vector3 = (forward + right * (u * tan_half) + up * (v * tan_half)).normalized()
+	var beacon_hits: int = 0
+	for j in range(nh):
+		var v: float = 1.0 - 2.0 * (float(j) + 0.5) / float(nh)   # top row first
+		for i in range(nw):
+			var u: float = -1.0 + 2.0 * (float(i) + 0.5) / float(nw)
+			var dir: Vector3 = (forward + right * (u * tan_half_h) + up * (v * tan_half_v)).normalized()
 			q.from = origin
 			q.to   = origin + dir * LOOM_RAY_LEN
 			var hit := space_state.intersect_ray(q)
@@ -6740,8 +9096,20 @@ func _capture_vision() -> void:
 				depth_norm = clamp(origin.distance_to(hit.position) / LOOM_RAY_LEN, 0.0, 1.0)
 				var nrm: Vector3 = hit.get("normal", Vector3.UP)
 				var br: int; var bg: int; var bb: int          # base class colour
-				if hit.collider == target_collider:
-					br = 191; bg = 89; bb = 255          # purple — active target
+				# ---- 2026-08-04 · THE HONEST COLOUR TEST -------------------------------
+				# WAS: `if hit.collider == target_collider` -- a NODE-IDENTITY comparison
+				# against _pyramid_meshes[walk_target_idx].  That is an oracle painted into
+				# the raw pixels: the ground-truth answer to "which pyramid is the target"
+				# arrived upstream of the encoder, upstream of everything.  No camera can
+				# perform an identity test.  It also meant the scene-graph purple material
+				# was never read -- the purple was a HUD affordance for the human only.
+				# NOW: look up the surface's OWN colour.  The pyramid reads purple BECAUSE
+				# IT IS PURPLE, which any camera can do, and it degrades honestly -- paint
+				# two pyramids and both show; move the beacon and the purple moves with it.
+				var beacon_px: bool = _abl_is_beacon_surface(hit.collider)
+				if beacon_px:
+					br = 191; bg = 89; bb = 255          # purple — a purple SURFACE
+					beacon_hits += 1
 				elif nrm.y > 0.7:
 					br = 120; bg = 115; bb = 110         # gray — ground
 				else:
@@ -6753,11 +9121,20 @@ func _capture_vision() -> void:
 				r8 = int(clampf(br * shade, 0.0, 255.0))
 				g8 = int(clampf(bg * shade, 0.0, 255.0))
 				b8 = int(clampf(bb * shade, 0.0, 255.0))
-			var pidx: int = (j * n + i) * 3
+			var pidx: int = (j * nw + i) * 3
 			_last_vision_pixels[pidx]     = r8
 			_last_vision_pixels[pidx + 1] = g8
 			_last_vision_pixels[pidx + 2] = b8
-			_last_vision_depth[j * n + i] = depth_norm
+			_last_vision_depth[j * nw + i] = depth_norm
+	# ---- THE BEACON SCALAR -- computed HERE, at full ray resolution ------------------
+	# Deliberately NOT routed through the EPM.  A GNG coarse-grains into a discrete,
+	# addressable vocabulary, which is exactly right for "what kind of place is this" and
+	# exactly wrong for a beacon gradient: run-and-tumble climbs a CONTINUOUS graded
+	# magnitude, and node-quantising it destroys the signal it climbs.  This is the
+	# looming/LGMD pathway; `epm_color` remains the form pathway on the same image.
+	# Also note it is computed BEFORE the JL encoder's fixed 24x24 resize, so raising
+	# vision_res_* actually buys the nav loop range (it would not if this went via the EPM).
+	_beacon_frac = float(beacon_hits) / float(nw * nh)
 
 func _load_vision_steer_readout() -> void:
 	# Load the fixed linear readout (epm_color latent → bearing) for V2 steering.
@@ -6812,10 +9189,10 @@ func _build_vision_panel() -> void:
 	_vision_panel.add_child(vb)
 	_vision_panel.visible = false
 	hud.add_child(_vision_panel)
-	_vision_rgb_image = Image.create_empty(VISION_RES, VISION_RES, false, Image.FORMAT_RGB8)
+	_vision_rgb_image = Image.create_empty(vision_res_w, vision_res_h, false, Image.FORMAT_RGB8)
 	_vision_rgb_texture = ImageTexture.create_from_image(_vision_rgb_image)
 	_vision_rgb_rect.texture = _vision_rgb_texture
-	_vision_depth_image = Image.create_empty(VISION_RES, VISION_RES, false, Image.FORMAT_RGB8)
+	_vision_depth_image = Image.create_empty(vision_res_w, vision_res_h, false, Image.FORMAT_RGB8)
 	_vision_depth_texture = ImageTexture.create_from_image(_vision_depth_image)
 	_vision_depth_rect.texture = _vision_depth_texture
 
@@ -6829,18 +9206,19 @@ func _update_vision_panel() -> void:
 	if not _vision_panel_on:
 		return
 	_capture_vision()
-	var n: int = VISION_RES
-	if _last_vision_pixels.size() == n * n * 3:
-		_vision_rgb_image.set_data(n, n, false, Image.FORMAT_RGB8, _last_vision_pixels)
+	var nw: int = vision_res_w
+	var nh: int = vision_res_h
+	if _last_vision_pixels.size() == nw * nh * 3:
+		_vision_rgb_image.set_data(nw, nh, false, Image.FORMAT_RGB8, _last_vision_pixels)
 		_vision_rgb_texture.update(_vision_rgb_image)
 	# Depth → grayscale (near bright, far dark) for the panel.
-	if _last_vision_depth.size() == n * n:
+	if _last_vision_depth.size() == nw * nh:
 		var gray := PackedByteArray()
-		gray.resize(n * n * 3)
-		for k in range(n * n):
+		gray.resize(nw * nh * 3)
+		for k in range(nw * nh):
 			var g: int = int((1.0 - _last_vision_depth[k]) * 255.0)
 			gray[k * 3] = g; gray[k * 3 + 1] = g; gray[k * 3 + 2] = g
-		_vision_depth_image.set_data(n, n, false, Image.FORMAT_RGB8, gray)
+		_vision_depth_image.set_data(nw, nh, false, Image.FORMAT_RGB8, gray)
 		_vision_depth_texture.update(_vision_depth_image)
 
 func _update_distress_hud() -> void:
@@ -6900,6 +9278,12 @@ func _safe_reset_xz_near(target: Vector2) -> Vector2:
 	return safe
 
 func _do_hard_reset() -> void:
+	# Gate 0 (L-1a) — announce the teleport/respawn on the bus so brain modules
+	# (MotorEPM) can reset-mask their metrics.  A hard reset is otherwise invisible
+	# to the brain (no events.* fires), which fakes rhythm continuity across the
+	# discontinuity.  Reward-free instrumentation.
+	if brain != null:
+		brain.publish_event("reset", 1.0)
 	# Apply _pending_reset_offset to every cached rest transform.  Zero
 	# offset (legacy default) reproduces the original center-spawn
 	# behaviour bit-identically.  Non-zero offset translates the entire
@@ -6963,6 +9347,225 @@ func _do_hard_reset() -> void:
 	# keeps this safe in scenes without a WalkingTrail node.
 	if _walking_trail != null and _walking_trail.has_method("clear"):
 		_walking_trail.call("clear")
+
+# Sum each foot's contact impulses along the body-forward axis, every physics step.
+# Drained by the trace recorder, so the logged value is the impulse delivered over the
+# whole brain tick rather than a single-substep snapshot.
+func _fl_norm() -> float:
+	return max(1e-6, _TOTAL_MASS * 9.81 / float(physics_hz))
+
+func _accum_grf() -> void:
+	if _trace_file == null and not _trace_ready:
+		pass    # still accumulate before the trace opens; cost is 4 direct-state reads
+	if _chassis == null or not is_instance_valid(_chassis):
+		return
+	var yaw: float = _chassis.global_transform.basis.get_euler().y
+	var fwd := Vector3(sin(yaw), 0.0, cos(yaw))
+	var up_acc: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var nrm_acc: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	for i in range(_lowers.size()):
+		if not is_instance_valid(_lowers[i]):
+			continue
+		var st := PhysicsServer3D.body_get_direct_state(_lowers[i].get_rid())
+		if st == null:
+			continue
+		for j in range(st.get_contact_count()):
+			# get_contact_impulse is the impulse the SOLVER applied to this body this
+			# step; its forward component is the thrust the ground gave the foot.
+			var imp: Vector3 = st.get_contact_impulse(j)
+			_grf_fwd[i] += imp.dot(fwd)
+			up_acc[i]   += imp.dot(Vector3.UP)
+			# HARDWARE-HONEST VARIANT — what an FSR / load cell in the foot actually
+			# reads: the NORMAL force at the contact patch.  No world-frame projection,
+			# so it needs neither a god's-eye up-vector nor the IMU's estimate of one.
+			# This is the version a real picrawler can produce; the world-up projection
+			# above is kept only to check the two agree.
+			nrm_acc[i]  += absf(imp.dot(st.get_contact_local_normal(j)))
+	for i in range(4):
+		_grf_up[i]  += up_acc[i]
+		_grf_nrm[i] += nrm_acc[i]
+		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * nrm_acc[i]
+
+# ---------------------------------------------------------------------------
+# Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.
+# ---------------------------------------------------------------------------
+func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float, yaw: float, chassis_y: float) -> void:
+	if not _trace_ready:
+		_trace_ready = true
+		var path: String = OS.get_environment("OGMA_PICRAWLER_TRACE")
+		if path != "":
+			_trace_file = FileAccess.open(path, FileAccess.WRITE)
+			if _trace_file == null:
+				push_error("PicrawlerBody: could not open trace path " + path)
+			else:
+				print("PicrawlerBody: attribution trace -> %s" % path)
+	if _trace_file == null:
+		return
+	# Torques are ALREADY normalised to [-1,1] against MAX_SERVO_TORQUE by the
+	# joint_torque proprio block, and are ONE TICK DELAYED (the motor runs after
+	# perception).  Both facts matter to the offline analysis, so the raw values
+	# go out unmodified and the correction is made there, not hidden here.
+	var rec := {
+		"t": tick_counter,
+		"fwd_v": snappedf(fwd_v, 0.00001),
+		"yaw": snappedf(yaw, 0.00001),
+		# 2026-08-06 — chassis height and belly clearance.  ⚠ WITH chassis_collides=false
+		# (the default) the chassis is a GHOST: it passes THROUGH the floor rather than
+		# resting on it, so a NEGATIVE-going y is the body intersecting the world, not
+		# touching it.  Every claim about belly clearance is meaningless without this.
+		"cy": snappedf(chassis_y, 0.00001),
+		"gc": snappedf(_dbg_gc_raw, 0.00001),
+		"c": contact,
+		"h1": h1, "h2": h2, "kn": kn,
+		"th1": [_prev_torque_hip1[0], _prev_torque_hip1[1], _prev_torque_hip1[2], _prev_torque_hip1[3]],
+		"th2": [_prev_torque_hip2[0], _prev_torque_hip2[1], _prev_torque_hip2[2], _prev_torque_hip2[3]],
+		"tkn": [_prev_torque_knee[0], _prev_torque_knee[1], _prev_torque_knee[2], _prev_torque_knee[3]],
+		"a1": [_eff_target_hip1[0], _eff_target_hip1[1], _eff_target_hip1[2], _eff_target_hip1[3]],
+		"a2": [_eff_target_hip2[0], _eff_target_hip2[1], _eff_target_hip2[2], _eff_target_hip2[3]],
+		"akn": [_eff_target_knee[0], _eff_target_knee[1], _eff_target_knee[2], _eff_target_knee[3]],
+		"lh1": [_prev_load_hip1[0], _prev_load_hip1[1], _prev_load_hip1[2], _prev_load_hip1[3]],
+		"lh2": [_prev_load_hip2[0], _prev_load_hip2[1], _prev_load_hip2[2], _prev_load_hip2[3]],
+		"lkn": [_prev_load_knee[0], _prev_load_knee[1], _prev_load_knee[2], _prev_load_knee[3]],
+		"grf": [_grf_fwd[0], _grf_fwd[1], _grf_fwd[2], _grf_fwd[3]],
+		"grfup": [_grf_up[0], _grf_up[1], _grf_up[2], _grf_up[3]],
+		"grfn": [_grf_nrm[0], _grf_nrm[1], _grf_nrm[2], _grf_nrm[3]],
+		# the PUBLISHED foot_load channel, exactly as a consumer EPM would receive it
+		"fload": [snappedf(_foot_load_ema[0] / _fl_norm(), 0.00001),
+				  snappedf(_foot_load_ema[1] / _fl_norm(), 0.00001),
+				  snappedf(_foot_load_ema[2] / _fl_norm(), 0.00001),
+				  snappedf(_foot_load_ema[3] / _fl_norm(), 0.00001)],
+		# 2026-08-07 — THE ACCELEROMETER RESIDUAL.  raw accel-up minus the fused estimate,
+		# in BODY frame.  The complementary filter treats this as the thing to reject (and
+		# is right to: a footfall impulse reads as a tilt to an accelerometer, so feeding
+		# raw accel into attitude would make the body think it pitches on every step).
+		# But the rejected part is not noise — the operator observes it scattering in four
+		# diagonal directions, i.e. each leg's strike has a characteristic direction.  If
+		# that holds, the IMU is already a footfall/load sensor, on hardware the real
+		# picrawler HAS, and no FSR is needed.  Logged to test exactly that.
+		"ares": [snappedf(_up_acc_last.x - _up_est_body.x, 0.00001),
+				 snappedf(_up_acc_last.y - _up_est_body.y, 0.00001),
+				 snappedf(_up_acc_last.z - _up_est_body.z, 0.00001)],
+	}
+	_trace_file.store_line(JSON.stringify(rec))
+	for k in range(4):
+		_grf_fwd[k] = 0.0    # drain: each line reports one brain tick
+		_grf_up[k]  = 0.0
+		_grf_nrm[k] = 0.0
+
+# ---------------------------------------------------------------------------
+# Clip ring — one compact record per brain tick.  Cheap by construction: a fixed-size
+# Array of small Dictionaries, overwritten in place, never grown, never scanned.
+# ---------------------------------------------------------------------------
+func _clip_record(h1: Array, h2: Array, kn: Array, chassis_y: float) -> void:
+	if _chassis == null or not is_instance_valid(_chassis):
+		return
+	if _clip_ring.size() != _CLIP_RING_LEN:
+		_clip_ring.resize(_CLIP_RING_LEN)
+		_clip_head = 0
+		_clip_count = 0
+	var contact: Array = []
+	for i in range(4):
+		contact.append(1 if not _lowers[i].get_colliding_bodies().is_empty() else 0)
+	var o: Vector3 = _chassis.global_transform.origin
+	var yaw: float = _chassis.global_transform.basis.get_euler().y
+	# Same locomotor-forward projection the diag path uses (see :4515) — recomputed here
+	# rather than cached, so the recorder adds no state the rest of the body must maintain.
+	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z) \
+		.dot(Vector2(sin(yaw), cos(yaw)))
+	_trace_record(h1, h2, kn, contact, fwd_v, yaw, chassis_y)
+	_clip_ring[_clip_head] = {
+		"t": tick_counter,
+		"x": snappedf(o.x, 0.0001), "y": snappedf(chassis_y, 0.0001), "z": snappedf(o.z, 0.0001),
+		"yaw": snappedf(yaw, 0.0001),
+		"c": contact,
+		"h1": [snappedf(h1[0],0.0001), snappedf(h1[1],0.0001), snappedf(h1[2],0.0001), snappedf(h1[3],0.0001)],
+		"h2": [snappedf(h2[0],0.0001), snappedf(h2[1],0.0001), snappedf(h2[2],0.0001), snappedf(h2[3],0.0001)],
+		"kn": [snappedf(kn[0],0.0001), snappedf(kn[1],0.0001), snappedf(kn[2],0.0001), snappedf(kn[3],0.0001)],
+		"fwd_v": snappedf(fwd_v, 0.0001),
+		# 2026-08-05 — added for the BURST-ONSET probe.  The question is what gates a step:
+		# the gait moves in bursts of 2-4 steps separated by ~1.6 s silences (measured
+		# step-rate CV 5.6 against 1.0 for a memoryless process), and nothing in the
+		# 5-tick-resolution signal set predicts onset at +-40 ticks.  These are the
+		# body-side candidates, at full tick rate.
+		"tilt": snappedf(_chassis_tilt(_chassis.global_transform.basis), 0.0001),
+		"fy": _feet_y_array(),
+		"gc": snappedf(_dbg_gc_raw, 0.0001),
+		"lift": [_leg_lifted_count[0], _leg_lifted_count[1], _leg_lifted_count[2], _leg_lifted_count[3]],
+		"lat_v": snappedf(Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z)
+			.dot(Vector2(cos(yaw), -sin(yaw))), 0.0001),
+	}
+	_clip_head = (_clip_head + 1) % _CLIP_RING_LEN
+	# ---- AUTO-TRIGGER (2026-08-05) ------------------------------------------------------
+	# A ring buffer plus a trigger means the saved window is the RUN-UP to an event rather
+	# than a guess about when to press a key.  Two classes, so clipdiff.py has both sides:
+	#   ONSET — the first lift after >= _BURST_GAP_TICKS of silence.  The clip therefore
+	#           contains the whole preceding pause AND the burst that ends it.
+	#   GAP   — a control taken deep inside a silence, to answer "what is different about
+	#           the moment stepping resumes" rather than "what does a step look like".
+	# ⚠ Keyed on _leg_lifted_count, which is the SWING-DETECTOR's event, not true contact
+	# (the detector over-reports swing ~1.8x vs the physics flag).  If the captured windows
+	# do not look like pause->step transitions to the operator, this trigger is firing on
+	# the wrong events and nothing downstream of it is trustworthy.
+	if _cw_from >= 0 and not _cw_saved and tick_counter >= _cw_to:
+		_cw_saved = true
+		var n_out: int = 0
+		for k in range(_CLIP_RING_LEN):
+			var e = _clip_ring[(_clip_head + k) % _CLIP_RING_LEN]
+			if e is Dictionary and int(e.get("t", -1)) >= _cw_from and int(e.get("t", -1)) <= _cw_to:
+				e["cw"] = 1
+				print(JSON.stringify(e)); n_out += 1
+		print("PicrawlerBody: CLIP_WINDOW emitted %d ticks (%d..%d)" % [n_out, _cw_from, _cw_to])
+	if _burst_probe:
+		var lifts: int = 0
+		for i in range(4): lifts += int(_leg_lifted_count[i])
+		if lifts > _bp_last_lifts:
+			var gap: int = tick_counter - _bp_last_lift_tick
+			if gap >= _BURST_GAP_TICKS and _clip_count >= _CLIP_RING_LEN / 2:
+				_clip_save("ONSET")
+			_bp_last_lifts = lifts
+			_bp_last_lift_tick = tick_counter
+		elif tick_counter - _bp_last_lift_tick == _BURST_GAP_TICKS * 2 \
+				and _clip_count >= _CLIP_RING_LEN / 2:
+			_clip_save("GAP")
+	if _clip_count < _CLIP_RING_LEN:
+		_clip_count += 1
+
+
+## Write the ring to /tmp/xaq_clips/<runid>/, labelled GOOD or BAD.  Oldest-first, with a
+## `_meta` header line naming the config/gym/seed so clipdiff can refuse to compare clips
+## that came from different ARMS (a GOOD clip from one arm vs a BAD clip from another
+## measures the arm, and that confound is invisible in the output table).
+func _clip_save(label: String) -> void:
+	if _clip_count < 30:
+		print("PicrawlerBody: clip SKIPPED — only %d ticks buffered" % _clip_count)
+		return
+	if _clip_dir == "":
+		var stamp: String = Time.get_datetime_string_from_system().replace(":", "").replace("-", "")
+		_clip_dir = "/tmp/xaq_clips/run_%s" % stamp
+		DirAccess.make_dir_recursive_absolute(_clip_dir)
+	var path: String = "%s/clip_%02d_%s_t%06d.jsonl" % [_clip_dir, _clip_seq, label, tick_counter]
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		push_error("PicrawlerBody: could not open %s" % path)
+		return
+	f.store_line(JSON.stringify({"_meta": {
+		"label": label,
+		"config": OS.get_environment("OGMA_PICRAWLER_CONFIG"),
+		"gym": _gym_mode_active,
+		"tick": tick_counter,
+		"ticks": _clip_count,
+	}}))
+	# Unroll oldest-first so the file reads forward in time regardless of the ring's head.
+	var start: int = (_clip_head - _clip_count + 2 * _CLIP_RING_LEN) % _CLIP_RING_LEN
+	for k in range(_clip_count):
+		var rec = _clip_ring[(start + k) % _CLIP_RING_LEN]
+		if rec != null:
+			f.store_line(JSON.stringify(rec))
+	f.close()
+	_clip_seq += 1
+	print("PicrawlerBody: [%s] clip saved -> %s  (%d ticks)" % [label, path, _clip_count])
+	_ui_notify("clip %s saved (%d ticks)" % [label, _clip_count])
+
 
 func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				 chassis_y: float, chassis_tilt: float) -> void:
@@ -7035,6 +9638,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# tabula-rasa runs.
 	var cpg_state: Dictionary = {}
 	var epm_tle_by_id: Dictionary = {}   # per-EPM ema_tle (aliveness signal #3)
+	var epm_win_by_id: Dictionary = {}   # per-EPM current winner id
 	# Reset population caches each diag tick before the metrics loop populates them.
 	_cog_pop_accels.clear()
 	_cog_pop_chosen.clear()
@@ -7157,6 +9761,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# OgmaBrain::get_module_metrics).  Instantaneous TLE — spikes on
 			# first obstacle contact for the joints/imu EPMs (aliveness #3).
 			epm_tle_by_id[mod_id] = snappedf(float(m.get("tle", 0.0)), 0.00001)
+			# 2026-08-07 — the WINNER too, so per-node statistics are computable
+			# offline.  The selector's gating question is whether responsiveness
+			# varies ACROSS support nodes or only with the coarse count of planted
+			# feet; without the winner id that cannot be asked.
+			epm_win_by_id[mod_id] = int(m.get("winner_id", -1))
 	# 2026-06-07 — F10/F11 Cognitive Premotor Population aggregation.
 	# When the population caches are non-empty, body aggregates the population's
 	# accels into _cognitive_bias_rad (overrides the single-Premotor path above).
@@ -7360,6 +9969,363 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	#  #1 heading regulation — yaw + body-frame outward unit vector;
 	#  #3 obstacle adaptation — nearest-pyramid surface distance + per-EPM TLE.
 	line["heading_yaw"]              = snappedf(_last_yaw, 0.001)
+	# fwd_v — body-frame forward speed (same projection the IMU feeds the brain,
+	# MotorEPM.cpp reads it as the thrust/controllability signal).  Emitted for the
+	# seed-avg harness's DIRECT propulsion/anti-scrub metric (mean fwd_v).
+	line["fwd_v"]                    = snappedf(
+		Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(
+			Vector2(sin(_last_yaw), cos(_last_yaw))), 0.001)
+	# ---- RAMP DEBUG: belly rangefinder + height-homeostat state (2026-07-23) ----
+	# gc_raw = raw belly ToF clearance (m); gc_norm = normalized signal the brain sees
+	# (ground_clearance); cy_norm = the OLD god's-eye chassis_y_norm (absolute-Y) for
+	# comparison. h_ema/h_max/h_bias pulled from MotorEPM's snapshot = the homeostat's
+	# smoothed height, self-discovered ceiling, and the integrated lift bias driving hip2.
+	line["gc_raw"]  = snappedf(_dbg_gc_raw, 0.0001)
+	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
+	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
+	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against
+	# which any duty-factor claim must be checked, and which disagrees with BOTH proxies
+	# previously used for it (see where it is computed).
+	line["contact_swing"] = snappedf(_dbg_contact_swing, 0.001)
+	# Servo tracking error in foot-height metres = the information hobby servos do NOT
+	# report. If this is large, commanded-angle FK is a materially different signal.
+	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
+	line["fk_valid_err"] = snappedf(_dbg_fk_valid_err, 0.00001)
+	line["att_err_acc"] = snappedf(_dbg_att_err_acc, 0.01)
+	line["att_err_imu"] = snappedf(_dbg_att_err_imu, 0.01)
+	line["acc_mag"] = snappedf(_dbg_acc_mag, 0.01)
+	line["acc_trust"] = snappedf(_dbg_acc_trust, 0.0001)
+	# 2026-08-06 — motor-layer EPM liveness probe.  A DEAD EPM has a signature the
+	# operator named: tle 0, 2 nodes, 1 baked (the seed pair, never grown).  Printing
+	# it makes "is anything flowing?" a measurement instead of an inference.
+	if brain != null and brain.has_method("get_module_snapshot"):
+		for _gid in ["motor_gng_fl", "motor_gng_fr", "motor_gng_rl", "motor_gng_rr", "support_epm"]:
+			# ⚠ An EPM snapshot has NO "module" wrapper -- its diag fields sit at top
+			# level, unlike MotorEPM's.  Looking for one silently yields nothing, which
+			# is how a DEAD EPM and an UNREAD EPM became indistinguishable.
+			var _gs = JSON.parse_string(str(brain.get_module_snapshot(_gid)))
+			if _gs is Dictionary and _gs.has("gng"):
+				var _g = _gs["gng"]
+				var _narr: Array = _g.get("nodes", [])
+				var _nodes: int = _narr.size() if _g.has("nodes") else -1
+				var _lx: Array = _g.get("last_x", [])
+				var _mag: float = 0.0
+				for _v in _lx: _mag += abs(float(_v))
+				# ⚠ last_x is JSON null until the first step().  ALL-ZEROS is a
+				# DIFFERENT failure -- it means step() ran on a zero encode (the
+				# dim-mismatch trap, EPM.md "The zero-encode trap").  Testing for null
+				# distinguishes them; magnitude alone cannot, and reading all-zeros as
+				# "nothing arrived" cost a session.
+				var _never_stepped: bool = (_g.get("last_x", null) == null)
+				# GATE FIELDS (§0 rule 4: never baking / never growing / growing
+				# unbounded are CONDITIONING diagnoses, not verdicts on the idea).
+				#   baked -- is the vocabulary EARNED, or is it churning?
+				#   top1  -- visit share of the single busiest node.  A high top1 next to
+				#            a large node count is premature saturation: one word absorbs
+				#            the stream while the rest are decoration.  Node count alone
+				#            cannot see this (it is the same blindness that made purity,
+				#            not node count, the EPM commissioning acceptance test).
+				var _bake_thr: int = int(_g.get("baking_threshold", 50))
+				var _baked: int = 0
+				var _visits_tot: float = 0.0
+				var _visits_max: float = 0.0
+				for _n in _narr:
+					var _v2: float = float(_n.get("visits", 0))
+					_visits_tot += _v2
+					if _v2 > _visits_max: _visits_max = _v2
+					if int(_v2) >= _bake_thr: _baked += 1
+				var _top1: float = (_visits_max / _visits_tot) if _visits_tot > 0.0 else -1.0
+				line["g_" + (_gid.substr(10) if _gid.begins_with("motor_gng_") else "sup")] = [
+					_nodes, _baked, snappedf(float(_gs.get("ema_tle", -1.0)), 0.000001),
+					(-1.0 if _never_stepped else snappedf(_mag, 0.0001)),
+					int(_g.get("mitosis_count", -1)), snappedf(_top1, 0.001),
+						snappedf(float(_g.get("autotune_value", -1.0)), 0.000001),
+						snappedf(float(_g.get("min_insertion_error", -1.0)), 0.000001)]
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
+		if _ms is Dictionary and _ms.has("module"):
+			var _mm = _ms["module"]
+			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
+			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
+			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
+			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
+			# moved" -- the consumer-fired check, which this session has needed twice.
+			line["h_keff"] = snappedf(float(_mm.get("height_k_eff", -1.0)), 0.001)
+			# 2026-08-07 — homeokinetic support selector telemetry.  Without these the
+			# consumer-fired check cannot distinguish "the selector moved the gait" from
+			# "the seeds moved" — the check this session has needed at every lever.
+			line["sup_bin"]  = int(_mm.get("support_bin", -1))
+			line["sup_val"]  = snappedf(float(_mm.get("support_value", 1.0)), 0.001)
+			line["sup_mult"] = snappedf(float(_mm.get("support_mult", 1.0)), 0.001)
+			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
+			# recovering after an inverted episode.  h_max above is the worst: a monotonic
+			# max with no decay and no reset, and it sets the height setpoint.
+			line["amp_gain"] = snappedf(float(_mm.get("amp_gain_mean", 0.0)), 0.001)
+			line["coord_best_fit"] = snappedf(float(_mm.get("coord_best_fitness", 0.0)), 0.0001)
+			line["motor_tle"] = snappedf(float(_mm.get("motor_tle", 0.0)), 0.0001)
+			# --- 2026-08-02 Phase-0 instruments (report-only).  See
+			# docs/reports/playful_machine_source_analysis.md §4.
+			# clip_duty: fraction of post-warmup leg-ticks where the ASSEMBLED command
+			# (HK + stroke + postural + height + cruse + coupling + noise) exceeded ±1
+			# and was flattened by the one output clamp.  The HK loop-Jacobian assumes a
+			# tanh; the body applies a hard clip — so a high clip_duty means every timing
+			# lever downstream was measured through a saturated actuator.
+			# hk_share: HK's share of the pre-clamp command magnitude (is the learned
+			# controller driving this gait, or the additive scaffolds?).
+			# echo_a: mean self-model gain on the [pos, ACTION, delta] echo channel
+			# (→1 = the model has latched a channel it can predict perfectly and the
+			# controller can drive perfectly, i.e. HK satisfiable without moving).
+			# c_act: share of |C|'s mass sitting on those echo columns.
+			# L-1b objective socket: is the posture OBJECTIVE driving the controller, or is
+			# postural_gain doing it additively?  obj_w is the mean blend weight actually
+			# applied (MotorEPM blends xi_tilde = (1-w)*xi + w*(x - x*)); obj_legs counts
+			# how many legs have a live objective.  Both 0 => the socket is not firing and
+			# any "objective replaces the additive term" claim is untestable.
+			# ★ inter-leg phase coherence — the operator's "are the legs actually working
+			# together" number.  Lived in diag_snapshot only until 2026-08-03, so no arm in
+			# this campaign had ever reported it.
+			# coh is the INSTANTANEOUS Kuramoto order parameter: for four independent legs its
+			# distribution is mean 0.450 / sd 0.219, so a single reading is nearly meaningless
+			# and a 12-seed sweep of it looks bimodal when nothing is locked.  plv is the
+			# honest read — constant RELATIVE phase over the run, null -> 0.
+			line["coh"] = snappedf(float(_mm.get("gait_coherence", 0.0)), 0.0001)
+			# plv is GATED on both legs of a pair actually oscillating — a frozen body has
+			# constant phases and would otherwise score ~1.  plv_n says how many ticks of
+			# genuine oscillation back the number; a low plv_n means plv is unsupported,
+			# not that the legs are uncoordinated.
+			line["plv"]   = snappedf(float(_mm.get("interleg_plv", 0.0)), 0.0001)
+			line["plv_n"] = int(_mm.get("plv_support", 0))
+			# TRAILING-WINDOW plv (tau ~500 ticks).  `plv` above accumulates over the whole
+			# run, so a perturbation at tick 2500 is diluted by 6000 ticks of history and the
+			# recovery it is meant to score is invisible.  plv_w CAN express a before/after.
+			# plv_wn is its support: |plv_w| <= plv_wn by construction, so a low plv_w with a
+			# low plv_wn means "nothing was moving", not "the legs are uncoordinated".
+			line["plv_w"]  = snappedf(float(_mm.get("interleg_plv_win", 0.0)), 0.0001)
+			line["plv_wn"] = snappedf(float(_mm.get("plv_win_support", 0.0)), 0.0001)
+			# Per-pair, so a three-legged gait can be scored among its SURVIVORS instead of
+			# being averaged against three dead pairs.  Order (0,1)(0,2)(0,3)(1,2)(1,3)(2,3).
+			var _pwp = _mm.get("plv_win_pairs", [])
+			var _pws = _mm.get("plv_win_pair_sup", [])
+			if _pwp is Array and not _pwp.is_empty(): line["plv_pairs"] = _pwp
+			if _pws is Array and not _pws.is_empty(): line["plv_pair_n"] = _pws
+			# Per-leg homeokinetic forward-model residual + oscillation amplitude.  The
+			# inferential-gain direction turns on whether these DIFFER across legs; the
+			# body-level motor_tle collapses exactly that.  −1 = leg not initialised;
+			# an exactly-0.0000 residual means a limb that never moved, not a perfect model.
+			var _tlg = _mm.get("tle_leg", [])
+			var _amg = _mm.get("amp_leg", [])
+			if _tlg is Array and not _tlg.is_empty(): line["tle_leg"] = _tlg
+			if _amg is Array and not _amg.is_empty(): line["amp_leg"] = _amg
+			# Panic override: (1 - panic_eff) already scales the coupling/stroke/rhythm terms,
+			# so this is an EXISTING surprise-modulated gain that has never been measured.
+			line["panic_eff"] = snappedf(float(_mm.get("panic_eff", 0.0)), 0.0001)
+			# Consumer check for couple_prec_gain.  The weights are mean-normalised, so
+			# cw_mean must read 1.00 and cw_spr = (max-min)/mean is the read that matters:
+			# flat across a gain sweep = the lever never fired, which is a measurement
+			# outcome and not a verdict on the idea.
+			# 2026-08-04 — the beacon channel, for the Stage-0 sensing-envelope measurement.
+			# beacon = fraction of frame that is beacon-coloured (the nav sensor).
+			# tgt_range is GOD'S-EYE and DIAGNOSTIC ONLY — it exists so the beacon can be
+			# characterised against true range and must never reach the brain.
+			line["beacon"] = snappedf(_beacon_frac, 0.000001)
+			line["vis_wh"] = [vision_res_w, vision_res_h]
+			if walk_target_idx >= 0 and walk_target_idx < _pyramid_xz_positions.size():
+				var _tp: Vector2 = _pyramid_xz_positions[walk_target_idx]
+				line["tgt_range"] = snappedf(Vector2(_chassis.global_transform.origin.x,
+					_chassis.global_transform.origin.z).distance_to(_tp), 0.001)
+			# L1 NAV CONSUMER CHECK.  gb_msgs == 0 with goal_bearing_topic configured means the
+			# nav module never published and the heading PD is silently still holding the spawn
+			# bearing — indistinguishable from "the lever did nothing" without this number.
+			# Per-leg hip1 clip duty. LEFT = legs 0,2 / RIGHT = 1,3 (the skid-steer `side`
+			# pattern). A RECTIFIED differential shows as one side pinned near its
+			# straight-line duty while the other falls — the commanded turn is symmetric but
+			# only half of it survives the clamp.
+			var _clg = _mm.get("clip_h1_leg", [])
+			var _prg = _mm.get("pre_h1_leg", [])
+			if _clg is Array and not _clg.is_empty(): line["clip_h1_leg"] = _clg
+			if _prg is Array and not _prg.is_empty(): line["pre_h1_leg"] = _prg
+			# CONSUMER CHECK for the heading integral term. 0.000 with heading_trim_rate != 0
+			# means the integrator never accumulated — and without this line, "inert lever" and
+			# "unwired instrument" are indistinguishable, which is exactly how this sweep first
+			# reported every arm at trim=0.000.
+			line["h_trim"] = snappedf(float(_mm.get("heading_trim", 0.0)), 0.00001)
+			# CONSUMER CHECK for commit_prec — MISSING until now, which made a whole 35-run
+			# sweep uninterpretable: the analysis read 1.00 from a .get() default and could not
+			# tell "the lever ran and did nothing" from "the lever never ran".
+			line["cR"]    = snappedf(float(_mm.get("couple_R", -1.0)), 0.001)
+			line["pretro"] = snappedf(float(_mm.get("phase_retro", -1.0)), 0.001)
+			line["resT"]  = snappedf(float(_mm.get("res_period", -1.0)), 0.1)
+			line["resA"]  = snappedf(float(_mm.get("res_amp", -1.0)), 0.001)
+			line["resL"]  = snappedf(float(_mm.get("res_lock", -1.0)), 0.001)
+			line["fprog"] = snappedf(float(_mm.get("fwd_progress_ema", -99.0)), 0.00001)
+			line["ierr"]  = snappedf(float(_mm.get("intent_err", -99.0)), 0.00001)
+			line["cprec"] = snappedf(float(_mm.get("commit_prec", -1.0)), 0.0001)
+			line["imsgs"] = int(_mm.get("intent_msgs", 0))
+			line["cboost"] = snappedf(float(_mm.get("commit_boost", -1.0)), 0.0001)
+			line["gb_msgs"] = int(_mm.get("goal_bearing_msgs", 0))
+			line["gb_err"]  = snappedf(float(_mm.get("goal_bearing_err", 0.0)), 0.0001)
+			line["cw_spr"]  = snappedf(float(_mm.get("couple_w_spr", 0.0)), 0.0001)
+			line["cw_mean"] = snappedf(float(_mm.get("couple_w_mean", 0.0)), 0.0001)
+			# hip2<->knee command sign agreement — the operator's "for the first time I see
+			# hip2 and knee work together to lift the chassis".  0.5 = chance.
+			line["hk_agree"] = snappedf(float(_mm.get("hip2_knee_agree", 0.0)), 0.0001)
+			line["obj_active"] = 1 if bool(_mm.get("obj_active", false)) else 0
+			line["obj_w"]      = snappedf(float(_mm.get("obj_weight", 0.0)), 0.0001)
+			line["obj_legs"]   = int(_mm.get("obj_legs", 0))
+			line["tq_mag"] = snappedf(_tq_mag_acc / maxf(1.0, _tq_n), 0.0001)
+			line["tq_sat"] = snappedf(_tq_sat_acc / maxf(1.0, _tq_n), 0.0001)
+			line["clip_duty"] = snappedf(float(_mm.get("clip_duty", 0.0)), 0.0001)
+			line["hk_share"]  = snappedf(float(_mm.get("hk_share", 0.0)), 0.0001)
+			line["echo_a"]    = snappedf(float(_mm.get("echo_a_gain", 0.0)), 0.0001)
+			line["c_pos"]     = snappedf(float(_mm.get("c_mass_pos", 0.0)), 0.0001)
+			line["c_act"]     = snappedf(float(_mm.get("c_mass_act", 0.0)), 0.0001)
+			line["c_del"]     = snappedf(float(_mm.get("c_mass_del", 0.0)), 0.0001)
+			var _cdj: Array = _mm.get("clip_duty_j", [])
+			if _cdj is Array and _cdj.size() >= 3:
+				line["clip_h1"] = snappedf(float(_cdj[0]), 0.0001)
+				line["clip_h2"] = snappedf(float(_cdj[1]), 0.0001)
+				line["clip_kn"] = snappedf(float(_cdj[2]), 0.0001)
+			var _pmj: Array = _mm.get("pre_mag_j", [])
+			if _pmj is Array and _pmj.size() >= 3:
+				line["pre_h1"] = snappedf(float(_pmj[0]), 0.001)
+				line["pre_h2"] = snappedf(float(_pmj[1]), 0.001)
+				line["pre_kn"] = snappedf(float(_pmj[2]), 0.001)
+			# swing_frac = fraction of legs MotorEPM's foot-height detector calls
+			# "swinging" — the gate stance_lift and the Cruse rules ride on.  Read it
+			# against this body's OWN absolute planted test (feet_y < stance_y_threshold):
+			# a detector reporting ~0.5 while the feet are genuinely down ~80% of the
+			# time is measuring gait phase, not ground contact.
+			line["swing_frac"] = snappedf(float(_mm.get("swing_frac", 0.0)), 0.001)
+			# cruse_bias = mean |MotorEPM's OWN Cruse contribution|.  EXACTLY 0 means
+			# MotorEPM's Cruse block never ran, so any Cruse-looking motion is coming
+			# from elsewhere.  NOTE there are TWO Rule-3 knobs: MotorEPM's
+			# `cruse_rule3_weight` (inert unless `cruse_gain` != 0 — this is the one the
+			# MOTOR-EPM panel writes) and CruseCoordinator's separate `rule3_weight`
+			# (gated by `cruse_bias_gain`, which defaults to 1.0 = ON).
+			line["cruse_bias"] = snappedf(float(_mm.get("cruse_bias", 0.0)), 0.0001)
+			# phase_agree: does a LEGAL body-rhythm phase gate reproduce the god's-eye swing
+			# detector? ~0.5 = no information; ~1.0 = the detector is really a phase gate and
+			# the oracle can be replaced by a signal a real robot has.
+			line["phase_agree"] = snappedf(float(_mm.get("phase_agree", 0.0)), 0.001)
+			line["legphase_agree"] = snappedf(float(_mm.get("legphase_agree", 0.0)), 0.001)
+			# ---- Phase-0 gait-alignment diagnostic (2026-07-26, `gait_align_diag`) ----
+			# Is the propulsive stroke phase-locked to ground contact AT ALL?  The stroke
+			# rides L.phase (from the KNEE); the stance gate rides the FOOT-HEIGHT cycle.
+			# td_plv = phase-locking value of the stroke waveform at TRUE touchdown:
+			#   ~0 = the foot lands at a uniformly random point in the power stroke, so
+			#        half the stroke pushes air and half the return swing scrubs.
+			#   ~1 = locked (and td_phase then says whether stroke_phase is mis-offset).
+			# pos_stance vs pos_swing: fraction of each spent in the stroke's positive
+			# half.  Both ~0.5 = no relation.  torque_* answers whether joint_torque can
+			# separate stance from swing, which is the prerequisite for a load lever.
+			line["td_plv"]     = snappedf(float(_mm.get("stroke_td_plv", 0.0)), 0.0001)
+			line["sd_plv"]     = snappedf(float(_mm.get("stroke_sd_plv", 0.0)), 0.0001)
+			line["pos_stance"] = snappedf(float(_mm.get("stroke_pos_stance", 0.0)), 0.0001)
+			line["pos_swing"]  = snappedf(float(_mm.get("stroke_pos_swing", 0.0)), 0.0001)
+			line["contact_duty"] = snappedf(float(_mm.get("contact_duty", 0.0)), 0.0001)
+			line["tq_agree"]   = snappedf(float(_mm.get("torque_agree", 0.0)), 0.0001)
+			line["tq_stance"]  = snappedf(float(_mm.get("torque_stance", 0.0)), 0.00001)
+			line["tq_swing"]   = snappedf(float(_mm.get("torque_swing", 0.0)), 0.00001)
+			# tq_agree on hip1 ALONE — the signal a load-derived step clock would actually
+			# threshold.  The summed three-servo version dilutes it (per-joint stance/swing
+			# ratio is 1.368 on hip1 vs 1.148 summed), so scope a load lever on THIS number.
+			line["tq_agree_hip1"] = snappedf(float(_mm.get("torque_agree_hip1", 0.0)), 0.0001)
+			# --- stroke-to-step lock.  step_lock is the CONSUMER CHECK; mv_* are the
+			# NON-tautological reads (td_plv/pos_stance above are satisfied by construction
+			# once the phase is touchdown-referenced, whereas mv_* is computed on ACHIEVED
+			# hip1 motion and cannot be faked by re-referencing the command).
+			line["step_lock"]   = snappedf(float(_mm.get("step_lock", 0.0)), 0.0001)
+			line["step_period"] = snappedf(float(_mm.get("step_period", 0.0)), 0.01)
+			line["step_td_err"] = snappedf(float(_mm.get("step_td_err", 0.0)), 0.0001)
+			# How often the stroke's phase reference SWAPPED between the step clock and the
+			# L.phase fallback.  Intermittent locking is worse than never locking: each swap
+			# is a discontinuity in the driven command.
+			line["step_flips"]  = int(_mm.get("step_lock_flips", 0))
+			# FOOTFALL REGULARITY — cycle-to-cycle CV of the true inter-touchdown interval.
+			# The prerequisite for any touchdown-referenced phase: a PLL cannot lock to a
+			# rhythm whose period wanders.  Reported for EVERY instrumented arm, including
+			# the control, so "is the gait periodic at all?" is answerable on the baseline.
+			line["step_cv"]     = snappedf(float(_mm.get("step_cv", 0.0)), 0.0001)
+			# CHATTER vs APERIODICITY: mean stance/swing BOUT length and the fraction of
+			# bouts too short to be a real gait phase.  A high step_cv with a high
+			# short_bout_frac is a contact-signal problem; a high step_cv with normal bouts
+			# is a genuinely irregular gait.  Same statistic, opposite next lever.
+			line["stance_bout"] = snappedf(float(_mm.get("stance_bout", 0.0)), 0.01)
+			line["swing_bout"]  = snappedf(float(_mm.get("swing_bout", 0.0)), 0.01)
+			line["short_bouts"] = snappedf(float(_mm.get("short_bout_frac", 0.0)), 0.0001)
+			# ...and the interval CV counting ONLY real steps (touchdowns preceded by a
+			# swing long enough to be a stride).  If step_cv is ~1.0 because micro-lifts are
+			# pooled with real steps, THIS is where the hidden rhythm shows up.
+			line["step_cv_real"]  = snappedf(float(_mm.get("step_cv_real", 0.0)), 0.0001)
+			line["step_per_real"] = snappedf(float(_mm.get("step_per_real", 0.0)), 0.01)
+			line["mv_stance"]   = snappedf(float(_mm.get("mv_stance", 0.0)), 0.000001)
+			line["mv_swing"]    = snappedf(float(_mm.get("mv_swing", 0.0)), 0.000001)
+			# explore_mult = the progress->commit damping actually applied to the
+			# coordination probe sigma.  If this already sits at 0 on flat ground then a
+			# precision gate on the same sigma would be a TAUTOLOGY (CLAUDE.md 3.2 r1).
+			line["explore_mult"] = snappedf(float(_mm.get("explore_mult", 1.0)), 0.001)
+			# Per-leg cycle periods: hip1 = the stride, knee = what the stroke's phase is
+			# read from, foot = what the stance gate rides.  Three different numbers means
+			# three clocks, and the beat between them is the stumble.
+			var _p1: Array = _mm.get("ga_hip1_per", [])
+			var _pk: Array = _mm.get("ga_knee_per", [])
+			var _pf: Array = _mm.get("ga_foot_per", [])
+			if _p1 is Array and not _p1.is_empty(): line["per_hip1"] = _p1
+			if _pk is Array and not _pk.is_empty(): line["per_knee"] = _pk
+			if _pf is Array and not _pf.is_empty(): line["per_foot"] = _pf
+			# per_con = the REAL step period from the physics touch flag.  per_foot is the
+			# INCUMBENT detector's cycle; a fast per_foot next to a slow per_con is the
+			# detector chattering (it is a self-referential threshold that stance_lift
+			# rings), not the body stepping faster.
+			var _pc: Array = _mm.get("ga_con_per", [])
+			if _pc is Array and not _pc.is_empty(): line["per_con"] = _pc
+			# Per-joint stance/swing load ratio [hip1, hip2, knee].  1.0 = that servo
+			# reports nothing about whether the foot is bearing weight.
+			var _tj: Array = _mm.get("torque_sep_joint", [])
+			if _tj is Array and not _tj.is_empty(): line["tq_sep_j"] = _tj
+			# PURCHASE GATE (stroke_load_gain): mean and spread of the per-leg stroke
+			# gate actually applied.  mean 1.0 with spread EXACTLY 0 means the gate never
+			# fired -- either the gain is 0 or torque_topic is unwired.  This is the
+			# "did the consumer fire?" number; a gate has shipped as silent dead code here
+			# once already (CLAUDE.md 3.2 rule 5).
+			line["sgate"]    = snappedf(float(_mm.get("stroke_gate_mean", 1.0)), 0.0001)
+			line["sgate_spr"] = snappedf(float(_mm.get("stroke_gate_spread", 0.0)), 0.0001)
+			# SWING DYNAMICS.  yaw_swing_excess = mean |yaw rate| while ANY foot is
+			# airborne minus the all-four-down reference -- i.e. "does swinging a limb
+			# spin the chassis?", which is the operator's UI observation as a number.
+			# yaw_per_leg attributes it per limb so "it's the back legs" is checkable.
+			# swing_tuck_frac is the did-it-fire number for the swing_tuck lever; 0 with
+			# the gains non-zero means contact_topic is unwired.
+			line["yaw_allplant"] = snappedf(float(_mm.get("yaw_allplant", 0.0)), 0.00001)
+			line["yaw_anyswing"] = snappedf(float(_mm.get("yaw_anyswing", 0.0)), 0.00001)
+			line["yaw_swing_excess"] = snappedf(float(_mm.get("yaw_swing_excess", 0.0)), 0.00001)
+			line["swing_tuck_frac"] = snappedf(float(_mm.get("swing_tuck_frac", 0.0)), 0.001)
+			# Mean |shank off vertical| as the CONTROLLER sees it (radians). The collector
+			# also reconstructs this from hip2/knee; they should agree.
+			line["tib_off_ctl"] = snappedf(float(_mm.get("tibia_off_mean", 0.0)), 0.0001)
+			var _yl: Array = _mm.get("yaw_per_leg", [])
+			if _yl is Array and not _yl.is_empty(): line["yaw_per_leg"] = _yl
+			# |delta yaw rate| split the same way. THIS is the one that can see a swing
+			# reaction torque: mean yaw RATE is dominated by intentional steering (which
+			# acts through planted feet), so a limb impulse is invisible under it.
+			line["yawd_allplant"] = snappedf(float(_mm.get("yawd_allplant", 0.0)), 0.000001)
+			line["yawd_anyswing"] = snappedf(float(_mm.get("yawd_anyswing", 0.0)), 0.000001)
+			line["yawd_swing_excess"] = snappedf(float(_mm.get("yawd_swing_excess", 0.0)), 0.000001)
+			var _yd: Array = _mm.get("yawd_per_leg", [])
+			if _yd is Array and not _yd.is_empty(): line["yawd_per_leg"] = _yd
+			# (gait_phase — has the imposed trot [0, pi, pi, 0] drifted? — is already
+			#  emitted a few lines below; do not duplicate it here.)
+			# gait_phase = the LIVE Kuramoto target offsets [FL,FR,RL,RR].  Constant
+			# unless coord_adapt_rate (leaky tracker) or coord_reward_drive (fitness
+			# ratchet) is on.  Surfaced so "did the coordination recover after the robot
+			# got stuck, or did it lock in a destructive pattern?" is a MEASUREMENT.
+			# A leaky tracker must drift under perturbation and RETURN; a ratchet won't.
+			var _gp = _mm.get("gait_phase", null)
+			if _gp is Array:
+				var _gpo: Array = []
+				for _v in _gp: _gpo.append(snappedf(float(_v), 0.001))
+				line["gait_phase"] = _gpo
 	line["radial_compass"]           = [snappedf(_last_radial_compass.x, 0.001),
 										snappedf(_last_radial_compass.y, 0.001)]
 	line["target_compass"]           = [snappedf(_last_target_compass.x, 0.001),
@@ -7462,6 +10428,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				line["cruse_pm_bias_norms"] = bias_norms
 	line["target_loom"]              = snappedf(_last_target_loom, 0.001)
 	line["epm_tle"]                  = epm_tle_by_id
+	line["epm_win"]                  = epm_win_by_id
 	line["lateral_v"]                = snappedf(_last_lat_v, 0.0001)
 	line["speed_now"]                = snappedf(current_speed, 0.0001)
 	line["speed_ema"]                = snappedf(_speed_ema, 0.0001)

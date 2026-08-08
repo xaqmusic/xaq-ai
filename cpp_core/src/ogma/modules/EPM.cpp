@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <typeindex>
 #include <variant>
@@ -131,6 +133,18 @@ ParamSchema EPM::params_schema() const {
         {"dim_min",                 ParamMutability::ConstructionOnly, "RBF per-dim normalisation MIN (vector, len=proprio_state_dims). With dim_max, maps each input dim to [0,1] over its ACTUAL range so small-magnitude sensors (e.g. vision loom ~0.09) aren't washed out by the default [-1,1].  Omitted → [-1,1].", std::nullopt},
         {"dim_max",                 ParamMutability::ConstructionOnly, "RBF per-dim normalisation MAX (vector, len=proprio_state_dims).", std::nullopt},
         {"master_seed",             ParamMutability::ConstructionOnly, "RNG namespace seed",    ParamValue{int64_t{0}}},
+        {"insertion_autotune",      ParamMutability::ConstructionOnly,
+            "ECOLOGICAL SELF-TUNING OF THE INSERTION GATE.  `min_insertion_error` is an ABSOLUTE threshold and only means something relative to the typical quantisation error of the signal in front of it; held fixed on a stream whose typical error exceeds it, insertion never stops being justified and the GNG grows until it hits max_nodes.  When on, the GNG sets its own gate from the `insertion_autotune_quantile`-th percentile of its OWN recent squared-TLE distribution, and the configured `min_insertion_error` becomes the FLOOR it always claimed to be: effective = max(configured, quantile) * neuro_scale.  Restores behaviour that existed in the v3 Python reference and was lost in the C++ port.  false (default) = the fixed-threshold path, byte-identical.",
+            ParamValue{false}},
+        {"insertion_autotune_quantile", ParamMutability::ConstructionOnly,
+            "Percentile of the GNG's own recent squared-TLE distribution used as the insertion floor.  A RANK, not a scale: dimensionless and invariant to the signal's units, which is what makes this adaptive rather than another constant tuned to a signal's magnitude.  0.30 matches the v3 reference.",
+            ParamValue{0.30}},
+        {"dim_autocal_ticks",       ParamMutability::ConstructionOnly,
+            "COMMISSIONING WINDOW, in input frames.  When > 0, the EPM measures its own per-dim input ranges over the first N frames instead of being told them, then installs them and RESETS the GNG topology so the vocabulary is re-earned in the calibrated space.  This is the adaptive form of `dim_min`/`dim_max`: §0 rule 2 requires the input be conditioned before discretisation, and a hand-measured constant per sensor is the smell that names a missing mechanism.  Window length is legitimately application-set — it must cover the body's characteristic motion (several stride cycles for a gait, a full sweep for a sensor), because a range set by a startup transient is worse than the default.  Mutually exclusive with explicit dim_min/dim_max (throws).  RBF encoder only (throws for jl/stft, whose dims are homogeneous pixels/samples and must not be rescaled per-dim).  0 = off, byte-identical.",
+            ParamValue{int64_t{0}}},
+        {"dim_autocal_k",           ParamMutability::ConstructionOnly,
+            "Sigma multiplier for the commissioning range: per dim, range = intersect(mu +/- k*sigma, [min_obs, max_obs]).  Larger k = wider range, less clamping, coarser resolution.  Values outside the installed range saturate (normalise_state clamps), so under-covering the tails is lossy but never unstable.",
+            ParamValue{4.0}},
     };
 }
 
@@ -182,6 +196,8 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "process_every_n_ticks",   [&](auto const& v){ process_every_n_ticks_   = std::max(1, int(get_int(v, "process_every_n_ticks"))); });
     apply_param(params, "subtract_descending_prediction", [&](auto const& v){ subtract_descending_prediction_ = get_bool(v, "subtract_descending_prediction"); });
     apply_param(params, "master_seed",    [&](auto const& v){ master_seed_    = uint64_t(get_int(v, "master_seed")); });
+    apply_param(params, "dim_autocal_ticks", [&](auto const& v){ dim_autocal_ticks_ = std::max(0, int(get_int(v, "dim_autocal_ticks"))); });
+    apply_param(params, "dim_autocal_k",     [&](auto const& v){ dim_autocal_k_     = get_double(v, "dim_autocal_k"); });
 
     // Output topic name.
     if (modality_group_ == "consensus") {
@@ -224,6 +240,9 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_check_interval",  [&](auto const& v){ gng_cfg.mitosis_check_interval  = int(get_int(v, "mitosis_check_interval")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
+    apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
+    apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
+    insertion_autotune_ = gng_cfg.insertion_autotune;
 
     base_epsilon_b_               = gng_cfg.epsilon_b;
     base_min_insertion_error_     = gng_cfg.min_insertion_error;
@@ -260,6 +279,14 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
                 apply_param(params, "dim_min", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) dmin = *p; });
                 apply_param(params, "dim_max", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) dmax = *p; });
                 if (!dmin.empty() || !dmax.empty()) {
+                    // Contradiction, not a precedence question: one says "I know
+                    // the ranges", the other says "measure them".  Silently
+                    // picking a winner is how a config means something other
+                    // than what it reads like.
+                    if (dim_autocal_ticks_ > 0)
+                        throw std::invalid_argument(
+                            "EPM: dim_autocal_ticks and explicit dim_min/dim_max are mutually exclusive — "
+                            "either state the ranges or commission them, not both");
                     if (dmin.size() != size_t(cfg.state_dims) || dmax.size() != size_t(cfg.state_dims))
                         throw std::invalid_argument("EPM: dim_min/dim_max length must equal proprio_state_dims");
                     cfg.dim_ranges.clear();
@@ -268,11 +295,29 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
                 }
             }
             enc_rbf_ = std::make_unique<ami_ogma::v3::FrozenRBFEncoder>(cfg);
+            if (dim_autocal_ticks_ > 0) {
+                const size_t n = size_t(cfg.state_dims);
+                dac_min_.assign(n,  std::numeric_limits<double>::max());
+                dac_max_.assign(n, -std::numeric_limits<double>::max());
+                dac_sum_.assign(n, 0.0);
+                dac_sumsq_.assign(n, 0.0);
+            }
             break;
         }
         case EncoderKind::Identity:
             // No encoder.  GNG receives input vectors directly.
             break;
+    }
+
+    // Commissioning is defined for encoders whose input dims are HETEROGENEOUS
+    // sensor channels.  JL and STFT consume homogeneous pixels/samples, where a
+    // per-dim rescale would destroy the very structure the frozen encoder exists
+    // to preserve.  Identity is deferred, not refused: stacked latents plausibly
+    // want it, but nothing has measured a need, and a mechanism enabled on a
+    // guess is one nobody can later attribute a result to.
+    if (dim_autocal_ticks_ > 0 && encoder_kind_ != EncoderKind::RBF) {
+        throw std::invalid_argument(
+            "EPM: dim_autocal_ticks is supported for encoder_kind='rbf' only (got '" + ek_str + "')");
     }
 
     // Subscribe to the input topic.
@@ -362,6 +407,74 @@ void EPM::handle_prediction(std::string_view /*topic*/, MessagePtr payload) {
     pending_prediction_ = std::dynamic_pointer_cast<const PredictionToken>(payload);
 }
 
+// ---------------------------------------------------------------------------
+// Commissioning window (dim_autocal_ticks) — see EPM.hpp for the rationale
+// ---------------------------------------------------------------------------
+
+void EPM::dim_autocal_observe(const float* v, int n) {
+    if (int(dac_min_.size()) != n) return;   // dim mismatch: nothing to learn from
+    for (int d = 0; d < n; ++d) {
+        const double x = double(v[d]);
+        dac_min_[d]    = std::min(dac_min_[d], x);
+        dac_max_[d]    = std::max(dac_max_[d], x);
+        dac_sum_[d]   += x;
+        dac_sumsq_[d] += x * x;
+    }
+    ++dim_autocal_seen_;
+}
+
+void EPM::dim_autocal_finalise() {
+    const int n      = int(dac_min_.size());
+    const double cnt = double(dim_autocal_seen_);
+    if (n == 0 || cnt <= 0.0) { dim_autocal_done_ = true; return; }
+
+    std::vector<std::pair<float,float>> ranges;
+    ranges.reserve(size_t(n));
+    int degenerate = 0;
+    for (int d = 0; d < n; ++d) {
+        const double mu  = dac_sum_[d] / cnt;
+        const double var = std::max(0.0, dac_sumsq_[d] / cnt - mu * mu);
+        const double sd  = std::sqrt(var);
+        // Intersect the statistical range with what was actually observed:
+        // mu +/- k*sd rejects transients, min/max refuses to invent range.
+        double lo = std::max(dac_min_[d], mu - dim_autocal_k_ * sd);
+        double hi = std::min(dac_max_[d], mu + dim_autocal_k_ * sd);
+        // A channel that never moved carries no information at any scale.
+        // Fall back to the encoder default rather than dividing by ~0.
+        if (!(hi - lo > 1e-6)) { lo = -1.0; hi = 1.0; ++degenerate; }
+        ranges.emplace_back(float(lo), float(hi));
+    }
+
+    enc_rbf_->set_dim_ranges(ranges);
+
+    // MANDATORY: every prototype learned during the window is expressed in the
+    // provisional units and is garbage in the new space.  Node IDs deliberately
+    // continue from where they were (Invariant 4).
+    gng_->reset_topology();
+    prev_winner_prototype_ = Eigen::VectorXf();
+    has_prev_prototype_    = false;
+    prev_winner_id_for_transitions_ = -1;
+    transition_counts_.clear();
+    winner_counts_.clear();
+    history_trace_.clear();
+    ema_tle_               = 0.1f;      // the constructed default, not a learned value
+    last_tle_              = 0.0f;
+    last_quant_error_      = 0.0f;
+    last_published_token_.reset();
+
+    dim_autocal_done_ = true;
+
+    std::printf("{\"EPM_AUTOCAL\":{\"id\":\"%s\",\"topic\":\"%s\",\"frames\":%llu,\"k\":%.2f,"
+                "\"degenerate_dims\":%d,\"ranges\":[",
+                id_.c_str(), output_topic_.c_str(),
+                (unsigned long long)dim_autocal_seen_, dim_autocal_k_, degenerate);
+    for (int d = 0; d < n; ++d)
+        std::printf("%s[%.5f,%.5f]", d ? "," : "", double(ranges[size_t(d)].first),
+                                                   double(ranges[size_t(d)].second));
+    std::printf("]}}\n");
+    std::fflush(stdout);
+}
+
 bool EPM::encode_pending_input(Eigen::VectorXf& out) {
     switch (encoder_kind_) {
         case EncoderKind::JL: {
@@ -410,7 +523,24 @@ bool EPM::encode_pending_input(Eigen::VectorXf& out) {
 void EPM::apply_neuro_scaling() {
     if (!gng_) return;
     gng_->set_epsilon_b(              base_epsilon_b_           * epsilon_b_scale_);
-    gng_->set_min_insertion_error(    base_min_insertion_error_ * min_insertion_error_scale_);
+    // ⚠ THE SCALE IS APPLIED IN TWO DIFFERENT PLACES ON PURPOSE.
+    //
+    // Legacy path (autotune off): fold the neurochemical scale into the value
+    // handed to the GNG, exactly as before — that arithmetic must stay
+    // bit-identical or every existing config moves.
+    //
+    // Autotune path: hand the GNG the UNSCALED configured floor and pass the
+    // scale separately, so the GNG applies it to max(floor, quantile).  The
+    // scale then modulates growth relative to the body's CURRENT typical
+    // surprise rather than relative to a fixed constant, which is the only
+    // reading of "min_insertion_error_scale" that still means something once
+    // the base is no longer fixed.
+    if (insertion_autotune_) {
+        gng_->set_min_insertion_error(base_min_insertion_error_);
+        gng_->set_neuro_min_insertion_scale(min_insertion_error_scale_);
+    } else {
+        gng_->set_min_insertion_error(base_min_insertion_error_ * min_insertion_error_scale_);
+    }
     gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_);
 }
 
@@ -533,6 +663,19 @@ void EPM::tick(uint64_t tick_id) {
     }
     ++sub_rate_tick_count_;
 
+    // Commissioning window: observe the RAW input, before conditioning, so the
+    // measured range describes the sensor rather than the current mapping of it.
+    if (dim_autocal_ticks_ > 0 && !dim_autocal_done_ &&
+        pending_proprio_ && pending_proprio_->values.size() > 0) {
+        dim_autocal_observe(pending_proprio_->values.data(),
+                            int(pending_proprio_->values.size()));
+        // Finalise BEFORE encoding this frame, so the window is exactly N frames
+        // and frame N+1 is the first one encoded in the calibrated space.  The
+        // reset leaves the GNG pre-bootstrap, so this tick publishes the
+        // placeholder token — the same shape as any other bootstrap tick.
+        if (dim_autocal_seen_ >= uint64_t(dim_autocal_ticks_)) dim_autocal_finalise();
+    }
+
     Eigen::VectorXf latent;
     bool have_input = encode_pending_input(latent);
 
@@ -641,7 +784,7 @@ nlohmann::json EPM::snapshot_state() const {
         for (auto const& [dst, cnt] : succ) m[std::to_string(dst)] = cnt;
         trans[std::to_string(src)] = std::move(m);
     }
-    return nlohmann::json{
+    nlohmann::json out = nlohmann::json{
         {"version",                       1},
         {"gng",                           gng_json},
         {"prev_winner_prototype",         prev_proto},
@@ -658,6 +801,34 @@ nlohmann::json EPM::snapshot_state() const {
         {"mitosis_threshold_scale",       mitosis_threshold_scale_},
         {"novelty_threshold_scale",       novelty_threshold_scale_},
     };
+    // Commissioning state.  Emitted ONLY when the feature is enabled, so every
+    // config that leaves dim_autocal_ticks at 0 produces a byte-identical
+    // snapshot to before this feature existed (the gain-0 guard extends to the
+    // serialised form, which is what the pristine-snapshot differ compares).
+    //
+    // Both the accumulator AND the installed ranges must round-trip: an EPM
+    // restored mid-window has to finish the window with the frames it already
+    // saw, and one restored after the window must come back conditioned the
+    // same way — the encoder is rebuilt from params by on_setup and would
+    // otherwise silently revert to the defaults.  Same requirement, and the
+    // same reason, as Invariant 10's Hopf MOC EMA.
+    if (dim_autocal_ticks_ > 0) {
+        nlohmann::json dac = nlohmann::json::object();
+        dac["done"] = dim_autocal_done_;
+        dac["seen"] = dim_autocal_seen_;
+        dac["min"]  = dac_min_;
+        dac["max"]  = dac_max_;
+        dac["sum"]  = dac_sum_;
+        dac["sumsq"] = dac_sumsq_;
+        if (dim_autocal_done_ && enc_rbf_) {
+            nlohmann::json lo = nlohmann::json::array(), hi = nlohmann::json::array();
+            for (auto const& r : enc_rbf_->dim_ranges()) { lo.push_back(r.first); hi.push_back(r.second); }
+            dac["range_lo"] = std::move(lo);
+            dac["range_hi"] = std::move(hi);
+        }
+        out["dim_autocal"] = std::move(dac);
+    }
+    return out;
 }
 
 void EPM::restore_state(nlohmann::json const& s) {
@@ -700,6 +871,35 @@ void EPM::restore_state(nlohmann::json const& s) {
     min_insertion_error_scale_ = s.value("min_insertion_error_scale", min_insertion_error_scale_);
     mitosis_threshold_scale_   = s.value("mitosis_threshold_scale",   mitosis_threshold_scale_);
     novelty_threshold_scale_   = s.value("novelty_threshold_scale",   novelty_threshold_scale_);
+
+    // Commissioning state.  Absent from snapshots taken with the feature off,
+    // and from every pre-feature snapshot — in both cases the defaults set by
+    // on_setup are already correct, so absence is not an error.
+    if (s.contains("dim_autocal") && s["dim_autocal"].is_object()) {
+        auto const& dac = s["dim_autocal"];
+        dim_autocal_done_ = dac.value("done", false);
+        dim_autocal_seen_ = dac.value("seen", uint64_t{0});
+        if (dac.contains("min"))   dac_min_   = dac["min"].get<std::vector<double>>();
+        if (dac.contains("max"))   dac_max_   = dac["max"].get<std::vector<double>>();
+        if (dac.contains("sum"))   dac_sum_   = dac["sum"].get<std::vector<double>>();
+        if (dac.contains("sumsq")) dac_sumsq_ = dac["sumsq"].get<std::vector<double>>();
+        // Re-install the calibrated ranges: on_setup rebuilt the encoder from
+        // params, so without this the restored EPM would run its baked GNG
+        // against DEFAULT conditioning — a silent space swap, the exact class
+        // of bug this whole mechanism exists to make impossible.
+        if (dim_autocal_done_ && enc_rbf_ &&
+            dac.contains("range_lo") && dac.contains("range_hi")) {
+            auto lo = dac["range_lo"].get<std::vector<double>>();
+            auto hi = dac["range_hi"].get<std::vector<double>>();
+            if (lo.size() == hi.size() && !lo.empty()) {
+                std::vector<std::pair<float,float>> ranges;
+                ranges.reserve(lo.size());
+                for (size_t i = 0; i < lo.size(); ++i)
+                    ranges.emplace_back(float(lo[i]), float(hi[i]));
+                enc_rbf_->set_dim_ranges(ranges);
+            }
+        }
+    }
 }
 
 } // namespace ogma

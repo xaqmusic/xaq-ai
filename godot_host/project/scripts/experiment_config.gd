@@ -206,6 +206,17 @@ var picrawler_curriculum_auto_advance:   bool   = true
 # lr_and_fr_pairs.  See picrawler_body.gd::_sync_leg_symmetry.
 var picrawler_leg_symmetry:              String = ""
 
+# Gym / world select for the picrawler.  "" (default) = the legacy donut arena;
+# "corridor" = the trench curriculum gym.  Set from config metadata
+# (metadata.gym_mode) or via OGMA_PICRAWLER_GYM env var.  See
+# picrawler_body.gd::_build_corridor.
+var picrawler_gym_mode:                  String = ""
+
+# Corridor-gym obstacle difficulty (0 = trivial .. 1 = hard); -1 = "not set" ->
+# body default.  Scales hump / rumble-bump / pyramid heights.  Set from the
+# launcher spinbox, config metadata.gym_difficulty, or OGMA_PICRAWLER_GYM_DIFFICULTY.
+var picrawler_gym_difficulty:            float = -1.0
+
 func resolve_picrawler_mc_period(default_v: int) -> int:
 	if launched and picrawler_mc_episode_period >= 0:
 		return picrawler_mc_episode_period
@@ -502,6 +513,22 @@ func resolve_picrawler_joint_backend(default_v: String) -> String:
 		return env_v
 	return default_v
 
+func resolve_picrawler_gym_mode(default_v: String) -> String:
+	if launched and picrawler_gym_mode != "":
+		return picrawler_gym_mode
+	var env_v := OS.get_environment("OGMA_PICRAWLER_GYM").to_lower()
+	if env_v in ["arena", "donut", "corridor"]:
+		return env_v
+	return default_v
+
+func resolve_picrawler_gym_difficulty(default_v: float) -> float:
+	if launched and picrawler_gym_difficulty >= 0.0:
+		return picrawler_gym_difficulty
+	var env_v := OS.get_environment("OGMA_PICRAWLER_GYM_DIFFICULTY")
+	if env_v != "":
+		return clamp(env_v.to_float(), 0.0, 1.0)
+	return default_v
+
 func resolve_picrawler_phase_contrast_gain(default_v: float) -> float:
 	if launched and picrawler_phase_contrast_gain >= 0.0:
 		return picrawler_phase_contrast_gain
@@ -691,6 +718,8 @@ func save_state() -> void:
 		"picrawler_curriculum_auto_advance": picrawler_curriculum_auto_advance,
 		"picrawler_leg_symmetry":            picrawler_leg_symmetry,
 		"picrawler_joint_backend":           picrawler_joint_backend,
+		"picrawler_gym_mode":                picrawler_gym_mode,
+		"picrawler_gym_difficulty":          picrawler_gym_difficulty,
 	}
 	var f := FileAccess.open(_STATE_PATH, FileAccess.WRITE)
 	if f:
@@ -762,6 +791,8 @@ func load_state() -> bool:
 	picrawler_curriculum_path         = str(d.get("picrawler_curriculum_path", ""))
 	picrawler_curriculum_auto_advance = bool(d.get("picrawler_curriculum_auto_advance", true))
 	picrawler_joint_backend           = str(d.get("picrawler_joint_backend", ""))
+	picrawler_gym_mode                = str(d.get("picrawler_gym_mode", ""))
+	picrawler_gym_difficulty          = float(d.get("picrawler_gym_difficulty", -1.0))
 	# Schema migration: v1 (no version) → v2 force auto-advance on.
 	# v1 saved state has false-default; the launcher's new ON-default
 	# UX won't apply unless we migrate stale false values.  Users who

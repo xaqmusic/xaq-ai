@@ -19,11 +19,21 @@ brain's two inspector surfaces:
 
 ```bash
 pip install -r requirements.txt
-python -m xaq_inspector
+tools/run_inspector.sh
 ```
 
+Run `tools/run_inspector.sh` from the repo root (or anywhere — it locates
+itself). **Don't run `python -m xaq_inspector` directly unless your CWD is
+`tools/`** (the parent of this package) — `xaq_inspector` is a plain
+directory package, not pip-installed, so `python -m xaq_inspector` only
+resolves when `tools/` is on `sys.path`. The wrapper script sets
+`PYTHONPATH` for you; running it from inside `tools/xaq_inspector/` itself
+(a natural first read of this doc) fails with `No module named
+xaq_inspector`.
+
 Defaults to `tcp://127.0.0.1:7400` for control and `tcp://127.0.0.1:7401`
-for diag.  Use `--control-port` / `--diag-host` to override.
+for diag.  Use `--control-port` / `--diag-host` to override (passed through
+to `run_inspector.sh`).
 
 ## Module dispatch
 

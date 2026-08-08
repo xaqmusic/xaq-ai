@@ -130,6 +130,43 @@ private:
     // The GNG.  Always present.
     std::unique_ptr<ami_ogma::v3::GNG> gng_;
 
+    // Mirrors GNG::Config::insertion_autotune so apply_neuro_scaling() knows
+    // which of its two scale-application paths is live (see its comment).
+    bool            insertion_autotune_  = false;
+
+    // -------------------------------------------------------------------------
+    // Commissioning window — per-dim input autocalibration (dim_autocal_ticks)
+    // -------------------------------------------------------------------------
+    //
+    // §0 rule 2 requires every EPM's input to be conditioned before the GNG
+    // discretises it: a channel whose scale is small relative to its siblings
+    // is collapsed by the insertion gate WHILE the encoder still shows the
+    // structure.  Doing that by hand means measuring each sensor and writing
+    // dim_min/dim_max into config — which is a constant tuned to a signal's
+    // scale, i.e. exactly the smell that names a missing adaptive mechanism.
+    //
+    // This is that mechanism.  For the first `dim_autocal_ticks` input frames
+    // the EPM runs NORMALLY (warm start) while accumulating per-dim statistics;
+    // it then derives ranges, installs them, and RESETS the GNG topology so the
+    // vocabulary is re-earned in the calibrated space.  The reset is mandatory:
+    // every prototype learned during commissioning is expressed in provisional
+    // units and is meaningless afterwards.
+    //
+    // Range per dim = intersect(mu +/- k*sigma, [min_obs, max_obs]).  Pure
+    // min/max is outlier-driven (a single first-tick transient can set a range
+    // an order of magnitude too wide); pure mu +/- k*sigma can invent range a
+    // bounded channel never occupies.  The intersection takes the tighter and
+    // can never exceed what was actually observed.
+    //
+    // 0 (default) = off: nothing accumulated, no reset, byte-identical.
+    int             dim_autocal_ticks_   = 0;
+    double          dim_autocal_k_       = 4.0;
+    bool            dim_autocal_done_    = false;
+    uint64_t        dim_autocal_seen_    = 0;
+    std::vector<double> dac_min_, dac_max_, dac_sum_, dac_sumsq_;
+    void            dim_autocal_observe(const float* v, int n);
+    void            dim_autocal_finalise();
+
     // Working state
     Eigen::VectorXf prev_winner_prototype_;
     bool            has_prev_prototype_ = false;

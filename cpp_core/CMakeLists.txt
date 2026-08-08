@@ -225,6 +225,10 @@ add_library(ogma_core
     src/ogma/modules/PolicyChannelAggregator.cpp
     src/ogma/modules/CPGOscillator.cpp
     src/ogma/modules/MotorEPM.cpp
+    src/ogma/modules/MotorEPMv2.cpp
+    src/ogma/modules/PosturalPrior.cpp
+    src/ogma/modules/KeyframeGait.cpp
+    src/ogma/modules/BodyRhythmTracker.cpp
     src/ogma/modules/SynergyTimer.cpp
     src/ogma/modules/CruseCoordinator.cpp
     src/ogma/modules/GaitSelector.cpp
@@ -391,6 +395,15 @@ target_link_libraries(test_motor_fader_streams PRIVATE ogma_core GTest::gtest_ma
 add_executable(test_motor_epm tests/ogma/test_motor_epm.cpp)
 target_link_libraries(test_motor_epm PRIVATE ogma_core GTest::gtest_main pthread)
 
+add_executable(test_postural_prior tests/ogma/test_postural_prior.cpp)
+target_link_libraries(test_postural_prior PRIVATE ogma_core GTest::gtest_main pthread)
+
+add_executable(test_keyframe_gait tests/ogma/test_keyframe_gait.cpp)
+target_link_libraries(test_keyframe_gait PRIVATE ogma_core GTest::gtest_main pthread)
+
+add_executable(test_body_rhythm_tracker tests/ogma/test_body_rhythm_tracker.cpp)
+target_link_libraries(test_body_rhythm_tracker PRIVATE ogma_core GTest::gtest_main pthread)
+
 add_executable(test_phase6_6f_verification tests/ogma/test_phase6_6f_verification.cpp)
 target_link_libraries(test_phase6_6f_verification PRIVATE ogma_core GTest::gtest_main pthread)
 
@@ -544,6 +557,9 @@ gtest_discover_tests(test_voter_surprise_modulation)
 gtest_discover_tests(test_phase6_6e_verification)
 gtest_discover_tests(test_motor_fader_streams)
 gtest_discover_tests(test_motor_epm)
+gtest_discover_tests(test_postural_prior)
+gtest_discover_tests(test_keyframe_gait)
+gtest_discover_tests(test_body_rhythm_tracker)
 gtest_discover_tests(test_phase6_6f_verification)
 gtest_discover_tests(test_fader_controller_streams)
 gtest_discover_tests(test_premotor_bilateral)

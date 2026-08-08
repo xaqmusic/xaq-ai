@@ -1,0 +1,445 @@
+# Picrawler active-inference gait loop — findings (L-1b: steps 2–3 + Gate 2 + emergent gait)
+
+Status as of 2026-07-21. Companion to `docs/plans-and-designs/picrawler_active_inference_plan.md`.
+All results are headless, reset-masked, reward-free. Verification scripts live in the session
+scratchpad (`gait_metrics.py`/`gaith.py`/`raw_diag.py`/`gate1*`/`brt`/`gate2*` collectors).
+
+## STATUS — where we are (2026-07-20)
+
+**Milestone reached** (commit `ed3c56f`, config `the_picrawler_motor_epm_embed.json`): a gait that
+**learns a coordination it was not given, walks ~5 m, and — stuck on an obstacle with its legs off the
+ground — improvises a NOVEL limb movement to free itself and keeps going.** That self-rescue is the
+homeokinetic exploration drive working as designed; a scripted gait cannot do it. It reads as *alive*
+and *evolving* in the UI (robust over long runs, multiple stuck/escape events). First gait worth naming.
+
+**The one principle that explains every result: LEARNED cooperates, IMPOSED fights.** Every mechanism
+that *let the body discover* won; every mechanism that *dictated to the body* lost the same way (chaos,
+collision, or stiffness). This is the through-line — reach for the learned/contextual form, not the
+commanded one.
+
+### Scorecard (isolated A/B, promoted only on merit — chassis-up + adaptation + intended effect, not just fwd_v)
+
+| mechanism | verdict | why |
+|---|---|---|
+| KeyframeGait phase-indexed map + self-precision gate | **promoted** | learns coordination; drives on consistency |
+| BodyRhythmTracker PLL + CPG entrainment | **promoted** | CPG tracks the body (fixes the washout) |
+| CPG-as-**embedding** (`cpg_embed`, controller learns a phase-conditioned feed-forward from the keyframe error) | **promoted ★** | phase as CONTEXT → emergent, self-rescuing gait |
+| firm stance (`postural_gain` 0.3→0.7) | **promoted** | defends the stance → 0 falls, no collision, sharper map |
+| CPG-phase *drive* (open-loop per-joint rhythm) — "coherent walk" | **rejected** | servo sequencer; chassis slams the ground (flopping fish) |
+| keyframe **tween** (smooth the staircase) | **rejected** | lowpasses out the adaptive slack → stiff |
+| hip2 **stroke** (imposed femur lift) | **rejected** | energetic but chaotic, no stable gait, frequent falls |
+| hip2 **tuck** (femur rest override, alone) | **rejected** | didn't crouch (weak reflex) + destabilized |
+| **learned** hip2 (per-joint postural *profile* loosens the femur spring; HK+embedding move it) | **rejected** | isolated long A/B: no gait / traversal / disengagement gain, +instability (2× stuck-time, 4 tipovers vs 0) — see learned-hip2 section |
+| phase-indexed **velocity** objective (`Cvel` propulsive pump: FF trained on velocity error v*−ẋ) | **rejected** | marginal steady gain, then **amplified a rear-leg asymmetry into circling** (embed traverses 6.1 m; velobj circles ~2 turns); the LR-symmetry fix **backfired** (~3 turns) — see velocity-lever section |
+| **gait symmetry** (amp-homeo / exploration / per-leg controller-coupling / walk-phasing / balance / heading-hold) | **rejected** | ~35 isolated A/Bs: every symmetry-forcing lever → circling (the tripod-skid asymmetry is load-bearing for straightness); the 2 stabilization reflexes are inert/mis-tuned — see gait-symmetry section |
+
+**Metrics lesson (a real gap I hit):** a fast-traversing *flopping* gait scored great on fwd_v +
+joint-coherence — the collision was invisible until a **`chassis_h`** (chassis height) metric was
+added. **No gait is good if the chassis collides — always measure chassis height** (and adaptation,
+not just speed).
+
+**Open levers (both former levers now refuted).** The two named levers — phase-indexed **velocity**
+in the objective (the propulsive push) and **emergent hip2** — were each built and tested in
+isolation and **both refuted** (see their sections below). Threads, after the symmetry sweep (below) also came up empty:
+**(1)** ~~straighten the rear-leg asymmetry~~ — **refuted** (the asymmetry is load-bearing; forcing
+symmetry circles). The residue is: **fix the two broken stabilization reflexes** (active-balance is
+inert+destabilizing; `heading_gain` anti-yaw is erratic) → a working closed-loop heading/attitude
+controller is the real prerequisite for both symmetry and the faster walk. **(2)** a **richer gym**
+than the open plane (the robot circles/idles because a flat plane gives curiosity no gradient — a
+corridor/slope/terrain that makes directed motion the path of richer sensorimotor experience); the most
+promising near-term move, since `embed` is a solid straight+stable base. **(3)** **tooling gaps** — the
+`master_seed` override rewrites **0 modules** (no A/B can be seed-averaged), and `publish_tilt` is off in
+headless (headless ≠ UI for the balance reflex); close both before the next quantitative gait study.
+Bonus speed lever discovered: **lateral-sequence walk phasing = +65 % distance** (needs stability first).
+
+## The architecture under test
+
+A closed gait loop decomposed as **substrate / objective / arbitration**:
+
+- **Substrate** — `MotorEPM` (homeokinetic self-model + control), behaviour-agnostic.
+- **Objective** — `KeyframeGait` learns a **phase-indexed keyframe map** (whole-body posture vs
+  gait phase) and feeds it back as a soft target on the `objective.posture.*` socket
+  (a `PredictionToken {target, confidence}`; the controller descends a retargeted error, never
+  an additive injection).
+- **Coordinating clock** — `CPGOscillator`, a smooth phase everyone keys off.
+- **Afferent estimator** — `BodyRhythmTracker` (new), turns proprioception into a body-gait-phase
+  estimate the CPG entrains to.
+
+## Step 2 — the washout (falsifiable branch, as designed)
+
+`KeyframeGait` binned whole-body posture against a **free-running** CPG (fixed period 60). The map
+**washed out**: `keyframe_tle` pinned ~0.87, `mean_consistency` fell 0.99→0.52. Root cause was
+structural, not a bug — **two uncoupled clocks**: the CPG ran an autonomous 60-tick clock while
+`MotorEPM`'s gait rhythm is self-generated with no CPG input. Binning the body against a clock it
+doesn't follow smears every bin. → the CPG↔body PLL (step 3) is required, cleanly diagnosed.
+
+## Step 3 — CPG↔body PLL, entrainment, and the confidence gate
+
+- **`BodyRhythmTracker`** — a morphology-specific trot collective coordinate
+  `F(t) = Σ_leg sign·pos[swing_joint]` feeds a **measurement-seeded PLL** (frequency from the
+  unbiased hysteresis up-crossing interval; phase = smooth integrator locked to the crossings).
+  A Righetti–Ijspeert adaptive Hopf oscillator was tried first and **abandoned** — at dt=1 it
+  showed a strong-forcing frequency bias (railed to the wrong frequency even when started exactly
+  on the true one), while the zero-crossing period read exact every time.
+- **CPG entrainment** — the CPG optionally tracks `rhythm.body.gait`: slow period pull toward the
+  body's measured frequency + a phase nudge, clamped to an **aliasing-safe** band `[48,120]`
+  (≥3 ticks/bin at 16 bins). Additive, default-off, byte-identical for existing configs.
+- **Measurement (measure-first)** — the body walks at **~70 ticks (0.85 Hz), not 60**; the free CPG
+  was ~17% too fast. `hip1` is the dominant carrier. Notably **the knee cycles at a different
+  period (~42) than the hip (~70)** — the body is *not* a clean single-frequency limit cycle.
+- **Confidence gate** — the published confidence is `gain · self_precision(bin)`, where
+  `self_precision = warmup_ramp · exp(−bin_dev/scale)`: a smeared or unproven bin drives weakly or
+  not at all ("drive on consistency"). This is the objective's **bottom-up self-precision** — the
+  exact quantity the future EFE arbiter multiplies its **top-down allocation** onto
+  (`w_final = gain · self_precision · allocation`; gate and arbiter compose, they don't compete).
+
+**Gate-1 outcome (entrained + gated):** `keyframe_tle` falls (0.92→0.82) *while* the gait stays
+coherent — the premature-drive failure (ungated: `keyframe_tle` rises, coherence collapses 0.20→0.06)
+is fixed. But crystallization **plateaus** (`bin_dev`≈0.8 ⇒ precision ~0.26). Raising drive gain
+made it worse, so the plateau is **coherence-limited, not drive-limited** — the ceiling is the body's
+own multi-frequency incoherence.
+
+## Gait-quality metrics (beyond `keyframe_tle`)
+
+To judge "what better looks like" we measure locomotion (`fwd_v`), stability (falls/streak),
+`gait_coherence`, **whole-body frequency lock** (per-joint period spread — one period = clean limit
+cycle), rhythm regularity (period CV), and effort (`motor_tle`, `out_mag`).
+
+**Baseline (coupling ON), 3-min:** `fwd_v` +0.041, coherence ~0.41, **joint-period spread ~32**
+(hip1≈61 / hip2≈29 / knee≈42; hip2 amplitude near-dead 0.095), CV ~0.20, stable after settling. The
+gated keyframe drive is **not fighting** the coupling gait — marginally better (faster, steadier,
+knee period nudged toward hip). The whole-body incoherence is inherent to the imposed coupling
+(present drive on *or* off).
+
+## Gate 2 — retire the imposed coupling (Kuramoto contrast)
+
+Because the map can only learn from an existing gait, a fresh-start coupling-off run has no
+coordinator to bootstrap from. So we test **crystallize-then-wean** via a deterministic
+tick-scheduled `coupling_fade` in `MotorEPM` (a TCP `set_param` verb was added but the control
+server is single-connection + idle-times-out, so live mid-run control is fragile; the baked fade is
+deterministic and collected purely over the diag stream).
+
+**Result (fade 70→90s, observe to ~150s):**
+
+| phase | fwd_v | gait_coherence | joint-period spread | falls |
+|---|---|---|---|---|
+| COUPLED (1.0–1.55) | **+0.062** | 0.45 | **21.5** (h1 52 / h2 31 / kn 43) | 1 |
+| WEANED (→0) | **+0.001** | 0.46 | **75.1** (h1 89 / h2 15 / kn 14) | 0 |
+
+**Coordination is still imposed, not learned.** Removing coupling stops locomotion (`fwd_v`→0) and
+the joints scatter to unrelated frequencies (spread 21→75); the body stays upright (posture + the
+Gate-0 prior) but doesn't walk. The learned map (precision ~0.25) is too weak to carry the gait —
+the §2.5 chicken-and-egg. A slower wean won't rescue it (the plateau is coherence-limited).
+
+**Metric caveat:** `gait_coherence` held ~0.46 *through* the collapse — it survives a near-static
+body, so it is a **misleading** Gate-2 metric. `fwd_v` and joint-period spread are the honest signals.
+
+## The crux, and an open question
+
+The plateau, the premature-drive fragility, and the Gate-2 collapse are one problem: **the body is
+not a clean single-frequency whole-body limit cycle** (hip2/knee ≠ the hip1 fundamental; hip2 nearly
+dead). Everything downstream is capped by that.
+
+Open, before pushing further on wean/adapt mechanisms: **is a trot the right target gait for this
+stiff, hobby-servo quadruped at all?** A trot is dynamically unstable (only two legs down), which
+shows up as belly-up flips and a body that fights the imposed coordination. A statically-stable
+four-beat walk may be far easier to synchronise and keep upright — possibly dissolving the
+incoherence at its root rather than fighting it downstream.
+
+## RESOLUTION (2026-07-20): the incoherence was INTRA-leg, and a coherent CPG-phase drive fixes it
+
+A raw per-(leg,joint) diagnostic (added to `BodyRhythmTracker`) showed the incoherence is **within
+each leg**, not between legs: a single leg's three joints run at *different* frequencies
+(e.g. hip1≈61, hip2≈28, knee≈40; intra-leg period spread ~28). The knees actually sync well across
+legs (inter-leg std ~3.6) — the coupling works — but the design sourced each leg's oscillator phase
+from the **knee** (`L.phase`, MotorEPM.cpp:883) while the actual locomotor rhythm is **hip1** (the
+fore-aft stride), and only hip1 was rhythmically driven (via the stroke) — so the joints drifted to
+independent frequencies and the keyframe could never crystallize.
+
+**The fix — drive every joint from ONE clean phase.** New MotorEPM knobs (all default-off,
+byte-identical): `phase_joint` (which proprio joint sources `L.phase`), a per-joint **coherent
+rhythmic drive** `rhythm_gains`/`rhythm_offsets` (`y[j] += g_j·sin(base + off_j)`), and a
+`cpg_phase_topic` so `base` is the **clean, entrained global CPG phase** (`+ gait_phase[leg]`)
+rather than the noisy proprio-derived `L.phase`. With coupling+stroke off and all joints driven from
+the CPG phase:
+
+| | trot (before) | **CPG-phase coherent drive** |
+|---|---|---|
+| intra-leg period spread | ~28 | **0.0** (knee/hip = 1.00) |
+| inter-leg std | ~6 | **0.1** |
+| mean fwd_v | +0.041 | **+0.084** (2×) |
+| `keyframe_tle` | 0.82 (plateau) | **0.25** |
+| `mean_precision` | 0.26 (plateau) | **0.53 → 0.73** |
+| `gait_coherence` | 0.41 | **0.62–0.76** |
+| belly-up flips | 3 | 0–4 |
+
+The whole body became a **clean single-frequency limit cycle**, which broke the precision plateau and
+made the keyframe crystallize (`keyframe_tle` 0.82→0.25, precision 0.26→0.73). This was the root fix.
+
+**Gate 2 on the coherent gait (rhythm-scaffold wean).** Fading the rhythm scaffold to 0, the learned
+keyframe **holds the coordination** — the body stays a clean limit cycle (spread 1.1) and matches the
+map almost perfectly (`keyframe_tle` 0.08, precision **0.918**) — but **loses propulsion**
+(fwd_v→0). The keyframe is a phase-indexed **posture** template: it reproduces the gait's *shape* but
+not its propulsive *push*. So coordination is genuinely learnable/holdable; propulsion needs a
+rhythmic pump. Practical upshot: keep a residual CPG-phase pump (a permanent rhythm generator, as in
+animal locomotion) and let the keyframe learn/refine the coordination — or extend the objective to
+carry a phase-indexed feed-forward command, not just posture. (`rhythm_fade_start/end` provides the
+deterministic wean schedule for this study.)
+
+## Final tuned gait (`the_picrawler_motor_epm_cpgwalk.json`)
+
+Combining the coherence fix with statically-stable walk phasing and clean propulsion signing yields
+a gait that is **3× faster, coherent, and stable** vs the original trot:
+
+- CPG-phase coherent drive (coupling + stroke off; all joints from `rhythm.cpg.body`).
+- **Walk phasing** `gait_phase = [π/2, 3π/2, 0, π]` (lateral-sequence LH→LF→RH→RF, more legs down).
+- `rhythm_gains = [1.8, 1.0, 1.6]`, `rhythm_offsets = [0, π/2, π/2]` (knee/hip2 lift 90° into swing).
+- `stroke_signs = [-1, 1, -1, 1]` — the fore-aft joint (0) carries the per-leg propulsion sign so
+  opposite sides push the body the same way → **straight, forward** walking (a MotorEPM change: the
+  rhythm drive applies `stroke_signs[leg]` to joint 0).
+
+| | original trot | **final coherent walk** |
+|---|---|---|
+| mean fwd_v | +0.041 | **+0.116 (≈3×)** |
+| joint-period spread | ~32 | **0.5** |
+| `mean_precision` | 0.26 (plateau) | **0.52** (crystallizes) |
+| `keyframe_tle` | 0.82 | 0.37 |
+| belly-up flips (90 s) | 3 | **0–2** |
+| Gate 0 (reset_rate) | 0 | 0 |
+
+Remaining polish: CPG clamp sits at 48 while the body runs ~38 (a residual ~1.25× mismatch); lowering
+the entrainment clamp toward the body's cadence should tighten crystallization further. Propulsion
+after a full scaffold wean still needs a residual pump or a feed-forward-command objective (above).
+
+## CORRECTION (2026-07-20, UI observation): the coherent CPG-walk is REJECTED
+
+The "coherent walk" above scores well headless but is an **open-loop servo sequencer**: driving every
+joint from a CPG clock ignores ground contact, so the chassis **slams its corners into the ground every
+step** (a flopping fish). This was invisible to fwd_v + joint-coherence and caught only after a
+`chassis_h` collision metric was added (fraction of time the chassis dips below 0.35 of target height:
+**15.6% for the CPG-walk vs 3.3% for the keyframe**). Coherent ≠ emergent; fast fwd_v ≠ walking. Lesson:
+**no gait is good if the chassis collides — always measure chassis height.**
+
+## The emergent path: CPG as an EMBEDDING (not a driver) + firm stance
+
+Back on the `keyframe` config (which showed emergent steps with some "fighting"), the audit found the
+keyframer is a phase-indexed POSTURE map fed as a soft position target — a template that *averages* the
+gait to a damped smear, so driving toward it fights the very motion it should reproduce. Tweening the
+template (smooth C0 vs 16-step staircase) only made it **stiffer** (it lowpasses out the adaptive slack
+HK/balance need) — rejected.
+
+The fix demotes the CPG phase from a COMMAND to a CONTEXT (as in the earlier RL pipeline, where a CPG
+token was LateralVoter-fused with proprio/IMU into the EPM's input):
+- **`cpg_embed` (MotorEPM, default-off)**: the HK controller learns a phase-conditioned bias
+  `y = tanh(C·x + Cphi·[cosφ,sinφ] + h)`. `Cphi` is trained NOT on HK surprise (which damps motion — the
+  least-surprising thing is a still body) but to reduce the **keyframe error** (x*−x) at the command
+  phase — a self-limiting phase-indexed feed-forward toward the learned posture. Phase modulates the
+  learned control law; it never commands a joint, so HK exploration + balance reflexes stay live.
+- **firm stance** (`postural_gain` 0.3→0.7): the weak postural reflex let the lively controller
+  over-extend the legs and sag the chassis; firming it holds the stance → 0 falls, min chassis height
+  0.19→0.28 (no collision), sharper crystallization. (`hip2_tuck_target` added as a knob but did not
+  merit on its own.)
+
+Isolated A/B vs the keyframe baseline (promote-on-merit): precision 0.255→0.30+ (crystallizes),
+keyframe_tle 0.82→0.72, falls halved then zeroed, motor_tle smoother — at a modest fwd_v cost (the
+feed-forward still pushes toward the damped *posture*, not a propulsive *trajectory*).
+
+**UI validation (the real proof):** the robot reads as ALIVE and EVOLVING (not a template), traverses
+~5 m, and — stuck on a pyramid with its legs off the ground — **discovered a NOVEL limb movement to
+dislodge itself and continued walking.** That self-rescue is the homeokinetic exploration drive working
+as designed; an open-loop sequencer cannot do it. This is the emergent, feedback-driven direction.
+Config: `the_picrawler_motor_epm_embed.json`.
+
+**Open (not blockers):** hip2 is still passive (no rhythmic role, raw amp ~0.035); a sustained/efficient
+cycle likely wants the objective to carry phase-indexed VELOCITY (a propulsive trajectory), not just
+posture — the next lever.
+
+## Learned hip2 — tested and refuted (2026-07-20)
+
+The open "emergent hip2" lever, run to ground. **Hypothesis:** hip2 already has a *reflex* (the
+height homeostat DC-lifts the femur to raise the chassis); the uniform `postural_gain` spring pins the
+femur at its extended, no-leverage spawn pose. **Loosen the spring on hip2 alone** and the learned
+controller (HK `C` + the phase embedding `Cphi`) should be free to develop a stroke *on top of* the
+reflex — the learned form of the idea, not an imposed stroke (which we already rejected, chaotic).
+
+**Mechanism:** added `postural_gain_joints`, a per-joint spring. First cut was an *absolute* override;
+this produced a **methodological trap** worth recording. In the UI the operator raised the global
+`postural_gain` scalar to 1.0, saw the robot engage pyramids shortly after, and (naturally) attributed
+the change to the knob. But with the per-joint array active, the scalar's *magnitude* was ignored —
+**the knob-turn was a complete no-op.** The engagement was the system's own temporal evolution; a
+hand-tuned correlation had nearly been filed as a finding. **Lesson: hand-tuning manufactures false
+causation — an observed correlation under a hand-turned knob is worth nothing until isolated.** Two
+fixes followed: `postural_gain_joints` is now a **multiplier** on the scalar (so `postural_gain` is an
+honest global tone knob), and MotorEPM emits **`postural_eff`** (the effective per-joint gains applied
+each tick) so a no-op can never again hide.
+
+**Isolated A/B** (firm profile `[1,1,1]` → eff 0.70 vs loose `[1,0.3,1]` → eff 0.21, everything else
+identical):
+
+- **Gait:** firm ~18% faster forward (`fwd_v` 0.0337 vs 0.0284), **replicated** across two independent
+  short pairs. Loose *did* free the femur (raw amp 0.041 vs 0.035, coherence slightly better) — the
+  manipulation worked — but bought nothing and cost speed.
+- **Long run (60k steps, both reach the pyramids):** firm traverses **~3× faster net** (0.011 vs
+  0.003 m/s), is **stuck half as often** (10% vs 20% of the time), and **never falls**; loose tips over
+  **4×** (max tilt π vs 0.69). *(An early confound: every "long" headless run before this was secretly
+  capped at tick 6000 (~100 sim-s) by the default `max_steps`; real long runs need
+  `OGMA_PICRAWLER_MAX_STEPS` + `OGMA_RESET_MODE=continuous`.)*
+- **Disengagement** (the operator's UI hunch that hip2 helps escape): **refuted.** The body escape
+  counter is a null signal here, but the valid `stuck_deficit` fraction says loose is stuck *more*, not
+  less. The milestone self-rescue happened on the **firm** embed config — the escape is an HK+embedding
+  property on a *stable base*; hip2 was never the source.
+
+**Verdict: not promoted.** Learned-hip2 loses or ties on every functional axis and adds instability;
+its only effect is marginally more femur motion, to no benefit. The `postural_gain_joints` (multiplier)
++ `postural_eff` diag **stay** — infrastructure that makes any future per-joint experiment trustworthy.
+The clean negative is the isolate-and-promote discipline working: the idea *looked* promising by hand
+and is unambiguously negative under control.
+
+## Phase-indexed velocity objective — tested and refuted (2026-07-21)
+
+The last named lever, run to ground. **Hypothesis** (findings above): the keyframe is a phase-indexed
+*posture* template — it holds the gait's *shape* but loses the propulsive *push* on a scaffold wean
+(`fwd_v→0`), because "be at position p" gives zero drive once you're already there. **Fix:** carry a
+phase-indexed *velocity* in the objective — a learned propulsive pump, the emergent analog of the
+(rejected-as-imposed) rhythmic sinusoid.
+
+**Mechanism built** (kept as default-off, byte-identical infrastructure): `KeyframeGait` learns a
+second **velocity map** (`vel_keyframe[bin]` = cross-cycle EMA of the body's *own* joint delta —
+proprio index 3j+2 — per CPG-phase bin) and publishes it on `objective.velocity.*`. `MotorEPM` trains
+a **separate feed-forward `Cvel`** on the velocity error `(v*−ẋ)` at the command phase (alongside the
+posture `Cphi`, so posture-pull and velocity-pump are independently learned/observable — `embed_norm`
+vs `vel_embed_norm`) and adds `Cvel·[cosφ,sinφ]` to the command.
+
+**Result — three isolated strikes** (each a *byte-perfect* isolation: the seed is inert — see below —
+so `embed` vs `velobj` differ by *exactly* the socket):
+
+1. **Steady A/B (120 s):** marginal — `fwd_v` +5.6% (0.0337→0.0356), coherence slightly up, no chassis
+   collision. But **`Cvel` self-limits to ~0.038** (vs `Cphi`'s 0.29): because `v*` is the body's *own*
+   recurring velocity, the error `(v*−ẋ)` is near-zero in steady state — the pump only supplies the
+   residual, which on the (already scaffold-free) `embed` gait is little.
+2. **Circling A/B (12 k ticks):** the socket **degrades the gait**. `embed` walks **6.1 m straight to a
+   pyramid** (0.47 net turns, 0 falls); `velobj` **circles ~1.89 turns** (3.2 m net, 1 tipover), never
+   directed. Mechanism: `Cvel` reinforces the body's *own* per-bin velocity — **including its yaw
+   asymmetry** — so a mild rear-leg imbalance (that `embed` tolerates: plant `[9,9,9,3]`) is compounded
+   into circling (`velobj` plant `[6,4,6,3]` — the front pair splits too).
+3. **The symmetry fix backfired.** An LR-pair prior equalizing paired legs' RMS push magnitude
+   (`symmetry_pairs`+`vel_symmetry_gain`) made circling **worse** — `velsym` circles **~3.19 turns**
+   (2.0 m net, never reaches a pyramid), plant `[3,13,4,3]`: it scaled the *weak* FR **up** until FR
+   *dominated*, flipping the yaw the other way. **Lesson:** yaw is a *signed, phased* quantity, not a
+   per-joint RMS magnitude; and the weak leg is a **weight-bearing/balance** asymmetry, not a
+   velocity-map one — `embed` already handles it *without* a pump, so symmetrizing the velocity map
+   fixes the wrong layer.
+
+**Verdict: not promoted.** The velocity feed-forward is not *wrong in principle* — a propulsive FF
+likely helps on a **symmetric base gait** — but it is **incompatible with the current asymmetric
+gait**, which it amplifies into circling; and the obvious fix belongs at the gait/balance layer, not
+here. The socket + symmetry prior **stay** as default-off/byte-identical infrastructure (reusable when
+a symmetric base gait exists). Same isolate-and-promote discipline as learned-hip2: looked promising by
+concept, unambiguously negative under control.
+
+**Tooling finding (affects all A/Bs):** the `master_seed` override logs **"0 modules rewritten"** — it
+does *not* reseed module RNGs, so every run reuses the config-baked seeds and is **fully deterministic
+regardless of `OGMA_SEED`** (confirmed: `embed@7 ≡ embed@42` byte-for-byte). Upside: A/Bs here are
+byte-perfect isolations. Downside: **we cannot seed-average** — every result (this lever, hip2, the
+milestone) is single-config; generality is untested. Worth fixing before the next quantitative gait study.
+
+## Gait symmetry / straightness — autonomously explored and refuted (2026-07-21)
+
+The velocity work traced the circling to a persistent **RR (right-rear) under-plant** (`embed` plant
+`[9,9,9,3]`). An autonomous sweep (**~35 headless A/Bs**, each a *byte-perfect* isolation — seed inert)
+ran that asymmetry to ground across every plausible lever.
+
+**Diagnosis refined.** The spawn stance is a clean L/R mirror (not a body-model/rest-pose asymmetry).
+RR *moves* (hip1 stride full) but **under-flexes its knee (0.82 vs ~1.4) and over-lifts hip2** → never
+completes the plant. It develops ~20 s in and holds. Critically, this asymmetry is **load-bearing for
+straightness**: `embed` is a stable emergent **tripod-skid** (three legs walk, RR rides as a
+stabilizer) and goes straight (0.47 turns, 0 falls).
+
+**Every symmetry-forcing intervention causes circling** — the tripod is a delicate fixed point:
+- *amplitude homeostat up* equalizes the knee amplitude (imb 46%→25%) but RR then plants **1×** and it
+  circles **−7.7 turns**; *exploration / coord-adapt / coord-explore* destabilize or no-op.
+- *reflex knobs* (balance on/flipped, coupling↑, height↓): 2 no-ops + 2 destabilizers.
+- **per-leg controller symmetry coupling** — a new MotorEPM mechanism (`ctrl_symmetry_gain` +
+  `symmetry_group_of`: pull each leg's learned `C`/`h`/`Cphi` toward its group-average, sign-safe by
+  stroke-sign groups) tried at multiple gains and groupings: **all circle.** Even the root-level fix
+  (make the four legs learn one law) fails — one run hit **3 %** knee-amplitude imbalance while spinning
+  −19 turns with RR fully excluded, proving *amplitude symmetry ≠ functional symmetry*.
+
+**Walk phasing is faster but not symmetric.** Lateral-sequence walk (`gait_phase [π/2,3π/2,0,π]`) =
+**+65 % distance** (10.05 m vs 6.10), fairly straight (0.83 turns), RR participates — but it *relocates*
+the asymmetry (RL skids), costs stability (2 falls), and is fragile (every tuning knob → circling).
+
+> **⚠️ CORRECTION (2026-07-25) — read this before citing the +65 %.** Here "walk" / "walk-LS" means
+> `the_picrawler_motor_epm_cpgwalk.json` (see "Final tuned gait" above) — the **open-loop CPG servo
+> sequencer that was REJECTED** one day earlier on UI observation (chassis collision 15.6 % vs 3.3 %,
+> "flopping fish"). It is the only config carrying this phasing, and it carries `rhythm_gains` with **no
+> `cpg_embed`**. So the +65 % is *the sequencer's* speed, measured on a body already judged
+> non-viable — and the operator's recollection of the behaviour is the decisive datum: it **looked
+> sequenced and paddle-like, low on aliveness.** This section carried the number forward without
+> re-flagging that, which is how it later got mis-recorded as a banked speed lever.
+>
+> **The lesson is one this document already teaches, recurring one section later:** distance certified a
+> degenerate paddling behaviour. *Coherent ≠ emergent; fast fwd_v ≠ walking* — and neither is far.
+> **Lateral-sequence phasing has never been tested on the emergent `embed` base**; isolating it from the
+> open-loop drive is a legitimate open experiment, judged on chassis height and adaptation, starting from
+> zero. See [`picrawler_lever_ledger.md`](picrawler_lever_ledger.md) §2.
+
+**The deep gap — both closed-loop stabilization reflexes are broken:**
+- **Active-balance (vestibular)** is **inert by default headless** (the body's `publish_tilt` `@export`
+  defaults *false*; the brain-config `metadata.publish_tilt:true` never sets the *body* export → tilt
+  never published → MotorEPM's tilt = 0, proven by byte-identical `balance_gain` changes) **and
+  destabilizing when enabled** (`OGMA_PICRAWLER_PUBLISH_TILT=1`: both ±0.5 turn straight `embed` into
+  circling — it maps tilt→hip2 = pitch/roll leveling, not yaw).
+- **Heading-hold (anti-yaw, `heading_gain`)** is off by default and *erratic* when enabled — it makes
+  `embed` circle (even gentle 0.4 → −6.7 turns) yet straightens walk-LS (0.16 turns). A sign/coupling
+  issue makes it destructive in most contexts.
+
+**Verdict: symmetric-AND-straight-AND-stable is not reachable on this substrate by tuning.** The
+asymmetric tripod-skid *is* the stable straight solution; the reflexes that should give robust
+closed-loop heading/attitude control are inert or mis-tuned. **`embed` remains the best straight+stable
+gait** (only config with 0 falls + low turns + traversal). The real engineering lever is a **working
+closed-loop heading/balance controller** (a redesign, not a knob) — likely the prerequisite for both a
+symmetric gait *and* the faster walk. ~~Lateral-sequence walk (+65 %) is a speed lever for once stability
+is solved.~~ **Retracted 2026-07-25** — that framing banks a number measured on the rejected open-loop
+sequencer (see the correction above). Phasing on the *emergent* base is an untested experiment, not a
+pending win. *(The heading controller called for here was subsequently built: bearing-hold P+7.)*
+
+**Measurement gaps surfaced:** (a) **headless ≠ UI** — `publish_tilt` is off in headless but may be on
+via the launcher, so the balance reflex (and thus stability) differs between headless A/Bs and UI
+observation; (b) the seed-inert gap (above) still stands. Both should be closed before the next gait study.
+
+## Reusable pieces added
+
+- `BodyRhythmTracker` (module) — proprioception → body-gait-phase reference.
+- `CPGOscillator` afferent entrainment (`entrain_topic`, aliasing clamp).
+- `KeyframeGait` self-precision drive gate (`warmup_visits`, `precision_scale`).
+- `MotorEPM` `coupling_fade_start/end` + `rhythm_fade_start/end` — deterministic scaffold-retirement schedules.
+- `MotorEPM` `phase_joint` + `rhythm_gains`/`rhythm_offsets` + `cpg_phase_topic` — the coherent
+  per-joint rhythmic drive (the REJECTED open-loop sequencer).
+- `MotorEPM` `cpg_embed` (+ `embed_lr`/`embed_decay`) — CPG-as-embedding: HK controller learns a
+  phase-conditioned feed-forward from the keyframe error (the emergent, validated path).
+- `MotorEPM` `chassis_h`/`chassis_h_ema` diag + `hip2_tuck_target` — collision metric + femur-crouch knob.
+- `MotorEPM` `postural_gain_joints` (per-joint postural **multiplier** profile) + `postural_eff` diag —
+  loosen one joint's spring relative to a global tone; effective gains observable (no silent no-ops).
+  Used to test — and **refute** — learned hip2.
+- `BodyRhythmTracker` `raw_period`/`raw_amp` diag — per-(leg,joint) frequency diagnostic.
+- `KeyframeGait` phase-indexed **velocity map** (`velocity_output_topics`) + `MotorEPM` velocity
+  objective socket (`velocity_objective_topics`) + `Cvel` feed-forward (trained on v*−ẋ) — a learned
+  propulsive pump on the objective (`vel_embed_norm`/`obj_vel_active`/`vel_keyframe_tle` diag). Refuted
+  on the current gait; default-off/byte-identical, reusable on a symmetric base gait.
+- `KeyframeGait` LR-symmetry prior (`symmetry_pairs`/`vel_symmetry_gain`, `vel_lr_imbalance` diag) —
+  paired-leg RMS-energy equalization on the velocity map. The naive magnitude form backfired (see
+  velocity-lever section); kept default-off for a future phase-aware variant.
+- `OgmaBrain` TCP `set_param` verb — live param mutation for experiments (single-connection server).
+- `gait_metrics.py` + `raw_diag.py` — quantitative gait-quality + per-joint frequency diagnostics.
+- `circle.py` — circling quantifier from the body-diag log (net displacement vs path length vs
+  unwrapped `heading_yaw` = net turns; + per-leg plant/lift asymmetry). Distinguishes directed
+  traversal from circling-in-place — the metric that caught the velocity lever's failure.
+- `MotorEPM` `ctrl_symmetry_gain`/`symmetry_group_of` — per-leg controller (C/h/Cphi) symmetry coupling
+  toward group averages (sign-safe by stroke-sign groups). Refuted for the picrawler gait; default-off /
+  byte-identical, tested inert-when-off + active-when-on (no silent no-op). Reusable on a symmetric base.
+- `gaiteval.py` (+ `seedrun.sh`/`seedrun_tilt.sh`) — symmetry/stability eval from the body log (plant
+  balance, per-leg joint amplitudes, circling, chassis height/falls); tilt-on runner for the balance reflex.
+- **Known gaps to fix before the next gait study:** the active-balance reflex is headless-inert
+  (`publish_tilt` body-export default) AND destabilizing as tuned; `heading_gain` anti-yaw is erratic;
+  both need redesign for real closed-loop heading/attitude control.

@@ -65,6 +65,10 @@ std::vector<TopicSpec> CPGOscillator::input_topics() const {
     v.emplace_back(std::string(topics::kConsensusPrefix) + "0",
                    std::type_index(typeid(ConsensusToken)),
                    SubscriptionKind::Direct, /*required=*/false);
+    // L-1b step 3 — optional afferent body-rhythm reference to entrain to.
+    if (!entrain_topic_.empty())
+        v.emplace_back(entrain_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
     return v;
 }
 
@@ -100,6 +104,21 @@ ParamSchema CPGOscillator::params_schema() const {
         {"period_ticks",         ParamMutability::HotMutable,
             "Cycle length in ticks.  Default 60 ≈ 1 sim sec on the 60Hz tick (slow walk for picrawler scale).",
             ParamValue{int64_t{60}}},
+        {"entrain_topic",        ParamMutability::ConstructionOnly,
+            "Optional afferent body-rhythm reference (BodyRhythmTracker's rhythm.body.gait, ProprioToken [cos φ, sin φ, ω]). Empty = free-running (byte-identical).",
+            std::nullopt},
+        {"entrain_freq_gain",    ParamMutability::HotMutable,
+            "Integral pull of the CPG period toward the body's measured period (small = smooth frequency tracking).",
+            ParamValue{0.02}},
+        {"entrain_phase_gain",   ParamMutability::HotMutable,
+            "Proportional nudge of CPG phase toward φ_body each tick (aligns phase without a jump).",
+            ParamValue{0.05}},
+        {"entrain_period_min",   ParamMutability::HotMutable,
+            "Aliasing-safe floor on the entrained period (ticks). ≥ ~3·n_bins keeps the keyframe binning oversampled.",
+            ParamValue{48.0}},
+        {"entrain_period_max",   ParamMutability::HotMutable,
+            "Ceiling on the entrained period (ticks).",
+            ParamValue{120.0}},
         {"amplitude",            ParamMutability::HotMutable,
             "Peak waveform amplitude when competence_gate is fully open.  Effective amp = amplitude_floor + (amplitude − amplitude_floor) * gate.  Default 0.3.",
             ParamValue{0.3}},
@@ -169,6 +188,11 @@ ParamMap CPGOscillator::current_params() const {
     std::vector<double> ppo(perceptual_leg_phase_offsets_.begin(), perceptual_leg_phase_offsets_.end());
     p["perceptual_leg_phase_offsets"] = ParamValue{ppo};
     p["perceptual_sensor_label"]      = ParamValue{perceptual_sensor_label_};
+    p["entrain_topic"]       = ParamValue{entrain_topic_};
+    p["entrain_freq_gain"]   = ParamValue{double(entrain_freq_gain_)};
+    p["entrain_phase_gain"]  = ParamValue{double(entrain_phase_gain_)};
+    p["entrain_period_min"]  = ParamValue{double(entrain_period_min_)};
+    p["entrain_period_max"]  = ParamValue{double(entrain_period_max_)};
     return p;
 }
 
@@ -292,6 +316,14 @@ void CPGOscillator::on_setup(Bus* bus, ParamMap const& params) {
             "CPGOscillator: at least one of (motor side: input_topics+output_topics+...) or (perceptual side: perceptual_output_topics+perceptual_leg_phase_offsets) must be configured");
     }
 
+    // L-1b step 3 — afferent entrainment (optional).
+    apply_param(params, "entrain_topic",      [&](auto const& v){ entrain_topic_      = get_string(v, "entrain_topic"); });
+    apply_param(params, "entrain_freq_gain",  [&](auto const& v){ entrain_freq_gain_  = get_double(v, "entrain_freq_gain"); });
+    apply_param(params, "entrain_phase_gain", [&](auto const& v){ entrain_phase_gain_ = get_double(v, "entrain_phase_gain"); });
+    apply_param(params, "entrain_period_min", [&](auto const& v){ entrain_period_min_ = get_double(v, "entrain_period_min"); });
+    apply_param(params, "entrain_period_max", [&](auto const& v){ entrain_period_max_ = get_double(v, "entrain_period_max"); });
+    period_eff_ = float(period_ticks_);   // free-running until a body reference arrives
+
     sub_ids_.clear();
     for (int i = 0; i < int(N); ++i) {
         sub_ids_.push_back(bus_->subscribe(input_topics_[i], SubscriptionKind::Direct,
@@ -304,6 +336,19 @@ void CPGOscillator::on_setup(Bus* bus, ParamMap const& params) {
     sub_ids_.push_back(bus_->subscribe(std::string(topics::kConsensusPrefix) + "0",
         SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ this->handle_consensus(p); }));
+    if (!entrain_topic_.empty())
+        sub_ids_.push_back(bus_->subscribe(entrain_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){ this->handle_body_rhythm(p); }));
+}
+
+void CPGOscillator::handle_body_rhythm(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto p = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!p || p->values.size() < 3) return;
+    body_cos_   = p->values[0];
+    body_sin_   = p->values[1];
+    body_omega_ = p->values[2];
+    body_seen_  = true;
 }
 
 void CPGOscillator::handle_consensus(MessagePtr payload) {
@@ -428,6 +473,10 @@ void CPGOscillator::on_param_change(std::string_view key, ParamValue const& valu
     else if (k == "gate_scale")     gate_scale_     = std::max(1e-6f, float(get_double(value, k)));
     else if (k == "accel_min")      accel_min_      = float(get_double(value, k));
     else if (k == "accel_max")      accel_max_      = float(get_double(value, k));
+    else if (k == "entrain_freq_gain")  entrain_freq_gain_  = get_double(value, k);
+    else if (k == "entrain_phase_gain") entrain_phase_gain_ = get_double(value, k);
+    else if (k == "entrain_period_min") entrain_period_min_ = get_double(value, k);
+    else if (k == "entrain_period_max") entrain_period_max_ = get_double(value, k);
     else
         throw std::invalid_argument("CPGOscillator: param '" + k + "' is ConstructionOnly");
 }
@@ -445,7 +494,25 @@ void CPGOscillator::handle_brain_action(int joint_idx, MessagePtr payload) {
 void CPGOscillator::tick(uint64_t tick_id) {
     // Advance phase.
     const float TWO_PI = 6.28318530717958647692f;
-    phase_ += TWO_PI / float(period_ticks_);
+    // L-1b step 3 — afferent entrainment (CPG↔body PLL).  When a body-rhythm reference is
+    // present, slowly track its frequency (feed-forward from the measured ω_body) and nudge
+    // phase toward φ_body.  period_eff_ integrates smoothly and phase_ stays an accumulator ⇒
+    // no waveform break.  No reference (empty topic / not yet locked) = the exact free-running
+    // advance below (respects a hot period_ticks change, byte-identical to pre-entrainment).
+    if (!entrain_topic_.empty() && body_seen_ && body_omega_ > 1e-6f) {
+        float target_period = TWO_PI / body_omega_;
+        period_eff_ += float(entrain_freq_gain_) * (target_period - period_eff_);
+        period_eff_  = std::clamp(period_eff_, float(entrain_period_min_), float(entrain_period_max_));
+        phase_ += TWO_PI / period_eff_;
+        float phi_body = std::atan2(body_sin_, body_cos_);
+        float e = phi_body - phase_;
+        while (e >  3.14159265358979323846f) e -= TWO_PI;
+        while (e < -3.14159265358979323846f) e += TWO_PI;
+        phase_ += float(entrain_phase_gain_) * e;
+        while (phase_ <   0.0f)   phase_ += TWO_PI;
+    } else {
+        phase_ += TWO_PI / float(period_ticks_);
+    }
     while (phase_ >= TWO_PI) phase_ -= TWO_PI;
 
     // Phase 7.x — competence-gated amplitude with cold-start floor.
@@ -594,6 +661,10 @@ nlohmann::json CPGOscillator::snapshot_state() const {
         {"perceptual_leg_phase_offsets", to_array(perceptual_leg_phase_offsets_)},
         {"perceptual_sensor_label",    perceptual_sensor_label_},
         {"n_perceptual_channels",      n_perceptual_channels()},
+        {"entrain_active",  !entrain_topic_.empty() && body_seen_},
+        {"period_eff",      double(period_eff_)},
+        {"body_period",     body_omega_ > 1e-6f ? double(6.28318530717958647692f / body_omega_) : 0.0},
+        {"body_phase_err",  double(std::remainder(std::atan2(body_sin_, body_cos_) - phase_, 6.28318530717958647692f))},
     };
 }
 

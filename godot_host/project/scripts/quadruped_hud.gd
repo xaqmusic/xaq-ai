@@ -36,6 +36,11 @@ var _prev_tilt_above_tipover: bool = false  # for tipover-event edge detection
 var _below_fail_ticks: int = 0           # cumulative below-FAIL count
 var _tipover_ticks: int = 0              # cumulative tilt>π/2 count
 var _hud_sample_ticks: int = 0           # increments per _process call
+# IMU scope — a live view of the modelled accelerometer/gyro + the attitude filter, and
+# the reference panel for bringing the real PiCrawler IMU up.  Created lazily only for a
+# body that actually models an IMU (get_imu_debug), so the quadruped is unaffected.
+var _imu_scope: Control = null
+var _imu_scope_on: bool = true
 
 func _as_bool(v: Variant) -> bool:
 	if v == null:
@@ -93,6 +98,14 @@ const _LEG_COLORS: Array = [
 	Color(0.30, 0.50, 0.95, 1.0),
 	Color(0.95, 0.85, 0.20, 1.0),
 ]
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_I:
+		_imu_scope_on = not _imu_scope_on
+		if _imu_scope != null:
+			_imu_scope.visible = _imu_scope_on
+		print("QuadrupedHUD: [I] imu_scope = %s" % _imu_scope_on)
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -164,6 +177,21 @@ func _process(_delta: float) -> void:
 			log(max(1.0, float(pm.get("n_intents", 5))))
 		]
 
+	# IMU scope — created on first sight of a body that models an IMU.  [I] toggles it.
+	if _imu_scope == null and body != null and body.has_method("get_imu_debug"):
+		_imu_scope = (load("res://scripts/imu_scope.gd") as Script).new()
+		_imu_scope.set("body", body)
+		_imu_scope.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		_imu_scope.position = Vector2(-266, 8)
+		# MotorEpmPanel is a SIBLING of this HUD Control under the HUD CanvasLayer and is
+		# declared after it in the scene, so it draws over everything here — including a
+		# collapsed panel's full-rect Control.  An absolute z_index lifts the scope clear
+		# without depending on scene child order.
+		_imu_scope.z_as_relative = false
+		_imu_scope.z_index = 100
+		_imu_scope.visible = _imu_scope_on
+		add_child(_imu_scope)
+
 	# Chassis kinematics for situational awareness while watching.
 	var y_str: String    = "—"
 	var tilt_str: String = "—"
@@ -178,7 +206,17 @@ func _process(_delta: float) -> void:
 			var pos: Vector3 = (ch as RigidBody3D).global_transform.origin
 			y_str = "%.2fm" % pos.y
 			var tilt_rad: float = _tilt(ch.global_transform.basis)
-			tilt_str = "%.0f°" % rad_to_deg(tilt_rad)
+			# Report tilt from the IMU-FUSED estimate when the body has one — a number the
+			# real robot can actually produce — and mark the god's-eye value as such so the
+			# two can be compared at a glance.  (The fall/tipover accounting below keeps
+			# using ground truth on purpose: it is bookkeeping, not an observation.)
+			if body.has_method("get_imu_debug"):
+				var imud: Dictionary = body.get_imu_debug()
+				var uf: Vector3 = imud.get("up_fused", Vector3.UP)
+				var imu_tilt: float = acos(clampf(uf.y, -1.0, 1.0))
+				tilt_str = "%.0f° imu (%.0f° true)" % [rad_to_deg(imu_tilt), rad_to_deg(tilt_rad)]
+			else:
+				tilt_str = "%.0f°" % rad_to_deg(tilt_rad)
 			# Sample stability metrics for the end-run summary.
 			_hud_sample_ticks += 1
 			var y_above_fail: bool = pos.y >= _FAIL_HEIGHT and tilt_rad <= _FAIL_TILT
@@ -382,8 +420,6 @@ func _process(_delta: float) -> void:
 	var calib_hint: String = ""
 	if calib != null:
 		calib_hint = "   [C] calibrate: %s" % ("ON" if calib_active else "off")
-		if calib_active:
-			calib_hint += "   [N/P] step  [A] auto"
 	var mtest_v: Variant = body.get("_motor_test_mode")
 	var mtest_active: bool = (mtest_v != null and _as_bool(mtest_v))
 	var mtest_hint: String = ""
@@ -395,8 +431,124 @@ func _process(_delta: float) -> void:
 	var hud_v: Variant = body.get("hud_hidden")
 	var hud_is_hidden: bool = _as_bool(hud_v)
 	var hud_hint: String = "   [H] hud: %s" % ("hidden" if hud_is_hidden else "ON")
-	var hint_line: String = "%s%s%s%s%s%s   [`] or [F1] toggle graph   [ESC] quit" % [
-		space_hint, ragdoll_hint, calib_hint, mtest_hint, panels_hint, hud_hint]
+	# 2026-07-22 — live gym swap (KEY_1 arena / KEY_2 corridor); shows the active gym.
+	var gym_v: Variant = body.get("_gym_mode_active")
+	var gym_hint: String = ""
+	if gym_v != null:
+		var gm: String = str(gym_v)
+		if gm == "" or gm == "donut": gm = "arena"
+		gym_hint = "   [1/2] gym: %s" % gm
+	# 2026-07-23 — [P] walking-path trail (red X every metre travelled, both gyms).
+	var trail_v: Variant = body.get("_walking_trail")
+	var path_hint: String = ""
+	if trail_v != null and is_instance_valid(trail_v):
+		path_hint = "   [P] path: %s" % ("ON" if (trail_v as Node3D).visible else "hidden")
+	# 2026-07-26 — EVERY bound hotkey is listed, split across two lines: run/mode controls
+	# then view toggles.  Keys that carry live state show it, so the hint doubles as a
+	# status readout.  If a binding is added to picrawler_body._handle_key, add it here too.
+	var mpanel_hint: String = ""
+	var mpanel: Node = get_tree().get_root().find_child("MotorEpmPanel", true, false)
+	if mpanel != null and mpanel is Control:
+		mpanel_hint = "   [M] sliders: %s" % ("ON" if (mpanel as Control).visible else "hidden")
+	# 2026-08-04 — [K] ablation bench.  It reports how many of the 12 joints are broken, so
+	# the hint doubles as a "is this robot damaged right now?" readout -- which matters,
+	# because an ablation is deliberately NOT announced to the brain and is easy to forget
+	# you left on while reading a later run.
+	var abl_hint: String = ""
+	var apanel: Node = get_tree().get_root().find_child("AblationPanel", true, false)
+	if apanel != null and body != null and body.has_method("abl_kind_of"):
+		var nbroken: int = 0
+		for leg in range(4):
+			for jn in range(3):
+				if body.abl_is_detached(leg, jn) or body.abl_kind_of(leg, jn) != 0:
+					nbroken += 1
+		abl_hint = "   [K] ablate: %s" % ("intact" if nbroken == 0 else "%d/12 BROKEN" % nbroken)
+	# 2026-08-04 — [J] chassis collision.  ALWAYS shown, never blank: the chassis was a
+	# GHOST for the whole campaign (nothing masked _LAYER_CHASSIS in either direction), so
+	# which mode a run used is a physical fact about the body that lives in no config file.
+	# Measured: with both rear legs off, a ghost chassis sinks to y = -0.028, i.e. THROUGH
+	# the floor; solid, it rests at +0.025.
+	var cc_hint: String = ""
+	if body != null:
+		var ccv: Variant = body.get("chassis_collides")
+		cc_hint = "   [J] chassis: %s" % ("SOLID" if _as_bool(ccv) else "ghost")
+	# 2026-08-05 — SUBSTRATE, always shown.  hinge is CANONICAL and every number in the
+	# ledger is hinge; g6dof numbers are not comparable to any of them.  Four nav curricula
+	# were silently selecting g6dof, so a UI session could have been observing a different
+	# body than the one the measurements describe.  Loud and permanent beats a startup line
+	# that scrolls away.
+	# Time scale — shown whenever it is NOT real time, because "the legs look slow today"
+	# must never be a mystery.  Same rule as substrate: and [J] chassis:.
+	var ts_hint: String = ""
+	if body != null:
+		var tsv: Variant = body.get("_time_scale_v")
+		if tsv != null and not is_equal_approx(float(tsv), 1.0):
+			ts_hint = "   TIME %.2fx%s" % [float(tsv),
+				" (turbo — capped)" if float(tsv) > 1.0 else " (slow-mo)"]
+	var jb_hint: String = ""
+	if body != null:
+		var jbv: Variant = body.get("joint_backend")
+		if jbv != null:
+			var jb: String = str(jbv)
+			jb_hint = "   substrate: %s%s" % [jb, "" if jb == "hinge" else "  <<< NOT CANONICAL"]
+	# 2026-08-05 — the LEARNED heading trim, live.  This is the integral term acquiring the
+	# body's own yaw bias; watching it converge is the difference between "the lever fired"
+	# and "the lever fired AND settled".  Blank when the lever is off.
+	var trim_hint: String = ""
+	if body != null:
+		var br: Variant = body.get("brain")
+		if br != null and br.has_method("get_module_metrics"):
+			var mm: Variant = br.get_module_metrics()
+			if mm is Dictionary:
+				var me: Variant = (mm as Dictionary).get("motor_epm", {})
+				if me is Dictionary:
+					var tv: float = float((me as Dictionary).get("heading_trim", 0.0))
+					# Blank when the lever is off, so a zero can never read as "converged".
+					if abs(tv) > 1e-6:
+						trim_hint = "   learned trim %+.3f" % tv
+	var imu_hint: String = ""
+	if _imu_scope != null:
+		imu_hint = "   [I] imu: %s" % ("ON" if _imu_scope.visible else "hidden")
+	# Remaining body toggles that were never surfaced: place-mode, ray overlay, vision panel.
+	var place_v: Variant = body.get("_place_mode")
+	var place_hint: String = ""
+	if place_v != null:
+		# While placement is armed, say which button does what — LEFT drops upright,
+		# RIGHT drops INVERTED (the inversion-recovery probe).
+		place_hint = ("   [4] place: ON — LMB=upright RMB=INVERTED"
+			if _as_bool(place_v) else "   [4] place: off")
+		# Live marker XYZ while armed, so the exact target is readable BEFORE dropping.
+		if _as_bool(place_v):
+			var pt_v: Variant = body.get("_place_target")
+			if pt_v is Vector3:
+				place_hint += "  target(%.2f, %.2f, %.2f)" % [pt_v.x, pt_v.y, pt_v.z]
+	var rays_v: Variant = body.get("_ray_overlay_on")
+	var rays_hint: String = ""
+	if rays_v != null:
+		rays_hint = "   [V] rays: %s" % ("ON" if _as_bool(rays_v) else "off")
+	var vis_v: Variant = body.get("_vision_panel_on")
+	var vis_hint: String = ""
+	if vis_v != null:
+		vis_hint = "   [N] vision: %s" % ("ON" if _as_bool(vis_v) else "off")
+
+	# Line 1 — run + mode controls.  Line 2 — view toggles + persistence.
+	# Last teleport drop, kept on screen so a UI observation can be replayed exactly:
+	# OGMA_PICRAWLER_TELEPORT_XZ="x,z" (+ _FLIP=1) reproduces it headless.
+	var drop_v: Variant = body.get("_last_drop")
+	var drop_tick_v: Variant = body.get("_last_drop_tick")
+	if drop_v is Vector3 and drop_tick_v != null and _as_int(drop_tick_v) >= 0:
+		var flip_v: Variant = body.get("_last_drop_flip")
+		lines.append("last drop: (%.2f, %.2f, %.2f)%s @tick %d   [replay: TELEPORT_XZ=\"%.2f,%.2f\"%s]" % [
+			drop_v.x, drop_v.y, drop_v.z, "  INVERTED" if _as_bool(flip_v) else "",
+			_as_int(drop_tick_v), drop_v.x, drop_v.z,
+			" TELEPORT_FLIP=1" if _as_bool(flip_v) else ""])
+	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s" % [
+		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
+		jb_hint + ts_hint]
+	var hint_view: String = "%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
+		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, rays_hint,
+		vis_hint]
+	var hint_line: String = hint_run + "\n" + hint_view
 	if hud_is_hidden:
 		# Hidden mode: render ONLY the hint line so the user keeps the
 		# keyboard reference but loses the diagnostic text + notifications.
@@ -527,7 +679,7 @@ func build_clipboard_text(body: Node) -> String:
 	var lines: Array[String] = []
 
 	# --- Header ---
-	lines.append("=== AMI-Ogma %s run snapshot ===" % str(body.name))
+	lines.append("=== xaq %s run snapshot ===" % str(body.name))
 	lines.append("Config:      %s" % str(ExperimentConfig.config_path))
 	lines.append("Seed:        %d" % _as_int(ExperimentConfig.seed_value))
 	var ticks: int = _as_int(body.get("tick_counter")) if body.get("tick_counter") != null else 0

@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import QLabel, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
 from ._multi_series import MultiSeriesPlot, Series
 from .epm_pca_scatter import EpmPcaScatter
+from .gait_raster import GaitRaster
 from .motor_selfmodel_graph import MotorSelfModelGraph
 
 
@@ -115,9 +116,28 @@ class _Readout(QWidget):
 
         rows = [
             ("motor-TLE",  f("motor_tle")),
+            # 2026-08-05 — the commit loop.  commit_prec is the EARNED precision: >1 means
+            # the body is predicting itself better than its own running average, which
+            # shortens the commit window and slows its release.  Exactly 1.000 = lever off.
+            # fwd_progress_ema is the INPUT to the whole commit chain: commit_ticks gates
+            # on it and intent_err is measured from it.  Read it against intent_err to see
+            # whether cprec is REGULATING or just tracking a constant offset.
+            ("fwd_prog_ema", f("fwd_progress_ema")),
+            ("intent_err",  f("intent_err")),
+            ("couple_R",    f("couple_R")),
+            ("phase_retro", f("phase_retro")),
+            ("res_period",  f("res_period")),
+            ("res_lock",    f("res_lock")),
+            ("commit_prec", f("commit_prec")),
+            ("commit_boost", f("commit_boost")),
+            ("explore_mult", f("explore_mult")),
             ("fwd_v",      f("fwd_v")),
             ("lateral_v",  f("lateral_v")),
             ("loop_gain",  f("loop_gain")),
+            ("gait_coher", f("gait_coherence")),
+            ("reset_rate", f("reset_rate")),
+            ("reset_cnt",  i("reset_count")),
+            ("since_rst",  i("ticks_since_reset")),
             ("cog_steer",  f("cog_steer")),
             ("steer msgs", i("cog_steer_msgs")),
             ("cog_thrust", f("cog_thrust")),
@@ -155,9 +175,24 @@ class MotorEpmInspector(QWidget):
         self._series = MultiSeriesPlot(
             [
                 Series("motor_tle",  "motor-TLE",  (255, 120, 120), width=2.0),
+                # The commit loop as a trace: watch commit_prec lead commit_boost, and
+                # explore_mult fall as commit ramps.  If commit_prec sits flat at 1.0 the
+                # lever is off; if it swings but commit_boost does not follow, the
+                # precision is being computed and not consumed.
+                Series("fwd_progress_ema", "fwd-prog-ema", (140, 255, 140), width=2.0),
+                Series("intent_err",   "intent-err",   (255, 140, 255), width=1.5),
+        Series("couple_R",    "couple-R",    (120, 200, 255), width=2.0),
+        Series("phase_retro", "phase-retro", (255, 180,  90), width=1.5),
+        Series("res_amp",     "res-amp",     (180, 255, 220), width=1.5),
+        Series("res_lock",    "res-lock",    (255, 255, 140), width=2.0),
+                Series("commit_prec",  "commit-prec",  (120, 220, 255), width=1.5),
+                Series("commit_boost", "commit-boost", (255, 210, 120), width=1.5),
+                Series("explore_mult", "explore",      (170, 170, 170), width=1.0),
                 Series("fwd_v",      "fwd_v",      (120, 255, 140), width=1.5),
                 Series("cog_steer",  "cog_steer",  (255, 215,  60), width=1.5),
                 Series("cog_thrust", "cog_thrust", (120, 200, 255), width=1.5),
+                Series("gait_coherence", "gait-coher", (180, 120, 255), width=2.0),
+                Series("reset_rate",     "reset-rate", (255, 160,  60), width=2.0),
             ],
             title="Self-model health + cognitive drive",
             y_label="value",
@@ -166,7 +201,11 @@ class MotorEpmInspector(QWidget):
         self._pca   = EpmPcaScatter()
         self._graph = MotorSelfModelGraph()
         self._amatrix = _AMatrix()
+        self._raster = GaitRaster()
         self._model_tabs = QTabWidget()
+        # Gait first: it is the tab you want open while WATCHING the robot, and the
+        # only view that shows whether thrust is landing on the ground.
+        self._model_tabs.addTab(self._raster,  "Gait raster")
         self._model_tabs.addTab(self._pca,     "Model PCA")
         self._model_tabs.addTab(self._graph,   "Model graph")
         self._model_tabs.addTab(self._amatrix, "A matrix")
@@ -187,6 +226,7 @@ class MotorEpmInspector(QWidget):
         if not isinstance(snapshot, dict):
             return
         self._series.update_payload(snapshot)
+        self._raster.update_payload(snapshot)
         self._pca.update_payload(tick_id, snapshot)
         self._graph.update_payload(snapshot)
         self._amatrix.update_payload(snapshot)

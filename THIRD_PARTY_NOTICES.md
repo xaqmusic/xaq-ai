@@ -2,8 +2,10 @@
 
 xaq depends on the third-party components listed below. Each remains the
 property of its respective authors and is governed by its own license, not by
-xaq's Apache-2.0 license. This file is a starting inventory; verify and
-complete it (versions, license texts) before any public release.
+xaq's Apache-2.0 license. Reviewed 2026-08-07 against the actual build
+(`cpp_core/CMakeLists.txt`, `godot_host/CMakeLists.txt`, and every
+`pyproject.toml`/`requirements.txt` in the tree) — update this file whenever
+a dependency is added, removed, or re-pinned.
 
 ## C++ runtime (`cpp_core/`)
 
@@ -27,13 +29,13 @@ Vendored header:
 
 | Component | License | Path |
 |---|---|---|
-| `sha256.h` | *verify* | `cpp_core/third_party/sha256.h` — confirm origin/license before release |
+| `sha256.h` | Public domain | `cpp_core/third_party/sha256.h` — minimal single-header SHA-256 (FIPS 180-4); self-attests public domain in its own header comment |
 
 ## Godot host (`godot_host/`)
 
 | Component | License | Source |
 |---|---|---|
-| godot-cpp | MIT | https://github.com/godotengine/godot-cpp (fetched at build time) |
+| godot-cpp | MIT | https://github.com/godotengine/godot-cpp, pinned to commit `7e18e40` (fetched at build time) |
 | Godot Engine API (`extension_api.json`, `gdextension_interface.h`) | MIT | dumped from Godot 4.6.x |
 
 ## Python (`python/`)
@@ -48,6 +50,20 @@ Vendored header:
 | PyQt6 | GPL-3.0 / commercial | **`[ui]` extra only** — review licensing implications before distributing UI builds |
 | pyqtgraph | MIT | `[ui]` extra |
 
-> **Action before release:** PyQt6 is GPL-3.0 (or commercial). It is confined to
-> the optional `[ui]` extra and is not required to run the engine, but any
-> distributed build that bundles the Qt UI must comply with its terms.
+> **PyQt6 is GPL-3.0 (or commercial).** Verified 2026-08-07 by import grep: PyQt6/pyqtgraph
+> usage is confined to `python/xaq/xaq/server/ui/`, `python/xaq/xaq/observer/widgets/`, and
+> `tools/xaq_inspector/` — never imported from `xaq_core` or the engine core, so running xaq
+> headless pulls in neither. Still applies to anyone who **distributes** a build bundling the
+> Qt UI: that build must comply with GPL-3.0 (or hold a commercial PyQt6 license).
+
+## Tools (`tools/`)
+
+`tools/xaq_inspector/requirements.txt` — a standalone sidecar app, pinned separately from
+`python/xaq`'s `[ui]` extra:
+
+| Component | License | Notes |
+|---|---|---|
+| PyQt6 | GPL-3.0 / commercial | unconditional dependency of this tool (see the PyQt6 note above) |
+| pyqtgraph | MIT | |
+| pyzmq | BSD-3-Clause | |
+| NumPy | BSD-3-Clause | |

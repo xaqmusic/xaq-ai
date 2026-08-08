@@ -19,6 +19,7 @@
 // Module lifecycle authoring contract: per docs/primitives/_module_lifecycle.md.
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,67 @@ private:
     // action_topics.size() / group_size.  Default 1 preserves per-joint
     // output behaviour bit-identically.
     int                      group_size_         = 1;
+    // 2026-08-07 — OPTIONAL PER-LEG LOAD CHANNEL appended to each output vector.
+    //
+    // MotorEPMv2 sizes its forward model from the arriving vector (L.n = values.size();
+    // A is n x m, C is m x n), and its guards are `>= 3*m` rather than `==`, so an extra
+    // trailing element is LEARNED AUTOMATICALLY while every existing index is unchanged
+    // ([pos,act,delta] per joint, joint j position at 3j).  That is what makes this a
+    // one-element change rather than a refactor.
+    //
+    // ⚠ THE WIDTH MUST BE CONSTANT FROM THE FIRST FRAME.  MotorEPMv2 rejects any frame
+    // whose dimensionality differs from the one it initialised on ("dimensionality must
+    // be stable"), so if the bridge emitted 9 dims before the load topic arrived and 10
+    // after, every leg would latch at 9 and silently drop every later frame.  Therefore
+    // the width is decided by whether load_topic is CONFIGURED, not by whether a load
+    // value has been received yet; the slot carries 0.0 until the first one lands.
+    std::string              load_topic_;                 // empty = off, byte-identical
+    std::vector<float>       last_load_;                  // per output (leg)
+    bool                     have_load_          = false;
+    // 2026-08-02 · IMPORT I4b — POSITION-CHANNEL-ONLY colored sensor noise.
+    // PM wires every legged controller through ColorUniformNoise(0.1) on every sensor.
+    // Injecting that at the BODY (picrawler_body.gd sensor_noise_sigma) lands on the raw
+    // joint angles, and because `delta` here is a DIFFERENCE of successive positions the
+    // same sigma then re-enters the velocity channel — the channel the HK gradient
+    // weights most heavily (44% of |C| mass).  Measured effect: transport falls
+    // monotonically with sigma while posture peaks at sigma=0.03, i.e. a
+    // stochastic-resonance curve whose optimum sits below PM's nominal value.
+    // Injecting HERE instead perturbs `pos` only and leaves `delta` computed from the
+    // clean positions, so the dose reaches one channel rather than two.
+    // sigma = 0 (default) is byte-identical.
+    double                   pos_noise_sigma_    = 0.0;
+    // I4c — the COMPLEMENT: noise on the VELOCITY (delta) channel only, position clean.
+    // Measured 2026-08-02: both-channel body-side noise at sigma 0.03 makes the body
+    // progressively STAND UP (chassis 0.045 -> 0.071 over 40k) while position-only
+    // reproduces it at no sigma.  So the active ingredient is the velocity component --
+    // which is also the channel the HK gradient weights most (44% of |C| mass).  This
+    // isolates it, to CONFIRM the mechanism rather than infer it from the complement.
+    double                   vel_noise_sigma_    = 0.0;
+    double                   pos_noise_tau_      = 8.0;   // correlation length in ticks; 1 = white
+    uint64_t                 pos_noise_seed_     = 0;
+    std::vector<float>       pos_noise_;                  // per-joint colored state
+    std::vector<float>       vel_noise_;                  // per-joint colored state (velocity channel)
+    std::mt19937             pos_noise_rng_;
+
+    // 2026-08-06 — PER-CHANNEL RANGE PROBE (instrument, not a lever).
+    //
+    // An RBF EPM downstream normalises each input dim over a CONSTANT range
+    // (EPM `dim_min`/`dim_max`, default [-1,1]).  The three channels of this
+    // bridge's output do NOT share a scale: `pos` and `action` are ~[-1,1],
+    // but `delta` is a per-tick difference an order of magnitude smaller, so
+    // the default range crushes the velocity channels into a few percent of
+    // [0,1] and the GNG's insertion gate never sees them.  That is CLAUDE.md
+    // §0 rule 2 — the documented way EPM use goes wrong — and the only honest
+    // way to set those constants is to MEASURE the channels first.
+    //
+    // range_probe_ticks = 0 (default) accumulates nothing and prints nothing,
+    // so the off-path is byte-identical.
+    int                      range_probe_ticks_  = 0;
+    std::vector<float>       rp_min_, rp_max_;   // per output, per dim
+    std::vector<double>      rp_sum_, rp_sumsq_;
+    uint64_t                 rp_count_           = 0;
+    void                     range_probe_accum(int out_idx, int dim, float v);
+    void                     range_probe_report(uint64_t tick_id) const;
 
     // Working state — sized to n_joints() at setup.
     std::vector<float> last_position_;       // latest per-joint position seen

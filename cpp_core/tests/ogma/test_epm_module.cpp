@@ -14,6 +14,9 @@
 
 #include <Eigen/Dense>
 #include <memory>
+#include <array>
+#include <map>
+#include <set>
 #include <string>
 
 #include "ogma/InProcessBus.hpp"
@@ -399,4 +402,352 @@ TEST(EPM, SubRateOneIsBitIdenticalToLegacy) {
     }
     EXPECT_EQ(f_def.epm.node_count(), f_sub1.epm.node_count())
         << "sub_rate=1 must be bit-identical to default";
+}
+
+// -- Commissioning window (dim_autocal_ticks) -------------------------------
+//
+// The mechanism under test replaces hand-measured dim_min/dim_max with a
+// measured-then-frozen conditioning stage.  §0 rule 2 is the reason it exists:
+// a channel whose scale is small relative to its siblings gets collapsed by the
+// insertion gate while the encoder still shows the structure.
+
+namespace {
+
+// A stream where the ONLY channel that distinguishes states is tiny in
+// magnitude — the exact shape of the picrawler's velocity channels (delta
+// ~0.05 riding alongside position/action channels that span [-1,1]).
+// dims 0..3: large common-mode, identical in both states.
+// dim 4: the discriminating channel, +/- `amp`.
+// dim 5: large noise-free constant.
+std::shared_ptr<ogma::ProprioToken> make_tiny_signal(int state, float amp, float t) {
+    const float common = 0.8f * std::sin(t * 0.05f);
+    return make_proprio6(common, -common, 0.9f, -0.9f,
+                         (state ? amp : -amp), 0.5f);
+}
+
+ogma::ParamMap autocal_params(int64_t ticks, double k = 4.0) {
+    auto p = rbf_params();
+    p["dim_autocal_ticks"] = ticks;
+    p["dim_autocal_k"]     = k;
+    return p;
+}
+
+// Drive a stream that alternates state every 10 frames, return the EPM.
+void drive_tiny(EpmFixture& f, int n_ticks, float amp) {
+    for (int t = 0; t < n_ticks; ++t) {
+        auto pp = make_tiny_signal((t / 10) % 2, amp, float(t));
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", pp);
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+}
+
+} // namespace
+
+TEST(EPMAutocal, OffByDefaultAndAbsentFromSnapshot) {
+    EpmFixture f(rbf_params());
+    drive_tiny(f, 40, 0.03f);
+    auto snap = f.epm.snapshot_state();
+    EXPECT_FALSE(snap.contains("dim_autocal"))
+        << "with the feature off the serialised form must be byte-identical to pre-feature";
+}
+
+TEST(EPMAutocal, RejectedForNonRbfEncoders) {
+    auto p = identity_params();
+    p["dim_autocal_ticks"] = int64_t{100};
+    ogma::InProcessBus bus;
+    ogma::EPM epm;
+    epm.set_id("epm_ident");
+    // JL/STFT/Identity dims are not heterogeneous sensor channels.
+    EXPECT_THROW(epm.on_setup(&bus, p), std::invalid_argument);
+}
+
+TEST(EPMAutocal, ContradictsExplicitDimRanges) {
+    auto p = autocal_params(100);
+    p["dim_min"] = std::vector<double>{-1, -1, -1, -1, -1, -1};
+    p["dim_max"] = std::vector<double>{ 1,  1,  1,  1,  1,  1};
+    ogma::InProcessBus bus;
+    ogma::EPM epm;
+    epm.set_id("epm_contradiction");
+    EXPECT_THROW(epm.on_setup(&bus, p), std::invalid_argument);
+}
+
+TEST(EPMAutocal, DeterministicForIdenticalStreams) {
+    EpmFixture a(autocal_params(50));
+    EpmFixture b(autocal_params(50));
+    drive_tiny(a, 120, 0.03f);
+    drive_tiny(b, 120, 0.03f);
+    auto sa = a.epm.snapshot_state()["dim_autocal"];
+    auto sb = b.epm.snapshot_state()["dim_autocal"];
+    EXPECT_EQ(sa["range_lo"], sb["range_lo"]);
+    EXPECT_EQ(sa["range_hi"], sb["range_hi"]);
+    EXPECT_EQ(a.epm.node_count(), b.epm.node_count());
+}
+
+TEST(EPMAutocal, WindowRunsWarmThenResetsTopology) {
+    EpmFixture f(autocal_params(60));
+    // Warm start: the GNG is live DURING the window, so a vocabulary exists.
+    drive_tiny(f, 55, 0.03f);
+    const int nodes_before = f.epm.node_count();
+    EXPECT_GT(nodes_before, 2) << "warm start means the GNG runs during commissioning";
+    // Crossing the window must drop that vocabulary: it is expressed in the
+    // provisional units and is meaningless in the calibrated space.
+    drive_tiny(f, 10, 0.03f);
+    EXPECT_LT(f.epm.node_count(), nodes_before)
+        << "the topology must be reset when the input space is rescaled";
+    EXPECT_TRUE(f.epm.snapshot_state()["dim_autocal"]["done"].get<bool>());
+}
+
+TEST(EPMAutocal, RejectsOutlierDrivenRange) {
+    // One first-tick-style transient must not set the range: this is why the
+    // range intersects mu+/-k*sigma with the observed min/max instead of using
+    // min/max alone.  The picrawler's knee delta did exactly this (delta =
+    // pos - 0 on tick 1, ~16 sigma).
+    EpmFixture f(autocal_params(200));
+    for (int t = 0; t < 200; ++t) {
+        auto pp = (t == 0) ? make_proprio6(0, 0, 0, 0, 1.0f, 0)   // the spike
+                           : make_tiny_signal((t / 10) % 2, 0.03f, float(t));
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", pp);
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+    auto dac = f.epm.snapshot_state()["dim_autocal"];
+    const double hi = dac["range_hi"][4].get<double>();
+    EXPECT_LT(hi, 0.5) << "a single 1.0 transient must not stretch dim 4's range to it";
+    EXPECT_GT(hi, 0.0) << "but the channel's real excursion must survive";
+}
+
+TEST(EPMAutocal, SnapshotRoundTripPreservesConditioning) {
+    EpmFixture f(autocal_params(50));
+    drive_tiny(f, 150, 0.03f);
+    auto snap = f.epm.snapshot_state();
+
+    // A fresh EPM built from the SAME params has default conditioning until it
+    // restores; after restore it must be conditioned identically, or its baked
+    // vocabulary would be running against a different space.
+    EpmFixture g(autocal_params(50));
+    g.epm.restore_state(snap);
+    auto rt = g.epm.snapshot_state()["dim_autocal"];
+    EXPECT_EQ(rt["range_lo"], snap["dim_autocal"]["range_lo"]);
+    EXPECT_EQ(rt["range_hi"], snap["dim_autocal"]["range_hi"]);
+    EXPECT_TRUE(rt["done"].get<bool>());
+
+    // And one more tick must land on the same winner in both.
+    auto pp = make_tiny_signal(1, 0.03f, 200.0f);
+    for (auto* fix : {&f, &g}) {
+        fix->bus.begin_tick(500);
+        fix->bus.publish("reality.proprio.imu", pp);
+        fix->epm.tick(500);
+        fix->bus.end_tick();
+    }
+    EXPECT_EQ(f.epm.node_count(), g.epm.node_count());
+}
+
+// ★ THE ACCEPTANCE TEST.  Everything above proves the mechanism is wired
+// correctly; this one proves it DOES SOMETHING — that a state distinction
+// carried on a small-magnitude channel is discriminable with commissioning
+// and is lost without it.  If this fails to separate, the mechanism is not
+// earning its place regardless of what any behavioural number says later.
+//
+// ⚠ NODE COUNT IS A BLIND METRIC HERE and the first version of this test used
+// it: with a varying common-mode, the vocabulary size is set by the common-mode
+// sweep in BOTH arms (measured: 10 vs 10) while the channel under test changes
+// nothing either way.  The honest question is not "how many words" but "are the
+// two states different words", so this asks that directly — the unit-test form
+// of §0 rule 2's "believe the scatter, not the node count".
+namespace {
+// WINNER PURITY: for each winner id, how one-sided is its state distribution?
+// 1.0 = every word means exactly one state (the vocabulary carries the
+// distinction); 0.5 = every word is used by both states equally (the
+// distinction was discretised away).  Weighted by visit count, back half only.
+//
+// This is the measurement that matters.  Node COUNT cannot answer it — a rich
+// vocabulary built entirely on the common-mode scores well while being blind
+// to the channel under test, which is precisely the §0 rule-2 trap.
+double winner_purity(EpmFixture& f, int ticks, float amp) {
+    std::map<int, std::array<int,2>> hist;
+    for (int t = 0; t < ticks; ++t) {
+        const int state = (t / 10) % 2;
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu", make_tiny_signal(state, amp, float(t)));
+        f.epm.tick(uint64_t(t));
+        auto tok = f.last_token("reality.proprio.imu");
+        if (t > ticks / 2 && tok && tok->winner_id >= 0) ++hist[tok->winner_id][state];
+        f.bus.end_tick();
+    }
+    long total = 0, pure = 0;
+    for (auto const& [id, c] : hist) {
+        total += c[0] + c[1];
+        pure  += std::max(c[0], c[1]);
+    }
+    return total ? double(pure) / double(total) : 0.0;
+}
+} // namespace
+
+TEST(EPMAutocal, RecoversDiscriminationLostAtDefaultRanges) {
+    // The §0 rule-2 shape: a small directional signal riding on a LARGE
+    // common-mode.  The common-mode dominates the distance metric, so the GNG
+    // spends its resolution there and collapses the small channel — while the
+    // encoder still shows it.  This is the picrawler's velocity channel exactly.
+    const float amp   = 0.02f;    // ~1% of the default [-1,1] span
+    const int   ticks = 400;
+
+    EpmFixture off(rbf_params());
+    const double p_off = winner_purity(off, ticks, amp);
+
+    EpmFixture on(autocal_params(100));
+    const double p_on = winner_purity(on, ticks, amp);
+
+    std::printf("[ PURITY ] default=%.3f  commissioned=%.3f  (nodes %d vs %d)\n",
+                p_off, p_on, off.epm.node_count(), on.epm.node_count());
+
+    EXPECT_LT(p_off, 0.80)
+        << "control arm must FAIL to separate (purity " << p_off
+        << ") or the test isn't testing anything";
+    EXPECT_GT(p_on, 0.95)
+        << "commissioned purity " << p_on
+        << " — conditioning must make the two states different words";
+    EXPECT_GT(p_on, p_off + 0.15) << "and the gain must be large, not marginal";
+}
+
+// -- Insertion-gate self-tuning (insertion_autotune) -------------------------
+//
+// Restores a mechanism the v3 Python reference had and the C++ port dropped:
+// the GNG sets its own insertion floor from the quantile of its own recent
+// squared-TLE distribution.  A FIXED absolute threshold only means something
+// relative to the signal's typical error, so on a stream whose typical error
+// exceeds it, insertion never stops and the GNG grows until it hits max_nodes.
+
+namespace {
+ogma::ParamMap autotune_params(bool on, int64_t max_nodes) {
+    auto p = rbf_params();
+    p["max_nodes"]          = max_nodes;
+    p["baking_threshold"]   = int64_t{10};
+    p["insertion_autotune"] = on;
+    return p;
+}
+
+// A continuous, never-exactly-repeating stream — the shape that made the
+// picrawler motor GNG grow without bound.  Quantisation error never falls to
+// zero, so a fixed absolute gate keeps justifying insertion forever.
+void drive_continuous(EpmFixture& f, int ticks) {
+    for (int t = 0; t < ticks; ++t) {
+        const float u = float(t);
+        f.bus.begin_tick(uint64_t(t));
+        f.bus.publish("reality.proprio.imu",
+            make_proprio6(std::sin(u * 0.031f), std::cos(u * 0.017f),
+                          std::sin(u * 0.0071f), std::cos(u * 0.0113f),
+                          std::sin(u * 0.0043f), std::cos(u * 0.0234f)));
+        f.epm.tick(uint64_t(t));
+        f.bus.end_tick();
+    }
+}
+} // namespace
+
+TEST(EPMInsertionAutotune, OffByDefaultAndAbsentFromSnapshot) {
+    EpmFixture f(rbf_params());
+    drive_continuous(f, 200);
+    auto gng = f.epm.snapshot_state()["gng"];
+    EXPECT_FALSE(gng.contains("insertion_autotune"))
+        << "with the feature off the serialised GNG must be byte-identical to pre-feature";
+}
+
+TEST(EPMInsertionAutotune, ConfiguredValueIsAFloorNotAReplacement) {
+    // The documented contract ("this is the floor") and the divergence from the
+    // Python reference, which replaced the threshold outright.  A huge floor
+    // must dominate whatever the quantile computes, suppressing growth.
+    auto p = autotune_params(true, 500);
+    p["min_insertion_error"] = 1e9;
+    EpmFixture f(p);
+    drive_continuous(f, 1000);
+    EXPECT_LE(f.epm.node_count(), 3)
+        << "an enormous configured floor must still gate insertion — it is a FLOOR";
+}
+
+TEST(EPMInsertionAutotune, SnapshotRoundTripPreservesGateHistory) {
+    EpmFixture f(autotune_params(true, 500));
+    drive_continuous(f, 600);
+    auto snap = f.epm.snapshot_state();
+    ASSERT_TRUE(snap["gng"].contains("autotune_hist"));
+    EXPECT_GT(snap["gng"]["autotune_hist"].size(), 0u)
+        << "the history must round-trip, or a restored GNG re-warms with no gate "
+           "and grows unbounded for the whole warmup window";
+
+    EpmFixture g(autotune_params(true, 500));
+    g.epm.restore_state(snap);
+    auto rt = g.epm.snapshot_state()["gng"];
+    EXPECT_EQ(rt["autotune_hist"].size(), snap["gng"]["autotune_hist"].size());
+    EXPECT_FLOAT_EQ(rt["autotune_value"].get<float>(),
+                    snap["gng"]["autotune_value"].get<float>());
+}
+
+// ★ THE ACCEPTANCE TEST.
+//
+// ⚠ THE CRITERION HERE WAS WRONG THE FIRST TIME AND THE CORRECTION IS THE POINT.
+// It originally asserted "the population plateaus below max_nodes", from the
+// 2026-08-06 picrawler gate read (nodes pinned at the cap; raising the cap
+// 120 -> 400 made baking WORSE, 19-27 -> 6-11).  That framing mistook a
+// SYMPTOM for the disease, and node count is the wrong instrument for the
+// third time in this file.
+//
+// `min_insertion_error` gates TWO things, here and in the v3 Python reference:
+//    insertion   -- ema_error <  gate  =>  do not insert (converged)
+//    baking      -- ema_error >= gate  =>  demote instead of bake (inconsistent)
+// A gate sitting BELOW the signal's own error floor therefore means nodes
+// always look surprising enough to insert AND never look consistent enough to
+// bake.  Unbounded growth and near-zero baking are ONE cause, not two symptoms.
+//
+// So the honest measure is the BAKED FRACTION: is the vocabulary earned?  Node
+// count actually RISES under the fix, because baked nodes are frozen and immune
+// to pruning -- a detail that would read as a regression to anyone grading on
+// size.  The quantile cannot sit outside the error distribution by construction,
+// which is exactly why it fixes both arms of the failure at once.
+TEST(EPMInsertionAutotune, VocabularyIsEarnedNotChurned) {
+    const int ticks = 3000;
+
+    EpmFixture off(autotune_params(false, 240));
+    EpmFixture on (autotune_params(true,  240));
+    drive_continuous(off, ticks);
+    drive_continuous(on,  ticks);
+
+    const double f_off = double(off.epm.baked_count()) / std::max(1, off.epm.node_count());
+    const double f_on  = double(on.epm.baked_count())  / std::max(1, on.epm.node_count());
+    std::printf("[ BAKED ] fixed-gate %d/%d (%.0f%%)   autotune %d/%d (%.0f%%)  gate=%.5f\n",
+                off.epm.baked_count(), off.epm.node_count(), 100.0 * f_off,
+                on.epm.baked_count(),  on.epm.node_count(),  100.0 * f_on,
+                on.epm.snapshot_state()["gng"].value("autotune_value", -1.0f));
+
+    EXPECT_LT(f_off, 0.10)
+        << "control arm must fail to bake, or this test proves nothing";
+    EXPECT_GT(f_on, 0.80)
+        << "autotuned gate must let the vocabulary actually be EARNED";
+}
+
+// The gate must TRACK the signal, not merely be larger.  On a low-error stream
+// it stays at the configured floor; on a high-error stream it rises above it.
+// This is what distinguishes "adaptive" from "a bigger constant".
+TEST(EPMInsertionAutotune, GateTracksTheSignalsOwnErrorDistribution) {
+    auto p = autotune_params(true, 240);
+    p["min_insertion_error"] = 0.001;
+
+    EpmFixture busy(p);
+    drive_continuous(busy, 1500);
+    const float gate_busy = busy.epm.snapshot_state()["gng"].value("autotune_value", -1.0f);
+
+    // A near-stationary stream: quantisation error collapses, so the quantile
+    // falls below the floor and the floor is what holds.
+    EpmFixture calm(p);
+    for (int t = 0; t < 1500; ++t) {
+        calm.bus.begin_tick(uint64_t(t));
+        calm.bus.publish("reality.proprio.imu", make_proprio6(0.5f, -0.5f, 0.9f, -0.9f, 0.1f, 0.25f));
+        calm.epm.tick(uint64_t(t));
+        calm.bus.end_tick();
+    }
+    const float gate_calm = calm.epm.snapshot_state()["gng"].value("autotune_value", -1.0f);
+
+    std::printf("[ GATE ] busy=%.6f  calm=%.6f  floor=0.001\n", gate_busy, gate_calm);
+    EXPECT_GT(gate_busy, 0.001f) << "a high-error signal must lift the gate above the floor";
+    EXPECT_LT(gate_calm, gate_busy) << "a low-error signal must not";
 }

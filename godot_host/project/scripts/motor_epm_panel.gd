@@ -24,11 +24,26 @@ const _MODULE_ID: String = "motor_epm"
 const _SLIDERS: Array = [
 	# primary "by eye" levers (legs weak -> motor_gain; jerky -> ctrl_lr / noise)
 	{"key": "motor_gain",        "label": "motor_gain  (leg strength)", "min": 0.0,  "max": 5.0,  "step": 0.1},
-	{"key": "ctrl_lr",           "label": "ctrl_lr  (HK drive)",        "min": 0.0,  "max": 0.10, "step": 0.005},
+	# 2026-08-02 — ceiling raised 0.10 -> 0.30.  The old max sat exactly at the BOTTOM of
+	# the range that works, so this lever could not be found by eye.  Measured on the
+	# pure-HK base at 20k, n=4: steps 41 -> 141 -> 163 -> 226 and net_disp 0.56 -> 0.68
+	# -> 1.79 -> 2.17 across ctrl_lr 0.01 / 0.05 / 0.10 / 0.20, with falls rising
+	# 1.00 -> 1.75.  Playful Machine reference: hexapod epsC=0.1, dog epsC=0.05 -- we had
+	# been running 0.01, i.e. 5-10x below every legged experiment of theirs.
+	# NOTE the activity PEAKS around 14-20k ticks and then decays, so judge this slider
+	# over minutes, not seconds.
+	{"key": "ctrl_lr",           "label": "ctrl_lr  (HK drive; PM=0.05-0.1)", "min": 0.0, "max": 0.30, "step": 0.01},
+	# The model rate is the other half of the pair and has never been on the panel.
+	# PM: hexapod epsA=0.05, dog epsA=0.01.  Ours defaults to 0.02.  A model that learns
+	# too slowly makes the loop Jacobian stale, which is what the HK gradient descends.
+	{"key": "model_lr",          "label": "model_lr  (self-model; PM=0.01-0.05)", "min": 0.0, "max": 0.20, "step": 0.005},
 	{"key": "explore_noise",     "label": "explore_noise  (motion)",    "min": 0.0,  "max": 0.50, "step": 0.01},
 	# gait oscillation
 	{"key": "amp_target",        "label": "amp_target  (osc size)",     "min": 0.0,  "max": 1.5,  "step": 0.05},
 	{"key": "coupling_gain",     "label": "coupling_gain  (Rung3 sync)","min": 0.0,  "max": 2.0,  "step": 0.05},
+	# 0 = the legacy UNIFORM neighbour mean.  Above 0 each leg listens to its neighbours in
+	# proportion to how well each of THEM predicts itself; below 0 is the wrong-sign control.
+	{"key": "couple_prec_gain",  "label": "couple_prec_gain (trust)",   "min": -2.0, "max": 2.0,  "step": 0.1},
 	{"key": "stroke_gain",       "label": "stroke_gain  (fwd thrust)",  "min": 0.0,  "max": 2.0,  "step": 0.05},
 	# balance / posture
 	{"key": "balance_gain",      "label": "balance_gain  (vestibular)", "min": -3.0, "max": 3.0,  "step": 0.05},
@@ -36,11 +51,53 @@ const _SLIDERS: Array = [
 	{"key": "postural_gain",     "label": "postural_gain  (damp/hold)", "min": 0.0,  "max": 2.0,  "step": 0.05},
 	# steering
 	{"key": "heading_gain",      "label": "heading_gain (go-straight)", "min": -3.0, "max": 3.0,  "step": 0.05},
+	{"key": "heading_hold_gain", "label": "heading_hold (yaw-rate)",    "min": -3.0, "max": 3.0,  "step": 0.05},
+	{"key": "heading_bearing_hold_gain", "label": "heading→spawn (go-straight, POS)", "min": 0.0, "max": 12.0, "step": 0.5},
+	{"key": "stuck_explore_gain", "label": "stuck→explore (propulsion)", "min": 0.0, "max": 5.0,  "step": 0.25},
+	{"key": "progress_commit_gain", "label": "progress→commit (drive)", "min": 0.0, "max": 3.0,  "step": 0.25},
+	{"key": "forward_flow_gain",  "label": "fwd-flow (homeokinetic)",   "min": 0.0, "max": 2.0,  "step": 0.1},
+	{"key": "propulsion_balance_gain", "label": "prop_bal (leg catch-up)", "min": 0.0, "max": 2.0, "step": 0.05},
 	# coordination / agency (reward-free homeokinetic drives, not RL)
 	{"key": "cruse_gain",        "label": "cruse_gain  (leg coord)",    "min": 0.0,  "max": 0.50, "step": 0.02},
 	{"key": "cruse_rule3_weight","label": "cruse_rule3  (contra load)", "min": 0.0,  "max": 2.0,  "step": 0.1},
+	{"key": "cruse_rule5_gain",  "label": "cruse_rule5 (load→grip)",    "min": 0.0,  "max": 0.30, "step": 0.02},
+	{"key": "stance_lift_gain",  "label": "stance_lift (belly-up knee)", "min": -1.5, "max": 1.5, "step": 0.1},
+	# Purchase gate on the power stroke. Needs torque_topic wired (ConstructionOnly, so
+	# this slider cannot supply it -- use a loadstroke config arm). 0 = off.
+	{"key": "stroke_load_gain",  "label": "stroke_load (purchase gate)", "min": 0.0, "max": 8.0, "step": 0.5},
+	# 2026-07-27 — stroke TIMING, live.  `stroke_phase` never had a slider even though it is
+	# the sharpest knob on the whole gait: the deployed -2.85 sits in a good window only
+	# ~90 deg wide, and both cardinal offsets outside it (0, pi/2) collapse the gait to
+	# net_z ~0.  Pair this with the inspector's Gait-raster tab (gait_raster_diag=1) and the
+	# push band can be slid into alignment with stance BY EYE, which is the tightest loop
+	# available for a timing lever.
+	{"key": "stroke_phase",      "label": "stroke_phase (push timing)", "min": -3.14, "max": 3.14, "step": 0.05},
+	# Phase SOURCE. 0 = the leg's own oscillator phase (deployed). 1 = a touchdown-referenced
+	# step clock, 2 = the same from hip1 load.  1 and 2 are REFUTED as gait levers (net_z
+	# 4.58 -> 0.20 at the deployed offset, refuted across the full circle against a matched
+	# control row) -- kept on the panel because flipping it live against the raster is the
+	# clearest demonstration of WHY: the legs keep stepping and the body stops moving.
+	{"key": "stroke_phase_src",  "label": "phase src: 0=leg 1=contact 2=load", "min": 0.0, "max": 2.0, "step": 1.0},
+	# Swing tuck: the mirror of stance_lift -- folds hip2+knee on legs that are OFF the
+	# ground so sweeping them forward stops spinning the chassis. Needs contact_topic.
+	# Tibia-plumb: hip2 nulls the shank's deviation from vertical so the knee's drive
+	# translates the foot instead of arcing it. Needs no extra topics.
+	{"key": "tibia_plumb_gain",  "label": "tibia_plumb (hip2 -> shank vert)", "min": -1.5, "max": 1.5, "step": 0.1},
+	{"key": "swing_tuck_hip2",   "label": "swing_tuck hip2 (fold femur)", "min": -1.5, "max": 1.5, "step": 0.1},
+	{"key": "swing_tuck_knee",   "label": "swing_tuck knee (fold shank)", "min": -1.5, "max": 1.5, "step": 0.1},
 	{"key": "coord_reward_drive","label": "agency_drive (phase search)","min": 0.0,  "max": 0.60, "step": 0.05},
 	{"key": "coord_stab_penalty","label": "agency_stab (tilt guard)",   "min": 0.0,  "max": 1.0,  "step": 0.05},
+	{"key": "coord_fitness_mode","label": "fitness: 0=fwd_v REWARD 1=free","min": 0.0, "max": 1.0, "step": 1.0},
+	# ---- plasticity / forgetting (2026-07-26) --------------------------------------
+	# homeo_leak_cycles is the "learn fast, forget fast" knob: the stride-cycle time
+	# constant over which height_bias + amp_gain forget toward minimum authority, so an
+	# inverted excursion cannot latch.  ~5 measured free; ~2 is too aggressive (wobble).
+	# NOTE it wants rhythm_topic=rhythm.body.gait in the CONFIG to read the body's real
+	# stride period; without it the leak falls back to a fixed 70-tick stride.
+	{"key": "homeo_leak_cycles", "label": "homeo_leak (forget, strides)", "min": 0.0, "max": 20.0, "step": 1.0},
+	{"key": "homeo_upright_gate","label": "upright_gate (FREEZE homeo)",  "min": 0.0, "max": 1.0,  "step": 0.05},
+	{"key": "height_unwind_free","label": "height unwind-while-moving",   "min": 0.0, "max": 1.0,  "step": 1.0},
+	{"key": "swing_hyst_frac",   "label": "swing deadband (MAD units)",   "min": 0.0, "max": 3.0,  "step": 0.25},
 	{"key": "coord_lat_penalty", "label": "agency_lat  (anti-crab)",    "min": 0.0,  "max": 1.0,  "step": 0.05},
 ]
 

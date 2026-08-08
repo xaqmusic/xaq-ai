@@ -299,7 +299,7 @@ func _env_summary_lines(_body: Node) -> Array[String]:
 func build_clipboard_text(body: Node) -> String:
 	var lines: Array[String] = []
 	# --- Header ---
-	lines.append("=== AMI-Ogma UI run summary ===")
+	lines.append("=== xaq UI run summary ===")
 	lines.append("Body:        %s" % body_node_name)
 	lines.append("Config:      %s" % str(ExperimentConfig.config_path))
 	lines.append("Seed:        %d" % int(ExperimentConfig.seed_value))

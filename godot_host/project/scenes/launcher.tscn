@@ -38,7 +38,7 @@ theme_override_constants/separation = 12
 
 [node name="Title" type="Label" parent="Margin/V"]
 layout_mode = 2
-text = "AMI-Ogma — Experiment Launcher"
+text = "xaq — Experiment Launcher"
 theme_override_font_sizes/font_size = 22
 horizontal_alignment = 1
 
