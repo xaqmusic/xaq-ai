@@ -200,9 +200,17 @@ late in a run).
 
 ## 4. Build & run (picrawler)
 
+**First run on a new machine:** `godot4` below is not a package your OS provides —
+it must be a **Godot 4.6.2** binary on `PATH` (exact version; `godot_host/`'s
+`extension_api.json` / `gdextension_interface.h` were dumped from it). Download
+`Godot_v4.6.2-stable_linux.x86_64` and symlink it: `ln -s
+/path/to/Godot_v4.6.2-stable_linux.x86_64 ~/.local/bin/godot4`. Full first-time
+system/Python prerequisites (ZeroMQ dev headers, the Python venv, `pytest`) are in
+[`AGENTS.md`](AGENTS.md#build--test-quick).
+
 ```sh
 # Build (MotorEPM-only edit ≈ 30 s; the .so auto-copies into project/addons/ami_ogma/)
-cmake --build /home/xaqmusic/xaq-ai/godot_host/build --target ami_ogma_host -j8
+cmake --build godot_host/build --target ami_ogma_host -j8
 
 # Seed-averaged A/B — USE THIS FOR EVERY COMPARISON
 python3 godot_host/project/scripts_tools/seedavg.py <config.json> [n=6] [steps=12000] [diff=0.3]

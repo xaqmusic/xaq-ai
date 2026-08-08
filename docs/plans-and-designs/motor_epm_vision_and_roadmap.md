@@ -115,8 +115,7 @@ alongside V1.
 A3 ablation (needs honest reframe — HK-not-strictly-necessary finding), A4 reward
 head-to-head, A5 reproducibility, A6 developmental figure, A7 docs/claims sheet.
 The reward-free NAV + the hip2 STANDING wins are new headline results to fold into
-the evidence package. See the approved plan in
-`/home/xaqmusic/.claude/plans/i-don-t-want-to-typed-ocean.md`.
+the evidence package.
 
 ---
 

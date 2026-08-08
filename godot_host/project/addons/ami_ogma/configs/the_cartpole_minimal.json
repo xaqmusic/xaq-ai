@@ -1,0 +1,99 @@
+{
+  "metadata": {
+    "name": "CartPole-v1 \u2014 manifest-derived",
+    "description": "CartPole-v1 \u2014 single 4-D state, binary force, dense per-tick survival reward.  Auto-derived from configs/manifests/cartpole.json by scripts/derive_brain_config.py.",
+    "env_target": "cartpole",
+    "phase_tag": "6.5.3.6 (auto-derived)",
+    "derived_from_manifest": true
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001
+      }
+    },
+    {
+      "id": "epm_cart_state",
+      "type": "EPM",
+      "params": {
+        "modality_group": "kinematic",
+        "modality_name": "cart_state",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.cart_state",
+        "projection_dim": 32,
+        "proprio_state_dims": 4,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": false,
+        "priority_group": "kinematic"
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "alive"
+        ],
+        "channel_kinds": [
+          "alive_pulse"
+        ],
+        "setpoints": [
+          1.0
+        ],
+        "urgency_normalizers": [
+          1.0
+        ],
+        "channel_input_topics": [
+          "events.alive"
+        ],
+        "alive_pulse_decay_per_tick": 0.005,
+        "alive_pulse_replenish_per_event": 0.5
+      }
+    },
+    {
+      "id": "action_decoder",
+      "type": "ActionDecoder",
+      "params": {
+        "consensus_level": 0,
+        "proprio_topic": "reality.kinematic.cart_state",
+        "action_bins": 2,
+        "accel_min": -4.0,
+        "accel_max": 4.0,
+        "pragmatic_gain": 10.0,
+        "epistemic_gain": 2.0,
+        "td_lambda": 0.7,
+        "td_gamma": 0.95,
+        "urgency_exploit_threshold": 0.3,
+        "urgency_exploit_bias": 4.0,
+        "use_rollout": false,
+        "use_chunks": false
+      }
+    }
+  ],
+  "edges": []
+}
