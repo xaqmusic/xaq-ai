@@ -129,6 +129,15 @@ const _MOUNTAIN_CAR_CONFIG_ALLOWLIST: Array = [
 	"the_mountain_car_premotor_efe.json", # PREMOTOR + EFE — the fullest variant of the same experiment (graded + eligibility + drive + epistemic).
 ]
 
+# 2026-08-08 — same story as CartPole/MountainCar above: quadruped_body.gd's own
+# @export config_path default pointed at a file that only existed in configs/archive/,
+# so the_quadruped.tscn's brain.setup() failed even launched directly. Only ONE
+# quadruped config exists at all (v6.0.a.6, 8-channel bilateral-Premotor standing
+# balance) — copied it up and re-verified headless before restoring it here.
+const _QUADRUPED_CONFIG_ALLOWLIST: Array = [
+	"the_quadruped_minimal.json",  # DEFAULT — quadruped_body.gd's own @export default. Brain-only standing balance: 4 bilateral Premotors (one per leg), 8 actuated DOFs, hip+knee both brain-controlled with weak rest-pose PD bias. Reward is per-tick events.body_alive.
+]
+
 const _ENV_TO_SCENE := {
 	"cell":         "res://scenes/the_cell.tscn",
 	"cartpole":     "res://scenes/the_cartpole.tscn",
@@ -299,6 +308,8 @@ func _scan_configs() -> void:
 		if env == "cartpole" and not _CARTPOLE_CONFIG_ALLOWLIST.has(fname):
 			continue
 		if env == "mountain_car" and not _MOUNTAIN_CAR_CONFIG_ALLOWLIST.has(fname):
+			continue
+		if env == "quadruped" and not _QUADRUPED_CONFIG_ALLOWLIST.has(fname):
 			continue
 		if not _configs_by_env.has(env):
 			_configs_by_env[env] = []
