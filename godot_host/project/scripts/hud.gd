@@ -621,7 +621,7 @@ func build_clipboard_text(body: Node) -> String:
 	var world: Node = get_tree().get_root().find_child("TheCell", true, false)
 
 	# --- Header ---
-	lines.append("=== AMI-Ogma Cell run snapshot ===")
+	lines.append("=== xaq Cell run snapshot ===")
 	lines.append("Config:      %s" % str(ExperimentConfig.config_path))
 	lines.append("Seed:        %d" % int(ExperimentConfig.seed_value))
 	if body and body.has_method("get") and body.get("tick_counter") != null:

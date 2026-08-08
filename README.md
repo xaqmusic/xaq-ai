@@ -28,7 +28,7 @@ The cool thing about very hard problems that vex the greatest minds on this plan
 | Layer | What it is |
 |---|---|
 | **`cpp_core/`** | The C++ cognitive runtime: an in-process message bus, EPM (Episodic Predictive Module) nodes, a Growing Neural Gas topology, a Lateral Voter (Hebbian cross-modal consensus), homeostatic drive, active-inference policy selection, and motor/navigation modules. |
-| **`godot_host/`** | A Godot 4.6 GDExtension that embodies the runtime in simulated worlds — including **the Cell**, a single-celled forager used as a falsification testbed (see the report below). |
+| **`godot_host/`** | A Godot 4.6 GDExtension that embodies the runtime in simulated worlds — **the Cell**, a single-celled forager used as a falsification testbed (see the report below), and **the PiCrawler**, a simulated quadruped and the current most active line of development (see [docs/reports/picrawler_lever_ledger.md](docs/reports/picrawler_lever_ledger.md)). |
 | **`python/xaq_core/`** | Shared substrate: the socket/ZeroMQ message bus, a torch predictor + episodic memory, export-parity checks, and the logging protocol. |
 | **`python/xaq/`** | The Python engine: EPM nodes, GNG, lateral voting, active inference / global workspace, motor & navigation, and a **generic STFT audio modality** so multi-modal fusion is demonstrable out of the box. |
 
@@ -51,6 +51,10 @@ See [docs/NAMING.md](docs/NAMING.md).
 - **[docs/brain_building_doctrine.md](docs/brain_building_doctrine.md)** — the
   method the report tests: how to compose predictive loops without fooling
   yourself.  This is a living document.
+- **[docs/reports/picrawler_lever_ledger.md](docs/reports/picrawler_lever_ledger.md)** —
+  the PiCrawler quadruped gait work: what's promoted, what's refuted (and in what
+  context), and why. The current most active line of development, run under the
+  same falsification discipline as the Cell.
 - **[docs/](docs/)** — full documentation index, including
   [research summaries](docs/research-summaries/) of the papers xaq builds on.
 
@@ -73,8 +77,14 @@ This project is in very early stages (started at the beginning of 2026) so there
 
 ## Build
 
-**C++ runtime** (needs CMake ≥ 3.14, a C++17 compiler, and ZeroMQ; Eigen /
-nlohmann-json / GoogleTest are fetched automatically):
+> First time in this repo? [AGENTS.md](AGENTS.md#build--test-quick) has the full
+> first-time setup — including system prerequisites the snippets below assume
+> are already installed — and [CLAUDE.md](CLAUDE.md#4-build--run-picrawler) covers
+> actually *running* the Godot host (the `.so` below only gets built, not launched).
+
+**C++ runtime** (needs CMake ≥ 3.14, a C++17 compiler, and ZeroMQ's **dev**
+package — e.g. `libzmq3-dev` on Debian/Ubuntu; the ZeroMQ runtime library alone
+is not enough. Eigen / nlohmann-json / GoogleTest are fetched automatically):
 
 ```sh
 cmake -S cpp_core -B cpp_core/build
@@ -82,7 +92,8 @@ cmake --build cpp_core/build -j
 ```
 
 **Godot host** (rebuilds the GDExtension `.so`, which is intentionally not
-committed — it is regenerated from source on every clone):
+committed — it is regenerated from source on every clone; building it does
+**not** require a Godot binary, only *running* it does):
 
 ```sh
 cmake -S godot_host -B godot_host/build

@@ -1636,6 +1636,69 @@ the fix protects **fast** arms, i.e. exactly the ones a propulsion lever exists 
 
 ---
 
+### ⚠️ 2026-08-07 — `apply_patch()` never trial-validates `SetParamOp`: a startup `ERROR` + one dropped tick on every config without `cruse_coordinator` (found during a from-scratch environment setup; **NOT FIXED — logged only, left for an operator decision**)
+
+Found running a plain headless smoke test (`motor_epm_pure_hk.json`, corridor, 200 ticks) while
+setting up this repo on a new machine — not a lever, not a measurement. Root-caused across three
+layers; reproduces on any machine on this source tree, not a setup artifact.
+
+**Symptom:** one line on startup —
+`ERROR: OgmaBrain::tick: hot-patch or module-tick threw: hot_patch: SetParamOp.target_id 'cruse_coordinator' not found` —
+then the run proceeds and completes cleanly (`RUN_END` at the configured tick count, no further
+errors).
+
+**The chain:**
+1. `cpp_core`'s `Scheduler::apply_batch()` (`cpp_core/src/ogma/Scheduler.cpp:309-313`)
+   deliberately throws `std::invalid_argument` when a `SetParamOp` targets an unknown module
+   id — this is intentional, tested behavior
+   (`cpp_core/tests/ogma/test_hot_patch.cpp:194-203`, `SetParamOpUnknownTargetRejected`).
+2. The Godot bridge, `OgmaBrain::apply_patch()` (`godot_host/src/OgmaBrain.cpp:1943`), promises
+   GDScript a synchronous `{success, error}` verdict, and does trial-construct every
+   `AddNodeOp` before enqueueing to keep that promise (lines 1989-2008, with a comment
+   explaining exactly why — to avoid a failure "surfacing only as a Godot console error").
+   **That same trial-validation was never extended to `SetParamOp`** — a `set_param` op is
+   parsed and enqueued unconditionally (line 2010), so `apply_patch()` always returns
+   `success: true` for it even when the target module doesn't exist. The real failure shows up
+   one tick later, inside `OgmaBrain::tick()`, as a `push_error`
+   (`OgmaBrain.cpp:319-325`) — not through the Dictionary the caller is checking. (The
+   ControlServer's own TCP `set_param` verb, `OgmaBrain.cpp:267-273`, *does* check
+   `instance_->module(id) == nullptr` first — so the guard exists in the codebase, just not on
+   this call path.)
+3. `picrawler_body.gd` unconditionally pushes 5 `cruse_bias_gain*`/saturation-zone params into
+   a `cruse_coordinator` module right after `brain.setup()`, for every config
+   (`picrawler_body.gd:2397-2405`), with an explicit comment: *"Safe no-op when... the brain
+   has no cruse_coordinator module."* It does check the returned error for
+   `"unknown"`/`"not found"` to swallow it gracefully (`:7113-7116`) — correct in intent, but
+   dead code on this path, since `apply_patch()` never gives it an error to check.
+
+**Why it is very likely cosmetic, not a functional bug:** `Scheduler::process_pending_patches()`
+swaps the whole pending queue into a local vector and applies each batch in order
+(`Scheduler.cpp:115-121`); the first throw unwinds out of `tick()` before the remaining queued
+batches are applied, so they are silently dropped rather than retried. Since none of the 5
+queued ops had a real target either, nothing of value is lost. Net effect: one skipped tick of
+brain processing at the very start of a run (no action computed, no diag published that tick),
+then normal operation for the rest of the run — consistent with what was observed (one `ERROR`
+line, then a clean run to `RUN_END`).
+
+**Why this matters for the deployed stack specifically, not just the config tested:** per
+§4's 2026-07-26 entry above, the deployed graph is 5 modules — bridge, MotorEPM, CPG,
+KeyframeGait, BodyRhythmTracker — and **`CruseCoordinator` is not instantiated**. So this fires
+on every run of the currently-deployed stack, not just the `motor_epm_pure_hk*` family tested
+here. `cruse_coordinator` only appears in the archived `*_trot_cruse_v2*`/`*_walk_cruse_v2*`
+config lineage (repo-wide grep) — a different machine that mostly ran that lineage, or that
+wasn't watching raw stdout (vs. `seedavg.py`'s parsed summary, which this doesn't affect),
+would have no reason to have noticed it.
+
+**Not fixed. If it gets picked up:** extend `apply_patch()`'s pre-enqueue trial-validation
+(`OgmaBrain.cpp:1989-2008`) to also check `instance_->module(op.target_id) != nullptr` for a
+`SetParamOp`, mirroring both the existing `AddNodeOp` trial-construct path and the
+ControlServer's own `set_param` verb. A regression test parallel to
+`SetParamOpUnknownTargetRejected` but through `OgmaBrain::apply_patch()` (asserting
+`success == false` synchronously, no `push_error`) would close the gap the tests currently
+have at the Godot-bridge layer.
+
+---
+
 ## 5. Open frontier
 
 - **★★★ MAKE THE REFLEX GAINS INFERENTIAL — the next direction (2026-08-03).** The deployed

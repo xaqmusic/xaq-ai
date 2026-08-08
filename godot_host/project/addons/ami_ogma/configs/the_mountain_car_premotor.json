@@ -1,0 +1,149 @@
+{
+  "metadata": {
+    "name": "MountainCar \u2014 Premotor (cross-env validation)",
+    "description": "Phase 6.5.28 cross-env A/B: replaces ActionDecoder with Premotor in MountainCar to test whether the +48% Cell win generalises.  Same 5-intent softmax + Hebbian credit as the Cell premotor variant.",
+    "env_target": "mountain_car",
+    "phase_tag": "6.5.28",
+    "derived_from_manifest": false
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "neuro",
+      "type": "NeurochemState",
+      "params": {
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
+        "intrinsic_da_gain": 0.05,
+        "event_coupled_da": true,
+        "event_coupled_ht": true,
+        "da_baseline_ema_alpha": 0.001
+      }
+    },
+    {
+      "id": "epm_mc_state",
+      "type": "EPM",
+      "params": {
+        "modality_group": "kinematic",
+        "modality_name": "mc_state",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.mc_state",
+        "projection_dim": 16,
+        "proprio_state_dims": 2,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false
+      }
+    },
+    {
+      "id": "seq_consensus",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "consensus.0",
+        "source_kind": "winner",
+        "window_size": 5,
+        "projection_dim": 64
+      }
+    },
+    {
+      "id": "seq_action",
+      "type": "SequenceGNG",
+      "params": {
+        "source_topic": "action.out",
+        "source_kind": "action",
+        "window_size": 5,
+        "projection_dim": 64,
+        "context_topic": "sequence.motif.consensus.0"
+      }
+    },
+    {
+      "id": "repertoire",
+      "type": "MotorRepertoire",
+      "params": {
+        "max_chunks": 64,
+        "chunk_max_ticks": 20,
+        "crystallization_min_observations": 4,
+        "crystallization_min_drive_delta": 0.03,
+        "crystallization_drive_window_ticks": 60
+      }
+    },
+    {
+      "id": "voter_0",
+      "type": "LateralVoter",
+      "params": {
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": false,
+        "priority_group": "kinematic"
+      }
+    },
+    {
+      "id": "drive",
+      "type": "HomeostaticDrive",
+      "params": {
+        "channels": [
+          "energy",
+          "novelty_satiation"
+        ],
+        "channel_kinds": [
+          "energy",
+          "novelty_ema"
+        ],
+        "setpoints": [
+          0.8,
+          0.5
+        ],
+        "urgency_normalizers": [
+          1.0,
+          0.5
+        ],
+        "channel_input_topics": [
+          "reality.proprio.energy",
+          "consensus.0"
+        ],
+        "energy_drain_per_tick": 0.0005,
+        "energy_replenish_per_hit": 0.5,
+        "novelty_satiation_alpha": 0.001
+      }
+    },
+    {
+      "id": "premotor",
+      "type": "Premotor",
+      "params": {
+        "level": 0,
+        "n_intents": 5,
+        "accel_min": -1.0,
+        "accel_max": 1.0,
+        "gain": 1.0,
+        "learning_rate": 0.05,
+        "temperature_base": 1.0,
+        "temperature_da_gain": 0.5,
+        "sample_action": true,
+        "use_weighted_accel": true,
+        "master_seed": 0
+      }
+    },
+    {
+      "id": "kinesis",
+      "type": "HomeokineticExploration",
+      "params": {
+        "window_ticks": 120,
+        "long_window_ticks": 480,
+        "change_ema_alpha": 0.002,
+        "anomaly_factor": 0.5,
+        "chunk_match_eps": 0.01,
+        "episode_ticks": 60,
+        "cooldown_ticks": 30,
+        "accel_jitter": 1.0
+      }
+    }
+  ],
+  "edges": []
+}
