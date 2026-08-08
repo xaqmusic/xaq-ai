@@ -8,8 +8,11 @@ actually varies the MotorEPM RNG).
 Usage:  python3 seedavg.py <config_basename.json> [n_seeds] [max_steps] [difficulty] [extra_env=...]
 """
 import hashlib, json, math, os, subprocess, sys, statistics, concurrent.futures as cf
+import pathlib
 
-PROJ = "/home/xaqmusic/xaq-ai/godot_host/project"
+# Derived from this script's own location so a fresh clone works anywhere
+# (was a hardcoded home directory, which broke every non-author checkout).
+PROJ = str(pathlib.Path(__file__).resolve().parents[1])
 # Scratch dir for the per-seed body logs. Defaults to a stable tmp dir; override with
 # SEEDAVG_OUT=<dir> (e.g. an agent session scratchpad). Must NOT be a hardcoded
 # session path — those go stale and the runs then fail to write.

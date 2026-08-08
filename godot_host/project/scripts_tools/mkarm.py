@@ -14,8 +14,11 @@ Usage:
     value is parsed as JSON, so:  stance_lift_gain=0.8  gait_phase=[0,3.14159,4.71239,1.5708]
 """
 import json, os, sys
+import pathlib
 
-CFG = "/home/xaqmusic/xaq-ai/godot_host/project/addons/ami_ogma/configs"
+# Derived from this script's own location so a fresh clone works anywhere
+# (was a hardcoded home directory, which broke every non-author checkout).
+CFG = str(pathlib.Path(__file__).resolve().parents[1] / "addons/ami_ogma/configs")
 
 def main(argv):
     if len(argv) < 3:

@@ -41,8 +41,11 @@ Usage:  python3 gaitalign.py [config.json] [n_seeds] [max_steps] [difficulty] [K
 Logs go to $SEEDAVG_OUT or /tmp/xaq_seedavg (shared with seedavg.py).
 """
 import json, math, os, subprocess, sys, statistics, concurrent.futures as cf
+import pathlib
 
-PROJ = "/home/xaqmusic/xaq-ai/godot_host/project"
+# Derived from this script's own location so a fresh clone works anywhere
+# (was a hardcoded home directory, which broke every non-author checkout).
+PROJ = str(pathlib.Path(__file__).resolve().parents[1])
 SP = os.environ.get("SEEDAVG_OUT", "/tmp/xaq_seedavg")
 os.makedirs(SP, exist_ok=True)
 

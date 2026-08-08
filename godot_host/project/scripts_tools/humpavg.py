@@ -12,8 +12,11 @@ final_z well past the hump base (z=4); ~2.6 means it high-centred and stalled.
 Usage: humpavg.py <config_basename.json> [n_seeds] [max_steps] [difficulty] [teleport_at]
 """
 import json, os, statistics, subprocess, sys, concurrent.futures as cf
+import pathlib
 
-PROJ = "/home/xaqmusic/xaq-ai/godot_host/project"
+# Derived from this script's own location so a fresh clone works anywhere
+# (was a hardcoded home directory, which broke every non-author checkout).
+PROJ = str(pathlib.Path(__file__).resolve().parents[1])
 SP   = os.environ.get("SEEDAVG_OUT", "/tmp/xaq_seedavg")
 os.makedirs(SP, exist_ok=True)
 WARMUP_PAD = 600          # settle window after the teleport before scoring posture
