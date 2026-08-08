@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Quadruped — brain-only standing balance (v6.0.c minimal)",
-    "description": "v6.0.a.6 — 8-channel motor authority. Four bilateral Premotors (one per leg: premotor_fl/fr/rl/rr), each emitting (hip, knee) torque pairs to action.{leg}_hip + action.{leg}_knee. The body has 8 actuated DOFs total, all rotating around the leg's lateral axis. Hip is no longer locked — both hip and knee are brain-controlled with weak rest PD bias toward standing pose. StaleConfidenceDecay watches chassis_height EPM winners. Reward is per-tick events.body_alive. Brain MUST actively coordinate all 8 channels to maintain standing.",
+    "description": "v6.0.a.6 — 8-channel motor authority. Four bilateral Premotors (one per leg: premotor_fl/fr/rl/rr), each emitting (hip, knee) torque pairs to action.{leg}_hip + action.{leg}_knee. The body has 8 actuated DOFs total, all rotating around the leg's lateral axis. Hip is no longer locked — both hip and knee are brain-controlled with weak rest PD bias toward standing pose. StaleConfidenceDecay watches chassis_height EPM winners. Reward is per-tick events.body_alive. Brain MUST actively coordinate all 8 channels to maintain standing. ABANDONED (2026-08-08) in favor of a quasi sim2real approach using the PiCrawler's hardware-matched body instead. TODO: try brains/configs developed on the PiCrawler in this body — a generic abstract quadruped is a useful transfer test once one exists worth transferring.",
     "env_target": "quadruped",
     "phase_tag": "v6.0.a.6-8channel",
     "derived_from_manifest": true,
