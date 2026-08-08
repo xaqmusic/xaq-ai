@@ -21,8 +21,11 @@ progress resumed after each hit.
 Usage: recoveravg.py <config.json> [n_seeds] [max_steps] [difficulty] [teleport_every]
 """
 import json, math, os, statistics, subprocess, sys, concurrent.futures as cf
+import pathlib
 
-PROJ = "/home/xaqmusic/xaq-ai/godot_host/project"
+# Derived from this script's own location so a fresh clone works anywhere
+# (was a hardcoded home directory, which broke every non-author checkout).
+PROJ = str(pathlib.Path(__file__).resolve().parents[1])
 SP   = os.environ.get("SEEDAVG_OUT", "/tmp/xaq_recover")
 os.makedirs(SP, exist_ok=True)
 
