@@ -780,6 +780,23 @@ basin, which is the thing the actuator search was looking for and the criterion 
 not name. Recommended operator read: watch 0.5 and 1.0 in the UI; if the 1.0 wobble is
 the deck-riding, the knee-only shaped release is the next refinement.
 
+**ARENA CROSS-CHECK (same day, operator-prompted; 4 arms × n=20, 12 000 ticks, diff 0,
+solid chassis, `arenaavg.py`) — the costs were corridor artifacts; the conversion is
+corridor-assisted.** The dose gradient on progress TRANSFERS: net_disp 1.99 → 2.40 →
+**2.74** (+38 %), steps 8.6 → 11.4 → 13.8, both monotonic. The corridor's costs do NOT
+transfer: straight is FLAT (0.70/0.69/0.69) and falls *drop* (0.15 → 0.10/0.10) — the
+frac-1.0 wobble/veering was hump-and-wall interaction, not intrinsic yaw damage. **But
+the walk-fraction conversion shrinks to 1/20 → 2/20 → 3/20** (vs 2 → 6 → 11 in the
+corridor), and even the deployed `imufused` base walks only 2/20 on open flat ground
+(net_disp 1.92 ± 1.53 — the honest arena reference, protocol fully recorded). ⇒ Layered
+reading: the release removes the SUPPRESSOR (pressed feet), while the corridor's rumble
+strips supply the PERTURBATIONS that recruit stepping — flat ground leaves the shuffle
+unchallenged. Consistent with obstacle-triggered adaptation being one of §3.3's three
+real-capability signatures. Directly testable: corridor diff 0 vs 0.3 on the srel arm
+(does the conversion need the rumble?). ⚠ `yaw_swing_excess` read exactly 0.0000 in all
+80 runs — the instrument did not fire in these configs (contact wiring absent), so the
+yaw question is UNMEASURED here, not null.
+
 ---
 
 ### ★★★ 2026-08-05 — COMMIT IS A PRECISION, AND THREE HAND-PICKED CROSSOVER POINTS LOST TO THE ORIGINAL
