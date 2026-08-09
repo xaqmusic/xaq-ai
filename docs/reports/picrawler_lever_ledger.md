@@ -2543,6 +2543,18 @@ these arms as unmeasured.**
 
 ## 5. Open frontier
 
+- **★★★ THE MOTOR-SYSTEM AUDIT (2026-08-09) — read before proposing any lever:**
+  [`motor_system_audit_2026-08-09.md`](motor_system_audit_2026-08-09.md) (+ verbatim
+  appendix). Full topic graph, the 148-param inventory (11 live mechanisms; 3 configured
+  params silently dead — `balance_gain`, `coord_stab_penalty`, `nav_gain` in the
+  corridor; panic live via invisible header defaults), all five EPMs confirmed pure
+  observers with unfed prediction sockets, three no-leak ratchets, and the timing
+  finding that reframes the campaign: **`L.phase` is retrograde 2/3 of ticks, three
+  clocks beat unsynchronized, and nothing references contact** — the structural
+  explanation for every failed timing lever and the level-ground shuffle. Its §4.3
+  dependency order (phase substrate → honest stance signal → stroke↔contact loop →
+  anti-freeze floor → body-level predictor) is the audit's proposed roadmap, pending
+  operator review.
 - **★★★ THE STROKE-DIRECTION-AWARE STANCE RELEASE (2026-08-09) — BUILT AND MEASURED SAME
   DAY: walk fraction 2/20 → 11/20.** `stance_release_frac` (0 = byte-identical, verified):
   on a mid-stance sign flip of the leg's own commanded hip1 delta, fade that leg's stance
