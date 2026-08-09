@@ -769,6 +769,17 @@ intermediate belly cost — the dose sweep is the open edge, plus a shaped varia
 (release the KNEE only, keep the hip2 press) if the belly cost proves inherent.
 **Not promoted: pending operator UI observation (§3 rule 5) and the dose question.**
 
+**DOSE MEASURED (same day, n=20 each): the gradient is monotonic on BOTH axes.**
+Walkers 2/20 → **6/20** → **11/20** across frac 0 → 0.5 → 1.0; net_z 1.95 → 2.50 → 2.97;
+plv 0.09 → 0.12 → 0.13 — and the costs ride the same gradient: bellyc_min 0.014 → 0.008
+→ 0.003, tilt_sd 0.062 → 0.073 → 0.148, falls 0.15 → **0.15** → 0.30, straight 0.69 →
+**0.69** → 0.56. **At 0.5 the lever buys 3× walkers at ZERO falls/straightness cost and
+a moderate belly cost.** A monotonic dose–response on a mechanism-predicted target is
+what "authority + cause" means — this knob has causal authority over the walk/shuffle
+basin, which is the thing the actuator search was looking for and the criterion could
+not name. Recommended operator read: watch 0.5 and 1.0 in the UI; if the 1.0 wobble is
+the deck-riding, the knee-only shaped release is the next refinement.
+
 ---
 
 ### ★★★ 2026-08-05 — COMMIT IS A PRECISION, AND THREE HAND-PICKED CROSSOVER POINTS LOST TO THE ORIGINAL
