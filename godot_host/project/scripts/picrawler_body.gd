@@ -10068,6 +10068,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# criterion value = responsiveness/(motor_tle+ε).  Unconditional in MotorEPMv2 so
 			# EVERY arm can be scored on the criterion, selector present or not.
 			line["sup_resp"] = snappedf(float(_mm.get("support_resp", 0.0)), 0.0001)
+			# 2026-08-09 — stance_release_frac consumer check: fraction of stance-lift
+			# ticks with the release live.  0.0 with the lever on = detector never fired.
+			line["sr_duty"] = snappedf(float(_mm.get("sr_duty", 0.0)), 0.001)
 			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.

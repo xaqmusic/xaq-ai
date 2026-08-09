@@ -1080,6 +1080,23 @@ private:
     // so no swing leg is ever hoisted off the terrain -- the measured objection to a
     // whole-body lift does not apply.  0 = off, byte-identical.
     double  stance_lift_hip2_ = 0.0;
+    // 2026-08-09 — STROKE-DIRECTION-AWARE STANCE RELEASE.
+    //
+    // MEASURED (flbrake.py on full actuator-sweep traces): every leg's COMMANDED
+    // stroke reverses 7–9 ticks before liftoff (servo slew only 2–3), and the leg
+    // pays −0.004…−0.015 g/tick of braking shear for the whole pressed window;
+    // posture knobs redistribute which leg pays (fl worst, shear ratio −0.48) but
+    // never remove the toll.  So: from the tick a planted leg's own commanded hip1
+    // delta flips sign (recovery onset), multiply its stance biases by
+    // (1 − stance_release_frac) until it leaves stance.  Fully egocentric (the
+    // brain's own command stream), no propulsive-sign convention needed.
+    // 0 = off, byte-identical.
+    double  stance_release_frac_ = 0.0;
+    std::array<bool,  8> sr_released_ {};   // per leg: recovery detected this stance bout
+    std::array<bool,  8> sr_was_stance_ {}; // per leg: previous tick's stance state
+    std::array<float, 8> sr_prev_dh1_ {};   // per leg: last commanded hip1 delta past deadband
+    long   sr_stance_ticks_  = 0;           // diag: consumer-fired check
+    long   sr_release_ticks_ = 0;
     // 2026-08-07 — HOMEOKINETIC SUPPORT SELECTOR.
     //
     // MEASURED (n=4, egocentric |dx|/|du| over joint vs commanded deltas):

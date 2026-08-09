@@ -32,9 +32,9 @@ def main(argv):
     kvs = [kv for kv in kvs if not kv.startswith("--")]
     with open(os.path.join(CFG, base)) as f:
         d = json.load(f)
-    mods = [m for m in d["modules"] if m.get("type") == "MotorEPM"]
+    mods = [m for m in d["modules"] if m.get("type") in ("MotorEPM", "MotorEPMv2")]
     if len(mods) != 1:
-        print(f"ERROR: expected exactly 1 MotorEPM module, found {len(mods)}"); return 1
+        print(f"ERROR: expected exactly 1 MotorEPM(v2) module, found {len(mods)}"); return 1
     p = mods[0]["params"]
 
     changes, noops = [], []

@@ -340,6 +340,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"stance_lift_gain", ParamMutability::HotMutable,
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"stance_release_frac", ParamMutability::HotMutable,
+         "STROKE-DIRECTION-AWARE STANCE RELEASE.  The stance biases (stance_lift + its hip2 fraction) press a planted leg down through its ENTIRE stance -- including the measured 7-9 ticks after that leg's own COMMANDED stroke has reversed (flbrake.py 2026-08-09: liftoff lags the commanded reversal body-wide with only 2-3 ticks of servo slew, and the pressed window costs -0.004..-0.015 g/tick of braking shear per leg; posture knobs redistribute WHICH leg pays, never the toll).  From the tick a planted leg's own commanded hip1 delta flips sign (recovery onset), multiply its stance biases by (1 - this) until it leaves stance; reset at the next touchdown.  Fully egocentric (the brain's own command stream), no propulsive-sign convention needed -- whichever way the stroke was going, continuing to press after it turns around is what delays the lift.  Candidate for the shuffle attractor (a stance bias pressing all four planted feet through recovery is a stall-shaped loop).  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"swing_hyst_frac", ParamMutability::HotMutable,
          "SWING-DETECTOR DEADBAND, in units of the foot's own running mean-absolute-deviation from its height EMA. The bare `foot_y > foot_y_ema` test has NO deadband, so it splits ~50/50 by construction — it reports gait PHASE, not ground contact — and it closes a positive feedback loop with any consumer that moves the foot (stance_lift, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. That relaxation oscillator runs at the EMA's ~50-tick timescale and competes with the body's own ~70-tick stride, so its cost scales with the consumer's gain. The band stays RELATIVE (foot_y is world-Y; an absolute threshold would call a planted foot on raised terrain permanently swinging — the blindness that retired chassis_y_norm) and self-scales to the gait's own amplitude rather than being tuned. ~1.0 ≈ one mean deviation of hold. 0 = legacy no-deadband detector (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
@@ -647,6 +650,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["progress_commit_gain"] = progress_commit_gain_;
     m["forward_flow_gain"]  = forward_flow_gain_;
     m["stance_lift_gain"]   = stance_lift_gain_;
+    m["stance_release_frac"] = stance_release_frac_;
     m["swing_hyst_frac"]    = swing_hyst_frac_;
     m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
     m["homeo_upright_gate"] = homeo_upright_gate_;
@@ -798,6 +802,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "progress_commit_gain", [&](auto const& v){ progress_commit_gain_ = get_double(v, "progress_commit_gain"); });
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
+    apply_param(params, "stance_release_frac", [&](auto const& v){ stance_release_frac_ = get_double(v, "stance_release_frac"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -1992,6 +1997,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
+    else if (key == "stance_release_frac") stance_release_frac_ = get_double(value, "stance_release_frac");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -3348,11 +3354,42 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // set empirically (which knee dir raises the chassis on a planted foot).
         if (!warmup && stance_lift_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
             && !in_swing_[leg]) {
-            y[m - 1] += float(stance_lift_gain_);
+            // STROKE-DIRECTION-AWARE RELEASE (stance_release_frac; see the param text).
+            // Recovery onset = the leg's OWN commanded hip1 delta flips sign mid-stance;
+            // from then until liftoff the press is faded, because continuing to press a
+            // foot whose stroke has turned around only buys braking shear (measured
+            // −0.004…−0.015 g/tick) and a delayed lift.  The deadband is a numerical
+            // guard against zero-chatter, not a tuned threshold: commanded per-tick
+            // deltas run ~0.1 here (max_dctrl caps at 0.05 per joint pre-gain).
+            float press = 1.0f;
+            if (stance_release_frac_ > 0.0 && leg < int(sr_released_.size())
+                && L.prev_y.size() > 0 && L.prev_prev_y.size() > 0) {
+                if (!sr_was_stance_[leg]) {          // touchdown: start bout pressed
+                    sr_released_[leg] = false;
+                    sr_prev_dh1_[leg] = 0.0f;
+                }
+                sr_was_stance_[leg] = true;
+                const float dh1 = L.prev_y[0] - L.prev_prev_y[0];
+                constexpr float kSrDead = 2e-4f;
+                if (std::fabs(dh1) > kSrDead) {
+                    if (sr_prev_dh1_[leg] != 0.0f && dh1 * sr_prev_dh1_[leg] < 0.0f)
+                        sr_released_[leg] = true;    // commanded reversal → recovery
+                    sr_prev_dh1_[leg] = dh1;
+                }
+                ++sr_stance_ticks_;
+                if (sr_released_[leg]) {
+                    press = 1.0f - float(stance_release_frac_);
+                    ++sr_release_ticks_;
+                }
+            }
+            y[m - 1] += press * float(stance_lift_gain_);
             // Same sign to hip2 — see stance_lift_hip2.  On a PLANTED foot hip2+ presses
             // down and levers the chassis up; it is the other half of the same raise.
             if (stance_lift_hip2_ != 0.0)
-                y[1] += float(stance_lift_hip2_) * float(stance_lift_gain_);
+                y[1] += press * float(stance_lift_hip2_) * float(stance_lift_gain_);
+        } else if (stance_release_frac_ > 0.0 && leg < int(sr_was_stance_.size())
+                   && int(in_swing_.size()) == n_legs_ && in_swing_[leg]) {
+            sr_was_stance_[leg] = false;             // swing: arm the next bout's reset
         }
         // TIBIA-PLUMB — hip2 nulls the shank's deviation from vertical, so the knee's
         // gait drive TRANSLATES the foot instead of arcing it.  See the header.  Applied to
@@ -4173,6 +4210,9 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["support_value"]     = support_value_diag_;
     mod["support_mult"]      = support_mult_diag_;
     mod["support_resp"]      = support_resp_diag_;
+    // Consumer-fired check for stance_release_frac: fraction of stance-lift ticks where
+    // the release was live.  0.0 with the lever on = the reversal detector never fired.
+    mod["sr_duty"] = sr_stance_ticks_ ? double(sr_release_ticks_) / double(sr_stance_ticks_) : 0.0;
     mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
@@ -4672,6 +4712,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     // responsiveness/(motor_tle+ε).  In the BODY log (not only the inspector diag) so a
     // seedavg arm can score itself on the criterion; an unparsed metric is invisible.
     j["support_resp"]        = support_resp_diag_;
+    j["sr_duty"] = sr_stance_ticks_ ? double(sr_release_ticks_) / double(sr_stance_ticks_) : 0.0;
     j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
     j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to
     // The coordination search, made observable: which fitness is ranking probes, and the
