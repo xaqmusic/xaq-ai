@@ -755,6 +755,20 @@ it must satisfy: g_rec shrinks body-wide (flbrake), act_lag drops toward the 2�
 floor, and — if the pressed-shuffle reading of the basin problem holds — shuffle seeds
 convert to walk seeds at n=20.
 
+**SAME-DAY RESULT — the walk-fraction prediction held, loudly.** `stance_release_frac=1.0`
+on the supportepm base, n=20, 12 000 ticks, solid chassis, same seeds both arms:
+**walkers (steps>30) 2/20 → 11/20**; steps 17.8 → 62.3 (3.5×); net_z 1.95 ± 1.31 →
+2.97 ± 2.30; step_bal 0.12 → 0.23; **plv 0.09 → 0.13** — the legs phase-lock more when
+their feet are allowed off the ground. Consumer check `sr_duty` = 0.75 (the release
+latches for most of stance once the stroke reverses, as designed). **Costs, named:**
+belly clearance 0.031 → 0.024 with `bellyc_min` 0.014 → **0.003** (the tuck IS the
+belly-up mechanism and the release fades it — the body walks but rides the deck),
+falls 0.15 → 0.30, straight 0.69 → 0.56, one destabilized seed (tilt_sd 1.09). At 0.5
+the n=6 screen keeps control-level stability (tilt_sd 0.058, unstable 0.01) at an
+intermediate belly cost — the dose sweep is the open edge, plus a shaped variant
+(release the KNEE only, keep the hip2 press) if the belly cost proves inherent.
+**Not promoted: pending operator UI observation (§3 rule 5) and the dose question.**
+
 ---
 
 ### ★★★ 2026-08-05 — COMMIT IS A PRECISION, AND THREE HAND-PICKED CROSSOVER POINTS LOST TO THE ORIGINAL
@@ -2489,18 +2503,17 @@ these arms as unmeasured.**
 
 ## 5. Open frontier
 
-- **★★★ THE STROKE-DIRECTION-AWARE STANCE RELEASE (2026-08-09) — the next lever, named by
-  the recovery-shear mechanism (boxed entry).** The stance biases (`stance_lift`, Cruse
-  rule 5) press a planted leg down through its ENTIRE stance — including the measured
-  7–9 ticks after that leg's own commanded stroke has reversed, a window that costs
-  −0.004…−0.015 g/tick of braking shear per leg. Release form: on a mid-stance sign flip
-  of the leg's own commanded hip1 delta, multiply the stance bias by
-  `(1 − stance_release_frac)` until liftoff; reset at the next touchdown. Fully
-  egocentric (the brain's own command stream), no propulsive-sign convention needed,
-  one param, 0 = byte-identical. **Judge on: walk fraction at n=20 (primary — this is
-  also the standing candidate for the shuffle attractor), g_rec via `flbrake.py`,
-  act_lag vs the 2–3-tick slew floor, and belly clearance** (the risk: the tuck IS
-  belly-up; the release is per-leg and brief, the other planted legs keep carrying).
+- **★★★ THE STROKE-DIRECTION-AWARE STANCE RELEASE (2026-08-09) — BUILT AND MEASURED SAME
+  DAY: walk fraction 2/20 → 11/20.** `stance_release_frac` (0 = byte-identical, verified):
+  on a mid-stance sign flip of the leg's own commanded hip1 delta, fade that leg's stance
+  biases until liftoff. At 1.0, n=20: walkers 2/20 → **11/20**, steps ×3.5, plv 0.09 →
+  0.13 — the loudest single-lever move on the books under the new protocol, and it
+  converts the shuffle attractor directly, which is what it was designed to do. **Costs:
+  belly clearance (bellyc_min 0.014 → 0.003 — the released tuck rides the deck), falls
+  0.15 → 0.30, straight −0.13.** See the boxed entry for the full record. **Open edges,
+  in order: (1) dose — 0.5 keeps control-level stability at n=6, its n=20 walk fraction
+  is unmeasured; (2) shape — release the KNEE only and keep the hip2 press if the belly
+  cost is inherent; (3) operator UI observation before any promotion (§3 rule 5).**
 - **★ Walk-fraction protocol (2026-08-09).** Until the shuffle attractor is solved, every
   A/B on the corridor stack reports walkers/n at n≥20 alongside the metric groups —
   seed-mean net_z on a bimodal distribution rewards lottery variance, not gait quality.
