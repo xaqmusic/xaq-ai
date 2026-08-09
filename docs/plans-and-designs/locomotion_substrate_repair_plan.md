@@ -156,6 +156,20 @@ Campaign success criteria: walk fraction ≥ ~15/20 on level ground with `step_c
 and no belly/falls regression — then, and only then, the higher-level active-inference
 work reopens.
 
+## Campaign log
+
+**2026-08-09 — P0 COMPLETE.** The v2base canonical config ties the old config
+**bit-exactly** at n=20 (every seed, every metric identical) — the five observer EPMs,
+the dead params, nav zeroing, panic surfacing, and instrument-only contact wiring have
+zero behavioral footprint, verified at the trajectory level, not assumed.
+First full read of the new BRT lock instrument (n=20): **brt_plv 0.10 ± 0.05,
+residual 1.48 ± 0.14 rad, period_est 42.8 ± 5.3 ticks** — the body-rhythm PLL is
+UNLOCKED everywhere, including the two walker seeds (0.08 / 0.03), and its period sits
+at the knee-harmonic timescale, not the ~70-tick stride. Consequences for P1: the
+per-leg PLL (candidate a) is promoted to front-runner; the shared-phase option (b) must
+first explain why the shared reference fails to lock even during walking; BRT's own
+crossing detection (hysteresis on the hip1 diagonal coordinate) joins the suspect list.
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
