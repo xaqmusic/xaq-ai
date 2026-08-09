@@ -797,6 +797,18 @@ real-capability signatures. Directly testable: corridor diff 0 vs 0.3 on the sre
 80 runs — the instrument did not fire in these configs (contact wiring absent), so the
 yaw question is UNMEASURED here, not null.
 
+**TESTED (same day): the discriminator is the GYM, not the texture.** srel 1.0 at n=20,
+three environments: corridor diff 0.3 → **11/20** walkers, steps 62; corridor diff 0.0
+(flat) → **7–8/20**, steps 34; arena diff 0.0 → **3/20**, steps 14. The conversion
+mostly SURVIVES the flat corridor and dies in the arena, so the rumble is a step-count
+amplifier (halves without it) but the walker conversion tracks corridor-vs-arena
+geometry. Candidate mechanisms for the gap, unmeasured: the corridor's self-centering
+walls as a perturbation source, and the nav/bearing drive differing between gyms
+(`target_compass` has a corridor goal to pull toward). Also new at flat corridor:
+three walkers CIRCLE (straight 0.06–0.12) — the rumble may be helping the heading hold
+as well. ⇒ Before attributing any of this, wire the contact instrumentation so
+`yaw_swing_excess` fires, and check what `target_compass` publishes in each gym.
+
 ---
 
 ### ★★★ 2026-08-05 — COMMIT IS A PRECISION, AND THREE HAND-PICKED CROSSOVER POINTS LOST TO THE ORIGINAL
