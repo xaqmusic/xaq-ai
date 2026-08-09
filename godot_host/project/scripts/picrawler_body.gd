@@ -10047,6 +10047,16 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 					int(_g.get("mitosis_count", -1)), snappedf(_top1, 0.001),
 						snappedf(float(_g.get("autotune_value", -1.0)), 0.000001),
 						snappedf(float(_g.get("min_insertion_error", -1.0)), 0.000001)]
+	# 2026-08-09 (substrate-repair P0) — BodyRhythmTracker lock quality, mirrored so a
+	# seedavg arm can read whether the body's own rhythm reference is actually locked
+	# (brt_plv near 1 = swing crossings land at one phase) rather than merely warmed up.
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _bs = JSON.parse_string(str(brain.get_module_snapshot("body_rhythm_tracker")))
+		if _bs is Dictionary and _bs.has("module"):
+			var _bm = _bs["module"]
+			line["brt_plv"]    = snappedf(float(_bm.get("lock_plv", 0.0)), 0.001)
+			line["brt_err"]    = snappedf(float(_bm.get("lock_err_ema", -1.0)), 0.001)
+			line["brt_period"] = snappedf(float(_bm.get("period_est", 0.0)), 0.01)
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):

@@ -267,6 +267,13 @@ void BodyRhythmTracker::tick(uint64_t tick_id) {
     phi_body_ += omega_;                                        // integrate (smooth by construction)
     if (swing_up) {                                            // proportional phase-lock to φ_ref = 0
         float err = (phi_body_ > kTwoPi_ * 0.5f) ? (kTwoPi_ - phi_body_) : (-phi_body_);
+        // Lock instrument, PRE-pull (post-pull would measure the corrector, not the lock):
+        // where in [0,2π) does the crossing actually land, and how big is the residual.
+        lock_cos_sum_ += std::cos(phi_body_);
+        lock_sin_sum_ += std::sin(phi_body_);
+        ++lock_n_;
+        lock_err_ema_ = (lock_err_ema_ < 0.0f) ? std::fabs(err)
+                        : 0.95f * lock_err_ema_ + 0.05f * std::fabs(err);
         phi_body_ += float(phase_lock_) * err;
     }
     phi_body_ = std::fmod(phi_body_, kTwoPi_);
@@ -292,6 +299,11 @@ nlohmann::json BodyRhythmTracker::diag_snapshot() const {
     j["period_est"]  = omega_ > 1e-6f ? kTwoPi_ / omega_ : 0.0f;   // the frequency the CPG locks toward
     j["locked"]      = crossings_seen_ >= 2;
     j["crossings"]   = crossings_seen_;
+    // Lock QUALITY (2026-08-09) — "locked" above is a warm-up counter, not a measure.
+    j["lock_plv"]     = lock_n_ ? std::sqrt(lock_cos_sum_ * lock_cos_sum_
+                                          + lock_sin_sum_ * lock_sin_sum_) / double(lock_n_) : 0.0;
+    j["lock_err_ema"] = lock_err_ema_;
+    j["lock_n"]       = lock_n_;
     j["f_swing"]     = f_swing_;
     j["swing_joint"] = swing_joint_;
     // Per-joint amplitude + up-crossing period (the raw measurement / pick the cleanest carrier).
@@ -318,12 +330,33 @@ nlohmann::json BodyRhythmTracker::diag_snapshot() const {
 
 // ---- snapshot / restore (persist the PLL + DC/measurement state) ----
 nlohmann::json BodyRhythmTracker::snapshot_state() const {
+    // NOTE FOR ANYONE ADDING AN INSTRUMENT: headless runs read
+    // brain.get_module_snapshot() → THIS json — diag_snapshot() feeds only the live
+    // inspector.  Until 2026-08-09 this module had no "module" dict, so every BRT
+    // diagnostic read 0.0/absent in every headless run (the documented
+    // instrument-invisibility trap, third occurrence).  Export in BOTH places.
+    nlohmann::json mod;
+    mod["phi_body"]     = phi_body_;
+    mod["omega"]        = omega_;
+    mod["period_est"]   = omega_ > 1e-6f ? kTwoPi_ / omega_ : 0.0f;
+    mod["crossings"]    = crossings_seen_;
+    mod["lock_plv"]     = lock_n_ ? std::sqrt(lock_cos_sum_ * lock_cos_sum_
+                                            + lock_sin_sum_ * lock_sin_sum_)
+                                        / double(lock_n_) : 0.0;
+    mod["lock_err_ema"] = lock_err_ema_;
+    mod["lock_n"]       = lock_n_;
+    {
+        nlohmann::json pzc = nlohmann::json::array();
+        for (int jn = 0; jn < motor_dim_; ++jn) pzc.push_back(period_zc_ema_[jn]);
+        mod["period_zc_per_joint"] = pzc;
+    }
     return nlohmann::json{
         {"version", 1},
         {"omega", omega_}, {"phi_body", phi_body_}, {"crossings", crossings_seen_},
         {"mean_ema",  std::vector<float>(mean_ema_.begin(),  mean_ema_.end())},
         {"amp_ema",   std::vector<float>(amp_ema_.begin(),   amp_ema_.end())},
         {"period_zc", std::vector<float>(period_zc_ema_.begin(), period_zc_ema_.end())},
+        {"module", mod},
     };
 }
 

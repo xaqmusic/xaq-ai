@@ -106,6 +106,14 @@ private:
     float phi_body_ = 0.0f;                 // integrated gait phase, [0,2π)
     float f_swing_  = 0.0f;                 // last swing-joint coordinate (diag)
     int64_t crossings_seen_ = 0;            // up-crossings on the swing joint (≥2 ⇒ period valid)
+    // Lock-quality instrument (2026-08-09, substrate-repair P0).  Sampled at each swing
+    // up-crossing BEFORE the phase pull — sampling after measures the corrector, not the
+    // lock (the step-clock's documented instrument failure).  lock_plv = |mean e^{iφ}|
+    // over crossing phases: 1 + mean angle 0 = locked; near 0 = crossings land anywhere.
+    double  lock_cos_sum_ = 0.0;
+    double  lock_sin_sum_ = 0.0;
+    int64_t lock_n_       = 0;
+    float   lock_err_ema_ = -1.0f;          // EMA of |pre-pull phase error|; −1 = no crossing yet
 };
 
 } // namespace ogma
