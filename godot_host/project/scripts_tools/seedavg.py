@@ -64,7 +64,7 @@ def parse(path):
     # distance and steps while the operator's actual complaint -- "each leg has its own
     # directive" -- went unmeasured.  A metric that exists but is unparsed is exactly as
     # invisible as one that was never emitted.
-    plv=0.0;plv_n=0;coh=[];step_cv=0.0;mtle=[]
+    plv=0.0;plv_n=0;coh=[];step_cv=0.0;mtle=[];resp=[]
     tleg=[[] for _ in range(4)];ameg=[[] for _ in range(4)]
     tspr=[];plvw=[];plvwn=[];panic=[];cwspr=0.0;cwmean=0.0
     for line in open(path):
@@ -108,6 +108,9 @@ def parse(path):
             if 'plv_w'  in d: plvw.append(d['plv_w'])
             if 'plv_wn' in d: plvwn.append(d['plv_wn'])
             if 'motor_tle' in d: mtle.append(d['motor_tle'])
+            # Raw egocentric responsiveness |dx|/|du| (2026-08-09).  Numerator of the
+            # actuator-search criterion; 0.0 = not yet computed this run, skip.
+            if d.get('sup_resp', 0.0) > 0.0: resp.append(d['sup_resp'])
             if 'panic_eff' in d: panic.append(d['panic_eff'])
             if 'cw_spr'  in d: cwspr=d['cw_spr']       # whole-run accumulator: last = value
             if 'cw_mean' in d: cwmean=d['cw_mean']
@@ -191,6 +194,12 @@ def parse(path):
                 plv_w=statistics.mean(plvw) if plvw else 0.0,
                 plv_wn=statistics.mean(plvwn) if plvwn else 0.0,
                 motor_tle=statistics.mean(mtle) if mtle else 0.0,
+                # THE CRITERION (ledger ★ open problem): value = responsiveness/(motor_tle+ε).
+                # ε matches the selector's in-code 1e-3.  Run-level = ratio of run means, the
+                # same read that scored the 2026-08-07 amp sweep at corr +0.996 with net_z.
+                resp=statistics.mean(resp) if resp else 0.0,
+                hk_value=(statistics.mean(resp)/(statistics.mean(mtle)+1e-3))
+                         if (resp and mtle) else 0.0,
                 tle_spr=statistics.mean(tspr) if tspr else 0.0,
                 tle_legs=tl_mu, amp_legs=am_mu,
                 amp_min=min(live_am) if live_am else 0.0,
@@ -228,7 +237,11 @@ if __name__=="__main__":
               # amp_min guards the freeze trap (a still leg is trivially predictable) and is
               # also PLV's support floor (kPlvAmpFloor = 0.02).
               ("INFERENTIAL", ("motor_tle","tle_spr","amp_min","panic_duty",
-                               "cw_spr","cw_mean")))
+                               "cw_spr","cw_mean")),
+              # The actuator-search criterion (ledger ★ open problem).  resp is raw
+              # |dx|/|du|; hk_value divides by motor_tle.  Read hk_value WITH net_z:
+              # a knob moving both the same way is an actuator candidate.
+              ("CRITERION", ("resp","hk_value")))
     for label, keys in GROUPS:
         print(f"  -- {label}")
         for k in keys:
@@ -236,7 +249,7 @@ if __name__=="__main__":
             m,s=ms([r[k] for r in ok])
             fmt = (".3f" if k in ("bellyc","bellyc_min","chassis_y","scrub","tilt_sd")
                    else ".0f" if k == "plv_n"
-                   else ".4f" if k in ("motor_tle","amp_min") else ".2f")
+                   else ".4f" if k in ("motor_tle","amp_min","resp") else ".2f")
             per = '  '.join(f"{r[k]:{fmt}}" for r in ok)
             print(f"     {k:<10} mean={m:+{fmt}}  std={s:{fmt}}   [{per}]")
     # Per-leg breakdown, printed OUTSIDE the groups because it is a vector per seed.  This is

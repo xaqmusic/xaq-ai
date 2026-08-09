@@ -10058,6 +10058,10 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["sup_bin"]  = int(_mm.get("support_bin", -1))
 			line["sup_val"]  = snappedf(float(_mm.get("support_value", 1.0)), 0.001)
 			line["sup_mult"] = snappedf(float(_mm.get("support_mult", 1.0)), 0.001)
+			# 2026-08-09 — raw |dx|/|du| responsiveness, the numerator of the actuator-search
+			# criterion value = responsiveness/(motor_tle+ε).  Unconditional in MotorEPMv2 so
+			# EVERY arm can be scored on the criterion, selector present or not.
+			line["sup_resp"] = snappedf(float(_mm.get("support_resp", 0.0)), 0.0001)
 			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.

@@ -2796,12 +2796,14 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     // that value is below what this body typically achieves.  See the header for why the
     // criterion is responsiveness and not forward progress, and why the divisor matters.
     support_mult_diag_ = 1.0f;
-    if (support_select_gain_ > 0.0 && have_contact_ && int(foot_contact_.size()) == n_legs_) {
-        int planted = 0;
-        for (int i = 0; i < n_legs_; ++i) if (foot_contact_[i] >= 0.5f) ++planted;
-        planted = std::clamp(planted, 0, kSupportBins - 1);
-        // Instantaneous responsiveness: sensor change per unit COMMANDED change, summed
-        // over every leg and joint.  Both terms egocentric; the ratio is scale-free.
+    // Instantaneous responsiveness: sensor change per unit COMMANDED change, summed
+    // over every leg and joint.  Both terms egocentric; the ratio is scale-free.
+    // Computed UNCONDITIONALLY (2026-08-09): value = responsiveness/(motor_tle+ε) is the
+    // criterion the actuator search scores against (ledger ★ open problem), so every arm
+    // must log it — not only arms running the selector.  Selector behaviour is unchanged:
+    // explore_mult modulation stays behind support_select_gain below.
+    bool resp_fresh = false;   // EMA below must only ingest a THIS-tick ratio, never a stale diag
+    {
         double dx = 0.0, du = 0.0;
         for (auto const& L : legs_) {
             if (!L.initialized || L.x.size() != L.prev_x.size()) continue;
@@ -2810,12 +2812,17 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 for (int k = 0; k < L.prev_y.size(); ++k)
                     du += std::fabs(L.prev_y[k] - L.prev_prev_y[k]);
         }
-        if (du > 1e-6) {
-            const float inst = float(dx / du);
+        if (du > 1e-6) { support_resp_diag_ = float(dx / du); resp_fresh = true; }
+    }
+    if (support_select_gain_ > 0.0 && have_contact_ && int(foot_contact_.size()) == n_legs_) {
+        int planted = 0;
+        for (int i = 0; i < n_legs_; ++i) if (foot_contact_[i] >= 0.5f) ++planted;
+        planted = std::clamp(planted, 0, kSupportBins - 1);
+        if (resp_fresh) {
+            const float inst = support_resp_diag_;
             float& e = resp_ema_[planted];
             e = (resp_seen_[planted] == 0) ? inst : (1.0f - kRespAlpha) * e + kRespAlpha * inst;
             ++resp_seen_[planted];
-            support_resp_diag_ = inst;
         }
         support_bin_diag_ = planted;
         // Value, and a SCALE-FREE comparison against what this body typically achieves --
@@ -4661,6 +4668,10 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["support_bin"]         = support_bin_diag_;
     j["support_value"]       = support_value_diag_;
     j["support_mult"]        = support_mult_diag_;
+    // Raw |dx|/|du| — the numerator of the actuator-search criterion value =
+    // responsiveness/(motor_tle+ε).  In the BODY log (not only the inspector diag) so a
+    // seedavg arm can score itself on the criterion; an unparsed metric is invisible.
+    j["support_resp"]        = support_resp_diag_;
     j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
     j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to
     // The coordination search, made observable: which fitness is ranking probes, and the
