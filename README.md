@@ -25,6 +25,8 @@ The cool thing about very hard problems that vex the greatest minds on this plan
 
 ## What's here
 
+**All development is currently happening in Linux.**  Windows support (runtime and inspector) is coming soon.
+
 | Layer | What it is |
 |---|---|
 | **`cpp_core/`** | The C++ cognitive runtime: an in-process message bus, EPM (Episodic Predictive Module) nodes, a Growing Neural Gas topology, a Lateral Voter (Hebbian cross-modal consensus), homeostatic drive, active-inference policy selection, and motor/navigation modules. |
