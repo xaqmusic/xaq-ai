@@ -9447,6 +9447,12 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 				 snappedf(_up_acc_last.z - _up_est_body.z, 0.00001)],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
+	# FileAccess buffers and the quit path never closes this file, so an unflushed
+	# trace silently loses its TAIL — every banked trace was found truncated at
+	# 1.9–4 MB of an expected ~12 MB (2026-08-09).  A truncated instrument is worse
+	# than a slow one: it reads as "early-run behavior" without saying so.
+	if tick_counter % 200 == 0:
+		_trace_file.flush()
 	for k in range(4):
 		_grf_fwd[k] = 0.0    # drain: each line reports one brain tick
 		_grf_up[k]  = 0.0
