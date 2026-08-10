@@ -340,6 +340,21 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"stance_lift_gain", ParamMutability::HotMutable,
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"swing_descend_gain", ParamMutability::HotMutable,
+         "SWING DESCENT (operator-diagnosed 2026-08-10).  swing_tuck_hip2 lifts through the ENTIRE swing and fights the landing -- rear feet plant unsettled and the stroke sweeps back before full contact (the -15% transport of the tuck+pair).  Past half of the leg's OWN running swing duration (self-scaled fraction, no tick constant), hip2 flips from the lift bias to +this (press down, Rule-5 sign) so the foot plants before the stroke reverses; the knee keeps its fold.  Requires contact_topic + swing_tuck active.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"coord_cv_weight", ParamMutability::HotMutable,
+         "SELECT STEP-INTERVAL REGULARITY (P4 arm 3b).  Penalizes the mode-1 coordination fitness by the window's mean |interval - running period| / period over DEBOUNCED touchdowns (the v3 step machinery's accepted intervals -- micro-lift chatter excluded by construction).  Arm 3 measured that touchdown-PHASE consistency selects robustness but cannot buy TIME-regularity (step_cv 0.98 at every dose, because consistent phase on an irregular clock is still irregular in time); this selects the operator's step-regularity number LITERALLY, against each leg's own habitual period -- egocentric, intrinsic, no task quantity.  Requires contact_topic + fitness mode 1.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"coord_td_weight", ParamMutability::HotMutable,
+         "SELECT RHYTHM, DON'T FORCE IT (P4 arm 3).  Adds a touchdown-consistency bonus to the mode-1 coordination fitness: the per-probe-window resultant of L.phase at raw contact onsets (1 = every touchdown lands at one phase).  The (1+1) search then DISCOVERS gait_phase offsets under which stepping is regular, instead of any mechanism imposing timing -- arms 1-2 measured that smoothing/locking/offsetting the phase all break stroke-limb alignment (the phase is a state observation), while arm 1 proved rhythm CAN move when the stroke genuinely reorganizes (step_cv 0.97->0.82).  Selection is the doctrine-native carrier: the body keeps coordinations whose touchdowns it can predict.  Requires contact_topic + fitness mode 1.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"phase_td_pull", ParamMutability::HotMutable,
+         "TOUCHDOWN-CONSISTENCY PHASE OFFSET (P4 arm 2).  Rotates each leg's phase by a slow per-leg offset nudged at every ACCEPTED touchdown (v3 back-dated debounce) toward that leg's own RUNNING mean touchdown phase -- so touchdowns become phase-CONSISTENT without any imposed reference, and every consumer (stroke, Kuramoto coupling, amplitude homeostat, coordination fitness) rotates TOGETHER, preserving the inter-leg coherence that per-leg stroke locking destroyed (stroke_phase_src=1: step_cv 0.97->0.82 -- the first regularity move on the books -- but net_z 6.49->0.23, twice measured).  Self-consistency, not a clock: the target is the leg's own habit.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.5}},
+        {"stance_release_frac", ParamMutability::HotMutable,
+         "STROKE-DIRECTION-AWARE STANCE RELEASE.  The stance biases (stance_lift + its hip2 fraction) press a planted leg down through its ENTIRE stance -- including the measured 7-9 ticks after that leg's own COMMANDED stroke has reversed (flbrake.py 2026-08-09: liftoff lags the commanded reversal body-wide with only 2-3 ticks of servo slew, and the pressed window costs -0.004..-0.015 g/tick of braking shear per leg; posture knobs redistribute WHICH leg pays, never the toll).  From the tick a planted leg's own commanded hip1 delta flips sign (recovery onset), multiply its stance biases by (1 - this) until it leaves stance; reset at the next touchdown.  Fully egocentric (the brain's own command stream), no propulsive-sign convention needed -- whichever way the stroke was going, continuing to press after it turns around is what delays the lift.  Candidate for the shuffle attractor (a stance bias pressing all four planted feet through recovery is a stall-shaped loop).  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"swing_hyst_frac", ParamMutability::HotMutable,
          "SWING-DETECTOR DEADBAND, in units of the foot's own running mean-absolute-deviation from its height EMA. The bare `foot_y > foot_y_ema` test has NO deadband, so it splits ~50/50 by construction — it reports gait PHASE, not ground contact — and it closes a positive feedback loop with any consumer that moves the foot (stance_lift, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. That relaxation oscillator runs at the EMA's ~50-tick timescale and competes with the body's own ~70-tick stride, so its cost scales with the consumer's gain. The band stays RELATIVE (foot_y is world-Y; an absolute threshold would call a planted foot on raised terrain permanently swinging — the blindness that retired chassis_y_norm) and self-scales to the gait's own amplitude rather than being tuned. ~1.0 ≈ one mean deviation of hold. 0 = legacy no-deadband detector (byte-identical).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{3.0}},
@@ -647,6 +662,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["progress_commit_gain"] = progress_commit_gain_;
     m["forward_flow_gain"]  = forward_flow_gain_;
     m["stance_lift_gain"]   = stance_lift_gain_;
+    m["stance_release_frac"] = stance_release_frac_;
     m["swing_hyst_frac"]    = swing_hyst_frac_;
     m["coord_fitness_mode"] = int64_t(coord_fitness_mode_);
     m["homeo_upright_gate"] = homeo_upright_gate_;
@@ -798,6 +814,11 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "progress_commit_gain", [&](auto const& v){ progress_commit_gain_ = get_double(v, "progress_commit_gain"); });
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
+    apply_param(params, "stance_release_frac", [&](auto const& v){ stance_release_frac_ = get_double(v, "stance_release_frac"); });
+    apply_param(params, "phase_td_pull", [&](auto const& v){ phase_td_pull_ = get_double(v, "phase_td_pull"); });
+    apply_param(params, "coord_td_weight", [&](auto const& v){ coord_td_weight_ = get_double(v, "coord_td_weight"); });
+    apply_param(params, "coord_cv_weight", [&](auto const& v){ coord_cv_weight_ = get_double(v, "coord_cv_weight"); });
+    apply_param(params, "swing_descend_gain", [&](auto const& v){ swing_descend_gain_ = get_double(v, "swing_descend_gain"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -1426,6 +1447,17 @@ void MotorEPMv2::update_step_phase(uint64_t tick_id) {
                 if (L.last_td_tick >= 0) {
                     float d = float(td_tick - L.last_td_tick);
                     d = std::clamp(d, float(step_period_min_), float(step_period_max_));
+                    // P4 arm 3b (coord_cv_weight): interval-regularity deviation for the
+                    // coordination fitness — |d − running period| / running period, per
+                    // accepted (debounced) interval, back half of the probe window only.
+                    // Uses the leg's own habitual period as the reference: egocentric,
+                    // intrinsic, and sample-efficient where a within-window CV (≈4
+                    // intervals) would be noise.
+                    if (coord_cv_weight_ > 0.0 && L.step_per_ema > 1.0f
+                        && coord_probe_counter_ > coord_probe_ticks_ / 2) {
+                        ccv_dev_sum_ += std::fabs(d - L.step_per_ema) / L.step_per_ema;
+                        ++ccv_dev_n_;
+                    }
                     L.step_per_ema = (L.step_per_ema <= 0.0f)
                                    ? d
                                    : (1.0f - float(step_period_alpha_)) * L.step_per_ema
@@ -1436,6 +1468,28 @@ void MotorEPMv2::update_step_phase(uint64_t tick_id) {
                 if (L.td_count < 1) L.td_count = 1;      // first touchdown: no interval yet
                 td_now = true;
             }
+        }
+
+        // ---- P4 arm 2: touchdown-consistency pull on the SHARED phase (phase_td_pull).
+        // At each accepted touchdown, nudge this leg's phase OFFSET (applied to L.phase
+        // in the pre-pass, so stroke/Kuramoto/amp/fitness all rotate together) toward the
+        // leg's own running-mean touchdown phase.  Self-consistency, no imposed target;
+        // the circular-EMA ref must accumulate meaning (R ≥ kTdRefMinR) before any pull.
+        if (td_now && phase_td_pull_ > 0.0 && i < 8) {
+            const float phi = L.phase;                    // already includes td_off_ this tick
+            const float rc  = td_ref_cos_[i], rs = td_ref_sin_[i];
+            const float R   = std::sqrt(rc * rc + rs * rs);
+            if (R >= kTdRefMinR) {
+                float err = std::atan2(rs, rc) - phi;
+                while (err >  float(M_PI)) err -= 2.0f * float(M_PI);
+                while (err < -float(M_PI)) err += 2.0f * float(M_PI);
+                td_off_[i] += float(phase_td_pull_) * err;
+                while (td_off_[i] >  float(M_PI)) td_off_[i] -= 2.0f * float(M_PI);
+                while (td_off_[i] < -float(M_PI)) td_off_[i] += 2.0f * float(M_PI);
+                ++td_pull_events_;
+            }
+            td_ref_cos_[i] = (1.0f - kTdRefAlpha) * rc + kTdRefAlpha * std::cos(phi);
+            td_ref_sin_[i] = (1.0f - kTdRefAlpha) * rs + kTdRefAlpha * std::sin(phi);
         }
 
         // ---- advance.  Locked once an interval has been measured at least twice, i.e.
@@ -1992,6 +2046,11 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "progress_commit_gain") progress_commit_gain_ = get_double(value, "progress_commit_gain");
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
+    else if (key == "stance_release_frac") stance_release_frac_ = get_double(value, "stance_release_frac");
+    else if (key == "phase_td_pull") phase_td_pull_ = get_double(value, "phase_td_pull");
+    else if (key == "coord_td_weight") coord_td_weight_ = get_double(value, "coord_td_weight");
+    else if (key == "coord_cv_weight") coord_cv_weight_ = get_double(value, "coord_cv_weight");
+    else if (key == "swing_descend_gain") swing_descend_gain_ = get_double(value, "swing_descend_gain");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -2484,6 +2543,89 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 L.phase_prev = phase_new;
             }
             L.phase = phase_new;
+            // P4 arm 2: rotate the consumed phase by the touchdown-consistency offset.
+            // Retro/prev accounting above stays on the RAW readout; td_off_ ≡ 0 when
+            // phase_td_pull = 0, so the gain-0 guard is exact.
+            if (leg < 8 && td_off_[leg] != 0.0f) {
+                float pr = phase_new + td_off_[leg];
+                while (pr >  float(M_PI)) pr -= 2.0f * float(M_PI);
+                while (pr < -float(M_PI)) pr += 2.0f * float(M_PI);
+                L.phase = pr;
+            }
+            // ---- P1 SHADOW PHASES (zero authority; see the header block) -------------
+            if (leg < 8) {
+                const float f = kp - L.knee_ema;             // the leg's own knee coordinate
+                // A: per-leg PLL.  Hysteresis up-crossing → period → ω → integrate + pull.
+                shA_amp_[leg] = (1.0f - kShAmpAlpha) * shA_amp_[leg]
+                              + kShAmpAlpha * std::fabs(f);
+                const float hys = kShHysFrac * shA_amp_[leg];
+                ++shA_tsu_[leg];
+                bool crossed = false;
+                if (shA_below_[leg] && f > hys) {
+                    if (shA_period_[leg] <= 0.0f) shA_period_[leg] = float(shA_tsu_[leg]);
+                    else shA_period_[leg] = (1.0f - kShPeriodAlpha) * shA_period_[leg]
+                                          + kShPeriodAlpha * float(shA_tsu_[leg]);
+                    shA_tsu_[leg] = 0; shA_below_[leg] = 0; crossed = true;
+                } else if (!shA_below_[leg] && f < -hys) {
+                    shA_below_[leg] = 1;
+                }
+                if (shA_period_[leg] > 1.0f) {
+                    const float wt = std::clamp(2.0f * float(M_PI) / shA_period_[leg],
+                                                2.0f * float(M_PI) / 400.0f,
+                                                2.0f * float(M_PI) / 8.0f);
+                    if (shA_omega_[leg] <= 0.0f) shA_omega_[leg] = wt;   // seed, don't lag
+                    else shA_omega_[leg] += kShOmegaLp * (wt - shA_omega_[leg]);
+                }
+                if (shA_omega_[leg] > 0.0f) {
+                    shA_phi_[leg] += shA_omega_[leg];
+                    if (crossed) {
+                        float err = (shA_phi_[leg] > float(M_PI))
+                                  ? (2.0f * float(M_PI) - shA_phi_[leg]) : (-shA_phi_[leg]);
+                        shA_phi_[leg] += kShPhaseLock * err;
+                    }
+                    shA_phi_[leg] = std::fmod(shA_phi_[leg], 2.0f * float(M_PI));
+                    if (shA_phi_[leg] < 0.0f) shA_phi_[leg] += 2.0f * float(M_PI);
+                }
+                // B: shared CPG reference + this leg's learned offset.
+                if (cpg_seen_ && leg < int(gait_phase_.size())) {
+                    float pb = cpg_phase_ + float(gait_phase_[leg]);
+                    pb = std::fmod(pb, 2.0f * float(M_PI));
+                    if (pb < 0.0f) pb += 2.0f * float(M_PI);
+                    shB_phi_[leg] = pb;
+                }
+                // C: symmetric filter + delay compensation (τ = (1−a)/a, ω from A).
+                {
+                    const float cvx = kp - L.knee_ema, cvy = kd * kPhaseVelScale;
+                    if (!shC_init_[leg]) { shC_pos_[leg] = cvx; shC_vel_[leg] = cvy; shC_init_[leg] = 1; }
+                    shC_pos_[leg] = (1.0f - kShFilterA) * shC_pos_[leg] + kShFilterA * cvx;
+                    shC_vel_[leg] = (1.0f - kShFilterA) * shC_vel_[leg] + kShFilterA * cvy;
+                    const float tau = (1.0f - kShFilterA) / kShFilterA;
+                    float pc = std::atan2(shC_vel_[leg], shC_pos_[leg])
+                             + (shA_omega_[leg] > 0.0f ? shA_omega_[leg] * tau : 0.0f);
+                    pc = std::fmod(pc, 2.0f * float(M_PI));
+                    if (pc < 0.0f) pc += 2.0f * float(M_PI);
+                    shC_phi_[leg] = pc;
+                }
+                // Retro fractions — the same read phase_retro_diag_ gives the incumbent.
+                if (sh_prev_init_[leg]) {
+                    auto retro = [](float now, float prev) {
+                        float d = now - prev;
+                        while (d >  float(M_PI)) d -= 2.0f * float(M_PI);
+                        while (d < -float(M_PI)) d += 2.0f * float(M_PI);
+                        return d < 0.0f ? 1.0f : 0.0f;
+                    };
+                    shA_retro_ = (1.0f - kCommitPrecAlpha) * shA_retro_
+                               + kCommitPrecAlpha * retro(shA_phi_[leg], shA_prev_[leg]);
+                    shB_retro_ = (1.0f - kCommitPrecAlpha) * shB_retro_
+                               + kCommitPrecAlpha * retro(shB_phi_[leg], shB_prev_[leg]);
+                    shC_retro_ = (1.0f - kCommitPrecAlpha) * shC_retro_
+                               + kCommitPrecAlpha * retro(shC_phi_[leg], shC_prev_[leg]);
+                }
+                shA_prev_[leg] = shA_phi_[leg];
+                shB_prev_[leg] = shB_phi_[leg];
+                shC_prev_[leg] = shC_phi_[leg];
+                sh_prev_init_[leg] = 1;
+            }
             // amplitude homeostat: phase-vector magnitude = oscillation amplitude.
             // Slow integral regulator drives amp_gain so amp_ema → amp_target.
             //
@@ -2796,12 +2938,14 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     // that value is below what this body typically achieves.  See the header for why the
     // criterion is responsiveness and not forward progress, and why the divisor matters.
     support_mult_diag_ = 1.0f;
-    if (support_select_gain_ > 0.0 && have_contact_ && int(foot_contact_.size()) == n_legs_) {
-        int planted = 0;
-        for (int i = 0; i < n_legs_; ++i) if (foot_contact_[i] >= 0.5f) ++planted;
-        planted = std::clamp(planted, 0, kSupportBins - 1);
-        // Instantaneous responsiveness: sensor change per unit COMMANDED change, summed
-        // over every leg and joint.  Both terms egocentric; the ratio is scale-free.
+    // Instantaneous responsiveness: sensor change per unit COMMANDED change, summed
+    // over every leg and joint.  Both terms egocentric; the ratio is scale-free.
+    // Computed UNCONDITIONALLY (2026-08-09): value = responsiveness/(motor_tle+ε) is the
+    // criterion the actuator search scores against (ledger ★ open problem), so every arm
+    // must log it — not only arms running the selector.  Selector behaviour is unchanged:
+    // explore_mult modulation stays behind support_select_gain below.
+    bool resp_fresh = false;   // EMA below must only ingest a THIS-tick ratio, never a stale diag
+    {
         double dx = 0.0, du = 0.0;
         for (auto const& L : legs_) {
             if (!L.initialized || L.x.size() != L.prev_x.size()) continue;
@@ -2810,12 +2954,17 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 for (int k = 0; k < L.prev_y.size(); ++k)
                     du += std::fabs(L.prev_y[k] - L.prev_prev_y[k]);
         }
-        if (du > 1e-6) {
-            const float inst = float(dx / du);
+        if (du > 1e-6) { support_resp_diag_ = float(dx / du); resp_fresh = true; }
+    }
+    if (support_select_gain_ > 0.0 && have_contact_ && int(foot_contact_.size()) == n_legs_) {
+        int planted = 0;
+        for (int i = 0; i < n_legs_; ++i) if (foot_contact_[i] >= 0.5f) ++planted;
+        planted = std::clamp(planted, 0, kSupportBins - 1);
+        if (resp_fresh) {
+            const float inst = support_resp_diag_;
             float& e = resp_ema_[planted];
             e = (resp_seen_[planted] == 0) ? inst : (1.0f - kRespAlpha) * e + kRespAlpha * inst;
             ++resp_seen_[planted];
-            support_resp_diag_ = inst;
         }
         support_bin_diag_ = planted;
         // Value, and a SCALE-FREE comparison against what this body typically achieves --
@@ -2884,6 +3033,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             coord_best_phase_ = gait_phase_; coord_best_init_ = true;
         }
         coord_probe_counter_++;
+        // P4 arm 3: track raw contact edges every tick (edge detection needs a
+        // continuous prev), accumulate touchdown phases only in the measured back half.
+        if (have_contact_ && int(foot_contact_.size()) == n_legs_) {
+            for (int i = 0; i < n_legs_ && i < 8; ++i) {
+                const bool con = foot_contact_[i] > 0.5f;
+                if (con && !ctd_prev_con_[i]
+                    && coord_probe_counter_ > coord_probe_ticks_ / 2
+                    && i < int(legs_.size()) && legs_[i].initialized) {
+                    ctd_cos_[i] += std::cos(legs_[i].phase);
+                    ctd_sin_[i] += std::sin(legs_[i].phase);
+                    ++ctd_n_[i];
+                }
+                ctd_prev_con_[i] = con ? 1 : 0;
+            }
+        }
         if (coord_probe_counter_ > coord_probe_ticks_ / 2) {   // measure back half
             // controllability (forward thrust) minus an edge-of-chaos penalty on
             // tilt magnitude — a probe that goes faster by going wobbly is rejected,
@@ -2945,6 +3109,33 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         }
         if (coord_probe_counter_ >= coord_probe_ticks_) {
             float fit = (coord_fit_count_ > 0) ? coord_fit_accum_ / float(coord_fit_count_) : 0.0f;
+            // P4 arm 3: touchdown-consistency bonus.  R per leg = resultant of the
+            // window's touchdown phases (≥2 events or the leg abstains); bonus = weight ×
+            // mean R.  Every window carries the same term, so probe-vs-incumbent
+            // comparisons stay apples-to-apples.
+            if (coord_td_weight_ > 0.0) {
+                double rsum = 0.0; int rn = 0;
+                for (int i = 0; i < n_legs_ && i < 8; ++i) {
+                    if (ctd_n_[i] >= 2) {
+                        rsum += std::sqrt(ctd_cos_[i] * ctd_cos_[i] + ctd_sin_[i] * ctd_sin_[i])
+                              / double(ctd_n_[i]);
+                        ++rn;
+                    }
+                }
+                if (rn > 0) {
+                    const float tdR = float(rsum / rn);
+                    coord_td_R_diag_ = tdR;
+                    fit += float(coord_td_weight_) * tdR;
+                }
+            }
+            for (int i = 0; i < 8; ++i) { ctd_cos_[i] = 0.0; ctd_sin_[i] = 0.0; ctd_n_[i] = 0; }
+            // P4 arm 3b: interval-regularity penalty (mean |d − period|/period, debounced).
+            if (coord_cv_weight_ > 0.0 && ccv_dev_n_ >= 2) {
+                const float dev = float(ccv_dev_sum_ / double(ccv_dev_n_));
+                coord_cv_diag_ = dev;
+                fit -= float(coord_cv_weight_) * dev;
+            }
+            ccv_dev_sum_ = 0.0; ccv_dev_n_ = 0;
             if (fit > coord_best_fitness_) {     // probe won → adopt it
                 coord_best_phase_ = gait_phase_; coord_best_fitness_ = fit;
             } else {                              // probe lost → revert
@@ -2955,9 +3146,15 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // the search jumps OUT of a slow local optimum toward a propulsive coordination.
             float coord_sigma = float(coord_reward_drive_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_)
                               * explore_mult;   // progress→commit (C) damps the phase-search σ
-            std::normal_distribution<float> pz(0.0f, coord_sigma);
+            // ⚠ σ = 0 is REACHABLE (full commit × explore_floor 0) and normal_distribution
+            // ASSERTS on it — a latent process-abort that fired stochastically whenever a
+            // probe boundary landed inside full commit (found 2026-08-09 when per-tick diag
+            // changed run timing).  The σ→0 limit's honest semantics: propose the incumbent
+            // unchanged.  Draw only when σ > 0.
+            std::normal_distribution<float> pz(0.0f, std::max(coord_sigma, 1e-9f));
             for (int i = 1; i < n_legs_; ++i) {   // propose a new probe around the incumbent
-                float p = float(coord_best_phase_[i]) + pz(coord_rng_);
+                float p = float(coord_best_phase_[i])
+                        + (coord_sigma > 0.0f ? pz(coord_rng_) : 0.0f);
                 while (p >  float(M_PI)) p -= 2.0f * float(M_PI);
                 while (p < -float(M_PI)) p += 2.0f * float(M_PI);
                 gait_phase_[i] = p;
@@ -3004,7 +3201,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     // BEFORE the per-leg output loop (the stroke reads L.step_phase) and AFTER the contact
     // /torque handlers have landed this tick's sensor values.  Skipped entirely at the
     // default 0, so L.step_phase stays at its init and nothing downstream can read it.
-    if (stroke_phase_src_ > 0.0) update_step_phase(tick_id);
+    // phase_td_pull needs the v3 touchdown machinery running even when the stroke
+    // stays on L.phase — the stroke SOURCE switch inside stays gated on stroke_phase_src.
+    if (stroke_phase_src_ > 0.0 || phase_td_pull_ > 0.0 || coord_cv_weight_ > 0.0)
+        update_step_phase(tick_id);   // 3b consumes its debounced intervals as instrument
     // Measurement only, and skipped entirely at the default 0 — see the function header.
     if (gait_align_diag_ > 0.0) update_gait_align_diag(tick_id);
     // Pure observation for the live inspector; skipped entirely at the default 0.
@@ -3341,11 +3541,42 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // set empirically (which knee dir raises the chassis on a planted foot).
         if (!warmup && stance_lift_gain_ != 0.0 && m >= 2 && int(in_swing_.size()) == n_legs_
             && !in_swing_[leg]) {
-            y[m - 1] += float(stance_lift_gain_);
+            // STROKE-DIRECTION-AWARE RELEASE (stance_release_frac; see the param text).
+            // Recovery onset = the leg's OWN commanded hip1 delta flips sign mid-stance;
+            // from then until liftoff the press is faded, because continuing to press a
+            // foot whose stroke has turned around only buys braking shear (measured
+            // −0.004…−0.015 g/tick) and a delayed lift.  The deadband is a numerical
+            // guard against zero-chatter, not a tuned threshold: commanded per-tick
+            // deltas run ~0.1 here (max_dctrl caps at 0.05 per joint pre-gain).
+            float press = 1.0f;
+            if (stance_release_frac_ > 0.0 && leg < int(sr_released_.size())
+                && L.prev_y.size() > 0 && L.prev_prev_y.size() > 0) {
+                if (!sr_was_stance_[leg]) {          // touchdown: start bout pressed
+                    sr_released_[leg] = false;
+                    sr_prev_dh1_[leg] = 0.0f;
+                }
+                sr_was_stance_[leg] = true;
+                const float dh1 = L.prev_y[0] - L.prev_prev_y[0];
+                constexpr float kSrDead = 2e-4f;
+                if (std::fabs(dh1) > kSrDead) {
+                    if (sr_prev_dh1_[leg] != 0.0f && dh1 * sr_prev_dh1_[leg] < 0.0f)
+                        sr_released_[leg] = true;    // commanded reversal → recovery
+                    sr_prev_dh1_[leg] = dh1;
+                }
+                ++sr_stance_ticks_;
+                if (sr_released_[leg]) {
+                    press = 1.0f - float(stance_release_frac_);
+                    ++sr_release_ticks_;
+                }
+            }
+            y[m - 1] += press * float(stance_lift_gain_);
             // Same sign to hip2 — see stance_lift_hip2.  On a PLANTED foot hip2+ presses
             // down and levers the chassis up; it is the other half of the same raise.
             if (stance_lift_hip2_ != 0.0)
-                y[1] += float(stance_lift_hip2_) * float(stance_lift_gain_);
+                y[1] += press * float(stance_lift_hip2_) * float(stance_lift_gain_);
+        } else if (stance_release_frac_ > 0.0 && leg < int(sr_was_stance_.size())
+                   && int(in_swing_.size()) == n_legs_ && in_swing_[leg]) {
+            sr_was_stance_[leg] = false;             // swing: arm the next bout's reset
         }
         // TIBIA-PLUMB — hip2 nulls the shank's deviation from vertical, so the knee's
         // gait drive TRANSLATES the foot instead of arcing it.  See the header.  Applied to
@@ -3363,9 +3594,31 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         if (!warmup && (swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && m >= 3
             && have_contact_ && int(foot_contact_.size()) == n_legs_) {
             ++swing_tuck_ticks_;
-            if (foot_contact_[leg] <= 0.5f) {          // this foot is off the ground
-                y[1]     += float(swing_tuck_hip2_);   // fold the femur up
-                y[m - 1] += float(swing_tuck_knee_);   // fold the shank under
+            const bool airborne = foot_contact_[leg] <= 0.5f;
+            // SWING-DESCENT bookkeeping (self-scaled swing age; see the header note).
+            bool descending = false;
+            if (swing_descend_gain_ > 0.0 && leg < 8) {
+                if (airborne) {
+                    if (!swd_air_[leg]) swd_age_[leg] = 0;
+                    ++swd_age_[leg];
+                    if (swd_dur_[leg] > 2.0f
+                        && float(swd_age_[leg]) > kDescentFrac * swd_dur_[leg])
+                        descending = true;
+                } else if (swd_air_[leg]) {
+                    swd_dur_[leg] = (swd_dur_[leg] <= 0.0f)
+                                  ? float(swd_age_[leg])
+                                  : 0.9f * swd_dur_[leg] + 0.1f * float(swd_age_[leg]);
+                }
+                swd_air_[leg] = airborne ? 1 : 0;
+            }
+            if (airborne) {
+                if (descending) {
+                    y[1] += float(swing_descend_gain_);   // press DOWN: plant before the sweep
+                    ++swd_press_ticks_;
+                } else {
+                    y[1] += float(swing_tuck_hip2_);      // fold/lift the femur (first half)
+                }
+                y[m - 1] += float(swing_tuck_knee_);       // the shank keeps its fold throughout
                 ++swing_tuck_hits_;
             }
         }
@@ -4166,6 +4419,34 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["support_value"]     = support_value_diag_;
     mod["support_mult"]      = support_mult_diag_;
     mod["support_resp"]      = support_resp_diag_;
+    // Consumer-fired check for stance_release_frac: fraction of stance-lift ticks where
+    // the release was live.  0.0 with the lever on = the reversal detector never fired.
+    mod["sr_duty"] = sr_stance_ticks_ ? double(sr_release_ticks_) / double(sr_stance_ticks_) : 0.0;
+    // P4 arm 2 consumer check + state: pull events and the per-leg offsets.
+    mod["td_pull_events"] = td_pull_events_;
+    mod["coord_td_R"] = coord_td_R_diag_;   // arm 3 consumer check: −1 = never computed
+    mod["coord_cv_dev"] = coord_cv_diag_;   // arm 3b consumer check: −1 = never computed
+    mod["swd_press_ticks"] = swd_press_ticks_;  // swing-descent consumer check
+    {
+        nlohmann::json off = nlohmann::json::array();
+        for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);
+        mod["td_off"] = off;
+    }
+    // P1 shadow phases (zero authority) — per-tick values for offline scoring against
+    // the trace's contact/GRF ground truth, plus pooled retro fractions.  ph_l is the
+    // incumbent L.phase, exported beside them so every comparison shares one tick.
+    {
+        nlohmann::json a = nlohmann::json::array(), b = nlohmann::json::array(),
+                       c = nlohmann::json::array(), l = nlohmann::json::array();
+        for (int i = 0; i < n_legs_ && i < 8; ++i) {
+            a.push_back(shA_phi_[i]); b.push_back(shB_phi_[i]);
+            c.push_back(shC_phi_[i]);
+            l.push_back(i < int(legs_.size()) ? legs_[i].phase : 0.0f);
+        }
+        mod["sh_a"] = a; mod["sh_b"] = b; mod["sh_c"] = c; mod["ph_l"] = l;
+        mod["sh_a_retro"] = shA_retro_; mod["sh_b_retro"] = shB_retro_;
+        mod["sh_c_retro"] = shC_retro_;
+    }
     mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
@@ -4661,6 +4942,11 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["support_bin"]         = support_bin_diag_;
     j["support_value"]       = support_value_diag_;
     j["support_mult"]        = support_mult_diag_;
+    // Raw |dx|/|du| — the numerator of the actuator-search criterion value =
+    // responsiveness/(motor_tle+ε).  In the BODY log (not only the inspector diag) so a
+    // seedavg arm can score itself on the criterion; an unparsed metric is invisible.
+    j["support_resp"]        = support_resp_diag_;
+    j["sr_duty"] = sr_stance_ticks_ ? double(sr_release_ticks_) / double(sr_stance_ticks_) : 0.0;
     j["gait_phase"]          = gait_phase_;        // has the imposed trot [0,π,π,0] drifted?
     j["coord_best_phase"]    = coord_best_phase_;  // the stored winner it reverts to
     // The coordination search, made observable: which fitness is ranking probes, and the

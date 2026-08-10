@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "LEGACY \u2014 pre-audit stack, stance-hip2 lift (reference)",
-    "description": "Pre-campaign stack with the stance-gated hip2 lift (PARTIAL: coherence up, fl brake deepened). Superseded by BASE; kept as reference.",
+    "name": "RETRACTED \u2014 stance release 0.5 (crash-era lever)",
+    "description": "WATCH (if at all): on the healthy build this adds wobble (tilt 0.099\u21920.232) and falls for zero step gain. Its celebrated walk-conversion (2/20\u21926/20) was an artifact of the sigma crash killing runs at commit saturation. Kept as the record of the verdict; ledger \u00a72/\u00a74.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -169,7 +169,8 @@
         "coord_adapt_rate": 0.001,
         "coord_fitness_mode": 1,
         "height_ground_gain": 0.01,
-        "stance_lift_hip2": 0.25
+        "stance_lift_hip2": 0.25,
+        "stance_release_frac": 0.5
       }
     },
     {
@@ -293,6 +294,33 @@
         "encoder_kind": "rbf",
         "input_topic": "reality.motor_leg.rr",
         "proprio_state_dims": 9,
+        "tle_alpha": 0.7,
+        "tle_beta": 0.3,
+        "mitosis_enabled": true,
+        "max_nodes": 120
+      }
+    },
+    {
+      "id": "support_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "support",
+        "modality_name": "body",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.foot_load",
+        "proprio_state_dims": 4,
+        "dim_min": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dim_max": [
+          0.8,
+          0.8,
+          0.8,
+          0.8
+        ],
         "tle_alpha": 0.7,
         "tle_beta": 0.3,
         "mitosis_enabled": true,

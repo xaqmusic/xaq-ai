@@ -1080,6 +1080,23 @@ private:
     // so no swing leg is ever hoisted off the terrain -- the measured objection to a
     // whole-body lift does not apply.  0 = off, byte-identical.
     double  stance_lift_hip2_ = 0.0;
+    // 2026-08-09 — STROKE-DIRECTION-AWARE STANCE RELEASE.
+    //
+    // MEASURED (flbrake.py on full actuator-sweep traces): every leg's COMMANDED
+    // stroke reverses 7–9 ticks before liftoff (servo slew only 2–3), and the leg
+    // pays −0.004…−0.015 g/tick of braking shear for the whole pressed window;
+    // posture knobs redistribute which leg pays (fl worst, shear ratio −0.48) but
+    // never remove the toll.  So: from the tick a planted leg's own commanded hip1
+    // delta flips sign (recovery onset), multiply its stance biases by
+    // (1 − stance_release_frac) until it leaves stance.  Fully egocentric (the
+    // brain's own command stream), no propulsive-sign convention needed.
+    // 0 = off, byte-identical.
+    double  stance_release_frac_ = 0.0;
+    std::array<bool,  8> sr_released_ {};   // per leg: recovery detected this stance bout
+    std::array<bool,  8> sr_was_stance_ {}; // per leg: previous tick's stance state
+    std::array<float, 8> sr_prev_dh1_ {};   // per leg: last commanded hip1 delta past deadband
+    long   sr_stance_ticks_  = 0;           // diag: consumer-fired check
+    long   sr_release_ticks_ = 0;
     // 2026-08-07 — HOMEOKINETIC SUPPORT SELECTOR.
     //
     // MEASURED (n=4, egocentric |dx|/|du| over joint vs commanded deltas):
@@ -1259,6 +1276,95 @@ private:
     float  phase_pos_ema_[8] = {0,0,0,0,0,0,0,0};
     bool   phase_sym_init_[8] = {false,false,false,false,false,false,false,false};
     double phase_sym_smooth_ = 0.0;
+    // ── P1 SHADOW PHASES (2026-08-09, substrate-repair campaign) — ZERO AUTHORITY.
+    // Three candidate replacements for the retrograde L.phase, computed every tick and
+    // only ever exported to diagnostics; no control path reads them.  The winner (scored
+    // offline against flbrake's propulsive-window ground truth) gets a consumer switch
+    // in a LATER lever, never here.
+    //   A: per-leg PLL, BodyRhythmTracker's proven form — integrator + frequency state
+    //      from hysteresis up-crossings of the leg's own knee coordinate + soft pull at
+    //      each crossing.  No high-pass arm, no group delay ("no filter of any shape can
+    //      fix a signal whose value must be timely" — the retraction above).
+    //   B: shared reference + per-leg offsets = cpg_phase_ + gait_phase_[i].  Carries a
+    //      measured defect to explain first: BRT is UNLOCKED even in walker seeds
+    //      (brt_plv ~0.10, campaign log P0).
+    //   C: delay-compensated symmetric filter — both-arm EMA advanced by ω·τ, the
+    //      retraction's own recorded re-use context; τ = (1−a)/a of the kernel, ω from
+    //      candidate A's crossing measurement (the honest per-leg frequency).
+    static constexpr float kShAmpAlpha   = 0.02f;   // BRT amp_alpha
+    static constexpr float kShPeriodAlpha= 0.2f;    // BRT period EMA weight
+    static constexpr float kShOmegaLp    = 0.05f;   // BRT omega_lp
+    static constexpr float kShPhaseLock  = 0.10f;   // BRT phase_lock (soft pull)
+    static constexpr float kShHysFrac    = 0.2f;    // hysteresis = frac · amp_ema
+    static constexpr float kShFilterA    = 1.0f/3;  // C's kernel weight → τ = 2 ticks
+    float   shA_amp_[8]    = {0,0,0,0,0,0,0,0};
+    float   shA_period_[8] = {0,0,0,0,0,0,0,0};
+    float   shA_omega_[8]  = {0,0,0,0,0,0,0,0};     // 0 = uninitialized (seeded on first period)
+    float   shA_phi_[8]    = {0,0,0,0,0,0,0,0};
+    int     shA_tsu_[8]    = {0,0,0,0,0,0,0,0};
+    uint8_t shA_below_[8]  = {1,1,1,1,1,1,1,1};
+    float   shB_phi_[8]    = {0,0,0,0,0,0,0,0};
+    float   shC_pos_[8]    = {0,0,0,0,0,0,0,0};
+    float   shC_vel_[8]    = {0,0,0,0,0,0,0,0};
+    uint8_t shC_init_[8]   = {0,0,0,0,0,0,0,0};
+    float   shC_phi_[8]    = {0,0,0,0,0,0,0,0};
+    // Retro-fraction EMAs per candidate (pooled over legs; same α as phase_retro_diag_).
+    float   shA_retro_ = 0.0f, shB_retro_ = 0.0f, shC_retro_ = 0.0f;
+    float   shA_prev_[8] = {0,0,0,0,0,0,0,0};
+    float   shB_prev_[8] = {0,0,0,0,0,0,0,0};
+    float   shC_prev_[8] = {0,0,0,0,0,0,0,0};
+    uint8_t sh_prev_init_[8] = {0,0,0,0,0,0,0,0};
+    // ── P4 arm 2 (2026-08-09): TOUCHDOWN-CONSISTENCY PHASE OFFSET (phase_td_pull).
+    // Arm 1 (per-leg stroke lock) moved step_cv for the first time in campaign history
+    // (0.97 → 0.82) and killed transport the same way it did 2026-07-27 — independent
+    // thrusts cancel.  This form keeps every consumer (stroke, Kuramoto, amp, fitness)
+    // on ONE per-leg phase rotated by a slow offset, nudged at each ACCEPTED touchdown
+    // toward the leg's own RUNNING touchdown phase — self-consistency, no imposed
+    // target, inter-leg coherence preserved.  0 = off, byte-identical.
+    double  phase_td_pull_ = 0.0;
+    // ── P4 arm 3 (2026-08-10): SELECT rhythm, don't force it (coord_td_weight).
+    // Arms 1–2 proved the phase must stay a raw state observation; the sanctioned knob
+    // for WHERE legs sit in the cycle is gait_phase, and the (1+1) search already owns
+    // it.  This adds a touchdown-consistency term to the mode-1 fitness — the
+    // per-window resultant of L.phase at raw contact onsets — so the search DISCOVERS
+    // offsets under which touchdowns land at a repeatable phase.  No phase is touched;
+    // selection does the entraining.  0 = off, byte-identical.
+    double  coord_td_weight_ = 0.0;
+    double  ctd_cos_[8] = {0,0,0,0,0,0,0,0};
+    double  ctd_sin_[8] = {0,0,0,0,0,0,0,0};
+    int     ctd_n_[8]   = {0,0,0,0,0,0,0,0};
+    uint8_t ctd_prev_con_[8] = {0,0,0,0,0,0,0,0};
+    float   coord_td_R_diag_ = -1.0f;   // last window's touchdown-consistency, −1 = none yet
+    // ── P4 arm 3b (2026-08-10): interval-CV selection (coord_cv_weight).  Arm 3's miss
+    // was diagnostic — phase-consistency ≠ time-regularity.  This penalizes the fitness
+    // by the mean |interval − running period| / period over the window's DEBOUNCED
+    // touchdowns (the v3 machinery's accepted intervals), selecting literally the
+    // operator's step-regularity number.  0 = off, byte-identical.
+    double  coord_cv_weight_ = 0.0;
+    double  ccv_dev_sum_ = 0.0;
+    int     ccv_dev_n_   = 0;
+    float   coord_cv_diag_ = -1.0f;     // last window's mean interval deviation
+    // ── SWING DESCENT (2026-08-10, operator-diagnosed): swing_tuck_hip2 is a CONSTANT
+    // lift across the whole swing, so it fights the descent — rear feet land unsettled
+    // (miss% 5→9, el_def −0.17→−0.06, rl early stance net-braking) and the stroke
+    // sweeps back before full plant.  This splits the swing by phase, SELF-SCALED to
+    // each leg's own running swing duration (dimensionless fraction, no tick constant):
+    // first half = the lift/fold biases as configured; past kDescentFrac of the leg's
+    // typical swing, hip2 flips to +swing_descend_gain (press DOWN, Rule-5 sign) so the
+    // foot plants before the stroke reverses.  Knee keeps its fold.  0 = byte-identical.
+    double  swing_descend_gain_ = 0.0;
+    static constexpr float kDescentFrac = 0.5f;
+    int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
+    float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
+    uint8_t swd_air_[8] = {0,0,0,0,0,0,0,0};       // previous airborne state
+    long    swd_press_ticks_ = 0;                   // consumer-fired check
+
+    float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
+    float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase
+    float   td_ref_sin_[8] = {0,0,0,0,0,0,0,0};
+    long    td_pull_events_ = 0;                   // consumer-fired check
+    static constexpr float kTdRefAlpha = 0.05f;
+    static constexpr float kTdRefMinR  = 0.10f;    // no pull until the ref means something
     static constexpr float kAmpEmaAlpha    = 0.01f;   // slow amplitude estimate for the homeostat
     static constexpr float kPropCreditAlpha = 0.01f;  // ~100-tick propulsive-credit EMA (functional balance)
     static constexpr float kAmpGainMin     = 0.1f;

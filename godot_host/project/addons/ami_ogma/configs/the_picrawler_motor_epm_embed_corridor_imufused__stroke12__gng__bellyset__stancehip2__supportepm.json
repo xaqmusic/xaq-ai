@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "ARM support-pattern EPM (load vocabulary, nothing consumes it)",
-    "description": "stancehip2 + an EPM over the new 4-D foot_load channel. NOTHING CONSUMES THE TOKENS \u2014 this arm exists only to answer whether the body's weight distribution HAS learnable structure, before load is fed anywhere. Read: nodes / baked / tle / top1 on support_epm. Baking = a real support vocabulary; collapse to one node = load is a slow scalar and the EPM route is dead.",
+    "name": "LEGACY \u2014 pre-audit stack + observer support-EPM (reference)",
+    "description": "The pre-campaign deployed stack with the unconsumed support-EPM observer \u2014 the config the 2026-08-09 audit was run against. Superseded by BASE (v2 canonical); kept as the before-picture reference.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",

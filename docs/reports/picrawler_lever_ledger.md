@@ -68,36 +68,36 @@ not verdicts on the idea.** Before recording any negative entry, run the seven c
 
 ---
 
-## ★ THE OPEN PROBLEM — start here (2026-08-07)
+## ★ THE OPEN PROBLEM — start here (2026-08-09, rewritten same day after the crash finding)
 
-**The criterion is solved; the actuator is not.**
+**The stack walks. It always did. The day's "shuffle attractor" was a process crash
+scoring artifact** — see the ★★★★ §4 entry: a hardened-toolchain assert killed every
+run at the moment progress-commit saturated (i.e. when the body committed to walking),
+and `seedavg` scored the corpses. With the crash fixed, the v2base canonical walks
+**6/6 screened seeds at net_z ~6.5, ~110 real steps** — consistent with the Aug-7
+baselines, whose "non-reproduction" is now fully explained (the old binary predated
+the hardening).
 
-`value = responsiveness / (motor_tle + ε)` — egocentric `|Δx|/|Δu|` over the body's own
-forward-model error — **ranks gaits at corr +0.996 with net_z on a sweep it never saw**,
-without ever being told about transport. It is §5.1-legal (homeokinetic, not reward
-shaping) and it correctly ranks the *fewest-feet-down* arm lowest, so it is not a
-disguised restatement of a simpler target. See §2 for the two entries.
+What is genuinely open, unchanged from before this detour and now measurable on clean
+instruments:
 
-**What is missing is an actuator with authority over gait quality.** Every knob tested
-so far either cannot move it or moves it the wrong way:
-
-| actuator | target | result |
-|---|---|---|
-| `gait_phase` | footfall timing | command varies **6×** more than the timing it sets |
-| `height_lift_knee` | hip2/knee coherence while cruising | that path is multiplied by **zero** there |
-| `support_select_gain` → `explore_mult` | stance overlap | `corr(actuator, target)` ≈ **0** |
-| `amp_target` | stance overlap | **has** authority — and collapses transport 87 % |
-
-**The two checks any candidate must pass, in order:**
-1. **Authority** — `corr(actuator, target)` on traces that already exist. Cheap, and it
-   would have killed three of this session's levers before they were built.
-2. **Cause, not symptom** — a *causal* sweep. `amp_target` passes (1) and fails (2);
-   the correlational target ("fewer feet planted") was a symptom of striding well, not
-   a cause of it.
-
-⇒ **Next session: search for actuators, not levers.** Sweep candidate knobs and score
-them on `corr(knob, value)` and `corr(knob, net_z)` together — a knob that moves the
-criterion *and* transport in the same direction is the thing to attach the selector to.
+1. **Gait REGULARITY — the operator's stated goal.** `step_cv` ≈ 1.0 (memoryless
+   inter-step intervals) even on walking runs, and `td_plv` stays 0.04–0.21: nothing
+   in the timing chain references contact. The audit's structural findings all stand
+   (retrograde `L.phase`, three unsynchronized clocks, press-fights-lift). P1's clean
+   scoring (post-fix, full walking runs) says the incumbent state-observation phase
+   beats every smooth candidate on body-coupling — the substrate question is settled
+   for now; the ENTRAINMENT question (P4: lock the stroke to touchdowns it can now
+   feel) is the live thread.
+2. **The recovery-shear toll** — real trace physics, unaffected by the crash: every
+   leg pays −0.004…−0.015 g/tick braking during the 7–9-tick pressed window after its
+   commanded stroke reverses. The stance release's CONVERSION story is retracted
+   (crash-confounded), but its mechanism target survives; clean n=20 dose re-measure
+   in flight.
+3. **Flat speed** — `fwd_v` ~0.04–0.05 on walking runs; the old pinned-flat-speed
+   thread returns as the transport question once rhythm exists.
+4. **The criterion question is REOPENED** (its refutation was measured on crashed
+   runs) — re-run `actsweep.py` on the fixed build before any verdict.
 
 ---
 
@@ -128,6 +128,7 @@ walks, and improvises a novel limb movement to free itself when stuck).
 
 | Lever | Scenario tested | Why it failed |
 |---|---|---|
+| **hk_value as a gait-quality criterion** (`value = responsiveness/(motor_tle+ε)` as the quantity a selector would optimize) ⚠ **CONTAMINATED (2026-08-09, see §4 crash entry): the sweep ran on the armed-assert build — its runs were crash-truncated. The verdict below is RETRACTED PENDING RE-MEASURE on the fixed build; do not cite the +0.05 number** | corridor diff 0.3, solid chassis, 12 000 ticks, **13 arms × n=6 across SIX knob axes** (postural, stroke, coupling, stance_lift, stance_lift_hip2, amp) — `actsweep.py`, 2026-08-09 | **Refuted as a transport proxy: pooled corr(hk_value, net_z) = +0.05 over 78 runs; within-arm mean +0.15 with the sign flipping arm to arm.** The +0.996 of 2026-08-07 was four arm-means along ONE axis — and that axis still reproduces (hk 4.46/4.49/3.75 as amp rises 0.4/0.55/0.7, net_z collapsing to −0.04) while every other axis decouples: `coupling_gain` moves the criterion hard (corr −0.95) with no transport consequence (+0.12); `stroke_gain` moves transport (−0.86 — SHORTER strokes carry further, again) with no criterion movement (+0.20). A selector attached to hk_value today would crank coupling down for nothing. ⚠ Instrument scale differs from the 2026-08-07 read (raw \|dx\|/\|du\| time-mean ~1.25 vs the per-bin EMA's ~0.42), but the amp-axis ordering matches, which is the behavior the reference itself demonstrated. **Re-use context: per-axis validity is real** — the criterion may still gate the one knob whose axis validated it; and the generalization bar for ANY intrinsic criterion is now written: score it pooled across ≥5 knob axes, never along the axis that motivated it |
 | **Complete-the-lift** (`height_lift_knee` — drive the knee with the same sign as the height homeostat's hip2 lift, as the panic pathway already does) | corridor, n=6, `CHASSIS_COLLIDE=1`, on top of the belly arm; fracs 0.5 and 1.0 | **`NULL` at 0.5, `REGRESSION` at 1.0 — with a diagnosis that names the flaw in the design, not the idea.** Premise was sound and measured: **hip2 and the knee agree on sign only 50.8 % ± 1.1 % of ticks — chance** — and the panic pathway's own comment records that opposite signs mean the knee un-tucks and *fights* the hip2 lift ("same sign = a coherent anti-gravity push"). At 0.5: everything neutral (net_z t=+1.11, straight t=−0.25, tilt_sd t=−0.70, swing_frac t=−0.05) and **`hk_agree` moves only 0.522 → 0.529**. At 1.0 the pre-existing verdict reappears — tilt_sd 0.076 → **0.194** (2.5×), straight 0.72 → 0.61 ± 0.27, one seed collapsing to net_z 0.27. ★ **WHY IT CANNOT WORK: the height-lift path is multiplied by `height_rest_frac`, which is ZERO while cruising — so it extends a pathway that is switched off exactly when the disagreement occurs.** `hk_agree` is dominated by locomotion ticks the lift never touches. **Re-use context: the target (hip2/knee sign coherence during LOCOMOTION) is still live and still unaddressed; it needs a carrier that is active while walking — `stance_lift_gain`'s stance-gated path is the obvious candidate, not the rest-gated height path.** Note the prior in-code verdict ("a DC bias there clamps the swing and kills the gait") is *not* what was reproduced: `swing_frac` barely moved (0.493 → 0.486); the 1.0 failure is destabilisation, not swing-clamping |
 | **Load in the motor input** (`load_topic` on the bridge → per-leg `foot_load` appended as a 10th element of each motor proprio vector; motor EPMs 9→10 dims) | corridor, n=6, `CHASSIS_COLLIDE=1`, on the stancehip2+supportEPM arm | **`NULL` on behaviour, `REGRESSION` on the self-model — and the diagnosis is structural, not a tuning miss.** Behaviour is untouched: net_z **t = −0.02** (4.56 → 4.55), %<10mm t = +0.02, legs+ t = 0.00; straight (+1.15) and tilt_sd (−0.70) drift the right way but not significantly. **But `motor_tle` rises 0.263 → 0.320, t = +2.75** — the forward model got *worse at predicting itself* after being handed the observation. ★ **WHY: load is a BODY-LEVEL quantity and `MotorEPMv2`'s model is PER-LEG.** What a foot carries depends on all four legs and where the CoG is, not on that leg's own commands — so a per-leg model asked to predict it can only accumulate irreducible error. The consumer-fired check passed (10-D encode live, \|last_x\| 8.08, model running at n=10), so this is not a plumbing null. **Re-use context: load belongs to a BODY-LEVEL consumer — the support EPM sees all four at once and DID find structure (a self-limiting ~150-node vocabulary) — not appended to each leg's private state.** Retry per-leg only if the model is ever made body-level, or if a leg-local load derivative (rate of unloading) turns out to be leg-predictable where the level is not |
 | **Homeokinetic support selector** (`support_select_gain` — value the current support state as responsiveness/(motor_tle+ε) and modulate `explore_mult` by it; gains 1.0 / 2.0 / 4.0) | corridor, n=6, `CHASSIS_COLLIDE=1`, control has contact wired instrument-only so the ONLY difference is the gain | **`NULL` — and the diagnosis is that the ACTUATOR HAS NO AUTHORITY OVER THE TARGET.** The criterion is sound and measured: responsiveness (egocentric \|Δx\|/\|Δu\|) is 0.470 at 2 feet planted vs 0.367 at 4 (+28 %) with \|Δu\| flat, so preferring responsive support states prefers 2-leg support **without ever being told forward progress is good** — homeokinesis, not reward shaping on progress (§5.1). Consumer verified firing: `support_mult` non-unity on 418/500 samples, correctly signed (4 feet down → 1.033 = explore more; 2 feet down → 0.901 = commit). **But nothing moved**: net_z t = −1.87 / +0.10 / −1.17 (non-monotonic noise), mean planted 3.21 → 3.17, %≤2-down 15.1 % → 17.3 % (t = +1.06…+1.69, right direction, not significant). ★ **WHY: `corr(explore_mult, feet planted)` = −0.06…+0.03 now, and −0.14…−0.17 at 20–60 ticks ahead.** Exploration does not move the support state, so **no gain on this actuator could have worked.** Same shape as `gait_phase` having no authority over footfall timing, and as `height_lift_knee` extending a path that is faded to zero while cruising. **Re-use context: the criterion is worth keeping and re-aiming at an actuator with measured authority over stance overlap — which nothing yet has. Find the actuator FIRST.** |
@@ -404,6 +405,8 @@ to become per-integrator**, because `amp_gain` is EFFORT (may escalate when fail
 | Bug | Shape |
 |---|---|
 | **★ `seedavg.py` does not set `OGMA_PICRAWLER_CHASSIS_COLLIDE` (2026-08-06)** | It inherits `os.environ` (`seedavg.py:29`) but never sets the flag, and `chassis_collides` defaults **false** — so **every `seedavg` A/B runs on the GHOST chassis**, a body whose belly cannot touch the ground. A belly-clearance lever measured this way showed net_z 4.31→3.44, a seed-3 collapse and falls 0→0.33; re-measured on a **solid** chassis at the same gain it is net_z 4.32→4.50 with no collapse. **The 2026-08-04 ghost finding warned that every belly CLAIM was measured on a ghost; this is the same trap entered from the other side — a belly lever REFUTED on one.** Rule: any lever whose mechanism involves belly/chassis contact must export `OGMA_PICRAWLER_CHASSIS_COLLIDE=1`, and a run summary that omits it describes a different body |
+| **★★★★ THE CRASH THAT MANUFACTURED THE BASIN LOTTERY — every "shuffler" today was a corpse (2026-08-09, supersedes the entry below)** | The coordination probe constructs `normal_distribution(0, σ)` with σ = `coord_reward_drive × explore_mult`, and full progress-commit drives `explore_mult` to EXACTLY 0 (explore_floor 0) → σ = 0 → **Ubuntu's hardened libstdc++ asserts and ABORTS THE PROCESS**. Sustained progress saturates commit, so **runs were killed at precisely the moment the body committed to walking** — the better the walk, the more certain the death. The assert armed TODAY: the first rebuild of `MotorEPMv2.o` since the toolchain hardening (the Aug-7 binary predated it; unhardened `normal(0,0)` draws 0 = "propose the incumbent", benign). `seedavg` then scored every corpse as a completed run — **19/20 tie-run seeds died at t=960–8400 with the assertion in their logs; "net_z 1.45" was where the body stood when it died.** Verified three independent ways: per-seed log truncation + assert lines; pre-fix rebuild reproduces the 19/20 crash pattern; post-fix build walks 6/6 at net_z ~6.5 ≈ the Aug-7 baselines. **CONSEQUENTLY RETRACTED: the basin-lottery entry below (kept for the record); the walk-fraction crisis (2–5/20 — those were crashes); the criterion multi-axis refutation (§2 — the 78-run sweep ran on the armed build, re-measure before trusting); the release dose-curve conversion story (2/20→11/20 — confounded by crash timing; clean re-measure in flight); the "logging cadence changes trajectories" claim (both compared runs were crashes; determinism holds).** STILL STANDING: every code-structural audit finding; the recovery-shear trace physics; P0's hygiene (both tie arms crashed identically — the tie holds); P1's phase scoring (collected post-fix on full walking runs). **Rules, each now enforced in tooling: (1) a parser must verify run COMPLETION before scoring (seedavg now excludes truncated runs loudly); (2) after ANY build-state detour, rebuild before the next measurement — the .so on disk is part of the arm; (3) when a toolchain hardens, the first rebuild is a new context: re-baseline before comparing to history** |
+| **★★★ THE BASELINE DID NOT SURVIVE THE ENVIRONMENT — the walk was a basin lottery (2026-08-09)** ⚠ **SUPERSEDED by the entry above — the "basin" was crash truncation** | The stancehip2+supportepm reference (net_z 4.56, n=6) reads **1.45 ± 0.54** at the exact recorded protocol, and the cause is BOUNDED, not found: code/configs/Godot 4.6.2/machine/boot/seeds all verified identical (full-tree git diff to the session-close commit is empty; same uptime since 08-06; runs are bit-reproducible today, seed-for-seed identical across two harnesses), and the new criterion instrument was isolated by a same-build-dir revert A/B — seed 1 posts net_z 1.09 on both builds, behaviorally byte-equal. What cannot be reconstructed is the 08-07 working tree's uncommitted state and its exact .so (untracked, since overwritten). Difficulty is NOT the cause (5/6 seeds identical at diff 0.0 — the stall is terrain-independent); chassis mode is not (ghost: 1.85 ± 0.94). **The lesson with teeth: an n=6 fixed-seed walking number records which BASIN six seeds landed in, and basin assignment did not survive an FP-level perturbation of the environment. Seeds ARE FP-level perturbations, so the corridor baselines were basin measurements wearing capability clothes.** Rules: (1) a walking-stack claim now requires the walk FRACTION at n≥20 (2026-08-09 truth: **4–5/20** on `..._imufused`, walkers at 48–112 real steps, shufflers at 0–12); (2) every ledger entry must record steps/difficulty/chassis/n — several reference entries recorded none of these, which is why this non-reproduction cannot be assigned |
 | **★★★ "FEWER FEET PLANTED" WAS A SYMPTOM, NOT A CAUSE (2026-08-07)** | The correlational read was loud: 2 feet planted ↔ fwd_v +0.0996, 4 feet ↔ +0.0116, an 8× spread, and the body sits at 3–4 planted 85 % of the time. I proposed stance overlap as **the** target. **A causal test refutes it.** `amp_target` HAS authority over stance overlap (0.40 → 0.70 drives mean planted 3.23 → 2.14, %≤2-down 15 % → 63 %, t = −4.87) — **and transport collapses with it: net_z 4.67 → 0.61 (t = −14.17), straight 0.71 → 0.21, tilt_sd 0.089 → 0.901 (10×).** The body has two feet down **when it is striding well**; it does not stride well *because* two feet are down. **Rule: an actuator with authority is necessary but not sufficient — a correlational target can be a symptom, and the causal test is the only thing that separates them.** ⇒ The stance-overlap target is retired; the responsiveness measurement that motivated it stands, but its interpretation does not |
 | **★★ THE HOMEOKINETIC CRITERION SURVIVES A TEST IT NEVER SAW (2026-08-07)** | Same amplitude sweep, scored by `value = responsiveness/(motor_tle+ε)` — a purely egocentric quantity that never observes forward progress: amp 0.30 → 1.46, **0.40 → 1.47**, 0.55 → 1.34, **0.70 → 1.24**, against net_z 4.53 / 4.67 / 2.01 / 0.61. **`corr(value, net_z) = +0.996`.** It ranks the fewest-feet-down arm LOWEST — correctly — and it is *not* a restatement of "fewer feet is better", which is what makes it more than the target it replaced. Mechanism: responsiveness itself saturates at high amplitude (0.4166 → 0.3663) because the commanded change grows faster than the sensory change. **This is the strongest evidence in the campaign that an intrinsic, §5.1-legal criterion can rank gaits the way transport does, without being told about transport.** Still unattached to any actuator with authority — that remains the open problem |
 | **★★ THREE LEVERS IN ONE SESSION AIMED AT AN ACTUATOR WITH NO AUTHORITY (2026-08-07)** | `gait_phase` → footfall timing (commanded diagonal offset spans 24 ticks, realized spans 4 — the command varies **6× more** than the timing it sets); `height_lift_knee` → hip2/knee coherence during locomotion (the height path is multiplied by `height_rest_frac`, which is **zero while cruising**); `support_select_gain` → stance overlap (`corr(explore_mult, feet planted)` ≈ **0**). All three were correctly built, correctly signed, and **verified firing** — and all three were incapable of moving their target for reasons measurable in ten minutes beforehand. **RULE: before building a lever, measure whether the actuator has AUTHORITY over the target variable — `corr(actuator, target)` on existing traces. A consumer-fired check proves the code runs; an authority check proves it can matter.** The two are different, and this session needed both |
@@ -712,6 +715,115 @@ control (identical instruments, gain 0): net_z 4.75→4.80, straight 0.74→0.73
 was HEADROOM, not transferable mechanism** — the corridor baseline already sits at `step_bal`
 0.44 while the arena sits at 0.07. Verdict `PARTIAL`, scenario-scoped to open ground; the wobble
 reduction is the part that appears in both gyms. Not promoted.
+
+---
+
+### ★★★ 2026-08-09 — THE BRAKE IS A PHASE, NOT A LEG: recovery-while-planted shear, measured down to its mechanism
+
+The stance-hip2 verdict left "fl brakes 2.5× harder" as a leg-shaped mystery. Four
+measurements on the actuator-sweep traces (solid chassis, per-tick GRF ⊕ true contact ⊕
+commanded targets; instrument `flbrake.py` over the traces `actsweep.py` banks) close it:
+
+1. **Liftoff lag is BODY-WIDE, not fl's.** Every leg stays planted ~10–12 ticks past its
+   own stroke reversal (fl 11.1 / fr 11.8 / rl 9.8 / rr 10.2) — and the **commanded**
+   stroke reverses **7–9 ticks before liftoff** with only 2–3 ticks of servo slew. The
+   brain itself sweeps planted legs backward; the lift channel is late, not the tracking.
+2. **Load does not discriminate.** fl's recovery-window normal force is ordinary
+   (rec/prop 0.92) and the second-LOWEST of the four legs in absolute terms.
+3. **Shear discriminates.** During recovery-in-stance fl converts **−0.48** of its normal
+   load into backward force vs fr −0.32, rr −0.29, rl −0.15 — saturated friction. fl
+   SLIPS where rl pivots.
+4. **Posture is the correlate.** fl holds the most-flexed knee (−0.95 rad) and the
+   most-tilted tibia (−0.95 rad from vertical) during recovery, and tibia tilt tracks the
+   shear gradient across legs — the §2 plumb story's cost, localized to one leg and one
+   phase.
+
+**The knobs REDISTRIBUTE this cost; none remove it.** `stance_lift_hip2` 0 → 0.25 → 0.5
+deepens fl's net brake monotonically (−0.0016 → −0.0021 → −0.0027 g/tick);
+`stance_lift_gain` 0.8 flips fl to a propulsor (+0.0009, its propulsive force ×1.7) and
+hands the brake to BOTH rear legs. Conservation, not cure: some leg always pays the
+recovery-shear toll, because every leg is commanded to sweep while planted and pressed.
+
+⚠ The first-pass numbers were computed on traces silently TRUNCATED at 1.9–4 MB of ~12 MB
+(FileAccess buffers; the quit path never closes the file). Flush fix landed same day; the
+hip2/stance_lift comparisons above are from full-length traces. An instrument that loses
+its tail reads as "early-run behavior" without saying so.
+
+⇒ **The lever this names** (§5 top): the stroke-direction-aware stance release. Predictions
+it must satisfy: g_rec shrinks body-wide (flbrake), act_lag drops toward the 2–3-tick slew
+floor, and — if the pressed-shuffle reading of the basin problem holds — shuffle seeds
+convert to walk seeds at n=20.
+
+**SAME-DAY RESULT — the walk-fraction prediction held, loudly.** `stance_release_frac=1.0`
+on the supportepm base, n=20, 12 000 ticks, solid chassis, same seeds both arms:
+**walkers (steps>30) 2/20 → 11/20**; steps 17.8 → 62.3 (3.5×); net_z 1.95 ± 1.31 →
+2.97 ± 2.30; step_bal 0.12 → 0.23; **plv 0.09 → 0.13** — the legs phase-lock more when
+their feet are allowed off the ground. Consumer check `sr_duty` = 0.75 (the release
+latches for most of stance once the stroke reverses, as designed). **Costs, named:**
+belly clearance 0.031 → 0.024 with `bellyc_min` 0.014 → **0.003** (the tuck IS the
+belly-up mechanism and the release fades it — the body walks but rides the deck),
+falls 0.15 → 0.30, straight 0.69 → 0.56, one destabilized seed (tilt_sd 1.09). At 0.5
+the n=6 screen keeps control-level stability (tilt_sd 0.058, unstable 0.01) at an
+intermediate belly cost — the dose sweep is the open edge, plus a shaped variant
+(release the KNEE only, keep the hip2 press) if the belly cost proves inherent.
+**Not promoted: pending operator UI observation (§3 rule 5) and the dose question.**
+
+**DOSE MEASURED (same day, n=20 each): the gradient is monotonic on BOTH axes.**
+Walkers 2/20 → **6/20** → **11/20** across frac 0 → 0.5 → 1.0; net_z 1.95 → 2.50 → 2.97;
+plv 0.09 → 0.12 → 0.13 — and the costs ride the same gradient: bellyc_min 0.014 → 0.008
+→ 0.003, tilt_sd 0.062 → 0.073 → 0.148, falls 0.15 → **0.15** → 0.30, straight 0.69 →
+**0.69** → 0.56. **At 0.5 the lever buys 3× walkers at ZERO falls/straightness cost and
+a moderate belly cost.** A monotonic dose–response on a mechanism-predicted target is
+what "authority + cause" means — this knob has causal authority over the walk/shuffle
+basin, which is the thing the actuator search was looking for and the criterion could
+not name. Recommended operator read: watch 0.5 and 1.0 in the UI; if the 1.0 wobble is
+the deck-riding, the knee-only shaped release is the next refinement.
+
+**ARENA CROSS-CHECK (same day, operator-prompted; 4 arms × n=20, 12 000 ticks, diff 0,
+solid chassis, `arenaavg.py`) — the costs were corridor artifacts; the conversion is
+corridor-assisted.** The dose gradient on progress TRANSFERS: net_disp 1.99 → 2.40 →
+**2.74** (+38 %), steps 8.6 → 11.4 → 13.8, both monotonic. The corridor's costs do NOT
+transfer: straight is FLAT (0.70/0.69/0.69) and falls *drop* (0.15 → 0.10/0.10) — the
+frac-1.0 wobble/veering was hump-and-wall interaction, not intrinsic yaw damage. **But
+the walk-fraction conversion shrinks to 1/20 → 2/20 → 3/20** (vs 2 → 6 → 11 in the
+corridor), and even the deployed `imufused` base walks only 2/20 on open flat ground
+(net_disp 1.92 ± 1.53 — the honest arena reference, protocol fully recorded). ⇒ Layered
+reading: the release removes the SUPPRESSOR (pressed feet), while the corridor's rumble
+strips supply the PERTURBATIONS that recruit stepping — flat ground leaves the shuffle
+unchallenged. Consistent with obstacle-triggered adaptation being one of §3.3's three
+real-capability signatures. Directly testable: corridor diff 0 vs 0.3 on the srel arm
+(does the conversion need the rumble?). ⚠ `yaw_swing_excess` read exactly 0.0000 in all
+80 runs — the instrument did not fire in these configs (contact wiring absent), so the
+yaw question is UNMEASURED here, not null.
+
+> ⚠⚠ **CORRECTION (same day, later): EVERY walk-fraction number in this entry and the
+> two blocks above — the 2/20→11/20 conversion, the dose curve, the arena and
+> flat-corridor comparisons — was measured on the armed-assert build (§4 ★★★★ entry):
+> the "shufflers" were runs that CRASHED when commit saturated, and the release changes
+> commit dynamics, hence crash timing. The conversion story is RETRACTED.**
+>
+> **CLEAN VERDICT (n=20 per arm, fixed build, zero crashes, 20/20 walkers everywhere):
+> `NULL`-to-`REGRESSION`.** control net_z 6.43 ± 1.58 / tilt_sd 0.099 / falls 0.30 /
+> steps 113; srel 0.5 → 5.56 / **0.232** / 0.55 / 114; srel 1.0 → 5.69 / **0.255** /
+> 0.55 / 115. Steps FLAT, transport slightly down, wobble 2.4×, falls +83 %. On a body
+> that survives its own success the release adds instability and buys nothing.
+> `stance_release_frac` stays 0. **Re-use context: the recovery-shear window is real
+> trace physics (−0.004…−0.015 g/tick, 7–9 ticks, body-wide) — the toll exists but
+> un-pressing mid-stance is evidently the wrong way to collect it. Candidates that
+> honor the measurement: the knee-only shaped release, or timing the LIFT earlier
+> (P4 entrainment) rather than weakening the stance.**
+
+**TESTED (same day): the discriminator is the GYM, not the texture.** srel 1.0 at n=20,
+three environments: corridor diff 0.3 → **11/20** walkers, steps 62; corridor diff 0.0
+(flat) → **7–8/20**, steps 34; arena diff 0.0 → **3/20**, steps 14. The conversion
+mostly SURVIVES the flat corridor and dies in the arena, so the rumble is a step-count
+amplifier (halves without it) but the walker conversion tracks corridor-vs-arena
+geometry. Candidate mechanisms for the gap, unmeasured: the corridor's self-centering
+walls as a perturbation source, and the nav/bearing drive differing between gyms
+(`target_compass` has a corridor goal to pull toward). Also new at flat corridor:
+three walkers CIRCLE (straight 0.06–0.12) — the rumble may be helping the heading hold
+as well. ⇒ Before attributing any of this, wire the contact instrumentation so
+`yaw_swing_excess` fires, and check what `target_compass` publishes in each gym.
 
 ---
 
@@ -2447,6 +2559,32 @@ these arms as unmeasured.**
 
 ## 5. Open frontier
 
+- **★★★ THE MOTOR-SYSTEM AUDIT (2026-08-09) — read before proposing any lever:**
+  [`motor_system_audit_2026-08-09.md`](motor_system_audit_2026-08-09.md) (+ verbatim
+  appendix). Full topic graph, the 148-param inventory (11 live mechanisms; 3 configured
+  params silently dead — `balance_gain`, `coord_stab_penalty`, `nav_gain` in the
+  corridor; panic live via invisible header defaults), all five EPMs confirmed pure
+  observers with unfed prediction sockets, three no-leak ratchets, and the timing
+  finding that reframes the campaign: **`L.phase` is retrograde 2/3 of ticks, three
+  clocks beat unsynchronized, and nothing references contact** — the structural
+  explanation for every failed timing lever and the level-ground shuffle. Its §4.3
+  dependency order (phase substrate → honest stance signal → stroke↔contact loop →
+  anti-freeze floor → body-level predictor) is the audit's proposed roadmap, pending
+  operator review.
+- **★★★ THE STROKE-DIRECTION-AWARE STANCE RELEASE (2026-08-09) — BUILT AND MEASURED SAME
+  DAY: walk fraction 2/20 → 11/20.** `stance_release_frac` (0 = byte-identical, verified):
+  on a mid-stance sign flip of the leg's own commanded hip1 delta, fade that leg's stance
+  biases until liftoff. At 1.0, n=20: walkers 2/20 → **11/20**, steps ×3.5, plv 0.09 →
+  0.13 — the loudest single-lever move on the books under the new protocol, and it
+  converts the shuffle attractor directly, which is what it was designed to do. **Costs:
+  belly clearance (bellyc_min 0.014 → 0.003 — the released tuck rides the deck), falls
+  0.15 → 0.30, straight −0.13.** See the boxed entry for the full record. **Open edges,
+  in order: (1) dose — 0.5 keeps control-level stability at n=6, its n=20 walk fraction
+  is unmeasured; (2) shape — release the KNEE only and keep the hip2 press if the belly
+  cost is inherent; (3) operator UI observation before any promotion (§3 rule 5).**
+- **★ Walk-fraction protocol (2026-08-09).** Until the shuffle attractor is solved, every
+  A/B on the corridor stack reports walkers/n at n≥20 alongside the metric groups —
+  seed-mean net_z on a bimodal distribution rewards lottery variance, not gait quality.
 - **★★★ MAKE THE REFLEX GAINS INFERENTIAL — FIRST LEVER MEASURED 2026-08-04, see the boxed
   entry at the top of §2.** `couple_prec_gain` is `NULL` on the healthy gait and `WORKING` on the
   (d) test (coordination after a leg dies: control 0.127, k=+2 **0.190**, t = 5.84, wrong-sign

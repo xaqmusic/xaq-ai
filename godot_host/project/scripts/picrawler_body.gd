@@ -357,6 +357,29 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # unchanged.
 @export var motor_damping_factor:  float = 1.0
 
+# 2026-08-10 — P7 SERVO_KI (body-fidelity candidate; PM's ForceBoostWiring analogue).
+# Leaky integral of beyond-deadband servo tracking error, boosting BOTH the raw torque
+# and the impulse cap: a stance leg the ground resists accumulates error and pushes
+# harder — load-dependent timing, the within-leg thrust↔support coupling.
+# ⚠ FRAME MAPPING: the hardware doc's Ki band (0.01–0.05, servo_dynamics.md) lives in
+# the real servo's internal-loop units and does NOT transplant.  Here the boost is a
+# FRACTION of motor_max_impulse on the real force path (imp_* → _set_motor_vf):
+# boost_frac ≈ servo_ki × |beyond-deadband error| at integral saturation (τ = 0.4 s),
+# so servo_ki {1, 3, 6} ≈ {10, 30, 60} % boost at a 0.1 rad sustained load error.
+# (First build attached to _powered_torque and produced BIT-IDENTICAL trajectories —
+# that function is telemetry-only; the lesson is inline there.)
+# Guards (three windup precedents + the freeplay drift-twitch limit cycle): integral
+# FROZEN inside the deadband (output stays 0 there regardless), leak ALWAYS applied,
+# contribution clamped to ≤ SERVO_KI_AUTH_FRAC × max_torque.  0 = off, byte-identical.
+@export var servo_ki: float = 0.0
+const SERVO_KI_TAU: float = 0.4          # leak time constant, seconds
+const SERVO_KI_AUTH_FRAC: float = 0.5    # boost cap, fraction of max_torque
+var _ki_int: Array[float] = []           # 12 accumulators, [joint*4 + leg]
+var _ki_mag_acc: float = 0.0             # diag: mean |integral|
+var _ki_mag_n: int = 0
+var _ki_boost_ticks: int = 0             # diag: boost-active duty
+var _ki_total_ticks: int = 0
+
 # 2026-06-01 — knee-widening A/B toggle.  Default true preserves the
 # 2026-06-01 widening (KNEE_LIMIT_LOW=-2.50, asymmetric KNEE_RANGE_
 # EXTEND/BEND mapping from f9ab634).  Set false to restore the pre-
@@ -2950,6 +2973,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_MAX_STEPS", "OGMA_PICRAWLER_MAX_EPISODES",
 			  "OGMA_PICRAWLER_DIAG_INTERVAL", "OGMA_PICRAWLER_MC_PERIOD",
 			  "OGMA_LEG_STRENGTH", "OGMA_RESET_MODE", "OGMA_PICRAWLER_CONFIG",
+			  "OGMA_PICRAWLER_SERVO_KI",
 			  "OGMA_PICRAWLER_STAB_Y_NORM", "OGMA_PICRAWLER_STAB_SPEED",
 			  "OGMA_PICRAWLER_STAB_GAIN",
 			  "OGMA_PICRAWLER_ANTIROT_THRESHOLD", "OGMA_PICRAWLER_ANTIROT_SCALE",
@@ -3011,6 +3035,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_DIAG_INTERVAL":  diag_interval_ticks = max(0, v.to_int())
 			"OGMA_PICRAWLER_MC_PERIOD":      mc_episode_period = max(0, v.to_int())
 			"OGMA_LEG_STRENGTH":             leg_strength = max(0.0, v.to_float())
+			"OGMA_PICRAWLER_SERVO_KI":       servo_ki = max(0.0, v.to_float())
 			"OGMA_RESET_MODE":               if v in _RESET_MODE_CHOICES: reset_mode = v
 			"OGMA_PICRAWLER_CONFIG":         config_path = v
 			"OGMA_PICRAWLER_STAB_Y_NORM":    stability_y_norm = clamp(v.to_float(), 0.0, 1.0)
@@ -7303,6 +7328,30 @@ func _step_one() -> void:
 		var imp_h1: float = motor_max_impulse
 		var imp_h2: float = motor_max_impulse
 		var imp_kn: float = motor_max_impulse
+		# P7 SERVO_KI — the force-boost integral, on the REAL force path (imp_* is what
+		# _set_motor_vf hands the joint; _powered_torque is telemetry).  eh* is already
+		# the beyond-deadband error (0 inside the band → integral frozen there by
+		# construction), the leak always applies, and the boost is a bounded FRACTION of
+		# motor_max_impulse.  boost_frac ≈ servo_ki × |err| at integral saturation
+		# (τ = 0.4 s), so servo_ki {1, 3, 6} ≈ {10, 30, 60}% boost at a 0.1 rad
+		# sustained load error.  0 = off, byte-identical.
+		if servo_ki > 0.0:
+			if _ki_int.size() != 12:
+				_ki_int.resize(12)
+				for _k in range(12): _ki_int[_k] = 0.0
+			var _ki_leak: float = 1.0 - 1.0 / (SERVO_KI_TAU * float(physics_hz))
+			var _ehs: Array = [eh1, eh2, ekn]
+			var _imps: Array = [imp_h1, imp_h2, imp_kn]
+			for _jn in range(3):
+				var _kx: int = _jn * 4 + i
+				_ki_int[_kx] = _ki_int[_kx] * _ki_leak + _ehs[_jn] / float(physics_hz)
+				var _bf: float = clamp(servo_ki * abs(_ki_int[_kx]) / SERVO_KI_TAU,
+									   0.0, SERVO_KI_AUTH_FRAC)
+				_imps[_jn] = _imps[_jn] * (1.0 + _bf)
+				_ki_mag_acc += abs(_ki_int[_kx]); _ki_mag_n += 1
+				_ki_total_ticks += 1
+				if _bf > 0.01: _ki_boost_ticks += 1
+			imp_h1 = _imps[0]; imp_h2 = _imps[1]; imp_kn = _imps[2]
 		if use_freeplay:
 			# Inside the band the hard motor is released.  What acts there instead is the
 			# SOFT SPRING below — see _soft_spring_cmd().
@@ -8599,6 +8648,10 @@ func _powered_torque(target: float, angle: float, omega: float, max_torque: floa
 	# slop zone where the motor leaves the joint alone.  In this zone only
 	# gravity acts (a passive centering spring was attempted but is unstable
 	# at picrawler scale via apply_torque — deferred to G6DOFJoint3D).
+	# ⚠ TELEMETRY PATH ONLY (verified 2026-08-10 the hard way: a force boost added
+	# here produced BIT-IDENTICAL trajectories — nothing physical reads this value;
+	# the joints' impulse caps flow through imp_* → _set_motor_vf).  Any actuation
+	# lever must attach THERE, not here.
 	if abs(error) < max(SERVO_DEADBAND, motor_freeplay_rad):
 		return 0.0
 	# 2026-06-01 — motor_damping_factor scales the implicit Kd for tunable
@@ -9447,6 +9500,12 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 				 snappedf(_up_acc_last.z - _up_est_body.z, 0.00001)],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
+	# FileAccess buffers and the quit path never closes this file, so an unflushed
+	# trace silently loses its TAIL — every banked trace was found truncated at
+	# 1.9–4 MB of an expected ~12 MB (2026-08-09).  A truncated instrument is worse
+	# than a slow one: it reads as "early-run behavior" without saying so.
+	if tick_counter % 200 == 0:
+		_trace_file.flush()
 	for k in range(4):
 		_grf_fwd[k] = 0.0    # drain: each line reports one brain tick
 		_grf_up[k]  = 0.0
@@ -10041,6 +10100,36 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 					int(_g.get("mitosis_count", -1)), snappedf(_top1, 0.001),
 						snappedf(float(_g.get("autotune_value", -1.0)), 0.000001),
 						snappedf(float(_g.get("min_insertion_error", -1.0)), 0.000001)]
+	# 2026-08-10 (P5) — body-pose EPM per-tick token mirror.  get_module_metrics reads the
+	# bus last-value token, so at OGMA_PICRAWLER_DIAG_INTERVAL=1 this gives the SAME-tick
+	# tle/winner the anticipation analysis joins against the trace's contact events.
+	# Absent modules simply add no keys — zero cost on configs without the EPMs.
+	if brain != null and brain.has_method("get_module_metrics"):
+		var _pm = brain.get_module_metrics()
+		for _bpid in ["body_pose", "body_pose_t"]:
+			if _pm.has(_bpid):
+				var _bp = _pm[_bpid]
+				var _tag = "bp" if _bpid == "body_pose" else "bpt"
+				line[_tag + "_tle"] = snappedf(float(_bp.get("tle", -1.0)), 0.0001)
+				line[_tag + "_win"] = int(_bp.get("winner_id", -1))
+				line[_tag + "_n"]   = int(_bp.get("node_count", -1))
+				line[_tag + "_b"]   = int(_bp.get("baked_count", -1))
+	# 2026-08-10 (P7) — SERVO_KI consumer check: mean |integral| and boost duty.  Both
+	# 0.0 with the lever on = the integral never engaged (deadband too wide, or the
+	# body never loads its servos — either way the arm measured nothing).
+	if servo_ki > 0.0:
+		line["ki_mag"]  = snappedf(_ki_mag_acc / max(1, _ki_mag_n), 0.00001)
+		line["ki_duty"] = snappedf(float(_ki_boost_ticks) / max(1, _ki_total_ticks), 0.001)
+	# 2026-08-09 (substrate-repair P0) — BodyRhythmTracker lock quality, mirrored so a
+	# seedavg arm can read whether the body's own rhythm reference is actually locked
+	# (brt_plv near 1 = swing crossings land at one phase) rather than merely warmed up.
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _bs = JSON.parse_string(str(brain.get_module_snapshot("body_rhythm_tracker")))
+		if _bs is Dictionary and _bs.has("module"):
+			var _bm = _bs["module"]
+			line["brt_plv"]    = snappedf(float(_bm.get("lock_plv", 0.0)), 0.001)
+			line["brt_err"]    = snappedf(float(_bm.get("lock_err_ema", -1.0)), 0.001)
+			line["brt_period"] = snappedf(float(_bm.get("period_est", 0.0)), 0.01)
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
@@ -10058,6 +10147,26 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["sup_bin"]  = int(_mm.get("support_bin", -1))
 			line["sup_val"]  = snappedf(float(_mm.get("support_value", 1.0)), 0.001)
 			line["sup_mult"] = snappedf(float(_mm.get("support_mult", 1.0)), 0.001)
+			# 2026-08-09 — raw |dx|/|du| responsiveness, the numerator of the actuator-search
+			# criterion value = responsiveness/(motor_tle+ε).  Unconditional in MotorEPMv2 so
+			# EVERY arm can be scored on the criterion, selector present or not.
+			line["sup_resp"] = snappedf(float(_mm.get("support_resp", 0.0)), 0.0001)
+			# 2026-08-09 — stance_release_frac consumer check: fraction of stance-lift
+			# ticks with the release live.  0.0 with the lever on = detector never fired.
+			line["sr_duty"] = snappedf(float(_mm.get("sr_duty", 0.0)), 0.001)
+			# 2026-08-09 P1 — shadow phases (zero authority), per tick, for offline
+			# scoring against the trace's contact ground truth.  STAYS INSIDE the _mm
+			# block: a mirror placed after it once dedented the scope and killed the
+			# whole body script (see the P0 commit).
+			for _shk in ["sh_a", "sh_b", "sh_c", "ph_l"]:
+				var _shv = _mm.get(_shk, [])
+				if _shv is Array and _shv.size() > 0:
+					var _shr: Array = []
+					for _v in _shv: _shr.append(snappedf(float(_v), 0.001))
+					line[_shk] = _shr
+			line["sh_ra"] = snappedf(float(_mm.get("sh_a_retro", -1.0)), 0.001)
+			line["sh_rb"] = snappedf(float(_mm.get("sh_b_retro", -1.0)), 0.001)
+			line["sh_rc"] = snappedf(float(_mm.get("sh_c_retro", -1.0)), 0.001)
 			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.

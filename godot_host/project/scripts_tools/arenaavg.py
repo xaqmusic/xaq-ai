@@ -108,6 +108,14 @@ def parse(path):
             lifts = ll
     if len(xs) < 5:
         return None
+    # RUN-COMPLETION GUARD (2026-08-10, mirrored from seedavg): a crashed run's log
+    # simply stops, and scoring the corpse manufactured the walk-or-shuffle "basin
+    # lottery" (ledger §4 ★★★★).  Truncated runs are excluded loudly, never averaged.
+    expected = int(os.environ.get("SEEDAVG_EXPECT_TICKS", "0"))
+    if expected > 0 and ts and ts[-1] < 0.95 * expected:
+        print(f"  !! CRASHED/TRUNCATED RUN: {os.path.basename(path)} ended at t={ts[-1]}"
+              f" of {expected} — excluded from averages")
+        return dict(_crashed=True, last_t=ts[-1])
 
     # Unwrapped net rotation.  Kept only as a companion to `straight` -- on its own it is a
     # BLIND metric (a body that swings its heading and nets ~0 scores perfectly).
@@ -141,8 +149,38 @@ def parse(path):
     # Mechanism metrics, carried from the last diag line (they are cumulative run means).
     for k in ("yaw_allplant", "yaw_anyswing", "yaw_swing_excess", "swing_tuck_frac",
               "yawd_allplant", "yawd_anyswing", "yawd_swing_excess",
-              "sgate", "sgate_spr", "contact_duty", "td_plv", "pos_stance", "pos_swing"):
+              "sgate", "sgate_spr", "contact_duty", "td_plv", "pos_stance", "pos_swing",
+              # P6 (2026-08-10): rhythm + detector + body-rhythm reads, all cumulative
+              # run-means carried on the same diag lines (need gait_align_diag=1).
+              "step_cv_real", "step_per_real", "stance_bout", "swing_bout",
+              "short_bouts", "brt_plv", "brt_err", "brt_period"):
         r[k] = float(last.get(k, 0.0)) if last else 0.0
+    # WINDOWED activity (P6): steps + displacement per quarter of the run — the ctrl_lr
+    # ladder's activity PEAKS at 14–20k and decays, and an aggregate averages that away
+    # (the 2026-08-02 protocol lesson).  Vectors, printed outside the scalar groups.
+    if ts and lifts and lifts0:
+        t0, t1 = ts[0], ts[-1]
+        span = max(1, t1 - t0)
+        marks = [t0 + span * q // 4 for q in range(5)]
+        w_steps, w_disp = [], []
+        # per-line cumulative lifts were only kept as first/last; re-scan cheaply:
+        cum = []
+        for line in open(path):
+            if '"leg_lifted_counts"' not in line: continue
+            try: d = json.loads(line.strip())
+            except Exception: continue
+            ll = d.get("leg_lifted_counts")
+            if isinstance(ll, list) and ll:
+                cum.append((d.get("t", 0), sum(ll), d.get("x", 0.0), d.get("z", 0.0)))
+        for q in range(4):
+            seg = [c for c in cum if marks[q] <= c[0] < marks[q + 1]]
+            if len(seg) >= 2:
+                w_steps.append(seg[-1][1] - seg[0][1])
+                w_disp.append(math.hypot(seg[-1][2] - seg[0][2], seg[-1][3] - seg[0][3]))
+            else:
+                w_steps.append(0); w_disp.append(0.0)
+        r["w_steps"] = w_steps
+        r["w_disp"]  = [round(v, 2) for v in w_disp]
     r["yaw_per_leg"]  = (last or {}).get("yaw_per_leg", [])
     r["yawd_per_leg"] = (last or {}).get("yawd_per_leg", [])
     return r
@@ -160,10 +198,15 @@ if __name__ == "__main__":
     diff = sys.argv[4] if len(sys.argv) > 4 else "0.3"
     extra = list(sys.argv[5:])
     seeds = list(range(1, n + 1))
+    os.environ["SEEDAVG_EXPECT_TICKS"] = str(steps)   # arm the completion guard
     with cf.ThreadPoolExecutor(max_workers=min(8, n)) as ex:
         res = list(ex.map(lambda s: run_one(cfg, s, steps, diff, extra), seeds))
-    ok = [r for r in res if r]
+    crashed = [i + 1 for i, r in enumerate(res) if r and r.get("_crashed")]
+    ok = [r for r in res if r and not r.get("_crashed")]
     print(f"\n{cfg}  [ARENA]  (n={len(ok)}/{n} seeds, {steps} ticks, diff {diff})")
+    if crashed:
+        print(f"  !! {len(crashed)}/{n} RUNS CRASHED (seeds {crashed}) — fix the build "
+              f"before comparing")
     if not ok:
         print("  no valid runs"); sys.exit(1)
 
@@ -177,6 +220,11 @@ if __name__ == "__main__":
         ("POSTURE (sprawl) -- design rest: tib_off 10 deg; total leg reach 166 mm",
          ("tib_off", "foot_r")),
         ("RHYTHM", ("steps", "step_bal", "contact_duty", "td_plv", "pos_stance", "pos_swing")),
+        # P6: true-contact regularity (micro-lifts filtered) + detector + body-rhythm
+        # lock.  All 0.0 unless the arm sets gait_align_diag=1.
+        ("STEP-CLOCK", ("step_cv_real", "step_per_real", "stance_bout", "swing_bout",
+                        "short_bouts")),
+        ("BODY-RHYTHM", ("brt_plv", "brt_err", "brt_period")),
     )
     for label, keys in GROUPS:
         print(f"  -- {label}")
@@ -193,6 +241,13 @@ if __name__ == "__main__":
         print("  -- YAW IMPULSE BY LIMB (mean |d yaw rate| while that limb is airborne)")
         for name, col in zip(("FL", "FR", "RL", "RR"), cols):
             print(f"     {name:<17} mean={statistics.mean(col):+.4f}   [{'  '.join(f'{c:.4f}' for c in col)}]")
+    # P6 windowed activity: quarter-run steps + displacement per seed — the honest read
+    # of a peak-and-decay trajectory an aggregate would average away.
+    if ok[0].get("w_steps"):
+        print("  -- WINDOWS (quarter-run [Q1 Q2 Q3 Q4] per seed)")
+        for nm, key in (("w_steps", "w_steps"), ("w_disp", "w_disp")):
+            rows = "  |  ".join(" ".join(f"{v}" for v in r.get(key, [])) for r in ok)
+            print(f"     {nm:<10} {rows}")
     near = [(i + 1, r["max_r"]) for i, r in enumerate(ok) if r["max_r"] > ARENA_SAFE_R]
     if near:
         print(f"\n  !! ARENA-BOUNDARY WARNING: {len(near)}/{len(ok)} seeds passed r={ARENA_SAFE_R}")
