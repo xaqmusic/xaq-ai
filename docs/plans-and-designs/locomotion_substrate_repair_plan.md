@@ -546,6 +546,16 @@ alone (transport-first), (b) bake both (rhythm/safety-first — arguably the har
 profile: higher cadence, less per-step torque, fewer falls), or (c) dose-search the
 middle (h1k1 held transport at n=6 with one wobble seed — n=20 unmeasured).
 
+**2026-08-10 — THE DESCENT PRESS: diagnosis confirmed, trade conserved, frontier
+mapped.** swing_descend_gain (hip2 flips lift→press past half the leg's own swing
+duration): transport recovers DOSE-MONOTONICALLY (8.34 → 9.23 → 9.81 at 0/0.2/0.4 —
+the operator's late-plant diagnosis is causal), but rhythm pays back proportionally
+(cv 0.75 → 0.85 → 0.89) and step density halves. **The posture family now spans a
+mapped frontier — stance tuck / swing lift+fold / descent press are three orthogonal
+knobs trading rhythm-density against stride length — and the plain TUCK still
+Pareto-holds its point (9.79 / 0.81 / falls 0.05).** Operator picks the operating
+point; any chosen point gets n=20 + traces + UI before promotion.
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
