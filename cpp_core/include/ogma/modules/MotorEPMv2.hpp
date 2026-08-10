@@ -1335,6 +1335,15 @@ private:
     int     ctd_n_[8]   = {0,0,0,0,0,0,0,0};
     uint8_t ctd_prev_con_[8] = {0,0,0,0,0,0,0,0};
     float   coord_td_R_diag_ = -1.0f;   // last window's touchdown-consistency, −1 = none yet
+    // ── P4 arm 3b (2026-08-10): interval-CV selection (coord_cv_weight).  Arm 3's miss
+    // was diagnostic — phase-consistency ≠ time-regularity.  This penalizes the fitness
+    // by the mean |interval − running period| / period over the window's DEBOUNCED
+    // touchdowns (the v3 machinery's accepted intervals), selecting literally the
+    // operator's step-regularity number.  0 = off, byte-identical.
+    double  coord_cv_weight_ = 0.0;
+    double  ccv_dev_sum_ = 0.0;
+    int     ccv_dev_n_   = 0;
+    float   coord_cv_diag_ = -1.0f;     // last window's mean interval deviation
     float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
     float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase
     float   td_ref_sin_[8] = {0,0,0,0,0,0,0,0};
