@@ -41,65 +41,86 @@ extends Node3D
 ##   "Leg-local lateral" = world UP × heading (rotated 90° CCW in horizontal).
 
 # ---------------------------------------------------------------------------
-# Geometry — measured from PiCrawler hardware (mm in spec, m in Godot)
+# Geometry — the BODY, loaded from a swappable JSON before _build_body()
 # ---------------------------------------------------------------------------
-const TAU: float = 0.02              # 50 Hz brain tick
-const L1: float = 0.03726             # hip1 → hip2 (coxa segment length)
-const L2: float = 0.0536              # hip2 → knee (upper leg)
-const L3: float = 0.0755              # knee → toe (lower leg + foot)
-const COXA_Z_DROP: float = 0.007      # vertical drop from chassis-mounted hip1 to hip2
+# 2026-08-10: these were `const` until the physical robot reached the bench and
+# its MEASURED geometry turned out to differ materially from the CAD export
+# (see docs/operational/picrawler_geometry.md §"Measured from the built robot"
+# and docs/plans-and-designs/picrawler_sim2real_port.md).  They are now `var`s
+# populated by _load_geometry() BEFORE _build_body(), which makes the body
+# swappable — including mid-run, via _rebuild_body(), for the morphological
+# (d) test.
+#
+# The literals below ARE the CAD body and remain the fallback if the JSON is
+# missing or malformed, so a load failure degrades to the historical build
+# rather than to something silently wrong.  Rationale for each value stays
+# HERE; the JSON carries bare numbers so no documentation is lost.
+@export var body_geometry_path: String = "res://addons/ami_ogma/body/cad.json"
+var _geometry_name: String = "cad"   # whatever was actually loaded; shown in diagnostics
 
-const CHASSIS_X: float = 0.098
-const CHASSIS_Y: float = 0.042
-const CHASSIS_Z: float = 0.098
-const HIP_X_SPAN: float = 0.0766      # hip1 mount rectangle width  (76.6 mm)
-const HIP_Z_SPAN: float = 0.066       # hip1 mount rectangle length (66 mm)
+# The @export literal for target_height / peak_height.  _recompute_derived_
+# geometry() treats "still equal to this" as "nobody set it explicitly", and
+# only then re-points it at the loaded STANDING_CHASSIS_Y.
+const _EXPORT_DEFAULT_HEIGHT: float = 0.082
 
-const STANDING_CHASSIS_Y: float = 0.082   # = real measured chassis-to-floor.
-										  # We spawn at this height so feet START on the floor
-										  # (no fall, no impact).  Previous 0.105 spawn meant
-										  # 23mm drop on launch → asymmetric foot impacts
-										  # propagated through joints to tilt the chassis.
+const TAU: float = 0.02              # 50 Hz brain tick — NOT geometry, stays const
+var L1: float = 0.03726              # hip1 → hip2 (coxa segment length)
+var L2: float = 0.0536               # hip2 → knee (upper leg)
+var L3: float = 0.0755               # knee → toe (lower leg + foot)
+var COXA_Z_DROP: float = 0.007       # vertical drop from chassis-mounted hip1 to hip2
+
+var CHASSIS_X: float = 0.098
+var CHASSIS_Y: float = 0.042
+var CHASSIS_Z: float = 0.098
+var HIP_X_SPAN: float = 0.0766       # hip1 mount rectangle width  (76.6 mm)
+var HIP_Z_SPAN: float = 0.066        # hip1 mount rectangle length (66 mm)
+
+# = real measured chassis-to-floor.  We spawn at this height so feet START on
+# the floor (no fall, no impact).  Previous 0.105 spawn meant 23mm drop on
+# launch → asymmetric foot impacts propagated through joints to tilt the chassis.
+var STANDING_CHASSIS_Y: float = 0.082
 
 # Standing-pose joint angles for the PD rest targets.  All zero because
 # the construction-time relative orientation between adjacent bodies is
 # IDENTITY (both built with IDENTITY basis at their world-positioned
 # centers), so the joint reports angle 0 at the standing pose.  PD
 # targeting 0 keeps the body in its construction pose.
-const HIP1_REST: float = 0.0
-const HIP2_REST: float = 0.0
+var HIP1_REST: float = 0.0
+var HIP2_REST: float = 0.0
 # Calibration confirmed (2026-05-16): hip1=0, hip2=0, knee=−1.6 produces
 # a perfect X-stance for all four legs.  KNEE_REST is the joint angle
 # the motor commands when brain action u_knee=0 — set to standing so
 # the brain starts at a stable base pose and learns balance around it.
-const KNEE_REST: float = -1.6
+var KNEE_REST: float = -1.6
 # LEG GEOMETRY only: how much to rotate heading around lateral to compute
 # the standing-pose lower-leg DIRECTION (not the same as the joint angle).
 # −1.396 rad ≈ −80° puts the lower leg almost vertical with toe down.
-const LOWER_LEG_DROP_ANGLE: float = -1.396
+var LOWER_LEG_DROP_ANGLE: float = -1.396
 
 # Joint angle limits — knee is centered at −1.6 (standing pose) with a
 # full ±1.4 rad brain-command range around it, so limits must span
 # [−3.0, −0.2] at minimum.  Hip1/hip2 are centered at 0 with ±1.4 range.
-const HIP1_LIMIT: float       =  1.40     # ±80° around 0  (hip1 yaw)
-const HIP2_LIMIT: float       =  1.40     # ±80° around 0  (hip2 pitch)
-const KNEE_LIMIT_LOW:  float  = -2.50     # 2026-06-01: widened from -1.70 to allow
-										  # deeper bend (deep-tuck / crouch postures
-										  # in the negative u direction).  Symmetric
-										  # limits were under-utilizing the physical
-										  # range — at rest=-1.6 with old limit -1.70
-										  # the brain only reached -97° on the bend
-										  # side.  -2.50 ≈ -143° leaves headroom from
-										  # the -π = -3.14 quaternion wrap point while
-										  # giving Cruse/Walknet-style deep-stance
-										  # poses a place to sit.  Pairs with the
-										  # asymmetric KNEE_RANGE_HYPEREXT below.
-const KNEE_LIMIT_HIGH: float  = +1.70     # symmetric with KNEE_LIMIT_LOW around the
-										  # perpendicular rest pose.  Setting UPPER to
-										  # exactly the rest value (0) made the hinge
-										  # constraint asymmetric and the motor unable
-										  # to drive past the gravity equilibrium on
-										  # the negative side.
+var HIP1_LIMIT: float = 1.40         # ±80° around 0  (hip1 yaw)
+var HIP2_LIMIT: float = 1.40         # ±80° around 0  (hip2 pitch)
+
+# 2026-06-01: widened from -1.70 to allow deeper bend (deep-tuck / crouch
+# postures in the negative u direction).  Symmetric limits were under-utilizing
+# the physical range — at rest=-1.6 with old limit -1.70 the brain only reached
+# -97° on the bend side.  -2.50 ≈ -143° leaves headroom from the -π = -3.14
+# quaternion wrap point while giving Cruse/Walknet-style deep-stance poses a
+# place to sit.  Pairs with the asymmetric KNEE_RANGE_HYPEREXT below.
+var KNEE_LIMIT_LOW: float = -2.50
+
+# Symmetric with KNEE_LIMIT_LOW around the perpendicular rest pose.  Setting
+# UPPER to exactly the rest value (0) made the hinge constraint asymmetric and
+# the motor unable to drive past the gravity equilibrium on the negative side.
+var KNEE_LIMIT_HIGH: float = 1.70
+
+# ⚠ HARDWARE NOTE (2026-08-10): KNEE_RANGE_FOLD/HYPEREXT below let the brain
+# COMMAND a 232° knee span; a 500–2500 µs hobby servo has ~180°.  The deployed
+# gait only OCCUPIES 113° (−98…+15), so this is not a porting blocker — but the
+# limits are fiction, and hardware must be granted occupancy-plus-margin rather
+# than the commanded span.  See picrawler_sim2real_port.md §Phase 2.
 
 # Masses calibrated to SunFounder PiCrawler published 600g total.
 # Previous estimate underweighted legs (14g) — actual servo + bracket +
@@ -111,14 +132,17 @@ const KNEE_LIMIT_HIGH: float  = +1.70     # symmetric with KNEE_LIMIT_LOW around
 #   Upper (25g):  knee servo + upper-arm bracket + connectors
 #   Lower (25g):  lower-arm bracket + foot + extension
 # Total: 300 + 4×(25+25+25) = 600g.
-const CHASSIS_MASS: float = 0.300
-const COXA_MASS: float    = 0.025
-const UPPER_MASS: float   = 0.025
-const LOWER_MASS: float   = 0.025
+# ⚠ The real robot weighs 590 g with 62 g legs ⇒ a 58/42 body/leg split, not the
+# 50/50 these values give.  Corrected numbers ship in body/measured.json; these
+# stay as the CAD body.  Comments at :1605 and :8714 still assert the 50 % figure.
+var CHASSIS_MASS: float = 0.300
+var COXA_MASS: float    = 0.025
+var UPPER_MASS: float   = 0.025
+var LOWER_MASS: float   = 0.025
 
 # Visual/collision sizes
-const COXA_RADIUS: float = 0.020          # thicker stub
-const LEG_RADIUS:  float = 0.012          # thinner segments
+var COXA_RADIUS: float = 0.020       # thicker stub
+var LEG_RADIUS:  float = 0.012       # thinner segments
 
 # Servo model — calibrated for sim-to-real fidelity per docs/servo_dynamics.md.
 # Metal-gear hobby servo (~MG90S class), heavy gear train, stiff PWM tracker.
@@ -513,8 +537,8 @@ func _apply_joint_solver_params() -> void:
 		j.set_param_x(Generic6DOFJoint3D.PARAM_ANGULAR_LIMIT_SOFTNESS, joint_angular_limit_softness)
 		j.set_param_x(Generic6DOFJoint3D.PARAM_ANGULAR_ERP, joint_angular_erp)
 
-const KNEE_LIMIT_LOW_NARROW: float  = -1.70  # pre-widening (toggle=false)
-const KNEE_RANGE_SYMMETRIC:  float  =  1.40  # pre-widening (toggle=false), == HIP_TARGET_RANGE
+var KNEE_LIMIT_LOW_NARROW: float = -1.70  # pre-widening (toggle=false)
+var KNEE_RANGE_SYMMETRIC:  float =  1.40  # pre-widening (toggle=false), == HIP_TARGET_RANGE
 
 func _set_knee_widening_enabled(value: bool) -> void:
 	var changed: bool = (knee_widening_enabled != value)
@@ -617,6 +641,20 @@ func _set_knee_widening_enabled(value: bool) -> void:
 @export var auto_reset_on_inversion:    bool  = true
 @export var auto_reset_tilt_threshold:  float = 2.094   # ~120°  — past on-its-side
 @export var auto_reset_max_height:      float = 0.030   # m       — chassis on floor
+# ⚠ auto_reset_max_height is an ORIGIN height, and the origin's height when the
+# body is resting on its back depends on the chassis SHAPE.  The 0.030 default
+# was calibrated against the legacy single box, whose top sits CHASSIS_Y/2 =
+# 21 mm above the node origin — so it really encoded "9 mm of slack above the
+# height this body rests at when inverted".
+#
+# The measured body comes to rest on the RPi / Robot-HAT stack, whose top is
+# 77 mm above the origin.  Inverted, chassis_y ≈ 0.077 — never below a fixed
+# 0.030 — so the belly-up reset could NEVER fire on the new chassis.
+#
+# Fix: preserve the SLACK, not the absolute number, keying off _chassis_top_local.
+#   cad      → 0.021 + 0.009 = 0.030  (byte-identical to the old behaviour)
+#   measured → 0.077 + 0.009 = 0.086  (fires when down on the HAT block)
+const _LEGACY_INVERTED_REST_H: float = 0.021   # legacy CHASSIS_Y/2, the calibration ref
 @export var auto_reset_dwell_ticks:     int   = 30      # ticks   — ~0.5 s at 60 Hz
 # Phase 6.14 — outer-wall reset.  When ON, fires _pending_manual_reset
 # the moment chassis horizontal distance from origin exceeds
@@ -710,6 +748,24 @@ const _LAYER_CHASSIS: int = 1 << 2   # chassis-only layer — floor.mask does
 # ---------------------------------------------------------------------------
 @onready var brain: OgmaBrain = $Brain
 var _chassis: RigidBody3D
+# Set by _rebuild_body() so a live body swap reconstructs AT THE CURRENT POSE
+# instead of respawning at the origin — otherwise the morphological (d) test is
+# confounded by a teleport.  Ignored on the initial _ready() build.
+var _body_spawn_xform: Transform3D = Transform3D.IDENTITY
+var _body_spawn_valid: bool = false
+# Optional multi-box chassis (the measured body: base plate + electronics stack).
+# EMPTY means the legacy single-box path runs untouched — that is what keeps
+# cad.json byte-identical rather than merely equivalent.
+var _chassis_boxes: Array = []
+# Explicit chassis centre of mass, in chassis-local coords.  A RigidBody3D has
+# ONE mass, so an internal distribution can only be expressed this way.
+var _chassis_com: Vector3 = Vector3.ZERO
+var _chassis_com_valid: bool = false
+# Height of the HIGHEST chassis surface above the node origin — i.e. the surface
+# the body comes to rest on when INVERTED.  Legacy single box: CHASSIS_Y/2.
+# Measured two-box body: the top of the RPi / Robot-HAT stack.  The belly-up
+# auto-reset keys off this; see _LEGACY_INVERTED_REST_H.
+var _chassis_top_local: float = 0.021
 # Walking-trail UI helper (sibling node found at _build time); cached so
 # _do_hard_reset() can wipe its X-markers without re-traversing the tree.
 # Burst-onset probe state — see the trigger in _clip_record().
@@ -1327,7 +1383,10 @@ var _foot_load_ema: Array[float] = [0.0, 0.0, 0.0, 0.0]
 const _FOOT_LOAD_ALPHA: float = 0.15
 # Static weight as a PER-PHYSICS-STEP impulse (N·s), which is the unit
 # get_contact_impulse returns.  chassis + 4 legs x (coxa+upper+lower).
-const _TOTAL_MASS: float = CHASSIS_MASS + 4.0 * (COXA_MASS + UPPER_MASS + LOWER_MASS)
+# ⚠ Was `const ... = CHASSIS_MASS + ...` — a const folded from consts, which
+# would have silently kept the CAD total once the masses became loadable vars.
+# Recomputed by _load_geometry(); the literal here is only a pre-load fallback.
+var _TOTAL_MASS: float = 0.600
 var _slick_leg: int = -1
 var _slick_at: int = 0
 var _slick_done: bool = false
@@ -1552,7 +1611,12 @@ var _hit_cum_step_quality:      float = 0.0
 # height_penalty_gain=0 (default), the penalty arm is off and the
 # reward simply caps at target_height — preserves byte-identical
 # behaviour vs. pre-v6.0.b.11 when target_height = STANDING_CHASSIS_Y.
-@export var target_height:         float = STANDING_CHASSIS_Y   # 0.082 default — back-compat
+# ⚠ Literal, not STANDING_CHASSIS_Y: an @export default is evaluated at class
+# init, before _load_geometry() runs, so it cannot reference a loadable var.
+# _load_geometry() re-points it at the loaded standing height IF it is still
+# sitting at this literal — so a swapped body follows, while env
+# (OGMA_PICRAWLER_TARGET_HEIGHT) and curriculum overrides still win.
+@export var target_height:         float = 0.082   # = CAD STANDING_CHASSIS_Y — back-compat
 @export var height_penalty_grace:  float = 0.02                  # m above target before penalty engages
 @export var height_penalty_scale:  float = 0.03                  # m above (target+grace) for full intensity
 @export var height_penalty_gain:   float = 0.0                   # events.miss intensity at full; 0 = mechanism off
@@ -1580,7 +1644,8 @@ var _hit_cum_step_quality:      float = 0.0
 #                  pull may suppress the "keep climbing" failure mode the
 #                  trapezoid + per-tick penalty couldn't eliminate.
 @export var reward_shape: String = "trapezoid"
-@export var peak_height:  float  = STANDING_CHASSIS_Y   # used by inverted_u; default = standing
+@export var peak_height:  float  = 0.082   # = CAD STANDING_CHASSIS_Y; used by inverted_u.
+										   # Same init-order caveat as target_height above.
 @export var band_width:   float  = 0.04                  # m; reward → 0 at peak ± band_width
 # V9 spider-stance floor — anti-belly-flop safety bound.  When chassis_y falls
 # below this, chassis_y_norm (the reward-side height factor used by standing /
@@ -2381,6 +2446,12 @@ static func servo_idx(leg: int, jt: int) -> int:
 # Boot
 # ---------------------------------------------------------------------------
 func _ready() -> void:
+	# FIRST — the body's own dimensions, before anything reads or builds them.
+	# Must precede the env/curriculum resolution further down (_resolve_env,
+	# ExperimentConfig.resolve_*) so those overrides still win over the body's
+	# defaults rather than being stomped by them.
+	_load_geometry()
+
 	# Apply physics oversampling.
 	Engine.physics_ticks_per_second = physics_hz
 	ProjectSettings.set_setting("physics/3d/solver/solver_iterations", solver_iterations)
@@ -2908,19 +2979,7 @@ func _ready() -> void:
 		OS.get_environment("OGMA_PICRAWLER_CURRICULUM"),
 		str(ExperimentConfig.get("picrawler_curriculum_path")) if ExperimentConfig.has_method("get") else "(no_get)"])
 
-	# Re-target orbit camera if present
-	var cam: Node = get_tree().get_root().find_child("Camera3D", true, false)
-	if cam != null and cam.has_method("set_target"):
-		cam.call("set_target", _chassis)
-
-	# Wire up the walking-trail visualiser (picrawler-specific UI helper).
-	# Same target-set-by-body pattern as the camera since the chassis is
-	# built programmatically and isn't reachable via NodePath at scene-
-	# load time.
-	var trail: Node = get_tree().get_root().find_child("WalkingTrail", true, false)
-	if trail != null and trail.has_method("set_target"):
-		trail.call("set_target", _chassis)
-		_walking_trail = trail
+	_retarget_body_watchers()
 
 	print("PicrawlerBody: built — chassis at y=%.3f, leg_strength=%.2f, reset_mode=%s" % [
 		STANDING_CHASSIS_Y, leg_strength, reset_mode])
@@ -4026,11 +4085,234 @@ func _apply_chassis_collision() -> void:
 		chassis_collides, n])
 	_ui_notify("[J] chassis collision: %s" % ("ON" if chassis_collides else "OFF (ghost)"))
 
+# ---------------------------------------------------------------------------
+# Geometry loading — populates the body vars from JSON before _build_body()
+# ---------------------------------------------------------------------------
+# Called first thing in _ready(), and again by _rebuild_body() for a live swap.
+#
+# A missing or malformed file is deliberately NON-FATAL: the class-level
+# literals ARE the CAD body, so a load failure degrades to the historical build
+# rather than to something silently wrong.  Returns true iff a file was applied.
+#
+# OGMA_PICRAWLER_BODY selects the body without editing the scene, so the A/B
+# harnesses can swap it per-arm.  Accepts a bare name ("measured") or a full
+# res:// path.
+func _load_geometry(path_override: String = "") -> bool:
+	var p: String = body_geometry_path
+	if path_override != "":
+		p = path_override
+	else:
+		var env_body: String = OS.get_environment("OGMA_PICRAWLER_BODY")
+		if env_body != "":
+			p = env_body if env_body.begins_with("res://") \
+				else "res://addons/ami_ogma/body/%s.json" % env_body
+
+	var applied: bool = false
+	if not FileAccess.file_exists(p):
+		push_warning("PicrawlerBody: geometry '%s' not found — keeping built-in CAD values" % p)
+	else:
+		var f := FileAccess.open(p, FileAccess.READ)
+		if f == null:
+			push_warning("PicrawlerBody: cannot open geometry '%s' — keeping built-in CAD values" % p)
+		else:
+			var txt: String = f.get_as_text()
+			f.close()
+			var parsed: Variant = JSON.parse_string(txt)
+			if not (parsed is Dictionary):
+				push_error("PicrawlerBody: geometry '%s' is not a JSON object — keeping built-in CAD values" % p)
+			else:
+				_apply_geometry(parsed as Dictionary)
+				_geometry_name = str((parsed as Dictionary).get("name", p.get_file()))
+				applied = true
+				print("PicrawlerBody: geometry '%s' loaded from %s" % [_geometry_name, p])
+
+	_recompute_derived_geometry()
+	return applied
+
+# Reads one nested float, leaving the current value untouched if absent — so a
+# partial JSON overrides only what it names.
+func _geom_f(d: Dictionary, group: String, key: String, current: float) -> float:
+	if d.has(group) and d[group] is Dictionary:
+		var g: Dictionary = d[group]
+		if g.has(key):
+			return float(g[key])
+	return current
+
+func _apply_geometry(d: Dictionary) -> void:
+	L1                   = _geom_f(d, "links", "l1", L1)
+	L2                   = _geom_f(d, "links", "l2", L2)
+	L3                   = _geom_f(d, "links", "l3", L3)
+	COXA_Z_DROP          = _geom_f(d, "links", "coxa_z_drop", COXA_Z_DROP)
+
+	CHASSIS_X            = _geom_f(d, "chassis", "x", CHASSIS_X)
+	CHASSIS_Y            = _geom_f(d, "chassis", "y", CHASSIS_Y)
+	CHASSIS_Z            = _geom_f(d, "chassis", "z", CHASSIS_Z)
+	HIP_X_SPAN           = _geom_f(d, "chassis", "hip_x_span", HIP_X_SPAN)
+	HIP_Z_SPAN           = _geom_f(d, "chassis", "hip_z_span", HIP_Z_SPAN)
+	STANDING_CHASSIS_Y   = _geom_f(d, "chassis", "standing_y", STANDING_CHASSIS_Y)
+
+	HIP1_REST            = _geom_f(d, "rest", "hip1", HIP1_REST)
+	HIP2_REST            = _geom_f(d, "rest", "hip2", HIP2_REST)
+	KNEE_REST            = _geom_f(d, "rest", "knee", KNEE_REST)
+	LOWER_LEG_DROP_ANGLE = _geom_f(d, "rest", "lower_leg_drop_angle", LOWER_LEG_DROP_ANGLE)
+
+	HIP1_LIMIT           = _geom_f(d, "limits", "hip1", HIP1_LIMIT)
+	HIP2_LIMIT           = _geom_f(d, "limits", "hip2", HIP2_LIMIT)
+	KNEE_LIMIT_LOW       = _geom_f(d, "limits", "knee_low", KNEE_LIMIT_LOW)
+	KNEE_LIMIT_HIGH      = _geom_f(d, "limits", "knee_high", KNEE_LIMIT_HIGH)
+	KNEE_LIMIT_LOW_NARROW = _geom_f(d, "limits", "knee_low_narrow", KNEE_LIMIT_LOW_NARROW)
+
+	CHASSIS_MASS         = _geom_f(d, "masses", "chassis", CHASSIS_MASS)
+	COXA_MASS            = _geom_f(d, "masses", "coxa", COXA_MASS)
+	UPPER_MASS           = _geom_f(d, "masses", "upper", UPPER_MASS)
+	LOWER_MASS           = _geom_f(d, "masses", "lower", LOWER_MASS)
+
+	COXA_RADIUS          = _geom_f(d, "radii", "coxa", COXA_RADIUS)
+	LEG_RADIUS           = _geom_f(d, "radii", "leg", LEG_RADIUS)
+
+	# Optional multi-box chassis + explicit CoM.  Both absent ⇒ legacy path.
+	_chassis_boxes.clear()
+	_chassis_com_valid = false
+	if d.has("chassis") and d["chassis"] is Dictionary:
+		var ch: Dictionary = d["chassis"]
+		if ch.has("boxes") and ch["boxes"] is Array:
+			for b in (ch["boxes"] as Array):
+				if b is Dictionary and b.has("size") and b.has("offset"):
+					_chassis_boxes.append({
+						"name":   str((b as Dictionary).get("name", "box")),
+						"size":   _to_vec3((b as Dictionary)["size"]),
+						"offset": _to_vec3((b as Dictionary)["offset"]),
+					})
+		if ch.has("center_of_mass"):
+			_chassis_com = _to_vec3(ch["center_of_mass"])
+			_chassis_com_valid = true
+
+func _to_vec3(v: Variant) -> Vector3:
+	if v is Array and (v as Array).size() >= 3:
+		return Vector3(float(v[0]), float(v[1]), float(v[2]))
+	return Vector3.ZERO
+
+# Everything downstream of the loaded numbers.  Split out so _rebuild_body()
+# and the fallback path both get it.
+func _recompute_derived_geometry() -> void:
+	# Was `const _TOTAL_MASS = CHASSIS_MASS + ...`, which would have frozen at
+	# the CAD total the moment the masses became loadable.
+	_TOTAL_MASS = CHASSIS_MASS + 4.0 * (COXA_MASS + UPPER_MASS + LOWER_MASS)
+
+	# Topmost chassis surface = what touches down when the robot is on its back.
+	_chassis_top_local = CHASSIS_Y * 0.5
+	if not _chassis_boxes.is_empty():
+		_chassis_top_local = -INF
+		for spec in _chassis_boxes:
+			var sz: Vector3 = spec["size"]
+			var off: Vector3 = spec["offset"]
+			_chassis_top_local = max(_chassis_top_local, off.y + sz.y * 0.5)
+
+	# target_height / peak_height follow the body's standing height, but ONLY
+	# while still sitting at the class-level literal.  An explicit scene, env
+	# (OGMA_PICRAWLER_TARGET_HEIGHT) or curriculum value must survive a body
+	# swap untouched — those resolve later in _ready() and win.
+	if is_equal_approx(target_height, _EXPORT_DEFAULT_HEIGHT):
+		target_height = STANDING_CHASSIS_Y
+	if is_equal_approx(peak_height, _EXPORT_DEFAULT_HEIGHT):
+		peak_height = STANDING_CHASSIS_Y
+
+# ---------------------------------------------------------------------------
+# Live body swap — the morphological (d) test
+# ---------------------------------------------------------------------------
+# Rebuilds the PHYSICAL body from a different geometry while leaving the brain
+# completely untouched: GNG, EPMs and every learned weight persist across the
+# swap.  That is the whole point — what follows is RE-INFERENCE, not
+# re-initialisation.  Resetting the brain here would turn the sharpest single
+# piece of evidence we have into a demo (picrawler_sim2real_port.md §Phase 5).
+#
+# To read it as evidence, log TLE through the transition: the spike-then-decay
+# IS the re-inference.  Without that trace it is a video.
+#
+# Mirrors _switch_gym(): remove_child detaches IMMEDIATELY (no one-frame double
+# body), queue_free deallocates safely afterwards.
+func _rebuild_body(geometry_path: String = "") -> void:
+	# 1 — Remember pose and motion, so a body swap is a MORPHOLOGICAL
+	#     perturbation and not silently also a teleport.  Confounding the two
+	#     would make the (d) test unreadable.
+	var had_body: bool = is_instance_valid(_chassis)
+	# ⚠ POSITION ONLY — the orientation is deliberately DISCARDED and the new
+	# body is rebuilt axis-aligned.
+	#
+	# _build_leg() constructs the entire limb in WORLD axes: `heading` and
+	# `lateral` come from the world-frame NEUTRAL_HEADINGS, hip1_local is added
+	# to the chassis origin WITHOUT the basis, coxa_dir uses world Vector3.DOWN,
+	# and the hinge frames are built from world RIGHT/UP with hand-verified
+	# handedness.  All of that is correct only while the chassis basis is
+	# IDENTITY, which it always is at spawn.
+	#
+	# Restoring a tilted transform here therefore builds the legs on world axes
+	# around a rotated chassis, which visibly deforms the robot — front hips ride
+	# higher than rear, left hips sit forward of right.  Rebuilding upright is
+	# correct; preserving orientation would require rewriting _build_leg() in
+	# chassis-local space, including the handedness-sensitive joint frames.
+	# Logged as a follow-up in picrawler_sim2real_port.md.
+	var keep_origin: Vector3 = _chassis.global_transform.origin if had_body else Vector3.ZERO
+	var keep_lin:   Vector3  = _chassis.linear_velocity  if had_body else Vector3.ZERO
+	var keep_ang:   Vector3  = _chassis.angular_velocity if had_body else Vector3.ZERO
+
+	# 2 — Tear down.  JOINTS FIRST: a Godot joint outliving its bodies asserts.
+	for jarr in [_hip1_joints, _hip2_joints, _knee_joints]:
+		for j in jarr:
+			if is_instance_valid(j):
+				remove_child(j)
+				j.queue_free()
+	for barr in [_coxas, _uppers, _lowers]:
+		for b in barr:
+			if is_instance_valid(b):
+				remove_child(b)
+				b.queue_free()
+	if had_body:
+		remove_child(_chassis)
+		_chassis.queue_free()
+	_chassis = null
+
+	# Every array _build_leg() appends to must be cleared, or the rebuilt body
+	# indexes into stale entries from the previous morphology.
+	_hip1_joints.clear(); _hip2_joints.clear(); _knee_joints.clear()
+	_coxas.clear();       _uppers.clear();      _lowers.clear()
+	_hip2_axes.clear();   _knee_axes.clear()
+	_coxa_rest_xform.clear(); _upper_rest_xform.clear(); _lower_rest_xform.clear()
+	_hip1_world_c.clear();    _hip2_world_c.clear();     _knee_world_c.clear()
+	_foot_load_ema        = [0.0, 0.0, 0.0, 0.0]
+	_foot_was_in_contact  = [false, false, false, false]
+
+	# 3 — New dimensions, then rebuild AT THE REMEMBERED POSE.  _build_leg()
+	#     anchors off _chassis.global_transform, so the spawn override has to be
+	#     applied inside _build_body() before the legs are placed.
+	_load_geometry(geometry_path)
+	_body_spawn_xform = Transform3D(Basis.IDENTITY, keep_origin)
+	_body_spawn_valid = had_body
+	_build_body()
+	_body_spawn_valid = false
+	_apply_limb_materials()
+	# Consumers holding the OLD chassis instance are now dangling — the orbit
+	# camera and the walking trail both track by reference, not NodePath.
+	_retarget_body_watchers()
+
+	if had_body and is_instance_valid(_chassis):
+		_chassis.linear_velocity  = keep_lin
+		_chassis.angular_velocity = keep_ang
+
+	print("PicrawlerBody: BODY SWAPPED → '%s'  (brain untouched — TLE trace is the evidence)"
+		% _geometry_name)
+	_ui_notify("[body] swapped → %s" % _geometry_name)
+
 func _build_body() -> void:
 	# Chassis
 	_chassis = RigidBody3D.new()
 	_chassis.mass = CHASSIS_MASS
 	_chassis.position = Vector3(0, STANDING_CHASSIS_Y, 0)
+	# Live swap: keep the pose the old body had, so _build_leg() (which anchors
+	# off _chassis.global_transform) places the new limbs around the CURRENT
+	# location rather than at the origin.
+	if _body_spawn_valid:
+		_chassis.transform = _body_spawn_xform
 	_chassis.collision_layer = _LAYER_CHASSIS   # separate layer; floor.mask
 												# doesn't include it, so the
 												# chassis never touches floor.
@@ -4040,19 +4322,52 @@ func _build_body() -> void:
 	_chassis.angular_damp = BODY_ANGULAR_DAMP * body_damp_scale
 	_chassis.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 	_chassis.physics_material_override = _make_chassis_mat()
-	var cs := CollisionShape3D.new()
-	var cb := BoxShape3D.new()
-	cb.size = Vector3(CHASSIS_X, CHASSIS_Y, CHASSIS_Z)
-	cs.shape = cb
-	_chassis.add_child(cs)
-	var cm := MeshInstance3D.new()
-	var cbm := BoxMesh.new()
-	cbm.size = cb.size
-	cm.mesh = cbm
-	var cmat := StandardMaterial3D.new()
-	cmat.albedo_color = Color(0.65, 0.55, 0.40, 1.0)
-	cm.set_surface_override_material(0, cmat)
-	_chassis.add_child(cm)
+	if _chassis_boxes.is_empty():
+		# Legacy single centred box — byte-identical path for cad.json.
+		var cs := CollisionShape3D.new()
+		var cb := BoxShape3D.new()
+		cb.size = Vector3(CHASSIS_X, CHASSIS_Y, CHASSIS_Z)
+		cs.shape = cb
+		_chassis.add_child(cs)
+		var cm := MeshInstance3D.new()
+		var cbm := BoxMesh.new()
+		cbm.size = cb.size
+		cm.mesh = cbm
+		var cmat := StandardMaterial3D.new()
+		cmat.albedo_color = Color(0.65, 0.55, 0.40, 1.0)
+		cm.set_surface_override_material(0, cmat)
+		_chassis.add_child(cm)
+	else:
+		# Multi-box chassis (measured body: 41 mm base plate + 62 mm electronics
+		# stack).  The BASE's underside is the belly — the surface that actually
+		# contacts the floor — so its size and offset are load-bearing for every
+		# clearance metric, not decoration.
+		var cmat_multi := StandardMaterial3D.new()
+		cmat_multi.albedo_color = Color(0.65, 0.55, 0.40, 1.0)
+		for spec in _chassis_boxes:
+			var sz:  Vector3 = spec["size"]
+			var off: Vector3 = spec["offset"]
+			var cs2 := CollisionShape3D.new()
+			var cb2 := BoxShape3D.new()
+			cb2.size = sz
+			cs2.shape = cb2
+			cs2.position = off
+			_chassis.add_child(cs2)
+			var cm2 := MeshInstance3D.new()
+			var cbm2 := BoxMesh.new()
+			cbm2.size = sz
+			cm2.mesh = cbm2
+			cm2.position = off
+			cm2.set_surface_override_material(0, cmat_multi)
+			_chassis.add_child(cm2)
+
+	# A RigidBody3D has one mass, so an internal distribution is expressible
+	# ONLY as an explicit centre of mass.  For the measured body this is what
+	# reproduces the tape-measured CoG by construction (gate G1) instead of
+	# hoping the box geometry happens to imply it.
+	if _chassis_com_valid:
+		_chassis.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+		_chassis.center_of_mass = _chassis_com
 
 	# Visual "eyes" on the +Z chassis face (front).  Two black half-embedded
 	# spheres (visible hemisphere from outside).  Visual-only — no
@@ -4111,6 +4426,75 @@ func _build_body() -> void:
 			hip1_spring_stiffness, hip1_spring_damping,
 			hip2_spring_stiffness, hip2_spring_damping,
 			knee_spring_stiffness, knee_spring_damping])
+	_report_geometry()
+
+# Hand the (re)built chassis to everything that tracks it by REFERENCE rather
+# than by NodePath.  The chassis is built programmatically, so it isn't
+# reachable via NodePath at scene-load time — these consumers are given the
+# instance instead.
+#
+# ⚠ That makes them stale-able.  _rebuild_body() frees the old chassis, and a
+# consumer still holding it has a freed instance: the orbit camera silently
+# stopped responding to input after the first live body swap for exactly this
+# reason.  Anything added here MUST be re-targeted on every rebuild, not just
+# at _ready().
+func _retarget_body_watchers() -> void:
+	var cam: Node = get_tree().get_root().find_child("Camera3D", true, false)
+	if cam != null and cam.has_method("set_target"):
+		cam.call("set_target", _chassis)
+
+	var trail: Node = get_tree().get_root().find_child("WalkingTrail", true, false)
+	if trail != null and trail.has_method("set_target"):
+		trail.call("set_target", _chassis)
+		_walking_trail = trail
+
+# The geometry receipt.  Printed once per build, right after the legs exist, so
+# every run's log carries the evidence for gates G1–G3 rather than requiring a
+# bespoke harness to check them (picrawler_sim2real_port.md §Validation gates).
+# Same spirit as the G6DOF param print above: a claim you can read back.
+func _report_geometry() -> void:
+	if not is_instance_valid(_chassis):
+		return
+	var origin_y: float = _chassis.global_transform.origin.y
+	var hip2_y:   float = origin_y - COXA_Z_DROP     # node origin sits at hip1
+
+	# G1 — TWO different CoGs, and conflating them already cost one wrong mass
+	# split.  The operator measures the CHASSIS assembly (legs off / not
+	# contributing); the whole-body number is DERIVED and sits much lower
+	# because 248 g of legs hang at ~-11 mm rel hip2.  Print both, always.
+	var cog_y: float = _compute_body_cog_y()          # whole body, derived
+	var chassis_cog_y: float = _chassis.global_transform.origin.y
+	if _chassis_com_valid:
+		chassis_cog_y = (_chassis.global_transform * _chassis_com).y
+
+	# G2 — belly = lowest underside among the chassis boxes.
+	var belly_local: float = -CHASSIS_Y * 0.5
+	if not _chassis_boxes.is_empty():
+		belly_local = INF
+		for spec in _chassis_boxes:
+			var sz: Vector3 = spec["size"]
+			var off: Vector3 = spec["offset"]
+			belly_local = min(belly_local, off.y - sz.y * 0.5)
+
+	var reach: float = L1 + L2 + L3
+	var knee_span_deg: float = rad_to_deg(KNEE_LIMIT_HIGH - KNEE_LIMIT_LOW)
+
+	print("PicrawlerBody: GEOMETRY RECEIPT '%s'" % _geometry_name)
+	print("  reach L1+L2+L3 = %.1f mm   (hip span %.0f x %.0f mm)"
+		% [reach * 1000.0, HIP_X_SPAN * 1000.0, HIP_Z_SPAN * 1000.0])
+	print("  G1 chassis CoG = %+.1f mm rel hip2   <- the MEASURED quantity"
+		% [(chassis_cog_y - hip2_y) * 1000.0])
+	print("     whole-body  = %+.1f mm rel hip2   (derived; legs pull it down)"
+		% [(cog_y - hip2_y) * 1000.0])
+	print("  G2 belly       = %+.1f mm rel hip2   (%.1f mm above floor at spawn)"
+		% [(origin_y + belly_local - hip2_y) * 1000.0, (origin_y + belly_local) * 1000.0])
+	print("  G3 knee span   = %.0f deg commanded-limit  (servo can do ~180)"
+		% knee_span_deg)
+	print("  mass total     = %.3f kg  (chassis %.3f + 4x%.3f legs)"
+		% [_TOTAL_MASS, CHASSIS_MASS, COXA_MASS + UPPER_MASS + LOWER_MASS])
+	print("  belly-up reset = chassis_y < %.3f m  (rests on top surface %+.1f mm rel origin)"
+		% [_chassis_top_local + (auto_reset_max_height - _LEGACY_INVERTED_REST_H),
+		   _chassis_top_local * 1000.0])
 
 func _build_leg(leg_index: int) -> void:
 	var heading: Vector3 = NEUTRAL_HEADINGS[leg_index]
@@ -4945,6 +5329,17 @@ func _input(event: InputEvent) -> void:
 						print("PicrawlerBody: [F3] dropped clip %s" % fn)
 						_ui_notify("clip dropped")
 						break
+	elif key == KEY_B:
+		# Live BODY swap — the morphological (d) test.  Toggles cad ↔ measured
+		# under the SAME brain, mid-run.  Watch TLE: a spike that then decays is
+		# re-inference against a changed morphology, and is the evidence.  A flat
+		# TLE means the swap did not reach anything the brain predicts with.
+		var next_body: String = "measured" if _geometry_name == "cad" else "cad"
+		var next_path: String = "res://addons/ami_ogma/body/%s.json" % next_body
+		if not FileAccess.file_exists(next_path):
+			_ui_notify("[body] %s.json not present" % next_body)
+		else:
+			_rebuild_body(next_path)
 	elif key == KEY_1:
 		# Live gym swap — drop the experienced robot (brain intact) into the ARENA (donut).
 		_switch_gym("arena")
@@ -5391,7 +5786,19 @@ func _step_one() -> void:
 	# we deliberately do NOT auto-reset at the standard FAIL_TILT.  The
 	# dwell counter avoids triggering on a single transient frame.
 	if auto_reset_on_inversion:
-		if chassis_tilt > auto_reset_tilt_threshold and chassis_y < auto_reset_max_height:
+		# Shape-aware grounding test.  chassis_y is the NODE ORIGIN height, and
+		# where the origin sits when the body is on its back is set by the
+		# topmost chassis surface — the belly-up contact patch.  Comparing a raw
+		# origin height against a fixed constant only works for the one chassis
+		# it was tuned on.  See _LEGACY_INVERTED_REST_H.
+		# Ordering matters for byte-identity: written this way the correction
+		# term is EXACTLY 0.0 for the legacy box (_chassis_top_local is
+		# CHASSIS_Y*0.5 = 0.021, halving is exact in IEEE), so the threshold is
+		# bit-for-bit the old literal.  The other grouping,
+		# _chassis_top_local + (max_height - REF), rounds to 0.030000000000000002.
+		var inverted_ground_h: float = auto_reset_max_height \
+			+ (_chassis_top_local - _LEGACY_INVERTED_REST_H)
+		if chassis_tilt > auto_reset_tilt_threshold and chassis_y < inverted_ground_h:
 			_auto_reset_dwell_counter += 1
 			if _auto_reset_dwell_counter >= auto_reset_dwell_ticks:
 				# If the chassis is OUTSIDE the central ring zone (i.e.
@@ -8716,7 +9123,14 @@ func _end_gait_cycle(fired_reward: bool) -> void:
 # more stable than chassis_y because internal forces between chassis and legs
 # cancel in the body CoG (only gravity + ground reaction move it).
 func _compute_body_cog_y() -> float:
-	var weighted_y: float = CHASSIS_MASS * _chassis.global_transform.origin.y
+	# The chassis CoG equals its node origin only while the chassis is a single
+	# centred box.  With a multi-box chassis the CoM is deliberately offset, and
+	# reading the origin would silently misreport the very quantity gate G1
+	# checks.  cad.json leaves _chassis_com_valid false ⇒ unchanged arithmetic.
+	var chassis_cog_y: float = _chassis.global_transform.origin.y
+	if _chassis_com_valid:
+		chassis_cog_y = (_chassis.global_transform * _chassis_com).y
+	var weighted_y: float = CHASSIS_MASS * chassis_cog_y
 	var n: int = _coxas.size()
 	for i in range(n):
 		weighted_y += COXA_MASS  * _coxas[i].global_transform.origin.y
