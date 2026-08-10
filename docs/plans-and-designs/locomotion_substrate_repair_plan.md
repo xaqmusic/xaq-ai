@@ -556,6 +556,14 @@ knobs trading rhythm-density against stride length — and the plain TUCK still
 Pareto-holds its point (9.79 / 0.81 / falls 0.05).** Operator picks the operating
 point; any chosen point gets n=20 + traces + UI before promotion.
 
+**2026-08-10 — PROMOTED: V3 BASE (TUCK+PAIR), all gates green.** Operator UI verdict
+"confident and fast"; corridor gate n=20: **20/20 walkers, ZERO falls** (best safety
+result of the campaign), cv 0.77 on rough terrain, net_z 5.90 (the known −8 % trade).
+Baked as `the_picrawler_motor_epm_embed_corridor_v3base.json` (+ __ga instrument twin
+— the new measurement control): knee_tuck_target 0.85, swing_tuck_hip2 −0.2,
+swing_tuck_knee 0.1 on the v2 canonical. Remaining P8 study: the CoT/amp_seek energy
+pass, screening on the new base.
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
