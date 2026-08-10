@@ -10081,6 +10081,19 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# 2026-08-09 — stance_release_frac consumer check: fraction of stance-lift
 			# ticks with the release live.  0.0 with the lever on = detector never fired.
 			line["sr_duty"] = snappedf(float(_mm.get("sr_duty", 0.0)), 0.001)
+			# 2026-08-09 P1 — shadow phases (zero authority), per tick, for offline
+			# scoring against the trace's contact ground truth.  STAYS INSIDE the _mm
+			# block: a mirror placed after it once dedented the scope and killed the
+			# whole body script (see the P0 commit).
+			for _shk in ["sh_a", "sh_b", "sh_c", "ph_l"]:
+				var _shv = _mm.get(_shk, [])
+				if _shv is Array and _shv.size() > 0:
+					var _shr: Array = []
+					for _v in _shv: _shr.append(snappedf(float(_v), 0.001))
+					line[_shk] = _shr
+			line["sh_ra"] = snappedf(float(_mm.get("sh_a_retro", -1.0)), 0.001)
+			line["sh_rb"] = snappedf(float(_mm.get("sh_b_retro", -1.0)), 0.001)
+			line["sh_rc"] = snappedf(float(_mm.get("sh_c_retro", -1.0)), 0.001)
 			# Ratchet state for the forgetting diagnosis — the variables suspected of NOT
 			# recovering after an inverted episode.  h_max above is the worst: a monotonic
 			# max with no decay and no reset, and it sets the height setpoint.

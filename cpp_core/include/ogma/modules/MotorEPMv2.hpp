@@ -1276,6 +1276,44 @@ private:
     float  phase_pos_ema_[8] = {0,0,0,0,0,0,0,0};
     bool   phase_sym_init_[8] = {false,false,false,false,false,false,false,false};
     double phase_sym_smooth_ = 0.0;
+    // ── P1 SHADOW PHASES (2026-08-09, substrate-repair campaign) — ZERO AUTHORITY.
+    // Three candidate replacements for the retrograde L.phase, computed every tick and
+    // only ever exported to diagnostics; no control path reads them.  The winner (scored
+    // offline against flbrake's propulsive-window ground truth) gets a consumer switch
+    // in a LATER lever, never here.
+    //   A: per-leg PLL, BodyRhythmTracker's proven form — integrator + frequency state
+    //      from hysteresis up-crossings of the leg's own knee coordinate + soft pull at
+    //      each crossing.  No high-pass arm, no group delay ("no filter of any shape can
+    //      fix a signal whose value must be timely" — the retraction above).
+    //   B: shared reference + per-leg offsets = cpg_phase_ + gait_phase_[i].  Carries a
+    //      measured defect to explain first: BRT is UNLOCKED even in walker seeds
+    //      (brt_plv ~0.10, campaign log P0).
+    //   C: delay-compensated symmetric filter — both-arm EMA advanced by ω·τ, the
+    //      retraction's own recorded re-use context; τ = (1−a)/a of the kernel, ω from
+    //      candidate A's crossing measurement (the honest per-leg frequency).
+    static constexpr float kShAmpAlpha   = 0.02f;   // BRT amp_alpha
+    static constexpr float kShPeriodAlpha= 0.2f;    // BRT period EMA weight
+    static constexpr float kShOmegaLp    = 0.05f;   // BRT omega_lp
+    static constexpr float kShPhaseLock  = 0.10f;   // BRT phase_lock (soft pull)
+    static constexpr float kShHysFrac    = 0.2f;    // hysteresis = frac · amp_ema
+    static constexpr float kShFilterA    = 1.0f/3;  // C's kernel weight → τ = 2 ticks
+    float   shA_amp_[8]    = {0,0,0,0,0,0,0,0};
+    float   shA_period_[8] = {0,0,0,0,0,0,0,0};
+    float   shA_omega_[8]  = {0,0,0,0,0,0,0,0};     // 0 = uninitialized (seeded on first period)
+    float   shA_phi_[8]    = {0,0,0,0,0,0,0,0};
+    int     shA_tsu_[8]    = {0,0,0,0,0,0,0,0};
+    uint8_t shA_below_[8]  = {1,1,1,1,1,1,1,1};
+    float   shB_phi_[8]    = {0,0,0,0,0,0,0,0};
+    float   shC_pos_[8]    = {0,0,0,0,0,0,0,0};
+    float   shC_vel_[8]    = {0,0,0,0,0,0,0,0};
+    uint8_t shC_init_[8]   = {0,0,0,0,0,0,0,0};
+    float   shC_phi_[8]    = {0,0,0,0,0,0,0,0};
+    // Retro-fraction EMAs per candidate (pooled over legs; same α as phase_retro_diag_).
+    float   shA_retro_ = 0.0f, shB_retro_ = 0.0f, shC_retro_ = 0.0f;
+    float   shA_prev_[8] = {0,0,0,0,0,0,0,0};
+    float   shB_prev_[8] = {0,0,0,0,0,0,0,0};
+    float   shC_prev_[8] = {0,0,0,0,0,0,0,0};
+    uint8_t sh_prev_init_[8] = {0,0,0,0,0,0,0,0};
     static constexpr float kAmpEmaAlpha    = 0.01f;   // slow amplitude estimate for the homeostat
     static constexpr float kPropCreditAlpha = 0.01f;  // ~100-tick propulsive-credit EMA (functional balance)
     static constexpr float kAmpGainMin     = 0.1f;

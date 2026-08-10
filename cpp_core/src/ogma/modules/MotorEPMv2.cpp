@@ -2490,6 +2490,80 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 L.phase_prev = phase_new;
             }
             L.phase = phase_new;
+            // ---- P1 SHADOW PHASES (zero authority; see the header block) -------------
+            if (leg < 8) {
+                const float f = kp - L.knee_ema;             // the leg's own knee coordinate
+                // A: per-leg PLL.  Hysteresis up-crossing → period → ω → integrate + pull.
+                shA_amp_[leg] = (1.0f - kShAmpAlpha) * shA_amp_[leg]
+                              + kShAmpAlpha * std::fabs(f);
+                const float hys = kShHysFrac * shA_amp_[leg];
+                ++shA_tsu_[leg];
+                bool crossed = false;
+                if (shA_below_[leg] && f > hys) {
+                    if (shA_period_[leg] <= 0.0f) shA_period_[leg] = float(shA_tsu_[leg]);
+                    else shA_period_[leg] = (1.0f - kShPeriodAlpha) * shA_period_[leg]
+                                          + kShPeriodAlpha * float(shA_tsu_[leg]);
+                    shA_tsu_[leg] = 0; shA_below_[leg] = 0; crossed = true;
+                } else if (!shA_below_[leg] && f < -hys) {
+                    shA_below_[leg] = 1;
+                }
+                if (shA_period_[leg] > 1.0f) {
+                    const float wt = std::clamp(2.0f * float(M_PI) / shA_period_[leg],
+                                                2.0f * float(M_PI) / 400.0f,
+                                                2.0f * float(M_PI) / 8.0f);
+                    if (shA_omega_[leg] <= 0.0f) shA_omega_[leg] = wt;   // seed, don't lag
+                    else shA_omega_[leg] += kShOmegaLp * (wt - shA_omega_[leg]);
+                }
+                if (shA_omega_[leg] > 0.0f) {
+                    shA_phi_[leg] += shA_omega_[leg];
+                    if (crossed) {
+                        float err = (shA_phi_[leg] > float(M_PI))
+                                  ? (2.0f * float(M_PI) - shA_phi_[leg]) : (-shA_phi_[leg]);
+                        shA_phi_[leg] += kShPhaseLock * err;
+                    }
+                    shA_phi_[leg] = std::fmod(shA_phi_[leg], 2.0f * float(M_PI));
+                    if (shA_phi_[leg] < 0.0f) shA_phi_[leg] += 2.0f * float(M_PI);
+                }
+                // B: shared CPG reference + this leg's learned offset.
+                if (cpg_seen_ && leg < int(gait_phase_.size())) {
+                    float pb = cpg_phase_ + float(gait_phase_[leg]);
+                    pb = std::fmod(pb, 2.0f * float(M_PI));
+                    if (pb < 0.0f) pb += 2.0f * float(M_PI);
+                    shB_phi_[leg] = pb;
+                }
+                // C: symmetric filter + delay compensation (τ = (1−a)/a, ω from A).
+                {
+                    const float cvx = kp - L.knee_ema, cvy = kd * kPhaseVelScale;
+                    if (!shC_init_[leg]) { shC_pos_[leg] = cvx; shC_vel_[leg] = cvy; shC_init_[leg] = 1; }
+                    shC_pos_[leg] = (1.0f - kShFilterA) * shC_pos_[leg] + kShFilterA * cvx;
+                    shC_vel_[leg] = (1.0f - kShFilterA) * shC_vel_[leg] + kShFilterA * cvy;
+                    const float tau = (1.0f - kShFilterA) / kShFilterA;
+                    float pc = std::atan2(shC_vel_[leg], shC_pos_[leg])
+                             + (shA_omega_[leg] > 0.0f ? shA_omega_[leg] * tau : 0.0f);
+                    pc = std::fmod(pc, 2.0f * float(M_PI));
+                    if (pc < 0.0f) pc += 2.0f * float(M_PI);
+                    shC_phi_[leg] = pc;
+                }
+                // Retro fractions — the same read phase_retro_diag_ gives the incumbent.
+                if (sh_prev_init_[leg]) {
+                    auto retro = [](float now, float prev) {
+                        float d = now - prev;
+                        while (d >  float(M_PI)) d -= 2.0f * float(M_PI);
+                        while (d < -float(M_PI)) d += 2.0f * float(M_PI);
+                        return d < 0.0f ? 1.0f : 0.0f;
+                    };
+                    shA_retro_ = (1.0f - kCommitPrecAlpha) * shA_retro_
+                               + kCommitPrecAlpha * retro(shA_phi_[leg], shA_prev_[leg]);
+                    shB_retro_ = (1.0f - kCommitPrecAlpha) * shB_retro_
+                               + kCommitPrecAlpha * retro(shB_phi_[leg], shB_prev_[leg]);
+                    shC_retro_ = (1.0f - kCommitPrecAlpha) * shC_retro_
+                               + kCommitPrecAlpha * retro(shC_phi_[leg], shC_prev_[leg]);
+                }
+                shA_prev_[leg] = shA_phi_[leg];
+                shB_prev_[leg] = shB_phi_[leg];
+                shC_prev_[leg] = shC_phi_[leg];
+                sh_prev_init_[leg] = 1;
+            }
             // amplitude homeostat: phase-vector magnitude = oscillation amplitude.
             // Slow integral regulator drives amp_gain so amp_ema → amp_target.
             //
@@ -4213,6 +4287,21 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // Consumer-fired check for stance_release_frac: fraction of stance-lift ticks where
     // the release was live.  0.0 with the lever on = the reversal detector never fired.
     mod["sr_duty"] = sr_stance_ticks_ ? double(sr_release_ticks_) / double(sr_stance_ticks_) : 0.0;
+    // P1 shadow phases (zero authority) — per-tick values for offline scoring against
+    // the trace's contact/GRF ground truth, plus pooled retro fractions.  ph_l is the
+    // incumbent L.phase, exported beside them so every comparison shares one tick.
+    {
+        nlohmann::json a = nlohmann::json::array(), b = nlohmann::json::array(),
+                       c = nlohmann::json::array(), l = nlohmann::json::array();
+        for (int i = 0; i < n_legs_ && i < 8; ++i) {
+            a.push_back(shA_phi_[i]); b.push_back(shB_phi_[i]);
+            c.push_back(shC_phi_[i]);
+            l.push_back(i < int(legs_.size()) ? legs_[i].phase : 0.0f);
+        }
+        mod["sh_a"] = a; mod["sh_b"] = b; mod["sh_c"] = c; mod["ph_l"] = l;
+        mod["sh_a_retro"] = shA_retro_; mod["sh_b_retro"] = shB_retro_;
+        mod["sh_c_retro"] = shC_retro_;
+    }
     mod["ga_yaw_leg"] = ga_yaw_leg_;  mod["ga_yaw_leg_n"] = ga_yaw_leg_n_;
     mod["ga_yaw_allplant"] = ga_yaw_allplant_; mod["ga_yaw_allplant_n"] = ga_yaw_allplant_n_;
     mod["ga_yaw_anyswing"] = ga_yaw_anyswing_; mod["ga_yaw_anyswing_n"] = ga_yaw_anyswing_n_;
