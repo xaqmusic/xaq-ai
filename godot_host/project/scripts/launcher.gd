@@ -17,6 +17,31 @@ const _CONFIG_DIR := "res://addons/ami_ogma/configs/"
 # couple of reference baselines.  Other env_targets are unfiltered.  To surface
 # a config in the launcher, add its exact .json filename here.  Files are NOT
 # moved/deleted — every config stays loadable by path for scripts + A/B runs.
+#
+# ── NAMING CONVENTION FOR EXPOSED CONFIGS (2026-08-10) ──────────────────────────
+# The dropdown displays `metadata.name`, NOT the filename, and NOT the GDScript
+# comment beside the entry (that comment is for code readers).  mkarm.py
+# autogenerates names like "ARM src1 (base the_picrawler_...)" — cryptic at the
+# point of observation — so EVERY config exposed here must have its metadata
+# rewritten first:
+#
+#   name:  ROLE — mechanism · what-you'll-see
+#     Roles: "★ BASE" (the canonical), "★ BASE+INSTRUMENTS" (the measurement
+#     control), "P<phase>·<arm>" (campaign arms, role-of-the-arm in the name,
+#     e.g. "RHYTHM DEMO", "VARIANCE LEVER"), "RETRACTED" (kept as the record of
+#     a verdict), "LEGACY" (pre-campaign reference), "ARENA" (open-floor refs).
+#
+#   description:  leads with "WATCH:" — what the operator's EYE should look for
+#     in this config, with the key numbers inline (n, net_z±std, the one metric
+#     that defines the arm).  State the verdict plainly (WORKING / REGRESSION /
+#     NULL / RETRACTED) and, for refuted arms, why the entry is kept.  Name the
+#     A/B control the arm should be compared against — and remember instrument
+#     settings are part of a run's context: arms carrying gait_align_diag=1
+#     compare against BASE+INSTRUMENTS, not bare BASE.
+#
+# Operator-driven UI diagnosis is first-class (CLAUDE.md §4); the dropdown is an
+# instrument panel, and an entry whose name needs the filename decoded is a
+# broken instrument.
 const _PICRAWLER_CONFIG_ALLOWLIST: Array = [
 	"the_picrawler_motor_epm_arena_control.json",  # ── ARENA CONTROL ── deployed stack + measurement instruments, NO lever. Verified behaviourally inert (identical seedavg on all 17 metrics, per seed, at 6000 and 12000 ticks), so any visible difference vs the two arms below is the lever. n=3: net_disp 4.85, straight 0.71, tilt_sd 0.088, steps 25, step_bal 0.07, belly 0.0221, 0 falls. The sprawl to look for: hip2 never leaves neutral, tibia 37.5° off vertical (design rest 10°), feet planted at 170mm against a 166mm total leg reach, and scrub 0.100 vs fwd_v 0.050 (sliding sideways twice as fast as it advances).
 	"the_picrawler_motor_epm_arena_ik_plumb.json",  # ── ARENA · IK ── tibia_plumb_gain=0.15. hip2 nulls the shank's deviation from vertical so the knee's drive TRANSLATES the foot instead of arcing it (hip2+knee are a planar 2-link arm; one joint of a 2-DOF pair forces a circular foot path). LARGEST EFFECT MEASURED: net_disp 4.85→6.38 (+32%), straight 0.71→0.82 with std 0.00 across 3 seeds, tilt_sd 0.088→0.069, 0 falls. NOT PROMOTED: belly 0.0221→0.0156 (−29%) and belly-up is a promoted invariant. WATCH: does the shank stay under the knee through the stride, and is the belly scraping? Live slider `tibia_plumb` on [M]; +0.3 goes unstable, NEGATIVE un-plumbs.
