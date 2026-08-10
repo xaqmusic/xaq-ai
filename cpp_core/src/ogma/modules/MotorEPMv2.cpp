@@ -340,6 +340,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"stance_lift_gain", ParamMutability::HotMutable,
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"swing_descend_gain", ParamMutability::HotMutable,
+         "SWING DESCENT (operator-diagnosed 2026-08-10).  swing_tuck_hip2 lifts through the ENTIRE swing and fights the landing -- rear feet plant unsettled and the stroke sweeps back before full contact (the -15% transport of the tuck+pair).  Past half of the leg's OWN running swing duration (self-scaled fraction, no tick constant), hip2 flips from the lift bias to +this (press down, Rule-5 sign) so the foot plants before the stroke reverses; the knee keeps its fold.  Requires contact_topic + swing_tuck active.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"coord_cv_weight", ParamMutability::HotMutable,
          "SELECT STEP-INTERVAL REGULARITY (P4 arm 3b).  Penalizes the mode-1 coordination fitness by the window's mean |interval - running period| / period over DEBOUNCED touchdowns (the v3 step machinery's accepted intervals -- micro-lift chatter excluded by construction).  Arm 3 measured that touchdown-PHASE consistency selects robustness but cannot buy TIME-regularity (step_cv 0.98 at every dose, because consistent phase on an irregular clock is still irregular in time); this selects the operator's step-regularity number LITERALLY, against each leg's own habitual period -- egocentric, intrinsic, no task quantity.  Requires contact_topic + fitness mode 1.  0 = off, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -815,6 +818,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "phase_td_pull", [&](auto const& v){ phase_td_pull_ = get_double(v, "phase_td_pull"); });
     apply_param(params, "coord_td_weight", [&](auto const& v){ coord_td_weight_ = get_double(v, "coord_td_weight"); });
     apply_param(params, "coord_cv_weight", [&](auto const& v){ coord_cv_weight_ = get_double(v, "coord_cv_weight"); });
+    apply_param(params, "swing_descend_gain", [&](auto const& v){ swing_descend_gain_ = get_double(v, "swing_descend_gain"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -2046,6 +2050,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "phase_td_pull") phase_td_pull_ = get_double(value, "phase_td_pull");
     else if (key == "coord_td_weight") coord_td_weight_ = get_double(value, "coord_td_weight");
     else if (key == "coord_cv_weight") coord_cv_weight_ = get_double(value, "coord_cv_weight");
+    else if (key == "swing_descend_gain") swing_descend_gain_ = get_double(value, "swing_descend_gain");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -3589,9 +3594,31 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         if (!warmup && (swing_tuck_hip2_ != 0.0 || swing_tuck_knee_ != 0.0) && m >= 3
             && have_contact_ && int(foot_contact_.size()) == n_legs_) {
             ++swing_tuck_ticks_;
-            if (foot_contact_[leg] <= 0.5f) {          // this foot is off the ground
-                y[1]     += float(swing_tuck_hip2_);   // fold the femur up
-                y[m - 1] += float(swing_tuck_knee_);   // fold the shank under
+            const bool airborne = foot_contact_[leg] <= 0.5f;
+            // SWING-DESCENT bookkeeping (self-scaled swing age; see the header note).
+            bool descending = false;
+            if (swing_descend_gain_ > 0.0 && leg < 8) {
+                if (airborne) {
+                    if (!swd_air_[leg]) swd_age_[leg] = 0;
+                    ++swd_age_[leg];
+                    if (swd_dur_[leg] > 2.0f
+                        && float(swd_age_[leg]) > kDescentFrac * swd_dur_[leg])
+                        descending = true;
+                } else if (swd_air_[leg]) {
+                    swd_dur_[leg] = (swd_dur_[leg] <= 0.0f)
+                                  ? float(swd_age_[leg])
+                                  : 0.9f * swd_dur_[leg] + 0.1f * float(swd_age_[leg]);
+                }
+                swd_air_[leg] = airborne ? 1 : 0;
+            }
+            if (airborne) {
+                if (descending) {
+                    y[1] += float(swing_descend_gain_);   // press DOWN: plant before the sweep
+                    ++swd_press_ticks_;
+                } else {
+                    y[1] += float(swing_tuck_hip2_);      // fold/lift the femur (first half)
+                }
+                y[m - 1] += float(swing_tuck_knee_);       // the shank keeps its fold throughout
                 ++swing_tuck_hits_;
             }
         }
@@ -4399,6 +4426,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["td_pull_events"] = td_pull_events_;
     mod["coord_td_R"] = coord_td_R_diag_;   // arm 3 consumer check: −1 = never computed
     mod["coord_cv_dev"] = coord_cv_diag_;   // arm 3b consumer check: −1 = never computed
+    mod["swd_press_ticks"] = swd_press_ticks_;  // swing-descent consumer check
     {
         nlohmann::json off = nlohmann::json::array();
         for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);

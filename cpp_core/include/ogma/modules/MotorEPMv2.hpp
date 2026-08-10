@@ -1344,6 +1344,21 @@ private:
     double  ccv_dev_sum_ = 0.0;
     int     ccv_dev_n_   = 0;
     float   coord_cv_diag_ = -1.0f;     // last window's mean interval deviation
+    // ── SWING DESCENT (2026-08-10, operator-diagnosed): swing_tuck_hip2 is a CONSTANT
+    // lift across the whole swing, so it fights the descent — rear feet land unsettled
+    // (miss% 5→9, el_def −0.17→−0.06, rl early stance net-braking) and the stroke
+    // sweeps back before full plant.  This splits the swing by phase, SELF-SCALED to
+    // each leg's own running swing duration (dimensionless fraction, no tick constant):
+    // first half = the lift/fold biases as configured; past kDescentFrac of the leg's
+    // typical swing, hip2 flips to +swing_descend_gain (press DOWN, Rule-5 sign) so the
+    // foot plants before the stroke reverses.  Knee keeps its fold.  0 = byte-identical.
+    double  swing_descend_gain_ = 0.0;
+    static constexpr float kDescentFrac = 0.5f;
+    int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
+    float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
+    uint8_t swd_air_[8] = {0,0,0,0,0,0,0,0};       // previous airborne state
+    long    swd_press_ticks_ = 0;                   // consumer-fired check
+
     float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
     float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase
     float   td_ref_sin_[8] = {0,0,0,0,0,0,0,0};
