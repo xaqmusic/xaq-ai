@@ -340,6 +340,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"stance_lift_gain", ParamMutability::HotMutable,
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
+        {"phase_td_pull", ParamMutability::HotMutable,
+         "TOUCHDOWN-CONSISTENCY PHASE OFFSET (P4 arm 2).  Rotates each leg's phase by a slow per-leg offset nudged at every ACCEPTED touchdown (v3 back-dated debounce) toward that leg's own RUNNING mean touchdown phase -- so touchdowns become phase-CONSISTENT without any imposed reference, and every consumer (stroke, Kuramoto coupling, amplitude homeostat, coordination fitness) rotates TOGETHER, preserving the inter-leg coherence that per-leg stroke locking destroyed (stroke_phase_src=1: step_cv 0.97->0.82 -- the first regularity move on the books -- but net_z 6.49->0.23, twice measured).  Self-consistency, not a clock: the target is the leg's own habit.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.5}},
         {"stance_release_frac", ParamMutability::HotMutable,
          "STROKE-DIRECTION-AWARE STANCE RELEASE.  The stance biases (stance_lift + its hip2 fraction) press a planted leg down through its ENTIRE stance -- including the measured 7-9 ticks after that leg's own COMMANDED stroke has reversed (flbrake.py 2026-08-09: liftoff lags the commanded reversal body-wide with only 2-3 ticks of servo slew, and the pressed window costs -0.004..-0.015 g/tick of braking shear per leg; posture knobs redistribute WHICH leg pays, never the toll).  From the tick a planted leg's own commanded hip1 delta flips sign (recovery onset), multiply its stance biases by (1 - this) until it leaves stance; reset at the next touchdown.  Fully egocentric (the brain's own command stream), no propulsive-sign convention needed -- whichever way the stroke was going, continuing to press after it turns around is what delays the lift.  Candidate for the shuffle attractor (a stance bias pressing all four planted feet through recovery is a stall-shaped loop).  0 = off, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -803,6 +806,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "forward_flow_gain", [&](auto const& v){ forward_flow_gain_ = get_double(v, "forward_flow_gain"); });
     apply_param(params, "stance_lift_gain", [&](auto const& v){ stance_lift_gain_ = get_double(v, "stance_lift_gain"); });
     apply_param(params, "stance_release_frac", [&](auto const& v){ stance_release_frac_ = get_double(v, "stance_release_frac"); });
+    apply_param(params, "phase_td_pull", [&](auto const& v){ phase_td_pull_ = get_double(v, "phase_td_pull"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -1443,6 +1447,28 @@ void MotorEPMv2::update_step_phase(uint64_t tick_id) {
             }
         }
 
+        // ---- P4 arm 2: touchdown-consistency pull on the SHARED phase (phase_td_pull).
+        // At each accepted touchdown, nudge this leg's phase OFFSET (applied to L.phase
+        // in the pre-pass, so stroke/Kuramoto/amp/fitness all rotate together) toward the
+        // leg's own running-mean touchdown phase.  Self-consistency, no imposed target;
+        // the circular-EMA ref must accumulate meaning (R ≥ kTdRefMinR) before any pull.
+        if (td_now && phase_td_pull_ > 0.0 && i < 8) {
+            const float phi = L.phase;                    // already includes td_off_ this tick
+            const float rc  = td_ref_cos_[i], rs = td_ref_sin_[i];
+            const float R   = std::sqrt(rc * rc + rs * rs);
+            if (R >= kTdRefMinR) {
+                float err = std::atan2(rs, rc) - phi;
+                while (err >  float(M_PI)) err -= 2.0f * float(M_PI);
+                while (err < -float(M_PI)) err += 2.0f * float(M_PI);
+                td_off_[i] += float(phase_td_pull_) * err;
+                while (td_off_[i] >  float(M_PI)) td_off_[i] -= 2.0f * float(M_PI);
+                while (td_off_[i] < -float(M_PI)) td_off_[i] += 2.0f * float(M_PI);
+                ++td_pull_events_;
+            }
+            td_ref_cos_[i] = (1.0f - kTdRefAlpha) * rc + kTdRefAlpha * std::cos(phi);
+            td_ref_sin_[i] = (1.0f - kTdRefAlpha) * rs + kTdRefAlpha * std::sin(phi);
+        }
+
         // ---- advance.  Locked once an interval has been measured at least twice, i.e.
         // the period estimate is a real measurement rather than one sample.
         const bool was_locked = L.step_locked;
@@ -1998,6 +2024,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "forward_flow_gain") forward_flow_gain_ = get_double(value, "forward_flow_gain");
     else if (key == "stance_lift_gain") stance_lift_gain_ = get_double(value, "stance_lift_gain");
     else if (key == "stance_release_frac") stance_release_frac_ = get_double(value, "stance_release_frac");
+    else if (key == "phase_td_pull") phase_td_pull_ = get_double(value, "phase_td_pull");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -2490,6 +2517,15 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 L.phase_prev = phase_new;
             }
             L.phase = phase_new;
+            // P4 arm 2: rotate the consumed phase by the touchdown-consistency offset.
+            // Retro/prev accounting above stays on the RAW readout; td_off_ ≡ 0 when
+            // phase_td_pull = 0, so the gain-0 guard is exact.
+            if (leg < 8 && td_off_[leg] != 0.0f) {
+                float pr = phase_new + td_off_[leg];
+                while (pr >  float(M_PI)) pr -= 2.0f * float(M_PI);
+                while (pr < -float(M_PI)) pr += 2.0f * float(M_PI);
+                L.phase = pr;
+            }
             // ---- P1 SHADOW PHASES (zero authority; see the header block) -------------
             if (leg < 8) {
                 const float f = kp - L.knee_ema;             // the leg's own knee coordinate
@@ -3097,7 +3133,9 @@ void MotorEPMv2::tick(uint64_t tick_id) {
     // BEFORE the per-leg output loop (the stroke reads L.step_phase) and AFTER the contact
     // /torque handlers have landed this tick's sensor values.  Skipped entirely at the
     // default 0, so L.step_phase stays at its init and nothing downstream can read it.
-    if (stroke_phase_src_ > 0.0) update_step_phase(tick_id);
+    // phase_td_pull needs the v3 touchdown machinery running even when the stroke
+    // stays on L.phase — the stroke SOURCE switch inside stays gated on stroke_phase_src.
+    if (stroke_phase_src_ > 0.0 || phase_td_pull_ > 0.0) update_step_phase(tick_id);
     // Measurement only, and skipped entirely at the default 0 — see the function header.
     if (gait_align_diag_ > 0.0) update_gait_align_diag(tick_id);
     // Pure observation for the live inspector; skipped entirely at the default 0.
@@ -4293,6 +4331,13 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // Consumer-fired check for stance_release_frac: fraction of stance-lift ticks where
     // the release was live.  0.0 with the lever on = the reversal detector never fired.
     mod["sr_duty"] = sr_stance_ticks_ ? double(sr_release_ticks_) / double(sr_stance_ticks_) : 0.0;
+    // P4 arm 2 consumer check + state: pull events and the per-leg offsets.
+    mod["td_pull_events"] = td_pull_events_;
+    {
+        nlohmann::json off = nlohmann::json::array();
+        for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);
+        mod["td_off"] = off;
+    }
     // P1 shadow phases (zero authority) — per-tick values for offline scoring against
     // the trace's contact/GRF ground truth, plus pooled retro fractions.  ph_l is the
     // incumbent L.phase, exported beside them so every comparison shares one tick.

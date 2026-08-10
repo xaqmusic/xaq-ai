@@ -230,6 +230,20 @@ the live thread — the body walks arrhythmically (`td_plv` ≤ 0.21, `step_cv_r
 unmeasured-by-default) and the operator's continuous-gait goal is now cleanly a
 RHYTHM problem on a healthy, crash-free, fully-instrumented baseline.**
 
+**2026-08-09 — P4 arm 1 (`stroke_phase_src=1` re-test, clean build, n=6): REGRESSION
+again — and the two most useful facts of the campaign ride along.** Transport collapses
+exactly as 2026-07-27 (net_z 6.49 → 0.23, straight 0.03, circling) with both old
+excuses eliminated: the v3 debounce FIXED the frequency estimate (step_per_real 54.6
+vs true ~55–59) and the clock runs locked — yet step_td_err holds at ~1.4 rad: the
+stroke drives the foot it locks to, a self-referential loop with a stable lag
+equilibrium no weak pull can close. **And `step_cv_real` 0.97 → 0.82 — the FIRST
+lever ever to move step regularity** (the ledger's "nothing has ever moved step_cv"
+falls), at the cost of transport. Direction right, topology wrong: per-leg-independent
+locking destroys the inter-leg coherence that carries thrust. ⇒ Arm 2 (in build):
+touchdown-consistency pull on a SHARED per-leg phase offset — all consumers rotate
+together, Kuramoto coherence preserved, no imposed target (each leg pulls toward its
+own running touchdown phase — self-consistency, not a reference).
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak

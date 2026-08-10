@@ -1314,6 +1314,20 @@ private:
     float   shB_prev_[8] = {0,0,0,0,0,0,0,0};
     float   shC_prev_[8] = {0,0,0,0,0,0,0,0};
     uint8_t sh_prev_init_[8] = {0,0,0,0,0,0,0,0};
+    // ── P4 arm 2 (2026-08-09): TOUCHDOWN-CONSISTENCY PHASE OFFSET (phase_td_pull).
+    // Arm 1 (per-leg stroke lock) moved step_cv for the first time in campaign history
+    // (0.97 → 0.82) and killed transport the same way it did 2026-07-27 — independent
+    // thrusts cancel.  This form keeps every consumer (stroke, Kuramoto, amp, fitness)
+    // on ONE per-leg phase rotated by a slow offset, nudged at each ACCEPTED touchdown
+    // toward the leg's own RUNNING touchdown phase — self-consistency, no imposed
+    // target, inter-leg coherence preserved.  0 = off, byte-identical.
+    double  phase_td_pull_ = 0.0;
+    float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
+    float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase
+    float   td_ref_sin_[8] = {0,0,0,0,0,0,0,0};
+    long    td_pull_events_ = 0;                   // consumer-fired check
+    static constexpr float kTdRefAlpha = 0.05f;
+    static constexpr float kTdRefMinR  = 0.10f;    // no pull until the ref means something
     static constexpr float kAmpEmaAlpha    = 0.01f;   // slow amplitude estimate for the homeostat
     static constexpr float kPropCreditAlpha = 0.01f;  // ~100-tick propulsive-credit EMA (functional balance)
     static constexpr float kAmpGainMin     = 0.1f;
