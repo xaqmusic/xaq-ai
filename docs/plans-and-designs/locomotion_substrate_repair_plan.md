@@ -534,6 +534,18 @@ or hip2-half only with a NEW hypothesis for the seed-dependent destabilization.
 **The tuck alone (knee_tuck_target 0.85) remains the promotion candidate at the
 operator UI gate.** P8 remaining: the CoT/amp_seek energy pass.
 
+**2026-08-10 — THE DIALED-IN TUCK (operator-prescribed): rhythm record 0.75, a real
+transport trade.** swing_tuck_hip2 −0.2 + swing_tuck_knee 0.1 on the tuck base — the
+operator's "hip2 should lift, knee should fold" — MECHANISM CONFIRMED in traces (lift
+share inverted: hip2 −0.05 → −0.16..−0.22, rr femur out-lifts the knee; front-leg
+momentum reaction collapsed fr −0.14 → −0.10, fl/rr ≈ 0; fl early braking 8× better).
+n=20: **step_cv_real 0.75 ± 0.11 (campaign record, success bar is <0.7)**, steps 196,
+falls 0.10 — but net_disp 8.34 ± 2.36 vs the tuck's 9.79 ± 1.48: **the −15 % transport
+cost is real at power** (shorter, denser strides). OPERATOR DECISION: (a) bake tuck
+alone (transport-first), (b) bake both (rhythm/safety-first — arguably the hardware
+profile: higher cadence, less per-step torque, fewer falls), or (c) dose-search the
+middle (h1k1 held transport at n=6 with one wobble seed — n=20 unmeasured).
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
