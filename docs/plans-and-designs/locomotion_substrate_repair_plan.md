@@ -308,6 +308,27 @@ ideas. Arena baseline on record: **net_disp 10.2 ± 1.2, straight 0.70, falls 0.
 the healthiest n=20 this stack has ever posted.** P4 stays closed; P5 unchanged as
 the next build, now to be judged arena-first.
 
+**2026-08-10 — P5 GATE: FAIL (clean kill at the instrument stage).** Arena n=6, two
+zero-authority body-pose EPMs (contract 0.7/0.3 + transition-heavy 0.3/0.7): antic
+index **+0.022σ / +0.005σ**, predictive lift **1.06 / 1.02**, reactive ≈ 0. The
+excuses are ruled out by the same run: vocabularies healthy (60–70 nodes, ~65 %
+baked, no collapse — conditioning is NOT the diagnosis) and both tle mixes agree.
+Pose-transition surprise does not lead touchdowns; the support-EPM's reactive
+verdict generalizes. §3.3: sub-σ excavation is not a capability — killed, no
+consumer built. **Re-use contexts, recorded: (a) re-audition the predictor if
+stepping ever becomes regular (anticipating an aperiodic process is the hard case);
+(b) the untried input framings — per-leg EPM latents stacked, joint-delta features,
+or PER-LEG-conditioned surprise (a body-global scalar dilutes four legs' events);
+(c) the anticipation target may want the distal joints' fine pre-touchdown motion,
+below RBF-grid granularity.**
+**CAMPAIGN POSITION after P0–P5: the substrate is healthy, honest, and fully
+instrumented; every cheap rhythm lever is now measured and killed (force, select,
+anticipate). The evidence points below the coordination layer — the HK controller's
+own limit-cycle dynamics (the Playful-Machine import list: SERVO_KI/ForceBoost,
+colored sensor noise, ctrl_lr scale) as the place step rhythm must come FROM, rather
+than a mechanism added around the controller. That is a design conversation with
+the operator, not another autonomous lever.**
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
