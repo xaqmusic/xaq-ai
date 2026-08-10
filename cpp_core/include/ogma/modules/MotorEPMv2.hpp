@@ -1322,6 +1322,19 @@ private:
     // toward the leg's own RUNNING touchdown phase — self-consistency, no imposed
     // target, inter-leg coherence preserved.  0 = off, byte-identical.
     double  phase_td_pull_ = 0.0;
+    // ── P4 arm 3 (2026-08-10): SELECT rhythm, don't force it (coord_td_weight).
+    // Arms 1–2 proved the phase must stay a raw state observation; the sanctioned knob
+    // for WHERE legs sit in the cycle is gait_phase, and the (1+1) search already owns
+    // it.  This adds a touchdown-consistency term to the mode-1 fitness — the
+    // per-window resultant of L.phase at raw contact onsets — so the search DISCOVERS
+    // offsets under which touchdowns land at a repeatable phase.  No phase is touched;
+    // selection does the entraining.  0 = off, byte-identical.
+    double  coord_td_weight_ = 0.0;
+    double  ctd_cos_[8] = {0,0,0,0,0,0,0,0};
+    double  ctd_sin_[8] = {0,0,0,0,0,0,0,0};
+    int     ctd_n_[8]   = {0,0,0,0,0,0,0,0};
+    uint8_t ctd_prev_con_[8] = {0,0,0,0,0,0,0,0};
+    float   coord_td_R_diag_ = -1.0f;   // last window's touchdown-consistency, −1 = none yet
     float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
     float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase
     float   td_ref_sin_[8] = {0,0,0,0,0,0,0,0};
