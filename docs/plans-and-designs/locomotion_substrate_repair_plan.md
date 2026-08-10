@@ -500,6 +500,15 @@ The operator's mechanical-advantage thread found it. n=20 confirmation of 0.85/0
 and 0.85/0.40 in flight; then the corridor obstacle gate, the tibia_plumb
 re-audition at the narrowed radius, and operator UI review.
 
+**n=20 CONFIRMED (same day): step_cv_real 0.81 ± 0.07 both cells, falls QUARTERED
+(0.20 → 0.05), steps ×1.8, transport statistically tied (9.79/9.42 vs 10.17, ns),
+clearance up.** The 0.85/0.25 cell is a ONE-PARAMETER lever (knee_tuck_target
+0.7 → 0.85 alone) — the promotion candidate. ⚠ Surprise that reshapes step 2:
+`tib_off` ROSE (37.5° → 48°) — mechanical advantage came through moment arm and
+chassis height, not shank plumbing, and the tuck un-plumbs further. The plumb
+re-audition now runs against its own premise (screen for the record per the re-use
+context). Pending gates: corridor obstacle spot-check, operator UI review.
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
