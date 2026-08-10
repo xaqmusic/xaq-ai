@@ -202,6 +202,21 @@ DEFERRED; the shadows stay as zero-cost instruments; re-score after P3's density
 The campaign order becomes P2 → P3 → (re-run P1 scoring) → P4.** Verdict class:
 NULL-in-context with a crisp re-use gate, not a refutation of the designs.
 
+**2026-08-09 — THE CRASH FINDING (supersedes much of the above; ledger §4 ★★★★).**
+Every pre-fix run today was killed by a hardened-libstdc++ assert at the moment
+progress-commit saturated (σ=0 in the probe's `normal_distribution`), and `seedavg`
+scored the corpses. The "shuffle attractor", the walk-fraction crisis, the release
+conversion story, the criterion multi-axis refutation, and the "logging-context"
+claim are all retracted (details in the ledger entry). **The stack walks: post-fix
+v2base 6/6 screened seeds, net_z ~6.5, ~110 steps — the Aug-7 baselines reproduce.**
+P0's tie holds (both arms crashed identically). P1's scoring ran post-fix on full
+walking runs and STANDS — measured on walkers, its verdict is stronger than first
+framed: the incumbent phase wins on body-coupling in the *walking* gait, so the
+substrate question closes and **P4's entrainment question (td_plv still ≤0.21 while
+walking) is the campaign's live thread, in direct service of the operator's step-rhythm
+goal.** Tooling hardened: seedavg completion guard; rebuild-after-detour rule; and the
+campaign's honest baseline (n=20, fixed build) is being measured now.
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak

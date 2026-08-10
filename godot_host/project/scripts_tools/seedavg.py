@@ -144,6 +144,17 @@ def parse(path):
                 for i,v in enumerate(al[:4]):
                     if v is not None and v >= 0.0: ameg[i].append(v)
     if len(zs)<5: return None
+    # RUN-COMPLETION GUARD (2026-08-09).  A crashed run's log simply STOPS, and this
+    # parser scored the corpse as if it were the gait: 19/20 "shufflers" in the v2base
+    # tie run were processes killed at t=960–8400 by a latent assert — measured net_z
+    # ~1.2 was "where the body stood when it died", and the walk-or-shuffle "basin
+    # lottery" was manufactured by exactly this.  A truncated run is marked, reported,
+    # and EXCLUDED from the averages.
+    expected = int(os.environ.get("SEEDAVG_EXPECT_TICKS", "0"))
+    if expected > 0 and ts and ts[-1] < 0.95 * expected:
+        print(f"  !! CRASHED/TRUNCATED RUN: {os.path.basename(path)} ended at t={ts[-1]}"
+              f" of {expected} — excluded from averages")
+        return dict(_crashed=True, last_t=ts[-1])
     acc=hy[0];prev=hy[0]
     for h in hy[1:]:
         dd=h-prev
@@ -229,10 +240,15 @@ if __name__=="__main__":
     diff=sys.argv[4] if len(sys.argv)>4 else "0.3"
     extra=[a for a in sys.argv[5:]]
     seeds=list(range(1,n+1))
+    os.environ["SEEDAVG_EXPECT_TICKS"]=str(steps)   # arm the completion guard in parse()
     with cf.ThreadPoolExecutor(max_workers=min(8,n)) as ex:
         res=list(ex.map(lambda s: run_one(cfg,s,steps,diff,extra), seeds))
-    ok=[r for r in res if r]
+    crashed=[i+1 for i,r in enumerate(res) if r and r.get("_crashed")]
+    ok=[r for r in res if r and not r.get("_crashed")]
     print(f"\n{cfg}  (n={len(ok)}/{n} seeds, {steps} ticks, diff {diff})")
+    if crashed:
+        print(f"  !! {len(crashed)}/{n} RUNS CRASHED (seeds {crashed}) — a config whose runs"
+              f"\n     die is a finding about the BUILD, not the gait; fix before comparing")
     if not ok: print("  no valid runs"); sys.exit()
     # WALK FRACTION — the campaign's primary metric (ledger 2026-08-09: seed-mean net_z
     # on a bimodal walk-or-shuffle distribution rewards lottery variance, not gait
