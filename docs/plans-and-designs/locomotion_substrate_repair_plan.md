@@ -244,6 +244,22 @@ touchdown-consistency pull on a SHARED per-leg phase offset — all consumers ro
 together, Kuramoto coherence preserved, no imposed target (each leg pulls toward its
 own running touchdown phase — self-consistency, not a reference).
 
+**2026-08-09 — P4 arm 2 (`phase_td_pull` 0.1, n=6): REGRESSION — and the principle that
+closes the phase-manipulation family.** net_z 6.49 → 0.91, straight 0.12, falls 1.67,
+plv 0.14 → **0.07** (the coherence it was designed to preserve), step_cv_real 1.01 (no
+rhythm gain). Per-leg offsets drift independently and rotate each stroke away from its
+limb's true state — the same lesson as P1 and arm 1, now from the third direction:
+**the phase is a STATE OBSERVATION and every consumer needs it raw; smoothing it (P1),
+locking it (arm 1), or offsetting it (arm 2) all break stroke–limb alignment and cost
+transport. Timing can only change by changing when the limb PHYSICALLY moves.**
+Arm 1 remains the proof that rhythm CAN move (step_cv 0.82) when the stroke genuinely
+reorganizes. ⇒ **Arm 3 (specced, not yet built): select rhythm instead of forcing it —
+add a touchdown-consistency term to the mode-1 coordination fitness
+(`coord_td_weight`: per-probe-window resultant of L.phase at raw touchdowns), so the
+existing (1+1) search DISCOVERS gait_phase offsets that make contact regular. No phase
+is touched; the body's own search does the entraining. Doctrine-native ("give it a
+prediction to fulfill"), one param, existing machinery.**
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
