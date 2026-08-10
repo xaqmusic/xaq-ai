@@ -474,6 +474,20 @@ REVISED: on full instruments 0.05 dominates both.** Windowed activity still deca
 across quarters at every dose (the peak-and-decay stands) but stays alive at Q4 on
 0.05. ⇒ P7 tests SERVO_KI on BOTH tiers: v2base__ga and pure-HK @ lr 0.05.
 
+**2026-08-10 — P7 VERDICT: SERVO_KI is NULL on both tiers; the omission is
+measured-benign.** With the boost on the verified force path (imp_* → _set_motor_vf;
+the first build attached to telemetry-only `_powered_torque` and was bit-identical —
+both lessons now inline in the body script), doses {10, 30, 60}%-at-0.1-rad, n=6 per
+tier: stance/swing bouts UNMOVED (the load-dependent-timing prediction refuted),
+step_cv sub-σ drift, transport tie at best (v2) and −30/−40 % at mid/high doses
+(pure-HK tier). Confirms tq_sat's "authority was never the binding constraint" from
+the actuation side with a live lever. **servo_ki stays 0; no fidelity promotion**
+(the healthy-dose condition is not met — inert-to-mildly-negative); the real-servo
+I-term omission is now a MEASURED non-issue for behavioral fidelity at this scale.
+Re-use context: a body with weaker servos (hardware's real effort budget) or a
+load-conditioned rather than error-integral form. ⇒ **P8 (mechanical advantage) is
+the live phase.**
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
