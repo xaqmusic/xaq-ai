@@ -38,9 +38,14 @@ re-introduces what its predictor consumes.
 - One lever at a time; every change gain-0-guarded and verified byte-identical at 0
   (same-seed net_z reproduction, as done for `stance_release_frac`).
 - Primary metric: walkers/n at n=20 (walker = steps>30), plus the full seedavg metric
-  set; `CHASSIS_COLLIDE=1` always. Report corridor diff 0.3 and flat (diff 0);
-  arena spot-checks for gym-transfer claims (nav oracle engages ONLY in the arena —
-  account for it).
+  set; `CHASSIS_COLLIDE=1` always.
+- **GYM PROTOCOL (operator correction, 2026-08-10): gait-QUALITY levers are judged in
+  the OPEN ARENA (`arenaavg.py`, diff 0) — the corridor's self-centering walls suppress
+  exactly the heading/circling failures a gait lever can cause, so corridor
+  `straight` is wall-assisted and not a gait property. The corridor (diff 0.3) is the
+  OBSTACLE gate, already established, and keeps that role.** P0–P4 numbers before this
+  date are corridor-scoped; arena confirmation is required before any promotion.
+  (nav oracle: zeroed in v2base-derived configs, so the old arena nav confound is gone.)
 - Operator UI observation gates every promotion (§3 rule 5).
 - Ledger entry per verdict; the audit's dispositions table is the checklist.
 - Existing tools, reused not rebuilt: `seedavg.py`, `mkarm.py`, `actsweep.py`,
