@@ -488,6 +488,18 @@ Re-use context: a body with weaker servos (hardware's real effort budget) or a
 load-conditioned rather than error-integral form. ⇒ **P8 (mechanical advantage) is
 the live phase.**
 
+**2026-08-10 — P8 GRID SCREEN (n=6): THE SPRAWL WAS THE RHYTHM BLOCKER.** The
+knee_tuck × stance_lift_hip2 grid's kt=0.85 band delivers **step_cv_real 0.95 →
+0.80–0.83 — the largest rhythm move ever recorded** (beating arm 1's destructive
+0.82) — WITH steps ×1.7 (69→117), transport HELD (10.47/10.06 vs 10.17), falls
+better (0.17), chassis +7–16 %, bellyc_min ×3–5, feet inboard 170→165 mm. kt=1.0
+overreaches (transport 6.3–7.7, tilt ×2). No clock, no fitness term, no phase
+machinery — rhythm emerged from the GEOMETRY the limb moves through, exactly the
+"change when the limb physically moves" requirement P4's five levers could not meet.
+The operator's mechanical-advantage thread found it. n=20 confirmation of 0.85/0.25
+and 0.85/0.40 in flight; then the corridor obstacle gate, the tibia_plumb
+re-audition at the narrowed radius, and operator UI review.
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
