@@ -460,6 +460,20 @@ chassis; sustained clearance is a hardware GATE, not a preference.
   `flbrake.py` + attribution traces for the shear reads; ledger §2 re-use-context
   updates for `hip2_tuck_target` and `tibia_plumb`.
 
+## PART II campaign log
+
+**2026-08-10 — P6 COMPLETE: ctrl_lr 0.05 (PM dog) dominates the pure-HK tier.**
+Arena diff 0, 24k, n=6, full instruments (first rhythm-instrumented ladder ever):
+0.05 → steps ×2.7 (72→191), step_bal ×2 (0.21→0.43), net_disp ×1.8, short_bouts
+0.49→0.41, swing bouts LENGTHEN 7.0→8.7 ticks, stride 58→42 ticks, falls FLAT (0.33)
+— and `step_cv_real` 0.94→**0.89** (4/6 seeds ≤0.90): the second rhythm move in
+campaign history, signal-grade (sub-σ pooled; the structural companions are the
+stronger evidence). 0.10/0.20 buy falls ×3.5 and tilt ×1.8 for nothing extra —
+**the 2026-08-02 "0.10 for power / 0.01 for coordination, no optimum" verdict is
+REVISED: on full instruments 0.05 dominates both.** Windowed activity still decays
+across quarters at every dose (the peak-and-decay stands) but stays alive at Q4 on
+0.05. ⇒ P7 tests SERVO_KI on BOTH tiers: v2base__ga and pure-HK @ lr 0.05.
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
