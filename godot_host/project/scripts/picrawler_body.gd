@@ -362,10 +362,12 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # and the impulse cap: a stance leg the ground resists accumulates error and pushes
 # harder — load-dependent timing, the within-leg thrust↔support coupling.
 # ⚠ FRAME MAPPING: the hardware doc's Ki band (0.01–0.05, servo_dynamics.md) lives in
-# the real servo's internal-loop units and does NOT transplant to this SERVO_KP=20
-# pseudo-torque frame (there it would be ~2 % of the P-term — inert).  Here the dose
-# axis is BOOST AS FRACTION OF THE P-TERM at integral saturation: with leak τ = 0.4 s,
-# steady boost ≈ servo_ki × τ × P-term → servo_ki {0.25, 0.75, 1.5} ≈ {10, 30, 60} %.
+# the real servo's internal-loop units and does NOT transplant.  Here the boost is a
+# FRACTION of motor_max_impulse on the real force path (imp_* → _set_motor_vf):
+# boost_frac ≈ servo_ki × |beyond-deadband error| at integral saturation (τ = 0.4 s),
+# so servo_ki {1, 3, 6} ≈ {10, 30, 60} % boost at a 0.1 rad sustained load error.
+# (First build attached to _powered_torque and produced BIT-IDENTICAL trajectories —
+# that function is telemetry-only; the lesson is inline there.)
 # Guards (three windup precedents + the freeplay drift-twitch limit cycle): integral
 # FROZEN inside the deadband (output stays 0 there regardless), leak ALWAYS applied,
 # contribution clamped to ≤ SERVO_KI_AUTH_FRAC × max_torque.  0 = off, byte-identical.
@@ -7217,9 +7219,9 @@ func _step_one() -> void:
 			_eff_target_hip1[i] = clamp(t_hip1_cmd, _eff_target_hip1[i] - max_step, _eff_target_hip1[i] + max_step)
 			_eff_target_hip2[i] = clamp(t_hip2_cmd, _eff_target_hip2[i] - max_step, _eff_target_hip2[i] + max_step)
 			_eff_target_knee[i] = clamp(t_knee_cmd, _eff_target_knee[i] - max_step, _eff_target_knee[i] + max_step)
-			tq_hip1 = _powered_torque(_eff_target_hip1[i], hip1_angles[i], omega_hip1, leg_tq, 0 * 4 + i)
-			tq_hip2 = _powered_torque(_eff_target_hip2[i], hip2_angles[i], omega_hip2, leg_tq, 1 * 4 + i)
-			tq_knee = _powered_torque(_eff_target_knee[i], knee_angles[i], omega_knee, leg_tq, 2 * 4 + i)
+			tq_hip1 = _powered_torque(_eff_target_hip1[i], hip1_angles[i], omega_hip1, leg_tq)
+			tq_hip2 = _powered_torque(_eff_target_hip2[i], hip2_angles[i], omega_hip2, leg_tq)
+			tq_knee = _powered_torque(_eff_target_knee[i], knee_angles[i], omega_knee, leg_tq)
 		# First-order lag — emulates real servo's gear+motor rise time.
 		# Without this, stiff Kp produces step-impulses that go unstable.
 		var alpha: float = 1.0 - exp(-TAU / SERVO_TORQUE_RISE_TAU)
@@ -7326,6 +7328,30 @@ func _step_one() -> void:
 		var imp_h1: float = motor_max_impulse
 		var imp_h2: float = motor_max_impulse
 		var imp_kn: float = motor_max_impulse
+		# P7 SERVO_KI — the force-boost integral, on the REAL force path (imp_* is what
+		# _set_motor_vf hands the joint; _powered_torque is telemetry).  eh* is already
+		# the beyond-deadband error (0 inside the band → integral frozen there by
+		# construction), the leak always applies, and the boost is a bounded FRACTION of
+		# motor_max_impulse.  boost_frac ≈ servo_ki × |err| at integral saturation
+		# (τ = 0.4 s), so servo_ki {1, 3, 6} ≈ {10, 30, 60}% boost at a 0.1 rad
+		# sustained load error.  0 = off, byte-identical.
+		if servo_ki > 0.0:
+			if _ki_int.size() != 12:
+				_ki_int.resize(12)
+				for _k in range(12): _ki_int[_k] = 0.0
+			var _ki_leak: float = 1.0 - 1.0 / (SERVO_KI_TAU * float(physics_hz))
+			var _ehs: Array = [eh1, eh2, ekn]
+			var _imps: Array = [imp_h1, imp_h2, imp_kn]
+			for _jn in range(3):
+				var _kx: int = _jn * 4 + i
+				_ki_int[_kx] = _ki_int[_kx] * _ki_leak + _ehs[_jn] / float(physics_hz)
+				var _bf: float = clamp(servo_ki * abs(_ki_int[_kx]) / SERVO_KI_TAU,
+									   0.0, SERVO_KI_AUTH_FRAC)
+				_imps[_jn] = _imps[_jn] * (1.0 + _bf)
+				_ki_mag_acc += abs(_ki_int[_kx]); _ki_mag_n += 1
+				_ki_total_ticks += 1
+				if _bf > 0.01: _ki_boost_ticks += 1
+			imp_h1 = _imps[0]; imp_h2 = _imps[1]; imp_kn = _imps[2]
 		if use_freeplay:
 			# Inside the band the hard motor is released.  What acts there instead is the
 			# SOFT SPRING below — see _soft_spring_cmd().
@@ -8614,44 +8640,27 @@ func _abl_apply_env_spec() -> void:
 		else:
 			push_warning("ABLATE: unknown kind '%s'" % kind)
 
-func _powered_torque(target: float, angle: float, omega: float, max_torque: float, ki_idx: int = -1) -> float:
+func _powered_torque(target: float, angle: float, omega: float, max_torque: float) -> float:
 	var error: float = target - angle
-	var db: float = max(SERVO_DEADBAND, motor_freeplay_rad)
-	# P7 SERVO_KI: leak ALWAYS (a stale integral must never survive a swing), integrate
-	# only beyond the deadband, output only beyond the deadband.  See the @export note
-	# for the frame mapping and the windup guards.
-	var ki_boost: float = 0.0
-	if servo_ki > 0.0 and ki_idx >= 0:
-		if _ki_int.size() != 12:
-			_ki_int.resize(12)
-			for _k in range(12): _ki_int[_k] = 0.0
-		_ki_int[ki_idx] *= 1.0 - 1.0 / (SERVO_KI_TAU * float(physics_hz))
-		if abs(error) >= db:
-			_ki_int[ki_idx] += (error - sign(error) * db) / float(physics_hz)
-		ki_boost = servo_ki * SERVO_KP * _ki_int[ki_idx]
-		var cap: float = SERVO_KI_AUTH_FRAC * max_torque
-		ki_boost = clamp(ki_boost, -cap, cap)
-		_ki_mag_acc += abs(_ki_int[ki_idx]); _ki_mag_n += 1
-		_ki_total_ticks += 1
-		if abs(ki_boost) > 0.01 * max_torque: _ki_boost_ticks += 1
 	# Effective deadband = max(SERVO_DEADBAND, motor_freeplay_rad).  The
 	# constant deadband prevents motor chatter near the target; the
 	# operator-settable freeplay extends that to a configurable mechanical-
 	# slop zone where the motor leaves the joint alone.  In this zone only
 	# gravity acts (a passive centering spring was attempted but is unstable
 	# at picrawler scale via apply_torque — deferred to G6DOFJoint3D).
-	if abs(error) < db:
+	# ⚠ TELEMETRY PATH ONLY (verified 2026-08-10 the hard way: a force boost added
+	# here produced BIT-IDENTICAL trajectories — nothing physical reads this value;
+	# the joints' impulse caps flow through imp_* → _set_motor_vf).  Any actuation
+	# lever must attach THERE, not here.
+	if abs(error) < max(SERVO_DEADBAND, motor_freeplay_rad):
 		return 0.0
 	# 2026-06-01 — motor_damping_factor scales the implicit Kd for tunable
 	# springiness.  Default 1.0 = current overdamped behavior; <1 = under-
 	# damped = oscillates before settling (springy compliance feel).
-	var raw: float = SERVO_KP * error - SERVO_KD * motor_damping_factor * omega + ki_boost
+	var raw: float = SERVO_KP * error - SERVO_KD * motor_damping_factor * omega
 	# Speed-dependent saturation: available torque drops linearly with |ω|.
 	var speed_factor: float = clamp(1.0 - abs(omega) / MAX_SERVO_SPEED, 0.0, 1.0)
-	# The FORCE-BOOST semantic: sustained load raises the CAP too, so the boost still
-	# acts precisely when the P-D term is already saturated (the loaded-stance case —
-	# otherwise the integral would be clipped away exactly when it matters).
-	var effective_max: float = max_torque * speed_factor + abs(ki_boost)
+	var effective_max: float = max_torque * speed_factor
 	return clamp(raw, -effective_max, effective_max)
 
 # Unpowered-servo torque model (back-EMF + gear-train friction).
