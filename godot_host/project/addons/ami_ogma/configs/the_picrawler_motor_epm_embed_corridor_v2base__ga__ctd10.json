@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "P4\u00b73 \u2014 touchdown-consistency selection \u00b7 VARIANCE LEVER (candidate)",
-    "description": "WATCH: the same gait as BASE but steadier across runs \u2014 the coordination search gets a touchdown-consistency bonus and selects RELIABLE coordinations: n=20 net_z 6.64\u00b10.96 vs control \u00b11.58, straightness spread halved, bad-seed tail thinned, slightly fewer steps at equal distance. Does NOT move rhythm (step_cv unchanged). WORKING (signal); bake decision open.",
+    "name": "P4\u00b73 \u2014 td-consistency selection \u00b7 corridor-only effect (NOT baked)",
+    "description": "WATCH: in the CORRIDOR this looked like a variance lever (net_z \u00b10.96 vs \u00b11.58); in the honest OPEN ARENA it inverts \u2014 net_disp 9.51\u00b11.43 vs control 10.17\u00b11.15, straight 0.67 vs 0.70. The corridor variance collapse was wall-assisted; the selection found wall-exploiting coordinations. NULL-to-negative in the gait-quality gym; kept as the record of the first catch by the arena protocol.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",

@@ -293,6 +293,21 @@ P5's anticipatory predictor is next, with arm 1's step_cv 0.82 standing as the
 existence proof and this campaign's instruments (true-contact step_cv_real, td_plv,
 completion guard) as its measurement frame.**
 
+**2026-08-10 — THE ARENA PROTOCOL'S FIRST CATCH: ctd10 demoted.** Open floor, n=20:
+net_disp 10.17 ± 1.15 (control) vs 9.51 ± 1.43 (ctd10), straight 0.70 ± 0.04 vs
+0.67 ± 0.07 — the corridor variance collapse was WALL-ASSISTED; the td-consistency
+selection found wall-exploiting coordinations. NULL-to-negative in the honest gym;
+NOT baked. Two more firsts from the same runs: (1) the operator's right-circling UI
+observation is EPISODIC, not systematic (turns ≈ 0 ± 0.23 both arms; single-seed
+circlers in both directions — a UI run draws one seed); (2) `yawd_swing_excess`
+fired for the first time and is **negative** in both arms (≈ −0.037): the body turns
+MORE with all four feet planted than during swing — yaw is stance-injected
+(skid-steer differentials on planted legs), overturning the swing-reaction-torque
+hypothesis and redirecting any future anti-circling lever away from swing-phase
+ideas. Arena baseline on record: **net_disp 10.2 ± 1.2, straight 0.70, falls 0.20 —
+the healthiest n=20 this stack has ever posted.** P4 stays closed; P5 unchanged as
+the next build, now to be judged arena-first.
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
