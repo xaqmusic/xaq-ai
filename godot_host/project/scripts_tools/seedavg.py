@@ -66,6 +66,7 @@ def parse(path):
     # invisible as one that was never emitted.
     plv=0.0;plv_n=0;coh=[];step_cv=0.0;mtle=[];resp=[]
     brtp=0.0;brte=-1.0;brtper=0.0   # BRT lock quality: running accumulators, last = run value
+    stb=0.0;swb=0.0;shb=0.0;cdu=0.0;swf=0.0   # detector health (needs gait_align_diag=1)
     tleg=[[] for _ in range(4)];ameg=[[] for _ in range(4)]
     tspr=[];plvw=[];plvwn=[];panic=[];cwspr=0.0;cwmean=0.0
     for line in open(path):
@@ -115,6 +116,13 @@ def parse(path):
             if 'brt_plv'    in d: brtp=d['brt_plv']
             if 'brt_err'    in d: brte=d['brt_err']
             if 'brt_period' in d: brtper=d['brt_period']
+            # Detector health (P2): whole-run accumulators, last sample = run value.
+            # All 0.0 unless the arm sets gait_align_diag=1.
+            if 'stance_bout' in d: stb=d['stance_bout']
+            if 'swing_bout'  in d: swb=d['swing_bout']
+            if 'short_bouts' in d: shb=d['short_bouts']
+            if 'contact_duty'in d: cdu=d['contact_duty']
+            if 'swing_frac'  in d: swf=d['swing_frac']
             if 'panic_eff' in d: panic.append(d['panic_eff'])
             if 'cw_spr'  in d: cwspr=d['cw_spr']       # whole-run accumulator: last = value
             if 'cw_mean' in d: cwmean=d['cw_mean']
@@ -205,6 +213,8 @@ def parse(path):
                 hk_value=(statistics.mean(resp)/(statistics.mean(mtle)+1e-3))
                          if (resp and mtle) else 0.0,
                 brt_plv=brtp, brt_err=brte, brt_period=brtper,
+                stance_bout=stb, swing_bout=swb, short_bouts=shb,
+                contact_duty=cdu, swing_frac=swf,
                 tle_spr=statistics.mean(tspr) if tspr else 0.0,
                 tle_legs=tl_mu, amp_legs=am_mu,
                 amp_min=min(live_am) if live_am else 0.0,
@@ -246,6 +256,10 @@ if __name__=="__main__":
               # BodyRhythmTracker lock quality (substrate-repair P0): brt_plv near 1 =
               # the body rhythm reference is genuinely locked, not merely warmed up.
               ("BODY-RHYTHM", ("brt_plv","brt_err","brt_period")),
+              # Detector health (P2 deadband sweep; needs gait_align_diag=1 in the arm):
+              # short_bouts = fraction of stance/swing bouts under 4 ticks (chatter).
+              ("DETECTOR", ("stance_bout","swing_bout","short_bouts",
+                            "contact_duty","swing_frac")),
               # The inferential-gain direction: does the agent's own prediction error DIFFER
               # across legs?  tle_spr = (max-min)/mean over the four legs, per sample, time
               # averaged.  ~0 means there is nothing for a precision weighting to weight.
