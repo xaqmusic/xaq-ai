@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "ARM stance-gated hip2 lift (stance_lift_hip2=0.25) on bellyset",
-    "description": "Completes the STANCE lift: stance_lift is knee-only (\"no hip2 -> no foot-lift traction loss\"), but on a PLANTED foot hip2+ presses down and raises the chassis. n=6 corridor SOLID chassis: hip2/knee sign agreement 0.522 -> 0.601 (t=+13.5), fr RECRUITED as a propulsor (2/6 -> 5/6 seeds), rr strengthened (5/6 -> 6/6). net_z +1.04 (ns), straight/tilt_sd/swing_frac all ns. \u26a0 BUT fl brakes 2.5x harder so NET forward force FALLS (+0.00168 -> +0.00114): legs+ is a blind count that ignores the brake. PARTIAL \u2014 mechanism confirmed, transport not yet.",
+    "name": "LEGACY \u2014 pre-audit stack, stance-hip2 lift (reference)",
+    "description": "Pre-campaign stack with the stance-gated hip2 lift (PARTIAL: coherence up, fl brake deepened). Superseded by BASE; kept as reference.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",

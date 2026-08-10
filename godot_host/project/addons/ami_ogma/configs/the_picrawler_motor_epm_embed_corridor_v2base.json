@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "V2 BASE \u2014 post-audit canonical (substrate-repair campaign phase 0)",
-    "description": "Canonical config for the locomotion substrate-repair campaign (docs/plans-and-designs/locomotion_substrate_repair_plan.md, audit 2026-08-09). Derived from ..._stancehip2__supportepm with: dead params REMOVED (balance_gain/tilt_topic \u2014 tilt is never published; coord_stab_penalty \u2014 same tilt), nav_gain=0 (was corridor-latent: target_compass reads (0,0) with target_mode off; zeroed so the arena cannot silently differ), the PANIC family surfaced at its header defaults so the config states what runs, the 5 observer EPMs removed (re-introduced by the phase-5 predictor with a consumer), and true contact wired INSTRUMENT-ONLY (stance gate untouched \u2014 the recorded re-use pattern).",
+    "name": "\u2605 BASE \u2014 v2 canonical \u00b7 walks 20/20, arrhythmic stepping",
+    "description": "WATCH: the honest baseline gait \u2014 every seed walks (net_z 6.4\u00b11.6, ~113 real steps), but stepping is arrhythmic (memoryless intervals, step_cv\u22480.95). This is the body every lever is measured against. Post-audit canonical: cruft removed, panic surfaced, contact wired instrument-only, observer EPMs dropped.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
