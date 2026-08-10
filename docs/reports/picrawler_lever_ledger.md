@@ -800,9 +800,18 @@ yaw question is UNMEASURED here, not null.
 > two blocks above — the 2/20→11/20 conversion, the dose curve, the arena and
 > flat-corridor comparisons — was measured on the armed-assert build (§4 ★★★★ entry):
 > the "shufflers" were runs that CRASHED when commit saturated, and the release changes
-> commit dynamics, hence crash timing. The conversion story is RETRACTED. The
-> recovery-shear mechanism (trace physics) and the lever's design stand; its actual
-> effect on a surviving body is being re-measured at n=20 on the fixed build.**
+> commit dynamics, hence crash timing. The conversion story is RETRACTED.**
+>
+> **CLEAN VERDICT (n=20 per arm, fixed build, zero crashes, 20/20 walkers everywhere):
+> `NULL`-to-`REGRESSION`.** control net_z 6.43 ± 1.58 / tilt_sd 0.099 / falls 0.30 /
+> steps 113; srel 0.5 → 5.56 / **0.232** / 0.55 / 114; srel 1.0 → 5.69 / **0.255** /
+> 0.55 / 115. Steps FLAT, transport slightly down, wobble 2.4×, falls +83 %. On a body
+> that survives its own success the release adds instability and buys nothing.
+> `stance_release_frac` stays 0. **Re-use context: the recovery-shear window is real
+> trace physics (−0.004…−0.015 g/tick, 7–9 ticks, body-wide) — the toll exists but
+> un-pressing mid-stance is evidently the wrong way to collect it. Candidates that
+> honor the measurement: the knee-only shaped release, or timing the LIFT earlier
+> (P4 entrainment) rather than weakening the stance.**
 
 **TESTED (same day): the discriminator is the GYM, not the texture.** srel 1.0 at n=20,
 three environments: corridor diff 0.3 → **11/20** walkers, steps 62; corridor diff 0.0

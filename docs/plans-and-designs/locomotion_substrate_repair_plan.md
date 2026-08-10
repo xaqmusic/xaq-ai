@@ -217,6 +217,19 @@ walking) is the campaign's live thread, in direct service of the operator's step
 goal.** Tooling hardened: seedavg completion guard; rebuild-after-detour rule; and the
 campaign's honest baseline (n=20, fixed build) is being measured now.
 
+**2026-08-09 — CLEAN BASELINE SET + release verdict; the campaign's honest state.**
+n=20 per arm, fixed build, zero crashes: **v2base walks 20/20** (net_z 6.43 ± 1.58,
+steps 113, tilt_sd 0.099, falls 0.30) — the canonical baseline, protocol fully
+recorded. **stance_release: NULL-to-REGRESSION** (steps flat, tilt 2.4×, falls +83 %);
+stays 0; re-use context recorded (knee-only shape, or fix the LIFT timing instead).
+**P2 deadband: NULL on its gate** (short_bouts 0.39 → 0.38 at every dose — the
+detector's chatter is real crossings, not hysteresis noise); nothing promoted.
+Campaign state: P0 ✓, P1 closed (incumbent phase stands), P2 NULL, P3's premise
+dissolved with the crash artifact (stepping density was never the problem), **P4 is
+the live thread — the body walks arrhythmically (`td_plv` ≤ 0.21, `step_cv_real`
+unmeasured-by-default) and the operator's continuous-gait goal is now cleanly a
+RHYTHM problem on a healthy, crash-free, fully-instrumented baseline.**
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
