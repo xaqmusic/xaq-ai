@@ -509,6 +509,14 @@ chassis height, not shank plumbing, and the tuck un-plumbs further. The plumb
 re-audition now runs against its own premise (screen for the record per the re-use
 context). Pending gates: corridor obstacle spot-check, operator UI review.
 
+**GATES (same day): corridor PASSES WITH A BONUS — net_z 7.37 ± 1.22 vs 6.43 ± 1.58
+(+15 %), 6/6 walkers, falls better; the tucked posture climbs the hump BETTER than
+the sprawl. Plumb re-audition: NULL at the narrowed radius — pulls the shank
+vertical by DROPPING the body (chassis 0.048 → 0.045), costs rhythm (cv 0.81 →
+0.85); the plumb-vs-height trade is inherent at both radii and its re-use context
+is closed. ⇒ `knee_tuck_target 0.85` is fully gated pending ONLY operator UI review
+(launcher: "★ P8 TUCK"). Remaining P8 item: the CoT/amp_seek energy pass.**
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
