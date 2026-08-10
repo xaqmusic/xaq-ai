@@ -274,6 +274,20 @@ promotion on its own; (b) the direct form, arm 3b (`coord_cv_weight`): put the
 INTERVAL CV itself in the fitness — egocentric, intrinsic, the operator's number
 selected literally — or escalate rhythm to P5's anticipatory predictor.**
 
+**2026-08-10 — P4 CLOSES.** Arm 3 n=20 confirmation: robustness holds, softened —
+net_z 6.43 ± 1.58 → 6.64 ± **0.96**, straight ± 0.15 → ± 0.07, sub-5 seeds 3 → 1,
+falls 0.25; step_cv/steps/plv flat. `WORKING` (signal) as a variance lever; bake
+decision = operator's. Arm 3b (interval-CV selection, n=6): **NULL — step_cv_real
+0.97 even when the fitness selects the operator's number literally.**
+**P4's structural conclusion, four arms deep: forcing rhythm breaks stroke–limb
+alignment (1, 2); selecting rhythm through the coordination search fails because
+RHYTHM IS NOT IN THE SEARCH SPACE (3, 3b) — inter-leg offsets do not control interval
+regularity. The irregularity lives below the coordination layer, in the physical
+cycle itself. Step regularity requires a mechanism that changes WHEN the limb moves:
+P5's anticipatory predictor is next, with arm 1's step_cv 0.82 standing as the
+existence proof and this campaign's instruments (true-contact step_cv_real, td_plv,
+completion guard) as its measurement frame.**
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
