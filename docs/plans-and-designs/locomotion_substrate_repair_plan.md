@@ -564,6 +564,17 @@ Baked as `the_picrawler_motor_epm_embed_corridor_v3base.json` (+ __ga instrument
 swing_tuck_knee 0.1 on the v2 canonical. Remaining P8 study: the CoT/amp_seek energy
 pass, screening on the new base.
 
+**2026-08-10 — P8 CLOSES: the CoT screen, and the campaign's end state.** amp_seek
+0.05 on V3 BASE: transport tie with variance nearly halved (8.32 ± 1.41 vs
+8.34 ± 2.36), falls 0/6, rhythm held — signal-grade, parked (not powered: the energy
+half of the CoT claim needs an effort column — tq_mag — that the arena harness does
+not yet surface; recorded as an instrument gap beside the signed-yaw upgrade).
+0.02 mildly regresses. **END STATE: V3 BASE promoted and canonical; the posture
+frontier mapped; every lever verdicted with re-use contexts; the harness completion-
+guarded, gym-honest, and context-aware. Open for the hardware road: the ~8 mm
+clearance bar, effort instrumentation, ratchet leaks — then the higher-level
+active-inference loops.**
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
