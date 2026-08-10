@@ -148,6 +148,77 @@ def main(argv):
         for c, (r, t, p) in summary.items():
             print(f"{c:<7}mean retro={r:.3f}  td_plv={t:.3f}  prop_R={p:.3f}")
         return 0
+    if argv[0] == "scan":
+        # Candidate D, reconstructed OFFLINE from the banked per-tick series:
+        #   D(t+1) = D(t) + dphi_A(t)  +  k · wrap(C(t) − D(t))
+        # A's monotone advance supplies the frequency; a continuous pull toward C's
+        # coupled readout supplies the body-coupling.  k → 0 degenerates to A
+        # (monotone, decoupled); k large → C (coupled, retrograde).  The scan asks
+        # whether any k beats the INCUMBENT on retro AND prop_R AND td_plv at once.
+        ks = [float(x) for x in (argv[1:] or ["0.02", "0.05", "0.1", "0.2", "0.35", "0.5"])]
+        seeds = sorted(int(p.name[4:-4]) for p in pathlib.Path(OUT).glob("ps_s*.log"))
+        rows = {k: {leg: dict(td=[], prop=[], retro=[0, 0]) for leg in LEGS} for k in ks}
+        used = 0
+        for seed in seeds:
+            log, tracep = f"{OUT}/ps_s{seed}.log", f"{OUT}/ps_s{seed}.trace.jsonl"
+            series = {}                       # t -> (shA[4], shC[4])
+            for line in open(log):
+                if '"sh_a"' not in line: continue
+                try: d = json.loads(line)
+                except json.JSONDecodeError: continue
+                if d.get("t", 0) < 1000 or "sh_c" not in d: continue
+                series[d["t"]] = (d["sh_a"], d["sh_c"])
+            R = []
+            for line in open(tracep):
+                try: d = json.loads(line)
+                except json.JSONDecodeError: continue
+                if d.get("t", 0) >= 1000: R.append(d)
+            if len(R) < 500 or len(series) < 500: continue
+            used += 1
+            V = [r["fwd_v"] for r in R[1:]]
+            for i, leg in enumerate(LEGS):
+                sw = [(R[k2]["h1"][i] - R[k2 - 1]["h1"][i]) * (1.0 if R[k2]["c"][i] else 0.0)
+                      for k2 in range(1, len(R))]
+                s = 1.0 if corr(sw, V) >= 0 else -1.0
+                D = {k: None for k in ks}
+                prevA = None
+                for k2 in range(1, len(R)):
+                    t = R[k2]["t"]
+                    sv = series.get(t)
+                    if not sv: continue
+                    a, c = sv[0][i], sv[1][i]
+                    if prevA is None: prevA = a; D = {k: a for k in ks}; continue
+                    da = a - prevA
+                    while da > math.pi:  da -= 2 * math.pi
+                    while da < -math.pi: da += 2 * math.pi
+                    prevA = a
+                    for k in ks:
+                        e = c - D[k]
+                        while e > math.pi:  e -= 2 * math.pi
+                        while e < -math.pi: e += 2 * math.pi
+                        nd = D[k] + da + k * e
+                        step = nd - D[k]
+                        while step > math.pi:  step -= 2 * math.pi
+                        while step < -math.pi: step += 2 * math.pi
+                        rows[k][leg]["retro"][0] += 1 if step < 0 else 0
+                        rows[k][leg]["retro"][1] += 1
+                        nd = math.fmod(nd, 2 * math.pi)
+                        if nd < 0: nd += 2 * math.pi
+                        D[k] = nd
+                        if R[k2]["c"][i] and not R[k2 - 1]["c"][i]:
+                            rows[k][leg]["td"].append(nd)
+                        if R[k2]["c"][i] and s * (R[k2]["h1"][i] - R[k2 - 1]["h1"][i]) > 0.0002:
+                            rows[k][leg]["prop"].append(nd)
+        print(f"phasescore scan: candidate D over {used} seeds  "
+              f"(incumbent: retro 0.652, td_plv 0.213, prop_R 0.357)")
+        print(f"{'k':>6}{'retro':>8}{'td_plv':>9}{'prop_R':>9}")
+        for k in ks:
+            rr = [rows[k][leg]["retro"] for leg in LEGS]
+            retro = sum(a for a, _ in rr) / max(1, sum(b for _, b in rr))
+            tdp = statistics.mean(resultant(rows[k][leg]["td"])   for leg in LEGS)
+            prp = statistics.mean(resultant(rows[k][leg]["prop"]) for leg in LEGS)
+            print(f"{k:>6.2f}{retro:>8.3f}{tdp:>9.3f}{prp:>9.3f}")
+        return 0
     print(__doc__); return 2
 
 

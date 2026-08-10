@@ -187,6 +187,21 @@ across logging cadences (same seed crashed at DIAG_INTERVAL=1, ran clean at 60) 
 instrument env settings are part of a run's context; A/B arms must share identical
 instrument settings, always.
 
+**2026-08-09 — P1 VERDICT: the phase-substrate swap is REGIME-BLOCKED; deferred behind
+P3.** Full clean scorecard (6/6 seeds, 12 000 ticks): incumbent retro 0.652 / td_plv
+0.213 / prop_R 0.357; per-leg PLL 0.005 / **0.043** / **0.038**; shared+offsets 0.001 /
+0.046 / 0.027; filtered readout 0.819 / 0.144 / **0.517**. The smooth oscillators are
+essentially uncorrelated with the body; the incumbent's jitter carries ~5–7× more
+contact information. The hybrid scan (integrator at A's rate + continuous pull toward
+C, k ∈ [0.02, 0.5], reconstructed offline at zero sim cost) traces a clean frontier —
+and **no k beats the incumbent on all three axes; td_plv is strictly worse everywhere**
+(0.02–0.11): the raw readout's jitter is exactly what snaps it to contact events.
+⇒ In an aperiodic-contact regime there is no better phase than the state observation —
+"an honest phase substrate" requires a stepping body first. **P1's consumer switch is
+DEFERRED; the shadows stay as zero-cost instruments; re-score after P3's density gate.
+The campaign order becomes P2 → P3 → (re-run P1 scoring) → P4.** Verdict class:
+NULL-in-context with a crisp re-use gate, not a refutation of the designs.
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
