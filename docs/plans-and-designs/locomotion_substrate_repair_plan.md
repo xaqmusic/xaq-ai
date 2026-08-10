@@ -260,6 +260,20 @@ existing (1+1) search DISCOVERS gait_phase offsets that make contact regular. No
 is touched; the body's own search does the entraining. Doctrine-native ("give it a
 prediction to fulfill"), one param, existing machinery.**
 
+**2026-08-10 — P4 arm 3 (`coord_td_weight` 0.1/0.3, n=6 each): NULL on rhythm, PARTIAL
+(signal) on robustness — and the miss is diagnostic.** step_cv_real 0.97/0.98/0.98
+across 0/0.1/0.3: the rhythm target is not reachable through touchdown-PHASE
+consistency, because td_R measures consistency against the knee's own oscillation —
+a gait can land every touchdown at one phase of an IRREGULAR clock. The fitness
+selected exactly what it measured: at 0.1, net_z variance collapses (6.49 ± 1.70 →
+6.93 ± **0.36**), straight 0.59 ± 0.03 (the circler seed gone), tilt 0.078, falls
+0.17, with FEWER steps (110 → 92) at equal distance; 0.3 erodes it (non-monotonic —
+n=6 caution). **Two forks from here: (a) confirm the 0.1 robustness at n=20 — variance
+collapse across every transport metric is "confident gait" in seed terms and may merit
+promotion on its own; (b) the direct form, arm 3b (`coord_cv_weight`): put the
+INTERVAL CV itself in the fitness — egocentric, intrinsic, the operator's number
+selected literally — or escalate rhythm to P5's anticipatory predictor.**
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
