@@ -334,3 +334,138 @@ the operator, not another autonomous lever.**
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
 redesign (documented, deferred — revisit before hardware); promotion of anything without
 its UI review.
+
+
+---
+
+# PART II — Below the coordination layer (approved 2026-08-10)
+
+# Below the coordination layer — P6 (ctrl_lr) → P7 (SERVO_KI) → P8 (mechanical advantage / hardware readiness)
+
+## Context
+
+The substrate-repair campaign (P0–P5, complete; full log in
+`docs/plans-and-designs/locomotion_substrate_repair_plan.md`) measured and killed every
+cheap rhythm lever: forcing phase breaks stroke–limb alignment, selecting rhythm fails
+because it is not in the coordination search space, and pose-transition surprise does
+not anticipate touchdowns. The stack walks (arena n=20: net_disp 10.2 ± 1.2, straight
+0.70) but arrhythmically, and the evidence points below the coordination layer — the HK
+controller's own limit-cycle dynamics and the actuation model.
+
+Operator decisions (2026-08-10): **sequence = measure ctrl_lr first, then build
+SERVO_KI**; SERVO_KI is framed as a **body-fidelity correction** (real servos have
+integral behavior; `docs/servo_dynamics.md:82` specifies Ki 0.01–0.05, currently
+omitted) — a healthy value becomes the default body, like `chassis_collides`.
+**Added scope (operator): P8 — leg mechanical advantage.** The sprawl is wide and a
+REAL picrawler integration is imminent: chassis height, tuck kinematics, and energy
+efficiency are in scope, with hardware-readiness (no deck contact, honest effort
+budgets) as the framing.
+
+Key priors that shape both steps:
+- ctrl_lr ladder (2026-08-02, pure-HK base, n=4): steps ×4–5 and step_bal ×2.6 at
+  0.05–0.10, but activity **peaks at 14–20k ticks and decays by 40k**; raising it on
+  the DEPLOYED base destabilizes; it trades inter-leg coordination for per-leg power.
+  **No rhythm metric was ever recorded** (step_cv read a structural 0.000 that era).
+- Authority is not the binding constraint (tq_sat 0.5%→3.8% at high drive — direction
+  of force, not magnitude). If SERVO_KI matters it is via **load-dependent timing**
+  (stance leg under load → error integrates → force ramps → later-but-harder release),
+  i.e. a within-leg thrust↔support coupling — the ledger's standing prerequisite.
+- Windup precedents: three no-leak ratchets + the freeplay drift-twitch limit cycle.
+  Any integral must be leaky, clamped, and frozen inside the deadband.
+- Pooled step_cv ≈ 1 can hide tight in-cluster rhythm (2026-08-05) — read windowed
+  regularity, not the pooled number alone.
+
+## P6 — ctrl_lr ladder re-run with rhythm instruments (measurement only)
+
+1. Arms: mkarm `gait_align_diag=1` variants of the existing pure-HK ladder configs
+   (`motor_epm_pure_hk__inst__stance__c025.json` = 0.01, `__lr005` = 0.05,
+   `__lr10` = 0.10, `__lr020` = 0.20; ignore the lr05/lr20 name-duplicates). These
+   configs already carry `contact_topic` + `contact_instrument_only=1`.
+2. Tooling: extend `arenaavg.py` with the STEP-CLOCK / DETECTOR / BODY-RHYTHM parsing
+   groups (mirror the seedavg additions) and the completion guard — the new gym
+   protocol judges gait quality in the arena, and the pure-HK arms wander (turns ±12),
+   which the corridor walls would mask.
+3. Protocol: arena diff 0, `CHASSIS_COLLIDE=1`, **24k ticks** (≥20k stripped-controller
+   horizon; brackets the 14–20k peak), n=6 per dose. Read early/mid/late windows
+   (the peak-and-decay is part of the result), `step_cv_real`, td_plv, bout structure,
+   plus the full metric set.
+4. Decision: does any dose move windowed step regularity vs 0.01? Either answer sets
+   P7's judgment frame; a positive also nominates the pure-HK dose P7 tests on.
+
+## P7 — SERVO_KI (the body-fidelity build)
+
+1. Implementation in `godot_host/project/scripts/picrawler_body.gd`:
+   - Per-joint leaky integral of servo tracking error against `_eff_target_*` (the
+     rate-limited target, `:950`), **frozen when |error| ≤ deadband** (drift-twitch
+     precedent), leak τ ≈ 0.3–0.5 s, contribution clamped to ≤ ~0.5 × MAX_SERVO_TORQUE.
+   - Attach on the **torque/impulse-cap path** (`_powered_torque()`, `:8594` — raises
+     authority under sustained load), NOT the velocity command (speed-clipped, windup-prone).
+   - Expose `@export var servo_ki = 0.0` + env `OGMA_PICRAWLER_SERVO_KI` (the
+     chassis_collides pattern). Diag: per-joint integral magnitude + boost duty
+     mirrored into the body log (consumer-fired check).
+2. A/B: default-0 byte-identity first (body-side change touches every config — the
+   guard run is mandatory); then doses {0.01, 0.03, 0.05} (the servo_dynamics band,
+   = PM's 0.05 at the top), n=20 arena diff 0 primary + corridor 0.3 obstacle-gate
+   spot-check, on BOTH tiers (v2base__ga and the best P6 pure-HK dose). Judged on
+   windowed step regularity / td_plv first, full metric set always, belly + falls
+   as the cost axes.
+3. Fidelity promotion (operator-decided framing): if a dose is healthy, it becomes the
+   body DEFAULT, recorded as a body correction in `docs/servo_dynamics.md` and the
+   ledger; configs stay untouched (the body carries it).
+
+## P8 — Leg mechanical advantage & hardware readiness (operator-added)
+
+**The measured anchor.** Arena control posture: feet planted at ~170 mm against a
+166 mm total leg reach (fully stretched sprawl), tibia 37.5° off vertical vs the 10°
+design rest, scrub 0.10 vs fwd_v 0.05 (slides sideways 2× faster than it advances).
+The largest single effect ever measured (`ik_plumb`, tibia_plumb 0.15: net_disp +32 %,
+straight 0.82) is blocked ONLY by its belly cost — and the recorded plumb-vs-height
+conflict ("hip2 plumbs and drops; the knee raises and un-plumbs") holds at the CURRENT
+stance radius. `foot_r` is set by hip2+knee alone (hip1 is a yaw sweep at constant
+radius), so **narrowing the sprawl is the un-refuted combination: feet inboard buys
+height AND plumb from the same leg reach**, and plumber shanks attack the measured
+recovery-shear brake (fl −0.48 shear ratio from the most-tilted tibia). Hardware
+stake: `bellyc_min` runs ~1–2 mm even in healthy runs — deck-kissing grinds a real
+chassis; sustained clearance is a hardware GATE, not a preference.
+
+1. **Posture operating-point sweep (one lever: the stance radius).** Move the rest
+   posture inboard via the existing gated carriers — `knee_tuck_target` (deployed 0.7)
+   and a hip2 rest target — as a 2-D coarse grid (3×3, n=6 arena screens), with
+   `tibia_plumb_gain` off first. Judged on: tib_off (the `ga_tib` instrument), chassis_y
+   + bellyc/bellyc_min, scrub, net_disp/straight, falls, and per-leg shear via flbrake
+   traces. The ungated `hip2_tuck_target` refutation stands — any hip2 rest change
+   rides the stance-phase machinery or the postural-profile path, never a blind
+   rest override.
+2. **Re-audition tibia_plumb AT the narrowed radius** (its recorded re-use context):
+   if the inboard posture holds height, the +32 % transport effect may return without
+   the belly cost that blocked promotion. Dose from the ik_plumb arm (0.15), n=20
+   arena on a win.
+3. **Energy: activate the built-but-never-deployed CoT search** (`amp_seek_rate` —
+   (1+1) hill-climb on amp_target maximizing fwd_v per oscillation amplitude), and
+   promote effort metrics to first-class in every P8 report: tq_mag, tq_sat, scrub,
+   and net_disp per unit amplitude (the CoT proxy). Hardware framing: the effort
+   budget of a real servo is the binding resource.
+4. **Hardware-readiness gate for the phase**: bellyc_min sustained > ~8 mm at n=20
+   with falls ≤ baseline — the "would not grind" bar — alongside the standard set.
+
+## Files
+
+- P6: 4 mkarm'd `__ga` ladder arms; `godot_host/project/scripts_tools/arenaavg.py`
+  (parsing groups + completion guard, mirroring seedavg).
+- P7: `godot_host/project/scripts/picrawler_body.gd` (integral, env, diag mirror);
+  dose arms via env (body param — no config changes needed); `docs/servo_dynamics.md`
+  + ledger/campaign-log entries.
+- P8: config arms via `mkarm.py` (knee_tuck_target / hip2 rest grid, tibia_plumb
+  re-audition, amp_seek activation — all existing MotorEPMv2 params, no new C++);
+  `flbrake.py` + attribution traces for the shear reads; ledger §2 re-use-context
+  updates for `hip2_tuck_target` and `tibia_plumb`.
+
+## Verification
+
+Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
+reproduction) before any dose; consumer-fired checks from the new diag mirrors; arena
+primary per the gym protocol with a corridor obstacle-gate spot-check before any
+promotion; ledger + campaign-log entry per verdict; launcher naming convention for any
+exposed arm. Known failure shapes to watch: integral windup (leak/clamp/freeze guards),
+the 14–20k peak-and-decay masquerading as a win at short horizons, and pooled-step_cv
+hiding cluster rhythm (windowed reads mandatory).
