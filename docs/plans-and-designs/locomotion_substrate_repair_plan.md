@@ -517,6 +517,23 @@ vertical by DROPPING the body (chassis 0.048 → 0.045), costs rhythm (cv 0.81 �
 is closed. ⇒ `knee_tuck_target 0.85` is fully gated pending ONLY operator UI review
 (launcher: "★ P8 TUCK"). Remaining P8 item: the CoT/amp_seek energy pass.**
 
+**2026-08-10 — SWING-ECONOMY THREAD (operator UI observation → measured → counter-lever
+killed honestly).** swingreport.py confirmed all three observed signatures on the tuck
+base: swing knee-throw AMPLIFIED by the tuck (−0.17 → −0.27 rad), return whip ×2–4,
+front-leg reaction coherent in SIGNED yaw (fr r ≈ −0.15..−0.26 — invisible to the
+magnitude-only yaw instrument), and the "lost power stroke" localized to EARLY-STANCE
+loading (rear-leg first-5-tick forward impulse 0.032 → 0.003), not to missed plants
+(6–13 %, HALVED by the tuck). The purpose-built counter (`swing_tuck_knee` 0.2 on the
+tuck base): n=6 screen looked excellent (disp 10.23 ± 0.35, scrub −12 %) — **n=20
+REFUTES it** (disp 8.81 ± 3.03, tilt 0.117, falls 0.20, cv 0.90 ± 0.15) **while the
+traced mechanism check shows the fold DOES shrink throw/whip as designed. Mechanism
+delivered, outcome worse: swing economy is not the binding constraint, and the ±0.35
+screen was a favorable draw — n=6 variance collapse can be luck (§3.3, again).**
+0.4 is catastrophic (disp 1.9, falls 1.3). swing_tuck stays 0; re-use: smaller dose
+or hip2-half only with a NEW hypothesis for the seed-dependent destabilization.
+**The tuck alone (knee_tuck_target 0.85) remains the promotion candidate at the
+operator UI gate.** P8 remaining: the CoT/amp_seek energy pass.
+
 ## Verification
 
 Every step: completion-guarded runs only; gain-0/default-0 byte-identity (same-seed
