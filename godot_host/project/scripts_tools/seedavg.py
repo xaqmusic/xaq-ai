@@ -67,6 +67,7 @@ def parse(path):
     plv=0.0;plv_n=0;coh=[];step_cv=0.0;mtle=[];resp=[]
     brtp=0.0;brte=-1.0;brtper=0.0   # BRT lock quality: running accumulators, last = run value
     stb=0.0;swb=0.0;shb=0.0;cdu=0.0;swf=0.0   # detector health (needs gait_align_diag=1)
+    tdp=0.0;stl=0.0;ste=-1.0;spr=0.0;scr=0.0  # step clock + true rhythm (P4)
     tleg=[[] for _ in range(4)];ameg=[[] for _ in range(4)]
     tspr=[];plvw=[];plvwn=[];panic=[];cwspr=0.0;cwmean=0.0
     for line in open(path):
@@ -123,6 +124,14 @@ def parse(path):
             if 'short_bouts' in d: shb=d['short_bouts']
             if 'contact_duty'in d: cdu=d['contact_duty']
             if 'swing_frac'  in d: swf=d['swing_frac']
+            # P4 step-clock + true-rhythm reads.  td_plv = stroke phase at touchdown
+            # (the honest lock metric); step_cv_real = contact-interval CV with
+            # micro-lifts filtered (the operator's rhythm goal as a number).
+            if 'td_plv'      in d: tdp=d['td_plv']
+            if 'step_lock'   in d: stl=d['step_lock']
+            if 'step_td_err' in d: ste=d['step_td_err']
+            if 'step_per_real' in d: spr=d['step_per_real']
+            if 'step_cv_real'  in d: scr=d['step_cv_real']
             if 'panic_eff' in d: panic.append(d['panic_eff'])
             if 'cw_spr'  in d: cwspr=d['cw_spr']       # whole-run accumulator: last = value
             if 'cw_mean' in d: cwmean=d['cw_mean']
@@ -226,6 +235,8 @@ def parse(path):
                 brt_plv=brtp, brt_err=brte, brt_period=brtper,
                 stance_bout=stb, swing_bout=swb, short_bouts=shb,
                 contact_duty=cdu, swing_frac=swf,
+                td_plv=tdp, step_lock=stl, step_td_err=ste,
+                step_per_real=spr, step_cv_real=scr,
                 tle_spr=statistics.mean(tspr) if tspr else 0.0,
                 tle_legs=tl_mu, amp_legs=am_mu,
                 amp_min=min(live_am) if live_am else 0.0,
@@ -276,6 +287,11 @@ if __name__=="__main__":
               # short_bouts = fraction of stance/swing bouts under 4 ticks (chatter).
               ("DETECTOR", ("stance_bout","swing_bout","short_bouts",
                             "contact_duty","swing_frac")),
+              # P4 — the campaign's live thread.  td_plv: does touchdown land at one
+              # stroke phase (1 = locked)?  step_cv_real: contact-interval regularity,
+              # micro-lifts filtered — the operator's "repetitive stepping" as a number.
+              ("STEP-CLOCK", ("td_plv","step_lock","step_td_err",
+                              "step_per_real","step_cv_real")),
               # The inferential-gain direction: does the agent's own prediction error DIFFER
               # across legs?  tle_spr = (max-min)/mean over the four legs, per sample, time
               # averaged.  ~0 means there is nothing for a precision weighting to weight.
