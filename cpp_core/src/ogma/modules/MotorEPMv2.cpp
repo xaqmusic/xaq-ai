@@ -3042,9 +3042,15 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // the search jumps OUT of a slow local optimum toward a propulsive coordination.
             float coord_sigma = float(coord_reward_drive_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_)
                               * explore_mult;   // progress→commit (C) damps the phase-search σ
-            std::normal_distribution<float> pz(0.0f, coord_sigma);
+            // ⚠ σ = 0 is REACHABLE (full commit × explore_floor 0) and normal_distribution
+            // ASSERTS on it — a latent process-abort that fired stochastically whenever a
+            // probe boundary landed inside full commit (found 2026-08-09 when per-tick diag
+            // changed run timing).  The σ→0 limit's honest semantics: propose the incumbent
+            // unchanged.  Draw only when σ > 0.
+            std::normal_distribution<float> pz(0.0f, std::max(coord_sigma, 1e-9f));
             for (int i = 1; i < n_legs_; ++i) {   // propose a new probe around the incumbent
-                float p = float(coord_best_phase_[i]) + pz(coord_rng_);
+                float p = float(coord_best_phase_[i])
+                        + (coord_sigma > 0.0f ? pz(coord_rng_) : 0.0f);
                 while (p >  float(M_PI)) p -= 2.0f * float(M_PI);
                 while (p < -float(M_PI)) p += 2.0f * float(M_PI);
                 gait_phase_[i] = p;

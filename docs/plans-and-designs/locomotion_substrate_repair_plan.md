@@ -170,6 +170,23 @@ per-leg PLL (candidate a) is promoted to front-runner; the shared-phase option (
 first explain why the shared reference fails to lock even during walking; BRT's own
 crossing detection (hysteresis on the hip1 diagonal coordinate) joins the suspect list.
 
+**2026-08-09 — P1 in flight; two findings from the first scoring pass.**
+(1) **Preliminary scorecard (truncated runs): monotonicity and body-coupling trade off
+across every candidate.** The smooth oscillators (A retro 0.005 / B 0.001) know LESS
+about contact and propulsion (td_plv 0.15/0.12, prop_R 0.09/0.08) than the retrograde
+incumbent (0.26/0.33); the filtered readout C is the reverse (prop_R 0.50 — best; retro
+0.82 — worst). "L.phase is a state observation, not a clock," now quantified. A fourth
+design follows: PLL with a CONTINUOUS confidence-weighted phase detector (integrator for
+monotonicity + per-tick pull toward the readout for coupling).
+(2) **A latent process-abort found and fixed:** the coordination probe constructs
+`normal_distribution(0, σ)` with σ = drive × explore_mult, and full commit drives
+explore_mult to EXACTLY 0 (floor 0) → glibc++ assert → the whole process dies. Fired
+stochastically whenever a probe boundary landed inside full commit. Fix: σ→0 proposes
+the incumbent unchanged. ⚠ Corollary discovered en route: the brain trajectory DIFFERS
+across logging cadences (same seed crashed at DIAG_INTERVAL=1, ran clean at 60) —
+instrument env settings are part of a run's context; A/B arms must share identical
+instrument settings, always.
+
 ## Explicitly out of scope
 
 L1 nav / EFE arbiter layers; new reflex levers on the unrepaired substrate; ratchet-leak
