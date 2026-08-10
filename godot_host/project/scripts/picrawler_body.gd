@@ -10047,6 +10047,20 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 					int(_g.get("mitosis_count", -1)), snappedf(_top1, 0.001),
 						snappedf(float(_g.get("autotune_value", -1.0)), 0.000001),
 						snappedf(float(_g.get("min_insertion_error", -1.0)), 0.000001)]
+	# 2026-08-10 (P5) — body-pose EPM per-tick token mirror.  get_module_metrics reads the
+	# bus last-value token, so at OGMA_PICRAWLER_DIAG_INTERVAL=1 this gives the SAME-tick
+	# tle/winner the anticipation analysis joins against the trace's contact events.
+	# Absent modules simply add no keys — zero cost on configs without the EPMs.
+	if brain != null and brain.has_method("get_module_metrics"):
+		var _pm = brain.get_module_metrics()
+		for _bpid in ["body_pose", "body_pose_t"]:
+			if _pm.has(_bpid):
+				var _bp = _pm[_bpid]
+				var _tag = "bp" if _bpid == "body_pose" else "bpt"
+				line[_tag + "_tle"] = snappedf(float(_bp.get("tle", -1.0)), 0.0001)
+				line[_tag + "_win"] = int(_bp.get("winner_id", -1))
+				line[_tag + "_n"]   = int(_bp.get("node_count", -1))
+				line[_tag + "_b"]   = int(_bp.get("baked_count", -1))
 	# 2026-08-09 (substrate-repair P0) — BodyRhythmTracker lock quality, mirrored so a
 	# seedavg arm can read whether the body's own rhythm reference is actually locked
 	# (brt_plv near 1 = swing crossings land at one phase) rather than merely warmed up.
