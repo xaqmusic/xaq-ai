@@ -1,5 +1,20 @@
 # Motor-system audit — 2026-08-09
 
+> ## ⚠ SAME-DAY CORRECTION (evening)
+>
+> **§4's behavioral thesis is retracted; the structural findings (§1–§3) all stand.**
+> The "level-ground shuffle attractor" and the walk-fraction numbers were manufactured
+> by a latent process crash: a hardened-libstdc++ assert (armed by the day's first
+> rebuild since the toolchain upgrade) killed every run at the moment progress-commit
+> saturated — i.e. when the body committed to walking — and the harness scored the
+> corpses. With the crash fixed, the canonical config walks 6/6 screened seeds at
+> net_z ~6.5 (~110 real steps): **the Aug-7 baselines reproduce, and the "baseline
+> non-reproduction" mystery is closed** (never FP basins — a hardening flag). What §4
+> got right survives re-reading: stepping is still arrhythmic (`step_cv` ≈ 1.0,
+> `td_plv` ≤ 0.21 *on walking runs*), the press-fights-lift window is real trace
+> physics, and the operator's continuous-gait goal remains open — as a RHYTHM problem,
+> not a walk/shuffle problem. Full record: lever ledger §4 ★★★★ entry (2026-08-09).
+
 **Scope:** the deployed stack config
 `the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2__supportepm.json`
 and every module it instantiates (JointSensorimotorBridge, MotorEPMv2, CPGOscillator,
