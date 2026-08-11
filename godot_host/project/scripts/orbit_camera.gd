@@ -67,16 +67,22 @@ func snap_to_target() -> void:
     _smoothed_xz_init = false
 
 func _process(_delta: float) -> void:
-    if _target == null:
+    # is_instance_valid, NOT `!= null`: a queue_free()d node is not null, it is a
+    # FREED INSTANCE, and touching it throws every frame.  That is precisely what
+    # happened when the live body swap ([B]) began rebuilding the chassis — input
+    # kept updating _orbiting/_distance while _apply_pose() aborted on the dead
+    # reference, so the camera looked like it had stopped taking input.
+    # The body re-targets us on every rebuild; this is the belt to that braces.
+    if not is_instance_valid(_target):
         return
     _apply_pose()
 
 func _apply_pose() -> void:
-    var raw_target: Vector3 = _target.global_transform.origin if _target != null else Vector3.ZERO
+    var raw_target: Vector3 = _target.global_transform.origin if is_instance_valid(_target) else Vector3.ZERO
     # Low-pass X/Z to damp jarring per-tick jitter as the body becomes
     # more mobile.  Run BEFORE the floor_lock + offset application so
     # those still respond immediately to user input (right-click pan).
-    if follow_smoothing_seconds > 0.0 and _target != null:
+    if follow_smoothing_seconds > 0.0 and is_instance_valid(_target):
         var dt: float = get_process_delta_time()
         var target_xz: Vector2 = Vector2(raw_target.x, raw_target.z)
         if not _smoothed_xz_init:

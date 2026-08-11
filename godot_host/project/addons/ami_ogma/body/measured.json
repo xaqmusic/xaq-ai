@@ -1,0 +1,99 @@
+{
+  "name": "measured",
+  "source": "Tape-measure + scale readings from the assembled robot, operator, 2026-08-10",
+  "notes": [
+    "The body as BUILT. See docs/operational/picrawler_geometry.md for the full",
+    "measured-vs-CAD table and docs/plans-and-designs/picrawler_sim2real_port.md.",
+    "",
+    "FRAME NOTE: the operator measured everything against the HIP2 AXIS, but the sim's",
+    "chassis node origin sits at the HIP1 axis (_build_leg anchors hip1 at the chassis",
+    "origin's Y, then drops COXA_Z_DROP to hip2).  Every offset below is therefore the",
+    "operator's hip2-relative number MINUS coxa_z_drop (0.007):",
+    "  belly       -19 mm rel hip2  ->  -26 mm rel origin",
+    "  box seam    +22 mm rel hip2  ->  +15 mm rel origin",
+    "  stack top   +84 mm rel hip2  ->  +77 mm rel origin",
+    "  CoG         +15 mm rel hip2  ->   +8 mm rel origin",
+    "",
+    "coxa_z_drop was NOT re-measured -- the operator gave hip2->hip1 as a 32 mm LENGTH,",
+    "not its vertical component.  CAD's 7 mm is carried over and is an open item.",
+    "",
+    "Per-segment leg masses are an EQUAL split of the measured 62 g/leg.  The real",
+    "distribution is not uniform (coxa carries the hip2 servo, upper the knee servo,",
+    "lower is bracket+foot only) but was not measured per segment.  Open item.",
+    "",
+    "CENTRE OF MASS -- +15 mm rel hip2 is the CHASSIS ASSEMBLY's CoG.",
+    "Settled 2026-08-10 by the operator's layer description, which is direct observation",
+    "and outranks any back-solve.  Chassis layers bottom-to-top: bottom plate, top plate,",
+    "RPi, Robot HAT -- with the BATTERY BETWEEN THE PLATES, velcro'd to the underside of",
+    "the top plate.  That puts the heaviest single component (~95 g) LOW, inside the base",
+    "box, not in the electronics stack.  A layer-by-layer estimate reproduces it:",
+    "    bottom plate  ~40 g @ -17.5      battery      ~95 g @ +12",
+    "    4x hip1 servo ~52 g @ -10        top plate    ~40 g @ +22",
+    "    RPi            45 g @ +30        Robot HAT     30 g @ +45",
+    "    wiring/screws ~40 g @ +40",
+    "    => sum 342 g, CoG +14.9 mm rel hip2  (measured: +15)",
+    "  In node-origin coords (origin = hip1 = +7 rel hip2): +15 - 7 = +8 mm.",
+    "",
+    "  Box split that reproduces it: base ~252 g, electronics ~90 g",
+    "  (Pi 45 + HAT 30 + wiring ~ 90 g checks out for the top box).",
+    "",
+    "CONSEQUENCE: the WHOLE-ROBOT CoG is then a DERIVED ~+3.9 mm rel hip2, since the",
+    "248 g of legs sit at ~-11.4 mm in the standing pose.  _report_geometry() prints",
+    "both numbers so the two are never conflated again.",
+    "",
+    "A superseded reading had the +15 mm as the whole-robot CoG, which forced the battery",
+    "into the top stack (electronics ~217 g).  The layer description refutes it.",
+    "",
+    "Joint limits and rest poses are deliberately IDENTICAL to cad.json: the servo",
+    "envelope is Phase 2 and must not ride along with the geometry lever."
+  ],
+
+  "links": {
+    "l1": 0.032,
+    "l2": 0.048,
+    "l3": 0.0765,
+    "coxa_z_drop": 0.007
+  },
+
+  "chassis": {
+    "x": 0.098,
+    "y": 0.103,
+    "z": 0.098,
+    "hip_x_span": 0.076,
+    "hip_z_span": 0.076,
+    "standing_y": 0.0823,
+
+    "boxes": [
+      { "name": "base",        "size": [0.098, 0.041, 0.098], "offset": [0.0, -0.0055, 0.0] },
+      { "name": "electronics", "size": [0.090, 0.062, 0.056], "offset": [0.0,  0.046,  0.0] }
+    ],
+    "center_of_mass": [0.0, 0.008, 0.0]
+  },
+
+  "rest": {
+    "hip1": 0.0,
+    "hip2": 0.0,
+    "knee": -1.6,
+    "lower_leg_drop_angle": -1.396
+  },
+
+  "limits": {
+    "hip1": 1.40,
+    "hip2": 1.40,
+    "knee_low": -2.50,
+    "knee_high": 1.70,
+    "knee_low_narrow": -1.70
+  },
+
+  "masses": {
+    "chassis": 0.342,
+    "coxa": 0.020667,
+    "upper": 0.020667,
+    "lower": 0.020667
+  },
+
+  "radii": {
+    "coxa": 0.020,
+    "leg": 0.012
+  }
+}
