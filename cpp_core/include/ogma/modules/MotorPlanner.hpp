@@ -78,6 +78,8 @@ private:
     bool   phi_seen_ = false;
     std::array<float, kJoints> cur_pose_{};
     bool   pose_seen_ = false;
+    int    prev_tok_ = -1;        // per-INSTANCE learn context (a static thread_local
+    int    prev_bin_ = 0;         // here cross-contaminated two-planner configs)
 
     // --- learned model: P(next | token, phase_bin), per-tick counts
     // key = token * kMaxBins + bin

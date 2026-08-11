@@ -249,10 +249,9 @@ void MotorPlanner::tick(uint64_t tick_id) {
     marginal_[cur_tok_] += 1.0f;
 
     // ---- learn: per-tick phase-conditioned transition from the PREVIOUS observation.
-    static thread_local int prev_tok = -1; static thread_local int prev_bin = 0;
-    if (prev_tok >= 0) { trans_[prev_tok * kMaxBins + prev_bin][cur_tok_] += 1.0f; ++n_obs_; }
+    if (prev_tok_ >= 0) { trans_[prev_tok_ * kMaxBins + prev_bin_][cur_tok_] += 1.0f; ++n_obs_; }
     tok_phase_[cur_tok_][bin] += 1.0f;
-    prev_tok = cur_tok_; prev_bin = bin;
+    prev_tok_ = cur_tok_; prev_bin_ = bin;
 
     // ---- pose readout + past ring (the roll's decoder and its left half)
     if (pose_seen_) {
