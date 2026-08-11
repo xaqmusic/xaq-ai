@@ -172,7 +172,10 @@ int MotorPlanner::phase_bin(float phi) const {
 }
 
 void MotorPlanner::apply_mask(Dist& d, int bin) const {
-    if (mask_mode_ < 0.5) return;
+    // MODE 1 ONLY (phase-affinity, the recorded refuted arm).  The guard must
+    // exclude mode 2 — a `>= 0.5` test silently ran this mask under mode 2,
+    // emptying rows and truncating the roll (operator-reported flicker).
+    if (mask_mode_ < 0.5 || mask_mode_ > 1.5) return;
     for (auto it = d.begin(); it != d.end(); ) {
         auto tp = tok_phase_.find(it->first);
         float aff = 0.0f;
@@ -225,6 +228,12 @@ bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
     const float hi = float(std::max(mask_val_lo_, mask_val_hi_));
     if (hi <= lo) return false;
     const int jsel = int(mask_joint_);
+    // INHIBITION MAY REROUTE, NEVER ANNIHILATE.  If suppression would zero the
+    // whole row (every option inside the masked region), the mask is
+    // uninformative at this depth — there is nothing to reroute TO.  The row
+    // passes unmasked and the saturation counter records it (total-inhibition
+    // rows were truncating the roll and flickering the widget's future).
+    Dist backup = d;
     bool any = false;
     for (auto& [tok, pmass] : d) {
         auto it = tok_pose_.find(tok);
@@ -239,14 +248,18 @@ bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
         }
         if (inside) { pmass *= float(1.0 - mask_strength_); any = true; ++masked_out_; }
     }
-    if (any) {
-        for (auto it = d.begin(); it != d.end(); )
-            it = (it->second <= 1e-9f) ? d.erase(it) : std::next(it);
-        float tot = 0.0f;
-        for (auto const& kv : d) tot += kv.second;
-        if (tot > 1e-9f) for (auto& kv : d) kv.second /= tot;
+    if (!any) return false;
+    float tot = 0.0f;
+    for (auto const& kv : d) tot += kv.second;
+    if (tot <= 1e-9f) {           // saturated: total inhibition — revert
+        d = std::move(backup);
+        ++mask_saturated_;
+        return false;
     }
-    return any;
+    for (auto it = d.begin(); it != d.end(); )
+        it = (it->second <= 1e-9f) ? d.erase(it) : std::next(it);
+    for (auto& kv : d) kv.second /= tot;
+    return true;
 }
 
 MotorPlanner::Dist MotorPlanner::propagate(Dist const& d, int bin) const {
@@ -473,7 +486,8 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     // pre-mask), THE MASK, FINAL motion.  Raw roll ships only while a mask is
     // actually suppressing mass (payload stays lean otherwise).
     mod["mask_applied"] = mask_applied_;
-    if (mask_applied_) {
+    mod["mask_saturated"] = mask_saturated_;
+    if (mask_mode_ > 1.5 && mask_strength_ > 0.0) {
         nlohmann::json rrm = nlohmann::json::array(), rrs = nlohmann::json::array();
         for (int i = 0; i < roll_len_ * kJoints; ++i) {
             rrm.push_back(std::round(roll_raw_mean_[i] * 1000.0f) / 1000.0f);

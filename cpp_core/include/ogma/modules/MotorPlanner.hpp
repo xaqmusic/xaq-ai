@@ -128,6 +128,7 @@ private:
     double marg_top1_ = 0.0; long marg_n_ = 0;    // marginal baseline at depth 1
     std::unordered_map<int, float> marginal_;
     long   masked_out_ = 0;                        // mask activity (consumer check)
+    long   mask_saturated_ = 0;                    // rows where total inhibition was refused
 
     // --- the piano roll: this tick's cone decoded to joint space, all depths.
     // FINAL (post-mask) and RAW (pre-mask, the original excitation) — the widget
