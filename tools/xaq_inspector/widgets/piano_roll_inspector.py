@@ -56,7 +56,9 @@ _C_FUT_DIM   = (130, 200, 255, 175)   # unearned segment: same hue, clearly visi
                                       # distinguished by width/solidity not invisibility
 _C_FAN       = (120, 190, 255, 70)
 _C_PLAYHEAD  = (255, 95, 85)
-_C_AUTHORITY = (255, 205, 95)
+_C_AUTHORITY = (255, 205, 95)        # GLOBAL (token-chain) authority: dashed
+_C_JOINT_BAND = (255, 175, 60, 34)   # per-joint authority BAND fill
+_C_JOINT_BAND_EDGE = (255, 175, 60, 140)
 _C_NEUTRAL   = (130, 130, 135, 110)
 _C_STRIDE    = (255, 255, 255, 26)
 _MAX_STRIDE_LINES = 8
@@ -98,6 +100,16 @@ class _Track:
             pos=0.0, angle=90,
             pen=pg.mkPen(_C_AUTHORITY, width=2, style=Qt.PenStyle.DashLine))
         plot.addItem(self.authority)
+        # this JOINT's own verified authority BAND — the marginal can lose at
+        # k=1 (jump to token mean vs a barely-moving body) yet win at stride
+        # scale, so earned authority is an INTERVAL, not a line from the present
+        self.band = pg.LinearRegionItem(
+            values=(0, 0), movable=False,
+            brush=pg.mkBrush(_C_JOINT_BAND),
+            pen=pg.mkPen(_C_JOINT_BAND_EDGE, width=1))
+        self.band.setZValue(-10)
+        self.band.setVisible(False)
+        plot.addItem(self.band)
         self.neutral = pg.InfiniteLine(
             pos=0.0, angle=0,
             pen=pg.mkPen(_C_NEUTRAL, width=1, style=Qt.PenStyle.DotLine))
@@ -236,6 +248,7 @@ class PianoRollInspector(QWidget):
             if roll_len else np.zeros((0, nj))
         past = np.asarray(snap.get("past", []), dtype=float).reshape(-1, nj)
         authority = int(snap.get("authority_depth", 0))
+        joint_band = snap.get("joint_band", [0, 0] * nj)
         phi = float(snap.get("phi", 0.0))
         omega = float(snap.get("omega", 0.105))
         period = (2.0 * np.pi / omega) if omega > 1e-6 else 0.0
@@ -268,10 +281,18 @@ class PianoRollInspector(QWidget):
                 xs = np.concatenate(([0], fx))
                 tr.fan_hi.setData(xs, mean + sd)
                 tr.fan_lo.setData(xs, mean - sd)
-                a = min(authority, roll_len)
-                # saturated segment [t0..a], washed [a..end] (shared joint point)
-                tr.fut_auth.setData(xs[:a + 1], mean[:a + 1])
-                tr.fut_dim.setData(xs[a:], mean[a:])
+                # full future washed; THIS JOINT's earned band overdrawn bright
+                tr.fut_dim.setData(xs, mean)
+                blo = int(joint_band[2 * jidx]) if 2 * jidx + 1 < len(joint_band) else 0
+                bhi = int(joint_band[2 * jidx + 1]) if 2 * jidx + 1 < len(joint_band) else 0
+                if bhi > 0:
+                    bm = (xs >= blo) & (xs <= bhi)
+                    tr.fut_auth.setData(xs[bm], mean[bm])
+                    tr.band.setRegion((blo, bhi))
+                    tr.band.setVisible(True)
+                else:
+                    tr.fut_auth.setData([], [])
+                    tr.band.setVisible(False)
             else:
                 for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim):
                     c.setData([], [])
@@ -325,10 +346,18 @@ class PianoRollInspector(QWidget):
             f"Motor piano roll — AUTHORITY HORIZON = {authority} ticks"
             + (f" ({authority / period:.2f} strides)" if period > 0 else "")
             + ("   [reflexes own the roll]" if authority == 0 else ""))
+        def _band_str(jidx: int) -> str:
+            lo, hi = int(joint_band[2 * jidx]), int(joint_band[2 * jidx + 1])
+            return f"{lo}-{hi}" if hi > 0 else "·"
+        jgrid = "  ".join(
+            f"{_LEGS[leg]} " + "/".join(_band_str(leg + 4 * j) for j in range(3))
+            for leg in range(4)) if len(joint_band) >= 24 else "—"
         self._readout.setText(
             f"  stride ≈ {period:.0f} ticks   n_obs {int(snap.get('n_obs', 0))}   "
             f"mask_mode {snap.get('mask_mode', 0):.0f} "
             f"(pruned {int(snap.get('masked_out', 0))})\n"
             f"  verified cone-top1/persistence per depth:  {pairs}\n"
-            f"  gold line = deepest depth where cone beats persistence by ≥5% "
-            f"(n≥200).  Fan = ±1σ of the decoded pose.")
+            f"  per-joint authority BANDS (h1/h2/kn, ticks):  {jgrid}\n"
+            f"  dashed gold = whole-body token authority (from t0); amber band + "
+            f"bright segment = depths where that JOINT's decoded marginal beats "
+            f"hold-pose by ≥5%.")

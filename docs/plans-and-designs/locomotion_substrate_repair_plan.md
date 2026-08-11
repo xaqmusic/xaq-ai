@@ -766,3 +766,30 @@ persistence ≥ cone at every depth (k1: 0.74 vs 0.77) — reflexes own the roll
 The line is drawn; the campaign's job is to move it right. Body-log `plan`
 mirror now carries `pr` (persist) + `auth` per line, so seed runs record the
 authority trajectory.
+
+**2026-08-11 — PER-JOINT VERIFICATION: the first verified positive planner
+result, found by the operator's eye.** Operator observation on the live roll:
+"some joints are predicted a few ticks out while others are not" — on a SINGLE
+whole-body predictor, so the difference had to live in the marginals. Built:
+per-joint continuous-space verification under the identical pending protocol
+(Pending freezes the decoded joint prediction + the pose at prediction time;
+verify accumulates per-depth per-joint |err| for cone-decode vs hold-pose).
+**Result (live, seed 2, n≈9k verdicts/depth): the error-ratio table splits the
+body cleanly.** At k=1–3 every joint LOSES ~3× (the decode jumps to token mean
+against a barely-moving body). At k=8–34, **all eight hip1/knee marginals WIN
+12–23%** (ratios 0.77–0.92); the four h2 marginals never meaningfully win
+(~0.91–1.07 — the slow postural joints, where hold-pose is near-optimal).
+Native authority bands: FL/FR/RL/RR h1 and knee all **[8–34]**; h2 ·/·/21-21/
+13-13. TWO consequences: (1) **the whole-body cone DOES carry verified
+stride-scale structure in its joint marginals** even though the token-argmax
+authority is 0 — the global gate was measuring the argmax, not the material;
+(2) **authority is a BAND, not a line from the present** — the ladder-from-t0
+definition hid the win entirely (contiguity from k=1 demanded beating
+persistence exactly where it is unbeatable). This matches the operator's
+architecture directly: reflexes own the near field; a planner earns an
+INTERVAL of the future. Implemented: `joint_band` [lo,hi] per joint (longest
+winning run) in the payload + body mirror (`jband`); the roll now draws each
+track's amber authority band with the bright segment inside it; global dashed
+line unchanged. **Re-use context for M1: refinement/masking experiments should
+be scored per-joint in the band, where verified material exists — h2 tracks
+and k<5 are reflex territory on this vocabulary.**

@@ -95,12 +95,19 @@ private:
     // tok0 = the token that was current when the prediction was made — scoring
     // "predict tok0" alongside the cone gives the per-depth PERSISTENCE baseline
     // under the identical pending protocol (the authority line's denominator).
-    struct Pending { uint64_t due; int depth; int tok0; Dist dist; };
+    // pred_pose/pose0 = the DECODED joint prediction and the actual pose at
+    // prediction time, frozen when the prediction is made — verified per joint
+    // against the arriving pose, giving each track its OWN authority horizon
+    // (the global token chain can fail while a joint marginal still predicts).
+    struct Pending { uint64_t due; int depth; int tok0; Dist dist;
+                     std::array<float, kJoints> pred_pose; std::array<float, kJoints> pose0; };
     std::vector<Pending> pending_;
 
     // --- per-depth accumulators (index = probe slot)
     std::array<double, kNumProbes> acc_top1_{}, acc_mass_{}, acc_ent_{}, acc_topk_{}, acc_pers_{};
     std::array<long,   kNumProbes> acc_n_{};
+    // per-depth × per-joint mean-|error| accumulators: cone decode vs hold-pose
+    std::array<std::array<double, kJoints>, kNumProbes> acc_jerr_{}, acc_jpers_{};
     double marg_top1_ = 0.0; long marg_n_ = 0;    // marginal baseline at depth 1
     std::unordered_map<int, float> marginal_;
     long   masked_out_ = 0;                        // mask activity (consumer check)

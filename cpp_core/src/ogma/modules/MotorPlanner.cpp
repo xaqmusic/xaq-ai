@@ -228,6 +228,12 @@ void MotorPlanner::tick(uint64_t tick_id) {
                 acc_mass_[slot] += mass;
                 acc_ent_[slot]  += ent;
                 acc_pers_[slot] += (it->tok0 == cur_tok_) ? 1.0 : 0.0;
+                if (pose_seen_) {
+                    for (int j = 0; j < kJoints; ++j) {
+                        acc_jerr_[slot][j]  += std::fabs(it->pred_pose[j] - cur_pose_[j]);
+                        acc_jpers_[slot][j] += std::fabs(it->pose0[j]     - cur_pose_[j]);
+                    }
+                }
                 ++acc_n_[slot];
             }
             it = pending_.erase(it);
@@ -279,7 +285,12 @@ void MotorPlanner::tick(uint64_t tick_id) {
                         &roll_sd_[size_t(n - 1) * kJoints]);
         roll_len_ = n;
         if (next_probe < kNumProbes && n == kProbes[next_probe]) {
-            pending_.push_back(Pending{tick_id + uint64_t(n), n, cur_tok_, row});
+            Pending pd{tick_id + uint64_t(n), n, cur_tok_, row, {}, {}};
+            for (int j = 0; j < kJoints; ++j) {
+                pd.pred_pose[j] = roll_mean_[size_t(n - 1) * kJoints + j];
+                pd.pose0[j]     = cur_pose_[j];
+            }
+            pending_.push_back(std::move(pd));
             ++next_probe;
         }
     }
@@ -318,6 +329,45 @@ nlohmann::json MotorPlanner::snapshot_state() const {
         authority = kProbes[i];
     }
     mod["authority_depth"] = authority;
+    // PER-JOINT authority: same protocol, continuous space — deepest probe where
+    // the decoded joint prediction's mean |error| beats hold-pose by ≥5%.  The
+    // token chain is one whole-body model; these are its per-joint marginals,
+    // and a joint can carry earned authority the global argmax does not.
+    nlohmann::json jauth = nlohmann::json::array();
+    for (int j = 0; j < kJoints; ++j) {
+        int a = 0;
+        for (int i = 0; i < kNumProbes; ++i) {
+            if (acc_n_[i] < 200) break;
+            double n = double(acc_n_[i]);
+            double je = acc_jerr_[i][j] / n, pe = acc_jpers_[i][j] / n;
+            if (je >= 0.95 * pe) break;
+            a = kProbes[i];
+        }
+        jauth.push_back(a);
+    }
+    mod["joint_auth"] = std::move(jauth);
+    // PER-JOINT authority BAND [lo, hi]: the longest contiguous run of probe
+    // depths where the joint marginal wins.  Measured 2026-08-11: hip1/knee
+    // marginals lose 3× at k=1 (the jump to token mean vs a barely-moving body)
+    // yet win 12–23% at k=8–34 — authority need not start at the present.
+    // Reflexes own the near field; a planner earns a BAND of the future.
+    nlohmann::json jband = nlohmann::json::array();
+    for (int j = 0; j < kJoints; ++j) {
+        int best_lo = 0, best_hi = 0, best_len = 0, cur_lo = 0, cur_hi = 0, run = 0;
+        for (int i = 0; i < kNumProbes; ++i) {
+            double n = double(std::max<long>(1, acc_n_[i]));
+            bool win = acc_n_[i] >= 200 &&
+                       (acc_jerr_[i][j] / n) < 0.95 * (acc_jpers_[i][j] / n);
+            if (win) {
+                if (run == 0) cur_lo = kProbes[i];
+                cur_hi = kProbes[i];
+                if (++run > best_len) { best_len = run; best_lo = cur_lo; best_hi = cur_hi; }
+            } else run = 0;
+        }
+        jband.push_back(best_lo);
+        jband.push_back(best_hi);
+    }
+    mod["joint_band"] = std::move(jband);
     return nlohmann::json{{"version", 1}, {"module", mod}};
 }
 
@@ -350,6 +400,18 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     mod["cur_tok"]  = cur_tok_;
     mod["phi"]      = std::round(phi_ * 1000.0f) / 1000.0f;
     mod["omega"]    = omega_;
+    // per-depth × per-joint mean |error| pairs (cone decode vs hold-pose) —
+    // the raw material behind joint_auth, for the widget's certainty readout
+    nlohmann::json je = nlohmann::json::array(), jp = nlohmann::json::array();
+    for (int i = 0; i < kNumProbes; ++i) {
+        double n = double(std::max<long>(1, acc_n_[i]));
+        for (int j = 0; j < kJoints; ++j) {
+            je.push_back(std::round(acc_jerr_[i][j] / n * 10000.0) / 10000.0);
+            jp.push_back(std::round(acc_jpers_[i][j] / n * 10000.0) / 10000.0);
+        }
+    }
+    mod["jerr"]  = std::move(je);
+    mod["jpers"] = std::move(jp);
     return mod;
 }
 
