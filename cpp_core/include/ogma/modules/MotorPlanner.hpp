@@ -48,17 +48,22 @@ private:
     static constexpr int   kMaxBins   = 16;
     static constexpr int   kNumProbes = 7;
     static constexpr std::array<int, kNumProbes> kProbes{1, 3, 5, 8, 13, 21, 34};
+    static constexpr int   kJoints    = 12;              // 4 hip1 + 4 hip2 + 4 knee
+    static constexpr int   kPastRing  = 128;             // shipped whole in diag (raster lesson:
+                                                         // client-side accumulation aliases)
 
     using Dist = std::unordered_map<int, float>;         // token -> probability
 
     int   phase_bin(float phi) const;
     Dist  propagate(Dist const& d, int bin) const;
     void  apply_mask(Dist& d, int bin) const;
+    void  decode_row(Dist const& d, float* mean_out, float* sd_out) const;
 
     // --- wiring / params
     Bus*        bus_ = nullptr;
     std::string state_topic_  = "reality.bodypose.pose";
     std::string rhythm_topic_ = "rhythm.body.gait";
+    std::string pose_topic_   = "reality.proprio.joints";
     double horizon_    = 40.0;    // cone depth in ticks (>= largest probe)
     double beam_k_     = 12.0;    // per-row sparsity cap
     double phase_bins_ = 8.0;
@@ -71,6 +76,8 @@ private:
     float  phi_      = 0.0f;      // body phase [0,2π)
     float  omega_    = 0.105f;    // rad/tick (≈60-tick stride prior; overwritten by rhythm)
     bool   phi_seen_ = false;
+    std::array<float, kJoints> cur_pose_{};
+    bool   pose_seen_ = false;
 
     // --- learned model: P(next | token, phase_bin), per-tick counts
     // key = token * kMaxBins + bin
@@ -78,16 +85,32 @@ private:
     std::unordered_map<int, std::array<float, kMaxBins>>    tok_phase_;   // occupancy per bin
     long   n_obs_ = 0;
 
-    // --- the cone verification ring: predictions made for tick t, keyed by t
-    struct Pending { uint64_t due; int depth; Dist dist; };
+    // --- per-token pose READOUT (instrument, not percept): Welford mean/var of the
+    // 12-D pose observed while each token is winner.  Decodes cone rows to joint space
+    // for the piano roll; nothing downstream consumes it.
+    struct PoseStat { std::array<float, kJoints> mean{}; std::array<float, kJoints> m2{}; long n = 0; };
+    std::unordered_map<int, PoseStat> tok_pose_;
+
+    // --- the cone verification ring: predictions made for tick t, keyed by t.
+    // tok0 = the token that was current when the prediction was made — scoring
+    // "predict tok0" alongside the cone gives the per-depth PERSISTENCE baseline
+    // under the identical pending protocol (the authority line's denominator).
+    struct Pending { uint64_t due; int depth; int tok0; Dist dist; };
     std::vector<Pending> pending_;
 
     // --- per-depth accumulators (index = probe slot)
-    std::array<double, kNumProbes> acc_top1_{}, acc_mass_{}, acc_ent_{}, acc_topk_{};
+    std::array<double, kNumProbes> acc_top1_{}, acc_mass_{}, acc_ent_{}, acc_topk_{}, acc_pers_{};
     std::array<long,   kNumProbes> acc_n_{};
     double marg_top1_ = 0.0; long marg_n_ = 0;    // marginal baseline at depth 1
     std::unordered_map<int, float> marginal_;
     long   masked_out_ = 0;                        // mask activity (consumer check)
+
+    // --- the piano roll: this tick's cone decoded to joint space, all depths
+    std::vector<float> roll_mean_, roll_sd_;       // roll_len_ × kJoints, row-major
+    int roll_len_ = 0;
+    // past ring of actual poses (oldest→newest reconstruction at read time)
+    std::array<std::array<float, kJoints>, kPastRing> past_{};
+    int past_head_ = 0, past_n_ = 0;
 };
 
 } // namespace ogma

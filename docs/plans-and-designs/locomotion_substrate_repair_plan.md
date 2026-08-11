@@ -742,3 +742,27 @@ change only; **(a) conditioned vocabulary** — centre the tuck common-mode out 
 the 12-D input and give the observer EPM phase context (§0 rules 2+3; needs a
 conditioning bridge or an EPM input-conditioning extension — a substrate design
 decision). (b) is cheap and sharpens (a)'s requirement; (a) is the deeper fix.
+
+**2026-08-11 — the MOTOR PIANO ROLL + the AUTHORITY HORIZON (operator-directed
+instrument; "the authority horizon line is essential").** The roll is the plan
+buffer made visible: executed past immutable left of the playhead, t0 owned by
+reflexes, future columns the mutable rows loops will write into — slow loops far,
+fast loops near — with reflex suppression allowed only where confidence is EARNED.
+Built: (1) planner-side per-token 12-D pose readout (Welford; instrument, not
+percept) decoding every cone row to joint space via the law of total variance —
+the ±1σ FAN; (2) an online PERSISTENCE baseline scored under the identical
+pending protocol (Pending carries tok0), giving `cone_persist` per depth;
+(3) **`authority_depth` = deepest probe with n≥200 verdicts where verified cone
+top1 > 1.05 × persistence** — the gold line; (4) diag payload shipping the whole
+roll (40 × 12 mean/sd) + a 128-tick past ring (server-side, the gait-raster
+anti-aliasing lesson) at ~48 KB/payload; (5) `PianoRollInspector` (12 tracks =
+4 legs × 3 joints, or per-leg 3-track zoom): past curve, decoded future with
+saturated-vs-washed authority segments, fan, playhead, stride ruler from the
+rhythm reference, adaptive per-track ranging; registered for MotorPlanner with a
+teaching doc. Verified end-to-end on a LIVE run (ControlClient →
+module_subscribe_diag → ZMQ payloads validated → offscreen render). First live
+reading, honest: **authority_depth = 0 — under the identical-protocol baseline,
+persistence ≥ cone at every depth (k1: 0.74 vs 0.77) — reflexes own the roll.**
+The line is drawn; the campaign's job is to move it right. Body-log `plan`
+mirror now carries `pr` (persist) + `auth` per line, so seed runs record the
+authority trajectory.

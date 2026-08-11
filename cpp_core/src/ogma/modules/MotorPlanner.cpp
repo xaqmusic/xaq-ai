@@ -34,6 +34,8 @@ std::vector<TopicSpec> MotorPlanner::input_topics() const {
                   SubscriptionKind::Direct, /*required=*/false},
         TopicSpec{rhythm_topic_, std::type_index(typeid(ProprioToken)),
                   SubscriptionKind::Direct, /*required=*/false},
+        TopicSpec{pose_topic_,   std::type_index(typeid(ProprioToken)),
+                  SubscriptionKind::Direct, /*required=*/false},
     };
 }
 
@@ -45,6 +47,11 @@ ParamSchema MotorPlanner::params_schema() const {
         {"rhythm_topic", ParamMutability::ConstructionOnly,
          "ProprioToken [cos φ, sin φ, ω] body-rhythm reference; the cone's transition model is "
          "PHASE-CONDITIONED on it (the M0 diagnosis: unconditioned chains degenerate to persistence).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"pose_topic", ParamMutability::ConstructionOnly,
+         "12-D joint-pose ProprioToken (4 hip1 + 4 hip2 + 4 knee, normalised) used ONLY for the "
+         "per-token pose readout that decodes cone rows to joint space for the piano-roll display. "
+         "An instrument readout, not a percept — nothing downstream consumes it.",
          std::nullopt, std::nullopt, std::nullopt},
         {"horizon", ParamMutability::HotMutable,
          "Cone depth in ticks.", ParamValue{40.0}, ParamValue{4.0}, ParamValue{120.0}},
@@ -65,6 +72,7 @@ ParamSchema MotorPlanner::params_schema() const {
 ParamMap MotorPlanner::current_params() const {
     ParamMap m;
     m["state_topic"] = state_topic_; m["rhythm_topic"] = rhythm_topic_;
+    m["pose_topic"] = pose_topic_;
     m["horizon"] = horizon_; m["beam_k"] = beam_k_;
     m["phase_bins"] = phase_bins_; m["mask_mode"] = mask_mode_; m["mask_floor"] = mask_floor_;
     return m;
@@ -74,6 +82,7 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     bus_ = bus;
     state_topic_  = sget(params, "state_topic",  state_topic_);
     rhythm_topic_ = sget(params, "rhythm_topic", rhythm_topic_);
+    pose_topic_   = sget(params, "pose_topic",   pose_topic_);
     horizon_    = pget(params, "horizon",    horizon_);
     beam_k_     = pget(params, "beam_k",     beam_k_);
     phase_bins_ = std::clamp(pget(params, "phase_bins", phase_bins_), 2.0, double(kMaxBins));
@@ -103,6 +112,14 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
                 }
                 phi_ = phi;
                 phi_seen_ = true;
+            }
+        }));
+    subs_.push_back(bus_->subscribe(pose_topic_, SubscriptionKind::Direct,
+        [this](std::string_view, MessagePtr p){
+            auto t = std::dynamic_pointer_cast<const ProprioToken>(p);
+            if (t && t->values.size() >= kJoints) {
+                for (int j = 0; j < kJoints; ++j) cur_pose_[j] = t->values[j];
+                pose_seen_ = true;
             }
         }));
 }
@@ -137,6 +154,31 @@ void MotorPlanner::apply_mask(Dist& d, int bin) const {
     float tot = 0.0f;
     for (auto const& kv : d) tot += kv.second;
     if (tot > 1e-9f) for (auto& kv : d) kv.second /= tot;
+}
+
+// Cone row → joint space: probability-weighted mixture over the per-token pose
+// readouts.  mean = Σ p·μ_tok ; var = Σ p·(σ²_tok + μ²_tok) − mean²  (law of total
+// variance — the fan width carries BOTH within-token spread and across-token
+// disagreement).  Tokens with no readout yet fall back to the current pose.
+void MotorPlanner::decode_row(Dist const& d, float* mean_out, float* sd_out) const {
+    for (int j = 0; j < kJoints; ++j) {
+        float m = 0.0f, s = 0.0f;
+        for (auto const& [tok, p] : d) {
+            auto it = tok_pose_.find(tok);
+            if (it == tok_pose_.end() || it->second.n < 2) {
+                m += p * cur_pose_[j];
+                s += p * cur_pose_[j] * cur_pose_[j];
+            } else {
+                float mu  = it->second.mean[j];
+                float var = it->second.m2[j] / float(it->second.n - 1);
+                m += p * mu;
+                s += p * (var + mu * mu);
+            }
+        }
+        mean_out[j] = m;
+        float v = s - m * m;
+        sd_out[j] = v > 0.0f ? std::sqrt(v) : 0.0f;
+    }
 }
 
 MotorPlanner::Dist MotorPlanner::propagate(Dist const& d, int bin) const {
@@ -185,6 +227,7 @@ void MotorPlanner::tick(uint64_t tick_id) {
                 acc_topk_[slot] += (mass > 0.0f) ? 1.0 : 0.0;
                 acc_mass_[slot] += mass;
                 acc_ent_[slot]  += ent;
+                acc_pers_[slot] += (it->tok0 == cur_tok_) ? 1.0 : 0.0;
                 ++acc_n_[slot];
             }
             it = pending_.erase(it);
@@ -205,16 +248,38 @@ void MotorPlanner::tick(uint64_t tick_id) {
     tok_phase_[cur_tok_][bin] += 1.0f;
     prev_tok = cur_tok_; prev_bin = bin;
 
-    // ---- roll the cone from t0 (the reflexes' row: the actual present) outward.
+    // ---- pose readout + past ring (the roll's decoder and its left half)
+    if (pose_seen_) {
+        auto& ps = tok_pose_[cur_tok_];
+        ++ps.n;
+        for (int j = 0; j < kJoints; ++j) {           // Welford
+            float d1 = cur_pose_[j] - ps.mean[j];
+            ps.mean[j] += d1 / float(ps.n);
+            ps.m2[j]   += d1 * (cur_pose_[j] - ps.mean[j]);
+        }
+        past_[past_head_] = cur_pose_;
+        past_head_ = (past_head_ + 1) % kPastRing;
+        if (past_n_ < kPastRing) ++past_n_;
+    }
+
+    // ---- roll the cone from t0 (the reflexes' row: the actual present) outward,
+    // decoding EVERY depth to joint space for the piano roll.
+    const int H = int(horizon_);
+    roll_mean_.assign(size_t(H) * kJoints, 0.0f);
+    roll_sd_.assign(size_t(H) * kJoints, 0.0f);
+    roll_len_ = 0;
     Dist row; row[cur_tok_] = 1.0f;
     int next_probe = 0;
-    for (int n = 1; n <= int(horizon_) && next_probe < kNumProbes; ++n) {
+    for (int n = 1; n <= H; ++n) {
         const int b = phase_bin(std::fmod(phi_ + float(n) * omega_, kTwoPi));
         row = propagate(row, b);
         apply_mask(row, b);
         if (row.empty()) break;
-        if (n == kProbes[next_probe]) {
-            pending_.push_back(Pending{tick_id + uint64_t(n), n, row});
+        decode_row(row, &roll_mean_[size_t(n - 1) * kJoints],
+                        &roll_sd_[size_t(n - 1) * kJoints]);
+        roll_len_ = n;
+        if (next_probe < kNumProbes && n == kProbes[next_probe]) {
+            pending_.push_back(Pending{tick_id + uint64_t(n), n, cur_tok_, row});
             ++next_probe;
         }
     }
@@ -225,24 +290,67 @@ nlohmann::json MotorPlanner::snapshot_state() const {
     nlohmann::json mod;
     nlohmann::json d = nlohmann::json::array(), t1 = nlohmann::json::array(),
                    tk = nlohmann::json::array(), ms = nlohmann::json::array(),
-                   en = nlohmann::json::array(), nn = nlohmann::json::array();
+                   en = nlohmann::json::array(), nn = nlohmann::json::array(),
+                   pr = nlohmann::json::array();
     for (int i = 0; i < kNumProbes; ++i) {
         d.push_back(kProbes[i]);
         double n = double(std::max<long>(1, acc_n_[i]));
         t1.push_back(acc_top1_[i] / n); tk.push_back(acc_topk_[i] / n);
         ms.push_back(acc_mass_[i] / n); en.push_back(acc_ent_[i] / n);
+        pr.push_back(acc_pers_[i] / n);
         nn.push_back(acc_n_[i]);
     }
     mod["probe_depths"] = d; mod["cone_top1"] = t1; mod["cone_topk"] = tk;
     mod["cone_mass"] = ms; mod["cone_entropy"] = en; mod["cone_n"] = nn;
+    mod["cone_persist"] = pr;
     mod["marg_top1"] = marg_n_ ? marg_top1_ / double(marg_n_) : 0.0;
     mod["n_obs"] = n_obs_; mod["masked_out"] = masked_out_;
     mod["mask_mode"] = mask_mode_;
+    // THE AUTHORITY DEPTH — the deepest probe (in ticks) such that every probe up
+    // to it has enough verdicts (n≥200) and the cone's argmax beats the persistence
+    // baseline scored under the identical pending protocol, with a 5% margin.
+    // 0 = the planner has earned no authority anywhere; reflexes own the roll.
+    int authority = 0;
+    for (int i = 0; i < kNumProbes; ++i) {
+        if (acc_n_[i] < 200) break;
+        double n = double(acc_n_[i]);
+        if (acc_top1_[i] / n <= 1.05 * (acc_pers_[i] / n)) break;
+        authority = kProbes[i];
+    }
+    mod["authority_depth"] = authority;
     return nlohmann::json{{"version", 1}, {"module", mod}};
 }
 
 void MotorPlanner::restore_state(nlohmann::json const&) {}
 
-nlohmann::json MotorPlanner::diag_snapshot() const { return snapshot_state()["module"]; }
+nlohmann::json MotorPlanner::diag_snapshot() const {
+    // The piano-roll payload: everything snapshot_state carries, plus this tick's
+    // decoded cone (roll_mean/roll_sd, roll_len × 12) and the past-pose ring —
+    // shipped WHOLE, not accumulated client-side (DiagPublisher throttles to the
+    // subscription hz; a client accumulator would alias, the gait-raster lesson).
+    nlohmann::json mod = snapshot_state()["module"];
+    mod["joints"]   = kJoints;
+    mod["horizon"]  = int(horizon_);
+    mod["roll_len"] = roll_len_;
+    nlohmann::json rm = nlohmann::json::array(), rs = nlohmann::json::array();
+    for (int i = 0; i < roll_len_ * kJoints; ++i) {
+        rm.push_back(std::round(roll_mean_[i] * 1000.0f) / 1000.0f);
+        rs.push_back(std::round(roll_sd_[i]   * 1000.0f) / 1000.0f);
+    }
+    mod["roll_mean"] = std::move(rm);
+    mod["roll_sd"]   = std::move(rs);
+    nlohmann::json past = nlohmann::json::array();
+    for (int i = 0; i < past_n_; ++i) {           // oldest → newest
+        int idx = (past_head_ - past_n_ + i + kPastRing) % kPastRing;
+        for (int j = 0; j < kJoints; ++j)
+            past.push_back(std::round(past_[idx][j] * 1000.0f) / 1000.0f);
+    }
+    mod["past"]     = std::move(past);
+    mod["past_len"] = past_n_;
+    mod["cur_tok"]  = cur_tok_;
+    mod["phi"]      = std::round(phi_ * 1000.0f) / 1000.0f;
+    mod["omega"]    = omega_;
+    return mod;
+}
 
 } // namespace ogma

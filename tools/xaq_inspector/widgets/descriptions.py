@@ -314,6 +314,34 @@ DOCS: dict[str, ModuleDoc] = {
         ),
     ),
 
+    "MotorPlanner": ModuleDoc(
+        title="MotorPlanner — the motor piano roll (probability cone, shadow)",
+        summary=(
+            "A zero-authority observer that treats the near future as a piano "
+            "roll: the executed past is immutable, the present column belongs to "
+            "the reflexes, and the future columns hold a probability cone — "
+            "“where will my body most likely be in n ticks?” — learned online "
+            "from the body-pose token stream, conditioned on stride phase. It "
+            "verifies its own predictions when the future arrives, and the GOLD "
+            "LINE is the payoff: the authority horizon, the deepest depth at "
+            "which its verified accuracy still beats the do-nothing baseline "
+            "(persistence). Planning loops may only suppress reflexes left of "
+            "that line — authority is earned by prediction, never asserted."
+        ),
+        formulas=(
+            "<code>T[s, bin(φ)][s'] += 1</code> — phase-conditioned transition counts (online)<br>"
+            "<code>row₀ = δ(s_now); &nbsp; row_{n+1} = topK(mask(row_n · T[·, bin(φ + n·ω)]))</code> — the cone<br>"
+            "<code>mask (mode 1): drop s where occupancy(s, bin)/occupancy(s) &lt; floor</code> — precision withdrawal<br>"
+            "<code>pose(row)[j] = Σ_s p_s·μ_s[j]; &nbsp; σ² = Σ p_s(σ²_s + μ_s²) − pose²</code> — joint-space decode (fan)<br>"
+            "<code>authority = max{k : top1(k) &gt; 1.05·persist(k), n(k) ≥ 200}</code> — the gold line<br><br>"
+            "<b>Terms.</b> s = body-pose token (EPM winner); φ, ω = stride phase / "
+            "rate from the rhythm reference; top1(k) = verified argmax accuracy at "
+            "depth k; persist(k) = accuracy of predicting “still s_now” scored "
+            "under the identical protocol; μ_s, σ_s = per-token Welford pose "
+            "readout (instrument, not percept)."
+        ),
+    ),
+
     "ActionDecoder": ModuleDoc(
         title="ActionDecoder — the coxswain (deliberate actor)",
         summary=(

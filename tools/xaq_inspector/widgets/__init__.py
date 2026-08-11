@@ -36,6 +36,7 @@ from .cylinder_inspector           import CylinderInspector
 from .efe_arbiter_inspector        import EFEArbiterInspector
 from .vision_bearing_inspector     import VisualBearingInspector
 from .vision_homing_inspector      import VisualHomingInspector
+from .piano_roll_inspector         import PianoRollInspector
 
 
 WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
@@ -81,6 +82,10 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     # Food is FOV-gated so both read 0 until food is in view (status banners make that legible).
     "VisualBearing":        VisualBearingInspector,
     "VisualHomingNav":      VisualHomingInspector,
+    # PART III (2026-08-11) — the motor piano roll: the planner's probability cone
+    # decoded to per-joint timelines, with the EARNED authority horizon drawn as
+    # a gold line (verified cone accuracy vs the persistence baseline, per depth).
+    "MotorPlanner":         PianoRollInspector,
     # Generic reflex / detector widget — auto-discovers fields from the
     # snapshot, so one ReflexInspector suffices for every reflex type
     # without per-type bespoke panels.
