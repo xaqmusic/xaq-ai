@@ -484,7 +484,10 @@ func _set_body_damp_scale(v: float) -> void:
 			b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 @export var sensor_noise_tau:   float = 8.0
 var _sensor_noise: PackedFloat64Array = PackedFloat64Array()
-var _prev_joints_pub: PackedFloat64Array = PackedFloat64Array()  # for the joints_dyn Δq
+var _prev_joints_pub: PackedFloat64Array = PackedFloat64Array()  # for the joints_dyn q̇
+var _qdot_ema: PackedFloat64Array = PackedFloat64Array()          # M0.d.2 smoothed velocity
+## joints_dyn q̇ EMA rate (τ ≈ 1/alpha ticks; 0.3 ≈ 3-tick smoothing, ~servo timescale).
+@export var joints_dyn_vel_alpha: float = 0.3
 # Ground-force / authority accumulators (see the joint_torque publish site).
 var _tq_mag_acc: float = 0.0
 var _tq_sat_acc: float = 0.0
@@ -6195,16 +6198,24 @@ func _step_one() -> void:
 				+ a * _sensor_noise_rng.randf_range(-sensor_noise_sigma, sensor_noise_sigma)
 			joints[i] = clamp(joints[i] + _sensor_noise[i], -1.0, 1.0)
 	brain.publish_proprio(joints, "joints")
-	# 2026-08-11 (twin-gate M0.d) — [q, Δq] phase-space stream.  Δq is computed
-	# AFTER sensor noise so both halves describe the same egocentric view.
+	# 2026-08-11 (twin-gate M0.d) — [q, q̇] phase-space stream.  Computed AFTER
+	# sensor noise so both halves describe the same egocentric view.
+	# M0.d.2 (same day): q̇ is now an EMA of the per-tick delta, NOT the raw
+	# delta — the v1 raw single-tick Δq was measured to be a noisy velocity
+	# estimator (dyn-token chain WORSE than persistence, lift 0.94→0.64) while
+	# the stream's structural effect (self-mass 0.72→0.55) confirmed the
+	# phase-space concept.  τ ≈ 1/alpha ticks, matched to servo dynamics.
 	var joints_dyn := PackedFloat64Array()
 	joints_dyn.append_array(joints)
+	if _qdot_ema.size() != joints.size():
+		_qdot_ema.resize(joints.size())
+		_qdot_ema.fill(0.0)
 	if _prev_joints_pub.size() == joints.size():
 		for i in range(joints.size()):
-			joints_dyn.append(joints[i] - _prev_joints_pub[i])
-	else:
-		for i in range(joints.size()):
-			joints_dyn.append(0.0)
+			_qdot_ema[i] = (1.0 - joints_dyn_vel_alpha) * _qdot_ema[i] \
+				+ joints_dyn_vel_alpha * (joints[i] - _prev_joints_pub[i])
+	for i in range(joints.size()):
+		joints_dyn.append(_qdot_ema[i])
 	_prev_joints_pub = joints.duplicate()
 	brain.publish_proprio(joints_dyn, "joints_dyn")
 

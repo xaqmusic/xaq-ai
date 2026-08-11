@@ -932,6 +932,43 @@ seed 3's dyn EPM hit the 200-node cap (raise for v2); the phase conditioning
 (bins=8) costs 8× count sparsity for a measured-zero gain — drop to the
 minimum in v2 arms.
 
+**2026-08-11 — M0.d.2 (smoothed velocity): the anti-signal fixed, the gate
+still not passed — and the campaign's token-chain chapter closes.** v2
+changed exactly the diagnosed conditioning: q̇ = EMA(Δq, α=0.3) body-side,
+dq ranges re-measured on the smoothed signal (p2/p98+20%, ~half the raw
+envelopes), max_nodes 320, planner_dyn phase_bins 2. Stream identity
+verified again. **Result (n=4): the unconditioned dyn chain went from
+LOSING to persistence (v1 lift 0.94→0.64 with depth) to TYING it flat
+(0.94/0.97/1.00/1.02/1.03/1.00 at k=1..10)** — the smoothing removed the
+noise-injection, confirming the estimator diagnosis — **but surfaced no
+positive structure.** The cone shows a small mid-horizon bump (×1.14–1.20
+at k=5–8, n=4 — a signal at best) yet decays worse at stride scale (×0.52
+at k=34); bands did not widen (38/48, width 17.7); authority 0 everywhere.
+The vocabulary meanwhile kept growing with every cap raise (163 in-use;
+238–278 total, near the new 320 cap) at unchanged self-mass 0.55 — finer
+tiling without added predictability, at per-token sample cost (k=1 model
+0.47 on 163 tokens vs 0.67 on 51).
+
+**The pattern, now complete across every arm tried:** per-tick FIRST-ORDER
+TOKEN CHAINS on this body's proprioceptive stream do not beat persistence
+under ANY tested vocabulary (position, position+raw-q̇, position+smoothed-q̇)
+or conditioning (none, brt phase, CPG clock, 2 or 8 bins); window-clustered
+chunks lose to the chain itself; event space holds only ~1–4 events of
+structure. **The one verified positive in the entire program is CONTINUOUS:
+the per-joint marginal decode beats hold-pose by 12–23% in the k∈[8,34]
+band.** The predictable object at stride scale is the continuous trajectory
+distribution, not the symbolic successor. **Verdict: M0.d.2 PARTIAL
+(estimator fixed, gate unpassed); the token-argmax planning route is
+REFUTED on this substrate at per-tick granularity — re-use context: a
+vocabulary whose tokens are EARNED FROM predictive success (e.g., a
+descending-predictor-conditioned EPM per §0's predictive-coding path)
+rather than from spatial quantization.** Recommendation for M1 recorded:
+the piano-roll architecture survives unchanged — its rows already carry
+continuous per-joint distributions (the decode/fan); make THAT the
+prediction substrate the refinement/masking loops operate on, with the
+authority bands as the earned-confidence gate, and drop the requirement
+that a symbolic chain must first beat persistence.
+
 **2026-08-11 — the LEG-NAMING MIRROR (operator-diagnosed on the roll).** With
 per-tick motor traces beside the 3-D view for the first time, the operator saw
 the red leg lift while the widget said FL. Geometry confirms: true forward is
