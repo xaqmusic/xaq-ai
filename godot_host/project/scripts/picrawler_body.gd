@@ -10637,6 +10637,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 					"mk":  _pmod.get("masked_out", 0),
 					"mm":  _pmod.get("mask_mode", 0.0),
 				}
+				# 2026-08-11 (M1) — mask-AUTHOR mirror: trial state + the earned
+				# (kept) mask list, so seed runs record what the author learned.
+				# Absent unless author_mode=1 (zero cost on every other config).
+				if _pmod.has("author"):
+					line[_plid[1]]["au"] = _pmod["author"]
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):

@@ -421,6 +421,31 @@ class PianoRollInspector(QWidget):
         jgrid = "  ".join(
             f"{_LEGS[leg]['anat']} " + "/".join(_band_str(leg + 4 * j) for j in range(3))
             for leg in range(4)) if len(joint_band) >= 24 else "—"
+        # M1 mask AUTHOR status (absent unless author_mode=1): the trial loop's
+        # live state + the earned (kept) mask set.  Kept masks are RECORDED
+        # keep-rights, not currently applied to the roll (v1 is a prospector).
+        author_txt = ""
+        au = snap.get("author")
+        if isinstance(au, dict):
+            phase = {0: "warmup", 1: "TRIAL", 2: "drain"}.get(int(au.get("phase", 0)), "?")
+            cand = au.get("cand") or {}
+            cand_s = (f"j{cand.get('j')} [{cand.get('lo'):.2f},{cand.get('hi'):.2f}] "
+                      f"d[{cand.get('dlo')},{cand.get('dhi')}]"
+                      + (" guided" if cand.get("guided") else " random")) if cand else "—"
+            kept = au.get("kept", [])
+            kept_s = "  ".join(
+                f"j{k['j']}[{k['lo']:.2f},{k['hi']:.2f}]d[{k['dlo']},{k['dhi']}]r={k['r']:.3f}"
+                for k in kept[:4]) or "none yet"
+            res = snap.get("res_top", [])
+            res_s = "  ".join(
+                f"d{c['d']}·j{c['j']} t={c['t']:.0f} {'+' if c['m'] > 0 else '−'}"
+                for c in res[:3]) or "—"
+            author_txt = (
+                f"\n  AUTHOR {phase} · trial {int(au.get('trial', 0))} "
+                f"({int(au.get('trials', 0))} judged, last r={au.get('last_r', -1):.3f})   "
+                f"cand: {cand_s}\n"
+                f"  kept ({len(kept)}): {kept_s}\n"
+                f"  raw-decode hallucination cells (residual t): {res_s}")
         self._readout.setText(
             f"  stride ≈ {period:.0f} ticks   n_obs {int(snap.get('n_obs', 0))}   "
             f"mask_mode {snap.get('mask_mode', 0):.0f} "
@@ -432,4 +457,4 @@ class PianoRollInspector(QWidget):
             f"hold-pose by ≥5%.\n"
             f"  labels are ANATOMICAL (leg-colored); body/config frame is "
             f"mirrored L↔R: FR=cfg'fl'·red  FL=cfg'fr'·green  RR=cfg'rl'·blue  "
-            f"RL=cfg'rr'·yellow.")
+            f"RL=cfg'rr'·yellow." + author_txt)

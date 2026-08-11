@@ -14,6 +14,18 @@
 // (mask_mode) sharpens the cone before propagation; masking experiments measure
 // cone quality deltas, never behavior (yet).
 //
+// M1 (2026-08-11, substrate pivot): the CONTINUOUS roll is the substrate — the
+// token-argmax chain is refuted at per-tick granularity, but the per-joint marginal
+// decode carries verified authority in the k∈[8,34] band.  The MASK AUTHOR
+// (author_mode=1) is the first slow loop over that substrate: it PROPOSES region
+// masks (inhibition candidates), trials each one, and KEEPS only masks whose
+// verified final-vs-raw error ratio shows the inhibition removed predicted mass
+// reality never delivered.  Candidates come from the planner's own measured signed
+// residuals (where the raw decode systematically hallucinates) plus random
+// exploration; keep-rights are EARNED through the meters, never assigned.  While a
+// region mask is live the planner propagates a TRUE second unmasked cone, so
+// raw-vs-final is a genuine per-tick counterfactual at every depth.
+//
 // Doctrine anchors: instrument-first (P5/M0 pattern); "feed it phase" (§0 rule 3),
 // applied to the VOCABULARY's dynamics for the first time; the plan-as-prediction
 // framing (PART III non-negotiables) — this module is the future-buffer half only.
@@ -80,6 +92,23 @@ private:
     double mask_depth_lo_ = 1.0;
     double mask_depth_hi_ = 40.0;
     double mask_strength_ = 1.0;
+    // --- the M1 MASK AUTHOR (all inert by default — gain-0 guard).  author_mode=1
+    // takes OWNERSHIP of the region-mask params above: it writes a candidate spec
+    // at each trial start and zeroes mask_strength_ between trials.
+    double author_mode_       = 0.0;    // 0 off · 1 authoring slow loop
+    double author_period_     = 800.0;  // ticks per candidate trial
+    double author_warmup_     = 3000.0; // ticks before the first trial
+    double author_min_n_      = 300.0;  // min per-slot trial verdicts to judge
+    double author_keep_ratio_ = 0.95;   // keep iff the SCORING final/raw ratio < this
+    double author_score_      = 0.0;    // 0 whole-body ratio · 1 TARGET-JOINT ratio
+                                        //   (the ledger's altitude: verified material
+                                        //   lives in the per-joint marginals) with the
+                                        //   whole-body ratio as a no-damage guard
+    double author_guard_      = 1.0;    // score=1: whole-body ratio must stay < this
+    double author_depth_min_  = 5.0;    // the ledger's re-use context: k<5 is
+    double author_depth_max_  = 34.0;   //   reflex territory on this vocabulary
+    double author_max_kept_   = 8.0;
+    double seed_              = 1234.0; // reseeded per-run via OGMA_SEED override
     std::vector<uint64_t> subs_;
 
     // --- live state
@@ -114,8 +143,9 @@ private:
     // (the global token chain can fail while a joint marginal still predicts).
     struct Pending { uint64_t due; int depth; int tok0; Dist dist;
                      std::array<float, kJoints> pred_pose;      // FINAL (post-mask) decode
-                     std::array<float, kJoints> pred_pose_raw;  // pre-mask decode (== final when unmasked)
-                     std::array<float, kJoints> pose0; };
+                     std::array<float, kJoints> pred_pose_raw;  // TRUE unmasked-cone decode (== final when unmasked)
+                     std::array<float, kJoints> pose0;
+                     int trial = 0; };                          // author trial serial at prediction time (0 = none)
     std::vector<Pending> pending_;
 
     // --- per-depth accumulators (index = probe slot)
@@ -140,6 +170,32 @@ private:
     // past ring of actual poses (oldest→newest reconstruction at read time)
     std::array<std::array<float, kJoints>, kPastRing> past_{};
     int past_head_ = 0, past_n_ = 0;
+
+    // --- MASK AUTHOR state (author_mode=1) -----------------------------------
+    struct MaskSpec { int joint = -1; float lo = 0, hi = 0; int dlo = 1, dhi = 1; };
+    struct Kept { MaskSpec spec; double ratio_all, ratio_tgt; long n; int trial; bool guided; };
+    void author_step();                 // the trial state machine (pre-roll)
+    void author_start_trial();
+    void author_judge_trial();
+    uint32_t rng_next();                // xorshift32 off seed_
+    uint32_t rng_state_ = 0;
+    int      author_phase_  = 0;        // 0 warmup · 1 trial live · 2 drain
+    long     author_t_      = 0;        // ticks in current phase
+    int      trial_serial_  = 0;        // 0 = no trial yet
+    long     trials_done_   = 0;
+    MaskSpec cand_{};
+    bool     cand_guided_   = false;
+    double   last_ratio_all_ = -1.0, last_ratio_tgt_ = -1.0;
+    std::vector<Kept> kept_;            // the earned set (recorded, NOT re-applied in v1)
+    // per-trial dual-verification accumulators (final vs true-raw, same ticks)
+    std::array<std::array<double, kJoints>, kNumProbes> tacc_jerr_{}, tacc_jerr_raw_{};
+    std::array<long, kNumProbes> tacc_n_{};
+    // signed residual tracker on the RAW decode (Welford) — where the un-inhibited
+    // excitation systematically misses reality; the author's proposal gradient
+    std::array<std::array<double, kJoints>, kNumProbes> res_mean_{}, res_m2_{};
+    std::array<std::array<long,   kJoints>, kNumProbes> res_n_{};
+    std::array<int, 24> tried_{};       // (slot,joint,sign) signatures already trialed
+    int tried_n_ = 0;
 };
 
 } // namespace ogma
