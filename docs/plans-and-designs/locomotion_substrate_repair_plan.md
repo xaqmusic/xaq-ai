@@ -584,3 +584,85 @@ promotion; ledger + campaign-log entry per verdict; launcher naming convention f
 exposed arm. Known failure shapes to watch: integral windup (leak/clamp/freeze guards),
 the 14–20k peak-and-decay masquerading as a win at short horizons, and pooled-step_cv
 hiding cluster rhythm (windowed reads mandatory).
+
+
+---
+
+# PART III — The Motor Planner: rolling masked action prediction (approved 2026-08-10)
+
+## Context
+
+Operator direction: achieve MPC/RL-class competence while keeping runtime plasticity —
+the project's actual goal. Diagnosis: the input side (EPM coarse-graining/prediction)
+is solid; **the output side lacks real prediction and planning**. Proposal (operator,
+from E/I pathways + speech-denoising masking): **roll out sequences of future motor
+messages and continuously mask/refine them as they approach the present.**
+
+Field coordinates, recorded for orientation: this is a receding horizon (MPC's actual
+power source) executed as continuous refinement rather than re-optimization; it is the
+anatomy of a diffusion policy (coarse far-future, committed near-future); and the E/I
+masking is basal-ganglia action selection — GO/NO-GO as selective disinhibition of
+prepared motor predictions. Doctrine-native reading: **a motor rollout IS a prediction
+of future proprioception; acting is fulfilling it; masking IS precision** (inhibition =
+precision withdrawal). The bumblebee argument operationalized: not a bigger brain, a
+structured one — the missing module is central-complex-shaped: a small structured
+future buffer on the motor side.
+
+What this answers on our books: the ablation null (the learned layer finally gets a job
+reflexes cannot do — THE FUTURE; reflexes own now), and the P4 impasse (a plan can
+carry contact-CONTINGENT structure — a stroke element masked until its predicted-contact
+element precedes it — which phase machinery could never express).
+
+## Non-negotiables (from the campaign's own scars)
+
+- The plan NEVER becomes an imposed trajectory. Entry is exclusively through the
+  objective/confidence socket (KeyframeGait's error-retarget pattern), with confidence
+  EARNED from the planner's own predictive accuracy 1/(tle+ε). The plan proposes;
+  reflexes dispose. ("Flopping fish" + P4 arms 1–2 are the graves this fence guards.)
+- Instrument-first at every stage; shadow before authority; mechanism in traces before
+  n=20; n=20 + UI before promotion; all harness rules (completion guard, instrument
+  context, byte-identity, consumer-fired after the FIRST arm).
+- Shadow stages publish on shadow topics — NOT `prediction.*` — because the EPMs'
+  descending-subtraction sockets are live-by-default and feeding them is itself a
+  behavioral change to be made deliberately (stage M3+, gated).
+
+## M0 — Raw material: the vocabulary and transition model on the RHYTHMIC gait
+
+All prior EPM measurements predate V3 BASE. A rhythmic body should produce a far
+better-conditioned vocabulary and transition graph than the shuffle era's.
+1. `v3base__ga__bodypose`: re-introduce the body-pose EPM (+ later the 4 leg EPMs —
+   exactly the P0 disposition: "re-introduced by the predictor WITH a consumer").
+2. Collect per-tick winner streams (the bp_/bpt_ mirrors, DIAG_INTERVAL=1, n=4).
+3. Offline: empirical transition matrix from each run's first half; **k-step rollout
+   accuracy on the second half vs persistence** (k = 1..10). GATE: the transition
+   model must beat persistence decisively at k ≥ 3 — the planner's raw material check.
+   If it fails: conditioning work on the vocabulary BEFORE any planner code.
+
+## M1 — The shadow planner (zero authority)
+
+`MotorPlanner` module: horizon buffer H ≈ one stride, rolled from the transition
+graph; per-element confidence; per-tick shift-and-refine; branch masking by predicted
+TLE along the rollout (high-expected-surprise branches pruned — EFE arriving
+bottom-up). Publishes on `shadow.plan.*`. Scored offline against traces:
+- GATE: near-horizon (1–5 tick) predictions of proprio/contact beat BOTH persistence
+  and the unrefined rollout — refinement must add anticipation, measurably.
+
+## M2 — One consumer: the objective socket with earned confidence
+
+Plan head enters as confidence-weighted error retarget (the KeyframeGait pattern),
+w = f(1/(planner_tle+ε)), gain-0-guarded. Judged on anticipation metrics (td timing,
+obstacle pre-adjustment), the full set, arena + corridor, n=20, operator UI.
+
+## M3 — The inhibitory pathway + the thesis experiment
+
+Contact-contingent masking (the P4 answer: strokes wait for predicted contact), then
+the (d)-tests on the V3 body: perturb / lesion / relocate mid-episode — does the PLAN
+re-roll (visible re-inference in the buffer) and behavior recover? This is the
+project's central claim, run on an honest substrate for the first time.
+
+## Files
+
+- M0: config script (v3base__ga + EPM modules); offline scorer (planscore.py).
+- M1: cpp_core/src/ogma/modules/MotorPlanner.{cpp,hpp} (new module, bus-native);
+  registry entry; config arm; body-log mirrors for plan diagnostics.
+- M2/M3: MotorEPMv2 objective-socket wiring only (existing pattern); no new paths.
