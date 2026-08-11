@@ -109,8 +109,12 @@ class _Track:
 class PianoRollInspector(QWidget):
     """Live motor piano roll for the MotorPlanner (see module docstring)."""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, module_id: str = "motor_planner",
+                 module_type: str = "MotorPlanner",
+                 parent: QWidget | None = None):
         super().__init__(parent)
+        self.module_id = module_id
+        self.module_type = module_type
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
 
@@ -169,7 +173,11 @@ class PianoRollInspector(QWidget):
         self._dirty = True
 
     # ------------------------------------------------------------------
-    def update_payload(self, snapshot: dict) -> None:
+    def update_payload(self, tick_id: int, snapshot: dict | None = None) -> None:
+        # Top-level convention: the inspector (via the description card) calls
+        # (tick_id, snapshot).  Accept (snapshot) alone too for offscreen tests.
+        if snapshot is None and isinstance(tick_id, dict):
+            snapshot = tick_id
         if isinstance(snapshot, dict):
             self._latest = snapshot
             self._dirty = True
