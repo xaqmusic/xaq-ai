@@ -57,6 +57,7 @@ private:
     int   phase_bin(float phi) const;
     Dist  propagate(Dist const& d, int bin) const;
     void  apply_mask(Dist& d, int bin) const;
+    bool  apply_region_mask(Dist& d, int depth);
     void  decode_row(Dist const& d, float* mean_out, float* sd_out) const;
 
     // --- wiring / params
@@ -67,8 +68,18 @@ private:
     double horizon_    = 40.0;    // cone depth in ticks (>= largest probe)
     double beam_k_     = 12.0;    // per-row sparsity cap
     double phase_bins_ = 8.0;
-    double mask_mode_  = 0.0;     // 0 none · 1 phase-affinity mask
+    double mask_mode_  = 0.0;     // 0 none · 1 phase-affinity (refuted) · 2 CONTINUOUS region
     double mask_floor_ = 0.02;    // affinity below this ⇒ masked (mode 1)
+    // mode 2 — continuous inhibition on the roll (M1 substrate): suppress token
+    // mass whose READOUT pose falls in [val_lo,val_hi] on mask_joint_, at cone
+    // depths [depth_lo,depth_hi], by mask_strength_.  All hot-mutable so the
+    // inspector widget drives the mask live.  Defaults inert (gain-0).
+    double mask_joint_    = -1.0;  // 0..11, or -1 = mask ALL joints' readouts
+    double mask_val_lo_   = 0.0;
+    double mask_val_hi_   = 0.0;
+    double mask_depth_lo_ = 1.0;
+    double mask_depth_hi_ = 40.0;
+    double mask_strength_ = 1.0;
     std::vector<uint64_t> subs_;
 
     // --- live state
@@ -102,7 +113,9 @@ private:
     // against the arriving pose, giving each track its OWN authority horizon
     // (the global token chain can fail while a joint marginal still predicts).
     struct Pending { uint64_t due; int depth; int tok0; Dist dist;
-                     std::array<float, kJoints> pred_pose; std::array<float, kJoints> pose0; };
+                     std::array<float, kJoints> pred_pose;      // FINAL (post-mask) decode
+                     std::array<float, kJoints> pred_pose_raw;  // pre-mask decode (== final when unmasked)
+                     std::array<float, kJoints> pose0; };
     std::vector<Pending> pending_;
 
     // --- per-depth accumulators (index = probe slot)
@@ -110,12 +123,18 @@ private:
     std::array<long,   kNumProbes> acc_n_{};
     // per-depth × per-joint mean-|error| accumulators: cone decode vs hold-pose
     std::array<std::array<double, kJoints>, kNumProbes> acc_jerr_{}, acc_jpers_{};
+    // raw (pre-mask) decode errors — the inhibition damage/benefit meter
+    std::array<std::array<double, kJoints>, kNumProbes> acc_jerr_raw_{};
     double marg_top1_ = 0.0; long marg_n_ = 0;    // marginal baseline at depth 1
     std::unordered_map<int, float> marginal_;
     long   masked_out_ = 0;                        // mask activity (consumer check)
 
-    // --- the piano roll: this tick's cone decoded to joint space, all depths
-    std::vector<float> roll_mean_, roll_sd_;       // roll_len_ × kJoints, row-major
+    // --- the piano roll: this tick's cone decoded to joint space, all depths.
+    // FINAL (post-mask) and RAW (pre-mask, the original excitation) — the widget
+    // shows original motion, the mask, and the final motion (operator contract).
+    std::vector<float> roll_mean_, roll_sd_;           // roll_len_ × kJoints
+    std::vector<float> roll_raw_mean_, roll_raw_sd_;
+    bool mask_applied_ = false;                        // any mass suppressed this tick
     int roll_len_ = 0;
     // past ring of actual poses (oldest→newest reconstruction at read time)
     std::array<std::array<float, kJoints>, kPastRing> past_{};

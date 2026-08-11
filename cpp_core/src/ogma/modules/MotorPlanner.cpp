@@ -66,6 +66,20 @@ ParamSchema MotorPlanner::params_schema() const {
          "no behavioral authority).", ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"mask_floor", ParamMutability::HotMutable,
          "Affinity floor for mask_mode 1.", ParamValue{0.02}, ParamValue{0.0}, ParamValue{0.5}},
+        {"mask_joint", ParamMutability::HotMutable,
+         "mode 2: joint whose READOUT pose is tested (0..11), or -1 = all joints.",
+         ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{11.0}},
+        {"mask_val_lo", ParamMutability::HotMutable,
+         "mode 2: inhibited pose-value range, low edge.", ParamValue{0.0}, ParamValue{-1.5}, ParamValue{1.5}},
+        {"mask_val_hi", ParamMutability::HotMutable,
+         "mode 2: inhibited pose-value range, high edge.", ParamValue{0.0}, ParamValue{-1.5}, ParamValue{1.5}},
+        {"mask_depth_lo", ParamMutability::HotMutable,
+         "mode 2: first cone depth (ticks ahead) the mask acts on.", ParamValue{1.0}, ParamValue{1.0}, ParamValue{120.0}},
+        {"mask_depth_hi", ParamMutability::HotMutable,
+         "mode 2: last cone depth the mask acts on.", ParamValue{40.0}, ParamValue{1.0}, ParamValue{120.0}},
+        {"mask_strength", ParamMutability::HotMutable,
+         "mode 2: suppression factor (1 = full inhibition of matching mass).",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{1.0}},
     };
 }
 
@@ -75,6 +89,9 @@ ParamMap MotorPlanner::current_params() const {
     m["pose_topic"] = pose_topic_;
     m["horizon"] = horizon_; m["beam_k"] = beam_k_;
     m["phase_bins"] = phase_bins_; m["mask_mode"] = mask_mode_; m["mask_floor"] = mask_floor_;
+    m["mask_joint"] = mask_joint_; m["mask_val_lo"] = mask_val_lo_; m["mask_val_hi"] = mask_val_hi_;
+    m["mask_depth_lo"] = mask_depth_lo_; m["mask_depth_hi"] = mask_depth_hi_;
+    m["mask_strength"] = mask_strength_;
     return m;
 }
 
@@ -88,6 +105,12 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     phase_bins_ = std::clamp(pget(params, "phase_bins", phase_bins_), 2.0, double(kMaxBins));
     mask_mode_  = pget(params, "mask_mode",  mask_mode_);
     mask_floor_ = pget(params, "mask_floor", mask_floor_);
+    mask_joint_    = pget(params, "mask_joint",    mask_joint_);
+    mask_val_lo_   = pget(params, "mask_val_lo",   mask_val_lo_);
+    mask_val_hi_   = pget(params, "mask_val_hi",   mask_val_hi_);
+    mask_depth_lo_ = pget(params, "mask_depth_lo", mask_depth_lo_);
+    mask_depth_hi_ = pget(params, "mask_depth_hi", mask_depth_hi_);
+    mask_strength_ = pget(params, "mask_strength", mask_strength_);
     subs_.push_back(bus_->subscribe(state_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){
             if (auto t = std::dynamic_pointer_cast<const RealityToken>(p))
@@ -126,11 +149,21 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
 
 void MotorPlanner::on_param_change(std::string_view key, ParamValue const& value) {
     std::string k(key);
-    auto d = [&](double dflt){ if (auto* v = std::get_if<double>(&value)) return *v; return dflt; };
+    auto d = [&](double dflt){
+        if (auto* v = std::get_if<double>(&value)) return *v;
+        if (auto* i = std::get_if<int64_t>(&value)) return double(*i);   // set_param sends ints as int64
+        return dflt;
+    };
     if      (k == "horizon")    horizon_    = d(horizon_);
     else if (k == "beam_k")     beam_k_     = d(beam_k_);
     else if (k == "mask_mode")  mask_mode_  = d(mask_mode_);
     else if (k == "mask_floor") mask_floor_ = d(mask_floor_);
+    else if (k == "mask_joint")    mask_joint_    = d(mask_joint_);
+    else if (k == "mask_val_lo")   mask_val_lo_   = d(mask_val_lo_);
+    else if (k == "mask_val_hi")   mask_val_hi_   = d(mask_val_hi_);
+    else if (k == "mask_depth_lo") mask_depth_lo_ = d(mask_depth_lo_);
+    else if (k == "mask_depth_hi") mask_depth_hi_ = d(mask_depth_hi_);
+    else if (k == "mask_strength") mask_strength_ = d(mask_strength_);
 }
 
 int MotorPlanner::phase_bin(float phi) const {
@@ -179,6 +212,41 @@ void MotorPlanner::decode_row(Dist const& d, float* mean_out, float* sd_out) con
         float v = s - m * m;
         sd_out[j] = v > 0.0f ? std::sqrt(v) : 0.0f;
     }
+}
+
+// mode 2 — continuous region inhibition: suppress mass of tokens whose READOUT
+// pose falls inside the masked value range on the masked joint(s).  Inhibition
+// acts on the CONTINUOUS substrate through the mixture; tokens are carriers.
+// Returns true if any mass was suppressed.
+bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
+    if (mask_mode_ < 1.5 || mask_strength_ <= 0.0) return false;
+    if (depth < int(mask_depth_lo_) || depth > int(mask_depth_hi_)) return false;
+    const float lo = float(std::min(mask_val_lo_, mask_val_hi_));
+    const float hi = float(std::max(mask_val_lo_, mask_val_hi_));
+    if (hi <= lo) return false;
+    const int jsel = int(mask_joint_);
+    bool any = false;
+    for (auto& [tok, pmass] : d) {
+        auto it = tok_pose_.find(tok);
+        if (it == tok_pose_.end() || it->second.n < 2) continue;
+        bool inside = false;
+        if (jsel >= 0 && jsel < kJoints) {
+            float v = it->second.mean[jsel];
+            inside = (v >= lo && v <= hi);
+        } else {
+            for (int j = 0; j < kJoints && !inside; ++j)
+                inside = (it->second.mean[j] >= lo && it->second.mean[j] <= hi);
+        }
+        if (inside) { pmass *= float(1.0 - mask_strength_); any = true; ++masked_out_; }
+    }
+    if (any) {
+        for (auto it = d.begin(); it != d.end(); )
+            it = (it->second <= 1e-9f) ? d.erase(it) : std::next(it);
+        float tot = 0.0f;
+        for (auto const& kv : d) tot += kv.second;
+        if (tot > 1e-9f) for (auto& kv : d) kv.second /= tot;
+    }
+    return any;
 }
 
 MotorPlanner::Dist MotorPlanner::propagate(Dist const& d, int bin) const {
@@ -230,8 +298,9 @@ void MotorPlanner::tick(uint64_t tick_id) {
                 acc_pers_[slot] += (it->tok0 == cur_tok_) ? 1.0 : 0.0;
                 if (pose_seen_) {
                     for (int j = 0; j < kJoints; ++j) {
-                        acc_jerr_[slot][j]  += std::fabs(it->pred_pose[j] - cur_pose_[j]);
-                        acc_jpers_[slot][j] += std::fabs(it->pose0[j]     - cur_pose_[j]);
+                        acc_jerr_[slot][j]     += std::fabs(it->pred_pose[j]     - cur_pose_[j]);
+                        acc_jerr_raw_[slot][j] += std::fabs(it->pred_pose_raw[j] - cur_pose_[j]);
+                        acc_jpers_[slot][j]    += std::fabs(it->pose0[j]         - cur_pose_[j]);
                     }
                 }
                 ++acc_n_[slot];
@@ -272,22 +341,34 @@ void MotorPlanner::tick(uint64_t tick_id) {
     const int H = int(horizon_);
     roll_mean_.assign(size_t(H) * kJoints, 0.0f);
     roll_sd_.assign(size_t(H) * kJoints, 0.0f);
+    roll_raw_mean_.assign(size_t(H) * kJoints, 0.0f);
+    roll_raw_sd_.assign(size_t(H) * kJoints, 0.0f);
     roll_len_ = 0;
+    mask_applied_ = false;
     Dist row; row[cur_tok_] = 1.0f;
     int next_probe = 0;
     for (int n = 1; n <= H; ++n) {
         const int b = phase_bin(std::fmod(phi_ + float(n) * omega_, kTwoPi));
         row = propagate(row, b);
-        apply_mask(row, b);
+        apply_mask(row, b);                     // mode 1 (kept as the recorded arm)
+        if (row.empty()) break;
+        // RAW decode first — the original excitation, before inhibition
+        decode_row(row, &roll_raw_mean_[size_t(n - 1) * kJoints],
+                        &roll_raw_sd_[size_t(n - 1) * kJoints]);
+        // mode 2: the mask REROUTES the row itself, so suppression at depth n
+        // propagates into every deeper row — the future influencing what the
+        // near rows can still believe.
+        if (apply_region_mask(row, n)) mask_applied_ = true;
         if (row.empty()) break;
         decode_row(row, &roll_mean_[size_t(n - 1) * kJoints],
                         &roll_sd_[size_t(n - 1) * kJoints]);
         roll_len_ = n;
         if (next_probe < kNumProbes && n == kProbes[next_probe]) {
-            Pending pd{tick_id + uint64_t(n), n, cur_tok_, row, {}, {}};
+            Pending pd{tick_id + uint64_t(n), n, cur_tok_, row, {}, {}, {}};
             for (int j = 0; j < kJoints; ++j) {
-                pd.pred_pose[j] = roll_mean_[size_t(n - 1) * kJoints + j];
-                pd.pose0[j]     = cur_pose_[j];
+                pd.pred_pose[j]     = roll_mean_[size_t(n - 1) * kJoints + j];
+                pd.pred_pose_raw[j] = roll_raw_mean_[size_t(n - 1) * kJoints + j];
+                pd.pose0[j]         = cur_pose_[j];
             }
             pending_.push_back(std::move(pd));
             ++next_probe;
@@ -388,6 +469,42 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     }
     mod["roll_mean"] = std::move(rm);
     mod["roll_sd"]   = std::move(rs);
+    // The operator's three-layer debugging contract: ORIGINAL motion (raw,
+    // pre-mask), THE MASK, FINAL motion.  Raw roll ships only while a mask is
+    // actually suppressing mass (payload stays lean otherwise).
+    mod["mask_applied"] = mask_applied_;
+    if (mask_applied_) {
+        nlohmann::json rrm = nlohmann::json::array(), rrs = nlohmann::json::array();
+        for (int i = 0; i < roll_len_ * kJoints; ++i) {
+            rrm.push_back(std::round(roll_raw_mean_[i] * 1000.0f) / 1000.0f);
+            rrs.push_back(std::round(roll_raw_sd_[i]   * 1000.0f) / 1000.0f);
+        }
+        mod["roll_raw_mean"] = std::move(rrm);
+        mod["roll_raw_sd"]   = std::move(rrs);
+    }
+    if (mask_mode_ > 1.5) {
+        mod["mask_spec"] = {
+            {"joint", int(mask_joint_)},
+            {"val_lo", mask_val_lo_}, {"val_hi", mask_val_hi_},
+            {"depth_lo", int(mask_depth_lo_)}, {"depth_hi", int(mask_depth_hi_)},
+            {"strength", mask_strength_},
+        };
+        // the inhibition damage/benefit meter: per-depth mean |err| of the
+        // FINAL (masked) vs RAW decode, averaged over joints
+        nlohmann::json em = nlohmann::json::array(), er = nlohmann::json::array();
+        for (int i = 0; i < kNumProbes; ++i) {
+            double n = double(std::max<long>(1, acc_n_[i]));
+            double a = 0.0, b = 0.0;
+            for (int j = 0; j < kJoints; ++j) {
+                a += acc_jerr_[i][j] / n;
+                b += acc_jerr_raw_[i][j] / n;
+            }
+            em.push_back(std::round(a / kJoints * 10000.0) / 10000.0);
+            er.push_back(std::round(b / kJoints * 10000.0) / 10000.0);
+        }
+        mod["masked_err"] = std::move(em);
+        mod["raw_err"]    = std::move(er);
+    }
     nlohmann::json past = nlohmann::json::array();
     for (int i = 0; i < past_n_; ++i) {           // oldest → newest
         int idx = (past_head_ - past_n_ + i + kPastRing) % kPastRing;

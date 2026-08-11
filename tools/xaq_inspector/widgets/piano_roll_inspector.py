@@ -65,6 +65,10 @@ _JOINTS = ("h1", "h2", "kn")
 _PAST_SHOW = 128          # ticks of past drawn (== planner ring size)
 
 _C_PAST      = (205, 205, 210)
+_C_RAW_GHOST = (150, 200, 255, 120)   # ORIGINAL (pre-mask) motion: dashed ghost
+_C_RAW_FAN   = (150, 200, 255, 28)
+_C_MASK      = (240, 80, 200, 46)     # the inhibited region
+_C_MASK_EDGE = (240, 80, 200, 170)
 _C_FUT_AUTH  = (130, 200, 255)        # earned-authority segment: bright, wide
 _C_FUT_DIM   = (130, 200, 255, 175)   # unearned segment: same hue, clearly visible,
                                       # distinguished by width/solidity not invisibility
@@ -108,6 +112,22 @@ class _Track:
         plot.addItem(self.fan)
         self.fut_auth = plot.plot(pen=pg.mkPen(_C_FUT_AUTH, width=2.5))
         self.fut_dim = plot.plot(pen=pg.mkPen(_C_FUT_DIM, width=1.5))
+        # three-layer masking view (operator contract): the ORIGINAL excitation
+        # as a dashed ghost + its own faint fan; the mask region as a magenta
+        # rectangle; the FINAL motion stays the bright layer above.
+        self.raw_fan_hi = plot.plot(pen=None)
+        self.raw_fan_lo = plot.plot(pen=None)
+        self.raw_fan = pg.FillBetweenItem(self.raw_fan_hi, self.raw_fan_lo,
+                                          brush=pg.mkBrush(_C_RAW_FAN))
+        plot.addItem(self.raw_fan)
+        self.raw_mean = plot.plot(pen=pg.mkPen(_C_RAW_GHOST, width=1.5,
+                                               style=Qt.PenStyle.DashLine))
+        self.mask_rect = pg.QtWidgets.QGraphicsRectItem()
+        self.mask_rect.setPen(pg.mkPen(_C_MASK_EDGE, width=1))
+        self.mask_rect.setBrush(pg.mkBrush(_C_MASK))
+        self.mask_rect.setZValue(-5)
+        self.mask_rect.setVisible(False)
+        plot.addItem(self.mask_rect)
 
         self.playhead = pg.InfiniteLine(pos=0.0, angle=90,
                                         pen=pg.mkPen(_C_PLAYHEAD, width=2))
@@ -267,6 +287,12 @@ class PianoRollInspector(QWidget):
         rs = np.asarray(snap.get("roll_sd", []), dtype=float).reshape(-1, nj) \
             if roll_len else np.zeros((0, nj))
         past = np.asarray(snap.get("past", []), dtype=float).reshape(-1, nj)
+        mask_on = bool(snap.get("mask_applied", False))
+        rrm = np.asarray(snap.get("roll_raw_mean", []), dtype=float).reshape(-1, nj) \
+            if mask_on and snap.get("roll_raw_mean") else None
+        rrs = np.asarray(snap.get("roll_raw_sd", []), dtype=float).reshape(-1, nj) \
+            if mask_on and snap.get("roll_raw_sd") else None
+        mspec = snap.get("mask_spec")
         authority = int(snap.get("authority_depth", 0))
         joint_band = snap.get("joint_band", [0, 0] * nj)
         phi = float(snap.get("phi", 0.0))
@@ -313,6 +339,29 @@ class PianoRollInspector(QWidget):
                 else:
                     tr.fut_auth.setData([], [])
                     tr.band.setVisible(False)
+                # ORIGINAL (pre-mask) ghost — only while the mask suppresses mass
+                if rrm is not None and rrm.shape[0] >= roll_len:
+                    rmean = np.concatenate(([actual_now], rrm[:roll_len, jidx]))
+                    rsd = np.concatenate(([0.0], rrs[:roll_len, jidx]))
+                    tr.raw_mean.setData(xs, rmean)
+                    tr.raw_fan_hi.setData(xs, rmean + rsd)
+                    tr.raw_fan_lo.setData(xs, rmean - rsd)
+                else:
+                    for c in (tr.raw_mean, tr.raw_fan_hi, tr.raw_fan_lo):
+                        c.setData([], [])
+                # THE MASK — magenta region on the masked joint's track(s)
+                if mspec and float(mspec.get("strength", 0)) > 0:
+                    mj = int(mspec.get("joint", -1))
+                    if mj == jidx or mj < 0:
+                        x0 = float(mspec["depth_lo"]); x1 = float(mspec["depth_hi"])
+                        y0 = min(float(mspec["val_lo"]), float(mspec["val_hi"]))
+                        y1 = max(float(mspec["val_lo"]), float(mspec["val_hi"]))
+                        tr.mask_rect.setRect(x0, y0, x1 - x0, y1 - y0)
+                        tr.mask_rect.setVisible(y1 > y0)
+                    else:
+                        tr.mask_rect.setVisible(False)
+                else:
+                    tr.mask_rect.setVisible(False)
             else:
                 for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim):
                     c.setData([], [])
