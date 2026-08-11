@@ -1,0 +1,54 @@
+{
+  "name": "cad",
+  "source": "PiCrawler kit STEP/CAD export — the body as DESIGNED",
+  "notes": [
+    "This is the historical body. Every ledger result up to 2026-08-10 was measured on it.",
+    "Keep it selectable forever so historical results stay reproducible.",
+    "Rationale for each value lives beside its var declaration in picrawler_body.gd —",
+    "this file carries values only, so no documentation is lost by the extraction.",
+    "Reference plane for links: hip2 axis. Units: metres and radians (Godot native)."
+  ],
+
+  "links": {
+    "l1": 0.03726,
+    "l2": 0.0536,
+    "l3": 0.0755,
+    "coxa_z_drop": 0.007
+  },
+
+  "chassis": {
+    "x": 0.098,
+    "y": 0.042,
+    "z": 0.098,
+    "hip_x_span": 0.0766,
+    "hip_z_span": 0.066,
+    "standing_y": 0.082
+  },
+
+  "rest": {
+    "hip1": 0.0,
+    "hip2": 0.0,
+    "knee": -1.6,
+    "lower_leg_drop_angle": -1.396
+  },
+
+  "limits": {
+    "hip1": 1.40,
+    "hip2": 1.40,
+    "knee_low": -2.50,
+    "knee_high": 1.70,
+    "knee_low_narrow": -1.70
+  },
+
+  "masses": {
+    "chassis": 0.300,
+    "coxa": 0.025,
+    "upper": 0.025,
+    "lower": 0.025
+  },
+
+  "radii": {
+    "coxa": 0.020,
+    "leg": 0.012
+  }
+}
