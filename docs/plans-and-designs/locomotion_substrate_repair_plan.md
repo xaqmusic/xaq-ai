@@ -794,6 +794,98 @@ line unchanged. **Re-use context for M1: refinement/masking experiments should
 be scored per-joint in the band, where verified material exists — h2 tracks
 and k<5 are reflex territory on this vocabulary.**
 
+**2026-08-11 — THE TWIN GATES (S0 + M0.d): formalized, with the full module
+audit behind them.**
+
+*The audit (all 69 modules; operator asked "pieces we can put together, or
+hand-roll?").* Answer: **the pieces exist; hand-roll nothing but scorers.**
+The chunk pipeline the sequencing conversation asked for was designed and
+built in Phase 1: `SequenceGNG` (n-grams of winners → JL → GNG motifs +
+successor counts, with a complete registered inspector widget — the
+"abandoned chunk UI" is `seqgng_inspector.py`, alive, just starved of a live
+module) → `GNGRollout` (K-sample rollouts with MOTIF TELEPORT — planning-via-
+chunks, built) → `MotorRepertoire` (chunk library, drive-tagged
+crystallization, playback with policy suppression) + `EpisodicCapture` +
+`ChunkAbortGate`/`ChunkOutcomeGate` (the closed-loop abort machinery) +
+`GaitSelector` (sequence REINFORCE) + `KeyframeGait` (phase-indexed posture+
+velocity map with per-bin self-precision — PROMOTED, live in V3 BASE).
+
+*The recorded verdicts, and why re-entry is legal now (§3.1 discipline).*
+The archive is uniformly negative on chunking — `seqgng_body.baked_count=0`
+on the tabula-rasa picrawler; GaitSelector NULL ("no primitive in the
+library translates"); the 11-module cartpole chunk arm lost 18% to minimal;
+EpisodicCapture "currently silent"; ChunkAbortGate "wired but never fires."
+But every one of those verdicts carries the SAME re-use condition, recorded
+identically in three places: *"only after a known-good translating primitive
+exists inside a closed-loop, abortable controller."* **That condition is met
+as of V3 BASE** (cv 0.75, 20/20 walkers): the RL-era chunker starved because
+the body never produced recurring behavior to chunk; today's body does, and
+M0 measured its event-space structure directly (next-posture 3.9× chance).
+The abort machinery the condition demands is already built. Re-audition is
+not re-proposing a refuted lever — it is exercising the recorded re-use
+context.
+
+*GATE S0 — is there chunkable sequence structure? (the long-loop gate).*
+`SequenceGNG` over the body-pose winner stream — with one required
+extension: **`event_mode` (new param, default 0 = byte-identical legacy)**
+that pushes the window only on winner CHANGE. Without it the 0.72
+self-transition stream makes every motif a dwell run; the Cell-era per-tick
+windows are one plausible reason it never baked ("food-approach takes
+seconds but SequenceGNG encodes 83 ms" — the KeyframeAverager doc recorded
+this exact diagnosis in 2026-05). Shadow instance `seq_bodypose` on
+`reality.bodypose.pose`, window 4, proj 64, bounded nodes; nothing consumes
+the motifs. Instruments: the existing `seqgng_inspector` + a body-log
+mirror (`sg_*`: nodes/baked/motif/match_conf) + `seqscore.py` (new).
+**Pass:** motifs BAKE (≥3 by ~3k events, the contract acceptance), the
+vocabulary self-limits (support-EPM signature), motifs recur across seeds,
+and the active motif's successor argmax beats the flat first-order event
+chain on next-event prediction. **Fail:** no baking or no lift ⇒ chunking
+waits for M0.d's vocabulary.
+
+*GATE M0.d — phase-space vocabulary (the refinement-mechanics gate).* The
+structural diagnosis stands: position-only tokens self-intersect on a limit
+cycle ("knee at 0.3 going up" ≡ "going down"), which is WHY the chain is
+persistence and the near-field decode jumps to the token mean. Fix at the
+input (§0 rule 2): body publishes `reality.proprio.joints_dyn` (24-D: q +
+per-tick Δq; a transparent sensor reduction — Δq dims are naturally
+zero-mean, dissolving most of the common-mode problem), a new observer EPM
+`body_pose_dyn` over it (RBF 24-D, dim ranges MEASURED via range probe per
+the support-EPM precedent, never assumed), and a second shadow MotorPlanner
+`motor_planner_dyn` keyed to it. **Pass:** per-joint authority bands extend
+below k=8 (the jump-to-mean dies) and/or past k=34; h2 tracks earn first
+bands; self-transition mass drops materially from 0.72; dwell shortens
+(tokens carve the stride). **Fail:** conditioning goes deeper (explicit
+common-mode centring arm) before any M1.
+
+*Protocol.* ONE shadow config carrying both gates on the same streams:
+v3base__ga__bodypose + joints_dyn + body_pose_dyn + seq_bodypose + both
+planners — every addition zero-authority, so the behavioral base is
+untouched (the M0.b↔M0.c bit-identical-stream check is the precedent; a
+same-seed stream-identity check against a prior M0.b log is step 1 of the
+run). n=4 seeds × 12k arena, DIAG_INTERVAL=1, M0-matched. Two gates, two
+independent instruments, one set of runs — one-lever discipline applies to
+behavioral levers, and there are none here.
+
+*Decision matrix for M1 (the first authority-bearing loop).*
+- S0 loud + M0.d loud → chunk PROPOSER over the dyn vocabulary writing far
+  rows as sequence templates, lattice refinement inward (the operator's
+  long-loop architecture, both halves earned).
+- S0 loud only → chunk proposer on the current vocabulary, event-space rows.
+- M0.d loud only → backward-pass lattice refinement (masking propagates
+  future→present survival) on the dyn vocabulary.
+- Neither → vocabulary conditioning arm (centred common-mode) before any
+  authority. In ALL cases: reflexes keep t0; per-chunk/per-row precision is
+  EARNED from verification (the authority-band machinery, already live);
+  ChunkAbortGate/OutcomeGate are the recorded execution guards when
+  authority eventually flows.
+
+*Build list.* (1) `SequenceGNG.event_mode` (C++, default-0 guarded);
+(2) body-side `joints_dyn` publish (new topic, no subscribers in existing
+configs — behaviorally null); (3) `sg_*` body-log mirror; (4) the twin-gate
+config + launcher entry per convention; (5) `seqscore.py`; (6) range-probe
+pass for the dyn EPM's dim_min/max. KeyframeGait, GNGRollout, MotorRepertoire,
+ChunkAbort/OutcomeGate: untouched now, named as the M1/M2 assembly kit.
+
 **2026-08-11 — the LEG-NAMING MIRROR (operator-diagnosed on the roll).** With
 per-tick motor traces beside the 3-D view for the first time, the operator saw
 the red leg lift while the widget said FL. Geometry confirms: true forward is
