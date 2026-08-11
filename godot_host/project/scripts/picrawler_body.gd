@@ -484,6 +484,7 @@ func _set_body_damp_scale(v: float) -> void:
 			b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 @export var sensor_noise_tau:   float = 8.0
 var _sensor_noise: PackedFloat64Array = PackedFloat64Array()
+var _prev_joints_pub: PackedFloat64Array = PackedFloat64Array()  # for the joints_dyn Δq
 # Ground-force / authority accumulators (see the joint_torque publish site).
 var _tq_mag_acc: float = 0.0
 var _tq_sat_acc: float = 0.0
@@ -2684,6 +2685,14 @@ func _ready() -> void:
 		"float32[4]: sin(yaw), cos(yaw), forward speed, angular speed", true)
 	brain.register_source("Joints",  "reality.proprio.joints",
 		"float32[12]: 4 hip1 + 4 hip2 + 4 knee, normalised", true)
+	# 2026-08-11 (twin-gate M0.d) — PHASE-SPACE proprio: [q, Δq].  Position-only
+	# tokens self-intersect on a limit cycle ("knee at 0.3 going up" ≡ "going
+	# down"), which is why the planner's chain degenerates to persistence; the
+	# per-tick delta breaks the degeneracy with the body's OWN dynamics (no
+	# external clock).  Transparent sensor reduction of the same egocentric
+	# stream — no subscribers in existing configs, so behaviorally null there.
+	brain.register_source("JointsDyn", "reality.proprio.joints_dyn",
+		"float32[24]: [q(12), Δq(12)] — the joints stream + its per-tick delta (phase-space embedding)", true)
 	if publish_vision:
 		# 2026-06-13 — forward-facing raycast camera (Lambert-shaded RGB) → an
 		# epm_color JL EPM (host.video.color → reality.video.color → consensus).
@@ -6186,6 +6195,18 @@ func _step_one() -> void:
 				+ a * _sensor_noise_rng.randf_range(-sensor_noise_sigma, sensor_noise_sigma)
 			joints[i] = clamp(joints[i] + _sensor_noise[i], -1.0, 1.0)
 	brain.publish_proprio(joints, "joints")
+	# 2026-08-11 (twin-gate M0.d) — [q, Δq] phase-space stream.  Δq is computed
+	# AFTER sensor noise so both halves describe the same egocentric view.
+	var joints_dyn := PackedFloat64Array()
+	joints_dyn.append_array(joints)
+	if _prev_joints_pub.size() == joints.size():
+		for i in range(joints.size()):
+			joints_dyn.append(joints[i] - _prev_joints_pub[i])
+	else:
+		for i in range(joints.size()):
+			joints_dyn.append(0.0)
+	_prev_joints_pub = joints.duplicate()
+	brain.publish_proprio(joints_dyn, "joints_dyn")
 
 	# Phase 7.9 — per-leg foot-Y for SynergyTimer touchdown detection.
 	# Cheap (4 floats); consumers opt in by instantiating SynergyTimer.
@@ -10541,6 +10562,27 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				line[_tag + "_win"] = int(_bp.get("winner_id", -1))
 				line[_tag + "_n"]   = int(_bp.get("node_count", -1))
 				line[_tag + "_b"]   = int(_bp.get("baked_count", -1))
+		# 2026-08-11 (twin-gate M0.d) — the phase-space EPM's token mirror, same
+		# shape as bp_/bpt_ so planscore/conescore-style tools read it unchanged.
+		if _pm.has("body_pose_dyn"):
+			var _bd = _pm["body_pose_dyn"]
+			line["bd_tle"] = snappedf(float(_bd.get("tle", -1.0)), 0.0001)
+			line["bd_win"] = int(_bd.get("winner_id", -1))
+			line["bd_n"]   = int(_bd.get("node_count", -1))
+			line["bd_b"]   = int(_bd.get("baked_count", -1))
+		# 2026-08-11 (twin-gate S0) — SequenceGNG motif mirror (seq_bodypose).
+		# sg_m = active motif, sg_c = match confidence, sg_pn = predicted next
+		# WINNER (the successor argmax scored by seqscore.py), sg_n/sg_b/sg_ev =
+		# nodes/baked/events.  Absent module → no keys.
+		if _pm.has("seq_bodypose"):
+			var _sg = _pm["seq_bodypose"]
+			line["sg_m"]  = int(_sg.get("motif_id", -1))
+			line["sg_c"]  = snappedf(float(_sg.get("match_confidence", 0.0)), 0.001)
+			line["sg_pn"] = int(_sg.get("predicted_next_id", -1))
+			line["sg_bk"] = 1 if bool(_sg.get("is_baked", false)) else 0
+			line["sg_n"]  = int(_sg.get("node_count", -1))
+			line["sg_b"]  = int(_sg.get("baked_count", -1))
+			line["sg_ev"] = int(_sg.get("n_events", 0))
 	# 2026-08-10 (P7) — SERVO_KI consumer check: mean |integral| and boost duty.  Both
 	# 0.0 with the lever on = the integral never engaged (deadband too wide, or the
 	# body never loads its servos — either way the arm measured nothing).
@@ -10561,26 +10603,29 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# accumulators are RUNNING MEANS over the whole run, so any diag-cadence line carries
 	# the cumulative per-depth verification scores; the last line is the run's verdict.
 	# Absent module → no key (zero cost on non-planner configs).
+	# 2026-08-11 (twin gates) — mirrors BOTH planner instances: "plan" = motor_planner
+	# (bodypose control), "pland" = motor_planner_dyn (the [q,dq] phase-space arm).
 	if brain != null and brain.has_method("get_module_snapshot"):
-		var _ps = JSON.parse_string(str(brain.get_module_snapshot("motor_planner")))
-		if _ps is Dictionary and _ps.has("module"):
-			var _pmod = _ps["module"]
-			line["plan"] = {
-				"d":   _pmod.get("probe_depths", []),
-				"t1":  _pmod.get("cone_top1", []),
-				"tk":  _pmod.get("cone_topk", []),
-				"ms":  _pmod.get("cone_mass", []),
-				"en":  _pmod.get("cone_entropy", []),
-				"n":   _pmod.get("cone_n", []),
-				"pr":  _pmod.get("cone_persist", []),
-				"auth": _pmod.get("authority_depth", 0),
-				"jauth": _pmod.get("joint_auth", []),
-				"jband": _pmod.get("joint_band", []),
-				"mg":  _pmod.get("marg_top1", 0.0),
-				"obs": _pmod.get("n_obs", 0),
-				"mk":  _pmod.get("masked_out", 0),
-				"mm":  _pmod.get("mask_mode", 0.0),
-			}
+		for _plid in [["motor_planner", "plan"], ["motor_planner_dyn", "pland"]]:
+			var _ps = JSON.parse_string(str(brain.get_module_snapshot(_plid[0])))
+			if _ps is Dictionary and _ps.has("module"):
+				var _pmod = _ps["module"]
+				line[_plid[1]] = {
+					"d":   _pmod.get("probe_depths", []),
+					"t1":  _pmod.get("cone_top1", []),
+					"tk":  _pmod.get("cone_topk", []),
+					"ms":  _pmod.get("cone_mass", []),
+					"en":  _pmod.get("cone_entropy", []),
+					"n":   _pmod.get("cone_n", []),
+					"pr":  _pmod.get("cone_persist", []),
+					"auth": _pmod.get("authority_depth", 0),
+					"jauth": _pmod.get("joint_auth", []),
+					"jband": _pmod.get("joint_band", []),
+					"mg":  _pmod.get("marg_top1", 0.0),
+					"obs": _pmod.get("n_obs", 0),
+					"mk":  _pmod.get("masked_out", 0),
+					"mm":  _pmod.get("mask_mode", 0.0),
+				}
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):

@@ -104,6 +104,7 @@ ParamSchema SequenceGNG::params_schema() const {
         {"mitosis_error_threshold",     ParamMutability::HotMutable,       "GNG mitosis trigger", ParamValue{0.30}},
         {"output_topic",                ParamMutability::ConstructionOnly, "Override output topic (default sequence.motif.<source>)", ParamValue{std::string("")}},
         {"context_topic",               ParamMutability::ConstructionOnly, "Optional SequenceMotif topic; gates GNG updates on context-motif stability over window_size ticks", ParamValue{std::string("")}},
+        {"event_mode",                  ParamMutability::ConstructionOnly, "Winner source only: push the n-gram window on winner CHANGE (dwell-collapsed events) and step the GNG only when the window changed. Default false = byte-identical legacy per-tick windows.", ParamValue{false}},
         {"master_seed",                 ParamMutability::ConstructionOnly, "RNG namespace seed", ParamValue{int64_t{0}}},
     };
 }
@@ -137,6 +138,9 @@ void SequenceGNG::on_setup(Bus* bus, ParamMap const& params) {
     }
     apply_param(params, "context_topic", [&](auto const& v){
         context_topic_ = get_string(v, "context_topic");
+    });
+    apply_param(params, "event_mode", [&](auto const& v){
+        event_mode_ = get_bool(v, "event_mode");
     });
 
     // GNG configuration.
@@ -235,13 +239,16 @@ void SequenceGNG::handle_source(std::string_view /*topic*/, MessagePtr payload) 
     else if (auto ct = std::dynamic_pointer_cast<const ConsensusToken>(payload))
         wid = ct->active_winner_id;
     if (wid < 0) return;     // skip bootstrap placeholder tokens
+    if (event_mode_ && wid == last_winner_id_) return;   // dwell: not an event
 
     if (last_winner_id_ >= 0)
-        track_successor(current_motif_id_, wid);
+        track_successor(current_motif_id_, wid);         // event-successors in event mode
     last_winner_id_ = wid;
 
     winner_window_.push_back(wid);
     while (int(winner_window_.size()) > window_size_) winner_window_.pop_front();
+    window_dirty_ = true;
+    ++n_events_;
 }
 
 void SequenceGNG::handle_neuro(std::string_view /*topic*/, MessagePtr /*payload*/) {
@@ -314,9 +321,31 @@ void SequenceGNG::tick(uint64_t tick_id) {
         return;
     }
 
+    // Event mode: during dwell the window is unchanged — re-stepping the GNG
+    // on the identical encoding would inflate visit counts with dwell time.
+    // Publish the standing motif state and return.
+    if (event_mode_ && !window_dirty_) {
+        if (current_motif_id_ >= 0) {
+            out->motif_id         = current_motif_id_;
+            out->phase            = motif_phase_;
+            out->match_confidence = match_confidence_;
+            out->is_baked         = gng_ && gng_->is_crystallised(current_motif_id_);
+            auto it = successor_counts_.find(current_motif_id_);
+            if (it != successor_counts_.end() && !it->second.empty()) {
+                int best_id = -1, best_count = -1;
+                for (auto const& [next, count] : it->second)
+                    if (count > best_count) { best_count = count; best_id = next; }
+                out->predicted_next_id = best_id;
+            }
+        }
+        bus_->publish(output_topic_, out);
+        return;
+    }
+
     Eigen::VectorXf encoded;
     if (encode_window(encoded)) {
         auto [winner_id, qe] = gng_->step(encoded);
+        window_dirty_ = false;
         just_baked_     = gng_->last_step_baked();
         if (winner_id >= 0 && gng_->node_count() >= 2) {
             current_motif_id_ = winner_id;
@@ -434,6 +463,8 @@ nlohmann::json SequenceGNG::diag_snapshot() const {
         {"motif_phase",            motif_phase_},
         {"match_confidence",       match_confidence_},
         {"just_baked",             just_baked_},
+        {"event_mode",             event_mode_},
+        {"n_events",               n_events_},
         {"successor_counts",       std::move(succ)},
     };
 }

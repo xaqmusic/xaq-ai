@@ -661,6 +661,28 @@ Dictionary OgmaBrain::get_module_metrics() const {
                 d["winner_top8"] = hist;
             }
         }
+        // --- SequenceGNG (2026-08-11, twin-gate S0) ---
+        // Cheap per-tick scalars for the body-log sg_* mirror: the last
+        // published SequenceMotif + the module's own counters.  Deliberately
+        // NOT snapshot_state() — that ships the full GNG and is too heavy
+        // for a per-tick read (the diag_snapshot ZMQ lesson).
+        else if (type == "SequenceGNG") {
+            auto tops = m->output_topics();
+            if (!tops.empty()) {
+                if (auto sm = std::dynamic_pointer_cast<const ogma::SequenceMotif>(
+                        bus->last_value(tops[0].name))) {
+                    d["motif_id"]          = sm->motif_id;
+                    d["match_confidence"]  = double(sm->match_confidence);
+                    d["predicted_next_id"] = sm->predicted_next_id;
+                    d["is_baked"]          = sm->is_baked;
+                }
+            }
+            if (auto const* sg = dynamic_cast<const ogma::SequenceGNG*>(m)) {
+                d["node_count"]  = sg->node_count();
+                d["baked_count"] = sg->baked_count();
+                d["n_events"]    = int64_t(sg->n_events());
+            }
+        }
         // --- LateralVoter ---
         else if (type == "LateralVoter") {
             auto tops = m->output_topics();

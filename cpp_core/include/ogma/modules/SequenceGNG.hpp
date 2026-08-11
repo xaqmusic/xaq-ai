@@ -60,6 +60,7 @@ public:
     int  node_count()    const { return gng_ ? gng_->node_count() : 0; }
     int  baked_count()   const { return gng_ ? gng_->baked_count() : 0; }
     int  current_motif() const { return current_motif_id_; }
+    long n_events()      const { return n_events_; }
 
 private:
     void handle_source(std::string_view topic, MessagePtr payload);
@@ -78,6 +79,12 @@ private:
     float        motif_branching_threshold_ = 0.4f;
     uint64_t     master_seed_              = 0;
     std::string  output_topic_;
+    // 2026-08-11 (twin-gate S0) — EVENT MODE: push the window only when the
+    // winner CHANGES, and step the GNG only when the window changed.  On a
+    // dwell-heavy stream (body-pose self-transition mass 0.72) the legacy
+    // per-tick windows are dwell runs — one plausible reason the picrawler-era
+    // seqgng never baked a motif.  Default false = byte-identical legacy.
+    bool         event_mode_               = false;
 
     // Phase 6.5.3.2 — optional context-stability gate.
     // When `context_topic_` is non-empty, the module subscribes to a
@@ -101,6 +108,8 @@ private:
     std::deque<float>         action_window_;
     int                       last_winner_id_   = -1;
     int                       current_motif_id_ = -1;
+    bool                      window_dirty_     = false;
+    long                      n_events_         = 0;
     int                       motif_phase_      = 0;
     int                       motif_length_     = 0;
     float                     match_confidence_ = 0.0f;
