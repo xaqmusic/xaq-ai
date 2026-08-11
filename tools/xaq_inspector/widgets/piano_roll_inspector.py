@@ -45,7 +45,21 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton,
                              QVBoxLayout, QWidget)
 
-_LEGS = ("FL", "FR", "RL", "RR")
+# ⚠ LEG NAMING MIRROR (diagnosed 2026-08-11 on this very widget): the body's
+# internal leg names are anatomically SWAPPED left↔right.  True forward is +Z
+# (eyes / corridor / fwd_v — picrawler_body.gd:3605), so body-left = +X; yet
+# leg 0 "fl" is built at x<0 — the anatomical FRONT-RIGHT.  Every config,
+# action topic, and historical per-leg finding uses the body frame
+# consistently, so tracks here are labelled by ANATOMY + the leg's sim COLOR
+# (the unambiguous identity the operator's eye matches), with the config-frame
+# name kept for cross-referencing.  Body leg order (= joints index order) is
+# unchanged: idx0 red, idx1 green, idx2 blue, idx3 yellow.
+_LEGS = (
+    {"anat": "FR", "cfg": "fl", "color": "#f23333", "cname": "red"},     # body idx 0
+    {"anat": "FL", "cfg": "fr", "color": "#33d933", "cname": "green"},   # body idx 1
+    {"anat": "RR", "cfg": "rl", "color": "#4d80f2", "cname": "blue"},    # body idx 2
+    {"anat": "RL", "cfg": "rr", "color": "#f2d933", "cname": "yellow"},  # body idx 3
+)
 _JOINTS = ("h1", "h2", "kn")
 # reality.proprio.joints layout: 4 hip1 + 4 hip2 + 4 knee → joint index = leg + 4*j
 _PAST_SHOW = 128          # ticks of past drawn (== planner ring size)
@@ -68,9 +82,11 @@ class _Track:
     """One joint's timeline: past curve, future mean (two authority segments),
     ±1σ fan, playhead, authority line, neutral line, stride ruler pool."""
 
-    def __init__(self, plot: pg.PlotItem, label: str):
+    def __init__(self, plot: pg.PlotItem, label: str, leg_color: str = "#dddddd"):
         self.plot = plot
-        plot.setLabel("left", label)
+        # label tinted the LEG'S SIM COLOR — the unambiguous identity the
+        # operator's eye matches against the 3-D view (see the _LEGS note)
+        plot.setLabel("left", label, color=leg_color)
         plot.getAxis("left").setStyle(showValues=False, tickLength=0)
         plot.getAxis("left").setWidth(44)
         plot.getAxis("left").enableAutoSIPrefix(False)
@@ -142,7 +158,9 @@ class PianoRollInspector(QWidget):
         self._title.setStyleSheet("color: #ddd; font-size: 11px;")
         header.addWidget(self._title, 1)
         self._leg_sel = QComboBox()
-        self._leg_sel.addItems(["All legs (12 tracks)"] + [f"{l} (3 tracks)" for l in _LEGS])
+        self._leg_sel.addItems(
+            ["All legs (12 tracks)"]
+            + [f"{l['anat']} — {l['cname']} (cfg {l['cfg']})" for l in _LEGS])
         self._leg_sel.currentIndexChanged.connect(self._rebuild_tracks)
         header.addWidget(self._leg_sel)
         self._fit_btn = QPushButton("Auto-fit")
@@ -179,14 +197,16 @@ class PianoRollInspector(QWidget):
         self._refresh.start()
 
     # ------------------------------------------------------------------
-    def _joint_rows(self) -> list[tuple[int, str]]:
-        """(joint_index, label) rows for the current leg selection, grouped by leg."""
+    def _joint_rows(self) -> list[tuple[int, str, str]]:
+        """(joint_index, label, leg_color) rows for the leg selection, grouped by leg.
+        Labels are ANATOMICAL and tinted the leg's sim color (see _LEGS note)."""
         sel = self._leg_sel.currentIndex()
         legs = range(4) if sel == 0 else [sel - 1]
         rows = []
         for leg in legs:
             for j, jn in enumerate(_JOINTS):
-                rows.append((leg + 4 * j, f"{_LEGS[leg]}·{jn}"))
+                rows.append((leg + 4 * j,
+                             f"{_LEGS[leg]['anat']}·{jn}", _LEGS[leg]["color"]))
         return rows
 
     def _rebuild_tracks(self) -> None:
@@ -194,13 +214,13 @@ class PianoRollInspector(QWidget):
         self._tracks = []
         rows = self._joint_rows()
         first_plot = None
-        for i, (jidx, label) in enumerate(rows):
+        for i, (jidx, label, color) in enumerate(rows):
             plot = self._view.addPlot(row=i, col=0)
             if i < len(rows) - 1:
                 plot.getAxis("bottom").setStyle(showValues=False, tickLength=0)
             else:
                 plot.setLabel("bottom", "ticks relative to now")
-            self._tracks.append((jidx, _Track(plot, label)))
+            self._tracks.append((jidx, _Track(plot, label, color)))
             # the time axis is ONE axis: zooming any track zooms them all
             if first_plot is None:
                 first_plot = plot
@@ -350,7 +370,7 @@ class PianoRollInspector(QWidget):
             lo, hi = int(joint_band[2 * jidx]), int(joint_band[2 * jidx + 1])
             return f"{lo}-{hi}" if hi > 0 else "·"
         jgrid = "  ".join(
-            f"{_LEGS[leg]} " + "/".join(_band_str(leg + 4 * j) for j in range(3))
+            f"{_LEGS[leg]['anat']} " + "/".join(_band_str(leg + 4 * j) for j in range(3))
             for leg in range(4)) if len(joint_band) >= 24 else "—"
         self._readout.setText(
             f"  stride ≈ {period:.0f} ticks   n_obs {int(snap.get('n_obs', 0))}   "
@@ -360,4 +380,7 @@ class PianoRollInspector(QWidget):
             f"  per-joint authority BANDS (h1/h2/kn, ticks):  {jgrid}\n"
             f"  dashed gold = whole-body token authority (from t0); amber band + "
             f"bright segment = depths where that JOINT's decoded marginal beats "
-            f"hold-pose by ≥5%.")
+            f"hold-pose by ≥5%.\n"
+            f"  labels are ANATOMICAL (leg-colored); body/config frame is "
+            f"mirrored L↔R: FR=cfg'fl'·red  FL=cfg'fr'·green  RR=cfg'rl'·blue  "
+            f"RL=cfg'rr'·yellow.")

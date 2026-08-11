@@ -793,3 +793,21 @@ track's amber authority band with the bright segment inside it; global dashed
 line unchanged. **Re-use context for M1: refinement/masking experiments should
 be scored per-joint in the band, where verified material exists — h2 tracks
 and k<5 are reflex territory on this vocabulary.**
+
+**2026-08-11 — the LEG-NAMING MIRROR (operator-diagnosed on the roll).** With
+per-tick motor traces beside the 3-D view for the first time, the operator saw
+the red leg lift while the widget said FL. Geometry confirms: true forward is
++Z (eyes / corridor / fwd_v), so body-left = +X — yet leg 0 "fl" (red) is
+built at x<0, the anatomical FRONT-RIGHT. The names were assigned in the
+default-camera screen frame (the mirror illusion of labelling a body that
+faces you). The frame is used CONSISTENTLY end-to-end — every action topic,
+config, event, instrument, and historical per-leg finding ("fl brakes 2.5×" =
+the red = anatomical front-RIGHT leg) — so the record is coherent and the
+mirror is behaviorally null in sim. Fixes: the roll now labels tracks by
+ANATOMY tinted the leg's sim color (cfg name kept for cross-reference); loud
+warnings at LEG_NAMES in the body script (do NOT rename piecemeal — the blast
+radius is every config + topic + ledger history) and in the sim2real port doc,
+where the servo map MUST be written by anatomy, not by name. Instrument
+payoff: this is exactly the class of defect the piano roll exists to catch —
+invisible to every aggregate metric, obvious the moment motor output sits
+beside the body.

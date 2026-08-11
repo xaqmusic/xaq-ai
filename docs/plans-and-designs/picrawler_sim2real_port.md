@@ -66,6 +66,28 @@ Reference plane: **hip2 axis, y = 0.** Operator-measured 2026-08-10 unless noted
 | knee mobility | **full 180°** — folds into the leg structure |
 | min chassis clearance | **9 mm** — knee folded tight, hip2 vertical ⇒ toe at **−28 mm** |
 
+### ⚠ The leg-naming mirror — MUST be resolved at the servo map
+
+**Operator-diagnosed 2026-08-11 on the piano roll** (the first instrument to
+put per-leg motor traces beside the 3-D view): the sim body's internal leg
+names are anatomically **swapped left↔right**. True forward is +Z (eyes /
+corridor / fwd_v), so body-left = +X — yet leg 0 "fl" is built at x<0, the
+anatomical FRONT-RIGHT (names were assigned in the default-camera screen
+frame: the mirror illusion of labelling a body that faces you). The frame is
+used *consistently* by every action topic, config, event, instrument, and
+per-leg finding — "fl" = red = anatomical FR throughout history — so the sim
+record is coherent and the mirror is behaviorally null **in sim**.
+
+**At the port it is not null.** The servo map (Phase 4) must pin each
+`action.<leg>_<joint>` topic to a PHYSICAL servo channel; mapping "fl" to the
+real robot's front-left servo would mirror the learned gait across the body.
+The map must be written **by anatomy, not by name**: `action.fl_*` → the
+real FRONT-RIGHT leg's servos (and likewise fr→FL, rl→RR, rr→RL), with the
+calibration colors as the cross-check (red leg = the one "fl" drives).
+Decide at that point whether to do the full rename (topics + configs +
+ledger annotation) or keep the body frame and carry this mapping note — but
+never both halves of each.
+
 ### Validation gates — checks, not A/Bs
 
 Constraints the measurements *impose*, independently checkable in sim. **If one fails, the model

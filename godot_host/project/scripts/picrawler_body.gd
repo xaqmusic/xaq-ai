@@ -321,9 +321,22 @@ const NEUTRAL_HEADINGS: Array = [
 	Vector3(+0.7071, 0.0, -0.7071),   # RR: +X -Z
 ]
 const LEG_NAMES: Array = ["fl", "fr", "rl", "rr"]
+# ⚠⚠ LEG NAMING MIRROR (operator-diagnosed 2026-08-11 on the piano roll).
+# These names are anatomically SWAPPED left↔right: the body's TRUE forward is
+# +Z (eyes / corridor / fwd_v — see the corridor-gym note ~:3605), so body-left
+# = +X — yet leg 0 "fl" is BUILT at x<0, the anatomical FRONT-RIGHT (the names
+# were assigned in the default-camera screen frame, the classic mirror illusion
+# of labelling a body that faces you).  Every action topic, config, event name,
+# instrument, and historical per-leg finding uses THIS body frame consistently
+# ("fl" = red = anatomical FR), so the record is coherent and the mirror is
+# behaviorally null — DO NOT rename piecemeal; the blast radius is every config
+# + topic + the ledger's per-leg history.  MUST be resolved deliberately at the
+# sim2real port boundary (the real robot's servo map): see
+# docs/plans-and-designs/picrawler_sim2real_port.md.
 # Per-leg color so each leg is visually distinguishable during calibration
 # (lets the user identify which leg has e.g. a reversed servo direction).
-# Robotics convention: FL=red, FR=green, RL=blue, RR=yellow.
+# Robotics convention was INTENDED as FL=red … but see the mirror note: red is
+# the anatomical FRONT-RIGHT.
 const LEG_COLORS: Array = [
 	Color(0.95, 0.20, 0.20, 1.0),   # FL (front-left)  red
 	Color(0.20, 0.85, 0.20, 1.0),   # FR (front-right) green
