@@ -10130,6 +10130,26 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["brt_plv"]    = snappedf(float(_bm.get("lock_plv", 0.0)), 0.001)
 			line["brt_err"]    = snappedf(float(_bm.get("lock_err_ema", -1.0)), 0.001)
 			line["brt_period"] = snappedf(float(_bm.get("period_est", 0.0)), 0.01)
+	# 2026-08-10 (PART III / M0.b) — MotorPlanner probability-cone mirror.  The planner's
+	# accumulators are RUNNING MEANS over the whole run, so any diag-cadence line carries
+	# the cumulative per-depth verification scores; the last line is the run's verdict.
+	# Absent module → no key (zero cost on non-planner configs).
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _ps = JSON.parse_string(str(brain.get_module_snapshot("motor_planner")))
+		if _ps is Dictionary and _ps.has("module"):
+			var _pmod = _ps["module"]
+			line["plan"] = {
+				"d":   _pmod.get("probe_depths", []),
+				"t1":  _pmod.get("cone_top1", []),
+				"tk":  _pmod.get("cone_topk", []),
+				"ms":  _pmod.get("cone_mass", []),
+				"en":  _pmod.get("cone_entropy", []),
+				"n":   _pmod.get("cone_n", []),
+				"mg":  _pmod.get("marg_top1", 0.0),
+				"obs": _pmod.get("n_obs", 0),
+				"mk":  _pmod.get("masked_out", 0),
+				"mm":  _pmod.get("mask_mode", 0.0),
+			}
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):

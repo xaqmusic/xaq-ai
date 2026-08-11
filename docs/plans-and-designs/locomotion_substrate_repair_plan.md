@@ -685,3 +685,60 @@ transition scoring on the SAME banked streams (offline — P(next | token, CPG-p
 bin) needs the cpg field joined per tick), then a conditioned vocabulary arm
 (centred input, phase context) if the offline read demands it. The gate re-runs
 before any MotorPlanner code.**
+
+**2026-08-10 — M0.b: the planner AS the instrument (operator pivot), and a §3.2
+catch.** The operator redirected M0.b from offline scoring to building the
+MotorPlanner itself as a zero-authority shadow — "reflexes write the t0 row, EPMs
+write the tN rows; analyze the probability cone this produces." Built:
+`MotorPlanner` (cpp_core), no bus outputs, learns P(next | token, phase_bin) online,
+rolls the cone each tick from the t0 row with phase advance φ+n·ω, verifies itself
+at probe depths {1,3,5,8,13,21,34} against the arriving future; `plan` mirror in the
+body log; `conescore.py` reads it with a per-depth PERSISTENCE baseline from the
+same run's `bp_win` stream. Protocol = M0 (arena, 12k, seeds 1–4, per-tick diag),
+conditioning on `rhythm.body.gait`, mask off. **Full-run table (n=4): top1 beats
+persistence at k=5–21 (lift 1.2–1.6, peak k=13) and marginal 2–2.7× throughout —
+but this is a FIRST-HALF ARTIFACT.** Warm-model cut (second half only, per-seed
+lift vs second-half persistence): k=5 **0.96±0.09**, k=13 1.21±0.51, k=21
+0.78±0.15 — the conditioned cone equals persistence once warm. §3.2 check found
+the cause before the verdict: **the conditioning variable was noise** —
+`brt_plv` on these very runs is 0.02–0.10 (the BodyRhythmTracker never locks on
+V3 BASE), so the 8 phase bins fragment the transition counts without carrying
+signal, and the cone's no-data fallback (hold state) degrades it to persistence.
+**Verdict: NULL against a broken reference — a measurement outcome, not a verdict
+on phase conditioning.** The masking arm was NOT run on this reference (masking on
+noise affinity would measure nothing). ⇒ **M0.c: same protocol, conditioning
+swapped to `rhythm.cpg.body` — the CPG clock, the phase context measured
+load-bearing for the controller itself (§0 rule 3). Planner now accepts 2-D
+[cos,sin] clocks and self-estimates ω from the clock's own advance.**
+
+**2026-08-10 — M0.c + masking experiment #1: the vocabulary is the limit,
+confirmed three ways on a perfectly controlled A/B.** The planner is shadow (zero
+authority), so same-seed arms have BIT-IDENTICAL token streams (verified: `bp_win`
+sequences equal across all arms) — every cone delta is the planner-side variable
+alone. Three results, n=4 each, arena 12k:
+(1) **Conditioning reference is irrelevant.** CPG-clock conditioning (M0.c)
+reproduces the brt-conditioned table to the third decimal (top1@13 0.108 both;
+@34 0.084 vs 0.082). Whatever phase either reference carries, the transition
+model can't use it.
+(2) **The beam holds no structure past dwell + frequency.** Cone reality-in-beam
+at k=21–34 is 0.34–0.38 — statistically the STATIC most-frequent-12 beam (marginal
+top-12 mass 0.396). The dynamic cone buys nothing over a frequency table at
+stride scale (body period ≈ 70 ticks; k=34 ≈ half a stride).
+(3) **Phase-affinity masking (mode 1, floor 0.02) DAMAGES the cone.** Consumer
+fired hard (masked_out 13k–39k/run), yet top1 falls at every depth (0.211 vs
+0.234 @5; 0.069 vs 0.084 @34), assigned mass falls, and ~12% of probe rows empty
+out entirely. Token↔clock-bin affinity is too weak to gate on — the mask removes
+reality, not noise. Same root cause as (1).
+**Verdict: the MASKING INTERFACE is WORKING (built, consumer-verified, measures
+controlled deltas — the operator's E/I method now exists as an instrument); the
+phase-affinity mask ON THIS VOCABULARY is a REGRESSION; the tick-level cone on
+the current body-pose tokens is refuted as planning material — persistence-
+equivalent argmax (warm-model lift ≈ 1.0), frequency-equivalent beam.
+Re-use context: any mask/conditioning retry needs tokens that actually carve the
+stride.** Two candidate fixes, in tension order: **(b) event-space cone** —
+planner rows advance per token-CHANGE event instead of per tick (M0 measured the
+only real structure anywhere in this stream: next-event 3.9× chance), planner-side
+change only; **(a) conditioned vocabulary** — centre the tuck common-mode out of
+the 12-D input and give the observer EPM phase context (§0 rules 2+3; needs a
+conditioning bridge or an EPM input-conditioning extension — a substrate design
+decision). (b) is cheap and sharpens (a)'s requirement; (a) is the deeper fix.

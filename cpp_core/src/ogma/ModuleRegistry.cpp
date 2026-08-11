@@ -45,6 +45,7 @@
 #include "ogma/modules/JointSensorimotorBridge.hpp"
 #include "ogma/modules/PolicyChannelAggregator.hpp"
 #include "ogma/modules/CPGOscillator.hpp"
+#include "ogma/modules/MotorPlanner.hpp"
 #include "ogma/modules/MotorEPM.hpp"
 #include "ogma/modules/MotorEPMv2.hpp"
 #include "ogma/modules/PosturalPrior.hpp"
@@ -82,6 +83,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         // Order is irrelevant — the registry is by string.
         reg.register_type("NeurochemState",      [](){ return std::make_unique<NeurochemState>(); });
         reg.register_type("EPM",                 [](){ return std::make_unique<EPM>(); });
+        reg.register_type("MotorPlanner",        [](){ return std::make_unique<MotorPlanner>(); });
         reg.register_type("LateralVoter",        [](){ return std::make_unique<LateralVoter>(); });
         reg.register_type("HomeostaticDrive",    [](){ return std::make_unique<HomeostaticDrive>(); });
         reg.register_type("ActionDecoder",       [](){ return std::make_unique<ActionDecoder>(); });
