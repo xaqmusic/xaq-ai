@@ -886,6 +886,52 @@ config + launcher entry per convention; (5) `seqscore.py`; (6) range-probe
 pass for the dyn EPM's dim_min/max. KeyframeGait, GNGRollout, MotorRepertoire,
 ChunkAbort/OutcomeGate: untouched now, named as the M1/M2 assembly kit.
 
+**2026-08-11 — TWIN GATES RUN: both FAIL as built, both failures diagnosed as
+CONDITIONING — and a §3.2 harness catch on the way.** Build: SequenceGNG
+`event_mode` (default-0), `joints_dyn` [q, Δq] body stream, `body_pose_dyn`
+EPM (measured dim ranges), second planner, sg_*/bd_*/pland mirrors,
+`seqscore.py`; smoke-verified consumers + BIT-IDENTICAL bp_win stream vs
+M0.b (behavioral null confirmed). **The catch:** first collection showed the
+bodypose CONTROL cone's top1@1 collapsed 0.71→0.24 on an identical stream —
+the planner's learn context was `static thread_local`, shared by the twin
+config's TWO instances, cross-writing each other's transition tables. Fixed
+(members), rerun, control reproduced M0.c exactly (0.713). The control arm
+caught the bug; this is why the twin config keeps one.
+
+**GATE S0 — FAIL on this vocabulary (n=4, ~2.7k events/run).** Zero motifs
+baked (again — the RL-era signature, now WITH event mode), vocabulary runs
+to the 96-node cap in 4/4 seeds, match_conf 0.00, and the motif successor
+argmax scores 0.118 vs the flat first-order event chain's 0.175 — **lift
+0.67: the chunker is WORSE than the chain it must beat.** Diagnosis: (1)
+exact/near 4-gram recurrence is rare over a ~60–100-token vocabulary with
+GNG boundary jitter — the noisy tokens shred motif identity; (2) hash-window
+clustering treats all 4 positions equally, so windows differing in the LAST
+token cluster together — the successor is conditioned on a state blurrier
+than "last token" alone, structurally losing to the chain on noisy streams.
+**Verdict: NULL — sequence memory beyond first order is not extractable from
+THIS vocabulary by window clustering. Re-use context: retry after a
+vocabulary that passes M0.d-style dynamics checks, and/or with
+last-position-weighted or shorter windows.**
+
+**GATE M0.d — PARTIAL: the stream improves exactly as designed; the chain
+does not.** Stream-level (real, n=4): self-transition mass 0.72 → 0.55,
+dwell ~halved, vocab 51 → 109, and h2 joints begin earning authority bands
+in the dyn arm. But the cone over dyn tokens is no better than the bodypose
+control (top1/persistence ×0.90–1.08 shallow, ×0.56 at k=34), and the
+decisive planscore check — the UNCONDITIONED first-order chain, no phase-bin
+sparsity — shows dyn lift 0.94 (k=1) falling to 0.64 (k=10): **worse than
+persistence at every depth.** Diagnosis (§3.2 faithfulness): a weakened
+slice of the mechanism — single-tick Δq of a noisy servo stream is a poor
+velocity estimator, and the dq dims' RBF ranges (set from p1/p99 envelopes)
+leave the typical |Δq| crowded near zero. The phase-space idea is measured
+to do its structural job (self-intersection reduced); the VELOCITY ESTIMATE
+is the broken part. **Verdict: PARTIAL — retry with a smoothed velocity
+(EMA/boxcar over ~3–5 ticks, matching servo dynamics) and scale-adapted dq
+ranges before judging phase-space vocabularies. ⇒ M0.d.2.** Secondary notes:
+seed 3's dyn EPM hit the 200-node cap (raise for v2); the phase conditioning
+(bins=8) costs 8× count sparsity for a measured-zero gain — drop to the
+minimum in v2 arms.
+
 **2026-08-11 — the LEG-NAMING MIRROR (operator-diagnosed on the roll).** With
 per-tick motor traces beside the 3-D view for the first time, the operator saw
 the red leg lift while the widget said FL. Geometry confirms: true forward is
