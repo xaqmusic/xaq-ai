@@ -42,7 +42,8 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton,
+                             QVBoxLayout, QWidget)
 
 _LEGS = ("FL", "FR", "RL", "RR")
 _JOINTS = ("h1", "h2", "kn")
@@ -71,7 +72,9 @@ class _Track:
         plot.getAxis("left").setStyle(showValues=False, tickLength=0)
         plot.getAxis("left").setWidth(44)
         plot.getAxis("left").enableAutoSIPrefix(False)
-        plot.setMouseEnabled(x=False, y=False)
+        # wheel-zoom / drag-pan like the other graphs (pairs with slow-mo for
+        # detail work); Auto-fit yields to manual zoom and snaps back on click
+        plot.setMouseEnabled(x=True, y=True)
         plot.hideButtons()
         plot.setMenuEnabled(False)
 
@@ -127,6 +130,15 @@ class PianoRollInspector(QWidget):
         self._leg_sel.addItems(["All legs (12 tracks)"] + [f"{l} (3 tracks)" for l in _LEGS])
         self._leg_sel.currentIndexChanged.connect(self._rebuild_tracks)
         header.addWidget(self._leg_sel)
+        self._fit_btn = QPushButton("Auto-fit")
+        self._fit_btn.setCheckable(True)
+        self._fit_btn.setChecked(True)
+        self._fit_btn.setToolTip(
+            "Checked: the view follows the data (adaptive per-track ranging, "
+            "centred playhead).  Wheel-zoom or drag any track to take manual "
+            "control (time axis stays linked across tracks); click to snap back.")
+        self._fit_btn.toggled.connect(self._on_fit_toggled)
+        header.addWidget(self._fit_btn)
         layout.addLayout(header)
 
         self._view = pg.GraphicsLayoutWidget()
@@ -142,6 +154,7 @@ class PianoRollInspector(QWidget):
         self._tracks: list[tuple[int, _Track]] = []   # (joint_index, track)
         self._latest: dict | None = None
         self._dirty = False
+        self._auto_view = True
         self._rebuild_tracks()
 
         self._refresh = QTimer(self)
@@ -164,6 +177,7 @@ class PianoRollInspector(QWidget):
         self._view.clear()
         self._tracks = []
         rows = self._joint_rows()
+        first_plot = None
         for i, (jidx, label) in enumerate(rows):
             plot = self._view.addPlot(row=i, col=0)
             if i < len(rows) - 1:
@@ -171,7 +185,22 @@ class PianoRollInspector(QWidget):
             else:
                 plot.setLabel("bottom", "ticks relative to now")
             self._tracks.append((jidx, _Track(plot, label)))
+            # the time axis is ONE axis: zooming any track zooms them all
+            if first_plot is None:
+                first_plot = plot
+            else:
+                plot.setXLink(first_plot)
+            plot.vb.sigRangeChangedManually.connect(self._on_manual_zoom)
         self._dirty = True
+
+    def _on_manual_zoom(self, *_a) -> None:
+        if self._auto_view:
+            self._fit_btn.setChecked(False)   # toggled() flips _auto_view
+
+    def _on_fit_toggled(self, checked: bool) -> None:
+        self._auto_view = checked
+        if checked:
+            self._dirty = True                # snap back on next flush
 
     # ------------------------------------------------------------------
     def update_payload(self, tick_id: int, snapshot: dict | None = None) -> None:
@@ -253,22 +282,24 @@ class PianoRollInspector(QWidget):
                     ln.setVisible(True)
                 else:
                     ln.setVisible(False)
-            tr.plot.setXRange(-half_w, half_w, padding=0)
-            # adaptive y-range: fit the data band (past + fan), smoothed so the
-            # view breathes instead of jittering; min span guards flat joints.
-            vals = [past[:, jidx]]
-            if roll_len:
-                vals += [rm[:, jidx] + rs[:, jidx], rm[:, jidx] - rs[:, jidx]]
-            allv = np.concatenate(vals)
-            lo, hi = float(allv.min()), float(allv.max())
-            pad = max(0.18 * (hi - lo), 0.04)
-            lo, hi = lo - pad, hi + pad
-            if tr.ylo is None:
-                tr.ylo, tr.yhi = lo, hi
-            else:
-                tr.ylo += 0.3 * (lo - tr.ylo)
-                tr.yhi += 0.3 * (hi - tr.yhi)
-            tr.plot.setYRange(tr.ylo, tr.yhi, padding=0)
+            if self._auto_view:
+                tr.plot.setXRange(-half_w, half_w, padding=0)
+                # adaptive y-range: fit the data band (past + fan), smoothed so
+                # the view breathes instead of jittering; min span guards flat
+                # joints.  Manual zoom suspends all of this until Auto-fit.
+                vals = [past[:, jidx]]
+                if roll_len:
+                    vals += [rm[:, jidx] + rs[:, jidx], rm[:, jidx] - rs[:, jidx]]
+                allv = np.concatenate(vals)
+                lo, hi = float(allv.min()), float(allv.max())
+                pad = max(0.18 * (hi - lo), 0.04)
+                lo, hi = lo - pad, hi + pad
+                if tr.ylo is None:
+                    tr.ylo, tr.yhi = lo, hi
+                else:
+                    tr.ylo += 0.3 * (lo - tr.ylo)
+                    tr.yhi += 0.3 * (hi - tr.yhi)
+                tr.plot.setYRange(tr.ylo, tr.yhi, padding=0)
 
         # readout: the earned-authority story in numbers
         depths = snap.get("probe_depths", [])
