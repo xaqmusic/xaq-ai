@@ -969,6 +969,30 @@ prediction substrate the refinement/masking loops operate on, with the
 authority bands as the earned-confidence gate, and drop the requirement
 that a symbolic chain must first beat persistence.
 
+**2026-08-11 — M1 SUBSTRATE PIVOT (operator decision) + CONTINUOUS MASKING
+with the three-layer debugging view.** Operator, after the token-chain
+chapter closed: "the approach needs to be entirely fresh, and the new joint
+piano roll is going to be the substrate on which we can excite and inhibit
+future motions" — with a hard debugging requirement: the widget must show
+the ORIGINAL motion, the MASK applied, and the FINAL motion. Built:
+`mask_mode=2` — continuous region inhibition ON THE ROLL: token mass whose
+READOUT pose falls in [val_lo,val_hi] on the masked joint (or all) at cone
+depths [depth_lo,depth_hi] is suppressed by mask_strength, and because the
+mask reroutes the ROW itself, suppression propagates into every deeper row.
+Dual decode (raw pre-mask + final) and dual verification (per-depth
+masked-vs-raw |err| = the inhibition damage/benefit meter); raw roll ships
+only while suppressing. Widget: dashed ghost + faint fan (original),
+magenta region rect (the mask), bright layers (final). All params inert by
+default (gain-0). **Demo arm `__mask2` verified live** (inhibit FR-knee
+rest [0.7,1.05] at depths 8–21 — "don't be at rest a quarter-stride out"):
+255k suppressions, divergence localized to the mask window, damage meter
+honest (+14% err at k=8 — the body DOES rest there), and the reroute
+visible ACROSS joints — masking one joint moves its correlated partners
+through the whole-body mixture, which is precisely the debugging visibility
+the contract demanded. The E/I loop now has its full instrument: excite =
+the decoded roll, inhibit = region masks, verify = the banded per-joint
+error meters.**
+
 **2026-08-11 — the LEG-NAMING MIRROR (operator-diagnosed on the roll).** With
 per-tick motor traces beside the 3-D view for the first time, the operator saw
 the red leg lift while the widget said FL. Geometry confirms: true forward is
