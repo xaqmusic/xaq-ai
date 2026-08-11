@@ -72,9 +72,12 @@ class _Track:
         plot.getAxis("left").setStyle(showValues=False, tickLength=0)
         plot.getAxis("left").setWidth(44)
         plot.getAxis("left").enableAutoSIPrefix(False)
-        # wheel-zoom / drag-pan like the other graphs (pairs with slow-mo for
-        # detail work); Auto-fit yields to manual zoom and snaps back on click
-        plot.setMouseEnabled(x=True, y=True)
+        # wheel-zoom / drag-pan on the TIME axis only — the x-link makes every
+        # gesture a whole-roll gesture.  y is never mouse-driven: each track's
+        # vertical scale auto-fits the VISIBLE time window every flush, so
+        # zooming into time magnifies vertical detail uniformly on all tracks
+        # (per-axis wheel zoom on the hovered track was the inconsistency).
+        plot.setMouseEnabled(x=True, y=False)
         plot.hideButtons()
         plot.setMenuEnabled(False)
 
@@ -134,9 +137,10 @@ class PianoRollInspector(QWidget):
         self._fit_btn.setCheckable(True)
         self._fit_btn.setChecked(True)
         self._fit_btn.setToolTip(
-            "Checked: the view follows the data (adaptive per-track ranging, "
-            "centred playhead).  Wheel-zoom or drag any track to take manual "
-            "control (time axis stays linked across tracks); click to snap back.")
+            "Checked: the time window follows the data (centred playhead). "
+            "Wheel-zoom or drag any track to take manual control of the time "
+            "axis — all tracks move together, and each track's vertical scale "
+            "always auto-fits the visible window.  Click to snap back.")
         self._fit_btn.toggled.connect(self._on_fit_toggled)
         header.addWidget(self._fit_btn)
         layout.addLayout(header)
@@ -284,13 +288,19 @@ class PianoRollInspector(QWidget):
                     ln.setVisible(False)
             if self._auto_view:
                 tr.plot.setXRange(-half_w, half_w, padding=0)
-                # adaptive y-range: fit the data band (past + fan), smoothed so
-                # the view breathes instead of jittering; min span guards flat
-                # joints.  Manual zoom suspends all of this until Auto-fit.
-                vals = [past[:, jidx]]
-                if roll_len:
-                    vals += [rm[:, jidx] + rs[:, jidx], rm[:, jidx] - rs[:, jidx]]
-                allv = np.concatenate(vals)
+                xlo, xhi = -half_w, half_w
+            else:
+                xlo, xhi = tr.plot.vb.viewRange()[0]
+            # y ALWAYS auto-fits the data inside the VISIBLE time window,
+            # smoothed so the view breathes instead of jittering; min span
+            # guards flat joints.  Zooming time thus magnifies vertical detail
+            # uniformly across tracks — y is never mouse-driven.
+            vals = [past[(px >= xlo) & (px <= xhi), jidx]]
+            if roll_len:
+                fm = (fx >= xlo) & (fx <= xhi)
+                vals += [rm[fm, jidx] + rs[fm, jidx], rm[fm, jidx] - rs[fm, jidx]]
+            allv = np.concatenate([v for v in vals if v.size])
+            if allv.size:
                 lo, hi = float(allv.min()), float(allv.max())
                 pad = max(0.18 * (hi - lo), 0.04)
                 lo, hi = lo - pad, hi + pad
