@@ -96,7 +96,7 @@ class _Track:
         plot.addItem(self.playhead)
         self.authority = pg.InfiniteLine(
             pos=0.0, angle=90,
-            pen=pg.mkPen(_C_AUTHORITY, width=1, style=Qt.PenStyle.DashLine))
+            pen=pg.mkPen(_C_AUTHORITY, width=2, style=Qt.PenStyle.DashLine))
         plot.addItem(self.authority)
         self.neutral = pg.InfiniteLine(
             pos=0.0, angle=0,
@@ -275,8 +275,11 @@ class PianoRollInspector(QWidget):
             else:
                 for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim):
                     c.setData([], [])
+            # ALWAYS drawn: at authority 0 the gold line sits collapsed ON the
+            # playhead — "the planner's authority ends at the present" — and
+            # visibly detaches rightward as authority is earned.  (Hiding it at
+            # 0 made honest-zero indistinguishable from a broken feature.)
             tr.authority.setPos(float(authority))
-            tr.authority.setVisible(authority > 0)
             tr.rest_ema = actual_now if tr.rest_ema is None else \
                 tr.rest_ema + 0.02 * (actual_now - tr.rest_ema)
             tr.neutral.setPos(tr.rest_ema)
