@@ -50,9 +50,10 @@ _JOINTS = ("h1", "h2", "kn")
 _PAST_SHOW = 128          # ticks of past drawn (== planner ring size)
 
 _C_PAST      = (205, 205, 210)
-_C_FUT_AUTH  = (100, 170, 255)
-_C_FUT_DIM   = (100, 170, 255, 80)
-_C_FAN       = (100, 170, 255, 42)
+_C_FUT_AUTH  = (130, 200, 255)        # earned-authority segment: bright, wide
+_C_FUT_DIM   = (130, 200, 255, 175)   # unearned segment: same hue, clearly visible,
+                                      # distinguished by width/solidity not invisibility
+_C_FAN       = (120, 190, 255, 70)
 _C_PLAYHEAD  = (255, 95, 85)
 _C_AUTHORITY = (255, 205, 95)
 _C_NEUTRAL   = (130, 130, 135, 110)
@@ -81,8 +82,8 @@ class _Track:
         self.fan = pg.FillBetweenItem(self.fan_hi, self.fan_lo,
                                       brush=pg.mkBrush(_C_FAN))
         plot.addItem(self.fan)
-        self.fut_auth = plot.plot(pen=pg.mkPen(_C_FUT_AUTH, width=2))
-        self.fut_dim = plot.plot(pen=pg.mkPen(_C_FUT_DIM, width=1))
+        self.fut_auth = plot.plot(pen=pg.mkPen(_C_FUT_AUTH, width=2.5))
+        self.fut_dim = plot.plot(pen=pg.mkPen(_C_FUT_DIM, width=1.5))
 
         self.playhead = pg.InfiniteLine(pos=0.0, angle=90,
                                         pen=pg.mkPen(_C_PLAYHEAD, width=2))
@@ -208,33 +209,41 @@ class PianoRollInspector(QWidget):
 
         px = np.arange(-past.shape[0] + 1, 1)          # past ends AT the playhead
         fx = np.arange(1, roll_len + 1)
+        # symmetric window, t0 dead centre — the cone's SPREAD is the object of
+        # analysis, so the future half gets equal billing (and headroom beyond
+        # the current horizon, which will grow).
+        half_w = min(_PAST_SHOW, max(64, horizon + 8))
         # stride ruler: phase-zero crossings at n0 + m·period, spanning the view
         stride_xs = []
         if period > 0:
             n0 = ((2.0 * np.pi - phi) % (2.0 * np.pi)) / omega
-            m0 = int(np.ceil((-_PAST_SHOW - n0) / period))
+            m0 = int(np.ceil((-half_w - n0) / period))
             x = n0 + m0 * period
-            while x <= horizon and len(stride_xs) < _MAX_STRIDE_LINES:
+            while x <= half_w and len(stride_xs) < _MAX_STRIDE_LINES:
                 stride_xs.append(x)
                 x += period
 
         for jidx, tr in self._tracks:
             tr.past.setData(px, past[:, jidx])
+            actual_now = float(past[-1, jidx])
             if roll_len:
-                mean = rm[:, jidx]
-                sd = rs[:, jidx]
-                tr.fan_hi.setData(fx, mean + sd)
-                tr.fan_lo.setData(fx, mean - sd)
+                # anchor the cone AT the playhead: it opens from the actual
+                # present pose with σ=0 — the immutable point every future
+                # fans out of.
+                mean = np.concatenate(([actual_now], rm[:, jidx]))
+                sd = np.concatenate(([0.0], rs[:, jidx]))
+                xs = np.concatenate(([0], fx))
+                tr.fan_hi.setData(xs, mean + sd)
+                tr.fan_lo.setData(xs, mean - sd)
                 a = min(authority, roll_len)
-                # saturated segment [1..a] (incl. joining point), washed [a..end]
-                tr.fut_auth.setData(fx[:a], mean[:a])
-                tr.fut_dim.setData(fx[max(a - 1, 0):], mean[max(a - 1, 0):])
+                # saturated segment [t0..a], washed [a..end] (shared joint point)
+                tr.fut_auth.setData(xs[:a + 1], mean[:a + 1])
+                tr.fut_dim.setData(xs[a:], mean[a:])
             else:
                 for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim):
                     c.setData([], [])
             tr.authority.setPos(float(authority))
             tr.authority.setVisible(authority > 0)
-            actual_now = float(past[-1, jidx])
             tr.rest_ema = actual_now if tr.rest_ema is None else \
                 tr.rest_ema + 0.02 * (actual_now - tr.rest_ema)
             tr.neutral.setPos(tr.rest_ema)
@@ -244,7 +253,7 @@ class PianoRollInspector(QWidget):
                     ln.setVisible(True)
                 else:
                     ln.setVisible(False)
-            tr.plot.setXRange(-_PAST_SHOW, horizon, padding=0)
+            tr.plot.setXRange(-half_w, half_w, padding=0)
             # adaptive y-range: fit the data band (past + fan), smoothed so the
             # view breathes instead of jittering; min span guards flat joints.
             vals = [past[:, jidx]]
