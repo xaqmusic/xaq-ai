@@ -666,3 +666,22 @@ project's central claim, run on an honest substrate for the first time.
 - M1: cpp_core/src/ogma/modules/MotorPlanner.{cpp,hpp} (new module, bus-native);
   registry entry; config arm; body-log mirrors for plan diagnostics.
 - M2/M3: MotorEPMv2 objective-socket wiring only (existing pattern); no new paths.
+
+## PART III campaign log
+
+**2026-08-10 — M0: FAIL (the gate worked; no planner code gets written on this
+material).** Per-tick chain: self-transition mass 0.72 → the argmax model IS
+persistence (lift 1.00 at every k). Event space (dwell collapsed): real short-range
+structure — next-posture 3.9× chance — decaying below baseline by ~5 events. Beam
+(width 8, top-3 branching, the fairest read for a MASKED planner): truth-in-beam ≈
+chance by k=5; top-3 next-event coverage only 0.30. **Verdict: the 51-token
+unconditioned first-order material cannot support a stride-scale horizon.**
+DIAGNOSIS, two levels: (1) these observer EPMs were built WITHOUT phase context —
+§0's "feed it phase" rule, measured load-bearing for the controller, was never
+applied to the vocabulary; on a rhythmic body transitions are phase-dependent by
+construction. (2) Vocabulary conditioning never done: common mode (the tuck rest)
+uncentred (§0 rule 2), 51/200 nodes in use. ⇒ **M0.b (next): phase-conditioned
+transition scoring on the SAME banked streams (offline — P(next | token, CPG-phase
+bin) needs the cpg field joined per tick), then a conditioned vocabulary arm
+(centred input, phase context) if the offline read demands it. The gate re-runs
+before any MotorPlanner code.**
