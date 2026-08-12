@@ -5428,6 +5428,15 @@ func _input(event: InputEvent) -> void:
 		_vision_panel_on = not _vision_panel_on
 		_update_vision_panel()
 		print("PicrawlerBody: [N] vision_panel = %s" % _vision_panel_on)
+	elif key == KEY_O:
+		# 2026-08-12 — toggle the PLAN AUTHORITY bench (lever b): the reflex↔plan
+		# mix slider, the earned-bands gate override, and the live hand-mask
+		# controls.  Its own key because [M] is the MOTOR-EPM panel.
+		var pp: Node = get_tree().get_root().find_child("PlanAuthorityPanel", true, false)
+		if pp != null and pp is Control:
+			var pc := pp as Control
+			pc.visible = not pc.visible
+			print("PicrawlerBody: [O] plan_authority_panel = %s" % pc.visible)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):

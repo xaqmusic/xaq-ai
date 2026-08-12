@@ -128,6 +128,10 @@ func _ready() -> void:
 	offset_right = -12.0
 	offset_bottom = -12.0
 	mouse_filter = Control.MOUSE_FILTER_PASS
+	# 2026-08-12 (operator QoL) — boots HIDDEN: the panel is a tuning bench, not
+	# a monitor, and even collapsed its full-rect Control shadows the top-right
+	# corner.  [M] unhides it (picrawler_body KEY_M handler).
+	visible = false
 
 	var root := PanelContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

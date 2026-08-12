@@ -1198,7 +1198,7 @@ itself; +13% sub-σ is not an announcement). NOT PROMOTED: the operator's UI
 review is the promotion gate. What to WATCH live: does the gait visibly
 gain step-rhythm coherence; does arm-seed-2-style entrenchment appear (a
 stumble the pull then commits to); and the demo-with-teeth — hand-apply the
-FR-knee rest mask on [M] with the pull live: does inhibiting the predicted
+FR-knee rest mask on the [O] bench with the pull live: does inhibiting the predicted
 rest actually recruit an earlier FR step? Re-use context: plan_gain dose
 (0.05/0.2), plan_depth 13, and gating on the kept-mask-shaped vs raw roll
 are the untried axes; a (d)-style perturbation (drop the pull mid-run,

@@ -160,6 +160,12 @@ ParamSchema MotorPlanner::params_schema() const {
          "Distress level above which all plan weights go to 0 — reflexes own emergencies "
          "unconditionally (matches the panic_on convention).",
          ParamValue{0.5}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_gate_override", ParamMutability::HotMutable,
+         "OPERATOR SCAFFOLD (named as such — a diagnostic lesion, never an operating mode): "
+         "1 = publish weight 1 on ALL joints, bypassing the earned-bands gate, so the operator "
+         "can FEEL the difference between earned and unearned authority by hand (with the "
+         "consumer's plan_gain as the reflex↔plan mix).  The distress cut still applies.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
     };
 }
 
@@ -182,6 +188,7 @@ ParamMap MotorPlanner::current_params() const {
     m["plan_output_topics"] = std::vector<std::string>(plan_output_topics_);
     m["plan_publish"] = plan_publish_; m["plan_depth"] = plan_depth_;
     m["plan_distress_cut"] = plan_distress_cut_;
+    m["plan_gate_override"] = plan_gate_override_;
     return m;
 }
 
@@ -217,6 +224,7 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     plan_publish_       = pget(params, "plan_publish",      plan_publish_);
     plan_depth_         = pget(params, "plan_depth",        plan_depth_);
     plan_distress_cut_  = pget(params, "plan_distress_cut", plan_distress_cut_);
+    plan_gate_override_ = pget(params, "plan_gate_override", plan_gate_override_);
     // xorshift32 init: mix the (possibly OGMA_SEED-namespaced) seed, never zero
     rng_state_ = uint32_t(uint64_t(seed_) * 2654435761u ^ 0x9E3779B9u);
     if (rng_state_ == 0) rng_state_ = 0x1234567u;
@@ -294,6 +302,7 @@ void MotorPlanner::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "plan_publish")      plan_publish_      = d(plan_publish_);
     else if (k == "plan_depth")        plan_depth_        = d(plan_depth_);
     else if (k == "plan_distress_cut") plan_distress_cut_ = d(plan_distress_cut_);
+    else if (k == "plan_gate_override") plan_gate_override_ = d(plan_gate_override_);
 }
 
 int MotorPlanner::phase_bin(float phi) const {
@@ -640,10 +649,13 @@ void MotorPlanner::tick(uint64_t tick_id) {
         bool any_w = false;
         for (int j = 0; j < kJoints; ++j) {
             float w = 0.0f;
-            if (!cut && plan_pose_valid_ && pose_seen_ && slot >= 0
-                && acc_n_[slot] >= 200) {
-                double n = double(acc_n_[slot]);
-                if (acc_jerr_[slot][j] / n < 0.95 * (acc_jpers_[slot][j] / n)) w = 1.0f;
+            if (!cut && plan_pose_valid_ && pose_seen_) {
+                if (plan_gate_override_ >= 0.5) {
+                    w = 1.0f;      // operator scaffold: unearned authority, by hand
+                } else if (slot >= 0 && acc_n_[slot] >= 200) {
+                    double n = double(acc_n_[slot]);
+                    if (acc_jerr_[slot][j] / n < 0.95 * (acc_jpers_[slot][j] / n)) w = 1.0f;
+                }
             }
             plan_w_[j] = w;
             if (w > 0.0f) any_w = true;
@@ -982,6 +994,7 @@ nlohmann::json MotorPlanner::snapshot_state() const {
         for (int j = 0; j < kJoints; ++j) pw.push_back(plan_w_[j]);
         mod["plan_pub"] = {{"depth", int(plan_depth_)}, {"n", plan_published_},
                            {"w", std::move(pw)},
+                           {"override", plan_gate_override_ >= 0.5 ? 1 : 0},
                            {"distress", std::round(distress_ * 1000.0f) / 1000.0f}};
     }
     return nlohmann::json{{"version", 1}, {"module", mod}};

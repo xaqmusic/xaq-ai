@@ -131,6 +131,10 @@ private:
     double plan_publish_      = 0.0;    // 0 = shadow (no publications at all)
     double plan_depth_        = 8.0;    // must be a probe depth {1,3,5,8,13,21,34}
     double plan_distress_cut_ = 0.5;    // distress above this ⇒ all weights 0
+    double plan_gate_override_ = 0.0;   // OPERATOR SCAFFOLD: 1 = weights 1 on ALL
+                                        // joints, ignoring the earned bands — the
+                                        // "feel unearned authority" bench.  The
+                                        // distress cut still applies.
     std::vector<std::string> plan_output_topics_;   // 4 per-leg topics; empty = shadow
     std::string distress_topic_ = "reality.proprio.distress";
     float  distress_ = 0.0f;
