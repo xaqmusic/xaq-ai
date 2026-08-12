@@ -1010,3 +1010,143 @@ where the servo map MUST be written by anatomy, not by name. Instrument
 payoff: this is exactly the class of defect the piano roll exists to catch —
 invisible to every aggregate metric, obvious the moment motor output sits
 beside the body.
+
+**2026-08-11 — M1 MASK AUTHOR v1: the authoring slow loop BUILT and WORKING;
+per-joint inhibitory keep-rights are EARNABLE but seed-specific — plus a
+dual-cone fidelity fix and the demo-mask/band interaction explained.**
+
+*The operator's observation, diagnosed first.* On the live `__mask2` demo the
+confidence (authority-band) windows grow everywhere EXCEPT the front-right
+leg. Mechanism confirmed in code: the per-joint bands score the FINAL
+(post-mask) decode, the demo mask fights reality on that leg ("don't rest"
+where the body does rest — the recorded +14% @ k=8), and mode-2 rerouting
+moves the whole-body mixture, so all three FR tracks carry damaged final
+decodes and their bands stay pinned while unmasked legs grow. Expected;
+the meter is honest. (Design note kept: bands describe what the planner
+currently OUTPUTS — during inhibition experiments they will show the mask's
+cost, which is precisely their job as the earned-confidence gate.)
+
+*Fidelity fix (build prerequisite).* The old "raw" layer was decoded from the
+SAME cone pre-this-row's-mask, so past the first masked depth it inherited
+upstream rerouting — understating the mask's true effect (the demo's recorded
++14% @ k=8 stands: k=8 WAS its first masked depth). Now, while a region mask
+is live, a TRUE second unmasked cone propagates beside the final one:
+raw-vs-final is a genuine per-tick counterfactual at every depth, the ghost
+layer is honestly "the original motion" (operator contract), and — the point —
+the dual verification becomes a perfectly controlled within-run A/B: both
+decodes frozen at prediction time, scored against the same arriving reality.
+
+*The build (author_mode=1, all params inert by default — gain-0).* The M1
+slow loop that AUTHORS masks: per (probe, joint) it tracks the RAW decode's
+signed residual (Welford); each trial it proposes the cell with the strongest
+standardized residual t≥3 not yet tried (where the un-inhibited excitation
+systematically hallucinates), builds a one-sided slab from the past-ring
+envelope (μ + sign·[0.5σ, 3σ] — placed from the body's own running stats,
+§5), depth windows probe-to-probe within [5,34] (the ledger's re-use
+context: k<5/h2-near-field is reflex territory), with a random h1/knee-biased
+arm as fallback (never fired: the residual gradient always had a target).
+Trial = 800 ticks masked + 48 drain; judge on all probes ≥ the mask's first
+depth. Instruments: `author` block in snapshot/diag (phase/trial/cand/kept +
+`res_top` hallucination cells), body-log `plan.au` mirror, piano-roll AUTHOR
+readout (the magenta rect hops per trial — the search made visible),
+`authorscore.py`, config `__m1auth` + launcher entry. Consumer checks all
+fired (masked_out 136k–162k per run; trials 10/10/10/10 at n=4 × 12k arena,
+seeds 11–14).
+
+*v1.0 result — whole-body keep-gate (ratio_all < 0.95): NEAR-NULL, and the
+null is DIAGNOSTIC.* 40 trials judged, 1 kept (s11 j7 [-0.28,-0.10] d[6,8],
+r_all 0.943), no recurrence. Reconstructing all 40 trials: ratio_all sits
+0.96–1.14 (masks neutral-to-damaging at body altitude) while ratio_tgt shows
+loud repeated wins — s11 rt 0.86/0.86/0.88 (j6/j7), s13 rt 0.75/0.82/0.87
+(j1), s14 rt 0.82/0.84 (j5) — the 11 untargeted joints DILUTE the pooled
+ratio to ~1. The wrong altitude, exactly as the per-joint-verification entry
+predicted ("score per-joint in the band").
+
+*v1.1 — per-joint keep-gate (ratio_tgt < 0.95 AND ratio_all < 1.0, the
+no-damage guard): the author EARNS keep-rights.* Same seeds → bit-identical
+body streams and trials (masked_out equal to v1.0 per seed — the scoring
+change is the only variable; a free controlled comparison and a determinism
+check in one). Keeps: s11 4 masks (j6/j7 h2, d5–13, rt 0.855–0.933), s13
+4 masks (j1 h1, d5–34, rt 0.749–0.912), s12/s14 0 — s14's two loud target
+wins REJECTED by the guard (r_all 1.02–1.03: target wins, body pays; the
+demo-mask failure mode, now caught automatically). Class-level regularity:
+8/8 kept masks are guided, below-envelope slabs on slow joints — the raw
+decode systematically UNDER-predicts them (jump-to-mean), and inhibiting the
+low-side mass corrects it, verified out-of-sample. No cross-seed recurrence
+of specific regions: the residual field is seed-specific (each seed's gait
+settles a different attractor with different decode biases).
+
+**Verdict: the AUTHOR MECHANISM is WORKING (built, consumer-verified,
+deterministic, honest keeps/rejects including the guard) — the operator's
+E/I loop now has its authoring half as an instrument. The SEARCH RESULT is
+PARTIAL: per-joint inhibitory keep-rights are earnable on this vocabulary
+(2/4 seeds, rt 0.75–0.93 at n=800–4000 verdicts/keep), but what is earned is
+SEED-SPECIFIC MODEL-BIAS CORRECTION (below-envelope, slow-joint, guided —
+the class recurs; the regions do not), not yet a body-invariant inhibitory
+vocabulary. Re-use context / next rungs: (a) CLOSE THE LOOP — re-apply the
+kept set continuously after keeping and verify the final roll's per-joint
+bands WIDEN vs the no-author control (authority earned through the meters,
+the M1 contract); (b) class-level recurrence needs n≥20 before any "the
+decode under-predicts slow joints" finding; (c) the deeper fix remains
+vocabulary conditioning — a predictive-coding-conditioned EPM whose tokens
+are earned from predictive success would shrink the residual field the
+author is currently mopping up.** §3.2 notes: no tautology (all params new),
+consumers verified per seed, control = the same-seed v1.0/v1.1 identity,
+faithfulness = the true-counterfactual fix landed BEFORE any keep was
+recorded.
+
+**2026-08-12 — M1 RUNG (a): THE PREDICTION LOOP CLOSES — earned inhibition
+compounds into a measurably better operating roll (operator-directed:
+"close the loop and fully verify the instrumentation before lever (b)").**
+
+*Design.* `author_apply=1`: kept masks apply to the roll CONTINUOUSLY from
+the moment they are earned, in CHRONOLOGICAL keep order — each keep is
+judged marginally against its predecessors' composite, so keep order is the
+order in which validity was established (and the kept cap now STOPS new
+keeps rather than evicting: eviction would silently invalidate every later
+keep's judgment). Up to THREE cones per tick: FINAL (kept+candidate), BASE
+(kept only — the operating roll), RAW (unmasked). Candidates are judged
+MARGINALLY (final vs base) so they cannot inherit the kept set's credit;
+with the author on, the main verification and the authority bands score
+BASE, so bands measure the kept set, not trial churn (manual-mask configs
+keep their final-scored semantics). `jerr`/`jpers` tables now mirror into
+the body log (`je`/`jp`) — jband alone is thresholded and hides sub-0.95
+movement. Widget: faint steady rects = the earned set operating; bright
+hopping rect = the live trial. Control arm = same build, `author_apply=0`
+(`__m1auth_ctrl`, harness-only). Scorer: `authorab.py`.
+
+*Smoke regression (seed 11).* Pre-keep trials bit-match the prospector run
+(trial-7 keep identical: rt 0.8574); after the first keep the same j7
+candidate that scored rt 0.855 standalone scores rt 0.938 MARGINALLY — its
+correlated partner j6 was already kept and operating, so the candidate is
+credited only for what it adds. The credit-inheritance protection observed
+working on live data.
+
+*A/B (n=4 matched seeds × 12k, apply vs prospector, same build).*
+- s13 (kept at trials 1–2 → operating ~60% of the run): target-joint
+  operating-error ratio apply/control **0.881 @ k=21, 0.914 @ k=34**;
+  untargeted joints 0.987–1.000; band width 269 → 290 (**grew**).
+- s11 (kept at trials 7–8 → operating ~25% of the run): target ratios
+  0.973–0.983 from depth 5 outward (the d[5,5] masks propagate deeper);
+  untargeted 0.989–1.004; band width 198 → 185 (**dipped** — see caveat).
+- s12/s14 (no keeps): max |Δje| = 0.0000 — apply ≡ control exactly; the
+  three-cone plumbing is inert when idle (built-in null, clean).
+Benefit magnitude tracks keep-time coverage (cumulative accounting dilutes
+late keeps), matching the trial-time instantaneous ratios (0.75–0.94).
+
+**Verdict: WORKING — the M1 contract's rung (a) is met: masks EARN
+keep-rights through the meters and the earned set VERIFIABLY improves the
+operating roll where it acts, with clean nulls and no collateral damage.
+Caveats recorded: (1) s11's total band width dipped 6.5% — threshold
+crossings at diluted-cumulative altitude, not a measured harm (its je
+ratios improve); re-check with earlier warmup or longer runs before calling
+it real; (2) cumulative meters understate late keeps — a windowed
+(since-first-keep) accumulator is a v2 nicety; (3) global token authority
+stays 0 everywhere, as expected — the symbolic argmax is refuted material,
+the continuous marginals are the substrate. INSTRUMENTATION STATUS FOR (b):
+proposal → trial → marginal keep → apply → compound verified benefit is now
+a fully closed, self-auditing chain with built-in nulls. Lever (b) — first
+behavioral authority: the BASE roll's decode published as a weak, band-gated
+objective (reflexes keep t0, per-joint gate = the earned bands, gain-0
+guarded, ChunkAbort/OutcomeGate as recorded execution guards) — is cleared
+to build NEXT, with the operator watching the UI before any promotion.**

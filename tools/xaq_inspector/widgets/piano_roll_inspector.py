@@ -69,6 +69,7 @@ _C_RAW_GHOST = (150, 200, 255, 120)   # ORIGINAL (pre-mask) motion: dashed ghost
 _C_RAW_FAN   = (150, 200, 255, 28)
 _C_MASK      = (240, 80, 200, 46)     # the inhibited region
 _C_MASK_EDGE = (240, 80, 200, 170)
+_C_KEPT      = (240, 80, 200, 22)     # earned (kept) masks — steady, fainter
 _C_FUT_AUTH  = (130, 200, 255)        # earned-authority segment: bright, wide
 _C_FUT_DIM   = (130, 200, 255, 175)   # unearned segment: same hue, clearly visible,
                                       # distinguished by width/solidity not invisibility
@@ -128,6 +129,11 @@ class _Track:
         self.mask_rect.setZValue(-5)
         self.mask_rect.setVisible(False)
         plot.addItem(self.mask_rect)
+        # KEPT masks (author_apply): the earned, continuously-operating
+        # inhibitions — dimmer than the live candidate so the eye separates
+        # "what the author is trying" (bright magenta, hops per trial) from
+        # "what it has earned" (steady, faint).  Created lazily per track.
+        self.kept_rects: list = []
 
         self.playhead = pg.InfiniteLine(pos=0.0, angle=90,
                                         pen=pg.mkPen(_C_PLAYHEAD, width=2))
@@ -293,6 +299,8 @@ class PianoRollInspector(QWidget):
         rrs = np.asarray(snap.get("roll_raw_sd", []), dtype=float).reshape(-1, nj) \
             if mask_on and snap.get("roll_raw_sd") else None
         mspec = snap.get("mask_spec")
+        au_snap = snap.get("author") or {}
+        kept_specs = au_snap.get("kept", []) if int(au_snap.get("apply", 0)) else []
         authority = int(snap.get("authority_depth", 0))
         joint_band = snap.get("joint_band", [0, 0] * nj)
         phi = float(snap.get("phi", 0.0))
@@ -362,6 +370,22 @@ class PianoRollInspector(QWidget):
                         tr.mask_rect.setVisible(False)
                 else:
                     tr.mask_rect.setVisible(False)
+                # KEPT masks operating on this track (author_apply=1): steady
+                # faint rects under the candidate's bright one
+                kept_here = [k for k in kept_specs if int(k.get("j", -1)) == jidx]
+                while len(tr.kept_rects) < len(kept_here):
+                    r = pg.QtWidgets.QGraphicsRectItem()
+                    r.setPen(pg.mkPen(_C_MASK_EDGE, width=1, style=Qt.PenStyle.DotLine))
+                    r.setBrush(pg.mkBrush(_C_KEPT))
+                    r.setZValue(-6)
+                    tr.plot.addItem(r)
+                    tr.kept_rects.append(r)
+                for r, k in zip(tr.kept_rects, kept_here):
+                    y0, y1 = float(k["lo"]), float(k["hi"])
+                    r.setRect(float(k["dlo"]), y0, float(k["dhi"]) - float(k["dlo"]), y1 - y0)
+                    r.setVisible(True)
+                for r in tr.kept_rects[len(kept_here):]:
+                    r.setVisible(False)
             else:
                 for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim):
                     c.setData([], [])
@@ -421,6 +445,34 @@ class PianoRollInspector(QWidget):
         jgrid = "  ".join(
             f"{_LEGS[leg]['anat']} " + "/".join(_band_str(leg + 4 * j) for j in range(3))
             for leg in range(4)) if len(joint_band) >= 24 else "—"
+        # M1 mask AUTHOR status (absent unless author_mode=1): the trial loop's
+        # live state + the earned (kept) mask set.  Kept masks are RECORDED
+        # keep-rights, not currently applied to the roll (v1 is a prospector).
+        author_txt = ""
+        au = snap.get("author")
+        if isinstance(au, dict):
+            phase = {0: "warmup", 1: "TRIAL", 2: "drain"}.get(int(au.get("phase", 0)), "?")
+            cand = au.get("cand") or {}
+            cand_s = (f"j{cand.get('j')} [{cand.get('lo'):.2f},{cand.get('hi'):.2f}] "
+                      f"d[{cand.get('dlo')},{cand.get('dhi')}]"
+                      + (" guided" if cand.get("guided") else " random")) if cand else "—"
+            kept = au.get("kept", [])
+            kept_s = "  ".join(
+                f"j{k['j']}[{k['lo']:.2f},{k['hi']:.2f}]d[{k['dlo']},{k['dhi']}]r={k['r']:.3f}"
+                for k in kept[:4]) or "none yet"
+            res = snap.get("res_top", [])
+            res_s = "  ".join(
+                f"d{c['d']}·j{c['j']} t={c['t']:.0f} {'+' if c['m'] > 0 else '−'}"
+                for c in res[:3]) or "—"
+            applying = int(au.get("apply", 0))
+            author_txt = (
+                f"\n  AUTHOR {phase} · trial {int(au.get('trial', 0))} "
+                f"({int(au.get('trials', 0))} judged, last r={au.get('last_r', -1):.3f})   "
+                f"cand: {cand_s}\n"
+                f"  kept ({len(kept)}"
+                + (f", APPLYING — {int(au.get('kmk', 0))} suppressions" if applying else ", recorded only")
+                + f"): {kept_s}\n"
+                f"  raw-decode hallucination cells (residual t): {res_s}")
         self._readout.setText(
             f"  stride ≈ {period:.0f} ticks   n_obs {int(snap.get('n_obs', 0))}   "
             f"mask_mode {snap.get('mask_mode', 0):.0f} "
@@ -432,4 +484,4 @@ class PianoRollInspector(QWidget):
             f"hold-pose by ≥5%.\n"
             f"  labels are ANATOMICAL (leg-colored); body/config frame is "
             f"mirrored L↔R: FR=cfg'fl'·red  FL=cfg'fr'·green  RR=cfg'rl'·blue  "
-            f"RL=cfg'rr'·yellow.")
+            f"RL=cfg'rr'·yellow." + author_txt)
