@@ -44,7 +44,10 @@ public:
     std::string_view type_name() const override { return "MotorPlanner"; }
 
     std::vector<TopicSpec> input_topics() const override;
-    std::vector<TopicSpec> output_topics() const override { return {}; }   // shadow: none
+    // Shadow BY DEFAULT (empty).  Lever (b): when plan_output_topics is
+    // configured, the BASE roll's decode at plan_depth publishes per leg as a
+    // band-gated PredictionToken — the first behavioral authority.
+    std::vector<TopicSpec> output_topics() const override;
     ParamSchema params_schema() const override;
     ParamMap current_params() const override;
 
@@ -119,6 +122,22 @@ private:
     double author_depth_max_  = 34.0;   //   reflex territory on this vocabulary
     double author_max_kept_   = 8.0;
     double seed_              = 1234.0; // reseeded per-run via OGMA_SEED override
+    // --- lever (b): the band-gated plan objective (all inert by default) -----
+    // The body acts to FULFIL the planner's earned prediction: per leg, a
+    // PredictionToken [3 targets | 3 weights] from the BASE (operating) roll at
+    // plan_depth.  A joint's weight is 1 only where its verified authority
+    // holds at that depth (the earned-bands gate); distress cuts all weights
+    // (reflexes own emergencies, t0 and always).
+    double plan_publish_      = 0.0;    // 0 = shadow (no publications at all)
+    double plan_depth_        = 8.0;    // must be a probe depth {1,3,5,8,13,21,34}
+    double plan_distress_cut_ = 0.5;    // distress above this ⇒ all weights 0
+    std::vector<std::string> plan_output_topics_;   // 4 per-leg topics; empty = shadow
+    std::string distress_topic_ = "reality.proprio.distress";
+    float  distress_ = 0.0f;
+    std::array<float, kJoints> plan_pose_{};   // BASE decode at plan_depth (this tick)
+    std::array<float, kJoints> plan_w_{};      // per-joint gate weights (this tick)
+    bool   plan_pose_valid_ = false;
+    long   plan_published_ = 0;                // publisher consumer-check counter
     std::vector<uint64_t> subs_;
 
     // --- live state

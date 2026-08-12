@@ -1150,3 +1150,56 @@ behavioral authority: the BASE roll's decode published as a weak, band-gated
 objective (reflexes keep t0, per-joint gate = the earned bands, gain-0
 guarded, ChunkAbort/OutcomeGate as recorded execution guards) — is cleared
 to build NEXT, with the operator watching the UI before any promotion.**
+
+**2026-08-12 — LEVER (b): FIRST BEHAVIORAL AUTHORITY — the plan pull.
+Built, guarded, measured at n=6: SAFE, mildly positive, not loud. NOT
+PROMOTED (UI review is the operator's gate).**
+
+*The mechanism (rewrite-rule form).* The error the behavior minimizes: the
+discrepancy between the body's trajectory and its OWN verified prediction —
+proprioceptive active inference, plan-as-prediction (§5 rule 7 honored: no
+rhythm injected, no trajectory scripted). MotorPlanner publishes its BASE
+(operating, kept-mask-shaped) roll decode at plan_depth=8 as per-leg
+PredictionTokens `[3 targets | 3 weights]` on `objective.plan.<leg>`; a
+joint's weight is 1 ONLY where its verified authority holds at that depth
+(the slot-win test the bands are built from — earned, never assigned).
+MotorEPMv2 gains a second posture-objective socket (`plan_topics` +
+`plan_gain`) fused with the keyframe objective PER JOINT, precision-weighted
+(the LateralVoter pattern): `w_eff = wk + plan_gain·wp`, so an ungated
+joint's keyframe pull is untouched (never weaken a working loop). Distress
+above `plan_distress_cut` zeroes all plan weights — reflexes own
+emergencies, and t0 always. Because the published decode is the BASE roll,
+EARNED inhibition (rung a) now has a behavioral path — and trial candidates
+do NOT leak into behavior (base excludes the live candidate by
+construction).
+
+*Guards verified.* (1) gain-0: `__m1auth__planpull0` (publisher ON, consumer
+gain 0) is behaviorally IDENTICAL to `__m1auth` tick-for-tick on a matched
+seed (66/66 mirror lines). (2) Publisher gate matches the verified authority
+map exactly on live data: h1 (j0–3) and knees (j8,9,11) gate in; h2 (j4–7)
+never do — reflex territory stays reflex. (3) Consumer fired across all arm
+seeds (pl_pull ≈ 0.015, ~10–11.7k gated publish-ticks / 12k). (4) Config
+diff between arms is `plan_gain` alone.
+
+*A/B (seedavg, n=6 × 12k corridor 0.3, control = gain 0).* Transport:
+net_z 4.87±1.76 → 5.49±1.78 (+13%, sub-σ), straight 0.44 → 0.47, flat_v
+0.03 → 0.04. Stability: falls 0.67 → 0.17 (4 total → 1), unstable 0.12 →
+0.09, planted 3.37 → 3.49, plv_wn 0.91 → 0.98. Rhythm: step_cv_real 0.88 →
+0.81 with the step-period spread HALVED (σ 6.3 → 3.2 ticks) — consistent
+with prediction-fulfilment adding coherence. Cost, honestly: arm seed 2
+regressed (tilt_sd 0.93, net_z 2.35, the only nonzero panic_duty 0.08 in
+either arm) — the pull can entrench a bad episode; belly and scrub flat.
+
+**Verdict: PARTIAL (safe + mildly positive SIGNAL at n=6) — behavioral
+authority flows through earned bands without destabilizing the stack; no
+metric shows systematic damage; transport/stability/rhythm all lean
+positive; the effect is NOT loud (§3.3 — a real capability announces
+itself; +13% sub-σ is not an announcement). NOT PROMOTED: the operator's UI
+review is the promotion gate. What to WATCH live: does the gait visibly
+gain step-rhythm coherence; does arm-seed-2-style entrenchment appear (a
+stumble the pull then commits to); and the demo-with-teeth — hand-apply the
+FR-knee rest mask on [M] with the pull live: does inhibiting the predicted
+rest actually recruit an earlier FR step? Re-use context: plan_gain dose
+(0.05/0.2), plan_depth 13, and gating on the kept-mask-shaped vs raw roll
+are the untried axes; a (d)-style perturbation (drop the pull mid-run,
+watch re-coordination) is the sharpest next evidence.**

@@ -1191,6 +1191,24 @@ private:
     std::vector<float>           obj_weight_;    // per-leg weight w = PredictionToken.confidence ∈ [0,1]
     std::vector<char>            obj_seen_;      // per-leg: an objective has arrived (char, not vector<bool>)
 
+    // ---- PART III lever (b): the PLANNER's band-gated posture prediction ----
+    // A second posture-objective socket (objective.plan.<leg>) carrying the
+    // MotorPlanner's BASE-roll decode at its plan depth: predicted_latent =
+    // [m targets | m per-joint weights] (weights 0/1 = the earned authority-band
+    // gate, planner-side).  Fused with the keyframe objective PER JOINT,
+    // precision-weighted (the LateralVoter pattern): w_eff = wk + plan_gain·wp,
+    // x*_eff = (wk·xk + plan_gain·wp·xp)/w_eff — so an ungated joint (wp=0)
+    // leaves the keyframe pull EXACTLY as it was (never weaken a working loop),
+    // and plan_gain=0 is byte-identical.  Empty socket = OFF.
+    void handle_plan(int leg, MessagePtr payload);
+    std::vector<std::string>     plan_topics_;   // optional per-leg plan-objective topics; empty = OFF
+    double                       plan_gain_ = 0.0;
+    std::vector<Eigen::VectorXf> plan_target_;   // per-leg target joint positions (motor_dim)
+    std::vector<Eigen::VectorXf> plan_w_;        // per-leg PER-JOINT weights ∈ [0,1] (the band gate)
+    std::vector<char>            plan_seen_;
+    float plan_pull_ema_ = 0.0f;                 // consumer-fired telemetry: mean w·|x−x*| (EMA)
+    float plan_w_mean_   = 0.0f;                 // mean effective plan weight this tick
+
     // ---- L-1b velocity objective (§the propulsive push) ----
     // A phase-indexed VELOCITY target on objective.velocity.<leg> (KeyframeGait's vel map).
     // A second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the

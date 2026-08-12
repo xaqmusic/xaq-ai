@@ -10649,6 +10649,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				if _pmod.has("jerr"):
 					line[_plid[1]]["je"] = _pmod["jerr"]
 					line[_plid[1]]["jp"] = _pmod["jpers"]
+				# 2026-08-12 (lever b) — planner-side publisher state
+				if _pmod.has("plan_pub"):
+					line[_plid[1]]["pp"] = _pmod["plan_pub"]
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
@@ -10656,6 +10659,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
 			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
 			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# 2026-08-12 (lever b) — plan-objective CONSUMER telemetry: without
+			# these the A/B cannot distinguish "the pull acted" from "the seeds
+			# moved" (the consumer-fired check every lever has needed).
+			line["pl_pull"] = snappedf(float(_mm.get("plan_pull", 0.0)), 0.00001)
+			line["pl_w"]    = snappedf(float(_mm.get("plan_w", 0.0)), 0.0001)
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.

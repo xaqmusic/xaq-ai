@@ -119,6 +119,17 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a SOFT posture target (predicted_latent = motor_dim target joint positions; confidence = weight w). The controller descends toward it (objective-change, not additive — §1.1/§2.4). Empty = socket off (byte-identical HK).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"plan_topics", ParamMutability::ConstructionOnly,
+         "PART III lever (b): optional per-leg PredictionToken topics carrying the MotorPlanner's "
+         "band-gated posture prediction (predicted_latent = [motor_dim targets | motor_dim per-joint "
+         "weights]). Fused with the keyframe objective PER JOINT, precision-weighted — an ungated "
+         "joint (weight 0) leaves the keyframe pull untouched. Empty = socket off (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"plan_gain", ParamMutability::HotMutable,
+         "Weight multiplier on the planner's per-joint plan weights in the fused objective "
+         "(w_eff = w_keyframe + plan_gain·w_plan). 0 = byte-identical (the lever's gain-0 guard). "
+         "The body acts to FULFIL the planner's earned prediction — plan-as-prediction, not a script.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"velocity_objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a phase-indexed SOFT VELOCITY target (predicted_latent = motor_dim target joint velocities = the propulsive trajectory; confidence = w). Needs cpg_embed + cpg_phase_topic: a second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the command phase → the body keeps moving THROUGH the pose (propulsion), where the posture objective only holds it AT the pose. Empty = Cvel stays 0 = byte-identical.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -595,6 +606,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["proprio_topics"] = pt;
     m["action_topics"]  = at;
     m["objective_topics"] = std::vector<std::string>(objective_topics_);
+    m["plan_topics"] = std::vector<std::string>(plan_topics_);
+    m["plan_gain"] = plan_gain_;
     m["velocity_objective_topics"] = std::vector<std::string>(velocity_objective_topics_);
     m["n_legs"]     = int64_t(n_legs_);
     m["motor_dim"]  = int64_t(motor_dim_);
@@ -899,6 +912,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "proprio_topics", [&](auto const& v){ proprio_topics_ = get_string_vec(v, "proprio_topics"); });
     apply_param(params, "action_topics",  [&](auto const& v){ action_topics_  = get_string_vec(v, "action_topics"); });
     apply_param(params, "objective_topics", [&](auto const& v){ objective_topics_ = get_string_vec(v, "objective_topics"); });
+    apply_param(params, "plan_topics", [&](auto const& v){ plan_topics_ = get_string_vec(v, "plan_topics"); });
+    apply_param(params, "plan_gain", [&](auto const& v){ plan_gain_ = get_double(v, "plan_gain"); });
     apply_param(params, "velocity_objective_topics", [&](auto const& v){ velocity_objective_topics_ = get_string_vec(v, "velocity_objective_topics"); });
 
     if (int(proprio_topics_.size()) != n_legs_)
@@ -907,6 +922,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         throw std::invalid_argument("MotorEPM: action_topics length must equal n_legs*motor_dim");
     if (!objective_topics_.empty() && int(objective_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: objective_topics length must equal n_legs (or be empty)");
+    if (!plan_topics_.empty() && int(plan_topics_.size()) != n_legs_)
+        throw std::invalid_argument("MotorEPM: plan_topics length must equal n_legs (or be empty)");
     if (!velocity_objective_topics_.empty() && int(velocity_objective_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: velocity_objective_topics length must equal n_legs (or be empty)");
     if (int(gait_phase_.size()) != n_legs_)
@@ -920,6 +937,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     sat_clip_leg_.assign(n_legs_, 0.0);
     sat_pre_leg_.assign(n_legs_, 0.0);
     obj_seen_.assign(n_legs_, 0);
+    plan_target_.assign(n_legs_, Eigen::VectorXf());
+    plan_w_.assign(n_legs_, Eigen::VectorXf());
+    plan_seen_.assign(n_legs_, 0);
     obj_vel_target_.assign(n_legs_, Eigen::VectorXf());
     obj_vel_weight_.assign(n_legs_, 0.0f);
     obj_vel_seen_.assign(n_legs_, 0);
@@ -1036,6 +1056,14 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
             objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
     }
+    // PLAN-objective socket (PART III lever b) — the planner's band-gated posture
+    // prediction, same Feedback semantics.  Empty list = no subscription → byte-identical.
+    for (int leg = 0; leg < int(plan_topics_.size()) && leg < n_legs_; ++leg) {
+        if (plan_topics_[leg].empty()) continue;
+        sub_ids_.push_back(bus_->subscribe(
+            plan_topics_[leg], SubscriptionKind::Feedback,
+            [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_plan(leg, p); }));
+    }
     // Velocity objective socket (L-1b, the propulsive push) — optional per-leg soft velocity
     // targets, same Feedback semantics.  Empty list = no subscription → Cvel never trains.
     for (int leg = 0; leg < int(velocity_objective_topics_.size()) && leg < n_legs_; ++leg) {
@@ -1124,6 +1152,19 @@ void MotorEPMv2::handle_objective(int leg, MessagePtr payload) {
     obj_target_[leg] = pt->predicted_latent;                    // motor_dim target positions
     obj_weight_[leg] = std::clamp(pt->confidence, 0.0f, 1.0f);  // w ∈ [0,1]
     obj_seen_[leg]   = 1;
+}
+
+void MotorEPMv2::handle_plan(int leg, MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const PredictionToken>(payload);
+    if (!pt || leg < 0 || leg >= n_legs_) return;
+    // predicted_latent = [motor_dim targets | motor_dim per-joint weights]:
+    // the weights carry the planner's earned authority-band gate per joint.
+    const int m = motor_dim_;
+    if (pt->predicted_latent.size() < 2 * m) return;
+    plan_target_[leg] = pt->predicted_latent.head(m);
+    plan_w_[leg]      = pt->predicted_latent.segment(m, m).cwiseMax(0.0f).cwiseMin(1.0f);
+    plan_seen_[leg]   = 1;
 }
 
 void MotorEPMv2::handle_objective_vel(int leg, MessagePtr payload) {
@@ -2018,6 +2059,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "max_dctrl") max_dctrl_ = get_double(value, "max_dctrl");
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
     else if (key == "sat_lr")       sat_lr_       = get_double(value, "sat_lr");
+    else if (key == "plan_gain") plan_gain_ = get_double(value, "plan_gain");
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
@@ -3292,14 +3334,42 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // it LEARNS to reach x*, an objective-change, not an additive output bias.
                 // The MODEL (A,b) above kept the raw ξ (self-model stays honest).  w=0 or
                 // no objective → ξ̃ = ξ → byte-identical HK.
-                Eigen::VectorXf xi_tilde = xi;
-                if (obj_seen_[leg] && obj_weight_[leg] > 0.0f
-                    && obj_target_[leg].size() == m && n >= 3 * m) {
-                    float w = obj_weight_[leg];
+                // PART III lever (b): the effective objective is the PER-JOINT
+                // precision-weighted fusion of the keyframe target and the
+                // planner's band-gated prediction (w_eff = wk + plan_gain·wp).
+                // wp=0 on a joint leaves the keyframe pull EXACTLY as before
+                // (never weaken a working loop); plan_gain=0 ⇒ eff ≡ keyframe
+                // ⇒ byte-identical.
+                const bool kf_ok = obj_seen_[leg] && obj_weight_[leg] > 0.0f
+                                   && obj_target_[leg].size() == m;
+                const bool pl_ok = plan_gain_ > 0.0 && plan_seen_[leg]
+                                   && plan_target_[leg].size() == m
+                                   && plan_w_[leg].size() == m;
+                Eigen::VectorXf eff_t = Eigen::VectorXf::Zero(m);
+                Eigen::VectorXf eff_w = Eigen::VectorXf::Zero(m);
+                if (kf_ok || pl_ok) {
+                    const float wk = kf_ok ? obj_weight_[leg] : 0.0f;
                     for (int j = 0; j < m; ++j) {
-                        int idx = 3 * j;                                  // joint j position
-                        float goal_err = L.x[idx] - obj_target_[leg][j]; // x − x*
-                        xi_tilde[idx] = (1.0f - w) * xi[idx] + w * goal_err;
+                        float wp = pl_ok ? float(plan_gain_) * plan_w_[leg][j] : 0.0f;
+                        float tw = wk + wp;
+                        if (tw <= 0.0f) continue;
+                        eff_w[j] = std::min(1.0f, tw);
+                        eff_t[j] = (wk * (kf_ok ? obj_target_[leg][j] : 0.0f)
+                                    + wp * (pl_ok ? plan_target_[leg][j] : 0.0f)) / tw;
+                        if (pl_ok && wp > 0.0f && n >= 3 * m) {
+                            plan_pull_ema_ += 0.01f *
+                                (wp * std::fabs(L.x[3 * j] - plan_target_[leg][j]) - plan_pull_ema_);
+                            plan_w_mean_ += 0.01f * (wp - plan_w_mean_);
+                        }
+                    }
+                }
+                Eigen::VectorXf xi_tilde = xi;
+                if ((kf_ok || pl_ok) && n >= 3 * m) {
+                    for (int j = 0; j < m; ++j) {
+                        if (eff_w[j] <= 0.0f) continue;
+                        int idx = 3 * j;                              // joint j position
+                        float goal_err = L.x[idx] - eff_t[j];         // x − x*_eff
+                        xi_tilde[idx] = (1.0f - eff_w[j]) * xi[idx] + eff_w[j] * goal_err;
                     }
                 }
                 // ---- DEP: C from the correlation of MOTOR and SENSOR derivatives -----
@@ -3345,10 +3415,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // at the command phase — NOT HK surprise (which damps motion).  Self-limiting: as
                 // the bias moves the body toward x*, the error shrinks and learning stops.  Small
                 // L2 decay bounds it.  This is the "alternate learning signal".
-                if (embed && obj_seen_[leg] && obj_weight_[leg] > 0.0f
-                    && obj_target_[leg].size() == m && n >= 3 * m) {
+                if (embed && (kf_ok || pl_ok) && n >= 3 * m) {
                     for (int j = 0; j < m; ++j) {
-                        float e = obj_target_[leg][j] - L.x[3 * j];   // x* − x toward the keyframe posture
+                        if (eff_w[j] <= 0.0f) continue;
+                        float e = eff_t[j] - L.x[3 * j];   // x*_eff − x toward the fused posture
                         L.Cphi.row(j).noalias() += float(embed_lr_) * e * L.prev_phi_ctx.transpose();
                     }
                     if (embed_decay_ > 0.0) L.Cphi *= (1.0f - float(embed_decay_));
@@ -4280,6 +4350,11 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["height_bias"]    = height_bias_;
     mod["height_k_eff"]   = height_k_eff_;
     mod["chassis_h_seen"] = chassis_h_seen_;
+    // PART III lever (b) — plan-objective consumer telemetry: without these the
+    // A/B cannot distinguish "the pull acted" from "the seeds moved" (the
+    // consumer-fired check every lever has needed)
+    mod["plan_pull"]  = plan_pull_ema_;
+    mod["plan_w"]     = plan_w_mean_;
     // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
     // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
     mod["swing_frac"]     = swing_frac_ema_;
@@ -4986,6 +5061,8 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["height_bias"]   = height_bias_;           // integrated lift bias (hip2)
     j["height_k_eff"]  = height_k_eff_;          // adapted setpoint fraction (belly-grounding)
     j["height_rest_frac"] = height_rest_frac_;   // height-defense fade: 1 at rest → 0 while moving fwd
+    j["plan_pull"] = plan_pull_ema_;             // lever (b): mean w·|x−x*| of the plan pull (EMA)
+    j["plan_w"]    = plan_w_mean_;               // lever (b): mean effective plan weight
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
       j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much POSTURE phase-conditioning HK has learned
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cvel.norm(); ++c; }
