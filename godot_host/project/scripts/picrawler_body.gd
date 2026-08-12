@@ -10642,6 +10642,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				# Absent unless author_mode=1 (zero cost on every other config).
 				if _pmod.has("author"):
 					line[_plid[1]]["au"] = _pmod["author"]
+				# 2026-08-12 (M1 rung a) — per-depth×per-joint |err| tables
+				# (operating decode vs hold-pose): the author_apply A/B compares
+				# these across arms; jband alone is thresholded and would hide
+				# sub-0.95 improvements.
+				if _pmod.has("jerr"):
+					line[_plid[1]]["je"] = _pmod["jerr"]
+					line[_plid[1]]["jp"] = _pmod["jpers"]
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):

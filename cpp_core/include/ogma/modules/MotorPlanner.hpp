@@ -71,6 +71,11 @@ private:
     void  apply_mask(Dist& d, int bin) const;
     bool  apply_region_mask(Dist& d, int depth);
     void  decode_row(Dist const& d, float* mean_out, float* sd_out) const;
+    // one region spec against one row, with the per-mask no-annihilation revert;
+    // the composite paths (kept list, candidate) all funnel through this
+    bool  suppress_region(Dist& d, int joint, float lo, float hi, int dlo, int dhi,
+                          float strength, int depth, long& hit_counter);
+    bool  apply_kept_masks(Dist& d, int depth);   // author_apply: the earned set
 
     // --- wiring / params
     Bus*        bus_ = nullptr;
@@ -96,6 +101,11 @@ private:
     // takes OWNERSHIP of the region-mask params above: it writes a candidate spec
     // at each trial start and zeroes mask_strength_ between trials.
     double author_mode_       = 0.0;    // 0 off · 1 authoring slow loop
+    double author_apply_      = 0.0;    // 0 prospector (keeps recorded only) ·
+                                        // 1 CLOSE THE LOOP: kept masks apply to the
+                                        //   roll continuously, in chronological keep
+                                        //   order (each keep was validated MARGINALLY
+                                        //   against its predecessors' composite)
     double author_period_     = 800.0;  // ticks per candidate trial
     double author_warmup_     = 3000.0; // ticks before the first trial
     double author_min_n_      = 300.0;  // min per-slot trial verdicts to judge
@@ -142,8 +152,10 @@ private:
     // against the arriving pose, giving each track its OWN authority horizon
     // (the global token chain can fail while a joint marginal still predicts).
     struct Pending { uint64_t due; int depth; int tok0; Dist dist;
-                     std::array<float, kJoints> pred_pose;      // FINAL (post-mask) decode
+                     std::array<float, kJoints> pred_pose;      // FINAL decode (kept + candidate/manual mask)
                      std::array<float, kJoints> pred_pose_raw;  // TRUE unmasked-cone decode (== final when unmasked)
+                     std::array<float, kJoints> pred_pose_base; // KEPT-ONLY decode (the operating roll under
+                                                                // author_apply; == raw when nothing kept/applied)
                      std::array<float, kJoints> pose0;
                      int trial = 0; };                          // author trial serial at prediction time (0 = none)
     std::vector<Pending> pending_;
@@ -186,9 +198,15 @@ private:
     MaskSpec cand_{};
     bool     cand_guided_   = false;
     double   last_ratio_all_ = -1.0, last_ratio_tgt_ = -1.0;
-    std::vector<Kept> kept_;            // the earned set (recorded, NOT re-applied in v1)
-    // per-trial dual-verification accumulators (final vs true-raw, same ticks)
-    std::array<std::array<double, kJoints>, kNumProbes> tacc_jerr_{}, tacc_jerr_raw_{};
+    std::vector<Kept> kept_;            // the earned set, CHRONOLOGICAL keep order
+                                        // (application order under author_apply;
+                                        // cap stops new keeps — eviction would
+                                        // invalidate the composite's marginality)
+    long kept_masked_out_ = 0;          // rows suppressed by KEPT masks (consumer check)
+    long kept_cap_hit_    = 0;          // keeps refused because the cap was reached
+    // per-trial MARGINAL verification accumulators: FINAL (kept+cand) vs BASE
+    // (kept only), same ticks — a candidate must not inherit the kept set's credit
+    std::array<std::array<double, kJoints>, kNumProbes> tacc_jerr_{}, tacc_jerr_base_{};
     std::array<long, kNumProbes> tacc_n_{};
     // signed residual tracker on the RAW decode (Welford) — where the un-inhibited
     // excitation systematically misses reality; the author's proposal gradient

@@ -86,6 +86,13 @@ ParamSchema MotorPlanner::params_schema() const {
          "author_period ticks, and KEEPS only candidates whose verified final-vs-raw error ratio "
          "beats author_keep_ratio.  Requires mask_mode=2.  Kept masks are recorded, not re-applied (v1).",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"author_apply", ParamMutability::HotMutable,
+         "0 = prospector (kept masks recorded only — v1); 1 = CLOSE THE LOOP: kept masks apply to "
+         "the roll continuously in chronological keep order (each keep was judged MARGINALLY "
+         "against its predecessors' composite, so keep order preserves validity).  Candidates are "
+         "then judged final-vs-base so they cannot inherit the kept set's credit; the main "
+         "verification (and the authority bands) scores the BASE operating roll.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"author_period", ParamMutability::HotMutable,
          "Ticks per candidate trial.", ParamValue{800.0}, ParamValue{200.0}, ParamValue{6000.0}},
         {"author_warmup", ParamMutability::HotMutable,
@@ -129,7 +136,8 @@ ParamMap MotorPlanner::current_params() const {
     m["mask_joint"] = mask_joint_; m["mask_val_lo"] = mask_val_lo_; m["mask_val_hi"] = mask_val_hi_;
     m["mask_depth_lo"] = mask_depth_lo_; m["mask_depth_hi"] = mask_depth_hi_;
     m["mask_strength"] = mask_strength_;
-    m["author_mode"] = author_mode_; m["author_period"] = author_period_;
+    m["author_mode"] = author_mode_; m["author_apply"] = author_apply_;
+    m["author_period"] = author_period_;
     m["author_warmup"] = author_warmup_; m["author_min_n"] = author_min_n_;
     m["author_keep_ratio"] = author_keep_ratio_;
     m["author_score"] = author_score_; m["author_guard"] = author_guard_;
@@ -155,6 +163,7 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     mask_depth_hi_ = pget(params, "mask_depth_hi", mask_depth_hi_);
     mask_strength_ = pget(params, "mask_strength", mask_strength_);
     author_mode_       = pget(params, "author_mode",       author_mode_);
+    author_apply_      = pget(params, "author_apply",      author_apply_);
     author_period_     = pget(params, "author_period",     author_period_);
     author_warmup_     = pget(params, "author_warmup",     author_warmup_);
     author_min_n_      = pget(params, "author_min_n",      author_min_n_);
@@ -222,6 +231,7 @@ void MotorPlanner::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "mask_depth_hi") mask_depth_hi_ = d(mask_depth_hi_);
     else if (k == "mask_strength") mask_strength_ = d(mask_strength_);
     else if (k == "author_mode")       author_mode_       = d(author_mode_);
+    else if (k == "author_apply")      author_apply_      = d(author_apply_);
     else if (k == "author_period")     author_period_     = d(author_period_);
     else if (k == "author_warmup")     author_warmup_     = d(author_warmup_);
     else if (k == "author_min_n")      author_min_n_      = d(author_min_n_);
@@ -284,17 +294,17 @@ void MotorPlanner::decode_row(Dist const& d, float* mean_out, float* sd_out) con
     }
 }
 
-// mode 2 — continuous region inhibition: suppress mass of tokens whose READOUT
-// pose falls inside the masked value range on the masked joint(s).  Inhibition
-// acts on the CONTINUOUS substrate through the mixture; tokens are carriers.
-// Returns true if any mass was suppressed.
-bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
-    if (mask_mode_ < 1.5 || mask_strength_ <= 0.0) return false;
-    if (depth < int(mask_depth_lo_) || depth > int(mask_depth_hi_)) return false;
-    const float lo = float(std::min(mask_val_lo_, mask_val_hi_));
-    const float hi = float(std::max(mask_val_lo_, mask_val_hi_));
+// One region spec against one row — the shared primitive every masking path
+// (manual/candidate params, each kept mask) funnels through.  Suppresses mass
+// of tokens whose READOUT pose falls inside [lo,hi] on the selected joint(s).
+// Inhibition acts on the CONTINUOUS substrate through the mixture; tokens are
+// carriers.  Returns true if any mass survived suppression and was renormalized.
+bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
+                                   int dlo, int dhi, float strength,
+                                   int depth, long& hit_counter) {
+    if (strength <= 0.0f) return false;
+    if (depth < dlo || depth > dhi) return false;
     if (hi <= lo) return false;
-    const int jsel = int(mask_joint_);
     // INHIBITION MAY REROUTE, NEVER ANNIHILATE.  If suppression would zero the
     // whole row (every option inside the masked region), the mask is
     // uninformative at this depth — there is nothing to reroute TO.  The row
@@ -313,7 +323,7 @@ bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
             for (int j = 0; j < kJoints && !inside; ++j)
                 inside = (it->second.mean[j] >= lo && it->second.mean[j] <= hi);
         }
-        if (inside) { pmass *= float(1.0 - mask_strength_); any = true; ++masked_out_; }
+        if (inside) { pmass *= (1.0f - strength); any = true; ++hit_counter; }
     }
     if (!any) return false;
     float tot = 0.0f;
@@ -327,6 +337,30 @@ bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
         it = (it->second <= 1e-9f) ? d.erase(it) : std::next(it);
     for (auto& kv : d) kv.second /= tot;
     return true;
+}
+
+// mode 2 — the param-spec mask: the manual/demo mask, or the author's live
+// trial candidate (the author writes the params at trial start).
+bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
+    if (mask_mode_ < 1.5) return false;
+    const float lo = float(std::min(mask_val_lo_, mask_val_hi_));
+    const float hi = float(std::max(mask_val_lo_, mask_val_hi_));
+    return suppress_region(d, int(mask_joint_), lo, hi,
+                           int(mask_depth_lo_), int(mask_depth_hi_),
+                           float(mask_strength_), depth, masked_out_);
+}
+
+// author_apply — the EARNED set, applied in chronological keep order (each
+// keep was judged marginally against its predecessors' composite; keep order
+// is the order in which that validity was established).
+bool MotorPlanner::apply_kept_masks(Dist& d, int depth) {
+    if (author_apply_ < 0.5 || kept_.empty()) return false;
+    bool any = false;
+    for (auto const& k : kept_)
+        if (suppress_region(d, k.spec.joint, k.spec.lo, k.spec.hi,
+                            k.spec.dlo, k.spec.dhi, 1.0f, depth, kept_masked_out_))
+            any = true;
+    return any;
 }
 
 MotorPlanner::Dist MotorPlanner::propagate(Dist const& d, int bin) const {
@@ -377,8 +411,15 @@ void MotorPlanner::tick(uint64_t tick_id) {
                 acc_ent_[slot]  += ent;
                 acc_pers_[slot] += (it->tok0 == cur_tok_) ? 1.0 : 0.0;
                 if (pose_seen_) {
+                    // With the author ON, the main verification (and the bands)
+                    // scores the BASE operating roll — the live experimental
+                    // candidate is excluded, so bands measure the kept set, not
+                    // trial churn.  Author OFF keeps the manual-mask semantics:
+                    // the final (masked) decode is the thing being measured.
+                    const bool op_base = author_mode_ >= 0.5;
                     for (int j = 0; j < kJoints; ++j) {
-                        acc_jerr_[slot][j]     += std::fabs(it->pred_pose[j]     - cur_pose_[j]);
+                        float op = op_base ? it->pred_pose_base[j] : it->pred_pose[j];
+                        acc_jerr_[slot][j]     += std::fabs(op                   - cur_pose_[j]);
                         acc_jerr_raw_[slot][j] += std::fabs(it->pred_pose_raw[j] - cur_pose_[j]);
                         acc_jpers_[slot][j]    += std::fabs(it->pose0[j]         - cur_pose_[j]);
                         // SIGNED raw residual (Welford) — the author's proposal gradient:
@@ -389,9 +430,11 @@ void MotorPlanner::tick(uint64_t tick_id) {
                         double d1 = r - res_mean_[slot][j];
                         res_mean_[slot][j] += d1 / double(++rn);
                         res_m2_[slot][j]   += d1 * (r - res_mean_[slot][j]);
+                        // MARGINAL trial meter: candidate (final) vs kept-only
+                        // (base) — a candidate cannot inherit the kept set's credit
                         if (it->trial != 0 && it->trial == trial_serial_) {
-                            tacc_jerr_[slot][j]     += std::fabs(it->pred_pose[j]     - cur_pose_[j]);
-                            tacc_jerr_raw_[slot][j] += std::fabs(it->pred_pose_raw[j] - cur_pose_[j]);
+                            tacc_jerr_[slot][j]      += std::fabs(it->pred_pose[j]      - cur_pose_[j]);
+                            tacc_jerr_base_[slot][j] += std::fabs(it->pred_pose_base[j] - cur_pose_[j]);
                         }
                     }
                     if (it->trial != 0 && it->trial == trial_serial_) ++tacc_n_[slot];
@@ -442,14 +485,24 @@ void MotorPlanner::tick(uint64_t tick_id) {
     roll_raw_sd_.assign(size_t(H) * kJoints, 0.0f);
     roll_len_ = 0;
     mask_applied_ = false;
-    // While a region mask is live, a TRUE second unmasked cone runs beside the
-    // final one, so raw-vs-final is a genuine counterfactual at EVERY depth.
-    // (The old single-cone "raw" was pre-this-row's-mask only: past the first
-    // masked depth it inherited upstream rerouting and understated the mask's
-    // real effect — the author's keep-rule needs the honest with/without.)
-    const bool masking = mask_mode_ > 1.5 && mask_strength_ > 0.0;
+    // Up to THREE cones run beside each other, so every meter is a genuine
+    // per-tick counterfactual (the old single-cone "raw" was pre-this-row's-mask
+    // only — it inherited upstream rerouting past the first masked depth):
+    //   FINAL = kept set + candidate/manual mask   (what the widget shows bright)
+    //   BASE  = kept set only                      (the OPERATING roll under
+    //           author_apply; the main verification and the bands score this)
+    //   RAW   = unmasked                           (the compound meter's floor
+    //           and the residual tracker's reference)
+    // BASE collapses onto FINAL when no candidate is live, and onto RAW when
+    // nothing is kept/applied — the extra propagation runs only when needed.
+    const bool kept_active = author_apply_ >= 0.5 && !kept_.empty() && mask_mode_ > 1.5;
+    const bool cand_active = mask_mode_ > 1.5 && mask_strength_ > 0.0;
+    const bool masking     = kept_active || cand_active;
+    const bool three_cone  = kept_active && cand_active;
     Dist row; row[cur_tok_] = 1.0f;
-    Dist row_raw; if (masking) row_raw[cur_tok_] = 1.0f;
+    Dist row_raw;  if (masking)    row_raw[cur_tok_]  = 1.0f;
+    Dist row_base; if (three_cone) row_base[cur_tok_] = 1.0f;
+    std::array<float, kJoints> base_mean{}, base_sd{};
     int next_probe = 0;
     for (int n = 1; n <= H; ++n) {
         const int b = phase_bin(std::fmod(phi_ + float(n) * omega_, kTwoPi));
@@ -464,21 +517,37 @@ void MotorPlanner::tick(uint64_t tick_id) {
             decode_row(row, &roll_raw_mean_[size_t(n - 1) * kJoints],
                             &roll_raw_sd_[size_t(n - 1) * kJoints]);
         }
-        // mode 2: the mask REROUTES the row itself, so suppression at depth n
+        if (three_cone) {
+            row_base = propagate(row_base, b);
+            apply_mask(row_base, b);
+            apply_kept_masks(row_base, n);
+        }
+        // mode 2: the masks REROUTE the row itself, so suppression at depth n
         // propagates into every deeper row — the future influencing what the
-        // near rows can still believe.
-        if (apply_region_mask(row, n)) mask_applied_ = true;
+        // near rows can still believe.  Kept set first (the operating layer),
+        // then the candidate/manual spec on top.
+        bool sup = apply_kept_masks(row, n);
+        if (apply_region_mask(row, n)) sup = true;
+        if (sup) mask_applied_ = true;
         if (row.empty()) break;
         decode_row(row, &roll_mean_[size_t(n - 1) * kJoints],
                         &roll_sd_[size_t(n - 1) * kJoints]);
         roll_len_ = n;
         if (next_probe < kNumProbes && n == kProbes[next_probe]) {
-            Pending pd{tick_id + uint64_t(n), n, cur_tok_, row, {}, {}, {},
-                       (author_phase_ == 1 && masking) ? trial_serial_ : 0};
+            Pending pd{tick_id + uint64_t(n), n, cur_tok_, row, {}, {}, {}, {},
+                       (author_phase_ == 1 && cand_active) ? trial_serial_ : 0};
             for (int j = 0; j < kJoints; ++j) {
                 pd.pred_pose[j]     = roll_mean_[size_t(n - 1) * kJoints + j];
                 pd.pred_pose_raw[j] = roll_raw_mean_[size_t(n - 1) * kJoints + j];
                 pd.pose0[j]         = cur_pose_[j];
+            }
+            if (three_cone) {
+                decode_row(row_base, base_mean.data(), base_sd.data());
+                pd.pred_pose_base = base_mean;
+            } else if (kept_active) {
+                pd.pred_pose_base = pd.pred_pose;      // final IS kept-only
+            } else {
+                pd.pred_pose_base = pd.pred_pose_raw;  // nothing kept/applied
             }
             pending_.push_back(std::move(pd));
             ++next_probe;
@@ -619,8 +688,8 @@ void MotorPlanner::author_start_trial() {
     mask_depth_lo_ = double(c.dlo);
     mask_depth_hi_ = double(c.dhi);
     mask_strength_ = 1.0;
-    for (auto& a : tacc_jerr_)     a.fill(0.0);
-    for (auto& a : tacc_jerr_raw_) a.fill(0.0);
+    for (auto& a : tacc_jerr_)      a.fill(0.0);
+    for (auto& a : tacc_jerr_base_) a.fill(0.0);
     tacc_n_.fill(0);
     ++trial_serial_;
     author_phase_ = 1;
@@ -630,6 +699,8 @@ void MotorPlanner::author_start_trial() {
 void MotorPlanner::author_judge_trial() {
     // Judge on every probe at or beyond the mask's first depth: rerouting
     // propagates deeper, so the meter must capture the whole downstream roll.
+    // Ratios are MARGINAL — candidate (final) over kept-only (base) — so a
+    // candidate is judged on what IT adds to the operating composite.
     double num_all = 0.0, den_all = 0.0, num_tgt = 0.0, den_tgt = 0.0;
     long n_tot = 0;
     for (int i = 0; i < kNumProbes; ++i) {
@@ -638,10 +709,10 @@ void MotorPlanner::author_judge_trial() {
         n_tot += tacc_n_[i];
         for (int j = 0; j < kJoints; ++j) {
             num_all += tacc_jerr_[i][j];
-            den_all += tacc_jerr_raw_[i][j];
+            den_all += tacc_jerr_base_[i][j];
             if (j == cand_.joint) {
                 num_tgt += tacc_jerr_[i][j];
-                den_tgt += tacc_jerr_raw_[i][j];
+                den_tgt += tacc_jerr_base_[i][j];
             }
         }
     }
@@ -661,12 +732,16 @@ void MotorPlanner::author_judge_trial() {
         keep = last_ratio_all_ > 0.0 && last_ratio_all_ < author_keep_ratio_;
     }
     if (n_tot > 0 && keep) {
-        kept_.push_back(Kept{cand_, last_ratio_all_, last_ratio_tgt_, n_tot,
-                             trial_serial_, cand_guided_});
-        const bool by_tgt = author_score_ >= 0.5;
-        std::sort(kept_.begin(), kept_.end(), [by_tgt](Kept const& a, Kept const& b){
-            return (by_tgt ? a.ratio_tgt : a.ratio_all) < (by_tgt ? b.ratio_tgt : b.ratio_all); });
-        if (int(kept_.size()) > int(author_max_kept_)) kept_.resize(size_t(author_max_kept_));
+        // CHRONOLOGICAL keep order, and the cap STOPS new keeps rather than
+        // evicting: under author_apply each keep was validated marginally
+        // against its predecessors' composite — reordering or evicting a
+        // predecessor would silently invalidate every later keep's judgment.
+        if (int(kept_.size()) < int(author_max_kept_)) {
+            kept_.push_back(Kept{cand_, last_ratio_all_, last_ratio_tgt_, n_tot,
+                                 trial_serial_, cand_guided_});
+        } else {
+            ++kept_cap_hit_;
+        }
     }
 }
 
@@ -749,6 +824,9 @@ nlohmann::json MotorPlanner::snapshot_state() const {
         au["phase"]  = author_phase_;          // 0 warmup · 1 trial · 2 drain
         au["trial"]  = trial_serial_;
         au["trials"] = trials_done_;
+        au["apply"]  = author_apply_ >= 0.5 ? 1 : 0;
+        au["kmk"]    = kept_masked_out_;       // kept-mask suppressions (consumer check)
+        au["cap"]    = kept_cap_hit_;          // keeps refused at capacity
         au["last_r"]     = std::round(last_ratio_all_ * 10000.0) / 10000.0;
         au["last_r_tgt"] = std::round(last_ratio_tgt_ * 10000.0) / 10000.0;
         if (author_phase_ == 1) {
@@ -770,6 +848,21 @@ nlohmann::json MotorPlanner::snapshot_state() const {
         au["kept"] = std::move(kl);
         mod["author"] = std::move(au);
     }
+    // per-depth × per-joint mean |error| pairs (OPERATING decode vs hold-pose) —
+    // the raw material behind joint_auth/joint_band.  Lives in the snapshot (not
+    // just diag) so the body-log mirror carries it: the rung-(a) A/B compares
+    // these tables across arms, and jband alone is thresholded (a sub-0.95
+    // improvement would be invisible).
+    nlohmann::json je = nlohmann::json::array(), jp = nlohmann::json::array();
+    for (int i = 0; i < kNumProbes; ++i) {
+        double n = double(std::max<long>(1, acc_n_[i]));
+        for (int j = 0; j < kJoints; ++j) {
+            je.push_back(std::round(acc_jerr_[i][j] / n * 10000.0) / 10000.0);
+            jp.push_back(std::round(acc_jpers_[i][j] / n * 10000.0) / 10000.0);
+        }
+    }
+    mod["jerr"]  = std::move(je);
+    mod["jpers"] = std::move(jp);
     return nlohmann::json{{"version", 1}, {"module", mod}};
 }
 
@@ -796,7 +889,8 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     // actually suppressing mass (payload stays lean otherwise).
     mod["mask_applied"] = mask_applied_;
     mod["mask_saturated"] = mask_saturated_;
-    if (mask_mode_ > 1.5 && mask_strength_ > 0.0) {
+    const bool kept_live = author_apply_ >= 0.5 && !kept_.empty();
+    if (mask_mode_ > 1.5 && (mask_strength_ > 0.0 || kept_live)) {
         nlohmann::json rrm = nlohmann::json::array(), rrs = nlohmann::json::array();
         for (int i = 0; i < roll_len_ * kJoints; ++i) {
             rrm.push_back(std::round(roll_raw_mean_[i] * 1000.0f) / 1000.0f);
@@ -839,18 +933,8 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     mod["cur_tok"]  = cur_tok_;
     mod["phi"]      = std::round(phi_ * 1000.0f) / 1000.0f;
     mod["omega"]    = omega_;
-    // per-depth × per-joint mean |error| pairs (cone decode vs hold-pose) —
-    // the raw material behind joint_auth, for the widget's certainty readout
-    nlohmann::json je = nlohmann::json::array(), jp = nlohmann::json::array();
-    for (int i = 0; i < kNumProbes; ++i) {
-        double n = double(std::max<long>(1, acc_n_[i]));
-        for (int j = 0; j < kJoints; ++j) {
-            je.push_back(std::round(acc_jerr_[i][j] / n * 10000.0) / 10000.0);
-            jp.push_back(std::round(acc_jpers_[i][j] / n * 10000.0) / 10000.0);
-        }
-    }
-    mod["jerr"]  = std::move(je);
-    mod["jpers"] = std::move(jp);
+    // (jerr/jpers now ship in snapshot_state, inherited above — the body-log
+    // mirror needs them for the rung-(a) A/B.)
     // the author's proposal gradient, top standardized residual cells — the
     // widget's "where does the raw decode hallucinate" readout
     if (author_mode_ >= 0.5) {

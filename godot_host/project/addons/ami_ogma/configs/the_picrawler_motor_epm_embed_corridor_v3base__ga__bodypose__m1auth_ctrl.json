@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "M1 AUTHOR \u2014 the mask-authoring slow loop, kept set APPLIED (rung a)",
-    "description": "M1 rung (a), the closed prediction loop: the author proposes/trials/keeps region masks as before, and KEPT masks now APPLY to the roll continuously (author_apply=1) in chronological keep order. Candidates are judged MARGINALLY (final vs kept-only base) so they cannot inherit the kept set's credit; the main verification and the authority bands score the BASE operating roll (trial churn excluded). Control arm = author_apply 0 (prospector, same build). Zero authority; behavior IDENTICAL to V3 BASE.",
+    "name": "M1 AUTHOR control \u2014 prospector (author_apply=0), the rung-(a) A/B baseline",
+    "description": "Harness arm for the rung-(a) A/B: identical to __m1auth on the same build but author_apply=0 \u2014 trials and keeps recorded, kept set NEVER applied. Not allowlisted.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -360,7 +360,7 @@
         "seed": 1234,
         "author_score": 1.0,
         "author_guard": 1.0,
-        "author_apply": 1.0
+        "author_apply": 0.0
       }
     }
   ],

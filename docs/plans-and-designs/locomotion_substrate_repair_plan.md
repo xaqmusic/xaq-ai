@@ -1094,3 +1094,59 @@ author is currently mopping up.** §3.2 notes: no tautology (all params new),
 consumers verified per seed, control = the same-seed v1.0/v1.1 identity,
 faithfulness = the true-counterfactual fix landed BEFORE any keep was
 recorded.
+
+**2026-08-12 — M1 RUNG (a): THE PREDICTION LOOP CLOSES — earned inhibition
+compounds into a measurably better operating roll (operator-directed:
+"close the loop and fully verify the instrumentation before lever (b)").**
+
+*Design.* `author_apply=1`: kept masks apply to the roll CONTINUOUSLY from
+the moment they are earned, in CHRONOLOGICAL keep order — each keep is
+judged marginally against its predecessors' composite, so keep order is the
+order in which validity was established (and the kept cap now STOPS new
+keeps rather than evicting: eviction would silently invalidate every later
+keep's judgment). Up to THREE cones per tick: FINAL (kept+candidate), BASE
+(kept only — the operating roll), RAW (unmasked). Candidates are judged
+MARGINALLY (final vs base) so they cannot inherit the kept set's credit;
+with the author on, the main verification and the authority bands score
+BASE, so bands measure the kept set, not trial churn (manual-mask configs
+keep their final-scored semantics). `jerr`/`jpers` tables now mirror into
+the body log (`je`/`jp`) — jband alone is thresholded and hides sub-0.95
+movement. Widget: faint steady rects = the earned set operating; bright
+hopping rect = the live trial. Control arm = same build, `author_apply=0`
+(`__m1auth_ctrl`, harness-only). Scorer: `authorab.py`.
+
+*Smoke regression (seed 11).* Pre-keep trials bit-match the prospector run
+(trial-7 keep identical: rt 0.8574); after the first keep the same j7
+candidate that scored rt 0.855 standalone scores rt 0.938 MARGINALLY — its
+correlated partner j6 was already kept and operating, so the candidate is
+credited only for what it adds. The credit-inheritance protection observed
+working on live data.
+
+*A/B (n=4 matched seeds × 12k, apply vs prospector, same build).*
+- s13 (kept at trials 1–2 → operating ~60% of the run): target-joint
+  operating-error ratio apply/control **0.881 @ k=21, 0.914 @ k=34**;
+  untargeted joints 0.987–1.000; band width 269 → 290 (**grew**).
+- s11 (kept at trials 7–8 → operating ~25% of the run): target ratios
+  0.973–0.983 from depth 5 outward (the d[5,5] masks propagate deeper);
+  untargeted 0.989–1.004; band width 198 → 185 (**dipped** — see caveat).
+- s12/s14 (no keeps): max |Δje| = 0.0000 — apply ≡ control exactly; the
+  three-cone plumbing is inert when idle (built-in null, clean).
+Benefit magnitude tracks keep-time coverage (cumulative accounting dilutes
+late keeps), matching the trial-time instantaneous ratios (0.75–0.94).
+
+**Verdict: WORKING — the M1 contract's rung (a) is met: masks EARN
+keep-rights through the meters and the earned set VERIFIABLY improves the
+operating roll where it acts, with clean nulls and no collateral damage.
+Caveats recorded: (1) s11's total band width dipped 6.5% — threshold
+crossings at diluted-cumulative altitude, not a measured harm (its je
+ratios improve); re-check with earlier warmup or longer runs before calling
+it real; (2) cumulative meters understate late keeps — a windowed
+(since-first-keep) accumulator is a v2 nicety; (3) global token authority
+stays 0 everywhere, as expected — the symbolic argmax is refuted material,
+the continuous marginals are the substrate. INSTRUMENTATION STATUS FOR (b):
+proposal → trial → marginal keep → apply → compound verified benefit is now
+a fully closed, self-auditing chain with built-in nulls. Lever (b) — first
+behavioral authority: the BASE roll's decode published as a weak, band-gated
+objective (reflexes keep t0, per-joint gate = the earned bands, gain-0
+guarded, ChunkAbort/OutcomeGate as recorded execution guards) — is cleared
+to build NEXT, with the operator watching the UI before any promotion.**
