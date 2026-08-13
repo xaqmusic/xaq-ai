@@ -130,6 +130,16 @@ ParamSchema MotorEPMv2::params_schema() const {
          "(w_eff = w_keyframe + plan_gain·w_plan). 0 = byte-identical (the lever's gain-0 guard). "
          "The body acts to FULFIL the planner's earned prediction — plan-as-prediction, not a script.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_fade", ParamMutability::HotMutable,
+         "OPERATOR SCAFFOLD (the [G]/[R] bench class — a lesion-as-test, never an operating mode): "
+         "crossfade the FINAL assembled command toward a pure position-servo tracking the planner's "
+         "published targets. 0 = byte-identical (all reflexes); 1 = reflexes SILENCED — the stride "
+         "as the planner imagines it, embodied. Expect blur/under-swing at 1: the decode is a "
+         "mixture mean, and the gap you see IS the measurement (substrate vs reflex content).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_puppet_gain", ParamMutability::HotMutable,
+         "Servo P gain of the fade's puppet term, u = gain·(x*_plan − x) per joint (command units).",
+         ParamValue{2.0}, ParamValue{0.0}, ParamValue{8.0}},
         {"velocity_objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a phase-indexed SOFT VELOCITY target (predicted_latent = motor_dim target joint velocities = the propulsive trajectory; confidence = w). Needs cpg_embed + cpg_phase_topic: a second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the command phase → the body keeps moving THROUGH the pose (propulsion), where the posture objective only holds it AT the pose. Empty = Cvel stays 0 = byte-identical.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -608,6 +618,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["objective_topics"] = std::vector<std::string>(objective_topics_);
     m["plan_topics"] = std::vector<std::string>(plan_topics_);
     m["plan_gain"] = plan_gain_;
+    m["plan_fade"] = plan_fade_;
+    m["plan_puppet_gain"] = plan_puppet_gain_;
     m["velocity_objective_topics"] = std::vector<std::string>(velocity_objective_topics_);
     m["n_legs"]     = int64_t(n_legs_);
     m["motor_dim"]  = int64_t(motor_dim_);
@@ -914,6 +926,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "objective_topics", [&](auto const& v){ objective_topics_ = get_string_vec(v, "objective_topics"); });
     apply_param(params, "plan_topics", [&](auto const& v){ plan_topics_ = get_string_vec(v, "plan_topics"); });
     apply_param(params, "plan_gain", [&](auto const& v){ plan_gain_ = get_double(v, "plan_gain"); });
+    apply_param(params, "plan_fade", [&](auto const& v){ plan_fade_ = get_double(v, "plan_fade"); });
+    apply_param(params, "plan_puppet_gain", [&](auto const& v){ plan_puppet_gain_ = get_double(v, "plan_puppet_gain"); });
     apply_param(params, "velocity_objective_topics", [&](auto const& v){ velocity_objective_topics_ = get_string_vec(v, "velocity_objective_topics"); });
 
     if (int(proprio_topics_.size()) != n_legs_)
@@ -2060,6 +2074,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
     else if (key == "sat_lr")       sat_lr_       = get_double(value, "sat_lr");
     else if (key == "plan_gain") plan_gain_ = get_double(value, "plan_gain");
+    else if (key == "plan_fade") plan_fade_ = get_double(value, "plan_fade");
+    else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
@@ -4097,6 +4113,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             y[1]     += drive;    // hip2 + = push feet down / lift chassis
             y[m - 1] += drive;    // knee + = tuck (raises the chassis in spider stance)
         }
+        // PART III bench — the reflex↔plan FADE (operator scaffold, [G]/[R]
+        // class).  Applied to the FULLY ASSEMBLED command (HK + every scaffold
+        // + panic above) so fade 1 silences ALL reflex output and the body
+        // becomes a position servo on the planner's published targets.  Sits
+        // BEFORE the coordination/saturation instruments so they read the
+        // command the body actually executes.  fade 0 = byte-identical.
+        if (plan_fade_ > 0.0 && plan_seen_[leg]
+            && plan_target_[leg].size() == m && L.n >= 3 * m) {
+            const float f = float(std::clamp(plan_fade_, 0.0, 1.0));
+            for (int j = 0; j < m; ++j) {
+                float servo = float(plan_puppet_gain_)
+                              * (plan_target_[leg][j] - L.x[3 * j]);
+                y[j] = (1.0f - f) * y[j] + f * servo;
+            }
+        }
         // Intra-leg coordination instrument: do hip2 (index 1) and the knee (index m-1)
         // push the SAME way?  Read on the assembled command, pre-clamp, post-warmup.
         if (!warmup && m >= 3) {
@@ -4355,6 +4386,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // consumer-fired check every lever has needed)
     mod["plan_pull"]  = plan_pull_ema_;
     mod["plan_w"]     = plan_w_mean_;
+    mod["plan_fade"]  = plan_fade_;
     // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
     // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
     mod["swing_frac"]     = swing_frac_ema_;
@@ -5063,6 +5095,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["height_rest_frac"] = height_rest_frac_;   // height-defense fade: 1 at rest → 0 while moving fwd
     j["plan_pull"] = plan_pull_ema_;             // lever (b): mean w·|x−x*| of the plan pull (EMA)
     j["plan_w"]    = plan_w_mean_;               // lever (b): mean effective plan weight
+    j["plan_fade"] = plan_fade_;                 // bench: reflex↔plan crossfade position
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
       j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much POSTURE phase-conditioning HK has learned
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cvel.norm(); ++c; }

@@ -160,7 +160,26 @@ func _ready() -> void:
 	drow.add_child(_depth_opt)
 	vb.add_child(drow)
 
+	_mk_section(vb, "FADE — reflex ↔ plan puppet (the lesion bench)")
+	_mk_slider(vb, _MOTOR_ID, "plan_fade", "plan_fade (1=puppet, no reflex)", 0.0, 1.0, 0.01)
+	_mk_slider(vb, _MOTOR_ID, "plan_puppet_gain", "puppet servo gain", 0.0, 8.0, 0.1)
+
 	_mk_section(vb, "HAND MASK — mode-2 region inhibition, live")
+	var grow := HBoxContainer.new()
+	var gl := Label.new()
+	gl.text = "group"
+	gl.custom_minimum_size = Vector2(46, 0)
+	gl.add_theme_font_size_override("font_size", 11)
+	grow.add_child(gl)
+	for preset in [["ALL h1", 15.0], ["ALL h2", 240.0], ["ALL knee", 3840.0], ["single", 0.0]]:
+		var gb := Button.new()
+		gb.text = preset[0]
+		gb.add_theme_font_size_override("font_size", 11)
+		var gv: float = preset[1]
+		gb.pressed.connect(func() -> void:
+			_set_param(_PLANNER_ID, "mask_joints", gv))
+		grow.add_child(gb)
+	vb.add_child(grow)
 	var jrow := HBoxContainer.new()
 	var jl := Label.new()
 	jl.text = "mask_joint (anatomical)"
@@ -297,8 +316,19 @@ func _process(_dt: float) -> void:
 			var au = pmod.get("author", null)
 			if au is Dictionary:
 				gate_txt += "   kept %d" % [au.get("kept", []).size()]
+	if ps is Dictionary and ps.has("module") and (ps["module"] as Dictionary).has("plan_pub"):
+		var tug: Array = (ps["module"]["plan_pub"] as Dictionary).get("tug", [])
+		if tug.size() >= 12:
+			var by_g: String = ""
+			for g in range(3):
+				var s: float = 0.0
+				for leg in range(4):
+					s += absf(float(tug[g * 4 + leg]))
+				by_g += " %s %.3f" % [_GRP[g], s / 4.0]
+			gate_txt += "\ntug mean|Δ|:%s" % by_g
 	if ms is Dictionary and ms.has("module"):
 		var mmod: Dictionary = ms["module"]
-		gate_txt += "\npull %.4f  w %.3f   (leg order in gate map: FR FL RR RL — anatomical)" % [
-			float(mmod.get("plan_pull", 0.0)), float(mmod.get("plan_w", 0.0))]
+		gate_txt += "\npull %.4f  w %.3f  fade %.2f   (gate-map leg order: FR FL RR RL — anatomical)" % [
+			float(mmod.get("plan_pull", 0.0)), float(mmod.get("plan_w", 0.0)),
+			float(mmod.get("plan_fade", 0.0))]
 	_gate_line.text = gate_txt

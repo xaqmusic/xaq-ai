@@ -70,6 +70,7 @@ _C_RAW_FAN   = (150, 200, 255, 28)
 _C_MASK      = (240, 80, 200, 46)     # the inhibited region
 _C_MASK_EDGE = (240, 80, 200, 170)
 _C_KEPT      = (240, 80, 200, 22)     # earned (kept) masks — steady, fainter
+_C_TUG       = (48, 200, 255, 230)    # the plan pull: playhead → target at plan depth
 _C_FUT_AUTH  = (130, 200, 255)        # earned-authority segment: bright, wide
 _C_FUT_DIM   = (130, 200, 255, 175)   # unearned segment: same hue, clearly visible,
                                       # distinguished by width/solidity not invisibility
@@ -134,6 +135,10 @@ class _Track:
         # "what the author is trying" (bright magenta, hops per trial) from
         # "what it has earned" (steady, faint).  Created lazily per track.
         self.kept_rects: list = []
+        # lever (b) TUG tick: a cyan vector from the playhead's actual pose to
+        # the plan target at its depth — where (and how hard) the pull is
+        # asking this joint to go.  Absent when the joint's gate weight is 0.
+        self.tug_line = plot.plot(pen=pg.mkPen(_C_TUG, width=2.5))
 
         self.playhead = pg.InfiniteLine(pos=0.0, angle=90,
                                         pen=pg.mkPen(_C_PLAYHEAD, width=2))
@@ -301,6 +306,9 @@ class PianoRollInspector(QWidget):
         mspec = snap.get("mask_spec")
         au_snap = snap.get("author") or {}
         kept_specs = au_snap.get("kept", []) if int(au_snap.get("apply", 0)) else []
+        plan_pub = snap.get("plan_pub") or {}
+        tug = plan_pub.get("tug", [])
+        tug_depth = int(plan_pub.get("depth", 8))
         authority = int(snap.get("authority_depth", 0))
         joint_band = snap.get("joint_band", [0, 0] * nj)
         phi = float(snap.get("phi", 0.0))
@@ -357,10 +365,20 @@ class PianoRollInspector(QWidget):
                 else:
                     for c in (tr.raw_mean, tr.raw_fan_hi, tr.raw_fan_lo):
                         c.setData([], [])
-                # THE MASK — magenta region on the masked joint's track(s)
+                # lever (b) TUG tick — from the playhead's actual pose to the
+                # plan target at its depth (tug = w·(target−actual), so with a
+                # gated joint the endpoint IS the target value)
+                if len(tug) > jidx and abs(float(tug[jidx])) > 1e-6:
+                    tr.tug_line.setData([0, tug_depth],
+                                        [actual_now, actual_now + float(tug[jidx])])
+                else:
+                    tr.tug_line.setData([], [])
+                # THE MASK — magenta region on the masked joint's track(s);
+                # the GROUP bitmask (joints_mask) wins over the legacy joint
                 if mspec and float(mspec.get("strength", 0)) > 0:
+                    jm = int(mspec.get("joints_mask", 0))
                     mj = int(mspec.get("joint", -1))
-                    if mj == jidx or mj < 0:
+                    if ((jm >> jidx) & 1) if jm else (mj == jidx or mj < 0):
                         x0 = float(mspec["depth_lo"]); x1 = float(mspec["depth_hi"])
                         y0 = min(float(mspec["val_lo"]), float(mspec["val_hi"]))
                         y1 = max(float(mspec["val_lo"]), float(mspec["val_hi"]))
@@ -387,7 +405,7 @@ class PianoRollInspector(QWidget):
                 for r in tr.kept_rects[len(kept_here):]:
                     r.setVisible(False)
             else:
-                for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim):
+                for c in (tr.fan_hi, tr.fan_lo, tr.fut_auth, tr.fut_dim, tr.tug_line):
                     c.setData([], [])
             # ALWAYS drawn: at authority 0 the gold line sits collapsed ON the
             # playhead — "the planner's authority ends at the present" — and

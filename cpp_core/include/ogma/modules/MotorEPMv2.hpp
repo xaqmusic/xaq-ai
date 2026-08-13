@@ -1203,6 +1203,14 @@ private:
     void handle_plan(int leg, MessagePtr payload);
     std::vector<std::string>     plan_topics_;   // optional per-leg plan-objective topics; empty = OFF
     double                       plan_gain_ = 0.0;
+    // OPERATOR SCAFFOLD ([G]/[R] bench class — a lesion-as-test, never an
+    // operating mode): crossfade the FINAL assembled command (reflexes +
+    // scaffolds, everything) toward a pure position-servo on the planner's
+    // published targets.  fade 0 = byte-identical; fade 1 = the stride as the
+    // planner imagines it, embodied.  Ungated joints' targets arrive as the
+    // current pose (planner-side), so they HOLD rather than flail.
+    double                       plan_fade_ = 0.0;
+    double                       plan_puppet_gain_ = 2.0;   // servo P on (x*−x)
     std::vector<Eigen::VectorXf> plan_target_;   // per-leg target joint positions (motor_dim)
     std::vector<Eigen::VectorXf> plan_w_;        // per-leg PER-JOINT weights ∈ [0,1] (the band gate)
     std::vector<char>            plan_seen_;

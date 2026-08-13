@@ -88,6 +88,11 @@ ParamSchema MotorPlanner::params_schema() const {
         {"mask_joint", ParamMutability::HotMutable,
          "mode 2: joint whose READOUT pose is tested (0..11), or -1 = all joints.",
          ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{11.0}},
+        {"mask_joints", ParamMutability::HotMutable,
+         "mode 2 GROUP mask: bitmask of joints (bit j = planner joint j; h1=15, h2=240, "
+         "knee=3840).  Non-zero WINS over mask_joint — the operator's tier-wide inhibition "
+         "(e.g. all four hip2 at once).  0 = off (legacy single-joint semantics).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{4095.0}},
         {"mask_val_lo", ParamMutability::HotMutable,
          "mode 2: inhibited pose-value range, low edge.", ParamValue{0.0}, ParamValue{-1.5}, ParamValue{1.5}},
         {"mask_val_hi", ParamMutability::HotMutable,
@@ -175,7 +180,8 @@ ParamMap MotorPlanner::current_params() const {
     m["pose_topic"] = pose_topic_;
     m["horizon"] = horizon_; m["beam_k"] = beam_k_;
     m["phase_bins"] = phase_bins_; m["mask_mode"] = mask_mode_; m["mask_floor"] = mask_floor_;
-    m["mask_joint"] = mask_joint_; m["mask_val_lo"] = mask_val_lo_; m["mask_val_hi"] = mask_val_hi_;
+    m["mask_joint"] = mask_joint_; m["mask_joints"] = mask_joints_;
+    m["mask_val_lo"] = mask_val_lo_; m["mask_val_hi"] = mask_val_hi_;
     m["mask_depth_lo"] = mask_depth_lo_; m["mask_depth_hi"] = mask_depth_hi_;
     m["mask_strength"] = mask_strength_;
     m["author_mode"] = author_mode_; m["author_apply"] = author_apply_;
@@ -203,6 +209,7 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     mask_mode_  = pget(params, "mask_mode",  mask_mode_);
     mask_floor_ = pget(params, "mask_floor", mask_floor_);
     mask_joint_    = pget(params, "mask_joint",    mask_joint_);
+    mask_joints_   = pget(params, "mask_joints",   mask_joints_);
     mask_val_lo_   = pget(params, "mask_val_lo",   mask_val_lo_);
     mask_val_hi_   = pget(params, "mask_val_hi",   mask_val_hi_);
     mask_depth_lo_ = pget(params, "mask_depth_lo", mask_depth_lo_);
@@ -283,6 +290,7 @@ void MotorPlanner::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "mask_mode")  mask_mode_  = d(mask_mode_);
     else if (k == "mask_floor") mask_floor_ = d(mask_floor_);
     else if (k == "mask_joint")    mask_joint_    = d(mask_joint_);
+    else if (k == "mask_joints")   mask_joints_   = d(mask_joints_);
     else if (k == "mask_val_lo")   mask_val_lo_   = d(mask_val_lo_);
     else if (k == "mask_val_hi")   mask_val_hi_   = d(mask_val_hi_);
     else if (k == "mask_depth_lo") mask_depth_lo_ = d(mask_depth_lo_);
@@ -358,13 +366,15 @@ void MotorPlanner::decode_row(Dist const& d, float* mean_out, float* sd_out) con
 
 // One region spec against one row — the shared primitive every masking path
 // (manual/candidate params, each kept mask) funnels through.  Suppresses mass
-// of tokens whose READOUT pose falls inside [lo,hi] on the selected joint(s).
-// Inhibition acts on the CONTINUOUS substrate through the mixture; tokens are
-// carriers.  Returns true if any mass survived suppression and was renormalized.
-bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
+// of tokens whose READOUT pose falls inside [lo,hi] on any selected joint
+// (jmask bit j = planner joint j; 0xFFF = all — the GROUP form the operator's
+// all-h2 experiments need).  Inhibition acts on the CONTINUOUS substrate
+// through the mixture; tokens are carriers.  Returns true if any mass
+// survived suppression and was renormalized.
+bool MotorPlanner::suppress_region(Dist& d, uint32_t jmask, float lo, float hi,
                                    int dlo, int dhi, float strength,
                                    int depth, long& hit_counter) {
-    if (strength <= 0.0f) return false;
+    if (strength <= 0.0f || jmask == 0) return false;
     if (depth < dlo || depth > dhi) return false;
     if (hi <= lo) return false;
     // INHIBITION MAY REROUTE, NEVER ANNIHILATE.  If suppression would zero the
@@ -378,12 +388,9 @@ bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
         auto it = tok_pose_.find(tok);
         if (it == tok_pose_.end() || it->second.n < 2) continue;
         bool inside = false;
-        if (jsel >= 0 && jsel < kJoints) {
-            float v = it->second.mean[jsel];
-            inside = (v >= lo && v <= hi);
-        } else {
-            for (int j = 0; j < kJoints && !inside; ++j)
-                inside = (it->second.mean[j] >= lo && it->second.mean[j] <= hi);
+        for (int j = 0; j < kJoints && !inside; ++j) {
+            if (!((jmask >> j) & 1u)) continue;
+            inside = (it->second.mean[j] >= lo && it->second.mean[j] <= hi);
         }
         if (inside) { pmass *= (1.0f - strength); any = true; ++hit_counter; }
     }
@@ -402,12 +409,17 @@ bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
 }
 
 // mode 2 — the param-spec mask: the manual/demo mask, or the author's live
-// trial candidate (the author writes the params at trial start).
+// trial candidate (the author writes the params at trial start).  The GROUP
+// bitmask (mask_joints) wins when set; else legacy single-joint/all semantics.
 bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
     if (mask_mode_ < 1.5) return false;
     const float lo = float(std::min(mask_val_lo_, mask_val_hi_));
     const float hi = float(std::max(mask_val_lo_, mask_val_hi_));
-    return suppress_region(d, int(mask_joint_), lo, hi,
+    uint32_t jm;
+    if (mask_joints_ >= 1.0) jm = uint32_t(mask_joints_) & 0xFFFu;
+    else if (mask_joint_ >= 0.0) jm = 1u << int(mask_joint_);
+    else jm = 0xFFFu;
+    return suppress_region(d, jm, lo, hi,
                            int(mask_depth_lo_), int(mask_depth_hi_),
                            float(mask_strength_), depth, masked_out_);
 }
@@ -418,10 +430,12 @@ bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
 bool MotorPlanner::apply_kept_masks(Dist& d, int depth) {
     if (author_apply_ < 0.5 || kept_.empty()) return false;
     bool any = false;
-    for (auto const& k : kept_)
-        if (suppress_region(d, k.spec.joint, k.spec.lo, k.spec.hi,
+    for (auto const& k : kept_) {
+        uint32_t jm = (k.spec.joint >= 0) ? (1u << k.spec.joint) : 0xFFFu;
+        if (suppress_region(d, jm, k.spec.lo, k.spec.hi,
                             k.spec.dlo, k.spec.dhi, 1.0f, depth, kept_masked_out_))
             any = true;
+    }
     return any;
 }
 
@@ -658,6 +672,8 @@ void MotorPlanner::tick(uint64_t tick_id) {
                 }
             }
             plan_w_[j] = w;
+            plan_tug_[j] = (w > 0.0f && plan_pose_valid_)
+                               ? w * (plan_pose_[j] - cur_pose_[j]) : 0.0f;
             if (w > 0.0f) any_w = true;
         }
         for (size_t leg = 0; leg < plan_output_topics_.size() && leg < 4; ++leg) {
@@ -805,7 +821,9 @@ void MotorPlanner::author_start_trial() {
     c.hi = std::clamp(c.hi, -1.5f, 1.5f);
     cand_ = c;
 
-    // the author OWNS the mask params during a trial
+    // the author OWNS the mask params during a trial (incl. clearing any
+    // operator-set GROUP bitmask, which would otherwise ride its trials)
+    mask_joints_   = 0.0;
     mask_joint_    = double(c.joint);
     mask_val_lo_   = double(c.lo);
     mask_val_hi_   = double(c.hi);
@@ -990,10 +1008,13 @@ nlohmann::json MotorPlanner::snapshot_state() const {
     // lever (b) publisher state — which joints the earned-bands gate admits at
     // plan_depth this tick, and the distress cut (the §3.2 publisher-fired check)
     if (plan_publish_ >= 0.5 && !plan_output_topics_.empty()) {
-        nlohmann::json pw = nlohmann::json::array();
-        for (int j = 0; j < kJoints; ++j) pw.push_back(plan_w_[j]);
+        nlohmann::json pw = nlohmann::json::array(), pt = nlohmann::json::array();
+        for (int j = 0; j < kJoints; ++j) {
+            pw.push_back(plan_w_[j]);
+            pt.push_back(std::round(plan_tug_[j] * 1000.0f) / 1000.0f);
+        }
         mod["plan_pub"] = {{"depth", int(plan_depth_)}, {"n", plan_published_},
-                           {"w", std::move(pw)},
+                           {"w", std::move(pw)}, {"tug", std::move(pt)},
                            {"override", plan_gate_override_ >= 0.5 ? 1 : 0},
                            {"distress", std::round(distress_ * 1000.0f) / 1000.0f}};
     }
@@ -1036,6 +1057,7 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     if (mask_mode_ > 1.5) {
         mod["mask_spec"] = {
             {"joint", int(mask_joint_)},
+            {"joints_mask", int(mask_joints_)},   // group bitmask; 0 = legacy joint field
             {"val_lo", mask_val_lo_}, {"val_hi", mask_val_hi_},
             {"depth_lo", int(mask_depth_lo_)}, {"depth_hi", int(mask_depth_hi_)},
             {"strength", mask_strength_},
