@@ -1431,6 +1431,7 @@ var _slick_leg: int = -1
 var _slick_at: int = 0
 var _slick_done: bool = false
 var _lesion_at: int = -1
+var _sched_patches: Array = []   # SETPARAM_AT entries: {t, id, key, val, done}
 var _lesion_until: int = 0x7FFFFFFF
 var _lesion_scale: float = 0.2
 # "action" (default) attenuates the leg's COMMANDED MOTION; "torque" caps its torque
@@ -2539,6 +2540,21 @@ func _ready() -> void:
 	if skl != "": _slick_leg = skl.to_int()
 	var ska: String = OS.get_environment("OGMA_PICRAWLER_SLICK_AT")
 	if ska != "": _slick_at = ska.to_int()
+	# 2026-08-14 — SCHEDULED BRAIN-PARAM FLIP (generic perturbation hook, the
+	# lesion-AT idiom generalized to any HotMutable module param).  Format:
+	#   OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;tick:module:key:value...]"
+	# Applied ONCE when tick_counter reaches each entry's tick (tick 1 = an
+	# arm-differentiation mechanism without config proliferation; a mid-run
+	# tick = the (d)-test's perturbation).  Each application is logged.
+	var spa: String = OS.get_environment("OGMA_PICRAWLER_SETPARAM_AT")
+	if spa != "":
+		for ent in spa.split(";", false):
+			var parts: PackedStringArray = ent.split(":", false)
+			if parts.size() == 4:
+				_sched_patches.append({"t": parts[0].to_int(), "id": parts[1],
+					"key": parts[2], "val": parts[3].to_float(), "done": false})
+			else:
+				push_warning("SETPARAM_AT entry malformed (want tick:module:key:value): " + ent)
 	_abl_init()
 	_abl_parse_env()
 	var ccl: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_COLLIDE")
@@ -5736,6 +5752,17 @@ func _step_one() -> void:
 	if _abl_env_spec != "" and not _abl_env_done and tick_counter >= _abl_env_at:
 		_abl_env_done = true
 		_abl_apply_env_spec()
+	# Scheduled brain-param flips (SETPARAM_AT).  Announced loudly per §3.2 rule 7 —
+	# a run must never silently be the arm you did not intend.
+	for _sp in _sched_patches:
+		if not _sp["done"] and tick_counter >= int(_sp["t"]) and brain != null:
+			_sp["done"] = true
+			var _res = brain.apply_patch({"op": "set_param", "id": _sp["id"],
+				"key": _sp["key"], "value": _sp["val"]})
+			var _ok: bool = typeof(_res) == TYPE_DICTIONARY and bool(_res.get("success", false))
+			print("PicrawlerBody: [setparam_at] %s.%s = %s at tick %d -> %s" % [
+				_sp["id"], _sp["key"], str(_sp["val"]), tick_counter,
+				("OK" if _ok else "FAILED " + str(_res))])
 	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
 		_teleport_to_ramp()
 	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \

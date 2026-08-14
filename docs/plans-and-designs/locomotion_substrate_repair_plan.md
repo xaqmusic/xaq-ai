@@ -1229,3 +1229,33 @@ DIFFER from habit — via a predictive-coding-conditioned vocabulary
 (doctrine §0's descending-predictor path, the recorded (c) fix) and/or a
 generative excitation source (M2: episodic capture of the body's own best
 segments written into far rows).**
+
+**2026-08-14 — OPTION A LAUNCHED (operator-approved: consolidate (b), then
+B) + the SETPARAM_AT hook + B's design queued.** Running: n=20 powering
+(planpull vs planpull0, 12k), dose arms (plan_gain 0.05/0.2, n=6), depth
+arm (plan_depth 13, n=6), and the (d)-test (16k, plan_gain 0.1→0 at
+t=10000 vs no-flip baseline, n=6; scorer `ddropscore.py` — windowed
+disp/steps/planted/tilt + the pl_pull flip-fired check).  New generic
+perturbation hook: `OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;…]"`
+(the lesion-AT idiom generalized to any HotMutable brain param; announced
+loudly per §3.2 rule 7; tick 1 doubles as arm differentiation without
+config proliferation).
+
+*B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
+The audit answer again — the pieces exist, hand-roll only scorers: EPM
+already implements descending-prediction subtraction (`gng_input =
+encode(obs) − predicted_latent`, unit-tested), and `DescendingPredictor`
+(AR(1): W·context + b per target, online SGD) has existed since Phase 1
+with no motor-path consumer.  Wiring: `body_pose_pc` EPM over
+`reality.proprio.joints` (subtract_descending_prediction=true) + a
+DescendingPredictor whose CONTEXT is the CPG clock [cosφ,sinφ] (§0 rule 3
+— phase is the load-bearing context), so the subtracted term is the
+stride's phase-expected pose and the GNG tiles DEVIATION-FROM-RHYTHM — the
+corrections the operator sees as h2 noise become the densest, most
+predictable token regions instead of invisible residue.  Shadow
+MotorPlanner over the pc vocabulary beside the bodypose control (the twin
+protocol).  Gates, M0.d-style: vocabulary self-limits; self-transition
+mass falls materially below 0.55; per-joint bands extend below k=8 or past
+k=34; h2 tracks earn FIRST bands; decode sharpens (fade-1 embodied
+playback is the operator's blur test).  Fail ⇒ context arm swap (own-latent
+AR(1) vs clock) before any verdict on the predictive-coding path itself.
