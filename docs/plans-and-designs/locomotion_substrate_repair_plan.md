@@ -1451,6 +1451,34 @@ stationary residual space → the GNG can finally bake).  The B program's
 structural achievement stands: self-mass 0.72 → 0.27 across the campaign;
 the planner value question stays open pending the freeze arm.**
 
+**2026-08-14 — OPERATOR LIVE CATCH: the "seized blue leg" diagnosed — a
+seed-roaming STANCE-CAPTURE attractor, invisible to the global amplitude
+homeostat.** Operator, watching the promoted stack at seed 42: "the right
+rear blue leg is seizing up ... might be a sign flip."  High-fidelity
+repro (seed 42, 4200 ticks, DIAG_INTERVAL=1, window 3000–4000): leg rl
+(cfg 'rl' = BLUE = anatomical RR) shows amp 0.004 vs 0.47–0.81 on its
+siblings, ZERO lifts, hip1 pinned deep negative with its command CLIPPING
+62% of ticks, knee held tucked (never below −0.28 vs siblings' −1.6), h2
+pressing.  NOT a sign flip: the collapse is EPISODIC (dies ≈t1200,
+RECOVERS to amp 0.567 ≈t2400, dies again ≈t3200) — a flipped sign never
+walks.  Mechanism: stance capture — the leg becomes the permanent support
+leg; its stroke accumulates backward against the hip1 stop, the swing
+that would release it never triggers, and the stance biases hold the
+posture; self-reinforcing.  The weak pair is the π-phase diagonal (fr
+took 1 lift in the window).  SEED-ROAMING: seed 2's final amps are
+[0.48, 0.05, 0.57, 0.26] — same attractor, leg fr — which retro-explains
+the recurring "one bad seed" in every A/B this week.  WHY UNCORRECTED:
+the amplitude homeostat is GLOBAL — it satisfies the group mean by
+over-driving the living legs (a blind metric in control form).  Chronic
+h_bias floor-saturation (−0.5, 46–66% of ticks in healthy seeds too) is
+background pressure, not the discriminator.  **Candidate lever, already
+built and OFF: `propulsion_balance_gain` — the per-leg propulsive-credit
+homeostat (below-group-mean legs get a self-limiting stroke boost) — the
+exact per-leg ownership the global homeostat lacks.  A/B launched
+(0.3 vs control, n=6); judge on per-seed MIN leg amplitude (the honest
+anti-blind metric for this failure) + the full set; operator running the
+live [M]-panel slider test at seed 42 in parallel.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
