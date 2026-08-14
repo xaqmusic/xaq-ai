@@ -548,9 +548,15 @@ func _process(_delta: float) -> void:
 			drop_v.x, drop_v.y, drop_v.z, "  INVERTED" if _as_bool(flip_v) else "",
 			_as_int(drop_tick_v), drop_v.x, drop_v.z,
 			" TELEPORT_FLIP=1" if _as_bool(flip_v) else ""])
-	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s" % [
+	# 2026-08-14 — the RESOLVED seed, always visible.  The launcher's 'random'
+	# checkbox silently overrides the spinbox (a rolled seed was invisible, so a
+	# run the operator wanted to revisit was unrecoverable — the seed-42 seize
+	# hunt).  -1 = config-default seeding (no override applied).
+	var seed_v: Variant = body.get("_resolved_seed")
+	var seed_hint: String = "   seed: %s" % (str(_as_int(seed_v)) if seed_v != null and _as_int(seed_v) >= 0 else "cfg")
+	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s%s" % [
 		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
-		jb_hint + ts_hint]
+		jb_hint + ts_hint, seed_hint]
 	var hint_view: String = "%s%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
 		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, plan_hint,
 		rays_hint, vis_hint]
