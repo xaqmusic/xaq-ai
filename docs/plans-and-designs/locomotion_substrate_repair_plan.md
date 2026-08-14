@@ -1416,6 +1416,41 @@ lengthen runs (24k+) so tokens earn visits and bakes, and/or coarsen the
 residual tiling; re-judge the planner gates only when baked > 0 and the
 per-token count matches the bodypose reference's.**
 
+**2026-08-14 — RATCHET-FIXED OVERDUE KNEE (arm 3) + B v2.1 (fed vocabulary):
+the planting family reaches the operator's-eye gate; the residual planner
+nulls again with a NEW mechanism named.**
+
+*swing_overdue_knee 0.4 with the unassisted-reference fix (n=6): the
+GAIT'S CHARACTER CHANGES.* Robustness is the headline: net_z σ COLLAPSES
+1.33→0.63 (every seed 5.4–7.4, zero falls), **planted 3.54→3.67 — the
+planting metric's first move in the family**, straight holds.  The costs:
+steps 270→167 (cadence −38%), cv 0.89.  And the consumer count ROSE to
+9,305: excluding assisted swings from training exposes the REVERSE
+entanglement — the reference cannot track a legitimate gait slow-down, so
+lengthening swings read as perpetually overdue.  The result is fewer,
+longer, more-planted strides.  **Verdict: PARTIAL, ESCALATED TO THE
+OPERATOR'S EYE — aggregate metrics cannot distinguish 'deliberate planted
+gait' from 'sluggish gait' (a blind-metric situation by construction).
+`swing_overdue_knee` added to the [M] motor-panel sliders for live
+judgment.  Re-use context: if the eye says 'planted', the cadence cost is
+the trade to tune; if 'sluggish', the reference needs a two-timescale form
+(slow tracking of ALL swings + fast exclusion of assisted ones).**
+
+*B v2.1 (latent-AR + norm, cap 800, 24k, n=4): the vocabulary is healthy
+and the planner nulls AGAIN — with the cause visible.* Nodes 274–285
+(below cap, pruning live), in-use 453, self-mass **0.27** (the deepest
+carve yet) — but **baked = 0 even at 24k with ~85 visits/node**, and the
+answer is structural: the predictor NEVER STOPS LEARNING (lr 0.01, no
+freeze), so the residual distribution drifts under the GNG forever — a
+substrate chasing itself cannot stabilize enough to bake.  Planner gates:
+rear-knee ratios TIE control, rk bands narrower, h2 absent, chain ≈
+persistence, authority 0.  **Verdict: NULL for the planner layer at every
+tested configuration (v1/v2/v2.1); the pre-registered next knob costs
+zero code — `freeze_after_ticks` on pc_predictor (converge, then freeze →
+stationary residual space → the GNG can finally bake).  The B program's
+structural achievement stands: self-mass 0.72 → 0.27 across the campaign;
+the planner value question stays open pending the freeze arm.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =

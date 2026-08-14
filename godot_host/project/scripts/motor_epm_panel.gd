@@ -24,6 +24,9 @@ const _MODULE_ID: String = "motor_epm"
 const _SLIDERS: Array = [
 	# primary "by eye" levers (legs weak -> motor_gain; jerky -> ctrl_lr / noise)
 	{"key": "motor_gain",        "label": "motor_gain  (leg strength)", "min": 0.0,  "max": 5.0,  "step": 0.1},
+	# 2026-08-14 — the planting family's decision knob (operator's-eye gate):
+	# 0 = off; the reach fires only on swings that outlive the leg's own average.
+	{"key": "swing_overdue_knee", "label": "overdue_knee (planting reach)", "min": 0.0, "max": 1.5, "step": 0.05},
 	# 2026-08-02 — ceiling raised 0.10 -> 0.30.  The old max sat exactly at the BOTTOM of
 	# the range that works, so this lever could not be found by eye.  Measured on the
 	# pure-HK base at 20k, n=4: steps 41 -> 141 -> 163 -> 226 and net_disp 0.56 -> 0.68
