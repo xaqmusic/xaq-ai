@@ -1381,6 +1381,41 @@ CONSTRUCTION.  Verdict on arm 1: REGRESSION (recorded, kept as the arm);
 arm 2 (overdue form, 0.4) in flight.  Re-use context for arm 1: none
 foreseen — the mechanism class is superseded by the error-form.
 
+**2026-08-14 — PLANTING arm 2 (the overdue error-form) + B v2 (residual
+normalization): one PARTIAL with a named ratchet, one HISTORIC structural
+pass with a starved planner.**
+
+*swing_overdue_knee 0.4 (n=6): PARTIAL.* Five of six seeds hold transport
+(7.0–8.8 vs control 7.24); swing bouts shorten 8.29→7.68 exactly as
+designed (overdue swings get terminated by the reach); but cv 0.75→0.85,
+falls 0→3 (two seeds), and the consumer counter exposes the flaw: 4,575
+overdue leg-ticks — **the expectation RATCHETS.** The reach shortens
+swings; completed-swing durations feed the running average; the average
+falls; more swings read as overdue.  The intervention chases its own
+reference.  Re-use context (the fix, one gate): learn the expected
+duration ONLY from unassisted swings (skip the EMA update when the reach
+fired that swing).  Operator eye pending on the planting quality itself.
+
+*B v2 (normalize_residual, both context arms, n=4 × 12k arena):* **The
+structural gates PASS for the first time in the campaign's history** —
+vocab 25 → 235/246 in-use, entropy 5.1 nats, and self-transition mass
+falls to **0.51 (clock ctx) / 0.32 (latent-AR ctx)** against the pose
+vocabulary's 0.69–0.72 and the gate's < 0.55: the token stream finally
+CARVES THE STRIDE, the target M0 set on 2026-08-09.  The collapse fix
+did exactly what the §6 diagnosis said it would.  **But the planner
+gates still FAIL:** the vocabulary slams into the 200-node cap with ZERO
+baked (≈50 visits/token at 12k — below the baking threshold's
+statistics), the chain scores BELOW the now-weaker persistence baseline
+(0.77–0.94), h2 bands appear only scattered (2/4 seeds, narrow), and the
+v1 rear-knee gain is GONE (pc ties-to-worse vs control) — the M0.d.2
+lesson verbatim: finer tiling without transition statistics is per-token
+sample starvation.  **Verdict: B v2 PARTIAL — the substrate condition is
+finally met; the planner layer is data-starved, not refuted.  Re-use
+context / v2.1: raise max_nodes (cap-hit is §0 rule 4's diagnosis),
+lengthen runs (24k+) so tokens earn visits and bakes, and/or coarsen the
+residual tiling; re-judge the planner gates only when baked > 0 and the
+per-token count matches the bodypose reference's.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
