@@ -1203,3 +1203,29 @@ rest actually recruit an earlier FR step? Re-use context: plan_gain dose
 (0.05/0.2), plan_depth 13, and gating on the kept-mask-shaped vs raw roll
 are the untried axes; a (d)-style perturbation (drop the pull mid-run,
 watch re-coordination) is the sharpest next evidence.**
+
+**2026-08-14 — OPERATOR BENCH SESSION: the levers verified by hand, and the
+M1 chapter's closing diagnosis.** With the full bench in place ([O]: mix,
+gate override, group masks, reflex↔plan fade, tug vectors), the operator
+drove the crossfade and the tier masks live. Two observations, both
+load-bearing: (1) **at fade 1 (reflexes silenced, pure plan playback) the
+motors settle into a stable OSCILLATORY state** — the closed loop
+pose→tokens→cone→decode→servo→pose converges to the predictor's
+self-consistent orbit: the substrate carries the body's RHYTHM but the
+PROPULSION (stroke, stance press, load corrections) survives only as a
+blurred mixture-mean, and embodied, that residue is an oscillation that
+goes nowhere; (2) **no region mask on any joint set (incl. all-h2 with
+override + fade) visibly improves the gait** — inhibition reroutes mass to
+other tokens the model already believes, and the vocabulary, learned from
+the body's own history, contains only its habits. **Verdict (three
+independent demonstrations now: token-chain refutation M0–M0.d.2, the
+author's search finding only seed-specific bias masks, and the operator's
+embodied playback): the E/I instrument is WORKING and BOUNDED BY THE
+VOCABULARY'S CONTENT, which is a mirror of the reflex stack's habits.
+Selection over habitual futures can stabilize and commit (the lever-(b)
+coherence signal) but cannot innovate. Re-use context: E/I selection
+becomes interesting again the moment the vocabulary contains futures that
+DIFFER from habit — via a predictive-coding-conditioned vocabulary
+(doctrine §0's descending-predictor path, the recorded (c) fix) and/or a
+generative excitation source (M2: episodic capture of the body's own best
+segments written into far rows).**
