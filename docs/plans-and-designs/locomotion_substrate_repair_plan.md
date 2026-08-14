@@ -1537,6 +1537,48 @@ holding the aggregate ties.  Promotion of prop_bal alone = operator's
 call: severity-halving with zero aggregate cost is a real robustness
 gain, but it is half a fix.**
 
+**2026-08-14 — THE REAR LANDING SEQUENCE (operator-directed, arena
+protocol): the composite produces the first LOADED rear touchdowns —
+signal-grade WORKING at 0.5/0.5, UI review pending.** Operator spec:
+prop_bal unpromoted (effect real but negligible by eye; ledger stands at
+PARTIAL); the rear failure is SEQUENCING — hip2+knee lift high through
+swing, then hip1/hip2/knee all move AT ONCE on the stroke; needed: DROP
+and load first, THEN hip1 sweeps with slight knee extension.  All
+measurement moved to the OPEN ARENA (fast straight outward travel).
+
+*Build (rear pair only, both gain-0):* `rear_land_gain` — during descent,
+hip2 press + knee SERVO to `rear_knee_plant` (+0.2, slightly flexed for
+traction; closed-loop, because the open-loop descent extension was the
+measured regression = the 'everything at once' failure itself);
+`rear_push_ext` — while PLANTED and the hip1 actually sweeps, knee
+extension scaled by the leg's own running |Δhip1| (structurally cannot
+fire before the plant — sequence enforced by gates, not schedule).
+
+*Arena table (n=6 × 12k, seeds 1–6, control = promoted stack):*
+- CTRL: net_disp 10.20±1.70, straight 0.64, falls 0, cv 0.70, rear-TD
+  hip2 −0.05.
+- A (drop 0.5): 10.74±0.87 (σ HALVED), straight 0.68, cv 0.88 (rhythm
+  pays), TD hip2 −0.17.
+- B (push 0.5): ties control, cleanest amp (meanworst 0.001), falls
+  spike (4, one seed 3).
+- **A+B (0.5/0.5): net_disp 11.07 (+9%), straight 0.67, and the TARGET
+  SIGNATURE — rear touchdowns arrive with hip2 POSITIVE (+0.02): the
+  femur lands pressed/loaded for the first time in the campaign.**
+  Costs: cv 0.85, 2 unstable seeds (falls 2+1), σ 2.52.
+- HALF DOSES (0.25): the signature VANISHES (hip2 −0.09/−0.15) and the
+  gains with it; A-half destabilizes (one seed 3.90/0.20/4 falls).  The
+  dose response is not an inverted-U here — full dose is the point.
+
+**Verdict: WORKING at signal grade — the operator's sequencing model is
+CONFIRMED CAUSAL (only the drop+push composite loads the landings, and
+loading them buys transport).  NOT promoted: n=6, rhythm cost real, two
+unstable seeds.  Next: the operator's eye at rear_land 0.5 + rear_push
+0.5 (panel sliders live; arena; watch the rear sequence itself), then
+n=20 on the composite if the eye approves.  Re-use context: the rhythm
+cost may be the drop-press's cadence drag (the 2026-08-10 pattern);
+a phase-shaped press (strong only in the descent's back half) is the
+recorded refinement if cv must come back before promotion.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
