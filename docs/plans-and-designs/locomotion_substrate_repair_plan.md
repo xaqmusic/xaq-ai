@@ -1516,6 +1516,27 @@ the anti-fragility candidate for the stack — and the rear-only touchdown
 posture idea stays pocketed for whatever residual planting deficit
 survives prop_bal.**
 
+**2026-08-14 — PROP_BAL n=20: severity HALVED, incidence UNCHANGED — a
+half-fix that localizes the attractor's second door.** Population (n=20,
+0.3 vs the promoted stack): aggregates TIE (net 6.48±1.80 vs 6.41±1.86,
+cv 0.81≈0.80, falls 2=2).  The attractor metric tells the real story:
+seized seeds (worst-leg dead-duty > 0.05) are **5/20 IN BOTH ARMS**
+(largely the same seeds — 16/17/18/19 both), but severity halves: mean
+worst-duty 0.118 → 0.060, and the catastrophic captures are gone (ctrl
+worst 0.853/0.644/0.534 → pb worst 0.325/0.288/0.272; seed 42 rescued
+outright, 0.30 → 0.00).  **Verdict: PARTIAL — per-leg propulsive credit
+shortens captures (recovery door opened) but does not prevent entry.  The
+entry door is the LANDING GEOMETRY (the touchdown forensics: femur-lifted
+ghost touches earn no load regardless of stroke boost — a boosted stroke
+cannot push through a foot that never loads).  Re-use context / next arm:
+close the entry door with the landing-posture family — the operator's
+rear-gated touchdown idea, or the recorded hip2 descent press at LOW dose
+— measured ON TOP of prop_bal (one lever at a time: pb becomes the
+baseline if adopted), judged on INCIDENCE (seized-seeds count) while
+holding the aggregate ties.  Promotion of prop_bal alone = operator's
+call: severity-halving with zero aggregate cost is a real robustness
+gain, but it is half a fix.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
