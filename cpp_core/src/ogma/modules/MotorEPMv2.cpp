@@ -3723,9 +3723,20 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                         && float(swd_age_[leg]) > kDescentFrac * swd_dur_[leg])
                         descending = true;
                 } else if (swd_air_[leg]) {
-                    swd_dur_[leg] = (swd_dur_[leg] <= 0.0f)
-                                  ? float(swd_age_[leg])
-                                  : 0.9f * swd_dur_[leg] + 0.1f * float(swd_age_[leg]);
+                    // RATCHET FIX (2026-08-14, measured): an ASSISTED swing's
+                    // duration must not train the expectation — the reach
+                    // shortens swings, the shrinking average then reads MORE
+                    // swings as overdue, and the intervention chases its own
+                    // reference (4,575 overdue leg-ticks/run at 0.4).  The
+                    // reference learns from unassisted swings only.  The hip2
+                    // press path (swing_descend_gain) keeps its 2026-08-10
+                    // recorded semantics — only the overdue reach sets the flag.
+                    if (!swd_assisted_[leg]) {
+                        swd_dur_[leg] = (swd_dur_[leg] <= 0.0f)
+                                      ? float(swd_age_[leg])
+                                      : 0.9f * swd_dur_[leg] + 0.1f * float(swd_age_[leg]);
+                    }
+                    swd_assisted_[leg] = 0;
                 }
                 swd_air_[leg] = airborne ? 1 : 0;
             }
@@ -3749,6 +3760,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     const float late = float(swd_age_[leg]) / swd_dur_[leg] - 1.0f;
                     if (late > 0.0f) {
                         y[m - 1] -= float(swing_overdue_knee_) * std::min(1.0f, late);
+                        swd_assisted_[leg] = 1;     // this swing may not train the reference
                         ++swd_overdue_ticks_;
                     }
                 }

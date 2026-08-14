@@ -1388,6 +1388,11 @@ private:
     int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
     float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
     uint8_t swd_air_[8] = {0,0,0,0,0,0,0,0};       // previous airborne state
+    uint8_t swd_assisted_[8] = {0,0,0,0,0,0,0,0};  // overdue reach fired THIS swing —
+                                                   // its duration must NOT train the
+                                                   // expectation (the ratchet fix:
+                                                   // the reference chases only
+                                                   // UNASSISTED swings)
     long    swd_press_ticks_ = 0;                   // consumer-fired check
     long    swd_overdue_ticks_ = 0;                 // touchdown-seeking fired check
 
