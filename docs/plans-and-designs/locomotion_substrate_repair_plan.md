@@ -1364,6 +1364,23 @@ rungs; (iii) the rear-knee planting target does NOT wait on B: it can get
 its own behavioral lever (stance-gated knee-flexion-at-touchdown through
 the promoted plan-pull carrier) regardless of vocabulary work.**
 
+**2026-08-14 — REAR-KNEE PLANTING lever, arm 1 (constant descent extension):
+REGRESSION — and the §3.2-rule-6 catch on my own build.** The operator's
+named target built as the knee half of swing-descent (`swing_descend_knee`:
+past half the leg's own swing, the shank flips from fold to extend).  n=6
+corridor vs the promoted stack: net_z 7.24→5.15/4.73 (0.3/0.6), cv
+0.75→0.87/0.89, falls 0→3/1, planted DROPS 3.54→3.36/3.46 — the constant
+form pays the hip2-press's rhythm cost AND loses transport: extending
+through EVERY descent stabs healthy swings; the 2026-08-10 "knee keeps its
+fold" was load-bearing.  **Faithfulness check on myself: the constant form
+is a WEAKENED SLICE of the stated design** ("contact expected by now, none
+arrived").  Built the error-form (`swing_overdue_knee`): extension fires
+ONLY when a swing outlives the leg's own running-average duration, grows
+with lateness, releases on contact — healthy swings untouched BY
+CONSTRUCTION.  Verdict on arm 1: REGRESSION (recorded, kept as the arm);
+arm 2 (overdue form, 0.4) in flight.  Re-use context for arm 1: none
+foreseen — the mechanism class is superseded by the error-form.
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =

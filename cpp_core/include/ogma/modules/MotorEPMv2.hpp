@@ -1379,11 +1379,17 @@ private:
     // typical swing, hip2 flips to +swing_descend_gain (press DOWN, Rule-5 sign) so the
     // foot plants before the stroke reverses.  Knee keeps its fold.  0 = byte-identical.
     double  swing_descend_gain_ = 0.0;
+    double  swing_descend_knee_ = 0.0;   // the KNEE half (operator 2026-08-14):
+                                         // during descent the shank flips from
+                                         // fold to EXTEND toward the ground
+    double  swing_overdue_knee_ = 0.0;   // the ERROR-FORM: reach for ground only
+                                         // when the swing outlives its own average
     static constexpr float kDescentFrac = 0.5f;
     int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
     float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
     uint8_t swd_air_[8] = {0,0,0,0,0,0,0,0};       // previous airborne state
     long    swd_press_ticks_ = 0;                   // consumer-fired check
+    long    swd_overdue_ticks_ = 0;                 // touchdown-seeking fired check
 
     float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
     float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase

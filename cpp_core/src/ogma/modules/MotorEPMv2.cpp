@@ -362,8 +362,25 @@ ParamSchema MotorEPMv2::params_schema() const {
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"swing_descend_gain", ParamMutability::HotMutable,
-         "SWING DESCENT (operator-diagnosed 2026-08-10).  swing_tuck_hip2 lifts through the ENTIRE swing and fights the landing -- rear feet plant unsettled and the stroke sweeps back before full contact (the -15% transport of the tuck+pair).  Past half of the leg's OWN running swing duration (self-scaled fraction, no tick constant), hip2 flips from the lift bias to +this (press down, Rule-5 sign) so the foot plants before the stroke reverses; the knee keeps its fold.  Requires contact_topic + swing_tuck active.  0 = off, byte-identical.",
+         "SWING DESCENT (operator-diagnosed 2026-08-10).  swing_tuck_hip2 lifts through the ENTIRE swing and fights the landing -- rear feet plant unsettled and the stroke sweeps back before full contact (the -15% transport of the tuck+pair).  Past half of the leg's OWN running swing duration (self-scaled fraction, no tick constant), hip2 flips from the lift bias to +this (press down, Rule-5 sign) so the foot plants before the stroke reverses; the knee keeps its fold.  Requires contact_topic + swing_tuck active.  0 = off, byte-identical.  Measured 2026-08-10: transport recovers dose-monotonically but rhythm pays (cv 0.75->0.89) -- V3 BASE shipped with it OFF.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"swing_descend_knee", ParamMutability::HotMutable,
+         "SWING DESCENT, the KNEE half (operator-diagnosed 2026-08-14: rear legs swing forward "
+         "then back WITHOUT PLANTING -- the shank keeps its fold through descent and the foot "
+         "never reaches the ground).  During the descent phase (same self-scaled past-half-swing "
+         "trigger as swing_descend_gain) the knee flips from fold to EXTEND toward the ground: "
+         "y_knee += swing_tuck_knee - this.  MEASURED 2026-08-14 (n=6, 0.3/0.6): REGRESSION -- "
+         "transport -30%, cv 0.75->0.87/0.89, falls appear; extending through EVERY descent "
+         "stabs healthy swings.  Kept as the recorded arm; use swing_overdue_knee instead.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
+        {"swing_overdue_knee", ParamMutability::HotMutable,
+         "TOUCHDOWN-SEEKING knee (the ERROR-FORM of the planting lever: 'contact was expected by "
+         "now and none arrived').  Fires ONLY when a swing runs PAST the leg's own running-average "
+         "swing duration (self-scaled, no tick constant): knee extension grows with lateness "
+         "(bias = this * min(1, age/dur - 1)), releasing on contact.  Healthy swings (age <= own "
+         "average) are untouched BY CONSTRUCTION -- the constant-descent form measured its rhythm "
+         "cost precisely here (it extended every swing).  0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
         {"coord_cv_weight", ParamMutability::HotMutable,
          "SELECT STEP-INTERVAL REGULARITY (P4 arm 3b).  Penalizes the mode-1 coordination fitness by the window's mean |interval - running period| / period over DEBOUNCED touchdowns (the v3 step machinery's accepted intervals -- micro-lift chatter excluded by construction).  Arm 3 measured that touchdown-PHASE consistency selects robustness but cannot buy TIME-regularity (step_cv 0.98 at every dose, because consistent phase on an irregular clock is still irregular in time); this selects the operator's step-regularity number LITERALLY, against each leg's own habitual period -- egocentric, intrinsic, no task quantity.  Requires contact_topic + fitness mode 1.  0 = off, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -715,6 +732,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["tibia_plumb_offset"] = tibia_plumb_offset_;
     m["swing_tuck_hip2"]    = swing_tuck_hip2_;
     m["swing_tuck_knee"]    = swing_tuck_knee_;
+    m["swing_descend_gain"] = swing_descend_gain_;
+    m["swing_descend_knee"] = swing_descend_knee_;
+    m["swing_overdue_knee"] = swing_overdue_knee_;
     m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
@@ -844,6 +864,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "coord_td_weight", [&](auto const& v){ coord_td_weight_ = get_double(v, "coord_td_weight"); });
     apply_param(params, "coord_cv_weight", [&](auto const& v){ coord_cv_weight_ = get_double(v, "coord_cv_weight"); });
     apply_param(params, "swing_descend_gain", [&](auto const& v){ swing_descend_gain_ = get_double(v, "swing_descend_gain"); });
+    apply_param(params, "swing_descend_knee", [&](auto const& v){ swing_descend_knee_ = get_double(v, "swing_descend_knee"); });
+    apply_param(params, "swing_overdue_knee", [&](auto const& v){ swing_overdue_knee_ = get_double(v, "swing_overdue_knee"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -2109,6 +2131,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "coord_td_weight") coord_td_weight_ = get_double(value, "coord_td_weight");
     else if (key == "coord_cv_weight") coord_cv_weight_ = get_double(value, "coord_cv_weight");
     else if (key == "swing_descend_gain") swing_descend_gain_ = get_double(value, "swing_descend_gain");
+    else if (key == "swing_descend_knee") swing_descend_knee_ = get_double(value, "swing_descend_knee");
+    else if (key == "swing_overdue_knee") swing_overdue_knee_ = get_double(value, "swing_overdue_knee");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -3687,8 +3711,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             ++swing_tuck_ticks_;
             const bool airborne = foot_contact_[leg] <= 0.5f;
             // SWING-DESCENT bookkeeping (self-scaled swing age; see the header note).
+            // Runs when EITHER descent half is live — the knee-only arm
+            // (swing_descend_knee > 0, hip2 press 0) needs the age tracker too.
             bool descending = false;
-            if (swing_descend_gain_ > 0.0 && leg < 8) {
+            if ((swing_descend_gain_ > 0.0 || swing_descend_knee_ > 0.0
+                 || swing_overdue_knee_ > 0.0) && leg < 8) {
                 if (airborne) {
                     if (!swd_air_[leg]) swd_age_[leg] = 0;
                     ++swd_age_[leg];
@@ -3705,11 +3732,26 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             if (airborne) {
                 if (descending) {
                     y[1] += float(swing_descend_gain_);   // press DOWN: plant before the sweep
+                    // the KNEE half (operator 2026-08-14): the shank flips from
+                    // fold to EXTEND toward the ground — the distal route to the
+                    // plant.  0 keeps the 2026-08-10 fold-throughout behavior.
+                    // (Measured REGRESSION as a constant bias — see the schema.)
+                    y[m - 1] += float(swing_tuck_knee_) - float(swing_descend_knee_);
                     ++swd_press_ticks_;
                 } else {
                     y[1] += float(swing_tuck_hip2_);      // fold/lift the femur (first half)
+                    y[m - 1] += float(swing_tuck_knee_);  // the shank folds through ascent
                 }
-                y[m - 1] += float(swing_tuck_knee_);       // the shank keeps its fold throughout
+                // TOUCHDOWN-SEEKING (the error-form): only when THIS swing has
+                // outlived the leg's own average does the knee reach for ground,
+                // harder the later it is.  Healthy swings never feel it.
+                if (swing_overdue_knee_ > 0.0 && leg < 8 && swd_dur_[leg] > 2.0f) {
+                    const float late = float(swd_age_[leg]) / swd_dur_[leg] - 1.0f;
+                    if (late > 0.0f) {
+                        y[m - 1] -= float(swing_overdue_knee_) * std::min(1.0f, late);
+                        ++swd_overdue_ticks_;
+                    }
+                }
                 ++swing_tuck_hits_;
             }
         }
@@ -4539,6 +4581,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["coord_td_R"] = coord_td_R_diag_;   // arm 3 consumer check: −1 = never computed
     mod["coord_cv_dev"] = coord_cv_diag_;   // arm 3b consumer check: −1 = never computed
     mod["swd_press_ticks"] = swd_press_ticks_;  // swing-descent consumer check
+    mod["swd_overdue_ticks"] = swd_overdue_ticks_;  // touchdown-seeking consumer check
     {
         nlohmann::json off = nlohmann::json::array();
         for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);

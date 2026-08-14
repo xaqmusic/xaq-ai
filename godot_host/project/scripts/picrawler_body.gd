@@ -10730,6 +10730,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# moved" (the consumer-fired check every lever has needed).
 			line["pl_pull"] = snappedf(float(_mm.get("plan_pull", 0.0)), 0.00001)
 			line["pl_w"]    = snappedf(float(_mm.get("plan_w", 0.0)), 0.0001)
+			# 2026-08-14 (rear-knee planting lever) — swing-descent consumer check:
+			# the descent branch (hip2 press AND/OR the new knee extension) fires
+			# only while this counter grows.
+			line["swd"] = int(_mm.get("swd_press_ticks", 0))
+			line["swo"] = int(_mm.get("swd_overdue_ticks", 0))
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.
