@@ -1479,6 +1479,43 @@ exact per-leg ownership the global homeostat lacks.  A/B launched
 anti-blind metric for this failure) + the full set; operator running the
 live [M]-panel slider test at seed 42 in parallel.**
 
+**2026-08-14 — PROP_BAL BREAKS THE STANCE-CAPTURE ATTRACTOR (diseased-seed
+test) + the touchdown forensics + the seed-checkbox catch.**
+
+*Seed reproducibility (operator: "same seed twice, different paths").* The
+launcher's RANDOM-SEED CHECKBOX silently overrides the seed spinbox at
+launch (randi()%1000000; the checkbox defaults CHECKED) — the operator's
+"seed-42 reruns" were different seeds by design, invisibly.  Headless
+bit-determinism was never in question.  Fix: the HUD now always shows the
+RESOLVED seed; uncheck 'random' to pin the spinbox value.
+
+*Touchdown forensics (seed 42, every plant edge).* All four legs land
+with statistically IDENTICAL knee extension (front pair −0.86, rear
+−0.82) — the posture scaffolds are leg-uniform, so the rear literally
+copies the front, as the operator hypothesized.  But the copy is not
+itself fatal: the WORKING rear leg is the body's most active (74
+touchdowns, deepest stride).  The FAILING leg's landings are the
+signature: femur LIFTED (hip2 −0.78 vs ≈−0.2 elsewhere), shank shallow
+(knee −0.63), stroke pre-spent (hip1 −0.20) — ghost touches, unloaded,
+no push-travel left ("comes down without enough knee to gain traction",
+measured).  The two operator observations are ONE LOOP: unloaded landings
+→ zero propulsive credit → no sensorimotor contingency → oscillation
+decays → stance capture → worse landings.
+
+*The lever (already built, was OFF): propulsion_balance_gain 0.3.*
+Population n=6 (disease absent in those seeds): behaviorally NEUTRAL —
+ties control everywhere (net 6.94 vs 7.24, straight 0.56=0.56, cv
+0.77≈0.75).  DISEASED SEED 42 head-to-head (12k): **rl dead-duty
+0.30 → 0.00 — the attractor eliminated**; rl lifts 66→112; rl hip1 clip
+0.50→0.24; net_z 6.54→7.58 (+16%).  **Verdict: WORKING (mechanism test
+loud + population no-harm) — the profile of a robustness lever: fixes the
+failure where present, free where absent.  n=20 powering launched;
+promotion gate = operator eye (slide prop_bal live at a pinned seed 42
+and watch the blue leg wake).  Re-use context: if n=20 confirms, this is
+the anti-fragility candidate for the stack — and the rear-only touchdown
+posture idea stays pocketed for whatever residual planting deficit
+survives prop_bal.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
