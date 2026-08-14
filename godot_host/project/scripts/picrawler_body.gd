@@ -10735,6 +10735,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# only while this counter grows.
 			line["swd"] = int(_mm.get("swd_press_ticks", 0))
 			line["swo"] = int(_mm.get("swd_overdue_ticks", 0))
+			line["rlt"] = int(_mm.get("rear_land_ticks", 0))
+			line["rpt"] = int(_mm.get("rear_push_ticks", 0))
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.

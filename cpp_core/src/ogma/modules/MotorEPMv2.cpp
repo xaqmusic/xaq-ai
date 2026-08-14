@@ -373,6 +373,23 @@ ParamSchema MotorEPMv2::params_schema() const {
          "transport -30%, cv 0.75->0.87/0.89, falls appear; extending through EVERY descent "
          "stabs healthy swings.  Kept as the recorded arm; use swing_overdue_knee instead.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
+        {"rear_land_gain", ParamMutability::HotMutable,
+         "REAR LANDING SEQUENCE part 1 (operator 2026-08-14: rear legs lift hip2+knee high, then "
+         "hip1/hip2/knee all move AT ONCE on the stroke — the drop must come FIRST).  During the "
+         "descent phase (the self-scaled past-half-swing trigger), REAR legs only: hip2 presses "
+         "down (0.5x this) and the knee SERVOS toward rear_knee_plant (closed-loop — the open-loop "
+         "descent extension was the measured 2026-08-14 regression).  Front legs untouched.  "
+         "0 = byte-identical.", ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
+        {"rear_knee_plant", ParamMutability::HotMutable,
+         "The rear plant angle rear_land_gain servos toward: slightly FLEXED (+) so the shank "
+         "lands with push traction (operator: 'the knee is not bent enough to gain traction').",
+         ParamValue{0.2}, ParamValue{-0.5}, ParamValue{0.8}},
+        {"rear_push_ext", ParamMutability::HotMutable,
+         "REAR LANDING SEQUENCE part 2: while a REAR leg is PLANTED and its hip1 is actually "
+         "sweeping (the power stroke), the knee extends slightly (-knee = push down/back), scaled "
+         "by the leg's own running |dhip1| (self-scaled, no hand constant).  'THEN hip1 swings "
+         "back with a bit of knee extension.'  0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
         {"swing_overdue_knee", ParamMutability::HotMutable,
          "TOUCHDOWN-SEEKING knee (the ERROR-FORM of the planting lever: 'contact was expected by "
          "now and none arrived').  Fires ONLY when a swing runs PAST the leg's own running-average "
@@ -735,6 +752,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["swing_descend_gain"] = swing_descend_gain_;
     m["swing_descend_knee"] = swing_descend_knee_;
     m["swing_overdue_knee"] = swing_overdue_knee_;
+    m["rear_land_gain"] = rear_land_gain_;
+    m["rear_knee_plant"] = rear_knee_plant_;
+    m["rear_push_ext"] = rear_push_ext_;
     m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
@@ -866,6 +886,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "swing_descend_gain", [&](auto const& v){ swing_descend_gain_ = get_double(v, "swing_descend_gain"); });
     apply_param(params, "swing_descend_knee", [&](auto const& v){ swing_descend_knee_ = get_double(v, "swing_descend_knee"); });
     apply_param(params, "swing_overdue_knee", [&](auto const& v){ swing_overdue_knee_ = get_double(v, "swing_overdue_knee"); });
+    apply_param(params, "rear_land_gain", [&](auto const& v){ rear_land_gain_ = get_double(v, "rear_land_gain"); });
+    apply_param(params, "rear_knee_plant", [&](auto const& v){ rear_knee_plant_ = get_double(v, "rear_knee_plant"); });
+    apply_param(params, "rear_push_ext", [&](auto const& v){ rear_push_ext_ = get_double(v, "rear_push_ext"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -2133,6 +2156,9 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "swing_descend_gain") swing_descend_gain_ = get_double(value, "swing_descend_gain");
     else if (key == "swing_descend_knee") swing_descend_knee_ = get_double(value, "swing_descend_knee");
     else if (key == "swing_overdue_knee") swing_overdue_knee_ = get_double(value, "swing_overdue_knee");
+    else if (key == "rear_land_gain") rear_land_gain_ = get_double(value, "rear_land_gain");
+    else if (key == "rear_knee_plant") rear_knee_plant_ = get_double(value, "rear_knee_plant");
+    else if (key == "rear_push_ext") rear_push_ext_ = get_double(value, "rear_push_ext");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -3650,6 +3676,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             y[1]     += load;    // +hip2 = press foot down (load for grip)
             y[m - 1] += -load;   // knee extends down with it
         }
+        // REAR LANDING SEQUENCE part 2 (operator 2026-08-14): while a REAR leg
+        // is PLANTED and its hip1 is actually SWEEPING (the power stroke), the
+        // knee extends slightly so the shank pushes instead of riding tucked.
+        // Scaled by the leg's own running |Δhip1| (self-scaled, §5) — a parked
+        // hip1 gets no extension, so this cannot fire outside the stroke.
+        if (!warmup && rear_push_ext_ > 0.0 && leg >= 2 && m >= 3
+            && int(in_swing_.size()) == n_legs_ && !in_swing_[leg] && L.n >= 3 * m) {
+            const float dh1 = std::fabs(L.x[2]);          // hip1 delta component
+            dh1_ema_[leg] = 0.99f * dh1_ema_[leg] + 0.01f * dh1;
+            if (dh1_ema_[leg] > 1e-5f) {
+                const float sweep = std::min(1.0f, dh1 / (2.0f * dh1_ema_[leg]));
+                y[m - 1] += -float(rear_push_ext_) * sweep;   // −knee = extend/push
+                ++rear_push_ticks_;
+            }
+        }
         // STANCE-LIFT (belly-up while walking): a constant KNEE bias on PLANTED legs
         // only — raise the chassis off the feet it can push against without touching the
         // swing legs' rhythm.  Knee-only (no hip2 → no foot-lift traction loss).  Sign
@@ -3715,7 +3756,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // (swing_descend_knee > 0, hip2 press 0) needs the age tracker too.
             bool descending = false;
             if ((swing_descend_gain_ > 0.0 || swing_descend_knee_ > 0.0
-                 || swing_overdue_knee_ > 0.0) && leg < 8) {
+                 || swing_overdue_knee_ > 0.0 || rear_land_gain_ > 0.0) && leg < 8) {
                 if (airborne) {
                     if (!swd_air_[leg]) swd_age_[leg] = 0;
                     ++swd_age_[leg];
@@ -3743,11 +3784,20 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             if (airborne) {
                 if (descending) {
                     y[1] += float(swing_descend_gain_);   // press DOWN: plant before the sweep
-                    // the KNEE half (operator 2026-08-14): the shank flips from
-                    // fold to EXTEND toward the ground — the distal route to the
-                    // plant.  0 keeps the 2026-08-10 fold-throughout behavior.
-                    // (Measured REGRESSION as a constant bias — see the schema.)
-                    y[m - 1] += float(swing_tuck_knee_) - float(swing_descend_knee_);
+                    // REAR LANDING SEQUENCE part 1: on the rear pair the drop
+                    // comes first — femur presses, shank SERVOS to the plant
+                    // angle (closed-loop; the open-loop extension regressed).
+                    if (rear_land_gain_ > 0.0 && leg >= 2 && L.n >= 3 * m) {
+                        y[1]     += float(rear_land_gain_) * 0.5f;
+                        y[m - 1] += float(swing_tuck_knee_) - float(swing_descend_knee_)
+                                  + float(rear_land_gain_)
+                                    * (float(rear_knee_plant_) - L.x[3 * (m - 1)]);
+                        ++rear_land_ticks_;
+                    } else {
+                        // the KNEE half (operator 2026-08-14): fold-to-extend flip.
+                        // (Measured REGRESSION as a constant bias — see the schema.)
+                        y[m - 1] += float(swing_tuck_knee_) - float(swing_descend_knee_);
+                    }
                     ++swd_press_ticks_;
                 } else {
                     y[1] += float(swing_tuck_hip2_);      // fold/lift the femur (first half)
@@ -4594,6 +4644,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["coord_cv_dev"] = coord_cv_diag_;   // arm 3b consumer check: −1 = never computed
     mod["swd_press_ticks"] = swd_press_ticks_;  // swing-descent consumer check
     mod["swd_overdue_ticks"] = swd_overdue_ticks_;  // touchdown-seeking consumer check
+    mod["rear_land_ticks"] = rear_land_ticks_;      // rear drop consumer check
+    mod["rear_push_ticks"] = rear_push_ticks_;      // rear push consumer check
     {
         nlohmann::json off = nlohmann::json::array();
         for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);

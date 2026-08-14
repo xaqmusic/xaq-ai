@@ -1384,6 +1384,21 @@ private:
                                          // fold to EXTEND toward the ground
     double  swing_overdue_knee_ = 0.0;   // the ERROR-FORM: reach for ground only
                                          // when the swing outlives its own average
+    // REAR LANDING SEQUENCE (operator 2026-08-14: "hip2 and knee must DROP
+    // first, THEN hip1 sweeps back with a bit of knee extension").  Two
+    // separately-gated rear-pair levers (legs 2,3 = cfg rl/rr = anatomical
+    // RR/RL — front/rear is NOT mirrored by the naming flip):
+    double  rear_land_gain_  = 0.0;      // descent: hip2 press + knee SERVO to
+                                         //   the plant angle (closed-loop — the
+                                         //   open-loop extension was the
+                                         //   measured regression)
+    double  rear_knee_plant_ = 0.2;      // the plant angle (slightly flexed for
+                                         //   push traction)
+    double  rear_push_ext_   = 0.0;      // stance: knee extension while the
+                                         //   planted leg's hip1 actually sweeps
+    float   dh1_ema_[8] = {0,0,0,0,0,0,0,0};   // per-leg |Δhip1| running scale
+    long    rear_land_ticks_ = 0;        // consumer-fired checks
+    long    rear_push_ticks_ = 0;
     static constexpr float kDescentFrac = 0.5f;
     int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
     float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
