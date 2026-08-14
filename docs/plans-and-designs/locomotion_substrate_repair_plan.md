@@ -1313,6 +1313,57 @@ see — if the surprise vocabulary is doing its job, rear-knee touchdown
 error should become one of its DENSEST, most predictable token regions,
 and its planner's bands on j10/j11 should say so.
 
+**2026-08-14 — B GATE RUN (both pre-registered arms): the predictive-coding
+pair WORKS MECHANICALLY; the surprise vocabulary FAILS its planner gates as
+built — and the failure diagnosis is §6 CONDITIONING, again, in a new
+place.**
+
+*Build integrity (§3.2 catches before first run, all three latent bugs
+found at design time or first smoke):* (1) the predictor's source port
+silently dropped ProprioToken context (ConsensusToken-only cast — fixed
+with a typed fallback; RealityToken added for arm 2); (2) the closed pair
+converged to HALF-subtraction (the EPM publishes its residual as latent;
+the legacy update subtracted the cached prediction from it again — fixed
+with `target_is_residual`, which integrates the residual directly);
+(3) the err/norm health ratio is TAUTOLOGICALLY 1 in residual mode — the
+honest bite-meter is ‖prediction‖ (dp_pn) vs ‖residual‖ (dp_err).
+
+*Arm 1 — CPG-clock context (2-D [cosφ,sinφ]), n=4 × 12k arena.* The pair
+closes and bites: dp_err falls 0.89 → 0.18–0.22 with dp_pn ≈ 0.99 — the
+first stride harmonic (all a 2-D linear context can express) absorbs ~80%
+of the encoding.  But the residual vocabulary yields NOTHING for the
+planner: self-mass 0.69 → 0.65 (gate wanted < 0.55), chain lift 0.92–0.99
+(≤ persistence), pc bands equal-or-NARROWER than control everywhere, zero
+new h2 bands, rear-knee ratios unchanged, h2 decodes a few points WORSE.
+
+*Arm 2 — latent-autoregression context (the plain EPM's raw latent), the
+pre-registered fail branch.* Absorbs more (dp_err 0.10–0.12, ~90%), and
+the residual vocabulary COLLAPSES 41 → 25 tokens; chain lift 1.00 flat;
+h2 bands still absent; h2 decodes still worse.  ONE genuine positive:
+**the rear-knee marginals (j10/j11 — the operator's named planting target)
+improve 3–8 points at k∈[13,21] in ALL FOUR seeds** (e.g. s13: 0.76/0.77
+vs control 0.83/0.85) — the latent-AR residual carries real rear-knee
+correction structure; the near field (k 1–3) degrades and the bands'
+0.95-contiguity threshold hides the gain.
+
+**Verdict: B v1 is a NULL against its pre-registered gates — but a §3.2
+review says the measured object was partly the HARNESS AGAIN: the
+subtraction happens in latent space, so the GNG receives a residual of
+norm ~0.1–0.2 against insertion/error scales sized for encoder outputs of
+norm ~1.  The vocabulary collapse under the STRONGER predictor (arm 2,
+41→25) is §6's insertion-gate collapse in a new costume — the residual's
+SHAPE is never tiled because its SIZE is below the gate's resolution.
+Doctrine §5 rule 5 prescribes the fix: adapt, don't tune — a running-RMS
+normalization of the post-subtraction residual before the GNG (an EPM
+option, off by default), so the vocabulary tiles residual DIRECTION at
+unit scale.  Re-use context: (i) B v2 = residual normalization + re-run
+both context arms (the rear-knee k∈[13,21] signal is the thing to watch
+grow); (ii) if v2 still nulls, the linear predictor family is exhausted —
+phase-binned piecewise-linear or the planner-as-predictor are the next
+rungs; (iii) the rear-knee planting target does NOT wait on B: it can get
+its own behavioral lever (stance-gated knee-flexion-at-touchdown through
+the promoted plan-pull carrier) regardless of vocabulary work.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =

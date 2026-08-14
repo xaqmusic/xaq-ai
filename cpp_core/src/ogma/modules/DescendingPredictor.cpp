@@ -179,6 +179,11 @@ void DescendingPredictor::handle_consensus(std::string_view /*topic*/, MessagePt
         emb = ct->fused_embedding;
     } else if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload)) {
         emb = pt->values;
+    } else if (auto rt = std::dynamic_pointer_cast<const RealityToken>(payload)) {
+        // Latent-autoregression context (B gate, arm 2): the raw encoding
+        // itself — a full linear map in latent space, against which the 2-D
+        // clock context (first stride harmonic only) is the weak baseline.
+        emb = rt->latent;
     }
     if (emb.size() == 0) return;
     latest_consensus_ = std::move(emb);
