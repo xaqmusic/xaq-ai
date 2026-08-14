@@ -1296,6 +1296,23 @@ circling), and whether the late-run tilt cost of KEEPING the pull on
 late-tilt hint deserves its own windowed look before any long-run
 deployment.**
 
+**2026-08-14 — LEVER (b) PROMOTED (operator UI review, the standing gate).**
+The operator's eye at plan_gain 0.05: "better stability during walking,"
+slight rear-leg improvement, and — the load-bearing observation — **the
+robot climbs the corridor's 30° walls markedly better than before.**  The
+plan pull at the whisper dose joins the stack: the promoted operating
+point is v3base + bodypose EPMs + M1 author (apply) + plan pull @ 0.05,
+band-gated, distress-cut.  NAMED TARGET for the next behavioral lever
+(operator-set): **REAR-LEG PLANTING** — the rear legs swing forward then
+back without planting correctly, usually because the KNEE does not flex
+downward to make ground contact (a swing-termination/touchdown failure;
+anatomically the rear pair = cfg 'rl'/'rr', rear knees = planner joints
+10/11).  This is the evaluation lens B inherits: touchdown corrections are
+precisely the aperiodic, load-linked events the pose vocabulary cannot
+see — if the surprise vocabulary is doing its job, rear-knee touchdown
+error should become one of its DENSEST, most predictable token regions,
+and its planner's bands on j10/j11 should say so.
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
