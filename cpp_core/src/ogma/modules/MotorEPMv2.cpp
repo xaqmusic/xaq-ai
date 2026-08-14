@@ -3367,16 +3367,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     const float wk = kf_ok ? obj_weight_[leg] : 0.0f;
                     for (int j = 0; j < m; ++j) {
                         float wp = pl_ok ? float(plan_gain_) * plan_w_[leg][j] : 0.0f;
+                        // telemetry EMAs track wp even at 0 — a frozen meter
+                        // after a mid-run gain drop read as "flip never fired"
+                        // in the (d)-test (2026-08-14); an inactive pull must
+                        // DECAY the meter, not preserve its last value.
+                        if (n >= 3 * m) {
+                            plan_pull_ema_ += 0.01f * ((pl_ok && wp > 0.0f
+                                ? wp * std::fabs(L.x[3 * j] - plan_target_[leg][j])
+                                : 0.0f) - plan_pull_ema_);
+                            plan_w_mean_ += 0.01f * (wp - plan_w_mean_);
+                        }
                         float tw = wk + wp;
                         if (tw <= 0.0f) continue;
                         eff_w[j] = std::min(1.0f, tw);
                         eff_t[j] = (wk * (kf_ok ? obj_target_[leg][j] : 0.0f)
                                     + wp * (pl_ok ? plan_target_[leg][j] : 0.0f)) / tw;
-                        if (pl_ok && wp > 0.0f && n >= 3 * m) {
-                            plan_pull_ema_ += 0.01f *
-                                (wp * std::fabs(L.x[3 * j] - plan_target_[leg][j]) - plan_pull_ema_);
-                            plan_w_mean_ += 0.01f * (wp - plan_w_mean_);
-                        }
                     }
                 }
                 Eigen::VectorXf xi_tilde = xi;

@@ -118,7 +118,25 @@ private:
             std::lock_guard<std::mutex> lock(patch_mutex_);
             to_apply.swap(pending_);
         }
-        for (auto& [batch_id, batch] : to_apply) apply_batch(batch_id, batch);
+        // PER-BATCH ISOLATION.  A rejected batch must not take its NEIGHBORS
+        // down: the drain has already swapped them out of pending_, so a
+        // throw here used to silently discard every batch queued behind the
+        // bad one — after each of their enqueues had returned success.
+        // (Found 2026-08-14: an init-time cruse patch on a config without
+        // that module ate a same-tick SETPARAM_AT plan_gain flip; the arm
+        // silently ran at the wrong dose.  §3.2 rule 7 in the harness
+        // itself.)  Each batch keeps its own validate-then-apply atomicity;
+        // the rejection is still surfaced, loudly, per batch.
+        for (auto& [batch_id, batch] : to_apply) {
+            try {
+                apply_batch(batch_id, batch);
+            } catch (std::exception const& e) {
+                std::fprintf(stderr,
+                             "Scheduler: hot-patch batch %llu REJECTED (%s) — "
+                             "remaining batches still applied\n",
+                             (unsigned long long)batch_id, e.what());
+            }
+        }
     }
 
     // Validate the entire batch first (to honor atomicity), then apply.

@@ -1241,6 +1241,61 @@ perturbation hook: `OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;…]"`
 loudly per §3.2 rule 7; tick 1 doubles as arm differentiation without
 config proliferation).
 
+**2026-08-14 — OPTION A COMPLETE: lever (b) consolidation — the 0.1 dose
+REFUTED, the 0.05 dose WORKING at n=20, and two harness bugs caught by the
+§3.2 discipline.**
+
+*The §3.2 catch that paid for itself.* The dose/depth arms came back
+BIT-IDENTICAL to the 0.1 arm — the tick-1 SETPARAM_AT flips reported
+enqueue-OK but never took effect.  Root cause found in the SCHEDULER:
+`process_pending_patches` drained all queued batches then applied them in
+a loop where one batch's validation throw (the pre-existing init-time
+cruse patch on configs without that module) aborted the loop — EVERY BATCH
+QUEUED BEHIND THE BAD ONE was silently discarded after its enqueue had
+returned success.  Fixed: per-batch isolation (each batch keeps its own
+validate-then-apply atomicity; rejections surface loudly; neighbors still
+apply).  Historically only cruse-family patches sat in the init queue, so
+no prior measurement was contaminated.  Second bug: the pl_pull/pl_w
+telemetry EMAs froze at their last value when the pull went inactive — a
+mid-run gain drop read as "flip never fired."  Fixed: inactive pull decays
+the meter.  Bonus: the three accidentally-identical arms proved the whole
+pipeline bit-deterministic per seed.
+
+*The verdicts (all corridor 0.3, 12k unless noted).*
+- **n=20 @ gain 0.1: TIE** — net_z 5.40±1.85 vs 5.44±2.24, straight
+  0.47/0.46, step_cv_real 0.80/0.80.  The n=6 coherence signal was
+  substantially seed luck (control's n=6 subset happened to contain its
+  bad seeds).  Three arm seeds circle (straight 0.11–0.16).  The original
+  lever-(b) dose is REFUTED as a behavioral improvement.
+- **Dose sweep (n=6, post-fix): INVERTED-U** — net_z 4.87 (0) / 7.24
+  (0.05) / 5.49 (0.1) / 6.72 (0.2); depth 13 no better than depth 8 with
+  worse tails.  The house pattern again: a whisper cooperates, a shout
+  fights the keyframe loop it fuses with.
+- **n=20 @ gain 0.05: WORKING** — net_z 5.40→6.41 (+19%), straight
+  0.47→0.52 (σ 0.15→0.11), falls 8→2, tilt_sd 0.164→0.098 with the
+  outlier tail GONE (max 0.16 vs control's 0.49), bellyc equal, 20/20
+  walkers, one weak seed (s19).  No metric worse.  Stability-dominant.
+- **(d)-test @ 0.1 (16k, flip at 10k, n=6): FLAT** — no transient, no
+  recovery signature; the pull was not load-bearing at that dose.  Late
+  windows: the keep-it-on baseline shows HIGHER tilt variance.
+- **(d)-test @ 0.05 (same protocol, flip verified by the fixed meter,
+  n=6): a WEAK dip-then-recover** — disp 0.70→0.61 relative dip in the
+  first two post-flip windows, recovery to ABOVE baseline by 14–16k
+  (0.54 vs 0.40), steps recover likewise; base again shows the late tilt
+  blowup (0.48±0.51 vs flip 0.18).  Signal-grade only (n=6): a hint that
+  0.05 carries load and the body re-coordinates without it.
+
+**Verdict: lever (b) at plan_gain 0.05 is a WORKING n=20 signal —
+stability-dominant (falls, tilt), transport-positive, nothing worse —
+and the config/launcher now carry 0.05 as the operating point.
+PROMOTION AWAITS THE OPERATOR'S UI REVIEW (the standing gate); what to
+watch: overall gait quality at 0.05, the rare weak seed (s19-type
+circling), and whether the late-run tilt cost of KEEPING the pull on
+(both (d)-tests hint at it) is visible by eye.  Re-use context: a finding
+(vs signal) needs the (d) at 0.05 powered to n≥20 and varied worlds; the
+late-tilt hint deserves its own windowed look before any long-run
+deployment.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =

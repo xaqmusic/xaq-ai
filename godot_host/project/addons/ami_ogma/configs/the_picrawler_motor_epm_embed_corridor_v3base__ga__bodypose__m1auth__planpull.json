@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "M1\u2192(b) PLAN PULL \u2014 first behavioral authority: the body fulfils its own earned prediction",
-    "description": "LEVER (b): MotorPlanner publishes its BASE (operating, kept-mask-shaped) roll decode at depth 8 as per-leg PredictionTokens [3 targets | 3 weights]; a joint's weight is 1 only where its verified authority band holds at that depth. MotorEPMv2 fuses it with the keyframe objective PER JOINT, precision-weighted (plan_gain=0.1) \u2014 an ungated joint's keyframe pull is untouched; distress cuts all plan weights (reflexes own emergencies). The pull is toward the body's OWN verified prediction \u2014 plan-as-prediction, no script. A/B lever = plan_gain. Consumer check: pl_pull/pl_w in the body log; publisher check: plan.pp. NOT PROMOTED \u2014 UI review is the promotion gate.",
+    "description": "LEVER (b): MotorPlanner publishes its BASE (operating, kept-mask-shaped) roll decode at depth 8 as per-leg PredictionTokens [3 targets | 3 weights]; a joint's weight is 1 only where its verified authority band holds at that depth. MotorEPMv2 fuses it with the keyframe objective PER JOINT, precision-weighted (plan_gain=0.05 \u2014 the measured operating point: the dose response is an inverted-U and 0.05 beat 0/0.1/0.2 at n=20 on net_z/falls/tilt with no metric worse) \u2014 an ungated joint's keyframe pull is untouched; distress cuts all plan weights (reflexes own emergencies). The pull is toward the body's OWN verified prediction \u2014 plan-as-prediction, no script. A/B lever = plan_gain. Consumer check: pl_pull/pl_w in the body log; publisher check: plan.pp. NOT PROMOTED \u2014 UI review is the promotion gate.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -183,7 +183,7 @@
           "objective.plan.rl",
           "objective.plan.rr"
         ],
-        "plan_gain": 0.1
+        "plan_gain": 0.05
       }
     },
     {
