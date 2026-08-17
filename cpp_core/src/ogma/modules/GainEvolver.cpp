@@ -723,6 +723,20 @@ nlohmann::json GainEvolver::diag_snapshot() const {
     j["accept_log"] = accept_log_;
     j["overrides"]  = overrides_;
     j["eval_window_ticks"] = eval_window_ticks_;
+    // The declared BOUNDS and the seed point: a viewer cannot draw "where does
+    // this gain sit in its range" without them, and each gain's range differs by
+    // more than an order of magnitude (height_homeo 0..0.1 vs coupling 0..3), so
+    // a shared raw axis would pin seven of eight traces flat to the bottom.
+    j["gain_min"]   = gain_min_;
+    j["gain_max"]   = gain_max_;
+    j["gain_seed"]  = gain_seed_;
+    // The criterion WEIGHTS, so a viewer can show each term's actual
+    // CONTRIBUTION to J (w*term) rather than its raw value — a large raw term
+    // with a small weight decides nothing, and that distinction is exactly what
+    // "is this term dead?" asks.
+    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_var", w_tilt_var_},
+                                  {"distress_duty", w_distress_},
+                                  {"unloaded_mean", w_unloaded_}, {"flow_term", w_flow_}};
     nlohmann::json ct;
     ct["falls"] = cand_terms_.falls; ct["tilt_var"] = cand_terms_.tilt_var;
     ct["distress_duty"] = cand_terms_.distress_duty; ct["unloaded_mean"] = cand_terms_.unloaded_mean;

@@ -894,6 +894,51 @@ _GENERIC = ModuleDoc(
 )
 
 
+DOCS["GainEvolver"] = ModuleDoc(
+    title="GainEvolver — the robot re-finding its own gains, for life",
+    summary=(
+        "The high-value gains of a walking brain (how hard a rear leg plants, how "
+        "strongly the legs couple, how much the body defends its height) are normally "
+        "found by hand and then frozen. This module lets the robot find them "
+        "<i>itself</i>, continuously, from sensors it actually has. It holds an "
+        "<b>incumbent</b> vector, mutates the whole vector at once into a "
+        "<b>candidate</b>, runs each for a long window, and keeps the candidate only "
+        "if the body did better — otherwise it reverts. Nothing here is a reward: it "
+        "scores <i>error</i> (falls, wobble, distress, unloaded landings, stumbling "
+        "flow), so a body that stands still scores badly rather than well.<br><br>"
+        "Two things make it more than a hill-climb. It re-measures the incumbent "
+        "<i>every</i> generation instead of trusting a remembered score — so a lucky "
+        "thrash cannot become a permanent champion, and when the world changes the "
+        "incumbent's score decays on its own. And its safety check is <b>separate</b> "
+        "from its improvement check: a candidate that scores better overall but drops "
+        "a leg or adds a fall is rejected outright, never averaged into a win."
+    ),
+    formulas=(
+        "<code>J = w_falls·falls + w_tilt·var(upright) + w_dis·distress_duty "
+        "+ w_unl·unloaded_contact + w_flow·(1 − flow_quality)</code> — lower is better<br>"
+        "<code>flow_quality = clamp(flow_ema,0,v*)/v* / (1 + k·flow_vol_ema)</code> "
+        "— magnitude × predictability<br>"
+        "<code>candidate_k = clamp(incumbent_k + σ·scale_k·(max_k−min_k)·N(0,1), min_k, max_k)</code><br>"
+        "<code>accept ⇔ G1 ∧ G2 ∧ (J_cand &lt; J_inc)</code><br>"
+        "<code>G1: cand.falls ≤ inc.falls + tol</code> &nbsp; (viability, not criterion)<br>"
+        "<code>G2: min_leg(loaded_l) ≥ min_leg(inc.loaded_l) − tol</code> &nbsp; "
+        "(per-leg MINIMUM — a group mean hides a dead leg)<br>"
+        "<code>σ ← clamp(σ · (accept_rate &gt; target ? up : down), σ_min, σ_max)</code> "
+        "— 1/5th-rule anneal<br><br>"
+        "<b>Reading the panel.</b> The rack is the live vector: dashed tick = the seed "
+        "it started from, filled dot = incumbent, hollow ring = the candidate currently "
+        "being tried. The trajectory normalizes every gain into its own range because "
+        "the ranges differ by ~30×. The term bars show <i>weighted</i> contributions — "
+        "a term pinned at zero is marked DEAD, which is a statement about that "
+        "sensor, not about the criterion.<br><br>"
+        "<b>Terms.</b> σ = mutation scale (0 ⇒ silent observer, byte-identical); "
+        "window = ticks per evaluation, measured over its back half (the front half is "
+        "settling); upright = the accelerometer's gravity component; unloaded contact = "
+        "a touchdown that never earns foot load (a ghost touch)."
+    ),
+)
+
+
 def doc_for(module_type: str) -> ModuleDoc:
     """Return the ModuleDoc for a C++ module type_name (never None)."""
     return DOCS.get(module_type, _GENERIC)

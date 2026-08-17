@@ -37,6 +37,7 @@ from .efe_arbiter_inspector        import EFEArbiterInspector
 from .vision_bearing_inspector     import VisualBearingInspector
 from .vision_homing_inspector      import VisualHomingInspector
 from .piano_roll_inspector         import PianoRollInspector
+from .gain_evolver_inspector       import GainEvolverInspector
 
 
 WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
@@ -86,6 +87,11 @@ WIDGET_REGISTRY: dict[str, Type[QWidget]] = {
     # decoded to per-joint timelines, with the EARNED authority horizon drawn as
     # a gold line (verified cone accuracy vs the persistence baseline, per depth).
     "MotorPlanner":         PianoRollInspector,
+    # PART IV (2026-08-17) — the lifetime (1+1)-ES over the gain vector: the
+    # bounded-range rack (where each gain sits NOW, incumbent vs candidate),
+    # the normalized trajectory, the criterion J, and the weighted term
+    # breakdown that shows whether a term is dead.
+    "GainEvolver":          GainEvolverInspector,
     # Generic reflex / detector widget — auto-discovers fields from the
     # snapshot, so one ReflexInspector suffices for every reflex type
     # without per-type bespoke panels.
