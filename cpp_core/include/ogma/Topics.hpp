@@ -614,6 +614,23 @@ struct FitnessScore : Message {
 };
 
 // -----------------------------------------------------------------------------
+// gain.<consumer_id>  --  PART IV GainEvolver → consumer evolved-gain vector
+// -----------------------------------------------------------------------------
+//
+// keys/values are PARALLEL and travel together so the key→value mapping is
+// explicit in every message — the consumer verifies each key against its own
+// param schema by read-back, never by config-side agreement.  `generation` and
+// `is_candidate` exist so the consumer's telemetry can attribute which window
+// (incumbent or candidate) a landed vector belongs to.
+
+struct GainVector : Message {
+    std::vector<std::string> keys;
+    std::vector<double>      values;
+    uint64_t generation   = 0;
+    bool     is_candidate = false;   // false = incumbent window
+};
+
+// -----------------------------------------------------------------------------
 // rhythm.bias.<premotor_id>  --  Phase 7.9 SynergyTimer pre-softmax bias
 // -----------------------------------------------------------------------------
 //

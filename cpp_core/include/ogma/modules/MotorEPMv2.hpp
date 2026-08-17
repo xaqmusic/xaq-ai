@@ -68,8 +68,11 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -1165,6 +1168,25 @@ private:
     float   distress_      = 0.0f;                    // latest distress (wedge severity)
     float   panic_         = 0.0f;                    // smoothed panic level [0,1] (telemetry)
     bool    panic_latched_ = false;                   // hysteresis state
+
+    // ---- PART IV gain socket (GainEvolver → evolved-gain vector) -------------
+    // A GainVector's (key,value) pairs are stashed by the bus handler and applied
+    // at the TOP of the next tick() through the existing on_param_change dispatch,
+    // then READ BACK from current_params(): the dispatch chain has no terminal
+    // else (unknown keys are silently ignored), so the read-back is the only
+    // honest applied-counter (§3.2 — a gate has shipped as silent dead code here
+    // before).  gain_topic_ == "" ⇒ no subscription ⇒ byte-identical.
+    // applied_gains_ (last landed value per key) exists for restore_state replay:
+    // evolved gains live in param members the instance snapshot does NOT
+    // round-trip, so a restored clone would silently revert to config gains.
+    void handle_gain_vector(MessagePtr payload);
+    void apply_pending_gains();
+    std::string gain_topic_;                                     // "" = socket off
+    std::vector<std::pair<std::string, double>> pending_gains_;  // stashed by handler
+    mutable std::mutex pending_gains_mu_;                        // parallel-level proofing
+    std::map<std::string, double> applied_gains_;                // last landed values
+    int64_t gains_applied_  = 0;                                 // read-back verified
+    int64_t gains_rejected_ = 0;                                 // ignored/mismatched keys
 
     // ---- Gate 0 reset-masking instrumentation (L-1a) -------------------------
     // The body's leg-phase + EMA continuity survives the fall+respawn cycle, so a
