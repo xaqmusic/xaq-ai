@@ -57,6 +57,17 @@ ParamMap ge_params(double sigma = 0.1) {
     p["warmup_ticks"]     = kWarmup;
     p["eval_window_ticks"] = kWindow;
     p["mutation_sigma"]   = sigma;
+    // PIN the criterion explicitly instead of inheriting production defaults:
+    // these tests exercise the LOOP (accept / revert / guards / anneal), so they
+    // drive a single, deterministic term and must not silently change meaning
+    // when the criterion's composition is retuned (which is exactly what
+    // happened when falls and distress moved to weight 0 after gate 2).
+    p["w_falls"]    = 0.0;      // falls is guard-only; G1 tests it directly
+    p["w_tilt_sd"]  = 0.0;
+    p["w_distress"] = 1.0;      // <- the term these tests drive
+    p["w_unloaded"] = 0.0;
+    p["w_flow"]     = 0.0;
+    p["accept_k"]   = 0.0;      // bare inequality; the margin has its own tests
     p["fall_debounce_ticks"] = int64_t{10};
     p["touchdown_horizon_ticks"] = int64_t{8};
     p["min_touchdowns"]   = int64_t{3};
@@ -183,9 +194,7 @@ TEST(GainEvolver, RevertOnWorse) {
 TEST(GainEvolver, ViabilityRejectsTargetWinsBodyPays) {
     ogma::InProcessBus bus;
     ogma::GainEvolver ge;
-    ParamMap p = ge_params();
-    p["w_falls"] = 0.001;   // make the criterion nearly blind to falls…
-    ge.on_setup(&bus, p);
+    ge.on_setup(&bus, ge_params());   // w_falls 0 => criterion is blind to falls
     uint64_t t = 0;
     Feed inc; inc.distress = 0.6f;             // mediocre incumbent, zero falls
     run_ticks(bus, ge, t, kWarmup, Feed{});
@@ -201,7 +210,7 @@ TEST(GainEvolver, ViabilityRejectsTargetWinsBodyPays) {
     run_ticks(bus, ge, t, 20, fall);           // > debounce(10) below thresh → 1 fall
     run_ticks(bus, ge, t, kWindow - 40, cand);
 
-    // …the G1 falls guard must still reject it.
+    // …the G1 falls guard must still reject it, even though J clearly improved.
     EXPECT_EQ(metric_i(ge, "accepts"), 0);
     EXPECT_EQ(metric_i(ge, "reverts"), 1);
 }
@@ -443,4 +452,74 @@ TEST(MotorEPMv2GainSocket, SnapshotReplayReappliesGains) {
     for (size_t i = 0; i < kRealKeys.size(); ++i)
         EXPECT_EQ(std::get<double>(now.at(kRealKeys[i])), kRealVals[i])
             << "restored clone lost evolved gain " << kRealKeys[i];
+}
+
+// ---- noise-aware acceptance (the gate-2 fix) --------------------------------
+
+TEST(GainEvolver, AcceptMarginBlocksSubNoiseImprovement) {
+    // A candidate that improves J by LESS than the criterion's own measured
+    // noise must be reverted: that is the coin flip that drove sigma to the
+    // ceiling in gate 2.  Feed alternating distress so revert pairs accumulate
+    // a nonzero sigma_hat, then offer a tiny improvement.
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params();
+    p["accept_k"]    = 1.0;
+    p["noise_min_n"] = int64_t{1};
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    // Generations whose incumbent windows differ a lot => large sigma_hat, and
+    // whose candidates are never better => reverts (which is what makes pairs).
+    for (int g = 0; g < 4; ++g) {
+        Feed inc;  inc.distress  = (g % 2 == 0) ? 0.0f : 1.0f;
+        Feed cand; cand.distress = 1.0f;
+        run_ticks(bus, ge, t, kWindow, inc);
+        run_ticks(bus, ge, t, kWindow, cand);
+    }
+    EXPECT_GT(metric_d(ge, "sigma_est"), 0.0) << "revert pairs must estimate noise";
+    EXPECT_GT(metric_d(ge, "accept_margin"), 0.0);
+    int64_t acc_before = metric_i(ge, "accepts");
+    // Now a candidate that is better, but by far less than sigma_hat.
+    Feed inc;  inc.distress  = 1.0f;
+    Feed cand; cand.distress = 0.99f;
+    run_ticks(bus, ge, t, kWindow, inc);
+    run_ticks(bus, ge, t, kWindow, cand);
+    EXPECT_EQ(metric_i(ge, "accepts"), acc_before)
+        << "a sub-noise improvement must NOT be accepted";
+}
+
+TEST(GainEvolver, AcceptMarginStillAcceptsClearWin) {
+    // The margin must not freeze the search: an improvement far larger than the
+    // noise is still accepted.
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params();
+    p["accept_k"]    = 1.0;
+    p["noise_min_n"] = int64_t{1};
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    for (int g = 0; g < 3; ++g) {           // build a small sigma_hat via reverts
+        Feed inc;  inc.distress  = 0.50f;
+        Feed cand; cand.distress = 1.00f;
+        run_ticks(bus, ge, t, kWindow, inc);
+        run_ticks(bus, ge, t, kWindow, cand);
+    }
+    int64_t acc_before = metric_i(ge, "accepts");
+    Feed inc;  inc.distress  = 1.0f;
+    Feed cand; cand.distress = 0.0f;        // a full-scale improvement
+    run_ticks(bus, ge, t, kWindow, inc);
+    run_ticks(bus, ge, t, kWindow, cand);
+    EXPECT_EQ(metric_i(ge, "accepts"), acc_before + 1);
+}
+
+TEST(GainEvolver, DeprecatedTiltVarKeyThrows) {
+    // A stale config key would otherwise be silently ignored and the default
+    // weight applied to a DIFFERENT quantity (sd, not variance).
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params();
+    p["w_tilt_var"] = 5.0;
+    EXPECT_THROW(ge.on_setup(&bus, p), std::invalid_argument);
 }

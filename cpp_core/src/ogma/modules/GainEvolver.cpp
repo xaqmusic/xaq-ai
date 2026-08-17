@@ -107,8 +107,8 @@ ParamSchema GainEvolver::params_schema() const {
          "Ticks before the first incumbent window (body stand-up + EMA settling).",
          ParamValue{int64_t(1500)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
         {"eval_window_ticks", ParamMutability::ConstructionOnly,
-         "Ticks per evaluation window; continuous terms measure the BACK HALF only. Charter: ≥4000–6000 — our own seed-averaging discipline applied inward: short windows are noise.",
-         ParamValue{int64_t(4000)}, ParamValue{int64_t(200)}, ParamValue{int64_t(1000000)}},
+         "Ticks per evaluation window; continuous terms measure the BACK HALF only. Gate 2 MEASURED 4000 to be far too short (noise sd 1.4 vs signal 0.3); with the post-gate-2 criterion ~11k suffices, so the default is 12000.",
+         ParamValue{int64_t(12000)}, ParamValue{int64_t(200)}, ParamValue{int64_t(1000000)}},
         {"republish_every", ParamMutability::ConstructionOnly,
          "If >0, re-send the active vector every N ticks inside a window (robustness against a late-joining consumer). 0 = boundary publishes only.",
          ParamValue{int64_t(0)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
@@ -118,16 +118,27 @@ ParamSchema GainEvolver::params_schema() const {
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.5}},
         // ---- criterion weights (HotMutable for between-run tuning; FIXED
         // during a judged run — the stationary evaluator) ----------------------
-        {"w_falls", ParamMutability::HotMutable, "weight: debounced upright<thresh excursions per window (whole window).",
-         ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
-        {"w_tilt_var", ParamMutability::HotMutable, "weight: variance of upright over the back half (wobble, error-form).",
-         ParamValue{5.0}, ParamValue{0.0}, ParamValue{1000.0}},
-        {"w_distress", ParamMutability::HotMutable, "weight: fraction of back-half ticks with distress>thresh.",
-         ParamValue{0.5}, ParamValue{0.0}, ParamValue{100.0}},
+        {"w_falls", ParamMutability::HotMutable,
+         "weight on debounced fall excursions. DEFAULT 0 — falls is guard-only (G1). Gate 2 measured it at 80.9% of J's variance: a rare discrete count cannot be a per-window gradient at any affordable window (134k ticks needed). Guard the catastrophe; the criterion optimizes its precursor (w_tilt_sd). >0 re-enables it and re-imports that variance.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"w_tilt_sd", ParamMutability::HotMutable,
+         "weight on sd(upright) over the back half — the CONTINUOUS precursor of a fall, sampled every tick. sd not variance: squaring let one tumble dominate quadratically (gate 2).",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{1000.0}},
+        {"w_distress", ParamMutability::HotMutable,
+         "weight on distress duty. DEFAULT 0: the body's distress signal is known-contaminated (world-frame stall half + a 50-vs-240Hz normalisation bug that makes it under-fire). Re-enable when that sensor is repaired — the param is kept precisely so the fix has somewhere to land.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{100.0}},
         {"w_unloaded", ParamMutability::HotMutable, "weight: mean per-leg unloaded-touchdown rate (ghost touches — femur-lifted landings that earn no load).",
-         ParamValue{0.5}, ParamValue{0.0}, ParamValue{100.0}},
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
         {"w_flow", ParamMutability::HotMutable, "weight: (1 − flow_quality), flow = magnitude × predictability of fwd flow.",
-         ParamValue{0.5}, ParamValue{0.0}, ParamValue{100.0}},
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"accept_k", ParamMutability::HotMutable,
+         "Accept only when J_cand < J_inc − accept_k·sigma_hat, where sigma_hat is the criterion's OWN measured per-window noise (estimated from revert pairs). 0 = legacy bare inequality, which on a stochastic criterion accepts ~50% by coin flip and drives the 1/5th anneal to the sigma ceiling (gate 2, 3/4 seeds).",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{10.0}},
+        {"noise_min_n", ParamMutability::HotMutable,
+         "Revert-pair samples required before the acceptance margin is trusted; below it the margin is 0 so the search is not frozen at boot.",
+         ParamValue{int64_t(3)}, ParamValue{int64_t(1)}, ParamValue{int64_t(100)}},
+        {"noise_alpha", ParamMutability::HotMutable, "EMA rate for the squared revert-pair delta that estimates sigma_hat.",
+         ParamValue{0.25}, ParamValue{0.001}, ParamValue{1.0}},
         // ---- guards ----------------------------------------------------------
         {"viability_falls_tol", ParamMutability::HotMutable,
          "G1: candidate falls may exceed incumbent falls by at most this (0 = strict no-regression).",
@@ -200,10 +211,13 @@ ParamMap GainEvolver::current_params() const {
     m["republish_every"]   = republish_every_;
     m["mutation_sigma"]    = sigma_;          // LIVE annealed σ (panel sync shows it)
     m["w_falls"]    = w_falls_;
-    m["w_tilt_var"] = w_tilt_var_;
+    m["w_tilt_sd"]  = w_tilt_sd_;
     m["w_distress"] = w_distress_;
     m["w_unloaded"] = w_unloaded_;
     m["w_flow"]     = w_flow_;
+    m["accept_k"]    = accept_k_;
+    m["noise_min_n"] = noise_min_n_;
+    m["noise_alpha"] = noise_alpha_;
     m["viability_falls_tol"] = viability_falls_tol_;
     m["viability_load_tol"]  = viability_load_tol_;
     m["upright_fall_thresh"] = upright_fall_thresh_;
@@ -252,8 +266,9 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "eval_window_ticks", [&](auto const& v){ eval_window_ticks_ = get_int(v, "eval_window_ticks"); });
     apply_param(params, "republish_every",   [&](auto const& v){ republish_every_   = get_int(v, "republish_every"); });
     for (auto const& [key, member] : std::initializer_list<std::pair<char const*, double*>>{
-             {"w_falls", &w_falls_}, {"w_tilt_var", &w_tilt_var_}, {"w_distress", &w_distress_},
+             {"w_falls", &w_falls_}, {"w_tilt_sd", &w_tilt_sd_}, {"w_distress", &w_distress_},
              {"w_unloaded", &w_unloaded_}, {"w_flow", &w_flow_},
+             {"accept_k", &accept_k_}, {"noise_alpha", &noise_alpha_},
              {"viability_load_tol", &viability_load_tol_},
              {"upright_fall_thresh", &upright_fall_thresh_},
              {"distress_thresh", &distress_thresh_}, {"load_thresh", &load_thresh_},
@@ -285,6 +300,14 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
             throw std::invalid_argument("GainEvolver: gain_seed out of bounds at '" + gain_keys_[k] + "'");
     }
     if (sigma_ < 0.0) throw std::invalid_argument("GainEvolver: mutation_sigma must be >= 0");
+    // w_tilt_var became w_tilt_sd when the term changed from variance to sd
+    // (gate 2).  An unknown key in a ParamMap is silently ignored, so a stale
+    // config would quietly get the DEFAULT weight on a DIFFERENT quantity —
+    // exactly the silent-drift trap this repo keeps re-learning.  Fail loudly.
+    if (params.find("w_tilt_var") != params.end())
+        throw std::invalid_argument(
+            "GainEvolver: 'w_tilt_var' was replaced by 'w_tilt_sd' (the term is now "
+            "sd(upright), not variance) — update the config rather than inheriting a default");
 
     incumbent_ = gain_seed_;
     candidate_ = gain_seed_;
@@ -351,9 +374,11 @@ void GainEvolver::on_param_change(std::string_view key, ParamValue const& value)
         return;
     }
     struct DKey { char const* k; double* m; };
-    for (auto const& d : {DKey{"w_falls", &w_falls_}, DKey{"w_tilt_var", &w_tilt_var_},
+    for (auto const& d : {DKey{"w_falls", &w_falls_}, DKey{"w_tilt_sd", &w_tilt_sd_},
                           DKey{"w_distress", &w_distress_}, DKey{"w_unloaded", &w_unloaded_},
-                          DKey{"w_flow", &w_flow_}, DKey{"viability_load_tol", &viability_load_tol_},
+                          DKey{"w_flow", &w_flow_}, DKey{"accept_k", &accept_k_},
+                          DKey{"noise_alpha", &noise_alpha_},
+                          DKey{"viability_load_tol", &viability_load_tol_},
                           DKey{"upright_fall_thresh", &upright_fall_thresh_},
                           DKey{"distress_thresh", &distress_thresh_}, DKey{"load_thresh", &load_thresh_},
                           DKey{"flow_alpha", &flow_alpha_}, DKey{"flow_vol_k", &flow_vol_k_},
@@ -365,7 +390,7 @@ void GainEvolver::on_param_change(std::string_view key, ParamValue const& value)
     for (auto const& d : {IKey{"viability_falls_tol", &viability_falls_tol_},
                           IKey{"fall_debounce_ticks", &fall_debounce_ticks_},
                           IKey{"touchdown_horizon_ticks", &touchdown_horizon_ticks_},
-                          IKey{"min_touchdowns", &min_touchdowns_},
+                          IKey{"min_touchdowns", &min_touchdowns_}, IKey{"noise_min_n", &noise_min_n_},
                           IKey{"anneal_window", &anneal_window_}})
         if (key == d.k) { *d.m = get_int(value, d.k); return; }
     throw std::invalid_argument("GainEvolver: param '" + std::string(key) + "' is not HotMutable");
@@ -428,11 +453,13 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
     t.falls = double(w.falls);
     if (w.meas_n > 0) {
         double mean = w.up_sum / double(w.meas_n);
-        t.tilt_var      = std::max(0.0, w.up_sq / double(w.meas_n) - mean * mean);
+        // sd, NOT variance: squaring let a single tumble dominate quadratically
+        // and made the term a rare-event count in disguise (gate 2).
+        t.tilt_sd       = std::sqrt(std::max(0.0, w.up_sq / double(w.meas_n) - mean * mean));
         t.distress_duty = double(w.distress_hits) / double(w.meas_n);
         t.flow_term     = 1.0 - w.flow_q_sum / double(w.meas_n);
     } else {
-        t.tilt_var = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0;
+        t.tilt_sd = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0;
     }
     double unl_sum = 0.0;
     for (int l = 0; l < n_legs_; ++l) {
@@ -443,10 +470,18 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
     }
     t.unloaded_mean = n_legs_ > 0 ? unl_sum / double(n_legs_) : 0.0;
     t.loaded_min    = per_leg_loaded_min(w);
-    t.J = w_falls_ * t.falls + w_tilt_var_ * t.tilt_var + w_distress_ * t.distress_duty
+    t.J = w_falls_ * t.falls + w_tilt_sd_ * t.tilt_sd + w_distress_ * t.distress_duty
         + w_unloaded_ * t.unloaded_mean + w_flow_ * t.flow_term;
     t.valid = true;
     return t;
+}
+
+// Pure per-window noise, estimated from the system's own dynamics: two
+// consecutive incumbent windows separated by a REVERT scored the SAME vector,
+// so their difference is measurement noise alone.  var(difference) = 2*var(window).
+double GainEvolver::sigma_est() const {
+    if (noise_n_ < noise_min_n_ || noise_ema_ <= 0.0) return 0.0;
+    return std::sqrt(noise_ema_ * 0.5);
 }
 
 bool GainEvolver::viability_ok(WindowStats const& cand, WindowStats const& inc) const {
@@ -574,15 +609,30 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
     if (phase_ == Phase::Incumbent) {
         inc_stats_ = cur_;
         inc_terms_ = score(cur_);
+        // Noise sample: only valid when the PREVIOUS generation reverted, i.e.
+        // this window and the last one scored the same vector.
+        if (prev_inc_pair_ && prev_inc_J_ >= 0.0) {
+            double d = inc_terms_.J - prev_inc_J_;
+            noise_ema_ = (noise_n_ == 0) ? d * d
+                                         : noise_ema_ + noise_alpha_ * (d * d - noise_ema_);
+            ++noise_n_;
+        }
+        prev_inc_J_ = inc_terms_.J;
+        prev_inc_pair_ = false;
         mutate_candidate();
         start_window(Phase::Candidate);
         return;
     }
     // Candidate window complete — the contemporaneous compare.
     cand_terms_ = score(cur_);
-    bool ok = viability_ok(cur_, inc_stats_) && cand_terms_.J < inc_terms_.J;
+    // The improvement must clear the criterion's own measured noise, or a coin
+    // flip becomes an "accept" and the 1/5th anneal reads that as success.
+    accept_margin_ = accept_k_ * sigma_est();
+    bool ok = viability_ok(cur_, inc_stats_)
+              && cand_terms_.J < inc_terms_.J - accept_margin_;
     if (ok) { incumbent_ = candidate_; ++accepts_; }
     else    { ++reverts_; }
+    prev_inc_pair_ = !ok;          // a revert leaves the vector unchanged
     accept_log_.push_back(ok ? 'A' : 'R');
     if (accept_log_.size() > kAcceptLogMax) accept_log_.erase(0, 1);
     ++generation_;
@@ -608,6 +658,11 @@ nlohmann::json GainEvolver::snapshot_state() const {
     mod["accept_hist"] = std::vector<int>(accept_hist_.begin(), accept_hist_.end());
     mod["accept_log"]  = accept_log_;
     mod["need_publish"] = need_publish_;
+    mod["noise_ema"] = noise_ema_;
+    mod["noise_n"] = noise_n_;
+    mod["prev_inc_J"] = prev_inc_J_;
+    mod["prev_inc_pair"] = prev_inc_pair_;
+    mod["accept_margin"] = accept_margin_;
     auto stats = [](WindowStats const& w) {
         return nlohmann::json{{"falls", w.falls}, {"up_sum", w.up_sum}, {"up_sq", w.up_sq},
                               {"meas_n", w.meas_n}, {"distress_hits", w.distress_hits},
@@ -616,7 +671,7 @@ nlohmann::json GainEvolver::snapshot_state() const {
     mod["cur"]       = stats(cur_);
     mod["inc_stats"] = stats(inc_stats_);
     auto terms = [](Terms const& t) {
-        return nlohmann::json{{"falls", t.falls}, {"tilt_var", t.tilt_var},
+        return nlohmann::json{{"falls", t.falls}, {"tilt_sd", t.tilt_sd},
                               {"distress_duty", t.distress_duty}, {"unloaded_mean", t.unloaded_mean},
                               {"flow_term", t.flow_term}, {"loaded_min", t.loaded_min},
                               {"J", t.J}, {"valid", t.valid}};
@@ -661,6 +716,11 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
     }
     accept_log_   = mod.value("accept_log", accept_log_);
     need_publish_ = mod.value("need_publish", need_publish_);
+    noise_ema_ = mod.value("noise_ema", noise_ema_);
+    noise_n_ = mod.value("noise_n", noise_n_);
+    prev_inc_J_ = mod.value("prev_inc_J", prev_inc_J_);
+    prev_inc_pair_ = mod.value("prev_inc_pair", prev_inc_pair_);
+    accept_margin_ = mod.value("accept_margin", accept_margin_);
     auto stats = [this](nlohmann::json const& j, WindowStats& w) {
         w.reset(n_legs_);
         w.falls = j.value("falls", 0);
@@ -673,7 +733,7 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
     if (mod.contains("cur"))       stats(mod["cur"], cur_);
     if (mod.contains("inc_stats")) stats(mod["inc_stats"], inc_stats_);
     auto terms = [](nlohmann::json const& j, Terms& t) {
-        t.falls = j.value("falls", 0.0); t.tilt_var = j.value("tilt_var", 0.0);
+        t.falls = j.value("falls", 0.0); t.tilt_sd = j.value("tilt_sd", 0.0);
         t.distress_duty = j.value("distress_duty", 0.0); t.unloaded_mean = j.value("unloaded_mean", 0.0);
         t.flow_term = j.value("flow_term", 0.0); t.loaded_min = j.value("loaded_min", 0.0);
         t.J = j.value("J", 0.0); t.valid = j.value("valid", false);
@@ -706,11 +766,14 @@ nlohmann::json GainEvolver::metrics() const {
     m["J_inc"]      = inc_terms_.valid ? inc_terms_.J : -1.0;
     m["J_cand"]     = cand_terms_.valid ? cand_terms_.J : -1.0;
     m["falls"]         = inc_terms_.falls;
-    m["tilt_var"]      = inc_terms_.tilt_var;
+    m["tilt_sd"]       = inc_terms_.tilt_sd;
     m["distress_duty"] = inc_terms_.distress_duty;
     m["unloaded_mean"] = inc_terms_.unloaded_mean;
     m["flow_term"]     = inc_terms_.flow_term;
     m["loaded_min"]    = inc_terms_.loaded_min;
+    m["sigma_est"]     = sigma_est();
+    m["accept_margin"] = accept_margin_;
+    m["noise_n"]       = noise_n_;
     m["vec"] = (phase_ == Phase::Candidate) ? candidate_ : incumbent_;
     return m;
 }
@@ -734,11 +797,11 @@ nlohmann::json GainEvolver::diag_snapshot() const {
     // CONTRIBUTION to J (w*term) rather than its raw value — a large raw term
     // with a small weight decides nothing, and that distinction is exactly what
     // "is this term dead?" asks.
-    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_var", w_tilt_var_},
+    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_sd", w_tilt_sd_},
                                   {"distress_duty", w_distress_},
                                   {"unloaded_mean", w_unloaded_}, {"flow_term", w_flow_}};
     nlohmann::json ct;
-    ct["falls"] = cand_terms_.falls; ct["tilt_var"] = cand_terms_.tilt_var;
+    ct["falls"] = cand_terms_.falls; ct["tilt_sd"] = cand_terms_.tilt_sd;
     ct["distress_duty"] = cand_terms_.distress_duty; ct["unloaded_mean"] = cand_terms_.unloaded_mean;
     ct["flow_term"] = cand_terms_.flow_term; ct["loaded_min"] = cand_terms_.loaded_min;
     j["cand_terms"] = std::move(ct);

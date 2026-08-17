@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "PART IV GAIN EVOLVER \u2014 lifetime (1+1)-ES over the 8-gain vector",
-    "description": "PART IV v1 (2026-08-17): GainEvolver module ON, seeded at the operator's baked point (rear 0.5/0.2/0.5, amp_target 0.4, height_homeo 0.04, postural 0.7, coupling 1.55, plan 0.05). SHIPS AT mutation_sigma 0 = SILENT OBSERVER: the intrinsic criterion J = 1.0*falls + 5.0*var(upright) + 0.5*distress_duty + 0.5*unloaded_contact + 0.5*(1-flow_quality) is scored every 4000-tick window and mirrored (ge_ji + ge_* terms) but NOTHING publishes \u2014 byte-identical to the planpull config (gate 1). A/B LEVER = gain_evolver:mutation_sigma (panel slider or OGMA_PICRAWLER_SETPARAM_AT=\"1:gain_evolver:mutation_sigma:0.08\"). At sigma>0: interleaved incumbent re-evaluation (incumbent window -> candidate window -> contemporaneous compare), accept iff G1 falls-no-regression AND G2 per-leg loaded-minima AND J_cand<J_inc; whole-vector Gaussian mutation, 1/5th-rule sigma anneal. WATCH: ge_ji must FALL; ga_app must track ge_pub*8 (two-sided consumer check, ga_rej must stay 0); [U] panel shows the live vector + accept history. NOTE coord_reward_drive 0.3 stays LIVE inside every window (the inner phase search is part of the plant being evaluated). amp_seek_rate must stay unset/0 \u2014 setup THROWS on the amp_target ownership collision. First measurable job: erase the 3/20 falls tail (s12, s3) without giving back the loaded rear touchdowns (rlt/rpt). Charter: docs/plans-and-designs/adaptive_gains_substrate_plan.md.",
+    "description": "PART IV v1 (2026-08-17): GainEvolver module ON, seeded at the operator's baked point (rear 0.5/0.2/0.5, amp_target 0.4, height_homeo 0.04, postural 0.7, coupling 1.55, plan 0.05). SHIPS AT mutation_sigma 0 = SILENT OBSERVER: the intrinsic criterion J = 1.0*sd(upright) + 1.0*unloaded_contact + 1.0*(1-flow_quality) is scored every 12000-tick window and mirrored (ge_ji + ge_* terms) but NOTHING publishes \u2014 byte-identical to the planpull config (gate 1). A/B LEVER = gain_evolver:mutation_sigma (panel slider or OGMA_PICRAWLER_SETPARAM_AT=\"1:gain_evolver:mutation_sigma:0.08\"). At sigma>0: interleaved incumbent re-evaluation (incumbent window -> candidate window -> contemporaneous compare), accept iff G1 falls-no-regression AND G2 per-leg loaded-minima AND J_cand<J_inc; whole-vector Gaussian mutation, 1/5th-rule sigma anneal. WATCH: ge_ji must FALL; ga_app must track ge_pub*8 (two-sided consumer check, ga_rej must stay 0); [U] panel shows the live vector + accept history. NOTE coord_reward_drive 0.3 stays LIVE inside every window (the inner phase search is part of the plant being evaluated). amp_seek_rate must stay unset/0 \u2014 setup THROWS on the amp_target ownership collision. First measurable job: erase the 3/20 falls tail (s12, s3) without giving back the loaded rear touchdowns (rlt/rpt). Charter: docs/plans-and-designs/adaptive_gains_substrate_plan.md. CRITERION REVISED 2026-08-17 after gate 2 measured its noise budget: falls was 80.9% of J's variance and is now GUARD-ONLY (w_falls 0) \u2014 guard the catastrophe, optimize its continuous precursor sd(upright); var->sd; w_distress 0 until that contaminated sensor is fixed; window 4000->12000; and acceptance now requires J_cand < J_inc - accept_k*sigma_hat where sigma_hat is estimated from the search's OWN revert pairs (a bare inequality accepted ~50% by coin flip and drove the 1/5th anneal to the sigma ceiling on 3/4 seeds).",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -446,13 +446,12 @@
         "n_legs": 4,
         "seed": 20260817,
         "warmup_ticks": 1500,
-        "eval_window_ticks": 4000,
+        "eval_window_ticks": 12000,
         "mutation_sigma": 0.0,
-        "w_falls": 1.0,
-        "w_tilt_var": 5.0,
-        "w_distress": 0.5,
-        "w_unloaded": 0.5,
-        "w_flow": 0.5,
+        "w_falls": 0.0,
+        "w_distress": 0.0,
+        "w_unloaded": 1.0,
+        "w_flow": 1.0,
         "viability_falls_tol": 0,
         "viability_load_tol": 0.05,
         "upright_fall_thresh": 0.0,
@@ -469,7 +468,11 @@
         "anneal_up": 1.5,
         "anneal_down": 0.85,
         "sigma_min": 0.01,
-        "sigma_max": 0.5
+        "sigma_max": 0.5,
+        "w_tilt_sd": 1.0,
+        "accept_k": 1.0,
+        "noise_min_n": 3,
+        "noise_alpha": 0.25
       }
     }
   ],

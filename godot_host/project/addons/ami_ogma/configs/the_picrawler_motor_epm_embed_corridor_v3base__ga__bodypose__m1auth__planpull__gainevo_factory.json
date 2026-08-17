@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "PART IV GAIN EVOLVER (FACTORY) \u2014 convergence gate arm",
-    "description": "GATE 2 ARM (2026-08-17): identical to __gainevo but gain_seed = the pinned MotorEPMv2 member/schema DEFAULTS [0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0] and mutation_sigma 0.08 from boot. NOTE four of eight factory defaults are 0 \u2014 whole mechanisms OFF, including coupling_gain 0 (no Kuramoto coupling): the generation-0 body may barely locomote, which makes this the HONEST hard version of the convergence claim (does the vector walk toward/past the operator's hand point and the ge_ji trace fall?). If gradient-free, the recorded fallback arm is mid-range seeds \u2014 record whichever is run. Judge on per-seed ge_vec trajectories + ge_ji + accepts>0 (tautology check), then re-bake the settled vector and seedavg n=6 vs the hand point on the FULL standard set. Arena protocol: seedavg extra-arg OGMA_PICRAWLER_GYM=arena.",
+    "description": "GATE 2 ARM (2026-08-17): identical to __gainevo but gain_seed = the pinned MotorEPMv2 member/schema DEFAULTS [0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0] and mutation_sigma 0.08 from boot. NOTE four of eight factory defaults are 0 \u2014 whole mechanisms OFF, including coupling_gain 0 (no Kuramoto coupling): the generation-0 body may barely locomote, which makes this the HONEST hard version of the convergence claim (does the vector walk toward/past the operator's hand point and the ge_ji trace fall?). If gradient-free, the recorded fallback arm is mid-range seeds \u2014 record whichever is run. Judge on per-seed ge_vec trajectories + ge_ji + accepts>0 (tautology check), then re-bake the settled vector and seedavg n=6 vs the hand point on the FULL standard set. Arena protocol: seedavg extra-arg OGMA_PICRAWLER_GYM=arena. CRITERION REVISED 2026-08-17 after gate 2 measured its noise budget: falls was 80.9% of J's variance and is now GUARD-ONLY (w_falls 0) \u2014 guard the catastrophe, optimize its continuous precursor sd(upright); var->sd; w_distress 0 until that contaminated sensor is fixed; window 4000->12000; and acceptance now requires J_cand < J_inc - accept_k*sigma_hat where sigma_hat is estimated from the search's OWN revert pairs (a bare inequality accepted ~50% by coin flip and drove the 1/5th anneal to the sigma ceiling on 3/4 seeds).",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -446,13 +446,12 @@
         "n_legs": 4,
         "seed": 20260817,
         "warmup_ticks": 1500,
-        "eval_window_ticks": 4000,
+        "eval_window_ticks": 12000,
         "mutation_sigma": 0.08,
-        "w_falls": 1.0,
-        "w_tilt_var": 5.0,
-        "w_distress": 0.5,
-        "w_unloaded": 0.5,
-        "w_flow": 0.5,
+        "w_falls": 0.0,
+        "w_distress": 0.0,
+        "w_unloaded": 1.0,
+        "w_flow": 1.0,
         "viability_falls_tol": 0,
         "viability_load_tol": 0.05,
         "upright_fall_thresh": 0.0,
@@ -469,7 +468,11 @@
         "anneal_up": 1.5,
         "anneal_down": 0.85,
         "sigma_min": 0.01,
-        "sigma_max": 0.5
+        "sigma_max": 0.5,
+        "w_tilt_sd": 1.0,
+        "accept_k": 1.0,
+        "noise_min_n": 3,
+        "noise_alpha": 0.25
       }
     }
   ],

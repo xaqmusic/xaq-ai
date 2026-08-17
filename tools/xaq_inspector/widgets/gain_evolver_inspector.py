@@ -258,7 +258,7 @@ class _GainRack(_SurfaceWidget):
 class _TermBars(_SurfaceWidget):
     """Weighted criterion contributions — w*term, the thing that moves J."""
 
-    TERMS = [("falls", "falls"), ("tilt_var", "tilt var"),
+    TERMS = [("falls", "falls (guard-only)"), ("tilt_sd", "upright sd"),
              ("distress_duty", "distress"), ("unloaded_mean", "unloaded"),
              ("flow_term", "flow")]
     ROW_H = 22
@@ -312,11 +312,14 @@ class _TermBars(_SurfaceWidget):
             p.setPen(QPen(QColor(INK_PRIMARY)))
             p.drawText(x1 + 8, cy + 4, vtxt)
             if v == v and abs(v) < 1e-9:
-                # Never fired in this window: the weight is buying nothing, which
-                # is a statement about the SENSOR feeding it.
-                p.setPen(QPen(QColor(CRIT)))
+                # Distinguish the two zeros, because they mean opposite things:
+                # weight 0 is a DESIGN choice (falls is guard-only; distress is
+                # off until its sensor is fixed), whereas a weighted term that
+                # never fires is a statement about that SENSOR.
+                off = abs(self._weights.get(key, 1.0)) < 1e-12
+                p.setPen(QPen(QColor(INK_MUTED if off else CRIT)))
                 p.drawText(x1 + 8 + fm.horizontalAdvance(vtxt) + 10, cy + 4,
-                           "DEAD — sensor never fired")
+                           "off (weight 0)" if off else "DEAD — sensor never fired")
         p.end()
 
 
@@ -495,5 +498,8 @@ class GainEvolverInspector(QWidget):
             f"<span style='color:{CRIT}'>{rev} reverted</span> &nbsp;·&nbsp; "
             f"J_inc {jin:.4f} &nbsp; J_cand {'—' if jca < 0 else f'{jca:.4f}'} &nbsp;·&nbsp; "
             f"per-leg loaded min {minld:.3f} &nbsp;·&nbsp; "
+            f"margin {_fl(s.get('accept_margin'), 0.0):.4f} "
+            f"<span style='color:{INK_MUTED}'>(σ̂ {_fl(s.get('sigma_est'), 0.0):.4f}, "
+            f"n={int(_fl(s.get('noise_n'), 0) or 0)})</span> &nbsp;·&nbsp; "
             f"<span style='color:{INK_MUTED}'>{pub} vectors published</span>"
         )

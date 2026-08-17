@@ -21,8 +21,8 @@
 // exactly the mid-run (d)-test this phase must pass.
 //
 // THE CRITERION (error-form ONLY, §5.1 — never raw speed):
-//   J = w_falls·falls + w_tilt_var·var(upright) + w_distress·distress_duty
-//     + w_unloaded·unloaded_contact_mean + w_flow·(1 − flow_quality_mean)
+//   J = w_tilt_sd·sd(upright) + w_unloaded·unloaded_contact_mean
+//     + w_flow·(1 − flow_quality_mean)        [+ optional falls / distress]
 // computed EXCLUSIVELY from body-published reality.proprio.* topics with the
 // module's own EMAs — never from the consumer's internal state, which its own
 // homeostats bend (the stationary-evaluator burns: a self-referential
@@ -37,9 +37,25 @@
 //   G2  PER-LEG loaded-contact minima (min over legs, never a group mean —
 //       the stance-capture lesson: the GLOBAL amp homeostat satisfied the
 //       group mean by over-driving the living legs while one leg was dead)
-//   accept ⇔ G1 ∧ G2 ∧ (J_cand < J_inc)   — the viability guard is SEPARATE
-//   from the improvement criterion (the demo-mask lesson: "target wins, body
-//   pays" must be rejected, not netted).
+//   accept ⇔ G1 ∧ G2 ∧ (J_cand < J_inc − k·σ̂)  — the viability guard is
+//   SEPARATE from the improvement criterion (the demo-mask lesson:
+//   "target wins, body pays" must be rejected, not netted).
+//
+// THE NOISE BUDGET (measured 2026-08-17, gate 2 — this shaped the criterion).
+// Scored per 4000-tick window, `falls` supplied 80.9% of J's variance while the
+// three gait-quality terms supplied 0.9% between them: a rare discrete count
+// drowned everything the criterion existed to select on, and no affordable
+// window fixes it (134k ticks would be needed).  Two consequences, both live:
+//   * falls left the criterion for the GUARD.  Guard the catastrophe, optimize
+//     its continuous precursor (upright sd, sampled every tick).  var → sd
+//     because squaring let one tumble dominate quadratically.
+//   * acceptance became noise-aware.  A bare J_cand < J_inc accepts ~50% by
+//     coin flip; the 1/5th rule reads that as success and RAISES sigma, which
+//     pinned 3/4 gate-2 seeds at the ceiling.  σ̂ is now estimated from the
+//     system's own revert pairs (consecutive incumbent windows with an
+//     unchanged vector = pure measurement noise) and the improvement must
+//     clear k·σ̂.  Measured offline on 128 real windows, this cut the window
+//     length needed for a usable signal from ~134k ticks to ~11k.
 //
 // GAIN-0 GUARD: mutation_sigma == 0 ⇒ SILENT OBSERVER — the evaluator still
 // scores windows (criterion visible on the promoted stack before any search),
@@ -102,7 +118,7 @@ private:
     };
     // A scored window, kept for diag + the guard comparison.
     struct Terms {
-        double falls = 0, tilt_var = 0, distress_duty = 0,
+        double falls = 0, tilt_sd = 0, distress_duty = 0,
                unloaded_mean = 0, flow_term = 0, loaded_min = 0, J = 0;
         bool   valid = false;
     };
@@ -120,6 +136,7 @@ private:
     void  mutate_candidate();
     void  anneal(bool accepted);
     Terms score(WindowStats const& w) const;
+    double sigma_est() const;      // sd of one window's J, from revert pairs
     double per_leg_loaded_min(WindowStats const& w) const;
     bool  viability_ok(WindowStats const& cand, WindowStats const& inc) const;
 
@@ -138,19 +155,39 @@ private:
     // ---- timing / loop params ------------------------------------------------
     int     n_legs_            = 4;
     int64_t warmup_ticks_      = 1500;
-    int64_t eval_window_ticks_ = 4000;
+    int64_t eval_window_ticks_ = 12000;   // 4000 measured too short (gate 2)
     int64_t seed_              = 0;       // OGMA_SEED override rewrites "seed"
     int64_t republish_every_   = 0;       // 0 = publish on window boundaries only
 
     // ---- criterion weights (HotMutable; FIXED during a run = the stationary
     // evaluator — retune between runs, never let the loop touch them) ---------
-    double w_falls_    = 1.0;
-    double w_tilt_var_ = 5.0;
-    double w_distress_ = 0.5;
-    double w_unloaded_ = 0.5;
-    double w_flow_     = 0.5;
+    // 2026-08-17, after gate 2 measured the criterion's noise budget:
+    //   falls was 80.9% of J's variance and CANNOT be estimated per-window at
+    //   any affordable window length (134k ticks would be needed) — it is a
+    //   rare discrete count.  It moves OUT of the improvement criterion and
+    //   lives only in the G1 viability guard, where a no-regression THRESHOLD
+    //   is robust to exactly the noise that ruins it as a gradient.  What the
+    //   criterion optimizes instead is the CONTINUOUS PRECURSOR of falling
+    //   (upright sd), which is well-sampled every tick.
+    //   Guard the catastrophe; optimize its precursor.
+    double w_falls_    = 0.0;   // 0 = falls is guard-only (see G1)
+    double w_tilt_sd_  = 1.0;   // sd(upright), NOT variance: squaring made a
+                                // rare tumble dominate quadratically
+    double w_distress_ = 0.0;   // 0 until the body's distress sensor is fixed
+                                // (world-frame stall half + a 50-vs-240Hz bug)
+    double w_unloaded_ = 1.0;
+    double w_flow_     = 1.0;
 
     // ---- guard + detector params (HotMutable) --------------------------------
+    // Noise-aware acceptance.  A bare J_cand < J_inc on a stochastic criterion
+    // accepts ~50% by coin flip, which the 1/5th rule then reads as success and
+    // answers by RAISING sigma — gate 2 pinned 3/4 seeds at the ceiling that
+    // way.  Require the improvement to clear the criterion's OWN measured
+    // noise, estimated from the system's running dynamics (doctrine §5: adapt
+    // the constant, never tune it to the signal's scale).
+    double  accept_k_        = 1.0;   // 0 = legacy bare inequality
+    int64_t noise_min_n_     = 3;     // samples before the margin is trusted
+    double  noise_alpha_     = 0.25;  // EMA rate on squared revert-pair deltas
     double  viability_load_tol_    = 0.05;
     int64_t viability_falls_tol_   = 0;
     double  upright_fall_thresh_   = 0.0;
@@ -187,7 +224,14 @@ private:
     std::mt19937_64 rng_;
     WindowStats cur_, inc_stats_;
     Terms inc_terms_, cand_terms_;
-    bool  need_publish_ = false;           // set by param transitions, fires next tick
+    bool  need_publish_ = false;
+    // Pure-noise estimator: only pairs of incumbent windows measured across a
+    // REVERT are comparable (same vector, two independent windows).
+    double  noise_ema_     = 0.0;    // EMA of (dJ)^2 over those pairs
+    int64_t noise_n_       = 0;
+    double  prev_inc_J_    = -1.0;
+    bool    prev_inc_pair_ = false;  // previous generation reverted => pairable
+    double  accept_margin_ = 0.0;    // last margin actually applied (diag)           // set by param transitions, fires next tick
 
     // ---- sensor caches + edge state (ALL serialized) -------------------------
     float upright_  = 1.0f;

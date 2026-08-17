@@ -11075,11 +11075,19 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# domination check (§3.2): a weight whose term never moves is dead,
 			# which is a measurement about the sensor, not the criterion.
 			line["ge_falls"] = snappedf(float(_ge.get("falls", 0.0)), 0.01)
-			line["ge_tilt"]  = snappedf(float(_ge.get("tilt_var", 0.0)), 0.000001)
+			line["ge_tilt"]  = snappedf(float(_ge.get("tilt_sd", 0.0)), 0.000001)
 			line["ge_dis"]   = snappedf(float(_ge.get("distress_duty", 0.0)), 0.0001)
 			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
 			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
 			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
+			# Noise-aware acceptance (post-gate-2): sigma_hat is estimated from the
+			# search's own revert pairs and the margin is what a candidate must
+			# actually beat.  ge_sig_e == 0 with ge_nn > 0 would mean the estimator
+			# ran but found no noise; ge_nn == 0 late in a run means it never
+			# gathered a pair, i.e. nothing has been reverted.
+			line["ge_sig_e"] = snappedf(float(_ge.get("sigma_est", 0.0)), 0.00001)
+			line["ge_marg"]  = snappedf(float(_ge.get("accept_margin", 0.0)), 0.00001)
+			line["ge_nn"]    = int(_ge.get("noise_n", 0))
 			var _gev = _ge.get("vec", [])
 			if _gev is Array and not _gev.is_empty():
 				var _gvo: Array = []
