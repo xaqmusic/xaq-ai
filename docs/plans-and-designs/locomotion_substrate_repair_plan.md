@@ -1579,6 +1579,24 @@ cost may be the drop-press's cadence drag (the 2026-08-10 pattern);
 a phase-shaped press (strong only in the descent's back half) is the
 recorded refinement if cv must come back before promotion.**
 
+**2026-08-17 — REAR LANDING SEQUENCE at the operator's operating point
+(0.5/0.2/0.5), n=20 ARENA: the signature and the transport HOLD AT POWER;
+the cost is an instability tail — which is PART IV's opening argument.**
+Baked as named scaffold values (operator hand-found).  vs trio-zeroed
+control, same build: **net_disp 8.93±2.66 → 10.23±2.17 (+15%)**, straight
+0.61 → 0.65, **rear-TD hip2 −0.106 → +0.003 (the loaded-landing signature
+confirmed at n=20, 228 touchdowns)**, seizure severity nearly halved
+(meanworst 0.107 → 0.061; incidence 5/20 → 4/20).  The tail: falls 1 → 8,
+concentrated in 3/20 seeds (s12: 4 falls + tilt 0.40; s3: tilt 0.98), and
+cv 0.77 → 0.87.  **Verdict: the CONCEPT IS PROMOTED (operator eye + n=20
+transport + the causal landing signature); the FIXED POINT pays a ~3/20
+instability tax and a cadence cost.  That tax is precisely the case for
+PART IV: a fixed gain vector cannot be right for every seed's attractor —
+the GainEvolver's per-lifetime search, seeded at this exact point with the
+viability guard (falls/tilt) in its criterion, is the designed answer to
+this tail.  The PART III campaign log closes here; the frontier moves to
+`adaptive_gains_substrate_plan.md`.**
+
 *B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
 The audit answer again — the pieces exist, hand-roll only scorers: EPM
 already implements descending-prediction subtraction (`gng_input =
