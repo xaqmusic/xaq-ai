@@ -103,3 +103,143 @@ generalized to a declared gain vector:
 - **Interaction with B:** a stride-carving vocabulary (PART III's B thread, self-mass
   0.27) could eventually *predict* criterion moves before they happen — planning in
   gain space. Out of scope until B's planner layer earns a verdict.
+
+---
+
+## 6. The v1 build — BUILT 2026-08-17 (`IN_FLIGHT`, gate 1 PASSED)
+
+### 6.1 Architecture as built (three operator fork decisions)
+
+1. **Separate module + gain topic**, not a search inside MotorEPMv2. `GainEvolver`
+   publishes a `GainVector` (parallel `keys`/`values` — the mapping is explicit in every
+   message, never config-side agreement) on `gain.motor_epm`; MotorEPMv2 gained a
+   `gain_topic` socket (ConstructionOnly, `""` = off = byte-identical). **Why it matters
+   beyond tidiness: the evaluator is stationary BY CONSTRUCTION** — the criterion reads
+   only body-published `reality.proprio.*` topics and the module's own EMAs, so it
+   cannot read a quantity the mutated gains regulate through MotorEPMv2's internals
+   (the stationary-evaluator burns: a self-referential threshold is not a sensor; a live
+   homeostat silently restores the measured quantity).
+2. **Post-plant slip DEFERRED** — no egocentric slip signal exists (`lateral_v` is a
+   soft oracle, `_grf_fwd` is declared permanently god's-eye). Ledgered with its re-use
+   context; it slots in later as one more `w_*` term with zero loop changes.
+3. **Interleaved incumbent re-evaluation** replaces the precedent's stored-winner score.
+   Each generation = incumbent window → candidate window → *contemporaneous* compare.
+   No stored best, no `×0.99` forget. This kills the residual ratchet shape the ledger
+   flags (a lucky escape thrash becoming a permanently-reverted-to incumbent) and makes
+   the (d)-test structural: after a perturbation the incumbent's score degrades within
+   one window instead of waiting on a decay constant.
+
+### 6.2 The criterion and guards as built
+
+```
+J = w_falls·falls + w_tilt_var·var(upright) + w_distress·distress_duty
+  + w_unloaded·unloaded_contact_mean + w_flow·(1 − flow_quality)     [lower = better]
+```
+Defaults 1.0 / 5.0 / 0.5 / 0.5 / 0.5. Continuous terms measure the **back half** of each
+window (front half = settling, the coord-search precedent); falls count whole-window.
+A leg below `min_touchdowns` scores **fully unloaded** — a non-stepping leg must never
+look clean. `flow_quality = clamp(flow_ema,0,0.05)/0.05 / (1+4·flow_vol_ema)`, form
+lifted from MotorEPMv2's fwd-flow homeostat; its `fwd_v` input is a soft oracle and is
+the charter's one knowing exception.
+
+Guards, evaluated **separately** from J (`accept ⇔ G1 ∧ G2 ∧ J_cand < J_inc`):
+- **G1** falls no-regression: `cand.falls ≤ inc.falls + viability_falls_tol`
+- **G2** per-leg loaded-contact **minimum**: `min_l(loaded_l)` may not fall more than
+  `viability_load_tol` below the incumbent's — never a group mean (the stance-capture
+  lesson: the GLOBAL amp homeostat satisfied the group mean by over-driving the living
+  legs while one leg was dead).
+
+Falls are counted as **debounced `upright < thresh` EDGES** (25 ticks, deliberately under
+the body's 30-tick inversion dwell so the edge fires before auto-reset snaps upright
+back) — never the harness's god's-eye `chassis_y` detector, and never a duty.
+
+`mutation_sigma = 0` ⇒ **silent observer**: the evaluator still scores windows for the
+instruments (the criterion is watchable on the promoted stack before any search runs),
+but nothing publishes, no RNG is drawn, nothing mutates. σ self-anneals (1/5th-success
+flavor) between `sigma_min`/`sigma_max`; the search never fully stops, which is the
+"settle AND remain adaptable" property stated as a mechanism rather than a hope.
+
+Two collisions refused at construction rather than tuned around: `gain_topic` +
+`amp_seek_rate > 0` **throws** (both would own `amp_target`), and a declared vector whose
+parallel arrays disagree or whose seed is out of bounds throws.
+
+### 6.3 Files
+
+| Path | What |
+|---|---|
+| `cpp_core/include/ogma/Topics.hpp` | `GainVector` message |
+| `cpp_core/src/ogma/PayloadTypeName.cpp` | type-name entry (else it reports "Unknown") |
+| `cpp_core/{include,src}/ogma/modules/GainEvolver.{hpp,cpp}` | the module |
+| `cpp_core/src/ogma/ModuleRegistry.cpp`, `cpp_core/CMakeLists.txt` | registration |
+| `cpp_core/src/ogma/modules/MotorEPMv2.cpp` (+ hpp) | the gain socket + counters + restore replay |
+| `cpp_core/tests/ogma/test_gain_evolver.cpp` | 12 tests, all passing |
+| `godot_host/src/OgmaBrain.cpp` | `get_module_metrics` branch (metrics, **not** snapshot — the per-tick lesson) |
+| `godot_host/project/scripts/picrawler_body.gd` | `ga_app`/`ga_rej` (inside `_mm`) + the `ge_*` block |
+| `godot_host/project/scripts/gain_evolver_panel.gd` + `scenes/the_picrawler.tscn` | the `[U]` panel |
+| `configs/…__planpull__gainevo.json`, `…__gainevo_factory.json` | the deployable arm (σ=0) + the gate-2 arm |
+
+**Restore replay is load-bearing:** evolved gains live in param members the instance
+snapshot does *not* round-trip (params come from the GraphConfig), so `restore_state`
+re-dispatches `applied_gains_` through `on_param_change`. Without it a restored clone
+silently reverts to config gains and the clone-determinism test would blame the evolver.
+
+**The applied-counter is read-back verified**, not assumed: MotorEPMv2's
+`on_param_change` chain has **no terminal else**, so an unknown key is silently ignored.
+The socket therefore re-reads `current_params()` after dispatch and counts a landing only
+when the value actually matches — a typo'd key increments `gains_rejected` instead of
+vanishing. (§3.2 rule 5: a gate has shipped here as silent dead code before.)
+
+### 6.4 Gate 1 — PASSED (2026-08-17)
+
+Promoted config vs `__gainevo` at σ=0, `OGMA_SEED=7`, corridor, 12 000 ticks. Diff =
+body-log JSON lines, `ge_`/`ga_` keys dropped (the instrument delta is by design),
+sorted-key re-serialize, exact compare: **251 lines each side, byte-identical.** The
+observer instruments were confirmed live in the same run (`ge_ji` 0.4578, `ge_ph` 1,
+per-term breakdown populated, `ge_pub` 0) — so this is byte-identity *with the evaluator
+running*, not byte-identity because the module was inert.
+
+**Live-search smoke** (σ=0.08 via `SETPARAM_AT` at tick 1, 30 000 ticks, seed 7): the
+loop runs — 3 generations, 1 accept / 2 reverts, σ held 0.08, and the vector migrated
+`[0.5, 0.2, 0.5, 0.4, 0.04, 0.7, 1.55, 0.05] → [0.415, 0.128, 0.840, 0.378, 0.074,
+0.673, 1.321, 0.047]`. **The §3.2 two-sided consumer check passes exactly:
+`ga_app` 64 = `ge_pub` 8 × 8 keys, `ga_rej` 0** — every published vector landed, every
+key mapped. `rlt`/`rpt` kept climbing (10 609 / 30 100), so the rear-landing consumers
+stayed live under evolution. **This is a pipe-integrity result and nothing more:** 3
+generations on one seed says nothing about convergence, and the J trace moved *up*
+(0.281 → 0.336) across them, which at this power is noise.
+
+### 6.5 Gates 2 and 3 — NOT YET RUN
+
+- **Gate 2 (convergence):** `seedavg.py …__gainevo_factory.json 4 256000 0.3
+  OGMA_PICRAWLER_GYM=arena` (~30 generations; generation = 2 × 4000 ticks; ≈1.5 h wall).
+  ⚠ **Operator decision recorded:** the factory arm seeds at the *pinned* MotorEPMv2
+  schema defaults `[0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0]` — **four of eight are 0,
+  i.e. whole mechanisms OFF, including `coupling_gain` (no Kuramoto coupling)**. The
+  generation-0 body may barely locomote, which makes this the honest *hard* version of
+  the convergence claim; if it proves gradient-free the recorded fallback is mid-range
+  seeds, and whichever is run gets recorded.
+- **Gate 3 ((d)-test):** `OGMA_PICRAWLER_SLICK_LEG=2 OGMA_PICRAWLER_SLICK_AT=200000`
+  (leg 2 = cfg `rl` = anatomical REAR-RIGHT) + σ on at tick 1, 400 k ticks, one run.
+  Judge migration + **partial** J recovery; demanding full return would over-claim, as
+  the friction loss is permanent.
+- **Job #1 (the falls tail):** σ=0.08 from the baked seed, ~200 k × 4 seeds → operator
+  picks a settled vector from `[U]` → re-bake → `seedavg.py <baked> 20 12000 0.3`
+  (seeds include s3/s12). Accept iff the tail shrinks with `rlt`/`rpt` held and the
+  per-leg loaded minima not below baseline − tol. **The operator's eye remains the
+  promotion gate.**
+
+### 6.6 Known caveats carried into the gates (not defects of the loop)
+
+- `w_distress` consumes the body's **known-contaminated** distress signal as-is: its
+  stall half is a world-frame XZ displacement (audit-illegal) and it carries an apparent
+  50 Hz-vs-240 Hz normalisation error that makes it under-fire. Fixing the sensor moves
+  the deployed panic + plan-distress-cut and is therefore a **separate lever**. If
+  `ge_dis` reads ~0 throughout, that weight is dead — a measurement about the sensor,
+  not a verdict on the criterion.
+- `coord_reward_drive 0.3` and `coord_adapt_rate 0.001` stay **live** inside every
+  window: the inner phase search is part of the plant being evaluated (240-tick probes,
+  ~10 per measured half-window — symmetric noise across both windows).
+- Window noise is the main threat to a convergence claim. If generation-to-generation
+  `ge_ji` spread across *incumbent* windows rivals the candidate deltas, accepts are
+  coin flips and "converged" would be false; the remedy is a longer
+  `eval_window_ticks`, and the spread is measurable directly from the log.

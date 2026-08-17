@@ -422,6 +422,97 @@ to become per-integrator**, because `amp_gain` is EFFORT (may escalate when fail
 | **★ THE CORRIDOR GYM RUNS OUT AT ~9.5 m, AND A LONG RUN CHARGES THE FASTEST ARM A `fall` FOR IT** (2026-07-27) | `_build_corridor()` lays a **9.5 m** curriculum on a **20×20** floor (`picrawler_body.gd:2945`, `:2665`), so the walkable strip ends near z=9.5 and the world ends at z=10. At **12 000** ticks a fast arm reaches it: in the load-stroke gain-2 sweep, seed 1 posted **the best distance of the entire campaign (net_z 10.04, max_z 10.06) while its mean `chassis_y` was −39.29** — it walked off the floor and kept falling, and `falls` and `chassis_y` both recorded that as a gait failure. **The bias runs the wrong way: it hits the FASTEST arm first, i.e. exactly the arm a propulsion lever exists to demonstrate, so a long run systematically penalizes levers that work.** Re-run clean at 6 000 ticks, the same arm shows 0 falls and no distance gain at all — so the 12 000-tick reading would have recorded BOTH a false positive (net_z +10 %) and a false negative (0.5 falls) on the same lever. This is §3.2 rule 7 (silent confound) and also explains why the standard protocol is 6 000 ticks — that is the run length that fits the gym, not an arbitrary choice. **Fixed in the harness:** `seedavg.py` now prints a loud `GYM-BOUNDARY WARNING` naming every seed whose `max_z` passes `SEEDAVG_SAFE_Z` (default 8.5) and states that `falls`/`chassis_y` are untrustworthy for those seeds |
 | **Swing detector inferred contact from height instead of using the contact sensor that already existed** (2026-07-25; magnitude CORRECTED below) | `bool sw = foot_y_[i] > foot_y_ema_[i]` — no deadband. **Measured against the TRUE physics foot-contact sensor on identical runs: the detector reads 0.408 swing vs a true 0.229 — over-reporting by ~1.8×.** ⚠️ This row first claimed "40.3 % vs 0.7 %, wrong by ~50×"; that 0.7 % came from a **world-height** proxy which itself under-reports swing by ~16×, so the 50× figure was an artifact of comparing one bad proxy against another. **The real fix was not a deadband at all: `reality.proprio.foot_contact` (a physics touch flag, and the sensor a real picrawler has) was already published every tick and simply never wired into MotorEPM** — now available as `contact_topic`. Historical detail retained: | It then closes a feedback loop with any consumer that moves the foot (`stance_lift`, Cruse): bias lifts the foot above its EMA → declared swing → bias removed → foot drops → declared stance → bias returns. Cost scales with the consumer's gain, which is the measured `stance_lift` sweep: steps 50→84→**147** across gain 0→0.5→0.8 with **no** speed gain, tilt_sd 0.066→0.078→**0.178**, falls 0→0→**0.75**. Mitigated behind `swing_hyst_frac` (MAD-scaled deadband, default 0 = legacy; guard verified byte-identical to the per-seed digit). At gain 0.8 a 0.5 band halves the parasitic lifts (147→73), halves the wobble (0.178→0.089) and removes the falls. **⚠️ CORRECTED after unit testing — this is CONDITIONAL, and the condition is the absence of stepping.** Given a *real* duty cycle (80 planted + 20 lift) the legacy detector is essentially correct (0.18 measured vs 0.20 true): the lift excursions pull the EMA up, so the stance phase sits decisively below it and there is nothing to chatter on. And a band of 1.0·MAD in that regime is too wide — the stance deviation never clears −band, so the detector **latches** (0.58), which is the failure mode behind the live `frac=2.0` arm degrading after 0.5 helped. **So the detector is an AMPLIFIER of the no-stepping problem (§5), not an independent root cause.** Two shapes to remember: **a self-referential threshold is not a sensor, and any bias that moves what it measures will ring it** — and **a scale-invariant deadband cannot separate jitter from a step by amplitude** (a sinusoid has peak/MAD ≈ 1.57 at any size), so answering "is this foot loaded" needs a load observation, which the bus does not have |
 
+| **★★ TWO LATENT TEST/RUNTIME DEFECTS FOUND WHILE GATING THE GAINEVOLVER (2026-08-17) — both PRE-EXISTING, attributed on a clean worktree** | A full `ctest` during the PART IV gate showed **20 failures**. Attribution was done properly instead of assumed: a detached worktree at `HEAD` (8b2fb2f, **none** of the GainEvolver code present) reproduces **both clusters identically**, so none belong to this build (`test_gain_evolver` 12/12 and `test_clone_shipping_configs` 4-passed/4-skipped are green). What the two clusters actually are: **(1) `DescendingPredictor` (9 tests, "Subprocess aborted") is THE SAME σ=0 `normal_distribution` PROCESS ABORT recorded above for the coordination probe** — `DescendingPredictor.cpp:197` and `:224` construct `normal_distribution(0.0f, init_noise_scale_)`, which on hardened libstdc++ **aborts the process** when the scale is 0. The default is 0.01 (safe), so this is armed only when a config or test sets it to 0 — **and `DescendingPredictor` is the `pc_predictor` of the pocketed B thread (`…__pc*.json`)**, whose recorded next knob is a freeze/decay experiment on exactly that predictor. If B resumes and that scale reaches 0, runs die mid-episode and `seedavg` scores corpses — the precise 2026-08-09 failure shape, in a second module. **The 2026-08-09 fix was applied at the crash site, not to the pattern; the pattern is "any `normal_distribution` whose σ is a live parameter".** Fix shape (as used in `GainEvolver::mutate_candidate`): draw from a **fixed unit normal and scale after**, so σ never parameterizes the distribution and σ=0 is unreachable by construction. **(2) `HotPatch`/`HotPatchConnect` (10 tests) are STALE, not broken code:** they `EXPECT_THROW` on a rejected patch, but commit `7db087a` ("per-batch patch isolation") deliberately changed the semantics to *log* `hot-patch batch N REJECTED … — remaining batches still applied* and continue. The live behavior is visible in every picrawler run today (a body-script patch aimed at the absent `cruse_coordinator` is rejected per-batch each run). The tests were never updated with the semantics change. **Rule this reinforces: a red suite that predates your branch still has to be attributed before it is dismissed — and "attributed" means run on a clean tree, not reasoned about.** |
+
+---
+
+### ★★ 2026-08-17 — PART IV: THE GAINEVOLVER IS BUILT AND GATE 1 PASSES (`IN_FLIGHT`)
+
+**Verdict: `IN_FLIGHT`.** Byte-identity smoke PASSED; the search loop is verified live
+end-to-end; **the convergence gate, the (d)-test, and job #1 are NOT yet run, so there is
+no capability claim here at all.** Full build record + parameters:
+[`../plans-and-designs/adaptive_gains_substrate_plan.md`](../plans-and-designs/adaptive_gains_substrate_plan.md) §6.
+
+**What it is.** A lifetime (1+1)-ES over the 8 high-value gains (`rear_land_gain`,
+`rear_knee_plant`, `rear_push_ext`, `amp_target`, `height_homeo_gain`, `postural_gain`,
+`coupling_gain`, `plan_gain`), seeded at the operator's baked rear-sequence point, scored
+by an intrinsic error-form criterion and shipped at `mutation_sigma = 0`.
+
+**Three design decisions worth carrying forward, each answering a recorded burn:**
+
+1. **A separate module + a gain topic, not a search inside MotorEPMv2** (the precedent's
+   own shape). The payoff is not tidiness: because `GainEvolver` can only see
+   `reality.proprio.*`, **the evaluator is stationary by construction** — it is
+   structurally incapable of scoring a quantity that the gains it mutates regulate
+   through MotorEPMv2's internals. The ratchet/self-referential-threshold family of burns
+   is closed by architecture rather than by discipline.
+2. **Interleaved incumbent re-evaluation replaces the stored winner.** The precedent keeps
+   a best score decaying `×0.99`; this ledger already flags "stores a winner" as the
+   residual ratchet shape. Re-measuring the incumbent in its own window every generation
+   means a lucky thrash must **keep re-earning** its score, and after a perturbation the
+   incumbent degrades within one window — so the (d)-test becomes structural rather than
+   dependent on a decay constant.
+3. **The viability guard is SEPARATE from the criterion, and its leg term is a MINIMUM.**
+   `accept ⇔ G1(falls no-regression) ∧ G2(per-leg loaded-contact minimum) ∧ J_cand < J_inc`.
+   G2 is the stance-capture lesson in enforcement form; a group mean would accept a
+   candidate that kills one leg while three improve. Both are unit-tested by
+   constructing exactly those candidates (`ViabilityRejectsTargetWinsBodyPays`,
+   `PerLegMinimaGuard`) — a candidate with a *better* J is REVERTED in both.
+
+**Gate 1 (byte-identity) — PASS.** Promoted config vs `__gainevo` at σ=0, seed 7,
+corridor, 12 000 ticks: 251 body-log lines each, **byte-identical** after dropping the
+`ge_`/`ga_` instrument keys. Critically this is byte-identity **with the evaluator
+running** — the same run shows `ge_ji` 0.4578 and a populated per-term breakdown at
+`ge_pub` 0 — so it is not the trivial identity of an inert module.
+
+**Live-search smoke (pipe integrity only).** σ=0.08 via `SETPARAM_AT`, 30 k ticks: 3
+generations, 1 accept / 2 reverts, vector migrated off the seed. **The §3.2 two-sided
+consumer check passes exactly: `ga_app` 64 = `ge_pub` 8 × 8 keys, `ga_rej` 0.** `rlt`/`rpt`
+kept climbing, so the rear-landing consumers stayed live under evolution. **Scale of this
+claim: the pipe works. Nothing else.** 3 generations on one seed is far below signal
+grade, and J moved *up* across them (0.281 → 0.336), which at this power is noise — quoted
+here only so the number is on the record rather than quietly dropped.
+
+**Two §3.2 traps closed during the build, both of which would have produced silent
+false verdicts:**
+- **The applied-counter had to be READ-BACK verified.** MotorEPMv2's `on_param_change`
+  chain has **no terminal else** — an unknown key is silently ignored. A naive counter
+  would report 8 landings for 8 sends regardless. The socket now re-reads
+  `current_params()` and counts a landing only on an actual value match, so a typo'd key
+  increments `gains_rejected` instead of vanishing (unit-tested).
+- **Restore had to REPLAY the evolved gains.** They live in param members the instance
+  snapshot does not round-trip (params come from the GraphConfig), so without replay a
+  restored clone silently reverts to config gains — and the clone-determinism test would
+  have blamed the evolver for a divergence it did not cause.
+
+**Carried caveat, stated up front so a later reading is not mistaken for a result:**
+`w_distress` consumes the body's **known-contaminated** distress signal as-is (world-frame
+stall half + an apparent 50 Hz-vs-240 Hz normalisation error that makes it under-fire).
+Fixing that sensor moves the deployed panic and plan-distress-cut, so it is a separate
+lever. **If `ge_dis` reads ~0 through the gates, that weight is dead — which is a
+measurement about the sensor, not a verdict on the criterion.**
+
+### 2026-08-17 — POST-PLANT SLIP: `DEFERRED` from the GainEvolver's v1 criterion
+
+The charter lists post-plant slip (foot drift while planted) as a criterion ingredient.
+**It was not built, because no egocentric slip signal exists anywhere in the codebase** —
+and the two nearest candidates are both illegal for a criterion that argues its own
+sim2real legitimacy: `lateral_v` is a **soft oracle** (`_chassis.linear_velocity`
+projected on body-right — the audit's own classification), and `_grf_fwd` is declared
+**permanently god's-eye** in the body script. Building the estimator *and* the evolver in
+one lever would also have violated one-lever-at-a-time, with the unvalidated estimator
+inside the very criterion meant to judge everything else.
+
+**Re-use context (what would justify building it):** the body publishing a legal
+planted-foot drift signal — FK foot position in the chassis frame (`foot_xz`, already
+logged) differenced across ticks while `foot_contact` holds, cross-checked between
+simultaneously-planted legs to cancel body motion; or a servo-current slip proxy. Note
+the confound that makes it a real build rather than a one-liner: body-frame foot motion is
+body motion plus foot motion, so a *single* leg's drift cannot distinguish slipping from
+walking — the differential between planted legs is the honest form. **When it exists it
+slots into the GainEvolver as one more `w_*` term with zero loop changes** — the criterion
+was written as a weighted sum of independently-accumulated terms for exactly this reason.
+
 ---
 
 ### ★ 2026-07-26 — THE POWER STROKE IS NOT PHASE-LOCKED TO GROUND CONTACT
