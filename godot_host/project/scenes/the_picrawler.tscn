@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://scripts/motor_epm_panel.gd"         id="11"]
 [ext_resource type="Script" path="res://scripts/ablation_panel.gd"          id="12"]
 [ext_resource type="Script" path="res://scripts/plan_authority_panel.gd"    id="13"]
+[ext_resource type="Script" path="res://scripts/gain_evolver_panel.gd"      id="14"]
 
 [sub_resource type="Environment" id="Environment_picrawler"]
 background_mode = 1
@@ -100,3 +101,10 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("13")
+
+[node name="GainEvolverPanel" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("14")

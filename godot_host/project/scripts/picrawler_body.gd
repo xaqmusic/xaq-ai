@@ -5453,6 +5453,16 @@ func _input(event: InputEvent) -> void:
 			var pc := pp as Control
 			pc.visible = not pc.visible
 			print("PicrawlerBody: [O] plan_authority_panel = %s" % pc.visible)
+	elif key == KEY_U:
+		# 2026-08-17 (PART IV) — toggle the GAIN EVOLVER panel: live vector +
+		# incumbent/candidate criterion scores + accept history + the mutation-σ
+		# slider (0 = observer; ADOPT hands a hand-tuned [M] point to the
+		# evolver before σ-resume).  Its own key: [M] and [O] are taken.
+		var gp: Node = get_tree().get_root().find_child("GainEvolverPanel", true, false)
+		if gp != null and gp is Control:
+			var gc := gp as Control
+			gc.visible = not gc.visible
+			print("PicrawlerBody: [U] gain_evolver_panel = %s" % gc.visible)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
@@ -10737,6 +10747,14 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["swo"] = int(_mm.get("swd_overdue_ticks", 0))
 			line["rlt"] = int(_mm.get("rear_land_ticks", 0))
 			line["rpt"] = int(_mm.get("rear_push_ticks", 0))
+			# 2026-08-17 (PART IV) — gain-socket CONSUMER counters, read-back
+			# verified in C++: ga_app counts keys that LANDED (current_params
+			# reflects the sent value), ga_rej counts keys the on_param_change
+			# dispatch silently ignored (typo'd key = nonzero ga_rej, never
+			# silence).  ga_app must track ge_pub × |gain_keys| (the ge_* block
+			# below) — the two-sided §3.2 check for the evolver pipe.
+			line["ga_app"] = int(_mm.get("gains_applied", 0))
+			line["ga_rej"] = int(_mm.get("gains_rejected", 0))
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.
@@ -11035,6 +11053,38 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				var _gpo: Array = []
 				for _v in _gp: _gpo.append(snappedf(float(_v), 0.001))
 				line["gait_phase"] = _gpo
+	# ---- PART IV GainEvolver mirror (2026-08-17).  Self-guarded: absent module
+	# ⇒ no ge_* keys ⇒ promoted-config logs unchanged.  Cheap metrics path, NOT
+	# get_module_snapshot (the per-tick full-snapshot lesson).  ge_ji is the
+	# incumbent criterion J (error-form, lower = better): THE trace that must
+	# FALL during the convergence gate and SPIKE-then-recover at the (d)-test.
+	# ge_ph: 0=warmup 1=incumbent 2=candidate.  ge_vec = the ACTIVE vector.
+	if brain != null and brain.has_method("get_module_metrics"):
+		var _ge: Dictionary = brain.get_module_metrics().get("gain_evolver", {})
+		if not _ge.is_empty():
+			line["ge_gen"]   = int(_ge.get("generation", 0))
+			line["ge_acc"]   = int(_ge.get("accepts", 0))
+			line["ge_rev"]   = int(_ge.get("reverts", 0))
+			line["ge_pub"]   = int(_ge.get("publishes", 0))
+			line["ge_sig"]   = snappedf(float(_ge.get("sigma", 0.0)), 0.0001)
+			line["ge_ph"]    = int(_ge.get("phase", 0))
+			line["ge_wt"]    = int(_ge.get("win_tick", 0))
+			line["ge_ji"]    = snappedf(float(_ge.get("J_inc", -1.0)), 0.0001)
+			line["ge_jc"]    = snappedf(float(_ge.get("J_cand", -1.0)), 0.0001)
+			# Per-term breakdown of the INCUMBENT window — the dead-term / term-
+			# domination check (§3.2): a weight whose term never moves is dead,
+			# which is a measurement about the sensor, not the criterion.
+			line["ge_falls"] = snappedf(float(_ge.get("falls", 0.0)), 0.01)
+			line["ge_tilt"]  = snappedf(float(_ge.get("tilt_var", 0.0)), 0.000001)
+			line["ge_dis"]   = snappedf(float(_ge.get("distress_duty", 0.0)), 0.0001)
+			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
+			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
+			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
+			var _gev = _ge.get("vec", [])
+			if _gev is Array and not _gev.is_empty():
+				var _gvo: Array = []
+				for _v in _gev: _gvo.append(snappedf(float(_v), 0.0001))
+				line["ge_vec"] = _gvo
 	line["radial_compass"]           = [snappedf(_last_radial_compass.x, 0.001),
 										snappedf(_last_radial_compass.y, 0.001)]
 	line["target_compass"]           = [snappedf(_last_target_compass.x, 0.001),
