@@ -120,6 +120,10 @@ private:
     std::shared_ptr<RealityToken> last_published_token_;
 
     bool subtract_descending_prediction_ = true;
+    bool  normalize_residual_ = false;   // B v2: running-RMS normalize the
+                                         // post-subtraction residual before the
+                                         // GNG (§6 collapse fix; off = v1)
+    float residual_rms_ = 0.0f;          // the adaptive scale (serialized)
     uint64_t master_seed_               = 0;
 
     // Encoders (exactly one populated based on encoder_kind_).

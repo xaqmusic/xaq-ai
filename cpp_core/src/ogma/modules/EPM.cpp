@@ -126,6 +126,12 @@ ParamSchema EPM::params_schema() const {
         {"stale_prune_enabled",     ParamMutability::HotMutable, "GNG stale-prune",             ParamValue{true}},
         {"stale_window_factor",     ParamMutability::HotMutable, "Stale prune window",          ParamValue{12000.0}},
         {"subtract_descending_prediction", ParamMutability::HotMutable, "Subtract prediction.<m>", ParamValue{true}},
+        {"normalize_residual", ParamMutability::ConstructionOnly,
+         "B v2 (2026-08-14): running-RMS normalize the post-subtraction residual before the GNG, "
+         "so the vocabulary tiles the residual's DIRECTION at unit scale instead of collapsing on "
+         "its (small) absolute size — §6's insertion-gate collapse, measured on the motor path "
+         "(stronger predictor → vocab 41→25).  Only meaningful with subtract_descending_prediction. "
+         "false = byte-identical (B v1).", ParamValue{false}},
         {"sample_rate",             ParamMutability::ConstructionOnly, "STFT sample rate",      ParamValue{int64_t{48000}}},
         {"f_min",                   ParamMutability::ConstructionOnly, "STFT f_min",            ParamValue{80.0}},
         {"f_max",                   ParamMutability::ConstructionOnly, "STFT f_max",            ParamValue{8000.0}},
@@ -195,6 +201,7 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "predicted_pathway_steps", [&](auto const& v){ predicted_pathway_steps_ = int(get_int(v, "predicted_pathway_steps")); });
     apply_param(params, "process_every_n_ticks",   [&](auto const& v){ process_every_n_ticks_   = std::max(1, int(get_int(v, "process_every_n_ticks"))); });
     apply_param(params, "subtract_descending_prediction", [&](auto const& v){ subtract_descending_prediction_ = get_bool(v, "subtract_descending_prediction"); });
+    apply_param(params, "normalize_residual", [&](auto const& v){ normalize_residual_ = get_bool(v, "normalize_residual"); });
     apply_param(params, "master_seed",    [&](auto const& v){ master_seed_    = uint64_t(get_int(v, "master_seed")); });
     apply_param(params, "dim_autocal_ticks", [&](auto const& v){ dim_autocal_ticks_ = std::max(0, int(get_int(v, "dim_autocal_ticks"))); });
     apply_param(params, "dim_autocal_k",     [&](auto const& v){ dim_autocal_k_     = get_double(v, "dim_autocal_k"); });
@@ -697,6 +704,20 @@ void EPM::tick(uint64_t tick_id) {
         pending_prediction_ &&
         pending_prediction_->predicted_latent.size() == latent.size()) {
         latent.noalias() -= pending_prediction_->predicted_latent;
+        // RESIDUAL NORMALIZATION (B v2, 2026-08-14).  A working predictor leaves
+        // a residual of norm ~0.1–0.2 against GNG insertion/error scales sized
+        // for encoder outputs of norm ~1 — the vocabulary then COLLAPSES instead
+        // of tiling the residual's shape (§6's insertion-gate collapse, measured:
+        // the STRONGER context arm shrank the vocabulary 41→25).  Scale by the
+        // residual's own running RMS (§5: adapt, don't tune) so the GNG tiles
+        // DIRECTION at unit scale.  Off = byte-identical (B v1 behavior).
+        if (normalize_residual_) {
+            const float nrm = latent.norm();
+            residual_rms_ = residual_rms_ <= 0.0f
+                                ? std::max(nrm, 1e-6f)
+                                : 0.99f * residual_rms_ + 0.01f * nrm;
+            if (residual_rms_ > 1e-6f) latent *= (1.0f / residual_rms_);
+        }
     }
 
     apply_neuro_scaling();
@@ -828,6 +849,9 @@ nlohmann::json EPM::snapshot_state() const {
         }
         out["dim_autocal"] = std::move(dac);
     }
+    if (normalize_residual_) {
+        out["residual_rms"] = residual_rms_;   // B v2 adaptive scale (replay fidelity)
+    }
     return out;
 }
 
@@ -851,6 +875,7 @@ void EPM::restore_state(nlohmann::json const& s) {
     }
     ema_tle_                   = s.value("ema_tle",                   ema_tle_);
     last_tle_                  = s.value("last_tle",                  last_tle_);
+    residual_rms_              = s.value("residual_rms",              residual_rms_);
     last_quant_error_          = s.value("last_quant_error",          last_quant_error_);
     novelty_threshold_now_     = s.value("novelty_threshold_now",     novelty_threshold_now_);
     history_trace_.clear();

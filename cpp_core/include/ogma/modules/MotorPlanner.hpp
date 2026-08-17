@@ -44,7 +44,10 @@ public:
     std::string_view type_name() const override { return "MotorPlanner"; }
 
     std::vector<TopicSpec> input_topics() const override;
-    std::vector<TopicSpec> output_topics() const override { return {}; }   // shadow: none
+    // Shadow BY DEFAULT (empty).  Lever (b): when plan_output_topics is
+    // configured, the BASE roll's decode at plan_depth publishes per leg as a
+    // band-gated PredictionToken — the first behavioral authority.
+    std::vector<TopicSpec> output_topics() const override;
     ParamSchema params_schema() const override;
     ParamMap current_params() const override;
 
@@ -72,8 +75,9 @@ private:
     bool  apply_region_mask(Dist& d, int depth);
     void  decode_row(Dist const& d, float* mean_out, float* sd_out) const;
     // one region spec against one row, with the per-mask no-annihilation revert;
-    // the composite paths (kept list, candidate) all funnel through this
-    bool  suppress_region(Dist& d, int joint, float lo, float hi, int dlo, int dhi,
+    // the composite paths (kept list, candidate) all funnel through this.
+    // jmask = bitmask of selected joints (bit j = planner joint j; 0xFFF = all).
+    bool  suppress_region(Dist& d, uint32_t jmask, float lo, float hi, int dlo, int dhi,
                           float strength, int depth, long& hit_counter);
     bool  apply_kept_masks(Dist& d, int depth);   // author_apply: the earned set
 
@@ -92,6 +96,9 @@ private:
     // depths [depth_lo,depth_hi], by mask_strength_.  All hot-mutable so the
     // inspector widget drives the mask live.  Defaults inert (gain-0).
     double mask_joint_    = -1.0;  // 0..11, or -1 = mask ALL joints' readouts
+    double mask_joints_   = 0.0;   // GROUP mask bitmask (bit j = joint j; h1=0x00F,
+                                   // h2=0x0F0, knee=0xF00).  0 = off → mask_joint_
+                                   // legacy semantics.  Wins when non-zero.
     double mask_val_lo_   = 0.0;
     double mask_val_hi_   = 0.0;
     double mask_depth_lo_ = 1.0;
@@ -119,6 +126,29 @@ private:
     double author_depth_max_  = 34.0;   //   reflex territory on this vocabulary
     double author_max_kept_   = 8.0;
     double seed_              = 1234.0; // reseeded per-run via OGMA_SEED override
+    // --- lever (b): the band-gated plan objective (all inert by default) -----
+    // The body acts to FULFIL the planner's earned prediction: per leg, a
+    // PredictionToken [3 targets | 3 weights] from the BASE (operating) roll at
+    // plan_depth.  A joint's weight is 1 only where its verified authority
+    // holds at that depth (the earned-bands gate); distress cuts all weights
+    // (reflexes own emergencies, t0 and always).
+    double plan_publish_      = 0.0;    // 0 = shadow (no publications at all)
+    double plan_depth_        = 8.0;    // must be a probe depth {1,3,5,8,13,21,34}
+    double plan_distress_cut_ = 0.5;    // distress above this ⇒ all weights 0
+    double plan_gate_override_ = 0.0;   // OPERATOR SCAFFOLD: 1 = weights 1 on ALL
+                                        // joints, ignoring the earned bands — the
+                                        // "feel unearned authority" bench.  The
+                                        // distress cut still applies.
+    std::vector<std::string> plan_output_topics_;   // 4 per-leg topics; empty = shadow
+    std::string distress_topic_ = "reality.proprio.distress";
+    float  distress_ = 0.0f;
+    std::array<float, kJoints> plan_pose_{};   // BASE decode at plan_depth (this tick)
+    std::array<float, kJoints> plan_w_{};      // per-joint gate weights (this tick)
+    std::array<float, kJoints> plan_tug_{};    // w·(target − current) — the requested
+                                               // pull per joint, pre-consumer-gain
+                                               // (the piano roll's tug ticks)
+    bool   plan_pose_valid_ = false;
+    long   plan_published_ = 0;                // publisher consumer-check counter
     std::vector<uint64_t> subs_;
 
     // --- live state

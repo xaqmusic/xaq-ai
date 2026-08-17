@@ -1150,3 +1150,468 @@ behavioral authority: the BASE roll's decode published as a weak, band-gated
 objective (reflexes keep t0, per-joint gate = the earned bands, gain-0
 guarded, ChunkAbort/OutcomeGate as recorded execution guards) — is cleared
 to build NEXT, with the operator watching the UI before any promotion.**
+
+**2026-08-12 — LEVER (b): FIRST BEHAVIORAL AUTHORITY — the plan pull.
+Built, guarded, measured at n=6: SAFE, mildly positive, not loud. NOT
+PROMOTED (UI review is the operator's gate).**
+
+*The mechanism (rewrite-rule form).* The error the behavior minimizes: the
+discrepancy between the body's trajectory and its OWN verified prediction —
+proprioceptive active inference, plan-as-prediction (§5 rule 7 honored: no
+rhythm injected, no trajectory scripted). MotorPlanner publishes its BASE
+(operating, kept-mask-shaped) roll decode at plan_depth=8 as per-leg
+PredictionTokens `[3 targets | 3 weights]` on `objective.plan.<leg>`; a
+joint's weight is 1 ONLY where its verified authority holds at that depth
+(the slot-win test the bands are built from — earned, never assigned).
+MotorEPMv2 gains a second posture-objective socket (`plan_topics` +
+`plan_gain`) fused with the keyframe objective PER JOINT, precision-weighted
+(the LateralVoter pattern): `w_eff = wk + plan_gain·wp`, so an ungated
+joint's keyframe pull is untouched (never weaken a working loop). Distress
+above `plan_distress_cut` zeroes all plan weights — reflexes own
+emergencies, and t0 always. Because the published decode is the BASE roll,
+EARNED inhibition (rung a) now has a behavioral path — and trial candidates
+do NOT leak into behavior (base excludes the live candidate by
+construction).
+
+*Guards verified.* (1) gain-0: `__m1auth__planpull0` (publisher ON, consumer
+gain 0) is behaviorally IDENTICAL to `__m1auth` tick-for-tick on a matched
+seed (66/66 mirror lines). (2) Publisher gate matches the verified authority
+map exactly on live data: h1 (j0–3) and knees (j8,9,11) gate in; h2 (j4–7)
+never do — reflex territory stays reflex. (3) Consumer fired across all arm
+seeds (pl_pull ≈ 0.015, ~10–11.7k gated publish-ticks / 12k). (4) Config
+diff between arms is `plan_gain` alone.
+
+*A/B (seedavg, n=6 × 12k corridor 0.3, control = gain 0).* Transport:
+net_z 4.87±1.76 → 5.49±1.78 (+13%, sub-σ), straight 0.44 → 0.47, flat_v
+0.03 → 0.04. Stability: falls 0.67 → 0.17 (4 total → 1), unstable 0.12 →
+0.09, planted 3.37 → 3.49, plv_wn 0.91 → 0.98. Rhythm: step_cv_real 0.88 →
+0.81 with the step-period spread HALVED (σ 6.3 → 3.2 ticks) — consistent
+with prediction-fulfilment adding coherence. Cost, honestly: arm seed 2
+regressed (tilt_sd 0.93, net_z 2.35, the only nonzero panic_duty 0.08 in
+either arm) — the pull can entrench a bad episode; belly and scrub flat.
+
+**Verdict: PARTIAL (safe + mildly positive SIGNAL at n=6) — behavioral
+authority flows through earned bands without destabilizing the stack; no
+metric shows systematic damage; transport/stability/rhythm all lean
+positive; the effect is NOT loud (§3.3 — a real capability announces
+itself; +13% sub-σ is not an announcement). NOT PROMOTED: the operator's UI
+review is the promotion gate. What to WATCH live: does the gait visibly
+gain step-rhythm coherence; does arm-seed-2-style entrenchment appear (a
+stumble the pull then commits to); and the demo-with-teeth — hand-apply the
+FR-knee rest mask on the [O] bench with the pull live: does inhibiting the predicted
+rest actually recruit an earlier FR step? Re-use context: plan_gain dose
+(0.05/0.2), plan_depth 13, and gating on the kept-mask-shaped vs raw roll
+are the untried axes; a (d)-style perturbation (drop the pull mid-run,
+watch re-coordination) is the sharpest next evidence.**
+
+**2026-08-14 — OPERATOR BENCH SESSION: the levers verified by hand, and the
+M1 chapter's closing diagnosis.** With the full bench in place ([O]: mix,
+gate override, group masks, reflex↔plan fade, tug vectors), the operator
+drove the crossfade and the tier masks live. Two observations, both
+load-bearing: (1) **at fade 1 (reflexes silenced, pure plan playback) the
+motors settle into a stable OSCILLATORY state** — the closed loop
+pose→tokens→cone→decode→servo→pose converges to the predictor's
+self-consistent orbit: the substrate carries the body's RHYTHM but the
+PROPULSION (stroke, stance press, load corrections) survives only as a
+blurred mixture-mean, and embodied, that residue is an oscillation that
+goes nowhere; (2) **no region mask on any joint set (incl. all-h2 with
+override + fade) visibly improves the gait** — inhibition reroutes mass to
+other tokens the model already believes, and the vocabulary, learned from
+the body's own history, contains only its habits. **Verdict (three
+independent demonstrations now: token-chain refutation M0–M0.d.2, the
+author's search finding only seed-specific bias masks, and the operator's
+embodied playback): the E/I instrument is WORKING and BOUNDED BY THE
+VOCABULARY'S CONTENT, which is a mirror of the reflex stack's habits.
+Selection over habitual futures can stabilize and commit (the lever-(b)
+coherence signal) but cannot innovate. Re-use context: E/I selection
+becomes interesting again the moment the vocabulary contains futures that
+DIFFER from habit — via a predictive-coding-conditioned vocabulary
+(doctrine §0's descending-predictor path, the recorded (c) fix) and/or a
+generative excitation source (M2: episodic capture of the body's own best
+segments written into far rows).**
+
+**2026-08-14 — OPTION A LAUNCHED (operator-approved: consolidate (b), then
+B) + the SETPARAM_AT hook + B's design queued.** Running: n=20 powering
+(planpull vs planpull0, 12k), dose arms (plan_gain 0.05/0.2, n=6), depth
+arm (plan_depth 13, n=6), and the (d)-test (16k, plan_gain 0.1→0 at
+t=10000 vs no-flip baseline, n=6; scorer `ddropscore.py` — windowed
+disp/steps/planted/tilt + the pl_pull flip-fired check).  New generic
+perturbation hook: `OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;…]"`
+(the lesion-AT idiom generalized to any HotMutable brain param; announced
+loudly per §3.2 rule 7; tick 1 doubles as arm differentiation without
+config proliferation).
+
+**2026-08-14 — OPTION A COMPLETE: lever (b) consolidation — the 0.1 dose
+REFUTED, the 0.05 dose WORKING at n=20, and two harness bugs caught by the
+§3.2 discipline.**
+
+*The §3.2 catch that paid for itself.* The dose/depth arms came back
+BIT-IDENTICAL to the 0.1 arm — the tick-1 SETPARAM_AT flips reported
+enqueue-OK but never took effect.  Root cause found in the SCHEDULER:
+`process_pending_patches` drained all queued batches then applied them in
+a loop where one batch's validation throw (the pre-existing init-time
+cruse patch on configs without that module) aborted the loop — EVERY BATCH
+QUEUED BEHIND THE BAD ONE was silently discarded after its enqueue had
+returned success.  Fixed: per-batch isolation (each batch keeps its own
+validate-then-apply atomicity; rejections surface loudly; neighbors still
+apply).  Historically only cruse-family patches sat in the init queue, so
+no prior measurement was contaminated.  Second bug: the pl_pull/pl_w
+telemetry EMAs froze at their last value when the pull went inactive — a
+mid-run gain drop read as "flip never fired."  Fixed: inactive pull decays
+the meter.  Bonus: the three accidentally-identical arms proved the whole
+pipeline bit-deterministic per seed.
+
+*The verdicts (all corridor 0.3, 12k unless noted).*
+- **n=20 @ gain 0.1: TIE** — net_z 5.40±1.85 vs 5.44±2.24, straight
+  0.47/0.46, step_cv_real 0.80/0.80.  The n=6 coherence signal was
+  substantially seed luck (control's n=6 subset happened to contain its
+  bad seeds).  Three arm seeds circle (straight 0.11–0.16).  The original
+  lever-(b) dose is REFUTED as a behavioral improvement.
+- **Dose sweep (n=6, post-fix): INVERTED-U** — net_z 4.87 (0) / 7.24
+  (0.05) / 5.49 (0.1) / 6.72 (0.2); depth 13 no better than depth 8 with
+  worse tails.  The house pattern again: a whisper cooperates, a shout
+  fights the keyframe loop it fuses with.
+- **n=20 @ gain 0.05: WORKING** — net_z 5.40→6.41 (+19%), straight
+  0.47→0.52 (σ 0.15→0.11), falls 8→2, tilt_sd 0.164→0.098 with the
+  outlier tail GONE (max 0.16 vs control's 0.49), bellyc equal, 20/20
+  walkers, one weak seed (s19).  No metric worse.  Stability-dominant.
+- **(d)-test @ 0.1 (16k, flip at 10k, n=6): FLAT** — no transient, no
+  recovery signature; the pull was not load-bearing at that dose.  Late
+  windows: the keep-it-on baseline shows HIGHER tilt variance.
+- **(d)-test @ 0.05 (same protocol, flip verified by the fixed meter,
+  n=6): a WEAK dip-then-recover** — disp 0.70→0.61 relative dip in the
+  first two post-flip windows, recovery to ABOVE baseline by 14–16k
+  (0.54 vs 0.40), steps recover likewise; base again shows the late tilt
+  blowup (0.48±0.51 vs flip 0.18).  Signal-grade only (n=6): a hint that
+  0.05 carries load and the body re-coordinates without it.
+
+**Verdict: lever (b) at plan_gain 0.05 is a WORKING n=20 signal —
+stability-dominant (falls, tilt), transport-positive, nothing worse —
+and the config/launcher now carry 0.05 as the operating point.
+PROMOTION AWAITS THE OPERATOR'S UI REVIEW (the standing gate); what to
+watch: overall gait quality at 0.05, the rare weak seed (s19-type
+circling), and whether the late-run tilt cost of KEEPING the pull on
+(both (d)-tests hint at it) is visible by eye.  Re-use context: a finding
+(vs signal) needs the (d) at 0.05 powered to n≥20 and varied worlds; the
+late-tilt hint deserves its own windowed look before any long-run
+deployment.**
+
+**2026-08-14 — LEVER (b) PROMOTED (operator UI review, the standing gate).**
+The operator's eye at plan_gain 0.05: "better stability during walking,"
+slight rear-leg improvement, and — the load-bearing observation — **the
+robot climbs the corridor's 30° walls markedly better than before.**  The
+plan pull at the whisper dose joins the stack: the promoted operating
+point is v3base + bodypose EPMs + M1 author (apply) + plan pull @ 0.05,
+band-gated, distress-cut.  NAMED TARGET for the next behavioral lever
+(operator-set): **REAR-LEG PLANTING** — the rear legs swing forward then
+back without planting correctly, usually because the KNEE does not flex
+downward to make ground contact (a swing-termination/touchdown failure;
+anatomically the rear pair = cfg 'rl'/'rr', rear knees = planner joints
+10/11).  This is the evaluation lens B inherits: touchdown corrections are
+precisely the aperiodic, load-linked events the pose vocabulary cannot
+see — if the surprise vocabulary is doing its job, rear-knee touchdown
+error should become one of its DENSEST, most predictable token regions,
+and its planner's bands on j10/j11 should say so.
+
+**2026-08-14 — B GATE RUN (both pre-registered arms): the predictive-coding
+pair WORKS MECHANICALLY; the surprise vocabulary FAILS its planner gates as
+built — and the failure diagnosis is §6 CONDITIONING, again, in a new
+place.**
+
+*Build integrity (§3.2 catches before first run, all three latent bugs
+found at design time or first smoke):* (1) the predictor's source port
+silently dropped ProprioToken context (ConsensusToken-only cast — fixed
+with a typed fallback; RealityToken added for arm 2); (2) the closed pair
+converged to HALF-subtraction (the EPM publishes its residual as latent;
+the legacy update subtracted the cached prediction from it again — fixed
+with `target_is_residual`, which integrates the residual directly);
+(3) the err/norm health ratio is TAUTOLOGICALLY 1 in residual mode — the
+honest bite-meter is ‖prediction‖ (dp_pn) vs ‖residual‖ (dp_err).
+
+*Arm 1 — CPG-clock context (2-D [cosφ,sinφ]), n=4 × 12k arena.* The pair
+closes and bites: dp_err falls 0.89 → 0.18–0.22 with dp_pn ≈ 0.99 — the
+first stride harmonic (all a 2-D linear context can express) absorbs ~80%
+of the encoding.  But the residual vocabulary yields NOTHING for the
+planner: self-mass 0.69 → 0.65 (gate wanted < 0.55), chain lift 0.92–0.99
+(≤ persistence), pc bands equal-or-NARROWER than control everywhere, zero
+new h2 bands, rear-knee ratios unchanged, h2 decodes a few points WORSE.
+
+*Arm 2 — latent-autoregression context (the plain EPM's raw latent), the
+pre-registered fail branch.* Absorbs more (dp_err 0.10–0.12, ~90%), and
+the residual vocabulary COLLAPSES 41 → 25 tokens; chain lift 1.00 flat;
+h2 bands still absent; h2 decodes still worse.  ONE genuine positive:
+**the rear-knee marginals (j10/j11 — the operator's named planting target)
+improve 3–8 points at k∈[13,21] in ALL FOUR seeds** (e.g. s13: 0.76/0.77
+vs control 0.83/0.85) — the latent-AR residual carries real rear-knee
+correction structure; the near field (k 1–3) degrades and the bands'
+0.95-contiguity threshold hides the gain.
+
+**Verdict: B v1 is a NULL against its pre-registered gates — but a §3.2
+review says the measured object was partly the HARNESS AGAIN: the
+subtraction happens in latent space, so the GNG receives a residual of
+norm ~0.1–0.2 against insertion/error scales sized for encoder outputs of
+norm ~1.  The vocabulary collapse under the STRONGER predictor (arm 2,
+41→25) is §6's insertion-gate collapse in a new costume — the residual's
+SHAPE is never tiled because its SIZE is below the gate's resolution.
+Doctrine §5 rule 5 prescribes the fix: adapt, don't tune — a running-RMS
+normalization of the post-subtraction residual before the GNG (an EPM
+option, off by default), so the vocabulary tiles residual DIRECTION at
+unit scale.  Re-use context: (i) B v2 = residual normalization + re-run
+both context arms (the rear-knee k∈[13,21] signal is the thing to watch
+grow); (ii) if v2 still nulls, the linear predictor family is exhausted —
+phase-binned piecewise-linear or the planner-as-predictor are the next
+rungs; (iii) the rear-knee planting target does NOT wait on B: it can get
+its own behavioral lever (stance-gated knee-flexion-at-touchdown through
+the promoted plan-pull carrier) regardless of vocabulary work.**
+
+**2026-08-14 — REAR-KNEE PLANTING lever, arm 1 (constant descent extension):
+REGRESSION — and the §3.2-rule-6 catch on my own build.** The operator's
+named target built as the knee half of swing-descent (`swing_descend_knee`:
+past half the leg's own swing, the shank flips from fold to extend).  n=6
+corridor vs the promoted stack: net_z 7.24→5.15/4.73 (0.3/0.6), cv
+0.75→0.87/0.89, falls 0→3/1, planted DROPS 3.54→3.36/3.46 — the constant
+form pays the hip2-press's rhythm cost AND loses transport: extending
+through EVERY descent stabs healthy swings; the 2026-08-10 "knee keeps its
+fold" was load-bearing.  **Faithfulness check on myself: the constant form
+is a WEAKENED SLICE of the stated design** ("contact expected by now, none
+arrived").  Built the error-form (`swing_overdue_knee`): extension fires
+ONLY when a swing outlives the leg's own running-average duration, grows
+with lateness, releases on contact — healthy swings untouched BY
+CONSTRUCTION.  Verdict on arm 1: REGRESSION (recorded, kept as the arm);
+arm 2 (overdue form, 0.4) in flight.  Re-use context for arm 1: none
+foreseen — the mechanism class is superseded by the error-form.
+
+**2026-08-14 — PLANTING arm 2 (the overdue error-form) + B v2 (residual
+normalization): one PARTIAL with a named ratchet, one HISTORIC structural
+pass with a starved planner.**
+
+*swing_overdue_knee 0.4 (n=6): PARTIAL.* Five of six seeds hold transport
+(7.0–8.8 vs control 7.24); swing bouts shorten 8.29→7.68 exactly as
+designed (overdue swings get terminated by the reach); but cv 0.75→0.85,
+falls 0→3 (two seeds), and the consumer counter exposes the flaw: 4,575
+overdue leg-ticks — **the expectation RATCHETS.** The reach shortens
+swings; completed-swing durations feed the running average; the average
+falls; more swings read as overdue.  The intervention chases its own
+reference.  Re-use context (the fix, one gate): learn the expected
+duration ONLY from unassisted swings (skip the EMA update when the reach
+fired that swing).  Operator eye pending on the planting quality itself.
+
+*B v2 (normalize_residual, both context arms, n=4 × 12k arena):* **The
+structural gates PASS for the first time in the campaign's history** —
+vocab 25 → 235/246 in-use, entropy 5.1 nats, and self-transition mass
+falls to **0.51 (clock ctx) / 0.32 (latent-AR ctx)** against the pose
+vocabulary's 0.69–0.72 and the gate's < 0.55: the token stream finally
+CARVES THE STRIDE, the target M0 set on 2026-08-09.  The collapse fix
+did exactly what the §6 diagnosis said it would.  **But the planner
+gates still FAIL:** the vocabulary slams into the 200-node cap with ZERO
+baked (≈50 visits/token at 12k — below the baking threshold's
+statistics), the chain scores BELOW the now-weaker persistence baseline
+(0.77–0.94), h2 bands appear only scattered (2/4 seeds, narrow), and the
+v1 rear-knee gain is GONE (pc ties-to-worse vs control) — the M0.d.2
+lesson verbatim: finer tiling without transition statistics is per-token
+sample starvation.  **Verdict: B v2 PARTIAL — the substrate condition is
+finally met; the planner layer is data-starved, not refuted.  Re-use
+context / v2.1: raise max_nodes (cap-hit is §0 rule 4's diagnosis),
+lengthen runs (24k+) so tokens earn visits and bakes, and/or coarsen the
+residual tiling; re-judge the planner gates only when baked > 0 and the
+per-token count matches the bodypose reference's.**
+
+**2026-08-14 — RATCHET-FIXED OVERDUE KNEE (arm 3) + B v2.1 (fed vocabulary):
+the planting family reaches the operator's-eye gate; the residual planner
+nulls again with a NEW mechanism named.**
+
+*swing_overdue_knee 0.4 with the unassisted-reference fix (n=6): the
+GAIT'S CHARACTER CHANGES.* Robustness is the headline: net_z σ COLLAPSES
+1.33→0.63 (every seed 5.4–7.4, zero falls), **planted 3.54→3.67 — the
+planting metric's first move in the family**, straight holds.  The costs:
+steps 270→167 (cadence −38%), cv 0.89.  And the consumer count ROSE to
+9,305: excluding assisted swings from training exposes the REVERSE
+entanglement — the reference cannot track a legitimate gait slow-down, so
+lengthening swings read as perpetually overdue.  The result is fewer,
+longer, more-planted strides.  **Verdict: PARTIAL, ESCALATED TO THE
+OPERATOR'S EYE — aggregate metrics cannot distinguish 'deliberate planted
+gait' from 'sluggish gait' (a blind-metric situation by construction).
+`swing_overdue_knee` added to the [M] motor-panel sliders for live
+judgment.  Re-use context: if the eye says 'planted', the cadence cost is
+the trade to tune; if 'sluggish', the reference needs a two-timescale form
+(slow tracking of ALL swings + fast exclusion of assisted ones).**
+
+*B v2.1 (latent-AR + norm, cap 800, 24k, n=4): the vocabulary is healthy
+and the planner nulls AGAIN — with the cause visible.* Nodes 274–285
+(below cap, pruning live), in-use 453, self-mass **0.27** (the deepest
+carve yet) — but **baked = 0 even at 24k with ~85 visits/node**, and the
+answer is structural: the predictor NEVER STOPS LEARNING (lr 0.01, no
+freeze), so the residual distribution drifts under the GNG forever — a
+substrate chasing itself cannot stabilize enough to bake.  Planner gates:
+rear-knee ratios TIE control, rk bands narrower, h2 absent, chain ≈
+persistence, authority 0.  **Verdict: NULL for the planner layer at every
+tested configuration (v1/v2/v2.1); the pre-registered next knob costs
+zero code — `freeze_after_ticks` on pc_predictor (converge, then freeze →
+stationary residual space → the GNG can finally bake).  The B program's
+structural achievement stands: self-mass 0.72 → 0.27 across the campaign;
+the planner value question stays open pending the freeze arm.**
+
+**2026-08-14 — OPERATOR LIVE CATCH: the "seized blue leg" diagnosed — a
+seed-roaming STANCE-CAPTURE attractor, invisible to the global amplitude
+homeostat.** Operator, watching the promoted stack at seed 42: "the right
+rear blue leg is seizing up ... might be a sign flip."  High-fidelity
+repro (seed 42, 4200 ticks, DIAG_INTERVAL=1, window 3000–4000): leg rl
+(cfg 'rl' = BLUE = anatomical RR) shows amp 0.004 vs 0.47–0.81 on its
+siblings, ZERO lifts, hip1 pinned deep negative with its command CLIPPING
+62% of ticks, knee held tucked (never below −0.28 vs siblings' −1.6), h2
+pressing.  NOT a sign flip: the collapse is EPISODIC (dies ≈t1200,
+RECOVERS to amp 0.567 ≈t2400, dies again ≈t3200) — a flipped sign never
+walks.  Mechanism: stance capture — the leg becomes the permanent support
+leg; its stroke accumulates backward against the hip1 stop, the swing
+that would release it never triggers, and the stance biases hold the
+posture; self-reinforcing.  The weak pair is the π-phase diagonal (fr
+took 1 lift in the window).  SEED-ROAMING: seed 2's final amps are
+[0.48, 0.05, 0.57, 0.26] — same attractor, leg fr — which retro-explains
+the recurring "one bad seed" in every A/B this week.  WHY UNCORRECTED:
+the amplitude homeostat is GLOBAL — it satisfies the group mean by
+over-driving the living legs (a blind metric in control form).  Chronic
+h_bias floor-saturation (−0.5, 46–66% of ticks in healthy seeds too) is
+background pressure, not the discriminator.  **Candidate lever, already
+built and OFF: `propulsion_balance_gain` — the per-leg propulsive-credit
+homeostat (below-group-mean legs get a self-limiting stroke boost) — the
+exact per-leg ownership the global homeostat lacks.  A/B launched
+(0.3 vs control, n=6); judge on per-seed MIN leg amplitude (the honest
+anti-blind metric for this failure) + the full set; operator running the
+live [M]-panel slider test at seed 42 in parallel.**
+
+**2026-08-14 — PROP_BAL BREAKS THE STANCE-CAPTURE ATTRACTOR (diseased-seed
+test) + the touchdown forensics + the seed-checkbox catch.**
+
+*Seed reproducibility (operator: "same seed twice, different paths").* The
+launcher's RANDOM-SEED CHECKBOX silently overrides the seed spinbox at
+launch (randi()%1000000; the checkbox defaults CHECKED) — the operator's
+"seed-42 reruns" were different seeds by design, invisibly.  Headless
+bit-determinism was never in question.  Fix: the HUD now always shows the
+RESOLVED seed; uncheck 'random' to pin the spinbox value.
+
+*Touchdown forensics (seed 42, every plant edge).* All four legs land
+with statistically IDENTICAL knee extension (front pair −0.86, rear
+−0.82) — the posture scaffolds are leg-uniform, so the rear literally
+copies the front, as the operator hypothesized.  But the copy is not
+itself fatal: the WORKING rear leg is the body's most active (74
+touchdowns, deepest stride).  The FAILING leg's landings are the
+signature: femur LIFTED (hip2 −0.78 vs ≈−0.2 elsewhere), shank shallow
+(knee −0.63), stroke pre-spent (hip1 −0.20) — ghost touches, unloaded,
+no push-travel left ("comes down without enough knee to gain traction",
+measured).  The two operator observations are ONE LOOP: unloaded landings
+→ zero propulsive credit → no sensorimotor contingency → oscillation
+decays → stance capture → worse landings.
+
+*The lever (already built, was OFF): propulsion_balance_gain 0.3.*
+Population n=6 (disease absent in those seeds): behaviorally NEUTRAL —
+ties control everywhere (net 6.94 vs 7.24, straight 0.56=0.56, cv
+0.77≈0.75).  DISEASED SEED 42 head-to-head (12k): **rl dead-duty
+0.30 → 0.00 — the attractor eliminated**; rl lifts 66→112; rl hip1 clip
+0.50→0.24; net_z 6.54→7.58 (+16%).  **Verdict: WORKING (mechanism test
+loud + population no-harm) — the profile of a robustness lever: fixes the
+failure where present, free where absent.  n=20 powering launched;
+promotion gate = operator eye (slide prop_bal live at a pinned seed 42
+and watch the blue leg wake).  Re-use context: if n=20 confirms, this is
+the anti-fragility candidate for the stack — and the rear-only touchdown
+posture idea stays pocketed for whatever residual planting deficit
+survives prop_bal.**
+
+**2026-08-14 — PROP_BAL n=20: severity HALVED, incidence UNCHANGED — a
+half-fix that localizes the attractor's second door.** Population (n=20,
+0.3 vs the promoted stack): aggregates TIE (net 6.48±1.80 vs 6.41±1.86,
+cv 0.81≈0.80, falls 2=2).  The attractor metric tells the real story:
+seized seeds (worst-leg dead-duty > 0.05) are **5/20 IN BOTH ARMS**
+(largely the same seeds — 16/17/18/19 both), but severity halves: mean
+worst-duty 0.118 → 0.060, and the catastrophic captures are gone (ctrl
+worst 0.853/0.644/0.534 → pb worst 0.325/0.288/0.272; seed 42 rescued
+outright, 0.30 → 0.00).  **Verdict: PARTIAL — per-leg propulsive credit
+shortens captures (recovery door opened) but does not prevent entry.  The
+entry door is the LANDING GEOMETRY (the touchdown forensics: femur-lifted
+ghost touches earn no load regardless of stroke boost — a boosted stroke
+cannot push through a foot that never loads).  Re-use context / next arm:
+close the entry door with the landing-posture family — the operator's
+rear-gated touchdown idea, or the recorded hip2 descent press at LOW dose
+— measured ON TOP of prop_bal (one lever at a time: pb becomes the
+baseline if adopted), judged on INCIDENCE (seized-seeds count) while
+holding the aggregate ties.  Promotion of prop_bal alone = operator's
+call: severity-halving with zero aggregate cost is a real robustness
+gain, but it is half a fix.**
+
+**2026-08-14 — THE REAR LANDING SEQUENCE (operator-directed, arena
+protocol): the composite produces the first LOADED rear touchdowns —
+signal-grade WORKING at 0.5/0.5, UI review pending.** Operator spec:
+prop_bal unpromoted (effect real but negligible by eye; ledger stands at
+PARTIAL); the rear failure is SEQUENCING — hip2+knee lift high through
+swing, then hip1/hip2/knee all move AT ONCE on the stroke; needed: DROP
+and load first, THEN hip1 sweeps with slight knee extension.  All
+measurement moved to the OPEN ARENA (fast straight outward travel).
+
+*Build (rear pair only, both gain-0):* `rear_land_gain` — during descent,
+hip2 press + knee SERVO to `rear_knee_plant` (+0.2, slightly flexed for
+traction; closed-loop, because the open-loop descent extension was the
+measured regression = the 'everything at once' failure itself);
+`rear_push_ext` — while PLANTED and the hip1 actually sweeps, knee
+extension scaled by the leg's own running |Δhip1| (structurally cannot
+fire before the plant — sequence enforced by gates, not schedule).
+
+*Arena table (n=6 × 12k, seeds 1–6, control = promoted stack):*
+- CTRL: net_disp 10.20±1.70, straight 0.64, falls 0, cv 0.70, rear-TD
+  hip2 −0.05.
+- A (drop 0.5): 10.74±0.87 (σ HALVED), straight 0.68, cv 0.88 (rhythm
+  pays), TD hip2 −0.17.
+- B (push 0.5): ties control, cleanest amp (meanworst 0.001), falls
+  spike (4, one seed 3).
+- **A+B (0.5/0.5): net_disp 11.07 (+9%), straight 0.67, and the TARGET
+  SIGNATURE — rear touchdowns arrive with hip2 POSITIVE (+0.02): the
+  femur lands pressed/loaded for the first time in the campaign.**
+  Costs: cv 0.85, 2 unstable seeds (falls 2+1), σ 2.52.
+- HALF DOSES (0.25): the signature VANISHES (hip2 −0.09/−0.15) and the
+  gains with it; A-half destabilizes (one seed 3.90/0.20/4 falls).  The
+  dose response is not an inverted-U here — full dose is the point.
+
+**Verdict: WORKING at signal grade — the operator's sequencing model is
+CONFIRMED CAUSAL (only the drop+push composite loads the landings, and
+loading them buys transport).  NOT promoted: n=6, rhythm cost real, two
+unstable seeds.  Next: the operator's eye at rear_land 0.5 + rear_push
+0.5 (panel sliders live; arena; watch the rear sequence itself), then
+n=20 on the composite if the eye approves.  Re-use context: the rhythm
+cost may be the drop-press's cadence drag (the 2026-08-10 pattern);
+a phase-shaped press (strong only in the descent's back half) is the
+recorded refinement if cv must come back before promotion.**
+
+**2026-08-17 — REAR LANDING SEQUENCE at the operator's operating point
+(0.5/0.2/0.5), n=20 ARENA: the signature and the transport HOLD AT POWER;
+the cost is an instability tail — which is PART IV's opening argument.**
+Baked as named scaffold values (operator hand-found).  vs trio-zeroed
+control, same build: **net_disp 8.93±2.66 → 10.23±2.17 (+15%)**, straight
+0.61 → 0.65, **rear-TD hip2 −0.106 → +0.003 (the loaded-landing signature
+confirmed at n=20, 228 touchdowns)**, seizure severity nearly halved
+(meanworst 0.107 → 0.061; incidence 5/20 → 4/20).  The tail: falls 1 → 8,
+concentrated in 3/20 seeds (s12: 4 falls + tilt 0.40; s3: tilt 0.98), and
+cv 0.77 → 0.87.  **Verdict: the CONCEPT IS PROMOTED (operator eye + n=20
+transport + the causal landing signature); the FIXED POINT pays a ~3/20
+instability tax and a cadence cost.  That tax is precisely the case for
+PART IV: a fixed gain vector cannot be right for every seed's attractor —
+the GainEvolver's per-lifetime search, seeded at this exact point with the
+viability guard (falls/tilt) in its criterion, is the designed answer to
+this tail.  The PART III campaign log closes here; the frontier moves to
+`adaptive_gains_substrate_plan.md`.**
+
+*B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
+The audit answer again — the pieces exist, hand-roll only scorers: EPM
+already implements descending-prediction subtraction (`gng_input =
+encode(obs) − predicted_latent`, unit-tested), and `DescendingPredictor`
+(AR(1): W·context + b per target, online SGD) has existed since Phase 1
+with no motor-path consumer.  Wiring: `body_pose_pc` EPM over
+`reality.proprio.joints` (subtract_descending_prediction=true) + a
+DescendingPredictor whose CONTEXT is the CPG clock [cosφ,sinφ] (§0 rule 3
+— phase is the load-bearing context), so the subtracted term is the
+stride's phase-expected pose and the GNG tiles DEVIATION-FROM-RHYTHM — the
+corrections the operator sees as h2 noise become the densest, most
+predictable token regions instead of invisible residue.  Shadow
+MotorPlanner over the pc vocabulary beside the bodypose control (the twin
+protocol).  Gates, M0.d-style: vocabulary self-limits; self-transition
+mass falls materially below 0.55; per-joint bands extend below k=8 or past
+k=34; h2 tracks earn FIRST bands; decode sharpens (fade-1 embodied
+playback is the operator's blur test).  Fail ⇒ context arm swap (own-latent
+AR(1) vs clock) before any verdict on the predictive-coding path itself.

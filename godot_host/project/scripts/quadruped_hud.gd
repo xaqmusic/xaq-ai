@@ -40,7 +40,8 @@ var _hud_sample_ticks: int = 0           # increments per _process call
 # the reference panel for bringing the real PiCrawler IMU up.  Created lazily only for a
 # body that actually models an IMU (get_imu_debug), so the quadruped is unaffected.
 var _imu_scope: Control = null
-var _imu_scope_on: bool = true
+# 2026-08-12 (operator QoL) — IMU scope boots HIDDEN; [I] unhides when needed.
+var _imu_scope_on: bool = false
 
 func _as_bool(v: Variant) -> bool:
 	if v == null:
@@ -443,6 +444,11 @@ func _process(_delta: float) -> void:
 	var path_hint: String = ""
 	if trail_v != null and is_instance_valid(trail_v):
 		path_hint = "   [P] path: %s" % ("ON" if (trail_v as Node3D).visible else "hidden")
+	# 2026-08-12 — [O] plan-authority bench (lever b: mix / gate override / hand mask).
+	var plan_hint: String = ""
+	var pap: Node = get_tree().get_root().find_child("PlanAuthorityPanel", true, false)
+	if pap != null and pap is Control:
+		plan_hint = "   [O] plan bench: %s" % ("ON" if (pap as Control).visible else "hidden")
 	# 2026-07-26 — EVERY bound hotkey is listed, split across two lines: run/mode controls
 	# then view toggles.  Keys that carry live state show it, so the hint doubles as a
 	# status readout.  If a binding is added to picrawler_body._handle_key, add it here too.
@@ -542,12 +548,18 @@ func _process(_delta: float) -> void:
 			drop_v.x, drop_v.y, drop_v.z, "  INVERTED" if _as_bool(flip_v) else "",
 			_as_int(drop_tick_v), drop_v.x, drop_v.z,
 			" TELEPORT_FLIP=1" if _as_bool(flip_v) else ""])
-	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s" % [
+	# 2026-08-14 — the RESOLVED seed, always visible.  The launcher's 'random'
+	# checkbox silently overrides the spinbox (a rolled seed was invisible, so a
+	# run the operator wanted to revisit was unrecoverable — the seed-42 seize
+	# hunt).  -1 = config-default seeding (no override applied).
+	var seed_v: Variant = body.get("_resolved_seed")
+	var seed_hint: String = "   seed: %s" % (str(_as_int(seed_v)) if seed_v != null and _as_int(seed_v) >= 0 else "cfg")
+	var hint_run: String = "%s%s%s%s%s   [3] hump%s%s%s%s" % [
 		space_hint, ragdoll_hint, calib_hint, mtest_hint, gym_hint, place_hint, trim_hint,
-		jb_hint + ts_hint]
-	var hint_view: String = "%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
-		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, rays_hint,
-		vis_hint]
+		jb_hint + ts_hint, seed_hint]
+	var hint_view: String = "%s%s%s%s%s%s%s%s%s%s   [,/.] time  [/] 1x   [`] graph   [F1/F2] clip   [F5] save   [F9] load   [ESC] quit" % [
+		panels_hint, mpanel_hint, abl_hint, cc_hint, imu_hint, hud_hint, path_hint, plan_hint,
+		rays_hint, vis_hint]
 	var hint_line: String = hint_run + "\n" + hint_view
 	if hud_is_hidden:
 		# Hidden mode: render ONLY the hint line so the user keeps the

@@ -1431,6 +1431,7 @@ var _slick_leg: int = -1
 var _slick_at: int = 0
 var _slick_done: bool = false
 var _lesion_at: int = -1
+var _sched_patches: Array = []   # SETPARAM_AT entries: {t, id, key, val, done}
 var _lesion_until: int = 0x7FFFFFFF
 var _lesion_scale: float = 0.2
 # "action" (default) attenuates the leg's COMMANDED MOTION; "torque" caps its torque
@@ -2539,6 +2540,21 @@ func _ready() -> void:
 	if skl != "": _slick_leg = skl.to_int()
 	var ska: String = OS.get_environment("OGMA_PICRAWLER_SLICK_AT")
 	if ska != "": _slick_at = ska.to_int()
+	# 2026-08-14 — SCHEDULED BRAIN-PARAM FLIP (generic perturbation hook, the
+	# lesion-AT idiom generalized to any HotMutable module param).  Format:
+	#   OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;tick:module:key:value...]"
+	# Applied ONCE when tick_counter reaches each entry's tick (tick 1 = an
+	# arm-differentiation mechanism without config proliferation; a mid-run
+	# tick = the (d)-test's perturbation).  Each application is logged.
+	var spa: String = OS.get_environment("OGMA_PICRAWLER_SETPARAM_AT")
+	if spa != "":
+		for ent in spa.split(";", false):
+			var parts: PackedStringArray = ent.split(":", false)
+			if parts.size() == 4:
+				_sched_patches.append({"t": parts[0].to_int(), "id": parts[1],
+					"key": parts[2], "val": parts[3].to_float(), "done": false})
+			else:
+				push_warning("SETPARAM_AT entry malformed (want tick:module:key:value): " + ent)
 	_abl_init()
 	_abl_parse_env()
 	var ccl: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_COLLIDE")
@@ -5428,6 +5444,15 @@ func _input(event: InputEvent) -> void:
 		_vision_panel_on = not _vision_panel_on
 		_update_vision_panel()
 		print("PicrawlerBody: [N] vision_panel = %s" % _vision_panel_on)
+	elif key == KEY_O:
+		# 2026-08-12 — toggle the PLAN AUTHORITY bench (lever b): the reflex↔plan
+		# mix slider, the earned-bands gate override, and the live hand-mask
+		# controls.  Its own key because [M] is the MOTOR-EPM panel.
+		var pp: Node = get_tree().get_root().find_child("PlanAuthorityPanel", true, false)
+		if pp != null and pp is Control:
+			var pc := pp as Control
+			pc.visible = not pc.visible
+			print("PicrawlerBody: [O] plan_authority_panel = %s" % pc.visible)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
@@ -5727,6 +5752,17 @@ func _step_one() -> void:
 	if _abl_env_spec != "" and not _abl_env_done and tick_counter >= _abl_env_at:
 		_abl_env_done = true
 		_abl_apply_env_spec()
+	# Scheduled brain-param flips (SETPARAM_AT).  Announced loudly per §3.2 rule 7 —
+	# a run must never silently be the arm you did not intend.
+	for _sp in _sched_patches:
+		if not _sp["done"] and tick_counter >= int(_sp["t"]) and brain != null:
+			_sp["done"] = true
+			var _res = brain.apply_patch({"op": "set_param", "id": _sp["id"],
+				"key": _sp["key"], "value": _sp["val"]})
+			var _ok: bool = typeof(_res) == TYPE_DICTIONARY and bool(_res.get("success", false))
+			print("PicrawlerBody: [setparam_at] %s.%s = %s at tick %d -> %s" % [
+				_sp["id"], _sp["key"], str(_sp["val"]), tick_counter,
+				("OK" if _ok else "FAILED " + str(_res))])
 	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
 		_teleport_to_ramp()
 	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \
@@ -10581,6 +10617,14 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["bd_win"] = int(_bd.get("winner_id", -1))
 			line["bd_n"]   = int(_bd.get("node_count", -1))
 			line["bd_b"]   = int(_bd.get("baked_count", -1))
+		# 2026-08-14 (option B) — the SURPRISE-vocabulary EPM's token mirror, same
+		# shape as bp_/bd_ so planscore/conescore-style tools read it unchanged.
+		if _pm.has("body_pose_pc"):
+			var _bc = _pm["body_pose_pc"]
+			line["pc_tle"] = snappedf(float(_bc.get("tle", -1.0)), 0.0001)
+			line["pc_win"] = int(_bc.get("winner_id", -1))
+			line["pc_n"]   = int(_bc.get("node_count", -1))
+			line["pc_b"]   = int(_bc.get("baked_count", -1))
 		# 2026-08-11 (twin-gate S0) — SequenceGNG motif mirror (seq_bodypose).
 		# sg_m = active motif, sg_c = match confidence, sg_pn = predicted next
 		# WINNER (the successor argmax scored by seqscore.py), sg_n/sg_b/sg_ev =
@@ -10617,7 +10661,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# 2026-08-11 (twin gates) — mirrors BOTH planner instances: "plan" = motor_planner
 	# (bodypose control), "pland" = motor_planner_dyn (the [q,dq] phase-space arm).
 	if brain != null and brain.has_method("get_module_snapshot"):
-		for _plid in [["motor_planner", "plan"], ["motor_planner_dyn", "pland"]]:
+		for _plid in [["motor_planner", "plan"], ["motor_planner_dyn", "pland"], ["motor_planner_pc", "planc"]]:
 			var _ps = JSON.parse_string(str(brain.get_module_snapshot(_plid[0])))
 			if _ps is Dictionary and _ps.has("module"):
 				var _pmod = _ps["module"]
@@ -10649,6 +10693,31 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				if _pmod.has("jerr"):
 					line[_plid[1]]["je"] = _pmod["jerr"]
 					line[_plid[1]]["jp"] = _pmod["jpers"]
+				# 2026-08-12 (lever b) — planner-side publisher state
+				if _pmod.has("plan_pub"):
+					line[_plid[1]]["pp"] = _pmod["plan_pub"]
+	# 2026-08-14 (option B) — DescendingPredictor health.  In residual mode the
+	# published latent IS the error, so err/norm ≡ 1 (a tautology, caught on the
+	# first smoke); the honest bite-meter is ‖prediction‖ vs ‖residual‖:
+	#   dp_err = EMA ‖residual‖ (must FALL as the predictor absorbs the stride)
+	#   dp_pn  = ‖cached_prediction‖ (must GROW ≫ dp_err — the absorbed part)
+	# dp_seen guards the §3.2 dead-source trap via cached_consensus_valid
+	# (sticky after the first context delivery; consensus_seen is a per-tick
+	# freshness flag that reads false between deliveries — the first mirror
+	# misread it as liveness).
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _dps = JSON.parse_string(str(brain.get_module_snapshot("pc_predictor")))
+		if _dps is Dictionary and _dps.has("targets"):
+			line["dp_seen"] = 1 if bool(_dps.get("cached_consensus_valid", false)) else 0
+			for _tk in (_dps["targets"] as Dictionary):
+				var _tg: Dictionary = _dps["targets"][_tk]
+				line["dp_err"] = snappedf(float(_tg.get("err_ema", -1.0)), 0.0001)
+				var _cp = _tg.get("cached_prediction", [])
+				var _pn: float = 0.0
+				if _cp is Array:
+					for _v in _cp: _pn += float(_v) * float(_v)
+				line["dp_pn"] = snappedf(sqrt(_pn), 0.0001)
+				break
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
@@ -10656,6 +10725,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
 			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
 			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# 2026-08-12 (lever b) — plan-objective CONSUMER telemetry: without
+			# these the A/B cannot distinguish "the pull acted" from "the seeds
+			# moved" (the consumer-fired check every lever has needed).
+			line["pl_pull"] = snappedf(float(_mm.get("plan_pull", 0.0)), 0.00001)
+			line["pl_w"]    = snappedf(float(_mm.get("plan_w", 0.0)), 0.0001)
+			# 2026-08-14 (rear-knee planting lever) — swing-descent consumer check:
+			# the descent branch (hip2 press AND/OR the new knee extension) fires
+			# only while this counter grows.
+			line["swd"] = int(_mm.get("swd_press_ticks", 0))
+			line["swo"] = int(_mm.get("swd_overdue_ticks", 0))
+			line["rlt"] = int(_mm.get("rear_land_ticks", 0))
+			line["rpt"] = int(_mm.get("rear_push_ticks", 0))
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.

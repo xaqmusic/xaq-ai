@@ -119,6 +119,27 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a SOFT posture target (predicted_latent = motor_dim target joint positions; confidence = weight w). The controller descends toward it (objective-change, not additive — §1.1/§2.4). Empty = socket off (byte-identical HK).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"plan_topics", ParamMutability::ConstructionOnly,
+         "PART III lever (b): optional per-leg PredictionToken topics carrying the MotorPlanner's "
+         "band-gated posture prediction (predicted_latent = [motor_dim targets | motor_dim per-joint "
+         "weights]). Fused with the keyframe objective PER JOINT, precision-weighted — an ungated "
+         "joint (weight 0) leaves the keyframe pull untouched. Empty = socket off (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"plan_gain", ParamMutability::HotMutable,
+         "Weight multiplier on the planner's per-joint plan weights in the fused objective "
+         "(w_eff = w_keyframe + plan_gain·w_plan). 0 = byte-identical (the lever's gain-0 guard). "
+         "The body acts to FULFIL the planner's earned prediction — plan-as-prediction, not a script.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_fade", ParamMutability::HotMutable,
+         "OPERATOR SCAFFOLD (the [G]/[R] bench class — a lesion-as-test, never an operating mode): "
+         "crossfade the FINAL assembled command toward a pure position-servo tracking the planner's "
+         "published targets. 0 = byte-identical (all reflexes); 1 = reflexes SILENCED — the stride "
+         "as the planner imagines it, embodied. Expect blur/under-swing at 1: the decode is a "
+         "mixture mean, and the gap you see IS the measurement (substrate vs reflex content).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_puppet_gain", ParamMutability::HotMutable,
+         "Servo P gain of the fade's puppet term, u = gain·(x*_plan − x) per joint (command units).",
+         ParamValue{2.0}, ParamValue{0.0}, ParamValue{8.0}},
         {"velocity_objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a phase-indexed SOFT VELOCITY target (predicted_latent = motor_dim target joint velocities = the propulsive trajectory; confidence = w). Needs cpg_embed + cpg_phase_topic: a second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the command phase → the body keeps moving THROUGH the pose (propulsion), where the posture objective only holds it AT the pose. Empty = Cvel stays 0 = byte-identical.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -341,8 +362,42 @@ ParamSchema MotorEPMv2::params_schema() const {
          "STANCE-LIFT (belly-up while walking, chassis protection): a KNEE bias applied ONLY to legs currently in STANCE (planted — Cruse foot-height detector) to hold the chassis high off the ground it can push against. Traction-preserving (pushes off planted feet; unlike the hip2 height_homeo lift which rotates the feet off the slope) and rhythm-safe (swing legs get NO bias, so the stepping cycle is untouched — the 'DC knee bias kills the gait' warning only applies to an UNGATED bias). Held constant (not faded) so the belly rides high during fast flat traversal. Requires feet_topic wired. Sign set empirically (which knee dir raises the chassis on a planted foot). 0 = off.",
          ParamValue{0.0}, ParamValue{-2.0}, ParamValue{2.0}},
         {"swing_descend_gain", ParamMutability::HotMutable,
-         "SWING DESCENT (operator-diagnosed 2026-08-10).  swing_tuck_hip2 lifts through the ENTIRE swing and fights the landing -- rear feet plant unsettled and the stroke sweeps back before full contact (the -15% transport of the tuck+pair).  Past half of the leg's OWN running swing duration (self-scaled fraction, no tick constant), hip2 flips from the lift bias to +this (press down, Rule-5 sign) so the foot plants before the stroke reverses; the knee keeps its fold.  Requires contact_topic + swing_tuck active.  0 = off, byte-identical.",
+         "SWING DESCENT (operator-diagnosed 2026-08-10).  swing_tuck_hip2 lifts through the ENTIRE swing and fights the landing -- rear feet plant unsettled and the stroke sweeps back before full contact (the -15% transport of the tuck+pair).  Past half of the leg's OWN running swing duration (self-scaled fraction, no tick constant), hip2 flips from the lift bias to +this (press down, Rule-5 sign) so the foot plants before the stroke reverses; the knee keeps its fold.  Requires contact_topic + swing_tuck active.  0 = off, byte-identical.  Measured 2026-08-10: transport recovers dose-monotonically but rhythm pays (cv 0.75->0.89) -- V3 BASE shipped with it OFF.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"swing_descend_knee", ParamMutability::HotMutable,
+         "SWING DESCENT, the KNEE half (operator-diagnosed 2026-08-14: rear legs swing forward "
+         "then back WITHOUT PLANTING -- the shank keeps its fold through descent and the foot "
+         "never reaches the ground).  During the descent phase (same self-scaled past-half-swing "
+         "trigger as swing_descend_gain) the knee flips from fold to EXTEND toward the ground: "
+         "y_knee += swing_tuck_knee - this.  MEASURED 2026-08-14 (n=6, 0.3/0.6): REGRESSION -- "
+         "transport -30%, cv 0.75->0.87/0.89, falls appear; extending through EVERY descent "
+         "stabs healthy swings.  Kept as the recorded arm; use swing_overdue_knee instead.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
+        {"rear_land_gain", ParamMutability::HotMutable,
+         "REAR LANDING SEQUENCE part 1 (operator 2026-08-14: rear legs lift hip2+knee high, then "
+         "hip1/hip2/knee all move AT ONCE on the stroke — the drop must come FIRST).  During the "
+         "descent phase (the self-scaled past-half-swing trigger), REAR legs only: hip2 presses "
+         "down (0.5x this) and the knee SERVOS toward rear_knee_plant (closed-loop — the open-loop "
+         "descent extension was the measured 2026-08-14 regression).  Front legs untouched.  "
+         "0 = byte-identical.", ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
+        {"rear_knee_plant", ParamMutability::HotMutable,
+         "The rear plant angle rear_land_gain servos toward: slightly FLEXED (+) so the shank "
+         "lands with push traction (operator: 'the knee is not bent enough to gain traction').",
+         ParamValue{0.2}, ParamValue{-0.5}, ParamValue{0.8}},
+        {"rear_push_ext", ParamMutability::HotMutable,
+         "REAR LANDING SEQUENCE part 2: while a REAR leg is PLANTED and its hip1 is actually "
+         "sweeping (the power stroke), the knee extends slightly (-knee = push down/back), scaled "
+         "by the leg's own running |dhip1| (self-scaled, no hand constant).  'THEN hip1 swings "
+         "back with a bit of knee extension.'  0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
+        {"swing_overdue_knee", ParamMutability::HotMutable,
+         "TOUCHDOWN-SEEKING knee (the ERROR-FORM of the planting lever: 'contact was expected by "
+         "now and none arrived').  Fires ONLY when a swing runs PAST the leg's own running-average "
+         "swing duration (self-scaled, no tick constant): knee extension grows with lateness "
+         "(bias = this * min(1, age/dur - 1)), releasing on contact.  Healthy swings (age <= own "
+         "average) are untouched BY CONSTRUCTION -- the constant-descent form measured its rhythm "
+         "cost precisely here (it extended every swing).  0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.5}},
         {"coord_cv_weight", ParamMutability::HotMutable,
          "SELECT STEP-INTERVAL REGULARITY (P4 arm 3b).  Penalizes the mode-1 coordination fitness by the window's mean |interval - running period| / period over DEBOUNCED touchdowns (the v3 step machinery's accepted intervals -- micro-lift chatter excluded by construction).  Arm 3 measured that touchdown-PHASE consistency selects robustness but cannot buy TIME-regularity (step_cv 0.98 at every dose, because consistent phase on an irregular clock is still irregular in time); this selects the operator's step-regularity number LITERALLY, against each leg's own habitual period -- egocentric, intrinsic, no task quantity.  Requires contact_topic + fitness mode 1.  0 = off, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
@@ -595,6 +650,10 @@ ParamMap MotorEPMv2::current_params() const {
     m["proprio_topics"] = pt;
     m["action_topics"]  = at;
     m["objective_topics"] = std::vector<std::string>(objective_topics_);
+    m["plan_topics"] = std::vector<std::string>(plan_topics_);
+    m["plan_gain"] = plan_gain_;
+    m["plan_fade"] = plan_fade_;
+    m["plan_puppet_gain"] = plan_puppet_gain_;
     m["velocity_objective_topics"] = std::vector<std::string>(velocity_objective_topics_);
     m["n_legs"]     = int64_t(n_legs_);
     m["motor_dim"]  = int64_t(motor_dim_);
@@ -690,6 +749,12 @@ ParamMap MotorEPMv2::current_params() const {
     m["tibia_plumb_offset"] = tibia_plumb_offset_;
     m["swing_tuck_hip2"]    = swing_tuck_hip2_;
     m["swing_tuck_knee"]    = swing_tuck_knee_;
+    m["swing_descend_gain"] = swing_descend_gain_;
+    m["swing_descend_knee"] = swing_descend_knee_;
+    m["swing_overdue_knee"] = swing_overdue_knee_;
+    m["rear_land_gain"] = rear_land_gain_;
+    m["rear_knee_plant"] = rear_knee_plant_;
+    m["rear_push_ext"] = rear_push_ext_;
     m["upright_topic"]      = upright_topic_;
     m["stroke_gain"]      = stroke_gain_;
     m["stroke_phase"]     = stroke_phase_;
@@ -819,6 +884,11 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "coord_td_weight", [&](auto const& v){ coord_td_weight_ = get_double(v, "coord_td_weight"); });
     apply_param(params, "coord_cv_weight", [&](auto const& v){ coord_cv_weight_ = get_double(v, "coord_cv_weight"); });
     apply_param(params, "swing_descend_gain", [&](auto const& v){ swing_descend_gain_ = get_double(v, "swing_descend_gain"); });
+    apply_param(params, "swing_descend_knee", [&](auto const& v){ swing_descend_knee_ = get_double(v, "swing_descend_knee"); });
+    apply_param(params, "swing_overdue_knee", [&](auto const& v){ swing_overdue_knee_ = get_double(v, "swing_overdue_knee"); });
+    apply_param(params, "rear_land_gain", [&](auto const& v){ rear_land_gain_ = get_double(v, "rear_land_gain"); });
+    apply_param(params, "rear_knee_plant", [&](auto const& v){ rear_knee_plant_ = get_double(v, "rear_knee_plant"); });
+    apply_param(params, "rear_push_ext", [&](auto const& v){ rear_push_ext_ = get_double(v, "rear_push_ext"); });
     apply_param(params, "swing_hyst_frac", [&](auto const& v){ swing_hyst_frac_ = get_double(v, "swing_hyst_frac"); });
     apply_param(params, "homeo_leak_upright_only", [&](auto const& v){ homeo_leak_upright_only_ = get_double(v, "homeo_leak_upright_only"); });
     apply_param(params, "homeo_leak_progress_gate", [&](auto const& v){ homeo_leak_progress_gate_ = get_double(v, "homeo_leak_progress_gate"); });
@@ -899,6 +969,10 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "proprio_topics", [&](auto const& v){ proprio_topics_ = get_string_vec(v, "proprio_topics"); });
     apply_param(params, "action_topics",  [&](auto const& v){ action_topics_  = get_string_vec(v, "action_topics"); });
     apply_param(params, "objective_topics", [&](auto const& v){ objective_topics_ = get_string_vec(v, "objective_topics"); });
+    apply_param(params, "plan_topics", [&](auto const& v){ plan_topics_ = get_string_vec(v, "plan_topics"); });
+    apply_param(params, "plan_gain", [&](auto const& v){ plan_gain_ = get_double(v, "plan_gain"); });
+    apply_param(params, "plan_fade", [&](auto const& v){ plan_fade_ = get_double(v, "plan_fade"); });
+    apply_param(params, "plan_puppet_gain", [&](auto const& v){ plan_puppet_gain_ = get_double(v, "plan_puppet_gain"); });
     apply_param(params, "velocity_objective_topics", [&](auto const& v){ velocity_objective_topics_ = get_string_vec(v, "velocity_objective_topics"); });
 
     if (int(proprio_topics_.size()) != n_legs_)
@@ -907,6 +981,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         throw std::invalid_argument("MotorEPM: action_topics length must equal n_legs*motor_dim");
     if (!objective_topics_.empty() && int(objective_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: objective_topics length must equal n_legs (or be empty)");
+    if (!plan_topics_.empty() && int(plan_topics_.size()) != n_legs_)
+        throw std::invalid_argument("MotorEPM: plan_topics length must equal n_legs (or be empty)");
     if (!velocity_objective_topics_.empty() && int(velocity_objective_topics_.size()) != n_legs_)
         throw std::invalid_argument("MotorEPM: velocity_objective_topics length must equal n_legs (or be empty)");
     if (int(gait_phase_.size()) != n_legs_)
@@ -920,6 +996,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     sat_clip_leg_.assign(n_legs_, 0.0);
     sat_pre_leg_.assign(n_legs_, 0.0);
     obj_seen_.assign(n_legs_, 0);
+    plan_target_.assign(n_legs_, Eigen::VectorXf());
+    plan_w_.assign(n_legs_, Eigen::VectorXf());
+    plan_seen_.assign(n_legs_, 0);
     obj_vel_target_.assign(n_legs_, Eigen::VectorXf());
     obj_vel_weight_.assign(n_legs_, 0.0f);
     obj_vel_seen_.assign(n_legs_, 0);
@@ -1036,6 +1115,14 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
             objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective(leg, p); }));
     }
+    // PLAN-objective socket (PART III lever b) — the planner's band-gated posture
+    // prediction, same Feedback semantics.  Empty list = no subscription → byte-identical.
+    for (int leg = 0; leg < int(plan_topics_.size()) && leg < n_legs_; ++leg) {
+        if (plan_topics_[leg].empty()) continue;
+        sub_ids_.push_back(bus_->subscribe(
+            plan_topics_[leg], SubscriptionKind::Feedback,
+            [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_plan(leg, p); }));
+    }
     // Velocity objective socket (L-1b, the propulsive push) — optional per-leg soft velocity
     // targets, same Feedback semantics.  Empty list = no subscription → Cvel never trains.
     for (int leg = 0; leg < int(velocity_objective_topics_.size()) && leg < n_legs_; ++leg) {
@@ -1124,6 +1211,19 @@ void MotorEPMv2::handle_objective(int leg, MessagePtr payload) {
     obj_target_[leg] = pt->predicted_latent;                    // motor_dim target positions
     obj_weight_[leg] = std::clamp(pt->confidence, 0.0f, 1.0f);  // w ∈ [0,1]
     obj_seen_[leg]   = 1;
+}
+
+void MotorEPMv2::handle_plan(int leg, MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const PredictionToken>(payload);
+    if (!pt || leg < 0 || leg >= n_legs_) return;
+    // predicted_latent = [motor_dim targets | motor_dim per-joint weights]:
+    // the weights carry the planner's earned authority-band gate per joint.
+    const int m = motor_dim_;
+    if (pt->predicted_latent.size() < 2 * m) return;
+    plan_target_[leg] = pt->predicted_latent.head(m);
+    plan_w_[leg]      = pt->predicted_latent.segment(m, m).cwiseMax(0.0f).cwiseMin(1.0f);
+    plan_seen_[leg]   = 1;
 }
 
 void MotorEPMv2::handle_objective_vel(int leg, MessagePtr payload) {
@@ -2018,6 +2118,9 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "max_dctrl") max_dctrl_ = get_double(value, "max_dctrl");
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
     else if (key == "sat_lr")       sat_lr_       = get_double(value, "sat_lr");
+    else if (key == "plan_gain") plan_gain_ = get_double(value, "plan_gain");
+    else if (key == "plan_fade") plan_fade_ = get_double(value, "plan_fade");
+    else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
@@ -2051,6 +2154,11 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "coord_td_weight") coord_td_weight_ = get_double(value, "coord_td_weight");
     else if (key == "coord_cv_weight") coord_cv_weight_ = get_double(value, "coord_cv_weight");
     else if (key == "swing_descend_gain") swing_descend_gain_ = get_double(value, "swing_descend_gain");
+    else if (key == "swing_descend_knee") swing_descend_knee_ = get_double(value, "swing_descend_knee");
+    else if (key == "swing_overdue_knee") swing_overdue_knee_ = get_double(value, "swing_overdue_knee");
+    else if (key == "rear_land_gain") rear_land_gain_ = get_double(value, "rear_land_gain");
+    else if (key == "rear_knee_plant") rear_knee_plant_ = get_double(value, "rear_knee_plant");
+    else if (key == "rear_push_ext") rear_push_ext_ = get_double(value, "rear_push_ext");
     else if (key == "swing_hyst_frac") swing_hyst_frac_ = get_double(value, "swing_hyst_frac");
     else if (key == "contact_instrument_only") contact_instrument_only_ = get_double(value, "contact_instrument_only");
     else if (key == "gait_align_diag") gait_align_diag_ = get_double(value, "gait_align_diag");
@@ -3292,14 +3400,47 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // it LEARNS to reach x*, an objective-change, not an additive output bias.
                 // The MODEL (A,b) above kept the raw ξ (self-model stays honest).  w=0 or
                 // no objective → ξ̃ = ξ → byte-identical HK.
-                Eigen::VectorXf xi_tilde = xi;
-                if (obj_seen_[leg] && obj_weight_[leg] > 0.0f
-                    && obj_target_[leg].size() == m && n >= 3 * m) {
-                    float w = obj_weight_[leg];
+                // PART III lever (b): the effective objective is the PER-JOINT
+                // precision-weighted fusion of the keyframe target and the
+                // planner's band-gated prediction (w_eff = wk + plan_gain·wp).
+                // wp=0 on a joint leaves the keyframe pull EXACTLY as before
+                // (never weaken a working loop); plan_gain=0 ⇒ eff ≡ keyframe
+                // ⇒ byte-identical.
+                const bool kf_ok = obj_seen_[leg] && obj_weight_[leg] > 0.0f
+                                   && obj_target_[leg].size() == m;
+                const bool pl_ok = plan_gain_ > 0.0 && plan_seen_[leg]
+                                   && plan_target_[leg].size() == m
+                                   && plan_w_[leg].size() == m;
+                Eigen::VectorXf eff_t = Eigen::VectorXf::Zero(m);
+                Eigen::VectorXf eff_w = Eigen::VectorXf::Zero(m);
+                if (kf_ok || pl_ok) {
+                    const float wk = kf_ok ? obj_weight_[leg] : 0.0f;
                     for (int j = 0; j < m; ++j) {
-                        int idx = 3 * j;                                  // joint j position
-                        float goal_err = L.x[idx] - obj_target_[leg][j]; // x − x*
-                        xi_tilde[idx] = (1.0f - w) * xi[idx] + w * goal_err;
+                        float wp = pl_ok ? float(plan_gain_) * plan_w_[leg][j] : 0.0f;
+                        // telemetry EMAs track wp even at 0 — a frozen meter
+                        // after a mid-run gain drop read as "flip never fired"
+                        // in the (d)-test (2026-08-14); an inactive pull must
+                        // DECAY the meter, not preserve its last value.
+                        if (n >= 3 * m) {
+                            plan_pull_ema_ += 0.01f * ((pl_ok && wp > 0.0f
+                                ? wp * std::fabs(L.x[3 * j] - plan_target_[leg][j])
+                                : 0.0f) - plan_pull_ema_);
+                            plan_w_mean_ += 0.01f * (wp - plan_w_mean_);
+                        }
+                        float tw = wk + wp;
+                        if (tw <= 0.0f) continue;
+                        eff_w[j] = std::min(1.0f, tw);
+                        eff_t[j] = (wk * (kf_ok ? obj_target_[leg][j] : 0.0f)
+                                    + wp * (pl_ok ? plan_target_[leg][j] : 0.0f)) / tw;
+                    }
+                }
+                Eigen::VectorXf xi_tilde = xi;
+                if ((kf_ok || pl_ok) && n >= 3 * m) {
+                    for (int j = 0; j < m; ++j) {
+                        if (eff_w[j] <= 0.0f) continue;
+                        int idx = 3 * j;                              // joint j position
+                        float goal_err = L.x[idx] - eff_t[j];         // x − x*_eff
+                        xi_tilde[idx] = (1.0f - eff_w[j]) * xi[idx] + eff_w[j] * goal_err;
                     }
                 }
                 // ---- DEP: C from the correlation of MOTOR and SENSOR derivatives -----
@@ -3345,10 +3486,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // at the command phase — NOT HK surprise (which damps motion).  Self-limiting: as
                 // the bias moves the body toward x*, the error shrinks and learning stops.  Small
                 // L2 decay bounds it.  This is the "alternate learning signal".
-                if (embed && obj_seen_[leg] && obj_weight_[leg] > 0.0f
-                    && obj_target_[leg].size() == m && n >= 3 * m) {
+                if (embed && (kf_ok || pl_ok) && n >= 3 * m) {
                     for (int j = 0; j < m; ++j) {
-                        float e = obj_target_[leg][j] - L.x[3 * j];   // x* − x toward the keyframe posture
+                        if (eff_w[j] <= 0.0f) continue;
+                        float e = eff_t[j] - L.x[3 * j];   // x*_eff − x toward the fused posture
                         L.Cphi.row(j).noalias() += float(embed_lr_) * e * L.prev_phi_ctx.transpose();
                     }
                     if (embed_decay_ > 0.0) L.Cphi *= (1.0f - float(embed_decay_));
@@ -3535,6 +3676,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             y[1]     += load;    // +hip2 = press foot down (load for grip)
             y[m - 1] += -load;   // knee extends down with it
         }
+        // REAR LANDING SEQUENCE part 2 (operator 2026-08-14): while a REAR leg
+        // is PLANTED and its hip1 is actually SWEEPING (the power stroke), the
+        // knee extends slightly so the shank pushes instead of riding tucked.
+        // Scaled by the leg's own running |Δhip1| (self-scaled, §5) — a parked
+        // hip1 gets no extension, so this cannot fire outside the stroke.
+        if (!warmup && rear_push_ext_ > 0.0 && leg >= 2 && m >= 3
+            && int(in_swing_.size()) == n_legs_ && !in_swing_[leg] && L.n >= 3 * m) {
+            const float dh1 = std::fabs(L.x[2]);          // hip1 delta component
+            dh1_ema_[leg] = 0.99f * dh1_ema_[leg] + 0.01f * dh1;
+            if (dh1_ema_[leg] > 1e-5f) {
+                const float sweep = std::min(1.0f, dh1 / (2.0f * dh1_ema_[leg]));
+                y[m - 1] += -float(rear_push_ext_) * sweep;   // −knee = extend/push
+                ++rear_push_ticks_;
+            }
+        }
         // STANCE-LIFT (belly-up while walking): a constant KNEE bias on PLANTED legs
         // only — raise the chassis off the feet it can push against without touching the
         // swing legs' rhythm.  Knee-only (no hip2 → no foot-lift traction loss).  Sign
@@ -3596,8 +3752,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             ++swing_tuck_ticks_;
             const bool airborne = foot_contact_[leg] <= 0.5f;
             // SWING-DESCENT bookkeeping (self-scaled swing age; see the header note).
+            // Runs when EITHER descent half is live — the knee-only arm
+            // (swing_descend_knee > 0, hip2 press 0) needs the age tracker too.
             bool descending = false;
-            if (swing_descend_gain_ > 0.0 && leg < 8) {
+            if ((swing_descend_gain_ > 0.0 || swing_descend_knee_ > 0.0
+                 || swing_overdue_knee_ > 0.0 || rear_land_gain_ > 0.0) && leg < 8) {
                 if (airborne) {
                     if (!swd_air_[leg]) swd_age_[leg] = 0;
                     ++swd_age_[leg];
@@ -3605,20 +3764,56 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                         && float(swd_age_[leg]) > kDescentFrac * swd_dur_[leg])
                         descending = true;
                 } else if (swd_air_[leg]) {
-                    swd_dur_[leg] = (swd_dur_[leg] <= 0.0f)
-                                  ? float(swd_age_[leg])
-                                  : 0.9f * swd_dur_[leg] + 0.1f * float(swd_age_[leg]);
+                    // RATCHET FIX (2026-08-14, measured): an ASSISTED swing's
+                    // duration must not train the expectation — the reach
+                    // shortens swings, the shrinking average then reads MORE
+                    // swings as overdue, and the intervention chases its own
+                    // reference (4,575 overdue leg-ticks/run at 0.4).  The
+                    // reference learns from unassisted swings only.  The hip2
+                    // press path (swing_descend_gain) keeps its 2026-08-10
+                    // recorded semantics — only the overdue reach sets the flag.
+                    if (!swd_assisted_[leg]) {
+                        swd_dur_[leg] = (swd_dur_[leg] <= 0.0f)
+                                      ? float(swd_age_[leg])
+                                      : 0.9f * swd_dur_[leg] + 0.1f * float(swd_age_[leg]);
+                    }
+                    swd_assisted_[leg] = 0;
                 }
                 swd_air_[leg] = airborne ? 1 : 0;
             }
             if (airborne) {
                 if (descending) {
                     y[1] += float(swing_descend_gain_);   // press DOWN: plant before the sweep
+                    // REAR LANDING SEQUENCE part 1: on the rear pair the drop
+                    // comes first — femur presses, shank SERVOS to the plant
+                    // angle (closed-loop; the open-loop extension regressed).
+                    if (rear_land_gain_ > 0.0 && leg >= 2 && L.n >= 3 * m) {
+                        y[1]     += float(rear_land_gain_) * 0.5f;
+                        y[m - 1] += float(swing_tuck_knee_) - float(swing_descend_knee_)
+                                  + float(rear_land_gain_)
+                                    * (float(rear_knee_plant_) - L.x[3 * (m - 1)]);
+                        ++rear_land_ticks_;
+                    } else {
+                        // the KNEE half (operator 2026-08-14): fold-to-extend flip.
+                        // (Measured REGRESSION as a constant bias — see the schema.)
+                        y[m - 1] += float(swing_tuck_knee_) - float(swing_descend_knee_);
+                    }
                     ++swd_press_ticks_;
                 } else {
                     y[1] += float(swing_tuck_hip2_);      // fold/lift the femur (first half)
+                    y[m - 1] += float(swing_tuck_knee_);  // the shank folds through ascent
                 }
-                y[m - 1] += float(swing_tuck_knee_);       // the shank keeps its fold throughout
+                // TOUCHDOWN-SEEKING (the error-form): only when THIS swing has
+                // outlived the leg's own average does the knee reach for ground,
+                // harder the later it is.  Healthy swings never feel it.
+                if (swing_overdue_knee_ > 0.0 && leg < 8 && swd_dur_[leg] > 2.0f) {
+                    const float late = float(swd_age_[leg]) / swd_dur_[leg] - 1.0f;
+                    if (late > 0.0f) {
+                        y[m - 1] -= float(swing_overdue_knee_) * std::min(1.0f, late);
+                        swd_assisted_[leg] = 1;     // this swing may not train the reference
+                        ++swd_overdue_ticks_;
+                    }
+                }
                 ++swing_tuck_hits_;
             }
         }
@@ -4027,6 +4222,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             y[1]     += drive;    // hip2 + = push feet down / lift chassis
             y[m - 1] += drive;    // knee + = tuck (raises the chassis in spider stance)
         }
+        // PART III bench — the reflex↔plan FADE (operator scaffold, [G]/[R]
+        // class).  Applied to the FULLY ASSEMBLED command (HK + every scaffold
+        // + panic above) so fade 1 silences ALL reflex output and the body
+        // becomes a position servo on the planner's published targets.  Sits
+        // BEFORE the coordination/saturation instruments so they read the
+        // command the body actually executes.  fade 0 = byte-identical.
+        if (plan_fade_ > 0.0 && plan_seen_[leg]
+            && plan_target_[leg].size() == m && L.n >= 3 * m) {
+            const float f = float(std::clamp(plan_fade_, 0.0, 1.0));
+            for (int j = 0; j < m; ++j) {
+                float servo = float(plan_puppet_gain_)
+                              * (plan_target_[leg][j] - L.x[3 * j]);
+                y[j] = (1.0f - f) * y[j] + f * servo;
+            }
+        }
         // Intra-leg coordination instrument: do hip2 (index 1) and the knee (index m-1)
         // push the SAME way?  Read on the assembled command, pre-clamp, post-warmup.
         if (!warmup && m >= 3) {
@@ -4280,6 +4490,12 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["height_bias"]    = height_bias_;
     mod["height_k_eff"]   = height_k_eff_;
     mod["chassis_h_seen"] = chassis_h_seen_;
+    // PART III lever (b) — plan-objective consumer telemetry: without these the
+    // A/B cannot distinguish "the pull acted" from "the seeds moved" (the
+    // consumer-fired check every lever has needed)
+    mod["plan_pull"]  = plan_pull_ema_;
+    mod["plan_w"]     = plan_w_mean_;
+    mod["plan_fade"]  = plan_fade_;
     // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
     // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
     mod["swing_frac"]     = swing_frac_ema_;
@@ -4427,6 +4643,9 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["coord_td_R"] = coord_td_R_diag_;   // arm 3 consumer check: −1 = never computed
     mod["coord_cv_dev"] = coord_cv_diag_;   // arm 3b consumer check: −1 = never computed
     mod["swd_press_ticks"] = swd_press_ticks_;  // swing-descent consumer check
+    mod["swd_overdue_ticks"] = swd_overdue_ticks_;  // touchdown-seeking consumer check
+    mod["rear_land_ticks"] = rear_land_ticks_;      // rear drop consumer check
+    mod["rear_push_ticks"] = rear_push_ticks_;      // rear push consumer check
     {
         nlohmann::json off = nlohmann::json::array();
         for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);
@@ -4986,6 +5205,9 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["height_bias"]   = height_bias_;           // integrated lift bias (hip2)
     j["height_k_eff"]  = height_k_eff_;          // adapted setpoint fraction (belly-grounding)
     j["height_rest_frac"] = height_rest_frac_;   // height-defense fade: 1 at rest → 0 while moving fwd
+    j["plan_pull"] = plan_pull_ema_;             // lever (b): mean w·|x−x*| of the plan pull (EMA)
+    j["plan_w"]    = plan_w_mean_;               // lever (b): mean effective plan weight
+    j["plan_fade"] = plan_fade_;                 // bench: reflex↔plan crossfade position
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cphi.norm(); ++c; }
       j["embed_norm"] = c ? s / float(c) : 0.0f; }   // mean ‖Cphi‖ — how much POSTURE phase-conditioning HK has learned
     { float s = 0.0f; int c = 0; for (auto const& L : legs_) if (L.initialized) { s += L.Cvel.norm(); ++c; }

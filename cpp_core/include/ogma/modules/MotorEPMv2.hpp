@@ -1191,6 +1191,32 @@ private:
     std::vector<float>           obj_weight_;    // per-leg weight w = PredictionToken.confidence ∈ [0,1]
     std::vector<char>            obj_seen_;      // per-leg: an objective has arrived (char, not vector<bool>)
 
+    // ---- PART III lever (b): the PLANNER's band-gated posture prediction ----
+    // A second posture-objective socket (objective.plan.<leg>) carrying the
+    // MotorPlanner's BASE-roll decode at its plan depth: predicted_latent =
+    // [m targets | m per-joint weights] (weights 0/1 = the earned authority-band
+    // gate, planner-side).  Fused with the keyframe objective PER JOINT,
+    // precision-weighted (the LateralVoter pattern): w_eff = wk + plan_gain·wp,
+    // x*_eff = (wk·xk + plan_gain·wp·xp)/w_eff — so an ungated joint (wp=0)
+    // leaves the keyframe pull EXACTLY as it was (never weaken a working loop),
+    // and plan_gain=0 is byte-identical.  Empty socket = OFF.
+    void handle_plan(int leg, MessagePtr payload);
+    std::vector<std::string>     plan_topics_;   // optional per-leg plan-objective topics; empty = OFF
+    double                       plan_gain_ = 0.0;
+    // OPERATOR SCAFFOLD ([G]/[R] bench class — a lesion-as-test, never an
+    // operating mode): crossfade the FINAL assembled command (reflexes +
+    // scaffolds, everything) toward a pure position-servo on the planner's
+    // published targets.  fade 0 = byte-identical; fade 1 = the stride as the
+    // planner imagines it, embodied.  Ungated joints' targets arrive as the
+    // current pose (planner-side), so they HOLD rather than flail.
+    double                       plan_fade_ = 0.0;
+    double                       plan_puppet_gain_ = 2.0;   // servo P on (x*−x)
+    std::vector<Eigen::VectorXf> plan_target_;   // per-leg target joint positions (motor_dim)
+    std::vector<Eigen::VectorXf> plan_w_;        // per-leg PER-JOINT weights ∈ [0,1] (the band gate)
+    std::vector<char>            plan_seen_;
+    float plan_pull_ema_ = 0.0f;                 // consumer-fired telemetry: mean w·|x−x*| (EMA)
+    float plan_w_mean_   = 0.0f;                 // mean effective plan weight this tick
+
     // ---- L-1b velocity objective (§the propulsive push) ----
     // A phase-indexed VELOCITY target on objective.velocity.<leg> (KeyframeGait's vel map).
     // A second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the
@@ -1353,11 +1379,37 @@ private:
     // typical swing, hip2 flips to +swing_descend_gain (press DOWN, Rule-5 sign) so the
     // foot plants before the stroke reverses.  Knee keeps its fold.  0 = byte-identical.
     double  swing_descend_gain_ = 0.0;
+    double  swing_descend_knee_ = 0.0;   // the KNEE half (operator 2026-08-14):
+                                         // during descent the shank flips from
+                                         // fold to EXTEND toward the ground
+    double  swing_overdue_knee_ = 0.0;   // the ERROR-FORM: reach for ground only
+                                         // when the swing outlives its own average
+    // REAR LANDING SEQUENCE (operator 2026-08-14: "hip2 and knee must DROP
+    // first, THEN hip1 sweeps back with a bit of knee extension").  Two
+    // separately-gated rear-pair levers (legs 2,3 = cfg rl/rr = anatomical
+    // RR/RL — front/rear is NOT mirrored by the naming flip):
+    double  rear_land_gain_  = 0.0;      // descent: hip2 press + knee SERVO to
+                                         //   the plant angle (closed-loop — the
+                                         //   open-loop extension was the
+                                         //   measured regression)
+    double  rear_knee_plant_ = 0.2;      // the plant angle (slightly flexed for
+                                         //   push traction)
+    double  rear_push_ext_   = 0.0;      // stance: knee extension while the
+                                         //   planted leg's hip1 actually sweeps
+    float   dh1_ema_[8] = {0,0,0,0,0,0,0,0};   // per-leg |Δhip1| running scale
+    long    rear_land_ticks_ = 0;        // consumer-fired checks
+    long    rear_push_ticks_ = 0;
     static constexpr float kDescentFrac = 0.5f;
     int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
     float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
     uint8_t swd_air_[8] = {0,0,0,0,0,0,0,0};       // previous airborne state
+    uint8_t swd_assisted_[8] = {0,0,0,0,0,0,0,0};  // overdue reach fired THIS swing —
+                                                   // its duration must NOT train the
+                                                   // expectation (the ratchet fix:
+                                                   // the reference chases only
+                                                   // UNASSISTED swings)
     long    swd_press_ticks_ = 0;                   // consumer-fired check
+    long    swd_overdue_ticks_ = 0;                 // touchdown-seeking fired check
 
     float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
     float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase

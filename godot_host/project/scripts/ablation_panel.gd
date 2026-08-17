@@ -56,18 +56,22 @@ var _is_minimised: bool = true    # starts collapsed: destructive, so opt-in
 var _full_anchor_bottom: float = -1.0
 var _full_offset_bottom: float = 0.0
 const _COLLAPSED_HEIGHT: float = 38.0
+# 2026-08-12 (operator QoL) — the distress bar lives at bottom-left y∈[-28,-8]
+# (picrawler_body._update_distress_hud), and a -12 bottom edge sat on top of it.
+const _BOTTOM_MARGIN: float = 48.0
 
 
 func _ready() -> void:
-	# Bottom-LEFT.  The HUD owns top-left and MOTOR-EPM owns the right edge.
+	# Bottom-LEFT, raised clear of the distress bar.  The HUD owns top-left and
+	# MOTOR-EPM owns the right edge.
 	anchor_left = 0.0
 	anchor_top = 1.0
 	anchor_right = 0.0
 	anchor_bottom = 1.0
 	offset_left = 12.0
-	offset_top = -12.0 - 360.0
+	offset_top = -_BOTTOM_MARGIN - 360.0
 	offset_right = 12.0 + 430.0
-	offset_bottom = -12.0
+	offset_bottom = -_BOTTOM_MARGIN
 	mouse_filter = Control.MOUSE_FILTER_PASS
 
 	var root := PanelContainer.new()
@@ -355,6 +359,6 @@ func _apply_minimised() -> void:
 	_content_vb.visible = not _is_minimised
 	_minimise_btn.text = "▲" if _is_minimised else "▼"
 	if _is_minimised:
-		offset_top = -12.0 - _COLLAPSED_HEIGHT
+		offset_top = -_BOTTOM_MARGIN - _COLLAPSED_HEIGHT
 	else:
-		offset_top = -12.0 - 360.0
+		offset_top = -_BOTTOM_MARGIN - 360.0

@@ -23,13 +23,19 @@ std::string sget(ParamMap const& p, std::string const& k, std::string dflt) {
     if (auto* s = std::get_if<std::string>(&it->second)) return *s;
     return dflt;
 }
+std::vector<std::string> svget(ParamMap const& p, std::string const& k) {
+    auto it = p.find(k);
+    if (it == p.end()) return {};
+    if (auto* v = std::get_if<std::vector<std::string>>(&it->second)) return *v;
+    return {};
+}
 constexpr float kTwoPi = 6.28318530718f;
 } // namespace
 
 constexpr std::array<int, MotorPlanner::kNumProbes> MotorPlanner::kProbes;
 
 std::vector<TopicSpec> MotorPlanner::input_topics() const {
-    return {
+    std::vector<TopicSpec> v = {
         TopicSpec{state_topic_,  std::type_index(typeid(RealityToken)),
                   SubscriptionKind::Direct, /*required=*/false},
         TopicSpec{rhythm_topic_, std::type_index(typeid(ProprioToken)),
@@ -37,6 +43,19 @@ std::vector<TopicSpec> MotorPlanner::input_topics() const {
         TopicSpec{pose_topic_,   std::type_index(typeid(ProprioToken)),
                   SubscriptionKind::Direct, /*required=*/false},
     };
+    if (!plan_output_topics_.empty())
+        v.emplace_back(distress_topic_, std::type_index(typeid(ProprioToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
+    return v;
+}
+
+std::vector<TopicSpec> MotorPlanner::output_topics() const {
+    std::vector<TopicSpec> v;
+    v.reserve(plan_output_topics_.size());
+    for (auto const& t : plan_output_topics_)
+        v.emplace_back(t, std::type_index(typeid(PredictionToken)),
+                       SubscriptionKind::Direct, /*required=*/false);
+    return v;
 }
 
 ParamSchema MotorPlanner::params_schema() const {
@@ -69,6 +88,11 @@ ParamSchema MotorPlanner::params_schema() const {
         {"mask_joint", ParamMutability::HotMutable,
          "mode 2: joint whose READOUT pose is tested (0..11), or -1 = all joints.",
          ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{11.0}},
+        {"mask_joints", ParamMutability::HotMutable,
+         "mode 2 GROUP mask: bitmask of joints (bit j = planner joint j; h1=15, h2=240, "
+         "knee=3840).  Non-zero WINS over mask_joint — the operator's tier-wide inhibition "
+         "(e.g. all four hip2 at once).  0 = off (legacy single-joint semantics).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{4095.0}},
         {"mask_val_lo", ParamMutability::HotMutable,
          "mode 2: inhibited pose-value range, low edge.", ParamValue{0.0}, ParamValue{-1.5}, ParamValue{1.5}},
         {"mask_val_hi", ParamMutability::HotMutable,
@@ -124,6 +148,29 @@ ParamSchema MotorPlanner::params_schema() const {
         {"seed", ParamMutability::ConstructionOnly,
          "Author RNG seed (rewritten per-run by the OGMA_SEED master override, like every 'seed' param).",
          ParamValue{1234.0}, std::nullopt, std::nullopt},
+        {"plan_output_topics", ParamMutability::ConstructionOnly,
+         "LEVER (b): per-leg PredictionToken output topics (objective.plan.<leg>) carrying the BASE "
+         "roll's decode at plan_depth as [3 targets | 3 per-joint weights].  Weight 1 only where the "
+         "joint's verified authority holds at that depth (the earned-bands gate).  EMPTY (default) = "
+         "shadow, no publications — every pre-(b) config is untouched.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"plan_publish", ParamMutability::HotMutable,
+         "Master publish switch for the plan objective (0 = shadow even when topics are wired).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_depth", ParamMutability::HotMutable,
+         "Cone depth (ticks ahead) whose BASE decode is published as the target.  Must be a probe "
+         "depth {1,3,5,8,13,21,34}; a non-probe depth publishes weight 0 (no pull).  Default 8 = the "
+         "verified band's inner edge.", ParamValue{8.0}, ParamValue{1.0}, ParamValue{34.0}},
+        {"plan_distress_cut", ParamMutability::HotMutable,
+         "Distress level above which all plan weights go to 0 — reflexes own emergencies "
+         "unconditionally (matches the panic_on convention).",
+         ParamValue{0.5}, ParamValue{0.0}, ParamValue{1.0}},
+        {"plan_gate_override", ParamMutability::HotMutable,
+         "OPERATOR SCAFFOLD (named as such — a diagnostic lesion, never an operating mode): "
+         "1 = publish weight 1 on ALL joints, bypassing the earned-bands gate, so the operator "
+         "can FEEL the difference between earned and unearned authority by hand (with the "
+         "consumer's plan_gain as the reflex↔plan mix).  The distress cut still applies.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
     };
 }
 
@@ -133,7 +180,8 @@ ParamMap MotorPlanner::current_params() const {
     m["pose_topic"] = pose_topic_;
     m["horizon"] = horizon_; m["beam_k"] = beam_k_;
     m["phase_bins"] = phase_bins_; m["mask_mode"] = mask_mode_; m["mask_floor"] = mask_floor_;
-    m["mask_joint"] = mask_joint_; m["mask_val_lo"] = mask_val_lo_; m["mask_val_hi"] = mask_val_hi_;
+    m["mask_joint"] = mask_joint_; m["mask_joints"] = mask_joints_;
+    m["mask_val_lo"] = mask_val_lo_; m["mask_val_hi"] = mask_val_hi_;
     m["mask_depth_lo"] = mask_depth_lo_; m["mask_depth_hi"] = mask_depth_hi_;
     m["mask_strength"] = mask_strength_;
     m["author_mode"] = author_mode_; m["author_apply"] = author_apply_;
@@ -143,6 +191,10 @@ ParamMap MotorPlanner::current_params() const {
     m["author_score"] = author_score_; m["author_guard"] = author_guard_;
     m["author_depth_min"] = author_depth_min_; m["author_depth_max"] = author_depth_max_;
     m["author_max_kept"] = author_max_kept_; m["seed"] = seed_;
+    m["plan_output_topics"] = std::vector<std::string>(plan_output_topics_);
+    m["plan_publish"] = plan_publish_; m["plan_depth"] = plan_depth_;
+    m["plan_distress_cut"] = plan_distress_cut_;
+    m["plan_gate_override"] = plan_gate_override_;
     return m;
 }
 
@@ -157,6 +209,7 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     mask_mode_  = pget(params, "mask_mode",  mask_mode_);
     mask_floor_ = pget(params, "mask_floor", mask_floor_);
     mask_joint_    = pget(params, "mask_joint",    mask_joint_);
+    mask_joints_   = pget(params, "mask_joints",   mask_joints_);
     mask_val_lo_   = pget(params, "mask_val_lo",   mask_val_lo_);
     mask_val_hi_   = pget(params, "mask_val_hi",   mask_val_hi_);
     mask_depth_lo_ = pget(params, "mask_depth_lo", mask_depth_lo_);
@@ -174,9 +227,21 @@ void MotorPlanner::on_setup(Bus* bus, ParamMap const& params) {
     author_depth_max_  = pget(params, "author_depth_max",  author_depth_max_);
     author_max_kept_   = pget(params, "author_max_kept",   author_max_kept_);
     seed_              = pget(params, "seed",              seed_);
+    plan_output_topics_ = svget(params, "plan_output_topics");
+    plan_publish_       = pget(params, "plan_publish",      plan_publish_);
+    plan_depth_         = pget(params, "plan_depth",        plan_depth_);
+    plan_distress_cut_  = pget(params, "plan_distress_cut", plan_distress_cut_);
+    plan_gate_override_ = pget(params, "plan_gate_override", plan_gate_override_);
     // xorshift32 init: mix the (possibly OGMA_SEED-namespaced) seed, never zero
     rng_state_ = uint32_t(uint64_t(seed_) * 2654435761u ^ 0x9E3779B9u);
     if (rng_state_ == 0) rng_state_ = 0x1234567u;
+    if (!plan_output_topics_.empty()) {
+        subs_.push_back(bus_->subscribe(distress_topic_, SubscriptionKind::Direct,
+            [this](std::string_view, MessagePtr p){
+                auto t = std::dynamic_pointer_cast<const ProprioToken>(p);
+                if (t && t->values.size() > 0) distress_ = t->values[0];
+            }));
+    }
     subs_.push_back(bus_->subscribe(state_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){
             if (auto t = std::dynamic_pointer_cast<const RealityToken>(p))
@@ -225,6 +290,7 @@ void MotorPlanner::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "mask_mode")  mask_mode_  = d(mask_mode_);
     else if (k == "mask_floor") mask_floor_ = d(mask_floor_);
     else if (k == "mask_joint")    mask_joint_    = d(mask_joint_);
+    else if (k == "mask_joints")   mask_joints_   = d(mask_joints_);
     else if (k == "mask_val_lo")   mask_val_lo_   = d(mask_val_lo_);
     else if (k == "mask_val_hi")   mask_val_hi_   = d(mask_val_hi_);
     else if (k == "mask_depth_lo") mask_depth_lo_ = d(mask_depth_lo_);
@@ -241,6 +307,10 @@ void MotorPlanner::on_param_change(std::string_view key, ParamValue const& value
     else if (k == "author_depth_min")  author_depth_min_  = d(author_depth_min_);
     else if (k == "author_depth_max")  author_depth_max_  = d(author_depth_max_);
     else if (k == "author_max_kept")   author_max_kept_   = d(author_max_kept_);
+    else if (k == "plan_publish")      plan_publish_      = d(plan_publish_);
+    else if (k == "plan_depth")        plan_depth_        = d(plan_depth_);
+    else if (k == "plan_distress_cut") plan_distress_cut_ = d(plan_distress_cut_);
+    else if (k == "plan_gate_override") plan_gate_override_ = d(plan_gate_override_);
 }
 
 int MotorPlanner::phase_bin(float phi) const {
@@ -296,13 +366,15 @@ void MotorPlanner::decode_row(Dist const& d, float* mean_out, float* sd_out) con
 
 // One region spec against one row — the shared primitive every masking path
 // (manual/candidate params, each kept mask) funnels through.  Suppresses mass
-// of tokens whose READOUT pose falls inside [lo,hi] on the selected joint(s).
-// Inhibition acts on the CONTINUOUS substrate through the mixture; tokens are
-// carriers.  Returns true if any mass survived suppression and was renormalized.
-bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
+// of tokens whose READOUT pose falls inside [lo,hi] on any selected joint
+// (jmask bit j = planner joint j; 0xFFF = all — the GROUP form the operator's
+// all-h2 experiments need).  Inhibition acts on the CONTINUOUS substrate
+// through the mixture; tokens are carriers.  Returns true if any mass
+// survived suppression and was renormalized.
+bool MotorPlanner::suppress_region(Dist& d, uint32_t jmask, float lo, float hi,
                                    int dlo, int dhi, float strength,
                                    int depth, long& hit_counter) {
-    if (strength <= 0.0f) return false;
+    if (strength <= 0.0f || jmask == 0) return false;
     if (depth < dlo || depth > dhi) return false;
     if (hi <= lo) return false;
     // INHIBITION MAY REROUTE, NEVER ANNIHILATE.  If suppression would zero the
@@ -316,12 +388,9 @@ bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
         auto it = tok_pose_.find(tok);
         if (it == tok_pose_.end() || it->second.n < 2) continue;
         bool inside = false;
-        if (jsel >= 0 && jsel < kJoints) {
-            float v = it->second.mean[jsel];
-            inside = (v >= lo && v <= hi);
-        } else {
-            for (int j = 0; j < kJoints && !inside; ++j)
-                inside = (it->second.mean[j] >= lo && it->second.mean[j] <= hi);
+        for (int j = 0; j < kJoints && !inside; ++j) {
+            if (!((jmask >> j) & 1u)) continue;
+            inside = (it->second.mean[j] >= lo && it->second.mean[j] <= hi);
         }
         if (inside) { pmass *= (1.0f - strength); any = true; ++hit_counter; }
     }
@@ -340,12 +409,17 @@ bool MotorPlanner::suppress_region(Dist& d, int jsel, float lo, float hi,
 }
 
 // mode 2 — the param-spec mask: the manual/demo mask, or the author's live
-// trial candidate (the author writes the params at trial start).
+// trial candidate (the author writes the params at trial start).  The GROUP
+// bitmask (mask_joints) wins when set; else legacy single-joint/all semantics.
 bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
     if (mask_mode_ < 1.5) return false;
     const float lo = float(std::min(mask_val_lo_, mask_val_hi_));
     const float hi = float(std::max(mask_val_lo_, mask_val_hi_));
-    return suppress_region(d, int(mask_joint_), lo, hi,
+    uint32_t jm;
+    if (mask_joints_ >= 1.0) jm = uint32_t(mask_joints_) & 0xFFFu;
+    else if (mask_joint_ >= 0.0) jm = 1u << int(mask_joint_);
+    else jm = 0xFFFu;
+    return suppress_region(d, jm, lo, hi,
                            int(mask_depth_lo_), int(mask_depth_hi_),
                            float(mask_strength_), depth, masked_out_);
 }
@@ -356,10 +430,12 @@ bool MotorPlanner::apply_region_mask(Dist& d, int depth) {
 bool MotorPlanner::apply_kept_masks(Dist& d, int depth) {
     if (author_apply_ < 0.5 || kept_.empty()) return false;
     bool any = false;
-    for (auto const& k : kept_)
-        if (suppress_region(d, k.spec.joint, k.spec.lo, k.spec.hi,
+    for (auto const& k : kept_) {
+        uint32_t jm = (k.spec.joint >= 0) ? (1u << k.spec.joint) : 0xFFFu;
+        if (suppress_region(d, jm, k.spec.lo, k.spec.hi,
                             k.spec.dlo, k.spec.dhi, 1.0f, depth, kept_masked_out_))
             any = true;
+    }
     return any;
 }
 
@@ -485,6 +561,7 @@ void MotorPlanner::tick(uint64_t tick_id) {
     roll_raw_sd_.assign(size_t(H) * kJoints, 0.0f);
     roll_len_ = 0;
     mask_applied_ = false;
+    plan_pose_valid_ = false;
     // Up to THREE cones run beside each other, so every meter is a genuine
     // per-tick counterfactual (the old single-cone "raw" was pre-this-row's-mask
     // only — it inherited upstream rerouting past the first masked depth):
@@ -533,6 +610,22 @@ void MotorPlanner::tick(uint64_t tick_id) {
         decode_row(row, &roll_mean_[size_t(n - 1) * kJoints],
                         &roll_sd_[size_t(n - 1) * kJoints]);
         roll_len_ = n;
+        // lever (b): capture the BASE (operating) decode at the plan depth —
+        // the prediction the body will be asked to fulfil
+        if (plan_publish_ >= 0.5 && !plan_output_topics_.empty()
+            && n == int(plan_depth_)) {
+            std::array<float, kJoints> scratch_sd{};
+            if (three_cone) {
+                decode_row(row_base, plan_pose_.data(), scratch_sd.data());
+            } else if (kept_active) {
+                for (int j = 0; j < kJoints; ++j)
+                    plan_pose_[j] = roll_mean_[size_t(n - 1) * kJoints + j];
+            } else {
+                for (int j = 0; j < kJoints; ++j)
+                    plan_pose_[j] = roll_raw_mean_[size_t(n - 1) * kJoints + j];
+            }
+            plan_pose_valid_ = true;
+        }
         if (next_probe < kNumProbes && n == kProbes[next_probe]) {
             Pending pd{tick_id + uint64_t(n), n, cur_tok_, row, {}, {}, {}, {},
                        (author_phase_ == 1 && cand_active) ? trial_serial_ : 0};
@@ -554,6 +647,53 @@ void MotorPlanner::tick(uint64_t tick_id) {
         }
     }
     if (pending_.size() > 512) pending_.erase(pending_.begin(), pending_.begin() + 128);
+
+    // ---- lever (b): publish the band-gated plan objective.  Per leg l the
+    // token carries [3 targets | 3 weights] for (hip1, hip2, knee) = planner
+    // joints (l, 4+l, 8+l).  A joint's weight is 1 only where its verified
+    // authority holds at plan_depth (the slot-win test the bands are built
+    // from); distress cuts everything (reflexes own emergencies); an invalid
+    // roll or a non-probe depth publishes weight 0 with the CURRENT pose as
+    // target — a pull of exactly zero, never a stale command.
+    if (plan_publish_ >= 0.5 && !plan_output_topics_.empty()) {
+        int slot = -1;
+        for (int i = 0; i < kNumProbes; ++i)
+            if (kProbes[i] == int(plan_depth_)) slot = i;
+        const bool cut = distress_ > float(plan_distress_cut_);
+        bool any_w = false;
+        for (int j = 0; j < kJoints; ++j) {
+            float w = 0.0f;
+            if (!cut && plan_pose_valid_ && pose_seen_) {
+                if (plan_gate_override_ >= 0.5) {
+                    w = 1.0f;      // operator scaffold: unearned authority, by hand
+                } else if (slot >= 0 && acc_n_[slot] >= 200) {
+                    double n = double(acc_n_[slot]);
+                    if (acc_jerr_[slot][j] / n < 0.95 * (acc_jpers_[slot][j] / n)) w = 1.0f;
+                }
+            }
+            plan_w_[j] = w;
+            plan_tug_[j] = (w > 0.0f && plan_pose_valid_)
+                               ? w * (plan_pose_[j] - cur_pose_[j]) : 0.0f;
+            if (w > 0.0f) any_w = true;
+        }
+        for (size_t leg = 0; leg < plan_output_topics_.size() && leg < 4; ++leg) {
+            auto out = std::make_shared<PredictionToken>();
+            out->tick_id         = tick_id;
+            out->producer_id     = id_.empty() ? std::string("motor_planner") : id_;
+            out->target_modality = "plan." + std::to_string(leg);
+            out->predicted_latent.resize(6);
+            const int jidx[3] = {int(leg), int(leg) + 4, int(leg) + 8};
+            for (int c = 0; c < 3; ++c) {
+                float tgt = (plan_pose_valid_ && plan_w_[jidx[c]] > 0.0f)
+                                ? plan_pose_[jidx[c]] : cur_pose_[jidx[c]];
+                out->predicted_latent[c]     = tgt;
+                out->predicted_latent[3 + c] = plan_w_[jidx[c]];
+                if (out->confidence < plan_w_[jidx[c]]) out->confidence = plan_w_[jidx[c]];
+            }
+            bus_->publish(plan_output_topics_[leg], out);
+        }
+        if (any_w) ++plan_published_;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -681,7 +821,9 @@ void MotorPlanner::author_start_trial() {
     c.hi = std::clamp(c.hi, -1.5f, 1.5f);
     cand_ = c;
 
-    // the author OWNS the mask params during a trial
+    // the author OWNS the mask params during a trial (incl. clearing any
+    // operator-set GROUP bitmask, which would otherwise ride its trials)
+    mask_joints_   = 0.0;
     mask_joint_    = double(c.joint);
     mask_val_lo_   = double(c.lo);
     mask_val_hi_   = double(c.hi);
@@ -863,6 +1005,19 @@ nlohmann::json MotorPlanner::snapshot_state() const {
     }
     mod["jerr"]  = std::move(je);
     mod["jpers"] = std::move(jp);
+    // lever (b) publisher state — which joints the earned-bands gate admits at
+    // plan_depth this tick, and the distress cut (the §3.2 publisher-fired check)
+    if (plan_publish_ >= 0.5 && !plan_output_topics_.empty()) {
+        nlohmann::json pw = nlohmann::json::array(), pt = nlohmann::json::array();
+        for (int j = 0; j < kJoints; ++j) {
+            pw.push_back(plan_w_[j]);
+            pt.push_back(std::round(plan_tug_[j] * 1000.0f) / 1000.0f);
+        }
+        mod["plan_pub"] = {{"depth", int(plan_depth_)}, {"n", plan_published_},
+                           {"w", std::move(pw)}, {"tug", std::move(pt)},
+                           {"override", plan_gate_override_ >= 0.5 ? 1 : 0},
+                           {"distress", std::round(distress_ * 1000.0f) / 1000.0f}};
+    }
     return nlohmann::json{{"version", 1}, {"module", mod}};
 }
 
@@ -902,6 +1057,7 @@ nlohmann::json MotorPlanner::diag_snapshot() const {
     if (mask_mode_ > 1.5) {
         mod["mask_spec"] = {
             {"joint", int(mask_joint_)},
+            {"joints_mask", int(mask_joints_)},   // group bitmask; 0 = legacy joint field
             {"val_lo", mask_val_lo_}, {"val_hi", mask_val_hi_},
             {"depth_lo", int(mask_depth_lo_)}, {"depth_hi", int(mask_depth_hi_)},
             {"strength", mask_strength_},
