@@ -208,16 +208,77 @@ stayed live under evolution. **This is a pipe-integrity result and nothing more:
 generations on one seed says nothing about convergence, and the J trace moved *up*
 (0.281 → 0.336) across them, which at this power is noise.
 
-### 6.5 Gates 2 and 3 — NOT YET RUN
+### 6.5 Gate 2 — RUN 2026-08-17: mechanism PASSES, convergence NOT DEMONSTRATED
 
-- **Gate 2 (convergence):** `seedavg.py …__gainevo_factory.json 4 256000 0.3
-  OGMA_PICRAWLER_GYM=arena` (~30 generations; generation = 2 × 4000 ticks; ≈1.5 h wall).
-  ⚠ **Operator decision recorded:** the factory arm seeds at the *pinned* MotorEPMv2
-  schema defaults `[0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0]` — **four of eight are 0,
-  i.e. whole mechanisms OFF, including `coupling_gain` (no Kuramoto coupling)**. The
-  generation-0 body may barely locomote, which makes this the honest *hard* version of
-  the convergence claim; if it proves gradient-free the recorded fallback is mid-range
-  seeds, and whichever is run gets recorded.
+Arm: `…__gainevo_factory.json` (factory seeds `[0, 0.2, 0, 0.4, 0, 0.3, 0, 0]`,
+σ 0.08), **arena**, n=4, 256 000 ticks, difficulty 0.3, **solid chassis**
+(`OGMA_PICRAWLER_CHASSIS_COLLIDE=1` — seedavg does not set it and the ghost default
+would make sagging free while `height_homeo_gain` is under evolution). 31 generations
+per seed.
+
+**What passed.**
+- **Consumer lockstep, all 4 seeds: `ga_app` 512 = `ge_pub` 64 × 8 keys, `ga_rej` 0.**
+  Every published vector landed on every key; the pipe is proven at scale.
+- **Tautology check: accepts > 0 on 4/4** (14 / 14 / 10 / 17 accepts against 17 / 17 /
+  21 / 14 reverts) — the search discriminates rather than rubber-stamping.
+- **Direction is sensible on the structural gains.** Pooled finals vs the hand point:
+  `coupling_gain` 0 → **2.06** (hand 1.55) — turned ON in all four seeds from a
+  factory default of zero, i.e. the search rediscovered that the legs must be coupled;
+  `height_homeo_gain` 0 → **0.039** (hand **0.040**); `rear_push_ext` 0 → 0.63 (hand
+  0.5); `postural_gain` 0.3 → 0.57 (hand 0.7); `rear_land_gain` 0 → 0.94 (overshoots
+  hand 0.5). 3/4 seeds ended closer to the hand point in L2 (1.75 → 0.81 / 1.65 /
+  1.84 / 1.05).
+
+**What did not pass — and why, measured.** The J trace does **not** fall: half-run
+deltas were +0.30 / −0.09 / **+0.70** / −0.62. Against a per-seed incumbent-window sd
+of **0.54 / 0.88 / 2.08 / 1.21**, every one of those deltas sits *inside the noise*.
+Pooled over 128 incumbent windows, **J = 1.009 ± 1.418**.
+
+**The variance decomposition names the culprit exactly** (weighted contributions,
+128 windows):
+
+| weighted term | mean | sd | share of J variance |
+|---|---|---|---|
+| `w_falls·falls` | 0.445 | 1.059 | **80.9 %** |
+| `w_tilt·var(upright)` | 0.155 | 0.502 | 18.2 % |
+| `w_flow·(1−flow_q)` | 0.386 | 0.082 | 0.5 % |
+| `w_dis·distress_duty` | 0.015 | 0.060 | 0.3 % |
+| `w_unl·unloaded_mean` | 0.009 | 0.045 | 0.1 % |
+
+**Falls alone is 81 % of the criterion's variance**, and the three gait-quality terms
+together are under 1 %. Falls is a *rare discrete count* over a 2 000-tick measured
+half-window — its relative variance is enormous, and it drowns the very terms the
+criterion was designed to select on.
+
+**Second finding: the 1/5th-rule anneal amplifies this instead of absorbing it.**
+Acceptance ran 32–55 %, far above `target_accept` 0.2, so σ was driven **up** — to the
+`sigma_max` 0.5 **ceiling on 3 of 4 seeds**. That is the signature of a coin flip: a
+noisy criterion yields ~50 % acceptance, the classic 1/5th rule reads that as "I am
+succeeding, take bigger steps," and the search widens instead of settling.
+**The 1/5th rule assumes a deterministic objective; ours is stochastic.**
+
+**Remedies, in the order they should be tried:**
+1. **Lengthen `eval_window_ticks` well past 4 000** — the charter's "≥4 000–6 000" is
+   now measured to be far too short; noise sd ~1.4 against a signal ~0.3.
+2. **Damp the falls term's variance** — cap it per window, or convert it to a
+   fall-*rate* over a much longer horizon, so a Poisson count cannot own 81 % of J.
+3. **Make acceptance noise-aware** — require `J_cand < J_inc − k·sd` rather than a bare
+   inequality, and/or anneal against an improvement *magnitude* instead of a raw
+   accept rate.
+4. **Common random numbers** — evaluate incumbent and candidate over the same
+   perturbation sequence so their difference cancels shared noise.
+
+**Two context caveats on these numbers.** Over 256 k ticks in the arena all four seeds
+reach the floor edge (`max_z` ≈ 9.9–10.1) and its containment ramps, so some of the
+falls are boundary events rather than gait failures — which inflates precisely the
+dominant term. And the factory body is genuinely unstable as predicted (tilt_sd 0.339,
+`bellyc_min` 0.000 — the belly does reach the ground on a solid chassis), so this is
+the hard version of the convergence question, not the friendly one.
+
+**Verdict: `PARTIAL`.** The machinery is correct and proven end-to-end, and the vector
+moves in defensible directions on the gains that matter most — but *convergence is not
+demonstrated*, and by §3.3 the honest response is to fix the instrument (window length
+and the falls term) rather than to power the effect with more seeds.
 - **Gate 3 ((d)-test):** `OGMA_PICRAWLER_SLICK_LEG=2 OGMA_PICRAWLER_SLICK_AT=200000`
   (leg 2 = cfg `rl` = anatomical REAR-RIGHT) + σ on at tick 1, 400 k ticks, one run.
   Judge migration + **partial** J recovery; demanding full return would over-claim, as

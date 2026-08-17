@@ -492,6 +492,63 @@ Fixing that sensor moves the deployed panic and plan-distress-cut, so it is a se
 lever. **If `ge_dis` reads ~0 through the gates, that weight is dead — which is a
 measurement about the sensor, not a verdict on the criterion.**
 
+### ★★★ 2026-08-17 — GATE 2: THE SEARCH RUNS, AND ITS CRITERION IS 81 % NOISE FROM ONE TERM
+
+**Verdict: `PARTIAL`.** Arm `…__gainevo_factory.json` (factory seeds, σ 0.08), **arena,
+n=4, 256 k ticks, solid chassis**, 31 generations/seed. Mechanism passes; **convergence
+is NOT demonstrated**; the reason was measured rather than guessed.
+
+**Passes.** Consumer lockstep on all 4 seeds — `ga_app` **512** = `ge_pub` 64 × 8 keys,
+`ga_rej` **0**. Accepts > 0 on 4/4 (14/14/10/17 accepts vs 17/17/21/14 reverts), so the
+tautology check clears and the search discriminates. Direction is sensible on the
+structural gains: **`coupling_gain` 0 → 2.06 (hand 1.55) — switched ON from a factory
+zero in all four seeds**, i.e. the search rediscovered from egocentric error alone that
+the legs must be coupled; `height_homeo_gain` 0 → **0.039** against a hand-found 0.040;
+`rear_push_ext` 0 → 0.63 (hand 0.5); `postural_gain` 0.3 → 0.57 (hand 0.7). 3/4 seeds
+ended closer to the hand point.
+
+**The failure, and the number that explains it.** Half-run J deltas were +0.30 / −0.09 /
++0.70 / −0.62 against per-seed incumbent-window sds of 0.54 / 0.88 / 2.08 / 1.21 —
+**every delta is inside its own noise.** Pooled over 128 incumbent windows J = 1.009 ±
+1.418, and decomposing that variance by weighted term is decisive:
+
+| weighted term | share of J variance |
+|---|---|
+| `w_falls·falls` | **80.9 %** |
+| `w_tilt·var(upright)` | 18.2 % |
+| flow + distress + unloaded, combined | **0.9 %** |
+
+**A rare discrete count owns four-fifths of the criterion, and the three gait-quality
+terms the criterion exists to select on own under one percent.** Falls is counted over a
+2 000-tick measured half-window, where its relative variance is enormous.
+
+**★ The second finding is a design law, not a tuning note: the 1/5th-success anneal is
+UNSAFE on a stochastic objective.** Acceptance ran 32–55 % against `target_accept` 0.2,
+so σ was driven **up to the `sigma_max` ceiling on 3 of 4 seeds**. That is the signature
+of a coin flip — a noisy criterion produces ~50 % acceptance, the rule reads it as
+success, and the search *widens* exactly when it should be settling. The classic rule
+assumes a deterministic objective; every self-annealing search over a noisy intrinsic
+criterion in this repo inherits this trap.
+
+**Re-use context (what would make gate 2 answerable):** (1) `eval_window_ticks` far
+above 4 000 — the charter's "≥4 000–6 000" is now *measured* to be too short at noise
+sd ≈ 1.4 vs signal ≈ 0.3; (2) cap the falls term per window or convert it to a rate over
+a long horizon so a Poisson count cannot dominate; (3) accept on `J_cand < J_inc − k·sd`
+rather than a bare inequality, and anneal on improvement magnitude rather than raw accept
+rate; (4) common random numbers across the incumbent/candidate pair so shared noise
+cancels. **Per §3.3 the response is to fix the instrument, not to power a
+sub-noise effect with more seeds.**
+
+**Context that bounds the claim:** over 256 k ticks all four seeds reach the arena floor
+edge (`max_z` 9.9–10.1) and its containment ramps, so an unknown share of `falls` are
+boundary events rather than gait failures — inflating precisely the dominant term. The
+factory body is also genuinely unstable by construction (tilt_sd 0.339, `bellyc_min`
+0.000 — the belly reaches the ground), which is the *hard* version of the question.
+⚠ Note this run used `OGMA_PICRAWLER_CHASSIS_COLLIDE=1`, which `seedavg` does **not**
+set: on the ghost default the belly cannot touch, and with `height_homeo_gain` under
+evolution and no belly term in the criterion the search would have been free to sag for
+nothing. Ghost-chassis history is therefore not directly comparable to these numbers.
+
 ### 2026-08-17 — POST-PLANT SLIP: `DEFERRED` from the GainEvolver's v1 criterion
 
 The charter lists post-plant slip (foot drift while planted) as a criterion ingredient.
