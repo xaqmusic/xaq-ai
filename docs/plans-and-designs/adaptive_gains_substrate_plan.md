@@ -279,6 +279,35 @@ the hard version of the convergence question, not the friendly one.
 moves in defensible directions on the gains that matter most — but *convergence is not
 demonstrated*, and by §3.3 the honest response is to fix the instrument (window length
 and the falls term) rather than to power the effect with more seeds.
+
+### 6.7 Gate 2 RE-RUN (2026-08-17) — the fix works; convergence still not shown
+
+Criterion repaired per §6.5's remedies (falls → guard-only, var → sd, `w_distress` 0,
+window 12 000, acceptance must clear `k·σ̂` estimated from the search's own revert pairs),
+plus `auto_reset_on_outer_wall=1` — the operator's "recenter on the wall", which already
+existed and simply needed enabling. n=4, arena, solid chassis, 500 k ticks, 20 generations.
+
+**Every axis the fix targeted moved the right way:** pooled measurement noise 0.8765 →
+**0.1913**; σ at the ceiling **3/4 → 0/4**; falls' variance share 80.9 % → 0 %; reverts now
+outnumber accepts 2:1 (the margin is biting); falls per 100 k ticks 11.43 → 9.50 and
+tilt_sd 0.339 → 0.239.
+
+**The gate still fails.** Against each seed's own noise: seed 3 fell −0.348 vs 0.143
+(2.4× — the campaign's first *claimable* improvement), seed 4 rose +0.232 vs 0.136, seeds
+1–2 sat inside noise. One win, one loss, two nulls.
+
+**The cost, and the lesson.** `coupling_gain` — gate 2's strongest result at 0 → 2.06 in
+**4/4** seeds — collapsed to **0.61 ± 0.57 with 2/4 seeds leaving it at zero.** The falls
+term was carrying the selection pressure that discovered coupling; `sd(upright)` does not
+reward coordination nearly as hard. **A term can be simultaneously the noisiest thing in a
+criterion and the sole carrier of a real signal; "the noise went down" is not evidence the
+criterion improved.** The next design restores that pressure in a low-variance *form* — a
+continuous near-inversion dwell, `mean(max(0, thresh − upright))`, which is sampled every
+tick and is the actual pre-fall regime — rather than reinstating the Poisson count.
+
+⚠ `net_disp`/`straight` are void in this arm: recentering teleports the body to the
+origin, so displacement cannot accumulate (straight reads 0.01). Falls/tilt are per-tick
+normalised across the differing run lengths (256 k vs 500 k).
 - **Gate 3 ((d)-test):** `OGMA_PICRAWLER_SLICK_LEG=2 OGMA_PICRAWLER_SLICK_AT=200000`
   (leg 2 = cfg `rl` = anatomical REAR-RIGHT) + σ on at tick 1, 400 k ticks, one run.
   Judge migration + **partial** J recovery; demanding full return would over-claim, as

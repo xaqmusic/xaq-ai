@@ -549,6 +549,62 @@ set: on the ghost default the belly cannot touch, and with `height_homeo_gain` u
 evolution and no belly term in the criterion the search would have been free to sag for
 nothing. Ghost-chassis history is therefore not directly comparable to these numbers.
 
+### ★★★ 2026-08-17 — GATE 2 RE-RUN: THE NOISE FIX WORKS, AND IT COST US THE ONE STRONG RESULT
+
+**Verdict: `PARTIAL` (instrument `WORKING`, convergence still not demonstrated).** Same
+arm and protocol as the entry above, now with the repaired criterion (falls → guard-only,
+var → sd, `w_distress` 0, window 4 000 → 12 000, noise-aware acceptance) plus
+`auto_reset_on_outer_wall=1`. n=4, arena, solid chassis, **500 k ticks**, 20 generations.
+
+**The instrument fix is confirmed, on every axis it was designed for:**
+
+| | gate 2 | gate 2 re-run |
+|---|---|---|
+| pooled measurement noise (sd) | 0.8765 | **0.1913** (4.6× lower) |
+| σ pinned at the 0.5 ceiling | **3/4 seeds** | **0/4 seeds** |
+| `falls` share of J variance | 80.9 % | **0 %** (guard-only) |
+| accepts / 20 generations | 14 / 14 / 10 / 17 | 6 / 8 / 7 / 6 |
+| falls per 100 k ticks | 11.43 | **9.50** |
+| tilt_sd | 0.339 | **0.239** |
+
+Reverts now outnumber accepts 2:1 — the margin is biting, which is exactly what a
+noise-aware acceptance rule is supposed to do. Lockstep OK and accepts > 0 on 4/4.
+
+**The gate still does not pass.** Judged against each seed's OWN measured noise:
+seed 3 **J fell −0.348 against noise 0.143** (2.4× — a real improvement, the first one
+this campaign has been able to *claim*); seed 4 rose +0.232 against 0.136; seeds 1 and 2
+sat inside their noise (−0.104 vs 0.290; +0.005 vs 0.113). One clear win, one clear loss,
+two nulls is not convergence.
+
+**★ THE FINDING THAT MATTERS, AND IT IS A WARNING ABOUT NOISE-CLEANING:** gate 2's single
+strongest result was `coupling_gain` 0 → 2.06 with **all four seeds** switching it on —
+the search rediscovering that the legs must be coupled. After the fix it is **0.61 ± 0.57
+with two of four seeds leaving it at zero.** The term we deleted for being 81 % noise was
+also carrying the selection pressure that found coupling: with `falls` in J, an
+uncoordinated body was punished hard enough that turning coupling on paid; with it gone,
+`sd(upright)` does not reward coupling nearly as strongly. **A term can be the noisiest
+thing in a criterion AND the only thing carrying a particular signal. Removing it is not
+free, and "the noise went down" is not by itself evidence the criterion got better.**
+
+**Re-use context / next design, in order:**
+1. **Restore the falls signal in a low-variance FORM rather than as a count.** `sd(upright)`
+   measures wobble about the mean; it does not specifically measure *going toward
+   inverted*. A continuous **near-inversion dwell** — mean over the window of
+   `max(0, thresh − upright)` — is sampled every tick, is the actual pre-fall regime, and
+   should recover the coupling pressure without the Poisson variance.
+2. **Anneal on improvement MAGNITUDE relative to σ̂, not on accept count.** Even with the
+   margin, acceptance held 30–40 % (above the 1/5th target of 0.2) and σ still climbed to
+   0.13–0.40. The classic 20 % target is calibrated for a converged local search; during a
+   genuine improvement phase from a bad start, 40 % acceptance is legitimate. Shrink σ when
+   wins stop being large relative to σ̂ — that is the real signature of convergence.
+3. **More generations.** The search is now progress-limited, not noise-limited: 6–8 accepts
+   in 20 generations is too few to converge an 8-D vector.
+
+⚠ **`net_disp` / `straight` are meaningless in this arm** — outer-wall recentering
+teleports the body to the origin, so displacement no longer accumulates (straight reads
+0.01). Falls and tilt above are per-tick normalised across the two run lengths (256 k vs
+500 k); the raw counts are not comparable.
+
 ### 2026-08-17 — POST-PLANT SLIP: `DEFERRED` from the GainEvolver's v1 criterion
 
 The charter lists post-plant slip (foot drift while planted) as a criterion ingredient.
