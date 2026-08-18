@@ -258,10 +258,10 @@ class _GainRack(_SurfaceWidget):
 class _TermBars(_SurfaceWidget):
     """Weighted criterion contributions — w*term, the thing that moves J."""
 
-    TERMS = [("falls", "falls (guard-only)"), ("tilt_sd", "upright sd"),
-             ("dwell", "near-inversion dwell"),
+    TERMS = [("falls", "falls (guard)"), ("tilt_sd", "upright sd"),
+             ("dwell", "dwell (near-inv)"),
              ("distress_duty", "distress"), ("unloaded_mean", "unloaded"),
-             ("flow_term", "flow"), ("energy", "energy (servo current)")]
+             ("flow_term", "flow"), ("energy", "energy (current)")]
     ROW_H = 22
 
     def __init__(self, parent: QWidget | None = None):
@@ -294,7 +294,7 @@ class _TermBars(_SurfaceWidget):
         finite = [v for v in contrib.values() if v == v]
         top = max(finite) if finite else 1.0
         top = top if top > 1e-9 else 1.0
-        x0, w = 108, self.width()
+        x0, w = 150, self.width()   # fits the longest term label without clipping
         x1 = max(x0 + 30, w - 190)      # room for value + the DEAD callout
         for i, (key, label) in enumerate(self.TERMS):
             y = 22 + i * self.ROW_H

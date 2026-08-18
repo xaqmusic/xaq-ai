@@ -492,6 +492,21 @@ var _qdot_ema: PackedFloat64Array = PackedFloat64Array()          # M0.d.2 smoot
 var _tq_mag_acc: float = 0.0
 var _tq_sat_acc: float = 0.0
 var _tq_n: float = 0.0
+# ---- ENERGY READOUT (HUD) ----------------------------------------------------
+# Servo current is what the battery actually pays, and it is the best-conditioned
+# signal the GainEvolver's criterion has (signal/noise 4.74 vs 0.61 for upright
+# sd).  Three reads, because they answer different questions: `now` is this tick,
+# `peak_1s` is the worst tick inside each one-second window — LATCHED at the
+# window boundary so the number is readable instead of a blur — and `avg` is a
+# slow EMA for the trend.  Peak matters separately from mean: a gait can average
+# cheaply and still spike into servo saturation, which is what burns hardware.
+const ENERGY_PEAK_WINDOW_TICKS: int = 50    # 1 s at the 50 Hz brain tick
+const ENERGY_EMA_ALPHA: float = 0.01        # ~2 s trend
+var energy_now: float = 0.0
+var energy_peak_1s: float = 0.0
+var energy_avg: float = 0.0
+var _energy_peak_acc: float = 0.0
+var _energy_sec_ticks: int = 0
 var _sensor_noise_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
@@ -6690,11 +6705,22 @@ func _step_one() -> void:
 	#             arm exerting far MORE ground force than the deployed gait ever did)
 	#   tq_sat  — is the servo pinned?  Distinguishes "the controller is not using available
 	#             authority" (our bug, fixable) from "the authority is not there" (hardware).
+	var _e_sum: float = 0.0
 	for _ti in range(jtorque.size()):
 		var _ta: float = absf(jtorque[_ti])
 		_tq_mag_acc += _ta
+		_e_sum += _ta
 		if _ta > 0.95: _tq_sat_acc += 1.0
 		_tq_n += 1.0
+	# Per-tick mean |torque| -> now / 1 s peak / slow average (see the block above).
+	energy_now = _e_sum / maxf(1.0, float(jtorque.size()))
+	_energy_peak_acc = maxf(_energy_peak_acc, energy_now)
+	energy_avg = energy_avg + ENERGY_EMA_ALPHA * (energy_now - energy_avg)
+	_energy_sec_ticks += 1
+	if _energy_sec_ticks >= ENERGY_PEAK_WINDOW_TICKS:
+		energy_peak_1s = _energy_peak_acc
+		_energy_peak_acc = 0.0
+		_energy_sec_ticks = 0
 
 	# Phase 7.13 v4.2 — body-state signal for CruseCoordinator gating.
 	# chassis_y_norm in [0, 1].  CruseCoordinator subscribes optionally and
@@ -11121,6 +11147,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 												 _chassis.global_transform.origin.z)).length()
 	line["target_dist"]              = snappedf(target_dist, 0.001)
 	# 2026-06-13 — panic pathway GATE 0: distress telemetry (observe-only).
+	# ENERGY (servo current) — the same three reads the HUD shows, mirrored here so
+	# the trend is analysable offline and so "the HUD number is alive" is verifiable
+	# from a headless run rather than only by eye.
+	line["e_now"]  = snappedf(energy_now, 0.0001)
+	line["e_peak"] = snappedf(energy_peak_1s, 0.0001)
+	line["e_avg"]  = snappedf(energy_avg, 0.0001)
 	line["stuck_deficit"]            = snappedf(_stuck_deficit, 0.001)
 	line["distress"]                 = snappedf(_distress, 0.001)
 	if vision_steer:
