@@ -36,7 +36,7 @@ constexpr int   kAcceptLogMax = 24;
 } // namespace
 
 void GainEvolver::WindowStats::reset(int n_legs) {
-    falls = 0; up_sum = up_sq = 0.0; meas_n = distress_hits = 0; flow_q_sum = 0.0;
+    falls = 0; up_sum = up_sq = dwell_sum = 0.0; meas_n = distress_hits = 0; flow_q_sum = 0.0;
     td.assign(size_t(n_legs), 0); unloaded.assign(size_t(n_legs), 0);
 }
 
@@ -105,7 +105,7 @@ ParamSchema GainEvolver::params_schema() const {
          ParamValue{int64_t(0)}, std::nullopt, std::nullopt},
         {"warmup_ticks", ParamMutability::ConstructionOnly,
          "Ticks before the first incumbent window (body stand-up + EMA settling).",
-         ParamValue{int64_t(1500)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
+         ParamValue{int64_t(10000)}, ParamValue{int64_t(0)}, ParamValue{int64_t(1000000)}},
         {"eval_window_ticks", ParamMutability::ConstructionOnly,
          "Ticks per evaluation window; continuous terms measure the BACK HALF only. Gate 2 MEASURED 4000 to be far too short (noise sd 1.4 vs signal 0.3); with the post-gate-2 criterion ~11k suffices, so the default is 12000.",
          ParamValue{int64_t(12000)}, ParamValue{int64_t(200)}, ParamValue{int64_t(1000000)}},
@@ -131,6 +131,15 @@ ParamSchema GainEvolver::params_schema() const {
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
         {"w_flow", ParamMutability::HotMutable, "weight: (1 − flow_quality), flow = magnitude × predictability of fwd flow.",
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"w_dwell", ParamMutability::HotMutable,
+         "weight on NEAR-INVERSION DWELL = mean(max(0, dwell_thresh - upright)) over the measured region. SHIPS AT 0: measured against the gate-2b logs it is WORSE than sd(upright) (window noise/mean 5.5-5.9 vs 1.93) because instability is bursty and autocorrelated — a rare-event signal in continuous clothing. Built and instrumented at full per-tick resolution so its weight can be decided on real data rather than a 60-tick-sampled proxy.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"dwell_thresh", ParamMutability::HotMutable,
+         "upright below this counts as leaning dangerously (0.9 ~ 26 deg off vertical). Fires on ~3.4% of ticks at 0.9, ~1.1% at 0.7 — higher threshold samples more often and is better conditioned.",
+         ParamValue{0.9}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"settle_ticks", ParamMutability::ConstructionOnly,
+         "Ticks of settling at the head of each window, excluded from measurement. 0 = the legacy back-half rule. Measured: |tilt| shows no settling trend and fwd_v settles by ~2000-2500 ticks, so back-half-of-12000 was discarding 4000 usable ticks per window.",
+         ParamValue{int64_t(0)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
         {"accept_k", ParamMutability::HotMutable,
          "Accept only when J_cand < J_inc − accept_k·sigma_hat, where sigma_hat is the criterion's OWN measured per-window noise (estimated from revert pairs). 0 = legacy bare inequality, which on a stochastic criterion accepts ~50% by coin flip and drives the 1/5th anneal to the sigma ceiling (gate 2, 3/4 seeds).",
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{10.0}},
@@ -215,6 +224,9 @@ ParamMap GainEvolver::current_params() const {
     m["w_distress"] = w_distress_;
     m["w_unloaded"] = w_unloaded_;
     m["w_flow"]     = w_flow_;
+    m["w_dwell"]    = w_dwell_;
+    m["dwell_thresh"] = dwell_thresh_;
+    m["settle_ticks"] = settle_ticks_;
     m["accept_k"]    = accept_k_;
     m["noise_min_n"] = noise_min_n_;
     m["noise_alpha"] = noise_alpha_;
@@ -265,9 +277,11 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "warmup_ticks",      [&](auto const& v){ warmup_ticks_      = get_int(v, "warmup_ticks"); });
     apply_param(params, "eval_window_ticks", [&](auto const& v){ eval_window_ticks_ = get_int(v, "eval_window_ticks"); });
     apply_param(params, "republish_every",   [&](auto const& v){ republish_every_   = get_int(v, "republish_every"); });
+    apply_param(params, "settle_ticks",      [&](auto const& v){ settle_ticks_      = get_int(v, "settle_ticks"); });
     for (auto const& [key, member] : std::initializer_list<std::pair<char const*, double*>>{
              {"w_falls", &w_falls_}, {"w_tilt_sd", &w_tilt_sd_}, {"w_distress", &w_distress_},
              {"w_unloaded", &w_unloaded_}, {"w_flow", &w_flow_},
+             {"w_dwell", &w_dwell_}, {"dwell_thresh", &dwell_thresh_},
              {"accept_k", &accept_k_}, {"noise_alpha", &noise_alpha_},
              {"viability_load_tol", &viability_load_tol_},
              {"upright_fall_thresh", &upright_fall_thresh_},
@@ -376,7 +390,8 @@ void GainEvolver::on_param_change(std::string_view key, ParamValue const& value)
     struct DKey { char const* k; double* m; };
     for (auto const& d : {DKey{"w_falls", &w_falls_}, DKey{"w_tilt_sd", &w_tilt_sd_},
                           DKey{"w_distress", &w_distress_}, DKey{"w_unloaded", &w_unloaded_},
-                          DKey{"w_flow", &w_flow_}, DKey{"accept_k", &accept_k_},
+                          DKey{"w_flow", &w_flow_}, DKey{"w_dwell", &w_dwell_},
+                          DKey{"dwell_thresh", &dwell_thresh_}, DKey{"accept_k", &accept_k_},
                           DKey{"noise_alpha", &noise_alpha_},
                           DKey{"viability_load_tol", &viability_load_tol_},
                           DKey{"upright_fall_thresh", &upright_fall_thresh_},
@@ -457,9 +472,10 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
         // and made the term a rare-event count in disguise (gate 2).
         t.tilt_sd       = std::sqrt(std::max(0.0, w.up_sq / double(w.meas_n) - mean * mean));
         t.distress_duty = double(w.distress_hits) / double(w.meas_n);
+        t.dwell         = w.dwell_sum / double(w.meas_n);
         t.flow_term     = 1.0 - w.flow_q_sum / double(w.meas_n);
     } else {
-        t.tilt_sd = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0;
+        t.tilt_sd = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0; t.dwell = 0.0;
     }
     double unl_sum = 0.0;
     for (int l = 0; l < n_legs_; ++l) {
@@ -471,7 +487,7 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
     t.unloaded_mean = n_legs_ > 0 ? unl_sum / double(n_legs_) : 0.0;
     t.loaded_min    = per_leg_loaded_min(w);
     t.J = w_falls_ * t.falls + w_tilt_sd_ * t.tilt_sd + w_distress_ * t.distress_duty
-        + w_unloaded_ * t.unloaded_mean + w_flow_ * t.flow_term;
+        + w_unloaded_ * t.unloaded_mean + w_flow_ * t.flow_term + w_dwell_ * t.dwell;
     t.valid = true;
     return t;
 }
@@ -560,7 +576,9 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
         fall_below_run_ = 0;
     }
 
-    bool back_half = (phase_ != Phase::Warmup) && (win_tick_ >= eval_window_ticks_ / 2);
+    int64_t settle = settle_ticks_ > 0 ? settle_ticks_ : eval_window_ticks_ / 2;
+    if (settle >= eval_window_ticks_) settle = eval_window_ticks_ / 2;   // never measure nothing
+    bool back_half = (phase_ != Phase::Warmup) && (win_tick_ >= settle);
     for (int l = 0; l < n_legs_; ++l) {
         size_t i = size_t(l);
         bool was = contact_prev_[i] > 0.5f, now = foot_contact_[i] > 0.5f;
@@ -588,6 +606,8 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
         cur_.up_sq  += double(upright_) * double(upright_);
         ++cur_.meas_n;
         if (distress_ > float(distress_thresh_)) ++cur_.distress_hits;
+        if (double(upright_) < dwell_thresh_)
+            cur_.dwell_sum += dwell_thresh_ - double(upright_);
         double fq = std::clamp(double(flow_ema_), 0.0, flow_vel_norm_) / flow_vel_norm_;
         cur_.flow_q_sum += fq / (1.0 + flow_vol_k_ * double(flow_vol_ema_));
     }
@@ -666,12 +686,12 @@ nlohmann::json GainEvolver::snapshot_state() const {
     auto stats = [](WindowStats const& w) {
         return nlohmann::json{{"falls", w.falls}, {"up_sum", w.up_sum}, {"up_sq", w.up_sq},
                               {"meas_n", w.meas_n}, {"distress_hits", w.distress_hits},
-                              {"flow_q_sum", w.flow_q_sum}, {"td", w.td}, {"unloaded", w.unloaded}};
+                              {"flow_q_sum", w.flow_q_sum}, {"dwell_sum", w.dwell_sum}, {"td", w.td}, {"unloaded", w.unloaded}};
     };
     mod["cur"]       = stats(cur_);
     mod["inc_stats"] = stats(inc_stats_);
     auto terms = [](Terms const& t) {
-        return nlohmann::json{{"falls", t.falls}, {"tilt_sd", t.tilt_sd},
+        return nlohmann::json{{"falls", t.falls}, {"tilt_sd", t.tilt_sd}, {"dwell", t.dwell},
                               {"distress_duty", t.distress_duty}, {"unloaded_mean", t.unloaded_mean},
                               {"flow_term", t.flow_term}, {"loaded_min", t.loaded_min},
                               {"J", t.J}, {"valid", t.valid}};
@@ -726,7 +746,7 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
         w.falls = j.value("falls", 0);
         w.up_sum = j.value("up_sum", 0.0); w.up_sq = j.value("up_sq", 0.0);
         w.meas_n = j.value("meas_n", int64_t(0)); w.distress_hits = j.value("distress_hits", int64_t(0));
-        w.flow_q_sum = j.value("flow_q_sum", 0.0);
+        w.flow_q_sum = j.value("flow_q_sum", 0.0); w.dwell_sum = j.value("dwell_sum", 0.0);
         if (j.contains("td"))       w.td       = j["td"].get<std::vector<int>>();
         if (j.contains("unloaded")) w.unloaded = j["unloaded"].get<std::vector<int>>();
     };
@@ -734,6 +754,7 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
     if (mod.contains("inc_stats")) stats(mod["inc_stats"], inc_stats_);
     auto terms = [](nlohmann::json const& j, Terms& t) {
         t.falls = j.value("falls", 0.0); t.tilt_sd = j.value("tilt_sd", 0.0);
+        t.dwell = j.value("dwell", 0.0);
         t.distress_duty = j.value("distress_duty", 0.0); t.unloaded_mean = j.value("unloaded_mean", 0.0);
         t.flow_term = j.value("flow_term", 0.0); t.loaded_min = j.value("loaded_min", 0.0);
         t.J = j.value("J", 0.0); t.valid = j.value("valid", false);
@@ -767,6 +788,7 @@ nlohmann::json GainEvolver::metrics() const {
     m["J_cand"]     = cand_terms_.valid ? cand_terms_.J : -1.0;
     m["falls"]         = inc_terms_.falls;
     m["tilt_sd"]       = inc_terms_.tilt_sd;
+    m["dwell"]         = inc_terms_.dwell;
     m["distress_duty"] = inc_terms_.distress_duty;
     m["unloaded_mean"] = inc_terms_.unloaded_mean;
     m["flow_term"]     = inc_terms_.flow_term;
@@ -797,7 +819,7 @@ nlohmann::json GainEvolver::diag_snapshot() const {
     // CONTRIBUTION to J (w*term) rather than its raw value — a large raw term
     // with a small weight decides nothing, and that distinction is exactly what
     // "is this term dead?" asks.
-    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_sd", w_tilt_sd_},
+    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_sd", w_tilt_sd_}, {"dwell", w_dwell_},
                                   {"distress_duty", w_distress_},
                                   {"unloaded_mean", w_unloaded_}, {"flow_term", w_flow_}};
     nlohmann::json ct;

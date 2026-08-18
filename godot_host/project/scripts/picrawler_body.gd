@@ -11080,6 +11080,11 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
 			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
 			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
+			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it
+			# ships at weight 0: the 60-tick body-log proxy that measured it as WORSE
+			# than sd(upright) inflated its noise ~1.4x, so this is the data that
+			# decides its weight honestly.
+			line["ge_dwell"] = snappedf(float(_ge.get("dwell", 0.0)), 0.000001)
 			# Noise-aware acceptance (post-gate-2): sigma_hat is estimated from the
 			# search's own revert pairs and the margin is what a candidate must
 			# actually beat.  ge_sig_e == 0 with ge_nn > 0 would mean the estimator

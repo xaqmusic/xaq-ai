@@ -259,6 +259,7 @@ class _TermBars(_SurfaceWidget):
     """Weighted criterion contributions — w*term, the thing that moves J."""
 
     TERMS = [("falls", "falls (guard-only)"), ("tilt_sd", "upright sd"),
+             ("dwell", "near-inversion dwell"),
              ("distress_duty", "distress"), ("unloaded_mean", "unloaded"),
              ("flow_term", "flow")]
     ROW_H = 22

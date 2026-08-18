@@ -523,3 +523,48 @@ TEST(GainEvolver, DeprecatedTiltVarKeyThrows) {
     p["w_tilt_var"] = 5.0;
     EXPECT_THROW(ge.on_setup(&bus, p), std::invalid_argument);
 }
+
+// ---- dwell term + explicit settle window ------------------------------------
+
+TEST(GainEvolver, DwellTermMeasuresNearInversionDepth) {
+    // dwell = mean(max(0, thresh - upright)) over the MEASURED region only.
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.0);   // observer: just score a window
+    p["w_dwell"] = 1.0;  p["dwell_thresh"] = 0.9;
+    p["w_distress"] = 0.0;
+    p["settle_ticks"] = int64_t{100};        // measure ticks 100..199 of a 200 window
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    Feed lean; lean.upright = 0.5f;          // 0.4 below the 0.9 threshold
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    run_ticks(bus, ge, t, kWindow, lean);
+    EXPECT_NEAR(metric_d(ge, "dwell"), 0.4, 1e-3);
+
+    // An upright body never accumulates dwell.
+    ogma::InProcessBus bus2;
+    ogma::GainEvolver ge2;
+    ge2.on_setup(&bus2, p);
+    uint64_t t2 = 0;
+    run_ticks(bus2, ge2, t2, kWarmup, Feed{});
+    run_ticks(bus2, ge2, t2, kWindow, Feed{});   // upright = 1.0
+    EXPECT_NEAR(metric_d(ge2, "dwell"), 0.0, 1e-9);
+}
+
+TEST(GainEvolver, SettleTicksExcludesTheHeadOfTheWindow) {
+    // With settle_ticks=150 of a 200-tick window, only ticks 150..199 are
+    // measured — a disturbance confined to the head must NOT be scored.
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.0);
+    p["w_dwell"] = 1.0;  p["dwell_thresh"] = 0.9;  p["w_distress"] = 0.0;
+    p["settle_ticks"] = int64_t{150};
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    Feed lean; lean.upright = 0.5f;
+    run_ticks(bus, ge, t, 150, lean);        // head: leaning, must be ignored
+    run_ticks(bus, ge, t, 50, Feed{});       // measured tail: upright
+    EXPECT_NEAR(metric_d(ge, "dwell"), 0.0, 1e-9)
+        << "settling ticks must not reach the criterion";
+}

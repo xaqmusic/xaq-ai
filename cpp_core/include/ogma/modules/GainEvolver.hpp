@@ -110,7 +110,7 @@ private:
     // whole window (rare, discrete, attributable to the vector under test).
     struct WindowStats {
         int      falls = 0;
-        double   up_sum = 0.0, up_sq = 0.0;
+        double   up_sum = 0.0, up_sq = 0.0, dwell_sum = 0.0;
         int64_t  meas_n = 0, distress_hits = 0;
         double   flow_q_sum = 0.0;
         std::vector<int> td, unloaded;      // per-leg touchdowns / unloaded verdicts
@@ -118,7 +118,7 @@ private:
     };
     // A scored window, kept for diag + the guard comparison.
     struct Terms {
-        double falls = 0, tilt_sd = 0, distress_duty = 0,
+        double falls = 0, tilt_sd = 0, dwell = 0, distress_duty = 0,
                unloaded_mean = 0, flow_term = 0, loaded_min = 0, J = 0;
         bool   valid = false;
     };
@@ -154,7 +154,13 @@ private:
 
     // ---- timing / loop params ------------------------------------------------
     int     n_legs_            = 4;
-    int64_t warmup_ticks_      = 1500;
+    int64_t warmup_ticks_      = 10000;
+    // Ticks of SETTLING at the head of each window, excluded from measurement.
+    // 0 = the legacy back-half rule.  Measured from the gate-2b logs: |tilt| shows
+    // no settling trend at all and fwd_v settles by ~2000-2500 ticks, so
+    // back-half-of-12000 was discarding 4000 usable ticks per window — the
+    // operator's own read from watching the arena, confirmed in the data.
+    int64_t settle_ticks_      = 0;
     int64_t eval_window_ticks_ = 12000;   // 4000 measured too short (gate 2)
     int64_t seed_              = 0;       // OGMA_SEED override rewrites "seed"
     int64_t republish_every_   = 0;       // 0 = publish on window boundaries only
@@ -177,6 +183,19 @@ private:
                                 // (world-frame stall half + a 50-vs-240Hz bug)
     double w_unloaded_ = 1.0;
     double w_flow_     = 1.0;
+    // NEAR-INVERSION DWELL: mean(max(0, dwell_thresh - upright)) over the
+    // measured region — how deeply and how long the body dwelt toward inverted.
+    // SHIPS AT WEIGHT 0, deliberately.  It was proposed to recover the coupling
+    // selection pressure that `falls` used to supply, but measured against the
+    // gate-2b logs it is WORSE than the term it would join: window-level
+    // noise/mean 5.5-5.9 vs sd(upright)'s 1.93.  Instability is bursty and
+    // autocorrelated, so averaging it over a window does not tame it — it is a
+    // rare-event signal in continuous clothing.  It is built and INSTRUMENTED
+    // at full per-tick resolution (the estimate above came from 60-tick body-log
+    // sampling, which inflates its apparent noise ~1.4x) so the next run decides
+    // its weight on real data instead of a proxy.
+    double w_dwell_     = 0.0;
+    double dwell_thresh_ = 0.9;   // upright below this = leaning dangerously (~26 deg)
 
     // ---- guard + detector params (HotMutable) --------------------------------
     // Noise-aware acceptance.  A bare J_cand < J_inc on a stochastic criterion
