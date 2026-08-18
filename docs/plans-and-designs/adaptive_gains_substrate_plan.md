@@ -373,3 +373,103 @@ rests on measurement rather than the estimate.
 and the two converged seeds settled LOW on it. A better-conditioned general criterion did
 not restore what the noisy falls term used to supply — coupling needs its own mechanism,
 and the standing candidate is a lexicographic viability-then-quality ordering.
+
+---
+
+## 7. Landing the GainEvolver — the closing plan (2026-08-18)
+
+**Goal: a GainEvolver that is *working*, not merely built.** Everything to date says the
+instrument is sound; nothing yet says the capability is real. This section is the shortest
+path from here to a defensible verdict.
+
+### 7.1 The bar — what "working" has to mean
+
+Four things, and none of them is "the code runs":
+
+1. **Gate 2 convincing at power** — the vector walks toward the hand-found point and the
+   criterion falls beyond its own noise on **most** seeds, not 2/4.
+2. **Gate 3, the (d)-test** — the charter's headline evidence, and **still unrun**:
+   perturb mid-run, watch the criterion degrade, the vector migrate, and behavior recover
+   *with no external input*. This is "settle AND remain adaptable" shown in one run, and it
+   is the single most persuasive artifact this phase can produce.
+3. **Job #1 delivered** — the 3/20 falls tail erased without giving back the loaded rear
+   touchdowns, judged at **n≥20** (§3.3: n=4 is a signal, not a finding).
+4. **The operator's eye** on the settled operating point, in the arena.
+
+### 7.2 The blocker, stated precisely
+
+`coupling_gain` is not reliably discovered (1.46 / 0.00 / 0.56 / 0.27), and the two seeds
+that *converged* settled LOW on it. Under the original noisy criterion it went 0 → 2.06 in
+**4/4**. This matters more than any other open item: coupling is the largest behavioral
+lever in the vector, and a search that cannot find it is optimising around a hole.
+
+**There are three candidate explanations and they demand different fixes**, so guessing is
+the expensive path:
+
+- **(a) The criterion is blind to coordination.** Coupling's benefit may be almost entirely
+  *catastrophe avoidance* — which is exactly the signal that left J for the guard.
+- **(b) The search cannot reach it.** 8-D, ~60 generations, and the margin rejecting most
+  candidates: coupling may simply be under-sampled.
+- **(c) Coupling does not belong in the vector at all.** The charter already says anything
+  unlisted stays a hand knob. **A gain the criterion cannot sense should not be searched:**
+  it adds a blind dimension whose wandering injects noise into every comparison, so a 7-D
+  search with a hand-set coupling could beat an 8-D one that gropes.
+
+### 7.3 Step 0 — DIAGNOSE FIRST (cheap, decisive, ~30 min)
+
+The ledger's own rule: *"before building a lever, measure whether the actuator has
+AUTHORITY over the target variable. A consumer-fired check proves the code runs; an
+authority check proves it can matter."* Applied inward, to the criterion:
+
+**Does J respond to `coupling_gain` at all?** `coupling_gain` is HotMutable, so one run per
+seed suffices: hold the evolver in **observer mode (σ=0)** so it scores without searching,
+and step coupling through {0, 0.4, 0.8, 1.2, 1.6, 2.0} with `OGMA_PICRAWLER_SETPARAM_AT`,
+one evaluation window per value. Ascending on half the seeds, descending on the other half,
+so order effects and hysteresis are visible rather than baked in.
+
+Read out: `corr(coupling, J)` and **`corr(coupling, each term)`** — plus falls and
+`ge_alarm` per level, which is the direct test of hypothesis (a).
+
+- **J moves with coupling** ⇒ the criterion can see it; the problem is search reach → (b).
+- **J is flat but FALLS drop with coupling** ⇒ (a) confirmed: the benefit is catastrophe
+  avoidance, and the fix is the lexicographic viability-then-quality ordering, because a
+  threshold survives the variance that ruins falls as a gradient.
+- **Neither moves** ⇒ (c): drop coupling from the vector, set it by hand, and say so.
+
+⚠ **Fix the bound mismatch while here.** The evolver's `gain_max` for coupling is **3.0**
+but MotorEPMv2's own schema documents max **2.0** — and `set_param` does *not* enforce
+schema ranges (gate 2 drove it to 3.000 with `ga_rej` 0). Either the schema max is stale or
+the search bound is too generous; they must agree before any coupling verdict is trusted.
+
+### 7.4 The fork — operator's call, *after* Step 0 returns
+
+Step 0 chooses between: **lexicographic guard** (viability first, then quality — the
+standing candidate), **more search** (fewer dimensions or more generations), or **shrink the
+vector** and hand-set coupling. Each is a small build; none should be started before the
+measurement.
+
+### 7.5 Then, in order
+
+1. **Rebalance `w_energy` 8.0 → 4–5.** Energy currently takes 56.4 % of decision variance;
+   the weight was only ever meant to equalise its *signal* with `sd(upright)`'s. Folds into
+   the next run at no extra cost.
+2. **Gate 2 final** — n=4, with the Step-0 fix and the rebalance. Bar: ≥3/4 seeds falling
+   beyond their own noise, 0/4 rising, and coupling either found or honestly out of scope.
+3. **Gate 3 — the (d)-test.** One run per seed, `OGMA_PICRAWLER_SLICK_LEG=2` +
+   `OGMA_PICRAWLER_SLICK_AT` mid-run. Judge **migration + PARTIAL recovery**; demanding full
+   return would over-claim, since the friction loss is permanent.
+4. **Job #1 at n≥20.** Evolver from the baked point, operator picks the settled vector off
+   `[U]`, re-bake, `seedavg.py <baked> 20 12000 0.3` including seeds 3 and 12. Accept iff
+   the tail shrinks with `rlt`/`rpt` held and per-leg loaded minima not below baseline−tol.
+5. **Operator's eye**, arena, then ledger + PR.
+
+### 7.6 What would make this fail, and the honest exits
+
+- **Coupling proves unfindable and unfixable.** Then the honest result is a *7-gain*
+  evolver plus a hand-set coupling, reported as such. That is still a working GainEvolver;
+  it is not a failure, and pretending the 8th dimension works would be.
+- **The (d)-test shows migration but no recovery.** Report migration alone — it is a real
+  half-result, and the charter's claim is adaptability, not restoration.
+- **n≥20 washes out the n=4 signal.** Expected often enough to plan for: §3.3 says a real
+  capability is LOUD. If job #1 needs n=20 to see, prefer killing the operating point and
+  finding a bigger effect over powering a marginal one.
