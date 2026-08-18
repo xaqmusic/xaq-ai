@@ -52,6 +52,7 @@ ParamMap ge_params(double sigma = 0.1) {
     p["foot_load_topic"]  = std::string("t.load");
     p["foot_contact_topic"] = std::string("t.contact");
     p["imu_topic"]        = std::string("t.imu");
+    p["torque_topic"]     = std::string("t.torque");
     p["n_legs"]           = int64_t{4};
     p["seed"]             = int64_t{99};
     p["warmup_ticks"]     = kWarmup;
@@ -67,6 +68,7 @@ ParamMap ge_params(double sigma = 0.1) {
     p["w_distress"] = 1.0;      // <- the term these tests drive
     p["w_unloaded"] = 0.0;
     p["w_flow"]     = 0.0;
+    p["w_energy"]   = 0.0;      // loop tests drive distress only
     p["accept_k"]   = 0.0;      // bare inequality; the margin has its own tests
     p["fall_debounce_ticks"] = int64_t{10};
     p["touchdown_horizon_ticks"] = int64_t{8};
@@ -80,6 +82,7 @@ struct Feed {
     float upright = 1.0f;
     float distress = 0.0f;
     float fwd_v = 0.03f;
+    float torque = 0.4f;
     std::array<float, 4> load{0.5f, 0.5f, 0.5f, 0.5f};
     bool  cycle_contact = true;
 };
@@ -98,6 +101,7 @@ void ev_tick(ogma::InProcessBus& bus, ogma::GainEvolver& ge, uint64_t t, Feed co
     pub("t.load", {f.load[0], f.load[1], f.load[2], f.load[3]});
     pub("t.contact", {c, c, c, c});
     pub("t.imu", {0.0f, 1.0f, f.fwd_v, 0.0f});
+    pub("t.torque", std::vector<float>(12, f.torque));
     ge.tick(t);
     bus.end_tick();
 }
@@ -567,4 +571,87 @@ TEST(GainEvolver, SettleTicksExcludesTheHeadOfTheWindow) {
     run_ticks(bus, ge, t, 50, Feed{});       // measured tail: upright
     EXPECT_NEAR(metric_d(ge, "dwell"), 0.0, 1e-9)
         << "settling ticks must not reach the criterion";
+}
+
+
+// ---- energy term + the operator's falls alarm --------------------------------
+
+TEST(GainEvolver, EnergyTermTracksMeanJointTorque) {
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.0);
+    p["w_energy"] = 1.0; p["w_distress"] = 0.0;
+    p["settle_ticks"] = int64_t{100};
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    Feed f; f.torque = 0.25f;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    run_ticks(bus, ge, t, kWindow, f);
+    EXPECT_NEAR(metric_d(ge, "energy"), 0.25, 1e-3);
+}
+
+TEST(GainEvolver, LowerEnergyIsPreferredWhenNothingElseDiffers) {
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params();
+    p["w_energy"] = 1.0; p["w_distress"] = 0.0;
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    Feed hi; hi.torque = 0.6f;
+    Feed lo; lo.torque = 0.2f;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    run_ticks(bus, ge, t, kWindow, hi);     // incumbent burns more
+    run_ticks(bus, ge, t, kWindow, lo);     // candidate is cheaper -> accept
+    EXPECT_EQ(metric_i(ge, "accepts"), 1);
+}
+
+TEST(GainEvolver, FallAlarmDecaysAndOnlyEverTightens) {
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params();
+    p["fall_alarm_on"]  = 1.5;
+    p["fall_alarm_tau"] = 2000.0;
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    EXPECT_NEAR(metric_d(ge, "fall_alarm"), 0.0, 1e-9);
+    EXPECT_EQ(metric_i(ge, "alarm_on"), 0);
+
+    // Repeated falls accumulate past the threshold and trip the alarm.
+    Feed down; down.upright = -0.5f;
+    for (int i = 0; i < 4; ++i) {
+        run_ticks(bus, ge, t, 20, down);     // > debounce(10) -> one fall each
+        run_ticks(bus, ge, t, 20, Feed{});   // recover (upright clears the latch)
+    }
+    EXPECT_GT(metric_d(ge, "fall_alarm"), 1.5);
+    EXPECT_EQ(metric_i(ge, "alarm_on"), 1);
+
+    // ...and it decays away when the falling stops, so a sporadic faller is
+    // never held under a tightened guard forever.
+    run_ticks(bus, ge, t, 8000, Feed{});
+    EXPECT_LT(metric_d(ge, "fall_alarm"), 1.5);
+    EXPECT_EQ(metric_i(ge, "alarm_on"), 0);
+}
+
+TEST(GainEvolver, AlarmDisabledByDefaultIsByteIdenticalToNoAlarm) {
+    // fall_alarm_on defaults to 0 => the guard must behave exactly as before.
+    auto run = [](double alarm_on) {
+        ogma::InProcessBus bus;
+        ogma::GainEvolver ge;
+        ParamMap p = ge_params();
+        p["fall_alarm_on"] = alarm_on;
+        ge.on_setup(&bus, p);
+        uint64_t t = 0;
+        Feed good; good.distress = 0.0f;
+        Feed bad;  bad.distress = 1.0f;
+        run_ticks(bus, ge, t, kWarmup, Feed{});
+        for (int g = 0; g < 3; ++g) {
+            run_ticks(bus, ge, t, kWindow, bad);
+            run_ticks(bus, ge, t, kWindow, good);
+        }
+        return ge.snapshot_state()["module"]["incumbent"].dump();
+    };
+    EXPECT_EQ(run(0.0), run(0.0));
+    // With no falls at all the alarm never trips, so enabling it changes nothing.
+    EXPECT_EQ(run(0.0), run(2.0));
 }

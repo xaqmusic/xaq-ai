@@ -261,7 +261,7 @@ class _TermBars(_SurfaceWidget):
     TERMS = [("falls", "falls (guard-only)"), ("tilt_sd", "upright sd"),
              ("dwell", "near-inversion dwell"),
              ("distress_duty", "distress"), ("unloaded_mean", "unloaded"),
-             ("flow_term", "flow")]
+             ("flow_term", "flow"), ("energy", "energy (servo current)")]
     ROW_H = 22
 
     def __init__(self, parent: QWidget | None = None):
@@ -499,6 +499,8 @@ class GainEvolverInspector(QWidget):
             f"<span style='color:{CRIT}'>{rev} reverted</span> &nbsp;·&nbsp; "
             f"J_inc {jin:.4f} &nbsp; J_cand {'—' if jca < 0 else f'{jca:.4f}'} &nbsp;·&nbsp; "
             f"per-leg loaded min {minld:.3f} &nbsp;·&nbsp; "
+            f"{'<b style=\'color:#d1544f\'>FALL ALARM</b> ' if int(_fl(s.get('alarm_on'),0) or 0) else ''}"
+            f"alarm {_fl(s.get('fall_alarm'), 0.0):.2f} &nbsp;·&nbsp; "
             f"margin {_fl(s.get('accept_margin'), 0.0):.4f} "
             f"<span style='color:{INK_MUTED}'>(σ̂ {_fl(s.get('sigma_est'), 0.0):.4f}, "
             f"n={int(_fl(s.get('noise_n'), 0) or 0)})</span> &nbsp;·&nbsp; "

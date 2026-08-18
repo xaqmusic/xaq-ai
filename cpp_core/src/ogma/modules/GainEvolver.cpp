@@ -36,7 +36,7 @@ constexpr int   kAcceptLogMax = 24;
 } // namespace
 
 void GainEvolver::WindowStats::reset(int n_legs) {
-    falls = 0; up_sum = up_sq = dwell_sum = 0.0; meas_n = distress_hits = 0; flow_q_sum = 0.0;
+    falls = 0; up_sum = up_sq = dwell_sum = torque_sum = 0.0; meas_n = distress_hits = 0; flow_q_sum = 0.0;
     td.assign(size_t(n_legs), 0); unloaded.assign(size_t(n_legs), 0);
 }
 
@@ -48,7 +48,7 @@ std::string_view GainEvolver::type_name() const { return "GainEvolver"; }
 std::vector<TopicSpec> GainEvolver::input_topics() const {
     std::vector<TopicSpec> v;
     for (auto const* t : {&upright_topic_, &distress_topic_, &foot_load_topic_,
-                          &foot_contact_topic_, &imu_topic_})
+                          &foot_contact_topic_, &imu_topic_, &torque_topic_})
         if (!t->empty())
             v.emplace_back(*t, std::type_index(typeid(ProprioToken)),
                            SubscriptionKind::Direct, /*required=*/false);
@@ -131,6 +131,18 @@ ParamSchema GainEvolver::params_schema() const {
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
         {"w_flow", ParamMutability::HotMutable, "weight: (1 − flow_quality), flow = magnitude × predictability of fwd flow.",
          ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"torque_topic", ParamMutability::ConstructionOnly,
+         "Per-servo load (reality.proprio.joint_torque): 12 floats normalized to MAX_SERVO_TORQUE. Servo current sensing — the audit's 'REAL LOAD SIGNAL', and on hardware this is battery current.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"w_energy", ParamMutability::HotMutable,
+         "weight on ENERGY = mean |joint torque| over the measured region. Measured on the gate-2b windows: signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57 — ~8x better discrimination than anything else in this criterion, largely independent of it (corr -0.125), and agreeing with the flow term (+0.123) rather than fighting it. Default 8.0 equalizes its SIGNAL with sd(upright)'s at ~1/60th the noise. WARNING: the freeze trap is not disproven (no observed window held a frozen body) — flow is the counterweight and the per-leg minima guard blocks killing a leg to save current.",
+         ParamValue{8.0}, ParamValue{0.0}, ParamValue{1000.0}},
+        {"fall_alarm_tau", ParamMutability::HotMutable,
+         "Decay time constant (ticks) of the leaky fall accumulator. Long enough that several falls must land inside it to trip the alarm, so an adventurous body that falls sporadically never does.",
+         ParamValue{50000.0}, ParamValue{100.0}, ParamValue{10000000.0}},
+        {"fall_alarm_on", ParamMutability::HotMutable,
+         "Alarm level above which the viability guard demands a strict REDUCTION in falls instead of merely no regression. 0 = DISABLED (ships inert). The alarm can only ever TIGHTEN acceptance, never loosen it, so it cannot manufacture a false win.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1000.0}},
         {"w_dwell", ParamMutability::HotMutable,
          "weight on NEAR-INVERSION DWELL = mean(max(0, dwell_thresh - upright)) over the measured region. SHIPS AT 0: measured against the gate-2b logs it is WORSE than sd(upright) (window noise/mean 5.5-5.9 vs 1.93) because instability is bursty and autocorrelated — a rare-event signal in continuous clothing. Built and instrumented at full per-tick resolution so its weight can be decided on real data rather than a 60-tick-sampled proxy.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{100.0}},
@@ -225,6 +237,10 @@ ParamMap GainEvolver::current_params() const {
     m["w_unloaded"] = w_unloaded_;
     m["w_flow"]     = w_flow_;
     m["w_dwell"]    = w_dwell_;
+    m["w_energy"]   = w_energy_;
+    m["torque_topic"] = torque_topic_;
+    m["fall_alarm_tau"] = fall_alarm_tau_;
+    m["fall_alarm_on"] = fall_alarm_on_;
     m["dwell_thresh"] = dwell_thresh_;
     m["settle_ticks"] = settle_ticks_;
     m["accept_k"]    = accept_k_;
@@ -269,7 +285,8 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
     for (auto const& [key, member] : std::initializer_list<std::pair<char const*, std::string*>>{
              {"gain_topic", &gain_topic_}, {"upright_topic", &upright_topic_},
              {"distress_topic", &distress_topic_}, {"foot_load_topic", &foot_load_topic_},
-             {"foot_contact_topic", &foot_contact_topic_}, {"imu_topic", &imu_topic_}})
+             {"foot_contact_topic", &foot_contact_topic_}, {"imu_topic", &imu_topic_},
+             {"torque_topic", &torque_topic_}})
         apply_param(params, key, [&](auto const& v){
             if (auto p = std::get_if<std::string>(&v)) *member = *p; });
     apply_param(params, "n_legs",            [&](auto const& v){ n_legs_            = int(get_int(v, "n_legs")); });
@@ -282,6 +299,8 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
              {"w_falls", &w_falls_}, {"w_tilt_sd", &w_tilt_sd_}, {"w_distress", &w_distress_},
              {"w_unloaded", &w_unloaded_}, {"w_flow", &w_flow_},
              {"w_dwell", &w_dwell_}, {"dwell_thresh", &dwell_thresh_},
+             {"w_energy", &w_energy_}, {"fall_alarm_tau", &fall_alarm_tau_},
+             {"fall_alarm_on", &fall_alarm_on_},
              {"accept_k", &accept_k_}, {"noise_alpha", &noise_alpha_},
              {"viability_load_tol", &viability_load_tol_},
              {"upright_fall_thresh", &upright_fall_thresh_},
@@ -340,7 +359,8 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
                           Sub{&distress_topic_,     &GainEvolver::handle_distress},
                           Sub{&foot_load_topic_,    &GainEvolver::handle_foot_load},
                           Sub{&foot_contact_topic_, &GainEvolver::handle_foot_contact},
-                          Sub{&imu_topic_,          &GainEvolver::handle_imu}})
+                          Sub{&imu_topic_,          &GainEvolver::handle_imu},
+                          Sub{&torque_topic_,       &GainEvolver::handle_torque}})
         if (!s.topic->empty())
             sub_ids_.push_back(bus_->subscribe(*s.topic, SubscriptionKind::Direct,
                 [this, fn = s.fn](std::string_view, MessagePtr p){ (this->*fn)(p); }));
@@ -391,7 +411,9 @@ void GainEvolver::on_param_change(std::string_view key, ParamValue const& value)
     for (auto const& d : {DKey{"w_falls", &w_falls_}, DKey{"w_tilt_sd", &w_tilt_sd_},
                           DKey{"w_distress", &w_distress_}, DKey{"w_unloaded", &w_unloaded_},
                           DKey{"w_flow", &w_flow_}, DKey{"w_dwell", &w_dwell_},
-                          DKey{"dwell_thresh", &dwell_thresh_}, DKey{"accept_k", &accept_k_},
+                          DKey{"dwell_thresh", &dwell_thresh_}, DKey{"w_energy", &w_energy_},
+                          DKey{"fall_alarm_tau", &fall_alarm_tau_},
+                          DKey{"fall_alarm_on", &fall_alarm_on_}, DKey{"accept_k", &accept_k_},
                           DKey{"noise_alpha", &noise_alpha_},
                           DKey{"viability_load_tol", &viability_load_tol_},
                           DKey{"upright_fall_thresh", &upright_fall_thresh_},
@@ -443,6 +465,18 @@ void GainEvolver::handle_foot_contact(MessagePtr payload) {
     for (int i = 0; i < k; ++i) foot_contact_[size_t(i)] = pt->values[i];
 }
 
+void GainEvolver::handle_torque(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 1) return;
+    // Mean |torque| across the servos: what the battery pays.  A servo draws
+    // current to HOLD a pose as well as to move one, so magnitude (not mechanical
+    // power) is the honest electrical proxy — and it is what hardware reports.
+    double acc = 0.0;
+    for (int i = 0; i < pt->values.size(); ++i) acc += std::fabs(double(pt->values[i]));
+    torque_mag_ = acc / double(pt->values.size());
+}
+
 void GainEvolver::handle_imu(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -473,9 +507,10 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
         t.tilt_sd       = std::sqrt(std::max(0.0, w.up_sq / double(w.meas_n) - mean * mean));
         t.distress_duty = double(w.distress_hits) / double(w.meas_n);
         t.dwell         = w.dwell_sum / double(w.meas_n);
+        t.energy        = w.torque_sum / double(w.meas_n);
         t.flow_term     = 1.0 - w.flow_q_sum / double(w.meas_n);
     } else {
-        t.tilt_sd = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0; t.dwell = 0.0;
+        t.tilt_sd = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0; t.dwell = 0.0; t.energy = 0.0;
     }
     double unl_sum = 0.0;
     for (int l = 0; l < n_legs_; ++l) {
@@ -487,7 +522,8 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
     t.unloaded_mean = n_legs_ > 0 ? unl_sum / double(n_legs_) : 0.0;
     t.loaded_min    = per_leg_loaded_min(w);
     t.J = w_falls_ * t.falls + w_tilt_sd_ * t.tilt_sd + w_distress_ * t.distress_duty
-        + w_unloaded_ * t.unloaded_mean + w_flow_ * t.flow_term + w_dwell_ * t.dwell;
+        + w_unloaded_ * t.unloaded_mean + w_flow_ * t.flow_term + w_dwell_ * t.dwell
+        + w_energy_ * t.energy;
     t.valid = true;
     return t;
 }
@@ -501,7 +537,13 @@ double GainEvolver::sigma_est() const {
 }
 
 bool GainEvolver::viability_ok(WindowStats const& cand, WindowStats const& inc) const {
-    if (cand.falls > inc.falls + int(viability_falls_tol_)) return false;          // G1
+    // G1, with the operator's alarm: normally "no regression", but once the leaky
+    // fall accumulator says the body is falling PERSISTENTLY, a candidate must
+    // strictly REDUCE falls to be accepted at all.  tol can only shrink here —
+    // the alarm never widens the gate, so it cannot invent an acceptance.
+    int64_t tol = viability_falls_tol_;
+    if (fall_alarm_on_ > 0.0 && fall_alarm_ > fall_alarm_on_) tol = -1;
+    if (cand.falls > inc.falls + int(tol)) return false;                           // G1
     if (per_leg_loaded_min(cand) < per_leg_loaded_min(inc) - viability_load_tol_)  // G2
         return false;
     return true;
@@ -564,10 +606,15 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
     flow_ema_     += fa * (fwd_v_ - flow_ema_);
     flow_vol_ema_ += fa * (std::fabs(fwd_v_ - flow_ema_) - flow_vol_ema_);
 
+    // Leaky fall alarm: decays every tick regardless of phase, so it measures a
+    // SUSTAINED rate rather than one window's luck.  Deliberately outside the
+    // measured region — it is not a criterion term, it is a viability mode.
+    if (fall_alarm_tau_ > 0.0) fall_alarm_ *= (1.0 - 1.0 / fall_alarm_tau_);
     if (!fall_latched_) {
         if (upright_ < float(upright_fall_thresh_)) {
             if (++fall_below_run_ >= fall_debounce_ticks_) {
                 ++cur_.falls;               // one count per excursion
+                fall_alarm_ += 1.0;
                 fall_latched_ = true;
             }
         } else fall_below_run_ = 0;
@@ -608,6 +655,7 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
         if (distress_ > float(distress_thresh_)) ++cur_.distress_hits;
         if (double(upright_) < dwell_thresh_)
             cur_.dwell_sum += dwell_thresh_ - double(upright_);
+        cur_.torque_sum += torque_mag_;
         double fq = std::clamp(double(flow_ema_), 0.0, flow_vel_norm_) / flow_vel_norm_;
         cur_.flow_q_sum += fq / (1.0 + flow_vol_k_ * double(flow_vol_ema_));
     }
@@ -683,15 +731,17 @@ nlohmann::json GainEvolver::snapshot_state() const {
     mod["prev_inc_J"] = prev_inc_J_;
     mod["prev_inc_pair"] = prev_inc_pair_;
     mod["accept_margin"] = accept_margin_;
+    mod["fall_alarm"] = fall_alarm_;
+    mod["torque_mag"] = torque_mag_;
     auto stats = [](WindowStats const& w) {
         return nlohmann::json{{"falls", w.falls}, {"up_sum", w.up_sum}, {"up_sq", w.up_sq},
                               {"meas_n", w.meas_n}, {"distress_hits", w.distress_hits},
-                              {"flow_q_sum", w.flow_q_sum}, {"dwell_sum", w.dwell_sum}, {"td", w.td}, {"unloaded", w.unloaded}};
+                              {"flow_q_sum", w.flow_q_sum}, {"dwell_sum", w.dwell_sum}, {"torque_sum", w.torque_sum}, {"td", w.td}, {"unloaded", w.unloaded}};
     };
     mod["cur"]       = stats(cur_);
     mod["inc_stats"] = stats(inc_stats_);
     auto terms = [](Terms const& t) {
-        return nlohmann::json{{"falls", t.falls}, {"tilt_sd", t.tilt_sd}, {"dwell", t.dwell},
+        return nlohmann::json{{"falls", t.falls}, {"tilt_sd", t.tilt_sd}, {"dwell", t.dwell}, {"energy", t.energy},
                               {"distress_duty", t.distress_duty}, {"unloaded_mean", t.unloaded_mean},
                               {"flow_term", t.flow_term}, {"loaded_min", t.loaded_min},
                               {"J", t.J}, {"valid", t.valid}};
@@ -741,12 +791,14 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
     prev_inc_J_ = mod.value("prev_inc_J", prev_inc_J_);
     prev_inc_pair_ = mod.value("prev_inc_pair", prev_inc_pair_);
     accept_margin_ = mod.value("accept_margin", accept_margin_);
+    fall_alarm_ = mod.value("fall_alarm", fall_alarm_);
+    torque_mag_ = mod.value("torque_mag", torque_mag_);
     auto stats = [this](nlohmann::json const& j, WindowStats& w) {
         w.reset(n_legs_);
         w.falls = j.value("falls", 0);
         w.up_sum = j.value("up_sum", 0.0); w.up_sq = j.value("up_sq", 0.0);
         w.meas_n = j.value("meas_n", int64_t(0)); w.distress_hits = j.value("distress_hits", int64_t(0));
-        w.flow_q_sum = j.value("flow_q_sum", 0.0); w.dwell_sum = j.value("dwell_sum", 0.0);
+        w.flow_q_sum = j.value("flow_q_sum", 0.0); w.dwell_sum = j.value("dwell_sum", 0.0); w.torque_sum = j.value("torque_sum", 0.0);
         if (j.contains("td"))       w.td       = j["td"].get<std::vector<int>>();
         if (j.contains("unloaded")) w.unloaded = j["unloaded"].get<std::vector<int>>();
     };
@@ -754,7 +806,7 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
     if (mod.contains("inc_stats")) stats(mod["inc_stats"], inc_stats_);
     auto terms = [](nlohmann::json const& j, Terms& t) {
         t.falls = j.value("falls", 0.0); t.tilt_sd = j.value("tilt_sd", 0.0);
-        t.dwell = j.value("dwell", 0.0);
+        t.dwell = j.value("dwell", 0.0); t.energy = j.value("energy", 0.0);
         t.distress_duty = j.value("distress_duty", 0.0); t.unloaded_mean = j.value("unloaded_mean", 0.0);
         t.flow_term = j.value("flow_term", 0.0); t.loaded_min = j.value("loaded_min", 0.0);
         t.J = j.value("J", 0.0); t.valid = j.value("valid", false);
@@ -789,6 +841,9 @@ nlohmann::json GainEvolver::metrics() const {
     m["falls"]         = inc_terms_.falls;
     m["tilt_sd"]       = inc_terms_.tilt_sd;
     m["dwell"]         = inc_terms_.dwell;
+    m["energy"]        = inc_terms_.energy;
+    m["fall_alarm"]    = fall_alarm_;
+    m["alarm_on"]      = (fall_alarm_on_ > 0.0 && fall_alarm_ > fall_alarm_on_) ? 1 : 0;
     m["distress_duty"] = inc_terms_.distress_duty;
     m["unloaded_mean"] = inc_terms_.unloaded_mean;
     m["flow_term"]     = inc_terms_.flow_term;
@@ -819,7 +874,7 @@ nlohmann::json GainEvolver::diag_snapshot() const {
     // CONTRIBUTION to J (w*term) rather than its raw value — a large raw term
     // with a small weight decides nothing, and that distinction is exactly what
     // "is this term dead?" asks.
-    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_sd", w_tilt_sd_}, {"dwell", w_dwell_},
+    j["weights"] = nlohmann::json{{"falls", w_falls_}, {"tilt_sd", w_tilt_sd_}, {"dwell", w_dwell_}, {"energy", w_energy_},
                                   {"distress_duty", w_distress_},
                                   {"unloaded_mean", w_unloaded_}, {"flow_term", w_flow_}};
     nlohmann::json ct;

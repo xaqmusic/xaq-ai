@@ -11085,6 +11085,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# than sd(upright) inflated its noise ~1.4x, so this is the data that
 			# decides its weight honestly.
 			line["ge_dwell"] = snappedf(float(_ge.get("dwell", 0.0)), 0.000001)
+			# ENERGY (mean |joint torque| = servo current) and the leaky FALL ALARM.
+			# ge_alarm_on is the duty read that decides whether the threshold is sane:
+			# pinned at 1 means the guard is permanently strict (the search cannot
+			# accept), pinned at 0 means the alarm never fires and is decoration.
+			line["ge_energy"] = snappedf(float(_ge.get("energy", 0.0)), 0.00001)
+			line["ge_alarm"]  = snappedf(float(_ge.get("fall_alarm", 0.0)), 0.001)
+			line["ge_alarm_on"] = int(_ge.get("alarm_on", 0))
 			# Noise-aware acceptance (post-gate-2): sigma_hat is estimated from the
 			# search's own revert pairs and the margin is what a candidate must
 			# actually beat.  ge_sig_e == 0 with ge_nn > 0 would mean the estimator

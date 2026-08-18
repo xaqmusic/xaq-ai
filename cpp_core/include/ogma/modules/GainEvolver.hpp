@@ -110,7 +110,7 @@ private:
     // whole window (rare, discrete, attributable to the vector under test).
     struct WindowStats {
         int      falls = 0;
-        double   up_sum = 0.0, up_sq = 0.0, dwell_sum = 0.0;
+        double   up_sum = 0.0, up_sq = 0.0, dwell_sum = 0.0, torque_sum = 0.0;
         int64_t  meas_n = 0, distress_hits = 0;
         double   flow_q_sum = 0.0;
         std::vector<int> td, unloaded;      // per-leg touchdowns / unloaded verdicts
@@ -119,7 +119,7 @@ private:
     // A scored window, kept for diag + the guard comparison.
     struct Terms {
         double falls = 0, tilt_sd = 0, dwell = 0, distress_duty = 0,
-               unloaded_mean = 0, flow_term = 0, loaded_min = 0, J = 0;
+               unloaded_mean = 0, flow_term = 0, energy = 0, loaded_min = 0, J = 0;
         bool   valid = false;
     };
 
@@ -129,6 +129,7 @@ private:
     void handle_foot_load(MessagePtr payload);
     void handle_foot_contact(MessagePtr payload);
     void handle_imu(MessagePtr payload);
+    void handle_torque(MessagePtr payload);
 
     // ---- loop internals ------------------------------------------------------
     void  start_window(Phase p);
@@ -151,6 +152,11 @@ private:
     std::string foot_load_topic_    = "reality.proprio.foot_load";
     std::string foot_contact_topic_ = "reality.proprio.foot_contact";
     std::string imu_topic_          = "reality.proprio.imu";
+    // ENERGY: mean |joint torque| — servo current, which the sensor audit classes
+    // as a REAL egocentric load signal ("A REAL LOAD SIGNAL — and MotorEPM has
+    // never consumed it").  On the physical PiCrawler this is battery current, so
+    // it is one of the few criterion inputs with no reality gap at all.
+    std::string torque_topic_       = "reality.proprio.joint_torque";
 
     // ---- timing / loop params ------------------------------------------------
     int     n_legs_            = 4;
@@ -194,6 +200,20 @@ private:
     // at full per-tick resolution (the estimate above came from 60-tick body-log
     // sampling, which inflates its apparent noise ~1.4x) so the next run decides
     // its weight on real data instead of a proxy.
+    // ENERGY, measured on the gate-2b windows before being trusted, and by a wide
+    // margin the best-conditioned signal available to this criterion:
+    //   signal/noise 4.74   vs   sd(upright) 0.61   and   dwell 0.57
+    //   noise/mean   0.005  vs   1.93              and   5.45
+    // It is also largely INDEPENDENT of what we already score (corr −0.125 with
+    // sd(upright)), so it adds information rather than restating it, and it AGREES
+    // with the flow term (+0.123: worse locomotion also burns more current) rather
+    // than trading against it.  Default weight 8.0 equalises its SIGNAL with
+    // sd(upright)'s (0.0646/0.0083) while contributing ~1/60th of the noise.
+    // ⚠ THE FREEZE TRAP IS NOT DISPROVEN — the +0.123 agreement was measured over
+    // walking bodies only; no observed window contains a frozen one.  The flow term
+    // is the counterweight that must stop "spend nothing by doing nothing", and the
+    // per-leg loaded-minima guard blocks "kill a leg to save current".
+    double w_energy_    = 8.0;
     double w_dwell_     = 0.0;
     double dwell_thresh_ = 0.9;   // upright below this = leaning dangerously (~26 deg)
 
@@ -204,6 +224,18 @@ private:
     // way.  Require the improvement to clear the criterion's OWN measured
     // noise, estimated from the system's running dynamics (doctrine §5: adapt
     // the constant, never tune it to the signal's scale).
+    // FALLS ALARM (the operator's leaky accumulator, 2026-08-18).  A fall count
+    // cannot be a per-comparison gradient — an accumulator shares history across
+    // the incumbent/candidate pair, so a slow one reads the same on both arms and
+    // a fast one is the noisy window count again.  Its correct job is the operator's
+    // own word: an ALARM.  Sporadic falls decay and never trip it; sustained falling
+    // trips it and the viability guard tightens to demand a strict REDUCTION.
+    // ★ INVARIANT: the alarm may only ever make acceptance STRICTER, never looser,
+    // so it cannot manufacture a false win — which is what keeps a state-carrying
+    // signal safe next to a stationary evaluator.
+    double  fall_alarm_      = 0.0;   // live leaky accumulator (serialized)
+    double  fall_alarm_tau_  = 50000.0;  // decay time constant, ticks
+    double  fall_alarm_on_   = 0.0;   // 0 = DISABLED (ships inert; set per-config)
     double  accept_k_        = 1.0;   // 0 = legacy bare inequality
     int64_t noise_min_n_     = 3;     // samples before the margin is trusted
     double  noise_alpha_     = 0.25;  // EMA rate on squared revert-pair deltas
@@ -256,6 +288,7 @@ private:
     float upright_  = 1.0f;
     float distress_ = 0.0f;
     float fwd_v_    = 0.0f;
+    double torque_mag_ = 0.0;   // latest mean |joint torque| (the energy input)
     std::vector<float> foot_load_, foot_contact_;
     int64_t fall_below_run_ = 0;
     bool    fall_latched_   = false;
