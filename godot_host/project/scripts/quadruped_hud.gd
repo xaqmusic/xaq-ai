@@ -57,6 +57,16 @@ func _as_bool(v: Variant) -> bool:
 		_:
 			return false
 
+func _as_float(v: Variant, fallback: float = 0.0) -> float:
+	# Mirrors _as_int: body properties arrive as Variant and may be absent on a
+	# body that predates the field (the quadruped), so never assume a number.
+	if v == null:
+		return fallback
+	if v is float or v is int:
+		return float(v)
+	return fallback
+
+
 func _as_int(v: Variant, fallback: int = 0) -> int:
 	if v == null:
 		return fallback
@@ -294,6 +304,15 @@ func _process(_delta: float) -> void:
 		lines.append("walking:    now=%.2fm   best=%.2fm" % [cur_dist, max_dist])
 	lines.append("chassis:    y=%s   tilt=%s   leg×=%.2f" % [y_str, tilt_str, leg_str])
 	lines.append("brain:      da=%s   ht=%s   H=%s" % [da_str, ht_str, preH_str])
+	# ENERGY — mean |servo torque|, i.e. what the battery pays.  peak(1s) is the
+	# worst single tick of each second: a gait can average cheaply and still spike
+	# into saturation, and only the peak shows that.  sat = fraction of servo-ticks
+	# pinned at >0.95 of max torque, which is the authority ceiling.
+	if body.get("energy_now") != null:
+		lines.append("energy:     now=%.3f   peak(1s)=%.3f   avg=%.3f   (mean |servo torque|, 1.0 = max)" % [
+			_as_float(body.get("energy_now")),
+			_as_float(body.get("energy_peak_1s")),
+			_as_float(body.get("energy_avg"))])
 
 	# Phase 6.9 — speed indicators.  Pulls current/best from body fields,
 	# flashes [PR!] for ~0.5 s after a new personal record.  Sustained

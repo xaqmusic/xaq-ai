@@ -96,6 +96,9 @@ std::vector<TopicSpec> MotorEPMv2::input_topics() const {
     if (!feet_topic_.empty())
         v.emplace_back(feet_topic_, std::type_index(typeid(ProprioToken)),
                        SubscriptionKind::Direct, /*required=*/false);
+    if (!gain_topic_.empty())
+        v.emplace_back(gain_topic_, std::type_index(typeid(GainVector)),
+                       SubscriptionKind::Direct, /*required=*/false);
     return v;
 }
 
@@ -611,6 +614,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"distress_topic", ParamMutability::ConstructionOnly,
          "1-D distress (wedge severity [0,1]) ProprioToken topic. The body publishes reality.proprio.distress every tick.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"gain_topic", ParamMutability::ConstructionOnly,
+         "PART IV GainEvolver socket: a GainVector topic (gain.motor_epm) whose (key,value) pairs are applied through on_param_change at the top of the next tick, read-back verified (gains_applied/gains_rejected counters). '' = off = byte-identical. Setup THROWS if amp_seek_rate>0 while this is set — both would mutate amp_target, one owner only.",
+         std::nullopt, std::nullopt, std::nullopt},
         {"lateral_topic", ParamMutability::ConstructionOnly,
          "1-D signed lateral (sideways-slip) velocity ProprioToken topic, fed to the anti-crab coord_lat_penalty. The body publishes reality.proprio.lateral_v every tick.",
          std::nullopt, std::nullopt, std::nullopt},
@@ -798,6 +804,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["panic_push_amp"]    = panic_push_amp_;
     m["panic_push_hz"]     = panic_push_hz_;
     m["distress_topic"]    = distress_topic_;
+    m["gain_topic"]        = gain_topic_;
     m["lateral_topic"]     = lateral_topic_;
     return m;
 }
@@ -965,6 +972,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "panic_push_amp", [&](auto const& v){ panic_push_amp_ = get_double(v, "panic_push_amp"); });
     apply_param(params, "panic_push_hz", [&](auto const& v){ panic_push_hz_ = get_double(v, "panic_push_hz"); });
     apply_param(params, "distress_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) distress_topic_ = *p; });
+    apply_param(params, "gain_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) gain_topic_ = *p; });
     apply_param(params, "lateral_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) lateral_topic_ = *p; });
     apply_param(params, "proprio_topics", [&](auto const& v){ proprio_topics_ = get_string_vec(v, "proprio_topics"); });
     apply_param(params, "action_topics",  [&](auto const& v){ action_topics_  = get_string_vec(v, "action_topics"); });
@@ -1100,6 +1108,18 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             feet_topic_, SubscriptionKind::Direct,
             [this](std::string_view /*topic*/, MessagePtr p){ handle_feet(p); }));
+    }
+    if (!gain_topic_.empty()) {
+        // PART IV gain socket.  One owner per gain: amp_seek's in-place amp_target
+        // search and an external evolver mutating the same member is a live
+        // collision, not a tunable — refuse to construct.
+        if (amp_seek_rate_ > 0.0)
+            throw std::invalid_argument(
+                "MotorEPMv2: gain_topic and amp_seek_rate>0 both mutate amp_target "
+                "— one owner only (PART IV: the evolver owns it)");
+        sub_ids_.push_back(bus_->subscribe(
+            gain_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){ handle_gain_vector(p); }));
     }
     // Gate 0 (L-1a) — prefix-subscribe the body's disruption events (events.miss
     // on a fall, events.reset on a teleport/respawn) for reset-masking.
@@ -1375,6 +1395,44 @@ void MotorEPMv2::handle_lateral(MessagePtr payload) {
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
     if (!pt || pt->values.size() < 1) return;
     lateral_v_ = pt->values[0];   // signed sideways-slip velocity (+ = body-right)
+}
+
+// PART IV gain socket.  The handler only stashes; application happens at the top
+// of tick() so a landed vector never splits a tick (and stays deterministic if
+// scheduler levels ever go parallel).
+void MotorEPMv2::handle_gain_vector(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto gv = std::dynamic_pointer_cast<const GainVector>(payload);
+    if (!gv || gv->keys.size() != gv->values.size()) return;
+    std::lock_guard<std::mutex> lk(pending_gains_mu_);
+    for (size_t i = 0; i < gv->keys.size(); ++i)
+        pending_gains_.emplace_back(gv->keys[i], gv->values[i]);
+}
+
+void MotorEPMv2::apply_pending_gains() {
+    std::vector<std::pair<std::string, double>> batch;
+    {
+        std::lock_guard<std::mutex> lk(pending_gains_mu_);
+        if (pending_gains_.empty()) return;
+        batch.swap(pending_gains_);
+    }
+    for (auto const& kv : batch)
+        on_param_change(kv.first, ParamValue{kv.second});
+    // Read back: the on_param_change chain has no terminal else — an unknown key
+    // is silently ignored — so landing is proven by current_params(), never
+    // assumed (§3.2: a gate has shipped as silent dead code here before).
+    ParamMap now = current_params();
+    for (auto const& kv : batch) {
+        auto it = now.find(kv.first);
+        double const* landed =
+            (it == now.end()) ? nullptr : std::get_if<double>(&it->second);
+        if (landed && *landed == kv.second) {
+            ++gains_applied_;
+            applied_gains_[kv.first] = kv.second;
+        } else {
+            ++gains_rejected_;
+        }
+    }
 }
 
 void MotorEPMv2::handle_feet(MessagePtr payload) {
@@ -2424,6 +2482,7 @@ void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
 }
 
 void MotorEPMv2::tick(uint64_t tick_id) {
+    apply_pending_gains();   // PART IV gain socket — lands between-tick, never mid-tick
     int m = motor_dim_;
 
     // ---- Gate 2 coupling wean: deterministic tick-scheduled linear fade of the imposed
@@ -4646,6 +4705,9 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["swd_overdue_ticks"] = swd_overdue_ticks_;  // touchdown-seeking consumer check
     mod["rear_land_ticks"] = rear_land_ticks_;      // rear drop consumer check
     mod["rear_push_ticks"] = rear_push_ticks_;      // rear push consumer check
+    mod["gains_applied"]   = gains_applied_;        // PART IV gain-socket consumer check
+    mod["gains_rejected"]  = gains_rejected_;
+    mod["applied_gains"]   = applied_gains_;        // restore replay (see restore_state)
     {
         nlohmann::json off = nlohmann::json::array();
         for (int i = 0; i < n_legs_ && i < 8; ++i) off.push_back(td_off_[i]);
@@ -5348,6 +5410,17 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         amp_seek_fwd_accum_    = mod.value("amp_seek_fwd_accum",    amp_seek_fwd_accum_);
         amp_seek_amp_accum_    = mod.value("amp_seek_amp_accum",    amp_seek_amp_accum_);
         amp_seek_count_        = mod.value("amp_seek_count",        amp_seek_count_);
+        // PART IV gain socket: RE-DISPATCH every landed gain.  Evolved gains live
+        // in param members the instance snapshot does NOT round-trip (params come
+        // from the GraphConfig) — without this replay a restored clone silently
+        // reverts to config gains and clone-determinism fails.
+        if (mod.contains("applied_gains")) {
+            auto ag = mod["applied_gains"].get<std::map<std::string, double>>();
+            for (auto const& kv : ag) on_param_change(kv.first, ParamValue{kv.second});
+            applied_gains_ = std::move(ag);
+        }
+        gains_applied_  = mod.value("gains_applied",  gains_applied_);
+        gains_rejected_ = mod.value("gains_rejected", gains_rejected_);
         chassis_h_ema_  = mod.value("chassis_h_ema",  chassis_h_ema_);
         chassis_h_max_  = mod.value("chassis_h_max",  chassis_h_max_);
         height_bias_    = mod.value("height_bias",    height_bias_);

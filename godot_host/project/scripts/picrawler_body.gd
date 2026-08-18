@@ -492,6 +492,21 @@ var _qdot_ema: PackedFloat64Array = PackedFloat64Array()          # M0.d.2 smoot
 var _tq_mag_acc: float = 0.0
 var _tq_sat_acc: float = 0.0
 var _tq_n: float = 0.0
+# ---- ENERGY READOUT (HUD) ----------------------------------------------------
+# Servo current is what the battery actually pays, and it is the best-conditioned
+# signal the GainEvolver's criterion has (signal/noise 4.74 vs 0.61 for upright
+# sd).  Three reads, because they answer different questions: `now` is this tick,
+# `peak_1s` is the worst tick inside each one-second window — LATCHED at the
+# window boundary so the number is readable instead of a blur — and `avg` is a
+# slow EMA for the trend.  Peak matters separately from mean: a gait can average
+# cheaply and still spike into servo saturation, which is what burns hardware.
+const ENERGY_PEAK_WINDOW_TICKS: int = 50    # 1 s at the 50 Hz brain tick
+const ENERGY_EMA_ALPHA: float = 0.01        # ~2 s trend
+var energy_now: float = 0.0
+var energy_peak_1s: float = 0.0
+var energy_avg: float = 0.0
+var _energy_peak_acc: float = 0.0
+var _energy_sec_ticks: int = 0
 var _sensor_noise_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
@@ -5453,6 +5468,16 @@ func _input(event: InputEvent) -> void:
 			var pc := pp as Control
 			pc.visible = not pc.visible
 			print("PicrawlerBody: [O] plan_authority_panel = %s" % pc.visible)
+	elif key == KEY_U:
+		# 2026-08-17 (PART IV) — toggle the GAIN EVOLVER panel: live vector +
+		# incumbent/candidate criterion scores + accept history + the mutation-σ
+		# slider (0 = observer; ADOPT hands a hand-tuned [M] point to the
+		# evolver before σ-resume).  Its own key: [M] and [O] are taken.
+		var gp: Node = get_tree().get_root().find_child("GainEvolverPanel", true, false)
+		if gp != null and gp is Control:
+			var gc := gp as Control
+			gc.visible = not gc.visible
+			print("PicrawlerBody: [U] gain_evolver_panel = %s" % gc.visible)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
@@ -6680,11 +6705,22 @@ func _step_one() -> void:
 	#             arm exerting far MORE ground force than the deployed gait ever did)
 	#   tq_sat  — is the servo pinned?  Distinguishes "the controller is not using available
 	#             authority" (our bug, fixable) from "the authority is not there" (hardware).
+	var _e_sum: float = 0.0
 	for _ti in range(jtorque.size()):
 		var _ta: float = absf(jtorque[_ti])
 		_tq_mag_acc += _ta
+		_e_sum += _ta
 		if _ta > 0.95: _tq_sat_acc += 1.0
 		_tq_n += 1.0
+	# Per-tick mean |torque| -> now / 1 s peak / slow average (see the block above).
+	energy_now = _e_sum / maxf(1.0, float(jtorque.size()))
+	_energy_peak_acc = maxf(_energy_peak_acc, energy_now)
+	energy_avg = energy_avg + ENERGY_EMA_ALPHA * (energy_now - energy_avg)
+	_energy_sec_ticks += 1
+	if _energy_sec_ticks >= ENERGY_PEAK_WINDOW_TICKS:
+		energy_peak_1s = _energy_peak_acc
+		_energy_peak_acc = 0.0
+		_energy_sec_ticks = 0
 
 	# Phase 7.13 v4.2 — body-state signal for CruseCoordinator gating.
 	# chassis_y_norm in [0, 1].  CruseCoordinator subscribes optionally and
@@ -10737,6 +10773,14 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["swo"] = int(_mm.get("swd_overdue_ticks", 0))
 			line["rlt"] = int(_mm.get("rear_land_ticks", 0))
 			line["rpt"] = int(_mm.get("rear_push_ticks", 0))
+			# 2026-08-17 (PART IV) — gain-socket CONSUMER counters, read-back
+			# verified in C++: ga_app counts keys that LANDED (current_params
+			# reflects the sent value), ga_rej counts keys the on_param_change
+			# dispatch silently ignored (typo'd key = nonzero ga_rej, never
+			# silence).  ga_app must track ge_pub × |gain_keys| (the ge_* block
+			# below) — the two-sided §3.2 check for the evolver pipe.
+			line["ga_app"] = int(_mm.get("gains_applied", 0))
+			line["ga_rej"] = int(_mm.get("gains_rejected", 0))
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.
@@ -11035,6 +11079,58 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				var _gpo: Array = []
 				for _v in _gp: _gpo.append(snappedf(float(_v), 0.001))
 				line["gait_phase"] = _gpo
+	# ---- PART IV GainEvolver mirror (2026-08-17).  Self-guarded: absent module
+	# ⇒ no ge_* keys ⇒ promoted-config logs unchanged.  Cheap metrics path, NOT
+	# get_module_snapshot (the per-tick full-snapshot lesson).  ge_ji is the
+	# incumbent criterion J (error-form, lower = better): THE trace that must
+	# FALL during the convergence gate and SPIKE-then-recover at the (d)-test.
+	# ge_ph: 0=warmup 1=incumbent 2=candidate.  ge_vec = the ACTIVE vector.
+	if brain != null and brain.has_method("get_module_metrics"):
+		var _ge: Dictionary = brain.get_module_metrics().get("gain_evolver", {})
+		if not _ge.is_empty():
+			line["ge_gen"]   = int(_ge.get("generation", 0))
+			line["ge_acc"]   = int(_ge.get("accepts", 0))
+			line["ge_rev"]   = int(_ge.get("reverts", 0))
+			line["ge_pub"]   = int(_ge.get("publishes", 0))
+			line["ge_sig"]   = snappedf(float(_ge.get("sigma", 0.0)), 0.0001)
+			line["ge_ph"]    = int(_ge.get("phase", 0))
+			line["ge_wt"]    = int(_ge.get("win_tick", 0))
+			line["ge_ji"]    = snappedf(float(_ge.get("J_inc", -1.0)), 0.0001)
+			line["ge_jc"]    = snappedf(float(_ge.get("J_cand", -1.0)), 0.0001)
+			# Per-term breakdown of the INCUMBENT window — the dead-term / term-
+			# domination check (§3.2): a weight whose term never moves is dead,
+			# which is a measurement about the sensor, not the criterion.
+			line["ge_falls"] = snappedf(float(_ge.get("falls", 0.0)), 0.01)
+			line["ge_tilt"]  = snappedf(float(_ge.get("tilt_sd", 0.0)), 0.000001)
+			line["ge_dis"]   = snappedf(float(_ge.get("distress_duty", 0.0)), 0.0001)
+			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
+			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
+			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
+			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it
+			# ships at weight 0: the 60-tick body-log proxy that measured it as WORSE
+			# than sd(upright) inflated its noise ~1.4x, so this is the data that
+			# decides its weight honestly.
+			line["ge_dwell"] = snappedf(float(_ge.get("dwell", 0.0)), 0.000001)
+			# ENERGY (mean |joint torque| = servo current) and the leaky FALL ALARM.
+			# ge_alarm_on is the duty read that decides whether the threshold is sane:
+			# pinned at 1 means the guard is permanently strict (the search cannot
+			# accept), pinned at 0 means the alarm never fires and is decoration.
+			line["ge_energy"] = snappedf(float(_ge.get("energy", 0.0)), 0.00001)
+			line["ge_alarm"]  = snappedf(float(_ge.get("fall_alarm", 0.0)), 0.001)
+			line["ge_alarm_on"] = int(_ge.get("alarm_on", 0))
+			# Noise-aware acceptance (post-gate-2): sigma_hat is estimated from the
+			# search's own revert pairs and the margin is what a candidate must
+			# actually beat.  ge_sig_e == 0 with ge_nn > 0 would mean the estimator
+			# ran but found no noise; ge_nn == 0 late in a run means it never
+			# gathered a pair, i.e. nothing has been reverted.
+			line["ge_sig_e"] = snappedf(float(_ge.get("sigma_est", 0.0)), 0.00001)
+			line["ge_marg"]  = snappedf(float(_ge.get("accept_margin", 0.0)), 0.00001)
+			line["ge_nn"]    = int(_ge.get("noise_n", 0))
+			var _gev = _ge.get("vec", [])
+			if _gev is Array and not _gev.is_empty():
+				var _gvo: Array = []
+				for _v in _gev: _gvo.append(snappedf(float(_v), 0.0001))
+				line["ge_vec"] = _gvo
 	line["radial_compass"]           = [snappedf(_last_radial_compass.x, 0.001),
 										snappedf(_last_radial_compass.y, 0.001)]
 	line["target_compass"]           = [snappedf(_last_target_compass.x, 0.001),
@@ -11051,6 +11147,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 												 _chassis.global_transform.origin.z)).length()
 	line["target_dist"]              = snappedf(target_dist, 0.001)
 	# 2026-06-13 — panic pathway GATE 0: distress telemetry (observe-only).
+	# ENERGY (servo current) — the same three reads the HUD shows, mirrored here so
+	# the trend is analysable offline and so "the HUD number is alive" is verifiable
+	# from a headless run rather than only by eye.
+	line["e_now"]  = snappedf(energy_now, 0.0001)
+	line["e_peak"] = snappedf(energy_peak_1s, 0.0001)
+	line["e_avg"]  = snappedf(energy_avg, 0.0001)
 	line["stuck_deficit"]            = snappedf(_stuck_deficit, 0.001)
 	line["distress"]                 = snappedf(_distress, 0.001)
 	if vision_steer:

@@ -19,7 +19,7 @@ import sys
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QListWidget, QListWidgetItem, QSplitter,
     QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QLabel,
@@ -46,7 +46,24 @@ class InspectorWindow(QMainWindow):
                  diag_host: str, diag_port: int):
         super().__init__()
         self.setWindowTitle("xaq inspector")
-        self.resize(1280, 800)
+        # Size against the AVAILABLE screen, not a hardcoded 1280x800.  Qt sizes in
+        # LOGICAL pixels, so on a 1920x1080 display at 150% desktop scaling the whole
+        # logical desktop is only 1280x720 — the old fixed size asked for exactly the
+        # full logical width, which put the window's right edge on the screen boundary
+        # where it cannot be grabbed.  The window then resized vertically but not
+        # horizontally, which is precisely the reported symptom.
+        scr = QGuiApplication.primaryScreen()
+        if scr is not None:
+            av = scr.availableGeometry()
+            w = max(640, min(1280, int(av.width() * 0.88)))
+            h = max(480, min(800, int(av.height() * 0.88)))
+            self.resize(w, h)
+            self.move(av.left() + (av.width() - w) // 2,
+                      av.top() + (av.height() - h) // 2)
+        else:
+            self.resize(1280, 800)
+        # Never let content pin the window wide: it must always be shrinkable.
+        self.setMinimumSize(560, 400)
 
         self.control = ControlClient(control_host, control_port)
         self.diag    = DiagSubscriber(diag_host, diag_port)
@@ -110,7 +127,7 @@ class InspectorWindow(QMainWindow):
         self._right.addWidget(self._placeholder)
         split.addWidget(self._right)
 
-        split.setSizes([260, 1020])
+        split.setSizes([max(180, self.width() // 5), self.width() - max(180, self.width() // 5)])
         self.setCentralWidget(split)
 
         self.setStatusBar(QStatusBar())
