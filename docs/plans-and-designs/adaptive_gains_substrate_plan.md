@@ -333,3 +333,43 @@ normalised across the differing run lengths (256 k vs 500 k).
   `ge_ji` spread across *incumbent* windows rivals the candidate deltas, accepts are
   coin flips and "converged" would be false; the remedy is a longer
   `eval_window_ticks`, and the spread is measurable directly from the log.
+
+
+### 6.8 Gate 2d (2026-08-18) — energy + the fall alarm; two seeds converge
+
+Criterion now carries **energy** (mean |joint torque| — servo current, w 8.0), the
+operator's **leaky fall alarm** (guard-only, trip 8.0, never in J), dwell instrumented at
+weight 0, and the operator's timing (warmup 10 000 / window 4 000 / settle 2 000 →
+**61 generations**, ~3× the previous run).
+
+**The three-run progression on the same arm is the result:**
+
+| | gate 2 | re-run | **2d** |
+|---|---|---|---|
+| J fell beyond own noise | 0/4 | 1/4 | **2/4** |
+| J rose | 1/4 | 1/4 | **0/4** |
+| σ runaway to ceiling | 3/4 | 0/4 | **0/4** |
+| σ annealed to floor (settled) | 0/4 | 0/4 | **2/4** |
+| closer to hand point | 3/4 | 3/4 | **4/4** |
+
+Seeds 3 and 4 fell (−0.208 vs noise 0.198; −0.303 vs 0.248) *and* annealed σ to
+0.010/0.015 — the 1/5th rule hitting its floor is the signature of a settled search, the
+exact inverse of gate 2's runaway.
+
+**Energy is safe and load-bearing** (variance: energy 56.4 %, flow 34.4 %, upright-sd
+8.7 %). No freeze: every seed ended cheaper-and-better or dearer, `amp_min` rose
+0.419 → 0.442 and `step_bal` 0.41 → 0.44, so no leg was traded for current. ⚠ w 8.0 gives
+energy the majority vote — more than intended; 4–5 would balance it three ways.
+
+**Alarm duty 27.4 / 0 / 0 / 21.0 %** — fires only on the seeds that were actually falling
+(alarm peaks 21.6 and 15.0 vs 5.6 and 4.8), so the trip point cleanly separates the two
+populations and the adventurous body is never punished.
+
+**Dwell, on full per-tick data: noise/mean 2.93 vs sd(upright) 1.93 — stays at 0.** The
+60-tick proxy had said 5.45, so it overstated the penalty ~1.9×; the verdict holds but now
+rests on measurement rather than the estimate.
+
+**Still open:** `coupling_gain` (1.458 / 0.000 / 0.558 / 0.274) is not reliably discovered,
+and the two converged seeds settled LOW on it. A better-conditioned general criterion did
+not restore what the noisy falls term used to supply — coupling needs its own mechanism,
+and the standing candidate is a lexicographic viability-then-quality ordering.

@@ -605,6 +605,62 @@ teleports the body to the origin, so displacement no longer accumulates (straigh
 0.01). Falls and tilt above are per-tick normalised across the two run lengths (256 k vs
 500 k); the raw counts are not comparable.
 
+### ★★★ 2026-08-18 — ENERGY EARNS ITS PLACE: two seeds converge, σ anneals to the FLOOR
+
+**Verdict: `PARTIAL`, and the first run whose direction is unambiguous.** Same factory
+arm/protocol; criterion now carries **energy** (mean |joint torque| = servo current, w 8.0),
+the operator's **leaky fall alarm** (guard-only, trip 8.0), dwell instrumented at 0, and the
+operator's timing (warmup 10 000, window 4 000, settle 2 000 → **61 generations**).
+
+**The campaign's convergence signal across three runs of the same arm:**
+
+| | gate 2 | gate 2 re-run | **gate 2d** |
+|---|---|---|---|
+| seeds whose J fell beyond their OWN noise | 0/4 | 1/4 | **2/4** |
+| seeds whose J *rose* | 1/4 | 1/4 | **0/4** |
+| σ at the 0.5 ceiling (runaway) | 3/4 | 0/4 | **0/4** |
+| σ annealed to the 0.01 FLOOR (settled) | 0/4 | 0/4 | **2/4** |
+| moved closer to the hand point | 3/4 | 3/4 | **4/4** |
+| pooled measurement noise | 0.8765 | 0.1913 | 0.2439 |
+
+★ **Seeds 3 and 4 both fell (−0.208 vs noise 0.198; −0.303 vs 0.248) AND annealed σ down to
+0.010/0.015 — the 1/5th rule reaching its floor is what a converged search looks like**, and
+it is the exact opposite of gate 2's runaway to the ceiling. Accepts drop 21/14/10/8 across
+the seeds as reverts take over, which is settling rather than starvation. Noise is slightly
+above the re-run's because the window is 3× shorter — the expected, accepted trade.
+
+**Energy is safe and it is doing the work.** Variance shares are now **energy 56.4 %**, flow
+34.4 %, upright-sd 8.7 %, unloaded 0.5 %. ⚠ At w 8.0 energy holds the *majority* vote, which
+is more than the design intended (the weight was set to equalise its signal with
+sd(upright)'s) — worth dropping toward 4–5 if we want a genuine three-way balance.
+**The freeze trap did NOT materialise**: at completion every seed either improved flow or
+raised energy, and `amp_min` 0.419 → **0.442** with `step_bal` 0.41 → **0.44** says no leg was
+sacrificed to save current. ⚠ *A mid-run reading of seed 4 tripped my own freeze detector and
+I reported it as live; by completion it had resolved (energy −0.021 with flow_term −0.057,
+i.e. cheaper AND better). Mid-run halves of a 61-generation search are not verdicts.*
+
+**The fall alarm behaves exactly as specified.** Duty by seed: 27.4 % / 0 % / 0 % / 21.0 %,
+tripping only on the two seeds that were actually falling (alarm peaks 21.6 and 15.0 vs 5.6
+and 4.8 on the healthy pair). Threshold 8.0 sits cleanly between the two populations, so the
+adventurous body is never punished and the persistent faller is.
+
+**★ DWELL, measured at last on full per-tick data: `noise/mean 2.93` vs sd(upright)'s 1.93 —
+STAYS AT WEIGHT 0.** Note the honest correction: the 60-tick-sampled proxy had predicted
+5.45, so shipping it inert-but-instrumented was the right call *and* the proxy overstated the
+penalty by ~1.9× (I predicted ~1.4×). It remains worse than the term it would join, so the
+verdict holds — but on measurement, not on the estimate that motivated it.
+
+**The open problem is unchanged: `coupling_gain` is still not reliably found** — 1.458 /
+0.000 / 0.558 / 0.274 (mean 0.573), and notably the two *converged* seeds settled at LOW
+coupling. Energy did not restore the pressure that the old noisy falls term supplied.
+`plan_gain` did finally move off zero (0.037 vs hand 0.05), and `height_homeo` 0.036 vs hand
+0.040 remains the closest match in the vector.
+
+**Re-use context:** drop `w_energy` to 4–5 for a three-way variance balance; the coupling
+question now needs its own answer rather than a better general criterion — the candidate is
+a lexicographic viability-then-quality ordering, since a threshold comparison survives the
+variance that ruins these signals as gradients.
+
 ### 2026-08-17 — POST-PLANT SLIP: `DEFERRED` from the GainEvolver's v1 criterion
 
 The charter lists post-plant slip (foot drift while planted) as a criterion ingredient.
