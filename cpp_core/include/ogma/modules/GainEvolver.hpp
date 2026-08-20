@@ -236,7 +236,7 @@ private:
     double  fall_alarm_      = 0.0;   // live leaky accumulator (serialized)
     double  fall_alarm_tau_  = 50000.0;  // decay time constant, ticks
     double  fall_alarm_on_   = 0.0;   // 0 = DISABLED (ships inert; set per-config)
-    double  accept_k_        = 1.0;   // 0 = legacy bare inequality
+    double  accept_k_        = 0.25;  // 0 = legacy bare inequality; see schema note
     int64_t noise_min_n_     = 3;     // samples before the margin is trusted
     double  noise_alpha_     = 0.25;  // EMA rate on squared revert-pair deltas
     double  viability_load_tol_    = 0.05;
@@ -260,7 +260,7 @@ private:
     double  target_accept_ = 0.2;
     double  anneal_up_     = 1.5;
     double  anneal_down_   = 0.85;
-    double  sigma_min_     = 0.01;
+    double  sigma_min_     = 0.08;   // floor: never below measurable resolution
     double  sigma_max_     = 0.5;
 
     // ---- live ES state (ALL serialized) --------------------------------------
