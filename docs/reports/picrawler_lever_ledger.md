@@ -3089,3 +3089,69 @@ as it is decided, plus the re-use context that would justify a retry (§6). When
 generalizes into a reusable principle, fold that principle into
 [`../brain_building_doctrine.md`](../brain_building_doctrine.md) and leave the specific
 result here.*
+
+### ★★★ 2026-08-20 — STEP 0: the criterion SEES coupling; the ACCEPTANCE MARGIN cannot
+
+**Verdict: `WORKING` as a diagnosis — it refuted the fix we were about to build.** Evolver
+held in observer mode (σ=0, scores without searching or publishing) while `SETPARAM_AT`
+stepped `motor_epm.coupling_gain` through {0, 0.4, 0.8, 1.2, 1.6, 2.0}, 3 scored windows
+per level, **ascending on 2 seeds and descending on 2** so hysteresis would show. Consumer
+check: both arms reported `-> OK` and started at 0.0 / 2.0 respectively.
+
+| coupling | J | upright sd | unloaded | flow | energy | falls |
+|---|---|---|---|---|---|---|
+| 0.0 | 3.6805 | 0.0027 | 0.0048 | **0.7555** | 0.3647 | 0.40 |
+| 0.4 | 3.7476 | 0.0095 | 0.0022 | 0.7329 | 0.3754 | 0.17 |
+| 0.8 | 3.6119 | 0.0782 | 0.0036 | 0.5245 | 0.3757 | 0.58 |
+| 1.2 | 3.4045 | 0.0232 | 0.0031 | 0.4262 | 0.3690 | 0.50 |
+| **1.6** | **3.3895** | 0.0163 | 0.0067 | **0.3940** | 0.3716 | 0.50 |
+| 2.0 | 3.5881 | 0.0169 | 0.0071 | 0.4929 | 0.3839 | 0.70 |
+
+**Authority:** `flow` **r = −0.518 (STRONG)**, J r = −0.260, falls r = +0.220, everything
+else ~0.
+
+**1. The criterion is NOT blind to coordination.** `flow_term` nearly halves from 0.756 to
+0.394 as coupling rises — a large, monotone, strongly-correlated response. Hypothesis (a)
+is refuted. There is also a real optimum near **1.2–1.6**, which vindicates the operator's
+hand-found 1.55, and 2.0 is measurably worse.
+
+**2. ★ The standing fix would NOT have worked.** Coupling's benefit is *not* catastrophe
+avoidance — falls actually trend slightly UP with coupling (r = +0.220). The lexicographic
+viability-then-quality ordering was the recorded next build; **this measurement killed it
+before it was written.** That is the entire value of an authority check.
+
+**3. ★★ The real blocker is a SCALE MISMATCH between the acceptance margin and the
+mutation step**, and it is systemic rather than coupling-specific:
+
+```
+dJ/d(coupling) = −0.182 per unit           (measured, full-range swing −0.546)
+σ 0.08  → step 0.240 → ΔJ 0.0436   vs margin 0.244  →  5.6× TOO SMALL
+σ 0.04  → step 0.120 → ΔJ 0.0218   vs margin 0.244  → 11.2× TOO SMALL
+σ 0.015 → step 0.045 → ΔJ 0.0082   vs margin 0.244  → 29.8× TOO SMALL
+```
+
+A single mutation's *true* improvement is far below `accept_k·σ̂`, so a real gradient is
+rejected as indistinguishable from noise. **The margin that fixed the coin-flip problem now
+blocks the gradient it was protecting.** This also explains why the ORIGINAL noisy criterion
+found coupling (0→2.06 in 4/4): with no margin, a strong flow gradient could bias a random
+walk upward; adding the margin removed the walk without supplying a detectable step.
+
+**4. ⚠ THIS REFRAMES GATE 2d's HEADLINE — a correction to my own reporting.** I recorded
+"2/4 seeds annealed σ to the FLOOR = settled", reading it as convergence. At the σ those
+seeds reached (0.010–0.015) **nothing could clear the margin at all** (30× short), so the
+anneal is at least as consistent with being FROZEN OUT as with converging: fewer accepts →
+σ shrinks → smaller steps → fewer accepts. Self-reinforcing. I cannot settle it from the
+gate-2d logs because `/tmp` is a tmpfs and the reboot cleared them, so this is a strong
+hypothesis, not a fact. **The next run must log the accept timeline against σ to decide it.**
+
+**Re-use context / the fix, derived from the measurement:** match the margin to the step by
+construction. Requiring `|dJ/dg|·σ·range ≈ accept_k·σ̂` with the measured slope gives
+**σ ≈ 0.22 at accept_k 0.5, or σ ≈ 0.11 at accept_k 0.25.** Present `sigma_min` is 0.01 —
+10–20× below anything useful. Highest-value single change: **raise `sigma_min` to ~0.05–0.1
+and lower `accept_k` to ~0.3**, so the search cannot anneal itself below the resolution its
+own criterion can measure. Alternatives: longer windows (shrinks σ̂, costs generations) or
+per-gain `sigma_scale` (coupling's range is the widest at 3.0).
+
+⚠ Also fix before any coupling verdict: the evolver searches coupling to **3.0** while
+MotorEPMv2's schema documents max **2.0**, and `set_param` does not enforce schema ranges.
+The measurement above says >2.0 is worse anyway.
