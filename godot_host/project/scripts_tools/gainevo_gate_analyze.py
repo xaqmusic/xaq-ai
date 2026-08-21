@@ -231,3 +231,44 @@ for p_ in paths:
     print(f"  seed {seed}: {line}{tag}")
 print("  (accepts continuing at small sigma = genuinely converged; accepts going to")
 print("   ZERO exactly as sigma bottoms out = the margin froze the search)")
+
+
+# ---- J TREND (the half-vs-half test is mis-specified for a converging search) --
+# A search that works front-loads its gains: most of the improvement lands in the
+# first few generations, after which it plateaus.  Comparing first-half to
+# last-half then averages the plateau against itself and reports "inside noise"
+# for a run that visibly improved.  A regression slope over ALL generations does
+# not have that blind spot.
+print(chr(10) + "=== J TREND over all generations (slope test) ===")
+for p_ in paths:
+    rows, seen = [], set()
+    for ln in open(p_, errors="replace"):
+        ln = ln.strip()
+        if not ln.startswith("{") or '"ge_gen"' not in ln:
+            continue
+        try:
+            d = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        g = d.get("ge_gen")
+        if d.get("ge_ji", -1) > 0 and g not in seen:
+            seen.add(g); rows.append(d)
+    rows.sort(key=lambda d: d.get("ge_gen", 0))
+    if len(rows) < 8:
+        continue
+    ys = [r["ge_ji"] for r in rows]
+    xs = list(range(len(ys)))
+    mx, my = st.mean(xs), st.mean(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx if sxx else 0.0
+    resid = [y - (my + slope * (x - mx)) for x, y in zip(xs, ys)]
+    se_slope = (math.sqrt(sum(r * r for r in resid) / max(1, len(ys) - 2)) /
+                math.sqrt(sxx)) if sxx else float("inf")
+    tstat = slope / se_slope if se_slope else 0.0
+    total = slope * (len(ys) - 1)
+    blocks = [st.mean(ys[i * (len(ys) // 5):(i + 1) * (len(ys) // 5)]) for i in range(5)]
+    seed = p_.split("_s")[-1].split(".")[0]
+    tag = "J FELL (slope significant)" if tstat <= -2.0 else (
+          "J ROSE (slope significant)" if tstat >= 2.0 else "no significant trend")
+    print(f"  seed {seed}: blocks " + " ".join(f"{b:.3f}" for b in blocks))
+    print(f"           slope {slope:+.5f}/gen  t={tstat:+.2f}  total {total:+.3f}   -> {tag}")

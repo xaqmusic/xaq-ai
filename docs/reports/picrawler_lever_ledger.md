@@ -3210,3 +3210,53 @@ Coupling improved but is still not reliably found: 0.322 / 0.568 / 0.227 / **2.0
 0.779 ± 0.716, up from 0.573) — seed 4 drove it to the new cap. `plan_gain` 0.054 vs hand
 0.05 and `postural` 0.651 vs 0.700 are now close; `amp_target` moved the wrong way
 (0.177 vs hand 0.400) on every seed and is worth its own look.
+
+### ★★★ 2026-08-20 — GATE 2f: THE COUPLING PROBLEM IS SOLVED (monotone on 4/4 seeds)
+
+**Verdict: `WORKING` on the campaign's headline open problem; `PARTIAL` on the gate.**
+Same arm/protocol, with `target_accept` now AUTO — derived as the noise floor
+Φ(−accept_k/√2) instead of a fixed 0.2.
+
+**★ `coupling_gain` now climbs MONOTONICALLY on every seed**, by generation block:
+
+| seed | b1 | b2 | b3 | b4 | b5 | final |
+|---|---|---|---|---|---|---|
+| 1 | 0.18 | 0.35 | 0.52 | 0.64 | 0.61 | 0.641 |
+| 2 | 0.02 | 0.57 | 0.50 | 1.07 | **1.56** | 1.464 |
+| 3 | 0.25 | 0.68 | 0.70 | 0.74 | 0.98 | 0.815 |
+| 4 | 0.10 | 0.38 | 0.51 | 1.09 | 1.28 | 1.419 |
+
+Mean **1.085 ± 0.362** against a hand-found 1.55, and every seed non-zero — versus
+gate 2e's erratic 0.32 / 0.57 / 0.23 / 2.00 (0.779 ± 0.716) and gate 2d's two seeds stuck
+at zero. **Seed 2 reached 1.56, the hand point, on its own.** This is the search
+rediscovering that the legs must be coupled, from egocentric error alone, reproducibly.
+The whole chain — authority check → margin/step calibration → noise-floor anneal target —
+was aimed at this, and it landed.
+
+Also: **4/4 much closer to the hand point** (mean L2 distance **0.887**, vs 1.406 in
+gate 2e), `amp_min` **0.523** — best recorded — and σ at the ceiling on only 1/4.
+
+**★ A MIS-SPECIFIED TEST IN MY OWN ANALYSER, corrected.** The first-half-vs-last-half J
+test reported only 1/4 seeds falling. That test is wrong for a *converging* search: gains
+are FRONT-LOADED (early-block deltas −0.231 / −0.237 / −0.420 against totals −0.100 /
+−0.224 / −0.372), so it averages the plateau against itself. A regression slope over all
+generations has no such blind spot and gives **2/4 significant falls** (seed 3 t=−3.00,
+seed 4 t=−8.73) with the other two trending down but not significantly. The analyser now
+reports the slope test alongside; **earlier gate verdicts were scored on the weaker test
+and are understated to that extent.**
+
+**⚠ THE COST, and it is the next problem: falls ROSE — 54.75 → 66.50.** This is expected
+rather than mysterious: step 0 measured `corr(coupling, falls) = +0.220`, so the very
+coordination the search now correctly finds carries slightly *more* falling, and nothing
+in J penalises it (`w_falls` is 0 by design; the G1 guard only blocks per-comparison
+regression, not a slow drift across many accepted steps). Seed 1 is the casualty — 88
+falls, alarm tripped 25.8 % of generations peaking at 32.97, and the only seed whose J
+regressed in the final block (2.071 → 2.264).
+
+**Re-use context:** the criterion is now good enough to find coordination and bad enough
+to drift into falling. Job #1 (the 3/20 falls tail) is directly threatened by this, so the
+next lever is a falls channel that resists drift without reintroducing 81 % variance —
+candidates: the alarm gating a *ratchet* on accumulated falls rather than only tightening
+G1, or a small non-zero `w_falls` now that the other terms are well-conditioned enough to
+absorb it. Do NOT simply re-raise `w_falls` to 1.0; that is what the whole noise campaign
+removed.
