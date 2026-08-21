@@ -3155,3 +3155,58 @@ per-gain `sigma_scale` (coupling's range is the widest at 3.0).
 ⚠ Also fix before any coupling verdict: the evolver searches coupling to **3.0** while
 MotorEPMv2's schema documents max **2.0**, and `set_param` does not enforce schema ranges.
 The measurement above says >2.0 is worse anyway.
+
+### ★★★ 2026-08-20 — GATE 2 FINAL: 3/4 seeds converge; the freeze question is ANSWERED
+
+**Verdict: `PARTIAL`, best of the campaign.** Factory arm, arena, solid chassis, 500 k
+ticks, 61 generations, with the step-0 calibration (`accept_k` 1.0→0.25,
+`sigma_min` 0.01→0.08, `w_energy` 8→4, coupling max 3.0→2.0).
+
+| | gate 2 | 2b | 2d | **2e** |
+|---|---|---|---|---|
+| J fell beyond own noise | 0/4 | 1/4 | 2/4 | **3/4** |
+| J rose | 1/4 | 1/4 | 0/4 | **0/4** |
+| closer to hand point | 3/4 | 3/4 | 4/4 | **4/4** |
+| accepts (of 61 gens) | — | — | 21/14/10/8 | **16/18/24/26** |
+
+Falls: −0.226 vs noise 0.139 (s1), −0.246 vs 0.221 (s3), −0.452 vs 0.195 (s4). s2 inside
+noise. `amp_min` 0.483 — best recorded. Lockstep OK on all seeds.
+
+**★ THE FREEZE QUESTION IS SETTLED, and my gate-2d correction was right.** The σ-bucketed
+discriminator shows seeds 1 and 2 ending at σ 0.111/0.080 while **still accepting 43–50 %
+at the σ 0.08 floor** (6/14, 7/14). Acceptance survives at the floor once the floor is set
+above the criterion's resolution — so gate 2d's collapse to σ 0.010–0.015 with accepts
+dying was **freeze-out, not convergence**. The headline I originally reported for gate 2d
+("2/4 settled") is formally retracted; it was the margin starving the search.
+
+**★★ THE OPPOSITE FAILURE NOW APPEARS, and it exposes a flaw in the anneal itself.** σ is
+**at the 0.5 ceiling on 2/4 seeds** (3 and 4), which spent most of the run at maximum step
+while still accepting 38–40 %. The cause is not the margin size per se — it is that
+**`target_accept` has always been below the noise floor.** If a candidate differs from the
+incumbent by noise alone, the difference of two window scores has sd √2·σ̂, so the
+chance-level acceptance rate is **Φ(−k/√2)**:
+
+| accept_k | acceptance from PURE NOISE | observed |
+|---|---|---|
+| 0.25 (gate 2e) | **43.0 %** | 26 / 30 / 39 / 43 % |
+| 1.00 (gate 2d) | **24.0 %** | 13 / 23 / 16 / 34 % |
+
+**Every run to date has had `target_accept` 0.2 sitting BELOW its own noise floor.** The
+1/5th rule therefore reads a chance-level accept rate as success and inflates σ — which is
+why gate 2 pinned the ceiling at k=1.0 and gate 2e pins it again at k=0.25. Note also that
+observed acceptance never exceeds the noise floor in any run, so **acceptance rate alone
+has never been evidence of signal**; the J-falls-beyond-noise result is, and it is
+independent of it.
+
+**Re-use context / next fix (derived, not guessed):** set **`target_accept = Φ(−accept_k/√2)`**
+— the anneal then grows σ only when acceptance genuinely BEATS chance, and shrinks it
+otherwise, which is the property the 1/5th rule was always meant to have. For k=0.25 that
+is ≈0.43. This is a two-line change and it should be made before any further gate run.
+Keep `accept_k` 0.25 (k≥1.19 would be needed to push the noise floor under a 0.2 target,
+and step 0 measured that as blocking real gradients — the two constraints are only
+satisfiable by fixing the target, not the margin).
+
+Coupling improved but is still not reliably found: 0.322 / 0.568 / 0.227 / **2.000** (mean
+0.779 ± 0.716, up from 0.573) — seed 4 drove it to the new cap. `plan_gain` 0.054 vs hand
+0.05 and `postural` 0.651 vs 0.700 are now close; `amp_target` moved the wrong way
+(0.177 vs hand 0.400) on every seed and is worth its own look.
