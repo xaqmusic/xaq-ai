@@ -655,3 +655,59 @@ TEST(GainEvolver, AlarmDisabledByDefaultIsByteIdenticalToNoAlarm) {
     // With no falls at all the alarm never trips, so enabling it changes nothing.
     EXPECT_EQ(run(0.0), run(2.0));
 }
+
+// ---- the anneal target must be the NOISE FLOOR, not a fixed constant ---------
+
+TEST(GainEvolver, AutoTargetAcceptIsTheNoiseFloor) {
+    // Phi(-k/sqrt(2)) = 0.5*erfc(k/2): the acceptance rate reached while learning
+    // nothing.  A fixed 0.2 sat below this for every k the campaign used, so the
+    // 1/5th rule inflated sigma on chance-level acceptance.
+    struct { double k, want; } cases[] = {
+        {0.0, 0.500}, {0.25, 0.430}, {0.5, 0.362}, {1.0, 0.240}, {2.0, 0.079},
+    };
+    for (auto const& c : cases) {
+        ogma::InProcessBus bus;
+        ogma::GainEvolver ge;
+        ParamMap p = ge_params();
+        p["accept_k"] = c.k;
+        p["target_accept"] = -1.0;          // AUTO
+        ge.on_setup(&bus, p);
+        EXPECT_NEAR(metric_d(ge, "target_eff"), c.want, 0.002)
+            << "accept_k " << c.k;
+    }
+}
+
+TEST(GainEvolver, ExplicitTargetAcceptStillOverridesAuto) {
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params();
+    p["accept_k"] = 0.25;
+    p["target_accept"] = 0.2;               // explicit wins
+    ge.on_setup(&bus, p);
+    EXPECT_NEAR(metric_d(ge, "target_eff"), 0.2, 1e-9);
+}
+
+TEST(GainEvolver, ChanceLevelAcceptanceNoLongerGrowsSigma) {
+    // The gate-2/2e failure in miniature: a search accepting at roughly the noise
+    // floor must NOT be rewarded with a bigger step.  Alternate accept/revert at
+    // ~50% while k=0 (floor 0.50) and sigma must not climb.
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.1);
+    p["accept_k"] = 0.0;                    // noise floor 0.50
+    p["target_accept"] = -1.0;
+    p["anneal_window"] = int64_t{10};
+    p["sigma_max"] = 0.5;
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    Feed good; good.distress = 0.0f;
+    Feed bad;  bad.distress = 1.0f;
+    run_ticks(bus, ge, t, kWarmup, Feed{});
+    for (int g = 0; g < 14; ++g) {          // exactly alternating => 50% acceptance
+        bool win = (g % 2 == 0);
+        run_ticks(bus, ge, t, kWindow, win ? bad : good);
+        run_ticks(bus, ge, t, kWindow, win ? good : bad);
+    }
+    EXPECT_LE(metric_d(ge, "sigma"), 0.1 + 1e-9)
+        << "chance-level acceptance must not inflate sigma";
+}

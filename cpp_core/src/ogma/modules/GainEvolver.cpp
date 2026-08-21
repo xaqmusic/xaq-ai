@@ -195,8 +195,9 @@ ParamSchema GainEvolver::params_schema() const {
         // ---- anneal ----------------------------------------------------------
         {"anneal_window", ParamMutability::HotMutable, "generations of accept history the 1/5th rule reads.",
          ParamValue{int64_t(10)}, ParamValue{int64_t(1)}, ParamValue{int64_t(1000)}},
-        {"target_accept", ParamMutability::HotMutable, "acceptance rate above which σ grows (1/5th-success flavor).",
-         ParamValue{0.2}, ParamValue{0.0}, ParamValue{1.0}},
+        {"target_accept", ParamMutability::HotMutable,
+         "Acceptance rate above which sigma grows. NEGATIVE = AUTO (the default), deriving it as the NOISE FLOOR Phi(-accept_k/sqrt(2)) = 0.5*erfc(accept_k/2) — the rate a search reaches while learning nothing. A fixed 0.2 sat BELOW that floor for every accept_k used (43% at k=0.25, 24% at k=1.0), so the 1/5th rule read chance-level acceptance as success and pinned sigma at its ceiling in gates 2 and 2e alike. Auto means sigma grows only when acceptance actually BEATS chance.",
+         ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{1.0}},
         {"anneal_up", ParamMutability::HotMutable, "σ multiplier when accepting too often.",
          ParamValue{1.5}, ParamValue{1.0}, ParamValue{10.0}},
         {"anneal_down", ParamMutability::HotMutable, "σ multiplier when accepting too rarely.",
@@ -260,6 +261,7 @@ ParamMap GainEvolver::current_params() const {
     m["flow_vel_norm"] = flow_vel_norm_;
     m["anneal_window"] = anneal_window_;
     m["target_accept"] = target_accept_;
+    m["target_eff"]    = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
     m["anneal_up"]     = anneal_up_;
     m["anneal_down"]   = anneal_down_;
     m["sigma_min"]     = sigma_min_;
@@ -575,6 +577,22 @@ void GainEvolver::mutate_candidate() {
             gain_min_[k], gain_max_[k]);
 }
 
+// The acceptance rate a search achieves while learning NOTHING.  If a candidate
+// differs from the incumbent by noise alone, the difference of two independent
+// window scores has sd sqrt(2)*sigma_hat, so the chance of clearing a margin of
+// accept_k*sigma_hat is Phi(-accept_k/sqrt(2)) = 0.5*erfc(accept_k/2).
+//
+// This is the number the 1/5th rule must be compared against.  A FIXED target
+// (0.2) sat BELOW this floor for every accept_k the campaign used — 43% at
+// k=0.25, 24% at k=1.0 — so the rule read a chance-level accept rate as success
+// and inflated sigma to its ceiling.  Deriving the target instead means sigma
+// grows only when acceptance genuinely BEATS chance, which is the property the
+// rule was always meant to have (doctrine §5: adapt the constant from the
+// system's own dynamics, never hand-tune it to a scale).
+double GainEvolver::noise_floor_rate() const {
+    return 0.5 * std::erfc(accept_k_ * 0.5);
+}
+
 void GainEvolver::anneal(bool accepted) {
     accept_hist_.push_back(uint8_t(accepted));
     while (int64_t(accept_hist_.size()) > anneal_window_) accept_hist_.pop_front();
@@ -582,7 +600,8 @@ void GainEvolver::anneal(bool accepted) {
     double rate = 0.0;
     for (uint8_t a : accept_hist_) rate += a;
     rate /= double(accept_hist_.size());
-    sigma_ = std::clamp(sigma_ * (rate > target_accept_ ? anneal_up_ : anneal_down_),
+    double target = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
+    sigma_ = std::clamp(sigma_ * (rate > target ? anneal_up_ : anneal_down_),
                         sigma_min_, sigma_max_);
 }
 
@@ -850,6 +869,7 @@ nlohmann::json GainEvolver::metrics() const {
     m["flow_term"]     = inc_terms_.flow_term;
     m["loaded_min"]    = inc_terms_.loaded_min;
     m["sigma_est"]     = sigma_est();
+    m["target_eff"]    = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
     m["accept_margin"] = accept_margin_;
     m["noise_n"]       = noise_n_;
     m["vec"] = (phase_ == Phase::Candidate) ? candidate_ : incumbent_;

@@ -136,6 +136,7 @@ private:
     void  publish_vector(bool candidate);
     void  mutate_candidate();
     void  anneal(bool accepted);
+    double noise_floor_rate() const;   // Phi(-accept_k/sqrt(2)) — chance-level acceptance
     Terms score(WindowStats const& w) const;
     double sigma_est() const;      // sd of one window's J, from revert pairs
     double per_leg_loaded_min(WindowStats const& w) const;
@@ -257,7 +258,7 @@ private:
 
     // ---- anneal params -------------------------------------------------------
     int64_t anneal_window_ = 10;
-    double  target_accept_ = 0.2;
+    double  target_accept_ = -1.0;   // <0 = AUTO: derive the noise floor from accept_k
     double  anneal_up_     = 1.5;
     double  anneal_down_   = 0.85;
     double  sigma_min_     = 0.08;   // floor: never below measurable resolution
