@@ -3245,18 +3245,25 @@ seed 4 t=−8.73) with the other two trending down but not significantly. The an
 reports the slope test alongside; **earlier gate verdicts were scored on the weaker test
 and are understated to that extent.**
 
-**⚠ THE COST, and it is the next problem: falls ROSE — 54.75 → 66.50.** This is expected
-rather than mysterious: step 0 measured `corr(coupling, falls) = +0.220`, so the very
-coordination the search now correctly finds carries slightly *more* falling, and nothing
-in J penalises it (`w_falls` is 0 by design; the G1 guard only blocks per-comparison
-regression, not a slow drift across many accepted steps). Seed 1 is the casualty — 88
-falls, alarm tripped 25.8 % of generations peaking at 32.97, and the only seed whose J
-regressed in the final block (2.071 → 2.264).
+**⚠ A WATCH ITEM, NOT A FINDING — falls read 54.75 → 66.50, which is NOT significant.**
+I first recorded this as a cost of the coupling result; that overstates it. At n=4 the
+spread swamps the difference: 54.75 ± 13.30 vs 66.50 ± 20.01, **t = 0.98, df 6, p > 0.3.**
+It is a direction to watch, nothing more, and it would be exactly the §3.3 error to build
+a lever against it at this power.
 
-**Re-use context:** the criterion is now good enough to find coordination and bad enough
-to drift into falling. Job #1 (the 3/20 falls tail) is directly threatened by this, so the
-next lever is a falls channel that resists drift without reintroducing 81 % variance —
-candidates: the alarm gating a *ratchet* on accumulated falls rather than only tightening
-G1, or a small non-zero `w_falls` now that the other terms are well-conditioned enough to
-absorb it. Do NOT simply re-raise `w_falls` to 1.0; that is what the whole noise campaign
-removed.
+What IS specific and real is **one struggling seed**: seed 1 posts 88 falls, trips the
+alarm on 25.8 % of generations (peak 32.97 against a threshold of 8), and is the only seed
+whose J regressed in its final block (2.071 → 2.264). That is the ledger's recurring "one
+bad seed" pattern, not a population shift.
+
+There is a mechanism that would explain a real rise if one exists — step 0 measured
+`corr(coupling, falls) = +0.220`, so the coordination the search now finds may carry
+slightly more falling, and nothing in J penalises it (`w_falls` 0 by design; G1 blocks
+per-comparison regression, not slow drift across many accepted steps). **But that
+mechanism is a hypothesis awaiting power, not a diagnosis.**
+
+**Re-use context:** settle it at power rather than patching it — job #1 runs at n≥20 and
+measures falls directly, so it answers this question as a side effect of delivering the
+phase's actual goal. Only if n≥20 confirms a rise should a falls channel be built, and
+then as a small non-zero `w_falls` or an alarm-gated ratchet — **never a return to
+`w_falls` 1.0**, which is what the entire noise campaign removed.
