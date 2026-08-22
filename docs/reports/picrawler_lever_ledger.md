@@ -3156,6 +3156,16 @@ per-gain `sigma_scale` (coupling's range is the widest at 3.0).
 MotorEPMv2's schema documents max **2.0**, and `set_param` does not enforce schema ranges.
 The measurement above says >2.0 is worse anyway.
 
+⚠ **OPERATOR CORRECTION (2026-08-22) — the chassis-collide distinction is smaller than I
+claimed.** I set `OGMA_PICRAWLER_CHASSIS_COLLIDE=1` from gate 2 onward and wrote that
+ghost-chassis history "is NOT comparable", reasoning that `height_homeo_gain` is under
+evolution and a ghost belly would hide what sagging costs. The operator reports from the UI
+that **the hip1 joints ground against the floor at much the same height as a solid chassis
+does**, so the belly rarely becomes the limiting contact either way. The flag is therefore
+worth keeping for honesty, but **"not comparable" overstates it** — ghost and solid runs are
+closer than that phrasing implies, and no A/B here has actually measured the difference.
+Treat cross-protocol comparisons as mildly caveated rather than void.
+
 ### ★★★ 2026-08-20 — GATE 2 FINAL: 3/4 seeds converge; the freeze question is ANSWERED
 
 **Verdict: `PARTIAL`, best of the campaign.** Factory arm, arena, solid chassis, 500 k
