@@ -3334,3 +3334,44 @@ the env var under the UI, so a corridor default would silently give the wrong wo
 σ=0 so it cannot drift while being watched. **The operator's eye remains the promotion
 gate** — the numbers say steadier, and whether the rear landing still *looks* loaded is a
 question for the UI, not the table.
+
+### ★★ 2026-08-22 — ROBUSTNESS IN THE REAL SCENARIO: no evidence of long-term damage (underpowered)
+
+**Verdict: `NULL` — and the null is the wanted answer, but it is a weak one.** The operator's
+question: does a LIVE evolver damage the gait over long horizons in the real use case, with
+obstacles and perturbation? Design: **the same config file in both arms, differing ONLY in
+`mutation_sigma` set at tick 1**, so "the evolver did it" cannot be confused with "the body
+did it". Corridor (hump → rumble → pyramids) with outer-wall recentering ON, so the body
+traverses the obstacle curriculum **repeatedly**. 400 k ticks, n=4, paired seeds.
+
+| whole-run mean | live | frozen | Δ | t (df 3) |
+|---|---|---|---|---|
+| falls | 68.75 | 65.75 | +3.00 | **0.18** |
+| \|tilt\| | 0.659 | 0.432 | +0.227 | 1.07 |
+| fwd_v | 0.083 | 0.096 | −0.013 | −1.46 |
+| energy | 0.384 | 0.390 | −0.007 | −1.28 |
+| criterion J | 2.603 | 2.514 | +0.089 | 0.89 |
+| within-run tilt slope | +0.243 | −0.120 | +0.362 | 0.75 |
+
+**Nothing is significant** (all |t| ≤ 1.46 against a 3.18 threshold). Most directly: **falls
+are indistinguishable** (68.75 vs 65.75, t=0.18), and falls is where gait damage would show
+first. The rear-landing consumer did not collapse either — live ran *above* frozen on
+rear-land events throughout.
+
+**⚠ THE POWER, STATED HONESTLY.** Paired fall differences were −41 / +40 / +6 / +7 (sd 38),
+so the **minimum detectable difference at n=4 is ~60 falls — a ~90 % change.** "No significant
+damage" here means **"no LARGE damage"**; this design cannot rule out a modest one, and the
+mildly unfavourable direction on tilt, fwd_v and J (all ns) is exactly what a modest effect
+would look like if it were real. Settling it needs n≥12, roughly 6 h of compute.
+
+**A METHOD NOTE worth keeping: the first cut of this analysis was wrong.** Reporting Q4−Q1
+per quarter made the live arm look clearly damaged (falls +20.25 vs frozen −3.25). But both
+arms swing violently quarter to quarter — live falls ran 15 / 14 / 5 / **35**, frozen ran
+11 / **32** / 17 / 7 — so Q4−Q1 was reporting *which quarter happened to spike*, not a trend.
+Whole-run paired means killed the artefact. **On a metric this bursty, an endpoint difference
+is not a trend; fit or pool instead.**
+
+**Context:** the corridor is genuinely harsher than the arena — ~16–17 falls per 100 k ticks
+against the arena's ~9.5 — so the stress test did stress. Also note the frozen arm drifts on
+its own (its falls ranged 29–108 across seeds with no search running at all), which is why
+the control was indispensable: without it, live's tilt rise would have read as evolver damage.
