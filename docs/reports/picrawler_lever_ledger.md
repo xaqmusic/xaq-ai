@@ -3267,3 +3267,60 @@ measures falls directly, so it answers this question as a side effect of deliver
 phase's actual goal. Only if n≥20 confirms a rise should a falls channel be built, and
 then as a small non-zero `w_falls` or an alarm-gated ratchet — **never a return to
 `w_falls` 1.0**, which is what the entire noise campaign removed.
+
+### ★★★ 2026-08-22 — JOB #1 AT POWER: the evolver's own point erases the falls tail
+
+**Verdict: `WORKING` — the first gain vector this project did not choose by hand, and it
+beats the hand point at n=20.** Four arms differing ONLY in the eight gains (evolver
+present at σ=0 in all, so instruments live and nothing publishes), arena, **n=20**, 12 000
+ticks, solid chassis, recentering off. The hand point was **re-run as a fresh control**
+rather than compared to the recorded 3/20 tail, which was measured on a ghost chassis —
+and `height_homeo_gain` is one of the evolved gains, so a ghost belly would hide what it
+costs.
+
+| metric | hand (control) | j1s1 | **j1s4 (WINNER)** | j1mean |
+|---|---|---|---|---|
+| falls | 0.25 ± 0.55 (**4/20**) | 0.00 (0/20) | **0.00 (0/20)** | 0.25 (4/20) |
+| net_disp | 10.40 ± 2.10 | 9.87 ± 1.57 | **10.55 ± 1.20** | 10.45 ± 1.31 |
+| straight | 0.658 ± 0.10 | 0.712 | **0.702 ± 0.04** | 0.679 |
+| tilt_sd | 0.127 ± 0.11 | 0.085 | **0.080 ± 0.04** | 0.151 ± 0.13 |
+| amp_min | 0.580 ± 0.11 | 0.563 | **0.625 ± 0.02** | 0.600 |
+| step_bal | 0.137 | 0.106 | 0.095 | **0.203** |
+| **rlt** (rear land) | 3847 | **2194 (−43 %)** | **3605 (−6 %)** | 3296 (−14 %) |
+| **rpt** (rear push) | 12154 | 11934 | **12298 (+1 %)** | 11923 |
+
+**j1s4 meets job #1's bar exactly: the falls tail is gone (4/20 → 0/20) AND the loaded rear
+touchdowns hold** (rlt −6 %, rpt +1 %). The rival j1s1 also zeroed falls but gave back 43 %
+of the rear-landing consumer — the precise failure job #1 forbade — so the acceptance
+criterion did its job in discriminating them.
+
+**★ THE LOUD RESULT IS CONSISTENCY, NOT THE MEAN.** Paired per-seed tests (same 20 seeds)
+show every metric improving in direction but only marginally: falls t=−2.03, amp_min
+t=+1.92, tilt_sd t=−1.78, straight t=+1.80 — all p≈0.06–0.09, **none significant**, and
+falls alone is Fisher p=0.106. What IS loud is the collapse in across-seed spread:
+
+| | sd hand | sd j1s4 | F (crit 2.53) |
+|---|---|---|---|
+| amp_min | 0.111 | **0.018** | **37.8** |
+| tilt_sd | 0.107 | 0.036 | 9.1 |
+| straight | 0.103 | 0.045 | 5.3 |
+| net_disp | 2.10 | 1.20 | 3.1 |
+
+All significant. **The hand point works well on most seeds and fails on a few; the evolved
+point works on all of them.** That is precisely what PART IV was launched to fix — the
+charter's opening argument was "a fixed gain vector cannot be right for every seed's
+attractor", and the answer turns out to be that a *searched* fixed vector can be, where a
+hand-found one was not. ⚠ It is a ROBUSTNESS win, not a speed win: means are statistically
+marginal and `step_bal` is slightly worse (0.137 → 0.095).
+
+**★ NEGATIVE WORTH KEEPING — averaging multi-modal optima FAILS.** The four seeds settled
+in genuinely different basins (one abandoned coupling entirely at 0.14 while others held
+1.0–1.9). `j1mean`, their arithmetic mean, is **no better than the hand point on falls
+(4/20) and WORSE on tilt_sd (0.151 vs 0.127)** — it lands between basins rather than in
+one. Do not average evolved vectors; pick a seed and test it.
+
+**Promoted to the launcher** as `…__j1s4.json` with `gym_mode: arena` (metadata outranks
+the env var under the UI, so a corridor default would silently give the wrong world) and
+σ=0 so it cannot drift while being watched. **The operator's eye remains the promotion
+gate** — the numbers say steadier, and whether the rear landing still *looks* loaded is a
+question for the UI, not the table.
