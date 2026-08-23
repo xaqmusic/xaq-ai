@@ -3420,3 +3420,56 @@ run 16–17 per 100 k ticks against the arena's ~9.5, and the frozen arm alone s
 falls across seeds. Resolving a modest live-search effect here needs either many more seeds
 or a less variable scenario. The burst metric is the most promising discriminator to build
 the next comparison on.
+
+### ★★★ 2026-08-23 — THE CRITERION SEES 3 OF 8 GAINS: per-gain landscapes measured
+
+**Verdict: `WORKING` as a diagnosis, and it reframes the search.** Each gain swept across
+its full declared range while the other seven were held at the n=20-validated operating
+point, search in observer mode, 6 levels × 3 windows, 3 seeds, ascending on odd seeds and
+descending on even. Authority = landscape span ÷ within-level scatter.
+
+| gain | best J at | span/noise | authority |
+|---|---|---|---|
+| **amp_target** | 0.15 | **3.60** | STRONG |
+| **coupling_gain** | 1.6 | **3.00** | STRONG |
+| **postural_gain** | 1.5 | **2.34** | STRONG |
+| height_homeo_gain | 0.1 | 1.39 | weak |
+| plan_gain | 0.12 | 1.11 | weak ⚠ order-dominated |
+| rear_push_ext | 1.2 | 1.04 | weak |
+| rear_land_gain | 0.3 | 0.93 | **FLAT** ⚠ order-dominated |
+| rear_knee_plant | 0 | 0.84 | **FLAT** |
+
+**1. Three gains carry the search.** `amp_target` is cleanly monotone (J 1.865 → 2.843 as
+amplitude rises 0.15 → 0.8); `coupling_gain` is a clean bowl with its floor at 1.6.
+
+**2. `coupling_gain`'s optimum REPLICATES.** The 2026-08-20 step-0 sweep put it at 1.2–1.6
+from a different operating point; this puts it at 1.6. It also lands on the operator's
+hand-found 1.55. Independent measurement, same answer.
+
+**3. ★ THE REAR-LANDING GAINS ARE INVISIBLE TO THE CRITERION.** `rear_land_gain` and
+`rear_knee_plant` — the pair PART III promoted and the operator hand-tuned — have
+landscapes below their own scatter. This retro-explains behaviour recorded as puzzling:
+gate 2f's rear gains scattered across seeds (rear_push ended 0.006 / 0.79 / 0.34 / 0.03)
+not because the search failed but because there is no slope to climb. **A gain the
+criterion cannot sense is one the search can only wander in**, and eight dimensions of
+which five are weak-or-flat is a large part of why independent seeds land in different
+basins.
+
+**4. ★ TWO EARLIER "ANOMALIES" WERE THE SEARCH BEING RIGHT.** `amp_target` drifting *away*
+from the hand point (0.177 against 0.400) and `postural_gain` climbing were both recorded
+as odd. The landscapes show the criterion prefers amplitude 0.15 and postural 1.5; the
+search was tracking its criterion faithfully. Whether the criterion is *right* to prefer
+those is a separate question the operator's eye should settle.
+
+**⚠ 5. TWO OPTIMA SIT ON THEIR RANGE BOUNDARIES.** `amp_target` best at 0.15 (range
+minimum) and `postural_gain` best at 1.5 (range maximum) — so the true optima may lie
+outside the declared search bounds, and the search is being truncated. Widening those
+bounds is a prerequisite for any claim that the search found *the* operating point.
+
+**⚠ 6. The hysteresis check earned its place**: `rear_land_gain` and `plan_gain` both show
+an ascending/descending gap LARGER than their landscape span, so their apparent optima are
+sweep-order artefacts, not landscape.
+
+**Scope:** measured at ONE operating point with seven gains fixed, so interactions are
+invisible here — a gain flat at this point could matter elsewhere. The random-init basin
+study addresses exactly that.
