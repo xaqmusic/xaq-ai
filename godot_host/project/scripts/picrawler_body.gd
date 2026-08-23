@@ -502,6 +502,33 @@ var _tq_n: float = 0.0
 # cheaply and still spike into servo saturation, which is what burns hardware.
 const ENERGY_PEAK_WINDOW_TICKS: int = 50    # 1 s at the 50 Hz brain tick
 const ENERGY_EMA_ALPHA: float = 0.01        # ~2 s trend
+# ---- SUSTAINED FORWARD BURSTS (operator's metric, 2026-08-23) --------------
+# The corridor only permits SHORT runs of forward travel — but the operator's
+# read is that when runs of >=3 s do emerge they mark a genuinely better config,
+# in a way that mean fwd_v cannot show: a body that lurches and stalls can post
+# the same mean as one that actually travels.  Measured PER TICK, because the
+# body log samples every 60 ticks (1.2 s) and a 3 s burst is only 2.5 samples
+# there — far too coarse to time a run.
+# Reported as: how many qualifying bursts, what fraction of the run was spent in
+# one (duty), and the longest single burst.
+# A burst is a 3-SECOND ROLLING MEAN at or above BURST_MIN_SPEED — not every tick
+# above it.  Measured: instantaneous fwd_v swings -0.44..+0.56 (sd 0.147 about a
+# mean of 0.023) and sign-flips every stride, so an all-ticks rule can never reach
+# 3 s and would read 0 for every config, discriminating nothing.  The rolling mean
+# asks the honest question instead: did the body actually TRAVEL for three seconds,
+# tolerating the within-stride surge and stall that a walking gait must have.
+const BURST_MIN_SPEED: float = 0.06        # m/s over the window (~18 cm in 3 s)
+const BURST_MIN_TICKS: int = 150           # 3.0 s at the 50 Hz brain tick
+var burst_count: int = 0
+var burst_duty: float = 0.0
+var burst_longest_s: float = 0.0
+var _burst_hist: PackedFloat32Array = PackedFloat32Array()
+var _burst_idx: int = 0
+var _burst_sum: float = 0.0
+var _burst_filled: int = 0
+var _burst_active: int = 0
+var _burst_ticks_total: int = 0
+var _burst_samples: int = 0
 var energy_now: float = 0.0
 var energy_peak_1s: float = 0.0
 var energy_avg: float = 0.0
@@ -5887,6 +5914,26 @@ func _step_one() -> void:
 	# search reward sideways crab as much as forward; signed forward rewards
 	# forward-aligned motion (reduces crab + closes a speed-magnitude Goodhart).
 	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(Vector2(sin(yaw), cos(yaw)))
+	# Sustained-forward-burst tracker: rolling 3 s mean of fwd_v (see BURST_MIN_SPEED).
+	if _burst_hist.size() != BURST_MIN_TICKS:
+		_burst_hist.resize(BURST_MIN_TICKS)
+		for _bi in range(BURST_MIN_TICKS): _burst_hist[_bi] = 0.0
+	_burst_sum -= _burst_hist[_burst_idx]
+	_burst_hist[_burst_idx] = fwd_v
+	_burst_sum += fwd_v
+	_burst_idx = (_burst_idx + 1) % BURST_MIN_TICKS
+	_burst_filled = mini(_burst_filled + 1, BURST_MIN_TICKS)
+	_burst_samples += 1
+	# only judge once a full 3 s window exists, else a fast first tick reads as a burst
+	if _burst_filled >= BURST_MIN_TICKS:
+		if (_burst_sum / float(BURST_MIN_TICKS)) >= BURST_MIN_SPEED:
+			if _burst_active == 0: burst_count += 1     # count the ONSET
+			_burst_active += 1
+			_burst_ticks_total += 1
+			burst_longest_s = maxf(burst_longest_s, float(_burst_active) * TAU)
+		else:
+			_burst_active = 0
+	burst_duty = float(_burst_ticks_total) / maxf(1.0, float(_burst_samples))
 	var ang_v: float = _chassis.angular_velocity.y
 
 	# ---- Auto-reset on belly-up inversion (opt-in training safety) ----
@@ -11150,6 +11197,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# ENERGY (servo current) — the same three reads the HUD shows, mirrored here so
 	# the trend is analysable offline and so "the HUD number is alive" is verifiable
 	# from a headless run rather than only by eye.
+	line["bursts"]  = burst_count
+	line["burst_duty"] = snappedf(burst_duty, 0.0001)
+	line["burst_max"]  = snappedf(burst_longest_s, 0.01)
 	line["e_now"]  = snappedf(energy_now, 0.0001)
 	line["e_peak"] = snappedf(energy_peak_1s, 0.0001)
 	line["e_avg"]  = snappedf(energy_avg, 0.0001)
