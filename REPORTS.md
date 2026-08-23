@@ -72,6 +72,11 @@ it and move on.
 The same applies to *"to be fair"*, *"I should note"*, *"it must be said"*, and
 *"transparently"*.
 
+The rule is symmetric: **do not certify your own candour after the fact either.**
+*"That is reported as a result, not buried"*, *"we state this openly"*, *"this is not
+hidden"* fail exactly as the pre-qualifiers do, by inviting the reader to ask what else
+might have been buried. Report the result; the reporting of it is the candour.
+
 ### Banned constructions
 
 These are the tells of machine-written prose. They are not wrong so much as they are
@@ -127,6 +132,11 @@ The distinction worth holding:
 Also excluded from reports: self-correction of earlier drafts, apologies, and any sentence
 whose subject is the author's own reasoning.
 
+This extends to **the document's own history**. A report describes the system, not its
+own drafting: *"the external baseline this report had been missing"*, *"a section we
+previously lacked"*, *"now finally measured"*. The reader did not read the earlier draft
+and cannot be told what it was missing. Present what is here, not the gap it closed.
+
 ## 6. Jargon, abbreviations, and symbols
 
 - **No project-internal jargon** unless it is defined in the executive summary and earns
@@ -134,8 +144,13 @@ whose subject is the author's own reasoning.
   term used twice.
 - **No code identifiers, parameter names, or variable symbols in prose.** Write "the
   strength of the coupling between legs", not `coupling_gain`. Configuration names,
-  filenames, and parameters belong in an appendix or a methods note where a replicator
-  can find them.
+  source filenames, and parameters belong in an appendix or a methods note where a
+  replicator can find them.
+- **Companion documents are citations, not identifiers, and belong inline.** This rule
+  bans code, not references. A reader who meets "the doctrine already required this"
+  with no antecedent cannot follow it up; name the document where they first need it and
+  link it. Burying a cross-reference in an appendix to satisfy the line above is a
+  misreading of it.
 - **Expand every abbreviation on first use**, in the standard form: "Episodic Predictive
   Module (EPM)". Then use the short form consistently.
 - **Greek letters and mathematical symbols** get a plain-language gloss the first time:
@@ -161,6 +176,9 @@ whose subject is the author's own reasoning.
 - [ ] Scope narrows monotonically; stopping anywhere leaves nothing important behind
 - [ ] No "honest"/"to be fair"/"plainly" pre-qualifiers
 - [ ] No process narration, no self-correction, no apologies
+- [ ] No sentences about the document's own drafting or what an earlier draft lacked
+- [ ] No claims that the report is being candid, before or after the fact
+- [ ] Companion documents named and linked where first needed
 - [ ] Every number has its sample size; every null has its power
 - [ ] Falsified hypotheses framed as findings
 - [ ] Ends with concrete next work
