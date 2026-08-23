@@ -3559,3 +3559,61 @@ The runner greps `ge_fmf:1` from every log before reporting, per §3.2 #7.
 **Not touched:** the forward-only convention (`clamp` at 0 means steady *backward* travel
 scores zero magnitude) is unchanged in both forms. It is a real directional preference
 inside a criterion that is supposed to have none, and it is a separate lever.
+
+### ★★★ 2026-08-23 — AUDIT: the GainEvolver criterion's inputs against Markov-blanket discipline
+
+**Verdict: five of six inputs are clean; `fwd_v` is an oracle, and today's flow fix
+INCREASED the criterion's dependence on it.** Every criterion input traced to its
+publisher in `picrawler_body.gd` rather than to the plan doc's description of it.
+
+| input | where it comes from | verdict |
+|---|---|---|
+| `upright` (basis.y.y) | `_chassis…basis.y.y` = body-up · world-up | **LEGAL** — literally what an accelerometer reads |
+| `joint_torque` → energy | `_prev_torque_*/MAX_SERVO_TORQUE`, 1 tick delayed | **LEGAL** — servo current |
+| `foot_load` → unloaded | `_foot_load_ema / static weight` | **LEGAL** — FSR / servo-current analog |
+| `foot_contact` | physics `get_colliding_bodies()` | **SIM-ONLY, not an oracle** — a foot switch is physically realisable and cheap; a fidelity gap, not a god's-eye one |
+| `distress` | `perch × stall`, stall = **world-XZ chassis displacement** | **CONTAMINATED** — but `w_distress = 0.0` in every shipped config, so it is INERT. Not a live violation |
+| `imu[2]` = `fwd_v` → flow | `_chassis.linear_velocity` projected on `basis.get_euler().y` (`picrawler_body.gd:5916`) | **ORACLE** |
+
+**1. `fwd_v` is not IMU-derived. It is the rigid body's true world-frame velocity,**
+projected onto its true world yaw — god's-eye twice over. No accelerometer yields it; a
+real legged robot has no odometry, and integrating acceleration to velocity drifts without
+bound. The codebase already says so in three separate comments ("unlike `fwd_v` this is a
+LAWFUL brain input"), and the legitimacy audit flags it as "not free — worth its own pass."
+The GainEvolver reads only `values[2]`, so the absolute-yaw components are not consumed
+directly — but they are baked into the projection.
+
+**2. ★ TODAY'S FLOW FIX INCREASED THE EXPOSURE, and that must be recorded as a cost of it.**
+Under the legacy product the magnitude factor was a hard clamp that SATURATED at 0.05 m/s,
+so across the measured range the oracle's magnitude contributed a constant and only its
+volatility varied. The min form deliberately removed that ceiling — which is what makes the
+term work — so the criterion now responds **monotonically, across its whole range, to a
+quantity the robot cannot sense.** The fix is right by the criterion's own logic and worse
+by this principle at the same time. Both are true and neither cancels the other.
+
+**3. ★ `fwd_v` CANNOT DISTINGUISH FAST CIRCLING FROM FAST TRAVEL** — it is body-frame
+forward speed, so a body carving a tight circle reads as flowing beautifully. This is the
+ledger's own recorded blind metric ("high fwd_v + low net_disp = fast circling"), and the
+flow term has no complement for it. Today's change made this term stronger without adding
+that complement. **The legal complement is available and unused: `imu[3]` = `ang_v` is a
+GYROSCOPE reading — fully egocentric.** Penalizing sustained |ang_v| would close the
+circling hole without adding a gram of oracle.
+
+**4. Scale of the exposure.** Flow is 1 of 7 weight units (~14%), and energy at 4.0 —
+the dominant term — is legal. But weight share understates it: on `coupling_gain`'s
+landscape the flow term accounted for **105% of the total movement in J**. The single most
+convincing result in PART IV, coupling's replicated optimum, rests almost entirely on the
+oracle-fed term.
+
+**5. The legal replacement is a SENSOR, not a smarter term** (doctrine §1 step 2:
+"if no egocentric observation carries the signal, the fix is a new sensor"). The standard
+legged-robot answer is **planted-foot kinematic odometry** — while a foot is planted, joint
+angles say how the body moved relative to it, needing only encoders and contact, both of
+which this body already publishes. This is the same build the ledger already carries as
+DEFERRED under post-plant slip ("planted-foot FK drift"), which makes it one build serving
+two deferred needs. Optical flow from the existing forward camera is the second candidate.
+
+**Not a reason to stop.** The charter sanctioned one speed-flavored term knowingly, and it
+is named in the config, the code, and the logs rather than hidden. But "sanctioned" was
+priced against a term whose magnitude was saturated out; it is a bigger loan now, and PART
+IV's headline results should not be reported as oracle-free.
