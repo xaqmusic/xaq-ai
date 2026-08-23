@@ -5,7 +5,7 @@
 > the Cell rebuild, so its architectural examples may not match current module names. The
 > *concepts* are current; verify any specific claim about the code against the source.
 
-# AMI-Ogma Glossary
+# xaq-ai Glossary
 ### Terms, Abbreviations, and Jargon for the "Climbing the Active Inference Mountain" Series
 
 **Audience:** Someone who listens to AI podcasts and understands the landscape but is not a mathematician or ML researcher. Definitions favor intuition and analogy over precision.
