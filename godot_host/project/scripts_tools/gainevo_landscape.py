@@ -92,26 +92,51 @@ def main(d):
         print(f"  {g}")
         print("    level " + "  ".join(f"{levels[i]:>7.3g}" for i in range(N_LEVELS)))
         print("    J     " + "  ".join(f"{means[i]:>7.3f}" for i in range(N_LEVELS)))
+        # RESOLVABILITY.  The argmin of a noisy landscape is not an "ideal" — every
+        # level within one noise width of the best is a level the criterion cannot
+        # tell apart from the best.  Reporting the argmin as a target invites a
+        # displacement test the criterion is not sharp enough to pass.  What it CAN
+        # do is separate a good BAND from a bad one, so that is what gets printed.
+        good = [i for i in range(N_LEVELS)
+                if means[i] == means[i] and means[i] - means[best] <= noise]
+        bad = [i for i in range(N_LEVELS)
+               if means[i] == means[i] and means[i] - means[best] > 2 * noise]
+        print("    band  " + "  ".join(
+            f"{('  GOOD' if i in good else ('   BAD' if i in bad else '     ·')):>7}"
+            for i in range(N_LEVELS)))
         # hysteresis: same level reached from opposite directions
         hys = [abs(st.mean(asc[i]) - st.mean(desc[i]))
                for i in range(N_LEVELS) if asc[i] and desc[i]]
         h = max(hys) if hys else float("nan")
         print(f"    span {span:.3f}   within-level noise {noise:.3f}   span/noise {ratio:.2f}  -> {verdict}")
-        print(f"    best J at {levels[best]:.3g}   worst-case asc/desc gap {h:.3f}"
+        gtxt = ", ".join(f"{levels[i]:.3g}" for i in good)
+        btxt = ", ".join(f"{levels[i]:.3g}" for i in bad) if bad else "(none in range)"
+        print(f"    argmin at {levels[best]:.3g}, but the GOOD band is {{{gtxt}}} — "
+              f"indistinguishable at this noise")
+        print(f"    BAD band {{{btxt}}}   worst-case asc/desc gap {h:.3f}"
               f"{'   ** exceeds span: order effect, not landscape **' if h == h and h > span else ''}")
         print()
-        summary.append((g, levels[best], ratio, verdict))
+        summary.append((g, levels[best], ratio, verdict,
+                        [levels[i] for i in good], [levels[i] for i in bad]))
 
-    print("=== MEASURED IDEALS (for the displacement-recovery test) ===")
-    print(f"  {'gain':<20}{'ideal':>9}{'span/noise':>12}   authority")
-    for g, best, ratio, verdict in summary:
-        print(f"  {g:<20}{best:>9.3g}{ratio:>12.2f}   {verdict}")
-    usable = [g for g, _, r, _ in summary if r == r and r >= 1.0]
-    print(f"\n  {len(usable)}/{len(summary)} gains have a landscape the search could climb:")
-    print(f"    {', '.join(usable) if usable else '(none)'}")
-    print("  Gains below that bar are excluded from recovery testing: a flat landscape")
-    print("  offers no gradient, so failure to recover would measure the criterion, not")
-    print("  the search.")
+    print("=== WHAT THE CRITERION CAN RESOLVE (the displacement-recovery design) ===")
+    print(f"  {'gain':<20}{'argmin':>8}{'sp/noise':>10}   {'good band':<22}{'bad band':<20} authority")
+    for g, best, ratio, verdict, good, bad in summary:
+        gt = f"{min(good):.3g}–{max(good):.3g}" if len(good) > 1 else f"{good[0]:.3g}" if good else "—"
+        bt = f"{min(bad):.3g}–{max(bad):.3g}" if len(bad) > 1 else f"{bad[0]:.3g}" if bad else "none in range"
+        print(f"  {g:<20}{best:>8.3g}{ratio:>10.2f}   {gt:<22}{bt:<20} {verdict}")
+    usable = [(g, good, bad) for g, _, r, _, good, bad in summary
+              if r == r and r >= 2.0 and bad]
+    print(f"\n  {len(usable)}/{len(summary)} gains are testable by displacement — they need BOTH a")
+    print("  landscape above the noise AND a bad band inside the declared range to be")
+    print("  displaced into:")
+    for g, good, bad in usable:
+        print(f"    {g:<20} displace into {min(bad):.3g}–{max(bad):.3g}, "
+              f"recovery = re-entering {min(good):.3g}–{max(good):.3g}")
+    print("\n  Gains without a landscape are excluded: a flat one offers no gradient, so a")
+    print("  failure to recover would measure the criterion, not the search.  And the test")
+    print("  is BAND RE-ENTRY, never return-to-argmin — the criterion cannot resolve a")
+    print("  point inside its own good band, so demanding one would fail a working search.")
 
 
 if __name__ == "__main__":

@@ -3461,10 +3461,53 @@ as odd. The landscapes show the criterion prefers amplitude 0.15 and postural 1.
 search was tracking its criterion faithfully. Whether the criterion is *right* to prefer
 those is a separate question the operator's eye should settle.
 
-**⚠ 5. TWO OPTIMA SIT ON THEIR RANGE BOUNDARIES.** `amp_target` best at 0.15 (range
-minimum) and `postural_gain` best at 1.5 (range maximum) — so the true optima may lie
-outside the declared search bounds, and the search is being truncated. Widening those
-bounds is a prerequisite for any claim that the search found *the* operating point.
+**⚠ 5. RETRACTED SAME DAY — "two optima sit on their range boundaries, so the search is
+being truncated."** `amp_target`'s argmin is at its range minimum and `postural_gain`'s at
+its range maximum, and the first reading was that the true optima lie outside the declared
+bounds. The resolvability check below kills that: both argmins sit *inside a flat band*,
+so they are the argmin of noise, not evidence of a wall. **Widening the bounds is not
+required.** The error was reading an argmin off a landscape without first asking what the
+landscape can resolve — the same mistake in a new costume as gate 2d's "σ annealed to the
+floor, therefore converged."
+
+**★ 6. THE CRITERION RESOLVES BANDS, NOT POINTS — and this is what makes the
+displacement test designable.** Scoring every level against one within-level noise width:
+
+| gain | argmin | GOOD band (indistinguishable from best) | BAD band |
+|---|---|---|---|
+| amp_target | 0.15 | **0.15 – 0.41** | 0.67 – 0.8 |
+| coupling_gain | 1.6 | **1.2 – 2.0** | 0 – 0.8 |
+| postural_gain | 1.5 | **0.66 – 1.5** | 0.1 |
+
+So the criterion cleanly separates a good region from a bad one on each of the three, and
+cannot pick a point inside the good region. **The recovery test is therefore BAND RE-ENTRY,
+never return-to-argmin** — demanding a point the criterion cannot resolve would fail a
+working search and produce a false negative. `gainevo_landscape.py` now prints bands and
+refuses to nominate an "ideal", so the tool cannot reproduce the over-read.
+
+**★ 7. THIS RE-EXPLAINS THE `amp_target` ANOMALY A SECOND TIME, better.** The hand point
+0.400 and the evolved 0.177 are BOTH inside the good band. The search was not preferring
+0.177 over 0.400; it was drifting freely inside a flat basin, which is what a search does
+where its criterion is blind. Finding 3 above ("the search was being right") overstates
+it — the accurate version is that the search was neither right nor wrong there.
+
+**★ 8. EACH STRONG GAIN IS SEEN THROUGH A DIFFERENT TERM.** Decomposing |dJ| across each
+landscape: `coupling_gain` is **105% flow** (coupling buys phase predictability; the other
+terms slightly oppose), `postural_gain` is **65% energy** (higher tone costs the servos
+less than actively fighting gravity does), `amp_target` is **45% tilt-variance + 41% flow**
+(high amplitude thrashes the body — tilt sd runs 0.015 → 0.456 across the range). No single
+term would have seen all three, which is the multi-term criterion earning its shape.
+
+**⚠ 9. The flow term does not oppose a quiet body, and was assumed to.** It was included as
+the complement that stops the search from minimizing everything by standing still. It does
+not: flow quality is magnitude × predictability, and at low amplitude the predictability
+gain outweighs the magnitude loss, so flow votes WITH tilt, energy and unloaded for a
+quieter gait. Measured `|fwd_v|` is lowest (0.0495) at the amplitude the criterion likes
+best. The degenerate attractor did not bite here — the good band's upper half still moves
+(0.154 at amp 0.28) and nothing drove amplitude to zero — but **the guard against it is
+not present**, and the criterion is currently free to prefer slow. Re-use context: if a
+future run creeps, this is the first place to look, and the fix is a flow term whose
+magnitude factor cannot be traded away for predictability.
 
 **⚠ 6. The hysteresis check earned its place**: `rear_land_gain` and `plan_gain` both show
 an ascending/descending gap LARGER than their landscape span, so their apparent optima are
