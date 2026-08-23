@@ -3375,3 +3375,48 @@ is not a trend; fit or pool instead.**
 against the arena's ~9.5 — so the stress test did stress. Also note the frozen arm drifts on
 its own (its falls ranged 29–108 across seeds with no search running at all), which is why
 the control was indispensable: without it, live's tilt rise would have read as evolver damage.
+
+### ★★ 2026-08-23 — n=12 CORRIDOR CONFIRMATION: the live search neither helps nor harms
+
+**Verdict: `NULL` at usable power.** The powered replacement for the 2026-08-22 n=4 test.
+Same config in both arms, differing only in whether the search runs; corridor with
+obstacles, recentering ON so the obstacle curriculum is traversed repeatedly; 300 k ticks,
+**n=12 paired seeds**.
+
+| metric | live | frozen | Δ | t (df 11) | MDE |
+|---|---|---|---|---|---|
+| falls | 46.75 | 40.75 | +6.00 | 0.54 | 24.6 |
+| **burst onsets** | 450.8 | 494.0 | −43.2 | −0.52 | 183.7 |
+| **burst duty** | 6.68 % | 7.48 % | −0.80 pp | −0.58 | 3.1 pp |
+| **longest burst** | 15.5 s | 15.9 s | −0.37 s | −0.16 | 5.2 s |
+| mean \|tilt\| | 0.641 | 0.814 | −0.173 | −0.90 | 0.420 |
+| amp_min | 0.372 | 0.385 | −0.014 | −0.26 | 0.119 |
+| step_bal | 0.533 | 0.549 | −0.017 | −0.24 | 0.150 |
+| net_disp | 4.93 | 4.01 | +0.92 | 0.86 | 2.34 |
+
+**Nothing reaches significance on any metric.** Power roughly doubled against the n=4
+attempt — the minimum detectable difference in falls fell from ~53 (≈81 %) to **24.6
+(≈60 %)** — so this rules out a large effect in either direction, and still cannot resolve
+a modest one.
+
+**★ THE SUSTAINED-BURST METRIC (operator's, new here) EARNS ITS PLACE.** Defined as a
+3-second rolling mean of forward velocity at or above 0.06 m/s — roughly 18 cm of travel
+in three seconds. Its value shows in the contrast with the mean: **mean forward velocity
+reads 0.01 m/s, which alone would say the body barely moves**, while the burst measure
+shows 6.7–7.5 % of the run spent in genuine sustained travel, with individual runs reaching
+**25 s**. A body that lurches and stalls posts the same mean as one that periodically
+covers ground; only the burst view separates them. Spread across seeds is wide (sd 247 on
+a mean of 451), so it has the range to move under a future A/B.
+
+**Scope note that matters for interpretation.** This does NOT contradict job #1. The two
+tests ask different questions: job #1 compared a FIXED evolved operating point against the
+hand point (arena, 12 k ticks) and the evolved point won on falls and on across-seed
+consistency; this test asks whether running the SEARCH LIVE in the corridor changes
+anything over 300 k ticks, and the answer is that it does not, in either direction. The
+evolved *destination* is better; the live *journey* is neutral in this scenario.
+
+**Re-use context:** the corridor at 300 k ticks is a hostile measurement environment — falls
+run 16–17 per 100 k ticks against the arena's ~9.5, and the frozen arm alone spans 29–108
+falls across seeds. Resolving a modest live-search effect here needs either many more seeds
+or a less variable scenario. The burst metric is the most promising discriminator to build
+the next comparison on.
