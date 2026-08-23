@@ -117,6 +117,7 @@ the learned one.
 | Before trusting ANY picrawler sensor | [`docs/plans-and-designs/sensor_legitimacy_and_the_feet_y_oracle.md`](docs/plans-and-designs/sensor_legitimacy_and_the_feet_y_oracle.md) — **per-topic legality audit + a LIVE god's-eye dependency in the deployed gait.** `feet_y` is absolute world-Y |
 | Working on the picrawler | [`plan`](docs/plans-and-designs/picrawler_active_inference_plan.md) + [`gait findings`](docs/reports/picrawler_gait_loop_findings.md) |
 | Working on the Cell | [`cell report`](docs/reports/cell_markov_blanket_loops_report.md) |
+| **Writing ANY formal report** (`docs/reports/`) | [`REPORTS.md`](REPORTS.md) — **audience, structure, and the banned "Claudese".** Read it BEFORE the first line |
 | Repo layout, naming, licence | [`AGENTS.md`](AGENTS.md) — **`ami_ogma` == `ogma` == xaq**, intentionally |
 | The vocabulary is new to you | [`docs/glossary.md`](docs/glossary.md) — plain-language, concepts-first |
 | Body geometry / servo model | [`docs/operational/`](docs/operational/README.md) — CAD-derived ground truth + protocols |
@@ -293,6 +294,17 @@ C++/Python build and test: see [`AGENTS.md`](AGENTS.md). Commits are DCO-signed 
 ---
 
 ## 7. Reporting
+
+**For a FORMAL report — anything destined for `docs/reports/` and an outside reader —
+read [`REPORTS.md`](REPORTS.md) first.** It sets the audience (intelligent, outside
+active inference and machine learning), the structure (executive summary written as an
+abstract for that audience, then monotonically narrowing so a reader can stop at any
+depth), the tone (positive and inviting, including where a hypothesis was falsified), and
+the list of machine-writing tics to avoid. Two rules from it are worth repeating here
+because they are violated by default: **never pre-qualify your own honesty** ("the honest
+take", "to be fair") — it implies the surrounding text is less honest; and **process
+mistakes belong in the ledger, not the report** — a falsified hypothesis is a result and
+stays, but a wrong turn during the investigation goes to the ledger.
 
 Scale claims to evidence. If it ties the baseline, **say "ties."** Name scaffolds as
 scaffolds. A graceful-degradation result is not a "beats both" result. **A falsified
