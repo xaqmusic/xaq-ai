@@ -11152,6 +11152,17 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ge_dis"]   = snappedf(float(_ge.get("distress_duty", 0.0)), 0.0001)
 			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
 			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
+			# The flow term's TWO FACTORS, logged apart so a window says WHICH of
+			# them limited it.  Under the min form flow quality is capped by the
+			# smaller: ge_fmag < ge_fpred means travel is the binding constraint,
+			# the reverse means steadiness is.  Without this split the 2026-08-23
+			# defect was invisible — flow scored BEST where the body moved LEAST
+			# and the combined number gave no way to see why.  ge_fmf echoes which
+			# combining rule is live, so no arm is ever judged without knowing
+			# which criterion it actually ran under.
+			line["ge_fmag"]  = snappedf(float(_ge.get("flow_mag", 0.0)), 0.0001)
+			line["ge_fpred"] = snappedf(float(_ge.get("flow_pred", 0.0)), 0.0001)
+			line["ge_fmf"]   = int(_ge.get("flow_min_form", 0))
 			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
 			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it
 			# ships at weight 0: the 60-tick body-log proxy that measured it as WORSE

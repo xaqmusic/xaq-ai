@@ -3516,3 +3516,46 @@ sweep-order artefacts, not landscape.
 **Scope:** measured at ONE operating point with seven gains fixed, so interactions are
 invisible here — a gain flat at this point could matter elsewhere. The random-init basin
 study addresses exactly that.
+
+### 2026-08-23 — flow term: MIN form, so magnitude cannot be traded for predictability
+
+**Verdict: `IN_FLIGHT`** — built, unit-pinned, gain-0 guarded, A/B armed.
+
+The flow term is the criterion's only counterweight against minimizing every other
+term by standing still, and the landscape entry above measured it not doing that job.
+`flow_quality = magnitude × predictability`, a quiet body is a predictable one, and the
+product let the predictability a slower gait gains pay for the travel it loses.
+
+**The fix is a MINIMUM, which is this repo's own idiom for "cannot be traded"** — the
+same shape, for the same reason, as the per-leg loaded-contact guard using per-leg minima
+after a mean let one leg die while the others paid for it. Quality is capped by whichever
+factor is worse, so stillness-bought predictability buys nothing. Magnitude also becomes
+`v/(v+ref)` instead of `clamp(v,0,ref)/ref`: monotone in speed with no ceiling to sit
+against, so more travel always scores better and the factor never drops out of a
+comparison.
+
+`flow_min_form` — **0 = legacy product, and it is the default**, so every existing config
+is byte-identical and this is one isolated lever.
+
+**The instrument ships with it.** `flow_mag` / `flow_pred` are accumulated and logged
+apart (`ge_fmag` / `ge_fpred`), so a window reports WHICH factor limited it rather than
+only their product — the split that would have made the original defect visible on sight.
+`ge_fmf` echoes the live rule into every log line so no arm can be judged without knowing
+which criterion it ran under.
+
+**Five unit tests pin the truth table, including the defect itself** (`test_gain_evolver`,
+29/29): under form 0 a 0.06 m/s crawl beats 0.20 m/s travel and a *tenfold* speed range
+scores identically (the saturation that removed magnitude from the landscape); under
+form 1 the ordering reverses and the same range separates monotonically. Stillness scores
+worst under both — the fix must not accidentally reward the thing it is guarding against.
+Pinning the OLD behaviour as a test is deliberate: it proves the A/B has a real contrast
+rather than comparing a fix against nothing.
+
+**A/B armed** (`__j1s4_flowmin.json`, chained behind the basin study): the identical
+landscape sweep — same config, seeds, schedules, ticks — on the three gains with
+authority. Judged on whether flow still prefers the amplitude the body travels least at.
+The runner greps `ge_fmf:1` from every log before reporting, per §3.2 #7.
+
+**Not touched:** the forward-only convention (`clamp` at 0 means steady *backward* travel
+scores zero magnitude) is unchanged in both forms. It is a real directional preference
+inside a criterion that is supposed to have none, and it is a separate lever.

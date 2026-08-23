@@ -711,3 +711,99 @@ TEST(GainEvolver, ChanceLevelAcceptanceNoLongerGrowsSigma) {
     EXPECT_LE(metric_d(ge, "sigma"), 0.1 + 1e-9)
         << "chance-level acceptance must not inflate sigma";
 }
+
+// ---- flow term: magnitude must not be tradable for predictability ------------
+//
+// The flow term exists to be the counterweight that stops the search minimizing
+// every other term by standing still.  The 2026-08-23 landscape sweeps measured
+// it failing at that job: it scored BEST at the gait amplitude whose mean travel
+// was LOWEST, because a quiet body is a predictable one and the product form let
+// the predictability it gained pay for the travel it lost.  These tests pin both
+// halves — the defect under the legacy form, its absence under the new one — so
+// the fix cannot silently regress into the shape it replaced.
+
+namespace {
+
+struct FlowRead { double term, mag, pred; };
+
+// One scored window in OBSERVER mode with fwd_v = mean ± swing alternating.  The
+// warmup is long enough (12 EMA time constants at alpha 0.02) that both EMAs are
+// settled before the measured region opens, so the read is the steady state of
+// the requested (magnitude, volatility) pair and not a settling transient.
+FlowRead flow_window(int64_t form, float mean_v, float swing) {
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.0);
+    p["w_distress"] = 0.0;
+    p["w_flow"]     = 1.0;
+    p["flow_min_form"] = form;
+    p["warmup_ticks"]  = int64_t{600};
+    ge.on_setup(&bus, p);
+    uint64_t t = 0;
+    Feed f;
+    for (int64_t i = 0; i < 600 + kWindow; ++i) {
+        f.fwd_v = mean_v + ((i % 2 == 0) ? swing : -swing);
+        ev_tick(bus, ge, t++, f);
+    }
+    return {metric_d(ge, "flow_term"), metric_d(ge, "flow_mag"), metric_d(ge, "flow_pred")};
+}
+
+} // namespace
+
+TEST(GainEvolver, LegacyFlowFormLetsSteadinessPayForLostTravel) {
+    // A crawls (0.06 m/s) but is perfectly steady; B travels 3.3x faster (0.20)
+    // with real stride-to-stride variation.  Both sit ABOVE the legacy magnitude
+    // ceiling, so under form 0 magnitude is pinned at 1.0 for both and only
+    // predictability separates them -- and it crowns the crawl.
+    FlowRead a = flow_window(/*form=*/0, 0.06f, 0.0f);
+    FlowRead b = flow_window(/*form=*/0, 0.20f, 0.10f);
+    EXPECT_NEAR(a.mag, 1.0, 1e-6);
+    EXPECT_NEAR(b.mag, 1.0, 1e-6);
+    EXPECT_LT(a.term, b.term) << "legacy form is expected to prefer the crawl";
+}
+
+TEST(GainEvolver, MinFlowFormPrefersTravelOverASteadyCrawl) {
+    // Same two bodies, same criterion weight, only the combining rule differs.
+    FlowRead a = flow_window(/*form=*/1, 0.06f, 0.0f);
+    FlowRead b = flow_window(/*form=*/1, 0.20f, 0.10f);
+    EXPECT_LT(b.term, a.term) << "min form must prefer the body that travels";
+    // and it must be MAGNITUDE that limits the crawl, not steadiness
+    EXPECT_LT(a.mag, a.pred);
+}
+
+TEST(GainEvolver, LegacyMagnitudeSaturatesAndDropsOutOfTheComparison) {
+    // Steady travel at 0.06, 0.20 and 0.60 m/s -- a tenfold range.  Under the
+    // legacy ceiling all three score the same, which is the mechanism by which
+    // magnitude stopped contributing to the landscape at all.
+    double lo = flow_window(0, 0.06f, 0.0f).term;
+    double mid = flow_window(0, 0.20f, 0.0f).term;
+    double hi = flow_window(0, 0.60f, 0.0f).term;
+    EXPECT_NEAR(lo, mid, 1e-4);
+    EXPECT_NEAR(mid, hi, 1e-4);
+    // Under the min form the same tenfold range separates cleanly and monotonically.
+    double m_lo = flow_window(1, 0.06f, 0.0f).term;
+    double m_mid = flow_window(1, 0.20f, 0.0f).term;
+    double m_hi = flow_window(1, 0.60f, 0.0f).term;
+    EXPECT_GT(m_lo, m_mid + 0.1);
+    EXPECT_GT(m_mid, m_hi + 0.1);
+}
+
+TEST(GainEvolver, StillnessIsWorstUnderBothForms) {
+    // The floor case both forms must agree on: a body going nowhere scores the
+    // worst possible flow however steadily it does it.
+    EXPECT_NEAR(flow_window(0, 0.0f, 0.0f).term, 1.0, 1e-6);
+    EXPECT_NEAR(flow_window(1, 0.0f, 0.0f).term, 1.0, 1e-6);
+}
+
+TEST(GainEvolver, FlowMinFormDefaultsToLegacyAndIsByteIdentical) {
+    // The new rule ships OFF: an existing config that never mentions the key must
+    // score exactly as it did before it existed.
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.0);
+    p.erase("flow_min_form");
+    ge.on_setup(&bus, p);
+    EXPECT_EQ(std::get<int64_t>(ge.current_params().at("flow_min_form")), int64_t{0});
+    FlowRead def = flow_window(0, 0.12f, 0.04f);
+    EXPECT_DOUBLE_EQ(def.term, flow_window(0, 0.12f, 0.04f).term);
+}
