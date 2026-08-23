@@ -160,3 +160,8 @@ accepted under the Developer Certificate of Origin; see
 
 *xaq is a research framework, provided as-is. It is not legal or safety
 advice, and nothing here is a warranty of fitness for any particular purpose.*
+
+## Sponsors
+
+Bongiovi Media & Technology
+https://bongiovimt.com
