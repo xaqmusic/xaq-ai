@@ -273,9 +273,8 @@ the same time, a minor contributor to the goal.
 ## 6. The external baseline: the composition does not beat a reactive specialist
 
 §2 asked what each loop contributes to the *composition*; it could not say whether the
-composition is any good compared to the obvious alternative. Here is that comparison, the
-external baseline this report had been missing. We pitted the full four-loop agent against two
-controllers that share its exact body, sensor (the *scalar* scent; the directional eight-nostril
+composition is any good compared to the obvious alternative. To form that comparison, we
+pitted the full four-loop agent against two controllers that share its exact body, sensor (the *scalar* scent; the directional eight-nostril
 ring is never published, so gradient direction stays a hidden state for every agent), motor
 stack, and reflexes, differing only in the cognitive policy, across the same n = 20 randomised
 worlds:
@@ -328,7 +327,8 @@ appearance, so the detector stayed blind: vision-value was 0 on every tick. A ha
 in the same worlds fires normally (vision-value 1.0, winning 2.8 % of decisions). The original
 "+170 %" had worked precisely because *fixed* food gave the learner a stable target.
 
-The doctrine already required a belief to be **disconfirmable**. This adds a prior condition: a
+The companion method document, [the brain-building doctrine](../brain_building_doctrine.md),
+already required a belief to be **disconfirmable**. This adds a prior condition: a
 *learned* belief must also be **learnable**, meaning it needs a stable, repeated teaching signal
 to bootstrap at all. Randomising the target's appearance starves the learner. This is a direct
 warning for perception transfer, because the real world has more appearance variability than our
@@ -410,8 +410,7 @@ Stated explicitly, because the method requires it and because these are the real
 - We do not claim fractal-JEPA or mitosis works. It is unbuilt (Phase 4).
 - We do not claim the composition is competitive. We now have an external baseline (§6), a
   reactive chemotaxis specialist and a random-walk floor, and the composition does not beat the
-  specialist in this regime (it ties at best; as shipped it forages at the chance floor). That is
-  reported as a result, not buried.
+  specialist in this regime (it ties at best; as shipped it forages at the chance floor).
 
 ---
 
