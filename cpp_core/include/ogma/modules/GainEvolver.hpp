@@ -115,7 +115,7 @@ private:
         double   flow_q_sum = 0.0;
         // the two factors, accumulated separately so a window can report WHICH of
         // them limited its flow quality rather than only their combination
-        double   flow_mag_sum = 0.0, flow_pred_sum = 0.0;
+        double   flow_mag_sum = 0.0, flow_pred_sum = 0.0, flow_turn_sum = 0.0;
         std::vector<int> td, unloaded;      // per-leg touchdowns / unloaded verdicts
         void reset(int n_legs);
     };
@@ -123,7 +123,7 @@ private:
     struct Terms {
         double falls = 0, tilt_sd = 0, dwell = 0, distress_duty = 0,
                unloaded_mean = 0, flow_term = 0, energy = 0, loaded_min = 0, J = 0;
-        double flow_mag = 0, flow_pred = 0;   // diagnostic: the limiting factor
+        double flow_mag = 0, flow_pred = 0, flow_turn = 0;  // diagnostic: which factor binds
         bool   valid = false;
     };
 
@@ -133,6 +133,7 @@ private:
     void handle_foot_load(MessagePtr payload);
     void handle_foot_contact(MessagePtr payload);
     void handle_imu(MessagePtr payload);
+    void handle_gyro(MessagePtr payload);
     void handle_torque(MessagePtr payload);
 
     // ---- loop internals ------------------------------------------------------
@@ -157,6 +158,7 @@ private:
     std::string foot_load_topic_    = "reality.proprio.foot_load";
     std::string foot_contact_topic_ = "reality.proprio.foot_contact";
     std::string imu_topic_          = "reality.proprio.imu";
+    std::string gyro_topic_;        // "" = anti-circling factor has no input
     // ENERGY: mean |joint torque| — servo current, which the sensor audit classes
     // as a REAL egocentric load signal ("A REAL LOAD SIGNAL — and MotorEPM has
     // never consumed it").  On the physical PiCrawler this is battery current, so
@@ -260,6 +262,8 @@ private:
     double  flow_vol_k_    = 4.0;
     double  flow_vel_norm_ = 0.05;
     int64_t flow_min_form_ = 0;    // 0 = legacy product (byte-identical), 1 = min-form
+    double  flow_turn_k_     = 0.0;    // 0 = anti-circling factor OFF (byte-identical)
+    double  flow_turn_alpha_ = 0.004;  // ~250 ticks (5 s): slower than flow_alpha ON PURPOSE
 
     // ---- anneal params -------------------------------------------------------
     int64_t anneal_window_ = 10;
@@ -302,6 +306,8 @@ private:
     std::vector<int64_t> td_horizon_;      // >0 = ticks left in post-touchdown watch
     std::vector<float>   td_maxload_;
     float flow_ema_ = 0.0f, flow_vol_ema_ = 0.0f;
+    float yaw_rate_ = 0.0f;        // gyro about the body's OWN up axis
+    float turn_ema_ = 0.0f;        // SIGNED, so left-then-right cancels to ~0
 };
 
 } // namespace ogma

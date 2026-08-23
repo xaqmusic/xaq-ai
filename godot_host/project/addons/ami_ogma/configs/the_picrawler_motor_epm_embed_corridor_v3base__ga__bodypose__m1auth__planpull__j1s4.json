@@ -479,7 +479,8 @@
         "torque_topic": "reality.proprio.joint_torque",
         "w_energy": 4.0,
         "fall_alarm_tau": 50000.0,
-        "fall_alarm_on": 8.0
+        "fall_alarm_on": 8.0,
+        "gyro_topic": "reality.proprio.gyro"
       }
     }
   ],

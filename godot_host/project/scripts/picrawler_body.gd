@@ -6041,6 +6041,27 @@ func _step_one() -> void:
 		brain.publish_proprio(it, "motor_intent")
 	brain.publish_proprio(imu, "imu")
 
+	# ---- 2026-08-23 — TRUE 3-AXIS GYRO (a new sensor, not a new metric) -------------------
+	# imu[3] carries `_chassis.angular_velocity.y` — the WORLD vertical component.  A real
+	# MEMS gyro is bolted to the chassis and measures rotation about the BODY's own axes,
+	# and the two diverge exactly when the body tilts, which is when it matters.  This
+	# publishes the honest form: world angular velocity projected onto each body axis.
+	#   [0] roll rate  (about body +X)
+	#   [1] YAW RATE ABOUT THE BODY'S OWN UP  <- turn rate as the robot itself feels it
+	#   [2] pitch rate (about body +Z)
+	# Egocentric and physically realisable, so unlike fwd_v this is a LAWFUL brain input.
+	# Additive and default-no-consumer: published every tick, byte-identical until some
+	# module names it.  Built for the flow term's anti-circling factor — fwd_v is
+	# body-frame forward speed and reads a tight circle as flowing beautifully, so a
+	# sustained turn bias is what separates travelling from going round in circles.
+	var _wv: Vector3 = _chassis.angular_velocity
+	var _gb: Basis = chassis_xform.basis
+	var gyro := PackedFloat64Array()
+	gyro.append(clamp(_wv.dot(_gb.x) / PI, -1.0, 1.0))
+	gyro.append(clamp(_wv.dot(_gb.y) / PI, -1.0, 1.0))
+	gyro.append(clamp(_wv.dot(_gb.z) / PI, -1.0, 1.0))
+	brain.publish_proprio(gyro, "gyro")
+
 	# ---- L1 nav inputs (2026-08-04) -------------------------------------------------------
 	# RunTumbleNavV2 wants a scalar heading and an egocentric velocity.  Both are published
 	# unconditionally (they are cheap and honest); the nav module is what is gain-guarded.
@@ -10640,7 +10661,16 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# ⚠ An EPM snapshot has NO "module" wrapper -- its diag fields sit at top
 			# level, unlike MotorEPM's.  Looking for one silently yields nothing, which
 			# is how a DEAD EPM and an UNREAD EPM became indistinguishable.
-			var _gs = JSON.parse_string(str(brain.get_module_snapshot(_gid)))
+			# A module absent from THIS config returns "", and parsing "" is a Godot
+			# ERROR line.  These five ids belong to an earlier stack generation, so a
+			# 300k-tick run emitted ~40k of them — enough that `grep -i error` on a run
+			# log became useless and a REAL error would have hidden in the noise.  The
+			# parse result was already discarded on failure, so skipping is behaviour-
+			# identical; what it buys back is the ability to trust the log.
+			var _gsnap: String = str(brain.get_module_snapshot(_gid))
+			if _gsnap.is_empty():
+				continue
+			var _gs = JSON.parse_string(_gsnap)
 			if _gs is Dictionary and _gs.has("gng"):
 				var _g = _gs["gng"]
 				var _narr: Array = _g.get("nodes", [])
@@ -11162,6 +11192,7 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# which criterion it actually ran under.
 			line["ge_fmag"]  = snappedf(float(_ge.get("flow_mag", 0.0)), 0.0001)
 			line["ge_fpred"] = snappedf(float(_ge.get("flow_pred", 0.0)), 0.0001)
+			line["ge_fturn"] = snappedf(float(_ge.get("flow_turn", 0.0)), 0.0001)
 			line["ge_fmf"]   = int(_ge.get("flow_min_form", 0))
 			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
 			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it

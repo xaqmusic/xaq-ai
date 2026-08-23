@@ -29,7 +29,7 @@
       "height_homeostat",
       "panic"
     ],
-    "note": "j1s4 (the n=20-validated gain vector) with the flow term's MIN FORM enabled \u2014 the ONE lever that differs from __j1s4.json.  The flow term is the criterion's counterweight against minimizing everything by standing still, and the 2026-08-23 landscape sweeps measured it failing at that: it scored best at the gait amplitude whose mean travel was LOWEST, because a quiet body is a predictable one and the product form let predictability pay for lost travel.  flow_min_form 1 caps flow quality by whichever factor is worse, so stillness buys nothing.  Read ge_fmag vs ge_fpred to see which factor binds."
+    "note": "j1s4 + flow min form + ANTI-CIRCLING (flow_turn_k 4.0).  fwd_v is body-frame forward speed, so a tight circle reads as flowing beautifully; the factor is 1/(1+k*|turn bias|) on the gyro's yaw rate about the body's own up axis \u2014 a LAWFUL egocentric signal, unlike fwd_v itself.  The turn EMA is signed and slow (~5 s) so heading regulation, which we WANT, averages toward zero and only a sustained one-way turn is penalized.  ONE LEVER vs __j1s4_flowmin.json, and it is queued behind that arm's verdict \u2014 never run both changes as one comparison."
   },
   "version": 1,
   "runtime": {
@@ -482,7 +482,8 @@
         "fall_alarm_tau": 50000.0,
         "fall_alarm_on": 8.0,
         "flow_min_form": 1,
-        "gyro_topic": "reality.proprio.gyro"
+        "gyro_topic": "reality.proprio.gyro",
+        "flow_turn_k": 4.0
       }
     }
   ],

@@ -52,6 +52,7 @@ ParamMap ge_params(double sigma = 0.1) {
     p["foot_load_topic"]  = std::string("t.load");
     p["foot_contact_topic"] = std::string("t.contact");
     p["imu_topic"]        = std::string("t.imu");
+    p["gyro_topic"]       = std::string("t.gyro");
     p["torque_topic"]     = std::string("t.torque");
     p["n_legs"]           = int64_t{4};
     p["seed"]             = int64_t{99};
@@ -83,6 +84,7 @@ struct Feed {
     float distress = 0.0f;
     float fwd_v = 0.03f;
     float torque = 0.4f;
+    float yaw_rate = 0.0f;      // gyro about the body's own up axis
     std::array<float, 4> load{0.5f, 0.5f, 0.5f, 0.5f};
     bool  cycle_contact = true;
 };
@@ -101,6 +103,7 @@ void ev_tick(ogma::InProcessBus& bus, ogma::GainEvolver& ge, uint64_t t, Feed co
     pub("t.load", {f.load[0], f.load[1], f.load[2], f.load[3]});
     pub("t.contact", {c, c, c, c});
     pub("t.imu", {0.0f, 1.0f, f.fwd_v, 0.0f});
+    pub("t.gyro", {0.0f, f.yaw_rate, 0.0f});
     pub("t.torque", std::vector<float>(12, f.torque));
     ge.tick(t);
     bus.end_tick();
@@ -724,28 +727,35 @@ TEST(GainEvolver, ChanceLevelAcceptanceNoLongerGrowsSigma) {
 
 namespace {
 
-struct FlowRead { double term, mag, pred; };
+struct FlowRead { double term, mag, pred, turn; };
 
 // One scored window in OBSERVER mode with fwd_v = mean ± swing alternating.  The
 // warmup is long enough (12 EMA time constants at alpha 0.02) that both EMAs are
 // settled before the measured region opens, so the read is the steady state of
 // the requested (magnitude, volatility) pair and not a settling transient.
-FlowRead flow_window(int64_t form, float mean_v, float swing) {
+FlowRead flow_window(int64_t form, float mean_v, float swing,
+                     double turn_k = 0.0, float yaw_amp = 0.0f, int yaw_half_period = 0) {
     ogma::InProcessBus bus;
     ogma::GainEvolver ge;
     ParamMap p = ge_params(/*sigma=*/0.0);
     p["w_distress"] = 0.0;
     p["w_flow"]     = 1.0;
     p["flow_min_form"] = form;
-    p["warmup_ticks"]  = int64_t{600};
+    p["flow_turn_k"]   = turn_k;
+    p["warmup_ticks"]  = int64_t{1500};
     ge.on_setup(&bus, p);
     uint64_t t = 0;
     Feed f;
-    for (int64_t i = 0; i < 600 + kWindow; ++i) {
+    for (int64_t i = 0; i < 1500 + kWindow; ++i) {
         f.fwd_v = mean_v + ((i % 2 == 0) ? swing : -swing);
+        // yaw_half_period 0 = a SUSTAINED turn (circling); >0 alternates sign, which
+        // is what heading regulation looks like and must NOT be treated as circling
+        f.yaw_rate = (yaw_half_period > 0 && ((i / yaw_half_period) % 2 == 1))
+                     ? -yaw_amp : yaw_amp;
         ev_tick(bus, ge, t++, f);
     }
-    return {metric_d(ge, "flow_term"), metric_d(ge, "flow_mag"), metric_d(ge, "flow_pred")};
+    return {metric_d(ge, "flow_term"), metric_d(ge, "flow_mag"), metric_d(ge, "flow_pred"),
+            metric_d(ge, "flow_turn")};
 }
 
 } // namespace
@@ -806,4 +816,54 @@ TEST(GainEvolver, FlowMinFormDefaultsToLegacyAndIsByteIdentical) {
     EXPECT_EQ(std::get<int64_t>(ge.current_params().at("flow_min_form")), int64_t{0});
     FlowRead def = flow_window(0, 0.12f, 0.04f);
     EXPECT_DOUBLE_EQ(def.term, flow_window(0, 0.12f, 0.04f).term);
+}
+
+// ---- flow term: circling must not read as travelling -------------------------
+//
+// fwd_v is BODY-FRAME forward speed, so a body carving a tight circle produces a
+// large, steady forward reading while going nowhere -- the ledger's own recorded
+// blind metric, and the flow term had no complement for it.  The complement is the
+// gyro's yaw rate about the body's own up axis.  The hazard in adding it is
+// obvious and is what these tests guard: HEADING REGULATION is one of the three
+// behaviours this project reads as real capability, so a term that punishes
+// turning per se would punish the thing we most want to see.  Only a SUSTAINED
+// one-way turn is circling, which is why the turn EMA is signed and slow.
+
+TEST(GainEvolver, SustainedTurnIsPenalizedAsCircling) {
+    FlowRead straight = flow_window(1, 0.12f, 0.02f, /*turn_k=*/4.0, /*yaw_amp=*/0.0f);
+    FlowRead circle   = flow_window(1, 0.12f, 0.02f, /*turn_k=*/4.0, /*yaw_amp=*/0.30f);
+    EXPECT_NEAR(straight.turn, 1.0, 1e-3) << "no turn must cost nothing";
+    EXPECT_LT(circle.turn, 0.85) << "a sustained turn must register as circling";
+    EXPECT_GT(circle.term, straight.term) << "same speed, same steadiness -- circling scores worse";
+}
+
+TEST(GainEvolver, HeadingCorrectionIsNotTreatedAsCircling) {
+    // Identical |yaw rate| to the circler, but alternating every 40 ticks (0.8 s) --
+    // a body correcting its heading, not orbiting.  The signed slow EMA is what
+    // separates them, and this is the test that would fail if the term were built
+    // on mean |yaw rate| instead.
+    FlowRead circle = flow_window(1, 0.12f, 0.02f, 4.0, 0.30f, /*half_period=*/0);
+    FlowRead correct = flow_window(1, 0.12f, 0.02f, 4.0, 0.30f, /*half_period=*/40);
+    EXPECT_GT(correct.turn, 0.95) << "heading regulation must be nearly free";
+    EXPECT_LT(circle.turn, correct.turn - 0.1) << "circling must cost strictly more";
+}
+
+TEST(GainEvolver, AntiCirclingDefaultsOffAndIsByteIdentical) {
+    // Ships at k=0: the factor is exactly 1.0, so it cannot perturb either
+    // combining rule.  Checked under BOTH forms, with a turn present.
+    for (int64_t form : {int64_t{0}, int64_t{1}}) {
+        FlowRead off  = flow_window(form, 0.12f, 0.02f, /*turn_k=*/0.0, /*yaw_amp=*/0.30f);
+        FlowRead none = flow_window(form, 0.12f, 0.02f, /*turn_k=*/0.0, /*yaw_amp=*/0.0f);
+        EXPECT_DOUBLE_EQ(off.turn, 1.0);
+        EXPECT_DOUBLE_EQ(off.term, none.term) << "a turn must be invisible while k=0";
+    }
+}
+
+TEST(GainEvolver, CirclingCannotBeTradedAwayUnderTheMinForm) {
+    // The whole point of the min form: a fast, glassy-smooth circle must not buy
+    // its way to a good flow score with magnitude and steadiness.
+    FlowRead fast_circle = flow_window(1, 0.60f, 0.0f, 4.0, 0.30f);
+    EXPECT_LT(fast_circle.turn, fast_circle.mag);
+    EXPECT_LT(fast_circle.turn, fast_circle.pred);
+    EXPECT_NEAR(1.0 - fast_circle.term, fast_circle.turn, 1e-6) << "the worst factor must bind";
 }

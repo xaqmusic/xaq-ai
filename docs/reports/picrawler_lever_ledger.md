@@ -3617,3 +3617,48 @@ two deferred needs. Optical flow from the existing forward camera is the second 
 is named in the config, the code, and the logs rather than hidden. But "sanctioned" was
 priced against a term whose magnitude was saturated out; it is a bigger loan now, and PART
 IV's headline results should not be reported as oracle-free.
+
+### 2026-08-23 — anti-circling: closing the flow term's blind spot with a LAWFUL signal
+
+**Verdict: `IN_FLIGHT`** — built, unit-pinned, gain-0 guarded, queued behind the flow-min
+verdict (never two levers in one comparison).
+
+The audit above found the flow term blind to circling: `fwd_v` is **body-frame** forward
+speed, so a body carving a tight circle reads as flowing beautifully. The ledger already
+records this as a blind metric ("high fwd_v + low net_disp = fast circling") and the flow
+term had no complement for it — while the min form made that term stronger.
+
+**A new SENSOR, not a cleverer metric** (doctrine §1 step 2). `imu[3]` was the obvious
+input and is **not clean**: it carries `_chassis.angular_velocity.y`, the WORLD vertical
+component, which diverges from what a chassis-mounted gyro reads exactly when the body
+tilts. So the body now publishes `reality.proprio.gyro` — world angular velocity projected
+onto each **body** axis, `[roll, YAW ABOUT OWN UP, pitch]`, normalized by π. A real MEMS
+gyro measures precisely this. Additive and default-no-consumer, so it is byte-identical
+until a module names it. Using the almost-legal signal to fix a legality complaint would
+have defeated the point.
+
+**★ THE DESIGN IS THE TIMESCALE AND THE SIGN, not the magnitude.** Heading regulation is
+one of the three behaviours this project reads as genuine capability (§3.3), so a term
+punishing turning *per se* would punish the thing we most want to see. The turn bias is a
+**signed** EMA at **~5 s** (`flow_turn_alpha` 0.004, deliberately ~5× slower than
+`flow_alpha`): a body correcting left-then-right averages toward zero, a body orbiting
+holds a bias. Built on mean |yaw rate| it would have penalized exactly the wrong thing,
+and a test pins that distinction rather than trusting it.
+
+`straight = 1/(1 + flow_turn_k·|turn bias|)` joins whichever combining rule is in force —
+the min under form 1 (so circling cannot be bought off with speed and smoothness either),
+the product under form 0. **`flow_turn_k` defaults to 0**, which makes the factor exactly
+1.0 and cannot perturb either rule.
+
+**Four tests, 33/33 total.** A sustained turn registers (factor < 0.85) and scores worse
+than going straight at identical speed and steadiness; **the same |yaw rate| alternating
+every 0.8 s stays above 0.95** — the test that fails if the term is built the naive way; a
+fast, glassy-smooth circle has the turn factor bind under the min form; and at k=0 a turn
+is invisible under BOTH forms.
+
+**Byproduct — 40,000 spurious ERROR lines per run, fixed.** `_emit_jsonl` probes five
+per-leg EPM ids from an earlier stack generation; absent modules return `""`, and parsing
+`""` is a Godot ERROR. A 300k-tick run emitted ~40k of them. The parse result was already
+discarded on failure so the guard is behaviour-identical — what it buys back is a run log
+where `grep -i error` means something. **This nearly cost a false alarm today**: a routine
+liveness check on the basin study reported 27,096 "errors" and read as a crash.
