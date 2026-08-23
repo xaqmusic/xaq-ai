@@ -10775,7 +10775,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# (bodypose control), "pland" = motor_planner_dyn (the [q,dq] phase-space arm).
 	if brain != null and brain.has_method("get_module_snapshot"):
 		for _plid in [["motor_planner", "plan"], ["motor_planner_dyn", "pland"], ["motor_planner_pc", "planc"]]:
-			var _ps = JSON.parse_string(str(brain.get_module_snapshot(_plid[0])))
+			# absent in this config => "" => a Godot ERROR line per emit (see the
+			# motor_gng probe above); the result was already discarded, so this only
+			# keeps the run log greppable.
+			var _pstr: String = str(brain.get_module_snapshot(_plid[0]))
+			if _pstr.is_empty():
+				continue
+			var _ps = JSON.parse_string(_pstr)
 			if _ps is Dictionary and _ps.has("module"):
 				var _pmod = _ps["module"]
 				line[_plid[1]] = {
@@ -10819,7 +10825,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# freshness flag that reads false between deliveries — the first mirror
 	# misread it as liveness).
 	if brain != null and brain.has_method("get_module_snapshot"):
-		var _dps = JSON.parse_string(str(brain.get_module_snapshot("pc_predictor")))
+		var _dpstr: String = str(brain.get_module_snapshot("pc_predictor"))
+		var _dps = JSON.parse_string(_dpstr) if not _dpstr.is_empty() else null
 		if _dps is Dictionary and _dps.has("targets"):
 			line["dp_seen"] = 1 if bool(_dps.get("cached_consensus_valid", false)) else 0
 			for _tk in (_dps["targets"] as Dictionary):
