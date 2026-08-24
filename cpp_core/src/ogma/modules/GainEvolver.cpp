@@ -136,8 +136,8 @@ ParamSchema GainEvolver::params_schema() const {
          "Per-servo load (reality.proprio.joint_torque): 12 floats normalized to MAX_SERVO_TORQUE. Servo current sensing — the audit's 'REAL LOAD SIGNAL', and on hardware this is battery current.",
          std::nullopt, std::nullopt, std::nullopt},
         {"w_energy", ParamMutability::HotMutable,
-         "weight on ENERGY = mean |joint torque| over the measured region. Measured on the gate-2b windows: signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57 — ~8x better discrimination than anything else in this criterion, largely independent of it (corr -0.125), and agreeing with the flow term (+0.123) rather than fighting it. Default 8.0 equalizes its SIGNAL with sd(upright)'s at ~1/60th the noise. WARNING: the freeze trap is not disproven (no observed window held a frozen body) — flow is the counterweight and the per-leg minima guard blocks killing a leg to save current.",
-         ParamValue{8.0}, ParamValue{0.0}, ParamValue{1000.0}},
+         "weight on ENERGY = mean |joint torque| over the measured region. Measured on the gate-2b windows: signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57 — ~8x better discrimination than anything else in this criterion, largely independent of it (corr -0.125), and agreeing with the flow term (+0.123) rather than fighting it. Default 4.0 — the weight every landscape/basin/tsweep verdict was measured at (an 8.0 default drifted from the configs' 4.0; aligned toward the VALIDATED value 2026-08-24). TWO standing caveats: the freeze trap is not disproven (flow is the counterweight; the per-leg minima guard blocks killing a leg to save current), and the sim signal is measured to be damping-dominated — mostly a joint-speed penalty, not electrical load (corr(tau,dtheta) -0.46..-0.56; see the joint_torque registration string). On hardware this term becomes real current via an INA219.",
+         ParamValue{4.0}, ParamValue{0.0}, ParamValue{1000.0}},
         {"fall_alarm_tau", ParamMutability::HotMutable,
          "Decay time constant (ticks) of the leaky fall accumulator. Long enough that several falls must land inside it to trip the alarm, so an adventurous body that falls sporadically never does.",
          ParamValue{50000.0}, ParamValue{100.0}, ParamValue{10000000.0}},
@@ -339,6 +339,11 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
              {"fall_debounce_ticks", &fall_debounce_ticks_},
              {"touchdown_horizon_ticks", &touchdown_horizon_ticks_},
              {"min_touchdowns", &min_touchdowns_}, {"anneal_window", &anneal_window_},
+             // noise_min_n was MISSING here until 2026-08-24 — a config's value was
+             // silently ignored at construction (only a hot-mutate applied it) and
+             // the default 3 always won.  Every shipped config happened to set 3,
+             // so no run was affected; the de-vacuized margin test caught it.
+             {"noise_min_n", &noise_min_n_},
              {"flow_min_form", &flow_min_form_}})
         apply_param(params, key, [&](auto const& v){ *member = get_int(v, key); });
     apply_param(params, "mutation_sigma", [&](auto const& v){ sigma_ = get_double(v, "mutation_sigma"); });

@@ -278,7 +278,12 @@ TEST(GainEvolver, SigmaAnneal) {
         }
         EXPECT_EQ(metric_i(ge, "accepts"), 0);
         EXPECT_LT(metric_d(ge, "sigma"), 0.1);
-        EXPECT_GE(metric_d(ge, "sigma"), 0.01);   // floor: search never fully stops
+        // The floor is a CONTRACT (raised 0.01 -> 0.08 on 2026-08-20 so the
+        // anneal can never freeze the search below measurable resolution), so
+        // pin the shipped default exactly — the old ">= 0.01" was 8x looser
+        // than the contract and would have passed a broken floor.
+        EXPECT_NEAR(metric_d(ge, "sigma"), 0.08, 1e-9)
+            << "all-reject must PARK sigma at the sigma_min default, not below";
     }
     // All-accept: incumbent bad, candidate clean → σ grows, ceiling-bounded.
     {
@@ -463,33 +468,45 @@ TEST(MotorEPMv2GainSocket, SnapshotReplayReappliesGains) {
 
 // ---- noise-aware acceptance (the gate-2 fix) --------------------------------
 
+// Both margin tests drive the ENERGY term, deliberately.  Their first version
+// drove distress — a THRESHOLDED duty, so "1.0 vs 0.99" scored both windows at
+// duty 1.0 and the headline assertion held with the margin feature deleted
+// (audit 2026-08-24).  Energy is continuous (mean |torque| passes the feed value
+// straight through), so these windows differ by exactly what the test says.
+
 TEST(GainEvolver, AcceptMarginBlocksSubNoiseImprovement) {
     // A candidate that improves J by LESS than the criterion's own measured
     // noise must be reverted: that is the coin flip that drove sigma to the
-    // ceiling in gate 2.  Feed alternating distress so revert pairs accumulate
-    // a nonzero sigma_hat, then offer a tiny improvement.
+    // ceiling in gate 2.  Alternating incumbent windows across reverts give a
+    // KNOWN sigma_hat — |d| = 0.2 every pair, so noise_ema = 0.04 and
+    // sigma_est = sqrt(0.04/2) ≈ 0.1414 — which also pins the estimator's
+    // var(diff) = 2·var(window) halving, previously untested.
     ogma::InProcessBus bus;
     ogma::GainEvolver ge;
     ParamMap p = ge_params();
+    p["w_distress"]  = 0.0;
+    p["w_energy"]    = 1.0;
     p["accept_k"]    = 1.0;
     p["noise_min_n"] = int64_t{1};
     ge.on_setup(&bus, p);
     uint64_t t = 0;
     run_ticks(bus, ge, t, kWarmup, Feed{});
-    // Generations whose incumbent windows differ a lot => large sigma_hat, and
-    // whose candidates are never better => reverts (which is what makes pairs).
+    // Incumbent windows alternate 0.2/0.4; candidates always score 1.0, so every
+    // generation reverts (which is what makes consecutive incumbents pairable).
     for (int g = 0; g < 4; ++g) {
-        Feed inc;  inc.distress  = (g % 2 == 0) ? 0.0f : 1.0f;
-        Feed cand; cand.distress = 1.0f;
+        Feed inc;  inc.torque  = (g % 2 == 0) ? 0.2f : 0.4f;
+        Feed cand; cand.torque = 1.0f;
         run_ticks(bus, ge, t, kWindow, inc);
         run_ticks(bus, ge, t, kWindow, cand);
     }
-    EXPECT_GT(metric_d(ge, "sigma_est"), 0.0) << "revert pairs must estimate noise";
-    EXPECT_GT(metric_d(ge, "accept_margin"), 0.0);
+    EXPECT_NEAR(metric_d(ge, "sigma_est"), 0.1414, 0.005)
+        << "sigma_hat must be sqrt(noise_ema/2) of the known revert-pair delta";
+    EXPECT_NEAR(metric_d(ge, "accept_margin"), 0.1414, 0.005);   // k = 1.0
     int64_t acc_before = metric_i(ge, "accepts");
-    // Now a candidate that is better, but by far less than sigma_hat.
-    Feed inc;  inc.distress  = 1.0f;
-    Feed cand; cand.distress = 0.99f;
+    // A candidate better by 0.10 — a REAL improvement a bare inequality would
+    // take, sitting well inside the 0.1414 margin.
+    Feed inc;  inc.torque  = 0.40f;
+    Feed cand; cand.torque = 0.30f;
     run_ticks(bus, ge, t, kWindow, inc);
     run_ticks(bus, ge, t, kWindow, cand);
     EXPECT_EQ(metric_i(ge, "accepts"), acc_before)
@@ -498,27 +515,97 @@ TEST(GainEvolver, AcceptMarginBlocksSubNoiseImprovement) {
 
 TEST(GainEvolver, AcceptMarginStillAcceptsClearWin) {
     // The margin must not freeze the search: an improvement far larger than the
-    // noise is still accepted.
+    // noise is still accepted — WITH the margin verifiably armed.  (The first
+    // version built its "noise" from identical incumbent windows, so sigma_est
+    // was exactly 0 and the win was accepted with no margin in play.)
     ogma::InProcessBus bus;
     ogma::GainEvolver ge;
     ParamMap p = ge_params();
+    p["w_distress"]  = 0.0;
+    p["w_energy"]    = 1.0;
     p["accept_k"]    = 1.0;
     p["noise_min_n"] = int64_t{1};
     ge.on_setup(&bus, p);
     uint64_t t = 0;
     run_ticks(bus, ge, t, kWarmup, Feed{});
-    for (int g = 0; g < 3; ++g) {           // build a small sigma_hat via reverts
-        Feed inc;  inc.distress  = 0.50f;
-        Feed cand; cand.distress = 1.00f;
+    for (int g = 0; g < 3; ++g) {           // build sigma_hat ≈ 0.1414 via reverts
+        Feed inc;  inc.torque  = (g % 2 == 0) ? 0.2f : 0.4f;
+        Feed cand; cand.torque = 1.0f;
         run_ticks(bus, ge, t, kWindow, inc);
         run_ticks(bus, ge, t, kWindow, cand);
     }
+    // This assertion found a real bug on first contact: noise_min_n was missing
+    // from on_setup's int-param list, so the config's 1 was silently ignored and
+    // the default 3 kept sigma_est at 0 here (noise_n was only 2).
+    EXPECT_GT(metric_d(ge, "sigma_est"), 0.1) << "the margin must be armed here";
     int64_t acc_before = metric_i(ge, "accepts");
-    Feed inc;  inc.distress  = 1.0f;
-    Feed cand; cand.distress = 0.0f;        // a full-scale improvement
+    Feed inc;  inc.torque  = 0.8f;
+    Feed cand; cand.torque = 0.2f;          // improvement 0.6 >> margin 0.1414
     run_ticks(bus, ge, t, kWindow, inc);
     run_ticks(bus, ge, t, kWindow, cand);
     EXPECT_EQ(metric_i(ge, "accepts"), acc_before + 1);
+}
+
+// ---- the loop, CLOSED -------------------------------------------------------
+//
+// Every other test in this file feeds sensors as a function of the tick index
+// alone, so J is causally independent of the published vector and the ES runs
+// open-loop — none of them would fail if mutation, acceptance and incumbency
+// stopped composing into a search (audit 2026-08-24).  This one closes the
+// loop: a fake consumer applies the published GainVector, the energy sensor
+// reads a quadratic bowl of the APPLIED gains, and the incumbent must actually
+// walk down it.  Deterministic (no injected noise, seeded RNG), so a genuine
+// mechanism regression fails it loudly rather than statistically.
+
+TEST(GainEvolver, ClimbsASyntheticBowlClosedLoop) {
+    ogma::InProcessBus bus;
+    ogma::GainEvolver ge;
+    ParamMap p = ge_params(/*sigma=*/0.2);
+    p["gain_seed"]   = std::vector<double>{0.9, 0.9, 0.9};
+    p["w_distress"]  = 0.0;
+    p["w_energy"]    = 1.0;
+    p["accept_k"]    = 0.25;         // inert here (deterministic => sigma_est 0),
+    p["noise_min_n"] = int64_t{3};   // present so the full production path runs
+    p["sigma_min"]   = 0.2;          // pin sigma: the anneal has its own tests
+    p["sigma_max"]   = 0.2;
+    ge.on_setup(&bus, p);
+
+    std::vector<double> applied{0.9, 0.9, 0.9};      // the consumer's live gains
+    bus.subscribe("t.gains", ogma::SubscriptionKind::Direct,
+        [&](std::string_view, ogma::MessagePtr m) {
+            if (auto gv = std::dynamic_pointer_cast<const ogma::GainVector>(m))
+                applied = gv->values;
+        });
+    const std::vector<double> star{0.15, 0.15, 0.15};
+    auto msd = [&](std::vector<double> const& v) {   // mean squared dist to g*
+        double s = 0.0;
+        for (size_t k = 0; k < 3; ++k) s += (v[k] - star[k]) * (v[k] - star[k]);
+        return s / 3.0;
+    };
+    uint64_t t = 0;
+    auto drive = [&](int64_t n) {
+        for (int64_t i = 0; i < n; ++i) {
+            Feed f;
+            f.torque = float(0.1 + 0.8 * msd(applied));   // J = the bowl
+            ev_tick(bus, ge, t++, f);
+        }
+    };
+    const double d0 = msd({0.9, 0.9, 0.9});               // 0.5625
+    drive(kWarmup + 60 * 2 * kWindow);                    // 60 generations
+
+    auto inc = ge.snapshot_state()["module"]["incumbent"].get<std::vector<double>>();
+    EXPECT_LT(msd(inc), 0.25 * d0)
+        << "60 generations on a smooth bowl must recover most of the distance; "
+        << "incumbent ended at {" << inc[0] << "," << inc[1] << "," << inc[2] << "}";
+    EXPECT_LT(metric_d(ge, "J_inc"), 0.1 + 0.8 * 0.25 * d0 + 0.02)
+        << "the criterion the search reports must track the bowl it descended";
+    EXPECT_GE(metric_i(ge, "accepts"), 5)
+        << "descent must happen through ACCEPTS, not through drift";
+    // And the walk was selection, not luck-of-the-last-window: the accepted
+    // vector is applied — the consumer's live gains equal the incumbent after
+    // the closing incumbent publish of the final generation.
+    for (size_t k = 0; k < 3; ++k)
+        EXPECT_NEAR(applied[k], inc[k], 1e-12);
 }
 
 TEST(GainEvolver, DeprecatedTiltVarKeyThrows) {
@@ -636,6 +723,56 @@ TEST(GainEvolver, FallAlarmDecaysAndOnlyEverTightens) {
     EXPECT_EQ(metric_i(ge, "alarm_on"), 0);
 }
 
+TEST(GainEvolver, TrippedAlarmDemandsStrictFallReduction) {
+    // The alarm's actual CONTRACT — untested until the 2026-08-24 audit: once
+    // tripped, G1's tolerance goes to -1 and a candidate must strictly REDUCE
+    // falls; merely matching the incumbent's falls no longer passes, however
+    // good its J.  Two identical bodies, alarm armed vs disabled, same feeds:
+    // the armed one must revert the equal-falls winner the other accepts.
+    auto run = [](double alarm_on) {
+        ogma::InProcessBus bus;
+        ogma::GainEvolver ge;
+        ParamMap p = ge_params(/*sigma=*/0.1);
+        p["w_distress"]    = 0.0;
+        p["w_energy"]      = 1.0;
+        p["fall_alarm_on"] = alarm_on;
+        p["fall_alarm_tau"] = 1.0e6;        // negligible decay inside the test
+        ge.on_setup(&bus, p);
+        uint64_t t = 0;
+        // One evaluation window containing n_falls debounced excursions (dips at
+        // the head; falls count whole-window) and a flat torque = its J.
+        auto window = [&](int n_falls, float torque) {
+            int64_t used = 0;
+            for (int f = 0; f < n_falls; ++f) {
+                Feed dn; dn.upright = -0.5f; dn.torque = torque;
+                run_ticks(bus, ge, t, 15, dn);   // debounce 10 -> one fall
+                Feed up; up.torque = torque;
+                run_ticks(bus, ge, t, 15, up);   // recover above 0.5 (unlatch)
+                used += 30;
+            }
+            Feed rest; rest.torque = torque;
+            run_ticks(bus, ge, t, kWindow - used, rest);
+        };
+        run_ticks(bus, ge, t, kWarmup, Feed{});
+        // Trip phase: sustained falling (2 per window, 2 generations = 8 falls).
+        for (int g = 0; g < 2; ++g) { window(2, 0.5f); window(2, 0.5f); }
+        int64_t acc_before = metric_i(ge, "accepts");
+        // Measurement: candidate MATCHES the incumbent's falls and wins J big.
+        window(1, 0.8f);                    // incumbent: 1 fall, expensive
+        window(1, 0.2f);                    // candidate: 1 fall, much cheaper
+        return std::pair<int64_t, int64_t>(metric_i(ge, "accepts") - acc_before,
+                                           metric_i(ge, "alarm_on"));
+    };
+    auto [acc_armed, on_armed] = run(1.5);
+    auto [acc_off, on_off]     = run(0.0);
+    EXPECT_EQ(on_armed, 1) << "the trip phase must have tripped the alarm";
+    EXPECT_EQ(acc_armed, 0)
+        << "under a tripped alarm, equal falls must REVERT however good J is";
+    EXPECT_EQ(on_off, 0);
+    EXPECT_EQ(acc_off, 1)
+        << "the same candidate passes plain no-regression G1 when the alarm is off";
+}
+
 TEST(GainEvolver, AlarmDisabledByDefaultIsByteIdenticalToNoAlarm) {
     // fall_alarm_on defaults to 0 => the guard must behave exactly as before.
     auto run = [](double alarm_on) {
@@ -711,8 +848,13 @@ TEST(GainEvolver, ChanceLevelAcceptanceNoLongerGrowsSigma) {
         run_ticks(bus, ge, t, kWindow, win ? bad : good);
         run_ticks(bus, ge, t, kWindow, win ? good : bad);
     }
-    EXPECT_LE(metric_d(ge, "sigma"), 0.1 + 1e-9)
-        << "chance-level acceptance must not inflate sigma";
+    // Not merely "does not inflate": at exactly-chance acceptance the strict
+    // `rate > target` comparison fails, so the anneal takes the DOWN branch
+    // every generation and must PARK sigma at the floor.  This is the shipped
+    // behavior in miniature — production guards hold realized acceptance below
+    // the AUTO setpoint, which is how every AUTO arm settled at sigma_min.
+    EXPECT_NEAR(metric_d(ge, "sigma"), 0.08, 1e-9)
+        << "chance-level acceptance must anneal sigma down to the floor";
 }
 
 // ---- flow term: magnitude must not be tradable for predictability ------------

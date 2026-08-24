@@ -214,13 +214,16 @@ private:
     // It is also largely INDEPENDENT of what we already score (corr −0.125 with
     // sd(upright)), so it adds information rather than restating it, and it AGREES
     // with the flow term (+0.123: worse locomotion also burns more current) rather
-    // than trading against it.  Default weight 8.0 equalises its SIGNAL with
-    // sd(upright)'s (0.0646/0.0083) while contributing ~1/60th of the noise.
+    // than trading against it.  8.0 would equalise its SIGNAL with sd(upright)'s
+    // (0.0646/0.0083) at ~1/60th the noise; the default is 4.0 because that is the
+    // weight every landscape/basin/tsweep verdict was measured at (the configs all
+    // ran 4.0 while the default said 8.0 — the audit's drift trap #2, aligned
+    // 2026-08-24 toward the VALIDATED value, never the other way).
     // ⚠ THE FREEZE TRAP IS NOT DISPROVEN — the +0.123 agreement was measured over
     // walking bodies only; no observed window contains a frozen one.  The flow term
     // is the counterweight that must stop "spend nothing by doing nothing", and the
     // per-leg loaded-minima guard blocks "kill a leg to save current".
-    double w_energy_    = 8.0;
+    double w_energy_    = 4.0;
     double w_dwell_     = 0.0;
     double dwell_thresh_ = 0.9;   // upright below this = leaning dangerously (~26 deg)
 
