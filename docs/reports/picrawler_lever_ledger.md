@@ -4123,3 +4123,47 @@ simply settling after the displaced start — no search required. Five of seven 
 shape as the acceptance-rate error: a number that moves for a reason other than the one
 being credited.** The re-run adds `sigma0` and it is the arm the others are measured
 against.
+
+### ★★★ 2026-08-24 — n=6 KILLS THE n=3 SIGNAL: the search does not beat not-searching
+
+**Verdict: `NULL` on the search, measured against the control it needed. The criterion
+stands; the (1+1)-ES on top of it does not.**
+
+All arms start displaced — `coupling_gain` at 0.30, inside its measured BAD band — with
+`amp_target` and `postural_gain` in theirs. ΔJ is the last third of scored windows minus
+the first third; negative means the criterion improved.
+
+| arm | σ | n | ΔJ | sd | vs control |
+|---|---|---|---|---|---|
+| **`sigma0` — NO SEARCH** | 0 | 6 | **+0.033** | 0.117 | — |
+| `auto` — what ships | 0.08 | 6 | **−0.033** | 0.210 | t = **−0.67**, ns |
+| `fix008` — σ pinned | 0.08 | 6 | +0.100 | 0.336 | t = +0.46, ns |
+
+**★ 1. THE n=3 RESULT WAS NOISE, and this is the clearest demonstration of §3 rule 3 the
+project has.** At n=3 `auto` gave ΔJ **−0.181** against a −0.001 control, t = −2.48 —
+close enough to 2.8 to be tempting, and it was reported as "real-looking, underpowered, not
+yet a claim." Three more seeds moved it to **−0.033**, t = −0.67, with the sd rising 0.088
+→ 0.210. One of the new seeds drove coupling to 2.00 and carried its own ΔJ far off the
+others. **The effect did not shrink because the estimate got better; it was never there.**
+
+**★ 2. THE CONTROL WORKED, AND THAT IS WHAT MAKES THIS READABLE.** `sigma0` holds coupling
+at 0.30 in all six runs and gives ΔJ +0.033 — J does **not** drift on its own after a
+displaced start. So the ΔJ numbers are attributable, and the answer is that searching and
+not searching are indistinguishable. Without this arm the earlier five-of-seven-arms-improve
+pattern would have read as a working search.
+
+**★ 3. BAND RE-ENTRY: 1 of 12 searching runs.** The displaced gain stayed displaced. Both
+halves of the pass criterion fail together, which at least is consistent — the earlier
+disagreement (J falling while coupling stayed put) was itself an artifact of the noise.
+
+**★ 4. The anneal contributes nothing measurable.** `auto` vs `fix008` — same σ, anneal live
+vs neutralized — differ by 0.133 at t = −0.82. Consistent with the anneal servoing to a
+setpoint that is by construction the chance-acceptance rate.
+
+**WHAT THIS DOES AND DOES NOT SAY.** It does not say the criterion is blind: three gains
+have landscapes above noise, `coupling_gain`'s optimum replicated across two independent
+operating points onto the operator's hand-found 1.55, and measured authority predicted which
+gains resist scattering on two different bodies. **The signal is there and the search cannot
+climb it.** Scope: arena, 240k ticks (~28 generations), one displaced start, 3-D. Longer
+runs, a different accept rule, or a criterion whose terms are not two motion-magnitude
+proxies are all untested.
