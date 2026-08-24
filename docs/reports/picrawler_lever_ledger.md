@@ -3519,7 +3519,8 @@ study addresses exactly that.
 
 ### 2026-08-23 — flow term: MIN form, so magnitude cannot be traded for predictability
 
-**Verdict: `IN_FLIGHT`** — built, unit-pinned, gain-0 guarded, A/B armed.
+**Verdict: `NULL` on its stated purpose — and ★ THE PREMISE WAS A MISREAD, retracted below.**
+Built, unit-pinned, gain-0 guarded, A/B'd the same day. It ships and stays OFF.
 
 The flow term is the criterion's only counterweight against minimizing every other
 term by standing still, and the landscape entry above measured it not doing that job.
@@ -3671,8 +3672,14 @@ generations), body seed pinned so the only difference between runs is where the 
 started. All distances in normalized gain units (0 = `gain_min`, 1 = `gain_max`).
 
 **1. The search does NOT converge. It DIVERGES.** Mean pairwise spread between runs went
-**0.979 → 1.139** (cad) and **0.979 → 1.064** (measured). Independent starts end further
+**1.070 → 1.206** (cad) and **1.070 → 1.159** (measured). Independent starts end further
 apart than they began.
+
+*(Figures corrected the same day: the first pass normalized against a hand-copied bounds
+table that had drifted from the shipped config on two of eight gains. `gainevo_basin.py`
+now READS the bounds from the basin configs, so the table cannot drift again. Every
+verdict below is unchanged — per-gain sd ratios are scale-invariant, which is exactly why
+the authority cross-check, the finding this entry rests on, was untouched.)*
 
 **2. ★ BUT THE MEASURED AUTHORITY PREDICTS THE ORDERING — replicated on both bodies.**
 End/start spread ratio, averaged by the landscape sweeps' verdict:
@@ -3702,7 +3709,7 @@ searched space is mostly dimensions the search cannot navigate, and each one tax
 ones it can.
 
 **5. ⚠ THE TWO-BODY COMPARISON IS UNINFORMATIVE, and the script now says so itself.**
-Centroid separation 0.229 against within-body spread 1.101 reads as "both bodies agree",
+Centroid separation 0.267 against within-body spread 1.182 reads as "both bodies agree",
 but that is satisfied trivially when neither body converged — the within-body cloud
 swamps any body difference. It is a statement about the SEARCH, not about the two bodies.
 `gainevo_basin.py` refuses the verdict when spread exceeds 2× separation rather than
@@ -3718,3 +3725,64 @@ random in 8-D" is what was measured, not "cannot converge."
 and hand-set the rest. Two independent measurements now support it: the landscapes say
 the other five carry no gradient, and the basin study says they scatter while taxing the
 three that do. This is the next lever, and it is cheap.
+
+
+### ★★★ 2026-08-23 — RETRACTION + the finding underneath it: the flow term is an AMPLITUDE proxy
+
+**The A/B killed my own diagnosis, which is what an A/B is for.** Identical sweep, same
+config/seeds/schedules/ticks, `ge_fmf:1` verified in all nine logs.
+
+**1. ★ THE PREMISE WAS FALSE.** I wrote — into the ledger, the code comments, the config
+metadata, three commit messages, and a report to the operator — that the flow term "scored
+BEST at the gait amplitude whose mean travel was LOWEST (0.0495)." **It did not.** Flow's
+optimum sat at amp 0.28, where `|fwd_v|` = 0.1537 — the FASTEST level in the low band. The
+slowest level scored *worse* on flow (0.4086 vs 0.3733).
+
+The mistake: `|fwd_v|` is **not monotone in amplitude** (0.050, 0.154, 0.093, 0.069, 0.110,
+0.145). I saw flow preferring low amplitude, silently read that as preferring low travel,
+and never checked the column sitting next to it in my own table.
+
+**2. ★ WHAT FLOW ACTUALLY MEASURES — and this is the real finding.**
+
+| | corr with `|fwd_v|` | corr with amplitude |
+|---|---|---|
+| legacy product | **+0.256** | **+0.967** |
+| min form | +0.249 | +0.970 |
+
+**The flow term is a gait-amplitude proxy, not a travel term.** Mechanically it is
+`1 − 1/(1+k·vol)` in disguise: with magnitude saturated, flow reduces to the *volatility*
+of `fwd_v`, and velocity volatility tracks amplitude almost perfectly. **The criterion's
+one sanctioned speed-flavored term does not measure speed.**
+
+**3. The saturation half was real.** `ge_fmag` — the instrument shipped with the fix —
+reads median 0.534, i.e. `flow_ema` ≈ 0.057, above the 0.05 ceiling: magnitude was pinned
+at 1.0 most of the time, exactly as the unit test asserts. **A true defect whose repair
+changed nothing measurable**, because the term's variance never lived in magnitude.
+
+**4. Verdict on `flow_min_form`: NULL, ships OFF.** Span/noise 3.60 → 3.66, bands
+identical, correlation structure unmoved. It is defensible on first principles (a tenfold
+speed range scoring identically is indefensible) and it is free to keep as dead-by-default
+code — but principle is not evidence, and it does not get enabled on this. **Re-use
+context: it becomes live the moment a LEGAL travel signal replaces `fwd_v`**, because only
+then does magnitude carry information worth un-saturating.
+
+**5. This SHARPENS the audit rather than softening it.** I told the operator the min form
+"increased our exposure to the oracle." Weaker than stated: the term's response is
+dominated by `fwd_v`'s volatility in both forms, so removing the ceiling did not make it
+track the oracle's *magnitude* any harder. The input is still illegal and the exposure is
+still real — but the bigger problem is now visible, and it is not exposure. **The criterion
+has NO working travel term at all**, so nothing in it opposes a body that stops moving
+except by proxy through amplitude. That is a much stronger argument for planted-foot
+kinematic odometry than the one I made this morning: it is not only the legal replacement,
+it is the only way this term starts measuring what its name claims.
+
+**6. The anti-circling factor is untouched by this.** Its motivation — `fwd_v` is
+body-frame, so a circle reads as travel — is independent of the misread, and a term that
+tracks amplitude rather than travel cannot see circling either. It remains queued.
+
+**Process note (§3.2 #6, self-inflicted): I built, tested, documented and shipped a fix on
+an unverified reading of my own table.** The unit tests all passed because they pinned the
+*mechanism* I believed in, not the *claim* about the robot. Mechanism tests cannot catch a
+misdiagnosis; only the A/B could, and it did — within hours, because it was armed at build
+time. The lesson is not "test more", it is **run the A/B before writing the justification
+into five places.**

@@ -20,9 +20,24 @@ prediction from the landscape sweeps, made on data they never touched.
 """
 import glob, json, math, os, statistics as st, sys
 
-# declared search bounds (config gain_min / gain_max), for normalization
-BOUNDS = [(0.0, 1.5), (0.0, 0.6), (0.0, 1.5), (0.15, 0.8),
-          (0.0, 0.15), (0.1, 1.5), (0.0, 3.0), (0.0, 0.2)]
+# Search bounds are READ FROM THE CONFIG the runs actually used, never restated
+# here.  A hand-copied table drifted from the shipped bounds on two of eight gains
+# within a day of being written; per-gain sd RATIOS survive that (they are
+# scale-invariant) but every distance in normalized space does not.
+BOUNDS = []
+
+
+def load_bounds(d):
+    """Bounds from any basin_*.json the runs were launched with."""
+    import glob as _g
+    for pat in (os.path.join(d, "basin_*.json"),
+                "godot_host/project/addons/ami_ogma/configs/basin_*.json"):
+        for f in sorted(_g.glob(pat)):
+            cfg = json.load(open(f))
+            ge = next((m for m in cfg["modules"] if m.get("type") == "GainEvolver"), None)
+            if ge:
+                return list(zip(ge["params"]["gain_min"], ge["params"]["gain_max"]))
+    raise SystemExit("gainevo_basin: cannot find a basin_*.json to read gain bounds from")
 # authority measured by the landscape sweeps, for the cross-check
 # the GOOD band each gain's landscape resolved (None = the criterion cannot see it)
 GOOD_BAND = {"amp_target": (0.15, 0.41), "coupling_gain": (1.2, 2.0),
@@ -62,6 +77,10 @@ def spread(vs):
 def main(d):
     meta = json.load(open(os.path.join(d, "starts.json")))
     keys, starts = meta["keys"], meta["starts"]
+    global BOUNDS
+    BOUNDS = load_bounds(d)
+    print("  bounds (from config): " + ", ".join(
+        f"{k} [{lo:g},{hi:g}]" for k, (lo, hi) in zip(keys, BOUNDS)) + "\n")
     bodies = [b for b in ("cad", "measured") if os.path.isdir(os.path.join(d, b))]
     print(f"{len(starts)} random starts x {len(bodies)} bodies\n")
 
