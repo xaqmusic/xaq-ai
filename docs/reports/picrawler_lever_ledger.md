@@ -4067,3 +4067,59 @@ anneal on something that is not noise-dominated: realized ΔJ over a block of ge
 or the fraction of accepts that survive re-evaluation. Either way the first step is a
 sweep of `target_accept` against measured ΔJ, because ΔJ is the only signal in this loop
 that the anneal does not already control.
+
+### ★★ 2026-08-24 — target_accept IS A STEP-SIZE SELECTOR, and a self-inflicted seed confound
+
+**Verdict: the `target_accept` axis is `TAUTOLOGY` — it does nothing the σ bounds do not
+already do. The ΔJ question is re-running with the control it needed.**
+
+**★ 1. HARNESS TRAP, self-inflicted: `OGMA_SEED` overrides the module's own `seed` param.**
+The sweep pinned `OGMA_SEED=1234` for every run (to hold the body fixed) and tried to vary
+the search RNG through each config's `seed`. `OGMA_SEED` is the **master override** and
+rewrites it — the GainEvolver's schema says so in its own doc string. Result: all three
+replicates of every arm were **byte-identical**. n=3 was n=1, and ~5 hours of compute bought
+replication of a single trajectory.
+
+The tell was an analyzer crash — `stdev` of three identical numbers is zero. **A divide-by-
+zero was the only thing standing between this and three "seeds" reported as agreement.**
+`gainevo_tsweep.py` now names the condition instead of dying on it. To vary the search, vary
+`OGMA_SEED`; the module `seed` param is not an independent knob.
+
+**★ 2. `target_accept` CONFIRMED AS A σ SELECTOR — the axis is redundant.** Predicted from
+the anneal's structure, then measured: with acceptance pinned near the noise floor,
+`rate > target` has a fixed answer, so the anneal drives σ to one bound.
+
+| arm | target | σ settled | ΔJ | coupling end |
+|---|---|---|---|---|
+| `tgt070` | 0.70 (above floor) | 0.080 = σ_min | −0.175 | 0.769 |
+| `fix008` | — (σ pinned 0.08) | 0.080 | **−0.175** | **0.769** |
+| `tgt020` | 0.20 (below floor) | 0.180 → σ_max | −0.070 | 1.054 |
+
+`tgt070` and `fix008` are **byte-identical**. `target_accept` is a step-size knob wearing a
+statistician's name, so the tgt arms are dropped and the honest axis is σ.
+
+**★ 3. THE TWO HALVES DISAGREE — and that is the interesting part.** Single seed, so a
+direction only. Starting displaced (coupling 0.30, inside its BAD band):
+
+| arm | σ | ΔJ | coupling end | re-entered 1.2–2.0 |
+|---|---|---|---|---|
+| auto | 0.08 | **−0.132** | 0.793 | no |
+| fix003 | 0.03 | −0.122 | 0.838 | no |
+| fix008 | 0.08 | **−0.175** | 0.769 | no |
+| **fix020** | 0.20 | **+0.122** | **1.614** | **YES** |
+| fix045 | 0.45 | +0.111 | 0.937 | no |
+
+**J falls in every arm that leaves coupling displaced, and rises in the one arm that
+recovers it.** The single-gain landscape said coupling's good band is 1.2–2.0 with 0–0.8
+bad; here the search finds lower J *without* leaving the bad band — and `fix020`, which did
+recover coupling, paid for it by driving `amp_target` 0.385 → 0.575, outside amp's own good
+band. **The single-gain landscapes do not compose**, which is the interaction question the
+basin study was built for and could not answer while diffusing.
+
+**⚠ 4. THE MISSING CONTROL, and why the ΔJ numbers above cannot yet be read.** There was no
+**σ=0 observer** arm. J falling over 28 generations is equally consistent with the body
+simply settling after the displaced start — no search required. Five of seven arms showing
+ΔJ < 0 looks like a search working and may be nothing but relaxation. **This is the same
+shape as the acceptance-rate error: a number that moves for a reason other than the one
+being credited.** The re-run adds `sigma0` and it is the arm the others are measured
+against.
