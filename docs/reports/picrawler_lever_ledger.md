@@ -3859,3 +3859,56 @@ legal in one swap, with no consumer changes.
 one empirically-established porting invariant — gravity-referenced signals emerged in
 **8/8 cells across both actuation backends**, and no other family did. Horizontal travel
 must be separated from vertical bounce through fused accel+gyro attitude, not assumed.
+
+### ★★★ 2026-08-24 — THE SEARCH ACCEPTS AT CHANCE: every run used a window the project had already refuted
+
+**Verdict: `NULL` on the 3-D lever, and ★ the basin study's DIAGNOSIS is retracted — the
+observation stands, the cause was wrong.**
+
+**1. 3-D did not fix it.** Same protocol as the 8-D basin study, same 12 start points
+projected onto the three gains with authority, other five pinned at j1s4 so generation 0 is
+the same body. Spread 0.747 → **0.777** — still no convergence. The means appear to travel
+toward the good bands (coupling +0.259, postural +0.209) but **paired tests say no**:
+t = +0.88 / +1.09 / +0.40, sign counts 6/12, 8/12, 7/12. Coin flips. *Reporting those mean
+moves as a partial success was one sentence away and would have been wrong.*
+
+**2. ★ THE CAUSE: acceptance sits AT THE NOISE FLOOR.**
+
+| arm | accept rate | noise floor (k=0.25) |
+|---|---|---|
+| 8-D cad | 0.383 ± 0.074 | 0.430 |
+| 8-D measured | 0.290 ± 0.101 | 0.430 |
+| 3-D cad | 0.373 ± 0.072 | 0.430 |
+
+**The search is accepting by coin flip.** That is diffusion with extra steps, it is
+independent of dimensionality, and it is exactly why dropping 8-D to 3-D changed nothing.
+
+**3. ★ AND THE REASON IS A CONFIG THAT DRIFTED FROM ITS OWN MODULE DEFAULT.** Every config
+— `basin_*`, `basin3d_*`, `__j1s4`, `__gainevo_live` — runs `eval_window_ticks: 4000`.
+The module's default is **12000**, and its own parameter documentation says why:
+
+> *"Gate 2 MEASURED 4000 to be far too short (noise sd 1.4 vs signal 0.3); with the
+> post-gate-2 criterion ~11k suffices, so the default is 12000."*
+
+**The window was raised in the code after gate 2 measured it inadequate, and the configs
+were never updated.** So the basin study, the 3-D test and the deployed operating point all
+ran a search at the one window length this project had already refuted in writing. Short
+windows inflate σ̂, an inflated σ̂ makes the margin unfilterable, and the search accepts noise.
+
+This is §3.2 #7 — *did the arm you think you ran actually load?* — in its least visible
+form. Nothing failed, no guard fired, the parameter was legal and in range. **A default
+changed and its consumers did not, and a stale value is invisible precisely because it
+runs perfectly.**
+
+**4. What survives.** The authority cross-check from the basin study is **untouched** and
+remains the campaign's best independent confirmation: gains the criterion can see resisted
+scattering (STRONG 0.95/0.96) while gains it cannot see scattered freely (FLAT 1.70/1.41),
+replicated on two bodies. That effect appeared *despite* chance-level acceptance, which
+makes it more impressive, not less. What is retracted is the diagnosis built on top of it —
+"five of eight dimensions are noise and tax the three that work" — which the 3-D test
+falsified within hours of my writing it.
+
+**→ NEXT, AND CHEAP FIRST: verify the mechanism before repeating the study.** 6 runs at
+`eval_window_ticks: 12000`, 400k ticks each (~16 generations), measuring one number: does
+acceptance drop below the 0.430 floor? A basin study at 12000 costs 2.8× the ticks per
+generation, so it is worth ~9 hours only once the acceptance claim is confirmed for ~2.

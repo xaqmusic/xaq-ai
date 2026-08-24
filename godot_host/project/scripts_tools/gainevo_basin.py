@@ -30,8 +30,8 @@ BOUNDS = []
 def load_bounds(d):
     """Bounds from any basin_*.json the runs were launched with."""
     import glob as _g
-    for pat in (os.path.join(d, "basin_*.json"),
-                "godot_host/project/addons/ami_ogma/configs/basin_*.json"):
+    for pat in (os.path.join(d, "basin*_*.json"), os.path.join(d, "basin_*.json"),
+                os.path.basename(d.rstrip("/")).replace("basin3d","basin3d")+"","godot_host/project/addons/ami_ogma/configs/"+("basin3d_*.json" if "3d" in d else "basin_*.json")):
         for f in sorted(_g.glob(pat)):
             cfg = json.load(open(f))
             ge = next((m for m in cfg["modules"] if m.get("type") == "GainEvolver"), None)
