@@ -3786,3 +3786,76 @@ an unverified reading of my own table.** The unit tests all passed because they 
 misdiagnosis; only the A/B could, and it did — within hours, because it was armed at build
 time. The lesson is not "test more", it is **run the A/B before writing the justification
 into five places.**
+
+### ★★★ 2026-08-24 — LEG ODOMETRY ON THE REAL ROBOT: correcting "the body already publishes it"
+
+**Verdict: `DEFERRED`, with a corrected design and a MEASUREMENT that must come first.**
+
+**★ 1. RETRACTION.** Yesterday's audit said planted-foot odometry needs "only encoders and
+contact, **both of which this body already publishes**." True in **sim only**. The physical
+picrawler (`picrawler_sim2real_port.md`, robot on the bench since 2026-08-10) has:
+
+| what the design assumed | what the robot has |
+|---|---|
+| joint encoders | ❌ **hobby servos accept an angle and report nothing** |
+| foot contact switches | ❌ none |
+| servo current (torque surrogate) | ❌ **none** — Robot HAT V4's A4 is battery *voltage*; needs an INA219/INA3221 |
+| belly ToF rangefinder | ❌ not yet acquired (VL53L0X planned) |
+| magnetometer | ❌ unusable (12 servos ≈ 7 µT each vs 50 µT earth) |
+
+The legality bar is `{ commanded joint angles, IMU 6-axis, known link geometry }` — and
+**servo current has no hardware behind it**, so it is thinner than the legitimacy doc's §5
+table implies.
+
+**★ 2. CONTACT SENSING IS NOT THE BLOCKER — a robust consensus makes it optional.** A
+planted foot's body-frame velocity *is* the negative of the body's. A swinging foot's is
+not, and differs grossly. So take the **median across all four legs**, never the mean: in a
+crawl gait roughly three feet are down, the median is carried by the planted majority, and
+swing legs fall out as outliers **without any contact input at all**. Foot switches would
+sharpen this and are cheap — they are an optimization, not a prerequisite.
+
+This is the same differential the DEFERRED post-plant-slip entry required, read the other
+way round: **the consensus is body motion, and each leg's residual from it is that leg's
+slip.** One build, both deferred needs, as previously noted — but now with a form that
+survives the missing sensors.
+
+**★ 3. ACCELEROMETER SPIKES SOLVE A DIFFERENT PROBLEM THAN THE ONE ASKED.** A touchdown
+impulse is genuinely detectable, but one body-mounted IMU sees the **sum** of all four legs:
+it gives *timing*, not *identity*, and attributing a spike to a leg needs the gait phase,
+which is efference and is wrong exactly when a foot misses. Liftoff produces no impulse at
+all, so spikes give at best half of stance. Their real value is elsewhere and worth keeping:
+detecting a **full flight phase**, where no foot is planted and the kinematic estimate is
+undefined, so IMU integration must bridge it. Rare in a crawl gait, so low priority.
+
+**★ 4. THE DOMINANT ERROR IS THE COMMANDED-FK LOAD BIAS — AND THE NUMBER WE HAVE IS THE
+WRONG AXIS.** Commanded-angle FK is blind to servo deflection: a planted leg sags while its
+command still says "I am here." Measured `fk_cmd_err` = **22 mm mean / 38 mm max** — but
+that is `mean |commanded − achieved| foot HEIGHT` (`picrawler_body.gd:_dbg_fk_cmd_err`).
+**Odometry needs the HORIZONTAL component, which has never been measured.**
+
+Two things cut in opposite directions and neither is yet quantified:
+- *In our favour:* velocity is a **difference across ticks**, so any constant deflection
+  cancels. Only the deflection's **change within a stance phase** (load 0 → peak → 0)
+  corrupts the estimate.
+- *Against us:* leg reach is only 156.5 mm, so a stride is tens of mm. If the horizontal
+  deflection swing is of that order, it dominates.
+
+**→ THE FIRST BUILD IS A MEASUREMENT, NOT AN ESTIMATOR.** Both FK variants (`_fk` from
+achieved angles, `_cmd` from commanded) already run every tick through the same chain, with
+the miswiring control already in place (`_dbg_fk_valid_err` = 1.1 mm, 20× smaller than the
+deflection, which is what licenses the comparison). Extend that comparison to report
+**horizontal** error and, specifically, its **within-stance change**. Cheap, no new
+mechanism, and it decides whether this estimator is worth building before any of it is
+written. Ship the estimator only if the within-stance horizontal drift is small against
+stride length.
+
+**★ 5. THE INSERTION POINT IS ONE TOPIC.** `vel_ego` (`picrawler_body.gd:6071-6082`) is the
+sole consumer path — `PlaceGraphPlanner`, `PlayLoop` and `PlaceNav` all read it via
+`vel_topic`, and each already documents tolerating drift as common-mode. Replacing its
+publisher converts the nav stack **and** the GainEvolver's flow term from soft-oracle to
+legal in one swap, with no consumer changes.
+
+**★ 6. Whatever gets built must keep a GRAVITY REFERENCE.** The legitimacy doc's §6 is the
+one empirically-established porting invariant — gravity-referenced signals emerged in
+**8/8 cells across both actuation backends**, and no other family did. Horizontal travel
+must be separated from vertical bounce through fused accel+gyro attitude, not assumed.
