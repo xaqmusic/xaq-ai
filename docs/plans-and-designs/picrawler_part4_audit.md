@@ -255,3 +255,29 @@ legal travel term from FK+IMU fusion (which is also the deferred slip signal).
 No new runs were executed; every quantitative claim above is either read from committed
 code or recomputed from numbers already in the ledger. The §4.1 experiment is the only
 place where an audit conclusion depends on data that does not yet exist.
+
+---
+
+## 6. §4.1 pre-registration — written before the data existed
+
+Launched 2026-08-24 ~16:52, before any arm completed. Protocol: arena, difficulty 0.3,
+`OGMA_SEED` 1–6, 600k ticks (≈24 generations at the 12000 window + 10k warmup), arms
+`sigma0` (control, body displaced via the MotorEPM params — the §2.1 fix), `fix008`,
+`fix020`. Analyzer: the repaired `gainevo_tsweep.py` (Welch t vs control + band re-entry).
+
+**Predictions from the §1 arithmetic, recorded in advance:**
+
+- `sigma0`: ΔJ ≈ 0. First honest measurement of drift *at the displaced point*.
+- `fix008`: indistinguishable from control; band re-entry ≤ 1/6 (replicates C10 at the
+  right control).
+- `fix020` (σ̂ ≈ 0.125 at this window → margin 0.031; |ΔJ|/coupling-step ≈ 0.073; accept
+  0.59 good / 0.28 bad → drift ≈ 0.063 units/gen ≈ 1.5 units over 24 generations against
+  the 0.9 needed, diffusion sd ≈ 1.3): **band re-entry in the majority of runs (≥3/6)**
+  and ΔJ below the control's.
+
+**Decision rule, also in advance:** fix020 re-entry ≥ 3/6 with ΔJ < control ⇒ the search
+climbs once the step matches the noise, and the module fix is raising `sigma_min` to the
+step-matching bound (≈0.2) with the anneal neutralized or re-based on realized ΔJ.
+fix020 re-entry ≤ 1/6 ⇒ the "(1+1)-ES cannot climb this criterion" null becomes
+defensible at the right σ, and the report says so. 2/6 ⇒ underpowered; report the count
+and defer the mechanism claim.
