@@ -3662,3 +3662,59 @@ per-leg EPM ids from an earlier stack generation; absent modules return `""`, an
 discarded on failure so the guard is behaviour-identical — what it buys back is a run log
 where `grep -i error` means something. **This nearly cost a false alarm today**: a routine
 liveness check on the basin study reported 27,096 "errors" and read as a crash.
+
+### ★★★ 2026-08-23 — BASIN STUDY: the 8-D search diffuses; only what the criterion sees resists
+
+**Verdict: `NULL` on convergence, `WORKING` as a diagnosis — and it names the fix.**
+12 random start vectors × 2 bodies (`cad`, `measured`), arena, 300k ticks each (35
+generations), body seed pinned so the only difference between runs is where the search
+started. All distances in normalized gain units (0 = `gain_min`, 1 = `gain_max`).
+
+**1. The search does NOT converge. It DIVERGES.** Mean pairwise spread between runs went
+**0.979 → 1.139** (cad) and **0.979 → 1.064** (measured). Independent starts end further
+apart than they began.
+
+**2. ★ BUT THE MEASURED AUTHORITY PREDICTS THE ORDERING — replicated on both bodies.**
+End/start spread ratio, averaged by the landscape sweeps' verdict:
+
+| authority | cad | measured |
+|---|---|---|
+| STRONG | **0.95** | **0.96** |
+| weak | 1.11 | 1.11 |
+| FLAT | **1.70** | **1.41** |
+
+Monotone, twice, on data the sweeps never touched. **A gain the criterion can see resists
+being scattered; a gain it cannot see scatters freely.** This is the sweeps' sharpest
+independent confirmation, and it arrives inside a negative headline.
+
+**3. ★ THE MEANS DO NOT TRAVEL — so this is DIFFUSION, not selection.** Reporting spread
+alone would have hidden it. Across both bodies the STRONG gains' means move by ≤0.04
+(`amp_target` −0.021/+0.024, `postural_gain` −0.018/+0.024), while the largest movement
+belongs to `rear_push_ext` (+0.24/+0.27) — a gain with no landscape at all, i.e. pure
+drift. **`coupling_gain` moved in OPPOSITE directions on the two bodies** (+0.185 cad,
+−0.039 measured), which kills any claim of a consistent pull. The second body earned its
+place by producing that disagreement.
+
+**4. The mechanism, stated plainly: five of eight dimensions are noise to the criterion,
+and they inject that noise into every single comparison.** That is why even the three
+gains with real landscapes only manage a 0.82–0.96 ratio instead of collapsing. The
+searched space is mostly dimensions the search cannot navigate, and each one taxes the
+ones it can.
+
+**5. ⚠ THE TWO-BODY COMPARISON IS UNINFORMATIVE, and the script now says so itself.**
+Centroid separation 0.229 against within-body spread 1.101 reads as "both bodies agree",
+but that is satisfied trivially when neither body converged — the within-body cloud
+swamps any body difference. It is a statement about the SEARCH, not about the two bodies.
+`gainevo_basin.py` refuses the verdict when spread exceeds 2× separation rather than
+letting a future reader take the null at face value. **The sim2real question is not yet
+asked, let alone answered.**
+
+**6. ⚠ Scope: 35 generations.** Each generation costs two 4000-tick windows, so 300k ticks
+buys 35. This is a real bound on the claim — "does not converge in 35 generations from
+random in 8-D" is what was measured, not "cannot converge."
+
+**→ THE FIX THIS POINTS AT: search 3-D, not 8-D.** Restrict the searched vector to
+`amp_target`, `coupling_gain`, `postural_gain` — the three with demonstrated authority —
+and hand-set the rest. Two independent measurements now support it: the landscapes say
+the other five carry no gradient, and the basin study says they scatter while taxing the
+three that do. This is the next lever, and it is cheap.
