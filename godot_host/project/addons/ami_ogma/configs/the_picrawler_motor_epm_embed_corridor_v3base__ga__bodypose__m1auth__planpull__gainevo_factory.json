@@ -446,7 +446,7 @@
         "n_legs": 4,
         "seed": 20260817,
         "warmup_ticks": 10000,
-        "eval_window_ticks": 4000,
+        "eval_window_ticks": 12000,
         "mutation_sigma": 0.08,
         "w_falls": 0.0,
         "w_distress": 0.0,
