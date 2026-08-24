@@ -30,13 +30,15 @@ BASE3 = ("the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose"
 
 # start displaced: coupling inside its measured BAD band, the other two in theirs
 TSWEEP_START = [0.385, 0.30, 1.092]
+# The decision set (audit 2026-08-24).  fix020 is the arm the accept arithmetic says
+# can climb (drift ~0.047 units/gen vs 0.008 at sigma 0.08) and the only arm that
+# ever re-entered the band (n=1) — it was missing from the first n=6 rerun, which
+# tested only sigma 0.08.  tgt* arms were dropped as measured TAUTOLOGY (a sigma
+# selector); fix003/fix045 as measured (no re-entry, n=1).
 TSWEEP_ARMS = [                      # label,  sigma, sigma_min, sigma_max, target_accept
     ("sigma0", 0.00, 0.0001, 0.0001, -1.0),    # NO SEARCH — the control
-    ("auto",   0.08, 0.08,   0.50,   -1.0),    # what ships today
-    ("fix003", 0.03, 0.03,   0.03,   -1.0),    # sigma pinned by clamping min==max,
-    ("fix008", 0.08, 0.08,   0.08,   -1.0),    # which neutralizes the anneal without
-    ("fix020", 0.20, 0.20,   0.20,   -1.0),    # a code change
-    ("fix045", 0.45, 0.45,   0.45,   -1.0),
+    ("fix008", 0.08, 0.08,   0.08,   -1.0),    # the sigma the AUTO anneal parks on
+    ("fix020", 0.20, 0.20,   0.20,   -1.0),    # the step the arithmetic says can climb
 ]
 
 
@@ -46,6 +48,10 @@ def load(name):
 
 def ge_of(cfg):
     return next(m for m in cfg["modules"] if m.get("type") == "GainEvolver")
+
+
+def motor_of(cfg):
+    return next(m for m in cfg["modules"] if m.get("type") == "MotorEPMv2")
 
 
 def write(cfg, path, note):
@@ -110,11 +116,24 @@ def main():
                 p["gain_seed"] = TSWEEP_START
                 p["mutation_sigma"], p["target_accept"] = sig, tgt
                 p["sigma_min"], p["sigma_max"] = smin, smax
+                # ⚠ THE CONTROL CONFOUND FIX (audit 2026-08-24).  At sigma 0 the
+                # evolver is a silent observer and PUBLISHES NOTHING, so the body
+                # runs the MotorEPM's own config values — the first sigma0 control
+                # ran the j1s4 point (coupling 1.655), not the displaced start, and
+                # `ge_vec` reported the module's never-published intent.  Writing
+                # the start into the CONSUMER's params puts every arm's body at the
+                # displaced point from tick 0 (searching arms included, so warmup
+                # trajectories match the control's too).
+                mp = motor_of(c)["params"]
+                for k, v in zip(p["gain_keys"], TSWEEP_START):
+                    mp[k] = v
                 write(c, os.path.join(a.outdir, f"tsw2_{label}_s{s}.json"),
                       f"step-size sweep arm '{label}' seed {s}. Starts displaced with "
-                      f"coupling at 0.30, inside its BAD band. A pass needs BOTH halves: J "
-                      f"falls AND coupling re-enters 1.2-2.0. sigma0 is the no-search control "
-                      f"— without it, J falling is indistinguishable from the body settling.")
+                      f"coupling at 0.30, inside its BAD band — in BOTH the evolver seed "
+                      f"and the MotorEPM params, so the sigma0 control's body is actually "
+                      f"displaced (the first control ran j1s4 — audit 2026-08-24). A pass "
+                      f"needs BOTH halves: J falls beyond the sigma0 control AND coupling "
+                      f"re-enters 1.2-2.0.")
         json.dump({"keys": ge_of(base)["params"]["gain_keys"],
                    "bounds": list(map(list, zip(ge_of(base)["params"]["gain_min"],
                                                 ge_of(base)["params"]["gain_max"]))),

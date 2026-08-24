@@ -23,7 +23,13 @@ import glob, json, math, os, statistics as st, sys
 
 COUPLING_IDX = 1                  # gain_keys = [amp_target, coupling_gain, postural_gain]
 GOOD_LO, GOOD_HI = 1.2, 2.0       # coupling's measured good band
-ARMS = ["auto", "tgt020", "tgt070", "fix003", "fix008", "fix020", "fix045"]
+# sigma0 is the CONTROL and every searching arm is judged against it — the first
+# committed version omitted it from this list, so the analyzer could not produce
+# the comparison its own docstring promises.  tgt* arms were dropped after being
+# measured as TAUTOLOGY (a sigma selector); fix003/fix045 after being measured.
+ARMS = ["sigma0", "auto", "fix008", "fix020",
+        "tgt020", "tgt070", "fix003", "fix045"]
+CONTROL = "sigma0"
 
 
 def series(p):
@@ -58,7 +64,7 @@ def main(d):
     hdr = (f"  {'arm':<9}{'n':>3}{'dJ':>9}{'slope/gen':>11}{'t(dJ)':>7}"
            f"{'coupling end':>14}{'re-entered':>12}{'sigma':>8}{'acc rate':>10}")
     print(hdr); print("  " + "-" * (len(hdr) - 2))
-    rows = {}
+    rows, arm_dJs = {}, {}
     for arm in ARMS:
         dJs, slopes, cends, sigs, rates, gens = [], [], [], [], [], []
         for p in sorted(glob.glob(f"{d}/{arm}_s*.log")):
@@ -86,15 +92,37 @@ def main(d):
         print(f"  {arm:<9}{len(dJs):>3}{m:>+9.3f}{st.mean(slopes):>+11.5f}{t:>+7.2f}"
               f"{cend_txt:>14}{reent:>8}/{len(cends):<3}{st.mean(sigs):>8.3f}{st.mean(rates):>10.3f}")
         rows[arm] = (m, t, reent, len(cends), st.mean(sigs))
+        arm_dJs[arm] = dJs
     print("\n  dJ = mean J of the last third minus the first third; NEGATIVE = improving.")
-    print("  |t| > ~2.9 is p<0.05 at n=3, so n=3 can only surface a LOUD effect — which is")
-    print("  the intent: a real capability should not need heavy averaging to appear.\n")
-    passed = [a for a, (m, t, r, n, _) in rows.items() if m < 0 and t < -2.0 and r > n / 2]
-    if passed:
-        print(f"  ARMS PASSING BOTH HALVES: {', '.join(passed)}")
+
+    # ---- the comparison that carries the verdict: each searching arm vs the ----
+    # ---- sigma0 control (Welch t).  dJ falling in isolation is unreadable —  ----
+    # ---- the control is what separates search from settling.                 ----
+    ctrl = arm_dJs.get(CONTROL)
+    vs = {}
+    if ctrl and len(ctrl) > 1:
+        print(f"  vs control ({CONTROL}: dJ {st.mean(ctrl):+.3f} ± {st.stdev(ctrl):.3f}, "
+              f"n={len(ctrl)}):")
+        for arm, dJs in arm_dJs.items():
+            if arm == CONTROL or len(dJs) < 2:
+                continue
+            va, vc = st.variance(dJs), st.variance(ctrl)
+            se = math.sqrt(va / len(dJs) + vc / len(ctrl))
+            tw = (st.mean(dJs) - st.mean(ctrl)) / se if se > 1e-12 else float("nan")
+            vs[arm] = tw
+            print(f"    {arm:<9} dJ-dJ_ctrl {st.mean(dJs)-st.mean(ctrl):+7.3f}   Welch t {tw:+6.2f}")
     else:
-        print("  NO ARM PASSES BOTH HALVES.")
-        best = min(rows.items(), key=lambda kv: kv[1][0]) if rows else None
+        print(f"  ⚠ NO {CONTROL} CONTROL DATA — dJ columns above cannot separate search")
+        print("    from settling; do not read them as a verdict on the search.")
+    passed = [a for a, (m, t, r, n, _) in rows.items()
+              if a != CONTROL and r > n / 2 and vs.get(a, t) < -2.0]
+    if passed:
+        print(f"\n  ARMS PASSING BOTH HALVES (dJ beats control AND band re-entry): "
+              f"{', '.join(passed)}")
+    else:
+        print("\n  NO ARM PASSES BOTH HALVES.")
+        cand = {a: v for a, v in rows.items() if a != CONTROL}
+        best = min(cand.items(), key=lambda kv: kv[1][0]) if cand else None
         if best:
             print(f"  Closest on dJ: {best[0]} ({best[1][0]:+.3f}, t={best[1][1]:+.2f}, "
                   f"re-entry {best[1][2]}/{best[1][3]})")

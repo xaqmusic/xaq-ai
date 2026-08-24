@@ -26,6 +26,17 @@ import glob, json, math, os, statistics as st, sys
 # scale-invariant) but every distance in normalized space does not.
 BOUNDS = []
 
+# The landscape sweeps' verdicts (2026-08-23) — INPUTS to the authority cross-check,
+# measured on a dataset the basin logs never touched, so restating them here is not
+# the drift hazard the bounds were.  The spec.json refactor deleted them along with
+# the old bounds loader, which left every use below a NameError: the analyzer behind
+# the campaign's best positive could not run as committed.  Restored 2026-08-24.
+GOOD_BAND = {"amp_target": (0.15, 0.41), "coupling_gain": (1.2, 2.0),
+             "postural_gain": (0.66, 1.5)}
+AUTHORITY = {"amp_target": "STRONG", "coupling_gain": "STRONG", "postural_gain": "STRONG",
+             "height_homeo_gain": "weak", "plan_gain": "weak", "rear_push_ext": "weak",
+             "rear_land_gain": "FLAT", "rear_knee_plant": "FLAT"}
+
 
 def load_bounds(d):
     """Bounds from the sweep's spec.json — written by gainevo_make_arms.py.
