@@ -3912,3 +3912,81 @@ falsified within hours of my writing it.
 `eval_window_ticks: 12000`, 400k ticks each (~16 generations), measuring one number: does
 acceptance drop below the 0.430 floor? A basin study at 12000 costs 2.8× the ticks per
 generation, so it is worth ~9 hours only once the acceptance claim is confirmed for ~2.
+
+### ★★★ 2026-08-24 — HARDWARE AUDIT: 1 of 7 criterion weight units is buildable on the real robot
+
+**Verdict: `WORKING` as a porting diagnosis. Two findings — one about what the criterion
+measures in SIM, one about what survives the port.**
+
+**★ 1. THE DOMINANT TERM IS NOT MEASURING ENERGY.** `w_energy` is **4.0**, more than every
+other term combined, and it reads `reality.proprio.joint_torque`. The body's own
+registration string for that topic says:
+
+> *"⚠ **NOT applied torque and NOT a load proxy despite its original description**: it sets
+> the motor's max-impulse cap, and with Kp=20/Kd=8 it is **DOMINATED BY THE −Kd·omega
+> damping term** (measured corr with joint motion −0.46..−0.56), i.e. **it is mostly a
+> negated velocity copy**. Use JointLoad for load."
+
+So the criterion's heaviest term is largely **a measure of how fast the joints are moving**.
+Combined with the flow term turning out to be a gait-amplitude proxy (r = +0.97), **two of
+the criterion's three live terms are motion-magnitude proxies wearing other names.** The
+term was introduced and weighted on a signal/noise argument that was never wrong about the
+*statistics* — only about what the signal was.
+
+The honest load signal already exists and is unused here: `joint_load` (velocity-tracking
+deficit) — though it was measured NOT to discriminate stance from swing (0.383 vs 0.257),
+so it is not a drop-in. This needs its own lever, not a quiet re-point.
+
+**★ 2. PORT AUDIT — what the criterion can actually sense on the physical robot.**
+
+| term | weight | topic | on hardware today |
+|---|---|---|---|
+| tilt sd | 1.0 | `upright` | ✅ accelerometer |
+| **energy** | **4.0** | `joint_torque` | ❌ a sim PD-controller internal; **no hardware analog exists** |
+| unloaded | 1.0 | `foot_load` | ❌ needs foot FSRs |
+| flow | 1.0 | `imu[2]` = `fwd_v` | ❌ oracle even in sim |
+| G1 falls guard | — | `upright` | ✅ |
+| G2 per-leg minima guard | — | `foot_load` | ❌ needs foot FSRs |
+
+**One of seven weight units, and only one of two guards, survives the port as-is.**
+
+**★ 3. THREE LOW-COMPLEXITY ADDITIONS RECOVER SIX OF SEVEN.** All are I²C or the existing
+ADC header — no new buses, and the IMU wiring is already committed.
+
+| add | cost | recovers |
+|---|---|---|
+| **INA219** on the servo rail | ~$5, I²C | the **energy** term (4.0) as *real* current — bus total, not per-joint, which for an energy term is the more honest quantity anyway |
+| **4× FSR on A0–A3** | ~$10, existing ADC | `foot_load` (1.0) **+ the G2 guard** + stance ground truth for odometry bring-up |
+| **VL53L0X** belly ToF | ~$5, I²C `0x29` | the belly-clearance channel the deployed height homeostat rides on — CLAUDE.md's "hump breakthrough" |
+
+FSRs **supersede foot microswitches** — an FSR above threshold *is* a contact switch and
+also carries the load magnitude, so do not spend GPIO on both. Keep A4 on battery voltage;
+it is the brownout/stall detector.
+
+**★ 4. `vel_ego` FROM ACCELEROMETER ALONE: NO — and tolerating noise does not help, because
+the error is BIAS.** The accelerometer cannot separate tilt from acceleration, so an
+attitude error θ leaks `g·sin(θ)` into the horizontal axis:
+
+| attitude error | leak | drift after 1 s | after 5 s |
+|---|---|---|---|
+| 0.5° | 0.086 m/s² | 0.086 m/s | 0.43 m/s |
+| 1.0° | 0.171 m/s² | 0.171 m/s | 0.86 m/s |
+
+Measured body speed is **0.05–0.15 m/s**, so a **1° attitude error produces false velocity
+exceeding the true signal within one second**. Noise averages down as 1/√N; a gravity leak
+integrates **linearly**, and on a walking robot it is **gait-synchronous**, so it does not
+even average out over a stride. Gyro fusion bounds attitude but the picrawler's untrimmed
+ZRO is ±20 °/s and the accelerometer's own correction is corrupted by body acceleration —
+which is the classic legged-robot version of this problem.
+
+**★ 5. THE FIX NEEDS NO NEW SENSOR — it is a fusion of two things already on the parts
+list.** Integration drift is bounded by a velocity *observation*, and leg FK supplies one
+every tick from commanded angles. The two error profiles are exactly complementary:
+
+- **Leg FK** is bias-free over short intervals but **over-reports when feet slip** (a foot
+  sliding backward in body frame is indistinguishable from the body moving forward).
+- **The IMU** catches that slip but drifts.
+
+**Their disagreement IS the slip signal** — which is precisely the DEFERRED post-plant-slip
+term. One fusion delivers a legal `vel_ego`, the flow term's missing travel magnitude, and
+the deferred slip term, from commanded angles plus the IMU already being wired.
