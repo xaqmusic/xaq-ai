@@ -33,22 +33,33 @@ CONTROL = "sigma0"
 
 
 def series(p):
-    """(gen, J, vec, sigma, accepts) per generation, first sighting of each gen."""
-    out, seen = [], set()
+    """(idx, J, vec, sigma, accepts, gen) per SCORED WINDOW — a boundary is the
+    ge_wt counter resetting, the same rule gainevo_landscape.py uses.
+
+    Window-based, not generation-based, because the sigma0 CONTROL never
+    increments ge_gen (a silent observer has no generations) yet scores every
+    window — the first committed version indexed by ge_gen and could not read
+    the control arm at all.  It also matches the registered estimator's own
+    words: 'last third of SCORED WINDOWS minus the first third'."""
+    out, prev, cur = [], None, None
+    def emit(d):
+        if d and float(d.get("ge_ji", -1)) > 0:
+            out.append((len(out), float(d["ge_ji"]), d.get("ge_vec"),
+                        float(d.get("ge_sig", 0)), int(d.get("ge_acc", 0)),
+                        int(d.get("ge_gen", 0))))
     for ln in open(p, errors="replace"):
-        if '"ge_gen"' not in ln:
+        if '"ge_wt"' not in ln:
             continue
         try:
             d = json.loads(ln)
         except json.JSONDecodeError:
             continue
-        g = int(d.get("ge_gen", -1)); j = float(d.get("ge_ji", -1))
-        if g < 0 or g in seen:
-            continue
-        if j > 0:
-            seen.add(g)
-            out.append((g, j, d.get("ge_vec"), float(d.get("ge_sig", 0)),
-                        int(d.get("ge_acc", 0))))
+        wt = int(d.get("ge_wt", -1))
+        if prev is not None and wt < prev:
+            emit(cur)
+        prev = wt
+        cur = d
+    emit(cur)
     return out
 
 
@@ -61,7 +72,7 @@ def slope(xs, ys):
 def main(d):
     print("start: amp 0.385 | coupling 0.30 (BAD band 0-0.8) | postural 1.092")
     print(f"pass = J falls AND coupling re-enters [{GOOD_LO}, {GOOD_HI}]\n")
-    hdr = (f"  {'arm':<9}{'n':>3}{'dJ':>9}{'slope/gen':>11}{'t(dJ)':>7}"
+    hdr = (f"  {'arm':<9}{'n':>3}{'dJ':>9}{'slope/win':>11}{'t(dJ)':>7}"
            f"{'coupling end':>14}{'re-entered':>12}{'sigma':>8}{'acc rate':>10}")
     print(hdr); print("  " + "-" * (len(hdr) - 2))
     rows, arm_dJs = {}, {}
@@ -71,15 +82,17 @@ def main(d):
             s = series(p)
             if len(s) < 6:
                 continue
-            xs = [g for g, *_ in s]; ys = [j for _, j, *_ in s]
+            xs = [w for w, *_ in s]; ys = [j for _, j, *_ in s]
             k = max(2, len(ys) // 3)
             dJs.append(st.mean(ys[-k:]) - st.mean(ys[:k]))
             slopes.append(slope(xs, ys))
-            last_vec = next((v for _, _, v, _, _ in reversed(s) if v), None)
+            last_vec = next((v for _, _, v, _, _, _ in reversed(s) if v), None)
             if last_vec:
                 cends.append(float(last_vec[COUPLING_IDX]))
-            sigs.append(s[-1][3]); gens.append(s[-1][0])
-            rates.append(s[-1][4] / s[-1][0] if s[-1][0] else float("nan"))
+            sigs.append(s[-1][3]); gens.append(s[-1][5])
+            # acceptance rate is accepts per GENERATION (the sigma0 control has
+            # no generations; its rate is undefined, not zero)
+            rates.append(s[-1][4] / s[-1][5] if s[-1][5] else float("nan"))
         if not dJs:
             print(f"  {arm:<9}  no data"); continue
         m = st.mean(dJs)
@@ -88,9 +101,9 @@ def main(d):
         if sd <= 1e-12 and len(dJs) > 1:
             print(f"  !! {arm}: {len(dJs)} runs are IDENTICAL — replicates did not vary (check OGMA_SEED)")
         reent = sum(1 for c in cends if GOOD_LO <= c <= GOOD_HI)
-        cend_txt = ", ".join(f"{c:.2f}" for c in cends)
+        cend_txt = ",".join(f"{c:.2f}" for c in cends)
         print(f"  {arm:<9}{len(dJs):>3}{m:>+9.3f}{st.mean(slopes):>+11.5f}{t:>+7.2f}"
-              f"{cend_txt:>14}{reent:>8}/{len(cends):<3}{st.mean(sigs):>8.3f}{st.mean(rates):>10.3f}")
+              f"  {cend_txt:<30}{reent:>4}/{len(cends):<3}{st.mean(sigs):>8.3f}{st.mean(rates):>10.3f}")
         rows[arm] = (m, t, reent, len(cends), st.mean(sigs))
         arm_dJs[arm] = dJs
     print("\n  dJ = mean J of the last third minus the first third; NEGATIVE = improving.")
