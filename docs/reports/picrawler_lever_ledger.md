@@ -3990,3 +3990,80 @@ every tick from commanded angles. The two error profiles are exactly complementa
 **Their disagreement IS the slip signal** — which is precisely the DEFERRED post-plant-slip
 term. One fusion delivers a legal `vel_ego`, the flow term's missing travel magnitude, and
 the deferred slip term, from commanded angles plus the IMU already being wired.
+
+### ★★★ 2026-08-24 — THE WINDOW FIX FAILED, AND THE REASON RETIRES ACCEPTANCE AS A DIAGNOSTIC
+
+**Verdict: `NULL` on the window lever. ★ And the three diagnoses before it were all reading
+a controlled variable.**
+
+**1. Longer windows changed nothing.** 6 runs at `eval_window_ticks` 12000 vs 12 at 4000,
+same config otherwise:
+
+| arm | accepts/gens | rate | σ̂ | margin |
+|---|---|---|---|---|
+| 3-D, window 4000 | 161/432 | 0.373 ± 0.023 | 0.168 | 0.0420 |
+| 3-D, window 12000 | 38/96 | 0.396 ± 0.050 | 0.125 | 0.0313 |
+
+Difference −0.023 ± 0.055, **z = −0.42**. The window did exactly what it should — σ̂ fell
+0.168 → 0.125 — and acceptance did not move.
+
+**2. ★ IT CANNOT MOVE. THE ACCEPTANCE RATE IS A CONTROLLED VARIABLE WHOSE SETPOINT IS
+CHANCE.** Two lines of the module, read together:
+
+```cpp
+double target = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
+sigma_ = clamp(sigma_ * (rate > target ? anneal_up_ : anneal_down_), sigma_min_, sigma_max_);
+```
+```cpp
+double GainEvolver::noise_floor_rate() const { return 0.5 * std::erfc(accept_k_ * 0.5); }
+```
+
+Every config runs `target_accept: -1.0` = AUTO. **So the anneal servos σ until the accept
+rate equals the noise floor — the rate defined as what a search reaches while learning
+nothing.** It is a controller whose setpoint is "learn nothing," and it holds that setpoint
+regardless of window length, dimensionality, or body. That is why all four arms read
+0.29–0.40 against a 0.430 floor: **I was measuring the setpoint of a controller and
+reporting it as evidence about the search.**
+
+Doctrine §8 already names this — *"an instrument that measures your own corrector is not a
+measure of the thing"* — and it caught me anyway, because the corrector was three files
+away from the number. The gate-2f fix moved `target_accept` from a fixed 0.2 (below the
+floor, so the rule read chance as success) to AUTO (**at** the floor). Right direction,
+stopped one step short: at the floor the equilibrium *is* chance.
+
+**3. ★ THE UNCONFOUNDED MEASUREMENT, WHICH NOBODY HAD RUN: DOES J ACTUALLY FALL?**
+Incumbent J per generation, first third vs last third, on data already collected:
+
+| arm | n | first J | last J | slope/gen | runs improving | t |
+|---|---|---|---|---|---|---|
+| 8-D cad, 4000 | 12 | 2.206 | 2.142 | −0.0024 | 7/12 | −0.75 |
+| 8-D measured, 4000 | 12 | 2.591 | 2.469 | −0.0048 | 7/12 | −1.22 |
+| 3-D cad, 4000 | 12 | 2.125 | 2.176 | +0.0023 | 6/12 | +0.67 |
+| 3-D cad, 12000 | 6 | 2.313 | 2.196 | −0.0092 | 4/6 | −1.51 |
+
+**The search does not improve its own criterion from random starts in ANY configuration
+tested.** Every slope is within noise and every improving-run count is a coin flip. The
+12000 arm has the largest negative slope and the fewest runs — a hint, not a result.
+
+**4. ⚠ THIS PUTS A QUESTION MARK ON JOB #1'S ATTRIBUTION — not on its result.** The j1s4
+vector is genuinely better and that stands: n=20, falls tail 4/20 → 0/20, `amp_min` sd
+0.111 → 0.018, F=37.8. What is now in doubt is **what found it.** The protocol was: run the
+search from the hand point, **operator selects a settled vector from the panel**, bake, A/B.
+If the search diffuses, that is a *random search with human selection of the endpoint* —
+still a legitimate way to find a better vector, and it did, but it is not the charter's
+claim of a vector that **settles from its own criterion**. The A/B of the resulting vector
+is untouched; the mechanism credited for producing it is not.
+
+**→ WHAT THIS LEAVES STANDING.** The criterion demonstrably carries real information: three
+gains have landscapes above noise, `coupling_gain`'s optimum replicated from two independent
+operating points and matched the hand-found value, and authority predicted resistance to
+scattering on both bodies. **The criterion works; the search on top of it does not yet.**
+That is a far better position than the reverse, and it says the next work is in the
+accept/anneal loop, not in the criterion.
+
+**→ NEXT.** `target_accept` must sit **above** the floor for acceptance to indicate real
+improvement — but raising it invites the gate-2d/2e freeze-out, so the honest move is to
+anneal on something that is not noise-dominated: realized ΔJ over a block of generations,
+or the fraction of accepts that survive re-evaluation. Either way the first step is a
+sweep of `target_accept` against measured ΔJ, because ΔJ is the only signal in this loop
+that the anneal does not already control.
