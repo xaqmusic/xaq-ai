@@ -28,23 +28,23 @@ BOUNDS = []
 
 
 def load_bounds(d):
-    """Bounds from any basin_*.json the runs were launched with."""
+    """Bounds from the sweep's spec.json — written by gainevo_make_arms.py.
+
+    Earlier this reached into a basin_*.json in the configs directory, which tied the
+    analyzer to ~78 one-off configs that have since been replaced by their generator.
+    Before that it restated the bounds inline, and that table drifted from the shipped
+    values on two of eight gains within a day. The spec travels WITH the data.
+    """
     import glob as _g
-    for pat in (os.path.join(d, "basin*_*.json"), os.path.join(d, "basin_*.json"),
-                os.path.basename(d.rstrip("/")).replace("basin3d","basin3d")+"","godot_host/project/addons/ami_ogma/configs/"+("basin3d_*.json" if "3d" in d else "basin_*.json")):
-        for f in sorted(_g.glob(pat)):
-            cfg = json.load(open(f))
-            ge = next((m for m in cfg["modules"] if m.get("type") == "GainEvolver"), None)
-            if ge:
-                return list(zip(ge["params"]["gain_min"], ge["params"]["gain_max"]))
-    raise SystemExit("gainevo_basin: cannot find a basin_*.json to read gain bounds from")
-# authority measured by the landscape sweeps, for the cross-check
-# the GOOD band each gain's landscape resolved (None = the criterion cannot see it)
-GOOD_BAND = {"amp_target": (0.15, 0.41), "coupling_gain": (1.2, 2.0),
-             "postural_gain": (0.66, 1.5)}
-AUTHORITY = {"amp_target": "STRONG", "coupling_gain": "STRONG", "postural_gain": "STRONG",
-             "height_homeo_gain": "weak", "plan_gain": "weak", "rear_push_ext": "weak",
-             "rear_land_gain": "FLAT", "rear_knee_plant": "FLAT"}
+    for f in sorted(_g.glob(os.path.join(d, "*_spec.json"))) + \
+             sorted(_g.glob(os.path.join(d, "..", "*_spec.json"))):
+        j = json.load(open(f))
+        if "bounds" in j:
+            return [tuple(b) for b in j["bounds"]]
+    raise SystemExit(
+        "gainevo_basin: no *_spec.json beside the data. Regenerate the arms with\n"
+        "  python3 gainevo_make_arms.py <sweep> <dir>\n"
+        "which emits the spec, and keep it next to the logs.")
 
 
 def norm(v):
