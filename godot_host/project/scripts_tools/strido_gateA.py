@@ -177,6 +177,63 @@ def analyze_run(trace_path):
     out["phase_lock"] = pl
     out["phase_lock_null"] = pl_null
     out["n_strides"] = n_strides
+    # MEDIAN estimator (ledger 2026-08-24 ★2): median across all four UNGATED per-foot
+    # velocities — the contact-free stance consensus the hardware could run with no FSRs.
+    # Valid ticks: any nonzero per-foot value (the body zeroes the whole array on
+    # invalid ticks; an exactly-all-zero tick is treated as invalid).
+    med_pairs = []
+    for r in body:
+        v = r.get("svl_clp")
+        if v and any(x != 0.0 for x in v):
+            med_pairs.append((statistics.median(v), r["sv_true"][1]))
+    out["median"] = {"n": len(med_pairs),
+                     "mean_fk": statistics.mean(p[0] for p in med_pairs) if med_pairs else float("nan"),
+                     "mean_true": statistics.mean(p[1] for p in med_pairs) if med_pairs else float("nan")}
+    for w in WINDOWS:
+        fs, ts = windowed(med_pairs, w)
+        out["median"][f"r_w{w}"] = corr(fs, ts)
+    fs, ts = windowed(med_pairs, 50)
+    out["median"]["slope_w50"] = slope(fs, ts)
+    # Stance-threshold sweep (stage-B parameter, measured not guessed): r_w50 of the
+    # load-gated mean at alternative fload thresholds, re-scored from per-foot values.
+    out["thresh_sweep"] = {}
+    for th in (0.02, 0.05, 0.10, 0.20, 0.40):
+        pairs = []
+        prev_loaded = [False] * 4
+        for r in body:
+            v = r.get("svl_clp")
+            fl = r.get("fload")
+            if not v or not fl:
+                break
+            loaded = [f >= th for f in fl]
+            sel = [v[i] for i in range(4) if loaded[i] and prev_loaded[i] and v[i] != 0.0]
+            prev_loaded = loaded
+            if sel:
+                pairs.append((sum(sel) / len(sel), r["sv_true"][1]))
+        fs, ts = windowed(pairs, 50)
+        out["thresh_sweep"][th] = {"r_w50": corr(fs, ts), "n": len(pairs),
+                                   "mean_fk": statistics.mean(p[0] for p in pairs) if pairs else float("nan")}
+    # WITHIN-STANCE HORIZONTAL DRIFT (ledger 2026-08-24 ★4 — the pre-registered decider:
+    # "ship the estimator only if the within-stance horizontal drift is small against
+    # stride length").  Per contiguous loaded episode of one foot, integrate the
+    # commanded-vs-measured FK velocity gap = the horizontal deflection CHANGE the
+    # commanded-angle estimator cannot see (constant deflection cancels in differencing).
+    drifts = []
+    for leg in range(4):
+        acc, in_ep = 0.0, False
+        for r in body:
+            v, m, fl = r.get("svl_clp"), r.get("svl_meas"), r.get("fload")
+            if not v or not m or not fl:
+                break
+            if fl[leg] >= 0.05 and v[leg] != 0.0:
+                acc += (v[leg] - m[leg]) * TAU
+                in_ep = True
+            elif in_ep:
+                drifts.append(abs(acc) * 1000.0)  # mm
+                acc, in_ep = 0.0, False
+    out["stance_drift_mm"] = {"n": len(drifts),
+                              "mean": statistics.mean(drifts) if drifts else float("nan"),
+                              "p90": (statistics.quantiles(drifts, n=10)[8] if len(drifts) >= 10 else float("nan"))}
     # Odometer view: integrated FK forward travel vs integrated true forward travel.
     out["odo_fk"] = sum(rows[i]["sv_clp"][1] for i in usable) * TAU
     out["odo_true"] = sum(rows[i]["sv_true"][1] for i in usable) * TAU
@@ -219,6 +276,30 @@ def cmd_analyze(outdir):
               f"{agg([r['sv_clp']['slope_w50'] for r in rs]):>12s} "
               f"{agg([r['phase_lock'] for r in rs]):>12s} "
               f"{agg([r['phase_lock_null'] for r in rs]):>12s}")
+    print("\nmedian estimator (contact-free consensus, ledger 2026-08-24 #2):")
+    for arm, cfg, diff, seeds in ARMS:
+        rs = [per_run[(arm, s)] for s in seeds if (arm, s) in per_run]
+        if not rs:
+            continue
+        print(f"{arm:10s}  r_w1 {agg([r['median']['r_w1'] for r in rs])}  "
+              f"r_w50 {agg([r['median']['r_w50'] for r in rs])}  "
+              f"slope {agg([r['median']['slope_w50'] for r in rs])}  "
+              f"mean_fk {agg([r['median']['mean_fk'] for r in rs])} vs true {agg([r['median']['mean_true'] for r in rs])}")
+    print("\nstance-threshold sweep, r_w50 of load-gated mean:")
+    for arm, cfg, diff, seeds in ARMS:
+        rs = [per_run[(arm, s)] for s in seeds if (arm, s) in per_run]
+        if not rs:
+            continue
+        cells = "  ".join(f"th={th:.2f} {agg([r['thresh_sweep'][str(th) if str(th) in r['thresh_sweep'] else th]['r_w50'] for r in rs])}"
+                          for th in (0.02, 0.05, 0.10, 0.20, 0.40))
+        print(f"{arm:10s}  {cells}")
+    print("\nwithin-stance drift (mm, cmd-vs-meas gap integrated per stance episode — ledger #4 decider):")
+    for arm, cfg, diff, seeds in ARMS:
+        rs = [per_run[(arm, s)] for s in seeds if (arm, s) in per_run]
+        if not rs:
+            continue
+        print(f"{arm:10s}  mean {agg([r['stance_drift_mm']['mean'] for r in rs])}  "
+              f"p90 {agg([r['stance_drift_mm']['p90'] for r in rs])}")
     print("\nodometer view (integrated forward travel, m) + step activity:")
     for arm, cfg, diff, seeds in ARMS:
         rs = [per_run[(arm, s)] for s in seeds if (arm, s) in per_run]
