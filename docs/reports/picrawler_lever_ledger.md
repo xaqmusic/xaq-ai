@@ -4277,3 +4277,9 @@ wrong lens for fast transients. Watch windows 0–15, or the inspector, for the 
 Rehearsal logs: `demo_rehearsal*/` in the session scratch (regenerable: the demo config +
 seeds 1–4). The `gainevo_live` launcher entry rotated out of the dropdown (file stays):
 σ 0.08 is now measured to show ~nothing over an observation session.
+
+**Promotion (2026-08-25): the operator's eye — the standing gate — passed.** A long live
+run on `__gainevo_demo` in the arena showed the expected parameter behavior in the
+inspector (the rack's band overlays doing their job). The demo ships as the phase's
+observation instrument, and PART IV closes with the phase-boundary PR to `picrawler-dev`;
+PART V (`stride_odometry_and_criterion_repair_plan.md`) starts in fresh context.
