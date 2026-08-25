@@ -37,6 +37,7 @@ constexpr int   kAcceptLogMax = 24;
 
 void GainEvolver::WindowStats::reset(int n_legs) {
     falls = 0; up_sum = up_sq = dwell_sum = torque_sum = 0.0; meas_n = distress_hits = 0; flow_q_sum = 0.0;
+    flow_mag_sum = flow_pred_sum = flow_turn_sum = 0.0;
     td.assign(size_t(n_legs), 0); unloaded.assign(size_t(n_legs), 0);
 }
 
@@ -48,7 +49,7 @@ std::string_view GainEvolver::type_name() const { return "GainEvolver"; }
 std::vector<TopicSpec> GainEvolver::input_topics() const {
     std::vector<TopicSpec> v;
     for (auto const* t : {&upright_topic_, &distress_topic_, &foot_load_topic_,
-                          &foot_contact_topic_, &imu_topic_, &torque_topic_})
+                          &foot_contact_topic_, &imu_topic_, &gyro_topic_, &torque_topic_})
         if (!t->empty())
             v.emplace_back(*t, std::type_index(typeid(ProprioToken)),
                            SubscriptionKind::Direct, /*required=*/false);
@@ -135,8 +136,8 @@ ParamSchema GainEvolver::params_schema() const {
          "Per-servo load (reality.proprio.joint_torque): 12 floats normalized to MAX_SERVO_TORQUE. Servo current sensing — the audit's 'REAL LOAD SIGNAL', and on hardware this is battery current.",
          std::nullopt, std::nullopt, std::nullopt},
         {"w_energy", ParamMutability::HotMutable,
-         "weight on ENERGY = mean |joint torque| over the measured region. Measured on the gate-2b windows: signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57 — ~8x better discrimination than anything else in this criterion, largely independent of it (corr -0.125), and agreeing with the flow term (+0.123) rather than fighting it. Default 8.0 equalizes its SIGNAL with sd(upright)'s at ~1/60th the noise. WARNING: the freeze trap is not disproven (no observed window held a frozen body) — flow is the counterweight and the per-leg minima guard blocks killing a leg to save current.",
-         ParamValue{8.0}, ParamValue{0.0}, ParamValue{1000.0}},
+         "weight on ENERGY = mean |joint torque| over the measured region. Measured on the gate-2b windows: signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57 — ~8x better discrimination than anything else in this criterion, largely independent of it (corr -0.125), and agreeing with the flow term (+0.123) rather than fighting it. Default 4.0 — the weight every landscape/basin/tsweep verdict was measured at (an 8.0 default drifted from the configs' 4.0; aligned toward the VALIDATED value 2026-08-24). TWO standing caveats: the freeze trap is not disproven (flow is the counterweight; the per-leg minima guard blocks killing a leg to save current), and the sim signal is measured to be damping-dominated — mostly a joint-speed penalty, not electrical load (corr(tau,dtheta) -0.46..-0.56; see the joint_torque registration string). On hardware this term becomes real current via an INA219.",
+         ParamValue{4.0}, ParamValue{0.0}, ParamValue{1000.0}},
         {"fall_alarm_tau", ParamMutability::HotMutable,
          "Decay time constant (ticks) of the leaky fall accumulator. Long enough that several falls must land inside it to trip the alarm, so an adventurous body that falls sporadically never does.",
          ParamValue{50000.0}, ParamValue{100.0}, ParamValue{10000000.0}},
@@ -153,8 +154,8 @@ ParamSchema GainEvolver::params_schema() const {
          "Ticks of settling at the head of each window, excluded from measurement. 0 = the legacy back-half rule. Measured: |tilt| shows no settling trend and fwd_v settles by ~2000-2500 ticks, so back-half-of-12000 was discarding 4000 usable ticks per window.",
          ParamValue{int64_t(0)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
         {"accept_k", ParamMutability::HotMutable,
-         "Accept only when J_cand < J_inc − accept_k·sigma_hat, where sigma_hat is the criterion's OWN measured per-window noise (estimated from revert pairs). 0 = legacy bare inequality, which on a stochastic criterion accepts ~50% by coin flip and drives the 1/5th anneal to the sigma ceiling (gate 2, 3/4 seeds).",
-         ParamValue{1.0}, ParamValue{0.0}, ParamValue{10.0}},
+         "Accept only when J_cand < J_inc − accept_k·sigma_hat, where sigma_hat is the criterion's OWN measured per-window noise (estimated from revert pairs). 0 = legacy bare inequality, which on a stochastic criterion accepts ~50% by coin flip and drives the 1/5th anneal to the sigma ceiling (gate 2, 3/4 seeds). LOWERED 1.0 -> 0.25 on 2026-08-20: the step-0 authority check measured dJ/d(coupling) = -0.182/unit, so a single mutation at sigma 0.08 moves J by 0.044 against a margin of 0.244 — the margin was rejecting REAL gradients as noise. Margin and step must be matched: |dJ/dg|*sigma*range >= accept_k*sigma_hat, i.e. sigma >= 0.447*accept_k for the measured slope.",
+         ParamValue{0.25}, ParamValue{0.0}, ParamValue{10.0}},
         {"noise_min_n", ParamMutability::HotMutable,
          "Revert-pair samples required before the acceptance margin is trusted; below it the margin is 0 so the search is not frozen at boot.",
          ParamValue{int64_t(3)}, ParamValue{int64_t(1)}, ParamValue{int64_t(100)}},
@@ -190,19 +191,34 @@ ParamSchema GainEvolver::params_schema() const {
          ParamValue{0.02}, ParamValue{0.0001}, ParamValue{1.0}},
         {"flow_vol_k", ParamMutability::HotMutable, "volatility penalty strength in flow quality.",
          ParamValue{4.0}, ParamValue{0.0}, ParamValue{100.0}},
-        {"flow_vel_norm", ParamMutability::HotMutable, "fwd_v magnitude normalizer (m/s).",
+        {"flow_vel_norm", ParamMutability::HotMutable,
+         "fwd_v magnitude reference (m/s). Its MEANING depends on flow_min_form: at 0 it is a hard saturation ceiling (magnitude = clamp(v,0,norm)/norm); at 1 it is the HALF-quality speed (magnitude = v/(v+norm)), which has no ceiling to hide behind.",
          ParamValue{0.05}, ParamValue{0.001}, ParamValue{10.0}},
+        {"gyro_topic", ParamMutability::ConstructionOnly,
+         "Body-frame 3-axis gyro [roll rate, YAW RATE ABOUT OWN UP, pitch rate], each normalized by pi. Index 1 feeds the anti-circling factor. Egocentric and physically realisable (a MEMS gyro is bolted to the chassis), unlike imu[3] which is the WORLD vertical component and diverges from it exactly when the body tilts. '' = the factor has no input and is inert.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"flow_turn_k", ParamMutability::HotMutable,
+         "ANTI-CIRCLING strength in flow quality. 0 = OFF (byte-identical), which is the default. Why it exists: fwd_v is BODY-FRAME forward speed, so a body carving a tight circle reads as flowing beautifully — the ledger's own recorded blind metric (high fwd_v + low net displacement = fast circling), and the flow term had no complement for it. The factor is 1/(1+k*|turn bias|) using the gyro's yaw rate about the body's own up axis, so it closes the hole with a LAWFUL signal rather than a god's-eye heading. 4.0 matches flow_vol_k's precedent.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{100.0}},
+        {"flow_turn_alpha", ParamMutability::HotMutable,
+         "EMA alpha for the turn bias — deliberately ~5x SLOWER than flow_alpha (~250 ticks / 5 s vs ~50). This timescale IS the design: the EMA is SIGNED, so a body correcting its heading left-then-right averages toward zero and is not penalized, while a body going round in circles holds a persistent bias and is. Heading regulation is one of the three behaviours this project reads as real capability, so penalizing turning per se would punish the thing we most want to see; only SUSTAINED one-way turn is circling.",
+         ParamValue{0.004}, ParamValue{0.00001}, ParamValue{1.0}},
+        {"flow_min_form", ParamMutability::HotMutable,
+         "How the flow term's two factors combine. 0 = legacy PRODUCT magnitude*predictability (the default, byte-identical). 1 = MINIMUM of the two, with an unsaturating magnitude. Why 1 exists: flow was included as the counterweight that stops the search minimizing everything by standing still, and the 2026-08-23 landscape sweeps measured it failing to do that job. Predictability rises as a gait quietens, a product lets that pay for lost magnitude, and flow ended up voting WITH tilt/energy/unloaded for a slower body — mean |fwd_v| was LOWEST (0.0495) at the amplitude the criterion scored best. A minimum cannot be traded: quality is capped by whichever factor is worse, so predictability earned by not moving buys nothing. This is the same fix, for the same reason, as the per-leg loaded-contact guard using per-leg MINIMA instead of a mean (a mean let one leg die while the others paid for it).",
+         ParamValue{int64_t(0)}, ParamValue{int64_t(0)}, ParamValue{int64_t(1)}},
         // ---- anneal ----------------------------------------------------------
         {"anneal_window", ParamMutability::HotMutable, "generations of accept history the 1/5th rule reads.",
          ParamValue{int64_t(10)}, ParamValue{int64_t(1)}, ParamValue{int64_t(1000)}},
-        {"target_accept", ParamMutability::HotMutable, "acceptance rate above which σ grows (1/5th-success flavor).",
-         ParamValue{0.2}, ParamValue{0.0}, ParamValue{1.0}},
+        {"target_accept", ParamMutability::HotMutable,
+         "Acceptance rate above which sigma grows. NEGATIVE = AUTO (the default), deriving it as the NOISE FLOOR Phi(-accept_k/sqrt(2)) = 0.5*erfc(accept_k/2) — the rate a search reaches while learning nothing. A fixed 0.2 sat BELOW that floor for every accept_k used (43% at k=0.25, 24% at k=1.0), so the 1/5th rule read chance-level acceptance as success and pinned sigma at its ceiling in gates 2 and 2e alike. Auto means sigma grows only when acceptance actually BEATS chance.",
+         ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{1.0}},
         {"anneal_up", ParamMutability::HotMutable, "σ multiplier when accepting too often.",
          ParamValue{1.5}, ParamValue{1.0}, ParamValue{10.0}},
         {"anneal_down", ParamMutability::HotMutable, "σ multiplier when accepting too rarely.",
          ParamValue{0.85}, ParamValue{0.01}, ParamValue{1.0}},
-        {"sigma_min", ParamMutability::HotMutable, "anneal floor (search never fully stops — 'settle AND remain adaptable').",
-         ParamValue{0.01}, ParamValue{0.0001}, ParamValue{1.0}},
+        {"sigma_min", ParamMutability::HotMutable,
+         "Anneal FLOOR — the search never fully stops ('settle AND remain adaptable'), and must never anneal below the resolution its own criterion can measure. RAISED 0.01 -> 0.08 on 2026-08-20: at sigma 0.015 a coupling step moved J by 0.008 against a 0.244 margin (30x short), so shrinking sigma made acceptance IMPOSSIBLE and fewer accepts shrank sigma further — a self-reinforcing freeze that is indistinguishable from convergence in the logs. The floor now sits at the starting sigma so that collapse cannot happen.",
+         ParamValue{0.08}, ParamValue{0.0001}, ParamValue{1.0}},
         {"sigma_max", ParamMutability::HotMutable, "anneal ceiling.",
          ParamValue{0.5}, ParamValue{0.001}, ParamValue{2.0}},
         // ---- operator handoff ------------------------------------------------
@@ -225,6 +241,7 @@ ParamMap GainEvolver::current_params() const {
     m["foot_load_topic"]    = foot_load_topic_;
     m["foot_contact_topic"] = foot_contact_topic_;
     m["imu_topic"]          = imu_topic_;
+    m["gyro_topic"]         = gyro_topic_;
     m["n_legs"]            = int64_t(n_legs_);
     m["seed"]              = seed_;
     m["warmup_ticks"]      = warmup_ticks_;
@@ -257,8 +274,13 @@ ParamMap GainEvolver::current_params() const {
     m["flow_alpha"]    = flow_alpha_;
     m["flow_vol_k"]    = flow_vol_k_;
     m["flow_vel_norm"] = flow_vel_norm_;
+    m["flow_min_form"] = flow_min_form_;
+    m["flow_turn_k"] = flow_turn_k_;
+    m["flow_turn_alpha"] = flow_turn_alpha_;
+    m["gyro_topic"] = gyro_topic_;
     m["anneal_window"] = anneal_window_;
     m["target_accept"] = target_accept_;
+    m["target_eff"]    = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
     m["anneal_up"]     = anneal_up_;
     m["anneal_down"]   = anneal_down_;
     m["sigma_min"]     = sigma_min_;
@@ -286,6 +308,7 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
              {"gain_topic", &gain_topic_}, {"upright_topic", &upright_topic_},
              {"distress_topic", &distress_topic_}, {"foot_load_topic", &foot_load_topic_},
              {"foot_contact_topic", &foot_contact_topic_}, {"imu_topic", &imu_topic_},
+             {"gyro_topic", &gyro_topic_},
              {"torque_topic", &torque_topic_}})
         apply_param(params, key, [&](auto const& v){
             if (auto p = std::get_if<std::string>(&v)) *member = *p; });
@@ -306,7 +329,8 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
              {"upright_fall_thresh", &upright_fall_thresh_},
              {"distress_thresh", &distress_thresh_}, {"load_thresh", &load_thresh_},
              {"flow_alpha", &flow_alpha_}, {"flow_vol_k", &flow_vol_k_},
-             {"flow_vel_norm", &flow_vel_norm_}, {"target_accept", &target_accept_},
+             {"flow_vel_norm", &flow_vel_norm_}, {"flow_turn_k", &flow_turn_k_},
+             {"flow_turn_alpha", &flow_turn_alpha_}, {"target_accept", &target_accept_},
              {"anneal_up", &anneal_up_}, {"anneal_down", &anneal_down_},
              {"sigma_min", &sigma_min_}, {"sigma_max", &sigma_max_}})
         apply_param(params, key, [&](auto const& v){ *member = get_double(v, key); });
@@ -314,7 +338,13 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
              {"viability_falls_tol", &viability_falls_tol_},
              {"fall_debounce_ticks", &fall_debounce_ticks_},
              {"touchdown_horizon_ticks", &touchdown_horizon_ticks_},
-             {"min_touchdowns", &min_touchdowns_}, {"anneal_window", &anneal_window_}})
+             {"min_touchdowns", &min_touchdowns_}, {"anneal_window", &anneal_window_},
+             // noise_min_n was MISSING here until 2026-08-24 — a config's value was
+             // silently ignored at construction (only a hot-mutate applied it) and
+             // the default 3 always won.  Every shipped config happened to set 3,
+             // so no run was affected; the de-vacuized margin test caught it.
+             {"noise_min_n", &noise_min_n_},
+             {"flow_min_form", &flow_min_form_}})
         apply_param(params, key, [&](auto const& v){ *member = get_int(v, key); });
     apply_param(params, "mutation_sigma", [&](auto const& v){ sigma_ = get_double(v, "mutation_sigma"); });
 
@@ -360,6 +390,7 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
                           Sub{&foot_load_topic_,    &GainEvolver::handle_foot_load},
                           Sub{&foot_contact_topic_, &GainEvolver::handle_foot_contact},
                           Sub{&imu_topic_,          &GainEvolver::handle_imu},
+                          Sub{&gyro_topic_,         &GainEvolver::handle_gyro},
                           Sub{&torque_topic_,       &GainEvolver::handle_torque}})
         if (!s.topic->empty())
             sub_ids_.push_back(bus_->subscribe(*s.topic, SubscriptionKind::Direct,
@@ -419,7 +450,10 @@ void GainEvolver::on_param_change(std::string_view key, ParamValue const& value)
                           DKey{"upright_fall_thresh", &upright_fall_thresh_},
                           DKey{"distress_thresh", &distress_thresh_}, DKey{"load_thresh", &load_thresh_},
                           DKey{"flow_alpha", &flow_alpha_}, DKey{"flow_vol_k", &flow_vol_k_},
-                          DKey{"flow_vel_norm", &flow_vel_norm_}, DKey{"target_accept", &target_accept_},
+                          DKey{"flow_vel_norm", &flow_vel_norm_},
+                          DKey{"flow_turn_k", &flow_turn_k_},
+                          DKey{"flow_turn_alpha", &flow_turn_alpha_},
+                          DKey{"target_accept", &target_accept_},
                           DKey{"anneal_up", &anneal_up_}, DKey{"anneal_down", &anneal_down_},
                           DKey{"sigma_min", &sigma_min_}, DKey{"sigma_max", &sigma_max_}})
         if (key == d.k) { *d.m = get_double(value, d.k); return; }
@@ -428,7 +462,8 @@ void GainEvolver::on_param_change(std::string_view key, ParamValue const& value)
                           IKey{"fall_debounce_ticks", &fall_debounce_ticks_},
                           IKey{"touchdown_horizon_ticks", &touchdown_horizon_ticks_},
                           IKey{"min_touchdowns", &min_touchdowns_}, IKey{"noise_min_n", &noise_min_n_},
-                          IKey{"anneal_window", &anneal_window_}})
+                          IKey{"anneal_window", &anneal_window_},
+                          IKey{"flow_min_form", &flow_min_form_}})
         if (key == d.k) { *d.m = get_int(value, d.k); return; }
     throw std::invalid_argument("GainEvolver: param '" + std::string(key) + "' is not HotMutable");
 }
@@ -477,6 +512,13 @@ void GainEvolver::handle_torque(MessagePtr payload) {
     torque_mag_ = acc / double(pt->values.size());
 }
 
+void GainEvolver::handle_gyro(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 2) return;
+    yaw_rate_ = pt->values[1];       // [roll, YAW ABOUT OWN UP, pitch], /pi normalized
+}
+
 void GainEvolver::handle_imu(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -509,8 +551,12 @@ GainEvolver::Terms GainEvolver::score(WindowStats const& w) const {
         t.dwell         = w.dwell_sum / double(w.meas_n);
         t.energy        = w.torque_sum / double(w.meas_n);
         t.flow_term     = 1.0 - w.flow_q_sum / double(w.meas_n);
+        t.flow_mag      = w.flow_mag_sum  / double(w.meas_n);
+        t.flow_pred     = w.flow_pred_sum / double(w.meas_n);
+        t.flow_turn     = w.flow_turn_sum / double(w.meas_n);
     } else {
         t.tilt_sd = 0.0; t.distress_duty = 0.0; t.flow_term = 1.0; t.dwell = 0.0; t.energy = 0.0;
+        t.flow_mag = 0.0; t.flow_pred = 0.0; t.flow_turn = 0.0;
     }
     double unl_sum = 0.0;
     for (int l = 0; l < n_legs_; ++l) {
@@ -574,6 +620,22 @@ void GainEvolver::mutate_candidate() {
             gain_min_[k], gain_max_[k]);
 }
 
+// The acceptance rate a search achieves while learning NOTHING.  If a candidate
+// differs from the incumbent by noise alone, the difference of two independent
+// window scores has sd sqrt(2)*sigma_hat, so the chance of clearing a margin of
+// accept_k*sigma_hat is Phi(-accept_k/sqrt(2)) = 0.5*erfc(accept_k/2).
+//
+// This is the number the 1/5th rule must be compared against.  A FIXED target
+// (0.2) sat BELOW this floor for every accept_k the campaign used — 43% at
+// k=0.25, 24% at k=1.0 — so the rule read a chance-level accept rate as success
+// and inflated sigma to its ceiling.  Deriving the target instead means sigma
+// grows only when acceptance genuinely BEATS chance, which is the property the
+// rule was always meant to have (doctrine §5: adapt the constant from the
+// system's own dynamics, never hand-tune it to a scale).
+double GainEvolver::noise_floor_rate() const {
+    return 0.5 * std::erfc(accept_k_ * 0.5);
+}
+
 void GainEvolver::anneal(bool accepted) {
     accept_hist_.push_back(uint8_t(accepted));
     while (int64_t(accept_hist_.size()) > anneal_window_) accept_hist_.pop_front();
@@ -581,7 +643,8 @@ void GainEvolver::anneal(bool accepted) {
     double rate = 0.0;
     for (uint8_t a : accept_hist_) rate += a;
     rate /= double(accept_hist_.size());
-    sigma_ = std::clamp(sigma_ * (rate > target_accept_ ? anneal_up_ : anneal_down_),
+    double target = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
+    sigma_ = std::clamp(sigma_ * (rate > target ? anneal_up_ : anneal_down_),
                         sigma_min_, sigma_max_);
 }
 
@@ -605,6 +668,9 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
     float fa = float(flow_alpha_);
     flow_ema_     += fa * (fwd_v_ - flow_ema_);
     flow_vol_ema_ += fa * (std::fabs(fwd_v_ - flow_ema_) - flow_vol_ema_);
+    // TURN BIAS.  Signed and slow on purpose (see flow_turn_alpha): left-then-right
+    // heading correction averages toward zero, a circle holds a bias.
+    turn_ema_ += float(flow_turn_alpha_) * (yaw_rate_ - turn_ema_);
 
     // Leaky fall alarm: decays every tick regardless of phase, so it measures a
     // SUSTAINED rate rather than one window's luck.  Deliberately outside the
@@ -656,8 +722,44 @@ void GainEvolver::tick(uint64_t /*tick_id*/) {
         if (double(upright_) < dwell_thresh_)
             cur_.dwell_sum += dwell_thresh_ - double(upright_);
         cur_.torque_sum += torque_mag_;
-        double fq = std::clamp(double(flow_ema_), 0.0, flow_vel_norm_) / flow_vel_norm_;
-        cur_.flow_q_sum += fq / (1.0 + flow_vol_k_ * double(flow_vol_ema_));
+        // FLOW QUALITY = how much steady travel the body is actually producing.
+        // Two factors: MAGNITUDE (is it going anywhere) and PREDICTABILITY (is the
+        // going steady).  How they combine decides whether this term can do the job
+        // it was included for — being the counterweight that stops the search
+        // minimizing every other term by standing still.
+        double pred = 1.0 / (1.0 + flow_vol_k_ * double(flow_vol_ema_));
+        // ANTI-CIRCLING.  fwd_v is body-frame forward speed, so a tight circle reads
+        // as flowing beautifully -- travelling and going nowhere are indistinguishable
+        // to the magnitude factor.  The complement is a LAWFUL one: the gyro's yaw rate
+        // about the body's own up axis, EMA'd slowly and signed, so only a sustained
+        // one-way bias counts.  k = 0 gives exactly 1.0 and changes nothing.
+        double turn     = 1.0 / (1.0 + flow_turn_k_ * std::fabs(double(turn_ema_)));
+        double mag, fq;
+        if (flow_min_form_ > 0) {
+            // Form 1.  MAGNITUDE CANNOT BE TRADED AWAY.  A quiet body is a very
+            // predictable one, so under the product form predictability rose as the
+            // gait quietened and paid for the travel that was lost — measured on the
+            // 2026-08-23 landscape sweeps, where flow scored BEST at the amplitude
+            // whose mean |fwd_v| was LOWEST (0.0495), voting with tilt/energy/
+            // unloaded for a slower body instead of opposing them.  A minimum caps
+            // quality by whichever factor is worse, so stillness-bought
+            // predictability buys nothing.  Same fix and same reason as the per-leg
+            // loaded-contact guard taking per-leg MINIMA rather than a mean, after a
+            // mean let one leg die while the others paid for it.
+            // Magnitude is v/(v+ref) rather than a clamped ratio: monotone in speed
+            // with no ceiling to sit against, so more travel always scores better
+            // and the factor never drops out of the comparison.
+            double v = std::max(0.0, double(flow_ema_));
+            mag = v / (v + flow_vel_norm_);
+            fq  = std::min(std::min(mag, pred), turn);
+        } else {
+            mag = std::clamp(double(flow_ema_), 0.0, flow_vel_norm_) / flow_vel_norm_;
+            fq  = mag * pred * turn;
+        }
+        cur_.flow_q_sum    += fq;
+        cur_.flow_mag_sum  += mag;    // kept apart so a window can report WHICH
+        cur_.flow_pred_sum += pred;   // factor limited it, not just their result
+        cur_.flow_turn_sum += turn;
     }
 
     if (sigma_ > 0.0 && republish_every_ > 0 && win_tick_ > 0 &&
@@ -736,14 +838,19 @@ nlohmann::json GainEvolver::snapshot_state() const {
     auto stats = [](WindowStats const& w) {
         return nlohmann::json{{"falls", w.falls}, {"up_sum", w.up_sum}, {"up_sq", w.up_sq},
                               {"meas_n", w.meas_n}, {"distress_hits", w.distress_hits},
-                              {"flow_q_sum", w.flow_q_sum}, {"dwell_sum", w.dwell_sum}, {"torque_sum", w.torque_sum}, {"td", w.td}, {"unloaded", w.unloaded}};
+                              {"flow_q_sum", w.flow_q_sum}, {"flow_mag_sum", w.flow_mag_sum},
+                              {"flow_pred_sum", w.flow_pred_sum},
+                              {"flow_turn_sum", w.flow_turn_sum},
+                              {"dwell_sum", w.dwell_sum}, {"torque_sum", w.torque_sum}, {"td", w.td}, {"unloaded", w.unloaded}};
     };
     mod["cur"]       = stats(cur_);
     mod["inc_stats"] = stats(inc_stats_);
     auto terms = [](Terms const& t) {
         return nlohmann::json{{"falls", t.falls}, {"tilt_sd", t.tilt_sd}, {"dwell", t.dwell}, {"energy", t.energy},
                               {"distress_duty", t.distress_duty}, {"unloaded_mean", t.unloaded_mean},
-                              {"flow_term", t.flow_term}, {"loaded_min", t.loaded_min},
+                              {"flow_term", t.flow_term}, {"flow_mag", t.flow_mag},
+                              {"flow_pred", t.flow_pred}, {"flow_turn", t.flow_turn},
+                              {"loaded_min", t.loaded_min},
                               {"J", t.J}, {"valid", t.valid}};
     };
     mod["inc_terms"]  = terms(inc_terms_);
@@ -760,6 +867,7 @@ nlohmann::json GainEvolver::snapshot_state() const {
     mod["td_maxload"]   = td_maxload_;
     mod["flow_ema"]     = flow_ema_;
     mod["flow_vol_ema"] = flow_vol_ema_;
+    mod["turn_ema"]     = turn_ema_;
     return nlohmann::json{{"version", 1}, {"module", mod}};
 }
 
@@ -798,7 +906,10 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
         w.falls = j.value("falls", 0);
         w.up_sum = j.value("up_sum", 0.0); w.up_sq = j.value("up_sq", 0.0);
         w.meas_n = j.value("meas_n", int64_t(0)); w.distress_hits = j.value("distress_hits", int64_t(0));
-        w.flow_q_sum = j.value("flow_q_sum", 0.0); w.dwell_sum = j.value("dwell_sum", 0.0); w.torque_sum = j.value("torque_sum", 0.0);
+        w.flow_q_sum = j.value("flow_q_sum", 0.0);
+        w.flow_mag_sum = j.value("flow_mag_sum", 0.0);
+        w.flow_pred_sum = j.value("flow_pred_sum", 0.0);
+        w.flow_turn_sum = j.value("flow_turn_sum", 0.0); w.dwell_sum = j.value("dwell_sum", 0.0); w.torque_sum = j.value("torque_sum", 0.0);
         if (j.contains("td"))       w.td       = j["td"].get<std::vector<int>>();
         if (j.contains("unloaded")) w.unloaded = j["unloaded"].get<std::vector<int>>();
     };
@@ -809,6 +920,8 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
         t.dwell = j.value("dwell", 0.0); t.energy = j.value("energy", 0.0);
         t.distress_duty = j.value("distress_duty", 0.0); t.unloaded_mean = j.value("unloaded_mean", 0.0);
         t.flow_term = j.value("flow_term", 0.0); t.loaded_min = j.value("loaded_min", 0.0);
+        t.flow_mag = j.value("flow_mag", 0.0); t.flow_pred = j.value("flow_pred", 0.0);
+        t.flow_turn = j.value("flow_turn", 0.0);
         t.J = j.value("J", 0.0); t.valid = j.value("valid", false);
     };
     if (mod.contains("inc_terms"))  terms(mod["inc_terms"], inc_terms_);
@@ -825,6 +938,7 @@ void GainEvolver::restore_state(nlohmann::json const& s) {
     if (mod.contains("td_maxload"))   td_maxload_   = mod["td_maxload"].get<std::vector<float>>();
     flow_ema_     = mod.value("flow_ema", flow_ema_);
     flow_vol_ema_ = mod.value("flow_vol_ema", flow_vol_ema_);
+    turn_ema_     = mod.value("turn_ema", turn_ema_);
 }
 
 nlohmann::json GainEvolver::metrics() const {
@@ -847,8 +961,13 @@ nlohmann::json GainEvolver::metrics() const {
     m["distress_duty"] = inc_terms_.distress_duty;
     m["unloaded_mean"] = inc_terms_.unloaded_mean;
     m["flow_term"]     = inc_terms_.flow_term;
+    m["flow_mag"]      = inc_terms_.flow_mag;    // < flow_pred => travel is the limit
+    m["flow_pred"]     = inc_terms_.flow_pred;   // < flow_mag  => steadiness is the limit
+    m["flow_turn"]     = inc_terms_.flow_turn;   // < the others => circling is the limit
+    m["flow_min_form"] = double(flow_min_form_);
     m["loaded_min"]    = inc_terms_.loaded_min;
     m["sigma_est"]     = sigma_est();
+    m["target_eff"]    = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
     m["accept_margin"] = accept_margin_;
     m["noise_n"]       = noise_n_;
     m["vec"] = (phase_ == Phase::Candidate) ? candidate_ : incumbent_;
@@ -881,6 +1000,8 @@ nlohmann::json GainEvolver::diag_snapshot() const {
     ct["falls"] = cand_terms_.falls; ct["tilt_sd"] = cand_terms_.tilt_sd;
     ct["distress_duty"] = cand_terms_.distress_duty; ct["unloaded_mean"] = cand_terms_.unloaded_mean;
     ct["flow_term"] = cand_terms_.flow_term; ct["loaded_min"] = cand_terms_.loaded_min;
+    ct["flow_mag"] = cand_terms_.flow_mag; ct["flow_pred"] = cand_terms_.flow_pred;
+    ct["flow_turn"] = cand_terms_.flow_turn;
     j["cand_terms"] = std::move(ct);
     return j;
 }

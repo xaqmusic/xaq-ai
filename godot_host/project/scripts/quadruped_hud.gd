@@ -308,6 +308,14 @@ func _process(_delta: float) -> void:
 	# worst single tick of each second: a gait can average cheaply and still spike
 	# into saturation, and only the peak shows that.  sat = fraction of servo-ticks
 	# pinned at >0.95 of max torque, which is the authority ceiling.
+	# SUSTAINED FORWARD BURSTS — runs of >=3 s above 0.06 m/s.  In the corridor only
+	# short runs are possible, so a rising burst count/duty is the operator's marker
+	# of a config that actually travels rather than lurching to the same mean.
+	if body.get("burst_count") != null:
+		lines.append("bursts:     %d runs >=3s   duty=%.1f%%   longest=%.1fs" % [
+			_as_int(body.get("burst_count")),
+			100.0 * _as_float(body.get("burst_duty")),
+			_as_float(body.get("burst_longest_s"))])
 	if body.get("energy_now") != null:
 		lines.append("energy:     now=%.3f   peak(1s)=%.3f   avg=%.3f   (mean |servo torque|, 1.0 = max)" % [
 			_as_float(body.get("energy_now")),

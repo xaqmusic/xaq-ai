@@ -113,6 +113,9 @@ private:
         double   up_sum = 0.0, up_sq = 0.0, dwell_sum = 0.0, torque_sum = 0.0;
         int64_t  meas_n = 0, distress_hits = 0;
         double   flow_q_sum = 0.0;
+        // the two factors, accumulated separately so a window can report WHICH of
+        // them limited its flow quality rather than only their combination
+        double   flow_mag_sum = 0.0, flow_pred_sum = 0.0, flow_turn_sum = 0.0;
         std::vector<int> td, unloaded;      // per-leg touchdowns / unloaded verdicts
         void reset(int n_legs);
     };
@@ -120,6 +123,7 @@ private:
     struct Terms {
         double falls = 0, tilt_sd = 0, dwell = 0, distress_duty = 0,
                unloaded_mean = 0, flow_term = 0, energy = 0, loaded_min = 0, J = 0;
+        double flow_mag = 0, flow_pred = 0, flow_turn = 0;  // diagnostic: which factor binds
         bool   valid = false;
     };
 
@@ -129,6 +133,7 @@ private:
     void handle_foot_load(MessagePtr payload);
     void handle_foot_contact(MessagePtr payload);
     void handle_imu(MessagePtr payload);
+    void handle_gyro(MessagePtr payload);
     void handle_torque(MessagePtr payload);
 
     // ---- loop internals ------------------------------------------------------
@@ -136,6 +141,7 @@ private:
     void  publish_vector(bool candidate);
     void  mutate_candidate();
     void  anneal(bool accepted);
+    double noise_floor_rate() const;   // Phi(-accept_k/sqrt(2)) — chance-level acceptance
     Terms score(WindowStats const& w) const;
     double sigma_est() const;      // sd of one window's J, from revert pairs
     double per_leg_loaded_min(WindowStats const& w) const;
@@ -152,6 +158,7 @@ private:
     std::string foot_load_topic_    = "reality.proprio.foot_load";
     std::string foot_contact_topic_ = "reality.proprio.foot_contact";
     std::string imu_topic_          = "reality.proprio.imu";
+    std::string gyro_topic_;        // "" = anti-circling factor has no input
     // ENERGY: mean |joint torque| — servo current, which the sensor audit classes
     // as a REAL egocentric load signal ("A REAL LOAD SIGNAL — and MotorEPM has
     // never consumed it").  On the physical PiCrawler this is battery current, so
@@ -207,13 +214,16 @@ private:
     // It is also largely INDEPENDENT of what we already score (corr −0.125 with
     // sd(upright)), so it adds information rather than restating it, and it AGREES
     // with the flow term (+0.123: worse locomotion also burns more current) rather
-    // than trading against it.  Default weight 8.0 equalises its SIGNAL with
-    // sd(upright)'s (0.0646/0.0083) while contributing ~1/60th of the noise.
+    // than trading against it.  8.0 would equalise its SIGNAL with sd(upright)'s
+    // (0.0646/0.0083) at ~1/60th the noise; the default is 4.0 because that is the
+    // weight every landscape/basin/tsweep verdict was measured at (the configs all
+    // ran 4.0 while the default said 8.0 — the audit's drift trap #2, aligned
+    // 2026-08-24 toward the VALIDATED value, never the other way).
     // ⚠ THE FREEZE TRAP IS NOT DISPROVEN — the +0.123 agreement was measured over
     // walking bodies only; no observed window contains a frozen one.  The flow term
     // is the counterweight that must stop "spend nothing by doing nothing", and the
     // per-leg loaded-minima guard blocks "kill a leg to save current".
-    double w_energy_    = 8.0;
+    double w_energy_    = 4.0;
     double w_dwell_     = 0.0;
     double dwell_thresh_ = 0.9;   // upright below this = leaning dangerously (~26 deg)
 
@@ -236,7 +246,7 @@ private:
     double  fall_alarm_      = 0.0;   // live leaky accumulator (serialized)
     double  fall_alarm_tau_  = 50000.0;  // decay time constant, ticks
     double  fall_alarm_on_   = 0.0;   // 0 = DISABLED (ships inert; set per-config)
-    double  accept_k_        = 1.0;   // 0 = legacy bare inequality
+    double  accept_k_        = 0.25;  // 0 = legacy bare inequality; see schema note
     int64_t noise_min_n_     = 3;     // samples before the margin is trusted
     double  noise_alpha_     = 0.25;  // EMA rate on squared revert-pair deltas
     double  viability_load_tol_    = 0.05;
@@ -251,16 +261,19 @@ private:
     int64_t min_touchdowns_        = 3;
 
     // ---- flow form (copied from MotorEPMv2's fwd-flow homeostat) -------------
-    double flow_alpha_    = 0.02;
-    double flow_vol_k_    = 4.0;
-    double flow_vel_norm_ = 0.05;
+    double  flow_alpha_    = 0.02;
+    double  flow_vol_k_    = 4.0;
+    double  flow_vel_norm_ = 0.05;
+    int64_t flow_min_form_ = 0;    // 0 = legacy product (byte-identical), 1 = min-form
+    double  flow_turn_k_     = 0.0;    // 0 = anti-circling factor OFF (byte-identical)
+    double  flow_turn_alpha_ = 0.004;  // ~250 ticks (5 s): slower than flow_alpha ON PURPOSE
 
     // ---- anneal params -------------------------------------------------------
     int64_t anneal_window_ = 10;
-    double  target_accept_ = 0.2;
+    double  target_accept_ = -1.0;   // <0 = AUTO: derive the noise floor from accept_k
     double  anneal_up_     = 1.5;
     double  anneal_down_   = 0.85;
-    double  sigma_min_     = 0.01;
+    double  sigma_min_     = 0.08;   // floor: never below measurable resolution
     double  sigma_max_     = 0.5;
 
     // ---- live ES state (ALL serialized) --------------------------------------
@@ -296,6 +309,8 @@ private:
     std::vector<int64_t> td_horizon_;      // >0 = ticks left in post-touchdown watch
     std::vector<float>   td_maxload_;
     float flow_ema_ = 0.0f, flow_vol_ema_ = 0.0f;
+    float yaw_rate_ = 0.0f;        // gyro about the body's OWN up axis
+    float turn_ema_ = 0.0f;        // SIGNED, so left-then-right cancels to ~0
 };
 
 } // namespace ogma

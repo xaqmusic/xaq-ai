@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "PART IV GAIN EVOLVER (FACTORY) \u2014 convergence gate arm",
-    "description": "GATE 2 ARM (2026-08-17): identical to __gainevo but gain_seed = the pinned MotorEPMv2 member/schema DEFAULTS [0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0] and mutation_sigma 0.08 from boot. NOTE four of eight factory defaults are 0 \u2014 whole mechanisms OFF, including coupling_gain 0 (no Kuramoto coupling): the generation-0 body may barely locomote, which makes this the HONEST hard version of the convergence claim (does the vector walk toward/past the operator's hand point and the ge_ji trace fall?). If gradient-free, the recorded fallback arm is mid-range seeds \u2014 record whichever is run. Judge on per-seed ge_vec trajectories + ge_ji + accepts>0 (tautology check), then re-bake the settled vector and seedavg n=6 vs the hand point on the FULL standard set. Arena protocol: seedavg extra-arg OGMA_PICRAWLER_GYM=arena. CRITERION REVISED 2026-08-17 after gate 2 measured its noise budget: falls was 80.9% of J's variance and is now GUARD-ONLY (w_falls 0) \u2014 guard the catastrophe, optimize its continuous precursor sd(upright); var->sd; w_distress 0 until that contaminated sensor is fixed; window 4000->12000; and acceptance now requires J_cand < J_inc - accept_k*sigma_hat where sigma_hat is estimated from the search's OWN revert pairs (a bare inequality accepted ~50% by coin flip and drove the 1/5th anneal to the sigma ceiling on 3/4 seeds). TIMING REVISED 2026-08-18 (operator's arena observation, confirmed in the gate-2b logs): |tilt| shows NO settling trend and fwd_v settles by ~2000-2500 ticks, so back-half-of-12000 was discarding 4000 usable ticks per window. Now warmup 10000, window 4000, settle_ticks 2000 explicit -> 2000 measured ticks per window and ~3x more generations per unit compute (gate 2b was progress-limited at 6-8 accepts / 20 generations, not noise-limited). The noise-aware margin auto-adapts to the shorter window's higher per-window noise, so this trades per-decision precision for many more decisions without risking noise-driven accepts. w_dwell ships at 0 - instrumented only (see its schema note). ENERGY + FALL ALARM added 2026-08-18 (operator's call). ENERGY = mean |joint_torque| (servo current; battery current on hardware) at w_energy 8.0 \u2014 measured on the gate-2b windows as signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57, largely independent (corr -0.125) and AGREEING with flow (+0.123); weight 8 equalises its SIGNAL with sd(upright)'s at ~1/60th the noise. FALL ALARM = leaky accumulator (tau 50000 ticks, trip 8.0) that does NOT enter J \u2014 it only TIGHTENS the G1 guard to demand a strict reduction in falls when the body is falling persistently, so a sporadic faller is never punished and the alarm can never manufacture an acceptance. Trip point 8.0 vs a measured ~4.75 steady-state for this body (9.5 falls/100k ticks x tau), i.e. ~70% above typical. WATCH ge_alarm_on duty: pinned 1 = threshold too low (search frozen), pinned 0 = decoration.",
+    "description": "GATE 2 ARM (2026-08-17): identical to __gainevo but gain_seed = the pinned MotorEPMv2 member/schema DEFAULTS [0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0] and mutation_sigma 0.08 from boot. NOTE four of eight factory defaults are 0 \u2014 whole mechanisms OFF, including coupling_gain 0 (no Kuramoto coupling): the generation-0 body may barely locomote, which makes this the HONEST hard version of the convergence claim (does the vector walk toward/past the operator's hand point and the ge_ji trace fall?). If gradient-free, the recorded fallback arm is mid-range seeds \u2014 record whichever is run. Judge on per-seed ge_vec trajectories + ge_ji + accepts>0 (tautology check), then re-bake the settled vector and seedavg n=6 vs the hand point on the FULL standard set. Arena protocol: seedavg extra-arg OGMA_PICRAWLER_GYM=arena. CRITERION REVISED 2026-08-17 after gate 2 measured its noise budget: falls was 80.9% of J's variance and is now GUARD-ONLY (w_falls 0) \u2014 guard the catastrophe, optimize its continuous precursor sd(upright); var->sd; w_distress 0 until that contaminated sensor is fixed; window 4000->12000; and acceptance now requires J_cand < J_inc - accept_k*sigma_hat where sigma_hat is estimated from the search's OWN revert pairs (a bare inequality accepted ~50% by coin flip and drove the 1/5th anneal to the sigma ceiling on 3/4 seeds). TIMING REVISED 2026-08-18 (operator's arena observation, confirmed in the gate-2b logs): |tilt| shows NO settling trend and fwd_v settles by ~2000-2500 ticks, so back-half-of-12000 was discarding 4000 usable ticks per window. Now warmup 10000, window 4000, settle_ticks 2000 explicit -> 2000 measured ticks per window and ~3x more generations per unit compute (gate 2b was progress-limited at 6-8 accepts / 20 generations, not noise-limited). The noise-aware margin auto-adapts to the shorter window's higher per-window noise, so this trades per-decision precision for many more decisions without risking noise-driven accepts. w_dwell ships at 0 - instrumented only (see its schema note). ENERGY + FALL ALARM added 2026-08-18 (operator's call). ENERGY = mean |joint_torque| (servo current; battery current on hardware) at w_energy 8.0 \u2014 measured on the gate-2b windows as signal/noise 4.74 vs sd(upright) 0.61 and dwell 0.57, largely independent (corr -0.125) and AGREEING with flow (+0.123); weight 8 equalises its SIGNAL with sd(upright)'s at ~1/60th the noise. FALL ALARM = leaky accumulator (tau 50000 ticks, trip 8.0) that does NOT enter J \u2014 it only TIGHTENS the G1 guard to demand a strict reduction in falls when the body is falling persistently, so a sporadic faller is never punished and the alarm can never manufacture an acceptance. Trip point 8.0 vs a measured ~4.75 steady-state for this body (9.5 falls/100k ticks x tau), i.e. ~70% above typical. WATCH ge_alarm_on duty: pinned 1 = threshold too low (search frozen), pinned 0 = decoration. STEP-0 CALIBRATION 2026-08-20: the authority check measured dJ/d(coupling) = -0.182/unit, so one mutation at sigma 0.08 moves J by 0.044 against a 0.244 margin \u2014 the margin was rejecting real gradients. accept_k 1.0->0.25 and sigma_min 0.01->0.08 (matched by |dJ/dg|*sigma*range >= accept_k*sigma_hat => sigma >= 0.447*accept_k), so the search can neither anneal below its own measurable resolution nor reject true improvements. w_energy 8.0->4.0 (it held 56.4% of decision variance and barely responds to coupling, r=+0.125, so it was diluting the one term that CAN see it: flow, r=-0.518). coupling gain_max 3.0->2.0 to match MotorEPMv2's schema \u2014 set_param does not enforce ranges, and step 0 measured >2.0 as worse anyway (J 3.59 at 2.0 vs 3.39 at 1.6). ANNEAL TARGET FIXED 2026-08-20: target_accept -1 = AUTO, derived as the NOISE FLOOR Phi(-accept_k/sqrt(2)) = 0.5*erfc(accept_k/2) (0.43 at k=0.25). The old fixed 0.2 sat BELOW that floor for every accept_k used, so the 1/5th rule treated chance-level acceptance as success and pinned sigma at the ceiling in gate 2 (k=1.0) and again in gate 2e (k=0.25). Sigma now grows only when acceptance BEATS chance.",
     "env_target": "picrawler",
     "gym_mode": "corridor",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -424,7 +424,7 @@
           0.8,
           0.1,
           1.5,
-          3.0,
+          2.0,
           0.2
         ],
         "gain_sigma_scale": [
@@ -446,7 +446,7 @@
         "n_legs": 4,
         "seed": 20260817,
         "warmup_ticks": 10000,
-        "eval_window_ticks": 4000,
+        "eval_window_ticks": 12000,
         "mutation_sigma": 0.08,
         "w_falls": 0.0,
         "w_distress": 0.0,
@@ -464,22 +464,23 @@
         "flow_vol_k": 4.0,
         "flow_vel_norm": 0.05,
         "anneal_window": 10,
-        "target_accept": 0.2,
+        "target_accept": -1.0,
         "anneal_up": 1.5,
         "anneal_down": 0.85,
-        "sigma_min": 0.01,
+        "sigma_min": 0.08,
         "sigma_max": 0.5,
         "w_tilt_sd": 1.0,
-        "accept_k": 1.0,
+        "accept_k": 0.25,
         "noise_min_n": 3,
         "noise_alpha": 0.25,
         "settle_ticks": 2000,
         "w_dwell": 0.0,
         "dwell_thresh": 0.9,
         "torque_topic": "reality.proprio.joint_torque",
-        "w_energy": 8.0,
+        "w_energy": 4.0,
         "fall_alarm_tau": 50000.0,
-        "fall_alarm_on": 8.0
+        "fall_alarm_on": 8.0,
+        "gyro_topic": "reality.proprio.gyro"
       }
     }
   ],

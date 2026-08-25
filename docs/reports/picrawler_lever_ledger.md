@@ -3089,3 +3089,1197 @@ as it is decided, plus the re-use context that would justify a retry (§6). When
 generalizes into a reusable principle, fold that principle into
 [`../brain_building_doctrine.md`](../brain_building_doctrine.md) and leave the specific
 result here.*
+
+### ★★★ 2026-08-20 — STEP 0: the criterion SEES coupling; the ACCEPTANCE MARGIN cannot
+
+**Verdict: `WORKING` as a diagnosis — it refuted the fix we were about to build.** Evolver
+held in observer mode (σ=0, scores without searching or publishing) while `SETPARAM_AT`
+stepped `motor_epm.coupling_gain` through {0, 0.4, 0.8, 1.2, 1.6, 2.0}, 3 scored windows
+per level, **ascending on 2 seeds and descending on 2** so hysteresis would show. Consumer
+check: both arms reported `-> OK` and started at 0.0 / 2.0 respectively.
+
+| coupling | J | upright sd | unloaded | flow | energy | falls |
+|---|---|---|---|---|---|---|
+| 0.0 | 3.6805 | 0.0027 | 0.0048 | **0.7555** | 0.3647 | 0.40 |
+| 0.4 | 3.7476 | 0.0095 | 0.0022 | 0.7329 | 0.3754 | 0.17 |
+| 0.8 | 3.6119 | 0.0782 | 0.0036 | 0.5245 | 0.3757 | 0.58 |
+| 1.2 | 3.4045 | 0.0232 | 0.0031 | 0.4262 | 0.3690 | 0.50 |
+| **1.6** | **3.3895** | 0.0163 | 0.0067 | **0.3940** | 0.3716 | 0.50 |
+| 2.0 | 3.5881 | 0.0169 | 0.0071 | 0.4929 | 0.3839 | 0.70 |
+
+**Authority:** `flow` **r = −0.518 (STRONG)**, J r = −0.260, falls r = +0.220, everything
+else ~0.
+
+**1. The criterion is NOT blind to coordination.** `flow_term` nearly halves from 0.756 to
+0.394 as coupling rises — a large, monotone, strongly-correlated response. Hypothesis (a)
+is refuted. There is also a real optimum near **1.2–1.6**, which vindicates the operator's
+hand-found 1.55, and 2.0 is measurably worse.
+
+**2. ★ The standing fix would NOT have worked.** Coupling's benefit is *not* catastrophe
+avoidance — falls actually trend slightly UP with coupling (r = +0.220). The lexicographic
+viability-then-quality ordering was the recorded next build; **this measurement killed it
+before it was written.** That is the entire value of an authority check.
+
+**3. ★★ The real blocker is a SCALE MISMATCH between the acceptance margin and the
+mutation step**, and it is systemic rather than coupling-specific:
+
+```
+dJ/d(coupling) = −0.182 per unit           (measured, full-range swing −0.546)
+σ 0.08  → step 0.240 → ΔJ 0.0436   vs margin 0.244  →  5.6× TOO SMALL
+σ 0.04  → step 0.120 → ΔJ 0.0218   vs margin 0.244  → 11.2× TOO SMALL
+σ 0.015 → step 0.045 → ΔJ 0.0082   vs margin 0.244  → 29.8× TOO SMALL
+```
+
+A single mutation's *true* improvement is far below `accept_k·σ̂`, so a real gradient is
+rejected as indistinguishable from noise. **The margin that fixed the coin-flip problem now
+blocks the gradient it was protecting.** This also explains why the ORIGINAL noisy criterion
+found coupling (0→2.06 in 4/4): with no margin, a strong flow gradient could bias a random
+walk upward; adding the margin removed the walk without supplying a detectable step.
+
+**4. ⚠ THIS REFRAMES GATE 2d's HEADLINE — a correction to my own reporting.** I recorded
+"2/4 seeds annealed σ to the FLOOR = settled", reading it as convergence. At the σ those
+seeds reached (0.010–0.015) **nothing could clear the margin at all** (30× short), so the
+anneal is at least as consistent with being FROZEN OUT as with converging: fewer accepts →
+σ shrinks → smaller steps → fewer accepts. Self-reinforcing. I cannot settle it from the
+gate-2d logs because `/tmp` is a tmpfs and the reboot cleared them, so this is a strong
+hypothesis, not a fact. **The next run must log the accept timeline against σ to decide it.**
+
+**Re-use context / the fix, derived from the measurement:** match the margin to the step by
+construction. Requiring `|dJ/dg|·σ·range ≈ accept_k·σ̂` with the measured slope gives
+**σ ≈ 0.22 at accept_k 0.5, or σ ≈ 0.11 at accept_k 0.25.** Present `sigma_min` is 0.01 —
+10–20× below anything useful. Highest-value single change: **raise `sigma_min` to ~0.05–0.1
+and lower `accept_k` to ~0.3**, so the search cannot anneal itself below the resolution its
+own criterion can measure. Alternatives: longer windows (shrinks σ̂, costs generations) or
+per-gain `sigma_scale` (coupling's range is the widest at 3.0).
+
+⚠ Also fix before any coupling verdict: the evolver searches coupling to **3.0** while
+MotorEPMv2's schema documents max **2.0**, and `set_param` does not enforce schema ranges.
+The measurement above says >2.0 is worse anyway.
+
+⚠ **OPERATOR CORRECTION (2026-08-22) — the chassis-collide distinction is smaller than I
+claimed.** I set `OGMA_PICRAWLER_CHASSIS_COLLIDE=1` from gate 2 onward and wrote that
+ghost-chassis history "is NOT comparable", reasoning that `height_homeo_gain` is under
+evolution and a ghost belly would hide what sagging costs. The operator reports from the UI
+that **the hip1 joints ground against the floor at much the same height as a solid chassis
+does**, so the belly rarely becomes the limiting contact either way. The flag is therefore
+worth keeping for honesty, but **"not comparable" overstates it** — ghost and solid runs are
+closer than that phrasing implies, and no A/B here has actually measured the difference.
+Treat cross-protocol comparisons as mildly caveated rather than void.
+
+### ★★★ 2026-08-20 — GATE 2 FINAL: 3/4 seeds converge; the freeze question is ANSWERED
+
+**Verdict: `PARTIAL`, best of the campaign.** Factory arm, arena, solid chassis, 500 k
+ticks, 61 generations, with the step-0 calibration (`accept_k` 1.0→0.25,
+`sigma_min` 0.01→0.08, `w_energy` 8→4, coupling max 3.0→2.0).
+
+| | gate 2 | 2b | 2d | **2e** |
+|---|---|---|---|---|
+| J fell beyond own noise | 0/4 | 1/4 | 2/4 | **3/4** |
+| J rose | 1/4 | 1/4 | 0/4 | **0/4** |
+| closer to hand point | 3/4 | 3/4 | 4/4 | **4/4** |
+| accepts (of 61 gens) | — | — | 21/14/10/8 | **16/18/24/26** |
+
+Falls: −0.226 vs noise 0.139 (s1), −0.246 vs 0.221 (s3), −0.452 vs 0.195 (s4). s2 inside
+noise. `amp_min` 0.483 — best recorded. Lockstep OK on all seeds.
+
+**★ THE FREEZE QUESTION IS SETTLED, and my gate-2d correction was right.** The σ-bucketed
+discriminator shows seeds 1 and 2 ending at σ 0.111/0.080 while **still accepting 43–50 %
+at the σ 0.08 floor** (6/14, 7/14). Acceptance survives at the floor once the floor is set
+above the criterion's resolution — so gate 2d's collapse to σ 0.010–0.015 with accepts
+dying was **freeze-out, not convergence**. The headline I originally reported for gate 2d
+("2/4 settled") is formally retracted; it was the margin starving the search.
+
+**★★ THE OPPOSITE FAILURE NOW APPEARS, and it exposes a flaw in the anneal itself.** σ is
+**at the 0.5 ceiling on 2/4 seeds** (3 and 4), which spent most of the run at maximum step
+while still accepting 38–40 %. The cause is not the margin size per se — it is that
+**`target_accept` has always been below the noise floor.** If a candidate differs from the
+incumbent by noise alone, the difference of two window scores has sd √2·σ̂, so the
+chance-level acceptance rate is **Φ(−k/√2)**:
+
+| accept_k | acceptance from PURE NOISE | observed |
+|---|---|---|
+| 0.25 (gate 2e) | **43.0 %** | 26 / 30 / 39 / 43 % |
+| 1.00 (gate 2d) | **24.0 %** | 13 / 23 / 16 / 34 % |
+
+**Every run to date has had `target_accept` 0.2 sitting BELOW its own noise floor.** The
+1/5th rule therefore reads a chance-level accept rate as success and inflates σ — which is
+why gate 2 pinned the ceiling at k=1.0 and gate 2e pins it again at k=0.25. Note also that
+observed acceptance never exceeds the noise floor in any run, so **acceptance rate alone
+has never been evidence of signal**; the J-falls-beyond-noise result is, and it is
+independent of it.
+
+**Re-use context / next fix (derived, not guessed):** set **`target_accept = Φ(−accept_k/√2)`**
+— the anneal then grows σ only when acceptance genuinely BEATS chance, and shrinks it
+otherwise, which is the property the 1/5th rule was always meant to have. For k=0.25 that
+is ≈0.43. This is a two-line change and it should be made before any further gate run.
+Keep `accept_k` 0.25 (k≥1.19 would be needed to push the noise floor under a 0.2 target,
+and step 0 measured that as blocking real gradients — the two constraints are only
+satisfiable by fixing the target, not the margin).
+
+Coupling improved but is still not reliably found: 0.322 / 0.568 / 0.227 / **2.000** (mean
+0.779 ± 0.716, up from 0.573) — seed 4 drove it to the new cap. `plan_gain` 0.054 vs hand
+0.05 and `postural` 0.651 vs 0.700 are now close; `amp_target` moved the wrong way
+(0.177 vs hand 0.400) on every seed and is worth its own look.
+
+### ★★★ 2026-08-20 — GATE 2f: THE COUPLING PROBLEM IS SOLVED (monotone on 4/4 seeds)
+
+**Verdict: `WORKING` on the campaign's headline open problem; `PARTIAL` on the gate.**
+Same arm/protocol, with `target_accept` now AUTO — derived as the noise floor
+Φ(−accept_k/√2) instead of a fixed 0.2.
+
+**★ `coupling_gain` now climbs MONOTONICALLY on every seed**, by generation block:
+
+| seed | b1 | b2 | b3 | b4 | b5 | final |
+|---|---|---|---|---|---|---|
+| 1 | 0.18 | 0.35 | 0.52 | 0.64 | 0.61 | 0.641 |
+| 2 | 0.02 | 0.57 | 0.50 | 1.07 | **1.56** | 1.464 |
+| 3 | 0.25 | 0.68 | 0.70 | 0.74 | 0.98 | 0.815 |
+| 4 | 0.10 | 0.38 | 0.51 | 1.09 | 1.28 | 1.419 |
+
+Mean **1.085 ± 0.362** against a hand-found 1.55, and every seed non-zero — versus
+gate 2e's erratic 0.32 / 0.57 / 0.23 / 2.00 (0.779 ± 0.716) and gate 2d's two seeds stuck
+at zero. **Seed 2 reached 1.56, the hand point, on its own.** This is the search
+rediscovering that the legs must be coupled, from egocentric error alone, reproducibly.
+The whole chain — authority check → margin/step calibration → noise-floor anneal target —
+was aimed at this, and it landed.
+
+Also: **4/4 much closer to the hand point** (mean L2 distance **0.887**, vs 1.406 in
+gate 2e), `amp_min` **0.523** — best recorded — and σ at the ceiling on only 1/4.
+
+**★ A MIS-SPECIFIED TEST IN MY OWN ANALYSER, corrected.** The first-half-vs-last-half J
+test reported only 1/4 seeds falling. That test is wrong for a *converging* search: gains
+are FRONT-LOADED (early-block deltas −0.231 / −0.237 / −0.420 against totals −0.100 /
+−0.224 / −0.372), so it averages the plateau against itself. A regression slope over all
+generations has no such blind spot and gives **2/4 significant falls** (seed 3 t=−3.00,
+seed 4 t=−8.73) with the other two trending down but not significantly. The analyser now
+reports the slope test alongside; **earlier gate verdicts were scored on the weaker test
+and are understated to that extent.**
+
+**⚠ A WATCH ITEM, NOT A FINDING — falls read 54.75 → 66.50, which is NOT significant.**
+I first recorded this as a cost of the coupling result; that overstates it. At n=4 the
+spread swamps the difference: 54.75 ± 13.30 vs 66.50 ± 20.01, **t = 0.98, df 6, p > 0.3.**
+It is a direction to watch, nothing more, and it would be exactly the §3.3 error to build
+a lever against it at this power.
+
+What IS specific and real is **one struggling seed**: seed 1 posts 88 falls, trips the
+alarm on 25.8 % of generations (peak 32.97 against a threshold of 8), and is the only seed
+whose J regressed in its final block (2.071 → 2.264). That is the ledger's recurring "one
+bad seed" pattern, not a population shift.
+
+There is a mechanism that would explain a real rise if one exists — step 0 measured
+`corr(coupling, falls) = +0.220`, so the coordination the search now finds may carry
+slightly more falling, and nothing in J penalises it (`w_falls` 0 by design; G1 blocks
+per-comparison regression, not slow drift across many accepted steps). **But that
+mechanism is a hypothesis awaiting power, not a diagnosis.**
+
+**Re-use context:** settle it at power rather than patching it — job #1 runs at n≥20 and
+measures falls directly, so it answers this question as a side effect of delivering the
+phase's actual goal. Only if n≥20 confirms a rise should a falls channel be built, and
+then as a small non-zero `w_falls` or an alarm-gated ratchet — **never a return to
+`w_falls` 1.0**, which is what the entire noise campaign removed.
+
+### ★★★ 2026-08-22 — JOB #1 AT POWER: the evolver's own point erases the falls tail
+
+**Verdict: `WORKING` — the first gain vector this project did not choose by hand, and it
+beats the hand point at n=20.** Four arms differing ONLY in the eight gains (evolver
+present at σ=0 in all, so instruments live and nothing publishes), arena, **n=20**, 12 000
+ticks, solid chassis, recentering off. The hand point was **re-run as a fresh control**
+rather than compared to the recorded 3/20 tail, which was measured on a ghost chassis —
+and `height_homeo_gain` is one of the evolved gains, so a ghost belly would hide what it
+costs.
+
+| metric | hand (control) | j1s1 | **j1s4 (WINNER)** | j1mean |
+|---|---|---|---|---|
+| falls | 0.25 ± 0.55 (**4/20**) | 0.00 (0/20) | **0.00 (0/20)** | 0.25 (4/20) |
+| net_disp | 10.40 ± 2.10 | 9.87 ± 1.57 | **10.55 ± 1.20** | 10.45 ± 1.31 |
+| straight | 0.658 ± 0.10 | 0.712 | **0.702 ± 0.04** | 0.679 |
+| tilt_sd | 0.127 ± 0.11 | 0.085 | **0.080 ± 0.04** | 0.151 ± 0.13 |
+| amp_min | 0.580 ± 0.11 | 0.563 | **0.625 ± 0.02** | 0.600 |
+| step_bal | 0.137 | 0.106 | 0.095 | **0.203** |
+| **rlt** (rear land) | 3847 | **2194 (−43 %)** | **3605 (−6 %)** | 3296 (−14 %) |
+| **rpt** (rear push) | 12154 | 11934 | **12298 (+1 %)** | 11923 |
+
+**j1s4 meets job #1's bar exactly: the falls tail is gone (4/20 → 0/20) AND the loaded rear
+touchdowns hold** (rlt −6 %, rpt +1 %). The rival j1s1 also zeroed falls but gave back 43 %
+of the rear-landing consumer — the precise failure job #1 forbade — so the acceptance
+criterion did its job in discriminating them.
+
+**★ THE LOUD RESULT IS CONSISTENCY, NOT THE MEAN.** Paired per-seed tests (same 20 seeds)
+show every metric improving in direction but only marginally: falls t=−2.03, amp_min
+t=+1.92, tilt_sd t=−1.78, straight t=+1.80 — all p≈0.06–0.09, **none significant**, and
+falls alone is Fisher p=0.106. What IS loud is the collapse in across-seed spread:
+
+| | sd hand | sd j1s4 | F (crit 2.53) |
+|---|---|---|---|
+| amp_min | 0.111 | **0.018** | **37.8** |
+| tilt_sd | 0.107 | 0.036 | 9.1 |
+| straight | 0.103 | 0.045 | 5.3 |
+| net_disp | 2.10 | 1.20 | 3.1 |
+
+All significant. **The hand point works well on most seeds and fails on a few; the evolved
+point works on all of them.** That is precisely what PART IV was launched to fix — the
+charter's opening argument was "a fixed gain vector cannot be right for every seed's
+attractor", and the answer turns out to be that a *searched* fixed vector can be, where a
+hand-found one was not. ⚠ It is a ROBUSTNESS win, not a speed win: means are statistically
+marginal and `step_bal` is slightly worse (0.137 → 0.095).
+
+**★ NEGATIVE WORTH KEEPING — averaging multi-modal optima FAILS.** The four seeds settled
+in genuinely different basins (one abandoned coupling entirely at 0.14 while others held
+1.0–1.9). `j1mean`, their arithmetic mean, is **no better than the hand point on falls
+(4/20) and WORSE on tilt_sd (0.151 vs 0.127)** — it lands between basins rather than in
+one. Do not average evolved vectors; pick a seed and test it.
+
+**Promoted to the launcher** as `…__j1s4.json` with `gym_mode: arena` (metadata outranks
+the env var under the UI, so a corridor default would silently give the wrong world) and
+σ=0 so it cannot drift while being watched. **The operator's eye remains the promotion
+gate** — the numbers say steadier, and whether the rear landing still *looks* loaded is a
+question for the UI, not the table.
+
+### ★★ 2026-08-22 — ROBUSTNESS IN THE REAL SCENARIO: no evidence of long-term damage (underpowered)
+
+**Verdict: `NULL` — and the null is the wanted answer, but it is a weak one.** The operator's
+question: does a LIVE evolver damage the gait over long horizons in the real use case, with
+obstacles and perturbation? Design: **the same config file in both arms, differing ONLY in
+`mutation_sigma` set at tick 1**, so "the evolver did it" cannot be confused with "the body
+did it". Corridor (hump → rumble → pyramids) with outer-wall recentering ON, so the body
+traverses the obstacle curriculum **repeatedly**. 400 k ticks, n=4, paired seeds.
+
+| whole-run mean | live | frozen | Δ | t (df 3) |
+|---|---|---|---|---|
+| falls | 68.75 | 65.75 | +3.00 | **0.18** |
+| \|tilt\| | 0.659 | 0.432 | +0.227 | 1.07 |
+| fwd_v | 0.083 | 0.096 | −0.013 | −1.46 |
+| energy | 0.384 | 0.390 | −0.007 | −1.28 |
+| criterion J | 2.603 | 2.514 | +0.089 | 0.89 |
+| within-run tilt slope | +0.243 | −0.120 | +0.362 | 0.75 |
+
+**Nothing is significant** (all |t| ≤ 1.46 against a 3.18 threshold). Most directly: **falls
+are indistinguishable** (68.75 vs 65.75, t=0.18), and falls is where gait damage would show
+first. The rear-landing consumer did not collapse either — live ran *above* frozen on
+rear-land events throughout.
+
+**⚠ THE POWER, STATED HONESTLY.** Paired fall differences were −41 / +40 / +6 / +7 (sd 38),
+so the **minimum detectable difference at n=4 is ~60 falls — a ~90 % change.** "No significant
+damage" here means **"no LARGE damage"**; this design cannot rule out a modest one, and the
+mildly unfavourable direction on tilt, fwd_v and J (all ns) is exactly what a modest effect
+would look like if it were real. Settling it needs n≥12, roughly 6 h of compute.
+
+**A METHOD NOTE worth keeping: the first cut of this analysis was wrong.** Reporting Q4−Q1
+per quarter made the live arm look clearly damaged (falls +20.25 vs frozen −3.25). But both
+arms swing violently quarter to quarter — live falls ran 15 / 14 / 5 / **35**, frozen ran
+11 / **32** / 17 / 7 — so Q4−Q1 was reporting *which quarter happened to spike*, not a trend.
+Whole-run paired means killed the artefact. **On a metric this bursty, an endpoint difference
+is not a trend; fit or pool instead.**
+
+**Context:** the corridor is genuinely harsher than the arena — ~16–17 falls per 100 k ticks
+against the arena's ~9.5 — so the stress test did stress. Also note the frozen arm drifts on
+its own (its falls ranged 29–108 across seeds with no search running at all), which is why
+the control was indispensable: without it, live's tilt rise would have read as evolver damage.
+
+### ★★ 2026-08-23 — n=12 CORRIDOR CONFIRMATION: the live search neither helps nor harms
+
+**Verdict: `NULL` at usable power.** The powered replacement for the 2026-08-22 n=4 test.
+Same config in both arms, differing only in whether the search runs; corridor with
+obstacles, recentering ON so the obstacle curriculum is traversed repeatedly; 300 k ticks,
+**n=12 paired seeds**.
+
+| metric | live | frozen | Δ | t (df 11) | MDE |
+|---|---|---|---|---|---|
+| falls | 46.75 | 40.75 | +6.00 | 0.54 | 24.6 |
+| **burst onsets** | 450.8 | 494.0 | −43.2 | −0.52 | 183.7 |
+| **burst duty** | 6.68 % | 7.48 % | −0.80 pp | −0.58 | 3.1 pp |
+| **longest burst** | 15.5 s | 15.9 s | −0.37 s | −0.16 | 5.2 s |
+| mean \|tilt\| | 0.641 | 0.814 | −0.173 | −0.90 | 0.420 |
+| amp_min | 0.372 | 0.385 | −0.014 | −0.26 | 0.119 |
+| step_bal | 0.533 | 0.549 | −0.017 | −0.24 | 0.150 |
+| net_disp | 4.93 | 4.01 | +0.92 | 0.86 | 2.34 |
+
+**Nothing reaches significance on any metric.** Power roughly doubled against the n=4
+attempt — the minimum detectable difference in falls fell from ~53 (≈81 %) to **24.6
+(≈60 %)** — so this rules out a large effect in either direction, and still cannot resolve
+a modest one.
+
+**★ THE SUSTAINED-BURST METRIC (operator's, new here) EARNS ITS PLACE.** Defined as a
+3-second rolling mean of forward velocity at or above 0.06 m/s — roughly 18 cm of travel
+in three seconds. Its value shows in the contrast with the mean: **mean forward velocity
+reads 0.01 m/s, which alone would say the body barely moves**, while the burst measure
+shows 6.7–7.5 % of the run spent in genuine sustained travel, with individual runs reaching
+**25 s**. A body that lurches and stalls posts the same mean as one that periodically
+covers ground; only the burst view separates them. Spread across seeds is wide (sd 247 on
+a mean of 451), so it has the range to move under a future A/B.
+
+**Scope note that matters for interpretation.** This does NOT contradict job #1. The two
+tests ask different questions: job #1 compared a FIXED evolved operating point against the
+hand point (arena, 12 k ticks) and the evolved point won on falls and on across-seed
+consistency; this test asks whether running the SEARCH LIVE in the corridor changes
+anything over 300 k ticks, and the answer is that it does not, in either direction. The
+evolved *destination* is better; the live *journey* is neutral in this scenario.
+
+**Re-use context:** the corridor at 300 k ticks is a hostile measurement environment — falls
+run 16–17 per 100 k ticks against the arena's ~9.5, and the frozen arm alone spans 29–108
+falls across seeds. Resolving a modest live-search effect here needs either many more seeds
+or a less variable scenario. The burst metric is the most promising discriminator to build
+the next comparison on.
+
+### ★★★ 2026-08-23 — THE CRITERION SEES 3 OF 8 GAINS: per-gain landscapes measured
+
+**Verdict: `WORKING` as a diagnosis, and it reframes the search.** Each gain swept across
+its full declared range while the other seven were held at the n=20-validated operating
+point, search in observer mode, 6 levels × 3 windows, 3 seeds, ascending on odd seeds and
+descending on even. Authority = landscape span ÷ within-level scatter.
+
+| gain | best J at | span/noise | authority |
+|---|---|---|---|
+| **amp_target** | 0.15 | **3.60** | STRONG |
+| **coupling_gain** | 1.6 | **3.00** | STRONG |
+| **postural_gain** | 1.5 | **2.34** | STRONG |
+| height_homeo_gain | 0.1 | 1.39 | weak |
+| plan_gain | 0.12 | 1.11 | weak ⚠ order-dominated |
+| rear_push_ext | 1.2 | 1.04 | weak |
+| rear_land_gain | 0.3 | 0.93 | **FLAT** ⚠ order-dominated |
+| rear_knee_plant | 0 | 0.84 | **FLAT** |
+
+**1. Three gains carry the search.** `amp_target` is cleanly monotone (J 1.865 → 2.843 as
+amplitude rises 0.15 → 0.8); `coupling_gain` is a clean bowl with its floor at 1.6.
+
+**2. `coupling_gain`'s optimum REPLICATES.** The 2026-08-20 step-0 sweep put it at 1.2–1.6
+from a different operating point; this puts it at 1.6. It also lands on the operator's
+hand-found 1.55. Independent measurement, same answer.
+
+**3. ★ THE REAR-LANDING GAINS ARE INVISIBLE TO THE CRITERION.** `rear_land_gain` and
+`rear_knee_plant` — the pair PART III promoted and the operator hand-tuned — have
+landscapes below their own scatter. This retro-explains behaviour recorded as puzzling:
+gate 2f's rear gains scattered across seeds (rear_push ended 0.006 / 0.79 / 0.34 / 0.03)
+not because the search failed but because there is no slope to climb. **A gain the
+criterion cannot sense is one the search can only wander in**, and eight dimensions of
+which five are weak-or-flat is a large part of why independent seeds land in different
+basins.
+
+**4. ★ TWO EARLIER "ANOMALIES" WERE THE SEARCH BEING RIGHT.** `amp_target` drifting *away*
+from the hand point (0.177 against 0.400) and `postural_gain` climbing were both recorded
+as odd. The landscapes show the criterion prefers amplitude 0.15 and postural 1.5; the
+search was tracking its criterion faithfully. Whether the criterion is *right* to prefer
+those is a separate question the operator's eye should settle.
+
+**⚠ 5. RETRACTED SAME DAY — "two optima sit on their range boundaries, so the search is
+being truncated."** `amp_target`'s argmin is at its range minimum and `postural_gain`'s at
+its range maximum, and the first reading was that the true optima lie outside the declared
+bounds. The resolvability check below kills that: both argmins sit *inside a flat band*,
+so they are the argmin of noise, not evidence of a wall. **Widening the bounds is not
+required.** The error was reading an argmin off a landscape without first asking what the
+landscape can resolve — the same mistake in a new costume as gate 2d's "σ annealed to the
+floor, therefore converged."
+
+**★ 6. THE CRITERION RESOLVES BANDS, NOT POINTS — and this is what makes the
+displacement test designable.** Scoring every level against one within-level noise width:
+
+| gain | argmin | GOOD band (indistinguishable from best) | BAD band |
+|---|---|---|---|
+| amp_target | 0.15 | **0.15 – 0.41** | 0.67 – 0.8 |
+| coupling_gain | 1.6 | **1.2 – 2.0** | 0 – 0.8 |
+| postural_gain | 1.5 | **0.66 – 1.5** | 0.1 |
+
+So the criterion cleanly separates a good region from a bad one on each of the three, and
+cannot pick a point inside the good region. **The recovery test is therefore BAND RE-ENTRY,
+never return-to-argmin** — demanding a point the criterion cannot resolve would fail a
+working search and produce a false negative. `gainevo_landscape.py` now prints bands and
+refuses to nominate an "ideal", so the tool cannot reproduce the over-read.
+
+**★ 7. THIS RE-EXPLAINS THE `amp_target` ANOMALY A SECOND TIME, better.** The hand point
+0.400 and the evolved 0.177 are BOTH inside the good band. The search was not preferring
+0.177 over 0.400; it was drifting freely inside a flat basin, which is what a search does
+where its criterion is blind. Finding 3 above ("the search was being right") overstates
+it — the accurate version is that the search was neither right nor wrong there.
+
+**★ 8. EACH STRONG GAIN IS SEEN THROUGH A DIFFERENT TERM.** Decomposing |dJ| across each
+landscape: `coupling_gain` is **105% flow** (coupling buys phase predictability; the other
+terms slightly oppose), `postural_gain` is **65% energy** (higher tone costs the servos
+less than actively fighting gravity does), `amp_target` is **45% tilt-variance + 41% flow**
+(high amplitude thrashes the body — tilt sd runs 0.015 → 0.456 across the range). No single
+term would have seen all three, which is the multi-term criterion earning its shape.
+
+**⚠ 9. The flow term does not oppose a quiet body, and was assumed to.** It was included as
+the complement that stops the search from minimizing everything by standing still. It does
+not: flow quality is magnitude × predictability, and at low amplitude the predictability
+gain outweighs the magnitude loss, so flow votes WITH tilt, energy and unloaded for a
+quieter gait. Measured `|fwd_v|` is lowest (0.0495) at the amplitude the criterion likes
+best. The degenerate attractor did not bite here — the good band's upper half still moves
+(0.154 at amp 0.28) and nothing drove amplitude to zero — but **the guard against it is
+not present**, and the criterion is currently free to prefer slow. Re-use context: if a
+future run creeps, this is the first place to look, and the fix is a flow term whose
+magnitude factor cannot be traded away for predictability.
+
+**⚠ 6. The hysteresis check earned its place**: `rear_land_gain` and `plan_gain` both show
+an ascending/descending gap LARGER than their landscape span, so their apparent optima are
+sweep-order artefacts, not landscape.
+
+**Scope:** measured at ONE operating point with seven gains fixed, so interactions are
+invisible here — a gain flat at this point could matter elsewhere. The random-init basin
+study addresses exactly that.
+
+### 2026-08-23 — flow term: MIN form, so magnitude cannot be traded for predictability
+
+**Verdict: `NULL` on its stated purpose — and ★ THE PREMISE WAS A MISREAD, retracted below.**
+Built, unit-pinned, gain-0 guarded, A/B'd the same day. It ships and stays OFF.
+
+The flow term is the criterion's only counterweight against minimizing every other
+term by standing still, and the landscape entry above measured it not doing that job.
+`flow_quality = magnitude × predictability`, a quiet body is a predictable one, and the
+product let the predictability a slower gait gains pay for the travel it loses.
+
+**The fix is a MINIMUM, which is this repo's own idiom for "cannot be traded"** — the
+same shape, for the same reason, as the per-leg loaded-contact guard using per-leg minima
+after a mean let one leg die while the others paid for it. Quality is capped by whichever
+factor is worse, so stillness-bought predictability buys nothing. Magnitude also becomes
+`v/(v+ref)` instead of `clamp(v,0,ref)/ref`: monotone in speed with no ceiling to sit
+against, so more travel always scores better and the factor never drops out of a
+comparison.
+
+`flow_min_form` — **0 = legacy product, and it is the default**, so every existing config
+is byte-identical and this is one isolated lever.
+
+**The instrument ships with it.** `flow_mag` / `flow_pred` are accumulated and logged
+apart (`ge_fmag` / `ge_fpred`), so a window reports WHICH factor limited it rather than
+only their product — the split that would have made the original defect visible on sight.
+`ge_fmf` echoes the live rule into every log line so no arm can be judged without knowing
+which criterion it ran under.
+
+**Five unit tests pin the truth table, including the defect itself** (`test_gain_evolver`,
+29/29): under form 0 a 0.06 m/s crawl beats 0.20 m/s travel and a *tenfold* speed range
+scores identically (the saturation that removed magnitude from the landscape); under
+form 1 the ordering reverses and the same range separates monotonically. Stillness scores
+worst under both — the fix must not accidentally reward the thing it is guarding against.
+Pinning the OLD behaviour as a test is deliberate: it proves the A/B has a real contrast
+rather than comparing a fix against nothing.
+
+**A/B armed** (`__j1s4_flowmin.json`, chained behind the basin study): the identical
+landscape sweep — same config, seeds, schedules, ticks — on the three gains with
+authority. Judged on whether flow still prefers the amplitude the body travels least at.
+The runner greps `ge_fmf:1` from every log before reporting, per §3.2 #7.
+
+**Not touched:** the forward-only convention (`clamp` at 0 means steady *backward* travel
+scores zero magnitude) is unchanged in both forms. It is a real directional preference
+inside a criterion that is supposed to have none, and it is a separate lever.
+
+### ★★★ 2026-08-23 — AUDIT: the GainEvolver criterion's inputs against Markov-blanket discipline
+
+**Verdict: five of six inputs are clean; `fwd_v` is an oracle, and today's flow fix
+INCREASED the criterion's dependence on it.** Every criterion input traced to its
+publisher in `picrawler_body.gd` rather than to the plan doc's description of it.
+
+| input | where it comes from | verdict |
+|---|---|---|
+| `upright` (basis.y.y) | `_chassis…basis.y.y` = body-up · world-up | **LEGAL** — literally what an accelerometer reads |
+| `joint_torque` → energy | `_prev_torque_*/MAX_SERVO_TORQUE`, 1 tick delayed | **LEGAL** — servo current |
+| `foot_load` → unloaded | `_foot_load_ema / static weight` | **LEGAL** — FSR / servo-current analog |
+| `foot_contact` | physics `get_colliding_bodies()` | **SIM-ONLY, not an oracle** — a foot switch is physically realisable and cheap; a fidelity gap, not a god's-eye one |
+| `distress` | `perch × stall`, stall = **world-XZ chassis displacement** | **CONTAMINATED** — but `w_distress = 0.0` in every shipped config, so it is INERT. Not a live violation |
+| `imu[2]` = `fwd_v` → flow | `_chassis.linear_velocity` projected on `basis.get_euler().y` (`picrawler_body.gd:5916`) | **ORACLE** |
+
+**1. `fwd_v` is not IMU-derived. It is the rigid body's true world-frame velocity,**
+projected onto its true world yaw — god's-eye twice over. No accelerometer yields it; a
+real legged robot has no odometry, and integrating acceleration to velocity drifts without
+bound. The codebase already says so in three separate comments ("unlike `fwd_v` this is a
+LAWFUL brain input"), and the legitimacy audit flags it as "not free — worth its own pass."
+The GainEvolver reads only `values[2]`, so the absolute-yaw components are not consumed
+directly — but they are baked into the projection.
+
+**2. ★ TODAY'S FLOW FIX INCREASED THE EXPOSURE, and that must be recorded as a cost of it.**
+Under the legacy product the magnitude factor was a hard clamp that SATURATED at 0.05 m/s,
+so across the measured range the oracle's magnitude contributed a constant and only its
+volatility varied. The min form deliberately removed that ceiling — which is what makes the
+term work — so the criterion now responds **monotonically, across its whole range, to a
+quantity the robot cannot sense.** The fix is right by the criterion's own logic and worse
+by this principle at the same time. Both are true and neither cancels the other.
+
+**3. ★ `fwd_v` CANNOT DISTINGUISH FAST CIRCLING FROM FAST TRAVEL** — it is body-frame
+forward speed, so a body carving a tight circle reads as flowing beautifully. This is the
+ledger's own recorded blind metric ("high fwd_v + low net_disp = fast circling"), and the
+flow term has no complement for it. Today's change made this term stronger without adding
+that complement. **The legal complement is available and unused: `imu[3]` = `ang_v` is a
+GYROSCOPE reading — fully egocentric.** Penalizing sustained |ang_v| would close the
+circling hole without adding a gram of oracle.
+
+**4. Scale of the exposure.** Flow is 1 of 7 weight units (~14%), and energy at 4.0 —
+the dominant term — is legal. But weight share understates it: on `coupling_gain`'s
+landscape the flow term accounted for **105% of the total movement in J**. The single most
+convincing result in PART IV, coupling's replicated optimum, rests almost entirely on the
+oracle-fed term.
+
+**5. The legal replacement is a SENSOR, not a smarter term** (doctrine §1 step 2:
+"if no egocentric observation carries the signal, the fix is a new sensor"). The standard
+legged-robot answer is **planted-foot kinematic odometry** — while a foot is planted, joint
+angles say how the body moved relative to it, needing only encoders and contact, both of
+which this body already publishes. This is the same build the ledger already carries as
+DEFERRED under post-plant slip ("planted-foot FK drift"), which makes it one build serving
+two deferred needs. Optical flow from the existing forward camera is the second candidate.
+
+**Not a reason to stop.** The charter sanctioned one speed-flavored term knowingly, and it
+is named in the config, the code, and the logs rather than hidden. But "sanctioned" was
+priced against a term whose magnitude was saturated out; it is a bigger loan now, and PART
+IV's headline results should not be reported as oracle-free.
+
+### 2026-08-23 — anti-circling: closing the flow term's blind spot with a LAWFUL signal
+
+**Verdict: `IN_FLIGHT`** — built, unit-pinned, gain-0 guarded, queued behind the flow-min
+verdict (never two levers in one comparison).
+
+The audit above found the flow term blind to circling: `fwd_v` is **body-frame** forward
+speed, so a body carving a tight circle reads as flowing beautifully. The ledger already
+records this as a blind metric ("high fwd_v + low net_disp = fast circling") and the flow
+term had no complement for it — while the min form made that term stronger.
+
+**A new SENSOR, not a cleverer metric** (doctrine §1 step 2). `imu[3]` was the obvious
+input and is **not clean**: it carries `_chassis.angular_velocity.y`, the WORLD vertical
+component, which diverges from what a chassis-mounted gyro reads exactly when the body
+tilts. So the body now publishes `reality.proprio.gyro` — world angular velocity projected
+onto each **body** axis, `[roll, YAW ABOUT OWN UP, pitch]`, normalized by π. A real MEMS
+gyro measures precisely this. Additive and default-no-consumer, so it is byte-identical
+until a module names it. Using the almost-legal signal to fix a legality complaint would
+have defeated the point.
+
+**★ THE DESIGN IS THE TIMESCALE AND THE SIGN, not the magnitude.** Heading regulation is
+one of the three behaviours this project reads as genuine capability (§3.3), so a term
+punishing turning *per se* would punish the thing we most want to see. The turn bias is a
+**signed** EMA at **~5 s** (`flow_turn_alpha` 0.004, deliberately ~5× slower than
+`flow_alpha`): a body correcting left-then-right averages toward zero, a body orbiting
+holds a bias. Built on mean |yaw rate| it would have penalized exactly the wrong thing,
+and a test pins that distinction rather than trusting it.
+
+`straight = 1/(1 + flow_turn_k·|turn bias|)` joins whichever combining rule is in force —
+the min under form 1 (so circling cannot be bought off with speed and smoothness either),
+the product under form 0. **`flow_turn_k` defaults to 0**, which makes the factor exactly
+1.0 and cannot perturb either rule.
+
+**Four tests, 33/33 total.** A sustained turn registers (factor < 0.85) and scores worse
+than going straight at identical speed and steadiness; **the same |yaw rate| alternating
+every 0.8 s stays above 0.95** — the test that fails if the term is built the naive way; a
+fast, glassy-smooth circle has the turn factor bind under the min form; and at k=0 a turn
+is invisible under BOTH forms.
+
+**Byproduct — 40,000 spurious ERROR lines per run, fixed.** `_emit_jsonl` probes five
+per-leg EPM ids from an earlier stack generation; absent modules return `""`, and parsing
+`""` is a Godot ERROR. A 300k-tick run emitted ~40k of them. The parse result was already
+discarded on failure so the guard is behaviour-identical — what it buys back is a run log
+where `grep -i error` means something. **This nearly cost a false alarm today**: a routine
+liveness check on the basin study reported 27,096 "errors" and read as a crash.
+
+### ★★★ 2026-08-23 — BASIN STUDY: the 8-D search diffuses; only what the criterion sees resists
+
+**Verdict: `NULL` on convergence, `WORKING` as a diagnosis — and it names the fix.**
+12 random start vectors × 2 bodies (`cad`, `measured`), arena, 300k ticks each (35
+generations), body seed pinned so the only difference between runs is where the search
+started. All distances in normalized gain units (0 = `gain_min`, 1 = `gain_max`).
+
+**1. The search does NOT converge. It DIVERGES.** Mean pairwise spread between runs went
+**1.070 → 1.206** (cad) and **1.070 → 1.159** (measured). Independent starts end further
+apart than they began.
+
+*(Figures corrected the same day: the first pass normalized against a hand-copied bounds
+table that had drifted from the shipped config on two of eight gains. `gainevo_basin.py`
+now READS the bounds from the basin configs, so the table cannot drift again. Every
+verdict below is unchanged — per-gain sd ratios are scale-invariant, which is exactly why
+the authority cross-check, the finding this entry rests on, was untouched.)*
+
+**2. ★ BUT THE MEASURED AUTHORITY PREDICTS THE ORDERING — replicated on both bodies.**
+End/start spread ratio, averaged by the landscape sweeps' verdict:
+
+| authority | cad | measured |
+|---|---|---|
+| STRONG | **0.95** | **0.96** |
+| weak | 1.11 | 1.11 |
+| FLAT | **1.70** | **1.41** |
+
+Monotone, twice, on data the sweeps never touched. **A gain the criterion can see resists
+being scattered; a gain it cannot see scatters freely.** This is the sweeps' sharpest
+independent confirmation, and it arrives inside a negative headline.
+
+**3. ★ THE MEANS DO NOT TRAVEL — so this is DIFFUSION, not selection.** Reporting spread
+alone would have hidden it. Across both bodies the STRONG gains' means move by ≤0.04
+(`amp_target` −0.021/+0.024, `postural_gain` −0.018/+0.024), while the largest movement
+belongs to `rear_push_ext` (+0.24/+0.27) — a gain with no landscape at all, i.e. pure
+drift. **`coupling_gain` moved in OPPOSITE directions on the two bodies** (+0.185 cad,
+−0.039 measured), which kills any claim of a consistent pull. The second body earned its
+place by producing that disagreement.
+
+**4. The mechanism, stated plainly: five of eight dimensions are noise to the criterion,
+and they inject that noise into every single comparison.** That is why even the three
+gains with real landscapes only manage a 0.82–0.96 ratio instead of collapsing. The
+searched space is mostly dimensions the search cannot navigate, and each one taxes the
+ones it can.
+
+**5. ⚠ THE TWO-BODY COMPARISON IS UNINFORMATIVE, and the script now says so itself.**
+Centroid separation 0.267 against within-body spread 1.182 reads as "both bodies agree",
+but that is satisfied trivially when neither body converged — the within-body cloud
+swamps any body difference. It is a statement about the SEARCH, not about the two bodies.
+`gainevo_basin.py` refuses the verdict when spread exceeds 2× separation rather than
+letting a future reader take the null at face value. **The sim2real question is not yet
+asked, let alone answered.**
+
+**6. ⚠ Scope: 35 generations.** Each generation costs two 4000-tick windows, so 300k ticks
+buys 35. This is a real bound on the claim — "does not converge in 35 generations from
+random in 8-D" is what was measured, not "cannot converge."
+
+**→ THE FIX THIS POINTS AT: search 3-D, not 8-D.** Restrict the searched vector to
+`amp_target`, `coupling_gain`, `postural_gain` — the three with demonstrated authority —
+and hand-set the rest. Two independent measurements now support it: the landscapes say
+the other five carry no gradient, and the basin study says they scatter while taxing the
+three that do. This is the next lever, and it is cheap.
+
+
+### ★★★ 2026-08-23 — RETRACTION + the finding underneath it: the flow term is an AMPLITUDE proxy
+
+**The A/B killed my own diagnosis, which is what an A/B is for.** Identical sweep, same
+config/seeds/schedules/ticks, `ge_fmf:1` verified in all nine logs.
+
+**1. ★ THE PREMISE WAS FALSE.** I wrote — into the ledger, the code comments, the config
+metadata, three commit messages, and a report to the operator — that the flow term "scored
+BEST at the gait amplitude whose mean travel was LOWEST (0.0495)." **It did not.** Flow's
+optimum sat at amp 0.28, where `|fwd_v|` = 0.1537 — the FASTEST level in the low band. The
+slowest level scored *worse* on flow (0.4086 vs 0.3733).
+
+The mistake: `|fwd_v|` is **not monotone in amplitude** (0.050, 0.154, 0.093, 0.069, 0.110,
+0.145). I saw flow preferring low amplitude, silently read that as preferring low travel,
+and never checked the column sitting next to it in my own table.
+
+**2. ★ WHAT FLOW ACTUALLY MEASURES — and this is the real finding.**
+
+| | corr with `|fwd_v|` | corr with amplitude |
+|---|---|---|
+| legacy product | **+0.256** | **+0.967** |
+| min form | +0.249 | +0.970 |
+
+**The flow term is a gait-amplitude proxy, not a travel term.** Mechanically it is
+`1 − 1/(1+k·vol)` in disguise: with magnitude saturated, flow reduces to the *volatility*
+of `fwd_v`, and velocity volatility tracks amplitude almost perfectly. **The criterion's
+one sanctioned speed-flavored term does not measure speed.**
+
+**3. The saturation half was real.** `ge_fmag` — the instrument shipped with the fix —
+reads median 0.534, i.e. `flow_ema` ≈ 0.057, above the 0.05 ceiling: magnitude was pinned
+at 1.0 most of the time, exactly as the unit test asserts. **A true defect whose repair
+changed nothing measurable**, because the term's variance never lived in magnitude.
+
+**4. Verdict on `flow_min_form`: NULL, ships OFF.** Span/noise 3.60 → 3.66, bands
+identical, correlation structure unmoved. It is defensible on first principles (a tenfold
+speed range scoring identically is indefensible) and it is free to keep as dead-by-default
+code — but principle is not evidence, and it does not get enabled on this. **Re-use
+context: it becomes live the moment a LEGAL travel signal replaces `fwd_v`**, because only
+then does magnitude carry information worth un-saturating.
+
+**5. This SHARPENS the audit rather than softening it.** I told the operator the min form
+"increased our exposure to the oracle." Weaker than stated: the term's response is
+dominated by `fwd_v`'s volatility in both forms, so removing the ceiling did not make it
+track the oracle's *magnitude* any harder. The input is still illegal and the exposure is
+still real — but the bigger problem is now visible, and it is not exposure. **The criterion
+has NO working travel term at all**, so nothing in it opposes a body that stops moving
+except by proxy through amplitude. That is a much stronger argument for planted-foot
+kinematic odometry than the one I made this morning: it is not only the legal replacement,
+it is the only way this term starts measuring what its name claims.
+
+**6. The anti-circling factor is untouched by this.** Its motivation — `fwd_v` is
+body-frame, so a circle reads as travel — is independent of the misread, and a term that
+tracks amplitude rather than travel cannot see circling either. It remains queued.
+
+**Process note (§3.2 #6, self-inflicted): I built, tested, documented and shipped a fix on
+an unverified reading of my own table.** The unit tests all passed because they pinned the
+*mechanism* I believed in, not the *claim* about the robot. Mechanism tests cannot catch a
+misdiagnosis; only the A/B could, and it did — within hours, because it was armed at build
+time. The lesson is not "test more", it is **run the A/B before writing the justification
+into five places.**
+
+### ★★★ 2026-08-24 — LEG ODOMETRY ON THE REAL ROBOT: correcting "the body already publishes it"
+
+**Verdict: `DEFERRED`, with a corrected design and a MEASUREMENT that must come first.**
+
+**★ 1. RETRACTION.** Yesterday's audit said planted-foot odometry needs "only encoders and
+contact, **both of which this body already publishes**." True in **sim only**. The physical
+picrawler (`picrawler_sim2real_port.md`, robot on the bench since 2026-08-10) has:
+
+| what the design assumed | what the robot has |
+|---|---|
+| joint encoders | ❌ **hobby servos accept an angle and report nothing** |
+| foot contact switches | ❌ none |
+| servo current (torque surrogate) | ❌ **none** — Robot HAT V4's A4 is battery *voltage*; needs an INA219/INA3221 |
+| belly ToF rangefinder | ❌ not yet acquired (VL53L0X planned) |
+| magnetometer | ❌ unusable (12 servos ≈ 7 µT each vs 50 µT earth) |
+
+The legality bar is `{ commanded joint angles, IMU 6-axis, known link geometry }` — and
+**servo current has no hardware behind it**, so it is thinner than the legitimacy doc's §5
+table implies.
+
+**★ 2. CONTACT SENSING IS NOT THE BLOCKER — a robust consensus makes it optional.** A
+planted foot's body-frame velocity *is* the negative of the body's. A swinging foot's is
+not, and differs grossly. So take the **median across all four legs**, never the mean: in a
+crawl gait roughly three feet are down, the median is carried by the planted majority, and
+swing legs fall out as outliers **without any contact input at all**. Foot switches would
+sharpen this and are cheap — they are an optimization, not a prerequisite.
+
+This is the same differential the DEFERRED post-plant-slip entry required, read the other
+way round: **the consensus is body motion, and each leg's residual from it is that leg's
+slip.** One build, both deferred needs, as previously noted — but now with a form that
+survives the missing sensors.
+
+**★ 3. ACCELEROMETER SPIKES SOLVE A DIFFERENT PROBLEM THAN THE ONE ASKED.** A touchdown
+impulse is genuinely detectable, but one body-mounted IMU sees the **sum** of all four legs:
+it gives *timing*, not *identity*, and attributing a spike to a leg needs the gait phase,
+which is efference and is wrong exactly when a foot misses. Liftoff produces no impulse at
+all, so spikes give at best half of stance. Their real value is elsewhere and worth keeping:
+detecting a **full flight phase**, where no foot is planted and the kinematic estimate is
+undefined, so IMU integration must bridge it. Rare in a crawl gait, so low priority.
+
+**★ 4. THE DOMINANT ERROR IS THE COMMANDED-FK LOAD BIAS — AND THE NUMBER WE HAVE IS THE
+WRONG AXIS.** Commanded-angle FK is blind to servo deflection: a planted leg sags while its
+command still says "I am here." Measured `fk_cmd_err` = **22 mm mean / 38 mm max** — but
+that is `mean |commanded − achieved| foot HEIGHT` (`picrawler_body.gd:_dbg_fk_cmd_err`).
+**Odometry needs the HORIZONTAL component, which has never been measured.**
+
+Two things cut in opposite directions and neither is yet quantified:
+- *In our favour:* velocity is a **difference across ticks**, so any constant deflection
+  cancels. Only the deflection's **change within a stance phase** (load 0 → peak → 0)
+  corrupts the estimate.
+- *Against us:* leg reach is only 156.5 mm, so a stride is tens of mm. If the horizontal
+  deflection swing is of that order, it dominates.
+
+**→ THE FIRST BUILD IS A MEASUREMENT, NOT AN ESTIMATOR.** Both FK variants (`_fk` from
+achieved angles, `_cmd` from commanded) already run every tick through the same chain, with
+the miswiring control already in place (`_dbg_fk_valid_err` = 1.1 mm, 20× smaller than the
+deflection, which is what licenses the comparison). Extend that comparison to report
+**horizontal** error and, specifically, its **within-stance change**. Cheap, no new
+mechanism, and it decides whether this estimator is worth building before any of it is
+written. Ship the estimator only if the within-stance horizontal drift is small against
+stride length.
+
+**★ 5. THE INSERTION POINT IS ONE TOPIC.** `vel_ego` (`picrawler_body.gd:6071-6082`) is the
+sole consumer path — `PlaceGraphPlanner`, `PlayLoop` and `PlaceNav` all read it via
+`vel_topic`, and each already documents tolerating drift as common-mode. Replacing its
+publisher converts the nav stack **and** the GainEvolver's flow term from soft-oracle to
+legal in one swap, with no consumer changes.
+
+**★ 6. Whatever gets built must keep a GRAVITY REFERENCE.** The legitimacy doc's §6 is the
+one empirically-established porting invariant — gravity-referenced signals emerged in
+**8/8 cells across both actuation backends**, and no other family did. Horizontal travel
+must be separated from vertical bounce through fused accel+gyro attitude, not assumed.
+
+### ★★★ 2026-08-24 — THE SEARCH ACCEPTS AT CHANCE: every run used a window the project had already refuted
+
+**Verdict: `NULL` on the 3-D lever, and ★ the basin study's DIAGNOSIS is retracted — the
+observation stands, the cause was wrong.**
+
+**1. 3-D did not fix it.** Same protocol as the 8-D basin study, same 12 start points
+projected onto the three gains with authority, other five pinned at j1s4 so generation 0 is
+the same body. Spread 0.747 → **0.777** — still no convergence. The means appear to travel
+toward the good bands (coupling +0.259, postural +0.209) but **paired tests say no**:
+t = +0.88 / +1.09 / +0.40, sign counts 6/12, 8/12, 7/12. Coin flips. *Reporting those mean
+moves as a partial success was one sentence away and would have been wrong.*
+
+**2. ★ THE CAUSE: acceptance sits AT THE NOISE FLOOR.**
+
+| arm | accept rate | noise floor (k=0.25) |
+|---|---|---|
+| 8-D cad | 0.383 ± 0.074 | 0.430 |
+| 8-D measured | 0.290 ± 0.101 | 0.430 |
+| 3-D cad | 0.373 ± 0.072 | 0.430 |
+
+**The search is accepting by coin flip.** That is diffusion with extra steps, it is
+independent of dimensionality, and it is exactly why dropping 8-D to 3-D changed nothing.
+
+**3. ★ AND THE REASON IS A CONFIG THAT DRIFTED FROM ITS OWN MODULE DEFAULT.** Every config
+— `basin_*`, `basin3d_*`, `__j1s4`, `__gainevo_live` — runs `eval_window_ticks: 4000`.
+The module's default is **12000**, and its own parameter documentation says why:
+
+> *"Gate 2 MEASURED 4000 to be far too short (noise sd 1.4 vs signal 0.3); with the
+> post-gate-2 criterion ~11k suffices, so the default is 12000."*
+
+**The window was raised in the code after gate 2 measured it inadequate, and the configs
+were never updated.** So the basin study, the 3-D test and the deployed operating point all
+ran a search at the one window length this project had already refuted in writing. Short
+windows inflate σ̂, an inflated σ̂ makes the margin unfilterable, and the search accepts noise.
+
+This is §3.2 #7 — *did the arm you think you ran actually load?* — in its least visible
+form. Nothing failed, no guard fired, the parameter was legal and in range. **A default
+changed and its consumers did not, and a stale value is invisible precisely because it
+runs perfectly.**
+
+**4. What survives.** The authority cross-check from the basin study is **untouched** and
+remains the campaign's best independent confirmation: gains the criterion can see resisted
+scattering (STRONG 0.95/0.96) while gains it cannot see scattered freely (FLAT 1.70/1.41),
+replicated on two bodies. That effect appeared *despite* chance-level acceptance, which
+makes it more impressive, not less. What is retracted is the diagnosis built on top of it —
+"five of eight dimensions are noise and tax the three that work" — which the 3-D test
+falsified within hours of my writing it.
+
+**→ NEXT, AND CHEAP FIRST: verify the mechanism before repeating the study.** 6 runs at
+`eval_window_ticks: 12000`, 400k ticks each (~16 generations), measuring one number: does
+acceptance drop below the 0.430 floor? A basin study at 12000 costs 2.8× the ticks per
+generation, so it is worth ~9 hours only once the acceptance claim is confirmed for ~2.
+
+### ★★★ 2026-08-24 — HARDWARE AUDIT: 1 of 7 criterion weight units is buildable on the real robot
+
+**Verdict: `WORKING` as a porting diagnosis. Two findings — one about what the criterion
+measures in SIM, one about what survives the port.**
+
+**★ 1. THE DOMINANT TERM IS NOT MEASURING ENERGY.** `w_energy` is **4.0**, more than every
+other term combined, and it reads `reality.proprio.joint_torque`. The body's own
+registration string for that topic says:
+
+> *"⚠ **NOT applied torque and NOT a load proxy despite its original description**: it sets
+> the motor's max-impulse cap, and with Kp=20/Kd=8 it is **DOMINATED BY THE −Kd·omega
+> damping term** (measured corr with joint motion −0.46..−0.56), i.e. **it is mostly a
+> negated velocity copy**. Use JointLoad for load."
+
+So the criterion's heaviest term is largely **a measure of how fast the joints are moving**.
+Combined with the flow term turning out to be a gait-amplitude proxy (r = +0.97), **two of
+the criterion's three live terms are motion-magnitude proxies wearing other names.** The
+term was introduced and weighted on a signal/noise argument that was never wrong about the
+*statistics* — only about what the signal was.
+
+The honest load signal already exists and is unused here: `joint_load` (velocity-tracking
+deficit) — though it was measured NOT to discriminate stance from swing (0.383 vs 0.257),
+so it is not a drop-in. This needs its own lever, not a quiet re-point.
+
+**★ 2. PORT AUDIT — what the criterion can actually sense on the physical robot.**
+
+| term | weight | topic | on hardware today |
+|---|---|---|---|
+| tilt sd | 1.0 | `upright` | ✅ accelerometer |
+| **energy** | **4.0** | `joint_torque` | ❌ a sim PD-controller internal; **no hardware analog exists** |
+| unloaded | 1.0 | `foot_load` | ❌ needs foot FSRs |
+| flow | 1.0 | `imu[2]` = `fwd_v` | ❌ oracle even in sim |
+| G1 falls guard | — | `upright` | ✅ |
+| G2 per-leg minima guard | — | `foot_load` | ❌ needs foot FSRs |
+
+**One of seven weight units, and only one of two guards, survives the port as-is.**
+
+**★ 3. THREE LOW-COMPLEXITY ADDITIONS RECOVER SIX OF SEVEN.** All are I²C or the existing
+ADC header — no new buses, and the IMU wiring is already committed.
+
+| add | cost | recovers |
+|---|---|---|
+| **INA219** on the servo rail | ~$5, I²C | the **energy** term (4.0) as *real* current — bus total, not per-joint, which for an energy term is the more honest quantity anyway |
+| **4× FSR on A0–A3** | ~$10, existing ADC | `foot_load` (1.0) **+ the G2 guard** + stance ground truth for odometry bring-up |
+| **VL53L0X** belly ToF | ~$5, I²C `0x29` | the belly-clearance channel the deployed height homeostat rides on — CLAUDE.md's "hump breakthrough" |
+
+FSRs **supersede foot microswitches** — an FSR above threshold *is* a contact switch and
+also carries the load magnitude, so do not spend GPIO on both. Keep A4 on battery voltage;
+it is the brownout/stall detector.
+
+**★ 4. `vel_ego` FROM ACCELEROMETER ALONE: NO — and tolerating noise does not help, because
+the error is BIAS.** The accelerometer cannot separate tilt from acceleration, so an
+attitude error θ leaks `g·sin(θ)` into the horizontal axis:
+
+| attitude error | leak | drift after 1 s | after 5 s |
+|---|---|---|---|
+| 0.5° | 0.086 m/s² | 0.086 m/s | 0.43 m/s |
+| 1.0° | 0.171 m/s² | 0.171 m/s | 0.86 m/s |
+
+Measured body speed is **0.05–0.15 m/s**, so a **1° attitude error produces false velocity
+exceeding the true signal within one second**. Noise averages down as 1/√N; a gravity leak
+integrates **linearly**, and on a walking robot it is **gait-synchronous**, so it does not
+even average out over a stride. Gyro fusion bounds attitude but the picrawler's untrimmed
+ZRO is ±20 °/s and the accelerometer's own correction is corrupted by body acceleration —
+which is the classic legged-robot version of this problem.
+
+**★ 5. THE FIX NEEDS NO NEW SENSOR — it is a fusion of two things already on the parts
+list.** Integration drift is bounded by a velocity *observation*, and leg FK supplies one
+every tick from commanded angles. The two error profiles are exactly complementary:
+
+- **Leg FK** is bias-free over short intervals but **over-reports when feet slip** (a foot
+  sliding backward in body frame is indistinguishable from the body moving forward).
+- **The IMU** catches that slip but drifts.
+
+**Their disagreement IS the slip signal** — which is precisely the DEFERRED post-plant-slip
+term. One fusion delivers a legal `vel_ego`, the flow term's missing travel magnitude, and
+the deferred slip term, from commanded angles plus the IMU already being wired.
+
+### ★★★ 2026-08-24 — THE WINDOW FIX FAILED, AND THE REASON RETIRES ACCEPTANCE AS A DIAGNOSTIC
+
+**Verdict: `NULL` on the window lever. ★ And the three diagnoses before it were all reading
+a controlled variable.**
+
+**1. Longer windows changed nothing.** 6 runs at `eval_window_ticks` 12000 vs 12 at 4000,
+same config otherwise:
+
+| arm | accepts/gens | rate | σ̂ | margin |
+|---|---|---|---|---|
+| 3-D, window 4000 | 161/432 | 0.373 ± 0.023 | 0.168 | 0.0420 |
+| 3-D, window 12000 | 38/96 | 0.396 ± 0.050 | 0.125 | 0.0313 |
+
+Difference −0.023 ± 0.055, **z = −0.42**. The window did exactly what it should — σ̂ fell
+0.168 → 0.125 — and acceptance did not move.
+
+**2. ★ IT CANNOT MOVE. THE ACCEPTANCE RATE IS A CONTROLLED VARIABLE WHOSE SETPOINT IS
+CHANCE.** Two lines of the module, read together:
+
+```cpp
+double target = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
+sigma_ = clamp(sigma_ * (rate > target ? anneal_up_ : anneal_down_), sigma_min_, sigma_max_);
+```
+```cpp
+double GainEvolver::noise_floor_rate() const { return 0.5 * std::erfc(accept_k_ * 0.5); }
+```
+
+Every config runs `target_accept: -1.0` = AUTO. **So the anneal servos σ until the accept
+rate equals the noise floor — the rate defined as what a search reaches while learning
+nothing.** It is a controller whose setpoint is "learn nothing," and it holds that setpoint
+regardless of window length, dimensionality, or body. That is why all four arms read
+0.29–0.40 against a 0.430 floor: **I was measuring the setpoint of a controller and
+reporting it as evidence about the search.**
+
+Doctrine §8 already names this — *"an instrument that measures your own corrector is not a
+measure of the thing"* — and it caught me anyway, because the corrector was three files
+away from the number. The gate-2f fix moved `target_accept` from a fixed 0.2 (below the
+floor, so the rule read chance as success) to AUTO (**at** the floor). Right direction,
+stopped one step short: at the floor the equilibrium *is* chance.
+
+**3. ★ THE UNCONFOUNDED MEASUREMENT, WHICH NOBODY HAD RUN: DOES J ACTUALLY FALL?**
+Incumbent J per generation, first third vs last third, on data already collected:
+
+| arm | n | first J | last J | slope/gen | runs improving | t |
+|---|---|---|---|---|---|---|
+| 8-D cad, 4000 | 12 | 2.206 | 2.142 | −0.0024 | 7/12 | −0.75 |
+| 8-D measured, 4000 | 12 | 2.591 | 2.469 | −0.0048 | 7/12 | −1.22 |
+| 3-D cad, 4000 | 12 | 2.125 | 2.176 | +0.0023 | 6/12 | +0.67 |
+| 3-D cad, 12000 | 6 | 2.313 | 2.196 | −0.0092 | 4/6 | −1.51 |
+
+**The search does not improve its own criterion from random starts in ANY configuration
+tested.** Every slope is within noise and every improving-run count is a coin flip. The
+12000 arm has the largest negative slope and the fewest runs — a hint, not a result.
+
+**4. ⚠ THIS PUTS A QUESTION MARK ON JOB #1'S ATTRIBUTION — not on its result.** The j1s4
+vector is genuinely better and that stands: n=20, falls tail 4/20 → 0/20, `amp_min` sd
+0.111 → 0.018, F=37.8. What is now in doubt is **what found it.** The protocol was: run the
+search from the hand point, **operator selects a settled vector from the panel**, bake, A/B.
+If the search diffuses, that is a *random search with human selection of the endpoint* —
+still a legitimate way to find a better vector, and it did, but it is not the charter's
+claim of a vector that **settles from its own criterion**. The A/B of the resulting vector
+is untouched; the mechanism credited for producing it is not.
+
+**→ WHAT THIS LEAVES STANDING.** The criterion demonstrably carries real information: three
+gains have landscapes above noise, `coupling_gain`'s optimum replicated from two independent
+operating points and matched the hand-found value, and authority predicted resistance to
+scattering on both bodies. **The criterion works; the search on top of it does not yet.**
+That is a far better position than the reverse, and it says the next work is in the
+accept/anneal loop, not in the criterion.
+
+**→ NEXT.** `target_accept` must sit **above** the floor for acceptance to indicate real
+improvement — but raising it invites the gate-2d/2e freeze-out, so the honest move is to
+anneal on something that is not noise-dominated: realized ΔJ over a block of generations,
+or the fraction of accepts that survive re-evaluation. Either way the first step is a
+sweep of `target_accept` against measured ΔJ, because ΔJ is the only signal in this loop
+that the anneal does not already control.
+
+### ★★ 2026-08-24 — target_accept IS A STEP-SIZE SELECTOR, and a self-inflicted seed confound
+
+**Verdict: the `target_accept` axis is `TAUTOLOGY` — it does nothing the σ bounds do not
+already do. The ΔJ question is re-running with the control it needed.**
+
+**★ 1. HARNESS TRAP, self-inflicted: `OGMA_SEED` overrides the module's own `seed` param.**
+The sweep pinned `OGMA_SEED=1234` for every run (to hold the body fixed) and tried to vary
+the search RNG through each config's `seed`. `OGMA_SEED` is the **master override** and
+rewrites it — the GainEvolver's schema says so in its own doc string. Result: all three
+replicates of every arm were **byte-identical**. n=3 was n=1, and ~5 hours of compute bought
+replication of a single trajectory.
+
+The tell was an analyzer crash — `stdev` of three identical numbers is zero. **A divide-by-
+zero was the only thing standing between this and three "seeds" reported as agreement.**
+`gainevo_tsweep.py` now names the condition instead of dying on it. To vary the search, vary
+`OGMA_SEED`; the module `seed` param is not an independent knob.
+
+**★ 2. `target_accept` CONFIRMED AS A σ SELECTOR — the axis is redundant.** Predicted from
+the anneal's structure, then measured: with acceptance pinned near the noise floor,
+`rate > target` has a fixed answer, so the anneal drives σ to one bound.
+
+| arm | target | σ settled | ΔJ | coupling end |
+|---|---|---|---|---|
+| `tgt070` | 0.70 (above floor) | 0.080 = σ_min | −0.175 | 0.769 |
+| `fix008` | — (σ pinned 0.08) | 0.080 | **−0.175** | **0.769** |
+| `tgt020` | 0.20 (below floor) | 0.180 → σ_max | −0.070 | 1.054 |
+
+`tgt070` and `fix008` are **byte-identical**. `target_accept` is a step-size knob wearing a
+statistician's name, so the tgt arms are dropped and the honest axis is σ.
+
+**★ 3. THE TWO HALVES DISAGREE — and that is the interesting part.** Single seed, so a
+direction only. Starting displaced (coupling 0.30, inside its BAD band):
+
+| arm | σ | ΔJ | coupling end | re-entered 1.2–2.0 |
+|---|---|---|---|---|
+| auto | 0.08 | **−0.132** | 0.793 | no |
+| fix003 | 0.03 | −0.122 | 0.838 | no |
+| fix008 | 0.08 | **−0.175** | 0.769 | no |
+| **fix020** | 0.20 | **+0.122** | **1.614** | **YES** |
+| fix045 | 0.45 | +0.111 | 0.937 | no |
+
+**J falls in every arm that leaves coupling displaced, and rises in the one arm that
+recovers it.** The single-gain landscape said coupling's good band is 1.2–2.0 with 0–0.8
+bad; here the search finds lower J *without* leaving the bad band — and `fix020`, which did
+recover coupling, paid for it by driving `amp_target` 0.385 → 0.575, outside amp's own good
+band. **The single-gain landscapes do not compose**, which is the interaction question the
+basin study was built for and could not answer while diffusing.
+
+**⚠ 4. THE MISSING CONTROL, and why the ΔJ numbers above cannot yet be read.** There was no
+**σ=0 observer** arm. J falling over 28 generations is equally consistent with the body
+simply settling after the displaced start — no search required. Five of seven arms showing
+ΔJ < 0 looks like a search working and may be nothing but relaxation. **This is the same
+shape as the acceptance-rate error: a number that moves for a reason other than the one
+being credited.** The re-run adds `sigma0` and it is the arm the others are measured
+against.
+
+### ★★★ 2026-08-24 — n=6 KILLS THE n=3 SIGNAL: the search does not beat not-searching
+
+**Verdict: `NULL` on the search, measured against the control it needed. The criterion
+stands; the (1+1)-ES on top of it does not.**
+
+All arms start displaced — `coupling_gain` at 0.30, inside its measured BAD band — with
+`amp_target` and `postural_gain` in theirs. ΔJ is the last third of scored windows minus
+the first third; negative means the criterion improved.
+
+| arm | σ | n | ΔJ | sd | vs control |
+|---|---|---|---|---|---|
+| **`sigma0` — NO SEARCH** | 0 | 6 | **+0.033** | 0.117 | — |
+| `auto` — what ships | 0.08 | 6 | **−0.033** | 0.210 | t = **−0.67**, ns |
+| `fix008` — σ pinned | 0.08 | 6 | +0.100 | 0.336 | t = +0.46, ns |
+
+**★ 1. THE n=3 RESULT WAS NOISE, and this is the clearest demonstration of §3 rule 3 the
+project has.** At n=3 `auto` gave ΔJ **−0.181** against a −0.001 control, t = −2.48 —
+close enough to 2.8 to be tempting, and it was reported as "real-looking, underpowered, not
+yet a claim." Three more seeds moved it to **−0.033**, t = −0.67, with the sd rising 0.088
+→ 0.210. One of the new seeds drove coupling to 2.00 and carried its own ΔJ far off the
+others. **The effect did not shrink because the estimate got better; it was never there.**
+
+**★ 2. THE CONTROL WORKED, AND THAT IS WHAT MAKES THIS READABLE.** `sigma0` holds coupling
+at 0.30 in all six runs and gives ΔJ +0.033 — J does **not** drift on its own after a
+displaced start. So the ΔJ numbers are attributable, and the answer is that searching and
+not searching are indistinguishable. Without this arm the earlier five-of-seven-arms-improve
+pattern would have read as a working search.
+
+**★ 3. BAND RE-ENTRY: 1 of 12 searching runs.** The displaced gain stayed displaced. Both
+halves of the pass criterion fail together, which at least is consistent — the earlier
+disagreement (J falling while coupling stayed put) was itself an artifact of the noise.
+
+**★ 4. The anneal contributes nothing measurable.** `auto` vs `fix008` — same σ, anneal live
+vs neutralized — differ by 0.133 at t = −0.82. Consistent with the anneal servoing to a
+setpoint that is by construction the chance-acceptance rate.
+
+**WHAT THIS DOES AND DOES NOT SAY.** It does not say the criterion is blind: three gains
+have landscapes above noise, `coupling_gain`'s optimum replicated across two independent
+operating points onto the operator's hand-found 1.55, and measured authority predicted which
+gains resist scattering on two different bodies. **The signal is there and the search cannot
+climb it.** Scope: arena, 240k ticks (~28 generations), one displaced start, 3-D. Longer
+runs, a different accept rule, or a criterion whose terms are not two motion-magnitude
+proxies are all untested.
+
+### ★★★ 2026-08-24 — THE PRE-REGISTERED DECISION EXPERIMENT: a controlled null, and the criterion turns out to have TWO descents
+
+**Verdict: `NULL` on displacement recovery — now against the control it always needed, at
+the step size the accept arithmetic favored, with the verdict rule committed before the
+data existed** (`picrawler_part4_audit.md` §6, commit 1a52b82). And ★ the decomposition
+underneath the null upgrades the diagnosis: the search descends its criterion; the
+criterion does not point where the single-gain landscape said.
+
+**Protocol.** Arena, difficulty 0.3, 600k ticks (49 scored windows at the now-default
+12000 window; searching arms reach generation 24), `OGMA_SEED` 1–6, three arms from the
+same displaced start — coupling 0.30 (BAD band), amp/postural in their good bands —
+**written into the MotorEPM params as well as the evolver seed**, because the audit found
+the previous σ=0 control never published and its body silently ran the j1s4 point
+(coupling 1.655). `ge_vec` reported the module's never-published intent; the "sigma0
+holds coupling at 0.30" line in the earlier n=6 entry was that instrument artifact.
+First-third J levels now certify arm equivalence: 2.33 / 2.40 / 2.42. Logs:
+`~/xaq_runs/tsw2_20260824/` (the configs regenerate from `gainevo_make_arms.py tsweep`).
+
+**1. The pre-registered primary outcome — every arm fails both halves.**
+
+| arm | n | dJ (last−first third) | vs control (Welch t) | band re-entry |
+|---|---|---|---|---|
+| `sigma0` control | 6 | **+0.029 ± 0.055** | — | 0/6 (cannot move) |
+| `fix008` (σ=0.08) | 6 | −0.028 ± 0.086 | −1.34, ns | 0/6 |
+| `fix020` (σ=0.20) | 6 | −0.073 ± 0.172 | −1.41, ns | **1/6** |
+
+The registered rule said fix020 re-entry ≤ 1/6 ⇒ the null is defensible, and that is the
+row that came back. **"The (1+1)-ES does not recover a displaced gain on this criterion"
+now stands at n=6, both step sizes, 24 generations, the validated window, against a true
+displaced control.** The prediction of ≥3/6 re-entry at σ=0.20 was WRONG, and §3 below is
+the diagnosis of why.
+
+**2. ★ THE DECOMPOSITION: coupling→0 is SELECTED, and energy pays for it.** Per-run
+weighted term movement (first→last third):
+
+- **7 of 12 searching runs drove coupling to ≤0.08** — a boundary, coherently, not
+  diffusion around 0.30. In every one of them the **energy term (weight 4) improved while
+  the flow term (weight 1) worsened** (worst case `fix008_s6`: energy −0.185, flow
+  +0.244). Quieting the body is a descent direction, and the 4:1 weight ratio makes it
+  the wider one.
+- The **two runs that moved coupling UP toward the band** (`fix020_s2` → 0.90,
+  `fix020_s5` → 1.31, the sole re-entry) posted the **two best dJ of the experiment**
+  (−0.284, −0.224), with flow AND energy improving together.
+
+**3. ★ WHY THE PREDICTION FAILED — the arithmetic modeled the wrong thing.** The audit's
+accept arithmetic (selection differential ~0.24 at σ=0.20) was about magnitudes, and the
+magnitudes were fine: the search demonstrably descends J. What it assumed silently is that
+the band is the ONLY descent from 0.30. It is not: coupling 0 is **0.3 units away** with
+the heaviest term paying for the trip, while the band is **0.9 units away**. A working
+gradient-follower goes down the nearest slope. **The displacement test was set, unknowingly,
+between two attractors with the wrong one closer** — so its null measures the one-gain
+landscape's failure to compose (already seen once at n=1: "the single-gain landscapes do
+not compose"), not the search's failure to descend. The criterion's motion-proxy
+composition (flow = amplitude proxy r=+0.97; energy = damping copy, corr −0.46..−0.56,
+weight 4) is exactly the mechanism that digs the coupling-0 basin.
+
+**4. Exploratory, stated as such (not pre-registered):** pooling both searching arms
+(n=12, dJ −0.051 ± 0.137) against the control (+0.029): Welch t ≈ −1.75, p ≈ 0.10.
+A *signal* that searching descends the criterion where not-searching does not — promote-
+or-kill grade, never a finding, and it is the thing a criterion-first retry should power.
+
+**→ CONSEQUENCES.**
+- **Per the registered rule: no module change.** `sigma_min` stays 0.08; the
+  raise-to-0.2 lever was contingent on the success branch. σ=0.20's faster descent and
+  sole re-entry is recorded as its re-use context, to be retried *after* the criterion fix.
+- **The next lever is the CRITERION, not the loop.** Rebalance or repair the two
+  motion-magnitude proxies (legal travel term via leg-FK+IMU; energy re-pointed at
+  `joint_load` or de-weighted) before spending another tick on search mechanics. The
+  displacement test should then be re-armed with the same protocol — control included.
+- **Harness traps, recorded:** (a) a σ=0 "control" does not publish — its body runs the
+  config's own params, and `ge_vec` will happily report a vector the body never had;
+  (b) `ge_gen` never increments at σ=0, so any generation-indexed analyzer silently drops
+  the control arm (this bit `gainevo_tsweep.py` the same day it was fixed for (a));
+  (c) `noise_min_n` was silently ignored at construction (missing from `on_setup`'s parse
+  list) — caught by the de-vacuized margin test, inert in practice because every config
+  set the default. All three fixed 2026-08-24.
+
+### ★★ 2026-08-25 — THE PHASE DEMO, REHEARSED — and non-composition measured from a SECOND displaced start
+
+**Verdict: demo config shipped (`__gainevo_demo`), rehearsed before its blurb was allowed
+to promise anything.** Arena, window 6000 (observation-cadence compromise; DEMO SCAFFOLD,
+never evidence), σ pinned 0.2, 3-D vector, displaced start written into BOTH the evolver
+seed and the MotorEPM params. The inspector's gain rack now draws the landscape's measured
+GOOD bands, so "did it converge on the ideal" is answerable by eye.
+
+**1. ★ Rev 1 (amp 0.70 + postural 0.30 displaced jointly, n=3): the joint descent ESCAPES
+the band corner 2/3.** J fell in all three seeds (−0.20..−0.37) — but via **tilt_sd**
+(−0.24..−0.32), not the band route: two seeds parked postural at 0.10 (its single-gain BAD
+point) with amp at/near the ceiling and coupling risen to 2.0, and scored well anyway.
+From a *second* displaced start, with a *different* term paying (tilt here, energy in the
+coupling case), the criterion's joint landscape again fails to match the single-gain
+bands. Non-composition is generic, not a coupling quirk — PART V's premise, strengthened
+at n=3.
+
+**2. Rev 2 (amp-only displacement, n=4): 3/4 enter the band by generation ~3–6, 2/4 hold
+through 300k.** Seed map recorded in the launcher blurb: seeds 2/3 clean, seed 1 finds a
+stable high-amp posture instead (coupling ~1.96, tilt improving, amp pinned at the
+ceiling — the lesson live), seed 4 converges then wanders out late (bands are flat;
+nothing pins a point inside one, by design of the criterion's resolution).
+
+**3. ⚠ Estimator note: last-third-minus-first-third dJ is BLIND to the demo's own
+recovery.** Amp recovers by window ~6–12 of 49, i.e. *inside* the first third, so the
+whole-run dJ carries late flat-band drift, not the descent (signs were mixed across
+converged seeds). Fine for the tsweep (its recovery target was ~24 generations out);
+wrong lens for fast transients. Watch windows 0–15, or the inspector, for the event.
+
+Rehearsal logs: `demo_rehearsal*/` in the session scratch (regenerable: the demo config +
+seeds 1–4). The `gainevo_live` launcher entry rotated out of the dropdown (file stays):
+σ 0.08 is now measured to show ~nothing over an observation session.
+
+**Promotion (2026-08-25): the operator's eye — the standing gate — passed.** A long live
+run on `__gainevo_demo` in the arena showed the expected parameter behavior in the
+inspector (the rack's band overlays doing their job). The demo ships as the phase's
+observation instrument, and PART IV closes with the phase-boundary PR to `picrawler-dev`;
+PART V (`stride_odometry_and_criterion_repair_plan.md`) starts in fresh context.

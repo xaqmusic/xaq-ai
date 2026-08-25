@@ -528,6 +528,57 @@ recurs at every layer.
   it has a prior clause: ***is the instrument watching the thing you changed, in the process
   you are running?*** Verify a new instrument reports non-zero on an arm where it must, before
   trusting a zero anywhere else.
+- **★ A DISPLACEMENT-RECOVERY TEST BETWEEN TWO ATTRACTORS MEASURES LANDSCAPE COMPOSITION,
+  NOT SEARCH CAPABILITY.** The PART IV decision experiment displaced one gain into its
+  measured bad band and scored the search on re-entering the good band. It returned a
+  clean, controlled, pre-registered null — and the per-term decomposition showed the
+  search descending its criterion the whole time, into a *different* basin that the
+  single-gain landscape never showed: 7 of 12 runs drove the gain coherently to zero, the
+  heaviest criterion term paying for the trip, from a start 0.3 units from that boundary
+  and 0.9 from the demanded band. A working gradient-follower takes the nearest slope, so
+  the test convicted the criterion's shape while appearing to convict the search. The
+  rule: **before reading a recovery failure as a search verdict, establish that the
+  displaced point has a UNIQUE descent in the full context** — a per-term decomposition of
+  where the failing runs actually went is the cheapest way, and single-gain sweeps cannot
+  substitute (they already failed to compose here, twice). Corollary: pre-register the
+  decision rule; this experiment's prediction was wrong and the committed rule is what
+  kept the wrong prediction from bending the verdict.
+- **★ A GAIN-0 MODULE PUBLISHES NOTHING — SO A σ=0 "CONTROL" RUNS THE CONFIG'S OWN BODY,
+  AND ITS DIAGNOSTICS REPORT INTENT, NOT STATE.** The first no-search control arm was
+  believed displaced because `ge_vec` said so; `ge_vec` reports the module's internal
+  incumbent, which a silent observer never lands on the consumer, and the body ran the
+  base config's point the entire time. Same class, second bite: the observer never
+  increments its generation counter, so a generation-indexed analyzer silently dropped
+  the control's logs as empty. When a control arm works by *disabling* a publisher, the
+  controlled variable must be pinned **where the consumer reads it** (the config's own
+  params), and verified from the consumer's side — a disabled module's telemetry is a
+  statement about what it would have done.
+- **★ A MECHANISM TEST CANNOT CATCH A MISDIAGNOSIS — ONLY THE A/B CAN, SO RUN IT BEFORE YOU
+  WRITE THE JUSTIFICATION DOWN.** A criterion term was diagnosed as rewarding a *slower* body,
+  rebuilt to prevent that, shipped with five passing unit tests, and documented in the ledger,
+  the code comments, the config metadata, three commit messages and a report to the operator.
+  The A/B then showed the premise was false: the term's optimum sat at the level where the
+  robot travelled **fastest**, not slowest. Every test had passed because tests pin **the
+  mechanism you believe in**, not **your reading of the data** — they are equally green whether
+  or not the diagnosis was right. The failure mode is specific and cheap to avoid: a claim
+  about the robot must be measured against the robot before it becomes the reason for a build.
+  **Cost is asymmetric** — an unrun A/B costs one sweep; a wrong premise costs the build plus
+  every place you repeated it. Corollary: **the A/B armed at build time is worth more than the
+  A/B planned for later**, because it lands while the work is still cheap to unwind.
+- **★ "X PREFERS LOW A" IS NOT "X PREFERS LOW B" UNLESS B IS MONOTONE IN A — CHECK THE COLUMN,
+  DO NOT INFER IT.** The misdiagnosis above was one substitution: a term correlated with gait
+  *amplitude* (r = +0.97) was read as correlated with *travel* (r = +0.26, and the wrong sign
+  for the story being told). Travel was **not monotone** in amplitude — it ran 0.050, 0.154,
+  0.093, 0.069, 0.110, 0.145 — and the disproof was sitting in the next column of the same
+  table. When you catch yourself narrating a result in terms of a variable you did not plot,
+  plot it. **The general form: a correlate is not a synonym.**
+- **★ THE SAME DATA SHOULD ALSO BE ASKED WHAT THE MECHANISM *IS*, NOT ONLY WHETHER THE FIX
+  WORKED.** The A/B that refuted the premise also answered a better question nobody had asked:
+  the term is a gait-amplitude proxy, so **the criterion had no working travel term at all**.
+  That is more actionable than the fix would have been, and it was free — one extra correlation
+  on data already collected. A null on your hypothesis is the moment to ask the data what it
+  *is* measuring, because you have never been better positioned to find out.
+
 - **★ WHEN FIXING A MEASURED MISALIGNMENT MAKES THINGS WORSE, LOOK FOR THE ALIGNMENT YOU
   DESTROYED.** A quantity was measured wrong and the fix was correct on its own terms — thrust
   and support were genuinely uncorrelated within a limb, and locking them fixed exactly that.

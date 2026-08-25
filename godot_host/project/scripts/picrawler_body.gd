@@ -502,6 +502,33 @@ var _tq_n: float = 0.0
 # cheaply and still spike into servo saturation, which is what burns hardware.
 const ENERGY_PEAK_WINDOW_TICKS: int = 50    # 1 s at the 50 Hz brain tick
 const ENERGY_EMA_ALPHA: float = 0.01        # ~2 s trend
+# ---- SUSTAINED FORWARD BURSTS (operator's metric, 2026-08-23) --------------
+# The corridor only permits SHORT runs of forward travel — but the operator's
+# read is that when runs of >=3 s do emerge they mark a genuinely better config,
+# in a way that mean fwd_v cannot show: a body that lurches and stalls can post
+# the same mean as one that actually travels.  Measured PER TICK, because the
+# body log samples every 60 ticks (1.2 s) and a 3 s burst is only 2.5 samples
+# there — far too coarse to time a run.
+# Reported as: how many qualifying bursts, what fraction of the run was spent in
+# one (duty), and the longest single burst.
+# A burst is a 3-SECOND ROLLING MEAN at or above BURST_MIN_SPEED — not every tick
+# above it.  Measured: instantaneous fwd_v swings -0.44..+0.56 (sd 0.147 about a
+# mean of 0.023) and sign-flips every stride, so an all-ticks rule can never reach
+# 3 s and would read 0 for every config, discriminating nothing.  The rolling mean
+# asks the honest question instead: did the body actually TRAVEL for three seconds,
+# tolerating the within-stride surge and stall that a walking gait must have.
+const BURST_MIN_SPEED: float = 0.06        # m/s over the window (~18 cm in 3 s)
+const BURST_MIN_TICKS: int = 150           # 3.0 s at the 50 Hz brain tick
+var burst_count: int = 0
+var burst_duty: float = 0.0
+var burst_longest_s: float = 0.0
+var _burst_hist: PackedFloat32Array = PackedFloat32Array()
+var _burst_idx: int = 0
+var _burst_sum: float = 0.0
+var _burst_filled: int = 0
+var _burst_active: int = 0
+var _burst_ticks_total: int = 0
+var _burst_samples: int = 0
 var energy_now: float = 0.0
 var energy_peak_1s: float = 0.0
 var energy_avg: float = 0.0
@@ -5887,6 +5914,26 @@ func _step_one() -> void:
 	# search reward sideways crab as much as forward; signed forward rewards
 	# forward-aligned motion (reduces crab + closes a speed-magnitude Goodhart).
 	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(Vector2(sin(yaw), cos(yaw)))
+	# Sustained-forward-burst tracker: rolling 3 s mean of fwd_v (see BURST_MIN_SPEED).
+	if _burst_hist.size() != BURST_MIN_TICKS:
+		_burst_hist.resize(BURST_MIN_TICKS)
+		for _bi in range(BURST_MIN_TICKS): _burst_hist[_bi] = 0.0
+	_burst_sum -= _burst_hist[_burst_idx]
+	_burst_hist[_burst_idx] = fwd_v
+	_burst_sum += fwd_v
+	_burst_idx = (_burst_idx + 1) % BURST_MIN_TICKS
+	_burst_filled = mini(_burst_filled + 1, BURST_MIN_TICKS)
+	_burst_samples += 1
+	# only judge once a full 3 s window exists, else a fast first tick reads as a burst
+	if _burst_filled >= BURST_MIN_TICKS:
+		if (_burst_sum / float(BURST_MIN_TICKS)) >= BURST_MIN_SPEED:
+			if _burst_active == 0: burst_count += 1     # count the ONSET
+			_burst_active += 1
+			_burst_ticks_total += 1
+			burst_longest_s = maxf(burst_longest_s, float(_burst_active) * TAU)
+		else:
+			_burst_active = 0
+	burst_duty = float(_burst_ticks_total) / maxf(1.0, float(_burst_samples))
 	var ang_v: float = _chassis.angular_velocity.y
 
 	# ---- Auto-reset on belly-up inversion (opt-in training safety) ----
@@ -5993,6 +6040,27 @@ func _step_one() -> void:
 		it.append(intent_yaw)
 		brain.publish_proprio(it, "motor_intent")
 	brain.publish_proprio(imu, "imu")
+
+	# ---- 2026-08-23 — TRUE 3-AXIS GYRO (a new sensor, not a new metric) -------------------
+	# imu[3] carries `_chassis.angular_velocity.y` — the WORLD vertical component.  A real
+	# MEMS gyro is bolted to the chassis and measures rotation about the BODY's own axes,
+	# and the two diverge exactly when the body tilts, which is when it matters.  This
+	# publishes the honest form: world angular velocity projected onto each body axis.
+	#   [0] roll rate  (about body +X)
+	#   [1] YAW RATE ABOUT THE BODY'S OWN UP  <- turn rate as the robot itself feels it
+	#   [2] pitch rate (about body +Z)
+	# Egocentric and physically realisable, so unlike fwd_v this is a LAWFUL brain input.
+	# Additive and default-no-consumer: published every tick, byte-identical until some
+	# module names it.  Built for the flow term's anti-circling factor — fwd_v is
+	# body-frame forward speed and reads a tight circle as flowing beautifully, so a
+	# sustained turn bias is what separates travelling from going round in circles.
+	var _wv: Vector3 = _chassis.angular_velocity
+	var _gb: Basis = chassis_xform.basis
+	var gyro := PackedFloat64Array()
+	gyro.append(clamp(_wv.dot(_gb.x) / PI, -1.0, 1.0))
+	gyro.append(clamp(_wv.dot(_gb.y) / PI, -1.0, 1.0))
+	gyro.append(clamp(_wv.dot(_gb.z) / PI, -1.0, 1.0))
+	brain.publish_proprio(gyro, "gyro")
 
 	# ---- L1 nav inputs (2026-08-04) -------------------------------------------------------
 	# RunTumbleNavV2 wants a scalar heading and an egocentric velocity.  Both are published
@@ -10593,7 +10661,16 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# ⚠ An EPM snapshot has NO "module" wrapper -- its diag fields sit at top
 			# level, unlike MotorEPM's.  Looking for one silently yields nothing, which
 			# is how a DEAD EPM and an UNREAD EPM became indistinguishable.
-			var _gs = JSON.parse_string(str(brain.get_module_snapshot(_gid)))
+			# A module absent from THIS config returns "", and parsing "" is a Godot
+			# ERROR line.  These five ids belong to an earlier stack generation, so a
+			# 300k-tick run emitted ~40k of them — enough that `grep -i error` on a run
+			# log became useless and a REAL error would have hidden in the noise.  The
+			# parse result was already discarded on failure, so skipping is behaviour-
+			# identical; what it buys back is the ability to trust the log.
+			var _gsnap: String = str(brain.get_module_snapshot(_gid))
+			if _gsnap.is_empty():
+				continue
+			var _gs = JSON.parse_string(_gsnap)
 			if _gs is Dictionary and _gs.has("gng"):
 				var _g = _gs["gng"]
 				var _narr: Array = _g.get("nodes", [])
@@ -10698,7 +10775,13 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# (bodypose control), "pland" = motor_planner_dyn (the [q,dq] phase-space arm).
 	if brain != null and brain.has_method("get_module_snapshot"):
 		for _plid in [["motor_planner", "plan"], ["motor_planner_dyn", "pland"], ["motor_planner_pc", "planc"]]:
-			var _ps = JSON.parse_string(str(brain.get_module_snapshot(_plid[0])))
+			# absent in this config => "" => a Godot ERROR line per emit (see the
+			# motor_gng probe above); the result was already discarded, so this only
+			# keeps the run log greppable.
+			var _pstr: String = str(brain.get_module_snapshot(_plid[0]))
+			if _pstr.is_empty():
+				continue
+			var _ps = JSON.parse_string(_pstr)
 			if _ps is Dictionary and _ps.has("module"):
 				var _pmod = _ps["module"]
 				line[_plid[1]] = {
@@ -10742,7 +10825,8 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# freshness flag that reads false between deliveries — the first mirror
 	# misread it as liveness).
 	if brain != null and brain.has_method("get_module_snapshot"):
-		var _dps = JSON.parse_string(str(brain.get_module_snapshot("pc_predictor")))
+		var _dpstr: String = str(brain.get_module_snapshot("pc_predictor"))
+		var _dps = JSON.parse_string(_dpstr) if not _dpstr.is_empty() else null
 		if _dps is Dictionary and _dps.has("targets"):
 			line["dp_seen"] = 1 if bool(_dps.get("cached_consensus_valid", false)) else 0
 			for _tk in (_dps["targets"] as Dictionary):
@@ -11105,6 +11189,18 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ge_dis"]   = snappedf(float(_ge.get("distress_duty", 0.0)), 0.0001)
 			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
 			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
+			# The flow term's TWO FACTORS, logged apart so a window says WHICH of
+			# them limited it.  Under the min form flow quality is capped by the
+			# smaller: ge_fmag < ge_fpred means travel is the binding constraint,
+			# the reverse means steadiness is.  Without this split the 2026-08-23
+			# defect was invisible — flow scored BEST where the body moved LEAST
+			# and the combined number gave no way to see why.  ge_fmf echoes which
+			# combining rule is live, so no arm is ever judged without knowing
+			# which criterion it actually ran under.
+			line["ge_fmag"]  = snappedf(float(_ge.get("flow_mag", 0.0)), 0.0001)
+			line["ge_fpred"] = snappedf(float(_ge.get("flow_pred", 0.0)), 0.0001)
+			line["ge_fturn"] = snappedf(float(_ge.get("flow_turn", 0.0)), 0.0001)
+			line["ge_fmf"]   = int(_ge.get("flow_min_form", 0))
 			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
 			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it
 			# ships at weight 0: the 60-tick body-log proxy that measured it as WORSE
@@ -11150,6 +11246,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# ENERGY (servo current) — the same three reads the HUD shows, mirrored here so
 	# the trend is analysable offline and so "the HUD number is alive" is verifiable
 	# from a headless run rather than only by eye.
+	line["bursts"]  = burst_count
+	line["burst_duty"] = snappedf(burst_duty, 0.0001)
+	line["burst_max"]  = snappedf(burst_longest_s, 0.01)
 	line["e_now"]  = snappedf(energy_now, 0.0001)
 	line["e_peak"] = snappedf(energy_peak_1s, 0.0001)
 	line["e_avg"]  = snappedf(energy_avg, 0.0001)

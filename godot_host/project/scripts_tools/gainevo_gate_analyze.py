@@ -187,3 +187,88 @@ for p_, rows in rows_by_seed.items():
           f"flow_term {f0:.4f} -> {f1:.4f} ({f1-f0:+.4f}){flag}")
 print("  (also read amp_min / step_bal in the seedavg summary — a frozen or dead")
 print("   leg is the other way this shows up, and the per-leg guard should block it)")
+
+
+# ---- FREEZE-OUT vs CONVERGENCE ------------------------------------------------
+# Gate 2d showed 2/4 seeds annealing sigma to the floor and I read that as
+# convergence.  Step 0 then measured that at those sigma values NO single
+# mutation could clear the acceptance margin (30x short), which makes freeze-out
+# — fewer accepts shrink sigma, smaller steps yield fewer accepts — fit the data
+# just as well.  The two are distinguishable: a CONVERGED search stops accepting
+# because candidates stop being better; a FROZEN one stops because its steps got
+# too small to register.  Accept rate bucketed by sigma separates them.
+print(chr(10) + "=== FREEZE-OUT vs CONVERGENCE (accept rate by sigma) ===")
+for p_ in paths:
+    rows, seen = [], set()
+    for ln in open(p_, errors="replace"):
+        ln = ln.strip()
+        if not ln.startswith("{") or '"ge_gen"' not in ln:
+            continue
+        try:
+            d = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        g = d.get("ge_gen")
+        if g is not None and g not in seen:
+            seen.add(g); rows.append(d)
+    rows.sort(key=lambda d: d.get("ge_gen", 0))
+    if len(rows) < 4:
+        continue
+    seed = p_.split("_s")[-1].split(".")[0]
+    buckets = {}
+    for a, b in zip(rows, rows[1:]):
+        acc = int(b.get("ge_acc", 0)) > int(a.get("ge_acc", 0))
+        sig = float(a.get("ge_sig", 0.0))
+        key = round(sig, 2)
+        hit, tot = buckets.get(key, (0, 0))
+        buckets[key] = (hit + (1 if acc else 0), tot + 1)
+    line = "  ".join(f"σ{k:.2f}:{h}/{t}" for k, (h, t) in sorted(buckets.items()))
+    lo = min(buckets) if buckets else 0
+    lo_h, lo_t = buckets.get(lo, (0, 0))
+    tag = ""
+    if lo_t >= 3 and lo_h == 0:
+        tag = "  ** accepts DIED at the lowest sigma -> FREEZE-OUT, not convergence **"
+    print(f"  seed {seed}: {line}{tag}")
+print("  (accepts continuing at small sigma = genuinely converged; accepts going to")
+print("   ZERO exactly as sigma bottoms out = the margin froze the search)")
+
+
+# ---- J TREND (the half-vs-half test is mis-specified for a converging search) --
+# A search that works front-loads its gains: most of the improvement lands in the
+# first few generations, after which it plateaus.  Comparing first-half to
+# last-half then averages the plateau against itself and reports "inside noise"
+# for a run that visibly improved.  A regression slope over ALL generations does
+# not have that blind spot.
+print(chr(10) + "=== J TREND over all generations (slope test) ===")
+for p_ in paths:
+    rows, seen = [], set()
+    for ln in open(p_, errors="replace"):
+        ln = ln.strip()
+        if not ln.startswith("{") or '"ge_gen"' not in ln:
+            continue
+        try:
+            d = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        g = d.get("ge_gen")
+        if d.get("ge_ji", -1) > 0 and g not in seen:
+            seen.add(g); rows.append(d)
+    rows.sort(key=lambda d: d.get("ge_gen", 0))
+    if len(rows) < 8:
+        continue
+    ys = [r["ge_ji"] for r in rows]
+    xs = list(range(len(ys)))
+    mx, my = st.mean(xs), st.mean(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx if sxx else 0.0
+    resid = [y - (my + slope * (x - mx)) for x, y in zip(xs, ys)]
+    se_slope = (math.sqrt(sum(r * r for r in resid) / max(1, len(ys) - 2)) /
+                math.sqrt(sxx)) if sxx else float("inf")
+    tstat = slope / se_slope if se_slope else 0.0
+    total = slope * (len(ys) - 1)
+    blocks = [st.mean(ys[i * (len(ys) // 5):(i + 1) * (len(ys) // 5)]) for i in range(5)]
+    seed = p_.split("_s")[-1].split(".")[0]
+    tag = "J FELL (slope significant)" if tstat <= -2.0 else (
+          "J ROSE (slope significant)" if tstat >= 2.0 else "no significant trend")
+    print(f"  seed {seed}: blocks " + " ".join(f"{b:.3f}" for b in blocks))
+    print(f"           slope {slope:+.5f}/gen  t={tstat:+.2f}  total {total:+.3f}   -> {tag}")
