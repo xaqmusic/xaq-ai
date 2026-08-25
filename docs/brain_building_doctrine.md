@@ -528,6 +528,31 @@ recurs at every layer.
   it has a prior clause: ***is the instrument watching the thing you changed, in the process
   you are running?*** Verify a new instrument reports non-zero on an arm where it must, before
   trusting a zero anywhere else.
+- **★ A DISPLACEMENT-RECOVERY TEST BETWEEN TWO ATTRACTORS MEASURES LANDSCAPE COMPOSITION,
+  NOT SEARCH CAPABILITY.** The PART IV decision experiment displaced one gain into its
+  measured bad band and scored the search on re-entering the good band. It returned a
+  clean, controlled, pre-registered null — and the per-term decomposition showed the
+  search descending its criterion the whole time, into a *different* basin that the
+  single-gain landscape never showed: 7 of 12 runs drove the gain coherently to zero, the
+  heaviest criterion term paying for the trip, from a start 0.3 units from that boundary
+  and 0.9 from the demanded band. A working gradient-follower takes the nearest slope, so
+  the test convicted the criterion's shape while appearing to convict the search. The
+  rule: **before reading a recovery failure as a search verdict, establish that the
+  displaced point has a UNIQUE descent in the full context** — a per-term decomposition of
+  where the failing runs actually went is the cheapest way, and single-gain sweeps cannot
+  substitute (they already failed to compose here, twice). Corollary: pre-register the
+  decision rule; this experiment's prediction was wrong and the committed rule is what
+  kept the wrong prediction from bending the verdict.
+- **★ A GAIN-0 MODULE PUBLISHES NOTHING — SO A σ=0 "CONTROL" RUNS THE CONFIG'S OWN BODY,
+  AND ITS DIAGNOSTICS REPORT INTENT, NOT STATE.** The first no-search control arm was
+  believed displaced because `ge_vec` said so; `ge_vec` reports the module's internal
+  incumbent, which a silent observer never lands on the consumer, and the body ran the
+  base config's point the entire time. Same class, second bite: the observer never
+  increments its generation counter, so a generation-indexed analyzer silently dropped
+  the control's logs as empty. When a control arm works by *disabling* a publisher, the
+  controlled variable must be pinned **where the consumer reads it** (the config's own
+  params), and verified from the consumer's side — a disabled module's telemetry is a
+  statement about what it would have done.
 - **★ A MECHANISM TEST CANNOT CATCH A MISDIAGNOSIS — ONLY THE A/B CAN, SO RUN IT BEFORE YOU
   WRITE THE JUSTIFICATION DOWN.** A criterion term was diagnosed as rewarding a *slower* body,
   rebuilt to prevent that, shipped with five passing unit tests, and documented in the ledger,
