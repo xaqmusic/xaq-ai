@@ -218,22 +218,25 @@ def analyze_run(trace_path):
     # stride length").  Per contiguous loaded episode of one foot, integrate the
     # commanded-vs-measured FK velocity gap = the horizontal deflection CHANGE the
     # commanded-angle estimator cannot see (constant deflection cancels in differencing).
-    drifts = []
+    drifts, strides_mm = [], []
     for leg in range(4):
-        acc, in_ep = 0.0, False
+        acc, sweep, in_ep = 0.0, 0.0, False
         for r in body:
             v, m, fl = r.get("svl_clp"), r.get("svl_meas"), r.get("fload")
             if not v or not m or not fl:
                 break
             if fl[leg] >= 0.05 and v[leg] != 0.0:
                 acc += (v[leg] - m[leg]) * TAU
+                sweep += m[leg] * TAU
                 in_ep = True
             elif in_ep:
-                drifts.append(abs(acc) * 1000.0)  # mm
-                acc, in_ep = 0.0, False
+                drifts.append(abs(acc) * 1000.0)       # mm
+                strides_mm.append(abs(sweep) * 1000.0)  # the denominator: actual stance sweep
+                acc, sweep, in_ep = 0.0, 0.0, False
     out["stance_drift_mm"] = {"n": len(drifts),
                               "mean": statistics.mean(drifts) if drifts else float("nan"),
-                              "p90": (statistics.quantiles(drifts, n=10)[8] if len(drifts) >= 10 else float("nan"))}
+                              "p90": (statistics.quantiles(drifts, n=10)[8] if len(drifts) >= 10 else float("nan")),
+                              "stride_mean": statistics.mean(strides_mm) if strides_mm else float("nan")}
     # Odometer view: integrated FK forward travel vs integrated true forward travel.
     out["odo_fk"] = sum(rows[i]["sv_clp"][1] for i in usable) * TAU
     out["odo_true"] = sum(rows[i]["sv_true"][1] for i in usable) * TAU
@@ -299,7 +302,8 @@ def cmd_analyze(outdir):
         if not rs:
             continue
         print(f"{arm:10s}  mean {agg([r['stance_drift_mm']['mean'] for r in rs])}  "
-              f"p90 {agg([r['stance_drift_mm']['p90'] for r in rs])}")
+              f"p90 {agg([r['stance_drift_mm']['p90'] for r in rs])}  "
+              f"stance-sweep {agg([r['stance_drift_mm']['stride_mean'] for r in rs])}")
     print("\nodometer view (integrated forward travel, m) + step activity:")
     for arm, cfg, diff, seeds in ARMS:
         rs = [per_run[(arm, s)] for s in seeds if (arm, s) in per_run]
