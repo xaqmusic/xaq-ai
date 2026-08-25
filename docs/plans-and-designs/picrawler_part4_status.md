@@ -4,9 +4,13 @@
 before the formal write-up is attempted. `REPORTS.md` governs that write-up; this file
 deliberately does not follow it. The tone here is a ledger's, not a report's.
 
-**Status as of 2026-08-24: the criterion carries real signal; the search on top of it does
-not climb it.** That is a better position than the reverse, and it is the sentence the
-formal report has to be built around.
+**Status as of 2026-08-24, post-audit and post-decision-experiment: the criterion carries
+real signal, the search descends it, and what fails is the criterion's own shape — its two
+motion-magnitude proxies dig a nearer basin (coupling→0, energy paying flow) than the band
+the displacement test demanded.** The audit is `picrawler_part4_audit.md`; the
+pre-registered experiment that settled the search-vs-criterion question is its §6 and the
+ledger's closing 2026-08-24 entry. The sentence the formal report has to be built around:
+**the search follows its criterion; the criterion does not yet point at locomotion.**
 
 ---
 
@@ -47,7 +51,10 @@ never a finding, and explicitly never a defensible null.
 | C7 | Longer windows do not change acceptance | **signal** — 0.396 vs 0.373, z = −0.42 | winverify |
 | C8 | Acceptance is servoed to chance by construction | **structural** — `target_accept` AUTO resolves to the noise floor; read the code, not a run | `GainEvolver.cpp` anneal |
 | C9 | `target_accept` is only a step-size selector | **signal** — `tgt070` byte-identical to `fix008` | step-size sweep |
-| C10 | **Searching is indistinguishable from not searching** | **signal, controlled** — n=6, ΔJ −0.033 vs +0.033, t = −0.67; band re-entry 1/12 | step-size sweep |
+| C10 | ~~Searching is indistinguishable from not searching~~ **SUPERSEDED by C15/C16** — the σ=0 control in this sweep never published, so its body ran the j1s4 point, not the displaced start | (retracted control; searching-arm null itself stands) | step-size sweep |
+| C15 | **Displacement recovery fails at both step sizes against a TRUE displaced control** — the pre-registered null | **signal, controlled, pre-registered** — n=6/arm, window 12000, 24 gens; fix020 ΔJ −0.073 (t −1.41 ns), re-entry 1/6; fix008 0/6; control +0.029 | decision experiment |
+| C16 | The search DESCENDS its criterion — toward coupling≈0, with energy (w=4) improving and flow (w=1) paying, in 7/12 runs | **signal** — per-term decomposition; pooled searching-vs-control t ≈ −1.75 (exploratory) | decision experiment |
+| C17 | The single-gain landscape does not compose: from coupling 0.30 the full-context criterion has a NEARER descent (0→, 0.3 units) than the band (0.9 units) | **signal, replicates the n=1 observation** — the displacement premise, not the search, is what failed | decision experiment |
 | C11 | The flow term is an amplitude proxy, not travel | **measured** — r = +0.97 with amplitude, +0.26 with `\|fwd_v\|` | flow A/B |
 | C12 | The energy term reads a negated velocity copy | **documentary** — the body's own registration string says so; **not yet measured here** | `picrawler_body.gd` |
 | C13 | `fwd_v` is an oracle | **structural** — `_chassis.linear_velocity` on world yaw | `picrawler_body.gd:5916` |
@@ -119,13 +126,17 @@ Ordered by how much rests on it.
 
 ---
 
-## 6. Open, in rough priority
+## 6. Open, in rough priority (reordered by the decision experiment)
 
-- **The accept/anneal loop is where the failure lives.** Acceptance cannot be its own
-  feedback signal when it is noise-dominated. Candidates: anneal on realized ΔJ over a block
-  of generations, or on the fraction of accepts surviving re-evaluation.
-- **The criterion may be two motion-magnitude proxies and a tilt term.** C11 is measured,
-  C12 is not. If both hold, the criterion is narrower than its four terms suggest.
+- **The CRITERION is where the failure lives — the loop was exonerated.** C15–C17: the
+  search descends J; the two motion-magnitude proxies (C11 measured; C12 now also
+  measured — 2026-08-06 corr(τ,dθ) −0.46..−0.56, publish site confirmed) dig a coupling→0
+  basin nearer than the band. Fix the terms first: a legal travel magnitude (leg-FK+IMU),
+  and energy re-pointed at `joint_load` or de-weighted from 4.0. Only then re-arm the
+  displacement test — same protocol, control included.
+- **The accept/anneal loop, after the criterion.** Acceptance cannot be its own feedback
+  signal when servoed to chance; and per the registered rule, `sigma_min` stays 0.08 for
+  now — σ=0.20's faster descent and sole band re-entry is its recorded re-use context.
 - **A legal travel signal.** Leg FK + IMU fusion — their disagreement is also the deferred
   post-plant-slip term. First step is a measurement, not an estimator: the commanded-vs-
   achieved FK error is published for foot *height* (22 mm mean), but odometry needs the

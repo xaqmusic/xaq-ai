@@ -281,3 +281,24 @@ step-matching bound (≈0.2) with the anneal neutralized or re-based on realized
 fix020 re-entry ≤ 1/6 ⇒ the "(1+1)-ES cannot climb this criterion" null becomes
 defensible at the right σ, and the report says so. 2/6 ⇒ underpowered; report the count
 and defer the mechanism claim.
+
+### Outcome (same day, all 18 runs complete)
+
+**The null branch fired: fix020 re-entry 1/6** (fix008 0/6; control ΔJ +0.029 ± 0.055;
+fix020 ΔJ −0.073, Welch t −1.41 ns). Per the rule: the displacement null is now
+defensible, and **no module change ships** — `sigma_min` stays 0.08.
+
+**The ≥3/6 prediction was wrong, and the diagnosis matters more than the miss.** The §1
+arithmetic modeled magnitudes correctly and direction wrongly: it silently assumed the
+band was the *only* descent from coupling 0.30. The per-term decomposition shows the
+criterion also descends toward coupling ≈ 0 — **7 of 12 searching runs drove it there
+coherently, energy (weight 4) improving while flow (weight 1) paid** — and that basin is
+0.3 units away against the band's 0.9. A working gradient-follower takes the nearest
+slope, so the experiment measured the one-gain landscape's failure to compose, not the
+search's failure to descend. The two runs that did travel to the band posted the two best
+ΔJ of the experiment (−0.284, −0.224) with both terms improving.
+
+**Where this leaves §4:** item 1 is done and its successor is a *criterion* lever, not a
+search lever — repair the motion-magnitude proxies (§4.6), then re-arm this exact
+protocol. The full verdict, tables and harness traps are in the ledger's closing
+2026-08-24 entry; raw logs in `~/xaq_runs/tsw2_20260824/`.

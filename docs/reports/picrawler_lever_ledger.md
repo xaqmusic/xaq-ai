@@ -4167,3 +4167,80 @@ gains resist scattering on two different bodies. **The signal is there and the s
 climb it.** Scope: arena, 240k ticks (~28 generations), one displaced start, 3-D. Longer
 runs, a different accept rule, or a criterion whose terms are not two motion-magnitude
 proxies are all untested.
+
+### ★★★ 2026-08-24 — THE PRE-REGISTERED DECISION EXPERIMENT: a controlled null, and the criterion turns out to have TWO descents
+
+**Verdict: `NULL` on displacement recovery — now against the control it always needed, at
+the step size the accept arithmetic favored, with the verdict rule committed before the
+data existed** (`picrawler_part4_audit.md` §6, commit 1a52b82). And ★ the decomposition
+underneath the null upgrades the diagnosis: the search descends its criterion; the
+criterion does not point where the single-gain landscape said.
+
+**Protocol.** Arena, difficulty 0.3, 600k ticks (49 scored windows at the now-default
+12000 window; searching arms reach generation 24), `OGMA_SEED` 1–6, three arms from the
+same displaced start — coupling 0.30 (BAD band), amp/postural in their good bands —
+**written into the MotorEPM params as well as the evolver seed**, because the audit found
+the previous σ=0 control never published and its body silently ran the j1s4 point
+(coupling 1.655). `ge_vec` reported the module's never-published intent; the "sigma0
+holds coupling at 0.30" line in the earlier n=6 entry was that instrument artifact.
+First-third J levels now certify arm equivalence: 2.33 / 2.40 / 2.42. Logs:
+`~/xaq_runs/tsw2_20260824/` (the configs regenerate from `gainevo_make_arms.py tsweep`).
+
+**1. The pre-registered primary outcome — every arm fails both halves.**
+
+| arm | n | dJ (last−first third) | vs control (Welch t) | band re-entry |
+|---|---|---|---|---|
+| `sigma0` control | 6 | **+0.029 ± 0.055** | — | 0/6 (cannot move) |
+| `fix008` (σ=0.08) | 6 | −0.028 ± 0.086 | −1.34, ns | 0/6 |
+| `fix020` (σ=0.20) | 6 | −0.073 ± 0.172 | −1.41, ns | **1/6** |
+
+The registered rule said fix020 re-entry ≤ 1/6 ⇒ the null is defensible, and that is the
+row that came back. **"The (1+1)-ES does not recover a displaced gain on this criterion"
+now stands at n=6, both step sizes, 24 generations, the validated window, against a true
+displaced control.** The prediction of ≥3/6 re-entry at σ=0.20 was WRONG, and §3 below is
+the diagnosis of why.
+
+**2. ★ THE DECOMPOSITION: coupling→0 is SELECTED, and energy pays for it.** Per-run
+weighted term movement (first→last third):
+
+- **7 of 12 searching runs drove coupling to ≤0.08** — a boundary, coherently, not
+  diffusion around 0.30. In every one of them the **energy term (weight 4) improved while
+  the flow term (weight 1) worsened** (worst case `fix008_s6`: energy −0.185, flow
+  +0.244). Quieting the body is a descent direction, and the 4:1 weight ratio makes it
+  the wider one.
+- The **two runs that moved coupling UP toward the band** (`fix020_s2` → 0.90,
+  `fix020_s5` → 1.31, the sole re-entry) posted the **two best dJ of the experiment**
+  (−0.284, −0.224), with flow AND energy improving together.
+
+**3. ★ WHY THE PREDICTION FAILED — the arithmetic modeled the wrong thing.** The audit's
+accept arithmetic (selection differential ~0.24 at σ=0.20) was about magnitudes, and the
+magnitudes were fine: the search demonstrably descends J. What it assumed silently is that
+the band is the ONLY descent from 0.30. It is not: coupling 0 is **0.3 units away** with
+the heaviest term paying for the trip, while the band is **0.9 units away**. A working
+gradient-follower goes down the nearest slope. **The displacement test was set, unknowingly,
+between two attractors with the wrong one closer** — so its null measures the one-gain
+landscape's failure to compose (already seen once at n=1: "the single-gain landscapes do
+not compose"), not the search's failure to descend. The criterion's motion-proxy
+composition (flow = amplitude proxy r=+0.97; energy = damping copy, corr −0.46..−0.56,
+weight 4) is exactly the mechanism that digs the coupling-0 basin.
+
+**4. Exploratory, stated as such (not pre-registered):** pooling both searching arms
+(n=12, dJ −0.051 ± 0.137) against the control (+0.029): Welch t ≈ −1.75, p ≈ 0.10.
+A *signal* that searching descends the criterion where not-searching does not — promote-
+or-kill grade, never a finding, and it is the thing a criterion-first retry should power.
+
+**→ CONSEQUENCES.**
+- **Per the registered rule: no module change.** `sigma_min` stays 0.08; the
+  raise-to-0.2 lever was contingent on the success branch. σ=0.20's faster descent and
+  sole re-entry is recorded as its re-use context, to be retried *after* the criterion fix.
+- **The next lever is the CRITERION, not the loop.** Rebalance or repair the two
+  motion-magnitude proxies (legal travel term via leg-FK+IMU; energy re-pointed at
+  `joint_load` or de-weighted) before spending another tick on search mechanics. The
+  displacement test should then be re-armed with the same protocol — control included.
+- **Harness traps, recorded:** (a) a σ=0 "control" does not publish — its body runs the
+  config's own params, and `ge_vec` will happily report a vector the body never had;
+  (b) `ge_gen` never increments at σ=0, so any generation-indexed analyzer silently drops
+  the control arm (this bit `gainevo_tsweep.py` the same day it was fixed for (a));
+  (c) `noise_min_n` was silently ignored at construction (missing from `on_setup`'s parse
+  list) — caught by the de-vacuized margin test, inert in practice because every config
+  set the default. All three fixed 2026-08-24.
