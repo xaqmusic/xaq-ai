@@ -1588,6 +1588,11 @@ var _dbg_strido_tc: Vector3 = Vector3.ZERO    # body-frame FK velocity, forward-
 var _dbg_strido_true: Vector3 = Vector3.ZERO  # body-frame TRUE velocity (god's-eye instrument)
 var _dbg_strido_ns: int = 0                   # feet loaded through the whole tick (cmd/meas)
 var _dbg_strido_ns_tc: int = 0                # feet in true contact through the whole tick
+# Per-foot FORWARD FK velocities, UNGATED — with fload and c already in the trace these
+# let any stance rule (threshold, hysteresis, contact) be re-scored offline, so the
+# stage-B stance-gate parameter is measured from stage-A data instead of guessed.
+var _dbg_strido_vleg_clp: Array = [0.0, 0.0, 0.0, 0.0]
+var _dbg_strido_vleg_meas: Array = [0.0, 0.0, 0.0, 0.0]
 # HUD smoothing (display only; the trace logs raw per-tick values).
 var _strido_cmd_ema: float = 0.0
 var _strido_true_ema: float = 0.0
@@ -6607,16 +6612,23 @@ func _step_one() -> void:
 			for i in range(4):
 				var v_clp_i: Vector3 = -((toe_cmdlp_b[i] - _strido_prev_cmdlp[i]) / TAU \
 					+ gyro_mean.cross((toe_cmdlp_b[i] + _strido_prev_cmdlp[i]) * 0.5))
+				var v_meas_i: Vector3 = -((toe_meas_b[i] - _strido_prev_meas[i]) / TAU \
+					+ gyro_mean.cross((toe_meas_b[i] + _strido_prev_meas[i]) * 0.5))
+				_dbg_strido_vleg_clp[i] = v_clp_i.z
+				_dbg_strido_vleg_meas[i] = v_meas_i.z
 				if loaded_now[i] and _strido_prev_loaded[i]:
 					sv_cmdlp += v_clp_i
 					sv_cmd += -((toe_cmd_b[i] - _strido_prev_cmd[i]) / TAU \
 						+ gyro_mean.cross((toe_cmd_b[i] + _strido_prev_cmd[i]) * 0.5))
-					sv_meas += -((toe_meas_b[i] - _strido_prev_meas[i]) / TAU \
-						+ gyro_mean.cross((toe_meas_b[i] + _strido_prev_meas[i]) * 0.5))
+					sv_meas += v_meas_i
 					sv_ns += 1
 				if contact_now[i] and _strido_prev_contact[i]:
 					sv_tc += v_clp_i
 					sv_ns_tc += 1
+		else:
+			for i in range(4):
+				_dbg_strido_vleg_clp[i] = 0.0
+				_dbg_strido_vleg_meas[i] = 0.0
 		_dbg_strido_ns = sv_ns
 		_dbg_strido_ns_tc = sv_ns_tc
 		_dbg_strido_cmd = sv_cmd / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
@@ -10299,6 +10311,12 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"sv_tc":   [snappedf(_dbg_strido_tc.x, 0.0001),   snappedf(_dbg_strido_tc.z, 0.0001)],
 		"sv_true": [snappedf(_dbg_strido_true.x, 0.0001), snappedf(_dbg_strido_true.z, 0.0001)],
 		"sv_ns":   [_dbg_strido_ns, _dbg_strido_ns_tc],
+		# Per-foot forward FK velocities, UNGATED (0 on invalid ticks) — combine with
+		# fload/c above to re-score any stance rule offline.
+		"svl_clp":  [snappedf(_dbg_strido_vleg_clp[0], 0.0001),  snappedf(_dbg_strido_vleg_clp[1], 0.0001),
+					 snappedf(_dbg_strido_vleg_clp[2], 0.0001),  snappedf(_dbg_strido_vleg_clp[3], 0.0001)],
+		"svl_meas": [snappedf(_dbg_strido_vleg_meas[0], 0.0001), snappedf(_dbg_strido_vleg_meas[1], 0.0001),
+					 snappedf(_dbg_strido_vleg_meas[2], 0.0001), snappedf(_dbg_strido_vleg_meas[3], 0.0001)],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
 	# FileAccess buffers and the quit path never closes this file, so an unflushed
