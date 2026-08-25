@@ -4283,3 +4283,71 @@ run on `__gainevo_demo` in the arena showed the expected parameter behavior in t
 inspector (the rack's band overlays doing their job). The demo ships as the phase's
 observation instrument, and PART IV closes with the phase-boundary PR to `picrawler-dev`;
 PART V (`stride_odometry_and_criterion_repair_plan.md`) starts in fresh context.
+
+### ★★★ 2026-08-25 — GATE A: stance-FK odometry CARRIES travel — through a servo forward model, and only through one
+
+**Verdict: `PARTIAL`, promoted to stage B.** The pre-registered gate
+(`stride_odometry_and_criterion_repair_plan.md` §3-A) asked two things of the efference-copy
+half of `stride_v`: r ≥ ~0.8 against true forward velocity, and a *structured* slip
+residual. Measured (27 runs, n=6/arm fixed seeds + n=3 stepping-in-place, 12k ticks,
+j1s4 at difficulty 0/0.3/0.6 + v3base at 0.3): **r = 0.74–0.79 at the criterion timescale
+(1 s windows) under the best simple stance rule — a hair under the bar — and the residual
+is cleanly gait-phase-locked (6–10× a circular-shift null, seed-consistent).** The fail
+branch the gate was built to catch — unstructured slip, no signal — did not happen; every
+loss mechanism found is the thing the stage-B IMU fusion and slip percept are *for*.
+Signal-grade power (§3.3): promote-or-kill only, and it promotes. Sweep + analyzer:
+`scripts_tools/strido_gateA.py`; logs `~/xaq_runs/stridoA_20260825/`.
+
+**★ 1. THE NAIVE EFFERENCE COPY IS DEAD ON THIS BODY.** Raw commanded-angle FK velocity is
+near-uncorrelated with truth (r_tick ≈ 0.03; r_w50 = −0.08..+0.07 across arms). The servos
+low-pass the command too hard for the command to *be* the trajectory (the 22 mm foot-height
+tracking error, now measured on the axis that matters). **A first-order forward model of
+the servo rescues it**: LP(effective target) matches measured angles at r 0.93–0.99 per
+joint (α ≈ 0.2 at 50 Hz ≈ 90 ms; knees slightly faster than hips), and FK on the filtered
+commands reaches r_w50 0.74–0.79 — within 0.05 of the measured-angle ceiling. Efference
+copy works *only through a plant model* — biologically unembarrassing, and sim2real-clean:
+α is discoverable inside the blanket by fitting the FK/IMU disagreement.
+
+**★ 2. THE STANCE RULE IS A MEASURED PARAMETER: fload ≥ ~0.2, a plateau.** G2's ghost-touch
+threshold (0.05) costs ~0.15 of r (0.58–0.69); the optimum plateaus over 0.15–0.30 at
+0.74–0.79. Hysteresis (0.2/0.1) and edge-trimming both score *below* the plain rule —
+r 0.67–0.74 — so the touchdown/liftoff transients are apparently carrying signal, not just
+noise. The published `foot_load` EMA lags liftoff by ~1–2 ticks (α 0.15 at 240 Hz), which
+is exactly when a swing-forward foot pollutes the mean; the higher threshold trims that
+lag. Guard and sensor want *different* thresholds — G2 keeps 0.05.
+
+**★ 3. THE MEDIAN-OF-LEGS CONSENSUS IS REFUTED IN THIS CONTEXT** (the 2026-08-24 entry's
+★2, built and scored offline): r_w50 = 0.29–0.36, slope 0.14–0.19. These gaits simply do
+not keep 3+ feet loaded (stance count mode 3 with heavy 2s), so the median regularly
+includes swing legs. *Re-use context: a true crawl with duty factor ≥ 0.75, or as the
+fallback estimator if load sensing dies on hardware.*
+
+**★ 4. THE WITHIN-STANCE DRIFT DECIDER (2026-08-24 ★4) RETURNED "LARGE" — and the verdict
+it licenses is about the RAW estimator, which is indeed dead.** Forward-model-vs-measured
+FK drift per stance episode: mean ~10 mm, p90 ~22 mm on a ~26 mm stance sweep. Not small.
+The estimator survives at the criterion timescale because the drift is near-zero-mean
+across episodes and legs; what does NOT survive it is the unmodelled command (★1), exactly
+as the registered rule predicted.
+
+**★ 5. SCALE: FK travel integrates to a STABLE 73–78% of true travel** — flat across
+difficulty 0→0.6 and both gaits. A calibratable constant, not a terrain-varying bias; the
+missing quarter is candidate rolling-contact displacement (a capsule foot's contact point
+migrates without any joint moving) plus residual slip — i.e. the slip percept's raw
+material. Regression slope at W=50 is lower (~0.42–0.46): the estimator under-tracks
+*fast* velocity swings specifically, which is the band the stage-B accelerometer term is
+complementary in.
+
+**★ 6. BLIND-METRIC IMMUNITY, DEMONSTRATED NOT ASSUMED.** The `j1s4_c0` arm (coupling → 0
+in both MotorEPM and the frozen evolver seed = PART IV's shuffling basin as a config)
+steps at the same amplitude as the walkers (h1 sd 0.26 vs 0.26–0.32) while FK odometry
+reads 0.73 ± 0.36 m of travel vs the walkers' ~5.4 m — a 7× separation on the axis where
+the flow term's amplitude proxy reads *equal*. This is the property the criterion repair
+buys. Bonus consistency check: slip structure weakens when barely translating (phase-lock
+0.008 vs 0.013–0.024 walking) — the residual is translation-linked re-afference mismatch,
+not sensor noise.
+
+**Stage-B design, as measured:** publish `stride_v` = stance-mean forward FK velocity on
+LP(effective targets), stance = `foot_load ≥ 0.2` both-ends-of-tick, gyro ω×p rotation
+removal (tick-mean gyro); fuse complementary with the IMU per the plan; publish the
+FK/IMU disagreement as `slip`. Instrument stays: `sv_*`/`svl_*` trace fields, the
+stdout `strido_*` EMAs, and the HUD fk-vs-true line (operator-requested).

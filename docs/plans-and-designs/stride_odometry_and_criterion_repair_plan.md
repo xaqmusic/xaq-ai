@@ -82,6 +82,14 @@ velocity at r ≥ ~0.8, and the slip residual is *structured* (gait-phase-locked
 white. Fail ⇒ FK odometry on this body is dead cheaply, before any build — and that is
 worth knowing before hardware FSRs are ordered. Both outcomes go to the ledger.
 
+> **RUN 2026-08-25 — `PARTIAL`, promoted to stage B** (ledger entry of the same date has
+> the full numbers). r = 0.74–0.79 at 1 s windows across gaits and difficulties, phase
+> lock 6–10× null. Two design facts the gate paid for: the efference copy works **only
+> through a first-order servo forward model** (raw commanded FK is dead, r ≈ 0), and the
+> stance rule is `foot_load ≥ ~0.2` (a plateau; G2's 0.05 costs ~0.15 of r). Median-of-
+> legs consensus refuted in this context. Scale: FK travel = a stable 73–78% of truth.
+> Stepping-in-place immunity demonstrated (7× separation at equal step amplitude).
+
 ### Stage B — build the sensor (small, body-level)
 
 Publish `reality.proprio.stride_v` (stance-FK velocity estimate, IMU-fused per the
