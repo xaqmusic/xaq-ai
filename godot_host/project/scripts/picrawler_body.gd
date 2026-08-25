@@ -1542,6 +1542,66 @@ var _up_est_body: Vector3 = Vector3.ZERO    # complementary-filter gravity-up es
 var _up_acc_last: Vector3 = Vector3.ZERO    # last accel-only gravity-up (body frame)
 var _accel_body_last: Vector3 = Vector3.ZERO  # last modelled accelerometer reading
 var _gyro_body_last: Vector3 = Vector3.ZERO   # last modelled gyro reading
+# 2026-08-25 — STRIDE-ODOMETRY INSTRUMENT (PART V stage A / gate A).  Measures, per brain
+# tick, the body velocity IMPLIED by the FK of planted feet — the efference-copy half of
+# the stride_v sensor the PART V plan wants to build — beside the god's-eye true velocity.
+# This block is an INSTRUMENT: nothing here is published to the brain; the god's-eye
+# comparison target stays god's-eye and must never become one (same contract as the
+# propulsion-attribution trace above).  The question it answers is the one that was never
+# measured: horizontal commanded-FK error, not just foot height (22 mm mean).
+#   For a foot PLANTED in the world, d/dt p_world = 0 gives, in the body frame,
+#     v_body = −ṗ_body − ω_body × p_body
+#   with ṗ_body the FK toe displacement per tick and ω_body the gyro — so the gyro term
+#   removes what body ROTATION does to a planted foot, leaving pure translation (the
+#   operator-agreed fork: a tight circle must not read as travel).
+# Four variants, one judged and three diagnostic:
+#   cmdlp — commanded-angle FK through a FORWARD MODEL of the servo (first-order lag on
+#           the effective target, α≈0.2 ≙ ~80–100 ms — measured: LP(eff_target) matches
+#           the measured angle at r 0.93–0.99 per joint), stance = foot_load ≥ thresh.
+#           GATE A IS JUDGED ON THIS ONE: commanded angles are the only joint input, so
+#           it is exactly what the encoder-less hardware can build, and the lag constant
+#           is discoverable inside the blanket (fit it to the FK/IMU disagreement).
+#   cmd   — RAW commanded-angle FK, same stance gate → the naive efference copy.  Kept
+#           because its failure is itself a stage-A finding: the servos low-pass the
+#           command so hard (22 mm mean foot-height error) that raw-command FK velocity
+#           was measured near-uncorrelated with truth (r_tick ≈ 0.03).
+#   meas  — measured-angle FK, same stance gate → isolates servo tracking error (upper
+#           bound no encoder-less robot reaches; sim-only diagnosis).
+#   tc    — cmdlp-angle FK, stance = TRUE physics contact → isolates stance-gate error
+#           (if tc correlates and cmdlp does not, the fix is the load threshold, not FK).
+var _toe_off_c: Array = []                    # construction-frame toe offset per leg (lower_dir·L3/2)
+var _strido_prev_valid: bool = false          # false ⇒ no displacement this tick (reset/suspend)
+var _strido_prev_cmd: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _strido_prev_cmdlp: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _strido_prev_meas: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+# Servo forward-model state: per-joint first-order lag on the EFFECTIVE target (the
+# slew-limited command the PD actually tracks, _eff_target_* — itself pure efference).
+# Cleared on hard reset; re-seeded from the current effective target on first use.
+var _strido_lp: Array = []                    # 12 floats, index = leg*3 + joint
+const STRIDO_LP_ALPHA: float = 0.2
+var _strido_prev_loaded: Array = [false, false, false, false]
+var _strido_prev_contact: Array = [false, false, false, false]
+var _dbg_strido_cmd: Vector3 = Vector3.ZERO   # body-frame FK velocity, raw-command/load-gated
+var _dbg_strido_cmdlp: Vector3 = Vector3.ZERO # body-frame FK velocity, forward-model/load-gated (JUDGED)
+var _dbg_strido_meas: Vector3 = Vector3.ZERO  # body-frame FK velocity, measured/load-gated
+var _dbg_strido_tc: Vector3 = Vector3.ZERO    # body-frame FK velocity, forward-model/true-contact
+var _dbg_strido_true: Vector3 = Vector3.ZERO  # body-frame TRUE velocity (god's-eye instrument)
+var _dbg_strido_ns: int = 0                   # feet loaded through the whole tick (cmd/meas)
+var _dbg_strido_ns_tc: int = 0                # feet in true contact through the whole tick
+# HUD smoothing (display only; the trace logs raw per-tick values).
+var _strido_cmd_ema: float = 0.0
+var _strido_true_ema: float = 0.0
+var _strido_slip_ema: float = 0.0
+var _strido_hud: Label = null
+# Same normalized-foot_load stance threshold the GainEvolver's G2 guard uses
+# (load_thresh default 0.05) — the sensor must be judged with the stance rule it will run.
+const STRIDO_LOAD_THRESH: float = 0.05
+const STRIDO_EMA_ALPHA: float = 0.1
+# Gyro averaged across the brain tick's physics substeps for the ω×p term — the last
+# 240 Hz sample alone misrepresents a 20 ms displacement window mid-swing.  A real IMU
+# oversamples its control loop the same way, so the average is hardware-honest.
+var _gyro_tick_acc: Vector3 = Vector3.ZERO
+var _gyro_tick_n: int = 0
 # 2026-08-04 — DEAD-RECKONED EGO HEADING for the L1 nav loop.  Integrated from the MODELLED
 # BODY-FRAME GYRO (_gyro_body_last.y), which is what a real IMU reports — not from the chassis
 # world transform, which would be a god's-eye read.  It drifts, exactly as dead reckoning does
@@ -4078,6 +4138,8 @@ func _teleport_to(ground: Vector3) -> void:
 	_last_drop = drop
 	_last_drop_flip = flip
 	_last_drop_tick = tick_counter
+	# Stride-odometry instrument: teleport invalidates the previous toe/contact state.
+	_strido_prev_valid = false
 	if brain != null:
 		brain.publish_event("reset", 1.0)
 	print("PicrawlerBody: [teleport] dropped the experienced robot at (%.2f, %.2f)%s tick %d" % [
@@ -4703,6 +4765,13 @@ func _build_leg(leg_index: int) -> void:
 	# Darkest shade of leg_color for lower segment.
 	var lower := _make_capsule(LOWER_MASS, LEG_RADIUS * 0.8, L3, lower_center,
 							   leg_color.darkened(0.5), lower_dir)
+	# Stride-odometry instrument: construction-frame toe offset from the lower-link
+	# CENTER.  The FK transforms carry the center; odometry needs the TIP — the center
+	# rotates about a planted toe as the knee flexes, and at 50 Hz that spurious motion
+	# is the same order as the true ~2 mm/tick body displacement it would contaminate.
+	if leg_index == 0:
+		_toe_off_c.clear()
+	_toe_off_c.append(lower_dir * (L3 * 0.5))
 	# Markov-compliant foot-contact sensor: enable true physics contact reporting
 	# on the foot (lower leg) so we can sense TOUCH (= a hardware contact switch),
 	# not an absolute-Y threshold.  Legs mask _LAYER_WORLD only, so any reported
@@ -5615,6 +5684,9 @@ func _imu_substep(dt: float) -> void:
 	var gyro_body: Vector3 = w2b * _chassis.angular_velocity
 	_accel_body_last = accel_meas
 	_gyro_body_last  = gyro_body
+	# Stride-odometry instrument: accumulate the tick-mean gyro (drained per brain tick).
+	_gyro_tick_acc += gyro_body
+	_gyro_tick_n += 1
 	# Dead-reckon the ego heading from the gyro's yaw component (this runs at the IMU's own
 	# substep rate, so use that dt rather than the brain tick).
 	_ego_heading = wrapf(_ego_heading + gyro_body.y * dt, -PI, PI)
@@ -6423,6 +6495,19 @@ func _step_one() -> void:
 		var rest_inv: Transform3D = _chassis_rest_xform.affine_inverse()
 		var fk_arr := PackedFloat64Array()
 		var cmd_arr := PackedFloat64Array()
+		# Stride-odometry instrument: body-frame TOE positions from the same FK chain.
+		# lower_* * _toe_off_c[i] = the FK-transformed construction toe (t_lower maps
+		# construction-frame points; the offset rides the link's rotation), so unlike
+		# the height columns above this needs no vertical-link approximation.
+		var toe_cmd_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		var toe_cmdlp_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		var toe_meas_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		if _strido_lp.size() != 12:
+			_strido_lp.resize(12)
+			for k in range(4):
+				_strido_lp[k * 3]     = _eff_target_hip1[k]
+				_strido_lp[k * 3 + 1] = _eff_target_hip2[k]
+				_strido_lp[k * 3 + 2] = _eff_target_knee[k]
 		for i in range(4):
 			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
 			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
@@ -6435,6 +6520,17 @@ func _step_one() -> void:
 			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
 			fk_arr.append((rest_inv * lower_fk.origin).dot(up_body) - L3 * 0.5)
 			cmd_arr.append((rest_inv * lower_cmd.origin).dot(up_body) - L3 * 0.5)
+			if _toe_off_c.size() == 4:
+				# Servo forward model: first-order lag on the slew-limited effective
+				# target (which drove the physics that produced this tick's pose).
+				_strido_lp[i * 3]     += STRIDO_LP_ALPHA * (_eff_target_hip1[i] - _strido_lp[i * 3])
+				_strido_lp[i * 3 + 1] += STRIDO_LP_ALPHA * (_eff_target_hip2[i] - _strido_lp[i * 3 + 1])
+				_strido_lp[i * 3 + 2] += STRIDO_LP_ALPHA * (_eff_target_knee[i] - _strido_lp[i * 3 + 2])
+				var lower_clp: Transform3D = _fk_leg(i,
+					_strido_lp[i * 3], _strido_lp[i * 3 + 1], _strido_lp[i * 3 + 2])[2]
+				toe_cmd_b[i]   = rest_inv * (lower_cmd * _toe_off_c[i])
+				toe_cmdlp_b[i] = rest_inv * (lower_clp * _toe_off_c[i])
+				toe_meas_b[i]  = rest_inv * (lower_fk * _toe_off_c[i])
 		brain.publish_proprio(fk_arr,  "feet_y_gravity_fk")
 		brain.publish_proprio(cmd_arr, "feet_y_gravity_cmd")
 		# Mean |commanded − achieved| foot height: the servo tracking error in metres, i.e.
@@ -6483,6 +6579,68 @@ func _step_one() -> void:
 		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
 		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
+
+		# ---- STRIDE-ODOMETRY INSTRUMENT (2026-08-25, PART V stage A) -----------------
+		# Contract at the state-var block (~:1545).  Diagnostic-only: values go to the
+		# trace, the stdout diag and the HUD; NOTHING is published on the bus.
+		# ⚠ _dbg_strido_true is GOD'S-EYE and stays the measurement target only.
+		var gyro_mean: Vector3 = _gyro_body_last
+		if _gyro_tick_n > 0:
+			gyro_mean = _gyro_tick_acc / float(_gyro_tick_n)
+		_gyro_tick_acc = Vector3.ZERO
+		_gyro_tick_n = 0
+		var loaded_now: Array = [false, false, false, false]
+		var contact_now: Array = [false, false, false, false]
+		for i in range(4):
+			loaded_now[i] = (_foot_load_ema[i] / _fl_norm()) >= STRIDO_LOAD_THRESH
+			contact_now[i] = not _lowers[i].get_colliding_bodies().is_empty()
+		var sv_cmd := Vector3.ZERO
+		var sv_cmdlp := Vector3.ZERO
+		var sv_meas := Vector3.ZERO
+		var sv_tc := Vector3.ZERO
+		var sv_ns: int = 0
+		var sv_ns_tc: int = 0
+		# A freshly-planted foot still carries its swing displacement, so a foot counts
+		# only if it was planted at BOTH ends of the tick.  Suspend teleports the whole
+		# body (prev positions meaningless); hard reset invalidates via _do_hard_reset.
+		if _strido_prev_valid and _suspend_lift_y == 0.0 and _toe_off_c.size() == 4:
+			for i in range(4):
+				var v_clp_i: Vector3 = -((toe_cmdlp_b[i] - _strido_prev_cmdlp[i]) / TAU \
+					+ gyro_mean.cross((toe_cmdlp_b[i] + _strido_prev_cmdlp[i]) * 0.5))
+				if loaded_now[i] and _strido_prev_loaded[i]:
+					sv_cmdlp += v_clp_i
+					sv_cmd += -((toe_cmd_b[i] - _strido_prev_cmd[i]) / TAU \
+						+ gyro_mean.cross((toe_cmd_b[i] + _strido_prev_cmd[i]) * 0.5))
+					sv_meas += -((toe_meas_b[i] - _strido_prev_meas[i]) / TAU \
+						+ gyro_mean.cross((toe_meas_b[i] + _strido_prev_meas[i]) * 0.5))
+					sv_ns += 1
+				if contact_now[i] and _strido_prev_contact[i]:
+					sv_tc += v_clp_i
+					sv_ns_tc += 1
+		_dbg_strido_ns = sv_ns
+		_dbg_strido_ns_tc = sv_ns_tc
+		_dbg_strido_cmd = sv_cmd / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
+		_dbg_strido_cmdlp = sv_cmdlp / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
+		_dbg_strido_meas = sv_meas / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
+		_dbg_strido_tc = sv_tc / float(sv_ns_tc) if sv_ns_tc > 0 else Vector3.ZERO
+		_dbg_strido_true = _ch_inv.basis * _chassis.linear_velocity
+		for i in range(4):
+			_strido_prev_cmd[i] = toe_cmd_b[i]
+			_strido_prev_cmdlp[i] = toe_cmdlp_b[i]
+			_strido_prev_meas[i] = toe_meas_b[i]
+			_strido_prev_loaded[i] = loaded_now[i]
+			_strido_prev_contact[i] = contact_now[i]
+		_strido_prev_valid = _suspend_lift_y == 0.0
+		# HUD smoothing on the FORWARD (body +Z) components — the axis gate A judges.
+		# fk = the JUDGED cmdlp variant.  The FK/slip EMAs freeze during full-swing/
+		# airborne ticks (no stance estimate exists) rather than decaying toward a fake
+		# zero; true velocity always updates.
+		_strido_true_ema += STRIDO_EMA_ALPHA * (_dbg_strido_true.z - _strido_true_ema)
+		if sv_ns > 0:
+			_strido_cmd_ema += STRIDO_EMA_ALPHA * (_dbg_strido_cmdlp.z - _strido_cmd_ema)
+			_strido_slip_ema += STRIDO_EMA_ALPHA \
+				* (absf(_dbg_strido_cmdlp.z - _dbg_strido_true.z) - _strido_slip_ema)
+		_update_stride_hud()
 
 	# ---- Markov-blanket-compliant posture sensing (2026-07-22) ----------------
 	# The old height reflex read ABSOLUTE chassis world-Y (chassis_y_norm) — god's-
@@ -9873,6 +10031,32 @@ func _update_vision_panel() -> void:
 		_vision_depth_image.set_data(nw, nh, false, Image.FORMAT_RGB8, gray)
 		_vision_depth_texture.update(_vision_depth_image)
 
+# Stride-odometry HUD line (2026-08-25, PART V stage A) — operator-requested: the
+# FK-vs-true velocity comparison live, so slip reads as the two numbers peeling apart
+# on contact events.  Sits directly above the distress bar, same lazy-Label pattern.
+func _update_stride_hud() -> void:
+	if _strido_hud == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		_strido_hud = Label.new()
+		_strido_hud.name = "StrideOdoBar"
+		_strido_hud.add_theme_font_size_override("font_size", 13)
+		_strido_hud.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		_strido_hud.position = Vector2(12, -46)
+		hud.add_child(_strido_hud)
+	# Slip bar scaled against the true speed's own magnitude (floored so standing still
+	# does not divide by ~0): full bar = slip as large as the motion it corrupts.
+	var scale_v: float = maxf(absf(_strido_true_ema), 0.05)
+	var frac: float = clampf(_strido_slip_ema / scale_v, 0.0, 1.0)
+	var n: int = 12
+	var filled: int = clampi(int(round(frac * float(n))), 0, n)
+	var bar: String = "█".repeat(filled) + "░".repeat(n - filled)
+	_strido_hud.text = "stride  fk %+.3f  true %+.3f  slip [%s] %.3f  ns %d" % [
+		_strido_cmd_ema, _strido_true_ema, bar, _strido_slip_ema, _dbg_strido_ns]
+	_strido_hud.add_theme_color_override("font_color",
+		Color(0.4 + 0.6 * frac, 0.9 - 0.7 * frac, 0.3, 1.0))
+
 func _update_distress_hud() -> void:
 	# Always-visible distress bar (Cell-style) so the wedge state is watchable live.
 	if _distress_hud == null:
@@ -9936,6 +10120,11 @@ func _do_hard_reset() -> void:
 	# discontinuity.  Reward-free instrumentation.
 	if brain != null:
 		brain.publish_event("reset", 1.0)
+	# Stride-odometry instrument: the teleport makes the previous toe/contact state
+	# meaningless — skip one displacement tick rather than log a phantom stride.  The
+	# servo forward-model state re-seeds from the post-reset effective targets.
+	_strido_prev_valid = false
+	_strido_lp.clear()
 	# Apply _pending_reset_offset to every cached rest transform.  Zero
 	# offset (legacy default) reproduces the original center-spawn
 	# behaviour bit-identically.  Non-zero offset translates the entire
@@ -10097,6 +10286,19 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"ares": [snappedf(_up_acc_last.x - _up_est_body.x, 0.00001),
 				 snappedf(_up_acc_last.y - _up_est_body.y, 0.00001),
 				 snappedf(_up_acc_last.z - _up_est_body.z, 0.00001)],
+		# 2026-08-25 — STRIDE-ODOMETRY INSTRUMENT (PART V gate A).  Per-tick body-frame
+		# [x, z] velocities: sv_clp = forward-model-FK/load-gated (THE JUDGED SIGNAL),
+		# sv_cmd = raw-command FK (the naive efference copy, kept as a finding),
+		# sv_meas = measured-FK (servo-tracking diagnosis), sv_tc = forward-model-FK on
+		# TRUE contact (stance-gate diagnosis), sv_true = god's-eye truth in body frame.
+		# sv_ns = [load-gated stance feet, true-contact stance feet]; ns of 0 means NO
+		# estimate existed that tick (the zeros beside it are placeholders, filter on it).
+		"sv_clp":  [snappedf(_dbg_strido_cmdlp.x, 0.0001), snappedf(_dbg_strido_cmdlp.z, 0.0001)],
+		"sv_cmd":  [snappedf(_dbg_strido_cmd.x, 0.0001),  snappedf(_dbg_strido_cmd.z, 0.0001)],
+		"sv_meas": [snappedf(_dbg_strido_meas.x, 0.0001), snappedf(_dbg_strido_meas.z, 0.0001)],
+		"sv_tc":   [snappedf(_dbg_strido_tc.x, 0.0001),   snappedf(_dbg_strido_tc.z, 0.0001)],
+		"sv_true": [snappedf(_dbg_strido_true.x, 0.0001), snappedf(_dbg_strido_true.z, 0.0001)],
+		"sv_ns":   [_dbg_strido_ns, _dbg_strido_ns_tc],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
 	# FileAccess buffers and the quit path never closes this file, so an unflushed
@@ -10649,6 +10851,14 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# report. If this is large, commanded-angle FK is a materially different signal.
 	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
 	line["fk_valid_err"] = snappedf(_dbg_fk_valid_err, 0.00001)
+	# Stride-odometry instrument (PART V gate A): smoothed forward FK velocity (the
+	# judged forward-model/cmdlp variant) vs truth and their absolute gap.  Per-tick
+	# series live in the OGMA_PICRAWLER_TRACE file (sv_* fields); these EMAs are the
+	# at-a-glance version for run logs.
+	line["strido_fk"] = snappedf(_strido_cmd_ema, 0.0001)
+	line["strido_true"] = snappedf(_strido_true_ema, 0.0001)
+	line["strido_slip"] = snappedf(_strido_slip_ema, 0.0001)
+	line["strido_ns"] = _dbg_strido_ns
 	line["att_err_acc"] = snappedf(_dbg_att_err_acc, 0.01)
 	line["att_err_imu"] = snappedf(_dbg_att_err_imu, 0.01)
 	line["acc_mag"] = snappedf(_dbg_acc_mag, 0.01)
