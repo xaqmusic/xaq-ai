@@ -133,7 +133,9 @@ Ordered by how much rests on it.
   measured — 2026-08-06 corr(τ,dθ) −0.46..−0.56, publish site confirmed) dig a coupling→0
   basin nearer than the band. Fix the terms first: a legal travel magnitude (leg-FK+IMU),
   and energy re-pointed at `joint_load` or de-weighted from 4.0. Only then re-arm the
-  displacement test — same protocol, control included.
+  displacement test — same protocol, control included. **This is now PART V's charter:
+  `stride_odometry_and_criterion_repair_plan.md` (drafted 2026-08-25, operator-agreed
+  direction).**
 - **The accept/anneal loop, after the criterion.** Acceptance cannot be its own feedback
   signal when servoed to chance; and per the registered rule, `sigma_min` stays 0.08 for
   now — σ=0.20's faster descent and sole band re-entry is its recorded re-use context.
