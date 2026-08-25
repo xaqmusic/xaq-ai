@@ -70,6 +70,18 @@ SCOPE = {
 }
 PHASES = ["WARMUP", "INCUMBENT", "CANDIDATE"]
 
+# The landscape sweeps' measured GOOD bands (2026-08-23; same provenance and
+# values as gainevo_basin.py's GOOD_BAND — measured verdicts restated as an
+# instrument overlay, so "did it converge on the ideal?" is answerable by eye).
+# A gain with no entry has no band the criterion resolved: nothing is drawn,
+# because an invented target on an instrument reads as a measured one.
+# ⚠ The bands are SINGLE-GAIN verdicts at one operating point; the 2026-08-24
+# decision experiment showed they do not always compose (coupling's displaced
+# form usually descends to 0, not to this band) — the overlay marks where the
+# one-gain landscape scored best, not a promise of where the search will go.
+GOOD_BAND = {"amp_target": (0.15, 0.41), "coupling_gain": (1.2, 2.0),
+             "postural_gain": (0.66, 1.5)}
+
 
 def _fl(v, default=float("nan")) -> float:
     try:
@@ -185,7 +197,7 @@ class _GainRack(_SurfaceWidget):
                 if self._exact_bounds else
                 "AUTO-SCALED (module predates bounds-in-diag; rebuild for exact ranges)")
         p.setPen(QPen(QColor(INK_MUTED)))
-        p.drawText(6, 14, f"gain rack — track spans [min .. max] · {head}")
+        p.drawText(6, 14, f"gain rack — track spans [min .. max] · green = measured good band · {head}")
 
         for i, key in enumerate(self._keys):
             y = 22 + i * self.ROW_H
@@ -212,6 +224,20 @@ class _GainRack(_SurfaceWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(QColor(TRACK)))
             p.drawRoundedRect(QRectF(x0, cy - 3, span, 6), 3, 3)
+
+            # measured GOOD band, under everything that moves: the ideal drawn on
+            # the instrument, so convergence is a marker entering a green zone
+            # rather than a number remembered from a doc.  Only where exact bounds
+            # are live — on an auto-scaled track the band's position would drift
+            # with the observed extremes and read as a moving target.
+            band = GOOD_BAND.get(key) if self._exact_bounds else None
+            if band:
+                ba, bb = pos(band[0]), pos(band[1])
+                gb = QColor(GOOD)
+                gb.setAlpha(70)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(gb))
+                p.drawRoundedRect(QRectF(ba, cy - 5, max(1.0, bb - ba), 10), 3, 3)
 
             # seed tick — where the search started
             if i < len(self._seed) and self._seed[i] == self._seed[i]:

@@ -12,7 +12,7 @@ from xaq_inspector.widgets import widget_for, wrap_with_description
 KEYS = ["rear_land_gain", "rear_knee_plant", "rear_push_ext", "amp_target",
         "height_homeo_gain", "postural_gain", "coupling_gain", "plan_gain"]
 GMIN = [0.0, 0.0, 0.0, 0.15, 0.0, 0.1, 0.0, 0.0]
-GMAX = [1.5, 0.6, 1.5, 0.8, 0.1, 1.5, 3.0, 0.2]
+GMAX = [1.5, 0.6, 1.5, 0.8, 0.1, 1.5, 2.0, 0.2]   # coupling max 2.0 = the shipped bound
 SEED = [0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0]
 WINDOW = 4000
 WITH_BOUNDS = "--nobounds" not in sys.argv   # simulate old .so when absent

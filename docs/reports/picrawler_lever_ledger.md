@@ -4244,3 +4244,36 @@ or-kill grade, never a finding, and it is the thing a criterion-first retry shou
   (c) `noise_min_n` was silently ignored at construction (missing from `on_setup`'s parse
   list) — caught by the de-vacuized margin test, inert in practice because every config
   set the default. All three fixed 2026-08-24.
+
+### ★★ 2026-08-25 — THE PHASE DEMO, REHEARSED — and non-composition measured from a SECOND displaced start
+
+**Verdict: demo config shipped (`__gainevo_demo`), rehearsed before its blurb was allowed
+to promise anything.** Arena, window 6000 (observation-cadence compromise; DEMO SCAFFOLD,
+never evidence), σ pinned 0.2, 3-D vector, displaced start written into BOTH the evolver
+seed and the MotorEPM params. The inspector's gain rack now draws the landscape's measured
+GOOD bands, so "did it converge on the ideal" is answerable by eye.
+
+**1. ★ Rev 1 (amp 0.70 + postural 0.30 displaced jointly, n=3): the joint descent ESCAPES
+the band corner 2/3.** J fell in all three seeds (−0.20..−0.37) — but via **tilt_sd**
+(−0.24..−0.32), not the band route: two seeds parked postural at 0.10 (its single-gain BAD
+point) with amp at/near the ceiling and coupling risen to 2.0, and scored well anyway.
+From a *second* displaced start, with a *different* term paying (tilt here, energy in the
+coupling case), the criterion's joint landscape again fails to match the single-gain
+bands. Non-composition is generic, not a coupling quirk — PART V's premise, strengthened
+at n=3.
+
+**2. Rev 2 (amp-only displacement, n=4): 3/4 enter the band by generation ~3–6, 2/4 hold
+through 300k.** Seed map recorded in the launcher blurb: seeds 2/3 clean, seed 1 finds a
+stable high-amp posture instead (coupling ~1.96, tilt improving, amp pinned at the
+ceiling — the lesson live), seed 4 converges then wanders out late (bands are flat;
+nothing pins a point inside one, by design of the criterion's resolution).
+
+**3. ⚠ Estimator note: last-third-minus-first-third dJ is BLIND to the demo's own
+recovery.** Amp recovers by window ~6–12 of 49, i.e. *inside* the first third, so the
+whole-run dJ carries late flat-band drift, not the descent (signs were mixed across
+converged seeds). Fine for the tsweep (its recovery target was ~24 generations out);
+wrong lens for fast transients. Watch windows 0–15, or the inspector, for the event.
+
+Rehearsal logs: `demo_rehearsal*/` in the session scratch (regenerable: the demo config +
+seeds 1–4). The `gainevo_live` launcher entry rotated out of the dropdown (file stays):
+σ 0.08 is now measured to show ~nothing over an observation session.
