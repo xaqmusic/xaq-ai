@@ -4351,3 +4351,32 @@ LP(effective targets), stance = `foot_load ≥ 0.2` both-ends-of-tick, gyro ω×
 removal (tick-mean gyro); fuse complementary with the IMU per the plan; publish the
 FK/IMU disagreement as `slip`. Instrument stays: `sv_*`/`svl_*` trace fields, the
 stdout `strido_*` EMAs, and the HUD fk-vs-true line (operator-requested).
+
+### ★★ 2026-08-25 — STAGE B SHIPPED: `stride_v` ⊕ `slip` on the bus, and the fusion's β was decided by the criterion's own timescale
+
+**Verdict: `WORKING` (default-no-consumer; behavior-identity MEASURED).**
+`reality.proprio.stride_v` (`[v_right, v_forward]`, vel_ego-shaped for the one-swap
+insertion; lateral flagged UNVALIDATED) and `reality.proprio.slip` now publish every tick
+from `picrawler_body.gd`. Constants as gate A measured them: stance `foot_load ≥ 0.2`,
+servo forward model α 0.2, tick-mean-gyro rotation removal. Uncalibrated by design (the
+~0.75 scale is the consumer's to adapt — prohibition 5).
+
+**★ 1. THE NAIVE COMPLEMENTARY FILTER CRUSHED THE SIGNAL, AND THE FIX IS A PI BIAS
+ESTIMATOR.** P-only fusion (β 0.1) collapsed the mean — integrated travel 0.65 of 3.57 m
+— because the accelerometer's attitude-leak bias enters as `b·TAU/β` ≈ the whole signal.
+Letting the FK innovation *teach* the bias (`ki` 0.1) restores it to ~0.85 of truth,
+better than FK-alone's 0.80. The offline filter re-simulation (`alin` trace field) is the
+instrument that found this; one recorded run tunes every (β, ki) for free.
+
+**★ 2. β = 1.0, BECAUSE THE CRITERION CONSUMES ~1 s EMAs.** Measured trade-off, walk/c0
+validation runs: β 0.3 wins per-tick r (0.75/0.81 vs 0.57/0.55) but LOSES the criterion
+band (r_w50 0.62/0.72); β 1.0 ties the best there (0.71/0.79) with the accel kept for
+swing/flight coasting and the slip innovation. *Re-use context for β ≈ 0.3, ki ≈ 0.05: a
+fast-band consumer (reflexes, footfall-scale prediction).* The published sensor matches
+the offline simulation exactly — the in-body filter is faithful.
+
+**★ 3. GATE B PASSED ON ALL THREE CHECKS.** Publisher meter in the stdout diag
+(`stride_v`/`stride_vx`/`stride_slip`; consumer half arms when stage C subscribes);
+stepping-in-place reads 3.7× less than walking at equal step amplitude on the validation
+pair (7× on the gate-A n=9); and the no-consumer guard was measured, not argued —
+**7900/7900 ticks byte-identical trajectory** vs the pre-sensor build on the same seed.

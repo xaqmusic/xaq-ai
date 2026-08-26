@@ -101,6 +101,12 @@ Default-no-consumer: with nothing subscribed the build is behavior-identical.
 consumer meter in the body log), and `stride_v` ≈ 0 while stepping in place — the
 blind-metric immunity demonstrated, not assumed.
 
+> **RUN 2026-08-25 — `WORKING`, shipped** (ledger entry of the same date). Published
+> `stride_v` r_w50 0.71/0.79 vs truth; PI bias estimator required (P-only fusion crushed
+> the mean to 0.18 of truth); β=1.0 chosen by the criterion's own timescale, β≈0.3's
+> fast-band win recorded as re-use context. No-consumer guard measured: 7900/7900 ticks
+> byte-identical vs the pre-sensor build. Consumer-side meter arms at stage C.
+
 ### Stage C — re-point the criterion (mostly configuration; the machinery exists)
 
 PART IV already built the repaired flow term and shipped it OFF, each with a recorded
