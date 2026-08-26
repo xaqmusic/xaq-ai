@@ -96,7 +96,10 @@ ParamSchema GainEvolver::params_schema() const {
          "Per-leg touch flags — touchdown EDGES only (sim-only sensor; the hardware form is a load rising-edge, recorded in the plan).",
          std::nullopt, std::nullopt, std::nullopt},
         {"imu_topic", ParamMutability::ConstructionOnly,
-         "Body imu token [sin yaw, cos yaw, fwd_v, ang_v]; values[2] feeds the flow-quality term (the one sanctioned speed-flavored input, a soft oracle by the audit — the charter's knowing exception).",
+         "Body imu token [sin yaw, cos yaw, fwd_v, ang_v]; values[2] feeds the flow-quality term (the one sanctioned speed-flavored input, a soft oracle by the audit — the charter's knowing exception) UNLESS travel_topic is set.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"travel_topic", ParamMutability::ConstructionOnly,
+         "LEGAL travel input (PART V stage C1, ledger 2026-08-25). \"\" (default) = flow reads imu_topic values[2] — byte-identical to before this param existed. Set to reality.proprio.stride_v to feed the flow term the stance-FK ⊕ IMU estimate: values[1] (v_forward) of a [v_right, v_forward] token (or values[0] of a scalar). When set, imu_topic no longer writes the flow input; travel_rx_n in the diag is the consumer half of the two-sided meter.",
          std::nullopt, std::nullopt, std::nullopt},
         // ---- timing ----------------------------------------------------------
         {"n_legs", ParamMutability::ConstructionOnly, "legs (foot_load/contact dimensionality)",
@@ -241,6 +244,7 @@ ParamMap GainEvolver::current_params() const {
     m["foot_load_topic"]    = foot_load_topic_;
     m["foot_contact_topic"] = foot_contact_topic_;
     m["imu_topic"]          = imu_topic_;
+    m["travel_topic"]       = travel_topic_;
     m["gyro_topic"]         = gyro_topic_;
     m["n_legs"]            = int64_t(n_legs_);
     m["seed"]              = seed_;
@@ -308,7 +312,7 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
              {"gain_topic", &gain_topic_}, {"upright_topic", &upright_topic_},
              {"distress_topic", &distress_topic_}, {"foot_load_topic", &foot_load_topic_},
              {"foot_contact_topic", &foot_contact_topic_}, {"imu_topic", &imu_topic_},
-             {"gyro_topic", &gyro_topic_},
+             {"travel_topic", &travel_topic_}, {"gyro_topic", &gyro_topic_},
              {"torque_topic", &torque_topic_}})
         apply_param(params, key, [&](auto const& v){
             if (auto p = std::get_if<std::string>(&v)) *member = *p; });
@@ -390,6 +394,7 @@ void GainEvolver::on_setup(Bus* bus, ParamMap const& params) {
                           Sub{&foot_load_topic_,    &GainEvolver::handle_foot_load},
                           Sub{&foot_contact_topic_, &GainEvolver::handle_foot_contact},
                           Sub{&imu_topic_,          &GainEvolver::handle_imu},
+                          Sub{&travel_topic_,       &GainEvolver::handle_travel},
                           Sub{&gyro_topic_,         &GainEvolver::handle_gyro},
                           Sub{&torque_topic_,       &GainEvolver::handle_torque}})
         if (!s.topic->empty())
@@ -523,7 +528,17 @@ void GainEvolver::handle_imu(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
     if (!pt || pt->values.size() < 3) return;
-    fwd_v_ = pt->values[2];                 // [sin yaw, cos yaw, fwd_v, ang_v]
+    if (travel_topic_.empty())
+        fwd_v_ = pt->values[2];             // [sin yaw, cos yaw, fwd_v, ang_v]
+}
+
+void GainEvolver::handle_travel(MessagePtr payload) {
+    if (!input_allowed(payload->producer_id)) return;
+    auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
+    if (!pt || pt->values.size() < 1) return;
+    // stride_v is [v_right, v_forward] (vel_ego-shaped); a scalar topic also works.
+    fwd_v_ = pt->values.size() >= 2 ? pt->values[1] : pt->values[0];
+    ++travel_rx_n_;                         // consumer half of the two-sided meter
 }
 
 // ---- scoring ----------------------------------------------------------------
@@ -970,6 +985,8 @@ nlohmann::json GainEvolver::metrics() const {
     m["target_eff"]    = (target_accept_ >= 0.0) ? target_accept_ : noise_floor_rate();
     m["accept_margin"] = accept_margin_;
     m["noise_n"]       = noise_n_;
+    m["travel_rx_n"]   = travel_rx_n_;   // consumer half of the travel_topic two-sided meter
+    m["fwd_v_in"]      = fwd_v_;         // the flow input actually being consumed this tick
     m["vec"] = (phase_ == Phase::Candidate) ? candidate_ : incumbent_;
     return m;
 }

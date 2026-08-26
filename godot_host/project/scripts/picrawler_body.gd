@@ -11526,6 +11526,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["ge_fpred"] = snappedf(float(_ge.get("flow_pred", 0.0)), 0.0001)
 			line["ge_fturn"] = snappedf(float(_ge.get("flow_turn", 0.0)), 0.0001)
 			line["ge_fmf"]   = int(_ge.get("flow_min_form", 0))
+			# travel_topic two-sided meter (PART V C1): ge_trx = messages the evolver
+			# actually consumed (0 forever = dead wiring, the §3.2 #5 check), ge_fin =
+			# the flow input value it holds — must track the body's stride_v line
+			# when travel_topic is set, and fwd_v when it is not.
+			line["ge_trx"]   = int(_ge.get("travel_rx_n", 0))
+			line["ge_fin"]   = snappedf(float(_ge.get("fwd_v_in", 0.0)), 0.0001)
 			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
 			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it
 			# ships at weight 0: the 60-tick body-log proxy that measured it as WORSE
