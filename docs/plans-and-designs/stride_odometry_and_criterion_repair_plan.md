@@ -254,6 +254,25 @@ now.
 > bodies; re-earn guards on the physical body before the search may move (port-plan
 > requirement).
 
+### Stage E3 (added 2026-08-26, operator-directed) — native operating points, then displace
+
+The re-use context of the E2 verdict, run: give each body its OWN operating point
+first, then displace both from their own points — the settling demo becomes
+well-posed because both bodies then have a basin to return to. The settled points
+also ship as **permanent UI benchmark configs** (operator-requested, for demos),
+carried body-and-gains-together via new `metadata.body` support in the launcher chain.
+
+> **E3a PRE-REGISTRATION (2026-08-26, before the runs).** Settle protocol: free
+> search at σ 0.2 pinned (the step size that climbs), C2 criterion, from the NATIVE
+> j1s4 3-gain point [amp 0.385, coupling 1.655, postural 1.092] — generation 0 is
+> the deployed stack's body on cad. Arena 0.3, 600k ticks, both bodies × seeds 1–6.
+> **Selection rule (registered before any run):** per body, the benchmark vector is
+> the final incumbent of the run with the best last-third mean J among runs whose
+> falls are ≤ that arm's median (viability filter first, quality second); all six
+> endpoints and falls go to the ledger beside the selected one. E3a is exploratory
+> (settling, not a hypothesis test); E3b's predictions are registered from its
+> numbers before E3b launches.
+
 ## 4. The sim2real dividend
 
 This phase is also the port plan. With `stride_v` (needs no new hardware — commanded

@@ -39,8 +39,11 @@ import concurrent.futures as cf
 import glob, json, os, pathlib, statistics as st, subprocess, sys, time
 
 PROJ = str(pathlib.Path(__file__).resolve().parents[1])
+CFGDIR = os.path.join(PROJ, "addons", "ami_ogma", "configs")
 CFG_C2 = ("the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose"
           "__m1auth__planpull__j1s4_c2.json")
+CFG_3D = ("the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose"
+          "__m1auth__planpull__j1s4_3d.json")
 BODIES = ["cad", "measured"]
 LEVELS_ASC = [0.0, 0.4, 0.8, 1.2, 1.6, 2.0]
 WARMUP, WINDOW, WPL = 10000, 12000, 3
@@ -94,6 +97,68 @@ def cmd_landscape(outdir):
     with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
         ok = list(ex.map(lambda j: run_one(*j), jobs))
     print(f"done: {sum(ok)}/{len(ok)} confirmed (body + config)")
+
+
+def make_settle_config():
+    """E3a config: BASE3 (native j1s4 3-gain seed) + the C2 criterion + sigma 0.2
+    pinned, free search.  Regenerable one-off (not committed), body via env."""
+    cfg = json.load(open(os.path.join(CFGDIR, CFG_3D)))
+    ge = next(m for m in cfg["modules"] if m.get("type") == "GainEvolver")["params"]
+    assert ge["gain_seed"] == [0.385, 1.655, 1.092], ge["gain_seed"]
+    ge["mutation_sigma"] = 0.2
+    ge["sigma_min"], ge["sigma_max"] = 0.2, 0.2
+    ge["target_accept"] = -1.0
+    ge["travel_topic"] = "reality.proprio.stride_v"
+    ge["flow_min_form"] = 1
+    ge["flow_turn_k"] = 4.0
+    ge["w_flow"] = 2.0
+    ge["w_energy"] = 1.0
+    name = "e3_settle.json"
+    json.dump(cfg, open(os.path.join(CFGDIR, name), "w"), indent=2)
+    return name
+
+
+def cmd_settle(outdir):
+    cfg = make_settle_config()
+    jobs = []
+    k = 0
+    for body in BODIES:
+        for s in SEEDS:
+            jobs.append((body, "settle", cfg, s, SEARCH_STEPS, outdir, 7900 + k, None))
+            k += 1
+    print(f"E3a: {len(jobs)} runs x {SEARCH_STEPS} ticks -> {outdir}")
+    with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
+        ok = list(ex.map(lambda j: run_one(*j), jobs))
+    print(f"done: {sum(ok)}/{len(ok)} confirmed (body + config)")
+
+
+def cmd_analyze_settle(outdir):
+    """Apply the REGISTERED selection rule: per body, best last-third mean J among
+    runs with falls <= that arm's median; print all endpoints beside the pick."""
+    for body in BODIES:
+        rows = []
+        for p in sorted(glob.glob(f"{outdir}/{body}/settle_s*.log")):
+            ws = windows(p)
+            if not ws:
+                continue
+            last = ws[-1]
+            third = ws[-(max(1, len(ws) // 3)):]
+            rows.append({
+                "run": os.path.basename(p),
+                "vec": last.get("ge_vec"),
+                "J_third": st.mean(float(w["ge_ji"]) for w in third),
+                "falls": int(last.get("auto_reset_count", 0)),
+                "n_win": len(ws),
+            })
+        med_falls = st.median(r["falls"] for r in rows)
+        viable = [r for r in rows if r["falls"] <= med_falls]
+        pick = min(viable, key=lambda r: r["J_third"])
+        print(f"\n{body}: median falls {med_falls}")
+        for r in rows:
+            mark = "  << SELECTED" if r is pick else ("" if r["falls"] <= med_falls else "  (falls-filtered)")
+            v = r["vec"]
+            print(f"  {r['run']:16s} amp={v[0]:.3f} coup={v[1]:.3f} post={v[2]:.3f} "
+                  f"J3={r['J_third']:.4f} falls={r['falls']}{mark}")
 
 
 def cmd_search(outdir):
@@ -185,5 +250,10 @@ if __name__ == "__main__":
     elif len(sys.argv) >= 2 and sys.argv[1] == "search":
         cmd_search(sys.argv[2] if len(sys.argv) > 2 else
                    os.path.expanduser(time.strftime("~/xaq_runs/twobodyE2_%Y%m%d")))
+    elif len(sys.argv) >= 2 and sys.argv[1] == "settle":
+        cmd_settle(sys.argv[2] if len(sys.argv) > 2 else
+                   os.path.expanduser(time.strftime("~/xaq_runs/twobodyE3a_%Y%m%d")))
+    elif len(sys.argv) >= 3 and sys.argv[1] == "analyze-settle":
+        cmd_analyze_settle(sys.argv[2])
     else:
         print(__doc__)
