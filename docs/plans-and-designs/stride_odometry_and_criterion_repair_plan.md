@@ -198,6 +198,29 @@ and the search climbs it* — PART IV's machinery vindicated end to end. Fail �
 survives a real travel term, and the next suspect is the term *balance*, measured on the
 stage-C budget.
 
+### Stage E (added 2026-08-26, operator-directed) — the TWO-BODY study
+
+The embodiment capstone: same criterion (C2), same seed streams, same coupling
+displacement, on `cad` (the body as designed — every prior ledger result) and
+`measured` (the body as built: hip_z_span +15%, l1 −14%, l2 −10%, chassis mass +14%,
+real CoM). If the discovered gains are properties of the body, each body's search must
+land in a basin matching its OWN landscape. Tool: `strido_twobody.py`; PART IV's basin
+sweep ran 2 bodies but pre-dated a locomotion-tied criterion, which is why it returns
+now.
+
+> **E1 PRE-REGISTRATION (2026-08-26, before the runs).** Landscape per body: the D1
+> protocol in the ARENA (shared with the search phase), σ=0 on `j1s4_c2`, coupling
+> stepped 0→2, seeds 1–6 odd-asc/even-desc. These are conditional landscapes at the
+> shared j1s4 operating point (tuned on cad) — exactly E2's start. **Gate to E2:**
+> some level's between-body |ΔJ| exceeds 2× the pooled same-level window noise, or
+> the argmins sit ≥ 2 levels apart. Fail ⇒ the search comparison is unpowered by
+> construction: stop, report, consider an amplified third body.
+> **E2 (registered in outline; exact cross-predictions filled from E1 numbers BEFORE
+> E2 launches):** sigma0 + fix020 × seeds 1–6 per body (fix008 dropped — too slow to
+> climb, twice). The claim under test: paired by seed, each body's endpoints match
+> its OWN E1 landscape better than the other body's — falsifiable in both directions,
+> robust to flat-band endpoint wander.
+
 ## 4. The sim2real dividend
 
 This phase is also the port plan. With `stride_v` (needs no new hardware — commanded
