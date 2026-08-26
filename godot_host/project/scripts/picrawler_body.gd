@@ -1600,8 +1600,36 @@ var _strido_slip_ema: float = 0.0
 var _strido_hud: Label = null
 # Same normalized-foot_load stance threshold the GainEvolver's G2 guard uses
 # (load_thresh default 0.05) — the sensor must be judged with the stance rule it will run.
+# (Gate A then MEASURED the sensor's own optimum at ~0.2 — see STRIDE_V_LOAD_THRESH below.
+# The instrument keeps 0.05 so its series stays comparable across the gate-A record.)
 const STRIDO_LOAD_THRESH: float = 0.05
 const STRIDO_EMA_ALPHA: float = 0.1
+# ---- stride_v ⊕ slip — THE SENSOR (PART V stage B, 2026-08-25) --------------------------
+# The published bootstrap sensor gate A licensed, built exactly as measured: stance-mean
+# forward-model FK velocity (stance = foot_load ≥ 0.2, the measured plateau; G2's 0.05
+# costs ~0.15 of r), with the IMU in the three roles the offline filter sweep left it:
+# bridging swing/flight ticks (bias-corrected accel coast), a PI bias estimator learning
+# the accelerometer's attitude-leak from the FK innovation (without it the mean is
+# crushed: integrated travel 0.65 of 3.57 m; with it, ~0.85), and the innovation itself —
+# the re-afference mismatch (a foot sliding back reads as body-forward to FK but not to
+# the IMU) — published as `slip`, the percept deferred from GainEvolver v1.
+# β = 1.0 was CHOSEN AGAINST lower values on measurement: β 0.3 buys per-tick r
+# (0.75–0.81 vs 0.57) but costs the criterion band (r_w50 0.62–0.72 vs 0.71–0.79), and
+# the criterion consumes ~1 s EMAs.  Re-use context for β≈0.3 + ki≈0.05: a consumer that
+# needs the FAST band (reflexes, footfall-scale prediction).
+# LEGALITY: commanded angles + published foot_load + modelled IMU only.  No calibration
+# against god's-eye scale is applied (FK reads a stable ~75% of truth; consumers adapt —
+# hard prohibition 5).  Default-no-consumer: publishing alone is behavior-identical.
+const STRIDE_V_LOAD_THRESH: float = 0.2   # normalized foot_load; measured plateau 0.15–0.30
+const STRIDE_V_FUSE_BETA: float = 1.0     # FK owns stance ticks; accel owns the gaps
+const STRIDE_V_BIAS_KI: float = 0.1       # PI bias-estimator gain (integral of innovation)
+const STRIDE_V_SLIP_ALPHA: float = 0.05   # slip EMA (~0.4 s)
+const STRIDE_V_COAST_LEAK: float = 0.005  # leak toward 0 when no stance feet (~4 s tau)
+var _stridev_prev_loaded: Array = [false, false, false, false]
+var _stridev_est: Vector2 = Vector2.ZERO  # [x = right, y = forward] body frame, m/s
+var _stridev_bias: Vector2 = Vector2.ZERO # learned accel bias [x, z], m/s^2
+var _stridev_slip: float = 0.0
+var _dbg_stridev_alin: Vector3 = Vector3.ZERO  # trace-only: the a_lin fed to the fusion
 # Gyro averaged across the brain tick's physics substeps for the ω×p term — the last
 # 240 Hz sample alone misrepresents a 20 ms displacement window mid-swing.  A real IMU
 # oversamples its control loop the same way, so the average is hardware-honest.
@@ -2913,6 +2941,19 @@ func _ready() -> void:
 		"float32[1]: dead-reckoned heading, integrated from the modelled body-frame gyro (drifts, as real dead reckoning does)", true)
 	brain.register_source("VelEgo", "reality.proprio.vel_ego",
 		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc", true)
+	# 2026-08-25 — PART V stage B: the LEGAL travel lane (gate A, ledger same date).
+	brain.register_source("StrideV", "reality.proprio.stride_v",
+		"float32[2]: [v_right, v_forward] body-frame velocity ESTIMATED from stance-leg FK " +
+		"on servo forward-model commands, complementary-fused with the IMU. Fully Markov-" +
+		"compliant: commanded angles + foot_load + IMU, nothing else — the legal replacement " +
+		"lane for vel_ego. Gate A 2026-08-25: forward r≈0.75 vs truth at 1 s windows, " +
+		"reads a stable ~75% of true travel (uncalibrated by design — consumers adapt); " +
+		"lateral channel UNVALIDATED. Reads ~0 when stepping in place (7x separation).", true)
+	brain.register_source("Slip", "reality.proprio.slip",
+		"float32[1]: re-afference mismatch — EMA magnitude of the FK-vs-IMU innovation in " +
+		"the stride_v fusion (a planted foot sliding back reads as body-forward to FK but " +
+		"not to the IMU: the cat-on-ice percept). The post-plant-slip signal deferred from " +
+		"GainEvolver v1. Gait-phase-locked, translation-linked (gate A).", true)
 	brain.register_source("Beacon", "reality.proprio.beacon",
 		"float32[1]: fraction of the frame that is beacon-coloured (looming/LGMD analogue)", true)
 	brain.register_source("GroundClearance", "reality.proprio.ground_clearance",
@@ -6595,9 +6636,12 @@ func _step_one() -> void:
 		_gyro_tick_acc = Vector3.ZERO
 		_gyro_tick_n = 0
 		var loaded_now: Array = [false, false, false, false]
+		var loaded02_now: Array = [false, false, false, false]
 		var contact_now: Array = [false, false, false, false]
 		for i in range(4):
-			loaded_now[i] = (_foot_load_ema[i] / _fl_norm()) >= STRIDO_LOAD_THRESH
+			var fl_n: float = _foot_load_ema[i] / _fl_norm()
+			loaded_now[i] = fl_n >= STRIDO_LOAD_THRESH
+			loaded02_now[i] = fl_n >= STRIDE_V_LOAD_THRESH
 			contact_now[i] = not _lowers[i].get_colliding_bodies().is_empty()
 		var sv_cmd := Vector3.ZERO
 		var sv_cmdlp := Vector3.ZERO
@@ -6605,6 +6649,8 @@ func _step_one() -> void:
 		var sv_tc := Vector3.ZERO
 		var sv_ns: int = 0
 		var sv_ns_tc: int = 0
+		var sv_sensor := Vector3.ZERO   # stride_v accumulation (0.2 stance rule)
+		var sv_ns_sensor: int = 0
 		# A freshly-planted foot still carries its swing displacement, so a foot counts
 		# only if it was planted at BOTH ends of the tick.  Suspend teleports the whole
 		# body (prev positions meaningless); hard reset invalidates via _do_hard_reset.
@@ -6625,6 +6671,9 @@ func _step_one() -> void:
 				if contact_now[i] and _strido_prev_contact[i]:
 					sv_tc += v_clp_i
 					sv_ns_tc += 1
+				if loaded02_now[i] and _stridev_prev_loaded[i]:
+					sv_sensor += v_clp_i
+					sv_ns_sensor += 1
 		else:
 			for i in range(4):
 				_dbg_strido_vleg_clp[i] = 0.0
@@ -6641,8 +6690,38 @@ func _step_one() -> void:
 			_strido_prev_cmdlp[i] = toe_cmdlp_b[i]
 			_strido_prev_meas[i] = toe_meas_b[i]
 			_strido_prev_loaded[i] = loaded_now[i]
+			_stridev_prev_loaded[i] = loaded02_now[i]
 			_strido_prev_contact[i] = contact_now[i]
 		_strido_prev_valid = _suspend_lift_y == 0.0
+
+		# ---- stride_v ⊕ slip: the published sensor (stage B; contract at the consts) --
+		# PI complementary structure: predict with the accelerometer's linear part
+		# (gravity removed via the honest fused attitude estimate — the IMU's own, never
+		# exact attitude) minus the LEARNED bias; correct toward stance-FK when stance
+		# feet exist, and let the innovation both teach the bias and feed `slip`.
+		var a_lin: Vector3 = _accel_body_last - 9.81 * _up_est_body
+		_dbg_stridev_alin = a_lin
+		var v_pred := Vector2(_stridev_est.x + (a_lin.x - _stridev_bias.x) * TAU,
+							  _stridev_est.y + (a_lin.z - _stridev_bias.y) * TAU)
+		if sv_ns_sensor > 0:
+			var v_fk := Vector2(sv_sensor.x / float(sv_ns_sensor),
+								sv_sensor.z / float(sv_ns_sensor))
+			var innov: Vector2 = v_fk - v_pred
+			_stridev_est = v_pred + STRIDE_V_FUSE_BETA * innov
+			_stridev_bias += -STRIDE_V_BIAS_KI * innov
+			_stridev_slip += STRIDE_V_SLIP_ALPHA * (innov.length() - _stridev_slip)
+		else:
+			# No planted feet: coast on the bias-corrected accelerometer with a slow
+			# leak — the FK anchor is gone and unleaked integration turns attitude
+			# error into phantom velocity within seconds (hardware-audit failure shape).
+			_stridev_est = v_pred * (1.0 - STRIDE_V_COAST_LEAK)
+		var sv_out := PackedFloat64Array()
+		sv_out.append(_stridev_est.x)
+		sv_out.append(_stridev_est.y)
+		brain.publish_proprio(sv_out, "stride_v")
+		var slip_out := PackedFloat64Array()
+		slip_out.append(_stridev_slip)
+		brain.publish_proprio(slip_out, "slip")
 		# HUD smoothing on the FORWARD (body +Z) components — the axis gate A judges.
 		# fk = the JUDGED cmdlp variant.  The FK/slip EMAs freeze during full-swing/
 		# airborne ticks (no stance estimate exists) rather than decaying toward a fake
@@ -10064,8 +10143,8 @@ func _update_stride_hud() -> void:
 	var n: int = 12
 	var filled: int = clampi(int(round(frac * float(n))), 0, n)
 	var bar: String = "█".repeat(filled) + "░".repeat(n - filled)
-	_strido_hud.text = "stride  fk %+.3f  true %+.3f  slip [%s] %.3f  ns %d" % [
-		_strido_cmd_ema, _strido_true_ema, bar, _strido_slip_ema, _dbg_strido_ns]
+	_strido_hud.text = "stride  fk %+.3f  fuse %+.3f  true %+.3f  slip [%s] %.3f  ns %d" % [
+		_strido_cmd_ema, _stridev_est.y, _strido_true_ema, bar, _strido_slip_ema, _dbg_strido_ns]
 	_strido_hud.add_theme_color_override("font_color",
 		Color(0.4 + 0.6 * frac, 0.9 - 0.7 * frac, 0.3, 1.0))
 
@@ -10137,6 +10216,11 @@ func _do_hard_reset() -> void:
 	# servo forward-model state re-seeds from the post-reset effective targets.
 	_strido_prev_valid = false
 	_strido_lp.clear()
+	# stride_v sensor: a hard reset is a velocity discontinuity the fusion must not
+	# integrate across (the bus reset event tells consumers the same thing).
+	_stridev_est = Vector2.ZERO
+	_stridev_bias = Vector2.ZERO
+	_stridev_slip = 0.0
 	# Apply _pending_reset_offset to every cached rest transform.  Zero
 	# offset (legacy default) reproduces the original center-spawn
 	# behaviour bit-identically.  Non-zero offset translates the entire
@@ -10311,6 +10395,13 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"sv_tc":   [snappedf(_dbg_strido_tc.x, 0.0001),   snappedf(_dbg_strido_tc.z, 0.0001)],
 		"sv_true": [snappedf(_dbg_strido_true.x, 0.0001), snappedf(_dbg_strido_true.z, 0.0001)],
 		"sv_ns":   [_dbg_strido_ns, _dbg_strido_ns_tc],
+		# The PUBLISHED fused sensor [x=right, z=forward] — always defined (coasts on the
+		# IMU through full-swing ticks), so no ns gate applies to it.
+		"sv_fuse": [snappedf(_stridev_est.x, 0.0001), snappedf(_stridev_est.y, 0.0001)],
+		"sv_slip": snappedf(_stridev_slip, 0.0001),
+		# The IMU linear-acceleration term feeding the fusion [x, z] — lets the filter
+		# itself (β, bias gain) be re-simulated offline from one recorded run.
+		"alin": [snappedf(_dbg_stridev_alin.x, 0.0001), snappedf(_dbg_stridev_alin.z, 0.0001)],
 		# Per-foot forward FK velocities, UNGATED (0 on invalid ticks) — combine with
 		# fload/c above to re-score any stance rule offline.
 		"svl_clp":  [snappedf(_dbg_strido_vleg_clp[0], 0.0001),  snappedf(_dbg_strido_vleg_clp[1], 0.0001),
@@ -10877,6 +10968,12 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	line["strido_true"] = snappedf(_strido_true_ema, 0.0001)
 	line["strido_slip"] = snappedf(_strido_slip_ema, 0.0001)
 	line["strido_ns"] = _dbg_strido_ns
+	# stride_v/slip PUBLISHER METER (gate B's two-sided consumer check, publisher half):
+	# the values actually on the bus this tick, so a subscribed consumer can be checked
+	# end-to-end against what was sent.
+	line["stride_v"] = snappedf(_stridev_est.y, 0.0001)
+	line["stride_vx"] = snappedf(_stridev_est.x, 0.0001)
+	line["stride_slip"] = snappedf(_stridev_slip, 0.0001)
 	line["att_err_acc"] = snappedf(_dbg_att_err_acc, 0.01)
 	line["att_err_imu"] = snappedf(_dbg_att_err_imu, 0.01)
 	line["acc_mag"] = snappedf(_dbg_acc_mag, 0.01)
