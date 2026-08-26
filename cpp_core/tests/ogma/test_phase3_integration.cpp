@@ -343,7 +343,11 @@ TEST(HotPatchConnect, ConnectOpUnknownEndpointRejected) {
     batch.ops.push_back(ogma::ConnectOp{ogma::EdgeSpec{
         .from = "nonexistent", .to = "voter_0", .topic = "", .feedback = false}});
     inst.enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst.tick(), std::invalid_argument);
+    // Rejected per batch and logged, not thrown out of tick(); the edge
+    // must not have landed.
+    EXPECT_NO_THROW(inst.tick());
+    for (auto const& e : inst.scheduler()->feedback_edges())
+        EXPECT_FALSE(e.from == "nonexistent" && e.to == "voter_0");
 }
 
 TEST(HotPatchConnect, ConnectOpHostEndpointAlwaysOk) {
@@ -391,5 +395,6 @@ TEST(HotPatchConnect, DisconnectOpUnknownEndpointRejected) {
     ogma::GraphPatchBatch batch;
     batch.ops.push_back(ogma::DisconnectOp{.from = "ghost", .to = "voter_0", .topic = ""});
     inst.enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst.tick(), std::invalid_argument);
+    // Rejected per batch and logged, not thrown out of tick().
+    EXPECT_NO_THROW(inst.tick());
 }

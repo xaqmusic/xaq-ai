@@ -127,8 +127,15 @@ TEST(HotPatch, AddNodeOpDuplicateIdRejected) {
         .id = "voter_0", .type = "NeurochemState", .params = {}}});
     inst->enqueue_hot_patch(std::move(batch));
 
-    // Validation throws inside Scheduler::tick() on apply.
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    // The batch is rejected inside Scheduler::tick(), which logs it and
+    // moves on (per-batch isolation) rather than throwing out of tick().
+    // The contract under test is the REJECTION: `voter_0` is still the
+    // original LateralVoter, not the NeurochemState the duplicate op
+    // tried to install over it.
+    EXPECT_NO_THROW(inst->tick());
+    ASSERT_NE(inst->module("voter_0"), nullptr);
+    EXPECT_EQ(inst->module("voter_0")->type_name(), "LateralVoter");
+    EXPECT_EQ(inst->modules().size(), 3u);
 }
 
 TEST(HotPatch, AddNodeOpUnknownTypeRejected) {
@@ -137,7 +144,9 @@ TEST(HotPatch, AddNodeOpUnknownTypeRejected) {
     batch.ops.push_back(ogma::AddNodeOp{ogma::ModuleSpec{
         .id = "ghost", .type = "DefinitelyNotARealType", .params = {}}});
     inst->enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    EXPECT_NO_THROW(inst->tick());
+    EXPECT_EQ(inst->module("ghost"), nullptr);
+    EXPECT_EQ(inst->modules().size(), 3u);
 }
 
 // -- RemoveNodeOp ---------------------------------------------------------
@@ -160,7 +169,8 @@ TEST(HotPatch, RemoveNodeOpUnknownIdRejected) {
     ogma::GraphPatchBatch batch;
     batch.ops.push_back(ogma::RemoveNodeOp{"never_existed"});
     inst->enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    EXPECT_NO_THROW(inst->tick());
+    EXPECT_EQ(inst->modules().size(), 3u);
 }
 
 // -- SetParamOp -----------------------------------------------------------
@@ -188,7 +198,10 @@ TEST(HotPatch, SetParamOpConstructionOnlyRejected) {
         .key       = "master_seed",       // ConstructionOnly per the schema
         .value     = ogma::ParamValue{int64_t{99}}});
     inst->enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    EXPECT_NO_THROW(inst->tick());
+    // Rejected: the graph is untouched and `neuro` keeps running.
+    ASSERT_NE(inst->module("neuro"), nullptr);
+    EXPECT_EQ(inst->modules().size(), 3u);
 }
 
 TEST(HotPatch, SetParamOpUnknownTargetRejected) {
@@ -199,7 +212,9 @@ TEST(HotPatch, SetParamOpUnknownTargetRejected) {
         .key       = "da_decay",
         .value     = ogma::ParamValue{0.5}});
     inst->enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    EXPECT_NO_THROW(inst->tick());
+    EXPECT_EQ(inst->module("nonexistent"), nullptr);
+    EXPECT_EQ(inst->modules().size(), 3u);
 }
 
 TEST(HotPatch, SetParamOpUnknownKeyRejected) {
@@ -210,7 +225,10 @@ TEST(HotPatch, SetParamOpUnknownKeyRejected) {
         .key       = "not_a_real_key",
         .value     = ogma::ParamValue{0.5}});
     inst->enqueue_hot_patch(std::move(batch));
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    EXPECT_NO_THROW(inst->tick());
+    // Rejected: the graph is untouched and `neuro` keeps running.
+    ASSERT_NE(inst->module("neuro"), nullptr);
+    EXPECT_EQ(inst->modules().size(), 3u);
 }
 
 // -- Batch atomicity ------------------------------------------------------
@@ -234,11 +252,54 @@ TEST(HotPatch, BatchAtomicityOneBadOpRejectsAll) {
         .id = "ghost", .type = "DefinitelyNotARealType", .params = {}}});
     inst->enqueue_hot_patch(std::move(batch));
 
-    EXPECT_THROW(inst->tick(), std::invalid_argument);
+    EXPECT_NO_THROW(inst->tick());
 
     // The good op must NOT have applied — atomicity contract.
     EXPECT_EQ(inst->module("seq_0"), nullptr);
     EXPECT_EQ(inst->module("ghost"), nullptr);
+}
+
+// Regression (2026-08-14): a rejected batch must not take its NEIGHBOURS
+// down.  The drain swaps every pending batch out of `pending_` before
+// applying any of them, so a throw escaping one batch used to silently
+// discard every batch queued behind it — after each of their enqueues had
+// already returned success.  Found in the field: an init-time cruse patch
+// on a config without that module ate a same-tick plan_gain SETPARAM, and
+// the arm ran at the wrong dose while reporting success.  Each batch keeps
+// its own validate-then-apply atomicity; only the bad one is dropped.
+TEST(HotPatch, RejectedBatchDoesNotDiscardLaterBatches) {
+    auto inst = make_instance();
+
+    // Batch 1: invalid on its own (unknown module type).
+    {
+        ogma::GraphPatchBatch bad;
+        bad.ops.push_back(ogma::AddNodeOp{ogma::ModuleSpec{
+            .id = "ghost", .type = "DefinitelyNotARealType", .params = {}}});
+        inst->enqueue_hot_patch(std::move(bad));
+    }
+
+    // Batch 2: perfectly valid, queued behind the bad one in the same tick.
+    {
+        ogma::ModuleSpec good;
+        good.id   = "seq_0";
+        good.type = "SequenceGNG";
+        good.params["source_topic"]   = std::string("reality.proprio.imu");
+        good.params["source_kind"]    = std::string("winner");
+        good.params["window_size"]    = int64_t{4};
+        good.params["projection_dim"] = int64_t{16};
+
+        ogma::GraphPatchBatch ok;
+        ok.ops.push_back(ogma::AddNodeOp{good});
+        inst->enqueue_hot_patch(std::move(ok));
+    }
+
+    EXPECT_NO_THROW(inst->tick());
+
+    EXPECT_EQ(inst->module("ghost"), nullptr)
+        << "the invalid batch must still be rejected";
+    EXPECT_NE(inst->module("seq_0"), nullptr)
+        << "a valid batch queued behind a rejected one must still apply";
+    EXPECT_EQ(inst->modules().size(), 4u);
 }
 
 // -- Inter-tick boundary --------------------------------------------------
@@ -357,8 +418,8 @@ TEST(HotPatch, BadAddParamsRejectedBeforePartialApply) {
     ASSERT_GT(modules_before, 0u);
 
     // Batch: [remove every live module, then add an EPM with empty params].
-    // The trailing add MUST throw during validation; without the fix it
-    // would throw mid-pass-2 with the live modules already gone.
+    // The trailing add MUST fail validation; without the fix it would fail
+    // mid-pass-2 with the live modules already gone.
     ogma::GraphPatchBatch bad_batch;
     for (auto* m : inst->modules())
         bad_batch.ops.push_back(ogma::RemoveNodeOp{std::string(m->id())});
@@ -366,8 +427,9 @@ TEST(HotPatch, BadAddParamsRejectedBeforePartialApply) {
         .id = "bad_epm", .type = "EPM", .params = {}}});
     inst->enqueue_hot_patch(std::move(bad_batch));
 
-    // The throw happens inside the next tick when the batch is processed.
-    EXPECT_THROW(inst->tick(), std::exception);
+    // The rejection happens inside the next tick when the batch is
+    // processed; it is logged per batch, not thrown out of tick().
+    EXPECT_NO_THROW(inst->tick());
 
     // Critical: live graph is unchanged because validation rejected the
     // batch before any apply ran.
