@@ -177,6 +177,16 @@ One lever per A/B. C1 and C2 are separate arms, never combined in one comparison
 > confound). If no arm climbs while D1's offline flip predicted the pressure exists,
 > the suspect becomes search dynamics (step size / margin), NOT the criterion — σ=0.20's
 > recorded re-use context applies.
+>
+> **RESULT 2026-08-26 — `PARTIAL`, one run short of the endpoint majority, and the
+> zero basin is ELIMINATED** (ledger gate-D entry). Control valid (0.30 in 6/6).
+> fix020: ΔJ −0.117 (t −2.9, the J half passes decisively), endpoint re-entry 3/6;
+> by trajectory 6/6 entered the band, and the two runs that visited coupling ≈ 0
+> mid-run both escaped and ended in-band — under the old criterion 7/12 runs ended
+> there. The binding residual is the flat band (criterion resolution, §6 out of
+> scope), not direction. The C2 criterion is promoted as the reference criterion for
+> successor-phase work; the deployed j1s4 stack is untouched.
+
 2. **Re-arm the displacement protocol** — the tsw2 shape exactly: displaced start written
    into evolver seed *and* consumer params, σ=0 control, n=6, pre-registered predictions
    and decision rule committed before the data (doctrine §8: that pre-registration is

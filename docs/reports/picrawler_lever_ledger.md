@@ -4451,3 +4451,48 @@ previous window's terms. With 3 windows per level this dilutes level contrast bu
 preserves ordering, so PART IV's authority ORDERING reads survive; exact per-level
 values shift. Found by asking the D1 data where the J-step lands relative to the
 coupling-step (§3.2: measure the instrument before trusting it).
+
+### ★★★ 2026-08-26 — GATE D: THE ZERO BASIN IS GONE — the search now climbs toward the band, and what remains is the flat band, not the criterion's direction
+
+**Verdict: `PARTIAL` on the registered endpoint rule — and the phase's position sentence
+is half-falsified in the direction the phase wanted.** D2 = the tsw2 protocol under the
+C2 criterion (18 runs × 600k ticks, arena 0.3, `gainevo_make_arms.py d2` configs,
+displaced start amp 0.385 / coupling 0.30 / postural 1.092 in BOTH evolver seed and
+MotorEPM params; logs `~/xaq_runs/stridoD2_20260825/`, analyzer `gainevo_tsweep.py`).
+Consumer meter: `ge_trx` = 600000 in all 12 searching runs — every scored window ran on
+the legal travel signal.
+
+**★ 1. THE REGISTERED RULE, EXACTLY:** control valid (σ0: coupling 0.30 in 6/6, dJ
++0.005 ± 0.029). fix020: **ΔJ −0.117, Welch t −2.9 vs control — the J half passes
+decisively — and endpoint re-entry into 1.2–2.0 is 3/6: one run short of the registered
+majority.** fix008: +0.019 dJ, 2/6 — σ 0.08 still drifts too slowly, exactly as PART IV's
+drift arithmetic said (its σ-floor re-use context stands).
+
+**★ 2. THE WRONG-WAY BASIN IS ELIMINATED.** Under the old criterion, 7/12 searching runs
+descended coupling to ≈0 and stayed. Under C2: **0/12 endpoints at zero; the two runs
+that visited the zero basin mid-run (s3 to 0.00, s4 to 0.00) both ESCAPED it and ended
+IN the band** (1.17, 1.22). Escape from the old attractor is the single sharpest
+behavioral signature a re-pointed criterion could produce — closer to a (d)-test event
+than an endpoint statistic.
+
+**★ 3. BY TRAJECTORY, 6/6 fix020 runs ENTERED the band at least once**; the endpoint
+misses are late flat-band wander (s1 held ~1.04 for ~24 windows then dropped to 0.41 at
+run end; s6 reached 1.68 then wandered to 0.76). This is the ALREADY-LEDGERED flat-band
+property ("bands are flat; nothing pins a point inside one — by design of the
+criterion's resolution"), now the binding residual — a criterion-RESOLUTION question,
+explicitly out of this phase's scope (charter §6), not a direction question. The
+endpoint rule was registered before the data and its 3/6 stands as recorded; the
+trajectory read is reported beside it, not instead of it.
+
+**★ 4. NO PATHOLOGY SWAP-IN:** amp endpoints 0.15–0.52 (no ceiling-pinning), postural
+0.60–1.50 (no 0.10 parking) — the demo's tilt-led escape pattern did not reappear under
+the re-balance. Falls concentrated in the two zero-basin-visiting runs (40, 81), i.e.
+exactly where coupling was low — consistent with coupling's catastrophe-avoidance role.
+
+**The phase sentence, rewritten by measurement:** *the search follows its criterion, and
+the criterion now points at locomotion; what it cannot yet do is PIN a point inside a
+flat good band.* n=6/arm fixed seeds: signal-grade (§3.3) — promote-or-kill, and it
+promotes the C2 criterion as the reference criterion for the next phase's work. The
+deployed j1s4 stack is UNTOUCHED (σ=0; the criterion change affects only searching
+configs). Band-pinning (resolution / anneal-on-realized-ΔJ / σ floor) is the successor
+phase's natural charter, with σ=0.20's re-use context now doubly earned.
