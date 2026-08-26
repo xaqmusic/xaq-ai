@@ -4397,3 +4397,57 @@ anti-circling factor). Short-window smoke: `flow = 0.775` with **fmag 0.225 < fp
 0.686** — the min-form split reads *travel is the binding constraint*, which is
 precisely the pressure the PART IV criterion lacked. D1 (pre-registered in the plan doc
 §3-D before its runs) decides whether that pressure flattens the coupling→0 basin.
+
+### ★★★ 2026-08-25 — D1: THE BASIN SURVIVES THE TRAVEL TERM — and the C2 budget says why, and what fixes it
+
+**Verdict: D1 `NULL` on its registered rule (P1 held, P2 failed) — and the registered
+fail-branch immediately produced the C2 lever.** 12 runs (2 arms × 6 seeds, 228k ticks,
+coupling stepped 0→2 by SETPARAM_AT, σ=0 observer, behavior-identical bodies so the J
+difference is the criterion alone). Logs `~/xaq_runs/stridoD1_20260825/`.
+
+**★ 1. P1 HELD — the control replicates the wrong-way basin** (old criterion: J best at
+coupling 0.0–0.4, band worse; zero wins 4/6 seeds), so the control is valid and C1 gets a
+real verdict. **P2 FAILED — under C1 the zero basin still wins 4/6 seeds** (J(0.0) 2.443
+vs band 2.458–2.472), *the same seeds* as the control.
+
+**★ 2. THE FLOW REPAIR ITSELF WORKS.** C1's flow penalty gap at coupling 0 vs the band
+widened ~50% over the old term (0.18 vs 0.12 of flow units) — travel now pays. It is
+simply OUTVOTED: energy (w=4) rises 0.375→0.414 across the sweep, worth 4×0.039 ≈ 0.156
+of J against the band, more than flow's improvement buys back. **A criterion repair is
+two problems: the term (fixed by C1) and the BALANCE (C2's, exactly as the plan's
+fail-branch registered).**
+
+**★ 3. THE C2 BUDGET, measured on the D1 corpus** (variance share = cov(w·term, J)/var(J);
+noise from same-level consecutive-window pairs — the gate-analyze estimator on a cleaner
+corpus than gate 2 ever had): under C1, **energy carries 55% of the decision variance at
+s/n 0.76** (and PART IV showed its content is a damping copy), **the repaired flow is the
+cleanest term in the criterion (s/n 1.11) but holds only 8.7%**, tilt injects noise
+(s/n 0.47, 35%), unloaded is negligible in variance (0.9%) but is a guard-flavored term.
+
+**★ 4. THE RE-BALANCE, chosen by offline recomputation on the same 108 windows** (no new
+runs — the windows carry every term):
+
+| weights (flow, energy) | argmin | band beats zero | margin |
+|---|---|---|---|
+| c1 as-run (1, 4) | 0.4 | 2/6 | −0.022 |
+| energy→1 (1, 1) | 0.8 | 4/6 | +0.046 |
+| **flow→2, energy→1** | **0.8** | **5/6** | **+0.206, and coupling 0 becomes the WORST point on the landscape** |
+
+**C2 ships `w_energy 4→1` + `w_flow 1→2`** — each justified by content (energy is a
+damping copy; flow is the honest travel carrier with the best s/n), the pair by the
+measured flip. This is an in-sample read of the D1 corpus; **D2 (displacement, tsw2
+shape) is the out-of-sample behavioral test and the phase's headline gate.**
+
+**★ 5. SLIP STAYS OUT OF J.** The candidate measured s/n 1.10 — term-grade — but its
+level profile RISES with coupling (0.124 → 0.144): slip is travel-linked, so a positive
+weight would re-create a move-less pressure. It ships as a percept, not a criterion
+term. *Re-use context: normalized per unit travel (slip/|stride_v|), or as a guard
+input.*
+
+**★ 6. BUG (fixed): window-term attribution in the landscape readers was off by one.**
+A window's ge_* terms appear on the FIRST diag line AFTER the `ge_wt` reset that closes
+it; `coupling_authority.py` took the last line before, attributing each window the
+previous window's terms. With 3 windows per level this dilutes level contrast but
+preserves ordering, so PART IV's authority ORDERING reads survive; exact per-level
+values shift. Found by asking the D1 data where the J-step lands relative to the
+coupling-step (§3.2: measure the instrument before trusting it).

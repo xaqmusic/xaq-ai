@@ -68,7 +68,7 @@ def random_starts(keys, lo, hi, n, seed):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("sweep", choices=["basin", "basin3d", "winverify", "tsweep"])
+    ap.add_argument("sweep", choices=["basin", "basin3d", "winverify", "tsweep", "d2"])
     ap.add_argument("outdir", nargs="?", default=CFG)
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
@@ -108,7 +108,10 @@ def main():
         print("6 configs")
 
     else:
+        # tsweep, and its PART V twin `d2`: the SAME displaced-start protocol with the
+        # C2-rebalanced criterion applied (stride_odometry plan §3-D pre-registration).
         base = load(BASE3)
+        prefix = "tsw2" if a.sweep == "tsweep" else "d2"
         for label, sig, smin, smax, tgt in TSWEEP_ARMS:
             for s in (1, 2, 3, 4, 5, 6):
                 c = json.loads(json.dumps(base))
@@ -116,6 +119,14 @@ def main():
                 p["gain_seed"] = TSWEEP_START
                 p["mutation_sigma"], p["target_accept"] = sig, tgt
                 p["sigma_min"], p["sigma_max"] = smin, smax
+                if a.sweep == "d2":
+                    # The C2 criterion (ledger 2026-08-25 D1/C2 entry): the legal
+                    # travel lane + the repaired flow form + the measured re-balance.
+                    p["travel_topic"] = "reality.proprio.stride_v"
+                    p["flow_min_form"] = 1
+                    p["flow_turn_k"] = 4.0
+                    p["w_flow"] = 2.0
+                    p["w_energy"] = 1.0
                 # ⚠ THE CONTROL CONFOUND FIX (audit 2026-08-24).  At sigma 0 the
                 # evolver is a silent observer and PUBLISHES NOTHING, so the body
                 # runs the MotorEPM's own config values — the first sigma0 control
@@ -127,8 +138,10 @@ def main():
                 mp = motor_of(c)["params"]
                 for k, v in zip(p["gain_keys"], TSWEEP_START):
                     mp[k] = v
-                write(c, os.path.join(a.outdir, f"tsw2_{label}_s{s}.json"),
-                      f"step-size sweep arm '{label}' seed {s}. Starts displaced with "
+                write(c, os.path.join(a.outdir, f"{prefix}_{label}_s{s}.json"),
+                      f"step-size sweep arm '{label}' seed {s}"
+                      + (" under the C2 criterion" if a.sweep == "d2" else "")
+                      + ". Starts displaced with "
                       f"coupling at 0.30, inside its BAD band — in BOTH the evolver seed "
                       f"and the MotorEPM params, so the sigma0 control's body is actually "
                       f"displaced (the first control ran j1s4 — audit 2026-08-24). A pass "
@@ -139,8 +152,11 @@ def main():
                                                 ge_of(base)["params"]["gain_max"]))),
                    "start": TSWEEP_START,
                    "arms": [list(x) for x in TSWEEP_ARMS]},
-                  open(os.path.join(a.outdir, "tsweep_spec.json"), "w"), indent=1)
-        print(f"{len(TSWEEP_ARMS) * 6} configs + tsweep_spec.json")
+                  open(os.path.join(a.outdir,
+                       "tsweep_spec.json" if a.sweep == "tsweep" else "d2_spec.json"),
+                       "w"), indent=1)
+        print(f"{len(TSWEEP_ARMS) * 6} configs + "
+              + ("tsweep_spec.json" if a.sweep == "tsweep" else "d2_spec.json"))
     print("⚠ vary OGMA_SEED between replicates. The module's `seed` param is NOT an")
     print("  independent knob — OGMA_SEED overrides it, which silently made one sweep's")
     print("  n=3 into n=1 (2026-08-24).")

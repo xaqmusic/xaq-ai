@@ -152,6 +152,31 @@ One lever per A/B. C1 and C2 are separate arms, never combined in one comparison
 > If P1 fails, the control is invalid and NOTHING about C1 is concluded (§3.2 #4).
 > If P1 holds and P2 fails, the wrong-way basin survives a real travel term and the
 > next suspect is the term BALANCE on the stage-C2 budget, as chartered.
+>
+> **RESULT 2026-08-25 — P1 HELD, P2 FAILED; the fail-branch fired** (ledger D1 entry).
+> The flow repair works (its zero-vs-band penalty gap widened ~50%) but energy at w=4
+> outvotes it. The C2 budget on the same corpus: energy 55% of decision variance at
+> s/n 0.76; repaired flow the cleanest term (s/n 1.11) at 8.7%. Offline recomputation
+> over the 108 windows: `w_energy 4→1` + `w_flow 1→2` flips the basin (5/6 seeds,
+> +0.206 margin; coupling 0 becomes the WORST point). Slip measured term-grade
+> (s/n 1.10) but travel-linked (rises 0.124→0.144 with coupling) — stays OUT of J.
+
+> **D2 PRE-REGISTRATION (2026-08-25, committed before the runs).** Protocol: tsw2
+> exactly (`gainevo_make_arms.py d2` — the tsweep arms with the C2 criterion applied:
+> travel_topic = stride_v, flow_min_form 1, flow_turn_k 4, w_flow 2, w_energy 1).
+> Arena, difficulty 0.3, 600k ticks, arms sigma0 (displaced control, start written
+> into BOTH evolver seed and MotorEPM params) / fix008 / fix020, OGMA_SEED 1–6.
+> **Predictions:** (P1) sigma0 controls stay near the displaced coupling 0.30 with
+> flat J. (P2, the phase's headline gate as chartered) a searching arm re-enters
+> coupling 1.2–2.0 in the MAJORITY of its runs with ΔJ below the control's.
+> **Secondary registered read:** under the C2 criterion the landscape argmin measured
+> 0.8, so runs that climb out of the zero basin to ≥ 0.8 without crossing 1.2 are
+> reported as *directional* success, distinctly — they would satisfy the criterion
+> while missing the chartered band. **Decision rule:** gate D passes on P2 for either
+> searching arm. If controls also climb, the protocol is invalid (consumer-displacement
+> confound). If no arm climbs while D1's offline flip predicted the pressure exists,
+> the suspect becomes search dynamics (step size / margin), NOT the criterion — σ=0.20's
+> recorded re-use context applies.
 2. **Re-arm the displacement protocol** — the tsw2 shape exactly: displaced start written
    into evolver seed *and* consumer params, σ=0 control, n=6, pre-registered predictions
    and decision rule committed before the data (doctrine §8: that pre-registration is
