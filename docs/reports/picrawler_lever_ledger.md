@@ -4496,3 +4496,56 @@ promotes the C2 criterion as the reference criterion for the next phase's work. 
 deployed j1s4 stack is UNTOUCHED (σ=0; the criterion change affects only searching
 configs). Band-pinning (resolution / anneal-on-realized-ΔJ / σ floor) is the successor
 phase's natural charter, with σ=0.20's re-use context now doubly earned.
+
+### ★★★ 2026-08-26 — STAGE E, THE TWO-BODY STUDY: the criterion reads the body; the search transmits the landscape it is given; and searching on the WRONG body's operating point is dangerous
+
+**The operator-directed embodiment capstone** (same C2 criterion, same seed streams,
+same coupling displacement; `cad` = the body as designed, every prior result; `measured`
+= the body as built). Pre-registrations in the plan doc §3-E; tool `strido_twobody.py`;
+logs `~/xaq_runs/twobodyE1_20260826/` and `twobodyE2_20260826/` (cad's search arm = the
+D2 corpus reused — deterministic replay would be byte-identical, registered as such).
+
+**★ 1. E1 — THE CRITERION DISTINGUISHES THE BODIES (the study's clean positive).**
+Per-body coupling landscapes, arena, gate PASS at 4/6 levels beyond 2× window noise —
+and the difference is SHAPE, not offset: cad has a sculpted basin descending to argmin
+1.6 (relief 0.41); the measured body is FLAT across 0.4–1.2 (relief 0.11 ≈ noise) and
+turns worse exactly at cad's optimum (+0.44, the largest gap). Same gains, same
+evaluator, different mechanics ⇒ different preferred region. This is an embodiment
+property, measured.
+
+**★ 2. E2 — THE SEARCH TRANSMITS ITS BODY'S LANDSCAPE, in both directions.** On cad's
+basin it climbs (D2: ΔJ −0.117, t −2.9, endpoints mean 1.23). On measured's flat
+conditional landscape it DIFFUSES: ΔJ +0.056 (t −0.04 vs its own valid control — P1b
+FAILS), endpoints bimodal [0.11, 0.24, 0.25, 0.93, 1.75, 2.00]. Registered reads: P1 ✓
+(controls hold 0.30, 6/6); P2 partial (mean endpoint 0.88 < cad's 1.23 ✓ but no
+concentration in the flat region — flatness concentrates nothing); P3 ✓ directionally
+(one-sided, underpowered at t ≈ 0.8); **P4 ✗ as registered, and the metric itself is
+the lesson**: excess-J is relief-scale-dependent, so a flat cross-landscape makes ANY
+endpoint look good on it. A relief-normalized version favors own-landscape on the
+measured side only; recorded as post-hoc, not evidence.
+
+**★ 3. THE STRONG CLAIM — "each body settles into its own basin" — is NOT demonstrated
+in this context**, and the mechanism is precise: at the cad-tuned operating point the
+measured body HAS no coupling basin to settle into; a search cannot converge to a
+feature that does not exist. E1 predicted E2's measured-body outcome before it ran.
+*Re-use contexts for the vivid form:* (a) let each body settle its OWN operating point
+first (native run from the j1s4 start), then displace both from their own points; (b)
+an amplified third body; (c) the injured-body (ablation) variant, where the landscape
+difference is guaranteed large.
+
+**★ 4. ★ THE UNREGISTERED LOUD FINDING — VIABILITY DOES NOT TRANSFER.** Falls per 600k
+ticks, medians: cad σ0 **2** / cad searching **17** / measured σ0 **42** / measured
+searching **210** (peak 831, in a run that pinned amp at its ceiling — the known
+pathology, reappearing on the new body). Two independent effects: the cad-tuned
+operating point itself is ~20× less viable on the built body, and SEARCHING multiplies
+falls ~5–8× on both bodies — the guard set (falls out of J by design; guards tuned on
+cad) does not contain exploration on the measured body. **Sim2real warning of record:
+porting the evolver to hardware requires re-earning the viability guards on the
+physical body BEFORE the search is allowed to move** — a fall on the bench is not an
+auto-reset. Confound noted honestly: the measured body carries chassis collision boxes
+(cad's chassis is a ghost), which may contribute to the falls RATIO; it cannot explain
+the search-multiplier within either body.
+
+**Net: the method's embodiment story stands on E1 + the climb/diffuse contrast; the
+settling demo needs per-body operating points; and the port plan gains a hard
+requirement it did not have yesterday.**

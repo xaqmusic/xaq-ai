@@ -245,6 +245,15 @@ now.
 > track the body's own landscape — the settling is criterion- or search-generic, and
 > the embodiment claim fails at this power.
 
+> **E2 RESULT (2026-08-26, ledger stage-E entry):** P1 ✓, P1b ✗ (no ΔJ descent on
+> measured — its flat landscape gives the search nothing), P2 partial, P3 ✓
+> directionally (underpowered), P4 ✗ with the metric lesson recorded. The strong
+> settling claim is not demonstrated at this power; E1 + the climb/diffuse contrast
+> carry the embodiment story. Unregistered loud finding: falls medians 2/17/42/210
+> (cad-σ0/cad-search/meas-σ0/meas-search) — viability guards do NOT transfer across
+> bodies; re-earn guards on the physical body before the search may move (port-plan
+> requirement).
+
 ## 4. The sim2real dividend
 
 This phase is also the port plan. With `stride_v` (needs no new hardware — commanded
