@@ -30,7 +30,9 @@ LEVELS_ASC = [0.0, 0.4, 0.8, 1.2, 1.6, 2.0]
 WARMUP, WINDOW, WPL = 10000, 12000, 3
 MAX_STEPS = WARMUP + len(LEVELS_ASC) * WPL * WINDOW + 2000   # 228k: slack for the last flush
 SEEDS = range(1, 7)
-CONCURRENCY = 12
+# 12 concurrent instances on 20 cores measured ~19 tps/run (vs ~80 at 6) — two waves
+# of 6 finish in well under half the wall time of one oversubscribed wave of 12.
+CONCURRENCY = 6
 
 
 def schedule(asc):
