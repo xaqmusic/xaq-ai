@@ -4380,3 +4380,20 @@ the offline simulation exactly — the in-body filter is faithful.
 stepping-in-place reads 3.7× less than walking at equal step amplitude on the validation
 pair (7× on the gate-A n=9); and the no-consumer guard was measured, not argued —
 **7900/7900 ticks byte-identical trajectory** vs the pre-sensor build on the same seed.
+
+### ★★ 2026-08-25 — C1: THE TERM SWAP IS IN, and the min-form split already reads "travel-limited"
+
+**Verdict: `WORKING` (plumbing verified end to end; the science waits for D1).**
+`travel_topic` (ConstructionOnly) on the GainEvolver: `""` (default) keeps flow on
+`imu values[2]` — **measured byte-identical, 5900/5900 ticks, same seed, vs the pre-C1
+build**; set to `reality.proprio.stride_v` it feeds the flow term the legal estimate and
+gates the imu write off. The two-sided meter closed the loop the same day it opened:
+`ge_trx` counts exactly 1 message/tick and `ge_fin == stride_v` to the digit.
+
+The `j1s4_c1` arm config turns on, unchanged, the two OFF-shipped PART IV pieces whose
+recorded re-use context was exactly this moment: `flow_min_form = 1` (magnitude can no
+longer be traded for stillness-bought predictability) and `flow_turn_k = 4` (the lawful
+anti-circling factor). Short-window smoke: `flow = 0.775` with **fmag 0.225 < fpred
+0.686** — the min-form split reads *travel is the binding constraint*, which is
+precisely the pressure the PART IV criterion lacked. D1 (pre-registered in the plan doc
+§3-D before its runs) decides whether that pressure flattens the coupling→0 basin.
