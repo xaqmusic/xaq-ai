@@ -4318,10 +4318,13 @@ func _load_geometry(path_override: String = "") -> bool:
 	if path_override != "":
 		p = path_override
 	else:
-		var env_body: String = OS.get_environment("OGMA_PICRAWLER_BODY")
-		if env_body != "":
-			p = env_body if env_body.begins_with("res://") \
-				else "res://addons/ami_ogma/body/%s.json" % env_body
+		# Launcher metadata.body > OGMA_PICRAWLER_BODY env > @export default —
+		# resolved in ExperimentConfig so a benchmark config (a body+gains PAIR,
+		# stage E3) launched from the UI always gets ITS body.
+		var sel: String = ExperimentConfig.resolve_picrawler_body("")
+		if sel != "":
+			p = sel if sel.begins_with("res://") \
+				else "res://addons/ami_ogma/body/%s.json" % sel
 
 	var applied: bool = false
 	if not FileAccess.file_exists(p):

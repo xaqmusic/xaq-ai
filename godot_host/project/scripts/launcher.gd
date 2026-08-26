@@ -383,6 +383,9 @@ func _read_metadata(path: String) -> Variant:
 		# Gym / world select — "" = donut arena (default), "corridor" = trench
 		# curriculum gym.  Lets a config pick its world (metadata.gym_mode).
 		"picrawler_gym_mode":             str(meta.get("gym_mode",                "")),
+		# Body geometry select — "" = env/default (cad).  Lets a BENCHMARK config
+		# carry its body with its gains (metadata.body; stage E3 2026-08-26).
+		"picrawler_body":                 str(meta.get("body",                    "")),
 		# Corridor obstacle difficulty (0..1); -1 = not declared -> spinbox default.
 		"picrawler_gym_difficulty":       float(meta.get("gym_difficulty",       -1.0)),
 	}
@@ -831,6 +834,7 @@ func _on_launch() -> void:
 	ExperimentConfig.picrawler_walk_hit_rate        = float(entry.get("picrawler_walk_hit_rate",        -1.0))
 	ExperimentConfig.picrawler_leg_symmetry         = str(entry.get("picrawler_leg_symmetry",            ""))
 	ExperimentConfig.picrawler_gym_mode             = str(entry.get("picrawler_gym_mode",                ""))
+	ExperimentConfig.picrawler_body                 = str(entry.get("picrawler_body",                    ""))
 	# Corridor difficulty comes from the spinbox (picrawler only); other envs -1.
 	ExperimentConfig.picrawler_gym_difficulty       = (_gym_difficulty_spin.value
 		if (_selected_env == "picrawler" and _gym_difficulty_spin != null) else -1.0)
