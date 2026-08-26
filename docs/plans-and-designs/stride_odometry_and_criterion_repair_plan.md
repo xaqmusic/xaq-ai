@@ -135,6 +135,23 @@ One lever per A/B. C1 and C2 are separate arms, never combined in one comparison
    **The concrete success test: the coupling→0 basin flattens or the band basin
    dominates.** Also read what the new criterion says about amp — under a real travel
    magnitude it should stop preferring the quiet end of amp's range for free.
+
+> **D1 PRE-REGISTRATION (2026-08-25, committed before the runs).** Protocol: the
+> coupling-authority shape exactly — σ=0 observer, SETPARAM_AT steps
+> `motor_epm.coupling_gain` through [0.0, 0.4, 0.8, 1.2, 1.6, 2.0], 3 scored 12k
+> windows per level, warmup 10000; seeds 1–6, odd ascending, even descending. Two
+> arms, same seeds: `j1s4` (old criterion, the control) and `j1s4_c1` (travel_topic =
+> stride_v, flow_min_form 1, flow_turn_k 4). Bodies are behavior-identical across
+> arms (measured, C1 commit), so any J difference is the criterion alone.
+> **Predictions:** (P1) the control replicates PART IV's wrong-way basin — J improves
+> toward coupling 0 (energy-led). (P2) under C1 the coupling→0 basin flattens or
+> inverts: mean J at level 0.0 no longer beats the band (1.2–1.6), because fmag now
+> pays for the travel collapse (the c0 config measured stride_v 0.006 vs 0.021 m/s).
+> **Decision rule:** C1 passes D1 if P1 holds AND under C1 J(0.0) − J(1.2..1.6-best)
+> ≥ 0, judged on seed means with the asc/desc hysteresis check from the analyzer.
+> If P1 fails, the control is invalid and NOTHING about C1 is concluded (§3.2 #4).
+> If P1 holds and P2 fails, the wrong-way basin survives a real travel term and the
+> next suspect is the term BALANCE on the stage-C2 budget, as chartered.
 2. **Re-arm the displacement protocol** — the tsw2 shape exactly: displaced start written
    into evolver seed *and* consumer params, σ=0 control, n=6, pre-registered predictions
    and decision rule committed before the data (doctrine §8: that pre-registration is
