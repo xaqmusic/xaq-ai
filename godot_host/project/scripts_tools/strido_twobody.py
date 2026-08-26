@@ -97,14 +97,18 @@ def cmd_landscape(outdir):
 
 
 def cmd_search(outdir):
+    # MEASURED BODY ONLY.  The cad arm of E2 is the D2 corpus reused
+    # (~/xaq_runs/stridoD2_20260825): identical configs, seeds, gym, body and
+    # criterion, and the sim is deterministic (measured twice this campaign), so a
+    # cad re-run would reproduce those logs byte-for-byte.  Registered in the plan
+    # doc's E2 block — cad's numbers are post-diction and cited as-is.
     jobs = []
     k = 0
-    for body in BODIES:
-        for arm in SEARCH_ARMS:
-            for s in SEEDS:
-                jobs.append((body, arm, f"d2_{arm}_s{s}.json", s, SEARCH_STEPS,
-                             outdir, 7850 + k, None))
-                k += 1
+    for arm in SEARCH_ARMS:
+        for s in SEEDS:
+            jobs.append(("measured", arm, f"d2_{arm}_s{s}.json", s, SEARCH_STEPS,
+                         outdir, 7850 + k, None))
+            k += 1
     print(f"E2: {len(jobs)} runs x {SEARCH_STEPS} ticks -> {outdir}")
     with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
         ok = list(ex.map(lambda j: run_one(*j), jobs))

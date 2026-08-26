@@ -220,6 +220,30 @@ now.
 > climb, twice). The claim under test: paired by seed, each body's endpoints match
 > its OWN E1 landscape better than the other body's — falsifiable in both directions,
 > robust to flat-band endpoint wander.
+>
+> **E1 RESULT (2026-08-26): GATE PASS, 4/6 levels beyond 2× noise.** cad: a sculpted
+> basin, monotone descent to argmin 1.6 (J 1.759 vs 2.167 at zero). measured: nearly
+> flat across 0.4–1.2 (argmin 1.2 at 2.135, tied within noise with 0.4/0.8), and
+> RISING where cad's optimum sits (1.6: +0.44 vs cad, the largest between-body gap).
+> The bodies prefer different regions. Logs `~/xaq_runs/twobodyE1_20260826/`.
+>
+> **E2 EXACT PRE-REGISTRATION (2026-08-26, committed before the measured-body runs).**
+> The cad arm is the D2 corpus REUSED (identical configs/seeds/gym/body/criterion;
+> the sim is deterministic — a re-run would reproduce the logs byte-for-byte), so
+> cad's numbers are post-diction and are cited as-is: fix020 endpoints
+> [0.41, 0.76, 1.17, 1.22, 1.81, 2.00], mean 1.23, 3/6 ≥ 1.2, ΔJ −0.117 (t −2.9).
+> Fresh runs: measured body only, sigma0 + fix020 × seeds 1–6.
+> **Predictions:** (P1) measured sigma0 controls hold coupling 0.30, J flat. (P1b)
+> measured fix020's ΔJ beats its own control (the search descends on a body nothing
+> was tuned for — the mechanism-transfers claim). (P2) measured fix020 endpoints
+> concentrate in its own flat preferred region: mean endpoint BELOW cad's 1.23, and
+> fewer runs ending ≥ 1.6 than cad's 2/6. (P3, the headline contrast) cad mean
+> endpoint > measured mean endpoint, one-sided. (P4, secondary) own-landscape excess
+> J at endpoint (J_own(end) − min J_own) averaged over a body's runs is smaller than
+> its cross-landscape excess — the cross-prediction as one number; noted weak on the
+> measured side by its own flatness. Falsification of P2/P3 = the endpoints do NOT
+> track the body's own landscape — the settling is criterion- or search-generic, and
+> the embodiment claim fails at this power.
 
 ## 4. The sim2real dividend
 
