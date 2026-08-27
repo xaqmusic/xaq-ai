@@ -161,6 +161,100 @@ def cmd_analyze_settle(outdir):
                   f"J3={r['J_third']:.4f} falls={r['falls']}{mark}")
 
 
+NATIVES = {"cad": [0.1857, 0.8781, 1.2623], "measured": [0.3075, 0.9197, 0.8516]}
+CFG_NATIVE = {b: ("the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose"
+                  f"__m1auth__planpull__native_{b}.json") for b in BODIES}
+
+
+def make_e3b_configs():
+    """Displaced arms per body: the E3a native with coupling -> 0.30 written into
+    BOTH the evolver seed and the MotorEPM params (the tsw2 control-confound fix)."""
+    out = []
+    for body in BODIES:
+        base = json.load(open(os.path.join(CFGDIR, CFG_NATIVE[body])))
+        start = list(NATIVES[body])
+        start[1] = 0.30
+        for label, sig in (("sigma0", 0.0), ("fix020", 0.2)):
+            c = json.loads(json.dumps(base))
+            ge = next(m for m in c["modules"] if m.get("type") == "GainEvolver")["params"]
+            mo = next(m for m in c["modules"] if m.get("type") == "MotorEPMv2")["params"]
+            ge["gain_seed"] = start
+            ge["mutation_sigma"] = sig
+            if sig > 0:
+                ge["sigma_min"], ge["sigma_max"] = sig, sig
+                ge["target_accept"] = -1.0
+            for k, v in zip(ge["gain_keys"], start):
+                mo[k] = v
+            name = f"e3b_{body}_{label}.json"
+            json.dump(c, open(os.path.join(CFGDIR, name), "w"), indent=2)
+            out.append(name)
+    return out
+
+
+def cmd_e3b(outdir):
+    make_e3b_configs()
+    jobs = []
+    k = 0
+    for body in BODIES:
+        for s in (1, 2, 3):                       # native-sigma0: the benchmark, frozen
+            jobs.append((body, "native", CFG_NATIVE[body], s, SEARCH_STEPS,
+                         outdir, 7950 + k, None)); k += 1
+        for s in (1, 2, 3):                       # displaced control
+            jobs.append((body, "disp0", f"e3b_{body}_sigma0.json", s, SEARCH_STEPS,
+                         outdir, 7950 + k, None)); k += 1
+        for s in SEEDS:                           # the searcher
+            jobs.append((body, "fix020", f"e3b_{body}_fix020.json", s, SEARCH_STEPS,
+                         outdir, 7950 + k, None)); k += 1
+    print(f"E3b: {len(jobs)} runs x {SEARCH_STEPS} ticks -> {outdir}")
+    with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
+        ok = list(ex.map(lambda j: run_one(*j), jobs))
+    print(f"done: {sum(ok)}/{len(ok)} confirmed (body + config)")
+
+
+def cmd_analyze_e3b(outdir):
+    """The registered E3b reads: validity, P1, P2, P3, plus descriptive endpoints."""
+    for body in BODIES:
+        arms = {}
+        for arm in ("native", "disp0", "fix020"):
+            rows = []
+            for p in sorted(glob.glob(f"{outdir}/{body}/{arm}_s*.log")):
+                ws = windows(p)
+                if not ws:
+                    continue
+                third = ws[-(max(1, len(ws) // 3)):]
+                rows.append({
+                    "run": os.path.basename(p),
+                    "vec": ws[-1].get("ge_vec"),
+                    "J3": st.mean(float(w["ge_ji"]) for w in third),
+                    "dJ": (st.mean(float(w["ge_ji"]) for w in ws[-(len(ws) // 3):])
+                           - st.mean(float(w["ge_ji"]) for w in ws[:max(1, len(ws) // 3)])),
+                    "falls": int(ws[-1].get("auto_reset_count", 0)),
+                })
+            arms[arm] = rows
+        jn = st.mean(r["J3"] for r in arms["native"])
+        jd = st.mean(r["J3"] for r in arms["disp0"])
+        jf = st.mean(r["J3"] for r in arms["fix020"])
+        print(f"\n=== {body} ===")
+        for arm in ("native", "disp0", "fix020"):
+            for r in arms[arm]:
+                v = r["vec"]
+                print(f"  {arm:7s} {r['run']:16s} coup={v[1]:.3f} amp={v[0]:.3f} post={v[2]:.3f}"
+                      f"  J3={r['J3']:.4f} dJ={r['dJ']:+.4f} falls={r['falls']}")
+        print(f"  VALIDITY: J3 native {jn:.4f} vs displaced {jd:.4f} "
+              f"({'OK — displacement costs' if jd > jn else '** INVALID: no cost **'})")
+        holds = sum(1 for r in arms["disp0"] if abs(r["vec"][1] - 0.30) < 0.01)
+        print(f"  P1: displaced-σ0 holds 0.30 in {holds}/{len(arms['disp0'])}")
+        climbs = sum(1 for r in arms["fix020"] if r["vec"][1] >= 0.6)
+        dj_f = st.mean(r["dJ"] for r in arms["fix020"])
+        dj_d = st.mean(r["dJ"] for r in arms["disp0"])
+        print(f"  P2: fix020 coupling ≥0.6 in {climbs}/6 (need ≥4); "
+              f"dJ fix020 {dj_f:+.4f} vs disp0 {dj_d:+.4f}")
+        if jd > jn:
+            frac = (jf - jn) / (jd - jn)
+            print(f"  P3: recovery fraction (J3_fix020−J3_native)/(J3_disp−J3_native) "
+                  f"= {frac:.2f} (need < 0.5)")
+
+
 def cmd_search(outdir):
     # MEASURED BODY ONLY.  The cad arm of E2 is the D2 corpus reused
     # (~/xaq_runs/stridoD2_20260825): identical configs, seeds, gym, body and
@@ -255,5 +349,10 @@ if __name__ == "__main__":
                    os.path.expanduser(time.strftime("~/xaq_runs/twobodyE3a_%Y%m%d")))
     elif len(sys.argv) >= 3 and sys.argv[1] == "analyze-settle":
         cmd_analyze_settle(sys.argv[2])
+    elif len(sys.argv) >= 2 and sys.argv[1] == "e3b":
+        cmd_e3b(sys.argv[2] if len(sys.argv) > 2 else
+                os.path.expanduser(time.strftime("~/xaq_runs/twobodyE3b_%Y%m%d")))
+    elif len(sys.argv) >= 3 and sys.argv[1] == "analyze-e3b":
+        cmd_analyze_e3b(sys.argv[2])
     else:
         print(__doc__)

@@ -272,6 +272,32 @@ carried body-and-gains-together via new `metadata.body` support in the launcher 
 > endpoints and falls go to the ledger beside the selected one. E3a is exploratory
 > (settling, not a hypothesis test); E3b's predictions are registered from its
 > numbers before E3b launches.
+>
+> **E3a RESULT (2026-08-26):** cad native = [amp 0.1857, coupling 0.8781, postural
+> 1.2623] (settle_s6: J3 1.765, 2 falls — the arm's cleanest run); measured native =
+> [0.3075, 0.9197, 0.8516] (settle_s3: J3 1.993, 383 falls while searching; the
+> measured arm's search stayed fall-heavy, median 405 — the stage-E viability finding
+> again). The natives separate in AMP and POSTURAL, barely in coupling — and cad's
+> joint optimum (coupling 0.88, amp 0.19) does not match its E1 conditional slice
+> (argmin 1.6 at j1s4 amp/postural): non-composition, measured on the joint optimum.
+> cad shows a second good mode at coupling ~2.0 (s3/s5). Both natives ship as
+> permanent launcher benchmarks (`native_cad` / `native_measured`, metadata.body).
+>
+> **E3b PRE-REGISTRATION (2026-08-26, committed before the runs).** Per body, three
+> arms, arena 0.3, 600k: `native-σ0` n=3 (the benchmark config frozen at the native
+> point — characterizes the benchmark and anchors the recovery target),
+> `displaced-σ0` n=3 (native with coupling → 0.30 in both evolver seed and MotorEPM
+> params), `displaced-fix020` n=6 (same start, σ 0.2 pinned). **Validity condition:**
+> displaced-σ0's last-third J must be WORSE than native-σ0's (the displacement must
+> cost something, or there is nothing to recover — else report and stop).
+> **Predictions:** (P1) displaced-σ0 holds coupling 0.30. (P2, per body) fix020
+> re-climbs: ≥ 4/6 runs end coupling ≥ 0.6 AND arm ΔJ beats displaced-σ0's.
+> (P3, recovery) fix020's last-third J recovers the majority of the displacement
+> cost: (J3_fix020 − J3_native) < 0.5 × (J3_displaced − J3_native), per body on arm
+> means. The two bodies' recovered (amp, postural) endpoints separating toward their
+> own natives is reported DESCRIPTIVELY, not as a registered pass (the start is
+> body-specific, so a cross-body preference test would be biased by construction —
+> the common-start version of that test is the already-run D2/E2 pair).
 
 ## 4. The sim2real dividend
 
