@@ -299,6 +299,17 @@ carried body-and-gains-together via new `metadata.body` support in the launcher 
 > body-specific, so a cross-body preference test would be biased by construction —
 > the common-start version of that test is the already-run D2/E2 pair).
 
+> **E3b RESULT (2026-08-27, ledger E3 entry): ALL REGISTERED PREDICTIONS PASS on
+> both bodies.** Validity ✓ (displacement costs J), P1 ✓ (controls hold 6/6),
+> P2 ✓ (re-climb 6/6 cad, 5/6 measured; ΔJ beats control on both), P3 ✓✓ with
+> OVER-recovery (fractions −0.24 / −0.68 — E3a's 600k settle was unconverged).
+> The E2 measured-body null was about the operating point, not the body. "Home" is
+> a REGION (descriptive read: endpoints scatter within-body; measured's recovered
+> postural runs high of its native). Measured native is fall-heavy frozen
+> (849–940/600k); benchmark-upgrade candidates from E3b's best finds are in frozen
+> n=3 validation under a registered rule (promote only if better on BOTH J3 and
+> falls).
+
 ## 4. The sim2real dividend
 
 This phase is also the port plan. With `stride_v` (needs no new hardware — commanded

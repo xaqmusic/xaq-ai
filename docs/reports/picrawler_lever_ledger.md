@@ -4549,3 +4549,41 @@ the search-multiplier within either body.
 **Net: the method's embodiment story stands on E1 + the climb/diffuse contrast; the
 settling demo needs per-body operating points; and the port plan gains a hard
 requirement it did not have yesterday.**
+
+### ★★★ 2026-08-27 — E3: DISPLACE FROM YOUR OWN POINT AND THE SEARCH COMES HOME — on BOTH bodies, over-recovering, and the "home" is a region, not a point
+
+**Verdict: every registered E3b prediction PASSES on both bodies** (protocol +
+registrations in the plan doc §3-E3; logs `~/xaq_runs/twobodyE3a_20260826/` and
+`twobodyE3b_20260826/`; 24 runs, all body/config receipts confirmed).
+
+**★ 1. THE (d)-TEST, PER BODY.** Validity held (displacement costs J on both bodies:
+cad 1.994 → 2.120, measured 2.198 → 2.331); displaced-σ0 controls held 0.30 in 6/6.
+fix020 re-climbed coupling ≥ 0.6 in **6/6 (cad)** and **5/6 (measured)** with arm ΔJ
+beating the control on both. **On the measured body — where the common-start E2 search
+could not descend J at all — displacement from its OWN operating point recovers
+decisively.** The E2 null was about the operating point, not the body or the method.
+
+**★ 2. OVER-RECOVERY: recovery fractions −0.24 (cad) and −0.68 (measured)** — the
+searchers ended BELOW the native benchmarks' J. 600k ticks of E3a settling had not
+converged; the criterion still has downhill around both natives. Best finds (endpoint
+vectors, J3 while still searching): cad [0.150, 1.250, 0.316] J3 1.837; measured
+[0.150, 1.509, 1.078] J3 2.026 at **50 falls** — against the measured native's frozen
+**849–940 falls/600k** (★4). Frozen n=3 validation of both candidates is running; the
+benchmark-upgrade rule, registered before it: promote only if the candidate beats the
+incumbent on BOTH last-third J and falls, n=3 frozen means.
+
+**★ 3. "HOME" IS A REGION, NOT A POINT — reported as the descriptive read it was
+registered as.** Recovered endpoints scatter within-body (cad coupling 0.63–2.00;
+measured 0.74–2.00 plus one 0.16 miss) and do NOT return to the exact native vector —
+measured's recovered postural sits high (1.03–1.50, 6/6) where its E3a native was
+0.85. The criterion's per-body optimum is a broad region with multiple modes (cad's
+second mode at coupling ~2.0 appeared in both E3a and E3b), and single settled points
+are samples of it. The demo claim that survives: **displaced, each body's search
+returns to ITS OWN viable region and recovers its own J level** — not "returns to the
+same coordinates."
+
+**★ 4. THE MEASURED NATIVE BENCHMARK IS FALL-HEAVY FROZEN: 849–940 falls/600k**
+(the E3a selection could only choose among what its arm offered; its falls filter was
+relative, not absolute). Its blurb carries this until the candidate validation lands.
+cad's native is clean frozen (1–5 falls/600k, J3 1.994). The falls asymmetry between
+bodies persists at every stage — the port-plan guard-re-earning requirement stands.
