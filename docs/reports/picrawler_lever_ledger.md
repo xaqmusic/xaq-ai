@@ -4587,3 +4587,16 @@ same coordinates."
 relative, not absolute). Its blurb carries this until the candidate validation lands.
 cad's native is clean frozen (1–5 falls/600k, J3 1.994). The falls asymmetry between
 bodies persists at every stage — the port-plan guard-re-earning requirement stands.
+
+**★ 5. THE FROZEN VALIDATION (2026-08-27) SPLIT THE UPGRADE — and caught both
+candidates over-promising.** Registered rule: promote only if better on BOTH frozen
+J3 and falls, n=3. **cad: KEEP** — the challenger's J3 is better (1.90 vs 1.99) but it
+falls 9× more (26 vs 3). **measured: PROMOTE** — [0.150, 1.509, 1.078] beats the
+incumbent on both (J3 2.114 vs 2.198; falls 709 vs 879); `native_measured` now carries
+it, provenance chained in its metadata. The method lesson, recorded for every future
+selection: **a searching run's J and falls are trajectory-mixed** — the measured
+candidate's 50-fall search run froze to ~710 falls at its endpoint (the low falls were
+accrued at OTHER vectors along its path), and cad's 1.84-J search run froze to 1.90 at
+9× the falls. Never promote a point from its searching-run statistics; freeze it first.
+The measured body remains fall-heavy at every point yet measured (~1.2/1000 ticks) —
+its benchmark says so on its face.
