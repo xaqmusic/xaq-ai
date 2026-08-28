@@ -30,29 +30,33 @@ TERMS = [("ge_ji", "J"), ("ge_tilt", "upright sd"), ("ge_unl", "unloaded"),
 
 
 def windows(path):
-    """One record per SCORED window, in order.  A window boundary is ge_wt resetting."""
-    out, prev_wt, cur = [], None, None
-    falls_prev = 0
+    """One record per SCORED window, in order.  A window boundary is ge_wt resetting.
+
+    ⚠ ATTRIBUTION FIX (2026-08-25, measured on the stage-D1 corpus): the just-closed
+    window's ge_* terms appear on the FIRST diag line AFTER the reset — the evolver
+    updates inc_terms when the window closes, and the last line BEFORE the reset still
+    carries the PREVIOUS window.  The original last-line-before form lagged every
+    window by one, diluting level contrast (ordering conclusions survive; exact
+    per-level values shift).  Ledger 2026-08-25 D1 entry, bug ★6."""
+    rows = []
     for ln in open(path, errors="replace"):
         ln = ln.strip()
         if not ln.startswith("{") or '"ge_wt"' not in ln:
             continue
         try:
-            d = json.loads(ln)
+            rows.append(json.loads(ln))
         except json.JSONDecodeError:
             continue
-        wt = int(d.get("ge_wt", -1))
-        if prev_wt is not None and wt < prev_wt and cur is not None:
-            out.append(cur)          # the window that just closed
-        prev_wt = wt
-        if d.get("ge_ji", -1) > 0:   # scored: carries this window's terms
+    out = []
+    for i in range(1, len(rows)):
+        prev, d = rows[i - 1], rows[i]
+        if int(d.get("ge_wt", -1)) < int(prev.get("ge_wt", -1)) and d.get("ge_ji", -1) > 0:
             cur = dict(d)
             cur["_falls_cum"] = int(d.get("auto_reset_count", 0))
-    if cur is not None:
-        out.append(cur)
+            out.append(cur)
     # per-window falls from the cumulative counter
     for i, w in enumerate(out):
-        w["_falls"] = w["_falls_cum"] - (out[i - 1]["_falls_cum"] if i else falls_prev)
+        w["_falls"] = w["_falls_cum"] - (out[i - 1]["_falls_cum"] if i else 0)
     return out
 
 

@@ -4283,3 +4283,320 @@ run on `__gainevo_demo` in the arena showed the expected parameter behavior in t
 inspector (the rack's band overlays doing their job). The demo ships as the phase's
 observation instrument, and PART IV closes with the phase-boundary PR to `picrawler-dev`;
 PART V (`stride_odometry_and_criterion_repair_plan.md`) starts in fresh context.
+
+### ★★★ 2026-08-25 — GATE A: stance-FK odometry CARRIES travel — through a servo forward model, and only through one
+
+**Verdict: `PARTIAL`, promoted to stage B.** The pre-registered gate
+(`stride_odometry_and_criterion_repair_plan.md` §3-A) asked two things of the efference-copy
+half of `stride_v`: r ≥ ~0.8 against true forward velocity, and a *structured* slip
+residual. Measured (27 runs, n=6/arm fixed seeds + n=3 stepping-in-place, 12k ticks,
+j1s4 at difficulty 0/0.3/0.6 + v3base at 0.3): **r = 0.74–0.79 at the criterion timescale
+(1 s windows) under the best simple stance rule — a hair under the bar — and the residual
+is cleanly gait-phase-locked (6–10× a circular-shift null, seed-consistent).** The fail
+branch the gate was built to catch — unstructured slip, no signal — did not happen; every
+loss mechanism found is the thing the stage-B IMU fusion and slip percept are *for*.
+Signal-grade power (§3.3): promote-or-kill only, and it promotes. Sweep + analyzer:
+`scripts_tools/strido_gateA.py`; logs `~/xaq_runs/stridoA_20260825/`.
+
+**★ 1. THE NAIVE EFFERENCE COPY IS DEAD ON THIS BODY.** Raw commanded-angle FK velocity is
+near-uncorrelated with truth (r_tick ≈ 0.03; r_w50 = −0.08..+0.07 across arms). The servos
+low-pass the command too hard for the command to *be* the trajectory (the 22 mm foot-height
+tracking error, now measured on the axis that matters). **A first-order forward model of
+the servo rescues it**: LP(effective target) matches measured angles at r 0.93–0.99 per
+joint (α ≈ 0.2 at 50 Hz ≈ 90 ms; knees slightly faster than hips), and FK on the filtered
+commands reaches r_w50 0.74–0.79 — within 0.05 of the measured-angle ceiling. Efference
+copy works *only through a plant model* — biologically unembarrassing, and sim2real-clean:
+α is discoverable inside the blanket by fitting the FK/IMU disagreement.
+
+**★ 2. THE STANCE RULE IS A MEASURED PARAMETER: fload ≥ ~0.2, a plateau.** G2's ghost-touch
+threshold (0.05) costs ~0.15 of r (0.58–0.69); the optimum plateaus over 0.15–0.30 at
+0.74–0.79. Hysteresis (0.2/0.1) and edge-trimming both score *below* the plain rule —
+r 0.67–0.74 — so the touchdown/liftoff transients are apparently carrying signal, not just
+noise. The published `foot_load` EMA lags liftoff by ~1–2 ticks (α 0.15 at 240 Hz), which
+is exactly when a swing-forward foot pollutes the mean; the higher threshold trims that
+lag. Guard and sensor want *different* thresholds — G2 keeps 0.05.
+
+**★ 3. THE MEDIAN-OF-LEGS CONSENSUS IS REFUTED IN THIS CONTEXT** (the 2026-08-24 entry's
+★2, built and scored offline): r_w50 = 0.29–0.36, slope 0.14–0.19. These gaits simply do
+not keep 3+ feet loaded (stance count mode 3 with heavy 2s), so the median regularly
+includes swing legs. *Re-use context: a true crawl with duty factor ≥ 0.75, or as the
+fallback estimator if load sensing dies on hardware.*
+
+**★ 4. THE WITHIN-STANCE DRIFT DECIDER (2026-08-24 ★4) RETURNED "LARGE" — and the verdict
+it licenses is about the RAW estimator, which is indeed dead.** Forward-model-vs-measured
+FK drift per stance episode: mean ~10 mm, p90 ~22 mm on a ~26 mm stance sweep. Not small.
+The estimator survives at the criterion timescale because the drift is near-zero-mean
+across episodes and legs; what does NOT survive it is the unmodelled command (★1), exactly
+as the registered rule predicted.
+
+**★ 5. SCALE: FK travel integrates to a STABLE 73–78% of true travel** — flat across
+difficulty 0→0.6 and both gaits. A calibratable constant, not a terrain-varying bias; the
+missing quarter is candidate rolling-contact displacement (a capsule foot's contact point
+migrates without any joint moving) plus residual slip — i.e. the slip percept's raw
+material. Regression slope at W=50 is lower (~0.42–0.46): the estimator under-tracks
+*fast* velocity swings specifically, which is the band the stage-B accelerometer term is
+complementary in.
+
+**★ 6. BLIND-METRIC IMMUNITY, DEMONSTRATED NOT ASSUMED.** The `j1s4_c0` arm (coupling → 0
+in both MotorEPM and the frozen evolver seed = PART IV's shuffling basin as a config)
+steps at the same amplitude as the walkers (h1 sd 0.26 vs 0.26–0.32) while FK odometry
+reads 0.73 ± 0.36 m of travel vs the walkers' ~5.4 m — a 7× separation on the axis where
+the flow term's amplitude proxy reads *equal*. This is the property the criterion repair
+buys. Bonus consistency check: slip structure weakens when barely translating (phase-lock
+0.008 vs 0.013–0.024 walking) — the residual is translation-linked re-afference mismatch,
+not sensor noise.
+
+**Stage-B design, as measured:** publish `stride_v` = stance-mean forward FK velocity on
+LP(effective targets), stance = `foot_load ≥ 0.2` both-ends-of-tick, gyro ω×p rotation
+removal (tick-mean gyro); fuse complementary with the IMU per the plan; publish the
+FK/IMU disagreement as `slip`. Instrument stays: `sv_*`/`svl_*` trace fields, the
+stdout `strido_*` EMAs, and the HUD fk-vs-true line (operator-requested).
+
+### ★★ 2026-08-25 — STAGE B SHIPPED: `stride_v` ⊕ `slip` on the bus, and the fusion's β was decided by the criterion's own timescale
+
+**Verdict: `WORKING` (default-no-consumer; behavior-identity MEASURED).**
+`reality.proprio.stride_v` (`[v_right, v_forward]`, vel_ego-shaped for the one-swap
+insertion; lateral flagged UNVALIDATED) and `reality.proprio.slip` now publish every tick
+from `picrawler_body.gd`. Constants as gate A measured them: stance `foot_load ≥ 0.2`,
+servo forward model α 0.2, tick-mean-gyro rotation removal. Uncalibrated by design (the
+~0.75 scale is the consumer's to adapt — prohibition 5).
+
+**★ 1. THE NAIVE COMPLEMENTARY FILTER CRUSHED THE SIGNAL, AND THE FIX IS A PI BIAS
+ESTIMATOR.** P-only fusion (β 0.1) collapsed the mean — integrated travel 0.65 of 3.57 m
+— because the accelerometer's attitude-leak bias enters as `b·TAU/β` ≈ the whole signal.
+Letting the FK innovation *teach* the bias (`ki` 0.1) restores it to ~0.85 of truth,
+better than FK-alone's 0.80. The offline filter re-simulation (`alin` trace field) is the
+instrument that found this; one recorded run tunes every (β, ki) for free.
+
+**★ 2. β = 1.0, BECAUSE THE CRITERION CONSUMES ~1 s EMAs.** Measured trade-off, walk/c0
+validation runs: β 0.3 wins per-tick r (0.75/0.81 vs 0.57/0.55) but LOSES the criterion
+band (r_w50 0.62/0.72); β 1.0 ties the best there (0.71/0.79) with the accel kept for
+swing/flight coasting and the slip innovation. *Re-use context for β ≈ 0.3, ki ≈ 0.05: a
+fast-band consumer (reflexes, footfall-scale prediction).* The published sensor matches
+the offline simulation exactly — the in-body filter is faithful.
+
+**★ 3. GATE B PASSED ON ALL THREE CHECKS.** Publisher meter in the stdout diag
+(`stride_v`/`stride_vx`/`stride_slip`; consumer half arms when stage C subscribes);
+stepping-in-place reads 3.7× less than walking at equal step amplitude on the validation
+pair (7× on the gate-A n=9); and the no-consumer guard was measured, not argued —
+**7900/7900 ticks byte-identical trajectory** vs the pre-sensor build on the same seed.
+
+### ★★ 2026-08-25 — C1: THE TERM SWAP IS IN, and the min-form split already reads "travel-limited"
+
+**Verdict: `WORKING` (plumbing verified end to end; the science waits for D1).**
+`travel_topic` (ConstructionOnly) on the GainEvolver: `""` (default) keeps flow on
+`imu values[2]` — **measured byte-identical, 5900/5900 ticks, same seed, vs the pre-C1
+build**; set to `reality.proprio.stride_v` it feeds the flow term the legal estimate and
+gates the imu write off. The two-sided meter closed the loop the same day it opened:
+`ge_trx` counts exactly 1 message/tick and `ge_fin == stride_v` to the digit.
+
+The `j1s4_c1` arm config turns on, unchanged, the two OFF-shipped PART IV pieces whose
+recorded re-use context was exactly this moment: `flow_min_form = 1` (magnitude can no
+longer be traded for stillness-bought predictability) and `flow_turn_k = 4` (the lawful
+anti-circling factor). Short-window smoke: `flow = 0.775` with **fmag 0.225 < fpred
+0.686** — the min-form split reads *travel is the binding constraint*, which is
+precisely the pressure the PART IV criterion lacked. D1 (pre-registered in the plan doc
+§3-D before its runs) decides whether that pressure flattens the coupling→0 basin.
+
+### ★★★ 2026-08-25 — D1: THE BASIN SURVIVES THE TRAVEL TERM — and the C2 budget says why, and what fixes it
+
+**Verdict: D1 `NULL` on its registered rule (P1 held, P2 failed) — and the registered
+fail-branch immediately produced the C2 lever.** 12 runs (2 arms × 6 seeds, 228k ticks,
+coupling stepped 0→2 by SETPARAM_AT, σ=0 observer, behavior-identical bodies so the J
+difference is the criterion alone). Logs `~/xaq_runs/stridoD1_20260825/`.
+
+**★ 1. P1 HELD — the control replicates the wrong-way basin** (old criterion: J best at
+coupling 0.0–0.4, band worse; zero wins 4/6 seeds), so the control is valid and C1 gets a
+real verdict. **P2 FAILED — under C1 the zero basin still wins 4/6 seeds** (J(0.0) 2.443
+vs band 2.458–2.472), *the same seeds* as the control.
+
+**★ 2. THE FLOW REPAIR ITSELF WORKS.** C1's flow penalty gap at coupling 0 vs the band
+widened ~50% over the old term (0.18 vs 0.12 of flow units) — travel now pays. It is
+simply OUTVOTED: energy (w=4) rises 0.375→0.414 across the sweep, worth 4×0.039 ≈ 0.156
+of J against the band, more than flow's improvement buys back. **A criterion repair is
+two problems: the term (fixed by C1) and the BALANCE (C2's, exactly as the plan's
+fail-branch registered).**
+
+**★ 3. THE C2 BUDGET, measured on the D1 corpus** (variance share = cov(w·term, J)/var(J);
+noise from same-level consecutive-window pairs — the gate-analyze estimator on a cleaner
+corpus than gate 2 ever had): under C1, **energy carries 55% of the decision variance at
+s/n 0.76** (and PART IV showed its content is a damping copy), **the repaired flow is the
+cleanest term in the criterion (s/n 1.11) but holds only 8.7%**, tilt injects noise
+(s/n 0.47, 35%), unloaded is negligible in variance (0.9%) but is a guard-flavored term.
+
+**★ 4. THE RE-BALANCE, chosen by offline recomputation on the same 108 windows** (no new
+runs — the windows carry every term):
+
+| weights (flow, energy) | argmin | band beats zero | margin |
+|---|---|---|---|
+| c1 as-run (1, 4) | 0.4 | 2/6 | −0.022 |
+| energy→1 (1, 1) | 0.8 | 4/6 | +0.046 |
+| **flow→2, energy→1** | **0.8** | **5/6** | **+0.206, and coupling 0 becomes the WORST point on the landscape** |
+
+**C2 ships `w_energy 4→1` + `w_flow 1→2`** — each justified by content (energy is a
+damping copy; flow is the honest travel carrier with the best s/n), the pair by the
+measured flip. This is an in-sample read of the D1 corpus; **D2 (displacement, tsw2
+shape) is the out-of-sample behavioral test and the phase's headline gate.**
+
+**★ 5. SLIP STAYS OUT OF J.** The candidate measured s/n 1.10 — term-grade — but its
+level profile RISES with coupling (0.124 → 0.144): slip is travel-linked, so a positive
+weight would re-create a move-less pressure. It ships as a percept, not a criterion
+term. *Re-use context: normalized per unit travel (slip/|stride_v|), or as a guard
+input.*
+
+**★ 6. BUG (fixed): window-term attribution in the landscape readers was off by one.**
+A window's ge_* terms appear on the FIRST diag line AFTER the `ge_wt` reset that closes
+it; `coupling_authority.py` took the last line before, attributing each window the
+previous window's terms. With 3 windows per level this dilutes level contrast but
+preserves ordering, so PART IV's authority ORDERING reads survive; exact per-level
+values shift. Found by asking the D1 data where the J-step lands relative to the
+coupling-step (§3.2: measure the instrument before trusting it).
+
+### ★★★ 2026-08-26 — GATE D: THE ZERO BASIN IS GONE — the search now climbs toward the band, and what remains is the flat band, not the criterion's direction
+
+**Verdict: `PARTIAL` on the registered endpoint rule — and the phase's position sentence
+is half-falsified in the direction the phase wanted.** D2 = the tsw2 protocol under the
+C2 criterion (18 runs × 600k ticks, arena 0.3, `gainevo_make_arms.py d2` configs,
+displaced start amp 0.385 / coupling 0.30 / postural 1.092 in BOTH evolver seed and
+MotorEPM params; logs `~/xaq_runs/stridoD2_20260825/`, analyzer `gainevo_tsweep.py`).
+Consumer meter: `ge_trx` = 600000 in all 12 searching runs — every scored window ran on
+the legal travel signal.
+
+**★ 1. THE REGISTERED RULE, EXACTLY:** control valid (σ0: coupling 0.30 in 6/6, dJ
++0.005 ± 0.029). fix020: **ΔJ −0.117, Welch t −2.9 vs control — the J half passes
+decisively — and endpoint re-entry into 1.2–2.0 is 3/6: one run short of the registered
+majority.** fix008: +0.019 dJ, 2/6 — σ 0.08 still drifts too slowly, exactly as PART IV's
+drift arithmetic said (its σ-floor re-use context stands).
+
+**★ 2. THE WRONG-WAY BASIN IS ELIMINATED.** Under the old criterion, 7/12 searching runs
+descended coupling to ≈0 and stayed. Under C2: **0/12 endpoints at zero; the two runs
+that visited the zero basin mid-run (s3 to 0.00, s4 to 0.00) both ESCAPED it and ended
+IN the band** (1.17, 1.22). Escape from the old attractor is the single sharpest
+behavioral signature a re-pointed criterion could produce — closer to a (d)-test event
+than an endpoint statistic.
+
+**★ 3. BY TRAJECTORY, 6/6 fix020 runs ENTERED the band at least once**; the endpoint
+misses are late flat-band wander (s1 held ~1.04 for ~24 windows then dropped to 0.41 at
+run end; s6 reached 1.68 then wandered to 0.76). This is the ALREADY-LEDGERED flat-band
+property ("bands are flat; nothing pins a point inside one — by design of the
+criterion's resolution"), now the binding residual — a criterion-RESOLUTION question,
+explicitly out of this phase's scope (charter §6), not a direction question. The
+endpoint rule was registered before the data and its 3/6 stands as recorded; the
+trajectory read is reported beside it, not instead of it.
+
+**★ 4. NO PATHOLOGY SWAP-IN:** amp endpoints 0.15–0.52 (no ceiling-pinning), postural
+0.60–1.50 (no 0.10 parking) — the demo's tilt-led escape pattern did not reappear under
+the re-balance. Falls concentrated in the two zero-basin-visiting runs (40, 81), i.e.
+exactly where coupling was low — consistent with coupling's catastrophe-avoidance role.
+
+**The phase sentence, rewritten by measurement:** *the search follows its criterion, and
+the criterion now points at locomotion; what it cannot yet do is PIN a point inside a
+flat good band.* n=6/arm fixed seeds: signal-grade (§3.3) — promote-or-kill, and it
+promotes the C2 criterion as the reference criterion for the next phase's work. The
+deployed j1s4 stack is UNTOUCHED (σ=0; the criterion change affects only searching
+configs). Band-pinning (resolution / anneal-on-realized-ΔJ / σ floor) is the successor
+phase's natural charter, with σ=0.20's re-use context now doubly earned.
+
+### ★★★ 2026-08-26 — STAGE E, THE TWO-BODY STUDY: the criterion reads the body; the search transmits the landscape it is given; and searching on the WRONG body's operating point is dangerous
+
+**The operator-directed embodiment capstone** (same C2 criterion, same seed streams,
+same coupling displacement; `cad` = the body as designed, every prior result; `measured`
+= the body as built). Pre-registrations in the plan doc §3-E; tool `strido_twobody.py`;
+logs `~/xaq_runs/twobodyE1_20260826/` and `twobodyE2_20260826/` (cad's search arm = the
+D2 corpus reused — deterministic replay would be byte-identical, registered as such).
+
+**★ 1. E1 — THE CRITERION DISTINGUISHES THE BODIES (the study's clean positive).**
+Per-body coupling landscapes, arena, gate PASS at 4/6 levels beyond 2× window noise —
+and the difference is SHAPE, not offset: cad has a sculpted basin descending to argmin
+1.6 (relief 0.41); the measured body is FLAT across 0.4–1.2 (relief 0.11 ≈ noise) and
+turns worse exactly at cad's optimum (+0.44, the largest gap). Same gains, same
+evaluator, different mechanics ⇒ different preferred region. This is an embodiment
+property, measured.
+
+**★ 2. E2 — THE SEARCH TRANSMITS ITS BODY'S LANDSCAPE, in both directions.** On cad's
+basin it climbs (D2: ΔJ −0.117, t −2.9, endpoints mean 1.23). On measured's flat
+conditional landscape it DIFFUSES: ΔJ +0.056 (t −0.04 vs its own valid control — P1b
+FAILS), endpoints bimodal [0.11, 0.24, 0.25, 0.93, 1.75, 2.00]. Registered reads: P1 ✓
+(controls hold 0.30, 6/6); P2 partial (mean endpoint 0.88 < cad's 1.23 ✓ but no
+concentration in the flat region — flatness concentrates nothing); P3 ✓ directionally
+(one-sided, underpowered at t ≈ 0.8); **P4 ✗ as registered, and the metric itself is
+the lesson**: excess-J is relief-scale-dependent, so a flat cross-landscape makes ANY
+endpoint look good on it. A relief-normalized version favors own-landscape on the
+measured side only; recorded as post-hoc, not evidence.
+
+**★ 3. THE STRONG CLAIM — "each body settles into its own basin" — is NOT demonstrated
+in this context**, and the mechanism is precise: at the cad-tuned operating point the
+measured body HAS no coupling basin to settle into; a search cannot converge to a
+feature that does not exist. E1 predicted E2's measured-body outcome before it ran.
+*Re-use contexts for the vivid form:* (a) let each body settle its OWN operating point
+first (native run from the j1s4 start), then displace both from their own points; (b)
+an amplified third body; (c) the injured-body (ablation) variant, where the landscape
+difference is guaranteed large.
+
+**★ 4. ★ THE UNREGISTERED LOUD FINDING — VIABILITY DOES NOT TRANSFER.** Falls per 600k
+ticks, medians: cad σ0 **2** / cad searching **17** / measured σ0 **42** / measured
+searching **210** (peak 831, in a run that pinned amp at its ceiling — the known
+pathology, reappearing on the new body). Two independent effects: the cad-tuned
+operating point itself is ~20× less viable on the built body, and SEARCHING multiplies
+falls ~5–8× on both bodies — the guard set (falls out of J by design; guards tuned on
+cad) does not contain exploration on the measured body. **Sim2real warning of record:
+porting the evolver to hardware requires re-earning the viability guards on the
+physical body BEFORE the search is allowed to move** — a fall on the bench is not an
+auto-reset. Confound noted honestly: the measured body carries chassis collision boxes
+(cad's chassis is a ghost), which may contribute to the falls RATIO; it cannot explain
+the search-multiplier within either body.
+
+**Net: the method's embodiment story stands on E1 + the climb/diffuse contrast; the
+settling demo needs per-body operating points; and the port plan gains a hard
+requirement it did not have yesterday.**
+
+### ★★★ 2026-08-27 — E3: DISPLACE FROM YOUR OWN POINT AND THE SEARCH COMES HOME — on BOTH bodies, over-recovering, and the "home" is a region, not a point
+
+**Verdict: every registered E3b prediction PASSES on both bodies** (protocol +
+registrations in the plan doc §3-E3; logs `~/xaq_runs/twobodyE3a_20260826/` and
+`twobodyE3b_20260826/`; 24 runs, all body/config receipts confirmed).
+
+**★ 1. THE (d)-TEST, PER BODY.** Validity held (displacement costs J on both bodies:
+cad 1.994 → 2.120, measured 2.198 → 2.331); displaced-σ0 controls held 0.30 in 6/6.
+fix020 re-climbed coupling ≥ 0.6 in **6/6 (cad)** and **5/6 (measured)** with arm ΔJ
+beating the control on both. **On the measured body — where the common-start E2 search
+could not descend J at all — displacement from its OWN operating point recovers
+decisively.** The E2 null was about the operating point, not the body or the method.
+
+**★ 2. OVER-RECOVERY: recovery fractions −0.24 (cad) and −0.68 (measured)** — the
+searchers ended BELOW the native benchmarks' J. 600k ticks of E3a settling had not
+converged; the criterion still has downhill around both natives. Best finds (endpoint
+vectors, J3 while still searching): cad [0.150, 1.250, 0.316] J3 1.837; measured
+[0.150, 1.509, 1.078] J3 2.026 at **50 falls** — against the measured native's frozen
+**849–940 falls/600k** (★4). Frozen n=3 validation of both candidates is running; the
+benchmark-upgrade rule, registered before it: promote only if the candidate beats the
+incumbent on BOTH last-third J and falls, n=3 frozen means.
+
+**★ 3. "HOME" IS A REGION, NOT A POINT — reported as the descriptive read it was
+registered as.** Recovered endpoints scatter within-body (cad coupling 0.63–2.00;
+measured 0.74–2.00 plus one 0.16 miss) and do NOT return to the exact native vector —
+measured's recovered postural sits high (1.03–1.50, 6/6) where its E3a native was
+0.85. The criterion's per-body optimum is a broad region with multiple modes (cad's
+second mode at coupling ~2.0 appeared in both E3a and E3b), and single settled points
+are samples of it. The demo claim that survives: **displaced, each body's search
+returns to ITS OWN viable region and recovers its own J level** — not "returns to the
+same coordinates."
+
+**★ 4. THE MEASURED NATIVE BENCHMARK IS FALL-HEAVY FROZEN: 849–940 falls/600k**
+(the E3a selection could only choose among what its arm offered; its falls filter was
+relative, not absolute). Its blurb carries this until the candidate validation lands.
+cad's native is clean frozen (1–5 falls/600k, J3 1.994). The falls asymmetry between
+bodies persists at every stage — the port-plan guard-re-earning requirement stands.
+
+**★ 5. THE FROZEN VALIDATION (2026-08-27) SPLIT THE UPGRADE — and caught both
+candidates over-promising.** Registered rule: promote only if better on BOTH frozen
+J3 and falls, n=3. **cad: KEEP** — the challenger's J3 is better (1.90 vs 1.99) but it
+falls 9× more (26 vs 3). **measured: PROMOTE** — [0.150, 1.509, 1.078] beats the
+incumbent on both (J3 2.114 vs 2.198; falls 709 vs 879); `native_measured` now carries
+it, provenance chained in its metadata. The method lesson, recorded for every future
+selection: **a searching run's J and falls are trajectory-mixed** — the measured
+candidate's 50-fall search run froze to ~710 falls at its endpoint (the low falls were
+accrued at OTHER vectors along its path), and cad's 1.84-J search run froze to 1.90 at
+9× the falls. Never promote a point from its searching-run statistics; freeze it first.
+The measured body remains fall-heavy at every point yet measured (~1.2/1000 ticks) —
+its benchmark says so on its face.

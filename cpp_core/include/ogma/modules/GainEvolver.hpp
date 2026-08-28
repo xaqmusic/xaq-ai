@@ -133,6 +133,7 @@ private:
     void handle_foot_load(MessagePtr payload);
     void handle_foot_contact(MessagePtr payload);
     void handle_imu(MessagePtr payload);
+    void handle_travel(MessagePtr payload);
     void handle_gyro(MessagePtr payload);
     void handle_torque(MessagePtr payload);
 
@@ -158,6 +159,7 @@ private:
     std::string foot_load_topic_    = "reality.proprio.foot_load";
     std::string foot_contact_topic_ = "reality.proprio.foot_contact";
     std::string imu_topic_          = "reality.proprio.imu";
+    std::string travel_topic_;      // "" = flow reads imu values[2] (soft oracle); set = legal travel lane (C1)
     std::string gyro_topic_;        // "" = anti-circling factor has no input
     // ENERGY: mean |joint torque| — servo current, which the sensor audit classes
     // as a REAL egocentric load signal ("A REAL LOAD SIGNAL — and MotorEPM has
@@ -301,6 +303,7 @@ private:
     float upright_  = 1.0f;
     float distress_ = 0.0f;
     float fwd_v_    = 0.0f;
+    uint64_t travel_rx_n_ = 0;  // consumer meter for travel_topic (gate B's two-sided check); diag only
     double torque_mag_ = 0.0;   // latest mean |joint torque| (the energy input)
     std::vector<float> foot_load_, foot_contact_;
     int64_t fall_below_run_ = 0;

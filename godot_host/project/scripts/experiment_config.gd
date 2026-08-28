@@ -212,6 +212,14 @@ var picrawler_leg_symmetry:              String = ""
 # picrawler_body.gd::_build_corridor.
 var picrawler_gym_mode:                  String = ""
 
+# Body geometry select for the picrawler.  "" (default) = env var / scene default
+# (cad).  Set from config metadata (metadata.body) so a BENCHMARK config carries
+# its body with its gains — a settled operating point is a (body, gains) PAIR and
+# selecting one in the launcher must never run it on the wrong body (stage E3,
+# 2026-08-26).  Accepts a bare name ("measured") or a res:// path, same contract
+# as OGMA_PICRAWLER_BODY.
+var picrawler_body:                      String = ""
+
 # Corridor-gym obstacle difficulty (0 = trivial .. 1 = hard); -1 = "not set" ->
 # body default.  Scales hump / rumble-bump / pyramid heights.  Set from the
 # launcher spinbox, config metadata.gym_difficulty, or OGMA_PICRAWLER_GYM_DIFFICULTY.
@@ -521,6 +529,17 @@ func resolve_picrawler_gym_mode(default_v: String) -> String:
 		return env_v
 	return default_v
 
+func resolve_picrawler_body(default_v: String) -> String:
+	# Same precedence as gym_mode: launcher metadata > env var > default.  No name
+	# validation here — _load_geometry() warns and falls back to the built-in CAD
+	# values on a missing file, which is the established failure shape.
+	if launched and picrawler_body != "":
+		return picrawler_body
+	var env_v := OS.get_environment("OGMA_PICRAWLER_BODY")
+	if env_v != "":
+		return env_v
+	return default_v
+
 func resolve_picrawler_gym_difficulty(default_v: float) -> float:
 	if launched and picrawler_gym_difficulty >= 0.0:
 		return picrawler_gym_difficulty
@@ -719,6 +738,7 @@ func save_state() -> void:
 		"picrawler_leg_symmetry":            picrawler_leg_symmetry,
 		"picrawler_joint_backend":           picrawler_joint_backend,
 		"picrawler_gym_mode":                picrawler_gym_mode,
+		"picrawler_body":                    picrawler_body,
 		"picrawler_gym_difficulty":          picrawler_gym_difficulty,
 	}
 	var f := FileAccess.open(_STATE_PATH, FileAccess.WRITE)
@@ -792,6 +812,7 @@ func load_state() -> bool:
 	picrawler_curriculum_auto_advance = bool(d.get("picrawler_curriculum_auto_advance", true))
 	picrawler_joint_backend           = str(d.get("picrawler_joint_backend", ""))
 	picrawler_gym_mode                = str(d.get("picrawler_gym_mode", ""))
+	picrawler_body                    = str(d.get("picrawler_body", ""))
 	picrawler_gym_difficulty          = float(d.get("picrawler_gym_difficulty", -1.0))
 	# Schema migration: v1 (no version) → v2 force auto-advance on.
 	# v1 saved state has false-default; the launcher's new ON-default
