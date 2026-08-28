@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "NATIVE BENCHMARK \u00b7 cad body (stage E3a, 2026-08-26)",
-    "description": "THE CAD BODY'S OWN OPERATING POINT \u2014 settled by the GainEvolver itself (free 3-gain search, sigma 0.2, C2 criterion) from the native j1s4 start; selected by the registered rule (settle_s6, J3 1.765, 2 falls/600k during search). Vector: amp 0.1857, coupling 0.8781, postural 1.2623, baked into motor_epm; evolver frozen (sigma 0) as SILENT OBSERVER scoring the C2 criterion (travel = stride_v, flow_min_form 1, w_flow 2, w_energy 1). metadata.body pins the geometry \u2014 selecting this config ALWAYS runs the cad body. PERMANENT DEMO BENCHMARK (operator-requested): the two native configs side by side are the two-body embodiment story \u2014 same criterion, same seed streams, different bodies, different discovered points. WATCH: the [U] panel shows the vector (it will not drift); the HUD stride line shows fk/fuse/true velocity live.",
+    "description": "THE CAD BODY'S OWN OPERATING POINT \u2014 settled by the GainEvolver itself (free 3-gain search, sigma 0.2, C2 criterion) from the native j1s4 start; selected by the registered rule (settle_s6, J3 1.765, 2 falls/600k during search). Vector: amp 0.1857, coupling 0.8781, postural 1.2623, baked into motor_epm; evolver LIVE at pinned sigma 0.2, ALWAYS EVOLVING around the point under the C2 criterion (travel = stride_v, flow_min_form 1, w_flow 2, w_energy 1). metadata.body pins the geometry \u2014 selecting this config ALWAYS runs the cad body. PERMANENT DEMO BENCHMARK (operator-requested): the two native configs side by side are the two-body embodiment story \u2014 same criterion, same seed streams, different bodies, different discovered points. WATCH: the [U] panel shows the vector (it will not drift); the HUD stride line shows fk/fuse/true velocity live. ALWAYS-EVOLVING (operator 2026-08-28): the benchmark vector is the SEED; the search explores around it live, so expect the vector to walk its viable region (stage E3: home is a region, not a point) and falls to run somewhat above the frozen characterization while candidates probe.",
     "env_target": "picrawler",
     "gym_mode": "arena",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -424,7 +424,7 @@
         "seed": 20260817,
         "warmup_ticks": 10000,
         "eval_window_ticks": 12000,
-        "mutation_sigma": 0.0,
+        "mutation_sigma": 0.2,
         "w_falls": 0.0,
         "w_distress": 0.0,
         "w_unloaded": 1.0,
@@ -444,8 +444,8 @@
         "target_accept": -1.0,
         "anneal_up": 1.5,
         "anneal_down": 0.85,
-        "sigma_min": 0.08,
-        "sigma_max": 0.5,
+        "sigma_min": 0.2,
+        "sigma_max": 0.2,
         "w_tilt_sd": 1.0,
         "accept_k": 0.25,
         "noise_min_n": 3,

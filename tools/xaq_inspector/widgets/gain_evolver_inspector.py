@@ -126,6 +126,7 @@ class _GainRack(_SurfaceWidget):
         self._lo: list[float] = []
         self._hi: list[float] = []
         self._phase = 0
+        self._min_form = 0
         self._exact_bounds = False
         # Observed extremes, the fallback when the module predates the
         # bounds-in-diag change (an older .so): better an honest auto-scale
@@ -160,6 +161,14 @@ class _GainRack(_SurfaceWidget):
         else:
             self._lo, self._hi = [], []
         self._phase = int(_fl(s.get("phase"), 0) or 0)
+        # Which criterion is RUNNING.  The GOOD_BAND overlays are single-gain
+        # verdicts measured under the PART IV criterion (flow product form);
+        # under the C2 criterion (flow_min_form 1, PART V) the joint optima sit
+        # elsewhere (stage E3: cad's coupling settled at 0.88, outside the old
+        # 1.2–2.0 band) — drawing the old bands there would read a converged
+        # native config as "not converged".  Bands draw only when the criterion
+        # they were measured under is the one running.
+        self._min_form = int(_fl(s.get("flow_min_form"), 0) or 0)
         self.setMinimumHeight(self.ROW_H * max(1, n) + 26)
         self.update()
 
@@ -197,7 +206,9 @@ class _GainRack(_SurfaceWidget):
                 if self._exact_bounds else
                 "AUTO-SCALED (module predates bounds-in-diag; rebuild for exact ranges)")
         p.setPen(QPen(QColor(INK_MUTED)))
-        p.drawText(6, 14, f"gain rack — track spans [min .. max] · green = measured good band · {head}")
+        band_note = ("green = measured good band" if self._min_form == 0
+                     else "good bands unmeasured under this criterion")
+        p.drawText(6, 14, f"gain rack — track spans [min .. max] · {band_note} · {head}")
 
         for i, key in enumerate(self._keys):
             y = 22 + i * self.ROW_H
@@ -229,8 +240,11 @@ class _GainRack(_SurfaceWidget):
             # the instrument, so convergence is a marker entering a green zone
             # rather than a number remembered from a doc.  Only where exact bounds
             # are live — on an auto-scaled track the band's position would drift
-            # with the observed extremes and read as a moving target.
-            band = GOOD_BAND.get(key) if self._exact_bounds else None
+            # with the observed extremes and read as a moving target.  And only
+            # under the criterion the bands were MEASURED under (see _min_form
+            # capture above): the C2 criterion has different optima.
+            band = (GOOD_BAND.get(key)
+                    if (self._exact_bounds and self._min_form == 0) else None)
             if band:
                 ba, bb = pos(band[0]), pos(band[1])
                 gb = QColor(GOOD)
@@ -287,7 +301,7 @@ class _TermBars(_SurfaceWidget):
     TERMS = [("falls", "falls (guard)"), ("tilt_sd", "upright sd"),
              ("dwell", "dwell (near-inv)"),
              ("distress_duty", "distress"), ("unloaded_mean", "unloaded"),
-             ("flow_term", "flow"), ("energy", "energy (current)")]
+             ("flow_term", "flow"), ("energy", "energy (|torque|)")]
     ROW_H = 22
 
     def __init__(self, parent: QWidget | None = None):
@@ -295,6 +309,8 @@ class _TermBars(_SurfaceWidget):
         self._vals: dict[str, float] = {}
         self._weights: dict[str, float] = {}
         self._have_w = False
+        self._live: list[tuple[str, str]] = list(self.TERMS)
+        self._flow_split: Optional[tuple[float, float, float]] = None
         self.setMinimumHeight(self.ROW_H * len(self.TERMS) + 26)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
@@ -304,6 +320,22 @@ class _TermBars(_SurfaceWidget):
         self._have_w = isinstance(w, dict)
         self._weights = {k: _fl(w.get(k), 1.0) for k, _ in self.TERMS} if self._have_w \
             else {k: 1.0 for k, _ in self.TERMS}
+        # Rows whose weight is 0 are hidden, not greyed (operator 2026-08-28):
+        # a permanent "off (weight 0)" row is clutter to a demo viewer, and the
+        # DESIGN choice it records lives in the config/ledger, not the live
+        # instrument.  With no weights in the payload (older .so) all rows show.
+        self._live = [(k, l) for k, l in self.TERMS
+                      if not self._have_w or abs(self._weights.get(k, 1.0)) > 1e-12]
+        # Under the C2 min-form flow (flow_min_form 1) the flow term is
+        # 1 − min(mag, pred)·turn — WHICH factor binds is the diagnosis (the
+        # 2026-08-23 defect was invisible without the split), so show it.
+        if int(_fl(s.get("flow_min_form"), 0) or 0) == 1:
+            self._flow_split = (_fl(s.get("flow_mag")), _fl(s.get("flow_pred")),
+                                _fl(s.get("flow_turn")))
+        else:
+            self._flow_split = None
+        rows = len(self._live) + (1 if self._flow_split else 0)
+        self.setMinimumHeight(self.ROW_H * max(1, rows) + 26)
         self.update()
 
     def paintEvent(self, _e) -> None:
@@ -316,14 +348,15 @@ class _TermBars(_SurfaceWidget):
                           if self._have_w else
                           "criterion terms — RAW (weights unavailable; rebuild to weight)")
         contrib = {k: (self._vals.get(k, float("nan")) * self._weights.get(k, 1.0))
-                   for k, _ in self.TERMS}
+                   for k, _ in self._live}
         finite = [v for v in contrib.values() if v == v]
         top = max(finite) if finite else 1.0
         top = top if top > 1e-9 else 1.0
         x0, w = 150, self.width()   # fits the longest term label without clipping
         x1 = max(x0 + 30, w - 190)      # room for value + the DEAD callout
-        for i, (key, label) in enumerate(self.TERMS):
-            y = 22 + i * self.ROW_H
+        row = 0
+        for i, (key, label) in enumerate(self._live):
+            y = 22 + row * self.ROW_H
             cy = y + self.ROW_H // 2
             v = contrib.get(key, float("nan"))
             p.setPen(QPen(QColor(INK_SECOND)))
@@ -339,14 +372,28 @@ class _TermBars(_SurfaceWidget):
             p.setPen(QPen(QColor(INK_PRIMARY)))
             p.drawText(x1 + 8, cy + 4, vtxt)
             if v == v and abs(v) < 1e-9:
-                # Distinguish the two zeros, because they mean opposite things:
-                # weight 0 is a DESIGN choice (falls is guard-only; distress is
-                # off until its sensor is fixed), whereas a weighted term that
-                # never fires is a statement about that SENSOR.
-                off = abs(self._weights.get(key, 1.0)) < 1e-12
-                p.setPen(QPen(QColor(INK_MUTED if off else CRIT)))
+                # A weighted term pinned at zero is a statement about its SENSOR
+                # (weight-0 rows are hidden above, so this is never the design
+                # zero — that distinction lives in the config, not the panel).
+                p.setPen(QPen(QColor(CRIT)))
                 p.drawText(x1 + 8 + fm.horizontalAdvance(vtxt) + 10, cy + 4,
-                           "off (weight 0)" if off else "DEAD — sensor never fired")
+                           "DEAD — sensor never fired")
+            row += 1
+            if key == "flow_term" and self._flow_split is not None:
+                # The min-form split: flow = 1 − min(mag, pred)·turn.  The
+                # SMALLER of mag/pred is the binding constraint — mag binding
+                # means travel is the limit, pred means steadiness is.
+                mag, pred, turn = self._flow_split
+                scy = 22 + row * self.ROW_H + self.ROW_H // 2
+                mag_binds = (mag == mag and pred == pred and mag <= pred)
+                parts = []
+                for name, val, binds in (("mag", mag, mag_binds),
+                                         ("pred", pred, not mag_binds), ("turn", turn, False)):
+                    txt = "—" if val != val else f"{val:.3f}"
+                    parts.append(f"{name} {txt}" + (" ◀ binds" if binds else ""))
+                p.setPen(QPen(QColor(INK_MUTED)))
+                p.drawText(x0, scy + 4, "min-form:  " + "   ".join(parts))
+                row += 1
         p.end()
 
 
@@ -530,5 +577,12 @@ class GainEvolverInspector(QWidget):
             f"margin {_fl(s.get('accept_margin'), 0.0):.4f} "
             f"<span style='color:{INK_MUTED}'>(σ̂ {_fl(s.get('sigma_est'), 0.0):.4f}, "
             f"n={int(_fl(s.get('noise_n'), 0) or 0)})</span> &nbsp;·&nbsp; "
-            f"<span style='color:{INK_MUTED}'>{pub} vectors published</span>"
+            f"<span style='color:{INK_MUTED}'>{pub} vectors published</span> &nbsp;·&nbsp; "
+            # The C1 two-sided meter, consumer half: which lane feeds the flow
+            # term.  Green = the legal stride_v estimate is being consumed live;
+            # muted = the soft-oracle imu fwd_v lane (pre-C1 configs).
+            + (f"<span style='color:{GOOD}'>travel: stride_v "
+               f"(rx {int(_fl(s.get('travel_rx_n'), 0) or 0)})</span>"
+               if int(_fl(s.get("travel_rx_n"), 0) or 0) > 0 else
+               f"<span style='color:{INK_MUTED}'>travel: imu fwd_v (soft oracle)</span>")
         )

@@ -16,6 +16,16 @@ GMAX = [1.5, 0.6, 1.5, 0.8, 0.1, 1.5, 2.0, 0.2]   # coupling max 2.0 = the shipp
 SEED = [0.0, 0.2, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0]
 WINDOW = 4000
 WITH_BOUNDS = "--nobounds" not in sys.argv   # simulate old .so when absent
+# --c2: the PART V criterion generation (3-gain vector, min-form flow with its
+# factor split, weight-0 falls/distress/dwell HIDDEN, stride_v travel lane, and
+# the old-criterion GOOD bands correctly NOT drawn).
+C2 = "--c2" in sys.argv
+if C2:
+    KEYS = ["amp_target", "coupling_gain", "postural_gain"]
+    GMIN = [0.15, 0.0, 0.1]
+    GMAX = [0.8, 2.0, 1.5]
+    SEED = [0.385, 0.30, 1.092]
+    WINDOW = 12000
 
 app = QApplication([])
 cls = widget_for("GainEvolver")
@@ -33,21 +43,24 @@ acc = rev = pub = 0
 J_inc, J_cand = 0.62, -1.0
 
 # Simulate ~22 generations; the vector drifts toward the hand point and J falls.
-HAND = [0.5, 0.2, 0.5, 0.4, 0.04, 0.7, 1.55, 0.05]
+HAND = ([0.186, 0.878, 1.262] if C2 else
+        [0.5, 0.2, 0.5, 0.4, 0.04, 0.7, 1.55, 0.05])
+NG = len(KEYS)
 for gen in range(22):
     for phase in (1, 2):
         if phase == 2:
             cand = [min(GMAX[i], max(GMIN[i],
                     inc[i] + 0.08 * (GMAX[i] - GMIN[i]) * rng.gauss(0, 1)))
-                    for i in range(8)]
+                    for i in range(NG)]
         for step in range(0, WINDOW + 1, 400):
             snap = {
                 "generation": gen, "accepts": acc, "reverts": rev, "publishes": pub,
-                "sigma": 0.08 * (0.97 ** gen), "phase": phase, "win_tick": step,
+                "sigma": (0.2 if C2 else 0.08 * (0.97 ** gen)), "phase": phase, "win_tick": step,
                 "eval_window_ticks": WINDOW,
                 "J_inc": J_inc, "J_cand": J_cand if phase == 2 else -1.0,
                 "falls": max(0.0, 2.0 - gen * 0.12), "tilt_sd": 0.09 * (0.97 ** gen),
-                "distress_duty": 0.0,                       # weight 0 => "off", not "dead"
+                "distress_duty": 0.0,                       # weight 0 => hidden row
+                "dwell": 0.31,                              # weight 0 => hidden row
                 "unloaded_mean": max(0.02, 0.42 - gen * 0.017),
                 "flow_term": max(0.25, 0.90 - gen * 0.028),
                 "loaded_min": min(0.95, 0.30 + gen * 0.03),
@@ -57,10 +70,19 @@ for gen in range(22):
                 "accept_log": log,
                 "vec": cand if phase == 2 else inc,
             }
+            if C2:
+                snap |= {"flow_min_form": 1,
+                         "flow_mag": max(0.10, 0.32 - gen * 0.004),
+                         "flow_pred": 0.69, "flow_turn": 0.955,
+                         "travel_rx_n": gen * WINDOW + step}
             if WITH_BOUNDS:
                 snap |= {"gain_min": GMIN, "gain_max": GMAX, "gain_seed": SEED,
-                         "weights": {"falls": 0.0, "tilt_sd": 1.0, "distress_duty": 0.0,
-                                     "unloaded_mean": 1.0, "flow_term": 1.0, "energy": 8.0},
+                         "weights": ({"falls": 0.0, "tilt_sd": 1.0, "distress_duty": 0.0,
+                                      "dwell": 0.0, "unloaded_mean": 1.0,
+                                      "flow_term": 2.0, "energy": 1.0} if C2 else
+                                     {"falls": 0.0, "tilt_sd": 1.0, "distress_duty": 0.0,
+                                      "dwell": 0.0, "unloaded_mean": 1.0,
+                                      "flow_term": 1.0, "energy": 8.0}),
                          "sigma_est": 0.031, "accept_margin": 0.031, "noise_n": 6}
             w.update_payload(gen * 10000 + step, snap)
             app.processEvents()
