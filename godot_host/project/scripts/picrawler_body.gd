@@ -10136,8 +10136,15 @@ func _update_stride_hud() -> void:
 		_strido_hud = Label.new()
 		_strido_hud.name = "StrideOdoBar"
 		_strido_hud.add_theme_font_size_override("font_size", 13)
+		# Monospace: with the default proportional font the +/− glyph widths differ,
+		# so the line breathed as signs flipped (operator 2026-08-28).
+		var mono := SystemFont.new()
+		mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Liberation Mono", "Monospace"])
+		_strido_hud.add_theme_font_override("font", mono)
+		# BOTTOM ROW, beside the distress bar (which sits at x 12) — the old stacked
+		# spot (12, −46) overlapped the ablation [K] panel.
 		_strido_hud.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-		_strido_hud.position = Vector2(12, -46)
+		_strido_hud.position = Vector2(380, -28)
 		hud.add_child(_strido_hud)
 	# Slip bar scaled against the true speed's own magnitude (floored so standing still
 	# does not divide by ~0): full bar = slip as large as the motion it corrupts.
@@ -10146,8 +10153,13 @@ func _update_stride_hud() -> void:
 	var n: int = 12
 	var filled: int = clampi(int(round(frac * float(n))), 0, n)
 	var bar: String = "█".repeat(filled) + "░".repeat(n - filled)
-	_strido_hud.text = "stride  fk %+.3f  fuse %+.3f  true %+.3f  slip [%s] %.3f  ns %d" % [
-		_strido_cmd_ema, _stridev_est.y, _strido_true_ema, bar, _strido_slip_ema, _dbg_strido_ns]
+	# Fixed-width formats + display clamps to ±9.999 so the character count can never
+	# change: %+6.3f is always exactly six glyphs, %5.3f always five, ns one.
+	_strido_hud.text = "stride  fk %+6.3f  fuse %+6.3f  true %+6.3f  slip [%s] %5.3f  ns %d" % [
+		clampf(_strido_cmd_ema, -9.999, 9.999),
+		clampf(_stridev_est.y, -9.999, 9.999),
+		clampf(_strido_true_ema, -9.999, 9.999),
+		bar, clampf(_strido_slip_ema, 0.0, 9.999), _dbg_strido_ns]
 	_strido_hud.add_theme_color_override("font_color",
 		Color(0.4 + 0.6 * frac, 0.9 - 0.7 * frac, 0.3, 1.0))
 
