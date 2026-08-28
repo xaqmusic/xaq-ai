@@ -4651,3 +4651,33 @@ the UI launcher; a headless run of `native_measured` loaded **`cad`** until
 `OGMA_PICRAWLER_BODY=measured` was set. `strido_twobody.py` already passes it per arm and its
 logs carry the receipt, so the E-stage results are unaffected — but any ad-hoc headless
 "measured" number without a receipt line saying `'measured'` is a cad number.
+
+### ★★ 2026-08-28 — HARDWARE BRING-UP DAY 1: the HAT answers, a knee moves, and cross-arch FP is not free
+
+**Verdict: `WORKING` (H0 + the servo driver layer), on the STOCK robot — no new sensors yet.**
+Full log in the port doc's Phase 4 "Bring-up log"; this entry keeps what generalises.
+
+**★ 1. THE PROTOCOL TRANSFERS, THE LIBRARY DOES NOT — confirmed by measurement.** SunFounder's
+`robot_hat` 2.5.5 source yielded a five-line wire protocol; raw `smbus2` then the C++
+`ogma_hw` driver read **Vbat 7.65 V** and moved **P0 = the rear-left knee** without the
+library present. The servo frame rate the HAT actually produces is **49.95 Hz** (PSC 352 ×
+ARR 4095 at 72 MHz), not 50.00 — the 50 Hz brain tick and the servo frame are *different
+clocks* and the host must not assume they coincide.
+
+**★ 2. FIRST NATIVE BUILD FOUND A PORTABILITY DEFECT, NOT A LOGIC ONE.** `cpp_core` had never
+been built without X11 headers; one `USE_X11` gate (`d30ffdd`) and 657/658 tests pass on
+aarch64.
+
+**★ 3. SAME CODE ≠ SAME BITS ACROSS ARCHITECTURES.** One stochastic 4000-step nav test flips
+hemisphere on the Pi with an identical RNG stream. FMA contraction (default on aarch64, absent
+on baseline x86-64) and per-arch `libm` are the candidates; **`-ffp-contract=off` measured:
+still fails, μ moves −2.74 → +2.94** — contraction matters but `libm` differences remain, so no
+flag restores bit-parity. The test itself asserts a hemisphere from ONE 4000-step seed and is
+seed-fragile; make it seed-robust rather than chase bits. Rule for the port: **parity claims are about attributability of derivations, not
+bit-identity of trajectories** — golden replays are per-architecture unless the build pins
+FP contraction on both sides. Re-use context: any cross-machine replay or A/B that assumes
+bit-identity.
+
+**★ 4. Two Trixie-specific traps recorded for the next Pi:** the I²C overlay does not create
+`/dev/i2c-1` without `i2c-dev` in `/etc/modules`; the Imager no longer grants NOPASSWD sudo to
+a custom user.

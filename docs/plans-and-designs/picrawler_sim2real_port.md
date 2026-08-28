@@ -379,7 +379,37 @@ was the wrong pair of numbers; the *finding* (straight-legged planting) stands, 
 right instrument. Proposed pass/fail: **p95 `ext` ≤ 0.90** (operator to confirm the margin).
 Sprawl and the port remain one work item.
 
-## Phase 4 — Hardware host · recorded, not scheduled
+## Phase 4 — Hardware host · **IN PROGRESS — bring-up started 2026-08-28**
+
+### Bring-up log
+
+**2026-08-28 — H0 done, H1 started, on the STOCK robot (no new sensors yet; parts due 2026-08-29).**
+Pi 5 Model B Rev 1.1, **2 GB**, Trixie Lite 13.5, kernel 6.18 `PREEMPT`, at `picrawler`
+(`10.0.0.113`, Ethernet; wifi unconfigured). Tooling decided: **build natively on the Pi**
+(`cmake … -j2`; the 2 GB board already runs 2 GB zram swap) — the livepi qemu chroot on the
+laptop is kept for the golden image later, not for host work (a qemu chroot sees no device tree).
+
+| step | result |
+|---|---|
+| overlays | `dtparam=i2c_arm=on,i2c_arm_baudrate=400000` + `dtparam=spi=on` + **`i2c-dev` in `/etc/modules`** (the overlay alone gives no `/dev/i2c-1`) → `/dev/i2c-1` at 400 kHz, `/dev/spidev0.0`. NetworkManager `wifi.powersave=2` persisted |
+| **BOM §6 step 1** | ✅ `i2cdetect -y 1` = **`0x14` only**. Camera (OV5647) answers at `0x36` on the internal bus |
+| `cpp_core` native | ✅ Release, tests on, `-j2`, ~10 min. **Needed one fix:** `video_capture.cpp` included X11 unconditionally → now `USE_X11`-gated (`d30ffdd`). **657/658 ogma tests pass**; the one failure is cross-architecture floating point (below) |
+| HAT wire protocol | taken from `robot_hat` 2.5.5 source and **bench-verified over raw I²C** (Python first, then C++): ADC select `(7−ch)\|0x10` + two byte reads, `Vbat = A4·3.3/4095·3` read **7.65 V**; A0–A3 float (no FSRs). Servo: `[reg, hi, lo]`, `PSC+t = 351`, `ARR+t = 4095` ⇒ **49.95 Hz, not 50.00** — the loop clock must use the real frame rate; pulse `trunc(µs/20000·4095)`, `0` = limp |
+| **first motion** | `P0` at 1500 → 1300 → 1700 → 1500 µs, robot on a stand: **P0 = the rear-left knee** (anatomical). Vbat flat 7.61–7.67 V through the moves (no stall sag) |
+| **`pi_host/`** (new, top-level) | `ogma_hw`: `I2cBus`/`LinuxI2cBus`, `RobotHat` (protocol), **`ServoDriver`** (clamp · slew 40 µs/tick · watchdog 25 ticks → pulse 0 · time-at-limit), `hat_tool` CLI (never a bypass), `test_hw` — 7 byte-level + envelope tests against a fake bus, passing on x86 and aarch64. A slewed `sweep 0 1300 1700` through the driver moved the knee with Vbat flat |
+
+**Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
+passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step
+stochastic sim; `test_rng_parity` passes, so the RNG stream is identical). GCC fuses `a·b+c`
+into FMA on aarch64 by default and baseline x86-64 has no FMA; glibc's `libm` also differs per
+architecture. Consequence for §1's parity argument: *same code* buys attributability, not
+bit-identical trajectories across machines. **Measured:** rebuilding with `-ffp-contract=off`
+still fails the test and moves μ from −2.74 to +2.94 — FMA contraction changes the trajectory
+but is not the whole difference (per-arch `libm` remains). No compiler flag buys cross-arch
+bit-parity: **golden replays are per-architecture**, and a test that asserts a hemisphere from
+one 4000-step seed is seed-fragile rather than a port defect (its owner should make it
+seed-robust).
+
 
 ### The bus map, as of 2026-08-27 (parts ordered)
 
@@ -471,11 +501,14 @@ which is the reason to prefer it.
   (20K/10K divider, `Vbat = A4/4095 × 3.3 × 3`). The sensor-legitimacy doc's §5.3 claim that a
   Robot HAT "typically exposes bus current" is **wrong for V4**. Real servo-current work needs an
   **INA219** (bus) or **INA3221** (3ch) on the same I²C header.
-- `robot_hat` in Python for one "does servo 3 move" smoke test, then discarded.
+- ~~`robot_hat` in Python for one "does servo 3 move" smoke test, then discarded.~~ **Done
+  2026-08-28 without the library** — `hat_servo_smoke.py` over raw `smbus2` (P0 = RL knee), then
+  superseded the same evening by `pi_host/hat_tool` over the C++ driver.
 
 ## SPEC — the host, the daemon, and the bench dashboard
 
-> **STATUS: SPEC ONLY. NOTHING BUILT.** Written 2026-08-28, while the parts were in transit,
+> **STATUS: driver layer BUILT 2026-08-28 (`pi_host/` — `RobotHat`, `ServoDriver`, `hat_tool`);
+> `ogma_benchd` / `ogma_host` / dashboard not yet.** Written 2026-08-28, while the parts were in transit,
 > so the architecture is settled before the first line of host code. This is the *how* of
 > Phase 4 above; that section stays the electrical contract.
 
