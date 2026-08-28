@@ -110,7 +110,10 @@ if(OpenCV_FOUND)
 endif()
 
 if(X11_FOUND)
+    target_compile_definitions(ogma_infra PRIVATE USE_X11)
     target_link_libraries(ogma_infra PUBLIC X11::X11)
+else()
+    message(STATUS "X11 not found — window capture disabled (headless build)")
 endif()
 
 # ---------------------------------------------------------------------------
