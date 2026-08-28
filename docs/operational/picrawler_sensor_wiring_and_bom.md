@@ -18,7 +18,7 @@ HAT pinout from [SunFounder's hardware introduction](https://docs.sunfounder.com
 | **SPI** | 7-pin P2.54: `BSY(GPIO6) · CS(CE0/GPIO8) · SCK(GPIO11) · MI(GPIO9) · MO(GPIO10) · 3V3 · GND` | **ICM-20948** |
 | ADC | **A0–A3** user, 3-pin P2.54, **12-bit, 3.3 V reference**; A4 = battery via 20K/10K | 4 × FSR |
 | Servo PWM | **12 channels P0–P11**, 3-pin P2.54, **5 V rail** | the 12 MG90S (existing) |
-| Digital | D0→GPIO17, D1→GPIO4, D2→GPIO27, D3→GPIO22 | *unused — kept free* |
+| Digital | D0→GPIO17, D1→GPIO4, D2→GPIO27, D3→GPIO22 | **ultrasonic trig + echo** (§7) — D2/D3 stay free |
 | Power in | 6.0–8.4 V, XH2.54 3-pin | the INA219 goes **here** (§3) |
 
 ⚠ **Almost every GPIO is consumed by the HAT.** Only GPIO7 (CE1) and GPIO20 (NC) are unlisted,
@@ -208,7 +208,36 @@ calibration or the puck geometry is wrong, not the robot.**
 
 ---
 
-## 7. Open — must be resolved at the bench, not from documentation
+## 7. The ultrasonic rangefinder — already on the robot
+
+The physical PiCrawler carries an ultrasonic module. It is **not** in the BOM above because it is
+already fitted, but it needs wiring decisions and one measurement before it is trusted.
+
+**✓ Role settled (operator, 2026-08-28): the ultrasonic points FORWARD and is for obstacle
+avoidance. The VL53L0X points DOWN and is the belly-clearance channel.** The two are separate
+sensors with separate jobs — **the ToF is not redundant, fit it as planned.**
+
+⚠ **Never route the ultrasonic into `gc_raw`.** That channel is a *downward belly* sensor
+(`picrawler_body.gd:2854`, range 0.3 m, standing 0.06 m) and the deployed height homeostat rides
+it; feeding it a forward reading would corrupt a promoted lever silently. Rationale in the port
+doc's §7.7.
+
+| concern | detail |
+|---|---|
+| pins | trigger + echo on **D0 (GPIO17) / D1 (GPIO4)** — these were kept free for exactly this |
+| ⚠ level | HC-SR04-class modules drive echo at **5 V**; the Pi is 3.3 V-tolerant only. **Confirm SunFounder's module is already shifted for the HAT** before connecting — if not, add a divider or a shifter |
+| rate | **~10–20 Hz, off the tick thread.** Ping flight time bounds it; it cannot be a 50 Hz channel |
+| accuracy | echo is a userspace **pulse width** at ~58 µs/cm — 100 µs of scheduling jitter ≈ 1.7 cm |
+| blind spots | absorbed by carpet, reflects away past ~30° off-normal, ~15° cone reports the nearest thing in a fat lobe |
+| unmeasured | whether 12 servos couple acoustic noise into a 40 kHz receiver. Ten minutes on the bench |
+
+**Expose it as an instrument first.** Put it on the dashboard beside the belly channel and watch
+it across existing gaits. It earns a lever only once someone can name the prediction error it
+reduces — and only after the authority check.
+
+---
+
+## 8. Open — must be resolved at the bench, not from documentation
 
 1. **3-pin connector pin order and VCC rail voltage** (ADC / digital / servo) — not in the vendor
    hardware page. Read the silkscreen. §5 hazard 2 depends on this.
@@ -221,3 +250,6 @@ calibration or the puck geometry is wrong, not the robot.**
    ordering; several popular QWIIC boards are I²C-only.
 5. **FSR creep** — hold 175 g for 60 s and record the drift **before** the graded `unloaded`
    criterion term is trusted. If it is large, that term wants the threshold, not the magnitude.
+6. **Ultrasonic mounting height and pitch** — the role is settled (forward, obstacle avoidance),
+   but height and downward pitch set what it can see of the floor ahead. Record both.
+7. **Whether the ultrasonic module's echo is already level-shifted** for the HAT's 3.3 V pins.
