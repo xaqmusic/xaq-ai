@@ -178,8 +178,10 @@ func _build_row(ch: int) -> Control:
 	var origin := LineEdit.new(); origin.text = "1500"; origin.custom_minimum_size.x = 56; r2.add_child(origin); d["origin"] = origin
 	r2.add_child(_lbl("min", 11))
 	var mn := LineEdit.new(); mn.text = "900"; mn.custom_minimum_size.x = 52; r2.add_child(mn); d["min"] = mn
+	mn.text_submitted.connect(func(_t): _apply_row_limits(ch))
 	r2.add_child(_lbl("max", 11))
 	var mx := LineEdit.new(); mx.text = "2100"; mx.custom_minimum_size.x = 52; r2.add_child(mx); d["max"] = mx
+	mx.text_submitted.connect(func(_t): _apply_row_limits(ch))
 	var cur := _lbl("", 11); cur.custom_minimum_size.x = 120; r2.add_child(cur); d["cur"] = cur
 	_rows.append(d)
 	return box
@@ -217,7 +219,9 @@ func _refresh_row(ch: int) -> void:
 		d["sim"].remove_theme_color_override("font_color")
 		return
 	var sim: String = MIRROR[phys]
-	d["sim"].text = "sim %s · %s → PHYSICAL %s %s" % [sim, ["red", "green", "blue", "yellow"][SIM_INDEX[sim]], PHYS_LONG[phys], JOINT_OPTIONS[_row_joint_idx(d)]]
+	# PHYSICAL first — this is the robot's panel.  The sim name follows because it is
+	# mirrored (sim "rr" IS the physical rear-left) and the colour is the sim leg's.
+	d["sim"].text = "PHYSICAL %s %s   ← sim '%s' (%s)" % [PHYS_LONG[phys], JOINT_OPTIONS[_row_joint_idx(d)], sim, ["red", "green", "blue", "yellow"][SIM_INDEX[sim]]]
 	d["sim"].add_theme_color_override("font_color", SIM_COLORS[SIM_INDEX[sim]])
 
 
@@ -461,3 +465,13 @@ func _drive_body() -> void:
 		var angle: float = _row_sign(d) * (us - _row_origin(d)) / US_PER_RAD
 		var k: int = SIM_INDEX[MIRROR[phys]] * 3 + _row_joint_idx(d)
 		targets[k] = angle
+
+# Enter in a min/max field applies that row's OPERATING limits at once (servo.limits);
+# "record map" still writes them into the map.  Values are 500..2500 with min < max, and
+# the daemon refuses anything else — the reply lands in the status line.
+func _apply_row_limits(ch: int) -> void:
+	var d: Dictionary = _rows[ch]
+	var lo := int(d["min"].text.to_int())
+	var hi := int(d["max"].text.to_int())
+	var rep: Dictionary = _call({"verb": "servo.limits", "ch": ch, "min_us": lo, "max_us": hi})
+	_set_status("P%d limits %d–%d: %s" % [ch, lo, hi, "ok" if rep.get("ok", false) else str(rep.get("error", "?"))])

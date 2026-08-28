@@ -217,6 +217,13 @@ public:
     // the JSON shape stable so the widget code doesn't have to branch.
     virtual nlohmann::json diag_snapshot() const;
 
+    // A SMALL diagnostic payload — a handful of scalars — for high-rate subscribers
+    // that want the module's error signal, not its state (xaq_voice at 50 Hz per
+    // module).  diag_snapshot() for an EPM is the whole GNG (~50 KB) serialised on
+    // the tick thread; this must stay O(1).  DiagPublisher serves it when a
+    // subscription's topic is "lite".  Default: empty object.
+    virtual nlohmann::json diag_lite() const;
+
     // -------------------------------------------------------------------------
     // Per-primitive input gate (aux-send routing)
     // -------------------------------------------------------------------------

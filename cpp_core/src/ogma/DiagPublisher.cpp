@@ -97,7 +97,7 @@ void DiagPublisher::publish_tick(uint64_t tick_id, OgmaInstance& instance) {
             {"module_id", s.module_id},
             {"topic",     s.topic},
             {"tick_id",   tick_id},
-            {"snapshot",  m->diag_snapshot()},
+            {"snapshot",  s.topic == "lite" ? m->diag_lite() : m->diag_snapshot()},
         };
         std::string topic_str = "diag." + std::to_string(s.id) + ".";
         std::string body = payload.dump();

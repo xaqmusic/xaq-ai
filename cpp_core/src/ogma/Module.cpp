@@ -24,4 +24,8 @@ nlohmann::json Module::diag_snapshot() const {
     return snapshot_state();
 }
 
+nlohmann::json Module::diag_lite() const {
+    return nlohmann::json::object();
+}
+
 } // namespace ogma

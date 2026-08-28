@@ -4930,6 +4930,10 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
 // common-mode), the body's resulting forward velocity, the curiosity/hunger
 // neuromodulators, and the leg-0 forward self-model A (motor→sensor) so the widget
 // can draw a heatmap of what the body has learned to predict about its own motion.
+nlohmann::json MotorEPMv2::diag_lite() const {
+    return {{"motor_tle", tle_ema_mean()}};
+}
+
 nlohmann::json MotorEPMv2::diag_snapshot() const {
     nlohmann::json j;
     j["n_legs"]      = n_legs_;
