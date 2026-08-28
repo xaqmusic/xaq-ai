@@ -833,10 +833,17 @@ unless a vocabulary over range states is genuinely wanted.
 
 ### 9. Open
 
-- **`picrawler_body.gd:387` and `:700` both cite
-  `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md`, which does not exist in the
-  repo.** A dangling reference from before the split. Resolve it — recover, rewrite, or drop the
-  citations — before building the calibration tool against a plan that is not there.
+- ✅ **RESOLVED 2026-08-28 — the missing calibration plan.**
+  `picrawler_diagnostic_calibration_plan.md` was cited from **three** sites in
+  `picrawler_body.gd` (`:387` Stage 3.E, `:700` Stage 3.D, `:2865` Stage 3.A) and once from the
+  archive. It was **never in this repo's git history** — a casualty of the split from `ami-ogma`,
+  and not recoverable here. **Its content survived by distribution, so nothing needed
+  recreating:** the servo-saver / `motor_authority_scale` model is in `docs/servo_dynamics.md`
+  §4(d) *with the exact sim2real formula the code comment wanted*, and Bernoulli-Impulse
+  Actuation is in `docs/glossary.md` (which even names Stage 3.D). All citations now point at
+  live targets. The Stage 3.A site additionally carried a **refuted rationale** — Cruse Rule 5
+  and "torque as a load proxy" are both killed in the ledger — so it is annotated rather than
+  merely repointed.
 - Whether the daemon's sensor reads should reuse the host's derivation code directly or duplicate
   a read-only subset. Parity argues for the former; the daemon's no-real-time status argues it is
   not urgent.
