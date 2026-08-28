@@ -1028,6 +1028,44 @@ load rules on the current idealized GRF is a weakened-slice result in the *too-g
 Ships gain-0: the degradation model defaults OFF, and the hardware publisher is instrument-only
 until its A/B runs.
 
+## H3 — The derivation port · **SCOPED 2026-08-28, decided: C++ port, not a duplicate**
+
+**Decision (operator, 2026-08-28):** the legal sensor-derivation chain moves from GDScript into
+C++ so that Godot and the Pi host run *the same code* — parity by construction. **And the
+inventory that scoped it is also a legality audit of the deployed config**, which turned out to
+be the larger finding. Read against `native_measured`'s twelve consumed topics
+(`picrawler_body.gd`, publishes at 6221–7160; full line-level inventory in the ledger entry):
+
+| topic | consumers | what the sim publishes | on hardware |
+|---|---|---|---|
+| `joints` | Bridge, 2× EPM | **achieved hinge angles** (`_relative_angle_world_axis`) | ❌ hobby servos report nothing → publish the **servo forward model** of the command (the `_strido_lp` pattern the file already uses) |
+| `imu` | MotorEPMv2, GainEvolver | `[sin yaw, cos yaw, fwd_v, ang_v]` — **entirely oracle** (world attitude + world velocities) despite the name | ❌ → the legal vector the file already has: `[sin/cos _ego_heading, stride_v.y, gyro[1]]` — a **config-visible change**, must be A/B'd in sim first (§5.4) |
+| `gyro` | GainEvolver | body-frame ω, exact, no bias/noise | ✅ ICM-20948, after the bias estimator |
+| `upright` | GainEvolver | **exact** basis `y.y` (oracle form) | ✅ the accelerometer gives the same scalar — but the port must publish `_up_est_body.y`, and so should the sim (`tilt` likewise) |
+| `foot_contact` / `foot_load` | MotorEPMv2 / GainEvolver | contact monitor / normal-impulse EMA (α 0.15 @ 240 Hz) | ✅ FSR threshold / FSR magnitude, per the FSR spec |
+| `ground_clearance` | MotorEPMv2 | downward raycast — a faithful belly-ToF model | ✅ VL53L0X |
+| `joint_torque` | GainEvolver (**w = 4.0**) | PD-controller internal from achieved ω | ❌ **no analog** → INA219 bus current re-point, its own lever |
+| `stride_v` (+`slip`) | GainEvolver | FK-from-command ⊕ IMU fusion (β 1.0, K_I 0.1) — **legal** | ✅ port as is; heaviest geometry dependency |
+| `feet_y_gravity_cmd_imu` | MotorEPMv2 | FK from raw efference rotated by `_up_est_body` — **legal** | ✅ port as is |
+| `distress` | MotorEPMv2, GainEvolver | world-position history + **exact** tilt | ❌ inputs are oracle → needs `stride_v`-integrated displacement + filtered tilt; and it carries a **latent units bug** (window ÷ physics rate instead of tick rate: 0.04 m where 0.192 m was meant) — a bit-exact port reproduces it, a correct one changes behaviour |
+| `target_compass` | MotorEPMv2 | god's-eye bearing to the pyramid | ❌ no target on the bench → consumer must tolerate `(0,0)`; the legal stand-in is `vision_compass` |
+
+**Consequences.** (1) The deployed gait has never run on its legal inputs: `imu`, `upright`,
+`joints`, `distress` and `target_compass` are all oracle-fed today, so **the port is a config
+change plus a sim-honesty A/B before it is a host**. (2) The shared helpers to carry are
+few and well-bounded: `_fk_leg` + construction anchors (9386–9410, 4810–4950), the IMU model
+and complementary attitude filter `_imu_substep` (5801–5852: gravity-inclusive body accel,
+DLPF 0.25, 4 g clip, adaptive accel trust 0.02), the stride-odometry fusion (6631–6816), the
+foot-load EMA, the ground-clearance read, the servo command decode + slew. (3) Where it
+lives: **`cpp_core/include/ogma/body/`** (e.g. `LegKinematics`, `ImuAttitude`,
+`StrideOdometry`, `FootLoad`), linked by both the GDExtension and `ogma_host`; the GDScript
+then calls into it, and the sim's byte-identity across that swap is the gain-0 gate.
+
+**Order:** (a) port `LegKinematics` + `ImuAttitude` and prove them against the sim's own
+FK/IMU debug outputs (`get_imu_debug()`, the FK spot table); (b) `StrideOdometry` +
+`feet_y_gravity_cmd_imu`; (c) the sim-honesty A/B on `imu`/`upright`/`joints` substitutes;
+(d) `ogma_host` on the Pi with the parts.
+
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 
 - Hand-calibrate per Phase 2, export to the shared JSON, verify in sim.

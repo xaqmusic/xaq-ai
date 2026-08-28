@@ -4681,3 +4681,21 @@ bit-identity.
 **★ 4. Two Trixie-specific traps recorded for the next Pi:** the I²C overlay does not create
 `/dev/i2c-1` without `i2c-dev` in `/etc/modules`; the Imager no longer grants NOPASSWD sudo to
 a custom user.
+
+### ★★★ 2026-08-28 — THE DEPLOYED CONFIG HAS NEVER RUN ON ITS LEGAL INPUTS
+
+**Verdict: audit finding (`WORKING` as a diagnosis), from scoping the C++ derivation port.**
+Of the twelve `reality.proprio.*` topics `native_measured` consumes, **five are oracle-fed in
+sim**: `imu` = `[sin yaw, cos yaw, fwd_v, ang_v]` from world attitude and world velocity
+(entirely god's-eye despite its name; consumed by MotorEPMv2 AND GainEvolver); `upright` and
+`tilt` publish the exact basis, not the attitude filter the file already runs; `joints` are
+achieved hinge angles hobby servos cannot report; `distress` integrates world position and
+exact tilt (and has a units bug — window ÷ physics rate — that saturates it at 0.04 m instead
+of 0.192 m); `target_compass` is a god's-eye bearing. `joint_torque` (weight 4.0) has no
+hardware analog at all. Only `gyro`, `foot_contact/load`, `ground_clearance`, `stride_v`,
+`feet_y_gravity_cmd_imu` are hardware-shaped as published. **Every legal substitute already
+exists in the file** (`_ego_heading`, `stride_v`, `gyro[1]`, `_up_est_body`, the `_strido_lp`
+servo forward model, `vision_compass`), so this is a config-and-publisher swap with a §5.4
+honesty A/B — but it must happen BEFORE any hardware result is attributed to the gait. Re-use
+context: every sim result on this config is a result on oracle inputs until that A/B runs.
+Scope and order recorded in the port doc (§H3).

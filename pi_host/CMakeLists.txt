@@ -23,6 +23,19 @@ target_compile_options(ogma_hw PRIVATE -Wall -Wextra)
 add_executable(hat_tool tools/hat_tool.cpp)
 target_link_libraries(hat_tool PRIVATE ogma_hw)
 
+# ogma_benchd — the bench daemon (PROTOCOL.md): ZMQ REP verbs + PUB telemetry over the driver.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZMQ REQUIRED libzmq)
+include(FetchContent)
+FetchContent_Declare(json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3)
+FetchContent_MakeAvailable(json)
+add_executable(ogma_benchd src/benchd.cpp)
+target_include_directories(ogma_benchd PRIVATE ${ZMQ_INCLUDE_DIRS})
+target_link_libraries(ogma_benchd PRIVATE ogma_hw nlohmann_json::nlohmann_json ${ZMQ_LIBRARIES} pthread)
+target_compile_options(ogma_benchd PRIVATE -Wall -Wextra)
+
 if(PI_HOST_BUILD_TESTS)
   include(FetchContent)
   FetchContent_Declare(googletest

@@ -12,6 +12,7 @@ no Godot, and — at this layer — no `ogma_core` either, so the driver rebuild
 | `ServoDriver` | the safety envelope below the brain: clamp · slew · watchdog → pulse 0 · time-at-limit |
 | `hat_tool` | bench CLI over the driver (never a bypass): `vbat` · `adc` · `limp` · `pulse` · `sweep` |
 | `test_hw` | byte-level protocol tests + envelope tests, no hardware needed |
+| **`ogma_benchd`** | the bench daemon — [`PROTOCOL.md`](PROTOCOL.md): ZMQ REP verbs (`:5590`) + PUB telemetry (`:5591`) over the driver; 50 Hz tick thread, 10 Hz telemetry, local JSONL record in `log/`, servo map in `calib/servo_map.json`. **Bench mode only, deadman on the calibration channel only, one servo at a time, `cal.begin` is the audited widened envelope.** No verb starts a brain |
 
 **Wire facts** (bench-verified 2026-08-28): MCU `0x14`; every register write is `[reg, hi, lo]`;
 servo timer = `channel/4`, `PSC+t = 351`, `ARR+t = 4095` ⇒ **49.95 Hz** frames (not 50.00);
@@ -25,3 +26,14 @@ pulse count `trunc(µs/20000·4095)`, `0` = limp; ADC select `(7−ch)|0x10` the
 | P0 | rear-left knee | 2026-08-28, `hat_servo_smoke.py 0` |
 
 Robot on a stand for any servo verb.
+
+**Run the daemon** (from the checkout root on the Pi; the paths in it are relative):
+```sh
+cd ~/xaq-ai && setsid -f ./pi_host/build/ogma_benchd --body measured > pi_host/log/benchd.stdout 2>&1 < /dev/null
+```
+`hat_tool` and `ogma_benchd` both open `/dev/i2c-1` — stop the daemon (`pkill -x ogma_benchd`)
+before using `hat_tool`, or just use the daemon's verbs.
+
+**Bench-verified 2026-08-28** (pyzmq client from the laptop): telemetry under `ZMQ_CONFLATE`
+(which is why frames are single-part), `servo.set` clamp + slew, one-at-a-time, deadman trip
+after 1 s of silence, widen/restore audit, `cal.map`/`save`/`load` with the sim-name mirror.
