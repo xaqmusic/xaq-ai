@@ -239,7 +239,7 @@ controller. **Linkage hard stops** make the servo drive in at full torque and st
 The belly ToF rangefinder is the sensor CLAUDE.md names as the hump breakthrough — *"a new
 sensory channel"* that replaced the god's-eye `chassis_y_norm`. **The operator does not have one
 yet.** A VL53L0X/VL53L1X is a few dollars and speaks I²C (`0x29` is free alongside the MCU at
-`0x14` and the MPU-9150 at `0x68`), and **is expected to be acquired** — but it is worth knowing
+`0x14` and the IMU at `0x68`/`0x69`), and **is expected to be acquired** — but it is worth knowing
 how much of the result survives on parts already in hand, and the simplest thing that could work
 deserves a real test before more hardware is added.
 
@@ -330,7 +330,9 @@ rather than a surprise.
 
 1. **Four switches** (one per bottom-plate quadrant) — upgrades "am I grounded" to "which corner",
    which is directionally actionable. Almost free. Deliberately NOT in this spec: start simplest.
-2. **FSR pads** instead of microswitches — graded contact force rather than a bit.
+2. **FSR pads** instead of microswitches — graded contact force rather than a bit. ⚠ **Overtaken
+   for the FEET by the foot-FSR spec below** (ordered 2026-08-27); this path now refers only to a
+   belly pad.
 3. **VL53L0X/VL53L1X ToF** — the actual channel, on the I²C header already established. The
    direct fix if the hump gate regresses.
 
@@ -363,6 +365,24 @@ the concrete pass/fail for "safe to put on hardware."
 
 ## Phase 4 — Hardware host · recorded, not scheduled
 
+### The bus map, as of 2026-08-27 (parts ordered)
+
+> **Parts, connectors, power path and bring-up order are in
+> [`../operational/picrawler_sensor_wiring_and_bom.md`](../operational/picrawler_sensor_wiring_and_bom.md).**
+> This section stays the *why*; that file is the bench reference.
+
+| device | bus | address / pins | carries |
+|---|---|---|---|
+| Robot HAT MCU | I²C | `0x14` | 12 servo channels + ADC A0–A4 |
+| **ICM-20948** IMU | I²C **or SPI** | `0x69` (AD0 high) / `0x68` | attitude, yaw rate — SPI preferred, see below |
+| **INA219** | I²C | `0x40` default | servo-rail bus current → the energy term |
+| **VL53L0X** belly ToF | I²C | `0x29` | belly clearance |
+| **4 × FSR** | HAT ADC | A0–A3 | `foot_load` + the G2 guard |
+| battery voltage | HAT ADC | **A4 — keep it** | brownout + calibration stall detection |
+
+No address conflicts. If the IMU moves to SPI the I²C bus carries only the MCU, INA219 and ToF,
+which is the reason to prefer it.
+
 - **C++ host linking `ogma_core` directly** (already Godot-free — the gtest suite proves it).
   Rationale is **sim/real parity**: sensor derivation must be the *same code*, or every
   discrepancy is unattributable between body and reimplementation.
@@ -371,18 +391,62 @@ the concrete pass/fail for "safe to put on hardware."
   `timer = channel // 4`, 72 MHz clock, 50 Hz, period 4095, 500–2500 µs.
   **Do not depend on the `picrawler` library** — it is scripted gaits (`do_action('forward')`),
   an imposed coordination topology, prohibition §7.
-- **MPU-9150 on the HAT's I²C** (GPIO2/3, 3.3 V, 10 K pull-ups present, `0x68` free — MCU is at
-  `0x14`, no RTC, no onboard IMU). Set `i2c_arm_baudrate=400000`; at 100 kHz the servo + IMU
-  traffic exceeds the tick budget. **FIFO reads are mandatory** — the bus is shared with all 12
-  servo writes, so host-side jitter would integrate directly into dead-reckoned yaw.
-  Magnetometer is expected to be unusable (12 servos ≈ 7 µT each at 3 cm vs 50 µT earth field,
-  varying with gait); the architecture doesn't want it.
+- **ICM-20948, 6-axis in use** (ordered 2026-08-27, superseding the MPU-9150 this plan named
+  until then — that part is long EOL and what ships is old stock or counterfeit). Same price
+  class, better bias behaviour, and **it can leave the contended bus entirely** (see SPI below).
+  1.71–3.6 V, so the HAT's 3.3 V rail is fine.
+  - **Address:** `0x69` on most breakouts (AD0 high), `0x68` with AD0 low. **Both are free** —
+    MCU `0x14`, ToF `0x29`, INA219 `0x40`, no RTC, no onboard IMU on HAT V4. Read AD0 off the
+    board rather than assuming; `WHO_AM_I` (`0x00`) returns **`0xEA`**, which is the bring-up
+    check that the right part answered.
+  - ⚠ **The register map is BANKED — this is the real porting difference from the MPU-6050/9150
+    family, whose map is flat.** Four banks selected through `REG_BANK_SEL` (`0x7F`); a driver
+    written from MPU-family habit reads plausible garbage from the wrong bank. Since Phase 4
+    takes the wire protocol rather than a vendor library, budget for this explicitly.
+  - **If on I²C:** set `i2c_arm_baudrate=400000` (the part does fast-mode); at 100 kHz the
+    servo + IMU traffic exceeds the tick budget. **FIFO reads are mandatory** — the bus is shared
+    with all 12 servo writes, so host-side jitter integrates directly into dead-reckoned yaw.
+  - **★ SPI is the better option and the MPU-9150 could not offer it** (that part is I²C-only).
+    The ICM-20948 speaks SPI up to ~7 MHz, which takes the IMU **off the servo-contended I²C bus
+    altogether** and removes the jitter concern at its source rather than filtering it after the
+    fact. Confirm the breakout exposes CS/SCK/SDI/SDO before committing. Keep the FIFO regardless
+    — it is what makes the 50 Hz decimation honest.
+  - **Magnetometer (AK09916) stays disabled.** 12 servos ≈ 7 µT each at 3 cm against a 50 µT
+    earth field, varying with gait. On this part it sits behind the internal I²C-master aux bus,
+    so the cheapest correct action is simply **never to enable that master** — the mag costs
+    nothing as long as it is not turned on.
+  - ⚠ **Do not use the DMP.** The on-chip DMP3 needs an undocumented firmware blob and returns a
+    fused attitude from a filter that cannot be inspected, tuned for non-legged motion. That is a
+    teacher whose internals we cannot audit (prohibition §6), and it would destroy the design's
+    load-bearing quantity: **the FK/IMU disagreement IS the slip signal**, which requires the raw
+    channels and our own fusion. Take raw accel + gyro from the FIFO and nothing else.
 - Gyro **bias estimator gated on quasi-static windows**, not a hardcoded constant (prohibition
-  §5). Untrimmed ZRO is ±20 °/s; residual bias dominates yaw error.
+  §5). The ICM-20948's untrimmed ZRO is roughly **±5 °/s** against the MPU-9150's ±20 °/s
+  (confirm against the datasheet of the board that arrives) — but **initial offset is close to
+  irrelevant, because the estimator subtracts it either way.** What the newer part actually buys
+  is **in-run bias stability and a smaller temperature coefficient**, which matters because the
+  servos heat the board: it lengthens the interval the estimate stays good between quasi-static
+  windows. Real, and second-order.
+- ⚠ **The IMU is not the limit, and buying a better one does not move it.** The binding
+  constraint is **observability**: on a walking robot the accelerometer cannot separate tilt from
+  body acceleration, so its attitude correction is corrupted exactly during stance transitions
+  (ledger 2026-08-24 ★4). A 1° attitude error leaks false velocity exceeding the true 0.05–0.15
+  m/s signal within one second, as **bias** and **gait-synchronously**, so it does not average
+  down. No gyro grade fixes that. The fix is the one the ledger already names (★5): bound the
+  drift with the **leg-FK velocity observation**, whose error profile is exactly complementary.
+- **Placement beats sophistication for any SECOND unit.** Per legitimacy §5.5, the high-value
+  second IMU is **on a leg segment**, not a second body unit — hobby servos deny per-leg position
+  feedback, and a leg-mounted IMU recovers that limb's own motion directly. That targets the
+  commanded-vs-achieved gap the ledger calls the *dominant* odometry error (22 mm mean foot
+  deflection, 20× the FK error). ⚠ **Gated on a free measurement that has never been run:** the
+  **horizontal** within-stance FK error (ledger 2026-08-24 ★4). Both FK variants already run every
+  tick through the same chain with the miswiring control in place. Run that before buying against
+  the requirement.
 - Loop locked to **exactly 50 Hz** (`clock_nanosleep(TIMER_ABSTIME)`, `SCHED_FIFO`), overruns
   counted as a logged metric.
 - **Belly ToF rangefinder — to be acquired.** VL53L0X / VL53L1X, a few dollars, I²C at `0x29`
-  (free alongside MCU `0x14` and MPU-9150 `0x68`) on the header already established. This is the
+  (free alongside MCU `0x14`, the IMU `0x68`/`0x69` and INA219 `0x40`) on the header already
+  established. This is the
   sensor CLAUDE.md names as the hump breakthrough; the sim channel (`gc_raw`/`gc_norm`,
   `GROUND_CLEARANCE_RANGE` 0.3 m) already exists and assumes it. Until it arrives, see the
   IK-estimator + touch-switch spec above — and note that spec's recorded prediction is that the
@@ -392,6 +456,137 @@ the concrete pass/fail for "safe to put on hardware."
   Robot HAT "typically exposes bus current" is **wrong for V4**. Real servo-current work needs an
   **INA219** (bus) or **INA3221** (3ch) on the same I²C header.
 - `robot_hat` in Python for one "does servo 3 move" smoke test, then discarded.
+
+## SPEC — foot FSRs: conditioning, mounting, calibration
+
+> **STATUS: SPEC ONLY. NOTHING BUILT.** Written 2026-08-27 as the parts were ordered, so the
+> conditioning decisions are settled before assembly. Supersedes the four-microswitch upgrade
+> path in the belly-clearance spec above: **an FSR above threshold IS a contact switch and also
+> carries load magnitude, so do not spend GPIO on both** (ledger, 2026-08-24).
+
+Four circular FSRs, **20 g – 2 kg**, one per foot, on the Robot HAT's existing ADC **A0–A3**.
+No new bus. **A4 stays on battery voltage** — it is the brownout and calibration-stall detector.
+
+### The operating point — and why 20 g – 2 kg is the right part
+
+`foot_load` is published as a **fraction of total body weight**, not in newtons:
+`picrawler_body.gd:6768` divides the per-foot GRF EMA by `_fl_norm()` (`:10006`,
+`_TOTAL_MASS × 9.81 / physics_hz`) and clamps to ±2.0. Measured total mass is **590 g**, so the
+channel the consumer already expects maps onto force like this:
+
+| condition | `foot_load` | force on one foot |
+|---|---|---|
+| swing leg | 0.0 | 0 g |
+| static, 4 feet down | 0.25 | **148 g** |
+| static, 3 feet down (the crawl) | 0.33 | **197 g** |
+| single-leg support (the `rr` finding) | 1.0 | **590 g** |
+| **software clamp** | 2.0 | **1180 g** |
+
+- **The upper end is not a constraint.** The channel saturates at 1.18 kg; the sensor at 2 kg.
+  **Software discards the range before the sensor does**, so full-scale is untouchable in normal
+  operation.
+- **The lower end is not a constraint either.** 20 g is 0.034 body weight — about **10× below**
+  the static planted load that must be told apart from zero.
+- **The band that matters (150–200 g) lands in the lower third of the range**, which is where an
+  FSR's power-law response is steepest and best resolved. A 100 g – 10 kg part (the common
+  FSR 402 spec) would put the whole gait down in its compressed, noisy region. **The smaller
+  range is the better part here, not a compromise.**
+
+### ⚠ Sim-to-real gap: the channel's negative half is unrepresentable
+
+`foot_load` clamps to **−2.0**, but an FSR is **compression-only**. Nothing on hardware can
+report an upward pull on a foot. Clamp the hardware publisher at `[0, 2]` and record any sim
+excursion below zero as a sim-only artifact — do not let a consumer come to depend on it.
+
+### Divider sizing — measure, do not pick a number
+
+Standard series divider, sensor on the high side so the reading rises with force:
+
+```
+3.3 V ──[ FSR ]──┬── A_n (ADC, 12-bit, 0–3.3 V, 4095 counts)
+                 │
+                [ R_g ]
+                 │
+                GND
+```
+
+`V_out = 3.3 × R_g / (R_g + R_fsr)` — monotone increasing in force, since `R_fsr` falls as load
+rises.
+
+**`R_g` is the one decision that sets whether the range buys anything, and it cannot be chosen
+from the datasheet.** FSR resistance at a given force varies with the puck, the backing
+stiffness, and the part. **Procedure:** assemble one foot completely, rest a **175 g** weight on
+it (the mid-stance operating point), measure `R_fsr` in place, and **set `R_g` to that measured
+value**. That places the divider's steepest region on the load the gait actually spends its time
+at. Use the same `R_g` on all four channels so per-foot differences show up in calibration rather
+than in hardware.
+
+### Mounting — the puck is more of the design than the sensor is
+
+1. **A rigid disc, slightly SMALLER than the active area.** Force must arrive through a puck that
+   stays inside the active circle. A puck that overlaps the inactive border ring loads the
+   substrate instead of the sensing layer and produces nonlinearity and hysteresis that no
+   calibration removes. **Design the toe cap AS the puck** — do not mount a sensor under a toe
+   that happens to touch it.
+2. **⚠ Shear is the hazard, not force.** This robot *propels*: the toe applies tangential force
+   through stance, and the ledger's own attribution finding has `rr` doing the net propelling on
+   6/6 seeds. FSRs sense normal force only, and sustained shear delaminates the layers. Put a
+   **low-friction slip layer** (PTFE shim or a smooth-faced compliant pad) between the ground
+   contact and the sensor face so the tangential load goes to the structure, not across the film.
+   A foot is a far harsher application than the button these parts are designed for.
+3. **Compliant backing behind the sensor**, so a point contact on a rounded toe is spread across
+   the puck rather than concentrated at one spot.
+4. Route the tails so a leg's full swing does not flex them at the sensor — flex at the tail root
+   is a common failure.
+
+### Calibration — a physical measurement, not a tuned constant
+
+Part-to-part variation runs ±15–25 %, and the channel is normalized by body weight, so **each
+foot needs its own curve**. This is a measurement of a physical device, so it does not collide
+with prohibition §5 (*don't tune a constant to a signal's scale*) — but the **fit must be stored
+per foot in the shared calibration JSON**, alongside the servo sign/origin/limits, so it travels
+with the robot the way the servo map does.
+
+- Robot on a stand, one foot at a time, load a known series (**0 / 50 / 100 / 175 / 300 / 590 g**)
+  onto the assembled foot through its own puck.
+- Record ADC counts, fit `counts → grams`, store per foot.
+- Publish `foot_load = grams / 590` so the hardware channel is **numerically identical** to the
+  sim channel and every existing consumer reads it unchanged.
+- **Re-check after any foot re-assembly.** The puck geometry is part of the calibration.
+
+### ⚠ What FSRs will NOT deliver, and what depends on it
+
+- **Hysteresis and creep run ~10 %,** and creep grows under sustained load — a standing robot's
+  reading drifts. **Benign for the stance threshold** (planted vs swing is a 10× separation);
+  **a real caveat for the graded `unloaded` criterion term (weight 1.0)**, which is one of the
+  two things these parts are being bought for. **Measure the creep before that term is trusted:**
+  hold a static 175 g for 60 s and record the drift. If it is large, the term wants the
+  *threshold*, not the magnitude.
+- **The 20 g floor means light initial contact reads zero.** For stance detection that is a free
+  noise floor. Touchdown *timing* was already assigned to the accelerometer, not the FSR
+  (ledger 2026-08-24 ★3), so this costs nothing.
+- **Contact sensing is not a prerequisite for stride odometry.** The median across four legs lets
+  swing legs fall out as outliers with no contact input at all (ledger 2026-08-24 ★2). FSRs
+  sharpen that; there they are an optimization. They are **required** for the `foot_load` weight
+  unit and the G2 per-leg minima guard.
+
+### Consuming it — one recorded negative
+
+**Do not append per-leg `foot_load` to the motor EPM input.** Measured `NULL` on behaviour and a
+`REGRESSION` on the self-model (`motor_tle` 0.263 → 0.320, t = +2.75) — load is a **body-level**
+quantity and `MotorEPMv2`'s model is per-leg, so a per-leg model asked to predict it can only
+accumulate irreducible error (ledger `:133`). **Re-use context: a body-level consumer** — the
+support EPM sees all four at once and did find structure.
+
+### Sim-side honesty model, and the gain-0 guard
+
+Per the §5.4 pattern, the sim channel should be degraded to what hardware can actually deliver
+before any result is claimed to transfer: **quantize to the 12-bit ADC through the fitted curve,
+add the measured creep and hysteresis, clamp at `[0, 2]`, and apply the 20 g floor.** Testing the
+load rules on the current idealized GRF is a weakened-slice result in the *too-good* direction.
+
+Ships gain-0: the degradation model defaults OFF, and the hardware publisher is instrument-only
+until its A/B runs.
 
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 
