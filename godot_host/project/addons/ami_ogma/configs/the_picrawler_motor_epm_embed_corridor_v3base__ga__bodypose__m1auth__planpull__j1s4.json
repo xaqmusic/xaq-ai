@@ -1,0 +1,488 @@
+{
+  "metadata": {
+    "name": "JOB #1 arm j1s4 \u2014 n=20 powered A/B",
+    "description": "JOB #1 A/B ARM (j1s4). EVOLVED seed 4 \u2014 closest to the hand point (L2 0.699) and kept coupling high (1.66). Gains baked into motor_epm; the evolver is present but at mutation_sigma 0 (SILENT OBSERVER) so it scores and instruments without publishing \u2014 every arm is therefore byte-identical apart from the eight gains. Protocol: arena, n=20, 12000 ticks, CHASSIS_COLLIDE=1 (height_homeo is one of the evolved gains, so a ghost belly would hide what it costs), outer-wall recentering OFF (irrelevant at 12k ticks and it would void net_disp/straight). \u26a0 NOT comparable to the recorded 3/20 tail, which was measured on a ghost chassis \u2014 that is why the hand point is re-run here as a fresh control rather than cited. gym_mode set to ARENA: metadata.gym_mode OUTRANKS the env var when launched from the UI, so a corridor default here would silently give you the wrong world.",
+    "env_target": "picrawler",
+    "gym_mode": "arena",
+    "phase_tag": "motor-epm (minimal/deploy)",
+    "derived_from_manifest": false,
+    "episode_length": 6000,
+    "mc_episode_period": 1500,
+    "stability_gain": 0.05,
+    "stability_y_norm": 0.5,
+    "stability_speed": 0.05,
+    "reward_shape": "trapezoid",
+    "target_height": 0.085,
+    "height_penalty_grace": 0.02,
+    "height_penalty_scale": 0.03,
+    "height_penalty_gain": 0.05,
+    "leg_symmetry": "lr_pairs",
+    "label": "motor_epm_rung0",
+    "publish_tilt": false,
+    "tier": "markov_compliant",
+    "reward_class": "internal_objective",
+    "scaffolds_active": [
+      "postural",
+      "coupling",
+      "stroke",
+      "amp_homeostat",
+      "height_homeostat",
+      "panic"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "motor_proprio_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.fl_hip1",
+          "action.fl_hip2",
+          "action.fl_knee",
+          "action.fr_hip1",
+          "action.fr_hip2",
+          "action.fr_knee",
+          "action.rl_hip1",
+          "action.rl_hip2",
+          "action.rl_knee",
+          "action.rr_hip1",
+          "action.rr_hip2",
+          "action.rr_knee"
+        ],
+        "output_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "proprio_indices": [
+          0.0,
+          4.0,
+          8.0,
+          1.0,
+          5.0,
+          9.0,
+          2.0,
+          6.0,
+          10.0,
+          3.0,
+          7.0,
+          11.0
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "motor_leg",
+        "range_probe_ticks": 2000
+      }
+    },
+    {
+      "id": "motor_epm",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "action_topics": [
+          "action.fl_hip1",
+          "action.fl_hip2",
+          "action.fl_knee",
+          "action.fr_hip1",
+          "action.fr_hip2",
+          "action.fr_knee",
+          "action.rl_hip1",
+          "action.rl_hip2",
+          "action.rl_knee",
+          "action.rr_hip1",
+          "action.rr_hip2",
+          "action.rr_knee"
+        ],
+        "n_legs": 4,
+        "motor_dim": 3,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.01,
+        "bias_lr": 0.005,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 1234,
+        "babble_ticks": 200,
+        "babble_scale": 0.3,
+        "sat_lr": 0.02,
+        "postural_gain": 1.092,
+        "explore_noise": 0.05,
+        "knee_tuck_target": 0.85,
+        "motor_gain": 3.0,
+        "coupling_gain": 1.655,
+        "gait_phase": [
+          0.0,
+          3.14159265,
+          3.14159265,
+          0.0
+        ],
+        "stroke_gain": 1.2,
+        "stroke_phase": -2.85,
+        "steer": 0.0,
+        "stroke_signs": [
+          1.0,
+          -1.0,
+          1.0,
+          -1.0
+        ],
+        "amp_homeo_gain": 0.01,
+        "amp_target": 0.385,
+        "heading_gain": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "nav_gain": 0.0,
+        "nav_topic": "reality.proprio.target_compass",
+        "height_homeo_gain": 0.077,
+        "height_k": 0.3,
+        "height_topic": "reality.proprio.ground_clearance",
+        "panic_motor_mult": 4.0,
+        "coord_reward_drive": 0.3,
+        "coord_probe_ticks": 240,
+        "objective_topics": [
+          "objective.posture.fl",
+          "objective.posture.fr",
+          "objective.posture.rl",
+          "objective.posture.rr"
+        ],
+        "cpg_phase_topic": "rhythm.cpg.body",
+        "cpg_embed": true,
+        "heading_bearing_hold_gain": 7.0,
+        "heading_hold_gain": 0.3,
+        "progress_commit_gain": 1.0,
+        "feet_topic": "reality.proprio.feet_y_gravity_cmd_imu",
+        "stance_lift_gain": 0.5,
+        "coord_adapt_rate": 0.001,
+        "coord_fitness_mode": 1,
+        "height_ground_gain": 0.01,
+        "stance_lift_hip2": 0.25,
+        "distress_topic": "reality.proprio.distress",
+        "panic_on": 0.5,
+        "panic_off": 0.25,
+        "panic_strength": 1.0,
+        "panic_noise": 0.4,
+        "panic_push_amp": 1.2,
+        "panic_push_hz": 0.8,
+        "contact_topic": "reality.proprio.foot_contact",
+        "contact_instrument_only": 1,
+        "swing_tuck_hip2": -0.2,
+        "swing_tuck_knee": 0.1,
+        "gait_align_diag": 1,
+        "plan_topics": [
+          "objective.plan.fl",
+          "objective.plan.fr",
+          "objective.plan.rl",
+          "objective.plan.rr"
+        ],
+        "plan_gain": 0.025,
+        "rear_land_gain": 0.186,
+        "rear_knee_plant": 0.258,
+        "rear_push_ext": 0.03,
+        "gain_topic": "gain.motor_epm"
+      }
+    },
+    {
+      "id": "cpg_clock",
+      "type": "CPGOscillator",
+      "params": {
+        "period_ticks": 70,
+        "perceptual_output_topics": [
+          "rhythm.cpg.body"
+        ],
+        "perceptual_leg_phase_offsets": [
+          0.0
+        ],
+        "perceptual_sensor_label": "cpg_phase",
+        "amplitude": 0.0,
+        "amplitude_floor": 0.0,
+        "standing_bias_amplitude": 0.0,
+        "entrain_topic": "rhythm.body.gait",
+        "entrain_freq_gain": 0.02,
+        "entrain_phase_gain": 0.05,
+        "entrain_period_min": 48.0,
+        "entrain_period_max": 120.0
+      }
+    },
+    {
+      "id": "keyframe_gait",
+      "type": "KeyframeGait",
+      "params": {
+        "cpg_topic": "rhythm.cpg.body",
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "objective_output_topics": [
+          "objective.posture.fl",
+          "objective.posture.fr",
+          "objective.posture.rl",
+          "objective.posture.rr"
+        ],
+        "motor_dim": 3,
+        "n_bins": 16,
+        "keyframe_alpha": 0.02,
+        "gain": 0.3
+      }
+    },
+    {
+      "id": "body_rhythm_tracker",
+      "type": "BodyRhythmTracker",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_leg.fl",
+          "reality.motor_leg.fr",
+          "reality.motor_leg.rl",
+          "reality.motor_leg.rr"
+        ],
+        "output_topic": "rhythm.body.gait",
+        "leg_signs": [
+          1.0,
+          -1.0,
+          -1.0,
+          1.0
+        ],
+        "motor_dim": 3,
+        "swing_joint": 0,
+        "init_period": 70.0
+      }
+    },
+    {
+      "type": "EPM",
+      "id": "body_pose",
+      "params": {
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.joints",
+        "proprio_state_dims": 12,
+        "modality_group": "bodypose",
+        "modality_name": "pose",
+        "max_nodes": 200,
+        "mitosis_enabled": true,
+        "tle_alpha": 0.7,
+        "tle_beta": 0.3,
+        "dim_min": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "type": "EPM",
+      "id": "body_pose_t",
+      "params": {
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.joints",
+        "proprio_state_dims": 12,
+        "modality_group": "bodypose",
+        "modality_name": "pose_t",
+        "max_nodes": 200,
+        "mitosis_enabled": true,
+        "tle_alpha": 0.3,
+        "tle_beta": 0.7,
+        "dim_min": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ],
+        "dim_max": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "type": "MotorPlanner",
+      "id": "motor_planner",
+      "params": {
+        "state_topic": "reality.bodypose.pose",
+        "rhythm_topic": "rhythm.cpg.body",
+        "horizon": 40.0,
+        "beam_k": 12.0,
+        "phase_bins": 8.0,
+        "mask_mode": 2.0,
+        "mask_floor": 0.02,
+        "mask_joint": -1.0,
+        "mask_val_lo": 0.0,
+        "mask_val_hi": 0.0,
+        "mask_depth_lo": 1.0,
+        "mask_depth_hi": 40.0,
+        "mask_strength": 0.0,
+        "author_mode": 1.0,
+        "author_period": 800.0,
+        "author_warmup": 3000.0,
+        "author_min_n": 300.0,
+        "author_keep_ratio": 0.95,
+        "author_depth_min": 5.0,
+        "author_depth_max": 34.0,
+        "author_max_kept": 8.0,
+        "seed": 1234,
+        "author_score": 1.0,
+        "author_guard": 1.0,
+        "author_apply": 1.0,
+        "plan_output_topics": [
+          "objective.plan.fl",
+          "objective.plan.fr",
+          "objective.plan.rl",
+          "objective.plan.rr"
+        ],
+        "plan_publish": 1.0,
+        "plan_depth": 8.0,
+        "plan_distress_cut": 0.5
+      }
+    },
+    {
+      "id": "gain_evolver",
+      "type": "GainEvolver",
+      "params": {
+        "gain_keys": [
+          "rear_land_gain",
+          "rear_knee_plant",
+          "rear_push_ext",
+          "amp_target",
+          "height_homeo_gain",
+          "postural_gain",
+          "coupling_gain",
+          "plan_gain"
+        ],
+        "gain_seed": [
+          0.186,
+          0.258,
+          0.03,
+          0.385,
+          0.077,
+          1.092,
+          1.655,
+          0.025
+        ],
+        "gain_min": [
+          0.0,
+          0.0,
+          0.0,
+          0.15,
+          0.0,
+          0.1,
+          0.0,
+          0.0
+        ],
+        "gain_max": [
+          1.5,
+          0.6,
+          1.5,
+          0.8,
+          0.1,
+          1.5,
+          2.0,
+          0.2
+        ],
+        "gain_sigma_scale": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.5
+        ],
+        "gain_topic": "gain.motor_epm",
+        "upright_topic": "reality.proprio.upright",
+        "distress_topic": "reality.proprio.distress",
+        "foot_load_topic": "reality.proprio.foot_load",
+        "foot_contact_topic": "reality.proprio.foot_contact",
+        "imu_topic": "reality.proprio.imu",
+        "n_legs": 4,
+        "seed": 20260817,
+        "warmup_ticks": 10000,
+        "eval_window_ticks": 12000,
+        "mutation_sigma": 0.0,
+        "w_falls": 0.0,
+        "w_distress": 0.0,
+        "w_unloaded": 1.0,
+        "w_flow": 1.0,
+        "viability_falls_tol": 0,
+        "viability_load_tol": 0.05,
+        "upright_fall_thresh": 0.0,
+        "fall_debounce_ticks": 25,
+        "distress_thresh": 0.05,
+        "load_thresh": 0.05,
+        "touchdown_horizon_ticks": 12,
+        "min_touchdowns": 3,
+        "flow_alpha": 0.02,
+        "flow_vol_k": 4.0,
+        "flow_vel_norm": 0.05,
+        "anneal_window": 10,
+        "target_accept": -1.0,
+        "anneal_up": 1.5,
+        "anneal_down": 0.85,
+        "sigma_min": 0.08,
+        "sigma_max": 0.5,
+        "w_tilt_sd": 1.0,
+        "accept_k": 0.25,
+        "noise_min_n": 3,
+        "noise_alpha": 0.25,
+        "settle_ticks": 2000,
+        "w_dwell": 0.0,
+        "dwell_thresh": 0.9,
+        "torque_topic": "reality.proprio.joint_torque",
+        "w_energy": 4.0,
+        "fall_alarm_tau": 50000.0,
+        "fall_alarm_on": 8.0,
+        "gyro_topic": "reality.proprio.gyro"
+      }
+    }
+  ],
+  "edges": []
+}

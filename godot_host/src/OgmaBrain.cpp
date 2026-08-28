@@ -31,6 +31,7 @@
 #include "ogma/modules/DescendingPredictor.hpp"
 #include "ogma/modules/GNGRollout.hpp"
 #include "ogma/modules/HomeokineticExploration.hpp"
+#include "ogma/modules/GainEvolver.hpp"
 #include "ogma/modules/MotorEPM.hpp"
 #include "ogma/modules/KeyframeAverager.hpp"
 #include "ogma/modules/DualEMADetector.hpp"
@@ -659,6 +660,50 @@ Dictionary OgmaBrain::get_module_metrics() const {
                     hist.push_back(entry);
                 }
                 d["winner_top8"] = hist;
+            }
+        }
+        // --- SequenceGNG (2026-08-11, twin-gate S0) ---
+        // Cheap per-tick scalars for the body-log sg_* mirror: the last
+        // published SequenceMotif + the module's own counters.  Deliberately
+        // NOT snapshot_state() — that ships the full GNG and is too heavy
+        // for a per-tick read (the diag_snapshot ZMQ lesson).
+        else if (type == "SequenceGNG") {
+            auto tops = m->output_topics();
+            if (!tops.empty()) {
+                if (auto sm = std::dynamic_pointer_cast<const ogma::SequenceMotif>(
+                        bus->last_value(tops[0].name))) {
+                    d["motif_id"]          = sm->motif_id;
+                    d["match_confidence"]  = double(sm->match_confidence);
+                    d["predicted_next_id"] = sm->predicted_next_id;
+                    d["is_baked"]          = sm->is_baked;
+                }
+            }
+            if (auto const* sg = dynamic_cast<const ogma::SequenceGNG*>(m)) {
+                d["node_count"]  = sg->node_count();
+                d["baked_count"] = sg->baked_count();
+                d["n_events"]    = int64_t(sg->n_events());
+            }
+        }
+        // --- GainEvolver (PART IV, 2026-08-17) ---
+        // Cheap per-tick scalars for the body-log ge_* mirror: generation /
+        // accepts / reverts / σ / phase / window scores + criterion term
+        // breakdown + the active vector.  Deliberately metrics(), NOT
+        // snapshot_state() (the diag_snapshot ZMQ lesson above).
+        else if (type == "GainEvolver") {
+            if (auto const* ge = dynamic_cast<const ogma::GainEvolver*>(m)) {
+                nlohmann::json mj = ge->metrics();
+                for (auto it = mj.begin(); it != mj.end(); ++it) {
+                    if (it.key() == "vec") continue;
+                    auto const& v = it.value();
+                    String k(it.key().c_str());
+                    if (v.is_boolean())             d[k] = v.get<bool>();
+                    else if (v.is_number_integer()) d[k] = v.get<int64_t>();
+                    else if (v.is_number())         d[k] = v.get<double>();
+                    else if (v.is_string())         d[k] = String(v.get<std::string>().c_str());
+                }
+                Array vec;
+                for (double g : mj["vec"].get<std::vector<double>>()) vec.push_back(g);
+                d["vec"] = vec;
             }
         }
         // --- LateralVoter ---

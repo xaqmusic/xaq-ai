@@ -36,7 +36,12 @@ FetchContent_Declare(
     godot_cpp
     GIT_REPOSITORY https://github.com/godotengine/godot-cpp.git
     GIT_TAG        7e18e40d7591429f915035a7de7cf79457d555cc
-    GIT_SHALLOW    TRUE
+    # GIT_SHALLOW must stay FALSE while GIT_TAG is a pinned COMMIT.  A shallow
+    # clone fetches only the branch tip, so the pin becomes unreachable the
+    # moment upstream master moves past it — `fatal: reference is not a tree`,
+    # and the build stops being reproducible on any machine that has not
+    # already cloned it (found 2026-08-26 on a from-scratch reconfigure).
+    GIT_SHALLOW    FALSE
 )
 
 # Populate without immediately adding the subdirectory so we can inject

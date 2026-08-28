@@ -321,9 +321,22 @@ const NEUTRAL_HEADINGS: Array = [
 	Vector3(+0.7071, 0.0, -0.7071),   # RR: +X -Z
 ]
 const LEG_NAMES: Array = ["fl", "fr", "rl", "rr"]
+# ⚠⚠ LEG NAMING MIRROR (operator-diagnosed 2026-08-11 on the piano roll).
+# These names are anatomically SWAPPED left↔right: the body's TRUE forward is
+# +Z (eyes / corridor / fwd_v — see the corridor-gym note ~:3605), so body-left
+# = +X — yet leg 0 "fl" is BUILT at x<0, the anatomical FRONT-RIGHT (the names
+# were assigned in the default-camera screen frame, the classic mirror illusion
+# of labelling a body that faces you).  Every action topic, config, event name,
+# instrument, and historical per-leg finding uses THIS body frame consistently
+# ("fl" = red = anatomical FR), so the record is coherent and the mirror is
+# behaviorally null — DO NOT rename piecemeal; the blast radius is every config
+# + topic + the ledger's per-leg history.  MUST be resolved deliberately at the
+# sim2real port boundary (the real robot's servo map): see
+# docs/plans-and-designs/picrawler_sim2real_port.md.
 # Per-leg color so each leg is visually distinguishable during calibration
 # (lets the user identify which leg has e.g. a reversed servo direction).
-# Robotics convention: FL=red, FR=green, RL=blue, RR=yellow.
+# Robotics convention was INTENDED as FL=red … but see the mirror note: red is
+# the anatomical FRONT-RIGHT.
 const LEG_COLORS: Array = [
 	Color(0.95, 0.20, 0.20, 1.0),   # FL (front-left)  red
 	Color(0.20, 0.85, 0.20, 1.0),   # FR (front-right) green
@@ -371,8 +384,9 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # motor_authority_scale = (saver_max_transmissible_torque / MAX_SERVO_TORQUE).
 # Joseph 2026-05-31 brainstorm: servo savers are the cheap real-hardware
 # compliance retrofit.  This knob is the sim-side counterpart for sim2real
-# matching.  See `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md`
-# Stage 3.E.
+# matching.  See `docs/servo_dynamics.md` section 4(d) for the as-built model
+# and the sim2real formula.  (The RL-era `picrawler_diagnostic_calibration_plan.md`
+# Stage 3.E did not survive the repo split; its content lives there now.)
 @export var motor_authority_scale: float = 1.0
 
 # 2026-06-01 — Stage 3.E++ motor-internal damping tuner.  Multiplies SERVO_KD
@@ -471,10 +485,56 @@ func _set_body_damp_scale(v: float) -> void:
 			b.linear_damp  = BODY_LINEAR_DAMP * body_damp_scale
 @export var sensor_noise_tau:   float = 8.0
 var _sensor_noise: PackedFloat64Array = PackedFloat64Array()
+var _prev_joints_pub: PackedFloat64Array = PackedFloat64Array()  # for the joints_dyn q̇
+var _qdot_ema: PackedFloat64Array = PackedFloat64Array()          # M0.d.2 smoothed velocity
+## joints_dyn q̇ EMA rate (τ ≈ 1/alpha ticks; 0.3 ≈ 3-tick smoothing, ~servo timescale).
+@export var joints_dyn_vel_alpha: float = 0.3
 # Ground-force / authority accumulators (see the joint_torque publish site).
 var _tq_mag_acc: float = 0.0
 var _tq_sat_acc: float = 0.0
 var _tq_n: float = 0.0
+# ---- ENERGY READOUT (HUD) ----------------------------------------------------
+# Servo current is what the battery actually pays, and it is the best-conditioned
+# signal the GainEvolver's criterion has (signal/noise 4.74 vs 0.61 for upright
+# sd).  Three reads, because they answer different questions: `now` is this tick,
+# `peak_1s` is the worst tick inside each one-second window — LATCHED at the
+# window boundary so the number is readable instead of a blur — and `avg` is a
+# slow EMA for the trend.  Peak matters separately from mean: a gait can average
+# cheaply and still spike into servo saturation, which is what burns hardware.
+const ENERGY_PEAK_WINDOW_TICKS: int = 50    # 1 s at the 50 Hz brain tick
+const ENERGY_EMA_ALPHA: float = 0.01        # ~2 s trend
+# ---- SUSTAINED FORWARD BURSTS (operator's metric, 2026-08-23) --------------
+# The corridor only permits SHORT runs of forward travel — but the operator's
+# read is that when runs of >=3 s do emerge they mark a genuinely better config,
+# in a way that mean fwd_v cannot show: a body that lurches and stalls can post
+# the same mean as one that actually travels.  Measured PER TICK, because the
+# body log samples every 60 ticks (1.2 s) and a 3 s burst is only 2.5 samples
+# there — far too coarse to time a run.
+# Reported as: how many qualifying bursts, what fraction of the run was spent in
+# one (duty), and the longest single burst.
+# A burst is a 3-SECOND ROLLING MEAN at or above BURST_MIN_SPEED — not every tick
+# above it.  Measured: instantaneous fwd_v swings -0.44..+0.56 (sd 0.147 about a
+# mean of 0.023) and sign-flips every stride, so an all-ticks rule can never reach
+# 3 s and would read 0 for every config, discriminating nothing.  The rolling mean
+# asks the honest question instead: did the body actually TRAVEL for three seconds,
+# tolerating the within-stride surge and stall that a walking gait must have.
+const BURST_MIN_SPEED: float = 0.06        # m/s over the window (~18 cm in 3 s)
+const BURST_MIN_TICKS: int = 150           # 3.0 s at the 50 Hz brain tick
+var burst_count: int = 0
+var burst_duty: float = 0.0
+var burst_longest_s: float = 0.0
+var _burst_hist: PackedFloat32Array = PackedFloat32Array()
+var _burst_idx: int = 0
+var _burst_sum: float = 0.0
+var _burst_filled: int = 0
+var _burst_active: int = 0
+var _burst_ticks_total: int = 0
+var _burst_samples: int = 0
+var energy_now: float = 0.0
+var energy_peak_1s: float = 0.0
+var energy_avg: float = 0.0
+var _energy_peak_acc: float = 0.0
+var _energy_sec_ticks: int = 0
 var _sensor_noise_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # 2026-06-02 — Per-joint-type adjustable suspension (Generic6DOFJoint3D
@@ -637,9 +697,10 @@ func _set_knee_widening_enabled(value: bool) -> void:
 # on fire, the joint's target angle moves by `bri_impulse_per_spike`; each
 # tick the integrated offset decays toward rest by `bri_friction_per_tick`.
 # Smoothness emerges from the friction-integration of many discrete spikes,
-# not from smoothness of the brain's commands. See
-# `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md` Stage 3.D
-# and `docs/storytelling/glossary.md` "Bernoulli-Impulse Actuation".
+# not from smoothness of the brain's commands. See `docs/glossary.md`
+# "Bernoulli-Impulse Actuation".  (The RL-era
+# `picrawler_diagnostic_calibration_plan.md` Stage 3.D did not survive the repo
+# split; the glossary entry carries the model and its provenance.)
 #
 # Default `actuation_backend = "discrete"` is bit-identical to pre-3.D.
 @export_enum("discrete", "bernoulli_impulse") var actuation_backend: String = "discrete"
@@ -1414,6 +1475,7 @@ var _slick_leg: int = -1
 var _slick_at: int = 0
 var _slick_done: bool = false
 var _lesion_at: int = -1
+var _sched_patches: Array = []   # SETPARAM_AT entries: {t, id, key, val, done}
 var _lesion_until: int = 0x7FFFFFFF
 var _lesion_scale: float = 0.2
 # "action" (default) attenuates the leg's COMMANDED MOTION; "torque" caps its torque
@@ -1482,6 +1544,99 @@ var _up_est_body: Vector3 = Vector3.ZERO    # complementary-filter gravity-up es
 var _up_acc_last: Vector3 = Vector3.ZERO    # last accel-only gravity-up (body frame)
 var _accel_body_last: Vector3 = Vector3.ZERO  # last modelled accelerometer reading
 var _gyro_body_last: Vector3 = Vector3.ZERO   # last modelled gyro reading
+# 2026-08-25 — STRIDE-ODOMETRY INSTRUMENT (PART V stage A / gate A).  Measures, per brain
+# tick, the body velocity IMPLIED by the FK of planted feet — the efference-copy half of
+# the stride_v sensor the PART V plan wants to build — beside the god's-eye true velocity.
+# This block is an INSTRUMENT: nothing here is published to the brain; the god's-eye
+# comparison target stays god's-eye and must never become one (same contract as the
+# propulsion-attribution trace above).  The question it answers is the one that was never
+# measured: horizontal commanded-FK error, not just foot height (22 mm mean).
+#   For a foot PLANTED in the world, d/dt p_world = 0 gives, in the body frame,
+#     v_body = −ṗ_body − ω_body × p_body
+#   with ṗ_body the FK toe displacement per tick and ω_body the gyro — so the gyro term
+#   removes what body ROTATION does to a planted foot, leaving pure translation (the
+#   operator-agreed fork: a tight circle must not read as travel).
+# Four variants, one judged and three diagnostic:
+#   cmdlp — commanded-angle FK through a FORWARD MODEL of the servo (first-order lag on
+#           the effective target, α≈0.2 ≙ ~80–100 ms — measured: LP(eff_target) matches
+#           the measured angle at r 0.93–0.99 per joint), stance = foot_load ≥ thresh.
+#           GATE A IS JUDGED ON THIS ONE: commanded angles are the only joint input, so
+#           it is exactly what the encoder-less hardware can build, and the lag constant
+#           is discoverable inside the blanket (fit it to the FK/IMU disagreement).
+#   cmd   — RAW commanded-angle FK, same stance gate → the naive efference copy.  Kept
+#           because its failure is itself a stage-A finding: the servos low-pass the
+#           command so hard (22 mm mean foot-height error) that raw-command FK velocity
+#           was measured near-uncorrelated with truth (r_tick ≈ 0.03).
+#   meas  — measured-angle FK, same stance gate → isolates servo tracking error (upper
+#           bound no encoder-less robot reaches; sim-only diagnosis).
+#   tc    — cmdlp-angle FK, stance = TRUE physics contact → isolates stance-gate error
+#           (if tc correlates and cmdlp does not, the fix is the load threshold, not FK).
+var _toe_off_c: Array = []                    # construction-frame toe offset per leg (lower_dir·L3/2)
+var _strido_prev_valid: bool = false          # false ⇒ no displacement this tick (reset/suspend)
+var _strido_prev_cmd: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _strido_prev_cmdlp: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _strido_prev_meas: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+# Servo forward-model state: per-joint first-order lag on the EFFECTIVE target (the
+# slew-limited command the PD actually tracks, _eff_target_* — itself pure efference).
+# Cleared on hard reset; re-seeded from the current effective target on first use.
+var _strido_lp: Array = []                    # 12 floats, index = leg*3 + joint
+const STRIDO_LP_ALPHA: float = 0.2
+var _strido_prev_loaded: Array = [false, false, false, false]
+var _strido_prev_contact: Array = [false, false, false, false]
+var _dbg_strido_cmd: Vector3 = Vector3.ZERO   # body-frame FK velocity, raw-command/load-gated
+var _dbg_strido_cmdlp: Vector3 = Vector3.ZERO # body-frame FK velocity, forward-model/load-gated (JUDGED)
+var _dbg_strido_meas: Vector3 = Vector3.ZERO  # body-frame FK velocity, measured/load-gated
+var _dbg_strido_tc: Vector3 = Vector3.ZERO    # body-frame FK velocity, forward-model/true-contact
+var _dbg_strido_true: Vector3 = Vector3.ZERO  # body-frame TRUE velocity (god's-eye instrument)
+var _dbg_strido_ns: int = 0                   # feet loaded through the whole tick (cmd/meas)
+var _dbg_strido_ns_tc: int = 0                # feet in true contact through the whole tick
+# Per-foot FORWARD FK velocities, UNGATED — with fload and c already in the trace these
+# let any stance rule (threshold, hysteresis, contact) be re-scored offline, so the
+# stage-B stance-gate parameter is measured from stage-A data instead of guessed.
+var _dbg_strido_vleg_clp: Array = [0.0, 0.0, 0.0, 0.0]
+var _dbg_strido_vleg_meas: Array = [0.0, 0.0, 0.0, 0.0]
+# HUD smoothing (display only; the trace logs raw per-tick values).
+var _strido_cmd_ema: float = 0.0
+var _strido_true_ema: float = 0.0
+var _strido_slip_ema: float = 0.0
+var _strido_hud: Label = null
+# Same normalized-foot_load stance threshold the GainEvolver's G2 guard uses
+# (load_thresh default 0.05) — the sensor must be judged with the stance rule it will run.
+# (Gate A then MEASURED the sensor's own optimum at ~0.2 — see STRIDE_V_LOAD_THRESH below.
+# The instrument keeps 0.05 so its series stays comparable across the gate-A record.)
+const STRIDO_LOAD_THRESH: float = 0.05
+const STRIDO_EMA_ALPHA: float = 0.1
+# ---- stride_v ⊕ slip — THE SENSOR (PART V stage B, 2026-08-25) --------------------------
+# The published bootstrap sensor gate A licensed, built exactly as measured: stance-mean
+# forward-model FK velocity (stance = foot_load ≥ 0.2, the measured plateau; G2's 0.05
+# costs ~0.15 of r), with the IMU in the three roles the offline filter sweep left it:
+# bridging swing/flight ticks (bias-corrected accel coast), a PI bias estimator learning
+# the accelerometer's attitude-leak from the FK innovation (without it the mean is
+# crushed: integrated travel 0.65 of 3.57 m; with it, ~0.85), and the innovation itself —
+# the re-afference mismatch (a foot sliding back reads as body-forward to FK but not to
+# the IMU) — published as `slip`, the percept deferred from GainEvolver v1.
+# β = 1.0 was CHOSEN AGAINST lower values on measurement: β 0.3 buys per-tick r
+# (0.75–0.81 vs 0.57) but costs the criterion band (r_w50 0.62–0.72 vs 0.71–0.79), and
+# the criterion consumes ~1 s EMAs.  Re-use context for β≈0.3 + ki≈0.05: a consumer that
+# needs the FAST band (reflexes, footfall-scale prediction).
+# LEGALITY: commanded angles + published foot_load + modelled IMU only.  No calibration
+# against god's-eye scale is applied (FK reads a stable ~75% of truth; consumers adapt —
+# hard prohibition 5).  Default-no-consumer: publishing alone is behavior-identical.
+const STRIDE_V_LOAD_THRESH: float = 0.2   # normalized foot_load; measured plateau 0.15–0.30
+const STRIDE_V_FUSE_BETA: float = 1.0     # FK owns stance ticks; accel owns the gaps
+const STRIDE_V_BIAS_KI: float = 0.1       # PI bias-estimator gain (integral of innovation)
+const STRIDE_V_SLIP_ALPHA: float = 0.05   # slip EMA (~0.4 s)
+const STRIDE_V_COAST_LEAK: float = 0.005  # leak toward 0 when no stance feet (~4 s tau)
+var _stridev_prev_loaded: Array = [false, false, false, false]
+var _stridev_est: Vector2 = Vector2.ZERO  # [x = right, y = forward] body frame, m/s
+var _stridev_bias: Vector2 = Vector2.ZERO # learned accel bias [x, z], m/s^2
+var _stridev_slip: float = 0.0
+var _dbg_stridev_alin: Vector3 = Vector3.ZERO  # trace-only: the a_lin fed to the fusion
+# Gyro averaged across the brain tick's physics substeps for the ω×p term — the last
+# 240 Hz sample alone misrepresents a 20 ms displacement window mid-swing.  A real IMU
+# oversamples its control loop the same way, so the average is hardware-honest.
+var _gyro_tick_acc: Vector3 = Vector3.ZERO
+var _gyro_tick_n: int = 0
 # 2026-08-04 — DEAD-RECKONED EGO HEADING for the L1 nav loop.  Integrated from the MODELLED
 # BODY-FRAME GYRO (_gyro_body_last.y), which is what a real IMU reports — not from the chassis
 # world transform, which would be a god's-eye read.  It drifts, exactly as dead reckoning does
@@ -2522,6 +2677,21 @@ func _ready() -> void:
 	if skl != "": _slick_leg = skl.to_int()
 	var ska: String = OS.get_environment("OGMA_PICRAWLER_SLICK_AT")
 	if ska != "": _slick_at = ska.to_int()
+	# 2026-08-14 — SCHEDULED BRAIN-PARAM FLIP (generic perturbation hook, the
+	# lesion-AT idiom generalized to any HotMutable module param).  Format:
+	#   OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;tick:module:key:value...]"
+	# Applied ONCE when tick_counter reaches each entry's tick (tick 1 = an
+	# arm-differentiation mechanism without config proliferation; a mid-run
+	# tick = the (d)-test's perturbation).  Each application is logged.
+	var spa: String = OS.get_environment("OGMA_PICRAWLER_SETPARAM_AT")
+	if spa != "":
+		for ent in spa.split(";", false):
+			var parts: PackedStringArray = ent.split(":", false)
+			if parts.size() == 4:
+				_sched_patches.append({"t": parts[0].to_int(), "id": parts[1],
+					"key": parts[2], "val": parts[3].to_float(), "done": false})
+			else:
+				push_warning("SETPARAM_AT entry malformed (want tick:module:key:value): " + ent)
 	_abl_init()
 	_abl_parse_env()
 	var ccl: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_COLLIDE")
@@ -2671,6 +2841,14 @@ func _ready() -> void:
 		"float32[4]: sin(yaw), cos(yaw), forward speed, angular speed", true)
 	brain.register_source("Joints",  "reality.proprio.joints",
 		"float32[12]: 4 hip1 + 4 hip2 + 4 knee, normalised", true)
+	# 2026-08-11 (twin-gate M0.d) — PHASE-SPACE proprio: [q, Δq].  Position-only
+	# tokens self-intersect on a limit cycle ("knee at 0.3 going up" ≡ "going
+	# down"), which is why the planner's chain degenerates to persistence; the
+	# per-tick delta breaks the degeneracy with the body's OWN dynamics (no
+	# external clock).  Transparent sensor reduction of the same egocentric
+	# stream — no subscribers in existing configs, so behaviorally null there.
+	brain.register_source("JointsDyn", "reality.proprio.joints_dyn",
+		"float32[24]: [q(12), Δq(12)] — the joints stream + its per-tick delta (phase-space embedding)", true)
 	if publish_vision:
 		# 2026-06-13 — forward-facing raycast camera (Lambert-shaded RGB) → an
 		# epm_color JL EPM (host.video.color → reality.video.color → consensus).
@@ -2765,6 +2943,19 @@ func _ready() -> void:
 		"float32[1]: dead-reckoned heading, integrated from the modelled body-frame gyro (drifts, as real dead reckoning does)", true)
 	brain.register_source("VelEgo", "reality.proprio.vel_ego",
 		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc", true)
+	# 2026-08-25 — PART V stage B: the LEGAL travel lane (gate A, ledger same date).
+	brain.register_source("StrideV", "reality.proprio.stride_v",
+		"float32[2]: [v_right, v_forward] body-frame velocity ESTIMATED from stance-leg FK " +
+		"on servo forward-model commands, complementary-fused with the IMU. Fully Markov-" +
+		"compliant: commanded angles + foot_load + IMU, nothing else — the legal replacement " +
+		"lane for vel_ego. Gate A 2026-08-25: forward r≈0.75 vs truth at 1 s windows, " +
+		"reads a stable ~75% of true travel (uncalibrated by design — consumers adapt); " +
+		"lateral channel UNVALIDATED. Reads ~0 when stepping in place (7x separation).", true)
+	brain.register_source("Slip", "reality.proprio.slip",
+		"float32[1]: re-afference mismatch — EMA magnitude of the FK-vs-IMU innovation in " +
+		"the stride_v fusion (a planted foot sliding back reads as body-forward to FK but " +
+		"not to the IMU: the cat-on-ice percept). The post-plant-slip signal deferred from " +
+		"GainEvolver v1. Gait-phase-locked, translation-linked (gate A).", true)
 	brain.register_source("Beacon", "reality.proprio.beacon",
 		"float32[1]: fraction of the frame that is beacon-coloured (looming/LGMD analogue)", true)
 	brain.register_source("GroundClearance", "reality.proprio.ground_clearance",
@@ -2774,12 +2965,15 @@ func _ready() -> void:
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
 	# against MAX_SERVO_TORQUE. 12-D vector ordered hip1[0..3], hip2[0..3],
 	# knee[0..3] matching the existing `Joints` topic convention. Published
-	# every tick by default; no consumer wired until Stage 3.A.2 adds a
-	# CruseCoordinator load_topic gate. With no subscribers the channel has
-	# zero behavioral effect (bit-identical to pre-3.A runs). Per
-	# `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md`
-	# Stage 3.A: enables Cruse Walknet Rule 5 (Coactivation — load extends
-	# stance), and a future opt-in epm_joint_torque (Stage 3.A.3).
+	# every tick by default. With no subscribers the channel has zero
+	# behavioral effect (bit-identical to pre-3.A runs).
+	# ⚠ The RL-era plan that motivated this (`picrawler_diagnostic_calibration_plan.md`
+	# Stage 3.A) did not survive the repo split, AND its rationale has since been
+	# refuted twice over — see `docs/reports/picrawler_lever_ledger.md`:
+	#   · Cruse/Walknet Rule 5 was killed in the regime where its premise applied
+	#     (a second coordination controller firing out of phase with the emergent gait).
+	#   · this channel is NOT a load proxy — see the ⚠ in its description below.
+	# Kept as an instrument. Do not wire a consumer on the Stage 3.A rationale.
 	brain.register_source("JointTorque", "reality.proprio.joint_torque",
 		"float32[12]: per-servo PD COMMAND BUDGET (hip1×4, hip2×4, knee×4), normalized to [-1,1] vs MAX_SERVO_TORQUE. ⚠ NOT applied torque and NOT a load proxy despite its original description: it sets the motor's max-impulse cap, and with Kp=20/Kd=8 it is DOMINATED BY THE -Kd*omega damping term (measured corr with joint motion -0.46..-0.56), i.e. it is mostly a negated velocity copy. Use JointLoad for load.", true)
 	brain.register_source("FootLoad", "reality.proprio.foot_load",
@@ -3995,6 +4189,8 @@ func _teleport_to(ground: Vector3) -> void:
 	_last_drop = drop
 	_last_drop_flip = flip
 	_last_drop_tick = tick_counter
+	# Stride-odometry instrument: teleport invalidates the previous toe/contact state.
+	_strido_prev_valid = false
 	if brain != null:
 		brain.publish_event("reset", 1.0)
 	print("PicrawlerBody: [teleport] dropped the experienced robot at (%.2f, %.2f)%s tick %d" % [
@@ -4127,10 +4323,13 @@ func _load_geometry(path_override: String = "") -> bool:
 	if path_override != "":
 		p = path_override
 	else:
-		var env_body: String = OS.get_environment("OGMA_PICRAWLER_BODY")
-		if env_body != "":
-			p = env_body if env_body.begins_with("res://") \
-				else "res://addons/ami_ogma/body/%s.json" % env_body
+		# Launcher metadata.body > OGMA_PICRAWLER_BODY env > @export default —
+		# resolved in ExperimentConfig so a benchmark config (a body+gains PAIR,
+		# stage E3) launched from the UI always gets ITS body.
+		var sel: String = ExperimentConfig.resolve_picrawler_body("")
+		if sel != "":
+			p = sel if sel.begins_with("res://") \
+				else "res://addons/ami_ogma/body/%s.json" % sel
 
 	var applied: bool = false
 	if not FileAccess.file_exists(p):
@@ -4620,6 +4819,13 @@ func _build_leg(leg_index: int) -> void:
 	# Darkest shade of leg_color for lower segment.
 	var lower := _make_capsule(LOWER_MASS, LEG_RADIUS * 0.8, L3, lower_center,
 							   leg_color.darkened(0.5), lower_dir)
+	# Stride-odometry instrument: construction-frame toe offset from the lower-link
+	# CENTER.  The FK transforms carry the center; odometry needs the TIP — the center
+	# rotates about a planted toe as the knee flexes, and at 50 Hz that spurious motion
+	# is the same order as the true ~2 mm/tick body displacement it would contaminate.
+	if leg_index == 0:
+		_toe_off_c.clear()
+	_toe_off_c.append(lower_dir * (L3 * 0.5))
 	# Markov-compliant foot-contact sensor: enable true physics contact reporting
 	# on the foot (lower leg) so we can sense TOUCH (= a hardware contact switch),
 	# not an absolute-Y threshold.  Legs mask _LAYER_WORLD only, so any reported
@@ -5403,6 +5609,25 @@ func _input(event: InputEvent) -> void:
 		_vision_panel_on = not _vision_panel_on
 		_update_vision_panel()
 		print("PicrawlerBody: [N] vision_panel = %s" % _vision_panel_on)
+	elif key == KEY_O:
+		# 2026-08-12 — toggle the PLAN AUTHORITY bench (lever b): the reflex↔plan
+		# mix slider, the earned-bands gate override, and the live hand-mask
+		# controls.  Its own key because [M] is the MOTOR-EPM panel.
+		var pp: Node = get_tree().get_root().find_child("PlanAuthorityPanel", true, false)
+		if pp != null and pp is Control:
+			var pc := pp as Control
+			pc.visible = not pc.visible
+			print("PicrawlerBody: [O] plan_authority_panel = %s" % pc.visible)
+	elif key == KEY_U:
+		# 2026-08-17 (PART IV) — toggle the GAIN EVOLVER panel: live vector +
+		# incumbent/candidate criterion scores + accept history + the mutation-σ
+		# slider (0 = observer; ADOPT hands a hand-tuned [M] point to the
+		# evolver before σ-resume).  Its own key: [M] and [O] are taken.
+		var gp: Node = get_tree().get_root().find_child("GainEvolverPanel", true, false)
+		if gp != null and gp is Control:
+			var gc := gp as Control
+			gc.visible = not gc.visible
+			print("PicrawlerBody: [U] gain_evolver_panel = %s" % gc.visible)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
@@ -5513,6 +5738,9 @@ func _imu_substep(dt: float) -> void:
 	var gyro_body: Vector3 = w2b * _chassis.angular_velocity
 	_accel_body_last = accel_meas
 	_gyro_body_last  = gyro_body
+	# Stride-odometry instrument: accumulate the tick-mean gyro (drained per brain tick).
+	_gyro_tick_acc += gyro_body
+	_gyro_tick_n += 1
 	# Dead-reckon the ego heading from the gyro's yaw component (this runs at the IMU's own
 	# substep rate, so use that dt rather than the brain tick).
 	_ego_heading = wrapf(_ego_heading + gyro_body.y * dt, -PI, PI)
@@ -5702,6 +5930,17 @@ func _step_one() -> void:
 	if _abl_env_spec != "" and not _abl_env_done and tick_counter >= _abl_env_at:
 		_abl_env_done = true
 		_abl_apply_env_spec()
+	# Scheduled brain-param flips (SETPARAM_AT).  Announced loudly per §3.2 rule 7 —
+	# a run must never silently be the arm you did not intend.
+	for _sp in _sched_patches:
+		if not _sp["done"] and tick_counter >= int(_sp["t"]) and brain != null:
+			_sp["done"] = true
+			var _res = brain.apply_patch({"op": "set_param", "id": _sp["id"],
+				"key": _sp["key"], "value": _sp["val"]})
+			var _ok: bool = typeof(_res) == TYPE_DICTIONARY and bool(_res.get("success", false))
+			print("PicrawlerBody: [setparam_at] %s.%s = %s at tick %d -> %s" % [
+				_sp["id"], _sp["key"], str(_sp["val"]), tick_counter,
+				("OK" if _ok else "FAILED " + str(_res))])
 	if _teleport_ramp_at > 0 and tick_counter == _teleport_ramp_at:
 		_teleport_to_ramp()
 	elif _teleport_ramp_at > 0 and _teleport_every > 0 and tick_counter > _teleport_ramp_at \
@@ -5801,6 +6040,26 @@ func _step_one() -> void:
 	# search reward sideways crab as much as forward; signed forward rewards
 	# forward-aligned motion (reduces crab + closes a speed-magnitude Goodhart).
 	var fwd_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(Vector2(sin(yaw), cos(yaw)))
+	# Sustained-forward-burst tracker: rolling 3 s mean of fwd_v (see BURST_MIN_SPEED).
+	if _burst_hist.size() != BURST_MIN_TICKS:
+		_burst_hist.resize(BURST_MIN_TICKS)
+		for _bi in range(BURST_MIN_TICKS): _burst_hist[_bi] = 0.0
+	_burst_sum -= _burst_hist[_burst_idx]
+	_burst_hist[_burst_idx] = fwd_v
+	_burst_sum += fwd_v
+	_burst_idx = (_burst_idx + 1) % BURST_MIN_TICKS
+	_burst_filled = mini(_burst_filled + 1, BURST_MIN_TICKS)
+	_burst_samples += 1
+	# only judge once a full 3 s window exists, else a fast first tick reads as a burst
+	if _burst_filled >= BURST_MIN_TICKS:
+		if (_burst_sum / float(BURST_MIN_TICKS)) >= BURST_MIN_SPEED:
+			if _burst_active == 0: burst_count += 1     # count the ONSET
+			_burst_active += 1
+			_burst_ticks_total += 1
+			burst_longest_s = maxf(burst_longest_s, float(_burst_active) * TAU)
+		else:
+			_burst_active = 0
+	burst_duty = float(_burst_ticks_total) / maxf(1.0, float(_burst_samples))
 	var ang_v: float = _chassis.angular_velocity.y
 
 	# ---- Auto-reset on belly-up inversion (opt-in training safety) ----
@@ -5907,6 +6166,27 @@ func _step_one() -> void:
 		it.append(intent_yaw)
 		brain.publish_proprio(it, "motor_intent")
 	brain.publish_proprio(imu, "imu")
+
+	# ---- 2026-08-23 — TRUE 3-AXIS GYRO (a new sensor, not a new metric) -------------------
+	# imu[3] carries `_chassis.angular_velocity.y` — the WORLD vertical component.  A real
+	# MEMS gyro is bolted to the chassis and measures rotation about the BODY's own axes,
+	# and the two diverge exactly when the body tilts, which is when it matters.  This
+	# publishes the honest form: world angular velocity projected onto each body axis.
+	#   [0] roll rate  (about body +X)
+	#   [1] YAW RATE ABOUT THE BODY'S OWN UP  <- turn rate as the robot itself feels it
+	#   [2] pitch rate (about body +Z)
+	# Egocentric and physically realisable, so unlike fwd_v this is a LAWFUL brain input.
+	# Additive and default-no-consumer: published every tick, byte-identical until some
+	# module names it.  Built for the flow term's anti-circling factor — fwd_v is
+	# body-frame forward speed and reads a tight circle as flowing beautifully, so a
+	# sustained turn bias is what separates travelling from going round in circles.
+	var _wv: Vector3 = _chassis.angular_velocity
+	var _gb: Basis = chassis_xform.basis
+	var gyro := PackedFloat64Array()
+	gyro.append(clamp(_wv.dot(_gb.x) / PI, -1.0, 1.0))
+	gyro.append(clamp(_wv.dot(_gb.y) / PI, -1.0, 1.0))
+	gyro.append(clamp(_wv.dot(_gb.z) / PI, -1.0, 1.0))
+	brain.publish_proprio(gyro, "gyro")
 
 	# ---- L1 nav inputs (2026-08-04) -------------------------------------------------------
 	# RunTumbleNavV2 wants a scalar heading and an egocentric velocity.  Both are published
@@ -6173,6 +6453,26 @@ func _step_one() -> void:
 				+ a * _sensor_noise_rng.randf_range(-sensor_noise_sigma, sensor_noise_sigma)
 			joints[i] = clamp(joints[i] + _sensor_noise[i], -1.0, 1.0)
 	brain.publish_proprio(joints, "joints")
+	# 2026-08-11 (twin-gate M0.d) — [q, q̇] phase-space stream.  Computed AFTER
+	# sensor noise so both halves describe the same egocentric view.
+	# M0.d.2 (same day): q̇ is now an EMA of the per-tick delta, NOT the raw
+	# delta — the v1 raw single-tick Δq was measured to be a noisy velocity
+	# estimator (dyn-token chain WORSE than persistence, lift 0.94→0.64) while
+	# the stream's structural effect (self-mass 0.72→0.55) confirmed the
+	# phase-space concept.  τ ≈ 1/alpha ticks, matched to servo dynamics.
+	var joints_dyn := PackedFloat64Array()
+	joints_dyn.append_array(joints)
+	if _qdot_ema.size() != joints.size():
+		_qdot_ema.resize(joints.size())
+		_qdot_ema.fill(0.0)
+	if _prev_joints_pub.size() == joints.size():
+		for i in range(joints.size()):
+			_qdot_ema[i] = (1.0 - joints_dyn_vel_alpha) * _qdot_ema[i] \
+				+ joints_dyn_vel_alpha * (joints[i] - _prev_joints_pub[i])
+	for i in range(joints.size()):
+		joints_dyn.append(_qdot_ema[i])
+	_prev_joints_pub = joints.duplicate()
+	brain.publish_proprio(joints_dyn, "joints_dyn")
 
 	# Phase 7.9 — per-leg foot-Y for SynergyTimer touchdown detection.
 	# Cheap (4 floats); consumers opt in by instantiating SynergyTimer.
@@ -6249,6 +6549,19 @@ func _step_one() -> void:
 		var rest_inv: Transform3D = _chassis_rest_xform.affine_inverse()
 		var fk_arr := PackedFloat64Array()
 		var cmd_arr := PackedFloat64Array()
+		# Stride-odometry instrument: body-frame TOE positions from the same FK chain.
+		# lower_* * _toe_off_c[i] = the FK-transformed construction toe (t_lower maps
+		# construction-frame points; the offset rides the link's rotation), so unlike
+		# the height columns above this needs no vertical-link approximation.
+		var toe_cmd_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		var toe_cmdlp_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		var toe_meas_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		if _strido_lp.size() != 12:
+			_strido_lp.resize(12)
+			for k in range(4):
+				_strido_lp[k * 3]     = _eff_target_hip1[k]
+				_strido_lp[k * 3 + 1] = _eff_target_hip2[k]
+				_strido_lp[k * 3 + 2] = _eff_target_knee[k]
 		for i in range(4):
 			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
 			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
@@ -6261,6 +6574,17 @@ func _step_one() -> void:
 			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
 			fk_arr.append((rest_inv * lower_fk.origin).dot(up_body) - L3 * 0.5)
 			cmd_arr.append((rest_inv * lower_cmd.origin).dot(up_body) - L3 * 0.5)
+			if _toe_off_c.size() == 4:
+				# Servo forward model: first-order lag on the slew-limited effective
+				# target (which drove the physics that produced this tick's pose).
+				_strido_lp[i * 3]     += STRIDO_LP_ALPHA * (_eff_target_hip1[i] - _strido_lp[i * 3])
+				_strido_lp[i * 3 + 1] += STRIDO_LP_ALPHA * (_eff_target_hip2[i] - _strido_lp[i * 3 + 1])
+				_strido_lp[i * 3 + 2] += STRIDO_LP_ALPHA * (_eff_target_knee[i] - _strido_lp[i * 3 + 2])
+				var lower_clp: Transform3D = _fk_leg(i,
+					_strido_lp[i * 3], _strido_lp[i * 3 + 1], _strido_lp[i * 3 + 2])[2]
+				toe_cmd_b[i]   = rest_inv * (lower_cmd * _toe_off_c[i])
+				toe_cmdlp_b[i] = rest_inv * (lower_clp * _toe_off_c[i])
+				toe_meas_b[i]  = rest_inv * (lower_fk * _toe_off_c[i])
 		brain.publish_proprio(fk_arr,  "feet_y_gravity_fk")
 		brain.publish_proprio(cmd_arr, "feet_y_gravity_cmd")
 		# Mean |commanded − achieved| foot height: the servo tracking error in metres, i.e.
@@ -6309,6 +6633,113 @@ func _step_one() -> void:
 		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
 		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
+
+		# ---- STRIDE-ODOMETRY INSTRUMENT (2026-08-25, PART V stage A) -----------------
+		# Contract at the state-var block (~:1545).  Diagnostic-only: values go to the
+		# trace, the stdout diag and the HUD; NOTHING is published on the bus.
+		# ⚠ _dbg_strido_true is GOD'S-EYE and stays the measurement target only.
+		var gyro_mean: Vector3 = _gyro_body_last
+		if _gyro_tick_n > 0:
+			gyro_mean = _gyro_tick_acc / float(_gyro_tick_n)
+		_gyro_tick_acc = Vector3.ZERO
+		_gyro_tick_n = 0
+		var loaded_now: Array = [false, false, false, false]
+		var loaded02_now: Array = [false, false, false, false]
+		var contact_now: Array = [false, false, false, false]
+		for i in range(4):
+			var fl_n: float = _foot_load_ema[i] / _fl_norm()
+			loaded_now[i] = fl_n >= STRIDO_LOAD_THRESH
+			loaded02_now[i] = fl_n >= STRIDE_V_LOAD_THRESH
+			contact_now[i] = not _lowers[i].get_colliding_bodies().is_empty()
+		var sv_cmd := Vector3.ZERO
+		var sv_cmdlp := Vector3.ZERO
+		var sv_meas := Vector3.ZERO
+		var sv_tc := Vector3.ZERO
+		var sv_ns: int = 0
+		var sv_ns_tc: int = 0
+		var sv_sensor := Vector3.ZERO   # stride_v accumulation (0.2 stance rule)
+		var sv_ns_sensor: int = 0
+		# A freshly-planted foot still carries its swing displacement, so a foot counts
+		# only if it was planted at BOTH ends of the tick.  Suspend teleports the whole
+		# body (prev positions meaningless); hard reset invalidates via _do_hard_reset.
+		if _strido_prev_valid and _suspend_lift_y == 0.0 and _toe_off_c.size() == 4:
+			for i in range(4):
+				var v_clp_i: Vector3 = -((toe_cmdlp_b[i] - _strido_prev_cmdlp[i]) / TAU \
+					+ gyro_mean.cross((toe_cmdlp_b[i] + _strido_prev_cmdlp[i]) * 0.5))
+				var v_meas_i: Vector3 = -((toe_meas_b[i] - _strido_prev_meas[i]) / TAU \
+					+ gyro_mean.cross((toe_meas_b[i] + _strido_prev_meas[i]) * 0.5))
+				_dbg_strido_vleg_clp[i] = v_clp_i.z
+				_dbg_strido_vleg_meas[i] = v_meas_i.z
+				if loaded_now[i] and _strido_prev_loaded[i]:
+					sv_cmdlp += v_clp_i
+					sv_cmd += -((toe_cmd_b[i] - _strido_prev_cmd[i]) / TAU \
+						+ gyro_mean.cross((toe_cmd_b[i] + _strido_prev_cmd[i]) * 0.5))
+					sv_meas += v_meas_i
+					sv_ns += 1
+				if contact_now[i] and _strido_prev_contact[i]:
+					sv_tc += v_clp_i
+					sv_ns_tc += 1
+				if loaded02_now[i] and _stridev_prev_loaded[i]:
+					sv_sensor += v_clp_i
+					sv_ns_sensor += 1
+		else:
+			for i in range(4):
+				_dbg_strido_vleg_clp[i] = 0.0
+				_dbg_strido_vleg_meas[i] = 0.0
+		_dbg_strido_ns = sv_ns
+		_dbg_strido_ns_tc = sv_ns_tc
+		_dbg_strido_cmd = sv_cmd / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
+		_dbg_strido_cmdlp = sv_cmdlp / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
+		_dbg_strido_meas = sv_meas / float(sv_ns) if sv_ns > 0 else Vector3.ZERO
+		_dbg_strido_tc = sv_tc / float(sv_ns_tc) if sv_ns_tc > 0 else Vector3.ZERO
+		_dbg_strido_true = _ch_inv.basis * _chassis.linear_velocity
+		for i in range(4):
+			_strido_prev_cmd[i] = toe_cmd_b[i]
+			_strido_prev_cmdlp[i] = toe_cmdlp_b[i]
+			_strido_prev_meas[i] = toe_meas_b[i]
+			_strido_prev_loaded[i] = loaded_now[i]
+			_stridev_prev_loaded[i] = loaded02_now[i]
+			_strido_prev_contact[i] = contact_now[i]
+		_strido_prev_valid = _suspend_lift_y == 0.0
+
+		# ---- stride_v ⊕ slip: the published sensor (stage B; contract at the consts) --
+		# PI complementary structure: predict with the accelerometer's linear part
+		# (gravity removed via the honest fused attitude estimate — the IMU's own, never
+		# exact attitude) minus the LEARNED bias; correct toward stance-FK when stance
+		# feet exist, and let the innovation both teach the bias and feed `slip`.
+		var a_lin: Vector3 = _accel_body_last - 9.81 * _up_est_body
+		_dbg_stridev_alin = a_lin
+		var v_pred := Vector2(_stridev_est.x + (a_lin.x - _stridev_bias.x) * TAU,
+							  _stridev_est.y + (a_lin.z - _stridev_bias.y) * TAU)
+		if sv_ns_sensor > 0:
+			var v_fk := Vector2(sv_sensor.x / float(sv_ns_sensor),
+								sv_sensor.z / float(sv_ns_sensor))
+			var innov: Vector2 = v_fk - v_pred
+			_stridev_est = v_pred + STRIDE_V_FUSE_BETA * innov
+			_stridev_bias += -STRIDE_V_BIAS_KI * innov
+			_stridev_slip += STRIDE_V_SLIP_ALPHA * (innov.length() - _stridev_slip)
+		else:
+			# No planted feet: coast on the bias-corrected accelerometer with a slow
+			# leak — the FK anchor is gone and unleaked integration turns attitude
+			# error into phantom velocity within seconds (hardware-audit failure shape).
+			_stridev_est = v_pred * (1.0 - STRIDE_V_COAST_LEAK)
+		var sv_out := PackedFloat64Array()
+		sv_out.append(_stridev_est.x)
+		sv_out.append(_stridev_est.y)
+		brain.publish_proprio(sv_out, "stride_v")
+		var slip_out := PackedFloat64Array()
+		slip_out.append(_stridev_slip)
+		brain.publish_proprio(slip_out, "slip")
+		# HUD smoothing on the FORWARD (body +Z) components — the axis gate A judges.
+		# fk = the JUDGED cmdlp variant.  The FK/slip EMAs freeze during full-swing/
+		# airborne ticks (no stance estimate exists) rather than decaying toward a fake
+		# zero; true velocity always updates.
+		_strido_true_ema += STRIDO_EMA_ALPHA * (_dbg_strido_true.z - _strido_true_ema)
+		if sv_ns > 0:
+			_strido_cmd_ema += STRIDO_EMA_ALPHA * (_dbg_strido_cmdlp.z - _strido_cmd_ema)
+			_strido_slip_ema += STRIDO_EMA_ALPHA \
+				* (absf(_dbg_strido_cmdlp.z - _dbg_strido_true.z) - _strido_slip_ema)
+		_update_stride_hud()
 
 	# ---- Markov-blanket-compliant posture sensing (2026-07-22) ----------------
 	# The old height reflex read ABSOLUTE chassis world-Y (chassis_y_norm) — god's-
@@ -6599,11 +7030,22 @@ func _step_one() -> void:
 	#             arm exerting far MORE ground force than the deployed gait ever did)
 	#   tq_sat  — is the servo pinned?  Distinguishes "the controller is not using available
 	#             authority" (our bug, fixable) from "the authority is not there" (hardware).
+	var _e_sum: float = 0.0
 	for _ti in range(jtorque.size()):
 		var _ta: float = absf(jtorque[_ti])
 		_tq_mag_acc += _ta
+		_e_sum += _ta
 		if _ta > 0.95: _tq_sat_acc += 1.0
 		_tq_n += 1.0
+	# Per-tick mean |torque| -> now / 1 s peak / slow average (see the block above).
+	energy_now = _e_sum / maxf(1.0, float(jtorque.size()))
+	_energy_peak_acc = maxf(_energy_peak_acc, energy_now)
+	energy_avg = energy_avg + ENERGY_EMA_ALPHA * (energy_now - energy_avg)
+	_energy_sec_ticks += 1
+	if _energy_sec_ticks >= ENERGY_PEAK_WINDOW_TICKS:
+		energy_peak_1s = _energy_peak_acc
+		_energy_peak_acc = 0.0
+		_energy_sec_ticks = 0
 
 	# Phase 7.13 v4.2 — body-state signal for CruseCoordinator gating.
 	# chassis_y_norm in [0, 1].  CruseCoordinator subscribes optionally and
@@ -9688,6 +10130,44 @@ func _update_vision_panel() -> void:
 		_vision_depth_image.set_data(nw, nh, false, Image.FORMAT_RGB8, gray)
 		_vision_depth_texture.update(_vision_depth_image)
 
+# Stride-odometry HUD line (2026-08-25, PART V stage A) — operator-requested: the
+# FK-vs-true velocity comparison live, so slip reads as the two numbers peeling apart
+# on contact events.  Sits directly above the distress bar, same lazy-Label pattern.
+func _update_stride_hud() -> void:
+	if _strido_hud == null:
+		var hud := get_tree().get_root().find_child("HUD", true, false)
+		if hud == null:
+			return
+		_strido_hud = Label.new()
+		_strido_hud.name = "StrideOdoBar"
+		_strido_hud.add_theme_font_size_override("font_size", 13)
+		# Monospace: with the default proportional font the +/− glyph widths differ,
+		# so the line breathed as signs flipped (operator 2026-08-28).
+		var mono := SystemFont.new()
+		mono.font_names = PackedStringArray(["DejaVu Sans Mono", "Liberation Mono", "Monospace"])
+		_strido_hud.add_theme_font_override("font", mono)
+		# BOTTOM ROW, beside the distress bar (which sits at x 12) — the old stacked
+		# spot (12, −46) overlapped the ablation [K] panel.
+		_strido_hud.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		_strido_hud.position = Vector2(380, -28)
+		hud.add_child(_strido_hud)
+	# Slip bar scaled against the true speed's own magnitude (floored so standing still
+	# does not divide by ~0): full bar = slip as large as the motion it corrupts.
+	var scale_v: float = maxf(absf(_strido_true_ema), 0.05)
+	var frac: float = clampf(_strido_slip_ema / scale_v, 0.0, 1.0)
+	var n: int = 12
+	var filled: int = clampi(int(round(frac * float(n))), 0, n)
+	var bar: String = "█".repeat(filled) + "░".repeat(n - filled)
+	# Fixed-width formats + display clamps to ±9.999 so the character count can never
+	# change: %+6.3f is always exactly six glyphs, %5.3f always five, ns one.
+	_strido_hud.text = "stride  fk %+6.3f  fuse %+6.3f  true %+6.3f  slip [%s] %5.3f  ns %d" % [
+		clampf(_strido_cmd_ema, -9.999, 9.999),
+		clampf(_stridev_est.y, -9.999, 9.999),
+		clampf(_strido_true_ema, -9.999, 9.999),
+		bar, clampf(_strido_slip_ema, 0.0, 9.999), _dbg_strido_ns]
+	_strido_hud.add_theme_color_override("font_color",
+		Color(0.4 + 0.6 * frac, 0.9 - 0.7 * frac, 0.3, 1.0))
+
 func _update_distress_hud() -> void:
 	# Always-visible distress bar (Cell-style) so the wedge state is watchable live.
 	if _distress_hud == null:
@@ -9751,6 +10231,16 @@ func _do_hard_reset() -> void:
 	# discontinuity.  Reward-free instrumentation.
 	if brain != null:
 		brain.publish_event("reset", 1.0)
+	# Stride-odometry instrument: the teleport makes the previous toe/contact state
+	# meaningless — skip one displacement tick rather than log a phantom stride.  The
+	# servo forward-model state re-seeds from the post-reset effective targets.
+	_strido_prev_valid = false
+	_strido_lp.clear()
+	# stride_v sensor: a hard reset is a velocity discontinuity the fusion must not
+	# integrate across (the bus reset event tells consumers the same thing).
+	_stridev_est = Vector2.ZERO
+	_stridev_bias = Vector2.ZERO
+	_stridev_slip = 0.0
 	# Apply _pending_reset_offset to every cached rest transform.  Zero
 	# offset (legacy default) reproduces the original center-spawn
 	# behaviour bit-identically.  Non-zero offset translates the entire
@@ -9912,6 +10402,32 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"ares": [snappedf(_up_acc_last.x - _up_est_body.x, 0.00001),
 				 snappedf(_up_acc_last.y - _up_est_body.y, 0.00001),
 				 snappedf(_up_acc_last.z - _up_est_body.z, 0.00001)],
+		# 2026-08-25 — STRIDE-ODOMETRY INSTRUMENT (PART V gate A).  Per-tick body-frame
+		# [x, z] velocities: sv_clp = forward-model-FK/load-gated (THE JUDGED SIGNAL),
+		# sv_cmd = raw-command FK (the naive efference copy, kept as a finding),
+		# sv_meas = measured-FK (servo-tracking diagnosis), sv_tc = forward-model-FK on
+		# TRUE contact (stance-gate diagnosis), sv_true = god's-eye truth in body frame.
+		# sv_ns = [load-gated stance feet, true-contact stance feet]; ns of 0 means NO
+		# estimate existed that tick (the zeros beside it are placeholders, filter on it).
+		"sv_clp":  [snappedf(_dbg_strido_cmdlp.x, 0.0001), snappedf(_dbg_strido_cmdlp.z, 0.0001)],
+		"sv_cmd":  [snappedf(_dbg_strido_cmd.x, 0.0001),  snappedf(_dbg_strido_cmd.z, 0.0001)],
+		"sv_meas": [snappedf(_dbg_strido_meas.x, 0.0001), snappedf(_dbg_strido_meas.z, 0.0001)],
+		"sv_tc":   [snappedf(_dbg_strido_tc.x, 0.0001),   snappedf(_dbg_strido_tc.z, 0.0001)],
+		"sv_true": [snappedf(_dbg_strido_true.x, 0.0001), snappedf(_dbg_strido_true.z, 0.0001)],
+		"sv_ns":   [_dbg_strido_ns, _dbg_strido_ns_tc],
+		# The PUBLISHED fused sensor [x=right, z=forward] — always defined (coasts on the
+		# IMU through full-swing ticks), so no ns gate applies to it.
+		"sv_fuse": [snappedf(_stridev_est.x, 0.0001), snappedf(_stridev_est.y, 0.0001)],
+		"sv_slip": snappedf(_stridev_slip, 0.0001),
+		# The IMU linear-acceleration term feeding the fusion [x, z] — lets the filter
+		# itself (β, bias gain) be re-simulated offline from one recorded run.
+		"alin": [snappedf(_dbg_stridev_alin.x, 0.0001), snappedf(_dbg_stridev_alin.z, 0.0001)],
+		# Per-foot forward FK velocities, UNGATED (0 on invalid ticks) — combine with
+		# fload/c above to re-score any stance rule offline.
+		"svl_clp":  [snappedf(_dbg_strido_vleg_clp[0], 0.0001),  snappedf(_dbg_strido_vleg_clp[1], 0.0001),
+					 snappedf(_dbg_strido_vleg_clp[2], 0.0001),  snappedf(_dbg_strido_vleg_clp[3], 0.0001)],
+		"svl_meas": [snappedf(_dbg_strido_vleg_meas[0], 0.0001), snappedf(_dbg_strido_vleg_meas[1], 0.0001),
+					 snappedf(_dbg_strido_vleg_meas[2], 0.0001), snappedf(_dbg_strido_vleg_meas[3], 0.0001)],
 	}
 	_trace_file.store_line(JSON.stringify(rec))
 	# FileAccess buffers and the quit path never closes this file, so an unflushed
@@ -10464,6 +10980,20 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# report. If this is large, commanded-angle FK is a materially different signal.
 	line["fk_cmd_err"] = snappedf(_dbg_fk_cmd_err, 0.00001)
 	line["fk_valid_err"] = snappedf(_dbg_fk_valid_err, 0.00001)
+	# Stride-odometry instrument (PART V gate A): smoothed forward FK velocity (the
+	# judged forward-model/cmdlp variant) vs truth and their absolute gap.  Per-tick
+	# series live in the OGMA_PICRAWLER_TRACE file (sv_* fields); these EMAs are the
+	# at-a-glance version for run logs.
+	line["strido_fk"] = snappedf(_strido_cmd_ema, 0.0001)
+	line["strido_true"] = snappedf(_strido_true_ema, 0.0001)
+	line["strido_slip"] = snappedf(_strido_slip_ema, 0.0001)
+	line["strido_ns"] = _dbg_strido_ns
+	# stride_v/slip PUBLISHER METER (gate B's two-sided consumer check, publisher half):
+	# the values actually on the bus this tick, so a subscribed consumer can be checked
+	# end-to-end against what was sent.
+	line["stride_v"] = snappedf(_stridev_est.y, 0.0001)
+	line["stride_vx"] = snappedf(_stridev_est.x, 0.0001)
+	line["stride_slip"] = snappedf(_stridev_slip, 0.0001)
 	line["att_err_acc"] = snappedf(_dbg_att_err_acc, 0.01)
 	line["att_err_imu"] = snappedf(_dbg_att_err_imu, 0.01)
 	line["acc_mag"] = snappedf(_dbg_acc_mag, 0.01)
@@ -10476,7 +11006,16 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			# ⚠ An EPM snapshot has NO "module" wrapper -- its diag fields sit at top
 			# level, unlike MotorEPM's.  Looking for one silently yields nothing, which
 			# is how a DEAD EPM and an UNREAD EPM became indistinguishable.
-			var _gs = JSON.parse_string(str(brain.get_module_snapshot(_gid)))
+			# A module absent from THIS config returns "", and parsing "" is a Godot
+			# ERROR line.  These five ids belong to an earlier stack generation, so a
+			# 300k-tick run emitted ~40k of them — enough that `grep -i error` on a run
+			# log became useless and a REAL error would have hidden in the noise.  The
+			# parse result was already discarded on failure, so skipping is behaviour-
+			# identical; what it buys back is the ability to trust the log.
+			var _gsnap: String = str(brain.get_module_snapshot(_gid))
+			if _gsnap.is_empty():
+				continue
+			var _gs = JSON.parse_string(_gsnap)
 			if _gs is Dictionary and _gs.has("gng"):
 				var _g = _gs["gng"]
 				var _narr: Array = _g.get("nodes", [])
@@ -10528,6 +11067,35 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				line[_tag + "_win"] = int(_bp.get("winner_id", -1))
 				line[_tag + "_n"]   = int(_bp.get("node_count", -1))
 				line[_tag + "_b"]   = int(_bp.get("baked_count", -1))
+		# 2026-08-11 (twin-gate M0.d) — the phase-space EPM's token mirror, same
+		# shape as bp_/bpt_ so planscore/conescore-style tools read it unchanged.
+		if _pm.has("body_pose_dyn"):
+			var _bd = _pm["body_pose_dyn"]
+			line["bd_tle"] = snappedf(float(_bd.get("tle", -1.0)), 0.0001)
+			line["bd_win"] = int(_bd.get("winner_id", -1))
+			line["bd_n"]   = int(_bd.get("node_count", -1))
+			line["bd_b"]   = int(_bd.get("baked_count", -1))
+		# 2026-08-14 (option B) — the SURPRISE-vocabulary EPM's token mirror, same
+		# shape as bp_/bd_ so planscore/conescore-style tools read it unchanged.
+		if _pm.has("body_pose_pc"):
+			var _bc = _pm["body_pose_pc"]
+			line["pc_tle"] = snappedf(float(_bc.get("tle", -1.0)), 0.0001)
+			line["pc_win"] = int(_bc.get("winner_id", -1))
+			line["pc_n"]   = int(_bc.get("node_count", -1))
+			line["pc_b"]   = int(_bc.get("baked_count", -1))
+		# 2026-08-11 (twin-gate S0) — SequenceGNG motif mirror (seq_bodypose).
+		# sg_m = active motif, sg_c = match confidence, sg_pn = predicted next
+		# WINNER (the successor argmax scored by seqscore.py), sg_n/sg_b/sg_ev =
+		# nodes/baked/events.  Absent module → no keys.
+		if _pm.has("seq_bodypose"):
+			var _sg = _pm["seq_bodypose"]
+			line["sg_m"]  = int(_sg.get("motif_id", -1))
+			line["sg_c"]  = snappedf(float(_sg.get("match_confidence", 0.0)), 0.001)
+			line["sg_pn"] = int(_sg.get("predicted_next_id", -1))
+			line["sg_bk"] = 1 if bool(_sg.get("is_baked", false)) else 0
+			line["sg_n"]  = int(_sg.get("node_count", -1))
+			line["sg_b"]  = int(_sg.get("baked_count", -1))
+			line["sg_ev"] = int(_sg.get("n_events", 0))
 	# 2026-08-10 (P7) — SERVO_KI consumer check: mean |integral| and boost duty.  Both
 	# 0.0 with the lever on = the integral never engaged (deadband too wide, or the
 	# body never loads its servos — either way the arm measured nothing).
@@ -10544,6 +11112,77 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["brt_plv"]    = snappedf(float(_bm.get("lock_plv", 0.0)), 0.001)
 			line["brt_err"]    = snappedf(float(_bm.get("lock_err_ema", -1.0)), 0.001)
 			line["brt_period"] = snappedf(float(_bm.get("period_est", 0.0)), 0.01)
+	# 2026-08-10 (PART III / M0.b) — MotorPlanner probability-cone mirror.  The planner's
+	# accumulators are RUNNING MEANS over the whole run, so any diag-cadence line carries
+	# the cumulative per-depth verification scores; the last line is the run's verdict.
+	# Absent module → no key (zero cost on non-planner configs).
+	# 2026-08-11 (twin gates) — mirrors BOTH planner instances: "plan" = motor_planner
+	# (bodypose control), "pland" = motor_planner_dyn (the [q,dq] phase-space arm).
+	if brain != null and brain.has_method("get_module_snapshot"):
+		for _plid in [["motor_planner", "plan"], ["motor_planner_dyn", "pland"], ["motor_planner_pc", "planc"]]:
+			# absent in this config => "" => a Godot ERROR line per emit (see the
+			# motor_gng probe above); the result was already discarded, so this only
+			# keeps the run log greppable.
+			var _pstr: String = str(brain.get_module_snapshot(_plid[0]))
+			if _pstr.is_empty():
+				continue
+			var _ps = JSON.parse_string(_pstr)
+			if _ps is Dictionary and _ps.has("module"):
+				var _pmod = _ps["module"]
+				line[_plid[1]] = {
+					"d":   _pmod.get("probe_depths", []),
+					"t1":  _pmod.get("cone_top1", []),
+					"tk":  _pmod.get("cone_topk", []),
+					"ms":  _pmod.get("cone_mass", []),
+					"en":  _pmod.get("cone_entropy", []),
+					"n":   _pmod.get("cone_n", []),
+					"pr":  _pmod.get("cone_persist", []),
+					"auth": _pmod.get("authority_depth", 0),
+					"jauth": _pmod.get("joint_auth", []),
+					"jband": _pmod.get("joint_band", []),
+					"mg":  _pmod.get("marg_top1", 0.0),
+					"obs": _pmod.get("n_obs", 0),
+					"mk":  _pmod.get("masked_out", 0),
+					"mm":  _pmod.get("mask_mode", 0.0),
+				}
+				# 2026-08-11 (M1) — mask-AUTHOR mirror: trial state + the earned
+				# (kept) mask list, so seed runs record what the author learned.
+				# Absent unless author_mode=1 (zero cost on every other config).
+				if _pmod.has("author"):
+					line[_plid[1]]["au"] = _pmod["author"]
+				# 2026-08-12 (M1 rung a) — per-depth×per-joint |err| tables
+				# (operating decode vs hold-pose): the author_apply A/B compares
+				# these across arms; jband alone is thresholded and would hide
+				# sub-0.95 improvements.
+				if _pmod.has("jerr"):
+					line[_plid[1]]["je"] = _pmod["jerr"]
+					line[_plid[1]]["jp"] = _pmod["jpers"]
+				# 2026-08-12 (lever b) — planner-side publisher state
+				if _pmod.has("plan_pub"):
+					line[_plid[1]]["pp"] = _pmod["plan_pub"]
+	# 2026-08-14 (option B) — DescendingPredictor health.  In residual mode the
+	# published latent IS the error, so err/norm ≡ 1 (a tautology, caught on the
+	# first smoke); the honest bite-meter is ‖prediction‖ vs ‖residual‖:
+	#   dp_err = EMA ‖residual‖ (must FALL as the predictor absorbs the stride)
+	#   dp_pn  = ‖cached_prediction‖ (must GROW ≫ dp_err — the absorbed part)
+	# dp_seen guards the §3.2 dead-source trap via cached_consensus_valid
+	# (sticky after the first context delivery; consensus_seen is a per-tick
+	# freshness flag that reads false between deliveries — the first mirror
+	# misread it as liveness).
+	if brain != null and brain.has_method("get_module_snapshot"):
+		var _dpstr: String = str(brain.get_module_snapshot("pc_predictor"))
+		var _dps = JSON.parse_string(_dpstr) if not _dpstr.is_empty() else null
+		if _dps is Dictionary and _dps.has("targets"):
+			line["dp_seen"] = 1 if bool(_dps.get("cached_consensus_valid", false)) else 0
+			for _tk in (_dps["targets"] as Dictionary):
+				var _tg: Dictionary = _dps["targets"][_tk]
+				line["dp_err"] = snappedf(float(_tg.get("err_ema", -1.0)), 0.0001)
+				var _cp = _tg.get("cached_prediction", [])
+				var _pn: float = 0.0
+				if _cp is Array:
+					for _v in _cp: _pn += float(_v) * float(_v)
+				line["dp_pn"] = snappedf(sqrt(_pn), 0.0001)
+				break
 	if brain != null and brain.has_method("get_module_snapshot"):
 		var _ms = JSON.parse_string(str(brain.get_module_snapshot("motor_epm")))
 		if _ms is Dictionary and _ms.has("module"):
@@ -10551,6 +11190,26 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 			line["h_ema"]  = snappedf(float(_mm.get("chassis_h_ema", 0.0)), 0.001)
 			line["h_max"]  = snappedf(float(_mm.get("chassis_h_max", 0.0)), 0.001)
 			line["h_bias"] = snappedf(float(_mm.get("height_bias", 0.0)), 0.001)
+			# 2026-08-12 (lever b) — plan-objective CONSUMER telemetry: without
+			# these the A/B cannot distinguish "the pull acted" from "the seeds
+			# moved" (the consumer-fired check every lever has needed).
+			line["pl_pull"] = snappedf(float(_mm.get("plan_pull", 0.0)), 0.00001)
+			line["pl_w"]    = snappedf(float(_mm.get("plan_w", 0.0)), 0.0001)
+			# 2026-08-14 (rear-knee planting lever) — swing-descent consumer check:
+			# the descent branch (hip2 press AND/OR the new knee extension) fires
+			# only while this counter grows.
+			line["swd"] = int(_mm.get("swd_press_ticks", 0))
+			line["swo"] = int(_mm.get("swd_overdue_ticks", 0))
+			line["rlt"] = int(_mm.get("rear_land_ticks", 0))
+			line["rpt"] = int(_mm.get("rear_push_ticks", 0))
+			# 2026-08-17 (PART IV) — gain-socket CONSUMER counters, read-back
+			# verified in C++: ga_app counts keys that LANDED (current_params
+			# reflects the sent value), ga_rej counts keys the on_param_change
+			# dispatch silently ignored (typo'd key = nonzero ga_rej, never
+			# silence).  ga_app must track ge_pub × |gain_keys| (the ge_* block
+			# below) — the two-sided §3.2 check for the evolver pipe.
+			line["ga_app"] = int(_mm.get("gains_applied", 0))
+			line["ga_rej"] = int(_mm.get("gains_rejected", 0))
 			# Verify the belly-grounding setpoint adaptation actually FIRES.  Without
 			# this the A/B cannot distinguish "the mechanism worked" from "the seeds
 			# moved" -- the consumer-fired check, which this session has needed twice.
@@ -10849,6 +11508,76 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 				var _gpo: Array = []
 				for _v in _gp: _gpo.append(snappedf(float(_v), 0.001))
 				line["gait_phase"] = _gpo
+	# ---- PART IV GainEvolver mirror (2026-08-17).  Self-guarded: absent module
+	# ⇒ no ge_* keys ⇒ promoted-config logs unchanged.  Cheap metrics path, NOT
+	# get_module_snapshot (the per-tick full-snapshot lesson).  ge_ji is the
+	# incumbent criterion J (error-form, lower = better): THE trace that must
+	# FALL during the convergence gate and SPIKE-then-recover at the (d)-test.
+	# ge_ph: 0=warmup 1=incumbent 2=candidate.  ge_vec = the ACTIVE vector.
+	if brain != null and brain.has_method("get_module_metrics"):
+		var _ge: Dictionary = brain.get_module_metrics().get("gain_evolver", {})
+		if not _ge.is_empty():
+			line["ge_gen"]   = int(_ge.get("generation", 0))
+			line["ge_acc"]   = int(_ge.get("accepts", 0))
+			line["ge_rev"]   = int(_ge.get("reverts", 0))
+			line["ge_pub"]   = int(_ge.get("publishes", 0))
+			line["ge_sig"]   = snappedf(float(_ge.get("sigma", 0.0)), 0.0001)
+			line["ge_ph"]    = int(_ge.get("phase", 0))
+			line["ge_wt"]    = int(_ge.get("win_tick", 0))
+			line["ge_ji"]    = snappedf(float(_ge.get("J_inc", -1.0)), 0.0001)
+			line["ge_jc"]    = snappedf(float(_ge.get("J_cand", -1.0)), 0.0001)
+			# Per-term breakdown of the INCUMBENT window — the dead-term / term-
+			# domination check (§3.2): a weight whose term never moves is dead,
+			# which is a measurement about the sensor, not the criterion.
+			line["ge_falls"] = snappedf(float(_ge.get("falls", 0.0)), 0.01)
+			line["ge_tilt"]  = snappedf(float(_ge.get("tilt_sd", 0.0)), 0.000001)
+			line["ge_dis"]   = snappedf(float(_ge.get("distress_duty", 0.0)), 0.0001)
+			line["ge_unl"]   = snappedf(float(_ge.get("unloaded_mean", 0.0)), 0.0001)
+			line["ge_flow"]  = snappedf(float(_ge.get("flow_term", 0.0)), 0.0001)
+			# The flow term's TWO FACTORS, logged apart so a window says WHICH of
+			# them limited it.  Under the min form flow quality is capped by the
+			# smaller: ge_fmag < ge_fpred means travel is the binding constraint,
+			# the reverse means steadiness is.  Without this split the 2026-08-23
+			# defect was invisible — flow scored BEST where the body moved LEAST
+			# and the combined number gave no way to see why.  ge_fmf echoes which
+			# combining rule is live, so no arm is ever judged without knowing
+			# which criterion it actually ran under.
+			line["ge_fmag"]  = snappedf(float(_ge.get("flow_mag", 0.0)), 0.0001)
+			line["ge_fpred"] = snappedf(float(_ge.get("flow_pred", 0.0)), 0.0001)
+			line["ge_fturn"] = snappedf(float(_ge.get("flow_turn", 0.0)), 0.0001)
+			line["ge_fmf"]   = int(_ge.get("flow_min_form", 0))
+			# travel_topic two-sided meter (PART V C1): ge_trx = messages the evolver
+			# actually consumed (0 forever = dead wiring, the §3.2 #5 check), ge_fin =
+			# the flow input value it holds — must track the body's stride_v line
+			# when travel_topic is set, and fwd_v when it is not.
+			line["ge_trx"]   = int(_ge.get("travel_rx_n", 0))
+			line["ge_fin"]   = snappedf(float(_ge.get("fwd_v_in", 0.0)), 0.0001)
+			line["ge_minld"] = snappedf(float(_ge.get("loaded_min", 0.0)), 0.0001)
+			# NEAR-INVERSION DWELL, logged at full per-tick resolution even though it
+			# ships at weight 0: the 60-tick body-log proxy that measured it as WORSE
+			# than sd(upright) inflated its noise ~1.4x, so this is the data that
+			# decides its weight honestly.
+			line["ge_dwell"] = snappedf(float(_ge.get("dwell", 0.0)), 0.000001)
+			# ENERGY (mean |joint torque| = servo current) and the leaky FALL ALARM.
+			# ge_alarm_on is the duty read that decides whether the threshold is sane:
+			# pinned at 1 means the guard is permanently strict (the search cannot
+			# accept), pinned at 0 means the alarm never fires and is decoration.
+			line["ge_energy"] = snappedf(float(_ge.get("energy", 0.0)), 0.00001)
+			line["ge_alarm"]  = snappedf(float(_ge.get("fall_alarm", 0.0)), 0.001)
+			line["ge_alarm_on"] = int(_ge.get("alarm_on", 0))
+			# Noise-aware acceptance (post-gate-2): sigma_hat is estimated from the
+			# search's own revert pairs and the margin is what a candidate must
+			# actually beat.  ge_sig_e == 0 with ge_nn > 0 would mean the estimator
+			# ran but found no noise; ge_nn == 0 late in a run means it never
+			# gathered a pair, i.e. nothing has been reverted.
+			line["ge_sig_e"] = snappedf(float(_ge.get("sigma_est", 0.0)), 0.00001)
+			line["ge_marg"]  = snappedf(float(_ge.get("accept_margin", 0.0)), 0.00001)
+			line["ge_nn"]    = int(_ge.get("noise_n", 0))
+			var _gev = _ge.get("vec", [])
+			if _gev is Array and not _gev.is_empty():
+				var _gvo: Array = []
+				for _v in _gev: _gvo.append(snappedf(float(_v), 0.0001))
+				line["ge_vec"] = _gvo
 	line["radial_compass"]           = [snappedf(_last_radial_compass.x, 0.001),
 										snappedf(_last_radial_compass.y, 0.001)]
 	line["target_compass"]           = [snappedf(_last_target_compass.x, 0.001),
@@ -10865,6 +11594,15 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 												 _chassis.global_transform.origin.z)).length()
 	line["target_dist"]              = snappedf(target_dist, 0.001)
 	# 2026-06-13 — panic pathway GATE 0: distress telemetry (observe-only).
+	# ENERGY (servo current) — the same three reads the HUD shows, mirrored here so
+	# the trend is analysable offline and so "the HUD number is alive" is verifiable
+	# from a headless run rather than only by eye.
+	line["bursts"]  = burst_count
+	line["burst_duty"] = snappedf(burst_duty, 0.0001)
+	line["burst_max"]  = snappedf(burst_longest_s, 0.01)
+	line["e_now"]  = snappedf(energy_now, 0.0001)
+	line["e_peak"] = snappedf(energy_peak_1s, 0.0001)
+	line["e_avg"]  = snappedf(energy_avg, 0.0001)
 	line["stuck_deficit"]            = snappedf(_stuck_deficit, 0.001)
 	line["distress"]                 = snappedf(_distress, 0.001)
 	if vision_steer:

@@ -314,6 +314,34 @@ DOCS: dict[str, ModuleDoc] = {
         ),
     ),
 
+    "MotorPlanner": ModuleDoc(
+        title="MotorPlanner — the motor piano roll (probability cone, shadow)",
+        summary=(
+            "A zero-authority observer that treats the near future as a piano "
+            "roll: the executed past is immutable, the present column belongs to "
+            "the reflexes, and the future columns hold a probability cone — "
+            "“where will my body most likely be in n ticks?” — learned online "
+            "from the body-pose token stream, conditioned on stride phase. It "
+            "verifies its own predictions when the future arrives, and the GOLD "
+            "LINE is the payoff: the authority horizon, the deepest depth at "
+            "which its verified accuracy still beats the do-nothing baseline "
+            "(persistence). Planning loops may only suppress reflexes left of "
+            "that line — authority is earned by prediction, never asserted."
+        ),
+        formulas=(
+            "<code>T[s, bin(φ)][s'] += 1</code> — phase-conditioned transition counts (online)<br>"
+            "<code>row₀ = δ(s_now); &nbsp; row_{n+1} = topK(mask(row_n · T[·, bin(φ + n·ω)]))</code> — the cone<br>"
+            "<code>mask (mode 1): drop s where occupancy(s, bin)/occupancy(s) &lt; floor</code> — precision withdrawal<br>"
+            "<code>pose(row)[j] = Σ_s p_s·μ_s[j]; &nbsp; σ² = Σ p_s(σ²_s + μ_s²) − pose²</code> — joint-space decode (fan)<br>"
+            "<code>authority = max{k : top1(k) &gt; 1.05·persist(k), n(k) ≥ 200}</code> — the gold line<br><br>"
+            "<b>Terms.</b> s = body-pose token (EPM winner); φ, ω = stride phase / "
+            "rate from the rhythm reference; top1(k) = verified argmax accuracy at "
+            "depth k; persist(k) = accuracy of predicting “still s_now” scored "
+            "under the identical protocol; μ_s, σ_s = per-token Welford pose "
+            "readout (instrument, not percept)."
+        ),
+    ),
+
     "ActionDecoder": ModuleDoc(
         title="ActionDecoder — the coxswain (deliberate actor)",
         summary=(
@@ -862,6 +890,51 @@ _GENERIC = ModuleDoc(
         "Each row is a scalar the module publishes in its diagnostic snapshot; "
         "consult the module's source in "
         "<code>cpp_core/src/ogma/modules/</code> for the exact update rules."
+    ),
+)
+
+
+DOCS["GainEvolver"] = ModuleDoc(
+    title="GainEvolver — the robot re-finding its own gains, for life",
+    summary=(
+        "The high-value gains of a walking brain (how hard a rear leg plants, how "
+        "strongly the legs couple, how much the body defends its height) are normally "
+        "found by hand and then frozen. This module lets the robot find them "
+        "<i>itself</i>, continuously, from sensors it actually has. It holds an "
+        "<b>incumbent</b> vector, mutates the whole vector at once into a "
+        "<b>candidate</b>, runs each for a long window, and keeps the candidate only "
+        "if the body did better — otherwise it reverts. Nothing here is a reward: it "
+        "scores <i>error</i> (falls, wobble, distress, unloaded landings, stumbling "
+        "flow), so a body that stands still scores badly rather than well.<br><br>"
+        "Two things make it more than a hill-climb. It re-measures the incumbent "
+        "<i>every</i> generation instead of trusting a remembered score — so a lucky "
+        "thrash cannot become a permanent champion, and when the world changes the "
+        "incumbent's score decays on its own. And its safety check is <b>separate</b> "
+        "from its improvement check: a candidate that scores better overall but drops "
+        "a leg or adds a fall is rejected outright, never averaged into a win."
+    ),
+    formulas=(
+        "<code>J = w_falls·falls + w_tilt·var(upright) + w_dis·distress_duty "
+        "+ w_unl·unloaded_contact + w_flow·(1 − flow_quality)</code> — lower is better<br>"
+        "<code>flow_quality = clamp(flow_ema,0,v*)/v* / (1 + k·flow_vol_ema)</code> "
+        "— magnitude × predictability<br>"
+        "<code>candidate_k = clamp(incumbent_k + σ·scale_k·(max_k−min_k)·N(0,1), min_k, max_k)</code><br>"
+        "<code>accept ⇔ G1 ∧ G2 ∧ (J_cand &lt; J_inc)</code><br>"
+        "<code>G1: cand.falls ≤ inc.falls + tol</code> &nbsp; (viability, not criterion)<br>"
+        "<code>G2: min_leg(loaded_l) ≥ min_leg(inc.loaded_l) − tol</code> &nbsp; "
+        "(per-leg MINIMUM — a group mean hides a dead leg)<br>"
+        "<code>σ ← clamp(σ · (accept_rate &gt; target ? up : down), σ_min, σ_max)</code> "
+        "— 1/5th-rule anneal<br><br>"
+        "<b>Reading the panel.</b> The rack is the live vector: dashed tick = the seed "
+        "it started from, filled dot = incumbent, hollow ring = the candidate currently "
+        "being tried. The trajectory normalizes every gain into its own range because "
+        "the ranges differ by ~30×. The term bars show <i>weighted</i> contributions — "
+        "a term pinned at zero is marked DEAD, which is a statement about that "
+        "sensor, not about the criterion.<br><br>"
+        "<b>Terms.</b> σ = mutation scale (0 ⇒ silent observer, byte-identical); "
+        "window = ticks per evaluation, measured over its back half (the front half is "
+        "settling); upright = the accelerometer's gravity component; unloaded contact = "
+        "a touchdown that never earns foot load (a ghost touch)."
     ),
 )
 

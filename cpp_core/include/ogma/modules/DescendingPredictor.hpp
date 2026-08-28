@@ -98,6 +98,7 @@ private:
     int64_t      freeze_after_ticks_= 0;
     int64_t      confidence_window_ = 100;
     uint64_t     master_seed_       = 0;
+    bool         target_is_residual_ = false;   // target publishes residual → integrate it
 
     int          source_dim_        = 0;
     bool         dim_known_         = false;

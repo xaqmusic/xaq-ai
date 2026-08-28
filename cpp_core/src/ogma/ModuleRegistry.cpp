@@ -38,6 +38,7 @@
 #include "ogma/modules/EPM.hpp"
 #include "ogma/modules/FaderController.hpp"
 #include "ogma/modules/ForwardDriveReflex.hpp"
+#include "ogma/modules/GainEvolver.hpp"
 #include "ogma/modules/GaitSelector.hpp"
 #include "ogma/modules/GNGRollout.hpp"
 #include "ogma/modules/HomeokineticExploration.hpp"
@@ -45,6 +46,7 @@
 #include "ogma/modules/JointSensorimotorBridge.hpp"
 #include "ogma/modules/PolicyChannelAggregator.hpp"
 #include "ogma/modules/CPGOscillator.hpp"
+#include "ogma/modules/MotorPlanner.hpp"
 #include "ogma/modules/MotorEPM.hpp"
 #include "ogma/modules/MotorEPMv2.hpp"
 #include "ogma/modules/PosturalPrior.hpp"
@@ -82,6 +84,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         // Order is irrelevant — the registry is by string.
         reg.register_type("NeurochemState",      [](){ return std::make_unique<NeurochemState>(); });
         reg.register_type("EPM",                 [](){ return std::make_unique<EPM>(); });
+        reg.register_type("MotorPlanner",        [](){ return std::make_unique<MotorPlanner>(); });
         reg.register_type("LateralVoter",        [](){ return std::make_unique<LateralVoter>(); });
         reg.register_type("HomeostaticDrive",    [](){ return std::make_unique<HomeostaticDrive>(); });
         reg.register_type("ActionDecoder",       [](){ return std::make_unique<ActionDecoder>(); });
@@ -208,6 +211,12 @@ ModuleRegistry& ModuleRegistry::instance() {
         // the return accrued over its execution window.  The action-vocabulary
         // fix for A1's flat-landscape failure-to-converge.
         reg.register_type("GaitSelector",        [](){ return std::make_unique<GaitSelector>(); });
+        // PART IV (2026-08-17) — lifetime (1+1)-ES over a declared consumer gain
+        // vector (MotorEPMv2's high-value sliders), intrinsic viability+flow
+        // criterion, interleaved incumbent re-evaluation.  mutation_sigma 0 =
+        // silent observer = byte-identical.  Charter:
+        // docs/plans-and-designs/adaptive_gains_substrate_plan.md
+        reg.register_type("GainEvolver",         [](){ return std::make_unique<GainEvolver>(); });
     }
     return reg;
 }

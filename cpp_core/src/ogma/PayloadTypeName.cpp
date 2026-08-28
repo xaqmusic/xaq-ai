@@ -31,6 +31,7 @@ std::string payload_type_name(std::type_index t) {
     if (t == std::type_index(typeid(ReflexGate)))           return "ReflexGate";
     if (t == std::type_index(typeid(HormoneState)))         return "HormoneState";
     if (t == std::type_index(typeid(FitnessScore)))         return "FitnessScore";
+    if (t == std::type_index(typeid(GainVector)))           return "GainVector";
     if (t == std::type_index(typeid(AdaptiveThreshold)))    return "AdaptiveThreshold";
     return "Unknown";
 }

@@ -68,8 +68,11 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -1166,6 +1169,25 @@ private:
     float   panic_         = 0.0f;                    // smoothed panic level [0,1] (telemetry)
     bool    panic_latched_ = false;                   // hysteresis state
 
+    // ---- PART IV gain socket (GainEvolver → evolved-gain vector) -------------
+    // A GainVector's (key,value) pairs are stashed by the bus handler and applied
+    // at the TOP of the next tick() through the existing on_param_change dispatch,
+    // then READ BACK from current_params(): the dispatch chain has no terminal
+    // else (unknown keys are silently ignored), so the read-back is the only
+    // honest applied-counter (§3.2 — a gate has shipped as silent dead code here
+    // before).  gain_topic_ == "" ⇒ no subscription ⇒ byte-identical.
+    // applied_gains_ (last landed value per key) exists for restore_state replay:
+    // evolved gains live in param members the instance snapshot does NOT
+    // round-trip, so a restored clone would silently revert to config gains.
+    void handle_gain_vector(MessagePtr payload);
+    void apply_pending_gains();
+    std::string gain_topic_;                                     // "" = socket off
+    std::vector<std::pair<std::string, double>> pending_gains_;  // stashed by handler
+    mutable std::mutex pending_gains_mu_;                        // parallel-level proofing
+    std::map<std::string, double> applied_gains_;                // last landed values
+    int64_t gains_applied_  = 0;                                 // read-back verified
+    int64_t gains_rejected_ = 0;                                 // ignored/mismatched keys
+
     // ---- Gate 0 reset-masking instrumentation (L-1a) -------------------------
     // The body's leg-phase + EMA continuity survives the fall+respawn cycle, so a
     // coherence/TLE trend measured across a reset is fake (the "reset artifact").
@@ -1190,6 +1212,32 @@ private:
     std::vector<Eigen::VectorXf> obj_target_;   // per-leg target joint positions (motor_dim)
     std::vector<float>           obj_weight_;    // per-leg weight w = PredictionToken.confidence ∈ [0,1]
     std::vector<char>            obj_seen_;      // per-leg: an objective has arrived (char, not vector<bool>)
+
+    // ---- PART III lever (b): the PLANNER's band-gated posture prediction ----
+    // A second posture-objective socket (objective.plan.<leg>) carrying the
+    // MotorPlanner's BASE-roll decode at its plan depth: predicted_latent =
+    // [m targets | m per-joint weights] (weights 0/1 = the earned authority-band
+    // gate, planner-side).  Fused with the keyframe objective PER JOINT,
+    // precision-weighted (the LateralVoter pattern): w_eff = wk + plan_gain·wp,
+    // x*_eff = (wk·xk + plan_gain·wp·xp)/w_eff — so an ungated joint (wp=0)
+    // leaves the keyframe pull EXACTLY as it was (never weaken a working loop),
+    // and plan_gain=0 is byte-identical.  Empty socket = OFF.
+    void handle_plan(int leg, MessagePtr payload);
+    std::vector<std::string>     plan_topics_;   // optional per-leg plan-objective topics; empty = OFF
+    double                       plan_gain_ = 0.0;
+    // OPERATOR SCAFFOLD ([G]/[R] bench class — a lesion-as-test, never an
+    // operating mode): crossfade the FINAL assembled command (reflexes +
+    // scaffolds, everything) toward a pure position-servo on the planner's
+    // published targets.  fade 0 = byte-identical; fade 1 = the stride as the
+    // planner imagines it, embodied.  Ungated joints' targets arrive as the
+    // current pose (planner-side), so they HOLD rather than flail.
+    double                       plan_fade_ = 0.0;
+    double                       plan_puppet_gain_ = 2.0;   // servo P on (x*−x)
+    std::vector<Eigen::VectorXf> plan_target_;   // per-leg target joint positions (motor_dim)
+    std::vector<Eigen::VectorXf> plan_w_;        // per-leg PER-JOINT weights ∈ [0,1] (the band gate)
+    std::vector<char>            plan_seen_;
+    float plan_pull_ema_ = 0.0f;                 // consumer-fired telemetry: mean w·|x−x*| (EMA)
+    float plan_w_mean_   = 0.0f;                 // mean effective plan weight this tick
 
     // ---- L-1b velocity objective (§the propulsive push) ----
     // A phase-indexed VELOCITY target on objective.velocity.<leg> (KeyframeGait's vel map).
@@ -1353,11 +1401,37 @@ private:
     // typical swing, hip2 flips to +swing_descend_gain (press DOWN, Rule-5 sign) so the
     // foot plants before the stroke reverses.  Knee keeps its fold.  0 = byte-identical.
     double  swing_descend_gain_ = 0.0;
+    double  swing_descend_knee_ = 0.0;   // the KNEE half (operator 2026-08-14):
+                                         // during descent the shank flips from
+                                         // fold to EXTEND toward the ground
+    double  swing_overdue_knee_ = 0.0;   // the ERROR-FORM: reach for ground only
+                                         // when the swing outlives its own average
+    // REAR LANDING SEQUENCE (operator 2026-08-14: "hip2 and knee must DROP
+    // first, THEN hip1 sweeps back with a bit of knee extension").  Two
+    // separately-gated rear-pair levers (legs 2,3 = cfg rl/rr = anatomical
+    // RR/RL — front/rear is NOT mirrored by the naming flip):
+    double  rear_land_gain_  = 0.0;      // descent: hip2 press + knee SERVO to
+                                         //   the plant angle (closed-loop — the
+                                         //   open-loop extension was the
+                                         //   measured regression)
+    double  rear_knee_plant_ = 0.2;      // the plant angle (slightly flexed for
+                                         //   push traction)
+    double  rear_push_ext_   = 0.0;      // stance: knee extension while the
+                                         //   planted leg's hip1 actually sweeps
+    float   dh1_ema_[8] = {0,0,0,0,0,0,0,0};   // per-leg |Δhip1| running scale
+    long    rear_land_ticks_ = 0;        // consumer-fired checks
+    long    rear_push_ticks_ = 0;
     static constexpr float kDescentFrac = 0.5f;
     int     swd_age_[8] = {0,0,0,0,0,0,0,0};       // ticks in current swing
     float   swd_dur_[8] = {0,0,0,0,0,0,0,0};       // running mean swing duration (EMA)
     uint8_t swd_air_[8] = {0,0,0,0,0,0,0,0};       // previous airborne state
+    uint8_t swd_assisted_[8] = {0,0,0,0,0,0,0,0};  // overdue reach fired THIS swing —
+                                                   // its duration must NOT train the
+                                                   // expectation (the ratchet fix:
+                                                   // the reference chases only
+                                                   // UNASSISTED swings)
     long    swd_press_ticks_ = 0;                   // consumer-fired check
+    long    swd_overdue_ticks_ = 0;                 // touchdown-seeking fired check
 
     float   td_off_[8]     = {0,0,0,0,0,0,0,0};   // rotation applied to L.phase
     float   td_ref_cos_[8] = {0,0,0,0,0,0,0,0};   // circular EMA of touchdown phase

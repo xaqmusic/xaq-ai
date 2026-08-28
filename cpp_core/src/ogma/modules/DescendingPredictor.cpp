@@ -34,6 +34,12 @@ std::string get_string(ParamValue const& v, std::string const& key) {
     if (auto p = std::get_if<std::string>(&v)) return *p;
     throw std::invalid_argument("DescendingPredictor param '" + key + "' must be string");
 }
+bool get_bool(ParamValue const& v, std::string const& key) {
+    if (auto p = std::get_if<bool>(&v))    return *p;
+    if (auto p = std::get_if<int64_t>(&v)) return *p != 0;
+    if (auto p = std::get_if<double>(&v))  return *p != 0.0;
+    throw std::invalid_argument("DescendingPredictor: param '" + key + "' must be a bool");
+}
 std::vector<std::string> get_strings(ParamValue const& v, std::string const& key) {
     if (auto p = std::get_if<std::vector<std::string>>(&v)) return *p;
     throw std::invalid_argument("DescendingPredictor param '" + key + "' must be vector<string>");
@@ -86,6 +92,14 @@ ParamSchema DescendingPredictor::params_schema() const {
         {"freeze_after_ticks",  ParamMutability::HotMutable,       "0 = never freeze; >0 = freeze after this many ticks", ParamValue{int64_t{0}}},
         {"confidence_window",   ParamMutability::HotMutable,       "Rolling window for confidence",  ParamValue{int64_t{100}}},
         {"master_seed",         ParamMutability::ConstructionOnly, "RNG namespace seed",  ParamValue{int64_t{0}}},
+        {"target_is_residual",  ParamMutability::ConstructionOnly,
+         "Set true when the target EPM runs subtract_descending_prediction: its published "
+         "latent is then the RESIDUAL (encode − prediction), which IS the prediction error — "
+         "the update integrates it directly (err = latent), driving the residual to zero. "
+         "The legacy rule (err = latent − cached_prediction) against a residual target "
+         "converges to HALF-subtraction (P→E/2), found 2026-08-14 when the pair was closed "
+         "over the motor path for the first time.  false = legacy (raw-latent targets).",
+         ParamValue{false}},
     };
 }
 
@@ -108,6 +122,7 @@ void DescendingPredictor::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "freeze_after_ticks",[&](auto const& v){ freeze_after_ticks_= get_int(v, "freeze_after_ticks"); });
     apply_param(params, "confidence_window", [&](auto const& v){ confidence_window_ = get_int(v, "confidence_window"); });
     apply_param(params, "master_seed",       [&](auto const& v){ master_seed_       = uint64_t(get_int(v, "master_seed")); });
+    apply_param(params, "target_is_residual",[&](auto const& v){ target_is_residual_= get_bool(v, "target_is_residual"); });
 
     auto target_topics = get_strings(find_required("targets"), "targets");
     if (target_topics.empty())
@@ -153,9 +168,25 @@ void DescendingPredictor::on_param_change(std::string_view key, ParamValue const
 
 void DescendingPredictor::handle_consensus(std::string_view /*topic*/, MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
-    auto ct = std::dynamic_pointer_cast<const ConsensusToken>(payload);
-    if (!ct || ct->fused_embedding.size() == 0) return;
-    latest_consensus_ = ct->fused_embedding;
+    // Context source: ConsensusToken (the original design) OR any ProprioToken
+    // vector stream — the motor path's surprise vocabulary (PART III B) drives
+    // the predictor from the CPG clock [cosφ, sinφ], which is a ProprioToken.
+    // Without this fallback a ProprioToken source was SILENTLY dropped: no
+    // context → no prediction → no subtraction → the pc-EPM quietly degrades
+    // to a plain EPM (the §3.2 dead-code trap, caught at design time).
+    Eigen::VectorXf emb;
+    if (auto ct = std::dynamic_pointer_cast<const ConsensusToken>(payload)) {
+        emb = ct->fused_embedding;
+    } else if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload)) {
+        emb = pt->values;
+    } else if (auto rt = std::dynamic_pointer_cast<const RealityToken>(payload)) {
+        // Latent-autoregression context (B gate, arm 2): the raw encoding
+        // itself — a full linear map in latent space, against which the 2-D
+        // clock context (first stride harmonic only) is the weak baseline.
+        emb = rt->latent;
+    }
+    if (emb.size() == 0) return;
+    latest_consensus_ = std::move(emb);
     consensus_seen_   = true;
 
     // Lazy initialise W/b once we know the source dim.
@@ -209,7 +240,9 @@ void DescendingPredictor::handle_reality(std::string_view /*topic*/, MessagePtr 
                   (int64_t(ticks_run_) >= freeze_after_ticks_);
 
     if (can_update && !frozen) {
-        Eigen::VectorXf err = rt->latent - t.cached_prediction;
+        Eigen::VectorXf err = target_is_residual_
+                                  ? rt->latent
+                                  : (rt->latent - t.cached_prediction);
 
         if (update_method_ == "rls") {
             // RLS approximation via diagonal-only inverse-covariance for

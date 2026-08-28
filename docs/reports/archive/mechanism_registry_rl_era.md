@@ -583,7 +583,10 @@ These are not picrawler-tested but inform our priors.  See linked memory files.
   regulation, proto-gait, obstacle-triggered TLE). Goal: end the "add mechanism → blind
   n=1 → infer from manifest" loop that produced 7 days of rich data with no breakthrough.
   Either outcome (substrate works / substrate doesn't) becomes legible. See
-  `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md`.
+  `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md` — ⚠ **that plan did not
+  survive the repo split and is not recoverable from this repo's history.** Its surviving
+  content: the servo-saver / `motor_authority_scale` model in `docs/servo_dynamics.md` §4(d),
+  and Bernoulli-Impulse Actuation in `docs/glossary.md`.
 - **Gait ignition (2026-05-29 framing, ACTIVE as theory / DEFERRED as build).** Standing
   is a solved *fixed point*; gait is a *limit cycle* the body must ignite out of the
   standing basin; real efficacy must be non-ambiguous in a single ~20-min run, gated by

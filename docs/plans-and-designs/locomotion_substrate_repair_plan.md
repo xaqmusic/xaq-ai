@@ -584,3 +584,1034 @@ promotion; ledger + campaign-log entry per verdict; launcher naming convention f
 exposed arm. Known failure shapes to watch: integral windup (leak/clamp/freeze guards),
 the 14–20k peak-and-decay masquerading as a win at short horizons, and pooled-step_cv
 hiding cluster rhythm (windowed reads mandatory).
+
+
+---
+
+# PART III — The Motor Planner: rolling masked action prediction (approved 2026-08-10)
+
+## Context
+
+Operator direction: achieve MPC/RL-class competence while keeping runtime plasticity —
+the project's actual goal. Diagnosis: the input side (EPM coarse-graining/prediction)
+is solid; **the output side lacks real prediction and planning**. Proposal (operator,
+from E/I pathways + speech-denoising masking): **roll out sequences of future motor
+messages and continuously mask/refine them as they approach the present.**
+
+Field coordinates, recorded for orientation: this is a receding horizon (MPC's actual
+power source) executed as continuous refinement rather than re-optimization; it is the
+anatomy of a diffusion policy (coarse far-future, committed near-future); and the E/I
+masking is basal-ganglia action selection — GO/NO-GO as selective disinhibition of
+prepared motor predictions. Doctrine-native reading: **a motor rollout IS a prediction
+of future proprioception; acting is fulfilling it; masking IS precision** (inhibition =
+precision withdrawal). The bumblebee argument operationalized: not a bigger brain, a
+structured one — the missing module is central-complex-shaped: a small structured
+future buffer on the motor side.
+
+What this answers on our books: the ablation null (the learned layer finally gets a job
+reflexes cannot do — THE FUTURE; reflexes own now), and the P4 impasse (a plan can
+carry contact-CONTINGENT structure — a stroke element masked until its predicted-contact
+element precedes it — which phase machinery could never express).
+
+## Non-negotiables (from the campaign's own scars)
+
+- The plan NEVER becomes an imposed trajectory. Entry is exclusively through the
+  objective/confidence socket (KeyframeGait's error-retarget pattern), with confidence
+  EARNED from the planner's own predictive accuracy 1/(tle+ε). The plan proposes;
+  reflexes dispose. ("Flopping fish" + P4 arms 1–2 are the graves this fence guards.)
+- Instrument-first at every stage; shadow before authority; mechanism in traces before
+  n=20; n=20 + UI before promotion; all harness rules (completion guard, instrument
+  context, byte-identity, consumer-fired after the FIRST arm).
+- Shadow stages publish on shadow topics — NOT `prediction.*` — because the EPMs'
+  descending-subtraction sockets are live-by-default and feeding them is itself a
+  behavioral change to be made deliberately (stage M3+, gated).
+
+## M0 — Raw material: the vocabulary and transition model on the RHYTHMIC gait
+
+All prior EPM measurements predate V3 BASE. A rhythmic body should produce a far
+better-conditioned vocabulary and transition graph than the shuffle era's.
+1. `v3base__ga__bodypose`: re-introduce the body-pose EPM (+ later the 4 leg EPMs —
+   exactly the P0 disposition: "re-introduced by the predictor WITH a consumer").
+2. Collect per-tick winner streams (the bp_/bpt_ mirrors, DIAG_INTERVAL=1, n=4).
+3. Offline: empirical transition matrix from each run's first half; **k-step rollout
+   accuracy on the second half vs persistence** (k = 1..10). GATE: the transition
+   model must beat persistence decisively at k ≥ 3 — the planner's raw material check.
+   If it fails: conditioning work on the vocabulary BEFORE any planner code.
+
+## M1 — The shadow planner (zero authority)
+
+`MotorPlanner` module: horizon buffer H ≈ one stride, rolled from the transition
+graph; per-element confidence; per-tick shift-and-refine; branch masking by predicted
+TLE along the rollout (high-expected-surprise branches pruned — EFE arriving
+bottom-up). Publishes on `shadow.plan.*`. Scored offline against traces:
+- GATE: near-horizon (1–5 tick) predictions of proprio/contact beat BOTH persistence
+  and the unrefined rollout — refinement must add anticipation, measurably.
+
+## M2 — One consumer: the objective socket with earned confidence
+
+Plan head enters as confidence-weighted error retarget (the KeyframeGait pattern),
+w = f(1/(planner_tle+ε)), gain-0-guarded. Judged on anticipation metrics (td timing,
+obstacle pre-adjustment), the full set, arena + corridor, n=20, operator UI.
+
+## M3 — The inhibitory pathway + the thesis experiment
+
+Contact-contingent masking (the P4 answer: strokes wait for predicted contact), then
+the (d)-tests on the V3 body: perturb / lesion / relocate mid-episode — does the PLAN
+re-roll (visible re-inference in the buffer) and behavior recover? This is the
+project's central claim, run on an honest substrate for the first time.
+
+## Files
+
+- M0: config script (v3base__ga + EPM modules); offline scorer (planscore.py).
+- M1: cpp_core/src/ogma/modules/MotorPlanner.{cpp,hpp} (new module, bus-native);
+  registry entry; config arm; body-log mirrors for plan diagnostics.
+- M2/M3: MotorEPMv2 objective-socket wiring only (existing pattern); no new paths.
+
+## PART III campaign log
+
+**2026-08-10 — M0: FAIL (the gate worked; no planner code gets written on this
+material).** Per-tick chain: self-transition mass 0.72 → the argmax model IS
+persistence (lift 1.00 at every k). Event space (dwell collapsed): real short-range
+structure — next-posture 3.9× chance — decaying below baseline by ~5 events. Beam
+(width 8, top-3 branching, the fairest read for a MASKED planner): truth-in-beam ≈
+chance by k=5; top-3 next-event coverage only 0.30. **Verdict: the 51-token
+unconditioned first-order material cannot support a stride-scale horizon.**
+DIAGNOSIS, two levels: (1) these observer EPMs were built WITHOUT phase context —
+§0's "feed it phase" rule, measured load-bearing for the controller, was never
+applied to the vocabulary; on a rhythmic body transitions are phase-dependent by
+construction. (2) Vocabulary conditioning never done: common mode (the tuck rest)
+uncentred (§0 rule 2), 51/200 nodes in use. ⇒ **M0.b (next): phase-conditioned
+transition scoring on the SAME banked streams (offline — P(next | token, CPG-phase
+bin) needs the cpg field joined per tick), then a conditioned vocabulary arm
+(centred input, phase context) if the offline read demands it. The gate re-runs
+before any MotorPlanner code.**
+
+**2026-08-10 — M0.b: the planner AS the instrument (operator pivot), and a §3.2
+catch.** The operator redirected M0.b from offline scoring to building the
+MotorPlanner itself as a zero-authority shadow — "reflexes write the t0 row, EPMs
+write the tN rows; analyze the probability cone this produces." Built:
+`MotorPlanner` (cpp_core), no bus outputs, learns P(next | token, phase_bin) online,
+rolls the cone each tick from the t0 row with phase advance φ+n·ω, verifies itself
+at probe depths {1,3,5,8,13,21,34} against the arriving future; `plan` mirror in the
+body log; `conescore.py` reads it with a per-depth PERSISTENCE baseline from the
+same run's `bp_win` stream. Protocol = M0 (arena, 12k, seeds 1–4, per-tick diag),
+conditioning on `rhythm.body.gait`, mask off. **Full-run table (n=4): top1 beats
+persistence at k=5–21 (lift 1.2–1.6, peak k=13) and marginal 2–2.7× throughout —
+but this is a FIRST-HALF ARTIFACT.** Warm-model cut (second half only, per-seed
+lift vs second-half persistence): k=5 **0.96±0.09**, k=13 1.21±0.51, k=21
+0.78±0.15 — the conditioned cone equals persistence once warm. §3.2 check found
+the cause before the verdict: **the conditioning variable was noise** —
+`brt_plv` on these very runs is 0.02–0.10 (the BodyRhythmTracker never locks on
+V3 BASE), so the 8 phase bins fragment the transition counts without carrying
+signal, and the cone's no-data fallback (hold state) degrades it to persistence.
+**Verdict: NULL against a broken reference — a measurement outcome, not a verdict
+on phase conditioning.** The masking arm was NOT run on this reference (masking on
+noise affinity would measure nothing). ⇒ **M0.c: same protocol, conditioning
+swapped to `rhythm.cpg.body` — the CPG clock, the phase context measured
+load-bearing for the controller itself (§0 rule 3). Planner now accepts 2-D
+[cos,sin] clocks and self-estimates ω from the clock's own advance.**
+
+**2026-08-10 — M0.c + masking experiment #1: the vocabulary is the limit,
+confirmed three ways on a perfectly controlled A/B.** The planner is shadow (zero
+authority), so same-seed arms have BIT-IDENTICAL token streams (verified: `bp_win`
+sequences equal across all arms) — every cone delta is the planner-side variable
+alone. Three results, n=4 each, arena 12k:
+(1) **Conditioning reference is irrelevant.** CPG-clock conditioning (M0.c)
+reproduces the brt-conditioned table to the third decimal (top1@13 0.108 both;
+@34 0.084 vs 0.082). Whatever phase either reference carries, the transition
+model can't use it.
+(2) **The beam holds no structure past dwell + frequency.** Cone reality-in-beam
+at k=21–34 is 0.34–0.38 — statistically the STATIC most-frequent-12 beam (marginal
+top-12 mass 0.396). The dynamic cone buys nothing over a frequency table at
+stride scale (body period ≈ 70 ticks; k=34 ≈ half a stride).
+(3) **Phase-affinity masking (mode 1, floor 0.02) DAMAGES the cone.** Consumer
+fired hard (masked_out 13k–39k/run), yet top1 falls at every depth (0.211 vs
+0.234 @5; 0.069 vs 0.084 @34), assigned mass falls, and ~12% of probe rows empty
+out entirely. Token↔clock-bin affinity is too weak to gate on — the mask removes
+reality, not noise. Same root cause as (1).
+**Verdict: the MASKING INTERFACE is WORKING (built, consumer-verified, measures
+controlled deltas — the operator's E/I method now exists as an instrument); the
+phase-affinity mask ON THIS VOCABULARY is a REGRESSION; the tick-level cone on
+the current body-pose tokens is refuted as planning material — persistence-
+equivalent argmax (warm-model lift ≈ 1.0), frequency-equivalent beam.
+Re-use context: any mask/conditioning retry needs tokens that actually carve the
+stride.** Two candidate fixes, in tension order: **(b) event-space cone** —
+planner rows advance per token-CHANGE event instead of per tick (M0 measured the
+only real structure anywhere in this stream: next-event 3.9× chance), planner-side
+change only; **(a) conditioned vocabulary** — centre the tuck common-mode out of
+the 12-D input and give the observer EPM phase context (§0 rules 2+3; needs a
+conditioning bridge or an EPM input-conditioning extension — a substrate design
+decision). (b) is cheap and sharpens (a)'s requirement; (a) is the deeper fix.
+
+**2026-08-11 — the MOTOR PIANO ROLL + the AUTHORITY HORIZON (operator-directed
+instrument; "the authority horizon line is essential").** The roll is the plan
+buffer made visible: executed past immutable left of the playhead, t0 owned by
+reflexes, future columns the mutable rows loops will write into — slow loops far,
+fast loops near — with reflex suppression allowed only where confidence is EARNED.
+Built: (1) planner-side per-token 12-D pose readout (Welford; instrument, not
+percept) decoding every cone row to joint space via the law of total variance —
+the ±1σ FAN; (2) an online PERSISTENCE baseline scored under the identical
+pending protocol (Pending carries tok0), giving `cone_persist` per depth;
+(3) **`authority_depth` = deepest probe with n≥200 verdicts where verified cone
+top1 > 1.05 × persistence** — the gold line; (4) diag payload shipping the whole
+roll (40 × 12 mean/sd) + a 128-tick past ring (server-side, the gait-raster
+anti-aliasing lesson) at ~48 KB/payload; (5) `PianoRollInspector` (12 tracks =
+4 legs × 3 joints, or per-leg 3-track zoom): past curve, decoded future with
+saturated-vs-washed authority segments, fan, playhead, stride ruler from the
+rhythm reference, adaptive per-track ranging; registered for MotorPlanner with a
+teaching doc. Verified end-to-end on a LIVE run (ControlClient →
+module_subscribe_diag → ZMQ payloads validated → offscreen render). First live
+reading, honest: **authority_depth = 0 — under the identical-protocol baseline,
+persistence ≥ cone at every depth (k1: 0.74 vs 0.77) — reflexes own the roll.**
+The line is drawn; the campaign's job is to move it right. Body-log `plan`
+mirror now carries `pr` (persist) + `auth` per line, so seed runs record the
+authority trajectory.
+
+**2026-08-11 — PER-JOINT VERIFICATION: the first verified positive planner
+result, found by the operator's eye.** Operator observation on the live roll:
+"some joints are predicted a few ticks out while others are not" — on a SINGLE
+whole-body predictor, so the difference had to live in the marginals. Built:
+per-joint continuous-space verification under the identical pending protocol
+(Pending freezes the decoded joint prediction + the pose at prediction time;
+verify accumulates per-depth per-joint |err| for cone-decode vs hold-pose).
+**Result (live, seed 2, n≈9k verdicts/depth): the error-ratio table splits the
+body cleanly.** At k=1–3 every joint LOSES ~3× (the decode jumps to token mean
+against a barely-moving body). At k=8–34, **all eight hip1/knee marginals WIN
+12–23%** (ratios 0.77–0.92); the four h2 marginals never meaningfully win
+(~0.91–1.07 — the slow postural joints, where hold-pose is near-optimal).
+Native authority bands: FL/FR/RL/RR h1 and knee all **[8–34]**; h2 ·/·/21-21/
+13-13. TWO consequences: (1) **the whole-body cone DOES carry verified
+stride-scale structure in its joint marginals** even though the token-argmax
+authority is 0 — the global gate was measuring the argmax, not the material;
+(2) **authority is a BAND, not a line from the present** — the ladder-from-t0
+definition hid the win entirely (contiguity from k=1 demanded beating
+persistence exactly where it is unbeatable). This matches the operator's
+architecture directly: reflexes own the near field; a planner earns an
+INTERVAL of the future. Implemented: `joint_band` [lo,hi] per joint (longest
+winning run) in the payload + body mirror (`jband`); the roll now draws each
+track's amber authority band with the bright segment inside it; global dashed
+line unchanged. **Re-use context for M1: refinement/masking experiments should
+be scored per-joint in the band, where verified material exists — h2 tracks
+and k<5 are reflex territory on this vocabulary.**
+
+**2026-08-11 — THE TWIN GATES (S0 + M0.d): formalized, with the full module
+audit behind them.**
+
+*The audit (all 69 modules; operator asked "pieces we can put together, or
+hand-roll?").* Answer: **the pieces exist; hand-roll nothing but scorers.**
+The chunk pipeline the sequencing conversation asked for was designed and
+built in Phase 1: `SequenceGNG` (n-grams of winners → JL → GNG motifs +
+successor counts, with a complete registered inspector widget — the
+"abandoned chunk UI" is `seqgng_inspector.py`, alive, just starved of a live
+module) → `GNGRollout` (K-sample rollouts with MOTIF TELEPORT — planning-via-
+chunks, built) → `MotorRepertoire` (chunk library, drive-tagged
+crystallization, playback with policy suppression) + `EpisodicCapture` +
+`ChunkAbortGate`/`ChunkOutcomeGate` (the closed-loop abort machinery) +
+`GaitSelector` (sequence REINFORCE) + `KeyframeGait` (phase-indexed posture+
+velocity map with per-bin self-precision — PROMOTED, live in V3 BASE).
+
+*The recorded verdicts, and why re-entry is legal now (§3.1 discipline).*
+The archive is uniformly negative on chunking — `seqgng_body.baked_count=0`
+on the tabula-rasa picrawler; GaitSelector NULL ("no primitive in the
+library translates"); the 11-module cartpole chunk arm lost 18% to minimal;
+EpisodicCapture "currently silent"; ChunkAbortGate "wired but never fires."
+But every one of those verdicts carries the SAME re-use condition, recorded
+identically in three places: *"only after a known-good translating primitive
+exists inside a closed-loop, abortable controller."* **That condition is met
+as of V3 BASE** (cv 0.75, 20/20 walkers): the RL-era chunker starved because
+the body never produced recurring behavior to chunk; today's body does, and
+M0 measured its event-space structure directly (next-posture 3.9× chance).
+The abort machinery the condition demands is already built. Re-audition is
+not re-proposing a refuted lever — it is exercising the recorded re-use
+context.
+
+*GATE S0 — is there chunkable sequence structure? (the long-loop gate).*
+`SequenceGNG` over the body-pose winner stream — with one required
+extension: **`event_mode` (new param, default 0 = byte-identical legacy)**
+that pushes the window only on winner CHANGE. Without it the 0.72
+self-transition stream makes every motif a dwell run; the Cell-era per-tick
+windows are one plausible reason it never baked ("food-approach takes
+seconds but SequenceGNG encodes 83 ms" — the KeyframeAverager doc recorded
+this exact diagnosis in 2026-05). Shadow instance `seq_bodypose` on
+`reality.bodypose.pose`, window 4, proj 64, bounded nodes; nothing consumes
+the motifs. Instruments: the existing `seqgng_inspector` + a body-log
+mirror (`sg_*`: nodes/baked/motif/match_conf) + `seqscore.py` (new).
+**Pass:** motifs BAKE (≥3 by ~3k events, the contract acceptance), the
+vocabulary self-limits (support-EPM signature), motifs recur across seeds,
+and the active motif's successor argmax beats the flat first-order event
+chain on next-event prediction. **Fail:** no baking or no lift ⇒ chunking
+waits for M0.d's vocabulary.
+
+*GATE M0.d — phase-space vocabulary (the refinement-mechanics gate).* The
+structural diagnosis stands: position-only tokens self-intersect on a limit
+cycle ("knee at 0.3 going up" ≡ "going down"), which is WHY the chain is
+persistence and the near-field decode jumps to the token mean. Fix at the
+input (§0 rule 2): body publishes `reality.proprio.joints_dyn` (24-D: q +
+per-tick Δq; a transparent sensor reduction — Δq dims are naturally
+zero-mean, dissolving most of the common-mode problem), a new observer EPM
+`body_pose_dyn` over it (RBF 24-D, dim ranges MEASURED via range probe per
+the support-EPM precedent, never assumed), and a second shadow MotorPlanner
+`motor_planner_dyn` keyed to it. **Pass:** per-joint authority bands extend
+below k=8 (the jump-to-mean dies) and/or past k=34; h2 tracks earn first
+bands; self-transition mass drops materially from 0.72; dwell shortens
+(tokens carve the stride). **Fail:** conditioning goes deeper (explicit
+common-mode centring arm) before any M1.
+
+*Protocol.* ONE shadow config carrying both gates on the same streams:
+v3base__ga__bodypose + joints_dyn + body_pose_dyn + seq_bodypose + both
+planners — every addition zero-authority, so the behavioral base is
+untouched (the M0.b↔M0.c bit-identical-stream check is the precedent; a
+same-seed stream-identity check against a prior M0.b log is step 1 of the
+run). n=4 seeds × 12k arena, DIAG_INTERVAL=1, M0-matched. Two gates, two
+independent instruments, one set of runs — one-lever discipline applies to
+behavioral levers, and there are none here.
+
+*Decision matrix for M1 (the first authority-bearing loop).*
+- S0 loud + M0.d loud → chunk PROPOSER over the dyn vocabulary writing far
+  rows as sequence templates, lattice refinement inward (the operator's
+  long-loop architecture, both halves earned).
+- S0 loud only → chunk proposer on the current vocabulary, event-space rows.
+- M0.d loud only → backward-pass lattice refinement (masking propagates
+  future→present survival) on the dyn vocabulary.
+- Neither → vocabulary conditioning arm (centred common-mode) before any
+  authority. In ALL cases: reflexes keep t0; per-chunk/per-row precision is
+  EARNED from verification (the authority-band machinery, already live);
+  ChunkAbortGate/OutcomeGate are the recorded execution guards when
+  authority eventually flows.
+
+*Build list.* (1) `SequenceGNG.event_mode` (C++, default-0 guarded);
+(2) body-side `joints_dyn` publish (new topic, no subscribers in existing
+configs — behaviorally null); (3) `sg_*` body-log mirror; (4) the twin-gate
+config + launcher entry per convention; (5) `seqscore.py`; (6) range-probe
+pass for the dyn EPM's dim_min/max. KeyframeGait, GNGRollout, MotorRepertoire,
+ChunkAbort/OutcomeGate: untouched now, named as the M1/M2 assembly kit.
+
+**2026-08-11 — TWIN GATES RUN: both FAIL as built, both failures diagnosed as
+CONDITIONING — and a §3.2 harness catch on the way.** Build: SequenceGNG
+`event_mode` (default-0), `joints_dyn` [q, Δq] body stream, `body_pose_dyn`
+EPM (measured dim ranges), second planner, sg_*/bd_*/pland mirrors,
+`seqscore.py`; smoke-verified consumers + BIT-IDENTICAL bp_win stream vs
+M0.b (behavioral null confirmed). **The catch:** first collection showed the
+bodypose CONTROL cone's top1@1 collapsed 0.71→0.24 on an identical stream —
+the planner's learn context was `static thread_local`, shared by the twin
+config's TWO instances, cross-writing each other's transition tables. Fixed
+(members), rerun, control reproduced M0.c exactly (0.713). The control arm
+caught the bug; this is why the twin config keeps one.
+
+**GATE S0 — FAIL on this vocabulary (n=4, ~2.7k events/run).** Zero motifs
+baked (again — the RL-era signature, now WITH event mode), vocabulary runs
+to the 96-node cap in 4/4 seeds, match_conf 0.00, and the motif successor
+argmax scores 0.118 vs the flat first-order event chain's 0.175 — **lift
+0.67: the chunker is WORSE than the chain it must beat.** Diagnosis: (1)
+exact/near 4-gram recurrence is rare over a ~60–100-token vocabulary with
+GNG boundary jitter — the noisy tokens shred motif identity; (2) hash-window
+clustering treats all 4 positions equally, so windows differing in the LAST
+token cluster together — the successor is conditioned on a state blurrier
+than "last token" alone, structurally losing to the chain on noisy streams.
+**Verdict: NULL — sequence memory beyond first order is not extractable from
+THIS vocabulary by window clustering. Re-use context: retry after a
+vocabulary that passes M0.d-style dynamics checks, and/or with
+last-position-weighted or shorter windows.**
+
+**GATE M0.d — PARTIAL: the stream improves exactly as designed; the chain
+does not.** Stream-level (real, n=4): self-transition mass 0.72 → 0.55,
+dwell ~halved, vocab 51 → 109, and h2 joints begin earning authority bands
+in the dyn arm. But the cone over dyn tokens is no better than the bodypose
+control (top1/persistence ×0.90–1.08 shallow, ×0.56 at k=34), and the
+decisive planscore check — the UNCONDITIONED first-order chain, no phase-bin
+sparsity — shows dyn lift 0.94 (k=1) falling to 0.64 (k=10): **worse than
+persistence at every depth.** Diagnosis (§3.2 faithfulness): a weakened
+slice of the mechanism — single-tick Δq of a noisy servo stream is a poor
+velocity estimator, and the dq dims' RBF ranges (set from p1/p99 envelopes)
+leave the typical |Δq| crowded near zero. The phase-space idea is measured
+to do its structural job (self-intersection reduced); the VELOCITY ESTIMATE
+is the broken part. **Verdict: PARTIAL — retry with a smoothed velocity
+(EMA/boxcar over ~3–5 ticks, matching servo dynamics) and scale-adapted dq
+ranges before judging phase-space vocabularies. ⇒ M0.d.2.** Secondary notes:
+seed 3's dyn EPM hit the 200-node cap (raise for v2); the phase conditioning
+(bins=8) costs 8× count sparsity for a measured-zero gain — drop to the
+minimum in v2 arms.
+
+**2026-08-11 — M0.d.2 (smoothed velocity): the anti-signal fixed, the gate
+still not passed — and the campaign's token-chain chapter closes.** v2
+changed exactly the diagnosed conditioning: q̇ = EMA(Δq, α=0.3) body-side,
+dq ranges re-measured on the smoothed signal (p2/p98+20%, ~half the raw
+envelopes), max_nodes 320, planner_dyn phase_bins 2. Stream identity
+verified again. **Result (n=4): the unconditioned dyn chain went from
+LOSING to persistence (v1 lift 0.94→0.64 with depth) to TYING it flat
+(0.94/0.97/1.00/1.02/1.03/1.00 at k=1..10)** — the smoothing removed the
+noise-injection, confirming the estimator diagnosis — **but surfaced no
+positive structure.** The cone shows a small mid-horizon bump (×1.14–1.20
+at k=5–8, n=4 — a signal at best) yet decays worse at stride scale (×0.52
+at k=34); bands did not widen (38/48, width 17.7); authority 0 everywhere.
+The vocabulary meanwhile kept growing with every cap raise (163 in-use;
+238–278 total, near the new 320 cap) at unchanged self-mass 0.55 — finer
+tiling without added predictability, at per-token sample cost (k=1 model
+0.47 on 163 tokens vs 0.67 on 51).
+
+**The pattern, now complete across every arm tried:** per-tick FIRST-ORDER
+TOKEN CHAINS on this body's proprioceptive stream do not beat persistence
+under ANY tested vocabulary (position, position+raw-q̇, position+smoothed-q̇)
+or conditioning (none, brt phase, CPG clock, 2 or 8 bins); window-clustered
+chunks lose to the chain itself; event space holds only ~1–4 events of
+structure. **The one verified positive in the entire program is CONTINUOUS:
+the per-joint marginal decode beats hold-pose by 12–23% in the k∈[8,34]
+band.** The predictable object at stride scale is the continuous trajectory
+distribution, not the symbolic successor. **Verdict: M0.d.2 PARTIAL
+(estimator fixed, gate unpassed); the token-argmax planning route is
+REFUTED on this substrate at per-tick granularity — re-use context: a
+vocabulary whose tokens are EARNED FROM predictive success (e.g., a
+descending-predictor-conditioned EPM per §0's predictive-coding path)
+rather than from spatial quantization.** Recommendation for M1 recorded:
+the piano-roll architecture survives unchanged — its rows already carry
+continuous per-joint distributions (the decode/fan); make THAT the
+prediction substrate the refinement/masking loops operate on, with the
+authority bands as the earned-confidence gate, and drop the requirement
+that a symbolic chain must first beat persistence.
+
+**2026-08-11 — M1 SUBSTRATE PIVOT (operator decision) + CONTINUOUS MASKING
+with the three-layer debugging view.** Operator, after the token-chain
+chapter closed: "the approach needs to be entirely fresh, and the new joint
+piano roll is going to be the substrate on which we can excite and inhibit
+future motions" — with a hard debugging requirement: the widget must show
+the ORIGINAL motion, the MASK applied, and the FINAL motion. Built:
+`mask_mode=2` — continuous region inhibition ON THE ROLL: token mass whose
+READOUT pose falls in [val_lo,val_hi] on the masked joint (or all) at cone
+depths [depth_lo,depth_hi] is suppressed by mask_strength, and because the
+mask reroutes the ROW itself, suppression propagates into every deeper row.
+Dual decode (raw pre-mask + final) and dual verification (per-depth
+masked-vs-raw |err| = the inhibition damage/benefit meter); raw roll ships
+only while suppressing. Widget: dashed ghost + faint fan (original),
+magenta region rect (the mask), bright layers (final). All params inert by
+default (gain-0). **Demo arm `__mask2` verified live** (inhibit FR-knee
+rest [0.7,1.05] at depths 8–21 — "don't be at rest a quarter-stride out"):
+255k suppressions, divergence localized to the mask window, damage meter
+honest (+14% err at k=8 — the body DOES rest there), and the reroute
+visible ACROSS joints — masking one joint moves its correlated partners
+through the whole-body mixture, which is precisely the debugging visibility
+the contract demanded. The E/I loop now has its full instrument: excite =
+the decoded roll, inhibit = region masks, verify = the banded per-joint
+error meters.**
+
+**2026-08-11 — the LEG-NAMING MIRROR (operator-diagnosed on the roll).** With
+per-tick motor traces beside the 3-D view for the first time, the operator saw
+the red leg lift while the widget said FL. Geometry confirms: true forward is
++Z (eyes / corridor / fwd_v), so body-left = +X — yet leg 0 "fl" (red) is
+built at x<0, the anatomical FRONT-RIGHT. The names were assigned in the
+default-camera screen frame (the mirror illusion of labelling a body that
+faces you). The frame is used CONSISTENTLY end-to-end — every action topic,
+config, event, instrument, and historical per-leg finding ("fl brakes 2.5×" =
+the red = anatomical front-RIGHT leg) — so the record is coherent and the
+mirror is behaviorally null in sim. Fixes: the roll now labels tracks by
+ANATOMY tinted the leg's sim color (cfg name kept for cross-reference); loud
+warnings at LEG_NAMES in the body script (do NOT rename piecemeal — the blast
+radius is every config + topic + ledger history) and in the sim2real port doc,
+where the servo map MUST be written by anatomy, not by name. Instrument
+payoff: this is exactly the class of defect the piano roll exists to catch —
+invisible to every aggregate metric, obvious the moment motor output sits
+beside the body.
+
+**2026-08-11 — M1 MASK AUTHOR v1: the authoring slow loop BUILT and WORKING;
+per-joint inhibitory keep-rights are EARNABLE but seed-specific — plus a
+dual-cone fidelity fix and the demo-mask/band interaction explained.**
+
+*The operator's observation, diagnosed first.* On the live `__mask2` demo the
+confidence (authority-band) windows grow everywhere EXCEPT the front-right
+leg. Mechanism confirmed in code: the per-joint bands score the FINAL
+(post-mask) decode, the demo mask fights reality on that leg ("don't rest"
+where the body does rest — the recorded +14% @ k=8), and mode-2 rerouting
+moves the whole-body mixture, so all three FR tracks carry damaged final
+decodes and their bands stay pinned while unmasked legs grow. Expected;
+the meter is honest. (Design note kept: bands describe what the planner
+currently OUTPUTS — during inhibition experiments they will show the mask's
+cost, which is precisely their job as the earned-confidence gate.)
+
+*Fidelity fix (build prerequisite).* The old "raw" layer was decoded from the
+SAME cone pre-this-row's-mask, so past the first masked depth it inherited
+upstream rerouting — understating the mask's true effect (the demo's recorded
++14% @ k=8 stands: k=8 WAS its first masked depth). Now, while a region mask
+is live, a TRUE second unmasked cone propagates beside the final one:
+raw-vs-final is a genuine per-tick counterfactual at every depth, the ghost
+layer is honestly "the original motion" (operator contract), and — the point —
+the dual verification becomes a perfectly controlled within-run A/B: both
+decodes frozen at prediction time, scored against the same arriving reality.
+
+*The build (author_mode=1, all params inert by default — gain-0).* The M1
+slow loop that AUTHORS masks: per (probe, joint) it tracks the RAW decode's
+signed residual (Welford); each trial it proposes the cell with the strongest
+standardized residual t≥3 not yet tried (where the un-inhibited excitation
+systematically hallucinates), builds a one-sided slab from the past-ring
+envelope (μ + sign·[0.5σ, 3σ] — placed from the body's own running stats,
+§5), depth windows probe-to-probe within [5,34] (the ledger's re-use
+context: k<5/h2-near-field is reflex territory), with a random h1/knee-biased
+arm as fallback (never fired: the residual gradient always had a target).
+Trial = 800 ticks masked + 48 drain; judge on all probes ≥ the mask's first
+depth. Instruments: `author` block in snapshot/diag (phase/trial/cand/kept +
+`res_top` hallucination cells), body-log `plan.au` mirror, piano-roll AUTHOR
+readout (the magenta rect hops per trial — the search made visible),
+`authorscore.py`, config `__m1auth` + launcher entry. Consumer checks all
+fired (masked_out 136k–162k per run; trials 10/10/10/10 at n=4 × 12k arena,
+seeds 11–14).
+
+*v1.0 result — whole-body keep-gate (ratio_all < 0.95): NEAR-NULL, and the
+null is DIAGNOSTIC.* 40 trials judged, 1 kept (s11 j7 [-0.28,-0.10] d[6,8],
+r_all 0.943), no recurrence. Reconstructing all 40 trials: ratio_all sits
+0.96–1.14 (masks neutral-to-damaging at body altitude) while ratio_tgt shows
+loud repeated wins — s11 rt 0.86/0.86/0.88 (j6/j7), s13 rt 0.75/0.82/0.87
+(j1), s14 rt 0.82/0.84 (j5) — the 11 untargeted joints DILUTE the pooled
+ratio to ~1. The wrong altitude, exactly as the per-joint-verification entry
+predicted ("score per-joint in the band").
+
+*v1.1 — per-joint keep-gate (ratio_tgt < 0.95 AND ratio_all < 1.0, the
+no-damage guard): the author EARNS keep-rights.* Same seeds → bit-identical
+body streams and trials (masked_out equal to v1.0 per seed — the scoring
+change is the only variable; a free controlled comparison and a determinism
+check in one). Keeps: s11 4 masks (j6/j7 h2, d5–13, rt 0.855–0.933), s13
+4 masks (j1 h1, d5–34, rt 0.749–0.912), s12/s14 0 — s14's two loud target
+wins REJECTED by the guard (r_all 1.02–1.03: target wins, body pays; the
+demo-mask failure mode, now caught automatically). Class-level regularity:
+8/8 kept masks are guided, below-envelope slabs on slow joints — the raw
+decode systematically UNDER-predicts them (jump-to-mean), and inhibiting the
+low-side mass corrects it, verified out-of-sample. No cross-seed recurrence
+of specific regions: the residual field is seed-specific (each seed's gait
+settles a different attractor with different decode biases).
+
+**Verdict: the AUTHOR MECHANISM is WORKING (built, consumer-verified,
+deterministic, honest keeps/rejects including the guard) — the operator's
+E/I loop now has its authoring half as an instrument. The SEARCH RESULT is
+PARTIAL: per-joint inhibitory keep-rights are earnable on this vocabulary
+(2/4 seeds, rt 0.75–0.93 at n=800–4000 verdicts/keep), but what is earned is
+SEED-SPECIFIC MODEL-BIAS CORRECTION (below-envelope, slow-joint, guided —
+the class recurs; the regions do not), not yet a body-invariant inhibitory
+vocabulary. Re-use context / next rungs: (a) CLOSE THE LOOP — re-apply the
+kept set continuously after keeping and verify the final roll's per-joint
+bands WIDEN vs the no-author control (authority earned through the meters,
+the M1 contract); (b) class-level recurrence needs n≥20 before any "the
+decode under-predicts slow joints" finding; (c) the deeper fix remains
+vocabulary conditioning — a predictive-coding-conditioned EPM whose tokens
+are earned from predictive success would shrink the residual field the
+author is currently mopping up.** §3.2 notes: no tautology (all params new),
+consumers verified per seed, control = the same-seed v1.0/v1.1 identity,
+faithfulness = the true-counterfactual fix landed BEFORE any keep was
+recorded.
+
+**2026-08-12 — M1 RUNG (a): THE PREDICTION LOOP CLOSES — earned inhibition
+compounds into a measurably better operating roll (operator-directed:
+"close the loop and fully verify the instrumentation before lever (b)").**
+
+*Design.* `author_apply=1`: kept masks apply to the roll CONTINUOUSLY from
+the moment they are earned, in CHRONOLOGICAL keep order — each keep is
+judged marginally against its predecessors' composite, so keep order is the
+order in which validity was established (and the kept cap now STOPS new
+keeps rather than evicting: eviction would silently invalidate every later
+keep's judgment). Up to THREE cones per tick: FINAL (kept+candidate), BASE
+(kept only — the operating roll), RAW (unmasked). Candidates are judged
+MARGINALLY (final vs base) so they cannot inherit the kept set's credit;
+with the author on, the main verification and the authority bands score
+BASE, so bands measure the kept set, not trial churn (manual-mask configs
+keep their final-scored semantics). `jerr`/`jpers` tables now mirror into
+the body log (`je`/`jp`) — jband alone is thresholded and hides sub-0.95
+movement. Widget: faint steady rects = the earned set operating; bright
+hopping rect = the live trial. Control arm = same build, `author_apply=0`
+(`__m1auth_ctrl`, harness-only). Scorer: `authorab.py`.
+
+*Smoke regression (seed 11).* Pre-keep trials bit-match the prospector run
+(trial-7 keep identical: rt 0.8574); after the first keep the same j7
+candidate that scored rt 0.855 standalone scores rt 0.938 MARGINALLY — its
+correlated partner j6 was already kept and operating, so the candidate is
+credited only for what it adds. The credit-inheritance protection observed
+working on live data.
+
+*A/B (n=4 matched seeds × 12k, apply vs prospector, same build).*
+- s13 (kept at trials 1–2 → operating ~60% of the run): target-joint
+  operating-error ratio apply/control **0.881 @ k=21, 0.914 @ k=34**;
+  untargeted joints 0.987–1.000; band width 269 → 290 (**grew**).
+- s11 (kept at trials 7–8 → operating ~25% of the run): target ratios
+  0.973–0.983 from depth 5 outward (the d[5,5] masks propagate deeper);
+  untargeted 0.989–1.004; band width 198 → 185 (**dipped** — see caveat).
+- s12/s14 (no keeps): max |Δje| = 0.0000 — apply ≡ control exactly; the
+  three-cone plumbing is inert when idle (built-in null, clean).
+Benefit magnitude tracks keep-time coverage (cumulative accounting dilutes
+late keeps), matching the trial-time instantaneous ratios (0.75–0.94).
+
+**Verdict: WORKING — the M1 contract's rung (a) is met: masks EARN
+keep-rights through the meters and the earned set VERIFIABLY improves the
+operating roll where it acts, with clean nulls and no collateral damage.
+Caveats recorded: (1) s11's total band width dipped 6.5% — threshold
+crossings at diluted-cumulative altitude, not a measured harm (its je
+ratios improve); re-check with earlier warmup or longer runs before calling
+it real; (2) cumulative meters understate late keeps — a windowed
+(since-first-keep) accumulator is a v2 nicety; (3) global token authority
+stays 0 everywhere, as expected — the symbolic argmax is refuted material,
+the continuous marginals are the substrate. INSTRUMENTATION STATUS FOR (b):
+proposal → trial → marginal keep → apply → compound verified benefit is now
+a fully closed, self-auditing chain with built-in nulls. Lever (b) — first
+behavioral authority: the BASE roll's decode published as a weak, band-gated
+objective (reflexes keep t0, per-joint gate = the earned bands, gain-0
+guarded, ChunkAbort/OutcomeGate as recorded execution guards) — is cleared
+to build NEXT, with the operator watching the UI before any promotion.**
+
+**2026-08-12 — LEVER (b): FIRST BEHAVIORAL AUTHORITY — the plan pull.
+Built, guarded, measured at n=6: SAFE, mildly positive, not loud. NOT
+PROMOTED (UI review is the operator's gate).**
+
+*The mechanism (rewrite-rule form).* The error the behavior minimizes: the
+discrepancy between the body's trajectory and its OWN verified prediction —
+proprioceptive active inference, plan-as-prediction (§5 rule 7 honored: no
+rhythm injected, no trajectory scripted). MotorPlanner publishes its BASE
+(operating, kept-mask-shaped) roll decode at plan_depth=8 as per-leg
+PredictionTokens `[3 targets | 3 weights]` on `objective.plan.<leg>`; a
+joint's weight is 1 ONLY where its verified authority holds at that depth
+(the slot-win test the bands are built from — earned, never assigned).
+MotorEPMv2 gains a second posture-objective socket (`plan_topics` +
+`plan_gain`) fused with the keyframe objective PER JOINT, precision-weighted
+(the LateralVoter pattern): `w_eff = wk + plan_gain·wp`, so an ungated
+joint's keyframe pull is untouched (never weaken a working loop). Distress
+above `plan_distress_cut` zeroes all plan weights — reflexes own
+emergencies, and t0 always. Because the published decode is the BASE roll,
+EARNED inhibition (rung a) now has a behavioral path — and trial candidates
+do NOT leak into behavior (base excludes the live candidate by
+construction).
+
+*Guards verified.* (1) gain-0: `__m1auth__planpull0` (publisher ON, consumer
+gain 0) is behaviorally IDENTICAL to `__m1auth` tick-for-tick on a matched
+seed (66/66 mirror lines). (2) Publisher gate matches the verified authority
+map exactly on live data: h1 (j0–3) and knees (j8,9,11) gate in; h2 (j4–7)
+never do — reflex territory stays reflex. (3) Consumer fired across all arm
+seeds (pl_pull ≈ 0.015, ~10–11.7k gated publish-ticks / 12k). (4) Config
+diff between arms is `plan_gain` alone.
+
+*A/B (seedavg, n=6 × 12k corridor 0.3, control = gain 0).* Transport:
+net_z 4.87±1.76 → 5.49±1.78 (+13%, sub-σ), straight 0.44 → 0.47, flat_v
+0.03 → 0.04. Stability: falls 0.67 → 0.17 (4 total → 1), unstable 0.12 →
+0.09, planted 3.37 → 3.49, plv_wn 0.91 → 0.98. Rhythm: step_cv_real 0.88 →
+0.81 with the step-period spread HALVED (σ 6.3 → 3.2 ticks) — consistent
+with prediction-fulfilment adding coherence. Cost, honestly: arm seed 2
+regressed (tilt_sd 0.93, net_z 2.35, the only nonzero panic_duty 0.08 in
+either arm) — the pull can entrench a bad episode; belly and scrub flat.
+
+**Verdict: PARTIAL (safe + mildly positive SIGNAL at n=6) — behavioral
+authority flows through earned bands without destabilizing the stack; no
+metric shows systematic damage; transport/stability/rhythm all lean
+positive; the effect is NOT loud (§3.3 — a real capability announces
+itself; +13% sub-σ is not an announcement). NOT PROMOTED: the operator's UI
+review is the promotion gate. What to WATCH live: does the gait visibly
+gain step-rhythm coherence; does arm-seed-2-style entrenchment appear (a
+stumble the pull then commits to); and the demo-with-teeth — hand-apply the
+FR-knee rest mask on the [O] bench with the pull live: does inhibiting the predicted
+rest actually recruit an earlier FR step? Re-use context: plan_gain dose
+(0.05/0.2), plan_depth 13, and gating on the kept-mask-shaped vs raw roll
+are the untried axes; a (d)-style perturbation (drop the pull mid-run,
+watch re-coordination) is the sharpest next evidence.**
+
+**2026-08-14 — OPERATOR BENCH SESSION: the levers verified by hand, and the
+M1 chapter's closing diagnosis.** With the full bench in place ([O]: mix,
+gate override, group masks, reflex↔plan fade, tug vectors), the operator
+drove the crossfade and the tier masks live. Two observations, both
+load-bearing: (1) **at fade 1 (reflexes silenced, pure plan playback) the
+motors settle into a stable OSCILLATORY state** — the closed loop
+pose→tokens→cone→decode→servo→pose converges to the predictor's
+self-consistent orbit: the substrate carries the body's RHYTHM but the
+PROPULSION (stroke, stance press, load corrections) survives only as a
+blurred mixture-mean, and embodied, that residue is an oscillation that
+goes nowhere; (2) **no region mask on any joint set (incl. all-h2 with
+override + fade) visibly improves the gait** — inhibition reroutes mass to
+other tokens the model already believes, and the vocabulary, learned from
+the body's own history, contains only its habits. **Verdict (three
+independent demonstrations now: token-chain refutation M0–M0.d.2, the
+author's search finding only seed-specific bias masks, and the operator's
+embodied playback): the E/I instrument is WORKING and BOUNDED BY THE
+VOCABULARY'S CONTENT, which is a mirror of the reflex stack's habits.
+Selection over habitual futures can stabilize and commit (the lever-(b)
+coherence signal) but cannot innovate. Re-use context: E/I selection
+becomes interesting again the moment the vocabulary contains futures that
+DIFFER from habit — via a predictive-coding-conditioned vocabulary
+(doctrine §0's descending-predictor path, the recorded (c) fix) and/or a
+generative excitation source (M2: episodic capture of the body's own best
+segments written into far rows).**
+
+**2026-08-14 — OPTION A LAUNCHED (operator-approved: consolidate (b), then
+B) + the SETPARAM_AT hook + B's design queued.** Running: n=20 powering
+(planpull vs planpull0, 12k), dose arms (plan_gain 0.05/0.2, n=6), depth
+arm (plan_depth 13, n=6), and the (d)-test (16k, plan_gain 0.1→0 at
+t=10000 vs no-flip baseline, n=6; scorer `ddropscore.py` — windowed
+disp/steps/planted/tilt + the pl_pull flip-fired check).  New generic
+perturbation hook: `OGMA_PICRAWLER_SETPARAM_AT="tick:module:key:value[;…]"`
+(the lesion-AT idiom generalized to any HotMutable brain param; announced
+loudly per §3.2 rule 7; tick 1 doubles as arm differentiation without
+config proliferation).
+
+**2026-08-14 — OPTION A COMPLETE: lever (b) consolidation — the 0.1 dose
+REFUTED, the 0.05 dose WORKING at n=20, and two harness bugs caught by the
+§3.2 discipline.**
+
+*The §3.2 catch that paid for itself.* The dose/depth arms came back
+BIT-IDENTICAL to the 0.1 arm — the tick-1 SETPARAM_AT flips reported
+enqueue-OK but never took effect.  Root cause found in the SCHEDULER:
+`process_pending_patches` drained all queued batches then applied them in
+a loop where one batch's validation throw (the pre-existing init-time
+cruse patch on configs without that module) aborted the loop — EVERY BATCH
+QUEUED BEHIND THE BAD ONE was silently discarded after its enqueue had
+returned success.  Fixed: per-batch isolation (each batch keeps its own
+validate-then-apply atomicity; rejections surface loudly; neighbors still
+apply).  Historically only cruse-family patches sat in the init queue, so
+no prior measurement was contaminated.  Second bug: the pl_pull/pl_w
+telemetry EMAs froze at their last value when the pull went inactive — a
+mid-run gain drop read as "flip never fired."  Fixed: inactive pull decays
+the meter.  Bonus: the three accidentally-identical arms proved the whole
+pipeline bit-deterministic per seed.
+
+*The verdicts (all corridor 0.3, 12k unless noted).*
+- **n=20 @ gain 0.1: TIE** — net_z 5.40±1.85 vs 5.44±2.24, straight
+  0.47/0.46, step_cv_real 0.80/0.80.  The n=6 coherence signal was
+  substantially seed luck (control's n=6 subset happened to contain its
+  bad seeds).  Three arm seeds circle (straight 0.11–0.16).  The original
+  lever-(b) dose is REFUTED as a behavioral improvement.
+- **Dose sweep (n=6, post-fix): INVERTED-U** — net_z 4.87 (0) / 7.24
+  (0.05) / 5.49 (0.1) / 6.72 (0.2); depth 13 no better than depth 8 with
+  worse tails.  The house pattern again: a whisper cooperates, a shout
+  fights the keyframe loop it fuses with.
+- **n=20 @ gain 0.05: WORKING** — net_z 5.40→6.41 (+19%), straight
+  0.47→0.52 (σ 0.15→0.11), falls 8→2, tilt_sd 0.164→0.098 with the
+  outlier tail GONE (max 0.16 vs control's 0.49), bellyc equal, 20/20
+  walkers, one weak seed (s19).  No metric worse.  Stability-dominant.
+- **(d)-test @ 0.1 (16k, flip at 10k, n=6): FLAT** — no transient, no
+  recovery signature; the pull was not load-bearing at that dose.  Late
+  windows: the keep-it-on baseline shows HIGHER tilt variance.
+- **(d)-test @ 0.05 (same protocol, flip verified by the fixed meter,
+  n=6): a WEAK dip-then-recover** — disp 0.70→0.61 relative dip in the
+  first two post-flip windows, recovery to ABOVE baseline by 14–16k
+  (0.54 vs 0.40), steps recover likewise; base again shows the late tilt
+  blowup (0.48±0.51 vs flip 0.18).  Signal-grade only (n=6): a hint that
+  0.05 carries load and the body re-coordinates without it.
+
+**Verdict: lever (b) at plan_gain 0.05 is a WORKING n=20 signal —
+stability-dominant (falls, tilt), transport-positive, nothing worse —
+and the config/launcher now carry 0.05 as the operating point.
+PROMOTION AWAITS THE OPERATOR'S UI REVIEW (the standing gate); what to
+watch: overall gait quality at 0.05, the rare weak seed (s19-type
+circling), and whether the late-run tilt cost of KEEPING the pull on
+(both (d)-tests hint at it) is visible by eye.  Re-use context: a finding
+(vs signal) needs the (d) at 0.05 powered to n≥20 and varied worlds; the
+late-tilt hint deserves its own windowed look before any long-run
+deployment.**
+
+**2026-08-14 — LEVER (b) PROMOTED (operator UI review, the standing gate).**
+The operator's eye at plan_gain 0.05: "better stability during walking,"
+slight rear-leg improvement, and — the load-bearing observation — **the
+robot climbs the corridor's 30° walls markedly better than before.**  The
+plan pull at the whisper dose joins the stack: the promoted operating
+point is v3base + bodypose EPMs + M1 author (apply) + plan pull @ 0.05,
+band-gated, distress-cut.  NAMED TARGET for the next behavioral lever
+(operator-set): **REAR-LEG PLANTING** — the rear legs swing forward then
+back without planting correctly, usually because the KNEE does not flex
+downward to make ground contact (a swing-termination/touchdown failure;
+anatomically the rear pair = cfg 'rl'/'rr', rear knees = planner joints
+10/11).  This is the evaluation lens B inherits: touchdown corrections are
+precisely the aperiodic, load-linked events the pose vocabulary cannot
+see — if the surprise vocabulary is doing its job, rear-knee touchdown
+error should become one of its DENSEST, most predictable token regions,
+and its planner's bands on j10/j11 should say so.
+
+**2026-08-14 — B GATE RUN (both pre-registered arms): the predictive-coding
+pair WORKS MECHANICALLY; the surprise vocabulary FAILS its planner gates as
+built — and the failure diagnosis is §6 CONDITIONING, again, in a new
+place.**
+
+*Build integrity (§3.2 catches before first run, all three latent bugs
+found at design time or first smoke):* (1) the predictor's source port
+silently dropped ProprioToken context (ConsensusToken-only cast — fixed
+with a typed fallback; RealityToken added for arm 2); (2) the closed pair
+converged to HALF-subtraction (the EPM publishes its residual as latent;
+the legacy update subtracted the cached prediction from it again — fixed
+with `target_is_residual`, which integrates the residual directly);
+(3) the err/norm health ratio is TAUTOLOGICALLY 1 in residual mode — the
+honest bite-meter is ‖prediction‖ (dp_pn) vs ‖residual‖ (dp_err).
+
+*Arm 1 — CPG-clock context (2-D [cosφ,sinφ]), n=4 × 12k arena.* The pair
+closes and bites: dp_err falls 0.89 → 0.18–0.22 with dp_pn ≈ 0.99 — the
+first stride harmonic (all a 2-D linear context can express) absorbs ~80%
+of the encoding.  But the residual vocabulary yields NOTHING for the
+planner: self-mass 0.69 → 0.65 (gate wanted < 0.55), chain lift 0.92–0.99
+(≤ persistence), pc bands equal-or-NARROWER than control everywhere, zero
+new h2 bands, rear-knee ratios unchanged, h2 decodes a few points WORSE.
+
+*Arm 2 — latent-autoregression context (the plain EPM's raw latent), the
+pre-registered fail branch.* Absorbs more (dp_err 0.10–0.12, ~90%), and
+the residual vocabulary COLLAPSES 41 → 25 tokens; chain lift 1.00 flat;
+h2 bands still absent; h2 decodes still worse.  ONE genuine positive:
+**the rear-knee marginals (j10/j11 — the operator's named planting target)
+improve 3–8 points at k∈[13,21] in ALL FOUR seeds** (e.g. s13: 0.76/0.77
+vs control 0.83/0.85) — the latent-AR residual carries real rear-knee
+correction structure; the near field (k 1–3) degrades and the bands'
+0.95-contiguity threshold hides the gain.
+
+**Verdict: B v1 is a NULL against its pre-registered gates — but a §3.2
+review says the measured object was partly the HARNESS AGAIN: the
+subtraction happens in latent space, so the GNG receives a residual of
+norm ~0.1–0.2 against insertion/error scales sized for encoder outputs of
+norm ~1.  The vocabulary collapse under the STRONGER predictor (arm 2,
+41→25) is §6's insertion-gate collapse in a new costume — the residual's
+SHAPE is never tiled because its SIZE is below the gate's resolution.
+Doctrine §5 rule 5 prescribes the fix: adapt, don't tune — a running-RMS
+normalization of the post-subtraction residual before the GNG (an EPM
+option, off by default), so the vocabulary tiles residual DIRECTION at
+unit scale.  Re-use context: (i) B v2 = residual normalization + re-run
+both context arms (the rear-knee k∈[13,21] signal is the thing to watch
+grow); (ii) if v2 still nulls, the linear predictor family is exhausted —
+phase-binned piecewise-linear or the planner-as-predictor are the next
+rungs; (iii) the rear-knee planting target does NOT wait on B: it can get
+its own behavioral lever (stance-gated knee-flexion-at-touchdown through
+the promoted plan-pull carrier) regardless of vocabulary work.**
+
+**2026-08-14 — REAR-KNEE PLANTING lever, arm 1 (constant descent extension):
+REGRESSION — and the §3.2-rule-6 catch on my own build.** The operator's
+named target built as the knee half of swing-descent (`swing_descend_knee`:
+past half the leg's own swing, the shank flips from fold to extend).  n=6
+corridor vs the promoted stack: net_z 7.24→5.15/4.73 (0.3/0.6), cv
+0.75→0.87/0.89, falls 0→3/1, planted DROPS 3.54→3.36/3.46 — the constant
+form pays the hip2-press's rhythm cost AND loses transport: extending
+through EVERY descent stabs healthy swings; the 2026-08-10 "knee keeps its
+fold" was load-bearing.  **Faithfulness check on myself: the constant form
+is a WEAKENED SLICE of the stated design** ("contact expected by now, none
+arrived").  Built the error-form (`swing_overdue_knee`): extension fires
+ONLY when a swing outlives the leg's own running-average duration, grows
+with lateness, releases on contact — healthy swings untouched BY
+CONSTRUCTION.  Verdict on arm 1: REGRESSION (recorded, kept as the arm);
+arm 2 (overdue form, 0.4) in flight.  Re-use context for arm 1: none
+foreseen — the mechanism class is superseded by the error-form.
+
+**2026-08-14 — PLANTING arm 2 (the overdue error-form) + B v2 (residual
+normalization): one PARTIAL with a named ratchet, one HISTORIC structural
+pass with a starved planner.**
+
+*swing_overdue_knee 0.4 (n=6): PARTIAL.* Five of six seeds hold transport
+(7.0–8.8 vs control 7.24); swing bouts shorten 8.29→7.68 exactly as
+designed (overdue swings get terminated by the reach); but cv 0.75→0.85,
+falls 0→3 (two seeds), and the consumer counter exposes the flaw: 4,575
+overdue leg-ticks — **the expectation RATCHETS.** The reach shortens
+swings; completed-swing durations feed the running average; the average
+falls; more swings read as overdue.  The intervention chases its own
+reference.  Re-use context (the fix, one gate): learn the expected
+duration ONLY from unassisted swings (skip the EMA update when the reach
+fired that swing).  Operator eye pending on the planting quality itself.
+
+*B v2 (normalize_residual, both context arms, n=4 × 12k arena):* **The
+structural gates PASS for the first time in the campaign's history** —
+vocab 25 → 235/246 in-use, entropy 5.1 nats, and self-transition mass
+falls to **0.51 (clock ctx) / 0.32 (latent-AR ctx)** against the pose
+vocabulary's 0.69–0.72 and the gate's < 0.55: the token stream finally
+CARVES THE STRIDE, the target M0 set on 2026-08-09.  The collapse fix
+did exactly what the §6 diagnosis said it would.  **But the planner
+gates still FAIL:** the vocabulary slams into the 200-node cap with ZERO
+baked (≈50 visits/token at 12k — below the baking threshold's
+statistics), the chain scores BELOW the now-weaker persistence baseline
+(0.77–0.94), h2 bands appear only scattered (2/4 seeds, narrow), and the
+v1 rear-knee gain is GONE (pc ties-to-worse vs control) — the M0.d.2
+lesson verbatim: finer tiling without transition statistics is per-token
+sample starvation.  **Verdict: B v2 PARTIAL — the substrate condition is
+finally met; the planner layer is data-starved, not refuted.  Re-use
+context / v2.1: raise max_nodes (cap-hit is §0 rule 4's diagnosis),
+lengthen runs (24k+) so tokens earn visits and bakes, and/or coarsen the
+residual tiling; re-judge the planner gates only when baked > 0 and the
+per-token count matches the bodypose reference's.**
+
+**2026-08-14 — RATCHET-FIXED OVERDUE KNEE (arm 3) + B v2.1 (fed vocabulary):
+the planting family reaches the operator's-eye gate; the residual planner
+nulls again with a NEW mechanism named.**
+
+*swing_overdue_knee 0.4 with the unassisted-reference fix (n=6): the
+GAIT'S CHARACTER CHANGES.* Robustness is the headline: net_z σ COLLAPSES
+1.33→0.63 (every seed 5.4–7.4, zero falls), **planted 3.54→3.67 — the
+planting metric's first move in the family**, straight holds.  The costs:
+steps 270→167 (cadence −38%), cv 0.89.  And the consumer count ROSE to
+9,305: excluding assisted swings from training exposes the REVERSE
+entanglement — the reference cannot track a legitimate gait slow-down, so
+lengthening swings read as perpetually overdue.  The result is fewer,
+longer, more-planted strides.  **Verdict: PARTIAL, ESCALATED TO THE
+OPERATOR'S EYE — aggregate metrics cannot distinguish 'deliberate planted
+gait' from 'sluggish gait' (a blind-metric situation by construction).
+`swing_overdue_knee` added to the [M] motor-panel sliders for live
+judgment.  Re-use context: if the eye says 'planted', the cadence cost is
+the trade to tune; if 'sluggish', the reference needs a two-timescale form
+(slow tracking of ALL swings + fast exclusion of assisted ones).**
+
+*B v2.1 (latent-AR + norm, cap 800, 24k, n=4): the vocabulary is healthy
+and the planner nulls AGAIN — with the cause visible.* Nodes 274–285
+(below cap, pruning live), in-use 453, self-mass **0.27** (the deepest
+carve yet) — but **baked = 0 even at 24k with ~85 visits/node**, and the
+answer is structural: the predictor NEVER STOPS LEARNING (lr 0.01, no
+freeze), so the residual distribution drifts under the GNG forever — a
+substrate chasing itself cannot stabilize enough to bake.  Planner gates:
+rear-knee ratios TIE control, rk bands narrower, h2 absent, chain ≈
+persistence, authority 0.  **Verdict: NULL for the planner layer at every
+tested configuration (v1/v2/v2.1); the pre-registered next knob costs
+zero code — `freeze_after_ticks` on pc_predictor (converge, then freeze →
+stationary residual space → the GNG can finally bake).  The B program's
+structural achievement stands: self-mass 0.72 → 0.27 across the campaign;
+the planner value question stays open pending the freeze arm.**
+
+**2026-08-14 — OPERATOR LIVE CATCH: the "seized blue leg" diagnosed — a
+seed-roaming STANCE-CAPTURE attractor, invisible to the global amplitude
+homeostat.** Operator, watching the promoted stack at seed 42: "the right
+rear blue leg is seizing up ... might be a sign flip."  High-fidelity
+repro (seed 42, 4200 ticks, DIAG_INTERVAL=1, window 3000–4000): leg rl
+(cfg 'rl' = BLUE = anatomical RR) shows amp 0.004 vs 0.47–0.81 on its
+siblings, ZERO lifts, hip1 pinned deep negative with its command CLIPPING
+62% of ticks, knee held tucked (never below −0.28 vs siblings' −1.6), h2
+pressing.  NOT a sign flip: the collapse is EPISODIC (dies ≈t1200,
+RECOVERS to amp 0.567 ≈t2400, dies again ≈t3200) — a flipped sign never
+walks.  Mechanism: stance capture — the leg becomes the permanent support
+leg; its stroke accumulates backward against the hip1 stop, the swing
+that would release it never triggers, and the stance biases hold the
+posture; self-reinforcing.  The weak pair is the π-phase diagonal (fr
+took 1 lift in the window).  SEED-ROAMING: seed 2's final amps are
+[0.48, 0.05, 0.57, 0.26] — same attractor, leg fr — which retro-explains
+the recurring "one bad seed" in every A/B this week.  WHY UNCORRECTED:
+the amplitude homeostat is GLOBAL — it satisfies the group mean by
+over-driving the living legs (a blind metric in control form).  Chronic
+h_bias floor-saturation (−0.5, 46–66% of ticks in healthy seeds too) is
+background pressure, not the discriminator.  **Candidate lever, already
+built and OFF: `propulsion_balance_gain` — the per-leg propulsive-credit
+homeostat (below-group-mean legs get a self-limiting stroke boost) — the
+exact per-leg ownership the global homeostat lacks.  A/B launched
+(0.3 vs control, n=6); judge on per-seed MIN leg amplitude (the honest
+anti-blind metric for this failure) + the full set; operator running the
+live [M]-panel slider test at seed 42 in parallel.**
+
+**2026-08-14 — PROP_BAL BREAKS THE STANCE-CAPTURE ATTRACTOR (diseased-seed
+test) + the touchdown forensics + the seed-checkbox catch.**
+
+*Seed reproducibility (operator: "same seed twice, different paths").* The
+launcher's RANDOM-SEED CHECKBOX silently overrides the seed spinbox at
+launch (randi()%1000000; the checkbox defaults CHECKED) — the operator's
+"seed-42 reruns" were different seeds by design, invisibly.  Headless
+bit-determinism was never in question.  Fix: the HUD now always shows the
+RESOLVED seed; uncheck 'random' to pin the spinbox value.
+
+*Touchdown forensics (seed 42, every plant edge).* All four legs land
+with statistically IDENTICAL knee extension (front pair −0.86, rear
+−0.82) — the posture scaffolds are leg-uniform, so the rear literally
+copies the front, as the operator hypothesized.  But the copy is not
+itself fatal: the WORKING rear leg is the body's most active (74
+touchdowns, deepest stride).  The FAILING leg's landings are the
+signature: femur LIFTED (hip2 −0.78 vs ≈−0.2 elsewhere), shank shallow
+(knee −0.63), stroke pre-spent (hip1 −0.20) — ghost touches, unloaded,
+no push-travel left ("comes down without enough knee to gain traction",
+measured).  The two operator observations are ONE LOOP: unloaded landings
+→ zero propulsive credit → no sensorimotor contingency → oscillation
+decays → stance capture → worse landings.
+
+*The lever (already built, was OFF): propulsion_balance_gain 0.3.*
+Population n=6 (disease absent in those seeds): behaviorally NEUTRAL —
+ties control everywhere (net 6.94 vs 7.24, straight 0.56=0.56, cv
+0.77≈0.75).  DISEASED SEED 42 head-to-head (12k): **rl dead-duty
+0.30 → 0.00 — the attractor eliminated**; rl lifts 66→112; rl hip1 clip
+0.50→0.24; net_z 6.54→7.58 (+16%).  **Verdict: WORKING (mechanism test
+loud + population no-harm) — the profile of a robustness lever: fixes the
+failure where present, free where absent.  n=20 powering launched;
+promotion gate = operator eye (slide prop_bal live at a pinned seed 42
+and watch the blue leg wake).  Re-use context: if n=20 confirms, this is
+the anti-fragility candidate for the stack — and the rear-only touchdown
+posture idea stays pocketed for whatever residual planting deficit
+survives prop_bal.**
+
+**2026-08-14 — PROP_BAL n=20: severity HALVED, incidence UNCHANGED — a
+half-fix that localizes the attractor's second door.** Population (n=20,
+0.3 vs the promoted stack): aggregates TIE (net 6.48±1.80 vs 6.41±1.86,
+cv 0.81≈0.80, falls 2=2).  The attractor metric tells the real story:
+seized seeds (worst-leg dead-duty > 0.05) are **5/20 IN BOTH ARMS**
+(largely the same seeds — 16/17/18/19 both), but severity halves: mean
+worst-duty 0.118 → 0.060, and the catastrophic captures are gone (ctrl
+worst 0.853/0.644/0.534 → pb worst 0.325/0.288/0.272; seed 42 rescued
+outright, 0.30 → 0.00).  **Verdict: PARTIAL — per-leg propulsive credit
+shortens captures (recovery door opened) but does not prevent entry.  The
+entry door is the LANDING GEOMETRY (the touchdown forensics: femur-lifted
+ghost touches earn no load regardless of stroke boost — a boosted stroke
+cannot push through a foot that never loads).  Re-use context / next arm:
+close the entry door with the landing-posture family — the operator's
+rear-gated touchdown idea, or the recorded hip2 descent press at LOW dose
+— measured ON TOP of prop_bal (one lever at a time: pb becomes the
+baseline if adopted), judged on INCIDENCE (seized-seeds count) while
+holding the aggregate ties.  Promotion of prop_bal alone = operator's
+call: severity-halving with zero aggregate cost is a real robustness
+gain, but it is half a fix.**
+
+**2026-08-14 — THE REAR LANDING SEQUENCE (operator-directed, arena
+protocol): the composite produces the first LOADED rear touchdowns —
+signal-grade WORKING at 0.5/0.5, UI review pending.** Operator spec:
+prop_bal unpromoted (effect real but negligible by eye; ledger stands at
+PARTIAL); the rear failure is SEQUENCING — hip2+knee lift high through
+swing, then hip1/hip2/knee all move AT ONCE on the stroke; needed: DROP
+and load first, THEN hip1 sweeps with slight knee extension.  All
+measurement moved to the OPEN ARENA (fast straight outward travel).
+
+*Build (rear pair only, both gain-0):* `rear_land_gain` — during descent,
+hip2 press + knee SERVO to `rear_knee_plant` (+0.2, slightly flexed for
+traction; closed-loop, because the open-loop descent extension was the
+measured regression = the 'everything at once' failure itself);
+`rear_push_ext` — while PLANTED and the hip1 actually sweeps, knee
+extension scaled by the leg's own running |Δhip1| (structurally cannot
+fire before the plant — sequence enforced by gates, not schedule).
+
+*Arena table (n=6 × 12k, seeds 1–6, control = promoted stack):*
+- CTRL: net_disp 10.20±1.70, straight 0.64, falls 0, cv 0.70, rear-TD
+  hip2 −0.05.
+- A (drop 0.5): 10.74±0.87 (σ HALVED), straight 0.68, cv 0.88 (rhythm
+  pays), TD hip2 −0.17.
+- B (push 0.5): ties control, cleanest amp (meanworst 0.001), falls
+  spike (4, one seed 3).
+- **A+B (0.5/0.5): net_disp 11.07 (+9%), straight 0.67, and the TARGET
+  SIGNATURE — rear touchdowns arrive with hip2 POSITIVE (+0.02): the
+  femur lands pressed/loaded for the first time in the campaign.**
+  Costs: cv 0.85, 2 unstable seeds (falls 2+1), σ 2.52.
+- HALF DOSES (0.25): the signature VANISHES (hip2 −0.09/−0.15) and the
+  gains with it; A-half destabilizes (one seed 3.90/0.20/4 falls).  The
+  dose response is not an inverted-U here — full dose is the point.
+
+**Verdict: WORKING at signal grade — the operator's sequencing model is
+CONFIRMED CAUSAL (only the drop+push composite loads the landings, and
+loading them buys transport).  NOT promoted: n=6, rhythm cost real, two
+unstable seeds.  Next: the operator's eye at rear_land 0.5 + rear_push
+0.5 (panel sliders live; arena; watch the rear sequence itself), then
+n=20 on the composite if the eye approves.  Re-use context: the rhythm
+cost may be the drop-press's cadence drag (the 2026-08-10 pattern);
+a phase-shaped press (strong only in the descent's back half) is the
+recorded refinement if cv must come back before promotion.**
+
+**2026-08-17 — REAR LANDING SEQUENCE at the operator's operating point
+(0.5/0.2/0.5), n=20 ARENA: the signature and the transport HOLD AT POWER;
+the cost is an instability tail — which is PART IV's opening argument.**
+Baked as named scaffold values (operator hand-found).  vs trio-zeroed
+control, same build: **net_disp 8.93±2.66 → 10.23±2.17 (+15%)**, straight
+0.61 → 0.65, **rear-TD hip2 −0.106 → +0.003 (the loaded-landing signature
+confirmed at n=20, 228 touchdowns)**, seizure severity nearly halved
+(meanworst 0.107 → 0.061; incidence 5/20 → 4/20).  The tail: falls 1 → 8,
+concentrated in 3/20 seeds (s12: 4 falls + tilt 0.40; s3: tilt 0.98), and
+cv 0.77 → 0.87.  **Verdict: the CONCEPT IS PROMOTED (operator eye + n=20
+transport + the causal landing signature); the FIXED POINT pays a ~3/20
+instability tax and a cadence cost.  That tax is precisely the case for
+PART IV: a fixed gain vector cannot be right for every seed's attractor —
+the GainEvolver's per-lifetime search, seeded at this exact point with the
+viability guard (falls/tilt) in its criterion, is the designed answer to
+this tail.  The PART III campaign log closes here; the frontier moves to
+`adaptive_gains_substrate_plan.md`.**
+
+*B DESIGN (IN_FLIGHT, starts after A's verdicts): the SURPRISE VOCABULARY.*
+The audit answer again — the pieces exist, hand-roll only scorers: EPM
+already implements descending-prediction subtraction (`gng_input =
+encode(obs) − predicted_latent`, unit-tested), and `DescendingPredictor`
+(AR(1): W·context + b per target, online SGD) has existed since Phase 1
+with no motor-path consumer.  Wiring: `body_pose_pc` EPM over
+`reality.proprio.joints` (subtract_descending_prediction=true) + a
+DescendingPredictor whose CONTEXT is the CPG clock [cosφ,sinφ] (§0 rule 3
+— phase is the load-bearing context), so the subtracted term is the
+stride's phase-expected pose and the GNG tiles DEVIATION-FROM-RHYTHM — the
+corrections the operator sees as h2 noise become the densest, most
+predictable token regions instead of invisible residue.  Shadow
+MotorPlanner over the pc vocabulary beside the bodypose control (the twin
+protocol).  Gates, M0.d-style: vocabulary self-limits; self-transition
+mass falls materially below 0.55; per-joint bands extend below k=8 or past
+k=34; h2 tracks earn FIRST bands; decode sharpens (fade-1 embodied
+playback is the operator's blur test).  Fail ⇒ context arm swap (own-latent
+AR(1) vs clock) before any verdict on the predictive-coding path itself.

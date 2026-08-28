@@ -24,6 +24,13 @@ const _MODULE_ID: String = "motor_epm"
 const _SLIDERS: Array = [
 	# primary "by eye" levers (legs weak -> motor_gain; jerky -> ctrl_lr / noise)
 	{"key": "motor_gain",        "label": "motor_gain  (leg strength)", "min": 0.0,  "max": 5.0,  "step": 0.1},
+	# 2026-08-14 — the planting family's decision knob (operator's-eye gate):
+	# 0 = off; the reach fires only on swings that outlive the leg's own average.
+	{"key": "swing_overdue_knee", "label": "overdue_knee (planting reach)", "min": 0.0, "max": 1.5, "step": 0.05},
+	# 2026-08-14 — REAR LANDING SEQUENCE (operator: drop first, then push):
+	{"key": "rear_land_gain",  "label": "rear_land (drop-first, rear only)", "min": 0.0, "max": 1.5, "step": 0.05},
+	{"key": "rear_knee_plant", "label": "rear_knee_plant (landing angle)",  "min": -0.5, "max": 0.8, "step": 0.05},
+	{"key": "rear_push_ext",   "label": "rear_push (stroke knee-extend)",   "min": 0.0, "max": 1.5, "step": 0.05},
 	# 2026-08-02 — ceiling raised 0.10 -> 0.30.  The old max sat exactly at the BOTTOM of
 	# the range that works, so this lever could not be found by eye.  Measured on the
 	# pure-HK base at 20k, n=4: steps 41 -> 141 -> 163 -> 226 and net_disp 0.56 -> 0.68
@@ -128,6 +135,10 @@ func _ready() -> void:
 	offset_right = -12.0
 	offset_bottom = -12.0
 	mouse_filter = Control.MOUSE_FILTER_PASS
+	# 2026-08-12 (operator QoL) — boots HIDDEN: the panel is a tuning bench, not
+	# a monitor, and even collapsed its full-rect Control shadows the top-right
+	# corner.  [M] unhides it (picrawler_body KEY_M handler).
+	visible = false
 
 	var root := PanelContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
