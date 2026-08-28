@@ -384,8 +384,9 @@ const FAIL_HEIGHT: float = 0.025     # below this = collapsed
 # motor_authority_scale = (saver_max_transmissible_torque / MAX_SERVO_TORQUE).
 # Joseph 2026-05-31 brainstorm: servo savers are the cheap real-hardware
 # compliance retrofit.  This knob is the sim-side counterpart for sim2real
-# matching.  See `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md`
-# Stage 3.E.
+# matching.  See `docs/servo_dynamics.md` section 4(d) for the as-built model
+# and the sim2real formula.  (The RL-era `picrawler_diagnostic_calibration_plan.md`
+# Stage 3.E did not survive the repo split; its content lives there now.)
 @export var motor_authority_scale: float = 1.0
 
 # 2026-06-01 — Stage 3.E++ motor-internal damping tuner.  Multiplies SERVO_KD
@@ -696,9 +697,10 @@ func _set_knee_widening_enabled(value: bool) -> void:
 # on fire, the joint's target angle moves by `bri_impulse_per_spike`; each
 # tick the integrated offset decays toward rest by `bri_friction_per_tick`.
 # Smoothness emerges from the friction-integration of many discrete spikes,
-# not from smoothness of the brain's commands. See
-# `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md` Stage 3.D
-# and `docs/storytelling/glossary.md` "Bernoulli-Impulse Actuation".
+# not from smoothness of the brain's commands. See `docs/glossary.md`
+# "Bernoulli-Impulse Actuation".  (The RL-era
+# `picrawler_diagnostic_calibration_plan.md` Stage 3.D did not survive the repo
+# split; the glossary entry carries the model and its provenance.)
 #
 # Default `actuation_backend = "discrete"` is bit-identical to pre-3.D.
 @export_enum("discrete", "bernoulli_impulse") var actuation_backend: String = "discrete"
@@ -2963,12 +2965,15 @@ func _ready() -> void:
 	# 2026-06-01 Stage 3.A — per-servo torque proprio. Normalized to [-1, 1]
 	# against MAX_SERVO_TORQUE. 12-D vector ordered hip1[0..3], hip2[0..3],
 	# knee[0..3] matching the existing `Joints` topic convention. Published
-	# every tick by default; no consumer wired until Stage 3.A.2 adds a
-	# CruseCoordinator load_topic gate. With no subscribers the channel has
-	# zero behavioral effect (bit-identical to pre-3.A runs). Per
-	# `docs/plans-and-designs/picrawler_diagnostic_calibration_plan.md`
-	# Stage 3.A: enables Cruse Walknet Rule 5 (Coactivation — load extends
-	# stance), and a future opt-in epm_joint_torque (Stage 3.A.3).
+	# every tick by default. With no subscribers the channel has zero
+	# behavioral effect (bit-identical to pre-3.A runs).
+	# ⚠ The RL-era plan that motivated this (`picrawler_diagnostic_calibration_plan.md`
+	# Stage 3.A) did not survive the repo split, AND its rationale has since been
+	# refuted twice over — see `docs/reports/picrawler_lever_ledger.md`:
+	#   · Cruse/Walknet Rule 5 was killed in the regime where its premise applied
+	#     (a second coordination controller firing out of phase with the emergent gait).
+	#   · this channel is NOT a load proxy — see the ⚠ in its description below.
+	# Kept as an instrument. Do not wire a consumer on the Stage 3.A rationale.
 	brain.register_source("JointTorque", "reality.proprio.joint_torque",
 		"float32[12]: per-servo PD COMMAND BUDGET (hip1×4, hip2×4, knee×4), normalized to [-1,1] vs MAX_SERVO_TORQUE. ⚠ NOT applied torque and NOT a load proxy despite its original description: it sets the motor's max-impulse cap, and with Kp=20/Kd=8 it is DOMINATED BY THE -Kd*omega damping term (measured corr with joint motion -0.46..-0.56), i.e. it is mostly a negated velocity copy. Use JointLoad for load.", true)
 	brain.register_source("FootLoad", "reality.proprio.foot_load",

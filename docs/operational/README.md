@@ -10,6 +10,7 @@ and reference material behind it.
 | Doc | Era | Why it's here |
 |---|---|---|
 | [`picrawler_geometry.md`](picrawler_geometry.md) | **current** | CAD/STEP-derived body geometry — chassis envelope, hip-attach pattern, segment lengths. Physical ground truth; doesn't go stale with the software. The reference for sim-to-real fidelity |
+| [`picrawler_sensor_wiring_and_bom.md`](picrawler_sensor_wiring_and_bom.md) | **current** | The bench reference for the 2026-08-27 sensor addition — BOM, HAT pinout, power path, per-device wiring and bring-up order for the IMU / INA219 / ToF / foot FSRs. Rationale for each sensor lives in the port doc; this is the parts-and-wires half |
 | [`../servo_dynamics.md`](../servo_dynamics.md) | **current** | The servo model, cited directly from `picrawler_body.gd`. Lives one level up because the code references that path |
 | [`aliveness_metric_protocol.md`](aliveness_metric_protocol.md) | RL-era doc, **OPEN question** | Distance metrics can reward dead drift and select *against* closed-loop adaptation. The current metric set is distance-flavoured in exactly the way this warns about — tracked as open in [`../reports/picrawler_lever_ledger.md`](../reports/picrawler_lever_ledger.md) §7 |
 | [`picrawler_curriculum_protocol.md`](picrawler_curriculum_protocol.md) | RL-era machinery, **live discipline** | The curriculum/trainer machinery is disowned, but its **contamination discipline** is permanent: how one careless launch silently invalidates weeks of paired-seed results |
