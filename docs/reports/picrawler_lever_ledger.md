@@ -4600,3 +4600,54 @@ accrued at OTHER vectors along its path), and cad's 1.84-J search run froze to 1
 9× the falls. Never promote a point from its searching-run statistics; freeze it first.
 The measured body remains fall-heavy at every point yet measured (~1.2/1000 ticks) —
 its benchmark says so on its face.
+
+### ★★ 2026-08-28 — G2/G3 RUN, AND THE REACH GATE WAS MEASURING THE WRONG QUANTITY
+
+**Verdict: measurement outcomes, not lever verdicts.** G2 `WORKING` (measured body reproduces
+the operator's crouch), G3 `REGRESSION`-class on *limits* (2.8° short of a 180° fold), and the
+"feet plant beyond reach" claim `TAUTOLOGY`-adjacent — it compared two different quantities.
+Context: frozen native operating points (`native_measured` / `native_cad`), arena, chassis
+colliding, n=3 × 6000 ticks. Port-doc Phase 1a table and geometry doc updated in place.
+
+**★ 1. G2 PASSES ON THE BUILT BODY, AND ONLY ON IT.** `_report_reach_gates()` (new, print-only,
+in every geometry receipt) evaluates the operator's crouch — femur straight up, 180° fold —
+through `_fk_leg`: measured **toe −28.5 mm rel hip2, belly clearance 9.5 mm** against the
+measured −28 / 9; cad −21.9 / 7.9. The limit box clips the pose (needs hip2 −90° vs ±80°,
+knee +100° vs +97°) but the admissible corner still gives −28.6 mm — the shortfalls cancel.
+
+**★ 2. G3 FAILS BY 2.8°, AS A LIMIT, AND CANNOT BE TESTED AS A COLLISION.** Max fold under is
+177.2° at `KNEE_LIMIT_HIGH` +1.70 rad; 180° needs +1.745. Leg segments mask `_LAYER_WORLD`
+only, so leg-on-leg interpenetration is not modelled anywhere — G3 is geometric by
+construction. Sim also admits 63° of fold *above* the femur line, which hardware presumably
+lacks; Phase 2's hard-stop sweep is where both get settled.
+
+**★ 3. `foot_r` IS CHASSIS-CENTRE → TIBIA MIDPOINT.** `arenaavg.py` reads `foot_xz`, the lower
+capsule's origin in chassis frame; reach is hip1 → toe. "170 mm vs 166 mm reach" therefore
+never tested reach (the sim cannot exceed it). `scripts_tools/reach_check.py` computes the
+gate's own quantity, `ext = |hip1→toe| / reach`, from the achieved hinge angles with a planar
+model validated to 0.1 mm against the FK spot table on both bodies:
+
+| body | ext mean | p95 | planted > 0.95 | fold | tibia off vertical | chassis y | legacy foot_r |
+|---|---|---|---|---|---|---|---|
+| measured | 0.935 ± 0.006 | 0.993 | 52 % | 40.8° | 47.6° | 60.7 mm | 157.5 mm |
+| cad | 0.955 ± 0.000 | 0.983 | 68 % | 37.2° | 53.5° | 54.2 mm | 169.4 mm |
+
+The straight-legged finding **stands** — restated as "plants at 93–96 % of reach, half to two
+thirds of stance past 95 %, the knee at its singularity where its torque has no radial
+authority." Proposed hardware gate: p95 `ext` ≤ 0.90.
+
+**★ 4. HINGE ZERO IS THE CONSTRUCTION POSE, NOT A STRAIGHT LEG.** Every segment is built with
+an identity basis and `_relative_angle_world_axis` reads rotation from that pose, so knee 0 =
+tibia already dropped 80°; negative knee straightens, positive folds under; negative hip2
+raises the femur. Two consequences: `arenaavg`'s `tib_off = |hip2 + knee + π/2|` assumes
+0 = straight and **under-reads the sprawl by ~30°** (kept unchanged for continuity, annotated
+in place); and **`KNEE_REST = −1.6` is a nearly straight leg** (fold −12°, toe at hip height)
+— the brain's u = 0 posture is the sprawl attractor, and every standing posture is a held
+offset from it. To verify in the `[C]` calibration panel before anything is built on it.
+Re-use context: the sprawl family (Phase 3) should start from this, not from a bias lever.
+
+**★ 5. SILENT CONFOUND (§3.2 #7), CAUGHT BY THE RECEIPT.** `metadata.body` is honoured only from
+the UI launcher; a headless run of `native_measured` loaded **`cad`** until
+`OGMA_PICRAWLER_BODY=measured` was set. `strido_twobody.py` already passes it per arm and its
+logs carry the receipt, so the E-stage results are unaffected — but any ad-hoc headless
+"measured" number without a receipt line saying `'measured'` is a cad number.

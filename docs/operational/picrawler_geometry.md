@@ -307,6 +307,19 @@ placements are not merely inefficient on the real robot — a large share of the
 **geometrically unreachable**: the leg arrives straight and still short, and the foot lands
 early or not at all.
 
+**⚠ Correction 2026-08-28 — the 170 mm was the wrong quantity.** `arenaavg.py`'s `foot_r` is
+the horizontal distance from the **chassis centre to the tibia midpoint** (`foot_xz`), whereas
+reach is **hip1 → toe**; the sim can never exceed reach by construction, so "170 vs 166" was
+never a reach test. The honest instrument is `scripts_tools/reach_check.py` (extension
+fraction `|hip1→toe| / reach` from the achieved hinge angles): the frozen native gaits plant at
+**0.935 (measured) / 0.955 (cad) of full reach, p95 0.99**, with 52 % / 68 % of planted frames
+past 0.95. Same conclusion — straight-legged, at the singularity — restated on the right axis.
+Two conventions this exposed, both now printed in every run's `FK spot table`: hinge 0 is the
+**construction pose** (tibia already dropped 80°), not a straight leg, so `arenaavg`'s
+`tib_off` under-reads the sprawl by ~30° (true tibia-off-vertical ≈ 48–54°); and
+`KNEE_REST = −1.6` is a **nearly straight leg** (fold −12°, toe at hip height) — the brain's
+u = 0 knee posture *is* the sprawl. Verify the latter in the `[C]` calibration panel.
+
 This is the single most consequential item on this page for the port. It is also *not* a new
 problem the correction created — the sprawl finding already identified full-extension planting
 as a pathology, with `scrub` 0.100 against `fwd_v` 0.050 (the body slides sideways twice as fast

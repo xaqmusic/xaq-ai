@@ -4719,6 +4719,89 @@ func _report_geometry() -> void:
 	print("  belly-up reset = chassis_y < %.3f m  (rests on top surface %+.1f mm rel origin)"
 		% [_chassis_top_local + (auto_reset_max_height - _LEGACY_INVERTED_REST_H),
 		   _chassis_top_local * 1000.0])
+	_report_reach_gates(origin_y + belly_local - hip2_y)
+
+
+# G2 / G3 evidence by FK sweep (2026-08-28).  Print-only: it reads the rest
+# transforms through _fk_leg() and touches no state, so the build stays gain-0.
+# Leg 0 only — all four legs share lengths, limits and drop angle.
+#   G2  crouch reach.  The operator's 9 mm belly-clearance posture is the toe
+#       28 mm BELOW the hip2 axis.  Report the lowest toe the (hip2, knee)
+#       limit box admits, and the posture that reaches it.
+#   G3  knee fold.  The real knee folds a full 180 deg (tibia parallel to the
+#       femur).  Report the largest fold the limit box admits, in each
+#       direction.  Leg segments sit on _LAYER_BODY with a _LAYER_WORLD-only
+#       mask, so leg-on-leg contact is not modelled: interpenetration cannot
+#       be tested here and the gate is geometric only.
+# Angles are HINGE angles (0 = construction pose) — the frame the trace, the
+# servo-envelope table and _fk_leg's other callers all use.  Fold is signed:
+# positive = tibia swung to the under side of the femur (the standing side).
+func _report_reach_gates(belly_rel_hip2: float) -> void:
+	if _toe_off_c.size() < 4 or _hip2_world_c.size() < 4 or _hip1_world_c.size() < 4:
+		return
+	var lift: Vector3 = Vector3(0, _suspend_lift_y, 0)
+	var hip1_w: Vector3 = _hip1_world_c[0] + lift
+	var hip2_w: Vector3 = _hip2_world_c[0] + lift
+	var heading: Vector3 = NEUTRAL_HEADINGS[0]
+	var reach: float = L1 + L2 + L3
+	# G2 — the operator's crouch: femur straight UP (hip2 = -90 deg; negative
+	# hip2 raises the femur), tibia straight DOWN from the knee (a 180 deg fold).
+	# Toe height is L2 - L3 by construction; the check is that the built body
+	# reproduces the measured -28 mm, and whether the limit box admits the pose.
+	# _fk_leg does not clamp, so the ideal pose is evaluated directly; the
+	# admissible corner is the nearest pose inside the limits.
+	var k180: float = PI + LOWER_LEG_DROP_ANGLE          # hinge angle of a 180 deg fold
+	var ideal: Array = _toe_pose(0, -PI * 0.5, k180, hip2_w)
+	var corner: Array = _toe_pose(0, -HIP2_LIMIT, min(k180, KNEE_LIMIT_HIGH), hip2_w)
+	var iy: float = ideal[0].y - hip2_w.y
+	var cy: float = corner[0].y - hip2_w.y
+	print("  G2 crouch      = femur up + 180 fold: toe %+.1f mm rel hip2 -> belly clearance %.1f mm  [operator: -28 / 9 mm]  %s"
+		% [iy * 1000.0, (belly_rel_hip2 - iy) * 1000.0, "PASS" if abs(iy + 0.028) <= 0.001 else "FAIL"])
+	print("     limit box clips it: needs hip2 -90 (limit %+.0f) and knee %+.0f (limit %+.0f); at the admissible corner toe %+.1f mm, fold %.0f, clearance %.1f mm"
+		% [-rad_to_deg(HIP2_LIMIT), rad_to_deg(k180), rad_to_deg(KNEE_LIMIT_HIGH),
+		   cy * 1000.0, corner[1], (belly_rel_hip2 - cy) * 1000.0])
+	# G3 — sweep the knee limit range (fold is independent of hip2).
+	var fold_under: float = -INF; var fu_t3: float = 0.0
+	var fold_over: float = -INF;  var fo_t3: float = 0.0
+	var step: float = deg_to_rad(0.5)
+	var t3: float = KNEE_LIMIT_LOW
+	while t3 <= KNEE_LIMIT_HIGH + 1e-6:
+		var fold: float = _toe_pose(0, 0.0, t3, hip2_w)[1]
+		if fold >= 0.0 and fold > fold_under:
+			fold_under = fold; fu_t3 = t3
+		if fold < 0.0 and -fold > fold_over:
+			fold_over = -fold; fo_t3 = t3
+		t3 += step
+	var brain_max: float = _toe_pose(0, 0.0, KNEE_REST + KNEE_RANGE_FOLD, hip2_w)[1]
+	print("  G3 knee fold   = max %.1f deg under at knee %+.2f rad (brain can command %.1f); max %.0f deg over at knee %+.2f  [need 180 under]  %s"
+		% [fold_under, fu_t3, brain_max, fold_over, fo_t3, "PASS" if fold_under >= 179.0 else "FAIL"])
+	print("     leg self-collision: not modelled (segments mask _LAYER_WORLD only) — fold is a geometric check")
+	# Spot poses, so an offline planar model can be checked against THIS FK
+	# rather than reasoned from comments.  (r = along heading from hip1, y = up)
+	var hr: float = (hip2_w - hip1_w).dot(heading)
+	print("  FK spot table  (rel hip1; r along heading, y up; mm)  hip2 anchor r %+.1f y %+.1f  reach %.1f"
+		% [hr * 1000.0, (hip2_w.y - hip1_w.y) * 1000.0, reach * 1000.0])
+	for pr in [[0.0, 0.0], [0.0, KNEE_REST], [0.5, KNEE_REST], [-0.5, KNEE_REST],
+			   [0.0, KNEE_LIMIT_LOW], [0.0, KNEE_LIMIT_HIGH], [HIP2_LIMIT, KNEE_LIMIT_LOW]]:
+		var q: Array = _toe_pose(0, pr[0], pr[1], hip2_w)
+		var toe: Vector3 = q[0]
+		var d: Vector3 = toe - hip1_w
+		print("     hip2 %+.2f knee %+.2f -> toe r %+.1f y %+.1f  |hip1->toe| %.1f (%.2f reach)  fold %+.0f"
+			% [pr[0], pr[1], d.dot(heading) * 1000.0, d.y * 1000.0, d.length() * 1000.0,
+			   d.length() / reach, q[1]])
+
+# Toe world position + signed knee fold for leg i at hinge angles (0, t2, t3).
+# fold = angle between femur (hip2->knee) and tibia (knee->toe): 0 = straight,
+# 180 = tibia parallel to the femur; sign from the knee axis (positive = under).
+func _toe_pose(i: int, t2: float, t3: float, hip2_w: Vector3) -> Array:
+	var fk: Array = _fk_leg(i, 0.0, t2, t3)
+	var toe: Vector3 = fk[2] * _toe_off_c[i]
+	var knee: Vector3 = fk[2].origin * 2.0 - toe
+	var femur: Vector3 = (knee - hip2_w).normalized()
+	var tibia: Vector3 = (toe - knee).normalized()
+	var fold: float = rad_to_deg(acos(clamp(femur.dot(tibia), -1.0, 1.0)))
+	var sgn: float = 1.0 if femur.cross(tibia).dot(_knee_axes[i]) >= 0.0 else -1.0
+	return [toe, fold * sgn]
 
 func _build_leg(leg_index: int) -> void:
 	var heading: Vector3 = NEUTRAL_HEADINGS[leg_index]

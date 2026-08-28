@@ -162,8 +162,8 @@ Make the body a data file with no behavioral change. Gain-0-guarded and provable
 |---|---|
 | **G1 CoG** | ✅ **PASS — +15.0 mm rel hip2 exactly** (world y 0.0903) |
 | **G2 belly offset** | ✅ −19.0 mm rel hip2 exactly; 56.3 mm above floor at spawn |
-| **G2 crouch reach** | ⬜ **not yet checked** — needs FK to reach toe −28 mm (the 9 mm posture) |
-| **G3 knee 180° fold** | ⬜ **not yet checked** — receipt confirms the *commanded* span is still 241°, the known fiction (limits deliberately unchanged; Phase 2) |
+| **G2 crouch reach** | ✅ **PASS 2026-08-28** — femur straight up + 180° fold puts the toe at **−28.5 mm rel hip2 → 9.5 mm belly clearance**, reproducing the operator's −28 / 9 mm (cad gives −21.9 / 7.9, as it should). The limit box *clips the pose* — it needs hip2 −90° (limit ±80°) and knee +100° (limit +97°) — but at the admissible corner the toe is still −28.6 mm: the two shortfalls compensate. Printed by `_report_reach_gates()` in every receipt |
+| **G3 knee 180° fold** | ❌ **FAIL by 2.8° (limits, not geometry)** — max fold under = **177.2°** at `KNEE_LIMIT_HIGH` +1.70 rad; 180° needs +1.745 rad. The brain's commandable max is 171.7°. ⚠ Leg segments carry a `_LAYER_WORLD`-only mask, so **leg-on-leg contact is not modelled** — the fold is a geometric check only. Sim also admits 63° of "over" fold (tibia above the femur line) that hardware presumably lacks; Phase 2's hard-stop sweep decides |
 | **G4 gain-0** | ✅ PASS, re-verified 4× as the code changed |
 
 ⚠ **The +15 mm turned out to be the WHOLE-ROBOT CoG, not the chassis's** — the operator measured
@@ -360,8 +360,24 @@ regression — belly-up being a promoted invariant.
 +3.6 → **+13.5 mm**, and some current foot placements become geometrically unreachable. The
 improved ratio and the shortened reach pull opposite ways; only the A/B decides.
 
-**Hardware gate when this resumes:** `foot_r` must come inside **156.5 mm** with margin. That is
-the concrete pass/fail for "safe to put on hardware."
+**Hardware gate when this resumes — restated 2026-08-28.** The gate was written as *"`foot_r`
+inside 156.5 mm"*, but `arenaavg.py`'s `foot_r` is chassis-centre → **tibia midpoint**, not
+hip1 → toe, so it never measured reach. The gate's own quantity is the **extension fraction**
+`ext = |hip1→toe| / (L1+L2+L3)`, computed by `scripts_tools/reach_check.py` from the achieved
+hinge angles (planar model validated to 0.1 mm against `_fk_leg` on both bodies). Measured on
+the frozen native operating points, arena, chassis colliding, n=3 × 6000:
+
+| body | ext mean | ext p95 | planted frames > 0.95 | tibia off vertical | chassis y |
+|---|---|---|---|---|---|
+| measured | **0.935 ± 0.006** | **0.993** | **52 %** | 47.6° | 60.7 mm |
+| cad | 0.955 ± 0.000 | 0.983 | 68 % | 53.5° | 54.2 mm |
+
+Both bodies plant at 93–96 % of full reach, and half to two-thirds of planted frames are past
+95 % — the knee is locked straight at its kinematic singularity, where knee torque has no
+radial authority and any placement error lands the toe short. The "beyond reach" comparison
+was the wrong pair of numbers; the *finding* (straight-legged planting) stands, now on the
+right instrument. Proposed pass/fail: **p95 `ext` ≤ 0.90** (operator to confirm the margin).
+Sprawl and the port remain one work item.
 
 ## Phase 4 — Hardware host · recorded, not scheduled
 
