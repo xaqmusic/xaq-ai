@@ -124,7 +124,7 @@ Not subscribed by MotorEPMv2 in this config (params default empty): upright_topi
 | events.hit/miss | reward machinery keyed to god's-eye chassis height | only miss consumed, and only as a reset-mask (disruption marker), not a gradient |
 | reality.proprio.ground_clearance, foot_load, joint_load, feet_y_body, feet_y_ground, feet_y_gravity_cmd_imu | legal egocentric (per doc) | ground_clearance, foot_load, feet_y_gravity_cmd_imu consumed; rest unconsumed |
 
-Key file paths: `/home/xaqmusic/xaq-ai/godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2__supportepm.json`, `/home/xaqmusic/xaq-ai/cpp_core/src/ogma/modules/MotorEPMv2.cpp` (subs at 925–1045, action publish 3862, event handler 1068), `/home/xaqmusic/xaq-ai/cpp_core/include/ogma/modules/MotorEPMv2.hpp` (non-empty topic defaults at 441, 935, 954, 978, 1048, 1163–1164 — the reason distress/lateral are subscribed without appearing in the config), `/home/xaqmusic/xaq-ai/cpp_core/src/ogma/modules/EPM.cpp` (output topic build 203–206, prediction sub 332–337), `/home/xaqmusic/xaq-ai/godot_host/project/scripts/picrawler_body.gd` (register block 2576–2725, publish block 5468–6203), `/home/xaqmusic/xaq-ai/godot_host/src/OgmaBrain.cpp` (topic mapping 440–484).
+Key file paths: `godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2__supportepm.json`, `cpp_core/src/ogma/modules/MotorEPMv2.cpp` (subs at 925–1045, action publish 3862, event handler 1068), `cpp_core/include/ogma/modules/MotorEPMv2.hpp` (non-empty topic defaults at 441, 935, 954, 978, 1048, 1163–1164 — the reason distress/lateral are subscribed without appearing in the config), `cpp_core/src/ogma/modules/EPM.cpp` (output topic build 203–206, prediction sub 332–337), `godot_host/project/scripts/picrawler_body.gd` (register block 2576–2725, publish block 5468–6203), `godot_host/src/OgmaBrain.cpp` (topic mapping 440–484).
 
 Notable for the diagram: the closed motor loop is body joints → `reality.proprio.joints` → bridge → `reality.motor_leg.*` → {MotorEPMv2, KeyframeGait, BodyRhythmTracker, 4× EPM} → MotorEPMv2 → `action.*` → body servos (+ efference copy back into the bridge). The rhythm loop is `reality.motor_leg.*` → BodyRhythmTracker → `rhythm.body.gait` → CPG (entrain) → `rhythm.cpg.body` → {KeyframeGait bins, MotorEPMv2 phase embedding} → `objective.posture.*` → MotorEPMv2. Both EPM groups are pure observers with zero downstream consumers.
 
@@ -138,7 +138,7 @@ I have everything needed. Here is the structured report.
 
 # MotorEPMv2 MECHANISM INVENTORY — deployed config `the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2__supportepm.json`
 
-Sources: `/home/xaqmusic/xaq-ai/cpp_core/src/ogma/modules/MotorEPMv2.cpp` (param table lines 111–578, tick lines 2265–3910), `/home/xaqmusic/xaq-ai/cpp_core/include/ogma/modules/MotorEPMv2.hpp` (member defaults/constants), config lines 86–173.
+Sources: `cpp_core/src/ogma/modules/MotorEPMv2.cpp` (param table lines 111–578, tick lines 2265–3910), `cpp_core/include/ogma/modules/MotorEPMv2.hpp` (member defaults/constants), config lines 86–173.
 
 **Environment facts that drive ON/OFF verdicts** (verified in `godot_host/project/scripts/picrawler_body.gd`):
 - `reality.proprio.tilt` is published ONLY if `publish_tilt` (@export default false, line 2116; config metadata `publish_tilt: false`) → **tilt never arrives**; `tilt_pitch_`/`tilt_roll_` stay 0.
@@ -354,8 +354,8 @@ All reading done. Here is the structured audit report.
 
 # MotorEPMv2 per-tick control-law audit (deployed embed/corridor stack)
 
-**Files:** `/home/xaqmusic/xaq-ai/cpp_core/src/ogma/modules/MotorEPMv2.cpp` (cpp), `/home/xaqmusic/xaq-ai/cpp_core/include/ogma/modules/MotorEPMv2.hpp` (hpp).
-**Config matched:** `/home/xaqmusic/xaq-ai/godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2.json` (exact match to the given params; `__srel05/10` variants differ only by `stance_release_frac`). Relevant non-listed facts from that config: `contact_topic`/`torque_topic`/`intent_topic`/`rhythm_topic` **unset**, `objective_topics=objective.posture.{fl,fr,rl,rr}` (KeyframeGait, gain 0.3), `velocity_objective_topics` **unset** (Cvel never trains), `cpg_phase_topic=rhythm.cpg.body`, `stroke_phase_src` unset (=0 → stroke rides `L.phase`), `phase_joint` unset (=−1 → knee), `swing_hyst_frac` unset (=0 → legacy detector), `height_topic=reality.proprio.ground_clearance` (belly rangefinder), `stroke_signs=[1,−1,1,−1]`, `gait_phase init=[0,π,π,0]`.
+**Files:** `cpp_core/src/ogma/modules/MotorEPMv2.cpp` (cpp), `cpp_core/include/ogma/modules/MotorEPMv2.hpp` (hpp).
+**Config matched:** `godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_imufused__stroke12__gng__bellyset__stancehip2.json` (exact match to the given params; `__srel05/10` variants differ only by `stance_release_frac`). Relevant non-listed facts from that config: `contact_topic`/`torque_topic`/`intent_topic`/`rhythm_topic` **unset**, `objective_topics=objective.posture.{fl,fr,rl,rr}` (KeyframeGait, gain 0.3), `velocity_objective_topics` **unset** (Cvel never trains), `cpg_phase_topic=rhythm.cpg.body`, `stroke_phase_src` unset (=0 → stroke rides `L.phase`), `phase_joint` unset (=−1 → knee), `swing_hyst_frac` unset (=0 → legacy detector), `height_topic=reality.proprio.ground_clearance` (belly rangefinder), `stroke_signs=[1,−1,1,−1]`, `gait_phase init=[0,π,π,0]`.
 
 ---
 
