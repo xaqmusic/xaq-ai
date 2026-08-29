@@ -200,9 +200,11 @@ loud warning when its bind fails, and `hello` reports the engine's pid and the b
 attached to, which the studio shows in its status bar — read it before dragging anything.
 
 **State of tuning.** Gate 1.4× / full 2.0× / γ 0.5 and the octave ladder were set by ear on
-the corridor sim (2026-08-28) and remain the defaults. Everything past that is now a patch,
-and **no tuned patch ships** — `patches/` explains why. That is the open work: the
-mechanism is there, the listening is not done.
+the corridor sim (2026-08-28) and remain the auto-patch defaults. Two hand-tuned patches
+now ship for the corridor / `native_measured` config — see [`patches/`](patches/README.md)
+for what each does and why they differ. Both depart from the defaults in two ways worth
+knowing before tuning your own: quantise off, and `minmax` rather than `median_mad` on the
+routes driven by a slow-drifting `ema_tle`.
 
 **Roadmap, one dimension at a time.**
 1. Neurochem → timbre now has its source (`NeurochemState::diag_lite()`); it wants a patch
