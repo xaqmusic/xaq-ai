@@ -378,6 +378,19 @@ float HomeostaticDrive::current_value(std::string const& channel) const {
 // Snapshot / restore (Phase 6.5.4)
 // ---------------------------------------------------------------------------
 
+// The high-rate payload (xaq_voice).  Overall urgency plus each channel's current error,
+// nested by channel name so a subscriber sees `channels.<name>` without this module
+// fixing an order.  The drives are the body's felt needs — the slowest-moving honest
+// signal the brain produces, and the one worth hearing under everything else.
+nlohmann::json HomeostaticDrive::diag_lite() const {
+    nlohmann::json chans = nlohmann::json::object();
+    for (auto const& c : channels_) chans[c.name] = c.current;
+    return {
+        {"urgency",  urgency_},
+        {"channels", std::move(chans)},
+    };
+}
+
 nlohmann::json HomeostaticDrive::snapshot_state() const {
     nlohmann::json chans = nlohmann::json::array();
     for (auto const& c : channels_) {

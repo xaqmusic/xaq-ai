@@ -4434,8 +4434,12 @@ float MotorEPMv2::interleg_plv_win_support() const {
 float MotorEPMv2::gait_coherence() const {
     // Kuramoto order parameter on the gait-offset-corrected phases:
     // R = |mean_j e^{i(φ_j − P_j)}|.  1 = all legs locked to the gait pattern.
+    // Bound by legs_ rather than n_legs_: the two agree after on_setup(), but this is
+    // reachable from the diag thread before a module is set up (diag_lite), where
+    // n_legs_ carries its configured default and legs_ is still empty.
     float sx = 0.0f, sy = 0.0f; int c = 0;
-    for (int j = 0; j < n_legs_; ++j) {
+    const int nj = std::min<int>(n_legs_, int(legs_.size()));
+    for (int j = 0; j < nj; ++j) {
         if (!legs_[j].initialized) continue;
         float a = legs_[j].phase - (int(gait_phase_.size()) == n_legs_ ? float(gait_phase_[j]) : 0.0f);
         sx += std::cos(a); sy += std::sin(a); ++c;
@@ -4924,16 +4928,42 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
 }
 
+// The high-rate payload (xaq_voice at up to 60 Hz).  Every field is an already-computed
+// member or a fold over the four legs, so this stays O(1) against diag_snapshot()'s ~160
+// keys.  These are chosen to span the body's independent axes rather than to be a subset
+// of the widget's fields: the self-model's own error (motor_tle), how well the legs agree
+// (gait_coherence / couple_R / step_lock), what the body is actually doing (fwd_v,
+// yaw_rate_ema, upright), how well it is doing what it meant to (intent_err, commit_prec),
+// the learned body rhythm (res_freq, res_lock), and the neuromodulators (boredom, interest,
+// hunger, explore_mult).  A sonification wants axes that move independently; a heatmap
+// wants completeness.
+nlohmann::json MotorEPMv2::diag_lite() const {
+    return {
+        {"motor_tle",      tle_ema_mean()},                 // forward-model surprise: the error signal
+        {"gait_coherence", gait_coherence()},               // Kuramoto phase-lock ∈[0,1]
+        {"couple_R",       couple_R_diag_},                 // 1 = legs phase-locked, 0 = incoherent
+        {"step_lock",      step_lock_frac_},                // frac of legs with a locked step clock
+        {"upright",        upright_},                       // ~basis.y.y; drives the homeostat gate
+        {"fwd_v",          fwd_v_},                         // chassis forward velocity
+        {"yaw_rate_ema",   yaw_rate_ema_},                  // the heading-hold's error signal
+        {"chassis_h",      chassis_h_},                     // 1 = target height, ~0 = belly on the ground
+        {"intent_err",     intent_seen_ ? intent_err_norm() : -1.0f},   // -1 = no intent this tick
+        {"commit_prec",    commit_prec_diag_},
+        {"explore_mult",   explore_mult_diag_},
+        {"res_freq",       res_w_},                         // learned fwd_v frequency, rad/tick
+        {"res_lock",       std::sqrt(res_lock_cos_ * res_lock_cos_ + res_lock_sin_ * res_lock_sin_)},
+        {"boredom",        boredom_},                       // sensorimotor predictability
+        {"interest",       interest_},                      // curiosity drive
+        {"hunger",         hunger_},                        // 0 sated → 1 starving
+    };
+}
+
 // Live viz (xaq_inspector MotorEPM widget): the homeokinetic self-model's health
 // (motor-TLE = forward-model surprise, the one working predictive loop), the
 // cognitive drive channels the brain injects (cog_steer differential, cog_thrust
 // common-mode), the body's resulting forward velocity, the curiosity/hunger
 // neuromodulators, and the leg-0 forward self-model A (motor→sensor) so the widget
 // can draw a heatmap of what the body has learned to predict about its own motion.
-nlohmann::json MotorEPMv2::diag_lite() const {
-    return {{"motor_tle", tle_ema_mean()}};
-}
-
 nlohmann::json MotorEPMv2::diag_snapshot() const {
     nlohmann::json j;
     j["n_legs"]      = n_legs_;

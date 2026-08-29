@@ -324,6 +324,12 @@ int GradientEPM::baked_count() const {
     int n = 0; for (auto const& nd : nodes_) if (nd.baked) ++n; return n;
 }
 
+// This module's diag_snapshot() is already seven flat scalars — nothing in it grows with
+// run time — so the high-rate payload is the same payload.  Without this override the
+// module would publish `{}` to a "lite" subscriber while still matching xaq_voice's
+// EPM-type filter, which is a silent mute rather than an error.
+nlohmann::json GradientEPM::diag_lite() const { return diag_snapshot(); }
+
 nlohmann::json GradientEPM::diag_snapshot() const {
     return nlohmann::json{
         {"nodes", int(nodes_.size())},

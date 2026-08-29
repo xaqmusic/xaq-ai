@@ -53,6 +53,7 @@ public:
     void tick(uint64_t tick_id) override;
 
     nlohmann::json diag_snapshot() const override;
+    nlohmann::json diag_lite()     const override;
 
     // accessors (tests / telemetry)
     int   node_count()   const { return int(nodes_.size()); }

@@ -411,6 +411,23 @@ void NeurochemState::tick(uint64_t tick_id) {
 // da_hit_gain_, etc.) are NOT included — those come from GraphConfig and
 // are restored when the clone is constructed from the same config.
 
+// The high-rate payload (xaq_voice).  A projection of the working state — the two
+// neuromodulator levels, the baseline dopamine is measured against, and the TLE this
+// module last consumed.  All plain members; no allocation beyond the object itself.
+// These move on a slow timescale, which is what makes them good modulators of timbre
+// rather than pitch: they colour what the faster error signals are already saying.
+nlohmann::json NeurochemState::diag_lite() const {
+    return {
+        {"dopamine",             dopamine_},
+        {"serotonin",            serotonin_},
+        {"da_baseline_ema",      da_baseline_ema_},
+        {"prev_tle",             prev_tle_},
+        {"pending_consensus_tle", pending_consensus_tle_},
+        {"pending_hunger_max",   pending_hunger_max_},
+        {"pending_travel_max",   pending_travel_max_},
+    };
+}
+
 nlohmann::json NeurochemState::snapshot_state() const {
     return nlohmann::json{
         {"version", 1},
