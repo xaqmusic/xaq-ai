@@ -50,11 +50,13 @@ Vendored header:
 | PyQt6 | GPL-3.0 / commercial | **`[ui]` extra only** — review licensing implications before distributing UI builds |
 | pyqtgraph | MIT | `[ui]` extra |
 
-> **PyQt6 is GPL-3.0 (or commercial).** Verified 2026-08-07 by import grep: PyQt6/pyqtgraph
-> usage is confined to `python/xaq/xaq/server/ui/`, `python/xaq/xaq/observer/widgets/`, and
-> `tools/xaq_inspector/` — never imported from `xaq_core` or the engine core, so running xaq
-> headless pulls in neither. Still applies to anyone who **distributes** a build bundling the
-> Qt UI: that build must comply with GPL-3.0 (or hold a commercial PyQt6 license).
+> **PyQt6 is GPL-3.0 (or commercial).** Verified 2026-08-29 by import grep: PyQt6/pyqtgraph
+> usage is confined to `python/xaq/xaq/server/ui/`, `python/xaq/xaq/observer/widgets/`,
+> `tools/xaq_inspector/`, and `tools/xaq_voice_studio/` — never imported from `xaq_core` or
+> the engine core, so running xaq headless pulls in neither. The `tools/xaq_voice` engine
+> itself is C++ and links no Qt, so the audio side runs on the Pi without it. Still applies
+> to anyone who **distributes** a build bundling the Qt UI: that build must comply with
+> GPL-3.0 (or hold a commercial PyQt6 license).
 
 ## Tools (`tools/`)
 

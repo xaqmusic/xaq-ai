@@ -117,7 +117,7 @@ the learned one.
 | Before trusting ANY picrawler sensor | [`docs/plans-and-designs/sensor_legitimacy_and_the_feet_y_oracle.md`](docs/plans-and-designs/sensor_legitimacy_and_the_feet_y_oracle.md) — **per-topic legality audit + a LIVE god's-eye dependency in the deployed gait.** `feet_y` is absolute world-Y |
 | Working on the picrawler | [`plan`](docs/plans-and-designs/picrawler_active_inference_plan.md) + [`gait findings`](docs/reports/picrawler_gait_loop_findings.md) |
 | Working on the Cell | [`cell report`](docs/reports/cell_markov_blanket_loops_report.md) |
-| Working on **xaq_voice** (sonification of TLE) | [`tools/xaq_voice/README.md`](tools/xaq_voice/README.md) — an **instrument, not a behaviour**; touches no brain code; its contract is the `lite` diag topic |
+| Working on **xaq_voice** (sonification of TLE) | [`tools/xaq_voice/README.md`](tools/xaq_voice/README.md) — an **instrument, not a behaviour**; its only contract with the brain is the `lite` diag topic. Tune it with [the studio](tools/xaq_voice_studio/README.md); a new signal to sonify is a one-line, O(1) addition to a module's `diag_lite()` |
 | **Writing ANY formal report** (`docs/reports/`) | [`REPORTS.md`](REPORTS.md) — **audience, structure, and the banned "Claudese".** Read it BEFORE the first line |
 | Repo layout, naming, licence | [`AGENTS.md`](AGENTS.md) — **`ami_ogma` == `ogma` == xaq**, intentionally |
 | The vocabulary is new to you | [`docs/glossary.md`](docs/glossary.md) — plain-language, concepts-first |

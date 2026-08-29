@@ -4699,3 +4699,60 @@ servo forward model, `vision_compass`), so this is a config-and-publisher swap w
 honesty A/B — but it must happen BEFORE any hardware result is attributed to the gait. Re-use
 context: every sim result on this config is a result on oracle inputs until that A/B runs.
 Scope and order recorded in the port doc (§H3).
+
+---
+
+### 2026-08-29 — `diag_lite()` on eight more modules: diagnostic surface, structurally gain-0
+
+**Verdict: not a lever, and no verdict applies.** Recorded because it touches `cpp_core`,
+which is the bar for appearing here at all — not because anything about the brain changed.
+
+`xaq_voice` could only sonify what the brain publishes at rate, and that was **nine
+scalars**: eight from `EPM` and exactly one (`motor_tle`) from `MotorEPMv2`. Everything
+else lives in `diag_snapshot()`, which for an EPM is the whole GNG — ~50 KB serialised **on
+the tick thread**, per frame, per subscription — and is therefore closed to a 60 Hz
+subscriber. `diag_lite()` overrides were added to `MotorEPMv2` (1 → 16 keys),
+`NeurochemState`, `LateralVoter`, `HomeostaticDrive`, `GainEvolver`, `GradientEPM`,
+`SequenceGNG` and `MotorEPM` v1. About **60 signals** now reach a subscriber on the
+picrawler's corridor config.
+
+**★ 1. THE GAIN-0 GUARD IS STRUCTURAL, NOT A FLAG.** `diag_lite()` is called only by
+`DiagPublisher`, only when a subscription's topic is `"lite"`, and nothing in the brain
+reads it. With no `lite` subscriber the build is byte-identical — there is no knob to set
+to zero because there is no path into the tick. Worth naming as a shape: a diagnostic that
+is *unreachable from the control loop by construction* needs no A/B, and claiming one would
+be theatre.
+
+**★ 2. A TYPE FILTER SELECTED THREE MODULES THAT PUBLISHED NOTHING.** `xaq_voice` chose
+voices by matching `"EPM"` in the type name plus `SequenceGNG`. `GradientEPM`, `MotorEPM`
+v1 and `SequenceGNG` all matched and all returned `{}` — a **silent oscillator with no
+diagnostic**, which is strictly worse than an error because nothing reports it. This is the
+same failure the ledger records under "dead code" (§3.2 rule 2) wearing different clothes:
+the consumer was live, the producer was empty, and the only symptom was absence. The tool
+now names any subscribed module that publishes nothing, and every type its filter can
+select publishes something.
+
+**★ 3. AN ALPHABETICAL CONTAINER SILENTLY REORDERED A TUNED THING.** The voice registry
+stored modules in a `std::map` keyed by id, so the octave ladder was handed out by *name*
+rather than by the brain's `list_modules` order. `motor_epm` is documented as the lowest
+voice — the anchor the ear separates the mix against — and alphabetically it is fourth, so
+it landed on C6 and reached C8 on a spike. Nothing failed; it just sounded wrong, and only
+against a live sim. **A container's ordering is a decision even when it is not written down
+as one.**
+
+**★ 4. THE TEST CAUGHT TWO DEFECTS BEFORE THE EAR DID.** `test_diag_lite.cpp` pins flat
+scalars, names the unbounded containers and asserts them absent, and checks the base class
+still opts out with `{}` rather than falling back the way `diag_snapshot()` does. It
+immediately caught `GainEvolver::diag_lite()` shipping the gain **vectors** (returning
+`metrics()` wholesale), which is exactly the unbounded payload the topic exists to avoid —
+now filtered to scalars rather than key-listed, so a scalar added to `metrics()` reaches a
+subscriber for free and an array cannot make the payload unbounded.
+
+Also fixed en route: `MotorEPMv2::gait_coherence()` bounded its loop by `n_legs_` while
+indexing `legs_`. The two agree after `on_setup()`, but `diag_lite()` is reachable from the
+diag thread before then, where `n_legs_` carries its config default and `legs_` is empty.
+Latent out-of-bounds, never triggered by the existing callers.
+
+Re-use context: wanting a new signal sonified is a one-line addition to that module's
+`diag_lite()`, and it must stay O(1) and additive. That is the only place `tools/xaq_voice`
+may touch brain code.
