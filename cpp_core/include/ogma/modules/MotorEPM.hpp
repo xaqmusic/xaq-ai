@@ -68,6 +68,7 @@ public:
 
     nlohmann::json snapshot_state() const override;
     nlohmann::json diag_snapshot() const override;   // live viz: motor-TLE + self-model + cog drive
+    nlohmann::json diag_lite()     const override;   // high-rate: the self-model's error only
     void           restore_state(nlohmann::json const& s) override;
 
     // Telemetry (read by OgmaBrain::get_module_metrics / diag).

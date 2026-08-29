@@ -4210,6 +4210,17 @@ nlohmann::json MotorEPM::snapshot_state() const {
 // common-mode), the body's resulting forward velocity, the curiosity/hunger
 // neuromodulators, and the leg-0 forward self-model A (motor→sensor) so the widget
 // can draw a heatmap of what the body has learned to predict about its own motion.
+// The high-rate payload (xaq_voice).  v1 is superseded by MotorEPMv2 and kept for the
+// older configs, so this stays deliberately minimal — the self-model's own error and the
+// loop gain, nothing more.  It exists because this type matches xaq_voice's EPM-type
+// filter: without it the tool opens an oscillator that can never make a sound.
+nlohmann::json MotorEPM::diag_lite() const {
+    return {
+        {"motor_tle", tle_ema_mean()},
+        {"loop_gain", gain_ema_mean()},
+    };
+}
+
 nlohmann::json MotorEPM::diag_snapshot() const {
     nlohmann::json j;
     j["n_legs"]      = n_legs_;
