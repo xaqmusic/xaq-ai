@@ -82,6 +82,11 @@ class SourceRegistry {
         std::map<std::string, SourceState> keys;
     };
     std::map<std::string, Mod> mods_;
+    // First-seen order, which is the brain's list_modules order.  It has to be kept
+    // explicitly: the map is sorted by id, and reporting modules alphabetically would
+    // reorder the octave ladder auto_patch assigns — motor_epm is meant to be the LOWEST
+    // voice, and alphabetically it is fourth.
+    std::vector<std::string>   order_;
 };
 
 // ---------------------------------------------------------------------------- runtime

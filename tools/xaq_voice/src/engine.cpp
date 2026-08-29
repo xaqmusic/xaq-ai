@@ -46,14 +46,15 @@ void flatten(const nlohmann::json& j, const std::string& prefix, int depth, F&& 
 }  // namespace
 
 void SourceRegistry::note_module(const std::string& module, const std::string& type) {
+    if (mods_.find(module) == mods_.end()) order_.push_back(module);
     auto& m = mods_[module];
     if (m.type.empty()) m.type = type;
 }
 
 void SourceRegistry::observe(const std::string& module, const std::string& type,
                              const nlohmann::json& snapshot, double dt_s) {
+    note_module(module, type);
     auto& m = mods_[module];
-    if (m.type.empty()) m.type = type;
     ++m.frames;
     flatten(snapshot, "", 0, [&](const std::string& key, double val, bool is_bool) {
         SourceState& s = m.keys[key];
@@ -90,8 +91,11 @@ SourceState* SourceRegistry::find(const SourceRef& s) {
 
 std::vector<ObservedModule> SourceRegistry::observed() const {
     std::vector<ObservedModule> out;
-    out.reserve(mods_.size());
-    for (const auto& [id, m] : mods_) {
+    out.reserve(order_.size());
+    for (const auto& id : order_) {
+        const auto it = mods_.find(id);
+        if (it == mods_.end()) continue;
+        const Mod& m = it->second;
         ObservedModule om;
         om.module = id;
         om.type   = m.type;
@@ -104,7 +108,10 @@ std::vector<ObservedModule> SourceRegistry::observed() const {
 
 nlohmann::json SourceRegistry::to_json() const {
     nlohmann::json mods = nlohmann::json::array();
-    for (const auto& [id, m] : mods_) {
+    for (const auto& id : order_) {
+        const auto mit = mods_.find(id);
+        if (mit == mods_.end()) continue;
+        const Mod& m = mit->second;
         nlohmann::json keys = nlohmann::json::array();
         for (const auto& [k, s] : m.keys) {
             keys.push_back({{"key", k},

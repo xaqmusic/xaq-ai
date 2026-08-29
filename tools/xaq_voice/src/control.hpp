@@ -59,6 +59,7 @@ class ControlServer {
     std::thread       thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stop_{false};
+    uint64_t          tick_ = 0;
 };
 
 }  // namespace xv

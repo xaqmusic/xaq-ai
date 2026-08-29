@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -88,8 +89,18 @@ void ControlServer::run() {
         if (now >= next) {
             next = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(period);
             try {
-                const std::string body = engine_.state_json().dump();
-                const char* topic = "state";
+                // Two-part frame, and the body wears the same envelope the brain's diag
+                // stream uses ({topic, tick_id, snapshot}).  That is what lets the studio
+                // reuse tools/xaq_inspector/transport.py's DiagSubscriber unmodified —
+                // the SUB thread, the 200 ms timeout that makes stop() clean, and the
+                // join are the fiddly half, and they are already written and in service.
+                const json env = {{"topic", "state"},
+                                  {"tick_id", ++tick_},
+                                  {"module_id", "xaq_voice"},
+                                  {"sub_id", 0},
+                                  {"snapshot", engine_.state_json()}};
+                const std::string body = env.dump();
+                const char*       topic = "state";
                 zmq_send(pub_, topic, std::strlen(topic), ZMQ_SNDMORE | ZMQ_DONTWAIT);
                 zmq_send(pub_, body.data(), body.size(), ZMQ_DONTWAIT);
             } catch (const std::exception&) {
