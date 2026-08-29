@@ -216,13 +216,26 @@ inline Formants vowel_table(const std::string& name) {
 // Interpolate in the formant domain, not the audio domain: crossfading two vowel banks
 // gives a double-voice smear, while sliding the resonances gives the diphthong the ear
 // expects when a modulator sweeps the morph.
+//
+// And interpolate GEOMETRICALLY, because pitch is logarithmic.  Sweeping F2 from "oo"
+// (870 Hz) to "ee" (2290 Hz) linearly spends the first half of the travel covering seven
+// semitones and the second half covering five — the vowel appears to lurch early and stall
+// late.  Geometric interpolation makes equal morph steps equal musical intervals, which is
+// what "smooth across the range" actually requires.  Gains go in dB for the same reason:
+// the ear hears loudness logarithmically, and a linear fade through a formant that is
+// dropping to a quarter of its level audibly dips in the middle.
 inline Formants vowel_lerp(const Formants& a, const Formants& b, double t) {
     t = std::clamp(t, 0.0, 1.0);
+    if (t <= 0.0) return a;          // exact at the endpoints, so A really is A
+    if (t >= 1.0) return b;
     Formants o;
     for (int i = 0; i < 3; ++i) {
-        o.f[i]    = a.f[i]    + (b.f[i]    - a.f[i])    * t;
-        o.bw[i]   = a.bw[i]   + (b.bw[i]   - a.bw[i])   * t;
-        o.gain[i] = a.gain[i] + (b.gain[i] - a.gain[i]) * t;
+        o.f[i]  = a.f[i]  * std::pow(b.f[i]  / std::max(a.f[i],  1e-6), t);
+        o.bw[i] = a.bw[i] * std::pow(b.bw[i] / std::max(a.bw[i], 1e-6), t);
+        // Below about -60 dB a formant is inaudible; treat it as a floor rather than
+        // letting log() run away toward negative infinity as a gain approaches zero.
+        const double ga = std::max(a.gain[i], 1e-3), gb = std::max(b.gain[i], 1e-3);
+        o.gain[i] = ga * std::pow(gb / ga, t);
     }
     return o;
 }

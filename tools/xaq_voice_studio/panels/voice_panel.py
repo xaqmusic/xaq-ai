@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (QComboBox, QGroupBox, QHBoxLayout, QLabel, QPushBut
 
 from ..theme import INK_PRIMARY, SurfaceWidget
 from ._controls import FloatSlider, LabeledCombo, check, heading, hline, muted
+from .event_row import EventRow
 from .filter_panel import FilterPanel
 from .route_row import RouteRow
 
@@ -28,6 +29,7 @@ class VoicePanel(QWidget):
         self.on_dirty = on_dirty
         self._index = 0
         self._rows: list[RouteRow] = []
+        self._event_rows: list[EventRow] = []
         self._built_key: tuple = ()
         self._sources: list[str] = []
 
@@ -98,15 +100,18 @@ class VoicePanel(QWidget):
         ol.addWidget(self.noise_mix)
 
         self.glide = FloatSlider("glide", 0, 500, 30, unit=" ms", decimals=0, label_w=64)
+        self.glide.setToolTip("Portamento between pitches.  0 steps instantly.")
         self.glide.valueChanged.connect(lambda v: self._set("osc/glide_ms", float(v)))
         ol.addWidget(self.glide)
 
         self.attack = FloatSlider("attack", 0, 500, 20, unit=" ms", decimals=0, label_w=64)
+        self.attack.setToolTip("Time for the gate to open.  0 is a HARD gate — no ramp at all.")
         self.attack.valueChanged.connect(lambda v: self._set("osc/attack_ms", float(v)))
         ol.addWidget(self.attack)
 
         self.release = FloatSlider("release", 0, 2000, 150, unit=" ms", decimals=0,
                                    label_w=64)
+        self.release.setToolTip("Time for the gate to close.  0 cuts to digital silence\nthe instant the source drops below the gate.")
         self.release.valueChanged.connect(lambda v: self._set("osc/release_ms", float(v)))
         ol.addWidget(self.release)
 
@@ -133,8 +138,25 @@ class VoicePanel(QWidget):
         self.rack_lay.setSpacing(6)
         self.body_lay.addWidget(self.rack)
 
-        self.events_label = muted("")
-        self.body_lay.addWidget(self.events_label)
+        ev_head = QHBoxLayout()
+        ev_head.addWidget(heading("Events"))
+        ev_head.addStretch(1)
+        add_ev = QPushButton("+ event")
+        add_ev.setToolTip("Give a discrete brain transition — a bake, a mitosis, a prune — "
+                          "a short sound of its own")
+        add_ev.clicked.connect(self._add_event)
+        ev_head.addWidget(add_ev)
+        self.body_lay.addLayout(ev_head)
+
+        self.events = QWidget()
+        self.events_lay = QVBoxLayout(self.events)
+        self.events_lay.setContentsMargins(0, 0, 0, 0)
+        self.events_lay.setSpacing(4)
+        self.body_lay.addWidget(self.events)
+
+        self.events_hint = muted("")
+        self.events_hint.setWordWrap(True)
+        self.body_lay.addWidget(self.events_hint)
         self.body_lay.addStretch(1)
 
     # ------------------------------------------------------------------ helpers
@@ -169,6 +191,8 @@ class VoicePanel(QWidget):
         self._sources = sources
         for r in self._rows:
             r.set_sources(sources)
+        for r in self._event_rows:
+            r.set_sources(sources)
 
     # ------------------------------------------------------------------ build
     def rebuild(self) -> None:
@@ -184,6 +208,7 @@ class VoicePanel(QWidget):
             self._index = 0
             self.readout.setText("no voices — connect an engine, or use Auto-assign")
             self._clear_rack()
+            self._clear_events()
             self.osc_box.setVisible(False)
             self.filter_panel.setVisible(False)
             return
@@ -217,19 +242,17 @@ class VoicePanel(QWidget):
         self.filter_panel.sync_from(v.get("filter") or {})
 
         routes = v.get("routes") or []
-        key = (self._index, len(routes), tuple(r.get("dest") for r in routes))
+        events = v.get("events") or []
+        key = (self._index, len(routes), tuple(r.get("dest") for r in routes), len(events))
         if key != self._built_key:
             self._built_key = key
             self._rebuild_rack(routes)
+            self._rebuild_events(events)
 
-        events = v.get("events") or []
-        if events:
-            txt = "  ·  ".join(
-                f"{(e.get('source') or {}).get('key','?')} {e.get('trigger','')} → {e.get('sound','')}"
-                for e in events)
-            self.events_label.setText("events:  " + txt)
-        else:
-            self.events_label.setText("")
+        self.events_hint.setText(
+            "" if events else
+            "no events — this module publishes no bake / mitosis / prune signal, "
+            "or they were removed")
 
     def _clear_rack(self) -> None:
         for r in self._rows:
@@ -249,6 +272,54 @@ class VoicePanel(QWidget):
             row.removeRequested.connect(self._remove_route)
             self.rack_lay.addWidget(row)
             self._rows.append(row)
+
+    def _clear_events(self) -> None:
+        for r in self._event_rows:
+            r.setParent(None)
+            r.deleteLater()
+        self._event_rows = []
+
+    def _rebuild_events(self, events: list[dict]) -> None:
+        self._clear_events()
+        for i, e in enumerate(events):
+            row = EventRow(self._vpath(f"events/{i}"), e, self.caps, self._sources,
+                           self._set_abs, parent=self.events)
+            row.removeRequested.connect(self._remove_event)
+            self.events_lay.addWidget(row)
+            self._event_rows.append(row)
+
+    def _add_event(self) -> None:
+        v = self._voice()
+        if not v:
+            return
+        module = v.get("module", "")
+        # Prefer a signal that actually IS an event.  Offering a continuous source first
+        # would fire on nearly every frame, which sounds broken rather than expressive.
+        key, trigger, sound = "", "increase", "chirp_up"
+        available = {s.split(".", 1)[1] for s in self._sources if s.startswith(module + ".")}
+        for cand, trg, snd in (("baked_now", "true", "chirp_up"),
+                               ("just_baked", "true", "chirp_up"),
+                               ("mitosis_count", "increase", "two_notes"),
+                               ("nodes", "decrease", "blip_down")):
+            if cand in available:
+                key, trigger, sound = cand, trg, snd
+                break
+        if not key and available:
+            key = sorted(available)[0]
+        v.setdefault("events", []).append({
+            "source": {"module": module, "key": key},
+            "trigger": trigger, "sound": sound, "enabled": True})
+        self._push_whole()
+
+    def _remove_event(self, base: str) -> None:
+        try:
+            i = int(base.rsplit("/", 1)[1])
+        except (ValueError, IndexError):
+            return
+        events = self._voice().get("events") or []
+        if 0 <= i < len(events):
+            events.pop(i)
+            self._push_whole()
 
     # ------------------------------------------------------------------ edits
     def _add_route(self) -> None:

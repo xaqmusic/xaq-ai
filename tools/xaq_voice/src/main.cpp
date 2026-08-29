@@ -445,10 +445,23 @@ int main(int argc, char** argv) {
             }
             return json();      // not handled
         });
+        control.set_info({{"pid", int(getpid())},
+                          {"brain_host", host},
+                          {"brain_port", port},
+                          {"modules", int(subs.size())}});
         control_up = control.start();
         if (control_up)
             std::printf("           studio on tcp://%s:%d  (meters on %d)\n", bind_host.c_str(),
                         control_port, control_port + 1);
+        else
+            // Keep playing — audio never needed a studio.  But say plainly that a studio
+            // pointed here will reach the OTHER engine, because the symptom otherwise is
+            // an operator's tuning changing under them with no visible cause.
+            std::fprintf(stderr,
+                         "xaq_voice: no control socket — another engine already holds %d.\n"
+                         "           This one plays but cannot be tuned; a studio on %d will\n"
+                         "           reach THAT engine.  Use --control-port to pick another.\n",
+                         control_port, control_port);
     }
 
     std::thread ta(audio_thread, &engine, device, rate, no_audio);

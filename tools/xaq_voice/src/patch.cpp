@@ -139,6 +139,7 @@ json to_json(const Patch& p) {
               {"quantize", p.master.quantize},
               {"scale", p.master.scale},
               {"span", p.master.span},
+              {"mod_smooth_ms", p.master.mod_smooth_ms},
               {"filter", filter_json(p.master.filter)},
               {"routes", [&] {
                    json a = json::array();
@@ -163,6 +164,7 @@ Patch from_json(const json& j) {
     p.master.quantize = dbool(m, "quantize", p.master.quantize);
     p.master.scale    = dstr(m, "scale", p.master.scale);
     p.master.span     = dnum(m, "span", p.master.span);
+    p.master.mod_smooth_ms = dnum(m, "mod_smooth_ms", p.master.mod_smooth_ms);
     p.master.filter   = filter_from(dobj(m, "filter"), p.master.filter);
     for (const auto& rj : darr(m, "routes")) if (rj.is_object()) p.master.routes.push_back(route_from(rj));
 

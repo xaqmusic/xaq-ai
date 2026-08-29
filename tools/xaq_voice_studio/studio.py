@@ -210,7 +210,14 @@ class StudioWindow(QMainWindow):
         self._connected = True
         self.stream.stop()
         self.stream.start(lambda s: self._bridge.state.emit(s))
-        self._set_status(f"connected — {len(self.model.voices())} voice(s)")
+        # Name the engine and the brain it is attached to. An engine that could not bind
+        # its control port keeps playing headless, so a studio can silently reach a
+        # DIFFERENT engine than the one just launched — and the symptom of that is someone
+        # else's tuning changing with no visible cause.
+        who = f"engine pid {caps['pid']}" if "pid" in caps else "engine"
+        brain = (f" · brain {caps.get('brain_host', '?')}:{caps.get('brain_port', '?')}"
+                 if "brain_port" in caps else "")
+        self._set_status(f"connected — {len(self.model.voices())} voice(s) · {who}{brain}")
 
         if self._patch_path:
             path, self._patch_path = self._patch_path, None

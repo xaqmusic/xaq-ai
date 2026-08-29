@@ -176,6 +176,10 @@ def main() -> int:
     # Let the deferred connect run, then push a few synthetic meter frames.
     for _ in range(6):
         app.processEvents()
+    # body_pose carries the GNG life events, so the event rack has something to show.
+    win.voices.picker.setCurrentIndex(1)
+    for _ in range(4):
+        app.processEvents()
     for i in range(24):
         win._on_state(fake_state(i * 0.25))
         win._apply_state()

@@ -35,6 +35,14 @@ class ControlServer {
 
     void set_host_verb(HostVerb h) { host_verb_ = std::move(h); }
 
+    // Extra fields folded into the `hello` reply — which engine this is, and which brain
+    // it is listening to.  Not cosmetic: when a second engine cannot bind the control port
+    // it keeps running headless (correctly — audio does not need a studio), and a studio
+    // launched afterwards silently reaches the FIRST engine instead. Saying out loud which
+    // process and which brain answered turns that from an invisible mix-up into a line the
+    // operator can read.
+    void set_info(nlohmann::json info) { info_ = std::move(info); }
+
     // Returns false if either socket could not bind — the engine keeps running headless
     // rather than failing, exactly as the brain does with its own ports.
     bool start();
@@ -53,6 +61,7 @@ class ControlServer {
     int               port_;
     double            state_hz_;
     HostVerb          host_verb_;
+    nlohmann::json    info_ = nlohmann::json::object();
     void*             ctx_ = nullptr;
     void*             rep_ = nullptr;
     void*             pub_ = nullptr;

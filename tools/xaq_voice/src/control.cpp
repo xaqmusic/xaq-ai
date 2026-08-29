@@ -119,7 +119,7 @@ json ControlServer::dispatch(const json& req) {
     // The studio asks the engine what it can do rather than hardcoding the lists, so a
     // waveform or filter mode added here reaches the UI without a matching Python edit.
     if (verb == "hello") {
-        return {{"status", "ok"},
+        json r = {{"status", "ok"},
                 {"engine", "xaq_voice"},
                 {"version", 1},
                 {"waveforms", wave_names()},
@@ -131,6 +131,8 @@ json ControlServer::dispatch(const json& req) {
                 {"vowels", vowel_names()},
                 {"scales", scale_names()},
                 {"state_port", port_ + 1}};
+        for (auto const& [k, v] : info_.items()) r[k] = v;
+        return r;
     }
 
     if (verb == "get_patch") return {{"status", "ok"}, {"patch", to_json(engine_.patch())}};

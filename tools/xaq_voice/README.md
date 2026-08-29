@@ -67,6 +67,26 @@ plus a `noise_mix` that blends noise over any of them. Filters, per voice and on
 master: `lowpass`, `highpass`, `bandpass`, `notch`, and `vowel` — three formant resonators
 with a continuous morph between any two of A E I O U.
 
+**Timing.** Three separate things smooth, and knowing which is which is most of the
+tuning:
+
+| knob | governs | 0 means |
+|---|---|---|
+| a route's `smooth_ms` | that route's normalised value, before depth | no smoothing; the raw value |
+| `osc.glide_ms` / `attack_ms` / `release_ms` | pitch, and the amplitude envelope | **instant** — attack and release at 0 give a hard on/off gate with no ramp at all |
+| `master.mod_smooth_ms` | everything else a route can drive: cutoff, resonance, vowel morph, width, noise, pan, level | the raw stair |
+
+That last one exists because diag frames land at about 30 Hz. A destination consumed raw
+moves in 33 ms steps, which is audible as zipper noise on a cutoff sweep and as a lurching
+vowel; 25 ms of glide turns the stair into a slide. Pitch and amplitude never had this
+problem — they always had glide and attack/release of their own.
+
+The vowel morph interpolates **geometrically** in formant frequency and gain, because
+pitch and loudness are both logarithmic. F2 runs 870 Hz for "oo" to 2290 Hz for "ee";
+interpolating that linearly puts the midpoint a whole tone sharp of the musical centre, so
+the sweep lurches early and stalls late. Geometric interpolation makes equal morph steps
+equal musical intervals, which is what an even sweep across the range requires.
+
 ## The default mapping
 
 Launch with no `--config` and you get what this tool has always done, voice for voice:
@@ -169,6 +189,15 @@ the sim". Kill your own sim by pid; the process is named `Godot_v4.6.2-st…`, n
 and the operator's windows are the same binary. A second sim that cannot bind 7500 keeps
 running anyway and logs only `Control socket bind failed` — check for strays before
 concluding the tool is broken.
+
+⚠⚠ **The control port is the same hazard, and it is worse, because it writes.** An engine
+that cannot bind `--control-port` keeps playing headless — correct, since audio never
+needed a studio — so a studio launched afterwards silently reaches the engine *already*
+holding the port. If that is somebody's live tuning session, every slider the second
+studio touches edits **their** patch. Before starting an engine while anyone might be
+working: `ss -ltn | grep 746` and pick a free `--control-port`. The engine now prints a
+loud warning when its bind fails, and `hello` reports the engine's pid and the brain it is
+attached to, which the studio shows in its status bar — read it before dragging anything.
 
 **State of tuning.** Gate 1.4× / full 2.0× / γ 0.5 and the octave ladder were set by ear on
 the corridor sim (2026-08-28) and remain the defaults. Everything past that is now a patch,

@@ -64,6 +64,18 @@ class MasterPanel(QWidget):
         self.scale.currentTextChanged.connect(lambda v: self._set("/master/scale", v))
         lay.addWidget(self.scale)
 
+        self.mod_smooth = FloatSlider("mod glide", 0, 250, 25.0, unit=" ms", decimals=0,
+                                      label_w=60)
+        self.mod_smooth.setToolTip(
+            "How fast cutoff, resonance, vowel morph, width, noise, pan and level chase\n"
+            "their targets.  Diag frames land at ~30 Hz, so without this they move in\n"
+            "33 ms stair-steps — audible as zipper noise on a sweep and as a lurching\n"
+            "vowel.  Pitch and amplitude are not affected; they have glide and\n"
+            "attack/release per voice.  0 restores the stair.")
+        self.mod_smooth.valueChanged.connect(
+            lambda v: self._set("/master/mod_smooth_ms", float(v)))
+        lay.addWidget(self.mod_smooth)
+
         self.filter_panel = FilterPanel("output filter", "/master/filter", {}, caps,
                                         self._set)
         lay.addWidget(self.filter_panel)
@@ -109,6 +121,7 @@ class MasterPanel(QWidget):
         self.quantize.setChecked(bool(m.get("quantize", True)))
         self.quantize.blockSignals(False)
         self.scale.set_value(m.get("scale", "major_pentatonic"))
+        self.mod_smooth.set_value(m.get("mod_smooth_ms", 25.0))
         self.filter_panel.sync_from(m.get("filter") or {})
 
         routes = m.get("routes") or []

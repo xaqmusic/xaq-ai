@@ -20,8 +20,26 @@ Three panes:
 | pane | what it is for |
 |---|---|
 | **Sources** | every numeric signal any module publishes, live, with a sparkline. Double-click one to route it into the selected voice. Modules that publish nothing are greyed, with the file to fix in the tooltip |
-| **Voice** | the oscillator (waveform, base pitch, width, noise, glide/attack/release), its own filter, and its **modulation rack** — one row per route |
-| **Master** | output volume, quantise/scale, the output filter, and a **master mod rack** so the filter is modulatable by a signal belonging to no single voice |
+| **Voice** | the oscillator (waveform, base pitch, width, noise, glide/attack/release), its own filter, its **modulation rack** — one row per route — and its **event rack** |
+| **Master** | output volume, quantise/scale, mod glide, the output filter, and a **master mod rack** so the filter is modulatable by a signal belonging to no single voice |
+
+**Events** are the other half of the voice, and they are not modulation. A route maps a
+continuous signal onto a continuous parameter; an event watches for a **transition** and
+fires a short gesture. A node earning its place, a node splitting, a node dying — those are
+moments, and a moment wants a chirp rather than a change in pitch. Each row has its own
+enable, so a bake chirp can be silenced without losing how it was set up.
+
+Watch the trigger: `true` is a **level** test, because `baked_now` is already a one-tick
+pulse and an edge test would need it to go false between two bakes to fire the second one.
+`increase` / `decrease` watch a counter move — `mitosis_count` only ever climbs, and `nodes`
+falling is the only way to hear a prune.
+
+**Three separate things smooth**, and knowing which is which is most of the tuning: a
+route's own `smooth_ms` (its normalised value, before depth); the voice's
+`glide`/`attack`/`release` (pitch and the amplitude envelope — **set attack and release to
+0 for a hard on/off gate with no ramp at all**); and the master's `mod glide`, which
+governs every other destination a route can drive. That last one exists because diag frames
+land at ~30 Hz, so a cutoff or vowel morph consumed raw moves in 33 ms stair-steps.
 
 `Auto-assign` rebuilds the whole patch from what the brain is currently publishing.
 `Save As…` writes the patch; `xaq_voice --config <file>` loads it.

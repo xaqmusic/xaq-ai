@@ -29,11 +29,17 @@ namespace {
 int g_fail = 0;
 int g_ran  = 0;
 
-#define CHECK(cond)                                                                       \
+// An optional second argument carries the offending value, which is the difference
+// between "this assert failed" and knowing why without rebuilding.
+inline const char* _msg()                { return ""; }
+inline const char* _msg(const char* m)   { return m; }
+
+#define CHECK(cond, ...)                                                                  \
     do {                                                                                  \
         ++g_ran;                                                                          \
         if (!(cond)) {                                                                    \
-            std::printf("  FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);                 \
+            std::printf("  FAIL %s:%d  %s   %s\n", __FILE__, __LINE__, #cond,             \
+                        _msg(__VA_ARGS__));                                               \
             ++g_fail;                                                                     \
         }                                                                                 \
     } while (0)
@@ -339,6 +345,159 @@ void test_vowel_bank() {
     CHECK(peak > 0.05);
 }
 
+// Drive the engine the way the network thread does, so everything below is tested through
+// the same path the real frames take.
+void feed(Engine& e, const std::string& mod, const json& snap, int n, double dt = 0.02) {
+    for (int i = 0; i < n; ++i) e.on_frame(mod, "EPM", snap, dt);
+}
+
+void test_vowel_morph_is_geometric() {
+    section("dsp: the vowel morph is perceptually even across its range");
+    const Formants u = vowel_table("U"), i = vowel_table("I");
+    const Formants mid = vowel_lerp(u, i, 0.5);
+    // Halfway must be the geometric mean, not the arithmetic one: F2 runs 870 -> 2290 Hz,
+    // and linear interpolation puts the midpoint at 1580 Hz — a whole tone sharp of the
+    // musical centre (1412 Hz), so the sweep lurches early and stalls late.
+    for (int k = 0; k < 3; ++k) {
+        CHECK_NEAR(mid.f[k], std::sqrt(u.f[k] * i.f[k]), 1.0);
+        CHECK(mid.f[k] < (u.f[k] + i.f[k]) * 0.5 + 1e-9);   // strictly below the linear one
+    }
+    // Equal morph steps are equal musical intervals, which is what "smooth" means here.
+    const double r1 = vowel_lerp(u, i, 0.25).f[1] / u.f[1];
+    const double r2 = vowel_lerp(u, i, 0.50).f[1] / vowel_lerp(u, i, 0.25).f[1];
+    const double r3 = vowel_lerp(u, i, 0.75).f[1] / vowel_lerp(u, i, 0.50).f[1];
+    CHECK_NEAR(r1, r2, 1e-6);
+    CHECK_NEAR(r2, r3, 1e-6);
+    // The endpoints stay exact, so "A" really is A rather than A plus rounding.
+    CHECK(vowel_lerp(u, i, 0.0).f[1] == u.f[1]);
+    CHECK(vowel_lerp(u, i, 1.0).f[1] == i.f[1]);
+    // A formant whose gain goes to zero must not drag the interpolation to -inf.
+    Formants z = u;
+    z.gain = {{1.0, 0.0, 0.0}};
+    const Formants zm = vowel_lerp(z, i, 0.5);
+    for (int k = 0; k < 3; ++k) CHECK(std::isfinite(zm.gain[k]) && zm.gain[k] >= 0.0);
+}
+
+// Build a one-voice engine whose amplitude is driven straight from a source, with no
+// normalisation cleverness in the way, so envelope timing is the only variable.
+Engine* gate_engine(double attack_ms, double release_ms, double mod_smooth_ms = 25.0) {
+    Engine* e = new Engine(48000);
+    Patch p;
+    p.master.mod_smooth_ms = mod_smooth_ms;
+    VoiceCfg v;
+    v.id = v.module = "m";
+    v.osc.waveform    = Wave::Square;
+    v.osc.base_hz     = 400.0;
+    v.osc.attack_ms   = attack_ms;
+    v.osc.release_ms  = release_ms;
+    v.osc.glide_ms    = 0.0;
+    Route r;
+    r.source = {"m", "g"};
+    r.dest   = Dest::Amp;
+    r.norm.mode      = NormMode::Raw;
+    r.norm.in_lo     = 0.0;
+    r.norm.in_hi     = 1.0;
+    r.norm.smooth_ms = 0.0;
+    r.curve = 1.0;
+    v.routes.push_back(r);
+    p.voices.push_back(v);
+    e->set_patch(p);
+    return e;
+}
+
+double first_peak(Engine& e, int frames) {
+    std::vector<int16_t> buf(size_t(frames) * 2);
+    e.render(buf.data(), frames);
+    double pk = 0;
+    for (int16_t s : buf) pk = std::max(pk, double(std::abs(int(s))));
+    return pk;
+}
+
+void test_zero_time_constants_are_instant() {
+    section("engine: a zero attack/release is a HARD gate, with no ramp at all");
+    // Hard: the gate opens within the first handful of samples.
+    Engine* hard = gate_engine(0.0, 0.0);
+    feed(*hard, "m", {{"g", 1.0}}, 2);
+    const double hard_open = first_peak(*hard, 4);
+    // Measured against this voice's OWN steady level rather than an absolute, because the
+    // polyBLEP correction deliberately shapes the first samples either side of an edge —
+    // the opening transient never reaches the flat-top value, and should not.
+    const double steady = first_peak(*hard, 1024);
+
+    // Soft: the same four samples of a 20 ms attack are barely off the floor.
+    Engine* soft = gate_engine(20.0, 150.0);
+    feed(*soft, "m", {{"g", 1.0}}, 2);
+    const double soft_open = first_peak(*soft, 4);
+
+    CHECK(hard_open > steady * 0.5,
+          (std::to_string(hard_open) + " of " + std::to_string(steady)).c_str());
+    CHECK(soft_open < hard_open * 0.25, std::to_string(soft_open).c_str());
+
+    // Closing is hard too, and hard means DIGITALLY silent, not merely quiet — the old
+    // max(0.001, ms) floor made a 1 ms ramp unreachable however far the slider was dragged.
+    feed(*hard, "m", {{"g", 0.0}}, 1);
+    CHECK(first_peak(*hard, 64) == 0.0);
+
+    feed(*soft, "m", {{"g", 0.0}}, 1);
+    CHECK(first_peak(*soft, 64) > 0.0, "a 150 ms release must still be audible");
+
+    delete hard;
+    delete soft;
+}
+
+void test_mod_smoothing_is_wired() {
+    section("engine: control-rate destinations slide instead of stepping");
+    // A diag frame lands at ~30 Hz.  Without smoothing a cutoff target jumps the filter in
+    // one sample; with it, the filter is still on its way when the block is rendered.
+    auto energy_after_jump = [](double mod_smooth_ms) {
+        Engine e(48000);
+        Patch  p;
+        p.master.mod_smooth_ms = mod_smooth_ms;
+        VoiceCfg v;
+        v.id = v.module = "m";
+        v.osc.waveform   = Wave::Saw;
+        v.osc.base_hz    = 600.0;
+        v.osc.attack_ms  = 0.0;
+        v.osc.release_ms = 0.0;
+        v.filter.enabled   = true;
+        v.filter.mode      = FilterMode::LowPass;
+        v.filter.cutoff_hz = 40.0;            // shut, until the route opens it
+        Route amp;
+        amp.source = {"m", "g"};
+        amp.dest   = Dest::Amp;
+        amp.norm.mode = NormMode::Raw;
+        amp.norm.in_hi = 1.0;
+        amp.norm.smooth_ms = 0.0;
+        v.routes.push_back(amp);
+        Route cut;
+        cut.source = {"m", "g"};
+        cut.dest   = Dest::Cutoff;
+        cut.norm.mode = NormMode::Raw;
+        cut.norm.in_hi = 1.0;
+        cut.norm.smooth_ms = 0.0;
+        cut.depth = 96.0;                     // eight octaves, 40 Hz -> ~10 kHz
+        v.routes.push_back(cut);
+        p.voices.push_back(v);
+        e.set_patch(p);
+
+        feed(e, "m", {{"g", 0.0}}, 3);
+        std::vector<int16_t> buf(512);
+        for (int b = 0; b < 4; ++b) e.render(buf.data(), 256);   // settle, and prime
+        feed(e, "m", {{"g", 1.0}}, 1);                           // the jump
+        e.render(buf.data(), 256);
+        double acc = 0;
+        for (int16_t s : buf) acc += double(s) * s;
+        return std::sqrt(acc / double(buf.size()));
+    };
+
+    const double stepped = energy_after_jump(0.0);
+    const double slid    = energy_after_jump(200.0);
+    CHECK(stepped > 0.0, std::to_string(stepped).c_str());
+    // With a 200 ms glide the cutoff has barely moved 5 ms into the block, so far less of
+    // the saw gets through.  If these matched, the smoothing would not be wired in at all.
+    CHECK(slid < stepped * 0.7, (std::to_string(slid) + " vs " + std::to_string(stepped)).c_str());
+}
+
 void test_quantiser() {
     section("dsp: quantising snaps to the scale");
     const auto& penta = scale_degrees("major_pentatonic");
@@ -354,13 +513,6 @@ void test_quantiser() {
     CHECK_NEAR(note_to_hz("C3"), 130.81, 0.01);
     CHECK_NEAR(note_to_hz("523.25"), 523.25, 0.01);
     CHECK(hz_to_note(440.0f) == "A4");
-}
-
-// ---------------------------------------------------------------------------- engine
-// Drive the engine the way the network thread does, so the normalisers are tested through
-// the same path the real frames take.
-void feed(Engine& e, const std::string& mod, const json& snap, int n, double dt = 0.02) {
-    for (int i = 0; i < n; ++i) e.on_frame(mod, "EPM", snap, dt);
 }
 
 void test_normalisers() {
@@ -690,6 +842,9 @@ int main() {
     test_auto_patch();
     test_waveform_dc();
     test_pulse_width_is_centred();
+    test_vowel_morph_is_geometric();
+    test_zero_time_constants_are_instant();
+    test_mod_smoothing_is_wired();
     test_filter_stability_under_modulation();
     test_filter_shapes();
     test_vowel_bank();

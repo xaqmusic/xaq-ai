@@ -114,6 +114,14 @@ struct VoiceRT {
     double t_hz = 261.63, t_amp = 0.0, t_level = 1.0;
     double t_cutoff = 4000.0, t_q = 0.7, t_pw = 0.5, t_noise = 0.0, t_morph = 0.0, t_pan = 0.0;
 
+    // ...and where they have actually got to.  A diag frame lands at ~30 Hz, so a target
+    // consumed raw moves in 33 ms stair-steps — audible as zipper noise on a cutoff sweep
+    // and as a lurching vowel.  Pitch and amplitude always had their own smoothing (glide,
+    // attack/release); these are the ones that did not.
+    double n_level = 1.0, n_cutoff = 4000.0, n_q = 0.7, n_pw = 0.5, n_noise = 0.0,
+           n_morph = 0.0, n_pan = 0.0;
+    bool   primed = false;      // first frame jumps rather than sliding up from a default
+
     std::vector<RouteRT> routes;
     std::vector<EventRT> events;
 };
@@ -174,6 +182,8 @@ class Engine {
     // master bus runtime
     FilterUnit master_filt_, master_filt_r_;   // one per channel: filters carry state
     double     m_cutoff = 4000.0, m_q = 0.7, m_morph = 0.0, m_level = 1.0;
+    double     mn_cutoff = 4000.0, mn_q = 0.7, mn_morph = 0.0, mn_level = 1.0;
+    bool       m_primed = false;
     double     master_peak_ = 0.0;      // for the studio's level meter
     std::vector<float> mixL_, mixR_;
 

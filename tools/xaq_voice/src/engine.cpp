@@ -406,30 +406,61 @@ void Engine::render(int16_t* out, int frames) {
 
     const bool tone = tone_.load();
 
+    // A one-pole coefficient for a given time constant.  ZERO MEANS ZERO: the old
+    // max(0.001, …) floor quietly imposed a 1 ms ramp, so "no ramp at all" was not
+    // reachable however far a slider was dragged.  A gate asked to be hard should be hard.
+    const auto coef = [dt](double ms) {
+        return ms <= 1e-9 ? 0.0 : std::exp(-dt / (ms / 1000.0));
+    };
+    const double mod_c = coef(patch_.master.mod_smooth_ms);
+
+    // Vowel formants are recomputed at control rate rather than per sample: the morph is
+    // smoothed every sample, but three pow() calls per sample per voice would be real cost
+    // on the Pi for no audible gain.  Every 16 samples is 3 kHz, orders above anything the
+    // ear resolves as a step and orders below the 30 Hz stair this replaces.
+    constexpr int FORMANT_INTERVAL = 16;
+
     for (size_t vi = 0; vi < patch_.voices.size() && vi < voices_.size(); ++vi) {
         const VoiceCfg& cfg = patch_.voices[vi];
         VoiceRT&        rt  = voices_[vi];
         if (!cfg.enabled) continue;
 
-        const double glide   = std::exp(-dt / std::max(0.001, cfg.osc.glide_ms   / 1000.0));
-        const double attack  = std::exp(-dt / std::max(0.001, cfg.osc.attack_ms  / 1000.0));
-        const double release = std::exp(-dt / std::max(0.001, cfg.osc.release_ms / 1000.0));
+        const double glide   = coef(cfg.osc.glide_ms);
+        const double attack  = coef(cfg.osc.attack_ms);
+        const double release = coef(cfg.osc.release_ms);
 
         const FilterMode fmode = cfg.filter.enabled ? cfg.filter.mode : FilterMode::Bypass;
-        const Formants   fm    = vowel_lerp(vowel_table(cfg.filter.vowel_a),
-                                            vowel_table(cfg.filter.vowel_b), rt.t_morph);
+        const Formants   fa    = vowel_table(cfg.filter.vowel_a);
+        const Formants   fb    = vowel_table(cfg.filter.vowel_b);
 
-        // Equal-power pan: a voice swept across the field keeps its apparent loudness.
-        const double th = (rt.t_pan + 1.0) * 0.25 * M_PI;
-        const double gl = std::cos(th), gr = std::sin(th);
-
+        // The first block after a voice appears jumps to its targets: sliding up from a
+        // constructor default would be an audible swoop nobody asked for.
+        if (!rt.primed) {
+            rt.n_level = rt.t_level; rt.n_cutoff = rt.t_cutoff; rt.n_q = rt.t_q;
+            rt.n_pw = rt.t_pw; rt.n_noise = rt.t_noise; rt.n_morph = rt.t_morph;
+            rt.n_pan = rt.t_pan;
+            rt.primed = true;
+        }
         if (rt.hz_now <= 0.0) rt.hz_now = rt.t_hz;
+
+        Formants fm = vowel_lerp(fa, fb, rt.n_morph);
 
         for (int i = 0; i < frames; ++i) {
             rt.hz_now = rt.t_hz + (rt.hz_now - rt.t_hz) * glide;
             const double ta = tone ? rt.t_amp : 0.0;
             rt.amp_now = ta > rt.amp_now ? ta + (rt.amp_now - ta) * attack
                                          : ta + (rt.amp_now - ta) * release;
+
+            rt.n_level  = rt.t_level  + (rt.n_level  - rt.t_level)  * mod_c;
+            rt.n_cutoff = rt.t_cutoff + (rt.n_cutoff - rt.t_cutoff) * mod_c;
+            rt.n_q      = rt.t_q      + (rt.n_q      - rt.t_q)      * mod_c;
+            rt.n_pw     = rt.t_pw     + (rt.n_pw     - rt.t_pw)     * mod_c;
+            rt.n_noise  = rt.t_noise  + (rt.n_noise  - rt.t_noise)  * mod_c;
+            rt.n_morph  = rt.t_morph  + (rt.n_morph  - rt.t_morph)  * mod_c;
+            rt.n_pan    = rt.t_pan    + (rt.n_pan    - rt.t_pan)    * mod_c;
+
+            if (fmode == FilterMode::Vowel && (i % FORMANT_INTERVAL) == 0)
+                fm = vowel_lerp(fa, fb, rt.n_morph);
 
             double hz  = rt.hz_now;
             double amp = rt.amp_now;
@@ -446,12 +477,15 @@ void Engine::render(int16_t* out, int frames) {
                 }
             }
 
-            float s = rt.oscil.render(cfg.osc.waveform, hz, dt, float(rt.t_pw), float(rt.t_noise));
-            s = rt.filt.process(s, fmode, rt.t_cutoff, rt.t_q, fm, double(sr_),
+            // Equal-power pan, per sample now that pan itself slides.
+            const double th = (rt.n_pan + 1.0) * 0.25 * M_PI;
+
+            float s = rt.oscil.render(cfg.osc.waveform, hz, dt, float(rt.n_pw), float(rt.n_noise));
+            s = rt.filt.process(s, fmode, rt.n_cutoff, rt.n_q, fm, double(sr_),
                                 float(cfg.filter.mix));
-            const float g = float(amp * rt.t_level);
-            mixL_[i] += s * g * float(gl);
-            mixR_[i] += s * g * float(gr);
+            const float g = float(amp * rt.n_level);
+            mixL_[i] += s * g * float(std::cos(th));
+            mixR_[i] += s * g * float(std::sin(th));
         }
     }
 
@@ -459,18 +493,31 @@ void Engine::render(int16_t* out, int frames) {
     // loud moment compresses rather than tearing.
     const FilterMode mmode = patch_.master.filter.enabled ? patch_.master.filter.mode
                                                           : FilterMode::Bypass;
-    const Formants mfm = vowel_lerp(vowel_table(patch_.master.filter.vowel_a),
-                                    vowel_table(patch_.master.filter.vowel_b), m_morph);
-    const double vol = (mute_.load() ? 0.0 : patch_.master.volume) * m_level * 0.25;
+    const Formants mfa = vowel_table(patch_.master.filter.vowel_a);
+    const Formants mfb = vowel_table(patch_.master.filter.vowel_b);
+    if (!m_primed) {
+        mn_cutoff = m_cutoff; mn_q = m_q; mn_morph = m_morph; mn_level = m_level;
+        m_primed = true;
+    }
+    Formants mfm = vowel_lerp(mfa, mfb, mn_morph);
+    const double mute_vol = (mute_.load() ? 0.0 : patch_.master.volume) * 0.25;
 
     double peak = 0.0;
     for (int i = 0; i < frames; ++i) {
-        float l = master_filt_.process(mixL_[i], mmode, m_cutoff, m_q, mfm, double(sr_),
+        mn_cutoff = m_cutoff + (mn_cutoff - m_cutoff) * mod_c;
+        mn_q      = m_q      + (mn_q      - m_q)      * mod_c;
+        mn_morph  = m_morph  + (mn_morph  - m_morph)  * mod_c;
+        mn_level  = m_level  + (mn_level  - m_level)  * mod_c;
+        if (mmode == FilterMode::Vowel && (i % FORMANT_INTERVAL) == 0)
+            mfm = vowel_lerp(mfa, mfb, mn_morph);
+
+        float l = master_filt_.process(mixL_[i], mmode, mn_cutoff, mn_q, mfm, double(sr_),
                                        float(patch_.master.filter.mix));
-        float r = master_filt_r_.process(mixR_[i], mmode, m_cutoff, m_q, mfm, double(sr_),
+        float r = master_filt_r_.process(mixR_[i], mmode, mn_cutoff, mn_q, mfm, double(sr_),
                                          float(patch_.master.filter.mix));
-        l = std::tanh(l * float(vol));
-        r = std::tanh(r * float(vol));
+        const float vol = float(mute_vol * mn_level);
+        l = std::tanh(l * vol);
+        r = std::tanh(r * vol);
         peak = std::max(peak, double(std::max(std::fabs(l), std::fabs(r))));
         out[2 * i]     = int16_t(std::clamp(l, -1.f, 1.f) * 32767.f);
         out[2 * i + 1] = int16_t(std::clamp(r, -1.f, 1.f) * 32767.f);

@@ -170,6 +170,13 @@ struct MasterCfg {
     bool        quantize = true;
     std::string scale    = "major_pentatonic";
     double      span     = 24.0;   // default pitch depth handed to auto-built routes
+    // How fast the control-rate destinations (cutoff, resonance, vowel morph, pulse width,
+    // noise mix, pan, level) chase their targets.  Diag frames land at ~30 Hz, so a target
+    // used raw moves in visible stair-steps; this is what turns them into a slide.  Pitch
+    // and amplitude are NOT smoothed here — they have glide and attack/release per voice.
+    // 0 disables it and restores the stair, which is occasionally what a sample-and-hold
+    // effect wants.
+    double      mod_smooth_ms = 25.0;
     FilterCfg   filter;
     // The master bus gets its own mod rack, so the output filter is modulatable by any
     // source rather than being a static shape.  This is where `vowel` earns its keep: the
