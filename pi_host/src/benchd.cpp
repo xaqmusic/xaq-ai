@@ -35,6 +35,8 @@ constexpr int    OPER_MAX_US     = 2100;
 constexpr int    FULL_MIN_US     = 500;    // the servo's full travel — cal.begin only
 constexpr int    FULL_MAX_US     = 2500;
 constexpr double TICK_HZ         = 50.0;
+constexpr double VBAT_LIMP_V     = 6.4;    // HAT minimum is 6.0: limp and refuse arming below this
+constexpr double VBAT_RECOVER_V  = 6.7;    // hysteresis: arming allowed again above this
 
 int64_t mono_ms() {
     timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -72,6 +74,9 @@ struct State {
     int  overruns = 0;
     int  bus_errors = 0;
     json last_adc = json::array({0, 0, 0, 0, 0});
+    bool low_battery = false;
+    std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
+    int  throttled_poll = 0;
     double tick_hz_meas = 0.0;
     uint64_t seq = 0;
     int64_t t0_ms = mono_ms();
@@ -135,12 +140,28 @@ struct State {
             if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
         }
         const double vbat = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
+        // SPEC 4.6 — low-voltage auto-safe.  The HAT powers the Pi too, so a dying pack
+        // takes the whole robot down; go limp early and say so.
+        if (!low_battery && vbat < VBAT_LIMP_V && vbat > 1.0) {
+            low_battery = true; limp_all("low battery");
+            record("low_battery", {{"vbat", vbat}, {"limp_v", VBAT_LIMP_V}});
+        } else if (low_battery && vbat > VBAT_RECOVER_V) {
+            low_battery = false; record("battery_ok", {{"vbat", vbat}});
+        }
+        if (++throttled_poll >= 10) {                          // once a second
+            throttled_poll = 0;
+            if (FILE* f = popen("vcgencmd get_throttled 2>/dev/null", "r")) {
+                char b[64] = {0}; if (fgets(b, sizeof b, f)) { std::string t(b); auto eq = t.find('='); if (eq != std::string::npos) { pi_throttled = t.substr(eq + 1); while (!pi_throttled.empty() && (pi_throttled.back() == '\n' || pi_throttled.back() == '\r')) pi_throttled.pop_back(); } }
+                pclose(f);
+            }
+        }
         const int64_t dm = armed_ch >= 0 ? std::max<int64_t>(0, DEADMAN_MS - (now - last_client_ms)) : 0;
         return {{"seq", ++seq}, {"t_mono_ms", now}, {"uptime_s", (now - t0_ms) / 1000.0}, {"mode", "bench"},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
-                {"overruns", overruns}, {"bus_errors", bus_errors}, {"servos", servos}};
+                {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery},
+                {"pi_throttled", pi_throttled}, {"servos", servos}};
     }
 };
 
@@ -215,6 +236,7 @@ json handle(State& S, const json& req) {   // caller holds m
     if (verb == "mode")   return req.value("mode", "") == "bench" ? ok({{"mode", "bench"}}) : err("only 'bench' exists here; the brain's modes live in ogma_host");
     if (verb == "servo.set") {
         if (!ch_of(req, ch)) return err("bad ch");
+        if (S.low_battery) return err("battery low — limp until it recovers above " + std::to_string(VBAT_RECOVER_V) + " V");
         const int us = req.value("us", -1);
         if (us < FULL_MIN_US || us > FULL_MAX_US) return err("us out of 500-2500");
         if (S.armed_ch >= 0 && S.armed_ch != ch) { S.driver.limp_all(); S.record("one-at-a-time", {{"limped", S.armed_ch}, {"arming", ch}}); }
@@ -232,6 +254,7 @@ json handle(State& S, const json& req) {   // caller holds m
     }
     if (verb == "cal.begin") {
         if (!ch_of(req, ch)) return err("bad ch");
+        if (S.low_battery) return err("battery low — no calibration until it recovers");
         if (S.cal_ch >= 0 && S.cal_ch != ch) return err("channel " + std::to_string(S.cal_ch) + " is already widened; cal.end first");
         S.cal_ch = ch; S.cal_until_ms = now + CAL_TIMEOUT_MS;
         S.driver.set_limits(ch, {FULL_MIN_US, FULL_MAX_US});

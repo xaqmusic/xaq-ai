@@ -34,6 +34,11 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
   500–2500 µs for at most **120 s**, logs entry and exit, and `cal.end` (or the timeout, or any
   deadman trip) restores the operating limits. Calibration exercises the real driver — clamp,
   slew, watchdog — never a bypass (SPEC §4.4).
+- **Low battery (SPEC §4.6).** The HAT powers the Pi as well as the servos, so a dying pack
+  takes the whole robot down. Below **6.4 V** on A4 the daemon limps everything and refuses
+  `servo.set` / `cal.begin` until the pack reads above **6.7 V** again (`low_battery` in
+  telemetry). `pi_throttled` echoes `vcgencmd get_throttled` (bit 0 = under-voltage now,
+  bit 16 = has occurred since boot) so a servo-transient brownout of the Pi is visible.
 - **`limp` is pulse 0.** There is no "pause" verb: holding the last pulse is a different wire
   action and is never the safe one (SPEC §4.1).
 
@@ -59,7 +64,8 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
 {"seq": 1234, "t_mono_ms": 812345, "uptime_s": 81.2, "mode": "bench", "body": "measured",
  "vbat": 7.63, "adc": [3209, 3367, 3487, 3575, 3137],
  "armed_ch": 0, "cal_ch": -1, "cal_ms_left": 0, "deadman_ms_left": 640,
- "watchdog_trips": 0, "tick_hz": 49.98, "overruns": 0,
+ "watchdog_trips": 0, "tick_hz": 49.98, "overruns": 0, "bus_errors": 0,
+ "low_battery": false, "pi_throttled": "0x0",
  "servos": [{"ch": 0, "target_us": 1500, "current_us": 1500, "armed": true,
              "at_limit_s": 0.0, "min_us": 900, "max_us": 2100}, "... x12"]}
 ```
