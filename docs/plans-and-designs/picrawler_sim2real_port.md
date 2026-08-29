@@ -603,7 +603,14 @@ a golden-*input* replay reader, not a telemetry container. Copy the shape, not t
 
 ### 4. Safety semantics — these are wire actions, not UI states
 
-**⚠ 4.1 "Pause" and "ragdoll" are DIFFERENT wire actions, and conflating them is the failure
+**⚠ 4.1 — CORRECTED 2026-08-29: "ragdoll" does not exist on the Robot HAT V4.** Measured on the
+bench: pulse count 0 / 1 / ARR are ignored by the MCU, a stopped timer is ignored, and the
+MCU held in reset for 30 s leaves the servo powered; the single 5 V/3 A DC-DC feeds the Pi
+and the servos together, so the rail cannot be cut without killing the Pi. **The safe action is
+a saved `rescue` pose** — what limp existed for (no servo straining into a hard stop) done with
+what the hardware can do. The paragraph below is kept as the original design intent.
+
+**⚠ 4.1 (original) "Pause" and "ragdoll" are DIFFERENT wire actions, and conflating them is the failure
 mode.** Per Phase 2: *"A servo holds its last pulse indefinitely; going limp requires setting the
 channel pulse to 0 so pulses stop entirely."* **A pause that merely stops the command stream
 leaves twelve servos straining against gravity at their last commanded angle** — the exact quiet

@@ -41,6 +41,10 @@ public:
     // Pulse width in microseconds.  0 -> pulses stop -> the servo goes limp.
     void set_pulse_us(int channel, int us);
     void limp(int channel) { set_pulse_us(channel, 0); }
+    // Raw on-count for the channel register (bench experiments only: 0..ARR).
+    void set_pulse_raw(int channel, int count);
+    // Any register, any 16-bit value (bench experiments only).
+    void write_raw(uint8_t reg, int value) { write_reg(reg, value); }
     void limp_all();
 
     int    adc_raw(int channel);                 // 0..4095

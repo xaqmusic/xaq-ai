@@ -1,5 +1,6 @@
 #include "ogma/hw/RobotHat.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -35,6 +36,11 @@ void RobotHat::setup_servo_timer(int channel) {
 void RobotHat::set_pulse_us(int channel, int us) {
     if (channel < 0 || channel >= N_SERVO) throw std::out_of_range("RobotHat channel");
     write_reg(REG_CHN + static_cast<uint8_t>(channel), pulse_count(us));
+}
+
+void RobotHat::set_pulse_raw(int channel, int count) {
+    if (channel < 0 || channel >= N_SERVO) throw std::out_of_range("RobotHat channel");
+    write_reg(REG_CHN + static_cast<uint8_t>(channel), std::max(0, std::min(count, 0xFFFF)));
 }
 
 void RobotHat::limp_all() {

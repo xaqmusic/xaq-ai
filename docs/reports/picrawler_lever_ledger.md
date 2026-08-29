@@ -4700,6 +4700,20 @@ honesty A/B — but it must happen BEFORE any hardware result is attributed to t
 context: every sim result on this config is a result on oracle inputs until that A/B runs.
 Scope and order recorded in the port doc (§H3).
 
+### ★★ 2026-08-29 — THE ROBOT HAT V4 CANNOT LIMP A SERVO: the safe state is a pose
+
+**Verdict: hardware fact (`WORKING` as a diagnosis); a SPEC §4.1 assumption falsified.** Bench
+sequence with the operator's hand on the rear-left knee (P0): armed at 1500/1800 µs it holds;
+then pulse count **0, 1, ARR** (8 s each) — holds; timer period **0** and **1**, prescaler
+**65535** — holds; **MCU held in reset for 5 s, then 30 s** — holds, and re-arms afterwards. The
+V4's servo 5 V is the same 5 V/3 A DC-DC that powers the Pi (SunFounder: "provides a stable
+power source for the Raspberry Pi and other devices"), so there is no rail to cut. SunFounder's
+own robots never go limp. **Consequence:** `limp`, the bench deadman and the low-battery
+auto-safe all command a saved **`rescue` pose** instead; "ragdoll" in the sim has no
+hardware counterpart, and the (d) test's "drop a sensor"-style perturbations must be designed
+around poses, not power. Re-use context: a separate servo BEC with its own switch would bring
+limp back (a rebuild the wiring doc declined; the reason is now measured, not assumed).
+
 ---
 
 ### 2026-08-29 — `diag_lite()` on eight more modules: diagnostic surface, structurally gain-0
