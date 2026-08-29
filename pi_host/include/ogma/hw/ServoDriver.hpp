@@ -48,7 +48,11 @@ public:
     // it; run the watchdog; accumulate time-at-limit.
     void tick();
     // Immediate: pulse 0 on every channel, targets cleared, watchdog idle.
+    // (On the Robot HAT V4 the MCU ignores pulse 0 — the owner must ALSO reset the MCU
+    // and then call forget_timers(); see McuReset.)
     void limp_all();
+    // After an MCU reset every timer is unprogrammed: the next command() re-programs it.
+    void forget_timers() { timer_ready_.fill(false); }
 
     bool   armed(int ch) const { return armed_[ch]; }
     int    target_us(int ch) const { return target_[ch]; }

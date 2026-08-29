@@ -8,11 +8,13 @@
 // The bus (/dev/i2c-1) is not thread-safe; every I2C access happens under the mutex.
 // There is NO verb that starts a brain here, and none will be added (SPEC §1.1).
 #include "ogma/hw/ServoDriver.hpp"
+#include "ogma/hw/McuReset.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zmq.h>
 
 #include <atomic>
+#include <memory>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -64,9 +66,9 @@ struct State {
     LinuxI2cBus bus;
     RobotHat hat;
     ServoDriver driver;
+    std::unique_ptr<McuReset> mcu;              // null if the GPIO line could not be taken
     std::string body;
-    int  armed_ch = -1;
-    int  armed_target_us = 0;
+    int  armed_ch = -1;                          // last channel set by servo.set, for the dashboard
     int  cal_ch = -1;
     int64_t cal_until_ms = 0;
     int64_t last_client_ms = 0;
@@ -75,6 +77,9 @@ struct State {
     int  bus_errors = 0;
     json last_adc = json::array({0, 0, 0, 0, 0});
     bool low_battery = false;
+    std::string rescue_name = "rescue";      // the pose that stands in for limp on this HAT
+    int64_t rescue_until_ms = 0;              // while set, the tick keeps feeding the driver
+    bool deadman_tripped = false;
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
     int  throttled_poll = 0;
     double tick_hz_meas = 0.0;
@@ -82,11 +87,15 @@ struct State {
     int64_t t0_ms = mono_ms();
     json map = json::object();
     std::string map_path;
+    json poses = json::object();                 // name -> {us:[12], saved_at}
+    std::string poses_path;
     std::ofstream log;
 
-    State(const std::string& dev, const std::string& body_, const std::string& map_path_, const std::string& log_path)
+    State(const std::string& dev, const std::string& body_, const std::string& map_path_, const std::string& poses_path_, const std::string& log_path)
         : bus(dev), hat(bus), driver(hat, ServoDriverConfig{40, int(TICK_HZ / 2), TICK_HZ}),
-          body(body_), map_path(map_path_), log(log_path, std::ios::app) {
+          body(body_), map_path(map_path_), poses_path(poses_path_), log(log_path, std::ios::app) {
+        std::ifstream pf(poses_path); if (pf) { try { poses = json::parse(pf); } catch (...) { poses = json::object(); } }
+        if (!poses.is_object()) poses = json::object();
         for (int c = 0; c < ServoDriver::N; ++c) driver.set_limits(c, {OPER_MIN_US, OPER_MAX_US});
         map = {{"version", 1}, {"body", body}, {"servos", json::array()}};
     }
@@ -115,12 +124,29 @@ struct State {
         map["servos"].push_back({{"ch", ch}});
         return map["servos"].back();
     }
-    void limp_all(const char* why) {
-        driver.limp_all();
-        armed_ch = -1;
+    bool has_rescue() const { return poses.contains(rescue_name) && poses[rescue_name].contains("us") && poses[rescue_name]["us"].is_array() && poses[rescue_name]["us"].size() == size_t(ServoDriver::N); }
+
+    // The SAFE ACTION.  Measured 2026-08-29: this HAT cannot de-energise a servo from
+    // software — pulse 0/1/ARR are ignored, a stopped timer is ignored, and the MCU held
+    // in reset for 30 s still leaves the servo powered.  So "limp" is a pose: every
+    // channel goes to the saved `rescue` pose (slewed), which is what limp existed for —
+    // no servo left straining into a hard stop.  Without a rescue pose the old register
+    // write is issued and recorded as such (it does nothing on this hardware).
+    void rescue(const char* why) {
         end_cal(why);
-        record("limp", {{"why", why}});
+        armed_ch = -1;
+        if (has_rescue()) {
+            const json& us = poses[rescue_name]["us"];
+            for (int c = 0; c < ServoDriver::N; ++c)
+                if (us[c].is_number() && us[c].get<int>() >= 0) { try { driver.command(c, us[c].get<int>()); } catch (...) {} }
+            rescue_until_ms = mono_ms() + 3000;                    // keep feeding until it gets there
+            record("rescue", {{"why", why}, {"pose", rescue_name}});
+        } else {
+            try { driver.limp_all(); } catch (...) {}
+            record("limp", {{"why", why}, {"note", "no rescue pose saved; pulse 0 is ignored by this HAT"}});
+        }
     }
+    void limp_all(const char* why) { rescue(why); }
 
     json frame() {   // caller holds m
         const int64_t now = mono_ms();
@@ -134,7 +160,9 @@ struct State {
         json adc = json::array();
         try {
             for (int c = 0; c < RobotHat::N_ADC; ++c) adc.push_back(hat.adc_raw(c));
-            last_adc = adc;
+            const double v = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
+            if (v > 9.0) { record("adc_garbage", {{"vbat", v}}); adc = last_adc; }   // post-reset garbage
+            else last_adc = adc;
         } catch (const std::exception& e) {
             ++bus_errors; adc = last_adc;                          // keep the last good reading
             if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
@@ -143,7 +171,7 @@ struct State {
         // SPEC 4.6 — low-voltage auto-safe.  The HAT powers the Pi too, so a dying pack
         // takes the whole robot down; go limp early and say so.
         if (!low_battery && vbat < VBAT_LIMP_V && vbat > 1.0) {
-            low_battery = true; limp_all("low battery");
+            low_battery = true; rescue("low battery");
             record("low_battery", {{"vbat", vbat}, {"limp_v", VBAT_LIMP_V}});
         } else if (low_battery && vbat > VBAT_RECOVER_V) {
             low_battery = false; record("battery_ok", {{"vbat", vbat}});
@@ -155,12 +183,15 @@ struct State {
                 pclose(f);
             }
         }
-        const int64_t dm = armed_ch >= 0 ? std::max<int64_t>(0, DEADMAN_MS - (now - last_client_ms)) : 0;
+        bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= driver.armed(c);
+        if (!any_armed) armed_ch = -1;
+        const int64_t dm = any_armed ? std::max<int64_t>(0, DEADMAN_MS - (now - last_client_ms)) : 0;
         return {{"seq", ++seq}, {"t_mono_ms", now}, {"uptime_s", (now - t0_ms) / 1000.0}, {"mode", "bench"},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
-                {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery},
+                {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
+                {"rescue_active", mono_ms() < rescue_until_ms},
                 {"pi_throttled", pi_throttled}, {"servos", servos}};
     }
 };
@@ -182,8 +213,17 @@ void tick_thread(State& S) {
         if (late_ns > period_ns) ++S.overruns;
         const int64_t ms = mono_ms();
         try {
-            if (S.armed_ch >= 0 && ms - S.last_client_ms <= DEADMAN_MS)
-                S.driver.command(S.armed_ch, S.armed_target_us);   // keeps the driver watchdog fed
+            bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= S.driver.armed(c);
+            const bool client_fresh = ms - S.last_client_ms <= DEADMAN_MS;
+            if (any_armed && !client_fresh && !S.deadman_tripped && ms >= S.rescue_until_ms) {
+                S.deadman_tripped = true; ++S.watchdog_trips;
+                S.record("deadman", {{"trips", S.watchdog_trips}});
+                S.rescue("deadman");                                       // the safe action, once
+            }
+            if (client_fresh) S.deadman_tripped = false;
+            if (client_fresh || ms < S.rescue_until_ms)                    // keeps the driver watchdog fed
+                for (int c = 0; c < ServoDriver::N; ++c)
+                    if (S.driver.armed(c)) S.driver.command(c, S.driver.target_us(c));
             if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
             S.driver.tick();
         } catch (const std::exception& e) {
@@ -192,11 +232,12 @@ void tick_thread(State& S) {
             // the operator disconnected mid-calibration (2026-08-28).
             ++S.bus_errors;
             if (S.bus_errors % 50 == 1) S.record("bus_error", {{"where", "tick"}, {"what", e.what()}, {"count", S.bus_errors}});
+            if (S.bus_errors % 20 == 0 && S.mcu && S.mcu->ok()) {          // SunFounder's own recovery for a stuck MCU
+                S.mcu->reset(); S.driver.forget_timers();
+                S.record("mcu_reset", {{"why", "persistent bus errors"}, {"count", S.bus_errors}});
+            }
         }
-        if (S.driver.watchdog_tripped() && S.armed_ch >= 0) {
-            ++S.watchdog_trips; S.armed_ch = -1; S.end_cal("deadman");
-            S.record("watchdog", {{"trips", S.watchdog_trips}});
-        }
+        if (S.driver.watchdog_tripped()) { S.armed_ch = -1; S.end_cal("watchdog"); }   // after a rescue has landed
         if (++win_ticks >= 100) { S.tick_hz_meas = win_ticks * 1000.0 / double(ms - win_start); win_start = ms; win_ticks = 0; }
     }
 }
@@ -232,15 +273,15 @@ json handle(State& S, const json& req) {   // caller holds m
 
     if (verb == "ping")   return ok({{"t_mono_ms", now}});
     if (verb == "status") { json f = S.frame(); f["map"] = S.map; return ok(f); }
-    if (verb == "limp")   { S.limp_all("verb"); return ok(); }
+    if (verb == "limp")   { S.rescue("verb"); return ok({{"rescue_pose", S.has_rescue() ? json(S.rescue_name) : json(nullptr)}}); }
     if (verb == "mode")   return req.value("mode", "") == "bench" ? ok({{"mode", "bench"}}) : err("only 'bench' exists here; the brain's modes live in ogma_host");
     if (verb == "servo.set") {
         if (!ch_of(req, ch)) return err("bad ch");
         if (S.low_battery) return err("battery low — limp until it recovers above " + std::to_string(VBAT_RECOVER_V) + " V");
         const int us = req.value("us", -1);
         if (us < FULL_MIN_US || us > FULL_MAX_US) return err("us out of 500-2500");
-        if (S.armed_ch >= 0 && S.armed_ch != ch) { S.driver.limp_all(); S.record("one-at-a-time", {{"limped", S.armed_ch}, {"arming", ch}}); }
-        S.armed_ch = ch; S.armed_target_us = us;
+        if (S.cal_ch >= 0 && S.cal_ch != ch) return err("channel " + std::to_string(S.cal_ch) + " is widened: one servo at a time until cal.end");
+        S.armed_ch = ch;
         S.driver.command(ch, us);
         return ok({{"clamped_us", S.driver.target_us(ch)}});
     }
@@ -256,6 +297,7 @@ json handle(State& S, const json& req) {   // caller holds m
         if (!ch_of(req, ch)) return err("bad ch");
         if (S.low_battery) return err("battery low — no calibration until it recovers");
         if (S.cal_ch >= 0 && S.cal_ch != ch) return err("channel " + std::to_string(S.cal_ch) + " is already widened; cal.end first");
+        for (int c = 0; c < ServoDriver::N; ++c) if (c != ch && S.driver.armed(c)) { S.driver.limp_all(); S.record("one-at-a-time", {{"why", "cal.begin"}, {"ch", ch}}); break; }
         S.cal_ch = ch; S.cal_until_ms = now + CAL_TIMEOUT_MS;
         S.driver.set_limits(ch, {FULL_MIN_US, FULL_MAX_US});
         S.record("cal.begin", {{"ch", ch}, {"until_ms", S.cal_until_ms}});
@@ -291,26 +333,67 @@ json handle(State& S, const json& req) {   // caller holds m
         if (!load_map(S, path, why)) return err(why);
         return ok({{"path", path}, {"map", S.map}});
     }
+    if (verb == "pose.set") {
+        if (S.cal_ch >= 0) return err("channel " + std::to_string(S.cal_ch) + " is widened: cal.end before a pose");
+        if (S.low_battery) return err("battery low");
+        if (!req.contains("us") || !req["us"].is_array() || req["us"].size() != size_t(ServoDriver::N)) return err("us must be an array of 12");
+        json clamped = json::array();
+        for (int c = 0; c < ServoDriver::N; ++c) {
+            const int us = req["us"][c].is_number() ? req["us"][c].get<int>() : -1;
+            if (us < 0) { clamped.push_back(nullptr); continue; }          // null = leave this channel as it is
+            if (us < FULL_MIN_US || us > FULL_MAX_US) return err("us[" + std::to_string(c) + "] out of 500-2500");
+            S.driver.command(c, us); clamped.push_back(S.driver.target_us(c));
+        }
+        S.armed_ch = -1;
+        S.record("pose.set", {{"clamped_us", clamped}});
+        return ok({{"clamped_us", clamped}});
+    }
+    if (verb == "pose.save") {
+        const std::string name = req.value("name", "");
+        if (name.empty() || name.size() > 40) return err("name required (<= 40 chars)");
+        if (!req.contains("us") || !req["us"].is_array() || req["us"].size() != size_t(ServoDriver::N)) return err("us must be an array of 12");
+        S.poses[name] = {{"us", req["us"]}, {"saved_at", utc_now()}};
+        std::ofstream f(S.poses_path); if (!f) return err("cannot write " + S.poses_path);
+        f << S.poses.dump(2) << '\n';
+        S.record("pose.save", {{"name", name}, {"us", req["us"]}});
+        return ok({{"name", name}, {"count", S.poses.size()}});
+    }
+    if (verb == "pose.list") { json names = json::array(); for (auto& [k, v] : S.poses.items()) names.push_back(k); return ok({{"poses", names}}); }
+    if (verb == "pose.get") {
+        const std::string name = req.value("name", "");
+        if (!S.poses.contains(name)) return err("no pose '" + name + "'");
+        return ok({{"name", name}, {"us", S.poses[name]["us"]}, {"saved_at", S.poses[name].value("saved_at", "")}});
+    }
+    if (verb == "pose.delete") {
+        const std::string name = req.value("name", "");
+        if (!S.poses.contains(name)) return err("no pose '" + name + "'");
+        S.poses.erase(name);
+        std::ofstream f(S.poses_path); if (f) f << S.poses.dump(2) << '\n';
+        return ok({{"count", S.poses.size()}});
+    }
     return err("unknown verb '" + verb + "'");
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string body = "measured", dev = "/dev/i2c-1", log_dir = "pi_host/log", map_path = "pi_host/calib/servo_map.json";
-    int rep_port = 5590, pub_port = 5591;
+    std::string body = "measured", dev = "/dev/i2c-1", log_dir = "pi_host/log", map_path = "pi_host/calib/servo_map.json", poses_path = "pi_host/calib/poses.json";
+    int rep_port = 5590, pub_port = 5591; std::string rescue_name_arg = "rescue";
     for (int i = 1; i + 1 < argc; i += 2) {
         std::string a = argv[i];
         if (a == "--body") body = argv[i + 1]; else if (a == "--i2c") dev = argv[i + 1];
         else if (a == "--rep") rep_port = std::atoi(argv[i + 1]); else if (a == "--pub") pub_port = std::atoi(argv[i + 1]);
         else if (a == "--log-dir") log_dir = argv[i + 1]; else if (a == "--map") map_path = argv[i + 1];
+        else if (a == "--poses") poses_path = argv[i + 1]; else if (a == "--rescue") rescue_name_arg = argv[i + 1];
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
     const std::string log_path = log_dir + "/benchd_" + stamp_now() + ".jsonl";
-    State S(dev, body, map_path, log_path);
+    State S(dev, body, map_path, poses_path, log_path);
+    S.rescue_name = rescue_name_arg;
+    std::printf("ogma_benchd: rescue pose '%s' %s\n", S.rescue_name.c_str(), S.has_rescue() ? "loaded" : "NOT SAVED YET — limp is impossible on this HAT, save one");
+    try { S.mcu = std::make_unique<McuReset>(); } catch (const std::exception& e) { std::fprintf(stderr, "benchd: no MCU reset line (%s) — limp will be register-only, which this HAT ignores\n", e.what()); }
     if (!S.log) std::fprintf(stderr, "benchd: cannot open %s (continuing without the record)\n", log_path.c_str());
-    try { S.limp_all("startup"); } catch (const std::exception& e) { std::fprintf(stderr, "benchd: startup limp failed: %s\n", e.what()); }
     { std::string why; if (load_map(S, map_path, why)) std::printf("ogma_benchd: loaded map %s (%zu servos)\n", map_path.c_str(), S.map["servos"].size()); else std::printf("ogma_benchd: no map loaded (%s)\n", why.c_str()); }
     S.record("start", {{"body", body}, {"i2c", dev}, {"rep", rep_port}, {"pub", pub_port}, {"vbat", S.hat.battery_volts()}, {"map_servos", S.map["servos"].size()}});
 
@@ -349,7 +432,7 @@ int main(int argc, char** argv) {
         zmq_send(rep, out.data(), out.size(), 0);
     }
     tt.join(); tl.join();
-    { std::lock_guard<std::mutex> lk(S.m); try { S.limp_all("shutdown"); } catch (...) {} }
+    { std::lock_guard<std::mutex> lk(S.m); S.record("shutdown", {}); }
     zmq_close(rep); zmq_close(pub); zmq_ctx_term(ctx);
     return 0;
 }

@@ -5,6 +5,8 @@
 //   hat_tool pulse <ch> <us> [hold_s]  slew to <us>, hold, then limp (default hold 1 s)
 //   hat_tool sweep <ch> <from> <to> <step_us> [dwell_s]   STAIRCASE: hop, hold, hop... then limp
 //   hat_tool ramp  <ch> <from> <to> [slew_us_per_tick]     one continuous slew-limited move, then limp
+//   hat_tool limptest <ch>          arm at 1500, then hold three candidate 'limp' register values
+//                                   (0, 1, 4095) for 8 s each — feel the servo: which one goes slack?
 // Every servo action goes through ServoDriver: clamp, slew, watchdog, time-at-limit.
 // ROBOT ON A STAND for any servo verb.
 #include "ogma/hw/ServoDriver.hpp"
@@ -13,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <thread>
 
@@ -47,6 +50,47 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (verb == "limp") { hat.limp_all(); std::printf("all %d channels -> pulse 0 (limp)\n", RobotHat::N_SERVO); return 0; }
+        if (verb == "limptest2" && argc >= 3) {
+            // Discriminate: does the MCU default-pulse at boot?  Does stopping the TIMER release the servo?
+            const int ch = std::atoi(argv[2]); const uint8_t t = uint8_t(ch / 4);
+            auto arm = [&](int us, int secs) { hat.setup_servo_timer(ch); hat.set_pulse_us(ch, us); std::printf("ch%d -> %d us (%d s)\n", ch, us, secs); std::fflush(stdout); std::this_thread::sleep_for(std::chrono::seconds(secs)); };
+            arm(1800, 3);
+            std::printf("PHASE 1: MCU RESET with the knee at 1800 — does it SNAP TO CENTRE, stay stiff, or go floppy? (8 s)\n"); std::fflush(stdout);
+            std::system("timeout 0.05 gpioset -c gpiochip0 5=0 >/dev/null 2>&1; (gpioset -c gpiochip0 5=1 & sleep 0.4; kill $! ) 2>/dev/null");
+            std::this_thread::sleep_for(std::chrono::seconds(8));
+            arm(1800, 3);
+            std::printf("PHASE 2: timer %d ARR = 0 (period 0) — floppy? (8 s)\n", t); std::fflush(stdout);
+            hat.write_raw(RobotHat::REG_ARR + t, 0);
+            std::this_thread::sleep_for(std::chrono::seconds(8));
+            arm(1800, 3);
+            std::printf("PHASE 3: timer %d ARR = 1 (count 368 > ARR: constant level) — floppy? (8 s)\n", t); std::fflush(stdout);
+            hat.write_raw(RobotHat::REG_ARR + t, 1);
+            std::this_thread::sleep_for(std::chrono::seconds(8));
+            arm(1800, 3);
+            std::printf("PHASE 4: prescaler = 65535 (one pulse every ~3.7 s) — floppy between twitches? (8 s)\n"); std::fflush(stdout);
+            hat.write_raw(RobotHat::REG_PSC + t, 0xFFFF);
+            std::this_thread::sleep_for(std::chrono::seconds(8));
+            hat.setup_servo_timer(ch); hat.set_pulse_us(ch, 0);
+            std::printf("done (timer restored, count 0)\n");
+            return 0;
+        }
+        if (verb == "limptest" && argc >= 3) {
+            const int ch = std::atoi(argv[2]);
+            hat.setup_servo_timer(ch);
+            const int cands[3] = {0, 1, RobotHat::SERVO_ARR};
+            const char* names[3] = {"A: count 0 (current limp)", "B: count 1 (~5 us pulse)", "C: count 4095 (always high, no edges)"};
+            for (int i = 0; i < 3; ++i) {
+                hat.set_pulse_us(ch, 1500);
+                std::printf("ch%d -> 1500 us (armed, 3 s)  ...try to move it: it should resist\n", ch); std::fflush(stdout);
+                std::this_thread::sleep_for(std::chrono::seconds(3));
+                hat.set_pulse_raw(ch, cands[i]);
+                std::printf("ch%d -> %s  (8 s)  ...try to move it now\n", ch, names[i]); std::fflush(stdout);
+                std::this_thread::sleep_for(std::chrono::seconds(8));
+            }
+            hat.set_pulse_raw(ch, 0);
+            std::printf("done; ch%d left at count 0\n", ch);
+            return 0;
+        }
 
         ServoDriverConfig cfg;             // driver defaults: slew 40 us/tick, watchdog 0.5 s
         ServoDriver d(hat, cfg);

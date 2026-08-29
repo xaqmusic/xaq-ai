@@ -25,10 +25,12 @@ not know or care that a viewer came and went.
 channel, and the deadman belongs to the calibration channel only. In `bench`:
 
 - **Deadman.** While any servo is armed the client must send *some* verb (`ping` will do) at
-  least every **1000 ms**. If it does not, the daemon stops re-issuing targets and the driver's
-  own watchdog goes to **pulse 0 (limp)** within 0.5 s. Telemetry carries `deadman_ms_left`.
-- **One servo at a time.** `servo.set` on channel *n* limps every other armed channel first.
-  Enforced by construction, not by protocol discipline.
+  least every **1000 ms**. If it does not, the daemon commands the **rescue pose** once and
+  keeps feeding the driver until it lands. Telemetry carries `deadman_ms_left`.
+- **One servo at a time — while widened.** `cal.begin` limps every other channel first, and
+  while a channel is widened `servo.set` / `pose.set` on any other channel is refused. Outside
+  the widened mode channels hold independently, so a pose can be recalled and one joint
+  adjusted against it (2026-08-29; before this every `servo.set` limped the others).
 - **Envelope.** Every channel has *operating* limits (default **900–2100 µs** until calibration
   narrows them). `cal.begin` is the *audited widened mode*: it opens ONE channel to the full
   500–2500 µs for at most **120 s**, logs entry and exit, and `cal.end` (or the timeout, or any
@@ -39,7 +41,14 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
   `servo.set` / `cal.begin` until the pack reads above **6.7 V** again (`low_battery` in
   telemetry). `pi_throttled` echoes `vcgencmd get_throttled` (bit 0 = under-voltage now,
   bit 16 = has occurred since boot) so a servo-transient brownout of the Pi is visible.
-- **`limp` is pulse 0.** There is no "pause" verb: holding the last pulse is a different wire
+- **`limp` is a POSE, because this HAT cannot de-energise a servo (measured 2026-08-29).** Pulse
+  count 0, 1 and ARR are ignored; a stopped timer is ignored; the MCU held in reset for 30 s
+  leaves the servo powered; the 5 V/3 A DC-DC that feeds the servos also feeds the Pi. So the
+  safe action is the saved pose named **`rescue`**: `limp`, the deadman and low battery all
+  command it (slewed, every channel). Telemetry carries `rescue_pose` (name or `null` if none
+  is saved) and `rescue_active`. `pose.save` a pose called `rescue` first; until then the
+  daemon says so at start and in the banner.
+- There is no "pause" verb: holding the last pulse is a different wire
   action and is never the safe one (SPEC §4.1).
 
 ## Verbs
@@ -48,7 +57,7 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
 |---|---|---|---|
 | `ping` | — | `t_mono_ms` | feeds the deadman |
 | `status` | — | the full telemetry frame + `map` | |
-| `limp` | — | — | pulse 0 on all 12; clears armed + widened state |
+| `limp` | — | `rescue_pose` | command the `rescue` pose on all 12 (see above); ends any widened state |
 | `servo.set` | `ch` 0–11, `us` | `clamped_us` | arms `ch`; clamped to its current limits; slewed by the driver |
 | `servo.limits` | `ch`, `min_us`, `max_us` | — | sets the OPERATING limits (persisted by `cal.save`) |
 | `cal.begin` | `ch` | `until_ms` | widen `ch` to 500–2500 for ≤120 s; refused if another channel is widened |
@@ -57,6 +66,9 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
 | `cal.save` | optional `path` | `path` | write the map JSON (default `pi_host/calib/servo_map.json` in the Pi checkout) |
 | `cal.load` | optional `path` | `path`, `map` | |
 | `mode` | `mode` | — | only `bench` is accepted; anything else → `ok:false` (the brain's modes live in `ogma_host`) |
+| `pose.set` | `us` (array of 12 µs; `null`/negative = leave that channel) | `clamped_us` | arms every listed channel at once (clamped, slewed); refused while a channel is widened |
+| `pose.save` | `name`, `us` (12) | `count` | store a named pose in `pi_host/calib/poses.json` (raw µs per channel, independent of the map) |
+| `pose.list` / `pose.get` / `pose.delete` | — / `name` / `name` | `poses` / `us`,`saved_at` / `count` | |
 
 ## Telemetry frame (topic `bench`, 10 Hz)
 

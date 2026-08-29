@@ -39,6 +39,8 @@ var _tele_ms: int = -1
 var _rows: Array = []
 var _pending: Dictionary = {}       # ch -> us awaiting a throttled servo.set
 var _ping_acc := 0.0
+var _pose_name: LineEdit
+var _pose_list: OptionButton
 var _send_acc := 0.0
 var _status_msg := ""
 
@@ -94,10 +96,21 @@ func _build_ui() -> void:
 	row.add_child(_lbl(":%d / :%d" % [REP_PORT, PUB_PORT]))
 	var cb := Button.new(); cb.text = "  CONNECT  "; cb.pressed.connect(_on_connect); row.add_child(cb)
 	var db := Button.new(); db.text = "  DISCONNECT  "; db.pressed.connect(_on_disconnect); row.add_child(db)
-	var lb := Button.new(); lb.text = "  LIMP ALL (pulse 0)  "; lb.pressed.connect(_on_limp); row.add_child(lb)
+	var lb := Button.new(); lb.text = "  RESCUE POSE  "; lb.pressed.connect(_on_limp); row.add_child(lb)
 	lb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	_link_lbl = _lbl("link: disconnected"); row.add_child(_link_lbl)
 	var banner := HBoxContainer.new(); topv.add_child(banner)
+	# --- poses: raw µs per channel, stored on the Pi (pi_host/calib/poses.json).  SAVE takes
+	# the twelve sliders as they are; RECALL sets the sliders AND arms all twelve servos.
+	var prow := HBoxContainer.new(); topv.add_child(prow)
+	prow.add_child(_lbl("POSE"))
+	_pose_name = LineEdit.new(); _pose_name.placeholder_text = "name (e.g. storage)"; _pose_name.custom_minimum_size.x = 160; prow.add_child(_pose_name)
+	var psb := Button.new(); psb.text = " SAVE POSE (sliders) "; psb.pressed.connect(_on_pose_save); prow.add_child(psb)
+	_pose_list = OptionButton.new(); _pose_list.custom_minimum_size.x = 160; prow.add_child(_pose_list)
+	var prb := Button.new(); prb.text = " RECALL (arms all 12) "; prb.pressed.connect(_on_pose_recall); prow.add_child(prb)
+	prb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
+	var pdb := Button.new(); pdb.text = " delete "; pdb.pressed.connect(_on_pose_delete); prow.add_child(pdb)
+	var prf := Button.new(); prf.text = " ⟳ "; prf.pressed.connect(_refresh_poses); prow.add_child(prf)
 	_mode_lbl = _lbl("MODE: —", 20); banner.add_child(_mode_lbl)
 	banner.add_child(_lbl("      "))
 	_body_lbl = _lbl("BODY: —", 20); banner.add_child(_body_lbl)
@@ -266,6 +279,8 @@ func _on_connect() -> void:
 		_set_status("connected to %s" % _host_edit.text if bool(rep.get("ok", false)) else "socket open, but no reply from daemon: %s" % str(rep.get("error", "")))
 	else:
 		_set_status("connect failed: %s" % str(_client.call("last_error")))
+	if _connected:
+		_refresh_poses()
 
 func _on_disconnect() -> void:
 	# Disconnect is an ACTION, not a closed window (SPEC §4.2.2).  In bench mode the
@@ -274,14 +289,14 @@ func _on_disconnect() -> void:
 	_connected = false
 	_tele = {}; _tele_ms = -1
 	for d in _rows: d["armed"] = false
-	_set_status("disconnected — bench deadman on the Pi limps any armed servo within ~1.5 s")
+	_set_status("disconnected — bench deadman on the Pi sends the rescue pose within ~1 s")
 
 func _on_limp() -> void:
 	var rep := _call({"verb": "limp"})
 	if bool(rep.get("ok", false)):
 		for d in _rows: d["armed"] = false
 		_pending.clear()
-		_set_status("limp: all 12 channels → pulse 0")
+		_set_status("rescue pose '%s' commanded (this HAT cannot limp a servo)" % str(rep.get("rescue_pose", "NONE SAVED")))
 
 func _on_arm(ch: int) -> void:
 	if _refuse_if_not_measured("ARM P%d" % ch): return
@@ -382,13 +397,13 @@ func _update_labels() -> void:
 		_link_lbl.text = "link: DISCONNECTED"
 		_link_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	elif _link_fail >= 3 or (age_ms < 0 or age_ms > 1500):
-		_link_lbl.text = "link: LOST (%s) — daemon deadman limps armed servos" % ("no telemetry" if age_ms < 0 else "%d ms stale" % age_ms)
+		_link_lbl.text = "link: LOST (%s) — daemon deadman → rescue pose" % ("no telemetry" if age_ms < 0 else "%d ms stale" % age_ms)
 		_link_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
 	else:
 		_link_lbl.text = "link: OK   telemetry age %d ms" % age_ms
 		_link_lbl.add_theme_color_override("font_color", Color(0.3, 1, 0.3))
 	var mode := str(_tele.get("mode", "—"))
-	_mode_lbl.text = "MODE: %s — link loss ⇒ LIMP (deadman on the calibration channel)" % mode
+	_mode_lbl.text = "MODE: %s — link loss ⇒ RESCUE POSE (%s)" % [mode, "saved" if _tele.get("rescue_pose") != null else "NONE SAVED — save a pose named rescue"]
 	_mode_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
 	if _tele.is_empty():
 		_body_lbl.text = "BODY: — (no telemetry)"
@@ -475,3 +490,60 @@ func _apply_row_limits(ch: int) -> void:
 	var hi := int(d["max"].text.to_int())
 	var rep: Dictionary = _call({"verb": "servo.limits", "ch": ch, "min_us": lo, "max_us": hi})
 	_set_status("P%d limits %d–%d: %s" % [ch, lo, hi, "ok" if rep.get("ok", false) else str(rep.get("error", "?"))])
+
+# ======================================================================================
+# Poses
+# ======================================================================================
+func _slider_us() -> Array:
+	var us: Array = []
+	for d in _rows: us.append(int(d["slider"].value))
+	return us
+
+func _refresh_poses() -> void:
+	if not _connected: return
+	var rep: Dictionary = _call({"verb": "pose.list"})
+	var keep := _pose_list.get_item_text(_pose_list.selected) if _pose_list.selected >= 0 else ""
+	_pose_list.clear()
+	for n in rep.get("poses", []):
+		_pose_list.add_item(str(n))
+	for k in range(_pose_list.item_count):
+		if _pose_list.get_item_text(k) == keep: _pose_list.select(k)
+
+func _on_pose_save() -> void:
+	var name := _pose_name.text.strip_edges()
+	if name.is_empty():
+		_set_status("pose: give it a name first"); return
+	var rep: Dictionary = _call({"verb": "pose.save", "name": name, "us": _slider_us()})
+	_set_status("pose '%s' saved (%s poses)" % [name, str(rep.get("count", "?"))] if rep.get("ok", false) else "pose.save: " + str(rep.get("error", "?")))
+	_refresh_poses()
+	for k in range(_pose_list.item_count):
+		if _pose_list.get_item_text(k) == name: _pose_list.select(k)
+
+func _on_pose_recall() -> void:
+	if _pose_list.selected < 0:
+		_set_status("pose: nothing selected"); return
+	var name := _pose_list.get_item_text(_pose_list.selected)
+	if _refuse_if_not_measured("RECALL pose '%s'" % name): return
+	var rep: Dictionary = _call({"verb": "pose.get", "name": name})
+	if not rep.get("ok", false):
+		_set_status("pose.get: " + str(rep.get("error", "?"))); return
+	var us: Array = rep.get("us", [])
+	if us.size() != 12:
+		_set_status("pose '%s' is malformed" % name); return
+	for ch in range(12):
+		_rows[ch]["slider"].set_value_no_signal(float(us[ch]))
+		_rows[ch]["us"].text = "%d µs" % int(us[ch])
+	var set_rep: Dictionary = _call({"verb": "pose.set", "us": us})
+	if set_rep.get("ok", false):
+		for d in _rows: d["armed"] = true
+		_pending.clear()
+		_set_status("pose '%s' recalled — all 12 armed (slewing)" % name)
+	else:
+		_set_status("pose.set: " + str(set_rep.get("error", "?")))
+
+func _on_pose_delete() -> void:
+	if _pose_list.selected < 0: return
+	var name := _pose_list.get_item_text(_pose_list.selected)
+	var rep: Dictionary = _call({"verb": "pose.delete", "name": name})
+	_set_status("pose '%s' deleted" % name if rep.get("ok", false) else "pose.delete: " + str(rep.get("error", "?")))
+	_refresh_poses()
