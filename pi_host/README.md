@@ -27,12 +27,18 @@ pulse count `trunc(µs/20000·4095)`, `0` = limp; ADC select `(7−ch)|0x10` the
 
 Robot on a stand for any servo verb.
 
-**Run the daemon** (from the checkout root on the Pi; the paths in it are relative):
+**The daemon is a systemd service** (`/etc/systemd/system/ogma-benchd.service`, installed
+2026-08-29): starts on boot, restarts 2 s after any exit, `WorkingDirectory=~/xaq-ai` so the
+relative `pi_host/log` and `pi_host/calib` paths hold, stdout/stderr appended to
+`pi_host/log/benchd.stdout`. It auto-loads `pi_host/calib/servo_map.json` at start.
 ```sh
-cd ~/xaq-ai && setsid -f ./pi_host/build/ogma_benchd --body measured > pi_host/log/benchd.stdout 2>&1 < /dev/null
+systemctl status ogma-benchd            # is it up, what did it print
+sudo systemctl restart ogma-benchd      # after rebuilding pi_host/build/ogma_benchd
+sudo systemctl stop ogma-benchd         # before hat_tool — both open /dev/i2c-1
 ```
-`hat_tool` and `ogma_benchd` both open `/dev/i2c-1` — stop the daemon (`pkill -x ogma_benchd`)
-before using `hat_tool`, or just use the daemon's verbs.
+I²C is retried 3× per transaction in `LinuxI2cBus`; a NACK that survives the retries is
+counted (`bus_errors` in telemetry, logged every 50th) and never fatal — the first daemon died
+on one such error mid-calibration and took the session with it.
 
 **Bench-verified 2026-08-28** (pyzmq client from the laptop): telemetry under `ZMQ_CONFLATE`
 (which is why frames are single-part), `servo.set` clamp + slew, one-at-a-time, deadman trip

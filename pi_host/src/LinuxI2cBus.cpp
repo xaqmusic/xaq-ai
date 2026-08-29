@@ -7,6 +7,12 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
+#include <chrono>
+#include <thread>
+
+// The HAT's MCU occasionally NACKs a transaction (servo noise, a momentary sag):
+// retry a few times before it becomes the caller's problem.
+static constexpr int kRetries = 3;
 
 namespace ogma::hw {
 
@@ -29,17 +35,24 @@ void LinuxI2cBus::select(uint8_t addr) {
 
 void LinuxI2cBus::write(uint8_t addr, const std::vector<uint8_t>& bytes) {
     select(addr);
-    ssize_t n = ::write(fd_, bytes.data(), bytes.size());
-    if (n != static_cast<ssize_t>(bytes.size()))
-        throw std::runtime_error(std::string("LinuxI2cBus: write: ") + std::strerror(errno));
+    for (int attempt = 0;; ++attempt) {
+        ssize_t n = ::write(fd_, bytes.data(), bytes.size());
+        if (n == static_cast<ssize_t>(bytes.size())) return;
+        if (attempt >= kRetries)
+            throw std::runtime_error(std::string("LinuxI2cBus: write: ") + std::strerror(errno));
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
 }
 
 uint8_t LinuxI2cBus::read_byte(uint8_t addr) {
     select(addr);
     uint8_t b = 0;
-    if (::read(fd_, &b, 1) != 1)
-        throw std::runtime_error(std::string("LinuxI2cBus: read: ") + std::strerror(errno));
-    return b;
+    for (int attempt = 0;; ++attempt) {
+        if (::read(fd_, &b, 1) == 1) return b;
+        if (attempt >= kRetries)
+            throw std::runtime_error(std::string("LinuxI2cBus: read: ") + std::strerror(errno));
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
 }
 
 } // namespace ogma::hw

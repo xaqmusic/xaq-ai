@@ -70,6 +70,8 @@ struct State {
     int64_t last_client_ms = 0;
     int  watchdog_trips = 0;
     int  overruns = 0;
+    int  bus_errors = 0;
+    json last_adc = json::array({0, 0, 0, 0, 0});
     double tick_hz_meas = 0.0;
     uint64_t seq = 0;
     int64_t t0_ms = mono_ms();
@@ -125,14 +127,20 @@ struct State {
                               {"min_us", lim.min_us}, {"max_us", lim.max_us}});
         }
         json adc = json::array();
-        for (int c = 0; c < RobotHat::N_ADC; ++c) adc.push_back(hat.adc_raw(c));
+        try {
+            for (int c = 0; c < RobotHat::N_ADC; ++c) adc.push_back(hat.adc_raw(c));
+            last_adc = adc;
+        } catch (const std::exception& e) {
+            ++bus_errors; adc = last_adc;                          // keep the last good reading
+            if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
+        }
         const double vbat = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
         const int64_t dm = armed_ch >= 0 ? std::max<int64_t>(0, DEADMAN_MS - (now - last_client_ms)) : 0;
         return {{"seq", ++seq}, {"t_mono_ms", now}, {"uptime_s", (now - t0_ms) / 1000.0}, {"mode", "bench"},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
-                {"overruns", overruns}, {"servos", servos}};
+                {"overruns", overruns}, {"bus_errors", bus_errors}, {"servos", servos}};
     }
 };
 
@@ -152,10 +160,18 @@ void tick_thread(State& S) {
         std::lock_guard<std::mutex> lk(S.m);
         if (late_ns > period_ns) ++S.overruns;
         const int64_t ms = mono_ms();
-        if (S.armed_ch >= 0 && ms - S.last_client_ms <= DEADMAN_MS)
-            S.driver.command(S.armed_ch, S.armed_target_us);       // keeps the driver watchdog fed
-        if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
-        S.driver.tick();
+        try {
+            if (S.armed_ch >= 0 && ms - S.last_client_ms <= DEADMAN_MS)
+                S.driver.command(S.armed_ch, S.armed_target_us);   // keeps the driver watchdog fed
+            if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
+            S.driver.tick();
+        } catch (const std::exception& e) {
+            // A NACK that survived the bus retries.  Count it, log it, carry on: the next
+            // tick rewrites every armed pulse anyway.  Dying here left the robot limp and
+            // the operator disconnected mid-calibration (2026-08-28).
+            ++S.bus_errors;
+            if (S.bus_errors % 50 == 1) S.record("bus_error", {{"where", "tick"}, {"what", e.what()}, {"count", S.bus_errors}});
+        }
         if (S.driver.watchdog_tripped() && S.armed_ch >= 0) {
             ++S.watchdog_trips; S.armed_ch = -1; S.end_cal("deadman");
             S.record("watchdog", {{"trips", S.watchdog_trips}});
@@ -174,6 +190,14 @@ void telemetry_thread(State& S, void* pub) {
         const std::string msg = "bench " + body;
         zmq_send(pub, msg.data(), msg.size(), ZMQ_DONTWAIT);
     }
+}
+
+bool load_map(State& S, const std::string& path, std::string& why) {   // caller holds m
+    std::ifstream f(path); if (!f) { why = "cannot read " + path; return false; }
+    try { S.map = json::parse(f); } catch (const std::exception& e) { why = std::string("bad json: ") + e.what(); return false; }
+    if (!S.map.contains("servos") || !S.map["servos"].is_array()) S.map["servos"] = json::array();
+    for (auto& s : S.map["servos"]) { int c = s.value("ch", -1); if (c >= 0 && c < ServoDriver::N && c != S.cal_ch) S.driver.set_limits(c, S.oper_limits(c)); }
+    return true;
 }
 
 json handle(State& S, const json& req) {   // caller holds m
@@ -240,9 +264,8 @@ json handle(State& S, const json& req) {   // caller holds m
     }
     if (verb == "cal.load") {
         const std::string path = req.value("path", S.map_path);
-        std::ifstream f(path); if (!f) return err("cannot read " + path);
-        try { S.map = json::parse(f); } catch (const std::exception& e) { return err(std::string("bad json: ") + e.what()); }
-        for (auto& s : S.map["servos"]) { int c = s.value("ch", -1); if (c >= 0 && c < ServoDriver::N && c != S.cal_ch) S.driver.set_limits(c, S.oper_limits(c)); }
+        std::string why;
+        if (!load_map(S, path, why)) return err(why);
         return ok({{"path", path}, {"map", S.map}});
     }
     return err("unknown verb '" + verb + "'");
@@ -264,8 +287,9 @@ int main(int argc, char** argv) {
     const std::string log_path = log_dir + "/benchd_" + stamp_now() + ".jsonl";
     State S(dev, body, map_path, log_path);
     if (!S.log) std::fprintf(stderr, "benchd: cannot open %s (continuing without the record)\n", log_path.c_str());
-    S.limp_all("startup");
-    S.record("start", {{"body", body}, {"i2c", dev}, {"rep", rep_port}, {"pub", pub_port}, {"vbat", S.hat.battery_volts()}});
+    try { S.limp_all("startup"); } catch (const std::exception& e) { std::fprintf(stderr, "benchd: startup limp failed: %s\n", e.what()); }
+    { std::string why; if (load_map(S, map_path, why)) std::printf("ogma_benchd: loaded map %s (%zu servos)\n", map_path.c_str(), S.map["servos"].size()); else std::printf("ogma_benchd: no map loaded (%s)\n", why.c_str()); }
+    S.record("start", {{"body", body}, {"i2c", dev}, {"rep", rep_port}, {"pub", pub_port}, {"vbat", S.hat.battery_volts()}, {"map_servos", S.map["servos"].size()}});
 
     void* ctx = zmq_ctx_new();
     void* rep = zmq_socket(ctx, ZMQ_REP);
@@ -292,7 +316,8 @@ int main(int argc, char** argv) {
         try {
             json req = json::parse(buf);
             std::lock_guard<std::mutex> lk(S.m);
-            reply = handle(S, req);
+            try { reply = handle(S, req); }
+            catch (const std::exception& e) { ++S.bus_errors; reply = {{"ok", false}, {"error", std::string("bus: ") + e.what()}}; }
             if (req.value("verb", "") != "ping") S.record("verb", {{"req", req}, {"reply", reply}});
         } catch (const std::exception& e) {
             reply = {{"ok", false}, {"error", std::string("bad request: ") + e.what()}};
@@ -301,7 +326,7 @@ int main(int argc, char** argv) {
         zmq_send(rep, out.data(), out.size(), 0);
     }
     tt.join(); tl.join();
-    { std::lock_guard<std::mutex> lk(S.m); S.limp_all("shutdown"); }
+    { std::lock_guard<std::mutex> lk(S.m); try { S.limp_all("shutdown"); } catch (...) {} }
     zmq_close(rep); zmq_close(pub); zmq_ctx_term(ctx);
     return 0;
 }
