@@ -40,3 +40,19 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Sweep-arm configs, generated into the configs dir by the harness scripts and
+# regenerable from them — they are outputs of a study, not inputs to one.
+#   gainevo_make_arms.py {basin|basin3d|winverify|tsweep|d2}  ->  <sweep>_NN.json,
+#       <sweep>_spec.json, d2_<arm>_sN.json, tsweep_<arm>_sN.json, winverify_NN.json
+#   strido_twobody.py                                         ->  e3_settle.json,
+#       e3b_<body>_<arm>.json
+# Listed by family rather than globbed, so a genuinely new config still shows up as
+# untracked and gets a decision instead of disappearing silently.
+godot_host/project/addons/ami_ogma/configs/basin_*.json
+godot_host/project/addons/ami_ogma/configs/basin3d_*.json
+godot_host/project/addons/ami_ogma/configs/winverify_*.json
+godot_host/project/addons/ami_ogma/configs/tsweep_*.json
+godot_host/project/addons/ami_ogma/configs/d2_*.json
+godot_host/project/addons/ami_ogma/configs/e3_settle.json
+godot_host/project/addons/ami_ogma/configs/e3b_*.json
