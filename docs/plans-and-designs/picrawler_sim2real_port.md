@@ -409,7 +409,7 @@ systemd service with I²C retries, non-fatal bus errors, map/pose auto-load, low
 auto-safe and `pi_throttled` in telemetry. Power rule: the HAT powers the Pi; never both the
 HAT and the Pi's USB-C — HAT plus its own charger on the bench.
 
-**2026-08-30 — wifi, and the robot's own name.**
+**2026-08-30 — wifi, the robot's own name, and the INA219 driver.**
 **The onboard wifi was rfkill soft-blocked** (`phy0 soft=1`; NetworkManager `WIFI disabled`
 while `WIFI-HW enabled`), which is why every configuration attempt failed with no useful
 error — the device reads `unavailable`, so there is nothing for a wizard to configure. The
@@ -426,6 +426,21 @@ address — the eth0 address does not survive unplugging the cable, which is the
 having wifi. Verified end-to-end: libzmq's `getaddrinfo` resolves `.local` through nss-mdns,
 and the smoke client reached the live daemon over `picrawler.local` (30 telemetry frames in
 3 s, `vbat` 8.29 V).
+
+**`Ina219` landed in `ogma::hw`** (BOM §6 step 2 software half; the part is not installed
+yet). Three decisions worth carrying: **`I2cBus` gained `read_bytes()`** because two
+`read_byte()` calls are two START..STOP transactions and the INA219 restarts at its pointer's
+MSB each time — the naive version returns the high byte twice and silently halves every
+reading, so a test asserts the block read is used. **Current is derived on the host from raw
+shunt counts**, with the chip's `CURRENT` register kept only as a cross-check, because
+`r_shunt` is calibration data that will be re-fitted on the bench and a re-fit must re-derive
+already-recorded samples rather than strand them behind a stale constant — the capture file
+therefore stores raw counts plus `r_shunt` as metadata. **PGA defaults to /8**: the shunt LSB
+is 10 µV on every range, so the widest full scale costs no resolution, and `pga_clipped` is
+reported explicitly because a clipped peak is a floor rather than a measurement — silently
+under-measuring the inrush is the one failure this sensor exists to prevent. 18/18 `test_hw`
+pass on x86 and aarch64. `hat_tool ina probe` exits 0 only when the INA219's bus voltage
+agrees with A4 within 0.15 V, which is BOM §6 step 2's pass condition made scriptable.
 
 **Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
 passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step

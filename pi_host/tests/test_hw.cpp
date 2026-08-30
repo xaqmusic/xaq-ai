@@ -2,23 +2,157 @@
 // ones SunFounder's robot_hat 2.5.5 puts on the wire, cross-checked on the bench
 // 2026-08-28 (ADC read of A4 = 7.65 V pack; P0 moved at 1300/1500/1700 us).
 #include "ogma/hw/ServoDriver.hpp"
+#include "ogma/hw/Ina219.hpp"
 #include <gtest/gtest.h>
 
 using namespace ogma::hw;
 
 struct FakeI2cBus : I2cBus {
+    uint8_t expect_addr = RobotHat::ADDR;
     std::vector<std::vector<uint8_t>> writes;
     std::vector<uint8_t> read_queue;
+    int byte_reads = 0, block_reads = 0;
     void write(uint8_t addr, const std::vector<uint8_t>& b) override {
-        EXPECT_EQ(addr, RobotHat::ADDR);
+        EXPECT_EQ(addr, expect_addr);
         writes.push_back(b);
     }
     uint8_t read_byte(uint8_t) override {
+        ++byte_reads;
         EXPECT_FALSE(read_queue.empty());
         uint8_t v = read_queue.front(); read_queue.erase(read_queue.begin()); return v;
     }
+    std::vector<uint8_t> read_bytes(uint8_t, std::size_t n) override {
+        ++block_reads;
+        EXPECT_GE(read_queue.size(), n);
+        std::vector<uint8_t> out(read_queue.begin(), read_queue.begin() + n);
+        read_queue.erase(read_queue.begin(), read_queue.begin() + n);
+        return out;
+    }
     std::vector<uint8_t> last() const { return writes.empty() ? std::vector<uint8_t>{} : writes.back(); }
+    // Queue a 16-bit register value the way the part returns it: MSB first.
+    void queue_reg(uint16_t v) { read_queue.push_back(v >> 8); read_queue.push_back(v & 0xFF); }
 };
+
+// ---------------------------------------------------------------------------
+// INA219 — battery-inline current monitor (BOM §3).  Everything here is byte- or
+// datasheet-level; nothing needs the part present.
+// ---------------------------------------------------------------------------
+
+// A fake wired for 0x40 and the R010 shunt we run inline on the pack.
+struct InaFixture {
+    FakeI2cBus bus;
+    Ina219     ina{bus, 0.01, Ina219::ADDR_DEFAULT};
+    InaFixture() { bus.expect_addr = Ina219::ADDR_DEFAULT; }
+};
+
+TEST(Ina219Protocol, ConfigWordReproducesTheDatasheetPowerOnDefault) {
+    // The strongest available check on the bit layout: 0x399F is published, and
+    // it is exactly BRNG=32V, PGA/8, 12-bit both, shunt+bus continuous.
+    Ina219Config d;
+    d.brng = BusRange::V32; d.pga = Pga::Div8;
+    d.badc = Adc::Bits12;   d.sadc = Adc::Bits12;
+    d.mode = Mode::ShuntBusContinuous;
+    EXPECT_EQ(Ina219::config_word(d), 0x399F);
+}
+
+TEST(Ina219Protocol, OurDefaultsAre16VRangeAndWidestPga) {
+    // 16 V range for a 2S pack (6.0-8.4 V); PGA/8 so an inrush peak cannot clip.
+    EXPECT_EQ(Ina219::config_word(Ina219Config{}), 0x199F);
+    EXPECT_EQ(Ina219::pga_full_scale_v(Pga::Div8), 0.320);
+    EXPECT_EQ(Ina219::pga_clip_counts(Pga::Div8), 32000);   // 0.320 V / 10 uV
+    // Widening the PGA costs no resolution: the shunt LSB is 10 uV on every range.
+    EXPECT_EQ(Ina219::SHUNT_LSB_V, 10e-6);
+}
+
+TEST(Ina219Protocol, CaptureConfigIsShuntOnlyAtFullSpeed) {
+    // The inrush measurement: shunt only, 532 us -> ~1.9 kHz.  Pack voltage is
+    // not what browns out, so the bus channel is dropped to halve the period.
+    EXPECT_EQ(Ina219::config_word(ina219_capture_config()), 0x181D);
+    EXPECT_EQ(Ina219::conversion_time_us(Adc::Bits12), 532);
+    EXPECT_EQ(Ina219::conversion_time_us(Adc::Avg128), 68100);
+}
+
+TEST(Ina219Protocol, CalibrationWordForBothShunts) {
+    // R100 (stock) and R010 (fitted for the brownout measurement) both land on
+    // cal = 4096; only the current LSB and the full scale move.
+    EXPECT_DOUBLE_EQ(Ina219::choose_current_lsb(0.1,  Pga::Div8), 100e-6);
+    EXPECT_DOUBLE_EQ(Ina219::choose_current_lsb(0.01, Pga::Div8), 1e-3);
+    EXPECT_EQ(Ina219::calibration_word(0.1,  100e-6), 4096);
+    EXPECT_EQ(Ina219::calibration_word(0.01, 1e-3),   4096);
+    // Bit 0 of the calibration register is void and always reads back 0.
+    EXPECT_EQ(Ina219::calibration_word(0.0091, 2e-3) & 1u, 0u);
+}
+
+TEST(Ina219Protocol, ConfigureWritesConfigThenCalibration) {
+    InaFixture f;
+    f.ina.configure(ina219_capture_config());
+    ASSERT_EQ(f.bus.writes.size(), 2u);
+    EXPECT_EQ(f.bus.writes[0], (std::vector<uint8_t>{0x00, 0x18, 0x1D}));   // CONFIG
+    EXPECT_EQ(f.bus.writes[1], (std::vector<uint8_t>{0x05, 0x10, 0x00}));   // CALIB = 4096
+    EXPECT_EQ(f.ina.calibration_word(), 4096);
+}
+
+TEST(Ina219Protocol, RegisterReadIsPointerWriteThenOneTwoByteTransaction) {
+    // The trap this guards: two read_byte() calls are two START..STOPs, and the
+    // INA219 restarts at the MSB each time -- it would return the high byte twice.
+    InaFixture f;
+    f.bus.queue_reg(0x0BB8);
+    EXPECT_EQ(f.ina.read_shunt_raw(), 3000);
+    EXPECT_EQ(f.bus.last(), (std::vector<uint8_t>{0x01}));   // pointer = SHUNT_V
+    EXPECT_EQ(f.bus.block_reads, 1);
+    EXPECT_EQ(f.bus.byte_reads,  0);
+}
+
+TEST(Ina219Protocol, BusVoltageDropsTheThreeFlagBitsAndSurfacesThem) {
+    InaFixture f;
+    f.bus.queue_reg(0);                                       // shunt = 0
+    f.bus.queue_reg((1850u << 3) | 0x2);                      // 7.400 V, CNVR set
+    auto s = f.ina.read();
+    EXPECT_NEAR(s.bus_v, 7.400, 1e-9);
+    EXPECT_TRUE(s.conversion_ready);
+    EXPECT_FALSE(s.overflow);
+    EXPECT_EQ(s.bus_raw, (1850u << 3) | 0x2);                 // the record keeps it raw
+    f.bus.queue_reg(0);
+    f.bus.queue_reg((1500u << 3) | 0x1);                      // OVF: chip math invalid
+    EXPECT_TRUE(f.ina.read().overflow);
+}
+
+TEST(Ina219Protocol, ShuntIsSignedSoAReversedInstallReadsNegativeNotGarbage) {
+    // Vin+/Vin- swapped is a realistic wiring mistake.  It must be VISIBLE.
+    InaFixture f;
+    f.bus.queue_reg(0xFA24);                                  // -1500 counts
+    f.bus.queue_reg(1850u << 3);
+    auto s = f.ina.read();
+    EXPECT_EQ(s.shunt_raw, -1500);
+    EXPECT_NEAR(s.shunt_v, -0.015, 1e-12);
+    EXPECT_NEAR(s.current_a, -1.5, 1e-9);                     // -0.015 V / 0.01 ohm
+}
+
+TEST(Ina219Protocol, AClippedPeakIsFlaggedNotReportedAsMeasured) {
+    // At full scale the reading is a FLOOR on the truth.  Under-measuring the
+    // inrush silently is the one failure this sensor exists to avoid.
+    InaFixture f;
+    f.bus.queue_reg(32000); f.bus.queue_reg(1850u << 3);
+    EXPECT_TRUE(f.ina.read().pga_clipped);
+    f.bus.queue_reg(31999); f.bus.queue_reg(1850u << 3);
+    EXPECT_FALSE(f.ina.read().pga_clipped);
+}
+
+TEST(Ina219Protocol, CurrentIsHostDerivedSoARefitRescalesTheRecord) {
+    // r_shunt is calibration data, not a constant: a bench re-fit must re-derive
+    // already-recorded raw samples rather than strand them behind a stale value.
+    InaFixture f;
+    EXPECT_NEAR(f.ina.shunt_to_amps(1000), 1.0, 1e-12);       // 10 mV / 0.01 ohm
+    f.ina.set_r_shunt(0.0091);                                // R010 || stock R100
+    EXPECT_NEAR(f.ina.shunt_to_amps(1000), 1.0989010989, 1e-9);
+    EXPECT_EQ(f.bus.last()[0], Ina219::REG_CALIB);            // and the chip follows
+}
+
+TEST(Ina219Protocol, RejectsAShuntThatCannotBeCalibrated) {
+    FakeI2cBus bus;
+    EXPECT_THROW(Ina219(bus, 0.0), std::invalid_argument);
+    EXPECT_THROW(Ina219::calibration_word(1e-9, 1e-9), std::invalid_argument);
+}
 
 TEST(RobotHatProtocol, TimerSetupWritesPrescalerAndPeriod) {
     FakeI2cBus bus; RobotHat hat(bus);

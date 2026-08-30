@@ -17,6 +17,7 @@ add_library(ogma_hw
   src/ServoDriver.cpp
   src/LinuxI2cBus.cpp
   src/McuReset.cpp
+  src/Ina219.cpp
 )
 target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(ogma_hw PRIVATE -Wall -Wextra)

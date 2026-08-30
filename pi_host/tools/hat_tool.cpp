@@ -5,17 +5,21 @@
 //   hat_tool pulse <ch> <us> [hold_s]  slew to <us>, hold, then limp (default hold 1 s)
 //   hat_tool sweep <ch> <from> <to> <step_us> [dwell_s]   STAIRCASE: hop, hold, hop... then limp
 //   hat_tool ramp  <ch> <from> <to> [slew_us_per_tick]     one continuous slew-limited move, then limp
+//   hat_tool ina probe [r_shunt]     INA219 at 0x40: bus V, current, and the A4 cross-check
+//   hat_tool ina capture <sec> <file> [r_shunt]  shunt-only burst -> JSONL (the inrush record)
 //   hat_tool limptest <ch>          arm at 1500, then hold three candidate 'limp' register values
 //                                   (0, 1, 4095) for 8 s each — feel the servo: which one goes slack?
 // Every servo action goes through ServoDriver: clamp, slew, watchdog, time-at-limit.
 // ROBOT ON A STAND for any servo verb.
 #include "ogma/hw/ServoDriver.hpp"
+#include "ogma/hw/Ina219.hpp"
 
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
 #include <string>
 #include <thread>
 
@@ -41,6 +45,68 @@ int main(int argc, char** argv) {
         LinuxI2cBus bus("/dev/i2c-1");
         RobotHat hat(bus);
         if (verb == "vbat") { std::printf("Vbat %.2f V\n", hat.battery_volts()); return 0; }
+        if (verb == "ina") {
+            const std::string sub = argc > 2 ? argv[2] : "probe";
+            // r_shunt is calibration data: the default is the R010 we fit inline,
+            // but pass the real fitted value once it is measured on the bench.
+            if (sub == "probe") {
+                const double rs = argc > 3 ? std::atof(argv[3]) : 0.01;
+                Ina219 ina(bus, rs);
+                ina.configure(ina219_telemetry_config());
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));  // one 68 ms average
+                const auto s2 = ina.read();
+                const double a4 = hat.battery_volts();
+                std::printf("INA219 0x40   r_shunt %.5f ohm   I_lsb %.1f uA   cal %u\n",
+                            ina.r_shunt(), ina.current_lsb_a() * 1e6, ina.calibration_word());
+                std::printf("  bus     %.3f V     shunt %+.3f mV (raw %+d)\n",
+                            s2.bus_v, s2.shunt_v * 1e3, s2.shunt_raw);
+                std::printf("  current %+.3f A    (chip reg %+.3f A, power %.2f W)\n",
+                            s2.current_a, ina.chip_current_a(), ina.chip_power_w());
+                std::printf("  A4      %.3f V     delta %+.3f V  -> %s\n", a4, s2.bus_v - a4,
+                            std::fabs(s2.bus_v - a4) < 0.15 ? "AGREE (BOM 6.2 pass)" : "DISAGREE");
+                if (s2.overflow)    std::printf("  ! OVF: chip current/power registers invalid\n");
+                if (s2.pga_clipped) std::printf("  ! PGA CLIPPED: reading is a floor, not a measurement\n");
+                return std::fabs(s2.bus_v - a4) < 0.15 ? 0 : 1;
+            }
+            if (sub == "capture") {
+                if (argc < 5) { std::fprintf(stderr, "usage: hat_tool ina capture <sec> <file> [r_shunt]\n"); return 2; }
+                const double  secs = std::atof(argv[3]);
+                const char*   path = argv[4];
+                const double  rs   = argc > 5 ? std::atof(argv[5]) : 0.01;
+                Ina219 ina(bus, rs);
+                const auto cfg = ina219_capture_config();
+                ina.configure(cfg);
+                const int period_us = Ina219::conversion_time_us(cfg.sadc);
+                std::FILE* f = std::fopen(path, "w");
+                if (!f) { std::fprintf(stderr, "cannot open %s\n", path); return 2; }
+                // The record is raw counts + a timestamp.  r_shunt is written once as
+                // metadata so a later bench re-fit re-derives every sample (SPEC 3).
+                std::fprintf(f, "{\"kind\":\"ina219_capture\",\"r_shunt_ohm\":%.6f,"
+                                "\"shunt_lsb_v\":%g,\"period_us\":%d,\"pga_clip_counts\":%d}\n",
+                             rs, Ina219::SHUNT_LSB_V, period_us, Ina219::pga_clip_counts(cfg.pga));
+                const auto t0 = std::chrono::steady_clock::now();
+                auto next = t0;
+                long n = 0; int peak = 0; bool clipped = false;
+                while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < secs) {
+                    const int16_t raw = ina.read_shunt_raw();
+                    const long us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now() - t0).count();
+                    std::fprintf(f, "{\"t_us\":%ld,\"shunt_raw\":%d}\n", us, raw);
+                    if (std::abs(static_cast<int>(raw)) > std::abs(peak)) peak = raw;
+                    if (std::abs(static_cast<int>(raw)) >= Ina219::pga_clip_counts(cfg.pga)) clipped = true;
+                    ++n;
+                    next += std::chrono::microseconds(period_us);
+                    std::this_thread::sleep_until(next);
+                }
+                std::fclose(f);
+                std::printf("%ld samples in %.1f s (%.0f Hz) -> %s\n", n, secs, n / secs, path);
+                std::printf("peak %+d counts = %+.3f A\n", peak, ina.shunt_to_amps(static_cast<int16_t>(peak)));
+                if (clipped) std::printf("! PGA CLIPPED -- the peak is a FLOOR.  Widen the range or fit a smaller shunt.\n");
+                return 0;
+            }
+            std::fprintf(stderr, "usage: hat_tool ina probe|capture ...\n");
+            return 2;
+        }
         if (verb == "adc") {
             for (int c = 0; c < RobotHat::N_ADC; ++c) {
                 int raw = hat.adc_raw(c);
