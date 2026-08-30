@@ -1,0 +1,355 @@
+> **LIVING DOC — the single reference for the Microduck port.** Started 2026-08-30 on branch
+> `microduck-sim`. **Nothing is built yet**; every phase below is a plan. Update it in place —
+> do not fork a second port doc. The picrawler hardware build ([`picrawler_sim2real_port.md`](picrawler_sim2real_port.md))
+> runs in parallel and **shares no files with this work** (§Coordination).
+
+# Microduck port plan
+
+## Context
+
+[Microduck](https://github.com/pollen-robotics/microduck) is a ~800 g, ~25 cm bipedal robot
+from Pollen Robotics: fifteen Dynamixel XL330 servos and an IMU board on one 1 Mbps bus,
+driven by a 50 Hz Rust control loop on a Rockchip RK3566. Its policies are trained next door
+in [`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) — MuJoCo + PPO, exported
+to ONNX. Both repos are Apache-2.0.
+
+**The reason to care is not the robot, it is the sensorimotor surface.** Three things this
+body has that the picrawler does not, each of which the ledger has been fighting:
+
+1. **Measured joint position and velocity.** `pi_host`'s wire protocol is PWM pulse counts —
+   the picrawler has no encoders. MotorEPM's whole premise is
+   `ξ(t+1) = x(t+1) − x̂(t+1)` against a forward self-model `x̂ = A·y + b`. With `x` sourced
+   from *commanded* angles the self-model learns the identity map and the TLE collapses: a
+   §3.2 tautology, and the reason the picrawler's deepest result is currently sim-only for a
+   hardware reason rather than a scientific one. The duck returns measured `positions` and
+   `velocities` in the same bus transaction as the IMU.
+2. **Per-joint current (mA), every tick.** The ledger names this gap explicitly — the
+   swing-detector post-mortem ends *"answering 'is this foot loaded' needs a load observation,
+   which the bus does not have"*, and §6 names `joint_torque` as "the load observation Walknet
+   never had". Here it is a first-class channel. `stroke_load_gain` was measured against a
+   *simulated* hip1 load; on this body it would be a real one.
+3. **An 8×8 depth matrix with the geometry already done.** `kinematics::tof::Reprojector`
+   turns the VL53L8CX's 64 slant ranges into trunk-frame points classified
+   `Empty`/`TooClose`/`Floor`/`Hit`, using head FK and projected gravity to reject the floor.
+   The belly-rangefinder lesson (doctrine §1: a missing *observation*, not a missing policy)
+   generalises straight in, at 64 zones instead of one beam.
+
+Two more, smaller: runtime-settable servo P gain gives the adaptive-gains substrate plan an
+actuator it has never had, and contact odometry's anchor-foot switch is a body-derived phase
+event — §0 rule 3's "feed it phase", from the body rather than from a clock.
+
+**Timing.** The picrawler hardware bring-up occupies the bench. This work is pure simulation
+and needs no hardware, so the two proceed in parallel without contending for the robot.
+
+---
+
+## Decisions taken 2026-08-30
+
+| Decision | Choice | Why |
+|---|---|---|
+| **Sim engine** | MuJoCo, using Pollen's MJCF unmodified | Their body model is CAD-exported from Onshape, mesh-accurate, and validated by transfer to a real robot. Rebuilding it in Godot would reproduce that badly. `picrawler_sim2real_port.md` records what happens when a hand-derived body disagrees with the real one |
+| **Host** | A new **`mj_host/`**, peer to `godot_host/` and `pi_host/` | `OgmaInstance.hpp:60` already says the Bus is owned by "the host (Godot Host, **HAL Host**, Debug Host)". A second host is the anticipated shape, not a new one |
+| **No Godot for the duck** | Confirmed | The Godot dependency is the *picrawler body*, not the brain. `xaq_inspector` and `xaq_voice` reach the brain over ZMQ (`tcp://127.0.0.1:7400/7401`), so the operator's UI-first promotion gate survives the engine change untouched |
+| **No OgmaBrain refactor** | `mj_host` links `ogma_core` directly | `OgmaBrain.cpp` is 2 197 lines of Godot `Variant` marshalling that every picrawler A/B depends on. `mj_host` needs none of it: it can hold an `OgmaInstance` and call it in plain C++. Extracting a shared "BrainHost" would be a large refactor of a load-bearing file, for a duplication that is small and honest |
+
+---
+
+## The body of record
+
+Everything here is read from Pollen's own source, not transcribed from documentation.
+
+### Actuation — 14 policy joints, position control
+
+Joint order (`duck-control/src/model.rs`, `JOINT_NAMES`; index 9 `mouth` is excluded from
+every policy and from the action vector):
+
+| idx | joint | idx | joint | idx | joint |
+|---|---|---|---|---|---|
+| 0 | `left_hip_yaw` | 5 | `neck_pitch` | 10 | `right_hip_yaw` |
+| 1 | `left_hip_roll` | 6 | `head_pitch` | 11 | `right_hip_roll` |
+| 2 | `left_hip_pitch` | 7 | `head_yaw` | 12 | `right_hip_pitch` |
+| 3 | `left_knee` | 8 | `head_roll` | 13 | `right_knee` |
+| 4 | `left_ankle` | *9* | *mouth (excluded)* | 14 | `right_ankle` |
+
+Home pose (`DEFAULT_POSITION`, radians) is mirrored left/right and must match the sim's
+`HOME_FRAME` exactly — the policies observe joint position *relative* to it, and Pollen's own
+test `home_pose_legs_are_mirrored` pins the mirror.
+
+### Sensing, per 50 Hz tick
+
+| Channel | Width | Source | Markov-legal? |
+|---|---|---|---|
+| joint position | 15 | measured, rad | ✔ egocentric |
+| joint velocity | 15 | measured, rad/s | ✔ |
+| joint current | 15 | measured, mA (sign dropped) | ✔ — **the load observation** |
+| gyro | 3 | trunk frame, rad/s | ✔ |
+| projected gravity | 3 | trunk frame unit vector | ✔ |
+| ToF depth | 8×8 | `tofd`, 45°×45°, separate daemon | ✔ after reprojection |
+| bus voltage, per-joint temperature | 1 + 15 | ~1 Hz, separate transaction | ✔ interoceptive |
+
+Note what is **absent**: there is no god's-eye anything. The picrawler's legal foot-height
+signal is `feet_y_gravity_cmd` — FK from *commanded* angles, because there are no encoders. On
+the duck the same FK runs from *measured* angles, and the "commanded ≈ actual" assumption
+disappears.
+
+### The sim model — what is actually in the MJCF
+
+Checked against `microduck_rl/src/mjlab_microduck/robot/microduck/`:
+
+- `robot_walk.xml` — 428 lines, 85 geoms, 38 mesh assets (STL, in `assets/`), full inertials
+  from Onshape, joint ranges, **14 `position` actuators**. Self-contained.
+- `robot_allcollisions.xml` — the same body with the full collision set; the standup /
+  ground-pick / roller tasks use it. **This is the one we want**, because a brain that
+  destabilises on purpose will put the trunk on the floor and the walk model does not have
+  geometry there.
+- `scene_walk.xml` / `scene.xml` — floor plane, lighting, and four keyframes: `INIT`,
+  `STAND` (the STAND2 pose, CoM over the ankle axis), `SIT`, `FOLD`.
+- `sensors.xml` — `framequat`, `gyro`, `velocimeter`, `accelerometer` on the `imu` site,
+  plus `subtreeangmom`.
+- `joints_properties.xml` — the actuator default classes. The live one is `chosen_actuator`:
+  `joint damping=0.053 frictionloss=0.0048 armature=0.0018`,
+  `position kp=0.55 kv=0 forcerange=±0.96 ctrlrange=±10`.
+
+**⚠ The BAM actuator model is not in the MJCF.** `microduck_rl`'s headline actuator
+fidelity — the voltage-controlled XL330 model with Coulomb / Stribeck / load-dependent
+friction — comes from the Python package `better-actuator-models` and is installed onto the
+model at runtime by mjlab. What a plain-MuJoCo host gets is the XML `position` actuator above.
+Same for the ±1° backlash hinges (a post-processor, `add_backlash.py`, which *does* emit
+committed XML — `robot_walk_backlash.xml` — so backlash is available; BAM is not). See
+[SPEC — actuator fidelity](#spec--actuator-fidelity-the-bam-question).
+
+---
+
+## What we take from Pollen, and what we refuse
+
+`microduck_rl` is three separable layers. Naming them is what keeps the RL out.
+
+| Layer | Contents | Verdict |
+|---|---|---|
+| **A — the physics** | MJCF from Onshape, mesh collision, inertials, joint ranges, actuator classes, backlash hinges, the scene and its keyframes | **Take all of it.** Reward-free by construction. It is a body model, and it is the artefact the picrawler port had to derive from a tape measure |
+| **B — the deployment contract** | `obs[1,61] → act[1,14]` at 50 Hz, joint order, `HOME_FRAME`, `action_scale`, low-pass α | **Take the joint order, the home pose and the rate. Refuse the observation vector** (below) |
+| **C — the RL** | PPO, reward terms, curricula, command sampling, domain randomisation *as a training device* | **Refuse.** §5.1. We do not need it |
+
+### ⚠ The 61-D observation is the trap, and it is specific
+
+The observation is *almost* clean: gyro (3), projected gravity (3), joint position relative to
+home (14), joint velocity (14), previous action (14) — every one of those egocentric and legal.
+The problem is the last thirteen slots, `[vx, vy, vyaw, head(4), body(6)]`.
+
+That block is a **commanded set-point from a gamepad**. Feeding it to the brain as an input is
+the steering-script instinct from doctrine §1's table, arriving through a door marked "sensor".
+In this framework the command block is not an input to the brain — it is the *output* of a
+drive, or it is not there at all.
+
+Practically: **`mj_host` publishes the 48 proprioceptive dimensions and never the command
+block.** If an ONNX policy is ever loaded (Phase 4), the host synthesises its command block
+from the brain's own action topics, and that synthesis is a **named scaffold** with a
+de-scaffolding path, not a sensory channel.
+
+---
+
+## Architecture — `mj_host` is a peer HAL
+
+```text
+   ┌──────────────────────── mj_host (one process) ─────────────────────────┐
+   │                                                                        │
+   │   MuJoCo                    DuckBody                    OgmaInstance   │
+   │   mjModel/mjData  ──read──▶ (sensor reduction) ─publish─▶ InProcessBus │
+   │        ▲                                                       │       │
+   │        │                    action.<joint> ◀──last_value───────┘       │
+   │        └──── d->ctrl ◀───── (envelope: clamp · slew)                   │
+   │                                                                        │
+   │   ControlServer :7400 (JSON-RPC)   DiagPublisher :7401 (ZMQ PUB)       │
+   └────────────────┬───────────────────────────┬───────────────────────────┘
+                    │                           │
+             xaq_inspector                  xaq_voice
+        (unchanged — same ports)      (unchanged — diag_lite only)
+```
+
+### What `mj_host` owns
+
+- `mjModel` / `mjData` from a vendored `scene_allcollisions.xml`, stepped at the physics rate
+  with the brain ticked at 50 Hz (see G3).
+- **`DuckBody`** — the analogue of `picrawler_body.gd`, in C++: reads `mjData`, publishes named
+  proprio packets, reads the action channels, writes `d->ctrl`. This is the only file that
+  knows about ducks.
+- `OgmaInstance` + `InProcessBus`, built from a JSON `GraphConfig` exactly as the Godot host
+  builds one.
+- `ControlServer` on 7400 and `DiagPublisher` on 7401, so `xaq_inspector` and `xaq_voice`
+  attach with no change.
+- A JSON-per-line diagnostic on stdout, in the shape `seedavg.py` already parses.
+- An optional GLFW viewer (MuJoCo ships one), off by default, `--headless` being the norm.
+
+### ⚠ What `mj_host` must NOT own
+
+- **No reward, no episode return, no fitness.** The `metadata` block in picrawler configs
+  carries `reward_shape` / `target_height` / `stability_gain` — those are picrawler-body
+  scoring fields consumed by the Godot body, and none of them come across.
+- **No command block, no twist, no waypoint.** See above.
+- **No ONNX in Phases 0–3.** A policy in the process is a policy that gets reached for.
+
+---
+
+## Validation gates — checks, not A/Bs
+
+Constraints the port must satisfy independently of any behavioural result. **If one fails, the
+port is wrong** — these are not levers and are never seed-averaged.
+
+| Gate | Constraint |
+|---|---|
+| **G1 — the model loads unmodified** | `mj_loadXML` on the vendored scene succeeds with zero edits to Pollen's XML. Any edit we need is an *overlay* file, recorded as such |
+| **G2 — the STAND keyframe is a stable equilibrium** | Hold `key STAND`'s `ctrl` for 3 s from noisy inits: the trunk stays upright. **Check tilt, not height** — `microduck_rl/AGENTS.md` records that a settle test recording only `z` reports fallen states as resting fine |
+| **G3 — rate fidelity** | The brain ticks at exactly 50 Hz against MuJoCo's timestep, with the substep count stated and constant. The picrawler's `TAU = 0.02` is the same contract; a drifting ratio makes every learning rate meaningless |
+| **G4 — joint-order round trip** | `DuckBody` maps `action.<joint_name>` → `d->ctrl[i]` by **name lookup on the model**, never by a transcribed index — and a test asserts the resulting order matches `JOINT_NAMES`. This is the picrawler leg-naming mirror (`picrawler_sim2real_port.md` §"The leg-naming mirror"), and it is the same trap: silent, behavioural, and only visible as a robot that moves wrong |
+| **G5 — the picrawler is byte-identical** | Building `mj_host` changes nothing about `godot_host`. `seedavg.py` on the deployed picrawler config produces the same numbers before and after this branch. Verified once at Phase 0 and once at merge |
+| **G6 — no god's-eye channel** | Every topic `DuckBody` publishes is derivable from what the real `robot.state` + `tof.stream` carry. A sensor-legitimacy audit like [`sensor_legitimacy_and_the_feet_y_oracle.md`](sensor_legitimacy_and_the_feet_y_oracle.md), written **before** the first brain runs rather than after |
+
+---
+
+## Phases
+
+### Phase 0 — vendoring and build · **NOT STARTED**
+
+- `mj_host/models/microduck/` — the MJCF, `assets/*.stl`, scenes, `joints_properties.xml`,
+  `sensors.xml`, copied from `microduck_rl` at a **recorded commit**, unmodified.
+  Apache-2.0 both sides; add the attribution row to `THIRD_PARTY_NOTICES.md`.
+- `mj_host/CMakeLists.txt` — `add_subdirectory(../cpp_core)`, MuJoCo at a **pinned release**
+  via `FetchContent` (prebuilt library; MJCF parsing is version-sensitive, so the version is
+  part of the body of record and goes in this doc when chosen).
+- A `--load-only` mode that satisfies **G1** and prints the model's joint / actuator / sensor
+  tables. That output is the first thing pasted back into this doc.
+
+### Phase 1 — the body, with no brain · **NOT STARTED**
+
+`DuckBody` + a run loop, no `OgmaInstance` at all. Holds `key STAND`'s `ctrl`, steps physics,
+writes the stdout JSONL, serves the viewer. Satisfies **G2**, **G3**, **G5**.
+
+This is the gain-0 guard for the whole port: a host that runs the body correctly with no brain
+in it is the baseline every later phase is measured against.
+
+### Phase 2 — the sensory surface · **NOT STARTED**
+
+Publish, as `reality.proprio.<name>`:
+
+| topic | width | from |
+|---|---|---|
+| `joints` | 14 | `d->qpos` at the servo joints, minus `HOME_FRAME` |
+| `joints_dyn` | 28 | `[q, q̇]` — real `d->qvel`, not the picrawler's synthetic Δq |
+| `imu` | 4 | `framequat` + `gyro`, reduced as the picrawler's `imu` is |
+| `gravity` | 3 | projected gravity, trunk frame — **the legal replacement for absolute Y** |
+| `load` | 14 | `d->actuator_force` → the mA-equivalent channel |
+| `foot_contact` | 2 | contact sensors at the foot geoms |
+| `tof` | 64 | ray-cast through the `tof` site's 8×8 beam table, then `Reprojector`'s classification ported |
+
+Each one gets a `register_source` line with a plain-language description, exactly as
+`picrawler_body.gd:2842` does, so the graph panel shows the full environment↔brain interface.
+**G6 is written at the end of this phase, before Phase 3 starts.**
+
+### Phase 3 — the first brain: MotorEPM on measured proprioception · **NOT STARTED**
+
+The point of the whole exercise. A `JointSensorimotorBridge` + `MotorEPM` graph, per-limb, on
+a body whose `x` is *measured*. The picrawler config
+`motor_epm_pure_hk__inst__stance__c025__lr10.json` is the shape to start from — the same two
+modules, re-grouped for two legs of five joints plus a head of four.
+
+**⚠ Expect this to be hard in a way the picrawler was not.** A quadruped that flails falls over
+and keeps trying; a biped that flails falls over and stops. Homeokinesis destabilises on
+purpose, and this body has no static-stability margin to absorb that. Phase 4 exists because of
+this, and the honest position is that **bipedal homeokinesis may not bootstrap at all** — which
+is a result, gets a ledger entry, and redirects rather than ends the work.
+
+Before any lever: run the authority check the ledger demands
+(`corr(actuator, target)` on existing traces — ledger §"THREE LEVERS IN ONE SESSION AIMED AT AN
+ACTUATOR WITH NO AUTHORITY").
+
+### Phase 4 — standup-as-reset · **NOT STARTED**
+
+The picrawler harness gets continuous resets by teleporting in sim; on hardware it has none.
+Pollen trained `Mjlab-StandUp` and ship `alpha_stand.onnx` / the sitstand net: **a get-up
+reflex that works on the real robot.**
+
+Use it as the **reset mechanism, never as a controller**: the brain drives the joints; on fall
+detection (`duck-control/src/fall.rs` is the reference implementation) hand to the standup net;
+when upright, hand back. It never touches the brain's own error signal, and it is the harness,
+not the brain — the same category as the Godot body's auto-reset teleport.
+
+Two things this must carry from the picrawler's own harness bugs (ledger §"Reset artifact"):
+publish `events.reset` on every hand-back, and mask learning across the boundary, or **any
+TLE or coherence trend across a reset is fake**.
+
+### Phase 5 — harness parity · **NOT STARTED**
+
+`seedavg.py` currently shells `godot4` with picrawler env vars. Give `mj_host` the same
+contract — `OGMA_SEED`, `OGMA_INSPECTOR_PORT`, `OGMA_*_CONFIG`, `OGMA_*_MAX_STEPS`, JSONL on
+stdout — and add a duck-side runner beside it rather than branching the picrawler one. The
+metric set is the duck's own; `net_z`/`straight`/`turns` are corridor metrics and do not
+transfer unexamined. Designing that metric set, and asking §3 rule 4's question of each
+candidate ("what degenerate behaviour also scores well here?"), is the work of this phase.
+
+### Phase 6 — hardware · **DEFERRED, and out of scope for this branch**
+
+Recorded so the shape stays visible. The seam is a `robot.joints` intent added to `robotd`
+plus a sibling `ogma_duckd`: `robotd` stays authoritative on safety, the control loop never
+blocks on us, stale targets hold the pose. That respects their stated invariants
+(`architecture.md` §1.1) and is plausibly upstreamable — their own
+`docs/ideas/autonomous_behavior.md` records the brain as *"the biggest untracked gap… no design
+doc owns it yet"*, and what they plan to put there is a 16-state hand-authored FSM with an
+energy/mood model.
+
+**Do not reach for the alternative** of driving the existing `robot.*` socket: it accepts only
+intents (`move` / `head` / `pose`), so choosing it silently forces the brain into the
+command-block architecture §"the trap" rules out.
+
+---
+
+## SPEC — actuator fidelity: the BAM question
+
+**Status: spec only, nothing built.** Written now so the decision is deliberate rather than
+discovered at the first transfer test.
+
+Pollen's sim2real recipe rests on BAM — a measured, voltage-controlled model of the XL330 with
+Coulomb, Stribeck and load-dependent friction, identified on a test bench
+(`xl330_test_bench/`). A plain-MuJoCo host gets the XML `position` actuator instead:
+`kp=0.55, kv=0, forcerange=±0.96, ctrlrange=±10`, with `damping/frictionloss/armature` on the
+joint.
+
+Three options, in increasing cost:
+
+1. **Ship the XML actuator.** Free, and adequate for everything in Phases 0–5, which are about
+   whether a brain closes a loop at all — not about transfer. **Start here.**
+2. **Port BAM's `compute()` to C++.** It is a torque model over `(q, q̇, target, load)`; the
+   Python is thin, and Rhoban's `bam` carries the identified parameters. Becomes necessary the
+   moment a *hardware* transfer is attempted, and not before.
+3. **Drive MuJoCo from Python and keep BAM.** Rejected: it puts the brain behind an FFI
+   boundary at 50 Hz and drags mjlab's whole training stack into the runtime.
+
+**The gate that decides it:** any claim about behaviour that would transfer to the real duck
+needs option 2. Any claim about whether the substrate learns needs only option 1. Record which
+one a result was measured under, the same way the picrawler records ghost-vs-solid chassis.
+
+---
+
+## Open decisions
+
+1. **MuJoCo version pin.** Must be chosen and recorded here; `mj_loadXML` behaviour on these
+   files is version-sensitive, and `microduck_rl` deliberately does not override the `mujoco`
+   version mjlab pins.
+2. **Head joints in or out of the motor loop.** Four of the fourteen joints are neck and head.
+   They are not locomotion, they carry the ToF and the camera, and including them in the
+   MotorEPM group makes the loop's `x` a mix of two very different dynamics. Leaning toward a
+   separate group from the start, decided by measurement in Phase 3.
+3. **Whether `robot_walk` or `robot_allcollisions` is the default.** Leaning `allcollisions`,
+   per the ghost-chassis lesson: a belly that cannot touch the ground is a different body, and
+   every claim measured on it is about that body (ledger §"seedavg.py does not set
+   `OGMA_PICRAWLER_CHASSIS_COLLIDE`").
+
+## Coordination with the picrawler branch
+
+**No shared files.** This branch adds `mj_host/` and this doc; the picrawler hardware work
+lives in `pi_host/`, `godot_host/project/scripts/picrawler_body.gd`, and its own port doc.
+The one shared surface is `cpp_core/` — and the rule is that **this branch does not modify a
+module.** If Phase 3 wants a MotorEPM change, it stops and gets its own lever discussion under
+the §3 protocol, on its own branch, gain-0-guarded, rather than editing the benchmark every
+picrawler A/B depends on (the reason `MotorEPMv2` exists as a copy).
+
+**G5 is the check that keeps this true** and is run at both ends of the branch.
