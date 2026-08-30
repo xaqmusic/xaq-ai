@@ -398,6 +398,17 @@ laptop is kept for the golden image later, not for host work (a qemu chroot sees
 | **first motion** | `P0` at 1500 → 1300 → 1700 → 1500 µs, robot on a stand: **P0 = the rear-left knee** (anatomical). Vbat flat 7.61–7.67 V through the moves (no stall sag) |
 | **`pi_host/`** (new, top-level) | `ogma_hw`: `I2cBus`/`LinuxI2cBus`, `RobotHat` (protocol), **`ServoDriver`** (clamp · slew 40 µs/tick · watchdog 25 ticks → pulse 0 · time-at-limit), `hat_tool` CLI (never a bypass), `test_hw` — 7 byte-level + envelope tests against a fake bus, passing on x86 and aarch64. A slewed `sweep 0 1300 1700` through the driver moved the knee with Vbat flat |
 
+**2026-08-29 — the map is complete, limp does not exist, and a pose recall browned the Pi out.**
+Full 12-channel servo map calibrated through the dashboard (`pi_host/calib/servo_map.json`;
+hip2 horns re-mounted so 1500 µs = femur horizontal = sim `hip2 = 0`). Poses saved
+(`poses.json`: `rescue`, `stand`, `X`). **Limp is impossible on this HAT** (SPEC §4.1
+corrected above) → the `rescue` pose is the safe state. **Twelve servos starting together on
+the shared 5 V/3 A rail brown the Pi out** (reproduced; A4 blind to it) → pose/rescue moves
+are staggered 100 ms apart at 600 µs/s; verified on the same recall. `ogma-benchd` is a
+systemd service with I²C retries, non-fatal bus errors, map/pose auto-load, low-battery
+auto-safe and `pi_throttled` in telemetry. Power rule: the HAT powers the Pi; never both the
+HAT and the Pi's USB-C — HAT plus its own charger on the bench.
+
 **Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
 passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step
 stochastic sim; `test_rng_parity` passes, so the RNG stream is identical). GCC fuses `a·b+c`

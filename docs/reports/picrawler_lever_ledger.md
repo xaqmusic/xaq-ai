@@ -4770,3 +4770,18 @@ Latent out-of-bounds, never triggered by the existing callers.
 Re-use context: wanting a new signal sonified is a one-line addition to that module's
 `diag_lite()`, and it must stay O(1) and additive. That is the only place `tools/xaq_voice`
 may touch brain code.
+
+### ★★ 2026-08-29/30 — A POSE RECALL BROWNED THE PI OUT: the shared 5 V rail, measured the hard way
+
+**Verdict: hardware fact + fix (`WORKING`).** Recalling the `rescue` pose from the X pose —
+eight servos starting together toward their 500 µs extremes at 2000 µs/s — took the Pi down
+within 0.5 s (telemetry stopped, the daemon's record ends mid-line at Vbat 8.08 V, the HAT
+stayed latched off until power-cycled). **A4 battery voltage never saw it**: the sag is on the
+5 V/3 A DC-DC output that the Pi and all twelve servos share (see the previous entry), and
+10 Hz telemetry cannot resolve a 50 ms dip. Reproduced on demand. **Fix:** `pose.set` and the
+rescue path start channels one every 100 ms, shortest travel first, at 600 µs/s; the same
+X → rescue recall then lands in 4.2 s with the throttle flags clean. Two instrument notes:
+`vcgencmd pmic_read_adc` takes ~0.7 s per read, useless for rail transients (the INA219 is the
+instrument); and a first arm after boot cannot slew (no known position) — the stagger alone
+carried that case. Re-use context: the servo-BEC rebuild now has two measured reasons (no
+limp, shared-rail brownout); the INA219 quantifies the inrush margin before deciding.
