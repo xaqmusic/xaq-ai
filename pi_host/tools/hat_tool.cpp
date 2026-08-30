@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
             auto arm = [&](int us, int secs) { hat.setup_servo_timer(ch); hat.set_pulse_us(ch, us); std::printf("ch%d -> %d us (%d s)\n", ch, us, secs); std::fflush(stdout); std::this_thread::sleep_for(std::chrono::seconds(secs)); };
             arm(1800, 3);
             std::printf("PHASE 1: MCU RESET with the knee at 1800 — does it SNAP TO CENTRE, stay stiff, or go floppy? (8 s)\n"); std::fflush(stdout);
-            std::system("timeout 0.05 gpioset -c gpiochip0 5=0 >/dev/null 2>&1; (gpioset -c gpiochip0 5=1 & sleep 0.4; kill $! ) 2>/dev/null");
+            { int rc = std::system("timeout 0.05 gpioset -c gpiochip0 5=0 >/dev/null 2>&1; (gpioset -c gpiochip0 5=1 & sleep 0.4; kill $! ) 2>/dev/null"); (void)rc; }
             std::this_thread::sleep_for(std::chrono::seconds(8));
             arm(1800, 3);
             std::printf("PHASE 2: timer %d ARR = 0 (period 0) — floppy? (8 s)\n", t); std::fflush(stdout);

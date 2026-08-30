@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include <zmq.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <chrono>
@@ -22,6 +23,8 @@
 #include <ctime>
 #include <fstream>
 #include <mutex>
+#include <utility>
+#include <vector>
 #include <string>
 #include <thread>
 
@@ -39,6 +42,12 @@ constexpr int    FULL_MAX_US     = 2500;
 constexpr double TICK_HZ         = 50.0;
 constexpr double VBAT_LIMP_V     = 6.4;    // HAT minimum is 6.0: limp and refuse arming below this
 constexpr double VBAT_RECOVER_V  = 6.7;    // hysteresis: arming allowed again above this
+// Pose moves: twelve servos starting at once on the 5 V/3 A DC-DC the Pi shares browned the
+// Pi out (2026-08-29, reproduced: telemetry gone 0.5 s after pose.set, Pi rebooted).  So a
+// pose starts its channels one at a time and slews them gently; servo.set keeps the fast slew.
+constexpr int NORMAL_SLEW_US     = 40;
+int g_pose_slew_us = 12;                   // 600 us/s: a 1000 us move takes ~1.7 s
+int g_pose_stagger_ticks = 5;              // 100 ms between channel starts
 
 int64_t mono_ms() {
     timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -79,6 +88,9 @@ struct State {
     bool low_battery = false;
     std::string rescue_name = "rescue";      // the pose that stands in for limp on this HAT
     int64_t rescue_until_ms = 0;              // while set, the tick keeps feeding the driver
+    std::vector<std::pair<int,int>> pose_queue;  // (ch, us) still to start, in order
+    int pose_stagger_left = 0;
+    bool pose_move_active = false;
     bool deadman_tripped = false;
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
     int  throttled_poll = 0;
@@ -137,9 +149,11 @@ struct State {
         armed_ch = -1;
         if (has_rescue()) {
             const json& us = poses[rescue_name]["us"];
+            std::vector<std::pair<int,int>> targets;
             for (int c = 0; c < ServoDriver::N; ++c)
-                if (us[c].is_number() && us[c].get<int>() >= 0) { try { driver.command(c, us[c].get<int>()); } catch (...) {} }
-            rescue_until_ms = mono_ms() + 3000;                    // keep feeding until it gets there
+                if (us[c].is_number() && us[c].get<int>() >= 0) targets.push_back({c, us[c].get<int>()});
+            begin_pose_move(targets);
+            rescue_until_ms = mono_ms() + 3000 + int64_t(targets.size()) * g_pose_stagger_ticks * 20 + 4000;   // stagger + travel
             record("rescue", {{"why", why}, {"pose", rescue_name}});
         } else {
             try { driver.limp_all(); } catch (...) {}
@@ -147,6 +161,36 @@ struct State {
         }
     }
     void limp_all(const char* why) { rescue(why); }
+
+    // Begin a staggered, gentle move of many channels.  Channels are ordered by distance
+    // to travel (shortest first) so the big swings start last, one every stagger period.
+    void begin_pose_move(const std::vector<std::pair<int,int>>& targets) {
+        pose_queue.clear();
+        for (auto& t : targets) pose_queue.push_back(t);
+        std::sort(pose_queue.begin(), pose_queue.end(), [&](const std::pair<int,int>& a, const std::pair<int,int>& b) {
+            int da = std::abs(a.second - (driver.armed(a.first) ? driver.current_us(a.first) : a.second));
+            int db = std::abs(b.second - (driver.armed(b.first) ? driver.current_us(b.first) : b.second));
+            return da < db; });
+        driver.set_slew_us_per_tick(g_pose_slew_us);
+        pose_move_active = true;
+        pose_stagger_left = 0;                                   // first channel starts this tick
+    }
+    // Called every tick (holding m): start the next queued channel when its time comes;
+    // restore the fast slew once everything has landed.
+    void service_pose_move() {
+        if (!pose_move_active) return;
+        if (!pose_queue.empty()) {
+            if (pose_stagger_left <= 0) {
+                auto [ch, us] = pose_queue.front(); pose_queue.erase(pose_queue.begin());
+                try { driver.command(ch, us); } catch (...) {}
+                pose_stagger_left = g_pose_stagger_ticks;
+            } else --pose_stagger_left;
+        } else if (driver.settled()) {
+            driver.set_slew_us_per_tick(NORMAL_SLEW_US);
+            pose_move_active = false;
+            record("pose.landed", {});
+        }
+    }
 
     json frame() {   // caller holds m
         const int64_t now = mono_ms();
@@ -191,7 +235,7 @@ struct State {
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
                 {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
-                {"rescue_active", mono_ms() < rescue_until_ms},
+                {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
                 {"pi_throttled", pi_throttled}, {"servos", servos}};
     }
 };
@@ -213,6 +257,7 @@ void tick_thread(State& S) {
         if (late_ns > period_ns) ++S.overruns;
         const int64_t ms = mono_ms();
         try {
+            S.service_pose_move();
             bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= S.driver.armed(c);
             const bool client_fresh = ms - S.last_client_ms <= DEADMAN_MS;
             if (any_armed && !client_fresh && !S.deadman_tripped && ms >= S.rescue_until_ms) {
@@ -221,7 +266,7 @@ void tick_thread(State& S) {
                 S.rescue("deadman");                                       // the safe action, once
             }
             if (client_fresh) S.deadman_tripped = false;
-            if (client_fresh || ms < S.rescue_until_ms)                    // keeps the driver watchdog fed
+            if (client_fresh || ms < S.rescue_until_ms || S.pose_move_active)   // keeps the driver watchdog fed
                 for (int c = 0; c < ServoDriver::N; ++c)
                     if (S.driver.armed(c)) S.driver.command(c, S.driver.target_us(c));
             if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
@@ -337,16 +382,17 @@ json handle(State& S, const json& req) {   // caller holds m
         if (S.cal_ch >= 0) return err("channel " + std::to_string(S.cal_ch) + " is widened: cal.end before a pose");
         if (S.low_battery) return err("battery low");
         if (!req.contains("us") || !req["us"].is_array() || req["us"].size() != size_t(ServoDriver::N)) return err("us must be an array of 12");
-        json clamped = json::array();
+        std::vector<std::pair<int,int>> targets; json listed = json::array();
         for (int c = 0; c < ServoDriver::N; ++c) {
             const int us = req["us"][c].is_number() ? req["us"][c].get<int>() : -1;
-            if (us < 0) { clamped.push_back(nullptr); continue; }          // null = leave this channel as it is
+            if (us < 0) { listed.push_back(nullptr); continue; }           // null = leave this channel as it is
             if (us < FULL_MIN_US || us > FULL_MAX_US) return err("us[" + std::to_string(c) + "] out of 500-2500");
-            S.driver.command(c, us); clamped.push_back(S.driver.target_us(c));
+            targets.push_back({c, us}); listed.push_back(us);
         }
+        S.begin_pose_move(targets);                                       // staggered + gentle: protects the Pi's rail
         S.armed_ch = -1;
-        S.record("pose.set", {{"clamped_us", clamped}});
-        return ok({{"clamped_us", clamped}});
+        S.record("pose.set", {{"us", listed}, {"stagger_ticks", g_pose_stagger_ticks}, {"slew", g_pose_slew_us}});
+        return ok({{"us", listed}, {"staggered", true}, {"eta_ms", int(targets.size()) * g_pose_stagger_ticks * 20 + 2000}});
     }
     if (verb == "pose.save") {
         const std::string name = req.value("name", "");
@@ -385,6 +431,8 @@ int main(int argc, char** argv) {
         else if (a == "--rep") rep_port = std::atoi(argv[i + 1]); else if (a == "--pub") pub_port = std::atoi(argv[i + 1]);
         else if (a == "--log-dir") log_dir = argv[i + 1]; else if (a == "--map") map_path = argv[i + 1];
         else if (a == "--poses") poses_path = argv[i + 1]; else if (a == "--rescue") rescue_name_arg = argv[i + 1];
+        else if (a == "--pose-slew") g_pose_slew_us = std::max(1, std::atoi(argv[i + 1]));
+        else if (a == "--pose-stagger-ms") g_pose_stagger_ticks = std::max(0, std::atoi(argv[i + 1]) / 20);
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
