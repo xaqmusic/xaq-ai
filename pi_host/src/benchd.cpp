@@ -8,6 +8,7 @@
 // The bus (/dev/i2c-1) is not thread-safe; every I2C access happens under the mutex.
 // There is NO verb that starts a brain here, and none will be added (SPEC §1.1).
 #include "ogma/hw/ServoDriver.hpp"
+#include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
 
 #include <nlohmann/json.hpp>
@@ -94,6 +95,11 @@ struct State {
     bool deadman_tripped = false;
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
     int  throttled_poll = 0;
+    TickBudget  budget{TICK_HZ, 25};    // 25 ticks = 0.5 s: fast enough to read as a meter
+    int  load_cpu_us   = 0;             // synthetic load, gain-0 by default (see the 'load' verb)
+    int  load_block_us = 0;
+    TickStats   tick_cost{};            // last closed window
+    HostSample  host{};                 // sampled ~1 Hz OFF the tick thread
     double tick_hz_meas = 0.0;
     uint64_t seq = 0;
     int64_t t0_ms = mono_ms();
@@ -236,12 +242,46 @@ struct State {
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
                 {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
                 {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
-                {"pi_throttled", pi_throttled}, {"servos", servos}};
+                {"pi_throttled", pi_throttled},
+                // Cost of the loop, in the units a control loop cares about: per cent of
+                // the tick BUDGET, with the tail (max) beside the middle because a mean
+                // is blind to the spike that actually misses a deadline.  wall vs cpu
+                // separates "blocked on the bus" from "out of compute" (ResourceMonitor).
+                {"cpu", {{"budget_ms", tick_cost.budget_ms}, {"n", tick_cost.n},
+                         {"wall_p50", tick_cost.wall_p50}, {"wall_p95", tick_cost.wall_p95},
+                         {"wall_max", tick_cost.wall_max},
+                         {"cpu_p50", tick_cost.cpu_p50}, {"cpu_p95", tick_cost.cpu_p95},
+                         {"cpu_max", tick_cost.cpu_max},
+                         {"proc_pct", host.proc_cpu_pct}, {"temp_c", host.cpu_temp_c}}},
+                {"mem", {{"rss_mb", host.rss_mb}, {"swap_mb", host.swap_mb},
+                         {"avail_mb", host.mem_avail_mb}, {"majflt", host.majflt},
+                         {"growth_mb_min", host.rss_growth_mb_per_min}}},
+                {"servos", servos}};
     }
 };
 
 std::atomic<bool> g_run{true};
 void on_sig(int) { g_run = false; }
+
+// Synthetic tick load — an instrument CALIBRATOR, not a feature.  A meter is checked
+// against a known signal (a test tone), never against an uncontrolled real one, and
+// there is no way to run a picrawler config on this machine yet anyway: that needs
+// ogma_host (H3), and the deployed config does not yet run on legal inputs.
+//   cpu_us   spins real FP work   -> drives wall ~= cpu   (compute-bound)
+//   block_us sleeps               -> drives wall >> cpu   (blocked)
+// Having both is what proves the wall-vs-cpu VERDICT, not merely the meter's range.
+void burn_cpu_us(int us) {
+    if (us <= 0) return;
+    timespec a; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &a);
+    const int64_t target_ns = int64_t(us) * 1000;
+    static volatile double sink = 0.0;
+    double x = 1.000001;
+    for (;;) {
+        for (int i = 0; i < 256; ++i) { x = x * 1.0000001 + 1e-9; sink = sink + x; }
+        timespec b; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &b);
+        if ((b.tv_sec - a.tv_sec) * 1000000000L + (b.tv_nsec - a.tv_nsec) >= target_ns) return;
+    }
+}
 
 void tick_thread(State& S) {
     timespec next; clock_gettime(CLOCK_MONOTONIC, &next);
@@ -253,6 +293,9 @@ void tick_thread(State& S) {
         clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, nullptr);
         timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
         const long late_ns = (now.tv_sec - next.tv_sec) * 1000000000L + (now.tv_nsec - next.tv_nsec);
+        // The budget span starts at WAKE, not after the lock: waiting for the mutex
+        // spends the tick's budget just as surely as working does.
+        timespec cpu0; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
         std::lock_guard<std::mutex> lk(S.m);
         if (late_ns > period_ns) ++S.overruns;
         const int64_t ms = mono_ms();
@@ -283,15 +326,30 @@ void tick_thread(State& S) {
             }
         }
         if (S.driver.watchdog_tripped()) { S.armed_ch = -1; S.end_cal("watchdog"); }   // after a rescue has landed
+        if (S.load_cpu_us > 0) burn_cpu_us(S.load_cpu_us);
+        if (S.load_block_us > 0) { timespec b{0, long(S.load_block_us) * 1000L}; nanosleep(&b, nullptr); }
+        timespec w1, c1;
+        clock_gettime(CLOCK_MONOTONIC, &w1);
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1);
+        if (S.budget.sample((w1.tv_sec - now.tv_sec) * 1000000000L + (w1.tv_nsec - now.tv_nsec),
+                            (c1.tv_sec - cpu0.tv_sec) * 1000000000L + (c1.tv_nsec - cpu0.tv_nsec)))
+            S.tick_cost = S.budget.last();
         if (++win_ticks >= 100) { S.tick_hz_meas = win_ticks * 1000.0 / double(ms - win_start); win_start = ms; win_ticks = 0; }
     }
 }
 
 void telemetry_thread(State& S, void* pub) {
+    HostStats hs;
+    int host_poll = 0;
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Read /proc BEFORE taking the lock.  It costs ~100 us; doing it while the
+        // tick thread waits would make the instrument a cause of what it measures.
+        HostSample fresh; bool have_fresh = false;
+        if (++host_poll >= 10) { host_poll = 0; fresh = hs.sample(); have_fresh = fresh.ok; }
         std::string body;
-        { std::lock_guard<std::mutex> lk(S.m); json f = S.frame(); body = f.dump(); S.record("telemetry", f); }
+        { std::lock_guard<std::mutex> lk(S.m); if (have_fresh) S.host = fresh;
+          json f = S.frame(); body = f.dump(); S.record("telemetry", f); }
         // ONE frame: "bench " + JSON.  ZMQ_CONFLATE on the subscriber does not support
         // multi-part messages, and SUB filtering is a prefix match, so the topic rides in-band.
         const std::string msg = "bench " + body;
@@ -347,6 +405,19 @@ json handle(State& S, const json& req) {   // caller holds m
         S.driver.set_limits(ch, {FULL_MIN_US, FULL_MAX_US});
         S.record("cal.begin", {{"ch", ch}, {"until_ms", S.cal_until_ms}});
         return ok({{"until_ms", S.cal_until_ms}});
+    }
+    if (verb == "load") {
+        // ⚠ Interlock: a load at or above the budget starves the servo refresh and
+        // trips the driver watchdog, which commands the rescue pose — the robot MOVES.
+        // Refuse while anything is armed; this is a bench instrument, not a live knob.
+        bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= S.driver.armed(c);
+        const int cpu_us   = std::clamp(req.value("cpu_us",   0), 0, 50000);
+        const int block_us = std::clamp(req.value("block_us", 0), 0, 50000);
+        if ((cpu_us > 0 || block_us > 0) && any_armed)
+            return err("refusing a synthetic load while servos are armed: it can trip the watchdog into a rescue move");
+        S.load_cpu_us = cpu_us; S.load_block_us = block_us;
+        S.record("load", {{"cpu_us", cpu_us}, {"block_us", block_us}});
+        return ok({{"cpu_us", cpu_us}, {"block_us", block_us}, {"budget_ms", 1000.0 / TICK_HZ}});
     }
     if (verb == "cal.end") { S.end_cal("verb"); return ok(); }
     if (verb == "cal.map") {

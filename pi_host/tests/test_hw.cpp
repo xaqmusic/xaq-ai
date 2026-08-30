@@ -3,6 +3,10 @@
 // 2026-08-28 (ADC read of A4 = 7.65 V pack; P0 moved at 1300/1500/1700 us).
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/Ina219.hpp"
+#include "ogma/hw/ResourceMonitor.hpp"
+#include <cstdlib>
+#include <fstream>
+#include <filesystem>
 #include <gtest/gtest.h>
 
 using namespace ogma::hw;
@@ -236,4 +240,104 @@ TEST(ServoDriver, TimerIsProgrammedOncePerTimerOnFirstArm) {
     int psc_writes = 0;
     for (auto& w : bus.writes) if (w[0] >= 0x40 && w[0] < 0x44) ++psc_writes;
     EXPECT_EQ(psc_writes, 2);                       // timers 0 and 1 only
+}
+
+
+// ---------------------------------------------------------------------------
+// ResourceMonitor — what the loop costs, in tick-budget percent.
+// ---------------------------------------------------------------------------
+
+TEST(TickBudget, ReportsPercentOfTheTickPeriodNotOfAWallClockSecond) {
+    TickBudget b(50.0, 4);                       // 50 Hz -> a 20 ms budget
+    EXPECT_FALSE(b.sample(2000000, 1000000));    // 2 ms wall / 1 ms cpu = 10 % / 5 %
+    EXPECT_FALSE(b.sample(2000000, 1000000));
+    EXPECT_FALSE(b.sample(2000000, 1000000));
+    EXPECT_TRUE (b.sample(2000000, 1000000));    // 4th closes the window
+    EXPECT_EQ(b.last().n, 4);
+    EXPECT_NEAR(b.last().budget_ms, 20.0, 1e-9);
+    EXPECT_NEAR(b.last().wall_p50, 10.0, 1e-9);
+    EXPECT_NEAR(b.last().cpu_p50,   5.0, 1e-9);
+}
+
+TEST(TickBudget, TheMaxCatchesTheSpikeThatAMeanHides) {
+    // The blind-metric case this instrument exists for: 39 quiet ticks and one
+    // that blows the budget.  The mean says 17 %; the loop still missed a deadline.
+    TickBudget b(50.0, 40);
+    for (int i = 0; i < 39; ++i) b.sample(3000000, 3000000);   // 15 %
+    ASSERT_TRUE(b.sample(22000000, 22000000));                 // 110 % -- an overrun
+    EXPECT_NEAR(b.last().wall_p50, 15.0, 1e-9);                // middle looks fine
+    EXPECT_NEAR(b.last().wall_max, 110.0, 1e-9);               // the tail does not
+    EXPECT_GT(b.last().wall_max, 100.0);
+}
+
+TEST(TickBudget, WallAndCpuAreSeparateSoBlockedIsDistinguishableFromBusy) {
+    // 15 ms of wall for 1 ms of compute = blocked on the I2C bus, not out of CPU.
+    // Same wall time with 14 ms of compute would be the opposite diagnosis and the
+    // opposite response, so one number cannot serve.
+    TickBudget b(50.0, 2);
+    b.sample(15000000, 1000000);
+    ASSERT_TRUE(b.sample(15000000, 1000000));
+    EXPECT_NEAR(b.last().wall_max, 75.0, 1e-9);
+    EXPECT_NEAR(b.last().cpu_max,   5.0, 1e-9);
+}
+
+TEST(TickBudget, PercentileIsNearestRankSoEveryNumberIsARealTick) {
+    std::vector<int64_t> v{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    EXPECT_EQ(TickBudget::percentile(v, 0.50), 6.0);
+    EXPECT_EQ(TickBudget::percentile(v, 0.95), 10.0);
+    EXPECT_EQ(TickBudget::percentile(v, 0.00), 1.0);
+    EXPECT_EQ(TickBudget::percentile({}, 0.5), 0.0);           // empty window
+}
+
+TEST(HostStats, ParsesKbFieldsAndIsNotFooledByAKeyThatIsASuffixOfAnother) {
+    const std::string status =
+        "Name:\tognma\nVmRSS:\t   41216 kB\nVmSwap:\t       0 kB\nRssAnon:\t 9999 kB\n";
+    EXPECT_NEAR(HostStats::parse_kb_field(status, "VmRSS"),  41216.0 / 1024.0, 1e-9);
+    EXPECT_NEAR(HostStats::parse_kb_field(status, "VmSwap"), 0.0, 1e-9);
+    // "Rss" must not match inside "VmRSS"/"RssAnon" at a non-line-start.
+    EXPECT_LT(HostStats::parse_kb_field(status, "Rss"), 0.0);
+    EXPECT_LT(HostStats::parse_kb_field(status, "Nope"), 0.0);
+}
+
+TEST(HostStats, StatParseSurvivesACommContainingSpacesAndParens) {
+    // The classic /proc/<pid>/stat trap: field 2 is the executable name in
+    // parentheses and may contain both spaces and ')'.  Splitting on whitespace
+    // from the left silently shifts every field after it.
+    const std::string stat =
+        "1234 (ogma benchd (x)) S 1 1234 1234 0 -1 4194304 5000 0 "
+        "7 0 111 222 0 0 20 0 4 0 99 0 0";
+    long ut = 0, st = 0, mf = 0;
+    ASSERT_TRUE(HostStats::parse_stat_cpu(stat, ut, st, mf));
+    EXPECT_EQ(mf, 7);          // field 12
+    EXPECT_EQ(ut, 111);        // field 14
+    EXPECT_EQ(st, 222);        // field 15
+    EXPECT_FALSE(HostStats::parse_stat_cpu("no parens here", ut, st, mf));
+}
+
+TEST(HostStats, ReadsAFixtureTreeAndReportsUnreadableRootsAsNotOk) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "ogma_hoststats_fixture";
+    fs::remove_all(root);
+    fs::create_directories(root / "proc" / "self");
+    fs::create_directories(root / "sys" / "class" / "thermal" / "thermal_zone0");
+    std::ofstream(root / "proc" / "self" / "status")
+        << "VmRSS:\t  102400 kB\nVmSwap:\t   2048 kB\n";
+    std::ofstream(root / "proc" / "self" / "stat")
+        << "1 (x) S 1 1 1 0 -1 0 0 0 3 0 10 20 0 0 20 0 4 0 0 0 0\n";
+    std::ofstream(root / "proc" / "meminfo") << "MemTotal:\t2000000 kB\nMemAvailable:\t1433600 kB\n";
+    std::ofstream(root / "sys" / "class" / "thermal" / "thermal_zone0" / "temp") << "52104\n";
+
+    HostStats hs((root / "proc").string(), (root / "sys").string());
+    const auto s = hs.sample();
+    EXPECT_TRUE(s.ok);
+    EXPECT_NEAR(s.rss_mb,       100.0, 1e-9);
+    EXPECT_NEAR(s.swap_mb,        2.0, 1e-9);
+    EXPECT_NEAR(s.mem_avail_mb, 1400.0, 1e-9);
+    EXPECT_NEAR(s.cpu_temp_c,   52.104, 1e-6);
+    EXPECT_EQ(s.majflt, 3);
+    EXPECT_EQ(s.proc_cpu_pct, 0.0);        // no previous sample to difference against
+
+    HostStats missing((root / "nope").string(), (root / "nope").string());
+    EXPECT_FALSE(missing.sample().ok);
+    fs::remove_all(root);
 }
