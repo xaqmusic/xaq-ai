@@ -121,7 +121,7 @@ func _build_ui() -> void:
 	var topv := VBoxContainer.new(); top.add_child(topv)
 	var row := HBoxContainer.new(); topv.add_child(row)
 	row.add_child(_lbl("ogma_benchd @"))
-	_host_edit = LineEdit.new(); _host_edit.text = "10.0.0.113"; _host_edit.custom_minimum_size.x = 160
+	_host_edit = LineEdit.new(); _host_edit.text = "picrawler.local"; _host_edit.custom_minimum_size.x = 160
 	row.add_child(_host_edit)
 	row.add_child(_lbl(":%d / :%d" % [REP_PORT, PUB_PORT]))
 	var cb := Button.new(); cb.text = "CONNECT"; cb.pressed.connect(_on_connect); row.add_child(cb)

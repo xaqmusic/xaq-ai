@@ -409,6 +409,24 @@ systemd service with I²C retries, non-fatal bus errors, map/pose auto-load, low
 auto-safe and `pi_throttled` in telemetry. Power rule: the HAT powers the Pi; never both the
 HAT and the Pi's USB-C — HAT plus its own charger on the bench.
 
+**2026-08-30 — wifi, and the robot's own name.**
+**The onboard wifi was rfkill soft-blocked** (`phy0 soft=1`; NetworkManager `WIFI disabled`
+while `WIFI-HW enabled`), which is why every configuration attempt failed with no useful
+error — the device reads `unavailable`, so there is nothing for a wizard to configure. The
+country code was NOT the cause and was already correct: Imager had written
+`cfg80211.ieee80211_regdom=US` onto the kernel cmdline, giving a valid regulatory domain and
+a still-blocked radio at the same time. `nmcli radio wifi on` cleared it; the unblock
+persists across reboot in both layers (`/var/lib/systemd/rfkill/platform-…mmc:wlan = 0` and
+NetworkManager's `WirelessEnabled=true`). On `<your-ssid>`, 2.4 GHz, `wlan0` = 10.0.0.114 at
+route metric 600 against eth0's 100, so Ethernet stays primary while it is plugged in.
+**Hostname renamed `raspberrypi` → `picrawler`, so avahi now advertises `picrawler.local`**
+as §7.5 specifies, and the three hardcoded `10.0.0.113` call sites (the dashboard's host
+field, `bench_client_smoke.gd`, the operator's ssh config) follow the name instead of the
+address — the eth0 address does not survive unplugging the cable, which is the whole point of
+having wifi. Verified end-to-end: libzmq's `getaddrinfo` resolves `.local` through nss-mdns,
+and the smoke client reached the live daemon over `picrawler.local` (30 telemetry frames in
+3 s, `vbat` 8.29 V).
+
 **Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
 passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step
 stochastic sim; `test_rng_parity` passes, so the RNG stream is identical). GCC fuses `a·b+c`
