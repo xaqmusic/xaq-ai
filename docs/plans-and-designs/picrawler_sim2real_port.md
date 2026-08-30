@@ -442,6 +442,56 @@ under-measuring the inrush is the one failure this sensor exists to prevent. 18/
 pass on x86 and aarch64. `hat_tool ina probe` exits 0 only when the INA219's bus voltage
 agrees with A4 within 0.15 V, which is BOM §6 step 2's pass condition made scriptable.
 
+**2026-08-30 (later) — H3(d): `ogma_host` exists, and the brain runs on the robot.**
+The third program of SPEC §1 is real. `pi_host/src/ogma_host.cpp` links `ogma_core`, builds
+one `OgmaInstance` from a `GraphConfig`, bridges physical sensors onto `reality.*`, ticks at
+50 Hz on an absolute-deadline loop, and serves the *existing* inspector protocol — the same
+`ControlServer` on `OGMA_INSPECTOR_PORT` and `DiagPublisher` on port+1 — so `xaq_inspector`
+and `xaq_voice` needed no new interface. **It has no servo path and no way to acquire one**
+(SPEC §1.1), which is also what makes it safe to leave running unattended. Cost at idle:
+**0.068 % of the 20 ms budget**, 0 overruns.
+
+**The config is authored FOR hardware, which sidesteps H3's own finding.** The gait configs
+cannot run here — five of their twelve topics are oracle-fed. `picrawler_senses.json` is
+three Level-0 EPMs over the three inputs the robot physically has (mic → `stft`, camera →
+`jl` at the retinal encoder's 32×32×1, ultrasonic → `rbf`) fused by a `LateralVoter`. Every
+input is egocentric and legal by construction.
+
+**Three sensor findings, each of which would have been a silent wrong answer.**
+(1) **The ultrasonic is on D2/D3, not D0/D1** — the BOM had it wrong. Established by holding
+every D pin as an input and reading it under an internal pull-up and then a pull-down: a pin
+a device drives ignores the pull, a floating pin follows it. GPIO22 was driven low, the rest
+floated. The driver takes its pulse width from libgpiod v2 **kernel edge timestamps** rather
+than a poll loop, which is what the BOM's ±1.7 cm jitter worry was about: measured spread is
+**866 µs ± 3 µs**, about ±0.5 mm. (2) **ALSA card indices move.** Adding the DAC overlay
+pushed the USB mic from card 0 to card 1, so `plughw:0,0` would have quietly pointed capture
+at an HDMI output; devices are addressed by stable card *id* now. (3) **A `hw:`/`plughw:`
+capture stream must be explicitly `snd_pcm_prepare`d AND `snd_pcm_start`ed**, or the first
+`readi` returns `-EIO` on every latency and resample setting — measured across 24
+combinations. Only the `default` device auto-starts, which is why `arecord` worked.
+
+**The GNGs stalled, and it was conditioning — exactly as §0 rule 4 says it usually is.**
+With every channel flowing cleanly the audio EPM sat at 2 nodes. The mic's capture gain was
+at **0 of 0–16**, putting room tone at −74 dBFS; the STFT features never reached the
+insertion gate. `insertion_autotune` is *not* the fix here — it takes the configured value
+as a **floor**, so it addresses error above the gate, not below it. Raising the hardware gain
+(+23.8 dB, persisted with `alsactl store`) and giving the channel real sound took the audio
+GNG **2 → 29 nodes** with TLE tracking the input and `is_novel` firing. Vision reached 7 on a
+static bench scene; range stayed at 2, which is the honest answer for a wall at a fixed
+distance. **Node count alone would have read as a broken EPM; it was a quiet room.**
+
+**xaq_voice ported by rebuilding it — no source changes.** It already spoke ALSA and ZMQ and
+already had `--device`, so aarch64 was the whole port. Verified acoustically rather than by
+absence of errors: a 440 Hz tone through the HAT DAC came back through the USB mic at
+**1070× the off-tone energy**, and xaq_voice driven by the live brain read **+22.2 dB over
+room noise**. The speaker needed `dtoverlay=hifiberry-dac` and GPIO20 held high.
+
+⚠ **Two operational lessons.** `DiagPublisher` binds **127.0.0.1**, so laptop-side tools
+cannot reach it as-is — fine for voice on the Pi, a gap for a remote inspector. And after the
+reboot `picrawler.local` did not resolve until avahi was restarted: it registers before wifi
+has an address. Since ssh and the dashboard now address the robot by that name, a
+NetworkManager dispatcher re-publishes avahi whenever an interface comes up.
+
 **Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
 passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step
 stochastic sim; `test_rng_parity` passes, so the RNG stream is identical). GCC fuses `a·b+c`

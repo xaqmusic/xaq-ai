@@ -341,3 +341,63 @@ TEST(HostStats, ReadsAFixtureTreeAndReportsUnreadableRootsAsNotOk) {
     EXPECT_FALSE(missing.sample().ok);
     fs::remove_all(root);
 }
+
+
+#ifdef PI_HOST_HAVE_SENSORS
+#include "ogma/hw/Ultrasonic.hpp"
+#include "ogma/hw/CameraCapture.hpp"
+
+// ---------------------------------------------------------------------------
+// Sensor helpers.  Pure arithmetic and pure resampling — no device, no thread.
+// ---------------------------------------------------------------------------
+
+TEST(Ultrasonic, SpeedOfSoundTracksTemperatureRatherThanAssuming343) {
+    // Hardcoding 343 m/s costs ~7 % across 0-40 C, and 7 % of every distance this
+    // sensor reports is not a rounding error.
+    EXPECT_NEAR(Ultrasonic::speed_of_sound_mps(0.0),  331.3, 1e-9);
+    EXPECT_NEAR(Ultrasonic::speed_of_sound_mps(20.0), 343.42, 1e-6);
+    EXPECT_GT(Ultrasonic::speed_of_sound_mps(40.0), Ultrasonic::speed_of_sound_mps(0.0) * 1.06);
+}
+
+TEST(Ultrasonic, PulseWidthToMetresHalvesForTheReturnTrip) {
+    // The measured bench ping: 866 us of echo, with a wall about 15 cm away.
+    const double d = Ultrasonic::pulse_to_metres(866000, 20.0);
+    EXPECT_NEAR(d, 0.1487, 0.001);
+    // Out AND back: forgetting the factor of two doubles every reading.
+    EXPECT_NEAR(Ultrasonic::pulse_to_metres(2000000, 20.0), 0.34342, 1e-5);
+    EXPECT_EQ(Ultrasonic::pulse_to_metres(0, 20.0), 0.0);
+}
+
+TEST(CameraCapture, ReduceAreaAveragesRatherThanDecimating) {
+    // A 4x4 checkerboard reduced to 2x2 must give the MEAN (127), not whichever
+    // corner pixel a nearest-neighbour decimation happened to land on (0 or 255).
+    std::vector<uint8_t> src(16);
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 4; ++x) src[size_t(y*4+x)] = ((x + y) % 2) ? 255 : 0;
+    std::vector<uint8_t> dst;
+    CameraCapture::reduce(src.data(), 4, 4, 2, dst);
+    ASSERT_EQ(dst.size(), 4u);
+    for (uint8_t v : dst) EXPECT_NEAR(int(v), 127, 1);
+}
+
+TEST(CameraCapture, ReduceCentreCropsSoTheSceneIsNotSquashed) {
+    // 4 wide x 2 high: only the centre 2x2 square may contribute, so the outer
+    // columns (marked 255) must not reach the output.
+    std::vector<uint8_t> src(8, 0);
+    src[0] = src[3] = src[4] = src[7] = 255;          // the cropped-away columns
+    std::vector<uint8_t> dst;
+    CameraCapture::reduce(src.data(), 4, 2, 2, dst);
+    ASSERT_EQ(dst.size(), 4u);
+    for (uint8_t v : dst) EXPECT_EQ(int(v), 0);
+}
+
+TEST(CameraCapture, ReduceIsTotalOnDegenerateInput) {
+    std::vector<uint8_t> dst;
+    CameraCapture::reduce(nullptr, 0, 0, 4, dst);
+    EXPECT_EQ(dst.size(), 16u);                        // sized, zeroed, never a crash
+    std::vector<uint8_t> one{200};
+    CameraCapture::reduce(one.data(), 1, 1, 2, dst);   // upscale: every cell the pixel
+    ASSERT_EQ(dst.size(), 4u);
+    for (uint8_t v : dst) EXPECT_EQ(int(v), 200);
+}
+#endif  // PI_HOST_HAVE_SENSORS
