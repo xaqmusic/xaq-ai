@@ -1,7 +1,11 @@
 > **LIVING DOC — the single reference for the Microduck port.** Started 2026-08-30 on branch
-> `microduck-sim`. **Nothing is built yet**; every phase below is a plan. Update it in place —
-> do not fork a second port doc. The picrawler hardware build ([`picrawler_sim2real_port.md`](picrawler_sim2real_port.md))
-> runs in parallel and **shares no files with this work** (§Coordination).
+> `microduck`, cut from `master`. **Nothing is built yet**; every phase below is a plan. Update
+> it in place — do not fork a second port doc.
+>
+> **Scope: simulation only.** No hardware, no `robotd`, no servos. The picrawler hardware
+> build occupies the bench and runs in parallel on its own branches; the two **share no files**
+> (§Coordination). References below to `picrawler_sim2real_port.md` are to that line of work —
+> the file lives on the picrawler branches, not on this one.
 
 # Microduck port plan
 
@@ -51,6 +55,9 @@ and needs no hardware, so the two proceed in parallel without contending for the
 | **Host** | A new **`mj_host/`**, peer to `godot_host/` and `pi_host/` | `OgmaInstance.hpp:60` already says the Bus is owned by "the host (Godot Host, **HAL Host**, Debug Host)". A second host is the anticipated shape, not a new one |
 | **No Godot for the duck** | Confirmed | The Godot dependency is the *picrawler body*, not the brain. `xaq_inspector` and `xaq_voice` reach the brain over ZMQ (`tcp://127.0.0.1:7400/7401`), so the operator's UI-first promotion gate survives the engine change untouched |
 | **No OgmaBrain refactor** | `mj_host` links `ogma_core` directly | `OgmaBrain.cpp` is 2 197 lines of Godot `Variant` marshalling that every picrawler A/B depends on. `mj_host` needs none of it: it can hold an `OgmaInstance` and call it in plain C++. Extracting a shared "BrainHost" would be a large refactor of a load-bearing file, for a duplication that is small and honest |
+| **Head and neck in the motor loop** | In, from run one — two `MotorEPM` instances (legs 2×5, head 1×4) | The head chain is 38 % of the robot's mass with measured CoM authority, and Pollen's own PPO policy found it as a counterweight unprompted (§"The head is 38 % of the mass") |
+| **Standing as scaffolding** | Accepted — `alpha_stand` / StandUp used as the **reset mechanism**, never as a controller (Phase 4) | Gives the brain the continuous-reset harness the picrawler only has in sim, on a body that would otherwise stop at the first fall. Named a scaffold, with a de-scaffolding path |
+| **Scope** | Simulation only, until the controller is understood in this body | No hardware contention with the picrawler bring-up, and no transfer claim to defend before there is something to transfer |
 
 ---
 
@@ -74,6 +81,49 @@ every policy and from the action vector):
 Home pose (`DEFAULT_POSITION`, radians) is mirrored left/right and must match the sim's
 `HOME_FRAME` exactly — the policies observe joint position *relative* to it, and Pollen's own
 test `home_pose_legs_are_mirrored` pins the mirror.
+
+### ★ The head is 38 % of the mass, and it is this body's balance actuator
+
+Operator observation 2026-08-30, on watching the robot: *the head appears to act as a
+stabiliser.* Checked against the MJCF inertials rather than left as an impression, and it is
+correct by a wide margin.
+
+Mass, summed from `robot_walk.xml`'s `<inertial>` elements (737.2 g modelled, ~800 g shipped
+with battery):
+
+| Group | Mass | Share |
+|---|---|---|
+| neck + head chain | **279.9 g** | **38.0 %** |
+| both legs, all ten joints | 258.1 g | 35.0 % |
+| trunk alone | 199.2 g | 27.0 % |
+
+**The head chain outweighs both legs put together.** The head shell (`jaw_soft`, 188.8 g) is
+the second-heaviest single body in the robot, within 10 g of the entire trunk, and it hangs at
+the end of a four-DoF articulated boom.
+
+Forward kinematics at the `STAND` keyframe, in the trunk frame:
+
+- head-chain CoM sits **143 mm** from the rest-of-robot CoM;
+- swinging `neck_pitch` + `head_pitch` by ±0.5 rad (±29°) moves the **whole-robot CoM by
+  8.8 mm horizontally** (+8.7 mm forward / −7.2 mm back).
+
+For scale: Pollen re-baselined their entire home pose — and retrained against it — for a **5 mm**
+trunk shift, *"so the CoM is over the ankle axis; the old pose biased the robot backwards"*
+(`duck-control/src/model.rs`). **A head-pitch swing has more CoM authority than the pose change
+they considered worth a re-baseline.**
+
+**And their own trained policy found it without being told.** The `HOME_FRAME` comment in
+`microduck_rl` records that the pre-STAND2 pose *"biased the robot backward **and made the
+standup policy droop its head forward as a counterweight**"*. A PPO agent, given no instruction
+about the head, discovered it as a balance actuator.
+
+That last paragraph is the ledger's **authority check** — *"before building a lever, measure
+whether the actuator has authority over the target variable"* — passing before a line of code
+is written, on evidence from someone else's experiment. It settles the head/neck question
+(§Phase 3): **the head and neck joints are in the motor loop from the first run.** Excluding
+them would hand the brain a body whose largest control authority over its own centre of mass is
+held out of reach — the exact failure the ledger records three times over as a lever aimed at an
+actuator that could not move its target.
 
 ### Sensing, per 50 Hz tick
 
@@ -247,10 +297,44 @@ Each one gets a `register_source` line with a plain-language description, exactl
 
 ### Phase 3 — the first brain: MotorEPM on measured proprioception · **NOT STARTED**
 
-The point of the whole exercise. A `JointSensorimotorBridge` + `MotorEPM` graph, per-limb, on
-a body whose `x` is *measured*. The picrawler config
-`motor_epm_pure_hk__inst__stance__c025__lr10.json` is the shape to start from — the same two
-modules, re-grouped for two legs of five joints plus a head of four.
+The point of the whole exercise: a `JointSensorimotorBridge` + `MotorEPM` graph on a body whose
+`x` is *measured*. The picrawler config `motor_epm_pure_hk__inst__stance__c025__lr10.json` is
+the shape to start from — the same two module types, re-grouped for this body.
+
+**The head is in the loop from the first run, not an addition later.** It carries 38 % of the
+robot's mass on a four-DoF boom with more CoM authority than the trunk-pose shift Pollen
+retrained against (§"The head is 38 % of the mass"). Including it is the *smaller* hypothesis;
+excluding it asserts that the largest mass in the robot is not part of balance, against
+evidence that it is.
+
+**The shape is two `MotorEPM` instances, and this is config-only.** `MotorEPM` validates
+`action_topics.size() == n_legs * motor_dim` (`MotorEPM.cpp:853`) — one scalar width for every
+group — so a 5/5/4 split cannot live in a single instance:
+
+| instance | `n_legs` | `motor_dim` | joints |
+|---|---|---|---|
+| `motor_epm_legs` | 2 | 5 | hip_yaw, hip_roll, hip_pitch, knee, ankle × L/R |
+| `motor_epm_head` | 1 | 4 | `neck_pitch`, `head_pitch`, `head_yaw`, `head_roll` |
+
+Both shapes already ship: the picrawler runs `n_legs=4, motor_dim=3`, and the Cell runs
+`n_legs=1, motor_dim=2`. **No module change is needed** — which matters, because §Coordination
+forbids one on this branch.
+
+`JointSensorimotorBridge` carries the same single-scalar constraint (`group_size`), so it pairs
+one-to-one: a `group_size=5` bridge feeding the legs and a `group_size=4` bridge feeding the
+head. Each group's state vector `x` is `3 × group_size` — the bridge emits `[pos, action, delta]`
+per joint (`JointSensorimotorBridge.cpp:123`) — so the legs learn a 15-D loop and the head a
+12-D one, against the picrawler's 9-D.
+
+Splitting costs almost nothing behaviourally: each group's `(A, b, C, h)` is *already* seeded
+from its own RNG stream (`base_seed ^ leg`) and learned independently, and the inter-group
+coupling knobs (`coupling_gain`, `ctrl_symmetry_gain`) are 0 in the deployed picrawler config.
+It buys something real — head and legs get their own learning rates and gains, which they
+should, since a 280 g boom and a 129 g leg do not share dynamics.
+
+**⚠ The mouth is not simulable.** `robot_walk.xml` declares exactly the 14 policy joints; there
+is no mouth hinge in any MJCF variant, though the real robot has the servo and
+`robot.mouth` drives it. Anything mouth-shaped is hardware-only and out of scope here.
 
 **⚠ Expect this to be hard in a way the picrawler was not.** A quadruped that flails falls over
 and keeps trying; a biped that flails falls over and stops. Homeokinesis destabilises on
@@ -334,11 +418,7 @@ one a result was measured under, the same way the picrawler records ghost-vs-sol
 1. **MuJoCo version pin.** Must be chosen and recorded here; `mj_loadXML` behaviour on these
    files is version-sensitive, and `microduck_rl` deliberately does not override the `mujoco`
    version mjlab pins.
-2. **Head joints in or out of the motor loop.** Four of the fourteen joints are neck and head.
-   They are not locomotion, they carry the ToF and the camera, and including them in the
-   MotorEPM group makes the loop's `x` a mix of two very different dynamics. Leaning toward a
-   separate group from the start, decided by measurement in Phase 3.
-3. **Whether `robot_walk` or `robot_allcollisions` is the default.** Leaning `allcollisions`,
+2. **Whether `robot_walk` or `robot_allcollisions` is the default.** Leaning `allcollisions`,
    per the ghost-chassis lesson: a belly that cannot touch the ground is a different body, and
    every claim measured on it is about that body (ledger §"seedavg.py does not set
    `OGMA_PICRAWLER_CHASSIS_COLLIDE`").
