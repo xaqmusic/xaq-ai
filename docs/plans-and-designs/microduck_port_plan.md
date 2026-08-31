@@ -1,6 +1,12 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
-> `microduck`, cut from `master`. **Nothing is built yet**; every phase below is a plan. Update
-> it in place — do not fork a second port doc.
+> `microduck`, cut from `master`. Update it in place — do not fork a second port doc.
+>
+> **Status 2026-08-31: their sim runs here, nothing of ours is built yet.** G1/G3/G4 measured
+> and passing, G2 restated after it failed and taught us something (§Measured). Upstream is
+> cloned *outside* this repo — `/home/xaqmusic/microduck` at `590b986` and
+> `/home/xaqmusic/microduck_rl` at `d424a0c` — so it stays a clean base to PR from. The CPU
+> sim venv is `microduck_rl/.venv` (mujoco 3.12.0, onnxruntime 1.29.0, numpy 2.5.2; no mjlab,
+> no CUDA).
 >
 > **Scope: simulation only.** No hardware, no `robotd`, no servos, until the controller is
 > understood in this body. The picrawler hardware build occupies the bench and runs in parallel
@@ -235,6 +241,66 @@ Pollen's plan calls for an "energy/mood model" driving state choice. They have t
 already; it is on `robot.health`. This is the doctrine's own §1 step 2 — *check the sensory
 channel first* — coming out in our favour for once, because the channel is already there.
 
+### ★ Measured 2026-08-31 — the sim runs, and two premises were wrong
+
+First contact with the real thing. Upstream cloned to `/home/xaqmusic/microduck` (`590b986`)
+and `/home/xaqmusic/microduck_rl` (`d424a0c`); CPU MuJoCo 3.12.0 + onnxruntime 1.29.0 in a
+venv at `microduck_rl/.venv`. No mjlab, no CUDA, no `uv` — `infer_policy.py` imports only
+`numpy`, `mujoco` and `onnxruntime`, so the whole training stack is unnecessary to *run* a duck.
+
+**G1 — PASS.** `scene.xml` and `scene_walk.xml` both load unmodified:
+
+| | `scene.xml` | `scene_walk.xml` |
+|---|---|---|
+| `nq` / `nv` / `nu` | 21 / 20 / 14 | 21 / 20 / 14 |
+| bodies / geoms / sensors / keyframes | 16 / 82 / 6 / 4 | 16 / 76 / 6 / 4 |
+| `opt.timestep` | **0.002 s** | 0.002 s |
+
+Two numbers the plan needed and now has. **G3's substep count is 10** (500 Hz physics ÷ 50 Hz
+brain). And **G4's mapping is the identity on this model**: `ctrl[i]` drives joint `i`, in
+exactly `JOINT_NAMES`-minus-mouth order. The name-lookup requirement stands anyway, because an
+identity that holds today is not a contract.
+
+**G2 — the original wording was wrong, and the correction is a finding.** Holding the `STAND`
+keyframe's own `ctrl` for 3 s topples the robot to **81° tilt at every noise level including
+zero**. That is not a harness fault: tilt reads 0.00° at t=0, the fall is gradual (10° by
+0.4 s), and the actuators peak at **0.13 N·m against a 0.96 N·m limit** — they are not
+saturating, they are *soft*. At kp×5 the same passive hold stands at 1.6°.
+
+**This body has no passive standing equilibrium. It is always actively balancing.** Which is
+consistent with everything else here: a robot carrying 38 % of its mass on a four-DoF boom
+(§"The head is 38 % of the mass") is an inverted pendulum that must be ridden, not a tripod
+that can be parked.
+
+Consequences, both of which change the plan:
+
+1. **S1's premise is void.** "Hold `key STAND`'s ctrl with no brain" is not a baseline; it is a
+   robot falling over. S1 becomes "hold with the *standing policy*", which measures at
+   **tilt 0.47°** and is robust to 0.03 rad init noise across seeds.
+2. **Track A's brain must balance from tick one.** There is no passive fallback to degrade to
+   while the motor loop learns, which sharpens the A1 warning rather than adding a new one.
+
+**And the XML actuator cannot walk, which promotes the BAM question.** Same policy, same
+command, only stiffness differing:
+
+| arm | commanded stride (ptp) | joint stride (ptp) | tracking error | displacement, 15 s |
+|---|---|---|---|---|
+| `alpha_walking`, vx 0.15, **stock kp** | 0.224 rad | 0.118 rad | **0.213 rad** | **0.009 m** |
+| same, kp×5 | 1.066 rad | 0.943 rad | 0.326 rad | **1.595 m** (0.106 m/s) |
+| stock kp, vx 0.30 | 1.430 rad | 0.627 rad | 0.406 rad | 1.951 m (0.130 m/s) |
+
+The policy *is* commanding a gait at stock gains; the joints deliver about half of it and lag
+by 12°, and the duck steps in place. A large enough commanded stride escapes the attractor,
+which is why vx 0.30 walks where vx 0.15 does not.
+
+**So option 1 of the BAM spec is adequate for posture and NOT for locomotion**, where that
+spec claimed it was adequate for everything through S3. Any locomotion claim needs BAM or a
+validated stiffness correction; standing, balance and head-use work can proceed as-is. Record
+which arm a result came from, exactly as the picrawler records ghost-vs-solid chassis.
+
+**Their Rust test suite is green here**: `duck-control` 60 passed, `duck-ipc-proto` 49 passed,
+0 failed, no warnings, on rustc 1.98.0. That is the baseline the `robot.state` PR moves.
+
 ### The sim model — what is actually in the MJCF
 
 Checked against `microduck_rl/src/mjlab_microduck/robot/microduck/`:
@@ -445,7 +511,7 @@ port is wrong** — these are not levers and are never seed-averaged.
 | Gate | Constraint |
 |---|---|
 | **G1 — the model loads unmodified** | `mj_loadXML` on the vendored scene succeeds with zero edits to Pollen's XML. Any edit we need is an *overlay* file, recorded as such |
-| **G2 — the STAND keyframe is a stable equilibrium** | Hold `key STAND`'s `ctrl` for 3 s from noisy inits: the trunk stays upright. **Check tilt, not height** — `microduck_rl/AGENTS.md` records that a settle test recording only `z` reports fallen states as resting fine |
+| **G2 — STAND is a stable equilibrium *under active control*** | Hold the standing policy for 3 s from noisy inits: the trunk stays upright. **Check tilt, not height** — `microduck_rl/AGENTS.md` records that a settle test recording only `z` reports fallen states as resting fine. **Restated 2026-08-31 after measurement**: the original wording asked for a *passive* `ctrl` hold, and that fails at 81° tilt even at zero noise. This body has no passive standing equilibrium (§Measured) |
 | **G3 — rate fidelity** | The brain ticks at exactly 50 Hz against MuJoCo's timestep, with the substep count stated and constant. The picrawler's `TAU = 0.02` is the same contract; a drifting ratio makes every learning rate meaningless |
 | **G4 — joint-order round trip** | `DuckBody` maps `action.<joint_name>` → `d->ctrl[i]` by **name lookup on the model**, never by a transcribed index — and a test asserts the resulting order matches `JOINT_NAMES`. This is the picrawler leg-naming mirror (`picrawler_sim2real_port.md` §"The leg-naming mirror"), and it is the same trap: silent, behavioural, and only visible as a robot that moves wrong |
 | **G5 — the picrawler is byte-identical** | Building `mj_host` changes nothing about `godot_host`. `seedavg.py` on the deployed picrawler config produces the same numbers before and after this branch. Verified once at S0 and once at merge |
@@ -487,8 +553,14 @@ first; after that the tracks are independent and can run in either order, or tog
 
 ### S1 — the body, with no brain · *shared* · **NOT STARTED**
 
-`DuckBody` + a run loop, no `OgmaInstance` at all. Holds `key STAND`'s `ctrl`, steps physics,
-writes the stdout JSONL, serves the viewer. Satisfies **G2**, **G3**, **G5**.
+`DuckBody` + a run loop, no `OgmaInstance` at all. Steps physics, writes the stdout JSONL,
+serves the viewer. Satisfies **G2**, **G3**, **G5**.
+
+**Holds the pose with the *standing policy*, not with a passive `ctrl` hold** — the passive
+version falls over (§Measured), so the only honest no-brain baseline on this body is an
+actively balanced one. That makes `alpha_stand.onnx` a dependency of S1 rather than of A2,
+which is a change from the original phasing and is fine: it is the same named scaffold,
+arriving one phase earlier.
 
 This is the gain-0 guard for the whole port: a host that runs the body correctly with no brain
 in it is the baseline every later phase is measured against.
@@ -661,16 +733,20 @@ joint.
 
 Three options, in increasing cost:
 
-1. **Ship the XML actuator.** Free, and adequate for everything in Phases 0–5, which are about
-   whether a brain closes a loop at all — not about transfer. **Start here.**
+1. **Ship the XML actuator.** Free, and adequate for **posture, balance and head-use** work.
+   **Measured 2026-08-31 to be NOT adequate for locomotion**: the trained gait is attenuated to
+   half amplitude and the duck steps in place (§Measured). The original wording here claimed it
+   was adequate through S3, and that was falsified within a day of writing it. **Start here for
+   anything postural.**
 2. **Port BAM's `compute()` to C++.** It is a torque model over `(q, q̇, target, load)`; the
    Python is thin, and Rhoban's `bam` carries the identified parameters. Becomes necessary the
    moment a *hardware* transfer is attempted, and not before.
 3. **Drive MuJoCo from Python and keep BAM.** Rejected: it puts the brain behind an FFI
    boundary at 50 Hz and drags mjlab's whole training stack into the runtime.
 
-**The gate that decides it:** any claim about behaviour that would transfer to the real duck
-needs option 2. Any claim about whether the substrate learns needs only option 1. Record which
+**The gate that decides it:** any claim involving **locomotion** needs option 2 (or a
+stiffness correction validated against it). Any claim about posture, balance or whether the
+substrate closes a loop at all needs only option 1. Record which
 one a result was measured under, the same way the picrawler records ghost-vs-solid chassis.
 
 ---
