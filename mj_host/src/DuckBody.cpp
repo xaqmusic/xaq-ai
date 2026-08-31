@@ -127,6 +127,10 @@ double DuckBody::tilt_deg() const {
     return std::acos(std::fmax(-1.0, std::fmin(1.0, cos_tilt))) * 180.0 / M_PI;
 }
 
+std::vector<double> DuckBody::qpos() const {
+    return std::vector<double>(d_->qpos, d_->qpos + m_->nq);
+}
+
 std::array<double, 3> DuckBody::trunk_position() const {
     return {d_->xpos[3 * trunk_body_], d_->xpos[3 * trunk_body_ + 1], d_->xpos[3 * trunk_body_ + 2]};
 }

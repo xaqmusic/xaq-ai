@@ -185,6 +185,12 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
                         body.time(), t, p[0], p[1], p[2], tilt, g[0], g[1], g[2]);
             for (int i = 0; i < kNumPolicyJoints; ++i)
                 std::printf("%s%.4f", i ? "," : "", q[i]);
+            // Full generalized position last, so a viewer can draw exactly this
+            // pose instead of running a second copy of the dynamics to guess it.
+            std::printf("],\"qpos\":[");
+            const auto full = body.qpos();
+            for (size_t i = 0; i < full.size(); ++i)
+                std::printf("%s%.6f", i ? "," : "", full[i]);
             std::printf("]}\n");
         }
     }

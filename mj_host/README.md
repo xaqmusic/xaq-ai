@@ -21,14 +21,35 @@ Plan and rationale: [`docs/plans-and-designs/microduck_port_plan.md`](../docs/pl
 
 ## Build and run
 
-```sh
-cmake -S mj_host -B mj_host/build -DCMAKE_BUILD_TYPE=Release
-cmake --build mj_host/build -j8
+[`run.sh`](run.sh) is the front door:
 
+```sh
+./mj_host/run.sh build
+./mj_host/run.sh gates                        # every gate, non-zero exit on any failure
+./mj_host/run.sh watch --secs 30              # WATCH IT — live window, run saved to log/
+./mj_host/run.sh record /tmp/duck.mp4 --secs 8
+./mj_host/run.sh hold --secs 60               # headless, JSONL to log/
+```
+
+`watch` and `record` take the host's own arguments, so `--secs`, `--noise`, `--seed` and a
+scene path all pass straight through:
+
+```sh
+./mj_host/run.sh watch --secs 10 --noise 0.05 --seed 2
+```
+
+The binary underneath, if you want it directly:
+
+```sh
 ./mj_host/build/ogma_mjhost --load-only     # G1 / G3 / G4, on models/microduck/scene.xml
 ./mj_host/build/ogma_mjhost --gate-g2       # the settle sweep: 4 noise levels x 3 seeds
 ./mj_host/build/ogma_mjhost --hold --secs 5 # run the scaffold, JSONL on stdout
 ```
+
+**The viewer never simulates.** The host writes the full generalized position every tick and
+[`tools/duck_viewer`](../tools/duck_viewer) draws it — so what is on screen is the run, not a
+second copy of the dynamics that could quietly disagree with it. Every `watch` and `hold` keeps
+its run under `log/`, and a saved run replays identically forever.
 
 MuJoCo (31 MB) and ONNX Runtime (11 MB) download on the first configure and are cached
 thereafter. Nothing else is needed: no Python, no mjlab, no CUDA, and `ogma_core` is not built
@@ -86,11 +107,11 @@ Two implementations, one trajectory. That is the check worth having on
 
 ## Not here yet, deliberately
 
-**No interactive viewer.** MuJoCo's own `simulate` is a separate GLFW application, and
-embedding one would add a windowing dependency to a host whose workflow is headless runs plus
-the ZMQ inspector (S2). Any trajectory this host produces can be rendered from Python against
-the same vendored model when something needs watching. Revisit when there is a brain worth
-watching live.
+**No viewer inside the host.** Watching happens through
+[`tools/duck_viewer`](../tools/duck_viewer), which renders the host's own output rather than
+linking a windowing toolkit into the process that owns the physics. The host stays headless and
+the observation path stays a reader, which is the same separation `xaq_inspector` has from the
+picrawler.
 
 ## Notes for whoever builds S2 on this
 

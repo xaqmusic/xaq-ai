@@ -96,6 +96,12 @@ public:
     // Trunk position in the world frame. Same rule: instrumentation only.
     std::array<double, 3> trunk_position() const;
 
+    // Full generalized position, including the trunk's free joint. Not an
+    // observation and never published to a brain: it is what a viewer needs in
+    // order to draw exactly the pose the host computed, rather than re-deriving
+    // one from a second copy of the dynamics.
+    std::vector<double> qpos() const;
+
     const mjModel* model() const { return m_; }
     const mjData*  data()  const { return d_; }
 

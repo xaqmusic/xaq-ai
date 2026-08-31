@@ -56,3 +56,6 @@ godot_host/project/addons/ami_ogma/configs/tsweep_*.json
 godot_host/project/addons/ami_ogma/configs/d2_*.json
 godot_host/project/addons/ami_ogma/configs/e3_settle.json
 godot_host/project/addons/ami_ogma/configs/e3b_*.json
+
+# MuJoCo drops this wherever it is run from
+MUJOCO_LOG.TXT
