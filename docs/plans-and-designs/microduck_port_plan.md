@@ -683,9 +683,41 @@ Three artefacts, in this order:
 1. **The gap analysis**, written for Pollen: what `autonomous_behavior.md` plans, what the
    substrate does instead, and what is measurably better rather than merely different
    (§"The gap we fill").
-2. **`robot.state` gains velocities and currents** — a small, self-contained PR with a stated
-   motivation, useful to any client and not only to us. The right first contribution:
-   narrow, obviously correct, and it does not ask anyone to adopt a philosophy.
+2. **`robot.state` gains velocities and currents** — ✅ **WRITTEN 2026-08-31, not submitted.**
+   Branch `state-velocities-currents` in the local clone; **nothing pushed, no fork, no PR** —
+   that is the operator's call to make.
+
+   The motivation turned out stronger than the plan assumed. `bus.rs` reads **one contiguous
+   twelve-byte block** per tick at register 124 — `present_pwm`, `present_current`,
+   `present_velocity`, `present_position` — and unpacks all four into `Sensors`. Only position
+   reaches the wire. The other two are already measured and paid for, and are discarded at the
+   socket. **Zero extra bus cost, zero new failure mode.**
+
+   Neither is recoverable from outside: subscribers are decimated per connection, so
+   differencing `joints` means differencing across five ticks at 10 Hz with any dropped frame
+   becoming a spike; and load has no substitute at all.
+
+   | | |
+   |---|---|
+   | Diff | +199 lines, 0 deletions, 3 files |
+   | Wire cost | 722 B → 957 B (+235 B, +33 %); +11.8 KB/s at 50 Hz, +2.4 KB/s at 10 Hz |
+   | Back-compat | `skip_serializing_if = "Vec::is_empty"` on the `odom` rule — an older frame parses, and *absent* stays distinguishable from *zero* |
+   | Tests | duck-control 60→60, duck-ipc-proto 49→**51**, robotd 96→**97**, 0 failed |
+   | Their gates | `cargo fmt --all --check` clean, `clippy -D warnings` clean |
+
+   Validated in sim, which for this change means their own `FakeIo` driving the real
+   `control_loop` — the new end-to-end test asserts both blocks reach the stream with values
+   distinguishable from each other *and* from the joint angles, so a block landing in the wrong
+   field fails in CI rather than on a robot. `FakeIo` gained `set_velocities` /
+   `set_currents_ma` mirroring `set_imu`, deliberately **not** derived from what was written:
+   positions are echoed back, and deriving these the same way would make the test vacuous.
+
+   **Out of scope, found on the way:** `serde_json` round-trips some `f64` values inexactly
+   here (`1.4000000000000001` → `1.4`). It affects every float already on this wire —
+   `joints`, `targets`, `gravity` — is ~1e-16 against a sensor resolution of ~1e-3, and is not
+   ours to fix in a PR about two new fields. Our test compares approximately, which is the rule
+   their own `SafetyState` states when it drops `Eq` because "exact equality on [a measurement]
+   is not a comparison anybody should be offered".
 3. **`ogma_duckd` itself**, off by default, with the education doc (§Educate).
 
 **Nothing here is offered until it works in sim.** An unproven contribution to someone else's
