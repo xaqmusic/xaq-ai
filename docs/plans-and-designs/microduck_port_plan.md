@@ -614,11 +614,34 @@ offset there produces a plausible robot rather than an error, and no metric catc
 An earlier 0.46 vs 0.48 gap between the two turned out to be 3 s against 5 s on a settling
 transient, not a divergence.
 
-**Deferred, and named rather than dropped: the interactive viewer.** MuJoCo's `simulate` is a
-separate GLFW application, and embedding one adds a windowing dependency to a host whose
-workflow is headless runs plus the ZMQ inspector. Any trajectory here renders from Python
-against the same vendored model when something needs watching. Revisit when there is a brain
-worth watching live.
+**Two things came out of watching it, and both change something.**
+
+*The head leads the settle.* Over the first second `neck_pitch` moves 146 mrad peak-to-peak,
+`head_pitch` 99 and `head_yaw` 68 — every one larger than the largest leg joint at 63. The
+head-as-balance-actuator finding (§"The head is 38 % of the mass") was derived from mass and
+lever arm; this is the same conclusion arriving from a completely different direction, in a
+trained controller's own behaviour.
+
+*★ The standing scaffold already recovers from a fall.* Shoved with 10 N it is knocked past
+90° four times out of four — peaks of 92–144°, trunk height dropping to 0.05 m — and stands
+itself back up within two seconds each time. **A2 planned to add `StandUp` or `VelStand` as the
+reset mechanism; the file already vendored for S1 does that job**, so A2 needs no new dependency,
+only the hand-off logic and its `events.reset`.
+
+⚠ **A blind metric found on the way** (§3 rule 4): `tilt_end` cannot tell "upright" from "still
+recovering", so a run that ends mid-recovery reports FALLEN. It is the verdict being literal
+rather than wrong, and the fix is to read recovery over a window rather than at the last tick.
+Worth fixing before any push-based number is quoted as a result.
+
+**The observation path landed the same day.** `mj_host/run.sh` is the front door
+(`build` / `gates` / `watch` / `record` / `hold`) and `tools/duck_viewer` draws the run.
+**The viewer never simulates**: the host writes full `qpos` every tick and the viewer assigns it
+and calls `mj_forward`, so what is on screen is the run rather than a second copy of the
+dynamics that could quietly disagree. Every `watch` and `hold` keeps its JSONL under
+`mj_host/log/`, and a saved run replays identically forever.
+
+No viewer inside the host, which is the same separation `xaq_inspector` has from the picrawler:
+the observation path is a reader.
 
 This is the gain-0 guard for the whole port: a host that runs the body correctly with no brain
 in it is the baseline every later phase is measured against.

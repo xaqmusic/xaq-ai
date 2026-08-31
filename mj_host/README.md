@@ -36,7 +36,24 @@ scene path all pass straight through:
 
 ```sh
 ./mj_host/run.sh watch --secs 10 --noise 0.05 --seed 2
+./mj_host/run.sh watch --secs 20 --push 10 --push-every 3     # shove it and watch it recover
 ```
+
+**Give it something to recover from.** A held pose settles in about a second and then sits
+almost still — a millirad of residual correction, which is correct and dull. `--push N` shoves
+the trunk with `N` newtons on a rotating heading every `--push-every` seconds, which is the
+cheapest form of the perturb-and-recover test and the thing an eye can actually judge.
+
+| shove | what happens |
+|---|---|
+| 2 N | leans to 7.5°, recovers, drifts 8 cm over four shoves |
+| 5 N | leans to 8.2°, recovers, drifts 33 cm |
+| **10 N** | **goes over — peaks 92–144° — and gets back up, 4 for 4, each within 2 s** |
+| 20 N | goes over and stays down |
+
+⚠ **`tilt_end` is blind to "still recovering".** A run that ends mid-recovery reports FALLEN
+because the verdict is read at the last tick. Ending a push run cleanly means leaving it more
+than about two seconds after the final shove.
 
 The binary underneath, if you want it directly:
 
@@ -67,6 +84,12 @@ in CI rather than in a person's memory.
 | **G4** | does `ctrl[i]` drive the joint this project thinks it does? | PASS — identity, in `JOINT_NAMES`-minus-mouth order |
 | **G2** | is `STAND` a stable equilibrium *under active control*? | PASS — tilt 0.46–0.48° across 4 noise levels × 3 seeds |
 
+The settling transient is worth watching once: **the head is the biggest mover in it.**
+Over the first second `neck_pitch` swings 146 mrad, `head_pitch` 99 and `head_yaw` 68 — every
+one larger than any leg joint (the largest is 63). When this body settles, the head does most
+of the work, which is what a robot carrying 38 % of its mass on a four-DoF boom should be
+expected to do.
+
 **G4 earns its place by being able to fail.** Swapping the `left_knee` and `left_ankle`
 transmissions in a scratch copy produces:
 
@@ -91,6 +114,16 @@ The gate is also the reason there is a scaffold at all. The plan originally had 
 `STAND` keyframe's own `ctrl` with nothing in the loop; measured, that topples the robot to 81°
 at every noise level including zero. **This body has no passive standing equilibrium**, so the
 only honest no-brain baseline is an actively balanced one.
+
+## The standing scaffold already recovers from a fall
+
+Measured, not assumed: at 10 N it is knocked past 90° four times out of four and stands itself
+back up within two seconds each time.
+
+That matters beyond being fun to watch. The plan's phase A2 plans a fall-recovery scaffold as
+the reset mechanism for when the brain drives the joints, and expected to need `StandUp` or
+`VelStand` for it. **The file already vendored here does that job**, so A2 needs no new
+dependency — only the hand-off logic and its `events.reset`.
 
 ## Cross-checked against an independent implementation
 

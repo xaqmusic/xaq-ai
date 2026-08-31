@@ -66,6 +66,17 @@ public:
     // Advance one brain tick: `substeps()` physics steps holding `ctrl`.
     void step(const std::array<double, kNumPolicyJoints>& ctrl);
 
+    // Shove the trunk, in world newtons, for the next `ticks` brain ticks.
+    //
+    // This is the (d) test in its cheapest form: perturb, then watch whether the
+    // controller re-establishes what it was holding. A run that only ever settles
+    // shows that a fixed point exists; a run that recovers shows the fixed point is
+    // ATTRACTING, which is the property worth having and the one an eye can judge.
+    void push(const std::array<double, 3>& force_newtons, int ticks);
+
+    // The force being applied right now, world newtons. Zero when nothing is.
+    std::array<double, 3> active_push() const { return push_ticks_ > 0 ? push_ : std::array<double, 3>{}; }
+
     int    substeps() const { return substeps_; }
     double timestep() const { return m_->opt.timestep; }
     double time()     const { return d_->time; }
@@ -115,6 +126,8 @@ private:
     std::array<int, kNumPolicyJoints> qvel_adr_{};   // into d_->qvel
     std::array<int, kNumPolicyJoints> actuator_{};   // into d_->ctrl
     int trunk_body_  = -1;
+    std::array<double, 3> push_{};
+    int push_ticks_ = 0;
     int quat_adr_    = -1;   // into d_->sensordata, framequat on the imu site
     int gyro_adr_    = -1;   // into d_->sensordata
 };

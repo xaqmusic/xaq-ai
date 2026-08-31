@@ -16,6 +16,7 @@
 // Every mode exits non-zero when a gate fails, so all of them belong in CI rather
 // than in somebody's memory.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -148,11 +149,19 @@ struct RunResult {
     double tilt_max = 0.0;
     double z_end = 0.0;
     double travelled = 0.0;
+    int    pushes = 0;
+    double worst_recovery_tilt = 0.0;   // highest tilt reached after any shove
+};
+
+struct PushPlan {
+    double newtons = 0.0;      // 0 disables
+    double every_s = 3.0;      // how often
+    double hold_s  = 0.1;      // how long each shove lasts
 };
 
 // One episode of the standing scaffold. `emit` writes the per-tick JSONL when asked.
 RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise, uint64_t seed,
-                   bool emit) {
+                   bool emit, const PushPlan& pushes = {}) {
     body.reset("STAND", noise, seed);
     const auto start = body.trunk_position();
 
@@ -161,7 +170,19 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
 
     RunResult r;
     const int ticks = int(seconds * kBrainHz);
+    const int push_period = int(pushes.every_s * kBrainHz);
+    const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
+    int push_index = 0;
+
     for (int t = 0; t < ticks; ++t) {
+        // Shove on a fixed schedule, rotating the direction so the controller is
+        // asked to recover from every side rather than from a favourite one.
+        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t % push_period == 0) {
+            static const double dirs[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+            const auto& d = dirs[push_index++ % 4];
+            body.push({pushes.newtons * d[0], pushes.newtons * d[1], 0.0}, push_hold);
+            r.pushes++;
+        }
         const auto action = policy.infer(build_observation(body, last_action, command));
         last_action = action;
 
@@ -172,6 +193,7 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
 
         const double tilt = body.tilt_deg();
         r.tilt_max = std::fmax(r.tilt_max, tilt);
+        if (r.pushes > 0) r.worst_recovery_tilt = std::fmax(r.worst_recovery_tilt, tilt);
 
         if (emit) {
             const auto p = body.trunk_position();
@@ -181,8 +203,9 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
             // Instrumentation fields (x/y/z, tilt) are world-frame and are for the
             // reader; no brain ever subscribes to them.
             std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
-                        "\"grav\":[%.4f,%.4f,%.4f],\"q\":[",
-                        body.time(), t, p[0], p[1], p[2], tilt, g[0], g[1], g[2]);
+                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[%.2f,%.2f,%.2f],\"q\":[",
+                        body.time(), t, p[0], p[1], p[2], tilt, g[0], g[1], g[2],
+                        body.active_push()[0], body.active_push()[1], body.active_push()[2]);
             for (int i = 0; i < kNumPolicyJoints; ++i)
                 std::printf("%s%.4f", i ? "," : "", q[i]);
             // Full generalized position last, so a viewer can draw exactly this
@@ -202,13 +225,18 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
     return r;
 }
 
-int cmd_hold(const std::string& scene, double seconds, double noise, uint64_t seed) {
+int cmd_hold(const std::string& scene, double seconds, double noise, uint64_t seed,
+             const PushPlan& pushes) {
     DuckBody body(scene);
     Policy policy(kStandScaffold);
-    const RunResult r = run_hold(body, policy, seconds, noise, seed, /*emit=*/true);
-    std::fprintf(stderr, "held %.1f s — tilt_end %.2f deg, tilt_max %.2f deg, z %.4f m, drift %.3f m — %s\n",
-                 seconds, r.tilt_end, r.tilt_max, r.z_end, r.travelled,
-                 r.tilt_end < kFallenTiltDeg ? "UPRIGHT" : "FALLEN");
+    const RunResult r = run_hold(body, policy, seconds, noise, seed, /*emit=*/true, pushes);
+    std::fprintf(stderr, "held %.1f s — tilt_end %.2f deg, tilt_max %.2f deg, z %.4f m, drift %.3f m",
+                 seconds, r.tilt_end, r.tilt_max, r.z_end, r.travelled);
+    if (r.pushes > 0) {
+        std::fprintf(stderr, ", %d shoves of %.1f N (worst tilt after one: %.2f deg)", r.pushes,
+                     pushes.newtons, r.worst_recovery_tilt);
+    }
+    std::fprintf(stderr, " — %s\n", r.tilt_end < kFallenTiltDeg ? "UPRIGHT" : "FALLEN");
     return r.tilt_end < kFallenTiltDeg ? 0 : 1;
 }
 
@@ -255,8 +283,11 @@ void usage() {
         "      G4 (ctrl order matches the joint names).\n"
         "\n"
         "  ogma_mjhost --hold [scene.xml] [--secs S] [--noise R] [--seed N]\n"
+        "                     [--push N] [--push-every S] [--push-hold S]\n"
         "      Run the standing scaffold. One JSON object per tick on stdout, a\n"
         "      summary on stderr. Exits non-zero if the robot ends up down.\n"
+        "      --push shoves the trunk on a rotating heading: the cheapest form of\n"
+        "      the perturb-and-recover test, and the thing an eye can judge.\n"
         "\n"
         "  ogma_mjhost --gate-g2 [scene.xml] [--secs S]\n"
         "      The settle sweep: four noise levels x three seeds, judged on TILT.\n"
@@ -273,6 +304,7 @@ int main(int argc, char** argv) {
     std::string mode;
     double seconds = 3.0, noise = 0.0;
     uint64_t seed = 0;
+    PushPlan pushes;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -288,6 +320,12 @@ int main(int argc, char** argv) {
             noise = std::stod(next("--noise"));
         } else if (a == "--seed") {
             seed = std::stoull(next("--seed"));
+        } else if (a == "--push") {
+            pushes.newtons = std::stod(next("--push"));
+        } else if (a == "--push-every") {
+            pushes.every_s = std::stod(next("--push-every"));
+        } else if (a == "--push-hold") {
+            pushes.hold_s = std::stod(next("--push-hold"));
         } else if (a == "-h" || a == "--help") {
             usage();
             return 0;
@@ -308,7 +346,7 @@ int main(int argc, char** argv) {
 
     try {
         if (mode == "--load-only") return cmd_load_only(scene);
-        if (mode == "--hold") return cmd_hold(scene, seconds, noise, seed);
+        if (mode == "--hold") return cmd_hold(scene, seconds, noise, seed, pushes);
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

@@ -96,8 +96,21 @@ void DuckBody::reset(const std::string& keyframe, double joint_noise, uint64_t s
     mj_forward(m_, d_);
 }
 
+void DuckBody::push(const std::array<double, 3>& force_newtons, int ticks) {
+    push_ = force_newtons;
+    push_ticks_ = ticks;
+}
+
 void DuckBody::step(const std::array<double, kNumPolicyJoints>& ctrl) {
     for (int i = 0; i < kNumPolicyJoints; ++i) d_->ctrl[actuator_[i]] = ctrl[i];
+
+    // xfrc_applied is a persistent field, so it is written every tick and cleared
+    // when the window closes. Leaving a stale force on the trunk would look like a
+    // controller that had developed a lean.
+    const bool pushing = push_ticks_ > 0;
+    for (int i = 0; i < 3; ++i) d_->xfrc_applied[6 * trunk_body_ + i] = pushing ? push_[i] : 0.0;
+    if (pushing) --push_ticks_;
+
     for (int s = 0; s < substeps_; ++s) mj_step(m_, d_);
 }
 
