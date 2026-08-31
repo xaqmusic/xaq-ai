@@ -119,7 +119,7 @@ the learned one.
 | Working on the Cell | [`cell report`](docs/reports/cell_markov_blanket_loops_report.md) |
 | Building a level ABOVE the fast loops (hierarchy, a slow EPM, fusing several EPMs) | [`slow-loop notes`](docs/plans-and-designs/slow_loop_design_notes.md) + [`fusion notes`](docs/plans-and-designs/fusion_notes.md) — **design-stage, nothing measured yet.** Both mark which parts are already shipped machinery (`consensus.0` stacking, `KeyframeAverager`, `GNGRollout`, a level ≥ 1 LateralVoter) and which are proposals |
 | Working on **xaq_voice** (sonification of TLE) | [`tools/xaq_voice/README.md`](tools/xaq_voice/README.md) — an **instrument, not a behaviour**; its only contract with the brain is the `lite` diag topic. Tune it with [the studio](tools/xaq_voice_studio/README.md); a new signal to sonify is a one-line, O(1) addition to a module's `diag_lite()` |
-| **Writing ANY formal report** (`docs/reports/`) | [`REPORTS.md`](REPORTS.md) — **audience, structure, and the banned "Claudese".** Read it BEFORE the first line |
+| **Writing anything that LEAVES this repo** — a formal report (`docs/reports/`), or a PR / issue / commit in someone else's repository | [`REPORTS.md`](REPORTS.md) — **audience, structure, and the banned "Claudese".** §9 covers outward-facing work: **our jargon does not travel, one thing per PR, and opening one is always the operator's call**. Read it BEFORE the first line |
 | Repo layout, naming, licence | [`AGENTS.md`](AGENTS.md) — **`ami_ogma` == `ogma` == xaq**, intentionally |
 | The vocabulary is new to you | [`docs/glossary.md`](docs/glossary.md) — plain-language, concepts-first |
 | Body geometry / servo model | [`docs/operational/`](docs/operational/README.md) — CAD-derived ground truth + protocols |
@@ -307,6 +307,13 @@ because they are violated by default: **never pre-qualify your own honesty** ("t
 take", "to be fair") — it implies the surrounding text is less honest; and **process
 mistakes belong in the ledger, not the report** — a falsified hypothesis is a result and
 stays, but a wrong turn during the investigation goes to the ledger.
+
+**REPORTS.md §9 extends the same standard to anything sent OUTSIDE this project** — a pull
+request, issue, or commit message in someone else's repository. Three of its rules bind
+hardest: **our vocabulary does not travel** (no EPM, TLE, or Markov blanket in someone else's
+PR, and a change that needs our framework to look worthwhile is the wrong change to send);
+**one thing per PR**; and **opening one is always the operator's call** — prepare it locally,
+run their gates, and show them.
 
 Scale claims to evidence. If it ties the baseline, **say "ties."** Name scaffolds as
 scaffolds. A graceful-degradation result is not a "beats both" result. **A falsified

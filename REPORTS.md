@@ -1,10 +1,16 @@
-# REPORTS.md — how to write a formal report in this repo
+# REPORTS.md — how to write for a reader outside this repo
 
-**This governs formal reports only** — the documents in `docs/reports/` that an outside
-reader might be handed. It does not govern the ledger, plan docs, commit messages, or
-conversational replies, which have their own jobs and their own registers.
+**This governs writing that leaves the project.** Two kinds, sharing one standard:
 
-The reference instance is
+| | Governed by | Reader |
+|---|---|---|
+| **Formal reports** — `docs/reports/` | §1–§8 | curious, outside active inference and machine learning |
+| **Outward-facing communication** — pull requests, issues, and commit messages in someone else's repository | §3 and §9 | an expert in *their* codebase who knows nothing about ours |
+
+It does not govern the ledger, plan docs, commit messages in **this** repo, or conversational
+replies. Those have their own jobs and their own registers.
+
+The reference instance for a report is
 [`cell_markov_blanket_loops_report.md`](docs/reports/cell_markov_blanket_loops_report.md).
 Read it before writing a new one.
 
@@ -183,3 +189,104 @@ and cannot be told what it was missing. Present what is here, not the gap it clo
 - [ ] Falsified hypotheses framed as findings
 - [ ] Ends with concrete next work
 - [ ] "Claims we are not making" present
+
+---
+
+## 9. Outward-facing communication: pull requests, issues, upstream commits
+
+Everything in §3 (language, the ban on pre-qualifying your own honesty, the banned
+constructions) applies here word for word. This section is what changes on top of it.
+
+### 9.1 The reader is a stranger doing you a favour
+
+A report's reader is curious and chose to be there. A pull request's reader is an expert in a
+codebase we are visiting, knows nothing about ours, and did not ask for any of this. Reviewing
+costs them time they had allocated to something else.
+
+**Their attention is the scarce resource, and every line either reduces their review work or is
+noise.** That single test settles most questions of what to include.
+
+We are guests. A contribution is a gift only if it does not arrive as a bill.
+
+### 9.2 Our vocabulary does not travel
+
+No "EPM", "TLE", "Markov blanket", "homeokinetic", "precision-weighted", or "active inference"
+in an upstream pull request. Not defined-on-first-use, as §6 would allow in a report. Absent.
+
+The rule behind it is sharper than a style preference: **if a change only makes sense once the
+reader accepts our framework, it is the wrong change to send.** Split it until each piece
+stands on its own merits, stated in their terms, against their problem. A contribution that
+cannot survive that split is one we should keep and run ourselves.
+
+It is also the test that separates augmenting from competing. Anything that needs our
+philosophy to look worthwhile is competing.
+
+### 9.3 The shape of a pull request
+
+Narrowing monotonically, on §2's rule, at a much smaller scale:
+
+| Layer | Contains | A reviewer who stops here knows |
+|---|---|---|
+| **Title** | the situation or the change, one line, in their vocabulary | whether to open it |
+| **Opening** | what today's code does and what that costs, in their terms | whether they care |
+| **The change** | what it does, minimally described | what they are approving |
+| **Cost** | measured, with numbers | what it takes from them |
+| **Validation** | what was run, and what that does *not* prove | how much to trust it |
+| **Out of scope** | what you deliberately did not do | that the diff is the whole story |
+
+Lead with **their** problem, never with our need. "The servos report velocity and load every
+tick, and the wire dropped both" opens a review. "Our brain needs load data" opens an argument.
+
+### 9.4 Rules specific to a pull request
+
+- **One thing per PR.** A second change bundled in is not efficiency, it is a debate attached
+  to a merge.
+- **Measured cost, in numbers you took yourself.** "A modest increase" asks the reviewer to do
+  your measuring. Give them the bytes, the milliseconds, the allocation.
+- **Say what you did not do.** Scope discipline is invisible unless stated, and stating it is
+  the cheapest trust available.
+- **Never describe their design as a mistake.** A reasonable design that does not yet do
+  something is not a bug, and a contributor who arrives correcting people is not read twice.
+- **Match their conventions, including the ones we would not have picked** — commit subject
+  style, test idiom, doc-comment voice, error wording, whether they sign off at all. Read ten
+  of their commits before writing one. Our house style has no standing in their repository.
+- **Scale claims to evidence** (§7). "Validated against their own fake IO, which exercises the
+  control loop but not a servo" is worth more than "fully tested", and it is what a maintainer
+  needs in order to know what still needs a bench.
+- **Out-of-scope findings get mentioned once and left alone.** Fixing something you noticed on
+  the way turns one reviewable change into two unreviewable ones. Note it; move on.
+- **No links a stranger cannot open**, and none they can open but should not have to: our
+  internal docs, our branch names, our file paths, our ledger.
+
+### 9.5 Attribution, and what never leaves
+
+- **The `Co-Authored-By` line stays.** The work is machine-written and a maintainer merging it
+  is entitled to know that without having to ask.
+- **Private session URLs never travel.** Our own commits carry one; an upstream commit must
+  not.
+- **Our DCO sign-off is our convention, not theirs.** If their history has no `Signed-off-by`,
+  adding one is noise. If they require it, follow their instructions exactly.
+
+### 9.6 Opening it is the operator's call, always
+
+Writing a pull request is reversible and is ordinary work. **Opening one is not**: it is a
+public act in someone else's project, under the operator's name, that others will respond to.
+
+Prepare it on a local branch, run their gates, and show the operator what it would say. Pushing
+a fork, opening the PR, and replying in its thread all wait for an explicit go-ahead. The same
+holds for issues, discussions, and any reply to a maintainer.
+
+### 9.7 Checklist before showing a pull request to the operator
+
+- [ ] Title states the situation in their vocabulary, not ours
+- [ ] Opens with what their code does today and what it costs
+- [ ] No project-internal jargon anywhere, defined or otherwise
+- [ ] The change would stand up without any reference to our framework
+- [ ] One thing only; a second improvement was noticed and left alone
+- [ ] Cost measured, with the numbers in the description
+- [ ] Validation says what it proves *and* what it leaves for a bench
+- [ ] An explicit out-of-scope note
+- [ ] Their formatter, linter, and test suite run clean, with before/after counts
+- [ ] Commit subject and body match the style of their last ten commits
+- [ ] `Co-Authored-By` present; no session URL, no internal links, no our-repo paths
+- [ ] Nothing pushed anywhere, and nothing opened
