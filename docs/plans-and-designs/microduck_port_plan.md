@@ -10,9 +10,7 @@
 >
 > **Scope: simulation only.** No hardware, no `robotd`, no servos, until the controller is
 > understood in this body. The picrawler hardware build occupies the bench and runs in parallel
-> on its own branches; the two **share no files** (§Coordination). References below to
-> `picrawler_sim2real_port.md` are to that line of work, and that file lives on the picrawler
-> branches rather than this one.
+> on `picrawler-dev`; the two **share no files** (§Coordination).
 
 # Microduck port plan
 
@@ -107,7 +105,7 @@ is offering a foundation.
 
 | Decision | Choice | Why |
 |---|---|---|
-| **Sim engine** | MuJoCo, using Pollen's MJCF unmodified | Their body model is CAD-exported from Onshape, mesh-accurate, and validated by transfer to a real robot. Rebuilding it in Godot would reproduce that badly. `picrawler_sim2real_port.md` records what happens when a hand-derived body disagrees with the real one |
+| **Sim engine** | MuJoCo, using Pollen's MJCF unmodified | Their body model is CAD-exported from Onshape, mesh-accurate, and validated by transfer to a real robot. Rebuilding it in Godot would reproduce that badly. [`picrawler_sim2real_port.md`](picrawler_sim2real_port.md) records what happens when a hand-derived body disagrees with the real one |
 | **Host** | A new **`mj_host/`**, peer to `godot_host/` and `pi_host/` | `OgmaInstance.hpp:60` already says the Bus is owned by "the host (Godot Host, **HAL Host**, Debug Host)". A second host is the anticipated shape, not a new one |
 | **No Godot for the duck** | Confirmed | The Godot dependency is the *picrawler body*, not the brain. `xaq_inspector` and `xaq_voice` reach the brain over ZMQ (`tcp://127.0.0.1:7400/7401`), so the operator's UI-first promotion gate survives the engine change untouched |
 | **No OgmaBrain refactor** | `mj_host` links `ogma_core` directly | `OgmaBrain.cpp` is 2 197 lines of Godot `Variant` marshalling that every picrawler A/B depends on. `mj_host` needs none of it: it can hold an `OgmaInstance` and call it in plain C++. Extracting a shared "BrainHost" would be a large refactor of a load-bearing file, for a duplication that is small and honest |
@@ -513,7 +511,7 @@ port is wrong** — these are not levers and are never seed-averaged.
 | **G1 — the model loads unmodified** | `mj_loadXML` on the vendored scene succeeds with zero edits to Pollen's XML. Any edit we need is an *overlay* file, recorded as such |
 | **G2 — STAND is a stable equilibrium *under active control*** | Hold the standing policy for 3 s from noisy inits: the trunk stays upright. **Check tilt, not height** — `microduck_rl/AGENTS.md` records that a settle test recording only `z` reports fallen states as resting fine. **Restated 2026-08-31 after measurement**: the original wording asked for a *passive* `ctrl` hold, and that fails at 81° tilt even at zero noise. This body has no passive standing equilibrium (§Measured) |
 | **G3 — rate fidelity** | The brain ticks at exactly 50 Hz against MuJoCo's timestep, with the substep count stated and constant. The picrawler's `TAU = 0.02` is the same contract; a drifting ratio makes every learning rate meaningless |
-| **G4 — joint-order round trip** | `DuckBody` maps `action.<joint_name>` → `d->ctrl[i]` by **name lookup on the model**, never by a transcribed index — and a test asserts the resulting order matches `JOINT_NAMES`. This is the picrawler leg-naming mirror (`picrawler_sim2real_port.md` §"The leg-naming mirror"), and it is the same trap: silent, behavioural, and only visible as a robot that moves wrong |
+| **G4 — joint-order round trip** | `DuckBody` maps `action.<joint_name>` → `d->ctrl[i]` by **name lookup on the model**, never by a transcribed index — and a test asserts the resulting order matches `JOINT_NAMES`. This is the picrawler leg-naming mirror ([`picrawler_sim2real_port.md`](picrawler_sim2real_port.md) §"The leg-naming mirror"), and it is the same trap: silent, behavioural, and only visible as a robot that moves wrong |
 | **G5 — the picrawler is byte-identical** | Building `mj_host` changes nothing about `godot_host`. `seedavg.py` on the deployed picrawler config produces the same numbers before and after this branch. Verified once at S0 and once at merge |
 | **G6 — no god's-eye channel** | Every topic `DuckBody` publishes is derivable from what the real `robot.state` + `tof.stream` carry. A sensor-legitimacy audit like [`sensor_legitimacy_and_the_feet_y_oracle.md`](sensor_legitimacy_and_the_feet_y_oracle.md), written **before** the first brain runs rather than after |
 | **G7 — Track B sees only the wire** | In `--intent-mode` the host publishes exactly the fields `robot.state` / `tof.stream` / `robot.health` carry, and **not one field more** — no velocities, no currents, no ground truth. A test asserts the topic set against the proto. Without this, Track B gets developed against a duck that does not exist |
