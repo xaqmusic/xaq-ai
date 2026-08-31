@@ -98,6 +98,7 @@ add_executable(ogma_mjhost
   src/DuckBody.cpp
   src/Observation.cpp
   src/Policy.cpp
+  src/Recovery.cpp
 )
 target_link_libraries(ogma_mjhost PRIVATE mujoco onnxruntime)
 target_compile_options(ogma_mjhost PRIVATE -Wall -Wextra)

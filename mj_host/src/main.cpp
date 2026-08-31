@@ -29,6 +29,8 @@
 #include "DuckBody.hpp"
 #include "Observation.hpp"
 #include "Policy.hpp"
+#include "Recovery.hpp"
+#include "StubBrain.hpp"
 
 namespace {
 
@@ -443,6 +445,103 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
     return all_ok ? 0 : 1;
 }
 
+// ---------------------------------------------------------------------------
+// --stub  (A2, exercised before A1 exists)
+//
+// A brain that falls over, a scaffold that picks it up, and the hand-off between
+// them.  What is under test is the HARNESS: does the trigger fire on the right
+// egocentric signal, does learning stop while the scaffold drives, does every edge
+// announce itself, and does the body keep running instead of lying on the floor.
+// ---------------------------------------------------------------------------
+
+int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amplitude,
+             double drift, bool emit) {
+    DuckBody body(scene);
+    Policy scaffold(kStandScaffold);
+    StubBrain brain(amplitude, drift, seed);
+    Recovery recovery;
+
+    body.reset("STAND", 0.0, seed);
+
+    std::array<float, kActionLen> last_action{};
+    const Command command{};
+    const double dt = 1.0 / kBrainHz;
+    const int ticks = int(seconds * kBrainHz);
+
+    int frozen_ticks = 0;
+    for (int t = 0; t < ticks; ++t) {
+        const Driver driver = recovery.update(body.gravity(), dt);
+
+        // Both edges: tell the brain, and stop or start its learning. Freeze BEFORE
+        // the scaffold ever acts, resume only once the body is back.
+        if (recovery.handed_off_this_tick()) {
+            brain.set_learning(false);
+            brain.on_reset();
+        } else if (recovery.handed_back_this_tick()) {
+            brain.on_reset();
+            brain.set_learning(true);
+            // The scaffold's own action feedback must not follow the brain back in.
+            last_action.fill(0.0f);
+        }
+        if (!brain.learning()) ++frozen_ticks;
+
+        std::array<double, kNumPolicyJoints> ctrl{};
+        if (driver == Driver::Scaffold) {
+            const auto action = scaffold.infer(build_observation(body, last_action, command));
+            last_action = action;
+            for (int i = 0; i < kNumPolicyJoints; ++i)
+                ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+        } else {
+            ctrl = brain.act(body);
+        }
+        body.step(ctrl);
+
+        if (emit) {
+            const auto p = body.trunk_position();
+            const auto g = body.gravity();
+            std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
+                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\","
+                        "\"learning\":%s,\"event\":\"%s\",\"q\":[",
+                        body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
+                        driver_name(driver), brain.learning() ? "true" : "false",
+                        recovery.handed_off_this_tick()    ? "reset:handoff"
+                        : recovery.handed_back_this_tick() ? "reset:handback"
+                                                           : "");
+            const auto q = body.joint_positions();
+            for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
+            std::printf("],\"qpos\":[");
+            const auto full = body.qpos();
+            for (size_t i = 0; i < full.size(); ++i) std::printf("%s%.6f", i ? "," : "", full[i]);
+            std::printf("]}\n");
+        }
+    }
+
+    const double total = recovery.brain_seconds() + recovery.scaffold_seconds();
+    std::fprintf(stderr,
+                 "stub %.0f s — %d rescues, %.0f%% of the run driven by the brain, "
+                 "longest recovery %.2f s\n",
+                 seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / total,
+                 recovery.longest_recovery());
+    std::fprintf(stderr, "  learning frozen for %.0f%% of ticks (must equal the scaffold's share)\n",
+                 100.0 * frozen_ticks / ticks);
+    if (recovery.gave_up() > 0) {
+        std::fprintf(stderr, "  %d recoveries timed out — the scaffold could not stand it up\n",
+                     recovery.gave_up());
+    }
+
+    // What "working" means here: the body kept running. A harness that never fired
+    // proves nothing, and one that never handed back has stopped being a harness.
+    const bool fired = recovery.rescues() > 0;
+    const bool handing_back = recovery.gave_up() < recovery.rescues();
+    if (!fired) {
+        std::fprintf(stderr, "NO RESCUES — the stub never fell, so nothing was tested. "
+                             "Raise --stub-amp.\n");
+        return 3;
+    }
+    std::fprintf(stderr, "%s\n", handing_back ? "HARNESS OK" : "HARNESS STUCK");
+    return handing_back ? 0 : 1;
+}
+
 void usage() {
     std::printf(
         "ogma_mjhost — the Microduck MuJoCo host\n"
@@ -461,6 +560,11 @@ void usage() {
         "  ogma_mjhost --gate-g2 [scene.xml] [--secs S]\n"
         "      The settle sweep: four noise levels x three seeds, judged on TILT.\n"
         "\n"
+        "  ogma_mjhost --stub [scene.xml] [--secs S] [--seed N]\n"
+        "                     [--stub-amp R] [--stub-drift R]\n"
+        "      A brain that falls over, the scaffold that picks it up, and the\n"
+        "      hand-off between them. Tests the RECOVERY HARNESS, not the substrate.\n"
+        "\n"
         "  The scene defaults to %s\n"
         "  The standing scaffold is %s\n",
         kDefaultScene.c_str(), kStandScaffold.c_str());
@@ -474,6 +578,7 @@ int main(int argc, char** argv) {
     double seconds = 3.0, noise = 0.0;
     uint64_t seed = 0;
     PushPlan pushes;
+    double stub_amp = 0.25, stub_drift = 0.08;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -481,7 +586,7 @@ int main(int argc, char** argv) {
             if (i + 1 >= argc) throw std::runtime_error(std::string(what) + " needs a value");
             return argv[++i];
         };
-        if (a == "--load-only" || a == "--hold" || a == "--gate-g2") {
+        if (a == "--load-only" || a == "--hold" || a == "--gate-g2" || a == "--stub") {
             mode = a;
         } else if (a == "--secs") {
             seconds = std::stod(next("--secs"));
@@ -495,6 +600,10 @@ int main(int argc, char** argv) {
             pushes.every_s = std::stod(next("--push-every"));
         } else if (a == "--push-hold") {
             pushes.hold_s = std::stod(next("--push-hold"));
+        } else if (a == "--stub-amp") {
+            stub_amp = std::stod(next("--stub-amp"));
+        } else if (a == "--stub-drift") {
+            stub_drift = std::stod(next("--stub-drift"));
         } else if (a == "-h" || a == "--help") {
             usage();
             return 0;
@@ -517,6 +626,7 @@ int main(int argc, char** argv) {
         if (mode == "--load-only") return cmd_load_only(scene);
         if (mode == "--hold") return cmd_hold(scene, seconds, noise, seed, pushes);
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
+        if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

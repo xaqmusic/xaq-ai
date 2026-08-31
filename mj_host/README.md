@@ -29,6 +29,7 @@ Plan and rationale: [`docs/plans-and-designs/microduck_port_plan.md`](../docs/pl
 ./mj_host/run.sh watch --secs 30              # WATCH IT — live window, run saved to log/
 ./mj_host/run.sh record /tmp/duck.mp4 --secs 8
 ./mj_host/run.sh hold --secs 60               # headless, JSONL to log/
+./mj_host/run.sh stub --secs 60               # the recovery harness (below)
 ```
 
 `watch` and `record` take the host's own arguments, so `--secs`, `--noise`, `--seed` and a
@@ -135,6 +136,51 @@ The gate is also the reason there is a scaffold at all. The plan originally had 
 `STAND` keyframe's own `ctrl` with nothing in the loop; measured, that topples the robot to 81°
 at every noise level including zero. **This body has no passive standing equilibrium**, so the
 only honest no-brain baseline is an actively balanced one.
+
+## The recovery harness (phase A2, built before A1)
+
+The arrangement the brain will run under: **the brain drives the joints, and when the body
+ends up on the floor the scaffold picks it up and hands it back.** That is the harness, not the
+controller — the same category as the Godot body's auto-reset teleport — and it is what gives a
+learning brain continuous operation on a body with no passive standing equilibrium.
+
+It is testable now because it needs a brain that *fails*, which is far easier to write than one
+that works. `--stub` is a random walk around the home pose, and `run.sh stub` watches it.
+
+```sh
+./mj_host/run.sh stub --secs 60              # watch it fall and be caught, ~40 times
+./mj_host/build/ogma_mjhost --stub --secs 60 --stub-amp 0
+```
+
+| | |
+|---|---|
+| **Trigger** | projected gravity past **−0.5** (about 60° over) held **200 ms** — `duck-control`'s own `SafetyConfig` numbers, so the same criterion runs in sim and on the robot |
+| **Hand-back** | gravity below −0.95 held 0.4 s, so a tumble passing through upright does not count |
+| **Measured** | fires at ~82° tilt, hands back at ~5°, recovery ~0.7 s; 42–44 rescues per 60 s, stable across seeds |
+
+Three things it gets right, each for a reason that cost somebody time before:
+
+- **The trigger is the LATE detector, deliberately.** `robotd` also ships a `FallPredictor`
+  that fires at ~26° so the gains can drop before impact. Using that here would rescue the
+  brain before it experienced the fall, and **the fall is the prediction error**. Let it go down.
+- **Nothing learns while the scaffold drives.** A controller still updating on actions it did
+  not issue is learning the scaffold's policy — doctrine §5.6, and invisible, because the brain
+  would look like it was learning to get up. The run reports the frozen fraction, and it must
+  equal the scaffold's share of ticks. *(Deferred subtlety: a* forward *model learning from
+  those actions is learning the* body*, which is legitimate off-policy data. MotorEPM drives
+  both from one TLE, so freezing everything is the safe default and the split becomes its own
+  lever.)*
+- **Both edges announce themselves** as `reset:handoff` / `reset:handback` in the JSONL. The
+  picrawler paid for this: its auto-reset fired no event, MotorEPM's leg-phase and EMAs survived
+  fall-plus-respawn, and every trend spanning a reset was fake.
+
+**`--stub-amp 0` is the one to run.** The stub then emits *exactly* the home pose — no
+controller at all — and the robot still falls 44 times in 60 s, with the harness keeping it
+running the whole time. That is this body's lack of a passive equilibrium, demonstrated rather
+than asserted.
+
+⚠ A run against the stub says the **harness** works. It says nothing whatever about the
+substrate, and no number from it is a baseline.
 
 ## The standing scaffold already recovers from a fall
 

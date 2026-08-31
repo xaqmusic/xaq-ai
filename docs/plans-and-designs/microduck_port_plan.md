@@ -727,7 +727,7 @@ Before any lever: run the authority check the ledger demands
 (`corr(actuator, target)` on existing traces — ledger §"THREE LEVERS IN ONE SESSION AIMED AT AN
 ACTUATOR WITH NO AUTHORITY").
 
-### A2 — standup-as-reset · *Track A* · **NOT STARTED**
+### A2 — standup-as-reset · *Track A* · ✅ **HARNESS DONE 2026-08-31, ahead of A1**
 
 The picrawler harness gets continuous resets by teleporting in sim; on hardware it has none.
 Pollen trained `Mjlab-StandUp` and ship `alpha_stand.onnx` / the sitstand net: **a get-up
@@ -741,6 +741,37 @@ not the brain — the same category as the Godot body's auto-reset teleport.
 Two things this must carry from the picrawler's own harness bugs (ledger §"Reset artifact"):
 publish `events.reset` on every hand-back, and mask learning across the boundary, or **any
 TLE or coherence trend across a reset is fake**.
+
+**Built and validated 2026-08-31, before A1, because it needs a brain that FAILS** — far easier
+to write than one that works. `--stub` is a random walk around the home pose; `Recovery` is the
+state machine; `BrainLike` is the seam A1's real brain implements.
+
+| | |
+|---|---|
+| Trigger | projected gravity past **−0.5** (~60° over) held **200 ms** — `duck-control`'s own `SafetyConfig` numbers, so sim and hardware share one criterion |
+| Hand-back | gravity below −0.95 held 0.4 s, so a tumble *through* upright does not count |
+| Measured | fires at ~82° tilt, hands back at ~5°, recovery ~0.7 s, 42–44 rescues per 60 s, stable across seeds |
+
+**The trigger is the LATE detector on purpose.** `robotd` also ships a `FallPredictor` firing at
+~26° so gains can drop before impact; using that here would rescue the brain before it
+experienced the fall, and the fall *is* the prediction error. Both detectors read projected
+gravity and the gyro, so nothing here is a sim-only oracle — `tilt_deg()` is deliberately unused
+because it reads the world frame and would need rewriting for the robot.
+
+**Learning is frozen for the whole scaffold window**, and the run reports the frozen fraction so
+the invariant is checkable rather than believed: it equals the scaffold's share of ticks
+exactly. A controller still updating on actions it did not issue would be learning the
+scaffold's policy — §5.6, and invisible, since the brain would look like it was learning to get
+up. *Deferred as its own lever:* a **forward** model learning from those actions is learning the
+**body**, which is legitimate off-policy data; only the **controller** copying them is copying
+the teacher. MotorEPM drives both from one TLE and §Coordination forbids editing it here.
+
+**`--stub-amp 0` is the demonstration worth keeping.** With the stub emitting *exactly* the home
+pose — no controller at all — the robot still falls 44 times in 60 s and the harness keeps it
+running throughout. This body's lack of a passive equilibrium, shown rather than asserted.
+
+⚠ A stub run says the **harness** works and says nothing about the substrate. No number from it
+is a baseline.
 
 ### B1 — intent-mode host, and the first drive · *Track B* · **NOT STARTED**
 

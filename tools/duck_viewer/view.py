@@ -57,10 +57,10 @@ def frames_from(stream):
             yield frame
 
 
-def host_command(extra):
+def host_command(extra, mode="--hold"):
     if not HOST.exists():
         sys.exit(f"host not built: {HOST}\n  cmake --build mj_host/build -j8")
-    return [str(HOST), "--hold", *extra]
+    return [str(HOST), mode, *extra]
 
 
 def watch(frames, realtime=True, title_every=25):
@@ -137,6 +137,8 @@ def main():
 
     live = sub.add_parser("live", help="spawn the host and watch it run")
     live.add_argument("--save", metavar="RUN.jsonl", help="also keep the run")
+    live.add_argument("--host-mode", default="--hold",
+                      help="which host mode to drive: --hold (default) or --stub")
     live.add_argument("host_args", nargs="*", help="passed through, e.g. --secs 30 --noise 0.05")
 
     rep = sub.add_parser("replay", help="watch a saved run")
@@ -150,7 +152,7 @@ def main():
     a = p.parse_args()
 
     if a.mode == "live":
-        cmd = host_command(a.host_args)
+        cmd = host_command(a.host_args, a.host_mode)
         print(f"  {' '.join(cmd)}")
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, bufsize=1)
         saved = open(a.save, "w") if a.save else None
