@@ -44,16 +44,37 @@ almost still — a millirad of residual correction, which is correct and dull. `
 the trunk with `N` newtons on a rotating heading every `--push-every` seconds, which is the
 cheapest form of the perturb-and-recover test and the thing an eye can actually judge.
 
-| shove | what happens |
-|---|---|
-| 2 N | leans to 7.5°, recovers, drifts 8 cm over four shoves |
-| 5 N | leans to 8.2°, recovers, drifts 33 cm |
-| **10 N** | **goes over — peaks 92–144° — and gets back up, 4 for 4, each within 2 s** |
-| 20 N | goes over and stays down |
+Measured over 24 s with `--push-every 4`, which leaves every shove room to finish:
 
-⚠ **`tilt_end` is blind to "still recovering".** A run that ends mid-recovery reports FALLEN
-because the verdict is read at the last tick. Ending a push run cleanly means leaving it more
-than about two seconds after the final shove.
+| shove | peak tilt | outcome |
+|---|---|---|
+| 2 N | 7.6° | leans and catches itself, 5/5 |
+| 5 N | 6.7° | staggers, 5/5 — the most watchable |
+| 10 N | 101° | knocked over, 5/5 back up |
+| 25 N | 166° | knocked flat, 5/5 back up |
+| 60 N | 176° | 4/5 — this is where it stays down |
+
+**Space the shoves.** A recovery takes about 1.6–2.4 s, so `--push-every` under about 4 s
+shoves the robot again while it is still getting up. That is a legitimate thing to test, and it
+is reported as INCONCLUSIVE per shove rather than as a failure — but it is not a strength limit,
+and reading it as one understates the recovery envelope badly.
+
+### The verdict is three-valued, on purpose
+
+`tilt_end` used to be read at the last tick, so it could not tell UPRIGHT from STILL RECOVERING
+and a run that stopped mid-getup reported a fall that never happened. What replaced it:
+
+- **`settled`** — worst tilt across the final window, not one sample's opinion
+- **`upright %`** — how much of the run was spent up, which no instant knows
+- **per-shove recovery**, each marked recovered / not recovered / **inconclusive**
+
+**Inconclusive is the part that was missing.** A shove that cannot be judged — because the run
+ended, or because the next shove landed first — is not a failure, and the two causes are named
+separately because one means "run longer" and the other means "shove less often". Exit codes
+follow: `0` upright, `1` a real fall, `3` not watched long enough.
+
+Runs reserve a clean tail automatically: nothing is shoved inside the final recovery window, so
+a conclusive run is what you get by default and an inconclusive one takes effort.
 
 The binary underneath, if you want it directly:
 
@@ -117,8 +138,8 @@ only honest no-brain baseline is an actively balanced one.
 
 ## The standing scaffold already recovers from a fall
 
-Measured, not assumed: at 10 N it is knocked past 90° four times out of four and stands itself
-back up within two seconds each time.
+Measured, not assumed: knocked past 90° at 10 N and flat at 25 N, it stands itself back up
+five times out of five, each in about 1.6–2.4 s.
 
 That matters beyond being fun to watch. The plan's phase A2 plans a fall-recovery scaffold as
 the reset mechanism for when the brain drives the joints, and expected to need `StandUp` or

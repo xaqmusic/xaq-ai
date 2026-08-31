@@ -144,14 +144,141 @@ int cmd_load_only(const std::string& scene) {
 // The run loop
 // ---------------------------------------------------------------------------
 
+// A robot is BACK once it is under this and stays there — passing through on the
+// way down does not count, which is what the hold below is for.
+constexpr double kRecoveredTiltDeg = 5.0;
+constexpr double kRecoverHoldSecs  = 0.4;
+constexpr double kRecoverWindowSecs = 4.0;
+
+// What happened to one shove.
+struct Shove {
+    double t = 0.0;
+    double peak_tilt = 0.0;
+    double recovered_after = -1.0;   // seconds; negative if it did not
+    bool   conclusive = false;       // was there room to judge this one at all?
+    // Why not, when not. These are different problems with different fixes: one is
+    // "run longer", the other is "shove less often", and reporting the wrong one
+    // sends the reader to change the wrong knob.
+    bool   cut_short_by_next = false;
+};
+
 struct RunResult {
-    double tilt_end = 0.0;
     double tilt_max = 0.0;
     double z_end = 0.0;
     double travelled = 0.0;
-    int    pushes = 0;
-    double worst_recovery_tilt = 0.0;   // highest tilt reached after any shove
+
+    // The fix for the blind metric. `tilt_end` was read at the last tick, so it
+    // could not tell UPRIGHT from STILL RECOVERING, and a run that stopped two
+    // seconds after a shove reported a fall that never happened.
+    //
+    // Three things replace it, and the third is the one that was actually missing:
+    //   * settled_tilt   — the worst tilt over the final window, not one sample
+    //   * upright_frac   — how much of the run was spent up, which no instant knows
+    //   * shoves         — per-shove recovery, WITH a conclusive/inconclusive flag
+    //
+    // A shove too near the end of the run is INCONCLUSIVE, never failed. Calling
+    // "I did not watch long enough" a failure is how a metric lies in the
+    // direction of its own convenience.
+    double settled_tilt = 0.0;
+    double upright_frac = 0.0;
+    std::vector<Shove> shoves;
+
+    int recovered() const {
+        int n = 0;
+        for (const auto& s : shoves) if (s.conclusive && s.recovered_after >= 0.0) ++n;
+        return n;
+    }
+    int conclusive() const {
+        int n = 0;
+        for (const auto& s : shoves) if (s.conclusive) ++n;
+        return n;
+    }
+    int inconclusive() const { return int(shoves.size()) - conclusive(); }
+
+    // THREE outcomes, not two. A run that stopped while the robot was still getting
+    // up has not failed and has not passed — it was not watched long enough, and
+    // saying so is the whole point of this fix. Collapsing that into FAILED is how a
+    // metric lies in the direction of its own convenience; collapsing it into PASSED
+    // would be worse.
+    enum class Verdict { Upright, Fallen, Inconclusive };
+
+    Verdict verdict() const {
+        // A definite failure outranks an unfinished one: if some shove that COULD be
+        // judged was not recovered from, the run failed whatever else is in flight.
+        for (const auto& s : shoves)
+            if (s.conclusive && s.recovered_after < 0.0) return Verdict::Fallen;
+        // Otherwise an unfinished shove means the settled window is measuring a
+        // recovery in progress, and nothing can be concluded from it.
+        if (inconclusive() > 0) return Verdict::Inconclusive;
+        return settled_tilt < kFallenTiltDeg ? Verdict::Upright : Verdict::Fallen;
+    }
+
+    const char* verdict_name() const {
+        switch (verdict()) {
+            case Verdict::Upright: return "UPRIGHT";
+            case Verdict::Fallen:  return "FALLEN";
+            default:               return "INCONCLUSIVE";
+        }
+    }
+
+    // 0 pass, 1 a real failure, 3 "not watched long enough" — distinct so a gate can
+    // tell a broken robot from a badly set up run.
+    int exit_code() const {
+        switch (verdict()) {
+            case Verdict::Upright: return 0;
+            case Verdict::Fallen:  return 1;
+            default:               return 3;
+        }
+    }
 };
+
+// Turn a tilt trace plus the ticks at which shoves landed into the verdict above.
+// Post-processing rather than online detection, because "recovered" is a statement
+// about a window and cannot be decided at the tick it starts.
+RunResult analyse(const std::vector<double>& tilt, const std::vector<int>& shove_ticks) {
+    RunResult r;
+    if (tilt.empty()) return r;
+
+    const int hold_ticks   = std::max(1, int(kRecoverHoldSecs * kBrainHz));
+    const int window_ticks = int(kRecoverWindowSecs * kBrainHz);
+    const int total = int(tilt.size());
+
+    int up = 0;
+    for (double v : tilt) {
+        r.tilt_max = std::fmax(r.tilt_max, v);
+        if (v < kFallenTiltDeg) ++up;
+    }
+    r.upright_frac = double(up) / total;
+
+    // The final window, so the verdict is not one sample's opinion.
+    const int settle_from = std::max(0, total - hold_ticks);
+    for (int i = settle_from; i < total; ++i) r.settled_tilt = std::fmax(r.settled_tilt, tilt[i]);
+
+    for (size_t k = 0; k < shove_ticks.size(); ++k) {
+        const int from = shove_ticks[k];
+        // Judge each shove up to the next one, or to the end of its window.
+        const int next = (k + 1 < shove_ticks.size()) ? shove_ticks[k + 1] : total;
+        const int until = std::min({total, from + window_ticks, next});
+
+        Shove sh;
+        sh.t = from / kBrainHz;
+        for (int i = from; i < until; ++i) sh.peak_tilt = std::fmax(sh.peak_tilt, tilt[i]);
+
+        // Recovered = under the threshold and STAYS under it for the hold.
+        for (int i = from; i + hold_ticks <= until; ++i) {
+            bool held = true;
+            for (int j = i; j < i + hold_ticks; ++j) {
+                if (tilt[j] >= kRecoveredTiltDeg) { held = false; break; }
+            }
+            if (held) { sh.recovered_after = (i + hold_ticks - from) / kBrainHz; break; }
+        }
+        // Enough room to have seen a recovery, had one happened?
+        sh.conclusive = (sh.recovered_after >= 0.0) || (until - from >= window_ticks);
+        sh.cut_short_by_next = !sh.conclusive && (next < total) && (next - from < window_ticks);
+        r.shoves.push_back(sh);
+    }
+    return r;
+}
 
 struct PushPlan {
     double newtons = 0.0;      // 0 disables
@@ -168,8 +295,10 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
     std::array<float, kActionLen> last_action{};
     const Command command{};  // stand still, head level, nominal stance
 
-    RunResult r;
+    std::vector<double> tilt_trace;
+    std::vector<int> shove_ticks;
     const int ticks = int(seconds * kBrainHz);
+    tilt_trace.reserve(ticks);
     const int push_period = int(pushes.every_s * kBrainHz);
     const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
     int push_index = 0;
@@ -177,11 +306,18 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
     for (int t = 0; t < ticks; ++t) {
         // Shove on a fixed schedule, rotating the direction so the controller is
         // asked to recover from every side rather than from a favourite one.
-        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t % push_period == 0) {
+        //
+        // NOTHING IS SHOVED INSIDE THE FINAL RECOVERY WINDOW. Otherwise every run
+        // ends mid-getup and reports INCONCLUSIVE, and the operator is left doing
+        // arithmetic to get an answer out of the tool. A conclusive run should be
+        // what you get by default; an inconclusive one should take effort.
+        const bool room_to_recover = (ticks - t) >= int(kRecoverWindowSecs * kBrainHz);
+        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t % push_period == 0 &&
+            room_to_recover) {
             static const double dirs[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
             const auto& d = dirs[push_index++ % 4];
             body.push({pushes.newtons * d[0], pushes.newtons * d[1], 0.0}, push_hold);
-            r.pushes++;
+            shove_ticks.push_back(t);
         }
         const auto action = policy.infer(build_observation(body, last_action, command));
         last_action = action;
@@ -192,8 +328,7 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
         body.step(ctrl);
 
         const double tilt = body.tilt_deg();
-        r.tilt_max = std::fmax(r.tilt_max, tilt);
-        if (r.pushes > 0) r.worst_recovery_tilt = std::fmax(r.worst_recovery_tilt, tilt);
+        tilt_trace.push_back(tilt);
 
         if (emit) {
             const auto p = body.trunk_position();
@@ -219,7 +354,7 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
     }
 
     const auto end = body.trunk_position();
-    r.tilt_end = body.tilt_deg();
+    RunResult r = analyse(tilt_trace, shove_ticks);
     r.z_end = end[2];
     r.travelled = std::hypot(end[0] - start[0], end[1] - start[1]);
     return r;
@@ -230,14 +365,47 @@ int cmd_hold(const std::string& scene, double seconds, double noise, uint64_t se
     DuckBody body(scene);
     Policy policy(kStandScaffold);
     const RunResult r = run_hold(body, policy, seconds, noise, seed, /*emit=*/true, pushes);
-    std::fprintf(stderr, "held %.1f s — tilt_end %.2f deg, tilt_max %.2f deg, z %.4f m, drift %.3f m",
-                 seconds, r.tilt_end, r.tilt_max, r.z_end, r.travelled);
-    if (r.pushes > 0) {
-        std::fprintf(stderr, ", %d shoves of %.1f N (worst tilt after one: %.2f deg)", r.pushes,
-                     pushes.newtons, r.worst_recovery_tilt);
+    if (pushes.newtons > 0.0 && r.shoves.empty()) {
+        std::fprintf(stderr, "no room to shove: a run needs more than %.1f s so a recovery can "
+                             "finish inside it\n", kRecoverWindowSecs);
     }
-    std::fprintf(stderr, " — %s\n", r.tilt_end < kFallenTiltDeg ? "UPRIGHT" : "FALLEN");
-    return r.tilt_end < kFallenTiltDeg ? 0 : 1;
+
+    std::fprintf(stderr, "held %.1f s — settled %.2f deg, peak %.2f deg, upright %.1f%% of the run,"
+                         " z %.4f m, drift %.3f m\n",
+                 seconds, r.settled_tilt, r.tilt_max, 100.0 * r.upright_frac, r.z_end, r.travelled);
+
+    for (size_t i = 0; i < r.shoves.size(); ++i) {
+        const auto& sh = r.shoves[i];
+        if (!sh.conclusive) {
+            // The whole point of the fix: no room to judge is its own answer, and it
+            // is not a failure.
+            std::fprintf(stderr, "  shove %zu at %5.2fs: peak %6.2f deg — INCONCLUSIVE, %s\n",
+                         i + 1, sh.t, sh.peak_tilt,
+                         sh.cut_short_by_next ? "the next shove landed before it could recover"
+                                              : "the run ended too soon after it");
+        } else if (sh.recovered_after >= 0.0) {
+            std::fprintf(stderr, "  shove %zu at %5.2fs: peak %6.2f deg — recovered in %.2f s\n",
+                         i + 1, sh.t, sh.peak_tilt, sh.recovered_after);
+        } else {
+            std::fprintf(stderr, "  shove %zu at %5.2fs: peak %6.2f deg — NOT RECOVERED\n",
+                         i + 1, sh.t, sh.peak_tilt);
+        }
+    }
+    if (!r.shoves.empty()) {
+        std::fprintf(stderr, "  %d/%d judged shoves recovered", r.recovered(), r.conclusive());
+        if (r.inconclusive() > 0) std::fprintf(stderr, ", %d not judged", r.inconclusive());
+        std::fprintf(stderr, "\n");
+    }
+    std::fprintf(stderr, "%s\n", r.verdict_name());
+    if (r.verdict() == RunResult::Verdict::Inconclusive) {
+        bool crowded = false;
+        for (const auto& sh : r.shoves) crowded = crowded || sh.cut_short_by_next;
+        std::fprintf(stderr, "  (%s)\n",
+                     crowded ? "space the shoves at least --push-every 4 apart, or a recovery "
+                               "cannot finish before the next one"
+                             : "give the run more time after the last shove");
+    }
+    return r.exit_code();
 }
 
 // ---------------------------------------------------------------------------
@@ -254,19 +422,20 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
 
     std::printf("G2 — hold %s for %.0f s from noisy inits, under the standing scaffold\n",
                 "STAND", seconds);
-    std::printf("     PASS is tilt < %.0f deg at the end. Height is not the test.\n\n",
-                kFallenTiltDeg);
-    std::printf("  %10s %5s %9s %9s %9s  %s\n", "noise(rad)", "seed", "tilt_end", "tilt_max",
+    std::printf("     PASS is tilt < %.0f deg across the final %.1f s. Height is not the test,\n"
+                "     and neither is a single last sample.\n\n",
+                kFallenTiltDeg, kRecoverHoldSecs);
+    std::printf("  %10s %5s %9s %9s %9s  %s\n", "noise(rad)", "seed", "settled", "tilt_max",
                 "z_end(m)", "verdict");
 
     bool all_ok = true;
     for (double noise : {0.0, 0.01, 0.03, 0.05}) {
         for (uint64_t seed = 0; seed < 3; ++seed) {
             const RunResult r = run_hold(body, policy, seconds, noise, seed, /*emit=*/false);
-            const bool ok = r.tilt_end < kFallenTiltDeg;
+            const bool ok = r.verdict() == RunResult::Verdict::Upright;
             all_ok = all_ok && ok;
             std::printf("  %10.2f %5llu %9.2f %9.2f %9.4f  %s\n", noise, (unsigned long long)seed,
-                        r.tilt_end, r.tilt_max, r.z_end, ok ? "PASS" : "FALLEN");
+                        r.settled_tilt, r.tilt_max, r.z_end, ok ? "PASS" : "FALLEN");
         }
     }
     std::printf("\n%s\n", all_ok ? "[G2 PASS — the standing scaffold holds this body]"

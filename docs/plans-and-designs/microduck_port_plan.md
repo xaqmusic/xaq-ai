@@ -622,16 +622,28 @@ head-as-balance-actuator finding (§"The head is 38 % of the mass") was derived 
 lever arm; this is the same conclusion arriving from a completely different direction, in a
 trained controller's own behaviour.
 
-*★ The standing scaffold already recovers from a fall.* Shoved with 10 N it is knocked past
-90° four times out of four — peaks of 92–144°, trunk height dropping to 0.05 m — and stands
-itself back up within two seconds each time. **A2 planned to add `StandUp` or `VelStand` as the
-reset mechanism; the file already vendored for S1 does that job**, so A2 needs no new dependency,
-only the hand-off logic and its `events.reset`.
+*★ The standing scaffold already recovers from a fall.* Over 24 s with shoves every 4 s it is
+knocked past 90° at 10 N and flat at 25 N, and stands itself back up **5 out of 5 times**, each
+in about 1.6–2.4 s. It stays down only at 60 N. **A2 planned to add `StandUp` or `VelStand` as
+the reset mechanism; the file already vendored for S1 does that job**, so A2 needs no new
+dependency, only the hand-off logic and its `events.reset`.
 
-⚠ **A blind metric found on the way** (§3 rule 4): `tilt_end` cannot tell "upright" from "still
-recovering", so a run that ends mid-recovery reports FALLEN. It is the verdict being literal
-rather than wrong, and the fix is to read recovery over a window rather than at the last tick.
-Worth fixing before any push-based number is quoted as a result.
+**⚠ A blind metric, found and fixed the same day — and it bit twice.** `tilt_end` was read at
+the last tick, so it could not tell UPRIGHT from STILL RECOVERING, and a run ending mid-getup
+reported a fall that never happened.
+
+The fix is not a better threshold. It is that the metric had **no category for "not enough run
+to tell"**, and silently filed that under failure. The verdict is now three-valued — upright /
+fallen / inconclusive, with distinct exit codes — and a shove that cannot be judged names *why*,
+because "the run ended" and "the next shove landed first" are different problems with different
+fixes. Runs also reserve a clean tail automatically, so a conclusive run is the default and an
+inconclusive one takes effort.
+
+**The second bite is the instructive one.** The first push sweep reported "20 N goes over and
+stays down", and that was wrong: at `--push-every 2.5` the robot was being shoved again while
+still getting up. Re-measured with room to recover, it survives 25 N and needs 60 N to stay
+down. A blind metric did not just mislabel one run — it understated a capability by more than
+a factor of two, and the number went into a document before it was caught.
 
 **The observation path landed the same day.** `mj_host/run.sh` is the front door
 (`build` / `gates` / `watch` / `record` / `hold`) and `tools/duck_viewer` draws the run.
