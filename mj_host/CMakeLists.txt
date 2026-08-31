@@ -99,6 +99,7 @@ add_executable(ogma_mjhost
   src/Observation.cpp
   src/Policy.cpp
   src/Recovery.cpp
+  src/OgmaBrainAdapter.cpp
 )
 target_link_libraries(ogma_mjhost PRIVATE mujoco onnxruntime)
 target_compile_options(ogma_mjhost PRIVATE -Wall -Wextra)
@@ -111,7 +112,8 @@ endif()
 
 # Where the vendored body lives, so `--load-only` needs no argument and no cwd.
 target_compile_definitions(ogma_mjhost PRIVATE
-  MJ_HOST_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models/microduck")
+  MJ_HOST_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models/microduck"
+  MJ_HOST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/configs")
 
 # libmujoco.so is not on the loader path; carry it on the binary rather than
 # asking every caller to set LD_LIBRARY_PATH.

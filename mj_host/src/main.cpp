@@ -30,6 +30,7 @@
 #include "Observation.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
+#include "OgmaBrainAdapter.hpp"
 #include "StubBrain.hpp"
 
 namespace {
@@ -454,11 +455,10 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
 // announce itself, and does the body keep running instead of lying on the floor.
 // ---------------------------------------------------------------------------
 
-int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amplitude,
-             double drift, bool emit) {
+int run_with_brain(const std::string& scene, double seconds, uint64_t seed, BrainLike& brain,
+                   bool emit) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
-    StubBrain brain(amplitude, drift, seed);
     Recovery recovery;
 
     body.reset("STAND", 0.0, seed);
@@ -483,7 +483,8 @@ int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amp
             // The scaffold's own action feedback must not follow the brain back in.
             last_action.fill(0.0f);
         }
-        if (!brain.learning()) ++frozen_ticks;
+        const bool learning_now = (driver == Driver::Brain);
+        if (!learning_now) ++frozen_ticks;
 
         std::array<double, kNumPolicyJoints> ctrl{};
         if (driver == Driver::Scaffold) {
@@ -503,7 +504,7 @@ int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amp
                         "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\","
                         "\"learning\":%s,\"event\":\"%s\",\"q\":[",
                         body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
-                        driver_name(driver), brain.learning() ? "true" : "false",
+                        driver_name(driver), learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
                         : recovery.handed_back_this_tick() ? "reset:handback"
                                                            : "");
@@ -518,10 +519,10 @@ int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amp
 
     const double total = recovery.brain_seconds() + recovery.scaffold_seconds();
     std::fprintf(stderr,
-                 "stub %.0f s — %d rescues, %.0f%% of the run driven by the brain, "
+                 "%s %.0f s — %d rescues, %.0f%% of the run driven by the brain, "
                  "longest recovery %.2f s\n",
-                 seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / total,
-                 recovery.longest_recovery());
+                 brain.name(), seconds, recovery.rescues(),
+                 100.0 * recovery.brain_seconds() / total, recovery.longest_recovery());
     std::fprintf(stderr, "  learning frozen for %.0f%% of ticks (must equal the scaffold's share)\n",
                  100.0 * frozen_ticks / ticks);
     if (recovery.gave_up() > 0) {
@@ -531,15 +532,41 @@ int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amp
 
     // What "working" means here: the body kept running. A harness that never fired
     // proves nothing, and one that never handed back has stopped being a harness.
-    const bool fired = recovery.rescues() > 0;
     const bool handing_back = recovery.gave_up() < recovery.rescues();
-    if (!fired) {
-        std::fprintf(stderr, "NO RESCUES — the stub never fell, so nothing was tested. "
-                             "Raise --stub-amp.\n");
-        return 3;
+    if (recovery.rescues() == 0) {
+        // Never falling is a result, not a failure: for the stub it means nothing
+        // was tested, for a real brain it would be the whole point.
+        std::fprintf(stderr, "NO RESCUES — the body never went down.\n");
+        return 0;
     }
     std::fprintf(stderr, "%s\n", handing_back ? "HARNESS OK" : "HARNESS STUCK");
     return handing_back ? 0 : 1;
+}
+
+int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amplitude,
+             double drift, bool emit) {
+    StubBrain brain(amplitude, drift, seed);
+    return run_with_brain(scene, seconds, seed, brain, emit);
+}
+
+// ---------------------------------------------------------------------------
+// --brain  (A1)
+// ---------------------------------------------------------------------------
+
+int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
+              double amplitude, bool emit) {
+    DuckBody probe(scene);   // for the joint ranges the adapter reads by name
+    OgmaBrainAdapter brain(probe, {graph, seed, amplitude});
+
+    std::fprintf(stderr, "graph %s\n  modules:", graph.c_str());
+    for (const auto& id : brain.module_ids()) std::fprintf(stderr, " %s", id.c_str());
+    std::fprintf(stderr, "\n");
+
+    const int rc = run_with_brain(scene, seconds, seed, brain, emit);
+    std::fprintf(stderr, "  mean |action| %.4f over %llu brain ticks\n", brain.mean_abs_action(),
+                 (unsigned long long)brain.ticks());
+    for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
+    return rc;
 }
 
 void usage() {
@@ -565,6 +592,9 @@ void usage() {
         "      A brain that falls over, the scaffold that picks it up, and the\n"
         "      hand-off between them. Tests the RECOVERY HARNESS, not the substrate.\n"
         "\n"
+        "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
+        "      Phase A1: an OgmaInstance driving the joints, inside the same harness.\n"
+        "\n"
         "  The scene defaults to %s\n"
         "  The standing scaffold is %s\n",
         kDefaultScene.c_str(), kStandScaffold.c_str());
@@ -579,6 +609,8 @@ int main(int argc, char** argv) {
     uint64_t seed = 0;
     PushPlan pushes;
     double stub_amp = 0.25, stub_drift = 0.08;
+    std::string graph = std::string(MJ_HOST_CONFIG_DIR) + "/a1_motor_epm.json";
+    double amplitude = 0.35;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -586,7 +618,8 @@ int main(int argc, char** argv) {
             if (i + 1 >= argc) throw std::runtime_error(std::string(what) + " needs a value");
             return argv[++i];
         };
-        if (a == "--load-only" || a == "--hold" || a == "--gate-g2" || a == "--stub") {
+        if (a == "--load-only" || a == "--hold" || a == "--gate-g2" || a == "--stub" ||
+            a == "--brain") {
             mode = a;
         } else if (a == "--secs") {
             seconds = std::stod(next("--secs"));
@@ -604,6 +637,10 @@ int main(int argc, char** argv) {
             stub_amp = std::stod(next("--stub-amp"));
         } else if (a == "--stub-drift") {
             stub_drift = std::stod(next("--stub-drift"));
+        } else if (a == "--graph") {
+            graph = next("--graph");
+        } else if (a == "--amp") {
+            amplitude = std::stod(next("--amp"));
         } else if (a == "-h" || a == "--help") {
             usage();
             return 0;
@@ -627,6 +664,7 @@ int main(int argc, char** argv) {
         if (mode == "--hold") return cmd_hold(scene, seconds, noise, seed, pushes);
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
         if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
+        if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

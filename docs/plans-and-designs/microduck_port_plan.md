@@ -1,7 +1,7 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
 > `microduck`, cut from `master`. Update it in place — do not fork a second port doc.
 >
-> **Status 2026-08-31: S0 and S1 are done — `mj_host/` runs the body.** All four gates that can
+> **Status 2026-08-31: S0, S1 and the A2 harness are done; A1 runs and ties a random walk.** All four gates that can
 > be checked yet pass from our own host: G1/G3/G4 via `--load-only`, G2 via `--gate-g2`, and the
 > whole trajectory cross-checks exactly against an independent Python implementation. No brain
 > in the host yet — that is S2. Upstream is
@@ -676,7 +676,7 @@ Each one gets a `register_source` line with a plain-language description, exactl
 `picrawler_body.gd:2842` does, so the graph panel shows the full environment↔brain interface.
 **G6 is written at the end of this phase, before A1 or B1 starts.**
 
-### A1 — the first brain: MotorEPM on measured proprioception · *Track A* · **NOT STARTED**
+### A1 — the first brain: MotorEPM on measured proprioception · *Track A* · ⚙ **RUNS 2026-08-31 · ties a random walk · promote-or-kill open**
 
 The point of the whole exercise: a `JointSensorimotorBridge` + `MotorEPM` graph on a body whose
 `x` is *measured*. The picrawler config `motor_epm_pure_hk__inst__stance__c025__lr10.json` is
@@ -726,6 +726,46 @@ is a result, gets a ledger entry, and redirects rather than ends the work.
 Before any lever: run the authority check the ledger demands
 (`corr(actuator, target)` on existing traces — ledger §"THREE LEVERS IN ONE SESSION AIMED AT AN
 ACTUATOR WITH NO AUTHORITY").
+
+#### Built and measured 2026-08-31
+
+`mj_host/configs/a1_motor_epm.json` — two bridges, two MotorEPM instances, **no module edited**.
+`OgmaBrainAdapter` fills the same `BrainLike` seam the stub filled, so A1 dropped into a harness
+that already worked. Sensors go out **centred on the home pose and scaled by the command
+amplitude**, so the resting pose is the origin and sensor and action share a unit — §0 rule 2,
+applied before it could bite.
+
+**The §3.2 checks first, because a number from an unfired consumer is worse than no number.**
+
+| check | answer |
+|---|---|
+| Consumer fired? | ✔ `motor_tle` 0.62–0.88 (legs), 0.75–1.02 (head) — **non-zero**, so the self-model is genuinely surprised and the loop is closed |
+| Loop live? | ✔ `loop_gain` 2.5–3.1 against a configured `motor_gain` of 3.0 |
+| Learning freeze real? | ✔ all eight rates logged `0.02 → 0`, and read back after to confirm it landed, not merely that `set_param` was called |
+| Input collapsed (§0 rule 2)? | ✔ no — per-joint means near 0, SD 0.43–0.68, only **12.9 %** of samples at the clamp |
+
+**The result, at n=3 fixed seeds — a signal, not a finding (§3.3):**
+
+| arm | rescues/min | share of run driven by the brain |
+|---|---|---|
+| MotorEPM | 37.5–38 | 45–47 % |
+| stub random walk | 41.5–43 | 50–51 % |
+
+**It ties a random walk.** Marginally fewer falls, and a slightly *smaller* share of the run,
+which is the wrong direction. §3.3 is explicit that this is the shape of a non-result: a real
+capability is loud, and standing is the loudest thing this body could do. Nothing is promoted.
+
+**What is NOT the explanation**, because each was checked rather than assumed: a dead consumer,
+a collapsed observation, a broken freeze, or a mis-scaled sensor. The substrate is running
+correctly and the body is still falling over.
+
+**What to try next, in the order the doctrine implies.** `mean |u|` sits at 0.59–0.82 on a
+[−1, 1] range, so the controller is near saturation, and `motor_gain = 3.0` / `c_init = 0.25`
+were tuned on a picrawler leg of three joints, not a duck leg of five. Conditioning and gain are
+the cheap hypotheses. The expensive one, and the one the plan already flagged, is that a
+quadruped that flails keeps trying while a biped that flails is on the floor within a second —
+and that **bipedal homeokinesis may simply not bootstrap**, which would be a result, a ledger
+entry, and a redirect rather than an ending.
 
 ### A2 — standup-as-reset · *Track A* · ✅ **HARNESS DONE 2026-08-31, ahead of A1**
 

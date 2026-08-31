@@ -10,6 +10,7 @@
 #   ./mj_host/run.sh watch [args]       WATCH IT LIVE — spawns the host, opens a window
 #   ./mj_host/run.sh stub  [args]       watch the recovery harness: a brain that falls
 #                                       over, and the scaffold that picks it up
+#   ./mj_host/run.sh brain [args]       watch phase A1: MotorEPM driving the joints
 #   ./mj_host/run.sh record out.mp4 [args]   render a run to video (no window needed)
 #   ./mj_host/run.sh hold [args]        headless, JSONL to log/
 #
@@ -76,6 +77,14 @@ case "${1:-}" in
     "$VENV" "$VIEW" live --save "$run" -- "$@"
     ;;
 
+  brain)
+    shift
+    need_host; need_viewer
+    mkdir -p "$LOGDIR"
+    run="$LOGDIR/brain-$(date +%Y%m%d-%H%M%S).jsonl"
+    "$VENV" "$VIEW" live --save "$run" --host-mode=--brain -- "$@"
+    ;;
+
   stub)
     shift
     need_host; need_viewer
@@ -88,7 +97,7 @@ case "${1:-}" in
     shift
     out="${1:?usage: run.sh record OUT.mp4 [host args]}"; shift || true
     mode=--hold
-    if [[ "${1:-}" == "--stub" ]]; then mode=--stub; shift; fi
+    if [[ "${1:-}" == "--stub" || "${1:-}" == "--brain" ]]; then mode="$1"; shift; fi
     need_host; need_viewer
     "$HOST" "$mode" "$@" | "$VENV" "$VIEW" record - "$out"
     ;;
