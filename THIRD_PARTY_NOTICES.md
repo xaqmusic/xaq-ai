@@ -45,17 +45,21 @@ Fetched at build time, pinned by version and by SHA-256:
 | Component | Version | License | Source |
 |---|---|---|---|
 | MuJoCo (official prebuilt, Linux x86-64) | 3.12.0 | Apache-2.0 | https://github.com/google-deepmind/mujoco/releases |
+| ONNX Runtime (official prebuilt, Linux x64) | 1.29.0 | MIT | https://github.com/microsoft/onnxruntime/releases |
 
 Vendored, unmodified, under `mj_host/models/microduck/`:
 
 | Component | License | Source |
 |---|---|---|
 | Microduck MJCF model — 4 scene/robot XML files and 38 STL meshes | Apache-2.0 | https://github.com/pollen-robotics/microduck_rl at commit `d424a0c`, path `src/mjlab_microduck/robot/microduck/` |
+| `scaffolds/alpha_stand.onnx` — the trained standing policy, used as a prop | Apache-2.0 | https://github.com/pollen-robotics/microduck at commit `590b986`, path `policies/alpha_stand.onnx` |
 
-The robot itself and its policies are Pollen Robotics'
+The robot, its model and its policies are Pollen Robotics'
 ([`microduck`](https://github.com/pollen-robotics/microduck),
-[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl)), both Apache-2.0. Only the
-model is vendored here; the ONNX policies are not, and neither repository is a submodule.
+[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl)), both Apache-2.0. Of the nine
+shipped policies only `alpha_stand` is vendored, and it is a scaffold rather than part of the
+brain ([`scaffolds/README.md`](mj_host/models/microduck/scaffolds/README.md)). Neither
+repository is a submodule.
 Provenance and the re-vendoring rule are in
 [`mj_host/models/microduck/README.md`](mj_host/models/microduck/README.md).
 

@@ -1,9 +1,10 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
 > `microduck`, cut from `master`. Update it in place — do not fork a second port doc.
 >
-> **Status 2026-08-31: S0 is done — `mj_host/` builds and loads the body.** G1/G3/G4 pass from
-> our own host (`ogma_mjhost --load-only`); G2 was restated after it failed and taught us
-> something (§Measured). No brain in the host yet — that is S1. Upstream is
+> **Status 2026-08-31: S0 and S1 are done — `mj_host/` runs the body.** All four gates that can
+> be checked yet pass from our own host: G1/G3/G4 via `--load-only`, G2 via `--gate-g2`, and the
+> whole trajectory cross-checks exactly against an independent Python implementation. No brain
+> in the host yet — that is S2. Upstream is
 > cloned *outside* this repo — `/home/xaqmusic/microduck` at `590b986` and
 > `/home/xaqmusic/microduck_rl` at `d424a0c` — so it stays a clean base to PR from. The CPU
 > sim venv is `microduck_rl/.venv` (mujoco 3.12.0, onnxruntime 1.29.0, numpy 2.5.2; no mjlab,
@@ -582,16 +583,42 @@ for, showing up on day one.
 **G5 holds by construction:** nothing outside `mj_host/` was touched, so `godot_host` and every
 picrawler A/B are byte-identical.
 
-### S1 — the body, with no brain · *shared* · **NOT STARTED**
+### S1 — the body, with no brain · *shared* · ✅ **DONE 2026-08-31 (G2 PASS)**
 
-`DuckBody` + a run loop, no `OgmaInstance` at all. Steps physics, writes the stdout JSONL,
-serves the viewer. Satisfies **G2**, **G3**, **G5**.
+**Landed:** `DuckBody` (names resolved once, physics stepped, egocentric state out),
+`Observation` (the 61-D vector with its layout table), `Policy` (one ONNX session, validated at
+load), and three modes on the host — `--load-only`, `--hold`, `--gate-g2`. No `OgmaInstance`,
+no bus, no learning.
 
-**Holds the pose with the *standing policy*, not with a passive `ctrl` hold** — the passive
-version falls over (§Measured), so the only honest no-brain baseline on this body is an
-actively balanced one. That makes `alpha_stand.onnx` a dependency of S1 rather than of A2,
-which is a change from the original phasing and is fine: it is the same named scaffold,
-arriving one phase earlier.
+`alpha_stand.onnx` is vendored under `models/microduck/scaffolds/`, a directory named so that
+nothing in it becomes load-bearing without somebody reading the word first. ONNX Runtime 1.29.0
+is pinned the same way MuJoCo is, by version and SHA-256.
+
+**G2 PASS** — the settle sweep, four noise levels × three seeds × 3 s, judged on **tilt** and
+never on height:
+
+```
+  noise(rad)  seed  tilt_end  tilt_max  z_end(m)  verdict
+        0.00     0      0.46      1.44    0.1163  PASS
+        0.05     0      0.48      2.80    0.1163  PASS
+                    ... 12/12 PASS ...
+[G2 PASS — the standing scaffold holds this body]
+```
+
+**Cross-checked against an independent implementation, and this is the result worth keeping.**
+The same 5 s episode through the C++ host and through the Python probe — MuJoCo C API versus
+the Python bindings — gives `tilt_end` 0.48°, `z` 0.1163 m, drift 0.003 m on both. Two
+implementations, one trajectory. That is the check `Observation.cpp` needed, because a wrong
+offset there produces a plausible robot rather than an error, and no metric catches it.
+
+An earlier 0.46 vs 0.48 gap between the two turned out to be 3 s against 5 s on a settling
+transient, not a divergence.
+
+**Deferred, and named rather than dropped: the interactive viewer.** MuJoCo's `simulate` is a
+separate GLFW application, and embedding one adds a windowing dependency to a host whose
+workflow is headless runs plus the ZMQ inspector. Any trajectory here renders from Python
+against the same vendored model when something needs watching. Revisit when there is a brain
+worth watching live.
 
 This is the gain-0 guard for the whole port: a host that runs the body correctly with no brain
 in it is the baseline every later phase is measured against.

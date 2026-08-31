@@ -56,7 +56,32 @@ set_target_properties(mujoco PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# 2. Ogma Core — the brain, when asked for.
+# 2. ONNX Runtime — for the standing scaffold (models/microduck/scaffolds/).
+#
+#    S1 needs a controller in the loop because this body has no passive standing
+#    equilibrium: holding the STAND keyframe's own ctrl topples it to 81 degrees.
+#    So the no-brain baseline is an actively balanced one, and that costs a second
+#    prebuilt dependency.  Pinned the same way MuJoCo is, and to the same version
+#    the Python cross-check ran against.
+# ---------------------------------------------------------------------------
+
+set(ORT_VERSION 1.29.0)
+
+FetchContent_Declare(onnxruntime
+  URL https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz
+  URL_HASH SHA256=c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(onnxruntime)
+
+add_library(onnxruntime SHARED IMPORTED)
+set_target_properties(onnxruntime PROPERTIES
+  IMPORTED_LOCATION             "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so"
+  INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
+)
+
+# ---------------------------------------------------------------------------
+# 3. Ogma Core — the brain, when asked for.
 # ---------------------------------------------------------------------------
 
 if(MJ_HOST_WITH_BRAIN)
@@ -65,11 +90,16 @@ if(MJ_HOST_WITH_BRAIN)
 endif()
 
 # ---------------------------------------------------------------------------
-# 3. The host
+# 4. The host
 # ---------------------------------------------------------------------------
 
-add_executable(ogma_mjhost src/main.cpp)
-target_link_libraries(ogma_mjhost PRIVATE mujoco)
+add_executable(ogma_mjhost
+  src/main.cpp
+  src/DuckBody.cpp
+  src/Observation.cpp
+  src/Policy.cpp
+)
+target_link_libraries(ogma_mjhost PRIVATE mujoco onnxruntime)
 target_compile_options(ogma_mjhost PRIVATE -Wall -Wextra)
 
 if(MJ_HOST_WITH_BRAIN)
@@ -85,5 +115,5 @@ target_compile_definitions(ogma_mjhost PRIVATE
 # libmujoco.so is not on the loader path; carry it on the binary rather than
 # asking every caller to set LD_LIBRARY_PATH.
 set_target_properties(ogma_mjhost PROPERTIES
-  BUILD_RPATH   "${mujoco_SOURCE_DIR}/lib"
-  INSTALL_RPATH "${mujoco_SOURCE_DIR}/lib")
+  BUILD_RPATH   "${mujoco_SOURCE_DIR}/lib;${onnxruntime_SOURCE_DIR}/lib"
+  INSTALL_RPATH "${mujoco_SOURCE_DIR}/lib;${onnxruntime_SOURCE_DIR}/lib")
