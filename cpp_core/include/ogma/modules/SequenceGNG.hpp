@@ -123,6 +123,7 @@ private:
 public:
     nlohmann::json snapshot_state() const override;
     nlohmann::json diag_snapshot()  const override;
+    nlohmann::json diag_lite()      const override;
     void           restore_state(nlohmann::json const&) override;
 };
 

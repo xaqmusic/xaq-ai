@@ -382,6 +382,20 @@ void SequenceGNG::tick(uint64_t tick_id) {
 // Snapshot / restore (Phase 6.5.4)
 // ---------------------------------------------------------------------------
 
+// The high-rate payload (xaq_voice).  Which motif the sequence layer thinks it is in,
+// how far through it, and how well it matches — the scalars only, never the GNG.  Without
+// this the module publishes `{}` while still matching xaq_voice's type filter, which
+// opens a permanently silent oscillator with no diagnostic.
+nlohmann::json SequenceGNG::diag_lite() const {
+    return {
+        {"current_motif_id", current_motif_id_},
+        {"motif_phase",      motif_phase_},
+        {"match_confidence", match_confidence_},
+        {"just_baked",       just_baked_},
+        {"n_events",         n_events_},
+    };
+}
+
 nlohmann::json SequenceGNG::diag_snapshot() const {
     // Lightweight payload tailored to tools/xaq_inspector/widgets/
     // seqgng_inspector.py.  The full snapshot_state() ships every

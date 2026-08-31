@@ -89,6 +89,12 @@ def parse(path):
         # convention the tibia's angle from vertical is hip2 + knee + pi/2.
         #   tib_off  -- how far the shank is from vertical.  The design rest is 10 deg; the
         #               deployed gait measures ~37 deg, i.e. the robot walks sprawled.
+        #               !! 2026-08-28: this formula assumes hinge 0 = straight leg.  The
+        #               body's hinges read 0 at the CONSTRUCTION pose (tibia already dropped
+        #               80 deg), so tib_off UNDER-READS the sprawl by ~30 deg and foot_r
+        #               below is chassis-centre -> tibia MIDPOINT, not hip1 -> toe.  Both
+        #               are kept unchanged for continuity with the ledger; the honest
+        #               posture/reach numbers come from reach_check.py on the same logs.
         #   foot_r   -- horizontal foot radius = the MOMENT ARM the hip torque works through.
         #               Total straight-line leg reach is 166 mm, so a mean near that means
         #               the legs are running straight out at minimum mechanical advantage.

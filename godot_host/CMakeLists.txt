@@ -75,6 +75,7 @@ add_subdirectory(${godot_cpp_SOURCE_DIR} ${godot_cpp_BINARY_DIR})
 add_library(ami_ogma_host SHARED
     src/AmiOgmaPlugin.cpp
     src/OgmaBrain.cpp
+    src/BenchClient.cpp   # bench dashboard client (pi_host/PROTOCOL.md)
 )
 
 # No "lib" prefix — we reference it as "ami_ogma_host.so" in the .gdextension.

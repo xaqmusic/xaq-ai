@@ -4,6 +4,10 @@
 #include <thread>
 #include <chrono>
 
+// X11 window capture is a desktop-only facility.  USE_X11 is defined by CMake when
+// libX11 is found; a headless host (the Pi) builds ogma_infra without it and
+// create_window_video() throws instead.
+#ifdef USE_X11
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
@@ -133,6 +137,7 @@ private:
 
 } // namespace sensors
 } // namespace ami_ogma
+#endif // USE_X11
 
 // Conditional compilation for OpenCV to allow audio-only builds if OpenCV is missing
 #ifdef USE_OPENCV
@@ -260,7 +265,11 @@ std::unique_ptr<VideoStream> create_mock_video(const std::string& mp4_file_path,
 }
 
 std::unique_ptr<VideoStream> create_window_video(const std::string& window_id, size_t width, size_t height) {
+#ifdef USE_X11
     return std::make_unique<X11WindowCaptureStream>(window_id, width, height);
+#else
+    throw std::runtime_error("X11 not compiled into ogma_core. Window capture unimplemented.");
+#endif
 }
 
 } // namespace sensors
@@ -280,8 +289,12 @@ std::unique_ptr<VideoStream> create_mock_video(const std::string& mp4_file_path,
 }
 
 std::unique_ptr<VideoStream> create_window_video(const std::string& window_id, size_t width, size_t height) {
+#ifdef USE_X11
     // We can use our pure X11 fallback!
     return std::make_unique<X11WindowCaptureStream>(window_id, width, height);
+#else
+    throw std::runtime_error("X11 not compiled into ogma_core. Window capture unimplemented.");
+#endif
 }
 
 } // namespace sensors

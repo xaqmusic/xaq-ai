@@ -790,6 +790,22 @@ void EPM::tick(uint64_t tick_id) {
 // flow with cloning.  For MC/CartPole (RBF encoder, stateless), this is
 // not a concern.
 
+nlohmann::json EPM::diag_lite() const {
+    nlohmann::json j = {
+        {"last_tle",              last_tle_},
+        {"ema_tle",               ema_tle_},
+        {"last_quant_error",      last_quant_error_},
+        {"novelty_threshold_now", novelty_threshold_now_},
+    };
+    if (gng_) {
+        j["nodes"]         = gng_->node_count();
+        j["baked"]         = gng_->baked_count();
+        j["mitosis_count"] = gng_->mitosis_count();
+        j["baked_now"]     = gng_->last_step_baked();   // a node earned its place THIS step
+    }
+    return j;
+}
+
 nlohmann::json EPM::snapshot_state() const {
     nlohmann::json prev_proto = nlohmann::json::array();
     if (has_prev_prototype_)

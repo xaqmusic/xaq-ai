@@ -162,8 +162,8 @@ Make the body a data file with no behavioral change. Gain-0-guarded and provable
 |---|---|
 | **G1 CoG** | ✅ **PASS — +15.0 mm rel hip2 exactly** (world y 0.0903) |
 | **G2 belly offset** | ✅ −19.0 mm rel hip2 exactly; 56.3 mm above floor at spawn |
-| **G2 crouch reach** | ⬜ **not yet checked** — needs FK to reach toe −28 mm (the 9 mm posture) |
-| **G3 knee 180° fold** | ⬜ **not yet checked** — receipt confirms the *commanded* span is still 241°, the known fiction (limits deliberately unchanged; Phase 2) |
+| **G2 crouch reach** | ✅ **PASS 2026-08-28** — femur straight up + 180° fold puts the toe at **−28.5 mm rel hip2 → 9.5 mm belly clearance**, reproducing the operator's −28 / 9 mm (cad gives −21.9 / 7.9, as it should). The limit box *clips the pose* — it needs hip2 −90° (limit ±80°) and knee +100° (limit +97°) — but at the admissible corner the toe is still −28.6 mm: the two shortfalls compensate. Printed by `_report_reach_gates()` in every receipt |
+| **G3 knee 180° fold** | ❌ **FAIL by 2.8° (limits, not geometry)** — max fold under = **177.2°** at `KNEE_LIMIT_HIGH` +1.70 rad; 180° needs +1.745 rad. The brain's commandable max is 171.7°. ⚠ Leg segments carry a `_LAYER_WORLD`-only mask, so **leg-on-leg contact is not modelled** — the fold is a geometric check only. Sim also admits 63° of "over" fold (tibia above the femur line) that hardware presumably lacks; Phase 2's hard-stop sweep decides |
 | **G4 gain-0** | ✅ PASS, re-verified 4× as the code changed |
 
 ⚠ **The +15 mm turned out to be the WHOLE-ROBOT CoG, not the chassis's** — the operator measured
@@ -360,10 +360,56 @@ regression — belly-up being a promoted invariant.
 +3.6 → **+13.5 mm**, and some current foot placements become geometrically unreachable. The
 improved ratio and the shortened reach pull opposite ways; only the A/B decides.
 
-**Hardware gate when this resumes:** `foot_r` must come inside **156.5 mm** with margin. That is
-the concrete pass/fail for "safe to put on hardware."
+**Hardware gate when this resumes — restated 2026-08-28.** The gate was written as *"`foot_r`
+inside 156.5 mm"*, but `arenaavg.py`'s `foot_r` is chassis-centre → **tibia midpoint**, not
+hip1 → toe, so it never measured reach. The gate's own quantity is the **extension fraction**
+`ext = |hip1→toe| / (L1+L2+L3)`, computed by `scripts_tools/reach_check.py` from the achieved
+hinge angles (planar model validated to 0.1 mm against `_fk_leg` on both bodies). Measured on
+the frozen native operating points, arena, chassis colliding, n=3 × 6000:
 
-## Phase 4 — Hardware host · recorded, not scheduled
+| body | ext mean | ext p95 | planted frames > 0.95 | tibia off vertical | chassis y |
+|---|---|---|---|---|---|
+| measured | **0.935 ± 0.006** | **0.993** | **52 %** | 47.6° | 60.7 mm |
+| cad | 0.955 ± 0.000 | 0.983 | 68 % | 53.5° | 54.2 mm |
+
+Both bodies plant at 93–96 % of full reach, and half to two-thirds of planted frames are past
+95 % — the knee is locked straight at its kinematic singularity, where knee torque has no
+radial authority and any placement error lands the toe short. The "beyond reach" comparison
+was the wrong pair of numbers; the *finding* (straight-legged planting) stands, now on the
+right instrument. Proposed pass/fail: **p95 `ext` ≤ 0.90** (operator to confirm the margin).
+Sprawl and the port remain one work item.
+
+## Phase 4 — Hardware host · **IN PROGRESS — bring-up started 2026-08-28**
+
+### Bring-up log
+
+**2026-08-28 — H0 done, H1 started, on the STOCK robot (no new sensors yet; parts due 2026-08-29).**
+Pi 5 Model B Rev 1.1, **2 GB**, Trixie Lite 13.5, kernel 6.18 `PREEMPT`, at `picrawler`
+(`10.0.0.113`, Ethernet; wifi unconfigured). Tooling decided: **build natively on the Pi**
+(`cmake … -j2`; the 2 GB board already runs 2 GB zram swap) — the livepi qemu chroot on the
+laptop is kept for the golden image later, not for host work (a qemu chroot sees no device tree).
+
+| step | result |
+|---|---|
+| overlays | `dtparam=i2c_arm=on,i2c_arm_baudrate=400000` + `dtparam=spi=on` + **`i2c-dev` in `/etc/modules`** (the overlay alone gives no `/dev/i2c-1`) → `/dev/i2c-1` at 400 kHz, `/dev/spidev0.0`. NetworkManager `wifi.powersave=2` persisted |
+| **BOM §6 step 1** | ✅ `i2cdetect -y 1` = **`0x14` only**. Camera (OV5647) answers at `0x36` on the internal bus |
+| `cpp_core` native | ✅ Release, tests on, `-j2`, ~10 min. **Needed one fix:** `video_capture.cpp` included X11 unconditionally → now `USE_X11`-gated (`d30ffdd`). **657/658 ogma tests pass**; the one failure is cross-architecture floating point (below) |
+| HAT wire protocol | taken from `robot_hat` 2.5.5 source and **bench-verified over raw I²C** (Python first, then C++): ADC select `(7−ch)\|0x10` + two byte reads, `Vbat = A4·3.3/4095·3` read **7.65 V**; A0–A3 float (no FSRs). Servo: `[reg, hi, lo]`, `PSC+t = 351`, `ARR+t = 4095` ⇒ **49.95 Hz, not 50.00** — the loop clock must use the real frame rate; pulse `trunc(µs/20000·4095)`, `0` = limp |
+| **first motion** | `P0` at 1500 → 1300 → 1700 → 1500 µs, robot on a stand: **P0 = the rear-left knee** (anatomical). Vbat flat 7.61–7.67 V through the moves (no stall sag) |
+| **`pi_host/`** (new, top-level) | `ogma_hw`: `I2cBus`/`LinuxI2cBus`, `RobotHat` (protocol), **`ServoDriver`** (clamp · slew 40 µs/tick · watchdog 25 ticks → pulse 0 · time-at-limit), `hat_tool` CLI (never a bypass), `test_hw` — 7 byte-level + envelope tests against a fake bus, passing on x86 and aarch64. A slewed `sweep 0 1300 1700` through the driver moved the knee with Vbat flat |
+
+**Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
+passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step
+stochastic sim; `test_rng_parity` passes, so the RNG stream is identical). GCC fuses `a·b+c`
+into FMA on aarch64 by default and baseline x86-64 has no FMA; glibc's `libm` also differs per
+architecture. Consequence for §1's parity argument: *same code* buys attributability, not
+bit-identical trajectories across machines. **Measured:** rebuilding with `-ffp-contract=off`
+still fails the test and moves μ from −2.74 to +2.94 — FMA contraction changes the trajectory
+but is not the whole difference (per-arch `libm` remains). No compiler flag buys cross-arch
+bit-parity: **golden replays are per-architecture**, and a test that asserts a hemisphere from
+one 4000-step seed is seed-fragile rather than a port defect (its owner should make it
+seed-robust).
+
 
 ### The bus map, as of 2026-08-27 (parts ordered)
 
@@ -455,11 +501,14 @@ which is the reason to prefer it.
   (20K/10K divider, `Vbat = A4/4095 × 3.3 × 3`). The sensor-legitimacy doc's §5.3 claim that a
   Robot HAT "typically exposes bus current" is **wrong for V4**. Real servo-current work needs an
   **INA219** (bus) or **INA3221** (3ch) on the same I²C header.
-- `robot_hat` in Python for one "does servo 3 move" smoke test, then discarded.
+- ~~`robot_hat` in Python for one "does servo 3 move" smoke test, then discarded.~~ **Done
+  2026-08-28 without the library** — `hat_servo_smoke.py` over raw `smbus2` (P0 = RL knee), then
+  superseded the same evening by `pi_host/hat_tool` over the C++ driver.
 
 ## SPEC — the host, the daemon, and the bench dashboard
 
-> **STATUS: SPEC ONLY. NOTHING BUILT.** Written 2026-08-28, while the parts were in transit,
+> **STATUS: driver layer BUILT 2026-08-28 (`pi_host/` — `RobotHat`, `ServoDriver`, `hat_tool`);
+> `ogma_benchd` / `ogma_host` / dashboard not yet.** Written 2026-08-28, while the parts were in transit,
 > so the architecture is settled before the first line of host code. This is the *how* of
 > Phase 4 above; that section stays the electrical contract.
 
@@ -554,7 +603,14 @@ a golden-*input* replay reader, not a telemetry container. Copy the shape, not t
 
 ### 4. Safety semantics — these are wire actions, not UI states
 
-**⚠ 4.1 "Pause" and "ragdoll" are DIFFERENT wire actions, and conflating them is the failure
+**⚠ 4.1 — CORRECTED 2026-08-29: "ragdoll" does not exist on the Robot HAT V4.** Measured on the
+bench: pulse count 0 / 1 / ARR are ignored by the MCU, a stopped timer is ignored, and the
+MCU held in reset for 30 s leaves the servo powered; the single 5 V/3 A DC-DC feeds the Pi
+and the servos together, so the rail cannot be cut without killing the Pi. **The safe action is
+a saved `rescue` pose** — what limp existed for (no servo straining into a hard stop) done with
+what the hardware can do. The paragraph below is kept as the original design intent.
+
+**⚠ 4.1 (original) "Pause" and "ragdoll" are DIFFERENT wire actions, and conflating them is the failure
 mode.** Per Phase 2: *"A servo holds its last pulse indefinitely; going limp requires setting the
 channel pulse to 0 so pulses stop entirely."* **A pause that merely stops the command stream
 leaves twelve servos straining against gravity at their last commanded angle** — the exact quiet
@@ -978,6 +1034,44 @@ load rules on the current idealized GRF is a weakened-slice result in the *too-g
 
 Ships gain-0: the degradation model defaults OFF, and the hardware publisher is instrument-only
 until its A/B runs.
+
+## H3 — The derivation port · **SCOPED 2026-08-28, decided: C++ port, not a duplicate**
+
+**Decision (operator, 2026-08-28):** the legal sensor-derivation chain moves from GDScript into
+C++ so that Godot and the Pi host run *the same code* — parity by construction. **And the
+inventory that scoped it is also a legality audit of the deployed config**, which turned out to
+be the larger finding. Read against `native_measured`'s twelve consumed topics
+(`picrawler_body.gd`, publishes at 6221–7160; full line-level inventory in the ledger entry):
+
+| topic | consumers | what the sim publishes | on hardware |
+|---|---|---|---|
+| `joints` | Bridge, 2× EPM | **achieved hinge angles** (`_relative_angle_world_axis`) | ❌ hobby servos report nothing → publish the **servo forward model** of the command (the `_strido_lp` pattern the file already uses) |
+| `imu` | MotorEPMv2, GainEvolver | `[sin yaw, cos yaw, fwd_v, ang_v]` — **entirely oracle** (world attitude + world velocities) despite the name | ❌ → the legal vector the file already has: `[sin/cos _ego_heading, stride_v.y, gyro[1]]` — a **config-visible change**, must be A/B'd in sim first (§5.4) |
+| `gyro` | GainEvolver | body-frame ω, exact, no bias/noise | ✅ ICM-20948, after the bias estimator |
+| `upright` | GainEvolver | **exact** basis `y.y` (oracle form) | ✅ the accelerometer gives the same scalar — but the port must publish `_up_est_body.y`, and so should the sim (`tilt` likewise) |
+| `foot_contact` / `foot_load` | MotorEPMv2 / GainEvolver | contact monitor / normal-impulse EMA (α 0.15 @ 240 Hz) | ✅ FSR threshold / FSR magnitude, per the FSR spec |
+| `ground_clearance` | MotorEPMv2 | downward raycast — a faithful belly-ToF model | ✅ VL53L0X |
+| `joint_torque` | GainEvolver (**w = 4.0**) | PD-controller internal from achieved ω | ❌ **no analog** → INA219 bus current re-point, its own lever |
+| `stride_v` (+`slip`) | GainEvolver | FK-from-command ⊕ IMU fusion (β 1.0, K_I 0.1) — **legal** | ✅ port as is; heaviest geometry dependency |
+| `feet_y_gravity_cmd_imu` | MotorEPMv2 | FK from raw efference rotated by `_up_est_body` — **legal** | ✅ port as is |
+| `distress` | MotorEPMv2, GainEvolver | world-position history + **exact** tilt | ❌ inputs are oracle → needs `stride_v`-integrated displacement + filtered tilt; and it carries a **latent units bug** (window ÷ physics rate instead of tick rate: 0.04 m where 0.192 m was meant) — a bit-exact port reproduces it, a correct one changes behaviour |
+| `target_compass` | MotorEPMv2 | god's-eye bearing to the pyramid | ❌ no target on the bench → consumer must tolerate `(0,0)`; the legal stand-in is `vision_compass` |
+
+**Consequences.** (1) The deployed gait has never run on its legal inputs: `imu`, `upright`,
+`joints`, `distress` and `target_compass` are all oracle-fed today, so **the port is a config
+change plus a sim-honesty A/B before it is a host**. (2) The shared helpers to carry are
+few and well-bounded: `_fk_leg` + construction anchors (9386–9410, 4810–4950), the IMU model
+and complementary attitude filter `_imu_substep` (5801–5852: gravity-inclusive body accel,
+DLPF 0.25, 4 g clip, adaptive accel trust 0.02), the stride-odometry fusion (6631–6816), the
+foot-load EMA, the ground-clearance read, the servo command decode + slew. (3) Where it
+lives: **`cpp_core/include/ogma/body/`** (e.g. `LegKinematics`, `ImuAttitude`,
+`StrideOdometry`, `FootLoad`), linked by both the GDExtension and `ogma_host`; the GDScript
+then calls into it, and the sim's byte-identity across that swap is the gain-0 gate.
+
+**Order:** (a) port `LegKinematics` + `ImuAttitude` and prove them against the sim's own
+FK/IMU debug outputs (`get_imu_debug()`, the FK spot table); (b) `StrideOdometry` +
+`feet_y_gravity_cmd_imu`; (c) the sim-honesty A/B on `imu`/`upright`/`joints` substitutes;
+(d) `ogma_host` on the Pi with the parts.
 
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 

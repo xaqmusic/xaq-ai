@@ -196,7 +196,7 @@ value on all four channels so per-foot variation shows up in calibration rather 
 
 | # | step | pass condition |
 |---|---|---|
-| 1 | Baseline, nothing added | `i2cdetect -y 1` shows **`0x14`** only |
+| 1 | Baseline, nothing added | `i2cdetect -y 1` shows **`0x14`** only — ✅ **PASS 2026-08-28** (needs `i2c-dev` in `/etc/modules` besides the overlay) |
 | 2 | INA219 inline on the battery | `0x40` appears; idle current is plausible; its bus voltage **agrees with A4's** reading |
 | 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 |
 | 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure |

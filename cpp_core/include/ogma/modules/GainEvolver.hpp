@@ -96,6 +96,7 @@ public:
     nlohmann::json snapshot_state() const override;
     void restore_state(nlohmann::json const& s) override;
     nlohmann::json diag_snapshot() const override;
+    nlohmann::json diag_lite()     const override;
 
     // Cheap per-tick scalars for OgmaBrain::get_module_metrics — the body-log
     // mirror reads this every diag emit; the full snapshot is NOT the per-tick

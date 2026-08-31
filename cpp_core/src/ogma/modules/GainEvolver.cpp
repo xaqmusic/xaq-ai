@@ -991,6 +991,23 @@ nlohmann::json GainEvolver::metrics() const {
     return m;
 }
 
+// metrics() is already maintained as "cheap per-tick scalars" for the body log, so it is
+// the right source for the high-rate payload — but it also carries the gain vectors, and
+// those are arrays whose length follows the config.  Keep the scalars and drop the rest,
+// rather than naming keys here: a scalar added to metrics() then reaches a sonifier for
+// free, and an array added there cannot silently make this payload unbounded.
+// The search reads well as sound: sigma is the step size, J_inc/J_cand the incumbent and
+// challenger costs, and accepts/reverts tick over as the population moves.
+nlohmann::json GainEvolver::diag_lite() const {
+    // `m` must be a named local: items() returns a proxy over the json it was called on,
+    // and a temporary would be destroyed before the loop body ever ran.
+    const nlohmann::json m = metrics();
+    nlohmann::json j = nlohmann::json::object();
+    for (auto const& [k, v] : m.items())
+        if (v.is_number() || v.is_boolean()) j[k] = v;
+    return j;
+}
+
 nlohmann::json GainEvolver::diag_snapshot() const {
     nlohmann::json j = metrics();
     j["gain_keys"]  = gain_keys_;

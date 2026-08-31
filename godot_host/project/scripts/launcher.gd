@@ -257,6 +257,12 @@ func _ready() -> void:
 	_start_curr_btn.pressed.connect(_on_start_curriculum)
 	_quit_btn.pressed.connect(_on_quit)
 	_browse_btn.pressed.connect(_on_browse_results)
+	# 2026-08-28 — hardware bench dashboard (pi_host/PROTOCOL.md).  Created in code;
+	# the .tscn is untouched.  Not an env: it has no configs and starts no brain.
+	var bench_btn := Button.new()
+	bench_btn.text = "Bench dashboard (hardware)"
+	_browse_btn.get_parent().add_child(bench_btn)
+	bench_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/the_bench.tscn"))
 	_on_config_changed(_config_dropdown.selected)
 	print("launcher: _ready complete")
 

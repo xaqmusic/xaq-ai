@@ -1,0 +1,4 @@
+PyQt6>=6.4
+pyqtgraph>=0.13
+pyzmq>=25
+numpy>=1.23

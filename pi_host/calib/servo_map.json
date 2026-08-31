@@ -1,0 +1,127 @@
+{
+  "body": "measured",
+  "saved_at": "2026-08-29T14:54:52Z",
+  "servos": [
+    {
+      "ch": 0,
+      "joint": "knee",
+      "max_us": 2300,
+      "min_us": 600,
+      "origin_us": 1500,
+      "physical": "RL",
+      "sign": -1,
+      "sim_leg": "rr"
+    },
+    {
+      "ch": 1,
+      "joint": "hip2",
+      "max_us": 2460,
+      "min_us": 640,
+      "origin_us": 1535,
+      "physical": "RL",
+      "sign": 1,
+      "sim_leg": "rr"
+    },
+    {
+      "ch": 2,
+      "joint": "hip1",
+      "max_us": 2000,
+      "min_us": 750,
+      "origin_us": 1380,
+      "physical": "RL",
+      "sign": 1,
+      "sim_leg": "rr"
+    },
+    {
+      "ch": 3,
+      "joint": "knee",
+      "max_us": 2300,
+      "min_us": 600,
+      "origin_us": 1500,
+      "physical": "FL",
+      "sign": -1,
+      "sim_leg": "fr"
+    },
+    {
+      "ch": 4,
+      "joint": "hip2",
+      "max_us": 2400,
+      "min_us": 500,
+      "origin_us": 1420,
+      "physical": "FL",
+      "sign": 1,
+      "sim_leg": "fr"
+    },
+    {
+      "ch": 5,
+      "joint": "hip1",
+      "max_us": 2160,
+      "min_us": 900,
+      "origin_us": 1575,
+      "physical": "FL",
+      "sign": 1,
+      "sim_leg": "fr"
+    },
+    {
+      "ch": 6,
+      "joint": "knee",
+      "max_us": 2400,
+      "min_us": 700,
+      "origin_us": 1600,
+      "physical": "RR",
+      "sign": -1,
+      "sim_leg": "rl"
+    },
+    {
+      "ch": 9,
+      "joint": "knee",
+      "max_us": 2300,
+      "min_us": 640,
+      "origin_us": 1500,
+      "physical": "FR",
+      "sign": -1,
+      "sim_leg": "fl"
+    },
+    {
+      "ch": 10,
+      "joint": "hip2",
+      "max_us": 2330,
+      "min_us": 550,
+      "origin_us": 1500,
+      "physical": "FR",
+      "sign": 1,
+      "sim_leg": "fl"
+    },
+    {
+      "ch": 11,
+      "joint": "hip1",
+      "max_us": 1900,
+      "min_us": 600,
+      "origin_us": 1275,
+      "physical": "FR",
+      "sign": 1,
+      "sim_leg": "fl"
+    },
+    {
+      "ch": 7,
+      "joint": "hip2",
+      "max_us": 2380,
+      "min_us": 500,
+      "origin_us": 1420,
+      "physical": "RR",
+      "sign": 1,
+      "sim_leg": "rl"
+    },
+    {
+      "ch": 8,
+      "joint": "hip1",
+      "max_us": 2000,
+      "min_us": 730,
+      "origin_us": 1310,
+      "physical": "RR",
+      "sign": 1,
+      "sim_leg": "rl"
+    }
+  ],
+  "version": 1
+}

@@ -13,6 +13,12 @@ brain's two inspector surfaces:
   - `unsubscribe {sub_id}`
 - **Diag stream**: ZMQ PUB on TCP 7401.  Per-subscription topic prefix
   `diag.<sub_id>.` carries serialized `Module::snapshot_state()` as
+  - Topic `"lite"` (2026-08-28): the publisher serves `Module::diag_lite()` instead — a
+    handful of scalars (for an EPM: `last_tle`, `ema_tle`, `last_quant_error`,
+    `novelty_threshold_now`, `nodes`, `baked`, `mitosis_count`, `baked_now`; for
+    `MotorEPMv2`: `motor_tle`), ~280 bytes against ~50 KB for the full snapshot.
+    High-rate subscribers that want the error signal, not the state, must use it —
+    `tools/xaq_voice` does. The inspector keeps the full snapshot (topic `""`).
   JSON, fanned out at the requested Hz from the host's tick thread.
 
 ## Run

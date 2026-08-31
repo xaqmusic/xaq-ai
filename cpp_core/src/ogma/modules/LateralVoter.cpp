@@ -587,6 +587,28 @@ void LateralVoter::tick(uint64_t tick_id) {
 // Snapshot / restore (Phase 6.5.4)
 // ---------------------------------------------------------------------------
 
+// The high-rate payload (xaq_voice).  The consensus's own fused error, plus the two
+// per-source maps that say WHICH module the consensus currently believes: trust is the
+// precision weight 1/(tle+eps) the fusion actually used, surprise its running prediction
+// error.  Both are published as nested objects rather than flattened keys, so a subscriber
+// enumerating dotted paths sees `trust.<modality>` without this module having to guess at
+// a fixed source order.  The maps are small (one entry per voting modality) and copied as
+// floats; nothing here walks an embedding.
+nlohmann::json LateralVoter::diag_lite() const {
+    nlohmann::json trust = nlohmann::json::object();
+    nlohmann::json surp  = nlohmann::json::object();
+    if (prev_token_)
+        for (auto const& [k, v] : prev_token_->trust_weights) trust[k] = v;
+    for (auto const& [k, v] : surprise_ema_) surp[k] = v;
+    return {
+        {"dopamine",  dopamine_},
+        {"fused_tle", prev_token_ ? prev_token_->fused_tle : 0.0f},
+        {"has_token", bool(prev_token_)},
+        {"trust",     std::move(trust)},
+        {"surprise",  std::move(surp)},
+    };
+}
+
 nlohmann::json LateralVoter::snapshot_state() const {
     nlohmann::json prev = nullptr;
     if (prev_token_) {

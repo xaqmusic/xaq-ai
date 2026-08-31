@@ -4600,3 +4600,173 @@ accrued at OTHER vectors along its path), and cad's 1.84-J search run froze to 1
 9× the falls. Never promote a point from its searching-run statistics; freeze it first.
 The measured body remains fall-heavy at every point yet measured (~1.2/1000 ticks) —
 its benchmark says so on its face.
+
+### ★★ 2026-08-28 — G2/G3 RUN, AND THE REACH GATE WAS MEASURING THE WRONG QUANTITY
+
+**Verdict: measurement outcomes, not lever verdicts.** G2 `WORKING` (measured body reproduces
+the operator's crouch), G3 `REGRESSION`-class on *limits* (2.8° short of a 180° fold), and the
+"feet plant beyond reach" claim `TAUTOLOGY`-adjacent — it compared two different quantities.
+Context: frozen native operating points (`native_measured` / `native_cad`), arena, chassis
+colliding, n=3 × 6000 ticks. Port-doc Phase 1a table and geometry doc updated in place.
+
+**★ 1. G2 PASSES ON THE BUILT BODY, AND ONLY ON IT.** `_report_reach_gates()` (new, print-only,
+in every geometry receipt) evaluates the operator's crouch — femur straight up, 180° fold —
+through `_fk_leg`: measured **toe −28.5 mm rel hip2, belly clearance 9.5 mm** against the
+measured −28 / 9; cad −21.9 / 7.9. The limit box clips the pose (needs hip2 −90° vs ±80°,
+knee +100° vs +97°) but the admissible corner still gives −28.6 mm — the shortfalls cancel.
+
+**★ 2. G3 FAILS BY 2.8°, AS A LIMIT, AND CANNOT BE TESTED AS A COLLISION.** Max fold under is
+177.2° at `KNEE_LIMIT_HIGH` +1.70 rad; 180° needs +1.745. Leg segments mask `_LAYER_WORLD`
+only, so leg-on-leg interpenetration is not modelled anywhere — G3 is geometric by
+construction. Sim also admits 63° of fold *above* the femur line, which hardware presumably
+lacks; Phase 2's hard-stop sweep is where both get settled.
+
+**★ 3. `foot_r` IS CHASSIS-CENTRE → TIBIA MIDPOINT.** `arenaavg.py` reads `foot_xz`, the lower
+capsule's origin in chassis frame; reach is hip1 → toe. "170 mm vs 166 mm reach" therefore
+never tested reach (the sim cannot exceed it). `scripts_tools/reach_check.py` computes the
+gate's own quantity, `ext = |hip1→toe| / reach`, from the achieved hinge angles with a planar
+model validated to 0.1 mm against the FK spot table on both bodies:
+
+| body | ext mean | p95 | planted > 0.95 | fold | tibia off vertical | chassis y | legacy foot_r |
+|---|---|---|---|---|---|---|---|
+| measured | 0.935 ± 0.006 | 0.993 | 52 % | 40.8° | 47.6° | 60.7 mm | 157.5 mm |
+| cad | 0.955 ± 0.000 | 0.983 | 68 % | 37.2° | 53.5° | 54.2 mm | 169.4 mm |
+
+The straight-legged finding **stands** — restated as "plants at 93–96 % of reach, half to two
+thirds of stance past 95 %, the knee at its singularity where its torque has no radial
+authority." Proposed hardware gate: p95 `ext` ≤ 0.90.
+
+**★ 4. HINGE ZERO IS THE CONSTRUCTION POSE, NOT A STRAIGHT LEG.** Every segment is built with
+an identity basis and `_relative_angle_world_axis` reads rotation from that pose, so knee 0 =
+tibia already dropped 80°; negative knee straightens, positive folds under; negative hip2
+raises the femur. Two consequences: `arenaavg`'s `tib_off = |hip2 + knee + π/2|` assumes
+0 = straight and **under-reads the sprawl by ~30°** (kept unchanged for continuity, annotated
+in place); and **`KNEE_REST = −1.6` is a nearly straight leg** (fold −12°, toe at hip height)
+— the brain's u = 0 posture is the sprawl attractor, and every standing posture is a held
+offset from it. To verify in the `[C]` calibration panel before anything is built on it.
+Re-use context: the sprawl family (Phase 3) should start from this, not from a bias lever.
+
+**★ 5. SILENT CONFOUND (§3.2 #7), CAUGHT BY THE RECEIPT.** `metadata.body` is honoured only from
+the UI launcher; a headless run of `native_measured` loaded **`cad`** until
+`OGMA_PICRAWLER_BODY=measured` was set. `strido_twobody.py` already passes it per arm and its
+logs carry the receipt, so the E-stage results are unaffected — but any ad-hoc headless
+"measured" number without a receipt line saying `'measured'` is a cad number.
+
+### ★★ 2026-08-28 — HARDWARE BRING-UP DAY 1: the HAT answers, a knee moves, and cross-arch FP is not free
+
+**Verdict: `WORKING` (H0 + the servo driver layer), on the STOCK robot — no new sensors yet.**
+Full log in the port doc's Phase 4 "Bring-up log"; this entry keeps what generalises.
+
+**★ 1. THE PROTOCOL TRANSFERS, THE LIBRARY DOES NOT — confirmed by measurement.** SunFounder's
+`robot_hat` 2.5.5 source yielded a five-line wire protocol; raw `smbus2` then the C++
+`ogma_hw` driver read **Vbat 7.65 V** and moved **P0 = the rear-left knee** without the
+library present. The servo frame rate the HAT actually produces is **49.95 Hz** (PSC 352 ×
+ARR 4095 at 72 MHz), not 50.00 — the 50 Hz brain tick and the servo frame are *different
+clocks* and the host must not assume they coincide.
+
+**★ 2. FIRST NATIVE BUILD FOUND A PORTABILITY DEFECT, NOT A LOGIC ONE.** `cpp_core` had never
+been built without X11 headers; one `USE_X11` gate (`d30ffdd`) and 657/658 tests pass on
+aarch64.
+
+**★ 3. SAME CODE ≠ SAME BITS ACROSS ARCHITECTURES.** One stochastic 4000-step nav test flips
+hemisphere on the Pi with an identical RNG stream. FMA contraction (default on aarch64, absent
+on baseline x86-64) and per-arch `libm` are the candidates; **`-ffp-contract=off` measured:
+still fails, μ moves −2.74 → +2.94** — contraction matters but `libm` differences remain, so no
+flag restores bit-parity. The test itself asserts a hemisphere from ONE 4000-step seed and is
+seed-fragile; make it seed-robust rather than chase bits. Rule for the port: **parity claims are about attributability of derivations, not
+bit-identity of trajectories** — golden replays are per-architecture unless the build pins
+FP contraction on both sides. Re-use context: any cross-machine replay or A/B that assumes
+bit-identity.
+
+**★ 4. Two Trixie-specific traps recorded for the next Pi:** the I²C overlay does not create
+`/dev/i2c-1` without `i2c-dev` in `/etc/modules`; the Imager no longer grants NOPASSWD sudo to
+a custom user.
+
+### ★★★ 2026-08-28 — THE DEPLOYED CONFIG HAS NEVER RUN ON ITS LEGAL INPUTS
+
+**Verdict: audit finding (`WORKING` as a diagnosis), from scoping the C++ derivation port.**
+Of the twelve `reality.proprio.*` topics `native_measured` consumes, **five are oracle-fed in
+sim**: `imu` = `[sin yaw, cos yaw, fwd_v, ang_v]` from world attitude and world velocity
+(entirely god's-eye despite its name; consumed by MotorEPMv2 AND GainEvolver); `upright` and
+`tilt` publish the exact basis, not the attitude filter the file already runs; `joints` are
+achieved hinge angles hobby servos cannot report; `distress` integrates world position and
+exact tilt (and has a units bug — window ÷ physics rate — that saturates it at 0.04 m instead
+of 0.192 m); `target_compass` is a god's-eye bearing. `joint_torque` (weight 4.0) has no
+hardware analog at all. Only `gyro`, `foot_contact/load`, `ground_clearance`, `stride_v`,
+`feet_y_gravity_cmd_imu` are hardware-shaped as published. **Every legal substitute already
+exists in the file** (`_ego_heading`, `stride_v`, `gyro[1]`, `_up_est_body`, the `_strido_lp`
+servo forward model, `vision_compass`), so this is a config-and-publisher swap with a §5.4
+honesty A/B — but it must happen BEFORE any hardware result is attributed to the gait. Re-use
+context: every sim result on this config is a result on oracle inputs until that A/B runs.
+Scope and order recorded in the port doc (§H3).
+
+### ★★ 2026-08-29 — THE ROBOT HAT V4 CANNOT LIMP A SERVO: the safe state is a pose
+
+**Verdict: hardware fact (`WORKING` as a diagnosis); a SPEC §4.1 assumption falsified.** Bench
+sequence with the operator's hand on the rear-left knee (P0): armed at 1500/1800 µs it holds;
+then pulse count **0, 1, ARR** (8 s each) — holds; timer period **0** and **1**, prescaler
+**65535** — holds; **MCU held in reset for 5 s, then 30 s** — holds, and re-arms afterwards. The
+V4's servo 5 V is the same 5 V/3 A DC-DC that powers the Pi (SunFounder: "provides a stable
+power source for the Raspberry Pi and other devices"), so there is no rail to cut. SunFounder's
+own robots never go limp. **Consequence:** `limp`, the bench deadman and the low-battery
+auto-safe all command a saved **`rescue` pose** instead; "ragdoll" in the sim has no
+hardware counterpart, and the (d) test's "drop a sensor"-style perturbations must be designed
+around poses, not power. Re-use context: a separate servo BEC with its own switch would bring
+limp back (a rebuild the wiring doc declined; the reason is now measured, not assumed).
+
+---
+
+### 2026-08-29 — `diag_lite()` on eight more modules: diagnostic surface, structurally gain-0
+
+**Verdict: not a lever, and no verdict applies.** Recorded because it touches `cpp_core`,
+which is the bar for appearing here at all — not because anything about the brain changed.
+
+`xaq_voice` could only sonify what the brain publishes at rate, and that was **nine
+scalars**: eight from `EPM` and exactly one (`motor_tle`) from `MotorEPMv2`. Everything
+else lives in `diag_snapshot()`, which for an EPM is the whole GNG — ~50 KB serialised **on
+the tick thread**, per frame, per subscription — and is therefore closed to a 60 Hz
+subscriber. `diag_lite()` overrides were added to `MotorEPMv2` (1 → 16 keys),
+`NeurochemState`, `LateralVoter`, `HomeostaticDrive`, `GainEvolver`, `GradientEPM`,
+`SequenceGNG` and `MotorEPM` v1. About **60 signals** now reach a subscriber on the
+picrawler's corridor config.
+
+**★ 1. THE GAIN-0 GUARD IS STRUCTURAL, NOT A FLAG.** `diag_lite()` is called only by
+`DiagPublisher`, only when a subscription's topic is `"lite"`, and nothing in the brain
+reads it. With no `lite` subscriber the build is byte-identical — there is no knob to set
+to zero because there is no path into the tick. Worth naming as a shape: a diagnostic that
+is *unreachable from the control loop by construction* needs no A/B, and claiming one would
+be theatre.
+
+**★ 2. A TYPE FILTER SELECTED THREE MODULES THAT PUBLISHED NOTHING.** `xaq_voice` chose
+voices by matching `"EPM"` in the type name plus `SequenceGNG`. `GradientEPM`, `MotorEPM`
+v1 and `SequenceGNG` all matched and all returned `{}` — a **silent oscillator with no
+diagnostic**, which is strictly worse than an error because nothing reports it. This is the
+same failure the ledger records under "dead code" (§3.2 rule 2) wearing different clothes:
+the consumer was live, the producer was empty, and the only symptom was absence. The tool
+now names any subscribed module that publishes nothing, and every type its filter can
+select publishes something.
+
+**★ 3. AN ALPHABETICAL CONTAINER SILENTLY REORDERED A TUNED THING.** The voice registry
+stored modules in a `std::map` keyed by id, so the octave ladder was handed out by *name*
+rather than by the brain's `list_modules` order. `motor_epm` is documented as the lowest
+voice — the anchor the ear separates the mix against — and alphabetically it is fourth, so
+it landed on C6 and reached C8 on a spike. Nothing failed; it just sounded wrong, and only
+against a live sim. **A container's ordering is a decision even when it is not written down
+as one.**
+
+**★ 4. THE TEST CAUGHT TWO DEFECTS BEFORE THE EAR DID.** `test_diag_lite.cpp` pins flat
+scalars, names the unbounded containers and asserts them absent, and checks the base class
+still opts out with `{}` rather than falling back the way `diag_snapshot()` does. It
+immediately caught `GainEvolver::diag_lite()` shipping the gain **vectors** (returning
+`metrics()` wholesale), which is exactly the unbounded payload the topic exists to avoid —
+now filtered to scalars rather than key-listed, so a scalar added to `metrics()` reaches a
+subscriber for free and an array cannot make the payload unbounded.
+
+Also fixed en route: `MotorEPMv2::gait_coherence()` bounded its loop by `n_legs_` while
+indexing `legs_`. The two agree after `on_setup()`, but `diag_lite()` is reachable from the
+diag thread before then, where `n_legs_` carries its config default and `legs_` is empty.
+Latent out-of-bounds, never triggered by the existing callers.
+
+Re-use context: wanting a new signal sonified is a one-line addition to that module's
+`diag_lite()`, and it must stay O(1) and additive. That is the only place `tools/xaq_voice`
+may touch brain code.

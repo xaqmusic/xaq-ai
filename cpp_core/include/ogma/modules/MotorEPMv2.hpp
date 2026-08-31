@@ -98,7 +98,8 @@ public:
     void on_param_change(std::string_view key, ParamValue const& value) override;
 
     nlohmann::json snapshot_state() const override;
-    nlohmann::json diag_snapshot() const override;   // live viz: motor-TLE + self-model + cog drive
+    nlohmann::json diag_snapshot() const override;
+    nlohmann::json diag_lite() const override;   // live viz: motor-TLE + self-model + cog drive
     void           restore_state(nlohmann::json const& s) override;
 
     // Telemetry (read by OgmaBrain::get_module_metrics / diag).

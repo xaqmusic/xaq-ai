@@ -10,12 +10,14 @@
 #include <godot_cpp/godot.hpp>
 
 #include "OgmaBrain.hpp"
+#include "BenchClient.hpp"
 
 using namespace godot;
 
 static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) return;
     ClassDB::register_class<OgmaBrain>();
+    ClassDB::register_class<BenchClient>();
 }
 
 static void uninitialize_ami_ogma_module(ModuleInitializationLevel p_level) {
