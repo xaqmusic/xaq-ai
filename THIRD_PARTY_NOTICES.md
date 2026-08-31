@@ -38,6 +38,27 @@ Vendored header:
 | godot-cpp | MIT | https://github.com/godotengine/godot-cpp, pinned to commit `7e18e40` (fetched at build time) |
 | Godot Engine API (`extension_api.json`, `gdextension_interface.h`) | MIT | dumped from Godot 4.6.x |
 
+## MuJoCo host (`mj_host/`)
+
+Fetched at build time, pinned by version and by SHA-256:
+
+| Component | Version | License | Source |
+|---|---|---|---|
+| MuJoCo (official prebuilt, Linux x86-64) | 3.12.0 | Apache-2.0 | https://github.com/google-deepmind/mujoco/releases |
+
+Vendored, unmodified, under `mj_host/models/microduck/`:
+
+| Component | License | Source |
+|---|---|---|
+| Microduck MJCF model — 4 scene/robot XML files and 38 STL meshes | Apache-2.0 | https://github.com/pollen-robotics/microduck_rl at commit `d424a0c`, path `src/mjlab_microduck/robot/microduck/` |
+
+The robot itself and its policies are Pollen Robotics'
+([`microduck`](https://github.com/pollen-robotics/microduck),
+[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl)), both Apache-2.0. Only the
+model is vendored here; the ONNX policies are not, and neither repository is a submodule.
+Provenance and the re-vendoring rule are in
+[`mj_host/models/microduck/README.md`](mj_host/models/microduck/README.md).
+
 ## Python (`python/`)
 
 | Component | License | Notes |

@@ -1,8 +1,9 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
 > `microduck`, cut from `master`. Update it in place — do not fork a second port doc.
 >
-> **Status 2026-08-31: their sim runs here, nothing of ours is built yet.** G1/G3/G4 measured
-> and passing, G2 restated after it failed and taught us something (§Measured). Upstream is
+> **Status 2026-08-31: S0 is done — `mj_host/` builds and loads the body.** G1/G3/G4 pass from
+> our own host (`ogma_mjhost --load-only`); G2 was restated after it failed and taught us
+> something (§Measured). No brain in the host yet — that is S1. Upstream is
 > cloned *outside* this repo — `/home/xaqmusic/microduck` at `590b986` and
 > `/home/xaqmusic/microduck_rl` at `d424a0c` — so it stays a clean base to PR from. The CPU
 > sim venv is `microduck_rl/.venv` (mujoco 3.12.0, onnxruntime 1.29.0, numpy 2.5.2; no mjlab,
@@ -538,16 +539,48 @@ first; after that the tracks are independent and can run in either order, or tog
                                                              B3 the offer to Pollen
 ```
 
-### S0 — vendoring and build · *shared* · **NOT STARTED**
+### S0 — vendoring and build · *shared* · ✅ **DONE 2026-08-31 (G1, G3, G4 PASS)**
 
-- `mj_host/models/microduck/` — the MJCF, `assets/*.stl`, scenes, `joints_properties.xml`,
-  `sensors.xml`, copied from `microduck_rl` at a **recorded commit**, unmodified.
-  Apache-2.0 both sides; add the attribution row to `THIRD_PARTY_NOTICES.md`.
-- `mj_host/CMakeLists.txt` — `add_subdirectory(../cpp_core)`, MuJoCo at a **pinned release**
-  via `FetchContent` (prebuilt library; MJCF parsing is version-sensitive, so the version is
-  part of the body of record and goes in this doc when chosen).
-- A `--load-only` mode that satisfies **G1** and prints the model's joint / actuator / sensor
-  tables. That output is the first thing pasted back into this doc.
+**Landed:** `mj_host/`, a peer of `godot_host/` and `pi_host/`.
+
+- `mj_host/models/microduck/` — 4 XML + 38 STL (21 MB), copied unmodified from `microduck_rl`
+  at `d424a0c`. The 47 `.part` files are Onshape intermediates MuJoCo never reads and are not
+  vendored; `joints_properties.xml` / `additional.xml` / `sensors.xml` are inlined by
+  `onshape-to-robot` at export and are not runtime inputs either. Attribution is in
+  `THIRD_PARTY_NOTICES.md`, provenance and the re-vendoring rule in the model's own README.
+- **MuJoCo pinned to 3.12.0** — the official prebuilt, by version *and* SHA-256. This closes
+  open decision 1. Prebuilt over source: the source build pulls its own dependency tree for no
+  benefit, and the release binary is what `microduck_rl`'s own CPU path runs against.
+- `ogma_core` sits behind `-DMJ_HOST_WITH_BRAIN=ON`, **off by default**, so the S0 loop stays a
+  seconds-long build. S1 turns it on and leaves it on.
+
+**`--load-only` is gate G1 with its working shown**, and it exits non-zero on failure so it
+belongs in CI rather than in someone's memory:
+
+```
+[G1 PASS] loaded unmodified — MuJoCo library 3.12.0, header 3012000
+  nq 21   nv 20   nu 14   nbody 16   ngeom 82   nsensor 6   nkey 4
+  total mass 737.2 g
+  substeps per tick  10.000000 -> 10   [G3 PASS]
+  [G4 PASS — ctrl order matches the policy joint vector]
+```
+
+Both scenes pass. The numbers reproduce the independent Python probe exactly, which is the
+cross-check worth having: two implementations, one answer.
+
+**The gates were shown to be able to fail**, which is the part that makes them worth running.
+Swapping the `left_knee` and `left_ankle` transmissions in a scratch copy gives
+`3 left_knee -> left_ankle <-- expected left_knee` and `[G4 FAIL]` with exit 1; pointing G1 at
+a missing file reports MuJoCo's own parse error and exits 1. A gate that cannot fail is worse
+than no gate, because it reads as evidence.
+
+**One API note for S1.** MuJoCo 3.12 widened the model dimensions to `mjtSize` (`int64_t`) —
+`nq`, `nu`, `nbody` are no longer `int`. Iterate with `mjtSize`, print through `long long`; a
+blind `%d` truncates silently on a future pin. This is the version-sensitivity the pin exists
+for, showing up on day one.
+
+**G5 holds by construction:** nothing outside `mj_host/` was touched, so `godot_host` and every
+picrawler A/B are byte-identical.
 
 ### S1 — the body, with no brain · *shared* · **NOT STARTED**
 
@@ -783,10 +816,9 @@ one a result was measured under, the same way the picrawler records ghost-vs-sol
 
 ## Open decisions
 
-1. **MuJoCo version pin.** Must be chosen and recorded here; `mj_loadXML` behaviour on these
-   files is version-sensitive, and `microduck_rl` deliberately does not override the `mujoco`
-   version mjlab pins.
-2. **Whether `robot_walk` or `robot_allcollisions` is the default.** Leaning `allcollisions`,
+1. ~~**MuJoCo version pin.**~~ **Settled at S0: 3.12.0**, pinned by version and SHA-256.
+2. **Whether `robot_walk` or `robot_allcollisions` is the default.** `scene.xml`
+   (allcollisions) is what `--load-only` defaults to today. Leaning to keep it,
    per the ghost-chassis lesson: a belly that cannot touch the ground is a different body, and
    every claim measured on it is about that body (ledger §"seedavg.py does not set
    `OGMA_PICRAWLER_CHASSIS_COLLIDE`").
