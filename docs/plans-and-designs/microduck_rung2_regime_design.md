@@ -190,3 +190,45 @@ key (the pure standing node) exists in both seeds at high purity and high share.
 nodes blur only the transitional banks — which today do not exist at all, so their floor is
 the status quo. The two ⚠ items are recorded as R1-era conditioning work (mitosis
 triggering, transition-surprise sharpening), not gate failures.
+
+---
+
+## 7. Earned consolidation (2026-09-01) — **STANDING, PERMANENT, 3/6 SEEDS**
+
+The seed-robustness pass found the last disease and its cure in one day.
+
+**The disease: standing found, then destroyed.**  Per-seed 30-min diagnosis on the
+R1-stable stack: seeds find the standing basin in minutes (seed 4: up15 0.99 in bucket 0)
+and *continued learning erodes it* (0.99 → 0.63 by bucket 6).  `--freeze-after 300`
+(a diagnostic hard freeze, added for this test) proved the mechanism: the same seed frozen
+at 5 min holds 0.93 for the rest of the run.  The destroyer is the learning itself — the
+homeokinetic terms keep sharpening sensitivity out of a solved posture.  A hand-picked
+freeze time is a scaffold, so the shipped form is the GNG's baking principle at the
+controller level:
+
+**`consolidate_gain`** — every learning rate (model, Bx, dC, h, prior lw) is scaled by
+`1 − gain·c`, where `c` ramps up (τ ≈ 10 s) only while the state prior is satisfied
+**and** no fall for 30 s, and re-arms fast (τ ≈ 2 s) when either breaks.  The
+satisfaction reference took four designs: short/long EMA ratio (never engages when
+standing is found *first*), smoothed peak (dilutes), decaying peak (collapses during the
+quiet it should protect).  What survived is a **fixed 0.15 threshold on the prior-error
+EMA** — a fraction of a unit-scaled channel, not a constant tuned to a signal (§5.5).
+
+**Measured** (`a1v2_r3_consol.json` = r1_stable + consolidate_gain 1.0, 30 min/seed):
+
+| seeds | outcome |
+|---|---|
+| 4, 5, 6 | **0.0 falls/min, up15 1.00, five straight 5-min buckets, cons=1.00** — permanent standing |
+| 1, 3 | never found the basin; cons=0.00, behaviour unchanged (the gate cannot consolidate a non-solution) |
+| 2 | crouch attractor; cons=0.00, unchanged |
+
+Gain-0 verified live: the r3 and r1-stable runs are byte-identical until the first
+engagement (~t=277 s, exactly 30 s + ramp after the last rescue), then diverge.  Late
+quiet-band posture: joint sd ~0.001 rad, tilt sd 0.06° — the near-motionless stance the
+operator asked the amplitude study to converge to.  Committed as 4f7b0c2; validation
+10/10 unit tests, all gates, v1↔v2 identity IDENTICAL.
+
+**The remaining gap** is basin *finding*, not basin *keeping*: seeds 1/3 never enter
+standing post-identification, seed 2 settles into a crouch.  Candidate levers: longer or
+repeated identification, basin-entry assistance from the standing bank's own model, or
+accepting per-seed convergence variance and measuring the finding rate at n≥20.
