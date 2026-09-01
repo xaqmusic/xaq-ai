@@ -28,6 +28,10 @@ const char* const kSeedParams[] = {"master_seed", "seed"};
 }  // namespace
 
 OgmaBrainAdapter::OgmaBrainAdapter(const DuckBody& body, Config config) : c_(std::move(config)) {
+    for (int i = 0; i < kNumPolicyJoints; ++i)
+        home_[size_t(i)] = (int(c_.home.size()) == kNumPolicyJoints) ? c_.home[size_t(i)]
+                                                                     : kHomePose[size_t(i)];
+
     auto cfg = ogma::GraphConfig::load_from_file(c_.graph_path);
 
     if (c_.seed != 0) {
@@ -79,7 +83,7 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
     const auto q = body.joint_positions();
     std::vector<float> joints(kNumPolicyJoints);
     for (int i = 0; i < kNumPolicyJoints; ++i) {
-        const double norm = (q[i] - kHomePose[i]) / c_.amplitude;
+        const double norm = (q[i] - home_[size_t(i)]) / c_.amplitude;
         joints[size_t(i)] = float(std::clamp(norm, -1.0, 1.0));
     }
     publish("joints", joints);
@@ -113,6 +117,35 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
     // Roll is deliberately absent — the socket is one element wide, and widening it
     // is a module change and therefore a separate conversation.
     publish("lean", {float(g[0]), float(g[0])});
+
+    // lean2 — pitch AND roll, for configs whose bridges set load_slots: 2.  The
+    // fore/aft-only prior measured a real degenerate: a duck on its SIDE has
+    // g_x = 0 exactly like a standing one, and the prior arms' rescues dropped
+    // while tilt ROSE and down-became-quieter in 4/6 seeds — fewer rescues earned
+    // by finding poses the lean channel cannot see.  Both components, each signed
+    // and linear (a magnitude would be sign-degenerate at 0 and average opposing
+    // authorities to zero in a linear model).  Layout is group-major
+    // [g0_pitch, g0_roll, g1_pitch, g1_roll]; the head bridge (one group) reads
+    // the first two.  The old `lean` topic stays exactly as it was, so every
+    // existing config is bit-identical.
+    publish("lean2", {float(g[0]), float(g[1]), float(g[0]), float(g[1])});
+
+    // lean4 — pitch, roll, AND THEIR RATES, for configs whose bridges set
+    // load_slots: 4.  The measured motivation (stage-3 triage, 2026-08-31): every
+    // position-only prior arm ARRESTS falls (tilt held sub-trigger) without ever
+    // restoring upright, across prior strengths and HK amplitudes — which is what
+    // P-only feedback does on an inverted pendulum: without rate feedback there is
+    // no damping, so the loop can slow a fall but not stabilise a point.  The rates
+    // were on the bus all along (the gyro), just never in any motor group's state —
+    // doctrine §1 step 2, the third time this project has found it: the fix is a
+    // SENSOR, not a smarter policy.  Rotation about x tips the body sideways (roll
+    // rate, w[0]) and rotation about y tips it fore/aft (pitch rate, w[1]).  Rates
+    // are scaled by 0.3 so ±3 rad/s spans the channel (a fall tips at ~1.5 rad/s),
+    // then clamped like every other channel.  Group-major, 4 per group.
+    const float pr = std::clamp(0.3 * w[1], -1.0, 1.0);
+    const float rr = std::clamp(0.3 * w[0], -1.0, 1.0);
+    publish("lean4", {float(g[0]), float(g[1]), pr, rr,
+                      float(g[0]), float(g[1]), pr, rr});
 }
 
 std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body) {
@@ -137,7 +170,7 @@ std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body)
         const double u = std::clamp(last_u_[size_t(i)], -1.0, 1.0);
         action_abs_sum_ += std::fabs(u);
         ++action_samples_;
-        const double want = kHomePose[i] + c_.amplitude * u;
+        const double want = home_[size_t(i)] + c_.amplitude * u;
         target[size_t(i)] = std::clamp(want, range_[size_t(i)].first, range_[size_t(i)].second);
     }
     return target;
@@ -157,14 +190,30 @@ void OgmaBrainAdapter::on_reset() {
 }
 
 void OgmaBrainAdapter::set_learning(bool on) {
-    if (on == learning_) return;
     learning_ = on;
+    apply_freeze_state();
+}
+
+void OgmaBrainAdapter::set_regime_learning(bool on) {
+    regime_ok_ = on;
+    apply_freeze_state();
+}
+
+void OgmaBrainAdapter::apply_freeze_state() {
+    const bool on = learning_ && regime_ok_;   // frozen iff EITHER axis says frozen
+    if (on == !frozen_now_) return;
+    frozen_now_ = !on;
 
     // Freeze through PARAMETERS rather than by skipping ticks. The brain must keep
     // observing while the scaffold drives — the fall is the most informative thing
     // that happens — but it must not fit the scaffold's policy (§5.6). All four
     // rates are HotMutable, so no module is edited to do this.
-    static const char* const kRates[] = {"model_lr", "ctrl_lr", "bias_lr", "sat_lr"};
+    // state_prior_lr joined 2026-08-31: the prior's C/h descent is a learner like the
+    // other four, and one that must not integrate the scaffold's rescues (§5.6) — a
+    // fall's railed error would wind the prior's bias through every hand-off otherwise.
+    static const char* const kRates[] = {"model_lr", "ctrl_lr", "bias_lr", "sat_lr",
+                                         "state_prior_lr", "state_prior_h_lr",
+                                         "state_model_lr"};
     bool reported = false;
     for (auto* module : instance_->modules()) {
         const std::string type(module->type_name());
@@ -254,13 +303,21 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                               snap["clip_duty"].get<double>());
                 line += buf;
             }
+            if (snap.contains("state_prior_active") && snap["state_prior_active"].get<bool>()) {
+                char buf[80];
+                std::snprintf(buf, sizeof buf, "  sp_err=%.3f sp_applied=%d",
+                              snap["state_prior_err"].get<double>(),
+                              snap["state_prior_applied"].get<int>());
+                line += buf;
+            }
         }
         // The operating point, read back from the module rather than from the config
         // that was supposed to set it — a run that prints its own arm cannot be a
         // silent-confound run.
         {
             const auto params = m->current_params();
-            for (const char* k : {"motor_gain", "c_init", "cmd_squash"}) {
+            for (const char* k : {"motor_gain", "c_init", "cmd_squash", "sat_lr",
+                                  "state_prior_gain", "state_prior_lr"}) {
                 auto it = params.find(k);
                 if (it == params.end()) continue;
                 if (const double* v = std::get_if<double>(&it->second)) {
@@ -287,6 +344,64 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
             return 0;
         };
         if (const int rows = find_rows(m->snapshot_state())) line += "  state_dim=" + std::to_string(rows);
+        // The fight for C, made visible (2026-08-31): the prior writes feedback into
+        // C's trailing (lean) columns while HK's own dC keeps rewriting all of C.
+        // Whether the prior's columns SURVIVE is the mechanism question every duck
+        // A/B keeps asking, so the host prints it: per leg, the Frobenius norm of
+        // the last-4 columns of C, and the largest |h|.
+        {
+            const auto snap = m->snapshot_state();
+            if (snap.contains("legs") && snap["legs"].is_array()) {
+                std::string extra;
+                for (const auto& lj : snap["legs"]) {
+                    if (!lj.contains("C") || !lj.contains("h")) continue;
+                    const auto C = lj["C"].get<std::vector<float>>();
+                    const auto h = lj["h"].get<std::vector<float>>();
+                    const int mm = int(h.size());
+                    if (mm == 0 || C.size() % size_t(mm) != 0) continue;
+                    const int nn = int(C.size()) / mm;
+                    double c4 = 0.0;
+                    for (int col = std::max(0, nn - 4); col < nn; ++col)
+                        for (int j = 0; j < mm; ++j)
+                            c4 += double(C[size_t(col) * size_t(mm) + size_t(j)])
+                                  * double(C[size_t(col) * size_t(mm) + size_t(j)]);
+                    double hmax = 0.0;
+                    for (float v : h) hmax = std::max(hmax, double(std::fabs(v)));
+                    char buf[64];
+                    std::snprintf(buf, sizeof buf, " C4=%.2f hmax=%.2f", std::sqrt(c4), hmax);
+                    extra += buf;
+                }
+                if (!extra.empty()) line += " |" + extra;
+                // One-off model-inspection dump (OGMA_DUMP_MODEL=1): the learned
+                // A's trailing-4 rows (the model's authority estimate over the
+                // lean block) — directly comparable against --probe's measured J.
+                if (std::getenv("OGMA_DUMP_MODEL")) {
+                    std::string dump = "\n    A(trailing rows):";
+                    int legidx = 0;
+                    for (const auto& lj : snap["legs"]) {
+                        if (!lj.contains("A") || !lj.contains("h")) continue;
+                        const auto A = lj["A"].get<std::vector<float>>();
+                        const int mm = int(lj["h"].get<std::vector<float>>().size());
+                        if (mm == 0 || A.size() % size_t(mm) != 0) continue;
+                        const int nn = int(A.size()) / mm;   // A is n x m col-major
+                        char hdr[32]; std::snprintf(hdr, sizeof hdr, "\n      leg%d:", legidx++);
+                        dump += hdr;
+                        for (int row = std::max(0, nn - 4); row < nn; ++row) {
+                            dump += " [";
+                            for (int j = 0; j < mm; ++j) {
+                                char buf[16];
+                                std::snprintf(buf, sizeof buf, "%+.3f%s",
+                                              A[size_t(j) * size_t(nn) + size_t(row)],
+                                              j + 1 < mm ? " " : "");
+                                dump += buf;
+                            }
+                            dump += "]";
+                        }
+                    }
+                    line += dump;
+                }
+            }
+        }
         out.push_back(line);
     }
     return out;

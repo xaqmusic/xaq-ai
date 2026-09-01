@@ -93,9 +93,33 @@ struct RecoveryConfig {
     double upright_gravity_z = -0.95;   // about 18°
     double upright_hold_s = 0.4;
 
+    // STILLNESS HANDBACK (2026-08-31).  Measured: at the old criterion the brain
+    // could inherit a body up to 18° over and still rotating, on a body whose
+    // passive topple clock from the home pose is ~0.1 s to 15° — every episode
+    // began mid-fall, already past catchability, and every arm's rescue rate was
+    // the topple clock in disguise (stub-amp-0: 15° crossed 0.08–0.14 s after
+    // handback, handoff ~0.6 s, forever).  The scaffold itself settles to ~0.5°
+    // (G2), so requiring its settle before handback costs nothing and hands the
+    // brain a genuinely standing body: ≲2.5° AND rotationally quiet, held.
+    // still_gyro <= 0 disables the stillness terms (the old criterion exactly).
+    double still_gravity_z = -0.999;    // ≈ 2.5°
+    double still_gyro      = 0.15;      // rad/s, max |ω| component
+    double still_hold_s    = 0.5;
+
     // A recovery that runs this long is reported rather than waited on. The
     // measured range is 1.6–2.4 s, so this is generous on purpose.
     double give_up_s = 8.0;
+
+    // STUCK-POSE RESCUE (2026-08-31).  Measured: a prior arm found a statically
+    // stable SIT — tilt 15–60°, below the fall trigger — and parked there for
+    // THIRTEEN MINUTES: zero rescues, zero upright time, zero authority to leave
+    // (the model correctly learns a folded body cannot right itself, so the
+    // descent damps to nothing).  A stable non-upright pose is a prison, not a
+    // success, and thirteen minutes of it is thirteen minutes outside the
+    // learnable regime.  Sustained sub-trigger tilt is therefore a fall.
+    // stuck_s <= 0 disables.
+    double stuck_gravity_z = -0.94;     // ≈ 20° — "not upright"
+    double stuck_s = 5.0;               // sustained this long → rescue
 };
 
 class Recovery {
@@ -104,8 +128,10 @@ public:
 
     explicit Recovery(Config config = Config()) : c_(config) {}
 
-    // Feed it projected gravity, get back who drives this tick.
-    Driver update(const std::array<double, 3>& gravity, double dt);
+    // Feed it projected gravity (and the gyro, for the stillness handback), get
+    // back who drives this tick.
+    Driver update(const std::array<double, 3>& gravity,
+                  const std::array<double, 3>& gyro, double dt);
 
     Driver driver() const { return driver_; }
     bool handed_off_this_tick() const { return handed_off_; }
@@ -113,6 +139,7 @@ public:
 
     // Counters, for the summary.
     int  rescues() const { return rescues_; }
+    int  stuck_rescues() const { return stuck_rescues_; }
     int  gave_up() const { return gave_up_; }
     double brain_seconds() const { return brain_s_; }
     double scaffold_seconds() const { return scaffold_s_; }
@@ -127,6 +154,8 @@ private:
     bool handed_off_ = false;
     bool handed_back_ = false;
     int  rescues_ = 0;
+    int  stuck_rescues_ = 0;
+    double stuck_for_ = 0.0;
     int  gave_up_ = 0;
     double brain_s_ = 0.0;
     double scaffold_s_ = 0.0;

@@ -53,14 +53,33 @@ public:
         // Joint command amplitude, radians. The brain's [-1, 1] output spans
         // home ± this, and it is also the scale the observation is divided by.
         double amplitude = 0.35;
+        // The brain's command/observation ORIGIN.  Empty = kHomePose (the STAND
+        // keyframe).  The harness fills this with the SCAFFOLD'S OWN measured
+        // equilibrium (2026-08-31): the keyframe is up to 0.10 rad away from where
+        // alpha_stand actually balances (neck −0.10, head +0.09, r_hip_pitch
+        // −0.06), so u = 0 at the keyframe is a pose the body topples from in
+        // ~0.1 s, and every handback began with a step-change lurch toward it.
+        // A scaffold-derived origin is a calibration, named as such — the same
+        // category as reading joint ranges from the model instead of transcribing
+        // them.
+        std::vector<double> home;
     };
 
     OgmaBrainAdapter(const DuckBody& body, Config config);
+
+    // The origin actually in use (calibrated or keyframe), for the record line.
+    const std::array<double, kNumPolicyJoints>& home() const { return home_; }
     ~OgmaBrainAdapter() override;
 
     std::array<double, kNumPolicyJoints> act(const DuckBody& body) override;
     void on_reset() override;
     void set_learning(bool on) override;
+    void set_regime_learning(bool on);   // the learnable-regime gate (see note above)
+
+private:
+    void apply_freeze_state();
+
+public:
     const char* name() const override { return "ogma"; }
 
     // Diagnostics, for the run summary.
@@ -92,6 +111,7 @@ private:
     void publish_sensors(const DuckBody& body);
 
     Config c_;
+    std::array<double, kNumPolicyJoints> home_{};
     std::unique_ptr<ogma::OgmaInstance> instance_;
     uint64_t tick_id_ = 0;
     std::array<std::string, kNumPolicyJoints> action_topics_;
@@ -99,7 +119,9 @@ private:
     std::vector<std::pair<double, double>> range_;    // per policy joint, from the model
     // Learning rates parked while the scaffold drives, keyed "<module id>:<param>".
     std::map<std::string, double> frozen_rates_;
-    bool learning_ = true;
+    bool learning_ = true;        // the scaffold axis (BrainLike::set_learning)
+    bool regime_ok_ = true;       // the regime axis
+    bool frozen_now_ = false;     // what is actually applied (either axis)
     bool announced_freeze_ = false;
     double tle_up_sum_ = 0.0, tle_down_sum_ = 0.0;
     uint64_t tle_up_n_ = 0, tle_down_n_ = 0;

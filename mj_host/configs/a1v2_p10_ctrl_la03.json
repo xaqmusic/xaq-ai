@@ -1,0 +1,201 @@
+{
+  "metadata": {
+    "name": "A1v2 \u00b7 lookahead 0.3, prior 0 (control)",
+    "description": "Stage 10 (2026-08-31): the prior aims, the lookahead makes it timely.  The stage-9 lesion proved the barrier is not the HK storm: prior-only C ties passive-limp.  A 0.1 s-e-fold topple against a ~2-tick sense-command-servo delay means feedback on the MEASURED state is always late \u2014 and v2 already owns the built, gain-0-guarded fix (rung 1, lookahead_gain): feed the controller x_eff = (1-l)x + l*x_hat through its own forward model.  Composition: aim (state prior) + timeliness (lookahead).  Control: lookahead 0.3 with prior 0 \u2014 is timeliness alone the effect?",
+    "env_target": "microduck",
+    "phase_tag": "A1 (first brain)",
+    "scaffolds_active": [
+      "alpha_stand.onnx via the A2 recovery harness \u2014 drives only while the body is down, with all learning rates zeroed"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "legs_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.left_hip_yaw",
+          "action.left_hip_roll",
+          "action.left_hip_pitch",
+          "action.left_knee",
+          "action.left_ankle",
+          "action.right_hip_yaw",
+          "action.right_hip_roll",
+          "action.right_hip_pitch",
+          "action.right_knee",
+          "action.right_ankle"
+        ],
+        "output_topics": [
+          "reality.motor_limb.left",
+          "reality.motor_limb.right"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          9.0,
+          10.0,
+          11.0,
+          12.0,
+          13.0
+        ],
+        "group_size": 5,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.lean4",
+        "load_slots": 4
+      }
+    },
+    {
+      "id": "head_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.neck_pitch",
+          "action.head_pitch",
+          "action.head_yaw",
+          "action.head_roll"
+        ],
+        "output_topics": [
+          "reality.motor_limb.head"
+        ],
+        "proprio_indices": [
+          5.0,
+          6.0,
+          7.0,
+          8.0
+        ],
+        "group_size": 4,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.lean4",
+        "load_slots": 4
+      }
+    },
+    {
+      "id": "motor_epm_legs",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.left",
+          "reality.motor_limb.right"
+        ],
+        "action_topics": [
+          "action.left_hip_yaw",
+          "action.left_hip_roll",
+          "action.left_hip_pitch",
+          "action.left_knee",
+          "action.left_ankle",
+          "action.right_hip_yaw",
+          "action.right_hip_roll",
+          "action.right_hip_pitch",
+          "action.right_knee",
+          "action.right_ankle"
+        ],
+        "n_legs": 2,
+        "motor_dim": 5,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.1,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 1234,
+        "babble_ticks": 200,
+        "babble_scale": 0.3,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.05,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_prior_indices": [
+          -4.0,
+          -3.0,
+          -2.0,
+          -1.0
+        ],
+        "state_prior_targets": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_gain": 0.0,
+        "lookahead_gain": 0.3
+      }
+    },
+    {
+      "id": "motor_epm_head",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.head"
+        ],
+        "action_topics": [
+          "action.neck_pitch",
+          "action.head_pitch",
+          "action.head_yaw",
+          "action.head_roll"
+        ],
+        "n_legs": 1,
+        "motor_dim": 4,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.1,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 5678,
+        "babble_ticks": 200,
+        "babble_scale": 0.3,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.05,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_prior_indices": [
+          -4.0,
+          -3.0,
+          -2.0,
+          -1.0
+        ],
+        "state_prior_targets": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_gain": 0.0,
+        "lookahead_gain": 0.3
+      }
+    }
+  ],
+  "edges": []
+}

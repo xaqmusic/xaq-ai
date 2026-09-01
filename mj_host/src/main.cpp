@@ -470,7 +470,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
 
     int frozen_ticks = 0;
     for (int t = 0; t < ticks; ++t) {
-        const Driver driver = recovery.update(body.gravity(), dt);
+        const Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
 
         // Both edges: tell the brain, and stop or start its learning. Freeze BEFORE
         // the scaffold ever acts, resume only once the body is back.
@@ -487,8 +487,13 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         if (!learning_now) ++frozen_ticks;
         // Posture-bucketed TLE, on the same -0.5 gravity threshold the harness
         // uses for "down", so the two agree about what a fall is.
-        if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain))
+        if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain)) {
             og->sample_tle(body.gravity()[2] < -0.5);
+            // The learnable-regime gate: the model learns only near-upright
+            // (~25°); it always ACTS.  See the adapter's note for the measured
+            // motivation (a mixture-poisoned A with half its signs wrong).
+            og->set_regime_learning(body.gravity()[2] < -0.90);
+        }
 
         std::array<double, kNumPolicyJoints> ctrl{};
         if (driver == Driver::Scaffold) {
@@ -529,6 +534,10 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                  100.0 * recovery.brain_seconds() / total, recovery.longest_recovery());
     std::fprintf(stderr, "  learning frozen for %.0f%% of ticks (must equal the scaffold's share)\n",
                  100.0 * frozen_ticks / ticks);
+    if (recovery.stuck_rescues() > 0)
+        std::fprintf(stderr, "  %d of the rescues were STUCK-POSE rescues (stable sub-trigger "
+                             "tilt held %d s) rather than falls\n",
+                     recovery.stuck_rescues(), 5);
     if (recovery.gave_up() > 0) {
         std::fprintf(stderr, "  %d recoveries timed out — the scaffold could not stand it up\n",
                      recovery.gave_up());
@@ -554,13 +563,216 @@ int cmd_stub(const std::string& scene, double seconds, uint64_t seed, double amp
 }
 
 // ---------------------------------------------------------------------------
+// --probe  (DIAGNOSTIC BENCH, 2026-08-31) — is a catch policy IN the linear class?
+//
+// Every learned arm converges to ~22 rescues/min while the trained scaffold holds
+// the body with 0.0002 rad corrections.  Before concluding anything about the
+// learners, the question underneath them has to be answered: does the policy
+// class they search — linear feedback on (pitch, roll, rates) — contain a catch
+// policy on this body AT ALL?  This mode measures each joint's authority over
+// pitch/roll empirically (short pulses from the calibrated stand), then runs a
+// Jacobian-transpose PD with swept hand gains under the SAME recovery harness
+// and metrics as every learned arm.  A test instrument, never an operating mode:
+// hand gains are exactly what the doctrine forbids shipping, and exactly what a
+// ceiling measurement needs.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class ProbeBrain final : public BrainLike {
+public:
+    ProbeBrain(std::array<double, kNumPolicyJoints> home,
+               std::array<double, kNumPolicyJoints> jp,
+               std::array<double, kNumPolicyJoints> jr,
+               double kp, double kd)
+        : home_(home), jp_(jp), jr_(jr), kp_(kp), kd_(kd) {}
+
+    std::array<double, kNumPolicyJoints> act(const DuckBody& body) override {
+        const auto g = body.gravity();
+        const auto w = body.gyro();
+        const double ep = kp_ * g[0] + kd_ * 0.3 * w[1];   // pitch error signal
+        const double er = kp_ * g[1] + kd_ * 0.3 * w[0];   // roll error signal
+        std::array<double, kNumPolicyJoints> target{};
+        for (int i = 0; i < kNumPolicyJoints; ++i) {
+            const double u = std::clamp(-(jp_[size_t(i)] * ep + jr_[size_t(i)] * er), -1.0, 1.0);
+            target[size_t(i)] = home_[size_t(i)] + 0.35 * u;
+        }
+        return target;
+    }
+    const char* name() const override { return "probe"; }
+
+private:
+    std::array<double, kNumPolicyJoints> home_, jp_, jr_;
+    double kp_, kd_;
+};
+
+}  // namespace
+
+int cmd_probe(const std::string& scene, double seconds, uint64_t seed) {
+    DuckBody body(scene);
+    Policy scaffold(kStandScaffold);
+
+    // 1. Calibrated stand (same as cmd_brain).
+    std::array<double, kNumPolicyJoints> stand{};
+    {
+        body.reset("STAND", 0.0, seed);
+        std::array<float, kActionLen> last_action{};
+        const Command command{};
+        const int settle = int(3.0 * kBrainHz), avg_from = int(2.0 * kBrainHz);
+        int n_avg = 0;
+        for (int t = 0; t < settle; ++t) {
+            const auto action = scaffold.infer(build_observation(body, last_action, command));
+            last_action = action;
+            std::array<double, kNumPolicyJoints> ctrl{};
+            for (int i = 0; i < kNumPolicyJoints; ++i)
+                ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+            body.step(ctrl);
+            if (t >= avg_from) {
+                const auto q = body.joint_positions();
+                for (int i = 0; i < kNumPolicyJoints; ++i) stand[size_t(i)] += q[i];
+                ++n_avg;
+            }
+        }
+        for (int i = 0; i < kNumPolicyJoints; ++i) stand[size_t(i)] /= double(n_avg);
+    }
+
+    // 2. Empirical authority: pulse each joint ±0.08 rad for 6 ticks from the
+    //    settled stand and read the pitch/roll response, antisymmetrised.
+    std::array<double, kNumPolicyJoints> Jp{}, Jr{};
+    const double delta = 0.08;
+    const int pulse_ticks = 6;
+    for (int j = 0; j < kNumPolicyJoints; ++j) {
+        double dp[2] = {0, 0}, dr[2] = {0, 0};
+        for (int sgn = 0; sgn < 2; ++sgn) {
+            // fresh settle per pulse so probes never contaminate each other
+            body.reset("STAND", 0.0, seed);
+            std::array<float, kActionLen> last_action{};
+            const Command command{};
+            for (int t = 0; t < int(2.0 * kBrainHz); ++t) {
+                const auto action = scaffold.infer(build_observation(body, last_action, command));
+                last_action = action;
+                std::array<double, kNumPolicyJoints> ctrl{};
+                for (int i = 0; i < kNumPolicyJoints; ++i)
+                    ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+                body.step(ctrl);
+            }
+            const auto g0 = body.gravity();
+            std::array<double, kNumPolicyJoints> ctrl{};
+            for (int i = 0; i < kNumPolicyJoints; ++i) ctrl[i] = stand[size_t(i)];
+            ctrl[size_t(j)] += (sgn ? -delta : delta);
+            for (int t = 0; t < pulse_ticks; ++t) body.step(ctrl);
+            const auto g1 = body.gravity();
+            dp[sgn] = g1[0] - g0[0];
+            dr[sgn] = g1[1] - g0[1];
+        }
+        Jp[size_t(j)] = (dp[0] - dp[1]) / (2.0 * delta);
+        Jr[size_t(j)] = (dr[0] - dr[1]) / (2.0 * delta);
+    }
+    {
+        double np = 0, nr = 0;
+        for (int j = 0; j < kNumPolicyJoints; ++j) { np += Jp[size_t(j)] * Jp[size_t(j)];
+                                                     nr += Jr[size_t(j)] * Jr[size_t(j)]; }
+        np = std::sqrt(np); nr = std::sqrt(nr);
+        std::fprintf(stderr, "probe authority (d gravity / d rad, normalised):\n  Jp:");
+        for (int j = 0; j < kNumPolicyJoints; ++j) {
+            if (np > 1e-9) Jp[size_t(j)] /= np;
+            std::fprintf(stderr, " %+.2f", Jp[size_t(j)]);
+        }
+        std::fprintf(stderr, "\n  Jr:");
+        for (int j = 0; j < kNumPolicyJoints; ++j) {
+            if (nr > 1e-9) Jr[size_t(j)] /= nr;
+            std::fprintf(stderr, " %+.2f", Jr[size_t(j)]);
+        }
+        std::fprintf(stderr, "\n");
+    }
+
+    // 3. Gain grid under the same harness and metric as every learned arm.
+    std::fprintf(stderr, "\n  %6s %6s | rescues/min  brain%%\n", "kp", "kd");
+    double best = 1e9; double best_kp = 0, best_kd = 0;
+    for (double kp : {5.0, 10.0, 20.0, 40.0, 80.0}) {
+        for (double kd : {2.0, 4.0, 6.0, 8.0}) {
+            ProbeBrain brain(stand, Jp, Jr, kp, kd);
+            DuckBody b2(scene);
+            Policy sc2(kStandScaffold);
+            Recovery recovery;
+            b2.reset("STAND", 0.0, seed);
+            std::array<float, kActionLen> last_action{};
+            const Command command{};
+            const double dt = 1.0 / kBrainHz;
+            const int ticks = int(seconds * kBrainHz);
+            for (int t = 0; t < ticks; ++t) {
+                const Driver driver = recovery.update(b2.gravity(), b2.gyro(), dt);
+                std::array<double, kNumPolicyJoints> ctrl{};
+                if (driver == Driver::Scaffold) {
+                    const auto action = sc2.infer(build_observation(b2, last_action, command));
+                    last_action = action;
+                    for (int i = 0; i < kNumPolicyJoints; ++i)
+                        ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+                } else {
+                    ctrl = brain.act(b2);
+                }
+                b2.step(ctrl);
+            }
+            const double rpm = recovery.rescues() * 60.0 / seconds;
+            std::fprintf(stderr, "  %6.1f %6.1f | %6.1f       %3.0f%%\n", kp, kd, rpm,
+                         100.0 * recovery.brain_seconds()
+                             / (recovery.brain_seconds() + recovery.scaffold_seconds()));
+            if (rpm < best) { best = rpm; best_kp = kp; best_kd = kd; }
+        }
+    }
+    std::fprintf(stderr, "\nbest: kp %.1f kd %.1f -> %.1f rescues/min\n", best_kp, best_kd, best);
+    // Confirmation run at the best gains through the SAME emitting path as every
+    // brain arm — so the operator can watch the class ceiling (and record it).
+    ProbeBrain brain(stand, Jp, Jr, best_kp, best_kd);
+    return run_with_brain(scene, seconds, seed, brain, /*emit=*/true);
+}
+
+// ---------------------------------------------------------------------------
 // --brain  (A1)
 // ---------------------------------------------------------------------------
 
 int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
               double amplitude, bool emit) {
     DuckBody probe(scene);   // for the joint ranges the adapter reads by name
-    OgmaBrainAdapter brain(probe, {graph, seed, amplitude});
+
+    // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
+    // measured equilibrium, not the STAND keyframe: the keyframe is up to 0.10 rad
+    // from where alpha_stand actually balances, so u = 0 at the keyframe is a pose
+    // the body topples from in ~0.1 s and every handback began with a step-change
+    // lurch toward it.  Three scaffold-driven seconds, mean q over the final one.
+    // A scaffold-derived origin is a calibration in the same category as reading
+    // joint ranges from the model instead of transcribing them.
+    std::vector<double> stand_home(kNumPolicyJoints, 0.0);
+    {
+        Policy scaffold(kStandScaffold);
+        probe.reset("STAND", 0.0, seed);
+        std::array<float, kActionLen> last_action{};
+        const Command command{};
+        const int settle = int(3.0 * kBrainHz), avg_from = int(2.0 * kBrainHz);
+        int n_avg = 0;
+        for (int t = 0; t < settle; ++t) {
+            const auto action = scaffold.infer(build_observation(probe, last_action, command));
+            last_action = action;
+            std::array<double, kNumPolicyJoints> ctrl{};
+            for (int i = 0; i < kNumPolicyJoints; ++i)
+                ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+            probe.step(ctrl);
+            if (t >= avg_from) {
+                const auto q = probe.joint_positions();
+                for (int i = 0; i < kNumPolicyJoints; ++i) stand_home[size_t(i)] += q[i];
+                ++n_avg;
+            }
+        }
+        double dmax = 0.0;
+        for (int i = 0; i < kNumPolicyJoints; ++i) {
+            stand_home[size_t(i)] /= double(n_avg);
+            dmax = std::max(dmax, std::fabs(stand_home[size_t(i)] - kHomePose[i]));
+        }
+        std::fprintf(stderr, "stand calibration: origin = scaffold equilibrium "
+                             "(max |delta| from keyframe %.4f rad)\n", dmax);
+    }
+
+    OgmaBrainAdapter brain(probe, {graph, seed, amplitude, stand_home});
 
     std::fprintf(stderr, "graph %s\n  modules:", graph.c_str());
     for (const auto& id : brain.module_ids()) std::fprintf(stderr, " %s", id.c_str());
@@ -628,7 +840,7 @@ int main(int argc, char** argv) {
             return argv[++i];
         };
         if (a == "--load-only" || a == "--hold" || a == "--gate-g2" || a == "--stub" ||
-            a == "--brain") {
+            a == "--brain" || a == "--probe") {
             mode = a;
         } else if (a == "--secs") {
             seconds = std::stod(next("--secs"));
@@ -674,6 +886,7 @@ int main(int argc, char** argv) {
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
         if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
         if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true);
+        if (mode == "--probe") return cmd_probe(scene, seconds, seed);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;
