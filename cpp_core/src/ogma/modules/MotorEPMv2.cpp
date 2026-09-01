@@ -308,8 +308,35 @@ ParamSchema MotorEPMv2::params_schema() const {
          "R4/R4b-measured semantics under which learning co-adapts around the pull and "
          "still finds standing (R4b seed 4: permanent 1.00 upright WITH the pull) — and "
          "adds only the h share (C balances, h reaches: R4b's C-only pull never moved "
-         "the head).  Attenuation and calm exemption stay full, as in R4b.",
-         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
+         "the head).  Attenuation and calm exemption stay full, as in R4b.  MODE 3 "
+         "(R4e refuted mode 2: full-rate h live through the pre-standing fall epochs "
+         "wound up to 2.67 and re-created the windup disease): C-pull live from tick 0 "
+         "as in mode 2, but the reach bias goes to a SEPARATE vector hr, written only "
+         "in consolidated quiet (rate ∝ c) and applied as c·hr — no chaos windup by "
+         "construction, and the force ramps in/out smoothly with consolidation instead "
+         "of waking against a frozen loop.  MODE 4 (R5 measured mode 3's always-on "
+         "whole-body pull: pose 2-3x closer to home on every seed and a crouch seed "
+         "rescued to 0.93 upright, but the race lost everywhere — no 30 s calm window, "
+         "cons never armed): the pull scales with the BALANCE SUBSET'S OWN SATISFACTION "
+         "s = 1 − gate_ema/0.15 (the gate's own fraction, no new constant) — zero during "
+         "chaos with exemption scoped away (chaos ≈ control exactly), engaging within "
+         "~10 s of standing WITH HK live, so co-adaptation happens in the quiet "
+         "stretches.  Self-limiting sign: pull → tilt → s falls → pull backs off.  hr "
+         "as mode 3.  MODE 5 (R5b measured mode 4 still losing the race — the balance "
+         "gate engages after ~10 s of mere quiet, long before consolidation): BIAS-ONLY "
+         "— no reach C-pull, no attenuation, no exemption; pre-consolidation is "
+         "bit-identical to control BY CONSTRUCTION, then hr walks the equilibrium at "
+         "the µ-rate consolidate_reach_lr through the consolidated C's live feedback — "
+         "quasi-static drift, not a waking force.  A fall collapses c (the force fades "
+         "as c·hr), the brief plasticity burst re-learns near the edge, consolidation "
+         "re-arms, the walk resumes: a ratchet whose pawl is consolidation itself.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{5.0}},
+        {"consolidate_reach_lr", ParamMutability::HotMutable,
+         "Mode 5's hr write rate — the µ-rate of the quasi-static walk (the GN step "
+         "e·A·G/‖A‖² times this, times c).  The gate is the design (c-gating, GN "
+         "direction); this magnitude sets only how fast the equilibrium drifts.  "
+         "0 = the walk never moves, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -977,6 +1004,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["consolidate_n"] = consolidate_n_;
     m["consolidate_spares_prior"] = consolidate_spares_prior_;
     m["consolidate_reach"] = consolidate_reach_;
+    m["consolidate_reach_lr"] = consolidate_reach_lr_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1155,6 +1183,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "consolidate_n", [&](auto const& v){ consolidate_n_ = get_double(v, "consolidate_n"); });
     apply_param(params, "consolidate_spares_prior", [&](auto const& v){ consolidate_spares_prior_ = get_double(v, "consolidate_spares_prior"); });
     apply_param(params, "consolidate_reach", [&](auto const& v){ consolidate_reach_ = get_double(v, "consolidate_reach"); });
+    apply_param(params, "consolidate_reach_lr", [&](auto const& v){ consolidate_reach_lr_ = get_double(v, "consolidate_reach_lr"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -2795,6 +2824,7 @@ void MotorEPMv2::ensure_leg_init(int leg, int n) {
     L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // velocity feed-forward starts at 0 (byte-identical until learned)
     L.prev_phi_ctx.setZero();
     L.h = Eigen::VectorXf::Zero(m);
+    L.hr = Eigen::VectorXf::Zero(m);
     // A: small random motor→sensor (model learns the real coupling quickly).
     // C: small random sensor→motor so the initial command y≈0 → body holds the
     //    export-default (standing) pose; HK then destabilizes it.
@@ -3996,11 +4026,23 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // measured (R4c): attenuating a dormant reach index blinded
                             // HK to head-CoM surprise with no counter-pull, and every
                             // standing seed degraded from bucket 1.
+                            const bool scoped = consolidate_reach_ < 1.5     // mode 1
+                                                || consolidate_reach_ > 3.5; // mode 4
                             const bool reach_k = consolidate_reach_ > 0.0
-                                                 && consolidate_reach_ < 1.5
+                                                 && scoped
                                                  && consolidate_n_ > 0.0
                                                  && int(k) >= int(consolidate_n_);
-                            const float w_k = reach_k ? w * consolidate_c_ : w;
+                            // Mode 1 scales by c; mode 4 by the balance satisfaction
+                            // (same factor as its pull) — attenuation must track the
+                            // pull, or HK goes blind to a dimension nothing defends
+                            // (the R4c lesson).
+                            const float att_s =
+                                (consolidate_reach_ > 4.5) ? 0.0f   // mode 5: never blind
+                                : (consolidate_reach_ > 3.5)
+                                    ? std::clamp(1.0f - state_prior_gate_ema_ / 0.15f,
+                                                 0.0f, 1.0f)
+                                    : consolidate_c_;
+                            const float w_k = reach_k ? w * att_s : w;
                             xi_tilde[idx] = (1.0f - w_k) * xi[idx];
                         }
                     }
@@ -4111,8 +4153,38 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // standing — and adds only what R4b's seed 4 proved missing:
                             // the h share, because C balances while h reaches.
                             const bool dormant = consolidate_reach_ < 1.5;
-                            const float lw_k  = reach_k ? (dormant ? lw * consolidate_c_
-                                                                   : lw)
+                            // Modes 3 AND 4 route the reach bias through hr (c-gated).
+                            const bool mode3   = consolidate_reach_ > 2.5;
+                            // Mode 4: BALANCE-GATED pull.  R5 measured mode 3's
+                            // always-on whole-body pull dragging every pose 2-3x
+                            // closer to home but costing the race everywhere (no seed
+                            // reached 30 fall-free seconds).  The scale s is the
+                            // balance subset's own satisfaction against the SAME 0.15
+                            // unit-channel fraction the gate uses — no new constant —
+                            // and the feedback sign is self-limiting: pull → tilt →
+                            // s falls → pull backs off.  During chaos s = 0 exactly.
+                            const bool mode4   = consolidate_reach_ > 3.5
+                                                 && consolidate_reach_ < 4.5;
+                            // Mode 5: BIAS-ONLY reach.  Seven arms measured the same
+                            // two walls: a reach force live before consolidation loses
+                            // the race (R4b/R5/R5b), and one waking abruptly after it
+                            // breaks the basin (R4d).  Mode 5 has NO reach C-pull at
+                            // all — pre-consolidation is bit-identical to control by
+                            // construction — and hr then walks the equilibrium at the
+                            // µ-rate consolidate_reach_lr through the consolidated C's
+                            // live feedback: quasi-static drift, not a waking force.
+                            // A fall collapses c (force fades c·hr), the brief
+                            // plasticity burst re-learns near the edge, consolidation
+                            // re-arms, the walk resumes — a ratchet whose pawl is
+                            // consolidation itself.
+                            const bool mode5   = consolidate_reach_ > 4.5;
+                            const float bal_s  = mode4
+                                ? std::clamp(1.0f - state_prior_gate_ema_ / 0.15f,
+                                             0.0f, 1.0f)
+                                : 1.0f;
+                            const float lw_k  = reach_k ? (mode5 ? 0.0f
+                                                          : dormant ? lw * consolidate_c_
+                                                                    : lw * bal_s)
                                                         : lw;
                             const float hlw_k = reach_k ? lw_k : hlw;
                             if (reach_k) reach_lw_last_ = lw_k;
@@ -4130,7 +4202,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // re-inflating).  Honest G restores the self-limit.
                             Eigen::VectorXf Gt = G.diagonal();
                             if (split) {
-                                Eigen::VectorXf zt = L.last_mult * (L.C * L.prev_x + L.h)
+                                Eigen::VectorXf zt = L.last_mult * (L.C * L.prev_x + L.h
+                                                                    + float(consolidate_c_) * L.hr)
                                                      + L.Cp * L.prev_x;
                                 for (int j = 0; j < m; ++j) {
                                     const float t = std::tanh(zt[j]);
@@ -4139,7 +4212,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             } else if (L.last_mult < 1.0f) {
                                 // shared C under the squelch: z_actual =
                                 // mult·(z − z_att) + z_att; recompute G there.
-                                Eigen::VectorXf zfull = L.C * L.prev_x + L.h;
+                                Eigen::VectorXf zfull = L.C * L.prev_x + L.h
+                                                        + float(consolidate_c_) * L.hr;
                                 Eigen::VectorXf zatt  = Eigen::VectorXf::Zero(m);
                                 for (size_t kk = 0; kk < state_prior_indices_.size(); ++kk) {
                                     int ai = int(state_prior_indices_[kk]);
@@ -4147,7 +4221,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                     if (ai < 0 || ai >= n) continue;
                                     // Must mirror the command path's exemption subset
                                     // exactly, or G is dishonest at the reach columns.
-                                    if (consolidate_reach_ > 0.0 && consolidate_reach_ < 1.5
+                                    if (consolidate_reach_ > 0.0
+                                        && (consolidate_reach_ < 1.5 || consolidate_reach_ > 3.5)
                                         && consolidate_n_ > 0.0
                                         && int(kk) >= int(consolidate_n_)) continue;
                                     zatt.noalias() += L.C.col(ai) * L.prev_x[ai];
@@ -4179,7 +4254,27 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                 const float gh = (lw_k > 0.0f) ? g * (hlw_k / lw_k) : 0.0f;
                                 const bool deepening = std::fabs(t_j) > 0.95f
                                                        && ((gh > 0.0f) == (t_j > 0.0f));
-                                if (!deepening) L.h[j] += gh;
+                                // Modes 3-5: the reach's bias goes to hr, written only
+                                // in consolidated quiet (rate ∝ c) — at c = 0 nothing
+                                // accumulates (no chaos windup, the R4e disease), and
+                                // the applied force c·hr ramps in/out with consolidation
+                                // (no waking jolt, the R4d disease).  Mode 5 writes at
+                                // its own µ-rate (consolidate_reach_lr): g is zero
+                                // there (no C-pull), so the GN step is rebuilt at the
+                                // reach rate directly.
+                                if (reach_k && mode5) {
+                                    const float ghr = float(consolidate_reach_lr_)
+                                        * e * L.A(idx, j) * Gt[j] / anorm
+                                        * consolidate_c_;
+                                    const bool deep_r = std::fabs(t_j) > 0.95f
+                                                        && ((ghr > 0.0f) == (t_j > 0.0f));
+                                    if (!deep_r) L.hr[j] += ghr;
+                                } else if (!deepening) {
+                                    if (reach_k && mode3)
+                                        L.hr[j] += gh * consolidate_c_;
+                                    else
+                                        L.h[j] += gh;
+                                }
                             }
                             sp_err += std::fabs(e); ++sp_n;
                             if (int(k) < int(consolidate_n_)) { gate_err += std::fabs(e); ++gate_n; }
@@ -4360,8 +4455,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // lookahead_null drops the A·y term (x̂ := b), testing whether the benefit is
             // the model's DYNAMICS or merely shrinking x toward a constant.
             // gain 0 => x_eff == x exactly => byte-identical to MotorEPM.
+            // The reach bias rides with h everywhere h appears (command AND the
+            // honest-G reconstructions below), applied as c·hr — zero until mode 3
+            // writes hr, so plain adds are byte-identical for every other config.
+            const float cr = float(consolidate_c_);
             y = wb_on ? Eigen::VectorXf(Zw_.segment(leg * m, m))   // I7: this leg's slice
-                      : Eigen::VectorXf(L.C * L.x + L.h);
+                      : Eigen::VectorXf(L.C * L.x + L.h + cr * L.hr);
             if (!wb_on && lookahead_gain_ != 0.0 && L.A.size() > 0 && L.have_prev) {
                 const float lam = float(lookahead_gain_);
                 Eigen::VectorXf y0 = y;                       // pre-tanh operating point
@@ -4375,7 +4474,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     xhat.noalias() += L.Bx * L.x;              // the state term of the same model
                 if (xhat.size() == L.x.size()) {
                     const Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
-                    y = L.C * x_eff + L.h;
+                    y = L.C * x_eff + L.h + cr * L.hr;
                     la_dev_ema_ = (1.0f - kTeleEmaAlpha) * la_dev_ema_
                                 + kTeleEmaAlpha * (x_eff - L.x).norm();
                 }
@@ -4448,9 +4547,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     // (measured, R4c: listed-but-dormant head-CoM columns, all three
                     // standing seeds degraded).  The reach pull acts through the
                     // squelched slope — honest-G below must use this same subset.
-                    // (Mode 1 only: mode 2 keeps R4b's full exemption, the measured
-                    // semantics under which seed 4 stood permanently with the pull.)
-                    if (consolidate_reach_ > 0.0 && consolidate_reach_ < 1.5
+                    // (Modes 1 and 4: mode 2 keeps R4b's full exemption, the measured
+                    // semantics under which seed 4 stood permanently with the pull;
+                    // mode 4 scopes it away so chaos phases match control exactly.)
+                    if (consolidate_reach_ > 0.0
+                        && (consolidate_reach_ < 1.5 || consolidate_reach_ > 3.5)
                         && consolidate_n_ > 0.0
                         && int(k) >= int(consolidate_n_)) continue;
                     z_att.noalias() += L.C.col(idx) * L.x[idx];
@@ -5915,6 +6016,12 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
     j["consolidate_gate"] = state_prior_gate_ema_;  // the gate subset's own satisfaction EMA
     j["reach_lw"] = reach_lw_last_;            // reach terms' effective lw (0 until consolidated)
+    {
+        float hrm = 0.0f;
+        for (auto const& L : legs_)
+            if (L.hr.size() > 0) hrm = std::max(hrm, L.hr.cwiseAbs().maxCoeff());
+        j["hr_max"] = hrm;                     // mode-3 reach bias magnitude (applied as c·hr)
+    }
     {
         double cpn = 0.0;
         for (auto const& L : legs_) if (L.Cp.size() > 0) cpn += double(L.Cp.squaredNorm());

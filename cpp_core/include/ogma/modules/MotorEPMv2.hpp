@@ -1264,6 +1264,9 @@ private:
         Eigen::VectorXf     pulse_dplus;          // completed + window's Δx/hold (awaiting its − twin)
         int                 pulse_dplus_motor = -1;
         Eigen::MatrixXf     Cp;                   // the prior's OWN controller (empty unless state_prior_split)
+        Eigen::VectorXf     hr;                   // reach bias (consolidate_reach mode 3): written only in
+                                                  // consolidated quiet (rate ∝ c), applied as c·hr — ramps in
+                                                  // with consolidation, fades the moment a fall collapses c
         // R1 regime banks (empty unless regime_topic set): per-regime self-models.
         // L.A/Bx/b remain the ACTIVE working copy; banks swap in/out on regime
         // change, so every model path reads/writes exactly as before.
@@ -1563,6 +1566,7 @@ private:
     double consolidate_n_    = 0.0;             // gate reads only the FIRST N prior indices; 0 = all (legacy)
     double consolidate_spares_prior_ = 0.0;     // >0: the prior's own descent survives consolidation
     double consolidate_reach_ = 0.0;            // >0: indices ≥ consolidate_n engage at lw·c, with h (reach terms)
+    double consolidate_reach_lr_ = 0.0;         // mode 5's hr write rate (µ-rate; 0 = hr never writes)
     float  reach_lw_last_ = 0.0f;               // telemetry: the reach terms' current effective lw
     float  state_prior_gate_ema_ = 0.0f;        // satisfaction EMA over the gate subset (consolidate_n > 0)
     float  sp_err_peak_      = 0.0f;            // decaying peak of the prior error (the reference)

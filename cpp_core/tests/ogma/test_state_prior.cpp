@@ -696,6 +696,69 @@ TEST(StatePrior, ReachDormantUntilConsolidatedThenEngages) {
         << "consolidated: the reach term must engage at lw*c";
 }
 
+TEST(StatePrior, Mode3ReachBiasWaitsForConsolidationNoChaosWindup) {
+    ParamMap p = consol_params(1.0);
+    p["consolidate_spares_prior"] = 1.0;
+    p["consolidate_reach"]        = 3.0;   // C-pull live from tick 0; bias via c-gated hr
+    Fixture f(p);
+    for (uint64_t t = 1; t <= 1400; ++t) f.run_tick(t, 0.02f);
+    auto d = f.m.diag_snapshot();
+    EXPECT_EQ(d["hr_max"].get<float>(), 0.0f)
+        << "pre-consolidation (c = 0): the reach bias must accumulate NOTHING";
+    EXPECT_GT(d["reach_lw"].get<float>(), 0.01f)
+        << "mode 3's C-pull is live from tick 0 (the co-adaptation half)";
+    for (uint64_t t = 1401; t <= 4500; ++t) f.run_tick(t, 0.02f);
+    d = f.m.diag_snapshot();
+    EXPECT_GT(d["consolidate_c"].get<float>(), 0.5f);
+    EXPECT_GT(d["hr_max"].get<float>(), 1e-4f)
+        << "consolidated: the reach bias must be accumulating toward the target";
+}
+
+TEST(StatePrior, Mode4ReachScalesWithBalanceSatisfaction) {
+    ParamMap p = consol_params(1.0);
+    p["consolidate_spares_prior"] = 1.0;
+    p["consolidate_reach"]        = 4.0;   // pull ∝ balance-subset satisfaction
+    Fixture balanced(p);
+    Fixture toppling(p);
+    for (uint64_t t = 1; t <= 800; ++t) {
+        balanced.run_tick(t, 0.02f);       // balance satisfied → pull engaged
+        toppling.run_tick(t, 0.60f);       // balance violated → pull off
+    }
+    const float lw_bal = balanced.m.diag_snapshot()["reach_lw"].get<float>();
+    const float lw_top = toppling.m.diag_snapshot()["reach_lw"].get<float>();
+    EXPECT_GT(lw_bal, 0.05f) << "satisfied balance must engage the reach pull";
+    EXPECT_EQ(lw_top, 0.0f) << "violated balance (gate ema >= 0.15) must zero the pull";
+}
+
+TEST(StatePrior, Mode5BiasOnlyReachIsControlUntilConsolidatedThenWalks) {
+    // Twin WITHOUT the reach index at all — the control this mode must match
+    // bit-for-bit while unconsolidated.
+    ParamMap ctrl = consol_params(1.0);
+    ctrl["state_prior_indices"] = std::vector<double>{double(kLeanIdx)};
+    ctrl["state_prior_targets"] = std::vector<double>{0.0};
+    ParamMap m5 = consol_params(1.0);
+    m5["consolidate_reach"]    = 5.0;
+    m5["consolidate_reach_lr"] = 0.01;
+    Fixture a(ctrl), b(m5);
+    // Hold the balance term UNSATISFIED so c stays 0: every path of the listed
+    // reach index must be exactly zero.
+    for (uint64_t t = 1; t <= 2500; ++t) {
+        a.run_tick(t, 0.60f);
+        b.run_tick(t, 0.60f);
+        if (t % 500 == 0)
+            for (int j = 0; j < kMotors; ++j)
+                ASSERT_EQ(a.accel(j), b.accel(j))
+                    << "unconsolidated mode 5 must be BIT-IDENTICAL to the no-reach twin";
+    }
+    EXPECT_EQ(b.m.diag_snapshot()["hr_max"].get<float>(), 0.0f);
+    // Now satisfy the balance: consolidation arms and the walk begins.
+    for (uint64_t t = 2501; t <= 6500; ++t) b.run_tick(t, 0.02f);
+    auto d = b.m.diag_snapshot();
+    EXPECT_GT(d["consolidate_c"].get<float>(), 0.5f);
+    EXPECT_GT(d["hr_max"].get<float>(), 1e-5f)
+        << "consolidated: the bias walk must be moving toward the reach target";
+}
+
 TEST(StatePrior, HotParamRoundTrip) {
     Fixture f(base_params());
     f.m.on_param_change("state_prior_gain", ParamValue{0.6});
