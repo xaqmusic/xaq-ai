@@ -1,7 +1,9 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
 > `microduck`, cut from `master`. Update it in place — do not fork a second port doc.
 >
-> **Status 2026-08-31: S0, S1 and the A2 harness are done; A1 runs and ties a random walk.** All four gates that can
+> **Status 2026-08-31: S0, S1 and the A2 harness are done; A1 runs, ties a random walk, and
+> all three cheap lever families (reflex, sensor, conditioning/gain) are measured null —
+> the objective-socket decision is what remains.** All four gates that can
 > be checked yet pass from our own host: G1/G3/G4 via `--load-only`, G2 via `--gate-g2`, and the
 > whole trajectory cross-checks exactly against an independent Python implementation. No brain
 > in the host yet — that is S2. Upstream is
@@ -35,15 +37,20 @@ out, so there is no hardware and none is assumed. Upstream lives *outside* this 
 | S1 body + run loop | ✅ G2 passes; cross-checks exactly against an independent Python implementation |
 | A2 recovery harness | ✅ built *before* A1 with a stub brain, since it needs a brain that fails |
 | observation path | ✅ `run.sh` + `tools/duck_viewer`; the viewer draws the host's `qpos` and never simulates |
-| **A1 first brain** | ⚙ **runs, ties a random walk, two verified nulls** |
+| **A1 first brain** | ⚙ **runs, ties a random walk, three verified null lever families** |
 | S2 / S3 / B1–B3 | not started |
 
 ### The one decision waiting on the operator
 
-A1 ties a random walk, and two levers came back null **with the consumer verified firing in
-both cases** (§"Two levers tried"). Together they place the problem in **the objective, not the
-sensor**: MotorEPM descends a sensitivity metric, and its own header says *"the rule cannot rest
-at standing."* It now has the lean signal and still no reason to use it.
+A1 ties a random walk, and every cheap hypothesis has now been measured null **with the
+consumer verified firing in each case**: the postural reflex, lean-in-the-loop (§"Two levers
+tried"), and the conditioning-and-gain sweep (§"The cheap hypotheses, measured") — the last
+with a sting in it: de-clipping the controller makes the body fall *more*, and makes lying
+down the quieter state (10/12 runs vs 2/6 at baseline). Together they place the problem in
+**the objective, not the sensor and not the conditioning**: MotorEPM descends a sensitivity
+metric, and its own header says *"the rule cannot rest at standing."* It has the lean signal,
+a cleanly conditioned loop is *available* — and cleanliness makes the floor more attractive,
+not less.
 
 **Proposed next step:** extend `MotorEPMv2`'s objective socket so a prior can target *any*
 element of the state vector — *predicted lean = 0* — rather than only the `motor_dim`
@@ -881,6 +888,48 @@ the cheap hypotheses. The expensive one, and the one the plan already flagged, i
 quadruped that flails keeps trying while a biped that flails is on the floor within a second —
 and that **bipedal homeokinesis may simply not bootstrap**, which would be a result, a ledger
 entry, and a redirect rather than an ending.
+
+#### The cheap hypotheses, measured 2026-08-31 — NULL, and the null sharpens the diagnosis
+
+Three config-only arms against a re-run baseline, n=6 seeds × 120 s each, all on the A2
+recovery harness. The host now reads the operating point **back from the modules** per run
+(`motor_gain`, `c_init`, `cmd_squash`, `clip_duty` — measured pre-bound, so it stays meaningful
+under clamp or squash), so a silent-confound arm cannot happen quietly.
+
+| arm | rescues/min | brain share | mean \|u\| | clip duty (legs) | TLE up / down | down-quieter flags |
+|---|---|---|---|---|---|---|
+| baseline `g3.0 / c0.25` | 38.3 ± 0.7 | 45.5 % | 0.81 | **0.69** | 0.71 / 0.71 | 2/6 |
+| `g1.0 / c0.75` (same eff loop gain 0.75) | 41.5 ± 1.9 | 46.3 % | 0.32 | 0.00 | 0.53 / 0.52 | **5/6** |
+| `g1.0 / c1.00` (PM canonical) | 42.0 ± 0.4 | 46.5 % | 0.33 | 0.00 | 0.54 / 0.53 | **5/6** |
+| `cmd_squash` @ baseline gains | 37.8 ± 2.3 | 44.5 % | 0.71 | 0.64 | 0.69 / 0.69 | 2/6 |
+
+Configs: `a1_gain075.json`, `a1_gain100.json`, `a1_squash.json` (kept, per the config-retention
+rule). The stub random walk's band is 41.5–43 rescues/min.
+
+**Three things the table says:**
+
+1. **The saturation was real and much worse than the adapter-side 12.9 % suggested** — the
+   modules' own pre-bound `clip_duty` has the legs requesting past the bound **69 %** of the
+   time. The de-clip verifiably engaged: unity-gain arms collapse it to 0.000.
+2. **And fixing it does not help — it hurts.** Both unity-gain arms fall *more* (41.5–42.0
+   vs 38.3), landing exactly in the random walk's band. `cmd_squash` ties. The saturation
+   hypothesis is **NULL in this context**: the clip was not what kept the body from standing.
+3. **The sharp part: out of the clip regime, the floor gets *quieter*.** TLE drops
+   0.71 → 0.53 (a smoother loop predicts better) and the *"down is the quieter state"*
+   lying-down-attractor flag flares in **10/12** unity-gain runs against 2/6 at baseline.
+   The ledger's *"inverted-on-flat is a low-surprise attractor"* risk, absent in the lean
+   lever, appears the moment the loop is cleanly conditioned: **a better-conditioned
+   homeokinetic loop is more comfortable on the floor, not less.**
+
+**Verdict: NULL for conditioning-and-gain, in the A1 recovery-harness context, against a
+baseline that ties a random walk.** Re-use context: re-sweep the operating point *after* an
+objective exists that can rest at standing — conditioning may well matter once there is
+something to express, and the PM-band arms are the natural substrate for a lean prior
+(they are the ones whose loop Jacobian is honest). With the sensor null (lean), the reflex
+null (postural), and now the conditioning null all verified-fired, **every cheap hypothesis
+is spent, and each null independently points at the objective.** The
+`MotorEPMv2` objective-socket extension (§"The one decision waiting on the operator") is no
+longer the expensive candidate among several — it is the remaining move.
 
 ### A2 — standup-as-reset · *Track A* · ✅ **HARNESS DONE 2026-08-31, ahead of A1**
 

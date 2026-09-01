@@ -244,6 +244,32 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
         const auto d = m->diag_lite();
         if (d.is_null() || d.empty()) continue;
         std::string line = std::string(m->id()) + " " + d.dump();
+        // clip_duty is measured PRE-bound (how often the request exceeds |1|), so it
+        // stays meaningful whether the bound is a hard clamp or a squash.
+        {
+            const auto snap = m->diag_snapshot();
+            if (snap.contains("clip_duty")) {
+                char buf[48];
+                std::snprintf(buf, sizeof buf, "  clip_duty=%.3f",
+                              snap["clip_duty"].get<double>());
+                line += buf;
+            }
+        }
+        // The operating point, read back from the module rather than from the config
+        // that was supposed to set it — a run that prints its own arm cannot be a
+        // silent-confound run.
+        {
+            const auto params = m->current_params();
+            for (const char* k : {"motor_gain", "c_init", "cmd_squash"}) {
+                auto it = params.find(k);
+                if (it == params.end()) continue;
+                if (const double* v = std::get_if<double>(&it->second)) {
+                    char buf[64];
+                    std::snprintf(buf, sizeof buf, "  %s=%.2f", k, *v);
+                    line += buf;
+                }
+            }
+        }
         // §3.2 rule 5 again: the state width, read from the module rather than
         // inferred from the config. An appended sensor channel that never widened
         // the model is a knob that cannot act, and it would look causal anyway.
