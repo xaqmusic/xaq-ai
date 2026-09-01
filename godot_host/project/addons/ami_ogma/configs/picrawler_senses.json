@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "PiCrawler senses \u2014 the three real channels, no oracle",
-    "description": "The first config authored FOR hardware rather than ported to it. Three Level-0 EPMs over the three physical inputs the robot actually has \u2014 USB mic (STFT/cochlear), OV5647 camera (JL/retinal, 32x32 grayscale), ultrasonic rangefinder (RBF/proprio, 2-D [distance, valid], ranges COMMISSIONED not hand-written) \u2014 fused by a LateralVoter on precision. Every input is egocentric and legal by construction; nothing here is god's-eye, so it sidesteps H3's finding that the deployed gait configs run on five oracle-fed topics the hardware cannot produce. NO ACTUATION: this graph has no ActionDecoder and ogma_host has no servo path (SPEC 1.1), so it is safe to leave running unattended. Runs under ogma_host on the Pi; the sim cannot produce these topics.",
+    "description": "The first config authored FOR hardware rather than ported to it. Three Level-0 EPMs over the three physical inputs the robot actually has \u2014 USB mic (STFT/cochlear), OV5647 camera (JL/retinal, 32x32 grayscale), ultrasonic rangefinder (RBF/proprio, 2-D [distance, valid], ranges COMMISSIONED on the bench 2026-09-01 and stored as calibration) \u2014 fused by a LateralVoter on precision. Every input is egocentric and legal by construction; nothing here is god's-eye, so it sidesteps H3's finding that the deployed gait configs run on five oracle-fed topics the hardware cannot produce. NO ACTUATION: this graph has no ActionDecoder and ogma_host has no servo path (SPEC 1.1), so it is safe to leave running unattended. Runs under ogma_host on the Pi; the sim cannot produce these topics.",
     "env_target": "picrawler_hw",
     "phase_tag": "4-H3d"
   },
@@ -69,7 +69,14 @@
         "baking_threshold": 50,
         "min_insertion_error": 0.02,
         "subtract_descending_prediction": false,
-        "dim_autocal_ticks": 400
+        "dim_min": [
+          0.02338,
+          0.0
+        ],
+        "dim_max": [
+          1.5,
+          1.0
+        ]
       }
     },
     {
