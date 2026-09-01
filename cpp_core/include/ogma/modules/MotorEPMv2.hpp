@@ -1560,6 +1560,11 @@ private:
     double state_prior_calm_mode_ = 0.0;        // R2: 0 = continuous key (legacy), 1 = regime-keyed
     double consolidate_gain_ = 0.0;             // earned consolidation strength; 0 = off
     float  consolidate_c_    = 0.0f;            // the consolidation state ∈ [0,1]
+    double consolidate_n_    = 0.0;             // gate reads only the FIRST N prior indices; 0 = all (legacy)
+    double consolidate_spares_prior_ = 0.0;     // >0: the prior's own descent survives consolidation
+    double consolidate_reach_ = 0.0;            // >0: indices ≥ consolidate_n engage at lw·c, with h (reach terms)
+    float  reach_lw_last_ = 0.0f;               // telemetry: the reach terms' current effective lw
+    float  state_prior_gate_ema_ = 0.0f;        // satisfaction EMA over the gate subset (consolidate_n > 0)
     float  sp_err_peak_      = 0.0f;            // decaying peak of the prior error (the reference)
     int    regime_banks_   = 6;                 // bank slots (last slot = shared overflow)
     int    regime_winner_  = -1;                // latest winner_id from the token

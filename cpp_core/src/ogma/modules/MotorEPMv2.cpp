@@ -254,8 +254,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"consolidate_gain", ParamMutability::HotMutable,
          "EARNED CONSOLIDATION (2026-09-01): anneal ALL learning rates by a factor "
          "(1 − gain·c), where c ∈ [0,1] ramps up (τ ≈ 10 s) while BOTH hold — the state "
-         "prior's short error EMA sits below half its own long EMA (self-scaled: the prior "
-         "is being satisfied, which a tilted crouch fails) AND no fall for 30 s "
+         "prior's error EMA sits below 0.15, a fixed fraction of the unit-conditioned "
+         "channel (§5.5: the conditioning already normalised the scale; every adaptive "
+         "reference tried was measured self-defeating) AND no fall for 30 s "
          "(ticks_since_reset > 1500, which a fall-cycle fails) — and decays fast (τ ≈ 2 s) "
          "when either breaks, so plasticity returns the moment the world changes.  Measured "
          "motivation: seeds find standing in their first minutes (0.99 upright) and continued "
@@ -265,6 +266,50 @@ ParamSchema MotorEPMv2::params_schema() const {
          "body standing has EARNED slow plasticity; it is not unlearned for the crime of "
          "working.  0 = off, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_n", ParamMutability::HotMutable,
+         "GATE/OBJECTIVE SEPARATION (2026-09-01, the R4-neck lesson): the consolidation "
+         "gate's satisfaction EMA reads only the FIRST N state_prior_indices; 0 = all of "
+         "them (legacy, byte-identical).  Measured motivation: widening the prior to the "
+         "head-CoM slots poisoned the gate — the achievable standing stance sits ~0.4 off "
+         "the scaffold-calibrated origin on that channel, the 6-index EMA hovered at "
+         "0.14–0.28 while the body stood at 1–5° tilt, consolidation never armed, and "
+         "continued learning destroyed standing that had already been found (the exact "
+         "disease consolidation exists to cure; seeds 5/6, found-then-lost time course).  "
+         "The gate asks one question — IS THE BALANCE SOLVED — so it reads the attitude "
+         "indices; extra objective terms (reach targets like the head-CoM origin) pull "
+         "without holding permanence hostage.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{16.0}},
+        {"consolidate_spares_prior", ParamMutability::HotMutable,
+         "When > 0 the state prior's own descent (lw, and its h share) is NOT annealed by "
+         "consolidation.  The lr_scale anneal exists to stop the DESTROYER — the sign-blind "
+         "HK sensitivity descent, which cannot rest at standing — but the prior's "
+         "Gauss-Newton step self-terminates at its target (e → 0), so freezing it buys no "
+         "stability and costs the objective: measured (R4-neck, seed 4), the one seed that "
+         "consolidated held its head exactly where the slump left it, the pull frozen at "
+         "lr_scale = 0.  0 = legacy (prior anneals with everything else), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_reach", ParamMutability::HotMutable,
+         "BALANCE FIRST, THEN REACH (2026-09-01, the R4b race): prior indices at/after "
+         "consolidate_n become REACH terms — their descent is scaled by consolidate_c, so "
+         "they are DORMANT until the balance subset has consolidated, then engage at lw·c "
+         "with an h share equal to lw (the measured dissociation: C balances, h reaches; a "
+         "C-only pull left seed 4's head exactly where the slump put it).  Measured "
+         "motivation for the dormancy: the full-weight head-CoM pull live from tick 0 cost "
+         "enough pre-consolidation robustness (6.4 vs 2.6 falls/min in bucket 0) that the "
+         "30 s calm window never arrived — consolidation lost the race and the destroyer "
+         "ate the standing (seeds 5/6, twice).  The ratchet is safe by construction: a "
+         "fall collapses c in ~2 s, disengaging the reach (and its h) before a fall epoch "
+         "can wind it up.  0 = off, byte-identical.  MODE 2 (2026-09-01, the R4d "
+         "refutation): mode 1's dormancy was measured to be the poison — the basin is "
+         "found WITHOUT the pull, consolidation freezes the loop, and the waking pull "
+         "pushes a frozen controller out of a basin it never learned to widen (3/3 "
+         "standing seeds destroyed 3–28 s after engagement, bit-identical to control "
+         "before it).  Mode 2 keeps the reach pull live from tick 0 at full lw — the "
+         "R4/R4b-measured semantics under which learning co-adapts around the pull and "
+         "still finds standing (R4b seed 4: permanent 1.00 upright WITH the pull) — and "
+         "adds only the h share (C balances, h reaches: R4b's C-only pull never moved "
+         "the head).  Attenuation and calm exemption stay full, as in R4b.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -929,6 +974,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["babble_owns_a"] = babble_owns_a_;
     m["state_prior_calm_mode"] = state_prior_calm_mode_;
     m["consolidate_gain"] = consolidate_gain_;
+    m["consolidate_n"] = consolidate_n_;
+    m["consolidate_spares_prior"] = consolidate_spares_prior_;
+    m["consolidate_reach"] = consolidate_reach_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1104,6 +1152,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
     apply_param(params, "state_prior_calm_mode", [&](auto const& v){ state_prior_calm_mode_ = get_double(v, "state_prior_calm_mode"); });
     apply_param(params, "consolidate_gain", [&](auto const& v){ consolidate_gain_ = get_double(v, "consolidate_gain"); });
+    apply_param(params, "consolidate_n", [&](auto const& v){ consolidate_n_ = get_double(v, "consolidate_n"); });
+    apply_param(params, "consolidate_spares_prior", [&](auto const& v){ consolidate_spares_prior_ = get_double(v, "consolidate_spares_prior"); });
+    apply_param(params, "consolidate_reach", [&](auto const& v){ consolidate_reach_ = get_double(v, "consolidate_reach"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -3789,8 +3840,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // during exactly the long quiet stretches it should protect.  The
         // conditioning already normalised the scale — use it.
         if (consolidate_gain_ > 0.0 && leg == 0) {
-            const bool sat  = state_prior_err_ema_ > 0.0f
-                              && state_prior_err_ema_ < 0.15f;
+            // consolidate_n > 0: the gate reads the balance subset's own EMA, so
+            // reach-type prior terms (head-CoM) cannot hold permanence hostage.
+            const float gate_ema = (consolidate_n_ > 0.0) ? state_prior_gate_ema_
+                                                          : state_prior_err_ema_;
+            const bool sat  = gate_ema > 0.0f && gate_ema < 0.15f;
             const bool calm = ticks_since_reset_ > 1500;
             const float tgt = (sat && calm) ? 1.0f : 0.0f;
             const float k   = (tgt > consolidate_c_) ? 0.002f : 0.01f;   // up τ~10s, down τ~2s
@@ -3937,7 +3991,17 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             int idx = int(state_prior_indices_[k]);
                             if (idx < 0) idx += n;
                             if (idx < 0 || idx >= n) continue;        // out of range: skip, never throw
-                            xi_tilde[idx] = (1.0f - w) * xi[idx];
+                            // Reach terms attenuate only as consolidation engages them
+                            // (w·c): at c = 0 the listing must be INVISIBLE to HK —
+                            // measured (R4c): attenuating a dormant reach index blinded
+                            // HK to head-CoM surprise with no counter-pull, and every
+                            // standing seed degraded from bucket 1.
+                            const bool reach_k = consolidate_reach_ > 0.0
+                                                 && consolidate_reach_ < 1.5
+                                                 && consolidate_n_ > 0.0
+                                                 && int(k) >= int(consolidate_n_);
+                            const float w_k = reach_k ? w * consolidate_c_ : w;
+                            xi_tilde[idx] = (1.0f - w_k) * xi[idx];
                         }
                     }
                 }
@@ -3998,8 +4062,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                        && !state_prior_indices_.empty()
                                        && state_prior_indices_.size() == state_prior_targets_.size();
                     float sp_err = 0.0f; int sp_n = 0;
+                    float gate_err = 0.0f; int gate_n = 0;
                     if (sp_ok) {
-                        const float lw = lr_scale * float(state_prior_lr_ * state_prior_gain_);
+                        // consolidate_spares_prior: the anneal stops the destroyer (HK),
+                        // not the objective — the GN step self-terminates at e = 0.
+                        const float sp_scale = (consolidate_spares_prior_ > 0.0)
+                                               ? 1.0f : lr_scale;
+                        const float lw = sp_scale * float(state_prior_lr_ * state_prior_gain_);
                         const float hlw = float((state_prior_h_lr_ < 0.0 ? state_prior_lr_
                                                                         : state_prior_h_lr_)
                                                 * state_prior_gain_);
@@ -4018,6 +4087,35 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // a prior becomes a flail.  lr is then a FRACTION of the
                             // model-implied correction per tick, comparable across bodies.
                             const float anorm = L.A.row(idx).squaredNorm() + float(reg_eps_);
+                            // consolidate_reach: indices at/after consolidate_n are REACH
+                            // terms — dormant until the balance subset has consolidated,
+                            // then engaged at lw·c WITH an h share (the measured role
+                            // dissociation: C balances, h reaches — a C-only pull cannot
+                            // relocate an equilibrium, seed 4's unmoved head).  A fall
+                            // collapses c (τ ≈ 2 s), disengaging the reach BEFORE any
+                            // fall-epoch h integration — the windup disease structurally
+                            // cannot start.  The R4/R4b measurement behind the split: the
+                            // full-weight pull live from tick 0 cost enough robustness
+                            // (6.4 vs 2.6 falls/min, bucket 0) that the 30 s calm window
+                            // never arrived and consolidation lost the race.
+                            const bool reach_k = consolidate_reach_ > 0.0
+                                                 && consolidate_n_ > 0.0
+                                                 && int(k) >= int(consolidate_n_);
+                            // Mode 1 (dormant, lw·c) was measured REFUTED: the basin is
+                            // found WITHOUT the pull, consolidation freezes the
+                            // controller, and the waking pull then pushes a frozen loop
+                            // out of a basin it never learned to widen (all three
+                            // standing seeds destroyed 3–28 s after engagement).  Mode 2
+                            // keeps the pull live from tick 0 — the R4/R4b measurement:
+                            // learning CO-ADAPTS around the pull and still finds
+                            // standing — and adds only what R4b's seed 4 proved missing:
+                            // the h share, because C balances while h reaches.
+                            const bool dormant = consolidate_reach_ < 1.5;
+                            const float lw_k  = reach_k ? (dormant ? lw * consolidate_c_
+                                                                   : lw)
+                                                        : lw;
+                            const float hlw_k = reach_k ? lw_k : hlw;
+                            if (reach_k) reach_lw_last_ = lw_k;
                             const bool split = state_prior_split_ > 0.0;
                             if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);
                             Eigen::MatrixXf& Cdst = split ? L.Cp : L.C;
@@ -4047,6 +4145,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                     int ai = int(state_prior_indices_[kk]);
                                     if (ai < 0) ai += n;
                                     if (ai < 0 || ai >= n) continue;
+                                    // Must mirror the command path's exemption subset
+                                    // exactly, or G is dishonest at the reach columns.
+                                    if (consolidate_reach_ > 0.0 && consolidate_reach_ < 1.5
+                                        && consolidate_n_ > 0.0
+                                        && int(kk) >= int(consolidate_n_)) continue;
                                     zatt.noalias() += L.C.col(ai) * L.prev_x[ai];
                                 }
                                 for (int j = 0; j < m; ++j) {
@@ -4056,7 +4159,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                 }
                             }
                             for (int j = 0; j < m; ++j) {
-                                const float g = lw * e * L.A(idx, j) * Gt[j] / anorm;
+                                const float g = lw_k * e * L.A(idx, j) * Gt[j] / anorm;
                                 Cdst.row(j).noalias() += g * L.prev_x.transpose();
                                 // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate
                                 // cleanly (measured, this lever's plant): C is what
@@ -4073,18 +4176,22 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                 // (command already saturated in g's own direction);
                                 // an unwinding update always passes.
                                 const float t_j = std::tanh(z[j]);
-                                const float gh = (lw > 0.0f) ? g * (hlw / lw) : 0.0f;
+                                const float gh = (lw_k > 0.0f) ? g * (hlw_k / lw_k) : 0.0f;
                                 const bool deepening = std::fabs(t_j) > 0.95f
                                                        && ((gh > 0.0f) == (t_j > 0.0f));
                                 if (!deepening) L.h[j] += gh;
                             }
                             sp_err += std::fabs(e); ++sp_n;
+                            if (int(k) < int(consolidate_n_)) { gate_err += std::fabs(e); ++gate_n; }
                         }
                     }
                     // Frozen-meter lesson (2026-08-14): an inactive prior must DECAY the
                     // meter, or a mid-run gain drop reads as "still pulling" in the (d)-test.
                     state_prior_err_ema_ += 0.01f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
                                                      - state_prior_err_ema_);
+                    // The gate subset's own EMA (same cadence, same frozen-meter decay).
+                    state_prior_gate_ema_ += 0.01f * ((gate_n ? gate_err / float(gate_n) : 0.0f)
+                                                      - state_prior_gate_ema_);
                     // The calm reference: the same error on a ~40 s horizon.  The
                     // annealing ratio short/long is self-scaled — no constant to
                     // tune to the signal (§5.5).
@@ -4335,6 +4442,17 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     int idx = int(state_prior_indices_[k]);
                     if (idx < 0) idx += L.n;
                     if (idx < 0 || idx >= L.n) continue;
+                    // Reach terms are NEVER calm-exempt: the exemption exists so the
+                    // BALANCE error keeps full slope through the squelch; granting it
+                    // to a reach column hands the HK loop a new full-gain channel
+                    // (measured, R4c: listed-but-dormant head-CoM columns, all three
+                    // standing seeds degraded).  The reach pull acts through the
+                    // squelched slope — honest-G below must use this same subset.
+                    // (Mode 1 only: mode 2 keeps R4b's full exemption, the measured
+                    // semantics under which seed 4 stood permanently with the pull.)
+                    if (consolidate_reach_ > 0.0 && consolidate_reach_ < 1.5
+                        && consolidate_n_ > 0.0
+                        && int(k) >= int(consolidate_n_)) continue;
                     z_att.noalias() += L.C.col(idx) * L.x[idx];
                 }
                 // The calm KEY reads its own index list (angles), not the full
@@ -5795,6 +5913,8 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_applied"] = state_prior_applied_;
     j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
     j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
+    j["consolidate_gate"] = state_prior_gate_ema_;  // the gate subset's own satisfaction EMA
+    j["reach_lw"] = reach_lw_last_;            // reach terms' effective lw (0 until consolidated)
     {
         double cpn = 0.0;
         for (auto const& L : legs_) if (L.Cp.size() > 0) cpn += double(L.Cp.squaredNorm());

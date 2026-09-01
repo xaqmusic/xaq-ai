@@ -613,6 +613,89 @@ TEST(StatePrior, DISABLED_TraceProbeDirection) {
 // =============================================================================
 // 7. Hot-param round trip.
 // =============================================================================
+// =============================================================================
+// 8. Gate/objective separation (the R4-neck lesson).  consolidate_n reads only
+//    the first N prior indices, so a reach-type target with a large standing
+//    error (the head-CoM origin) cannot hold consolidation hostage; and
+//    consolidate_spares_prior keeps the objective's pull alive after the HK
+//    learning has been annealed away.
+// =============================================================================
+
+namespace {
+ParamMap consol_params(double consolidate_n) {
+    ParamMap p = base_params();
+    p["state_prior_gain"]    = 1.0;
+    p["state_prior_lr"]      = 0.1;
+    // FIRST index = the balance term (lean, satisfied at ~0.02); SECOND = a
+    // reach target the scripted state can never satisfy (|e| ~ 1.5).
+    p["state_prior_indices"] = std::vector<double>{double(kLeanIdx), 0.0};
+    p["state_prior_targets"] = std::vector<double>{0.0, 1.5};
+    p["consolidate_gain"]    = 1.0;
+    p["consolidate_n"]       = consolidate_n;
+    return p;
+}
+}  // namespace
+
+TEST(StatePrior, GateSubsetArmsDespiteReachError) {
+    Fixture subset(consol_params(1.0));   // gate = the balance index only
+    Fixture legacy(consol_params(0.0));   // gate = mean over ALL prior indices
+    for (uint64_t t = 1; t <= 3500; ++t) {
+        subset.run_tick(t, 0.02f);        // balanced: tiny, nonzero lean
+        legacy.run_tick(t, 0.02f);
+    }
+    const float c_subset = subset.m.diag_snapshot()["consolidate_c"].get<float>();
+    const float c_legacy = legacy.m.diag_snapshot()["consolidate_c"].get<float>();
+    EXPECT_GT(c_subset, 0.5f) << "balance satisfied: the subset gate must arm";
+    EXPECT_LT(c_legacy, 0.05f) << "the unreachable reach term must block the legacy gate";
+    const float gate = subset.m.diag_snapshot()["consolidate_gate"].get<float>();
+    EXPECT_GT(gate, 0.0f);
+    EXPECT_LT(gate, 0.15f) << "gate EMA reads the balance subset, not the reach error";
+}
+
+TEST(StatePrior, SparesPriorKeepsPullingAfterConsolidation) {
+    ParamMap keep = consol_params(1.0);
+    keep["consolidate_spares_prior"] = 1.0;
+    Fixture spared(keep);
+    Fixture frozen(consol_params(1.0));
+    // Before consolidation can begin (calm needs 1500 ticks) the flag is inert:
+    // the two arms must be byte-identical.
+    for (uint64_t t = 1; t <= 1000; ++t) {
+        spared.run_tick(t, 0.02f);
+        frozen.run_tick(t, 0.02f);
+        if (t % 250 == 0)
+            for (int j = 0; j < kMotors; ++j)
+                ASSERT_EQ(spared.accel(j), frozen.accel(j)) << "inert before c > 0";
+    }
+    // Consolidate both, then the spared arm's prior keeps descending toward the
+    // reach target while the frozen arm's pull anneals away with everything else.
+    for (uint64_t t = 1001; t <= 4500; ++t) {
+        spared.run_tick(t, 0.02f);
+        frozen.run_tick(t, 0.02f);
+    }
+    EXPECT_GT(spared.m.diag_snapshot()["consolidate_c"].get<float>(), 0.5f);
+    EXPECT_GT(frozen.m.diag_snapshot()["consolidate_c"].get<float>(), 0.5f);
+    float max_diff = 0.0f;
+    for (int j = 0; j < kMotors; ++j)
+        max_diff = std::max(max_diff, std::fabs(spared.accel(j) - frozen.accel(j)));
+    EXPECT_GT(max_diff, 1e-4f) << "the spared prior must still be writing the controller";
+}
+
+TEST(StatePrior, ReachDormantUntilConsolidatedThenEngages) {
+    ParamMap p = consol_params(1.0);           // gate = the balance index (lean)
+    p["consolidate_spares_prior"] = 1.0;
+    p["consolidate_reach"]        = 1.0;       // index 1 (the reach target) scales with c
+    Fixture f(p);
+    for (uint64_t t = 1; t <= 1400; ++t) f.run_tick(t, 0.02f);
+    auto d = f.m.diag_snapshot();
+    EXPECT_EQ(d["reach_lw"].get<float>(), 0.0f)
+        << "the reach term must be dormant before consolidation (c = 0)";
+    for (uint64_t t = 1401; t <= 4500; ++t) f.run_tick(t, 0.02f);
+    d = f.m.diag_snapshot();
+    EXPECT_GT(d["consolidate_c"].get<float>(), 0.5f);
+    EXPECT_GT(d["reach_lw"].get<float>(), 0.01f)
+        << "consolidated: the reach term must engage at lw*c";
+}
+
 TEST(StatePrior, HotParamRoundTrip) {
     Fixture f(base_params());
     f.m.on_param_change("state_prior_gain", ParamValue{0.6});
