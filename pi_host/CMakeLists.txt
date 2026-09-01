@@ -61,6 +61,12 @@ if(ALSA_FOUND AND GPIOD_FOUND)
   add_executable(cam_tool tools/cam_tool.cpp)
   target_link_libraries(cam_tool PRIVATE ogma_sensors)
   target_compile_options(cam_tool PRIVATE -Wall -Wextra)
+
+  # range_tool — the raw rangefinder, so "is the sensor right" can be settled apart
+  # from "is the encoder right".
+  add_executable(range_tool tools/range_tool.cpp)
+  target_link_libraries(range_tool PRIVATE ogma_sensors)
+  target_compile_options(range_tool PRIVATE -Wall -Wextra)
 else()
   message(STATUS "pi_host: ALSA/libgpiod not found — ogma_sensors and ogma_host disabled")
 endif()
