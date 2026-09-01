@@ -1,32 +1,43 @@
 {
   "metadata": {
-    "name": "PiCrawler senses — the three real channels, no oracle",
-    "description": "The first config authored FOR hardware rather than ported to it. Three Level-0 EPMs over the three physical inputs the robot actually has — USB mic (STFT/cochlear), OV5647 camera (JL/retinal, 32x32 grayscale), ultrasonic rangefinder (RBF/proprio) — fused by a LateralVoter on precision. Every input is egocentric and legal by construction; nothing here is god's-eye, so it sidesteps H3's finding that the deployed gait configs run on five oracle-fed topics the hardware cannot produce. NO ACTUATION: this graph has no ActionDecoder and ogma_host has no servo path (SPEC 1.1), so it is safe to leave running unattended. Runs under ogma_host on the Pi; the sim cannot produce these topics.",
+    "name": "PiCrawler senses \u2014 the three real channels, no oracle",
+    "description": "The first config authored FOR hardware rather than ported to it. Three Level-0 EPMs over the three physical inputs the robot actually has \u2014 USB mic (STFT/cochlear), OV5647 camera (JL/retinal, 32x32 grayscale), ultrasonic rangefinder (RBF/proprio, 2-D [distance, valid], ranges COMMISSIONED not hand-written) \u2014 fused by a LateralVoter on precision. Every input is egocentric and legal by construction; nothing here is god's-eye, so it sidesteps H3's finding that the deployed gait configs run on five oracle-fed topics the hardware cannot produce. NO ACTUATION: this graph has no ActionDecoder and ogma_host has no servo path (SPEC 1.1), so it is safe to leave running unattended. Runs under ogma_host on the Pi; the sim cannot produce these topics.",
     "env_target": "picrawler_hw",
     "phase_tag": "4-H3d"
   },
   "version": 1,
-  "runtime": { "thread_pool": "per_instance", "num_threads": 0 },
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
   "modules": [
     {
       "id": "neuro",
       "type": "NeurochemState",
       "params": {
-        "da_baseline": 0.2, "ht_baseline": 0.65,
-        "da_decay": 0.88, "ht_decay": 0.93,
+        "da_baseline": 0.2,
+        "ht_baseline": 0.65,
+        "da_decay": 0.88,
+        "ht_decay": 0.93,
         "intrinsic_da_gain": 0.05,
-        "event_coupled_da": true, "event_coupled_ht": true
+        "event_coupled_da": true,
+        "event_coupled_ht": true
       }
     },
     {
       "id": "epm_audio",
       "type": "EPM",
       "params": {
-        "modality_group": "audio", "modality_name": "cochlear",
-        "encoder_kind": "stft", "input_topic": "sense.audio",
+        "modality_group": "audio",
+        "modality_name": "cochlear",
+        "encoder_kind": "stft",
+        "input_topic": "sense.audio",
         "projection_dim": 64,
-        "sample_rate": 48000, "f_min": 80.0, "f_max": 8000.0,
-        "baking_threshold": 50, "min_insertion_error": 0.02,
+        "sample_rate": 48000,
+        "f_min": 80.0,
+        "f_max": 8000.0,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
         "subtract_descending_prediction": false
       }
     },
@@ -34,10 +45,14 @@
       "id": "epm_vision",
       "type": "EPM",
       "params": {
-        "modality_group": "video", "modality_name": "retinal",
-        "encoder_kind": "jl", "input_topic": "sense.camera",
-        "projection_dim": 64, "encoder_res": 32,
-        "baking_threshold": 50, "min_insertion_error": 0.02,
+        "modality_group": "video",
+        "modality_name": "retinal",
+        "encoder_kind": "jl",
+        "input_topic": "sense.camera",
+        "projection_dim": 64,
+        "encoder_res": 32,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
         "subtract_descending_prediction": false
       }
     },
@@ -45,21 +60,26 @@
       "id": "epm_range",
       "type": "EPM",
       "params": {
-        "modality_group": "proprio", "modality_name": "range",
-        "encoder_kind": "rbf", "input_topic": "sense.range",
-        "projection_dim": 48, "proprio_state_dims": 3,
-        "dim_min": [0.0, -2.0, 0.0],
-        "dim_max": [4.0, 2.0, 1.0],
-        "baking_threshold": 50, "min_insertion_error": 0.02,
-        "subtract_descending_prediction": false
+        "modality_group": "proprio",
+        "modality_name": "range",
+        "encoder_kind": "rbf",
+        "input_topic": "sense.range",
+        "projection_dim": 48,
+        "proprio_state_dims": 2,
+        "baking_threshold": 50,
+        "min_insertion_error": 0.02,
+        "subtract_descending_prediction": false,
+        "dim_autocal_ticks": 400
       }
     },
     {
       "id": "voter_0",
       "type": "LateralVoter",
       "params": {
-        "level": 0, "input_pattern": "reality.",
-        "trust_epsilon": 0.05, "group_balance": false
+        "level": 0,
+        "input_pattern": "reality.",
+        "trust_epsilon": 0.05,
+        "group_balance": false
       }
     }
   ],

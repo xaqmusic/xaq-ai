@@ -38,7 +38,11 @@ public:
         std::string chip;                 // empty = auto-detect the RP1 pinctrl chip
         unsigned trig_offset = 27;        // D2 — measured, not assumed
         unsigned echo_offset = 22;        // D3 — measured, not assumed
-        double   hz           = 15.0;
+        // 20 Hz measured 2026-09-01 as the reliable ceiling on a static target:
+        // sd 0.56 cm at 20, 1.34 at 30, and 12.7 at 40 where the previous ping's echo
+        // ghosts into the next window (the MEAN drifts too, 37 -> 48 cm, which is the
+        // tell that it is trailing echoes and not just noise).
+        double   hz           = 20.0;
         double   max_range_m  = 4.0;
         double   air_temp_c   = 20.0;     // speed of sound is temperature-dependent
     };

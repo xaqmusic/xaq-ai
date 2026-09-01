@@ -109,6 +109,23 @@ int main(int argc, char** argv) {
         auto instance = std::make_unique<ogma::OgmaInstance>(
             std::move(cfg), std::make_unique<ogma::InProcessBus>());
 
+        // Sensors start BEFORE the loop so a failure is a startup error the operator
+        // sees, not a channel that is quietly dead for the whole run.
+        ogma::hw::AudioCapture  mic{ogma::hw::AudioCapture::Config{}};
+        ogma::hw::CameraCapture cam{ogma::hw::CameraCapture::Config{}};
+        ogma::hw::Ultrasonic    rangefinder{ogma::hw::Ultrasonic::Config{}};
+        if (a.mic && !mic.start())
+            std::fprintf(stderr, "ogma_host: mic: %s\n", mic.last_error().c_str());
+        if (a.camera && !cam.start())
+            std::fprintf(stderr, "ogma_host: camera: %s\n", cam.last_error().c_str());
+        if (a.range && !rangefinder.start())
+            std::fprintf(stderr, "ogma_host: rangefinder: %s\n", rangefinder.last_error().c_str());
+        std::printf("ogma_host: sensors mic=%s camera=%s range=%s\n",
+                    a.mic ? (mic.running() ? "up" : "FAILED") : "off",
+                    a.camera ? (cam.running() ? "up" : "FAILED") : "off",
+                    a.range ? (rangefinder.running() ? "up" : "FAILED") : "off");
+
+
         uint16_t control_port = 7400;
         if (const char* env = std::getenv("OGMA_INSPECTOR_PORT")) {
             const int p = std::atoi(env);
@@ -123,6 +140,15 @@ int main(int argc, char** argv) {
         // PUB stream, so a host without it is mute to every existing tool.
         // The lock guards against the tick thread mutating the module list under a verb.
         std::mutex inst_mtx;
+        // The raw sensor values, so a human can see what the encoders were handed.
+        // Debugging an encoder through its embedding alone is guesswork: the range
+        // channel looked like a change detector for a week and the rangefinder was
+        // fine the whole time -- what was missing was the number beside the embedding.
+        struct RawSense {
+            double range_m = 0, range_rate = 0; bool range_valid = false; uint64_t range_seq = 0;
+            double cam_mean = 0; uint64_t cam_frames = 0;
+            double mic_peak = 0; uint64_t mic_windows = 0;
+        } raw;
         ami_ogma::control::ControlServer control(control_port);
         control.start();
         control.set_command_handler(
@@ -153,24 +179,24 @@ int main(int argc, char** argv) {
                             {"topic_prefix", "diag." + std::to_string(sub_id) + "."}};
                 }
                 if (verb == "unsubscribe") { diag.unsubscribe(req.value("sub_id", 0)); return {{"status","ok"}}; }
+                if (verb == "host_sensors") {
+                    // Raw, pre-encoder.  Paired with each channel's health counters so
+                    // "no reading" and "a reading of zero" stay distinguishable.
+                    return {{"status","ok"},
+                            {"range", {{"m", raw.range_m}, {"cm", raw.range_m * 100.0},
+                                       {"rate_mps", raw.range_rate}, {"valid", raw.range_valid},
+                                       {"seq", raw.range_seq},
+                                       {"hz", rangefinder.running() ? 20.0 : 0.0},
+                                       {"pings", rangefinder.pings()},
+                                       {"timeouts", rangefinder.timeouts()}}},
+                            {"camera", {{"mean_level", raw.cam_mean}, {"frames", raw.cam_frames},
+                                        {"stride", cam.stride()}, {"frame_bytes", cam.frame_bytes()},
+                                        {"out_size", cam.out_size()}}},
+                            {"mic", {{"peak", raw.mic_peak}, {"windows", raw.mic_windows},
+                                     {"xruns", mic.xruns()}, {"rate", mic.rate()}}}};
+                }
                 return {{"status","error"}, {"message","unknown verb: " + verb}};
             });
-
-        // Sensors start BEFORE the loop so a failure is a startup error the operator
-        // sees, not a channel that is quietly dead for the whole run.
-        ogma::hw::AudioCapture  mic{ogma::hw::AudioCapture::Config{}};
-        ogma::hw::CameraCapture cam{ogma::hw::CameraCapture::Config{}};
-        ogma::hw::Ultrasonic    rangefinder{ogma::hw::Ultrasonic::Config{}};
-        if (a.mic && !mic.start())
-            std::fprintf(stderr, "ogma_host: mic: %s\n", mic.last_error().c_str());
-        if (a.camera && !cam.start())
-            std::fprintf(stderr, "ogma_host: camera: %s\n", cam.last_error().c_str());
-        if (a.range && !rangefinder.start())
-            std::fprintf(stderr, "ogma_host: rangefinder: %s\n", rangefinder.last_error().c_str());
-        std::printf("ogma_host: sensors mic=%s camera=%s range=%s\n",
-                    a.mic ? (mic.running() ? "up" : "FAILED") : "off",
-                    a.camera ? (cam.running() ? "up" : "FAILED") : "off",
-                    a.range ? (rangefinder.running() ? "up" : "FAILED") : "off");
 
         const bool rt = a.realtime ? try_realtime() : false;
         std::printf("ogma_host: config=%s hz=%.2f diag=%u %s\n",
@@ -215,6 +241,8 @@ int main(int argc, char** argv) {
             if (mic.running()) {
                 static std::vector<float> pcm;
                 if (mic.latest(pcm) && !pcm.empty()) {
+                    { std::lock_guard<std::mutex> lk(inst_mtx);
+                      raw.mic_peak = mic.peak(); raw.mic_windows = mic.windows(); }
                     auto f = std::make_shared<ogma::RawAudioFrame>();
                     f->tick_id = uint64_t(ticks); f->producer_id = "host";
                     f->samples = pcm; f->n_samples = int(pcm.size()); f->channels = 1;
@@ -224,6 +252,8 @@ int main(int argc, char** argv) {
             if (cam.running()) {
                 static std::vector<uint8_t> px;
                 if (cam.latest(px) && !px.empty()) {
+                    { std::lock_guard<std::mutex> lk(inst_mtx);
+                      raw.cam_mean = cam.mean_level(); raw.cam_frames = cam.frames(); }
                     auto f = std::make_shared<ogma::RawImageFrame>();
                     f->tick_id = uint64_t(ticks); f->producer_id = "host";
                     f->pixels = px; f->height = cam.out_size(); f->width = cam.out_size(); f->channels = 1;
@@ -233,15 +263,24 @@ int main(int argc, char** argv) {
             if (rangefinder.running()) {
                 ogma::hw::Ultrasonic::Reading r;
                 if (rangefinder.latest(r)) {
+                    { std::lock_guard<std::mutex> lk(inst_mtx);
+                      raw.range_m = r.distance_m; raw.range_rate = r.rate_mps;
+                      raw.range_valid = r.valid;  raw.range_seq = r.seq; }
                     auto f = std::make_shared<ogma::ProprioToken>();
                     f->tick_id = uint64_t(ticks); f->producer_id = "host"; f->sensor = "range";
-                    f->values.resize(3);
-                    // [distance, closing rate, validity].  Validity is a CHANNEL, not a
-                    // silent substitution: an out-of-range ping and a 4 m wall are
-                    // different facts and the vocabulary should be able to tell them apart.
+                    f->values.resize(2);
+                    // [distance, validity].  ⚠ The closing-RATE channel was REMOVED
+                    // 2026-09-01: with the target static to within 11 mm it still swung
+                    // +/-0.08 m/s, i.e. it was encoding sensor noise, and against the
+                    // configured ranges it carried 12x more normalised variance than the
+                    // distance it sat beside -- which is why the vocabulary behaved like a
+                    // change detector.  The EPM's dual TLE already asks "did I predict
+                    // where I would go next?" via transition_surprise, so a hand-computed
+                    // derivative was duplicating that in its noisiest form.
+                    // Validity stays a CHANNEL, not a silent substitution: an out-of-range
+                    // ping and a wall at 0 m are different facts.
                     f->values[0] = float(r.valid ? r.distance_m : 0.0);
-                    f->values[1] = float(r.valid ? r.rate_mps : 0.0);
-                    f->values[2] = r.valid ? 1.0f : 0.0f;
+                    f->values[1] = r.valid ? 1.0f : 0.0f;
                     bus->publish("sense.range", f);
                 }
             }
