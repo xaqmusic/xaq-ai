@@ -1,0 +1,18 @@
+# ogma_benchd — servo driver + sensor reads, serving the bench (port doc SPEC §1).
+# Checked in 2026-09-01: this was live on the robot but existed only in
+# /etc/systemd/system, so the deployment was undocumented and unreproducible.
+[Unit]
+Description=xaq PiCrawler bench daemon (ogma_benchd) — calibration channel, bench mode only
+After=local-fs.target
+
+[Service]
+User=xaqmusic
+WorkingDirectory=/home/xaqmusic/xaq-ai
+ExecStart=/home/xaqmusic/xaq-ai/pi_host/build/ogma_benchd --body measured
+Restart=always
+RestartSec=2
+StandardOutput=append:/home/xaqmusic/xaq-ai/pi_host/log/benchd.stdout
+StandardError=append:/home/xaqmusic/xaq-ai/pi_host/log/benchd.stdout
+
+[Install]
+WantedBy=multi-user.target
