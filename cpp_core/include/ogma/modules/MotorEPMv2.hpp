@@ -1263,8 +1263,10 @@ private:
         float               pulse_sign  = 0.0f;
         Eigen::VectorXf     pulse_dplus;          // completed + window's Δx/hold (awaiting its − twin)
         int                 pulse_dplus_motor = -1;
+        Eigen::MatrixXf     Cp;                   // the prior's OWN controller (empty unless state_prior_split)
         float               calm_state = 1.0f;    // the annealing ratchet (slow attack, fast release)
         float               calm_peak  = 0.1f;    // decaying peak-hold of the prior error (the reference)
+        float               last_mult  = 1.0f;    // the calm multiplier the assembly last applied
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
         Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning (posture feed-forward)
@@ -1542,6 +1544,8 @@ private:
     double state_prior_calm_    = 0.0;          // exploration-precision annealing strength; 0 = off
     std::vector<double> state_prior_calm_indices_;  // the key's own indices (empty = all prior indices)
     double state_prior_calm_fixed_ = 0.0;       // >0 = pin the multiplier (designed gate, tuned magnitude)
+    double state_prior_split_  = 0.0;           // 1 = prior writes its OWN matrix Cp; HK keeps C
+    double state_prior_damping_ = 0.0;          // L2 brake on Cp ALONE (the split's whole point)
     int    state_prior_applied_ = 0;
     float  calm_mult_ = 1.0f;                   // last applied annealing multiplier (diag)            // indices that actually resolved last controller tick —
                                                 // disambiguates "satisfied (err→0)" from "never in range"

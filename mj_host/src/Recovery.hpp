@@ -123,7 +123,10 @@ struct RecoveryConfig {
     // success, and thirteen minutes of it is thirteen minutes outside the
     // learnable regime.  Sustained sub-trigger tilt is therefore a fall.
     // stuck_s <= 0 disables.
-    double stuck_gravity_z = -0.94;     // ≈ 20° — "not upright"
+    double stuck_gravity_z = -0.966;    // ≈ 15° — "not upright", aligned with the up15 bar
+                                        // (a fixed-squelch soak parked in the 15–20° band the
+                                        // old 20° trigger could not see: falls 7–8/min with
+                                        // upright 0.05 — a shallow crouch in the blind band)
     double stuck_s = 5.0;               // sustained this long → rescue
 };
 

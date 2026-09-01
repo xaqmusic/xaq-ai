@@ -345,6 +345,10 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                               snap["state_prior_applied"].get<int>(),
                               snap.value("state_prior_calm_mult", 1.0));
                 line += buf;
+                char buf2[48];
+                std::snprintf(buf2, sizeof buf2, " cpm=%.2f",
+                              snap.value("state_prior_cp_norm", 0.0));
+                line += buf2;
             }
         }
         // The operating point, read back from the module rather than from the config

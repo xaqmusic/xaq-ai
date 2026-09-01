@@ -1096,6 +1096,37 @@ quiet-band amplitude trends, and Cp (the prior's own feedback columns, read from
 storm-coupling weakens as episodes lengthen, and the ratchet's attack can then engage across
 longer quiet stretches.
 
+**Stage 18–19 — the long soak, and the containment ledger (2026-09-01).** The operator's
+question: does the unfrozen learner ACCUMULATE?  Hour-long soaks, per-5-minute buckets:
+
+**No.  Every arm reaches its plateau within ~10 minutes; none compound.**  Two mechanisms:
+1. **HK inflates through any fixed attenuation** — the squelch held |u|-quiet at ~0.3 for ten
+   minutes, then ctrl_lr grew C until 0.3·z railed again (0.3 → 0.92 over the hour).  A
+   static gate cannot contain a growth process.
+2. **The crouch returns on long horizons** — one seed parked in the 15–20° band the stuck
+   trigger could not see (falls "7–8/min" with upright 0.05).  The trigger is now 15°,
+   aligned with the up15 bar.
+
+The containment ledger, every row measured at n≥2 × 1 h or n≥3–6 × 600 s:
+| containment | outcome |
+|---|---|
+| fixed squelch (calm_fixed 0.3) | consumed by HK's growth within the hour |
+| ctrl_damping 3e-4 (shared C) | bounds inflation, crushes the prior's columns with it (Cp 15→0.7, falls worse) |
+| adaptive calm keys (five designs) | storm-coupled; tie |
+| **state_prior_split** (Cp owned by the prior; C by HK; honest-G self-limit + separate L2) | mechanically sound after two fixes (the blind-G blow-up railed the output at cpm≈4 ≈ effective kp 30–40 bang-bang), but **PARTIAL: ties fixed03 on falls, loses upright 0.45 vs 0.57** |
+
+**Re-use context for the split**: revisit with a governed output scale on Cp (the descent has
+no notion of a target gain band; the probe's evidence says kp 5–80 continuous-authority, not
+railed bang-bang through a learned direction) and with Cp's direction validated against the
+probe's J.
+
+**The conclusion the whole campaign now points at, three independent ways** (mixture-poisoned
+identification, the crouch as an out-of-regime minimum, and unbounded storm regrowth eating
+every parametric containment): the ONNX policy converges because standing is, for it, a
+STATE with its own quiet dynamics — not a point defended forever inside one matrix against a
+rule whose header says it cannot rest.  That is rung 2's regime vocabulary, and it is now the
+recommended fork.
+
 **The fork that remains for the operator:**
 1. **Rung 2 — the real motor-EPM** (v2 plan §4): a GNG regime vocabulary with per-regime
    models — now motivated by TWO measured walls (mixture-poisoned identification, and the

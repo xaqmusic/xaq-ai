@@ -239,6 +239,25 @@ ParamSchema MotorEPMv2::params_schema() const {
          "at perfect uprightness reads as high error, so any rate-inclusive key holds its "
          "own squelch open. The key should ask only WHERE AM I: the angle elements.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_split", ParamMutability::HotMutable,
+         "SEPARATED CONTROLLERS (2026-09-01, the gain-gap study's structural conclusion): when "
+         "1, the prior's descent writes its OWN matrix Cp (zero-init) and HK keeps C; the "
+         "command is y = tanh(calm·(C·x) + Cp·x + h). Why, each measured on hour-long soaks: "
+         "in the shared matrix, HK INFLATES THROUGH any fixed squelch (|u|-quiet 0.3 → 0.92 as "
+         "ctrl_lr consumed the headroom), ctrl_damping bounds the inflation but crushes the "
+         "prior's columns with it (Cp 15 → 0.7, falls worse), and every adaptive key is "
+         "storm-coupled. Nothing in a shared C can tell prior-serving content from "
+         "sensitivity-seeking content — so they get separate matrices with separate dynamics: "
+         "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
+         "own self-limiting rule. 0 = legacy shared C, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_damping", ParamMutability::HotMutable,
+         "L2 decay on Cp alone (split mode) — the separation's payoff: the storm's brake "
+         "(ctrl_damping on C) and the prior's brake are finally different knobs. Measured "
+         "need: without it, and with the descent's G computed blind to Cp's own contribution, "
+         "Cp grew until the output railed permanently (|u| 0.994 with C at 0.03 — the split's "
+         "first soak).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{0.01}},
         {"state_prior_calm_fixed", ParamMutability::HotMutable,
          "Pin the calm multiplier to this value instead of the adaptive ratchet (0 = adaptive). "
          "The gate (squelch the non-attitude command, keep the prior's slope) is the design; "
@@ -851,6 +870,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_h_lr"]    = state_prior_h_lr_;
     m["state_prior_calm"]    = state_prior_calm_;
     m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
+    m["state_prior_split"]   = state_prior_split_;
+    m["state_prior_damping"] = state_prior_damping_;
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
     m["model_trace"]         = model_trace_;
@@ -1019,6 +1040,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_h_lr",    [&](auto const& v){ state_prior_h_lr_    = get_double(v, "state_prior_h_lr"); });
     apply_param(params, "state_prior_calm",    [&](auto const& v){ state_prior_calm_    = get_double(v, "state_prior_calm"); });
     apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
+    apply_param(params, "state_prior_split",   [&](auto const& v){ state_prior_split_   = get_double(v, "state_prior_split"); });
+    apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
     apply_param(params, "state_prior_calm_indices", [&](auto const& v){ state_prior_calm_indices_ = get_double_vec(v, "state_prior_calm_indices"); });
     apply_param(params, "state_model_lr",      [&](auto const& v){ state_model_lr_      = get_double(v, "state_model_lr"); });
     apply_param(params, "model_trace",         [&](auto const& v){ model_trace_         = get_double(v, "model_trace"); });
@@ -2391,6 +2414,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_h_lr")    state_prior_h_lr_    = get_double(value, "state_prior_h_lr");
     else if (key == "state_prior_calm")    state_prior_calm_    = get_double(value, "state_prior_calm");
     else if (key == "state_prior_calm_fixed") state_prior_calm_fixed_ = get_double(value, "state_prior_calm_fixed");
+    else if (key == "state_prior_split")   state_prior_split_   = get_double(value, "state_prior_split");
+    else if (key == "state_prior_damping") state_prior_damping_ = get_double(value, "state_prior_damping");
     else if (key == "state_prior_calm_indices") state_prior_calm_indices_ = get_double_vec(value, "state_prior_calm_indices");
     else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
     else if (key == "model_trace")         model_trace_         = get_double(value, "model_trace");
@@ -3853,9 +3878,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // a prior becomes a flail.  lr is then a FRACTION of the
                             // model-implied correction per tick, comparable across bodies.
                             const float anorm = L.A.row(idx).squaredNorm() + float(reg_eps_);
+                            const bool split = state_prior_split_ > 0.0;
+                            if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);
+                            Eigen::MatrixXf& Cdst = split ? L.Cp : L.C;
+                            // In split mode the step's G must be the TRUE actuator
+                            // Jacobian — the operating point INCLUDING Cp's own
+                            // contribution and the calm squelch.  Computed blind to
+                            // Cp, the descent kept writing at G≈1 into a rail of
+                            // its own making and Cp grew without bound (measured:
+                            // |u| pinned at 0.994 with C at 0.03).  Honest G
+                            // restores the self-limit: railed → G→0 → step→0.
+                            Eigen::VectorXf Gt = G.diagonal();
+                            if (split) {
+                                Eigen::VectorXf zt = L.last_mult * (L.C * L.prev_x + L.h)
+                                                     + L.Cp * L.prev_x;
+                                for (int j = 0; j < m; ++j) {
+                                    const float t = std::tanh(zt[j]);
+                                    Gt[j] = 1.0f - t * t;
+                                }
+                            }
                             for (int j = 0; j < m; ++j) {
-                                const float g = lw * e * L.A(idx, j) * G(j, j) / anorm;
-                                L.C.row(j).noalias() += g * L.prev_x.transpose();
+                                const float g = lw * e * L.A(idx, j) * Gt[j] / anorm;
+                                Cdst.row(j).noalias() += g * L.prev_x.transpose();
                                 // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate
                                 // cleanly (measured, this lever's plant): C is what
                                 // BALANCES (feedback; C-only passed the unstable-plant
@@ -4066,7 +4110,34 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // NON-attitude part of the pre-tanh command by the prior error's
             // short/long EMA ratio; the prior's own feedback columns keep full
             // slope.  See the param docstring for the measured motivation.
-            if (state_prior_calm_ > 0.0 && state_prior_gain_ > 0.0
+            if (state_prior_split_ > 0.0 && L.Cp.rows() == m) {
+                // Separated controllers: the ENTIRE legacy z is HK content; the
+                // prior's own term is added outside the squelch.  See the
+                // state_prior_split docstring for the measured motivation.
+                float mult = 1.0f;
+                if (state_prior_calm_ > 0.0 || state_prior_calm_fixed_ > 0.0) {
+                    float e_now = 0.0f; int e_n = 0;
+                    const auto& key_idx = state_prior_calm_indices_.empty()
+                                          ? state_prior_indices_ : state_prior_calm_indices_;
+                    for (double di : key_idx) {
+                        int idx = int(di);
+                        if (idx < 0) idx += L.n;
+                        if (idx < 0 || idx >= L.n) continue;
+                        e_now += std::fabs(L.x[idx]); ++e_n;
+                    }
+                    if (e_n) e_now /= float(e_n);
+                    L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
+                    const float target = std::clamp(e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                    const float k = (target > L.calm_state) ? 0.2f : 0.03f;
+                    L.calm_state += k * (target - L.calm_state);
+                    mult = 1.0f - float(state_prior_calm_) * (1.0f - L.calm_state);
+                    if (state_prior_calm_fixed_ > 0.0) mult = float(state_prior_calm_fixed_);
+                }
+                if (state_prior_damping_ > 0.0) L.Cp *= (1.0f - float(state_prior_damping_));
+                y = mult * y + L.Cp * L.x;
+                calm_mult_ = mult;
+                L.last_mult = mult;
+            } else if (state_prior_calm_ > 0.0 && state_prior_gain_ > 0.0
                 && !state_prior_indices_.empty()
                 && state_prior_indices_.size() == state_prior_targets_.size()) {
                 Eigen::VectorXf z_att = Eigen::VectorXf::Zero(m);
@@ -4997,6 +5068,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         lj["Cphi"] = flat(L.Cphi);
         lj["Cvel"] = flat(L.Cvel);
         if (L.Bx.size() > 0) lj["Bx"] = flat(L.Bx);   // state-model term, only when in use
+        if (L.Cp.size() > 0) lj["Cp"] = flat(L.Cp);   // the prior's own controller (split mode)
         lj["prev_x"] = flat(L.prev_x); lj["prev_y"] = flat(L.prev_y);
         lj["rows_A"] = int(L.A.rows()); lj["cols_A"] = int(L.A.cols());
         legs.push_back(std::move(lj));
@@ -5502,7 +5574,12 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
     j["state_prior_w"]   = state_prior_gain_;
     j["state_prior_applied"] = state_prior_applied_;
-    j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied  // indices resolved last controller tick;
+    j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
+    {
+        double cpn = 0.0;
+        for (auto const& L : legs_) if (L.Cp.size() > 0) cpn += double(L.Cp.squaredNorm());
+        j["state_prior_cp_norm"] = std::sqrt(cpn);  // the prior's own controller (split mode)
+    }  // indices resolved last controller tick;
                                                       // active && applied==0 → indices out of range
     // Propulsive-credit homeostat: per-leg functional forward contribution + the
     // group mean, so the L/R propulsion imbalance (the drag → spin) is observable.
@@ -5910,6 +5987,7 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         if (lj.contains("Cphi")) L.Cphi = toM(vecf(lj.at("Cphi")), m, 2);   // legacy snapshots → keep zero-init
         if (lj.contains("Cvel")) L.Cvel = toM(vecf(lj.at("Cvel")), m, 2);   // legacy snapshots → keep zero-init
         if (lj.contains("Bx"))   L.Bx   = toM(vecf(lj.at("Bx")), n, n);     // absent = state model off
+        if (lj.contains("Cp"))   L.Cp   = toM(vecf(lj.at("Cp")), m, n);     // absent = split off
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);
