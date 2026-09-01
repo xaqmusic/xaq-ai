@@ -232,3 +232,40 @@ operator asked the amplitude study to converge to.  Committed as 4f7b0c2; valida
 standing post-identification, seed 2 settles into a crouch.  Candidate levers: longer or
 repeated identification, basin-entry assistance from the standing bank's own model, or
 accepting per-seed convergence variance and measuring the finding rate at n≥20.
+
+---
+
+## 8. The stand-tall drive (R4 family, 2026-09-01) — five iterations, REFUTED AS A PARTIAL-POSE PULL
+
+The operator's read of the standing video: the stance is slump-shaped, and the drive
+should be toward standing tall.  First measurement split that in two: the stance is
+**dynamically balanced, not a passive slump** (servos held at the achieved pose with the
+brain removed topple in 30 s, same as the STAND keyframe) — but the *pose* is a crane-head
+crouch, because nothing in the attitude-only prior says tall.
+
+Lever: state-prior targets on the stand-calibrated head-CoM slots (sense 10/11).  Five
+arms, each killing one mechanism (full chain in the 729b0cc commit message): gate
+poisoning → the race (pull costs pre-consolidation robustness; the 30 s calm window
+misses) → listing side-channels (calm exemption hands HK a full-gain channel) → dormancy
+itself (a waking pull pushes a consolidation-frozen loop out of a basin it never learned
+to widen, 3/3 seeds, 3–28 s) → h windup during pre-standing chaos (hmax 2.67).
+
+**What stands after the smoke clears:**
+
+1. **R4b seed 4 is the existence proof**: permanent 1.00 upright, cons=1.00, with the
+   full head-CoM C-pull live — standing and a reach objective can coexist when learning
+   *co-adapts around the pull from tick 0*.
+2. **The reach machinery works** — seeds reached the origin (6.5 mm) — and the roles are
+   confirmed a third time: C balances, h reaches.
+3. **The verdict's real content is about the TARGET, not the mechanism**: head-at-origin
+   over slump legs is not a balanceable configuration (seed 4 reached it twice and fell
+   20/min there).  The scaffold balances that head position with *extended legs under
+   it*.  A reach toward a partial pose deforms the body into unproven territory; the
+   coherent target is the whole-body stand pose the probe already proved balanceable.
+
+**Re-use context:** whole-body reach (legs + head toward the calibrated stand pose, both
+modules) with the arm-shape the five verdicts select — C-pull live from tick 0, h gated
+by consolidation while the spared C-pull keeps the reach direction plastic (mode-3
+semantics, unbuilt).  Alternative shape: tall standing as its own regime with its own
+bank and consolidation, entered from the scaffold's settle pose rather than deformed into
+from the slump.
