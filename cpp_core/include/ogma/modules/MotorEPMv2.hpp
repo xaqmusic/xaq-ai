@@ -1264,6 +1264,13 @@ private:
         Eigen::VectorXf     pulse_dplus;          // completed + window's Δx/hold (awaiting its − twin)
         int                 pulse_dplus_motor = -1;
         Eigen::MatrixXf     Cp;                   // the prior's OWN controller (empty unless state_prior_split)
+        // R1 regime banks (empty unless regime_topic set): per-regime self-models.
+        // L.A/Bx/b remain the ACTIVE working copy; banks swap in/out on regime
+        // change, so every model path reads/writes exactly as before.
+        struct ModelBank { Eigen::MatrixXf A, Bx; Eigen::VectorXf b; float tle_ema = 0.0f;
+                           int64_t samples = 0; };
+        std::vector<ModelBank> banks;
+        int                 active_bank = -1;
         float               calm_state = 1.0f;    // the annealing ratchet (slow attack, fast release)
         float               calm_peak  = 0.1f;    // decaying peak-hold of the prior error (the reference)
         float               last_mult  = 1.0f;    // the calm multiplier the assembly last applied
@@ -1546,6 +1553,13 @@ private:
     double state_prior_calm_fixed_ = 0.0;       // >0 = pin the multiplier (designed gate, tuned magnitude)
     double state_prior_split_  = 0.0;           // 1 = prior writes its OWN matrix Cp; HK keeps C
     double state_prior_damping_ = 0.0;          // L2 brake on Cp ALONE (the split's whole point)
+    // R1: the regime socket
+    std::string regime_topic_;                  // RealityToken source; empty = banks off, byte-identical
+    double babble_owns_a_ = 0.0;                // 1 = the babble's paired-difference estimator owns A forever
+    int    regime_banks_   = 6;                 // bank slots (last slot = shared overflow)
+    int    regime_winner_  = -1;                // latest winner_id from the token
+    std::vector<int> bank_of_winner_;           // winner_id -> bank slot, first-seen order
+    int64_t bank_switches_ = 0;                 // §3.2 consumer counter
     int    state_prior_applied_ = 0;
     float  calm_mult_ = 1.0f;                   // last applied annealing multiplier (diag)            // indices that actually resolved last controller tick —
                                                 // disambiguates "satisfied (err→0)" from "never in range"

@@ -127,6 +127,23 @@ best standing stack, instrument-only. 15 min × 2 seeds, scored in a 2-D label s
 | mixed transitional nodes | ⚠ the largest node in each seed mixes STAND-STILL with fall-moving (~0.5/0.3); weighted top-7 purity 0.63–0.64 |
 | mitosis | ⚠ never fires even at threshold 0.10 — the designed cure for mixed nodes is inert here; open conditioning item |
 
+**R1 measured (2026-09-01) — GATES MET, PROMOTED AS SIGNAL.**  Build: `regime_topic` +
+per-regime (A, Bx, b, TLE) banks in MotorEPMv2, L.A/Bx/b as the active working copy swapped
+on winner change, warm-start from the incumbent, boundary sample dropped at switches, banks
+engaged **after** the identification phase (engaged-during-babble scattered pair-writes to
+init noise — measured), plus `babble_owns_a` (one-owner-per-estimand extended past warmup:
+closed-loop LMS erodes the babble-identified authority — measured at 900 s — so the babble's
+paired-difference estimator owns A permanently; LMS keeps b and Bx).  Unit test
+`RegimeBanksUnmixOpposedAuthorities`: banks provably learn sign-opposed authorities no
+shared model can hold (9/9 suite green).
+
+| R1 gate | result |
+|---|---|
+| §3.2 consumer | ✅ ~900 switches/600 s; samples across all 6 banks |
+| identification WITHOUT the harness tilt gate | ✅ standing-bank A holds **4/5 probe-J signs at 900 s** (bankless ungated control: 2/5 scrambled) — the hand rule's job, learned |
+| per-regime TLE < mixed | ✅ standing bank 0.45 vs 2.0–2.7 (transitional) and ~1.0 (mixed) |
+| behaviour (n=6 × 600 s) | ✅ upright **0.66±0.12 vs 0.58±0.10** (campaign best), tilt 21.4 vs 23.9, brain 62.5 % vs 56.5 %, falls tie |
+
 **Why the notes do not block R1:** R1's critical consumer is the *standing* bank, and its
 key (the pure standing node) exists in both seeds at high purity and high share. Mixed
 nodes blur only the transitional banks — which today do not exist at all, so their floor is

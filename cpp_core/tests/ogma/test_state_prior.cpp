@@ -434,6 +434,100 @@ TEST(StatePrior, StateModelIdentifiesThePole) {
     }
 }
 
+// =============================================================================
+// 6c. R1 regime banks: per-regime self-models UNMIX a mixture no single model
+//     can represent.  The plant's authority FLIPS SIGN by regime (as a fallen
+//     body's does vs a standing one); a synthetic RealityToken keys the banks.
+//     Asserted: (i) empty regime_topic is byte-identical (the guard, hard form:
+//     the token stream is live either way); (ii) with banks, each bank's A
+//     learns ITS regime's authority sign — the two banks end OPPOSITE — while
+//     the bankless model, fed the same mixture, cannot hold both (its lean
+//     column's |value| is smaller than either bank's); (iii) switches counted.
+// =============================================================================
+TEST(StatePrior, RegimeBanksUnmixOpposedAuthorities) {
+    auto mk = [](bool banks) {
+        auto p = base_params();
+        p["babble_ticks"]   = int64_t{100000};   // model-only learning throughout
+        p["babble_scale"]   = 0.25;
+        p["state_model_lr"] = 0.02;
+        if (banks) { p["regime_topic"] = std::string("sp.regime"); p["regime_banks"] = int64_t{3}; }
+        return p;
+    };
+    auto run = [](Fixture& f, bool publish_token) {
+        const float kA[kMotors] = {0.050f, -0.030f, 0.020f};   // regime 0 authority
+        const float kB[kMotors] = {-0.050f, 0.030f, -0.020f};  // regime 7: SIGN-FLIPPED
+        std::mt19937 rng(11);
+        std::uniform_real_distribution<float> nd(-0.02f, 0.02f);
+        float lean = 0.05f;
+        for (uint64_t t = 0; t < 6000; ++t) {
+            const bool regA = (t / 300) % 2 == 0;              // alternate every 300 ticks
+            f.bus.begin_tick(t);
+            if (publish_token) {
+                auto rt = std::make_shared<ogma::RealityToken>();
+                rt->winner_id = regA ? 0 : 7;
+                f.bus.publish("sp.regime", rt);
+            }
+            auto pt = std::make_shared<ogma::ProprioToken>();
+            pt->values = Eigen::VectorXf::Zero(kStateN);
+            pt->values[kLeanIdx] = lean;
+            pt->sensor = "proprio";
+            f.bus.publish("sp.p0", pt);
+            f.m.tick(t);
+            f.bus.end_tick();
+            float push = 0.0f;
+            const float* k = regA ? kA : kB;
+            for (int j = 0; j < kMotors; ++j) {
+                const float a = f.accel(j);
+                if (std::isfinite(a)) push += k[j] * a;
+            }
+            lean = std::clamp(0.98f * lean + push + nd(rng), -1.5f, 1.5f);
+        }
+    };
+
+    // (i) the guard, hard form: token live on the bus, socket not configured.
+    Fixture N(mk(false)), Z(mk(false)), B(mk(true));
+    {
+        std::mt19937 rng(11);
+        // N gets no token, Z gets the token with no socket — must match N exactly.
+        // (run() publishes per its flag; reuse it.)
+    }
+    run(N, false); run(Z, true);
+    double maxdiff = 0.0;
+    for (int j = 0; j < kMotors; ++j)
+        maxdiff = std::max(maxdiff, double(std::fabs(N.accel(j) - Z.accel(j))));
+    EXPECT_LT(maxdiff, 1e-9)
+        << "a live token with no regime_topic configured must change nothing";
+
+    // (ii) banks unmix.
+    run(B, true);
+    auto snap = B.m.snapshot_state();
+    auto const& lj = snap["legs"][0];
+    ASSERT_TRUE(lj.contains("banks")) << "banks must be in the snapshot when configured";
+    const auto banks = lj["banks"];
+    ASSERT_GE(banks.size(), 2u);
+    // slots claimed first-seen: regime 0 -> slot 0, regime 7 -> slot 1.
+    auto leanrow = [&](nlohmann::json const& bj, int j) {
+        const auto A = bj["A"].get<std::vector<float>>();     // n x m col-major
+        return A[size_t(j) * kStateN + kLeanIdx];
+    };
+    ASSERT_TRUE(banks[0].contains("A") && banks[1].contains("A"));
+    EXPECT_GT(leanrow(banks[0], 0), 0.0f) << "bank 0 must learn regime A's +authority on motor 0";
+    EXPECT_LT(leanrow(banks[1], 0), 0.0f) << "bank 1 must learn regime B's −authority on motor 0";
+    EXPECT_GT(leanrow(banks[0], 0) - leanrow(banks[1], 0), 0.02f)
+        << "the banks must be separated, not both near zero";
+    // The bankless mixture CANNOT hold both signs at once.
+    auto snapN = N.m.snapshot_state();
+    const auto AN = snapN["legs"][0]["A"].get<std::vector<float>>();
+    const float mixed = AN[size_t(0) * kStateN + kLeanIdx];
+    EXPECT_LT(std::fabs(mixed),
+              std::max(std::fabs(leanrow(banks[0], 0)), std::fabs(leanrow(banks[1], 0))))
+        << "the shared model's lean authority must be smaller than the better bank's — "
+           "it is fitting a mixture whose true values have opposite signs";
+
+    // (iii) the consumer counter.
+    EXPECT_GT(B.m.diag_snapshot()["bank_switches"].get<int64_t>(), 10);
+}
+
 // A disabled-by-default probe: watch the on-arm learn (run with
 //   --gtest_also_run_disabled_tests --gtest_filter='*TraceProbe*').
 TEST(StatePrior, DISABLED_TraceProbe) {

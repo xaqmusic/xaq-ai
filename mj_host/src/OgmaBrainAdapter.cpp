@@ -360,6 +360,23 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                               snap.value("state_prior_cp_norm", 0.0));
                 line += buf2;
             }
+            // R1 bank read-back (regime banks configured): switches + per-bank samples.
+            if (snap.contains("bank_switches")) {
+                char rb[128];
+                std::string bl;
+                if (snap.contains("banks"))
+                    for (auto const& b : snap["banks"]) {
+                        char bb[40];
+                        std::snprintf(bb, sizeof bb, " %lld/%.2f",
+                                      (long long)b.value("n", int64_t(0)),
+                                      b.value("tle", 0.0));
+                        bl += bb;
+                    }
+                std::snprintf(rb, sizeof rb, "  rbsw=%lld rbank=%d n=[%s]",
+                              (long long)snap.value("bank_switches", int64_t(0)),
+                              snap.value("active_bank", -1), bl.c_str());
+                line += rb;
+            }
         }
         // The operating point, read back from the module rather than from the config
         // that was supposed to set it — a run that prints its own arm cannot be a
@@ -444,6 +461,22 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                 // A's trailing-4 rows (the model's authority estimate over the
                 // lean block) — directly comparable against --probe's measured J.
                 if (std::getenv("OGMA_DUMP_MODEL")) {
+                    const auto dump_A = [](const std::vector<float>& A, int mm, int nn,
+                                           int rows_from) {
+                        std::string out;
+                        for (int row = rows_from; row < nn; ++row) {
+                            out += " [";
+                            for (int j = 0; j < mm; ++j) {
+                                char buf[16];
+                                std::snprintf(buf, sizeof buf, "%+.3f%s",
+                                              A[size_t(j) * size_t(nn) + size_t(row)],
+                                              j + 1 < mm ? " " : "");
+                                out += buf;
+                            }
+                            out += "]";
+                        }
+                        return out;
+                    };
                     std::string dump = "\n    A(trailing rows):";
                     int legidx = 0;
                     for (const auto& lj : snap["legs"]) {
@@ -452,19 +485,26 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                         const int mm = int(lj["h"].get<std::vector<float>>().size());
                         if (mm == 0 || A.size() % size_t(mm) != 0) continue;
                         const int nn = int(A.size()) / mm;   // A is n x m col-major
-                        char hdr[32]; std::snprintf(hdr, sizeof hdr, "\n      leg%d:", legidx++);
+                        char hdr[32]; std::snprintf(hdr, sizeof hdr, "\n      leg%d:", legidx);
                         dump += hdr;
-                        for (int row = std::max(0, nn - 4); row < nn; ++row) {
-                            dump += " [";
-                            for (int j = 0; j < mm; ++j) {
-                                char buf[16];
-                                std::snprintf(buf, sizeof buf, "%+.3f%s",
-                                              A[size_t(j) * size_t(nn) + size_t(row)],
-                                              j + 1 < mm ? " " : "");
-                                dump += buf;
+                        dump += dump_A(A, mm, nn, std::max(0, nn - 4));
+                        // R1: per-bank trailing PITCH row, so the standing bank's
+                        // authority is inspectable against the probe's J.
+                        if (lj.contains("banks")) {
+                            int bi = 0;
+                            for (const auto& bj : lj["banks"]) {
+                                if (bj.contains("A") && bj.value("n", int64_t(0)) > 0) {
+                                    char bh[48];
+                                    std::snprintf(bh, sizeof bh, "\n        bank%d(n=%lld):",
+                                                  bi, (long long)bj.value("n", int64_t(0)));
+                                    dump += bh;
+                                    const auto BA = bj["A"].get<std::vector<float>>();
+                                    dump += dump_A(BA, mm, nn, std::max(0, nn - 12));
+                                }
+                                ++bi;
                             }
-                            dump += "]";
                         }
+                        ++legidx;
                     }
                     line += dump;
                 }

@@ -251,6 +251,33 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
          "own self-limiting rule. 0 = legacy shared C, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"babble_owns_a", ParamMutability::HotMutable,
+         "ONE OWNER PER ESTIMAND, extended past warmup (2026-09-01, the R1 gate's finding): "
+         "when 1 and babble_isolate is configured, the paired-difference babble owns A "
+         "PERMANENTLY — closed-loop LMS never writes it (b and Bx stay LMS-owned).  Measured: "
+         "the babble identifies authority to 4/5 correct signs, and post-babble closed-loop "
+         "LMS then erodes it (the de-identification confound, now within one regime bank — "
+         "A(pitch,·) at 900 s bore no resemblance to its babble-window values).  The module's "
+         "own self-measured authority is a calibration; a confounded estimator does not get "
+         "to overwrite a clean one.  0 = legacy (LMS resumes after warmup).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"regime_topic", ParamMutability::ConstructionOnly,
+         "R1 REGIME SOCKET (2026-09-01, rung-2 design §4): a RealityToken topic whose "
+         "winner_id keys PER-REGIME SELF-MODEL BANKS (A, Bx, b, per-bank TLE). The measured "
+         "motivation is the whole A1-v2 campaign: one linear self-model fit to the mixture of "
+         "falling/fallen/flailing/standing data holds sign-scrambled authority (A(lean,·) "
+         "de-identified in every long run), and identification only ever succeeded when a "
+         "regime was carved out by hand.  The banks make that carve-out LEARNED: each regime's "
+         "model sees only its own data.  L.A/Bx/b stay the active working copy — banks swap on "
+         "winner change, so every model path is untouched; a new winner's bank warm-starts "
+         "from the incumbent model; the cross-regime pairing sample is dropped at each switch "
+         "(the boundary sample is exactly the mixture poison, the reset-pairing lesson one "
+         "level up).  Empty = no banks, byte-identical.",
+         ParamValue{std::string("")}},
+        {"regime_banks", ParamMutability::ConstructionOnly,
+         "Bank slots. Winners claim slots in first-seen order (high-share regimes claim "
+         "early); when full, unseen winners share the LAST slot (the overflow bank).",
+         ParamValue{int64_t(6)}, ParamValue{int64_t(2)}, ParamValue{int64_t(32)}},
         {"state_prior_damping", ParamMutability::HotMutable,
          "L2 decay on Cp alone (split mode) — the separation's payoff: the storm's brake "
          "(ctrl_damping on C) and the prior's brake are finally different knobs. Measured "
@@ -872,6 +899,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
     m["state_prior_split"]   = state_prior_split_;
     m["state_prior_damping"] = state_prior_damping_;
+    m["regime_topic"] = regime_topic_;
+    m["babble_owns_a"] = babble_owns_a_;
+    m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
     m["model_trace"]         = model_trace_;
@@ -1042,6 +1072,12 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
     apply_param(params, "state_prior_split",   [&](auto const& v){ state_prior_split_   = get_double(v, "state_prior_split"); });
     apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
+    apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
+    apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
+    apply_param(params, "regime_banks", [&](auto const& v){
+        if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
+        else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
+    });
     apply_param(params, "state_prior_calm_indices", [&](auto const& v){ state_prior_calm_indices_ = get_double_vec(v, "state_prior_calm_indices"); });
     apply_param(params, "state_model_lr",      [&](auto const& v){ state_model_lr_      = get_double(v, "state_model_lr"); });
     apply_param(params, "model_trace",         [&](auto const& v){ model_trace_         = get_double(v, "model_trace"); });
@@ -1351,6 +1387,19 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
         sub_ids_.push_back(bus_->subscribe(
             velocity_objective_topics_[leg], SubscriptionKind::Feedback,
             [this, leg](std::string_view /*topic*/, MessagePtr p){ handle_objective_vel(leg, p); }));
+    }
+    // R1 regime socket: one body-level RealityToken stream keys the model banks.
+    // Direct (not Feedback): the token for THIS tick's state should gate THIS
+    // tick's learning where available; a one-tick lag only shifts the boundary
+    // sample, which is dropped at switches anyway.
+    if (!regime_topic_.empty()) {
+        sub_ids_.push_back(bus_->subscribe(
+            regime_topic_, SubscriptionKind::Direct,
+            [this](std::string_view /*topic*/, MessagePtr p){
+                if (!input_allowed(p->producer_id)) return;
+                if (auto rt = std::dynamic_pointer_cast<const RealityToken>(p))
+                    regime_winner_ = rt->winner_id;
+            }));
     }
     // Coherent-scaffold phase (L-1b): an optional global CPG phase (rhythm.cpg.body,
     // ProprioToken [cos φ, sin φ]) to drive the per-joint rhythm from — a CLEAN entrained phase,
@@ -3660,6 +3709,45 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         bool warmup = (wb_on ? (wb_steps_ <= babble_ticks_)
                              : (L.steps_seen <= babble_ticks_));
 
+        // ---- R1: regime-bank swap (regime_topic set and a token seen) ----
+        // L.A/Bx/b are the ACTIVE bank's working copy; on a winner change the
+        // incumbent is stored and the new regime's bank is loaded (warm-started
+        // from the incumbent on first sight).  The cross-regime pairing sample
+        // is dropped — the boundary sample is the mixture poison.
+        // Engagement waits for the identification phase to finish: babble writes
+        // land in ONE shared model (the harness holds the body near-standing
+        // through identification), and every bank then warm-starts from the
+        // IDENTIFIED model rather than scattering pair-writes across flickering
+        // banks (measured: engaged-during-babble left every bank at init noise).
+        if (!regime_topic_.empty() && regime_winner_ >= 0 && !warmup) {
+            // winner_id -> slot, first-seen; overflow shares the last slot.
+            int w = regime_winner_;
+            if (w >= int(bank_of_winner_.size())) bank_of_winner_.resize(size_t(w) + 1, -1);
+            if (bank_of_winner_[size_t(w)] < 0) {
+                int next = 0;
+                for (int b : bank_of_winner_) if (b >= 0 && b < regime_banks_ - 1) next = std::max(next, b + 1);
+                bank_of_winner_[size_t(w)] = std::min(next, regime_banks_ - 1);
+            }
+            const int slot = bank_of_winner_[size_t(w)];
+            if (int(L.banks.size()) < regime_banks_) L.banks.resize(size_t(regime_banks_));
+            if (L.active_bank != slot) {
+                if (L.active_bank >= 0) {          // store the incumbent
+                    auto& ob = L.banks[size_t(L.active_bank)];
+                    ob.A = L.A; ob.Bx = L.Bx; ob.b = L.b; ob.tle_ema = L.tle_ema;
+                }
+                auto& nb = L.banks[size_t(slot)];
+                if (nb.A.size() == 0) {            // first sight: warm-start from incumbent
+                    nb.A = L.A; nb.Bx = L.Bx; nb.b = L.b; nb.tle_ema = L.tle_ema;
+                }
+                L.A = nb.A; L.Bx = nb.Bx; L.b = nb.b; L.tle_ema = nb.tle_ema;
+                L.active_bank = slot;
+                L.have_prev = false;               // drop the boundary sample
+                if (L.ytrace.size() > 0) L.ytrace.setZero();
+                ++bank_switches_;
+            }
+            if (L.active_bank >= 0) ++L.banks[size_t(L.active_bank)].samples;
+        }
+
         // ---- Learn from the previous command's outcome (motor TLE) ----
         // The MODEL always learns (also during babble warmup, where it learns the
         // body's response to small random commands).  The CONTROLLER (HK + anti-
@@ -3688,7 +3776,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // writer owns A (measured: with both estimators live the columns
             // wandered run-to-run and TLE hit 2.0 — the two fighting); LMS keeps
             // b and Bx, which the differencing cannot see.
-            const bool a_lms = !(babble_isolate_ > 0.0 && warmup);
+            const bool a_lms = !(babble_isolate_ > 0.0 && warmup)
+                               && !(babble_owns_a_ > 0.0 && babble_isolate_ > 0.0);
             if (a_lms) L.A.noalias() += float(model_lr_) * xi * yin.transpose();
             L.b.noalias() += float(model_lr_) * xi;
             if (smodel) {
@@ -5069,6 +5158,17 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         lj["Cvel"] = flat(L.Cvel);
         if (L.Bx.size() > 0) lj["Bx"] = flat(L.Bx);   // state-model term, only when in use
         if (L.Cp.size() > 0) lj["Cp"] = flat(L.Cp);   // the prior's own controller (split mode)
+        if (!L.banks.empty()) {                        // R1 regime banks
+            nlohmann::json banks = nlohmann::json::array();
+            for (auto const& bk : L.banks) {
+                nlohmann::json bj;
+                bj["n"] = bk.samples; bj["tle"] = bk.tle_ema;
+                if (bk.A.size() > 0) { bj["A"] = flat(bk.A); bj["Bx"] = flat(bk.Bx); bj["b"] = flat(bk.b); }
+                banks.push_back(bj);
+            }
+            lj["banks"] = banks;
+            lj["active_bank"] = L.active_bank;
+        }
         lj["prev_x"] = flat(L.prev_x); lj["prev_y"] = flat(L.prev_y);
         lj["rows_A"] = int(L.A.rows()); lj["cols_A"] = int(L.A.cols());
         legs.push_back(std::move(lj));
@@ -5579,6 +5679,19 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
         double cpn = 0.0;
         for (auto const& L : legs_) if (L.Cp.size() > 0) cpn += double(L.Cp.squaredNorm());
         j["state_prior_cp_norm"] = std::sqrt(cpn);  // the prior's own controller (split mode)
+    }
+    // R1 regime banks — the §3.2 consumer surface: switches counted, per-bank
+    // sample counts and TLEs (leg 0), and the live winner/slot.
+    if (!regime_topic_.empty()) {
+        j["regime_winner"]   = regime_winner_;
+        j["bank_switches"]   = bank_switches_;
+        if (!legs_.empty()) {
+            j["active_bank"] = legs_[0].active_bank;
+            nlohmann::json bs = nlohmann::json::array();
+            for (auto const& b : legs_[0].banks)
+                bs.push_back({{"n", b.samples}, {"tle", b.tle_ema}});
+            j["banks"] = bs;
+        }
     }  // indices resolved last controller tick;
                                                       // active && applied==0 → indices out of range
     // Propulsive-credit homeostat: per-leg functional forward contribution + the
@@ -5988,6 +6101,21 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         if (lj.contains("Cvel")) L.Cvel = toM(vecf(lj.at("Cvel")), m, 2);   // legacy snapshots → keep zero-init
         if (lj.contains("Bx"))   L.Bx   = toM(vecf(lj.at("Bx")), n, n);     // absent = state model off
         if (lj.contains("Cp"))   L.Cp   = toM(vecf(lj.at("Cp")), m, n);     // absent = split off
+        if (lj.contains("banks")) {                                          // R1 regime banks
+            L.banks.clear();
+            for (auto const& bj : lj["banks"]) {
+                Leg::ModelBank bk;
+                bk.samples = bj.value("n", int64_t(0));
+                bk.tle_ema = bj.value("tle", 0.0f);
+                if (bj.contains("A")) {
+                    bk.A  = toM(vecf(bj.at("A")), n, m);
+                    bk.Bx = bj.contains("Bx") && !bj["Bx"].empty() ? toM(vecf(bj.at("Bx")), n, n) : Eigen::MatrixXf();
+                    bk.b  = toM(vecf(bj.at("b")), n, 1);
+                }
+                L.banks.push_back(std::move(bk));
+            }
+            L.active_bank = lj.value("active_bank", -1);
+        }
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);

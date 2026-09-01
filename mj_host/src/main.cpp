@@ -50,6 +50,10 @@ constexpr double kStandingActionScale = 1.0;
 // A robot past this much tilt is on its way down, not standing.
 constexpr double kFallenTiltDeg = 15.0;
 
+// --no-tilt-gate: disables the harness's learnable-regime gate (the hand rule
+// the R1 regime banks are the learned replacement for).
+bool g_no_tilt_gate = false;
+
 const char* name_of(const mjModel* m, mjtObj type, int id) {
     const char* n = mj_id2name(m, type, id);
     return n ? n : "<unnamed>";
@@ -527,7 +531,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             // The learnable-regime gate: the model learns only near-upright
             // (~25°); it always ACTS.  See the adapter's note for the measured
             // motivation (a mixture-poisoned A with half its signs wrong).
-            og->set_regime_learning(body.gravity()[2] < -0.90);
+            // --no-tilt-gate disables it — the R1 regime banks are the LEARNED
+            // replacement for this hand rule, and their gate is precisely
+            // "identification holds without it".
+            if (!g_no_tilt_gate)
+                og->set_regime_learning(body.gravity()[2] < -0.90);
         }
 
         std::array<double, kNumPolicyJoints> ctrl{};
@@ -874,6 +882,7 @@ int main(int argc, char** argv) {
     PushPlan pushes;
     double stub_amp = 0.25, stub_drift = 0.08;
     int ident_every = 0, ident_until = 0;
+    (void)0;
     std::string graph = std::string(MJ_HOST_CONFIG_DIR) + "/a1_motor_epm.json";
     double amplitude = 0.35;
 
@@ -896,6 +905,8 @@ int main(int argc, char** argv) {
             ident_every = std::stoi(next("--ident-every"));
         } else if (a == "--ident-until") {
             ident_until = std::stoi(next("--ident-until"));
+        } else if (a == "--no-tilt-gate") {
+            g_no_tilt_gate = true;
         } else if (a == "--push") {
             pushes.newtons = std::stod(next("--push"));
         } else if (a == "--push-every") {
