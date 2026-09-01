@@ -230,7 +230,11 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
 
             // Track the weakest node for potential death (near-baked nodes
             // remain eligible, but near-baked decay is halved above, so they
-            // rarely reach the threshold).
+            // rarely reach the threshold).  With the spares-baked guard on,
+            // BAKED nodes are exempt — see the config note: earned regimes are
+            // permanent facts, not casualties of a long absence.
+            if (cfg_.health_death_spares_baked
+                && node.visits >= cfg_.baking_threshold) continue;
             if (node.health < worst_health) {
                 worst_health = node.health;
                 worst_id = id;

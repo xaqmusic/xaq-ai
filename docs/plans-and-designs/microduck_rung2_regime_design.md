@@ -160,6 +160,31 @@ to genuinely separate, which needs sustained quiet standing first — the chicke
 level up.  **Re-use contexts:** (a) an attitude-column governor (the split architecture's
 unfinished business); (b) retry once identified standing stretches lengthen.
 
+**The vocabulary-stability audit (2026-09-01, the operator's prune-cascade observation).**
+The operator asked whether the picrawler's watched pattern — long pruning sequences after a
+perturbation, baked nodes included, then relearning the same nodes on recovery — could be
+eating our regimes.  **Mechanism confirmed in code**: the GNG's health-death sweep iterates
+ALL nodes, baked included (its docstring says it "replaces the binary baked/unbaked utility
+system" — the header's "baked = never pruned" contract was silently void), so a long
+absence (fall, rescue, crouch) starves an earned node to death in minutes.  **Fingerprint
+measured on the duck**: 41 regime ids over an hour with 25 dead; the standing crown itself
+migrating 1→16→29 — orphaning the bank map, sending the crown's data to the overflow bank,
+and resetting R2's statistics.  Both of R2's fragilities in one stroke.
+
+**Fix, guarded**: `health_death_spares_baked` (GNG config + EPM param, default false —
+picrawler byte-identical until the operator opts in) + `min_insertion_error` 0.06 on the
+regime EPM (near-duplicate crown-stealing).  Measured: ids 41 → 10, deaths 25 → 2 (seed 1;
+seeds 2–3 stabilise less — 34–38 ids — noted as seed-dependent conditioning).
+
+**And the stack entered the probe band.**  R1-stable, n=6 × 600 s: **falls 7.5 ± 5.1/min
+(the hand-gain probe's own 7–8 band), upright 0.73 ± 0.24 (campaign best), tilt 15.7°,
+brain share 77 %** — versus the churn-vocabulary incumbent at equal falls and upright 0.56.
+Re-running that incumbent also surfaced a silent cross-arm gift: the shared-mode honest-G
+fix (committed during R2) had halved the fixed-squelch stack's falls (12.9 → 7.6) — the
+control re-run is what caught it.  Known residuals: strong seed bimodality (crouch-prone
+seeds drive the ±0.24), the R2 adaptive key still never engages (fixed squelch does the
+work), vocabulary stability varies by seed.
+
 **Why the notes do not block R1:** R1's critical consumer is the *standing* bank, and its
 key (the pure standing node) exists in both seeds at high purity and high share. Mixed
 nodes blur only the transitional banks — which today do not exist at all, so their floor is
