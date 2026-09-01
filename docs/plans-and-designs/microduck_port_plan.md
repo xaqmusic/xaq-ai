@@ -1013,17 +1013,43 @@ identification-vs-toppling tension itself: pulses big enough to out-shout the to
 cause the falls that corrupt the windows. The probe escapes only by scaffold-settling
 between measurements.
 
-**Three candidate roads, for the operator's fork** (in doctrine order):
+**Road 2 was then built and measured the same night — and it changed the regime.**
+`--ident-every K --ident-until N`: during the babble phase the harness inserts a scaffold
+re-settle between pulse windows (the probe's remaining trick). With settles between every
+window, keep-completed-pair-halves across resets, and window-completion writes, **the
+in-module babble now identifies the body**: both legs' pitch angle AND rate authority rows
+match the probe's J sign-for-sign on the bench.
+
+**Stage 15, the identified stack (600 s × 2 seeds, prior vs matched control):**
+
+| arm | falls/min (post-ident) | stuck-crouch rescues | character |
+|---|---|---|---|
+| identified stack + prior | **10–12** | 27–30 of ~80 | falls become held crouches |
+| identified stack, prior 0 | 16–18 | 4–9 | keeps toppling |
+| *(the probe's hand-gain ceiling)* | *(7–8)* | — | *(stands ~6 s stretches)* |
+
+The prior is **verified load-bearing** (~35 % fewer falls than its matched control), the
+stack as a whole entered the probe's band from the 20–27/min it lived in all day, and the
+first ~90 s of every run is a body that simply stays standing while the brain runs its own
+experiments (watch `duck_identified_stack` — sent to the operator). Two seeds; a signal.
+
+**What still separates it from the probe, measured:** (a) the prior's descent equilibrium
+puts effective feedback gain at kp ≲ 2 where the probe's working band is 5–80 — the
+identified LESION arm (prior-only C, ctrl_lr 0) is *worse* than the full stack (20–23/min),
+so the GN descent alone cannot accumulate probe-grade gains and HK's contribution is real;
+(b) the prior's minimum on this body is a *level-trunk crouch*, not the stand — out of the
+identified model's regime, which is the rung-2 shape again.
+
+**The fork that remains for the operator:**
 1. **Rung 2 — the real motor-EPM** (v2 plan §4): a GNG regime vocabulary with per-regime
-   models is the §0-native answer to "one linear model cannot span falling and standing".
-   The big build.
-2. **Identification episodes as a harness policy**: let babble borrow the probe's remaining
-   trick — a scaffold re-settle between pulse pairs. Cheap, host-side, and the module's
-   pair-differencing (already 4/5 signs) would likely close.
-3. **The probe's J as a NAMED CALIBRATION SCAFFOLD**: seed A's lean rows from the startup
-   probe (a transparent sensorimotor reduction — own commands, own sensors, hardware-legal),
-   watch whether the prior then stands the body, and de-scaffold via 1 or 2. Fastest path to
-   a standing duck; the de-scaffold is the honest test.
+   models — now motivated by TWO measured walls (mixture-poisoned identification, and the
+   crouch as an out-of-regime minimum). The big build.
+2. **Close the gain gap within the current mechanism**: why does the descent stall at
+   kp ≲ 2? (Candidates: e-scaled growth self-limits as behaviour improves; the metric's
+   self-normalisation; C-column competition with HK.) A focused mechanism study.
+3. **The probe's J as a NAMED CALIBRATION SCAFFOLD**: seed the lean rows at probe-grade
+   gain and watch whether the duck stands outright; de-scaffold via 1 or 2. Fastest path;
+   the de-scaffold is the honest test.
 
 ### A2 — standup-as-reset · *Track A* · ✅ **HARNESS DONE 2026-08-31, ahead of A1**
 

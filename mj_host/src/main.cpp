@@ -455,8 +455,15 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
 // announce itself, and does the body keep running instead of lying on the floor.
 // ---------------------------------------------------------------------------
 
+// ident_every/ident_until (0 = off): IDENTIFICATION EPISODES — during the first
+// ident_until brain-driven ticks, insert a scaffold re-settle after every
+// ident_every of them.  The probe's remaining trick, moved into the harness: the
+// module's antisymmetric-pair babble cancels drift WITHIN a pair, but pairs that
+// start from a toppling body still ride it; a settle between pairs hands each
+// pair a still start, which is exactly how the probe achieved clean columns.
+// Settle edges publish events.reset (pairing invalidation) and freeze learning.
 int run_with_brain(const std::string& scene, double seconds, uint64_t seed, BrainLike& brain,
-                   bool emit) {
+                   bool emit, int ident_every = 0, int ident_until = 0) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
     Recovery recovery;
@@ -469,8 +476,36 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     const int ticks = int(seconds * kBrainHz);
 
     int frozen_ticks = 0;
+    int brain_ticks_seen = 0, settle_left = 0;
     for (int t = 0; t < ticks; ++t) {
-        const Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
+        Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
+
+        // Identification-episode scheduling (see the note above the function).
+        if (ident_every > 0 && driver == Driver::Brain) {
+            if (settle_left > 0) {
+                const auto g = body.gravity();
+                const auto w = body.gyro();
+                const bool still = g[2] < -0.999
+                                   && std::max({std::fabs(w[0]), std::fabs(w[1]),
+                                                std::fabs(w[2])}) < 0.15;
+                --settle_left;
+                if (still || settle_left == 0) {
+                    settle_left = 0;
+                    brain.on_reset();
+                    brain.set_learning(true);
+                } else {
+                    driver = Driver::Scaffold;   // host override: keep settling
+                }
+            } else if (brain_ticks_seen < ident_until
+                       && brain_ticks_seen > 0
+                       && brain_ticks_seen % ident_every == 0) {
+                settle_left = 100;               // up to 2 s; usually ends at stillness
+                brain.set_learning(false);
+                brain.on_reset();
+                driver = Driver::Scaffold;
+            }
+            if (driver == Driver::Brain) ++brain_ticks_seen;
+        }
 
         // Both edges: tell the brain, and stop or start its learning. Freeze BEFORE
         // the scaffold ever acts, resume only once the body is back.
@@ -732,7 +767,7 @@ int cmd_probe(const std::string& scene, double seconds, uint64_t seed) {
 // ---------------------------------------------------------------------------
 
 int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
-              double amplitude, bool emit) {
+              double amplitude, bool emit, int ident_every = 0, int ident_until = 0) {
     DuckBody probe(scene);   // for the joint ranges the adapter reads by name
 
     // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
@@ -778,7 +813,7 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     for (const auto& id : brain.module_ids()) std::fprintf(stderr, " %s", id.c_str());
     std::fprintf(stderr, "\n");
 
-    const int rc = run_with_brain(scene, seconds, seed, brain, emit);
+    const int rc = run_with_brain(scene, seconds, seed, brain, emit, ident_every, ident_until);
     std::fprintf(stderr, "  mean |action| %.4f over %llu brain ticks\n", brain.mean_abs_action(),
                  (unsigned long long)brain.ticks());
     for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
@@ -830,6 +865,7 @@ int main(int argc, char** argv) {
     uint64_t seed = 0;
     PushPlan pushes;
     double stub_amp = 0.25, stub_drift = 0.08;
+    int ident_every = 0, ident_until = 0;
     std::string graph = std::string(MJ_HOST_CONFIG_DIR) + "/a1_motor_epm.json";
     double amplitude = 0.35;
 
@@ -848,6 +884,10 @@ int main(int argc, char** argv) {
             noise = std::stod(next("--noise"));
         } else if (a == "--seed") {
             seed = std::stoull(next("--seed"));
+        } else if (a == "--ident-every") {
+            ident_every = std::stoi(next("--ident-every"));
+        } else if (a == "--ident-until") {
+            ident_until = std::stoi(next("--ident-until"));
         } else if (a == "--push") {
             pushes.newtons = std::stod(next("--push"));
         } else if (a == "--push-every") {
@@ -885,7 +925,8 @@ int main(int argc, char** argv) {
         if (mode == "--hold") return cmd_hold(scene, seconds, noise, seed, pushes);
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
         if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
-        if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true);
+        if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true,
+                                                ident_every, ident_until);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

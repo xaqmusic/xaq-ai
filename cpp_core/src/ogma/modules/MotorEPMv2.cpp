@@ -1378,7 +1378,10 @@ void MotorEPMv2::handle_event(std::string_view topic, MessagePtr payload) {
                 L.pulse_motor = -1;        // a pulse window straddling the reset is garbage
                 L.pulse_sign  = 0.0f;      // (measured: the leg whose pulses topple more
                                            // wrote scrambled columns until invalidated)
-                L.pulse_dplus_motor = -1;  // and so is a half-completed +/− pair
+                // The COMPLETED d+ half of a pair is kept: with identification
+                // episodes the harness settles between windows, so both halves
+                // start still and stay comparable — clearing it here left every
+                // pair half-finished and A at its init (measured: all ~0.01).
             }
         }
     }
@@ -3927,29 +3930,36 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // it GROWS — so unpaired windows invert columns wholesale (measured:
                 // 4/5 signs flipped, deterministically).  A +/− pair on the same
                 // motor cancels the drift to first order; only completed pairs
-                // write the column.
+                // write the column.  The write happens at the window's FINAL tick
+                // (not the next boundary), so a harness settle scheduled between
+                // pairs cannot swallow a completed measurement; the final command's
+                // one-tick-late effect is excluded by construction, hence the
+                // (hold−1) denominator and the x0 capture at the window's first
+                // tick.
                 {
-                    const bool boundary = (pulse_motor != L.pulse_motor)
-                                          || (pulse_sign != L.pulse_sign);
-                    if (boundary) {
-                        if (L.pulse_motor >= 0 && L.pulse_x0.size() == n) {
-                            const Eigen::VectorXf d =
-                                (L.x - L.pulse_x0) / float(std::max(1, babble_hold_));
-                            if (L.pulse_sign > 0.0f) {
-                                L.pulse_dplus = d;               // first half of the pair
-                                L.pulse_dplus_motor = L.pulse_motor;
-                            } else if (L.pulse_dplus_motor == L.pulse_motor
-                                       && L.pulse_dplus.size() == n) {
-                                const Eigen::VectorXf resp =
-                                    (L.pulse_dplus - d) / (2.0f * float(babble_scale_));
-                                L.A.col(L.pulse_motor) =
-                                    0.8f * L.A.col(L.pulse_motor) + 0.2f * resp;
-                                L.pulse_dplus_motor = -1;
-                            }
-                        }
-                        L.pulse_motor = pulse_motor;
+                    const int hold = std::max(2, babble_hold_);
+                    const bool window_starts    = ((L.steps_seen - 1) % int64_t(hold)) == 0;
+                    const bool window_completes = (L.steps_seen % int64_t(hold)) == 0;
+                    if (window_starts) {
+                        L.pulse_motor = pulse_motor;   // −1 when this leg is passive
                         L.pulse_sign  = pulse_sign;
                         L.pulse_x0    = L.x;
+                    }
+                    if (window_completes && L.pulse_motor >= 0 && L.pulse_motor == pulse_motor
+                        && L.pulse_x0.size() == n) {
+                        const Eigen::VectorXf d = (L.x - L.pulse_x0) / float(hold - 1);
+                        if (L.pulse_sign > 0.0f) {
+                            L.pulse_dplus = d;                   // first half of the pair
+                            L.pulse_dplus_motor = L.pulse_motor;
+                        } else if (L.pulse_dplus_motor == L.pulse_motor
+                                   && L.pulse_dplus.size() == n) {
+                            const Eigen::VectorXf resp =
+                                (L.pulse_dplus - d) / (2.0f * float(babble_scale_));
+                            L.A.col(L.pulse_motor) =
+                                0.8f * L.A.col(L.pulse_motor) + 0.2f * resp;
+                            L.pulse_dplus_motor = -1;
+                        }
+                        L.pulse_motor = -1;                      // window consumed
                     }
                 }
             } else {
