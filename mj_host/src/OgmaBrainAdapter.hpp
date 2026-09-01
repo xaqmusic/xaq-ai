@@ -68,6 +68,20 @@ public:
     double   mean_abs_action() const;
     std::vector<std::string> module_ids() const;
 
+    // ★ The risk this experiment must be able to see.
+    //
+    // The ledger records that on the picrawler "inverted-on-flat is a LOW-SURPRISE
+    // attractor -- motor_tle falls 0.24 -> 0.08". Once a forward model learns
+    // falling well, lying down becomes PREDICTABLE, and a rule that descends a
+    // sensitivity metric may come to prefer it. Adding gravity to the loop could
+    // therefore produce a very good faller.
+    //
+    // So TLE is bucketed by posture from the first run rather than after somebody
+    // wonders. If tle_down < tle_up, the duck is learning to fall.
+    double tle_upright() const;
+    double tle_down() const;
+    void   sample_tle(bool upright);
+
     // Per-module diag_lite, as "<id> {json}" lines. The §3.2 question every run
     // has to answer before any behaviour is discussed: DID THE CONSUMER FIRE?
     // A motor TLE pinned at zero means the self-model is predicting perfectly,
@@ -87,6 +101,8 @@ private:
     std::map<std::string, double> frozen_rates_;
     bool learning_ = true;
     bool announced_freeze_ = false;
+    double tle_up_sum_ = 0.0, tle_down_sum_ = 0.0;
+    uint64_t tle_up_n_ = 0, tle_down_n_ = 0;
     double action_abs_sum_ = 0.0;
     uint64_t action_samples_ = 0;
 };

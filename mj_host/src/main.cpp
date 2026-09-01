@@ -485,6 +485,10 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         }
         const bool learning_now = (driver == Driver::Brain);
         if (!learning_now) ++frozen_ticks;
+        // Posture-bucketed TLE, on the same -0.5 gravity threshold the harness
+        // uses for "down", so the two agree about what a fall is.
+        if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain))
+            og->sample_tle(body.gravity()[2] < -0.5);
 
         std::array<double, kNumPolicyJoints> ctrl{};
         if (driver == Driver::Scaffold) {
@@ -566,6 +570,11 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     std::fprintf(stderr, "  mean |action| %.4f over %llu brain ticks\n", brain.mean_abs_action(),
                  (unsigned long long)brain.ticks());
     for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
+    std::fprintf(stderr, "  motor_tle upright %.4f | down %.4f  -> %s\n", brain.tle_upright(),
+                 brain.tle_down(),
+                 brain.tle_down() < brain.tle_upright()
+                     ? "!! DOWN IS THE QUIETER STATE — check for a lying-down attractor"
+                     : "upright is not the noisier state (good)");
     return rc;
 }
 

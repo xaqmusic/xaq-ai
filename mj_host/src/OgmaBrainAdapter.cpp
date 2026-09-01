@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cmath>
 #include <stdexcept>
+#include <functional>
 #include <variant>
 
 #include <ogma/GraphConfig.hpp>
@@ -89,6 +90,29 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
     const auto w = body.gyro();
     publish("imu", {float(g[0]), float(g[1]), float(g[2]),
                     float(w[0]), float(w[1]), float(w[2])});
+
+    // lean — SIGNED FORE/AFT LEAN, the channel A1 was missing.
+    //
+    // Each motor group's state was [pos, action, delta] per joint: angles, actions,
+    // joint velocities, and nothing else. A duck at its exact rest pose has the same
+    // proprioceptive state standing up as lying on its side, so an inverted pendulum
+    // cannot be balanced from it — which is also why the postural reflex changed
+    // nothing, since it pulls toward a joint pose the body was already in.
+    //
+    // Doctrine §1 step 2: the fix for that is a SENSOR, not a smarter policy.
+    // The bridge's load socket appends this as the trailing element of every group's
+    // vector, and MotorEPM sizes its state from the arriving vector (`L.x =
+    // pt->values`), so the forward model learns how its own actions move the lean
+    // without any module being edited.
+    //
+    // x is fore/aft in the trunk frame (the hip bodies are separated on y), and the
+    // same value goes to every group on purpose: each leg owns its own C, so the two
+    // legs LEARN opposite responses rather than being told them. LEARNED cooperates,
+    // IMPOSED fights.
+    //
+    // Roll is deliberately absent — the socket is one element wide, and widening it
+    // is a module change and therefore a separate conversation.
+    publish("lean", {float(g[0]), float(g[0])});
 }
 
 std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body) {
@@ -190,12 +214,54 @@ void OgmaBrainAdapter::set_learning(bool on) {
     }
 }
 
+void OgmaBrainAdapter::sample_tle(bool upright) {
+    double tle = 0.0;
+    int n = 0;
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_lite();
+        if (!d.contains("motor_tle")) continue;
+        tle += d["motor_tle"].get<double>();
+        ++n;
+    }
+    if (!n) return;
+    tle /= n;
+    if (upright) { tle_up_sum_ += tle; ++tle_up_n_; }
+    else         { tle_down_sum_ += tle; ++tle_down_n_; }
+}
+
+double OgmaBrainAdapter::tle_upright() const {
+    return tle_up_n_ ? tle_up_sum_ / double(tle_up_n_) : 0.0;
+}
+double OgmaBrainAdapter::tle_down() const {
+    return tle_down_n_ ? tle_down_sum_ / double(tle_down_n_) : 0.0;
+}
+
 std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
     std::vector<std::string> out;
     for (auto* m : instance_->modules()) {
         const auto d = m->diag_lite();
         if (d.is_null() || d.empty()) continue;
-        out.push_back(std::string(m->id()) + " " + d.dump());
+        std::string line = std::string(m->id()) + " " + d.dump();
+        // §3.2 rule 5 again: the state width, read from the module rather than
+        // inferred from the config. An appended sensor channel that never widened
+        // the model is a knob that cannot act, and it would look causal anyway.
+        // Search the snapshot for the forward model's own row count rather than
+        // guessing at its layout: A maps action -> state, so rows_A IS the state
+        // width the model was built to.
+        std::function<int(const nlohmann::json&)> find_rows = [&](const nlohmann::json& j) -> int {
+            if (j.is_object()) {
+                auto it = j.find("rows_A");
+                if (it != j.end() && it->is_number()) return it->get<int>();
+                for (auto& kv : j.items()) { int r = find_rows(kv.value()); if (r) return r; }
+            } else if (j.is_array()) {
+                for (auto& e : j) { int r = find_rows(e); if (r) return r; }
+            }
+            return 0;
+        };
+        if (const int rows = find_rows(m->snapshot_state())) line += "  state_dim=" + std::to_string(rows);
+        out.push_back(line);
     }
     return out;
 }

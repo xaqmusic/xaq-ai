@@ -676,7 +676,7 @@ Each one gets a `register_source` line with a plain-language description, exactl
 `picrawler_body.gd:2842` does, so the graph panel shows the full environment↔brain interface.
 **G6 is written at the end of this phase, before A1 or B1 starts.**
 
-### A1 — the first brain: MotorEPM on measured proprioception · *Track A* · ⚙ **RUNS 2026-08-31 · ties a random walk · promote-or-kill open**
+### A1 — the first brain: MotorEPM on measured proprioception · *Track A* · ⚙ **RUNS · two levers null · diagnosis narrowed to the OBJECTIVE**
 
 The point of the whole exercise: a `JointSensorimotorBridge` + `MotorEPM` graph on a body whose
 `x` is *measured*. The picrawler config `motor_epm_pure_hk__inst__stance__c025__lr10.json` is
@@ -758,6 +758,61 @@ capability is loud, and standing is the loudest thing this body could do. Nothin
 **What is NOT the explanation**, because each was checked rather than assumed: a dead consumer,
 a collapsed observation, a broken freeze, or a mis-scaled sensor. The substrate is running
 correctly and the body is still falling over.
+
+#### Two levers tried, both null, and together they narrow it a long way
+
+**Lever 1 — the postural reflex, which I had disabled.** The A1 config set
+`postural_gain: 0.0`, zeroing the one mechanism whose own description reads *"weak PD pull
+toward the standing rest pose… gives HK a stable upright fixed point to bifurcate from"*.
+Swept at 0.3 and 0.7, n=3: **flat** (37.5–41 rescues/min). Verified live rather than assumed —
+`rest_captured` fires, the width guard passes exactly (15 ≥ 15, 12 ≥ 12), and the
+`knee_tuck_target` / `hip2_tuck_target` spider-stance overrides sit at their `−99` sentinel, so
+no picrawler geometry leaked in.
+
+**Why it could not have worked, in hindsight:** the postural reflex pulls toward a *joint pose*,
+and the duck was already in it. `height_homeo_gain`'s own docstring says this outright —
+*"the postural reflex defends a joint-angle pose, not a height."*
+
+**⚠ And the picrawler's height homeostat cannot be borrowed to fix that.** Its bias is
+`y[1] += …`, hardcoded, with a comment explaining that index 1 is *hip2* on a picrawler. On a
+duck leg index 1 is `hip_roll`, a lateral joint — biasing it splays the legs sideways instead of
+raising the body. That is the "actuator with no authority over the target" failure the ledger
+records three times, and it would have been invisible in the metrics.
+
+**Lever 2 — the missing observation.** Each group's state was `[pos, action, delta]` per joint
+and nothing else: **the motor loop cannot see gravity** (`handle_imu` extracts only a yaw rate,
+for heading-hold). A duck at its rest pose has an *identical* proprioceptive state standing up
+and lying on its side, so an inverted pendulum cannot be balanced from it. Doctrine §1 step 2
+says the fix for that is a sensor.
+
+Signed fore/aft lean (projected gravity x) was appended to every group through the bridge's
+`load_topic` socket. **No module edited** — MotorEPM sizes its state from the arriving vector
+(`L.x = pt->values`), so the extra element is learned. Verified by reading the forward model's
+own row count: **`state_dim` 15 → 16.**
+
+| arm | rescues/min | brain share | `motor_tle` up / down |
+|---|---|---|---|
+| A1 baseline | 37.5–38 | 45–47 % | 0.69–0.71 / 0.69–0.72 |
+| + lean in the loop | 39.5–41 | 42–45 % | 0.78–0.79 / 0.78–0.79 |
+
+**Null, and slightly negative.** One risk did *not* materialise: the ledger's *"inverted-on-flat
+is a low-surprise attractor"* would have shown as `tle_down < tle_up`, and it does not — lying
+down is not the quieter state here. That instrument stays on.
+
+#### What the two nulls together say
+
+The observation was necessary and **not sufficient**, and the reason is the objective rather
+than the sensor. Knowing which way you are falling does not make you want to stop: the
+controller descends a *sensitivity* metric, and MotorEPM's own header is explicit that **"the
+rule cannot rest at standing."** It now has the information and still no reason to use it.
+
+**This is where a new module becomes the honest answer — for one narrow reason, not for
+"reflexes".** MotorEPM's objective socket (`posture_topics`) carries *"motor_dim target joint
+positions"*: joint space only. What this body needs is a prior on a **non-joint state dimension**
+— *predicted lean = 0* — which that socket cannot express. That is the rewrite rule applied
+exactly: the behaviour is "stand tall", the error it minimises is predicted-minus-measured lean,
+and the module needs to be able to hold that prediction. `MotorEPMv2` exists for precisely this
+("v2 STARTS AS A COPY … so new features can be tested without touching the benchmark").
 
 **What to try next, in the order the doctrine implies.** `mean |u|` sits at 0.59–0.82 on a
 [−1, 1] range, so the controller is near saturation, and `motor_gain = 3.0` / `c_init = 0.25`
