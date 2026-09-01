@@ -16,6 +16,66 @@
 
 # Microduck port plan
 
+## ▶ Resume here
+
+**State on 2026-08-31.** Branch `microduck`, clean and pushed. Simulation only — the robot sold
+out, so there is no hardware and none is assumed. Upstream lives *outside* this repo, on purpose:
+`/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
+
+```sh
+./mj_host/run.sh gates                     # G1/G2/G3/G4, non-zero exit on any failure
+./mj_host/run.sh brain --secs 60           # A1: MotorEPM driving, watch it live
+./mj_host/run.sh stub  --secs 60           # the recovery harness against a brain that fails
+./mj_host/run.sh watch --secs 20 --push 25 --push-every 4   # the scaffold's own recovery
+```
+
+| phase | state |
+|---|---|
+| S0 vendor + build | ✅ MuJoCo 3.12.0 pinned by hash; G1/G3/G4 pass |
+| S1 body + run loop | ✅ G2 passes; cross-checks exactly against an independent Python implementation |
+| A2 recovery harness | ✅ built *before* A1 with a stub brain, since it needs a brain that fails |
+| observation path | ✅ `run.sh` + `tools/duck_viewer`; the viewer draws the host's `qpos` and never simulates |
+| **A1 first brain** | ⚙ **runs, ties a random walk, two verified nulls** |
+| S2 / S3 / B1–B3 | not started |
+
+### The one decision waiting on the operator
+
+A1 ties a random walk, and two levers came back null **with the consumer verified firing in
+both cases** (§"Two levers tried"). Together they place the problem in **the objective, not the
+sensor**: MotorEPM descends a sensitivity metric, and its own header says *"the rule cannot rest
+at standing."* It now has the lean signal and still no reason to use it.
+
+**Proposed next step:** extend `MotorEPMv2`'s objective socket so a prior can target *any*
+element of the state vector — *predicted lean = 0* — rather than only the `motor_dim`
+joint-position slots. That is the rewrite rule applied exactly: the behaviour is "stand tall",
+the error it minimises is predicted-minus-measured lean, and the module must be able to hold
+that prediction. It is **not** a hand-written inverted-pendulum reflex, which §1 would throw away.
+
+**It is a module change, which §Coordination forbids on this branch.** It needs its own branch
+and an explicit go-ahead. `MotorEPMv2` exists for this ("v2 starts as a copy, so new features
+can be tested without touching the benchmark").
+
+### Also parked
+
+A written, tested, **unsubmitted** upstream PR exposing joint velocities and currents on
+`robot.state` — branch `state-velocities-currents` in the microduck clone. Opening it is the
+operator's call (REPORTS.md §9.6).
+
+### Traps a fresh session should not re-learn
+
+- **Picrawler joint indices are baked into MotorEPM's biases.** `height_homeo_gain` applies
+  `y[1] += …` because index 1 is *hip2* on a picrawler; on a duck leg it is `hip_roll`, a lateral
+  joint. Borrowing that homeostat splays the legs sideways and looks fine in the metrics.
+- **The postural reflex defends a joint pose, not a height** — its sibling's docstring says so.
+  On a body already in that pose it can do nothing.
+- **`tilt_deg()` and `trunk_position()` are world-frame instrumentation.** No brain subscribes to
+  them; the recovery harness deliberately uses projected gravity so the same criterion runs on
+  hardware.
+- **Never edit a `cpp_core` module on this branch** (§Coordination). G5 — the picrawler staying
+  byte-identical — is checked at both ends.
+
+---
+
 ## Two goals, and they put the Markov blanket in different places
 
 **Goal 1 — improve the framework.** Use a body that suits active inference better than the
