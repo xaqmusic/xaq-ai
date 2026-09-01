@@ -1268,6 +1268,7 @@ private:
         // L.A/Bx/b remain the ACTIVE working copy; banks swap in/out on regime
         // change, so every model path reads/writes exactly as before.
         struct ModelBank { Eigen::MatrixXf A, Bx; Eigen::VectorXf b; float tle_ema = 0.0f;
+                           float sp_err = -1.0f;   // per-regime prior-error EMA (−1 = unseen)
                            int64_t samples = 0; };
         std::vector<ModelBank> banks;
         int                 active_bank = -1;
@@ -1556,6 +1557,7 @@ private:
     // R1: the regime socket
     std::string regime_topic_;                  // RealityToken source; empty = banks off, byte-identical
     double babble_owns_a_ = 0.0;                // 1 = the babble's paired-difference estimator owns A forever
+    double state_prior_calm_mode_ = 0.0;        // R2: 0 = continuous key (legacy), 1 = regime-keyed
     int    regime_banks_   = 6;                 // bank slots (last slot = shared overflow)
     int    regime_winner_  = -1;                // latest winner_id from the token
     std::vector<int> bank_of_winner_;           // winner_id -> bank slot, first-seen order

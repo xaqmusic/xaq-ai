@@ -144,6 +144,22 @@ shared model can hold (9/9 suite green).
 | per-regime TLE < mixed | ✅ standing bank 0.45 vs 2.0–2.7 (transitional) and ~1.0 (mixed) |
 | behaviour (n=6 × 600 s) | ✅ upright **0.66±0.12 vs 0.58±0.10** (campaign best), tilt 21.4 vs 23.9, brain 62.5 % vs 56.5 %, falls tie |
 
+**R2 measured (2026-09-01) — TIE at 600 s, GATE FAILED at the hour; default-off.**
+Build: `state_prior_calm_mode 1` — the calm target becomes the ACTIVE BANK's prior-error EMA
+against the worst across banks (discrete, regime-local, storm-proof by construction), through
+the existing ratchet; per-bank `sp_err` statistics; unit test
+`RegimeKeyedCalmQuietsTheSatisfiedRegime` (the satisfied regime anneals, the violated one
+keeps drive, nothing hand-labeled — 10/10 suite green).  On the duck: behaviourally a TIE at
+n=6 × 600 s (11.5±2.9 vs 12.9±3.5 falls, upright 0.58±0.19 vs 0.66±0.12); at the hour-soak
+gate the squelch ENGAGED once — quiet-band |u| 0.40–0.47 for 25 minutes, the campaign's
+first sustained quiet — then re-inflated, and did not reproduce (1 of 6 soak runs).  Two
+mechanisms recorded: the prior's attitude columns in shared C grow without bound under the
+squelch (to 103; the split's honest-G fix, ported to shared mode, did NOT tame it — the
+growth also happens unsquelched), and the key's engagement needs the standing bank's error
+to genuinely separate, which needs sustained quiet standing first — the chicken-egg one
+level up.  **Re-use contexts:** (a) an attitude-column governor (the split architecture's
+unfinished business); (b) retry once identified standing stretches lengthen.
+
 **Why the notes do not block R1:** R1's critical consumer is the *standing* bank, and its
 key (the pure standing node) exists in both seeds at high purity and high share. Mixed
 nodes blur only the transitional banks — which today do not exist at all, so their floor is

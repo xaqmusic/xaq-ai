@@ -251,6 +251,18 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
          "own self-limiting rule. 0 = legacy shared C, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_calm_mode", ParamMutability::HotMutable,
+         "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
+         "measured storm-coupled: the flail generates the very error that holds its own "
+         "squelch open). 1 = REGIME-KEYED: the target is the ACTIVE BANK's prior-error EMA "
+         "against the worst seen across banks — a discrete key on slow statistics the storm "
+         "cannot fake, with the reference supplied by the vocabulary's own spread (no "
+         "constant, no self-referential average). A bank that satisfies the prior anneals "
+         "toward quiet; a bank that does not keeps full drive; nothing is hand-labeled "
+         "'standing'. Requires engaged regime banks (else mult stays 1). The ratchet "
+         "(attack 0.03 / release 0.2) still smooths bank transitions; state_prior_calm_fixed "
+         "still pins when set. 0 = byte-identical to the continuous key.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"babble_owns_a", ParamMutability::HotMutable,
          "ONE OWNER PER ESTIMAND, extended past warmup (2026-09-01, the R1 gate's finding): "
          "when 1 and babble_isolate is configured, the paired-difference babble owns A "
@@ -901,6 +913,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_damping"] = state_prior_damping_;
     m["regime_topic"] = regime_topic_;
     m["babble_owns_a"] = babble_owns_a_;
+    m["state_prior_calm_mode"] = state_prior_calm_mode_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1074,6 +1087,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
     apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
     apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
+    apply_param(params, "state_prior_calm_mode", [&](auto const& v){ state_prior_calm_mode_ = get_double(v, "state_prior_calm_mode"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -3970,19 +3984,37 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             const bool split = state_prior_split_ > 0.0;
                             if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);
                             Eigen::MatrixXf& Cdst = split ? L.Cp : L.C;
-                            // In split mode the step's G must be the TRUE actuator
-                            // Jacobian — the operating point INCLUDING Cp's own
-                            // contribution and the calm squelch.  Computed blind to
-                            // Cp, the descent kept writing at G≈1 into a rail of
-                            // its own making and Cp grew without bound (measured:
-                            // |u| pinned at 0.994 with C at 0.03).  Honest G
-                            // restores the self-limit: railed → G→0 → step→0.
+                            // The step's G must be the TRUE actuator Jacobian — the
+                            // operating point the body actually ran, INCLUDING the
+                            // calm squelch (and Cp in split mode).  Computed blind,
+                            // the descent writes at G≈1 into a rail of its own
+                            // making and the target columns grow without bound —
+                            // measured in split mode (|u| 0.994 at C 0.03) and
+                            // AGAIN in shared mode under the R2 regime calm
+                            // (attitude columns to 103, the 25-minute quiet
+                            // re-inflating).  Honest G restores the self-limit.
                             Eigen::VectorXf Gt = G.diagonal();
                             if (split) {
                                 Eigen::VectorXf zt = L.last_mult * (L.C * L.prev_x + L.h)
                                                      + L.Cp * L.prev_x;
                                 for (int j = 0; j < m; ++j) {
                                     const float t = std::tanh(zt[j]);
+                                    Gt[j] = 1.0f - t * t;
+                                }
+                            } else if (L.last_mult < 1.0f) {
+                                // shared C under the squelch: z_actual =
+                                // mult·(z − z_att) + z_att; recompute G there.
+                                Eigen::VectorXf zfull = L.C * L.prev_x + L.h;
+                                Eigen::VectorXf zatt  = Eigen::VectorXf::Zero(m);
+                                for (size_t kk = 0; kk < state_prior_indices_.size(); ++kk) {
+                                    int ai = int(state_prior_indices_[kk]);
+                                    if (ai < 0) ai += n;
+                                    if (ai < 0 || ai >= n) continue;
+                                    zatt.noalias() += L.C.col(ai) * L.prev_x[ai];
+                                }
+                                for (int j = 0; j < m; ++j) {
+                                    const float zt = L.last_mult * (zfull[j] - zatt[j]) + zatt[j];
+                                    const float t = std::tanh(zt);
                                     Gt[j] = 1.0f - t * t;
                                 }
                             }
@@ -4022,6 +4054,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     state_prior_err_long_ += 0.0005f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
                                                         - state_prior_err_long_);
                     state_prior_applied_ = sp_n;
+                    // R2: the ACTIVE bank's own prior-error EMA — the discrete
+                    // calm key's statistic (slow, regime-local, storm-proof).
+                    if (sp_n && L.active_bank >= 0 && L.active_bank < int(L.banks.size())) {
+                        auto& bk = L.banks[size_t(L.active_bank)];
+                        const float e = sp_err / float(sp_n);
+                        bk.sp_err = (bk.sp_err < 0.0f) ? e : bk.sp_err + 0.01f * (e - bk.sp_err);
+                    }
                 }
                 // Phase-conditioned feed-forward: train Cphi to REDUCE the keyframe error (x* − x)
                 // at the command phase — NOT HK surprise (which damps motion).  Self-limiting: as
@@ -4215,8 +4254,26 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                         e_now += std::fabs(L.x[idx]); ++e_n;
                     }
                     if (e_n) e_now /= float(e_n);
-                    L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
-                    const float target = std::clamp(e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                    float target;
+                    if (state_prior_calm_mode_ > 0.0) {
+                        // R2: the regime key — the active bank's slow prior-error
+                        // EMA against the worst across banks.  Discrete, regime-
+                        // local, storm-proof; 1.0 (full drive) until banks engage.
+                        target = 1.0f;
+                        if (L.active_bank >= 0 && L.active_bank < int(L.banks.size())
+                            && L.banks[size_t(L.active_bank)].sp_err >= 0.0f) {
+                            float ref = 0.0f;
+                            for (auto const& bk : L.banks)
+                                if (bk.sp_err >= 0.0f && bk.samples > 500)
+                                    ref = std::max(ref, bk.sp_err);
+                            if (ref > 1e-6f)
+                                target = std::clamp(
+                                    L.banks[size_t(L.active_bank)].sp_err / ref, 0.1f, 1.0f);
+                        }
+                    } else {
+                        L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
+                        target = std::clamp(e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                    }
                     const float k = (target > L.calm_state) ? 0.2f : 0.03f;
                     L.calm_state += k * (target - L.calm_state);
                     mult = 1.0f - float(state_prior_calm_) * (1.0f - L.calm_state);
@@ -4266,9 +4323,26 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // and releases full drive.  Peak decay 0.999/tick (~20 s); the
                 // ratchet stays (attack 0.005, release 0.2) so single noisy
                 // ticks cannot flip the state.  All dimensionless, self-scaled.
-                L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
-                const float target = std::clamp(
-                    e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                float target;
+                if (state_prior_calm_mode_ > 0.0) {
+                    // R2: the regime key — see the split branch and the
+                    // state_prior_calm_mode docstring.
+                    target = 1.0f;
+                    if (L.active_bank >= 0 && L.active_bank < int(L.banks.size())
+                        && L.banks[size_t(L.active_bank)].sp_err >= 0.0f) {
+                        float ref = 0.0f;
+                        for (auto const& bk : L.banks)
+                            if (bk.sp_err >= 0.0f && bk.samples > 500)
+                                ref = std::max(ref, bk.sp_err);
+                        if (ref > 1e-6f)
+                            target = std::clamp(
+                                L.banks[size_t(L.active_bank)].sp_err / ref, 0.1f, 1.0f);
+                    }
+                } else {
+                    L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
+                    target = std::clamp(
+                        e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                }
                 // Attack must FIT INSIDE an upright episode: at 0.005/tick the
                 // descent needed ~300 consecutive quiet ticks while episodes ran
                 // 100–150, and every fall's release reset it — the squelch never
@@ -4279,6 +4353,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 if (state_prior_calm_fixed_ > 0.0) mult = float(state_prior_calm_fixed_);
                 y = z_att + mult * (y - z_att);
                 calm_mult_ = mult;
+                L.last_mult = mult;
             } else {
                 calm_mult_ = 1.0f;
             }
@@ -5162,7 +5237,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
             nlohmann::json banks = nlohmann::json::array();
             for (auto const& bk : L.banks) {
                 nlohmann::json bj;
-                bj["n"] = bk.samples; bj["tle"] = bk.tle_ema;
+                bj["n"] = bk.samples; bj["tle"] = bk.tle_ema; bj["err"] = bk.sp_err;
                 if (bk.A.size() > 0) { bj["A"] = flat(bk.A); bj["Bx"] = flat(bk.Bx); bj["b"] = flat(bk.b); }
                 banks.push_back(bj);
             }
@@ -5689,7 +5764,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
             j["active_bank"] = legs_[0].active_bank;
             nlohmann::json bs = nlohmann::json::array();
             for (auto const& b : legs_[0].banks)
-                bs.push_back({{"n", b.samples}, {"tle", b.tle_ema}});
+                bs.push_back({{"n", b.samples}, {"tle", b.tle_ema}, {"err", b.sp_err}});
             j["banks"] = bs;
         }
     }  // indices resolved last controller tick;
@@ -6107,6 +6182,7 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
                 Leg::ModelBank bk;
                 bk.samples = bj.value("n", int64_t(0));
                 bk.tle_ema = bj.value("tle", 0.0f);
+                bk.sp_err  = bj.value("err", -1.0f);
                 if (bj.contains("A")) {
                     bk.A  = toM(vecf(bj.at("A")), n, m);
                     bk.Bx = bj.contains("Bx") && !bj["Bx"].empty() ? toM(vecf(bj.at("Bx")), n, n) : Eigen::MatrixXf();

@@ -447,8 +447,12 @@ TEST(StatePrior, StateModelIdentifiesThePole) {
 TEST(StatePrior, RegimeBanksUnmixOpposedAuthorities) {
     auto mk = [](bool banks) {
         auto p = base_params();
-        p["babble_ticks"]   = int64_t{100000};   // model-only learning throughout
+        // Banks engage only after warmup (the R1 delay, measured in), so warmup
+        // ends early and persistent explore noise supplies the identification
+        // excitation instead (deterministic per seed, identical across arms).
+        p["babble_ticks"]   = int64_t{200};
         p["babble_scale"]   = 0.25;
+        p["explore_noise"]  = 0.3;
         p["state_model_lr"] = 0.02;
         if (banks) { p["regime_topic"] = std::string("sp.regime"); p["regime_banks"] = int64_t{3}; }
         return p;
@@ -526,6 +530,75 @@ TEST(StatePrior, RegimeBanksUnmixOpposedAuthorities) {
 
     // (iii) the consumer counter.
     EXPECT_GT(B.m.diag_snapshot()["bank_switches"].get<int64_t>(), 10);
+}
+
+// =============================================================================
+// 6d. R2 regime-keyed calm: the bank that satisfies the prior anneals toward
+//     quiet; the bank that cannot keeps full drive.  Regime A's plant is
+//     controllable near the target; regime B is dragged to +0.5 by a drift the
+//     motors cannot cancel.  Nothing labels the regimes — the per-bank error
+//     statistics decide.  (The five continuous keys all failed storm-coupled;
+//     this is the discrete replacement, gated by state_prior_calm_mode.)
+// =============================================================================
+TEST(StatePrior, RegimeKeyedCalmQuietsTheSatisfiedRegime) {
+    auto p = base_params();
+    p["babble_ticks"]   = int64_t{200};
+    p["babble_scale"]   = 0.25;
+    p["explore_noise"]  = 0.10;
+    p["state_model_lr"] = 0.02;
+    p["regime_topic"]   = std::string("sp.regime");
+    p["regime_banks"]   = int64_t{3};
+    p["state_prior_indices"] = std::vector<double>{-1.0};
+    p["state_prior_targets"] = std::vector<double>{0.0};
+    p["state_prior_gain"]    = 1.0;
+    p["state_prior_calm"]      = 1.0;
+    p["state_prior_calm_mode"] = 1.0;
+    Fixture f(p);
+
+    const float k[kMotors] = {0.050f, -0.030f, 0.020f};
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<float> nd(-0.02f, 0.02f);
+    float lean = 0.05f;
+    double multA = 0.0, multB = 0.0; int nA = 0, nB = 0;
+    for (uint64_t t = 0; t < 12000; ++t) {
+        const bool regA = (t / 400) % 2 == 0;
+        f.bus.begin_tick(t);
+        auto rt = std::make_shared<ogma::RealityToken>();
+        rt->winner_id = regA ? 0 : 7;
+        f.bus.publish("sp.regime", rt);
+        auto pt = std::make_shared<ogma::ProprioToken>();
+        pt->values = Eigen::VectorXf::Zero(kStateN);
+        pt->values[kLeanIdx] = lean;
+        pt->sensor = "proprio";
+        f.bus.publish("sp.p0", pt);
+        f.m.tick(t);
+        f.bus.end_tick();
+        float push = 0.0f;
+        for (int j = 0; j < kMotors; ++j) {
+            const float a = f.accel(j);
+            if (std::isfinite(a)) push += k[j] * a;
+        }
+        // Regime A: STRONGLY self-stable near 0 (leak 0.75 — the prior is
+        // satisfiable and stays satisfied).  Regime B: slow plant dragged toward
+        // +0.5 by a drift beyond the motors' authority.  (First version gave A
+        // the same slow leak and exploration noise kept |lean|_A ≈ |lean|_B —
+        // the statistics could not separate what the plant did not separate.)
+        const float leak  = regA ? 0.75f : 0.90f;
+        const float drift = regA ? 0.0f : 0.05f;
+        lean = std::clamp(leak * lean + push + drift + nd(rng), -1.5f, 1.5f);
+        // Late run, and only each phase's SETTLED half: the ratchet needs ~100
+        // ticks to descend after a bank switch, and averaging the transient in
+        // would test the smoothing, not the key.
+        if (t > 8000 && (t % 400) >= 200) {
+            const double m2 = f.m.diag_snapshot()["state_prior_calm_mult"].get<double>();
+            if (regA) { multA += m2; ++nA; } else { multB += m2; ++nB; }
+        }
+    }
+    multA /= nA; multB /= nB;
+    EXPECT_LT(multA, 0.45) << "the satisfied regime must anneal toward quiet (got " << multA << ")";
+    EXPECT_GT(multB, 0.70) << "the violated regime must keep its drive (got " << multB << ")";
+    EXPECT_LT(multA, multB - 0.25)
+        << "the two regimes must be clearly separated (A " << multA << " vs B " << multB << ")";
 }
 
 // A disabled-by-default probe: watch the on-arm learn (run with
