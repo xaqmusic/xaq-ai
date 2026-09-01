@@ -38,6 +38,7 @@ out, so there is no hardware and none is assumed. Upstream lives *outside* this 
 | A2 recovery harness | ✅ built *before* A1 with a stub brain, since it needs a brain that fails |
 | observation path | ✅ `run.sh` + `tools/duck_viewer`; the viewer draws the host's `qpos` and never simulates |
 | **A1 first brain** | ⚙ **runs, ties a random walk, three verified null lever families** |
+| **A1-v2 state prior** | ⚙ **built + validated (branch `microduck-lean-prior`); duck verdict SIGNAL not standing; class ceiling PROVEN at 7/min; frontier = authority identification** |
 | S2 / S3 / B1–B3 | not started |
 
 ### The one decision waiting on the operator
@@ -930,6 +931,99 @@ null (postural), and now the conditioning null all verified-fired, **every cheap
 is spent, and each null independently points at the objective.** The
 `MotorEPMv2` objective-socket extension (§"The one decision waiting on the operator") is no
 longer the expensive candidate among several — it is the remaining move.
+
+### A1-v2 — the state-prior campaign · *Track A* · **BUILT & VALIDATED 2026-08-31 · duck verdict: SIGNAL, not standing · frontier = authority identification** *(branch `microduck-lean-prior`)*
+
+The operator's go-ahead: extend `MotorEPMv2`'s objective socket so a prior can target any
+state element, on its own branch, done right, iterate until the duck stands. One long
+session; here is what exists, what was measured, and where it stopped.
+
+#### What was built (all gain-0-guarded; v2 byte-identity to MotorEPM re-verified after every change)
+
+| piece | what it is | guard |
+|---|---|---|
+| **state prior** (`state_prior_indices/targets/gain/lr/h_lr`) | a soft prior on ARBITRARY state indices (−1 = the appended load slot). TWO halves, measured onto their roles by the unit plant: ξ̃[idx] *= (1−w) lets the sensitivity rule REST on the prior-owned dim; a Gauss–Newton descent of e = x*−x[idx] through the learned A writes C (the balancer) and h (the reacher, with conditional anti-windup) | `state_prior_gain` 0 |
+| **state-augmented self-model** (`state_model_lr`) | x̂ = A·y + **Bx·x** + b (NLMS on Bx) — the model can finally carry a state's own dynamics (an inverted pendulum's pole), so A can identify honest action authority | 0 = Bx never allocated |
+| **command trace** (`model_trace`) | A learns against the servo-filtered command — the physically effective input (the probe needed 6-tick pulses for the same reason) | 0 |
+| **structured babble** (`babble_isolate/hold`) | identification-shaped babble: one motor in the whole instance at a time, held pulses, legs time-multiplexed (mirrored legs pulsing together CANCEL in pitch — measured), ANTISYMMETRIC ±pairs differenced to cancel the topple drift (unpaired windows invert columns wholesale — measured, 4/5 signs) | 0 = legacy white babble |
+| **reset-pairing fix** (`reset_breaks_model_pairing`) | events.reset invalidates have_prev/trace/DEP/pulse windows — without it the first post-rescue tick regresses the pre-fall command against the post-rescue state: one giant-ξ poison sample per episode, ~40/min, in EVERY arm ever run on this harness. Bug-compatible default 0 because the v2 identity invariant outranks the fix | 0 |
+| **widened load socket** (`load_slots` on the bridge) | K trailing elements per group; `lean2` = pitch+roll (a fore/aft-only prior scores a SIDE-LYING duck as upright — measured degenerate), `lean4` = + their rates (P-only feedback arrests a fall but cannot damp one — measured across every position-only arm) | 1 = historical |
+| **unit-test suite** (`test_state_prior.cpp`, 8 tests) | gain-0 hard-form byte-identity, mis-size/out-of-range guards, −1 index, hot-params, DIRECTION control (sign must follow the target), CAPABILITY (a 1-D unstable plant the bare rule keeps toppling is held up: falls 291→87, sustained 1500+-tick balanced stretch), pole identification (Bx→0.98, A recovers true authority signs) | — |
+
+**Mechanism findings that came out of the plant, each measured:** the HK dC update is
+QUADRATIC in q — sign-blind — so a goal error fed through the keyframe-style ξ̃ replacement
+is *amplified*, not closed (the plant learned positive feedback and pushed WITH the fall);
+`sat_lr` erodes the prior's feedback column in proportion to its use (prior arm 261 falls vs
+97 for no control); `ctrl_damping` cannot tell the feedback column from the windup bias and
+killed balance first; the h integrator winds up through fall episodes (the repo's
+homeostat-windup lesson one level down) — conditional anti-windup at the use site.
+
+#### The harness, made honest (mj_host — each change measured before and after)
+
+1. **Stillness handback** — the old criterion handed the brain a body up to 18° over and
+   still rotating, on a body whose measured topple clock from the home pose is **0.08–0.14 s
+   to 15°**. Every episode began mid-fall; every arm's rescue rate was the topple clock in
+   disguise. Now: ≲2.5° AND gyro-quiet, held.
+2. **Stand calibration** — the brain's command origin is the SCAFFOLD'S measured equilibrium
+   (3 s settle at startup), not the STAND keyframe, which sits up to 0.107 rad away and
+   topples in ~0.1 s.
+3. **Stuck-pose rescue** — a prior arm found a statically stable SIT below the fall trigger
+   and parked there for THIRTEEN MINUTES (rescues → 0 AND upright → 0 — the two blind
+   metrics catching each other). Sustained sub-trigger tilt is now a fall.
+4. **Learnable-regime gate** — model learning freezes outside ~25° (a second freeze axis
+   beside the scaffold freeze): one global linear model fit to a mixture of falling/fallen/
+   flailing regimes held sign-scrambled authority.
+5. **Instruments** — module-side `clip_duty`, per-leg `C4`/`hmax`, `state_prior_err/applied`,
+   parameter read-backs on every run line, `OGMA_DUMP_MODEL` for the learned-A-vs-measured-J
+   comparison, and `--probe` (below).
+
+#### ★ The class-ceiling probe — standing IS in the linear class
+
+`ogma_mjhost --probe` measures each joint's authority over pitch/roll empirically (±held
+pulses from the calibrated stand, antisymmetrised) and runs a Jacobian-transpose PD with
+swept hand gains under the SAME harness and metrics as every learned arm. **Result: 7–8
+rescues/min at 74–79 % brain share across kp 5–80** (every learned arm: 20–27/min at
+~30 %). The body stands for ~6 s stretches, wobbles, falls, is rescued. A bench instrument,
+never a shipped policy — but it proves the policy class the prior writes into C contains a
+3× better solution, so **the barrier is not the class, it is the learning**. Video:
+`duck_probe_ceiling.mp4` (sent to the operator, with `duck_learned_prior.mp4` beside it).
+
+#### The duck verdict (final A/B, n=6 × 240 s, honest harness, one lever)
+
+| arm | rescues/min | upright<15° (brain) | tilt (brain) |
+|---|---|---|---|
+| control (prior 0) | 23.0 ± 3.8 | 0.30 ± 0.04 | 38.1 ± 2.2 |
+| **state prior (C-only, calibrated origin)** | **20.6 ± 2.2** | **0.39 ± 0.10** | **34.1 ± 6.5** |
+
+Coherent and directionally consistent — fewer falls AND more upright AND lower tilt, the
+first arm all campaign to move the three together — and by §3.3's own bar it is a **signal,
+not a capability**: standing would be loud (upright ≥ 0.9, rescues ≤ 5). Say it plainly:
+**the duck does not stand yet.**
+
+#### Where it stopped, precisely: authority identification in the harness
+
+The chain that remains open, every link measured: the learned A(lean,·) must match the
+probe's J for the prior's descent to aim right; continuous LMS through the storm holds
+scrambled signs (closed-loop confound: under tight regulation the causal term and the
+feedback confound cancel — A(lean,0) decayed 0.086→−0.006 across one balanced stretch);
+every conditioning step (regime gate, pairing fix, command trace, structured babble,
+leg-staggering, antisymmetric pairs, single-owner-per-estimand) improved the estimate — the
+bench now gets 4/5 signs on the left leg — and the remaining contamination is the
+identification-vs-toppling tension itself: pulses big enough to out-shout the topple drift
+cause the falls that corrupt the windows. The probe escapes only by scaffold-settling
+between measurements.
+
+**Three candidate roads, for the operator's fork** (in doctrine order):
+1. **Rung 2 — the real motor-EPM** (v2 plan §4): a GNG regime vocabulary with per-regime
+   models is the §0-native answer to "one linear model cannot span falling and standing".
+   The big build.
+2. **Identification episodes as a harness policy**: let babble borrow the probe's remaining
+   trick — a scaffold re-settle between pulse pairs. Cheap, host-side, and the module's
+   pair-differencing (already 4/5 signs) would likely close.
+3. **The probe's J as a NAMED CALIBRATION SCAFFOLD**: seed A's lean rows from the startup
+   probe (a transparent sensorimotor reduction — own commands, own sensors, hardware-legal),
+   watch whether the prior then stands the body, and de-scaffold via 1 or 2. Fastest path to
+   a standing duck; the de-scaffold is the honest test.
 
 ### A2 — standup-as-reset · *Track A* · ✅ **HARNESS DONE 2026-08-31, ahead of A1**
 
