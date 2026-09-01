@@ -53,6 +53,10 @@ struct Args {
     bool    quiet      = false;
     // Sensors are opt-in, one at a time -- the same discipline the BOM applies to
     // bring-up.  A host that silently enables everything makes a failure ambiguous.
+    // Loopback by default: the diag stream is unauthenticated, so putting the brain
+    // on the network is a deliberate act.  --listen 0.0.0.0 is how the laptop's
+    // xaq_inspector attaches.  (ControlServer already binds INADDR_ANY regardless.)
+    std::string listen = "127.0.0.1";
     bool    mic        = false;
     bool    camera     = false;
     bool    range      = false;
@@ -61,7 +65,7 @@ struct Args {
 void usage() {
     std::fprintf(stderr,
         "usage: ogma_host --config <graph.json> [--hz 50] [--ticks N] [--rt] [--quiet]\n"
-        "                 [--mic] [--camera] [--range]\n"
+        "                 [--mic] [--camera] [--range] [--listen 0.0.0.0]\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
@@ -89,6 +93,7 @@ int main(int argc, char** argv) {
         else if (v == "--ticks" && i + 1 < argc)  a.max_ticks = std::atol(argv[++i]);
         else if (v == "--rt")                     a.realtime = true;
         else if (v == "--quiet")                  a.quiet = true;
+        else if (v == "--listen" && i + 1 < argc)  a.listen = argv[++i];
         else if (v == "--mic")                    a.mic = true;
         else if (v == "--camera")                 a.camera = true;
         else if (v == "--range")                  a.range = true;
@@ -110,7 +115,7 @@ int main(int argc, char** argv) {
             if (p > 1024 && p < 65534) control_port = uint16_t(p);
         }
         const uint16_t diag_port = uint16_t(control_port + 1);
-        ogma::DiagPublisher diag(diag_port);
+        ogma::DiagPublisher diag(diag_port, a.listen);
         diag.start();
 
         // The inspector/voice protocol, same three verbs and same shapes the Godot host
@@ -172,7 +177,8 @@ int main(int argc, char** argv) {
                     a.config.c_str(), a.hz, unsigned(diag_port),
                     a.realtime ? (rt ? "SCHED_FIFO" : "SCHED_FIFO DENIED (need CAP_SYS_NICE) -- running SCHED_OTHER")
                                : "SCHED_OTHER");
-        std::printf("ogma_host: inspector control=%u diag=%u\n", unsigned(control_port), unsigned(diag_port));
+        std::printf("ogma_host: inspector control=%u (0.0.0.0) diag=%u (%s)\n",
+                    unsigned(control_port), unsigned(diag_port), a.listen.c_str());
         std::fflush(stdout);
 
         // Same absolute-deadline loop shape as benchd's, and the same instrument on

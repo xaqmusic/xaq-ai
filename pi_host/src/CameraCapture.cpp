@@ -50,6 +50,13 @@ bool CameraCapture::start() {
         ::close(fds[1]);
         const int devnull = ::open("/dev/null", O_WRONLY);
         if (devnull >= 0) { ::dup2(devnull, STDERR_FILENO); ::close(devnull); }
+        // Close everything above stdio before exec.  fork() hands the child every open
+        // descriptor, and the brain's are LISTENING SOCKETS (control 7400, diag 7401):
+        // an inherited copy keeps those ports bound for as long as rpicam-vid lives, so
+        // a host that died would leave a camera subprocess squatting on the inspector's
+        // ports.  Observed in `ss -ltnp` as rpicam-vid holding fd 10 on 7400.
+        const long maxfd = ::sysconf(_SC_OPEN_MAX);
+        for (int fd = STDERR_FILENO + 1; fd < int(maxfd > 0 ? maxfd : 4096); ++fd) ::close(fd);
         char sw[16], sh[16], sf[16];
         std::snprintf(sw, sizeof sw, "%d", cfg_.src_width);
         std::snprintf(sh, sizeof sh, "%d", cfg_.src_height);
