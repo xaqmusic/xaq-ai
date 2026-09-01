@@ -76,6 +76,11 @@ public:
     // Frozen for the whole time the scaffold drives. See (2) above.
     virtual void set_learning(bool) {}
 
+    // Mean |u| of the last act() in command units, for the amplitude instrument
+    // (the operator's convergence metric: a brain settling into the standing
+    // basin should make smaller and smaller adjustments).  −1 = not reported.
+    virtual double last_cmd_mag() const { return -1.0; }
+
     virtual const char* name() const { return "brain"; }
 };
 

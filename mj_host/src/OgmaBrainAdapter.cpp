@@ -198,13 +198,16 @@ std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body)
     ++tick_id_;
 
     std::array<double, kNumPolicyJoints> target{};
+    double mag = 0.0;
     for (int i = 0; i < kNumPolicyJoints; ++i) {
         const double u = std::clamp(last_u_[size_t(i)], -1.0, 1.0);
         action_abs_sum_ += std::fabs(u);
+        mag += std::fabs(u);
         ++action_samples_;
         const double want = home_[size_t(i)] + c_.amplitude * u;
         target[size_t(i)] = std::clamp(want, range_[size_t(i)].first, range_[size_t(i)].second);
     }
+    last_cmd_mag_ = mag / kNumPolicyJoints;
     return target;
 }
 
@@ -337,9 +340,10 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
             }
             if (snap.contains("state_prior_active") && snap["state_prior_active"].get<bool>()) {
                 char buf[80];
-                std::snprintf(buf, sizeof buf, "  sp_err=%.3f sp_applied=%d",
+                std::snprintf(buf, sizeof buf, "  sp_err=%.3f sp_applied=%d calm=%.2f",
                               snap["state_prior_err"].get<double>(),
-                              snap["state_prior_applied"].get<int>());
+                              snap["state_prior_applied"].get<int>(),
+                              snap.value("state_prior_calm_mult", 1.0));
                 line += buf;
             }
         }
@@ -399,8 +403,26 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                                   * double(C[size_t(col) * size_t(mm) + size_t(j)]);
                     double hmax = 0.0;
                     for (float v : h) hmax = std::max(hmax, double(std::fabs(v)));
-                    char buf[64];
-                    std::snprintf(buf, sizeof buf, " C4=%.2f hmax=%.2f", std::sqrt(c4), hmax);
+                    // Cp: the prior's OWN feedback columns, resolved from the
+                    // module's state_prior_indices — the "effective kp" the
+                    // gain-gap study watches grow (or stall).
+                    double cp = 0.0;
+                    {
+                        const auto params = m->current_params();
+                        auto it = params.find("state_prior_indices");
+                        if (it != params.end())
+                            if (auto* v = std::get_if<std::vector<double>>(&it->second))
+                                for (double di : *v) {
+                                    int idx = int(di); if (idx < 0) idx += nn;
+                                    if (idx < 0 || idx >= nn) continue;
+                                    for (int j = 0; j < mm; ++j)
+                                        cp += double(C[size_t(idx) * size_t(mm) + size_t(j)])
+                                              * double(C[size_t(idx) * size_t(mm) + size_t(j)]);
+                                }
+                    }
+                    char buf[96];
+                    std::snprintf(buf, sizeof buf, " C4=%.2f Cp=%.2f hmax=%.2f",
+                                  std::sqrt(c4), std::sqrt(cp), hmax);
                     extra += buf;
                 }
                 if (!extra.empty()) line += " |" + extra;

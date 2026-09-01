@@ -545,10 +545,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             const auto p = body.trunk_position();
             const auto g = body.gravity();
             std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
-                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\","
+                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\",\"u\":%.4f,"
                         "\"learning\":%s,\"event\":\"%s\",\"q\":[",
                         body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
-                        driver_name(driver), learning_now ? "true" : "false",
+                        driver_name(driver), brain.last_cmd_mag(),
+                        learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
                         : recovery.handed_back_this_tick() ? "reset:handback"
                                                            : "");

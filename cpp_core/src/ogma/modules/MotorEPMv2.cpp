@@ -231,6 +231,37 @@ ParamSchema MotorEPMv2::params_schema() const {
          "units become per-sustained-command — the same thing the probe measures. β ≈ 1/servo "
          "ticks (try 0.15). 0 = raw prev_y, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_calm_indices", ParamMutability::HotMutable,
+         "State indices the calm KEY reads (negative = from the end); empty = all "
+         "state_prior_indices. The key and the descent have different roles and need "
+         "different signals, measured over four key iterations: the descent needs the RATE "
+         "elements (damping), but rates are storm-coupled by definition — a flailing body "
+         "at perfect uprightness reads as high error, so any rate-inclusive key holds its "
+         "own squelch open. The key should ask only WHERE AM I: the angle elements.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_calm_fixed", ParamMutability::HotMutable,
+         "Pin the calm multiplier to this value instead of the adaptive ratchet (0 = adaptive). "
+         "The gate (squelch the non-attitude command, keep the prior's slope) is the design; "
+         "this makes its magnitude plain tuning. Measured: the adaptive key TIES base at n=6 "
+         "after five key iterations — every error signal is storm-coupled to some degree — "
+         "while the fixed bench produced the scaffold-shaped profile (quiet 0.11 rising to "
+         "0.51 under error) with the study's best individual runs.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_calm", ParamMutability::HotMutable,
+         "EXPLORATION-PRECISION ANNEALING (2026-09-01, the gain-gap study's answer): scale the "
+         "NON-attitude part of the pre-tanh command — and the exploration noise — by the ratio "
+         "of the prior error's short EMA to its own long EMA (clamped [0.1, 1]: play never "
+         "abstains). Convergence quiets the storm by itself; a perturbation spikes the short "
+         "EMA over the long and re-arms exploration instantly. The prior's OWN feedback "
+         "columns (state_prior_indices) are exempt, so the error response keeps full slope. "
+         "Measured motivation: the base arm ANTI-converges (quiet-band |u| trend 0.04→0.97 "
+         "over 10 min — HK grows its own storm), and at |u|~0.9 the tanh is railed so the "
+         "probe-grade gains ALREADY IN C (Cp 15–17) cannot act — G=1−tanh² gates every "
+         "learning rule, so the storm freezes the very columns that would quiet it. The "
+         "amplitude homeostat alternative crushes the storm but flattens the response with it "
+         "(|u| flat across tilt bands, Cp→2): a volume knob, where this is a squelch. "
+         "0 = off, byte-identical. 1 = full modulation.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"state_prior_h_lr", ParamMutability::HotMutable,
          "Separate rate for the h (tonic) half of the state prior's descent; the C (feedback) "
          "half always runs at state_prior_lr. The roles dissociate cleanly, measured on the "
@@ -818,6 +849,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
     m["state_prior_h_lr"]    = state_prior_h_lr_;
+    m["state_prior_calm"]    = state_prior_calm_;
+    m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
+    m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
     m["model_trace"]         = model_trace_;
     m["reset_breaks_model_pairing"] = reset_breaks_pairing_;
@@ -983,6 +1017,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
     apply_param(params, "state_prior_lr",      [&](auto const& v){ state_prior_lr_      = get_double(v, "state_prior_lr"); });
     apply_param(params, "state_prior_h_lr",    [&](auto const& v){ state_prior_h_lr_    = get_double(v, "state_prior_h_lr"); });
+    apply_param(params, "state_prior_calm",    [&](auto const& v){ state_prior_calm_    = get_double(v, "state_prior_calm"); });
+    apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
+    apply_param(params, "state_prior_calm_indices", [&](auto const& v){ state_prior_calm_indices_ = get_double_vec(v, "state_prior_calm_indices"); });
     apply_param(params, "state_model_lr",      [&](auto const& v){ state_model_lr_      = get_double(v, "state_model_lr"); });
     apply_param(params, "model_trace",         [&](auto const& v){ model_trace_         = get_double(v, "model_trace"); });
     apply_param(params, "reset_breaks_model_pairing", [&](auto const& v){ reset_breaks_pairing_ = get_double(v, "reset_breaks_model_pairing"); });
@@ -2352,6 +2389,9 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
     else if (key == "state_prior_lr")      state_prior_lr_      = get_double(value, "state_prior_lr");
     else if (key == "state_prior_h_lr")    state_prior_h_lr_    = get_double(value, "state_prior_h_lr");
+    else if (key == "state_prior_calm")    state_prior_calm_    = get_double(value, "state_prior_calm");
+    else if (key == "state_prior_calm_fixed") state_prior_calm_fixed_ = get_double(value, "state_prior_calm_fixed");
+    else if (key == "state_prior_calm_indices") state_prior_calm_indices_ = get_double_vec(value, "state_prior_calm_indices");
     else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
     else if (key == "model_trace")         model_trace_         = get_double(value, "model_trace");
     else if (key == "reset_breaks_model_pairing") reset_breaks_pairing_ = get_double(value, "reset_breaks_model_pairing");
@@ -3843,6 +3883,11 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     // meter, or a mid-run gain drop reads as "still pulling" in the (d)-test.
                     state_prior_err_ema_ += 0.01f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
                                                      - state_prior_err_ema_);
+                    // The calm reference: the same error on a ~40 s horizon.  The
+                    // annealing ratio short/long is self-scaled — no constant to
+                    // tune to the signal (§5.5).
+                    state_prior_err_long_ += 0.0005f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
+                                                        - state_prior_err_long_);
                     state_prior_applied_ = sp_n;
                 }
                 // Phase-conditioned feed-forward: train Cphi to REDUCE the keyframe error (x* − x)
@@ -4016,6 +4061,66 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 Eigen::Vector2f ctx(std::cos(cpg_phase_), std::sin(cpg_phase_));
                 y.noalias() += L.Cphi * ctx;   // posture feed-forward (pose)
                 y.noalias() += L.Cvel * ctx;   // velocity feed-forward (propulsive push; 0 until trained)
+            }
+            // Exploration-precision annealing (state_prior_calm > 0): squelch the
+            // NON-attitude part of the pre-tanh command by the prior error's
+            // short/long EMA ratio; the prior's own feedback columns keep full
+            // slope.  See the param docstring for the measured motivation.
+            if (state_prior_calm_ > 0.0 && state_prior_gain_ > 0.0
+                && !state_prior_indices_.empty()
+                && state_prior_indices_.size() == state_prior_targets_.size()) {
+                Eigen::VectorXf z_att = Eigen::VectorXf::Zero(m);
+                for (size_t k = 0; k < state_prior_indices_.size(); ++k) {
+                    int idx = int(state_prior_indices_[k]);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;
+                    z_att.noalias() += L.C.col(idx) * L.x[idx];
+                }
+                // The calm KEY reads its own index list (angles), not the full
+                // prior (whose rate elements are the storm) — see the
+                // state_prior_calm_indices docstring.
+                float e_now = 0.0f; int e_n = 0;
+                const auto& key_idx = state_prior_calm_indices_.empty()
+                                      ? state_prior_indices_ : state_prior_calm_indices_;
+                for (double di : key_idx) {
+                    int idx = int(di);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;
+                    e_now += std::fabs(L.x[idx]); ++e_n;
+                }
+                if (e_n) e_now /= float(e_n);
+                // Keyed to the INSTANTANEOUS attitude error against its own
+                // long-run scale — not to improvement.  The first (short/long
+                // EMA) version was measured null: the storm prevents the very
+                // improvement that would have quieted it, a self-referential
+                // trap.  Per-tick state avoids it: standing moments are quiet
+                // the moment they happen, and a shove restores full drive the
+                // same tick — the scaffold's own quiet-until-perturbed shape.
+                // FOURTH iteration, and the reference was the bug all along: an
+                // average of the error is ≈ the error half the time BY
+                // CONSTRUCTION, so target ≈ 1 and no key can engage (measured
+                // three ways).  The honest reference for "how bad is bad" is the
+                // error's own decaying PEAK — falls dominate it — so a typical
+                // standing moment reads as a small fraction and the squelch
+                // engages, while a genuine perturbation drives e toward the peak
+                // and releases full drive.  Peak decay 0.999/tick (~20 s); the
+                // ratchet stays (attack 0.005, release 0.2) so single noisy
+                // ticks cannot flip the state.  All dimensionless, self-scaled.
+                L.calm_peak = std::max(L.calm_peak * 0.999f, e_now);
+                const float target = std::clamp(
+                    e_now / (L.calm_peak + 1e-6f), 0.1f, 1.0f);
+                // Attack must FIT INSIDE an upright episode: at 0.005/tick the
+                // descent needed ~300 consecutive quiet ticks while episodes ran
+                // 100–150, and every fall's release reset it — the squelch never
+                // accumulated (measured).  0.03 descends in ~2 s.
+                const float k = (target > L.calm_state) ? 0.2f : 0.03f;
+                L.calm_state += k * (target - L.calm_state);
+                float mult = 1.0f - float(state_prior_calm_) * (1.0f - L.calm_state);
+                if (state_prior_calm_fixed_ > 0.0) mult = float(state_prior_calm_fixed_);
+                y = z_att + mult * (y - z_att);
+                calm_mult_ = mult;
+            } else {
+                calm_mult_ = 1.0f;
             }
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
             // Phase-0 saturation instrument: HK's own contribution, BEFORE any of the
@@ -4256,6 +4361,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // shakes loose (alongside the coord phase-search enlargement above).
         float noise_sigma = float(explore_noise_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_) * explore_mult
                           + pe * float(panic_noise_);   // C damps explore_noise (not panic)
+        if (state_prior_calm_ > 0.0) noise_sigma *= calm_mult_;   // annealed with the storm
         if (!warmup && noise_sigma > 0.0f) {
             std::normal_distribution<float> nz(0.0f, noise_sigma);
             for (int j = 0; j < m; ++j) y[j] += nz(L.babble_rng);
@@ -5395,7 +5501,8 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
                               && state_prior_indices_.size() == state_prior_targets_.size();
     j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
     j["state_prior_w"]   = state_prior_gain_;
-    j["state_prior_applied"] = state_prior_applied_;  // indices resolved last controller tick;
+    j["state_prior_applied"] = state_prior_applied_;
+    j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied  // indices resolved last controller tick;
                                                       // active && applied==0 → indices out of range
     // Propulsive-credit homeostat: per-leg functional forward contribution + the
     // group mean, so the L/R propulsion imbalance (the drag → spin) is observable.

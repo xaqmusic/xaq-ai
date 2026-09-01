@@ -1065,6 +1065,37 @@ HK itself (the control's 0.48 beats every pre-sense arm), the prior adds +0.07 u
 higher than the croucher's because standing exposes you to falling — upright fraction is the
 mission metric, and it is now within sight of the probe's regime.
 
+**Stage 17 — the gain-gap study (2026-09-01, operator-directed).** Question: why does the
+learner's effective feedback sit at kp ≲ 2 when the probe's band is 5–80 — and can the brain
+converge on the energy-efficient standing basin, amplitudes shrinking as balance improves?
+New permanent instruments: per-tick |u| in the body stream, |u|-by-tilt-band profiles,
+quiet-band amplitude trends, and Cp (the prior's own feedback columns, read from the module).
+
+**Findings, each measured:**
+1. **The gains are no longer missing — they are gated off.** Cp reaches 15–17 (probe-grade)
+   in C, but the base arm runs clip_duty 0.40–0.45: the tanh is railed, G = 1−tanh² ≈ 0, so
+   the stored feedback cannot act AND every learning rule (all G-scaled) freezes. The storm
+   blocks its own cure.
+2. **The base arm ANTI-converges**: quiet-band |u| grows 0.04 → 0.97 over 10 minutes — HK
+   builds its own storm. The operator's convergence does not happen spontaneously.
+3. **The amplitude homeostat** (existing machinery, target 0.1) reaches equal uprightness at
+   one-tenth the energy — but flattens the response with the storm (a volume knob).
+4. **The scaffold's shape exists in this architecture**: with the non-attitude command
+   squelched and the prior's columns exempt, |u| runs 0.11 balanced → 0.51 perturbed.
+5. **`state_prior_calm`** (new, gain-0): squelch the non-attitude pre-tanh command and the
+   explore noise by a self-scaled key, prior columns at full slope. FIVE key designs were
+   measured (improvement-EMA, instant-vs-EMA, ratchet, peak-referenced, angle-only+fast
+   attack): every error signal is storm-coupled to some degree; the adaptive key TIES base
+   at n=6 (13.8±3.0 vs 15.1±2.6, up15 0.52 vs 0.55). Recorded as a tie; kept off by default.
+6. **`state_prior_calm_fixed`** (the designed gate, magnitude as tuning): pin 0.3, n=6 —
+   13.2±2.0 falls/min, up15 0.58±0.10, energy −19 % (|u| 0.52), **clip_duty 0.40 → 0.02:
+   saturation eliminated, G live, learning never frozen.** Ties-to-slightly-better behaviour
+   at much better system health.
+
+**Re-use context for the adaptive key**: revisit when the residual falls come down — the
+storm-coupling weakens as episodes lengthen, and the ratchet's attack can then engage across
+longer quiet stretches.
+
 **The fork that remains for the operator:**
 1. **Rung 2 — the real motor-EPM** (v2 plan §4): a GNG regime vocabulary with per-regime
    models — now motivated by TWO measured walls (mixture-poisoned identification, and the
