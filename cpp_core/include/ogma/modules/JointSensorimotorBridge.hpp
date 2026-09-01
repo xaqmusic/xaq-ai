@@ -80,7 +80,8 @@ private:
     // the width is decided by whether load_topic is CONFIGURED, not by whether a load
     // value has been received yet; the slot carries 0.0 until the first one lands.
     std::string              load_topic_;                 // empty = off, byte-identical
-    std::vector<float>       last_load_;                  // per output (leg)
+    int                      load_slots_         = 1;     // trailing elements per group (1 = historical)
+    std::vector<float>       last_load_;                  // group-major: [o*load_slots + s]
     bool                     have_load_          = false;
     // 2026-08-02 · IMPORT I4b — POSITION-CHANNEL-ONLY colored sensor noise.
     // PM wires every legged controller through ColorUniformNoise(0.1) on every sensor.

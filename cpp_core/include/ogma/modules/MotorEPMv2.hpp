@@ -1256,6 +1256,13 @@ private:
         bool                initialized = false;
         int                 n           = 0;     // state dim
         Eigen::MatrixXf     A;                    // n x m  (motor → sensor)
+        Eigen::MatrixXf     Bx;                   // n x n  state-transition term (empty unless state_model_lr > 0)
+        Eigen::VectorXf     ytrace;               // servo-filtered command (empty unless model_trace > 0)
+        Eigen::VectorXf     pulse_x0;             // state at pulse start (babble_isolate bookkeeping)
+        int                 pulse_motor = -1;     // which motor the current pulse drives
+        float               pulse_sign  = 0.0f;
+        Eigen::VectorXf     pulse_dplus;          // completed + window's Δx/hold (awaiting its − twin)
+        int                 pulse_dplus_motor = -1;
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
         Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning (posture feed-forward)
@@ -1511,6 +1518,26 @@ private:
     double lookahead_mode_ = 0.0;    // 0 = fixed point (true lookahead), 1 = prev-action
     double lookahead_null_ = 0.0;    // 1 = drop A*y (control: is it the DYNAMICS?)
     float  la_dev_ema_     = 0.0f;   // ||x_eff - x||, the consumer check
+    // ── STATE-SPACE PRIOR (2026-08-31, the microduck lever).  A soft prior on
+    // ARBITRARY state indices (e.g. the bridge's appended load slot: predicted
+    // lean = 0).  TWO coupled halves, both gated by state_prior_gain (see the use
+    // sites and test_state_prior for why the keyframe socket's ξ̃-replacement is
+    // NOT the mechanism — the HK dC update is sign-blind and amplifies the error):
+    //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
+    //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
+    std::vector<double> state_prior_indices_;   // state indices; NEGATIVE = from the end (−1 = last)
+    std::vector<double> state_prior_targets_;   // target values x*, parallel to indices
+    double state_prior_gain_    = 0.0;          // weight w ∈ [0,1]; 0 = off, byte-identical
+    double state_prior_lr_     = 0.1;           // fraction of the GN-normalised correction per tick (C half)
+    double state_prior_h_lr_   = -1.0;          // h half's rate; -1 = follow state_prior_lr, 0 = C-only
+    double state_model_lr_     = 0.0;           // Bx learning rate; 0 = no state term, byte-identical
+    double model_trace_        = 0.0;           // EMA rate β of the command trace; 0 = raw prev_y, byte-identical
+    double reset_breaks_pairing_ = 0.0;         // 1 = reset invalidates model pairing; 0 = bug-compatible
+    double babble_isolate_       = 0.0;         // 1 = one-motor held-pulse babble; 0 = legacy white
+    int    babble_hold_          = 6;           // held-pulse ticks for babble_isolate
+    float  state_prior_err_ema_ = 0.0f;         // telemetry: mean |x[idx] − x*| (EMA; DECAYS when off)
+    int    state_prior_applied_ = 0;            // indices that actually resolved last controller tick —
+                                                // disambiguates "satisfied (err→0)" from "never in range"
     double intent_yaw_gain_ = 1.0;                  // 0 = progress-over-ground only
     // ── STRIDE-PROFILE PREDICTION (intent_rhythm_gain).  A constant v* is a target a
     // legged body physically CANNOT hold: it advances in pulses, so a level-seeking error

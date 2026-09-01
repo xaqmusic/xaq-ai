@@ -146,6 +146,109 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"velocity_objective_topics", ParamMutability::ConstructionOnly,
          "Optional per-leg PredictionToken topics carrying a phase-indexed SOFT VELOCITY target (predicted_latent = motor_dim target joint velocities = the propulsive trajectory; confidence = w). Needs cpg_embed + cpg_phase_topic: a second learned feed-forward Cvel is trained to reduce the velocity error (v*−ẋ) at the command phase → the body keeps moving THROUGH the pose (propulsion), where the posture objective only holds it AT the pose. Empty = Cvel stays 0 = byte-identical.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_indices", ParamMutability::HotMutable,
+         "STATE-SPACE PRIOR (2026-08-31, the microduck lever): state-vector indices a soft prior "
+         "applies to. NEGATIVE = from the end (−1 = the last element), so one config expression "
+         "addresses the bridge's appended load slot in every group regardless of group_size. "
+         "Motivation: the objective socket above can retarget only JOINT-POSITION components "
+         "(idx = 3j), and the microduck A1 campaign measured three verified-fired nulls (postural "
+         "reflex, lean-in-the-loop, conditioning/gain sweep) that together localise the failure to "
+         "the OBJECTIVE — the rule cannot rest at standing, and giving it the lean SENSOR without a "
+         "lean PRIOR left it no reason to use it (port plan §A1). This socket lets a prior live on "
+         "any state element the forward model already learns — e.g. predicted lean = 0. Same ξ̃ "
+         "mechanism as the keyframe socket (objective-change, not additive; the MODEL keeps raw ξ); "
+         "applied AFTER the keyframe/plan blend, so it wins where indices collide. Per-leg path "
+         "only, like the objective sockets (the whole_body_c path carries neither). Empty = off.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_targets", ParamMutability::HotMutable,
+         "Target values x* for state_prior_indices, parallel arrays. A mismatch in length "
+         "disables the prior (and shows as state_prior_active=false in diag — check it, per §3.2 "
+         "rule 5, before crediting or blaming this lever). For the microduck lean element the "
+         "target 0 is NOT a tuned constant: the host centres the lean channel on measured gravity, "
+         "so 0 is the signal's own origin (upright), CLAUDE.md §5.5-clean.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_gain", ParamMutability::HotMutable,
+         "Weight w of the state prior, gating BOTH halves of the mechanism: "
+         "(1) ξ̃[idx] *= (1−w) — the HK error at the prior-owned index is attenuated, so the "
+         "sensitivity rule may REST on that dimension (at w=1, fully); "
+         "(2) C and h descend the prior's own error e = x* − x[idx] THROUGH THE LEARNED MODEL: "
+         "per motor j, ΔC(j,:) = lr·w·e·A(idx,j)·G(j,j)·prev_xᵀ and Δh(j) likewise — A(idx,j) is "
+         "the model's own estimate of motor j's authority over the target, so HOW to satisfy the "
+         "prior is discovered, never wired, and C(:,idx) acquires the NEGATIVE-feedback sign by "
+         "itself. ⚠ NOT the keyframe socket's ξ̃-replacement, by measurement (test_state_prior "
+         "2026-08-31): the HK dC update is quadratic in q — sign-blind — so a goal error fed "
+         "through it is AMPLIFIED, not closed (a closed 1-D plant learned positive feedback and "
+         "pushed WITH the fall). Also measured there: sat_lr unwinds the tonic command a "
+         "standing prior needs at ~5× the rate the prior builds it, and the descent's feedback "
+         "column keeps a slow growth pressure on residual noise. Configs running this should set "
+         "sat_lr = 0: measured on the plant, sat erodes the learned feedback column IN "
+         "PROPORTION TO ITS USE (its erosion is ∝ gs·prev_xᵀ, and prev_x carries the very "
+         "element the feedback reads), leaving the prior arm WORSE than no control (261 vs 97 "
+         "falls). ctrl_damping is NOT the brake here — L2 cannot distinguish the feedback "
+         "column from the windup bias and killed balance first (measured 201 vs 141); the h "
+         "path instead carries conditional anti-windup at the use site. KNOWN LIMIT, "
+         "understood and accepted for this lever: under sustained tight regulation the "
+         "closed loop de-identifies A(idx,:) (causal term and feedback confound cancel — "
+         "textbook), so long balanced stretches end in a collapse-and-re-identify cycle; "
+         "the structural fix (IV identification / state-augmented self-model) is a future "
+         "lever. 0 = off, byte-identical (the gain-0 guard).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_model_lr", ParamMutability::HotMutable,
+         "STATE-AUGMENTED SELF-MODEL (2026-08-31, the microduck lever's companion): when > 0 "
+         "the forward model gains a learned state-transition term, x_hat = A·y + Bx·x + b, "
+         "with Bx trained by the same LMS as A (Bx += lr·ξ·prev_xᵀ). Motivation, measured "
+         "three ways on the duck: x_hat = A·y + b cannot represent a body whose state has its "
+         "own dynamics (an inverted pendulum's lean GROWS), so (1) A is forced to absorb state "
+         "persistence into action authority and de-identifies under feedback (the closed-loop "
+         "confound — A(lean,·) decayed to zero and flipped sign in every long run); (2) the "
+         "state prior's GN descent through that A is myopic — it corrects present lean while "
+         "unable to know lean grows; (3) C4 grew 3→17 over 30 min with zero behavioural "
+         "effect. The model was built for position-servo limbs where x follows y; a biped's "
+         "lean is a genuine dynamical state. With Bx absorbing the pole, A identifies the "
+         "honest action authority and everything downstream (ξ, TLE, lookahead, the prior) "
+         "sharpens. 0 = Bx never allocated, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"reset_breaks_model_pairing", ParamMutability::HotMutable,
+         "BUG FIX BEHIND A GUARD (2026-08-31): when 1, events.miss/reset also invalidate the "
+         "model's (prev_y, x) pairing (have_prev, the command trace, DEP's Δy) so the first "
+         "post-disruption tick does not regress the pre-disruption command against the "
+         "post-disruption state — one giant-ξ poison sample per episode, ~40/min on the duck "
+         "recovery harness, enough to keep A(lean,·) sign-scrambled against the empirically "
+         "probed authority in every arm measured. The ledger records this bug's phase-clock "
+         "sibling; this is the same fake one level deeper. Default 0 is BUG-COMPATIBLE on "
+         "purpose: the v2 invariant (byte-identical to MotorEPM with every feature at 0) "
+         "outranks the fix, so the correction ships as a lever like everything else.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"model_trace", ParamMutability::HotMutable,
+         "ELIGIBILITY TRACE on the self-model's action input (2026-08-31): when > 0, A learns "
+         "against (and predicts from) an EMA of the command, ỹ += β·(y − ỹ), instead of the "
+         "raw previous command. Measured motivation: the empirical authority probe needed "
+         "6-TICK pulses to read ∂pitch/∂joint cleanly, because a position-servo body answers a "
+         "command over its servo/inertia timescale, not in one tick — so one-step regression "
+         "of pitch on prev_y has abysmal SNR by construction, and the learned A(lean,·) held "
+         "wrong signs at 10x-low magnitudes against the probe's J in every run it was checked. "
+         "The trace IS the physically effective input (the servo-filtered command), so A's "
+         "units become per-sustained-command — the same thing the probe measures. β ≈ 1/servo "
+         "ticks (try 0.15). 0 = raw prev_y, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_h_lr", ParamMutability::HotMutable,
+         "Separate rate for the h (tonic) half of the state prior's descent; the C (feedback) "
+         "half always runs at state_prior_lr. The roles dissociate cleanly, measured on the "
+         "unit plant: C is what BALANCES (C-only passed the unstable-plant test) and h is what "
+         "REACHES a target away from the current state (direction failed without it). A body "
+         "whose target IS its calibrated origin needs no tonic at all — and on the microduck "
+         "the h integrator wound to |h| 3.5-4.1 through the flail (tanh(3.5)=0.999: motors "
+         "DC-railed, every post-handback first command a full yank) even under the conditional "
+         "anti-windup. -1 = follow state_prior_lr (the plant tests' regime). 0 = C-only.",
+         ParamValue{-1.0}, ParamValue{-1.0}, ParamValue{1.0}},
+        {"state_prior_lr", ParamMutability::HotMutable,
+         "Descent rate of the state prior's C/h update (half 2 above), as a FRACTION of the "
+         "model-implied (Gauss-Newton) correction per tick: the step is normalised by "
+         "||A(idx,:)||² + reg_eps, so it is scale-free across bodies (§5.5 — adapted, not "
+         "tuned) and self-damping wherever the authority channel is not yet identified. "
+         "Effective rate = state_prior_lr·state_prior_gain. 0 disables half 2 while keeping "
+         "half 1 (a lesion arm, not an operating mode).",
+         ParamValue{0.1}, ParamValue{0.0}, ParamValue{1.0}},
         {"n_legs", ParamMutability::ConstructionOnly, "number of legs",
          ParamValue{int64_t(4)}, ParamValue{int64_t(1)}, ParamValue{int64_t(8)}},
         {"motor_dim", ParamMutability::ConstructionOnly, "motors per leg",
@@ -220,6 +323,21 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"babble_ticks", ParamMutability::ConstructionOnly,
          "motor-babble warmup: for this many proprio frames the model learns from small random commands while the controller stays idle, so HK starts from a model that predicts the body (no startup convulsion).",
          ParamValue{int64_t(200)}, ParamValue{int64_t(0)}, ParamValue{int64_t(100000)}},
+        {"babble_isolate", ParamMutability::HotMutable,
+         "STRUCTURED BABBLE (2026-08-31): when 1, the warmup babbles ONE MOTOR AT A TIME with "
+         "a HELD constant pulse (babble_hold ticks, alternating sign, cycling motors) instead "
+         "of all-motor white noise. Measured motivation: an empirical authority probe using "
+         "exactly this shape — isolated held pulses — identified the body's pitch/roll "
+         "Jacobian cleanly and a hand-gained PD on it stood the duck at 7 rescues/min, while "
+         "the model regressed from all-joint white babble plus closed-loop storm held "
+         "sign-scrambled authority in every run checked. Isolation removes the inter-motor "
+         "confound; the hold matches the servo's multi-tick response (the reason model_trace "
+         "exists). Infant motor babbling has exactly this structure. 0 = legacy white babble, "
+         "byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"babble_hold", ParamMutability::HotMutable,
+         "Held-pulse length in ticks for babble_isolate (the probe's own pulse length).",
+         ParamValue{int64_t(6)}, ParamValue{int64_t(1)}, ParamValue{int64_t(50)}},
         {"babble_scale", ParamMutability::HotMutable, "amplitude of warmup babble commands",
          ParamValue{0.3}, ParamValue{0.0}, ParamValue{1.0}},
         {"sat_lr", ParamMutability::HotMutable,
@@ -679,6 +797,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["seed"]         = base_seed_;
     m["babble_ticks"]  = babble_ticks_;
     m["babble_scale"]  = babble_scale_;
+    m["babble_isolate"] = babble_isolate_;
+    m["babble_hold"]    = int64_t(babble_hold_);
     m["sat_lr"]        = sat_lr_;
     m["postural_gain"]    = postural_gain_;
     m["postural_gain_joints"] = postural_gain_joints_;
@@ -693,6 +813,14 @@ ParamMap MotorEPMv2::current_params() const {
     m["intent_yaw_gain"] = intent_yaw_gain_;
     m["lookahead_gain"] = lookahead_gain_;
     m["lookahead_mode"] = lookahead_mode_;
+    m["state_prior_indices"] = state_prior_indices_;
+    m["state_prior_targets"] = state_prior_targets_;
+    m["state_prior_gain"]    = state_prior_gain_;
+    m["state_prior_lr"]      = state_prior_lr_;
+    m["state_prior_h_lr"]    = state_prior_h_lr_;
+    m["state_model_lr"]      = state_model_lr_;
+    m["model_trace"]         = model_trace_;
+    m["reset_breaks_model_pairing"] = reset_breaks_pairing_;
     m["lookahead_null"] = lookahead_null_;
     m["intent_rhythm_gain"] = intent_rhythm_gain_;
     m["fwd_resonance_gain"] = fwd_resonance_gain_;
@@ -831,6 +959,11 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "seed",       [&](auto const& v){ base_seed_  = get_int(v, "seed"); });
     apply_param(params, "babble_ticks", [&](auto const& v){ babble_ticks_ = get_int(v, "babble_ticks"); });
     apply_param(params, "babble_scale", [&](auto const& v){ babble_scale_ = get_double(v, "babble_scale"); });
+    apply_param(params, "babble_isolate", [&](auto const& v){ babble_isolate_ = get_double(v, "babble_isolate"); });
+    apply_param(params, "babble_hold", [&](auto const& v){
+        if (auto pv = std::get_if<int64_t>(&v)) babble_hold_ = std::max(1, int(*pv));
+        else if (auto dv = std::get_if<double>(&v)) babble_hold_ = std::max(1, int(*dv));
+    });
     apply_param(params, "sat_lr",       [&](auto const& v){ sat_lr_       = get_double(v, "sat_lr"); });
     apply_param(params, "postural_gain", [&](auto const& v){ postural_gain_ = get_double(v, "postural_gain"); });
     apply_param(params, "postural_gain_joints", [&](auto const& v){ postural_gain_joints_ = get_double_vec(v, "postural_gain_joints"); });
@@ -845,6 +978,14 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "intent_yaw_gain", [&](auto const& v){ intent_yaw_gain_ = get_double(v, "intent_yaw_gain"); });
     apply_param(params, "lookahead_gain", [&](auto const& v){ lookahead_gain_ = get_double(v, "lookahead_gain"); });
     apply_param(params, "lookahead_mode", [&](auto const& v){ lookahead_mode_ = get_double(v, "lookahead_mode"); });
+    apply_param(params, "state_prior_indices", [&](auto const& v){ state_prior_indices_ = get_double_vec(v, "state_prior_indices"); });
+    apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
+    apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
+    apply_param(params, "state_prior_lr",      [&](auto const& v){ state_prior_lr_      = get_double(v, "state_prior_lr"); });
+    apply_param(params, "state_prior_h_lr",    [&](auto const& v){ state_prior_h_lr_    = get_double(v, "state_prior_h_lr"); });
+    apply_param(params, "state_model_lr",      [&](auto const& v){ state_model_lr_      = get_double(v, "state_model_lr"); });
+    apply_param(params, "model_trace",         [&](auto const& v){ model_trace_         = get_double(v, "model_trace"); });
+    apply_param(params, "reset_breaks_model_pairing", [&](auto const& v){ reset_breaks_pairing_ = get_double(v, "reset_breaks_model_pairing"); });
     apply_param(params, "lookahead_null", [&](auto const& v){ lookahead_null_ = get_double(v, "lookahead_null"); });
     apply_param(params, "intent_rhythm_gain", [&](auto const& v){ intent_rhythm_gain_ = get_double(v, "intent_rhythm_gain"); });
     apply_param(params, "fwd_resonance_gain", [&](auto const& v){ fwd_resonance_gain_ = get_double(v, "fwd_resonance_gain"); });
@@ -1220,6 +1361,25 @@ void MotorEPMv2::handle_event(std::string_view topic, MessagePtr payload) {
             // step_per_ema is DELIBERATELY kept: the body's stride period is a property
             // of the morphology and gait, not of the episode, so re-measuring it from
             // scratch after every stumble would throw away good information.
+            //
+            // THE MODEL PAIRING MUST ALSO BREAK (2026-08-31).  A reset is a
+            // discontinuity in the body's state; with have_prev kept, the first
+            // model update after it regresses the PRE-disruption command against
+            // the POST-disruption state — one giant-ξ poison sample per episode,
+            // which on the duck harness (~40 rescues/min) outweighed every honest
+            // sample and kept A(lean,·) sign-scrambled against the empirically
+            // probed authority in every arm measured.  The ledger already records
+            // this bug's phase-clock sibling ("any trend across a reset was
+            // fake"); this is the same fake, one level deeper.
+            if (reset_breaks_pairing_ > 0.0) {
+                L.have_prev = false;
+                if (L.ytrace.size() > 0) L.ytrace.setZero();
+                L.prev_prev_y.setZero();   // DEP's Δy pairing straddles the gap too
+                L.pulse_motor = -1;        // a pulse window straddling the reset is garbage
+                L.pulse_sign  = 0.0f;      // (measured: the leg whose pulses topple more
+                                           // wrote scrambled columns until invalidated)
+                L.pulse_dplus_motor = -1;  // and so is a half-completed +/− pair
+            }
         }
     }
 }
@@ -2175,10 +2335,23 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "reg_eps")   reg_eps_   = get_double(value, "reg_eps");
     else if (key == "max_dctrl") max_dctrl_ = get_double(value, "max_dctrl");
     else if (key == "babble_scale") babble_scale_ = get_double(value, "babble_scale");
+    else if (key == "babble_isolate") babble_isolate_ = get_double(value, "babble_isolate");
+    else if (key == "babble_hold") {
+        if (auto pv = std::get_if<int64_t>(&value)) babble_hold_ = std::max(1, int(*pv));
+        else if (auto dv = std::get_if<double>(&value)) babble_hold_ = std::max(1, int(*dv));
+    }
     else if (key == "sat_lr")       sat_lr_       = get_double(value, "sat_lr");
     else if (key == "plan_gain") plan_gain_ = get_double(value, "plan_gain");
     else if (key == "plan_fade") plan_fade_ = get_double(value, "plan_fade");
     else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
+    else if (key == "state_prior_indices") state_prior_indices_ = get_double_vec(value, "state_prior_indices");
+    else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
+    else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
+    else if (key == "state_prior_lr")      state_prior_lr_      = get_double(value, "state_prior_lr");
+    else if (key == "state_prior_h_lr")    state_prior_h_lr_    = get_double(value, "state_prior_h_lr");
+    else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
+    else if (key == "model_trace")         model_trace_         = get_double(value, "model_trace");
+    else if (key == "reset_breaks_model_pairing") reset_breaks_pairing_ = get_double(value, "reset_breaks_model_pairing");
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
@@ -3424,11 +3597,41 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // body's response to small random commands).  The CONTROLLER (HK + anti-
         // saturation) only learns after warmup, once the model can predict.
         if (L.have_prev && !wb_on) {
-            Eigen::VectorXf x_hat = L.A * L.prev_y + L.b;          // forward-model prediction
+            // State-augmented model (state_model_lr > 0): x̂ = A·y + Bx·x + b.  Bx
+            // carries what the state does BY ITSELF (the pendulum's pole), so A can
+            // identify what actions do TO it — see the state_model_lr docstring.
+            const bool smodel = state_model_lr_ > 0.0;
+            if (smodel && L.Bx.rows() != n) L.Bx = Eigen::MatrixXf::Zero(n, n);
+            // Eligibility trace (model_trace > 0): the model's action input is the
+            // servo-filtered command ỹ, the physically effective input — see the
+            // model_trace docstring.  The trace is updated BEFORE use so ỹ already
+            // contains prev_y (the command whose outcome x is).
+            const bool traced = model_trace_ > 0.0;
+            if (traced) {
+                if (L.ytrace.size() != m) L.ytrace = Eigen::VectorXf::Zero(m);
+                L.ytrace += float(model_trace_) * (L.prev_y - L.ytrace);
+            }
+            const Eigen::VectorXf& yin = traced ? L.ytrace : L.prev_y;
+            Eigen::VectorXf x_hat = L.A * yin + L.b;               // forward-model prediction
+            if (smodel) x_hat.noalias() += L.Bx * L.prev_x;
             Eigen::VectorXf xi    = L.x - x_hat;                   // motor TLE ξ
-            // (1) model descent: A += η_M ξ yᵀ ; b += η_M ξ
-            L.A.noalias() += float(model_lr_) * xi * L.prev_y.transpose();
+            // (1) model descent: A += η_M ξ ỹᵀ ; b += η_M ξ  (+ Bx += η_S ξ xᵀ)
+            // ONE OWNER PER ESTIMAND: during isolate-babble the paired-difference
+            // writer owns A (measured: with both estimators live the columns
+            // wandered run-to-run and TLE hit 2.0 — the two fighting); LMS keeps
+            // b and Bx, which the differencing cannot see.
+            const bool a_lms = !(babble_isolate_ > 0.0 && warmup);
+            if (a_lms) L.A.noalias() += float(model_lr_) * xi * yin.transpose();
             L.b.noalias() += float(model_lr_) * xi;
+            if (smodel) {
+                // NLMS, not raw LMS: raw LMS converges at lr·σ² and a regulated
+                // state's variance is tiny (measured on the plant: Bx found 0.13 of
+                // a 0.98 pole in 4000 ticks).  Normalising by the state's own power
+                // makes lr the FRACTION of each sample's error explained per tick —
+                // scale-free across bodies (§5.5), reg_eps as the numerical floor.
+                const float xpow = L.prev_x.squaredNorm() + float(reg_eps_);
+                L.Bx.noalias() += (float(state_model_lr_) / xpow) * xi * L.prev_x.transpose();
+            }
             L.tle_ema = (1.0f - kTeleEmaAlpha) * L.tle_ema + kTeleEmaAlpha * xi.norm();
 
             if (!warmup) {
@@ -3502,6 +3705,34 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                         xi_tilde[idx] = (1.0f - eff_w[j]) * xi[idx] + eff_w[j] * goal_err;
                     }
                 }
+                // STATE-SPACE PRIOR, part 1 of 2 (2026-08-31, the microduck lever):
+                // ATTENUATE the HK error at the prior-owned indices — ξ̃[idx] *= (1−w) —
+                // so the sensitivity rule progressively loses interest in that dimension
+                // and, at w=1, may fully REST there.  Negative indices resolve from the
+                // end (−1 = the bridge's load slot in every group, whatever its
+                // group_size).  The MODEL keeps the raw ξ — the self-model stays honest.
+                //
+                // ⚠ Why the prior is NOT the keyframe socket's ξ̃-replacement, measured
+                // rather than argued (test_state_prior, 2026-08-31): the HK dC update is
+                // QUADRATIC in q — sign-blind — so feeding it a goal error just amplifies
+                // loop gain ALONG the goal-error direction.  On a closed 1-D plant that
+                // learned C(:,lean) as POSITIVE feedback (push +0.100 at lean +1.10 —
+                // driving the fall), and the goal side inverted mirror-symmetrically
+                // (+0.4 → −0.067, −0.4 → +0.113).  Goal-SEEKING lives in part 2 below.
+                {
+                    const bool sp_ok = state_prior_gain_ > 0.0
+                                       && !state_prior_indices_.empty()
+                                       && state_prior_indices_.size() == state_prior_targets_.size();
+                    if (sp_ok) {
+                        const float w = float(state_prior_gain_);
+                        for (size_t k = 0; k < state_prior_indices_.size(); ++k) {
+                            int idx = int(state_prior_indices_[k]);
+                            if (idx < 0) idx += n;
+                            if (idx < 0 || idx >= n) continue;        // out of range: skip, never throw
+                            xi_tilde[idx] = (1.0f - w) * xi[idx];
+                        }
+                    }
+                }
                 // ---- DEP: C from the correlation of MOTOR and SENSOR derivatives -----
                 // Causal pairing: the command CHANGE we made last tick (Δprev_y) and the
                 // sensor CHANGE it produced (Δx).  Row-normalised so dep_gain is the
@@ -3541,6 +3772,76 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 if (dep_gain_ <= 0.0) L.C.noalias() += dC;         // DEP owns C when on
                 Eigen::VectorXf mu = G * (L.A.transpose() * q);    // bias toward less surprise
                 L.h.noalias() += float(bias_lr_) * mu;
+                // STATE-SPACE PRIOR, part 2 of 2: the goal-seeker.  Descend the prior's
+                // own error THROUGH THE LEARNED MODEL — the Cphi pattern below, aimed at
+                // the main controller:
+                //   e = x* − x[idx];  per motor j:
+                //   C(j,:) += lr·w·e·A(idx,j)·G(j,j)·prev_xᵀ ;   h(j) += lr·w·e·A(idx,j)·G(j,j)
+                // A(idx,j) is the model's CURRENT estimate of motor j's authority over the
+                // target index, so HOW to satisfy the prior is discovered, never wired —
+                // and the negative-feedback sign of C(:,idx) arises by itself (e ∝ −x[idx]
+                // for a zero target, prev_x carries +x[idx]).  Self-limiting as e → 0; on
+                // residual noise the feedback column keeps a slow growth pressure ∝ E[x²],
+                // so configs running this SHOULD set ctrl_damping > 0 (PM's own brake).
+                // Placed AFTER the HK dC/dh application, in the same slot as Cphi/Cvel —
+                // the house position for goal-error learners.
+                {
+                    const bool sp_ok = state_prior_gain_ > 0.0 && state_prior_lr_ > 0.0
+                                       && !state_prior_indices_.empty()
+                                       && state_prior_indices_.size() == state_prior_targets_.size();
+                    float sp_err = 0.0f; int sp_n = 0;
+                    if (sp_ok) {
+                        const float lw = float(state_prior_lr_ * state_prior_gain_);
+                        const float hlw = float((state_prior_h_lr_ < 0.0 ? state_prior_lr_
+                                                                        : state_prior_h_lr_)
+                                                * state_prior_gain_);
+                        for (size_t k = 0; k < state_prior_indices_.size(); ++k) {
+                            int idx = int(state_prior_indices_[k]);
+                            if (idx < 0) idx += n;
+                            if (idx < 0 || idx >= n) continue;
+                            const float e = float(state_prior_targets_[k]) - L.x[idx];
+                            // Gauss-Newton normalisation (§5.5: adapt to the signal's own
+                            // scale, never tune to it): the raw gradient is DOUBLY small —
+                            // e routed through a small-authority channel A(idx,j) — so the
+                            // step is normalised by the model's own authority scale
+                            // ||A(idx,:)||².  reg_eps (the module's existing metric
+                            // regulariser) damps the step wherever the channel is not yet
+                            // identified — pushing hard through an unlearned model is how
+                            // a prior becomes a flail.  lr is then a FRACTION of the
+                            // model-implied correction per tick, comparable across bodies.
+                            const float anorm = L.A.row(idx).squaredNorm() + float(reg_eps_);
+                            for (int j = 0; j < m; ++j) {
+                                const float g = lw * e * L.A(idx, j) * G(j, j) / anorm;
+                                L.C.row(j).noalias() += g * L.prev_x.transpose();
+                                // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate
+                                // cleanly (measured, this lever's plant): C is what
+                                // BALANCES (feedback; C-only passed the unstable-plant
+                                // test) and h is what REACHES a target away from the
+                                // current state (C·x cannot push off x≈0; direction
+                                // failed without h).  h's failure mode is the classic
+                                // saturated-integrator windup: during a fall the error
+                                // rails one-sided for a whole epoch and h integrates a
+                                // DC that then destabilises the NEXT epoch (traced:
+                                // balanced 4500 ticks, h crept 0.2→3.5, collapsed, never
+                                // recovered — the repo's homeostat-windup lesson in
+                                // miniature).  So: block only the rail-DEEPENING update
+                                // (command already saturated in g's own direction);
+                                // an unwinding update always passes.
+                                const float t_j = std::tanh(z[j]);
+                                const float gh = (lw > 0.0f) ? g * (hlw / lw) : 0.0f;
+                                const bool deepening = std::fabs(t_j) > 0.95f
+                                                       && ((gh > 0.0f) == (t_j > 0.0f));
+                                if (!deepening) L.h[j] += gh;
+                            }
+                            sp_err += std::fabs(e); ++sp_n;
+                        }
+                    }
+                    // Frozen-meter lesson (2026-08-14): an inactive prior must DECAY the
+                    // meter, or a mid-run gain drop reads as "still pulling" in the (d)-test.
+                    state_prior_err_ema_ += 0.01f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
+                                                     - state_prior_err_ema_);
+                    state_prior_applied_ = sp_n;
+                }
                 // Phase-conditioned feed-forward: train Cphi to REDUCE the keyframe error (x* − x)
                 // at the command phase — NOT HK surprise (which damps motion).  Self-limiting: as
                 // the bias moves the body toward x*, the error shrinks and learning stops.  Small
@@ -3593,10 +3894,70 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         // ---- Emit the new command ----
         Eigen::VectorXf y(m);
         if (warmup) {
-            // motor babble: small random commands so the model learns A,B,b before
-            // the controller rides the loop.
-            std::uniform_real_distribution<float> ud(-float(babble_scale_), float(babble_scale_));
-            for (int j = 0; j < m; ++j) y[j] = std::clamp(ud(L.babble_rng), -1.0f, 1.0f);
+            if (babble_isolate_ > 0.0) {
+                // Structured babble: one motor IN THE WHOLE INSTANCE at a time,
+                // held pulse, alternating sign — the empirically measured
+                // identification shape (see the babble_isolate docstring).
+                // Time-multiplexed ACROSS legs too: on a mirrored body, left and
+                // right pulsing the same motor index simultaneously cancel in the
+                // very channel being identified (measured: both hips' pitch
+                // authority regressed to ~0 with scrambled signs until the legs
+                // were staggered).
+                const int64_t slot   = (L.steps_seen - 1) / std::max(1, babble_hold_);
+                const int     active = int(slot % int64_t(n_legs_));
+                y.setZero();
+                int   pulse_motor = -1; float pulse_sign = 0.0f;
+                if (leg == active) {
+                    const int64_t lslot = slot / int64_t(n_legs_);
+                    pulse_motor = int((lslot / 2) % int64_t(m));   // m0+, m0−, m1+, m1−, …
+                    pulse_sign  = (lslot % 2 == 0) ? 1.0f : -1.0f;
+                    y[pulse_motor] = pulse_sign * float(babble_scale_);
+                }
+                // PAIRED-DIFFERENCE IDENTIFICATION (the probe's estimator, inside
+                // the module's own babble).  Continuous LMS through pulse
+                // aftermaths mis-attributes the pendulum's delayed counter-swing
+                // to whatever motor pulses next (measured: the higher-authority
+                // hip's sign inverted while its mirror identified).  The babble
+                // KNOWS its own pulse structure, so it can difference over the
+                // pulse window exactly as the probe does and write A's column
+                // with a clean per-tick response.  Self-experiment: the module's
+                // own commands, its own sensors, nothing external.
+                // ANTISYMMETRIC PAIRS, exactly as the probe measures: the body's own
+                // topple drift rides every window and is ~20x the pulse effect, and
+                // it GROWS — so unpaired windows invert columns wholesale (measured:
+                // 4/5 signs flipped, deterministically).  A +/− pair on the same
+                // motor cancels the drift to first order; only completed pairs
+                // write the column.
+                {
+                    const bool boundary = (pulse_motor != L.pulse_motor)
+                                          || (pulse_sign != L.pulse_sign);
+                    if (boundary) {
+                        if (L.pulse_motor >= 0 && L.pulse_x0.size() == n) {
+                            const Eigen::VectorXf d =
+                                (L.x - L.pulse_x0) / float(std::max(1, babble_hold_));
+                            if (L.pulse_sign > 0.0f) {
+                                L.pulse_dplus = d;               // first half of the pair
+                                L.pulse_dplus_motor = L.pulse_motor;
+                            } else if (L.pulse_dplus_motor == L.pulse_motor
+                                       && L.pulse_dplus.size() == n) {
+                                const Eigen::VectorXf resp =
+                                    (L.pulse_dplus - d) / (2.0f * float(babble_scale_));
+                                L.A.col(L.pulse_motor) =
+                                    0.8f * L.A.col(L.pulse_motor) + 0.2f * resp;
+                                L.pulse_dplus_motor = -1;
+                            }
+                        }
+                        L.pulse_motor = pulse_motor;
+                        L.pulse_sign  = pulse_sign;
+                        L.pulse_x0    = L.x;
+                    }
+                }
+            } else {
+                // motor babble: small random commands so the model learns A,B,b before
+                // the controller rides the loop.
+                std::uniform_real_distribution<float> ud(-float(babble_scale_), float(babble_scale_));
+                for (int j = 0; j < m; ++j) y[j] = std::clamp(ud(L.babble_rng), -1.0f, 1.0f);
+            }
         } else {
             // per-leg homeostat gain scales the HK oscillation toward amp_target
             float ag = (amp_homeo_gain_ > 0.0) ? L.amp_gain : 1.0f;
@@ -3632,6 +3993,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 Eigen::VectorXf xhat = (lookahead_null_ > 0.0)
                     ? Eigen::VectorXf(L.b)                     // null: no dynamics term
                     : Eigen::VectorXf(L.A * yref + L.b);
+                if (lookahead_null_ <= 0.0 && state_model_lr_ > 0.0 && L.Bx.rows() == L.x.size())
+                    xhat.noalias() += L.Bx * L.x;              // the state term of the same model
                 if (xhat.size() == L.x.size()) {
                     const Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
                     y = L.C * x_eff + L.h;
@@ -4517,6 +4880,7 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         lj["C"] = flat(L.C); lj["h"] = flat(L.h);
         lj["Cphi"] = flat(L.Cphi);
         lj["Cvel"] = flat(L.Cvel);
+        if (L.Bx.size() > 0) lj["Bx"] = flat(L.Bx);   // state-model term, only when in use
         lj["prev_x"] = flat(L.prev_x); lj["prev_y"] = flat(L.prev_y);
         lj["rows_A"] = int(L.A.rows()); lj["cols_A"] = int(L.A.cols());
         legs.push_back(std::move(lj));
@@ -4558,6 +4922,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // consumer-fired check every lever has needed)
     mod["plan_pull"]  = plan_pull_ema_;
     mod["plan_w"]     = plan_w_mean_;
+    mod["state_prior_err"] = state_prior_err_ema_;   // mirrored from diag_snapshot()
+    mod["state_prior_w"]   = state_prior_gain_;
     mod["plan_fade"]  = plan_fade_;
     // swing-detector observability (the gate stance_lift / Cruse ride on).  Mirrors
     // height_bias: serialized so the BODY can surface it in its stdout diag JSON.
@@ -5012,6 +5378,15 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
         j["obj_vel_active"] = on;
         j["obj_vel_weight"] = oc ? wsum / float(oc) : 0.0f;
     }
+    // State-space prior (2026-08-31) — active means the gain is up AND the arrays parse;
+    // a mis-sized config shows FALSE here, which is the §3.2 rule-5 read-back.
+    j["state_prior_active"] = state_prior_gain_ > 0.0
+                              && !state_prior_indices_.empty()
+                              && state_prior_indices_.size() == state_prior_targets_.size();
+    j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
+    j["state_prior_w"]   = state_prior_gain_;
+    j["state_prior_applied"] = state_prior_applied_;  // indices resolved last controller tick;
+                                                      // active && applied==0 → indices out of range
     // Propulsive-credit homeostat: per-leg functional forward contribution + the
     // group mean, so the L/R propulsion imbalance (the drag → spin) is observable.
     j["prop_balance_active"] = (propulsion_balance_gain_ > 0.0);
@@ -5417,6 +5792,7 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         L.Cvel = Eigen::MatrixXf::Zero(m, 2);   // ensure valid (m,2) dims even for snapshots without a velocity map
         if (lj.contains("Cphi")) L.Cphi = toM(vecf(lj.at("Cphi")), m, 2);   // legacy snapshots → keep zero-init
         if (lj.contains("Cvel")) L.Cvel = toM(vecf(lj.at("Cvel")), m, 2);   // legacy snapshots → keep zero-init
+        if (lj.contains("Bx"))   L.Bx   = toM(vecf(lj.at("Bx")), n, n);     // absent = state model off
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);

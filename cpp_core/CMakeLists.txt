@@ -403,6 +403,9 @@ target_link_libraries(test_motor_epm PRIVATE ogma_core GTest::gtest_main pthread
 add_executable(test_postural_prior tests/ogma/test_postural_prior.cpp)
 target_link_libraries(test_postural_prior PRIVATE ogma_core GTest::gtest_main pthread)
 
+add_executable(test_state_prior tests/ogma/test_state_prior.cpp)
+target_link_libraries(test_state_prior PRIVATE ogma_core GTest::gtest_main pthread)
+
 add_executable(test_keyframe_gait tests/ogma/test_keyframe_gait.cpp)
 target_link_libraries(test_keyframe_gait PRIVATE ogma_core GTest::gtest_main pthread)
 
@@ -569,6 +572,7 @@ gtest_discover_tests(test_phase6_6e_verification)
 gtest_discover_tests(test_motor_fader_streams)
 gtest_discover_tests(test_motor_epm)
 gtest_discover_tests(test_postural_prior)
+gtest_discover_tests(test_state_prior)
 gtest_discover_tests(test_keyframe_gait)
 gtest_discover_tests(test_body_rhythm_tracker)
 gtest_discover_tests(test_gain_evolver)
