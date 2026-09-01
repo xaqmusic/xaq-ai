@@ -375,7 +375,7 @@ TEST(CameraCapture, ReduceAreaAveragesRatherThanDecimating) {
     for (int y = 0; y < 4; ++y)
         for (int x = 0; x < 4; ++x) src[size_t(y*4+x)] = ((x + y) % 2) ? 255 : 0;
     std::vector<uint8_t> dst;
-    CameraCapture::reduce(src.data(), 4, 4, 2, dst);
+    CameraCapture::reduce(src.data(), 4, 4, 4, 2, dst);
     ASSERT_EQ(dst.size(), 4u);
     for (uint8_t v : dst) EXPECT_NEAR(int(v), 127, 1);
 }
@@ -386,18 +386,43 @@ TEST(CameraCapture, ReduceCentreCropsSoTheSceneIsNotSquashed) {
     std::vector<uint8_t> src(8, 0);
     src[0] = src[3] = src[4] = src[7] = 255;          // the cropped-away columns
     std::vector<uint8_t> dst;
-    CameraCapture::reduce(src.data(), 4, 2, 2, dst);
+    CameraCapture::reduce(src.data(), 4, 2, 4, 2, dst);
     ASSERT_EQ(dst.size(), 4u);
     for (uint8_t v : dst) EXPECT_EQ(int(v), 0);
 }
 
 TEST(CameraCapture, ReduceIsTotalOnDegenerateInput) {
     std::vector<uint8_t> dst;
-    CameraCapture::reduce(nullptr, 0, 0, 4, dst);
+    CameraCapture::reduce(nullptr, 0, 0, 0, 4, dst);
     EXPECT_EQ(dst.size(), 16u);                        // sized, zeroed, never a crash
     std::vector<uint8_t> one{200};
-    CameraCapture::reduce(one.data(), 1, 1, 2, dst);   // upscale: every cell the pixel
+    CameraCapture::reduce(one.data(), 1, 1, 1, 2, dst);   // upscale: every cell the pixel
     ASSERT_EQ(dst.size(), 4u);
     for (uint8_t v : dst) EXPECT_EQ(int(v), 200);
+}
+TEST(CameraCapture, StrideIsTheRowPitchAndPaddingNeverEntersTheAverage) {
+    // The bug this guards, measured 2026-09-01: rpicam-vid emits a Y plane whose row
+    // pitch is the width rounded UP to a multiple of 128, so a 160-wide frame is really
+    // 256 bytes per row.  Reading width-as-stride consumes 28800 of a 46080-byte frame,
+    // slides across frame boundaries forever, and yields a repeating pattern that ignores
+    // the scene while mean brightness still looks plausible.
+    EXPECT_EQ(CameraCapture::stride_for_width(160), 256);
+    EXPECT_EQ(CameraCapture::stride_for_width(192), 256);
+    EXPECT_EQ(CameraCapture::stride_for_width(320), 384);
+    EXPECT_EQ(CameraCapture::stride_for_width(128), 128);   // already aligned
+    EXPECT_EQ(CameraCapture::stride_for_width(256), 256);
+    EXPECT_EQ(CameraCapture::stride_for_width(640), 640);
+    EXPECT_EQ(CameraCapture::frame_bytes_for(256, 120), 46080u);   // the measured value
+    EXPECT_EQ(CameraCapture::frame_bytes_for(256, 192), 73728u);   // the new default
+
+    // 4 wide but padded to a pitch of 8: the right-hand 4 bytes are garbage padding and
+    // must not reach the output, which is 0 from the real columns.
+    std::vector<uint8_t> padded(8 * 4, 255);
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 4; ++x) padded[size_t(y * 8 + x)] = 0;   // real pixels are 0
+    std::vector<uint8_t> dst;
+    CameraCapture::reduce(padded.data(), 4, 4, 8, 2, dst);
+    ASSERT_EQ(dst.size(), 4u);
+    for (uint8_t v : dst) EXPECT_EQ(int(v), 0) << "ISP padding leaked into the image";
 }
 #endif  // PI_HOST_HAVE_SENSORS

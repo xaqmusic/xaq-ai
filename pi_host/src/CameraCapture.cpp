@@ -8,15 +8,32 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <cstdlib>
 
 namespace ogma::hw {
 
 CameraCapture::CameraCapture(Config cfg) : cfg_(std::move(cfg)) {}
 CameraCapture::~CameraCapture() { stop(); }
 
-void CameraCapture::reduce(const uint8_t* y, int w, int h, int out, std::vector<uint8_t>& dst) {
+int CameraCapture::stride_for_width(int width) {
+    // Measured on this ISP 2026-09-01: the Y-plane row pitch is the width rounded up to
+    // a multiple of 128 (160 -> 256, 192 -> 256, 320 -> 384; 128/256/640 already clean).
+    constexpr int kAlign = 128;
+    if (width <= 0) return 0;
+    return ((width + kAlign - 1) / kAlign) * kAlign;
+}
+
+size_t CameraCapture::frame_bytes_for(int stride, int height) {
+    if (stride <= 0 || height <= 0) return 0;
+    return size_t(stride) * size_t(height) * 3 / 2;   // Y, then quarter-size U and V
+}
+
+void CameraCapture::reduce(const uint8_t* y, int w, int h, int stride, int out,
+                           std::vector<uint8_t>& dst) {
     dst.assign(size_t(out) * size_t(out), 0);
     if (!y || w <= 0 || h <= 0 || out <= 0) return;
+    if (stride < w) stride = w;                       // a caller that means "unpadded"
     // Centre-crop to square first so the scene is not anamorphically squashed; the
     // JL projection is frozen and random, but a geometry the operator cannot reason
     // about is a bad thing to hand a vocabulary.
@@ -31,14 +48,63 @@ void CameraCapture::reduce(const uint8_t* y, int w, int h, int out, std::vector<
             const int sx1 = std::max(sx0 + 1, x0 + ((ox + 1) * side) / out);
             uint32_t sum = 0, n = 0;
             for (int sy = sy0; sy < sy1 && sy < h; ++sy)
-                for (int sx = sx0; sx < sx1 && sx < w; ++sx) { sum += y[size_t(sy) * size_t(w) + size_t(sx)]; ++n; }
+                for (int sx = sx0; sx < sx1 && sx < w; ++sx) {
+                    // Row addressing uses the STRIDE; the columns beyond `w` are ISP
+                    // padding and must never reach the average.
+                    sum += y[size_t(sy) * size_t(stride) + size_t(sx)];
+                    ++n;
+                }
             dst[size_t(oy) * size_t(out) + size_t(ox)] = uint8_t(n ? sum / n : 0);
         }
     }
 }
 
+namespace {
+// Ask the camera for exactly one frame to a temp file and measure it.  The ISP pads
+// the Y-plane row pitch, and ASSUMING width == stride is catastrophic in a way that
+// looks like a working camera: the reader consumes the wrong number of bytes, slides
+// across frame boundaries, and produces a pattern that repeats at the drift rate and
+// barely responds to the scene while mean brightness still tracks the light.
+// Measuring costs ~1 s at startup and removes the entire class.
+bool probe_geometry(const std::string& binary, int w, int h, int& stride, size_t& bytes) {
+    char path[] = "/tmp/ogma_camprobe_XXXXXX";
+    const int fd = ::mkstemp(path);
+    if (fd < 0) return false;
+    ::close(fd);
+    char cmd[512];
+    std::snprintf(cmd, sizeof cmd,
+                  "%s -t 0 --codec yuv420 --nopreview --width %d --height %d "
+                  "--framerate 15 --frames 1 -o %s >/dev/null 2>&1",
+                  binary.c_str(), w, h, path);
+    const int rc = std::system(cmd);
+    struct stat st{};
+    const bool ok = (rc == 0) && ::stat(path, &st) == 0 && st.st_size > 0;
+    if (ok) {
+        bytes  = size_t(st.st_size);
+        // bytes = stride * h * 3/2  =>  stride = 2*bytes / (3*h)
+        stride = int((bytes * 2) / (size_t(h) * 3));
+    }
+    ::unlink(path);
+    return ok && stride >= w;
+}
+} // namespace
+
 bool CameraCapture::start() {
     if (running_) return true;
+
+    if (cfg_.src_stride > 0) {
+        stride_      = cfg_.src_stride;
+        frame_bytes_ = frame_bytes_for(stride_, cfg_.src_height);
+    } else if (!probe_geometry(cfg_.binary, cfg_.src_width, cfg_.src_height, stride_, frame_bytes_)) {
+        stride_      = stride_for_width(cfg_.src_width);
+        frame_bytes_ = frame_bytes_for(stride_, cfg_.src_height);
+        std::fprintf(stderr, "CameraCapture: geometry probe failed; falling back to the "
+                             "measured alignment rule (stride %d)\n", stride_);
+    }
+    std::fprintf(stderr, "CameraCapture: %dx%d stride %d (%s), %zu bytes/frame\n",
+                 cfg_.src_width, cfg_.src_height, stride_,
+                 stride_ == cfg_.src_width ? "unpadded" : "ISP-PADDED", frame_bytes_);
+
     int fds[2];
     if (::pipe(fds) != 0) { err_ = std::string("pipe: ") + std::strerror(errno); return false; }
 
@@ -86,8 +152,7 @@ void CameraCapture::stop() {
 }
 
 void CameraCapture::run() {
-    const size_t ysize     = size_t(cfg_.src_width) * size_t(cfg_.src_height);
-    const size_t framesize = ysize * 3 / 2;           // YUV420: Y plane then quarter-size U, V
+    const size_t framesize = frame_bytes_;            // MEASURED at start(), never assumed
     std::vector<uint8_t> raw(framesize);
     std::vector<uint8_t> small;
 
@@ -110,7 +175,7 @@ void CameraCapture::run() {
         }
         if (got < framesize) return;
 
-        reduce(raw.data(), cfg_.src_width, cfg_.src_height, cfg_.out_size, small);
+        reduce(raw.data(), cfg_.src_width, cfg_.src_height, stride_, cfg_.out_size, small);
         uint32_t sum = 0;
         for (uint8_t v : small) sum += v;
         {

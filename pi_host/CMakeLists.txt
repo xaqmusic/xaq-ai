@@ -55,6 +55,12 @@ if(ALSA_FOUND AND GPIOD_FOUND)
   target_include_directories(ogma_sensors PRIVATE ${ALSA_INCLUDE_DIRS} ${GPIOD_INCLUDE_DIRS})
   target_link_libraries(ogma_sensors PUBLIC ${ALSA_LIBRARIES} ${GPIOD_LIBRARIES} pthread)
   target_compile_options(ogma_sensors PRIVATE -Wall -Wextra)
+
+  # cam_tool — dumps what the retinal EPM sees, as an image.  A claim about pixels is
+  # settled by looking at pixels, not by reading the pipeline again.
+  add_executable(cam_tool tools/cam_tool.cpp)
+  target_link_libraries(cam_tool PRIVATE ogma_sensors)
+  target_compile_options(cam_tool PRIVATE -Wall -Wextra)
 else()
   message(STATUS "pi_host: ALSA/libgpiod not found — ogma_sensors and ogma_host disabled")
 endif()
