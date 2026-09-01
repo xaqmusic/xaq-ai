@@ -74,6 +74,9 @@ DuckBody::DuckBody(const std::string& scene_path) {
     trunk_body_ = require(m_, mjOBJ_BODY, "trunk_base", "body");
     quat_adr_ = m_->sensor_adr[require(m_, mjOBJ_SENSOR, "orientation", "sensor")];
     gyro_adr_ = m_->sensor_adr[require(m_, mjOBJ_SENSOR, "angular-velocity", "sensor")];
+    accel_adr_ = m_->sensor_adr[require(m_, mjOBJ_SENSOR, "imu_accel", "sensor")];
+    head_body_ = m_->site_bodyid[require(m_, mjOBJ_SITE, "head_imu", "site")];
+    neck_root_ = require(m_, mjOBJ_BODY, "neck", "body");
 }
 
 DuckBody::~DuckBody() {
@@ -128,6 +131,37 @@ std::array<double, kNumPolicyJoints> DuckBody::joint_velocities() const {
 
 std::array<double, 3> DuckBody::gravity() const {
     return quat_rotate_inverse(&d_->sensordata[quat_adr_], {0.0, 0.0, -1.0});
+}
+
+std::array<double, 3> DuckBody::accel() const {
+    return {d_->sensordata[accel_adr_], d_->sensordata[accel_adr_ + 1],
+            d_->sensordata[accel_adr_ + 2]};
+}
+
+// Projected gravity IN THE HEAD FRAME.  The hardware has exactly one IMU (the
+// trunk imu_to_dxl board); the head-frame attitude it cannot sense directly is
+// nevertheless a rigid-body identity: head_quat = trunk_quat ∘ FK(measured neck
+// and head joints), which upstream's own kinematics crate computes (the ToF
+// Reprojector runs this very reduction).  Reading the sim's head body xquat is a
+// transparent shortcut for that composition — same rigid chain, same measured
+// joints — not a new sensor.  The head_imu CAD frame this reads at is the ghost
+// of the dropped v1-lineage head IMU; here it becomes a derived channel instead.
+std::array<double, 3> DuckBody::head_gravity() const {
+    return quat_rotate_inverse(&d_->xquat[4 * head_body_], {0.0, 0.0, -1.0});
+}
+
+// Head-subtree CoM offset in the TRUNK frame (x fore/aft, y lateral).  Pure FK
+// of measured joint angles plus CAD-constant masses — computable on hardware
+// with no IMU at all — read here from MuJoCo's subtree_com as the transparent
+// shortcut.  This is the observation the single trunk IMU is structurally blind
+// to: trunk level + head craned forward reads ZERO lean while 38 % of the mass
+// is far displaced.
+std::array<double, 2> DuckBody::head_com_trunk() const {
+    const double* com = &d_->subtree_com[3 * neck_root_];
+    const double* tp  = &d_->xpos[3 * trunk_body_];
+    const std::array<double, 3> rel = {com[0] - tp[0], com[1] - tp[1], com[2] - tp[2]};
+    const auto local = quat_rotate_inverse(&d_->xquat[4 * trunk_body_], rel);
+    return {local[0], local[1]};
 }
 
 std::array<double, 3> DuckBody::gyro() const {

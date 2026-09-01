@@ -63,6 +63,10 @@ public:
         // category as reading joint ranges from the model instead of transcribing
         // them.
         std::vector<double> home;
+        // Calibrated head-CoM offset at the scaffold's stand (trunk frame x/y, m):
+        // the sense channel publishes deviations FROM this, so the standing pose
+        // is the origin of the head-CoM observation too.
+        std::vector<double> head_com0;
     };
 
     OgmaBrainAdapter(const DuckBody& body, Config config);

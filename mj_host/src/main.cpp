@@ -778,6 +778,7 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     // A scaffold-derived origin is a calibration in the same category as reading
     // joint ranges from the model instead of transcribing them.
     std::vector<double> stand_home(kNumPolicyJoints, 0.0);
+    std::vector<double> stand_hcom(2, 0.0);
     {
         Policy scaffold(kStandScaffold);
         probe.reset("STAND", 0.0, seed);
@@ -795,6 +796,8 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
             if (t >= avg_from) {
                 const auto q = probe.joint_positions();
                 for (int i = 0; i < kNumPolicyJoints; ++i) stand_home[size_t(i)] += q[i];
+                const auto hc = probe.head_com_trunk();
+                stand_hcom[0] += hc[0]; stand_hcom[1] += hc[1];
                 ++n_avg;
             }
         }
@@ -803,11 +806,13 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
             stand_home[size_t(i)] /= double(n_avg);
             dmax = std::max(dmax, std::fabs(stand_home[size_t(i)] - kHomePose[i]));
         }
+        stand_hcom[0] /= double(n_avg); stand_hcom[1] /= double(n_avg);
         std::fprintf(stderr, "stand calibration: origin = scaffold equilibrium "
-                             "(max |delta| from keyframe %.4f rad)\n", dmax);
+                             "(max |delta| from keyframe %.4f rad; head CoM %+0.4f %+0.4f m)\n",
+                     dmax, stand_hcom[0], stand_hcom[1]);
     }
 
-    OgmaBrainAdapter brain(probe, {graph, seed, amplitude, stand_home});
+    OgmaBrainAdapter brain(probe, {graph, seed, amplitude, stand_home, stand_hcom});
 
     std::fprintf(stderr, "graph %s\n  modules:", graph.c_str());
     for (const auto& id : brain.module_ids()) std::fprintf(stderr, " %s", id.c_str());

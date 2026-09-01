@@ -25,9 +25,9 @@ import sys
 HOST = 'mj_host/build/ogma_mjhost'
 
 
-def run_one(cfg, seed, secs):
+def run_one(cfg, seed, secs, extra=()):
     p = subprocess.run(
-        [HOST, '--brain', '--graph', cfg, '--secs', str(secs), '--seed', str(seed)],
+        [HOST, '--brain', '--graph', cfg, '--secs', str(secs), '--seed', str(seed), *extra],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3600)
     err = p.stderr
     out = {}
@@ -66,13 +66,15 @@ def main():
     ap.add_argument('configs', nargs='+')
     ap.add_argument('--seeds', type=int, default=6)
     ap.add_argument('--secs', type=int, default=240)
+    ap.add_argument('--host-args', default='',
+                    help="extra host flags, e.g. '--ident-every 12 --ident-until 3000'")
     args = ap.parse_args()
 
     results = {}
     for cfg in args.configs:
         rows = []
         for seed in range(1, args.seeds + 1):
-            r = run_one(cfg, seed, args.secs)
+            r = run_one(cfg, seed, args.secs, tuple(args.host_args.split()))
             rows.append(r)
             print(f'  {cfg.split("/")[-1]:32s} seed {seed}: {r["rescues_min"]:5.1f} resc/min  '
                   f'brain {r["brain_pct"]:3.0f}%  tilt {r["tilt_mean"]:5.1f}  '

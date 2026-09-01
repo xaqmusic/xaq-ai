@@ -92,6 +92,12 @@ public:
     // [0, 0, -1]. This is the legal replacement for an absolute height or attitude:
     // it is what the real robot's IMU board reports and what `robot.state` carries.
     std::array<double, 3> gravity() const;
+    // The remaining IMU quantities and the two FK reductions of IMU+encoders —
+    // the sensory-completion audit (2026-09-01).  All egocentric; see the .cpp
+    // notes on why each is hardware-computable from the single trunk IMU.
+    std::array<double, 3> accel() const;            // imu_accel, m/s^2, gravity included
+    std::array<double, 3> head_gravity() const;     // projected gravity IN THE HEAD FRAME
+    std::array<double, 2> head_com_trunk() const;   // head-subtree CoM offset, trunk frame x/y (m)
 
     // Trunk-frame angular velocity, rad/s, from the model's own gyro sensor.
     std::array<double, 3> gyro() const;
@@ -130,6 +136,9 @@ private:
     int push_ticks_ = 0;
     int quat_adr_    = -1;   // into d_->sensordata, framequat on the imu site
     int gyro_adr_    = -1;   // into d_->sensordata
+    int accel_adr_   = -1;   // into d_->sensordata, imu_accel on the imu site
+    int head_body_   = -1;   // body owning the head_imu CAD frame (the head shell)
+    int neck_root_   = -1;   // first neck link — its subtree is the whole head mass
 };
 
 }  // namespace mjhost

@@ -146,6 +146,38 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
     const float rr = std::clamp(0.3 * w[0], -1.0, 1.0);
     publish("lean4", {float(g[0]), float(g[1]), pr, rr,
                       float(g[0]), float(g[1]), pr, rr});
+
+    // sense — THE FULL IMU VECTOR (2026-09-01): everything the one trunk IMU and
+    // the joint encoders can jointly say, conditioned to comparable scale, for
+    // configs whose bridges set load_slots: 12.  Twelve slots per group:
+    //   0 pitch g_x        1 roll g_y          2 pitch rate ·0.3   3 roll rate ·0.3
+    //   4 yaw rate ·0.3    5 accel x /20       6 accel y /20       7 accel z /20
+    //   8 head-frame pitch 9 head-frame roll  10 head-CoM Δx /0.1 11 head-CoM Δy /0.1
+    // Slots 8–11 are FK reductions of IMU+encoders (see DuckBody's notes): the
+    // head-frame attitude the dropped v1 head IMU would have sensed, and the
+    // head-CoM offset the trunk IMU is structurally blind to (38 % of the mass
+    // can crane forward while trunk lean reads zero).  Head-CoM is an
+    // OBSERVATION only — a prior there would fight the counterweight strategy
+    // the head measurably runs.  Same values to every group, as with lean.
+    const auto a  = body.accel();
+    const auto hg = body.head_gravity();
+    const auto hc = body.head_com_trunk();
+    const float c0 = c_.head_com0.size() == 2 ? float(c_.head_com0[0]) : 0.0f;
+    const float c1 = c_.head_com0.size() == 2 ? float(c_.head_com0[1]) : 0.0f;
+    const float yr  = std::clamp(0.3 * w[2], -1.0, 1.0);
+    const float ax  = std::clamp(a[0] / 20.0, -1.0, 1.0);
+    const float ay  = std::clamp(a[1] / 20.0, -1.0, 1.0);
+    const float az  = std::clamp(a[2] / 20.0, -1.0, 1.0);
+    const float hgx = std::clamp(hg[0], -1.0, 1.0);
+    const float hgy = std::clamp(hg[1], -1.0, 1.0);
+    const float hcx = std::clamp((hc[0] - c0) / 0.1, -1.0, 1.0);
+    const float hcy = std::clamp((hc[1] - c1) / 0.1, -1.0, 1.0);
+    std::vector<float> sense = {float(g[0]), float(g[1]), pr, rr, yr, ax, ay, az,
+                                hgx, hgy, hcx, hcy};
+    std::vector<float> sense2;
+    sense2.reserve(24);
+    for (int rep = 0; rep < 2; ++rep) sense2.insert(sense2.end(), sense.begin(), sense.end());
+    publish("sense", sense2);
 }
 
 std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body) {

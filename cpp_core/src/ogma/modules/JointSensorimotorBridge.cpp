@@ -117,7 +117,7 @@ ParamSchema JointSensorimotorBridge::params_schema() const {
             "load token's layout is values[group*load_slots + s]; the s elements are appended "
             "in order after the [pos,act,delta] triplets.  1 = the historical single slot, "
             "byte-identical.",
-            ParamValue{int64_t(1)}, ParamValue{int64_t(1)}, ParamValue{int64_t(8)}},
+            ParamValue{int64_t(1)}, ParamValue{int64_t(1)}, ParamValue{int64_t(16)}},
         {"range_probe_ticks",   ParamMutability::HotMutable,
             "INSTRUMENT, not a lever.  When > 0, accumulate per-output per-dim min/max/mean/std of the published [pos,action,delta] channels and print one `BRIDGE_RANGE` JSON line to stdout every N ticks (cumulative, so the LAST line is the whole-run answer).  Exists to set a downstream RBF EPM's `dim_min`/`dim_max` from MEASUREMENT rather than assumption: pos/action are ~[-1,1] but delta is a per-tick difference an order of magnitude smaller, and the EPM's default [-1,1] range would crush the velocity channels (CLAUDE.md §0 rule 2).  0 = off: nothing accumulated, nothing printed, byte-identical.",
             ParamValue{int64_t{0}}},

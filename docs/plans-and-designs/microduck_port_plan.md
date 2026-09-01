@@ -1040,6 +1040,31 @@ so the GN descent alone cannot accumulate probe-grade gains and HK's contributio
 (b) the prior's minimum on this body is a *level-trunk crouch*, not the stand — out of the
 identified model's regime, which is the rung-2 shape again.
 
+**Stage 16 — the full IMU vector (2026-09-01, operator-directed).** The IMU-count audit
+found ONE hardware IMU (the trunk `imu_to_dxl` v2 board, id 200; the v1 lineage's four
+other IMUs — the head's among them — are dropped, leaving `head_imu` as an orphan CAD frame).
+The operator's directive — fill the vector with all possible inputs — became twelve sense
+slots per group: trunk pitch/roll, all three rates, linear accel, **head-frame gravity**
+(trunk IMU ∘ measured-neck FK — what the dropped head IMU would have sensed, the reduction
+upstream's ToF Reprojector already runs) and the **head-CoM offset** (pure FK + CAD masses —
+the observation a trunk IMU is structurally blind to: 38 % of the mass can crane forward at
+zero lean reading), calibrated to the scaffold stand. Prior stays on the four attitude
+elements; head-CoM is observation only (a prior there would fight the counterweight
+strategy, whose reality the joint-motion audit confirmed: neck_pitch and head_yaw are the
+two most active joints on the robot).
+
+| arm (600 s, n=6, ident schedule) | rescues/min | upright<15° | tilt (brain) | crouch rescues |
+|---|---|---|---|---|
+| full sense + prior | 15.1 ± 2.6 | **0.55 ± 0.07** | **24.4 ± 2.5** | 0–3 |
+| full sense, prior 0 | 13.4 ± 2.0 | 0.48 ± 0.08 | 29.2 ± 5.1 | ~0 |
+| *(p15, 4-slot, prior — for scale)* | *(10–12 post-ident)* | *(0.27)* | — | *(27–30)* |
+
+**The crouch degenerate is gone and genuinely-upright time doubled.** The richer state helps
+HK itself (the control's 0.48 beats every pre-sense arm), the prior adds +0.07 upright and
+−4.8° tilt on top, and the down-quieter flag vanished from every run. The falls number is
+higher than the croucher's because standing exposes you to falling — upright fraction is the
+mission metric, and it is now within sight of the probe's regime.
+
 **The fork that remains for the operator:**
 1. **Rung 2 — the real motor-EPM** (v2 plan §4): a GNG regime vocabulary with per-regime
    models — now motivated by TWO measured walls (mixture-poisoned identification, and the
