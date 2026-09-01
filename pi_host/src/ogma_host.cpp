@@ -20,6 +20,7 @@
 #include "ogma/OgmaInstance.hpp"
 #include "ogma/DiagPublisher.hpp"
 #include "control_server.hpp"
+#include <zmq.h>
 #include "ogma/Topics.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/AudioCapture.hpp"
@@ -57,6 +58,7 @@ struct Args {
     // on the network is a deliberate act.  --listen 0.0.0.0 is how the laptop's
     // xaq_inspector attaches.  (ControlServer already binds INADDR_ANY regardless.)
     std::string listen = "127.0.0.1";
+    bool    video      = false;   // opt-in: it is a viewer, not part of the loop
     bool    mic        = false;
     bool    camera     = false;
     bool    range      = false;
@@ -65,7 +67,7 @@ struct Args {
 void usage() {
     std::fprintf(stderr,
         "usage: ogma_host --config <graph.json> [--hz 50] [--ticks N] [--rt] [--quiet]\n"
-        "                 [--mic] [--camera] [--range] [--listen 0.0.0.0]\n"
+        "                 [--mic] [--camera] [--range] [--listen 0.0.0.0] [--video]\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
@@ -94,6 +96,7 @@ int main(int argc, char** argv) {
         else if (v == "--rt")                     a.realtime = true;
         else if (v == "--quiet")                  a.quiet = true;
         else if (v == "--listen" && i + 1 < argc)  a.listen = argv[++i];
+        else if (v == "--video")                  a.video = true;
         else if (v == "--mic")                    a.mic = true;
         else if (v == "--camera")                 a.camera = true;
         else if (v == "--range")                  a.range = true;
@@ -131,7 +134,8 @@ int main(int argc, char** argv) {
             const int p = std::atoi(env);
             if (p > 1024 && p < 65534) control_port = uint16_t(p);
         }
-        const uint16_t diag_port = uint16_t(control_port + 1);
+        const uint16_t diag_port  = uint16_t(control_port + 1);
+        const uint16_t video_port = uint16_t(control_port + 2);
         ogma::DiagPublisher diag(diag_port, a.listen);
         diag.start();
 
@@ -197,6 +201,33 @@ int main(int argc, char** argv) {
                 }
                 return {{"status","error"}, {"message","unknown verb: " + verb}};
             });
+
+        // ---- video PUB ------------------------------------------------------------
+        // A VIEWER, never a participant.  It reads the camera through snapshot(), which
+        // does not consume the frame's freshness, so a subscriber cannot starve the EPM
+        // of an observation; and it is ZMQ_CONFLATE + DONTWAIT, so a slow or absent
+        // viewer costs the tick nothing and never blocks it.  Two planes per message:
+        // what the BRAIN sees (32x32, centre-cropped, the encoder's actual input) and
+        // what the CAMERA sees (native aspect) -- the pair is the point, because a
+        // fault in the pipeline shows as the two disagreeing.
+        void*  zmq_ctx = nullptr;
+        void*  vid_pub = nullptr;
+        if (a.video) {
+            zmq_ctx = zmq_ctx_new();
+            vid_pub = zmq_socket(zmq_ctx, ZMQ_PUB);
+            int conflate = 1, linger = 0, sndhwm = 2;
+            zmq_setsockopt(vid_pub, ZMQ_CONFLATE, &conflate, sizeof conflate);
+            zmq_setsockopt(vid_pub, ZMQ_LINGER,   &linger,   sizeof linger);
+            zmq_setsockopt(vid_pub, ZMQ_SNDHWM,   &sndhwm,   sizeof sndhwm);
+            char ep[64];
+            std::snprintf(ep, sizeof ep, "tcp://%s:%u", a.listen.c_str(), unsigned(video_port));
+            if (zmq_bind(vid_pub, ep) != 0) {
+                std::fprintf(stderr, "ogma_host: video bind %s failed: %s\n", ep, zmq_strerror(errno));
+                zmq_close(vid_pub); vid_pub = nullptr;
+            } else {
+                std::printf("ogma_host: video PUB on %s\n", ep);
+            }
+        }
 
         const bool rt = a.realtime ? try_realtime() : false;
         std::printf("ogma_host: config=%s hz=%.2f diag=%u %s\n",
@@ -294,6 +325,34 @@ int main(int argc, char** argv) {
             ++ticks;
             if (diag.running()) diag.publish_tick(uint64_t(ticks), *instance);
 
+            if (vid_pub) {
+                static uint64_t last_vid_seq = 0;
+                static std::vector<uint8_t> vsmall, vprev;
+                int pw = 0, ph = 0; uint64_t vseq = 0;
+                if (cam.snapshot(vsmall, vprev, pw, ph, vseq) && vseq != last_vid_seq) {
+                    last_vid_seq = vseq;
+                    // One frame, because ZMQ_CONFLATE does not do multipart: a topic
+                    // prefix, a self-describing JSON header, a newline, then the raw
+                    // planes back to back.  Sizes travel with the data so a viewer never
+                    // has to be told the geometry out of band -- the exact assumption
+                    // that broke the camera reader in the first place.
+                    char hdr[256];
+                    const int n = std::snprintf(hdr, sizeof hdr,
+                        "video {\"seq\":%llu,\"tick\":%ld,"
+                        "\"brain\":{\"w\":%d,\"h\":%d,\"off\":0},"
+                        "\"view\":{\"w\":%d,\"h\":%d,\"off\":%zu},"
+                        "\"src\":{\"w\":%d,\"h\":%d},\"fmt\":\"L8\"}\n",
+                        (unsigned long long)vseq, ticks,
+                        cam.out_size(), cam.out_size(),
+                        pw, ph, vsmall.size(),
+                        cam.src_width(), cam.src_height());
+                    std::string msg(hdr, size_t(n));
+                    msg.append(reinterpret_cast<const char*>(vsmall.data()), vsmall.size());
+                    msg.append(reinterpret_cast<const char*>(vprev.data()), vprev.size());
+                    zmq_send(vid_pub, msg.data(), msg.size(), ZMQ_DONTWAIT);
+                }
+            }
+
             timespec w1, c1;
             clock_gettime(CLOCK_MONOTONIC, &w1);
             clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1);
@@ -325,6 +384,8 @@ int main(int argc, char** argv) {
         // A channel that died mid-run must SAY so.  "0 windows" is indistinguishable
         // from a silent room, a lens cap, and an empty corridor unless the error shows.
         mic.stop(); cam.stop(); rangefinder.stop();
+        if (vid_pub) zmq_close(vid_pub);
+        if (zmq_ctx) zmq_ctx_term(zmq_ctx);
         if (!mic.last_error().empty())         std::fprintf(stderr, "ogma_host: mic died: %s\n", mic.last_error().c_str());
         if (!cam.last_error().empty())         std::fprintf(stderr, "ogma_host: camera died: %s\n", cam.last_error().c_str());
         if (!rangefinder.last_error().empty()) std::fprintf(stderr, "ogma_host: rangefinder died: %s\n", rangefinder.last_error().c_str());

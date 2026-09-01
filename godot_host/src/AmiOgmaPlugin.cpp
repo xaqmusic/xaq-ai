@@ -11,6 +11,7 @@
 
 #include "OgmaBrain.hpp"
 #include "BenchClient.hpp"
+#include "VideoClient.hpp"
 
 using namespace godot;
 
@@ -18,6 +19,7 @@ static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) return;
     ClassDB::register_class<OgmaBrain>();
     ClassDB::register_class<BenchClient>();
+    ClassDB::register_class<VideoClient>();
 }
 
 static void uninitialize_ami_ogma_module(ModuleInitializationLevel p_level) {

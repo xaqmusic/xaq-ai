@@ -13,6 +13,8 @@ extends Node3D
 
 const REP_PORT := 5590
 const PUB_PORT := 5591
+# ogma_host's video PUB = its inspector control port + 2 (7400 -> 7402).
+const VIDEO_PORT := 7402
 const PING_S   := 0.3
 const SEND_THROTTLE_S := 0.05
 const US_PER_RAD := 636.6            # 500–2500 µs ≙ ±π/2
@@ -68,6 +70,10 @@ var _check_lbls: Dictionary = {}
 var _status_lbl: Label
 var _widen_lbl: Label
 var _tick_meter: Control
+var _video: Node                     # VideoClient — receive-only, see VideoClient.hpp
+var _view_tex: TextureRect           # what the CAMERA sees
+var _brain_tex: TextureRect          # what the BRAIN sees (the encoder's actual input)
+var _video_lbl: Label
 
 
 func _ready() -> void:
@@ -173,6 +179,39 @@ func _build_ui() -> void:
 	for item in ["0x14 present", "Vbat plausible 6.0–8.4 V", "IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
 		var l := _lbl("○ " + item); _check_lbls[item] = l; lv.add_child(l)
 		l.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+
+	# ---- bottom-left: the camera, as the brain gets it -------------------------------
+	# Both planes, side by side, because the PAIR is the diagnostic: a fault between the
+	# sensor and the encoder shows up as the two disagreeing. (2026-09-01: the camera read
+	# across frame boundaries for a week and looked like a working camera the whole time,
+	# because nothing ever displayed what the encoder was actually handed.)
+	var vpanel := PanelContainer.new()
+	vpanel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	vpanel.offset_left = 8; vpanel.offset_top = -190; vpanel.offset_bottom = -8; vpanel.offset_right = 320
+	_ui.add_child(vpanel)
+	var vm := _margin(); vpanel.add_child(vm)
+	var vroot := VBoxContainer.new(); vm.add_child(vroot)
+	var vhdr := HBoxContainer.new(); vroot.add_child(vhdr)
+	vhdr.add_child(_lbl("CAMERA  (ogma_host :%d — view only)" % VIDEO_PORT, 13))
+	var vrow := HBoxContainer.new(); vroot.add_child(vrow)
+	var vcol := VBoxContainer.new(); vrow.add_child(vcol)
+	vcol.add_child(_lbl("what the camera sees", 11))
+	_view_tex = TextureRect.new()
+	_view_tex.custom_minimum_size = Vector2(192, 144)
+	_view_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	_view_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	vcol.add_child(_view_tex)
+	vrow.add_child(_lbl("  "))
+	var bcol := VBoxContainer.new(); vrow.add_child(bcol)
+	var blab := _lbl("what the BRAIN sees", 11)
+	blab.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	bcol.add_child(blab)
+	_brain_tex = TextureRect.new()
+	_brain_tex.custom_minimum_size = Vector2(96, 96)
+	_brain_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	_brain_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # show the pixels, do not smooth them
+	bcol.add_child(_brain_tex)
+	_video_lbl = _lbl("not connected", 11); vroot.add_child(_video_lbl)
 
 	# ---- bottom-centre: the honesty label on the 3-D view ----------------------------
 	var cap := _lbl("3-D view = COMMANDED pose", 14)
@@ -383,6 +422,13 @@ func _call(req: Dictionary) -> Dictionary:
 
 
 func _on_connect() -> void:
+	# The video stream lives on ogma_host, a different daemon from benchd, so it gets its
+	# own client. Receive-only: there is no verb path from here to the brain (SPEC §1.1).
+	if _video == null:
+		_video = ClassDB.instantiate("VideoClient")
+		if _video != null: add_child(_video)
+	if _video != null and not bool(_video.call("connect_to", _host_edit.text, VIDEO_PORT)):
+		_video_lbl.text = "video: %s" % str(_video.call("last_error"))
 	var ok: bool = _client.call("connect_to", _host_edit.text, REP_PORT, PUB_PORT)
 	_connected = ok
 	_link_fail = 0
@@ -479,7 +525,25 @@ func _on_load_map() -> void:
 # ======================================================================================
 # Per frame: ping, throttle, telemetry, body
 # ======================================================================================
+func _update_video() -> void:
+	if _video == null or not bool(_video.call("is_connected")):
+		return
+	if not bool(_video.call("poll")):
+		return
+	var vi: Image = _video.call("view_image")
+	if vi != null and not vi.is_empty():
+		_view_tex.texture = ImageTexture.create_from_image(vi)
+	var bi: Image = _video.call("brain_image")
+	if bi != null and not bi.is_empty():
+		_brain_tex.texture = ImageTexture.create_from_image(bi)
+	var info: Dictionary = _video.call("info")
+	_video_lbl.text = "frame %s   %dx%d source   %.1f kB" % [
+		str(info.get("seq", "—")), int(info.get("src_w", 0)), int(info.get("src_h", 0)),
+		float(info.get("bytes", 0)) / 1024.0]
+
+
 func _process(delta: float) -> void:
+	_update_video()
 	if _connected:
 		_ping_acc += delta
 		if _ping_acc >= PING_S:

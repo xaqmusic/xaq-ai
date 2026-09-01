@@ -89,6 +89,27 @@ bool probe_geometry(const std::string& binary, int w, int h, int& stride, size_t
 }
 } // namespace
 
+void CameraCapture::box_downsample(const uint8_t* y, int w, int h, int stride, int div,
+                                   std::vector<uint8_t>& dst, int& out_w, int& out_h) {
+    out_w = out_h = 0;
+    dst.clear();
+    if (!y || w <= 0 || h <= 0 || div <= 0) return;
+    if (stride < w) stride = w;
+    out_w = w / div;
+    out_h = h / div;
+    if (out_w <= 0 || out_h <= 0) { out_w = out_h = 0; return; }
+    dst.assign(size_t(out_w) * size_t(out_h), 0);
+    const uint32_t n = uint32_t(div) * uint32_t(div);
+    for (int oy = 0; oy < out_h; ++oy)
+        for (int ox = 0; ox < out_w; ++ox) {
+            uint32_t sum = 0;
+            for (int dy = 0; dy < div; ++dy)
+                for (int dx = 0; dx < div; ++dx)
+                    sum += y[size_t(oy * div + dy) * size_t(stride) + size_t(ox * div + dx)];
+            dst[size_t(oy) * size_t(out_w) + size_t(ox)] = uint8_t(sum / n);
+        }
+}
+
 bool CameraCapture::start() {
     if (running_) return true;
 
@@ -176,16 +197,34 @@ void CameraCapture::run() {
         if (got < framesize) return;
 
         reduce(raw.data(), cfg_.src_width, cfg_.src_height, stride_, cfg_.out_size, small);
+        std::vector<uint8_t> prev_small;
+        int pw = 0, ph = 0;
+        if (cfg_.preview_div > 0)
+            box_downsample(raw.data(), cfg_.src_width, cfg_.src_height, stride_,
+                           cfg_.preview_div, prev_small, pw, ph);
         uint32_t sum = 0;
         for (uint8_t v : small) sum += v;
         {
             std::lock_guard<std::mutex> lk(m_);
             frame_ = small;
+            preview_ = std::move(prev_small); preview_w_ = pw; preview_h_ = ph;
             fresh_ = true;
             mean_  = small.empty() ? 0.0f : float(sum) / float(small.size());
             ++frames_;
         }
     }
+}
+
+bool CameraCapture::snapshot(std::vector<uint8_t>& small, std::vector<uint8_t>& preview,
+                             int& preview_w, int& preview_h, uint64_t& seq) const {
+    std::lock_guard<std::mutex> lk(m_);
+    if (frame_.empty()) return false;
+    small     = frame_;
+    preview   = preview_;
+    preview_w = preview_w_;
+    preview_h = preview_h_;
+    seq       = frames_;              // deliberately does NOT clear fresh_
+    return true;
 }
 
 bool CameraCapture::latest(std::vector<uint8_t>& out) {

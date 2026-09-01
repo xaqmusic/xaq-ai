@@ -37,6 +37,11 @@ public:
         int out_size   = 32;       // the retinal encoder's spec (32x32x1, modality "retinal")
         int fps        = 15;       // well under the 50 Hz tick; frames are held, not faked
         int src_stride = 0;        // 0 = probe it; non-zero overrides the probe
+        // A human-viewable plane beside the 32x32 the brain gets.  Integer divisor of
+        // the source so it is an exact box average and keeps the native aspect (the
+        // 32x32 is centre-cropped square, which is right for the encoder and wrong for
+        // judging where the camera is pointed).
+        int preview_div = 2;       // 256x192 -> 128x96; 0 disables the preview
         std::string binary = "rpicam-vid";
     };
 
@@ -51,12 +56,23 @@ public:
 
     // Newest frame as out_size*out_size grayscale.  False when nothing new since
     // the last call — the caller must not republish a stale frame (see AudioCapture).
+    // ⚠ CONSUMES the freshness flag: exactly one consumer may use this, and it is the
+    // brain path.  Anything else watching the camera uses snapshot() below.
     bool latest(std::vector<uint8_t>& out);
+
+    // Non-consuming read for observers (the video stream).  Returns the current frame
+    // and its sequence number without touching `fresh_`, so a viewer cannot starve the
+    // EPM of an observation by being scheduled first — the bug this shape prevents.
+    // Compare `seq` against your own last value to detect a new frame.
+    bool snapshot(std::vector<uint8_t>& small, std::vector<uint8_t>& preview,
+                  int& preview_w, int& preview_h, uint64_t& seq) const;
 
     const std::string& last_error() const { return err_; }
     uint64_t frames()      const { return frames_; }
     int      out_size()    const { return cfg_.out_size; }
     int      stride()      const { return stride_; }     // measured, not assumed
+    int      src_width()   const { return cfg_.src_width; }
+    int      src_height()  const { return cfg_.src_height; }
     size_t   frame_bytes() const { return frame_bytes_; }
     // Mean brightness of the last frame: the "is the lens cap on?" check.
     float    mean_level()  const { return mean_; }
@@ -70,6 +86,10 @@ public:
     // Treating stride as width shears the image and, worse, makes the frame size wrong.
     static void reduce(const uint8_t* y, int w, int h, int stride, int out,
                        std::vector<uint8_t>& dst);
+
+    // Exact NxN box average of the whole frame, aspect preserved — the preview path.
+    static void box_downsample(const uint8_t* y, int w, int h, int stride, int div,
+                               std::vector<uint8_t>& dst, int& out_w, int& out_h);
 
     // Y-plane row pitch for a given width, per the ISP's measured alignment rule.
     // Used only as the fallback when the startup probe cannot run.
@@ -88,6 +108,8 @@ private:
     std::thread th_;
     mutable std::mutex m_;
     std::vector<uint8_t> frame_;
+    std::vector<uint8_t> preview_;
+    int         preview_w_ = 0, preview_h_ = 0;
     bool        fresh_   = false;
     std::atomic<bool> running_{false};
     uint64_t    frames_  = 0;

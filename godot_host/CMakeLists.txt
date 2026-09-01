@@ -76,6 +76,7 @@ add_library(ami_ogma_host SHARED
     src/AmiOgmaPlugin.cpp
     src/OgmaBrain.cpp
     src/BenchClient.cpp   # bench dashboard client (pi_host/PROTOCOL.md)
+    src/VideoClient.cpp   # camera stream from ogma_host (receive-only)
 )
 
 # No "lib" prefix — we reference it as "ami_ogma_host.so" in the .gdextension.
