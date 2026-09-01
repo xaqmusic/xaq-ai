@@ -81,6 +81,11 @@ public:
     // basin should make smaller and smaller adjustments).  −1 = not reported.
     virtual double last_cmd_mag() const { return -1.0; }
 
+    // Rung-2 regime token (instrument): the current GNG regime id and its TLE,
+    // when a regime EPM is in the graph.  −1 = no vocabulary present.
+    virtual int    regime_id()  const { return -1; }
+    virtual double regime_tle() const { return -1.0; }
+
     virtual const char* name() const { return "brain"; }
 };
 

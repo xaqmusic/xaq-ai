@@ -546,9 +546,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             const auto g = body.gravity();
             std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
                         "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\",\"u\":%.4f,"
+                        "\"rg\":%d,\"rtle\":%.3f,"
                         "\"learning\":%s,\"event\":\"%s\",\"q\":[",
                         body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
                         driver_name(driver), brain.last_cmd_mag(),
+                        brain.regime_id(), brain.regime_tle(),
                         learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
                         : recovery.handed_back_this_tick() ? "reset:handback"

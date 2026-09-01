@@ -178,6 +178,10 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
     sense2.reserve(24);
     for (int rep = 0; rep < 2; ++rep) sense2.insert(sense2.end(), sense.begin(), sense.end());
     publish("sense", sense2);
+
+    // sense1 — the same 12 slots ONCE, for a body-level consumer (the rung-2
+    // regime EPM reads this; the group-major duplicate above is bridge-shaped).
+    publish("sense1", sense);
 }
 
 std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body) {
@@ -194,6 +198,12 @@ std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body)
                 bus->last_value(action_topics_[size_t(i)]))) {
             last_u_[size_t(i)] = double(a->accel);
         }
+    }
+    // Rung-2 regime token, if a regime EPM is in the graph (conventional topic).
+    if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(
+            bus->last_value("reality.proprio.regime"))) {
+        regime_id_  = rt->winner_id;
+        regime_tle_ = rt->tle;
     }
     ++tick_id_;
 

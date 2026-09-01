@@ -90,6 +90,8 @@ public:
     uint64_t ticks() const { return tick_id_; }
     double   mean_abs_action() const;
     double last_cmd_mag() const override { return last_cmd_mag_; }
+    int    regime_id()  const override { return regime_id_; }
+    double regime_tle() const override { return regime_tle_; }
     std::vector<std::string> module_ids() const;
 
     // ★ The risk this experiment must be able to see.
@@ -132,6 +134,8 @@ private:
     uint64_t tle_up_n_ = 0, tle_down_n_ = 0;
     double action_abs_sum_ = 0.0;
     double last_cmd_mag_ = -1.0;
+    int    regime_id_  = -1;
+    double regime_tle_ = -1.0;
     uint64_t action_samples_ = 0;
 };
 
