@@ -337,6 +337,40 @@ ParamSchema MotorEPMv2::params_schema() const {
          "direction); this magnitude sets only how fast the equilibrium drifts.  "
          "0 = the walk never moves, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"regime_c_banks", ParamMutability::HotMutable,
+         "R3 of the rung-2 design — per-regime CONTROLLERS (C, h, hr, and the regime's "
+         "earned consolidation), swapped with the R1 model banks.  Its design gate was "
+         "'only if R1/R2 leave a measured residual demanding it', and the R4/R5 families "
+         "measured that residual nine arms deep: a single shared C is slump-hours-"
+         "dominated, the tall-local corrections learned in the seconds after every "
+         "scaffold handback are overwritten, and NO force schedule (always-on, dormant, "
+         "balance-gated, µ-rate bias) can deform a slump-consolidated controller to the "
+         "tall pose — its feedback correlations are slump-local and plasticity is what "
+         "consolidation removed.  With controller banks the tall regime (a distinct "
+         "vocabulary token — measured: post-handback pose = token 1, slump standing = "
+         "token 0) keeps its own solution and earns its own permanence; a fresh regime "
+         "warm-starts from the incumbent's controller but its cons_c starts 0 — "
+         "permanence is earned, never inherited.  Requires regime_topic.  0 = off, "
+         "byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"regime_dwell", ParamMutability::HotMutable,
+         "Ticks a NEW regime slot must persist before the bank swap executes.  Measured "
+         "motivation (R6a): the raw winner_id flickers at ~10 Hz near standing (median "
+         "dwell 0.10 s across 25+ tokens), so controller banks swap every ~5 ticks, every "
+         "swap drops the boundary pairing sample, and no bank owns its own topple onset — "
+         "the pre-fall second belongs to other tokens and the tall bank cannot learn from "
+         "its mistakes.  A real transition (a fall) persists and still switches within "
+         "dwell ticks; flicker does not.  0 = immediate (legacy), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{250.0}},
+        {"consolidate_calm_ticks", ParamMutability::HotMutable,
+         "No-fall ticks required before consolidation may ramp.  The 1500 default (30 s) "
+         "was picked, not derived, and it is the measured binding constraint on any stance "
+         "whose early fall gaps run 10-15 s: R5's seed 2 held 0.93 upright at 4 deg and "
+         "pose-distance 0.075 — the tallest sustained stance of the campaign — and could "
+         "never consolidate it (mean gap 13.6 s < 30 s), while c's own ramp (τ ≈ 10 s) "
+         "already provides a demonstration period on top of this window.  Default 1500 = "
+         "byte-identical legacy.",
+         ParamValue{1500.0}, ParamValue{100.0}, ParamValue{15000.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -1005,6 +1039,9 @@ ParamMap MotorEPMv2::current_params() const {
     m["consolidate_spares_prior"] = consolidate_spares_prior_;
     m["consolidate_reach"] = consolidate_reach_;
     m["consolidate_reach_lr"] = consolidate_reach_lr_;
+    m["regime_c_banks"] = regime_c_banks_;
+    m["regime_dwell"] = regime_dwell_;
+    m["consolidate_calm_ticks"] = consolidate_calm_ticks_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1184,6 +1221,9 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "consolidate_spares_prior", [&](auto const& v){ consolidate_spares_prior_ = get_double(v, "consolidate_spares_prior"); });
     apply_param(params, "consolidate_reach", [&](auto const& v){ consolidate_reach_ = get_double(v, "consolidate_reach"); });
     apply_param(params, "consolidate_reach_lr", [&](auto const& v){ consolidate_reach_lr_ = get_double(v, "consolidate_reach_lr"); });
+    apply_param(params, "regime_c_banks", [&](auto const& v){ regime_c_banks_ = get_double(v, "regime_c_banks"); });
+    apply_param(params, "regime_dwell", [&](auto const& v){ regime_dwell_ = get_double(v, "regime_dwell"); });
+    apply_param(params, "consolidate_calm_ticks", [&](auto const& v){ consolidate_calm_ticks_ = get_double(v, "consolidate_calm_ticks"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -3841,16 +3881,59 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             }
             const int slot = bank_of_winner_[size_t(w)];
             if (int(L.banks.size()) < regime_banks_) L.banks.resize(size_t(regime_banks_));
-            if (L.active_bank != slot) {
+            // regime_dwell: a CONTROLLER's regime key must be sticky.  Measured
+            // (R6a): the raw winner_id flickers at ~10 Hz near the standing
+            // region (median dwell 0.10 s across 25+ tokens) — banks swap every
+            // ~5 ticks, every swap drops the boundary sample, and no bank ever
+            // owns its own topple onset (the pre-fall second belongs to OTHER
+            // tokens), so the tall bank cannot learn from its mistakes.  A swap
+            // now executes only after the new slot persists regime_dwell
+            // consecutive ticks (leg-0 driven; legs move in lockstep).  0 =
+            // immediate, byte-identical.  First assignment is always immediate.
+            if (leg == 0) {
+                if (slot == L.active_bank)      { pending_slot_ = -1; pending_count_ = 0; }
+                else if (slot == pending_slot_) { ++pending_count_; }
+                else                            { pending_slot_ = slot; pending_count_ = 1; }
+            }
+            const bool may_swap = L.active_bank < 0 || regime_dwell_ <= 0.0
+                                  || pending_count_ >= int(regime_dwell_);
+            if (L.active_bank != slot && may_swap) {
                 if (L.active_bank >= 0) {          // store the incumbent
                     auto& ob = L.banks[size_t(L.active_bank)];
                     ob.A = L.A; ob.Bx = L.Bx; ob.b = L.b; ob.tle_ema = L.tle_ema;
+                    // R3: the CONTROLLER is the regime's too.  The nine-arm
+                    // measurement behind this (R4/R5 families): a single shared C
+                    // is slump-hours-dominated — tall-local corrections learned in
+                    // the seconds after every scaffold handback are overwritten,
+                    // and no force schedule can deform a slump-consolidated
+                    // controller to the tall pose.  Bank C/h/hr and the regime's
+                    // EARNED permanence, and each regime keeps its own solution.
+                    if (regime_c_banks_ > 0.0) {
+                        ob.C = L.C; ob.h = L.h; ob.hr = L.hr;
+                        if (leg == 0) {
+                            ob.cons_c   = consolidate_c_;
+                            ob.gate_ema = state_prior_gate_ema_;
+                        }
+                    }
                 }
                 auto& nb = L.banks[size_t(slot)];
                 if (nb.A.size() == 0) {            // first sight: warm-start from incumbent
                     nb.A = L.A; nb.Bx = L.Bx; nb.b = L.b; nb.tle_ema = L.tle_ema;
                 }
                 L.A = nb.A; L.Bx = nb.Bx; L.b = nb.b; L.tle_ema = nb.tle_ema;
+                if (regime_c_banks_ > 0.0) {
+                    if (nb.C.size() == 0) {        // first sight: inherit the incumbent's
+                        nb.C = L.C; nb.h = L.h; nb.hr = L.hr;
+                        // cons_c/gate_ema start 0: permanence is EARNED per regime,
+                        // never inherited — a fresh regime learns at full rate on
+                        // its warm-started copy without touching the incumbent's.
+                    }
+                    L.C = nb.C; L.h = nb.h; L.hr = nb.hr;
+                    if (leg == 0) {
+                        consolidate_c_        = nb.cons_c;
+                        state_prior_gate_ema_ = nb.gate_ema;
+                    }
+                }
                 L.active_bank = slot;
                 L.have_prev = false;               // drop the boundary sample
                 if (L.ytrace.size() > 0) L.ytrace.setZero();
@@ -3875,7 +3958,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             const float gate_ema = (consolidate_n_ > 0.0) ? state_prior_gate_ema_
                                                           : state_prior_err_ema_;
             const bool sat  = gate_ema > 0.0f && gate_ema < 0.15f;
-            const bool calm = ticks_since_reset_ > 1500;
+            const bool calm = ticks_since_reset_ > int(consolidate_calm_ticks_);
             const float tgt = (sat && calm) ? 1.0f : 0.0f;
             const float k   = (tgt > consolidate_c_) ? 0.002f : 0.01f;   // up τ~10s, down τ~2s
             consolidate_c_ += k * (tgt - consolidate_c_);
@@ -6021,6 +6104,13 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
         for (auto const& L : legs_)
             if (L.hr.size() > 0) hrm = std::max(hrm, L.hr.cwiseAbs().maxCoeff());
         j["hr_max"] = hrm;                     // mode-3 reach bias magnitude (applied as c·hr)
+    }
+    if (regime_c_banks_ > 0.0 && !legs_.empty()) {
+        auto bc = nlohmann::json::array();     // per-regime earned permanence (leg 0)
+        for (size_t bi = 0; bi < legs_[0].banks.size(); ++bi)
+            bc.push_back(int(legs_[0].active_bank) == int(bi)
+                         ? consolidate_c_ : legs_[0].banks[bi].cons_c);
+        j["bank_cons"] = bc;
     }
     {
         double cpn = 0.0;

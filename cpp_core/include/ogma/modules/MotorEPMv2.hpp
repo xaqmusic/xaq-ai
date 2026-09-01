@@ -1272,7 +1272,11 @@ private:
         // change, so every model path reads/writes exactly as before.
         struct ModelBank { Eigen::MatrixXf A, Bx; Eigen::VectorXf b; float tle_ema = 0.0f;
                            float sp_err = -1.0f;   // per-regime prior-error EMA (−1 = unseen)
-                           int64_t samples = 0; };
+                           int64_t samples = 0;
+                           // R3 (regime_c_banks): the regime's own CONTROLLER and its
+                           // earned permanence.  cons_c/gate_ema are carried on leg 0.
+                           Eigen::MatrixXf C; Eigen::VectorXf h, hr;
+                           float cons_c = 0.0f; float gate_ema = 0.0f; };
         std::vector<ModelBank> banks;
         int                 active_bank = -1;
         float               calm_state = 1.0f;    // the annealing ratchet (slow attack, fast release)
@@ -1567,6 +1571,8 @@ private:
     double consolidate_spares_prior_ = 0.0;     // >0: the prior's own descent survives consolidation
     double consolidate_reach_ = 0.0;            // >0: indices ≥ consolidate_n engage at lw·c, with h (reach terms)
     double consolidate_reach_lr_ = 0.0;         // mode 5's hr write rate (µ-rate; 0 = hr never writes)
+    double regime_c_banks_ = 0.0;               // R3: bank the CONTROLLER (C,h,hr + earned c) per regime
+    double consolidate_calm_ticks_ = 1500.0;    // no-fall ticks required before c may ramp (default = legacy 30 s)
     float  reach_lw_last_ = 0.0f;               // telemetry: the reach terms' current effective lw
     float  state_prior_gate_ema_ = 0.0f;        // satisfaction EMA over the gate subset (consolidate_n > 0)
     float  sp_err_peak_      = 0.0f;            // decaying peak of the prior error (the reference)
@@ -1574,6 +1580,9 @@ private:
     int    regime_winner_  = -1;                // latest winner_id from the token
     std::vector<int> bank_of_winner_;           // winner_id -> bank slot, first-seen order
     int64_t bank_switches_ = 0;                 // §3.2 consumer counter
+    double regime_dwell_ = 0.0;                 // ticks a new slot must persist before a swap (0 = immediate)
+    int    pending_slot_  = -1;                 // dwell bookkeeping (leg-0 driven, shared)
+    int    pending_count_ = 0;
     int    state_prior_applied_ = 0;
     float  calm_mult_ = 1.0f;                   // last applied annealing multiplier (diag)            // indices that actually resolved last controller tick —
                                                 // disambiguates "satisfied (err→0)" from "never in range"

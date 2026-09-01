@@ -759,6 +759,83 @@ TEST(StatePrior, Mode5BiasOnlyReachIsControlUntilConsolidatedThenWalks) {
         << "consolidated: the bias walk must be moving toward the reach target";
 }
 
+TEST(StatePrior, ControllerBanksKeepPermanenceRegimeLocal) {
+    ParamMap p = consol_params(0.0);
+    p["state_prior_indices"] = std::vector<double>{double(kLeanIdx)};
+    p["state_prior_targets"] = std::vector<double>{0.0};
+    p["babble_ticks"]   = int64_t{200};
+    p["regime_topic"]   = std::string("sp.regime");
+    p["regime_banks"]   = int64_t{3};
+    p["regime_c_banks"] = 1.0;
+    Fixture f(p);
+    auto tick = [&](uint64_t t, int winner, float lean) {
+        f.bus.begin_tick(t);
+        auto rt = std::make_shared<ogma::RealityToken>();
+        rt->winner_id = winner;
+        f.bus.publish("sp.regime", rt);
+        auto pt = std::make_shared<ogma::ProprioToken>();
+        pt->values = Eigen::VectorXf::Zero(kStateN);
+        const double ph = 0.15 * double(t);
+        for (int j = 0; j < kMotors; ++j) {
+            pt->values[3 * j + 0] = float(0.30 * std::sin(ph + j));
+            pt->values[3 * j + 1] = float(0.20 * std::cos(ph + j));
+            pt->values[3 * j + 2] = float(0.30 * 0.15 * std::cos(ph + j));
+        }
+        pt->values[kLeanIdx] = lean;
+        pt->sensor = "proprio";
+        f.bus.publish("sp.p0", pt);
+        f.m.tick(t);
+        f.bus.end_tick();
+    };
+    uint64_t t = 1;
+    for (; t <= 4000; ++t) tick(t, 0, 0.02f);        // regime 0: satisfied, consolidates
+    const float c_A = f.m.diag_snapshot()["consolidate_c"].get<float>();
+    EXPECT_GT(c_A, 0.5f) << "regime 0 must earn consolidation";
+    for (uint64_t e = 0; e < 600; ++e, ++t) tick(t, 7, 0.40f);   // regime 7: fresh, unsatisfied
+    const float c_B = f.m.diag_snapshot()["consolidate_c"].get<float>();
+    EXPECT_LT(c_B, 0.05f) << "a fresh regime's permanence starts at 0 — earned, not inherited";
+    for (uint64_t e = 0; e < 50; ++e, ++t) tick(t, 0, 0.02f);    // back to regime 0
+    const float c_back = f.m.diag_snapshot()["consolidate_c"].get<float>();
+    EXPECT_GT(c_back, 0.5f * c_A)
+        << "returning to regime 0 must restore ITS earned consolidation";
+}
+
+TEST(StatePrior, RegimeDwellSuppressesFlickerNotTransitions) {
+    auto mk = [](double dwell) {
+        ParamMap p = base_params();
+        p["babble_ticks"]   = int64_t{100};
+        p["regime_topic"]   = std::string("sp.regime");
+        p["regime_banks"]   = int64_t{3};
+        p["regime_dwell"]   = dwell;
+        return p;
+    };
+    auto drive = [](Fixture& f) {
+        auto tick = [&](uint64_t t, int winner) {
+            f.bus.begin_tick(t);
+            auto rt = std::make_shared<ogma::RealityToken>();
+            rt->winner_id = winner;
+            f.bus.publish("sp.regime", rt);
+            auto pt = std::make_shared<ogma::ProprioToken>();
+            pt->values = Eigen::VectorXf::Zero(kStateN);
+            pt->values[kLeanIdx] = wobble(t);
+            pt->sensor = "proprio";
+            f.bus.publish("sp.p0", pt);
+            f.m.tick(t);
+            f.bus.end_tick();
+        };
+        uint64_t t = 1;
+        for (; t <= 400; ++t) tick(t, 0);                       // settle in regime 0
+        for (; t <= 900; ++t) tick(t, (t % 10 < 5) ? 0 : 7);    // 5-tick flicker, 10 Hz
+        for (; t <= 1100; ++t) tick(t, 7);                      // a REAL transition
+        return f.m.diag_snapshot()["bank_switches"].get<int64_t>();
+    };
+    Fixture raw(mk(0.0)), sticky(mk(25.0));
+    const auto sw_raw = drive(raw), sw_sticky = drive(sticky);
+    EXPECT_GT(sw_raw, int64_t{50}) << "dwell 0 must chase every flicker (the R6a disease)";
+    EXPECT_LE(sw_sticky, int64_t{4}) << "dwell 25 must ignore 5-tick flicker";
+    EXPECT_GE(sw_sticky, int64_t{2}) << "…but still take the sustained transition";
+}
+
 TEST(StatePrior, HotParamRoundTrip) {
     Fixture f(base_params());
     f.m.on_param_change("state_prior_gain", ParamValue{0.6});
