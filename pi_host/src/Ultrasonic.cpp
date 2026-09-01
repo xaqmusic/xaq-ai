@@ -154,6 +154,9 @@ void Ultrasonic::run() {
             r.valid = r.distance_m > 0.01 && r.distance_m <= cfg_.max_range_m;
             ++pings_;
         } else {
+            // No echo: report the far limit, not zero.  See Reading::distance_m.
+            r.distance_m = cfg_.max_range_m;
+            r.valid      = false;
             ++timeouts_;
         }
         if (r.valid && have_prev) {

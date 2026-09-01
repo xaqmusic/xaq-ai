@@ -43,11 +43,22 @@ public:
         // ghosts into the next window (the MEAN drifts too, 37 -> 48 cm, which is the
         // tell that it is trailing echoes and not just noise).
         double   hz           = 20.0;
-        double   max_range_m  = 4.0;
+        // The module's USABLE range, not the datasheet's 4 m: measured 2026-09-01 the
+        // echo dies out around 1.2-1.4 m against ordinary targets.  This is not a taste
+        // setting -- it is what a no-echo ping is reported AS (see Reading::distance_m),
+        // so an over-wide value re-inflates the very axis commissioning just calibrated.
+        double   max_range_m  = 1.5;
         double   air_temp_c   = 20.0;     // speed of sound is temperature-dependent
     };
 
     struct Reading {
+        // ⚠ On a no-echo ping this is max_range_m, NOT zero, and `valid` is false.
+        // Zero was the original encoding and it is the worst available answer: it maps
+        // "nothing within range" (far) onto "something against the sensor" (near), the
+        // opposite extreme. No echo means nothing reflected within max_range_m, so the
+        // far limit is the honest floor on the distance, and `valid` carries the caveat.
+        // Reported rather than suppressed because "clear ahead" is real information --
+        // suppressing it makes an open corridor look identical to a dead sensor.
         double   distance_m = 0.0;
         double   rate_mps   = 0.0;        // closing speed, from consecutive readings
         bool     valid      = false;      // false = no echo, or beyond max range

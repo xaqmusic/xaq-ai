@@ -279,7 +279,9 @@ int main(int argc, char** argv) {
                     // derivative was duplicating that in its noisiest form.
                     // Validity stays a CHANNEL, not a silent substitution: an out-of-range
                     // ping and a wall at 0 m are different facts.
-                    f->values[0] = float(r.valid ? r.distance_m : 0.0);
+                    // distance_m is already max_range_m on a no-echo ping, so there is
+                    // no substitution to make here -- the driver owns that meaning.
+                    f->values[0] = float(r.distance_m);
                     f->values[1] = r.valid ? 1.0f : 0.0f;
                     bus->publish("sense.range", f);
                 }

@@ -400,6 +400,19 @@ TEST(CameraCapture, ReduceIsTotalOnDegenerateInput) {
     ASSERT_EQ(dst.size(), 4u);
     for (uint8_t v : dst) EXPECT_EQ(int(v), 200);
 }
+TEST(Ultrasonic, MaxRangeIsTheUsableRangeBecauseItIsWhatNoEchoReportsAs) {
+    // Regression guard for a real bug (2026-09-01): a no-echo ping used to publish
+    // distance 0, which maps "nothing within range" onto "something against the
+    // sensor" -- the opposite extreme -- and it poisoned the commissioned range, whose
+    // lower bound came back as exactly 0.0 against a true band of 0.03-1.2 m.
+    // The default must stay the module's USABLE range, not the datasheet's 4 m,
+    // because an over-wide value re-inflates the axis commissioning just calibrated.
+    Ultrasonic::Config cfg;
+    EXPECT_LT(cfg.max_range_m, 2.0) << "an over-wide no-echo value re-inflates the axis";
+    EXPECT_GT(cfg.max_range_m, 1.2) << "must cover the observed 1.43 m maximum";
+    EXPECT_DOUBLE_EQ(cfg.hz, 20.0);   // measured ceiling; 30 Hz degrades, 40 Hz ghosts
+}
+
 TEST(CameraCapture, StrideIsTheRowPitchAndPaddingNeverEntersTheAverage) {
     // The bug this guards, measured 2026-09-01: rpicam-vid emits a Y plane whose row
     // pitch is the width rounded UP to a multiple of 128, so a 160-wide frame is really
