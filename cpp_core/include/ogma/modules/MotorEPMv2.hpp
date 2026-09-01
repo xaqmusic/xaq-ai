@@ -1558,6 +1558,9 @@ private:
     std::string regime_topic_;                  // RealityToken source; empty = banks off, byte-identical
     double babble_owns_a_ = 0.0;                // 1 = the babble's paired-difference estimator owns A forever
     double state_prior_calm_mode_ = 0.0;        // R2: 0 = continuous key (legacy), 1 = regime-keyed
+    double consolidate_gain_ = 0.0;             // earned consolidation strength; 0 = off
+    float  consolidate_c_    = 0.0f;            // the consolidation state ∈ [0,1]
+    float  sp_err_peak_      = 0.0f;            // decaying peak of the prior error (the reference)
     int    regime_banks_   = 6;                 // bank slots (last slot = shared overflow)
     int    regime_winner_  = -1;                // latest winner_id from the token
     std::vector<int> bank_of_winner_;           // winner_id -> bank slot, first-seen order

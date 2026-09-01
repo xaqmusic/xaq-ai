@@ -251,6 +251,20 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
          "own self-limiting rule. 0 = legacy shared C, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_gain", ParamMutability::HotMutable,
+         "EARNED CONSOLIDATION (2026-09-01): anneal ALL learning rates by a factor "
+         "(1 − gain·c), where c ∈ [0,1] ramps up (τ ≈ 10 s) while BOTH hold — the state "
+         "prior's short error EMA sits below half its own long EMA (self-scaled: the prior "
+         "is being satisfied, which a tilted crouch fails) AND no fall for 30 s "
+         "(ticks_since_reset > 1500, which a fall-cycle fails) — and decays fast (τ ≈ 2 s) "
+         "when either breaks, so plasticity returns the moment the world changes.  Measured "
+         "motivation: seeds find standing in their first minutes (0.99 upright) and continued "
+         "learning then DESTROYS it (0.63, falls 22/min); a hand freeze at minute 5 preserved "
+         "0.93 for the remaining 25 — but a hand-picked time is a scaffold.  This is the GNG's "
+         "earned-node-permanence principle at the controller level: a solution that keeps the "
+         "body standing has EARNED slow plasticity; it is not unlearned for the crime of "
+         "working.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -914,6 +928,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["regime_topic"] = regime_topic_;
     m["babble_owns_a"] = babble_owns_a_;
     m["state_prior_calm_mode"] = state_prior_calm_mode_;
+    m["consolidate_gain"] = consolidate_gain_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1088,6 +1103,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
     apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
     apply_param(params, "state_prior_calm_mode", [&](auto const& v){ state_prior_calm_mode_ = get_double(v, "state_prior_calm_mode"); });
+    apply_param(params, "consolidate_gain", [&](auto const& v){ consolidate_gain_ = get_double(v, "consolidate_gain"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -3762,6 +3778,27 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             if (L.active_bank >= 0) ++L.banks[size_t(L.active_bank)].samples;
         }
 
+        // ---- Earned consolidation (consolidate_gain > 0): see the param note.
+        // The satisfaction threshold is a FIXED FRACTION OF THE UNIT CHANNEL —
+        // and that is not a tuned constant (§5.5): the sense channels are
+        // conditioned to [−1,1] by construction, a fall drives the attitude
+        // elements toward 1, standing sits near 0.07.  Every adaptive reference
+        // tried first was measured self-defeating: the long average had seen no
+        // bad times when the good phase came first; the smoothed peak diluted
+        // fall spikes to the standing level; the decaying instant peak collapsed
+        // during exactly the long quiet stretches it should protect.  The
+        // conditioning already normalised the scale — use it.
+        if (consolidate_gain_ > 0.0 && leg == 0) {
+            const bool sat  = state_prior_err_ema_ > 0.0f
+                              && state_prior_err_ema_ < 0.15f;
+            const bool calm = ticks_since_reset_ > 1500;
+            const float tgt = (sat && calm) ? 1.0f : 0.0f;
+            const float k   = (tgt > consolidate_c_) ? 0.002f : 0.01f;   // up τ~10s, down τ~2s
+            consolidate_c_ += k * (tgt - consolidate_c_);
+        }
+        const float lr_scale = (consolidate_gain_ > 0.0)
+            ? 1.0f - float(consolidate_gain_) * consolidate_c_ : 1.0f;
+
         // ---- Learn from the previous command's outcome (motor TLE) ----
         // The MODEL always learns (also during babble warmup, where it learns the
         // body's response to small random commands).  The CONTROLLER (HK + anti-
@@ -3792,8 +3829,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // b and Bx, which the differencing cannot see.
             const bool a_lms = !(babble_isolate_ > 0.0 && warmup)
                                && !(babble_owns_a_ > 0.0 && babble_isolate_ > 0.0);
-            if (a_lms) L.A.noalias() += float(model_lr_) * xi * yin.transpose();
-            L.b.noalias() += float(model_lr_) * xi;
+            if (a_lms) L.A.noalias() += lr_scale * float(model_lr_) * xi * yin.transpose();
+            L.b.noalias() += lr_scale * float(model_lr_) * xi;
             if (smodel) {
                 // NLMS, not raw LMS: raw LMS converges at lr·σ² and a regulated
                 // state's variance is tiny (measured on the plant: Bx found 0.13 of
@@ -3801,7 +3838,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // makes lr the FRACTION of each sample's error explained per tick —
                 // scale-free across bodies (§5.5), reg_eps as the numerical floor.
                 const float xpow = L.prev_x.squaredNorm() + float(reg_eps_);
-                L.Bx.noalias() += (float(state_model_lr_) / xpow) * xi * L.prev_x.transpose();
+                L.Bx.noalias() += lr_scale * (float(state_model_lr_) / xpow) * xi * L.prev_x.transpose();
             }
             L.tle_ema = (1.0f - kTeleEmaAlpha) * L.tle_ema + kTeleEmaAlpha * xi.norm();
 
@@ -3921,7 +3958,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     }
                 }
                 Eigen::VectorXf q  = P * xi_tilde;
-                Eigen::MatrixXf dC = 2.0f * float(ctrl_lr_)
+                Eigen::MatrixXf dC = 2.0f * lr_scale * float(ctrl_lr_)
                                      * (AG.transpose() * q) * (q.transpose() * Lp);
                 // I2 — the CONFINING term, ported from sos_avggrad.cpp's `epsrel`.
                 // Dimensions follow PM exactly with q qᵀ standing in for their averaged Q:
@@ -3942,7 +3979,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     dC *= float(max_dctrl_) / dC_norm;             // ignition clamp
                 if (dep_gain_ <= 0.0) L.C.noalias() += dC;         // DEP owns C when on
                 Eigen::VectorXf mu = G * (L.A.transpose() * q);    // bias toward less surprise
-                L.h.noalias() += float(bias_lr_) * mu;
+                L.h.noalias() += lr_scale * float(bias_lr_) * mu;
                 // STATE-SPACE PRIOR, part 2 of 2: the goal-seeker.  Descend the prior's
                 // own error THROUGH THE LEARNED MODEL — the Cphi pattern below, aimed at
                 // the main controller:
@@ -3962,7 +3999,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                        && state_prior_indices_.size() == state_prior_targets_.size();
                     float sp_err = 0.0f; int sp_n = 0;
                     if (sp_ok) {
-                        const float lw = float(state_prior_lr_ * state_prior_gain_);
+                        const float lw = lr_scale * float(state_prior_lr_ * state_prior_gain_);
                         const float hlw = float((state_prior_h_lr_ < 0.0 ? state_prior_lr_
                                                                         : state_prior_h_lr_)
                                                 * state_prior_gain_);
@@ -4054,6 +4091,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     state_prior_err_long_ += 0.0005f * ((sp_n ? sp_err / float(sp_n) : 0.0f)
                                                         - state_prior_err_long_);
                     state_prior_applied_ = sp_n;
+                    // Consolidation reference: peak of the INSTANT error (falls
+                    // drive it to 0.5+), minutes-scale decay.  Peaking the
+                    // smoothed EMA diluted fall spikes toward the standing level
+                    // and 0.2·peak became unreachably strict (measured: cons
+                    // stayed 0.00 in every seed, including ones standing at 1.0).
+                    if (sp_n && leg == 0)
+                        sp_err_peak_ = std::max(sp_err_peak_ * 0.9999f, sp_err / float(sp_n));
                     // R2: the ACTIVE bank's own prior-error EMA — the discrete
                     // calm key's statistic (slow, regime-local, storm-proof).
                     if (sp_n && L.active_bank >= 0 && L.active_bank < int(L.banks.size())) {
@@ -5750,6 +5794,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_w"]   = state_prior_gain_;
     j["state_prior_applied"] = state_prior_applied_;
     j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
+    j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
     {
         double cpn = 0.0;
         for (auto const& L : legs_) if (L.Cp.size() > 0) cpn += double(L.Cp.squaredNorm());

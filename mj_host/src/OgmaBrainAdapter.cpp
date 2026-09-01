@@ -354,7 +354,10 @@ std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
                               snap["state_prior_err"].get<double>(),
                               snap["state_prior_applied"].get<int>(),
                               snap.value("state_prior_calm_mult", 1.0));
-                line += buf;
+                char bufc[32];
+                std::snprintf(bufc, sizeof bufc, " cons=%.2f",
+                              snap.value("consolidate_c", 0.0));
+                line += bufc;
                 char buf2[48];
                 std::snprintf(buf2, sizeof buf2, " cpm=%.2f",
                               snap.value("state_prior_cp_norm", 0.0));

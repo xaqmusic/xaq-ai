@@ -54,6 +54,12 @@ constexpr double kFallenTiltDeg = 15.0;
 // the R1 regime banks are the learned replacement for).
 bool g_no_tilt_gate = false;
 
+// --freeze-after N: permanently freeze ALL learning after N brain-driven
+// seconds — a DIAGNOSTIC (a lesion-as-test, never an operating mode).  The
+// question it answers: seeds find standing in their first minutes and then
+// lose it — is continued learning the destroyer?
+int g_freeze_after_ticks = 0;
+
 const char* name_of(const mjModel* m, mjtObj type, int id) {
     const char* n = mj_id2name(m, type, id);
     return n ? n : "<unnamed>";
@@ -484,6 +490,14 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     for (int t = 0; t < ticks; ++t) {
         Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
 
+        // Diagnostic consolidation freeze (see g_freeze_after_ticks).
+        static bool frozen_forever = false;
+        if (g_freeze_after_ticks > 0 && !frozen_forever && t >= g_freeze_after_ticks) {
+            brain.set_learning(false);
+            frozen_forever = true;
+            std::fprintf(stderr, "  [freeze-after] all learning frozen at tick %d\n", t);
+        }
+
         // Identification-episode scheduling (see the note above the function).
         if (ident_every > 0 && driver == Driver::Brain) {
             if (settle_left > 0) {
@@ -496,7 +510,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                 if (still || settle_left == 0) {
                     settle_left = 0;
                     brain.on_reset();
-                    brain.set_learning(true);
+                    if (!frozen_forever) brain.set_learning(true);
                 } else {
                     driver = Driver::Scaffold;   // host override: keep settling
                 }
@@ -518,7 +532,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             brain.on_reset();
         } else if (recovery.handed_back_this_tick()) {
             brain.on_reset();
-            brain.set_learning(true);
+            if (!frozen_forever) brain.set_learning(true);
             // The scaffold's own action feedback must not follow the brain back in.
             last_action.fill(0.0f);
         }
@@ -907,6 +921,8 @@ int main(int argc, char** argv) {
             ident_until = std::stoi(next("--ident-until"));
         } else if (a == "--no-tilt-gate") {
             g_no_tilt_gate = true;
+        } else if (a == "--freeze-after") {
+            g_freeze_after_ticks = int(std::stod(next("--freeze-after")) * kBrainHz);
         } else if (a == "--push") {
             pushes.newtons = std::stod(next("--push"));
         } else if (a == "--push-every") {
