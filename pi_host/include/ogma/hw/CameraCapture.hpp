@@ -42,6 +42,11 @@ public:
         // 32x32 is centre-cropped square, which is right for the encoder and wrong for
         // judging where the camera is pointed).
         int preview_div = 2;       // 256x192 -> 128x96; 0 disables the preview
+        // Keep the chroma planes for the preview.  They cost NOTHING at the camera --
+        // YUV420 already carries them and the reader already fetches the whole frame --
+        // so this only decides whether they are downsampled and handed on.  The BRAIN's
+        // plane stays luma-only regardless: the retinal encoder is 32x32x1 by spec.
+        bool preview_color = true;
         std::string binary = "rpicam-vid";
     };
 
@@ -60,12 +65,19 @@ public:
     // brain path.  Anything else watching the camera uses snapshot() below.
     bool latest(std::vector<uint8_t>& out);
 
-    // Non-consuming read for observers (the video stream).  Returns the current frame
-    // and its sequence number without touching `fresh_`, so a viewer cannot starve the
-    // EPM of an observation by being scheduled first — the bug this shape prevents.
-    // Compare `seq` against your own last value to detect a new frame.
-    bool snapshot(std::vector<uint8_t>& small, std::vector<uint8_t>& preview,
-                  int& preview_w, int& preview_h, uint64_t& seq) const;
+    // What an observer gets: the brain's plane, plus a preview that may carry chroma.
+    struct Frame {
+        std::vector<uint8_t> small;             // out_size^2, L8 — the encoder's input
+        std::vector<uint8_t> view_y, view_u, view_v;
+        int      view_w = 0, view_h = 0;        // luma dimensions
+        int      chroma_w = 0, chroma_h = 0;    // 0 = no chroma, preview is greyscale
+        uint64_t seq = 0;
+    };
+
+    // Non-consuming read for observers (the video stream).  Fills `out` without touching
+    // `fresh_`, so a viewer cannot starve the EPM of an observation by being scheduled
+    // first — the bug this shape prevents.  Compare `seq` to detect a new frame.
+    bool snapshot(Frame& out) const;
 
     const std::string& last_error() const { return err_; }
     uint64_t frames()      const { return frames_; }
@@ -108,8 +120,9 @@ private:
     std::thread th_;
     mutable std::mutex m_;
     std::vector<uint8_t> frame_;
-    std::vector<uint8_t> preview_;
+    std::vector<uint8_t> preview_, preview_u_, preview_v_;
     int         preview_w_ = 0, preview_h_ = 0;
+    int         chroma_w_  = 0, chroma_h_  = 0;
     bool        fresh_   = false;
     std::atomic<bool> running_{false};
     uint64_t    frames_  = 0;

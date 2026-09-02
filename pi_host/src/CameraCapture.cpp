@@ -197,17 +197,39 @@ void CameraCapture::run() {
         if (got < framesize) return;
 
         reduce(raw.data(), cfg_.src_width, cfg_.src_height, stride_, cfg_.out_size, small);
-        std::vector<uint8_t> prev_small;
-        int pw = 0, ph = 0;
-        if (cfg_.preview_div > 0)
+        std::vector<uint8_t> prev_small, prev_u, prev_v;
+        int pw = 0, ph = 0, cw = 0, ch = 0;
+        if (cfg_.preview_div > 0) {
             box_downsample(raw.data(), cfg_.src_width, cfg_.src_height, stride_,
                            cfg_.preview_div, prev_small, pw, ph);
+            if (cfg_.preview_color) {
+                // YUV420: after the Y plane come U then V, each half the luma's width
+                // AND height, with a stride of stride/2.  Dividing them by the SAME
+                // preview_div keeps the 2:1 ratio, so the preview stays valid 4:2:0
+                // and the viewer needs no special case.
+                const size_t ysz  = size_t(stride_) * size_t(cfg_.src_height);
+                const int    cstr = stride_ / 2;
+                const int    csrc_w = cfg_.src_width / 2, csrc_h = cfg_.src_height / 2;
+                const size_t csz  = size_t(cstr) * size_t(csrc_h);
+                if (raw.size() >= ysz + 2 * csz) {
+                    int uw = 0, uh = 0, vw = 0, vh = 0;
+                    box_downsample(raw.data() + ysz,       csrc_w, csrc_h, cstr,
+                                   cfg_.preview_div, prev_u, uw, uh);
+                    box_downsample(raw.data() + ysz + csz, csrc_w, csrc_h, cstr,
+                                   cfg_.preview_div, prev_v, vw, vh);
+                    if (uw == vw && uh == vh) { cw = uw; ch = uh; }
+                    else { prev_u.clear(); prev_v.clear(); }
+                }
+            }
+        }
         uint32_t sum = 0;
         for (uint8_t v : small) sum += v;
         {
             std::lock_guard<std::mutex> lk(m_);
             frame_ = small;
-            preview_ = std::move(prev_small); preview_w_ = pw; preview_h_ = ph;
+            preview_   = std::move(prev_small); preview_w_ = pw; preview_h_ = ph;
+            preview_u_ = std::move(prev_u); preview_v_ = std::move(prev_v);
+            chroma_w_  = cw; chroma_h_ = ch;
             fresh_ = true;
             mean_  = small.empty() ? 0.0f : float(sum) / float(small.size());
             ++frames_;
@@ -215,15 +237,18 @@ void CameraCapture::run() {
     }
 }
 
-bool CameraCapture::snapshot(std::vector<uint8_t>& small, std::vector<uint8_t>& preview,
-                             int& preview_w, int& preview_h, uint64_t& seq) const {
+bool CameraCapture::snapshot(Frame& out) const {
     std::lock_guard<std::mutex> lk(m_);
     if (frame_.empty()) return false;
-    small     = frame_;
-    preview   = preview_;
-    preview_w = preview_w_;
-    preview_h = preview_h_;
-    seq       = frames_;              // deliberately does NOT clear fresh_
+    out.small    = frame_;
+    out.view_y   = preview_;
+    out.view_u   = preview_u_;
+    out.view_v   = preview_v_;
+    out.view_w   = preview_w_;
+    out.view_h   = preview_h_;
+    out.chroma_w = chroma_w_;
+    out.chroma_h = chroma_h_;
+    out.seq      = frames_;           // deliberately does NOT clear fresh_
     return true;
 }
 

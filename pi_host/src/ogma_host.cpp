@@ -59,6 +59,7 @@ struct Args {
     // xaq_inspector attaches.  (ControlServer already binds INADDR_ANY regardless.)
     std::string listen = "127.0.0.1";
     bool    video      = false;   // opt-in: it is a viewer, not part of the loop
+    bool    video_mono = false;   // drop the preview's chroma (1.5x -> 1x on a weak link)
     bool    mic        = false;
     bool    camera     = false;
     bool    range      = false;
@@ -67,7 +68,7 @@ struct Args {
 void usage() {
     std::fprintf(stderr,
         "usage: ogma_host --config <graph.json> [--hz 50] [--ticks N] [--rt] [--quiet]\n"
-        "                 [--mic] [--camera] [--range] [--listen 0.0.0.0] [--video]\n"
+        "                 [--mic] [--camera] [--range] [--listen 0.0.0.0] [--video] [--video-mono]\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
@@ -97,6 +98,7 @@ int main(int argc, char** argv) {
         else if (v == "--quiet")                  a.quiet = true;
         else if (v == "--listen" && i + 1 < argc)  a.listen = argv[++i];
         else if (v == "--video")                  a.video = true;
+        else if (v == "--video-mono")             a.video_mono = true;
         else if (v == "--mic")                    a.mic = true;
         else if (v == "--camera")                 a.camera = true;
         else if (v == "--range")                  a.range = true;
@@ -115,7 +117,11 @@ int main(int argc, char** argv) {
         // Sensors start BEFORE the loop so a failure is a startup error the operator
         // sees, not a channel that is quietly dead for the whole run.
         ogma::hw::AudioCapture  mic{ogma::hw::AudioCapture::Config{}};
-        ogma::hw::CameraCapture cam{ogma::hw::CameraCapture::Config{}};
+        ogma::hw::CameraCapture cam{[&]{
+            ogma::hw::CameraCapture::Config c;
+            c.preview_color = !a.video_mono;   // the brain's plane is luma-only either way
+            return c;
+        }()};
         ogma::hw::Ultrasonic    rangefinder{ogma::hw::Ultrasonic::Config{}};
         if (a.mic && !mic.start())
             std::fprintf(stderr, "ogma_host: mic: %s\n", mic.last_error().c_str());
@@ -327,28 +333,49 @@ int main(int argc, char** argv) {
 
             if (vid_pub) {
                 static uint64_t last_vid_seq = 0;
-                static std::vector<uint8_t> vsmall, vprev;
-                int pw = 0, ph = 0; uint64_t vseq = 0;
-                if (cam.snapshot(vsmall, vprev, pw, ph, vseq) && vseq != last_vid_seq) {
-                    last_vid_seq = vseq;
+                static ogma::hw::CameraCapture::Frame vf;
+                if (cam.snapshot(vf) && vf.seq != last_vid_seq) {
+                    last_vid_seq = vf.seq;
                     // One frame, because ZMQ_CONFLATE does not do multipart: a topic
                     // prefix, a self-describing JSON header, a newline, then the raw
-                    // planes back to back.  Sizes travel with the data so a viewer never
-                    // has to be told the geometry out of band -- the exact assumption
-                    // that broke the camera reader in the first place.
-                    char hdr[256];
-                    const int n = std::snprintf(hdr, sizeof hdr,
+                    // planes back to back.  Every size travels with the data so a viewer
+                    // never has to be told the geometry out of band -- the exact
+                    // assumption that broke the camera reader in the first place.
+                    //
+                    // The preview carries CHROMA when the camera kept it, as YUV420
+                    // rather than RGB: the chroma planes are quarter-size, so it is 1.5x
+                    // the bytes instead of 3x, it is what the camera actually produced
+                    // (no lossy conversion here), and the RGB conversion lands on the
+                    // viewer's machine instead of on this 20 ms tick.
+                    // The BRAIN's plane stays luma-only: the retinal encoder is 32x32x1.
+                    const size_t off_y = vf.small.size();
+                    const size_t off_u = off_y + vf.view_y.size();
+                    const size_t off_v = off_u + vf.view_u.size();
+                    const bool   color = vf.chroma_w > 0 && !vf.view_u.empty() && !vf.view_v.empty();
+                    char hdr[384];
+                    int n = std::snprintf(hdr, sizeof hdr,
                         "video {\"seq\":%llu,\"tick\":%ld,"
                         "\"brain\":{\"w\":%d,\"h\":%d,\"off\":0},"
-                        "\"view\":{\"w\":%d,\"h\":%d,\"off\":%zu},"
-                        "\"src\":{\"w\":%d,\"h\":%d},\"fmt\":\"L8\"}\n",
-                        (unsigned long long)vseq, ticks,
+                        "\"view\":{\"w\":%d,\"h\":%d,\"off\":%zu},",
+                        (unsigned long long)vf.seq, ticks,
                         cam.out_size(), cam.out_size(),
-                        pw, ph, vsmall.size(),
-                        cam.src_width(), cam.src_height());
+                        vf.view_w, vf.view_h, off_y);
+                    if (color)
+                        n += std::snprintf(hdr + n, sizeof hdr - size_t(n),
+                            "\"view_u\":{\"w\":%d,\"h\":%d,\"off\":%zu},"
+                            "\"view_v\":{\"w\":%d,\"h\":%d,\"off\":%zu},",
+                            vf.chroma_w, vf.chroma_h, off_u,
+                            vf.chroma_w, vf.chroma_h, off_v);
+                    n += std::snprintf(hdr + n, sizeof hdr - size_t(n),
+                        "\"src\":{\"w\":%d,\"h\":%d},\"fmt\":\"%s\"}\n",
+                        cam.src_width(), cam.src_height(), color ? "YUV420" : "L8");
                     std::string msg(hdr, size_t(n));
-                    msg.append(reinterpret_cast<const char*>(vsmall.data()), vsmall.size());
-                    msg.append(reinterpret_cast<const char*>(vprev.data()), vprev.size());
+                    msg.append(reinterpret_cast<const char*>(vf.small.data()),  vf.small.size());
+                    msg.append(reinterpret_cast<const char*>(vf.view_y.data()), vf.view_y.size());
+                    if (color) {
+                        msg.append(reinterpret_cast<const char*>(vf.view_u.data()), vf.view_u.size());
+                        msg.append(reinterpret_cast<const char*>(vf.view_v.data()), vf.view_v.size());
+                    }
                     zmq_send(vid_pub, msg.data(), msg.size(), ZMQ_DONTWAIT);
                 }
             }

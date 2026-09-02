@@ -24,6 +24,8 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <string>
 
 namespace godot {
@@ -52,6 +54,10 @@ protected:
     static void _bind_methods();
 
 private:
+    // YUV420 preview -> RGB8.  Returns invalid when any plane does not fit the bytes
+    // that arrived, so the caller falls back to luma rather than reading past the buffer.
+    static Ref<Image> view_rgb(const nlohmann::json& h, const char* payload, size_t avail);
+
     void*       ctx_ = nullptr;
     void*       sub_ = nullptr;
     Ref<Image>  brain_;

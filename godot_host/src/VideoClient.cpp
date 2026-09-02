@@ -92,9 +92,16 @@ bool VideoClient::poll() {
     };
 
     Ref<Image> b = plane("brain");
-    Ref<Image> v = plane("view");
     if (b.is_valid()) brain_ = b;
-    if (v.is_valid()) view_  = v;
+
+    // The preview carries chroma when the camera kept it (YUV420, quarter-size U and V).
+    // Converted here rather than on the Pi so the robot's 20 ms tick pays nothing for a
+    // picture only this machine looks at.  Falls back to the luma plane whenever chroma
+    // is absent or does not fit, so an older or greyscale publisher still renders.
+    Ref<Image> v;
+    if (h.contains("view_u") && h.contains("view_v")) v = view_rgb(h, payload, avail);
+    if (!v.is_valid()) v = plane("view");
+    if (v.is_valid()) view_ = v;
 
     Dictionary d;
     d["seq"]  = int64_t(h.value("seq", 0));
@@ -107,6 +114,45 @@ bool VideoClient::poll() {
     info_ = d;
     last_error_.clear();
     return brain_.is_valid() || view_.is_valid();
+}
+
+Ref<Image> VideoClient::view_rgb(const nlohmann::json& h, const char* payload, size_t avail) {
+    const int    yw = h["view"].value("w", 0),   yh = h["view"].value("h", 0);
+    const size_t yo = h["view"].value("off", 0);
+    const int    cw = h["view_u"].value("w", 0), ch = h["view_u"].value("h", 0);
+    const size_t uo = h["view_u"].value("off", 0), vo = h["view_v"].value("off", 0);
+    if (yw <= 0 || yh <= 0 || cw <= 0 || ch <= 0) return Ref<Image>();
+    const size_t ysz = size_t(yw) * size_t(yh), csz = size_t(cw) * size_t(ch);
+    // Verify every plane against what actually arrived before indexing into it.
+    if (yo + ysz > avail || uo + csz > avail || vo + csz > avail) return Ref<Image>();
+
+    const uint8_t* Y = reinterpret_cast<const uint8_t*>(payload) + yo;
+    const uint8_t* U = reinterpret_cast<const uint8_t*>(payload) + uo;
+    const uint8_t* V = reinterpret_cast<const uint8_t*>(payload) + vo;
+
+    PackedByteArray rgb;
+    rgb.resize(int64_t(ysz * 3));
+    uint8_t* out = rgb.ptrw();
+    // BT.601 full-range, which is what the ISP emits for YUV420 here.  Chroma is
+    // nearest-neighbour upsampled: the plane is a 128x96 preview, and a bilinear pass
+    // would cost more than it shows.
+    for (int y = 0; y < yh; ++y) {
+        const int cy = (ch == yh) ? y : (y * ch) / yh;
+        for (int x = 0; x < yw; ++x) {
+            const int cx = (cw == yw) ? x : (x * cw) / yw;
+            const float luma = float(Y[size_t(y) * size_t(yw) + size_t(x)]);
+            const float cu   = float(U[size_t(cy) * size_t(cw) + size_t(cx)]) - 128.0f;
+            const float cv   = float(V[size_t(cy) * size_t(cw) + size_t(cx)]) - 128.0f;
+            auto clamp8 = [](float f) -> uint8_t {
+                return uint8_t(f < 0.0f ? 0.0f : (f > 255.0f ? 255.0f : f));
+            };
+            const size_t o = (size_t(y) * size_t(yw) + size_t(x)) * 3;
+            out[o + 0] = clamp8(luma + 1.402f * cv);
+            out[o + 1] = clamp8(luma - 0.344136f * cu - 0.714136f * cv);
+            out[o + 2] = clamp8(luma + 1.772f * cu);
+        }
+    }
+    return Image::create_from_data(yw, yh, false, Image::FORMAT_RGB8, rgb);
 }
 
 } // namespace godot
