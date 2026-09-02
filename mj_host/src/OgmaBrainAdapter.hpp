@@ -95,6 +95,9 @@ public:
     int    regime_id()  const override { return regime_id_; }
     double regime_tle() const override { return regime_tle_; }
     std::vector<std::string> module_ids() const;
+    // Each MotorEPM's earned-consolidation state c ∈ [0,1], in graph order. The
+    // per-tick read-back the (d) push test is judged on (see run_with_brain).
+    std::vector<double> consolidation() const;
 
     // robotd's deployed joint-target low-pass (head 0.5, legs 0.7). Off = raw
     // commands (legacy, byte-identical).

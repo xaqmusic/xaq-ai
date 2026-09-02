@@ -351,6 +351,17 @@ double OgmaBrainAdapter::tle_down() const {
     return tle_down_n_ ? tle_down_sum_ / double(tle_down_n_) : 0.0;
 }
 
+std::vector<double> OgmaBrainAdapter::consolidation() const {
+    std::vector<double> out;
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_snapshot();
+        out.push_back(d.contains("consolidate_c") ? d["consolidate_c"].get<double>() : 0.0);
+    }
+    return out;
+}
+
 std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
     std::vector<std::string> out;
     for (auto* m : instance_->modules()) {

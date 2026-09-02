@@ -187,6 +187,10 @@ struct Shove {
     // "run longer", the other is "shove less often", and reporting the wrong one
     // sends the reader to change the wrong knob.
     bool   cut_short_by_next = false;
+    // Brain path only: the recovery harness handed the body to the scaffold inside
+    // this shove's window. A shove the BRAIN caught and one the SCAFFOLD stood back
+    // up are both "recovered"; only the first is evidence about the brain.
+    bool   rescued = false;
 };
 
 struct RunResult {
@@ -311,6 +315,7 @@ struct PushPlan {
     double newtons = 0.0;      // 0 disables
     double every_s = 3.0;      // how often
     double hold_s  = 0.1;      // how long each shove lasts
+    double from_s  = 0.0;      // no shove before this (let a brain consolidate first)
 };
 
 // One episode of the standing scaffold. `emit` writes the per-tick JSONL when asked.
@@ -328,6 +333,7 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
     tilt_trace.reserve(ticks);
     const int push_period = int(pushes.every_s * kBrainHz);
     const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
+    const int push_from   = int(pushes.from_s * kBrainHz);
     int push_index = 0;
 
     for (int t = 0; t < ticks; ++t) {
@@ -339,8 +345,8 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
         // arithmetic to get an answer out of the tool. A conclusive run should be
         // what you get by default; an inconclusive one should take effort.
         const bool room_to_recover = (ticks - t) >= int(kRecoverWindowSecs * kBrainHz);
-        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t % push_period == 0 &&
-            room_to_recover) {
+        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from &&
+            t % push_period == 0 && room_to_recover) {
             static const double dirs[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
             const auto& d = dirs[push_index++ % 4];
             body.push({pushes.newtons * d[0], pushes.newtons * d[1], 0.0}, push_hold);
@@ -486,8 +492,15 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
 // start from a toppling body still ride it; a settle between pairs hands each
 // pair a still start, which is exactly how the probe achieved clean columns.
 // Settle edges publish events.reset (pairing invalidation) and freeze learning.
+//
+// pushes: the (d) perturbation test on the BRAIN's stance.  The same rotating
+// schedule as the scaffold's --hold, with two differences that matter: a shove is
+// delivered only on a brain-driven tick (a shove landing mid-rescue would test the
+// scaffold, so the slot is skipped, not deferred — the schedule stays readable),
+// and each shove is reported as caught-by-the-brain or rescued-by-the-scaffold.
 int run_with_brain(const std::string& scene, double seconds, uint64_t seed, BrainLike& brain,
-                   bool emit, int ident_every = 0, int ident_until = 0) {
+                   bool emit, int ident_every = 0, int ident_until = 0,
+                   const PushPlan& pushes = {}) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
     Recovery recovery;
@@ -515,6 +528,15 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
 
     int frozen_ticks = 0;
     int brain_ticks_seen = 0, settle_left = 0;
+
+    std::vector<double> tilt_trace;
+    std::vector<int> shove_ticks, handoff_ticks;
+    const int push_period = int(pushes.every_s * kBrainHz);
+    const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
+    const int push_from   = int(pushes.from_s * kBrainHz);
+    int push_index = 0, push_skipped = 0;
+    if (pushes.newtons > 0.0) tilt_trace.reserve(ticks);
+
     for (int t = 0; t < ticks; ++t) {
         Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
 
@@ -580,6 +602,22 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                 og->set_regime_learning(body.gravity()[2] < -0.90);
         }
 
+        if (recovery.handed_off_this_tick()) handoff_ticks.push_back(t);
+
+        // The (d) shove, on the brain's stance only (see the note above the function).
+        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from &&
+            t % push_period == 0 &&
+            (ticks - t) >= int(kRecoverWindowSecs * kBrainHz)) {
+            if (driver == Driver::Brain) {
+                static const double dirs[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+                const auto& d = dirs[push_index++ % 4];
+                body.push({pushes.newtons * d[0], pushes.newtons * d[1], 0.0}, push_hold);
+                shove_ticks.push_back(t);
+            } else {
+                ++push_skipped;
+            }
+        }
+
         std::array<double, kNumPolicyJoints> ctrl{};
         if (driver == Driver::Scaffold) {
             const auto action = scaffold.infer(build_observation(body, last_action, command));
@@ -590,21 +628,37 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             ctrl = brain.act(body);
         }
         body.step(ctrl);
+        if (pushes.newtons > 0.0) tilt_trace.push_back(body.tilt_deg());
 
         if (emit) {
             const auto p = body.trunk_position();
             const auto g = body.gravity();
+            const auto f = body.active_push();
             std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
-                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\",\"u\":%.4f,"
+                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":",
+                        body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2]);
+            // Literal zeros when nothing is pushing, so a run without shoves stays
+            // byte-identical to the pre-push host (the guard in §3 of CLAUDE.md).
+            if (f[0] == 0.0 && f[1] == 0.0 && f[2] == 0.0) std::printf("[0,0,0]");
+            else std::printf("[%.2f,%.2f,%.2f]", f[0], f[1], f[2]);
+            std::printf(",\"drive\":\"%s\",\"u\":%.4f,"
                         "\"rg\":%d,\"rtle\":%.3f,"
-                        "\"learning\":%s,\"event\":\"%s\",\"q\":[",
-                        body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
+                        "\"learning\":%s,\"event\":\"%s\",",
                         driver_name(driver), brain.last_cmd_mag(),
                         brain.regime_id(), brain.regime_tle(),
                         learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
                         : recovery.handed_back_this_tick() ? "reset:handback"
                                                            : "");
+            // Earned consolidation per MotorEPM module, in graph order — the state
+            // the (d) test is about: it must collapse on a real perturbation and
+            // re-earn itself afterwards.  Empty for a brain that has none.
+            std::printf("\"cons\":[");
+            if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain)) {
+                const auto cs = og->consolidation();
+                for (size_t i = 0; i < cs.size(); ++i) std::printf("%s%.3f", i ? "," : "", cs[i]);
+            }
+            std::printf("],\"q\":[");
             const auto q = body.joint_positions();
             for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
             std::printf("],\"qpos\":[");
@@ -641,6 +695,34 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     if (recovery.gave_up() > 0) {
         std::fprintf(stderr, "  %d recoveries timed out — the scaffold could not stand it up\n",
                      recovery.gave_up());
+    }
+
+    if (pushes.newtons > 0.0) {
+        RunResult r = analyse(tilt_trace, shove_ticks);
+        int caught = 0, rescued = 0;
+        for (size_t k = 0; k < r.shoves.size(); ++k) {
+            auto& sh = r.shoves[k];
+            const int from = shove_ticks[k];
+            const int next = (k + 1 < shove_ticks.size()) ? shove_ticks[k + 1] : ticks;
+            const int until = std::min({ticks, from + int(kRecoverWindowSecs * kBrainHz), next});
+            for (int h : handoff_ticks) sh.rescued = sh.rescued || (h >= from && h < until);
+            const char* how = !sh.conclusive           ? "INCONCLUSIVE"
+                              : sh.rescued             ? "RESCUED by the scaffold"
+                              : sh.recovered_after >= 0 ? "caught by the brain"
+                                                       : "NOT RECOVERED";
+            if (sh.conclusive && !sh.rescued && sh.recovered_after >= 0) ++caught;
+            if (sh.rescued) ++rescued;
+            std::fprintf(stderr, "  shove %zu at %7.2fs: peak %6.2f deg — %s", k + 1, sh.t,
+                         sh.peak_tilt, how);
+            if (sh.conclusive && !sh.rescued && sh.recovered_after >= 0)
+                std::fprintf(stderr, ", back under %.0f deg in %.2f s", kRecoveredTiltDeg,
+                             sh.recovered_after);
+            std::fprintf(stderr, "\n");
+        }
+        std::fprintf(stderr, "  %.1f N shoves every %.1f s from %.0f s: %zu delivered, %d skipped "
+                             "(landed mid-rescue) — %d caught by the brain, %d rescued, %d not judged\n",
+                     pushes.newtons, pushes.every_s, pushes.from_s, shove_ticks.size(),
+                     push_skipped, caught, rescued, r.inconclusive());
     }
 
     // What "working" means here: the body kept running. A harness that never fired
@@ -832,7 +914,8 @@ int cmd_probe(const std::string& scene, double seconds, uint64_t seed) {
 // ---------------------------------------------------------------------------
 
 int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
-              double amplitude, bool emit, int ident_every = 0, int ident_until = 0) {
+              double amplitude, bool emit, int ident_every = 0, int ident_until = 0,
+              const PushPlan& pushes = {}) {
     DuckBody probe(scene);   // for the joint ranges the adapter reads by name
 
     // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
@@ -884,7 +967,8 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     for (const auto& id : brain.module_ids()) std::fprintf(stderr, " %s", id.c_str());
     std::fprintf(stderr, "\n");
 
-    const int rc = run_with_brain(scene, seconds, seed, brain, emit, ident_every, ident_until);
+    const int rc = run_with_brain(scene, seconds, seed, brain, emit, ident_every, ident_until,
+                                  pushes);
     std::fprintf(stderr, "  mean |action| %.4f over %llu brain ticks\n", brain.mean_abs_action(),
                  (unsigned long long)brain.ticks());
     for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
@@ -905,7 +989,7 @@ void usage() {
         "      G4 (ctrl order matches the joint names).\n"
         "\n"
         "  ogma_mjhost --hold [scene.xml] [--secs S] [--noise R] [--seed N]\n"
-        "                     [--push N] [--push-every S] [--push-hold S]\n"
+        "                     [--push N] [--push-every S] [--push-hold S] [--push-from S]\n"
         "      Run the standing scaffold. One JSON object per tick on stdout, a\n"
         "      summary on stderr. Exits non-zero if the robot ends up down.\n"
         "      --push shoves the trunk on a rotating heading: the cheapest form of\n"
@@ -920,7 +1004,13 @@ void usage() {
         "      hand-off between them. Tests the RECOVERY HARNESS, not the substrate.\n"
         "\n"
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
+        "                      [--load-brain F] [--save-brain F]\n"
+        "                      [--push N] [--push-every S] [--push-hold S] [--push-from S]\n"
         "      Phase A1: an OgmaInstance driving the joints, inside the same harness.\n"
+        "      --push runs the same shove schedule against the BRAIN's stance: shoves\n"
+        "      land only on brain-driven ticks, and each is reported as caught by the\n"
+        "      brain or rescued by the scaffold.  The JSONL carries the active force\n"
+        "      in \"push\" and each MotorEPM's earned consolidation in \"cons\".\n"
         "\n"
         "  The scene defaults to %s\n"
         "  The standing scaffold is %s\n",
@@ -976,6 +1066,8 @@ int main(int argc, char** argv) {
             pushes.every_s = std::stod(next("--push-every"));
         } else if (a == "--push-hold") {
             pushes.hold_s = std::stod(next("--push-hold"));
+        } else if (a == "--push-from") {
+            pushes.from_s = std::stod(next("--push-from"));
         } else if (a == "--stub-amp") {
             stub_amp = std::stod(next("--stub-amp"));
         } else if (a == "--stub-drift") {
@@ -1008,7 +1100,7 @@ int main(int argc, char** argv) {
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
         if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
         if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true,
-                                                ident_every, ident_until);
+                                                ident_every, ident_until, pushes);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

@@ -77,6 +77,27 @@ follow: `0` upright, `1` a real fall, `3` not watched long enough.
 Runs reserve a clean tail automatically: nothing is shoved inside the final recovery window, so
 a conclusive run is what you get by default and an inconclusive one takes effort.
 
+### Shoving the brain
+
+The same schedule runs against a learned stance:
+
+```sh
+mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json \
+    --secs 420 --seed 2 --load-brain mj_host/checkpoints/duck_controlled_brain_s2.json \
+    --push 2 --push-every 60 --push-from 30 > run.jsonl
+python3 mj_host/tools/push_report.py run.jsonl          # per-run + per-shove table
+python3 mj_host/tools/push_report.py --timeline run.jsonl
+```
+
+Two things differ from `--hold`. A shove lands only on a brain-driven tick — one that would
+land mid-rescue is skipped and counted, not deferred, so the schedule stays readable — and
+each shove is reported as **caught by the brain** or **rescued by the scaffold**, because both
+end upright and only the first says anything about the brain. `--push-from S` holds the
+shoves off until `S` seconds in, for a brain that has to consolidate first. The JSONL carries
+the active force in `push` (literal zeros when nothing is pushing) and each MotorEPM's earned
+consolidation in `cons`, which is the trace the perturb-and-recover test is judged on: it must
+collapse on a real fall and re-earn itself afterwards.
+
 The binary underneath, if you want it directly:
 
 ```sh

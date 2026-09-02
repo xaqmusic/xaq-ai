@@ -348,3 +348,111 @@ decays.  **Measured, three hours: 0.083–0.090 mrad/tick (the slump's own still
 still improving), ZERO falls, upright 1.00, pose 0.068, tilt 1.4→1.0°, |u| 0.34.**
 `a1v2_r12c_whole.json` is the promoted controlled-standing stack;
 `duck_controlled_brain_s2.json` is its checkpoint.
+
+## 11. THE (d) PUSH TEST (2026-09-02) — the loop re-infers; the stance does not catch
+
+**Setup.** `--push` wired into `run_with_brain` (the scaffold's `--hold` schedule, with
+shoves delivered only on brain-driven ticks and each one reported as *caught by the brain*
+or *rescued by the scaffold*; the JSONL now carries the active force in `push` and each
+MotorEPM's consolidation in `cons`; `mj_host/tools/push_report.py` reads it).  A world-frame
+force on the trunk, rotating +x, +y, −x, −y, every 60 s from 30 s — six shoves per 420 s
+run, each judged in a 4 s window (recovered = tilt < 5° held 0.4 s).  Two families: an
+impulse (0.1 s) and a sustained lean (1.0 s).  Three stances, same body, same seed 2:
+the **controlled** checkpoint (R12c, `duck_controlled_brain_s2`), the **tall** checkpoint
+(R8, `duck_tall_brain_s2`: C norms 40–60, the 12 mrad oscillation still on), and the
+**scaffold** (`--hold`, the STAND keyframe).  14 runs, 78 shoves.  One seed — the only
+tall stander — so a signal, not a finding.
+
+### 11.1 The envelope
+
+| shove | N·s | controlled: caught / rescued | tall: caught / rescued | scaffold |
+|---|---|---|---|---|
+| 0.5 N × 0.1 s | 0.05 | 5/5 (peaks 1–2°, one 26°) | — | — |
+| 1 N × 0.1 s | 0.1 | 5/6 (peaks 1–4°) | 5/6 | — |
+| 1 N × 0.2 s | 0.2 | 3/6 | — | — |
+| 1.5 N × 0.1 s | 0.15 | 3/6 | — | — |
+| 2 N × 0.1 s | 0.2 | 3/5 | 1/6 | peaks 0.4–7.9°, 6/6 |
+| 3 N × 0.1 s | 0.3 | 0/6 | 0/6 | peaks 0.5–4.8°, 6/6 |
+| 5 N × 0.1 s | 0.5 | 0/6 | 0/6 | peaks 3–11°, 6/6 |
+| 7 N × 0.1 s | 0.7 | — | — | 3/6 knocked over |
+| 10 N × 0.1 s | 1.0 | — | — | 6/6 knocked over, 6/6 stood back up |
+| 0.5 N × 1.0 s | 0.5 | 3/6 | — | — |
+| 1 N × 1.0 s | 1.0 | 2/6 | — | — |
+| 2 N × 1.0 s | 2.0 | 0/6 | — | — |
+
+The learned stance is knocked over at **0.15–0.2 N·s** (direction-dependent: fore-aft goes
+first, one lateral side is caught at 1.5 N); the scaffold at **~0.7 N·s**.  The tall and
+the controlled checkpoints have the **same envelope** at 5–10× the controller gain, so the
+gain hunt and the rest did not shed a catch — there was never one to shed.
+
+### 11.2 What a topple looks like (controlled, 2 N, forward)
+
+| t after push | 40 ms | 200 | 360 | 440 | 520 | 600 | 680 | 840 |
+|---|---|---|---|---|---|---|---|---|
+| tilt | 1.8° | 6.9° | 12.4° | 16.1° | 21.3° | 29.2° | 42.4° | 79.6° |
+| \|u\| | 0.36 | 0.36 | 0.37 | 0.38 | 0.41 | 0.48 | 0.60 | 0.35 |
+
+Eight hundred milliseconds from shove to flat — forty brain ticks — and the command does not
+move through the first twenty of them.  It rises only past 21°, where the learnable-regime
+gate is about to close.  At 1 N the body leans to 3.7° and **stays within 0.2° of it for
+over a second**: the "catch" is the support polygon, not the controller.  The stance is
+statically stable and nothing else.  The four gated attitude elements — gravity x/y and the
+pitch/roll rates — are in the state prior and in the blanket; the consolidated C simply
+carries no gain on them at the scale a catch needs.
+
+### 11.3 The loop re-infers — and this is the (d) result
+
+Every rescue ran the same cycle, **20 of 20** clean cycles across both checkpoints: handoff
+→ c ×0.37 (the v3 gate's reset event) → 10 s calm → ramp → **c ≥ 0.95 at +38 s** (37.3–39.1)
+→ stillness back at 0.06–0.08 mrad/tick, the tall pose (0.065–0.075) intact.  The 5 N run
+is six of these in a row with nothing else happening: six shoves, six falls, six re-earned
+stances.  And when the stance was *destroyed* — a wake that cascaded into the pre-
+consolidation chaos (c → 0, 10–17 falls a minute, |dq| 10–17 mrad) — the brain re-found and
+re-earned it inside 57–100 s in **4 of 6** cascades (the 1.5 N run came back at 0.034
+mrad, quieter than it left, and caught its next three shoves); 2 were still cascading at
+420 s (3 N; 1 N sustained).
+
+The cascade itself: **6 of 10** controlled runs, **0 of 4** tall runs.  Two hypotheses,
+both cheap on the same checkpoint and both untested: (i) the controlled wake is a regime
+change — the rested efference returns at 64 % into a stance frozen without it (R8 never
+rests, so its wake changes nothing); (ii) slow topples write poison — a 2–3 N shove spends
+~500 ms in the 12–25° band with learning re-armed, a 5 N knock-down 200 ms, and the 5 N run
+had no cascade.  Also seen and not diagnosed: **late falls** 8–27 s after sub-2° shoves
+(0.5 N at 300 s → fall at 327 s; 1 N at 120 s → fall at 128 s), in a stance that stood
+three unperturbed hours; the natural reading is a shifted contact state the frozen
+controller cannot re-centre.
+
+### 11.4 Verdicts (one seed, one checkpoint per stance — signal, not finding)
+
+- **(d) at the consolidation loop: WORKING.**  Perturb → c collapses → plasticity wakes →
+  stance re-found → re-earned → stillness returns.  Re-consolidation is metronomic (38 s)
+  and full re-inference after destruction is 4/6.
+- **(d) at balance: NULL, in context.**  No active catch; the envelope is the support
+  polygon's.  Re-use context: the catch's *gradient* — the brain learned to stand in a world
+  that never leaned it (dither is millirad; real leans happened only in falls, past the
+  learning gate).  Not a gain question (11.1) and not a sensor question (11.2).
+- **The wake cascade: PARTIAL.**  Re-use: test (i) and (ii) above — `consolidate_rests_act
+  0` on the controlled checkpoint at 2 N, and a learning hold-off during the first ticks of
+  a chaos decay.
+- **Harness: `--seed` is a no-op on `--load-brain`** — the RNG state is restored with the
+  brain; runs at seeds 3 and 4 are byte-identical to seed 2.  Variance on a checkpoint can
+  only come from the perturbation schedule.  (A §3.2 catch: the "seed variance" arm was a
+  tautology.)
+
+### 11.5 The fork — how does a catch get learned?
+
+The rewrite rule's three questions, answered by 11.1–11.2: the error exists (the attitude
+prior), the sensor exists (gravity + rates, in the blanket), the module owns both.  What is
+missing is **data in the regime where the catch acts**: leans of a few degrees while the
+controller is still plastic.  Two directions, the operator's call:
+
+- **A world with wind (no code).**  Sub-topple shoves (0.5–1 N, 0.1 s) throughout the
+  from-scratch pipeline — `--push 0.7 --push-every 8 --push-from 0` on
+  `a1v2_r8_tall.json` — so the prior's descent sees lean excursions at the scale a catch
+  needs while C still writes.  One lever, A/B against no wind, judged on the 11.1 envelope
+  of the resulting stance.  Risk: the from-scratch pipeline is 1/6 seed-robust, so the A/B
+  is noisy; and shoves are calm-gate neutral only below the 0.30 instant threshold (check
+  with the `cons` trace before trusting a null).
+- **A lean-aware wake.**  Let a *lean* re-arm plasticity the way a fall does, at a gentler
+  cost — so the consolidated stander learns from the shoves it survives instead of only from
+  the ones that flatten it.  A design discussion first: it touches the v3 gate.

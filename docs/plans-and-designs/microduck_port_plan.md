@@ -20,7 +20,7 @@
 
 ## ▶ Resume here
 
-**State on 2026-09-02.** Branch **`microduck-lean-prior`**, committed through `9cd982e`.
+**State on 2026-09-02.** Branch **`microduck-lean-prior`**, committed through the (d) push test.
 Simulation only — no hardware. Upstream lives *outside* this repo, on purpose:
 `/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
 
@@ -47,7 +47,8 @@ mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json \
 | **rung-2: slump standing** | ✅ **3/6 seeds permanent (`a1v2_r3_consol.json`, `4f7b0c2`)** |
 | **tall standing** | ✅ **seed 2 permanent (`a1v2_r8_tall.json`, `c647d02`); other seeds hover tall, lose the race** |
 | **controlled standing** | ✅ **3 h zero-fall stillness (`a1v2_r12c_whole.json` + checkpoint, `9cd982e`)** |
-| **(d) push-test** | ⚙ **next** — pushes exist only on the `--hold` scaffold path; wire `PushPlan` into `run_with_brain` first |
+| **(d) push-test** | ✅ **measured** (design doc §11): the consolidation loop re-infers — c collapses on a fall, the stance is re-found and re-earned in 38 s, 20/20 cycles, 4/6 full re-inferences after destruction. The stance itself has **no active catch**: knocked over at 0.15–0.2 N·s (the scaffold at ~0.7), identically at 5–10× gain |
+| **a catch (balance reflex)** | ⚙ **the fork** — the brain learned to stand in a world that never leaned it; §11.5 has the two options (a world with wind, no code; a lean-aware wake, design first). Operator's call |
 | from-scratch pipeline, seed-robustness | open — both stacks are 1–3/6 seeds (the race-variance gap) |
 | S2 / S3 / B1–B3 | not started |
 
@@ -58,6 +59,10 @@ A written, tested, **unsubmitted** upstream PR exposing joint velocities and cur
 operator's call (REPORTS.md §9.6).
 
 ### Traps a fresh session should not re-learn
+
+- **`--seed` does nothing on `--load-brain`.** The RNG state is restored with the brain, so two
+  resumes at different seeds are byte-identical. Variance on a checkpoint comes only from what
+  you do to it (the push schedule); seed-robustness is a from-scratch question.
 
 - **Picrawler joint indices are baked into MotorEPM's biases.** `height_homeo_gain` applies
   `y[1] += …` because index 1 is *hip2* on a picrawler; on a duck leg it is `hip_roll`, a lateral
