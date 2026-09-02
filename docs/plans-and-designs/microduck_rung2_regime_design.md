@@ -269,3 +269,36 @@ by consolidation while the spared C-pull keeps the reach direction plastic (mode
 semantics, unbuilt).  Alternative shape: tall standing as its own regime with its own
 bank and consolidation, entered from the scaffold's settle pose rather than deformed into
 from the slump.
+
+---
+
+## 9. THE DUCK STANDS TALL (R7→R8, 2026-09-01) — capability proven, 1/6 permanent
+
+The whole-body-reach directive resolved through a chain of eight more measured arms after
+§8 (controller banks R6a–c: interesting phenomena — a new stander, tall-hovering — but
+refuted for tall; the full verdicts live in commits e7c64a2 and c647d02).  The three that
+mattered:
+
+1. **The calm window was the binding constraint** (R7): with `consolidate_calm_ticks` 500
+   instead of the picked-not-derived 1500, the whole-body C-pull arm holds a TALL stance —
+   0.92–0.96 upright, pose-distance 0.072, tilt 4° — for 90 straight minutes.  The 4-hour
+   soak then showed why consolidation must catch during the good window: the destroyer
+   reverses the trend after hour one (falls 3.2 → 10.7/min).
+2. **The ratchet's losses were bookkeeping, not physics**: legacy c-decay wipes e⁻⁷ per
+   fall (topple + frozen rescue + the whole calm window all decay).  Symmetric slow decay
+   (R7b) anneals adaptation during real chaos — falls worse.  The EMA-keyed three-state
+   (R7c v1) misses 1 s topples — c held 0.94 through 21 falls/min.  The working form
+   (v2): **ramp when satisfied-and-calm, decay only while the INSTANT gate error exceeds
+   2× the satisfaction fraction (a topple crosses within ~0.3 s), hold otherwise.**
+3. **R8** = C-pull only (mode-3's hr wound at high c) + calm 500 + three-state v2.
+   Seed 2 — the control stack's crouch degenerate, which never stood at all — falls
+   7.7 → 2.7 → 0.8 → 0.1 → **0.0 for the final eighty minutes**, upright 1.00, cons 1.00,
+   pose 0.065–0.071, tilt ~1°, |u| converging 0.88 → 0.66.  Video sent.
+
+**Scale of claim** (§3.3/§3.7): the capability is LOUD — tall, permanent, earned, with
+amplitude convergence — on one seed, exactly reproduced in the battery.  Seeds 1/3/4/5/6
+hover TALL when upright (tilt 3–4.4°, pose 0.10–0.15: the pull shapes every seed) but
+fall-cycle at 15–22/min and never string the gaps.  **The frontier is now singular: the
+same basin-finding/race variance that leaves the slump stack at 3/6.**  Also killed
+cheaply on the way: the exploration-noise-tipper hypothesis (falls UP without dither —
+it excites the ongoing identification).
