@@ -118,6 +118,9 @@ public:
     // order to draw exactly the pose the host computed, rather than re-deriving
     // one from a second copy of the dynamics.
     std::vector<double> qpos() const;
+    std::vector<double> qvel() const;
+    // Restore an exact physics state (snapshot resume). Sizes must match the model.
+    void set_full_state(const std::vector<double>& qpos, const std::vector<double>& qvel);
 
     const mjModel* model() const { return m_; }
     const mjData*  data()  const { return d_; }

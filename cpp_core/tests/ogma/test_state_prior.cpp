@@ -848,8 +848,13 @@ TEST(StatePrior, ThreeStateRatchetHoldsThroughACaughtStumble) {
     const float cL0 = legacy.m.diag_snapshot()["consolidate_c"].get<float>();
     const float cT0 = three.m.diag_snapshot()["consolidate_c"].get<float>();
     ASSERT_GT(cL0, 0.5f); ASSERT_GT(cT0, 0.5f);
-    // A caught stumble: a reset event, then IMMEDIATELY satisfied again — but the
-    // calm window blocks ramping.  Legacy decays c the whole window; three-state holds.
+    // A caught WOBBLE (no reset event, error below the instant threshold): the
+    // three-state must hold what was earned.
+    for (uint64_t e = 0; e < 40; ++e, ++t) three.run_tick(t, 0.25f);   // brief: EMA stays under 0.15
+    EXPECT_GT(three.m.diag_snapshot()["consolidate_c"].get<float>(), 0.9f * cT0)
+        << "a caught wobble (no reset) must not un-earn the stance";
+    // A REAL FALL (the harness's reset event — v3: the one signal the frozen
+    // meters cannot hide): a bounded slice, never the legacy wipe.
     auto send_reset = [&](Fixture& f, uint64_t tk) {
         f.bus.begin_tick(tk);
         auto ev = std::make_shared<ogma::EnvEvent>();
@@ -862,7 +867,8 @@ TEST(StatePrior, ThreeStateRatchetHoldsThroughACaughtStumble) {
     const float cL1 = legacy.m.diag_snapshot()["consolidate_c"].get<float>();
     const float cT1 = three.m.diag_snapshot()["consolidate_c"].get<float>();
     EXPECT_LT(cL1, 0.05f) << "legacy must wipe c through the calm-blocked window";
-    EXPECT_GT(cT1, 0.9f * cT0) << "three-state must HOLD earned c through a caught stumble";
+    EXPECT_GT(cT1, 0.20f * cT0) << "v3: a real fall costs a bounded slice, not the wipe";
+    EXPECT_LT(cT1, 0.75f * cT0) << "v3: but a real fall MUST cost something";
     // A genuine regime change (sustained unsatisfied): three-state must still
     // restore plasticity at the legacy rate.
     for (uint64_t e = 0; e < 300; ++e, ++t) three.run_tick(t, 0.60f);

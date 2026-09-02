@@ -23,8 +23,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <fstream>
 
 #include <mujoco/mujoco.h>
+#include <nlohmann/json.hpp>
 
 #include "DuckBody.hpp"
 #include "Observation.hpp"
@@ -59,6 +61,18 @@ bool g_no_tilt_gate = false;
 // question it answers: seeds find standing in their first minutes and then
 // lose it — is continued learning the destroyer?
 int g_freeze_after_ticks = 0;
+
+// --save-brain FILE / --load-brain FILE (2026-09-01, the tall-standing
+// snapshot): checkpoint the WHOLE learned brain (every module's working state
+// incl. earned consolidation, plus the bus cache) together with the exact
+// physics state, so refinement can continue FROM a stable stance instead of
+// re-earning it.  Load restores brain + body before the first tick; callers
+// resuming a snapshot should not pass --ident flags (the babble is long done).
+std::string g_save_brain, g_load_brain;
+
+// --servo-filter: apply robotd's deployed joint-target low-pass (head 0.5,
+// legs 0.7) to the ogma brain's commands.  Off = legacy raw targets.
+bool g_servo_filter = false;
 
 const char* name_of(const mjModel* m, mjtObj type, int id) {
     const char* n = mj_id2name(m, type, id);
@@ -480,6 +494,20 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
 
     body.reset("STAND", 0.0, seed);
 
+    if (!g_load_brain.empty()) {
+        if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain)) {
+            std::ifstream in(g_load_brain);
+            if (!in) throw std::runtime_error("--load-brain: cannot open " + g_load_brain);
+            nlohmann::json snap; in >> snap;
+            og->restore_brain_state(snap.at("graph"));
+            body.set_full_state(snap.at("qpos").get<std::vector<double>>(),
+                                snap.at("qvel").get<std::vector<double>>());
+            std::fprintf(stderr, "brain+body restored from %s\n", g_load_brain.c_str());
+        } else {
+            throw std::runtime_error("--load-brain requires the ogma brain");
+        }
+    }
+
     std::array<float, kActionLen> last_action{};
     const Command command{};
     const double dt = 1.0 / kBrainHz;
@@ -583,6 +611,18 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             const auto full = body.qpos();
             for (size_t i = 0; i < full.size(); ++i) std::printf("%s%.6f", i ? "," : "", full[i]);
             std::printf("]}\n");
+        }
+    }
+
+    if (!g_save_brain.empty()) {
+        if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain)) {
+            nlohmann::json snap;
+            snap["graph"] = og->brain_state();
+            snap["qpos"]  = body.qpos();
+            snap["qvel"]  = body.qvel();
+            std::ofstream out(g_save_brain);
+            out << snap;
+            std::fprintf(stderr, "brain+body snapshot -> %s\n", g_save_brain.c_str());
         }
     }
 
@@ -838,6 +878,7 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     }
 
     OgmaBrainAdapter brain(probe, {graph, seed, amplitude, stand_home, stand_hcom});
+    if (g_servo_filter) brain.set_servo_filter(true);
 
     std::fprintf(stderr, "graph %s\n  modules:", graph.c_str());
     for (const auto& id : brain.module_ids()) std::fprintf(stderr, " %s", id.c_str());
@@ -923,6 +964,12 @@ int main(int argc, char** argv) {
             g_no_tilt_gate = true;
         } else if (a == "--freeze-after") {
             g_freeze_after_ticks = int(std::stod(next("--freeze-after")) * kBrainHz);
+        } else if (a == "--servo-filter") {
+            g_servo_filter = true;
+        } else if (a == "--save-brain") {
+            g_save_brain = next("--save-brain");
+        } else if (a == "--load-brain") {
+            g_load_brain = next("--load-brain");
         } else if (a == "--push") {
             pushes.newtons = std::stod(next("--push"));
         } else if (a == "--push-every") {

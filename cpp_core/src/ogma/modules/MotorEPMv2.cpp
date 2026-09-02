@@ -396,6 +396,17 @@ ParamSchema MotorEPMv2::params_schema() const {
          "falls/min) or sustained EMA ≥ 0.15.  REQUIRES consolidate_n > 0 (the gate "
          "subset is what the discriminator reads).  0 = legacy, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"calm_exempt_n", ParamMutability::HotMutable,
+         "The calm squelch's full-slope exemption covers only the FIRST N prior "
+         "indices.  Measured motivation (the R9 energy study, from the tall snapshot): "
+         "a whole-body prior lists 8-9 indices, the exemption then covers most of the "
+         "state's columns and calm_fixed squelches almost nothing — the tall stance ran "
+         "at full slope everywhere (C norms 40-60 vs the slump era's 1.4-2, head "
+         "clip_duty 0.40) in a ~12 mrad/tick limit cycle that resting the prior (null), "
+         "removing dither (worse) and damping C (worse) all failed to quiet.  The "
+         "exemption's purpose is the BALANCE error's full slope; position columns ride "
+         "the squelch.  0 = all prior indices (legacy), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{16.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -1069,6 +1080,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["consolidate_calm_ticks"] = consolidate_calm_ticks_;
     m["consolidate_down_rate"] = consolidate_down_rate_;
     m["consolidate_hold"] = consolidate_hold_;
+    m["calm_exempt_n"] = calm_exempt_n_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1253,6 +1265,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "consolidate_calm_ticks", [&](auto const& v){ consolidate_calm_ticks_ = get_double(v, "consolidate_calm_ticks"); });
     apply_param(params, "consolidate_down_rate", [&](auto const& v){ consolidate_down_rate_ = get_double(v, "consolidate_down_rate"); });
     apply_param(params, "consolidate_hold", [&](auto const& v){ consolidate_hold_ = get_double(v, "consolidate_hold"); });
+    apply_param(params, "calm_exempt_n", [&](auto const& v){ calm_exempt_n_ = get_double(v, "calm_exempt_n"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -4006,14 +4019,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // plasticity back in ~2 s); HOLD otherwise (standing again but
                 // calm-blocked, or frozen — the meter decays toward 0 when the
                 // prior loop is off, which reads as satisfied, which holds).
-                // v2 discriminator (R7c measured v1's flaw: a 1 s topple never
-                // moves the 2 s EMA past 0.15, so c held 0.94 while the body
-                // thrashed at 21 falls/min): decay keys on the INSTANT gate
-                // error crossing 2× the satisfaction fraction — a topple crosses
-                // within ~0.3 s — or on sustained EMA dissatisfaction.
+                // v3 discriminator.  v1 (EMA) missed 1 s topples (R7c: c held
+                // 0.94 through 21 falls/min).  v2 (instant error) was BLIND
+                // DURING FALLS: past ~25° the harness regime-gate freezes
+                // learning, the prior loop stops, and the meters read 0 — a
+                // topple transits the visible band in ~10 ticks (R9c: C damped
+                // to zero at cons 1.00 through 24 falls/min).  v3 adds the one
+                // signal the meters cannot hide: the harness's own reset event.
+                // A rescued fall decays c for its first 100 ticks (~2 s, a
+                // bounded ×0.37 slice); a caught wobble with no reset still
+                // holds.  This is the same reset-mask discipline the rest of
+                // the module already lives by.
                 const bool chaos = gate_err_inst_ > 0.30f
                                    || (state_prior_gate_ema_ >= 0.15f
-                                       && consolidate_n_ > 0.0);
+                                       && consolidate_n_ > 0.0)
+                                   || ticks_since_reset_ < 100;
                 if (chaos)
                     consolidate_c_ -= float(consolidate_down_rate_) * consolidate_c_;
                 else if (sat && calm)
@@ -4369,6 +4389,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                         && (consolidate_reach_ < 1.5 || consolidate_reach_ > 3.5)
                                         && consolidate_n_ > 0.0
                                         && int(kk) >= int(consolidate_n_)) continue;
+                                    if (calm_exempt_n_ > 0.0 && int(kk) >= int(calm_exempt_n_)) continue;
                                     zatt.noalias() += L.C.col(ai) * L.prev_x[ai];
                                 }
                                 for (int j = 0; j < m; ++j) {
@@ -4699,6 +4720,13 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                         && (consolidate_reach_ < 1.5 || consolidate_reach_ > 3.5)
                         && consolidate_n_ > 0.0
                         && int(k) >= int(consolidate_n_)) continue;
+                    // calm_exempt_n (R9d, the energy study): with a whole-body prior
+                    // the exemption covers 8-9 of the state's columns and the squelch
+                    // loses its bite — the tall stance ran at full slope everywhere,
+                    // C norms 40-60, ~12 mrad/tick of limit-cycle oscillation.  Scope
+                    // the exemption to the first N indices (the balance subset);
+                    // position columns ride the squelch.  0 = all (legacy).
+                    if (calm_exempt_n_ > 0.0 && int(k) >= int(calm_exempt_n_)) continue;
                     z_att.noalias() += L.C.col(idx) * L.x[idx];
                 }
                 // The calm KEY reads its own index list (angles), not the full
@@ -5639,6 +5667,14 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
         lj["C"] = flat(L.C); lj["h"] = flat(L.h);
         lj["Cphi"] = flat(L.Cphi);
         lj["Cvel"] = flat(L.Cvel);
+        // 2026-09-01 (the tall-standing campaign): reach bias, command trace, calm
+        // ratchet.  A restored stander that dropped these would wake with its earned
+        // stance intact but its bias/trace state cold.
+        if (L.hr.size() > 0)     lj["hr"]     = flat(L.hr);
+        if (L.ytrace.size() > 0) lj["ytrace"] = flat(L.ytrace);
+        lj["calm_state"] = L.calm_state;
+        lj["calm_peak"]  = L.calm_peak;
+        lj["last_mult"]  = L.last_mult;
         if (L.Bx.size() > 0) lj["Bx"] = flat(L.Bx);   // state-model term, only when in use
         if (L.Cp.size() > 0) lj["Cp"] = flat(L.Cp);   // the prior's own controller (split mode)
         if (!L.banks.empty()) {                        // R1 regime banks
@@ -5647,6 +5683,11 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
                 nlohmann::json bj;
                 bj["n"] = bk.samples; bj["tle"] = bk.tle_ema; bj["err"] = bk.sp_err;
                 if (bk.A.size() > 0) { bj["A"] = flat(bk.A); bj["Bx"] = flat(bk.Bx); bj["b"] = flat(bk.b); }
+                if (bk.C.size() > 0) {                 // R3 controller banks
+                    bj["C"] = flat(bk.C); bj["h"] = flat(bk.h);
+                    if (bk.hr.size() > 0) bj["hr"] = flat(bk.hr);
+                }
+                bj["cons_c"] = bk.cons_c; bj["gate_ema"] = bk.gate_ema;
                 banks.push_back(bj);
             }
             lj["banks"] = banks;
@@ -5727,6 +5768,18 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     // Gate 0 reset-masking counters (reset_hit_this_tick_ is intra-tick → omitted)
     mod["reset_count"]       = reset_count_;
     mod["ticks_since_reset"] = ticks_since_reset_;
+    // 2026-09-01: EARNED CONSOLIDATION IS WORKING STATE — a restored stander that
+    // dropped consolidate_c would wake fully plastic and the destroyer would eat
+    // the very stance the snapshot preserved.  Gate EMAs and the bank-slot map
+    // travel with it for the same reason.
+    mod["consolidate_c"]  = consolidate_c_;
+    mod["gate_ema"]       = state_prior_gate_ema_;
+    mod["gate_inst"]      = gate_err_inst_;
+    mod["sp_err_long"]    = state_prior_err_long_;
+    mod["sp_err_peak"]    = sp_err_peak_;
+    mod["bank_of_winner"] = bank_of_winner_;
+    mod["pending_slot"]   = pending_slot_;
+    mod["pending_count"]  = pending_count_;
     mod["reset_rate_ema"]    = reset_rate_ema_;
     mod["reset_rate_init"]   = reset_rate_init_;
     mod["heading_bearing"]   = heading_bearing_;   // integrator (yaw_rate_ema_ is transient, this is not)
@@ -6612,12 +6665,25 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
                     bk.Bx = bj.contains("Bx") && !bj["Bx"].empty() ? toM(vecf(bj.at("Bx")), n, n) : Eigen::MatrixXf();
                     bk.b  = toM(vecf(bj.at("b")), n, 1);
                 }
+                if (bj.contains("C")) {                // R3 controller banks
+                    bk.C = toM(vecf(bj.at("C")), m, n);
+                    bk.h = toM(vecf(bj.at("h")), m, 1);
+                    if (bj.contains("hr")) bk.hr = toM(vecf(bj.at("hr")), m, 1);
+                }
+                bk.cons_c   = bj.value("cons_c", 0.0f);
+                bk.gate_ema = bj.value("gate_ema", 0.0f);
                 L.banks.push_back(std::move(bk));
             }
             L.active_bank = lj.value("active_bank", -1);
         }
         L.b = toM(vecf(lj.at("b")), n, 1);
         L.h = toM(vecf(lj.at("h")), m, 1);
+        L.hr = lj.contains("hr") ? toM(vecf(lj.at("hr")), m, 1)
+                                 : Eigen::VectorXf::Zero(m);
+        if (lj.contains("ytrace")) L.ytrace = toM(vecf(lj.at("ytrace")), m, 1);
+        L.calm_state = lj.value("calm_state", 1.0f);
+        L.calm_peak  = lj.value("calm_peak", 0.0f);
+        L.last_mult  = lj.value("last_mult", 1.0f);
         L.prev_x = toM(vecf(lj.at("prev_x")), n, 1);
         L.prev_y = toM(vecf(lj.at("prev_y")), m, 1);
         L.x = Eigen::VectorXf::Zero(n);
@@ -6672,6 +6738,17 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
         interest_ema_init_ = mod.value("interest_ema_init", interest_ema_init_);
         reset_count_       = mod.value("reset_count",       reset_count_);
         ticks_since_reset_ = mod.value("ticks_since_reset", ticks_since_reset_);
+        // 2026-09-01: the earned consolidation and its gate travel with the brain.
+        state_prior_err_ema_  = mod.value("state_prior_err", state_prior_err_ema_);
+        consolidate_c_        = mod.value("consolidate_c", consolidate_c_);
+        state_prior_gate_ema_ = mod.value("gate_ema",      state_prior_gate_ema_);
+        gate_err_inst_        = mod.value("gate_inst",     gate_err_inst_);
+        state_prior_err_long_ = mod.value("sp_err_long",   state_prior_err_long_);
+        sp_err_peak_          = mod.value("sp_err_peak",   sp_err_peak_);
+        if (mod.contains("bank_of_winner"))
+            bank_of_winner_ = mod["bank_of_winner"].get<std::vector<int>>();
+        pending_slot_  = mod.value("pending_slot",  pending_slot_);
+        pending_count_ = mod.value("pending_count", pending_count_);
         reset_rate_ema_    = mod.value("reset_rate_ema",    reset_rate_ema_);
         reset_rate_init_   = mod.value("reset_rate_init",   reset_rate_init_);
         heading_bearing_   = mod.value("heading_bearing",   heading_bearing_);

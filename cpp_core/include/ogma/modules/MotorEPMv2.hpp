@@ -1575,6 +1575,7 @@ private:
     double consolidate_calm_ticks_ = 1500.0;    // no-fall ticks required before c may ramp (default = legacy 30 s)
     double consolidate_down_rate_ = 0.01;       // c's per-tick decay when unsatisfied (default = legacy τ~2s)
     double consolidate_hold_ = 0.0;             // 1 = three-state ratchet (ramp/hold/decay); 0 = legacy two-state
+    double calm_exempt_n_ = 0.0;                // calm exemption covers only the first N prior indices; 0 = all
     float  reach_lw_last_ = 0.0f;               // telemetry: the reach terms' current effective lw
     float  state_prior_gate_ema_ = 0.0f;        // satisfaction EMA over the gate subset (consolidate_n > 0)
     float  gate_err_inst_ = 0.0f;               // the gate subset's INSTANT error (0 while the prior is off)

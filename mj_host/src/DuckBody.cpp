@@ -178,6 +178,18 @@ std::vector<double> DuckBody::qpos() const {
     return std::vector<double>(d_->qpos, d_->qpos + m_->nq);
 }
 
+std::vector<double> DuckBody::qvel() const {
+    return std::vector<double>(d_->qvel, d_->qvel + m_->nv);
+}
+
+void DuckBody::set_full_state(const std::vector<double>& qpos, const std::vector<double>& qvel) {
+    if (int(qpos.size()) != m_->nq || int(qvel.size()) != m_->nv)
+        throw std::runtime_error("set_full_state: size mismatch (snapshot from a different model?)");
+    std::copy(qpos.begin(), qpos.end(), d_->qpos);
+    std::copy(qvel.begin(), qvel.end(), d_->qvel);
+    mj_forward(m_, d_);
+}
+
 std::array<double, 3> DuckBody::trunk_position() const {
     return {d_->xpos[3 * trunk_body_], d_->xpos[3 * trunk_body_ + 1], d_->xpos[3 * trunk_body_ + 2]};
 }

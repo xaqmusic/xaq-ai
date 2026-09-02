@@ -214,9 +214,24 @@ std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body)
         action_abs_sum_ += std::fabs(u);
         mag += std::fabs(u);
         ++action_samples_;
-        const double want = home_[size_t(i)] + c_.amplitude * u;
+        double want = home_[size_t(i)] + c_.amplitude * u;
+        // --servo-filter (2026-09-01, the energy study): robotd low-passes joint
+        // targets ON THE REAL ROBOT (head 0.5, legs 0.7 per tick); this host had
+        // been applying the brain's commands raw.  The tall stance's measured
+        // ~5 Hz whole-body limit cycle (12.4 mrad/tick; unchanged by resting the
+        // prior, removing dither, damping C, or scoping the calm exemption) is a
+        // loop-gain resonance the deployed filter attenuates.  This is the
+        // hardware's own signal path, not a new conditioning invention.
+        if (servo_filter_) {
+            const bool head = (i >= 5 && i <= 8);
+            const double a = head ? 0.5 : 0.7;
+            if (!filt_init_) filt_[size_t(i)] = want;
+            filt_[size_t(i)] += a * (want - filt_[size_t(i)]);
+            want = filt_[size_t(i)];
+        }
         target[size_t(i)] = std::clamp(want, range_[size_t(i)].first, range_[size_t(i)].second);
     }
+    if (servo_filter_) filt_init_ = true;
     last_cmd_mag_ = mag / kNumPolicyJoints;
     return target;
 }
@@ -526,6 +541,14 @@ std::vector<std::string> OgmaBrainAdapter::module_ids() const {
     std::vector<std::string> out;
     for (auto* m : instance_->modules()) out.emplace_back(m->id());
     return out;
+}
+
+nlohmann::json OgmaBrainAdapter::brain_state() const {
+    return instance_->snapshot_state();
+}
+
+void OgmaBrainAdapter::restore_brain_state(nlohmann::json const& s) {
+    instance_->restore_state(s);
 }
 
 }  // namespace mjhost

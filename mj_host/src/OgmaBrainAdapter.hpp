@@ -36,6 +36,8 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json_fwd.hpp>
+
 #include "DuckBody.hpp"
 #include "Recovery.hpp"
 
@@ -94,6 +96,16 @@ public:
     double regime_tle() const override { return regime_tle_; }
     std::vector<std::string> module_ids() const;
 
+    // robotd's deployed joint-target low-pass (head 0.5, legs 0.7). Off = raw
+    // commands (legacy, byte-identical).
+    void set_servo_filter(bool on) { servo_filter_ = on; }
+
+    // Brain checkpointing (2026-09-01, the tall-standing snapshot): the full
+    // OgmaInstance state — every module's working state incl. earned
+    // consolidation, plus the bus's last-value cache — as one JSON blob.
+    nlohmann::json brain_state() const;
+    void           restore_brain_state(nlohmann::json const& s);
+
     // ★ The risk this experiment must be able to see.
     //
     // The ledger records that on the picrawler "inverted-on-flat is a LOW-SURPRISE
@@ -120,6 +132,9 @@ private:
     Config c_;
     std::array<double, kNumPolicyJoints> home_{};
     std::unique_ptr<ogma::OgmaInstance> instance_;
+    bool servo_filter_ = false;                 // robotd's target low-pass; off = legacy raw
+    bool filt_init_ = false;
+    std::array<double, kNumPolicyJoints> filt_{};
     uint64_t tick_id_ = 0;
     std::array<std::string, kNumPolicyJoints> action_topics_;
     std::array<double, kNumPolicyJoints> last_u_{};
