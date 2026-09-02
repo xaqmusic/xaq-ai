@@ -302,3 +302,40 @@ fall-cycle at 15–22/min and never string the gaps.  **The frontier is now sing
 same basin-finding/race variance that leaves the slump stack at 3/6.**  Also killed
 cheaply on the way: the exploration-noise-tipper hypothesis (falls UP without dither —
 it excites the ongoing identification).
+
+---
+
+## 10. CONTROLLED STANDING (R10→R12b, 2026-09-01) — the oscillator found, named, and rested
+
+The operator watched the tall stander and saw it: dynamically stable but oscillating
+constantly.  Quantified: a coherent **~5.5 Hz whole-body limit cycle**, 12.5 mrad/tick of
+joint motion — 134× the consolidated slump's stillness — with the head (neck_pitch,
+head_roll) carrying most of it.
+
+**What it was NOT** (every probe from the same brain snapshot — the checkpoint machinery
+built this session made each one a controlled 30-minute experiment): not the spared
+prior's churn (null), not the exploration dither (removing it made things worse, twice —
+it is load-bearing), not raw gain (the ctrl_damping 2e-5 hunt shed C from 40–60 to
+3.6–10.6 with standing intact, and the cycle barely moved), not the calm exemption's
+scope (null), and not the missing robotd servo filter (three arms: the lag denies the
+basin entirely at learning time; re-use context — lag-aware learning).
+
+**What it was**: command-self-feedback through C's ACT (efference-copy) columns — the
+controller re-exciting itself through its own last action at one-tick lag.  The lesion
+proved it in ten minutes: zero those columns and the cycle collapses **160×** (11.1 →
+0.069 mrad, quieter than the slump) with the tall stance intact.  And a lesion cannot
+stick: the spared prior regrows the columns within minutes.
+
+**The mechanism**: `consolidate_rests_act` — the command's act input scales by
+(1 − gain·c).  Full efference while learning and during chaos; cut at earned stillness;
+restored the moment c collapses.  Plus the completing config move (R12 measured the trap):
+the prior must rest too (`spares` 0), or its writes inflate act columns the rested command
+cannot see and the first c-dip detonates them.  At earned stillness **nothing writes and
+nothing self-excites; the stance freezes whole** — and stays fully reversible through the
+v3 gate.
+
+**Measured, R12b, one hour**: 0.12–0.43 mrad/tick, upright 1.00, pose 0.062–0.070, tilt
+2–5.6°, |u| 0.30 (halved), one wobble self-caught and re-quieted.  Video sent (before/
+after).  Checkpoint `duck_controlled_brain_s2.json`.  Scale of claim: one seed, one hour
+(3 h soak in flight); the from-scratch pipeline (find → consolidate → hunt → rest) and
+seed-robustness are the open items, same as ever.
