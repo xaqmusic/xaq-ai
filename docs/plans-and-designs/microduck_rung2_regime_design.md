@@ -456,3 +456,133 @@ controller is still plastic.  Two directions, the operator's call:
 - **A lean-aware wake.**  Let a *lean* re-arm plasticity the way a fall does, at a gentler
   cost — so the consolidated stander learns from the shoves it survives instead of only from
   the ones that flatten it.  A design discussion first: it touches the v3 gate.
+
+## 12. THE WIND A/B AND THE RATCHET TAX (2026-09-02) — the lever is null; the pipeline was broken and is repaired
+
+The operator chose §11.5's option A: sub-topple shoves throughout learning, on the
+from-scratch pipeline, A/B against no wind.  Their caveat going in: the brain cannot step,
+so the only catch available is in place.  Three results came out, in this order.
+
+### 12.1 Commands (every run here is deterministic; a live window of the same command is the same run)
+
+```sh
+# from scratch, the R8 tall stack (the "base" arm); the wind arm adds the three --push flags
+mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r8_tall.json --secs 5400 --seed S \
+    --ident-every 12 --ident-until 3000 --save-brain base_sS.brain.json \
+    [--push 0.7 --push-every 8 --push-hold 0.1 --push-from 240]      # ident ends at ~200 s
+# the repaired pipeline (12.3) is the same with a1v2_r13_tax001.json and --secs 7200
+# the envelope of a saved brain: --load-brain X.brain.json --secs 420 --push N --push-every 60 --push-from 30
+# live:  ./mj_host/run.sh brain <the same host args>      replay:  tools/duck_viewer/view.py replay run.jsonl --fast
+```
+
+### 12.2 First battery — NULL against a broken baseline
+
+Two arms × six seeds × 90 min under the current code.  **Zero of six baseline seeds
+consolidate.**  Seed 2 — the recorded tall stander of §9 — reaches c 0.39–0.44 at 20–40
+min with 3 falls/min and then erodes (falls 7.6 → 3.6 → 3.1 → 3.8 → 4.4 → 5.6 → 6.2 → 6.9
+→ 8.0/min; c → 0.04).  Seeds 1/4/5/6 fall-cycle at 12–22/min, seed 3 sits in a
+lying-down attractor (upright 0.25) — all as the §9 battery recorded for them.  The wind
+arm on seed 2 was worse (c peak 0.26): a 0.7 N × 0.1 s shove topples the *unconsolidated*
+stance 59 % of the time (287 of 483 delivered), which is the operator's caveat measured.
+A §3.2 case 4 (baseline validity): nothing about the lever can be read from this battery.
+
+### 12.3 The ratchet tax — the from-scratch pipeline was silently broken since 6fac760
+
+The R8 record was made under ratchet v2.  v3 (6fac760, `consolidate_hold 1` changed in
+place) added the harness reset event as a chaos trigger: **every rescued fall decays c for
+100 ticks at `consolidate_down_rate`** — ×0.37 at the 0.01 default — on top of v2's
+instant-error decay.  The ramp is +0.002·(1−c) per tick after a 10 s calm window, so at
+one fall per 20 s the tax-then-ramp fixed point is c ≈ 0.4: **exactly seed 2's plateau.**
+v3 made the *resumed* stander chaos-aware (R9c) and killed the *race* — the from-scratch
+pipeline has not been run since, and both checkpoints predate the change.
+
+**The repair is config-only** (`a1v2_r13_tax001.json` / `a1v2_r13_tax003.json` = R8 +
+`consolidate_down_rate` 0.001 / 0.003; per-fall tax ×0.90 / ×0.74; chaos decay τ 20 s /
+6.7 s):
+
+| seed 2, falls/min per 10 min (c) | |
+|---|---|
+| tax 0.001 | 7.9 → 2.8 (0.84) → 1.2 (0.95) → 0.2 (0.99) → 0.1 → **0.0 → 0.3 → 0.0 → 0.0 → 0.1 → 0.0 → 0.2, c 1.00 — permanent from 30 min**, 128 rescues in 2 h, all early |
+| tax 0.003 | 8.0 → 4.5 (0.51) → 2.7 (0.72) → 2.2 (0.78) → 1.5 (0.88) → 3.2 (0.66) → 4.8 → 6.5 → 6.3 (0.26) — climbs, then loses it |
+| tax 0.01 (v3 default) | the 12.2 plateau at c 0.4 |
+
+The §9 trajectory (7.7 → 2.7 → 0.8 → 0.1 → 0.0) is back at 0.001.  Seeds 1/3/4/5/6 are
+**byte-identical across all three rates** — they never earn any c, so the tax never acts
+— and seed-robustness stays 1/6, the same race gap §9 recorded.  R13 is the from-scratch
+find-and-consolidate stage; the resumed R12c stack keeps the v3 default (its rest trio
+relies on a strong wake).  Whether the two stages hand over cleanly is 12.6.
+
+### 12.4 The wind on the repaired pipeline — it stands, it never rests, it does not catch
+
+Seed 2, R13, 2 h, wind at 0.3 / 0.5 / 0.7 N × 0.1 s every 8 s from 240 s.
+
+| | delivered | toppled | c by 30 min | c, hour 2 | falls/min, hour 2 |
+|---|---|---|---|---|---|
+| base | — | — | 0.99 | 1.00 | 0.0–0.3 |
+| wind 0.3 N | 801 | 16 % | 0.95 | 0.96 → 0.80 | 0.1 → 4.0 |
+| wind 0.5 N | 745 | 39 % | 0.89 | 0.55–0.75 | 4.6–6.6 |
+| wind 0.7 N | 809 | 19 % | 0.83 | 0.92 → 0.75 | 1.0 → 3.9 |
+
+The wind does not stop the race — all three arms consolidate a few minutes behind the
+base — but a stance under wind never fully rests: even 0.3 N topples the plastic stance
+one shove in six, each topple taxes c and re-arms learning at 4–20 %, and the stance
+erodes through the second hour (the destroyer, slowly).  **In-run catch fraction per 20
+min**, 0.3 N: 41 → 94 → 97 → 97 → 90 → 71 %; 0.5 N: 36 → 77 → 73 → 57 → 55 → 58 %;
+0.7 N: 53 → 85 → 89 → 86 → 87 → 73 %.  The rise is the stance being found (a found stance
+absorbs 0.3 N); the mean peak tilt of caught shoves never tightens (3–5° throughout); the
+late decline is the erosion.  **Envelope of the saved brains** (caught / delivered):
+
+| shove | base | wind 0.3 | wind 0.5 | wind 0.7 |
+|---|---|---|---|---|
+| 1 N | 6/6 | 4/5 | 2/3 | 0/4 |
+| 1.5 N | 3/6 | 1/6 | 1/4 | 3/6 |
+| 2 N | 1/6 | 0/4 | 2/5 | 1/6 |
+| 3 N | 0/6 | 0/5 | 0/5 | 1/6 |
+
+Unchanged: the threshold is 0.15–0.2 N·s for all four, the §11.1 envelope.
+
+### 12.5 Verdicts and the diagnosis
+
+- **A world with wind: NULL** (from-scratch R13, seed 2, 2 h, 0.3–0.7 N × 0.1 s every 8 s;
+  baseline healthy).  Leans while plastic do not produce a catch; they keep the brain
+  awake at low plasticity, and a brain kept awake erodes.  Re-use context below.
+- **The ratchet tax: a §3.2 harness finding, repaired.**  R13 restores the from-scratch
+  race on the one seed that ever won it.  The R8 configs are unchanged; the record in §9
+  stands for the code it was measured on.
+- **Option B (a lean-aware wake) is disfavoured by the same data**: the wind runs *were* a
+  low-plasticity wake with continuous leans, and nothing was learned from it.
+
+*Why the leans taught nothing* — the diagnosis to test next, not a verdict: the pull that
+shapes C is one linear descent on **ten pose elements and four attitude elements at equal
+weight**.  A catch is a movement *away* from the pose target in the service of the
+attitude target (hips, ankles, and a head that is 38 % of the mass), and the pose term is
+under direct control while attitude is reached only through it; locally the pose term
+wins, so a lean is answered with stiffness, which is what §11.2 saw.  Two cheap
+discriminators: (i) **precision** — keep the four attitude elements' descent live at c = 1
+while the pose elements rest (the rest trio rests the whole prior today), or weight the
+attitude subset above the pose subset; (ii) **sensitivity** — read the identified model's
+action → attitude columns: if babble on a stiff stance identified "actions barely move
+attitude", the catch has no gradient however often the world leans it.  Both are
+gain-0-guarded knobs on the same module; both are the operator's fork.
+
+### 12.6 The from-scratch pipeline, end to end — CLOSED
+
+The open item since §9.  From the R13 seed-2 brain at 2 h (c 1.00, C norms un-hunted, the
+12 mrad oscillation on), two hand-overs to the rest stack, 30 min each stage:
+
+| hand-over | falls | c | \|dq\| mrad/tick |
+|---|---|---|---|
+| R13 → R12c directly (1 h) | 209 rescues | 0.13–0.52 | 14.6–16.5 — the stance is lost (the R12 trap: the efference cut lands on an un-hunted C) |
+| R13 → R11 hunt (30 min) → R12c (30 min) | **0 and 0** | 1.00 throughout | 12.0 → 10.9 through the hunt, then **0.1** under R12c |
+
+**find (R13, 2 h) → hunt (R11, 30 min) → rest (R12c): zero falls after the find, and the
+controlled checkpoint's stillness (0.085) reproduced from nothing.**  Three sim-hours,
+about three minutes of wall clock.  The hunt is not optional: it is what makes the rest
+safe.  The resulting brain is `mj_host/checkpoints/duck_pipeline_s2.json`.
+
+```sh
+H=mj_host/build/ogma_mjhost; C=mj_host/configs
+$H --brain --graph $C/a1v2_r13_tax001.json --secs 7200 --seed 2 --ident-every 12 --ident-until 3000 --save-brain find.json
+$H --brain --graph $C/a1v2_r11_hunt.json    --secs 1800 --seed 2 --load-brain find.json --save-brain hunt.json
+$H --brain --graph $C/a1v2_r12c_whole.json  --secs 1800 --seed 2 --load-brain hunt.json --save-brain rest.json
+```

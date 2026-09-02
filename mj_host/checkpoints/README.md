@@ -24,3 +24,9 @@ and the exact physics state (qpos/qvel).
   mrad/tick joint motion (the pre-fix tall stance ran 12.5), upright 1.00,
   tall pose 0.07, |u| 0.30, one self-recovered wobble.  Resume with the R12b
   config; no --ident flags.
+
+- **`duck_pipeline_s2.json`** (2026-09-02): THE FROM-SCRATCH STANDER.  No
+  old-era lineage: find (`a1v2_r13_tax001.json`, 2 h, seed 2, ident flags)
+  → hunt (`a1v2_r11_hunt.json`, 30 min) → rest (`a1v2_r12c_whole.json`,
+  30 min), zero falls after the find, 0.1 mrad/tick, cons 1.00 (design doc
+  §12.6).  Resume with the R12c config; no --ident flags.

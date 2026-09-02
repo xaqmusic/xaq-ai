@@ -35,6 +35,11 @@ the one-glance state and resume commands live in the `microduck-frontier` memory
 mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json \
     --secs 1800 --seed 2 --load-brain mj_host/checkpoints/duck_controlled_brain_s2.json
                                            # the controlled stand, resumed (no --ident flags)
+# from nothing (design doc §12.6): find → hunt → rest, three stages, ~3 min wall
+mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r13_tax001.json --secs 7200 --seed 2 \
+    --ident-every 12 --ident-until 3000 --save-brain find.json
+mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r11_hunt.json   --secs 1800 --seed 2 --load-brain find.json --save-brain hunt.json
+mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json --secs 1800 --seed 2 --load-brain hunt.json --save-brain rest.json
 ```
 
 | phase | state |
@@ -48,8 +53,9 @@ mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json \
 | **tall standing** | ✅ **seed 2 permanent (`a1v2_r8_tall.json`, `c647d02`); other seeds hover tall, lose the race** |
 | **controlled standing** | ✅ **3 h zero-fall stillness (`a1v2_r12c_whole.json` + checkpoint, `9cd982e`)** |
 | **(d) push-test** | ✅ **measured** (design doc §11): the consolidation loop re-infers — c collapses on a fall, the stance is re-found and re-earned in 38 s, 20/20 cycles, 4/6 full re-inferences after destruction. The stance itself has **no active catch**: knocked over at 0.15–0.2 N·s (the scaffold at ~0.7), identically at 5–10× gain |
-| **a catch (balance reflex)** | ⚙ **the fork** — the brain learned to stand in a world that never leaned it; §11.5 has the two options (a world with wind, no code; a lean-aware wake, design first). Operator's call |
-| from-scratch pipeline, seed-robustness | open — both stacks are 1–3/6 seeds (the race-variance gap) |
+| **a catch (balance reflex)** | ⚙ **still the fork** — §11.5 option A (a world with wind) measured NULL on a healthy baseline (§12.4: it stands, never rests, envelope unchanged); option B disfavoured by the same data. Next discriminators in §12.5: attitude precision vs the pose prior, and the model's action→attitude sensitivity |
+| **from-scratch pipeline** | ✅ **repaired** (§12.3): ratchet v3's per-fall tax had silently broken the race since `6fac760`; `a1v2_r13_tax001.json` (R8 + `consolidate_down_rate` 0.001) stands seed 2 permanently from 30 min again. **End to end (§12.6): find R13 2 h → hunt R11 30 min → rest R12c = zero falls, 0.1 mrad/tick, from nothing.** The direct R13→R12c hand-over fails; the hunt is load-bearing. Checkpoint `duck_pipeline_s2.json` |
+| seed-robustness | open — 1/6 seeds from scratch, unchanged by the tax or the wind (the race-variance gap) |
 | S2 / S3 / B1–B3 | not started |
 
 ### Also parked
@@ -60,6 +66,10 @@ operator's call (REPORTS.md §9.6).
 
 ### Traps a fresh session should not re-learn
 
+- **The from-scratch stage is R13, not R8.** Under ratchet v3 the R8 config plateaus at c ≈ 0.4
+  (§12.3); use `a1v2_r13_tax001.json` to find and consolidate, and the R12c stack to rest.
+- **Run logs are big (~190 MB per sim-hour) and `/tmp` is a quota'd tmpfs.** Write batteries to
+  `mj_host/log/` (gitignored, on the main disk); a full `/tmp` takes the shell down with it.
 - **`--seed` does nothing on `--load-brain`.** The RNG state is restored with the brain, so two
   resumes at different seeds are byte-identical. Variance on a checkpoint comes only from what
   you do to it (the push schedule); seed-robustness is a from-scratch question.
