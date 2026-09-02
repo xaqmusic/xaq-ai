@@ -371,6 +371,31 @@ ParamSchema MotorEPMv2::params_schema() const {
          "already provides a demonstration period on top of this window.  Default 1500 = "
          "byte-identical legacy.",
          ParamValue{1500.0}, ParamValue{100.0}, ParamValue{15000.0}},
+        {"consolidate_down_rate", ParamMutability::HotMutable,
+         "c's per-tick decay rate while the gate is unsatisfied.  Measured motivation "
+         "(R7, 90 min): the tall stance held 0.92-0.96 upright at pose-distance 0.072 the "
+         "whole run with falls drifting 5.4 → 3.6/min — but c saw-toothed to 0.03: each "
+         "16 s gap ramps +~0.5 at the up-rate and each fall wipes it in ~2 s at the "
+         "legacy 0.01.  A symmetric rate (0.002) lets c compound across the gap-fall "
+         "cycle so annealing can engage and shrink the falls it needs.  The calm gate "
+         "still blocks up-ramping for consolidate_calm_ticks after every reset — chaos "
+         "is never consolidated into.  Default 0.01 = byte-identical legacy.",
+         ParamValue{0.01}, ParamValue{0.0005}, ParamValue{0.1}},
+        {"consolidate_hold", ParamMutability::HotMutable,
+         "1 = THREE-STATE ratchet: ramp c when satisfied-and-calm, decay (at "
+         "consolidate_down_rate) only while genuinely unsatisfied, HOLD otherwise.  "
+         "Measured triangulation: legacy two-state decays c through topple + frozen "
+         "rescue + the whole calm window (~13 s ≈ e⁻⁷ per fall — R7's tall stance held "
+         "0.92-0.96 upright for 90 min and could never keep a tenth of its earned c), "
+         "while a slow symmetric decay (R7b) annealed adaptation during real chaos and "
+         "made falls WORSE (6-10/min).  The three-state splits them: a caught stumble "
+         "costs only its ~2 s of true chaos (×0.5), a genuine regime change still "
+         "restores full plasticity at the legacy rate.  v2: decay keys on the INSTANT "
+         "gate error > 0.30 (2× the satisfaction fraction — a topple crosses within "
+         "~0.3 s, where the 2 s EMA never catches it: R7c held c=0.94 through 21 "
+         "falls/min) or sustained EMA ≥ 0.15.  REQUIRES consolidate_n > 0 (the gate "
+         "subset is what the discriminator reads).  0 = legacy, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -1042,6 +1067,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["regime_c_banks"] = regime_c_banks_;
     m["regime_dwell"] = regime_dwell_;
     m["consolidate_calm_ticks"] = consolidate_calm_ticks_;
+    m["consolidate_down_rate"] = consolidate_down_rate_;
+    m["consolidate_hold"] = consolidate_hold_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1224,6 +1251,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "regime_c_banks", [&](auto const& v){ regime_c_banks_ = get_double(v, "regime_c_banks"); });
     apply_param(params, "regime_dwell", [&](auto const& v){ regime_dwell_ = get_double(v, "regime_dwell"); });
     apply_param(params, "consolidate_calm_ticks", [&](auto const& v){ consolidate_calm_ticks_ = get_double(v, "consolidate_calm_ticks"); });
+    apply_param(params, "consolidate_down_rate", [&](auto const& v){ consolidate_down_rate_ = get_double(v, "consolidate_down_rate"); });
+    apply_param(params, "consolidate_hold", [&](auto const& v){ consolidate_hold_ = get_double(v, "consolidate_hold"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -3960,8 +3989,40 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             const bool sat  = gate_ema > 0.0f && gate_ema < 0.15f;
             const bool calm = ticks_since_reset_ > int(consolidate_calm_ticks_);
             const float tgt = (sat && calm) ? 1.0f : 0.0f;
-            const float k   = (tgt > consolidate_c_) ? 0.002f : 0.01f;   // up τ~10s, down τ~2s
-            consolidate_c_ += k * (tgt - consolidate_c_);
+            // Down-rate parameterized (R7 measured why): at 3.6 falls/min the tall
+            // stance's 16 s gaps ramp c by ~+0.5 while each fall's 0.01/tick decay
+            // wipes it in ~2 s — the ratchet can never climb through residual falls.
+            // 0.01 default = legacy.  A symmetric rate lets c compound across the
+            // gap-fall cycle; the calm gate still blocks UP-ramping for
+            // consolidate_calm_ticks after every reset, so chaos is never
+            // consolidated INTO — it just stops instantly un-earning the stance.
+            if (consolidate_hold_ > 0.0) {
+                // THREE-STATE ratchet (R7/R7b triangulated it): legacy decays c
+                // through topple + frozen rescue + the whole calm window (~13 s
+                // ≈ e⁻⁷ — every fall wipes the earned stance), while R7b's slow
+                // symmetric decay annealed adaptation DURING real chaos and made
+                // falls worse.  So: ramp when satisfied-and-calm; decay at the
+                // legacy rate only while genuinely UNSATISFIED (real chaos —
+                // plasticity back in ~2 s); HOLD otherwise (standing again but
+                // calm-blocked, or frozen — the meter decays toward 0 when the
+                // prior loop is off, which reads as satisfied, which holds).
+                // v2 discriminator (R7c measured v1's flaw: a 1 s topple never
+                // moves the 2 s EMA past 0.15, so c held 0.94 while the body
+                // thrashed at 21 falls/min): decay keys on the INSTANT gate
+                // error crossing 2× the satisfaction fraction — a topple crosses
+                // within ~0.3 s — or on sustained EMA dissatisfaction.
+                const bool chaos = gate_err_inst_ > 0.30f
+                                   || (state_prior_gate_ema_ >= 0.15f
+                                       && consolidate_n_ > 0.0);
+                if (chaos)
+                    consolidate_c_ -= float(consolidate_down_rate_) * consolidate_c_;
+                else if (sat && calm)
+                    consolidate_c_ += 0.002f * (1.0f - consolidate_c_);
+            } else {
+                const float k   = (tgt > consolidate_c_)
+                                  ? 0.002f : float(consolidate_down_rate_);
+                consolidate_c_ += k * (tgt - consolidate_c_);
+            }
         }
         const float lr_scale = (consolidate_gain_ > 0.0)
             ? 1.0f - float(consolidate_gain_) * consolidate_c_ : 1.0f;
@@ -4370,6 +4431,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     // The gate subset's own EMA (same cadence, same frozen-meter decay).
                     state_prior_gate_ema_ += 0.01f * ((gate_n ? gate_err / float(gate_n) : 0.0f)
                                                       - state_prior_gate_ema_);
+                    gate_err_inst_ = gate_n ? gate_err / float(gate_n) : 0.0f;
                     // The calm reference: the same error on a ~40 s horizon.  The
                     // annealing ratio short/long is self-scaled — no constant to
                     // tune to the signal (§5.5).

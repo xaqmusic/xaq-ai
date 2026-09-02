@@ -1573,8 +1573,11 @@ private:
     double consolidate_reach_lr_ = 0.0;         // mode 5's hr write rate (µ-rate; 0 = hr never writes)
     double regime_c_banks_ = 0.0;               // R3: bank the CONTROLLER (C,h,hr + earned c) per regime
     double consolidate_calm_ticks_ = 1500.0;    // no-fall ticks required before c may ramp (default = legacy 30 s)
+    double consolidate_down_rate_ = 0.01;       // c's per-tick decay when unsatisfied (default = legacy τ~2s)
+    double consolidate_hold_ = 0.0;             // 1 = three-state ratchet (ramp/hold/decay); 0 = legacy two-state
     float  reach_lw_last_ = 0.0f;               // telemetry: the reach terms' current effective lw
     float  state_prior_gate_ema_ = 0.0f;        // satisfaction EMA over the gate subset (consolidate_n > 0)
+    float  gate_err_inst_ = 0.0f;               // the gate subset's INSTANT error (0 while the prior is off)
     float  sp_err_peak_      = 0.0f;            // decaying peak of the prior error (the reference)
     int    regime_banks_   = 6;                 // bank slots (last slot = shared overflow)
     int    regime_winner_  = -1;                // latest winner_id from the token

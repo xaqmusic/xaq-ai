@@ -836,6 +836,40 @@ TEST(StatePrior, RegimeDwellSuppressesFlickerNotTransitions) {
     EXPECT_GE(sw_sticky, int64_t{2}) << "…but still take the sustained transition";
 }
 
+TEST(StatePrior, ThreeStateRatchetHoldsThroughACaughtStumble) {
+    auto mk = [](double hold) {
+        ParamMap p = consol_params(1.0);
+        p["consolidate_hold"] = hold;
+        return p;
+    };
+    Fixture legacy(mk(0.0)), three(mk(1.0));
+    uint64_t t = 1;
+    for (; t <= 4000; ++t) { legacy.run_tick(t, 0.02f); three.run_tick(t, 0.02f); }
+    const float cL0 = legacy.m.diag_snapshot()["consolidate_c"].get<float>();
+    const float cT0 = three.m.diag_snapshot()["consolidate_c"].get<float>();
+    ASSERT_GT(cL0, 0.5f); ASSERT_GT(cT0, 0.5f);
+    // A caught stumble: a reset event, then IMMEDIATELY satisfied again — but the
+    // calm window blocks ramping.  Legacy decays c the whole window; three-state holds.
+    auto send_reset = [&](Fixture& f, uint64_t tk) {
+        f.bus.begin_tick(tk);
+        auto ev = std::make_shared<ogma::EnvEvent>();
+        f.bus.publish("events.reset", ev);
+        f.m.tick(tk);
+        f.bus.end_tick();
+    };
+    send_reset(legacy, t); send_reset(three, t); ++t;
+    for (uint64_t e = 0; e < 1000; ++e, ++t) { legacy.run_tick(t, 0.02f); three.run_tick(t, 0.02f); }
+    const float cL1 = legacy.m.diag_snapshot()["consolidate_c"].get<float>();
+    const float cT1 = three.m.diag_snapshot()["consolidate_c"].get<float>();
+    EXPECT_LT(cL1, 0.05f) << "legacy must wipe c through the calm-blocked window";
+    EXPECT_GT(cT1, 0.9f * cT0) << "three-state must HOLD earned c through a caught stumble";
+    // A genuine regime change (sustained unsatisfied): three-state must still
+    // restore plasticity at the legacy rate.
+    for (uint64_t e = 0; e < 300; ++e, ++t) three.run_tick(t, 0.60f);
+    EXPECT_LT(three.m.diag_snapshot()["consolidate_c"].get<float>(), 0.15f)
+        << "sustained real error must decay c fast — the safety re-arm stays";
+}
+
 TEST(StatePrior, HotParamRoundTrip) {
     Fixture f(base_params());
     f.m.on_param_change("state_prior_gain", ParamValue{0.6});
