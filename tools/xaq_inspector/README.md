@@ -37,9 +37,28 @@ resolves when `tools/` is on `sys.path`. The wrapper script sets
 (a natural first read of this doc) fails with `No module named
 xaq_inspector`.
 
-Defaults to `tcp://127.0.0.1:7400` for control and `tcp://127.0.0.1:7401`
-for diag.  Use `--control-port` / `--diag-host` to override (passed through
-to `run_inspector.sh`).
+**The host fields under the module list are the normal way to connect** — type
+`picrawler.local` (or `host:port`) and press Enter, or hit **Connect / Refresh**.
+Both endpoints are **remembered between runs**, so the usual launch takes no
+arguments at all:
+
+```sh
+tools/run_inspector.sh          # reconnects to whatever you used last
+```
+
+Control and diag are separate fields because they can legitimately differ — an
+ssh tunnel forwarding only one, say — and each accepts a bare host or `host:port`
+so the ports stay overridable without four widgets. A field never raises: an
+unparseable port falls back to the default, and an unreachable host becomes a
+status-bar line rather than a dialog in the middle of debugging.
+
+`--control-host` / `--control-port` / `--diag-host` / `--diag-port` still work and
+win for that run, then become the remembered value. Defaults are
+`127.0.0.1:7400` (control) and `127.0.0.1:7401` (diag).
+
+Retargeting keeps the live subscription: the SUB socket is disconnected and
+reconnected rather than rebuilt, and ZMQ subscriptions belong to the socket, not
+the connection.
 
 ## Module dispatch
 
