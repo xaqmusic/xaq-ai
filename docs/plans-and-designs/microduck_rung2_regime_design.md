@@ -339,3 +339,12 @@ v3 gate.
 after).  Checkpoint `duck_controlled_brain_s2.json`.  Scale of claim: one seed, one hour
 (3 h soak in flight); the from-scratch pipeline (find → consolidate → hunt → rest) and
 seed-robustness are the open items, same as ever.
+
+**§10 addendum — the whole freeze (R12c).**  The 3 h soak of R12b caught the last leak:
+the gain hunt's unscaled decay kept eroding a frozen C that was now too stable to ever
+re-arm learning (90 quiet minutes, then collapse — the R9c disease in slow motion).
+R12c adds `ctrl_damping_lr_scaled` 1: at earned stillness nothing writes AND nothing
+decays.  **Measured, three hours: 0.083–0.090 mrad/tick (the slump's own stillness,
+still improving), ZERO falls, upright 1.00, pose 0.068, tilt 1.4→1.0°, |u| 0.34.**
+`a1v2_r12c_whole.json` is the promoted controlled-standing stack;
+`duck_controlled_brain_s2.json` is its checkpoint.
