@@ -180,30 +180,26 @@ func _build_ui() -> void:
 		var l := _lbl("○ " + item); _check_lbls[item] = l; lv.add_child(l)
 		l.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 
-	# ---- bottom-left: the camera, as the brain gets it -------------------------------
-	# Both planes, side by side, because the PAIR is the diagnostic: a fault between the
+	# ---- the camera, inside the telemetry panel so it minimises with the metrics ------
+	# Lives here rather than over the 3-D view: that area already carries the body's own
+	# meters and the COMMANDED-pose label, and a floating panel overlapped the distress bar.
+	# Both planes side by side, because the PAIR is the diagnostic — a fault between the
 	# sensor and the encoder shows up as the two disagreeing. (2026-09-01: the camera read
 	# across frame boundaries for a week and looked like a working camera the whole time,
 	# because nothing ever displayed what the encoder was actually handed.)
-	var vpanel := PanelContainer.new()
-	vpanel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	vpanel.offset_left = 8; vpanel.offset_top = -190; vpanel.offset_bottom = -8; vpanel.offset_right = 320
-	_ui.add_child(vpanel)
-	var vm := _margin(); vpanel.add_child(vm)
-	var vroot := VBoxContainer.new(); vm.add_child(vroot)
-	var vhdr := HBoxContainer.new(); vroot.add_child(vhdr)
-	vhdr.add_child(_lbl("CAMERA  (ogma_host :%d — view only)" % VIDEO_PORT, 13))
-	var vrow := HBoxContainer.new(); vroot.add_child(vrow)
+	lv.add_child(_lbl(" "))
+	lv.add_child(_lbl("CAMERA  (ogma_host :%d — view only)" % VIDEO_PORT, 13))
+	var vrow := HBoxContainer.new(); lv.add_child(vrow)
 	var vcol := VBoxContainer.new(); vrow.add_child(vcol)
 	vcol.add_child(_lbl("what the camera sees", 11))
 	_view_tex = TextureRect.new()
-	_view_tex.custom_minimum_size = Vector2(192, 144)
+	_view_tex.custom_minimum_size = Vector2(160, 120)
 	_view_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 	_view_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	vcol.add_child(_view_tex)
-	vrow.add_child(_lbl("  "))
+	vrow.add_child(_lbl(" "))
 	var bcol := VBoxContainer.new(); vrow.add_child(bcol)
-	var blab := _lbl("what the BRAIN sees", 11)
+	var blab := _lbl("the BRAIN sees", 11)
 	blab.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
 	bcol.add_child(blab)
 	_brain_tex = TextureRect.new()
@@ -211,7 +207,7 @@ func _build_ui() -> void:
 	_brain_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 	_brain_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # show the pixels, do not smooth them
 	bcol.add_child(_brain_tex)
-	_video_lbl = _lbl("not connected", 11); vroot.add_child(_video_lbl)
+	_video_lbl = _lbl("not connected", 11); lv.add_child(_video_lbl)
 
 	# ---- bottom-centre: the honesty label on the 3-D view ----------------------------
 	var cap := _lbl("3-D view = COMMANDED pose", 14)
@@ -527,6 +523,11 @@ func _on_load_map() -> void:
 # ======================================================================================
 func _update_video() -> void:
 	if _video == null or not bool(_video.call("is_connected")):
+		return
+	# Minimised: skip entirely rather than build an ImageTexture nobody draws. Safe to
+	# stop polling because the SUB socket is ZMQ_CONFLATE — at most one frame is ever
+	# queued, so nothing backs up while the panel is closed.
+	if _tele_content != null and not _tele_content.visible:
 		return
 	if not bool(_video.call("poll")):
 		return
