@@ -77,6 +77,14 @@ follow: `0` upright, `1` a real fall, `3` not watched long enough.
 Runs reserve a clean tail automatically: nothing is shoved inside the final recovery window, so
 a conclusive run is what you get by default and an inconclusive one takes effort.
 
+### The launcher
+
+`./mj_host/run.sh launcher` opens the experiment launcher
+([`tools/duck_launcher`](../tools/duck_launcher/README.md)): presets for the experiments
+so far, every config, seed or a battery of seeds, from scratch or from a saved brain, the
+shove schedule, watch live or headless — and the exact host command on screen to paste
+into a shell.
+
 ### Shoving the brain
 
 The same schedule runs against a learned stance:

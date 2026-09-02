@@ -13,6 +13,7 @@
 #   ./mj_host/run.sh brain [args]       watch phase A1: MotorEPM driving the joints
 #   ./mj_host/run.sh record out.mp4 [args]   render a run to video (no window needed)
 #   ./mj_host/run.sh hold [args]        headless, JSONL to log/
+#   ./mj_host/run.sh launcher           THE LAUNCHER — presets, configs, seeds, shoves, watch or headless
 #
 #
 # `record` takes --stub as its first host arg to drive the harness instead of --hold.
@@ -100,6 +101,12 @@ case "${1:-}" in
     if [[ "${1:-}" == "--stub" || "${1:-}" == "--brain" ]]; then mode="$1"; shift; fi
     need_host; need_viewer
     "$HOST" "$mode" "$@" | "$VENV" "$VIEW" record - "$out"
+    ;;
+
+  launcher)
+    shift
+    need_host; need_viewer
+    exec "$VENV" "$REPO/tools/duck_launcher/launcher.py" "$@"
     ;;
 
   hold)
