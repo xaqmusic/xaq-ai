@@ -20,15 +20,21 @@
 
 ## ▶ Resume here
 
-**State on 2026-08-31.** Branch `microduck`, clean and pushed. Simulation only — the robot sold
-out, so there is no hardware and none is assumed. Upstream lives *outside* this repo, on purpose:
+**State on 2026-09-02.** Branch **`microduck-lean-prior`**, committed through `9cd982e`.
+Simulation only — no hardware. Upstream lives *outside* this repo, on purpose:
 `/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
+
+**THE DUCK STANDS — tall, still, and self-recovering.** Three measured hours: ZERO falls,
+0.083–0.090 mrad/tick joint motion (the consolidated slump's own stillness), upright 1.00,
+pose-distance 0.068 from the calibrated stand pose, |u| 0.34. The authoritative record of
+how is [`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md) **§7–§10**;
+the one-glance state and resume commands live in the `microduck-frontier` memory.
 
 ```sh
 ./mj_host/run.sh gates                     # G1/G2/G3/G4, non-zero exit on any failure
-./mj_host/run.sh brain --secs 60           # A1: MotorEPM driving, watch it live
-./mj_host/run.sh stub  --secs 60           # the recovery harness against a brain that fails
-./mj_host/run.sh watch --secs 20 --push 25 --push-every 4   # the scaffold's own recovery
+mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json \
+    --secs 1800 --seed 2 --load-brain mj_host/checkpoints/duck_controlled_brain_s2.json
+                                           # the controlled stand, resumed (no --ident flags)
 ```
 
 | phase | state |
@@ -37,31 +43,13 @@ out, so there is no hardware and none is assumed. Upstream lives *outside* this 
 | S1 body + run loop | ✅ G2 passes; cross-checks exactly against an independent Python implementation |
 | A2 recovery harness | ✅ built *before* A1 with a stub brain, since it needs a brain that fails |
 | observation path | ✅ `run.sh` + `tools/duck_viewer`; the viewer draws the host's `qpos` and never simulates |
-| **A1 first brain** | ⚙ **runs, ties a random walk, three verified null lever families** |
-| **A1-v2 state prior** | ⚙ **built + validated (branch `microduck-lean-prior`); duck verdict SIGNAL not standing; class ceiling PROVEN at 7/min; frontier = authority identification** |
+| A1 / A1-v2 state prior | ✅ superseded by the rung-2 line (§"A1-v2" below is the history) |
+| **rung-2: slump standing** | ✅ **3/6 seeds permanent (`a1v2_r3_consol.json`, `4f7b0c2`)** |
+| **tall standing** | ✅ **seed 2 permanent (`a1v2_r8_tall.json`, `c647d02`); other seeds hover tall, lose the race** |
+| **controlled standing** | ✅ **3 h zero-fall stillness (`a1v2_r12c_whole.json` + checkpoint, `9cd982e`)** |
+| **(d) push-test** | ⚙ **next** — pushes exist only on the `--hold` scaffold path; wire `PushPlan` into `run_with_brain` first |
+| from-scratch pipeline, seed-robustness | open — both stacks are 1–3/6 seeds (the race-variance gap) |
 | S2 / S3 / B1–B3 | not started |
-
-### The one decision waiting on the operator
-
-A1 ties a random walk, and every cheap hypothesis has now been measured null **with the
-consumer verified firing in each case**: the postural reflex, lean-in-the-loop (§"Two levers
-tried"), and the conditioning-and-gain sweep (§"The cheap hypotheses, measured") — the last
-with a sting in it: de-clipping the controller makes the body fall *more*, and makes lying
-down the quieter state (10/12 runs vs 2/6 at baseline). Together they place the problem in
-**the objective, not the sensor and not the conditioning**: MotorEPM descends a sensitivity
-metric, and its own header says *"the rule cannot rest at standing."* It has the lean signal,
-a cleanly conditioned loop is *available* — and cleanliness makes the floor more attractive,
-not less.
-
-**Proposed next step:** extend `MotorEPMv2`'s objective socket so a prior can target *any*
-element of the state vector — *predicted lean = 0* — rather than only the `motor_dim`
-joint-position slots. That is the rewrite rule applied exactly: the behaviour is "stand tall",
-the error it minimises is predicted-minus-measured lean, and the module must be able to hold
-that prediction. It is **not** a hand-written inverted-pendulum reflex, which §1 would throw away.
-
-**It is a module change, which §Coordination forbids on this branch.** It needs its own branch
-and an explicit go-ahead. `MotorEPMv2` exists for this ("v2 starts as a copy, so new features
-can be tested without touching the benchmark").
 
 ### Also parked
 
