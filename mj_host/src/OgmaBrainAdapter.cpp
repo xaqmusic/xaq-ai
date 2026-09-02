@@ -247,6 +247,10 @@ void OgmaBrainAdapter::on_reset() {
     ev->intensity = 1.0f;
     instance_->bus()->publish("events.reset", ev);
     last_u_.fill(0.0);
+    // The servo filter must RE-SEED at the handback pose, or the first post-rescue
+    // commands are dragged toward stale pre-fall targets — the exact step-change
+    // lurch the stand calibration history records for every handback.
+    filt_init_ = false;
 }
 
 void OgmaBrainAdapter::set_learning(bool on) {

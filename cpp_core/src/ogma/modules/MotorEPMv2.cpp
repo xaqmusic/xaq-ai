@@ -407,6 +407,30 @@ ParamSchema MotorEPMv2::params_schema() const {
          "exemption's purpose is the BALANCE error's full slope; position columns ride "
          "the squelch.  0 = all prior indices (legacy), byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{16.0}},
+        {"ctrl_damping_lr_scaled", ParamMutability::HotMutable,
+         "1 = ctrl_damping's weight decay is scaled by consolidation's lr_scale — decay "
+         "is part of learning and rests when learning rests.  The two measured failure "
+         "modes it splits: unscaled decay at cons=1 shrank a frozen controller to zero "
+         "(R9c: C 0.01 at cons 1.00, 24 falls/min); no decay lets the tall-basin fight "
+         "ratchet C unboundedly because nothing prices gain (40-60 raw, 108-248 through "
+         "the servo filter — the descent pushes harder through any attenuation).  With "
+         "this on, decay bounds C DURING the fight and freezes WITH the solution.  "
+         "0 = legacy (decay always on), byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"consolidate_rests_act", ParamMutability::HotMutable,
+         "CONSOLIDATION RESTS THE EFFERENCE FEEDBACK: the command's act-element input "
+         "is scaled by (1 − gain·c).  The measured chain (2026-09-01 energy study): the "
+         "consolidated tall stance oscillated in a coherent ~5.5 Hz whole-body limit "
+         "cycle (~11-12 mrad/tick, 134× the slump) that survived a 10× gain reduction, "
+         "dither removal, a full freeze, calm-exemption scoping and a servo filter — "
+         "and collapsed 160× to 0.069 mrad (quieter than the slump) the moment C's act "
+         "columns were lesioned.  Command-self-feedback at one-tick lag IS the "
+         "oscillator; at earned stillness it is pure fuel, and the live prior regrows "
+         "the columns within minutes so a one-time lesion cannot hold.  This scales the "
+         "COMMAND's view only: learning sees the true x (efference stays for "
+         "identification and gait), and a fall collapses c, restoring the full pathway "
+         "with plasticity.  0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"state_prior_calm_mode", ParamMutability::HotMutable,
          "R2 (rung-2 design §4): 0 = the continuous calm key (legacy — five designs, all "
          "measured storm-coupled: the flail generates the very error that holds its own "
@@ -1081,6 +1105,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["consolidate_down_rate"] = consolidate_down_rate_;
     m["consolidate_hold"] = consolidate_hold_;
     m["calm_exempt_n"] = calm_exempt_n_;
+    m["ctrl_damping_lr_scaled"] = ctrl_damping_lr_scaled_;
+    m["consolidate_rests_act"] = consolidate_rests_act_;
     m["regime_banks"] = int64_t(regime_banks_);
     m["state_prior_calm_indices"] = state_prior_calm_indices_;
     m["state_model_lr"]      = state_model_lr_;
@@ -1266,6 +1292,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "consolidate_down_rate", [&](auto const& v){ consolidate_down_rate_ = get_double(v, "consolidate_down_rate"); });
     apply_param(params, "consolidate_hold", [&](auto const& v){ consolidate_hold_ = get_double(v, "consolidate_hold"); });
     apply_param(params, "calm_exempt_n", [&](auto const& v){ calm_exempt_n_ = get_double(v, "calm_exempt_n"); });
+    apply_param(params, "ctrl_damping_lr_scaled", [&](auto const& v){ ctrl_damping_lr_scaled_ = get_double(v, "ctrl_damping_lr_scaled"); });
+    apply_param(params, "consolidate_rests_act", [&](auto const& v){ consolidate_rests_act_ = get_double(v, "consolidate_rests_act"); });
     apply_param(params, "regime_banks", [&](auto const& v){
         if (auto pv = std::get_if<int64_t>(&v)) regime_banks_ = std::max(2, int(*pv));
         else if (auto dv = std::get_if<double>(&v)) regime_banks_ = std::max(2, int(*dv));
@@ -4365,10 +4393,18 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // (attitude columns to 103, the 25-minute quiet
                             // re-inflating).  Honest G restores the self-limit.
                             Eigen::VectorXf Gt = G.diagonal();
+                            // Mirror the command path's act-rest view, or G lies at
+                            // the efference columns.
+                            const float ract = (consolidate_rests_act_ > 0.0)
+                                ? 1.0f - float(consolidate_rests_act_) * consolidate_c_
+                                : 1.0f;
+                            Eigen::VectorXf pxr = L.prev_x;
+                            if (ract < 1.0f && n >= 3 * m)
+                                for (int jj = 0; jj < m; ++jj) pxr[3 * jj + 1] *= ract;
                             if (split) {
-                                Eigen::VectorXf zt = L.last_mult * (L.C * L.prev_x + L.h
+                                Eigen::VectorXf zt = L.last_mult * (L.C * pxr + L.h
                                                                     + float(consolidate_c_) * L.hr)
-                                                     + L.Cp * L.prev_x;
+                                                     + L.Cp * pxr;
                                 for (int j = 0; j < m; ++j) {
                                     const float t = std::tanh(zt[j]);
                                     Gt[j] = 1.0f - t * t;
@@ -4376,7 +4412,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             } else if (L.last_mult < 1.0f) {
                                 // shared C under the squelch: z_actual =
                                 // mult·(z − z_att) + z_att; recompute G there.
-                                Eigen::VectorXf zfull = L.C * L.prev_x + L.h
+                                Eigen::VectorXf zfull = L.C * pxr + L.h
                                                         + float(consolidate_c_) * L.hr;
                                 Eigen::VectorXf zatt  = Eigen::VectorXf::Zero(m);
                                 for (size_t kk = 0; kk < state_prior_indices_.size(); ++kk) {
@@ -4515,8 +4551,17 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 // I2 companion: the explicit bound on C and h that lets sat_lr be retired
                 // without reproducing its windup.  PM's `damping`.
                 if (ctrl_damping_ > 0.0) {
-                    L.C *= (1.0f - float(ctrl_damping_));
-                    L.h *= (1.0f - float(ctrl_damping_));
+                    // ctrl_damping_lr_scaled: weight decay is PART OF LEARNING —
+                    // when consolidation rests the learning, the decay rests too.
+                    // Measured both ways: unscaled decay at cons=1 shrank a frozen
+                    // C to zero (R9c, 24 falls/min at cons 1.00); and with NO decay
+                    // the tall fight ratchets C unboundedly (40-60 unfiltered,
+                    // 108-248 through the servo filter — the descent pushes harder
+                    // through any attenuation because nothing prices gain).
+                    const float d = float(ctrl_damping_)
+                                    * (ctrl_damping_lr_scaled_ > 0.0 ? lr_scale : 1.0f);
+                    L.C *= (1.0f - d);
+                    L.h *= (1.0f - d);
                 }
                 L.gain_ema = (1.0f - kTeleEmaAlpha) * L.gain_ema + kTeleEmaAlpha * Lp.norm();
                 L.sat_ema  = (1.0f - kTeleEmaAlpha) * L.sat_ema  + kTeleEmaAlpha * (sat / float(m));
@@ -4625,8 +4670,26 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // honest-G reconstructions below), applied as c·hr — zero until mode 3
             // writes hr, so plain adds are byte-identical for every other config.
             const float cr = float(consolidate_c_);
+            // consolidate_rests_act: scale the ACT (efference-copy) elements the
+            // COMMAND sees by (1 − gain·c).  The measured motivation (the energy
+            // study's lesion, 2026-09-01): the tall stance's ~5.5 Hz whole-body
+            // limit cycle survived 10× gain reduction, dither removal and a full
+            // freeze — and collapsed 160× (11.1 → 0.069 mrad/tick, quieter than
+            // the slump) the moment C's act columns were zeroed.  Command-self-
+            // feedback at one-tick lag is the oscillator; at earned stillness it
+            // is pure fuel.  Learning still sees the TRUE x (efference stays for
+            // identification and gait), and a fall collapses c, restoring the
+            // full pathway with plasticity.
+            const float act_s = (consolidate_rests_act_ > 0.0)
+                ? 1.0f - float(consolidate_rests_act_) * consolidate_c_ : 1.0f;
+            const bool  rest_act = act_s < 1.0f && L.n >= 3 * m;
+            Eigen::VectorXf x_cmd;
+            if (rest_act) {
+                x_cmd = L.x;
+                for (int j = 0; j < m; ++j) x_cmd[3 * j + 1] *= act_s;
+            }
             y = wb_on ? Eigen::VectorXf(Zw_.segment(leg * m, m))   // I7: this leg's slice
-                      : Eigen::VectorXf(L.C * L.x + L.h + cr * L.hr);
+                      : Eigen::VectorXf(L.C * (rest_act ? x_cmd : L.x) + L.h + cr * L.hr);
             if (!wb_on && lookahead_gain_ != 0.0 && L.A.size() > 0 && L.have_prev) {
                 const float lam = float(lookahead_gain_);
                 Eigen::VectorXf y0 = y;                       // pre-tanh operating point
@@ -4639,7 +4702,9 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 if (lookahead_null_ <= 0.0 && state_model_lr_ > 0.0 && L.Bx.rows() == L.x.size())
                     xhat.noalias() += L.Bx * L.x;              // the state term of the same model
                 if (xhat.size() == L.x.size()) {
-                    const Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
+                    Eigen::VectorXf x_eff = (1.0f - lam) * L.x + lam * xhat;
+                    if (rest_act)
+                        for (int j = 0; j < m; ++j) x_eff[3 * j + 1] *= act_s;
                     y = L.C * x_eff + L.h + cr * L.hr;
                     la_dev_ema_ = (1.0f - kTeleEmaAlpha) * la_dev_ema_
                                 + kTeleEmaAlpha * (x_eff - L.x).norm();

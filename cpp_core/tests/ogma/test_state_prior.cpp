@@ -876,6 +876,30 @@ TEST(StatePrior, ThreeStateRatchetHoldsThroughACaughtStumble) {
         << "sustained real error must decay c fast — the safety re-arm stays";
 }
 
+TEST(StatePrior, ConsolidationRestsTheEfferenceFeedback) {
+    ParamMap base = consol_params(1.0);
+    ParamMap rest = consol_params(1.0);
+    rest["consolidate_rests_act"] = 1.0;
+    Fixture a(base), b(rest);
+    // Identical while unconsolidated (c = 0 → the act view is unscaled).
+    for (uint64_t t = 1; t <= 1000; ++t) {
+        a.run_tick(t, 0.02f); b.run_tick(t, 0.02f);
+        if (t % 250 == 0)
+            for (int j = 0; j < kMotors; ++j)
+                ASSERT_EQ(a.accel(j), b.accel(j)) << "inert before c > 0";
+    }
+    // Consolidate both; the rested arm's command must stop hearing the act
+    // elements while the plain arm keeps its full efference feedback.
+    for (uint64_t t = 1001; t <= 4500; ++t) { a.run_tick(t, 0.02f); b.run_tick(t, 0.02f); }
+    EXPECT_GT(a.m.diag_snapshot()["consolidate_c"].get<float>(), 0.5f);
+    EXPECT_GT(b.m.diag_snapshot()["consolidate_c"].get<float>(), 0.5f);
+    float diff = 0.0f;
+    for (int j = 0; j < kMotors; ++j)
+        diff = std::max(diff, std::fabs(a.accel(j) - b.accel(j)));
+    EXPECT_GT(diff, 1e-5f)
+        << "consolidated: the rested command must differ (its act input is scaled away)";
+}
+
 TEST(StatePrior, HotParamRoundTrip) {
     Fixture f(base_params());
     f.m.on_param_change("state_prior_gain", ParamValue{0.6});

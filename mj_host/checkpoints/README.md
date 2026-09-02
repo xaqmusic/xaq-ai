@@ -16,3 +16,11 @@ and the exact physics state (qpos/qvel).
       --secs <N> --seed 2 --load-brain mj_host/checkpoints/duck_tall_brain_s2.json
   ```
   (No `--ident` flags on resume — the identification is long done.)
+
+- **`duck_controlled_brain_s2.json`** (2026-09-01): THE CONTROLLED STAND.  R12b
+  stack (`a1v2_r12b_controlled.json`), evolved from `duck_tall_brain_s2` through
+  the gain hunt (C norms 40-60 → ~4-10) and full rest at earned stillness
+  (`consolidate_rests_act` 1 + prior resting).  One hour verified: 0.12-0.43
+  mrad/tick joint motion (the pre-fix tall stance ran 12.5), upright 1.00,
+  tall pose 0.07, |u| 0.30, one self-recovered wobble.  Resume with the R12b
+  config; no --ident flags.
