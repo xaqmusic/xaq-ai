@@ -171,7 +171,7 @@ joint: in the first 400 ms the neck pitches 20 to 40 mrad, both hips move about 
 both ankles about 15, in a coordinated pattern. At 3 N the pushes from the side are
 caught and the pushes from front and back go over; the edge is the sagittal one.
 
-![The same 2 N shove, 400 ms after it lands: the previous stance (left) is going over at 20°; the new stance (right) peaked at 3.0° and is back to 1.9°.](figures/microduck_catch_2N.png)
+![The same 2 N shove, 600 ms after it lands: the previous stance (left) is going over at 51°; the new stance (right) peaked at 3.0° and is back to 0.1°.](figures/microduck_catch_2N.png)
 
 The reference for scale is Pollen's trained policy, which catches 3 N and 5 N and is
 knocked over by 10 N. The brain's envelope is now about half of it, up from about a
