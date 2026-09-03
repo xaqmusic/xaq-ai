@@ -45,6 +45,8 @@ build() {
 
 need_host() {
   [[ -x "$HOST" ]] || { echo "host not built — running build first"; build; }
+  [[ -f "$HERE/models/microduck/scaffolds/alpha_walking.onnx" && -f "$HERE/models/microduck/scaffolds/alpha_stand.onnx" ]] \
+    || { echo "fetching the scaffold policies"; "$HERE/scripts/fetch_scaffolds.sh"; }
 }
 
 need_viewer() {

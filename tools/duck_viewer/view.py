@@ -72,7 +72,8 @@ def host_command(extra, mode="--hold"):
 STATUS_LEGEND = ("  ball: green = brain driving, yellow = step hand-off, red = scaffold rescue, grey = no driver"
                  "  |  blue bar: consolidation c  |  orange arrow: a shove")
 DRIVE_RGBA = {"brain": (0.10, 0.90, 0.20, 1.0), "scaffold": (0.95, 0.15, 0.10, 1.0),
-              "step": (1.0, 0.85, 0.10, 1.0)}     # yellow: the walker taking a step for the brain
+              "step": (1.0, 0.85, 0.10, 1.0),     # yellow: the walker taking a step for the brain
+              "walk": (0.20, 0.75, 1.0, 1.0)}     # blue: the walker walking on an intent
 
 
 def draw_status(scn, frame, mujoco, np, reset=True):

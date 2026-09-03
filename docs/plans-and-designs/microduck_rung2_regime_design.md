@@ -877,3 +877,38 @@ exceeds what its catch handles, which is the level-2 reading the design wants, a
 it is a number the brain already publishes rather than a side computation in the harness.  The
 lean rule stays available.  Re-use note for the adaptive form (§5 rule 5): the threshold could
 be learned as a margin over the largest error the brain has survived without help.
+
+### 16.2 Phase 1b — a walk on request: the behaviour hand-off
+
+The same excursion as a step, triggered by an intent (a scripted one for now: `--walk-from S
+--walk-secs S --walk-vx --walk-vy --walk-vyaw`), and driven by the right network.  The stander
+(`alpha_stand`) ignores a twist — the first walks moved the body 0.00 m — so Pollen's walking
+policy is now vendored (`alpha_walking.onnx`, "velstand": walking on velocity commands and fall
+recovery in one network, the same 61-wide observation; provenance in the scaffolds README and
+THIRD_PARTY_NOTICES) and driven as their runtime drives it: actions × 0.9, joint targets
+low-passed 0.7 (legs) / 0.5 (head), the values it was trained with.  It runs on the body it was
+trained on: `scene.xml` includes the all-collisions model the velstand task used.  JSONL drive
+`walk`, events `walk:start` / `walk:end`, a blue ball in the viewer.
+
+**The walker's response, 4 s commands from the R19 stand (world displacement is
+instrumentation; the brain never reads it):**
+
+| command | forward | lateral | yaw | peak tilt | handed back |
+|---|---|---|---|---|---|
+| vx 0.1, 0.2 | 0.00, 0.01 m | — | −2°, −3° | ~1° | yes |
+| vx 0.3 / 0.4 / 0.5 | 0.46 / 0.60 / 0.86 m | −0.09 / −0.21 / −0.21 m | −21° / −30° / −25° | 4.5–5.0° | yes |
+| vx 0.6 (outside its ±0.4) | 1.04 m | −0.39 m | +316° (a spin) | 4.5° | yes |
+| vx −0.3 | 0.00 m | — | −2° | 2.8° | yes |
+| vy 0.2 / 0.3 | 0.00 / 0.05 m | 0.00 / +0.19 m | −4° / −21° | 1.2° / 5.6° | yes |
+| vyaw 1.0 / 1.5 / −1.0 | 0 | 0 | +9° / +174° / −13° | 1.8° / 4.4° / 0.7° | yes |
+
+Every walk handed back upright with no rescue, and the reflex was back at 0.06–0.09 mrad/tick
+within five seconds of handback.  Two properties of the policy to design against: **a
+standing regime** — commands below about 0.25 m/s (0.3 sideways, ~1.2 rad/s turning) are
+"stand still" to it, and it does not walk backward at −0.3 — and **a heading drift** of 5–8°/s
+while walking forward inside its range.  The first bounds the intent vocabulary; the second is
+the reason a level-2 heading prior exists (the doctrine's own "heading regulation" as a loud
+capability).  Trained ranges: vx ±0.4, vy ±0.3, vyaw ±1.0.
+
+**Verdict: WORKING** as a hand-off; a scaffold in the exact sense (a scripted intent driving a
+trained walker), named as such, and the machinery every level-2 intent will use.

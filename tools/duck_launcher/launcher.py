@@ -68,6 +68,7 @@ DEFAULTS = dict(
     checkpoint="duck_pipeline_s2.json", save_brain=False,
     push=0.0, push_every=60.0, push_hold=0.1, push_from=30.0,
     step_lean=0.0, step_twist=0.0, step_twist_s=0.5, step_trigger="att", step_att=0.06,
+    walk_from=-1.0, walk_secs=4.0, walk_vx=0.3, walk_vy=0.0, walk_vyaw=0.0,
     amp=HOST_AMP_DEFAULT, freeze_after=0.0, no_tilt_gate=False, servo_filter=False,
     noise=0.0, stub_amp=0.25, stub_drift=0.08,
 )
@@ -233,6 +234,9 @@ def host_args(s, seed, save_brain_path=None):
         else:
             a += ["--step-lean", fmt(float(s["step_lean"]))]
         a += ["--step-twist", fmt(float(s["step_twist"])), "--step-twist-secs", fmt(float(s["step_twist_s"]))]
+    if mode == "brain" and float(s["walk_from"]) >= 0:
+        a += ["--walk-from", fmt(float(s["walk_from"])), "--walk-secs", fmt(float(s["walk_secs"])),
+              "--walk-vx", fmt(float(s["walk_vx"])), "--walk-vy", fmt(float(s["walk_vy"])), "--walk-vyaw", fmt(float(s["walk_vyaw"]))]
     if s["scene"] and s["scene"] != "scene.xml":
         a += [str(MODEL_DIR / s["scene"])]
     return a
@@ -586,6 +590,14 @@ def build_window():
     ttk.Radiobutton(trow, text="the brain's attitude error >", value="att", variable=V["step_trigger"]).pack(side="left", padx=(4, 0))
     spin(trow, V["step_att"], 0.01, 1, 0.01, width=6).pack(side="left", padx=(2, 8))
     ttk.Radiobutton(trow, text="the harness's lean (above)", value="lean", variable=V["step_trigger"]).pack(side="left")
+    ttk.Separator(fp).grid(column=0, row=11, columnspan=2, sticky="ew", pady=6)
+    ttk.Label(fp, text="Walk on request (brain): at (s)   −1 = none").grid(column=0, row=12, sticky="w")
+    spin(fp, V["walk_from"], -1, 86400, 5).grid(column=1, row=12, sticky="w", padx=4)
+    wrow = ttk.Frame(fp); wrow.grid(column=0, row=13, columnspan=2, sticky="w")
+    for lbl, key, lo, hi in (("for (s)", "walk_secs", 0.5, 60), ("vx", "walk_vx", -0.4, 0.4), ("vy", "walk_vy", -0.3, 0.3), ("vyaw", "walk_vyaw", -1.5, 1.5)):
+        ttk.Label(wrow, text=lbl).pack(side="left", padx=(0, 2)); spin(wrow, V[key], lo, hi, 0.05, width=6).pack(side="left", padx=(0, 8))
+    ttk.Label(fp, text="the walker (alpha_walking, trained ±0.4 / ±0.3 / ±1.0) takes the joints for the walk, then hands back (blue ball); below ~0.25 m/s it stands",
+              foreground="#555", wraplength=380).grid(column=0, row=14, columnspan=2, sticky="w", pady=(4, 0))
     ttk.Label(fp, text="twist (m/s along the lean; 0 = the walker's own stagger, measured best)").grid(column=0, row=7, sticky="w")
     spin(fp, V["step_twist"], -1, 1, 0.05).grid(column=1, row=7, sticky="w", padx=4)
     ttk.Label(fp, text="twist for (s)").grid(column=0, row=8, sticky="w")

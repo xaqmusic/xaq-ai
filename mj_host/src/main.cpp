@@ -42,6 +42,13 @@ using namespace mjhost;
 const std::string kModelDir = MJ_HOST_MODEL_DIR;
 const std::string kDefaultScene  = kModelDir + "/scene.xml";
 const std::string kStandScaffold = kModelDir + "/scaffolds/alpha_stand.onnx";
+// The WALKER: Pollen's alpha_walking.onnx ("velstand" — walking on velocity commands and
+// fall recovery in one network), the same 61-wide observation as the stander.  Driven as
+// their runtime drives it (deploy/robotd.toml): actions scaled by 0.9, joint targets
+// low-passed with blend 0.7 (legs) / 0.5 (head) — the values it was trained with.
+const std::string kWalkScaffold  = kModelDir + "/scaffolds/alpha_walking.onnx";
+constexpr double kWalkingActionScale = 0.9;
+constexpr double kWalkLowpassLegs = 0.7, kWalkLowpassHead = 0.5;
 
 // The standing policy is trained to be applied whole. `robotd` also low-passes the
 // targets (head 0.5, legs 0.7) while microduck_rl trains and rehearses unfiltered;
@@ -332,6 +339,16 @@ struct PushPlan {
 // as for a rescue: nothing the walker does is learned from.  A harness rule, like
 // the fall detector, on the same egocentric projected gravity.  0 disables and
 // the build is byte-identical.
+// A WALK on request (phase 1b): the joints go to the walker with a given twist for a
+// given time, then settle and hand back — the same excursion as a step, triggered by an
+// INTENT (here a scripted one, from the command line; later the level-2 brain's) rather
+// than by the lean.  A scaffold for testing the behaviour hand-off, named as such.
+struct WalkPlan {
+    double from_s = -1.0;      // < 0 disables
+    double secs = 2.0;
+    double vx = 0.2, vy = 0.0, vyaw = 0.0;
+};
+
 struct StepPlan {
     double lean_deg = 0.0;     // 0 disables (the harness's own lean rule)
     double att = 0.0;          // > 0: trigger on the BRAIN's attitude-prior instant error instead
@@ -527,9 +544,13 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
 // and each shove is reported as caught-by-the-brain or rescued-by-the-scaffold.
 int run_with_brain(const std::string& scene, double seconds, uint64_t seed, BrainLike& brain,
                    bool emit, int ident_every = 0, int ident_until = 0,
-                   const PushPlan& pushes = {}, const StepPlan& step = {}) {
+                   const PushPlan& pushes = {}, const StepPlan& step = {},
+                   const WalkPlan& walk = {}) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
+    std::unique_ptr<Policy> walker;          // loaded only if a step or walk can happen
+    std::array<double, kNumPolicyJoints> walk_targets{};   // the walker's low-passed targets
+    std::array<float, kActionLen> walk_last_action{};
     Recovery recovery;
 
     body.reset("STAND", 0.0, seed);
@@ -562,8 +583,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     int step_left = 0, step_confirm = 0;
     int steps_started = 0, steps_ended = 0, steps_rescued = 0;
     double last_lean = 0.0;
-    std::array<double, 2> step_dir{0.0, 0.0};
-    bool stepping = false;
+    std::array<double, 3> step_twist{0.0, 0.0, 0.0};   // the twist commanded during the excursion
+    int step_twist_left = 0;                            // ticks of twist remaining in it
+    bool stepping = false, walking = false;
+    int walks_started = 0, walks_ended = 0, walks_rescued = 0;
+    const int walk_tick = walk.from_s >= 0.0 ? int(walk.from_s * kBrainHz) : -1;
     const char* step_event = "";
 
     std::vector<double> tilt_trace;
@@ -617,7 +641,22 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         // a step ends the step (counted below).
         stepping = false;
         step_event = "";
-        if ((step.lean_deg > 0.0 || step.att > 0.0) && driver == Driver::Brain) {
+        if (!walker && (walk_tick >= 0 || step.lean_deg > 0.0 || step.att > 0.0))
+            walker = std::make_unique<Policy>(kWalkScaffold);
+        // A walk on request starts an excursion exactly like a step, with its own twist.
+        if (walk_tick >= 0 && t == walk_tick && driver == Driver::Brain && step_left == 0) {
+            step_twist = {walk.vx, walk.vy, walk.vyaw};
+            step_twist_left = std::max(1, int(walk.secs * kBrainHz));
+            step_left = step_twist_left + step_settle_ticks;
+            walking = true;
+            walk_targets = body.joint_positions();
+            walk_last_action.fill(0.0f);
+            brain.set_learning(false);
+            brain.on_reset();
+            step_event = "walk:start";
+            ++walks_started;
+        }
+        if ((step.lean_deg > 0.0 || step.att > 0.0 || step_left > 0) && driver == Driver::Brain) {
             const auto g = body.gravity();
             // The signal: the brain's own attitude error when asked for (max over its
             // MotorEPMs), else the harness's lean in degrees.  One threshold each.
@@ -636,7 +675,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                                    && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
                 const bool twisting = step_left > step_settle_ticks;
                 if (twisting) {
-                    command.twist = {step.twist * step_dir[0], step.twist * step_dir[1], 0.0};
+                    command.twist = step_twist;
                     driver = Driver::Scaffold;
                     stepping = true;
                 } else if (still || step_left == 0) {
@@ -645,23 +684,26 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                     brain.on_reset();
                     if (!frozen_forever) brain.set_learning(true);
                     last_action.fill(0.0f);
-                    step_event = "step:end";
-                    ++steps_ended;
+                    step_event = walking ? "walk:end" : "step:end";
+                    if (walking) ++walks_ended; else ++steps_ended;
+                    walking = false;
                 } else {
                     command.twist = {0.0, 0.0, 0.0};
                     driver = Driver::Scaffold;
                     stepping = true;
                 }
-            } else {
+            } else if (step.lean_deg > 0.0 || step.att > 0.0) {
                 if (lean > thresh && lean > last_lean) ++step_confirm; else step_confirm = 0;
                 if (step_confirm >= step.confirm_ticks) {
                     step_confirm = 0;
                     const double n = std::hypot(g[0], g[1]);
-                    step_dir = {g[0] / n, g[1] / n};
+                    step_twist = {step.twist * g[0] / n, step.twist * g[1] / n, 0.0};
                     step_left = step_twist_ticks + step_settle_ticks;
+                    walk_targets = body.joint_positions();
+                    walk_last_action.fill(0.0f);
                     brain.set_learning(false);
                     brain.on_reset();
-                    command.twist = {step.twist * step_dir[0], step.twist * step_dir[1], 0.0};
+                    command.twist = step_twist;
                     driver = Driver::Scaffold;
                     stepping = true;
                     step_event = "step:start";
@@ -674,10 +716,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         // Both edges: tell the brain, and stop or start its learning. Freeze BEFORE
         // the scaffold ever acts, resume only once the body is back.
         if (recovery.handed_off_this_tick()) {
-            if (step_left > 0) {              // the step did not save it
+            if (step_left > 0) {              // the excursion ended in a fall
                 step_left = 0;
                 command.twist = {0.0, 0.0, 0.0};
-                ++steps_rescued;
+                if (walking) ++walks_rescued; else ++steps_rescued;
+                walking = false;
             }
             brain.set_learning(false);
             brain.on_reset();
@@ -720,7 +763,17 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         }
 
         std::array<double, kNumPolicyJoints> ctrl{};
-        if (driver == Driver::Scaffold) {
+        if (stepping && walker) {
+            // The walker, as their runtime runs it: 0.9 scale, low-passed targets.
+            const auto action = walker->infer(build_observation(body, walk_last_action, command));
+            walk_last_action = action;
+            for (int i = 0; i < kNumPolicyJoints; ++i) {
+                const double target = kHomePose[i] + kWalkingActionScale * action[i];
+                const double a = (i >= 5 && i <= 8) ? kWalkLowpassHead : kWalkLowpassLegs;
+                walk_targets[i] += a * (target - walk_targets[i]);
+                ctrl[i] = walk_targets[i];
+            }
+        } else if (driver == Driver::Scaffold) {
             const auto action = scaffold.infer(build_observation(body, last_action, command));
             last_action = action;
             for (int i = 0; i < kNumPolicyJoints; ++i)
@@ -745,7 +798,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             std::printf(",\"drive\":\"%s\",\"u\":%.4f,"
                         "\"rg\":%d,\"rtle\":%.3f,"
                         "\"learning\":%s,\"event\":\"%s\",",
-                        stepping ? "step" : driver_name(driver), brain.last_cmd_mag(),
+                        stepping ? (walking ? "walk" : "step") : driver_name(driver), brain.last_cmd_mag(),
                         brain.regime_id(), brain.regime_tle(),
                         learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
@@ -814,6 +867,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         std::fprintf(stderr, " (twist %.2f m/s for %.1f s): %d steps started, "
                              "%d handed back upright, %d rescued mid-step\n",
                      step.twist, step.twist_s, steps_started, steps_ended, steps_rescued);
+    }
+    if (walk.from_s >= 0.0) {
+        std::fprintf(stderr, "  walk on request at %.1f s (vx %.2f vy %.2f vyaw %.2f for %.1f s): %d started, "
+                             "%d handed back upright, %d rescued mid-walk\n",
+                     walk.from_s, walk.vx, walk.vy, walk.vyaw, walk.secs, walks_started, walks_ended, walks_rescued);
     }
     if (pushes.newtons > 0.0) {
         RunResult r = analyse(tilt_trace, shove_ticks);
@@ -1033,7 +1091,7 @@ int cmd_probe(const std::string& scene, double seconds, uint64_t seed) {
 
 int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
               double amplitude, bool emit, int ident_every = 0, int ident_until = 0,
-              const PushPlan& pushes = {}, const StepPlan& step = {}) {
+              const PushPlan& pushes = {}, const StepPlan& step = {}, const WalkPlan& walk = {}) {
     DuckBody probe(scene);   // for the joint ranges the adapter reads by name
 
     // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
@@ -1086,7 +1144,7 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     std::fprintf(stderr, "\n");
 
     const int rc = run_with_brain(scene, seconds, seed, brain, emit, ident_every, ident_until,
-                                  pushes, step);
+                                  pushes, step, walk);
     std::fprintf(stderr, "  mean |action| %.4f over %llu brain ticks\n", brain.mean_abs_action(),
                  (unsigned long long)brain.ticks());
     for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
@@ -1125,6 +1183,7 @@ void usage() {
         "                      [--load-brain F] [--save-brain F]\n"
         "                      [--push N] [--push-every S] [--push-hold S] [--push-from S]\n"
         "                      [--step-lean DEG | --step-att E] [--step-twist V] [--step-twist-secs S]\n"
+        "                      [--walk-from S --walk-secs S --walk-vx V --walk-vy V --walk-vyaw W]\n"
         "      Phase A1: an OgmaInstance driving the joints, inside the same harness.\n"
         "      --step-lean hands the joints to the walker when the brain's lean exceeds DEG\n"
         "      and is still rising (a step along the lean at V m/s for S s, then settle and\n"
@@ -1149,6 +1208,7 @@ int main(int argc, char** argv) {
     uint64_t seed = 0;
     PushPlan pushes;
     StepPlan step;
+    WalkPlan walk;
     double stub_amp = 0.25, stub_drift = 0.08;
     int ident_every = 0, ident_until = 0;
     (void)0;
@@ -1196,6 +1256,16 @@ int main(int argc, char** argv) {
             step.lean_deg = std::stod(next("--step-lean"));
         } else if (a == "--step-att") {
             step.att = std::stod(next("--step-att"));
+        } else if (a == "--walk-from") {
+            walk.from_s = std::stod(next("--walk-from"));
+        } else if (a == "--walk-secs") {
+            walk.secs = std::stod(next("--walk-secs"));
+        } else if (a == "--walk-vx") {
+            walk.vx = std::stod(next("--walk-vx"));
+        } else if (a == "--walk-vy") {
+            walk.vy = std::stod(next("--walk-vy"));
+        } else if (a == "--walk-vyaw") {
+            walk.vyaw = std::stod(next("--walk-vyaw"));
         } else if (a == "--step-twist") {
             step.twist = std::stod(next("--step-twist"));
         } else if (a == "--step-twist-secs") {
@@ -1236,7 +1306,7 @@ int main(int argc, char** argv) {
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
         if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
         if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true,
-                                                ident_every, ident_until, pushes, step);
+                                                ident_every, ident_until, pushes, step, walk);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

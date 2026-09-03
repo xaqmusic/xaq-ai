@@ -12,7 +12,8 @@
       "push": 0,
       "save_brain": false,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -31,7 +32,8 @@
       "save_brain": true,
       "battery": false,
       "seeds": "1-6",
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -47,7 +49,8 @@
       "push": 0,
       "save_brain": true,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -63,7 +66,8 @@
       "push": 0,
       "save_brain": true,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -82,7 +86,8 @@
       "push_from": 30,
       "save_brain": false,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -101,7 +106,8 @@
       "push_from": 30,
       "save_brain": false,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -119,7 +125,8 @@
       "push": 0,
       "save_brain": false,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -166,7 +173,8 @@
       "save_brain": true,
       "battery": false,
       "seeds": "1-6",
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -185,7 +193,8 @@
       "push_from": 10,
       "save_brain": false,
       "battery": false,
-      "step_lean": 0
+      "step_lean": 0,
+      "walk_from": -1
     }
   },
   {
@@ -208,7 +217,31 @@
       "save_brain": false,
       "battery": false,
       "step_trigger": "att",
-      "step_att": 0.06
+      "step_att": 0.06,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "★ STACK · a walk on request — 4 s forward at 0.3 m/s, then back to the reflex (watch)",
+    "hint": "Phase 1b of the intent boundary: at 10 s the joints go to Pollen's walking policy with a forward command (blue ball), it walks ~0.5 m, settles, and hands back to the brain, which is quiet again within seconds. Change vx/vy/vyaw to steer; the policy stands still below ~0.25 m/s.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 40,
+      "output": "watch",
+      "push": 0,
+      "step_lean": 6.5,
+      "step_trigger": "att",
+      "step_att": 0.06,
+      "walk_from": 10,
+      "walk_secs": 4,
+      "walk_vx": 0.3,
+      "walk_vy": 0,
+      "walk_vyaw": 0,
+      "save_brain": false,
+      "battery": false
     }
   }
 ]

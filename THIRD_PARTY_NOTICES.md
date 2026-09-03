@@ -53,6 +53,7 @@ Vendored, unmodified, under `mj_host/models/microduck/`:
 |---|---|---|
 | Microduck MJCF model — 4 scene/robot XML files and 38 STL meshes | Apache-2.0 | https://github.com/pollen-robotics/microduck_rl at commit `d424a0c`, path `src/mjlab_microduck/robot/microduck/` |
 | `scaffolds/alpha_stand.onnx` — the trained standing policy, used as a prop | Apache-2.0 | https://github.com/pollen-robotics/microduck at commit `590b986`, path `policies/alpha_stand.onnx` |
+| `scaffolds/alpha_walking.onnx` — the trained walking policy, used as the intent boundary's walker | Apache-2.0 | https://github.com/pollen-robotics/microduck at commit `3954496`, path `policies/alpha_walking.onnx` |
 
 The robot, its model and its policies are Pollen Robotics'
 ([`microduck`](https://github.com/pollen-robotics/microduck),

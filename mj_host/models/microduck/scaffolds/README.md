@@ -10,7 +10,11 @@ somebody reading the word "scaffolds" in the path first.
 
 | File | Provenance | Used by |
 |---|---|---|
-| `alpha_stand.onnx` | [`pollen-robotics/microduck`](https://github.com/pollen-robotics/microduck) at `590b986`, `policies/alpha_stand.onnx`, SHA-256 `15692687…` | phase S1 — holding the pose |
+| `alpha_stand.onnx` | [`pollen-robotics/microduck`](https://github.com/pollen-robotics/microduck) at `590b986`, `policies/alpha_stand.onnx`, SHA-256 `15692687…` | phase S1 — holding the pose; the rescue driver |
+| `alpha_walking.onnx` | the same repository at `3954496`, `policies/alpha_walking.onnx` ("velstand": walking on velocity commands and fall recovery in one network), SHA-256 `e36332d3…` | the intent boundary's walker — steps and walks on request, driven as their runtime drives it (0.9 action scale, 0.7/0.5 target low-pass) |
+
+Neither file is tracked in git (`*.onnx` is ignored); `mj_host/scripts/fetch_scaffolds.sh` fetches both
+by pinned commit and checks the hashes, and `run.sh` calls it when one is missing.
 
 Apache-2.0, as is this repository. Attribution is in
 [`THIRD_PARTY_NOTICES.md`](../../../THIRD_PARTY_NOTICES.md).
