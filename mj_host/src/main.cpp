@@ -31,6 +31,7 @@
 #include "DuckBody.hpp"
 #include "Observation.hpp"
 #include "Odometry.hpp"
+#include "IntentAdapter.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
 #include "OgmaBrainAdapter.hpp"
@@ -1167,6 +1168,166 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     return rc;
 }
 
+// ---------------------------------------------------------------------------
+// --level2  (the intent boundary, phase 1e): the brain one level up.  The walker
+// drives the joints throughout, the level-2 brain commands its twist and senses
+// the body's own velocity (contact odometry + gyro); the rescue harness stands it
+// up after a fall exactly as for the joint-level brain, with the level-2 learning
+// frozen and its pairing invalidated at both edges.  Identification first: the
+// gate is the sign and dominance of the identified A's velocity rows per command.
+// ---------------------------------------------------------------------------
+
+int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
+               bool emit) {
+    DuckBody body(scene);
+    Policy scaffold(kStandScaffold);
+    Policy walker(kWalkScaffold);
+    Recovery recovery;
+    IntentAdapter brain(graph, seed);
+    Odometry odom;
+
+    body.reset("STAND", 0.0, seed);
+    std::fprintf(stderr, "level-2 graph %s\n", graph.c_str());
+
+    std::array<float, kActionLen> scaffold_last{}, walker_last{};
+    std::array<double, kNumPolicyJoints> walk_targets = body.joint_positions();
+    Command command{};
+    const double dt = 1.0 / kBrainHz;
+    const int ticks = int(seconds * kBrainHz);
+
+    // The body's own velocity: odometry differenced in the world-of-boot frame and
+    // rotated into the body frame by the odometry's own yaw; the yaw rate from the
+    // gyro.  Both smoothed over ~10 ticks — contact odometry steps at anchor switches.
+    std::array<double, 3> prev_odom{}; bool have_prev = false;
+    std::array<double, 3> vel_body{};
+    constexpr double kVelEma = 0.1;
+    int frozen_ticks = 0;
+
+    for (int t = 0; t < ticks; ++t) {
+        Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
+        if (recovery.handed_off_this_tick()) {
+            brain.set_learning(false);
+            brain.on_reset();
+            command.twist = {0.0, 0.0, 0.0};
+        } else if (recovery.handed_back_this_tick()) {
+            brain.on_reset();
+            brain.set_learning(true);
+            walker_last.fill(0.0f);
+            walk_targets = body.joint_positions();
+        }
+        const bool learning_now = (driver == Driver::Brain);
+        if (!learning_now) ++frozen_ticks;
+
+        // The level-2 brain ticks every host tick (it observes the rescue too, frozen).
+        const auto g = body.gravity();
+        const auto w = body.gyro();
+        const auto a = body.accel();
+        const auto twist = brain.tick(vel_body, g, w, a);
+        if (driver == Driver::Brain) command.twist = twist;
+
+        std::array<double, kNumPolicyJoints> ctrl{};
+        if (driver == Driver::Scaffold) {
+            const auto action = scaffold.infer(build_observation(body, scaffold_last, Command{}));
+            scaffold_last = action;
+            for (int i = 0; i < kNumPolicyJoints; ++i)
+                ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+        } else {
+            const auto action = walker.infer(build_observation(body, walker_last, command));
+            walker_last = action;
+            for (int i = 0; i < kNumPolicyJoints; ++i) {
+                const double target = kHomePose[i] + kWalkingActionScale * action[i];
+                const double alpha = (i >= 5 && i <= 8) ? kWalkLowpassHead : kWalkLowpassLegs;
+                walk_targets[i] += alpha * (target - walk_targets[i]);
+                ctrl[i] = walk_targets[i];
+            }
+        }
+        body.step(ctrl);
+
+        {
+            std::array<SitePose, 2> feet;
+            body.site_pose_trunk("left_foot", feet[0].pos, feet[0].quat);
+            body.site_pose_trunk("right_foot", feet[1].pos, feet[1].quat);
+            odom.update(feet, body.imu_quat());
+            const auto p = odom.position();
+            const double yaw = odom.yaw();
+            if (have_prev) {
+                const double vx_w = (p[0] - prev_odom[0]) * kBrainHz, vy_w = (p[1] - prev_odom[1]) * kBrainHz;
+                const double c = std::cos(yaw), s = std::sin(yaw);
+                const double vx_b = c * vx_w + s * vy_w, vy_b = -s * vx_w + c * vy_w;
+                vel_body[0] += kVelEma * (vx_b - vel_body[0]);
+                vel_body[1] += kVelEma * (vy_b - vel_body[1]);
+            }
+            vel_body[2] += kVelEma * (w[2] - vel_body[2]);
+            prev_odom = {p[0], p[1], yaw};
+            have_prev = true;
+        }
+
+        if (emit) {
+            const auto p = body.trunk_position();
+            const auto op = odom.position();
+            const auto sensed = brain.last_sensed();
+            std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
+                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\","
+                        "\"twist\":[%.3f,%.3f,%.3f],\"sensed\":[%.3f,%.3f,%.3f],"
+                        "\"learning\":%s,\"event\":\"%s\",\"odom\":[%.4f,%.4f,%.4f],\"q\":[",
+                        body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
+                        driver == Driver::Brain ? "walk" : "scaffold",
+                        command.twist[0], command.twist[1], command.twist[2],
+                        sensed[0], sensed[1], sensed[2],
+                        learning_now ? "true" : "false",
+                        recovery.handed_off_this_tick()    ? "reset:handoff"
+                        : recovery.handed_back_this_tick() ? "reset:handback" : "",
+                        op[0], op[1], odom.yaw());
+            const auto q = body.joint_positions();
+            for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
+            std::printf("],\"qpos\":[");
+            const auto full = body.qpos();
+            for (size_t i = 0; i < full.size(); ++i) std::printf("%s%.6f", i ? "," : "", full[i]);
+            std::printf("]}\n");
+        }
+    }
+
+    if (!g_save_brain.empty()) {
+        nlohmann::json snap;
+        snap["graph"] = brain.brain_state();
+        snap["qpos"]  = body.qpos();
+        snap["qvel"]  = body.qvel();
+        std::ofstream out(g_save_brain);
+        out << snap;
+        std::fprintf(stderr, "level-2 brain+body snapshot -> %s\n", g_save_brain.c_str());
+    }
+
+    // The gate: the identified A's velocity rows against the commands.  The bridge
+    // lays the intent module's state out as [pos, act, delta] per motor, so row 3i
+    // is the sensed velocity of axis i; column j is command j.  Column-major, as the
+    // snapshot stores it.
+    {
+        const auto snap = brain.brain_state();
+        const auto& mods = snap.at("modules");
+        for (auto it = mods.begin(); it != mods.end(); ++it) {
+            if (!it.value().contains("legs")) continue;
+            const auto& leg = it.value().at("legs").at(0);
+            const int rows = leg.at("rows_A").get<int>(), cols = leg.at("cols_A").get<int>();
+            const auto A = leg.at("A").get<std::vector<double>>();
+            if (rows < 9 || cols != 3) continue;
+            std::fprintf(stderr, "  identified A of %s (sensed velocity row i vs command j; want a positive, "
+                                 "dominant diagonal):\n", it.key().c_str());
+            static const char* const kAxes[3] = {"vx  ", "vy  ", "vyaw"};
+            for (int i = 0; i < 3; ++i) {
+                std::fprintf(stderr, "    %s :", kAxes[i]);
+                for (int j = 0; j < 3; ++j) std::fprintf(stderr, " %+.4f", A[size_t(3 * i) + size_t(rows) * size_t(j)]);
+                std::fprintf(stderr, "\n");
+            }
+        }
+    }
+    const double total = recovery.brain_seconds() + recovery.scaffold_seconds();
+    std::fprintf(stderr, "level-2 %.0f s — %d rescues, %.0f%% of the run walker-driven; learning frozen %.0f%%\n",
+                 seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / std::max(total, 1e-9),
+                 100.0 * frozen_ticks / ticks);
+    for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
+    return 0;
+}
+
 void usage() {
     std::printf(
         "ogma_mjhost — the Microduck MuJoCo host\n"
@@ -1189,6 +1350,11 @@ void usage() {
         "                     [--stub-amp R] [--stub-drift R]\n"
         "      A brain that falls over, the scaffold that picks it up, and the\n"
         "      hand-off between them. Tests the RECOVERY HARNESS, not the substrate.\n"
+        "\n"
+        "  ogma_mjhost --level2 [scene.xml] --graph L2.json [--secs S] [--seed N] [--save-brain F]\n"
+        "      The brain one level up: the walker drives, the level-2 graph commands its\n"
+        "      twist and senses the body's own velocity (contact odometry + gyro).  Prints\n"
+        "      the identified A's velocity rows against the commands at the end.\n"
         "\n"
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
@@ -1233,7 +1399,7 @@ int main(int argc, char** argv) {
             return argv[++i];
         };
         if (a == "--load-only" || a == "--hold" || a == "--gate-g2" || a == "--stub" ||
-            a == "--brain" || a == "--probe") {
+            a == "--brain" || a == "--probe" || a == "--level2") {
             mode = a;
         } else if (a == "--secs") {
             seconds = std::stod(next("--secs"));
@@ -1319,6 +1485,7 @@ int main(int argc, char** argv) {
         if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true,
                                                 ident_every, ident_until, pushes, step, walk);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
+        if (mode == "--level2") return cmd_level2(scene, graph, seconds, seed, true);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

@@ -187,7 +187,7 @@ def fmt(x):
 
 def run_name(s, seed):
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    stem = Path(s["config"]).stem if s["mode"] == "brain" else s["mode"]
+    stem = Path(s["config"]).stem if s["mode"] in ("brain", "level2") else s["mode"]
     name = f"{stamp}_{stem}_s{seed}"
     if float(s["push"]) > 0:
         name += f"_push{fmt(float(s['push']))}"
@@ -198,7 +198,7 @@ def host_args(s, seed, save_brain_path=None):
     """argv after the binary: mode flag first, the scene last."""
     mode = s["mode"]
     a = [f"--{mode}"]
-    if mode == "brain":
+    if mode in ("brain", "level2"):
         a += ["--graph", str(CONFIG_DIR / s["config"])]
     a += ["--secs", fmt(float(s["secs"])), "--seed", str(int(seed))]
     if mode == "brain":
@@ -237,6 +237,8 @@ def host_args(s, seed, save_brain_path=None):
     if mode == "brain" and float(s["walk_from"]) >= 0:
         a += ["--walk-from", fmt(float(s["walk_from"])), "--walk-secs", fmt(float(s["walk_secs"])),
               "--walk-vx", fmt(float(s["walk_vx"])), "--walk-vy", fmt(float(s["walk_vy"])), "--walk-vyaw", fmt(float(s["walk_vyaw"]))]
+    if mode == "level2" and save_brain_path:
+        a += ["--save-brain", str(save_brain_path)]
     if s["scene"] and s["scene"] != "scene.xml":
         a += [str(MODEL_DIR / s["scene"])]
     return a
@@ -247,7 +249,7 @@ def plan(s, seed, name=None):
     name = name or run_name(s, seed)
     jsonl = RUNS_DIR / f"{name}.jsonl"
     err = RUNS_DIR / f"{name}.err"
-    brain = RUNS_DIR / f"{name}.brain.json" if (s["mode"] == "brain" and s["save_brain"]) else None
+    brain = RUNS_DIR / f"{name}.brain.json" if (s["mode"] in ("brain", "level2") and s["save_brain"]) else None
     args = host_args(s, seed, brain)
     host_cmd = [str(HOST)] + args
     watch_cmd = [str(VIEWER_PY), str(VIEWER), "live", "--save", str(jsonl),
@@ -261,7 +263,7 @@ def shell_line(p):
     rel = lambda x: os.path.relpath(x, REPO)
     host = " ".join(shlex.quote(rel(x) if x.startswith(str(REPO)) else x) for x in p["host_cmd"])
     if p["watch"]:
-        sub = {"--brain": "brain", "--hold": "watch", "--stub": "stub"}[p["host_cmd"][1]]
+        sub = {"--brain": "brain", "--hold": "watch", "--stub": "stub", "--level2": "level2"}[p["host_cmd"][1]]
         return f"./mj_host/run.sh {sub} {host.split(' ', 2)[2]}"
     return f"{host} 2> {rel(p['err'])} | grep '^{{' > {rel(p['jsonl'])}"
 
@@ -502,7 +504,7 @@ def build_window():
     fr = frame("Run", 0, 1)
     ttk.Label(fr, text="Mode").grid(column=0, row=0, sticky="w")
     mrow = ttk.Frame(fr); mrow.grid(column=1, row=0, columnspan=3, sticky="w")
-    for txt, val in (("brain (ogma)", "brain"), ("scaffold hold", "hold"), ("stub", "stub")):
+    for txt, val in (("brain (ogma)", "brain"), ("level-2 (intent)", "level2"), ("scaffold hold", "hold"), ("stub", "stub")):
         ttk.Radiobutton(mrow, text=txt, value=val, variable=V["mode"]).pack(side="left", padx=(0, 8))
 
     ttk.Label(fr, text="Seed").grid(column=0, row=1, sticky="w")

@@ -243,5 +243,22 @@
       "save_brain": false,
       "battery": false
     }
+  },
+  {
+    "name": "R20 · level-2 identification — twist babble at the walker (700 s, headless, saves the brain)",
+    "series": 20,
+    "hint": "Phase 1e of the intent boundary: the same module one level up. Motors = the three twist commands to Pollen's walker, senses = the body's own velocity from contact odometry and the gyro. Held 1.5 s twist pulses, one axis at a time. The host prints the identified A at the end: a positive, dominant diagonal is the gate (passed: 0.0083 / 0.0040 / 0.0090).",
+    "state": {
+      "config": "a1v2_l2_ident.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 700,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
   }
 ]

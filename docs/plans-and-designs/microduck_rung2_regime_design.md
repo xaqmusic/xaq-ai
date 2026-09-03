@@ -942,3 +942,45 @@ which is the one difference between this estimate and the robot's).  Per-tick ve
 is the same computation the robot publishes.  Also on the way: the vendored policies are
 no longer in git (`*.onnx` is ignored) — `mj_host/scripts/fetch_scaffolds.sh` fetches both by
 pinned commit and hash, and `run.sh` calls it when one is missing.
+
+### 16.4 Phase 1e — the brain one level up: identification at the intent boundary
+
+`--level2 --graph a1v2_l2_ident.json` (R20).  The same module code as the joint-level brain
+with the blanket drawn one layer out: a sensorimotor bridge and one MotorEPMv2 whose three
+"motors" are the twist commands to Pollen's walker (vx, vy, vyaw, in the walker's trained
+units 0.4 / 0.3 / 1.0) and whose "senses" are the body's own velocity — contact odometry
+differenced and rotated into the body frame by the odometry's own yaw, the yaw rate from
+the gyro, both smoothed over ten ticks — plus the 12-slot attitude/rate/accel sense as load
+slots.  The walker drives the joints throughout; the rescue harness stands the body up after
+a fall with the level-2 learning frozen and its pairing invalidated at both edges, exactly as
+at the joints (`IntentAdapter`).  Identification by the same structured babble: held twist
+pulses, one axis at a time, alternating sign — 75 ticks (1.5 s) at 0.8 of the range.  No
+prior, no controller learning: the gate is the identified A.
+
+**The gate — the identified A, sensed-velocity row against command column (positive,
+dominant diagonal wanted), seed 2, 700 s, 0 rescues in every run:**
+
+| babble | vx row | vy row | vyaw row | verdict |
+|---|---|---|---|---|
+| hold 75, scale 0.8 (R20) | **+0.0083** +0.0034 +0.0000 | −0.0011 **+0.0040** −0.0002 | +0.0039 −0.0013 **+0.0090** | pass |
+| hold 50, scale 0.8 | **+0.0126** +0.0051 +0.0000 | +0.0009 **+0.0050** +0.0018 | +0.0062 −0.0007 **+0.0137** | pass |
+| hold 100, scale 0.8 | **+0.0063** +0.0026 +0.0001 | +0.0026 **+0.0047** +0.0017 | +0.0035 −0.0009 **+0.0084** | pass |
+| hold 75, scale 1.0 | **+0.0083** +0.0033 +0.0000 | −0.0002 **+0.0037** +0.0017 | +0.0043 −0.0015 **+0.0091** | pass |
+| hold 75, scale 0.6 | **+0.0078** +0.0033 −0.0000 | −0.0086 **−0.0055** −0.0072 | +0.0098 +0.0029 **+0.0123** | **vy fails** |
+
+The one failure is the rule from §14 one level up: at 0.6 of range the lateral pulse is
+0.18 m/s, inside the walker's standing regime (§16.2), so the sideways pulses move nothing
+and the row is identified from drift.  Identify where the actuator answers.  The off-diagonal
+terms that survive are physics, not noise: a forward command yaws the body (+0.0039, the
+heading drift of §16.2) and a sideways command moves it forward a little.
+
+**The senses are honest**: sensed versus true body velocity differ by 0.012 m/s on average over
+35 000 ticks; during forward pulses true vx +0.110, sensed +0.106; backward pulses walk at
+−0.099 (the walker does walk backward at −0.32 m/s, which the 4 s command of §16.2 at −0.30
+did not show); sideways +0.036 / −0.029; turning ±0.33 rad/s; at zero command all zero.
+
+**Verdict: WORKING** — the level-2 blanket is closed, egocentric, and identifies.  The
+design doc's phase 1 gate ("the identified move → odometry rows agree with dead-reckoned
+ground truth in sign, per axis") is met.  What follows is the first level-2 *control*: a
+prior on this surface — forward speed and zero yaw rate, "I predict I am walking straight" —
+learned through the identified A, judged against the walker's own 5–8°/s drift.

@@ -88,6 +88,14 @@ case "${1:-}" in
     "$VENV" "$VIEW" live --save "$run" --host-mode=--brain -- "$@"
     ;;
 
+  level2)
+    shift
+    need_host; need_viewer
+    mkdir -p "$LOGDIR"
+    run="$LOGDIR/level2-$(date +%Y%m%d-%H%M%S).jsonl"
+    "$VENV" "$VIEW" live --save "$run" --host-mode=--level2 -- "$@"
+    ;;
+
   stub)
     shift
     need_host; need_viewer
