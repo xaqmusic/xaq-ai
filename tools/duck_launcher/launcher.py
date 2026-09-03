@@ -116,6 +116,8 @@ def preset_key(p):
         return (0, 0, name)
     if name.startswith("PROBE"):
         return (1, 0, name)
+    if name.startswith("PIPELINE"):
+        return (1, 1, name)
     return (2, p.get("series", 0), name)
 
 

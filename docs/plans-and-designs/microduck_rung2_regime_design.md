@@ -780,3 +780,24 @@ only to 0.90 (the R13 tax) and is re-earned in 19 s.  Checkpoint `duck_r19_s2.js
   at the noise floor); the fore-aft 3 N limit and whether the head's identified pitch
   authority (cosine 0.51, still the weakest) is what bounds it.  Promotion to `★` is the
   operator's eye (a preset shoves the checkpoint live).
+
+### 14.7 Addendum, the operator's eye (2026-09-03) — the deployed servo filter, and sustained pushes
+
+The operator watched R19 from scratch and then shoved the resumed stand with long, gentle
+pushes, and saw the body adjust *during* the push: "balancing has been maximized up to the
+point of the robot needing to take a step".  Two measurements to put numbers on that, both
+on `duck_r19_s2`:
+
+- **The deployed servo filter (`--servo-filter`, robotd's lag) no longer matters.**  Ten
+  minutes resumed under it: 0 falls, 0.021 mrad/tick, pose 0.036.  Envelope under it: 6/6
+  at 1 N, 6/6 at 2 N, 1/6 at 3 N — the same as without.  The §10 result ("the consolidated
+  loop cannot run through phase lag it never learned", 80 falls in 5 min) was about the old
+  stance; R19's catch is slow enough to be indifferent to the lag.  Sim-to-real relevant.
+- **Sustained pushes, 2 s holds every 6 s, 44–48 per run:** 0.8 N caught 46/48 with the
+  filter and 43/48 without (peak lean 1.6–2.8°, held against the push); 1.5 N caught 5/44;
+  2.5 N 0/44.  The limit is the angle the feet can hold, not the impulse — 0.8 N × 2 s is
+  1.6 N·s and is caught, where 3 N × 0.1 s (0.3 N·s) goes over half the time.  Past that
+  angle the only recovery is a step, which this brain does not have.
+
+R19 is promoted: `★ STACK` in the launcher, the old R13 → R11 → R12c chain relabelled
+`PIPELINE (old lineage)`.

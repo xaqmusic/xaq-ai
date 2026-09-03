@@ -1,12 +1,12 @@
 [
   {
-    "name": "★ STACK · the controlled stand — resume the from-scratch checkpoint (watch)",
-    "hint": "R12c on duck_pipeline_s2: tall, still (~0.1 mrad/tick), zero falls. What the brain does when nothing happens to it.",
+    "name": "★ STACK · the R19 stand, resumed and left alone (watch)",
+    "hint": "duck_r19_s2 under R19: tall, still (0.02 mrad/tick), zero falls, with or without the deployed servo filter.",
     "state": {
-      "config": "a1v2_r12c_whole.json",
+      "config": "a1v2_r19_settle_each.json",
       "mode": "brain",
       "start": "checkpoint",
-      "checkpoint": "duck_pipeline_s2.json",
+      "checkpoint": "duck_r19_s2.json",
       "secs": 600,
       "output": "watch",
       "push": 0,
@@ -15,7 +15,7 @@
     }
   },
   {
-    "name": "★ PIPELINE 1/3 · find from scratch (R13, 2 h, headless, saves the brain)",
+    "name": "PIPELINE (old lineage) 1/3 · find from scratch (R13, 2 h) — 1/6 seeds; the record of the pre-R19 path",
     "hint": "Design doc §12.3/§12.6. Seed 2 stands by ~30 min (falls 8 → 3 → 1 → 0/min); other seeds fall-cycle. Tick 'battery' with seeds 1-6 for the race. ≈ 380 MB of JSONL.",
     "state": {
       "config": "a1v2_r13_tax001.json",
@@ -33,7 +33,7 @@
     }
   },
   {
-    "name": "★ PIPELINE 2/3 · gain hunt (R11, 30 min, from the latest saved brain)",
+    "name": "PIPELINE (old lineage) 2/3 · gain hunt (R11, 30 min, from the latest saved brain)",
     "hint": "Resume the find brain under R11: C norms shed, no falls, oscillation 12 → 11 mrad. Load-bearing — handing the find brain straight to R12c fails (§12.6).",
     "state": {
       "config": "a1v2_r11_hunt.json",
@@ -48,7 +48,7 @@
     }
   },
   {
-    "name": "★ PIPELINE 3/3 · rest (R12c, 30 min, from the latest saved brain)",
+    "name": "PIPELINE (old lineage) 3/3 · rest (R12c, 30 min, from the latest saved brain)",
     "hint": "Resume the hunted brain under R12c: the efference rests at earned stillness, |dq| 11 → 0.1 mrad/tick, c 1.00. Watch it to see the oscillation stop.",
     "state": {
       "config": "a1v2_r12c_whole.json",
@@ -63,16 +63,16 @@
     }
   },
   {
-    "name": "PROBE · push test — 2 N shoves on the controlled stand every 60 s (watch)",
-    "hint": "The (d) test, design doc §11. 0.1 s shoves on a rotating heading; ≥ 2 N knocks it over, the scaffold rescues, c collapses and is re-earned in ~38 s. Report gives the per-shove table.",
+    "name": "PROBE · push test — 3 N shoves on the R19 stand every 60 s (watch)",
+    "hint": "The (d) test on the current stand: 3 N is the edge (13/36 caught, fore-aft goes over); watch the ball go red, c dip to 0.90 and re-earn in ~20 s.",
     "state": {
-      "config": "a1v2_r12c_whole.json",
+      "config": "a1v2_r19_settle_each.json",
       "mode": "brain",
       "start": "checkpoint",
-      "checkpoint": "duck_pipeline_s2.json",
+      "checkpoint": "duck_r19_s2.json",
       "secs": 420,
       "output": "watch",
-      "push": 2,
+      "push": 3,
       "push_every": 60,
       "push_hold": 0.1,
       "push_from": 30,
@@ -81,16 +81,16 @@
     }
   },
   {
-    "name": "PROBE · envelope — 1 N shoves on a saved brain (the catch limit)",
-    "hint": "1 N × 0.1 s is caught at 1–4° of tilt; 1.5 N is 50/50; 2 N topples. Change the force to bracket a brain's envelope; Report reads it. Point 'a saved brain' at the brain under test.",
+    "name": "PROBE · envelope — 2 N shoves on a saved brain (the catch limit)",
+    "hint": "R19 catches 2 N 35/36 and 3 N 13/36. Change the force to bracket a brain's envelope; Report reads it. Point 'a saved brain' at the brain under test.",
     "state": {
-      "config": "a1v2_r12c_whole.json",
+      "config": "a1v2_r19_settle_each.json",
       "mode": "brain",
       "start": "checkpoint",
-      "checkpoint": "duck_pipeline_s2.json",
+      "checkpoint": "duck_r19_s2.json",
       "secs": 420,
       "output": "headless",
-      "push": 1,
+      "push": 2,
       "push_every": 60,
       "push_hold": 0.1,
       "push_from": 30,
@@ -144,9 +144,8 @@
     }
   },
   {
-    "name": "R19 · identification schedule: a settle before every pulse — STANDS 6/6 AND CATCHES 2 N (§14)",
-    "series": 19,
-    "hint": "Measured 2026-09-03: all six seeds consolidate inside 15 min (2-3 rescues in 2 h, tilt 0.35°, |u| 0.18) and catch 2 N shoves 35/36 (peak ~2.7°, back in 0.6 s); 3 N 13/36. From scratch, 2 h, saves the brain. The cause: the babble alternated legs inside one settle period, so the right leg and the head were identified from a body still moving — their lean rows had the wrong sign.",
+    "name": "★ STACK · find from scratch (R19, 2 h, headless, saves the brain) — every seed stands in 15 min",
+    "hint": "R19: a settle before every identification pulse window. All six seeds consolidate inside 15 min, 2-3 rescues in 2 h, tilt 0.35°, |u| 0.18; the brain catches 2 N shoves. Tick 'battery' for seeds 1-6.",
     "state": {
       "config": "a1v2_r19_settle_each.json",
       "mode": "brain",
@@ -163,8 +162,7 @@
     }
   },
   {
-    "name": "R19 · watch the catch — 2 N shoves on the R19 stand every 20 s (watch)",
-    "series": 19,
+    "name": "★ STACK · watch the catch — 2 N shoves on the R19 stand every 20 s (watch)",
     "hint": "Resume duck_r19_s2 under R19 and shove it: the ball stays green, tilt peaks ~2.7° and the body is back inside 0.6 s. Raise to 3 N to see where it still goes over (fore-aft first).",
     "state": {
       "config": "a1v2_r19_settle_each.json",
