@@ -35,6 +35,32 @@ on the main disk on purpose: a run writes about 190 MB of JSONL per sim-hour,
 and `/tmp` is a quota'd tmpfs that takes the shell down when it fills. The
 window shows the estimate next to the duration.
 
+## Naming: milestones, probes, and the series
+
+The two lists are read top to bottom, and each entry says what it is by its prefix:
+
+| class | prefix | rank band | meaning |
+|---|---|---|---|
+| milestone | `★ STACK`, `★ PIPELINE n/3` | < 100 | the promoted state: the stand, the three stages that make it from nothing |
+| probe | `PROBE · …` | 100–999 | an instrument, not a hypothesis: the push test, the envelope, the byte-identity guard, the scaffold, the stub |
+| series | `R<nn> · …` | 1000 + nn | the tests of the current campaign, in the order they were made; the newest carries **◀ latest** |
+
+The R number is the design doc's: the config, its preset, and the doc section agree.
+Mint a test with
+
+```sh
+tools/duck_launcher/newtest.py --from a1v2_r13_tax001.json --slug trace05 \
+    --title "attitude-row trace 0.5" --set "*.model_trace=0.5" \
+    --why "temporal depth on the attitude rows so a torque becomes a lean inside the model"
+```
+
+which takes the next number, writes the config with the overrides and the name
+`R<nn> · attitude-row trace 0.5` at rank 1000 + nn, and appends a preset of the same
+name whose controls are copied from `★ PIPELINE 1/3` (from scratch, 2 h, saves the
+brain). At a milestone, prune: drop `launcher_rank` from the refuted tests (the files
+stay, their names keep the verdict), rename the winner to a ★ role and give it a low
+rank, and delete its series preset. `--selftest` checks every preset still builds.
+
 ## Exposing a config
 
 The dropdown shows configs that carry `metadata.launcher_rank` (lower first),

@@ -13,10 +13,18 @@ the same run.
     launcher.py --print                    # the command for the saved selections
 
 Configs appear under their `metadata.name` when they carry `metadata.launcher_rank`
-(lower ranks first); "show all" lists the rest by filename.  To surface a config you
-have designed, give it a rank and a name of the form ROLE — mechanism · what you'll
-see.  Presets (presets.json beside this file) fill the controls for a whole
-experiment; add one there rather than here.
+(lower ranks first); "show all" lists the rest by filename.  Three classes, told apart
+by the name's prefix and the rank band:
+
+    ★ STACK / ★ PIPELINE n/3   milestones, rank < 100      — the promoted state
+    PROBE · …                  instruments, rank 100–999   — push test, envelope, guard
+    R<nn> · …                  the current series, rank 1000 + nn — tests in the order
+                               they were made; the newest is marked ◀ latest
+
+Mint the next test with newtest.py (it takes the next R number, writes the config and
+its preset); at a milestone prune the refuted ones out of the whitelist (drop their
+rank; the files stay) and promote the winner to a ★ name.  Presets (presets.json
+beside this file) carry the same prefixes and an optional "series" number.
 
 Nothing in this file simulates or decides anything: it builds argv for
 mj_host/build/ogma_mjhost and, for watching, hands it to tools/duck_viewer/view.py.
@@ -84,11 +92,35 @@ def scan_configs():
     return out
 
 
-def config_label(entry):
+SERIES_RANK = 1000     # ranks at or above this are the current test series (1000 + R number)
+LATEST = " ◀ latest"
+
+
+def config_label(entry, latest=False):
     if entry["rank"] is not None:
-        return entry["name"]
+        return entry["name"] + (LATEST if latest else "")
     head = entry["desc"].split(".")[0][:70]
     return f"{entry['file']}  — {head}" if head else entry["file"]
+
+
+def latest_series(entries):
+    """The highest-ranked series entry (rank >= SERIES_RANK), or None."""
+    tests = [e for e in entries if e.get("rank") is not None and e["rank"] >= SERIES_RANK]
+    return max(tests, key=lambda e: e["rank"]) if tests else None
+
+
+def preset_key(p):
+    """★ milestones, then PROBE instruments, then the series in order."""
+    name = p.get("name", "")
+    if name.startswith("★"):
+        return (0, 0, name)
+    if name.startswith("PROBE"):
+        return (1, 0, name)
+    return (2, p.get("series", 0), name)
+
+
+def preset_label(p, latest=False):
+    return p["name"] + (LATEST if latest else "")
 
 
 def saved_brains():
@@ -248,9 +280,16 @@ def save_state(s):
 
 def load_presets():
     try:
-        return json.loads(PRESETS_FILE.read_text())
+        presets = json.loads(PRESETS_FILE.read_text())
     except (OSError, json.JSONDecodeError):
         return []
+    return sorted(presets, key=preset_key)
+
+
+def preset_labels(presets):
+    series = [p for p in presets if p.get("series")]
+    newest = max(series, key=lambda p: p["series"]) if series else None
+    return [preset_label(p, p is newest) for p in presets]
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +418,7 @@ def build_window():
     fx = frame("Experiment", 0, 0, colspan=2)
     fx.columnconfigure(1, weight=1)
     ttk.Label(fx, text="Preset").grid(column=0, row=0, sticky="w")
-    preset_box = ttk.Combobox(fx, values=[p["name"] for p in presets], state="readonly", width=70)
+    preset_box = ttk.Combobox(fx, values=preset_labels(presets), state="readonly", width=70)
     preset_box.grid(column=1, row=0, sticky="ew", padx=4)
     preset_hint = ttk.Label(fx, text="", wraplength=880, foreground="#555")
     preset_hint.grid(column=0, row=1, columnspan=3, sticky="w", pady=(0, 4))
@@ -400,7 +439,8 @@ def build_window():
         curated.sort(key=lambda c: c["rank"])
         rest = [c for c in configs if c["rank"] is None]
         config_entries = curated + (rest if V["show_all"].get() else [])
-        config_box["values"] = [config_label(c) for c in config_entries]
+        newest = latest_series(curated)
+        config_box["values"] = [config_label(c, c is newest) for c in config_entries]
         cur = V["config"].get()
         idx = next((i for i, c in enumerate(config_entries) if c["file"] == cur), None)
         if idx is None and config_entries:

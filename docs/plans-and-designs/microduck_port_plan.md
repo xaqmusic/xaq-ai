@@ -66,6 +66,11 @@ operator's call (REPORTS.md §9.6).
 
 ### Traps a fresh session should not re-learn
 
+- **Every new test config goes through `tools/duck_launcher/newtest.py`** (operator convention,
+  2026-09-03): it takes the next R number, names the config `R<nn> · …` at launcher rank 1000 + nn,
+  and writes its preset, so the launcher lists tests in the order they were made with the newest
+  marked ◀ latest. Milestones are `★`, instruments are `PROBE ·`. At a milestone, prune the refuted
+  tests out of the whitelist (drop the rank; keep the file) and promote the winner to a ★ name.
 - **The from-scratch stage is R13, not R8.** Under ratchet v3 the R8 config plateaus at c ≈ 0.4
   (§12.3); use `a1v2_r13_tax001.json` to find and consolidate, and the R12c stack to rest.
 - **Run logs are big (~190 MB per sim-hour) and `/tmp` is a quota'd tmpfs.** Write batteries to

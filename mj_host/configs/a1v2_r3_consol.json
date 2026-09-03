@@ -1,13 +1,13 @@
 {
   "metadata": {
-    "name": "GUARD \u2014 r3 consolidating stack \u00b7 the byte-identity reference: 300 s, seed 6, ident 12/3000, cmp the JSONL",
+    "name": "PROBE \u00b7 byte-identity guard \u2014 r3, 300 s, seed 6, ident 12/3000; cmp the JSONL before and after a code change",
     "description": "Rung-2 stage R1 (2026-09-01): the regime EPM's winner_id keys per-regime self-model banks in both MotorEPMv2 instances (regime_topic wired, 6 banks).  The identification-episode carve-out, learned instead of harness-imposed: each regime's model sees only its own data; the boundary sample is dropped at switches.  Gates: banks switch (rbsw), per-bank samples distribute, standing-bank A matches probe-J signs WITHOUT the harness tilt gate, per-regime TLE < mixed, then the behavioural A/B.  STABLE VOCABULARY (2026-09-01, the operator's prune-cascade observation, mechanism confirmed in the GNG death sweep): health_death_spares_baked \u2014 earned regimes are permanent facts, not casualties of a long absence \u2014 and min_insertion_error 0.06 so near-duplicate nodes stop crown-stealing from the baked core (measured: the standing identity churned 1\u219216\u219229, sending the crown's data to the overflow bank).  EARNED CONSOLIDATION (2026-09-01): consolidate_gain 1.0 \u2014 all learning rates anneal while the prior is satisfied AND falls have stopped, re-arm when either breaks.  Measured motivation: seeds find standing in minutes (0.99 upright) and continued learning destroys it; a hand freeze preserved 0.93 but a hand-picked time is a scaffold.  A solution that keeps the body standing has EARNED slow plasticity.",
     "env_target": "microduck",
     "phase_tag": "A1 (first brain)",
     "scaffolds_active": [
       "alpha_stand.onnx via the A2 recovery harness \u2014 drives only while the body is down, with all learning rates zeroed"
     ],
-    "launcher_rank": 60
+    "launcher_rank": 900
   },
   "version": 1,
   "runtime": {
