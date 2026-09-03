@@ -6302,6 +6302,10 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
     j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
     j["consolidate_gate"] = state_prior_gate_ema_;  // the gate subset's own satisfaction EMA
+    j["gate_err_inst"] = gate_err_inst_;            // the same subset's INSTANT error — the attitude prior's
+                                                    // own "how far am I from what I expect to feel" this tick;
+                                                    // the ratchet reads it (> 0.30 = chaos) and so does the
+                                                    // intent boundary's step hand-off (phase 1a)
     j["reach_lw"] = reach_lw_last_;            // reach terms' effective lw (0 until consolidated)
     {
         float hrm = 0.0f;

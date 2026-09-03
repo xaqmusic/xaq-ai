@@ -850,3 +850,30 @@ to 0 with the hand-off, and a "step" is now a counted, logged event with its own
 viewer (yellow).  What remains for the learned step is route 1's question (foot load and
 contact in the blanket); what remains for phase 1 is to move the trigger into the brain as a
 published saturation scalar rather than a harness rule.
+
+## 16. PHASE 1 OF THE INTENT BOUNDARY (2026-09-03) — the trigger becomes the brain's, then the surface
+
+### 16.1 Phase 1a — the hand-off fires on the brain's own signal
+
+The attitude prior's instant error (`gate_err_inst`, the same scalar the consolidation ratchet
+reads at 0.30 for "chaos") is now published per MotorEPM (`att` in the JSONL) and can be the
+step trigger: `--step-att E`.  Measured on the same 72 shoves as the lean rule: a caught shove
+never exceeds 0.049 (3 N) / 0.059 (2 N); topples pass 0.052 by 240 ms and 0.060–0.070 by 400 ms
+with the error rising.  The signal includes the rates, and a catch itself produces rate, so the
+margin is thinner than the lean's and the trigger fires ~70 ms later.  A/B across six brains,
+threshold 0.06, three rising ticks:
+
+| shove | brain-error trigger | lean rule 6.5° |
+|---|---|---|
+| 1 N (seed 2) | 6/6, 0 steps | 6/6, 0 steps |
+| 2 N | 36/36, **2 false hand-offs** | 36/36, 0 |
+| 3 N | 36/36, 20 steps | 36/36, 20 steps |
+| 5 N | 30/36, 36 steps (6 rescued mid-step) | 29/36, 32 steps (7 rescued) |
+
+**Verdict: WORKING, ties the lean rule on real topples, with a 6 % false-trigger rate at the
+reflex's edge** (a false hand-off costs the ×0.9 consolidation tax and ~2 s of walker, not a
+fall).  Adopted as the default trigger: the brain asks for help when its own prediction error
+exceeds what its catch handles, which is the level-2 reading the design wants, and on hardware
+it is a number the brain already publishes rather than a side computation in the harness.  The
+lean rule stays available.  Re-use note for the adaptive form (§5 rule 5): the threshold could
+be learned as a margin over the largest error the brain has survived without help.

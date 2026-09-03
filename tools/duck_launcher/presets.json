@@ -190,7 +190,7 @@
   },
   {
     "name": "★ STACK · the step — 3 N shoves on the R19 stand with the walker's hand-off (watch)",
-    "hint": "Phase 0 of the intent boundary: past 6.5° of rising lean the joints go to the walker (yellow ball), which staggers through it, then back to the brain. Measured: 3 N 36/36 upright across six brains (13/36 without), 5 N 6/6 (1/6 without), never fires at 1–2 N, and the reflex is unchanged after a 20-minute soak of it.",
+    "hint": "Phase 0/1a of the intent boundary: when the brain's own attitude-prior error passes 0.06 and is rising, the joints go to the walker (yellow ball), which staggers through it, then back to the brain. Measured across six brains: 3 N 36/36 upright (13/36 without), 5 N 30/36 (6/36 without), never at 1 N, two false hand-offs in 36 at 2 N.",
     "state": {
       "config": "a1v2_r19_settle_each.json",
       "mode": "brain",
@@ -206,7 +206,9 @@
       "step_twist": 0,
       "step_twist_s": 0.5,
       "save_brain": false,
-      "battery": false
+      "battery": false,
+      "step_trigger": "att",
+      "step_att": 0.06
     }
   }
 ]

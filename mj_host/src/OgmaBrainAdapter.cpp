@@ -362,6 +362,17 @@ std::vector<double> OgmaBrainAdapter::consolidation() const {
     return out;
 }
 
+std::vector<double> OgmaBrainAdapter::attitude_error() const {
+    std::vector<double> out;
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_snapshot();
+        out.push_back(d.contains("gate_err_inst") ? d["gate_err_inst"].get<double>() : 0.0);
+    }
+    return out;
+}
+
 std::vector<std::string> OgmaBrainAdapter::diagnostics() const {
     std::vector<std::string> out;
     for (auto* m : instance_->modules()) {

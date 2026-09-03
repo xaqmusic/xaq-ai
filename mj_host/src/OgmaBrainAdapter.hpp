@@ -98,6 +98,9 @@ public:
     // Each MotorEPM's earned-consolidation state c ∈ [0,1], in graph order. The
     // per-tick read-back the (d) push test is judged on (see run_with_brain).
     std::vector<double> consolidation() const;
+    // Each MotorEPM's attitude-prior instant error (the gate subset's |e| mean), in graph
+    // order: the brain's own saturation signal for the step hand-off.
+    std::vector<double> attitude_error() const;
 
     // robotd's deployed joint-target low-pass (head 0.5, legs 0.7). Off = raw
     // commands (legacy, byte-identical).

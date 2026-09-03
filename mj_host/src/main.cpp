@@ -333,7 +333,10 @@ struct PushPlan {
 // the fall detector, on the same egocentric projected gravity.  0 disables and
 // the build is byte-identical.
 struct StepPlan {
-    double lean_deg = 0.0;     // 0 disables
+    double lean_deg = 0.0;     // 0 disables (the harness's own lean rule)
+    double att = 0.0;          // > 0: trigger on the BRAIN's attitude-prior instant error instead
+                               // (phase 1a: the saturation signal is the brain's, the threshold the
+                               // harness's, measured on the same 72 shoves as the lean rule)
     int    confirm_ticks = 3;  // consecutive rising ticks above lean_deg
     double twist = 0.0;        // m/s along the lean direction; measured: the walker's own stagger
                                // recovers 3 N and 5 N at zero twist as well as at 0.2, and 0.35 or
@@ -614,9 +617,18 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
         // a step ends the step (counted below).
         stepping = false;
         step_event = "";
-        if (step.lean_deg > 0.0 && driver == Driver::Brain) {
+        if ((step.lean_deg > 0.0 || step.att > 0.0) && driver == Driver::Brain) {
             const auto g = body.gravity();
-            const double lean = std::atan2(std::hypot(g[0], g[1]), -g[2]) * (180.0 / 3.14159265358979323846);
+            // The signal: the brain's own attitude error when asked for (max over its
+            // MotorEPMs), else the harness's lean in degrees.  One threshold each.
+            double lean = std::atan2(std::hypot(g[0], g[1]), -g[2]) * (180.0 / 3.14159265358979323846);
+            double thresh = step.lean_deg;
+            if (step.att > 0.0) {
+                lean = 0.0;
+                if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain))
+                    for (double a : og->attitude_error()) lean = std::max(lean, a);
+                thresh = step.att;
+            }
             if (step_left > 0) {
                 --step_left;
                 const auto w = body.gyro();
@@ -641,7 +653,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                     stepping = true;
                 }
             } else {
-                if (lean > step.lean_deg && lean > last_lean) ++step_confirm; else step_confirm = 0;
+                if (lean > thresh && lean > last_lean) ++step_confirm; else step_confirm = 0;
                 if (step_confirm >= step.confirm_ticks) {
                     step_confirm = 0;
                     const double n = std::hypot(g[0], g[1]);
@@ -748,6 +760,13 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                 const auto cs = og->consolidation();
                 for (size_t i = 0; i < cs.size(); ++i) std::printf("%s%.3f", i ? "," : "", cs[i]);
             }
+            // The attitude prior's instant error per MotorEPM: the brain's own saturation
+            // signal (phase 1a), logged so the step threshold can be measured on it.
+            std::printf("],\"att\":[");
+            if (auto* og = dynamic_cast<OgmaBrainAdapter*>(&brain)) {
+                const auto as = og->attitude_error();
+                for (size_t i = 0; i < as.size(); ++i) std::printf("%s%.3f", i ? "," : "", as[i]);
+            }
             std::printf("],\"q\":[");
             const auto q = body.joint_positions();
             for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
@@ -787,10 +806,14 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                      recovery.gave_up());
     }
 
-    if (step.lean_deg > 0.0) {
-        std::fprintf(stderr, "  step hand-off at %.1f deg (twist %.2f m/s for %.1f s): %d steps started, "
+    if (step.lean_deg > 0.0 || step.att > 0.0) {
+        if (step.att > 0.0)
+            std::fprintf(stderr, "  step hand-off on the brain's attitude error > %.3f", step.att);
+        else
+            std::fprintf(stderr, "  step hand-off at %.1f deg", step.lean_deg);
+        std::fprintf(stderr, " (twist %.2f m/s for %.1f s): %d steps started, "
                              "%d handed back upright, %d rescued mid-step\n",
-                     step.lean_deg, step.twist, step.twist_s, steps_started, steps_ended, steps_rescued);
+                     step.twist, step.twist_s, steps_started, steps_ended, steps_rescued);
     }
     if (pushes.newtons > 0.0) {
         RunResult r = analyse(tilt_trace, shove_ticks);
@@ -1101,7 +1124,7 @@ void usage() {
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
         "                      [--push N] [--push-every S] [--push-hold S] [--push-from S]\n"
-        "                      [--step-lean DEG] [--step-twist V] [--step-twist-secs S]\n"
+        "                      [--step-lean DEG | --step-att E] [--step-twist V] [--step-twist-secs S]\n"
         "      Phase A1: an OgmaInstance driving the joints, inside the same harness.\n"
         "      --step-lean hands the joints to the walker when the brain's lean exceeds DEG\n"
         "      and is still rising (a step along the lean at V m/s for S s, then settle and\n"
@@ -1171,6 +1194,8 @@ int main(int argc, char** argv) {
             pushes.from_s = std::stod(next("--push-from"));
         } else if (a == "--step-lean") {
             step.lean_deg = std::stod(next("--step-lean"));
+        } else if (a == "--step-att") {
+            step.att = std::stod(next("--step-att"));
         } else if (a == "--step-twist") {
             step.twist = std::stod(next("--step-twist"));
         } else if (a == "--step-twist-secs") {
