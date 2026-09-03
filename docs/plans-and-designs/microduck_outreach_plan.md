@@ -89,10 +89,71 @@ and the rest of the robot", "which behaviour wins is decided by how badly each i
 > firmware applies. It does not walk, it has never run on hardware, and its push envelope is about
 > half of `alpha_stand`'s. Those limits are the reason the design leaves locomotion where it is.
 
-## 6. Decisions the operator owns
+## 6. Code sharing and packaging — how the brain reaches a robot
+
+**No submodule in either direction.** Their tree is a Rust workspace of daemons with its own
+cross-compile, release, signing and health-gate pipeline; a submodule of ours inside it would
+put a C++ core into their build under reviewers who did not write it. A submodule of theirs
+inside ours buys nothing: we never need their source at build time. We speak their socket
+protocol, which `duck-ipc-proto` defines, and we vendor their body model for the simulation.
+
+**The shape is the one their architecture already draws**: a platform repository owns the
+protocol and the daemons; third-party clients live in their own repositories and speak the
+socket. Intents in, state out, `safety` keeps the only write handle; `padd` and the perception
+workers are the in-tree examples. Their `Hello` call carries an API version, so a client refuses
+an incompatible robot the way their own clients do.
+
+### 6.1 What crosses the boundary, and in which direction
+
+| direction | what | how |
+|---|---|---|
+| upstream, as PRs | the two state fields; the autonomous design doc; later, if wanted, a way to test clients against a simulated robot; later still, if wanted, a documented community-component stanza | one thing each, §9 |
+| downstream, vendored | their MJCF and scene files, their policy ONNX files, their protocol version | pinned by version and hash in a manifest in our repo, refreshed from their tags by a script; reviewable, no live coupling |
+| never | the brain into their tree; their daemons into ours | |
+
+### 6.2 The daemon as an updater component
+
+Their update engine is config-driven: *each robot declares its components*, and a component is
+a thing with its own version line, a pluggable source, a signed artifact and manifest, a
+systemd unit, a post-install hook, a health gate and a rollback. Models are components too.
+That is the delivery vehicle for the brain, and it makes "don't run our daemon" mechanical:
+absent from the robot's updater config, absent from the robot.
+
+| element | ours |
+|---|---|
+| repository | `ogma_duckd` lives in this repo; cross-compiled to aarch64 in our CI (their `cargo board` never sees it) |
+| release | GitHub Releases on our repo, tag `ogma-duckd-v0.1.0`; assets = `ogma-duckd-0.1.0.tar.zst` + `.minisig` + manifest, in their §5.2–5.3 layout: `bin/ogma_duckd`, `systemd/ogma-duckd.service`, `version.toml` (semver, minimum `robotd` API version), `hooks/postinstall` |
+| signing | our own minisign key pair; the private key in our CI secrets, the public key published with the releases |
+| the robot side | one stanza in `/etc/robot/updater.toml`, e.g. `[component.ogma-duckd]` with `source = github-releases`, our repo and tag pattern; `on_apply` restarts our unit only |
+| health gate | our post-install hook and the unit's readiness: the daemon comes up, says `Hello` with its API version, subscribes to `robot.state`, and reports healthy on its own socket; a failure rolls back under their engine, not ours |
+| off by default | the component is not in any robot's shipped config; a user adds it, and removing the stanza removes the daemon |
+| compatibility | `version.toml` carries the minimum `robotd` API version; the daemon refuses to run above or below its window, in their own idiom |
+
+### 6.3 What this needs from Pollen — the one architectural ask
+
+A robot verifies a component only against the public keys baked into `/etc/robot/trusted_keys`.
+A community component therefore needs one of:
+
+1. its public key admitted to the trusted set — their key-custody decision, and the durable
+   answer;
+2. the developer sideload path their config already exposes (`allow_dev_keys` on a developer
+   board) — enough for enthusiasts and for us, today, with no change on their side;
+3. a documented "community component" affordance: a second trusted-keys directory, or a per-
+   component key, so a user can opt one third party in without trusting it for firmware.
+
+The design-doc PR raises this once, as a question about their trust model, and proposes nothing
+until they answer. Path 2 is how the first hardware runs happen regardless.
+
+### 6.4 Licences and attribution
+
+Both repositories are Apache-2.0. Vendored files (MJCF, policies) carry their copyright in our
+NOTICE. Machine-written code upstream carries `Co-Authored-By`, as PR-1 does.
+
+## 7. Decisions the operator owns
 
 - Whether the first contact is PR-1 (credibility first) or PR-2 (statement first). This plan
   recommends PR-1 first.
 - Whether the standing report is made reachable from outside, and how.
 - Whether to open a Discussion before either PR, if they use Discussions.
 - Every push, every open, every reply.
+- The signing key custody for our component releases (who holds the private minisign key).
