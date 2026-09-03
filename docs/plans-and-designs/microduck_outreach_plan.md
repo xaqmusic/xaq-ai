@@ -121,7 +121,7 @@ absent from the robot's updater config, absent from the robot.
 
 | element | ours |
 |---|---|
-| repository | `ogma_duckd` lives in this repo; cross-compiled to aarch64 in our CI (their `cargo board` never sees it) |
+| repository | `ogma_duckd` lives in this repo: a **Rust shell** on their `duck-ipc-proto` crate around the **C++ core** behind a C ABI (design doc §4.1); cross-compiled to aarch64 in our CI (their `cargo board` never sees it) |
 | release | GitHub Releases on our repo, tag `ogma-duckd-v0.1.0`; assets = `ogma-duckd-0.1.0.tar.zst` + `.minisig` + manifest, in their §5.2–5.3 layout: `bin/ogma_duckd`, `systemd/ogma-duckd.service`, `version.toml` (semver, minimum `robotd` API version), `hooks/postinstall` |
 | signing | our own minisign key pair; the private key in our CI secrets, the public key published with the releases |
 | the robot side | one stanza in `/etc/robot/updater.toml`, e.g. `[component.ogma-duckd]` with `source = github-releases`, our repo and tag pattern; `on_apply` restarts our unit only |

@@ -117,7 +117,29 @@ rewards dead drift; use coverage of the learned map plus collisions.
 of `padd` and `btd`: subscribes to state, sends intents as notifications at their rate, off by
 default. Sim first, against a simulated `robotd` (a question to raise with Pollen: a MuJoCo
 backend for `robotd` would let every client be tested without a robot, §6). Hardware only after
-the operator's eye and Pollen's.
+the operator's eye and Pollen's. Its construction is decided in §4.1.
+
+### 4.1 Decision: a Rust shell around a C++ core (2026-09-03)
+
+`ogma_duckd` is two things with one seam between them:
+
+| part | language | why |
+|---|---|---|
+| the shell — socket client, handshake, subscribe-and-notify, systemd, health | **Rust**, using their `duck-ipc-proto` crate directly | the protocol types, the API-version `Hello` and the notification idiom come from their code rather than from a hand-written JSON layer that drifts; it is the shape their own clients (`padd`, `btd`) have, and the shape a Rust reviewer would write |
+| the brain — `ogma_core`: the modules, the bus, the EPM stack | **C++**, unchanged, as a library | it is the existing engine that drives every other body; the duck gets the same core, not a port of it |
+| the seam | a small **C ABI** (`ogma_c.h`): create an instance from a graph JSON, publish sensors, tick, read intents and diagnostics, snapshot and restore | bounded, testable in isolation, and wanted anyway for the picrawler host and for Python tooling |
+
+Why this and not a C++ client or a Python one: language is invisible across the socket, but it
+is visible at three seams — the question "why not Rust?" from a Rust shop, the trust
+conversation about running a third-party binary on the robot, and the bench (cross-compiling
+to aarch64, memory and rate on the RK3566). A Rust shell answers the first at the seam, keeps
+the second about permissions and the write handle (their answer, not ours), and leaves only
+the third, which is measurement we owe regardless. The daemon then talks to their robot the
+way theirs do.
+
+Consequences: the C ABI is the first artefact of phase 3 and gets its own byte-identity guard
+(the C++ host and the Rust shell driving the same graph must produce the same JSONL); the Rust
+shell is cross-compiled in our CI with their target triple; nothing of this enters their tree.
 
 ## 5. Reporting rules that keep the blur readable
 
@@ -159,4 +181,6 @@ later, and only after a lesion test says the brain can).
 3. Phase 1's simulated ToF: a wall or two in the scene, or Pollen's own arena?
 4. Which of Pollen's behaviours (`do`) may the autonomous layer invoke in phase 2 — none, or the
    charm ones (stretch, preen) as the energy homeostat's outlets?
-5. `ogma_duckd` lives in our repo; their repo receives only the hooks it needs. Agreed?
+5. `ogma_duckd` lives in our repo; their repo receives only the hooks it needs. Agreed (2026-09-03).
+6. The C ABI's surface: the five calls above, or also live parameter mutation (the launcher's
+   hot params) and the `lite` diagnostics topic for xaq_voice?
