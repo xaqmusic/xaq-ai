@@ -2,59 +2,183 @@
   {
     "name": "Controlled stand — resume the from-scratch checkpoint (watch)",
     "hint": "R12c on duck_pipeline_s2: tall, still (~0.1 mrad/tick), zero falls. What the brain does when nothing happens to it.",
-    "state": {"config": "a1v2_r12c_whole.json", "mode": "brain", "start": "checkpoint", "checkpoint": "duck_pipeline_s2.json",
-              "secs": 600, "output": "watch", "push": 0, "save_brain": false, "battery": false}
+    "state": {
+      "config": "a1v2_r12c_whole.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_pipeline_s2.json",
+      "secs": 600,
+      "output": "watch",
+      "push": 0,
+      "save_brain": false,
+      "battery": false
+    }
   },
   {
     "name": "Push test — 2 N shoves on the controlled stand every 60 s (watch)",
     "hint": "The (d) test, design doc §11. 0.1 s shoves on a rotating heading; ≥ 2 N knocks it over, the scaffold rescues, c collapses and is re-earned in ~38 s. Report gives the per-shove table.",
-    "state": {"config": "a1v2_r12c_whole.json", "mode": "brain", "start": "checkpoint", "checkpoint": "duck_pipeline_s2.json",
-              "secs": 420, "output": "watch", "push": 2, "push_every": 60, "push_hold": 0.1, "push_from": 30, "save_brain": false, "battery": false}
+    "state": {
+      "config": "a1v2_r12c_whole.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_pipeline_s2.json",
+      "secs": 420,
+      "output": "watch",
+      "push": 2,
+      "push_every": 60,
+      "push_hold": 0.1,
+      "push_from": 30,
+      "save_brain": false,
+      "battery": false
+    }
   },
   {
     "name": "Envelope — 1 N shoves on the controlled stand (the catch limit)",
     "hint": "1 N × 0.1 s is caught at 1–4° of tilt; 1.5 N is 50/50; 2 N topples. Change the force to bracket a brain's envelope; Report reads it.",
-    "state": {"config": "a1v2_r12c_whole.json", "mode": "brain", "start": "checkpoint", "checkpoint": "duck_pipeline_s2.json",
-              "secs": 420, "output": "headless", "push": 1, "push_every": 60, "push_hold": 0.1, "push_from": 30, "save_brain": false, "battery": false}
+    "state": {
+      "config": "a1v2_r12c_whole.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_pipeline_s2.json",
+      "secs": 420,
+      "output": "headless",
+      "push": 1,
+      "push_every": 60,
+      "push_hold": 0.1,
+      "push_from": 30,
+      "save_brain": false,
+      "battery": false
+    }
   },
   {
     "name": "Pipeline 1/3 — find from scratch (R13, 2 h, headless, saves the brain)",
     "hint": "Design doc §12.3/§12.6. Seed 2 stands by ~30 min (falls 8 → 3 → 1 → 0/min); other seeds fall-cycle. Tick 'battery' with seeds 1-6 for the race. ≈ 380 MB of JSONL.",
-    "state": {"config": "a1v2_r13_tax001.json", "mode": "brain", "start": "scratch", "ident_every": 12, "ident_until": 3000,
-              "seed": 2, "secs": 7200, "output": "headless", "push": 0, "save_brain": true, "battery": false, "seeds": "1-6"}
+    "state": {
+      "config": "a1v2_r13_tax001.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "seed": 2,
+      "secs": 7200,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "seeds": "1-6"
+    }
+  },
+  {
+    "name": "R14 — attitude precision ×10, find from scratch (REGRESSION, §13; kept as the record)",
+    "hint": "Measured 2026-09-02: 0/6 seeds stand at weight 3 or 10 (1/6 at weight 1), and a found stance collapses within 10 min. The identified model has ~no action → lean authority, so the weight amplified rate feedback into instability. Re-run only with the lean channel identified (§13.4).",
+    "state": {
+      "config": "a1v2_r14_attw10.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "seed": 2,
+      "secs": 7200,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "seeds": "1-6"
+    }
   },
   {
     "name": "Pipeline 2/3 — gain hunt (R11, 30 min, from the latest saved brain)",
     "hint": "Resume the find brain under R11: C norms shed, no falls, oscillation 12 → 11 mrad. Load-bearing — handing the find brain straight to R12c fails (§12.6).",
-    "state": {"config": "a1v2_r11_hunt.json", "mode": "brain", "start": "checkpoint", "checkpoint": "(latest saved brain)",
-              "secs": 1800, "output": "headless", "push": 0, "save_brain": true, "battery": false}
+    "state": {
+      "config": "a1v2_r11_hunt.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "(latest saved brain)",
+      "secs": 1800,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false
+    }
   },
   {
     "name": "Pipeline 3/3 — rest (R12c, 30 min, from the latest saved brain)",
     "hint": "Resume the hunted brain under R12c: the efference rests at earned stillness, |dq| 11 → 0.1 mrad/tick, c 1.00. Watch it to see the oscillation stop.",
-    "state": {"config": "a1v2_r12c_whole.json", "mode": "brain", "start": "checkpoint", "checkpoint": "(latest saved brain)",
-              "secs": 1800, "output": "watch", "push": 0, "save_brain": true, "battery": false}
+    "state": {
+      "config": "a1v2_r12c_whole.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "(latest saved brain)",
+      "secs": 1800,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false
+    }
   },
   {
     "name": "Wind arm — find from scratch with 0.5 N shoves every 8 s (§12.4, null)",
     "hint": "The world-with-wind lever: sub-topple shoves throughout learning. Measured null — it stands, never rests, envelope unchanged. Here to be re-run against a new idea.",
-    "state": {"config": "a1v2_r13_tax001.json", "mode": "brain", "start": "scratch", "ident_every": 12, "ident_until": 3000,
-              "seed": 2, "secs": 7200, "output": "headless", "push": 0.5, "push_every": 8, "push_hold": 0.1, "push_from": 240, "save_brain": true, "battery": false}
+    "state": {
+      "config": "a1v2_r13_tax001.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "seed": 2,
+      "secs": 7200,
+      "output": "headless",
+      "push": 0.5,
+      "push_every": 8,
+      "push_hold": 0.1,
+      "push_from": 240,
+      "save_brain": true,
+      "battery": false
+    }
   },
   {
     "name": "Byte-identity reference — r3, seed 6, 300 s (headless)",
     "hint": "The guard: run it before touching code, keep the JSONL, run it again after, cmp (strip the 'cons' field if the reference predates it).",
-    "state": {"config": "a1v2_r3_consol.json", "mode": "brain", "start": "scratch", "ident_every": 12, "ident_until": 3000,
-              "seed": 6, "secs": 300, "output": "headless", "push": 0, "save_brain": false, "battery": false}
+    "state": {
+      "config": "a1v2_r3_consol.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "seed": 6,
+      "secs": 300,
+      "output": "headless",
+      "push": 0,
+      "save_brain": false,
+      "battery": false
+    }
   },
   {
     "name": "Scaffold — shove Pollen's standing policy (5 N every 4 s, watch)",
     "hint": "The RL reference: staggers and catches 5 N, knocked over at 10 N and stands back up. The envelope the brain is measured against.",
-    "state": {"mode": "hold", "secs": 24, "output": "watch", "push": 5, "push_every": 4, "push_hold": 0.1, "push_from": 0, "noise": 0, "battery": false}
+    "state": {
+      "mode": "hold",
+      "secs": 24,
+      "output": "watch",
+      "push": 5,
+      "push_every": 4,
+      "push_hold": 0.1,
+      "push_from": 0,
+      "noise": 0,
+      "battery": false
+    }
   },
   {
     "name": "Recovery harness — the stub brain that falls over (watch)",
     "hint": "A brain that fails, the scaffold that picks it up, and the hand-off between them. Tests the harness, not the substrate.",
-    "state": {"mode": "stub", "secs": 60, "output": "watch", "push": 0, "stub_amp": 0.25, "stub_drift": 0.08, "battery": false}
+    "state": {
+      "mode": "stub",
+      "secs": 60,
+      "output": "watch",
+      "push": 0,
+      "stub_amp": 0.25,
+      "stub_drift": 0.08,
+      "battery": false
+    }
   }
 ]

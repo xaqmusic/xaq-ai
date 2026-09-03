@@ -652,6 +652,27 @@ TEST(StatePrior, GateSubsetArmsDespiteReachError) {
     EXPECT_LT(gate, 0.15f) << "gate EMA reads the balance subset, not the reach error";
 }
 
+TEST(StatePrior, GateWeightScalesOnlyTheGateSubsetsDescent) {
+    // 1 = byte-identical to unset (the gain-0 guard), 3 acts, and with no gate
+    // subset (consolidate_n 0) the weight has nothing to scale and stays inert.
+    ParamMap unit = consol_params(1.0);  unit["state_prior_gate_weight"] = 1.0;
+    ParamMap heavy = consol_params(1.0); heavy["state_prior_gate_weight"] = 3.0;
+    ParamMap nogate = consol_params(0.0); nogate["state_prior_gate_weight"] = 3.0;
+    Fixture a(consol_params(1.0)), b(unit), c(heavy), d(consol_params(0.0)), e(nogate);
+    float max_bc = 0.0f;
+    for (uint64_t t = 1; t <= 900; ++t) {
+        const float lean = wobble(t);
+        a.run_tick(t, lean); b.run_tick(t, lean); c.run_tick(t, lean);
+        d.run_tick(t, lean); e.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            ASSERT_EQ(a.accel(j), b.accel(j)) << "weight 1 must be byte-identical (t=" << t << ")";
+            ASSERT_EQ(d.accel(j), e.accel(j)) << "no gate subset: the weight is inert (t=" << t << ")";
+            max_bc = std::max(max_bc, std::fabs(b.accel(j) - c.accel(j)));
+        }
+    }
+    EXPECT_GT(max_bc, 1e-4f) << "weight 3 must change the controller the attitude term writes";
+}
+
 TEST(StatePrior, SparesPriorKeepsPullingAfterConsolidation) {
     ParamMap keep = consol_params(1.0);
     keep["consolidate_spares_prior"] = 1.0;

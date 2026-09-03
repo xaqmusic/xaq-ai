@@ -1568,6 +1568,7 @@ private:
     double consolidate_gain_ = 0.0;             // earned consolidation strength; 0 = off
     float  consolidate_c_    = 0.0f;            // the consolidation state ∈ [0,1]
     double consolidate_n_    = 0.0;             // gate reads only the FIRST N prior indices; 0 = all (legacy)
+    double state_prior_gate_weight_ = 1.0;      // precision of the gate (attitude) subset's descent; 1 = byte-identical
     double consolidate_spares_prior_ = 0.0;     // >0: the prior's own descent survives consolidation
     double consolidate_reach_ = 0.0;            // >0: indices ≥ consolidate_n engage at lw·c, with h (reach terms)
     double consolidate_reach_lr_ = 0.0;         // mode 5's hr write rate (µ-rate; 0 = hr never writes)

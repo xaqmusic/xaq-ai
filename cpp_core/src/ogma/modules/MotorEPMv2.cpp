@@ -279,6 +279,19 @@ ParamSchema MotorEPMv2::params_schema() const {
          "indices; extra objective terms (reach targets like the head-CoM origin) pull "
          "without holding permanence hostage.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{16.0}},
+        {"state_prior_gate_weight", ParamMutability::HotMutable,
+         "ATTITUDE PRECISION (2026-09-02, the §12.5 discriminator): the gate subset — the "
+         "first consolidate_n state_prior_indices, attitude and its rates — descends at this "
+         "multiple of the prior's rate, C and h alike; inert when consolidate_n is 0.  "
+         "1 = byte-identical.  Measured motivation: the consolidated stance has no catch "
+         "(knocked over at 0.15–0.2 N·s, the support polygon's own envelope, identical at "
+         "5–10× controller gain) and leans while plastic taught none — the pull is one "
+         "equal-weight descent on ten pose elements and four attitude elements, and a catch "
+         "is a move AWAY from the pose target.  The attitude columns of C grow ∝ E[x_att²] "
+         "only while learning runs; this weight multiplies that pressure.  A fixed-weight "
+         "probe of whether attitude precision changes the answer; the adaptive form "
+         "(precision earned from the channel's own error) follows only if it does.",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{100.0}},
         {"consolidate_spares_prior", ParamMutability::HotMutable,
          "When > 0 the state prior's own descent (lw, and its h share) is NOT annealed by "
          "consolidation.  The lr_scale anneal exists to stop the DESTROYER — the sign-blind "
@@ -1104,6 +1117,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["consolidate_calm_ticks"] = consolidate_calm_ticks_;
     m["consolidate_down_rate"] = consolidate_down_rate_;
     m["consolidate_hold"] = consolidate_hold_;
+    m["state_prior_gate_weight"] = state_prior_gate_weight_;
     m["calm_exempt_n"] = calm_exempt_n_;
     m["ctrl_damping_lr_scaled"] = ctrl_damping_lr_scaled_;
     m["consolidate_rests_act"] = consolidate_rests_act_;
@@ -1283,6 +1297,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_calm_mode", [&](auto const& v){ state_prior_calm_mode_ = get_double(v, "state_prior_calm_mode"); });
     apply_param(params, "consolidate_gain", [&](auto const& v){ consolidate_gain_ = get_double(v, "consolidate_gain"); });
     apply_param(params, "consolidate_n", [&](auto const& v){ consolidate_n_ = get_double(v, "consolidate_n"); });
+    apply_param(params, "state_prior_gate_weight", [&](auto const& v){ state_prior_gate_weight_ = get_double(v, "state_prior_gate_weight"); });
     apply_param(params, "consolidate_spares_prior", [&](auto const& v){ consolidate_spares_prior_ = get_double(v, "consolidate_spares_prior"); });
     apply_param(params, "consolidate_reach", [&](auto const& v){ consolidate_reach_ = get_double(v, "consolidate_reach"); });
     apply_param(params, "consolidate_reach_lr", [&](auto const& v){ consolidate_reach_lr_ = get_double(v, "consolidate_reach_lr"); });
@@ -4374,11 +4389,20 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                 ? std::clamp(1.0f - state_prior_gate_ema_ / 0.15f,
                                              0.0f, 1.0f)
                                 : 1.0f;
-                            const float lw_k  = reach_k ? (mode5 ? 0.0f
-                                                          : dormant ? lw * consolidate_c_
-                                                                    : lw * bal_s)
-                                                        : lw;
-                            const float hlw_k = reach_k ? lw_k : hlw;
+                            const float lw_raw  = reach_k ? (mode5 ? 0.0f
+                                                            : dormant ? lw * consolidate_c_
+                                                                      : lw * bal_s)
+                                                          : lw;
+                            const float hlw_raw = reach_k ? lw_raw : hlw;
+                            // state_prior_gate_weight: the gate (attitude) subset's
+                            // PRECISION relative to the rest of the prior — its descent,
+                            // C and h alike, runs at gw× the rate (1 = byte-identical;
+                            // the reach terms are never in the subset).  See the param's
+                            // note for the §12.5 measurement behind it.
+                            const float gw = (consolidate_n_ > 0.0 && int(k) < int(consolidate_n_))
+                                             ? float(state_prior_gate_weight_) : 1.0f;
+                            const float lw_k  = gw * lw_raw;
+                            const float hlw_k = gw * hlw_raw;
                             if (reach_k) reach_lw_last_ = lw_k;
                             const bool split = state_prior_split_ > 0.0;
                             if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);

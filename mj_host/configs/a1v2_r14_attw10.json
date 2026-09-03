@@ -1,0 +1,284 @@
+{
+  "metadata": {
+    "name": "RETRACTED \u2014 R14 attitude precision \u00d710 \u00b7 REGRESSION (\u00a713): 0/6 seeds from scratch, a found stance collapses in minutes; the lean channel is unidentified in the model",
+    "description": "Rung-2 stage R1 (2026-09-01): the regime EPM's winner_id keys per-regime self-model banks in both MotorEPMv2 instances (regime_topic wired, 6 banks).  The identification-episode carve-out, learned instead of harness-imposed: each regime's model sees only its own data; the boundary sample is dropped at switches.  Gates: banks switch (rbsw), per-bank samples distribute, standing-bank A matches probe-J signs WITHOUT the harness tilt gate, per-regime TLE < mixed, then the behavioural A/B.  STABLE VOCABULARY (2026-09-01, the operator's prune-cascade observation, mechanism confirmed in the GNG death sweep): health_death_spares_baked \u2014 earned regimes are permanent facts, not casualties of a long absence \u2014 and min_insertion_error 0.06 so near-duplicate nodes stop crown-stealing from the baked core (measured: the standing identity churned 1\u219216\u219229, sending the crown's data to the overflow bank).  EARNED CONSOLIDATION (2026-09-01): consolidate_gain 1.0 \u2014 all learning rates anneal while the prior is satisfied AND falls have stopped, re-arm when either breaks.  Measured motivation: seeds find standing in minutes (0.99 upright) and continued learning destroys it; a hand freeze preserved 0.93 but a hand-picked time is a scaffold.  A solution that keeps the body standing has EARNED slow plasticity.",
+    "env_target": "microduck",
+    "phase_tag": "A1 (first brain)",
+    "scaffolds_active": [
+      "alpha_stand.onnx via the A2 recovery harness \u2014 drives only while the body is down, with all learning rates zeroed"
+    ],
+    "launcher_rank": 71
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "legs_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.left_hip_yaw",
+          "action.left_hip_roll",
+          "action.left_hip_pitch",
+          "action.left_knee",
+          "action.left_ankle",
+          "action.right_hip_yaw",
+          "action.right_hip_roll",
+          "action.right_hip_pitch",
+          "action.right_knee",
+          "action.right_ankle"
+        ],
+        "output_topics": [
+          "reality.motor_limb.left",
+          "reality.motor_limb.right"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          9.0,
+          10.0,
+          11.0,
+          12.0,
+          13.0
+        ],
+        "group_size": 5,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 12
+      }
+    },
+    {
+      "id": "head_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.neck_pitch",
+          "action.head_pitch",
+          "action.head_yaw",
+          "action.head_roll"
+        ],
+        "output_topics": [
+          "reality.motor_limb.head"
+        ],
+        "proprio_indices": [
+          5.0,
+          6.0,
+          7.0,
+          8.0
+        ],
+        "group_size": 4,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 12
+      }
+    },
+    {
+      "id": "motor_epm_legs",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.left",
+          "reality.motor_limb.right"
+        ],
+        "action_topics": [
+          "action.left_hip_yaw",
+          "action.left_hip_roll",
+          "action.left_hip_pitch",
+          "action.left_knee",
+          "action.left_ankle",
+          "action.right_hip_yaw",
+          "action.right_hip_roll",
+          "action.right_hip_pitch",
+          "action.right_knee",
+          "action.right_ankle"
+        ],
+        "n_legs": 2,
+        "motor_dim": 5,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.1,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 1234,
+        "babble_ticks": 3000,
+        "babble_scale": 0.25,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.05,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_prior_indices": [
+          -12,
+          -11,
+          -10,
+          -9,
+          0,
+          3,
+          6,
+          9,
+          12
+        ],
+        "state_prior_targets": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_gain": 1.0,
+        "state_prior_lr": 0.1,
+        "state_prior_h_lr": 0.0,
+        "state_model_lr": 0.05,
+        "model_trace": 0.15,
+        "reset_breaks_model_pairing": 1.0,
+        "babble_isolate": 1.0,
+        "babble_hold": 6,
+        "state_prior_calm": 1.0,
+        "state_prior_calm_indices": [
+          -12.0,
+          -11.0
+        ],
+        "state_prior_calm_fixed": 0.3,
+        "regime_topic": "reality.proprio.regime",
+        "regime_banks": 6,
+        "babble_owns_a": 1.0,
+        "consolidate_gain": 1.0,
+        "consolidate_n": 4,
+        "consolidate_spares_prior": 1,
+        "consolidate_reach": 0,
+        "consolidate_calm_ticks": 500,
+        "consolidate_hold": 1,
+        "consolidate_down_rate": 0.001,
+        "state_prior_gate_weight": 10.0
+      }
+    },
+    {
+      "id": "motor_epm_head",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.head"
+        ],
+        "action_topics": [
+          "action.neck_pitch",
+          "action.head_pitch",
+          "action.head_yaw",
+          "action.head_roll"
+        ],
+        "n_legs": 1,
+        "motor_dim": 4,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.1,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 5678,
+        "babble_ticks": 3000,
+        "babble_scale": 0.25,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.05,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_prior_indices": [
+          -12,
+          -11,
+          -10,
+          -9,
+          0,
+          3,
+          6,
+          9
+        ],
+        "state_prior_targets": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_gain": 1.0,
+        "state_prior_lr": 0.1,
+        "state_prior_h_lr": 0.0,
+        "state_model_lr": 0.05,
+        "model_trace": 0.15,
+        "reset_breaks_model_pairing": 1.0,
+        "babble_isolate": 1.0,
+        "babble_hold": 7,
+        "state_prior_calm": 1.0,
+        "state_prior_calm_indices": [
+          -12.0,
+          -11.0
+        ],
+        "state_prior_calm_fixed": 0.3,
+        "regime_topic": "reality.proprio.regime",
+        "regime_banks": 6,
+        "babble_owns_a": 1.0,
+        "consolidate_gain": 1.0,
+        "consolidate_n": 4,
+        "consolidate_spares_prior": 1,
+        "consolidate_reach": 0,
+        "consolidate_calm_ticks": 500,
+        "consolidate_hold": 1,
+        "consolidate_down_rate": 0.001,
+        "state_prior_gate_weight": 10.0
+      }
+    },
+    {
+      "id": "regime_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "regime",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.sense1",
+        "proprio_state_dims": 12,
+        "max_nodes": 64,
+        "master_seed": 4242,
+        "process_every_n_ticks": 5,
+        "mitosis_error_threshold": 0.1,
+        "health_death_spares_baked": true,
+        "min_insertion_error": 0.06
+      }
+    }
+  ],
+  "edges": [],
+  "description": "R14 ATTITUDE PRECISION (2026-09-02): R13 + state_prior_gate_weight 10.  The \u00a712.5 discriminator: the consolidated stance has no catch (knocked over at 0.15-0.2 N.s, the support polygon's own envelope, identical at 5-10x controller gain) and leans while plastic taught none (the wind, \u00a712.4).  Hypothesis: the pull is one equal-weight descent on ten pose elements and four attitude elements, a catch is a move AWAY from the pose target, and locally the pose term wins.  This arm multiplies the attitude subset's descent rate; judged on the from-scratch race (does it still stand) and on the envelope of the resulting stance (does it catch more)."
+}

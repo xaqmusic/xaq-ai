@@ -586,3 +586,81 @@ $H --brain --graph $C/a1v2_r13_tax001.json --secs 7200 --seed 2 --ident-every 12
 $H --brain --graph $C/a1v2_r11_hunt.json    --secs 1800 --seed 2 --load-brain find.json --save-brain hunt.json
 $H --brain --graph $C/a1v2_r12c_whole.json  --secs 1800 --seed 2 --load-brain hunt.json --save-brain rest.json
 ```
+
+
+## 13. THE ATTITUDE PRECISION TEST (2026-09-02) — REGRESSION, and the model says why
+
+The operator chose §12.5's discriminator (i).  One gain-0-guarded knob,
+`state_prior_gate_weight` (MotorEPMv2; 1 = byte-identical, verified on the r3 reference;
+21/21 unit tests, the new one asserting the guard, the effect, and inertness without a
+gate subset): the four attitude elements — gravity x/y and the pitch/roll rates, the
+first `consolidate_n` prior indices — descend at W× the pose elements' rate, C and h
+alike.  R14 = R13 + W ∈ {3, 10} (`a1v2_r14_attw3.json`, `a1v2_r14_attw10.json`).
+
+### 13.1 From scratch, six seeds, two hours each
+
+| weight | seeds standing at 2 h | seed 2 | chaos |
+|---|---|---|---|
+| 1 (R13) | **1/6** (seed 2, permanent from 30 min) | falls 7.9 → 2.8 → 1.2 → 0.2 → 0/min, c 1.00 | 13 mrad/tick |
+| 3 | **0/6** | 11 → 17 → 16 → 16 … 16/min, c 0.00 throughout | 16–22 mrad/tick |
+| 10 | **0/6** | 12 → 15 → 14 → 16 → 19 … 13/min, c 0.00 throughout | 14–22 mrad/tick |
+
+No seed at either weight earns any consolidation in two hours, seed 2 included, and the
+chaos is more energetic than at weight 1.  The R4b/R5 wall (§8): a stronger pull before
+the basin is found loses the race.
+
+### 13.2 After the basin is found — resume the weight-1 stander under the weight
+
+Seed 2's R13 brain (c 1.00, standing 90 min), one hour, R13 keeps the prior live at c = 1
+(`consolidate_spares_prior` 1), so the weight acts at once:
+
+| arm | first 10 min | hour |
+|---|---|---|
+| weight 1 + wind 0.5 N (control) | 0.2 falls/min, c 0.99 | holds 40 min, erodes to c 0.20 (§12.4 again) |
+| weight 3 | 10.6 falls/min, c 0.25 → 0 | 11–15/min, c 0, \|dq\| 16–20 |
+| weight 3 + wind | 8.7/min, c 0.35 → 0 | 10–16/min, c 0 |
+| weight 10 | 17.2/min, c 0.09 → 0 | 12–19/min, c 0, \|dq\| 18–22 |
+| weight 10 + wind | 18.0/min, c 0.09 → 0 | 13–21/min, c 0 |
+
+The stance is destroyed within minutes at either weight.  The wind runs delivered 4/177
+and 37/274 caught shoves against the control's 339/420.
+
+### 13.3 Discriminator (ii), read from the saved brain — the lean channel is unidentified
+
+Row norms of the identified state model A (each row: the five leg motors' authority over
+one state index), seed 2's R13 brain:
+
+| | gravity x | gravity y | pitch rate | roll rate | | joint positions |
+|---|---|---|---|---|---|---|
+| legs | 0.011 | 0.003 | 0.044 | 0.214 | | 0.221 | 0.039 | 0.205 | 0.036 | 0.218 |
+| head (4 motors) | 0.027 | 0.020 | 0.016 | 0.019 | | 0.012 | 0.016 | 0.018 | 0.021 |
+
+**The model knows a joint move barely moves the gravity vector in one tick** — the lean
+rows sit 20× below the pose rows (the Gauss-Newton step divides by ‖A(idx,:)‖² + reg_eps,
+so an unidentified channel gets a damped step, by design: "pushing hard through an
+unlearned model is how a prior becomes a flail").  The one attitude row the model does
+know is the roll rate.  So the weight had nothing to amplify on the lean and amplified
+rate feedback instead — into a loop already at its phase margin (the 5.5 Hz limit cycle,
+§10) — which is exactly a faster, more violent oscillation and a fall.  The controller's
+attitude columns are not small (norms 18–30 un-hunted, 3–6 after the hunt, the pose
+columns' size): C carries attitude gain, written by every prior term's row update and by
+HK, and the §11.2 topple showed it is not a catch.
+
+### 13.4 Verdicts
+
+- **Attitude precision as a fixed weight: REGRESSION** (W 3 and 10; from scratch, 6 seeds
+  × 2 h, 0/6 vs 1/6; and on a found stance, collapse within 10 min at both weights).
+- **Discriminator (ii) answered: the catch has no gradient at the MODEL.**  A catch is a
+  second-order fact — a joint torque moves the lean through its acceleration — and a
+  one-step model of lean sees it only through the rate rows.  Precision cannot exceed what
+  the model knows; the wind (§12.4) leaned a body whose model could not attribute the lean
+  to any action, so nothing was learned from it either.  This closes §11.5 option A, §12.5
+  (i), and (ii) together with one cause.
+- **Re-use context** (what would justify retrying attitude precision): a model that
+  identifies action → lean — temporal depth on the attitude channel (the trace mechanism
+  `model_trace` exists, at 0.15; an attitude-row trace long enough to see a torque become a
+  lean), or an identification episode in which leans are the babble's own consequence
+  rather than the harness's; then the weight, with the lean rows identified, is the same
+  experiment with its gradient present.  Until then a stronger attitude pull can only be
+  stronger rate feedback.  The `model_trace` arm is config-only and is the natural next
+  probe; the operator's call.
