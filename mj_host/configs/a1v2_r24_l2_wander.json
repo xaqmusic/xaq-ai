@@ -1,0 +1,154 @@
+{
+  "metadata": {
+    "name": "R24 \u00b7 level-2 map + surprise prior \u2014 NULL (\u00a717.3): the map learns the arena (34 nodes), the surprise row of A is zero, the orbit stays",
+    "description": "Phase 1e of the intent boundary (design doc \u00a716.4): the same module code one level up. The 'motors' are the three twist commands (vx, vy, vyaw) to Pollen's walking policy, the 'senses' are the body's own velocity from contact odometry and the gyro, normalised by the trained command ranges (0.4, 0.3, 1.0). Identification by held twist pulses (babble_hold 75 ticks = 1.5 s, scale 0.8 of range \u2014 above the walker's ~0.25 m/s standing regime), one motor at a time, alternating sign. Judged on the identified A: the velocity rows against the commands must be positive on the diagonal and dominant, per axis, against the walker's measured response (\u00a716.2). No prior, no controller learning: identification only.",
+    "env_target": "microduck",
+    "phase_tag": "intent boundary 1e",
+    "launcher_rank": 1024,
+    "scaffolds_active": [
+      "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "twist_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.intent",
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "output_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 16
+      }
+    },
+    {
+      "id": "motor_epm_intent",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "n_legs": 1,
+        "motor_dim": 3,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.0,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 9090,
+        "babble_ticks": 30000,
+        "babble_scale": 0.8,
+        "babble_isolate": 1.0,
+        "babble_hold": 75,
+        "babble_owns_a": 1.0,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.02,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_model_lr": 0.05,
+        "model_trace": 0.05,
+        "reset_breaks_model_pairing": 1.0,
+        "state_prior_gain": 1.0,
+        "consolidate_gain": 0.0,
+        "state_prior_indices": [
+          0,
+          -5,
+          -4,
+          -3,
+          -2
+        ],
+        "state_prior_targets": [
+          0.75,
+          0.6,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_lr": 0.1,
+        "consolidate_n": 0
+      }
+    },
+    {
+      "id": "map_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "place",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.place_in",
+        "proprio_state_dims": 12,
+        "dim_min": [
+          -0.6,
+          -0.6,
+          -1.0,
+          -1.0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "dim_max": [
+          0.6,
+          0.6,
+          1.0,
+          1.0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "max_nodes": 128,
+        "master_seed": 4343,
+        "process_every_n_ticks": 5,
+        "mitosis_error_threshold": 0.1,
+        "health_death_spares_baked": true,
+        "min_insertion_error": 0.06
+      }
+    }
+  ],
+  "edges": [],
+  "description": "R24 (level-2 wander: a map EPM over place (odometry + the ToF columns) and a prior that expects to be surprised \u2014 avoidance kept), from a1v2_r23_l2_avoid.json: Phase 2b (design doc \u00a717.3): a slow EPM (map_epm, rbf, 12 dims: x/2, y/2, cos, sin, the eight column ranges/4 m, every 5 ticks) is the learned novelty grid; its surprise enters the level-2 sense as slot 11 and a prior of 0.6 on it says 'I expect to be surprised' \u2014 the curiosity drive as a prediction to fulfil. R23's avoidance priors stay. Judged on coverage (cells visited) with collisions still zero, the map's growth, and the (d) test: a wall moved at 1100 s (--arena-shift) should raise the surprise and pull the body back to what changed."
+}

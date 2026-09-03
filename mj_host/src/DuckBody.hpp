@@ -80,6 +80,8 @@ public:
     // Instrumentation: is any part of the robot in contact with a geom whose name starts
     // with "wall"?  World-frame knowledge for the reader; no brain subscribes to it.
     bool touching_wall() const;
+    // Relocate a world geom mid-episode (the (d) test: move a wall and watch the map re-learn).
+    void move_geom(const char* name, const std::array<double, 3>& pos);
     // A site's world pose (position and rotation matrix), for casting rays from it.
     void site_world(const char* site, std::array<double, 3>& pos, std::array<double, 9>& mat) const;
     // A site's pose relative to the trunk body frame — forward kinematics, a pure

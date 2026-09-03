@@ -315,5 +315,41 @@
       "walk_from": -1,
       "scene": "scene_arena.xml"
     }
+  },
+  {
+    "name": "R24 · level-2 map + surprise prior in the arena — NULL: the map learns, the prior has no gradient (headless, 1500 s)",
+    "series": 24,
+    "hint": "Phase 2b first probe (§17.3): the map EPM over place reaches 34 nodes for 33 cells under a touring walker and its surprise falls as the arena becomes familiar; but the identified A row for surprise is zero, so a prior on it moves nothing and the R23 orbit stays. Kept as the record.",
+    "state": {
+      "config": "a1v2_r24_l2_wander.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml"
+    }
+  },
+  {
+    "name": "R25 · level-2 wander by boredom + heading + avoidance — REGRESSION: rides the walls (headless, 1500 s)",
+    "series": 25,
+    "hint": "Phase 2b second probe (§17.4): with the heading prior back, the body rides the walls at ~290 contacts/min because the heading row outweighs the barely identified proximity rows; 32 boredom-driven heading changes did not change coverage. The arbitration question, measured. Run with --wander-bored 8 --wander-turn 90 for the rule.",
+    "state": {
+      "config": "a1v2_r25_l2_lookaround.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml"
+    }
   }
 ]

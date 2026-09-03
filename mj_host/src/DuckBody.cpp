@@ -135,6 +135,13 @@ std::array<double, 4> DuckBody::imu_quat() const {
     return {q[0], q[1], q[2], q[3]};
 }
 
+void DuckBody::move_geom(const char* name, const std::array<double, 3>& pos) {
+    const int gid = mj_name2id(m_, mjOBJ_GEOM, name);
+    if (gid < 0) throw std::runtime_error(std::string("no geom ") + name);
+    for (int i = 0; i < 3; ++i) m_->geom_pos[3 * gid + i] = pos[i];
+    mj_forward(m_, d_);
+}
+
 bool DuckBody::touching_wall() const {
     for (int i = 0; i < d_->ncon; ++i) {
         for (int g : {d_->contact[i].geom1, d_->contact[i].geom2}) {

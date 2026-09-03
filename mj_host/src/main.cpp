@@ -1200,6 +1200,9 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
 // gate is the sign and dominance of the identified A's velocity rows per command.
 // ---------------------------------------------------------------------------
 
+double g_arena_shift_s = -1.0;   // > 0: at this time move wall_px from x = 1.0 to x = 0.5 (the (d) test)
+double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
+
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
                bool emit, const PushPlan& pushes = {}, const std::array<double, 3>* open_loop = nullptr) {
     DuckBody body(scene);
@@ -1208,10 +1211,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     Recovery recovery;
     IntentAdapter brain(graph, seed);
     if (open_loop) brain.set_override(*open_loop);
+    if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
     std::array<float, 4> tof_summary{};
+    std::array<float, 12> place{};             // x/2, y/2, cos, sin, the 8 column ranges / 4 m
     int tof_ticks = 0;
+    bool shifted = false;
     const int push_period = int(pushes.every_s * kBrainHz);
     const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
     const int push_from   = int(pushes.from_s * kBrainHz);
@@ -1255,7 +1261,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         const auto g = body.gravity();
         const auto w = body.gyro();
         const auto a = body.accel();
-        const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary);
+        if (g_arena_shift_s > 0.0 && !shifted && t >= int(g_arena_shift_s * kBrainHz)) {
+            body.move_geom("wall_px", {0.5, 0.0, 0.15});
+            shifted = true;
+            std::fprintf(stderr, "  arena shift at %.0f s: wall_px moved to x = 0.5\n", g_arena_shift_s);
+        }
+        const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         if (driver == Driver::Brain) command.twist = twist;
 
         if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from && t % push_period == 0
@@ -1295,6 +1306,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 tof.sense(body, p[2]);
                 tof_summary = tof.summary();
                 ++tof_ticks;
+            }
+            {
+                const auto col = tof.column_hit();
+                place = {float(p[0] / 2.0), float(p[1] / 2.0), float(std::cos(yaw)), float(std::sin(yaw)),
+                         float(col[0] / 4.0), float(col[1] / 4.0), float(col[2] / 4.0), float(col[3] / 4.0),
+                         float(col[4] / 4.0), float(col[5] / 4.0), float(col[6] / 4.0), float(col[7] / 4.0)};
             }
             if (have_prev) {
                 const double vx_w = (p[0] - prev_odom[0]) * kBrainHz, vy_w = (p[1] - prev_odom[1]) * kBrainHz;
@@ -1338,8 +1355,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             for (const auto& z : tof.zones()) std::printf("%d", int(z.cls));
             std::printf("\",\"tofr\":[");
             for (int i = 0; i < Tof::kZones; ++i) std::printf("%s%.2f", i ? "," : "", tof.zones()[i].range);
-            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d}\n", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
-                        body.touching_wall() ? 1 : 0);
+            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"map\":[%.3f,%d,%d,%d]}\n", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
+                        body.touching_wall() ? 1 : 0, brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
+                        (t % 25 == 0) ? brain.map_nodes() : -1);
         }
     }
 
@@ -1376,6 +1394,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             }
         }
     }
+    if (g_wander_bored_s > 0.0)
+        std::fprintf(stderr, "  wander: %d heading changes of %.0f deg after %.0f s of familiarity\n",
+                     brain.wander_turns(), g_wander_turn_deg, g_wander_bored_s);
     if (pushes.newtons > 0.0)
         std::fprintf(stderr, "  %.1f N shoves every %.1f s from %.0f s: %d delivered\n", pushes.newtons,
                      pushes.every_s, pushes.from_s, pushes_delivered);
@@ -1510,6 +1531,12 @@ int main(int argc, char** argv) {
             walk.vy = std::stod(next("--walk-vy"));
         } else if (a == "--walk-vyaw") {
             walk.vyaw = std::stod(next("--walk-vyaw"));
+        } else if (a == "--wander-bored") {
+            g_wander_bored_s = std::stod(next("--wander-bored"));
+        } else if (a == "--wander-turn") {
+            g_wander_turn_deg = std::stod(next("--wander-turn"));
+        } else if (a == "--arena-shift") {
+            g_arena_shift_s = std::stod(next("--arena-shift"));
         } else if (a == "--l2-twist") {
             l2_twist[0] = std::stod(next("--l2-twist")); l2_twist[1] = std::stod(next("--l2-twist"));
             l2_twist[2] = std::stod(next("--l2-twist")); l2_open_loop = true;

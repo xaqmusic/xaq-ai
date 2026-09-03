@@ -33,7 +33,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                                           const std::array<double, 3>& g,
                                           const std::array<double, 3>& w,
                                           const std::array<double, 3>& a,
-                                          double odom_yaw, const std::array<float, 4>& tof) {
+                                          double odom_yaw, const std::array<float, 4>& tof,
+                                          const std::array<float, 12>* place) {
     std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     auto* bus = instance_->bus();
     const auto publish = [&](const char* sensor, const std::vector<float>& values) {
@@ -75,11 +76,30 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // sensed velocity again, two spare.
     publish("sense", {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
                       unit(a[0] / 20.0), unit(a[1] / 20.0), unit(a[2] / 20.0),
-                      last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846), float(std::cos(odom_yaw)),
+                      last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846),
+                      unit(map_tle_),                    // slot 11: the map's surprise — novelty
                       tof[0], tof[1], tof[2], tof[3]});
+    if (place) publish("place_in", std::vector<float>(place->begin(), place->end()));
 
     instance_->tick();
     inspector_->publish_tick(tick_id_);
+    if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.proprio.place"))) {
+        map_tle_ = rt->tle; map_novel_ = rt->is_novel; map_winner_ = rt->winner_id;
+    }
+    // Wander: boredom is the map's surprise sitting below 0.8 of its own long average
+    // (τ 3000 ticks) — self-scaled, no constant tuned to the signal — for bored_s.
+    if (wander_bored_s_ > 0.0) {
+        map_tle_long_ += (1.0 / 3000.0) * (map_tle_ - map_tle_long_);
+        const bool bored_now = map_tle_long_ > 0.0 && map_tle_ < 0.8 * map_tle_long_;
+        bored_ticks_ = bored_now ? bored_ticks_ + 1 : 0;
+        if (bored_ticks_ >= int(wander_bored_s_ * 50.0)) {
+            bored_ticks_ = 0;
+            wander_rng_ ^= wander_rng_ << 13; wander_rng_ ^= wander_rng_ >> 7; wander_rng_ ^= wander_rng_ << 17;
+            const double sign = (wander_rng_ & 1) ? 1.0 : -1.0;
+            heading_ref_ += sign * wander_turn_deg_ * 3.14159265358979323846 / 180.0;
+            ++wander_turns_;
+        }
+    }
 
     static const char* const kActions[3] = {"action.vx", "action.vy", "action.vyaw"};
     static const double kRanges[3] = {kTwistRangeVx, kTwistRangeVy, kTwistRangeVyaw};
@@ -132,6 +152,20 @@ void IntentAdapter::set_learning(bool on) {
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
+
+void IntentAdapter::set_wander(double bored_s, double turn_deg, uint64_t seed) {
+    wander_bored_s_ = bored_s; wander_turn_deg_ = turn_deg;
+    wander_rng_ ^= (seed + 1) * 0x9E3779B97F4A7C15ull;
+}
+
+int IntentAdapter::map_nodes() const {
+    for (auto* m : instance_->modules()) {
+        if (std::string(m->id()) != "map_epm") continue;
+        const auto d = m->diag_lite();
+        if (d.contains("nodes")) return d["nodes"].get<int>();
+    }
+    return -1;
+}
 
 std::vector<std::string> IntentAdapter::diagnostics() const {
     std::vector<std::string> out;

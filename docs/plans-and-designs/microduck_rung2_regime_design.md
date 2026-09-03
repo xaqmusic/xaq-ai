@@ -1086,3 +1086,77 @@ DEGENERATE** — and the reason is the one the design named in advance: avoidanc
 constraint, not a drive; the drive is novelty (phase 2b).  Also learned: the walk-straight
 brain pins itself against a wall at 43 % of ticks, which on hardware is a stalled servo —
 the proximity priors are a safety result before they are a behaviour.
+
+### 17.3 Phase 2b, first probe (R24) — a map that learns the arena, and a surprise prior with no gradient
+
+A slow EPM over the robot's own place vector — dead-reckoned x/2, y/2, cos and sin of the
+heading, the eight ToF column ranges / 4 m, RBF-encoded, every 5 ticks (`map_epm`) — is the
+learned novelty grid; its surprise (TLE) enters the level-2 sense as slot 11 and R24 puts a
+prior of 0.6 on it: "I expect to be surprised", curiosity as a prediction to fulfil, with
+R23's avoidance priors kept.  1500 s in the arena, and 1800 s with the far wall moved from
+x = 1.0 to 0.5 at 1100 s (`--arena-shift`, the (d) test):
+
+| arm | cells (0.25 m), control phase | span | map nodes | map TLE / novel | walls |
+|---|---|---|---|---|---|
+| R23 avoidance | 9 | 0.5 × 0.6 m | — | — | 0 |
+| **R24 + surprise prior** | **9** | 0.6 × 0.6 m | 8 | 0.13 / 33 % | 0 |
+| R24, wall moved at 1100 s | 9 before, 9 after | unchanged | 8 → 11 | 0.13 → 0.10 | 0 |
+| open-loop walker, map only | 33 | the whole arena | 30 at 5 min, **34** plateau | 0.21 → 0.14 / 30 → 18 % | 45/min |
+
+**The map works**: under a walker that tours the arena it settles at 34 nodes for 33 visited
+cells, and its surprise falls as the arena becomes familiar — a learned familiarity signal,
+egocentric by construction.  **The prior on it does nothing**: the identified A row for the
+surprise slot is [4e-4, −7e-5, 3e-4] — zero to the precision that matters — because surprise
+depends on where the body has been, not linearly on the command it gives now.  With no
+gradient, the orbit R23 learned (a turn away from anything near, on either side) stays the
+attractor, the map sees eight places, and a moved wall adds three nodes without drawing the
+body toward it.  **Verdict: NULL** — with its cause: novelty is sensed but not yet a
+*direction*.  Two ways to make it one, the operator's fork: (a) a level-3 inference on the
+map — the bearing to the least-visited region as a learned "where to go" belief, the
+doctrine's own requirement that selection be learned; (b) the map's familiarity gating a
+change of the heading the brain keeps — cheap, testable now, and the first form of their
+Wander/LookAround.  (b) is measured next as R25.
+
+### 17.4 Phase 2b, second probe (R25) — wander by boredom, and the arbitration question
+
+R25 = R24's map + R22's heading prior + R23's avoidance priors + the host's wander rule
+(`--wander-bored 8 --wander-turn 90`: when the map's surprise has sat below 0.8 of its own
+long average for 8 s, the heading reference behind sense slot 10 jumps by 90° with a random
+sign and the heading prior turns the body; novelty holds the heading — self-scaled, no
+constant tuned to the signal).  1500 s in the arena, seed 2:
+
+| arm | wall-contact episodes | cells | span | map nodes / TLE | heading changes |
+|---|---|---|---|---|---|
+| R25 without the wander rule (heading + avoidance priors) | **297/min** | 28 | the whole arena | 46 / 0.21 | — |
+| R25, turn 90° | 286–294/min | 28–32 | the whole arena | 44–50 / 0.21 | 32 |
+| R25, turn 135° | 280/min | 28 | the whole arena | 36 / 0.22 | 35 |
+| R25, wall moved at 1100 s | 294 → 272 → 269/min | 32 → 8 → **1** | pinned in a corner by the moved wall | 44 → 31 / 0.22 → 0.06 | 23 |
+| R23 (avoidance only, §17.2) | 0/min | 9 | an orbit | — | — |
+| open loop | 46/min | 33 | the whole arena | 34 / 0.14 | — |
+
+**Verdict: REGRESSION**, with two causes that are the same cause.  The heading prior wins
+against the avoidance priors because its identified row (0.0034) is four times the
+proximity rows' (0.0009), so the body rides the walls: full coverage by contact, worse than
+the open loop's 46 contacts a minute.  The proximity rows are weak because the babble
+rarely met a wall and the state model is babble-owned (`babble_owns_a` 1), so nothing the
+body learned about walls afterwards ever entered A.  The wander rule changed the heading
+32 times and the coverage not at all, and after the wall moved the body ended in a corner
+with the map's surprise at 0.06 — nothing new to see, nowhere to go.
+
+**What phase 2 has established, and the fork it leaves.**  The eyes work (17.1); avoidance
+as a constraint works and pins the body in an orbit without a drive (17.2); the map works as
+a learned familiarity signal (17.3); and a single linear pull cannot hold three behaviours
+at once — forward, avoid, keep heading — because it resolves their conflicts by the size of
+the identified rows, not by need (17.4).  That is the arbitration question the design named
+in §3 ("presence, mood and the beat are inputs to one brain"; the Cell report's "curiosity
+must yield to need"), now measured.  Two things to decide, the operator's:
+
+1. **Identification of the world channels.** Let the state model keep learning after the
+   babble at level 2 (`babble_owns_a` 0 — the one-owner rule was about the babble *phase*),
+   so wall encounters identify the proximity rows; or babble deliberately near walls.
+2. **Arbitration.** Behaviours as separate loops with the LateralVoter's precision
+   weighting (the substrate this brain already has one level down), so avoidance carries
+   the precision when something is near and heading or novelty otherwise — rather than one
+   pull on one C.  With that in place the drive question (a level-3 "where to go" inference
+   on the map versus a boredom-gated heading) can be answered on a controller that can
+   hold more than one thing true.

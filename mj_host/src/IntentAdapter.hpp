@@ -43,7 +43,21 @@ public:
                                const std::array<double, 3>& gyro,
                                const std::array<double, 3>& accel,
                                double odom_yaw = 0.0,
-                               const std::array<float, 4>& tof = {0.0f, 0.0f, 0.0f, 0.0f});
+                               const std::array<float, 4>& tof = {0.0f, 0.0f, 0.0f, 0.0f},
+                               const std::array<float, 12>* place = nullptr);
+    // The map: a slow EPM over the place vector (dead-reckoned x, y, heading, the eight
+    // column ranges) publishes reality.proprio.place; its surprise is the novelty the
+    // brain senses (slot 11) and, with a prior, seeks.
+    double map_tle() const { return map_tle_; }
+    bool   map_novel() const { return map_novel_; }
+    int    map_winner() const { return map_winner_; }
+    int    map_nodes() const;
+    // Wander (phase 2b, R25): when the map has been unsurprised — its surprise below a
+    // fraction of its own long average — for bored_s seconds, the heading the brain keeps
+    // (the slow reference behind sense slot 10) jumps by turn_deg with a random sign, and
+    // the heading prior turns the body.  Novelty holds the heading.  0 = off.
+    void set_wander(double bored_s, double turn_deg, uint64_t seed);
+    int wander_turns() const { return wander_turns_; }
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
 
@@ -68,6 +82,10 @@ private:
     bool has_override_ = false;
     double heading_ = 0.0, prev_yaw_ = 0.0;   // the odometry yaw, unwrapped: a continuous heading
     double heading_ref_ = 0.0;                // its slow running average — the heading "I have been keeping"
+    double map_tle_ = 0.0; bool map_novel_ = false; int map_winner_ = -1;
+    double wander_bored_s_ = 0.0, wander_turn_deg_ = 90.0;
+    double map_tle_long_ = 0.0; int bored_ticks_ = 0; int wander_turns_ = 0;
+    uint64_t wander_rng_ = 0x9E3779B97F4A7C15ull;
     bool have_yaw_ = false;
 };
 
