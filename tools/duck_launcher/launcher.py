@@ -261,18 +261,33 @@ class Run:
     def __init__(self, p, proc, seed):
         self.p, self.proc, self.seed = p, proc, seed
         self.started = time.time()
+        self.ended = None          # wall clock at exit; the elapsed column stops there
+        self.stopped = False       # we terminated it (a Stop is not a failure)
         self.rc = None
 
     @property
     def status(self):
         if self.rc is None:
             return "running"
+        if self.stopped:
+            return "stopped"
         return "done" if self.rc == 0 else f"exit {self.rc}"
+
+    @property
+    def elapsed(self):
+        return (self.ended or time.time()) - self.started
 
     def poll(self):
         if self.rc is None:
             self.rc = self.proc.poll()
+            if self.rc is not None:
+                self.ended = time.time()
         return self.rc
+
+    def stop(self):
+        if self.poll() is None:
+            self.stopped = True
+            self.proc.terminate()
 
 
 def launch(p):
@@ -618,17 +633,24 @@ def build_window():
 
     def do_stop():
         r = selected_run()
-        if r and r.poll() is None:
-            r.proc.terminate()
+        if r:
+            r.stop()
 
-    def do_replay():
+    def replay(fast):
         r = selected_run()
         if not r:
             return
         if not r.p["jsonl"].exists():
             messagebox.showinfo("replay", "no JSONL for this run yet")
             return
-        subprocess.Popen([str(VIEWER_PY), str(VIEWER), "replay", str(r.p["jsonl"]), "--fast"], cwd=str(REPO))
+        cmd = [str(VIEWER_PY), str(VIEWER), "replay", str(r.p["jsonl"])] + (["--fast"] if fast else [])
+        subprocess.Popen(cmd, cwd=str(REPO))
+
+    def do_replay():
+        replay(fast=True)
+
+    def do_replay_realtime():
+        replay(fast=False)
 
     def do_report():
         r = selected_run()
@@ -655,9 +677,9 @@ def build_window():
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
         subprocess.Popen(["xdg-open", str(RUNS_DIR)])
 
-    for txt, fn in (("Launch", do_launch), ("Stop", do_stop), ("Replay", do_replay),
-                    ("Report", do_report), ("Copy command", do_copy), ("Open log dir", do_open),
-                    ("Health gates", do_gates)):
+    for txt, fn in (("Launch", do_launch), ("Stop", do_stop), ("Replay (fast)", do_replay),
+                    ("Replay (real time)", do_replay_realtime), ("Report", do_report),
+                    ("Copy command", do_copy), ("Open log dir", do_open), ("Health gates", do_gates)):
         ttk.Button(brow, text=txt, command=fn).pack(side="left", padx=(0, 6))
     ttk.Button(brow, text="Quit", command=root.destroy).pack(side="right")
 
@@ -673,8 +695,7 @@ def build_window():
         for i, r in enumerate(runs):
             was = r.rc
             r.poll()
-            elapsed = f"{time.time() - r.started:.0f} s"
-            tree.item(str(i), values=(r.status, elapsed, r.p["name"]))
+            tree.item(str(i), values=(r.status, f"{r.elapsed:.0f} s", r.p["name"]))
             if was is None and r.rc is not None and r is sel:
                 on_select(None)
                 refresh_checkpoints()

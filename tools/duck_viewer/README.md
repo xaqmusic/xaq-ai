@@ -61,3 +61,16 @@ On this Wayland/XWayland setup the live window prints
 warning on exit. Frames stream, telemetry prints and the run saves correctly either way. If the
 window turns out to be unusable on your driver, `record` renders through EGL offscreen and is
 verified working — reach for that and say so, and this note gets replaced by a fix.
+
+## Who is driving
+
+`live` and `replay` draw a status overlay in the window, where the eye already is:
+
+- a **ball** above the duck — **green** while the brain drives, **red** while the recovery
+  scaffold has the body, grey for a run with no driver (`--hold`);
+- a **blue bar** beside it whose length is the earned consolidation `c` (the smaller of
+  the two MotorEPMs);
+- an **orange arrow** along the force while a shove is being applied, longer with the newtons.
+
+Hand-offs are also printed as their own line in the terminal (`t=… -> scaffold`), and the
+status line carries the driver, `c`, the active push and any harness event.

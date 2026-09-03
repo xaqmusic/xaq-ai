@@ -27,7 +27,7 @@ it builds argv for `mj_host/build/ogma_mjhost` and, for watching, hands it to
 | Perturbation | force, period, hold, start | `--push --push-every --push-hold --push-from` |
 | Extras | amp, freeze-after, no-tilt-gate, servo-filter; hold noise; stub amp/drift | `--amp --freeze-after --no-tilt-gate --servo-filter --noise --stub-amp --stub-drift` |
 | Command | the run, as a shell line | |
-| Runs | Launch · Stop · Replay (viewer, fast) · Report (`push_report.py`) · Copy command · Open log dir · Health gates; the selected run's summary | |
+| Runs | Launch · Stop · Replay (fast) · Replay (real time) · Report (`push_report.py`) · Copy command · Open log dir · Health gates; each run's status and elapsed (frozen at exit; a Stop reads "stopped") and the selected run's summary | |
 
 Selections persist in `mj_host/log/launcher_state.json`. Runs go to
 `mj_host/log/launcher/<stamp>_<config>_s<seed>[_pushN].{jsonl,err,brain.json}` —
