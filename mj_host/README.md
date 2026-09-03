@@ -77,6 +77,15 @@ follow: `0` upright, `1` a real fall, `3` not watched long enough.
 Runs reserve a clean tail automatically: nothing is shoved inside the final recovery window, so
 a conclusive run is what you get by default and an inconclusive one takes effort.
 
+### The inspector
+
+Every brain-driving host serves the inspector's two sockets exactly as the Godot host does:
+control on TCP 7400 (`OGMA_INSPECTOR_PORT`; 0 disables) and the diag stream on 7401. So
+`tools/run_inspector.sh` attaches to a running duck brain unchanged, and `tools/xaq_voice`
+can subscribe to its `lite` topic. Start a live (viewer-paced) run first — a headless run
+finishes in seconds — then press Inspector in the launcher, or run the script. A port already
+taken (a battery of hosts) logs one line and the run proceeds without an inspector.
+
 ### The launcher
 
 `./mj_host/run.sh launcher` opens the experiment launcher

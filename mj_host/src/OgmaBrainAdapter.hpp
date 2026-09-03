@@ -38,7 +38,10 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <mutex>
+
 #include "DuckBody.hpp"
+#include "InspectorSurface.hpp"
 #include "Recovery.hpp"
 
 namespace ogma {
@@ -138,6 +141,8 @@ private:
     Config c_;
     std::array<double, kNumPolicyJoints> home_{};
     std::unique_ptr<ogma::OgmaInstance> instance_;
+    std::recursive_mutex instance_mtx_;                 // the tick vs the inspector's verbs
+    std::unique_ptr<InspectorSurface> inspector_;
     bool servo_filter_ = false;                 // robotd's target low-pass; off = legacy raw
     bool filt_init_ = false;
     std::array<double, kNumPolicyJoints> filt_{};

@@ -24,6 +24,7 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
             }
     }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_);
 }
 
 IntentAdapter::~IntentAdapter() = default;
@@ -33,6 +34,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                                           const std::array<double, 3>& w,
                                           const std::array<double, 3>& a,
                                           double odom_yaw) {
+    std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     auto* bus = instance_->bus();
     const auto publish = [&](const char* sensor, const std::vector<float>& values) {
         auto p = std::make_shared<ogma::ProprioToken>();
@@ -76,6 +78,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                       last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846), float(std::cos(odom_yaw))});
 
     instance_->tick();
+    inspector_->publish_tick(tick_id_);
 
     static const char* const kActions[3] = {"action.vx", "action.vy", "action.vyaw"};
     static const double kRanges[3] = {kTwistRangeVx, kTwistRangeVy, kTwistRangeVyaw};

@@ -754,9 +754,16 @@ def build_window():
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
         subprocess.Popen(["xdg-open", str(RUNS_DIR)])
 
+    def do_inspector():
+        # The sidecar inspector attaches to the live host's control socket (7400) and
+        # diag stream (7401); every brain-driving host serves them.  Headless runs finish
+        # in seconds, so this is for a run in the viewer window.
+        subprocess.Popen([str(REPO / "tools/run_inspector.sh")], cwd=str(REPO))
+
     for txt, fn in (("Launch", do_launch), ("Stop", do_stop), ("Replay (fast)", do_replay),
                     ("Replay (real time)", do_replay_realtime), ("Report", do_report),
-                    ("Copy command", do_copy), ("Open log dir", do_open), ("Health gates", do_gates)):
+                    ("Copy command", do_copy), ("Open log dir", do_open), ("Health gates", do_gates),
+                    ("Inspector", do_inspector)):
         ttk.Button(brow, text=txt, command=fn).pack(side="left", padx=(0, 6))
     ttk.Button(brow, text="Quit", command=root.destroy).pack(side="right")
 

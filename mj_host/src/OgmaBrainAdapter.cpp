@@ -46,6 +46,7 @@ OgmaBrainAdapter::OgmaBrainAdapter(const DuckBody& body, Config config) : c_(std
 
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg),
                                                      std::make_unique<ogma::InProcessBus>());
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_);
 
     // The action topics this host polls, one per policy joint, named after the
     // joint itself. The graph config must publish exactly these.
@@ -185,9 +186,11 @@ void OgmaBrainAdapter::publish_sensors(const DuckBody& body) {
 }
 
 std::array<double, kNumPolicyJoints> OgmaBrainAdapter::act(const DuckBody& body) {
+    std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     publish_sensors(body);
 
     instance_->tick();
+    inspector_->publish_tick(tick_id_);
 
     // Poll AFTER the tick and BEFORE bumping the tick id: modules stamped their
     // tokens with the Scheduler's current tick, and bumping first shifts the

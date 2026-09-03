@@ -11,7 +11,11 @@
 #include <string>
 #include <vector>
 
+#include <mutex>
+
 #include <nlohmann/json_fwd.hpp>
+
+#include "InspectorSurface.hpp"
 
 namespace ogma { class OgmaInstance; }
 
@@ -50,6 +54,8 @@ public:
 
 private:
     std::unique_ptr<ogma::OgmaInstance> instance_;
+    std::recursive_mutex instance_mtx_;
+    std::unique_ptr<InspectorSurface> inspector_;
     uint64_t tick_id_ = 0;
     std::array<double, 3> last_twist_{};
     std::array<float, 3> last_sensed_{};
