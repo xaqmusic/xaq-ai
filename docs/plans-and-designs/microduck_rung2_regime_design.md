@@ -801,3 +801,52 @@ on `duck_r19_s2`:
 
 R19 is promoted: `★ STACK` in the launcher, the old R13 → R11 → R12c chain relabelled
 `PIPELINE (old lineage)`.
+
+## 15. PHASE 0 OF THE INTENT BOUNDARY (2026-09-03) — the step hand-off
+
+The first capability of "the middle" ([intent-boundary design](microduck_intent_boundary_design.md)
+§4, phase 0): when the reflex's in-place catch is about to fail, hand the joints to the walker,
+let it recover, hand back.  Host-only; no brain code changed.
+
+### 15.1 The trigger, measured before it was written
+
+Across six R19 brains and 72 shoves, a caught shove never leans past 5.4° (projected-gravity
+lean), and every 3 N topple passes 5.8° by 300 ms with the lean still rising, 8° by 400 ms,
+10° by 500 ms — about 700 ms before the fall detector fires.  `--step-lean 6.5` with three
+consecutive rising ticks separates the two classes with margin, on the same egocentric
+signal the fall detector reads.  The hand-off reuses the identification path's machinery:
+learning off, pairing invalidated at both edges, the walker (`alpha_stand`, the standing
+network given a twist) drives for `--step-twist-secs` then until still or `--step-settle-secs`,
+handback resets the brain's action memory.  A rescue that starts mid-step ends the step and is
+counted.  0 disables; byte-identical on the r3 reference.
+
+### 15.2 Results (seed 2 checkpoint unless stated; 0.1 s shoves every 60 s, six per run)
+
+| shove | hand-off off | hand-off on (twist 0.2) | steps / handed back / rescued mid-step |
+|---|---|---|---|
+| 1 N | 6/6 caught | 6/6 caught | 0 — never fires |
+| 2 N | 6/6 | 6/6 | 0 — never fires |
+| 3 N, **six brains** | **13/36** upright | **36/36** upright | 20 / 20 / 0 |
+| 4 N | 1/6 | 5/6 | 4 / 3 / 1 |
+| 5 N | 1/6 | 6/6 | 5 / 5 / 0 |
+
+**The twist is not load-bearing.**  At 3 N every variant — 0, +0.2, −0.2, +0.35 m/s — went 3
+for 3; at 5 N twist 0 went 6/6 (4 steps), +0.2 6/6, and +0.35 and −0.2 each 5/6.  The walker's
+own trained stagger is the step, and it does not need to be told where to go.  Default set to 0.
+
+**A 20-minute soak** (3 N every 30 s, 39 shoves): 25 hand-offs, 25 handed back, 0 rescues,
+c 0.98 at the end (each hand-off costs the reset tax ×0.9, re-earned in ~17 s).  **The reflex
+afterwards** (2 N, hand-off off): 6/6 caught, 0 steps, 0.065 mrad/tick, c 1.00 — gate (iii)
+holds: nothing the walker did was learned into the brain.
+
+### 15.3 Verdict and what it is
+
+**WORKING, LOUD** — the three gates of phase 0 pass (byte-identical off; 3 N front-to-back
+36/36 vs 13/36; the reflex's envelope unchanged).  What it is, said plainly: a *hand-off*, not a
+learned step.  The brain contributes the trigger — the measured edge of its own catch — and the
+walker contributes the recovery it was trained for.  The walker's stagger recovers a 5 N shove
+from a 6.5° lean, which is the crutch meter's next rung: rescues per hour at 3 N went from ~14
+to 0 with the hand-off, and a "step" is now a counted, logged event with its own colour in the
+viewer (yellow).  What remains for the learned step is route 1's question (foot load and
+contact in the blanket); what remains for phase 1 is to move the trigger into the brain as a
+published saturation scalar rather than a harness rule.

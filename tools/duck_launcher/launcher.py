@@ -67,6 +67,7 @@ DEFAULTS = dict(
     start="checkpoint", ident_every=12, ident_until=3000,
     checkpoint="duck_pipeline_s2.json", save_brain=False,
     push=0.0, push_every=60.0, push_hold=0.1, push_from=30.0,
+    step_lean=0.0, step_twist=0.0, step_twist_s=0.5,
     amp=HOST_AMP_DEFAULT, freeze_after=0.0, no_tilt_gate=False, servo_filter=False,
     noise=0.0, stub_amp=0.25, stub_drift=0.08,
 )
@@ -226,6 +227,9 @@ def host_args(s, seed, save_brain_path=None):
               "--push-hold", fmt(float(s["push_hold"]))]
         if float(s["push_from"]) > 0:
             a += ["--push-from", fmt(float(s["push_from"]))]
+    if mode == "brain" and float(s["step_lean"]) > 0:
+        a += ["--step-lean", fmt(float(s["step_lean"])), "--step-twist", fmt(float(s["step_twist"])),
+              "--step-twist-secs", fmt(float(s["step_twist_s"]))]
     if s["scene"] and s["scene"] != "scene.xml":
         a += [str(MODEL_DIR / s["scene"])]
     return a
@@ -571,6 +575,15 @@ def build_window():
         spin(fp, V[key], lo, hi, inc).grid(column=1, row=i, sticky="w", padx=4)
     ttk.Label(fp, text="brain: lands only on brain-driven ticks; reported caught / rescued",
               foreground="#555", wraplength=380).grid(column=0, row=4, columnspan=2, sticky="w", pady=(4, 0))
+    ttk.Separator(fp).grid(column=0, row=5, columnspan=2, sticky="ew", pady=6)
+    ttk.Label(fp, text="Step hand-off (brain): lean (°)   0 = off").grid(column=0, row=6, sticky="w")
+    spin(fp, V["step_lean"], 0, 30, 0.5).grid(column=1, row=6, sticky="w", padx=4)
+    ttk.Label(fp, text="twist (m/s along the lean; 0 = the walker's own stagger, measured best)").grid(column=0, row=7, sticky="w")
+    spin(fp, V["step_twist"], -1, 1, 0.05).grid(column=1, row=7, sticky="w", padx=4)
+    ttk.Label(fp, text="twist for (s)").grid(column=0, row=8, sticky="w")
+    spin(fp, V["step_twist_s"], 0.1, 3, 0.1).grid(column=1, row=8, sticky="w", padx=4)
+    ttk.Label(fp, text="past 6.5° and rising the walker takes one step for the brain, then hands back (yellow ball)",
+              foreground="#555", wraplength=380).grid(column=0, row=9, columnspan=2, sticky="w", pady=(4, 0))
 
     # -- extras --------------------------------------------------------------------
     fe = frame("Extras", 1, 2)

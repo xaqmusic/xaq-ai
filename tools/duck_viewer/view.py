@@ -69,9 +69,10 @@ def host_command(extra, mode="--hold"):
 # is the earned consolidation c (the smaller of the two MotorEPMs), and an ORANGE
 # arrow along the force while a shove is being applied.  These are user-scene
 # geoms; nothing here touches the model or the data.
-STATUS_LEGEND = ("  ball: green = brain driving, red = scaffold rescue, grey = no driver"
+STATUS_LEGEND = ("  ball: green = brain driving, yellow = step hand-off, red = scaffold rescue, grey = no driver"
                  "  |  blue bar: consolidation c  |  orange arrow: a shove")
-DRIVE_RGBA = {"brain": (0.10, 0.90, 0.20, 1.0), "scaffold": (0.95, 0.15, 0.10, 1.0)}
+DRIVE_RGBA = {"brain": (0.10, 0.90, 0.20, 1.0), "scaffold": (0.95, 0.15, 0.10, 1.0),
+              "step": (1.0, 0.85, 0.10, 1.0)}     # yellow: the walker taking a step for the brain
 
 
 def draw_status(scn, frame, mujoco, np, reset=True):

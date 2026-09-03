@@ -16,6 +16,7 @@ Per shove, one row:
   peak°   worst tilt inside the judging window (4 s, or until the next shove)
   rec s   time until tilt was back under 5° and stayed there 0.4 s (nan = never)
   resc    YES if the recovery harness handed the body to the scaffold inside the window
+  step    YES if the step hand-off fired inside the window (--step-lean)
   c_bef   consolidation of each MotorEPM the tick before the shove
   c_min   its minimum between this shove and the next
   c_ok s  seconds until every MotorEPM was back at >= 0.95 after having dropped
@@ -89,14 +90,15 @@ def report(path, quiet=5.0, cons_ok=0.95):
     falls = sum(1 for r in rows if r.get('event') == 'reset:handoff')
     up15 = sum(1 for r in rows if r['tilt'] < 15) / n
     print(f"# {path}")
-    print(f"ticks {n} ({n / HZ:.0f} s)  brain-driven {100 * brain / n:.1f}%  falls {falls}  "
+    steps = sum(1 for r in rows if r.get('event') == 'step:start')
+    print(f"ticks {n} ({n / HZ:.0f} s)  brain-driven {100 * brain / n:.1f}%  falls {falls}  steps {steps}  "
           f"up15 {up15:.3f}  |dq| {dq_mrad(rows, 0, n):.3f} mrad/tick  "
           f"pose {pose_dist(rows, 0, n):.3f}  cons_end {rows[-1].get('cons')}")
     starts = shove_starts(rows)
     if not starts:
         return
     W, Q, hold = int(WINDOW_S * HZ), int(quiet * HZ), int(RECOVER_HOLD_S * HZ)
-    print(f"{'#':>2} {'t':>7} {'N':>5} {'body°':>6} {'peak°':>6} {'rec s':>6} {'resc':>4} "
+    print(f"{'#':>2} {'t':>7} {'N':>5} {'body°':>6} {'peak°':>6} {'rec s':>6} {'resc':>4} {'step':>4} "
           f"{'c_bef':>11} {'c_min':>11} {'c_ok s':>7} {'dq_bef':>7} {'dq_aft':>7} {'lrn%':>5}")
     for k, i in enumerate(starts):
         nxt = starts[k + 1] if k + 1 < len(starts) else n
@@ -113,6 +115,7 @@ def report(path, quiet=5.0, cons_ok=0.95):
                 rec = (j + hold - i) / HZ
                 break
         rescued = any(rows[m].get('event') == 'reset:handoff' for m in range(i, until))
+        stepped = any(rows[m].get('event') == 'step:start' for m in range(i, until))
         cb = rows[i - 1].get('cons', [])
         seg = rows[i:nxt]
         cmin = [min(r['cons'][c] for r in seg) for c in range(len(cb))] if cb else []
@@ -132,7 +135,7 @@ def report(path, quiet=5.0, cons_ok=0.95):
         lrn = 100 * sum(1 for r in seg if r['learning']) / len(seg)
         fmt = lambda v: ' '.join(f"{x:.2f}" for x in v) if v else '-'
         print(f"{k + 1:>2} {rows[i]['t']:>7.1f} {mag:>5.1f} {math.degrees(math.atan2(by, bx)):>6.0f} "
-              f"{peak:>6.1f} {rec:>6.2f} {'YES' if rescued else '-':>4} {fmt(cb):>11} {fmt(cmin):>11} "
+              f"{peak:>6.1f} {rec:>6.2f} {'YES' if rescued else '-':>4} {'YES' if stepped else '-':>4} {fmt(cb):>11} {fmt(cmin):>11} "
               f"{c_ok:>7.1f} {dqb:>7.3f} {dqa:>7.3f} {lrn:>5.0f}")
 
 

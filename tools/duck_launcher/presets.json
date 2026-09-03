@@ -11,7 +11,8 @@
       "output": "watch",
       "push": 0,
       "save_brain": false,
-      "battery": false
+      "battery": false,
+      "step_lean": 0
     }
   },
   {
@@ -29,7 +30,8 @@
       "push": 0,
       "save_brain": true,
       "battery": false,
-      "seeds": "1-6"
+      "seeds": "1-6",
+      "step_lean": 0
     }
   },
   {
@@ -44,7 +46,8 @@
       "output": "headless",
       "push": 0,
       "save_brain": true,
-      "battery": false
+      "battery": false,
+      "step_lean": 0
     }
   },
   {
@@ -59,7 +62,8 @@
       "output": "watch",
       "push": 0,
       "save_brain": true,
-      "battery": false
+      "battery": false,
+      "step_lean": 0
     }
   },
   {
@@ -77,7 +81,8 @@
       "push_hold": 0.1,
       "push_from": 30,
       "save_brain": false,
-      "battery": false
+      "battery": false,
+      "step_lean": 0
     }
   },
   {
@@ -95,7 +100,8 @@
       "push_hold": 0.1,
       "push_from": 30,
       "save_brain": false,
-      "battery": false
+      "battery": false,
+      "step_lean": 0
     }
   },
   {
@@ -112,7 +118,8 @@
       "output": "headless",
       "push": 0,
       "save_brain": false,
-      "battery": false
+      "battery": false,
+      "step_lean": 0
     }
   },
   {
@@ -158,7 +165,8 @@
       "push": 0,
       "save_brain": true,
       "battery": false,
-      "seeds": "1-6"
+      "seeds": "1-6",
+      "step_lean": 0
     }
   },
   {
@@ -175,6 +183,28 @@
       "push_every": 20,
       "push_hold": 0.1,
       "push_from": 10,
+      "save_brain": false,
+      "battery": false,
+      "step_lean": 0
+    }
+  },
+  {
+    "name": "★ STACK · the step — 3 N shoves on the R19 stand with the walker's hand-off (watch)",
+    "hint": "Phase 0 of the intent boundary: past 6.5° of rising lean the joints go to the walker (yellow ball), which staggers through it, then back to the brain. Measured: 3 N 36/36 upright across six brains (13/36 without), 5 N 6/6 (1/6 without), never fires at 1–2 N, and the reflex is unchanged after a 20-minute soak of it.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 300,
+      "output": "watch",
+      "push": 3,
+      "push_every": 20,
+      "push_hold": 0.1,
+      "push_from": 10,
+      "step_lean": 6.5,
+      "step_twist": 0,
+      "step_twist_s": 0.5,
       "save_brain": false,
       "battery": false
     }

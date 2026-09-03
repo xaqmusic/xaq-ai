@@ -318,6 +318,30 @@ struct PushPlan {
     double from_s  = 0.0;      // no shove before this (let a brain consolidate first)
 };
 
+// The STEP HAND-OFF (phase 0 of the intent boundary, 2026-09-03).  The brain's
+// in-place catch has a measured limit: across six R19 brains and 72 shoves, a
+// caught shove never leans past 5.4 deg, and every 3 N topple passes 5.8 deg by
+// 300 ms with the lean still rising, 8 deg at 400 ms, 10 deg at 500 ms — about
+// 700 ms before the fall detector fires.  Past that angle the only recovery is a
+// step, which the brain does not have and the trained walker does.  So: when the
+// lean exceeds lean_deg for confirm_ticks consecutive rising ticks while the brain
+// drives, hand the joints to the walker (the same standing network, given a
+// twist along the lean), for twist_s, then let it settle and hand back through
+// the identification path's own settle/handback machinery.  Learning is frozen
+// for the whole excursion and the pairing is invalidated at both edges, exactly
+// as for a rescue: nothing the walker does is learned from.  A harness rule, like
+// the fall detector, on the same egocentric projected gravity.  0 disables and
+// the build is byte-identical.
+struct StepPlan {
+    double lean_deg = 0.0;     // 0 disables
+    int    confirm_ticks = 3;  // consecutive rising ticks above lean_deg
+    double twist = 0.0;        // m/s along the lean direction; measured: the walker's own stagger
+                               // recovers 3 N and 5 N at zero twist as well as at 0.2, and 0.35 or
+                               // the wrong sign cost one in six — the hand-off is what matters
+    double twist_s = 0.5;      // how long the twist is commanded
+    double settle_s = 2.0;     // then wait for stillness, at most this long
+};
+
 // One episode of the standing scaffold. `emit` writes the per-tick JSONL when asked.
 RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise, uint64_t seed,
                    bool emit, const PushPlan& pushes = {}) {
@@ -500,7 +524,7 @@ int cmd_gate_g2(const std::string& scene, double seconds) {
 // and each shove is reported as caught-by-the-brain or rescued-by-the-scaffold.
 int run_with_brain(const std::string& scene, double seconds, uint64_t seed, BrainLike& brain,
                    bool emit, int ident_every = 0, int ident_until = 0,
-                   const PushPlan& pushes = {}) {
+                   const PushPlan& pushes = {}, const StepPlan& step = {}) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
     Recovery recovery;
@@ -522,12 +546,22 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     }
 
     std::array<float, kActionLen> last_action{};
-    const Command command{};
+    Command command{};
     const double dt = 1.0 / kBrainHz;
     const int ticks = int(seconds * kBrainHz);
 
     int frozen_ticks = 0;
     int brain_ticks_seen = 0, settle_left = 0;
+
+    // Step hand-off state (see StepPlan).
+    const int step_twist_ticks  = std::max(1, int(step.twist_s * kBrainHz));
+    const int step_settle_ticks = std::max(1, int(step.settle_s * kBrainHz));
+    int step_left = 0, step_confirm = 0;
+    int steps_started = 0, steps_ended = 0, steps_rescued = 0;
+    double last_lean = 0.0;
+    std::array<double, 2> step_dir{0.0, 0.0};
+    bool stepping = false;
+    const char* step_event = "";
 
     std::vector<double> tilt_trace;
     std::vector<int> shove_ticks, handoff_ticks;
@@ -575,9 +609,64 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             if (driver == Driver::Brain) ++brain_ticks_seen;
         }
 
+        // The step hand-off (see StepPlan).  Only while the brain would otherwise
+        // drive: a rescue in progress outranks it, and a rescue that starts during
+        // a step ends the step (counted below).
+        stepping = false;
+        step_event = "";
+        if (step.lean_deg > 0.0 && driver == Driver::Brain) {
+            const auto g = body.gravity();
+            const double lean = std::atan2(std::hypot(g[0], g[1]), -g[2]) * (180.0 / 3.14159265358979323846);
+            if (step_left > 0) {
+                --step_left;
+                const auto w = body.gyro();
+                const bool still = g[2] < -0.999
+                                   && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
+                const bool twisting = step_left > step_settle_ticks;
+                if (twisting) {
+                    command.twist = {step.twist * step_dir[0], step.twist * step_dir[1], 0.0};
+                    driver = Driver::Scaffold;
+                    stepping = true;
+                } else if (still || step_left == 0) {
+                    step_left = 0;
+                    command.twist = {0.0, 0.0, 0.0};
+                    brain.on_reset();
+                    if (!frozen_forever) brain.set_learning(true);
+                    last_action.fill(0.0f);
+                    step_event = "step:end";
+                    ++steps_ended;
+                } else {
+                    command.twist = {0.0, 0.0, 0.0};
+                    driver = Driver::Scaffold;
+                    stepping = true;
+                }
+            } else {
+                if (lean > step.lean_deg && lean > last_lean) ++step_confirm; else step_confirm = 0;
+                if (step_confirm >= step.confirm_ticks) {
+                    step_confirm = 0;
+                    const double n = std::hypot(g[0], g[1]);
+                    step_dir = {g[0] / n, g[1] / n};
+                    step_left = step_twist_ticks + step_settle_ticks;
+                    brain.set_learning(false);
+                    brain.on_reset();
+                    command.twist = {step.twist * step_dir[0], step.twist * step_dir[1], 0.0};
+                    driver = Driver::Scaffold;
+                    stepping = true;
+                    step_event = "step:start";
+                    ++steps_started;
+                }
+            }
+            last_lean = lean;
+        }
+
         // Both edges: tell the brain, and stop or start its learning. Freeze BEFORE
         // the scaffold ever acts, resume only once the body is back.
         if (recovery.handed_off_this_tick()) {
+            if (step_left > 0) {              // the step did not save it
+                step_left = 0;
+                command.twist = {0.0, 0.0, 0.0};
+                ++steps_rescued;
+            }
             brain.set_learning(false);
             brain.on_reset();
         } else if (recovery.handed_back_this_tick()) {
@@ -644,11 +733,12 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             std::printf(",\"drive\":\"%s\",\"u\":%.4f,"
                         "\"rg\":%d,\"rtle\":%.3f,"
                         "\"learning\":%s,\"event\":\"%s\",",
-                        driver_name(driver), brain.last_cmd_mag(),
+                        stepping ? "step" : driver_name(driver), brain.last_cmd_mag(),
                         brain.regime_id(), brain.regime_tle(),
                         learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
                         : recovery.handed_back_this_tick() ? "reset:handback"
+                        : step_event[0]                    ? step_event
                                                            : "");
             // Earned consolidation per MotorEPM module, in graph order — the state
             // the (d) test is about: it must collapse on a real perturbation and
@@ -697,6 +787,11 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                      recovery.gave_up());
     }
 
+    if (step.lean_deg > 0.0) {
+        std::fprintf(stderr, "  step hand-off at %.1f deg (twist %.2f m/s for %.1f s): %d steps started, "
+                             "%d handed back upright, %d rescued mid-step\n",
+                     step.lean_deg, step.twist, step.twist_s, steps_started, steps_ended, steps_rescued);
+    }
     if (pushes.newtons > 0.0) {
         RunResult r = analyse(tilt_trace, shove_ticks);
         int caught = 0, rescued = 0;
@@ -915,7 +1010,7 @@ int cmd_probe(const std::string& scene, double seconds, uint64_t seed) {
 
 int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
               double amplitude, bool emit, int ident_every = 0, int ident_until = 0,
-              const PushPlan& pushes = {}) {
+              const PushPlan& pushes = {}, const StepPlan& step = {}) {
     DuckBody probe(scene);   // for the joint ranges the adapter reads by name
 
     // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
@@ -968,7 +1063,7 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
     std::fprintf(stderr, "\n");
 
     const int rc = run_with_brain(scene, seconds, seed, brain, emit, ident_every, ident_until,
-                                  pushes);
+                                  pushes, step);
     std::fprintf(stderr, "  mean |action| %.4f over %llu brain ticks\n", brain.mean_abs_action(),
                  (unsigned long long)brain.ticks());
     for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
@@ -1006,7 +1101,12 @@ void usage() {
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
         "                      [--push N] [--push-every S] [--push-hold S] [--push-from S]\n"
+        "                      [--step-lean DEG] [--step-twist V] [--step-twist-secs S]\n"
         "      Phase A1: an OgmaInstance driving the joints, inside the same harness.\n"
+        "      --step-lean hands the joints to the walker when the brain's lean exceeds DEG\n"
+        "      and is still rising (a step along the lean at V m/s for S s, then settle and\n"
+        "      hand back; learning frozen throughout).  JSONL drive \"step\", events\n"
+        "      step:start / step:end.  0 = off.\n"
         "      --push runs the same shove schedule against the BRAIN's stance: shoves\n"
         "      land only on brain-driven ticks, and each is reported as caught by the\n"
         "      brain or rescued by the scaffold.  The JSONL carries the active force\n"
@@ -1025,6 +1125,7 @@ int main(int argc, char** argv) {
     double seconds = 3.0, noise = 0.0;
     uint64_t seed = 0;
     PushPlan pushes;
+    StepPlan step;
     double stub_amp = 0.25, stub_drift = 0.08;
     int ident_every = 0, ident_until = 0;
     (void)0;
@@ -1068,6 +1169,16 @@ int main(int argc, char** argv) {
             pushes.hold_s = std::stod(next("--push-hold"));
         } else if (a == "--push-from") {
             pushes.from_s = std::stod(next("--push-from"));
+        } else if (a == "--step-lean") {
+            step.lean_deg = std::stod(next("--step-lean"));
+        } else if (a == "--step-twist") {
+            step.twist = std::stod(next("--step-twist"));
+        } else if (a == "--step-twist-secs") {
+            step.twist_s = std::stod(next("--step-twist-secs"));
+        } else if (a == "--step-settle-secs") {
+            step.settle_s = std::stod(next("--step-settle-secs"));
+        } else if (a == "--step-confirm") {
+            step.confirm_ticks = std::stoi(next("--step-confirm"));
         } else if (a == "--stub-amp") {
             stub_amp = std::stod(next("--stub-amp"));
         } else if (a == "--stub-drift") {
@@ -1100,7 +1211,7 @@ int main(int argc, char** argv) {
         if (mode == "--gate-g2") return cmd_gate_g2(scene, seconds);
         if (mode == "--stub") return cmd_stub(scene, seconds, seed, stub_amp, stub_drift, true);
         if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true,
-                                                ident_every, ident_until, pushes);
+                                                ident_every, ident_until, pushes, step);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
