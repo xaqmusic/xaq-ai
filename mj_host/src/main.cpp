@@ -23,7 +23,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <chrono>
 #include <fstream>
+#include <thread>
 
 #include <mujoco/mujoco.h>
 #include <nlohmann/json.hpp>
@@ -60,6 +62,22 @@ constexpr double kStandingActionScale = 1.0;
 
 // A robot past this much tilt is on its way down, not standing.
 constexpr double kFallenTiltDeg = 15.0;
+
+// --realtime: the host paces ITSELF to the wall clock, one brain tick per 1/kBrainHz.
+// Without it a viewer paces the host through the stdout pipe, and a pipe is read in
+// 8 KB chunks: the host runs ~14 ticks in a burst and blocks, so every observer that
+// listens at tick time — the inspector's diag stream above all — sees a 3.6 Hz jerk
+// whatever rate it asked for (measured: gap median 1 ms, max 275 ms).  With the host
+// pacing, ticks are 20 ms apart and the viewer's own pacing has nothing left to do.
+bool g_realtime = false;
+struct TickPacer {
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    void wait_for(int tick, double hz) const {
+        if (!g_realtime) return;
+        std::this_thread::sleep_until(start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                  std::chrono::duration<double>(tick / hz)));
+    }
+};
 
 // --no-tilt-gate: disables the harness's learnable-regime gate (the hand rule
 // the R1 regime banks are the learned replacement for).
@@ -381,8 +399,10 @@ RunResult run_hold(DuckBody& body, Policy& policy, double seconds, double noise,
     const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
     const int push_from   = int(pushes.from_s * kBrainHz);
     int push_index = 0;
+    TickPacer pacer;
 
     for (int t = 0; t < ticks; ++t) {
+        pacer.wait_for(t, kBrainHz);
         // Shove on a fixed schedule, rotating the direction so the controller is
         // asked to recover from every side rather than from a favourite one.
         //
@@ -601,7 +621,9 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     int push_index = 0, push_skipped = 0;
     if (pushes.newtons > 0.0) tilt_trace.reserve(ticks);
 
+    TickPacer pacer;
     for (int t = 0; t < ticks; ++t) {
+        pacer.wait_for(t, kBrainHz);
         Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
 
         // Diagnostic consolidation freeze (see g_freeze_after_ticks).
@@ -1207,8 +1229,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::array<double, 3> vel_body{};
     constexpr double kVelEma = 0.1;
     int frozen_ticks = 0;
+    TickPacer pacer;
 
     for (int t = 0; t < ticks; ++t) {
+        pacer.wait_for(t, kBrainHz);
         Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
         if (recovery.handed_off_this_tick()) {
             brain.set_learning(false);
@@ -1391,6 +1415,9 @@ void usage() {
         "      brain or rescued by the scaffold.  The JSONL carries the active force\n"
         "      in \"push\" and each MotorEPM's earned consolidation in \"cons\".\n"
         "\n"
+        "  --realtime paces any mode to the wall clock (one tick per 20 ms); the viewer's live\n"
+        "  mode passes it, so the inspector sees smooth ticks rather than pipe-sized bursts.\n"
+        "\n"
         "  The scene defaults to %s\n"
         "  The standing scaffold is %s\n",
         kDefaultScene.c_str(), kStandScaffold.c_str());
@@ -1439,6 +1466,8 @@ int main(int argc, char** argv) {
             g_freeze_after_ticks = int(std::stod(next("--freeze-after")) * kBrainHz);
         } else if (a == "--servo-filter") {
             g_servo_filter = true;
+        } else if (a == "--realtime") {
+            g_realtime = true;
         } else if (a == "--save-brain") {
             g_save_brain = next("--save-brain");
         } else if (a == "--load-brain") {

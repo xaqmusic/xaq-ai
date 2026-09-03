@@ -24,6 +24,7 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
     const uint16_t diag_port = uint16_t(control_port + 1);
     try {
         diag_ = std::make_unique<ogma::DiagPublisher>(diag_port);
+        diag_->set_host_tick_hz(50.0);            // the brain tick; the publisher's rate maths needs it
         if (!diag_->start()) {
             std::fprintf(stderr, "inspector: diag port %u busy — running without an inspector\n", diag_port);
             diag_.reset();

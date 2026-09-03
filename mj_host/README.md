@@ -82,9 +82,15 @@ a conclusive run is what you get by default and an inconclusive one takes effort
 Every brain-driving host serves the inspector's two sockets exactly as the Godot host does:
 control on TCP 7400 (`OGMA_INSPECTOR_PORT`; 0 disables) and the diag stream on 7401. So
 `tools/run_inspector.sh` attaches to a running duck brain unchanged, and `tools/xaq_voice`
-can subscribe to its `lite` topic. Start a live (viewer-paced) run first — a headless run
+can subscribe to its `lite` topic. Start a live run first — a headless run
 finishes in seconds — then press Inspector in the launcher, or run the script. A port already
 taken (a battery of hosts) logs one line and the run proceeds without an inspector.
+
+The rate you ask for is the rate you get, on this host as on the Godot one: the publisher
+accumulates a fractional credit per tick instead of rounding to a tick interval, and the live
+host paces *itself* to the wall clock (`--realtime`, which the viewer passes). Pacing a host
+through the viewer's pipe instead makes it run in 8 KB bursts, which every tick-time observer
+sees as a 3.6 Hz jerk whatever it subscribed at; measured before and after in the design doc.
 
 ### The launcher
 

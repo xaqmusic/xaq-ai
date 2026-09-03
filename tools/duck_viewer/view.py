@@ -60,7 +60,11 @@ def frames_from(stream):
 def host_command(extra, mode="--hold"):
     if not HOST.exists():
         sys.exit(f"host not built: {HOST}\n  cmake --build mj_host/build -j8")
-    return [str(HOST), mode, *extra]
+    # The host paces itself to the wall clock.  Pacing it through this pipe instead
+    # makes it run in 8 KB bursts, which every tick-time observer (the inspector's
+    # diag stream) sees as a jerk; with --realtime the frames arrive 20 ms apart and
+    # the pacing in watch() has nothing to do.
+    return [str(HOST), mode, "--realtime", *extra]
 
 
 # Who is driving, drawn where the eye already is.  A ball above the duck: GREEN

@@ -91,6 +91,7 @@ public:
         double       hz        = 30.0;
         uint64_t     last_pub_tick = 0;
         bool         have_pubbed = false;
+        double       credit = 0.0;      // fractional-rate accumulator (see publish_tick)
     };
     std::vector<Subscription> active_subscriptions() const;
 

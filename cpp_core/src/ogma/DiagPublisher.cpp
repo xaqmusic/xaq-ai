@@ -84,12 +84,16 @@ void DiagPublisher::publish_tick(uint64_t tick_id, OgmaInstance& instance) {
     if (!running_.load() || sock_ == nullptr) return;
     std::lock_guard lk(subs_mtx_);
     for (auto& [id, s] : subs_) {
-        // Decide whether to fire this tick: every N ticks where
-        // N = round(host_tick_hz / s.hz), clamped to >= 1.
-        int interval = int(host_tick_hz_ / s.hz + 0.5);
-        if (interval < 1) interval = 1;
-        if (s.have_pubbed && (tick_id - s.last_pub_tick) < uint64_t(interval))
-            continue;
+        // Decide whether to fire this tick.  A fractional credit of hz / host_tick_hz
+        // per tick, firing when it reaches one: the requested rate is delivered exactly
+        // on any host tick rate (the earlier every-round(host/hz)-ticks rule gave 30 Hz
+        // at Godot's 60 ticks/s but only 25 at the MuJoCo host's 50, and 30 for a 25 Hz
+        // request at 60).  Capped at one so a stall never bursts.  Requests at or above
+        // the tick rate fire every tick.
+        s.credit += (host_tick_hz_ > 0.0) ? s.hz / host_tick_hz_ : 1.0;
+        if (s.credit < 1.0) continue;
+        s.credit -= 1.0;
+        if (s.credit > 1.0) s.credit = 1.0;
         auto* m = instance.module(s.module_id);
         if (m == nullptr) continue;
         nlohmann::json payload = {
