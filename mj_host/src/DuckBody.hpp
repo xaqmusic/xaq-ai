@@ -74,6 +74,15 @@ public:
     // ATTRACTING, which is the property worth having and the one an eye can judge.
     void push(const std::array<double, 3>& force_newtons, int ticks);
 
+    // The IMU's orientation (the framequat sensor on the imu site), w x y z — what the
+    // real robot's IMU fusion reports; the odometry port takes it as its only attitude.
+    std::array<double, 4> imu_quat() const;
+    // A site's pose relative to the trunk body frame — forward kinematics, a pure
+    // function of the joint angles and the body's geometry, evaluated by the simulator.
+    // pos and quat (w x y z) in the trunk frame.  Egocentric: no world quantity survives
+    // the relative transform.
+    void site_pose_trunk(const char* site, std::array<double, 3>& pos, std::array<double, 4>& quat) const;
+
     // The force being applied right now, world newtons. Zero when nothing is.
     std::array<double, 3> active_push() const { return push_ticks_ > 0 ? push_ : std::array<double, 3>{}; }
 

@@ -912,3 +912,33 @@ capability).  Trained ranges: vx ±0.4, vy ±0.3, vyaw ±1.0.
 
 **Verdict: WORKING** as a hand-off; a scaffold in the exact sense (a scripted intent driving a
 trained walker), named as such, and the machinery every level-2 intent will use.
+
+### 16.3 Phase 1c — the robot's own "where am I": Pollen's contact odometry, ported
+
+`mj_host/src/Odometry.{hpp,cpp}` is a line-for-line port of their `odometry` crate (itself
+from the prototype runtime and Rhoban's model_service): one sole corner is the anchor, at
+world Z = 0 and the X/Y it had when it became the anchor; the trunk is oriented by the IMU;
+the trunk's position follows by forward kinematics; when another corner drops below the
+anchor for two ticks, the anchor moves there at that corner's current X/Y, so the estimate
+never jumps.  Heading is the IMU's yaw.  The inputs are egocentric by construction: the two
+foot sites' poses in the trunk frame (forward kinematics, evaluated by the simulator from the
+joint angles and the body's geometry — `DuckBody::site_pose_trunk`) and the IMU quaternion
+(`imu_quat`, the framequat sensor on the imu site, the analogue of the robot's IMU fusion).
+Nothing reads the world pose.  Logged per tick as `odom: [x, y, yaw]`; the world pose the
+host already logs is the instrument it is judged against.
+
+| walk from the R19 stand | true world Δ | dead-reckoned Δ | error | of distance |
+|---|---|---|---|---|
+| vx 0.3, 4 s | −0.397, −0.244 m | −0.376, −0.240 m | 0.022 m | 5 % |
+| vx 0.4, 4 s | −0.582, −0.258 m | −0.553, −0.235 m | 0.036 m | 6 % |
+| vy 0.3, 4 s | +0.099, −0.174 m | +0.086, −0.175 m | 0.012 m | 6 % |
+| vyaw 1.5, 4 s (a turn in place) | 0.002 m | 0.021 m | 0.022 m | — |
+| vx 0.3, 20 s | −2.379, −0.308 m | −2.288, −0.313 m | 0.091 m | 4 % |
+| standing, 10 s | 0.1 mm | 0.2 mm | | |
+
+Yaw agrees to 0.1° throughout (the simulated IMU quaternion is absolute; the real one drifts,
+which is the one difference between this estimate and the robot's).  Per-tick velocity error
+0.014–0.027 m/s.  **Verdict: WORKING** — the level-2 blanket's position channel exists and
+is the same computation the robot publishes.  Also on the way: the vendored policies are
+no longer in git (`*.onnx` is ignored) — `mj_host/scripts/fetch_scaffolds.sh` fetches both by
+pinned commit and hash, and `run.sh` calls it when one is missing.

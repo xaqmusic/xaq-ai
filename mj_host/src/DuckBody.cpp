@@ -129,6 +129,30 @@ std::array<double, kNumPolicyJoints> DuckBody::joint_velocities() const {
     return v;
 }
 
+std::array<double, 4> DuckBody::imu_quat() const {
+    const double* q = &d_->sensordata[quat_adr_];
+    return {q[0], q[1], q[2], q[3]};
+}
+
+void DuckBody::site_pose_trunk(const char* site, std::array<double, 3>& pos,
+                               std::array<double, 4>& quat) const {
+    const int sid = mj_name2id(m_, mjOBJ_SITE, site);
+    if (sid < 0) throw std::runtime_error(std::string("no site ") + site);
+    const double* ps = &d_->site_xpos[3 * sid];
+    const double* Rs = &d_->site_xmat[9 * sid];
+    const double* pt = &d_->xpos[3 * trunk_body_];
+    const double* Rt = &d_->xmat[9 * trunk_body_];
+    double rel[3] = {ps[0] - pt[0], ps[1] - pt[1], ps[2] - pt[2]};
+    double prel[3];
+    mju_mulMatTVec(prel, Rt, rel, 3, 3);                 // Rtᵀ (ps − pt)
+    double Rrel[9];
+    mju_mulMatTMat(Rrel, Rt, Rs, 3, 3, 3);               // Rtᵀ Rs
+    double q[4];
+    mju_mat2Quat(q, Rrel);
+    pos = {prel[0], prel[1], prel[2]};
+    quat = {q[0], q[1], q[2], q[3]};
+}
+
 std::array<double, 3> DuckBody::gravity() const {
     return quat_rotate_inverse(&d_->sensordata[quat_adr_], {0.0, 0.0, -1.0});
 }

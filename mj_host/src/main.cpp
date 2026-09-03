@@ -30,6 +30,7 @@
 
 #include "DuckBody.hpp"
 #include "Observation.hpp"
+#include "Odometry.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
 #include "OgmaBrainAdapter.hpp"
@@ -586,6 +587,7 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
     std::array<double, 3> step_twist{0.0, 0.0, 0.0};   // the twist commanded during the excursion
     int step_twist_left = 0;                            // ticks of twist remaining in it
     bool stepping = false, walking = false;
+    Odometry odom;                          // the robot's own estimate of where it is
     int walks_started = 0, walks_ended = 0, walks_rescued = 0;
     const int walk_tick = walk.from_s >= 0.0 ? int(walk.from_s * kBrainHz) : -1;
     const char* step_event = "";
@@ -782,6 +784,12 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
             ctrl = brain.act(body);
         }
         body.step(ctrl);
+        {
+            std::array<SitePose, 2> feet;
+            body.site_pose_trunk("left_foot", feet[0].pos, feet[0].quat);
+            body.site_pose_trunk("right_foot", feet[1].pos, feet[1].quat);
+            odom.update(feet, body.imu_quat());
+        }
         if (pushes.newtons > 0.0) tilt_trace.push_back(body.tilt_deg());
 
         if (emit) {
@@ -820,7 +828,10 @@ int run_with_brain(const std::string& scene, double seconds, uint64_t seed, Brai
                 const auto as = og->attitude_error();
                 for (size_t i = 0; i < as.size(); ++i) std::printf("%s%.3f", i ? "," : "", as[i]);
             }
-            std::printf("],\"q\":[");
+            // The robot's own dead-reckoned pose (contact odometry, Pollen's algorithm):
+            // x, y in the boot frame, yaw.  Compare with x/y/qpos above, which are truth.
+            const auto op = odom.position();
+            std::printf("],\"odom\":[%.4f,%.4f,%.4f],\"q\":[", op[0], op[1], odom.yaw());
             const auto q = body.joint_positions();
             for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
             std::printf("],\"qpos\":[");

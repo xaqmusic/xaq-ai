@@ -96,6 +96,7 @@ endif()
 add_executable(ogma_mjhost
   src/main.cpp
   src/DuckBody.cpp
+  src/Odometry.cpp
   src/Observation.cpp
   src/Policy.cpp
   src/Recovery.cpp
