@@ -142,5 +142,43 @@
       "stub_drift": 0.08,
       "battery": false
     }
+  },
+  {
+    "name": "R19 · identification schedule: a settle before every pulse — STANDS 6/6 AND CATCHES 2 N (§14)",
+    "series": 19,
+    "hint": "Measured 2026-09-03: all six seeds consolidate inside 15 min (2-3 rescues in 2 h, tilt 0.35°, |u| 0.18) and catch 2 N shoves 35/36 (peak ~2.7°, back in 0.6 s); 3 N 13/36. From scratch, 2 h, saves the brain. The cause: the babble alternated legs inside one settle period, so the right leg and the head were identified from a body still moving — their lean rows had the wrong sign.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 6,
+      "ident_until": 3000,
+      "seed": 2,
+      "secs": 7200,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "seeds": "1-6"
+    }
+  },
+  {
+    "name": "R19 · watch the catch — 2 N shoves on the R19 stand every 20 s (watch)",
+    "series": 19,
+    "hint": "Resume duck_r19_s2 under R19 and shove it: the ball stays green, tilt peaks ~2.7° and the body is back inside 0.6 s. Raise to 3 N to see where it still goes over (fore-aft first).",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 300,
+      "output": "watch",
+      "push": 2,
+      "push_every": 20,
+      "push_hold": 0.1,
+      "push_from": 10,
+      "save_brain": false,
+      "battery": false
+    }
   }
 ]

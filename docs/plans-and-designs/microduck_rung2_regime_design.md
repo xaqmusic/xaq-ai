@@ -625,42 +625,158 @@ Seed 2's R13 brain (c 1.00, standing 90 min), one hour, R13 keeps the prior live
 The stance is destroyed within minutes at either weight.  The wind runs delivered 4/177
 and 37/274 caught shoves against the control's 339/420.
 
-### 13.3 Discriminator (ii), read from the saved brain — the lean channel is unidentified
+### 13.3 Discriminator (ii), read from the saved brain — CORRECTED 2026-09-03
 
-Row norms of the identified state model A (each row: the five leg motors' authority over
-one state index), seed 2's R13 brain:
+**The reading first written here was wrong.**  The brain snapshot flattens matrices in
+Eigen's column-major order and the analysis reshaped them row-major, so the "row norms"
+grouped the wrong elements.  The corrected reading (the sanity check: the first entries of
+the flat A are motor 0's authority over state 0, its own position):
 
-| | gravity x | gravity y | pitch rate | roll rate | | joint positions |
-|---|---|---|---|---|---|---|
-| legs | 0.011 | 0.003 | 0.044 | 0.214 | | 0.221 | 0.039 | 0.205 | 0.036 | 0.218 |
-| head (4 motors) | 0.027 | 0.020 | 0.016 | 0.019 | | 0.012 | 0.016 | 0.018 | 0.021 |
+| A row norms, seed 2's R13 brain | gravity x | gravity y | pitch rate | roll rate | joint positions |
+|---|---|---|---|---|---|
+| legs (5 motors) | 0.024 | 0.011 | 0.089 | 0.044 | 0.05–0.09 |
+| head (4 motors) | 0.019 | 0.021 | 0.011 | 0.019 | 0.02–0.03 |
 
-**The model knows a joint move barely moves the gravity vector in one tick** — the lean
-rows sit 20× below the pose rows (the Gauss-Newton step divides by ‖A(idx,:)‖² + reg_eps,
-so an unidentified channel gets a damped step, by design: "pushing hard through an
-unlearned model is how a prior becomes a flail").  The one attitude row the model does
-know is the roll rate.  So the weight had nothing to amplify on the lean and amplified
-rate feedback instead — into a loop already at its phase margin (the 5.5 Hz limit cycle,
-§10) — which is exactly a faster, more violent oscillation and a fall.  The controller's
-attitude columns are not small (norms 18–30 un-hunted, 3–6 after the hunt, the pose
-columns' size): C carries attitude gain, written by every prior term's row update and by
-HK, and the §11.2 topple showed it is not a catch.
+**The lean channel is identified** — at about a quarter of the pose rows' authority, with
+the rates at a comparable size.  The claim below it in the first version ("the model
+knows a joint move barely moves the gravity vector", rows 20× below pose) is retracted,
+and with it the diagnosis that the catch had no gradient at the model.  What the
+corrected layout shows instead (§14.3): in every standing brain the controller's
+attitude columns are *restoring* — the one-step loop gain Σⱼ A(lean, j)·C(j, lean) is
+negative on all four attitude elements, the columns aligned with −A at cosine 0.6–0.9 —
+and the wind brains grew that gain three to seven times larger without a catch.  The
+direction was never missing.  What is missing is measured in §14.4: the identified lean
+rows are *right for the left leg only*.
+
+The R14 regression (13.1, 13.2) stands as measured; its reading is now the phase one —
+more attitude gain into a loop already at its limit cycle (§10) — not the model one.
 
 ### 13.4 Verdicts
 
 - **Attitude precision as a fixed weight: REGRESSION** (W 3 and 10; from scratch, 6 seeds
   × 2 h, 0/6 vs 1/6; and on a found stance, collapse within 10 min at both weights).
-- **Discriminator (ii) answered: the catch has no gradient at the MODEL.**  A catch is a
-  second-order fact — a joint torque moves the lean through its acceleration — and a
-  one-step model of lean sees it only through the rate rows.  Precision cannot exceed what
-  the model knows; the wind (§12.4) leaned a body whose model could not attribute the lean
-  to any action, so nothing was learned from it either.  This closes §11.5 option A, §12.5
-  (i), and (ii) together with one cause.
-- **Re-use context** (what would justify retrying attitude precision): a model that
-  identifies action → lean — temporal depth on the attitude channel (the trace mechanism
-  `model_trace` exists, at 0.15; an attitude-row trace long enough to see a torque become a
-  lean), or an identification episode in which leans are the babble's own consequence
-  rather than the harness's; then the weight, with the lean rows identified, is the same
-  experiment with its gradient present.  Until then a stronger attitude pull can only be
-  stronger rate feedback.  The `model_trace` arm is config-only and is the natural next
-  probe; the operator's call.
+- ~~**Discriminator (ii) answered: the catch has no gradient at the MODEL.**~~  **RETRACTED
+  2026-09-03** — a matrix-layout error in the reading (13.3, corrected).  The lean channel
+  is identified and the attitude feedback is restoring; the defect is one-sided
+  identification (§14.4).
+- **Re-use context** (what would justify retrying attitude precision): an identification
+  that is right for the whole body (§14.4–14.5), then the weight is the same experiment on
+  a controller whose attitude gradient is not one-sided.  (The first version of this bullet
+  proposed temporal depth on the attitude rows via `model_trace`; §14 measured that
+  direction — the horizon was not the defect.)
+
+## 14. THE IDENTIFICATION SCHEDULE (2026-09-03) — the duck stands on every seed, and catches
+
+The operator chose "the model_trace test" from §13.4.  In the R13 configuration the state
+model A is owned by the paired-difference babble for the whole run (`babble_owns_a` 1), and
+`model_trace` only filters the model's *prediction* input, so the bare arm would have been
+a §3.2 dead-code tautology; the faithful form of "temporal depth on the attitude rows" is
+the identification pulse itself.  Four arms, then the reading that found the defect, then
+the arm that fixed it.  All from scratch, R13 as the base, 2 h, six seeds unless stated.
+
+### 14.1 The pulse-horizon arms — all REGRESSION
+
+| arm | change | identification | race |
+|---|---|---|---|
+| R15 | `babble_hold` 25 (500 ms), ident 50/12500 | ends 823 s; **250 falls in 250 pairs** | **0/6**, 18–26 falls/min, c 0 |
+| R16 | R15 + `model_trace` 0.04 | A byte-identical to R15 (the trace never touches a babble-owned A) | **0/6** |
+| R17 | R15 at `babble_scale` 0.1 | **250 falls in 250 pairs — at any amplitude** | not run |
+| R18 | `babble_hold` 12 (240 ms), ident 24/6000 | ends 483 s; 19 falls; TLE 0.85 vs R13's 0.95 | **0/6**, 15–18 falls/min, c 0 |
+| R13 | hold 6, ident 12/3000 | ends 202 s; 0 falls | 1/6 (seed 2) |
+
+R15's falls equal its pairs because the body has no passive equilibrium (§A1-v2): an idle
+one-second pair topples on its own, so the long window measured the fall, not the action.
+The identifiable horizon is bounded by the body's topple time; R18 sits inside it,
+identified cleanly, predicted better — and still lost the race.  The horizon was not the
+defect.
+
+### 14.2 A layout error in §13.3, and the corrected readings
+
+The snapshot flattens matrices column-major; the §13.3 reading reshaped row-major and
+grouped the wrong elements.  Corrected (§13.3 now carries the table): the lean rows of
+seed 2's R13 brain are 0.024 / 0.011 against pose rows of 0.05–0.09 — **identified, at a
+quarter of the pose authority** — and the rates 0.089 / 0.044.  The "no gradient at the
+model" diagnosis is retracted.
+
+### 14.3 The attitude feedback is restoring in every standing brain
+
+One-step attitude loop gain S = Σⱼ A(idx, j)·C(j, idx), negative = restoring, with the
+cosine between C(:, idx) and −A(idx, :):
+
+| brain | gravity x | gravity y | pitch rate | roll rate |
+|---|---|---|---|---|
+| R13 stand, un-hunted | −0.42 / 0.85 | −0.13 / 0.72 | −0.45 / 0.66 | −1.05 / 0.71 |
+| pipeline checkpoint (hunted, rested) | −0.08 / 0.80 | −0.02 / 0.64 | −0.18 / 0.49 | −0.11 / 0.56 |
+| controlled checkpoint (old era) | −0.03 / 0.88 | −0.00 / 0.06 | −0.20 / 0.97 | −0.04 / 0.78 |
+| wind 0.5 N brain (§12.4) | −1.47 / 0.89 | −0.32 / 0.78 | −3.27 / 0.90 | −2.87 / 0.78 |
+
+The direction was never missing, and the wind grew the gain three to seven times without a
+catch.  The host's `--probe` adds the reference point: a hand-gained PD on the *true*
+Jacobian, best of twenty gain pairs, still needs 7 rescues/min — a one-tick linear
+attitude reflex does not catch this body by gain alone.
+
+### 14.4 The defect: the lean rows are right for the left leg only
+
+The probe prints the true Jacobian (∂gravity/∂rad per joint).  Against it, per module:
+
+| identified A, seed 2 | left leg, pitch / roll | right leg, pitch / roll | head, pitch / roll |
+|---|---|---|---|
+| R13 (settle every 2 windows) | **+0.86** / +1.00 | **−0.22** / +0.98 | **−0.23** / +0.02 |
+| R19 (settle every window) | +0.84 / +0.99 | **+0.54** / +0.93 | **+0.51** / +0.42 |
+
+(cosines; the head's neck and head pitch carry the largest pitch authority of any joint,
++0.41 and −0.20).  The babble alternates legs inside one settle period, so the right leg
+always pulsed on a body still moving from the left leg's pulse, and the head's 7-tick
+windows straddled the 12-tick settles.  So the prior's forward-lean descent built
+restoring feedback in one leg — the one-sided response §11.2's topples showed (left
+ankle +128 mrad, right +20) — and a one-legged push twists instead of catching.
+
+### 14.5 R19 — a settle before every pulse window
+
+`a1v2_r19_settle_each.json` = R13 with the head's `babble_hold` 6 (the legs' value) and the
+harness at `--ident-every 6 --ident-until 3000`: every window starts from a settled body,
+and a completed first half survives the settle between windows (a settle *inside* a window
+drops it).  Identification ends at 170 s with **0 falls**, upright TLE 0.18 (R13: 0.95).
+
+**The race, six seeds, two hours each:**
+
+| | R13 | **R19** |
+|---|---|---|
+| seeds consolidated | 1/6 (seed 2, at 30 min) | **6/6, inside 15 min** |
+| rescues in 2 h | 128 (seed 2); 1300–2300 elsewhere | **2, 3, 2, 2, 2, 2** |
+| tilt · pose · trunk z | 1.0° · 0.069 · 0.116 m | **0.35° · 0.036 · 0.1163 m** |
+| \|u\| · joint motion | 0.34–0.8 · 11–13 mrad/tick un-rested | **0.18 · at the noise floor**, without the rest trio |
+| upright TLE | 0.85 | **0.06** |
+
+**The envelope, caught / delivered, six seeds × six shoves per force:**
+
+| shove | old stance (§11.1) | **R19** | RL scaffold |
+|---|---|---|---|
+| 1 N | 5/6 | **36/36** | — |
+| 1.5 N | 3/6 | **36/36** | — |
+| 2 N | 1/6 | **35/36** | 6/6 at 0.4–7.9° |
+| 3 N | 0/6 | **13/36** (lateral caught, fore-aft goes over) | 6/6 at 0.5–4.8° |
+| 5 N | 0/6 | — | 6/6 at 3–11° |
+
+A 2 N shove peaks at 2.3–3.0° and is back under 1° within 600 ms on every heading; the
+neck pitches +20–40 mrad, the hips ±30, the ankles ±15 — a whole-body catch.  The old
+stance leaned 3.7° and stayed at 1 N and went over at 2 N.  After a 3 N rescue c drops
+only to 0.90 (the R13 tax) and is re-earned in 19 s.  Checkpoint `duck_r19_s2.json`.
+
+### 14.6 Verdicts and scale
+
+- **Identification schedule (R19): WORKING, LOUD.**  6/6 seeds stand inside 15 minutes and
+  catch 2 N — the §3.3 shape: minutes, seed-robust, no averaging needed to see it.  From
+  scratch, no rest trio, no checkpoint lineage.
+- **The pulse horizon (R15–R18): REGRESSION**, re-use context: the identifiable window is
+  bounded by the body's own topple time; a longer pulse needs a body that stays up through
+  it (a settle-held pair, or a lighter body).
+- **What the catch needed**, in the rewrite rule's terms: not a sensor, not a weight, not a
+  longer model — an identification in which every actuator's authority over the lean was
+  read from a still body.  The wind (§12) and the weight (§13) were amplifying a gradient
+  that was right on one side and wrong on the other.
+- **Not yet done**: the (d) push test proper on R19 at 3 N (rescue → re-earn is measured
+  once above); the R12c rest on top of R19 (it may not be needed — the stance is already
+  at the noise floor); the fore-aft 3 N limit and whether the head's identified pitch
+  authority (cosine 0.51, still the weakest) is what bounds it.  Promotion to `★` is the
+  operator's eye (a preset shoves the checkpoint live).

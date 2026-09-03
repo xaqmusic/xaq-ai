@@ -24,6 +24,12 @@
 Simulation only — no hardware. Upstream lives *outside* this repo, on purpose:
 `/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
 
+**THE DUCK STANDS ON EVERY SEED, AND CATCHES (R19, 2026-09-03, design doc §14).** Six of six seeds
+consolidate inside 15 minutes from scratch, stand at 0.35° tilt with joint motion at the noise
+floor, and catch 2 N shoves 35/36. The lever was the identification schedule: a settle before
+every babble pulse window. Checkpoint `duck_r19_s2.json`; the launcher's `R19 · watch the catch`
+preset shoves it live. Earlier state, kept for the record:
+
 **THE DUCK STANDS — tall, still, and self-recovering.** Three measured hours: ZERO falls,
 0.083–0.090 mrad/tick joint motion (the consolidated slump's own stillness), upright 1.00,
 pose-distance 0.068 from the calibrated stand pose, |u| 0.34. The authoritative record of
@@ -53,9 +59,9 @@ mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json -
 | **tall standing** | ✅ **seed 2 permanent (`a1v2_r8_tall.json`, `c647d02`); other seeds hover tall, lose the race** |
 | **controlled standing** | ✅ **3 h zero-fall stillness (`a1v2_r12c_whole.json` + checkpoint, `9cd982e`)** |
 | **(d) push-test** | ✅ **measured** (design doc §11): the consolidation loop re-infers — c collapses on a fall, the stance is re-found and re-earned in 38 s, 20/20 cycles, 4/6 full re-inferences after destruction. The stance itself has **no active catch**: knocked over at 0.15–0.2 N·s (the scaffold at ~0.7), identically at 5–10× gain |
-| **a catch (balance reflex)** | ⚙ **the fork, narrowed** — wind NULL (§12.4); attitude precision as a fixed weight REGRESSION (§13: 0/6 from scratch at W 3 and 10; a found stance collapses in minutes). The cause, read from the brain (§13.3): the identified model has ~no action → lean authority (rows 20× below pose), so the catch has no gradient at the MODEL — a joint torque moves the lean through its acceleration and a one-step model sees only the rates. Next probe: temporal depth on the attitude rows (`model_trace`, config-only) |
-| **from-scratch pipeline** | ✅ **repaired** (§12.3): ratchet v3's per-fall tax had silently broken the race since `6fac760`; `a1v2_r13_tax001.json` (R8 + `consolidate_down_rate` 0.001) stands seed 2 permanently from 30 min again. **End to end (§12.6): find R13 2 h → hunt R11 30 min → rest R12c = zero falls, 0.1 mrad/tick, from nothing.** The direct R13→R12c hand-over fails; the hunt is load-bearing. Checkpoint `duck_pipeline_s2.json` |
-| seed-robustness | open — 1/6 seeds from scratch, unchanged by the tax or the wind (the race-variance gap) |
+| **a catch (balance reflex)** | ✅ **R19 catches** (§14, 2026-09-03): a settle before every identification pulse window (`--ident-every 6`, head hold 6) — the right leg and the head had been identified from a moving body and their lean rows had the wrong sign. Now **6/6 seeds stand inside 15 min** (2–3 rescues in 2 h, tilt 0.35°, \|u\| 0.18) and **catch 2 N 35/36** (3 N 13/36; the scaffold catches 3–5 N). Checkpoint `duck_r19_s2.json`. Wind NULL (§12.4), attitude weight REGRESSION (§13), pulse horizon REGRESSION (§14.1); the §13.3 model reading was a layout error, corrected |
+| **from-scratch pipeline** | ✅ **superseded by R19** (§14.5): from nothing to a consolidated, still, catching stand on every seed in 15 min — no hunt or rest needed for stillness. The R13 → R11 → R12c chain below remains the record of how the old stance was made. ✅ repaired (§12.3): ratchet v3's per-fall tax had silently broken the race since `6fac760`; `a1v2_r13_tax001.json` (R8 + `consolidate_down_rate` 0.001) stands seed 2 permanently from 30 min again. **End to end (§12.6): find R13 2 h → hunt R11 30 min → rest R12c = zero falls, 0.1 mrad/tick, from nothing.** The direct R13→R12c hand-over fails; the hunt is load-bearing. Checkpoint `duck_pipeline_s2.json` |
+| seed-robustness | ✅ **6/6 under R19** (§14.5) — the race-variance gap was one-sided identification |
 | S2 / S3 / B1–B3 | not started |
 
 ### Also parked

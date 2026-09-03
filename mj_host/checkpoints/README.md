@@ -30,3 +30,11 @@ and the exact physics state (qpos/qvel).
   → hunt (`a1v2_r11_hunt.json`, 30 min) → rest (`a1v2_r12c_whole.json`,
   30 min), zero falls after the find, 0.1 mrad/tick, cons 1.00 (design doc
   §12.6).  Resume with the R12c config; no --ident flags.
+
+- **`duck_r19_s2.json`** (2026-09-03): THE STANDER THAT CATCHES.  R19
+  (`a1v2_r19_settle_each.json`: R13 with a settle before EVERY pulse window,
+  `--ident-every 6 --ident-until 3000`, head hold 6), seed 2, 2 h from
+  scratch — and the same on all six seeds: c 1.00 inside 15 min, 2-3 rescues
+  in two hours, tilt 0.35°, pose 0.036, |u| 0.18, joint motion at the noise
+  floor.  Catches 2 N shoves (35/36 across seeds, peak ~2.7°, back in 0.6 s);
+  3 N is 13/36.  Resume with the R19 config; no --ident flags.

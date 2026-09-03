@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--preset-from", default="★ PIPELINE 1/3", help="prefix of the preset whose controls to copy")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--secs", type=float)
+    ap.add_argument("--state", action="append", default=[], metavar="CONTROL=VALUE",
+                    help="override a preset control (repeatable), e.g. ident_every=50")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -95,6 +97,11 @@ def main():
         state["seed"] = a.seed
     if a.secs is not None:
         state["secs"] = a.secs
+    for item in a.state:
+        if "=" not in item:
+            sys.exit(f"--state wants CONTROL=VALUE, got {item!r}")
+        k, v = item.split("=", 1)
+        state[k] = parse_value(v)
     preset = {"name": display, "series": nn, "hint": a.hint or a.why, "state": state}
 
     print(f"config  {CONFIG_DIR / out_name}\n  name  {display}\n  rank  {SERIES_RANK + nn}")
