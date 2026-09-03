@@ -1042,3 +1042,47 @@ the doctrine's "heading regulation: re-corrects when noise turns the body", on t
 boundary, with every input egocentric (contact odometry, gyro, IMU) and the walker untouched.
 Scale: one seed (the identification is deterministic), 20 shoves per arm, two forces; the (d)
 test is the result itself.
+
+## 17. PHASES 1d AND 2 (2026-09-03) — the eyes, avoidance, and the drive that avoidance needs
+
+### 17.1 Phase 1d — the ToF in simulation
+
+`mj_host/src/Tof.{hpp,cpp}`: the VL53L8CX's 8×8 depth matrix on the head, its 64 beams cast
+from the `tof` site with MuJoCo's ray query against world geometry only (group 0 — the robot
+is invisible to its own sensor, as in reality), classified by a port of Pollen's
+`kinematics::tof::Reprojector` (Empty / TooClose within 10 cm / Floor when a downward beam
+reaches 85 % of the way to the ground / Hit with its horizontal range), with the head pose
+from forward kinematics, the level from gravity, and the trunk height from the contact
+odometry.  Cast every 4 ticks (12.5 Hz, the sensor's rate).  The beam frame was measured,
+not assumed: at the standing keyframe the site's axes coincide with the world's (+x the
+optical axis, +y left, +z up — a ray along +x meets a wall 0.5 m ahead at 0.41 m from the
+site).  Gate: a wall 0.5 m ahead reads Hit at 0.40–0.47 m on seven rows and Floor on the
+eighth; in the 2 m arena (`scene_arena.xml`, walls 0.3 m high) the top row is Empty above
+the walls, three rows Hit the wall a metre away, four rows Floor at 0.46–0.97 m.  The
+JSONL carries the 64 classes and ranges (`tofz`, `tofr`) and the four-slot summary the brain
+sees (proximity ahead-left / ahead / ahead-right as 1 − range/1 m, TooClose fraction, `tofs`);
+the viewer draws the beams from the head (Hit orange, Floor grey, TooClose red).  A wall
+contact instrument (`wall`) counts collisions for the reader.
+
+### 17.2 Phase 2a — avoidance (R23), and what avoidance alone does
+
+R23 = the walk-forward prior (vx → 0.75) plus priors of zero on the three proximities (sense
+slots 12–14, `load_slots` 16), identified by the same twist babble in the arena.  1500 s,
+seed 2, judged over the control phase (700–1500 s):
+
+| arm, in the arena | wall-contact episodes | ticks in contact | TooClose fraction | path | cells visited (0.25 m) | falls |
+|---|---|---|---|---|---|---|
+| open loop, vx 0.4 | 45.8/min | 5.7 % | 0.23 | 150 m | 33 | 0 |
+| R21, walk straight | **194/min** — pinned against a wall by its own forward prior | 42.8 % | 0.50 | 92 m | 31 | 2 |
+| **R23, avoidance** | **0.0/min** | **0.0 %** | **0.000** | 167 m | **9** | 0 |
+
+Learned: C(vyaw, proximity left) = −0.25, C(vyaw, proximity right) = −0.22 — a turn away
+whenever anything is near, on either side — and a forward bias.  The proximity rows of A
+are weak (0.0009 against the command; the babble rarely reached a wall) and the result is
+what those gains produce: **an orbit in the middle of the arena, 167 m inside nine cells.**
+No collisions, no exploration.  The blind metric caught by its complement: collisions = 0
+is also satisfied by never approaching anything.  **Verdict: avoidance WORKING, coverage
+DEGENERATE** — and the reason is the one the design named in advance: avoidance is a
+constraint, not a drive; the drive is novelty (phase 2b).  Also learned: the walk-straight
+brain pins itself against a wall at 43 % of ticks, which on hardware is a stalled servo —
+the proximity priors are a safety result before they are a behaviour.

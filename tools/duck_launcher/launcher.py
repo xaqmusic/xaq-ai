@@ -252,9 +252,10 @@ def plan(s, seed, name=None):
     brain = RUNS_DIR / f"{name}.brain.json" if (s["mode"] in ("brain", "level2") and s["save_brain"]) else None
     args = host_args(s, seed, brain)
     host_cmd = [str(HOST)] + args
-    watch_cmd = [str(VIEWER_PY), str(VIEWER), "live", "--save", str(jsonl),
+    scene_opt = ["--scene", s["scene"]] if s["scene"] and s["scene"] != "scene.xml" else []
+    watch_cmd = [str(VIEWER_PY), str(VIEWER)] + scene_opt + ["live", "--save", str(jsonl),
                  f"--host-mode={args[0]}", "--"] + args[1:]
-    return dict(name=name, jsonl=jsonl, err=err, brain=brain,
+    return dict(name=name, jsonl=jsonl, err=err, brain=brain, scene=s["scene"],
                 host_cmd=host_cmd, watch_cmd=watch_cmd, watch=(s["output"] == "watch"))
 
 
@@ -524,7 +525,7 @@ def build_window():
     size_note.grid(column=2, row=4, columnspan=2, sticky="w")
 
     ttk.Label(fr, text="Scene").grid(column=0, row=5, sticky="w")
-    ttk.Combobox(fr, textvariable=V["scene"], values=["scene.xml", "scene_walk.xml"],
+    ttk.Combobox(fr, textvariable=V["scene"], values=["scene.xml", "scene_arena.xml", "scene_tofcheck.xml", "scene_walk.xml"],
                  state="readonly", width=14).grid(column=1, row=5, sticky="w")
 
     ttk.Label(fr, text="Output").grid(column=0, row=6, sticky="w")
@@ -720,7 +721,8 @@ def build_window():
         if not r.p["jsonl"].exists():
             messagebox.showinfo("replay", "no JSONL for this run yet")
             return
-        cmd = [str(VIEWER_PY), str(VIEWER), "replay", str(r.p["jsonl"])] + (["--fast"] if fast else [])
+        scene_opt = ["--scene", r.p.get("scene", "scene.xml")] if r.p.get("scene", "scene.xml") != "scene.xml" else []
+        cmd = [str(VIEWER_PY), str(VIEWER)] + scene_opt + ["replay", str(r.p["jsonl"])] + (["--fast"] if fast else [])
         subprocess.Popen(cmd, cwd=str(REPO))
 
     def do_replay():

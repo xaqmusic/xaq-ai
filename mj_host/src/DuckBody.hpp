@@ -77,6 +77,11 @@ public:
     // The IMU's orientation (the framequat sensor on the imu site), w x y z — what the
     // real robot's IMU fusion reports; the odometry port takes it as its only attitude.
     std::array<double, 4> imu_quat() const;
+    // Instrumentation: is any part of the robot in contact with a geom whose name starts
+    // with "wall"?  World-frame knowledge for the reader; no brain subscribes to it.
+    bool touching_wall() const;
+    // A site's world pose (position and rotation matrix), for casting rays from it.
+    void site_world(const char* site, std::array<double, 3>& pos, std::array<double, 9>& mat) const;
     // A site's pose relative to the trunk body frame — forward kinematics, a pure
     // function of the joint angles and the body's geometry, evaluated by the simulator.
     // pos and quat (w x y z) in the trunk frame.  Egocentric: no world quantity survives

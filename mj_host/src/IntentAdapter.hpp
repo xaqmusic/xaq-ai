@@ -36,11 +36,14 @@ public:
     // unwrapped heading's DEVIATION from its own slow running average (τ ≈ 60 s), as a fraction
     // of π: a continuous, bounded, linear heading memory a prior can hold at zero ("keep the
     // heading I have been keeping").  Slot 11 the cosine of the raw yaw.
+    // tof = the ToF summary (proximity ahead-left / ahead / ahead-right, TooClose fraction)
+    // as slots 12-15; a level-2 bridge with load_slots 12 sees the first twelve only.
     std::array<double, 3> tick(const std::array<double, 3>& vel_body,
                                const std::array<double, 3>& gravity,
                                const std::array<double, 3>& gyro,
                                const std::array<double, 3>& accel,
-                               double odom_yaw = 0.0);
+                               double odom_yaw = 0.0,
+                               const std::array<float, 4>& tof = {0.0f, 0.0f, 0.0f, 0.0f});
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
 

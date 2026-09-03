@@ -34,6 +34,7 @@
 #include "Observation.hpp"
 #include "Odometry.hpp"
 #include "IntentAdapter.hpp"
+#include "Tof.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
 #include "OgmaBrainAdapter.hpp"
@@ -1208,6 +1209,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     IntentAdapter brain(graph, seed);
     if (open_loop) brain.set_override(*open_loop);
     Odometry odom;
+    Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
+    std::array<float, 4> tof_summary{};
+    int tof_ticks = 0;
     const int push_period = int(pushes.every_s * kBrainHz);
     const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
     const int push_from   = int(pushes.from_s * kBrainHz);
@@ -1251,7 +1255,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         const auto g = body.gravity();
         const auto w = body.gyro();
         const auto a = body.accel();
-        const auto twist = brain.tick(vel_body, g, w, a, odom.yaw());
+        const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary);
         if (driver == Driver::Brain) command.twist = twist;
 
         if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from && t % push_period == 0
@@ -1287,6 +1291,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             odom.update(feet, body.imu_quat());
             const auto p = odom.position();
             const double yaw = odom.yaw();
+            if (t % 4 == 0) {
+                tof.sense(body, p[2]);
+                tof_summary = tof.summary();
+                ++tof_ticks;
+            }
             if (have_prev) {
                 const double vx_w = (p[0] - prev_odom[0]) * kBrainHz, vy_w = (p[1] - prev_odom[1]) * kBrainHz;
                 const double c = std::cos(yaw), s = std::sin(yaw);
@@ -1323,7 +1332,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::printf("],\"qpos\":[");
             const auto full = body.qpos();
             for (size_t i = 0; i < full.size(); ++i) std::printf("%s%.6f", i ? "," : "", full[i]);
-            std::printf("]}\n");
+            // The ToF: 64 zone classes as one string (0 Empty, 1 TooClose, 2 Floor, 3 Hit),
+            // the 64 slant ranges, and the four-slot summary the brain sees.
+            std::printf("],\"tofz\":\"");
+            for (const auto& z : tof.zones()) std::printf("%d", int(z.cls));
+            std::printf("\",\"tofr\":[");
+            for (int i = 0; i < Tof::kZones; ++i) std::printf("%s%.2f", i ? "," : "", tof.zones()[i].range);
+            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d}\n", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
+                        body.touching_wall() ? 1 : 0);
         }
     }
 

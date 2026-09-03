@@ -19,6 +19,7 @@ zoom, space to pause, and every one of MuJoCo's own viewer keys works.
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -126,6 +127,47 @@ def draw_status(scn, frame, mujoco, np, reset=True):
                                  tip - d * (0.08 + 0.02 * mag), tip)
 
 
+# The ToF's 64 beams in the tof site frame (forward +x, left +y, up +z), as Tof.cpp lays
+# them out: row 0 top, column 0 left, 45° FOV with a half-zone inset.
+def _tof_beams(np):
+    half = math.radians(45.0 / 2 - 45.0 / 8 / 2)
+    step = 2 * half / 7
+    out = []
+    for i in range(64):
+        el = half - (i // 8) * step
+        az = half - (i % 8) * step
+        out.append((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
+    return np.array(out)
+
+
+TOF_RGBA = {"1": (1.0, 0.2, 0.2, 0.9), "2": (0.6, 0.6, 0.7, 0.35), "3": (1.0, 0.55, 0.1, 0.9)}
+
+
+def draw_tof(scn, frame, model, data, mujoco, np, beams):
+    """The beams that returned, from the head, coloured by class (Hit orange, Floor grey,
+    TooClose red).  Empty beams are not drawn.  Uses the site pose the viewer already
+    placed with mj_forward — the same geometry the host cast from."""
+    z = frame.get("tofz")
+    r = frame.get("tofr")
+    if not z or not r:
+        return
+    sid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "tof")
+    if sid < 0:
+        return
+    pos = data.site_xpos[sid]
+    R = data.site_xmat[sid].reshape(3, 3)
+    for i in range(64):
+        cls = z[i]
+        if cls == "0" or r[i] < 0 or scn.ngeom >= scn.maxgeom:
+            continue
+        tip = pos + R @ beams[i] * r[i]
+        g = scn.geoms[scn.ngeom]
+        scn.ngeom += 1
+        mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_LINE, np.zeros(3), np.zeros(3), np.eye(3).flatten(),
+                            np.array(TOF_RGBA[cls], dtype=np.float32))
+        mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_LINE, 1.5, pos, tip)
+
+
 def status_line(frame):
     line = f"  t={frame['t']:6.2f}s  tilt={frame['tilt']:6.2f}°  z={frame['z']:.4f}m"
     if "drive" in frame:
@@ -150,6 +192,7 @@ def watch(frames, realtime=True, title_every=25):
     data = mujoco.MjData(model)
 
     print(STATUS_LEGEND)
+    beams = _tof_beams(np)
     with mujoco.viewer.launch_passive(model, data, show_left_ui=False,
                                       show_right_ui=False) as viewer:
         viewer.cam.distance, viewer.cam.elevation, viewer.cam.azimuth = 0.9, -12, 130
@@ -163,6 +206,7 @@ def watch(frames, realtime=True, title_every=25):
             mujoco.mj_forward(model, data)
             viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
             draw_status(viewer.user_scn, frame, mujoco, np)
+            draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
             viewer.sync()
             n += 1
             drive = frame.get("drive")
@@ -202,6 +246,7 @@ def record(frames, out_path, width=960, height=720):
     camera.distance, camera.elevation, camera.azimuth = 0.9, -12, 130
 
     np = need("numpy", "the status overlay")
+    beams = _tof_beams(np)
     images = []
     for frame in frames:
         data.qpos[:] = frame["qpos"]
@@ -209,6 +254,7 @@ def record(frames, out_path, width=960, height=720):
         camera.lookat[:] = (frame["x"], frame["y"], frame["z"])
         renderer.update_scene(data, camera)
         draw_status(renderer.scene, frame, mujoco, np, reset=False)   # the same overlay as live
+        draw_tof(renderer.scene, frame, model, data, mujoco, np, beams)
         images.append(renderer.render().copy())
     if not images:
         sys.exit("no frames — did the host write anything?")
@@ -228,6 +274,7 @@ def main():
                       help="which host mode to drive: --hold (default) or --stub")
     live.add_argument("host_args", nargs="*", help="passed through, e.g. --secs 30 --noise 0.05")
 
+    p.add_argument("--scene", default=None, help="the MJCF the run used (default: scene.xml); the arena runs need scene_arena.xml")
     rep = sub.add_parser("replay", help="watch a saved run")
     rep.add_argument("run")
     rep.add_argument("--fast", action="store_true", help="as fast as it draws")
@@ -237,6 +284,9 @@ def main():
     rec.add_argument("out")
 
     a = p.parse_args()
+    global SCENE
+    if a.scene:
+        SCENE = Path(a.scene) if Path(a.scene).is_absolute() else REPO / "mj_host/models/microduck" / a.scene
 
     if a.mode == "live":
         cmd = host_command(a.host_args, a.host_mode)

@@ -297,5 +297,23 @@
       "push_hold": 0.1,
       "push_from": 700
     }
+  },
+  {
+    "name": "R23 · level-2 avoidance in the arena — zero wall contacts, but an orbit (headless, 1500 s)",
+    "series": 23,
+    "hint": "Phase 2a: the ToF proximities enter the level-2 sense and a prior of zero on them plus the walk-forward prior gives 0 wall contacts in 25 min (open loop: 46/min; walk-straight: 194/min, pinned to a wall). But it orbits: 167 m inside nine 0.25 m cells. Avoidance is a constraint, not a drive — R24 adds the novelty drive. Watch it with scene_arena.xml; the beams draw from the head.",
+    "state": {
+      "config": "a1v2_r23_l2_avoid.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml"
+    }
   }
 ]

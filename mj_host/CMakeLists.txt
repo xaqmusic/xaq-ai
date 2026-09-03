@@ -99,6 +99,7 @@ add_executable(ogma_mjhost
   src/Odometry.cpp
   src/IntentAdapter.cpp
   src/InspectorSurface.cpp
+  src/Tof.cpp
   src/Observation.cpp
   src/Policy.cpp
   src/Recovery.cpp

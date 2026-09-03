@@ -33,7 +33,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                                           const std::array<double, 3>& g,
                                           const std::array<double, 3>& w,
                                           const std::array<double, 3>& a,
-                                          double odom_yaw) {
+                                          double odom_yaw, const std::array<float, 4>& tof) {
     std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     auto* bus = instance_->bus();
     const auto publish = [&](const char* sensor, const std::vector<float>& values) {
@@ -75,7 +75,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // sensed velocity again, two spare.
     publish("sense", {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
                       unit(a[0] / 20.0), unit(a[1] / 20.0), unit(a[2] / 20.0),
-                      last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846), float(std::cos(odom_yaw))});
+                      last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846), float(std::cos(odom_yaw)),
+                      tof[0], tof[1], tof[2], tof[3]});
 
     instance_->tick();
     inspector_->publish_tick(tick_id_);

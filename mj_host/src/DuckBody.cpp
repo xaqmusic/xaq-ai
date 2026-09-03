@@ -3,6 +3,7 @@
 #include <cmath>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 namespace mjhost {
 
@@ -132,6 +133,23 @@ std::array<double, kNumPolicyJoints> DuckBody::joint_velocities() const {
 std::array<double, 4> DuckBody::imu_quat() const {
     const double* q = &d_->sensordata[quat_adr_];
     return {q[0], q[1], q[2], q[3]};
+}
+
+bool DuckBody::touching_wall() const {
+    for (int i = 0; i < d_->ncon; ++i) {
+        for (int g : {d_->contact[i].geom1, d_->contact[i].geom2}) {
+            const char* name = mj_id2name(m_, mjOBJ_GEOM, g);
+            if (name && std::string(name).rfind("wall", 0) == 0) return true;
+        }
+    }
+    return false;
+}
+
+void DuckBody::site_world(const char* site, std::array<double, 3>& pos, std::array<double, 9>& mat) const {
+    const int sid = mj_name2id(m_, mjOBJ_SITE, site);
+    if (sid < 0) throw std::runtime_error(std::string("no site ") + site);
+    for (int i = 0; i < 3; ++i) pos[i] = d_->site_xpos[3 * sid + i];
+    for (int i = 0; i < 9; ++i) mat[i] = d_->site_xmat[9 * sid + i];
 }
 
 void DuckBody::site_pose_trunk(const char* site, std::array<double, 3>& pos,
