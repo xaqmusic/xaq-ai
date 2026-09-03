@@ -28,10 +28,17 @@ public:
 
     // One brain tick.  vel_body = the body's own velocity estimate (vx, vy, yaw rate),
     // gravity + gyro from the IMU.  Returns the commanded twist for the walker.
+    // odom_yaw = the odometry's own heading (boot frame, radians).  Sense slot 10 carries the
+    // unwrapped heading's DEVIATION from its own slow running average (τ ≈ 60 s), as a fraction
+    // of π: a continuous, bounded, linear heading memory a prior can hold at zero ("keep the
+    // heading I have been keeping").  Slot 11 the cosine of the raw yaw.
     std::array<double, 3> tick(const std::array<double, 3>& vel_body,
                                const std::array<double, 3>& gravity,
                                const std::array<double, 3>& gyro,
-                               const std::array<double, 3>& accel);
+                               const std::array<double, 3>& accel,
+                               double odom_yaw = 0.0);
+    // A constant command in place of the brain's (an open-loop baseline); NaN = off.
+    void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
 
     void on_reset();
     void set_learning(bool on);
@@ -48,6 +55,11 @@ private:
     std::array<float, 3> last_sensed_{};
     std::map<std::string, double> frozen_rates_;
     bool frozen_ = false;
+    std::array<double, 3> override_{};
+    bool has_override_ = false;
+    double heading_ = 0.0, prev_yaw_ = 0.0;   // the odometry yaw, unwrapped: a continuous heading
+    double heading_ref_ = 0.0;                // its slow running average — the heading "I have been keeping"
+    bool have_yaw_ = false;
 };
 
 }  // namespace mjhost

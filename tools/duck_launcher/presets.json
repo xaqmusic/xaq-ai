@@ -249,7 +249,7 @@
     "series": 20,
     "hint": "Phase 1e of the intent boundary: the same module one level up. Motors = the three twist commands to Pollen's walker, senses = the body's own velocity from contact odometry and the gyro. Held 1.5 s twist pulses, one axis at a time. The host prints the identified A at the end: a positive, dominant diagonal is the gate (passed: 0.0083 / 0.0040 / 0.0090).",
     "state": {
-      "config": "a1v2_l2_ident.json",
+      "config": "a1v2_r20_l2_ident.json",
       "mode": "level2",
       "start": "none",
       "secs": 700,
@@ -259,6 +259,43 @@
       "battery": false,
       "step_lean": 0,
       "walk_from": -1
+    }
+  },
+  {
+    "name": "R21 · level-2 prior: walk straight — prior-only (HK on spins); 0.21 m/s, straightness 0.90 (headless, 1500 s)",
+    "series": 21,
+    "hint": "The first level-2 control (design doc §16.5): a state prior on the sensed forward velocity (slot 0, target 0.75 of the 0.4 m/s range = 0.3 m/s) and on the yaw rate (slot 6, target 0), with the controller learning (ctrl_lr 0.1) through the A that R20 identified. Babble 600 s, then the prior drives. Judged on forward speed and heading drift over the control phase against the walker under a constant forward command, which drifts 5-8 deg/s by itself.",
+    "state": {
+      "config": "a1v2_r21_l2_straight.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "R22 · level-2 heading regulation — shoves during the walk, the brain turns back (headless, 1500 s)",
+    "series": 22,
+    "hint": "The (d) test at the intent boundary (§16.6): after 600 s of babble the brain walks at the walker's top speed holding its heading; 2 N shoves every 40 s turn it 17-20°, and it is back within 3-4° twenty seconds later, 20/20, no rescues. The open-loop walker (--l2-twist 0.4 0 0) ends 109° off. Switch to watch to see it; the ball is blue while the walker drives.",
+    "state": {
+      "config": "a1v2_r22_l2_heading.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 2,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "push_every": 40,
+      "push_hold": 0.1,
+      "push_from": 700
     }
   }
 ]

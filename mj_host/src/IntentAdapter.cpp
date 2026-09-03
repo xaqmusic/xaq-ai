@@ -31,7 +31,8 @@ IntentAdapter::~IntentAdapter() = default;
 std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                                           const std::array<double, 3>& g,
                                           const std::array<double, 3>& w,
-                                          const std::array<double, 3>& a) {
+                                          const std::array<double, 3>& a,
+                                          double odom_yaw) {
     auto* bus = instance_->bus();
     const auto publish = [&](const char* sensor, const std::vector<float>& values) {
         auto p = std::make_shared<ogma::ProprioToken>();
@@ -43,6 +44,25 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         bus->publish(std::string("reality.proprio.") + sensor, p);
     };
     const auto unit = [](double v) { return float(std::clamp(v, -1.0, 1.0)); };
+    // The heading, unwrapped.  A wrapped angle is not one linear row — its slope flips
+    // sign with where the body faces (R22 identified the sine row at 180° and held 180°,
+    // tightly).  Accumulating the wrapped increments gives a continuous heading whose
+    // row has one sign everywhere; beyond ±180° it saturates in the unit clamp.
+    if (have_yaw_) {
+        double d = odom_yaw - prev_yaw_;
+        while (d > 3.14159265358979323846) d -= 2.0 * 3.14159265358979323846;
+        while (d < -3.14159265358979323846) d += 2.0 * 3.14159265358979323846;
+        heading_ += d;
+    } else {
+        heading_ref_ = 0.0;
+    }
+    prev_yaw_ = odom_yaw; have_yaw_ = true;
+    // An unwrapped heading alone saturates: the body winds past a half turn during the
+    // babble and the row identifies as zero.  So the sense is the deviation from a slow
+    // running average of the heading (τ 3000 ticks = 60 s): bounded, linear, and a
+    // memory that forgets over a minute — long enough to answer a shove, short enough
+    // never to saturate.
+    heading_ref_ += (1.0 / 3000.0) * (heading_ - heading_ref_);
 
     // The level-2 "joints": the body's velocity in the walker's own command units.
     last_sensed_ = {unit(vel_body[0] / kTwistRangeVx), unit(vel_body[1] / kTwistRangeVy),
@@ -53,7 +73,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // sensed velocity again, two spare.
     publish("sense", {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
                       unit(a[0] / 20.0), unit(a[1] / 20.0), unit(a[2] / 20.0),
-                      last_sensed_[0], last_sensed_[1], 0.0f, 0.0f});
+                      last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846), float(std::cos(odom_yaw))});
 
     instance_->tick();
 
@@ -64,6 +84,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             last_twist_[i] = kRanges[i] * std::clamp(double(act->accel), -1.0, 1.0);
     }
     ++tick_id_;
+    if (has_override_) return override_;
     return last_twist_;
 }
 

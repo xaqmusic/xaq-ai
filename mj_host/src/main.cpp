@@ -1178,16 +1178,21 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
 // ---------------------------------------------------------------------------
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
-               bool emit) {
+               bool emit, const PushPlan& pushes = {}, const std::array<double, 3>* open_loop = nullptr) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
     Policy walker(kWalkScaffold);
     Recovery recovery;
     IntentAdapter brain(graph, seed);
+    if (open_loop) brain.set_override(*open_loop);
     Odometry odom;
+    const int push_period = int(pushes.every_s * kBrainHz);
+    const int push_hold   = std::max(1, int(pushes.hold_s * kBrainHz));
+    const int push_from   = int(pushes.from_s * kBrainHz);
+    int push_index = 0, pushes_delivered = 0;
 
     body.reset("STAND", 0.0, seed);
-    std::fprintf(stderr, "level-2 graph %s\n", graph.c_str());
+    std::fprintf(stderr, "level-2 graph %s%s\n", graph.c_str(), open_loop ? "  (open-loop override)" : "");
 
     std::array<float, kActionLen> scaffold_last{}, walker_last{};
     std::array<double, kNumPolicyJoints> walk_targets = body.joint_positions();
@@ -1222,8 +1227,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         const auto g = body.gravity();
         const auto w = body.gyro();
         const auto a = body.accel();
-        const auto twist = brain.tick(vel_body, g, w, a);
+        const auto twist = brain.tick(vel_body, g, w, a, odom.yaw());
         if (driver == Driver::Brain) command.twist = twist;
+
+        if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from && t % push_period == 0
+            && driver == Driver::Brain && (ticks - t) >= int(kRecoverWindowSecs * kBrainHz)) {
+            static const double dirs[4][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+            const auto& d = dirs[push_index++ % 4];
+            body.push({pushes.newtons * d[0], pushes.newtons * d[1], 0.0}, push_hold);
+            ++pushes_delivered;
+        }
 
         std::array<double, kNumPolicyJoints> ctrl{};
         if (driver == Driver::Scaffold) {
@@ -1266,11 +1279,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const auto p = body.trunk_position();
             const auto op = odom.position();
             const auto sensed = brain.last_sensed();
+            const auto f = body.active_push();
             std::printf("{\"t\":%.3f,\"tick\":%d,\"x\":%.5f,\"y\":%.5f,\"z\":%.5f,\"tilt\":%.3f,"
-                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":[0,0,0],\"drive\":\"%s\","
+                        "\"grav\":[%.4f,%.4f,%.4f],\"push\":", body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2]);
+            if (f[0] == 0.0 && f[1] == 0.0 && f[2] == 0.0) std::printf("[0,0,0]");
+            else std::printf("[%.2f,%.2f,%.2f]", f[0], f[1], f[2]);
+            std::printf(",\"drive\":\"%s\","
                         "\"twist\":[%.3f,%.3f,%.3f],\"sensed\":[%.3f,%.3f,%.3f],"
                         "\"learning\":%s,\"event\":\"%s\",\"odom\":[%.4f,%.4f,%.4f],\"q\":[",
-                        body.time(), t, p[0], p[1], p[2], body.tilt_deg(), g[0], g[1], g[2],
                         driver == Driver::Brain ? "walk" : "scaffold",
                         command.twist[0], command.twist[1], command.twist[2],
                         sensed[0], sensed[1], sensed[2],
@@ -1320,6 +1336,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             }
         }
     }
+    if (pushes.newtons > 0.0)
+        std::fprintf(stderr, "  %.1f N shoves every %.1f s from %.0f s: %d delivered\n", pushes.newtons,
+                     pushes.every_s, pushes.from_s, pushes_delivered);
     const double total = recovery.brain_seconds() + recovery.scaffold_seconds();
     std::fprintf(stderr, "level-2 %.0f s — %d rescues, %.0f%% of the run walker-driven; learning frozen %.0f%%\n",
                  seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / std::max(total, 1e-9),
@@ -1354,7 +1373,8 @@ void usage() {
         "  ogma_mjhost --level2 [scene.xml] --graph L2.json [--secs S] [--seed N] [--save-brain F]\n"
         "      The brain one level up: the walker drives, the level-2 graph commands its\n"
         "      twist and senses the body's own velocity (contact odometry + gyro).  Prints\n"
-        "      the identified A's velocity rows against the commands at the end.\n"
+        "      the identified A's velocity rows against the commands at the end.  --push works\n"
+        "      here too; --l2-twist VX VY VYAW replaces the brain's command (an open-loop baseline).\n"
         "\n"
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
@@ -1386,6 +1406,8 @@ int main(int argc, char** argv) {
     PushPlan pushes;
     StepPlan step;
     WalkPlan walk;
+    std::array<double, 3> l2_twist{};
+    bool l2_open_loop = false;
     double stub_amp = 0.25, stub_drift = 0.08;
     int ident_every = 0, ident_until = 0;
     (void)0;
@@ -1443,6 +1465,9 @@ int main(int argc, char** argv) {
             walk.vy = std::stod(next("--walk-vy"));
         } else if (a == "--walk-vyaw") {
             walk.vyaw = std::stod(next("--walk-vyaw"));
+        } else if (a == "--l2-twist") {
+            l2_twist[0] = std::stod(next("--l2-twist")); l2_twist[1] = std::stod(next("--l2-twist"));
+            l2_twist[2] = std::stod(next("--l2-twist")); l2_open_loop = true;
         } else if (a == "--step-twist") {
             step.twist = std::stod(next("--step-twist"));
         } else if (a == "--step-twist-secs") {
@@ -1485,7 +1510,8 @@ int main(int argc, char** argv) {
         if (mode == "--brain") return cmd_brain(scene, graph, seconds, seed, amplitude, true,
                                                 ident_every, ident_until, pushes, step, walk);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
-        if (mode == "--level2") return cmd_level2(scene, graph, seconds, seed, true);
+        if (mode == "--level2") return cmd_level2(scene, graph, seconds, seed, true, pushes,
+                                                  l2_open_loop ? &l2_twist : nullptr);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

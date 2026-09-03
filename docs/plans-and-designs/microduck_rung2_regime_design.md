@@ -905,10 +905,11 @@ instrumentation; the brain never reads it):**
 Every walk handed back upright with no rescue, and the reflex was back at 0.06–0.09 mrad/tick
 within five seconds of handback.  Two properties of the policy to design against: **a
 standing regime** — commands below about 0.25 m/s (0.3 sideways, ~1.2 rad/s turning) are
-"stand still" to it, and it does not walk backward at −0.3 — and **a heading drift** of 5–8°/s
-while walking forward inside its range.  The first bounds the intent vocabulary; the second is
-the reason a level-2 heading prior exists (the doctrine's own "heading regulation" as a loud
-capability).  Trained ranges: vx ±0.4, vy ±0.3, vyaw ±1.0.
+"stand still" to it, and it does not walk backward at −0.3 — and **a start-up curve**: the
+first 4 s of a forward walk turn the body 20–30°, after which it walks straight — measured
+over 900 s at vx 0.3 (§16.5): heading drift −0.02°/s, 110 m net of 155 m walked at 0.128 m/s.
+(The first version of this paragraph read the 4 s curve as a 5–8°/s drift; it is a transient.)
+The first bounds the intent vocabulary.  Trained ranges: vx ±0.4, vy ±0.3, vyaw ±1.0.
 
 **Verdict: WORKING** as a hand-off; a scaffold in the exact sense (a scripted intent driving a
 trained walker), named as such, and the machinery every level-2 intent will use.
@@ -945,7 +946,7 @@ pinned commit and hash, and `run.sh` calls it when one is missing.
 
 ### 16.4 Phase 1e — the brain one level up: identification at the intent boundary
 
-`--level2 --graph a1v2_l2_ident.json` (R20).  The same module code as the joint-level brain
+`--level2 --graph a1v2_r20_l2_ident.json` (R20).  The same module code as the joint-level brain
 with the blanket drawn one layer out: a sensorimotor bridge and one MotorEPMv2 whose three
 "motors" are the twist commands to Pollen's walker (vx, vy, vyaw, in the walker's trained
 units 0.4 / 0.3 / 1.0) and whose "senses" are the body's own velocity — contact odometry
@@ -984,3 +985,60 @@ design doc's phase 1 gate ("the identified move → odometry rows agree with dea
 ground truth in sign, per axis") is met.  What follows is the first level-2 *control*: a
 prior on this surface — forward speed and zero yaw rate, "I predict I am walking straight" —
 learned through the identified A, judged against the walker's own 5–8°/s drift.
+
+### 16.5 R21 — the first level-2 control: walking straight, and the homeokinetic spin
+
+R21 = R20 + a state prior on the sensed forward velocity (slot 0 → 0.75 of range = 0.3 m/s)
+and on the yaw rate (slot 6 → 0), learned through the identified A.  Babble 600 s, then the
+prior drives; judged over 700–1500 s against the walker under a constant forward command.
+
+| arm | forward speed | heading drift | straightness (net / path) | rescues |
+|---|---|---|---|---|
+| open loop, vx 0.3 constant, 900 s | 0.128 m/s | −0.02°/s | 0.71 (110 of 155 m) | 0 |
+| R21 with `ctrl_lr` 0.1 (HK on) | 0.163 m/s | **+6.5°/s — a spin** | 0.02 | 0 |
+| R21, HK on, no dither | 0.165 m/s | +7.1°/s | 0.01 | 0 |
+| **R21 prior-only (`ctrl_lr` 0)** | **0.214 m/s** | **0.00°/s** | **0.90 (178 of 197 m)** | 0 |
+| prior-only, target 0.5 | 0.145 m/s | −1.4°/s | 0.05 | 0 |
+
+The spin is §10's efference limit cycle one level up: with HK on, the learned yaw row is
+dominated by the copy of its own yaw command (C(vyaw, yaw act) = −57) and the body circles
+at 7°/s regardless of dither.  With the prior alone the controller walks straighter than the
+walker does by itself, at the walker's top speed (the 0.75 target sits above what it can do;
+the command rails at 0.4).  At target 0.5 the corrections the yaw-rate prior asks for fall
+inside the walker's turning dead zone and the heading wanders.  **Verdict: prior-only
+WORKING; HK at the intent level REGRESSION** (re-use: the rest trio's efference rest, one
+level up).  R21's config is the prior-only form.  Also measured here: the walker holds its
+heading over 15 min by itself (§16.2 corrected), so "walk straight" needed a perturbation to
+mean anything — which is §16.6.
+
+### 16.6 R22 — heading regulation: the (d) test at the intent level, and what a heading is
+
+R22 adds a heading prior.  Getting the *sense* right was the whole work, and each wrong form
+was measured before the next (the ledger's process record; the result is the last row):
+
+| heading sense (slot 10) | identified row (vs vyaw) | what the body did under 2 N shoves |
+|---|---|---|
+| odometry yaw / π, wrapped | −0.0014 (wrong sign: a pulse across ±π hands the estimator a jump of two) | held **±176°** tightly — the wrong fixed point |
+| sin(yaw) | −0.0049 (the body faced ~180° through the babble, where the sine's slope is negative) | held ±177° |
+| unwrapped yaw / π, clamped | 0.0000 (the body winds past a half turn in the babble; the clamp saturates) | wandered like the open loop |
+| **deviation from a slow running average (τ 60 s) / π** | **+0.0034** | **returned to its pre-shove heading** |
+
+A wrapped angle is not one linear row (its slope changes sign with where the body faces), an
+unwrapped one saturates, and a heading *relative to the heading recently kept* is bounded,
+linear, and a memory that forgets over a minute — long enough to answer a shove, short
+enough never to saturate.  With it, twenty 2 N shoves every 40 s during the walk:
+
+| arm | peak excursion | \|offset\| 20 s after a shove | rescues | speed |
+|---|---|---|---|---|
+| open loop (constant vx 0.4) | 39° | **109°** — never returns | 0 | 0.204 m/s |
+| heading prior only (R22b) | 17° | **3°** | 0 | 0.240 m/s |
+| heading prior only, 3 N | 36° | 5° | 2 | 0.245 m/s |
+| heading + yaw-rate priors (R22) | 20° | 4° | 0 | 0.247 m/s |
+
+Per-shove, the heading prior brings the body back within 5–10 s (+2 s: −12°, +5 s: −2°,
++10 s: −2°, +20 s: +3°).  Learned: C(vyaw, heading) = −0.91 (restoring), C(vyaw, yaw rate)
+= −1.24 (damping), through an A the brain identified itself.  **Verdict: WORKING, LOUD** —
+the doctrine's "heading regulation: re-corrects when noise turns the body", on the intent
+boundary, with every input egocentric (contact odometry, gyro, IMU) and the walker untouched.
+Scale: one seed (the identification is deterministic), 20 shoves per arm, two forces; the (d)
+test is the result itself.
