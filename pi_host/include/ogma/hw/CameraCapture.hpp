@@ -81,6 +81,10 @@ public:
 
     const std::string& last_error() const { return err_; }
     uint64_t frames()      const { return frames_; }
+    // Frames overwritten before the brain's latest() consumed them — the camera's
+    // equivalent of an ALSA xrun, and the honest measure of whether the tick is keeping
+    // up with the sensor rather than of how long it has been running.
+    uint64_t dropped()     const { return dropped_; }
     int      out_size()    const { return cfg_.out_size; }
     int      stride()      const { return stride_; }     // measured, not assumed
     int      src_width()   const { return cfg_.src_width; }
@@ -126,6 +130,7 @@ private:
     bool        fresh_   = false;
     std::atomic<bool> running_{false};
     uint64_t    frames_  = 0;
+    uint64_t    dropped_ = 0;
     float       mean_    = 0.0f;
     std::string err_;
 };

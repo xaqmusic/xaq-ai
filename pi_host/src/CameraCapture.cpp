@@ -226,6 +226,7 @@ void CameraCapture::run() {
         for (uint8_t v : small) sum += v;
         {
             std::lock_guard<std::mutex> lk(m_);
+            if (fresh_) ++dropped_;          // the previous frame was never read
             frame_ = small;
             preview_   = std::move(prev_small); preview_w_ = pw; preview_h_ = ph;
             preview_u_ = std::move(prev_u); preview_v_ = std::move(prev_v);

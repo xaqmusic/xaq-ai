@@ -166,6 +166,7 @@ void Ultrasonic::run() {
         if (r.valid) { prev_m = r.distance_m; prev_t = now_t; have_prev = true; }
 
         std::lock_guard<std::mutex> lk(m_);
+        if (fresh_) ++dropped_;              // the previous reading was never read
         r.seq  = ++last_.seq;
         last_  = r;
         fresh_ = true;

@@ -99,6 +99,7 @@ void AudioCapture::run() {
         }
         {
             std::lock_guard<std::mutex> lk(m_);
+            if (fresh_) ++dropped_;          // the previous window was never read
             window_.assign(buf.begin(), buf.begin() + have);
             fresh_ = true;
             peak_  = pk;

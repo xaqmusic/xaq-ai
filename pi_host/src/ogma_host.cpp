@@ -21,6 +21,12 @@
 #include "ogma/DiagPublisher.hpp"
 #include "control_server.hpp"
 #include <zmq.h>
+#include <sys/stat.h>
+#include <limits.h>
+
+#ifndef OGMA_HOST_GIT_SHA
+#define OGMA_HOST_GIT_SHA "unknown"
+#endif
 #include "ogma/Topics.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/AudioCapture.hpp"
@@ -37,6 +43,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <fstream>
 #include <string>
 #include <sched.h>
 #include <time.h>
@@ -110,6 +117,16 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, on_sig);
 
     try {
+        // The config's own name, so the dash can say WHICH graph is loaded rather than
+        // only which path — two checkouts can have the same filename.
+        std::string cfg_name, cfg_phase;
+        try {
+            std::ifstream cf(a.config);
+            nlohmann::json cj; cf >> cj;
+            cfg_name  = cj.value("metadata", nlohmann::json::object()).value("name", std::string());
+            cfg_phase = cj.value("metadata", nlohmann::json::object()).value("phase_tag", std::string());
+        } catch (...) { /* metadata is a convenience; a config without it still runs */ }
+
         auto cfg = ogma::GraphConfig::load_from_file(a.config);
         auto instance = std::make_unique<ogma::OgmaInstance>(
             std::move(cfg), std::make_unique<ogma::InProcessBus>());
@@ -150,6 +167,10 @@ int main(int argc, char** argv) {
         // PUB stream, so a host without it is mute to every existing tool.
         // The lock guards against the tick thread mutating the module list under a verb.
         std::mutex inst_mtx;
+        const auto t_start = std::chrono::steady_clock::now();
+        // Declared here, assigned below: the control handler captures by reference and
+        // reports it, and SCHED_FIFO cannot be requested until the sensors are up.
+        bool rt = false;
         // The raw sensor values, so a human can see what the encoders were handed.
         // Debugging an encoder through its embedding alone is guesswork: the range
         // channel looked like a change detector for a week and the rangefinder was
@@ -189,21 +210,77 @@ int main(int argc, char** argv) {
                             {"topic_prefix", "diag." + std::to_string(sub_id) + "."}};
                 }
                 if (verb == "unsubscribe") { diag.unsubscribe(req.value("sub_id", 0)); return {{"status","ok"}}; }
+                if (verb == "host_info") {
+                    // "What is actually running here" — asked of the process itself
+                    // rather than inferred from a repo the operator is standing in,
+                    // which may be a different checkout from the one that built this.
+                    auto stat_of = [](const std::string& path) {
+                        struct stat st{};
+                        nlohmann::json j;
+                        if (::stat(path.c_str(), &st) == 0) {
+                            j["bytes"] = int64_t(st.st_size);
+                            char buf[32];
+                            std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M",
+                                          std::localtime(&st.st_mtime));
+                            j["mtime"] = buf;
+                        } else {
+                            j["missing"] = true;
+                        }
+                        return j;
+                    };
+                    char exe[PATH_MAX] = {0};
+                    const ssize_t elen = ::readlink("/proc/self/exe", exe, sizeof exe - 1);
+                    const std::string exe_path = elen > 0 ? std::string(exe, size_t(elen)) : "?";
+                    char cwd[PATH_MAX] = {0};
+                    if (!::getcwd(cwd, sizeof cwd)) cwd[0] = 0;
+                    nlohmann::json mods = nlohmann::json::array();
+                    for (auto* m : instance->modules())
+                        mods.push_back({{"id", std::string(m->id())}, {"type", std::string(m->type_name())}});
+                    return {{"status","ok"},
+                            {"git_sha", OGMA_HOST_GIT_SHA},
+                            {"binary", {{"path", exe_path}, {"stat", stat_of(exe_path)}}},
+                            {"config", {{"path", a.config}, {"stat", stat_of(a.config)},
+                                        {"name", cfg_name}, {"phase_tag", cfg_phase}}},
+                            {"cwd", std::string(cwd)},
+                            {"hz", a.hz},
+                            {"realtime", rt},
+                            {"listen", a.listen},
+                            {"ports", {{"control", control_port}, {"diag", diag_port},
+                                       {"video", a.video ? video_port : 0}}},
+                            {"sensors", {{"mic", a.mic}, {"camera", a.camera}, {"range", a.range}}},
+                            {"modules", mods}};
+                }
                 if (verb == "host_sensors") {
+                    const double up_s = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - t_start).count();
                     // Raw, pre-encoder.  Paired with each channel's health counters so
                     // "no reading" and "a reading of zero" stay distinguishable.
+                    // Rates, not cumulative totals: "104569 frames" says how long the
+                    // process has been up, which `uptime_s` already says once.  What a
+                    // reader needs is whether the channel is keeping pace NOW, and
+                    // whether anything was dropped -- a producer overwriting an unread
+                    // observation is the sensor equivalent of a tick overrun.
+                    auto per_s = [&](uint64_t n) { return up_s > 0.5 ? double(n) / up_s : 0.0; };
                     return {{"status","ok"},
+                            {"uptime_s", up_s},
                             {"range", {{"m", raw.range_m}, {"cm", raw.range_m * 100.0},
                                        {"rate_mps", raw.range_rate}, {"valid", raw.range_valid},
-                                       {"seq", raw.range_seq},
-                                       {"hz", rangefinder.running() ? 20.0 : 0.0},
+                                       {"up", rangefinder.running()},
+                                       {"hz", per_s(rangefinder.pings() + rangefinder.timeouts())},
                                        {"pings", rangefinder.pings()},
-                                       {"timeouts", rangefinder.timeouts()}}},
-                            {"camera", {{"mean_level", raw.cam_mean}, {"frames", raw.cam_frames},
+                                       {"timeouts", rangefinder.timeouts()},
+                                       {"dropped", rangefinder.dropped()}}},
+                            {"camera", {{"mean_level", raw.cam_mean},
+                                        {"up", cam.running()},
+                                        {"fps", per_s(cam.frames())},
+                                        {"dropped", cam.dropped()},
                                         {"stride", cam.stride()}, {"frame_bytes", cam.frame_bytes()},
                                         {"out_size", cam.out_size()}}},
-                            {"mic", {{"peak", raw.mic_peak}, {"windows", raw.mic_windows},
-                                     {"xruns", mic.xruns()}, {"rate", mic.rate()}}}};
+                            {"mic", {{"peak", raw.mic_peak},
+                                     {"up", mic.running()},
+                                     {"hz", per_s(raw.mic_windows)},
+                                     {"xruns", mic.xruns()}, {"dropped", mic.dropped()},
+                                     {"rate", mic.rate()}}}};
                 }
                 return {{"status","error"}, {"message","unknown verb: " + verb}};
             });
@@ -235,7 +312,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        const bool rt = a.realtime ? try_realtime() : false;
+        rt = a.realtime ? try_realtime() : false;
         std::printf("ogma_host: config=%s hz=%.2f diag=%u %s\n",
                     a.config.c_str(), a.hz, unsigned(diag_port),
                     a.realtime ? (rt ? "SCHED_FIFO" : "SCHED_FIFO DENIED (need CAP_SYS_NICE) -- running SCHED_OTHER")

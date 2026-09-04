@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import curses
 import json
+import os
 import socket
 import time
 from typing import Any, Optional
@@ -142,6 +143,14 @@ def gng_baked(g: dict) -> tuple:
     return (len(nodes), baked, (baked / len(nodes)) if nodes else 0.0)
 
 
+def fmt_uptime(sec: float) -> str:
+    sec = int(max(0, sec))
+    d, r = divmod(sec, 86400)
+    h, r = divmod(r, 3600)
+    m, _ = divmod(r, 60)
+    return f"{d}d{h:02d}h{m:02d}m" if d else f"{h}h{m:02d}m"
+
+
 def bar(frac: float, width: int) -> str:
     frac = max(0.0, min(1.0, frac))
     n = int(frac * width)
@@ -159,12 +168,17 @@ class Dash:
         self.sensors: Optional[dict] = None
         self.brain: Optional[dict] = None
         self.st: Optional[dict] = None
+        self.info: Optional[dict] = None      # host_info: fetched once, it is static
         self.t0 = time.time()
 
     def poll(self) -> None:
         self.st = self.bench.status()
         self.brain = self.control.call("ping")
         if self.brain is not None:
+            # Static for the life of the process, so fetch it once — and re-fetch after a
+            # reconnect, since the daemon may have restarted onto a different config.
+            if self.info is None:
+                self.info = self.control.call("host_info")
             self.sensors = self.control.call("host_sensors")
             resp = self.control.call("list_modules")
             if resp and resp.get("status") == "ok":
@@ -177,6 +191,7 @@ class Dash:
                     self.snaps[m["id"]] = r.get("snapshot", {})
         else:
             self.sensors = None
+            self.info = None                   # force a re-read when it comes back
             self.modules = []
 
     # -- drawing helpers that never raise on a small terminal --
@@ -193,10 +208,16 @@ class Dash:
         h, w = scr.getmaxyx()
         C = curses.color_pair
         y = 0
-        up = int(time.time() - self.t0)
-        self._line(scr, y, 0, f" picrawler dash  {self.host}".ljust(max(0, w - 22))
-                   + time.strftime("%H:%M:%S") + f"  {up // 3600}h{(up // 60) % 60:02d}m",
-                   C(HEAD) | curses.A_BOLD)
+        # Uptimes that mean something: the daemons', not this viewer's.
+        bench_up = float((self.st or {}).get("uptime_s", 0.0))
+        brain_up = float((self.sensors or {}).get("uptime_s", 0.0))
+        # Right-align the clock+uptimes only if they fit; addnstr clips rather than
+        # wrapping, so a narrow terminal loses the least important end.
+        left = f" picrawler dash  {self.host}"
+        right = (time.strftime("%H:%M:%S")
+                 + f"  bench {fmt_uptime(bench_up)}  brain {fmt_uptime(brain_up)}")
+        pad = max(1, w - 1 - len(left) - len(right))
+        self._line(scr, y, 0, left + " " * pad + right, C(HEAD) | curses.A_BOLD)
         y += 1
         self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM)); y += 1
 
@@ -238,26 +259,68 @@ class Dash:
         else:
             self._line(scr, y, 21, f"ticks {self.brain.get('ticks', '?')}", C(OK))
             y += 1
+            # WHAT IS RUNNING.  Named because "which config is loaded" is otherwise a
+            # guess from whichever checkout the operator happens to be standing in, and
+            # two checkouts can hold the same filename with different contents.
+            nfo = self.info or {}
+            cfgi = nfo.get("config", {})
+            if cfgi:
+                self._line(scr, y, 3,
+                           f"cfg   {os.path.basename(cfgi.get('path', '?'))}"
+                           f"   [{cfgi.get('phase_tag', '-')}]"
+                           f"   {cfgi.get('stat', {}).get('mtime', '?')}", C(DIM))
+                y += 1
+                self._line(scr, y, 9, f"{cfgi.get('name', '')[:66]}", C(DIM))
+                y += 1
+            if nfo:
+                ports = nfo.get("ports", {})
+                sens = nfo.get("sensors", {})
+                on = ",".join(k for k, v in sens.items() if v) or "none"
+                self._line(scr, y, 3,
+                           f"build {nfo.get('git_sha', '?')}"
+                           f"  {nfo.get('binary', {}).get('stat', {}).get('mtime', '?')}"
+                           f"   {float(nfo.get('hz', 0)):.0f}Hz"
+                           f" {'SCHED_FIFO' if nfo.get('realtime') else 'SCHED_OTHER'}"
+                           f"   ports {ports.get('control')}/{ports.get('diag')}/{ports.get('video')}"
+                           f"   sensors {on}", C(DIM))
+                y += 1
             s = self.sensors or {}
             rg, cam, mic = s.get("range", {}), s.get("camera", {}), s.get("mic", {})
             if rg:
-                rv = rg.get("valid")
+                rv, up = rg.get("valid"), rg.get("up")
+                miss = int(rg.get("timeouts", 0))
+                tot = miss + int(rg.get("pings", 0))
                 self._line(scr, y, 3,
                            f"range {float(rg.get('cm', 0)):6.1f}cm {'ok' if rv else 'NO ECHO':8s}"
-                           f" pings {rg.get('pings', 0)} timeouts {rg.get('timeouts', 0)}",
-                           C(OK if rv else DIM))
+                           f"{float(rg.get('hz', 0)):5.1f}Hz   no-echo {100.0 * miss / max(1, tot):4.0f}%",
+                           C(BAD if not up else (OK if rv else DIM)))
                 y += 1
             if cam:
                 self._line(scr, y, 3,
-                           f"cam   {cam.get('frames', 0)} frames  mean {float(cam.get('mean_level', 0)):5.1f}"
-                           f"  stride {cam.get('stride', '?')}  {cam.get('frame_bytes', '?')}B", C(DIM))
+                           f"cam   {float(cam.get('fps', 0)):5.1f}fps  mean {float(cam.get('mean_level', 0)):5.1f}"
+                           f"  {cam.get('stride', '?')}px stride  {cam.get('frame_bytes', '?')}B/frame",
+                           C(BAD if not cam.get("up") else DIM))
                 y += 1
             if mic:
                 self._line(scr, y, 3,
-                           f"mic   peak {float(mic.get('peak', 0)):.4f}  windows {mic.get('windows', 0)}"
-                           f"  xruns {mic.get('xruns', 0)}",
-                           C(WARN if int(mic.get("xruns", 0)) else DIM))
+                           f"mic   peak {float(mic.get('peak', 0)):.4f}  {float(mic.get('hz', 0)):5.1f}Hz"
+                           f"  {int(mic.get('rate', 0)) // 1000}kHz",
+                           C(BAD if not mic.get("up") else DIM))
                 y += 1
+            # Every buffer over/underrun on one line, because "is anything being dropped"
+            # is one question.  A no-echo ping is a sensor MISS and is deliberately not
+            # summed in here: it means the world was empty, not that the host fell behind.
+            drops = [("mic xrun", int(mic.get("xruns", 0))),
+                     ("mic", int(mic.get("dropped", 0))),
+                     ("cam", int(cam.get("dropped", 0))),
+                     ("range", int(rg.get("dropped", 0))),
+                     ("tick", int((self.brain or {}).get("overruns", 0)))]
+            total = sum(v for _, v in drops)
+            self._line(scr, y, 3,
+                       "drops " + ("none" if total == 0 else
+                                   "  ".join(f"{k} {v}" for k, v in drops if v)),
+                       C(OK if total == 0 else WARN))
+            y += 1
         y += 1
 
         # ---- the EPMs: the part the Godot dashboard does not show ----
@@ -282,9 +345,16 @@ class Dash:
                        f"{str(sn.get('prev_winner_id_for_transitions', '')):>8}", C(col))
             y += 1
 
-        self._line(scr, h - 2, 0, "─" * max(0, w - 1), C(DIM))
+        self._line(scr, h - 3, 0, "─" * max(0, w - 1), C(DIM))
+        # A colour with no key is worse than no colour.
+        self._line(scr, h - 2, 1, "key ", C(DIM))
+        self._line(scr, h - 2, 5, "green ok", C(OK))
+        self._line(scr, h - 2, 14, "amber watch", C(WARN))
+        self._line(scr, h - 2, 26, "red fault", C(BAD))
+        self._line(scr, h - 2, 36,
+                   "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"q quit   r refresh      every {self.interval:.1f}s"
+                   f"q quit   r refresh   every {self.interval:.1f}s"
                    f"   baked = visits >= baking_threshold", C(DIM))
         scr.refresh()
 
@@ -330,6 +400,12 @@ def main() -> None:
         d.poll()
         st, br = d.st, d.brain
         print(f"bench: {'ok' if st else 'unreachable'}   brain: {'ok' if br else 'unreachable'}")
+        if d.info:
+            i = d.info
+            print(f"  cfg   {i['config']['path']}  [{i['config'].get('phase_tag', '-')}]")
+            print(f"        \"{i['config'].get('name', '')}\"")
+            print(f"  build {i.get('git_sha')}  binary {i['binary']['stat'].get('mtime')}"
+                  f"  {i.get('hz')}Hz {'SCHED_FIFO' if i.get('realtime') else 'SCHED_OTHER'}")
         if st:
             print(f"  vbat {float(st.get('vbat', 0)):.2f} V  tick {float(st.get('tick_hz', 0)):.2f} Hz"
                   f"  overruns {st.get('overruns')}")

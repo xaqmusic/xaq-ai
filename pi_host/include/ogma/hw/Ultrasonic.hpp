@@ -77,7 +77,10 @@ public:
 
     const std::string& last_error() const { return err_; }
     uint64_t pings()   const { return pings_; }
-    uint64_t timeouts() const { return timeouts_; }
+    uint64_t timeouts() const { return timeouts_; }   // pings with no echo (a MISS)
+    // Readings overwritten before latest() consumed them — a buffer overrun, which is a
+    // different fault from a timeout and must not be summed with it.
+    uint64_t dropped()  const { return dropped_; }
 
     // Pure helpers, exposed for the tests.
     static double speed_of_sound_mps(double air_temp_c);
@@ -96,6 +99,7 @@ private:
     std::atomic<bool> running_{false};
     uint64_t    pings_    = 0;
     uint64_t    timeouts_ = 0;
+    uint64_t    dropped_  = 0;
     std::string err_;
 };
 

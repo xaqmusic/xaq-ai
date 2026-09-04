@@ -101,6 +101,17 @@ endif()
 # stay a seconds-long edit-build-test loop.
 #   cmake -S pi_host -B pi_host/build -DPI_HOST_BUILD_BRAIN=ON
 # ---------------------------------------------------------------------------
+# What code is actually running.  Captured at CONFIGURE time, so it can go stale if you
+# rebuild without reconfiguring -- which is why ogma_host reports the BINARY'S MTIME
+# beside it: the mtime is always true, and a hash that disagrees with it is visibly a
+# hash from an older configure rather than a silent lie about the running build.
+execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR}/.. rev-parse --short HEAD
+                OUTPUT_VARIABLE PI_HOST_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET RESULT_VARIABLE _git_rc)
+if(NOT _git_rc EQUAL 0)
+  set(PI_HOST_GIT_SHA "unknown")
+endif()
+
 option(PI_HOST_BUILD_BRAIN "Build ogma_host (links ogma_core)" OFF)
 if(PI_HOST_BUILD_BRAIN AND PI_HOST_HAVE_SENSORS)
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../cpp_core cpp_core_build EXCLUDE_FROM_ALL)
@@ -108,4 +119,5 @@ if(PI_HOST_BUILD_BRAIN AND PI_HOST_HAVE_SENSORS)
   target_include_directories(ogma_host PRIVATE ${ZMQ_INCLUDE_DIRS})
   target_link_libraries(ogma_host PRIVATE ogma_hw ogma_sensors ogma_core ogma_infra ${ZMQ_LIBRARIES})
   target_compile_options(ogma_host PRIVATE -Wall -Wextra)
+  target_compile_definitions(ogma_host PRIVATE OGMA_HOST_GIT_SHA="${PI_HOST_GIT_SHA}")
 endif()

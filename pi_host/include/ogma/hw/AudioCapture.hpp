@@ -53,7 +53,11 @@ public:
     unsigned  rate()            const { return cfg_.rate; }
     unsigned  window_samples()  const { return cfg_.window_samples; }
     uint64_t  windows()         const { return windows_; }
-    uint64_t  xruns()           const { return xruns_; }
+    uint64_t  xruns()           const { return xruns_; }   // ALSA over/underruns
+    // Windows the capture thread overwrote while the previous one was still unread.
+    // A genuine buffer overrun on OUR side rather than ALSA's: the producer outran the
+    // consumer and an observation the brain never saw was discarded.
+    uint64_t  dropped()         const { return dropped_; }
     // Peak absolute sample of the last window — the level meter, and the cheapest
     // possible answer to "is the microphone actually hearing anything?"
     float     peak()            const { return peak_; }
@@ -70,6 +74,7 @@ private:
     std::atomic<bool> running_{false};
     uint64_t    windows_  = 0;
     uint64_t    xruns_    = 0;
+    uint64_t    dropped_  = 0;
     float       peak_     = 0.0f;
     std::string err_;
 };
