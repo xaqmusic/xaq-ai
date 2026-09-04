@@ -876,6 +876,56 @@ the dashboard joins that.
 - The AP has no uplink — the laptop loses internet while joined. Worth knowing before a demo, not
   during one.
 
+#### ✅ Band decided, 2026-09-04: **2.4 GHz, locked by BSSID** — the section asked for this to be recorded
+
+**Symptom.** The Godot bench dashboard could not connect, "worked once then would not
+reconnect", `picrawler.local` resolved only intermittently, and one ssh session died with
+`No route to host`. The obvious suspect — a second client (`picrawler-dash`) contending for
+`ogma_benchd`'s REP socket — was **wrong, and reproducing it is what showed that**: two
+concurrent REQ clients against that REP both ran clean, 30 requests each, zero timeouts.
+
+**Cause.** The Pi had roamed onto `<your-ssid>`'s **5 GHz** radio (ch 157, signal 57) while the
+**2.4 GHz** radio of the same SSID sat at signal 80. Measured on the bad link: **−67 dBm,
+20 % packet loss, 889 ms mean RTT (max 2051), and 9922 retries climbing ~22 every 5 s** in
+`/proc/net/wireless`. Godot's `BenchClient` uses a **500 ms** timeout, so at 889 ms mean it
+failed nearly every request. Nothing was wrong with either daemon.
+
+| | on 5 GHz | on 2.4 GHz |
+|---|---|---|
+| signal | −67 dBm | **−49 dBm** |
+| packet loss | 20 % | **0 %** |
+| RTT mean | 889 ms | **7 ms** |
+| benchd REQ from the laptop | 4 of 8 timed out | **10 of 10 ok**, 3 ms mean |
+| retries | 9922, climbing | **2** |
+
+**The decision.** 2.4 GHz. The band trade above says *"5 GHz for throughput if the camera
+feed is on"* — but the camera stream is **~200 kB/s** (13.1 kB greyscale / 19.2 kB colour at
+15 fps), which 2.4 GHz carries without noticing. Range is the binding constraint, not
+throughput, and this robot is meant to roam.
+
+⚠ **`802-11-wireless.band bg` is ADVISORY and did not work** — the AP band-steers and the
+Pi stayed on channel 157. What holds is a **BSSID lock** to the 2.4 GHz radio:
+
+```sh
+sudo nmcli connection modify <your-ssid> 802-11-wireless.bssid AA:BB:CC:DD:EE:F0
+sudo nmcli connection up <your-ssid>          # AA:BB:CC:DD:EE:F1 is the 5 GHz twin
+```
+
+⚠ **A BSSID lock does not roam.** The Pi will now join that one access point and no other,
+so moving the robot out of its range, or adding a mesh node, means it simply fails to
+associate. Undo with `802-11-wireless.bssid ""`. **Check this before taking the robot
+anywhere** — it is the failure mode this fix introduces.
+
+**Two lessons that generalise.**
+1. **Changing wifi over wifi needs a rollback, not care.** `eth0` was unplugged, so a failed
+   reassociation would have left no path in at all. The change ran detached via `setsid`
+   with a script that verifies the resulting **channel** (not merely that an IP appeared)
+   and reverts itself on failure.
+2. **`nmcli connection modify` fails SILENTLY without privilege.** The first attempt ran
+   detached as the user with no polkit agent; it logged success and changed nothing. Reading
+   the property back afterwards is what caught it — a script's own log is not evidence that
+   the system changed.
+
 ### 7.6 Camera feed — two streams, and they are not the same picture
 
 The physical camera is the **OV5647** whose true optics (**53.5° × 41.4°**, the quoted 65° being
