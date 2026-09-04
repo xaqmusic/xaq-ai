@@ -184,6 +184,7 @@ def status_line(frame):
 
 def watch(frames, realtime=True, title_every=25):
     """Drive the interactive viewer from a stream of frames."""
+    _prefer_x11_window()
     mujoco = need("mujoco", "the viewer")
     np = need("numpy", "the status overlay")
     import mujoco.viewer
@@ -261,6 +262,28 @@ def record(frames, out_path, width=960, height=720):
     iio.mimwrite(out_path, images, fps=int(BRAIN_HZ), quality=8, macro_block_size=1)
     print(f"wrote {out_path}  ({len(images)} frames, {len(images)/BRAIN_HZ:.1f} s)")
     return len(images)
+
+
+def _prefer_x11_window():
+    """Ask GLFW for an X11 window under a Wayland session.
+
+    MuJoCo's passive viewer opens a GLFW window.  Under Wayland GLFW draws its
+    own (missing) decorations, so the window cannot be moved or resized from
+    the desktop; as an XWayland client the compositor frames it like any other
+    window.  Set DUCK_VIEWER_PLATFORM=wayland to keep the native path.
+    """
+    if os.environ.get("XDG_SESSION_TYPE") != "wayland" or not os.environ.get("DISPLAY"):
+        return
+    if os.environ.get("DUCK_VIEWER_PLATFORM", "x11") != "x11":
+        return
+    # The glfw wheel ships an X11 and a Wayland build and picks by session
+    # type unless told otherwise; this must be set before glfw is imported.
+    os.environ.setdefault("PYGLFW_LIBRARY_VARIANT", "x11")
+    try:
+        import glfw
+        glfw.init_hint(glfw.PLATFORM, glfw.PLATFORM_X11)
+    except (ImportError, AttributeError):
+        pass
 
 
 def main():
