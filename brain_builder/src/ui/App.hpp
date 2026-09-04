@@ -69,7 +69,9 @@ struct AppState {
     std::string plus_node, plus_topic, plus_payload;
 
     // dialogs
-    bool   show_open = false, show_saveas = false, show_new = false;
+    bool   show_open = false, show_saveas = false, show_new = false, show_publish = false;
+    std::string pub_target, pub_title, pub_slug, pub_why, pub_phase;
+    bool   pub_dry_first = true;
     std::string dialog_path, dialog_search;
 
     // canvas
@@ -100,5 +102,6 @@ void draw_properties(AppState& st);
 void draw_order(AppState& st);
 void draw_validation(AppState& st);
 void draw_log(AppState& st);
+void draw_publish(AppState& st);
 
 } // namespace bb

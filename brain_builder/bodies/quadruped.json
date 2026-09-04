@@ -1,0 +1,115 @@
+{
+  "body": "quadruped",
+  "host": "godot",
+  "env_target": "quadruped",
+  "title": "Quadruped (Godot)",
+  "launch_hint": "godot_host launcher -> quadruped",
+  "description": "The simple quadruped in the Godot host (godot_host/project/scripts/quadruped_body.gd): 8 brain channels, hip + knee per leg.",
+  "sources": [
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "sin/cos yaw, fwd_v/3.0, ang_v/pi - chassis kinematics"
+    },
+    {
+      "name": "joints",
+      "topic": "reality.proprio.joints",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "4 yaw + 4 hip pitch + 4 knee angles, each normalised to [-1,+1]"
+    },
+    {
+      "name": "foot_contact",
+      "topic": "reality.proprio.foot_contact",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "0/1 per leg (FL, FR, RL, RR) when the lower leg touches ground"
+    },
+    {
+      "name": "chassis_height",
+      "topic": "reality.proprio.chassis_height",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "chassis Y / nominal stand height"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "fl_hip",
+      "topic": "action.fl_hip",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FL hip"
+    },
+    {
+      "name": "fl_knee",
+      "topic": "action.fl_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FL knee"
+    },
+    {
+      "name": "fr_hip",
+      "topic": "action.fr_hip",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FR hip"
+    },
+    {
+      "name": "fr_knee",
+      "topic": "action.fr_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the FR knee"
+    },
+    {
+      "name": "rl_hip",
+      "topic": "action.rl_hip",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RL hip"
+    },
+    {
+      "name": "rl_knee",
+      "topic": "action.rl_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RL knee"
+    },
+    {
+      "name": "rr_hip",
+      "topic": "action.rr_hip",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RR hip"
+    },
+    {
+      "name": "rr_knee",
+      "topic": "action.rr_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the RR knee"
+    }
+  ],
+  "reads": [],
+  "events": [
+    {
+      "name": "body_alive",
+      "topic": "events.body_alive",
+      "event_type": "body_alive",
+      "description": "per-tick survival pulse -> drive valence"
+    },
+    {
+      "name": "body_lift",
+      "topic": "events.body_lift",
+      "event_type": "body_lift",
+      "description": "per-tick lift reward (intensity = max(0, chassis_y - 0.05))"
+    },
+    {
+      "name": "fell_over",
+      "topic": "events.fell_over",
+      "event_type": "fell_over",
+      "description": "episode terminated by tipping or sinking"
+    },
+    {
+      "name": "episode_end",
+      "topic": "events.episode_end",
+      "event_type": "episode_end",
+      "description": "fired at the end of an episode"
+    }
+  ]
+}

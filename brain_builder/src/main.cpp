@@ -17,6 +17,7 @@
 #include "DryRun.hpp"
 #include "Graph.hpp"
 #include "Order.hpp"
+#include "Publish.hpp"
 #include "PaletteGen.hpp"
 #include "TrialSetup.hpp"
 #include "Wiring.hpp"
@@ -33,7 +34,9 @@ void usage() {
         "       brain_builder --gen-palette [--merge] [--out F] [--config-dir D]... [--palette P]\n"
         "       brain_builder --ports config.json [--body B]      every module's trial-setup ports\n"
         "       brain_builder --validate config.json [--body B]   wiring diagnostics; exit 1 on errors\n"
-        "       brain_builder --dry-run config.json [--ticks N] [--body B]   construct, feed synthetic input, tick\n";
+        "       brain_builder --dry-run config.json [--ticks N] [--body B]   construct, feed synthetic input, tick\n"
+        "       brain_builder --roundtrip in.json out.json            load and save through the document model\n"
+        "       brain_builder --publish-dry config.json --title T [--slug S] [--target mj_host|godot]   show the publish plan\n";
 }
 
 } // namespace
@@ -43,7 +46,9 @@ int main(int argc, char** argv) {
     std::string config_path, out_path;
     std::vector<std::string> config_dirs;
     std::string body_id, select_id;
-    bool dump = false, list = false, gen = false, merge = false, ports = false, validate = false, dryrun = false;
+    bool dump = false, list = false, gen = false, merge = false, ports = false, validate = false, dryrun = false, roundtrip = false, pubdry = false;
+    std::string pub_title, pub_slug, pub_target = "mj_host";
+    std::vector<std::string> positional;
     int ticks = 50;
 
     for (int i = 1; i < argc; ++i) {
@@ -61,13 +66,28 @@ int main(int argc, char** argv) {
         else if (a == "--body")           next(body_id);
         else if (a == "--select")         next(select_id);
         else if (a == "--dry-run")        dryrun = true;
+        else if (a == "--roundtrip")      roundtrip = true;
+        else if (a == "--publish-dry")    pubdry = true;
+        else if (a == "--title")          next(pub_title);
+        else if (a == "--slug")           next(pub_slug);
+        else if (a == "--target")         next(pub_target);
         else if (a == "--ticks")          { std::string t; next(t); ticks = std::stoi(t); }
         else if (a == "--palette")        next(palette);
         else if (a == "--out")            next(out_path);
         else if (a == "--config-dir")     { std::string d; next(d); config_dirs.push_back(d); }
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::cerr << "unknown option " << a << "\n"; usage(); return 2; }
-        else config_path = a;
+        else { positional.push_back(a); config_path = positional.front(); }
+    }
+
+    if (roundtrip) {
+        if (positional.size() != 2) { usage(); return 2; }
+        try {
+            bb::Graph g = bb::Graph::load(positional[0]);
+            g.save(positional[1]);
+            std::cout << "wrote " << positional[1] << " (" << g.size() << " modules" << (g.ascii_escapes ? ", ascii escapes" : "") << ")\n";
+        } catch (std::exception const& e) { std::cerr << e.what() << "\n"; return 1; }
+        return 0;
     }
 
     if (list) {
@@ -102,6 +122,17 @@ int main(int argc, char** argv) {
     }
 
     bb::BodyRegistry bodies = bb::BodyRegistry::load_dir(BB_BODIES_DIR);
+
+    if (pubdry) {
+        if (config_path.empty() || pub_title.empty()) { usage(); return 2; }
+        bb::Graph g;
+        try { g = bb::Graph::load(config_path); } catch (std::exception const& e) { std::cerr << e.what() << "\n"; return 2; }
+        bb::Body const* body = bodies.guess(g.body_manifest(), g.env_target(), {});
+        bb::PublishPlan p = bb::plan_publish(g, body, pub_target, pub_slug, pub_title, "", "");
+        std::cout << "file  " << p.path << "\nname  " << p.name << "\nrank  " << p.rank << "\nenv   " << p.env_target << "\n";
+        for (auto const& n : p.notes) std::cout << "note  " << n << "\n";
+        return 0;
+    }
 
     if (ports || validate || dryrun) {
         if (config_path.empty()) { usage(); return 2; }

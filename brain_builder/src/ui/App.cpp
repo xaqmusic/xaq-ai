@@ -248,6 +248,7 @@ void draw_menu(AppState& st, GLFWwindow* window) {
             if (ImGui::MenuItem("Open...", "Ctrl+O")) st.show_open = true;
             if (ImGui::MenuItem("Save", "Ctrl+S")) { if (st.config_path.empty()) st.show_saveas = true; else st.save(st.config_path); }
             if (ImGui::MenuItem("Save as...")) st.show_saveas = true;
+            if (ImGui::MenuItem("Publish...", "Ctrl+P")) st.show_publish = true;
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) glfwSetWindowShouldClose(window, 1);
             ImGui::EndMenu();
@@ -289,6 +290,7 @@ void handle_shortcuts(AppState& st, GLFWwindow* window) {
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) { if (st.config_path.empty()) st.show_saveas = true; else st.save(st.config_path); }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false)) st.show_open = true;
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_N, false)) st.show_new = true;
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_P, false)) st.show_publish = true;
     if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false) && st.graph.can_undo()) { st.graph.undo(); st.wiring_dirty = true; }
     if (io.KeyCtrl && (ImGui::IsKeyPressed(ImGuiKey_Y, false) || (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false))) && st.graph.can_redo()) { st.graph.redo(); st.wiring_dirty = true; }
 }
@@ -363,6 +365,7 @@ int run_app(AppState& st) {
         draw_menu(st, window);
         handle_shortcuts(st, window);
         draw_dialogs(st);
+        draw_publish(st);
         draw_palette(st);
         draw_canvas(st);
         draw_properties(st);

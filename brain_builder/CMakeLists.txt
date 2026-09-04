@@ -90,7 +90,8 @@ add_library(bb_core STATIC
   src/Wiring.cpp
   src/Layout.cpp
   src/DryRun.cpp
-  src/Order.cpp)
+  src/Order.cpp
+  src/Publish.cpp)
 target_include_directories(bb_core PUBLIC src ${BB_REPO_ROOT}/cpp_core/include)
 target_link_libraries(bb_core PUBLIC ogma_core ogma_infra)
 target_compile_definitions(bb_core PUBLIC
@@ -108,7 +109,8 @@ add_executable(brain_builder
   src/ui/Theme.cpp
   src/ui/PalettePanel.cpp
   src/ui/CanvasPanel.cpp
-  src/ui/PropertiesPanel.cpp)
+  src/ui/PropertiesPanel.cpp
+  src/ui/PublishDialog.cpp)
 target_link_libraries(brain_builder PRIVATE bb_core imgui imgui_node_editor)
 target_compile_options(brain_builder PRIVATE -Wall -Wextra)
 
