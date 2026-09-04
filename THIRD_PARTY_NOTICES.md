@@ -64,6 +64,20 @@ repository is a submodule.
 Provenance and the re-vendoring rule are in
 [`mj_host/models/microduck/README.md`](mj_host/models/microduck/README.md).
 
+## Brain builder (`brain_builder/`)
+
+Fetched at build time via CMake `FetchContent` (`brain_builder/CMakeLists.txt`):
+
+| Component | Version | License | Source |
+|---|---|---|---|
+| Dear ImGui (docking branch) | v1.91.9b-docking | MIT | https://github.com/ocornut/imgui |
+| imgui-node-editor | develop @ b302971 | MIT | https://github.com/thedmd/imgui-node-editor |
+| GLFW | 3.4 | zlib | https://github.com/glfw/glfw |
+| GoogleTest (tests only) | 1.14.0 | BSD-3-Clause | https://github.com/google/googletest |
+
+System dependencies (linked, not vendored): OpenGL (Mesa), X11 (the GLFW X11 backend;
+the Wayland backend is an opt-in build flag).
+
 ## Python (`python/`)
 
 | Component | License | Notes |

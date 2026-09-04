@@ -1,0 +1,3677 @@
+{
+  "_comment": "Hand-authored half of the catalogue: category, layer, purpose, id_prefix. sockets/fixed/baseline are written by `brain_builder --gen-palette --merge` and reviewed like code. kinds overrides a required param's widget kind; sockets_extra adds pins probing cannot find.",
+  "types": {
+    "ActionDecoder": {
+      "category": "motor",
+      "layer": 4,
+      "id_prefix": "decoder",
+      "purpose": "Final action policy: consensus + drives → ActionOut (action.out)",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [
+        {
+          "pattern": "consensus.{consensus_level}",
+          "params": [
+            "consensus_level"
+          ],
+          "output": false,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{intent_override_topic}",
+          "params": [
+            "intent_override_topic"
+          ],
+          "output": true,
+          "payload": "IntentToken"
+        },
+        {
+          "pattern": "{proprio_topic}",
+          "params": [
+            "proprio_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{interest_topic}",
+          "params": [
+            "interest_topic"
+          ],
+          "output": false,
+          "payload": "ReflexGate",
+          "required": false
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "drive.errors",
+          "output": false,
+          "payload": "DriveErrors"
+        },
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState"
+        },
+        {
+          "topic": "rollout.result",
+          "output": false,
+          "payload": "RolloutResult",
+          "required": false
+        },
+        {
+          "topic": "motor.chunks",
+          "output": false,
+          "payload": "MotorChunks",
+          "required": false
+        },
+        {
+          "topic": "motor.play.stream",
+          "output": false,
+          "payload": "MotorPlayStream",
+          "required": false
+        },
+        {
+          "topic": "sequence.motif.consensus.0",
+          "output": false,
+          "payload": "SequenceMotif",
+          "required": false
+        },
+        {
+          "topic": "rollout.query",
+          "output": true,
+          "payload": "RolloutQuery"
+        },
+        {
+          "topic": "motor.play.cmd",
+          "output": true,
+          "payload": "MotorPlayCmd"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "ActionGate": {
+      "category": "motor",
+      "layer": 4,
+      "id_prefix": "agate",
+      "purpose": "Gates an action stream by a reflex or priority signal",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "policy.intent",
+          "output": false,
+          "payload": "PolicyToken"
+        },
+        {
+          "topic": "exploration.directive",
+          "output": false,
+          "payload": "ExplorationDirective",
+          "required": false
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "AdaptiveThresholdTracker": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "thresh",
+      "purpose": "Running-variance adaptive threshold for a scalar; publishes AdaptiveThreshold",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "AdaptiveThreshold"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "BearingEstimator": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "bearing",
+      "purpose": "Estimates the bearing to a source from egocentric cues",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_corridor_turn_heading_infer.json",
+      "sockets": [
+        {
+          "pattern": "{ring_topic}",
+          "params": [
+            "ring_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{teacher_topic}",
+          "params": [
+            "teacher_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "BearingFusion": {
+      "category": "fusion",
+      "layer": 2,
+      "id_prefix": "bfuse",
+      "purpose": "Fuses several bearing estimates by their precision",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_maze_fusion.json",
+      "sockets": [
+        {
+          "pattern": "{consensus_topic}",
+          "params": [
+            "consensus_topic"
+          ],
+          "output": false,
+          "payload": "ConsensusToken",
+          "required": false
+        },
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vision_topic}",
+          "params": [
+            "vision_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "BodyRhythmTracker": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "rhythm",
+      "purpose": "Tracks the body's dominant rhythm and phase from proprioception",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_arena_control.json",
+      "sockets": [
+        {
+          "pattern": "{proprio_topics}",
+          "params": [
+            "proprio_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "proprio_topics": "list_string",
+        "output_topic": "string",
+        "leg_signs": "list_float"
+      }
+    },
+    "CPGOscillator": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "cpg",
+      "purpose": "Central pattern generator: a phase source for gait-level modules",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_cpgtest.json",
+      "sockets": [
+        {
+          "pattern": "{entrain_topic}",
+          "params": [
+            "entrain_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{perceptual_output_topics}",
+          "params": [
+            "perceptual_output_topics"
+          ],
+          "output": true,
+          "payload": "ProprioToken",
+          "list": true
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        },
+        {
+          "topic": "consensus.0",
+          "output": false,
+          "payload": "ConsensusToken",
+          "required": false
+        }
+      ],
+      "kinds_probed": {
+        "perceptual_output_topics": "list_string",
+        "perceptual_leg_phase_offsets": "list_float"
+      }
+    },
+    "CellReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "reflex",
+      "purpose": "Cell: the bundled reflex set (aversion, steer, escape)",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{whisker_topic_prefix}",
+          "params": [
+            "whisker_topic_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic_left}",
+          "params": [
+            "output_topic_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_right}",
+          "params": [
+            "output_topic_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "events.miss",
+          "output": true,
+          "payload": "EnvEvent"
+        },
+        {
+          "topic": "events.wall_stuck",
+          "output": true,
+          "payload": "EnvEvent"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "ChemotaxisAI": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "chemo",
+      "purpose": "Cell: chemotaxis as active inference on the scent channel",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_chemotaxis_ai.json",
+      "sockets": [
+        {
+          "pattern": "{nav_topic}",
+          "params": [
+            "nav_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic_left}",
+          "params": [
+            "output_topic_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_right}",
+          "params": [
+            "output_topic_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "ChunkAbortGate": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "abort",
+      "purpose": "Aborts a playing chunk when surprise spikes",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{consensus_topic}",
+          "params": [
+            "consensus_topic"
+          ],
+          "output": false,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "events.{output_event_name}",
+          "params": [
+            "output_event_name"
+          ],
+          "output": true,
+          "payload": "EnvEvent"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "ChunkOutcomeGate": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "outcome",
+      "purpose": "Grades a finished chunk's outcome against its expected drive reduction",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{outcome_topic}",
+          "params": [
+            "outcome_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{action_topic}",
+          "params": [
+            "action_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "events.{output_event_name}",
+          "params": [
+            "output_event_name"
+          ],
+          "output": true,
+          "payload": "EnvEvent"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "ColumnBuilder": {
+      "category": "fusion",
+      "layer": 2,
+      "id_prefix": "column",
+      "purpose": "Stacks EPM tokens into a cortical-column style consensus input",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{vision_topic}",
+          "params": [
+            "vision_topic"
+          ],
+          "output": false,
+          "payload": "RawImageFrame",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{ang_topic}",
+          "params": [
+            "ang_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "CruseCoordinator": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "cruse",
+      "purpose": "Cruse leg-coordination rules between legs",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2.json",
+      "sockets": [
+        {
+          "pattern": "{feet_y_topic}",
+          "params": [
+            "feet_y_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "rhythm.bias.{premotor_ids}",
+          "params": [
+            "premotor_ids"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "list": true
+        },
+        {
+          "pattern": "{premotor_policy_topics}",
+          "params": [
+            "premotor_policy_topics"
+          ],
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{body_state_topic}",
+          "params": [
+            "body_state_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "leg_names": "list_string",
+        "anatomical_anterior": "list_string",
+        "contralateral": "list_string",
+        "premotor_ids": "list_string",
+        "premotor_leg_assignment": "list_string",
+        "premotor_joint_kind": "list_string",
+        "premotor_policy_topics": "list_string"
+      }
+    },
+    "CylinderBuilder": {
+      "category": "fusion",
+      "layer": 2,
+      "id_prefix": "cyl",
+      "purpose": "Builds a cylinder map from bearing estimates accumulated over time",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{frame_topic}",
+          "params": [
+            "frame_topic"
+          ],
+          "output": false,
+          "payload": "RawImageFrame",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{active_topic}",
+          "params": [
+            "active_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "DescendingPredictor": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "pred",
+      "purpose": "Top-down predictor of a reality topic from consensus; its prediction is subtracted in the target EPM",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [
+        {
+          "pattern": "{consensus_topic}",
+          "params": [
+            "consensus_topic"
+          ],
+          "output": false,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "{targets}",
+          "params": [
+            "targets"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "feedback": true,
+          "list": true
+        },
+        {
+          "pattern": "prediction.{targets}",
+          "params": [
+            "targets"
+          ],
+          "output": true,
+          "payload": "PredictionToken",
+          "list": true
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "targets": "list_string"
+      }
+    },
+    "DistressDrive": {
+      "category": "drive",
+      "layer": 3,
+      "id_prefix": "distress",
+      "purpose": "Drive raised by distress events (falls, collisions) and relieved by recovery",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_cognitive.json",
+      "sockets": [
+        {
+          "pattern": "{meta_topic}",
+          "params": [
+            "meta_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{staleness_topic}",
+          "params": [
+            "staleness_topic"
+          ],
+          "output": false,
+          "payload": "ReflexGate",
+          "required": false
+        },
+        {
+          "pattern": "{pool_topic}",
+          "params": [
+            "pool_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{neuro_topic}",
+          "params": [
+            "neuro_topic"
+          ],
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        },
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{efference_topic}",
+          "params": [
+            "efference_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{clearance_topic}",
+          "params": [
+            "clearance_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{green_topic}",
+          "params": [
+            "green_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ReflexGate"
+        },
+        {
+          "pattern": "{interest_topic}",
+          "params": [
+            "interest_topic"
+          ],
+          "output": true,
+          "payload": "ReflexGate"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "DualEMADetector": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "ema",
+      "purpose": "Fast/slow exponential-moving-average change detector on a scalar stream",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "events.{output_event_name}",
+          "params": [
+            "output_event_name"
+          ],
+          "output": true,
+          "payload": "EnvEvent"
+        },
+        {
+          "pattern": "{motion_floor_topic}",
+          "params": [
+            "motion_floor_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "EFEArbiter": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "efe",
+      "purpose": "Arbitrates candidate behaviours by expected free energy",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{plan_value_topic}",
+          "params": [
+            "plan_value_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{klino_confidence_topic}",
+          "params": [
+            "klino_confidence_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{plan_novelty_topic}",
+          "params": [
+            "plan_novelty_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{plan_precision_topic}",
+          "params": [
+            "plan_precision_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{klino_gain_topic}",
+          "params": [
+            "klino_gain_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{planner_gain_topic}",
+          "params": [
+            "planner_gain_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{play_gain_topic}",
+          "params": [
+            "play_gain_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{vision_gain_topic}",
+          "params": [
+            "vision_gain_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "EPM": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "epm",
+      "purpose": "Episodic Predictive Module: frozen encoder + growing neural gas + dual TLE; publishes one RealityToken per tick on reality.<group>.<name>",
+      "baseline": "mj_host/configs/a1v2_r0_regime.json",
+      "sockets": [
+        {
+          "pattern": "prediction.{modality_group}.{modality_name}",
+          "params": [
+            "modality_group",
+            "modality_name"
+          ],
+          "output": false,
+          "payload": "PredictionToken",
+          "feedback": true,
+          "required": false
+        },
+        {
+          "pattern": "reality.{modality_group}.{modality_name}",
+          "params": [
+            "modality_group",
+            "modality_name"
+          ],
+          "output": true,
+          "payload": "RealityToken"
+        },
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        }
+      ],
+      "kinds_probed": {
+        "modality_group": "string",
+        "modality_name": "string",
+        "encoder_kind": "string",
+        "input_topic": "string"
+      }
+    },
+    "EmbeddingRegistry": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "embed",
+      "purpose": "Registry of latent embeddings keyed by winner id, for lookups by other modules",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{input_pattern}",
+          "params": [
+            "input_pattern"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false,
+          "prefix": true
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "EpisodicCapture": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "capture",
+      "purpose": "Captures episodes into chunk proposals for the repertoire",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{keyframe_topic}",
+          "params": [
+            "keyframe_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken"
+        },
+        {
+          "pattern": "{intent_topic}",
+          "params": [
+            "intent_topic"
+          ],
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "EpisodicChunkProposal"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "EventConjunction": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "conj",
+      "purpose": "Fires a derived event when named events coincide within a window",
+      "baseline": "palette:baseline_params",
+      "sockets": [
+        {
+          "pattern": "{input_event_topics}",
+          "params": [
+            "input_event_topics"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "events.{output_event_name}",
+          "params": [
+            "output_event_name"
+          ],
+          "output": true,
+          "payload": "EnvEvent"
+        },
+        {
+          "pattern": "{motion_floor_topic}",
+          "params": [
+            "motion_floor_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "baseline_params": {
+        "input_event_topics": [
+          "events.a",
+          "events.b"
+        ]
+      },
+      "kinds_probed": {
+        "input_event_topics": "list_string"
+      }
+    },
+    "FaderController": {
+      "category": "motor",
+      "layer": 5,
+      "id_prefix": "faderctl",
+      "purpose": "Sets the fader alpha from a surprise signal",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{consensus_topic}",
+          "params": [
+            "consensus_topic"
+          ],
+          "output": false,
+          "payload": "ConsensusToken",
+          "required": false
+        },
+        {
+          "pattern": "{alpha_topic}",
+          "params": [
+            "alpha_topic"
+          ],
+          "output": true,
+          "payload": "FaderState"
+        },
+        {
+          "pattern": "{urgency_topic}",
+          "params": [
+            "urgency_topic"
+          ],
+          "output": false,
+          "payload": "DriveErrors",
+          "required": false
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "policy.intent",
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "ForwardDriveReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "fwd",
+      "purpose": "Constant forward drive with reflex override",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_left}",
+          "params": [
+            "output_topic_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_right}",
+          "params": [
+            "output_topic_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "GNGRollout": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "rollout",
+      "purpose": "Imagined-trajectory cache: rolls the GNG forward for candidate actions (RolloutQuery/RolloutResult)",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [],
+      "fixed": [
+        {
+          "topic": "rollout.query",
+          "output": false,
+          "payload": "RolloutQuery"
+        },
+        {
+          "topic": "reality.",
+          "output": false,
+          "payload": "RealityToken"
+        },
+        {
+          "topic": "sequence.motif.",
+          "output": false,
+          "payload": "SequenceMotif",
+          "required": false
+        },
+        {
+          "topic": "drive.errors",
+          "output": false,
+          "payload": "DriveErrors",
+          "required": false
+        },
+        {
+          "topic": "rollout.result",
+          "output": true,
+          "payload": "RolloutResult"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "GainEvolver": {
+      "category": "meta",
+      "layer": 5,
+      "id_prefix": "evo",
+      "purpose": "Evolves module gains from intrinsic fitness: candidate vs incumbent windows (GainVector)",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__gainevo.json",
+      "sockets": [
+        {
+          "pattern": "{gain_topic}",
+          "params": [
+            "gain_topic"
+          ],
+          "output": true,
+          "payload": "GainVector",
+          "required": false
+        },
+        {
+          "pattern": "{upright_topic}",
+          "params": [
+            "upright_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{distress_topic}",
+          "params": [
+            "distress_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{foot_load_topic}",
+          "params": [
+            "foot_load_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{foot_contact_topic}",
+          "params": [
+            "foot_contact_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{torque_topic}",
+          "params": [
+            "torque_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{gyro_topic}",
+          "params": [
+            "gyro_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "gain_keys": "list_string",
+        "gain_seed": "list_float",
+        "gain_min": "list_float",
+        "gain_max": "list_float",
+        "gain_sigma_scale": "list_float",
+        "gain_topic": "string",
+        "upright_topic": "string",
+        "distress_topic": "string",
+        "foot_load_topic": "string",
+        "foot_contact_topic": "string",
+        "imu_topic": "string",
+        "torque_topic": "string",
+        "gyro_topic": "string"
+      }
+    },
+    "GaitSelector": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "gaitsel",
+      "purpose": "Selects among gaits by drive state",
+      "baseline": "palette:baseline_params",
+      "sockets": [
+        {
+          "pattern": "consensus.{level}",
+          "params": [
+            "level"
+          ],
+          "output": false,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "{intent_override_topic}",
+          "params": [
+            "intent_override_topic"
+          ],
+          "output": true,
+          "payload": "IntentToken"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        },
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        }
+      ],
+      "baseline_params": {
+        "gaits": [
+          "[0,0,0]",
+          "[1,1,2,2]"
+        ]
+      },
+      "kinds_probed": {
+        "gaits": "list_string"
+      }
+    },
+    "GoalBelief": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "goal",
+      "purpose": "Belief over goal bearing, updated by evidence and decayed by time",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_corridor_turn_heading_belief.json",
+      "sockets": [
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "GradientEPM": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "gepm",
+      "purpose": "EPM over the temporal gradient of a sensor stream rather than its level",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_open2_gradepm.json",
+      "sockets": [
+        {
+          "pattern": "{consensus_topic}",
+          "params": [
+            "consensus_topic"
+          ],
+          "output": false,
+          "payload": "ConsensusToken",
+          "required": false
+        },
+        {
+          "pattern": "{scalar_topic}",
+          "params": [
+            "scalar_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{hit_topic}",
+          "params": [
+            "hit_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "HeadingController": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "heading",
+      "purpose": "PD on dead-reckoned own-yaw toward a heading reference, through the skid-steer channel",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{steer_output_topic}",
+          "params": [
+            "steer_output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{thrust_output_topic}",
+          "params": [
+            "thrust_output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{speed_gate_topic}",
+          "params": [
+            "speed_gate_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "HeadingPlanner": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "hplan",
+      "purpose": "Chooses a heading from beliefs and drives",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_corridor_turn_heading_planner.json",
+      "sockets": [
+        {
+          "pattern": "{belief_topic}",
+          "params": [
+            "belief_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{progress_topic}",
+          "params": [
+            "progress_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "HeadingProbe": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "hprobe",
+      "purpose": "Probes headings to gather bearing evidence for the goal belief",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_heading_isolation.json",
+      "sockets": [
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "HomeokineticExploration": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "explore",
+      "purpose": "Exploration episode scheduler (ExplorationDirective)",
+      "deprecated": true,
+      "deprecated_note": "superseded by intrinsic probes; kept for old configs",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [],
+      "fixed": [
+        {
+          "topic": "drive.errors",
+          "output": false,
+          "payload": "DriveErrors"
+        },
+        {
+          "topic": "motor.chunks",
+          "output": false,
+          "payload": "MotorChunks",
+          "required": false
+        },
+        {
+          "topic": "action.out",
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "topic": "policy.intent",
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false
+        },
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "topic": "exploration.directive",
+          "output": true,
+          "payload": "ExplorationDirective"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "HomeostaticDrive": {
+      "category": "drive",
+      "layer": 3,
+      "id_prefix": "drive",
+      "purpose": "Homeostatic setpoints over events and sensors → drive errors and urgency on drive.errors",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [],
+      "fixed": [
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "topic": "drive.errors",
+          "output": true,
+          "payload": "DriveErrors"
+        }
+      ],
+      "kinds_probed": {
+        "channels": "list_string",
+        "setpoints": "list_float",
+        "urgency_normalizers": "list_float",
+        "channel_input_topics": "list_string",
+        "channel_kinds": "list_string"
+      }
+    },
+    "JointSensorimotorBridge": {
+      "category": "motor",
+      "layer": 1,
+      "id_prefix": "bridge",
+      "purpose": "Per-joint [pos, action, delta] triples plus load slots between the body's joints and a MotorEPM; reads the action back",
+      "baseline": "mj_host/configs/a1_gain075.json",
+      "sockets": [
+        {
+          "pattern": "{proprio_input_topic}",
+          "params": [
+            "proprio_input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{action_topics}",
+          "params": [
+            "action_topics"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{output_topics}",
+          "params": [
+            "output_topics"
+          ],
+          "output": true,
+          "payload": "ProprioToken",
+          "list": true
+        },
+        {
+          "pattern": "{load_topic}",
+          "params": [
+            "load_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "action_topics": "list_string",
+        "output_topics": "list_string",
+        "proprio_indices": "list_float"
+      }
+    },
+    "KeyframeAverager": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "kf",
+      "purpose": "Signal prep: downsamples a stream into keyframes (window average) before an EPM",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_cognitive.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "KeyframeGait": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "gait",
+      "purpose": "Gait from keyframe sequences",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_arena_control.json",
+      "sockets": [
+        {
+          "pattern": "{cpg_topic}",
+          "params": [
+            "cpg_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{proprio_topics}",
+          "params": [
+            "proprio_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{objective_output_topics}",
+          "params": [
+            "objective_output_topics"
+          ],
+          "output": true,
+          "payload": "PredictionToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{bake_upright_topic}",
+          "params": [
+            "bake_upright_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{bake_contact_topic}",
+          "params": [
+            "bake_contact_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "cpg_topic": "string",
+        "proprio_topics": "list_string",
+        "objective_output_topics": "list_string"
+      }
+    },
+    "KeyframePeakDetector": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "peak",
+      "purpose": "Detects peaks in a keyframed stream and emits events at them",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "Klinotaxis": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "klino",
+      "purpose": "Klinotaxis: turn by temporal comparison of scent samples",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_klino2.json",
+      "sockets": [
+        {
+          "pattern": "{scalar_topic}",
+          "params": [
+            "scalar_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "LateralVoter": {
+      "category": "fusion",
+      "layer": 2,
+      "id_prefix": "voter",
+      "purpose": "Precision-weighted (1/(tle+eps)) fusion of many EPMs into one ConsensusToken on consensus.<level>",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [
+        {
+          "pattern": "consensus.{level}",
+          "params": [
+            "level"
+          ],
+          "output": true,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "{input_pattern}",
+          "params": [
+            "input_pattern"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "prefix": true
+        },
+        {
+          "pattern": "{publish_as_reality_topic}",
+          "params": [
+            "publish_as_reality_topic"
+          ],
+          "output": true,
+          "payload": "RealityToken"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "MotivationGate": {
+      "category": "drive",
+      "layer": 3,
+      "id_prefix": "motiv",
+      "purpose": "Gates downstream behaviours by drive urgency",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_corridor_turn_heading_motiv.json",
+      "sockets": [
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{energy_topic}",
+          "params": [
+            "energy_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "MotorBus": {
+      "category": "motor",
+      "layer": 5,
+      "id_prefix": "bus",
+      "purpose": "Arbitrates action channels by authority; publishes the per-side outputs the body reads",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "arbiter.gain.{influencer_names}",
+          "params": [
+            "influencer_names"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{topics_a}",
+          "params": [
+            "topics_a"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{topics_b}",
+          "params": [
+            "topics_b"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{output_left}",
+          "params": [
+            "output_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_right}",
+          "params": [
+            "output_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{gain_mod_prefix}planner",
+          "params": [
+            "gain_mod_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{gain_mod_prefix}klino",
+          "params": [
+            "gain_mod_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{gain_mod_prefix}whisker",
+          "params": [
+            "gain_mod_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{gain_mod_prefix}stuck",
+          "params": [
+            "gain_mod_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "MotorEPM": {
+      "category": "motor",
+      "layer": 2,
+      "id_prefix": "motor1",
+      "purpose": "Motor EPM v1: sensorimotor GNG with action readout",
+      "deprecated": true,
+      "deprecated_note": "benchmark only; prefer MotorEPMv2",
+      "baseline": "mj_host/configs/a1_gain075.json",
+      "sockets": [
+        {
+          "pattern": "{proprio_topics}",
+          "params": [
+            "proprio_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{action_topics}",
+          "params": [
+            "action_topics"
+          ],
+          "output": true,
+          "payload": "ActionOut",
+          "list": true
+        },
+        {
+          "pattern": "{rhythm_topic}",
+          "params": [
+            "rhythm_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{upright_topic}",
+          "params": [
+            "upright_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{contact_topic}",
+          "params": [
+            "contact_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{feet_topic}",
+          "params": [
+            "feet_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{tilt_topic}",
+          "params": [
+            "tilt_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{nav_topic}",
+          "params": [
+            "nav_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{cog_steer_topic}",
+          "params": [
+            "cog_steer_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{cog_thrust_topic}",
+          "params": [
+            "cog_thrust_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{height_topic}",
+          "params": [
+            "height_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{distress_topic}",
+          "params": [
+            "distress_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{lateral_topic}",
+          "params": [
+            "lateral_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{torque_topic}",
+          "params": [
+            "torque_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "proprio_topics": "list_string",
+        "action_topics": "list_string",
+        "imu_topic": "string"
+      }
+    },
+    "MotorEPMv2": {
+      "category": "motor",
+      "layer": 2,
+      "id_prefix": "motor",
+      "purpose": "Motor EPM v2: sensorimotor GNG with state prior, consolidation ratchet and homeokinetic controller; publishes action.* per joint",
+      "baseline": "mj_host/configs/a1v2_ident.json",
+      "sockets": [
+        {
+          "pattern": "{proprio_topics}",
+          "params": [
+            "proprio_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{action_topics}",
+          "params": [
+            "action_topics"
+          ],
+          "output": true,
+          "payload": "ActionOut",
+          "list": true
+        },
+        {
+          "pattern": "{rhythm_topic}",
+          "params": [
+            "rhythm_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{upright_topic}",
+          "params": [
+            "upright_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{contact_topic}",
+          "params": [
+            "contact_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{feet_topic}",
+          "params": [
+            "feet_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{tilt_topic}",
+          "params": [
+            "tilt_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{nav_topic}",
+          "params": [
+            "nav_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{cog_steer_topic}",
+          "params": [
+            "cog_steer_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{cog_thrust_topic}",
+          "params": [
+            "cog_thrust_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{height_topic}",
+          "params": [
+            "height_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{distress_topic}",
+          "params": [
+            "distress_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{gain_topic}",
+          "params": [
+            "gain_topic"
+          ],
+          "output": false,
+          "payload": "GainVector",
+          "required": false
+        },
+        {
+          "pattern": "{lateral_topic}",
+          "params": [
+            "lateral_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{torque_topic}",
+          "params": [
+            "torque_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "proprio_topics": "list_string",
+        "action_topics": "list_string",
+        "state_prior_indices": "list_float",
+        "state_prior_targets": "list_float",
+        "imu_topic": "string"
+      }
+    },
+    "MotorFader": {
+      "category": "motor",
+      "layer": 5,
+      "id_prefix": "fader",
+      "purpose": "Crossfades brain and reflex action by surprise (FaderState)",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{brain_topic}",
+          "params": [
+            "brain_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{reflex_topic}",
+          "params": [
+            "reflex_topic"
+          ],
+          "output": false,
+          "payload": "ActionOut",
+          "required": false
+        },
+        {
+          "pattern": "{alpha_topic}",
+          "params": [
+            "alpha_topic"
+          ],
+          "output": false,
+          "payload": "FaderState",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{entropy_topic}",
+          "params": [
+            "entropy_topic"
+          ],
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "MotorPlanner": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "planner",
+      "purpose": "Plans motor chunks against imagined rollouts and drive reduction",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth.json",
+      "sockets": [
+        {
+          "pattern": "{state_topic}",
+          "params": [
+            "state_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{rhythm_topic}",
+          "params": [
+            "rhythm_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{pose_topic}",
+          "params": [
+            "pose_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "state_topic": "string",
+        "rhythm_topic": "string"
+      }
+    },
+    "MotorRepertoire": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "repertoire",
+      "purpose": "Crystallised motor chunks with their outcome statistics (MotorChunks)",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [
+        {
+          "pattern": "{intent_source_topic}",
+          "params": [
+            "intent_source_topic"
+          ],
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false
+        },
+        {
+          "pattern": "{intent_motif_topic}",
+          "params": [
+            "intent_motif_topic"
+          ],
+          "output": false,
+          "payload": "SequenceMotif"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "action.out",
+          "output": false,
+          "payload": "ActionOut"
+        },
+        {
+          "topic": "sequence.motif.consensus.0",
+          "output": false,
+          "payload": "SequenceMotif",
+          "required": false
+        },
+        {
+          "topic": "drive.errors",
+          "output": false,
+          "payload": "DriveErrors"
+        },
+        {
+          "topic": "motor.play.cmd",
+          "output": false,
+          "payload": "MotorPlayCmd"
+        },
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "topic": "motor.chunks",
+          "output": true,
+          "payload": "MotorChunks"
+        },
+        {
+          "topic": "motor.play.stream",
+          "output": true,
+          "payload": "MotorPlayStream"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "NeurochemState": {
+      "category": "neurochem",
+      "layer": 2,
+      "id_prefix": "neuro",
+      "purpose": "Ambient dopamine/serotonin state from drive errors; scales GNG thresholds and exploration via neuro.state",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [],
+      "fixed": [
+        {
+          "topic": "reality.",
+          "output": false,
+          "payload": "RealityToken",
+          "feedback": true
+        },
+        {
+          "topic": "consensus.",
+          "output": false,
+          "payload": "ConsensusToken",
+          "required": false
+        },
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "topic": "reality.proprio.",
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "topic": "neuro.state",
+          "output": true,
+          "payload": "NeuroState"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "PlaceGraphPlanner": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "placeplan",
+      "purpose": "Plans routes over a learned place graph",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{place_topic}",
+          "params": [
+            "place_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vision_topic}",
+          "params": [
+            "vision_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{eat_topic}",
+          "params": [
+            "eat_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{plan_value_topic}",
+          "params": [
+            "plan_value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{plan_precision_topic}",
+          "params": [
+            "plan_precision_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{plan_novelty_topic}",
+          "params": [
+            "plan_novelty_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "PlaceNav": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "placenav",
+      "purpose": "Navigation over learned place tokens",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_open_klino2_placenav.json",
+      "sockets": [
+        {
+          "pattern": "{place_topic}",
+          "params": [
+            "place_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{eat_topic}",
+          "params": [
+            "eat_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{plan_value_topic}",
+          "params": [
+            "plan_value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{plan_novelty_topic}",
+          "params": [
+            "plan_novelty_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "PlayLoop": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "play",
+      "purpose": "Replays motor chunks and grades their outcome against the promise",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_fused_lbend.json",
+      "sockets": [
+        {
+          "pattern": "{place_topic}",
+          "params": [
+            "place_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{eat_topic}",
+          "params": [
+            "eat_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{play_value_topic}",
+          "params": [
+            "play_value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "PolicyChannelAggregator": {
+      "category": "motor",
+      "layer": 4,
+      "id_prefix": "agg",
+      "purpose": "Aggregates several policy channels into one action",
+      "baseline": "palette:baseline_params",
+      "sockets": [
+        {
+          "pattern": "{input_topics}",
+          "params": [
+            "input_topics"
+          ],
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "PolicyToken"
+        }
+      ],
+      "fixed": [],
+      "baseline_params": {
+        "input_topics": [
+          "policy.intent.a",
+          "policy.intent.b"
+        ],
+        "channel_radix": [
+          5,
+          5
+        ]
+      },
+      "kinds_probed": {
+        "input_topics": "list_string",
+        "channel_radix": "list_float"
+      }
+    },
+    "PosturalPrior": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "posture",
+      "purpose": "Posture prior over joints from body pose",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_objposture.json",
+      "sockets": [
+        {
+          "pattern": "{proprio_topics}",
+          "params": [
+            "proprio_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{objective_output_topics}",
+          "params": [
+            "objective_output_topics"
+          ],
+          "output": true,
+          "payload": "PredictionToken",
+          "required": false,
+          "list": true
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {
+        "proprio_topics": "list_string",
+        "objective_output_topics": "list_string"
+      }
+    },
+    "Premotor": {
+      "category": "motor",
+      "layer": 4,
+      "id_prefix": "premotor",
+      "purpose": "Intent distribution over a consensus level → PolicyToken",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole_premotor.json",
+      "sockets": [
+        {
+          "pattern": "consensus.{level}",
+          "params": [
+            "level"
+          ],
+          "output": false,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "{phase_context_topic}",
+          "params": [
+            "phase_context_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{action_output_topic}",
+          "params": [
+            "action_output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{intent_override_topic}",
+          "params": [
+            "intent_override_topic"
+          ],
+          "output": false,
+          "payload": "IntentToken",
+          "required": false
+        },
+        {
+          "pattern": "{policy_output_topic}",
+          "params": [
+            "policy_output_topic"
+          ],
+          "output": true,
+          "payload": "PolicyToken"
+        },
+        {
+          "pattern": "{explore_directive_topic}",
+          "params": [
+            "explore_directive_topic"
+          ],
+          "output": false,
+          "payload": "ExplorationDirective",
+          "required": false
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "drive.errors",
+          "output": false,
+          "payload": "DriveErrors",
+          "required": false
+        },
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        },
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "PremotorAI": {
+      "category": "motor",
+      "layer": 4,
+      "id_prefix": "premotor_ai",
+      "purpose": "Active-inference premotor: intents scored by expected free energy",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_stand_target_per_servo_perceptual_cpg_trot_cruse_v2_target_compass_H1v6.json",
+      "sockets": [
+        {
+          "pattern": "consensus.{level}",
+          "params": [
+            "level"
+          ],
+          "output": false,
+          "payload": "ConsensusToken"
+        },
+        {
+          "pattern": "{phase_context_topic}",
+          "params": [
+            "phase_context_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{action_output_topic}",
+          "params": [
+            "action_output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{intent_override_topic}",
+          "params": [
+            "intent_override_topic"
+          ],
+          "output": false,
+          "payload": "IntentToken",
+          "required": false
+        },
+        {
+          "pattern": "{policy_output_topic}",
+          "params": [
+            "policy_output_topic"
+          ],
+          "output": true,
+          "payload": "PolicyToken"
+        },
+        {
+          "pattern": "{explore_directive_topic}",
+          "params": [
+            "explore_directive_topic"
+          ],
+          "output": false,
+          "payload": "ExplorationDirective",
+          "required": false
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "drive.errors",
+          "output": false,
+          "payload": "DriveErrors",
+          "required": false
+        },
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        },
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "RunTumbleNav": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "rt",
+      "purpose": "Run-and-tumble navigation on a sensed gradient",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{eat_topic}",
+          "params": [
+            "eat_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{confidence_topic}",
+          "params": [
+            "confidence_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "RunTumbleNavV2": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "rt2",
+      "purpose": "Run-and-tumble v2: adaptive run length from gradient confidence",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_fused_lbend.json",
+      "sockets": [
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{eat_topic}",
+          "params": [
+            "eat_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{confidence_topic}",
+          "params": [
+            "confidence_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "SaccadeReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "saccade",
+      "purpose": "Saccade toward visual salience",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_map_dev.json",
+      "sockets": [
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic_left}",
+          "params": [
+            "output_topic_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_right}",
+          "params": [
+            "output_topic_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{active_topic}",
+          "params": [
+            "active_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{scent_topic}",
+          "params": [
+            "scent_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{boredom_topic}",
+          "params": [
+            "boredom_topic"
+          ],
+          "output": false,
+          "payload": "ReflexGate",
+          "required": false
+        },
+        {
+          "pattern": "{novelty_topic}",
+          "params": [
+            "novelty_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "ScentCompass": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "compass",
+      "purpose": "Turns the scent gradient into a compass-like bearing estimate",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_chemotaxis_ai.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "ScentGateReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "sgate",
+      "purpose": "Gates forward drive by the scent gradient",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ReflexGate"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "ScentHomingLearner": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "homing",
+      "purpose": "Learns a scent→heading mapping from homing outcomes",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_corridor_turn_scent_bootstrap.json",
+      "sockets": [
+        {
+          "pattern": "{ring_topic}",
+          "params": [
+            "ring_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{progress_topic}",
+          "params": [
+            "progress_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{hit_topic}",
+          "params": [
+            "hit_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "SensorBundle": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "bundle",
+      "purpose": "Concatenates several proprio sensors into one ProprioToken for a downstream EPM",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_cognitive.json",
+      "sockets": [
+        {
+          "pattern": "{input_topics}",
+          "params": [
+            "input_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "SequenceGNG": {
+      "category": "predictor",
+      "layer": 3,
+      "id_prefix": "seq",
+      "purpose": "Temporal motif extractor over winner sequences; publishes SequenceMotif",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
+      "sockets": [
+        {
+          "pattern": "{source_topic}",
+          "params": [
+            "source_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken"
+        },
+        {
+          "pattern": "sequence.motif.{source_topic}",
+          "params": [
+            "source_topic",
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "SequenceMotif"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "neuro.state",
+          "output": false,
+          "payload": "NeuroState",
+          "required": false
+        }
+      ],
+      "kinds_probed": {
+        "source_topic": "string"
+      }
+    },
+    "StaleConfidenceDecay": {
+      "category": "meta",
+      "layer": 5,
+      "id_prefix": "decay",
+      "purpose": "Decays stale confidence in nodes that stop being visited",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_cognitive.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ReflexGate"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "StuckEscapeReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "escape",
+      "purpose": "Escape manoeuvre when motion stalls against an obstacle",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{imu_topic}",
+          "params": [
+            "imu_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic_left}",
+          "params": [
+            "output_topic_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_right}",
+          "params": [
+            "output_topic_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "events.wall_stuck",
+          "output": true,
+          "payload": "EnvEvent"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "SynergyTimer": {
+      "category": "motor",
+      "layer": 3,
+      "id_prefix": "synergy",
+      "purpose": "Rhythm-phase logit bias per premotor on rhythm.bias.<premotor>",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_picrawler_stand_target_per_servo_perceptual_cpg_walk_cruse_v2_target_compass_H1v6_F9_W1_diag_walk_E1_synergy_selfsup.json",
+      "sockets": [
+        {
+          "pattern": "{feet_y_topic}",
+          "params": [
+            "feet_y_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "rhythm.bias.{premotor_ids}",
+          "params": [
+            "premotor_ids"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "list": true
+        },
+        {
+          "pattern": "{premotor_policy_topics}",
+          "params": [
+            "premotor_policy_topics"
+          ],
+          "output": false,
+          "payload": "PolicyToken",
+          "required": false,
+          "list": true
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "events.",
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        }
+      ],
+      "kinds_probed": {
+        "leg_names": "list_string",
+        "premotor_ids": "list_string",
+        "premotor_leg_assignment": "list_string",
+        "premotor_policy_topics": "list_string"
+      }
+    },
+    "VisualBearing": {
+      "category": "sensory",
+      "layer": 1,
+      "id_prefix": "vbearing",
+      "purpose": "Bearing to a target from the visual channel",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_fused_lbend.json",
+      "sockets": [
+        {
+          "pattern": "{input_topic}",
+          "params": [
+            "input_topic"
+          ],
+          "output": false,
+          "payload": "RawImageFrame",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "VisualHomingNav": {
+      "category": "nav",
+      "layer": 3,
+      "id_prefix": "vhome",
+      "purpose": "Visual homing toward a remembered view",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter_fused_lbend.json",
+      "sockets": [
+        {
+          "pattern": "{vision_epm_topic}",
+          "params": [
+            "vision_epm_topic"
+          ],
+          "output": false,
+          "payload": "RealityToken",
+          "required": false
+        },
+        {
+          "pattern": "{bearing_topic}",
+          "params": [
+            "bearing_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{heading_topic}",
+          "params": [
+            "heading_topic"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{eat_topic}",
+          "params": [
+            "eat_topic"
+          ],
+          "output": false,
+          "payload": "EnvEvent",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{value_topic}",
+          "params": [
+            "value_topic"
+          ],
+          "output": true,
+          "payload": "ProprioToken"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    },
+    "WhiskerAversionReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "aversion",
+      "purpose": "Cell: veer away from whisker contact",
+      "baseline": "defaults",
+      "sockets": [
+        {
+          "pattern": "{whisker_topic_prefix}",
+          "params": [
+            "whisker_topic_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{suppression_topic}",
+          "params": [
+            "suppression_topic"
+          ],
+          "output": false,
+          "payload": "ReflexGate",
+          "required": false
+        }
+      ],
+      "fixed": [
+        {
+          "topic": "events.miss",
+          "output": true,
+          "payload": "EnvEvent"
+        },
+        {
+          "topic": "events.wall_stuck",
+          "output": true,
+          "payload": "EnvEvent"
+        }
+      ],
+      "kinds_probed": {}
+    },
+    "WhiskerSteerReflex": {
+      "category": "reflex",
+      "layer": 4,
+      "id_prefix": "wsteer",
+      "purpose": "Cell: steer by whisker asymmetry",
+      "baseline": "godot_host/project/addons/ami_ogma/configs/the_cell_arbiter.json",
+      "sockets": [
+        {
+          "pattern": "{whisker_topic_prefix}",
+          "params": [
+            "whisker_topic_prefix"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false
+        },
+        {
+          "pattern": "{output_topic}",
+          "params": [
+            "output_topic"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_left}",
+          "params": [
+            "output_topic_left"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        },
+        {
+          "pattern": "{output_topic_right}",
+          "params": [
+            "output_topic_right"
+          ],
+          "output": true,
+          "payload": "ActionOut"
+        }
+      ],
+      "fixed": [],
+      "kinds_probed": {}
+    }
+  }
+}
