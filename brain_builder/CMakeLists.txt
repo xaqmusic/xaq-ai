@@ -61,9 +61,10 @@ add_library(imgui STATIC
   ${imgui_SOURCE_DIR}/imgui_draw.cpp
   ${imgui_SOURCE_DIR}/imgui_tables.cpp
   ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+  ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
   ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
   ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
-target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imgui_SOURCE_DIR}/misc/cpp)
 target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
 target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 
@@ -83,7 +84,11 @@ get_filename_component(BB_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 add_library(bb_core STATIC
   src/TrialSetup.cpp
   src/Catalogue.cpp
-  src/PaletteGen.cpp)
+  src/PaletteGen.cpp
+  src/Graph.cpp
+  src/Body.cpp
+  src/Wiring.cpp
+  src/Layout.cpp)
 target_include_directories(bb_core PUBLIC src ${BB_REPO_ROOT}/cpp_core/include)
 target_link_libraries(bb_core PUBLIC ogma_core ogma_infra)
 target_compile_definitions(bb_core PUBLIC
@@ -100,7 +105,8 @@ add_executable(brain_builder
   src/ui/App.cpp
   src/ui/Theme.cpp
   src/ui/PalettePanel.cpp
-  src/ui/CanvasPanel.cpp)
+  src/ui/CanvasPanel.cpp
+  src/ui/PropertiesPanel.cpp)
 target_link_libraries(brain_builder PRIVATE bb_core imgui imgui_node_editor)
 target_compile_options(brain_builder PRIVATE -Wall -Wextra)
 
@@ -117,4 +123,7 @@ if(BRAIN_BUILDER_TESTS)
   add_executable(bb_test_catalogue tests/test_catalogue.cpp)
   target_link_libraries(bb_test_catalogue PRIVATE bb_core GTest::gtest_main pthread)
   add_test(NAME bb_test_catalogue COMMAND bb_test_catalogue)
+  add_executable(bb_test_wiring tests/test_wiring.cpp)
+  target_link_libraries(bb_test_wiring PRIVATE bb_core GTest::gtest_main pthread)
+  add_test(NAME bb_test_wiring COMMAND bb_test_wiring)
 endif()

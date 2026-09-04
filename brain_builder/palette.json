@@ -49,6 +49,66 @@
           "output": false,
           "payload": "ReflexGate",
           "required": false
+        },
+        {
+          "pattern": "{entry_topic}",
+          "params": [
+            "entry_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{secondary_entry_topic}",
+          "params": [
+            "secondary_entry_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{pref_obs_topic}",
+          "params": [
+            "pref_obs_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{authority_topic}",
+          "params": [
+            "authority_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{thrust_output_topic}",
+          "params": [
+            "thrust_output_topic"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{green_obs_topic}",
+          "params": [
+            "green_obs_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -97,7 +157,10 @@
           "payload": "MotorPlayCmd"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": [
+        "intent_channel_radix"
+      ]
     },
     "ActionGate": {
       "category": "motor",
@@ -128,7 +191,8 @@
           "required": false
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "AdaptiveThresholdTracker": {
       "category": "sensory",
@@ -156,7 +220,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "BearingEstimator": {
       "category": "sensory",
@@ -191,7 +256,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "BearingFusion": {
       "category": "fusion",
@@ -237,7 +303,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "BodyRhythmTracker": {
       "category": "sensory",
@@ -271,7 +338,8 @@
         "proprio_topics": "list_string",
         "output_topic": "string",
         "leg_signs": "list_float"
-      }
+      },
+      "tolerated_missing": []
     },
     "CPGOscillator": {
       "category": "motor",
@@ -297,6 +365,28 @@
           "output": true,
           "payload": "ProprioToken",
           "list": true
+        },
+        {
+          "pattern": "{input_topics}",
+          "params": [
+            "input_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{output_topics}",
+          "params": [
+            "output_topics"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
         }
       ],
       "fixed": [
@@ -316,7 +406,15 @@
       "kinds_probed": {
         "perceptual_output_topics": "list_string",
         "perceptual_leg_phase_offsets": "list_float"
-      }
+      },
+      "tolerated_missing": [
+        "input_topics",
+        "output_topics",
+        "leg_phase_offsets",
+        "joint_phase_offsets",
+        "entrain_topic",
+        "standing_signs"
+      ]
     },
     "CellReflex": {
       "category": "reflex",
@@ -381,7 +479,8 @@
           "payload": "EnvEvent"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ChemotaxisAI": {
       "category": "reflex",
@@ -417,7 +516,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ChunkAbortGate": {
       "category": "predictor",
@@ -444,7 +544,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ChunkOutcomeGate": {
       "category": "predictor",
@@ -481,7 +582,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ColumnBuilder": {
       "category": "fusion",
@@ -536,7 +638,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "CruseCoordinator": {
       "category": "motor",
@@ -580,6 +683,38 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{joints_topic}",
+          "params": [
+            "joints_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{phase_output_topics}",
+          "params": [
+            "phase_output_topics"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{bucket_output_topics}",
+          "params": [
+            "bucket_output_topics"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -591,7 +726,14 @@
         "premotor_leg_assignment": "list_string",
         "premotor_joint_kind": "list_string",
         "premotor_policy_topics": "list_string"
-      }
+      },
+      "tolerated_missing": [
+        "premotor_stance_sign",
+        "premotor_joint_position_indices",
+        "coupled_neighbors",
+        "phase_output_topics",
+        "bucket_output_topics"
+      ]
     },
     "CylinderBuilder": {
       "category": "fusion",
@@ -637,7 +779,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "DescendingPredictor": {
       "category": "predictor",
@@ -677,7 +820,8 @@
       "fixed": [],
       "kinds_probed": {
         "targets": "list_string"
-      }
+      },
+      "tolerated_missing": []
     },
     "DistressDrive": {
       "category": "drive",
@@ -785,7 +929,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "DualEMADetector": {
       "category": "sensory",
@@ -822,7 +967,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "EFEArbiter": {
       "category": "predictor",
@@ -916,10 +1062,31 @@
           ],
           "output": true,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{play_value_topic}",
+          "params": [
+            "play_value_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{vision_value_topic}",
+          "params": [
+            "vision_value_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "EPM": {
       "category": "sensory",
@@ -970,7 +1137,11 @@
         "modality_name": "string",
         "encoder_kind": "string",
         "input_topic": "string"
-      }
+      },
+      "tolerated_missing": [
+        "dim_min",
+        "dim_max"
+      ]
     },
     "EmbeddingRegistry": {
       "category": "sensory",
@@ -991,7 +1162,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "EpisodicCapture": {
       "category": "predictor",
@@ -1024,6 +1196,16 @@
           ],
           "output": true,
           "payload": "EpisodicChunkProposal"
+        },
+        {
+          "pattern": "{secondary_keyframe_topic}",
+          "params": [
+            "secondary_keyframe_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -1034,7 +1216,10 @@
           "required": false
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": [
+        "reward_event_names"
+      ]
     },
     "EventConjunction": {
       "category": "sensory",
@@ -1080,7 +1265,8 @@
       },
       "kinds_probed": {
         "input_event_topics": "list_string"
-      }
+      },
+      "tolerated_missing": []
     },
     "FaderController": {
       "category": "motor",
@@ -1114,6 +1300,16 @@
           "output": false,
           "payload": "DriveErrors",
           "required": false
+        },
+        {
+          "pattern": "{action_topic}",
+          "params": [
+            "action_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -1124,7 +1320,8 @@
           "required": false
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ForwardDriveReflex": {
       "category": "reflex",
@@ -1159,7 +1356,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "GNGRollout": {
       "category": "predictor",
@@ -1197,7 +1395,8 @@
           "payload": "RolloutResult"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "GainEvolver": {
       "category": "meta",
@@ -1277,6 +1476,16 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{travel_topic}",
+          "params": [
+            "travel_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -1294,7 +1503,11 @@
         "imu_topic": "string",
         "torque_topic": "string",
         "gyro_topic": "string"
-      }
+      },
+      "tolerated_missing": [
+        "travel_topic",
+        "incumbent_override"
+      ]
     },
     "GaitSelector": {
       "category": "motor",
@@ -1342,7 +1555,8 @@
       },
       "kinds_probed": {
         "gaits": "list_string"
-      }
+      },
+      "tolerated_missing": []
     },
     "GoalBelief": {
       "category": "nav",
@@ -1377,7 +1591,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "GradientEPM": {
       "category": "sensory",
@@ -1432,7 +1647,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "HeadingController": {
       "category": "nav",
@@ -1472,10 +1688,41 @@
           ],
           "output": false,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{ang_vel_topic}",
+          "params": [
+            "ang_vel_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{authority_topic}",
+          "params": [
+            "authority_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "HeadingPlanner": {
       "category": "nav",
@@ -1518,7 +1765,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "HeadingProbe": {
       "category": "nav",
@@ -1545,7 +1793,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "HomeokineticExploration": {
       "category": "motor",
@@ -1592,7 +1841,8 @@
           "payload": "ExplorationDirective"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "HomeostaticDrive": {
       "category": "drive",
@@ -1600,7 +1850,19 @@
       "id_prefix": "drive",
       "purpose": "Homeostatic setpoints over events and sensors → drive errors and urgency on drive.errors",
       "baseline": "godot_host/project/addons/ami_ogma/configs/the_cartpole.json",
-      "sockets": [],
+      "sockets": [
+        {
+          "pattern": "{channel_input_topics}",
+          "params": [
+            "channel_input_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        }
+      ],
       "fixed": [
         {
           "topic": "events.",
@@ -1620,7 +1882,8 @@
         "urgency_normalizers": "list_float",
         "channel_input_topics": "list_string",
         "channel_kinds": "list_string"
-      }
+      },
+      "tolerated_missing": []
     },
     "JointSensorimotorBridge": {
       "category": "motor",
@@ -1665,6 +1928,17 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{sensor_label_prefix}",
+          "params": [
+            "sensor_label_prefix"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "prefix": true,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -1672,7 +1946,8 @@
         "action_topics": "list_string",
         "output_topics": "list_string",
         "proprio_indices": "list_float"
-      }
+      },
+      "tolerated_missing": []
     },
     "KeyframeAverager": {
       "category": "sensory",
@@ -1700,7 +1975,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "KeyframeGait": {
       "category": "motor",
@@ -1755,6 +2031,27 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{velocity_output_topics}",
+          "params": [
+            "velocity_output_topics"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{bake_reset_topic}",
+          "params": [
+            "bake_reset_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -1762,7 +2059,14 @@
         "cpg_topic": "string",
         "proprio_topics": "list_string",
         "objective_output_topics": "list_string"
-      }
+      },
+      "tolerated_missing": [
+        "velocity_output_topics",
+        "symmetry_pairs",
+        "bake_upright_topic",
+        "bake_contact_topic",
+        "bake_reset_topic"
+      ]
     },
     "KeyframePeakDetector": {
       "category": "sensory",
@@ -1790,7 +2094,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "Klinotaxis": {
       "category": "reflex",
@@ -1833,10 +2138,31 @@
           ],
           "output": true,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{authority_topic}",
+          "params": [
+            "authority_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{vel_topic}",
+          "params": [
+            "vel_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "LateralVoter": {
       "category": "fusion",
@@ -1879,7 +2205,8 @@
           "required": false
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "MotivationGate": {
       "category": "drive",
@@ -1914,7 +2241,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "MotorBus": {
       "category": "motor",
@@ -2004,10 +2332,32 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{mod_topic}",
+          "params": [
+            "mod_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{authority_prefix}",
+          "params": [
+            "authority_prefix"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "prefix": true,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "MotorEPM": {
       "category": "motor",
@@ -2153,6 +2503,88 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{objective_topics}",
+          "params": [
+            "objective_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{velocity_objective_topics}",
+          "params": [
+            "velocity_objective_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{intent_topic}",
+          "params": [
+            "intent_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{goal_bearing_topic}",
+          "params": [
+            "goal_bearing_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{cpg_phase_topic}",
+          "params": [
+            "cpg_phase_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{boredom_topic}",
+          "params": [
+            "boredom_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{interest_topic}",
+          "params": [
+            "interest_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -2160,7 +2592,30 @@
         "proprio_topics": "list_string",
         "action_topics": "list_string",
         "imu_topic": "string"
-      }
+      },
+      "tolerated_missing": [
+        "objective_topics",
+        "velocity_objective_topics",
+        "postural_gain_joints",
+        "rhythm_gains",
+        "rhythm_offsets",
+        "cpg_phase_topic",
+        "symmetry_group_of",
+        "gait_phase",
+        "feet_topic",
+        "stroke_signs",
+        "tilt_topic",
+        "nav_topic",
+        "cog_steer_topic",
+        "cog_thrust_topic",
+        "boredom_topic",
+        "interest_topic",
+        "hunger_topic",
+        "height_topic",
+        "distress_topic",
+        "lateral_topic",
+        "torque_topic"
+      ]
     },
     "MotorEPMv2": {
       "category": "motor",
@@ -2313,6 +2768,109 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "{objective_topics}",
+          "params": [
+            "objective_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{plan_topics}",
+          "params": [
+            "plan_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{velocity_objective_topics}",
+          "params": [
+            "velocity_objective_topics"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "list": true,
+          "polled": true
+        },
+        {
+          "pattern": "{regime_topic}",
+          "params": [
+            "regime_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{intent_topic}",
+          "params": [
+            "intent_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{goal_bearing_topic}",
+          "params": [
+            "goal_bearing_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{cpg_phase_topic}",
+          "params": [
+            "cpg_phase_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{boredom_topic}",
+          "params": [
+            "boredom_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{interest_topic}",
+          "params": [
+            "interest_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
@@ -2322,7 +2880,33 @@
         "state_prior_indices": "list_float",
         "state_prior_targets": "list_float",
         "imu_topic": "string"
-      }
+      },
+      "tolerated_missing": [
+        "objective_topics",
+        "plan_topics",
+        "velocity_objective_topics",
+        "state_prior_calm_indices",
+        "postural_gain_joints",
+        "rhythm_gains",
+        "rhythm_offsets",
+        "cpg_phase_topic",
+        "symmetry_group_of",
+        "gait_phase",
+        "feet_topic",
+        "stroke_signs",
+        "tilt_topic",
+        "nav_topic",
+        "cog_steer_topic",
+        "cog_thrust_topic",
+        "boredom_topic",
+        "interest_topic",
+        "hunger_topic",
+        "height_topic",
+        "distress_topic",
+        "gain_topic",
+        "lateral_topic",
+        "torque_topic"
+      ]
     },
     "MotorFader": {
       "category": "motor",
@@ -2377,7 +2961,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "MotorPlanner": {
       "category": "predictor",
@@ -2412,13 +2997,38 @@
           "output": false,
           "payload": "ProprioToken",
           "required": false
+        },
+        {
+          "pattern": "reality.proprio.distress",
+          "params": [
+            "plan_output_topics"
+          ],
+          "output": false,
+          "payload": "ProprioToken",
+          "required": false,
+          "list": true,
+          "dynamic": true
+        },
+        {
+          "pattern": "{plan_output_topics}",
+          "params": [
+            "plan_output_topics"
+          ],
+          "output": true,
+          "payload": "PredictionToken",
+          "required": false,
+          "list": true
         }
       ],
       "fixed": [],
       "kinds_probed": {
         "state_topic": "string",
         "rhythm_topic": "string"
-      }
+      },
+      "tolerated_missing": [
+        "pose_topic",
+        "plan_output_topics"
+      ]
     },
     "MotorRepertoire": {
       "category": "predictor",
@@ -2484,7 +3094,10 @@
           "payload": "MotorPlayStream"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": [
+        "seed_chunks"
+      ]
     },
     "NeurochemState": {
       "category": "neurochem",
@@ -2524,7 +3137,8 @@
           "payload": "NeuroState"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "PlaceGraphPlanner": {
       "category": "nav",
@@ -2621,7 +3235,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "PlaceNav": {
       "category": "nav",
@@ -2701,7 +3316,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "PlayLoop": {
       "category": "predictor",
@@ -2764,7 +3380,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "PolicyChannelAggregator": {
       "category": "motor",
@@ -2806,7 +3423,8 @@
       "kinds_probed": {
         "input_topics": "list_string",
         "channel_radix": "list_float"
-      }
+      },
+      "tolerated_missing": []
     },
     "PosturalPrior": {
       "category": "motor",
@@ -2840,7 +3458,8 @@
       "kinds_probed": {
         "proprio_topics": "list_string",
         "objective_output_topics": "list_string"
-      }
+      },
+      "tolerated_missing": []
     },
     "Premotor": {
       "category": "motor",
@@ -2899,6 +3518,86 @@
           "output": false,
           "payload": "ExplorationDirective",
           "required": false
+        },
+        {
+          "pattern": "{bucket_context_topic}",
+          "params": [
+            "bucket_context_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{rhythm_bias_topic}",
+          "params": [
+            "rhythm_bias_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{alpha_topic}",
+          "params": [
+            "alpha_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{bc_reflex_topic}",
+          "params": [
+            "bc_reflex_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{bc_reflex_left_topic}",
+          "params": [
+            "bc_reflex_left_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{bc_reflex_right_topic}",
+          "params": [
+            "bc_reflex_right_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{output_topics}",
+          "params": [
+            "output_topics"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{mc_episode_topic}",
+          "params": [
+            "mc_episode_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -2921,7 +3620,8 @@
           "required": false
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "PremotorAI": {
       "category": "motor",
@@ -2980,6 +3680,96 @@
           "output": false,
           "payload": "ExplorationDirective",
           "required": false
+        },
+        {
+          "pattern": "{bucket_context_topic}",
+          "params": [
+            "bucket_context_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{leg_phase_input_topic}",
+          "params": [
+            "leg_phase_input_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{rhythm_bias_topic}",
+          "params": [
+            "rhythm_bias_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{alpha_topic}",
+          "params": [
+            "alpha_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{bc_reflex_topic}",
+          "params": [
+            "bc_reflex_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{bc_reflex_left_topic}",
+          "params": [
+            "bc_reflex_left_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{bc_reflex_right_topic}",
+          "params": [
+            "bc_reflex_right_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{output_topics}",
+          "params": [
+            "output_topics"
+          ],
+          "output": true,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{mc_episode_topic}",
+          "params": [
+            "mc_episode_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -3002,7 +3792,8 @@
           "required": false
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "RunTumbleNav": {
       "category": "nav",
@@ -3062,10 +3853,21 @@
           ],
           "output": true,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{authority_topic}",
+          "params": [
+            "authority_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "RunTumbleNavV2": {
       "category": "nav",
@@ -3125,10 +3927,21 @@
           ],
           "output": true,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{authority_topic}",
+          "params": [
+            "authority_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "SaccadeReflex": {
       "category": "reflex",
@@ -3208,7 +4021,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ScentCompass": {
       "category": "sensory",
@@ -3236,7 +4050,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ScentGateReflex": {
       "category": "reflex",
@@ -3264,7 +4079,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "ScentHomingLearner": {
       "category": "nav",
@@ -3307,10 +4123,21 @@
           ],
           "output": true,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{bootstrap_topic}",
+          "params": [
+            "bootstrap_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "SensorBundle": {
       "category": "sensory",
@@ -3339,7 +4166,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "SequenceGNG": {
       "category": "predictor",
@@ -3364,6 +4192,16 @@
           ],
           "output": true,
           "payload": "SequenceMotif"
+        },
+        {
+          "pattern": "{context_topic}",
+          "params": [
+            "context_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -3376,7 +4214,8 @@
       ],
       "kinds_probed": {
         "source_topic": "string"
-      }
+      },
+      "tolerated_missing": []
     },
     "StaleConfidenceDecay": {
       "category": "meta",
@@ -3404,7 +4243,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "StuckEscapeReflex": {
       "category": "reflex",
@@ -3437,6 +4277,36 @@
           ],
           "output": true,
           "payload": "ActionOut"
+        },
+        {
+          "pattern": "{ang_vel_topic}",
+          "params": [
+            "ang_vel_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{efference_topic}",
+          "params": [
+            "efference_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
+        },
+        {
+          "pattern": "{hunger_topic}",
+          "params": [
+            "hunger_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [
@@ -3446,7 +4316,8 @@
           "payload": "EnvEvent"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "SynergyTimer": {
       "category": "motor",
@@ -3496,7 +4367,8 @@
         "premotor_ids": "list_string",
         "premotor_leg_assignment": "list_string",
         "premotor_policy_topics": "list_string"
-      }
+      },
+      "tolerated_missing": []
     },
     "VisualBearing": {
       "category": "sensory",
@@ -3521,10 +4393,21 @@
           ],
           "output": true,
           "payload": "ProprioToken"
+        },
+        {
+          "pattern": "{hit_topic}",
+          "params": [
+            "hit_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "VisualHomingNav": {
       "category": "nav",
@@ -3587,7 +4470,8 @@
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "WhiskerAversionReflex": {
       "category": "reflex",
@@ -3627,7 +4511,8 @@
           "payload": "EnvEvent"
         }
       ],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     },
     "WhiskerSteerReflex": {
       "category": "reflex",
@@ -3668,10 +4553,21 @@
           ],
           "output": true,
           "payload": "ActionOut"
+        },
+        {
+          "pattern": "{suppression_topic}",
+          "params": [
+            "suppression_topic"
+          ],
+          "output": false,
+          "payload": "Unknown",
+          "required": false,
+          "polled": true
         }
       ],
       "fixed": [],
-      "kinds_probed": {}
+      "kinds_probed": {},
+      "tolerated_missing": []
     }
   }
 }

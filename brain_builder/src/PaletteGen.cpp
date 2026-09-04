@@ -5,6 +5,7 @@
 #include <fstream>
 #include <map>
 #include <ostream>
+#include <regex>
 #include <set>
 
 #include "TrialSetup.hpp"
@@ -251,6 +252,28 @@ nlohmann::ordered_json gen_palette(Catalogue const& cat,
             if (!dup) sockets.push_back(std::move(s));
         }
 
+        // Topic-named params probing did not see are sockets too: the module
+        // polls them with last_value or subscribes behind another switch.
+        {
+            static const std::regex topic_key(R"((_topics?|_pattern|_prefix)$|^topic$)");
+            std::set<std::string> covered;
+            for (auto const& sk : sockets) for (auto const& pn : sk.params) covered.insert(pn);
+            for (auto const& p : t.params) {
+                if (covered.count(p.key) || !std::regex_search(p.key, topic_key)) continue;
+                ParamKind k = kind_of_param(t, p.key);
+                if (k != ParamKind::String && k != ParamKind::ListString) continue;
+                SocketInfo sk;
+                sk.pattern  = "{" + p.key + "}";
+                sk.params   = {p.key};
+                sk.output   = p.key.find("output") != std::string::npos;
+                sk.required = false;   // unverified: the module tolerates its absence in shipped configs
+                sk.list     = k == ParamKind::ListString;
+                sk.prefix   = p.key.size() > 7 && p.key.compare(p.key.size() - 7, 7, "_prefix") == 0;
+                sk.polled   = true;
+                sockets.push_back(std::move(sk));
+            }
+        }
+
         std::vector<FixedTopic> fixed;
         for (int dir = 0; dir < 2; ++dir) {
             auto const& ports = dir ? r0.ports.outputs : r0.ports.inputs;
@@ -272,9 +295,14 @@ nlohmann::ordered_json gen_palette(Catalogue const& cat,
         for (auto const& s : sockets) sj.push_back(socket_to_json(s));
         auto fj = nlohmann::ordered_json::array();
         for (auto const& f : fixed) fj.push_back(fixed_to_json(f));
-        entry["sockets"]      = std::move(sj);
-        entry["fixed"]        = std::move(fj);
-        entry["kinds_probed"] = std::move(kinds_probed);
+        // Schema-required params the constructing baseline does not set: the
+        // module has a fallback, so the builder must not demand them.
+        auto tolerated = nlohmann::ordered_json::array();
+        for (auto const& p : t.params) if (p.required && !bp.count(p.key)) tolerated.push_back(p.key);
+        entry["sockets"]           = std::move(sj);
+        entry["fixed"]             = std::move(fj);
+        entry["kinds_probed"]      = std::move(kinds_probed);
+        entry["tolerated_missing"] = std::move(tolerated);
         (void)hits;
         out["types"][t.type] = std::move(entry);
     }
@@ -298,6 +326,7 @@ void merge_palette(std::string const& palette_path, nlohmann::ordered_json const
         pe["sockets"]  = entry["sockets"];
         pe["fixed"]    = entry["fixed"];
         if (entry.contains("kinds_probed")) pe["kinds_probed"] = entry["kinds_probed"];
+        if (entry.contains("tolerated_missing")) pe["tolerated_missing"] = entry["tolerated_missing"];
         if (entry.contains("error")) pe["gen_error"] = entry["error"]; else pe.erase("gen_error");
     }
     std::ofstream out(palette_path);

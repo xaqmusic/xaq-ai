@@ -36,6 +36,7 @@ struct SocketInfo {
     bool list     = false;   // the param is a list of topics (one pin per entry)
     bool prefix   = false;   // trailing-dot prefix subscription
     bool dynamic  = false;   // the topic depends on something the builder cannot see
+    bool polled   = false;   // named by a param but never seen as a port (read by last_value or gated)
     std::string payload = "Unknown";
 };
 

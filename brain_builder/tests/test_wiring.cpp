@@ -1,0 +1,108 @@
+#include <gtest/gtest.h>
+#include <fstream>
+#include <sstream>
+
+#include <set>
+
+#include "Body.hpp"
+#include "Catalogue.hpp"
+#include "Graph.hpp"
+#include "TrialSetup.hpp"
+#include "Wiring.hpp"
+
+namespace {
+
+bb::Catalogue const& catalogue() { static bb::Catalogue c = bb::Catalogue::build(BB_PALETTE); return c; }
+bb::BodyRegistry const& bodies()  { static bb::BodyRegistry b = bb::BodyRegistry::load_dir(BB_BODIES_DIR); return b; }
+
+bool has_link(bb::Wiring const& w, std::string const& from, std::string const& to, std::string const& topic) {
+    for (auto const& l : w.links) if (l.from_node == from && l.to_node == to && l.topic == topic) return true;
+    return false;
+}
+
+} // namespace
+
+TEST(Wiring, R19DuckConfigWiresBodyToBrainAndBack) {
+    bb::StdoutSilencer quiet;
+    bb::Graph g = bb::Graph::load(std::string(BB_MJ_CONFIG_DIR) + "/a1v2_r19_settle_each.json");
+    bb::Body const* body = bodies().find("microduck_joints");
+    ASSERT_NE(body, nullptr);
+    bb::TrialCache cache;
+    bb::Wiring w = bb::Wiring::build(g, catalogue(), body, cache);
+    ASSERT_EQ(w.nodes.size(), g.size() + 3);
+    for (auto const& n : w.nodes) EXPECT_TRUE(n.setup_ok) << n.name << ": " << n.setup_error;
+    EXPECT_TRUE(has_link(w, "@sources", "legs_bridge", "reality.proprio.joints"));
+    EXPECT_TRUE(has_link(w, "@sources", "regime_epm", "reality.proprio.sense1"));
+    EXPECT_TRUE(has_link(w, "legs_bridge", "motor_epm_legs", "reality.motor_limb.left"));
+    EXPECT_TRUE(has_link(w, "motor_epm_legs", "legs_bridge", "action.left_knee"));
+    EXPECT_TRUE(has_link(w, "motor_epm_legs", "@sinks", "action.left_knee"));
+    EXPECT_TRUE(has_link(w, "regime_epm", "@sinks", "reality.proprio.regime"));
+    EXPECT_EQ(w.errors, 0);
+    // every pin id unique and non-zero
+    std::set<uint64_t> ids;
+    for (auto const& n : w.nodes) {
+        EXPECT_NE(n.id, 0u);
+        EXPECT_TRUE(ids.insert(n.id).second) << n.name;
+        for (auto const& p : n.inputs)  { EXPECT_NE(p.id, 0u); EXPECT_TRUE(ids.insert(p.id).second) << n.name << " in " << p.label; }
+        for (auto const& p : n.outputs) { EXPECT_NE(p.id, 0u); EXPECT_TRUE(ids.insert(p.id).second) << n.name << " out " << p.label; }
+    }
+    for (auto const& l : w.links) EXPECT_TRUE(ids.insert(l.id).second);
+}
+
+TEST(Wiring, ConnectSetsParamsAndComposedSplitsTopic) {
+    bb::StdoutSilencer quiet;
+    bb::Body const* body = bodies().find("microduck_joints");
+    ASSERT_NE(body, nullptr);
+    bb::Graph g = bb::Graph::empty(body->env_target);
+    std::string epm = g.add_module("EPM", "epm", bb::ojson::object());
+    bb::TrialCache cache;
+    bb::Wiring w = bb::Wiring::build(g, catalogue(), body, cache);
+    bb::Node const* n = w.node_named(epm);
+    ASSERT_NE(n, nullptr);
+    EXPECT_FALSE(n->setup_ok);   // required params missing → placeholders shown
+    bb::Pin const* in_ph = nullptr; bb::Pin const* out_ph = nullptr;
+    for (auto const& p : n->inputs)  if (p.placeholder && p.label == "{input_topic}") in_ph = &p;
+    for (auto const& p : n->outputs) if (p.placeholder && p.label.find("{modality_group}") != std::string::npos) out_ph = &p;
+    ASSERT_NE(in_ph, nullptr);
+    ASSERT_NE(out_ph, nullptr);
+    bb::Pin const* sense1 = nullptr; bb::Pin const* regime_read = nullptr;
+    for (auto const& p : w.node_named("@sources")->outputs) if (p.topic == "reality.proprio.sense1") sense1 = &p;
+    for (auto const& p : w.node_named("@sinks")->inputs)    if (p.topic == "reality.proprio.regime") regime_read = &p;
+    ASSERT_NE(sense1, nullptr);
+    ASSERT_NE(regime_read, nullptr);
+
+    EXPECT_EQ(w.connect(g, catalogue(), sense1->id, in_ph->id), "");
+    EXPECT_EQ(g.params(0)["input_topic"], "reality.proprio.sense1");
+    EXPECT_EQ(w.connect(g, catalogue(), out_ph->id, regime_read->id), "");
+    EXPECT_EQ(g.params(0)["modality_group"], "proprio");
+    EXPECT_EQ(g.params(0)["modality_name"], "regime");
+
+    bb::Wiring w2 = bb::Wiring::build(g, catalogue(), body, cache);
+    EXPECT_TRUE(has_link(w2, "@sources", epm, "reality.proprio.sense1"));
+    EXPECT_TRUE(has_link(w2, epm, "@sinks", "reality.proprio.regime"));
+
+    // disconnect the input: the key goes away, undo brings it back
+    bb::Link const* l = nullptr;
+    for (auto const& x : w2.links) if (x.to_node == epm) l = &x;
+    ASSERT_NE(l, nullptr);
+    EXPECT_EQ(w2.disconnect(g, catalogue(), *l), "");
+    EXPECT_FALSE(g.params(0).contains("input_topic"));
+    EXPECT_TRUE(g.undo());
+    EXPECT_EQ(g.params(0)["input_topic"], "reality.proprio.sense1");
+}
+
+TEST(Graph, RoundTripKeepsEveryKeyAndOrder) {
+    std::string path = std::string(BB_MJ_CONFIG_DIR) + "/a1v2_r19_settle_each.json";
+    bb::Graph g = bb::Graph::load(path);
+    std::ifstream f(path);
+    std::stringstream ss; ss << f.rdbuf();
+    nlohmann::json a = nlohmann::json::parse(ss.str());
+    nlohmann::json b = nlohmann::json::parse(g.dump());
+    EXPECT_EQ(a, b);
+    std::vector<std::string> ids_a, ids_b;
+    for (auto const& m : a["modules"]) ids_a.push_back(m["id"]);
+    for (auto const& m : b["modules"]) ids_b.push_back(m["id"]);
+    EXPECT_EQ(ids_a, ids_b);
+    EXPECT_TRUE(g.ascii_escapes);
+    EXPECT_EQ(g.dump(), ss.str()) << "bytes differ (semantic identity still holds)";
+}

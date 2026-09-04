@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <regex>
+#include <set>
 
 #include "TrialSetup.hpp"
 #include "ogma/Module.hpp"
@@ -88,6 +89,7 @@ nlohmann::ordered_json socket_to_json(SocketInfo const& s) {
     if (s.list)      j["list"]     = true;
     if (s.prefix)    j["prefix"]   = true;
     if (s.dynamic)   j["dynamic"]  = true;
+    if (s.polled)    j["polled"]   = true;
     return j;
 }
 
@@ -113,6 +115,7 @@ SocketInfo socket_from_json(nlohmann::json const& j) {
     s.list     = j.value("list", false);
     s.prefix   = j.value("prefix", false);
     s.dynamic  = j.value("dynamic", false);
+    s.polled   = j.value("polled", false);
     return s;
 }
 
@@ -154,7 +157,8 @@ std::vector<std::string> parse_enum(std::string const& description) {
 }
 
 // For a required param (no default, so no type) when nothing better is known.
-ParamKind kind_from_description(std::string const& d) {
+ParamKind kind_from_description(std::string const& key, std::string const& d) {
+    if (key.size() > 7 && key.compare(key.size() - 7, 7, "_topics") == 0) return ParamKind::ListString;
     std::string l = d;
     std::transform(l.begin(), l.end(), l.begin(), [](unsigned char c) { return std::tolower(c); });
     bool arr = l.rfind("array", 0) == 0 || l.find("array of") != std::string::npos ||
@@ -209,6 +213,8 @@ Catalogue Catalogue::build(std::string const& palette_path) {
         }
         nlohmann::json pe = types_pal.contains(name) ? types_pal[name] : nlohmann::json::object();
         nlohmann::json kinds        = pe.value("kinds", nlohmann::json::object());
+        std::set<std::string> tolerated;
+        for (auto const& k : pe.value("tolerated_missing", nlohmann::json::array())) if (k.is_string()) tolerated.insert(k.get<std::string>());
         nlohmann::json kinds_probed = pe.value("kinds_probed", nlohmann::json::object());
 
         if (m) {
@@ -222,7 +228,7 @@ Catalogue Catalogue::build(std::string const& palette_path) {
                     p.kind = kind_of_json(p.def, ParamKind::String);
                 } else {
                     p.required = true;
-                    p.kind = kind_from_description(p.description);
+                    p.kind = kind_from_description(p.key, p.description);
                     if (spec.min_value) p.kind = kind_of_json(param_to_json(*spec.min_value), p.kind);
                     if (kinds_probed.contains(p.key) && kinds_probed[p.key].is_string())
                         p.kind = kind_from_name(kinds_probed[p.key].get<std::string>(), p.kind);
@@ -231,6 +237,7 @@ Catalogue Catalogue::build(std::string const& palette_path) {
                 if (spec.max_value) p.max = param_to_json(*spec.max_value);
                 if (kinds.contains(p.key) && kinds[p.key].is_string())
                     p.kind = kind_from_name(kinds[p.key].get<std::string>(), p.kind);
+                if (p.required && tolerated.count(p.key)) p.required = false;   // the module has a fallback
                 if (p.kind == ParamKind::String) p.enum_values = parse_enum(p.description);
                 t.params.push_back(std::move(p));
             }
