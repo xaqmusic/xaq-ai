@@ -312,12 +312,54 @@ void draw_order(AppState& st) {
         ImGui::EndTable();
     }
     if (move_from >= 0 && st.graph.move_module(move_from, move_to)) st.wiring_dirty = true;
+    ImGui::Separator();
+    if (ImGui::Button("Sort topologically")) { st.order_suggestion = topological_order(st.graph, st.wiring); st.order_preview = true; }
+    if (st.order_preview) {
+        auto const& sg = st.order_suggestion;
+        for (auto const& n : sg.notes) ImGui::TextDisabled("%s", n.c_str());
+        if (sg.changed) {
+            ImGui::TextUnformatted("proposed order:");
+            for (size_t i = 0; i < sg.order.size(); ++i) {
+                int from = sg.order[i];
+                bool moved = from != int(i);
+                if (moved) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "  %zu  %s   (was #%d)", i, st.graph.id_of(size_t(from)).c_str(), from);
+                else       ImGui::TextDisabled("  %zu  %s", i, st.graph.id_of(size_t(from)).c_str());
+            }
+            if (ImGui::Button("Apply")) { if (st.graph.reorder(sg.order)) { st.wiring_dirty = true; st.logf("execution order sorted topologically"); } st.order_preview = false; }
+            ImGui::SameLine();
+        }
+        if (ImGui::Button("Close")) st.order_preview = false;
+    }
     ImGui::End();
 }
 
 void draw_validation(AppState& st) {
     if (!ImGui::Begin("Validation")) { ImGui::End(); return; }
     ImGui::Text("%d errors, %d warnings", st.wiring.errors, st.wiring.warnings);
+    ImGui::SameLine(0, 30);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
+    ImGui::InputInt("ticks", &st.dry_ticks);
+    if (st.dry_ticks < 1) st.dry_ticks = 1;
+    ImGui::SameLine();
+    ImGui::BeginDisabled(st.dry_job != nullptr);
+    if (ImGui::Button(st.dry_job ? "running..." : "Dry run")) st.start_dry_run();
+    ImGui::EndDisabled();
+    if (st.dry_has_report) {
+        auto const& r = st.dry_report;
+        ImGui::SameLine(0, 20);
+        if (!r.constructed) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", r.error.c_str());
+        else if (!r.error.empty()) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%d ticks then: %s", r.ticks_done, r.error.c_str());
+        else ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "%d ticks OK  (construct %.0f ms, %.2f ms/tick)  sinks driven %zu/%zu, silent outputs %zu",
+                                r.ticks_done, r.construct_ms, r.ticks_done ? r.tick_ms / r.ticks_done : 0.0,
+                                r.actions_seen.size(), r.actions_seen.size() + r.actions_missing.size(), r.silent.size());
+        if (r.constructed && ImGui::TreeNode("dry run detail")) {
+            for (auto const& f : r.fed) ImGui::TextDisabled("fed      %s", f.c_str());
+            for (auto const& a : r.actions_missing) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "no value  %s (body sink)", a.c_str());
+            for (auto const& t : r.silent) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "silent    %s", t.c_str());
+            for (auto const& t : r.published) ImGui::TextDisabled("published %s", t.c_str());
+            ImGui::TreePop();
+        }
+    }
     if (ImGui::BeginTable("diag", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupColumn("severity", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 5.0f);
         ImGui::TableSetupColumn("node", ImGuiTableColumnFlags_WidthStretch, 0.25f);

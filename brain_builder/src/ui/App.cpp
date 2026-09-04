@@ -148,6 +148,34 @@ void AppState::add_module_at(std::string const& type, float x, float y) {
     logf("added " + id + " (" + type + ")");
 }
 
+void AppState::start_dry_run() {
+    if (dry_job) return;
+    auto job = std::make_unique<DryRunJob>();
+    Graph  g;  g.doc = graph.doc;      // a private copy: the operator keeps editing
+    Wiring w = wiring;
+    Body const* b = body;
+    int ticks = dry_ticks;
+    DryRunJob* raw = job.get();
+    job->thread = std::thread([raw, g = std::move(g), w = std::move(w), b, ticks]() {
+        raw->report = dry_run(g, w, b, ticks);
+        raw->done = true;
+    });
+    dry_job = std::move(job);
+    logf("dry run: " + std::to_string(ticks) + " ticks started");
+}
+
+void AppState::poll_dry_run() {
+    if (!dry_job || !dry_job->done) return;
+    dry_job->thread.join();
+    dry_report = std::move(dry_job->report);
+    dry_has_report = true;
+    dry_job.reset();
+    if (!dry_report.constructed) logf("dry run: " + dry_report.error);
+    else logf("dry run: " + std::to_string(dry_report.ticks_done) + " ticks, " + std::to_string(dry_report.actions_seen.size()) +
+              " of " + std::to_string(dry_report.actions_seen.size() + dry_report.actions_missing.size()) + " body sinks driven" +
+              (dry_report.error.empty() ? "" : " — " + dry_report.error));
+}
+
 // ---------------------------------------------------------------------------
 void draw_log(AppState& st) {
     if (ImGui::Begin("Log")) {
@@ -320,6 +348,7 @@ int run_app(AppState& st) {
         glfwPollEvents();
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) { ImGui_ImplGlfw_Sleep(10); continue; }
         if (st.wiring_dirty) st.rebuild();
+        st.poll_dry_run();
 
         std::string title = "Brain Builder — " + (st.config_path.empty() ? std::string("unsaved") : st.config_path) + (st.graph.dirty ? " *" : "");
         if (title != last_title) { glfwSetWindowTitle(window, title.c_str()); last_title = title; }
@@ -362,6 +391,7 @@ int run_app(AppState& st) {
         glfwSwapBuffers(window);
     }
 
+    if (st.dry_job) { st.dry_job->thread.join(); st.dry_job.reset(); }
     ed::DestroyEditor(st.editor);
     st.editor = nullptr;
     ImGui_ImplOpenGL3_Shutdown();

@@ -6,6 +6,8 @@
 
 #include "Body.hpp"
 #include "Catalogue.hpp"
+#include "DryRun.hpp"
+#include "Order.hpp"
 #include "Graph.hpp"
 #include "TrialSetup.hpp"
 #include "Wiring.hpp"
@@ -105,4 +107,49 @@ TEST(Graph, RoundTripKeepsEveryKeyAndOrder) {
     EXPECT_EQ(ids_a, ids_b);
     EXPECT_TRUE(g.ascii_escapes);
     EXPECT_EQ(g.dump(), ss.str()) << "bytes differ (semantic identity still holds)";
+}
+
+TEST(Order, R19KeepsBridgesBeforeMotorEpmsAndNamesTheCycle) {
+    bb::StdoutSilencer quiet;
+    bb::Graph g = bb::Graph::load(std::string(BB_MJ_CONFIG_DIR) + "/a1v2_r19_settle_each.json");
+    bb::TrialCache cache;
+    bb::Wiring w = bb::Wiring::build(g, catalogue(), bodies().find("microduck_joints"), cache);
+    bb::OrderSuggestion s = bb::topological_order(g, w);
+    ASSERT_EQ(s.order.size(), g.size());
+    int bridge = -1, motor = -1;
+    for (size_t i = 0; i < s.order.size(); ++i) {
+        std::string id = g.id_of(size_t(s.order[i]));
+        if (id == "legs_bridge") bridge = int(i);
+        if (id == "motor_epm_legs") motor = int(i);
+    }
+    EXPECT_LT(bridge, motor);
+    bool cycle_note = false;
+    for (auto const& n : s.notes) if (n.find("cycle") != std::string::npos) cycle_note = true;
+    EXPECT_TRUE(cycle_note);
+    // reorder round-trips through the graph
+    std::vector<int> rev(g.size());
+    for (size_t i = 0; i < rev.size(); ++i) rev[i] = int(rev.size() - 1 - i);
+    std::string first = g.id_of(0);
+    EXPECT_TRUE(g.reorder(rev));
+    EXPECT_EQ(g.id_of(g.size() - 1), first);
+    EXPECT_TRUE(g.undo());
+    EXPECT_EQ(g.id_of(0), first);
+}
+
+TEST(DryRun, R19ConstructsAndDrivesTheJoints) {
+    bb::StdoutSilencer quiet;
+    bb::Graph g = bb::Graph::load(std::string(BB_MJ_CONFIG_DIR) + "/a1v2_r19_settle_each.json");
+    bb::Body const* body = bodies().find("microduck_joints");
+    bb::TrialCache cache;
+    bb::Wiring w = bb::Wiring::build(g, catalogue(), body, cache);
+    bb::DryRunReport r = bb::dry_run(g, w, body, 50);
+    EXPECT_TRUE(r.constructed) << r.error;
+    EXPECT_EQ(r.error, "");
+    EXPECT_EQ(r.ticks_done, 50);
+    bool knee = false;
+    for (auto const& a : r.actions_seen) if (a == "action.left_knee") knee = true;
+    EXPECT_TRUE(knee) << "action.left_knee not driven";
+    bool regime = false;
+    for (auto const& p : r.published) if (p == "reality.proprio.regime") regime = true;
+    EXPECT_TRUE(regime);
 }

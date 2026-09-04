@@ -88,7 +88,9 @@ add_library(bb_core STATIC
   src/Graph.cpp
   src/Body.cpp
   src/Wiring.cpp
-  src/Layout.cpp)
+  src/Layout.cpp
+  src/DryRun.cpp
+  src/Order.cpp)
 target_include_directories(bb_core PUBLIC src ${BB_REPO_ROOT}/cpp_core/include)
 target_link_libraries(bb_core PUBLIC ogma_core ogma_infra)
 target_compile_definitions(bb_core PUBLIC

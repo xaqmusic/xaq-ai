@@ -177,6 +177,19 @@ bool Graph::move_module(int from, int to) {
     return true;
 }
 
+bool Graph::reorder(std::vector<int> const& order) {
+    int n = int(size());
+    if (int(order.size()) != n) return false;
+    std::vector<bool> seen(size_t(n), false);
+    for (int i : order) { if (i < 0 || i >= n || seen[size_t(i)]) return false; seen[size_t(i)] = true; }
+    checkpoint();
+    ojson mods = ojson::array();
+    for (int i : order) mods.push_back(doc["modules"][size_t(i)]);
+    doc["modules"] = std::move(mods);
+    dirty = true;
+    return true;
+}
+
 void Graph::set_param(std::string const& id, std::string const& key, ojson value, bool with_checkpoint) {
     ojson* m = find(id);
     if (!m) return;

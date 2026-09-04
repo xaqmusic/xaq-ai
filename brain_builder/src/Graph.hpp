@@ -55,6 +55,7 @@ struct Graph {
     std::string add_module(std::string const& type, std::string const& id, ojson params, int at = -1);
     bool        remove_module(std::string const& id);
     bool        move_module(int from, int to);
+    bool        reorder(std::vector<int> const& order);   // new position → old index
     void        set_param(std::string const& id, std::string const& key, ojson value, bool with_checkpoint = true);
     void        erase_param(std::string const& id, std::string const& key);
     bool        rename_module(std::string const& old_id, std::string const& new_id);

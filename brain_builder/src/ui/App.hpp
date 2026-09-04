@@ -1,11 +1,16 @@
 #pragma once
 // The window: GLFW + Dear ImGui (docking) + imgui-node-editor.  Panels are
 // free functions over one AppState so each file owns one panel.
+#include <atomic>
+#include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include "Body.hpp"
+#include "DryRun.hpp"
+#include "Order.hpp"
 #include "Catalogue.hpp"
 #include "Graph.hpp"
 #include "Layout.hpp"
@@ -44,6 +49,21 @@ struct AppState {
     std::string pending_key;      // numeric field being edited
     double      pending_num = 0;
 
+    // dry run (on a worker; the report lands on the Validation panel)
+    struct DryRunJob {
+        std::thread       thread;
+        std::atomic<bool> done{false};
+        DryRunReport      report;
+    };
+    std::unique_ptr<DryRunJob> dry_job;
+    DryRunReport dry_report;
+    bool         dry_has_report = false;
+    int          dry_ticks = 50;
+
+    // execution-order suggestion awaiting apply
+    OrderSuggestion order_suggestion;
+    bool            order_preview = false;
+
     // the "+" pin chooser
     bool        plus_open = false;
     std::string plus_node, plus_topic, plus_payload;
@@ -68,6 +88,8 @@ struct AppState {
     void select_body(std::string const& id);
     void rebuild();
     void add_module_at(std::string const& type, float x, float y);
+    void start_dry_run();
+    void poll_dry_run();
 };
 
 int  run_app(AppState& st);

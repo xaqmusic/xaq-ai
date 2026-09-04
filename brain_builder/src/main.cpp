@@ -14,7 +14,9 @@
 
 #include "Body.hpp"
 #include "Catalogue.hpp"
+#include "DryRun.hpp"
 #include "Graph.hpp"
+#include "Order.hpp"
 #include "PaletteGen.hpp"
 #include "TrialSetup.hpp"
 #include "Wiring.hpp"
@@ -30,7 +32,8 @@ void usage() {
         "       brain_builder --list-types\n"
         "       brain_builder --gen-palette [--merge] [--out F] [--config-dir D]... [--palette P]\n"
         "       brain_builder --ports config.json [--body B]      every module's trial-setup ports\n"
-        "       brain_builder --validate config.json [--body B]   wiring diagnostics; exit 1 on errors\n";
+        "       brain_builder --validate config.json [--body B]   wiring diagnostics; exit 1 on errors\n"
+        "       brain_builder --dry-run config.json [--ticks N] [--body B]   construct, feed synthetic input, tick\n";
 }
 
 } // namespace
@@ -40,7 +43,8 @@ int main(int argc, char** argv) {
     std::string config_path, out_path;
     std::vector<std::string> config_dirs;
     std::string body_id, select_id;
-    bool dump = false, list = false, gen = false, merge = false, ports = false, validate = false;
+    bool dump = false, list = false, gen = false, merge = false, ports = false, validate = false, dryrun = false;
+    int ticks = 50;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -56,6 +60,8 @@ int main(int argc, char** argv) {
         else if (a == "--validate")       validate = true;
         else if (a == "--body")           next(body_id);
         else if (a == "--select")         next(select_id);
+        else if (a == "--dry-run")        dryrun = true;
+        else if (a == "--ticks")          { std::string t; next(t); ticks = std::stoi(t); }
         else if (a == "--palette")        next(palette);
         else if (a == "--out")            next(out_path);
         else if (a == "--config-dir")     { std::string d; next(d); config_dirs.push_back(d); }
@@ -97,7 +103,7 @@ int main(int argc, char** argv) {
 
     bb::BodyRegistry bodies = bb::BodyRegistry::load_dir(BB_BODIES_DIR);
 
-    if (ports || validate) {
+    if (ports || validate || dryrun) {
         if (config_path.empty()) { usage(); return 2; }
         bb::Graph g;
         try { g = bb::Graph::load(config_path); }
@@ -126,6 +132,19 @@ int main(int argc, char** argv) {
             std::cout << "  " << (d.severity == bb::Diagnostic::Error ? "ERROR  " : d.severity == bb::Diagnostic::Warning ? "warning" : "info   ")
                       << "  " << d.node << ": " << d.message << "\n";
         std::cout << "  " << w.errors << " errors, " << w.warnings << " warnings\n";
+        if (dryrun) {
+            bb::DryRunReport r;
+            { bb::StdoutSilencer quiet; r = bb::dry_run(g, w, body, ticks); }
+            for (auto const& f : r.fed) std::cout << "  fed       " << f << "\n";
+            if (!r.constructed) { std::cout << "  FAILED: " << r.error << "\n"; return 1; }
+            std::cout << "  constructed in " << r.construct_ms << " ms; " << r.ticks_done << " ticks in " << r.tick_ms << " ms\n";
+            if (!r.error.empty()) std::cout << "  FAILED: " << r.error << "\n";
+            for (auto const& t : r.published)       std::cout << "  published " << t << "\n";
+            for (auto const& t : r.silent)          std::cout << "  SILENT    " << t << "\n";
+            for (auto const& t : r.actions_seen)    std::cout << "  driven    " << t << "\n";
+            for (auto const& t : r.actions_missing) std::cout << "  NO VALUE  " << t << " (body sink)\n";
+            return r.error.empty() ? 0 : 1;
+        }
         return (validate && w.errors) ? 1 : 0;
     }
 
