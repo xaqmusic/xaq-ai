@@ -5,14 +5,27 @@
 // the host bridges raw PCM onto the Bus as a RawAudioFrame and the encoder does the
 // filterbank itself.  The host's whole job is to deliver honest samples on time.
 //
-// Capture runs on its OWN thread with a ring buffer, and the brain tick only ever
-// copies the newest window.  ALSA's read is blocking and period-quantised; calling it
-// from the 50 Hz loop would couple the brain's deadline to the sound card's clock,
-// which is a different clock (the same lesson as the HAT's 49.95 Hz servo frames).
+// Capture runs on its OWN thread into a CONTINUOUS RING, and the tick copies the most
+// recent window_samples out of it whenever it asks.  ALSA's read is blocking and
+// period-quantised; calling it from the 50 Hz loop would couple the brain's deadline to
+// the sound card's clock, which is a different clock (the same lesson as the HAT's
+// 49.95 Hz servo frames).
 //
-// `latest()` reports whether the window is NEW.  A host that republishes a stale
-// window every tick would feed the GNG duplicate observations and inflate its visit
-// counts — baking a vocabulary out of the sensor standing still.
+// ⚠ WHY A RING AND NOT A HANDOFF OF DISCRETE WINDOWS.  The first version published the
+// newest completed window and counted the rest as dropped -- 14 % of them, measured.
+// The cause is not that the window is longer than the tick; it is that ALSA delivers in
+// PERIODS (1200 frames / 25 ms here, measured) that divide into no read size we use, so
+// windows arrive in bursts: two back to back, then a wait.  A 50 Hz consumer sees the
+// newest of each burst and the rest are gone.
+//
+// A ring removes the whole class: burstiness is absorbed, producer and consumer rates
+// stop having to match, and the consumer always gets the newest CONTIGUOUS window.
+//
+// ⚠ AND THE WINDOW MUST NOT SHRINK BELOW ONE TICK.  One 50 Hz tick is 960 samples at
+// 48 kHz; a window shorter than that leaves GAPS between polls -- audio the brain never
+// sees.  1024 sits just above the floor and overlaps consecutive polls by 64 samples,
+// which is the property to preserve.  Shortening it for FFT reasons would trade a
+// resolution the STFT already needs (f_min 80 Hz) for holes in the channel.
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -33,7 +46,8 @@ public:
         std::string device = "plughw:CARD=Device,DEV=0";
         unsigned    rate          = 48000;  // must match the EPM's sample_rate param
         unsigned    channels      = 1;
-        unsigned    window_samples = 1024;  // ~21 ms at 48 kHz, about one 50 Hz tick
+        unsigned    window_samples = 1024;  // >= one tick (960 @ 48 kHz) or coverage gaps
+        unsigned    ring_windows    = 8;    // ring depth; must exceed ALSA's buffer (100 ms)
     };
 
     explicit AudioCapture(Config cfg);
@@ -45,8 +59,10 @@ public:
     void stop();
     bool running() const { return running_.load(); }
 
-    // Copies the newest window into `out`.  Returns false when nothing new has
-    // arrived since the previous call, so the caller can skip publishing.
+    // Copies the most recent window_samples out of the ring.  False only when no NEW
+    // audio arrived since the previous call (ALSA stalled) or the ring has not filled
+    // yet — so unlike the camera, this normally succeeds every tick, and should: audio
+    // is continuous, and each tick's window covers new time rather than repeating old.
     bool latest(std::vector<float>& out);
 
     const std::string& last_error() const { return err_; }
@@ -54,9 +70,9 @@ public:
     unsigned  window_samples()  const { return cfg_.window_samples; }
     uint64_t  windows()         const { return windows_; }
     uint64_t  xruns()           const { return xruns_; }   // ALSA over/underruns
-    // Windows the capture thread overwrote while the previous one was still unread.
-    // A genuine buffer overrun on OUR side rather than ALSA's: the producer outran the
-    // consumer and an observation the brain never saw was discarded.
+    // Samples the ring overwrote before the consumer read them — a true overrun on our
+    // side rather than ALSA's, and with a ring deep enough for the ALSA buffer it should
+    // stay at zero.  Not the same fault as an xrun, so it is counted separately.
     uint64_t  dropped()         const { return dropped_; }
     // Peak absolute sample of the last window — the level meter, and the cheapest
     // possible answer to "is the microphone actually hearing anything?"
@@ -69,8 +85,10 @@ private:
     void*       pcm_ = nullptr;          // snd_pcm_t*, kept opaque to spare the header
     std::thread th_;
     mutable std::mutex m_;
-    std::vector<float> window_;          // newest complete window
-    bool        fresh_    = false;
+    std::vector<float> ring_;            // continuous, power-of-nothing-in-particular
+    size_t      wpos_     = 0;           // next write index
+    uint64_t    written_  = 0;           // total samples ever written
+    uint64_t    read_at_  = 0;           // `written_` at the previous latest()
     std::atomic<bool> running_{false};
     uint64_t    windows_  = 0;
     uint64_t    xruns_    = 0;

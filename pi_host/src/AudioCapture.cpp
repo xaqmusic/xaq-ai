@@ -42,6 +42,9 @@ bool AudioCapture::start() {
         snd_pcm_close(pcm);
         return false;
     }
+    ring_.assign(size_t(cfg_.window_samples) * size_t(cfg_.ring_windows > 0 ? cfg_.ring_windows : 1),
+                 0.0f);
+    wpos_ = 0; written_ = 0; read_at_ = 0;
     pcm_ = pcm;
     running_ = true;
     err_.clear();
@@ -99,10 +102,18 @@ void AudioCapture::run() {
         }
         {
             std::lock_guard<std::mutex> lk(m_);
-            if (fresh_) ++dropped_;          // the previous window was never read
-            window_.assign(buf.begin(), buf.begin() + have);
-            fresh_ = true;
-            peak_  = pk;
+            // Unread samples about to be overwritten are a real loss; with a ring deeper
+            // than ALSA's buffer this stays zero, and a non-zero value means the tick
+            // stopped polling rather than that audio arrived in a burst.
+            const uint64_t unread = written_ - read_at_;
+            if (unread + have > ring_.size())
+                dropped_ += (unread + have) - ring_.size();
+            for (unsigned i = 0; i < have; ++i) {
+                ring_[wpos_] = buf[i];
+                wpos_ = (wpos_ + 1) % ring_.size();
+            }
+            written_ += have;
+            peak_ = pk;
             ++windows_;
         }
     }
@@ -110,9 +121,18 @@ void AudioCapture::run() {
 
 bool AudioCapture::latest(std::vector<float>& out) {
     std::lock_guard<std::mutex> lk(m_);
-    if (!fresh_ || window_.empty()) return false;
-    out = window_;
-    fresh_ = false;
+    const size_t n = cfg_.window_samples;
+    if (ring_.empty() || written_ < n) return false;   // still filling
+    if (written_ == read_at_) return false;            // no new audio since last call
+    out.resize(n);
+    // Walk back n samples from the write head: the newest CONTIGUOUS window, regardless
+    // of how raggedly ALSA delivered it.
+    size_t idx = (wpos_ + ring_.size() - n) % ring_.size();
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = ring_[idx];
+        idx = (idx + 1) % ring_.size();
+    }
+    read_at_ = written_;
     return true;
 }
 
