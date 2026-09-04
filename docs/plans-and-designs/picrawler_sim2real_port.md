@@ -911,6 +911,10 @@ sudo nmcli connection modify <your-ssid> 802-11-wireless.bssid AA:BB:CC:DD:EE:F0
 sudo nmcli connection up <your-ssid>          # AA:BB:CC:DD:EE:F1 is the 5 GHz twin
 ```
 
+The SSID and both BSSIDs above are **placeholders** — read your own with
+`nmcli -f BSSID,SSID,CHAN,SIGNAL dev wifi list --rescan yes`, which is also how the two
+radios of one SSID are told apart (same name, different BSSID and channel).
+
 ⚠ **A BSSID lock does not roam.** The Pi will now join that one access point and no other,
 so moving the robot out of its range, or adding a mesh node, means it simply fails to
 associate. Undo with `802-11-wireless.bssid ""`. **Check this before taking the robot
