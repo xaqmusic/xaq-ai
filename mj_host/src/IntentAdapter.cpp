@@ -24,7 +24,7 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
             }
     }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
-    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_);
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path);
 }
 
 IntentAdapter::~IntentAdapter() = default;

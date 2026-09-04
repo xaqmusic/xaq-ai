@@ -8,13 +8,17 @@
 
 #include "control_server.hpp"
 #include "ogma/DiagPublisher.hpp"
+#include "ogma/GraphConfig.hpp"
+#include "ogma/LiveGraph.hpp"
 #include "ogma/OgmaInstance.hpp"
 #include "ogma/Module.hpp"
 
 namespace mjhost {
 
-InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_mutex& mtx)
+InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_mutex& mtx,
+                                   std::string source_path)
     : instance_(instance), mtx_(mtx) {
+    live_ = std::make_unique<ogma::LiveGraph>(instance, std::move(source_path));
     uint16_t control_port = 7400;
     if (const char* env = std::getenv("OGMA_INSPECTOR_PORT")) {
         const int p = std::atoi(env);
@@ -32,15 +36,36 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
         }
         control_ = std::make_unique<ami_ogma::control::ControlServer>(control_port);
         control_->set_command_handler([this](nlohmann::json const& req) -> nlohmann::json {
-            std::lock_guard<std::recursive_mutex> lk(mtx_);
             const std::string verb = req.value("verb", std::string());
+            // The brain builder's patch verb.  Parsing and the trial construction
+            // of every added module happen BEFORE the instance lock: a large module
+            // can take milliseconds to set up, and the tick thread (a real robot's
+            // control loop) must not wait for it.  Only the enqueue runs locked.
+            if (verb == "apply_patch") {
+                ogma::GraphPatchBatch batch;
+                try {
+                    batch = ogma::LiveGraph::batch_from_json(req.value("ops", nlohmann::json::array()),
+                                                             req.value("source", std::string("builder")));
+                } catch (const std::exception& e) {
+                    return {{"status", "error"}, {"message", e.what()}};
+                }
+                auto errors = ogma::LiveGraph::validate_offline(batch);
+                if (!errors.empty()) return {{"status", "error"}, {"message", errors.front()}, {"errors", errors}};
+                std::lock_guard<std::recursive_mutex> lk(mtx_);
+                try { return live_->apply(std::move(batch)); }
+                catch (const std::exception& e) { return {{"status", "error"}, {"message", e.what()}}; }
+            }
+            std::lock_guard<std::recursive_mutex> lk(mtx_);
             try {
                 if (verb == "list_modules") {
                     nlohmann::json mods = nlohmann::json::array();
                     for (auto* m : instance_.modules())
                         mods.push_back({{"id", std::string(m->id())}, {"type", std::string(m->type_name())}});
-                    return {{"status", "ok"}, {"modules", mods}};
+                    return {{"status", "ok"}, {"modules", mods}, {"graph_version", int64_t(live_->version())}};
                 }
+                if (verb == "get_graph")     return live_->get_graph();
+                if (verb == "graph_version") return {{"status", "ok"}, {"graph_version", int64_t(live_->version())},
+                                                     {"module_count", instance_.modules().size()}};
                 if (verb == "module_snapshot") {
                     const std::string id = req.value("id", std::string());
                     auto* m = instance_.module(id);
@@ -76,7 +101,8 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
                     else if (jv.is_string()) v = jv.get<std::string>();
                     else return {{"status", "error"}, {"message", "set_param: unsupported value type"}};
                     m->on_param_change(key, v);
-                    return {{"status", "ok"}};
+                    live_->record_set_param(id, key, v);
+                    return {{"status", "ok"}, {"graph_version", int64_t(live_->version())}};
                 }
                 return {{"status", "error"}, {"message", "unknown verb: " + verb}};
             } catch (const std::exception& e) {

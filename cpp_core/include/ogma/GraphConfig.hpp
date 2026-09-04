@@ -76,6 +76,7 @@
 #include <variant>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include "ogma/Module.hpp"
 
 namespace ogma {
@@ -130,6 +131,11 @@ struct GraphConfig {
     //   - param values match each module's ParamSchema
     static GraphConfig load_from_json(std::string_view json_text);
     static GraphConfig load_from_file(std::string_view path);
+
+    // The JSON ↔ ParamValue rules load_from_json / to_json use, for callers
+    // that handle one value at a time (hot-patch protocols, the builder).
+    static ParamValue     param_from_json(nlohmann::json const& j);
+    static nlohmann::json param_to_json(ParamValue const& v);
 
     std::string to_json() const;
 };

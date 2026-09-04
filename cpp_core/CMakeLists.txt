@@ -165,6 +165,7 @@ add_library(ogma_core
     src/ogma/Scheduler.cpp
     src/ogma/OgmaInstance.cpp
     src/ogma/GraphConfig.cpp
+    src/ogma/LiveGraph.cpp
     src/ogma/PayloadTypeName.cpp
     src/ogma/DiagPublisher.cpp
     src/ogma/modules/NeurochemState.cpp
