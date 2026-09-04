@@ -7,6 +7,7 @@
 //                                                probe sockets; print (or merge into palette.json)
 //   --palette P                                  use another palette.json
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -89,6 +90,15 @@ int main(int argc, char** argv) {
         } catch (std::exception const& e) { std::cerr << e.what() << "\n"; return 1; }
         return 0;
     }
+
+    // A config named relative to the repo root works from any directory.
+    auto resolve = [](std::string& p) {
+        if (p.empty() || std::filesystem::exists(p)) return;
+        std::filesystem::path alt = std::filesystem::path(BB_ROOT) / p;
+        if (std::filesystem::exists(alt)) p = alt.string();
+    };
+    resolve(config_path);
+    for (auto& p : positional) resolve(p);
 
     if (list) {
         bb::warm_registry();

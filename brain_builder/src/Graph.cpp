@@ -64,7 +64,7 @@ void Graph::save(std::string const& to_path) {
     dirty = false;
 }
 
-size_t       Graph::size() const            { return doc["modules"].size(); }
+size_t       Graph::size() const            { return doc.is_object() && doc.contains("modules") && doc["modules"].is_array() ? doc["modules"].size() : 0; }
 ojson&       Graph::module(size_t i)        { return doc["modules"][i]; }
 ojson const& Graph::module(size_t i) const  { return doc["modules"][i]; }
 std::string  Graph::id_of(size_t i) const   { return module(i).value("id", ""); }

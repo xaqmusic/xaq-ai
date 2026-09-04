@@ -94,6 +94,7 @@ void AppState::open(std::string const& path) {
         graph = Graph::load(path);
     } catch (std::exception const& e) {
         logf(std::string("open failed: ") + e.what());
+        if (!graph.doc.is_object()) new_graph(bodies.find("microduck_joints") ? "microduck_joints" : "");
         return;
     }
     config_path = path;
