@@ -7,6 +7,7 @@
 #include "Body.hpp"
 #include "Catalogue.hpp"
 #include "DryRun.hpp"
+#include "LiveSync.hpp"
 #include "Order.hpp"
 #include "Graph.hpp"
 #include "TrialSetup.hpp"
@@ -152,4 +153,52 @@ TEST(DryRun, R19ConstructsAndDrivesTheJoints) {
     bool regime = false;
     for (auto const& p : r.published) if (p == "reality.proprio.regime") regime = true;
     EXPECT_TRUE(regime);
+}
+
+TEST(LiveSync, DiffEmitsPatchesAndFlagsConstructionOnlyEdits) {
+    bb::StdoutSilencer quiet;
+    bb::Graph g = bb::Graph::load(std::string(BB_MJ_CONFIG_DIR) + "/a1v2_r19_settle_each.json");
+    nlohmann::json synced = nlohmann::json::parse(g.doc["modules"].dump());
+    // nothing changed → nothing to send
+    bb::LiveOps none = bb::diff_for_live(g, catalogue(), synced);
+    EXPECT_TRUE(none.ops.empty()); EXPECT_TRUE(none.recreate.empty());
+    // a hot-mutable param on the regime EPM → set_param
+    bb::TypeInfo const* epm = catalogue().find("EPM");
+    ASSERT_NE(epm, nullptr);
+    std::string hot;
+    for (auto const& p : epm->params) if (p.hot && p.kind == bb::ParamKind::Float) { hot = p.key; break; }
+    ASSERT_FALSE(hot.empty());
+    g.set_param("regime_epm", hot, 0.123);
+    // a construction-only change on a bridge → recreate
+    g.set_param("head_bridge", "load_topic", "reality.proprio.sense1");
+    // a new module → add_node; a removed one → remove_node
+    g.add_module("EPM", "epm_new", bb::ojson{{"modality_group", "proprio"}, {"modality_name", "x"}, {"input_topic", "reality.proprio.imu"}});
+    g.remove_module("motor_epm_head");
+    bb::LiveOps d = bb::diff_for_live(g, catalogue(), synced);
+    int adds = 0, removes = 0, sets = 0;
+    for (auto const& o : d.ops) {
+        std::string op = o.value("op", "");
+        if (op == "add_node") { ++adds; EXPECT_EQ(o["id"], "epm_new"); }
+        if (op == "remove_node") { ++removes; EXPECT_EQ(o["id"], "motor_epm_head"); }
+        if (op == "set_param") { ++sets; EXPECT_EQ(o["id"], "regime_epm"); EXPECT_EQ(o["key"], hot); }
+    }
+    EXPECT_EQ(adds, 1); EXPECT_EQ(removes, 1); EXPECT_EQ(sets, 1);
+    ASSERT_EQ(d.recreate.size(), 1u);
+    EXPECT_EQ(d.recreate[0], "head_bridge");
+    nlohmann::json rc = bb::recreate_ops(g, "head_bridge");
+    ASSERT_EQ(rc.size(), 2u);
+    EXPECT_EQ(rc[0]["op"], "remove_node");
+    EXPECT_EQ(rc[1]["op"], "add_node");
+    EXPECT_EQ(rc[1]["params"]["load_topic"], "reality.proprio.sense1");
+}
+
+TEST(LiveSync, AdoptReplacesModulesAndKeepsMetadata) {
+    bb::Graph g = bb::Graph::load(std::string(BB_MJ_CONFIG_DIR) + "/a1v2_r19_settle_each.json");
+    std::string name = g.metadata().value("name", "");
+    nlohmann::json cfg = {{"modules", nlohmann::json::array({{{"id", "a"}, {"type", "EPM"}, {"params", {{"k", 1}}}}})},
+                          {"runtime", {{"thread_pool", "per_instance"}, {"num_threads", 0}, {"auto_subscribe", true}}}};
+    bb::adopt_live_modules(g, cfg);
+    EXPECT_EQ(g.size(), 1u);
+    EXPECT_EQ(g.id_of(0), "a");
+    EXPECT_EQ(g.metadata().value("name", ""), name);
 }

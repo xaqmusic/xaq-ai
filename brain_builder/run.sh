@@ -5,6 +5,7 @@
 #
 #   ./brain_builder/run.sh build                 configure + build (fetches ImGui, GLFW, node-editor on first run)
 #   ./brain_builder/run.sh open [config.json]    open the builder (empty, or on a config)
+#   ./brain_builder/run.sh live [host:port]      open it connected to a running brain (default 127.0.0.1:7400)
 #   ./brain_builder/run.sh catalogue             dump the module catalogue as JSON (70 types, params, sockets)
 #   ./brain_builder/run.sh types                 list the registered module types
 #   ./brain_builder/run.sh gen-palette           re-derive sockets by probing and merge them into palette.json
@@ -28,6 +29,7 @@ need_bin() { [[ -x "$BIN" ]] || { echo "builder not built — running build firs
 case "${1:-}" in
   build)       build ;;
   open)        shift; need_bin; exec "$BIN" "$@" ;;
+  live)        shift; need_bin; exec "$BIN" --live "$@" ;;
   catalogue)   shift; need_bin; exec "$BIN" --dump-catalogue "$@" ;;
   types)       need_bin; exec "$BIN" --list-types ;;
   gen-palette) shift; need_bin; exec "$BIN" --gen-palette --merge "$@" ;;

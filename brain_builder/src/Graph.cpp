@@ -117,6 +117,7 @@ std::string Graph::unique_id(std::string const& prefix) const {
 
 // --- undo ------------------------------------------------------------------
 void Graph::checkpoint() {
+    ++revision;
     undo_.push_back(doc);
     if (undo_.size() > 200) undo_.erase(undo_.begin());
     redo_.clear();
@@ -127,6 +128,7 @@ bool Graph::undo() {
     doc = std::move(undo_.back());
     undo_.pop_back();
     dirty = true;
+    ++revision;
     return true;
 }
 bool Graph::redo() {
@@ -135,6 +137,7 @@ bool Graph::redo() {
     doc = std::move(redo_.back());
     redo_.pop_back();
     dirty = true;
+    ++revision;
     return true;
 }
 
@@ -193,7 +196,7 @@ bool Graph::reorder(std::vector<int> const& order) {
 void Graph::set_param(std::string const& id, std::string const& key, ojson value, bool with_checkpoint) {
     ojson* m = find(id);
     if (!m) return;
-    if (with_checkpoint) checkpoint();
+    if (with_checkpoint) checkpoint(); else ++revision;
     (*m)["params"][key] = std::move(value);
     dirty = true;
 }

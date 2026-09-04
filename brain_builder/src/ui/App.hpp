@@ -10,6 +10,8 @@
 
 #include "Body.hpp"
 #include "DryRun.hpp"
+#include "LiveClient.hpp"
+#include "LiveSync.hpp"
 #include "Order.hpp"
 #include "Catalogue.hpp"
 #include "Graph.hpp"
@@ -49,6 +51,22 @@ struct AppState {
     std::string pending_key;      // numeric field being edited
     double      pending_num = 0;
 
+    // the live link: edits are diffed against the host's modules and sent as patches
+    struct Live {
+        LiveClient  client;
+        bool        connected = false;
+        std::string source_path;
+        uint64_t    version = 0;              // the host's graph version we last matched
+        nlohmann::json synced;                // the host's modules [{id,type,params}]
+        uint64_t    synced_revision = 0;      // graph.revision at the last sync
+        double      last_poll = 0, last_change = 0;
+        bool        out_of_sync = false;
+        std::vector<std::string> recreate;    // awaiting the operator's confirmation
+        bool        recreate_prompt = false;
+        std::string dialog_endpoint = "127.0.0.1:7400";
+        bool        show_dialog = false;
+    } live;
+
     // dry run (on a worker; the report lands on the Validation panel)
     struct DryRunJob {
         std::thread       thread;
@@ -79,6 +97,7 @@ struct AppState {
     float canvas_mouse_x = 0, canvas_mouse_y = 0;
     float ui_scale     = 1.0f;
     bool  layout_built = false;
+    bool  live_on_start = false;
     bool  log_scroll   = true;
 
     void logf(std::string s) { log.push_back(std::move(s)); log_scroll = true; }
@@ -92,6 +111,12 @@ struct AppState {
     void add_module_at(std::string const& type, float x, float y);
     void start_dry_run();
     void poll_dry_run();
+    bool live_connect(std::string const& endpoint);
+    void live_disconnect();
+    bool live_pull(bool adopt);            // get_graph; adopt = replace the document's modules
+    void live_tick(double now);            // called every frame
+    void live_send(nlohmann::json ops, std::string const& what);
+    void live_recreate(bool confirm);
 };
 
 int  run_app(AppState& st);

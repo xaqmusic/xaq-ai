@@ -88,8 +88,52 @@ errors), `--dry-run config [--ticks N]`, `--roundtrip in out`,
   `-DBRAIN_BUILDER_WAYLAND=ON` once `libwayland-dev wayland-protocols
   libxkbcommon-dev` are installed.
 
+## Live: editing a brain while it runs
+
+```sh
+./brain_builder/run.sh live                 # connect to 127.0.0.1:7400 (mj_host or the Godot host)
+./brain_builder/run.sh live 127.0.0.1:7500  # another port (a battery host, a robot)
+```
+
+File ▸ Connect pulls the running graph over the same control socket the
+inspector uses, opens the host's source file for its metadata and layout,
+and marks the document **LIVE** in the menu bar. From then on every edit
+becomes a hot patch, sent about a third of a second after you stop editing:
+
+| edit | what the host gets |
+|---|---|
+| drop a module, wire it, set its params | one `add_node` with the params, so the topics are set at construction |
+| delete a module | `remove_node` |
+| change a hot-mutable param | `set_param` |
+| change a construction-only param (a topic, a dimension, a seed) on a running module | nothing yet: a prompt offers **Recreate** (remove + add, which loses that module's learned state) or **Revert** |
+| reorder | nothing: the host ticks in its own order; save the file and it applies at the next restart |
+
+The host validates every added module by trial construction *before* taking
+its tick mutex, so a real robot's control loop never waits on a large module's
+setup. A refused patch is logged with the host's reason and the link shows
+**OUT OF SYNC** until File ▸ Resync from host.
+
+**Several clients at once.** The control server gives each client its own
+connection and serializes requests. The inspector keeps its own diagnostic
+subscriptions (the builder never touches them), and it polls the host's
+`graph_version` every two seconds, so a module you add appears in its list
+and a module you remove drops out of it. The builder polls the same version
+every second: when the Godot panel, another builder, or the inspector's own
+`set_param` changes the graph, it pulls the new graph and redraws. Nothing
+here alters the brain's computation: with no client connected the host runs
+exactly as before.
+
+Protocol, for other clients (newline-delimited JSON on the control port):
+`{"verb":"get_graph"}` → the live config, edges, `source_path`, `graph_version`;
+`{"verb":"apply_patch","ops":[...]}` with the Godot panel's op shapes
+(`add_node`, `remove_node`, `connect`, `disconnect`, `set_param`) → `batch_id`
+and the new version, or the errors; `{"verb":"graph_version"}`. The logic
+lives in `cpp_core/include/ogma/LiveGraph.hpp` and both hosts call it.
+`brain_builder --connect host:port [--pull out.json] [--patch ops.json]` speaks
+it from a script.
+
 ## Not yet
 
-Live editing of a running brain (the control socket has no add/remove/connect
-verbs); overlaying live TLE on nodes; `--check-bodies` against a running host's
-`list_modules`. See `docs/plans-and-designs/brain_builder_plan.md`.
+Overlaying live TLE on nodes; explicit `connect` edges from the canvas (live
+wiring today is by construction params, as the configs are); `--check-bodies`
+against a running host. See `docs/plans-and-designs/brain_builder_plan.md`.

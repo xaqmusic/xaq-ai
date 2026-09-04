@@ -174,7 +174,154 @@ void AppState::poll_dry_run() {
     if (!dry_report.constructed) logf("dry run: " + dry_report.error);
     else logf("dry run: " + std::to_string(dry_report.ticks_done) + " ticks, " + std::to_string(dry_report.actions_seen.size()) +
               " of " + std::to_string(dry_report.actions_seen.size() + dry_report.actions_missing.size()) + " body sinks driven" +
-              (dry_report.error.empty() ? "" : " — " + dry_report.error));
+              (dry_report.error.empty() ? "" : " - " + dry_report.error));
+}
+
+// ---------------------------------------------------------------------------
+// the live link
+// ---------------------------------------------------------------------------
+bool AppState::live_connect(std::string const& endpoint) {
+    std::string host; uint16_t port = 7400;
+    if (!parse_endpoint(endpoint, host, port)) { logf("connect: bad endpoint '" + endpoint + "'"); return false; }
+    std::string err;
+    if (!live.client.connect(host, port, &err)) { logf("connect: " + err); return false; }
+    nlohmann::json r = live.client.call({{"verb", "get_graph"}});
+    if (r.value("status", "") != "ok") {
+        logf("connect: the host answered '" + r.value("message", std::string("?")) + "' - it has no get_graph verb (rebuild mj_host / the Godot host)");
+        live.client.close();
+        return false;
+    }
+    live.connected   = true;
+    live.source_path = r.value("source_path", "");
+    live.version     = uint64_t(r.value("graph_version", int64_t(0)));
+    live.synced      = r.value("config", nlohmann::json::object()).value("modules", nlohmann::json::array());
+    live.out_of_sync = false;
+    live.recreate.clear();
+
+    // The document: the host's source file for metadata and layout when we
+    // can read it, otherwise a fresh one; the modules are the host's.
+    Graph g;
+    bool from_file = false;
+    if (!live.source_path.empty() && fs::exists(live.source_path)) {
+        try { g = Graph::load(live.source_path); from_file = true; } catch (std::exception const& e) { logf(std::string("connect: ") + e.what()); }
+    }
+    if (!from_file) g = Graph::empty("");
+    adopt_live_modules(g, r.value("config", nlohmann::json::object()));
+    g.dirty = false;
+    graph = std::move(g);
+    config_path = from_file ? live.source_path : "";
+    live.synced_revision = graph.revision;
+    body = nullptr;
+    selected.clear();
+    text_bufs.clear();
+    layout.clear();
+    cache.clear();
+    wiring_dirty = true;
+    fit_frames = 3;
+    logf("LIVE: connected to " + live.client.endpoint() + " - " + std::to_string(graph.size()) + " modules, graph v" +
+         std::to_string(live.version) + (from_file ? ", file " + live.source_path : ", no readable source file"));
+    return true;
+}
+
+void AppState::live_disconnect() {
+    if (!live.connected) return;
+    live.client.close();
+    live.connected = false;
+    live.recreate.clear();
+    logf("LIVE: disconnected; the document stays for saving");
+}
+
+bool AppState::live_pull(bool adopt) {
+    nlohmann::json r = live.client.call({{"verb", "get_graph"}});
+    if (r.value("status", "") != "ok") { logf("LIVE: get_graph: " + r.value("message", std::string("?"))); return false; }
+    live.version = uint64_t(r.value("graph_version", int64_t(0)));
+    live.synced  = r.value("config", nlohmann::json::object()).value("modules", nlohmann::json::array());
+    if (adopt) {
+        graph.checkpoint();
+        adopt_live_modules(graph, r.value("config", nlohmann::json::object()));
+        live.synced_revision = graph.revision;
+        live.out_of_sync = false;
+        live.recreate.clear();
+        cache.clear();
+        wiring_dirty = true;
+        logf("LIVE: pulled graph v" + std::to_string(live.version) + " (" + std::to_string(graph.size()) + " modules)");
+    }
+    return true;
+}
+
+void AppState::live_send(nlohmann::json ops, std::string const& what) {
+    if (!live.connected || ops.empty()) return;
+    nlohmann::json r = live.client.call({{"verb", "apply_patch"}, {"ops", ops}, {"source", "builder"}});
+    if (r.value("status", "") == "ok") {
+        live.version = uint64_t(r.value("graph_version", int64_t(live.version)));
+        logf("LIVE: " + what + " → batch " + std::to_string(r.value("batch_id", int64_t(0))) + ", graph v" + std::to_string(live.version));
+    } else {
+        live.out_of_sync = true;
+        logf("LIVE: " + what + " REFUSED: " + r.value("message", std::string("?")) + "  (Resync from host to realign)");
+        if (r.contains("errors")) for (auto const& e : r["errors"]) logf("LIVE:   " + e.get<std::string>());
+        if (!live.client.connected()) { live.connected = false; logf("LIVE: connection lost"); }
+    }
+}
+
+void AppState::live_recreate(bool confirm) {
+    if (confirm) {
+        nlohmann::json ops = nlohmann::json::array();
+        for (auto const& id : live.recreate) for (auto const& o : recreate_ops(graph, id)) ops.push_back(o);
+        live_send(ops, "recreate " + std::to_string(live.recreate.size()) + " module(s)");
+    } else {
+        // Put the host's spec back for those modules.
+        graph.checkpoint();
+        for (auto const& id : live.recreate) {
+            for (auto const& m : live.synced)
+                if (m.value("id", "") == id) {
+                    if (ojson* doc_m = graph.find(id)) {
+                        (*doc_m)["type"]   = m.value("type", "");
+                        (*doc_m)["params"] = ojson::parse(m.value("params", nlohmann::json::object()).dump());
+                    }
+                }
+        }
+        graph.dirty = true;
+        wiring_dirty = true;
+        logf("LIVE: reverted " + std::to_string(live.recreate.size()) + " module(s) to the host's spec");
+    }
+    live.recreate.clear();
+    if (!live.out_of_sync) { live.synced = nlohmann::json::parse(graph.doc["modules"].dump()); live.synced_revision = graph.revision; }
+}
+
+void AppState::live_tick(double now) {
+    if (!live.connected) return;
+    // 1. local edits → patches (debounced, never mid-drag)
+    if (graph.revision != live.synced_revision && !live.recreate_prompt && !live.out_of_sync &&
+        !ImGui::IsAnyItemActive() && now - live.last_change > 0.3) {
+        LiveOps d = diff_for_live(graph, catalogue, live.synced);
+        for (auto const& n : d.notes) logf("LIVE: " + n);
+        if (!d.ops.empty()) live_send(d.ops, std::to_string(d.ops.size()) + " op(s)");
+        if (!d.recreate.empty()) { live.recreate = d.recreate; live.recreate_prompt = true; }
+        if (!live.out_of_sync) {
+            // The host now matches the document except for modules awaiting recreate.
+            nlohmann::json synced = nlohmann::json::parse(graph.doc["modules"].dump());
+            for (auto const& id : live.recreate)
+                for (auto& m : synced) if (m.value("id", "") == id)
+                    for (auto const& h : live.synced) if (h.value("id", "") == id) m = h;
+            live.synced = std::move(synced);
+        }
+        live.synced_revision = graph.revision;
+    }
+    if (graph.revision != live.synced_revision) live.last_change = now;
+    // 2. someone else changed the host (the Godot panel, another builder)
+    if (now - live.last_poll > 1.0) {
+        live.last_poll = now;
+        nlohmann::json r = live.client.call({{"verb", "graph_version"}});
+        if (r.value("status", "") != "ok") {
+            if (!live.client.connected()) { live.connected = false; logf("LIVE: connection lost"); }
+            return;
+        }
+        uint64_t v = uint64_t(r.value("graph_version", int64_t(0)));
+        if (v != live.version && live.recreate.empty()) {
+            logf("LIVE: the host's graph moved to v" + std::to_string(v) + " - pulling");
+            live_pull(true);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +378,30 @@ void draw_dialogs(AppState& st) {
         ImGui::EndPopup();
     }
 
+    if (st.live.show_dialog) { ImGui::OpenPopup("Connect to a running brain"); st.live.show_dialog = false; }
+    if (ImGui::BeginPopupModal("Connect to a running brain", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::TextDisabled("the host's control socket (mj_host or the Godot host; the inspector may stay connected)");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18);
+        bool enter = ImGui::InputText("host:port", &st.live.dialog_endpoint, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (st.graph.dirty) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "unsaved changes will be replaced by the host's graph");
+        if (ImGui::Button("Connect") || enter) { if (st.live_connect(st.live.dialog_endpoint)) ImGui::CloseCurrentPopup(); }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    if (st.live.recreate_prompt) { ImGui::OpenPopup("Recreate on the host?"); st.live.recreate_prompt = false; }
+    if (ImGui::BeginPopupModal("Recreate on the host?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::TextUnformatted("These edits change construction-only params (topics, dimensions, seeds).");
+        ImGui::TextUnformatted("A running module cannot change them: it must be removed and re-added,");
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "which loses everything it has learned.");
+        ImGui::Separator();
+        for (auto const& id : st.live.recreate) ImGui::BulletText("%s", id.c_str());
+        ImGui::Separator();
+        if (ImGui::Button("Recreate them")) { st.live_recreate(true); ImGui::CloseCurrentPopup(); }
+        ImGui::SameLine();
+        if (ImGui::Button("Revert my edits")) { st.live_recreate(false); ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
     if (ImGui::BeginPopupModal("New graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextUnformatted("Body:");
         for (auto const& b : st.bodies.bodies)
@@ -250,6 +421,10 @@ void draw_menu(AppState& st, GLFWwindow* window) {
             if (ImGui::MenuItem("Save", "Ctrl+S")) { if (st.config_path.empty()) st.show_saveas = true; else st.save(st.config_path); }
             if (ImGui::MenuItem("Save as...")) st.show_saveas = true;
             if (ImGui::MenuItem("Publish...", "Ctrl+P")) st.show_publish = true;
+            ImGui::Separator();
+            if (ImGui::MenuItem("Connect to a running brain...", nullptr, false, !st.live.connected)) st.live.show_dialog = true;
+            if (ImGui::MenuItem("Resync from host", nullptr, false, st.live.connected)) st.live_pull(true);
+            if (ImGui::MenuItem("Disconnect", nullptr, false, st.live.connected)) st.live_disconnect();
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) glfwSetWindowShouldClose(window, 1);
             ImGui::EndMenu();
@@ -272,6 +447,11 @@ void draw_menu(AppState& st, GLFWwindow* window) {
             ImGui::EndMenu();
         }
         // status, right-aligned
+        if (st.live.connected) {
+            std::string live = "LIVE " + st.live.client.endpoint() + " v" + std::to_string(st.live.version) + (st.live.out_of_sync ? "  OUT OF SYNC" : "");
+            ImGui::SameLine(0, 30);
+            ImGui::TextColored(st.live.out_of_sync ? ImVec4(1.0f, 0.55f, 0.2f, 1.0f) : ImVec4(0.4f, 0.85f, 0.45f, 1.0f), "%s", live.c_str());
+        }
         std::string status = st.config_path.empty() ? "(unsaved graph)" : fs::path(st.config_path).filename().string();
         if (st.graph.dirty) status += " *";
         status += "   body: " + std::string(st.body ? st.body->title : "none");
@@ -343,7 +523,8 @@ int run_app(AppState& st) {
     st.logf("catalogue: " + std::to_string(st.catalogue.types.size()) + " module types; " +
             std::to_string(st.bodies.bodies.size()) + " body manifests");
     for (auto const& w : st.bodies.warnings) st.logf("bodies: " + w);
-    if (!st.config_path.empty()) st.open(st.config_path);
+    if (st.live_on_start) { if (!st.live_connect(st.live.dialog_endpoint)) st.new_graph(""); }
+    else if (!st.config_path.empty()) st.open(st.config_path);
     else st.new_graph(st.bodies.bodies.empty() ? "" : (st.bodies.find("microduck_joints") ? "microduck_joints" : st.bodies.bodies.front().id));
 
     std::string last_title;
@@ -352,8 +533,9 @@ int run_app(AppState& st) {
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) { ImGui_ImplGlfw_Sleep(10); continue; }
         if (st.wiring_dirty) st.rebuild();
         st.poll_dry_run();
+        st.live_tick(glfwGetTime());
 
-        std::string title = "Brain Builder — " + (st.config_path.empty() ? std::string("unsaved") : st.config_path) + (st.graph.dirty ? " *" : "");
+        std::string title = "Brain Builder - " + (st.config_path.empty() ? std::string("unsaved") : st.config_path) + (st.graph.dirty ? " *" : "");
         if (title != last_title) { glfwSetWindowTitle(window, title.c_str()); last_title = title; }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -396,6 +578,7 @@ int run_app(AppState& st) {
     }
 
     if (st.dry_job) { st.dry_job->thread.join(); st.dry_job.reset(); }
+    st.live_disconnect();
     ed::DestroyEditor(st.editor);
     st.editor = nullptr;
     ImGui_ImplOpenGL3_Shutdown();

@@ -91,7 +91,9 @@ add_library(bb_core STATIC
   src/Layout.cpp
   src/DryRun.cpp
   src/Order.cpp
-  src/Publish.cpp)
+  src/Publish.cpp
+  src/LiveClient.cpp
+  src/LiveSync.cpp)
 target_include_directories(bb_core PUBLIC src ${BB_REPO_ROOT}/cpp_core/include)
 target_link_libraries(bb_core PUBLIC ogma_core ogma_infra)
 target_compile_definitions(bb_core PUBLIC

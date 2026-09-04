@@ -1,8 +1,7 @@
 # The brain builder — design and status
 
-**Status (2026-09-04): M1–M5 shipped on branch `microduck-lean-prior`** (commits
-`da86017`, `319822c`, `3981a22`, `e33ce73`, and the docs commit). M6, the live
-link, is deferred until the microduck science resumes. Operating notes are in
+**Status (2026-09-04): M1–M6 shipped on branch `microduck-lean-prior`** (M1–M5:
+`da86017` … `3a0a684`; M6, the live link, follows). Operating notes are in
 [`brain_builder/README.md`](../../brain_builder/README.md).
 
 ## Why
@@ -62,11 +61,44 @@ Two things the probe cannot see, both handled by rule:
 - the cell (`the_cell_cognitive.json`, 16 modules) and the picrawler rung0
   config (26 modules) validate with zero errors.
 
-## M6 — later
+## M6 — the live link (shipped)
 
-Live link over the inspector control socket: `list_modules` and
-`module_snapshot` to overlay TLE on nodes, `set_param` for hot patches;
-`--check-bodies` to compare a manifest with what a running host reports; a
-read-only graph tab in the inspector if still wanted. Live add / remove /
-connect would need new verbs on the socket (the Godot in-process `apply_patch`
-path is not exposed).
+The Godot panel edits its brain in-process (`OgmaBrain.apply_patch` → the
+scheduler's hot-patch queue); nothing of that was reachable over the wire, and
+the control socket served five verbs, none of which could fetch or change the
+graph. Three verbs were added, with the logic in one core class
+(`ogma::LiveGraph`) that both hosts call: `get_graph`, `apply_patch` (the
+panel's op shapes), `graph_version`. The Godot host's in-process path now goes
+through the same ledger, so a builder connected to Godot sees the panel's
+edits and vice versa.
+
+Designed around the hardest case the operator named: the host running (sim or
+robot), the inspector connected, the builder connected, all at once.
+
+- **No shared state between clients.** The control server already gave every
+  client its own thread and connection; requests serialize on the host's
+  instance mutex. The builder never subscribes to diagnostics, so it cannot
+  disturb the inspector's subscriptions; a removed module is skipped by the
+  diag publisher, not dereferenced.
+- **The tick loop never waits on validation.** A patch's parse and the trial
+  construction of every added module run before the instance lock is taken;
+  only the enqueue runs under it. The scheduler applies between ticks, as it
+  always did for the Godot panel.
+- **Everyone learns about everyone's edits.** A monotonic `graph_version`
+  travels on every reply. The inspector polls it and re-lists on change,
+  keeping its subscription if the watched module survived. The builder polls
+  it and pulls the graph when someone else moved it.
+- **Learned state is protected.** Construction-only params cannot change on a
+  running module; the builder diffs its document against the host's modules,
+  patches what can be patched (add, remove, hot-mutable set_param), and asks
+  before recreating a module.
+
+Verified end to end on the r19 duck brain running headless: the inspector's
+client listed and subscribed; the builder added an EPM (version 0 → 1); the
+inspector's next list showed it and could snapshot it; a malformed add was
+refused with the module's own error; the remove landed (v2); the host logged
+22k ticks with zero rejected batches. In the app, a module added from another
+client appeared on the canvas within a second.
+
+Still open: overlaying live TLE on nodes (the diag stream, per node);
+explicit `connect` edges from the canvas; `--check-bodies`.

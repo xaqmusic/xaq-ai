@@ -17,6 +17,7 @@
 #include "Catalogue.hpp"
 #include "DryRun.hpp"
 #include "Graph.hpp"
+#include "LiveClient.hpp"
 #include "Order.hpp"
 #include "Publish.hpp"
 #include "PaletteGen.hpp"
@@ -37,7 +38,9 @@ void usage() {
         "       brain_builder --validate config.json [--body B]   wiring diagnostics; exit 1 on errors\n"
         "       brain_builder --dry-run config.json [--ticks N] [--body B]   construct, feed synthetic input, tick\n"
         "       brain_builder --roundtrip in.json out.json            load and save through the document model\n"
-        "       brain_builder --publish-dry config.json --title T [--slug S] [--target mj_host|godot]   show the publish plan\n";
+        "       brain_builder --publish-dry config.json --title T [--slug S] [--target mj_host|godot]   show the publish plan\n"
+        "       brain_builder --connect host:port [--pull out.json] [--patch ops.json]   talk to a running brain\n"
+        "       brain_builder --live [host:port]                       open the builder connected to a running brain\n";
 }
 
 } // namespace
@@ -49,6 +52,8 @@ int main(int argc, char** argv) {
     std::string body_id, select_id;
     bool dump = false, list = false, gen = false, merge = false, ports = false, validate = false, dryrun = false, roundtrip = false, pubdry = false;
     std::string pub_title, pub_slug, pub_target = "mj_host";
+    std::string connect_to, pull_to, patch_file, live_to;
+    bool live = false;
     std::vector<std::string> positional;
     int ticks = 50;
 
@@ -72,6 +77,10 @@ int main(int argc, char** argv) {
         else if (a == "--title")          next(pub_title);
         else if (a == "--slug")           next(pub_slug);
         else if (a == "--target")         next(pub_target);
+        else if (a == "--connect")        next(connect_to);
+        else if (a == "--live")           { live = true; if (i + 1 < argc && argv[i + 1][0] != '-') live_to = argv[++i]; }
+        else if (a == "--pull")           next(pull_to);
+        else if (a == "--patch")          next(patch_file);
         else if (a == "--ticks")          { std::string t; next(t); ticks = std::stoi(t); }
         else if (a == "--palette")        next(palette);
         else if (a == "--out")            next(out_path);
@@ -79,6 +88,33 @@ int main(int argc, char** argv) {
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::cerr << "unknown option " << a << "\n"; usage(); return 2; }
         else { positional.push_back(a); config_path = positional.front(); }
+    }
+
+    if (!connect_to.empty()) {
+        std::string host; uint16_t port = 7400;
+        if (!bb::parse_endpoint(connect_to, host, port)) { std::cerr << "bad endpoint\n"; return 2; }
+        bb::LiveClient c;
+        std::string err;
+        if (!c.connect(host, port, &err)) { std::cerr << err << "\n"; return 1; }
+        nlohmann::json g = c.call({{"verb", "get_graph"}});
+        if (g.value("status", "") != "ok") { std::cerr << "get_graph: " << g.value("message", std::string("?")) << "\n"; return 1; }
+        std::cout << "connected " << c.endpoint() << ": graph v" << g.value("graph_version", int64_t(0)) << ", "
+                  << g.value("module_count", size_t(0)) << " modules, source " << g.value("source_path", std::string("?")) << "\n";
+        for (auto const& m : g["config"]["modules"]) std::cout << "  " << m.value("id", "") << " (" << m.value("type", "") << ")\n";
+        if (!pull_to.empty()) {
+            std::ofstream f(pull_to);
+            f << g["config"].dump(2) << "\n";
+            std::cout << "wrote " << pull_to << "\n";
+        }
+        if (!patch_file.empty()) {
+            std::ifstream f(patch_file);
+            nlohmann::json ops = nlohmann::json::parse(f, nullptr, false);
+            if (ops.is_discarded()) { std::cerr << "bad ops file\n"; return 2; }
+            nlohmann::json r = c.call({{"verb", "apply_patch"}, {"ops", ops}, {"source", "builder-cli"}});
+            std::cout << "apply_patch: " << r.dump() << "\n";
+            if (r.value("status", "") != "ok") return 1;
+        }
+        return 0;
     }
 
     if (roundtrip) {
@@ -193,6 +229,7 @@ int main(int argc, char** argv) {
     st.catalogue   = std::move(cat);
     st.bodies      = std::move(bodies);
     st.selected    = select_id;
+    if (live) { st.live_on_start = true; st.live.dialog_endpoint = live_to.empty() ? "127.0.0.1:7400" : live_to; }
     st.config_path = config_path;
     for (auto const& w : st.catalogue.warnings) st.logf("catalogue: " + w);
     return bb::run_app(st);

@@ -286,6 +286,7 @@ void draw_properties(AppState& st) {
 void draw_order(AppState& st) {
     if (!ImGui::Begin("Execution Order")) { ImGui::End(); return; }
     ImGui::TextDisabled("modules tick in this order, one level (the scheduler runs the array top to bottom)");
+    if (st.live.connected) ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "live: a reorder cannot be patched; it applies when the host restarts on the saved file");
     int move_from = -1, move_to = -1;
     if (ImGui::BeginTable("order", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
         ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 2.5f);

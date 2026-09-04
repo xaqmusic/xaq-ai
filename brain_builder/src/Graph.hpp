@@ -19,6 +19,7 @@ struct Graph {
     std::string path;
     bool        dirty         = false;
     bool        ascii_escapes = false;   // the source used \uXXXX (newtest.py does)
+    uint64_t    revision      = 0;       // bumped by every mutation (the live link syncs on change)
 
     static Graph empty(std::string const& env_target = "");
     static Graph load(std::string const& path);        // throws std::runtime_error
