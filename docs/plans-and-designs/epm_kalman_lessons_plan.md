@@ -527,10 +527,42 @@ zero displacement, so the activity term already discounts it (bench sub-rate arm
 
 ## Stage 3 — restore lost concepts
 
-K2 `transition_surprise_kind ∈ {displacement, logprob}` from the existing `transition_counts_`,
-bounded by `log N`; the S4 ratio is the discriminating measurement. K6 true RLS in the
-predictor plus the one-tick alignment fix; S3 is the measurement, the picrawler `__pc*` arms
-the creature readout.
+Operator decision 2026-09-05: proceed, and feed the restored transition surprise to the play
+loop.
+
+### K2 — `transition_surprise_kind=logprob` (SHIPPED 2026-09-05; bench WORKING)
+
+The C++ port's transition term is a displacement between successive prototypes; the Python
+reference's was `−log P(cur|prev)`. Restored as an option on the EPM: the surprise is scored
+against the transition table as it stood before the step, Laplace-smoothed, normalised by
+`log N` to [0, 1], and **conditioned on a move** (a stay scores 0, a first arrival 1). That last
+choice is the design point: with stays in the denominator every real move looks surprising,
+and what the play loop wants to know is whether the *move* was expected. Default
+`displacement` is byte-identical (S4 reference: zero differing lines). `PlayLoop.novelty_source`
+(`tle` default, `transition_surp`, `quant_error`) lets play read it. Unit test: a three-state
+cycle with a teleport, expected moves low, the teleport at the cap, the displacement unrelated
+to either.
+
+| S4 (n = 20 paired) | displacement | logprob | logprob + `gain_kind=kalman` |
+|---|---|---|---|
+| surprise on expected moves | 1.29 | 0.68 | 0.54 |
+| surprise on teleports | 1.34 | 0.99 | 1.00 |
+| **ratio unexpected / expected** | **1.03** | **1.50 ± 0.11** | **2.36 ± 0.83** |
+| surprise within a state | 0.015 | 0.065 | 0.039 |
+| nodes / baked | 11.7 / 7.1 | 11.7 / 7.1 | 7.75 / 5.1 |
+
+The displacement is blind; the restored surprise separates the cases, and the separation
+sharpens when the vocabulary is tighter, because over-tiling spreads each real edge's counts
+across several node pairs (the B-gate lesson: finer tiling without transition statistics is
+per-token sample starvation). The two levers compose.
+
+**Creature test in flight:** the study environment, 20 paired worlds: `full`, `k2` (logprob,
+play still on TLE), `k2_play` (play's novelty = the restored surprise), `noplay`. The report's
+finding is that play is a net cost there; the question is whether a play loop that seeks
+unexpected *moves* rather than high TLE stops being one.
+
+K6 (true RLS + the one-tick alignment fix in the predictor's residual mode) follows; S3 is the
+measurement, the picrawler `__pc*` arms the creature readout.
 
 ## Stage 4 — drift versus split
 

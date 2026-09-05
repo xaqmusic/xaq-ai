@@ -115,6 +115,13 @@ ParamSchema EPM::params_schema() const {
         {"tle_alpha",               ParamMutability::HotMutable, "Weight of QE in dual TLE",    ParamValue{0.7}},
         {"tle_beta",                ParamMutability::HotMutable, "Weight of TS in dual TLE",    ParamValue{0.3}},
         {"tle_ema_alpha",           ParamMutability::HotMutable, "TLE EMA decay",               ParamValue{0.05}},
+        {"transition_surprise_kind", ParamMutability::HotMutable,
+            "Kalman-lessons Stage 3 (K2).  'displacement' (default) = ||proto_t - proto_{t-1}||, the C++ port's "
+            "stand-in, byte-identical.  'logprob' = the Python reference's surprise restored: -log P(cur|prev) "
+            "from the EPM's own transition counts (before this step is added), Laplace-smoothed, normalised by "
+            "log N to [0,1], conditioned on a move (a stay scores 0, a first arrival 1).  Feeds tle via tle_beta "
+            "and the token's transition_surp; the bench's S4 showed the displacement cannot separate an expected "
+            "transition from a teleport (ratio 1.03).", ParamValue{std::string("displacement")}},
         {"novelty_threshold_multiplier", ParamMutability::HotMutable, "EMA scale for novelty",  ParamValue{1.5}},
         {"novelty_floor",           ParamMutability::HotMutable, "Min novelty threshold",       ParamValue{0.01}},
         {"history_trace_size",      ParamMutability::HotMutable, "Rolling winner trace length", ParamValue{int64_t{5}}},
@@ -213,6 +220,12 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "tle_alpha",      [&](auto const& v){ tle_alpha_      = float(get_double(v, "tle_alpha")); });
     apply_param(params, "tle_beta",       [&](auto const& v){ tle_beta_       = float(get_double(v, "tle_beta")); });
     apply_param(params, "tle_ema_alpha",  [&](auto const& v){ tle_ema_alpha_  = float(get_double(v, "tle_ema_alpha")); });
+    apply_param(params, "transition_surprise_kind", [&](auto const& v){
+        auto s = get_string(v, "transition_surprise_kind");
+        if      (s == "displacement") transition_logprob_ = false;
+        else if (s == "logprob")      transition_logprob_ = true;
+        else throw std::invalid_argument("EPM: transition_surprise_kind must be 'displacement' or 'logprob' (got '" + s + "')");
+    });
     apply_param(params, "novelty_threshold_multiplier", [&](auto const& v){ novelty_threshold_multiplier_ = float(get_double(v, "novelty_threshold_multiplier")); });
     apply_param(params, "novelty_floor",  [&](auto const& v){ novelty_floor_  = float(get_double(v, "novelty_floor")); });
     apply_param(params, "history_trace_size", [&](auto const& v){ history_trace_size_ = int(get_int(v, "history_trace_size")); });
@@ -376,6 +389,12 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     if (k == "tle_alpha")             tle_alpha_          = float(get_double(value, k));
     else if (k == "tle_beta")         tle_beta_           = float(get_double(value, k));
     else if (k == "tle_ema_alpha")    tle_ema_alpha_      = float(get_double(value, k));
+    else if (k == "transition_surprise_kind") {
+        auto s = get_string(value, k);
+        if      (s == "displacement") transition_logprob_ = false;
+        else if (s == "logprob")      transition_logprob_ = true;
+        else throw std::invalid_argument("EPM: transition_surprise_kind must be 'displacement' or 'logprob'");
+    }
     else if (k == "novelty_threshold_multiplier") novelty_threshold_multiplier_ = float(get_double(value, k));
     else if (k == "novelty_floor")    novelty_floor_      = float(get_double(value, k));
     else if (k == "history_trace_size") history_trace_size_ = int(get_int(value, k));
@@ -583,8 +602,25 @@ void EPM::apply_neuro_scaling() {
     gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_);
 }
 
+float EPM::transition_logprob_surprise(int prev_id, int cur_id) const {
+    if (prev_id < 0) return 1.0f;                 // a first arrival: nothing predicted it
+    if (prev_id == cur_id) return 0.0f;           // a stay is not a move
+    const int N = std::max(2, gng_ ? gng_->node_count() : 2);
+    auto rit = transition_counts_.find(prev_id);
+    double total = 0.0, count = 0.0;
+    if (rit != transition_counts_.end()) {
+        for (auto const& [dst, c] : rit->second) total += double(c);
+        auto cit = rit->second.find(cur_id);
+        if (cit != rit->second.end()) count = double(cit->second);
+    }
+    if (total <= 0.0) return 1.0f;                // never left this place before
+    const double p = (count + 1.0) / (total + double(N));   // Laplace, as the reference
+    return float(std::min(1.0, std::max(0.0, -std::log(p) / std::log(double(N)))));
+}
+
 void EPM::compute_dual_tle(float quant_error, int winner_id,
-                           float& transition_surp_out, float& tle_out) {
+                           float& transition_surp_out, float& tle_out,
+                           float  logprob_surp) {
     transition_surp_out = 0.0f;
 
     auto winner_proto = gng_->get_prototype(winner_id);
@@ -597,6 +633,7 @@ void EPM::compute_dual_tle(float quant_error, int winner_id,
         has_prev_prototype_    = true;
     }
 
+    if (logprob_surp >= 0.0f) transition_surp_out = logprob_surp;   // Stage 3 (K2): the restored surprise
     tle_out = tle_alpha_ * quant_error + tle_beta_ * transition_surp_out;
     if (std::isnan(tle_out)) tle_out = 0.0f;
 
@@ -799,6 +836,9 @@ void EPM::tick(uint64_t tick_id) {
             }
         }
     }
+    // Stage 3 (K2): score the move against the table as it stood BEFORE this step.
+    const float logprob_surp = transition_logprob_
+        ? transition_logprob_surprise(prev_winner_id_for_transitions_, winner_id) : -1.0f;
     if (prev_winner_id_for_transitions_ >= 0 &&
         prev_winner_id_for_transitions_ != winner_id) {
         ++transition_counts_[prev_winner_id_for_transitions_][winner_id];
@@ -806,7 +846,7 @@ void EPM::tick(uint64_t tick_id) {
     prev_winner_id_for_transitions_ = winner_id;
 
     float transition_surp = 0.0f, tle = 0.0f;
-    compute_dual_tle(quant_error, winner_id, transition_surp, tle);
+    compute_dual_tle(quant_error, winner_id, transition_surp, tle, logprob_surp);
     last_tle_         = tle;
     last_quant_error_ = quant_error;
 
