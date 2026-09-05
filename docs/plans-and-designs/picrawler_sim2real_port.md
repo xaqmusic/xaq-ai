@@ -398,6 +398,100 @@ laptop is kept for the golden image later, not for host work (a qemu chroot sees
 | **first motion** | `P0` at 1500 → 1300 → 1700 → 1500 µs, robot on a stand: **P0 = the rear-left knee** (anatomical). Vbat flat 7.61–7.67 V through the moves (no stall sag) |
 | **`pi_host/`** (new, top-level) | `ogma_hw`: `I2cBus`/`LinuxI2cBus`, `RobotHat` (protocol), **`ServoDriver`** (clamp · slew 40 µs/tick · watchdog 25 ticks → pulse 0 · time-at-limit), `hat_tool` CLI (never a bypass), `test_hw` — 7 byte-level + envelope tests against a fake bus, passing on x86 and aarch64. A slewed `sweep 0 1300 1700` through the driver moved the knee with Vbat flat |
 
+**2026-08-29 — the map is complete, limp does not exist, and a pose recall browned the Pi out.**
+Full 12-channel servo map calibrated through the dashboard (`pi_host/calib/servo_map.json`;
+hip2 horns re-mounted so 1500 µs = femur horizontal = sim `hip2 = 0`). Poses saved
+(`poses.json`: `rescue`, `stand`, `X`). **Limp is impossible on this HAT** (SPEC §4.1
+corrected above) → the `rescue` pose is the safe state. **Twelve servos starting together on
+the shared 5 V/3 A rail brown the Pi out** (reproduced; A4 blind to it) → pose/rescue moves
+are staggered 100 ms apart at 600 µs/s; verified on the same recall. `ogma-benchd` is a
+systemd service with I²C retries, non-fatal bus errors, map/pose auto-load, low-battery
+auto-safe and `pi_throttled` in telemetry. Power rule: the HAT powers the Pi; never both the
+HAT and the Pi's USB-C — HAT plus its own charger on the bench.
+
+**2026-08-30 — wifi, the robot's own name, and the INA219 driver.**
+**The onboard wifi was rfkill soft-blocked** (`phy0 soft=1`; NetworkManager `WIFI disabled`
+while `WIFI-HW enabled`), which is why every configuration attempt failed with no useful
+error — the device reads `unavailable`, so there is nothing for a wizard to configure. The
+country code was NOT the cause and was already correct: Imager had written
+`cfg80211.ieee80211_regdom=US` onto the kernel cmdline, giving a valid regulatory domain and
+a still-blocked radio at the same time. `nmcli radio wifi on` cleared it; the unblock
+persists across reboot in both layers (`/var/lib/systemd/rfkill/platform-…mmc:wlan = 0` and
+NetworkManager's `WirelessEnabled=true`). On `<your-ssid>`, 2.4 GHz, `wlan0` = 10.0.0.114 at
+route metric 600 against eth0's 100, so Ethernet stays primary while it is plugged in.
+**Hostname renamed `raspberrypi` → `picrawler`, so avahi now advertises `picrawler.local`**
+as §7.5 specifies, and the three hardcoded `10.0.0.113` call sites (the dashboard's host
+field, `bench_client_smoke.gd`, the operator's ssh config) follow the name instead of the
+address — the eth0 address does not survive unplugging the cable, which is the whole point of
+having wifi. Verified end-to-end: libzmq's `getaddrinfo` resolves `.local` through nss-mdns,
+and the smoke client reached the live daemon over `picrawler.local` (30 telemetry frames in
+3 s, `vbat` 8.29 V).
+
+**`Ina219` landed in `ogma::hw`** (BOM §6 step 2 software half; the part is not installed
+yet). Three decisions worth carrying: **`I2cBus` gained `read_bytes()`** because two
+`read_byte()` calls are two START..STOP transactions and the INA219 restarts at its pointer's
+MSB each time — the naive version returns the high byte twice and silently halves every
+reading, so a test asserts the block read is used. **Current is derived on the host from raw
+shunt counts**, with the chip's `CURRENT` register kept only as a cross-check, because
+`r_shunt` is calibration data that will be re-fitted on the bench and a re-fit must re-derive
+already-recorded samples rather than strand them behind a stale constant — the capture file
+therefore stores raw counts plus `r_shunt` as metadata. **PGA defaults to /8**: the shunt LSB
+is 10 µV on every range, so the widest full scale costs no resolution, and `pga_clipped` is
+reported explicitly because a clipped peak is a floor rather than a measurement — silently
+under-measuring the inrush is the one failure this sensor exists to prevent. 18/18 `test_hw`
+pass on x86 and aarch64. `hat_tool ina probe` exits 0 only when the INA219's bus voltage
+agrees with A4 within 0.15 V, which is BOM §6 step 2's pass condition made scriptable.
+
+**2026-08-30 (later) — H3(d): `ogma_host` exists, and the brain runs on the robot.**
+The third program of SPEC §1 is real. `pi_host/src/ogma_host.cpp` links `ogma_core`, builds
+one `OgmaInstance` from a `GraphConfig`, bridges physical sensors onto `reality.*`, ticks at
+50 Hz on an absolute-deadline loop, and serves the *existing* inspector protocol — the same
+`ControlServer` on `OGMA_INSPECTOR_PORT` and `DiagPublisher` on port+1 — so `xaq_inspector`
+and `xaq_voice` needed no new interface. **It has no servo path and no way to acquire one**
+(SPEC §1.1), which is also what makes it safe to leave running unattended. Cost at idle:
+**0.068 % of the 20 ms budget**, 0 overruns.
+
+**The config is authored FOR hardware, which sidesteps H3's own finding.** The gait configs
+cannot run here — five of their twelve topics are oracle-fed. `picrawler_senses.json` is
+three Level-0 EPMs over the three inputs the robot physically has (mic → `stft`, camera →
+`jl` at the retinal encoder's 32×32×1, ultrasonic → `rbf`) fused by a `LateralVoter`. Every
+input is egocentric and legal by construction.
+
+**Three sensor findings, each of which would have been a silent wrong answer.**
+(1) **The ultrasonic is on D2/D3, not D0/D1** — the BOM had it wrong. Established by holding
+every D pin as an input and reading it under an internal pull-up and then a pull-down: a pin
+a device drives ignores the pull, a floating pin follows it. GPIO22 was driven low, the rest
+floated. The driver takes its pulse width from libgpiod v2 **kernel edge timestamps** rather
+than a poll loop, which is what the BOM's ±1.7 cm jitter worry was about: measured spread is
+**866 µs ± 3 µs**, about ±0.5 mm. (2) **ALSA card indices move.** Adding the DAC overlay
+pushed the USB mic from card 0 to card 1, so `plughw:0,0` would have quietly pointed capture
+at an HDMI output; devices are addressed by stable card *id* now. (3) **A `hw:`/`plughw:`
+capture stream must be explicitly `snd_pcm_prepare`d AND `snd_pcm_start`ed**, or the first
+`readi` returns `-EIO` on every latency and resample setting — measured across 24
+combinations. Only the `default` device auto-starts, which is why `arecord` worked.
+
+**The GNGs stalled, and it was conditioning — exactly as §0 rule 4 says it usually is.**
+With every channel flowing cleanly the audio EPM sat at 2 nodes. The mic's capture gain was
+at **0 of 0–16**, putting room tone at −74 dBFS; the STFT features never reached the
+insertion gate. `insertion_autotune` is *not* the fix here — it takes the configured value
+as a **floor**, so it addresses error above the gate, not below it. Raising the hardware gain
+(+23.8 dB, persisted with `alsactl store`) and giving the channel real sound took the audio
+GNG **2 → 29 nodes** with TLE tracking the input and `is_novel` firing. Vision reached 7 on a
+static bench scene; range stayed at 2, which is the honest answer for a wall at a fixed
+distance. **Node count alone would have read as a broken EPM; it was a quiet room.**
+
+**xaq_voice ported by rebuilding it — no source changes.** It already spoke ALSA and ZMQ and
+already had `--device`, so aarch64 was the whole port. Verified acoustically rather than by
+absence of errors: a 440 Hz tone through the HAT DAC came back through the USB mic at
+**1070× the off-tone energy**, and xaq_voice driven by the live brain read **+22.2 dB over
+room noise**. The speaker needed `dtoverlay=hifiberry-dac` and GPIO20 held high.
+
+⚠ **Two operational lessons.** `DiagPublisher` binds **127.0.0.1**, so laptop-side tools
+cannot reach it as-is — fine for voice on the Pi, a gap for a remote inspector. And after the
+reboot `picrawler.local` did not resolve until avahi was restarted: it registers before wifi
+has an address. Since ssh and the dashboard now address the robot by that name, a
+NetworkManager dispatcher re-publishes avahi whenever an interface comes up.
+
 **Cross-architecture FP is real and must be planned for.** `RunTumbleNavV2.DirectionalBeliefInfersGoodDirection`
 passes on x86, fails on the Pi (belief μ lands in the opposite hemisphere after a 4000-step
 stochastic sim; `test_rng_parity` passes, so the RNG stream is identical). GCC fuses `a·b+c`
@@ -781,6 +875,60 @@ the dashboard joins that.
 - **`power_save off` applies in AP mode too** (§7).
 - The AP has no uplink — the laptop loses internet while joined. Worth knowing before a demo, not
   during one.
+
+#### ✅ Band decided, 2026-09-04: **2.4 GHz, locked by BSSID** — the section asked for this to be recorded
+
+**Symptom.** The Godot bench dashboard could not connect, "worked once then would not
+reconnect", `picrawler.local` resolved only intermittently, and one ssh session died with
+`No route to host`. The obvious suspect — a second client (`picrawler-dash`) contending for
+`ogma_benchd`'s REP socket — was **wrong, and reproducing it is what showed that**: two
+concurrent REQ clients against that REP both ran clean, 30 requests each, zero timeouts.
+
+**Cause.** The Pi had roamed onto `<your-ssid>`'s **5 GHz** radio (ch 157, signal 57) while the
+**2.4 GHz** radio of the same SSID sat at signal 80. Measured on the bad link: **−67 dBm,
+20 % packet loss, 889 ms mean RTT (max 2051), and 9922 retries climbing ~22 every 5 s** in
+`/proc/net/wireless`. Godot's `BenchClient` uses a **500 ms** timeout, so at 889 ms mean it
+failed nearly every request. Nothing was wrong with either daemon.
+
+| | on 5 GHz | on 2.4 GHz |
+|---|---|---|
+| signal | −67 dBm | **−49 dBm** |
+| packet loss | 20 % | **0 %** |
+| RTT mean | 889 ms | **7 ms** |
+| benchd REQ from the laptop | 4 of 8 timed out | **10 of 10 ok**, 3 ms mean |
+| retries | 9922, climbing | **2** |
+
+**The decision.** 2.4 GHz. The band trade above says *"5 GHz for throughput if the camera
+feed is on"* — but the camera stream is **~200 kB/s** (13.1 kB greyscale / 19.2 kB colour at
+15 fps), which 2.4 GHz carries without noticing. Range is the binding constraint, not
+throughput, and this robot is meant to roam.
+
+⚠ **`802-11-wireless.band bg` is ADVISORY and did not work** — the AP band-steers and the
+Pi stayed on channel 157. What holds is a **BSSID lock** to the 2.4 GHz radio:
+
+```sh
+sudo nmcli connection modify <your-ssid> 802-11-wireless.bssid AA:BB:CC:DD:EE:F0
+sudo nmcli connection up <your-ssid>          # AA:BB:CC:DD:EE:F1 is the 5 GHz twin
+```
+
+The SSID and both BSSIDs above are **placeholders** — read your own with
+`nmcli -f BSSID,SSID,CHAN,SIGNAL dev wifi list --rescan yes`, which is also how the two
+radios of one SSID are told apart (same name, different BSSID and channel).
+
+⚠ **A BSSID lock does not roam.** The Pi will now join that one access point and no other,
+so moving the robot out of its range, or adding a mesh node, means it simply fails to
+associate. Undo with `802-11-wireless.bssid ""`. **Check this before taking the robot
+anywhere** — it is the failure mode this fix introduces.
+
+**Two lessons that generalise.**
+1. **Changing wifi over wifi needs a rollback, not care.** `eth0` was unplugged, so a failed
+   reassociation would have left no path in at all. The change ran detached via `setsid`
+   with a script that verifies the resulting **channel** (not merely that an IP appeared)
+   and reverts itself on failure.
+2. **`nmcli connection modify` fails SILENTLY without privilege.** The first attempt ran
+   detached as the user with no polkit agent; it logged success and changed nothing. Reading
+   the property back afterwards is what caught it — a script's own log is not evidence that
+   the system changed.
 
 ### 7.6 Camera feed — two streams, and they are not the same picture
 

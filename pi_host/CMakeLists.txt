@@ -17,6 +17,8 @@ add_library(ogma_hw
   src/ServoDriver.cpp
   src/LinuxI2cBus.cpp
   src/McuReset.cpp
+  src/Ina219.cpp
+  src/ResourceMonitor.cpp
 )
 target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(ogma_hw PRIVATE -Wall -Wextra)
@@ -37,6 +39,38 @@ target_include_directories(ogma_benchd PRIVATE ${ZMQ_INCLUDE_DIRS})
 target_link_libraries(ogma_benchd PRIVATE ogma_hw nlohmann_json::nlohmann_json ${ZMQ_LIBRARIES} pthread)
 target_compile_options(ogma_benchd PRIVATE -Wall -Wextra)
 
+# ogma_sensors — the three physical input channels.  Kept OUT of ogma_hw so the
+# servo/driver layer keeps its seconds-long build and gains no ALSA/gpiod deps, but
+# OUTSIDE the brain guard so its pure helpers stay unit-testable without ogma_core.
+pkg_check_modules(ALSA alsa)
+pkg_check_modules(GPIOD libgpiod)
+if(ALSA_FOUND AND GPIOD_FOUND)
+  set(PI_HOST_HAVE_SENSORS ON)
+  add_library(ogma_sensors
+    src/AudioCapture.cpp
+    src/CameraCapture.cpp
+    src/Ultrasonic.cpp
+  )
+  target_include_directories(ogma_sensors PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_include_directories(ogma_sensors PRIVATE ${ALSA_INCLUDE_DIRS} ${GPIOD_INCLUDE_DIRS})
+  target_link_libraries(ogma_sensors PUBLIC ${ALSA_LIBRARIES} ${GPIOD_LIBRARIES} pthread)
+  target_compile_options(ogma_sensors PRIVATE -Wall -Wextra)
+
+  # cam_tool — dumps what the retinal EPM sees, as an image.  A claim about pixels is
+  # settled by looking at pixels, not by reading the pipeline again.
+  add_executable(cam_tool tools/cam_tool.cpp)
+  target_link_libraries(cam_tool PRIVATE ogma_sensors)
+  target_compile_options(cam_tool PRIVATE -Wall -Wextra)
+
+  # range_tool — the raw rangefinder, so "is the sensor right" can be settled apart
+  # from "is the encoder right".
+  add_executable(range_tool tools/range_tool.cpp)
+  target_link_libraries(range_tool PRIVATE ogma_sensors)
+  target_compile_options(range_tool PRIVATE -Wall -Wextra)
+else()
+  message(STATUS "pi_host: ALSA/libgpiod not found — ogma_sensors and ogma_host disabled")
+endif()
+
 if(PI_HOST_BUILD_TESTS)
   include(FetchContent)
   FetchContent_Declare(googletest
@@ -47,5 +81,43 @@ if(PI_HOST_BUILD_TESTS)
   enable_testing()
   add_executable(test_hw tests/test_hw.cpp)
   target_link_libraries(test_hw PRIVATE ogma_hw gtest_main)
+  if(PI_HOST_HAVE_SENSORS)
+    target_link_libraries(test_hw PRIVATE ogma_sensors)
+    target_compile_definitions(test_hw PRIVATE PI_HOST_HAVE_SENSORS=1)
+  endif()
   add_test(NAME test_hw COMMAND test_hw)
+endif()
+
+# ---------------------------------------------------------------------------
+# ogma_host — the brain on the Pi (port doc SPEC §1).  OFF by default: it pulls in
+# ogma_core, which is a ~10 minute build on this board, and the servo/driver work
+# above must stay a seconds-long edit-build-test loop.
+#   cmake -S pi_host -B pi_host/build -DPI_HOST_BUILD_BRAIN=ON
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# ogma_host — the brain on the Pi (port doc SPEC §1).  OFF by default: it pulls in
+# ogma_core, a ~10 minute build on this board, and the servo/driver work above must
+# stay a seconds-long edit-build-test loop.
+#   cmake -S pi_host -B pi_host/build -DPI_HOST_BUILD_BRAIN=ON
+# ---------------------------------------------------------------------------
+# What code is actually running.  Captured at CONFIGURE time, so it can go stale if you
+# rebuild without reconfiguring -- which is why ogma_host reports the BINARY'S MTIME
+# beside it: the mtime is always true, and a hash that disagrees with it is visibly a
+# hash from an older configure rather than a silent lie about the running build.
+execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR}/.. rev-parse --short HEAD
+                OUTPUT_VARIABLE PI_HOST_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET RESULT_VARIABLE _git_rc)
+if(NOT _git_rc EQUAL 0)
+  set(PI_HOST_GIT_SHA "unknown")
+endif()
+
+option(PI_HOST_BUILD_BRAIN "Build ogma_host (links ogma_core)" OFF)
+if(PI_HOST_BUILD_BRAIN AND PI_HOST_HAVE_SENSORS)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../cpp_core cpp_core_build EXCLUDE_FROM_ALL)
+  add_executable(ogma_host src/ogma_host.cpp)
+  target_include_directories(ogma_host PRIVATE ${ZMQ_INCLUDE_DIRS})
+  target_link_libraries(ogma_host PRIVATE ogma_hw ogma_sensors ogma_core ogma_infra ${ZMQ_LIBRARIES})
+  target_compile_options(ogma_host PRIVATE -Wall -Wextra)
+  target_compile_definitions(ogma_host PRIVATE OGMA_HOST_GIT_SHA="${PI_HOST_GIT_SHA}")
 endif()

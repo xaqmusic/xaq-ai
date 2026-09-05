@@ -3,6 +3,7 @@
 // RobotHat speaks to this interface only, so the protocol is unit-testable
 // against a FakeI2cBus (tests/test_hw.cpp) and the byte formation is proven
 // before a real servo ever sees it.
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -18,6 +19,11 @@ public:
     virtual void write(uint8_t addr, const std::vector<uint8_t>& bytes) = 0;
     // One 1-byte read transaction (no register phase).
     virtual uint8_t read_byte(uint8_t addr) = 0;
+    // One n-byte read transaction.  NOT the same as n calls to read_byte():
+    // each read_byte() is its own START..STOP, and a device with a pointer
+    // register (the INA219) restarts at the MSB every time, so two 1-byte reads
+    // return the high byte twice.  Multi-byte registers need this.
+    virtual std::vector<uint8_t> read_bytes(uint8_t addr, std::size_t n) = 0;
 };
 
 // Linux userspace I2C via /dev/i2c-N + ioctl(I2C_SLAVE).  Plain read()/write()
@@ -29,6 +35,7 @@ public:
     ~LinuxI2cBus() override;
     void write(uint8_t addr, const std::vector<uint8_t>& bytes) override;
     uint8_t read_byte(uint8_t addr) override;
+    std::vector<uint8_t> read_bytes(uint8_t addr, std::size_t n) override;
 private:
     void select(uint8_t addr);
     int fd_ = -1;

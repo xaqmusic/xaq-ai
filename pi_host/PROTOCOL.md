@@ -66,7 +66,7 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
 | `cal.save` | optional `path` | `path` | write the map JSON (default `pi_host/calib/servo_map.json` in the Pi checkout) |
 | `cal.load` | optional `path` | `path`, `map` | |
 | `mode` | `mode` | — | only `bench` is accepted; anything else → `ok:false` (the brain's modes live in `ogma_host`) |
-| `pose.set` | `us` (array of 12 µs; `null`/negative = leave that channel) | `clamped_us` | arms every listed channel at once (clamped, slewed); refused while a channel is widened |
+| `pose.set` | `us` (array of 12 µs; `null`/negative = leave that channel) | `us`, `staggered`, `eta_ms` | **staggered and gentle**: channels start one at a time (100 ms apart, shortest travel first) at 600 µs/s — twelve servos starting together on the 5 V/3 A rail the Pi shares browned the Pi out (reproduced 2026-08-29). Telemetry: `pose_move_active`, `pose_queue`. Refused while a channel is widened |
 | `pose.save` | `name`, `us` (12) | `count` | store a named pose in `pi_host/calib/poses.json` (raw µs per channel, independent of the map) |
 | `pose.list` / `pose.get` / `pose.delete` | — / `name` / `name` | `poses` / `us`,`saved_at` / `count` | |
 

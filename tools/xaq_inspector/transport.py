@@ -56,6 +56,17 @@ class ControlClient:
                 self._sock = None
                 self._buf = b""
 
+    def set_endpoint(self, host: str, port: int) -> None:
+        """Point at a different brain.  Drops any live socket so the next
+        connect() dials the new address; no-op when nothing changed, so the
+        caller can call it unconditionally on every Refresh."""
+        if host == self.host and port == self.port:
+            return
+        self.close()
+        with self._lock:
+            self.host = host
+            self.port = port
+
     def reconnect(self) -> None:
         """Force-close any existing socket and open a fresh one.
 
@@ -139,6 +150,27 @@ class DiagSubscriber:
         if self._sock is not None:
             self._sock.close()
             self._sock = None
+
+    def set_endpoint(self, host: str, port: int) -> None:
+        """Point the live SUB socket at a different brain.
+
+        ZMQ disconnect/connect on the SAME socket, deliberately: subscriptions
+        are a property of the socket rather than of the connection, so every
+        active topic prefix survives the move and the receive thread never
+        stops.  Tearing the subscriber down and rebuilding it would drop them
+        and leave the UI subscribed to a module it no longer receives.
+        """
+        if host == self.host and port == self.port:
+            return
+        old = f"tcp://{self.host}:{self.port}"
+        self.host = host
+        self.port = port
+        if self._sock is not None:
+            try:
+                self._sock.disconnect(old)
+            except zmq.ZMQError:
+                pass                      # never connected, or already gone
+            self._sock.connect(f"tcp://{host}:{port}")
 
     def add_prefix(self, prefix: str) -> None:
         if self._sock is not None:

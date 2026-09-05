@@ -13,6 +13,8 @@ extends Node3D
 
 const REP_PORT := 5590
 const PUB_PORT := 5591
+# ogma_host's video PUB = its inspector control port + 2 (7400 -> 7402).
+const VIDEO_PORT := 7402
 const PING_S   := 0.3
 const SEND_THROTTLE_S := 0.05
 const US_PER_RAD := 636.6            # 500–2500 µs ≙ ±π/2
@@ -67,6 +69,11 @@ var _tele_lbls: Dictionary = {}
 var _check_lbls: Dictionary = {}
 var _status_lbl: Label
 var _widen_lbl: Label
+var _tick_meter: Control
+var _video: Node                     # VideoClient — receive-only, see VideoClient.hpp
+var _view_tex: TextureRect           # what the CAMERA sees
+var _brain_tex: TextureRect          # what the BRAIN sees (the encoder's actual input)
+var _video_lbl: Label
 
 
 func _ready() -> void:
@@ -121,7 +128,7 @@ func _build_ui() -> void:
 	var topv := VBoxContainer.new(); top.add_child(topv)
 	var row := HBoxContainer.new(); topv.add_child(row)
 	row.add_child(_lbl("ogma_benchd @"))
-	_host_edit = LineEdit.new(); _host_edit.text = "10.0.0.113"; _host_edit.custom_minimum_size.x = 160
+	_host_edit = LineEdit.new(); _host_edit.text = "picrawler.local"; _host_edit.custom_minimum_size.x = 160
 	row.add_child(_host_edit)
 	row.add_child(_lbl(":%d / :%d" % [REP_PORT, PUB_PORT]))
 	var cb := Button.new(); cb.text = "CONNECT"; cb.pressed.connect(_on_connect); row.add_child(cb)
@@ -161,13 +168,46 @@ func _build_ui() -> void:
 	_tele_min_btn = Button.new(); _tele_min_btn.text = "▼"; _tele_min_btn.custom_minimum_size.x = 26
 	_tele_min_btn.pressed.connect(_on_tele_min); lhdr.add_child(_tele_min_btn)
 	var lv := VBoxContainer.new(); lroot.add_child(lv); _tele_content = lv
-	for key in ["vbat", "adc", "tick_hz", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
+	for key in ["vbat", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
 		var l := _lbl(key + ": —"); _tele_lbls[key] = l; lv.add_child(l)
+		if key == "cost":
+			_tick_meter = (load("res://scripts/tick_meter.gd") as Script).new()
+			_tick_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lv.add_child(_tick_meter)
 	lv.add_child(_lbl(" "))
 	lv.add_child(_lbl("BOOT SELF-CHECK  (SPEC §6)", 13))
 	for item in ["0x14 present", "Vbat plausible 6.0–8.4 V", "IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
 		var l := _lbl("○ " + item); _check_lbls[item] = l; lv.add_child(l)
 		l.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+
+	# ---- the camera, inside the telemetry panel so it minimises with the metrics ------
+	# Lives here rather than over the 3-D view: that area already carries the body's own
+	# meters and the COMMANDED-pose label, and a floating panel overlapped the distress bar.
+	# Both planes side by side, because the PAIR is the diagnostic — a fault between the
+	# sensor and the encoder shows up as the two disagreeing. (2026-09-01: the camera read
+	# across frame boundaries for a week and looked like a working camera the whole time,
+	# because nothing ever displayed what the encoder was actually handed.)
+	lv.add_child(_lbl(" "))
+	lv.add_child(_lbl("CAMERA  (ogma_host :%d — view only)" % VIDEO_PORT, 13))
+	var vrow := HBoxContainer.new(); lv.add_child(vrow)
+	var vcol := VBoxContainer.new(); vrow.add_child(vcol)
+	vcol.add_child(_lbl("what the camera sees", 11))
+	_view_tex = TextureRect.new()
+	_view_tex.custom_minimum_size = Vector2(160, 120)
+	_view_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	_view_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	vcol.add_child(_view_tex)
+	vrow.add_child(_lbl(" "))
+	var bcol := VBoxContainer.new(); vrow.add_child(bcol)
+	var blab := _lbl("the BRAIN sees", 11)
+	blab.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	bcol.add_child(blab)
+	_brain_tex = TextureRect.new()
+	_brain_tex.custom_minimum_size = Vector2(96, 96)
+	_brain_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	_brain_tex.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # show the pixels, do not smooth them
+	bcol.add_child(_brain_tex)
+	_video_lbl = _lbl("not connected", 11); lv.add_child(_video_lbl)
 
 	# ---- bottom-centre: the honesty label on the 3-D view ----------------------------
 	var cap := _lbl("3-D view = COMMANDED pose", 14)
@@ -248,6 +288,65 @@ func _margin(l: int = 10, t: int = 4, r: int = 8, b: int = 4) -> MarginContainer
 	m.add_theme_constant_override("margin_right", r); m.add_theme_constant_override("margin_bottom", b)
 	return m
 
+# ---- what the loop costs -------------------------------------------------------------
+# CPU is reported as per cent of the TICK BUDGET, not of a wall-clock second: at 50 Hz
+# the budget is 20 ms, so 50 % means the tick used half the time it had. The MAX sits
+# beside the middle on purpose — a mean is blind to the one tick in forty that blows the
+# budget, and that tick is the one that misses a deadline.
+func _fmt_ms(ms: float) -> String:
+	if ms >= 1.0: return "%.2f ms" % ms
+	if ms >= 0.001: return "%.1f µs" % (ms * 1000.0)
+	return "%.0f ns" % (ms * 1000000.0)
+
+
+func _update_cost_rows() -> void:
+	var c: Dictionary = _tele.get("cpu", {})
+	var m: Dictionary = _tele.get("mem", {})
+	if c.is_empty():
+		_tele_lbls["cost"].text = "tick cost: —   (daemon predates the cpu/mem telemetry)"
+		_tele_lbls["cost_split"].text = ""
+		_tele_lbls["mem"].text = ""
+		return
+	var budget := float(c.get("budget_ms", 0.0))
+	var wmax := float(c.get("wall_max", 0.0))
+	if _tick_meter: _tick_meter.set_window(float(c.get("wall_p50", 0.0)), float(c.get("wall_p95", 0.0)), wmax)
+	# Absolute time first, per cent on the max only. An idle loop and a saturated one are
+	# three orders of magnitude apart, and a bare "%.0f%%" prints 0 for everything below
+	# 0.5 % — which is the whole healthy range.
+	_tele_lbls["cost"].text = "tick cost: p50 %s  p95 %s  max %s = %.1f%% of the %.0f ms budget" % [
+		_fmt_ms(float(c.get("wall_p50", 0.0)) * budget / 100.0),
+		_fmt_ms(float(c.get("wall_p95", 0.0)) * budget / 100.0),
+		_fmt_ms(wmax * budget / 100.0), wmax, budget]
+	# Red only at a real overrun; amber is the margin worth watching, not a fault.
+	var col := Color(0.9, 0.9, 0.9)
+	if wmax >= 100.0: col = Color(1, 0.3, 0.3)
+	elif wmax >= 75.0: col = Color(1, 0.85, 0.4)
+	_tele_lbls["cost"].add_theme_color_override("font_color", col)
+
+	# wall >> cpu means the tick sat BLOCKED (I²C writes, lock contention, preemption)
+	# and more compute is nearly free; wall ≈ cpu means every new module costs budget.
+	var wp := float(c.get("wall_p50", 0.0))
+	var cp := float(c.get("cpu_p50", 0.0))
+	var verdict := "—"
+	if wp > 0.5:
+		var ratio := cp / wp
+		verdict = "BLOCKED (bus/lock)" if ratio < 0.5 else ("compute-bound" if ratio > 0.8 else "mixed")
+	_tele_lbls["cost_split"].text = "  wall %s vs cpu %s → %s      proc %.1f%% of a core   %.1f °C" % [
+		_fmt_ms(wp * budget / 100.0), _fmt_ms(cp * budget / 100.0), verdict,
+		float(c.get("proc_pct", 0.0)), float(c.get("temp_c", 0.0))]
+	var temp := float(c.get("temp_c", 0.0))
+	_tele_lbls["cost_split"].add_theme_color_override("font_color",
+		Color(1, 0.85, 0.4) if temp >= 80.0 else Color(0.75, 0.75, 0.75))
+
+	# Swap is the one to fear on a 2 GB board: once the brain swaps, latency is gone.
+	var swap := float(m.get("swap_mb", 0.0))
+	_tele_lbls["mem"].text = "mem: rss %.0f MB  swap %.0f MB  avail %.0f MB  %+.2f MB/min  majflt %s" % [
+		float(m.get("rss_mb", 0.0)), swap, float(m.get("avail_mb", 0.0)),
+		float(m.get("growth_mb_min", 0.0)), str(m.get("majflt", "—"))]
+	_tele_lbls["mem"].add_theme_color_override("font_color",
+		Color(1, 0.3, 0.3) if swap > 0.0 else Color(0.9, 0.9, 0.9))
+
+
 func _lbl(text: String, size: int = 12) -> Label:
 	var l := Label.new(); l.text = text
 	l.add_theme_font_size_override("font_size", size)
@@ -319,6 +418,13 @@ func _call(req: Dictionary) -> Dictionary:
 
 
 func _on_connect() -> void:
+	# The video stream lives on ogma_host, a different daemon from benchd, so it gets its
+	# own client. Receive-only: there is no verb path from here to the brain (SPEC §1.1).
+	if _video == null:
+		_video = ClassDB.instantiate("VideoClient")
+		if _video != null: add_child(_video)
+	if _video != null and not bool(_video.call("connect_to", _host_edit.text, VIDEO_PORT)):
+		_video_lbl.text = "video: %s" % str(_video.call("last_error"))
 	var ok: bool = _client.call("connect_to", _host_edit.text, REP_PORT, PUB_PORT)
 	_connected = ok
 	_link_fail = 0
@@ -415,7 +521,30 @@ func _on_load_map() -> void:
 # ======================================================================================
 # Per frame: ping, throttle, telemetry, body
 # ======================================================================================
+func _update_video() -> void:
+	if _video == null or not bool(_video.call("is_connected")):
+		return
+	# Minimised: skip entirely rather than build an ImageTexture nobody draws. Safe to
+	# stop polling because the SUB socket is ZMQ_CONFLATE — at most one frame is ever
+	# queued, so nothing backs up while the panel is closed.
+	if _tele_content != null and not _tele_content.visible:
+		return
+	if not bool(_video.call("poll")):
+		return
+	var vi: Image = _video.call("view_image")
+	if vi != null and not vi.is_empty():
+		_view_tex.texture = ImageTexture.create_from_image(vi)
+	var bi: Image = _video.call("brain_image")
+	if bi != null and not bi.is_empty():
+		_brain_tex.texture = ImageTexture.create_from_image(bi)
+	var info: Dictionary = _video.call("info")
+	_video_lbl.text = "frame %s   %dx%d source   %.1f kB" % [
+		str(info.get("seq", "—")), int(info.get("src_w", 0)), int(info.get("src_h", 0)),
+		float(info.get("bytes", 0)) / 1024.0]
+
+
 func _process(delta: float) -> void:
+	_update_video()
 	if _connected:
 		_ping_acc += delta
 		if _ping_acc >= PING_S:
@@ -489,6 +618,7 @@ func _update_labels() -> void:
 		_tele_lbls["tick_hz"].text = "tick_hz: %.2f   (HAT frame 49.95 Hz — a different clock)" % float(_avg.get("tick_hz", 0.0))
 		_tele_lbls["deadman_ms_left"].text = "deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))
 		_tele_lbls["age"].text = "frame seq %s   age %d ms (1 s mean)" % [str(_tele.get("seq", "—")), int(_avg.get("age", 0.0))]
+	_update_cost_rows()
 	_tele_lbls["overruns"].text = "overruns: %s   bus_errors: %s" % [str(_tele.get("overruns", "—")), str(_tele.get("bus_errors", "—"))]
 	_tele_lbls["watchdog_trips"].text = "watchdog_trips: %s   low_battery: %s   pi_throttled: %s" % [str(_tele.get("watchdog_trips", "—")), str(_tele.get("low_battery", "—")), str(_tele.get("pi_throttled", "—"))]
 	_tele_lbls["armed_ch"].text = "armed_ch: %s   rescue_pose: %s" % [str(_tele.get("armed_ch", "—")), str(_tele.get("rescue_pose", "NONE"))]

@@ -8,11 +8,13 @@
 // The bus (/dev/i2c-1) is not thread-safe; every I2C access happens under the mutex.
 // There is NO verb that starts a brain here, and none will be added (SPEC §1.1).
 #include "ogma/hw/ServoDriver.hpp"
+#include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zmq.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <chrono>
@@ -22,6 +24,8 @@
 #include <ctime>
 #include <fstream>
 #include <mutex>
+#include <utility>
+#include <vector>
 #include <string>
 #include <thread>
 
@@ -39,6 +43,12 @@ constexpr int    FULL_MAX_US     = 2500;
 constexpr double TICK_HZ         = 50.0;
 constexpr double VBAT_LIMP_V     = 6.4;    // HAT minimum is 6.0: limp and refuse arming below this
 constexpr double VBAT_RECOVER_V  = 6.7;    // hysteresis: arming allowed again above this
+// Pose moves: twelve servos starting at once on the 5 V/3 A DC-DC the Pi shares browned the
+// Pi out (2026-08-29, reproduced: telemetry gone 0.5 s after pose.set, Pi rebooted).  So a
+// pose starts its channels one at a time and slews them gently; servo.set keeps the fast slew.
+constexpr int NORMAL_SLEW_US     = 40;
+int g_pose_slew_us = 12;                   // 600 us/s: a 1000 us move takes ~1.7 s
+int g_pose_stagger_ticks = 5;              // 100 ms between channel starts
 
 int64_t mono_ms() {
     timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -79,9 +89,17 @@ struct State {
     bool low_battery = false;
     std::string rescue_name = "rescue";      // the pose that stands in for limp on this HAT
     int64_t rescue_until_ms = 0;              // while set, the tick keeps feeding the driver
+    std::vector<std::pair<int,int>> pose_queue;  // (ch, us) still to start, in order
+    int pose_stagger_left = 0;
+    bool pose_move_active = false;
     bool deadman_tripped = false;
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
     int  throttled_poll = 0;
+    TickBudget  budget{TICK_HZ, 25};    // 25 ticks = 0.5 s: fast enough to read as a meter
+    int  load_cpu_us   = 0;             // synthetic load, gain-0 by default (see the 'load' verb)
+    int  load_block_us = 0;
+    TickStats   tick_cost{};            // last closed window
+    HostSample  host{};                 // sampled ~1 Hz OFF the tick thread
     double tick_hz_meas = 0.0;
     uint64_t seq = 0;
     int64_t t0_ms = mono_ms();
@@ -137,9 +155,11 @@ struct State {
         armed_ch = -1;
         if (has_rescue()) {
             const json& us = poses[rescue_name]["us"];
+            std::vector<std::pair<int,int>> targets;
             for (int c = 0; c < ServoDriver::N; ++c)
-                if (us[c].is_number() && us[c].get<int>() >= 0) { try { driver.command(c, us[c].get<int>()); } catch (...) {} }
-            rescue_until_ms = mono_ms() + 3000;                    // keep feeding until it gets there
+                if (us[c].is_number() && us[c].get<int>() >= 0) targets.push_back({c, us[c].get<int>()});
+            begin_pose_move(targets);
+            rescue_until_ms = mono_ms() + 3000 + int64_t(targets.size()) * g_pose_stagger_ticks * 20 + 4000;   // stagger + travel
             record("rescue", {{"why", why}, {"pose", rescue_name}});
         } else {
             try { driver.limp_all(); } catch (...) {}
@@ -147,6 +167,36 @@ struct State {
         }
     }
     void limp_all(const char* why) { rescue(why); }
+
+    // Begin a staggered, gentle move of many channels.  Channels are ordered by distance
+    // to travel (shortest first) so the big swings start last, one every stagger period.
+    void begin_pose_move(const std::vector<std::pair<int,int>>& targets) {
+        pose_queue.clear();
+        for (auto& t : targets) pose_queue.push_back(t);
+        std::sort(pose_queue.begin(), pose_queue.end(), [&](const std::pair<int,int>& a, const std::pair<int,int>& b) {
+            int da = std::abs(a.second - (driver.armed(a.first) ? driver.current_us(a.first) : a.second));
+            int db = std::abs(b.second - (driver.armed(b.first) ? driver.current_us(b.first) : b.second));
+            return da < db; });
+        driver.set_slew_us_per_tick(g_pose_slew_us);
+        pose_move_active = true;
+        pose_stagger_left = 0;                                   // first channel starts this tick
+    }
+    // Called every tick (holding m): start the next queued channel when its time comes;
+    // restore the fast slew once everything has landed.
+    void service_pose_move() {
+        if (!pose_move_active) return;
+        if (!pose_queue.empty()) {
+            if (pose_stagger_left <= 0) {
+                auto [ch, us] = pose_queue.front(); pose_queue.erase(pose_queue.begin());
+                try { driver.command(ch, us); } catch (...) {}
+                pose_stagger_left = g_pose_stagger_ticks;
+            } else --pose_stagger_left;
+        } else if (driver.settled()) {
+            driver.set_slew_us_per_tick(NORMAL_SLEW_US);
+            pose_move_active = false;
+            record("pose.landed", {});
+        }
+    }
 
     json frame() {   // caller holds m
         const int64_t now = mono_ms();
@@ -191,13 +241,47 @@ struct State {
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
                 {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
-                {"rescue_active", mono_ms() < rescue_until_ms},
-                {"pi_throttled", pi_throttled}, {"servos", servos}};
+                {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
+                {"pi_throttled", pi_throttled},
+                // Cost of the loop, in the units a control loop cares about: per cent of
+                // the tick BUDGET, with the tail (max) beside the middle because a mean
+                // is blind to the spike that actually misses a deadline.  wall vs cpu
+                // separates "blocked on the bus" from "out of compute" (ResourceMonitor).
+                {"cpu", {{"budget_ms", tick_cost.budget_ms}, {"n", tick_cost.n},
+                         {"wall_p50", tick_cost.wall_p50}, {"wall_p95", tick_cost.wall_p95},
+                         {"wall_max", tick_cost.wall_max},
+                         {"cpu_p50", tick_cost.cpu_p50}, {"cpu_p95", tick_cost.cpu_p95},
+                         {"cpu_max", tick_cost.cpu_max},
+                         {"proc_pct", host.proc_cpu_pct}, {"temp_c", host.cpu_temp_c}}},
+                {"mem", {{"rss_mb", host.rss_mb}, {"swap_mb", host.swap_mb},
+                         {"avail_mb", host.mem_avail_mb}, {"majflt", host.majflt},
+                         {"growth_mb_min", host.rss_growth_mb_per_min}}},
+                {"servos", servos}};
     }
 };
 
 std::atomic<bool> g_run{true};
 void on_sig(int) { g_run = false; }
+
+// Synthetic tick load — an instrument CALIBRATOR, not a feature.  A meter is checked
+// against a known signal (a test tone), never against an uncontrolled real one, and
+// there is no way to run a picrawler config on this machine yet anyway: that needs
+// ogma_host (H3), and the deployed config does not yet run on legal inputs.
+//   cpu_us   spins real FP work   -> drives wall ~= cpu   (compute-bound)
+//   block_us sleeps               -> drives wall >> cpu   (blocked)
+// Having both is what proves the wall-vs-cpu VERDICT, not merely the meter's range.
+void burn_cpu_us(int us) {
+    if (us <= 0) return;
+    timespec a; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &a);
+    const int64_t target_ns = int64_t(us) * 1000;
+    static volatile double sink = 0.0;
+    double x = 1.000001;
+    for (;;) {
+        for (int i = 0; i < 256; ++i) { x = x * 1.0000001 + 1e-9; sink = sink + x; }
+        timespec b; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &b);
+        if ((b.tv_sec - a.tv_sec) * 1000000000L + (b.tv_nsec - a.tv_nsec) >= target_ns) return;
+    }
+}
 
 void tick_thread(State& S) {
     timespec next; clock_gettime(CLOCK_MONOTONIC, &next);
@@ -209,10 +293,14 @@ void tick_thread(State& S) {
         clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, nullptr);
         timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
         const long late_ns = (now.tv_sec - next.tv_sec) * 1000000000L + (now.tv_nsec - next.tv_nsec);
+        // The budget span starts at WAKE, not after the lock: waiting for the mutex
+        // spends the tick's budget just as surely as working does.
+        timespec cpu0; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
         std::lock_guard<std::mutex> lk(S.m);
         if (late_ns > period_ns) ++S.overruns;
         const int64_t ms = mono_ms();
         try {
+            S.service_pose_move();
             bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= S.driver.armed(c);
             const bool client_fresh = ms - S.last_client_ms <= DEADMAN_MS;
             if (any_armed && !client_fresh && !S.deadman_tripped && ms >= S.rescue_until_ms) {
@@ -221,7 +309,7 @@ void tick_thread(State& S) {
                 S.rescue("deadman");                                       // the safe action, once
             }
             if (client_fresh) S.deadman_tripped = false;
-            if (client_fresh || ms < S.rescue_until_ms)                    // keeps the driver watchdog fed
+            if (client_fresh || ms < S.rescue_until_ms || S.pose_move_active)   // keeps the driver watchdog fed
                 for (int c = 0; c < ServoDriver::N; ++c)
                     if (S.driver.armed(c)) S.driver.command(c, S.driver.target_us(c));
             if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
@@ -238,15 +326,30 @@ void tick_thread(State& S) {
             }
         }
         if (S.driver.watchdog_tripped()) { S.armed_ch = -1; S.end_cal("watchdog"); }   // after a rescue has landed
+        if (S.load_cpu_us > 0) burn_cpu_us(S.load_cpu_us);
+        if (S.load_block_us > 0) { timespec b{0, long(S.load_block_us) * 1000L}; nanosleep(&b, nullptr); }
+        timespec w1, c1;
+        clock_gettime(CLOCK_MONOTONIC, &w1);
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1);
+        if (S.budget.sample((w1.tv_sec - now.tv_sec) * 1000000000L + (w1.tv_nsec - now.tv_nsec),
+                            (c1.tv_sec - cpu0.tv_sec) * 1000000000L + (c1.tv_nsec - cpu0.tv_nsec)))
+            S.tick_cost = S.budget.last();
         if (++win_ticks >= 100) { S.tick_hz_meas = win_ticks * 1000.0 / double(ms - win_start); win_start = ms; win_ticks = 0; }
     }
 }
 
 void telemetry_thread(State& S, void* pub) {
+    HostStats hs;
+    int host_poll = 0;
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Read /proc BEFORE taking the lock.  It costs ~100 us; doing it while the
+        // tick thread waits would make the instrument a cause of what it measures.
+        HostSample fresh; bool have_fresh = false;
+        if (++host_poll >= 10) { host_poll = 0; fresh = hs.sample(); have_fresh = fresh.ok; }
         std::string body;
-        { std::lock_guard<std::mutex> lk(S.m); json f = S.frame(); body = f.dump(); S.record("telemetry", f); }
+        { std::lock_guard<std::mutex> lk(S.m); if (have_fresh) S.host = fresh;
+          json f = S.frame(); body = f.dump(); S.record("telemetry", f); }
         // ONE frame: "bench " + JSON.  ZMQ_CONFLATE on the subscriber does not support
         // multi-part messages, and SUB filtering is a prefix match, so the topic rides in-band.
         const std::string msg = "bench " + body;
@@ -303,6 +406,19 @@ json handle(State& S, const json& req) {   // caller holds m
         S.record("cal.begin", {{"ch", ch}, {"until_ms", S.cal_until_ms}});
         return ok({{"until_ms", S.cal_until_ms}});
     }
+    if (verb == "load") {
+        // ⚠ Interlock: a load at or above the budget starves the servo refresh and
+        // trips the driver watchdog, which commands the rescue pose — the robot MOVES.
+        // Refuse while anything is armed; this is a bench instrument, not a live knob.
+        bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= S.driver.armed(c);
+        const int cpu_us   = std::clamp(req.value("cpu_us",   0), 0, 50000);
+        const int block_us = std::clamp(req.value("block_us", 0), 0, 50000);
+        if ((cpu_us > 0 || block_us > 0) && any_armed)
+            return err("refusing a synthetic load while servos are armed: it can trip the watchdog into a rescue move");
+        S.load_cpu_us = cpu_us; S.load_block_us = block_us;
+        S.record("load", {{"cpu_us", cpu_us}, {"block_us", block_us}});
+        return ok({{"cpu_us", cpu_us}, {"block_us", block_us}, {"budget_ms", 1000.0 / TICK_HZ}});
+    }
     if (verb == "cal.end") { S.end_cal("verb"); return ok(); }
     if (verb == "cal.map") {
         if (!ch_of(req, ch)) return err("bad ch");
@@ -337,16 +453,17 @@ json handle(State& S, const json& req) {   // caller holds m
         if (S.cal_ch >= 0) return err("channel " + std::to_string(S.cal_ch) + " is widened: cal.end before a pose");
         if (S.low_battery) return err("battery low");
         if (!req.contains("us") || !req["us"].is_array() || req["us"].size() != size_t(ServoDriver::N)) return err("us must be an array of 12");
-        json clamped = json::array();
+        std::vector<std::pair<int,int>> targets; json listed = json::array();
         for (int c = 0; c < ServoDriver::N; ++c) {
             const int us = req["us"][c].is_number() ? req["us"][c].get<int>() : -1;
-            if (us < 0) { clamped.push_back(nullptr); continue; }          // null = leave this channel as it is
+            if (us < 0) { listed.push_back(nullptr); continue; }           // null = leave this channel as it is
             if (us < FULL_MIN_US || us > FULL_MAX_US) return err("us[" + std::to_string(c) + "] out of 500-2500");
-            S.driver.command(c, us); clamped.push_back(S.driver.target_us(c));
+            targets.push_back({c, us}); listed.push_back(us);
         }
+        S.begin_pose_move(targets);                                       // staggered + gentle: protects the Pi's rail
         S.armed_ch = -1;
-        S.record("pose.set", {{"clamped_us", clamped}});
-        return ok({{"clamped_us", clamped}});
+        S.record("pose.set", {{"us", listed}, {"stagger_ticks", g_pose_stagger_ticks}, {"slew", g_pose_slew_us}});
+        return ok({{"us", listed}, {"staggered", true}, {"eta_ms", int(targets.size()) * g_pose_stagger_ticks * 20 + 2000}});
     }
     if (verb == "pose.save") {
         const std::string name = req.value("name", "");
@@ -385,6 +502,8 @@ int main(int argc, char** argv) {
         else if (a == "--rep") rep_port = std::atoi(argv[i + 1]); else if (a == "--pub") pub_port = std::atoi(argv[i + 1]);
         else if (a == "--log-dir") log_dir = argv[i + 1]; else if (a == "--map") map_path = argv[i + 1];
         else if (a == "--poses") poses_path = argv[i + 1]; else if (a == "--rescue") rescue_name_arg = argv[i + 1];
+        else if (a == "--pose-slew") g_pose_slew_us = std::max(1, std::atoi(argv[i + 1]));
+        else if (a == "--pose-stagger-ms") g_pose_stagger_ticks = std::max(0, std::atoi(argv[i + 1]) / 20);
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);

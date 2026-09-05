@@ -18,15 +18,38 @@ import argparse
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSettings, QTimer
 from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QListWidget, QListWidgetItem, QSplitter,
     QStackedWidget, QStatusBar, QVBoxLayout, QWidget, QLabel,
-    QPushButton, QHBoxLayout, QSpinBox, QMessageBox,
+    QPushButton, QHBoxLayout, QSpinBox, QMessageBox, QLineEdit,
 )
 
 from .transport import ControlClient, DiagSubscriber, DiagPayload
+
+
+_DEFAULT_HOST = "127.0.0.1"
+
+
+def parse_endpoint(text: str, default_host: str, default_port: int) -> tuple[str, int]:
+    """Accept "host", "host:port", or "" — the field is a convenience, not a form.
+
+    A field is never allowed to fail: an unparseable port falls back to the default
+    rather than raising, because the cost of a typo should be connecting to the wrong
+    port and seeing it in the status bar, not a dialog in the middle of debugging.
+    """
+    text = (text or "").strip()
+    if not text:
+        return default_host, default_port
+    if ":" in text:
+        host, _, port_s = text.rpartition(":")
+        host = host.strip() or default_host
+        try:
+            return host, int(port_s)
+        except ValueError:
+            return host, default_port
+    return text, default_port
 from .widgets import widget_for, wrap_with_description
 
 
@@ -65,6 +88,17 @@ class InspectorWindow(QMainWindow):
         # Never let content pin the window wide: it must always be shrinkable.
         self.setMinimumSize(560, 400)
 
+        # QoL: the last endpoints are remembered, so the common case is launching with
+        # no arguments at all.  An explicit CLI flag still wins for this run and is then
+        # saved, which keeps scripted launches authoritative without stranding the value.
+        self._settings = QSettings("xaq", "xaq_inspector")
+        if control_host == _DEFAULT_HOST:
+            control_host = str(self._settings.value("control_host", control_host))
+            control_port = int(self._settings.value("control_port", control_port))
+        if diag_host == _DEFAULT_HOST:
+            diag_host = str(self._settings.value("diag_host", diag_host))
+            diag_port = int(self._settings.value("diag_port", diag_port))
+
         self.control = ControlClient(control_host, control_port)
         self.diag    = DiagSubscriber(diag_host, diag_port)
 
@@ -102,6 +136,24 @@ class InspectorWindow(QMainWindow):
         self._list.itemClicked.connect(self._on_module_activated)
         left_layout.addWidget(self._list, 1)
 
+        # Where the brain is.  Two fields rather than one because control and diag can
+        # legitimately differ (an ssh tunnel forwarding only one, say), and each accepts
+        # "host" or "host:port" so the ports stay overridable without four widgets.
+        for label, attr, host, port in (
+            ("control", "_ctl_edit", self.control.host, self.control.port),
+            ("diag",    "_diag_edit", self.diag.host,   self.diag.port),
+        ):
+            row = QHBoxLayout()
+            lab = QLabel(label)
+            lab.setMinimumWidth(46)
+            row.addWidget(lab)
+            edit = QLineEdit(f"{host}:{port}")
+            edit.setPlaceholderText("host or host:port")
+            edit.returnPressed.connect(self._refresh_modules)   # Enter = connect
+            row.addWidget(edit, 1)
+            setattr(self, attr, edit)
+            left_layout.addLayout(row)
+
         # Subscribe rate selector
         rate_row = QHBoxLayout()
         rate_row.addWidget(QLabel("hz:"))
@@ -110,7 +162,8 @@ class InspectorWindow(QMainWindow):
         self._hz.setValue(30)
         rate_row.addWidget(self._hz)
         rate_row.addStretch(1)
-        refresh_btn = QPushButton("Refresh")
+        refresh_btn = QPushButton("Connect / Refresh")
+        refresh_btn.setToolTip("Apply the host fields and re-list the brain's modules")
         refresh_btn.clicked.connect(self._refresh_modules)
         # The brain builder (or the Godot panel) can add and remove modules
         # while this window is open: poll the host's graph version and
@@ -173,11 +226,26 @@ class InspectorWindow(QMainWindow):
         # any existing socket and opens a new one, so the user can
         # leave the inspector window open across Godot restarts and
         # just hit Refresh.
+        # Apply whatever is in the host fields first, so Refresh doubles as Connect:
+        # one button, and changing a field then hitting it does the obvious thing.
+        c_host, c_port = parse_endpoint(self._ctl_edit.text(), _DEFAULT_HOST, 7400)
+        d_host, d_port = parse_endpoint(self._diag_edit.text(), _DEFAULT_HOST, 7401)
+        self.control.set_endpoint(c_host, c_port)
+        self.diag.set_endpoint(d_host, d_port)
+        self._settings.setValue("control_host", c_host)
+        self._settings.setValue("control_port", c_port)
+        self._settings.setValue("diag_host", d_host)
+        self._settings.setValue("diag_port", d_port)
+        # Connect may have re-pointed us at a DIFFERENT brain, whose graph version is
+        # unrelated to the one we were tracking.  Drop the baseline so the next poll
+        # re-establishes it silently instead of reporting a live edit that never
+        # happened — and overwriting the endpoint the operator just asked to see.
+        self._graph_version = None
         try:
             self.control.reconnect()
             resp = self.control.call("list_modules")
         except Exception as e:
-            self._set_status(f"control error: {e}")
+            self._set_status(f"control error at {c_host}:{c_port} — {e}")
             return
         if resp.get("status") != "ok":
             self._set_status(f"list_modules: {resp}")
@@ -205,7 +273,7 @@ class InspectorWindow(QMainWindow):
             # the new instance (typical re-launch case: same config).
             if prior_module_id is not None and m.get("id") == prior_module_id:
                 self._list.setCurrentItem(item)
-        self._set_status(f"{len(self._modules)} modules (reconnected)")
+        self._set_status(f"{len(self._modules)} modules — control {c_host}:{c_port}, diag {d_host}:{d_port}")
 
     def _sync_list_if_changed(self) -> None:
         """Re-list the modules when the host's graph version moved (a live
@@ -341,9 +409,9 @@ class InspectorWindow(QMainWindow):
 
 def main() -> None:
     p = argparse.ArgumentParser(description="xaq inspector sidecar")
-    p.add_argument("--control-host", default="127.0.0.1")
+    p.add_argument("--control-host", default=_DEFAULT_HOST)
     p.add_argument("--control-port", type=int, default=7400)
-    p.add_argument("--diag-host",    default="127.0.0.1")
+    p.add_argument("--diag-host",    default=_DEFAULT_HOST)
     p.add_argument("--diag-port",    type=int, default=7401)
     args = p.parse_args()
 

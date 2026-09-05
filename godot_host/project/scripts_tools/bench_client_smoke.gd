@@ -3,7 +3,7 @@
 extends SceneTree
 
 func _init() -> void:
-	var host := "10.0.0.113"
+	var host := "picrawler.local"
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0: host = args[0]
 	var c = ClassDB.instantiate("BenchClient")
