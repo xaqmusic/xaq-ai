@@ -417,8 +417,54 @@ files diff empty. Two unit tests.
 | wrong sign (gain −1), dead sensor | 0.659 | **0.9994** | fused MSE after death ×2.26 — the sign is the whole effect |
 
 Bench verdict `WORKING` on the failure it targets, neutral where it has no business, and the
-wrong-sign arm inverts it. Creature test pending: the vision dropout on
-`the_cell_maze_fusion__dims3.json` (baselines running).
+wrong-sign arm inverts it.
+
+**Creature test: a stuck camera, not a dropout.** Two things ruled out the planned vision
+dropout. The recovered `cell_perturbation_d.py` varies only a PlayLoop seed in a fixed world,
+so on the fusion config (no PlayLoop) its twenty runs were one world, and its lesion and
+control arms came out identical. And a lesion zeroes the bearing, which `BearingFusion`'s
+`confidence_floor` already drops regardless of trust, so a dropout cannot express a trust
+lever at all. The failure the activity term targets is a channel that reports a **constant,
+plausible** value. `VisualBearing.stick_after_ticks` (default −1, byte-identical) republishes
+the last bearing seen with food in view, unchanged, from that tick on (latching the first
+sighting after it if there was none before). Sanity run on `the_cell_maze_fusion__dims3.json`,
+stick at 1800: the vision EPM's input becomes a new constant (it tiles it down to error
+0.005, distinct from its blind state); legacy trust on the frozen channel climbs to **0.84**
+by tick 3540, and under `activity_gain 1` it sits at **0.03**, having been below 0.2 all run
+because the camera is blind most of the time. `cell_coverage.py` now reports eats and food
+distance per run-third so the perturbation reads as pre / mid / post.
+
+**A/B (2026-09-05): `the_cell_maze_fusion__dims3.json`, 20 paired worlds, 240 s, camera stuck
+at 4800 (the start of the middle third).**
+
+| arm | eats, total | eats by third (pre / mid / post) | food distance by third (m) |
+|---|---|---|---|
+| base | 13.6 | 5.55 / 4.10 / 3.95 | 8.28 / 5.64 / 5.70 |
+| stuck camera, legacy trust | **7.7** | 5.55 / **1.50 / 0.65** | 8.28 / **10.23 / 10.23** |
+| activity term, no perturbation | 13.85 | 5.55 / 4.45 / 3.85 | 7.99 / 5.82 / 5.41 |
+| stuck camera + activity term | **12.3** | 5.55 / **3.55 / 3.20** | 7.99 / **5.51 / 5.01** |
+| stuck camera + wrong sign (gain −1) | 6.0 | 5.35 / 0.35 / 0.30 | 7.94 / 12.61 / 12.12 |
+
+Paired by world (95 % CI, t on 19 df):
+
+| comparison | eats | food distance |
+|---|---|---|
+| stuck − base (the perturbation's cost) | −5.90 ± 1.97, t −6.3, 17 of 20 | +3.05 ± 0.98, t 6.5, 20 of 20 |
+| **act_stuck − stuck (the lever's claim)** | **+4.60 ± 2.09, t 4.6, 16 of 20** | **−3.42 ± 0.86, t −8.3, 19 of 20** |
+| act_stuck − base (what is left of the damage) | −1.30 ± 1.63, t −1.7 | +0.37 ± 0.60, tie |
+| act − base (no-perturbation control) | +0.25 ± 0.95, tie | −0.14 ± 0.52, tie |
+| wrong_stuck − stuck (sign control) | −1.70 ± 0.92, t −3.9 | +1.31 ± 0.82, t 3.3 |
+
+The pre-stick thirds are identical across arms (5.55 / 8.28), the built-in confound check. A
+camera frozen on a plausible bearing takes 43 % of the forager's eats under legacy trust,
+because a constant channel is the most predictable one in the room and `1/(err+ε)` hands it
+authority. With the activity term the frozen channel loses that authority in EMA time, scent
+steers, and 78 % of the lost eats come back; the residual against the intact base is inside
+its interval. The term costs nothing when nothing is wrong, and the wrong-sign arm is worse
+than doing nothing. **Verdict: `WORKING`, at n = 20 paired worlds, under a (d)-class
+perturbation, with an intact control and a sign control.** Re-use context: any fusion where a
+channel can freeze or go stale; the picrawler stack has no voter today, so nothing to carry
+there. Not a default: the operator's eye and the launcher decide promotion.
 
 ## Stage 3 — restore lost concepts
 
