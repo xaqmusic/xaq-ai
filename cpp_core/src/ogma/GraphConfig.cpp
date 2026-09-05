@@ -98,6 +98,9 @@ json runtime_to_json(RuntimeSpec const& rt) {
 
 } // namespace
 
+ParamValue     GraphConfig::param_from_json(nlohmann::json const& j) { return json_to_param(j); }
+nlohmann::json GraphConfig::param_to_json(ParamValue const& v)       { return ::ogma::param_to_json(v); }
+
 // --------------------------------------------------------------------------
 // GraphConfig::load_from_json
 // --------------------------------------------------------------------------

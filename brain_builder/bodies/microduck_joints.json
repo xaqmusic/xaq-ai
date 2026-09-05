@@ -1,0 +1,161 @@
+{
+  "body": "microduck",
+  "host": "mj_host",
+  "env_target": "microduck",
+  "title": "Microduck - joint level (mj_host --brain)",
+  "launch_hint": "./mj_host/run.sh brain --graph <config> [--seed N --secs S]",
+  "description": "The MuJoCo duck at the joints: the brain reads proprioception and publishes one ActionOut per policy joint (mj_host/src/OgmaBrainAdapter.cpp).",
+  "sources": [
+    {
+      "name": "joints",
+      "topic": "reality.proprio.joints",
+      "payload": "ProprioToken",
+      "dims": 14,
+      "description": "14 policy joint positions, normalised (kPolicyJoints order: left leg 5, neck/head 4, right leg 5)"
+    },
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 6,
+      "description": "projected gravity [g_x g_y g_z] + gyro [w_x w_y w_z] — the two channels the real robot publishes"
+    },
+    {
+      "name": "lean",
+      "topic": "reality.proprio.lean",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "signed fore/aft lean g_x, once per motor group (load_slots: 1)"
+    },
+    {
+      "name": "lean2",
+      "topic": "reality.proprio.lean2",
+      "payload": "ProprioToken",
+      "dims": 4,
+      "description": "pitch + roll per group, group-major [g0_pitch g0_roll g1_pitch g1_roll] (load_slots: 2)"
+    },
+    {
+      "name": "lean4",
+      "topic": "reality.proprio.lean4",
+      "payload": "ProprioToken",
+      "dims": 8,
+      "description": "pitch, roll and their rates ·0.3 per group, group-major (load_slots: 4)"
+    },
+    {
+      "name": "sense",
+      "topic": "reality.proprio.sense",
+      "payload": "ProprioToken",
+      "dims": 24,
+      "description": "the full IMU vector twice, group-major, 12 slots per group (load_slots: 12): pitch g_x, roll g_y, pitch rate ·0.3, roll rate ·0.3, yaw rate ·0.3, accel x/20, accel y/20, accel z/20, head-frame pitch, head-frame roll, head-CoM Δx/0.1, head-CoM Δy/0.1"
+    },
+    {
+      "name": "sense1",
+      "topic": "reality.proprio.sense1",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "the same 12 slots once, for a body-level consumer such as the regime EPM: pitch g_x, roll g_y, pitch rate ·0.3, roll rate ·0.3, yaw rate ·0.3, accel x/20, accel y/20, accel z/20, head-frame pitch, head-frame roll, head-CoM Δx/0.1, head-CoM Δy/0.1"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "left_hip_yaw",
+      "topic": "action.left_hip_yaw",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the left_hip_yaw servo target (kPolicyJoints)"
+    },
+    {
+      "name": "left_hip_roll",
+      "topic": "action.left_hip_roll",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the left_hip_roll servo target (kPolicyJoints)"
+    },
+    {
+      "name": "left_hip_pitch",
+      "topic": "action.left_hip_pitch",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the left_hip_pitch servo target (kPolicyJoints)"
+    },
+    {
+      "name": "left_knee",
+      "topic": "action.left_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the left_knee servo target (kPolicyJoints)"
+    },
+    {
+      "name": "left_ankle",
+      "topic": "action.left_ankle",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the left_ankle servo target (kPolicyJoints)"
+    },
+    {
+      "name": "neck_pitch",
+      "topic": "action.neck_pitch",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the neck_pitch servo target (kPolicyJoints)"
+    },
+    {
+      "name": "head_pitch",
+      "topic": "action.head_pitch",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the head_pitch servo target (kPolicyJoints)"
+    },
+    {
+      "name": "head_yaw",
+      "topic": "action.head_yaw",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the head_yaw servo target (kPolicyJoints)"
+    },
+    {
+      "name": "head_roll",
+      "topic": "action.head_roll",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the head_roll servo target (kPolicyJoints)"
+    },
+    {
+      "name": "right_hip_yaw",
+      "topic": "action.right_hip_yaw",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the right_hip_yaw servo target (kPolicyJoints)"
+    },
+    {
+      "name": "right_hip_roll",
+      "topic": "action.right_hip_roll",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the right_hip_roll servo target (kPolicyJoints)"
+    },
+    {
+      "name": "right_hip_pitch",
+      "topic": "action.right_hip_pitch",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the right_hip_pitch servo target (kPolicyJoints)"
+    },
+    {
+      "name": "right_knee",
+      "topic": "action.right_knee",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the right_knee servo target (kPolicyJoints)"
+    },
+    {
+      "name": "right_ankle",
+      "topic": "action.right_ankle",
+      "payload": "ActionOut",
+      "description": "ActionOut.accel drives the right_ankle servo target (kPolicyJoints)"
+    }
+  ],
+  "reads": [
+    {
+      "name": "regime",
+      "topic": "reality.proprio.regime",
+      "payload": "RealityToken",
+      "description": "the host reads the regime EPM's token (winner/TLE) for the recovery hand-off and the log"
+    }
+  ],
+  "events": [
+    {
+      "name": "reset",
+      "topic": "events.reset",
+      "event_type": "reset",
+      "description": "fired when the recovery harness stands the body back up"
+    }
+  ]
+}

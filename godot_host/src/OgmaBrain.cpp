@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ogma/InProcessBus.hpp"
+#include "ogma/LiveGraph.hpp"
 #include "ogma/OgmaInstance.hpp"
 #include "ogma/GraphConfig.hpp"
 #include "ogma/Module.hpp"
@@ -197,6 +198,7 @@ bool OgmaBrain::setup(String const& config_path) {
         instance_ = std::make_unique<ogma::OgmaInstance>(
             std::move(cfg),
             std::make_unique<ogma::InProcessBus>());
+        live_graph_ = std::make_unique<ogma::LiveGraph>(*instance_, std::string(fs_path.utf8().get_data()));
         initialized_ = true;
         UtilityFunctions::print("OgmaBrain: instance ready (", config_path, ")");
 
@@ -218,6 +220,24 @@ bool OgmaBrain::setup(String const& config_path) {
         UtilityFunctions::print("OgmaBrain: inspector control=", control_port, " diag=", diag_port);
         control_server_->set_command_handler(
             [this](nlohmann::json const& req) -> nlohmann::json {
+                // The brain builder's patch verb: parse and trial-construct
+                // BEFORE the instance lock (a large module takes milliseconds
+                // to set up and the tick thread must not wait), enqueue under it.
+                if (req.value("verb", std::string()) == "apply_patch") {
+                    ogma::GraphPatchBatch batch;
+                    try {
+                        batch = ogma::LiveGraph::batch_from_json(req.value("ops", nlohmann::json::array()),
+                                                                 req.value("source", std::string("builder")));
+                    } catch (std::exception const& e) {
+                        return {{"status","error"},{"message", e.what()}};
+                    }
+                    auto errors = ogma::LiveGraph::validate_offline(batch);
+                    if (!errors.empty()) return {{"status","error"},{"message", errors.front()},{"errors", errors}};
+                    std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
+                    if (!instance_ || !live_graph_) return {{"status","error"},{"message","brain not initialised"}};
+                    try { return live_graph_->apply(std::move(batch)); }
+                    catch (std::exception const& e) { return {{"status","error"},{"message", e.what()}}; }
+                }
                 // Serialise against tick-thread mutation of the modules
                 // vector (apply_remove etc).  Without this lock, a verb
                 // like list_modules / module_snapshot can iterate or
@@ -237,8 +257,15 @@ bool OgmaBrain::setup(String const& config_path) {
                                 {"type", std::string(m->type_name())},
                             });
                         }
-                        return {{"status","ok"}, {"modules", mods}};
+                        return {{"status","ok"},{"modules",mods},{"graph_version", int64_t(live_graph_ ? live_graph_->version() : 0)}};
                     }
+                    if (verb == "get_graph") {
+                        if (!live_graph_) return {{"status","error"},{"message","brain not initialised"}};
+                        return live_graph_->get_graph();
+                    }
+                    if (verb == "graph_version")
+                        return {{"status","ok"},{"graph_version", int64_t(live_graph_ ? live_graph_->version() : 0)},
+                                {"module_count", instance_->modules().size()}};
                     if (verb == "module_snapshot") {
                         std::string id = req.value("id", std::string());
                         auto* m = instance_->module(id);
@@ -286,8 +313,10 @@ bool OgmaBrain::setup(String const& config_path) {
                         ogma::GraphPatchBatch batch;
                         batch.source = "tcp";
                         batch.ops.emplace_back(std::move(s));
-                        auto batch_id = instance_->enqueue_hot_patch(std::move(batch));
-                        return {{"status","ok"},{"batch_id", int64_t(batch_id)},{"id",id},{"key",key}};
+                        nlohmann::json r = live_graph_ ? live_graph_->apply(std::move(batch))
+                                                       : nlohmann::json{{"batch_id", int64_t(instance_->enqueue_hot_patch(std::move(batch)))}};
+                        return {{"status","ok"},{"batch_id", r.value("batch_id", int64_t(0))},{"id",id},{"key",key},
+                                {"graph_version", r.value("graph_version", int64_t(0))}};
                     }
                     return {{"status","error"},{"message","unknown verb: "+verb}};
                 } catch (std::exception const& e) {
@@ -2052,9 +2081,14 @@ Dictionary OgmaBrain::apply_patch(Dictionary const& patch) {
             }
         }
 
-        auto batch_id = instance_->enqueue_hot_patch(std::move(batch));
+        int64_t batch_id = 0;
+        {
+            std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
+            if (live_graph_) batch_id = live_graph_->apply(std::move(batch)).value("batch_id", int64_t(0));
+            else             batch_id = int64_t(instance_->enqueue_hot_patch(std::move(batch)));
+        }
         result["success"]  = true;
-        result["batch_id"] = int64_t(batch_id);
+        result["batch_id"] = batch_id;
     } catch (std::exception const& e) {
         result["error"] = String(e.what());
     }

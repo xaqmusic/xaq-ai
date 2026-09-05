@@ -1,0 +1,74 @@
+{
+  "body": "microduck",
+  "host": "mj_host",
+  "env_target": "microduck",
+  "title": "Microduck - intent level (mj_host --level2)",
+  "launch_hint": "./mj_host/run.sh launcher → a level-2 preset, or ogma_mjhost --level2 --graph <config>",
+  "description": "The duck above Pollen's walking policy: the brain senses body velocity and publishes a twist intent (mj_host/src/IntentAdapter.cpp).",
+  "sources": [
+    {
+      "name": "intent",
+      "topic": "reality.proprio.intent",
+      "payload": "ProprioToken",
+      "dims": 3,
+      "description": "the sensed body velocity in the walker's command units [vx vy vyaw], each unit-clamped"
+    },
+    {
+      "name": "imu",
+      "topic": "reality.proprio.imu",
+      "payload": "ProprioToken",
+      "dims": 6,
+      "description": "projected gravity [g_x g_y g_z] + gyro [w_x w_y w_z]"
+    },
+    {
+      "name": "sense",
+      "topic": "reality.proprio.sense",
+      "payload": "ProprioToken",
+      "dims": 16,
+      "description": "12 load slots + 4 ToF: g_x, g_y, pitch rate ·0.3, roll rate ·0.3, yaw rate ·0.3, accel x/20, y/20, z/20, sensed vx, sensed vy, heading deviation from its 60 s average /π, map TLE, tof[0..3]"
+    },
+    {
+      "name": "place_in",
+      "topic": "reality.proprio.place_in",
+      "payload": "ProprioToken",
+      "dims": 12,
+      "description": "the map EPM's input: the place signature the adapter composes"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "vx",
+      "topic": "action.vx",
+      "payload": "ActionOut",
+      "description": "forward velocity command, unit-scaled to the walker's range"
+    },
+    {
+      "name": "vy",
+      "topic": "action.vy",
+      "payload": "ActionOut",
+      "description": "lateral velocity command"
+    },
+    {
+      "name": "vyaw",
+      "topic": "action.vyaw",
+      "payload": "ActionOut",
+      "description": "yaw-rate command"
+    }
+  ],
+  "reads": [
+    {
+      "name": "place",
+      "topic": "reality.proprio.place",
+      "payload": "RealityToken",
+      "description": "the host reads the map EPM's token: winner = place id, TLE = map surprise (slot 11 of sense)"
+    }
+  ],
+  "events": [
+    {
+      "name": "reset",
+      "topic": "events.reset",
+      "event_type": "reset",
+      "description": "fired when the recovery harness stands the body back up"
+    }
+  ]
+}

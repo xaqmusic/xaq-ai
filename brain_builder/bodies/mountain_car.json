@@ -1,0 +1,47 @@
+{
+  "body": "mountain_car",
+  "host": "godot",
+  "env_target": "mountain_car",
+  "title": "Mountain car (Godot)",
+  "launch_hint": "godot_host launcher -> mountain car",
+  "description": "The mountain car in the Godot host (godot_host/project/scripts/mc_body.gd).",
+  "sources": [
+    {
+      "name": "mc_state",
+      "topic": "reality.proprio.mc_state",
+      "payload": "ProprioToken",
+      "dims": 2,
+      "description": "pos/MAX_POS, vel/MAX_SPEED - normalised state"
+    },
+    {
+      "name": "energy",
+      "topic": "reality.proprio.energy",
+      "payload": "ProprioToken",
+      "dims": 1,
+      "description": "body energy [0,1]; drains, refills on goal hit"
+    }
+  ],
+  "sinks": [
+    {
+      "name": "force",
+      "topic": "action.out",
+      "payload": "ActionOut",
+      "description": "accel in [-1,+1]; the sign pushes left, none, or right"
+    }
+  ],
+  "reads": [],
+  "events": [
+    {
+      "name": "hit",
+      "topic": "events.hit",
+      "event_type": "hit",
+      "description": "goal reached at pos >= 0.5"
+    },
+    {
+      "name": "failed",
+      "topic": "events.failed",
+      "event_type": "failed",
+      "description": "episode timed out without reaching the goal"
+    }
+  ]
+}

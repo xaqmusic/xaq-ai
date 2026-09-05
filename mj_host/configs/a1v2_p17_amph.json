@@ -1,0 +1,215 @@
+{
+  "metadata": {
+    "name": "A1v2 \u00b7 gain-gap C: amplitude homeostat",
+    "description": "Gain-gap study arm (2026-09-01). Question: the learner's effective feedback gain stalls at kp<~2 where the probe's band is 5-80, while clip_duty 0.3-0.45 means the tanh operating point saturates constantly \u2014 and BOTH learning rules are scaled by G=1-tanh^2, which vanishes exactly there.  Hypothesis: the storm freezes the growth of the very columns that would quiet it; quieting is the enabler, not just efficiency.  THIS ARM: the existing per-leg amplitude homeostat driven toward a QUIET target (amp_homeo_gain 0.02, amp_target 0.1) \u2014 regulation of the flail by the module's own machinery rather than by init constants.",
+    "env_target": "microduck",
+    "phase_tag": "A1 (first brain)",
+    "scaffolds_active": [
+      "alpha_stand.onnx via the A2 recovery harness \u2014 drives only while the body is down, with all learning rates zeroed"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "legs_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.left_hip_yaw",
+          "action.left_hip_roll",
+          "action.left_hip_pitch",
+          "action.left_knee",
+          "action.left_ankle",
+          "action.right_hip_yaw",
+          "action.right_hip_roll",
+          "action.right_hip_pitch",
+          "action.right_knee",
+          "action.right_ankle"
+        ],
+        "output_topics": [
+          "reality.motor_limb.left",
+          "reality.motor_limb.right"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          9.0,
+          10.0,
+          11.0,
+          12.0,
+          13.0
+        ],
+        "group_size": 5,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 12
+      }
+    },
+    {
+      "id": "head_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.joints",
+        "action_topics": [
+          "action.neck_pitch",
+          "action.head_pitch",
+          "action.head_yaw",
+          "action.head_roll"
+        ],
+        "output_topics": [
+          "reality.motor_limb.head"
+        ],
+        "proprio_indices": [
+          5.0,
+          6.0,
+          7.0,
+          8.0
+        ],
+        "group_size": 4,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 12
+      }
+    },
+    {
+      "id": "motor_epm_legs",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.left",
+          "reality.motor_limb.right"
+        ],
+        "action_topics": [
+          "action.left_hip_yaw",
+          "action.left_hip_roll",
+          "action.left_hip_pitch",
+          "action.left_knee",
+          "action.left_ankle",
+          "action.right_hip_yaw",
+          "action.right_hip_roll",
+          "action.right_hip_pitch",
+          "action.right_knee",
+          "action.right_ankle"
+        ],
+        "n_legs": 2,
+        "motor_dim": 5,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.1,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 1234,
+        "babble_ticks": 3000,
+        "babble_scale": 0.25,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.05,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.02,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_prior_indices": [
+          -12.0,
+          -11.0,
+          -10.0,
+          -9.0
+        ],
+        "state_prior_targets": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_gain": 1.0,
+        "state_prior_lr": 0.1,
+        "state_prior_h_lr": 0.0,
+        "state_model_lr": 0.05,
+        "model_trace": 0.15,
+        "reset_breaks_model_pairing": 1.0,
+        "babble_isolate": 1.0,
+        "babble_hold": 6,
+        "amp_target": 0.1
+      }
+    },
+    {
+      "id": "motor_epm_head",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.head"
+        ],
+        "action_topics": [
+          "action.neck_pitch",
+          "action.head_pitch",
+          "action.head_yaw",
+          "action.head_roll"
+        ],
+        "n_legs": 1,
+        "motor_dim": 4,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.1,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 5678,
+        "babble_ticks": 3000,
+        "babble_scale": 0.25,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.05,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.02,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_prior_indices": [
+          -12.0,
+          -11.0,
+          -10.0,
+          -9.0
+        ],
+        "state_prior_targets": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_gain": 1.0,
+        "state_prior_lr": 0.1,
+        "state_prior_h_lr": 0.0,
+        "state_model_lr": 0.05,
+        "model_trace": 0.15,
+        "reset_breaks_model_pairing": 1.0,
+        "babble_isolate": 1.0,
+        "babble_hold": 7,
+        "amp_target": 0.1
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,105 @@
+{
+  "metadata": {
+    "name": "R22 \u00b7 level-2 heading regulation \u2014 keep the heading I have been keeping (+ walk straight): back within 3\u00b0 of pre-shove heading 20/20 at 2 N",
+    "description": "Phase 1e of the intent boundary (design doc \u00a716.4): the same module code one level up. The 'motors' are the three twist commands (vx, vy, vyaw) to Pollen's walking policy, the 'senses' are the body's own velocity from contact odometry and the gyro, normalised by the trained command ranges (0.4, 0.3, 1.0). Identification by held twist pulses (babble_hold 75 ticks = 1.5 s, scale 0.8 of range \u2014 above the walker's ~0.25 m/s standing regime), one motor at a time, alternating sign. Judged on the identified A: the velocity rows against the commands must be positive on the diagonal and dominant, per axis, against the walker's measured response (\u00a716.2). No prior, no controller learning: identification only.",
+    "env_target": "microduck",
+    "phase_tag": "intent boundary 1e",
+    "launcher_rank": 1022,
+    "scaffolds_active": [
+      "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "twist_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.intent",
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "output_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 12
+      }
+    },
+    {
+      "id": "motor_epm_intent",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "n_legs": 1,
+        "motor_dim": 3,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.0,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 9090,
+        "babble_ticks": 30000,
+        "babble_scale": 0.8,
+        "babble_isolate": 1.0,
+        "babble_hold": 75,
+        "babble_owns_a": 1.0,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.02,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_model_lr": 0.05,
+        "model_trace": 0.05,
+        "reset_breaks_model_pairing": 1.0,
+        "state_prior_gain": 1.0,
+        "consolidate_gain": 0.0,
+        "state_prior_indices": [
+          0,
+          6,
+          -2
+        ],
+        "state_prior_targets": [
+          0.75,
+          0.0,
+          0.0
+        ],
+        "state_prior_lr": 0.1,
+        "consolidate_n": 0
+      }
+    }
+  ],
+  "edges": [],
+  "description": "R22 (level-2 heading prior: face where I started \u2014 odometry yaw \u2192 0, plus walk straight (prior-only)), from a1v2_r21_l2_straight.json: R21 holds the yaw RATE at zero, which any walker does in the long run; a heading is a memory, and this arm gives the brain one: the odometry's own yaw (boot frame) as sense slot 10, with a prior at zero. The (d) test: 3 N shoves every 40 s during the walk turn the body; the heading prior should turn it back, the rate-only prior and the open-loop walker should not. MEASURED (2026-09-03, design doc \u00a716.6): the heading sense is the odometry yaw's deviation from its own slow running average (tau 60 s) \u2014 a wrapped angle, a sine, and an unwrapped clamped angle each failed to identify; this one gives A(heading, vyaw) +0.0034. Twenty 2 N shoves during the walk: peak 17-20 deg, back within 3-4 deg at +20 s, 0 rescues, 0.24 m/s; the open-loop walker is 109 deg off and never returns."
+}

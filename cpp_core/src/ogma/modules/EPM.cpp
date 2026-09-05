@@ -124,6 +124,15 @@ ParamSchema EPM::params_schema() const {
         {"mitosis_error_threshold", ParamMutability::HotMutable, "Post-bake mean error trigger", ParamValue{0.30}},
         {"mitosis_check_interval",  ParamMutability::HotMutable, "Visits between mitosis checks", ParamValue{int64_t{50}}},
         {"stale_prune_enabled",     ParamMutability::HotMutable, "GNG stale-prune",             ParamValue{true}},
+        {"health_death_spares_baked", ParamMutability::HotMutable,
+         "Exempt BAKED nodes from the GNG health-death sweep (2026-09-01).  The health system "
+         "silently removed baked-immunity: a long perturbation starves an earned node of "
+         "visits and its health decays to death in minutes — the operator's observed "
+         "prune-then-relearn cascade on the picrawler, and measured on the microduck regime "
+         "EPM as 25/41 node ids dead in 50 min with the standing regime's identity churning "
+         "1→16→29 (orphaning every consumer keyed on winner_id).  For a REGIME vocabulary — "
+         "permanent facts about the body — earned nodes should not be forgotten for a long "
+         "absence.  false = legacy, byte-identical.", ParamValue{false}},
         {"stale_window_factor",     ParamMutability::HotMutable, "Stale prune window",          ParamValue{12000.0}},
         {"subtract_descending_prediction", ParamMutability::HotMutable, "Subtract prediction.<m>", ParamValue{true}},
         {"normalize_residual", ParamMutability::ConstructionOnly,
@@ -246,6 +255,7 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_error_threshold", [&](auto const& v){ gng_cfg.mitosis_error_threshold = float(get_double(v, "mitosis_error_threshold")); });
     apply_param(params, "mitosis_check_interval",  [&](auto const& v){ gng_cfg.mitosis_check_interval  = int(get_int(v, "mitosis_check_interval")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
+    apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
     apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
     apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
@@ -366,6 +376,7 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mitosis_error_threshold") { base_mitosis_error_threshold_ = float(get_double(value, k)); gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_); }
     else if (k == "mitosis_check_interval")  gng_->set_mitosis_check_interval(int(get_int(value, k)));
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
+    else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
     else if (k == "modality_group" || k == "modality_name" || k == "encoder_kind"
           || k == "input_topic"    || k == "projection_dim" || k == "master_seed"

@@ -111,6 +111,19 @@ public:
         float insertion_autotune_quantile = 0.30f;
         bool  stale_prune_enabled = true;
         float stale_window_factor = 12000.0f; // absolute steps (~400s at 30fps)
+        // 2026-09-01 (guarded; default false = byte-identical everywhere): exempt
+        // BAKED nodes from the health-death sweep.  The health system replaced
+        // binary baked-immunity with a smooth gradient — and thereby silently
+        // removed the "baked = permanent" contract the header still promises:
+        // during a long perturbation (fall, inversion, rescue) an unvisited baked
+        // node's health decays to the death threshold in minutes, the operator's
+        // observed prune-then-relearn cascade.  Measured on the microduck regime
+        // EPM: 25 of 41 node ids dead within 50 minutes, the standing regime's
+        // identity churning 1→16→29 — which orphans any consumer keyed by
+        // winner_id.  A REGIME vocabulary is a set of permanent facts about the
+        // body; earned nodes should not be forgotten for the crime of a long
+        // absence.
+        bool  health_death_spares_baked = false;
         // Mitosis Gatekeeper
         bool  mitosis_enabled         = true;
         float mitosis_error_threshold = 0.30f;
@@ -203,6 +216,7 @@ public:
     // ---------------------------------------------------------------------------
 
     void set_stale_prune_enabled(bool enabled) { cfg_.stale_prune_enabled = enabled; }
+    void set_health_death_spares_baked(bool v) { cfg_.health_death_spares_baked = v; }
     void set_stale_window_factor(float factor) { cfg_.stale_window_factor = factor; }
     void set_min_insertion_error(float e)      { cfg_.min_insertion_error = e; }
 

@@ -18,7 +18,7 @@ import argparse
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSettings
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSettings, QTimer
 from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QListWidget, QListWidgetItem, QSplitter,
@@ -165,6 +165,15 @@ class InspectorWindow(QMainWindow):
         refresh_btn = QPushButton("Connect / Refresh")
         refresh_btn.setToolTip("Apply the host fields and re-list the brain's modules")
         refresh_btn.clicked.connect(self._refresh_modules)
+        # The brain builder (or the Godot panel) can add and remove modules
+        # while this window is open: poll the host's graph version and
+        # re-list on change, keeping the current subscription when its
+        # module survived.
+        self._graph_version = None
+        self._version_timer = QTimer(self)
+        self._version_timer.setInterval(2000)
+        self._version_timer.timeout.connect(self._sync_list_if_changed)
+        self._version_timer.start()
         rate_row.addWidget(refresh_btn)
         left_layout.addLayout(rate_row)
 
@@ -227,6 +236,11 @@ class InspectorWindow(QMainWindow):
         self._settings.setValue("control_port", c_port)
         self._settings.setValue("diag_host", d_host)
         self._settings.setValue("diag_port", d_port)
+        # Connect may have re-pointed us at a DIFFERENT brain, whose graph version is
+        # unrelated to the one we were tracking.  Drop the baseline so the next poll
+        # re-establishes it silently instead of reporting a live edit that never
+        # happened — and overwriting the endpoint the operator just asked to see.
+        self._graph_version = None
         try:
             self.control.reconnect()
             resp = self.control.call("list_modules")
@@ -260,6 +274,59 @@ class InspectorWindow(QMainWindow):
             if prior_module_id is not None and m.get("id") == prior_module_id:
                 self._list.setCurrentItem(item)
         self._set_status(f"{len(self._modules)} modules — control {c_host}:{c_port}, diag {d_host}:{d_port}")
+
+    def _sync_list_if_changed(self) -> None:
+        """Re-list the modules when the host's graph version moved (a live
+        edit from the brain builder).  Hosts without the verb answer with
+        an error and are left alone."""
+        try:
+            resp = self.control.call("graph_version")
+        except Exception:
+            return
+        if resp.get("status") != "ok":
+            return
+        version = resp.get("graph_version")
+        if version == self._graph_version:
+            return
+        first = self._graph_version is None
+        self._graph_version = version
+        if first:
+            return
+        try:
+            listing = self.control.call("list_modules")
+        except Exception as e:
+            self._set_status(f"control error: {e}")
+            return
+        if listing.get("status") != "ok":
+            return
+        modules = list(listing.get("modules", []))
+        ids = {m.get("id") for m in modules}
+        self._modules = modules
+        self._list.clear()
+        current_item = None
+        for m in modules:
+            item = QListWidgetItem(f"{m.get('id')}   ({m.get('type')})")
+            item.setData(Qt.ItemDataRole.UserRole, m)
+            self._list.addItem(item)
+            if m.get("id") == self._current_module_id:
+                current_item = item
+        if self._current_module_id is not None and self._current_module_id not in ids:
+            # The module we were watching was removed on the host.
+            self._current_sub_id = None
+            self._current_topic_prefix = None
+            self._current_module_id = None
+            if self._current_widget is not None:
+                self._right.removeWidget(self._current_widget)
+                self._current_widget.deleteLater()
+                self._current_widget = None
+                self._right.setCurrentWidget(self._placeholder)
+            self._set_status(f"{len(modules)} modules (graph v{version}; the watched module was removed)")
+            return
+        if current_item is not None:
+            self._list.blockSignals(True)
+            self._list.setCurrentItem(current_item)
+            self._list.blockSignals(False)
+        self._set_status(f"{len(modules)} modules (graph v{version})")
 
     def _on_module_activated(self, item: QListWidgetItem) -> None:
         m = item.data(Qt.ItemDataRole.UserRole) or {}

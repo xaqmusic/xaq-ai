@@ -108,6 +108,16 @@ ParamSchema JointSensorimotorBridge::params_schema() const {
         {"load_topic",          ParamMutability::ConstructionOnly,
             "Optional per-leg LOAD channel (e.g. reality.proprio.foot_load) appended as the trailing element of every output vector, so a downstream forward model can learn HOW ITS OWN ACTIONS REDISTRIBUTE WEIGHT.  MotorEPMv2 sizes its model from the arriving vector and guards on `>= 3*motor_dim`, so the extra element is learned automatically and existing indices are unchanged.  ⚠ The emitted width is fixed by whether this is CONFIGURED, not by whether a value has arrived — MotorEPMv2 latches its dimensionality on the first frame and drops any frame of a different width, so a late-arriving topic would otherwise silently kill the consumer.  Empty = off, byte-identical.",
             ParamValue{std::string("")}},
+        {"load_slots",          ParamMutability::ConstructionOnly,
+            "Number of trailing load elements appended PER OUTPUT GROUP (2026-08-31, widened "
+            "for the microduck state prior: a fore/aft-only lean prior scored a duck lying on "
+            "its SIDE as perfectly upright — g_x is 0 both standing and side-lying — and the "
+            "A/B's anti-blind tilt metrics caught exactly that degenerate.  Two slots carry "
+            "signed pitch AND roll, each linear in the model, closing the blind spot).  The "
+            "load token's layout is values[group*load_slots + s]; the s elements are appended "
+            "in order after the [pos,act,delta] triplets.  1 = the historical single slot, "
+            "byte-identical.",
+            ParamValue{int64_t(1)}, ParamValue{int64_t(1)}, ParamValue{int64_t(16)}},
         {"range_probe_ticks",   ParamMutability::HotMutable,
             "INSTRUMENT, not a lever.  When > 0, accumulate per-output per-dim min/max/mean/std of the published [pos,action,delta] channels and print one `BRIDGE_RANGE` JSON line to stdout every N ticks (cumulative, so the LAST line is the whole-run answer).  Exists to set a downstream RBF EPM's `dim_min`/`dim_max` from MEASUREMENT rather than assumption: pos/action are ~[-1,1] but delta is a per-tick difference an order of magnitude smaller, and the EPM's default [-1,1] range would crush the velocity channels (CLAUDE.md §0 rule 2).  0 = off: nothing accumulated, nothing printed, byte-identical.",
             ParamValue{int64_t{0}}},
@@ -171,6 +181,8 @@ ParamMap JointSensorimotorBridge::current_params() const {
     for (int i : proprio_indices_) idx.push_back(double(i));
     p["proprio_indices"]     = ParamValue{idx};
     p["sensor_label_prefix"] = ParamValue{sensor_label_prefix_};
+    p["load_topic"]          = ParamValue{load_topic_};
+    p["load_slots"]          = ParamValue{int64_t(load_slots_)};
     return p;
 }
 
@@ -200,6 +212,10 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
         else throw std::invalid_argument("JointSensorimotorBridge: group_size must be integer");
     });
     apply_param(params, "load_topic", [&](auto const& v){ load_topic_ = get_string(v, "load_topic"); });
+    apply_param(params, "load_slots", [&](auto const& v){
+        if (auto p = std::get_if<int64_t>(&v)) load_slots_ = std::max(1, int(*p));
+        else if (auto d = std::get_if<double>(&v)) load_slots_ = std::max(1, int(*d));
+    });
     apply_param(params, "range_probe_ticks", [&](auto const& v){
         if (auto p = std::get_if<int64_t>(&v)) range_probe_ticks_ = std::max(0, int(*p));
     });
@@ -256,7 +272,7 @@ void JointSensorimotorBridge::on_setup(Bus* bus, ParamMap const& params) {
     sub_ids_.push_back(bus_->subscribe(proprio_input_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ this->handle_proprio(p); }));
     if (!load_topic_.empty()) {
-        last_load_.assign(output_topics_.size(), 0.0f);
+        last_load_.assign(output_topics_.size() * size_t(load_slots_), 0.0f);
         sub_ids_.push_back(bus_->subscribe(load_topic_, SubscriptionKind::Direct,
             [this](std::string_view, MessagePtr p){
                 if (!input_allowed(p->producer_id)) return;
@@ -327,7 +343,7 @@ void JointSensorimotorBridge::tick(uint64_t tick_id) {
     for (int o = 0; o < n_outputs; ++o) {
         int base    = o * group_size_;
         int dim_per = 3;
-        const int load_slots = load_topic_.empty() ? 0 : 1;
+        const int load_slots = load_topic_.empty() ? 0 : load_slots_;
         int dim_out = dim_per * group_size_ + load_slots;
 
         auto out = std::make_shared<ProprioToken>();
@@ -377,9 +393,11 @@ void JointSensorimotorBridge::tick(uint64_t tick_id) {
                 range_probe_accum(o, g * dim_per + 2, delta);
             }
         }
-        if (load_slots > 0)
-            out->values(dim_per * group_size_) =
-                (o < int(last_load_.size())) ? last_load_[o] : 0.0f;
+        for (int sl = 0; sl < load_slots; ++sl) {
+            const int k = o * load_slots + sl;
+            out->values(dim_per * group_size_ + sl) =
+                (k < int(last_load_.size())) ? last_load_[size_t(k)] : 0.0f;
+        }
         bus_->publish(output_topics_[o], out);
         ++total_publishes_;
     }

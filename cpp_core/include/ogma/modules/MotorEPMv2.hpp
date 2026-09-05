@@ -1256,6 +1256,32 @@ private:
         bool                initialized = false;
         int                 n           = 0;     // state dim
         Eigen::MatrixXf     A;                    // n x m  (motor → sensor)
+        Eigen::MatrixXf     Bx;                   // n x n  state-transition term (empty unless state_model_lr > 0)
+        Eigen::VectorXf     ytrace;               // servo-filtered command (empty unless model_trace > 0)
+        Eigen::VectorXf     pulse_x0;             // state at pulse start (babble_isolate bookkeeping)
+        int                 pulse_motor = -1;     // which motor the current pulse drives
+        float               pulse_sign  = 0.0f;
+        Eigen::VectorXf     pulse_dplus;          // completed + window's Δx/hold (awaiting its − twin)
+        int                 pulse_dplus_motor = -1;
+        Eigen::MatrixXf     Cp;                   // the prior's OWN controller (empty unless state_prior_split)
+        Eigen::VectorXf     hr;                   // reach bias (consolidate_reach mode 3): written only in
+                                                  // consolidated quiet (rate ∝ c), applied as c·hr — ramps in
+                                                  // with consolidation, fades the moment a fall collapses c
+        // R1 regime banks (empty unless regime_topic set): per-regime self-models.
+        // L.A/Bx/b remain the ACTIVE working copy; banks swap in/out on regime
+        // change, so every model path reads/writes exactly as before.
+        struct ModelBank { Eigen::MatrixXf A, Bx; Eigen::VectorXf b; float tle_ema = 0.0f;
+                           float sp_err = -1.0f;   // per-regime prior-error EMA (−1 = unseen)
+                           int64_t samples = 0;
+                           // R3 (regime_c_banks): the regime's own CONTROLLER and its
+                           // earned permanence.  cons_c/gate_ema are carried on leg 0.
+                           Eigen::MatrixXf C; Eigen::VectorXf h, hr;
+                           float cons_c = 0.0f; float gate_ema = 0.0f; };
+        std::vector<ModelBank> banks;
+        int                 active_bank = -1;
+        float               calm_state = 1.0f;    // the annealing ratchet (slow attack, fast release)
+        float               calm_peak  = 0.1f;    // decaying peak-hold of the prior error (the reference)
+        float               last_mult  = 1.0f;    // the calm multiplier the assembly last applied
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
         Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning (posture feed-forward)
@@ -1511,6 +1537,62 @@ private:
     double lookahead_mode_ = 0.0;    // 0 = fixed point (true lookahead), 1 = prev-action
     double lookahead_null_ = 0.0;    // 1 = drop A*y (control: is it the DYNAMICS?)
     float  la_dev_ema_     = 0.0f;   // ||x_eff - x||, the consumer check
+    // ── STATE-SPACE PRIOR (2026-08-31, the microduck lever).  A soft prior on
+    // ARBITRARY state indices (e.g. the bridge's appended load slot: predicted
+    // lean = 0).  TWO coupled halves, both gated by state_prior_gain (see the use
+    // sites and test_state_prior for why the keyframe socket's ξ̃-replacement is
+    // NOT the mechanism — the HK dC update is sign-blind and amplifies the error):
+    //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
+    //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
+    std::vector<double> state_prior_indices_;   // state indices; NEGATIVE = from the end (−1 = last)
+    std::vector<double> state_prior_targets_;   // target values x*, parallel to indices
+    double state_prior_gain_    = 0.0;          // weight w ∈ [0,1]; 0 = off, byte-identical
+    double state_prior_lr_     = 0.1;           // fraction of the GN-normalised correction per tick (C half)
+    double state_prior_h_lr_   = -1.0;          // h half's rate; -1 = follow state_prior_lr, 0 = C-only
+    double state_model_lr_     = 0.0;           // Bx learning rate; 0 = no state term, byte-identical
+    double model_trace_        = 0.0;           // EMA rate β of the command trace; 0 = raw prev_y, byte-identical
+    double reset_breaks_pairing_ = 0.0;         // 1 = reset invalidates model pairing; 0 = bug-compatible
+    double babble_isolate_       = 0.0;         // 1 = one-motor held-pulse babble; 0 = legacy white
+    int    babble_hold_          = 6;           // held-pulse ticks for babble_isolate
+    float  state_prior_err_ema_ = 0.0f;         // telemetry: mean |x[idx] − x*| (EMA; DECAYS when off)
+    float  state_prior_err_long_ = 0.0f;        // slow EMA of the same (the calm reference scale)
+    double state_prior_calm_    = 0.0;          // exploration-precision annealing strength; 0 = off
+    std::vector<double> state_prior_calm_indices_;  // the key's own indices (empty = all prior indices)
+    double state_prior_calm_fixed_ = 0.0;       // >0 = pin the multiplier (designed gate, tuned magnitude)
+    double state_prior_split_  = 0.0;           // 1 = prior writes its OWN matrix Cp; HK keeps C
+    double state_prior_damping_ = 0.0;          // L2 brake on Cp ALONE (the split's whole point)
+    // R1: the regime socket
+    std::string regime_topic_;                  // RealityToken source; empty = banks off, byte-identical
+    double babble_owns_a_ = 0.0;                // 1 = the babble's paired-difference estimator owns A forever
+    double state_prior_calm_mode_ = 0.0;        // R2: 0 = continuous key (legacy), 1 = regime-keyed
+    double consolidate_gain_ = 0.0;             // earned consolidation strength; 0 = off
+    float  consolidate_c_    = 0.0f;            // the consolidation state ∈ [0,1]
+    double consolidate_n_    = 0.0;             // gate reads only the FIRST N prior indices; 0 = all (legacy)
+    double state_prior_gate_weight_ = 1.0;      // precision of the gate (attitude) subset's descent; 1 = byte-identical
+    double consolidate_spares_prior_ = 0.0;     // >0: the prior's own descent survives consolidation
+    double consolidate_reach_ = 0.0;            // >0: indices ≥ consolidate_n engage at lw·c, with h (reach terms)
+    double consolidate_reach_lr_ = 0.0;         // mode 5's hr write rate (µ-rate; 0 = hr never writes)
+    double regime_c_banks_ = 0.0;               // R3: bank the CONTROLLER (C,h,hr + earned c) per regime
+    double consolidate_calm_ticks_ = 1500.0;    // no-fall ticks required before c may ramp (default = legacy 30 s)
+    double consolidate_down_rate_ = 0.01;       // c's per-tick decay when unsatisfied (default = legacy τ~2s)
+    double consolidate_hold_ = 0.0;             // 1 = three-state ratchet (ramp/hold/decay); 0 = legacy two-state
+    double calm_exempt_n_ = 0.0;                // calm exemption covers only the first N prior indices; 0 = all
+    double ctrl_damping_lr_scaled_ = 0.0;       // 1 = weight decay anneals with learning (rests when consolidated)
+    double consolidate_rests_act_ = 0.0;        // >0: the COMMAND's act (efference) input scales by 1−gain·c
+    float  reach_lw_last_ = 0.0f;               // telemetry: the reach terms' current effective lw
+    float  state_prior_gate_ema_ = 0.0f;        // satisfaction EMA over the gate subset (consolidate_n > 0)
+    float  gate_err_inst_ = 0.0f;               // the gate subset's INSTANT error (0 while the prior is off)
+    float  sp_err_peak_      = 0.0f;            // decaying peak of the prior error (the reference)
+    int    regime_banks_   = 6;                 // bank slots (last slot = shared overflow)
+    int    regime_winner_  = -1;                // latest winner_id from the token
+    std::vector<int> bank_of_winner_;           // winner_id -> bank slot, first-seen order
+    int64_t bank_switches_ = 0;                 // §3.2 consumer counter
+    double regime_dwell_ = 0.0;                 // ticks a new slot must persist before a swap (0 = immediate)
+    int    pending_slot_  = -1;                 // dwell bookkeeping (leg-0 driven, shared)
+    int    pending_count_ = 0;
+    int    state_prior_applied_ = 0;
+    float  calm_mult_ = 1.0f;                   // last applied annealing multiplier (diag)            // indices that actually resolved last controller tick —
+                                                // disambiguates "satisfied (err→0)" from "never in range"
     double intent_yaw_gain_ = 1.0;                  // 0 = progress-over-ground only
     // ── STRIDE-PROFILE PREDICTION (intent_rhythm_gain).  A constant v* is a target a
     // legged body physically CANNOT hold: it advances in pulses, so a level-seeking error
