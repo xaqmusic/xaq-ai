@@ -16,8 +16,10 @@ metadata per the naming convention documented at the top of that allowlist
 (name = "ROLE — mechanism · what-you'll-see"; description leads with "WATCH:").
 
 Usage:
-  mkarm.py <base_config.json> <tag> key=value [key=value ...]
+  mkarm.py <base_config.json> <tag> key=value [key=value ...] [--module=<id>] [--allow-noop]
     value is parsed as JSON, so:  stance_lift_gain=0.8  gait_phase=[0,3.14159,4.71239,1.5708]
+    --module=<id> targets the module with that config id (any type) instead of the
+    single MotorEPM(v2); e.g. --module=body_pose for an EPM lever.
 """
 import json, os, sys
 import pathlib
@@ -35,13 +37,27 @@ def main(argv):
     # MotorEPM param -- a silent-confound generator in the one tool whose entire job is to
     # prevent silent confounds (CLAUDE.md 3.2 rule 7).  Found 2026-07-27 when the printed
     # diff showed `--allow-noop: "<unset>" -> ""` as though it were a real parameter change.
+    # --module=<id> (2026-09-05, Kalman-lessons campaign): target ANY module by its
+    # config id, so EPM / LateralVoter / DescendingPredictor arms get the same
+    # diff-print and tautology refusal MotorEPM arms always had.  Without the
+    # flag the legacy behaviour (exactly one MotorEPM(v2)) is unchanged.
+    module_id = None
+    for arg in argv:
+        if arg.startswith("--module="):
+            module_id = arg.split("=", 1)[1]
     kvs = [kv for kv in kvs if not kv.startswith("--")]
     with open(os.path.join(CFG, base)) as f:
         d = json.load(f)
-    mods = [m for m in d["modules"] if m.get("type") in ("MotorEPM", "MotorEPMv2")]
-    if len(mods) != 1:
-        print(f"ERROR: expected exactly 1 MotorEPM(v2) module, found {len(mods)}"); return 1
-    p = mods[0]["params"]
+    if module_id is not None:
+        mods = [m for m in d["modules"] if m.get("id") == module_id]
+        if len(mods) != 1:
+            print(f"ERROR: expected exactly 1 module with id {module_id!r}, found {len(mods)}"); return 1
+    else:
+        mods = [m for m in d["modules"] if m.get("type") in ("MotorEPM", "MotorEPMv2")]
+        if len(mods) != 1:
+            print(f"ERROR: expected exactly 1 MotorEPM(v2) module, found {len(mods)} "
+                  f"(pass --module=<id> to target another module)"); return 1
+    p = mods[0].setdefault("params", {})
 
     changes, noops = [], []
     for kv in kvs:

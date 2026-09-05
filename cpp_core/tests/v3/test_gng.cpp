@@ -301,3 +301,142 @@ TEST(GNG, CrystallizationRatioRange) {
     EXPECT_GE(cr_after, 0.0f);
     EXPECT_LE(cr_after, 1.0f);
 }
+
+// ---------------------------------------------------------------------------
+// Kalman-lessons campaign, Stage 0.3 — pin the linear gain anneal
+// (docs/plans-and-designs/epm_kalman_lessons_plan.md).
+//
+// The winner update is w += g_n (x - w) with g_n = eps_b (1 - 0.9 n/N) for the
+// n-th visit before bake, so the prototype at bake keeps weight prod(1 - g_n)
+// on the point it was born at: 0.241 at eps_b 0.05, N 50.  (The health term in
+// the damping perturbs the first three gains by ~1e-3 in total.)  Stage 1
+// replaces this schedule; this test proves the path it replaces is live and
+// measured — the CLAUDE.md §3.2 tautology / dead-code guard, in code.
+TEST(GNG, LinearAnnealSeedWeightAtBake) {
+    GNG::Config cfg;
+    cfg.dim                 = 8;
+    cfg.epsilon_b           = 0.05f;
+    cfg.epsilon_n           = 0.0f;       // the runner-up stays put
+    cfg.baking_threshold    = 50;
+    cfg.mitosis_enabled     = false;
+    cfg.stale_prune_enabled = false;
+    cfg.lambda_new          = 1000000;    // no insertion inside the window
+    GNG gng(cfg);
+
+    Eigen::VectorXf seed  = Eigen::VectorXf::Zero(8); seed(0)  = 1.0f;
+    Eigen::VectorXf delta = Eigen::VectorXf::Zero(8); delta(1) = 0.1f;
+    gng.step(seed); gng.step(seed);                    // bootstrap: two nodes at the seed
+    Eigen::VectorXf x = seed + delta;
+
+    int winner = -1;
+    for (int n = 0; n < cfg.baking_threshold; ++n) {
+        auto [w, d] = gng.step(x);
+        winner = w;
+    }
+    auto proto = gng.get_prototype(winner);
+    ASSERT_TRUE(proto.has_value());
+    EXPECT_TRUE(gng.is_crystallised(winner));
+
+    // Fraction of the seed→x segment the prototype has covered.
+    float moved = (proto.value() - seed)(1) / delta(1);
+    double expect_seed_w = 1.0;
+    for (int n = 0; n < cfg.baking_threshold; ++n)
+        expect_seed_w *= 1.0 - 0.05 * (1.0 - 0.9 * double(n) / cfg.baking_threshold);
+    EXPECT_NEAR(expect_seed_w, 0.241, 0.002);
+    EXPECT_NEAR(1.0 - double(moved), expect_seed_w, 0.01);
+}
+
+// ---------------------------------------------------------------------------
+// Kalman-lessons Stage 1 — the per-node Kalman gain.
+// ---------------------------------------------------------------------------
+
+static GNG::Config kalman_pin_cfg() {
+    GNG::Config cfg;
+    cfg.dim                 = 8;
+    cfg.epsilon_b           = 0.05f;
+    cfg.epsilon_n           = 0.0f;
+    cfg.baking_threshold    = 50;
+    cfg.mitosis_enabled     = false;
+    cfg.stale_prune_enabled = false;
+    cfg.lambda_new          = 1000000;
+    cfg.gain_kind           = GainKind::Kalman;
+    return cfg;
+}
+
+// With p0 = 1 and q = 0 the schedule is 1/(n+1): after N wins the seed keeps
+// exactly 1/(N+1) of the weight (0.0196 at N = 50, against the linear anneal's
+// 0.241 pinned above).  Then, baked, the node must not move at all.
+TEST(GNG, KalmanGainIsTheFilterForAConstantAndFreezesAtBake) {
+    GNG::Config cfg = kalman_pin_cfg();
+    GNG gng(cfg);
+    Eigen::VectorXf seed  = Eigen::VectorXf::Zero(8); seed(0)  = 1.0f;
+    Eigen::VectorXf delta = Eigen::VectorXf::Zero(8); delta(1) = 0.1f;
+    gng.step(seed); gng.step(seed);
+    Eigen::VectorXf x = seed + delta;
+    int winner = -1;
+    for (int n = 0; n < cfg.baking_threshold; ++n) { auto [w, d] = gng.step(x); winner = w; }
+    auto proto = gng.get_prototype(winner);
+    ASSERT_TRUE(proto.has_value());
+    EXPECT_TRUE(gng.is_crystallised(winner));
+    float moved = (proto.value() - seed)(1) / delta(1);
+    EXPECT_NEAR(1.0 - double(moved), 1.0 / (cfg.baking_threshold + 1), 1e-4);
+
+    // Baked + q = 0: frozen, bit-for-bit, even against a new offset.
+    Eigen::VectorXf x2 = x + delta;
+    Eigen::VectorXf before = proto.value();
+    for (int n = 0; n < 30; ++n) { auto [w, d] = gng.step(x2); EXPECT_EQ(w, winner); }
+    EXPECT_TRUE(gng.get_prototype(winner).value() == before);
+}
+
+// With q > 0 a baked node keeps a steady-state gain and follows a moved input.
+TEST(GNG, KalmanGainWithProcessNoiseTracksAfterBake) {
+    GNG::Config cfg = kalman_pin_cfg();
+    cfg.kalman_q = 0.01f;                       // K_inf = (q + sqrt(q^2 + 4q))/2 ~ 0.095
+    GNG gng(cfg);
+    Eigen::VectorXf seed  = Eigen::VectorXf::Zero(8); seed(0)  = 1.0f;
+    Eigen::VectorXf delta = Eigen::VectorXf::Zero(8); delta(1) = 0.1f;
+    gng.step(seed); gng.step(seed);
+    Eigen::VectorXf x = seed + delta;
+    int winner = -1;
+    for (int n = 0; n < cfg.baking_threshold; ++n) { auto [w, d] = gng.step(x); winner = w; }
+    ASSERT_TRUE(gng.is_crystallised(winner));
+    Eigen::VectorXf x2 = x + delta;             // the world drifted
+    float before = (gng.get_prototype(winner).value() - x2).norm();
+    for (int n = 0; n < 100; ++n) gng.step(x2);
+    float after = (gng.get_prototype(winner).value() - x2).norm();
+    EXPECT_LT(after, 0.05f * before);           // (1 - 0.095)^100 ~ 5e-5 of the way left
+}
+
+// Kalman state round-trips through JSON; Linear mode emits none of it, so a
+// pre-feature snapshot is byte-identical.
+TEST(GNG, KalmanStateSerialisation) {
+    GNG::Config cfg = kalman_pin_cfg();
+    GNG gng(cfg);
+    Eigen::VectorXf seed = Eigen::VectorXf::Zero(8); seed(0) = 1.0f;
+    gng.step(seed); gng.step(seed);
+    for (int n = 0; n < 5; ++n) gng.step(seed);
+    auto j = gng.to_json();
+    EXPECT_EQ(j.value("gain_kind", std::string("")), "kalman");
+    ASSERT_TRUE(j["nodes"][0].contains("p"));
+    GNG back = GNG::from_json(j);
+    EXPECT_EQ(back.gain_kind(), GainKind::Kalman);
+    // Node storage is an unordered_map, so array order may differ after a
+    // round trip; compare per id.
+    auto by_id = [](nlohmann::json const& nodes) {
+        std::map<int, nlohmann::json> m;
+        for (auto const& n : nodes) m[n.at("id").get<int>()] = n;
+        return m;
+    };
+    auto jr = back.to_json();
+    EXPECT_EQ(by_id(jr["nodes"]), by_id(j["nodes"]));
+    EXPECT_EQ(jr.value("kalman_p0", -1.0f), j.value("kalman_p0", -2.0f));
+    EXPECT_EQ(jr.value("kalman_q",  -1.0f), j.value("kalman_q",  -2.0f));
+
+    GNG::Config lin = kalman_pin_cfg();
+    lin.gain_kind = GainKind::Linear;
+    GNG g2(lin);
+    g2.step(seed); g2.step(seed); g2.step(seed);
+    auto j2 = g2.to_json();
+    EXPECT_FALSE(j2.contains("gain_kind"));
+    EXPECT_FALSE(j2["nodes"][0].contains("p"));
+}

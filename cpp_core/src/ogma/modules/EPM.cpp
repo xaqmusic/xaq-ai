@@ -154,6 +154,24 @@ ParamSchema EPM::params_schema() const {
         {"insertion_autotune_quantile", ParamMutability::ConstructionOnly,
             "Percentile of the GNG's own recent squared-TLE distribution used as the insertion floor.  A RANK, not a scale: dimensionless and invariant to the signal's units, which is what makes this adaptive rather than another constant tuned to a signal's magnitude.  0.30 matches the v3 reference.",
             ParamValue{0.30}},
+        {"gain_kind",               ParamMutability::ConstructionOnly,
+            "PER-NODE KALMAN GAIN (Kalman-lessons Stage 1, docs/plans-and-designs/epm_kalman_lessons_plan.md).  "
+            "'linear' (default) = the legacy anneal eps_b*(1 - 0.9*visits/N), byte-identical.  'kalman' = each node "
+            "carries a scalar prior-variance ratio p in units of its own observation noise: per win p += kalman_q; "
+            "K = min(kalman_gain_cap, p/(p+1)); w += K*(x-w); p *= 1-K.  With kalman_p0 = 1 and kalman_q = 0 that is "
+            "exactly the Kalman filter for a constant (gain 1/(n+1)) and baked nodes stay frozen.  Measured on the "
+            "bench, the legacy anneal leaves 24% of a baked prototype on its birth point and 2x the MSE of the mean "
+            "of the same samples.  eps_b, its visit/health damping and its neuro scaling are unused in this mode.",
+            ParamValue{std::string("linear")}},
+        {"kalman_p0",               ParamMutability::ConstructionOnly,
+            "Initial p for every node born (1 = the seed counts as one sample).", ParamValue{1.0}},
+        {"kalman_q",                ParamMutability::HotMutable,
+            "Process-noise ratio added to p per win.  0 (default) = baked nodes frozen; > 0 = every node, baked "
+            "included, settles at the random-walk steady-state gain (q + sqrt(q^2 + 4q))/2 and tracks slow drift.",
+            ParamValue{0.0}},
+        {"kalman_gain_cap",         ParamMutability::HotMutable,
+            "Upper bound on K (1 = uncapped).  Lower it (e.g. to eps_b) if young nodes get dragged across cluster "
+            "boundaries by the high early gain.", ParamValue{1.0}},
         {"dim_autocal_ticks",       ParamMutability::ConstructionOnly,
             "COMMISSIONING WINDOW, in input frames.  When > 0, the EPM measures its own per-dim input ranges over the first N frames instead of being told them, then installs them and RESETS the GNG topology so the vocabulary is re-earned in the calibrated space.  This is the adaptive form of `dim_min`/`dim_max`: §0 rule 2 requires the input be conditioned before discretisation, and a hand-measured constant per sensor is the smell that names a missing mechanism.  Window length is legitimately application-set — it must cover the body's characteristic motion (several stride cycles for a gait, a full sweep for a sensor), because a range set by a startup transient is worse than the default.  Mutually exclusive with explicit dim_min/dim_max (throws).  RBF encoder only (throws for jl/stft, whose dims are homogeneous pixels/samples and must not be rescaled per-dim).  0 = off, byte-identical.",
             ParamValue{int64_t{0}}},
@@ -260,6 +278,15 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "insertion_autotune",          [&](auto const& v){ gng_cfg.insertion_autotune          = get_bool(v, "insertion_autotune"); });
     apply_param(params, "insertion_autotune_quantile", [&](auto const& v){ gng_cfg.insertion_autotune_quantile = float(get_double(v, "insertion_autotune_quantile")); });
     insertion_autotune_ = gng_cfg.insertion_autotune;
+    apply_param(params, "gain_kind", [&](auto const& v){
+        auto s = get_string(v, "gain_kind");
+        if      (s == "linear") gng_cfg.gain_kind = ami_ogma::v3::GainKind::Linear;
+        else if (s == "kalman") gng_cfg.gain_kind = ami_ogma::v3::GainKind::Kalman;
+        else throw std::invalid_argument("EPM: gain_kind must be 'linear' or 'kalman' (got '" + s + "')");
+    });
+    apply_param(params, "kalman_p0",       [&](auto const& v){ gng_cfg.kalman_p0       = float(get_double(v, "kalman_p0")); });
+    apply_param(params, "kalman_q",        [&](auto const& v){ gng_cfg.kalman_q        = float(get_double(v, "kalman_q")); });
+    apply_param(params, "kalman_gain_cap", [&](auto const& v){ gng_cfg.kalman_gain_cap = float(get_double(v, "kalman_gain_cap")); });
 
     base_epsilon_b_               = gng_cfg.epsilon_b;
     base_min_insertion_error_     = gng_cfg.min_insertion_error;
@@ -378,10 +405,13 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
     else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
+    else if (k == "kalman_q")                gng_->set_kalman_q(float(get_double(value, k)));
+    else if (k == "kalman_gain_cap")         gng_->set_kalman_gain_cap(float(get_double(value, k)));
     else if (k == "modality_group" || k == "modality_name" || k == "encoder_kind"
           || k == "input_topic"    || k == "projection_dim" || k == "master_seed"
           || k == "sample_rate"    || k == "f_min" || k == "f_max"
-          || k == "proprio_state_dims" || k == "dim_min" || k == "dim_max")
+          || k == "proprio_state_dims" || k == "dim_min" || k == "dim_max"
+          || k == "gain_kind"      || k == "kalman_p0")
         throw std::invalid_argument("EPM param '" + k + "' is ConstructionOnly");
     else
         throw std::invalid_argument("EPM: unknown param '" + k + "'");
@@ -478,6 +508,8 @@ void EPM::dim_autocal_finalise() {
     ema_tle_               = 0.1f;      // the constructed default, not a learned value
     last_tle_              = 0.0f;
     last_quant_error_      = 0.0f;
+    qe_mean_ema_ = qe_sq_ema_ = qe_lag1_ema_ = prev_qe_ = 0.0f;
+    has_prev_qe_           = false;
     last_published_token_.reset();
 
     dim_autocal_done_ = true;
@@ -583,6 +615,18 @@ void EPM::compute_dual_tle(float quant_error, int winner_id,
     ema_tle_ = (1.0f - tle_ema_alpha_) * ema_tle_ + tle_ema_alpha_ * tle_out;
     novelty_threshold_now_ = std::max(novelty_floor_,
                                       ema_tle_ * novelty_threshold_multiplier_ * novelty_threshold_scale_);
+
+    // Stage 0.4 instruments (diag-only; see EPM.hpp).  Same EMA rate as the
+    // TLE so the three moments describe the same window.
+    {
+        const float a = tle_ema_alpha_;
+        if (has_prev_qe_)
+            qe_lag1_ema_ = (1.0f - a) * qe_lag1_ema_ + a * (quant_error * prev_qe_);
+        qe_mean_ema_ = (1.0f - a) * qe_mean_ema_ + a * quant_error;
+        qe_sq_ema_   = (1.0f - a) * qe_sq_ema_   + a * quant_error * quant_error;
+        prev_qe_     = quant_error;
+        has_prev_qe_ = true;
+    }
 }
 
 void EPM::publish_token(uint64_t tick_id,
@@ -813,6 +857,13 @@ nlohmann::json EPM::diag_lite() const {
         j["baked"]         = gng_->baked_count();
         j["mitosis_count"] = gng_->mitosis_count();
         j["baked_now"]     = gng_->last_step_baked();   // a node earned its place THIS step
+    }
+    // Stage 0.4 instruments — normalised innovation and innovation whiteness.
+    j["tle_norm"] = last_tle_ / std::max(ema_tle_, 1e-6f);
+    {
+        const float var = qe_sq_ema_   - qe_mean_ema_ * qe_mean_ema_;
+        const float cov = qe_lag1_ema_ - qe_mean_ema_ * qe_mean_ema_;
+        j["qe_lag1"] = var > 1e-12f ? std::clamp(cov / var, -1.0f, 1.0f) : 0.0f;
     }
     return j;
 }
