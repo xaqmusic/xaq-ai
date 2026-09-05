@@ -79,9 +79,15 @@ public:
     unsigned  window_samples()  const { return cfg_.window_samples; }
     uint64_t  windows()         const { return windows_; }
     uint64_t  xruns()           const { return xruns_; }   // ALSA over/underruns
-    // Samples the ring overwrote before the consumer read them — a true overrun on our
+    // Samples the ring overwrote before the cursor reached them — a true overrun on our
     // side rather than ALSA's, and with a ring deep enough for the ALSA buffer it should
     // stay at zero.  Not the same fault as an xrun, so it is counted separately.
+    // ⚠ RESET ON THE FIRST DELIVERY, so this counts loss AFTER the channel is live.
+    // Between start() and the host's first poll the capture thread is already filling
+    // while the host still loads its config, so the writer laps the ring and charges
+    // startup to this counter: 40836 samples measured after one restart, 2.2 M on a
+    // long-running host.  A large constant here is not a fault and would drown a real
+    // regression, which is the whole job of the number.
     uint64_t  dropped()         const { return dropped_; }
     // Windows actually handed to the consumer.  windows() - delivered() IS the audio the
     // brain never saw; the two must track.  ⚠ While latest() marked the whole backlog

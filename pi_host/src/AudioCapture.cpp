@@ -162,6 +162,15 @@ bool AudioCapture::latest(std::vector<float>& out) {
         idx = (idx + 1) % ring_.size();
     }
     read_at_ += n;
+    // ⚠ ZERO THE DROP COUNT ON THE FIRST DELIVERY.  Between start() and the host's first
+    // successful poll the capture thread is already filling the ring, and the host is
+    // still loading its config and constructing modules -- so the writer legitimately
+    // laps the ring and charges tens of thousands of samples to dropped_ before the
+    // consumer has asked for anything.  Measured after one restart: 40836 samples
+    // (~0.85 s), and 2.2 M on a long-running host.  That is startup, not steady-state
+    // loss, and leaving it in makes the counter a constant nobody can read a regression
+    // out of.  dropped_ is therefore defined as loss AFTER the channel is live.
+    if (delivered_ == 0) dropped_ = 0;
     ++delivered_;
     return true;
 }
