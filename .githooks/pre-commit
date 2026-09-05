@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Catch identifiers early, while a commit is still trivially amendable.
+# The gate that actually matters is pre-push (a push is what publishes); this is here
+# so the fix costs an amend rather than a rebase.
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Only ADDED lines: existing content is the business of whoever committed it, and
+# scanning it would make the hook unusable on a repo that already has a hit.
+staged="$(git diff --cached --unified=0 | grep '^+' | grep -v '^+++' || true)"
+[ -z "$staged" ] && exit 0
+
+if ! printf '%s\n' "$staged" | "$here/scan-identifiers.sh"; then
+    cat >&2 <<'MSG'
+
+pre-commit: refusing — real identifiers in the staged change (see above).
+
+  Replace them with the documented placeholders (REPORTS.md), and put the real
+  values in docs/operational/local_env.md, which is gitignored.
+
+  If this is a false positive: git commit --no-verify
+MSG
+    exit 1
+fi
+exit 0

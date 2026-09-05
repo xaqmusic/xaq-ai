@@ -56,3 +56,10 @@ godot_host/project/addons/ami_ogma/configs/tsweep_*.json
 godot_host/project/addons/ami_ogma/configs/d2_*.json
 godot_host/project/addons/ami_ogma/configs/e3_settle.json
 godot_host/project/addons/ami_ogma/configs/e3b_*.json
+
+# Local identifiers — real values that must never be published.  See
+# .secrets-local.example and docs/operational/local_env.example.md for the templates,
+# and .githooks/scan-identifiers.sh for what enforces this.  A denylist committed to the
+# repo would publish the strings it exists to protect, so the real files stay untracked.
+.secrets-local
+docs/operational/local_env.md
