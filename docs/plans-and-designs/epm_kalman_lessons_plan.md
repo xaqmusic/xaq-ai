@@ -496,9 +496,34 @@ zero differing lines (the new token field is the only textual change). Two unit 
 
 **Creature test: Gaussian noise on the scent compass** (operator's choice).
 `ScentCompass.noise_after_ticks` / `noise_sd` (default off) add N(0, sd) to the published
-direction and proximity from a tick, deterministically. A/B in flight on
-`the_cell_maze_fusion__dims3.json`, 20 paired worlds, noise sd 0.5 from tick 4800: arms `base`,
-`noisy`, `k3`, `k3_noisy`, `wrong_noisy` (power −1), `k3_act_noisy` (both levers).
+direction and proximity from a tick, deterministically. A/B on
+`the_cell_maze_fusion__dims3.json`, 20 paired worlds, 240 s, noise sd 0.5 from tick 4800:
+
+| arm | eats | by third (pre / mid / post) | paired vs `noisy` (eats) |
+|---|---|---|---|
+| base | 13.6 | 5.55 / 4.10 / 3.95 | +3.50 ± 1.76, t 4.2 (the noise's cost, 15 of 20 worlds) |
+| noisy scent, legacy trust | 10.1 | 5.55 / 2.75 / 1.80 | |
+| `expected` + power 2, no noise | 13.95 | 5.60 / 4.45 / 3.90 | +0.35 ± 1.09 vs base, tie (no cost when nothing is wrong) |
+| noisy + `expected` power 2 | 11.6 | 5.60 / 3.30 / 2.70 | **+1.50 ± 3.20, t 1.0, 8 of 20 up, 8 down** |
+| noisy + both levers | 11.45 | 5.70 / 2.95 / 2.80 | +1.35 ± 2.11, t 1.3 |
+| noisy + wrong sign | 10.75 | 5.40 / 3.00 / 2.35 | +0.65 ± 2.60, tie |
+
+**Verdict on the Cell: `NULL`.** The noise costs a quarter of the eats, the lever recovers
+under half of that on the mean with a spread so wide that eight worlds improve and eight get
+worse, and the wrong-sign arm is not worse than doing nothing, so the trust weighting is
+not load-bearing here in either direction. The reason is the one the repair-ties-broken
+result already gave: the Cell's camera is blind most of the run and `BearingFusion` drops it
+on its own floor, so most of the time there is no second live channel to move weight
+toward. Inverse-variance trust only has work to do when two live channels disagree in
+quality, which the bench's intact pair models and this creature rarely offers. Re-use
+context: a fusion with two channels alive at once (the stride-odometry complementary
+filter on the picrawler is exactly such a pair, fused today by hand-set gains), or the
+vision-rich `the_cell_vision_dtest` room where the camera sees food often.
+
+**Stage 2 closes** with two shipped, default-off levers: the activity term (WORKING on bench
+and creature) and inverse-variance expected-error trust (WORKING on bench, NULL on the Cell
+for lack of a second live channel). K4 stale inflation is subsumed: a republished token has
+zero displacement, so the activity term already discounts it (bench sub-rate arm ÷1.13).
 
 ## Stage 3 — restore lost concepts
 
