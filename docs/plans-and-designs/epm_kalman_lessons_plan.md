@@ -580,8 +580,40 @@ that a transition table has counts to speak with. The one instrument this leaves
 the bench's S4 ratio, which is now a real measurement (1.03 → 1.50 → 2.36) instead of a
 displacement.
 
-K6 (true RLS + the one-tick alignment fix in the predictor's residual mode) follows; S3 is the
-measurement, the picrawler `__pc*` arms the creature readout.
+### K6 — `residual_align` and true `rls` in the DescendingPredictor (SHIPPED 2026-09-05; bench WORKING)
+
+Two options on the predictor, both default-off and byte-identical (S3 at defaults: 20 of 20
+seed files identical between the pre-K6 and K6 trees). `residual_align=true` pairs the
+residual published at t−1, which measures the prediction made at t−2, with the context and
+prediction from t−2 instead of t−1 (the one-tick misalignment Stage 0 found). `update_method=rls`
+is now true recursive least squares over `[context; 1]`, the Kalman filter for a static
+parameter vector, with forgetting `rls_forget`, a diffuse prior `rls_p0`, double-precision
+covariance re-symmetrised each step and a trace cap against windup; the earlier `rls` was SGD
+with a rescaled constant and no config used it. Unit test: RLS learns a fixed linear map to
+error < 0.01 in 60 ticks where SGD at its default rate is still far off.
+
+| S3 residual², n = 20 | slow rotation θ 0.15 (KF floor 0.0166, persistence 0.0232) | fast rotation θ 0.6 (KF floor 0.0178, persistence 0.0399) |
+|---|---|---|
+| SGD, legacy pairing (base) | 0.0194 | 0.0398 |
+| SGD, aligned | 0.0212 | 0.0397 |
+| **RLS, legacy pairing** | **8 × 10¹⁰ — diverges** | 0.64 — diverges |
+| **RLS, aligned** | **0.0190** | **0.0294** |
+| RLS, aligned, no forgetting | 0.0188 | 0.0303 |
+
+Three readings. **The misalignment is real, and RLS is what proves it**: an exact estimator fed
+(context, innovation) pairs one tick apart blows up, while SGD, being a small step in a rotated
+direction, tolerates it and even scores slightly better with the wrong pairing at slow rotation.
+**Aligned RLS is the Kalman-faithful predictor**: on fast dynamics it beats SGD by 26 % and
+comes within 1.65× of the Kalman floor where SGD cannot beat persistence. **The remaining gap
+to the floor is the context, not the estimator**: two noisy lags cannot reach a filter that
+uses the whole history. So the two options go together, `rls` needs `residual_align`, and the
+contract says so.
+
+**Creature test in flight:** the picrawler predictive-coding arm `pc5` (latent-autoregression
+context, residual normalisation, 800-node residual vocabulary; B v2.1's "fed vocabulary"
+protocol: arena, difficulty 0, chassis collision on, 24 000 ticks, n = 6) as shipped, with
+`residual_align`, and with `rls` + `residual_align`; the readouts are the predictor's own bite
+(`dp_err`, `dp_pn`) and the gait metrics.
 
 ## Stage 4 — drift versus split
 

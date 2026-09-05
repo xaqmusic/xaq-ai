@@ -119,3 +119,13 @@ When the DescendingPredictor is wired into a Phase-3 integration of the maze ben
 
 - **Per-voter, not global.** Each LateralVoter that has a paired DescendingPredictor reads from its own `consensus.<level>` and projects to its own targets. There is no cross-level prediction sharing in Phase 1.
 - **Recurrent variant deferred.** A small per-voter recurrent predictor (GRU-shaped, but inside the voter, not a global workspace) is the documented next step in `v4_algorithmic_gaps.md`. Phase 1 ships AR(1); promotion happens via a contract amendment when the AR(1) form is shown to have a meaningful capacity gap on a real benchmark.
+
+## Kalman-lessons Stage 3 (K6) — two options, both default-off (2026-09-05)
+
+| Key | Type | Mutability | Default | Description |
+|---|---|---|---|---|
+| `residual_align` | bool | HotMutable | false | The residual the EPM publishes at t−1 measures the prediction made at t−2 (the EPM subtracts prediction(t−1) at tick t), but the legacy update pairs it with the context cached at t−1: one tick off. `true` pairs it with the context and prediction from t−2. Found by the bench (Stage 0); **proved by `rls`**, which diverges on the misaligned pairs (S3: residual² 8 × 10¹⁰) and converges on the aligned ones. SGD tolerates the misalignment, so `false` stays the default for byte-identity. |
+| `update_method` = `rls` | string | ConstructionOnly | `sgd` | Now true recursive least squares over `[context; 1]` with forgetting `rls_forget`: the Kalman filter for a static parameter vector. Double-precision covariance, re-symmetrised each step, trace capped at the prior. The earlier `rls` was SGD with a rescaled constant and no config used it. Needs `residual_align=true`. On the bench's fast-rotation target it beats SGD's residual by 26 % and sits within 1.65× of the Kalman floor where SGD cannot beat persistence; the rest of the gap is the two-lag context, not the estimator. |
+| `rls_p0` | double | ConstructionOnly | 100 | Initial diagonal of the RLS covariance (diffuse prior). |
+
+Charter with the measurements: [`../epm_kalman_lessons_plan.md`](../epm_kalman_lessons_plan.md).
