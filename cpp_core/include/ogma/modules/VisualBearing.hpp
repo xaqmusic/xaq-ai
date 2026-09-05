@@ -109,6 +109,12 @@ private:
                                          // [after, until) for the (d) perturbation→degradation→RECOVERY test;
                                          // <0 (default) = permanent onset (prior behaviour, byte-identical)
     bool  force_lesion_ = false;         // immediate lesion (UI "knock out vision" toggle)
+    // Kalman-lessons Stage 2 perturbation: a STUCK sensor.  From this tick on the
+    // module republishes the last bearing it saw food with, unchanged — a constant,
+    // plausible reading.  A lesion ([0,0]) is caught downstream by BearingFusion's
+    // confidence floor; a stuck sensor is not, and a trivially predictable channel is
+    // exactly what 1/(err+ε) trusts most.  The activity term is measured against it.
+    int   stick_after_ticks_ = -1;       // <0 (default) = off, byte-identical
 
     // Cached input frame.
     std::vector<uint8_t> pixels_;
@@ -119,6 +125,9 @@ private:
     float ema_u_ = 0.0f; bool have_ema_ = false;
     bool  lesioned_ = false;
     uint64_t tick_count_ = 0;
+    bool  stuck_ = false;
+    float last_seen_[3] = {0.0f, 0.0f, 0.0f};   // last bearing published with mag_ > 0
+    bool  have_last_seen_ = false;
 
     // learned-appearance state
     float food_proto_[3]  = {0.0f, 0.0f, 0.0f};
