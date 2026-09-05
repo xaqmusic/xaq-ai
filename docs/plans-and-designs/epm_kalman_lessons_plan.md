@@ -527,10 +527,61 @@ zero displacement, so the activity term already discounts it (bench sub-rate arm
 
 ## Stage 3 — restore lost concepts
 
-K2 `transition_surprise_kind ∈ {displacement, logprob}` from the existing `transition_counts_`,
-bounded by `log N`; the S4 ratio is the discriminating measurement. K6 true RLS in the
-predictor plus the one-tick alignment fix; S3 is the measurement, the picrawler `__pc*` arms
-the creature readout.
+Operator decision 2026-09-05: proceed, and feed the restored transition surprise to the play
+loop.
+
+### K2 — `transition_surprise_kind=logprob` (SHIPPED 2026-09-05; bench WORKING)
+
+The C++ port's transition term is a displacement between successive prototypes; the Python
+reference's was `−log P(cur|prev)`. Restored as an option on the EPM: the surprise is scored
+against the transition table as it stood before the step, Laplace-smoothed, normalised by
+`log N` to [0, 1], and **conditioned on a move** (a stay scores 0, a first arrival 1). That last
+choice is the design point: with stays in the denominator every real move looks surprising,
+and what the play loop wants to know is whether the *move* was expected. Default
+`displacement` is byte-identical (S4 reference: zero differing lines). `PlayLoop.novelty_source`
+(`tle` default, `transition_surp`, `quant_error`) lets play read it. Unit test: a three-state
+cycle with a teleport, expected moves low, the teleport at the cap, the displacement unrelated
+to either.
+
+| S4 (n = 20 paired) | displacement | logprob | logprob + `gain_kind=kalman` |
+|---|---|---|---|
+| surprise on expected moves | 1.29 | 0.68 | 0.54 |
+| surprise on teleports | 1.34 | 0.99 | 1.00 |
+| **ratio unexpected / expected** | **1.03** | **1.50 ± 0.11** | **2.36 ± 0.83** |
+| surprise within a state | 0.015 | 0.065 | 0.039 |
+| nodes / baked | 11.7 / 7.1 | 11.7 / 7.1 | 7.75 / 5.1 |
+
+The displacement is blind; the restored surprise separates the cases, and the separation
+sharpens when the vocabulary is tighter, because over-tiling spreads each real edge's counts
+across several node pairs (the B-gate lesson: finer tiling without transition statistics is
+per-token sample starvation). The two levers compose.
+
+**Creature test (2026-09-05): the study environment, 20 paired worlds, 240 s.** The report's
+finding is that play is a net cost there; the question was whether a play loop that seeks
+unexpected *moves* rather than high TLE stops being one.
+
+| arm | eats | coverage (cells) | crossings | play: climb / wander / stale | paired vs `full` (eats) |
+|---|---|---|---|---|---|
+| full composition | 0.60 | 152.2 | 9.2 | 0.0 / 0.7 / 35.1 | |
+| + logprob surprise, play on TLE | 0.70 | 150.0 | 9.3 | 0.0 / 0.7 / 35.8 | +0.10 ± 0.50 |
+| + logprob, **play on the surprise** | 0.70 | 153.1 | 9.4 | 0.0 / 0.7 / 31.5 | +0.10 ± 0.57; vs the row above **+0.00 ± 0.55** |
+| + logprob, play on the surprise, `gain_kind=kalman` cap 0.05 | 0.60 | 151.9 | 9.6 | 0.0 / 0.7 / 34.7 | −0.05 ± 0.44 |
+| composition minus play | 2.00 | 148.2 | 9.7 | | +1.40 ± 0.38, t 7.6 |
+
+**Verdict: `NULL`**, and the play-state column says why: **play's climb fraction is 0.0 in
+every arm**, the original included. In this room the play loop never climbs a novelty
+gradient; it wanders (0.7) and occasionally force-wanders (0.2), so what it is handed as
+novelty cannot matter. That is the report's §4 mechanism seen from inside the loop, and it is
+a finding about the play loop's value field, not about the surprise: the lever has no consumer
+here until climb is live. Coverage is unchanged, so the surprise does not change where the
+wander goes either. Re-use context: any consumer that acts on the surprise itself (a slow-loop
+keyframe trigger, a play loop whose climb mode fires), and a place vocabulary coarse enough
+that a transition table has counts to speak with. The one instrument this leaves behind is
+the bench's S4 ratio, which is now a real measurement (1.03 → 1.50 → 2.36) instead of a
+displacement.
+
+K6 (true RLS + the one-tick alignment fix in the predictor's residual mode) follows; S3 is the
+measurement, the picrawler `__pc*` arms the creature readout.
 
 ## Stage 4 — drift versus split
 

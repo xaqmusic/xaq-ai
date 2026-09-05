@@ -751,3 +751,61 @@ TEST(EPMInsertionAutotune, GateTracksTheSignalsOwnErrorDistribution) {
     EXPECT_GT(gate_busy, 0.001f) << "a high-error signal must lift the gate above the floor";
     EXPECT_LT(gate_calm, gate_busy) << "a low-error signal must not";
 }
+
+// -- Kalman-lessons Stage 3 (K2): the restored transition surprise ---------
+
+namespace {
+std::shared_ptr<ogma::ConsensusToken> make_axis(int dim, int axis) {
+    auto c = std::make_shared<ogma::ConsensusToken>();
+    c->fused_embedding = Eigen::VectorXf::Zero(dim);
+    c->fused_embedding(axis) = 1.0f;
+    return c;
+}
+}
+
+// A deterministic cycle A→B→C→A (dwell 5) then a teleport A→C.  With
+// transition_surprise_kind=logprob the expected moves score low and the
+// teleport high; with the default displacement both score the same (the
+// prototypes are equally far apart), which is the S4 blindness in miniature.
+TEST(EpmModule, LogprobTransitionSurpriseSeparatesExpectedFromTeleport) {
+    auto run = [](bool logprob) {
+        auto p = identity_params("1");
+        p["mitosis_enabled"] = false;
+        if (logprob) p["transition_surprise_kind"] = std::string("logprob");
+        EpmFixture f(p);
+        std::vector<float> expected; float teleport = -1.0f;
+        int state = 0;
+        for (int t = 1; t <= 300; ++t) {
+            int prev_state = state;
+            if (t > 1 && (t - 1) % 5 == 0) state = (state + 1) % 3;
+            f.bus.begin_tick(uint64_t(t));
+            f.bus.publish("consensus.0", make_axis(8, state));
+            f.epm.tick(uint64_t(t));
+            f.bus.end_tick();
+            auto tok = std::dynamic_pointer_cast<const ogma::RealityToken>(f.bus.last_value("consensus.1"));
+            if (tok && t > 150 && state != prev_state) expected.push_back(tok->transition_surp);
+        }
+        // teleport: from the current state jump two steps (not the cycle's next)
+        state = (state + 2) % 3;
+        f.bus.begin_tick(301);
+        f.bus.publish("consensus.0", make_axis(8, state));
+        f.epm.tick(301);
+        f.bus.end_tick();
+        auto tok = std::dynamic_pointer_cast<const ogma::RealityToken>(f.bus.last_value("consensus.1"));
+        teleport = tok ? tok->transition_surp : -1.0f;
+        float mean_expected = 0.0f;
+        for (float v : expected) mean_expected += v;
+        mean_expected /= float(std::max<size_t>(1, expected.size()));
+        return std::make_pair(mean_expected, teleport);
+    };
+    auto [exp_lp, tel_lp] = run(true);
+    EXPECT_LT(exp_lp, 0.5f);
+    EXPECT_GT(tel_lp, 0.8f);
+    EXPECT_GT(tel_lp, 3.0f * exp_lp);
+    // The default displacement carries no expectedness at all: it is a distance
+    // between prototypes, so its value on the teleport is whatever the node
+    // geometry makes it (measured here 0.22 vs 0.63 on the cycle's own moves).
+    auto [exp_disp, tel_disp] = run(false);
+    EXPECT_GT(exp_disp, 0.0f);
+    EXPECT_GT(tel_disp, 0.0f);
+}

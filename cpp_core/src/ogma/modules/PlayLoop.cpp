@@ -75,6 +75,7 @@ ParamSchema PlayLoop::params_schema() const {
         {"play_value_topic", ParamMutability::ConstructionOnly, "Publish the FRONTIER NOVELTY ∈[0,1] (the epistemic value) as a ProprioToken scalar → the L2 EFE arbiter (weighted by energy surplus). NOT zeroed while a route exists (play has no food route). Empty = no publish (default-off).", ParamValue{std::string("")}},
         {"gamma",         ParamMutability::HotMutable, "Novelty value-iteration discount.", ParamValue{0.85}},
         {"vi_sweeps",     ParamMutability::HotMutable, "Value-iteration sweeps per tick.", ParamValue{int64_t{8}}},
+        {"novelty_source", ParamMutability::HotMutable, "Kalman-lessons Stage 3: which place-token field is the novelty.  'tle' (default, byte-identical) | 'transition_surp' (the EPM's transition surprise; with EPM transition_surprise_kind=logprob, how unexpected the MOVE was) | 'quant_error'.", ParamValue{std::string("tle")}},
         {"tle_ema_alpha", ParamMutability::HotMutable, "EMA rate for the per-node TLE novelty signal.", ParamValue{0.1}},
         {"tle_peak_decay", ParamMutability::HotMutable, "Slow decay of the node-TLE running peak (the play_value normaliser, §6 — derived from the signal, not hand-set).", ParamValue{0.0005}},
         {"hab_rise",      ParamMutability::HotMutable, "HK habituation rise rate while dwelling (recent = boring; fast). 0 disables habituation.", ParamValue{0.1}},
@@ -99,6 +100,7 @@ ParamMap PlayLoop::current_params() const {
     m["play_value_topic"] = ParamValue{play_value_topic_};
     m["gamma"]         = ParamValue{double(gamma_)};
     m["vi_sweeps"]     = ParamValue{int64_t(vi_sweeps_)};
+    m["novelty_source"] = ParamValue{novelty_source_};
     m["tle_ema_alpha"] = ParamValue{double(tle_ema_alpha_)};
     m["tle_peak_decay"] = ParamValue{double(tle_peak_decay_)};
     m["hab_rise"]      = ParamValue{double(hab_rise_)};
@@ -118,6 +120,7 @@ void PlayLoop::on_param_change(std::string_view key, ParamValue const& value) {
     if      (k == "gamma")         gamma_         = float(get_double(value, k));
     else if (k == "vi_sweeps")     vi_sweeps_     = int(get_int(value, k));
     else if (k == "tle_ema_alpha") tle_ema_alpha_ = float(get_double(value, k));
+    else if (k == "novelty_source") novelty_source_ = get_string(value, k);
     else if (k == "tle_peak_decay") tle_peak_decay_ = float(get_double(value, k));
     else if (k == "hab_rise")      hab_rise_      = float(get_double(value, k));
     else if (k == "hab_decay")     hab_decay_     = float(get_double(value, k));
@@ -140,6 +143,7 @@ void PlayLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "gamma",         [&](auto const& v){ gamma_         = float(get_double(v,"gamma")); });
     apply_param(params, "vi_sweeps",     [&](auto const& v){ vi_sweeps_     = int(get_int(v,"vi_sweeps")); });
     apply_param(params, "tle_ema_alpha", [&](auto const& v){ tle_ema_alpha_ = float(get_double(v,"tle_ema_alpha")); });
+    apply_param(params, "novelty_source", [&](auto const& v){ novelty_source_ = get_string(v,"novelty_source"); });
     apply_param(params, "tle_peak_decay", [&](auto const& v){ tle_peak_decay_ = float(get_double(v,"tle_peak_decay")); });
     apply_param(params, "hab_rise",      [&](auto const& v){ hab_rise_      = float(get_double(v,"hab_rise")); });
     apply_param(params, "hab_decay",     [&](auto const& v){ hab_decay_     = float(get_double(v,"hab_decay")); });
@@ -198,7 +202,10 @@ void PlayLoop::tick(uint64_t tick_id) {
     float place_tle = 0.0f;
     if (auto pt = std::dynamic_pointer_cast<const RealityToken>(bus_->last_value(place_topic_))) {
         new_node = pt->winner_id;
-        place_tle = pt->tle;   // world-model surprise at the current place → novelty
+        // world-model surprise at the current place → novelty (Stage 3: field selectable)
+        place_tle = (novelty_source_ == "transition_surp") ? pt->transition_surp
+                  : (novelty_source_ == "quant_error")     ? pt->quant_error
+                  :                                          pt->tle;
     }
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(heading_topic_)))
         if (pt->values.size() > 0) cur_heading_ = float(pt->values[0]);

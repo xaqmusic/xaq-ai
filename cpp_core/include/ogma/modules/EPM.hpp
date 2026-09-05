@@ -76,7 +76,16 @@ private:
     void compute_dual_tle(float quant_error,
                           int   winner_id,
                           float& transition_surp_out,
-                          float& tle_out);
+                          float& tle_out,
+                          float  logprob_surp = -1.0f);   // >= 0 overrides the displacement (Stage 3, K2)
+    // Kalman-lessons Stage 3 (K2): the transition surprise as the Python reference had it,
+    // -log P(cur | prev) from the transition table BEFORE this step is added, Laplace-
+    // smoothed and normalised by log N to [0, 1], conditioned on a move having happened
+    // (a stay scores 0, a first arrival 1).  The C++ port had replaced it with the
+    // displacement ||proto_t - proto_{t-1}||, which the bench showed cannot tell an
+    // expected transition from a teleport (S4 ratio 1.03).  false (default) = displacement,
+    // byte-identical.
+    float transition_logprob_surprise(int prev_id, int cur_id) const;
     void publish_token(uint64_t tick_id,
                        int      winner_id,
                        float    quant_error,
@@ -205,6 +214,7 @@ private:
     // for predicted_pathway emission.  Cleaned up when GNG prunes a node.
     int prev_winner_id_for_transitions_ = -1;
     std::unordered_map<int, std::unordered_map<int, int>> transition_counts_;
+    bool transition_logprob_ = false;   // transition_surprise_kind == "logprob" (Stage 3, K2)
 
     // v5.4.L Diagnostic B — per-winner-id histogram across all ticks.
     // Identifies premature GNG saturation: if 1-2 winner_ids account
