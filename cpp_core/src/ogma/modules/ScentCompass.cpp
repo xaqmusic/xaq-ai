@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ogma/Rng.hpp"
+
 namespace ogma {
 
 namespace {
@@ -56,6 +58,12 @@ ParamSchema ScentCompass::params_schema() const {
             "Raw per-nostril scent ProprioToken (scalar concentration per nostril, "
             "ordered around a body-local ring at angles 2π·i/N).",
             ParamValue{std::string("reality.proprio.scent")}},
+        {"noise_after_ticks", ParamMutability::HotMutable,
+            "Kalman-lessons Stage 2 perturbation: from this tick on, add N(0, noise_sd) to the published "
+            "direction and proximity (a NOISY sensor, deterministic from master_seed).  <0 (default) = off, "
+            "byte-identical.", ParamValue{int64_t{-1}}},
+        {"noise_sd", ParamMutability::HotMutable, "Std-dev of the injected Gaussian noise (direction units; 0.5 makes a unit bearing unreliable).", ParamValue{0.0}},
+        {"master_seed", ParamMutability::ConstructionOnly, "RNG namespace seed for the noise perturbation.", ParamValue{int64_t{0}}},
         {"output_topic", ParamMutability::ConstructionOnly,
             "2-D egocentric up-gradient bearing ProprioToken (RAW: direction = "
             "bearing, magnitude = gradient strength; [x=+right, y=+forward]).",
@@ -138,6 +146,13 @@ void ScentCompass::on_setup(Bus* bus, ParamMap const& params) {
         [&](auto const& v){ lesion_after_ticks_ = int(get_int(v, "lesion_after_ticks")); });
     apply_param(params, "force_lesion",
         [&](auto const& v){ if (auto p = std::get_if<bool>(&v)) force_lesion_ = *p; });
+    apply_param(params, "noise_after_ticks",
+        [&](auto const& v){ noise_after_ticks_ = int(get_int(v, "noise_after_ticks")); });
+    apply_param(params, "noise_sd",
+        [&](auto const& v){ if (auto p = std::get_if<double>(&v)) noise_sd_ = float(*p); });
+    apply_param(params, "master_seed",
+        [&](auto const& v){ master_seed_ = uint64_t(get_int(v, "master_seed")); });
+    noise_rng_ = derive_rng(master_seed_, std::string("scent_compass.noise.") + (id_.empty() ? std::string("scent_compass") : id_));
     if (nostril_count_ < 1) nostril_count_ = 1;
 
     if (!input_topic_.empty()) {
@@ -150,6 +165,11 @@ void ScentCompass::on_param_change(std::string_view key, ParamValue const& value
     auto k = std::string(key);
     if (k == "lesion_after_ticks") {
         lesion_after_ticks_ = int(get_int(value, k));
+    } else if (k == "noise_after_ticks") {
+        noise_after_ticks_ = int(get_int(value, k));
+    } else if (k == "noise_sd") {
+        if (auto p = std::get_if<double>(&value)) noise_sd_ = float(*p);
+        else throw std::invalid_argument("ScentCompass: 'noise_sd' must be numeric");
     } else if (k == "force_lesion") {
         if (auto p = std::get_if<bool>(&value)) force_lesion_ = *p;
         else throw std::invalid_argument("ScentCompass: 'force_lesion' must be bool");
@@ -220,14 +240,23 @@ void ScentCompass::tick(uint64_t tick_id) {
     if (n > 0) mean_c /= float(n);
     prox_ = proximity_gain_ * mean_c;
 
+    // Noisy-sensor perturbation (see the header).  tick_count_ was advanced above.
+    noisy_ = noise_after_ticks_ >= 0 && int64_t(tick_count_) > int64_t(noise_after_ticks_) && noise_sd_ > 0.0f;
+    float ocx = cx_, ocy = cy_, opx = prox_;
+    if (noisy_) {
+        ocx += noise_sd_ * noise_dist_(noise_rng_);
+        ocy += noise_sd_ * noise_dist_(noise_rng_);
+        opx  = std::max(0.0f, opx + noise_sd_ * noise_dist_(noise_rng_));
+    }
+
     auto out = std::make_shared<ProprioToken>();
     out->tick_id     = tick_id;
     out->producer_id = id_.empty() ? std::string("scent_compass") : id_;
     out->sensor      = "scent_compass";
     out->values.resize(emit_proximity_ ? 3 : 2);
-    out->values[0] = cx_;
-    out->values[1] = cy_;
-    if (emit_proximity_) out->values[2] = prox_;
+    out->values[0] = ocx;
+    out->values[1] = ocy;
+    if (emit_proximity_) out->values[2] = opx;
     bus_->publish(output_topic_, out);
 }
 

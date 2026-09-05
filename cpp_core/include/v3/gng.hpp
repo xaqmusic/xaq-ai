@@ -203,6 +203,9 @@ public:
     std::optional<Eigen::VectorXf> get_prototype(int node_id) const;
 
     int  get_visit_count(int node_id) const;
+    /// The node's running EMA of its squared quantisation error (0 if unknown):
+    /// its own innovation variance, per mode.  Kalman-lessons Stage 2.
+    double get_ema_error(int node_id) const;
     bool is_crystallised(int node_id) const;
 
     /// True if the winner from the last step() just crossed the baking gate.

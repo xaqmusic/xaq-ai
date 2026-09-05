@@ -629,6 +629,7 @@ void EPM::publish_token(uint64_t tick_id,
     tok->producer_id       = id_.empty() ? std::string("epm") : id_;
     tok->winner_id         = winner_id;
     tok->quant_error       = quant_error;
+    tok->expected_error    = ema_tle_;   // channel-level expected TLE (see Topics.hpp)
     tok->transition_surp   = transition_surp;
     tok->tle               = tle;
     tok->novelty_threshold = novelty_threshold_now_;

@@ -488,6 +488,11 @@ int GNG::get_visit_count(int node_id) const {
     return (it != nodes_.end()) ? it->second.visits : 0;
 }
 
+double GNG::get_ema_error(int node_id) const {
+    auto it = nodes_.find(node_id);
+    return (it != nodes_.end()) ? it->second.ema_error : 0.0;
+}
+
 bool GNG::is_crystallised(int node_id) const {
     return get_visit_count(node_id) >= cfg_.baking_threshold;
 }

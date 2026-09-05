@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "ogma/InProcessBus.hpp"
 #include "ogma/modules/LateralVoter.hpp"
 #include "ogma/Topics.hpp"
@@ -380,4 +382,110 @@ TEST(LateralVoter, SingleStringExcludeStillSupported) {
     ASSERT_NE(cons, nullptr);
     EXPECT_EQ(cons->trust_weights.count("reality.whisker.whisker_0"), 0u);
     EXPECT_EQ(cons->trust_weights.count("reality.proprio.imu"),       1u);
+}
+
+// -- Kalman-lessons Stage 2: activity term ---------------------------------
+
+// Two channels with identical error.  Both move for 100 ticks, then b freezes.
+// Legacy trust would keep them at 0.5 / 0.5 forever (a frozen channel is trivially
+// predictable); with the activity term b is stripped in EMA time.
+TEST(LateralVoter, ActivityGainStripsAChannelThatStopsMoving) {
+    auto p = default_params();
+    p["group_balance"]  = false;
+    p["activity_gain"]  = 1.0;
+    p["activity_alpha"] = 0.2;
+    VoterFixture f(p);
+    float trust_b_moving = -1.0f, trust_b_dead = -1.0f;
+    for (int t = 0; t < 200; ++t) {
+        f.bus.begin_tick(uint64_t(t));
+        float wobble = (t % 2) ? 1.0f : -1.0f;
+        f.bus.publish("reality.sensor.a", make_token(8, 1, 0.1f, 0.1f, wobble));
+        f.bus.publish("reality.sensor.b", make_token(8, 2, 0.1f, 0.1f, t < 100 ? wobble : 0.5f));
+        f.voter.tick(uint64_t(t));
+        f.bus.end_tick();
+        auto c = f.last_consensus();
+        ASSERT_NE(c, nullptr);
+        if (t == 99)  trust_b_moving = c->trust_weights.at("reality.sensor.b");
+        if (t == 199) trust_b_dead   = c->trust_weights.at("reality.sensor.b");
+    }
+    EXPECT_NEAR(trust_b_moving, 0.5f, 0.05f);
+    EXPECT_LT(trust_b_dead, 0.05f);
+    EXPECT_LT(f.voter.activity("reality.sensor.b"), 0.05f);
+    EXPECT_GT(f.voter.activity("reality.sensor.a"), 0.9f);
+}
+
+// Gain 0 must be exactly the legacy voter, trust value for trust value, and its
+// snapshot must carry no activity state.
+TEST(LateralVoter, ActivityGainZeroIsIdenticalToLegacy) {
+    auto p = default_params();
+    p["activity_gain"] = 0.0;
+    VoterFixture legacy;
+    VoterFixture zero(p);
+    for (int t = 0; t < 60; ++t) {
+        for (VoterFixture* f : {&legacy, &zero}) {
+            f->bus.begin_tick(uint64_t(t));
+            float wobble = (t % 2) ? 1.0f : -1.0f;
+            f->bus.publish("reality.sensor.a", make_token(8, 1, 0.10f, 0.10f, wobble));
+            f->bus.publish("reality.sensor.b", make_token(8, 2, 0.25f, 0.25f, t < 30 ? wobble : 0.5f));
+            f->voter.tick(uint64_t(t));
+            f->bus.end_tick();
+        }
+        auto a = legacy.last_consensus(), b = zero.last_consensus();
+        ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
+        EXPECT_EQ(a->trust_weights.at("reality.sensor.b"), b->trust_weights.at("reality.sensor.b"));
+    }
+    EXPECT_FALSE(zero.voter.snapshot_state().contains("activity"));
+    EXPECT_FALSE(zero.voter.diag_lite().contains("activity"));
+}
+
+// -- Kalman-lessons Stage 2, lever 2: which error, what power --------------
+
+// Two channels with errors 0.1 and 0.3 (identical on tle, quant_error and
+// expected_error).  Legacy 1/(err+eps) gives 0.70 on the better one; inverse
+// variance (power 2) gives ~0.85; the Kalman optimum for a 3:1 error ratio is 0.90.
+TEST(LateralVoter, TrustPowerTwoWeightsByInverseVariance) {
+    auto run = [](ogma::ParamMap p) {
+        p["group_balance"] = false;
+        VoterFixture f(p);
+        float trust_a = -1.0f;
+        for (int t = 0; t < 5; ++t) {
+            f.bus.begin_tick(uint64_t(t));
+            auto a = make_token(8, 1, 0.1f, 0.1f, (t % 2) ? 1.0f : -1.0f); a->expected_error = 0.1f;
+            auto b = make_token(8, 2, 0.3f, 0.3f, (t % 2) ? 1.0f : -1.0f); b->expected_error = 0.3f;
+            f.bus.publish("reality.sensor.a", a);
+            f.bus.publish("reality.sensor.b", b);
+            f.voter.tick(uint64_t(t));
+            f.bus.end_tick();
+            trust_a = f.last_consensus()->trust_weights.at("reality.sensor.a");
+        }
+        return trust_a;
+    };
+    auto legacy = default_params();
+    EXPECT_NEAR(run(legacy), 0.70f, 0.02f);
+    auto p2 = default_params(); p2["trust_source"] = std::string("expected"); p2["trust_power"] = 2.0;
+    EXPECT_NEAR(run(p2), 0.845f, 0.02f);
+    auto wrong = default_params(); wrong["trust_source"] = std::string("expected"); wrong["trust_power"] = -1.0;
+    EXPECT_LT(run(wrong), 0.5f);              // the noisier channel wins under the wrong sign
+}
+
+// Explicit defaults must be the legacy voter, value for value.
+TEST(LateralVoter, TrustSourceAndPowerDefaultsAreIdenticalToLegacy) {
+    auto p = default_params();
+    p["trust_source"] = std::string("default");
+    p["trust_power"]  = 1.0;
+    VoterFixture legacy;
+    VoterFixture explicit_defaults(p);
+    for (int t = 0; t < 40; ++t) {
+        for (VoterFixture* f : {&legacy, &explicit_defaults}) {
+            f->bus.begin_tick(uint64_t(t));
+            auto a = make_token(8, 1, 0.10f + 0.01f * (t % 3), 0.10f, 1.0f); a->expected_error = 0.12f;
+            auto b = make_token(8, 2, 0.25f, 0.25f, -1.0f);                   b->expected_error = 0.30f;
+            f->bus.publish("reality.sensor.a", a);
+            f->bus.publish("reality.sensor.b", b);
+            f->voter.tick(uint64_t(t));
+            f->bus.end_tick();
+        }
+        EXPECT_EQ(legacy.last_consensus()->trust_weights.at("reality.sensor.a"),
+                  explicit_defaults.last_consensus()->trust_weights.at("reality.sensor.a"));
+    }
 }

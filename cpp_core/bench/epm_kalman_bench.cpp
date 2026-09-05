@@ -214,6 +214,7 @@ json token_json(std::shared_ptr<const ogma::RealityToken> const& t) {
     return json{
         {"winner",     t->winner_id},
         {"qe",         t->quant_error},
+        {"eerr",       t->expected_error},
         {"ts",         t->transition_surp},
         {"tle",        t->tle},
         {"nodes",      t->node_count},

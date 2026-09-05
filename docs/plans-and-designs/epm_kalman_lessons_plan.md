@@ -331,6 +331,26 @@ at it. Cap 0.05 now carries: corridor `PARTIAL` (faster, cleaner rhythm, zero fa
 no regression, recovery trend in its favour, hump tie. Still one lever at n = 6; the
 promotion bar (n ≥ 20 varied seeds, operator's eye) stands.
 
+### The promotion run: arena, n = 20 paired seeds, 12 000 ticks (2026-09-05)
+
+| metric | base | cap 0.05 | paired Δ, 95 % CI, t, sign |
+|---|---|---|---|
+| net_disp | 10.70 | 10.35 | −0.35 ± 0.51, t −1.4, 7+/13− |
+| straight | 0.712 | 0.721 | +0.009 ± 0.026 |
+| turns (net) | −0.069 | −0.011 | **+0.059 ± 0.042, t 2.9, 15+/5−** (the base drifts left; the arm does not) |
+| falls (total) | 1 | 2 | tie |
+| tilt_sd / planted / unstable / scrub / belly | 0.079 / 3.90 / 0.020 / 0.096 / 0.034 | 0.080 / 3.91 / 0.010 / 0.096 / 0.035 | ties |
+| steps / step_cv_real | 99.1 / 0.816 | 86.6 / 0.810 | −12 ± 14 / tie |
+
+**Verdict at power: `PARTIAL`, not promoted.** No regression on any metric, but the corridor's
+flat-speed gain does not carry to the open floor over 12 000 ticks: progress is a slight
+negative trend inside its interval, and the one resolvable change is heading neutrality. By
+§3.3 a lever that needs averaging to find is not a capability; `gain_kind=kalman` with
+`kalman_gain_cap 0.05` stays a shipped, default-off option (bench WORKING, body harmless,
+recovery trend in its favour) and does not enter `j1s4`. Re-use context: a body whose
+vocabulary is stationary enough for the uncapped schedule, and any regime where the
+recovery-gate trend (less coordination wander after perturbation) is load-bearing.
+
 ### Stage 1 verdict (2026-09-05)
 
 | Arm | Bench (n = 20) | Picrawler, n = 6 corridor 12 k | Verdict |
@@ -370,11 +390,140 @@ nodes): its own lever, on the bench loud (S2, ÷5.9); on a body only with the ca
 
 ## Stage 2 — precision levers on the voter (Cell fusion testbed)
 
-K3 `trust_source ∈ {tle, quant_error, expected}` with `RealityToken::expected_error` = winner's
-√`ema_error`; K8 `activity_gain` on per-channel latent displacement normalised by its own
-long-run EMA; K4 `stale_ticks` on republished tokens with `stale_q` in the voter's denominator.
-Each default 0; bench S5 first (the Stage-0 rows above are the baselines), then
-`the_cell_maze_fusion` vs `_dropvision`, n = 20 paired, wrong-sign arm.
+Order decided 2026-09-05 (operator: proceed as I see fit): **K8 activity term first**, because
+the failure both the bench and the repaired Cell config actually show is a blind or dead
+channel being the most trusted; K3 expected-error trust second (it addresses the noisy-versus-
+clean case the informativeness gate gets backwards); K4 stale inflation waits for the slow loop.
+Creature test = the vision dropout on the repaired fusion config, not the intact forage.
+
+### K8 — `activity_gain` (SHIPPED 2026-09-05; bench WORKING)
+
+Per channel the voter keeps an EMA (`activity_alpha` 0.1) of the latent's tick-to-tick
+displacement, normalised by its own decaying peak (`activity_peak_decay` 0.999) so the factor is
+dimensionless and self-calibrating in [0, 1]; raw trust is multiplied by
+`activity^activity_gain`. A channel that stops moving loses trust in EMA time instead of
+becoming the most trusted because it is trivially predictable. A republished sub-rate token has
+zero displacement, so a stale channel decays the same way (K4's intent, for free). State is
+serialised only when the gain is non-zero. Default 0 is byte-identical: 40 of 40 S5 reference
+files diff empty. Two unit tests.
+
+| S5 arm (n = 20 paired) | legacy | + `activity_gain` 1 | Δ, 95 % CI |
+|---|---|---|---|
+| intact pair, trust on the clean sensor | 0.672 | 0.671 | −0.0006 ± 0.0009, unchanged (both channels move; the term is not a noise discriminator) |
+| dead sensor at 2000: trust on it afterwards | **0.659** | **0.0022** | −0.656 ± 0.017 |
+| dead sensor: fused MSE after death (best single 0.0100) | 0.0443 | **0.0099** | ÷4.4, fusion falls back to the live sensor's floor |
+| dead sensor + informativeness gate: trust on it | 0.802 | 0.0048 | −0.797 ± 0.014; fused MSE 0.064 → 0.0099 |
+| sensor b at 1/4 rate: fused MSE | 0.01304 | **0.01152** | ÷1.13; trust on the fresh sensor 0.676 → 0.725 |
+| wrong sign (gain −1), dead sensor | 0.659 | **0.9994** | fused MSE after death ×2.26 — the sign is the whole effect |
+
+Bench verdict `WORKING` on the failure it targets, neutral where it has no business, and the
+wrong-sign arm inverts it.
+
+**Creature test: a stuck camera, not a dropout.** Two things ruled out the planned vision
+dropout. The recovered `cell_perturbation_d.py` varies only a PlayLoop seed in a fixed world,
+so on the fusion config (no PlayLoop) its twenty runs were one world, and its lesion and
+control arms came out identical. And a lesion zeroes the bearing, which `BearingFusion`'s
+`confidence_floor` already drops regardless of trust, so a dropout cannot express a trust
+lever at all. The failure the activity term targets is a channel that reports a **constant,
+plausible** value. `VisualBearing.stick_after_ticks` (default −1, byte-identical) republishes
+the last bearing seen with food in view, unchanged, from that tick on (latching the first
+sighting after it if there was none before). Sanity run on `the_cell_maze_fusion__dims3.json`,
+stick at 1800: the vision EPM's input becomes a new constant (it tiles it down to error
+0.005, distinct from its blind state); legacy trust on the frozen channel climbs to **0.84**
+by tick 3540, and under `activity_gain 1` it sits at **0.03**, having been below 0.2 all run
+because the camera is blind most of the time. `cell_coverage.py` now reports eats and food
+distance per run-third so the perturbation reads as pre / mid / post.
+
+**A/B (2026-09-05): `the_cell_maze_fusion__dims3.json`, 20 paired worlds, 240 s, camera stuck
+at 4800 (the start of the middle third).**
+
+| arm | eats, total | eats by third (pre / mid / post) | food distance by third (m) |
+|---|---|---|---|
+| base | 13.6 | 5.55 / 4.10 / 3.95 | 8.28 / 5.64 / 5.70 |
+| stuck camera, legacy trust | **7.7** | 5.55 / **1.50 / 0.65** | 8.28 / **10.23 / 10.23** |
+| activity term, no perturbation | 13.85 | 5.55 / 4.45 / 3.85 | 7.99 / 5.82 / 5.41 |
+| stuck camera + activity term | **12.3** | 5.55 / **3.55 / 3.20** | 7.99 / **5.51 / 5.01** |
+| stuck camera + wrong sign (gain −1) | 6.0 | 5.35 / 0.35 / 0.30 | 7.94 / 12.61 / 12.12 |
+
+Paired by world (95 % CI, t on 19 df):
+
+| comparison | eats | food distance |
+|---|---|---|
+| stuck − base (the perturbation's cost) | −5.90 ± 1.97, t −6.3, 17 of 20 | +3.05 ± 0.98, t 6.5, 20 of 20 |
+| **act_stuck − stuck (the lever's claim)** | **+4.60 ± 2.09, t 4.6, 16 of 20** | **−3.42 ± 0.86, t −8.3, 19 of 20** |
+| act_stuck − base (what is left of the damage) | −1.30 ± 1.63, t −1.7 | +0.37 ± 0.60, tie |
+| act − base (no-perturbation control) | +0.25 ± 0.95, tie | −0.14 ± 0.52, tie |
+| wrong_stuck − stuck (sign control) | −1.70 ± 0.92, t −3.9 | +1.31 ± 0.82, t 3.3 |
+
+The pre-stick thirds are identical across arms (5.55 / 8.28), the built-in confound check. A
+camera frozen on a plausible bearing takes 43 % of the forager's eats under legacy trust,
+because a constant channel is the most predictable one in the room and `1/(err+ε)` hands it
+authority. With the activity term the frozen channel loses that authority in EMA time, scent
+steers, and 78 % of the lost eats come back; the residual against the intact base is inside
+its interval. The term costs nothing when nothing is wrong, and the wrong-sign arm is worse
+than doing nothing. **Verdict: `WORKING`, at n = 20 paired worlds, under a (d)-class
+perturbation, with an intact control and a sign control.** Re-use context: any fusion where a
+channel can freeze or go stale; the picrawler stack has no voter today, so nothing to carry
+there. Not a default: the operator's eye and the launcher decide promotion.
+
+### K3 — `trust_source` / `trust_power` (SHIPPED 2026-09-05; bench WORKING)
+
+The bench said the intact-pair bias (0.67 on the clean sensor against the optimal 0.90) is the
+*form*, not the timing: a Kalman fusion weights by inverse variance, and `1/(err+ε)`
+compresses a 9:1 precision ratio to about 2:1. Two knobs, both default to the legacy
+expression bit for bit: `trust_source ∈ {default, tle, quant_error, expected}` and
+`trust_power` (precision `= 1/(err+ε)^power`; 1 = legacy, 2 = inverse variance, −1 = the
+sign control). `expected` is a new `RealityToken::expected_error` the EPM fills.
+
+**A refutation on the way.** `expected_error` was first the winner node's own running RMS
+residual, the per-mode innovation spread. On S5 it barely moved trust (0.672 → 0.688) and
+doubled its flicker: a noisy channel tiles its noise finely, so every node's own residual is
+small and the per-node value cannot tell noisy from clean. The channel's running expected TLE
+(the EPM's `ema_tle`) is the right quantity and is what ships.
+
+| S5 arm (n = 20 paired) | legacy | `expected`, power 2 | Δ, 95 % CI |
+|---|---|---|---|
+| intact pair: trust on the clean sensor (optimum 0.90) | 0.672 | **0.812** | +0.140 ± 0.001 |
+| intact pair: fused MSE (optimum 0.0090, best single 0.0100) | 0.01329 | **0.00976** | ÷1.36 |
+| intact pair: tick-to-tick trust std | 0.054 | **0.013** | ÷4.3 (instantaneous `tle` at power 2 gives 0.799 / 0.00938 with std 0.079) |
+| dead sensor alone: trust on it after death | 0.659 | 0.786 | worse, as predicted: a dead channel's expected error → 0 |
+| dead sensor + activity term: trust on it / fused MSE after death | 0.002 / 0.0099 | 0.005 / 0.0099 | the two levers compose: intact gain kept, dead sensor stripped |
+| under the informativeness gate (the Cell config): trust on the clean sensor / fused MSE | 0.478 / 0.0251 | **0.690 / 0.0135** | repairs half of the gate's noisy-channel inversion |
+| wrong sign (power −1): trust / fused MSE | 0.672 / 0.0133 | 0.325 / 0.0422 | ×3.2 worse |
+
+Gain-0 byte-identity: a structural comparison of the S5 reference at default params shows
+zero differing lines (the new token field is the only textual change). Two unit tests.
+
+**Creature test: Gaussian noise on the scent compass** (operator's choice).
+`ScentCompass.noise_after_ticks` / `noise_sd` (default off) add N(0, sd) to the published
+direction and proximity from a tick, deterministically. A/B on
+`the_cell_maze_fusion__dims3.json`, 20 paired worlds, 240 s, noise sd 0.5 from tick 4800:
+
+| arm | eats | by third (pre / mid / post) | paired vs `noisy` (eats) |
+|---|---|---|---|
+| base | 13.6 | 5.55 / 4.10 / 3.95 | +3.50 ± 1.76, t 4.2 (the noise's cost, 15 of 20 worlds) |
+| noisy scent, legacy trust | 10.1 | 5.55 / 2.75 / 1.80 | |
+| `expected` + power 2, no noise | 13.95 | 5.60 / 4.45 / 3.90 | +0.35 ± 1.09 vs base, tie (no cost when nothing is wrong) |
+| noisy + `expected` power 2 | 11.6 | 5.60 / 3.30 / 2.70 | **+1.50 ± 3.20, t 1.0, 8 of 20 up, 8 down** |
+| noisy + both levers | 11.45 | 5.70 / 2.95 / 2.80 | +1.35 ± 2.11, t 1.3 |
+| noisy + wrong sign | 10.75 | 5.40 / 3.00 / 2.35 | +0.65 ± 2.60, tie |
+
+**Verdict on the Cell: `NULL`.** The noise costs a quarter of the eats, the lever recovers
+under half of that on the mean with a spread so wide that eight worlds improve and eight get
+worse, and the wrong-sign arm is not worse than doing nothing, so the trust weighting is
+not load-bearing here in either direction. The reason is the one the repair-ties-broken
+result already gave: the Cell's camera is blind most of the run and `BearingFusion` drops it
+on its own floor, so most of the time there is no second live channel to move weight
+toward. Inverse-variance trust only has work to do when two live channels disagree in
+quality, which the bench's intact pair models and this creature rarely offers. Re-use
+context: a fusion with two channels alive at once (the stride-odometry complementary
+filter on the picrawler is exactly such a pair, fused today by hand-set gains), or the
+vision-rich `the_cell_vision_dtest` room where the camera sees food often.
+
+**Stage 2 closes** with two shipped, default-off levers: the activity term (WORKING on bench
+and creature) and inverse-variance expected-error trust (WORKING on bench, NULL on the Cell
+for lack of a second live channel). K4 stale inflation is subsumed: a republished token has
+zero displacement, so the activity term already discounts it (bench sub-rate arm ÷1.13).
 
 ## Stage 3 — restore lost concepts
 

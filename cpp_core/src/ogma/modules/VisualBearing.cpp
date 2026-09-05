@@ -108,6 +108,10 @@ ParamSchema VisualBearing::params_schema() const {
         {"lesion_after_ticks", ParamMutability::HotMutable,
             "≥0 → from this many ticks on, emit [0,0] (DROPOUT: knock vision out mid-run "
             "for the perturbation→recovery demo). <0 = never.", ParamValue{int64_t{-1}}},
+        {"stick_after_ticks", ParamMutability::HotMutable,
+            "Kalman-lessons Stage 2 perturbation: from this tick on, republish the LAST bearing seen with food "
+            "in view, unchanged (a STUCK sensor: constant, plausible, and not caught by BearingFusion's "
+            "confidence floor).  <0 (default) = off, byte-identical.", ParamValue{int64_t{-1}}},
         {"force_lesion", ParamMutability::HotMutable,
             "Immediate lesion — emit [0,0] every tick (the UI 'knock out vision' toggle).",
             ParamValue{false}},
@@ -144,6 +148,7 @@ ParamMap VisualBearing::current_params() const {
     m["lesion_after_ticks"]  = ParamValue{int64_t(lesion_after_ticks_)};
     m["lesion_until_ticks"]  = ParamValue{int64_t(lesion_until_ticks_)};
     m["force_lesion"]        = ParamValue{force_lesion_};
+    m["stick_after_ticks"]   = ParamValue{int64_t(stick_after_ticks_)};
     m["learn_appearance"]    = ParamValue{learn_appearance_};
     m["hit_topic"]           = ParamValue{hit_topic_};
     m["appearance_alpha"]    = ParamValue{double(appearance_alpha_)};
@@ -171,6 +176,7 @@ void VisualBearing::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lesion_after_ticks",  [&](auto const& v){ lesion_after_ticks_  = int(get_int(v, "lesion_after_ticks")); });
     apply_param(params, "lesion_until_ticks",  [&](auto const& v){ lesion_until_ticks_  = int(get_int(v, "lesion_until_ticks")); });
     apply_param(params, "force_lesion",        [&](auto const& v){ force_lesion_        = get_bool(v, "force_lesion"); });
+    apply_param(params, "stick_after_ticks",   [&](auto const& v){ stick_after_ticks_   = int(get_int(v, "stick_after_ticks")); });
     apply_param(params, "learn_appearance",    [&](auto const& v){ learn_appearance_    = get_bool(v, "learn_appearance"); });
     apply_param(params, "hit_topic",           [&](auto const& v){ hit_topic_           = get_string(v, "hit_topic"); });
     apply_param(params, "appearance_alpha",    [&](auto const& v){ appearance_alpha_    = float(get_double(v, "appearance_alpha")); });
@@ -193,6 +199,7 @@ void VisualBearing::on_param_change(std::string_view key, ParamValue const& valu
     if      (k == "lesion_after_ticks") lesion_after_ticks_ = int(get_int(value, k));
     else if (k == "lesion_until_ticks") lesion_until_ticks_ = int(get_int(value, k));
     else if (k == "force_lesion")       force_lesion_       = get_bool(value, k);
+    else if (k == "stick_after_ticks")  stick_after_ticks_  = int(get_int(value, k));
     else if (k == "appearance_alpha")   appearance_alpha_   = float(get_double(value, k));
     else if (k == "color_match_dist")   color_match_dist_   = float(get_double(value, k));
     else if (k == "central_ema_rate")   central_ema_rate_   = float(get_double(value, k));
@@ -309,14 +316,29 @@ void VisualBearing::tick(uint64_t tick_id) {
         }
     }
 
+    // Stuck-sensor perturbation (see the header).  Remember the last bearing
+    // published with food in view; from stick_after_ticks on, publish that
+    // reading unchanged.  tick_count_ was already advanced above.
+    // The reading latched is the last sighting before the stick tick, or, if
+    // there was none, the FIRST sighting after it — so every world in which
+    // food is ever seen gets a stuck camera, not only those that saw it early.
+    const bool stick_active = stick_after_ticks_ >= 0 && int64_t(tick_count_) > int64_t(stick_after_ticks_);
+    if (!(stick_active && have_last_seen_) && mag_ > 0.0f) {
+        last_seen_[0] = vx_; last_seen_[1] = vy_; last_seen_[2] = proximity_gain_ * green_frac_;
+        have_last_seen_ = true;
+    }
+    stuck_ = stick_active && have_last_seen_;
+    float ox = vx_, oy = vy_, op = proximity_gain_ * green_frac_;
+    if (stuck_ && have_last_seen_) { ox = last_seen_[0]; oy = last_seen_[1]; op = last_seen_[2]; }
+
     auto out = std::make_shared<ProprioToken>();
     out->tick_id     = tick_id;
     out->producer_id = id_.empty() ? std::string("visual_bearing") : id_;
     out->sensor      = "visual_bearing";
     out->values.resize(emit_proximity_ ? 3 : 2);
-    out->values[0] = vx_;
-    out->values[1] = vy_;
-    if (emit_proximity_) out->values[2] = proximity_gain_ * green_frac_;
+    out->values[0] = ox;
+    out->values[1] = oy;
+    if (emit_proximity_) out->values[2] = op;
     bus_->publish(output_topic_, out);
 }
 
@@ -331,6 +353,7 @@ nlohmann::json VisualBearing::diag_snapshot() const {
         {"mag", mag_},
         {"green_frac", green_frac_},
         {"lesioned", lesioned_},
+        {"stuck", stuck_},
     };
 }
 
