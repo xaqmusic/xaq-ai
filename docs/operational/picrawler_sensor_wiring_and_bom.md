@@ -18,7 +18,7 @@ HAT pinout from [SunFounder's hardware introduction](https://docs.sunfounder.com
 | **SPI** | 7-pin P2.54: `BSY(GPIO6) · CS(CE0/GPIO8) · SCK(GPIO11) · MI(GPIO9) · MO(GPIO10) · 3V3 · GND` | **ICM-20948** |
 | ADC | **A0–A3** user, 3-pin P2.54, **12-bit, 3.3 V reference**; A4 = battery via 20K/10K | 4 × FSR |
 | Servo PWM | **12 channels P0–P11**, 3-pin P2.54, **5 V rail** | the 12 MG90S (existing) |
-| Digital | D0→GPIO17, D1→GPIO4, D2→GPIO27, D3→GPIO22 | **ultrasonic trig + echo** (§7) — D2/D3 stay free |
+| Digital | D0→GPIO17, D1→GPIO4, D2→GPIO27, D3→GPIO22 | **ultrasonic trig = D2, echo = D3** — ✅ **MEASURED 2026-08-30** (§7); **D0/D1 are the free pair**, not D2/D3 |
 | Power in | 6.0–8.4 V, XH2.54 3-pin | the INA219 goes **here** (§3) |
 
 ⚠ **Almost every GPIO is consumed by the HAT.** Only GPIO7 (CE1) and GPIO20 (NC) are unlisted,
@@ -42,7 +42,7 @@ connectors** — which, as it happens, it all does.
 
 | # | item | qty | spec that matters | note |
 |---|---|---|---|---|
-| 1 | **ICM-20948** breakout | 1 | must expose **CS / SCK / SDI / SDO** for SPI | many QWIIC boards break out I²C only — **check before ordering** |
+| 1 | **ICM-20948** breakout | 1 | must expose **CS / SCK / SDI / SDO** for SPI | ✅ **CONFIRMED 2026-08-30** — the received board breaks out `NCS` and `ADO`, so SPI is available (§4) |
 | 2 | **INA219** breakout | 1 | I²C `0x40`, 26 V bus max ✓ | **shunt must be changed — see #3** |
 | 3 | **0.01 Ω shunt resistor** | 1 | 2512, ≥ 1 W, 1 % | replaces the stock 0.1 Ω (§3) |
 | 4 | **VL53L0X / VL53L1X** ToF | 1 | I²C `0x29` | belly clearance |
@@ -59,11 +59,12 @@ connectors** — which, as it happens, it all does.
 
 | # | item | qty | note |
 |---|---|---|---|
-| 8 | XH2.54 3-pin M+F pigtail pair | 1 | to break the battery line for the INA219 without cutting the pack |
+| 8 | XH2.54 3-pin M+F pigtail pair | 1 | to break the battery line for the INA219 without cutting the pack — **or one M-to-F extension cable, cut in half** (§3.1) |
 | 9 | 3-pin P2.54 leads (servo-style) | 4 | FSR → A0–A3 |
 | 10 | SH1.0 4-pin QWIIC cable | 2 | I²C chain: INA219 + ToF |
 | 11 | 7-pin P2.54 cable / header | 1 | SPI → IMU |
 | 12 | 30 AWG silicone hookup wire | — | FSR tails; flexible enough to survive full swing |
+| 12b | **22 AWG silicone hookup wire** | — | the INA219 power path only — 26 AWG stock cable is marginal at 2–3 A (§3.1) |
 | 13 | Heat-shrink, Kapton tape | — | tail strain relief |
 
 ### Mechanical — the foot stack (§5)
@@ -118,6 +119,29 @@ transients, and adding 300 mV of series drop right before that threshold is a br
 - **The Pi's own draw is common-mode**, roughly constant across a gait. Subtract an idle
   baseline before the energy term consumes it.
 
+### 3.1 Building the inline module non-destructively
+
+The pack is broken with connectors, never by cutting it. **The connector is JST XH, 2.54 mm
+pitch, 3-pin.** The HAT carries the male header (pins); the battery ends in a female housing
+(crimp sockets). So the module needs a **female pigtail toward the HAT** and a **male pigtail
+toward the pack**. The cheapest correct part is a **JST XH 2.54 3-pin male-to-female extension
+cable cut in half** — both halves are then guaranteed to mate.
+
+⚠ **JST XH contacts are rated 3 A each, and that is almost certainly why a 2-wire battery gets
+a 3-pin connector: the pins are paralleled to share current.** Steady draw is ~2.3 A with
+transients plausibly 4–7 A, at or past a single contact. **Two consequences.** The pin order is
+load-bearing — **meter it, never assume it**: with the pack unplugged, identify `+`/`−` on the
+battery's own connector and check which pins are commoned, and check continuity between pins on
+the HAT side. Reverse polarity destroys the HAT, and mis-reading the paralleling quietly puts
+the full current through one 3 A contact. And the module carries **three** conductors, not two:
+the paralleled polarity passes straight through, and only the single sensed leg goes through
+`Vin+`/`Vin−`.
+
+⚠ **Wire gauge.** Stock XH extension cables are usually 26 AWG, marginal at 2–3 A continuous and
+poor on the transients. XH crimp terminals accept 22–28 AWG — **use 22 AWG silicone**, the
+thickest the terminal takes. The INA219 breakout's own screw terminals and traces are in this
+path too (§2 #2): check their rating before they become the weakest link.
+
 ---
 
 ## 4. IMU — ICM-20948 on SPI
@@ -126,15 +150,26 @@ transients, and adding 300 mV of series drop right before that threshold is a br
 and host-side jitter integrates directly into dead-reckoned yaw. SPI removes that at the source
 rather than filtering it afterward, and the 7-pin header carries 3V3 and GND, so it is one cable.
 
-| HAT SPI header | RPi | → ICM-20948 |
-|---|---|---|
-| `BSY` | GPIO6 | *(spare — wire to INT if the breakout has one)* |
-| `CS` | GPIO8 / CE0 | `CS` |
-| `SCK` | GPIO11 | `SCK` |
-| `MI` | GPIO9 (MISO) | `SDO` / `AD0` |
-| `MO` | GPIO10 (MOSI) | `SDI` |
-| `3V3` | — | `VDD` + `VDDIO` |
-| `GND` | — | `GND` |
+**The board on the bench (confirmed 2026-08-30)** breaks out
+`VCC · GND · SCL · SDA · NCS · ADO · INT · FSY · ACL · ADA`. `NCS` is the proof SPI is
+available — that pin exists only for SPI. Wire it by the silkscreen:
+
+| HAT SPI header | RPi | → breakout pin | note |
+|---|---|---|---|
+| `3V3` | — | `VCC` | powers VDD + VDDIO |
+| `GND` | — | `GND` | |
+| `SCK` | GPIO11 | `SCL` | I²C name on a pin that is SCK in SPI mode |
+| `MO` | GPIO10 (MOSI) | `SDA` | likewise SDI in SPI mode |
+| `MI` | GPIO9 (MISO) | **`ADO`** | ⚠ **there is no pin labelled `SDO`** |
+| `CS` | GPIO8 / CE0 | `NCS` | |
+| `BSY` | GPIO6 | `INT` | optional |
+
+⚠ **MISO goes to `ADO`.** In I²C mode that pin is the address-select bit; in SPI mode it is the
+data output. Looking for an `SDO` pin is where a first wiring attempt stalls.
+
+**Leave `FSY`, `ACL` and `ADA` unconnected.** `ACL`/`ADA` are the auxiliary I²C master bus, and
+the decision below is not to enable the internal I²C master — which is what leaves the AK09916
+magnetometer dark. Accepted trade: dead-reckoned yaw comes from the gyro.
 
 **Enable in `/boot/firmware/config.txt`:**
 ```
@@ -224,12 +259,32 @@ doc's §7.7.
 
 | concern | detail |
 |---|---|
-| pins | trigger + echo on **D0 (GPIO17) / D1 (GPIO4)** — these were kept free for exactly this |
+| pins | ✅ **MEASURED 2026-08-30: trigger = D2 (GPIO27), echo = D3 (GPIO22).** This entry previously read D0/D1 and was wrong — see the measurement below. **D0/D1 are the free pair.** |
 | ⚠ level | HC-SR04-class modules drive echo at **5 V**; the Pi is 3.3 V-tolerant only. **Confirm SunFounder's module is already shifted for the HAT** before connecting — if not, add a divider or a shifter |
 | rate | **~10–20 Hz, off the tick thread.** Ping flight time bounds it; it cannot be a 50 Hz channel |
 | accuracy | echo is a userspace **pulse width** at ~58 µs/cm — 100 µs of scheduling jitter ≈ 1.7 cm |
 | blind spots | absorbed by carpet, reflects away past ~30° off-normal, ~15° cone reports the nearest thing in a fat lobe |
 | unmeasured | whether 12 servos couple acoustic noise into a 40 kHz receiver. Ten minutes on the bench |
+
+**How the pins were established, since the documented pair was wrong.** Holding every D pin
+as an *input* and reading it twice — once with an internal pull-up, once with a pull-down —
+separates "connected to a device output" from "floating" without driving anything, so there
+is no risk of contending with a module that is itself driving. GPIO22 read low under **both**
+pulls (a device output idling low); GPIO4, GPIO17 and GPIO27 all followed the pull, i.e.
+nothing is attached. Triggering GPIO27 then produced a clean echo on GPIO22 on every ping.
+(The same sweep also showed **GPIO20 driven low** — the speaker amplifier enable, §"speaker".)
+
+⚠ **Echo level (§8.7) is resolved in practice, not in theory.** The module drives GPIO22
+directly and the pin has behaved across thousands of pings, so SunFounder's HAT is doing
+whatever shifting is needed. We did not meter the echo's high level with a scope; if that
+matters later, measure it rather than inferring it from "it works".
+
+**Timing is kernel-side, not userspace.** The BOM's original worry — "echo is a userspace
+pulse width at ~58 µs/cm, so 100 µs of scheduling jitter is 1.7 cm" — applies to a poll loop.
+The driver uses libgpiod v2 **edge events**, whose timestamps are taken in the interrupt path,
+so the width is the difference of two kernel timestamps and userspace scheduling only affects
+*when we learn* the answer. Measured spread on a static target: **866 µs ± 3 µs**, i.e. about
+±0.5 mm.
 
 **Expose it as an instrument first.** Put it on the dashboard beside the belly channel and watch
 it across existing gaits. It earns a lever only once someone can name the prediction error it
@@ -246,10 +301,13 @@ reduces — and only after the authority check.
 3. **Actual gait current draw** — measure with the inline meter (#18) before trusting the 0.01 Ω
    choice. If peak gait current is well under 3 A the stock 0.1 Ω would give better resolution,
    but the brownout margin argues against it either way.
-4. **Whether the chosen ICM-20948 breakout exposes SPI** — verify on the product page before
-   ordering; several popular QWIIC boards are I²C-only.
+4. ~~**Whether the chosen ICM-20948 breakout exposes SPI**~~ — ✅ **RESOLVED 2026-08-30**: the
+   received board exposes `NCS` and `ADO`, so SPI is available. Pin map in §4.
 5. **FSR creep** — hold 175 g for 60 s and record the drift **before** the graded `unloaded`
    criterion term is trusted. If it is large, that term wants the threshold, not the magnitude.
 6. **Ultrasonic mounting height and pitch** — the role is settled (forward, obstacle avoidance),
    but height and downward pitch set what it can see of the floor ahead. Record both.
-7. **Whether the ultrasonic module's echo is already level-shifted** for the HAT's 3.3 V pins.
+7. ~~**Whether the ultrasonic module's echo is already level-shifted**~~ — ⚠ **partially resolved
+   2026-08-30**: the module drives GPIO22 (D3) directly and thousands of pings have been read
+   without incident, so the HAT handles it. The high level was never metered with a scope;
+   treat as "works", not as "characterised".

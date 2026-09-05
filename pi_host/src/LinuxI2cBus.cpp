@@ -55,4 +55,17 @@ uint8_t LinuxI2cBus::read_byte(uint8_t addr) {
     }
 }
 
+std::vector<uint8_t> LinuxI2cBus::read_bytes(uint8_t addr, std::size_t n) {
+    select(addr);
+    std::vector<uint8_t> out(n);
+    for (int attempt = 0;; ++attempt) {
+        // One transaction: a short read is a bus fault, not a partial result to
+        // stitch together — a second read() would restart the device's pointer.
+        if (::read(fd_, out.data(), n) == static_cast<ssize_t>(n)) return out;
+        if (attempt >= kRetries)
+            throw std::runtime_error(std::string("LinuxI2cBus: read_bytes: ") + std::strerror(errno));
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+}
+
 } // namespace ogma::hw

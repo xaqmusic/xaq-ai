@@ -1,0 +1,41 @@
+# ogma_host — the brain, on the robot.  Install with pi_host/systemd/install.sh
+#
+# ⚠ SENSES ONLY.  This unit runs the picrawler_senses graph, which has no
+# ActionDecoder, and ogma_host has no servo path at all (port doc SPEC §1.1).
+# Actuation belongs to ogma_benchd over its own control verbs.  That is what makes
+# this safe to enable at boot on an unattended robot.
+#
+# --video publishes the camera on control_port+2 (7402) for the Godot dashboard. A PUB
+# socket with no subscriber drops messages without queuing, so it costs ~nothing until
+# someone looks; and it reads the camera through a NON-CONSUMING snapshot, so a viewer
+# can never starve the EPM of an observation.
+#
+# ⚠ IT HOLDS THE CAMERA.  rpicam-vid runs as a child for as long as this service is
+# up, so other camera consumers will find the device busy.  `systemctl stop
+# ogma-host` before using rpicam-still/rpicam-vid by hand.
+[Unit]
+Description=xaq PiCrawler brain (ogma_host) — senses only, no actuation
+# Deliberately NOT After=network-online.target: SPEC §4.7 — the network must never
+# be a boot dependency.  The brain starts regardless of which link came up, or none.
+After=local-fs.target sound.target
+
+[Service]
+User=xaqmusic
+WorkingDirectory=/home/xaqmusic/xaq-ai
+# --rt asks for SCHED_FIFO, which SPEC §1 specifies for this loop; the capability
+# below is what lets a non-root service actually get it.  Without it ogma_host says
+# so and runs SCHED_OTHER rather than failing.
+AmbientCapabilities=CAP_SYS_NICE
+ExecStart=/home/xaqmusic/xaq-ai/pi_host/build/ogma_host \
+    --config godot_host/project/addons/ami_ogma/configs/picrawler_senses.json \
+    --hz 50 --mic --camera --range --listen 0.0.0.0 --video --rt --quiet
+# --quiet because the inspector is the live view; a 50 Hz process appending cost
+# lines forever is how a 2 GB card fills up.  Startup lines and sensor failures are
+# still logged, which is what post-hoc diagnosis actually needs.
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/xaqmusic/xaq-ai/pi_host/log/host.stdout
+StandardError=append:/home/xaqmusic/xaq-ai/pi_host/log/host.stdout
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,7 @@
 //
 // Not a thread: the owner calls tick() at the servo frame rate.
 #include "ogma/hw/RobotHat.hpp"
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -39,6 +40,11 @@ public:
     ServoDriver(RobotHat& hat, ServoDriverConfig cfg = {});
 
     void set_limits(int ch, ServoLimits lim);
+    // Slew rate for every armed channel, changeable at runtime (pose moves run gentler).
+    void set_slew_us_per_tick(int v) { cfg_.slew_us_per_tick = std::max(1, v); }
+    int  slew_us_per_tick() const { return cfg_.slew_us_per_tick; }
+    // True when every armed channel has reached its target.
+    bool settled() const { for (int c = 0; c < N; ++c) if (armed_[c] && current_[c] != target_[c]) return false; return true; }
     ServoLimits limits(int ch) const { return lim_[ch]; }
 
     // Request a pulse width; it is clamped now and slewed by tick().

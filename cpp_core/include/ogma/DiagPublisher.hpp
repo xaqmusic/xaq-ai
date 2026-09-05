@@ -62,7 +62,11 @@ class OgmaInstance;
 
 class DiagPublisher {
 public:
-    explicit DiagPublisher(uint16_t port);
+    // bind_addr defaults to loopback, which is what the Godot host has always used and
+    // what it keeps: a diag stream is unauthenticated, so opening it to the network is a
+    // deliberate act, not a default.  ogma_host on the robot passes "0.0.0.0" behind its
+    // own --listen flag so the inspector can attach from the laptop.
+    explicit DiagPublisher(uint16_t port, std::string bind_addr = "127.0.0.1");
     ~DiagPublisher();
 
     DiagPublisher(DiagPublisher const&) = delete;
@@ -104,10 +108,12 @@ public:
     void set_host_tick_hz(double hz) { host_tick_hz_ = hz; }
 
     uint16_t port() const { return port_; }
+    const std::string& bind_addr() const { return bind_addr_; }
     bool     running() const { return running_.load(); }
 
 private:
     uint16_t                  port_;
+    std::string               bind_addr_;
     std::atomic<bool>         running_{false};
     void*                     ctx_       = nullptr;
     void*                     sock_      = nullptr;

@@ -11,7 +11,8 @@
 
 namespace ogma {
 
-DiagPublisher::DiagPublisher(uint16_t port) : port_(port) {}
+DiagPublisher::DiagPublisher(uint16_t port, std::string bind_addr)
+    : port_(port), bind_addr_(std::move(bind_addr)) {}
 
 DiagPublisher::~DiagPublisher() { stop(); }
 
@@ -32,7 +33,7 @@ bool DiagPublisher::start() {
     int hwm = 64;
     zmq_setsockopt(sock_, ZMQ_SNDHWM, &hwm, sizeof(hwm));
     char addr[64];
-    std::snprintf(addr, sizeof(addr), "tcp://127.0.0.1:%u", port_);
+    std::snprintf(addr, sizeof(addr), "tcp://%s:%u", bind_addr_.c_str(), port_);
     if (zmq_bind(sock_, addr) != 0) {
         std::cerr << "DiagPublisher: zmq_bind " << addr << " failed: "
                   << zmq_strerror(zmq_errno()) << "\n";
