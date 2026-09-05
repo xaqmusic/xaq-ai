@@ -124,6 +124,16 @@ private:
     // dimensionless and self-calibrating (in [0,1]); raw trust is multiplied by
     // activity^activity_gain.  A republished (sub-rate) token has zero displacement,
     // so a stale channel decays the same way.  0 (default) = byte-identical.
+    // Kalman-lessons Stage 2, lever 2 — WHICH error and WHAT power.  Kalman weights
+    // by inverse VARIANCE; 1/(err+ε) compresses a 9:1 precision ratio to ~2:1
+    // (bench S5: trust on the clean sensor 0.67 vs the optimal 0.90).
+    //   trust_source: "default" = each path's own source (legacy: tle; informativeness
+    //                 path: quant_error), "tle", "quant_error", or "expected" = the
+    //                 winner node's running RMS residual (RealityToken::expected_error).
+    //   trust_power:  precision = 1 / (err + ε)^power; 1 (default) = legacy, byte-
+    //                 identical; 2 = inverse variance; −1 = the wrong-sign control.
+    std::string  trust_source_             = "default";
+    float        trust_power_              = 1.0f;
     float        activity_gain_            = 0.0f;
     float        activity_alpha_           = 0.1f;    // EMA rate of the displacement
     float        activity_peak_decay_      = 0.999f;  // per-tick decay of the running peak

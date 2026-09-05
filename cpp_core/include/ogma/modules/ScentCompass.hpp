@@ -29,6 +29,7 @@
 #include "ogma/Module.hpp"
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -84,6 +85,17 @@ private:
     // VisualBearing / BearingEstimator. Default off = bit-identical for existing runs.
     int         lesion_after_ticks_ = -1;   // ≥0 → emit [0,0] from this tick on
     bool        force_lesion_       = false;// immediate lesion (UI toggle)
+    // Kalman-lessons Stage 2 perturbation: a NOISY sensor.  From noise_after_ticks
+    // on, N(0, noise_sd) is added to the published direction (and proximity) —
+    // a channel that moves plenty but is unreliable, the case the voter's
+    // expected-error / inverse-variance trust targets (a stuck channel is the
+    // activity term's).  Deterministic (derive_rng from master_seed).  <0 = off.
+    int         noise_after_ticks_ = -1;
+    float       noise_sd_          = 0.0f;
+    uint64_t    master_seed_       = 0;
+    std::mt19937_64 noise_rng_;
+    std::normal_distribution<float> noise_dist_{0.0f, 1.0f};
+    bool        noisy_ = false;
 
     std::vector<float> scent_;          // latest per-nostril concentrations
     float cx_ = 0.0f;                   // +right

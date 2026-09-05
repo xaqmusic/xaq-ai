@@ -466,6 +466,40 @@ perturbation, with an intact control and a sign control.** Re-use context: any f
 channel can freeze or go stale; the picrawler stack has no voter today, so nothing to carry
 there. Not a default: the operator's eye and the launcher decide promotion.
 
+### K3 — `trust_source` / `trust_power` (SHIPPED 2026-09-05; bench WORKING)
+
+The bench said the intact-pair bias (0.67 on the clean sensor against the optimal 0.90) is the
+*form*, not the timing: a Kalman fusion weights by inverse variance, and `1/(err+ε)`
+compresses a 9:1 precision ratio to about 2:1. Two knobs, both default to the legacy
+expression bit for bit: `trust_source ∈ {default, tle, quant_error, expected}` and
+`trust_power` (precision `= 1/(err+ε)^power`; 1 = legacy, 2 = inverse variance, −1 = the
+sign control). `expected` is a new `RealityToken::expected_error` the EPM fills.
+
+**A refutation on the way.** `expected_error` was first the winner node's own running RMS
+residual, the per-mode innovation spread. On S5 it barely moved trust (0.672 → 0.688) and
+doubled its flicker: a noisy channel tiles its noise finely, so every node's own residual is
+small and the per-node value cannot tell noisy from clean. The channel's running expected TLE
+(the EPM's `ema_tle`) is the right quantity and is what ships.
+
+| S5 arm (n = 20 paired) | legacy | `expected`, power 2 | Δ, 95 % CI |
+|---|---|---|---|
+| intact pair: trust on the clean sensor (optimum 0.90) | 0.672 | **0.812** | +0.140 ± 0.001 |
+| intact pair: fused MSE (optimum 0.0090, best single 0.0100) | 0.01329 | **0.00976** | ÷1.36 |
+| intact pair: tick-to-tick trust std | 0.054 | **0.013** | ÷4.3 (instantaneous `tle` at power 2 gives 0.799 / 0.00938 with std 0.079) |
+| dead sensor alone: trust on it after death | 0.659 | 0.786 | worse, as predicted: a dead channel's expected error → 0 |
+| dead sensor + activity term: trust on it / fused MSE after death | 0.002 / 0.0099 | 0.005 / 0.0099 | the two levers compose: intact gain kept, dead sensor stripped |
+| under the informativeness gate (the Cell config): trust on the clean sensor / fused MSE | 0.478 / 0.0251 | **0.690 / 0.0135** | repairs half of the gate's noisy-channel inversion |
+| wrong sign (power −1): trust / fused MSE | 0.672 / 0.0133 | 0.325 / 0.0422 | ×3.2 worse |
+
+Gain-0 byte-identity: a structural comparison of the S5 reference at default params shows
+zero differing lines (the new token field is the only textual change). Two unit tests.
+
+**Creature test: Gaussian noise on the scent compass** (operator's choice).
+`ScentCompass.noise_after_ticks` / `noise_sd` (default off) add N(0, sd) to the published
+direction and proximity from a tick, deterministically. A/B in flight on
+`the_cell_maze_fusion__dims3.json`, 20 paired worlds, noise sd 0.5 from tick 4800: arms `base`,
+`noisy`, `k3`, `k3_noisy`, `wrong_noisy` (power −1), `k3_act_noisy` (both levers).
+
 ## Stage 3 — restore lost concepts
 
 K2 `transition_surprise_kind ∈ {displacement, logprob}` from the existing `transition_counts_`,

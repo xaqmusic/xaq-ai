@@ -85,6 +85,14 @@ ParamSchema LateralVoter::params_schema() const {
         {"surprise_floor",       ParamMutability::HotMutable,       "Phase 6.6.E: minimum trust-scale floor (avoid zeroing under sustained surprise)", ParamValue{0.05}},
         {"surprise_kind",        ParamMutability::HotMutable,       "Phase 6.6.H: 'binary' (0/1 node-id match; default + same as 6.6.E) or 'embedding' (cosine-distance surprise (1-cos)/2 in [0,1])", ParamValue{std::string("binary")}},
         {"surprise_calibrate",   ParamMutability::HotMutable,       "Phase 6.6.J: when true (default), the surfaced surprise_ema applies Bayesian shrinkage toward a 0.5 prior with strength 1/surprise_alpha so cold-start EPMs don't publish 'perfect predictor' immediately.  Trust modulator still uses the raw EMA.", ParamValue{true}},
+        {"trust_source",         ParamMutability::HotMutable,
+            "Kalman-lessons Stage 2: which error the precision is computed from.  'default' = each path's own "
+            "(legacy: tle; informativeness path: quant_error); 'tle'; 'quant_error'; 'expected' = the winner node's "
+            "running RMS residual (RealityToken::expected_error), the per-mode innovation spread.", ParamValue{std::string("default")}},
+        {"trust_power",          ParamMutability::HotMutable,
+            "Kalman-lessons Stage 2: precision = 1/(err + eps)^power.  1 (default) = legacy, byte-identical; 2 = inverse "
+            "variance (the Kalman weighting; bench S5 predicts trust on the clean sensor 0.67 -> ~0.85); -1 = wrong-sign control.",
+            ParamValue{1.0}},
         {"activity_gain",        ParamMutability::HotMutable,
             "Kalman-lessons Stage 2: ACTIVITY term (doctrine 2.3's observability proxy).  Raw trust is multiplied by "
             "activity^gain where activity = EMA of the channel's latent displacement / its own decaying peak, in [0,1].  "
@@ -122,6 +130,8 @@ void LateralVoter::on_setup(Bus* bus, ParamMap const& params) {
         }
     });
     apply_param(params, "trust_epsilon",       [&](auto const& v){ trust_epsilon_       = float(get_double(v, "trust_epsilon")); });
+    apply_param(params, "trust_source",        [&](auto const& v){ trust_source_        = get_string(v, "trust_source"); });
+    apply_param(params, "trust_power",         [&](auto const& v){ trust_power_         = float(get_double(v, "trust_power")); });
     apply_param(params, "activity_gain",       [&](auto const& v){ activity_gain_       = float(get_double(v, "activity_gain")); });
     apply_param(params, "activity_alpha",      [&](auto const& v){ activity_alpha_      = float(get_double(v, "activity_alpha")); });
     apply_param(params, "activity_peak_decay", [&](auto const& v){ activity_peak_decay_ = float(get_double(v, "activity_peak_decay")); });
@@ -159,6 +169,8 @@ void LateralVoter::on_setup(Bus* bus, ParamMap const& params) {
 void LateralVoter::on_param_change(std::string_view key, ParamValue const& value) {
     auto k = std::string(key);
     if      (k == "trust_epsilon")        trust_epsilon_       = float(get_double(value, k));
+    else if (k == "trust_source")         trust_source_        = get_string(value, k);
+    else if (k == "trust_power")          trust_power_         = float(get_double(value, k));
     else if (k == "activity_gain")        activity_gain_       = float(get_double(value, k));
     else if (k == "activity_alpha")       activity_alpha_      = float(get_double(value, k));
     else if (k == "activity_peak_decay")  activity_peak_decay_ = float(get_double(value, k));
@@ -370,6 +382,18 @@ void LateralVoter::tick(uint64_t tick_id) {
     // modulator if active: sustained mismatch between predicted and observed
     // winners attenuates that modality's contribution down to surprise_floor_.
     std::vector<float> raw(active.size(), 0.0f);
+    // Stage 2 lever 2: which error, and what power (see LateralVoter.hpp).  With
+    // the defaults both lambdas reduce to the legacy expressions, bit for bit.
+    auto err_of = [&](RealityToken const& t, float path_default) -> float {
+        if (trust_source_ == "expected")    return std::abs(t.expected_error);
+        if (trust_source_ == "quant_error") return std::abs(t.quant_error);
+        if (trust_source_ == "tle")         return std::abs(t.tle);
+        return path_default;
+    };
+    auto precision_of = [&](float err) -> float {
+        if (trust_power_ == 1.0f) return 1.0f / (err + trust_epsilon_);
+        return 1.0f / std::pow(err + trust_epsilon_, trust_power_);
+    };
     for (size_t i = 0; i < active.size(); ++i) {
         float r;
         if (informativeness_gain_ > 0.0f) {
@@ -380,7 +404,7 @@ void LateralVoter::tick(uint64_t tick_id) {
             //     informative ones).
             //   info = floor + (1−floor)·winner_entropy   ← actual discrimination;
             //     a flat/degenerate channel → entropy 0 → factor = floor → stripped.
-            float precision = 1.0f / (std::abs(active[i].second->quant_error) + trust_epsilon_);
+            float precision = precision_of(err_of(*active[i].second, std::abs(active[i].second->quant_error)));
             float ci   = channel_informativeness(*active[i].second);   // baked-count based, ∈[0,1]
             float info = info_floor_ + (1.0f - info_floor_) * ci;
             // NO floor on `info` here — a genuinely uninformative channel (ci=0,
@@ -389,7 +413,7 @@ void LateralVoter::tick(uint64_t tick_id) {
             r = precision * std::pow(info, informativeness_gain_);
         } else {
             float tle = active[i].second->tle;   // legacy: dual-TLE inverse (bit-identical)
-            r = 1.0f / (std::abs(tle) + trust_epsilon_);
+            r = precision_of(err_of(*active[i].second, std::abs(tle)));
         }
         if (surprise_gain_ > 0.0f) {
             auto sit = surprise_ema_.find(active[i].first);
