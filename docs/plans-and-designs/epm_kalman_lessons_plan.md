@@ -609,11 +609,32 @@ to the floor is the context, not the estimator**: two noisy lags cannot reach a 
 uses the whole history. So the two options go together, `rls` needs `residual_align`, and the
 contract says so.
 
-**Creature test in flight:** the picrawler predictive-coding arm `pc5` (latent-autoregression
-context, residual normalisation, 800-node residual vocabulary; B v2.1's "fed vocabulary"
-protocol: arena, difficulty 0, chassis collision on, 24 000 ticks, n = 6) as shipped, with
-`residual_align`, and with `rls` + `residual_align`; the readouts are the predictor's own bite
-(`dp_err`, `dp_pn`) and the gait metrics.
+**Creature test (2026-09-05): the picrawler predictive-coding arm `pc5`** (latent-autoregression
+context, residual normalisation, 800-node residual vocabulary; B v2.1's protocol: arena,
+difficulty 0, chassis collision on, 24 000 ticks, n = 6 paired) as shipped, with
+`residual_align`, and with `rls` + `residual_align`.
+
+Two things the arm's construction fixes in advance. Its residual planner (`motor_planner_pc`)
+declares no plan outputs: it is an observer, so nothing the residual path does can move the
+body, and all thirteen gait metrics came out identical to the last digit across the three arms.
+And with residual normalisation on, the published residual is unit-scale by construction, so
+`dp_err` and `dp_pn` sit at 1.00 in every arm and say nothing. What the arm can measure is the
+residual vocabulary itself, paired by seed:
+
+| residual EPM `body_pose_pc` | base | `residual_align` | `rls` + `residual_align` |
+|---|---|---|---|
+| TLE, last quarter | 0.666 | **0.632** (−0.034 ± 0.019, t −4.5, 6 of 6) | **0.638** (−0.027 ± 0.013, t −5.5, 6 of 6) |
+| TLE, whole run | 0.627 | **0.602** (−0.025 ± 0.007, t −9.8, 6 of 6) | 0.632 (tie) |
+| distinct winners, last quarter | 86.7 | **82.3** (−4.3 ± 2.9, 6 of 6) | 86.3 (tie) |
+| distinct winners, whole run | 255 | 245 (−9.5 ± 6.1, 6 of 6) | **229** (−26 ± 14, t −4.7, 6 of 6) |
+
+A better-aligned predictor leaves a residual stream the GNG quantises with less error and
+less churn, in every seed; RLS adds a large cut in whole-run churn at the price of a slightly
+higher mean error early on (its first thousand ticks are the diffuse-prior transient). Small
+effects, consistent signs. **Verdict: `PARTIAL` on the picrawler** (instrument-level, no
+behavioural primary by construction), `WORKING` on the bench. Re-use context: any config in
+which the residual vocabulary feeds a live planner; B v2.1's planner gates (self-transition
+mass, chain lift, h2 bands) are the next readout on this arm.
 
 ## Stage 4 — drift versus split
 
