@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
         struct RawSense {
             double range_m = 0, range_rate = 0; bool range_valid = false; uint64_t range_seq = 0;
             double cam_mean = 0; uint64_t cam_frames = 0;
-            double mic_peak = 0; uint64_t mic_windows = 0;
+            double mic_peak = 0; uint64_t mic_windows = 0; uint64_t mic_delivered = 0;
         } raw;
         ami_ogma::control::ControlServer control(control_port);
         control.start();
@@ -276,9 +276,17 @@ int main(int argc, char** argv) {
                                         {"dropped", cam.dropped()},
                                         {"stride", cam.stride()}, {"frame_bytes", cam.frame_bytes()},
                                         {"out_size", cam.out_size()}}},
+                            // ⚠ `hz` is the PRODUCER (ALSA reads); `delivered_hz` is what
+                            // actually reached the Bus.  They must track.  They did not:
+                            // 46.75 vs 39.90 measured 2026-09-05, a 14.7 % loss that
+                            // `dropped` reported as 0 because it could not see it.  Both
+                            // are published so the gap is visible without inference.
                             {"mic", {{"peak", raw.mic_peak},
                                      {"up", mic.running()},
                                      {"hz", per_s(raw.mic_windows)},
+                                     {"delivered_hz", per_s(raw.mic_delivered)},
+                                     {"windows", raw.mic_windows},
+                                     {"delivered", raw.mic_delivered},
                                      {"xruns", mic.xruns()}, {"dropped", mic.dropped()},
                                      {"rate", mic.rate()}}}};
                 }
@@ -356,7 +364,8 @@ int main(int argc, char** argv) {
                 static std::vector<float> pcm;
                 if (mic.latest(pcm) && !pcm.empty()) {
                     { std::lock_guard<std::mutex> lk(inst_mtx);
-                      raw.mic_peak = mic.peak(); raw.mic_windows = mic.windows(); }
+                      raw.mic_peak = mic.peak(); raw.mic_windows = mic.windows();
+                      raw.mic_delivered = mic.delivered(); }
                     auto f = std::make_shared<ogma::RawAudioFrame>();
                     f->tick_id = uint64_t(ticks); f->producer_id = "host";
                     f->samples = pcm; f->n_samples = int(pcm.size()); f->channels = 1;
@@ -467,11 +476,13 @@ int main(int argc, char** argv) {
                 std::printf("{\"kind\":\"host_cost\",\"tick\":%ld,\"budget_ms\":%.2f,"
                             "\"wall_p50\":%.3f,\"wall_p95\":%.3f,\"wall_max\":%.3f,"
                             "\"cpu_p50\":%.3f,\"overruns\":%ld,"
-                            "\"mic_windows\":%llu,\"mic_peak\":%.4f,\"mic_xruns\":%llu,"
+                            "\"mic_windows\":%llu,\"mic_delivered\":%llu,"
+                            "\"mic_peak\":%.4f,\"mic_xruns\":%llu,"
                             "\"cam_frames\":%llu,\"cam_mean\":%.1f,"
                             "\"range_pings\":%llu,\"range_timeouts\":%llu}\n",
                             ticks, s.budget_ms, s.wall_p50, s.wall_p95, s.wall_max, s.cpu_p50, overruns,
-                            (unsigned long long)mic.windows(), double(mic.peak()), (unsigned long long)mic.xruns(),
+                            (unsigned long long)mic.windows(), (unsigned long long)mic.delivered(),
+                            double(mic.peak()), (unsigned long long)mic.xruns(),
                             (unsigned long long)cam.frames(), double(cam.mean_level()),
                             (unsigned long long)rangefinder.pings(), (unsigned long long)rangefinder.timeouts());
                 for (auto const& t : epm_topics) {

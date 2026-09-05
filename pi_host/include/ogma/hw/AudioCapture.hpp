@@ -18,14 +18,21 @@
 // windows arrive in bursts: two back to back, then a wait.  A 50 Hz consumer sees the
 // newest of each burst and the rest are gone.
 //
-// A ring removes the whole class: burstiness is absorbed, producer and consumer rates
-// stop having to match, and the consumer always gets the newest CONTIGUOUS window.
+// A ring absorbs the burst, but storage alone is NOT enough -- the consumer must also
+// DRAIN it.  Handing back the newest window and marking the whole backlog read discards
+// the older window of every burst: measured on the robot at 14.7 % of captured audio
+// (6.85 windows/s of 46.75), with `dropped` reading 0 the entire time (2026-09-05).
+// latest() therefore advances a read CURSOR by exactly one window per call, so a burst
+// is delivered across consecutive ticks instead of being thrown away.
 //
 // ⚠ AND THE WINDOW MUST NOT SHRINK BELOW ONE TICK.  One 50 Hz tick is 960 samples at
-// 48 kHz; a window shorter than that leaves GAPS between polls -- audio the brain never
-// sees.  1024 sits just above the floor and overlaps consecutive polls by 64 samples,
-// which is the property to preserve.  Shortening it for FFT reasons would trade a
-// resolution the STFT already needs (f_min 80 Hz) for holes in the channel.
+// 48 kHz; a window shorter than that makes the producer faster than the consumer, and
+// the cursor then falls behind until the ring genuinely wraps.  1024 sits just above
+// that floor (46.9 windows/s against a 50 Hz drain).  It does NOT "overlap consecutive
+// polls by 64 samples" -- this header claimed that until 2026-09-05, but ALSA is read in
+// whole 1024-sample blocks, so delivered windows are ADJACENT and tile the stream with
+// no overlap.  Shortening it for FFT reasons would trade a resolution the STFT already
+// needs (f_min 80 Hz) for a channel the consumer cannot keep up with.
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -59,10 +66,12 @@ public:
     void stop();
     bool running() const { return running_.load(); }
 
-    // Copies the most recent window_samples out of the ring.  False only when no NEW
-    // audio arrived since the previous call (ALSA stalled) or the ring has not filled
-    // yet — so unlike the camera, this normally succeeds every tick, and should: audio
-    // is continuous, and each tick's window covers new time rather than repeating old.
+    // Copies the OLDEST not-yet-delivered window out of the ring and advances the read
+    // cursor by exactly one window.  False only when less than a full new window has
+    // arrived since the previous call (ALSA stalled) or the ring has not filled yet — so
+    // unlike the camera, this normally succeeds every tick, and should: audio is
+    // continuous, and each tick's window covers new time rather than repeating old.
+    // Delivering OLDEST-first is what lets a burst survive; see the ring note above.
     bool latest(std::vector<float>& out);
 
     const std::string& last_error() const { return err_; }
@@ -74,6 +83,11 @@ public:
     // side rather than ALSA's, and with a ring deep enough for the ALSA buffer it should
     // stay at zero.  Not the same fault as an xrun, so it is counted separately.
     uint64_t  dropped()         const { return dropped_; }
+    // Windows actually handed to the consumer.  windows() - delivered() IS the audio the
+    // brain never saw; the two must track.  ⚠ While latest() marked the whole backlog
+    // consumed, dropped() was structurally incapable of firing and reported 0 through a
+    // measured 14.7 % loss -- so this is published BESIDE it, never inferred from it.
+    uint64_t  delivered()       const { return delivered_; }
     // Peak absolute sample of the last window — the level meter, and the cheapest
     // possible answer to "is the microphone actually hearing anything?"
     float     peak()            const { return peak_; }
@@ -93,6 +107,7 @@ private:
     uint64_t    windows_  = 0;
     uint64_t    xruns_    = 0;
     uint64_t    dropped_  = 0;
+    uint64_t    delivered_ = 0;
     float       peak_     = 0.0f;
     std::string err_;
 };

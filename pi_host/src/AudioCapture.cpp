@@ -105,9 +105,17 @@ void AudioCapture::run() {
             // Unread samples about to be overwritten are a real loss; with a ring deeper
             // than ALSA's buffer this stays zero, and a non-zero value means the tick
             // stopped polling rather than that audio arrived in a burst.
+            // The writer OWNS this accounting, because it is the one destroying data:
+            // it counts the overflow and advances read_at_ past the samples it is about
+            // to overwrite.  latest() therefore never has to subtract a loss of its own
+            // (it would double-count the same samples if it did), and its backlog is
+            // guaranteed to be <= ring_.size().
             const uint64_t unread = written_ - read_at_;
-            if (unread + have > ring_.size())
-                dropped_ += (unread + have) - ring_.size();
+            if (unread + have > ring_.size()) {
+                const uint64_t lost = (unread + have) - ring_.size();
+                dropped_ += lost;
+                read_at_ += lost;
+            }
             for (unsigned i = 0; i < have; ++i) {
                 ring_[wpos_] = buf[i];
                 wpos_ = (wpos_ + 1) % ring_.size();
@@ -123,16 +131,38 @@ bool AudioCapture::latest(std::vector<float>& out) {
     std::lock_guard<std::mutex> lk(m_);
     const size_t n = cfg_.window_samples;
     if (ring_.empty() || written_ < n) return false;   // still filling
-    if (written_ == read_at_) return false;            // no new audio since last call
+
+    // ⚠ DRAIN, DO NOT SAMPLE.  read_at_ is a real read CURSOR, not a high-water mark.
+    // The previous version returned the newest window and then set read_at_ = written_,
+    // which declared the entire backlog consumed -- so when ALSA delivered two reads
+    // between two polls (its 1200-frame period divides into no read size we use, so it
+    // bursts), the OLDER window was discarded unread.  Measured on the robot: 798 of 935
+    // windows delivered, 14.7 % of captured audio never reaching the brain, while
+    // dropped_ read 0 throughout because that assignment kept `unread` at zero.
+    // Advancing by exactly one window instead spreads a burst over consecutive ticks;
+    // the 50 Hz consumer outruns the 46.9 Hz producer, so the backlog always drains.
+    uint64_t backlog = written_ - read_at_;
+    if (backlog < n) return false;                     // no complete new window yet
+
+    // Defensive only: the writer already advanced read_at_ past anything it overwrote,
+    // so this cannot fire.  It is NOT a second drop counter -- counting here would
+    // double-count samples the writer has already charged to dropped_.
+    if (backlog > ring_.size()) {
+        read_at_ = written_ - ring_.size();
+        backlog  = ring_.size();
+    }
+
     out.resize(n);
-    // Walk back n samples from the write head: the newest CONTIGUOUS window, regardless
-    // of how raggedly ALSA delivered it.
-    size_t idx = (wpos_ + ring_.size() - n) % ring_.size();
+    // Walk forward n samples from the cursor: the OLDEST contiguous window not yet
+    // handed over.  `backlog` samples sit behind the write head, so the cursor is that
+    // far back in the ring.
+    size_t idx = (wpos_ + ring_.size() - size_t(backlog)) % ring_.size();
     for (size_t i = 0; i < n; ++i) {
         out[i] = ring_[idx];
         idx = (idx + 1) % ring_.size();
     }
-    read_at_ = written_;
+    read_at_ += n;
+    ++delivered_;
     return true;
 }
 
