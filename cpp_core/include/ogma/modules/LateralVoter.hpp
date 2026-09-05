@@ -114,6 +114,20 @@ private:
     float        informativeness_gain_     = 0.0f;
     float        info_floor_               = 0.0f;   // additive floor on info; 0 = a dead channel gets EXACTLY 0 trust
     float        info_baked_ref_           = 3.0f;   // baked_count at which informativeness saturates to 1
+    // Kalman-lessons Stage 2 (docs/plans-and-designs/epm_kalman_lessons_plan.md) —
+    // ACTIVITY term, the observability proxy.  Doctrine §2.3: on a motor system
+    // prediction error is not a proxy for competence, activity is; a channel that
+    // has stopped moving is trivially predictable and earns the MOST trust from
+    // 1/(err+ε) (measured: a dead sensor kept 0.66 of the trust on the bench, and
+    // an occluded camera 0.80 on the Cell).  Per channel: an EMA of the latent's
+    // tick-to-tick displacement, normalised by its own decaying peak so it is
+    // dimensionless and self-calibrating (in [0,1]); raw trust is multiplied by
+    // activity^activity_gain.  A republished (sub-rate) token has zero displacement,
+    // so a stale channel decays the same way.  0 (default) = byte-identical.
+    float        activity_gain_            = 0.0f;
+    float        activity_alpha_           = 0.1f;    // EMA rate of the displacement
+    float        activity_peak_decay_      = 0.999f;  // per-tick decay of the running peak
+    float        activity_floor_           = 1e-3f;   // lowest activity factor (keeps the wrong-sign arm finite)
     bool         group_balance_            = true;
     float        softmax_temperature_      = 1.0f;
     std::string  priority_group_           = "proprio";
@@ -201,6 +215,18 @@ private:
     bool        surprise_calibrate_ = true;
     std::unordered_map<std::string, int>     last_predicted_next_;
     std::unordered_map<std::string, float>   surprise_ema_;
+    // Stage 2 activity state (serialised only when activity_gain_ != 0).
+    std::unordered_map<std::string, Eigen::VectorXf> act_prev_latent_;
+    std::unordered_map<std::string, float>           act_ema_;
+    std::unordered_map<std::string, float>           act_peak_;
+public:
+    /// Current activity factor of a channel, in [0,1]; 0 if unseen.  White-box tests + diag.
+    float activity(std::string const& topic) const {
+        auto e = act_ema_.find(topic); auto pk = act_peak_.find(topic);
+        if (e == act_ema_.end() || pk == act_peak_.end() || pk->second <= 1e-12f) return 0.0f;
+        return std::min(1.0f, e->second / pk->second);
+    }
+private:
     std::unordered_map<std::string, int64_t> prediction_counts_;
     // Per-modality embedding cache (topic → node_id → prototype).  The
     // voter already sees every input modality's RealityToken via its

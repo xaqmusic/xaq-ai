@@ -331,6 +331,26 @@ at it. Cap 0.05 now carries: corridor `PARTIAL` (faster, cleaner rhythm, zero fa
 no regression, recovery trend in its favour, hump tie. Still one lever at n = 6; the
 promotion bar (n ≥ 20 varied seeds, operator's eye) stands.
 
+### The promotion run: arena, n = 20 paired seeds, 12 000 ticks (2026-09-05)
+
+| metric | base | cap 0.05 | paired Δ, 95 % CI, t, sign |
+|---|---|---|---|
+| net_disp | 10.70 | 10.35 | −0.35 ± 0.51, t −1.4, 7+/13− |
+| straight | 0.712 | 0.721 | +0.009 ± 0.026 |
+| turns (net) | −0.069 | −0.011 | **+0.059 ± 0.042, t 2.9, 15+/5−** (the base drifts left; the arm does not) |
+| falls (total) | 1 | 2 | tie |
+| tilt_sd / planted / unstable / scrub / belly | 0.079 / 3.90 / 0.020 / 0.096 / 0.034 | 0.080 / 3.91 / 0.010 / 0.096 / 0.035 | ties |
+| steps / step_cv_real | 99.1 / 0.816 | 86.6 / 0.810 | −12 ± 14 / tie |
+
+**Verdict at power: `PARTIAL`, not promoted.** No regression on any metric, but the corridor's
+flat-speed gain does not carry to the open floor over 12 000 ticks: progress is a slight
+negative trend inside its interval, and the one resolvable change is heading neutrality. By
+§3.3 a lever that needs averaging to find is not a capability; `gain_kind=kalman` with
+`kalman_gain_cap 0.05` stays a shipped, default-off option (bench WORKING, body harmless,
+recovery trend in its favour) and does not enter `j1s4`. Re-use context: a body whose
+vocabulary is stationary enough for the uncapped schedule, and any regime where the
+recovery-gate trend (less coordination wander after perturbation) is load-bearing.
+
 ### Stage 1 verdict (2026-09-05)
 
 | Arm | Bench (n = 20) | Picrawler, n = 6 corridor 12 k | Verdict |
@@ -370,11 +390,35 @@ nodes): its own lever, on the bench loud (S2, ÷5.9); on a body only with the ca
 
 ## Stage 2 — precision levers on the voter (Cell fusion testbed)
 
-K3 `trust_source ∈ {tle, quant_error, expected}` with `RealityToken::expected_error` = winner's
-√`ema_error`; K8 `activity_gain` on per-channel latent displacement normalised by its own
-long-run EMA; K4 `stale_ticks` on republished tokens with `stale_q` in the voter's denominator.
-Each default 0; bench S5 first (the Stage-0 rows above are the baselines), then
-`the_cell_maze_fusion` vs `_dropvision`, n = 20 paired, wrong-sign arm.
+Order decided 2026-09-05 (operator: proceed as I see fit): **K8 activity term first**, because
+the failure both the bench and the repaired Cell config actually show is a blind or dead
+channel being the most trusted; K3 expected-error trust second (it addresses the noisy-versus-
+clean case the informativeness gate gets backwards); K4 stale inflation waits for the slow loop.
+Creature test = the vision dropout on the repaired fusion config, not the intact forage.
+
+### K8 — `activity_gain` (SHIPPED 2026-09-05; bench WORKING)
+
+Per channel the voter keeps an EMA (`activity_alpha` 0.1) of the latent's tick-to-tick
+displacement, normalised by its own decaying peak (`activity_peak_decay` 0.999) so the factor is
+dimensionless and self-calibrating in [0, 1]; raw trust is multiplied by
+`activity^activity_gain`. A channel that stops moving loses trust in EMA time instead of
+becoming the most trusted because it is trivially predictable. A republished sub-rate token has
+zero displacement, so a stale channel decays the same way (K4's intent, for free). State is
+serialised only when the gain is non-zero. Default 0 is byte-identical: 40 of 40 S5 reference
+files diff empty. Two unit tests.
+
+| S5 arm (n = 20 paired) | legacy | + `activity_gain` 1 | Δ, 95 % CI |
+|---|---|---|---|
+| intact pair, trust on the clean sensor | 0.672 | 0.671 | −0.0006 ± 0.0009, unchanged (both channels move; the term is not a noise discriminator) |
+| dead sensor at 2000: trust on it afterwards | **0.659** | **0.0022** | −0.656 ± 0.017 |
+| dead sensor: fused MSE after death (best single 0.0100) | 0.0443 | **0.0099** | ÷4.4, fusion falls back to the live sensor's floor |
+| dead sensor + informativeness gate: trust on it | 0.802 | 0.0048 | −0.797 ± 0.014; fused MSE 0.064 → 0.0099 |
+| sensor b at 1/4 rate: fused MSE | 0.01304 | **0.01152** | ÷1.13; trust on the fresh sensor 0.676 → 0.725 |
+| wrong sign (gain −1), dead sensor | 0.659 | **0.9994** | fused MSE after death ×2.26 — the sign is the whole effect |
+
+Bench verdict `WORKING` on the failure it targets, neutral where it has no business, and the
+wrong-sign arm inverts it. Creature test pending: the vision dropout on
+`the_cell_maze_fusion__dims3.json` (baselines running).
 
 ## Stage 3 — restore lost concepts
 

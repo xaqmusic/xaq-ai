@@ -85,6 +85,15 @@ ParamSchema LateralVoter::params_schema() const {
         {"surprise_floor",       ParamMutability::HotMutable,       "Phase 6.6.E: minimum trust-scale floor (avoid zeroing under sustained surprise)", ParamValue{0.05}},
         {"surprise_kind",        ParamMutability::HotMutable,       "Phase 6.6.H: 'binary' (0/1 node-id match; default + same as 6.6.E) or 'embedding' (cosine-distance surprise (1-cos)/2 in [0,1])", ParamValue{std::string("binary")}},
         {"surprise_calibrate",   ParamMutability::HotMutable,       "Phase 6.6.J: when true (default), the surfaced surprise_ema applies Bayesian shrinkage toward a 0.5 prior with strength 1/surprise_alpha so cold-start EPMs don't publish 'perfect predictor' immediately.  Trust modulator still uses the raw EMA.", ParamValue{true}},
+        {"activity_gain",        ParamMutability::HotMutable,
+            "Kalman-lessons Stage 2: ACTIVITY term (doctrine 2.3's observability proxy).  Raw trust is multiplied by "
+            "activity^gain where activity = EMA of the channel's latent displacement / its own decaying peak, in [0,1].  "
+            "A channel that stops moving (dead sensor, occluded camera, stale republished token) loses trust in EMA time "
+            "instead of becoming the most trusted because it is trivially predictable.  0 (default) = byte-identical; "
+            "-1 = the wrong-sign control.", ParamValue{0.0}},
+        {"activity_alpha",       ParamMutability::HotMutable, "EMA rate of the per-channel latent displacement.", ParamValue{0.1}},
+        {"activity_peak_decay",  ParamMutability::HotMutable, "Per-tick decay of the running peak the activity is normalised by (0.999 = ~1000-tick memory).", ParamValue{0.999}},
+        {"activity_floor",       ParamMutability::HotMutable, "Lowest activity factor applied (keeps activity^gain finite for gain < 0).", ParamValue{0.001}},
         {"publish_as_reality_topic", ParamMutability::ConstructionOnly, "Phase-6.0.c: also publish fused output as a RealityToken to this topic (empty=disabled)", ParamValue{std::string("")}},
         {"publish_consensus",        ParamMutability::ConstructionOnly, "Phase-6.0.c: false = suppress consensus.<level> publish (mid-voters whose only consumer is via publish_as_reality_topic)", ParamValue{true}},
         {"master_seed",          ParamMutability::ConstructionOnly, "RNG namespace seed",                              ParamValue{int64_t{0}}},
@@ -113,6 +122,10 @@ void LateralVoter::on_setup(Bus* bus, ParamMap const& params) {
         }
     });
     apply_param(params, "trust_epsilon",       [&](auto const& v){ trust_epsilon_       = float(get_double(v, "trust_epsilon")); });
+    apply_param(params, "activity_gain",       [&](auto const& v){ activity_gain_       = float(get_double(v, "activity_gain")); });
+    apply_param(params, "activity_alpha",      [&](auto const& v){ activity_alpha_      = float(get_double(v, "activity_alpha")); });
+    apply_param(params, "activity_peak_decay", [&](auto const& v){ activity_peak_decay_ = float(get_double(v, "activity_peak_decay")); });
+    apply_param(params, "activity_floor",      [&](auto const& v){ activity_floor_      = float(get_double(v, "activity_floor")); });
     apply_param(params, "informativeness_gain",[&](auto const& v){ informativeness_gain_= float(get_double(v, "informativeness_gain")); });
     apply_param(params, "info_floor",          [&](auto const& v){ info_floor_          = float(get_double(v, "info_floor")); });
     apply_param(params, "info_baked_ref",      [&](auto const& v){ info_baked_ref_      = float(get_double(v, "info_baked_ref")); });
@@ -146,6 +159,10 @@ void LateralVoter::on_setup(Bus* bus, ParamMap const& params) {
 void LateralVoter::on_param_change(std::string_view key, ParamValue const& value) {
     auto k = std::string(key);
     if      (k == "trust_epsilon")        trust_epsilon_       = float(get_double(value, k));
+    else if (k == "activity_gain")        activity_gain_       = float(get_double(value, k));
+    else if (k == "activity_alpha")       activity_alpha_      = float(get_double(value, k));
+    else if (k == "activity_peak_decay")  activity_peak_decay_ = float(get_double(value, k));
+    else if (k == "activity_floor")       activity_floor_      = float(get_double(value, k));
     else if (k == "informativeness_gain") informativeness_gain_= float(get_double(value, k));
     else if (k == "info_floor")           info_floor_          = float(get_double(value, k));
     else if (k == "info_baked_ref")       info_baked_ref_      = float(get_double(value, k));
@@ -382,6 +399,24 @@ void LateralVoter::tick(uint64_t tick_id) {
                 r *= scale;
             }
         }
+        // Stage 2 activity term (see LateralVoter.hpp).  Updated for every active
+        // channel each tick; multiplied in only when the gain is non-zero.
+        if (activity_gain_ != 0.0f) {
+            std::string const& topic = active[i].first;
+            Eigen::VectorXf const& L = active[i].second->latent;
+            float d = 0.0f;
+            auto pit = act_prev_latent_.find(topic);
+            if (pit != act_prev_latent_.end() && pit->second.size() == L.size())
+                d = (L - pit->second).norm();
+            act_prev_latent_[topic] = L;
+            float& ema  = act_ema_[topic];
+            ema = (1.0f - activity_alpha_) * ema + activity_alpha_ * d;
+            float& peak = act_peak_[topic];
+            peak = std::max(ema, peak * activity_peak_decay_);
+            float activity = peak > 1e-12f ? ema / peak : 0.0f;
+            activity = std::max(activity_floor_, std::min(1.0f, activity));
+            r *= std::pow(activity, activity_gain_);
+        }
         raw[i] = r;
     }
 
@@ -600,13 +635,19 @@ nlohmann::json LateralVoter::diag_lite() const {
     if (prev_token_)
         for (auto const& [k, v] : prev_token_->trust_weights) trust[k] = v;
     for (auto const& [k, v] : surprise_ema_) surp[k] = v;
-    return {
+    nlohmann::json j = {
         {"dopamine",  dopamine_},
         {"fused_tle", prev_token_ ? prev_token_->fused_tle : 0.0f},
         {"has_token", bool(prev_token_)},
         {"trust",     std::move(trust)},
         {"surprise",  std::move(surp)},
     };
+    if (activity_gain_ != 0.0f) {
+        nlohmann::json act = nlohmann::json::object();
+        for (auto const& [k, v] : act_ema_) act[k] = activity(k);
+        j["activity"] = std::move(act);
+    }
+    return j;
 }
 
 nlohmann::json LateralVoter::snapshot_state() const {
@@ -648,7 +689,7 @@ nlohmann::json LateralVoter::snapshot_state() const {
         }
         embed_cache[topic] = std::move(m);
     }
-    return nlohmann::json{
+    nlohmann::json out = nlohmann::json{
         {"version",              1},
         {"dopamine",             dopamine_},
         {"prev_token",           prev},
@@ -658,6 +699,20 @@ nlohmann::json LateralVoter::snapshot_state() const {
         {"prediction_counts",    counts},
         {"embedding_cache",      embed_cache},
     };
+    // Stage 2 activity state — emitted ONLY when the term is on, so every
+    // snapshot at activity_gain 0 is byte-identical to the pre-feature form.
+    if (activity_gain_ != 0.0f) {
+        nlohmann::json ema = nlohmann::json::object(), peak = nlohmann::json::object(), prev = nlohmann::json::object();
+        for (auto const& [k, v] : act_ema_)  ema[k]  = v;
+        for (auto const& [k, v] : act_peak_) peak[k] = v;
+        for (auto const& [k, vec] : act_prev_latent_) {
+            nlohmann::json arr = nlohmann::json::array();
+            for (int i = 0; i < vec.size(); ++i) arr.push_back(vec(i));
+            prev[k] = std::move(arr);
+        }
+        out["activity"] = nlohmann::json{{"ema", ema}, {"peak", peak}, {"prev_latent", prev}};
+    }
+    return out;
 }
 
 void LateralVoter::restore_state(nlohmann::json const& s) {
@@ -719,6 +774,19 @@ void LateralVoter::restore_state(nlohmann::json const& s) {
                 for (size_t i = 0; i < it2.value().size(); ++i)
                     v(int(i)) = it2.value()[i].get<float>();
                 inner[std::stoi(it2.key())] = std::move(v);
+            }
+        }
+    }
+    act_ema_.clear(); act_peak_.clear(); act_prev_latent_.clear();
+    if (s.contains("activity") && s["activity"].is_object()) {
+        auto const& a = s["activity"];
+        if (a.contains("ema"))  for (auto it = a["ema"].begin();  it != a["ema"].end();  ++it) act_ema_[it.key()]  = it.value().get<float>();
+        if (a.contains("peak")) for (auto it = a["peak"].begin(); it != a["peak"].end(); ++it) act_peak_[it.key()] = it.value().get<float>();
+        if (a.contains("prev_latent")) {
+            for (auto it = a["prev_latent"].begin(); it != a["prev_latent"].end(); ++it) {
+                Eigen::VectorXf v(int(it.value().size()));
+                for (size_t k = 0; k < it.value().size(); ++k) v(int(k)) = it.value()[k].get<float>();
+                act_prev_latent_[it.key()] = std::move(v);
             }
         }
     }
