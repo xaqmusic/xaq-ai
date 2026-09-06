@@ -147,6 +147,7 @@ public:
     float trust_klino()   const { return trust_klino_; }     // round 3
     float trust_planner() const { return trust_planner_; }
     float trust_play()    const { return trust_play_; }
+    std::string trust_keys() const { std::string s; for (auto const& [k, v] : trust_) { s += k + "=" + std::to_string(v).substr(0, 5) + " "; } return s; }   // diag: what the voter sent
     float g_prag_planner()  const { return g_prag_planner_; }   // hunger · reach-prob(planner) — pragmatic, model precision
     float g_epist_klino()   const { return g_epist_klino_; }    // (1−hunger) · normalised z-spike — klino approach/epistemic
     float g_epist_planner() const { return g_epist_planner_; }  // (1−hunger) · planner frontier novelty (Stage 3; 0 until then)

@@ -1779,6 +1779,10 @@ func _emit_jsonl(accel: float) -> void:
 				# winner-take-all with an adaptive hysteresis margin. win 0=klino 1=planner.
 				# mk = klino z-baseline, ppk = planner slow peak (vp denominator).
 				mods[mod_id] = {
+					"tk":  snappedf(float(m.get("trust_klino", 0.0)), 0.001),   # round 3: the voter's trust per loop
+					"tp":  snappedf(float(m.get("trust_planner", 0.0)), 0.001),
+					"tpl": snappedf(float(m.get("trust_play", 0.0)), 0.001),
+					"tkeys": String(m.get("trust_keys", "")),
 					"mode":  String(m.get("scoring_mode", "value_race")),  # value_race | efe
 					"win":   int(m.get("winner", 0)),
 					"rk":    snappedf(float(m.get("raw_klino", 0.0)), 0.0001),

@@ -1130,6 +1130,10 @@ Dictionary OgmaBrain::get_module_metrics() const {
         // --- EFEArbiter (Cell L2 — active-inference policy selection: the value race) ---
         else if (type == "EFEArbiter") {
             if (auto const* ar = dynamic_cast<const ogma::EFEArbiter*>(m)) {
+                d["trust_klino"]   = double(ar->trust_klino());     // round 3 precision mode: the voter's trust per loop
+                d["trust_planner"] = double(ar->trust_planner());
+                d["trust_play"]    = double(ar->trust_play());
+                d["trust_keys"]    = String(ar->trust_keys().c_str());
                 d["scoring_mode"] = String(ar->scoring_mode().c_str()); // "value_race" | "efe"
                 d["raw_klino"]    = double(ar->raw_klino());     // hunger × scent
                 d["raw_planner"]  = double(ar->raw_planner());   // food-route value (0 while exploring)
