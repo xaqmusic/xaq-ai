@@ -282,6 +282,7 @@ void PlayLoop::tick(uint64_t tick_id) {
     // the mapped graph). The +1e-4 is float-equality tolerance, not a knob.
     bool route_exists = (next_node_ >= 0) && (cur_node_ >= 0)
                         && (value(next_node_) > value(cur_node_) + 1e-4f);
+    last_route_exists_ = route_exists;   // audit diag (2026-09-06): climb needs BOTH this and !forced_wander_
     // WANDER-BEYOND: if the map has not grown for wander_stall_ticks, the bug has mapped this region
     // (climbing freshly-baked nodes is treadmilling) → FORCE the run-tumble wander to push PAST the
     // frontier into unmapped ground. A new node (grew → stale_explore_=0) drops it back to climb.
@@ -451,6 +452,7 @@ nlohmann::json PlayLoop::diag_snapshot() const {
         {"have_frontier", have_frontier_},        // frontier bearing defined + biasing the wander this tick
         {"frontier_bearing", frontier_bearing_},  // outward heading (away from the visited centroid)
         {"forced_wander", forced_wander_},   // stall-wander overriding the climb (pushing beyond the frontier)
+        {"route_exists", last_route_exists_},  // a strictly-more-novel neighbour exists (the other climb term)
         {"stale_explore", stale_explore_},    // ticks since the map last grew
         {"cur_heading", cur_heading_},
         {"n_nodes", int(value_.size())},

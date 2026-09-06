@@ -503,6 +503,14 @@ add_executable(test_clone_shipping_configs
 target_link_libraries(test_clone_shipping_configs
     PRIVATE ogma_core GTest::gtest_main pthread)
 
+# Cell system audit (2026-09-06) -- two durable instruments against the
+# "documented-but-absent" class: dropped config keys, and schema defaults that
+# are not the effective defaults (the bake-threshold trap).
+add_executable(test_shipping_config_schema tests/ogma/test_shipping_config_schema.cpp)
+target_link_libraries(test_shipping_config_schema PRIVATE ogma_core GTest::gtest_main pthread)
+add_executable(test_schema_defaults_effective tests/ogma/test_schema_defaults_effective.cpp)
+target_link_libraries(test_schema_defaults_effective PRIVATE ogma_core GTest::gtest_main pthread)
+
 # W3.6 — disk-round-trip smoke test.  Serialises snapshot via dump()/parse()
 # through a temp file before restore, catching float-precision losses that
 # the in-memory clone() path can't surface.

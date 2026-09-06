@@ -90,7 +90,7 @@ def gen_world(seed: int, room_frac: float = 0.36, min_sep: float = 0.5) -> dict:
 
 
 def patch_config(base_res: str, overrides: dict, explore_seed: int, tag: str,
-                 world: dict | None = None) -> tuple[str, Path]:
+                 world: dict | None = None, planner_seed: int | None = None) -> tuple[str, Path]:
     """Write a temp config with param overrides + explore_seed (+ optional per-seed world metadata).
     Returns (res_path, fs_path).
 
@@ -106,6 +106,10 @@ def patch_config(base_res: str, overrides: dict, explore_seed: int, tag: str,
     for mod in cfg.get("modules", []):
         if mod.get("type") == "PlayLoop":
             mod.setdefault("params", {})["explore_seed"] = int(explore_seed)
+        # 2026-09-06 (cell system audit): the planner's own run-and-tumble RNG was never
+        # varied by this harness; with repaired seeding it gets its own stream.
+        if planner_seed is not None and mod.get("type") == "PlaceGraphPlanner":
+            mod.setdefault("params", {})["explore_seed"] = int(planner_seed)
     for k, val in overrides.items():
         mtype, _, param = k.partition(".")
         if not param:      # bare key → PlayLoop
@@ -120,9 +124,19 @@ def patch_config(base_res: str, overrides: dict, explore_seed: int, tag: str,
 
 
 def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
-            world_seed: int = 42, turbo: bool = True, fwdlog: bool = False) -> dict:
+            world_seed: int = 42, turbo: bool = True, fwdlog: bool = False,
+            obstacle_seed: int | None = None, sites: list | None = None,
+            crossing_mode: str = "zwall", label: str = "", logdir: Path | None = None) -> dict:
+    """One headless run.  `sites` = the two food sites in METRES (for the bisector crossing
+    metric and the relocation metrics); `crossing_mode` = zwall | bisector | none."""
     env = dict(os.environ)
     env["OGMA_SEED"] = str(world_seed)
+    if obstacle_seed is not None:
+        env["OGMA_OBSTACLE_SEED"] = str(obstacle_seed)
+    # Seed manifest (CLAUDE.md 3.2 rule 7 applied to the harness itself): every seed a job
+    # sets is printed, so "20 varied worlds" can be checked, not assumed.
+    print(f"[seed] {label} OGMA_SEED={world_seed} OGMA_OBSTACLE_SEED={obstacle_seed if obstacle_seed is not None else '(unset -> OGMA_SEED)'}"
+          f" sites={sites} crossing={crossing_mode}", flush=True)
     env["OGMA_CELL_CONFIG"] = config_res
     if turbo:
         env["OGMA_TURBO"] = "1"
@@ -138,6 +152,10 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
     base += ["res://scenes/the_cell.tscn"]
     cmd = ["timeout", "--signal=TERM", str(wall_timeout)] + base
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if logdir is not None:   # keep the raw stream for post-hoc analysis (PCA of a percept, replays)
+        logdir.mkdir(parents=True, exist_ok=True)
+        safe = "".join(ch if ch.isalnum() or ch in "-_=." else "_" for ch in label) or "run"
+        (logdir / f"{safe}.jsonl").write_text(proc.stdout)
 
     cells: set[tuple[int, int]] = set()
     cov_series: list[tuple[int, int]] = []
@@ -153,6 +171,21 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
     min_fdist = None
     fd_sum = 0.0
     near2 = near1 = fwd_samples = 0   # ticks with food within 2m / 1m (close approaches)
+    rex_ticks = 0
+    # Relocation metrics (round 2): in an alternating-food world every eat relocates the
+    # food to the other site, so time-to-return = ticks between successive eats after the
+    # first, and near-other = ticks from an eat until the body is within 2 m of the OTHER
+    # site (the return leg, independent of whether it manages to eat there).
+    hit_ticks: list[int] = []
+    t_return: list[int] = []
+    t_near_other: list[int] = []
+    pending_other: tuple[float, float] | None = None
+    pending_since = 0
+    last_pos: tuple[float, float] | None = None
+    def _mid_side(x, z):
+        (ax, az), (bx, bz) = sites[0], sites[1]
+        mx, mz = (ax + bx) / 2.0, (az + bz) / 2.0
+        return (x - mx) * (bx - ax) + (z - mz) * (bz - az) > 0.0
     # Kalman-lessons Stage 2: per-third phase split (pre / perturbation / post) so a
     # mid-run sensor perturbation (VisualBearing.stick_after_ticks, lesion_after_ticks)
     # can be read as eats and food distance during and after it.
@@ -170,7 +203,16 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
             continue
         if r.get("event") == "HIT":
             eats += 1
-            eats_thirds[_third(int(r.get("t", 0)))] += 1
+            th_t = int(r.get("t", 0))
+            eats_thirds[_third(th_t)] += 1
+            if hit_ticks:
+                t_return.append(th_t - hit_ticks[-1])
+            hit_ticks.append(th_t)
+            if sites and len(sites) == 2 and last_pos is not None:
+                d0 = math.hypot(last_pos[0] - sites[0][0], last_pos[1] - sites[0][1])
+                d1 = math.hypot(last_pos[0] - sites[1][0], last_pos[1] - sites[1][1])
+                pending_other = tuple(sites[1] if d0 <= d1 else sites[0])
+                pending_since = th_t
             continue
         if r.get("event") == "FWDLOG":
             fd = float(r.get("fdist", -1.0))
@@ -190,9 +232,18 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
         total_diag += 1
         t = int(r.get("t", 0))
         x, z = float(r["pos"][0]), float(r["pos"][1])
+        last_pos = (x, z)
         cells.add((round(x / cell_m), round(z / cell_m)))
         cov_series.append((t, len(cells)))
-        is_far = z > z_wall
+        if pending_other is not None and math.hypot(x - pending_other[0], z - pending_other[1]) < 2.0:
+            t_near_other.append(t - pending_since)
+            pending_other = None
+        if crossing_mode == "bisector" and sites and len(sites) == 2:
+            is_far = _mid_side(x, z)
+        elif crossing_mode == "none":
+            is_far = False
+        else:
+            is_far = z > z_wall
         if is_far:
             far_ticks += 1
             if first_far is None:
@@ -209,6 +260,7 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
                 climb_ticks += bool(mv.get("climb"))
                 wand_ticks += bool(mv.get("wand"))
                 fwand_ticks += bool(mv.get("fwand"))
+                rex_ticks += bool(mv.get("rex"))      # route_exists (audit 2026-09-06)
                 hfront_ticks += bool(mv.get("hfront"))
                 stale_sum += float(mv.get("stale", 0))
             if "hfood" in mv:                      # VisualHomingNav
@@ -244,6 +296,11 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
         "climb_frac": round(climb_ticks / play_ticks, 3) if play_ticks else 0.0,
         "wand_frac": round(wand_ticks / play_ticks, 3) if play_ticks else 0.0,
         "fwand_frac": round(fwand_ticks / play_ticks, 3) if play_ticks else 0.0,
+        "rex_frac": round(rex_ticks / play_ticks, 3) if play_ticks else 0.0,
+        "eats_after_reloc": max(0, eats - 1),
+        "t_return_mean": round(statistics.mean(t_return), 1) if t_return else None,
+        "t_near_other_mean": round(statistics.mean(t_near_other), 1) if t_near_other else None,
+        "n_near_other": len(t_near_other),
         "hfront_frac": round(hfront_ticks / play_ticks, 3) if play_ticks else 0.0,
         "mean_stale": round(stale_sum / play_ticks, 1) if play_ticks else 0.0,
         "hfood_frac": round(hfood_ticks / vh_ticks, 3) if vh_ticks else 0.0,
@@ -296,7 +353,14 @@ def summarize(arm: str, rows: list[dict], duration_s: int) -> None:
         print(f"  WINNER FRAC (klino/planner/play/vision): {avg[0]} / {avg[1]} / {avg[2]} / {avg[3]}")
     print(f"  play state: climb {_mean([r['climb_frac'] for r in ok])}  wand {_mean([r['wand_frac'] for r in ok])}  "
           f"fwand {_mean([r['fwand_frac'] for r in ok])}  hfront {_mean([r['hfront_frac'] for r in ok])}  "
+          f"rex {_mean([r.get('rex_frac', 0.0) for r in ok])}  "
           f"stale {_mean([r['mean_stale'] for r in ok])}  nodes {_mean([r['n_nodes'] for r in ok])}")
+    tr = [r["t_return_mean"] for r in ok if r.get("t_return_mean") is not None]
+    tn = [r["t_near_other_mean"] for r in ok if r.get("t_near_other_mean") is not None]
+    if tr or tn:
+        print(f"  RELOCATION: eats-after-first {_mean([r.get('eats_after_reloc', 0) for r in ok])}  "
+              f"time-to-return {_mean(tr)} ticks ({len(tr)}/{len(ok)} runs)  "
+              f"near-other-site {_mean(tn)} ticks ({sum(r.get('n_near_other', 0) for r in ok)} legs)")
     thirds = [r.get("eats_thirds") for r in rows if r.get("eats_thirds")]
     if thirds:
         m = [statistics.mean(t[k] for t in thirds) for k in range(3)]
@@ -320,7 +384,18 @@ def main() -> int:
     ap.add_argument("--explore-base", type=int, default=11)
     ap.add_argument("--duration", type=int, default=240)
     ap.add_argument("--cell-m", type=float, default=2.0)
-    ap.add_argument("--z-wall", type=float, default=3.6)
+    ap.add_argument("--z-wall", type=float, default=None,
+                    help="crossing line for --crossing-mode zwall (default: room_size*0.15 for an lbend, else 3.6)")
+    ap.add_argument("--crossing-mode", choices=["auto", "zwall", "bisector", "none"], default="auto",
+                    help="auto: lbend layout -> zwall; a two-site world -> the sites' perpendicular bisector; else none")
+    ap.add_argument("--world-base", type=int, default=1000,
+                    help="first WORLD seed (OGMA_SEED + OGMA_OBSTACLE_SEED); worlds are world_base+i, distinct from explore seeds")
+    ap.add_argument("--legacy-seeding", action="store_true",
+                    help="reproduce the pre-2026-09-06 harness: OGMA_SEED fixed at 42 for every job, one pillar layout, "
+                         "the world draw keyed by the explore seed, the planner RNG never varied")
+    ap.add_argument("--logdir", default=None, help="keep each job's raw stdout as <logdir>/<arm=..._es=...>.jsonl")
+    ap.add_argument("--metadata", action="append", default=[],
+                    help="k=v metadata override applied to every job's config (e.g. obstacle_density=0.06)")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--fwdlog", action="store_true",
                     help="enable OGMA_FWDLOG → track closest-approach-to-food (fdist) for close-failure diagnosis")
@@ -344,23 +419,48 @@ def main() -> int:
             arms.append((name.strip(), d))
 
     eseeds = [args.explore_base + i for i in range(args.n_explore)]
+    base_cfg = json.load(open(_res_to_fs(args.config)))
+    base_md = base_cfg.get("metadata", {})
+    room_size = float(base_md.get("room_size", 16.0))
+    extra_md = {}
+    for kv in args.metadata:
+        k, _, v = kv.partition("=")
+        extra_md[k.strip()] = _coerce(v.strip())
     tmp_files: list[Path] = []
-    jobs = []   # (arm_name, seed, res_path)
+    jobs = []   # (arm_name, seed, res_path, world_seed, obstacle_seed, sites, crossing_mode, z_wall)
     for name, ov in arms:
-        for es in eseeds:
-            world = gen_world(es, args.room_frac, args.min_sep) if args.vary_world else None
-            res, fs = patch_config(args.config, ov, es, f"{name}_e{es}", world=world)
+        for i, es in enumerate(eseeds):
+            ws = 42 if args.legacy_seeding else args.world_base + i
+            world = None
+            if args.vary_world:
+                world = gen_world(es if args.legacy_seeding else ws, args.room_frac, args.min_sep)
+                if args.legacy_seeding:
+                    world.pop("obstacle_seed", None)   # the old harness wrote it and nothing read it
+            if extra_md:
+                world = {**(world or {}), **extra_md}
+            md = {**base_md, **(world or {})}
+            fps = md.get("food_positions") or []
+            sites = [[float(fp[0]) * room_size, float(fp[1]) * room_size] for fp in fps[:2]] if len(fps) >= 2 else None
+            mode = args.crossing_mode
+            if mode == "auto":
+                mode = "zwall" if md.get("maze_layout") == "lbend" else ("bisector" if sites else "none")
+            zw = args.z_wall if args.z_wall is not None else (room_size * 0.15 if md.get("maze_layout") == "lbend" else 3.6)
+            res, fs = patch_config(args.config, ov, es, f"{name}_e{es}", world=world,
+                                   planner_seed=None if args.legacy_seeding else es + 7919)
             tmp_files.append(fs)
-            jobs.append((name, es, res))
+            jobs.append((name, es, res, ws, ws, sites, mode, zw))
     if args.vary_world:
-        print(f"[--vary-world] {args.n_explore} per-seed FIXED worlds (food+pillars drawn per seed, shared across arms; paired)")
+        print(f"[--vary-world] {args.n_explore} per-seed FIXED worlds (food sites + spawn"
+              f"{' + pillar layout' if not args.legacy_seeding else ''} drawn per seed, shared across arms; paired)"
+              f"{'  [LEGACY SEEDING: OGMA_SEED=42 for every job, one pillar layout]' if args.legacy_seeding else ''}")
 
     results: dict[str, list[tuple[int, dict]]] = {name: [] for name, _ in arms}
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
-            futs = {ex.submit(run_one, res, args.duration, args.cell_m, args.z_wall,
-                              42, True, args.fwdlog): (name, es)
-                    for name, es, res in jobs}
+            futs = {ex.submit(run_one, res, args.duration, args.cell_m, zw,
+                              ws, True, args.fwdlog, obs, sites, mode, f"arm={name} es={es}",
+                              Path(args.logdir) if args.logdir else None): (name, es)
+                    for name, es, res, ws, obs, sites, mode, zw in jobs}
             for fut in concurrent.futures.as_completed(futs):
                 name, es = futs[fut]
                 results[name].append((es, fut.result()))
@@ -394,7 +494,9 @@ def paired_ab(nameA, resA, nameB, resB):
         return
     for metric, better in (("eats", "higher"), ("mean_fdist", "lower"),
                            ("eats_mid", "higher"), ("eats_post", "higher"),
-                           ("fdist_mid", "lower"), ("fdist_post", "lower")):
+                           ("fdist_mid", "lower"), ("fdist_post", "lower"),
+                           ("eats_after_reloc", "higher"), ("t_return_mean", "lower"),
+                           ("t_near_other_mean", "lower"), ("final_cov", "higher")):
         diffs = []
         for s in seeds:
             def _get(r, m):

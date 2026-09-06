@@ -1023,6 +1023,7 @@ Dictionary OgmaBrain::get_module_metrics() const {
                 d["climbing"]    = pl->climbing();               // routing UP the novelty gradient toward the frontier
                 d["wandering"]   = pl->wandering();              // run-and-tumble BEYOND the frontier (unmapped ground)
                 d["forced_wander"] = pl->forced_wander();        // stall-wander overriding the climb (pushing past the frontier)
+                d["route_exists"] = pl->route_exists();          // the other climb term: a strictly-more-novel neighbour exists
                 d["have_frontier"] = pl->have_frontier();        // frontier-directed wander engaged (steering away from the visited centroid)
                 d["frontier_bearing"] = double(pl->frontier_bearing());
                 d["stale_explore"] = pl->stale_explore();        // ticks since the map last grew

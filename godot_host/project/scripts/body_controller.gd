@@ -312,6 +312,47 @@ var _pos_history: Array = []              # ring of last N global_positions
 var _prev_imu_pos: Vector3 = Vector3.ZERO # last tick's position, for AFFERENT velocity
 var _imu_pos_init: bool = false
 var _stuck_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+# 2026-09-06 (cell system audit) -- two gain-0 PERTURBATION instruments for the (d) test,
+# body-side because the study brain has no ScentCompass for the module-side noise to reach:
+#   scent_noise_sigma    Gaussian noise added to the PUBLISHED scent_max (the true field untouched)
+#   heading_drift_sigma  a random-walk bias added to the PUBLISHED heading / heading_vec
+#                        (rotation.y untouched) -- names the drift-free compass scaffold
+# Each is active only in [after_ticks, until_ticks) (until <= 0 = to the end).  At sigma 0 the
+# code path is SKIPPED (no RNG draw), so every existing run is byte-identical.
+# Sources: metadata.<key> or OGMA_<KEY> env (env wins).
+var _perturb_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _scent_noise_sigma: float = 0.0
+var _scent_noise_after: int = 0
+var _scent_noise_until: int = 0
+var _heading_drift_sigma: float = 0.0
+var _heading_drift_after: int = 0
+var _heading_drift_until: int = 0
+var _heading_drift_bias: float = 0.0
+
+func _perturb_active(after: int, until: int) -> bool:
+	return tick_counter >= after and (until <= 0 or tick_counter < until)
+
+func _read_perturb_instruments() -> void:
+	var md: Dictionary = ExperimentConfig.read_cell_config_metadata()
+	var keys := {"scent_noise_sigma": "f", "scent_noise_after_ticks": "i", "scent_noise_until_ticks": "i",
+				 "heading_drift_sigma": "f", "heading_drift_after_ticks": "i", "heading_drift_until_ticks": "i"}
+	var vals := {}
+	for k in keys:
+		var env_v: String = OS.get_environment("OGMA_" + k.to_upper())
+		if env_v != "":
+			vals[k] = env_v.to_float() if keys[k] == "f" else env_v.to_int()
+		elif md.has(k):
+			vals[k] = float(md[k]) if keys[k] == "f" else int(md[k])
+	_scent_noise_sigma   = float(vals.get("scent_noise_sigma", 0.0))
+	_scent_noise_after   = int(vals.get("scent_noise_after_ticks", 0))
+	_scent_noise_until   = int(vals.get("scent_noise_until_ticks", 0))
+	_heading_drift_sigma = float(vals.get("heading_drift_sigma", 0.0))
+	_heading_drift_after = int(vals.get("heading_drift_after_ticks", 0))
+	_heading_drift_until = int(vals.get("heading_drift_until_ticks", 0))
+	if _scent_noise_sigma > 0.0 or _heading_drift_sigma > 0.0:
+		print("BodyController: PERTURBATION scent_noise_sigma=%.4f [%d,%d) heading_drift_sigma=%.4f [%d,%d)" % [
+			_scent_noise_sigma, _scent_noise_after, _scent_noise_until,
+			_heading_drift_sigma, _heading_drift_after, _heading_drift_until])
 var _stuck_severity: float = 0.0          # 0..1, surfaced to HUD/diagnostics
 # Held rotation pulse: a per-tick random walk produces only diffusive heading
 # changes (≈ 11°/s at deficit=1) that don't reliably escape corners.  We
@@ -484,12 +525,16 @@ func _ready() -> void:
 	if resolved_seed >= 0:
 		_stuck_rng.seed     = resolved_seed ^ 0x73746B
 		_flagellum_rng.seed = resolved_seed ^ 0x666C67
+		_perturb_rng.seed   = resolved_seed ^ 0x707274
 	elif env_seed != "":
 		_stuck_rng.seed = env_seed.hash() ^ 0x73746B
 		_flagellum_rng.seed = env_seed.hash() ^ 0x666C67
+		_perturb_rng.seed = env_seed.hash() ^ 0x707274
 	else:
 		_stuck_rng.randomize()
 		_flagellum_rng.randomize()
+		_perturb_rng.randomize()
+	_read_perturb_instruments()
 
 	# Phase 6.5.5: starting heading override.  All previous runs spawned
 	# at heading=0 → the body always drove +X first → always struck the
@@ -898,9 +943,13 @@ func _physics_process(delta: float) -> void:
 	# goal direction in the WORLD frame so a momentary scent occlusion doesn't erase
 	# the heading, and ego-rotation is compensated (world_goal − heading) → the belief
 	# keeps pointing at the remembered food location as the bug turns.
-	brain.publish_proprio(PackedFloat64Array([heading]), "heading")
+	var _h_pub := heading
+	if _heading_drift_sigma > 0.0 and _perturb_active(_heading_drift_after, _heading_drift_until):
+		_heading_drift_bias += _perturb_rng.randfn(0.0, _heading_drift_sigma)   # random walk (audit 2026-09-06)
+		_h_pub = heading + _heading_drift_bias
+	brain.publish_proprio(PackedFloat64Array([_h_pub]), "heading")
 	# 2026-06-26 — sin/cos heading for the compass-EPM (orientation, no ±π fracture, §7).
-	brain.publish_proprio(PackedFloat64Array([sin(heading), cos(heading)]), "heading_vec")
+	brain.publish_proprio(PackedFloat64Array([sin(_h_pub), cos(_h_pub)]), "heading_vec")
 	# Phase 6.8 — per-paddle leaky energy (the homeokinetic controller subscribes
 	# this so it can learn to pace its beating).  Always published (stays 1.0 when
 	# the dynamics are disabled) so a bundle subscribing it never stalls.
@@ -955,6 +1004,8 @@ func _physics_process(delta: float) -> void:
 			var _r: PackedFloat64Array = world.compute_scent_vector(global_position, global_transform.basis)
 			for v in _r: smax = maxf(smax, v)
 		_last_scent_max = smax
+		if _scent_noise_sigma > 0.0 and _perturb_active(_scent_noise_after, _scent_noise_until):
+			smax = maxf(0.0, smax + _perturb_rng.randfn(0.0, _scent_noise_sigma))   # published only (audit 2026-09-06)
 		brain.publish_proprio(PackedFloat64Array([smax]), "scent_max")
 
 		# 2b-scaffold. DIRECTIONAL 8-nostril ring — a SEPARATE sensory modality (a spatial gradient
@@ -1788,6 +1839,7 @@ func _emit_jsonl(accel: float) -> void:
 					"climb":  bool(m.get("climbing", false)),
 					"wand":   bool(m.get("wandering", false)),
 					"fwand":  bool(m.get("forced_wander", false)),
+					"rex":    bool(m.get("route_exists", false)),   # climb = rex and not fwand (audit 2026-09-06)
 						"hfront": bool(m.get("have_frontier", false)),
 					"stale":  int(m.get("stale_explore", 0)),
 					"cnode":  int(m.get("cur_node", -1)),
