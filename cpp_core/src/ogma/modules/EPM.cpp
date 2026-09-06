@@ -130,6 +130,19 @@ ParamSchema EPM::params_schema() const {
         {"mitosis_enabled",         ParamMutability::HotMutable, "GNG mitosis on/off",          ParamValue{true}},
         {"mitosis_error_threshold", ParamMutability::HotMutable, "Post-bake mean error trigger", ParamValue{0.30}},
         {"mitosis_check_interval",  ParamMutability::HotMutable, "Visits between mitosis checks", ParamValue{int64_t{50}}},
+        {"mitosis_gatekeeper",      ParamMutability::HotMutable,
+            "Kalman-lessons Stage 4.  ⚠ The v4 EPM never called GNG::maybe_mitosis: mitosis_enabled and its threshold "
+            "were plumbed and neuro-scaled but the gatekeeper was never invoked, so mitosis has been dead in every v4 "
+            "EPM (found 2026-09-05; bench S4 mitosis_count 0 on every tick).  true = call the gatekeeper each tick on "
+            "the winner (the v3 semantics: a baked node whose post-bake error stays above mitosis_error_threshold "
+            "splits).  false (default) = the dead path, byte-identical.", ParamValue{false}},
+        {"mitosis_drift_ratio",     ParamMutability::HotMutable,
+            "Kalman-lessons Stage 4: the innovation-mean test inside the gatekeeper (needs mitosis_gatekeeper).  At a "
+            "check, bias = |mean post-bake residual|, spread = RMS post-bake residual; bias/spread > ratio means the "
+            "world MOVED: the prototype is corrected by mitosis_drift_gain * mean residual and the node kept, instead "
+            "of splitting.  Noise alone gives ~1/sqrt(n) (0.14 at 50 visits).  0 (default) = off, byte-identical.",
+            ParamValue{0.0}},
+        {"mitosis_drift_gain",      ParamMutability::HotMutable, "Fraction of the mean residual applied as the drift correction (1 = jump to the corrected mean).", ParamValue{1.0}},
         {"stale_prune_enabled",     ParamMutability::HotMutable, "GNG stale-prune",             ParamValue{true}},
         {"health_death_spares_baked", ParamMutability::HotMutable,
          "Exempt BAKED nodes from the GNG health-death sweep (2026-09-01).  The health system "
@@ -285,6 +298,9 @@ void EPM::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "mitosis_enabled",         [&](auto const& v){ gng_cfg.mitosis_enabled         = get_bool(v, "mitosis_enabled"); });
     apply_param(params, "mitosis_error_threshold", [&](auto const& v){ gng_cfg.mitosis_error_threshold = float(get_double(v, "mitosis_error_threshold")); });
     apply_param(params, "mitosis_check_interval",  [&](auto const& v){ gng_cfg.mitosis_check_interval  = int(get_int(v, "mitosis_check_interval")); });
+    apply_param(params, "mitosis_gatekeeper",      [&](auto const& v){ mitosis_gatekeeper_             = get_bool(v, "mitosis_gatekeeper"); });
+    apply_param(params, "mitosis_drift_ratio",     [&](auto const& v){ gng_cfg.drift_ratio             = float(get_double(v, "mitosis_drift_ratio")); });
+    apply_param(params, "mitosis_drift_gain",      [&](auto const& v){ gng_cfg.drift_gain              = float(get_double(v, "mitosis_drift_gain")); });
     apply_param(params, "stale_prune_enabled",     [&](auto const& v){ gng_cfg.stale_prune_enabled     = get_bool(v, "stale_prune_enabled"); });
     apply_param(params, "health_death_spares_baked", [&](auto const& v){ gng_cfg.health_death_spares_baked = get_bool(v, "health_death_spares_baked"); });
     apply_param(params, "stale_window_factor",     [&](auto const& v){ gng_cfg.stale_window_factor     = float(get_double(v, "stale_window_factor")); });
@@ -421,6 +437,9 @@ void EPM::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mitosis_enabled")  gng_->set_mitosis_enabled(get_bool(value, k));
     else if (k == "mitosis_error_threshold") { base_mitosis_error_threshold_ = float(get_double(value, k)); gng_->set_mitosis_error_threshold(base_mitosis_error_threshold_ * mitosis_threshold_scale_); }
     else if (k == "mitosis_check_interval")  gng_->set_mitosis_check_interval(int(get_int(value, k)));
+    else if (k == "mitosis_gatekeeper")      mitosis_gatekeeper_ = get_bool(value, k);
+    else if (k == "mitosis_drift_ratio")     gng_->set_drift_ratio(float(get_double(value, k)));
+    else if (k == "mitosis_drift_gain")      gng_->set_drift_gain(float(get_double(value, k)));
     else if (k == "stale_prune_enabled")     gng_->set_stale_prune_enabled(get_bool(value, k));
     else if (k == "health_death_spares_baked") gng_->set_health_death_spares_baked(get_bool(value, k));
     else if (k == "stale_window_factor")     gng_->set_stale_window_factor(float(get_double(value, k)));
@@ -684,7 +703,8 @@ void EPM::publish_token(uint64_t tick_id,
     tok->is_novel          = quant_error > novelty_threshold_now_;
     tok->just_baked        = gng_->last_step_baked();
     tok->just_pruned       = !gng_->last_pruned_ids().empty();
-    tok->just_mitosis      = false; // TODO: gng_ doesn't expose a per-step flag yet
+    tok->just_mitosis      = last_just_mitosis_;
+    tok->drift_count       = gng_->drift_count();
     tok->pruned_ids        = gng_->last_pruned_ids();
     tok->node_count        = gng_->node_count();
     tok->baked_count       = gng_->baked_count();
@@ -858,6 +878,10 @@ void EPM::tick(uint64_t tick_id) {
 
     float transition_surp = 0.0f, tle = 0.0f;
     compute_dual_tle(quant_error, winner_id, transition_surp, tle, logprob_surp);
+
+    // Stage 4: the Mitosis Gatekeeper (with the innovation-mean drift test inside it).
+    last_just_mitosis_ = false;
+    if (mitosis_gatekeeper_) last_just_mitosis_ = gng_->maybe_mitosis(winner_id, latent);
     last_tle_         = tle;
     last_quant_error_ = quant_error;
 
@@ -897,6 +921,7 @@ nlohmann::json EPM::diag_lite() const {
         j["nodes"]         = gng_->node_count();
         j["baked"]         = gng_->baked_count();
         j["mitosis_count"] = gng_->mitosis_count();
+        j["drift_count"]   = gng_->drift_count();
         j["baked_now"]     = gng_->last_step_baked();   // a node earned its place THIS step
     }
     // Stage 0.4 instruments — normalised innovation and innovation whiteness.

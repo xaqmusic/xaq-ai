@@ -636,10 +636,51 @@ behavioural primary by construction), `WORKING` on the bench. Re-use context: an
 which the residual vocabulary feeds a live planner; B v2.1's planner gates (self-transition
 mass, chain lift, h2 bands) are the next readout on this arm.
 
-## Stage 4 — drift versus split
+## Stage 4 — drift versus split (SHIPPED 2026-09-05; bench WORKING as re-centring)
 
-Innovation-mean test in `maybe_mitosis`: a biased residual moves the prototype, a spread one
-splits it. S2 must drift-track, S4 must split.
+**A fourth documented-but-absent mechanism, found on the way.** The v4 EPM never called
+`GNG::maybe_mitosis`: `mitosis_enabled`, its threshold and the neurochemical scaling of that
+threshold were all plumbed, but the gatekeeper was never invoked, so mitosis has been dead in
+every v4 EPM (bench: mitosis count 0 on every tick of every scenario). Stage 4 therefore ships
+two guarded pieces. `EPM.mitosis_gatekeeper=true` restores the v3 call each tick on the winner
+(default false, the dead path, byte-identical). `mitosis_drift_ratio > 0` adds the
+innovation-mean test inside it: at a check, `bias = ‖mean post-bake residual‖` and
+`spread = RMS post-bake residual`; `bias/spread > ratio` means the world moved, so the prototype
+is corrected by `mitosis_drift_gain × mean residual` and the node kept; an unbiased but wide
+residual falls through to the split. Noise alone gives ≈ 1/√n, so 0.5 is a safe ratio. Two
+unit tests (a shifted constant is corrected onto, a symmetric pair still splits). Byte-identity
+at defaults: S1, S2, S4 references, zero differing lines.
+
+| bench, n = 20 paired, vs base | gatekeeper only | gatekeeper + drift 0.5 |
+|---|---|---|
+| S1 static cluster | identical (0 splits) | identical (0 drifts) |
+| S1m three clusters: prototype MSE to cluster mean | identical | **0.0102 → 0.0035 (÷2.9)**; nodes 10.7 → 8.0; 2.05 corrections per run; purity 1.0 |
+| S2 drifting mean: tracking MSE (KF 0.00095) | identical | 0.00594 → 0.00502 (÷1.18); nodes 18.7 → 11.8; 39 corrections per run |
+| S4 cycle: nodes / baked | identical | 11.7 → 7.75 / 7.1 → 5.15; surprise ratio unchanged |
+
+Two readings. The gatekeeper's split is dormant at its default threshold: 0.30 is a squared
+distance far above the bench's per-tick errors, so nothing ever splits, and a scale-tuned
+absolute threshold is the doctrine §6 smell; a rank-based threshold (the insertion gate's own
+cure) is the follow-up, out of this campaign's scope. The drift test is the live part: it
+re-centres baked prototypes onto the mean of what they have seen since baking, the after-the-fact
+Kalman estimate, and that is a large gain in estimate quality on clustered data. On continuous
+drift a correction every fifty visits is a poor tracker next to Stage 1's continuous gain
+(÷1.18 against ÷5.9), as it should be. `WORKING` on the bench, as re-centring.
+
+**Creature test (2026-09-05): the picrawler `body_pose` / `body_pose_t` EPMs with the gatekeeper
+and drift 0.5 on, corridor 12 000 ticks, n = 6 paired against `j1s4`.** Walkers 6/6, falls 1 vs 1,
+tilt tie. net_z 7.39 → 6.40 (−0.99 ± 2.56, 3 of 6 each way), straight 0.62 → 0.52 (−0.10 ± 0.23),
+flat_v +0.003 ± 0.005, scrub −0.003 ± 0.004 (better, 4 of 6), inter-leg coherence 0.512 → 0.493
+(−0.018 ± 0.024, t −1.9, worse in 5 of 6), step_cv +0.023 ± 0.057. Pose-vocabulary turnover
+fell (whole-run winner ids 45.8 → 41.0), so the correction was live. **Verdict: `NULL`, leaning
+negative**: nothing resolvable either way, with the coherence trend being the mild signature of
+the named risk, a baked pose vocabulary shifting under the planner that reads it. The
+re-centring that improves estimates on clustered data has no consumer on this body that
+benefits from a better-centred pose prototype, and one that mildly dislikes a moving one.
+Re-use context: a stationary-vocabulary consumer (a Level-N EPM, a place map) where the
+after-the-fact re-centring is pure gain, the same context as Stage 1's uncapped schedule.
+
+**The campaign's four stages are complete.**
 
 ---
 

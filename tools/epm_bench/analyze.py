@@ -127,7 +127,8 @@ def metrics_S1m(h, ticks, dumps):
     purity = float(np.mean([majority[int(w)] == int(kk) for w, kk in zip(winner[half:], k[half:])]))
     distinct = len(set(winner[-1000:].tolist()))
     out = {"purity": purity, "distinct_winners_last1000": distinct,
-           "nodes_end": tok(ticks, "nodes")[-1], "baked_end": tok(ticks, "baked")[-1]}
+           "nodes_end": tok(ticks, "nodes")[-1], "baked_end": tok(ticks, "baked")[-1],
+           "mitosis_end": tok(ticks, "mitosis")[-1], "drift_end": tok(ticks, "drift")[-1]}
     mus = np.array(h["mus"])
     d = node_dump_at(dumps, ticks[-1]["t"])
     if d is not None:
@@ -158,6 +159,7 @@ def metrics_S2(h, ticks, dumps):
         "epm_qe2": float(np.nanmean(qe[half:] ** 2)),
         "kf_prefit_resid2": dim * (p_prior + r),
         "nodes_end": tok(ticks, "nodes")[-1], "baked_end": tok(ticks, "baked")[-1],
+        "mitosis_end": tok(ticks, "mitosis")[-1], "drift_end": tok(ticks, "drift")[-1],
     }
 
 
@@ -223,6 +225,7 @@ def metrics_S4(h, ticks, dumps):
         "tle_unexpected": float(np.nanmean(tle[warm & (trans == 2)])) if np.any(warm & (trans == 2)) else np.nan,
         "n_unexpected": int(np.sum(warm & (trans == 2))),
         "nodes_end": tok(ticks, "nodes")[-1], "baked_end": tok(ticks, "baked")[-1],
+        "mitosis_end": tok(ticks, "mitosis")[-1], "drift_end": tok(ticks, "drift")[-1],
     }
 
 

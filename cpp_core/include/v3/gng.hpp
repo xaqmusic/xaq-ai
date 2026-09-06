@@ -49,6 +49,10 @@ struct GNGNode {
     // Post-bake tracking for Mitosis Gatekeeper
     int     post_bake_visits  = 0;
     double  post_bake_error   = 0.0;
+    // Kalman-lessons Stage 4: the post-bake residual SUM (x - w), so the gatekeeper
+    // can test the innovation MEAN against its spread.  Accumulated only when
+    // Config::drift_ratio > 0; serialised only then.
+    Eigen::VectorXf post_bake_resid_sum;
 
     // --- Biological health model ---
     // Health grows with activity and decays non-linearly: mature nodes
@@ -171,6 +175,18 @@ public:
         float mitosis_error_threshold = 0.30f;
         int   mitosis_check_interval  = 50;
         float mitosis_split_distance  = 0.10f;
+        // ---------------------------------------------------------------------
+        // Drift-versus-split (Kalman-lessons Stage 4) — the innovation-mean test
+        // ---------------------------------------------------------------------
+        // A well-tuned filter's innovations are zero-mean.  At a gatekeeper check
+        // the node's post-bake residual mean (bias) is compared with its RMS
+        // residual (spread): bias/spread > drift_ratio means the world moved and
+        // the prototype is corrected by drift_gain * mean residual instead of
+        // being split; otherwise the split decision proceeds as before.  Noise
+        // alone gives bias/spread ~ 1/sqrt(n) (0.14 at n = 50), so 0.5 is a safe
+        // ratio.  0 (default) = off, byte-identical (nothing accumulated).
+        float drift_ratio             = 0.0f;
+        float drift_gain              = 1.0f;
         // Biological health model (replaces metabolic mass-culling)
         float health_boost             = 0.5f;    // health gained per visit (activity-dependent potentiation)
         float health_base_decay        = 0.995f;  // decay rate at health=0 (young, volatile)
@@ -301,6 +317,9 @@ public:
     void set_mitosis_split_distance(float d)   { cfg_.mitosis_split_distance = d; }
 
     int  mitosis_count() const { return mitosis_count_; }
+    int  drift_count()   const { return drift_count_; }
+    void set_drift_ratio(float r)             { cfg_.drift_ratio = r; }
+    void set_drift_gain(float g)              { cfg_.drift_gain = g; }
 
     const std::vector<int>& last_pruned_ids() const { return last_pruned_ids_; }
 
@@ -347,6 +366,8 @@ private:
 
     // Mitosis counter
     int mitosis_count_ = 0;
+    // Stage 4: drift corrections applied by the gatekeeper
+    int drift_count_   = 0;
 
     // Set by step() when the winner just crossed the baking gate
     bool last_step_baked_ = false;

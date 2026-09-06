@@ -226,6 +226,7 @@ json token_json(std::shared_ptr<const ogma::RealityToken> const& t) {
         {"novel",      t->is_novel},
         {"just_baked", t->just_baked},
         {"mitosis",    t->mitosis_count},
+        {"drift",      t->drift_count},
     };
 }
 
