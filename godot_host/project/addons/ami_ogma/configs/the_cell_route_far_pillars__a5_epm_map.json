@@ -1,9 +1,9 @@
 {
  "metadata": {
-  "name": "Cell \u2014 FAR-FOOD arena + PILLARS (round-2 base)",
-  "description": "CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. ROUND-2 BASE (2026-09-06). the_cell_route_far_baseline.json's world (24 m open arena, two food sites 16 m apart, scent falloff 6, alternating) plus pillars (obstacle_density 0.06, scent attenuation 0.3, obstacle_seed 1000; --vary-world redraws the layout per job). Without pillars the absolute-heading panorama is a constant vector and the place EPM holds 2 nodes for the whole run (audit V4/L9 liveness 2026-09-06); with them it holds ~10 in 120 s and play's route_exists holds on a third of samples. Brain: the four-loop study composition with the arbiter in efe mode. Liveness 2026-09-06: PASS except 'planner wins' -- the planner scores routes but never wins against play's saturating value (audit V6).",
+  "name": "Cell \u2014 FAR-FOOD + PILLARS, EPM-NATIVE MAP (round-2 lever A5)",
+  "description": "LEVER A5 (2026-09-06): identical to the_cell_route_far_pillars.json except the place map is the place-EPM's vocabulary -- a PlaceVectorBuilder feeds [panorama ; dead-reckoned pose x6] to epm_place (48-D, dim_min/dim_max stated) and play/planner run with pi_cell_size 0 so the EPM's winner_id is the node (the grid, pi_cell_size 20/70, is the oracle it is measured against; audit V1). CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. ROUND-2 BASE (2026-09-06). the_cell_route_far_baseline.json's world (24 m open arena, two food sites 16 m apart, scent falloff 6, alternating) plus pillars (obstacle_density 0.06, scent attenuation 0.3, obstacle_seed 1000; --vary-world redraws the layout per job). Without pillars the absolute-heading panorama is a constant vector and the place EPM holds 2 nodes for the whole run (audit V4/L9 liveness 2026-09-06); with them it holds ~10 in 120 s and play's route_exists holds on a third of samples. Brain: the four-loop study composition with the arbiter in efe mode. Liveness 2026-09-06: PASS except 'planner wins' -- the planner scores routes but never wins against play's saturating value (audit V6).",
   "env_target": "cell",
-  "phase_tag": "round2.farfood.pillars",
+  "phase_tag": "round2.farfood.pillars.epm_map",
   "reflex_modular": true,
   "body_model": "bidirectional_paddler",
   "motor_baseline_beat": false,
@@ -91,11 +91,12 @@
     "disconfirm": 0.1,
     "escape_gain": 1.0,
     "wander_thrust": 0.0,
-    "pi_cell_size": 70.0,
+    "pi_cell_size": 0.0,
     "plan_value_topic": "reality.cognitive.plan_value",
     "plan_precision_topic": "reality.cognitive.plan_precision",
     "plan_novelty_topic": "reality.cognitive.plan_novelty",
-    "stall_factor": 4.0
+    "stall_factor": 4.0,
+    "_pi_cell_size_grid": 70.0
    }
   },
   {
@@ -108,8 +109,9 @@
     "eat_topic": "events.eat",
     "output_topic": "percept.play_bearing",
     "play_value_topic": "reality.cognitive.play_value",
-    "pi_cell_size": 20.0,
-    "wander_stall_ticks": 30
+    "pi_cell_size": 0.0,
+    "wander_stall_ticks": 30,
+    "_pi_cell_size_grid": 20.0
    }
   },
   {
@@ -240,14 +242,27 @@
    }
   },
   {
+   "id": "place_vec",
+   "type": "PlaceVectorBuilder",
+   "params": {
+    "pano_topic": "percept.cylinder",
+    "heading_topic": "reality.proprio.heading",
+    "vel_topic": "reality.proprio.vel_ego",
+    "output_topic": "percept.place_vec",
+    "n_pano": 24,
+    "odo_scale": 240.0,
+    "_comment": "Cell round 2 lever A5 (2026-09-06): [panorama 24 ; (x/240, y/240, cos h, sin h) x 6]. pose_repeat = 24/4 (derived) balances the two groups in the RBF L2. The dead-reckoned pose is the consumers' own path integral; the heading's drift-free perfection is the named scaffold (audit S1)."
+   }
+  },
+  {
    "id": "epm_place",
    "type": "EPM",
    "params": {
     "modality_group": "cognitive",
     "modality_name": "place",
     "encoder_kind": "rbf",
-    "input_topic": "percept.cylinder",
-    "proprio_state_dims": 24,
+    "input_topic": "percept.place_vec",
+    "proprio_state_dims": 48,
     "dim_min": [
      0.0,
      0.0,
@@ -272,7 +287,31 @@
      0.0,
      0.0,
      0.0,
-     0.0
+     0.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0,
+     -1.0
     ],
     "dim_max": [
      1.0,
@@ -298,15 +337,40 @@
      1.0,
      1.0,
      1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
      1.0
     ],
-    "projection_dim": 48,
+    "projection_dim": 96,
     "min_insertion_error": 0.1,
     "max_nodes": 40,
     "mitosis_enabled": false,
     "baking_threshold": 5,
     "process_every_n_ticks": 1,
-    "subtract_descending_prediction": false
+    "subtract_descending_prediction": false,
+    "_comment": "A5: the place vocabulary learns the map from the place vector (48-D); its winner_id is the node id for play and the planner (pi_cell_size 0)."
    }
   },
   {

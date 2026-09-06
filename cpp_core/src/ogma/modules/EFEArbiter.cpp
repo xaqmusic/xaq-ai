@@ -81,6 +81,7 @@ ParamSchema EFEArbiter::params_schema() const {
         {"vision_weight",      ParamMutability::HotMutable, "loop #4: vision pragmatic gain. G_vision = vision_weight·hunger·vision_value (CLOSE on a seen source, hunger-weighted like klino). 0 (default) = vision INERT (never wins; 2/3-policy race byte-identical). 1 = the fourth policy (Stage 2+). efe mode only.", ParamValue{0.0}},
         {"epistemic_reach_gated", ParamMutability::HotMutable, "R1 (2026-07-09): gate the epistemic (explore) terms by (1 − max(g_prag_klino, g_prag_planner)) = 1 − hunger·max_reach, NOT the blanket (1−hunger). Breaks the starvation deadlock (§2.1): a HUNGRY-but-BLIND agent (no reach) is in MAX uncertainty → epistemic stays high → play pushes the frontier to find food, instead of (1−hunger)→0 silencing exploration exactly when it is needed. full → gate≈1 (play when full, preserved); hungry+reachable → gate≈0 (exploit). No new constant. false = legacy (1−hunger) gate (ablation baseline).", ParamValue{true}},
         {"scoring_mode",  ParamMutability::HotMutable, "'value_race' (legacy value race — DEFAULT, byte-identical to prior builds) | 'efe' (explicit-EFE precision scoring: each policy G = pragmatic hunger·reach-prob (SHARED UNITS, scale mismatch gone by construction — no cede/plan_peak/max-of-three) + epistemic (1−hunger)·uncertainty-reduction; hunger sets the exploit/explore balance).", ParamValue{std::string("value_race")}},
+        {"pragmatic_norm", ParamMutability::HotMutable, "Cell round 2 lever A4 (2026-09-06): 'none' (default, byte-identical) | 'planner_peak' -- divide the PLANNER's reach (plan_value = gamma^hops, ~0.15 for a distant route) by its own slow-decaying running peak (decay = z_peak_decay) before hunger multiplies it, so a planner holding the best route it has seen reads 1 exactly as play does at its freshest novelty and the klino z-spike at its strongest whiff. Klino's reach stays eat-calibrated (a peak-normalised constant weak scent would read as full reach). Audit V6: with a raw planner reach against normalised epistemic terms at 1, a planner holding a route never wins. efe mode only.", ParamValue{std::string("none")}},
         {"z_peak_decay",  ParamMutability::HotMutable, "efe: SLOW decay of klino's z-spike running peak (the epistemic normaliser z_ref, §6 — derived from the signal, not hand-set).", ParamValue{0.0005}},
         {"planner_epistemic",  ParamMutability::HotMutable, "efe ABLATION: include the planner's epistemic term g_epist_planner=(1−hunger)·plan_novelty (true) or zero it (false, Stage-3 coverage A/B).", ParamValue{true}},
         {"klino_search_floor", ParamMutability::HotMutable, "efe: add g_epist_klino += (1−hunger)·(1−plan_precision) — an UNDIRECTED klino search drive when the planner's model is imprecise (§1.4 blind-forager floor; keep OFF unless eats regress below the value-race baseline).", ParamValue{false}},
@@ -113,6 +114,7 @@ ParamMap EFEArbiter::current_params() const {
     m["epistemic_reach_gated"] = ParamValue{epistemic_reach_gated_};
     m["scoring_mode"]  = ParamValue{scoring_mode_};
     m["z_peak_decay"]  = ParamValue{double(z_peak_decay_)};
+    m["pragmatic_norm"] = ParamValue{pragmatic_norm_};
     m["planner_epistemic"]  = ParamValue{planner_epistemic_};
     m["klino_search_floor"] = ParamValue{klino_search_floor_};
     m["mean_alpha"]    = ParamValue{double(mean_alpha_)};
@@ -137,6 +139,7 @@ void EFEArbiter::on_param_change(std::string_view key, ParamValue const& value) 
                                      vision_active_ = (vision_weight_ > 0.0f) && !vision_value_topic_.empty() && scoring_mode_ == "efe"; }
     else if (k == "epistemic_reach_gated") epistemic_reach_gated_ = get_bool(value, k);
     else if (k == "z_peak_decay")  z_peak_decay_  = float(get_double(value, k));
+    else if (k == "pragmatic_norm") pragmatic_norm_ = get_string(value, k);
     else if (k == "planner_epistemic")  planner_epistemic_  = get_bool(value, k);
     else if (k == "klino_search_floor") klino_search_floor_ = get_bool(value, k);
     else if (k == "mean_alpha")    mean_alpha_    = float(get_double(value, k));
@@ -167,6 +170,7 @@ void EFEArbiter::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "epistemic_reach_gated", [&](auto const& v){ epistemic_reach_gated_ = get_bool(v,"epistemic_reach_gated"); });
     apply_param(params, "scoring_mode",  [&](auto const& v){ scoring_mode_  = get_string(v,"scoring_mode"); });
     apply_param(params, "z_peak_decay",  [&](auto const& v){ z_peak_decay_  = float(get_double(v,"z_peak_decay")); });
+    apply_param(params, "pragmatic_norm", [&](auto const& v){ pragmatic_norm_ = get_string(v,"pragmatic_norm"); });
     apply_param(params, "planner_epistemic",  [&](auto const& v){ planner_epistemic_  = get_bool(v,"planner_epistemic"); });
     apply_param(params, "klino_search_floor", [&](auto const& v){ klino_search_floor_ = get_bool(v,"klino_search_floor"); });
     apply_param(params, "plan_novelty_topic",   [&](auto const& v){ plan_novelty_topic_   = get_string(v,"plan_novelty_topic"); });
@@ -293,6 +297,13 @@ void EFEArbiter::tick(uint64_t tick_id) {
         float reach_klino   = have_cap_ ? std::clamp(cap_klino_, 0.0f, 1.0f)
                                         : std::clamp(scent_,     0.0f, 1.0f);
         float reach_planner = std::clamp(plan_value_, 0.0f, 1.0f);
+        float reach_vision  = std::clamp(vision_value_, 0.0f, 1.0f);
+        if (pragmatic_norm_ == "planner_peak") {
+            // A4: the planner's reach as a fraction of its own recent best route (slow-decaying
+            // running peak, the z_peak device).  No route ever → stays 0; the first route reads 1.
+            reach_peak_planner_ = std::max(reach_planner, reach_peak_planner_ * (1.0f - z_peak_decay_));
+            reach_planner = reach_peak_planner_ > 1e-6f ? std::clamp(reach_planner / reach_peak_planner_, 0.0f, 1.0f) : 0.0f;
+        }
 
         // --- pragmatic (exploit): hunger × reach-prob — SHARED UNITS = expected hunger-reduction ---
         g_prag_klino_   = hunger_ * reach_klino;
@@ -301,7 +312,7 @@ void EFEArbiter::tick(uint64_t tick_id) {
         // VisualHomingNav's detection/direction confidence (vision_value ∈[0,1], distance-independent).
         // Computed HERE (before the gate) so it enters the reach-gate max below: when vision can reach
         // food it can SEE, exploration should back off just as it does for a smelling klino.
-        g_prag_vision_ = vision_weight_ * hunger_ * std::clamp(vision_value_, 0.0f, 1.0f);
+        g_prag_vision_ = vision_weight_ * hunger_ * reach_vision;
         // --- R1: epistemic precision = 1 − max reach (NOT the blanket 1−hunger) ---
         // The epistemic (explore) terms should be gated by how UNRESOLVED the pragmatic goal is, not
         // by energy surplus alone. max(g_prag) = hunger·max_reach is exactly "how well can I already
@@ -534,6 +545,8 @@ nlohmann::json EFEArbiter::diag_snapshot() const {
         {"cap_klino", cap_klino_},         // klino's self-reported capability ∈[0,1]
         {"mean_klino", mean_klino_},       // klino's running raw baseline (legible value race)
         {"plan_peak", plan_peak_},         // planner's slow-decaying peak food-route value (value-race level denominator)
+        {"pragmatic_norm", pragmatic_norm_}, // A4
+        {"reach_peak_planner", reach_peak_planner_},
         // ---- explicit-EFE decomposition (efe mode; 0 in value_race) ----
         {"g_prag_klino", g_prag_klino_},   // hunger · reach-prob(klino)   — pragmatic, sensory precision
         {"g_prag_planner", g_prag_planner_}, // hunger · reach-prob(planner) — pragmatic, model precision

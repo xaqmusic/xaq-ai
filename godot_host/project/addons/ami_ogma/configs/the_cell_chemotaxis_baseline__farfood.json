@@ -1,7 +1,7 @@
 {
  "metadata": {
   "name": "Cell \u2014 SPECIALIST in the FAR-FOOD arena (round-2 baseline)",
-  "description": "AUDIT/ROUND-2 BASELINE (2026-09-06): The reactive specialist in the far-food relocation arena: after each eat the food is beyond scent reach (falloff 6 < 16 m gap), so this controller can only re-find it by chance -- the floor the composition must beat with memory. Brain identical to the_cell_chemotaxis_baseline.json (reactive run-and-tumble on the scalar scent; no map, no arbiter); world metadata (incl. pillars 0.06) copied from the round-2 base the_cell_route_far_pillars.json; originally from Cell \u2014 FAR-RELOCATE composition (baseline): route to remembered far food.",
+  "description": "CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. AUDIT/ROUND-2 BASELINE (2026-09-06): The reactive specialist in the far-food relocation arena: after each eat the food is beyond scent reach (falloff 6 < 16 m gap), so this controller can only re-find it by chance -- the floor the composition must beat with memory. Brain identical to the_cell_chemotaxis_baseline.json (reactive run-and-tumble on the scalar scent; no map, no arbiter); world metadata (incl. pillars 0.06) copied from the round-2 base the_cell_route_far_pillars.json; originally from Cell \u2014 FAR-RELOCATE composition (baseline): route to remembered far food.",
   "env_target": "cell",
   "phase_tag": "baseline.reactive.chemotaxis.farfood",
   "reflex_modular": true,
@@ -10,7 +10,7 @@
   "motor_energy": false,
   "maze": true,
   "maze_layout": "open",
-  "scent_falloff_radius": 6.0,
+  "scent_falloff_radius": 2.0,
   "_comment_forage": "falloff 12->15 (2026-07-05 sweep): the reach fix for far-field quad foraging. At 12 the bug could not home across a 24m zone (first eat ~t13400, eat-gated reveal effectively dead); at 15 the first eat lands ~t1213 (11x faster) and the bug actually forages the revealed zones. 15 is the reach ceiling (>=16 flattens the screened-Poisson field -> no climbable gradient). Higher energy_drain, food-at-connector, and smaller room ALL tested WORSE. Honest limit: self-driven 4-zone completion is a capability limit (the bug reaches NE/NW but, full right after an eat, plays instead of foraging the far center food) -> the timed reveal (wall_drop_period) backstops hands-off completeness; the FIRST connector is eat-earned.",
   "nutrients": 1,
   "publish_scent_ring": false,

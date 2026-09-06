@@ -106,10 +106,16 @@ Three statements the doctrine requires, made explicit:
 - **Value race or precision weighting?** `OPEN` (O3). The `efe` mode puts every pragmatic
   term in shared units (hunger × a reach in [0,1]) and gates the epistemic terms by need,
   which is the scale-free form §2.2 asks for; whether hunger × reach *is* the precision §2.3
-  prescribes, or a proxy for it, is decided by the reach-gate ablation (Cell round 2 A1) and
-  the follow-on lever that puts the loops under `LateralVoter` trust. The gate's docstring
-  names two pragmatic terms; the code takes the max over three, one of which is
-  pre-multiplied by `vision_weight`.
+  prescribes, or a proxy for it, is decided by measurement. **Measured 2026-09-06:** the
+  reach-gate ablation (A1) is a null under both seedings; the crowding is a *units* defect —
+  klino's z-spike and play's value are normalised to their own peaks and sit at 1, while the
+  pragmatic reaches are raw (0.04 in the study room; a planner holding a distant route reads
+  `plan_value` ≈ 0.15 and never wins). The lever: `pragmatic_norm: planner_peak` divides the
+  planner's reach by its own slow-decaying peak (the device play and the z-spike already use;
+  no new constant), default `none`, byte-identical. Klino's reach stays eat-calibrated: a
+  peak-normalised constant weak scent would read as full reach, which the lever's first form
+  demonstrated by failing its own test. The gate's docstring names two pragmatic terms; the
+  code takes the max over three, one of which is pre-multiplied by `vision_weight`.
 - **The sign of play.** Play is weighted by the *surplus* (the need gate, ≈ 1 − hunger when
   nothing is reachable), never by hunger: a curious bug is one that survives. The
   hunger-weighted form is the shipped wrong-sign control (`play_hunger_weight`).

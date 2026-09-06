@@ -141,6 +141,8 @@ public:
     // ---- explicit-EFE terms (efe scoring_mode; §2.2/§2.3) ----
     std::string const& scoring_mode() const { return scoring_mode_; }
     float g_prag_klino()    const { return g_prag_klino_; }     // hunger · reach-prob(klino)   — pragmatic, sensory precision
+    std::string const& pragmatic_norm() const { return pragmatic_norm_; }   // A4
+    float reach_peak_planner() const { return reach_peak_planner_; }
     float g_prag_planner()  const { return g_prag_planner_; }   // hunger · reach-prob(planner) — pragmatic, model precision
     float g_epist_klino()   const { return g_epist_klino_; }    // (1−hunger) · normalised z-spike — klino approach/epistemic
     float g_epist_planner() const { return g_epist_planner_; }  // (1−hunger) · planner frontier novelty (Stage 3; 0 until then)
@@ -207,6 +209,17 @@ private:
     // participates in the winner race and the 2/3-policy logic is byte-identical. >0 = the 4th policy.
     float vision_weight_ = 0.0f;
     bool  epistemic_reach_gated_ = true;   // R1: gate epistemic by (1−max reach), not (1−hunger)
+    // Cell round 2, lever A4 (2026-09-06): the efe mode's pragmatic reaches are RAW scent-scaled
+    // quantities (0.04 in a scent-poor room) while the epistemic terms are normalised to their
+    // own running peaks and sit at 1 -- the doctrine's mis-scaled proxy, measured (audit V6).
+    // pragmatic_norm = "planner_peak" divides the PLANNER's reach (plan_value = γ^hops, ~0.15
+    // for a distant route) by its own slow-decaying running peak (the device play and the
+    // klino z-spike already use; decay = z_peak_decay, no new constant), so a planner holding
+    // the best route it has seen reads 1, as play does at its freshest novelty.  Klino is NOT
+    // normalised this way: its reach is already eat-calibrated (scent / scent-at-eat), and a
+    // peak-normalised constant weak scent would read as full reach (the first form of this
+    // lever failed its own test on exactly that).  "none" (default) is byte-identical.
+    std::string pragmatic_norm_ = "none";   // "none" | "planner_peak"
     bool  klino_search_floor_ = false; // efe: add g_epist_klino += (1−hunger)·(1−plan_precision) — undirected klino search when the model is imprecise (§1.4 floor; opt-in)
     float mean_alpha_    = 0.01f;   // EMA rate of klino's running baseline (z-score mean); slow → klino stays excited inside the scent field (~100 ticks)
     float var_alpha_     = 0.01f;   // EMA rate of klino's running variance (z-score scale)
@@ -238,6 +251,8 @@ private:
     float z_peak_       = 0.0f;
     // planner LEVEL state: slow-decaying peak of the food-route value (the level's denominator)
     float plan_peak_    = 0.0f;
+    // A4 pragmatic_norm=peak: running peaks of the raw reaches (serialised only when the option is on)
+    float reach_peak_planner_ = 0.0f;
     // scent-cede state: slow-decaying peak of scent (the strongest food-scent known → cede denominator)
 
     // adaptive-hysteresis state (running mean + variance of the value gap)
