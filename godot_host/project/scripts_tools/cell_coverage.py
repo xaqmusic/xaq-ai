@@ -153,6 +153,13 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
     min_fdist = None
     fd_sum = 0.0
     near2 = near1 = fwd_samples = 0   # ticks with food within 2m / 1m (close approaches)
+    # Kalman-lessons Stage 2: per-third phase split (pre / perturbation / post) so a
+    # mid-run sensor perturbation (VisualBearing.stick_after_ticks, lesion_after_ticks)
+    # can be read as eats and food distance during and after it.
+    total_ticks = duration_s * TICKS_PER_SEC
+    eats_thirds = [0, 0, 0]; fd_thirds = [0.0, 0.0, 0.0]; fd_n_thirds = [0, 0, 0]
+    def _third(t):
+        return min(2, int(3 * t / max(1, total_ticks)))
     for ln in proc.stdout.splitlines():
         ln = ln.strip()
         if not ln.startswith("{"):
@@ -163,12 +170,14 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
             continue
         if r.get("event") == "HIT":
             eats += 1
+            eats_thirds[_third(int(r.get("t", 0)))] += 1
             continue
         if r.get("event") == "FWDLOG":
             fd = float(r.get("fdist", -1.0))
             if fd >= 0.0:
                 fwd_samples += 1
                 fd_sum += fd
+                th = _third(int(r.get("t", 0))); fd_thirds[th] += fd; fd_n_thirds[th] += 1
                 if min_fdist is None or fd < min_fdist:
                     min_fdist = fd
                 if fd < 2.0:
@@ -246,6 +255,8 @@ def run_one(config_res: str, duration_s: int, cell_m: float, z_wall: float,
         "near2_frac": round(near2 / fwd_samples, 3) if fwd_samples else 0.0,
         "near1_frac": round(near1 / fwd_samples, 3) if fwd_samples else 0.0,
         "diag_lines": total_diag,
+        "eats_thirds": eats_thirds,
+        "fdist_thirds": [round(fd_thirds[i] / fd_n_thirds[i], 2) if fd_n_thirds[i] else None for i in range(3)],
         "stderr_tail": proc.stderr.strip().splitlines()[-3:] if proc.returncode else [],
     }
 
@@ -286,6 +297,17 @@ def summarize(arm: str, rows: list[dict], duration_s: int) -> None:
     print(f"  play state: climb {_mean([r['climb_frac'] for r in ok])}  wand {_mean([r['wand_frac'] for r in ok])}  "
           f"fwand {_mean([r['fwand_frac'] for r in ok])}  hfront {_mean([r['hfront_frac'] for r in ok])}  "
           f"stale {_mean([r['mean_stale'] for r in ok])}  nodes {_mean([r['n_nodes'] for r in ok])}")
+    thirds = [r.get("eats_thirds") for r in rows if r.get("eats_thirds")]
+    if thirds:
+        m = [statistics.mean(t[k] for t in thirds) for k in range(3)]
+        print(f"  EATS by third (pre / mid / post): {m[0]:.2f} / {m[1]:.2f} / {m[2]:.2f}")
+        fdt = [r.get("fdist_thirds") for r in rows if r.get("fdist_thirds")]
+        fm = []
+        for k in range(3):
+            v = [t[k] for t in fdt if t[k] is not None]
+            fm.append(f"{statistics.mean(v):.2f}" if v else "-")
+        print(f"  FOOD-DIST by third (pre / mid / post): {fm[0]} / {fm[1]} / {fm[2]} m")
+
 
 
 def main() -> int:
@@ -370,10 +392,18 @@ def paired_ab(nameA, resA, nameB, resB):
     seeds = sorted(set(a) & set(b))
     if len(seeds) < 2:
         return
-    for metric, better in (("eats", "higher"), ("mean_fdist", "lower")):
+    for metric, better in (("eats", "higher"), ("mean_fdist", "lower"),
+                           ("eats_mid", "higher"), ("eats_post", "higher"),
+                           ("fdist_mid", "lower"), ("fdist_post", "lower")):
         diffs = []
         for s in seeds:
-            va, vb = a[s].get(metric), b[s].get(metric)
+            def _get(r, m):
+                if m in ("eats_mid", "eats_post"):
+                    t = r.get("eats_thirds"); return None if not t else t[1 if m == "eats_mid" else 2]
+                if m in ("fdist_mid", "fdist_post"):
+                    t = r.get("fdist_thirds"); return None if not t else t[1 if m == "fdist_mid" else 2]
+                return r.get(m)
+            va, vb = _get(a[s], metric), _get(b[s], metric)
             if va is None or vb is None:
                 continue
             diffs.append(vb - va)   # B − A
