@@ -193,6 +193,33 @@ ticks, the lesion over the middle third; food relocation is built in):
   drift, or the vocabulary map (A5), whose panorama half can re-anchor a drifted frame and
   whose grid half cannot — the comparison that would name the scaffold by contrast.
 
+## Round 4 — competence-graded arbitration (register O21; started 2026-09-06)
+
+Operator's order: this before any microduck work.
+
+**The lever.** A loop's precision should mean whether its prediction about the *world* holds
+while it acts, not whether its own output is smooth (the R3 lesson). `LoopCompetence`, one per
+loop, watches the loop's objective stream and the arbiter's gain for that loop; over each
+window of `horizon_ticks` (30) of continuous driving it checks once whether the objective
+moved as the loop predicts, and keeps the fraction of such checks that held as a competence
+`c` (an EMA, scale-free: no constant tuned to the objective's units; stagnation counts as not
+improved, so a policy whose world does not move earns no trust by constancy). While the loop
+is not driving, `c` relaxes toward the uninformed prior 0.5 (uncertainty grows without
+observation). It publishes a RealityToken with `expected_error = tle = 1 − c`; a
+`LateralVoter` at level 1 (`trust_source expected`, `group_balance false`) turns that into
+trust; the arbiter's `scoring_mode precision` selects by need × trust. The module absent is
+byte-identical; 4/4 unit tests.
+
+The loops' predictions, as configured: klino — `scent_max` rises while it runs; planner —
+`plan_value` rises as it closes on remembered food; play — the place EPM's TLE rises as it
+climbs; vision — `vision_value` rises as it homes.
+
+**Arms (n = 20, far-food + pillars, falloff 2.0, the study brain):** `r4` vs the four-loop
+efe base (1.50) and the two-loop brain (2.45); `r4_wrongsign` (`precision_sign −1`, valid
+with three live channels). What "works" means: the four-loop brain, play present, forages at
+the two-loop brain's level, with the planner taking the motor when hungry and competent and
+play yielding when its world stops getting more novel.
+
 ## What round 2 hands the duck
 
 The recipe's currency (a heading and a confidence per loop; a heading reference into the

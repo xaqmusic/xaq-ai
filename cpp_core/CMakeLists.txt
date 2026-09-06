@@ -206,6 +206,7 @@ add_library(ogma_core
     src/ogma/modules/SaccadeReflex.cpp
     src/ogma/modules/CylinderBuilder.cpp
     src/ogma/modules/PlaceVectorBuilder.cpp
+    src/ogma/modules/LoopCompetence.cpp
     src/ogma/modules/ColumnBuilder.cpp
     src/ogma/modules/PlaceGraphPlanner.cpp
     src/ogma/modules/PlayLoop.cpp
@@ -515,6 +516,10 @@ target_link_libraries(test_schema_defaults_effective PRIVATE ogma_core GTest::gt
 # Cell round 2, lever A5 -- the place vector the place-EPM learns the map from
 add_executable(test_place_vector_builder tests/ogma/test_place_vector_builder.cpp)
 target_link_libraries(test_place_vector_builder PRIVATE ogma_core GTest::gtest_main pthread)
+
+# Cell round 4 -- a loop graded by whether the world moves as it says (register O21)
+add_executable(test_loop_competence tests/ogma/test_loop_competence.cpp)
+target_link_libraries(test_loop_competence PRIVATE ogma_core GTest::gtest_main pthread)
 
 # W3.6 — disk-round-trip smoke test.  Serialises snapshot via dump()/parse()
 # through a temp file before restore, catching float-precision losses that
