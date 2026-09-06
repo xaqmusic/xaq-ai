@@ -71,7 +71,9 @@ ParamSchema LoopCompetence::params_schema() const {
             "The loop's prediction horizon: one check per window of this many consecutive driving ticks (did sign·Δobjective exceed 0 over the window).",
             ParamValue{int64_t{30}}},
         {"alpha", ParamMutability::HotMutable, "EMA rate of the competence over checks (a fraction in [0,1]).", ParamValue{0.05}},
-        {"forget", ParamMutability::HotMutable, "Per-tick relaxation of the competence toward 0.5 while NOT driving (uncertainty grows without observation).", ParamValue{0.001}},
+        {"forget", ParamMutability::HotMutable, "Per-tick relaxation of the competence toward 0.5 while NOT driving (uncertainty grows without observation). With estimator beta: the pseudo-counts decay toward 1 at this rate.", ParamValue{0.001}},
+        {"estimator", ParamMutability::ConstructionOnly, "'ema' (default): the competence is an EMA of the checks. 'beta': a Beta posterior (a = 1+improvements, b = 1+failures, forgotten while idle) whose upper credible bound is published (see optimism) -- the fix for a loop that is never selected and so never observed.", ParamValue{std::string("ema")}},
+        {"optimism", ParamMutability::HotMutable, "estimator beta: published competence = mean + optimism x sd of the posterior (0 = the mean; 1 = one sd of optimism about the unproven).", ParamValue{0.0}},
     };
 }
 
@@ -82,6 +84,7 @@ ParamMap LoopCompetence::current_params() const {
     m["modality_group"] = ParamValue{modality_group_}; m["modality_name"] = ParamValue{modality_name_};
     m["sign"] = ParamValue{double(sign_)}; m["horizon_ticks"] = ParamValue{int64_t(horizon_ticks_)};
     m["alpha"] = ParamValue{double(alpha_)}; m["forget"] = ParamValue{double(forget_)};
+    m["estimator"] = ParamValue{estimator_}; m["optimism"] = ParamValue{double(optimism_)};
     return m;
 }
 
@@ -98,6 +101,8 @@ void LoopCompetence::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "horizon_ticks",   [&](auto const& v){ horizon_ticks_   = int(get_int(v,"horizon_ticks")); });
     apply_param(params, "alpha",           [&](auto const& v){ alpha_           = float(get_double(v,"alpha")); });
     apply_param(params, "forget",          [&](auto const& v){ forget_          = float(get_double(v,"forget")); });
+    apply_param(params, "estimator",       [&](auto const& v){ estimator_       = get_string(v,"estimator"); });
+    apply_param(params, "optimism",        [&](auto const& v){ optimism_        = float(get_double(v,"optimism")); });
     if (objective_topic_.empty()) throw std::invalid_argument("LoopCompetence: objective_topic is required");
     if (gain_topic_.empty())      throw std::invalid_argument("LoopCompetence: gain_topic is required");
     if (modality_name_.empty())   throw std::invalid_argument("LoopCompetence: modality_name is required");
@@ -117,6 +122,7 @@ void LoopCompetence::on_param_change(std::string_view key, ParamValue const& val
     else if (k == "horizon_ticks") horizon_ticks_ = std::max(1, int(get_int(value, k)));
     else if (k == "alpha")         alpha_ = float(get_double(value, k));
     else if (k == "forget")        forget_ = float(get_double(value, k));
+    else if (k == "optimism")      optimism_ = float(get_double(value, k));
     else throw std::invalid_argument("LoopCompetence: param '" + k + "' is construction-only / unknown");
 }
 
@@ -145,20 +151,31 @@ void LoopCompetence::tick(uint64_t tick_id) {
             const bool improved = sign_ * (obj_ - o_start_) > 0.0f;
             ++checks_; improvements_ += improved;
             c_ += alpha_ * ((improved ? 1.0f : 0.0f) - c_);
+            if (improved) a_ += 1.0; else b_ += 1.0;
             run_ticks_ = 0; o_start_ = obj_;
         }
     } else {
         c_ += forget_ * (prior_ - c_);          // uncertainty grows without observation
+        a_ += double(forget_) * (1.0 - a_);     // beta: the counts are forgotten toward the flat prior
+        b_ += double(forget_) * (1.0 - b_);
     }
     driving_ = drive_now;
+    if (estimator_ == "beta") {
+        const double n = a_ + b_;
+        const double mean = a_ / n;
+        const double sd = std::sqrt(a_ * b_ / (n * n * (n + 1.0)));
+        pub_ = float(std::clamp(mean + double(optimism_) * sd, 0.0, 1.0));
+    } else {
+        pub_ = c_;
+    }
 
     auto tok = std::make_shared<RealityToken>();
     tok->tick_id     = tick_id;
     tok->producer_id = id_.empty() ? output_topic_ : id_;
     tok->winner_id   = 0;
-    tok->latent      = Eigen::VectorXf::Constant(1, c_);
+    tok->latent      = Eigen::VectorXf::Constant(1, pub_);
     tok->winner_prototype = tok->latent;
-    const float err  = std::clamp(1.0f - c_, 0.0f, 1.0f);
+    const float err  = std::clamp(1.0f - pub_, 0.0f, 1.0f);
     tok->quant_error = err; tok->expected_error = err; tok->tle = err; tok->transition_surp = 0.0f;
     tok->node_count = 1; tok->baked_count = 3;   // informative by construction (one concept, graded)
     bus_->publish(output_topic_, tok);
@@ -167,17 +184,18 @@ void LoopCompetence::tick(uint64_t tick_id) {
 nlohmann::json LoopCompetence::snapshot_state() const {
     return nlohmann::json{{"version", 1}, {"c", c_}, {"obj", obj_}, {"have_obj", have_obj_}, {"gain", gain_},
                           {"driving", driving_}, {"run_ticks", run_ticks_}, {"o_start", o_start_},
-                          {"checks", checks_}, {"improvements", improvements_}};
+                          {"checks", checks_}, {"improvements", improvements_}, {"a", a_}, {"b", b_}};
 }
 void LoopCompetence::restore_state(nlohmann::json const& s) {
     if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
     c_ = s.value("c", 0.5f); obj_ = s.value("obj", 0.0f); have_obj_ = s.value("have_obj", false); gain_ = s.value("gain", 0.0f);
     driving_ = s.value("driving", false); run_ticks_ = s.value("run_ticks", 0); o_start_ = s.value("o_start", 0.0f);
     checks_ = s.value("checks", uint64_t{0}); improvements_ = s.value("improvements", uint64_t{0});
+    a_ = s.value("a", 1.0); b_ = s.value("b", 1.0);
 }
 nlohmann::json LoopCompetence::diag_snapshot() const {
-    return nlohmann::json{{"competence", c_}, {"driving", driving_}, {"checks", checks_}, {"improvements", improvements_},
-                          {"objective", obj_}, {"gain", gain_}};
+    return nlohmann::json{{"competence", c_}, {"published", pub_}, {"driving", driving_}, {"checks", checks_}, {"improvements", improvements_},
+                          {"objective", obj_}, {"gain", gain_}, {"beta_a", a_}, {"beta_b", b_}};
 }
 
 } // namespace ogma

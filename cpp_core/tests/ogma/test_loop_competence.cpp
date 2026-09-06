@@ -60,3 +60,29 @@ TEST(LoopCompetence, WindowRestartsWhenDrivingResumes) {
     f.run(t++, 5.0f, 1.0f);                                  // the 10th completes a window: 5.0 → 5.0, not improved
     EXPECT_EQ(f.m.checks(), 1u); EXPECT_EQ(f.m.improvements(), 0u);
 }
+
+// Second form: the Beta posterior with optimism.  An untried loop reads HIGH (so it gets tried);
+// a proven-poor one reads low with certainty; forgetting while idle re-opens the question.
+TEST(LoopCompetence, BetaOptimismRanksTheUnprovenAboveTheProvenPoor) {
+    auto p = params(); p["estimator"] = std::string("beta"); p["optimism"] = 1.0;
+    ogma::InProcessBus bus; ogma::LoopCompetence untried; untried.set_id("u"); untried.on_setup(&bus, p);
+    bus.begin_tick(0); bus.publish("reality.proprio.scent_max", p1(0.3f)); bus.publish("arbiter.gain.klino", p1(0.0f)); untried.tick(0); bus.end_tick();
+    EXPECT_NEAR(untried.published(), 0.5f + 1.0f * 0.2887f, 1e-3f) << "a=b=1: mean 0.5, sd 0.289";
+
+    ogma::InProcessBus bus2; ogma::LoopCompetence poor; poor.set_id("p"); poor.on_setup(&bus2, p);
+    uint64_t t = 0; float o = 2.0f;
+    for (int i = 0; i < 400; ++i) { o -= 0.01f; bus2.begin_tick(t); bus2.publish("reality.proprio.scent_max", p1(o)); bus2.publish("arbiter.gain.klino", p1(1.0f)); poor.tick(t++); bus2.end_tick(); }
+    EXPECT_GT(poor.checks(), 30u);
+    EXPECT_LT(poor.published(), 0.15f) << "40 failures: mean ~0.02, sd small -> even the optimistic bound is low";
+    EXPECT_GT(untried.published(), poor.published());
+
+    // forgetting while idle: the counts relax toward 1, the bound rises again
+    for (int i = 0; i < 3000; ++i) { bus2.begin_tick(t); bus2.publish("reality.proprio.scent_max", p1(o)); bus2.publish("arbiter.gain.klino", p1(0.0f)); poor.tick(t++); bus2.end_tick(); }
+    EXPECT_GT(poor.published(), 0.4f) << "after ~3000 idle ticks at forget 0.01 the posterior is nearly flat again";
+}
+
+TEST(LoopCompetence, DefaultEstimatorUnchangedByTheBetaOption) {
+    Fix f; uint64_t t = 0; float o = 0.1f;
+    for (int i = 0; i < 100; ++i) { o += 0.01f; f.run(t++, o, 1.0f); }
+    EXPECT_FLOAT_EQ(f.m.published(), f.m.competence()) << "estimator ema publishes the EMA, as before";
+}
