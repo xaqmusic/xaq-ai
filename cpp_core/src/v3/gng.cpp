@@ -299,6 +299,11 @@ std::pair<int, float> GNG::step(const Eigen::VectorXf& x) {
     if (s1.visits > cfg_.baking_threshold) {
         s1.post_bake_visits++;
         s1.post_bake_error += static_cast<double>(d1_sq);
+        if (cfg_.drift_ratio > 0.0f) {                      // Stage 4: innovation sum
+            if (s1.post_bake_resid_sum.size() != x.size())
+                s1.post_bake_resid_sum = Eigen::VectorXf::Zero(x.size());
+            s1.post_bake_resid_sum += (x - s1.prototype);
+        }
     }
 
     return {s1_id, d1};
@@ -532,6 +537,7 @@ void GNG::reset_topology() {
     adj_.clear();
     step_             = 0;
     mitosis_count_    = 0;
+    drift_count_      = 0;
     last_step_baked_  = false;
     last_pruned_ids_.clear();
     last_death_step_  = -1000000;
@@ -560,10 +566,29 @@ bool GNG::maybe_mitosis(int winner_id, const Eigen::VectorXf& x) {
 
     // Check post-bake mean error against threshold
     double mean_pb_error = q.post_bake_error / q.post_bake_visits;
+
+    // Stage 4 — the innovation-mean test, before the split decision.  A biased
+    // post-bake residual means the world moved: correct the prototype and keep
+    // the node.  An unbiased but wide residual falls through to mitosis.
+    if (cfg_.drift_ratio > 0.0f && q.post_bake_resid_sum.size() == q.prototype.size()) {
+        Eigen::VectorXf mean_resid = q.post_bake_resid_sum / float(q.post_bake_visits);
+        const float bias   = mean_resid.norm();
+        const float spread = std::sqrt(float(std::max(mean_pb_error, 1e-12)));
+        if (spread > 1e-9f && bias / spread > cfg_.drift_ratio) {
+            q.prototype += cfg_.drift_gain * mean_resid;
+            q.post_bake_visits = 0;
+            q.post_bake_error  = 0.0;
+            q.post_bake_resid_sum.setZero();
+            ++drift_count_;
+            return false;
+        }
+    }
+
     if (mean_pb_error < cfg_.mitosis_error_threshold) {
         // Not saturated — reset window and continue
         q.post_bake_visits = 0;
         q.post_bake_error  = 0.0;
+        if (q.post_bake_resid_sum.size() > 0) q.post_bake_resid_sum.setZero();
         return false;
     }
 
@@ -628,6 +653,12 @@ nlohmann::json GNG::to_json() const {
     j["step"]                = step_;
     j["next_id"]             = next_id_;
     j["mitosis_count"]       = mitosis_count_;
+    // Stage 4 drift state — emitted ONLY when the test is on (byte-identical otherwise).
+    if (cfg_.drift_ratio > 0.0f) {
+        j["drift_ratio"] = cfg_.drift_ratio;
+        j["drift_gain"]  = cfg_.drift_gain;
+        j["drift_count"] = drift_count_;
+    }
     j["running_mean_error"]  = running_mean_error_;
     // Insertion-gate self-tuning state.  Emitted ONLY when enabled, so a GNG
     // with autotune off serialises byte-identically to the pre-feature form.
@@ -668,6 +699,11 @@ nlohmann::json GNG::to_json() const {
         nj["bake_checked"]     = node.bake_checked;
         nj["post_bake_visits"] = node.post_bake_visits;
         nj["post_bake_error"]  = node.post_bake_error;
+        if (cfg_.drift_ratio > 0.0f && node.post_bake_resid_sum.size() > 0) {
+            std::vector<float> rs(node.post_bake_resid_sum.data(),
+                                  node.post_bake_resid_sum.data() + node.post_bake_resid_sum.size());
+            nj["post_bake_resid_sum"] = rs;
+        }
         nj["health"]           = node.health;
         if (cfg_.gain_kind == GainKind::Kalman) nj["p"] = node.p;
         std::vector<float> proto(node.prototype.data(),
@@ -712,6 +748,9 @@ GNG GNG::from_json(const nlohmann::json& j) {
     gng.step_          = j.value("step",          0);
     gng.next_id_       = j.value("next_id",       0);
     gng.mitosis_count_ = j.value("mitosis_count", 0);
+    gng.cfg_.drift_ratio = j.value("drift_ratio", 0.0f);
+    gng.cfg_.drift_gain  = j.value("drift_gain",  1.0f);
+    gng.drift_count_     = j.value("drift_count", 0);
     gng.autotune_value_ = j.value("autotune_value", -1.0f);
     if (j.contains("autotune_hist") && j["autotune_hist"].is_array()) {
         auto h = j["autotune_hist"].get<std::vector<double>>();
@@ -744,6 +783,10 @@ GNG GNG::from_json(const nlohmann::json& j) {
         node.bake_checked      = nj.value("bake_checked",      false);
         node.post_bake_visits  = nj.value("post_bake_visits",  0);
         node.post_bake_error   = nj.value("post_bake_error",   0.0);
+        if (nj.contains("post_bake_resid_sum") && nj["post_bake_resid_sum"].is_array()) {
+            auto rs = nj["post_bake_resid_sum"].get<std::vector<float>>();
+            node.post_bake_resid_sum = Eigen::Map<const Eigen::VectorXf>(rs.data(), rs.size());
+        }
         node.health            = nj.value("health",            1.0f);
         node.p                 = nj.value("p",                 cfg.kalman_p0);
         gng.adj_[id];   // ensure adjacency entry

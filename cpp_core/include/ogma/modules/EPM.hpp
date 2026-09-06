@@ -215,6 +215,12 @@ private:
     int prev_winner_id_for_transitions_ = -1;
     std::unordered_map<int, std::unordered_map<int, int>> transition_counts_;
     bool transition_logprob_ = false;   // transition_surprise_kind == "logprob" (Stage 3, K2)
+    // Stage 4: the v4 EPM never called GNG::maybe_mitosis (found 2026-09-05: mitosis_enabled
+    // and its threshold were plumbed and neuro-scaled, but the gatekeeper was never invoked,
+    // so mitosis has been dead in every v4 EPM).  mitosis_gatekeeper=true restores the v3
+    // call, each tick on the winner; false (default) keeps the dead path, byte-identical.
+    bool mitosis_gatekeeper_ = false;
+    bool last_just_mitosis_  = false;
 
     // v5.4.L Diagnostic B — per-winner-id histogram across all ticks.
     // Identifies premature GNG saturation: if 1-2 winner_ids account

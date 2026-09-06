@@ -113,6 +113,7 @@ struct RealityToken : Message {
     int     node_count       = 0;
     int     baked_count       = 0;
     int     mitosis_count    = 0;
+    int     drift_count      = 0;      // Stage 4: prototype corrections by the innovation-mean test
     std::vector<int> pruned_ids;
     std::vector<int> history_trace;    // last N winner IDs for sequence learners
     // Phase 6.6.E: forward-pointing analogue of history_trace.  Empty unless
