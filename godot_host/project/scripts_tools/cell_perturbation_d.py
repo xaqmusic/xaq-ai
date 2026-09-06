@@ -192,6 +192,16 @@ def main():
             return f"{statistics.mean(v):+.2f} m  sd {sd:.2f}  paired-t {t:+.2f}  sign {sum(x>0 for x in v)}+/{sum(x<0 for x in v)}−  n={len(v)}"
         print(f"      PAIRED lesion − control @ lesion phase (food distance): {tstat(d_les)}")
         print(f"      PAIRED degradation net of the control's drift:           {tstat(d_deg)}")
+        # a lesion can also damage MEMORY built during the window (e.g. a drifted compass leaves the
+        # map misregistered when it snaps back): the post-phase eats contrast, paired by world
+        def teats(v):
+            if len(v) < 2: return "n<2"
+            import math; sd = statistics.stdev(v); t = statistics.mean(v) / (sd / math.sqrt(len(v))) if sd else float("inf")
+            return f"{statistics.mean(v):+.2f} eats  sd {sd:.2f}  paired-t {t:+.2f}  sign {sum(x>0 for x in v)}+/{sum(x<0 for x in v)}−  n={len(v)}"
+        e_les  = [Lm[k]["eats"][1] - Cm[k]["eats"][1] for k in keys]
+        e_post = [Lm[k]["eats"][2] - Cm[k]["eats"][2] for k in keys]
+        print(f"      PAIRED eats lesion − control @ lesion phase:              {teats(e_les)}")
+        print(f"      PAIRED eats lesion − control @ POST phase (memory damage): {teats(e_post)}")
         ok = deg > 0 and rec > 0 and (cles is None or les > cles)
         print(f"      {'PASS' if ok else 'WEAK/NULL'} on the point estimates: perturbation → degradation → recovery"
               f" — the (d) bar for a load-bearing inference loop; read the paired lines for the power")

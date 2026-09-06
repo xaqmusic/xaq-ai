@@ -174,17 +174,19 @@ at the reflex's level, using its memory.
 ticks, the lesion over the middle third; food relocation is built in):
 
 - **Scent noise** (σ 0.05 on the published scent): food distance PRE 9.8 → LESION 13.5 →
-  POST 13.0 m against the control's 9.8 → 12.0 → 13.5. Approach degrades under the noise
-  (+1.5 m against the control at the lesion phase) with no recovery beyond the control's own
-  drift; eats 1.25 / 0.75 / 0.75 in both arms. A weak signal for the scent sense; the paired
-  contrast with its interval is being re-run.
+  POST 13.0 m against the control's 9.8 → 12.0 → 13.5. Approach degrades under the noise:
+  **paired lesion − control at the lesion phase +1.47 m, sd 2.32, t 2.2, worse on 8 of 12
+  worlds**, and the lesion arm is back level with the control afterwards (13.0 vs 13.5 m).
+  Eats 1.25 / 0.75 / 0.75 in both arms. The scent sense is load-bearing for approach and the
+  loop recovers when it returns: the (d) signature at signal-level power.
 - **Heading drift** (a random-walk bias on the published heading, σ 0.01 rad per tick, ≈ 40°
   by the window's end): **no effect during the window** (12.3 vs 12.0 m) — the map and the
   steering share the same drifting frame and stay self-consistent — and **the damage appears
   after it**: when the published heading snaps back, the memory built during the drift is
-  misregistered and eats fall to 0.33 against the control's 0.58 in the post phase. This is
-  the compass scaffold (register O8) showing itself where predicted: in the memory, not the
-  approach. Paired contrast being re-run.
+  misregistered and eats fall to 0.33 against the control's 0.58 in the post phase. Paired,
+  the in-window approach contrast is a clean null (+0.32 m, sd 2.82, t 0.4); the post-phase
+  eats contrast, paired by world, carries the finding and is being read. This is the compass
+  scaffold (register O8) showing itself where predicted: in the memory, not the approach.
 
 ## What round 2 hands the duck
 
