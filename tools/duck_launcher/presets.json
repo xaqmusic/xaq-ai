@@ -351,5 +351,22 @@
       "walk_from": -1,
       "scene": "scene_arena.xml"
     }
+  },
+  {
+    "name": "R26 · level-2 keeps learning after the babble (babble_owns_a 0) — the regression gone at n=6",
+    "series": 26,
+    "hint": "the fork's item 1 (§17.4): identified from real wall encounters after the babble, the proximity rows carry the avoidance and the heading prior no longer drags the body along walls; l2_sweep n=6 in the arena: 295 -> 26 wall contacts/min (t -17, 0+/6-), path 87 -> 157 m, TooClose 0.79 -> 0.06",
+    "state": {
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "secs": 1500.0,
+      "output": "headless",
+      "save_brain": true,
+      "battery": false,
+      "config": "a1v2_r26_l2_learn_after_babble.json",
+      "seed": 2
+    }
   }
 ]

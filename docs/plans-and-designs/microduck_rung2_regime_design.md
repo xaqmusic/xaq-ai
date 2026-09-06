@@ -1160,3 +1160,38 @@ must yield to need"), now measured.  Two things to decide, the operator's:
    pull on one C.  With that in place the drive question (a level-3 "where to go" inference
    on the map versus a boredom-gated heading) can be answered on a controller that can
    hold more than one thing true.
+
+### 17.5 The harness, and the fork's first item at n = 6 (2026-09-06)
+
+Every table above was read at seed 2. `mj_host/tools/l2_sweep.py` now runs a level-2
+config from scratch over N seeds in parallel (the host is unpaced headless: 1500 s of sim in
+about twenty seconds of wall time) and reports the §17 metrics over the control phase, paired
+by seed, with the identified A rows read back. Two harness facts came out of its first use
+and are fixed: the level-2 command's scene defaults to the **open floor**, not the arena (a
+sweep that omits the scene reports zero wall contacts because there are no walls; the tables
+above did pass the arena), and the reset-noise flag never reached the level-2 command, so a
+"seed" varied only the babble. With the arena and reset noise 0.05:
+
+| arm (n = 6, 1500 s, control phase 700–1500 s) | walls/min | contact | TooClose | path | cells | span | map nodes |
+|---|---|---|---|---|---|---|---|
+| R23 avoidance | 0.0 ± 0.0 | 0 % | 0.00 | 167 m | **8.8 ± 1.9** | 0.29 m² | — |
+| R23 + `babble_owns_a 0` | 4.0 ± 9.0 (two seeds) | 1.2 % | 0.00 | 168 m | **29 ± 21** (6 of 6 up, t 2.3) | 1.5 m² | — |
+| R25 heading + avoidance + map | **295 ± 8** | 43 % | 0.79 | 87 m | 28 ± 0 | 3.5 m² | 89 ± 13 |
+| **R26 = R25 + `babble_owns_a 0`** | **26 ± 35** (Δ −269, t −17, 0+/6−) | 4.9 % | 0.06 | 157 m (+71, t 15) | 30 ± 19 | 1.9 m² | 35 ± 18 |
+
+**R23's orbit and R25's wall-riding are findings, not seed-2 readings: six of six each.** And
+the fork's item 1 alone (§17.4: let the state model keep learning after the babble, so the
+proximity rows are identified from real wall encounters) removes the regression on every
+seed — a ten-fold drop in wall contacts, a body that walks 157 m instead of scraping 87, a
+ToF that sees a wall 6 % of the time instead of 79 %, and a map that stops tiling wall
+texture (89 → 35 nodes). One flag, no new module; the identified yaw row goes from
+`[+0.004 −0.001 +0.009]` to a row that carries the proximities. Verdict: **`WORKING`, loud**
+(CLAUDE.md §3.3). R26 is the line's new base (`a1v2_r26_l2_learn_after_babble.json`,
+launcher rank 1026).
+
+Two things the seeds say that seed 2 could not: coverage is **bimodal** under the fix (four
+seeds hold 14–25 cells, two tour 49–60), so the orbit and the tour are both attractors and
+which one a seed finds is part of the next question; and the wall contacts that remain (two
+seeds at 52 and 85 per minute) are the touring seeds — the avoidance is weakest exactly where
+the coverage is best, which is the arbitration question in its next form. The moved-wall (d)
+test and the wander rule on R26 follow at n = 6.

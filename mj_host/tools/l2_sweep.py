@@ -77,12 +77,22 @@ def control_from_default(cfg: Path) -> float:
     return 0.0
 
 
-def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tuple, logdir: Path | None) -> dict:
-    cmd = [str(HOST), "--level2", "--graph", str(cfg), "--secs", str(secs), "--seed", str(seed), *host_args]
+def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tuple, logdir: Path | None,
+            scene: str = "", noise: float = 0.0, phase_at: float | None = None) -> dict:
+    cmd = [str(HOST), "--level2", *([scene] if scene else []), "--graph", str(cfg), "--secs", str(secs), "--seed", str(seed),
+           "--noise", str(noise), *host_args]
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=7200, cwd=str(REPO / "mj_host"))
     if logdir is not None:
+        # a compact stream: the fields the metrics read (a full level-2 JSONL carries qpos and the
+        # 64 ToF zones per tick -- ~75 MB per 1500 s run, which filled a tmpfs quota on first use)
         logdir.mkdir(parents=True, exist_ok=True)
-        (logdir / f"{cfg.stem}_s{seed}.jsonl").write_text(p.stdout)
+        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "tofs", "map")
+        with open(logdir / f"{cfg.stem}_s{seed}.jsonl", "w") as f:
+            for line in p.stdout.splitlines():
+                if not line.startswith("{"): continue
+                try: row = json.loads(line)
+                except ValueError: continue
+                f.write(json.dumps({k: row[k] for k in keep if k in row}) + "\n")
         (logdir / f"{cfg.stem}_s{seed}.stderr").write_text(p.stderr)
     err = p.stderr
     out = {"seed": seed, "rc": p.returncode}
@@ -92,17 +102,25 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     m = re.search(r"wander: (\d+) heading changes", err)
     out["turns"] = int(m.group(1)) if m else None
     out["readback"] = " | ".join(l.strip() for l in err.splitlines() if re.match(r"\s+(vx|vy|vyaw)\s+:", l))
-    # ---- JSONL over the control phase
+    # ---- JSONL over the control phase (and, with --phase-at, the two halves around a perturbation)
     cells, xs, ys, winners = set(), [], [], set()
     path = 0.0; prev = None
     wall_eps = contact = n = 0; prev_wall = 0
     tooclose = tle_sum = 0.0; novel = 0
+    ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
+          "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
     for line in p.stdout.splitlines():
         if not line.startswith("{"): continue
         try: r = json.loads(line)
         except ValueError: continue
         t = float(r.get("t", 0.0))
         if t < control_from: continue
+        if phase_at is not None:
+            g = ph["before" if t < phase_at else "after"]
+            g["n"] += 1; g["cells"].add((math.floor(float(r["x"]) / CELL_M), math.floor(float(r["y"]) / CELL_M)))
+            gw = int(r.get("wall", 0)); g["walls"] += (gw and not g["prev_wall"]); g["prev_wall"] = gw
+            mp0 = r.get("map") or []
+            if len(mp0) >= 3: g["nodes"].add(int(mp0[2]))
         n += 1
         x, y = float(r["x"]), float(r["y"])
         xs.append(x); ys.append(y)
@@ -117,6 +135,11 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         if len(mp) >= 3:
             tle_sum += float(mp[0]); novel += int(mp[1]); winners.add(int(mp[2]))
     minutes = max(1e-9, (secs - control_from) / 60.0)
+    if phase_at is not None:
+        mb = max(1e-9, (phase_at - control_from) / 60.0); ma = max(1e-9, (secs - phase_at) / 60.0)
+        out["cells_before"] = len(ph["before"]["cells"]); out["cells_after"] = len(ph["after"]["cells"])
+        out["walls_before"] = ph["before"]["walls"] / mb; out["walls_after"] = ph["after"]["walls"] / ma
+        out["nodes_before"] = len(ph["before"]["nodes"]); out["nodes_after"] = len(ph["after"]["nodes"])
     out.update({
         "samples": n, "walls_min": wall_eps / minutes, "contact_pct": 100.0 * contact / max(1, n),
         "tooclose": tooclose / max(1, n), "path_m": path, "cells": len(cells),
@@ -151,6 +174,10 @@ def main():
     ap.add_argument("--host-args", default="")
     ap.add_argument("--arm", action="append", default=[])
     ap.add_argument("--logdir", default=None)
+    ap.add_argument("--scene", default=str(REPO / "mj_host/models/microduck/scene_arena.xml"),
+                    help="the level-2 scene (default: the 2 m arena -- the host's own default is the OPEN floor, where 'zero wall contacts' means no walls)")
+    ap.add_argument("--noise", type=float, default=0.05, help="reset noise on the start pose, so seeds vary the start and not only the babble (host --noise)")
+    ap.add_argument("--phase-at", type=float, default=None, help="split the control phase at this second (e.g. the --arena-shift time) and report cells / walls / nodes before and after -- the (d) reading")
     args = ap.parse_args()
     if not HOST.exists(): sys.exit(f"host binary missing: {HOST} (build with ./mj_host/run.sh build)")
     logdir = Path(args.logdir) if args.logdir else None
@@ -159,12 +186,12 @@ def main():
     cfgs += [make_arm(cfgs[0], spec, tmp) for spec in args.arm]
     ctrl = args.control_from if args.control_from is not None else control_from_default(cfgs[0])
     host_args = tuple(args.host_args.split())
-    print(f"level-2 sweep: {len(cfgs)} arms × {args.seeds} seeds × {args.secs} s, control phase from {ctrl:.0f} s, host args {host_args or '-'}", file=sys.stderr)
+    print(f"level-2 sweep: {len(cfgs)} arms × {args.seeds} seeds × {args.secs} s, control phase from {ctrl:.0f} s, scene {Path(args.scene).name}, reset noise {args.noise}, host args {host_args or '-'}", file=sys.stderr)
 
     jobs = [(c, s) for c in cfgs for s in range(1, args.seeds + 1)]
     results = {c: [] for c in cfgs}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
-        futs = {ex.submit(run_one, c, s, args.secs, ctrl, host_args, logdir): (c, s) for c, s in jobs}
+        futs = {ex.submit(run_one, c, s, args.secs, ctrl, host_args, logdir, args.scene, args.noise, args.phase_at): (c, s) for c, s in jobs}
         for fut in concurrent.futures.as_completed(futs):
             c, s = futs[fut]; r = fut.result(); results[c].append(r)
             print(f"  {c.stem:34s} seed {s}: walls {r['walls_min']:6.1f}/min  cells {r['cells']:3d}  path {r['path_m']:6.1f} m  "
@@ -184,6 +211,13 @@ def main():
             print(f"\n  PAIRED {c.stem} − {ref.stem}:")
             for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("nodes", "higher"), ("map_tle", "-"), ("rescues_min", "lower")):
                 print(f"    {k:12s} {paired(results[ref], results[c], k, better)}")
+    if args.phase_at is not None:
+        print(f"\n  (d) split at {args.phase_at:.0f} s -- before | after:")
+        for c in cfgs:
+            rows = sorted(results[c], key=lambda r: r["seed"])
+            print(f"    {c.stem:34s} cells {fmt([r['cells_before'] for r in rows])} | {fmt([r['cells_after'] for r in rows])}   "
+                  f"walls/min {fmt([r['walls_before'] for r in rows])} | {fmt([r['walls_after'] for r in rows])}   "
+                  f"nodes {fmt([r['nodes_before'] for r in rows])} | {fmt([r['nodes_after'] for r in rows])}")
     print("\nread-backs (identified A rows, first seed):")
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

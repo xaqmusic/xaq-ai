@@ -20,7 +20,18 @@
 
 ## ▶ Resume here
 
-**State on 2026-09-02.** Branch **`microduck-lean-prior`**, committed through the (d) push test.
+**State on 2026-09-06.** Branch **`duck-l2`** (stacked on the Cell audit PRs #28 → #29). The
+level-2 line now has a seed-averaged harness (`mj_host/tools/l2_sweep.py`, design doc §17.5)
+and its first finding: R25's wall-riding regression reproduces on six of six seeds and the
+fork's first item (`babble_owns_a 0`, R26) removes it on every seed — 295 → 26 wall contacts
+per minute, one flag. The Cell campaign's lessons that bind here: read a base's module graph
+before measuring it; a harness prints every seed it sets; a lever whose control cannot be
+told from the lever has not operated; the loop unit and its currency (a heading and a
+confidence per loop; the arbiter's winner → the heading reference in sense slot 10) are what
+port, and the arbitration machinery (`LoopCompetence` → `LateralVoter` → `EFEArbiter`
+`scoring_mode precision`) ports gain-0 with the Cell's verdict on it attached.
+
+Earlier state (2026-09-02): Branch **`microduck-lean-prior`**, committed through the (d) push test.
 Simulation only — no hardware. Upstream lives *outside* this repo, on purpose:
 `/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
 
@@ -65,7 +76,7 @@ mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json -
 | **the intent boundary, phase 1** | ✅ **closed** (§16, 2026-09-03): 1a the hand-off fires on the brain's own attitude error; 1b a walk on request drives Pollen's `alpha_walking` as their runtime does (vendored by `scripts/fetch_scaffolds.sh`); 1c Pollen's contact odometry ported (`Odometry.*`, 4–6 % of distance); 1e the level-2 brain (`--level2`, `a1v2_r20_l2_ident.json`, `IntentAdapter`) identifies which twist moves the body which way — a positive dominant diagonal at every pulse length, failing only inside the walker's standing regime. Next: the first level-2 prior (walk straight) |
 | **level-2 control: heading regulation** | ✅ **LOUD** (§16.5–16.6, 2026-09-03): a prior on the sensed forward speed and on the heading (the odometry yaw's deviation from its own slow running average) walks at the walker's top speed and, shoved 2 N every 40 s, is back within 3° of its heading 20 s later, 20/20, no rescues; the open-loop walker ends 109° off. Homeokinetic learning at this level spins the body (the efference limit cycle one level up) — the prior alone is the controller. `a1v2_r22_l2_heading.json` |
 | **phase 1d, the ToF** | ✅ (§17.1): the 8×8 depth matrix cast with MuJoCo rays against world geometry, Pollen's classifier ported, gated on a wall ahead and the arena; beams drawn in the viewer; `scene_arena.xml` |
-| **phase 2, Wander/Chill** | ⚙ **the arbitration fork** (§17.2–17.4): avoidance priors give 0 wall contacts but an orbit (R23); the map EPM learns the arena (34 nodes ≈ 33 cells) but a surprise prior has no gradient (R24, NULL); heading + avoidance in one linear pull rides the walls at 297 contacts/min (R25, REGRESSION). Decide: online identification of the world channels (`babble_owns_a` 0 at level 2) and behaviours as voter-arbitrated loops, before the drive question |
+| **phase 2, Wander/Chill** | ⚙ **item 1 of the fork is `WORKING` at n = 6** (§17.5, 2026-09-06): R26 keeps learning after the babble and the regression is gone (295 → 26 walls/min, 0+/6−); the harness `l2_sweep.py` exists; item 2 (arbitration) and the (d) moved-wall test are next. Earlier: **the arbitration fork** (§17.2–17.4): avoidance priors give 0 wall contacts but an orbit (R23); the map EPM learns the arena (34 nodes ≈ 33 cells) but a surprise prior has no gradient (R24, NULL); heading + avoidance in one linear pull rides the walls at 297 contacts/min (R25, REGRESSION). Decide: online identification of the world channels (`babble_owns_a` 0 at level 2) and behaviours as voter-arbitrated loops, before the drive question |
 | **the step (intent boundary phase 0)** | ✅ **the hand-off works** (§15, 2026-09-03): past 6.5° of rising lean the walker takes the joints and staggers through it — 3 N **36/36** upright across six brains (13/36 without), 5 N 6/6 (1/6 without), never fires at 1–2 N, the reflex unchanged after a 20-min soak. `--step-lean`; launcher preset "the step". Twist not load-bearing (default 0). Next: phase 1, the trigger as a brain-published scalar |
 | S2 / S3 / B1–B3 | not started |
 
