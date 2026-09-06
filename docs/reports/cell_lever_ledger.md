@@ -148,5 +148,16 @@ mistakes** REPORTS.md §5 keeps out of reports.
   wrote into metadata, so every `--vary-world` battery (the report's n = 20 and the Kalman
   campaign's) ran in one pillar layout. Found by tracing the seed, not by any metric.
   Instrument: the seed manifest every job now prints, and `cell_liveness.py`'s seed line.
+- **2026-09-06, the round-3 voter's trust was uniform by construction (CLAUDE.md §3.2
+  check 5, consumer fired?).** `LateralVoter` derives a channel's group from the first path
+  segment after its `input_pattern`; with a one-level pattern (`reality.loop.`) every channel
+  is its own group, and `group_balance` (default true) gives each group an equal 1/N — an
+  exact 0.25 to all four loops every tick, whatever their errors. The first two round-3
+  batteries measured preference alone. The fusion testbed's config had set `group_balance:
+  false` for exactly this reason, in its own `_comment`; the round-3 config copied its pattern
+  depth and not its flag. Found by putting the arbiter's trust inputs into the diagnostic
+  stream (now permanent: `tk`/`tp`/`tpl`/`tkeys`/`tupd`). Lesson: **copy a working testbed's
+  module params whole, then diff, rather than re-deriving them**; and a lever whose control arm
+  cannot be told from the lever has not operated (§3.2), whatever its eats say.
 - **2026-09-06, three liveness runs raced on one temp config name** (the first version of
   `cell_liveness.py` used a fixed tag); fixed to a per-process tag before any result was read.

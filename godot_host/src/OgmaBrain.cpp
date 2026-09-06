@@ -1134,6 +1134,8 @@ Dictionary OgmaBrain::get_module_metrics() const {
                 d["trust_planner"] = double(ar->trust_planner());
                 d["trust_play"]    = double(ar->trust_play());
                 d["trust_keys"]    = String(ar->trust_keys().c_str());
+                d["trust_updates"] = double(ar->trust_updates());
+                d["trust_rejected"] = double(ar->trust_rejected());
                 d["scoring_mode"] = String(ar->scoring_mode().c_str()); // "value_race" | "efe"
                 d["raw_klino"]    = double(ar->raw_klino());     // hunger × scent
                 d["raw_planner"]  = double(ar->raw_planner());   // food-route value (0 while exploring)

@@ -489,3 +489,37 @@ TEST(LateralVoter, TrustSourceAndPowerDefaultsAreIdenticalToLegacy) {
                   explicit_defaults.last_consensus()->trust_weights.at("reality.sensor.a"));
     }
 }
+
+// (Cell system audit, register L10, 2026-09-06) PIN: with a ONE-LEVEL input_pattern
+// (reality.loop.) every channel's remainder has no further dot, so parse_group_member makes
+// each channel its own group and group_balance (default true) hands each an equal 1/N —
+// trust is uniform by construction, whatever the channels' errors.  The fusion testbed sets
+// group_balance false for this reason.  This test pins today's behaviour so a fix (deriving
+// the group from the pattern's last segment, or a warning) is a visible lever, not a drift.
+TEST(LateralVoter, OneLevelPatternWithGroupBalanceIsUniformByConstruction) {
+    auto p = default_params();
+    p["input_pattern"] = std::string("reality.loop.");
+    p["level"] = int64_t{1};
+    VoterFixture f(p);
+    f.bus.begin_tick(0);
+    f.bus.publish("reality.loop.klino",   make_token(4, 1, 0.0f,  0.0f, 1.0f));   // flat channel
+    f.bus.publish("reality.loop.planner", make_token(4, 2, 0.20f, 0.2f, 1.0f));   // live channel
+    f.voter.tick(0);
+    f.bus.end_tick();
+    auto cons = std::dynamic_pointer_cast<const ogma::ConsensusToken>(f.bus.last_value("consensus.1"));
+    ASSERT_NE(cons, nullptr);
+    EXPECT_NEAR(cons->trust_weights.at("reality.loop.klino"),   0.5f, 1e-4f) << "pinned degeneracy: equal by construction";
+    EXPECT_NEAR(cons->trust_weights.at("reality.loop.planner"), 0.5f, 1e-4f);
+
+    auto q = p; q["group_balance"] = false;
+    VoterFixture g(q);
+    g.bus.begin_tick(0);
+    g.bus.publish("reality.loop.klino",   make_token(4, 1, 0.0f,  0.0f, 1.0f));
+    g.bus.publish("reality.loop.planner", make_token(4, 2, 0.20f, 0.2f, 1.0f));
+    g.voter.tick(0);
+    g.bus.end_tick();
+    auto c2 = std::dynamic_pointer_cast<const ogma::ConsensusToken>(g.bus.last_value("consensus.1"));
+    ASSERT_NE(c2, nullptr);
+    EXPECT_GT(c2->trust_weights.at("reality.loop.klino"), c2->trust_weights.at("reality.loop.planner"))
+        << "with the balance off, 1/(tle+eps) discriminates: the flat channel is trusted more (the low-TLE trap, by design)";
+}

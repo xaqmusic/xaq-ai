@@ -147,6 +147,8 @@ public:
     float trust_klino()   const { return trust_klino_; }     // round 3
     float trust_planner() const { return trust_planner_; }
     float trust_play()    const { return trust_play_; }
+    uint64_t trust_updates()  const { return trust_updates_; }
+    uint64_t trust_rejected() const { return trust_rejected_; }
     std::string trust_keys() const { std::string s; for (auto const& [k, v] : trust_) { s += k + "=" + std::to_string(v).substr(0, 5) + " "; } return s; }   // diag: what the voter sent
     float g_prag_planner()  const { return g_prag_planner_; }   // hunger · reach-prob(planner) — pragmatic, model precision
     float g_epist_klino()   const { return g_epist_klino_; }    // (1−hunger) · normalised z-spike — klino approach/epistemic
@@ -243,6 +245,7 @@ private:
     std::string trust_key_vision_  = "reality.loop.vision";
     float precision_sign_ = 1.0f;
     std::unordered_map<std::string, float> trust_;              // last trust_weights from the voter
+    uint64_t trust_updates_ = 0, trust_rejected_ = 0;           // diag: tokens accepted / rejected by the producer gate
     float trust_klino_ = 0.0f, trust_planner_ = 0.0f, trust_play_ = 0.0f, trust_vision_ = 0.0f;
     bool  klino_search_floor_ = false; // efe: add g_epist_klino += (1−hunger)·(1−plan_precision) — undirected klino search when the model is imprecise (§1.4 floor; opt-in)
     float mean_alpha_    = 0.01f;   // EMA rate of klino's running baseline (z-score mean); slow → klino stays excited inside the scent field (~100 ticks)

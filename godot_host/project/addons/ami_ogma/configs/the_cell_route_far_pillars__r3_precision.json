@@ -507,7 +507,8 @@
     "informativeness_gain": 1.0,
     "activity_gain": 0.0,
     "master_seed": 3,
-    "_comment": "Round 3: trust 1/(tle+eps) over the four loops' own bearing streams, informativeness-gated (the fusion testbed's setting); activity_gain 0 in the first form -- a committed straight route is steady, not frozen, and the activity term would punish it; the activity arm is separate."
+    "_comment": "Round 3: trust 1/(tle+eps) over the four loops' own bearing streams. group_balance FALSE (found 2026-09-06): the voter parses a channel's group as the first segment after input_pattern, so with a one-level pattern (reality.loop.) every channel is its own group and group_balance hands each an equal 1/N by construction -- uniform trust whatever the inputs (the probe showed 0.25 x 4 every tick). informativeness_gain 1.0 = the fusion testbed's setting; activity_gain 0 in the first form (a committed route is steady, not frozen).",
+    "group_balance": false
    }
   },
   {

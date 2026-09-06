@@ -1783,6 +1783,8 @@ func _emit_jsonl(accel: float) -> void:
 					"tp":  snappedf(float(m.get("trust_planner", 0.0)), 0.001),
 					"tpl": snappedf(float(m.get("trust_play", 0.0)), 0.001),
 					"tkeys": String(m.get("trust_keys", "")),
+					"tupd": int(m.get("trust_updates", 0)),
+					"trej": int(m.get("trust_rejected", 0)),
 					"mode":  String(m.get("scoring_mode", "value_race")),  # value_race | efe
 					"win":   int(m.get("winner", 0)),
 					"rk":    snappedf(float(m.get("raw_klino", 0.0)), 0.0001),

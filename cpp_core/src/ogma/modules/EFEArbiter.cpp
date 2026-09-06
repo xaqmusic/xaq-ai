@@ -274,8 +274,8 @@ void EFEArbiter::handle_play_value(MessagePtr payload) {
     if (pt && pt->values.size() > 0) play_value_ = float(pt->values[0]);
 }
 void EFEArbiter::handle_trust(MessagePtr payload) {
-    if (!input_allowed(payload->producer_id)) return;
-    if (auto ct = std::dynamic_pointer_cast<const ConsensusToken>(payload)) trust_ = ct->trust_weights;
+    if (!input_allowed(payload->producer_id)) { ++trust_rejected_; return; }
+    if (auto ct = std::dynamic_pointer_cast<const ConsensusToken>(payload)) { trust_ = ct->trust_weights; ++trust_updates_; }
 }
 
 void EFEArbiter::handle_vision_value(MessagePtr payload) {
