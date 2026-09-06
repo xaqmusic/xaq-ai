@@ -83,18 +83,35 @@ mistakes** REPORTS.md §5 keeps out of reports.
 | lever | config / arm | verdict | re-use context |
 |---|---|---|---|
 | **A1 — the reach gate off** (`EFEArbiter.epistemic_reach_gated=false`, the legacy `1 − hunger` gate the report §4 asks for) | study room, n = 20 paired, 240 s, both seedings: legacy full 0.6 vs gate-off 0.5; repaired 0.75 vs 0.60 | **`NULL`** twice — legacy Δ +0.10, sd 1.07, t 0.42; repaired Δ +0.15, sd 1.14, t 0.59; play's share 0.91 → 0.82 in both; food distance tie | The crowding is a units problem (audit V6): pragmatic terms peak near 0.04, play's at 1. Re-use: none for the gate; the lever is the arbiter's normalisation (register O3). |
-| **A2 — the stall latch off** (`PlayLoop.wander_stall_ticks=0`); A2b + `frontier_bias=1.0` | far-food arena + pillars (`the_cell_route_far_pillars.json`), n = 6 paired worlds, 240 s, promote-or-kill | **`PARTIAL`** — the mechanism is restored (climb fraction 0.0 → 0.2, forced wander 0.3 → 0.0; A2b frontier bearing engaged on 0.5 of samples) with no foraging effect: eats 1.7 → 1.8 / 1.8, Δ −0.17 ± 2.0; time-to-return worse on the 2 paired returns. A signal, not a finding. | A climbing play with the grid map treadmills freshly baked cells (the wander-beyond fix's own premise); re-use with the EPM-native map (A5), where "novel" means a place the vocabulary has not seen. |
-| **A3 — the planner's epistemic term on** (`EFEArbiter.planner_epistemic=true`) | same, n = 6 | **signal, promote to n = 20** — eats 1.7 → 2.7 (Δ +1.0, sd 1.9, 4+/2−), the planner's share of decisions 0.056 → 0.288, eats after the first relocation 1.0 → 1.7 (5 of 6 runs returned). Consistent with audit V6: the one normalised term the planner can carry lets it compete. | — |
-| **A4 — the planner's reach peak-normalised** (`EFEArbiter.pragmatic_norm=planner_peak`; default `none`, byte-identical; 31/31 arbiter tests) | far-food arena + pillars, n = 6 then 20 | `IN_FLIGHT` — built 2026-09-06 after A1's null located the crowding in the arbiter's units (audit V6). The first form (every reach by its own peak) failed its own test: a constant weak scent read as full reach for klino; klino keeps its eat-calibrated reach. | — |
+| **A2 — the stall latch off** (`PlayLoop.wander_stall_ticks=0`); A2b + `frontier_bias=1.0` | far-food arena + pillars, n = 6 paired worlds, 240 s, at falloff 6.0 and again at 2.0 | **`PARTIAL`** — the mechanism is restored (climb 0.0 → 0.2–0.3, forced wander → 0.0; A2b's frontier bearing engaged on 0.5 of samples) with at most a weak foraging signal: falloff 6.0 eats 1.7 → 1.8 (Δ −0.17 ± 2.0); falloff 2.0 eats 1.0 → 1.5 (Δ +0.5, sd 1.05, 3+/1−). **n = 20 (falloff 2.0): 1.60 vs 1.30, Δ +0.35, sd 1.18, t 1.3; eats after relocation +0.25 ± 0.91 — a trend inside its interval.** | A climbing play with the grid map treadmills freshly baked cells (the wander-beyond fix's own premise); re-use with the EPM-native map (A5), where "novel" means a place the vocabulary has not seen. |
+| **A3 — the planner's epistemic term on** (`EFEArbiter.planner_epistemic=true`) | same, n = 6 at falloff 6.0 and 2.0 | **`NULL`** — the falloff-6.0 signal (eats 1.7 → 2.7, Δ +1.0, sd 1.9) did not replicate at 2.0 (1.0 → 0.8, Δ −0.17, sd 1.33) although the planner's share of decisions rose both times (0.056 → 0.288; 0.029 → 0.438). A normalised epistemic term buys the planner the motor, not eats: what it routes over (the grid, the food memory) is the limit. | With the vocabulary map; and as the term the play plan moved out of the planner (register O7). |
+| **A4 — the planner's reach peak-normalised** (`EFEArbiter.pragmatic_norm=planner_peak`; default `none`, byte-identical; 31/31 arbiter tests) | far-food arena + pillars, falloff 2.0, n = 6 paired | **`NULL` alone** — the planner's share of decisions 0.029 → 0.075, and the eats are identical on all six worlds ([2,0,1,1,0,2]): the decisions it added came after the eats that occurred. Built after A1's null located the crowding in the arbiter's units (audit V6); the first form (every reach by its own peak) failed its own test (a constant weak scent read as full reach for klino). | With the vocabulary map (the A5 stack, below), where the planner has more to route over. |
+| **A5 — the EPM-native place map** (`PlaceVectorBuilder` → `epm_place` 48-D → play/planner at `pi_cell_size 0`; `the_cell_route_far_pillars__a5_epm_map.json`) | far-food arena + pillars, falloff 2.0, n = 6 paired (n = 20 on the stack in flight) | **alone: mixed** — eats 1.0 → 1.33 (+0.33, sd 1.37) with food distance *worse* on 6 of 6 worlds (+1.17 m, t 3.4); the vocabulary holds ~19 nodes and rarely grows (stale ~700 samples). **Stacked A5+A4: +0.67 (sd 1.86, 4+/2−); A5+A4+A2: +0.50 (sd 0.84, 2+/0−, four ties), the planner's share 0.029 → 0.123, return legs 3 of 6.** **n = 20 on the stack A5+A4+A2: 1.35 vs 1.30, Δ +0.05, sd 1.05, t 0.2, 7+/5− — `NULL`; the n = 6 trend was noise.** The vocabulary held 17.6 nodes and rarely grew (the insertion-gate collapse, audit V4); the conditioning pass precedes any second attempt. Liveness 2026-09-06 (120 s): the vocabulary holds 16 baked nodes, top winner 0.22 (against the base's 8 nodes / 0.55), play has a novelty route on 62 of 121 samples (base 30) — and climbs on none, because the stall latch counts *vocabulary* growth, rarer than grid growth; the planner scores routes on 51 samples and wins none without A4. So A5 is measured alone and stacked (A5+A4, A5+A4+A2). | — |
 | **A0 — the harness itself** (legacy vs repaired seeding) | study room, full / no-play / gate + the specialist, n = 20 each | legacy arm reproduces the Kalman-campaign numbers exactly (full 0.6 / no-play 2.0 / specialist 1.9). **Repaired seeding** (20 distinct worlds, every RNG varied): specialist 2.30, full 0.75, no-play 1.65, gate-off 0.60; full − no-play −0.90 ± 1.48 (t −2.7) vs −1.40 ± 0.82 (t −7.6) legacy; no-play − specialist −0.65 ± 1.84 (t −1.6). **The report's directions stand at about two-thirds the effect and twice the spread; the no-play tie becomes a non-significant trend below the specialist.** | Every prior Cell number is a one-world number; cite the repaired ones from here on. |
 
 ### Regime notes
 
+- **2026-09-06, the finding at n = 20 (varied worlds, falloff 2.0):** specialist 2.80 eats,
+  gradient-blind floor 1.60 (the specialist beats it by 1.20, t 2.5, returning after the
+  relocation on 16 of 20 runs against 8), the composition 1.30 (ties the floor; 1.50 below the
+  specialist, t −4.0, worse on 16 of 20 worlds), the stack 1.35. **In a regime that demands
+  memory the composition cannot use the memory it has**: play holds 82 % of decisions while
+  the body is hungry (register R6). Re-use context for every lever above: an arbitration that
+  gives a hungry body's remembered site the motor (round 3).
+
 - **2026-09-06, the far-food arena's premise.** The reactive specialist eats 3.7 in 240 s
   there (n = 6; 2.7 after the first relocation, returning in ~3000 ticks on 5 of 6 runs), so
   at scent falloff 6 the field still reaches across the gap and "blind after eating" is not
-  yet true; the regime does not yet *demand* a map. Calibrate the falloff against the scent
-  reach measured from the logs before any n = 20 battery counts (P0, in flight).
+  yet true; the regime does not yet *demand* a map. Measured from the base arm's logs, the
+  screened-Poisson field falls from 0.44 at the food to 0.01 at the far wall and never
+  reaches zero, so a run-and-tumble climber always has a gradient.
+- **Calibration (n = 6 paired worlds, specialist vs the gradient-blind floor
+  `RunTumbleNavV2.ablation=shuffle`):** the floor eats 1.8 at every falloff (it ignores
+  scent); the specialist eats 3.7 at falloffs 6.0 and 3.5 (return ~3000 / 3900 ticks) and
+  3.0 at 2.0 (return 4966 ticks vs the floor's 5927; 2.0 eats after the first relocation).
+  **Falloff 2.0 is the round-2 base**: the first eat is still earned locally, the return
+  leg is nearly chance for the reflex, so a map-user's return would be loud. The A2/A3
+  n = 6 signals above were taken at falloff 6.0 and are re-run at 2.0 in the lever battery.
 
 ### Process
 
