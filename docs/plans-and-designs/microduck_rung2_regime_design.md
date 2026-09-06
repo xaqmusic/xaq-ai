@@ -1252,3 +1252,53 @@ competence over loops with bearings; `LoopCompetence` → `LateralVoter` → `EF
 precision mode, all gain-0) is the next lever, with avoidance made a loop that emits a
 bearing rather than a prior in the matrix. Scene note again: the shifted wall leaves a gap
 one seed escapes through; the (d) metric must clip to the arena or the scene must close.
+
+### 17.7 R28 / R29 — the Cell recipe's arbitration on the duck: avoidance as a loop (2026-09-06)
+
+The measured form of §17.4's item 2: `TofAvoidLoop` (new, generic) turns the ToF summary
+into a bearing away from the nearest obstacle with that proximity as its need; the Cell's
+`LoopCompetence` grades each loop (avoidance: proximity falls while it drives; play: novelty
+rises; Beta + optimism), a `LateralVoter` turns competence into trust, `EFEArbiter`'s
+precision mode selects by need × trust with the nearest proximity as avoidance's "hunger"
+and its complement as play's surplus, and the `IntentAdapter` takes the winner's bearing as
+the heading reference (by presence of the arbiter; R27 and R26 stay byte-identical). The
+harness now records the winner per tick (`steer`), the steer shares, and clips samples that
+escape the arena.
+
+| n = 6, steady arena | walls/min | cells | avoid share | (d) moved wall: walls before \| after | nodes before \| after |
+|---|---|---|---|---|---|
+| R26 (no loops) | 26 ± 35 | 30 ± 19 | — | 47 \| 29 | 31 \| 28 |
+| R27 (play alone) | **9 ± 9** | 42 ± 18 | 0 | 13 \| **253 ± 143** | 22 \| **49** |
+| R28 (avoid's bearing wins) | 71 ± 80 | 54 ± 21 | 0.30 | 71 \| 114 ± 132 | 42 \| 33 |
+| R28 wrong-sign | 28 ± 23 | 52 ± 20 | 0.00 | — | — |
+| **R29 = release form** (avoid wins → the reference is released) | 44 ± 62 | 49 ± 19 | 0.23 | 45 \| 149 ± 151 | 31 \| 41 |
+
+**Why the bearing form fails, measured.** Past the babble, when avoidance won and set the
+heading reference to its away-bearing, the body barely turned: 0.14 rad in 0.5 s with no side
+preference at 0.5, 2 or 4 s. The heading reference is a slow regulator (§16.5 closed 3° in
+20 s) and the duck reaches a wall in two seconds. Avoidance's fast path is the proximity
+priors that R26 made work; only a slow direction belongs on the reference. So the
+arbitration is not one bearing against another but **"hold the novelty direction" against
+"yield to the reflex"**: R29 publishes avoidance's need with no bearing, and the adapter
+treats a winning loop with no bearing as *release* (the reference set to the current
+heading, so the heading prior stops fighting the proximity priors).
+
+**Verdict `PARTIAL`.** The trade-off is real and neither pole wins both regimes. In a known
+room play alone is the best avoider — walls stop being novel within minutes and the novelty
+climb turns away from them nine times in ten (P(turn left | wall on the right) 0.90 while
+play steers) — and every form that takes the motor from play near a wall costs contacts:
+R28 +62/min, R29 +34/min (4 of 4 seeds worse). After a wall moves, the new wall *is* novel and
+play drives at it; R29 cuts that burst by 40 % (253 → 149/min) while keeping half of R27's
+re-exploration (map +10 vs +22 nodes); R28 stops the burst harder (114) and the
+re-exploration with it. The wrong-sign control never lets avoidance win (its share 0.00), so
+here it is a play-alone arm with a different hysteresis, not a control of the ordering.
+
+What this hands the recipe: on a body whose only goal is coverage, the novelty loop is the
+pragmatic loop too, and a need-gated reflex that overrides it should fire only when the
+world has *changed* — the moved wall is novel and dangerous at once. The next form is not
+a better ranking but a competence signal that distinguishes "novel because unvisited" from
+"novel because it moved": the map's node *persistence* (a node whose prototype the world
+contradicts) rather than its TLE. That is the Cell's disconfirmation problem (register O9)
+arriving on the duck, and it is where the arbitration line stops for this phase. The
+escape counts (5 000–17 000 samples per run beyond the arena after the shift) say the
+shifted scene must be closed before the (d) reading is trusted at power.

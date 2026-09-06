@@ -1,0 +1,251 @@
+{
+  "metadata": {
+    "name": "R29 \u00b7 level-2 arbitration, the release form \u2014 avoidance yields the heading to the reflex",
+    "description": "R28 (2026-09-06): R27 + avoidance as a loop (TofAvoidLoop, a bearing away from the nearest obstacle, its need = that proximity) + LoopCompetence per loop (avoid: proximity falls while it drives; play: novelty rises) + LateralVoter + EFEArbiter in precision mode (need x competence, winner-take-all with hysteresis); the IntentAdapter takes the WINNER's bearing as the heading reference. Measured with l2_sweep vs R26/R27 on contacts vs coverage, and the moved wall. Wrong-sign control: EFEArbiter.precision_sign=-1.",
+    "env_target": "microduck",
+    "phase_tag": "intent boundary 1e",
+    "launcher_rank": 1029,
+    "scaffolds_active": [
+      "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "twist_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.intent",
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "output_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 16
+      }
+    },
+    {
+      "id": "motor_epm_intent",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "n_legs": 1,
+        "motor_dim": 3,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.0,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 9090,
+        "babble_ticks": 30000,
+        "babble_scale": 0.8,
+        "babble_isolate": 1.0,
+        "babble_hold": 75,
+        "babble_owns_a": 0,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.02,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_model_lr": 0.05,
+        "model_trace": 0.05,
+        "reset_breaks_model_pairing": 1.0,
+        "state_prior_gain": 1.0,
+        "consolidate_gain": 0.0,
+        "state_prior_indices": [
+          0,
+          -6,
+          -4,
+          -3,
+          -2
+        ],
+        "state_prior_targets": [
+          0.75,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_lr": 0.1,
+        "consolidate_n": 0
+      }
+    },
+    {
+      "id": "map_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "place",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.place_in",
+        "proprio_state_dims": 12,
+        "dim_min": [
+          -0.6,
+          -0.6,
+          -1.0,
+          -1.0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "dim_max": [
+          0.6,
+          0.6,
+          1.0,
+          1.0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "max_nodes": 128,
+        "master_seed": 4343,
+        "process_every_n_ticks": 5,
+        "mitosis_error_threshold": 0.1,
+        "health_death_spares_baked": true,
+        "min_insertion_error": 0.06
+      }
+    },
+    {
+      "id": "play",
+      "type": "PlayLoop",
+      "params": {
+        "place_topic": "reality.proprio.place",
+        "heading_topic": "reality.proprio.heading",
+        "vel_topic": "reality.proprio.vel_ego",
+        "output_topic": "percept.play_bearing",
+        "play_value_topic": "reality.cognitive.play_value",
+        "pi_cell_size": 0.0,
+        "wander_stall_ticks": 0,
+        "frontier_bias": 0.0,
+        "novelty_source": "tle",
+        "explore_seed": 11,
+        "_comment": "R27 (\u00a717.3 fork (a)): the Cell's play loop over the duck's map vocabulary -- the node is the map EPM's winner (pi_cell_size 0), the value field is the place TLE, the climb is the bearing to the most novel reachable node (wander_stall_ticks 0: the Cell's A2, so the climb engages). Its bearing sets the adapter's heading reference (sense slot 10); the heading prior turns the body. The loop the Cell dropped is the loop the duck wants: coverage is its goal."
+      }
+    },
+    {
+      "id": "avoid",
+      "type": "TofAvoidLoop",
+      "params": {
+        "prox_topic": "reality.proprio.tof",
+        "output_topic": "percept.avoid_bearing",
+        "value_topic": "reality.cognitive.avoid_value",
+        "floor": 0.05,
+        "_comment": "R28: avoidance as a LOOP with a bearing away from the nearest obstacle; its value (the nearest proximity) is the arbiter's need for it.",
+        "emit_bearing": false
+      }
+    },
+    {
+      "id": "comp_avoid",
+      "type": "LoopCompetence",
+      "params": {
+        "objective_topic": "reality.cognitive.avoid_value",
+        "gain_topic": "arbiter.gain.klino",
+        "modality_group": "loop",
+        "modality_name": "avoid",
+        "objective_field": "value",
+        "sign": -1.0,
+        "horizon_ticks": 30,
+        "alpha": 0.05,
+        "forget": 0.001,
+        "estimator": "beta",
+        "optimism": 1.0
+      }
+    },
+    {
+      "id": "comp_play",
+      "type": "LoopCompetence",
+      "params": {
+        "objective_topic": "reality.proprio.place",
+        "gain_topic": "arbiter.gain.play",
+        "modality_group": "loop",
+        "modality_name": "play",
+        "objective_field": "tle",
+        "sign": 1.0,
+        "horizon_ticks": 30,
+        "alpha": 0.05,
+        "forget": 0.001,
+        "estimator": "beta",
+        "optimism": 1.0
+      }
+    },
+    {
+      "id": "voter_loops",
+      "type": "LateralVoter",
+      "params": {
+        "level": 1,
+        "input_pattern": "reality.loop.",
+        "group_balance": false,
+        "informativeness_gain": 0.0,
+        "activity_gain": 0.0,
+        "trust_source": "expected",
+        "trust_power": 1.0,
+        "master_seed": 3,
+        "_comment": "trust = 1/(competence error + eps) per loop; group_balance false (audit L10)."
+      }
+    },
+    {
+      "id": "arbiter",
+      "type": "EFEArbiter",
+      "params": {
+        "scoring_mode": "precision",
+        "trust_consensus_topic": "consensus.1",
+        "trust_key_klino": "reality.loop.avoid",
+        "trust_key_play": "reality.loop.play",
+        "hunger_topic": "reality.cognitive.avoid_value",
+        "play_value_topic": "reality.cognitive.play_value",
+        "play_weight": 1.0,
+        "klino_gain_topic": "arbiter.gain.klino",
+        "play_gain_topic": "arbiter.gain.play",
+        "planner_gain_topic": "arbiter.gain.planner",
+        "precision_sign": 1.0,
+        "master_seed": 11,
+        "_comment": "R28: the Cell recipe's arbitration on the duck. The klino slot IS the avoidance loop; its need ('hunger') is the nearest proximity (avoid_value), play's need is the surplus 1 - proximity; each x the voter's competence trust; winner-take-all with the adaptive hysteresis; the winner's bearing sets the adapter's heading reference. precision_sign -1 = the wrong-sign control."
+      }
+    }
+  ],
+  "edges": [],
+  "description": "R29 (level-2 arbitration, the release form \u2014 avoidance yields the heading to the reflex), from a1v2_r28_l2_arbitrated.json: the heading reference is a slow regulator and cannot avoid a wall at walking speed (no side response at 0.5-4 s, R28 probe); when avoidance wins it now RELEASES the heading reference so the proximity priors act unopposed. n=6: steady arena walls 44/min (R28 71, R27 9), moved wall after-phase 149/min (R27 253) with half of R27's re-exploration"
+}
