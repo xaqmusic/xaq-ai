@@ -220,6 +220,19 @@ with three live channels). What "works" means: the four-loop brain, play present
 the two-loop brain's level, with the planner taking the motor when hungry and competent and
 play yielding when its world stops getting more novel.
 
+**First form, the competence mean — `NULL` (2026-09-06).** 1.70 eats vs 1.50 (Δ +0.20,
+sd 1.28, t 0.7), 0.75 below the two-loop brain, at the floor, and its wrong-sign control at
+1.65 does not regress: the ordering the grading produces is not what decides eats. The
+probe shows the mechanism and its limit: play's competence falls below the prior (its
+novelty rarely rises over a driving window) and klino's rises when it drives — but the
+planner is never given the motor, so its competence is never observed, stays at the prior,
+and loses every tie; play still holds 0.66 of decisions while hunger is low because
+preference dominates near-uniform trusts. **That is a bandit problem inside competence
+grading**: a loop never selected never proves itself. The second form grades each loop by
+the upper credible bound of a Beta posterior over its competence (optimism about the
+unproven; counts forgotten while not driving so uncertainty grows), a one-parameter
+extension (`estimator beta`, `optimism κ`), default unchanged.
+
 ## What round 2 hands the duck
 
 The recipe's currency (a heading and a confidence per loop; a heading reference into the
