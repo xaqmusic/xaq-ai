@@ -58,6 +58,12 @@ Ina219Config ina219_telemetry_config();
 // Inrush capture: shunt only, 12-bit single conversions -> 532 us, ~1.9 kHz.
 // The bus channel is dropped because pack voltage is not what browns out.
 Ina219Config ina219_capture_config();
+// Sag capture: shunt AND bus, both 12-bit -> ~1.06 ms per pair, ~940 Hz.  Half the
+// rate of the inrush config, in exchange for the leading indicator of a HARD collapse.
+// The 5 V rail is what fails, and the INA219 cannot see it -- but the HAT's regulator
+// drops out below 6.0 V in, so pack sag is the one measurable that leads the failure.
+// get_throttled cannot serve here: an unclean shutdown takes the reading with it.
+Ina219Config ina219_sag_config();
 
 class Ina219 {
 public:
@@ -77,6 +83,10 @@ public:
 
     void reset();                                  // CONFIG bit 15; leaves chip defaults
     void configure(const Ina219Config& cfg);       // CONFIG then CALIBRATION
+    // A bench tool (hat_tool ina capture/sag) reprograms CONFIG on the same part, and
+    // leaves it that way when it exits -- after which a long-lived reader is silently
+    // sampling the wrong mode.  One register read; rewrites only on mismatch.
+    bool ensure_configured();                      // true if it had to re-apply
 
     struct Sample {
         int16_t  shunt_raw    = 0;                 // as read, for the record

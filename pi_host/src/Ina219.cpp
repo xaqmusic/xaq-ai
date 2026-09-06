@@ -21,6 +21,14 @@ Ina219Config ina219_capture_config() {
     return c;
 }
 
+Ina219Config ina219_sag_config() {
+    Ina219Config c;
+    c.badc = Adc::Bits12;    // 532 us
+    c.sadc = Adc::Bits12;    // 532 us -> ~1.06 ms for the pair
+    c.mode = Mode::ShuntBusContinuous;
+    return c;
+}
+
 double Ina219::pga_full_scale_v(Pga pga) {
     switch (pga) {
         case Pga::Div1: return 0.040;
@@ -139,6 +147,12 @@ Ina219::Sample Ina219::read() {
     // rather than reporting a clipped peak as a measured one.
     s.pga_clipped = std::abs(static_cast<int>(s.shunt_raw)) >= pga_clip_counts(cfg_.pga);
     return s;
+}
+
+bool Ina219::ensure_configured() {
+    if (read_reg(REG_CONFIG) == config_word(cfg_)) return false;
+    configure(cfg_);
+    return true;
 }
 
 double Ina219::chip_current_a() {
