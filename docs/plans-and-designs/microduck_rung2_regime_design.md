@@ -125,7 +125,7 @@ best standing stack, instrument-only. 15 min × 2 seeds, scored in a 2-D label s
 | dwell at regime scale | ✅ mean ~0.6 s after the 10 Hz conditioning lever (was 40–80 ms at 50 Hz — the doc's predicted chatter, fixed by its predicted lever) |
 | transition surprise at falls | ⚠ elevated pre-fall (ratio 1.1–1.4) but weak — sharpen later |
 | mixed transitional nodes | ⚠ the largest node in each seed mixes STAND-STILL with fall-moving (~0.5/0.3); weighted top-7 purity 0.63–0.64 |
-| mitosis | ⚠ never fires even at threshold 0.10 — the designed cure for mixed nodes is inert here; open conditioning item |
+| mitosis | ⚠ never fires even at threshold 0.10 — *not conditioning: the v4 EPM never called the gatekeeper (found 2026-09-05; `mitosis_gatekeeper`, default off, restores the call; register O4)* |
 
 **R1 measured (2026-09-01) — GATES MET, PROMOTED AS SIGNAL.**  Build: `regime_topic` +
 per-regime (A, Bx, b, TLE) banks in MotorEPMv2, L.A/Bx/b as the active working copy swapped
@@ -188,8 +188,8 @@ work), vocabulary stability varies by seed.
 **Why the notes do not block R1:** R1's critical consumer is the *standing* bank, and its
 key (the pure standing node) exists in both seeds at high purity and high share. Mixed
 nodes blur only the transitional banks — which today do not exist at all, so their floor is
-the status quo. The two ⚠ items are recorded as R1-era conditioning work (mitosis
-triggering, transition-surprise sharpening), not gate failures.
+the status quo. The two ⚠ items are recorded as R1-era work (mitosis: the gate was never
+called, not a conditioning issue — see above; transition-surprise sharpening), not gate failures.
 
 ---
 

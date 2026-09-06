@@ -17,7 +17,7 @@ An EPM (Episodic Predictive Module) is the bath's per-modality clusterer. It own
 The EPM's output is one `RealityToken` per tick, published on `reality.<group>.<modality>` (e.g. `reality.video.retinal`). v4 adds two new behaviours absent in v3:
 
 - **Top-down prediction subtraction.** Before encoding, the EPM reads `prediction.<modality>` (Feedback subscription, prior-tick) from a DescendingPredictor and subtracts the predicted latent from its current encoder output. The GNG topologizes surprise, not raw observation.
-- **Level-N stacking via input source swap.** A Level-1 EPM is the same code as a Level-0 EPM with `params.input_topic` set to `consensus.0` instead of `reality.proprio.<sensor>`/etc. The encoder is the identity passthrough (or optional 128→128 JL rotation per Open Question #7 in `v4_refactor.md`).
+- **Level-N stacking via input source swap** *(no live configuration instantiates this as of 2026-09-06; every identity-encoder config is archived — register O5)*. A Level-1 EPM is the same code as a Level-0 EPM with `params.input_topic` set to `consensus.0` instead of `reality.proprio.<sensor>`/etc. The encoder is the identity passthrough (or optional 128→128 JL rotation per Open Question #7 in `v4_refactor.md`).
 
 ---
 

@@ -1,5 +1,7 @@
 # Cell Navigator — Strange-Loops Plan
 
+> **SUPERSEDED IN PART (2026-09-06).** The loop unit and the arbiter as built are in [`loop_and_arbitration_recipe.md`](loop_and_arbitration_recipe.md). Two statements below are no longer true of the system: PLAY does not win "when hunger is rising" (it is weighted by the energy surplus; the hunger form is the shipped wrong-sign control), and the predictor's residual is the prediction error only with `residual_align` on (default off). `PlaceGraphNav` here is `PlaceGraphPlanner` in the code.
+
 *The nav architecture for the Cell, from the operator's 2026-06-25 schematic. Built to
 `docs/brain_building_doctrine.md` — especially §5 (layered/additive, strange loops),
 §2 (the EFE arbiter chooses a pathway into the future), §8 (predictable env for

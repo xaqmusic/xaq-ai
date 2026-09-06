@@ -1,5 +1,5 @@
 > **LIVING DOC — the single reference for the Microduck project.** Started 2026-08-30 on branch
-> `microduck`, cut from `master`. Update it in place — do not fork a second port doc.
+> `microduck`, cut from `master` — **merged into `master` (R19–R25); duck work now lands on `master` branches.** Update it in place — do not fork a second port doc.
 >
 > **Status 2026-08-31: S0, S1 and the A2 harness are done; A1 runs, ties a random walk, and
 > all three cheap lever families (reflex, sensor, conditioning/gain) are measured null —

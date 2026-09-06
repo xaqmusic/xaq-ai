@@ -1,5 +1,7 @@
 # Cell PlayLoop — the third policy: grow the map (epistemic explore)
 
+> **SUPERSEDED IN PART (2026-09-06).** §2's shared map ("one node-creator, two overlays") was never built: play and the planner each bin their own path integral at different cell sizes (audit V1). §5's three-way ledger as built is [`loop_and_arbitration_recipe.md`](loop_and_arbitration_recipe.md) §3. Play's climb has never engaged in a recorded run (audit R1; round 2 A2).
+
 *Design + build spec. Branch `cell-maze`. Task #33 (the PLAY loop postulated in
 `cell_efe_arbiter_plan.md` §Open/N-loop, never built). Doctrine refs: §1 (predict-
 or-die), §2.1 (epistemic foraging), §2.2 (explicit EFE ledger — pragmatic vs

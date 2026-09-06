@@ -54,6 +54,7 @@ The trailing `<source>` is `params.id` — typically `consensus.0` or `action.ou
 | `projection_dim` | int64 | ConstructionOnly | 128 | [16, 1024] | JL output dim, also GNG input dim. |
 | `prototype_per_winner_dim` | int64 | ConstructionOnly | 32 | [8, 256] | Each winner's prototype is compressed to this dim before concatenation. (For `source_kind = action`, this is ignored — action scalars are concatenated directly.) |
 | GNG params (`baking_threshold`, `min_insertion_error`, `lambda_new`, `max_age`, `epsilon_b`, `epsilon_n`, `alpha`, `beta`, `max_nodes`, mitosis params, health params, stale-prune params) | various | HotMutable | match EPM defaults | — | Exact same shape as EPM's GNG configuration. |
+| | | | | | *Audit 2026-09-06: as in the EPM, the schema says 50 and the module runs 100 when the key is omitted (`SequenceGNG.cpp` display default) — register O13.* |
 | `motif_branching_threshold` | double | HotMutable | 0.4 | (0, 1] | When a baked motif's "predicted_next" entropy exceeds this, mitosis splits it into sub-motifs (matching v3 EPM mitosis but with the entropy criterion instead of mean error). |
 | `master_seed` | int64 | ConstructionOnly | 0 | — | RNG namespace `seqgng.<id>` for the JL random matrix. |
 

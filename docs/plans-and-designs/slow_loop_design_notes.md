@@ -64,9 +64,10 @@ settled trigger on low TLE *and* non-trivial latent displacement since the last 
 
 Neither threshold may be a constant (doctrine §6), and both already have homes.
 `neuro.state` scales the EPM's `novelty_threshold`, `mitosis_error_threshold`, `epsilon_b`
-and `min_insertion_error` per tick, and the LateralVoter already raises a flag when
+and `min_insertion_error` per tick, and the LateralVoter was designed to raise a flag when
 `fused_tle` crosses its own `novelty_threshold` — the flag Phase 4 fractal mitosis
-consumes. The spike trigger should be that flag rather than a second comparison beside it.
+consumes. *As of 2026-09-06 that parameter is parsed and never read and no token carries the
+flag (audit L4, register O6); wiring it is the prerequisite for this trigger.* The spike trigger should be that flag rather than a second comparison beside it.
 
 **Gate the slow update by precision.** The slow EPM's own update should be scaled by the
 pooled confidence — a Kalman-style gain — so a keyframe captured under high fast-level

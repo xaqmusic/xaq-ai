@@ -88,7 +88,7 @@ built purely for the inspector widget (`MotorEPM.cpp:4564`, `edges` always empty
 makes the name true, per CLAUDE.md §0:
 
 - frozen encoder over the per-leg sensorimotor vector (identity or RBF — modality-shaped);
-- GNG with baking / mitosis / pruning, so the motor vocabulary is **earned**;
+- GNG with baking / mitosis / pruning *(mitosis default-off; never called in v4 before 2026-09-05 — register O4)*, so the motor vocabulary is **earned**;
 - the **dual** TLE — `α·quant_error + β·transition_surprise` — which is the piece that gives
   "which node comes next", the structure the operator assumed already existed;
 - ⚠ **§0 rule 2 is the live risk here**: condition the input or the insertion gate collapses
