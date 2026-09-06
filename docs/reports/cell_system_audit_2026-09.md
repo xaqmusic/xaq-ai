@@ -254,10 +254,15 @@ and the schema-default check.
 
 ## 9. Next work
 
-Round 2 of the Cell, on the repaired far-food arena with pillars, where a reactive forager
-provably cannot do better than chance after its first meal: the seeding re-baseline, the
-arbiter's normalisation so that a planner with a route can win a decision, the climb repair,
-the vocabulary-native map as the one build lever, the planner's epistemic term, and a
-perturbation battery that includes heading drift. Its endpoint is the loop and
+Round 2 of the Cell ran on the repaired far-food arena with pillars, calibrated so that a
+reactive forager's return to relocated food is nearly chance. Its result, recorded in the
+round-2 charter and the Cell ledger: the composition's memory works once the exploration
+loop is out of the race (the two-loop brain ties the reactive specialist and beats the
+gradient-blind floor over twenty worlds), and no repair of the exploration loop, the
+arbiter's units, the map, or the arbitration's currency rescues the four-loop brain while
+that loop holds the motor. The exploration loop is dropped from the Cell's instance of the
+recipe. What follows is the perturbation battery on the two-loop brain, the L-bend as its
+transfer room, the duck's level-two harness, and a competence-graded arbitration in which
+each loop is weighed by its own prediction error about the world. Its endpoint is the loop and
 arbitration recipe the microduck will inherit, with a level-two harness so that the port's
 first verdict is not a single seed.

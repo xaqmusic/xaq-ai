@@ -142,6 +142,20 @@ specialist's on the same twenty worlds, with the planner taking the motor when h
 a route and the wrong-sign arm regressing. If it does not, the play loop is dropped from the
 composition and the two-loop (klino + planner) brain is the recipe's Cell instance.
 
+**Result (n = 20, 2026-09-06).** Two batteries measured nothing: the voter's group balance
+made the trust an exact quarter per loop by construction (a one-level `input_pattern` makes
+every channel its own group; register L10; the fusion testbed had set `group_balance false`
+and said why). Corrected, the mechanism operates — the planner's trust swings 0.27–0.66,
+klino's flat channel reads 0, the planner takes 0.31 of decisions against the race's 0.06 —
+and **eats do not move**: 1.30 against the base's 1.50 (Δ −0.20 ± 1.44), 1.15 below the
+two-loop brain (t −3.2). The pure form (gate off) trusts the flat scent channel and trends
+worse (0.95). The wrong-sign control is degenerate with two live channels. **Verdict
+`NULL`:** trust in a loop's own steadiness is not competence; the planner is trusted whether
+or not its route leads to food. **The play loop is dropped.** `the_cell_route_far_pillars__noplay.json`
+is the recipe's Cell instance: 2.45 eats, beats the floor, ties the reflex, the planner taking
+0.61 of decisions. The competence form of precision arbitration (each loop publishing its own
+prediction error about the world) is registered as O21, the round-4 design.
+
 ## What round 2 hands the duck
 
 The recipe's currency (a heading and a confidence per loop; a heading reference into the

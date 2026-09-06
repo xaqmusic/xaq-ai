@@ -41,6 +41,15 @@ Every loop is specified by five fields. The Cell's four, as built:
 | play (explore) | `PlayLoop` | where the map's frontier is | the same path integral and place TLE | more novelty at the next node than here | climb when a strictly more novel neighbour exists and the map grew recently; otherwise wander | **non-compliant as it stands**: `max(climb_value, 1 − habituation)`; with climb latched off it is a recency scalar (register R1) |
 | vision | `VisualHomingNav` via `VisualBearing` | the bearing to seen food | `host.video.color` | approach closes the bearing | confidence 0 when occluded | detection confidence in [0,1] (the doctrine's "value in the modality's own units") |
 
+**The Cell instance after round 3 (2026-09-06) is the two-loop brain: klino + planner, play
+ABLATED (`play_weight 0`, the module kept), vision inert.** In the far-food arena that
+demands memory, the four-loop brain forages at the random-walk floor (1.50 vs 1.60 eats,
+n = 20) and the two-loop brain ties the reactive specialist (2.45 vs 2.80) with the planner
+taking 0.61 of decisions; neither the units repair, the vocabulary map, the climb repair nor
+precision-weighted arbitration over the loops' bearing streams changes that while play is in
+the race (Cell ledger, round 2–3). Play's re-use context: a world where food does not return
+to known places, or a competence-graded arbitration (register O21).
+
 The place EPM (`epm_place`, an RBF encoder over the panorama) supplies a novelty scalar to
 the planner and to play. It does not supply the map. That inversion is the audit's central
 design finding and round 2's build lever (register O10).
@@ -112,7 +121,10 @@ Three statements the doctrine requires, made explicit:
   pragmatic reaches are raw (0.04 in the study room; a planner holding a distant route reads
   `plan_value` ≈ 0.15 and never wins). The lever: `pragmatic_norm: planner_peak` divides the
   planner's reach by its own slow-decaying peak (the device play and the z-spike already use;
-  no new constant), default `none`, byte-identical. Klino's reach stays eat-calibrated: a
+  no new constant), default `none`, byte-identical — `NULL` alone at n = 20. **Precision-weighted
+  selection** (`scoring_mode precision`: per-loop EPMs over each loop's bearing → `LateralVoter`
+  → preference × trust) is also `NULL` at n = 20: the planner takes five times more decisions
+  and eats do not move, because a loop's steadiness is not its competence (register O21). Klino's reach stays eat-calibrated: a
   peak-normalised constant weak scent would read as full reach, which the lever's first form
   demonstrated by failing its own test. The gate's docstring names two pragmatic terms; the
   code takes the max over three, one of which is pre-multiplied by `vision_weight`.
