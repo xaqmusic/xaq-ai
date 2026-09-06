@@ -156,6 +156,36 @@ is the recipe's Cell instance: 2.45 eats, beats the floor, ties the reflex, the 
 0.61 of decisions. The competence form of precision arbitration (each loop publishing its own
 prediction error about the world) is registered as O21, the round-4 design.
 
+## The two-loop brain under perturbation and in the transfer room (2026-09-06)
+
+**R-B, the L-bend** (`the_cell_arbiter_fused_lbend.json`, 30 m, pillars, a wall that blocks
+scent; vision on; n = 20 varied worlds, 240 s): four-loop brain 0.95 eats (play 0.80 of
+decisions), two-loop brain **2.10** (klino 0.62, planner 0.21, vision 0.17; returns after the
+relocation on 13 of 20 runs). Paired: **+1.15 eats, sd 1.66, t 3.1, better on 13 of 20
+worlds; food distance −2.73 m, t −3.0; eats after the first relocation +0.80, t 2.7.** The
+far-food finding transfers to the second regime at finding-level power. **In the same
+twenty worlds the reactive specialist eats 2.10 and the gradient-blind floor 0.95**: the
+two-loop brain ties the specialist exactly (Δ 0.00, sd 1.12) and beats the floor (+1.15,
+t 3.8, 14 of 20); the four-loop brain sits at the floor (−1.15 against the specialist,
+t −4.2). Two regimes, one picture: with play the composition forages at chance; without it,
+at the reflex's level, using its memory.
+
+**The (d) battery on the two-loop brain** (far-food arena, n = 12 varied worlds, 14 400
+ticks, the lesion over the middle third; food relocation is built in):
+
+- **Scent noise** (σ 0.05 on the published scent): food distance PRE 9.8 → LESION 13.5 →
+  POST 13.0 m against the control's 9.8 → 12.0 → 13.5. Approach degrades under the noise
+  (+1.5 m against the control at the lesion phase) with no recovery beyond the control's own
+  drift; eats 1.25 / 0.75 / 0.75 in both arms. A weak signal for the scent sense; the paired
+  contrast with its interval is being re-run.
+- **Heading drift** (a random-walk bias on the published heading, σ 0.01 rad per tick, ≈ 40°
+  by the window's end): **no effect during the window** (12.3 vs 12.0 m) — the map and the
+  steering share the same drifting frame and stay self-consistent — and **the damage appears
+  after it**: when the published heading snaps back, the memory built during the drift is
+  misregistered and eats fall to 0.33 against the control's 0.58 in the post phase. This is
+  the compass scaffold (register O8) showing itself where predicted: in the memory, not the
+  approach. Paired contrast being re-run.
+
 ## What round 2 hands the duck
 
 The recipe's currency (a heading and a confidence per loop; a heading reference into the

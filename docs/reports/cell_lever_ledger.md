@@ -97,6 +97,13 @@ mistakes** REPORTS.md §5 keeps out of reports.
 
 ### Regime notes
 
+- **2026-09-06, the transfer room (R-B, the L-bend, n = 20 varied worlds):** two-loop brain
+  2.10 eats vs the four-loop brain 0.95 (paired +1.15, sd 1.66, t 3.1, 13+/3−; food distance
+  −2.73 m, t −3.0; eats after the relocation +0.80, t 2.7). Specialist 2.10 (= the two-loop
+  brain, Δ 0.00 ± 1.12), floor 0.95 (= the four-loop brain). **The far-food finding transfers:
+  dropping play is `WORKING` in both regimes at n = 20; the four-loop brain is at the
+  random-walk floor in both.**
+
 - **2026-09-06, the finding at n = 20 (varied worlds, falloff 2.0):** specialist 2.80 eats,
   gradient-blind floor 1.60 (the specialist beats it by 1.20, t 2.5, returning after the
   relocation on 16 of 20 runs against 8), the composition 1.30 (ties the floor; 1.50 below the
