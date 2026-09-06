@@ -182,6 +182,22 @@ private:
     // (W2 EPM dashboard / v3 visualizer.py parity.)
     float           last_tle_           = 0.0f;
     float           last_quant_error_   = 0.0f;
+    // Kalman-lessons Stage 0.4 instruments (docs/plans-and-designs/
+    // epm_kalman_lessons_plan.md).  Diagnostic-only and deliberately NOT
+    // serialised, so snapshots stay byte-identical; they rebuild from zero
+    // after a restore.
+    //   tle_norm = last_tle / ema_tle — the normalised innovation the Python
+    //              reference folded into serotonin (1/(1 + tle/running_avg));
+    //              a scale-free surprise for xaq_voice and the inspector.
+    //   qe_lag1  = lag-1 autocorrelation of quant_error — innovation
+    //              whiteness.  A well-modelled stream leaves white residuals;
+    //              sustained positive lag-1 means the vocabulary (or the
+    //              descending predictor) is missing dynamics.
+    float           qe_mean_ema_        = 0.0f;
+    float           qe_sq_ema_          = 0.0f;
+    float           qe_lag1_ema_        = 0.0f;
+    float           prev_qe_            = 0.0f;
+    bool            has_prev_qe_        = false;
     std::deque<int> history_trace_;
 
     // Phase 6.6.E: per-node successor counts.  Updated each tick from the

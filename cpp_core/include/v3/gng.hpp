@@ -33,6 +33,12 @@
 namespace ami_ogma {
 namespace v3 {
 
+// Winner-update gain schedule (Kalman-lessons Stage 1,
+// docs/plans-and-designs/epm_kalman_lessons_plan.md).
+//   Linear — the legacy anneal eps_b * (1 - 0.9 * visits / N), frozen at bake.
+//   Kalman — per-node scalar Kalman gain; see Config below.
+enum class GainKind { Linear, Kalman };
+
 struct GNGNode {
     Eigen::VectorXf prototype;
     double  error             = 0.0;
@@ -53,6 +59,12 @@ struct GNGNode {
     // volatile (LTD-prone). Heavily-used synapses develop LTP and become
     // increasingly resistant to decay. Death is gradual, individual, smooth.
     float   health            = 1.0f;   // accumulated activity strength
+
+    // Prior-variance ratio for the per-node Kalman gain, in units of the
+    // node's own observation noise (so the schedule is dimensionless).  Read
+    // only when Config::gain_kind == GainKind::Kalman, and serialised only
+    // then, so a Linear-mode snapshot is byte-identical to the pre-feature form.
+    float   p                 = 1.0f;
 };
 
 class GNG {
@@ -109,6 +121,36 @@ public:
         // false (default) = exactly the pre-2026-08-06 fixed-threshold path.
         bool  insertion_autotune          = false;
         float insertion_autotune_quantile = 0.30f;
+
+        // ---------------------------------------------------------------------
+        // Per-node Kalman gain (Kalman-lessons Stage 1)
+        // ---------------------------------------------------------------------
+        //
+        // The winner update w += g (x - w) has the form of the Kalman filter
+        // for a constant, but the legacy schedule g_n = eps_b (1 - 0.9 n/N)
+        // is not its gain: measured on the bench (2026-09-05) a baked
+        // prototype keeps 24 % of its weight on the point it was born at and
+        // carries 2x the MSE of the mean of the same samples.  The Kalman gain
+        // for a constant is 1/(n+1).
+        //
+        // In Kalman mode each node carries p, its prior variance as a ratio
+        // of its own observation noise.  Per win:
+        //     p += kalman_q;  K = min(kalman_gain_cap, p / (p + 1));
+        //     w += K (x - w);  p *= (1 - K).
+        // With kalman_p0 = 1 and kalman_q = 0 that is exactly 1/(n+1) (the
+        // seed counts as one sample) and baked nodes stay frozen.  With
+        // kalman_q > 0 every node — baked included — settles at the random-
+        // walk steady-state gain (q + sqrt(q^2 + 4q))/2 and tracks slow drift
+        // instead of waiting for mitosis.  eps_b, the visit/health damping and
+        // the neurochemical eps_b scale are not consulted in this mode; the
+        // neighbour pull eps_n is unchanged.
+        //
+        // Linear (default) leaves step() byte-identical.
+        GainKind gain_kind       = GainKind::Linear;
+        float    kalman_p0       = 1.0f;
+        float    kalman_q        = 0.0f;
+        float    kalman_gain_cap = 1.0f;
+
         bool  stale_prune_enabled = true;
         float stale_window_factor = 12000.0f; // absolute steps (~400s at 30fps)
         // 2026-09-01 (guarded; default false = byte-identical everywhere): exempt
@@ -244,6 +286,9 @@ public:
     float autotune_value() const { return autotune_value_; }
     void set_epsilon_b(float e)                { cfg_.epsilon_b = e; }
     void set_epsilon_n(float e)                { cfg_.epsilon_n = e; }
+    void set_kalman_q(float q)                 { cfg_.kalman_q = q; }
+    void set_kalman_gain_cap(float c)          { cfg_.kalman_gain_cap = c; }
+    GainKind gain_kind() const                 { return cfg_.gain_kind; }
     void set_lambda_new(int l)                 { cfg_.lambda_new = l; }
     void set_max_age(int a)                    { cfg_.max_age = a; }
     void set_baking_threshold(int t)           { cfg_.baking_threshold = t; }

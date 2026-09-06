@@ -4785,3 +4785,50 @@ X → rescue recall then lands in 4.2 s with the throttle flags clean. Two instr
 instrument); and a first arm after boot cannot slew (no known position) — the stagger alone
 carried that case. Re-use context: the servo-BEC rebuild now has two measured reasons (no
 limp, shared-rail brownout); the INA219 quantifies the inrush margin before deciding.
+
+---
+
+### 2026-09-05 — PER-NODE KALMAN GAIN ON THE BODY-POSE EPMs: THE SCHEDULE'S TAIL HELPS, ITS HEAD CHURNS THE VOCABULARY (dose response, n=6)
+
+*Charter with the bench and the derivation:
+[`../plans-and-designs/epm_kalman_lessons_plan.md`](../plans-and-designs/epm_kalman_lessons_plan.md)
+(Kalman-lessons campaign, Stage 1). Lever: `gain_kind=kalman` on the `EPM` (`body_pose`,
+`body_pose_t`), whose `winner_id` feeds `MotorPlanner`. Gain-0 guard: `gain_kind=linear`
+default, byte-identical (120/120 bench seed files). Base: `…__j1s4.json`, corridor, 12 k
+ticks, difficulty 0.3, n=6 paired `OGMA_SEED` 1–6. Arms made with `mkarm.py --module`.*
+
+**What the lever is.** The GNG winner update `w += g(x−w)` has the form of the Kalman filter
+for a constant; the legacy anneal `g = ε_b(1 − 0.9·visits/N)` is not its gain. Measured on the
+synthetic bench (n=20): a baked prototype keeps 24 % of its weight on its birth point and
+carries 2× the MSE of the mean of the samples it saw. Kalman mode gives each node `p`, a
+prior-variance ratio: `K = min(cap, p/(p+1))`, `p *= 1−K`, i.e. exactly `1/(n+1)` at cap 1.
+On the bench it is WORKING everywhere (seed weight 0.275 → 0.034; 3-cluster vocabulary 10.7 →
+7.05 nodes at purity 1.0; with `kalman_q=0.01` a drifting mean is tracked within 6 % of the
+Kalman optimum by 2 nodes instead of 19).
+
+| Arm | falls (6 seeds) | tilt_sd | net_z | flat_v | t_flat | brt_err | whole-run winner ids | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| base `linear` | 1 | 0.104 | 7.39 ± 1.35 | 0.047 | 2416 | 1.545 | 46 | `BASELINE` |
+| `kalman`, cap 1.0 | **6** (one seed 4) | 0.279 | 6.44 ± 3.00 (one collapse) | 0.055 | 2127 | 1.557 | 53 | `REGRESSION` |
+| `kalman`, cap 0.2 | **5** (one seed 4) | 0.339 | 6.54 (one collapse) | 0.050 | 2318 | 1.503 | 53 | `REGRESSION` |
+| **`kalman`, cap 0.05** | **0** | 0.123 | 8.52 ± 0.94 | **0.057** (paired +0.010 ± 0.009, t 2.7) | **2000** (−416 ± 507) | **1.438** (−0.107 ± 0.084, t −3.3) | 43 | **`PARTIAL`** — promote to n≥20 + arena + operator's eye |
+
+**§3.2 checks.** Not a tautology (the base has no `gain_kind`); live (`MotorPlanner` reads
+the winner ids and every paired seed shows a different id set); healthy baseline (6/6
+walkers, 1 fall); the arm loaded (per-seed id sets differ; the whole-run id count moves with
+the cap). One seed reached the far wall in every arm (the harness's gym-boundary warning):
+distance is under-reported there, which only strengthens cap 0.05's `net_z` trend.
+
+**Diagnosis.** The extra winner ids under cap 1.0 / 0.2 are **turnover, not size**: distinct
+ids per run-quarter match the base (21–27) while the whole-run count rises. A gain of 0.5 on
+a node's first win is right for a static cluster and wrong for a gait: on a moving ring of
+poses the young node chases the input, its region gets re-inserted, the vocabulary churns,
+and the planner reading it loses the walk. Capped at 0.05 (never above the legacy starting
+gain) the body keeps only the Kalman *tail* (`1/(n+1)` instead of decaying to `0.1·ε_b`),
+which is where the estimate improves. `unstable` (ticks with < 3 feet planted) doubles under
+cap 0.05, but a faster gait raises it by construction; falls and tilt are the honest reads.
+
+**Re-use context.** Uncapped / 0.2: a *stationary* vocabulary (a Level-N EPM over settled
+consensus, a place map) — retry there. Cap 0.05: the promotion run. `kalman_q > 0`: its own
+lever, bench-loud, on a body only with the cap. Bench gap: no scenario expressed the churn;
+a rotating-ring scenario (`S6`) goes in before Stage 2's creature A/Bs.

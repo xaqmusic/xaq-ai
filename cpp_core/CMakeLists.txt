@@ -601,4 +601,14 @@ gtest_discover_tests(test_column_builder)
 gtest_discover_tests(test_bearing_estimator)
 gtest_discover_tests(test_keyframe_averager_streams)
 
+# ---------------------------------------------------------------------------
+# Synthetic bench for the Kalman-lessons campaign
+# (docs/plans-and-designs/epm_kalman_lessons_plan.md, Stage 0.1).  NOT a test:
+# a JSONL emitter that drives the real EPM / DescendingPredictor / LateralVoter
+# on an InProcessBus against streams whose optimal estimator is known, so
+# tools/epm_bench/analyze.py can compare the substrate to the Kalman reference.
+# ---------------------------------------------------------------------------
+add_executable(epm_kalman_bench bench/epm_kalman_bench.cpp)
+target_link_libraries(epm_kalman_bench PRIVATE ogma_core pthread)
+
 endif() # OGMA_BUILD_TESTS

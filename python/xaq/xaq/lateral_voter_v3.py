@@ -169,7 +169,17 @@ class LateralVoterV3:
         if not tokens:
             return self._empty_stats()
 
-        mods    = [m for m in self.modalities if m in tokens]
+        # Parity with the C++ voter (LateralVoter.cpp:250), 2026-09-05: a
+        # bootstrap / placeholder token (winner < 0) carries tle = 0.0 as a
+        # placeholder, not a measurement, and 1/(0 + eps) is the LARGEST trust
+        # in the room — the sign inversion recorded in
+        # docs/research-summaries/epm_kalman_filter_finding.md.  Drop such
+        # tokens before trust is computed, as the C++ core always did.
+        def _has_real_winner(s: dict) -> bool:
+            return s.get("active_node", s.get("winner_id", 0)) >= 0
+        mods    = [m for m in self.modalities if m in tokens and _has_real_winner(tokens[m])]
+        if not mods:
+            return self._empty_stats()
         stats   = [tokens[m] for m in mods]
 
         tles    = np.array([s.get("tle", 0.0) for s in stats], dtype=np.float32)

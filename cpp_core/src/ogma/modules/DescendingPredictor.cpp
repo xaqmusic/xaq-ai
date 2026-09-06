@@ -194,7 +194,12 @@ void DescendingPredictor::handle_consensus(std::string_view /*topic*/, MessagePt
         source_dim_ = int(latest_consensus_.size());
         std::mt19937_64 rng = derive_rng(master_seed_,
             std::string("predictor.") + (id_.empty() ? std::string("predictor") : id_) + ".weights_init");
-        std::normal_distribution<float> dist(0.0f, init_noise_scale_);
+        // init_noise_scale <= 0 means a deterministic zero initialisation.
+        // std::normal_distribution asserts on a non-positive stddev (the
+        // pre-existing test_descending_predictor abort, 2026-09-05), so the
+        // distribution is built with a dummy sd and never drawn from.
+        const bool draw_noise = init_noise_scale_ > 0.0f;
+        std::normal_distribution<float> dist(0.0f, draw_noise ? init_noise_scale_ : 1.0f);
         for (auto& t : targets_) {
             // Target dim is unknown until first reality.* delivery; we lazily
             // size W when that happens.  For now placeholder: source dim ×
@@ -203,7 +208,7 @@ void DescendingPredictor::handle_consensus(std::string_view /*topic*/, MessagePt
             t.b = Eigen::VectorXf::Zero(source_dim_);
             for (int i = 0; i < t.W.rows(); ++i)
                 for (int j = 0; j < t.W.cols(); ++j)
-                    t.W(i, j) = dist(rng);
+                    t.W(i, j) = draw_noise ? dist(rng) : 0.0f;
         }
         dim_known_ = true;
     }
@@ -221,11 +226,16 @@ void DescendingPredictor::handle_reality(std::string_view /*topic*/, MessagePtr 
     if (t.W.rows() != tgt_dim || t.W.cols() != source_dim_) {
         std::mt19937_64 rng = derive_rng(master_seed_,
             std::string("predictor.") + (id_.empty() ? std::string("predictor") : id_) + ".weights_resize");
-        std::normal_distribution<float> dist(0.0f, init_noise_scale_);
+        // init_noise_scale <= 0 means a deterministic zero initialisation.
+        // std::normal_distribution asserts on a non-positive stddev (the
+        // pre-existing test_descending_predictor abort, 2026-09-05), so the
+        // distribution is built with a dummy sd and never drawn from.
+        const bool draw_noise = init_noise_scale_ > 0.0f;
+        std::normal_distribution<float> dist(0.0f, draw_noise ? init_noise_scale_ : 1.0f);
         Eigen::MatrixXf W2 = Eigen::MatrixXf::Zero(tgt_dim, source_dim_);
         for (int i = 0; i < W2.rows(); ++i)
             for (int j = 0; j < W2.cols(); ++j)
-                W2(i, j) = dist(rng);
+                W2(i, j) = draw_noise ? dist(rng) : 0.0f;
         t.W = std::move(W2);
         t.b = Eigen::VectorXf::Zero(tgt_dim);
     }
