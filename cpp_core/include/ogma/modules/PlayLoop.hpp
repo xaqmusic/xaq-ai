@@ -117,6 +117,11 @@ private:
     // params
     float gamma_          = 0.85f;    // value-iteration discount (novelty propagation)
     int   vi_sweeps_      = 8;
+    // Kalman-lessons Stage 3: which field of the place token is the novelty.  "tle"
+    // (default) = the place EPM's dual TLE, byte-identical; "transition_surp" = the
+    // EPM's transition surprise (with transition_surprise_kind=logprob: how unexpected
+    // this MOVE was, the epistemic quantity play seeks); "quant_error" = the spatial term.
+    std::string novelty_source_ = "tle";
     float tle_ema_alpha_  = 0.1f;     // EMA rate of the per-node TLE novelty
     float tle_peak_decay_ = 0.0005f;  // slow decay of the novelty running peak (play_value normaliser, §6)
     float hab_rise_       = 0.1f;     // habituation rise while dwelling (recent = boring)

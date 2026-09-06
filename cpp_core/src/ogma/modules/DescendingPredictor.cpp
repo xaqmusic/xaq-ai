@@ -85,7 +85,15 @@ ParamSchema DescendingPredictor::params_schema() const {
     return {
         {"consensus_topic",     ParamMutability::ConstructionOnly, "Source topic", ParamValue{std::string("consensus.0")}},
         {"targets",             ParamMutability::ConstructionOnly, "List of reality.<group>.<modality> topics to predict", std::nullopt},
-        {"update_method",       ParamMutability::ConstructionOnly, "sgd | rls",   ParamValue{std::string("sgd")}},
+        {"update_method",       ParamMutability::ConstructionOnly,
+         "sgd | rls.  Kalman-lessons Stage 3 (K6): 'rls' is TRUE recursive least squares over [context; 1] with "
+         "forgetting rls_forget (the Kalman filter for a static parameter vector); the earlier 'rls' was SGD with a "
+         "rescaled constant and no config used it, so existing configs are unaffected.", ParamValue{std::string("sgd")}},
+        {"rls_p0",              ParamMutability::ConstructionOnly, "Initial diagonal of the RLS inverse-covariance P (large = diffuse prior).", ParamValue{100.0}},
+        {"residual_align",      ParamMutability::HotMutable,
+         "Kalman-lessons Stage 3 (K6): the residual published at t-1 measures the prediction made at t-2, but the "
+         "legacy update pairs it with the context cached at t-1 (one tick off; found 2026-09-05).  true = pair with the "
+         "context and prediction from two ticks back.  false (default) = legacy, byte-identical.", ParamValue{false}},
         {"learning_rate",       ParamMutability::HotMutable,       "SGD step size", ParamValue{0.01}},
         {"rls_forget",          ParamMutability::HotMutable,       "RLS forgetting factor", ParamValue{0.99}},
         {"init_noise_scale",    ParamMutability::ConstructionOnly, "Std-dev for W initialisation", ParamValue{0.01}},
@@ -118,6 +126,8 @@ void DescendingPredictor::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "update_method",     [&](auto const& v){ update_method_     = get_string(v, "update_method"); });
     apply_param(params, "learning_rate",     [&](auto const& v){ learning_rate_     = float(get_double(v, "learning_rate")); });
     apply_param(params, "rls_forget",        [&](auto const& v){ rls_forget_        = float(get_double(v, "rls_forget")); });
+    apply_param(params, "rls_p0",            [&](auto const& v){ rls_p0_            = float(get_double(v, "rls_p0")); });
+    apply_param(params, "residual_align",    [&](auto const& v){ residual_align_    = get_bool(v, "residual_align"); });
     apply_param(params, "init_noise_scale",  [&](auto const& v){ init_noise_scale_  = float(get_double(v, "init_noise_scale")); });
     apply_param(params, "freeze_after_ticks",[&](auto const& v){ freeze_after_ticks_= get_int(v, "freeze_after_ticks"); });
     apply_param(params, "confidence_window", [&](auto const& v){ confidence_window_ = get_int(v, "confidence_window"); });
@@ -157,6 +167,7 @@ void DescendingPredictor::on_param_change(std::string_view key, ParamValue const
     auto k = std::string(key);
     if (k == "learning_rate")           learning_rate_      = float(get_double(value, k));
     else if (k == "rls_forget")         rls_forget_         = float(get_double(value, k));
+    else if (k == "residual_align")     residual_align_     = get_bool(value, k);
     else if (k == "freeze_after_ticks") freeze_after_ticks_ = get_int(value, k);
     else if (k == "confidence_window")  confidence_window_  = get_int(value, k);
     else if (k == "consensus_topic" || k == "targets" || k == "update_method"
@@ -241,10 +252,15 @@ void DescendingPredictor::handle_reality(std::string_view /*topic*/, MessagePtr 
     }
 
     // Supervisory update against the cached forward pair.
-    bool can_update = t.cached_valid &&
-                      cached_consensus_valid_ &&
-                      t.cached_prediction.size() == rt->latent.size() &&
-                      cached_consensus_.size()   == source_dim_;
+    // K6: which (context, prediction) pair this residual belongs to.
+    Eigen::VectorXf const& ctx        = residual_align_ ? cached_consensus_prev_       : cached_consensus_;
+    const bool             ctx_valid  = residual_align_ ? cached_consensus_prev_valid_ : cached_consensus_valid_;
+    Eigen::VectorXf const& pred       = residual_align_ ? t.cached_prediction_prev      : t.cached_prediction;
+    const bool             pred_valid = residual_align_ ? t.cached_valid_prev           : t.cached_valid;
+    bool can_update = pred_valid &&
+                      ctx_valid &&
+                      pred.size() == rt->latent.size() &&
+                      ctx.size()  == source_dim_;
 
     bool frozen = (freeze_after_ticks_ > 0) &&
                   (int64_t(ticks_run_) >= freeze_after_ticks_);
@@ -252,17 +268,34 @@ void DescendingPredictor::handle_reality(std::string_view /*topic*/, MessagePtr 
     if (can_update && !frozen) {
         Eigen::VectorXf err = target_is_residual_
                                   ? rt->latent
-                                  : (rt->latent - t.cached_prediction);
+                                  : (rt->latent - pred);
 
         if (update_method_ == "rls") {
-            // RLS approximation via diagonal-only inverse-covariance for
-            // simplicity in Phase 1.6; full block-RLS is a Phase 3 stretch.
-            float gain = learning_rate_ / std::max(1e-6f, rls_forget_);
-            t.W.noalias() += gain * err * cached_consensus_.transpose();
-            t.b.noalias() += gain * err;
+            // True recursive least squares over the augmented context [ctx; 1]
+            // (K6): the Kalman filter for a static parameter vector.  err is the
+            // innovation of the prediction made with the OLD weights.
+            const int s = source_dim_;
+            if (t.P.rows() != s + 1 || t.P.cols() != s + 1)
+                t.P = Eigen::MatrixXd::Identity(s + 1, s + 1) * double(rls_p0_);
+            Eigen::VectorXd phi(s + 1);
+            phi.head(s) = ctx.cast<double>(); phi(s) = 1.0;
+            Eigen::VectorXd Pphi  = t.P * phi;
+            const double    lam   = std::max(double(rls_forget_), 1e-6);
+            const double    denom = std::max(lam + phi.dot(Pphi), 1e-12);
+            Eigen::VectorXd kgain = Pphi / denom;
+            Eigen::VectorXf kf    = kgain.cast<float>();
+            t.W.noalias() += err * kf.head(s).transpose();
+            t.b.noalias() += err * kf(s);
+            t.P = (t.P - kgain * Pphi.transpose()) / lam;
+            t.P = 0.5 * (t.P + t.P.transpose());                       // keep it symmetric
+            // Windup guard: with forgetting, P grows without bound in unexcited
+            // directions; cap its trace at the diffuse prior's.
+            const double trace_cap = double(rls_p0_) * double(s + 1);
+            const double tr = t.P.trace();
+            if (tr > trace_cap) t.P *= trace_cap / tr;
         } else {
             // Plain SGD step.
-            t.W.noalias() += learning_rate_ * err * cached_consensus_.transpose();
+            t.W.noalias() += learning_rate_ * err * ctx.transpose();
             t.b.noalias() += learning_rate_ * err;
         }
 
@@ -283,6 +316,9 @@ void DescendingPredictor::tick(uint64_t tick_id) {
         out->producer_id      = id_.empty() ? std::string("predictor") : id_;
         out->target_modality  = t.label;
 
+        // K6: shift the one-pass-earlier cache before this pass overwrites it.
+        t.cached_prediction_prev = t.cached_prediction;
+        t.cached_valid_prev      = t.cached_valid;
         if (consensus_seen_ && t.W.cols() == latest_consensus_.size() && t.W.rows() > 0) {
             out->predicted_latent = t.W * latest_consensus_ + t.b;
             t.cached_prediction = out->predicted_latent;
@@ -302,6 +338,9 @@ void DescendingPredictor::tick(uint64_t tick_id) {
 
     // Cache the consensus we just used so the next supervisory update can
     // pair it with the reality(t-1) feedback that arrives at tick t+1.
+    // K6: shift the one-pass-earlier context cache, then cache this pass's context.
+    cached_consensus_prev_       = cached_consensus_;
+    cached_consensus_prev_valid_ = cached_consensus_valid_;
     if (consensus_seen_) {
         cached_consensus_       = latest_consensus_;
         cached_consensus_valid_ = true;

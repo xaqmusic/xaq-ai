@@ -89,6 +89,8 @@ struct Args {
     int         subrate        = 1;   // S5: sensor b EPM process_every_n_ticks
     int         dump_every     = 50;  // node dumps cadence (0 = only on bake)
     double      omega          = 0.0; // S6: ring rotation, rad per tick (0 = stationary ring)
+    double      theta          = 0.15; // S3: per-tick rotation of the damped target (fast = exposes a one-tick lag)
+    double      rho            = 0.98; // S3: per-tick damping
     std::map<std::string, std::map<std::string, json>> sets;  // module → key → value
 };
 
@@ -122,6 +124,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--subrate")        a.subrate = std::stoi(need(i));
         else if (k == "--dump_every")     a.dump_every = std::stoi(need(i));
         else if (k == "--omega")          a.omega = std::stod(need(i));
+        else if (k == "--theta")          a.theta = std::stod(need(i));
+        else if (k == "--rho")            a.rho = std::stod(need(i));
         else if (k == "--set") {
             std::string kv = need(i);
             auto eq = kv.find('=');
@@ -435,7 +439,7 @@ int run_S3(Args const& a, Emitter& em) {
     const int obs_dim = 2, ctx_dim = 4;
     const double r_sd = a.sigma / std::sqrt(2.0);          // per-axis observation sd
     const double qsd  = std::sqrt(a.q > 0.0 ? a.q : 1e-3); // per-component process sd
-    const double rho = 0.98, theta = 0.15;
+    const double rho = a.rho, theta = a.theta;
     const double c = rho * std::cos(theta), sn = rho * std::sin(theta);
     Eigen::Vector4f st = Eigen::Vector4f::Zero();
     st(0) = 0.5f; st(2) = -0.5f;

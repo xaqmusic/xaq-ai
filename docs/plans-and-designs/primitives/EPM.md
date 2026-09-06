@@ -70,6 +70,7 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `beta` | double | HotMutable | 0.0005 | (0, 1] | Global error decay per step. |
 | `max_nodes` | int64 | HotMutable | 2000 | [50, 50000] | GNG capacity. |
 | `tle_alpha` | double | HotMutable | 0.7 | [0, 1] | Weight of `quant_error` in dual TLE. |
+| `transition_surprise_kind` | string | HotMutable | `displacement` | `displacement`/`logprob` | **Stage 3 restoration** ([charter](../epm_kalman_lessons_plan.md)). `displacement` = `‖proto_t − proto_{t−1}‖`, the C++ port's stand-in, byte-identical. `logprob` = the Python reference's surprise: `−log P(cur|prev)` from the EPM's own transition counts as they stood before the step, Laplace-smoothed, normalised by `log N` to [0, 1], conditioned on a move (a stay scores 0, a first arrival 1). The bench's S4 showed the displacement cannot separate an expected transition from a teleport (ratio 1.03). |
 | `tle_beta` | double | HotMutable | 0.3 | [0, 1] | Weight of `transition_surprise`. (`tle_alpha + tle_beta` need not sum to 1 — they are independent gains.) |
 | `mitosis_enabled` | bool | HotMutable | true | — | — |
 | `mitosis_error_threshold` | double | HotMutable | 0.30 | (0, 1] | Post-bake mean error to trigger split (modulated by `neuro.state.mitosis_threshold_scale`). |

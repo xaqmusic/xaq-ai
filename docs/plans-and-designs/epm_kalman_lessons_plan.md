@@ -527,10 +527,114 @@ zero displacement, so the activity term already discounts it (bench sub-rate arm
 
 ## Stage 3 — restore lost concepts
 
-K2 `transition_surprise_kind ∈ {displacement, logprob}` from the existing `transition_counts_`,
-bounded by `log N`; the S4 ratio is the discriminating measurement. K6 true RLS in the
-predictor plus the one-tick alignment fix; S3 is the measurement, the picrawler `__pc*` arms
-the creature readout.
+Operator decision 2026-09-05: proceed, and feed the restored transition surprise to the play
+loop.
+
+### K2 — `transition_surprise_kind=logprob` (SHIPPED 2026-09-05; bench WORKING)
+
+The C++ port's transition term is a displacement between successive prototypes; the Python
+reference's was `−log P(cur|prev)`. Restored as an option on the EPM: the surprise is scored
+against the transition table as it stood before the step, Laplace-smoothed, normalised by
+`log N` to [0, 1], and **conditioned on a move** (a stay scores 0, a first arrival 1). That last
+choice is the design point: with stays in the denominator every real move looks surprising,
+and what the play loop wants to know is whether the *move* was expected. Default
+`displacement` is byte-identical (S4 reference: zero differing lines). `PlayLoop.novelty_source`
+(`tle` default, `transition_surp`, `quant_error`) lets play read it. Unit test: a three-state
+cycle with a teleport, expected moves low, the teleport at the cap, the displacement unrelated
+to either.
+
+| S4 (n = 20 paired) | displacement | logprob | logprob + `gain_kind=kalman` |
+|---|---|---|---|
+| surprise on expected moves | 1.29 | 0.68 | 0.54 |
+| surprise on teleports | 1.34 | 0.99 | 1.00 |
+| **ratio unexpected / expected** | **1.03** | **1.50 ± 0.11** | **2.36 ± 0.83** |
+| surprise within a state | 0.015 | 0.065 | 0.039 |
+| nodes / baked | 11.7 / 7.1 | 11.7 / 7.1 | 7.75 / 5.1 |
+
+The displacement is blind; the restored surprise separates the cases, and the separation
+sharpens when the vocabulary is tighter, because over-tiling spreads each real edge's counts
+across several node pairs (the B-gate lesson: finer tiling without transition statistics is
+per-token sample starvation). The two levers compose.
+
+**Creature test (2026-09-05): the study environment, 20 paired worlds, 240 s.** The report's
+finding is that play is a net cost there; the question was whether a play loop that seeks
+unexpected *moves* rather than high TLE stops being one.
+
+| arm | eats | coverage (cells) | crossings | play: climb / wander / stale | paired vs `full` (eats) |
+|---|---|---|---|---|---|
+| full composition | 0.60 | 152.2 | 9.2 | 0.0 / 0.7 / 35.1 | |
+| + logprob surprise, play on TLE | 0.70 | 150.0 | 9.3 | 0.0 / 0.7 / 35.8 | +0.10 ± 0.50 |
+| + logprob, **play on the surprise** | 0.70 | 153.1 | 9.4 | 0.0 / 0.7 / 31.5 | +0.10 ± 0.57; vs the row above **+0.00 ± 0.55** |
+| + logprob, play on the surprise, `gain_kind=kalman` cap 0.05 | 0.60 | 151.9 | 9.6 | 0.0 / 0.7 / 34.7 | −0.05 ± 0.44 |
+| composition minus play | 2.00 | 148.2 | 9.7 | | +1.40 ± 0.38, t 7.6 |
+
+**Verdict: `NULL`**, and the play-state column says why: **play's climb fraction is 0.0 in
+every arm**, the original included. In this room the play loop never climbs a novelty
+gradient; it wanders (0.7) and occasionally force-wanders (0.2), so what it is handed as
+novelty cannot matter. That is the report's §4 mechanism seen from inside the loop, and it is
+a finding about the play loop's value field, not about the surprise: the lever has no consumer
+here until climb is live. Coverage is unchanged, so the surprise does not change where the
+wander goes either. Re-use context: any consumer that acts on the surprise itself (a slow-loop
+keyframe trigger, a play loop whose climb mode fires), and a place vocabulary coarse enough
+that a transition table has counts to speak with. The one instrument this leaves behind is
+the bench's S4 ratio, which is now a real measurement (1.03 → 1.50 → 2.36) instead of a
+displacement.
+
+### K6 — `residual_align` and true `rls` in the DescendingPredictor (SHIPPED 2026-09-05; bench WORKING)
+
+Two options on the predictor, both default-off and byte-identical (S3 at defaults: 20 of 20
+seed files identical between the pre-K6 and K6 trees). `residual_align=true` pairs the
+residual published at t−1, which measures the prediction made at t−2, with the context and
+prediction from t−2 instead of t−1 (the one-tick misalignment Stage 0 found). `update_method=rls`
+is now true recursive least squares over `[context; 1]`, the Kalman filter for a static
+parameter vector, with forgetting `rls_forget`, a diffuse prior `rls_p0`, double-precision
+covariance re-symmetrised each step and a trace cap against windup; the earlier `rls` was SGD
+with a rescaled constant and no config used it. Unit test: RLS learns a fixed linear map to
+error < 0.01 in 60 ticks where SGD at its default rate is still far off.
+
+| S3 residual², n = 20 | slow rotation θ 0.15 (KF floor 0.0166, persistence 0.0232) | fast rotation θ 0.6 (KF floor 0.0178, persistence 0.0399) |
+|---|---|---|
+| SGD, legacy pairing (base) | 0.0194 | 0.0398 |
+| SGD, aligned | 0.0212 | 0.0397 |
+| **RLS, legacy pairing** | **8 × 10¹⁰ — diverges** | 0.64 — diverges |
+| **RLS, aligned** | **0.0190** | **0.0294** |
+| RLS, aligned, no forgetting | 0.0188 | 0.0303 |
+
+Three readings. **The misalignment is real, and RLS is what proves it**: an exact estimator fed
+(context, innovation) pairs one tick apart blows up, while SGD, being a small step in a rotated
+direction, tolerates it and even scores slightly better with the wrong pairing at slow rotation.
+**Aligned RLS is the Kalman-faithful predictor**: on fast dynamics it beats SGD by 26 % and
+comes within 1.65× of the Kalman floor where SGD cannot beat persistence. **The remaining gap
+to the floor is the context, not the estimator**: two noisy lags cannot reach a filter that
+uses the whole history. So the two options go together, `rls` needs `residual_align`, and the
+contract says so.
+
+**Creature test (2026-09-05): the picrawler predictive-coding arm `pc5`** (latent-autoregression
+context, residual normalisation, 800-node residual vocabulary; B v2.1's protocol: arena,
+difficulty 0, chassis collision on, 24 000 ticks, n = 6 paired) as shipped, with
+`residual_align`, and with `rls` + `residual_align`.
+
+Two things the arm's construction fixes in advance. Its residual planner (`motor_planner_pc`)
+declares no plan outputs: it is an observer, so nothing the residual path does can move the
+body, and all thirteen gait metrics came out identical to the last digit across the three arms.
+And with residual normalisation on, the published residual is unit-scale by construction, so
+`dp_err` and `dp_pn` sit at 1.00 in every arm and say nothing. What the arm can measure is the
+residual vocabulary itself, paired by seed:
+
+| residual EPM `body_pose_pc` | base | `residual_align` | `rls` + `residual_align` |
+|---|---|---|---|
+| TLE, last quarter | 0.666 | **0.632** (−0.034 ± 0.019, t −4.5, 6 of 6) | **0.638** (−0.027 ± 0.013, t −5.5, 6 of 6) |
+| TLE, whole run | 0.627 | **0.602** (−0.025 ± 0.007, t −9.8, 6 of 6) | 0.632 (tie) |
+| distinct winners, last quarter | 86.7 | **82.3** (−4.3 ± 2.9, 6 of 6) | 86.3 (tie) |
+| distinct winners, whole run | 255 | 245 (−9.5 ± 6.1, 6 of 6) | **229** (−26 ± 14, t −4.7, 6 of 6) |
+
+A better-aligned predictor leaves a residual stream the GNG quantises with less error and
+less churn, in every seed; RLS adds a large cut in whole-run churn at the price of a slightly
+higher mean error early on (its first thousand ticks are the diffuse-prior transient). Small
+effects, consistent signs. **Verdict: `PARTIAL` on the picrawler** (instrument-level, no
+behavioural primary by construction), `WORKING` on the bench. Re-use context: any config in
+which the residual vocabulary feeds a live planner; B v2.1's planner gates (self-transition
+mass, chain lift, h2 bands) are the next readout on this arm.
 
 ## Stage 4 — drift versus split
 
