@@ -53,13 +53,15 @@ ParamSchema TofAvoidLoop::params_schema() const {
             ParamValue{std::string("reality.cognitive.avoid_value")}},
         {"floor", ParamMutability::HotMutable,
             "Nearest proximity below which the loop is silent (a zero bearing and value).", ParamValue{0.05}},
+        {"emit_bearing", ParamMutability::HotMutable,
+            "true: publish the away-bearing. false: publish a ZERO bearing (the value/need unchanged) -- to a heading-reference consumer a winning loop with no bearing means RELEASE the reference so the fast proximity priors act unopposed.", ParamValue{true}},
     };
 }
 
 ParamMap TofAvoidLoop::current_params() const {
     ParamMap m;
     m["prox_topic"] = ParamValue{prox_topic_}; m["output_topic"] = ParamValue{output_topic_};
-    m["value_topic"] = ParamValue{value_topic_}; m["floor"] = ParamValue{double(floor_)};
+    m["value_topic"] = ParamValue{value_topic_}; m["floor"] = ParamValue{double(floor_)}; m["emit_bearing"] = ParamValue{emit_bearing_};
     return m;
 }
 
@@ -70,12 +72,14 @@ void TofAvoidLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "output_topic", [&](auto const& v){ output_topic_ = get_string(v,"output_topic"); });
     apply_param(params, "value_topic",  [&](auto const& v){ value_topic_  = get_string(v,"value_topic"); });
     apply_param(params, "floor",        [&](auto const& v){ floor_        = float(get_double(v,"floor")); });
+    apply_param(params, "emit_bearing", [&](auto const& v){ if (auto b = std::get_if<bool>(&v)) emit_bearing_ = *b; });
     sub_ids_.push_back(bus_->subscribe(prox_topic_, SubscriptionKind::Direct,
         [this](std::string_view, MessagePtr p){ handle_prox(p); }));
 }
 
 void TofAvoidLoop::on_param_change(std::string_view key, ParamValue const& value) {
     if (key == "floor") floor_ = float(get_double(value, "floor"));
+    else if (key == "emit_bearing") { if (auto b = std::get_if<bool>(&value)) emit_bearing_ = *b; }
     else throw std::invalid_argument("TofAvoidLoop: param '" + std::string(key) + "' is construction-only / unknown");
 }
 
@@ -105,7 +109,9 @@ void TofAvoidLoop::tick(uint64_t tick_id) {
     }
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = id_.empty() ? std::string("avoid") : id_; out->sensor = "avoid_bearing";
-    out->values = Eigen::VectorXf::Zero(3); out->values[0] = cx_; out->values[1] = cy_; out->values[2] = value_;
+    out->values = Eigen::VectorXf::Zero(3);
+    if (emit_bearing_) { out->values[0] = cx_; out->values[1] = cy_; }
+    out->values[2] = value_;
     bus_->publish(output_topic_, out);
     auto v = std::make_shared<ProprioToken>();
     v->tick_id = tick_id; v->producer_id = out->producer_id; v->sensor = "avoid_value";

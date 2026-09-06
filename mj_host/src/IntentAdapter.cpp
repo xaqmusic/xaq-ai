@@ -110,6 +110,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (pb->values.size() >= 2) {
             const double cx = pb->values[0], cy = pb->values[1];
             if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); ++play_steers_; last_steer_ = (g_avoid > 0.5) ? 2 : 1; if (g_avoid > 0.5) ++avoid_steers_; }
+            else if (g_avoid > 0.5 || g_play > 0.5) { heading_ref_ = heading_; ++play_steers_; last_steer_ = (g_avoid > 0.5) ? 2 : 1; if (g_avoid > 0.5) ++avoid_steers_; }   // a winner with NO bearing releases the reference: no direction held, the reflex acts
         }
     }
     // Wander: boredom is the map's surprise sitting below 0.8 of its own long average

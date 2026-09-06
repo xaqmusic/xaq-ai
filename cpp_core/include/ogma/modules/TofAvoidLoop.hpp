@@ -51,6 +51,12 @@ private:
     std::string output_topic_ = "percept.avoid_bearing";
     std::string value_topic_  = "reality.cognitive.avoid_value";
     float floor_ = 0.05f;      // below this nearest proximity the loop is silent (a zero bearing)
+    // emit_bearing=false: publish a ZERO bearing (the value still carries the need).  To a
+    // consumer that holds a heading reference, a winning loop with no bearing means RELEASE
+    // the reference (no direction held) -- so the fast proximity priors act unopposed.  The
+    // slow heading regulator cannot avoid a wall at walking speed (measured: no side response
+    // at 0.5-4 s); the reflex can, if nothing holds a direction against it.
+    bool  emit_bearing_ = true;
     float left_ = 0.0f, ahead_ = 0.0f, right_ = 0.0f, tooclose_ = 0.0f;
     bool  have_ = false;
     float cx_ = 0.0f, cy_ = 0.0f, value_ = 0.0f;

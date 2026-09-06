@@ -25,3 +25,11 @@ TEST(TofAvoidLoop, BlockedAheadTurnsInPlaceTowardTheFreerSide) {
     Fix f; f.run(0, {0.3f, 0.95f, 0.5f, 0.5f});          // blocked ahead, right nearer → turn left, little forward
     EXPECT_LT(f.m.last_cx(), 0.0f); EXPECT_LT(f.m.last_cy(), 0.4f * std::fabs(f.m.last_cx())) << "mostly a turn, little forward"; EXPECT_NEAR(f.m.last_value(), 0.95f, 1e-6f);
 }
+TEST(TofAvoidLoop, EmitBearingFalsePublishesTheNeedWithNoDirection) {
+    ogma::InProcessBus bus; ogma::TofAvoidLoop m; m.set_id("avoid"); m.on_setup(&bus, {{"emit_bearing", false}});
+    bus.begin_tick(0); bus.publish("reality.proprio.tof", pv({0.8f, 0.1f, 0.0f, 0.0f})); m.tick(0); bus.end_tick();
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus.last_value("percept.avoid_bearing"));
+    ASSERT_TRUE(tok); EXPECT_FLOAT_EQ(tok->values[0], 0.0f); EXPECT_FLOAT_EQ(tok->values[1], 0.0f); EXPECT_NEAR(tok->values[2], 0.8f, 1e-6f);
+    auto val = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus.last_value("reality.cognitive.avoid_value"));
+    ASSERT_TRUE(val); EXPECT_NEAR(val->values[0], 0.8f, 1e-6f);
+}
