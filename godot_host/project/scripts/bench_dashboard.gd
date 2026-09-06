@@ -47,6 +47,7 @@ var _avg_started := -1
 var _avg: Dictionary = {}              # last completed 1 s means
 const UI_FONT := 12
 const TOP_H := 84                      # top bar height the side panels hang from
+const INA_A4_TOL_V := 0.15             # BOM 3.4: ~1 % on the 20K/10K divider is ordinary
 var _cal_content: Control
 var _cal_min_btn: Button
 var _cal_min := false
@@ -70,6 +71,8 @@ var _check_lbls: Dictionary = {}
 var _status_lbl: Label
 var _widen_lbl: Label
 var _tick_meter: Control
+var _power_graph: Control
+var _power_seq := -1              # _update_labels runs per FRAME; the graph wants per SAMPLE
 var _video: Node                     # VideoClient — receive-only, see VideoClient.hpp
 var _view_tex: TextureRect           # what the CAMERA sees
 var _brain_tex: TextureRect          # what the BRAIN sees (the encoder's actual input)
@@ -168,12 +171,18 @@ func _build_ui() -> void:
 	_tele_min_btn = Button.new(); _tele_min_btn.text = "▼"; _tele_min_btn.custom_minimum_size.x = 26
 	_tele_min_btn.pressed.connect(_on_tele_min); lhdr.add_child(_tele_min_btn)
 	var lv := VBoxContainer.new(); lroot.add_child(lv); _tele_content = lv
-	for key in ["vbat", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
+	for key in ["vbat", "power", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
 		var l := _lbl(key + ": —"); _tele_lbls[key] = l; lv.add_child(l)
 		if key == "cost":
 			_tick_meter = (load("res://scripts/tick_meter.gd") as Script).new()
 			_tick_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			lv.add_child(_tick_meter)
+		# Sits directly under vbat: the pair is the diagnostic. Sag without draw is a
+		# tired pack; draw without sag is a healthy one. Either alone is ambiguous.
+		if key == "power":
+			_power_graph = (load("res://scripts/current_graph.gd") as Script).new()
+			_power_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lv.add_child(_power_graph)
 	lv.add_child(_lbl(" "))
 	lv.add_child(_lbl("BOOT SELF-CHECK  (SPEC §6)", 13))
 	for item in ["0x14 present", "Vbat plausible 6.0–8.4 V", "IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
@@ -297,6 +306,40 @@ func _fmt_ms(ms: float) -> String:
 	if ms >= 1.0: return "%.2f ms" % ms
 	if ms >= 0.001: return "%.1f µs" % (ms * 1000.0)
 	return "%.0f ns" % (ms * 1000000.0)
+
+
+# Whole-robot current (BOM §3). Instrument only — nothing in the brain consumes it yet.
+func _update_power_row() -> void:
+	var ina_v: Variant = _tele.get("ina")
+	if not (ina_v is Dictionary) or not bool((ina_v as Dictionary).get("ok", false)):
+		_tele_lbls["power"].text = ("power: —   (no INA219, or a daemon that predates it)"
+			if ina_v == null else "power: INA219 not reading")
+		_tele_lbls["power"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		return
+	var ina: Dictionary = ina_v
+	var amps := float(ina.get("i_a", 0.0))
+	var ema := float(ina.get("i_ema", 0.0))
+	var peak := float(ina.get("i_peak", 0.0))
+	var charging := bool(ina.get("charging", false))
+	var busy := bool(_tele.get("pose_move_active", false)) or bool(_tele.get("rescue_active", false))
+	# Push once per telemetry frame, not once per rendered frame: at 60 fps against a
+	# 10 Hz daemon the trace would be six copies of every sample and the window would
+	# cover 10 s while claiming 60.
+	var seq := int(_tele.get("seq", -1))
+	if _power_graph and seq != _power_seq:
+		_power_seq = seq
+		_power_graph.push(amps, ema, peak, charging, busy)
+	# Spent energy belongs on the label, not the graph: it only ever rises, so as a
+	# trace it would say nothing, while as a number it is the budget itself.
+	_tele_lbls["power"].text = "power: %+.3f A  %.3f V   spent %.3f kJ / %.1f A·s%s" % [
+		amps, float(ina.get("v", 0.0)),
+		float(ina.get("energy_j", 0.0)) / 1000.0, float(ina.get("charge_as", 0.0)),
+		"   CHARGING" if charging else ""]
+	var col := Color(0.9, 0.9, 0.9)
+	if charging: col = Color(0.55, 0.95, 0.55)
+	elif amps >= 3.0: col = Color(1, 0.3, 0.3)
+	elif amps >= 2.25: col = Color(1, 0.85, 0.4)
+	_tele_lbls["power"].add_theme_color_override("font_color", col)
 
 
 func _update_cost_rows() -> void:
@@ -619,6 +662,7 @@ func _update_labels() -> void:
 		_tele_lbls["deadman_ms_left"].text = "deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))
 		_tele_lbls["age"].text = "frame seq %s   age %d ms (1 s mean)" % [str(_tele.get("seq", "—")), int(_avg.get("age", 0.0))]
 	_update_cost_rows()
+	_update_power_row()
 	_tele_lbls["overruns"].text = "overruns: %s   bus_errors: %s" % [str(_tele.get("overruns", "—")), str(_tele.get("bus_errors", "—"))]
 	_tele_lbls["watchdog_trips"].text = "watchdog_trips: %s   low_battery: %s   pi_throttled: %s" % [str(_tele.get("watchdog_trips", "—")), str(_tele.get("low_battery", "—")), str(_tele.get("pi_throttled", "—"))]
 	_tele_lbls["armed_ch"].text = "armed_ch: %s   rescue_pose: %s" % [str(_tele.get("armed_ch", "—")), str(_tele.get("rescue_pose", "NONE"))]
@@ -629,7 +673,19 @@ func _update_labels() -> void:
 	# self-check
 	_set_check("0x14 present", _tele_fresh(), "live" if _tele_fresh() else "no telemetry")
 	_set_check("Vbat plausible 6.0–8.4 V", _tele_fresh() and vbat >= VBAT_MIN and vbat <= VBAT_MAX, "%.2f V" % vbat)
-	for item in ["IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
+	# INA219 ⟷ A4 — two independent paths to one number, so a disagreement is a real
+	# fault rather than a calibration opinion. Same 150 mV gate `hat_tool ina probe`
+	# exits non-zero on (BOM §3.4). The other three are still genuinely unfitted.
+	var chk_ina: Variant = _tele.get("ina")
+	if chk_ina is Dictionary and bool((chk_ina as Dictionary).get("ok", false)):
+		var iv := float((chk_ina as Dictionary).get("v", 0.0))
+		var dv := iv - vbat
+		_set_check("INA219 ⟷ A4 agree", _tele_fresh() and absf(dv) < INA_A4_TOL_V,
+			"%.3f V vs %.3f V   Δ%+.3f V" % [iv, vbat, dv])
+	else:
+		_check_lbls["INA219 ⟷ A4 agree"].text = "○ INA219 ⟷ A4 agree — not fitted"
+		_check_lbls["INA219 ⟷ A4 agree"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	for item in ["IMU WHO_AM_I = 0xEA", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
 		_check_lbls[item].text = "○ %s — not fitted" % item
 
 	# rows: reflect the daemon's view of each channel
