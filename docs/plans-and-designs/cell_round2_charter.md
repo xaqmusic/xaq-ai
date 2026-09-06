@@ -183,10 +183,15 @@ ticks, the lesion over the middle third; food relocation is built in):
   by the window's end): **no effect during the window** (12.3 vs 12.0 m) — the map and the
   steering share the same drifting frame and stay self-consistent — and **the damage appears
   after it**: when the published heading snaps back, the memory built during the drift is
-  misregistered and eats fall to 0.33 against the control's 0.58 in the post phase. Paired,
-  the in-window approach contrast is a clean null (+0.32 m, sd 2.82, t 0.4); the post-phase
-  eats contrast, paired by world, carries the finding and is being read. This is the compass
-  scaffold (register O8) showing itself where predicted: in the memory, not the approach.
+  misregistered and the post-phase eats read 0.33 against the control's 0.58 — **but paired
+  by world that is −0.25 eats, sd 1.36, t −0.6, 3+/3−: a null at n = 12.** Both contrasts are
+  null: the in-window approach (+0.32 m, sd 2.82, t 0.4) because the map and the steering
+  share the drifting frame, the post-window memory because the effect, if any, is inside the
+  noise of twelve worlds. **Verdict `NULL` for this drift:** the two-loop brain is insensitive
+  to a slow compass drift of this size. The scaffold's drift-freeness was not shown to be
+  load-bearing here; re-use context: a persistent bias (not one that snaps back), a larger
+  drift, or the vocabulary map (A5), whose panorama half can re-anchor a drifted frame and
+  whose grid half cannot — the comparison that would name the scaffold by contrast.
 
 ## What round 2 hands the duck
 

@@ -97,6 +97,15 @@ mistakes** REPORTS.md §5 keeps out of reports.
 
 ### Regime notes
 
+- **2026-09-06, the (d) battery on the two-loop brain (far-food, n = 12 varied worlds, the
+  lesion over the middle third, paired by world):** scent noise (σ 0.05) — approach +1.47 m
+  worse than the control at the lesion phase (sd 2.32, t 2.2, 8+/4−), level afterwards: the
+  scent sense is load-bearing and the loop recovers (`WORKING` as a (d) signature, signal
+  power). Heading drift (random walk, ≈ 40° by the window's end) — in-window approach +0.32 m
+  (t 0.4), post-window eats −0.25 (sd 1.36, t −0.6): **`NULL`**; a slow compass drift that
+  snaps back does not touch this brain at this power. Re-use: a persistent bias, or the
+  grid-vs-vocabulary maps compared under drift.
+
 - **2026-09-06, the transfer room (R-B, the L-bend, n = 20 varied worlds):** two-loop brain
   2.10 eats vs the four-loop brain 0.95 (paired +1.15, sd 1.66, t 3.1, 13+/3−; food distance
   −2.73 m, t −3.0; eats after the relocation +0.80, t 2.7). Specialist 2.10 (= the two-loop
