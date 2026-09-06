@@ -667,9 +667,20 @@ Kalman estimate, and that is a large gain in estimate quality on clustered data.
 drift a correction every fifty visits is a poor tracker next to Stage 1's continuous gain
 (÷1.18 against ÷5.9), as it should be. `WORKING` on the bench, as re-centring.
 
-**Creature test in flight:** the picrawler `body_pose` / `body_pose_t` EPMs with the gatekeeper
-and drift on, corridor n = 6 paired against `j1s4`. The named risk: a baked pose prototype that
-moves under the planner reading it.
+**Creature test (2026-09-05): the picrawler `body_pose` / `body_pose_t` EPMs with the gatekeeper
+and drift 0.5 on, corridor 12 000 ticks, n = 6 paired against `j1s4`.** Walkers 6/6, falls 1 vs 1,
+tilt tie. net_z 7.39 → 6.40 (−0.99 ± 2.56, 3 of 6 each way), straight 0.62 → 0.52 (−0.10 ± 0.23),
+flat_v +0.003 ± 0.005, scrub −0.003 ± 0.004 (better, 4 of 6), inter-leg coherence 0.512 → 0.493
+(−0.018 ± 0.024, t −1.9, worse in 5 of 6), step_cv +0.023 ± 0.057. Pose-vocabulary turnover
+fell (whole-run winner ids 45.8 → 41.0), so the correction was live. **Verdict: `NULL`, leaning
+negative**: nothing resolvable either way, with the coherence trend being the mild signature of
+the named risk, a baked pose vocabulary shifting under the planner that reads it. The
+re-centring that improves estimates on clustered data has no consumer on this body that
+benefits from a better-centred pose prototype, and one that mildly dislikes a moving one.
+Re-use context: a stationary-vocabulary consumer (a Level-N EPM, a place map) where the
+after-the-fact re-centring is pure gain, the same context as Stage 1's uncapped schedule.
+
+**The campaign's four stages are complete.**
 
 ---
 
