@@ -58,6 +58,11 @@ public:
     // the heading prior turns the body.  Novelty holds the heading.  0 = off.
     void set_wander(double bored_s, double turn_deg, uint64_t seed);
     int wander_turns() const { return wander_turns_; }
+    // R27 (2026-09-06, §17.3 fork (a)): a loop in the graph that publishes an egocentric bearing
+    // on percept.play_bearing ([cx = +right, cy = +forward], the Cell's PlayLoop) sets the heading
+    // reference behind sense slot 10 each tick -- novelty becomes a direction.  By absence: a
+    // graph without such a loop is byte-identical (the reference stays the slow running average).
+    int play_steers() const { return play_steers_; }
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
 
@@ -87,6 +92,7 @@ private:
     double map_tle_long_ = 0.0; int bored_ticks_ = 0; int wander_turns_ = 0;
     uint64_t wander_rng_ = 0x9E3779B97F4A7C15ull;
     bool have_yaw_ = false;
+    int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
 };
 
 }  // namespace mjhost

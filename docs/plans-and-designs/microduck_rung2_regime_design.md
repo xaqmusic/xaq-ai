@@ -1219,3 +1219,36 @@ is inert here (`NULL`), and where it fired it bought nodes with wall contacts. W
 called the arbitration question now has its measured shape: R26 already has coverage and
 avoidance in one body without a wander rule; what it lacks is a *reason to go somewhere*
 (a drive with reach), which is the Cell recipe's pragmatic loop, not a heading jump.
+
+### 17.6 R27 — the fork's (a): novelty as a direction, the Cell's play loop over the map (2026-09-06)
+
+The operator's choice of the two §17.3 forks: a "where to go" belief on the map before any
+arbitration. Built as the Cell recipe's own loop: `PlayLoop` in the level-2 graph reads the
+map EPM's winner as its place (`pi_cell_size 0`), climbs the place-TLE novelty field
+(`wander_stall_ticks 0`, the Cell's A2, so the climb engages), and publishes an egocentric
+bearing; the `IntentAdapter` now publishes the unwrapped heading and the body velocity as
+`reality.proprio.heading` / `vel_ego`, and sets the heading reference behind sense slot 10
+from that bearing every tick when the topic exists (by presence: a graph without the loop is
+byte-identical). No new module; the loop the Cell dropped because it cost eats is the loop
+the duck wants, because coverage is the duck's goal. Config `a1v2_r27_l2_play_heading.json`,
+rank 1027.
+
+| n = 6, paired | walls/min | cells | span | map nodes | (d) moved wall: cells before \| after | walls before \| after | nodes before \| after |
+|---|---|---|---|---|---|---|---|
+| R26 | 26 ± 35 | 30 ± 19 | 1.9 m² | 35 ± 18 | 29 \| 27 | 47 \| 29 | 31 \| 28 |
+| **R27** | 9 ± 9 (Δ −16, t −1.1) | **42 ± 18** (Δ +12, t 1.7, 4+/1−) | 2.3 m² | 29 ± 13 | 37 \| 64 ± 69 (one seed leaves through the gap) | 13 \| **253 ± 143** (Δ +130, t 2.8) | 22 \| **49** (Δ +14, t 2.2, 5+/1−) |
+
+The loop steers on every tick (the host's own count). In the steady arena it is a `PARTIAL`
+at six seeds in the right direction on both blind-metric complements: more coverage with
+fewer contacts, five of six seeds touring, one still orbiting. Under the moved wall the
+(d) bar's re-inference half is now present — the map grows by half after the change,
+which R26's never did — and safety collapses: the novel region is where the wall now
+stands, the play bearing drives the body at it, and contacts go from 13 to 253 per minute
+while R26's fall. **A learned direction beats the proximity priors when the two conflict.**
+That is §17.4's item 2 in measured form, with a learned direction in place of a boredom
+jump: avoidance and novelty each have a bearing now, and the body has no arbitration
+between them but a linear pull on one C matrix. The Cell recipe's arbitration (need ×
+competence over loops with bearings; `LoopCompetence` → `LateralVoter` → `EFEArbiter`
+precision mode, all gain-0) is the next lever, with avoidance made a loop that emits a
+bearing rather than a prior in the matrix. Scene note again: the shifted wall leaves a gap
+one seed escapes through; the (d) metric must clip to the arena or the scene must close.

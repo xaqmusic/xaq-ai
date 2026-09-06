@@ -80,11 +80,24 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                       unit(map_tle_),                    // slot 11: the map's surprise — novelty
                       tof[0], tof[1], tof[2], tof[3]});
     if (place) publish("place_in", std::vector<float>(place->begin(), place->end()));
+    // The Cell recipe's two egocentric inputs, for a loop that plans over the map: the unwrapped
+    // heading and the body velocity as [lateral, forward] in command units.  Nothing in the
+    // level-0..2 graphs reads them; a graph that does (R27's PlayLoop) is a new arm.
+    publish("heading", {float(heading_)});
+    publish("vel_ego", {unit(vel_body[1] / kTwistRangeVy), unit(vel_body[0] / kTwistRangeVx)});
 
     instance_->tick();
     inspector_->publish_tick(tick_id_);
     if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.proprio.place"))) {
         map_tle_ = rt->tle; map_novel_ = rt->is_novel; map_winner_ = rt->winner_id;
+    }
+    // R27: a loop's bearing becomes the heading reference (cx = +right is a clockwise turn, i.e.
+    // a negative yaw in the odometry's right-handed frame).  Absent loop -> nothing happens.
+    if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("percept.play_bearing"))) {
+        if (pb->values.size() >= 2) {
+            const double cx = pb->values[0], cy = pb->values[1];
+            if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); ++play_steers_; }
+        }
     }
     // Wander: boredom is the map's surprise sitting below 0.8 of its own long average
     // (τ 3000 ticks) — self-scaled, no constant tuned to the signal — for bored_s.
@@ -169,6 +182,7 @@ int IntentAdapter::map_nodes() const {
 
 std::vector<std::string> IntentAdapter::diagnostics() const {
     std::vector<std::string> out;
+    if (play_steers_ > 0) out.push_back("play-heading: " + std::to_string(play_steers_) + " ticks steered by percept.play_bearing");
     for (auto* m : instance_->modules()) {
         const auto d = m->diag_lite();
         if (!d.is_null() && !d.empty()) out.emplace_back(std::string(m->id()) + " " + d.dump());
