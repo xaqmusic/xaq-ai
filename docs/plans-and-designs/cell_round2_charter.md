@@ -82,14 +82,65 @@ the food has moved no pragmatic loop has reach (klino's eat-calibrated capabilit
 planner's route value are both near zero), the need gate opens fully, and novelty-seeking
 steers away from the visited places the alternating food returns to. The units lever gives
 the planner the motor when it has a route; the vocabulary lever gives it more to route over;
-neither gives a hungry body with a memory a policy whose reach survives the site's temporary
-emptiness (the planner's `disconfirm` erodes the memory on arrival at an empty site).
+neither gives a hungry body with a memory the motor while play is in the race. (Measured on
+the v1-klino base; the study-brain base below shows the memory itself works: without play
+the planner returns to the relocated food on 14 of 20 runs.)
 
 The panorama check (register V4) stands beside this: the panorama carries 8–10 principal
 dimensions to 90 % of its variance and 150–158 distinct values per run, while the place
 vocabulary reading it ends at 10–19 nodes of an allowed 40. The insertion gate, not the
 input, sets the vocabulary's size; if the stack under-tiles at n = 20, the conditioning pass
 (`min_insertion_error`, `dim_autocal_ticks`) precedes any verdict on the map.
+
+## Round 3 — the arbitration for a hungry body with a memory (in flight)
+
+Operator's direction (2026-09-06): try precision-weighted arbitration; if it does not work,
+drop the play loop ("play saturates in these small environments and homeokinesis in the
+other loops may already be serving that role").
+
+**Faithfulness catch first.** The round-2 base's klino was `RunTumbleNav` (v1); the study
+brain and the specialist run `RunTumbleNavV2`. Every far-food number above is a weaker
+composition against the stronger reflex (CLAUDE.md §3.2 check 6). The base is rebuilt from
+the study brain's sixteen modules (`the_cell_route_far_pillars.json`; the old one kept as
+`_v1klino.json`), the A5 arm regenerated, and base / no-play / A2 / the stack re-run at
+n = 20. `cell_liveness.py` now prints the module graph.
+
+**The study brain in the far-food arena, n = 20 varied worlds, falloff 2.0 (2026-09-06):**
+
+| arm | eats | vs specialist (2.80) | vs floor (1.60) | decisions |
+|---|---|---|---|---|
+| base (four loops, efe) | 1.50 | −1.30, sd 1.98, t −2.9 | −0.10, tie | play 0.89 |
+| **no play** (`play_weight 0`) | **2.45** | −0.35, sd 1.93, t −0.8 — **a tie** | **+0.85, sd 1.95, t 2.0, 12+/5−**; food distance −1.70 m, t −3.1 | planner 0.61, klino 0.39; returns after the relocation on 14 of 20 runs |
+| A2 (latch off) | 1.55 | −1.25, t −3.1 | −0.05, tie | play 0.92 |
+| A5+A4+A2 (the stack) | 1.30 | −1.50, t −3.2 | −0.30 | play 0.90 |
+
+The composition's memory works: without play, the planner takes the motor when hungry,
+returns to the relocated food on 14 of 20 runs, beats the gradient-blind floor and ties the
+reflex in the regime built to favour memory. With play present it forages at chance, and no
+repair of play, units or map changes that while play holds nine decisions in ten. The
+v1-klino base had hidden this (its no-play arm read 1.05): the weaker chemotaxis module
+could not earn the first eats the planner's memory is built from.
+
+**The fallback on the v1-klino base (n = 20)** read no play 1.05 vs base 1.30 — below the
+floor. On the study-brain base (above) it reads 2.45: the fallback works, and it sets the
+bar the precision lever must reach with play *present* — silence play when hungry as well
+as removing it does.
+
+**The lever: `EFEArbiter.scoring_mode = precision`** (default unchanged; 33/33 arbiter
+tests). Each loop's own bearing stream is coarse-grained by a per-loop EPM
+(`reality.loop.<klino|planner|play|vision>`), a `LateralVoter` at level 1 grades them
+(trust `1/(tle+ε)`, informativeness-gated; `activity_gain` 0 in the first form because a
+committed straight route is steady, not frozen), and the arbiter selects by **preference
+precision × trust**: hunger for the pragmatic loops, `play_weight × (1 − hunger)` for play,
+with the shared hysteresis. Selection, not averaging (recipe §4). Wrong-sign control:
+`precision_sign −1` scores by distrust and must regress. Arms at n = 20 on the study-brain
+base: `r3_precision`, `r3_wrongsign`, `r3_activity` (the voter's activity term on). Config
+`the_cell_route_far_pillars__r3_precision.json`.
+
+What "works" means (§3.3, loud): the composition's eats and time-to-return move toward the
+specialist's on the same twenty worlds, with the planner taking the motor when hungry with
+a route and the wrong-sign arm regressing. If it does not, the play loop is dropped from the
+composition and the two-loop (klino + planner) brain is the recipe's Cell instance.
 
 ## What round 2 hands the duck
 

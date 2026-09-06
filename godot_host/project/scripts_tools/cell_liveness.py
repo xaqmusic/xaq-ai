@@ -79,6 +79,7 @@ def main() -> int:
                      "play": float(ap_.get("play_weight", 0.0)) > 0 and bool(ap_.get("play_value_topic", "")),
                      "vision": float(ap_.get("vision_weight", 0.0)) > 0 and bool(ap_.get("vision_value_topic", ""))}
     planner_epi = bool(ap_.get("planner_epistemic", True))
+    precision_mode = ap_.get("scoring_mode") == "precision"   # round 3: no epistemic G terms by construction
 
     # ---- stream ----
     seed_line = None
@@ -133,6 +134,8 @@ def main() -> int:
         else:          tag = "FAIL"; fails += 1
         print(f"  {tag}  {name:<28} {detail}")
     print(f"liveness: {a.config}  {a.duration}s  arm={overrides or '{}'}  diag samples {diag_lines} (one per second)  eats {eats}  rc {rc}")
+    # the module graph, read not assumed (2026-09-06: a base whose klino was v1 instead of the study's V2 went unnoticed for a battery)
+    print("  graph  " + ", ".join(f"{m['id']}:{m['type']}" for m in cfg.get("modules", [])))
     line("run", diag_lines > 0, f"{diag_lines} diag lines" + ("" if diag_lines else f"; stderr: {err.strip().splitlines()[-2:]}"))
     line("world seed", seed_line is not None, f"seed/obs_seed {seed_line}" if seed_line else "no TheCell seed line found")
     for ex in a.expect:
@@ -159,10 +162,10 @@ def main() -> int:
             line(f"arbiter {n} wins", win[i] > 0, f"{win[i]}/{arb_ticks} samples"
                  + ("  (no eat yet: the planner has nothing to route to)" if n == "planner" and eats == 0 else "")
                  + ("  (food never in view)" if n == "vision" and hfood == 0 else ""), weak=weak)
-        for k, n in (("gpk", "klino pragmatic"), ("gek", "klino epistemic")):
-            line(f"G {n}", gterms[k] > 0, f"max |G| {gterms[k]:.3f}")
+        line("G klino pragmatic", gterms["gpk"] > 0, f"max |G| {gterms['gpk']:.3f}")
+        line("G klino epistemic", None if precision_mode else gterms["gek"] > 0, f"max |G| {gterms['gek']:.3f}" + ("  (precision mode: no epistemic terms)" if precision_mode else ""))
         line("G planner pragmatic", gterms["gpp"] > 0, f"max |G| {gterms['gpp']:.3f}" + ("  (no eat yet)" if eats == 0 else ""), weak=(eats == 0))
-        line("G planner epistemic", (gterms["gep"] > 0) if planner_epi else None, f"max |G| {gterms['gep']:.3f}" + ("" if planner_epi else "  (planner_epistemic false in config)"))
+        line("G planner epistemic", None if (precision_mode or not planner_epi) else gterms["gep"] > 0, f"max |G| {gterms['gep']:.3f}" + ("" if planner_epi and not precision_mode else "  (off by mode/config)"))
         if loops_enabled["play"]:   line("G play", gterms["gepl"] > 0, f"max |G| {gterms['gepl']:.3f}")
         if loops_enabled["vision"]: line("G vision", gterms["gvi"] > 0, f"max |G| {gterms['gvi']:.3f}" + ("  (food never in view)" if hfood == 0 else ""), weak=(hfood == 0))
         line("planner route scored", rp_pos > 0, f"raw planner value > 0 on {rp_pos}/{arb_ticks} samples" + ("  (no eat yet)" if eats == 0 else ""), weak=(eats == 0))

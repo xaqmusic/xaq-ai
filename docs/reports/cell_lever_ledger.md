@@ -87,6 +87,9 @@ mistakes** REPORTS.md §5 keeps out of reports.
 | **A3 — the planner's epistemic term on** (`EFEArbiter.planner_epistemic=true`) | same, n = 6 at falloff 6.0 and 2.0 | **`NULL`** — the falloff-6.0 signal (eats 1.7 → 2.7, Δ +1.0, sd 1.9) did not replicate at 2.0 (1.0 → 0.8, Δ −0.17, sd 1.33) although the planner's share of decisions rose both times (0.056 → 0.288; 0.029 → 0.438). A normalised epistemic term buys the planner the motor, not eats: what it routes over (the grid, the food memory) is the limit. | With the vocabulary map; and as the term the play plan moved out of the planner (register O7). |
 | **A4 — the planner's reach peak-normalised** (`EFEArbiter.pragmatic_norm=planner_peak`; default `none`, byte-identical; 31/31 arbiter tests) | far-food arena + pillars, falloff 2.0, n = 6 paired | **`NULL` alone** — the planner's share of decisions 0.029 → 0.075, and the eats are identical on all six worlds ([2,0,1,1,0,2]): the decisions it added came after the eats that occurred. Built after A1's null located the crowding in the arbiter's units (audit V6); the first form (every reach by its own peak) failed its own test (a constant weak scent read as full reach for klino). | With the vocabulary map (the A5 stack, below), where the planner has more to route over. |
 | **A5 — the EPM-native place map** (`PlaceVectorBuilder` → `epm_place` 48-D → play/planner at `pi_cell_size 0`; `the_cell_route_far_pillars__a5_epm_map.json`) | far-food arena + pillars, falloff 2.0, n = 6 paired (n = 20 on the stack in flight) | **alone: mixed** — eats 1.0 → 1.33 (+0.33, sd 1.37) with food distance *worse* on 6 of 6 worlds (+1.17 m, t 3.4); the vocabulary holds ~19 nodes and rarely grows (stale ~700 samples). **Stacked A5+A4: +0.67 (sd 1.86, 4+/2−); A5+A4+A2: +0.50 (sd 0.84, 2+/0−, four ties), the planner's share 0.029 → 0.123, return legs 3 of 6.** **n = 20 on the stack A5+A4+A2: 1.35 vs 1.30, Δ +0.05, sd 1.05, t 0.2, 7+/5− — `NULL`; the n = 6 trend was noise.** The vocabulary held 17.6 nodes and rarely grew (the insertion-gate collapse, audit V4); the conditioning pass precedes any second attempt. Liveness 2026-09-06 (120 s): the vocabulary holds 16 baked nodes, top winner 0.22 (against the base's 8 nodes / 0.55), play has a novelty route on 62 of 121 samples (base 30) — and climbs on none, because the stall latch counts *vocabulary* growth, rarer than grid growth; the planner scores routes on 51 samples and wins none without A4. So A5 is measured alone and stacked (A5+A4, A5+A4+A2). | — |
+| **no play** (`EFEArbiter.play_weight=0`, the operator's fallback) | far-food arena + pillars, falloff 2.0, n = 20 | **v1-klino composition:** 1.05 vs base 1.30, below the floor (a weaker chemotaxis module cannot earn the first eats the memory is built from). **Study-brain composition: `WORKING` — 2.45 vs base 1.50 (+0.95); beats the gradient-blind floor (+0.85, sd 1.95, t 2.0, 12+/5−; food distance −1.70 m, t −3.1) and ties the specialist (−0.35, sd 1.93, t −0.8); the planner takes 0.61 of decisions and the body returns to the relocated food on 14 of 20 runs.** The memory works; play is the cost. | The bar the precision lever must reach with play present. |
+| **the study brain in the far-food arena** (the corrected base, n = 20) | falloff 2.0, pillars | base 1.50 (ties the floor 1.60; 1.30 below the specialist 2.80, t −2.9); A2 1.55 (`NULL`); the stack A5+A4+A2 1.30 (`NULL`, Δ −0.20 ± 1.64). The v1-klino numbers above are superseded for any composition-vs-specialist claim. | — |
+| **R3 — precision-weighted arbitration, first form** (`EFEArbiter.scoring_mode=precision`; per-loop EPMs → `LateralVoter` level 1 with the fusion testbed's `informativeness_gain 1.0` → preference × trust selection) | study-brain base, far-food + pillars, falloff 2.0, n = 20 | **`NULL` — uninterpretable as built:** 1.95 eats vs base 1.50 (+0.45, sd 1.23, t 1.6; food distance better on 16 of 20) but **indistinguishable from its wrong-sign control** (1.90; planner 0.0 of decisions in both, klino 0.19 / play 0.81 in both) and below the no-play bar (2.45, Δ −0.50, t −1.4). The planner never wins because the voter's informativeness gate, built to strip a dead sensor whose vocabulary never grows, strips a policy whose bearing is steady or zero most of the time — steadiness is a virtue in a policy, a defect in a sensor. `activity_gain 1.0` produced identical runs (the planner already at zero trust). The +0.45 over the base is klino winning more (0.19 vs 0.05), not the mechanism. | The faithful form: pure `1/(tle+ε)` trust (`informativeness_gain 0`), in flight with its wrong-sign control. |
 | **A0 — the harness itself** (legacy vs repaired seeding) | study room, full / no-play / gate + the specialist, n = 20 each | legacy arm reproduces the Kalman-campaign numbers exactly (full 0.6 / no-play 2.0 / specialist 1.9). **Repaired seeding** (20 distinct worlds, every RNG varied): specialist 2.30, full 0.75, no-play 1.65, gate-off 0.60; full − no-play −0.90 ± 1.48 (t −2.7) vs −1.40 ± 0.82 (t −7.6) legacy; no-play − specialist −0.65 ± 1.84 (t −1.6). **The report's directions stand at about two-thirds the effect and twice the spread; the no-play tie becomes a non-significant trend below the specialist.** | Every prior Cell number is a one-world number; cite the repaired ones from here on. |
 
 ### Regime notes
@@ -94,10 +97,13 @@ mistakes** REPORTS.md §5 keeps out of reports.
 - **2026-09-06, the finding at n = 20 (varied worlds, falloff 2.0):** specialist 2.80 eats,
   gradient-blind floor 1.60 (the specialist beats it by 1.20, t 2.5, returning after the
   relocation on 16 of 20 runs against 8), the composition 1.30 (ties the floor; 1.50 below the
-  specialist, t −4.0, worse on 16 of 20 worlds), the stack 1.35. **In a regime that demands
-  memory the composition cannot use the memory it has**: play holds 82 % of decisions while
-  the body is hungry (register R6). Re-use context for every lever above: an arbitration that
-  gives a hungry body's remembered site the motor (round 3).
+  specialist, t −4.0, worse on 16 of 20 worlds), the stack 1.35 — **on the v1-klino base;
+  superseded** by the study-brain base (below): base 1.50, no-play 2.45. **In a regime that
+  demands memory the composition's memory works once play is out of the race**: with play,
+  play holds 82 % of decisions while the body is hungry (register R6) and the composition
+  forages at chance; without it, the planner takes 0.61 of decisions and the composition ties
+  the reflex. Re-use context for every lever above: an arbitration that silences play when a
+  hungry body has a remembered site (round 3), or the two-loop brain.
 
 - **2026-09-06, the far-food arena's premise.** The reactive specialist eats 3.7 in 240 s
   there (n = 6; 2.7 after the first relocation, returning in ~3000 ticks on 5 of 6 runs), so
@@ -114,6 +120,19 @@ mistakes** REPORTS.md §5 keeps out of reports.
   n = 6 signals above were taken at falloff 6.0 and are re-run at 2.0 in the lever battery.
 
 ### Process
+
+- **2026-09-06, the round-2 base's klino was not the study brain's (CLAUDE.md §3.2 check 6,
+  faithfulness).** `the_cell_route_far_pillars.json` was derived from the old far-food config,
+  whose klino is `RunTumbleNav` (v1); the study brain and the reactive specialist run
+  `RunTumbleNavV2`. Every far-food composition-vs-specialist number above this note
+  (base 1.30, no-play 1.05, the stack 1.35 against the specialist's 2.80) conflates the
+  arbitration with a weaker chemotaxis module. Caught by reading the module graphs side by
+  side after the no-play arm failed to help. The base is rebuilt from the study brain's
+  sixteen modules (`the_cell_route_far_pillars.json`; the old one kept as
+  `_v1klino.json`), the A5 arm regenerated from it, and the n = 20 battery re-run; the
+  v1-klino numbers stay recorded as what they are. Instrument gap: `cell_liveness.py`
+  should print the module graph (id:type) so a base's composition is read, not assumed.
+
 
 - **2026-09-05, Kalman charter, misattribution (corrected in the audit).** The charter wrote
   that "the vision-dropout recovery in the Cell report ran through `BearingFusion`'s own

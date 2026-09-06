@@ -1,7 +1,7 @@
 {
  "metadata": {
-  "name": "Cell \u2014 FAR-FOOD arena + PILLARS (round-2 base)",
-  "description": "CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. ROUND-2 BASE (2026-09-06). the_cell_route_far_baseline.json's world (24 m open arena, two food sites 16 m apart, scent falloff 6, alternating) plus pillars (obstacle_density 0.06, scent attenuation 0.3, obstacle_seed 1000; --vary-world redraws the layout per job). Without pillars the absolute-heading panorama is a constant vector and the place EPM holds 2 nodes for the whole run (audit V4/L9 liveness 2026-09-06); with them it holds ~10 in 120 s and play's route_exists holds on a third of samples. Brain: the four-loop study composition with the arbiter in efe mode. Liveness 2026-09-06: PASS except 'planner wins' -- the planner scores routes but never wins against play's saturating value (audit V6).",
+  "name": "Cell \u2014 FAR-FOOD arena + PILLARS (round-2 base, the study brain)",
+  "description": "ROUND-2 BASE v2 (2026-09-06): the STUDY BRAIN (the_cell_arbiter_room_pillars_vision.json's 16 modules: RunTumbleNavV2 klino, PlaceGraphPlanner, PlayLoop, the inert vision loop at vision_weight 0, four HeadingControllers, EFEArbiter in efe mode, six-channel MotorBus; the planner's seven dead keys removed) in the far-food + pillars world at scent falloff 2.0. Replaces the_cell_route_far_pillars_v1klino.json, whose klino was RunTumbleNav v1. CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. ROUND-2 BASE (2026-09-06). the_cell_route_far_baseline.json's world (24 m open arena, two food sites 16 m apart, scent falloff 6, alternating) plus pillars (obstacle_density 0.06, scent attenuation 0.3, obstacle_seed 1000; --vary-world redraws the layout per job). Without pillars the absolute-heading panorama is a constant vector and the place EPM holds 2 nodes for the whole run (audit V4/L9 liveness 2026-09-06); with them it holds ~10 in 120 s and play's route_exists holds on a third of samples. Brain: the four-loop study composition with the arbiter in efe mode. Liveness 2026-09-06: PASS except 'planner wins' -- the planner scores routes but never wins against play's saturating value (audit V6).",
   "env_target": "cell",
   "phase_tag": "round2.farfood.pillars",
   "reflex_modular": true,
@@ -53,26 +53,16 @@
  "modules": [
   {
    "id": "klino",
-   "type": "RunTumbleNav",
+   "type": "RunTumbleNavV2",
    "params": {
     "scent_topic": "reality.proprio.scent_max",
     "heading_topic": "reality.proprio.heading",
     "vel_topic": "reality.proprio.vel_ego",
     "eat_topic": "events.eat",
     "output_topic": "percept.klino_heading",
-    "tumble_range": 1.5708,
-    "stuck_vel_thresh": 0.5,
-    "stuck_ticks": 10,
-    "shuffle": false,
     "confidence_topic": "percept.klino_confidence",
-    "tumble_level_gain": 4.0,
-    "_comment_ortho": "ORTHOKINESIS ON THE TUMBLE RATE (coarse->fine close). Works on the awash quad now that capability is HONEST source-normalised proximity (cap = smax/1.0, the maze field pins the source to 1.0): cap~0.33 at the wandering baseline (base_rate = tumble_base*(1+level_gain*0.33) -> long-ish approach runs, no strangle) and ~0.55 near food, rising to ~1 once eat_scent_ calibrates post-eat (fine sampling at the close). The OLD smax/scent_peak cap SATURATED to ~1 everywhere on the awash field -> pegged p_tumble -> runs collapsed to ~1.4 ticks (the operator's 'no run-and-tumble, bouncing'); the honest denom fixes that. 0 = plain kinesis.",
-    "run_commit": false,
-    "dir_belief": false,
-    "dir_lr": 0.1,
     "authority_topic": "motor.bus.authority.klino",
-    "authority_floor": 0.5,
-    "_comment_kt": "KF1/KF6 kt-loop fixes (live HotMutable sliders, DEFAULT-OFF = byte-identical). run_commit: a tumble decision belongs to a RUN \u2014 while reorienting toward run_dir suppress the tumble draw + the stuck counter (the per-tick draw otherwise re-tumbles during the turn transient \u2192 most runs die before they start = the random walk; the stuck check otherwise force-tumbles mid-turn). dir_belief: morph the tumble from a uniform draw to a belief-BIASED choice (kinesis\u2192reactive taxis) \u2014 the up-gradient DIRECTION inferred from the agent's own run outcomes (not read from a percept), centre blended toward the believed heading \u03bc by the self-scaled precision R\u2208[0,1]; R\u22480 tabula-rasa = the uniform floor. dir_lr = belief EMA rate."
+    "ablation": "none"
    }
   },
   {
@@ -189,6 +179,91 @@
     "authority_topic": "motor.bus.authority.play",
     "advance_homeokinetic": true,
     "_comment_hk": "advance_homeokinetic: reward = max(0,vel_fwd) \u2212 effort\u00b7|vel_fwd| (food-DECOUPLED, intrinsic controllable motion). No cos(bearing) \u2192 off-axis forward not punished \u2192 off-axis forward is no longer punished into NEGATIVE; the table STILL flattens to ~0 when STUCK (reward 0 \u2192 EMA \u2192 0) \u2014 the hunger-gated escape recovers it. nav+turn-priority handle aiming.",
+    "gain_min": 1.0,
+    "gain_max": 3.0
+   }
+  },
+  {
+   "id": "visual_bearing",
+   "type": "VisualBearing",
+   "params": {
+    "input_topic": "host.video.color",
+    "output_topic": "percept.visual_bearing",
+    "fov_deg": 80.0,
+    "normalize_direction": true,
+    "min_confidence": 0.0008,
+    "emit_proximity": true,
+    "proximity_gain": 1.0,
+    "learn_appearance": true,
+    "hit_topic": "events.eat",
+    "_comment": "learn_appearance: the bug LEARNS food's colour from real eats (events.eat = ground truth, NOT the overloaded events.hit); no hardcoded green. emit_proximity -> values[2]=green_frac (the reach/looming signal)."
+   }
+  },
+  {
+   "id": "epm_vision",
+   "type": "EPM",
+   "params": {
+    "modality_group": "cognitive",
+    "modality_name": "vision",
+    "encoder_kind": "rbf",
+    "input_topic": "percept.visual_bearing",
+    "proprio_state_dims": 3,
+    "dim_min": [
+     -1.0,
+     -1.0,
+     0.0
+    ],
+    "dim_max": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "projection_dim": 48,
+    "min_insertion_error": 0.1,
+    "max_nodes": 16,
+    "mitosis_enabled": false,
+    "baking_threshold": 5,
+    "process_every_n_ticks": 1,
+    "subtract_descending_prediction": false,
+    "_comment": "food-bearing EPM (angle-selective). Its TLE = VisualHomingNav's \u00a71 predictive error; node_count = informativeness (degenerate occluded-only node -> low trust). Output reality.cognitive.vision."
+   }
+  },
+  {
+   "id": "vision_nav",
+   "type": "VisualHomingNav",
+   "params": {
+    "vision_epm_topic": "reality.cognitive.vision",
+    "bearing_topic": "percept.visual_bearing",
+    "eat_topic": "events.eat",
+    "output_topic": "percept.vision_bearing",
+    "value_topic": "reality.cognitive.vision_value",
+    "min_conf": 0.002,
+    "node_ref": 4.0,
+    "eat_alpha": 0.2,
+    "green_bootstrap": 0.05
+   }
+  },
+  {
+   "id": "heading_controller_vision",
+   "type": "HeadingController",
+   "params": {
+    "input_topic": "percept.vision_bearing",
+    "cx_index": 0,
+    "cy_index": 1,
+    "steer_output_topic": "cogv.steer",
+    "thrust_output_topic": "cogv.thrust",
+    "turn_fraction": 2.5,
+    "learn_advance": true,
+    "vel_topic": "reality.proprio.vel_ego",
+    "n_err_bins": 4,
+    "n_thrust_acts": 3,
+    "advance_lr": 0.1,
+    "ucb_c": 0.4,
+    "effort_cost": 0.15,
+    "forward_only": false,
+    "reverse_brake_only": true,
+    "authority_topic": "motor.bus.authority.vision",
+    "advance_homeokinetic": true,
     "gain_min": 1.0,
     "gain_max": 3.0
    }
@@ -334,7 +409,11 @@
     "play_value_topic": "reality.cognitive.play_value",
     "play_gain_topic": "arbiter.gain.play",
     "play_weight": 1.0,
-    "_comment_play": "task #33 Stage 2 QUAD: play LIVE (play_weight=1). After eating a zone's one-shot food the bug is sated + scent fades \u2192 klino/planner go quiet \u2192 play (energy-surplus\u00b7novelty) wins \u2192 run-tumble WANDER beyond the mapped frontier \u2192 discovers the connector / next zone (the confinement-steer couldn't). play_weight live slider: 0=2-loop control."
+    "_comment_play": "task #33 Stage 2 QUAD: play LIVE (play_weight=1). After eating a zone's one-shot food the bug is sated + scent fades \u2192 klino/planner go quiet \u2192 play (energy-surplus\u00b7novelty) wins \u2192 run-tumble WANDER beyond the mapped frontier \u2192 discovers the connector / next zone (the confinement-steer couldn't). play_weight live slider: 0=2-loop control.",
+    "vision_value_topic": "reality.cognitive.vision_value",
+    "vision_gain_topic": "arbiter.gain.vision",
+    "vision_weight": 0.0,
+    "_comment_vision": "loop #4 Stage 1: vision_weight=0 (INERT) -> 3-policy race byte-identical + 4th channel published at 0 authority (consumer fires). Set 1 for Stage 2 (the scent-blind close)."
    }
   },
   {
@@ -345,10 +424,12 @@
      "planner",
      "klino",
      "play",
+     "vision",
      "whisker",
      "stuck"
     ],
     "kinds": [
+     "steer_thrust",
      "steer_thrust",
      "steer_thrust",
      "steer_thrust",
@@ -359,6 +440,7 @@
      "cog.steer",
      "cogk.steer",
      "cogp.steer",
+     "cogv.steer",
      "whisker.left",
      "stuck.left"
     ],
@@ -366,6 +448,7 @@
      "cog.thrust",
      "cogk.thrust",
      "cogp.thrust",
+     "cogv.thrust",
      "whisker.right",
      "stuck.right"
     ],
@@ -374,9 +457,11 @@
      4.0,
      4.0,
      4.0,
+     4.0,
      4.0
     ],
     "gains": [
+     0.75,
      0.75,
      0.75,
      0.75,
@@ -396,6 +481,7 @@
      "planner",
      "klino",
      "play",
+     "vision",
      "whisker",
      "stuck"
     ],

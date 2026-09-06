@@ -99,6 +99,7 @@
 #include <cstdint>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <nlohmann/json_fwd.hpp>
@@ -143,6 +144,9 @@ public:
     float g_prag_klino()    const { return g_prag_klino_; }     // hunger · reach-prob(klino)   — pragmatic, sensory precision
     std::string const& pragmatic_norm() const { return pragmatic_norm_; }   // A4
     float reach_peak_planner() const { return reach_peak_planner_; }
+    float trust_klino()   const { return trust_klino_; }     // round 3
+    float trust_planner() const { return trust_planner_; }
+    float trust_play()    const { return trust_play_; }
     float g_prag_planner()  const { return g_prag_planner_; }   // hunger · reach-prob(planner) — pragmatic, model precision
     float g_epist_klino()   const { return g_epist_klino_; }    // (1−hunger) · normalised z-spike — klino approach/epistemic
     float g_epist_planner() const { return g_epist_planner_; }  // (1−hunger) · planner frontier novelty (Stage 3; 0 until then)
@@ -173,6 +177,7 @@ private:
     void handle_plan_precision(MessagePtr payload);
     void handle_play_value(MessagePtr payload);
     void handle_vision_value(MessagePtr payload);
+    void handle_trust(MessagePtr payload);        // round 3: the voter's ConsensusToken
 
     // topics
     std::string hunger_topic_     = "reality.proprio.hunger";       // klino preference weight
@@ -220,6 +225,24 @@ private:
     // peak-normalised constant weak scent would read as full reach (the first form of this
     // lever failed its own test on exactly that).  "none" (default) is byte-identical.
     std::string pragmatic_norm_ = "none";   // "none" | "planner_peak"
+    // Cell round 3 (2026-09-06): scoring_mode "precision" -- the loops as channels under
+    // LateralVoter trust (doctrine §2.3; register O3; the duck's §17.4 fork).  Each loop's own
+    // bearing stream is coarse-grained by a per-loop EPM and fused by a LateralVoter whose trust
+    // is 1/(tle+ε) (+ the informativeness gate, optionally the activity term); this mode reads
+    // the ConsensusToken's trust_weights by the EPMs' output topics and scores each policy as
+    // preference precision × trust: hunger for the pragmatic loops, play_weight × energy
+    // surplus for play.  SELECTION, not averaging (recipe §4: policies with different goals
+    // race); what changes is the currency -- a loop is trusted for how well its own behaviour
+    // predicts itself, not for a scent-scaled reach.  precision_sign −1 is the wrong-sign
+    // control (score by distrust; must regress).  Default scoring_mode is unchanged.
+    std::string trust_consensus_topic_ = "";                 // e.g. consensus.1 (a voter over reality.loop.*)
+    std::string trust_key_klino_   = "reality.loop.klino";
+    std::string trust_key_planner_ = "reality.loop.planner";
+    std::string trust_key_play_    = "reality.loop.play";
+    std::string trust_key_vision_  = "reality.loop.vision";
+    float precision_sign_ = 1.0f;
+    std::unordered_map<std::string, float> trust_;              // last trust_weights from the voter
+    float trust_klino_ = 0.0f, trust_planner_ = 0.0f, trust_play_ = 0.0f, trust_vision_ = 0.0f;
     bool  klino_search_floor_ = false; // efe: add g_epist_klino += (1−hunger)·(1−plan_precision) — undirected klino search when the model is imprecise (§1.4 floor; opt-in)
     float mean_alpha_    = 0.01f;   // EMA rate of klino's running baseline (z-score mean); slow → klino stays excited inside the scent field (~100 ticks)
     float var_alpha_     = 0.01f;   // EMA rate of klino's running variance (z-score scale)

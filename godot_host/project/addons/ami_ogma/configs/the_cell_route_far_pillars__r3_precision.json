@@ -1,9 +1,9 @@
 {
  "metadata": {
-  "name": "Cell \u2014 FAR-FOOD + PILLARS, EPM-NATIVE MAP (round-2 lever A5, study brain)",
-  "description": "LEVER A5 (2026-09-06, regenerated from the v2 base): identical to the_cell_route_far_pillars.json except the place map is the place-EPM's vocabulary -- a PlaceVectorBuilder feeds [panorama ; dead-reckoned pose x6] to epm_place (48-D) and play/planner run with pi_cell_size 0. ROUND-2 BASE v2 (2026-09-06): the STUDY BRAIN (the_cell_arbiter_room_pillars_vision.json's 16 modules: RunTumbleNavV2 klino, PlaceGraphPlanner, PlayLoop, the inert vision loop at vision_weight 0, four HeadingControllers, EFEArbiter in efe mode, six-channel MotorBus; the planner's seven dead keys removed) in the far-food + pillars world at scent falloff 2.0. Replaces the_cell_route_far_pillars_v1klino.json, whose klino was RunTumbleNav v1. CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. ROUND-2 BASE (2026-09-06). the_cell_route_far_baseline.json's world (24 m open arena, two food sites 16 m apart, scent falloff 6, alternating) plus pillars (obstacle_density 0.06, scent attenuation 0.3, obstacle_seed 1000; --vary-world redraws the layout per job). Without pillars the absolute-heading panorama is a constant vector and the place EPM holds 2 nodes for the whole run (audit V4/L9 liveness 2026-09-06); with them it holds ~10 in 120 s and play's route_exists holds on a third of samples. Brain: the four-loop study composition with the arbiter in efe mode. Liveness 2026-09-06: PASS except 'planner wins' -- the planner scores routes but never wins against play's saturating value (audit V6).",
+  "name": "Cell \u2014 FAR-FOOD + PILLARS, PRECISION-WEIGHTED ARBITRATION (round-3 lever, study brain)",
+  "description": "ROUND-3 LEVER (2026-09-06): the study brain in the far-food + pillars world with the arbiter in scoring_mode 'precision' -- each loop's own bearing stream is coarse-grained by a per-loop EPM (reality.loop.<name>), a LateralVoter at level 1 grades them (trust 1/(tle+eps), informativeness-gated), and the arbiter selects by preference precision x trust instead of the efe value race (audit V6: the race's units let play win by construction). Wrong-sign control: EFEArbiter.precision_sign=-1. Compare against the_cell_route_far_pillars.json (efe). ROUND-2 BASE v2 (2026-09-06): the STUDY BRAIN (the_cell_arbiter_room_pillars_vision.json's 16 modules: RunTumbleNavV2 klino, PlaceGraphPlanner, PlayLoop, the inert vision loop at vision_weight 0, four HeadingControllers, EFEArbiter in efe mode, six-channel MotorBus; the planner's seven dead keys removed) in the far-food + pillars world at scent falloff 2.0. Replaces the_cell_route_far_pillars_v1klino.json, whose klino was RunTumbleNav v1. CALIBRATED 2026-09-06: scent_falloff_radius 2.0 (was 6.0). At 6.0 and 3.5 the reactive specialist returns to the relocated food in ~3000 ticks (3.7 eats / 240 s, n=6) because the screened-Poisson field never reaches zero; at 2.0 its return takes 4966 ticks against the gradient-blind floor's 5927 (3.0 vs 1.8 eats) while the first eat is still earned locally -- the setting where memory is demanded and the reflex is not. ROUND-2 BASE (2026-09-06). the_cell_route_far_baseline.json's world (24 m open arena, two food sites 16 m apart, scent falloff 6, alternating) plus pillars (obstacle_density 0.06, scent attenuation 0.3, obstacle_seed 1000; --vary-world redraws the layout per job). Without pillars the absolute-heading panorama is a constant vector and the place EPM holds 2 nodes for the whole run (audit V4/L9 liveness 2026-09-06); with them it holds ~10 in 120 s and play's route_exists holds on a third of samples. Brain: the four-loop study composition with the arbiter in efe mode. Liveness 2026-09-06: PASS except 'planner wins' -- the planner scores routes but never wins against play's saturating value (audit V6).",
   "env_target": "cell",
-  "phase_tag": "round2.farfood.pillars.epm_map",
+  "phase_tag": "round3.farfood.pillars.precision",
   "reflex_modular": true,
   "body_model": "bidirectional_paddler",
   "motor_baseline_beat": false,
@@ -81,12 +81,11 @@
     "disconfirm": 0.1,
     "escape_gain": 1.0,
     "wander_thrust": 0.0,
-    "pi_cell_size": 0.0,
+    "pi_cell_size": 70.0,
     "plan_value_topic": "reality.cognitive.plan_value",
     "plan_precision_topic": "reality.cognitive.plan_precision",
     "plan_novelty_topic": "reality.cognitive.plan_novelty",
-    "stall_factor": 4.0,
-    "_pi_cell_size_grid": 70.0
+    "stall_factor": 4.0
    }
   },
   {
@@ -99,9 +98,8 @@
     "eat_topic": "events.eat",
     "output_topic": "percept.play_bearing",
     "play_value_topic": "reality.cognitive.play_value",
-    "pi_cell_size": 0.0,
-    "wander_stall_ticks": 30,
-    "_pi_cell_size_grid": 20.0
+    "pi_cell_size": 20.0,
+    "wander_stall_ticks": 30
    }
   },
   {
@@ -317,27 +315,14 @@
    }
   },
   {
-   "id": "place_vec",
-   "type": "PlaceVectorBuilder",
-   "params": {
-    "pano_topic": "percept.cylinder",
-    "heading_topic": "reality.proprio.heading",
-    "vel_topic": "reality.proprio.vel_ego",
-    "output_topic": "percept.place_vec",
-    "n_pano": 24,
-    "odo_scale": 240.0,
-    "_comment": "Cell round 2 lever A5: [panorama 24 ; (x/240, y/240, cos h, sin h) x 6]; pose_repeat = 24/4 (derived). The dead-reckoned pose is the consumers' own path integral; the heading's drift-free perfection is the named scaffold (audit S1)."
-   }
-  },
-  {
    "id": "epm_place",
    "type": "EPM",
    "params": {
     "modality_group": "cognitive",
     "modality_name": "place",
     "encoder_kind": "rbf",
-    "input_topic": "percept.place_vec",
-    "proprio_state_dims": 48,
+    "input_topic": "percept.cylinder",
+    "proprio_state_dims": 24,
     "dim_min": [
      0.0,
      0.0,
@@ -362,31 +347,7 @@
      0.0,
      0.0,
      0.0,
-     0.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0,
-     -1.0
+     0.0
     ],
     "dim_max": [
      1.0,
@@ -412,40 +373,141 @@
      1.0,
      1.0,
      1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
      1.0
     ],
-    "projection_dim": 96,
+    "projection_dim": 48,
     "min_insertion_error": 0.1,
     "max_nodes": 40,
     "mitosis_enabled": false,
     "baking_threshold": 5,
     "process_every_n_ticks": 1,
+    "subtract_descending_prediction": false
+   }
+  },
+  {
+   "id": "epm_loop_klino",
+   "type": "EPM",
+   "params": {
+    "modality_group": "loop",
+    "modality_name": "klino",
+    "encoder_kind": "rbf",
+    "input_topic": "percept.klino_heading",
+    "proprio_state_dims": 2,
+    "dim_min": [
+     -1.0,
+     -1.0
+    ],
+    "dim_max": [
+     1.0,
+     1.0
+    ],
+    "projection_dim": 32,
+    "min_insertion_error": 0.1,
+    "max_nodes": 16,
+    "mitosis_enabled": false,
+    "baking_threshold": 5,
+    "process_every_n_ticks": 1,
     "subtract_descending_prediction": false,
-    "_comment": "A5: the place vocabulary learns the map from the place vector (48-D); its winner_id is the node id for play and the planner (pi_cell_size 0)."
+    "_comment": "Round 3: the klino loop's own bearing stream, coarse-grained so the voter can grade its predictability (tle)."
+   }
+  },
+  {
+   "id": "epm_loop_planner",
+   "type": "EPM",
+   "params": {
+    "modality_group": "loop",
+    "modality_name": "planner",
+    "encoder_kind": "rbf",
+    "input_topic": "percept.nav_bearing",
+    "proprio_state_dims": 3,
+    "dim_min": [
+     -1.0,
+     -1.0,
+     0.0
+    ],
+    "dim_max": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "projection_dim": 32,
+    "min_insertion_error": 0.1,
+    "max_nodes": 16,
+    "mitosis_enabled": false,
+    "baking_threshold": 5,
+    "process_every_n_ticks": 1,
+    "subtract_descending_prediction": false,
+    "_comment": "Round 3: the planner loop's own bearing stream, coarse-grained so the voter can grade its predictability (tle)."
+   }
+  },
+  {
+   "id": "epm_loop_play",
+   "type": "EPM",
+   "params": {
+    "modality_group": "loop",
+    "modality_name": "play",
+    "encoder_kind": "rbf",
+    "input_topic": "percept.play_bearing",
+    "proprio_state_dims": 3,
+    "dim_min": [
+     -1.0,
+     -1.0,
+     0.0
+    ],
+    "dim_max": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "projection_dim": 32,
+    "min_insertion_error": 0.1,
+    "max_nodes": 16,
+    "mitosis_enabled": false,
+    "baking_threshold": 5,
+    "process_every_n_ticks": 1,
+    "subtract_descending_prediction": false,
+    "_comment": "Round 3: the play loop's own bearing stream, coarse-grained so the voter can grade its predictability (tle)."
+   }
+  },
+  {
+   "id": "epm_loop_vision",
+   "type": "EPM",
+   "params": {
+    "modality_group": "loop",
+    "modality_name": "vision",
+    "encoder_kind": "rbf",
+    "input_topic": "percept.vision_bearing",
+    "proprio_state_dims": 3,
+    "dim_min": [
+     -1.0,
+     -1.0,
+     0.0
+    ],
+    "dim_max": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "projection_dim": 32,
+    "min_insertion_error": 0.1,
+    "max_nodes": 16,
+    "mitosis_enabled": false,
+    "baking_threshold": 5,
+    "process_every_n_ticks": 1,
+    "subtract_descending_prediction": false,
+    "_comment": "Round 3: the vision loop's own bearing stream, coarse-grained so the voter can grade its predictability (tle)."
+   }
+  },
+  {
+   "id": "voter_loops",
+   "type": "LateralVoter",
+   "params": {
+    "level": 1,
+    "input_pattern": "reality.loop.",
+    "informativeness_gain": 1.0,
+    "activity_gain": 0.0,
+    "master_seed": 3,
+    "_comment": "Round 3: trust 1/(tle+eps) over the four loops' own bearing streams, informativeness-gated (the fusion testbed's setting); activity_gain 0 in the first form -- a committed straight route is steady, not frozen, and the activity term would punish it; the activity arm is separate."
    }
   },
   {
@@ -457,7 +519,7 @@
     "plan_value_topic": "reality.cognitive.plan_value",
     "klino_gain_topic": "arbiter.gain.klino",
     "planner_gain_topic": "arbiter.gain.planner",
-    "scoring_mode": "efe",
+    "scoring_mode": "precision",
     "z_peak_decay": 0.0005,
     "planner_epistemic": false,
     "klino_search_floor": false,
@@ -477,7 +539,10 @@
     "vision_value_topic": "reality.cognitive.vision_value",
     "vision_gain_topic": "arbiter.gain.vision",
     "vision_weight": 0.0,
-    "_comment_vision": "loop #4 Stage 1: vision_weight=0 (INERT) -> 3-policy race byte-identical + 4th channel published at 0 authority (consumer fires). Set 1 for Stage 2 (the scent-blind close)."
+    "_comment_vision": "loop #4 Stage 1: vision_weight=0 (INERT) -> 3-policy race byte-identical + 4th channel published at 0 authority (consumer fires). Set 1 for Stage 2 (the scent-blind close).",
+    "trust_consensus_topic": "consensus.1",
+    "precision_sign": 1.0,
+    "_comment_round3": "scoring_mode precision: score_i = preference precision (hunger; play_weight x surplus for play) x the voter's trust in loop i's own bearing stream. precision_sign -1 = the wrong-sign control."
    }
   },
   {

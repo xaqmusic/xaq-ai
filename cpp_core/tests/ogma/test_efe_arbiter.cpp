@@ -16,6 +16,8 @@
 #include "ogma/modules/EFEArbiter.hpp"
 #include "ogma/modules/MotorBus.hpp"
 #include "ogma/InProcessBus.hpp"
+#include "ogma/Topics.hpp"
+#include <unordered_map>
 
 #include <cmath>
 #include <memory>
@@ -847,4 +849,54 @@ TEST(EFEArbiter, PragmaticNormDefaultIsByteIdentical) {
         ASSERT_EQ(a.arb.winner(), b.arb.winner());
         ASSERT_FLOAT_EQ(a.arb.g_prag_planner(), b.arb.g_prag_planner());
     }
+}
+
+// (Cell round 3, 2026-09-06) scoring_mode=precision — the loops as channels under LateralVoter
+// trust: score = preference precision × trust (hunger for klino/planner, play_weight × surplus
+// for play), selection by the same hysteresis.  The voter's trust arrives as a ConsensusToken.
+namespace {
+std::shared_ptr<ogma::ConsensusToken> trust_token(std::unordered_map<std::string, float> w) {
+    auto c = std::make_shared<ogma::ConsensusToken>(); c->trust_weights = std::move(w); c->level = 1; return c;
+}
+int run_precision(float sign, float hunger, std::unordered_map<std::string, float> w, float* out_gp = nullptr) {
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                        {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                        {"precision_sign", double(sign)}};
+    Fix f(p);
+    uint64_t t = 0; int last = -1;
+    for (int i = 0; i < 300; ++i) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.proprio.hunger",        p1(hunger));
+        f.bus.publish("reality.proprio.scent_max",     p1(0.02f));
+        f.bus.publish("reality.cognitive.plan_value",  p1(0.2f));
+        f.bus.publish("reality.cognitive.play_value",  p1(1.0f));
+        f.bus.publish("consensus.1", trust_token(w));
+        f.arb.tick(t++);
+        f.bus.end_tick();
+        last = f.arb.winner();
+    }
+    if (out_gp) *out_gp = f.arb.g_prag_planner();
+    return last;
+}
+}  // namespace
+
+TEST(EFEArbiter, PrecisionModeSelectsByTrustTimesNeed) {
+    std::unordered_map<std::string, float> w = {{"reality.loop.klino", 0.2f}, {"reality.loop.planner", 0.9f}, {"reality.loop.play", 0.5f}};
+    float gp = 0.0f;
+    // hungry: planner 0.8·0.9 = 0.72 beats play (1−0.8)·0.5 = 0.10 and klino 0.8·0.2 = 0.16
+    EXPECT_EQ(run_precision(+1.0f, 0.8f, w, &gp), 1);
+    EXPECT_NEAR(gp, 0.72f, 1e-4f);
+    // full: play (1−0.1)·0.5 = 0.45 beats planner 0.1·0.9 = 0.09 — curiosity when there is surplus
+    EXPECT_EQ(run_precision(+1.0f, 0.1f, w), 2);
+    // the wrong-sign control scores by distrust: hungry → klino 0.8·0.8 = 0.64 beats planner 0.8·0.1
+    EXPECT_EQ(run_precision(-1.0f, 0.8f, w), 0);
+}
+
+TEST(EFEArbiter, PrecisionModeAbsentTrustScoresZero) {
+    // no voter token ever arrives → every trust 0 → scores 0 → the incumbent (klino, index 0) holds
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")}};
+    Fix f(p); uint64_t t = 0;
+    for (int i = 0; i < 50; ++i) f.run(t++, 0.9f, 0.5f, 0.9f);
+    EXPECT_FLOAT_EQ(f.arb.g_prag_planner(), 0.0f);
+    EXPECT_FLOAT_EQ(f.arb.g_prag_klino(), 0.0f);
 }
