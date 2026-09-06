@@ -233,6 +233,21 @@ the upper credible bound of a Beta posterior over its competence (optimism about
 unproven; counts forgotten while not driving so uncertainty grows), a one-parameter
 extension (`estimator beta`, `optimism κ`), default unchanged.
 
+**Second form — `PARTIAL`, not a capability (2026-09-06, n = 20).** Optimism does what it
+is for: play's share of decisions falls from 0.89 (efe) to 0.51 at κ = 1 and 0.39 at κ = 2,
+the planner's rises from 0.06 to 0.20 and 0.23, and the planner is now observed. Eats follow
+weakly: 1.60 at κ = 1 (Δ +0.10 vs the base), **1.95 at κ = 2 (Δ +0.45, sd 1.19, t 1.7,
+11+/6−)** — still 0.50 below the two-loop brain (t −1.2) and 0.85 below the specialist
+(t −2.6). The wrong-sign control at κ = 1 does not regress (1.80). Read together with R3 and
+the first form: **eats rise as play's share of the motor falls, and no ordering principle —
+units, bearing predictability, competence, optimistic competence — adds an effect detectable
+at twenty worlds.** With a novelty-seeking loop in the race, its presence costs the eats,
+not its weight or its rank. The round-4 machinery stands as the recipe's arbitration for the
+duck (a generic competence grader, a voter, the arbiter's precision mode, all gain-0); the
+Cell's verdict on it is recorded, and the two-loop brain remains the Cell instance.
+
+**Round 4 is closed.**
+
 ## What round 2 hands the duck
 
 The recipe's currency (a heading and a confidence per loop; a heading reference into the
