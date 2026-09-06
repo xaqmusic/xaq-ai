@@ -93,6 +93,7 @@ private:
     uint64_t wander_rng_ = 0x9E3779B97F4A7C15ull;
     bool have_yaw_ = false;
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
+    int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
 };
 
 }  // namespace mjhost

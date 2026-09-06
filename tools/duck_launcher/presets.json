@@ -385,5 +385,22 @@
    "config": "a1v2_r27_l2_play_heading.json",
    "seed": 2
   }
+ },
+ {
+  "name": "R28 \u00b7 level-2 avoid vs novelty ARBITRATED \u2014 the Cell recipe on the duck (need \u00d7 competence over loops with bearings)",
+  "series": 28,
+  "hint": "watch avoidance take the motor near a wall and play take it back in the open; the moved wall should now be re-explored WITHOUT the collision burst",
+  "state": {
+   "mode": "brain",
+   "start": "scratch",
+   "ident_every": 12,
+   "ident_until": 3000,
+   "secs": 1500.0,
+   "output": "headless",
+   "save_brain": true,
+   "battery": false,
+   "config": "a1v2_r28_l2_arbitrated.json",
+   "seed": 2
+  }
  }
 ]

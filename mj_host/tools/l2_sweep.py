@@ -78,7 +78,7 @@ def control_from_default(cfg: Path) -> float:
 
 
 def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tuple, logdir: Path | None,
-            scene: str = "", noise: float = 0.0, phase_at: float | None = None) -> dict:
+            scene: str = "", noise: float = 0.0, phase_at: float | None = None, arena_half: float = 1e9) -> dict:
     cmd = [str(HOST), "--level2", *([scene] if scene else []), "--graph", str(cfg), "--secs", str(secs), "--seed", str(seed),
            "--noise", str(noise), *host_args]
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=7200, cwd=str(REPO / "mj_host"))
@@ -106,7 +106,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     cells, xs, ys, winners = set(), [], [], set()
     path = 0.0; prev = None
     wall_eps = contact = n = 0; prev_wall = 0
-    tooclose = tle_sum = 0.0; novel = 0
+    tooclose = tle_sum = 0.0; novel = 0; escaped = 0
     ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
           "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
     for line in p.stdout.splitlines():
@@ -115,6 +115,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         except ValueError: continue
         t = float(r.get("t", 0.0))
         if t < control_from: continue
+        if abs(float(r["x"])) > arena_half or abs(float(r["y"])) > arena_half: escaped += 1; continue
         if phase_at is not None:
             g = ph["before" if t < phase_at else "after"]
             g["n"] += 1; g["cells"].add((math.floor(float(r["x"]) / CELL_M), math.floor(float(r["y"]) / CELL_M)))
@@ -145,6 +146,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "tooclose": tooclose / max(1, n), "path_m": path, "cells": len(cells),
         "span": (max(xs) - min(xs)) * (max(ys) - min(ys)) if xs else 0.0,
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
+        "escaped": escaped,
     })
     return out
 
@@ -178,6 +180,7 @@ def main():
                     help="the level-2 scene (default: the 2 m arena -- the host's own default is the OPEN floor, where 'zero wall contacts' means no walls)")
     ap.add_argument("--noise", type=float, default=0.05, help="reset noise on the start pose, so seeds vary the start and not only the babble (host --noise)")
     ap.add_argument("--phase-at", type=float, default=None, help="split the control phase at this second (e.g. the --arena-shift time) and report cells / walls / nodes before and after -- the (d) reading")
+    ap.add_argument("--arena-half", type=float, default=1.05, help="samples with |x| or |y| beyond this (m) are ESCAPED (the shifted scene leaves a gap) and excluded from cells/span/path; the count is reported")
     args = ap.parse_args()
     if not HOST.exists(): sys.exit(f"host binary missing: {HOST} (build with ./mj_host/run.sh build)")
     logdir = Path(args.logdir) if args.logdir else None
@@ -191,7 +194,7 @@ def main():
     jobs = [(c, s) for c in cfgs for s in range(1, args.seeds + 1)]
     results = {c: [] for c in cfgs}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
-        futs = {ex.submit(run_one, c, s, args.secs, ctrl, host_args, logdir, args.scene, args.noise, args.phase_at): (c, s) for c, s in jobs}
+        futs = {ex.submit(run_one, c, s, args.secs, ctrl, host_args, logdir, args.scene, args.noise, args.phase_at, args.arena_half): (c, s) for c, s in jobs}
         for fut in concurrent.futures.as_completed(futs):
             c, s = futs[fut]; r = fut.result(); results[c].append(r)
             print(f"  {c.stem:34s} seed {s}: walls {r['walls_min']:6.1f}/min  cells {r['cells']:3d}  path {r['path_m']:6.1f} m  "
@@ -200,7 +203,7 @@ def main():
     print(f"\n=== LEVEL-2 A/B, {args.seeds} seeds × {args.secs} s, control phase {ctrl:.0f}–{args.secs} s ===")
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
             ("cells", "cells"), ("span", "span m²"), ("nodes", "nodes"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
-            ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%")]
+            ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])
