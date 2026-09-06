@@ -19,7 +19,7 @@ HAT pinout from [SunFounder's hardware introduction](https://docs.sunfounder.com
 | ADC | **A0–A3** user, 3-pin P2.54, **12-bit, 3.3 V reference**; A4 = battery via 20K/10K | 4 × FSR |
 | Servo PWM | **12 channels P0–P11**, 3-pin P2.54, **5 V rail** | the 12 MG90S (existing) |
 | Digital | D0→GPIO17, D1→GPIO4, D2→GPIO27, D3→GPIO22 | **ultrasonic trig = D2, echo = D3** — ✅ **MEASURED 2026-08-30** (§7); **D0/D1 are the free pair**, not D2/D3 |
-| Power in | 6.0–8.4 V, XH2.54 3-pin | the INA219 goes **here** (§3) |
+| Power in | 6.0–8.4 V, XH2.54 3-pin — **`−` / mid tap / `+`**, ✅ MEASURED 2026-09-05 (§3.2) | the INA219 goes **here**, in the `+` leg only (§3) |
 
 ⚠ **Almost every GPIO is consumed by the HAT.** Only GPIO7 (CE1) and GPIO20 (NC) are unlisted,
 and neither is broken out. **Everything added must go through the existing I²C / SPI / ADC
@@ -95,19 +95,29 @@ board modification) or feeding the servos from an external BEC (a rebuild). Neit
 because the ledger's own argument for this sensor was **bus total, not per-joint** — *"which for
 an energy term is the more honest quantity anyway."*
 
+**The 3-pin connector is a 2S centre tap, not a paralleled pair — ✅ MEASURED 2026-09-05 (§3.2).**
+Only the `+` leg is broken by the shunt; `−` and the mid tap pass straight through.
+
 ```
-  2S LiPo                INA219                        Robot HAT V4
-  6.0–8.4 V           (0.01 Ω shunt)
-     ┌───┐   XH2.54    ┌──────────┐      XH2.54       ┌──────────────┐
-     │ + ├────────────►│ Vin+     │──────────────────►│ PWR IN  +    │
-     │   │             │      Vin−│                   │              │
-     │ − ├─────────────┴──────────┴──────────────────►│ PWR IN  −    │
-     └───┘                   │                        │              │
-                             │ I²C 0x40               │              │
-                             └───────────────────────►│ QWIIC / I²C  │
-                                                      └──────────────┘
+  2S pack, 3-wire            INA219                      Robot HAT V4
+  6.0–8.4 V              (0.01 Ω shunt)
+   ┌──────────┐  XH2.54   ┌──────────┐     XH2.54      ┌──────────────┐
+   │ +   8.4V ├──22AWG───►│ Vin+     │                 │              │
+   │          │           │      Vin−├──22AWG─────────►│ PWR IN  +    │
+   │ mid 4.2V ├──26AWG────── straight through ────────►│ PWR IN  mid  │
+   │ −   0.0V ├──22AWG────── straight through ────────►│ PWR IN  −    │
+   └──────────┘                │                       │              │
+                               │ I²C 0x40 + 3V3 + GND  │              │
+                               └──────────────────────►│ QWIIC / I²C  │
+                                                       └──────────────┘
   measures: Pi 5 + 5 V regulator + all 12 servos (whole-robot current)
 ```
+
+⚠ **The shunt goes in the `+` leg, never the return.** A shunt in `−` lifts the HAT's ground
+above the Pi's I²C ground by the drop across it.
+
+⚠ **The mid tap touches nothing on the INA219** — not `Vin+`, not `Vin−`, not `GND`. It carries
+no load current. The breakout's `VCC` comes from the HAT's **3.3 V**, never from the pack.
 
 ⚠ **Change the shunt to 0.01 Ω before installing.** A stock breakout ships **0.1 Ω**, which
 drops **300 mV at 3 A**. The pack already sags toward the HAT's **6.0 V minimum** under servo
@@ -127,20 +137,109 @@ pitch, 3-pin.** The HAT carries the male header (pins); the battery ends in a fe
 toward the pack**. The cheapest correct part is a **JST XH 2.54 3-pin male-to-female extension
 cable cut in half** — both halves are then guaranteed to mate.
 
-⚠ **JST XH contacts are rated 3 A each, and that is almost certainly why a 2-wire battery gets
-a 3-pin connector: the pins are paralleled to share current.** Steady draw is ~2.3 A with
-transients plausibly 4–7 A, at or past a single contact. **Two consequences.** The pin order is
-load-bearing — **meter it, never assume it**: with the pack unplugged, identify `+`/`−` on the
-battery's own connector and check which pins are commoned, and check continuity between pins on
-the HAT side. Reverse polarity destroys the HAT, and mis-reading the paralleling quietly puts
-the full current through one 3 A contact. And the module carries **three** conductors, not two:
-the paralleled polarity passes straight through, and only the single sensed leg goes through
-`Vin+`/`Vin−`.
+⚠ **Wire gauge, and the contact that carries everything.** The third pin does **not** share the
+load (§3.2), so the whole draw — ~2.3 A steady, plausibly 4–7 A on servo transients — goes
+through **one 3 A-rated XH contact**, at or past its rating on the peaks. Nothing in the module
+can fix that, but two things stop it getting worse: stock XH extension cable is usually 26 AWG,
+marginal at 2–3 A continuous and poor on transients, so **crimp 22 AWG silicone** on `+` and `−`
+(XH terminals accept 22–28 AWG; the mid tap carries only balance current, so stock 26 AWG is
+fine there). And the INA219 breakout's own screw terminals and traces are in this path too
+(§2 #2) — check their rating before they become the weakest link. **Watch the connector for
+heating during the first full-servo load test.**
 
-⚠ **Wire gauge.** Stock XH extension cables are usually 26 AWG, marginal at 2–3 A continuous and
-poor on the transients. XH crimp terminals accept 22–28 AWG — **use 22 AWG silicone**, the
-thickest the terminal takes. The INA219 breakout's own screw terminals and traces are in this
-path too (§2 #2): check their rating before they become the weakest link.
+### 3.2 The battery connector — ✅ MEASURED 2026-09-05
+
+The 3-pin XH is the pack's **2S centre tap**, the standard `B− / cell1+ / pack+` balance
+layout — *not* two paralleled `+` pins sharing current, which is what this section previously
+assumed. Pack unplugged, DC volts:
+
+| pair | reading | reads as |
+|---|---|---|
+| `−` → `+` | **8.4 V** | full pack |
+| `−` → middle | **~4.2 V** | cell 1 |
+| middle → `+` | **4.2 V** | cell 2 — this is the one that settles it |
+
+Two paralleled `+` pins would both read 8.4 V and 0 V between them. Half the pack voltage on the
+middle wire can only be a cell junction.
+
+**The HAT side**, everything unplugged, on ohms:
+
+| pair | reading | reads as |
+|---|---|---|
+| middle → `+`, middle → `−` | **0.5 MΩ** both | floating pin, read through board leakage — 8 µA at 4.2 V |
+| `+` → `−` | **45 kΩ** | bleed / divider path (the A4 sense divider is 20K/10K = 30K), **not a short** |
+
+So the mid tap can pass straight through: the HAT does nothing with it, and it is not commoned
+to either rail.
+
+⚠ **This was the hazard worth metering.** Had the HAT's middle pin been commoned to `+` or `−`,
+plugging in a centre-tapped pack would short one cell through two 3 A contacts. **Meter the HAT
+side before mating a new pack**, and match the plug by its housing key, never by wire colour —
+with a mid tap present, a reversed plug lands +8.4 V on the HAT's `−` pin.
+
+### 3.3 Calibrating for the 0.01 Ω shunt
+
+**The driver already does this — `ogma::hw::Ina219` (`pi_host/src/Ina219.cpp`).** What matters
+on the bench is the two things it cannot know:
+
+**`r_shunt` is calibration data, not 0.010.** At 10 mΩ, trace and solder resistance are a large
+fraction of the part, and a multimeter cannot measure it — probe leads alone are ~200 mΩ. Fit it
+against a known current and store it in the calib JSON. The authoritative current is derived
+host-side from raw shunt microvolts precisely so a later re-fit re-derives every recorded
+sample; the chip's own `CURRENT` register is programmed as a cross-check only.
+
+**PGA stays at /8 (±320 mV).** The tempting move is to narrow it to /2 for "more resolution" —
+there is none to gain. `SHUNT_V`'s LSB is **10 µV on every range**; the PGA sets full scale
+alone. At 0.01 Ω that is **1 mA per count** regardless, 0.04 % of the ~2.3 A steady draw. What
+narrowing does buy is a clipped inrush that looks like a real number. `hat_tool` flags it
+(`! PGA CLIPPED`) rather than letting it pass, but the right default is not to clip.
+
+| setting | value | why |
+|---|---|---|
+| bus range | 16 V | pack maxes at 8.4 V |
+| PGA | **/8, ±320 mV** | resolution is fixed at 10 µV; width is free, clipping is not |
+| BADC/SADC (telemetry) | 128-sample avg, ~68 ms | averages servo PWM ripple out of a human-read number |
+| SADC (inrush capture) | 12-bit single, 532 µs | ~1.9 kHz; bus channel dropped — pack voltage is not what browns out |
+
+**Cross-check before trusting a reading:** `hat_tool ina probe` compares the INA219's bus voltage
+against **A4** and exits non-zero if they disagree by more than 150 mV — two independent paths to
+one number. Then verify current against the inline DC meter (§2 #17–19).
+
+### 3.4 Bring-up — ✅ MEASURED 2026-09-05
+
+Module built per §3, I²C on `SDA`/`SCL` + 3V3 + GND to the HAT. `i2cdetect -y 1` shows `0x14`
+and `0x40`. First `hat_tool ina probe`, servos undriven:
+
+```
+INA219 0x40   r_shunt 0.01000 ohm   I_lsb 1000.0 uA   cal 4096
+  bus     7.968 V     shunt +4.690 mV (raw +469)
+  current +0.469 A    (chip reg +0.469 A, power 3.70 W)
+  A4      7.891 V     delta +0.077 V  -> AGREE (BOM 6.2 pass)
+```
+
+| check | result |
+|---|---|
+| shunt sign | **positive** — `Vin+`/`Vin−` orientation correct |
+| INA219 bus ⟷ A4 | **+77 mV**, inside the 150 mV gate — ~1 % on the 20K/10K divider, ordinary tolerance |
+| PGA clip / OVF | neither |
+| series drop from the R010 | **4.69 mV** at idle, vs ~47 mV the stock 0.1 Ω would have cost at this current |
+| idle draw | **0.469 A / 3.70 W** — Pi 5 + HAT regulator, servos undriven. This is the common-mode baseline to subtract before the energy term consumes it |
+| stability | 5 samples over 5 s: **463–471 raw** (±4 mA on 467 mA, < 1 %), bus flat at 7.964 V |
+
+**Still open:** `r_shunt` remains the 0.010 placeholder — the bench fit against a known current
+has not been done, so absolute current is uncalibrated (the *relative* record is already sound,
+since current is derived host-side from raw microvolts and a later re-fit re-derives every
+recorded sample). And the inrush capture the driver was written for — `hat_tool ina capture`
+across a pose recall — has not been run.
+
+⚠ **Unresolved: pack sag.** Open-circuit the pack read **8.4 V** (§3.2); under a 0.47 A load it
+reads **7.964 V**. If the pack is simply partly discharged that is nothing — 3.98 V/cell is a
+normal resting point. If it is genuinely 436 mV of sag at 0.47 A, that is ~0.9 Ω of source
+impedance, which at a 4 A transient would be 3.6 V and straight through the HAT's 6.0 V minimum.
+**RESOLVED same day:** the 8.4 V reading was taken *while the charger was connected* — the
+charger holding its CV endpoint, not an open-circuit pack. Unloaded resting voltage is ~7.96 V
+(`benchd` logged `vbat 8.32 V` charging at 18:29, `7.98 V` off charge at 20:27). There is no
+anomalous sag and no source-impedance problem.
 
 ---
 
@@ -311,3 +410,440 @@ reduces — and only after the authority check.
    2026-08-30**: the module drives GPIO22 (D3) directly and thousands of pings have been read
    without incident, so the HAT handles it. The high level was never metered with a scope;
    treat as "works", not as "characterised".
+
+### 3.5 Inrush across a pose recall — ✅ MEASURED 2026-09-05
+
+The measurement the driver was written for (ledger 2026-08-29: a pose recall browns the Pi out
+on the shared 5 V/3 A rail, and A4 is blind to the transient). `hat_tool ina capture 12` at
+**1880 Hz**, trigger at t = 2.0 s: `pose.set` → `stand`. **Robot on the floor, carrying its own
+weight.** `ogma_host` is senses-only and `benchd` never touches the INA219, so the capture tool
+owned the part; the pose went through `benchd`, so there was only ever one writer to the servos.
+
+### ⚠ 3.5.1 First, the trap: `benchd`'s deadman truncates any unattended pose move
+
+**`DEADMAN_MS = 1000`, refreshed by *any* verb** (`benchd.cpp:37`, `:371`). While a channel is
+armed, a client that falls silent for one second triggers a `rescue` — a slew back to the
+`rescue` pose. **A script that fires `pose.set` and then waits is not measuring a pose recall.**
+It measures ~1 s of the move, then the rescue moving the other way, superimposed.
+
+This produced two invalid captures before it was caught. The tell was in `benchd`'s own log:
+
+```
+1197228 pose.set     {"us":[1455,...]}      <- the trigger
+1198248 deadman      {"trips":35}           <- 1.02 s later
+1198248 rescue       {"pose":"rescue","why":"deadman"}
+1201128 pose.landed                          <- the RESCUE landed, not `stand`
+```
+
+35 `deadman` / 35 `rescue` / 35 `pose.landed` against **2** `pose.set`. The trap is that the
+truncated capture looks perfectly plausible — a smooth hump, no clipping, a sane peak.
+
+**Two rules follow.** Keep the deadman fresh — ping at ≤ 200 ms for the whole move. And
+**verify the landing**: read `servos[].current_us` back and compare it to the target. Both
+captures were disproved by that one check.
+
+### 3.5.2 The measurement
+
+Keepalive at 200 ms; `current_us` verified equal to the target on all 12 channels; no new
+`watchdog_trips`.
+
+| | value |
+|---|---|
+| baseline (rescue pose, on the floor) | **0.654 A** (0.615–0.959) |
+| **peak** | **2.481 A at +1.305 s** after the trigger |
+| peak as fraction of PGA /8 range | **2481 of 32000 counts — 7.8 %** |
+| move complete | ~+1.75 s |
+| **holding `stand`** | **0.625 A** — at or below baseline |
+| cost of standing up | **0.726 A·s** above baseline ≈ 5.7 J at 7.8 V |
+| `vcgencmd get_throttled` | **`0x0`** — no undervoltage, not even the sticky bits |
+
+**The stagger works, and this shows how.** The peak is not a spike at t = 0 but a rise cresting
+at **+1.305 s** — the end of the 100 ms × 12 launch window, where every channel is slewing at
+once. The mitigation was written blind ("staggered + gentle: protects the Pi's rail"); this is
+the first evidence of what it does.
+
+**Holding costs nothing.** A standing quadruped rests on its gearboxes: with no position error
+the servos draw no more than idle. Holding (0.625 A) is *below* the splayed rescue pose
+(0.654 A), where legs sit near their limits. **The energy term lives in the transitions, not in
+the postures** — worth knowing before an energy cost is wired to anything.
+
+**PGA /8 is confirmed free.** The worst loaded transient reached 7.8 % of full scale. Narrowing
+the range would have bought no resolution (§3.3: 10 µV LSB on every range) and risked clipping.
+
+⚠ **Two limits on this number.** The **5 V rail is the constrained one and this measures the
+battery side** — 2.481 A at ~7.8 V is what the pack delivers, not what the 3 A regulator sees,
+and the INA219 cannot separate the Pi's share from the servos'. And the capture loop polls I²C
+at 1.9 kHz, raising the Pi's own draw ~120 mA: **compare capture-to-capture, never against
+§3.4's 0.469 A telemetry baseline.**
+
+**Not yet measured:** the same recall *unloaded* on a stand, for a load-vs-no-load comparison.
+The stand attempt on 2026-09-05 was one of the two deadman-truncated captures and was discarded.
+
+---
+
+## 3.6 Servo duty budget — concurrency sweep, ✅ MEASURED 2026-09-05
+
+**Question:** the 2026-08-29 brownout happened when all 12 servos moved at once. Where is the
+boundary, so a duty budget can be set?
+
+**Design.** Lever = **K**, the number of servos commanded inside one 20 ms tick, issued as K
+back-to-back `servo.set` verbs (which arm channels independently and bypass the pose stagger
+entirely; measured send spread 0.3–3.6 ms, so they start on the same tick or the next). Held
+constant: +400 µs travel, the driver's default 40 µs/tick slew, the rescue pose as home
+(splayed and low — the robot cannot topple as K climbs), direction, and channel order.
+**Channel order is knees first, one per leg** (`0,3,6,9` → hip2 `1,4,7,10` → hip1 `2,5,8,11`),
+so every added servo is a different leg. **4 repeats per K, interleaved round-robin**, so
+battery drain spreads across every K instead of aliasing onto the trend.
+
+**Metrics.** Baseline, raw peak, p99, and the peak of a **10 ms moving average**. The last is
+the one to read: a rail sags on sustained draw, and a single 532 µs sample is not that. A first
+attempt reporting raw peak from **one** trial per K was discarded — its repeated K=4 control
+came back 1.064 A against 1.419 A, a spread as large as the whole K=1→K=10 trend.
+
+**Tripwire:** `vcgencmd get_throttled` after every trial, aborting on the first non-zero.
+
+| K | peak A (mean ± sd) | **10 ms A (mean ± sd)** | over baseline | throttled |
+|---|---|---|---|---|
+| 1 | 0.844 ± 0.052 | **0.773 ± 0.039** | +0.170 | `0x0` |
+| 2 | 0.894 ± 0.032 | **0.823 ± 0.020** | +0.218 | `0x0` |
+| 4 | 1.082 ± 0.092 | **1.017 ± 0.079** | +0.412 | `0x0` |
+| 6 | 1.289 ± 0.075 | **1.247 ± 0.064** | +0.650 | `0x0` |
+| 8 | 1.630 ± 0.078 | **1.565 ± 0.068** | +0.974 | `0x0` |
+| 10 | 2.024 ± 0.056 | **1.947 ± 0.046** | +1.356 | `0x0` |
+| 12 | 2.272 ± 0.141 | **2.191 ± 0.138** | +1.601 | `0x0` |
+
+Baseline ~0.60 A throughout; pack 7.63–7.80 V, n=28 trials.
+
+**≈ 0.135 A per concurrent servo** (least-squares over K=1–12). The relation is mildly convex —
+marginal cost per added servo rises from ~0.05 A at K=2 to ~0.19 A at K=10 — so a linear budget
+is slightly optimistic at the top end.
+
+### 3.6.1 The stagger is defeated by its own gentleness
+
+The deployed pose move is **not** one leg at a time. Concurrency during a staggered move is
+
+```
+  K_concurrent  ≈  min(12,  travel_time_ms / stagger_ms)
+  travel_time_ms = (travel_us / slew_us_per_tick) × 20 ms
+```
+
+With the pose defaults (`slew 12 us/tick`, `stagger 100 ms`), the `rescue`→`stand` recall
+travels up to 940 µs on a channel = **1567 ms**, against a launch window of 12 × 100 ms =
+**1200 ms**. The first channel is still moving when the last one starts: **every channel ends up
+in motion together.** The stagger delays full concurrency, it does not prevent it.
+
+This is corroborated by the two independent measurements agreeing: the loaded `stand` recall
+peaked at **2.481 A** (§3.5), and this sweep puts **K=12 at 2.19–2.27 A** unloaded. Same regime.
+The recall's peak at **+1.305 s** is exactly where the launch window closes and all 12 overlap.
+
+**The knob is the ratio, not the stagger alone.** To hold a real one-leg-at-a-time K=3 at the
+current pose slew, the stagger would need to be ~520 ms, not 100 ms.
+
+### 3.6.2 What this does NOT establish
+
+⚠ **The boundary was not reached.** K=12 produced no throttle event — not one non-zero
+`get_throttled` in 28 trials. The 2026-08-29 brownout involved something harsher than a 400 µs
+step from a splayed pose: more travel, real body load, or a stall. **A duty budget cannot be set
+from this alone**; what the sweep gives is the *slope*, not the limit.
+
+⚠ **This measures the battery side; the brownout is on the HAT's 5 V rail.** The INA219 cannot
+see that rail and cannot separate the Pi's share from the servos'. `get_throttled` remains the
+only direct evidence of the rail failing, and it is binary and sticky.
+
+⚠ **Slew is the unmeasured second axis**, and it cuts both ways: a faster slew raises per-servo
+current but shortens the overlap window. This sweep held slew fixed at 40 µs/tick. The budget is
+two-dimensional and only one dimension has been measured.
+
+**To actually find the boundary,** in increasing order of cost: sweep travel and slew upward at
+K=12 until `get_throttled` moves; or put a sense wire on the 5 V rail and stop inferring it.
+
+---
+
+## 3.7 Where the cliff is — source impedance, ✅ MEASURED 2026-09-05
+
+The 2026-08-29 event was a **hard Pi shutdown**, not a throttle. That rules out
+`get_throttled` as the instrument: an unclean shutdown takes the reading with it, and the
+approach risks the SD card. **Pack sag is the leading indicator** — the HAT's regulator drops
+out below 6.0 V in — so `hat_tool ina sag` was added (shunt AND bus, both 12-bit, ~940 Hz).
+
+Fitting pack volts against current across a K=12 transient (a load already run 4× safely):
+
+```
+n=4700 samples   I 0.598-2.568 A   V 7.012-7.792 V
+fit:  V = 8.025 - 0.3943 * I        R_source = 394 mohm
+```
+
+| | value |
+|---|---|
+| open-circuit intercept `V0` | **8.025 V** (~4.01 V/cell, roughly half charge) |
+| **source impedance** | **394 mΩ** — pack + wiring + XH contacts + shunt |
+| sag already present at the K=12 peak | **1.01 V** (2.568 A → 7.012 V) |
+| **current at which the pack reaches 6.0 V** | **≈ 5.13 A** |
+| headroom from the K=12 peak | **2.57 A** |
+
+The fit predicts the observed minimum to 1 mV (8.025 − 0.394 × 2.568 = 7.013 vs 7.012 measured).
+
+**394 mΩ is high, and that is the real finding.** Cells account for maybe 100–160 mΩ of it
+(2S 18650 at 50–80 mΩ each). **The remaining ~250 mΩ is wiring, connector and contacts** — the
+single 3 A XH contact and cable gauge flagged in §3.1. Every milliohm removed there is bought
+back directly as brownout headroom, and it is the cheapest fix available.
+
+⚠ **Scope of the 5.13 A figure.** It is a **2× extrapolation** from 2.57 A; Li-ion series
+resistance is near-constant over this range, so it is defensible, but it is not measured. It is
+also **state-of-charge specific** — at a lower SoC `V0` falls and `R` rises, so the cliff moves
+closer. And 6.0 V is the HAT's *stated* input minimum; the actual regulator dropout may sit
+either side of it.
+
+### 3.7.1 The budget this implies — and the lever it is NOT
+
+**At the driver's default 40 µs/tick slew, concurrency is not the constraint.** §3.6 measured
+all 12 servos at once as 2.19–2.57 A, which is **half** the 5.13 A cliff. The historical
+brownout happened at **full speed**, and the slew limiter is exactly what "full speed" bypasses:
+40 µs/tick caps a servo at 2000 µs/s, well under an MG90S's own maximum velocity.
+
+**So the duty budget is a slew cap, not a concurrency cap.** §3.6's concurrency sweep found no
+boundary because it held the variable that matters fixed.
+
+A first cut, to be replaced by measurement:
+
+| quantity | value |
+|---|---|
+| hard limit (pack → 6.0 V, at this SoC) | 5.13 A |
+| working budget with margin | **≤ 3.5 A peak** (pack ≥ 6.65 V) |
+| cost per concurrent servo at slew 40 | ~0.135 A (§3.6) |
+| measured worst case so far, K=12 at slew 40 | 2.57 A ✅ inside budget |
+
+**Not yet measured: current vs slew rate.** That curve can be mapped entirely *below* the cliff
+— escalate slew at fixed K=12 and stop at 3.5 A — which yields the budget without reproducing
+the shutdown. **A stall hypothesis was raised and withdrawn:** the X pose's out-of-range 2500 µs
+entries are UI slider artifacts, and the servo map clamps to a calibrated in-range limit, so
+nothing drives into a mechanical stop.
+
+---
+
+## 3.8 Slew is the lever — and the 5 V rail is the real cliff, ✅ MEASURED 2026-09-05
+
+Sweeping **pose slew** at fixed motion (`rescue`↔`X`, `--pose-stagger-ms 0` so all 12 channels
+start on the same tick), 3 reps each, `hat_tool ina sag` at 940 Hz.
+
+| slew µs/tick | peak A (mean of 3) | min pack V | note |
+|---|---|---|---|
+| 12 | *1.64* | *7.37* | ⚠ **invalid** — 2000 µs at 12 µs/tick takes 3.3 s, longer than the 2.0 s window, so the servos reversed mid-flight |
+| 20 | 1.16 | 7.55 | |
+| 32 | 1.38 | 7.47 | |
+| 50 | **1.90** | 7.24 | |
+| 80 | 2.61 | 6.88 | |
+| 125 | 2.76 | 6.89 | |
+| 200 | 2.90 | 6.86 | **saturated** (vinyl) |
+| 320 | 2.86 | 6.84 | |
+| 500 | 2.96 | 6.81 | |
+| 800 | 2.93 | 6.83 | ⚠ **leather couch** from here |
+| 1300 | 3.04 | 6.70 | ⚠ leather couch |
+| 2000 | — | — | ⚠ leather couch · **💀 hard Pi shutdown, unclean reboot** |
+
+Within-point repeatability was excellent (e.g. 1.639 / 1.642 / 1.652 A), far tighter than §3.6.
+
+**Current saturates near 3.0 A above ~200 µs/tick.** Past that the limiter stops limiting: the
+servos are already at their own maximum velocity, and raising the slew number changes nothing.
+So "full speed" is reached at slew ≈ 200, not at 2000.
+
+### 3.8.1 The cliff is the 5 V regulator's current limit, not pack sag
+
+§3.7 extrapolated a pack-sag cliff at **5.13 A** (pack → 6.0 V). **The collapse happened at a
+pack voltage never observed below 6.70 V**, and at a measured current of ~3.0 A. The pack-sag
+model does not explain it — it was answering the wrong question, exactly as §3.7's own caveat
+warned.
+
+The arithmetic that does fit (**inference, not measurement** — the 5 V rail is not instrumented):
+
+```
+  slew 1300:  3.04 A x ~6.8 V  =  20.7 W drawn from the pack
+  less Pi + regulator idle     =  -4.6 W
+  servo share                  =  ~16 W  ->  3.2 A at 5 V even at 100% efficiency
+  plus the Pi's own 5 V draw   ->  ~3.4 A on a rail rated 3 A
+```
+
+**We were over the HAT's 3 A rating from slew ≈ 200 onward** and got away with it until a
+single-tick full-scale step on all 12 channels at once. That also explains 2026-08-29: the
+failure is a **regulator current limit**, which trips fast and hard, rather than a voltage sag,
+which would have shown as a droop first.
+
+### 3.8.2 The duty budget
+
+| slew µs/tick | peak battery A | verdict |
+|---|---|---|
+| ≤ 50 | ≤ 1.90 | ✅ **the budget** |
+| 80 | 2.61 | ⚠ at the edge |
+| ≥ 200 | ~3.0 | ❌ over the 5 V rail's rating |
+
+**The deployed defaults are already inside it** — pose slew 12, `NORMAL_SLEW_US` 40. The danger
+is any path that bypasses slew limiting entirely. **The budget is a slew cap; concurrency (§3.6,
+2.19–2.57 A for all 12 at slew 40) never was the binding constraint.**
+
+⚠ **Every number in that budget was measured on low-friction vinyl (§3.8.3) and is therefore
+optimistic.** Re-verify slew 50 and 80 on a high-friction surface before relying on them.
+
+### 3.8.3 The surface changed, and it splits the sweep in two
+
+**Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
+couch.** The operator moved the robot mid-sweep because the X pose at high slew was slamming the
+chassis into the ground, and reported visibly higher draw afterward.
+
+**Why friction changes the electrical load.** On slippery vinyl the feet slide when a leg pushes:
+the body does not rise, and the servo turns against little torque. On grippy leather the foot
+holds, so the servo must actually lift the chassis. **Grip converts free motion into work**, and
+work is current. The couch was also compliant and slightly taller, which changes leg geometry
+on top of the friction.
+
+**What survives.** The saturation finding rests on slew 200/320/500 (2.90 / 2.86 / 2.96 A), all
+**vinyl** — one surface, so the plateau is real. Curiously the couch points (800: 2.93, 1300:
+3.04) sit right on that same plateau, which suggests the surface effect is small *once the
+servos are velocity-saturated*: at max velocity the current is dominated by acceleration rather
+than by steady load.
+
+⚠ **What does NOT survive: the 1300 → 2000 comparison.** Two things differ between the last
+surviving point and the collapse — a slew-limited ramp becomes a **single-tick full-scale step**
+on all 12 channels at once, **and** the robot is on a grippy compliant surface. Two variables,
+one outcome: **the collapse cannot be attributed to either.** The step is the better suspect (a
+simultaneous full-scale error draws startup current from 12 stalled rotors at the same instant,
+plausibly faster than 940 Hz sampling can even see), but that is a hypothesis, not a result.
+
+**To separate them, without approaching collapse:** re-run slew 320 / 500 / 800 on the grippy
+surface and compare against the vinyl values at the same slews. That isolates friction at
+constant slew and stays on the measured plateau.
+
+⚠ **Mechanical, not electrical:** at high slew the X pose slams the chassis into the ground.
+That is a hardware risk independent of the rail, and a reason to cap slew that has nothing to do
+with current.
+
+⚠ **Still the cheapest headroom:** the ~250 mΩ of wiring and connector impedance (§3.7).
+
+⚠ **Write captures OUTSIDE `/tmp`.** It is tmpfs. The brownout rebooted the Pi and destroyed
+every raw capture in this sweep, leaving only the printed summary — so the surface-change
+confound could not be tested afterward. **A brownout experiment must persist its evidence
+outside the thing it is trying to break.**
+
+---
+
+## 3.9 Friction isolation — the slew cap only works on a slippery floor, ✅ MEASURED 2026-09-05
+
+Same slews, same motion (`rescue`↔`X`, stagger 0 → K=12), same window, 3 reps — **surface as the
+only lever**, vinyl → leather couch.
+
+| slew | vinyl peak A | **couch peak A (mean ± sd)** | Δ | couch min V |
+|---|---|---|---|---|
+| 50 | 1.90 | **2.615 ± 0.113** | **+0.72 (+38 %)** | 6.82 |
+| 80 | 2.61 | **2.667 ± 0.112** | +0.06 (+2 %) | 6.80 |
+| 320 | 2.86 | **2.907 ± 0.090** | +0.05 (+2 %) | 6.73 |
+| 500 | 2.96 | **2.829 ± 0.026** | −0.13 (−4 %) | 6.78 |
+
+Baseline (0.59–0.63 A) and holding current (0.55–0.73 A) are unchanged by surface. **The entire
+effect is in the transition.**
+
+### 3.9.1 What this means: the lever depends on the floor
+
+**On the couch, current is flat at ~2.6–2.9 A from slew 50 all the way to 500.** Slew stops
+being a lever entirely. The mechanism is friction: on vinyl the feet slide, the body never
+rises, and a slow move costs almost nothing — so on that surface current tracks velocity. On
+leather the foot grips, so *any* move must lift the chassis, and load torque sets the current
+regardless of how slowly it is done.
+
+**This overturns §3.8.2's budget.** `slew ≤ 50` was the most surface-optimistic point in the
+whole sweep: 1.90 A on vinyl, **2.62 A on the couch — a 38 % rise, landing it at the same level
+as slew 320.** There is no slew setting that makes the `rescue`↔`X` transition cheap on a grippy
+surface; it costs ~2.9 A and sags the pack to 6.73 V however it is commanded.
+
+**The lever that survives both surfaces is the STAGGER.** Every measurement in §3.8 and §3.9 ran
+at `--pose-stagger-ms 0` — full concurrency. Staggering divides the peak by spreading channel
+starts in time, and unlike slew that works whatever the load per servo is. But §3.6.1 showed the
+deployed stagger is **defeated by its own gentleness**: at pose slew 12, travel time per channel
+(~1.5 s) far exceeds the 1.2 s launch window, so every channel ends up moving together anyway.
+
+| surface | slew cap | stagger |
+|---|---|---|
+| low friction (vinyl) | ✅ effective | ✅ effective |
+| high friction (leather) | ❌ **no effect** | ✅ effective |
+
+**Set the budget on stagger, sized against travel time (§3.6.1), not on slew.**
+
+### 3.9.2 The second shutdown was a STALL, not a budget overrun
+
+Slew 800 on the couch took the Pi down. **The operator observed a leg catching on a seam at the
+moment of the reset.** A snagged servo is a locked rotor: it draws several times its running
+current, indefinitely, and no duty budget prevents it because the trigger is terrain, not a
+command.
+
+⚠ **This is a distinct failure path and it deserves its own mitigation** — stall detection and
+release. The machinery is already present but unused for this: `ServoDriver` tracks
+`time_at_limit_s` per channel, and the INA219 now resolves a current step at 940 Hz (§3.7).
+A stalled channel held against an obstruction is exactly what those two together can see.
+
+⚠ **A stall also re-opens the mechanism §3.5 dismissed.** The earlier stall hypothesis was
+correctly withdrawn — the servo map clamps to in-range limits, so commands never drive into a
+stop. **Terrain does what commands cannot.**
+
+⚠ **`fsync` or lose it.** Captures were moved out of `/tmp` after the first brownout, but the
+slew-800 files are still **0 bytes** and the run log lost its final lines: `python3 -u` and
+`fprintf` are unbuffered *at the application level only*, and the page cache dies with the
+power. **Evidence from a brownout experiment must be fsync'd per record, or streamed off-box.**
+
+---
+
+## 3.10 Current as a telemetry channel — ✅ SHIPPED 2026-09-05
+
+`ogma_benchd` now owns the INA219 and publishes it in every 10 Hz frame. **Instrument only:
+nothing in the daemon or the brain consumes it.** With the part absent the frame carries
+`"ina": null` and every other behaviour is unchanged.
+
+```json
+"ina": {"ok":true,"i_a":-0.413,"v":8.084,"i_ema":-0.463,"i_peak":0.0,"i_max":0.0,
+        "charge_as":-87.9,"energy_j":-710.0,"r_shunt":0.01,"charging":true,"resync":false,"errors":0}
+```
+
+| field | what it is |
+|---|---|
+| `i_a`, `v` | instantaneous current and the INA219's **own** bus voltage — a second path to a number A4 also reports |
+| `i_ema` | **the slow metric**: τ = 30 s. Instantaneous current says nothing about duty |
+| `i_peak` | decaying peak-hold, τ = 60 s — the *recent* worst, not a number stuck on one old spike |
+| `i_max` | worst since daemon start |
+| `charge_as`, `energy_j` | what the robot has actually spent — the budget itself |
+| `charging` | see below |
+| `resync` | another process had reprogrammed `CONFIG`; this frame re-applied it |
+
+Time constants are in **seconds, converted per-sample** (`1 − exp(−dt/τ)`), so the numbers keep
+their meaning if the telemetry rate ever changes.
+
+**Consumers.** `picrawler-dash` gains a `power` line and a `slow` line. The Godot bench
+dashboard gains a `power` row and a **60 s scrolling graph** (`scripts/current_graph.gd`) sitting
+directly under `vbat` — the pair is the diagnostic, since sag without draw is a tired pack and
+draw without sag is a healthy one. The graph draws each column as the **min–max** of its samples
+(a per-column mean would smooth away the spike it exists to show), always keeps **zero and the
+3 A rail line** on screen, and runs a **pose-move activity band** along the bottom. That band is
+the point: a current trace with no record of what the body was doing is just a wiggle.
+
+⚠ **The 3 A line is the HAT's regulator rating — a datasheet fact, not the duty budget.** §3.9
+measured the budget to be surface-dependent (1.90 A on vinyl, 2.62 A on leather for the same
+move), so drawing a fixed budget line in an instrument people trust would be a lie.
+
+### 3.10.1 Charging runs backwards through the shunt
+
+First live reading was **−0.354 A** with `vbat` climbing: the charger feeds the pack **through
+the HAT input we instrumented**, so charge current crosses the shunt in reverse.
+
+- **Useful:** the sign is a plugged-in detector, and a real interoceptive state the robot could
+  eventually sense for itself.
+- **Dangerous:** while it is true, **every energy number is confounded** — the accumulators run
+  negative and any "what did that movement cost" reading is measuring the charger. Hence the
+  explicit `charging` flag and the banner on both dashboards.
+- `i_peak` / `i_max` floor at zero, because peak means *worst draw*; a signed peak-hold would
+  quietly report the charge rate instead.
+
+### 3.10.2 ⚠ Stop `benchd` before any high-rate capture
+
+benchd re-asserts `CONFIG` whenever it finds it changed (`Ina219::ensure_configured`), which
+keeps its own telemetry honest — **verified: 8 resync frames during a 2 s `hat_tool ina sag`,
+and zero frames with implausible bus voltage.** But the two processes then fight over the
+register, so **`hat_tool ina capture` / `sag` run against a live benchd is mutually corrupting.**
+
+**`sudo systemctl stop ogma-benchd` before a capture**, as the §3.8 slew sweep already did. Every
+capture in §3.5–§3.9 predates benchd owning the part and is unaffected.
