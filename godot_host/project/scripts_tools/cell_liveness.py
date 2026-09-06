@@ -53,12 +53,15 @@ def main() -> int:
     ap.add_argument("--world-seed", type=int, default=1000)
     ap.add_argument("--vary-world-seed", type=int, default=None, help="draw a --vary-world world from this seed")
     ap.add_argument("--explore-seed", type=int, default=11)
+    ap.add_argument("--metadata", action="append", default=[], help="k=v world metadata override (e.g. obstacle_density=0.06)")
     a = ap.parse_args()
 
     overrides = {}
     for kv in a.arm.split(",") if a.arm else []:
         k, _, v = kv.partition("="); overrides[k.strip()] = _coerce(v.strip())
     world = gen_world(a.vary_world_seed) if a.vary_world_seed is not None else None
+    for kv in a.metadata:
+        k, _, v = kv.partition("="); world = {**(world or {}), k.strip(): _coerce(v.strip())}
     res, fs = patch_config(a.config, overrides, a.explore_seed, f"liveness_{os.getpid()}", world=world, planner_seed=a.explore_seed + 7919)
     cfg = json.load(open(fs))
     try:
