@@ -1193,5 +1193,29 @@ Two things the seeds say that seed 2 could not: coverage is **bimodal** under th
 seeds hold 14–25 cells, two tour 49–60), so the orbit and the tour are both attractors and
 which one a seed finds is part of the next question; and the wall contacts that remain (two
 seeds at 52 and 85 per minute) are the touring seeds — the avoidance is weakest exactly where
-the coverage is best, which is the arbitration question in its next form. The moved-wall (d)
-test and the wander rule on R26 follow at n = 6.
+the coverage is best, which is the arbitration question in its next form.
+
+**The moved-wall (d) test at n = 6** (`--arena-shift 1100`, 1800 s, the control phase split
+at the shift):
+
+| arm | cells before \| after | walls/min before \| after | map nodes before \| after |
+|---|---|---|---|
+| R25 | 28 \| 128 ± 277 (one seed leaves the arena through the moved wall) | 296 \| 351 ± 204 | 52 \| 47 |
+| **R26** | 29 ± 20 \| 27 ± 19 | 47 ± 69 \| **29 ± 32** | 31 ± 16 \| 28 ± 10 |
+
+R26 is robust to the change (its contacts fall after the wall moves where R25's rise) and it
+does **not** re-explore: coverage holds and the map does not grow after the shift. The (d)
+bar's re-inference half is `NULL` for R26 as it stands — the body keeps its habits in the
+new room rather than mapping it — which is the coverage question again: what would make a
+moved wall a *direction*. Scene note: after the shift one R25 seed escaped the arena (a
+522 m² span), so the shifted scene has a gap the (d) reading must exclude or the metric must
+clip to the arena.
+
+**The wander rule on R26 at n = 6** (`--wander-bored 8 --wander-turn 90`, paired against R26
+without it): identical runs on five of six seeds, one seed changed (walls +80/min, nodes +20).
+The boredom trigger — the map's surprise below 0.8 of its own long average for 8 s — almost
+never fires under R26, whose map stays 27 % novel because the body keeps touring; the rule
+is inert here (`NULL`), and where it fired it bought nodes with wall contacts. What §17.4
+called the arbitration question now has its measured shape: R26 already has coverage and
+avoidance in one body without a wander rule; what it lacks is a *reason to go somewhere*
+(a drive with reach), which is the Cell recipe's pragmatic loop, not a heading jump.
