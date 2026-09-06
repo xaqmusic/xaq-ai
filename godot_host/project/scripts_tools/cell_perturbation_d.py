@@ -141,9 +141,10 @@ def main():
     results = {"lesion": [], "control": []}
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
-            futs = {ex.submit(run, res, args.ticks, t1, t2, ws, obs, lab): arm for arm, res, ws, obs, lab in jobs}
+            futs = {ex.submit(run, res, args.ticks, t1, t2, ws, obs, lab): (arm, lab) for arm, res, ws, obs, lab in jobs}
             for fut in concurrent.futures.as_completed(futs):
-                results[futs[fut]].append(fut.result())
+                arm, lab = futs[fut]; r = fut.result(); r["label"] = lab
+                results[arm].append(r)
     finally:
         for fs in tmp:
             try: fs.unlink()
@@ -151,7 +152,8 @@ def main():
 
     print(f"\n===== (d) PERTURBATION [{args.lesion}] — n={args.n}, {args.ticks} ticks, lesion window [{t1},{t2})"
           f"{', varied worlds' if args.vary_world else ', one world'}{' (legacy seeding)' if args.legacy_seeding else ''} =====")
-    print(f"    phases (ticks each ~{t1}): PRE (vision on) | LESION (blind) | POST (restored)\n")
+    L = args.lesion
+    print(f"    phases (ticks each ~{t1}): PRE (intact) | LESION ({L} on) | POST (restored)\n")
     def col(rows, i, key): return [r[key][i] for r in rows if r[key][i] is not None]
     def m(v): return f"{statistics.mean(v):.2f}" if v else "-"
     for arm in ("lesion", "control"):
@@ -162,9 +164,9 @@ def main():
         hf = [col(rows, i, "hfood_frac") for i in range(3)]
         e  = [col(rows, i, "eats") for i in range(3)]
         print(f"  [{arm:7}] mean food-DIST (m): PRE {m(fd[0])}  |  LESION {m(fd[1])}  |  POST {m(fd[2])}   "
-              f"(vision cut → can't approach → DIST RISES)")
-        print(f"  {'':10} eats/phase: PRE {m(e[0])} | LES {m(e[1])} | POST {m(e[2])}   "
-              f"food-in-view: PRE {m(hf[0])} | LES {m(hf[1])} | POST {m(hf[2])}  (LES≈0 = vision confirmed blind)")
+              f"(a load-bearing sense: DIST RISES under the lesion, falls after)")
+        print(f"  {'':10} eats/phase: PRE {m(e[0])} | LES {m(e[1])} | POST {m(e[2])}"
+              + (f"   food-in-view: PRE {m(hf[0])} | LES {m(hf[1])} | POST {m(hf[2])}  (LES≈0 = vision confirmed blind)" if L in ("vision", "stick") else ""))
     # verdict — DENSE metric = mean food-distance. Degradation = dist RISES under lesion; recovery = FALLS back.
     L = [r for r in results["lesion"] if r["diag"][0] > 0]
     C = [r for r in results["control"] if r["diag"][0] > 0]
@@ -177,9 +179,22 @@ def main():
         if cles is not None:
             print(f"      contrast @ lesion phase: lesion {les:.2f} m vs control {cles:.2f} m  "
                   f"(lesion further from food = vision was the approach driver)")
+        # paired by world: lesion − control at the lesion phase, and the lesion arm's own (lesion − pre)
+        # minus the control's drift over the same phases, each with sd and paired t (REPORTS.md §7)
+        Lm = {r["label"].replace("arm=lesion ", ""): r for r in L}; Cm = {r["label"].replace("arm=control ", ""): r for r in C}
+        keys = sorted(set(Lm) & set(Cm))
+        d_les = [Lm[k]["mean_fdist"][1] - Cm[k]["mean_fdist"][1] for k in keys if Lm[k]["mean_fdist"][1] is not None and Cm[k]["mean_fdist"][1] is not None]
+        d_deg = [(Lm[k]["mean_fdist"][1] - Lm[k]["mean_fdist"][0]) - (Cm[k]["mean_fdist"][1] - Cm[k]["mean_fdist"][0]) for k in keys
+                 if None not in (Lm[k]["mean_fdist"][0], Lm[k]["mean_fdist"][1], Cm[k]["mean_fdist"][0], Cm[k]["mean_fdist"][1])]
+        def tstat(v):
+            if len(v) < 2: return "n<2"
+            import math; sd = statistics.stdev(v); t = statistics.mean(v) / (sd / math.sqrt(len(v))) if sd else float("inf")
+            return f"{statistics.mean(v):+.2f} m  sd {sd:.2f}  paired-t {t:+.2f}  sign {sum(x>0 for x in v)}+/{sum(x<0 for x in v)}−  n={len(v)}"
+        print(f"      PAIRED lesion − control @ lesion phase (food distance): {tstat(d_les)}")
+        print(f"      PAIRED degradation net of the control's drift:           {tstat(d_deg)}")
         ok = deg > 0 and rec > 0 and (cles is None or les > cles)
-        print(f"      {'PASS' if ok else 'WEAK/NULL'}: perturbation → degradation (can't approach) → recovery"
-              f" — the (d) bar for a load-bearing inference loop")
+        print(f"      {'PASS' if ok else 'WEAK/NULL'} on the point estimates: perturbation → degradation → recovery"
+              f" — the (d) bar for a load-bearing inference loop; read the paired lines for the power")
     return 0
 
 
