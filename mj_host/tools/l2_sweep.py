@@ -106,7 +106,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     cells, xs, ys, winners = set(), [], [], set()
     path = 0.0; prev = None
     wall_eps = contact = n = 0; prev_wall = 0
-    tooclose = tle_sum = 0.0; novel = 0; escaped = 0
+    tooclose = tle_sum = 0.0; novel = 0; escaped = 0; steer_avoid = steer_play = 0
     ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
           "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
     for line in p.stdout.splitlines():
@@ -129,6 +129,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         if prev is not None: path += math.hypot(x - prev[0], y - prev[1])
         prev = (x, y)
         w = int(r.get("wall", 0)); contact += w
+        st_ = int(r.get("steer", 0)); steer_avoid += (st_ == 2); steer_play += (st_ == 1)
         if w and not prev_wall: wall_eps += 1
         prev_wall = w
         tofs = r.get("tofs") or [0, 0, 0, 0]; tooclose += float(tofs[3]) if len(tofs) > 3 else 0.0
@@ -146,7 +147,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "tooclose": tooclose / max(1, n), "path_m": path, "cells": len(cells),
         "span": (max(xs) - min(xs)) * (max(ys) - min(ys)) if xs else 0.0,
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
-        "escaped": escaped,
+        "escaped": escaped, "avoid_pct": 100.0 * steer_avoid / max(1, n), "play_pct": 100.0 * steer_play / max(1, n),
     })
     return out
 
@@ -175,6 +176,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) // 2))
     ap.add_argument("--host-args", default="")
     ap.add_argument("--arm", action="append", default=[])
+    ap.add_argument("--arm-base", default=None, help="the config --arm derives from (default: the first config)")
     ap.add_argument("--logdir", default=None)
     ap.add_argument("--scene", default=str(REPO / "mj_host/models/microduck/scene_arena.xml"),
                     help="the level-2 scene (default: the 2 m arena -- the host's own default is the OPEN floor, where 'zero wall contacts' means no walls)")
@@ -186,7 +188,8 @@ def main():
     logdir = Path(args.logdir) if args.logdir else None
     tmp = Path(tempfile.mkdtemp(prefix="l2sweep_"))
     cfgs = [Path(c).resolve() for c in args.configs]
-    cfgs += [make_arm(cfgs[0], spec, tmp) for spec in args.arm]
+    arm_base = Path(args.arm_base).resolve() if args.arm_base else cfgs[0]
+    cfgs += [make_arm(arm_base, spec, tmp) for spec in args.arm]
     ctrl = args.control_from if args.control_from is not None else control_from_default(cfgs[0])
     host_args = tuple(args.host_args.split())
     print(f"level-2 sweep: {len(cfgs)} arms × {args.seeds} seeds × {args.secs} s, control phase from {ctrl:.0f} s, scene {Path(args.scene).name}, reset noise {args.noise}, host args {host_args or '-'}", file=sys.stderr)
@@ -203,7 +206,7 @@ def main():
     print(f"\n=== LEVEL-2 A/B, {args.seeds} seeds × {args.secs} s, control phase {ctrl:.0f}–{args.secs} s ===")
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
             ("cells", "cells"), ("span", "span m²"), ("nodes", "nodes"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
-            ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped")]
+            ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

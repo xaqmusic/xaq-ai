@@ -102,13 +102,14 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         return (g && g->values.size() > 0) ? double(g->values[0]) : -1.0;
     };
     const double g_avoid = gain_of("arbiter.gain.klino"), g_play = gain_of("arbiter.gain.play");
+    last_steer_ = 0;
     const char* bearing_topic = "percept.play_bearing";
     if (g_avoid >= 0.0 || g_play >= 0.0) bearing_topic = (g_avoid > 0.5) ? "percept.avoid_bearing" : ((g_play > 0.5) ? "percept.play_bearing" : nullptr);
     if (bearing_topic)
     if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(bearing_topic))) {
         if (pb->values.size() >= 2) {
             const double cx = pb->values[0], cy = pb->values[1];
-            if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); ++play_steers_; if (g_avoid > 0.5) ++avoid_steers_; }
+            if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); ++play_steers_; last_steer_ = (g_avoid > 0.5) ? 2 : 1; if (g_avoid > 0.5) ++avoid_steers_; }
         }
     }
     // Wander: boredom is the map's surprise sitting below 0.8 of its own long average

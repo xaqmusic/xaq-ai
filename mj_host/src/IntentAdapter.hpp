@@ -63,6 +63,7 @@ public:
     // reference behind sense slot 10 each tick -- novelty becomes a direction.  By absence: a
     // graph without such a loop is byte-identical (the reference stays the slow running average).
     int play_steers() const { return play_steers_; }
+    int last_steer() const { return last_steer_; }   // 0 none, 1 play, 2 avoidance (this tick)
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
 
@@ -94,6 +95,7 @@ private:
     bool have_yaw_ = false;
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
+    int last_steer_ = 0;
 };
 
 }  // namespace mjhost
