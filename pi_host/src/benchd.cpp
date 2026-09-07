@@ -11,6 +11,7 @@
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
 #include "ogma/hw/Ina219.hpp"
+#include "ogma/hw/Vl53l0x.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zmq.h>
@@ -54,6 +55,10 @@ int g_pose_stagger_ticks = 5;              // 100 ms between channel starts
 // large fraction of the part, and a meter cannot reach it through ~200 mOhm of leads.
 // Placeholder until the bench fit; override with --r-shunt.
 double g_r_shunt = 0.01;
+// CALIBRATION DATA too (Vl53l0x.hpp): the ToF is recessed up inside the chassis so the
+// belly's 0-56 mm range clears the part's unreliable short end, and only a tape measure
+// knows by how much.  0 = flush, which is the pre-bench default and not a fitted value.
+double g_tof_offset_mm = 0.0;
 
 int64_t mono_ms() {
     timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -114,6 +119,29 @@ struct State {
     double  ina_energy  = 0.0;        // J drawn since start
     int64_t ina_last_ms = 0;
     int     ina_errors  = 0;
+    // Belly clearance (BOM 2 #4).  Instrument only -- nothing in this daemon steers on
+    // it.  null when the part is absent, and benchd then behaves exactly as before.
+    std::unique_ptr<Vl53l0x> tof;
+    bool    tof_ok        = false;
+    uint16_t tof_raw_mm   = 0;        // as the chip reported it, before the offset
+    double  tof_m         = 0.0;      // belly clearance, m -- raw minus the mount offset
+    bool    tof_valid     = false;
+    std::string tof_status = "noupdate";
+    double  tof_signal    = 0.0;      // Mcps returned off the target
+    double  tof_ambient   = 0.0;      // Mcps the room contributed
+    double  tof_spads     = 0.0;
+    double  tof_m_ema     = 0.0;      // m, tau 30 s: the SLOW metric -- how high it rides
+    // The worst clearance, decaying.  A MIN-hold, not a peak: on this channel LOW is the
+    // dangerous end, so the peak-hold that serves current would report the safe extreme.
+    double  tof_m_min     = 0.0;      // m, tau 60 s decaying worst
+    double  tof_m_min_all = 0.0;      // m, worst since start
+    // Fraction of readings the part itself rejected, tau 30 s.  This is the channel's
+    // own honesty meter: a belly sensor that is 40 % invalid is not a channel, and the
+    // millimetres alone cannot say so -- an invalid reading looks like a good one.
+    double  tof_bad_frac  = 0.0;
+    int64_t tof_last_ms   = 0;
+    int64_t tof_fresh_ms  = 0;        // when a measurement last actually arrived
+    int     tof_errors    = 0;
     TickBudget  budget{TICK_HZ, 25};    // 25 ticks = 0.5 s: fast enough to read as a meter
     int  load_cpu_us   = 0;             // synthetic load, gain-0 by default (see the 'load' verb)
     int  load_block_us = 0;
@@ -201,6 +229,56 @@ struct State {
         }
     }
 
+    // Caller holds m.  NON-BLOCKING BY CONSTRUCTION: the part free-runs at ~30 Hz and
+    // this polls at 10, so a measurement is normally waiting -- but when it is not, this
+    // returns immediately rather than waiting out a 33 ms conversion while holding the
+    // bus mutex the 50 Hz servo tick needs.  A ToF must never cost a servo deadline.
+    void sample_tof() {
+        if (!tof) return;
+        try {
+            Vl53l0x::Reading r;
+            const int64_t now = mono_ms();
+            if (!tof->read_ready(r)) {
+                // Not an error: the previous reading stands, and tof_fresh_ms ages so a
+                // stalled part is visible as staleness rather than as a frozen number.
+                tof_ok = true;
+                return;
+            }
+            tof_ok      = true;
+            tof_raw_mm  = r.raw_mm;
+            tof_m       = r.distance_m;
+            tof_valid   = r.valid;
+            tof_status  = Vl53l0x::status_name(r.status);
+            tof_signal  = r.signal_mcps;
+            tof_ambient = r.ambient_mcps;
+            tof_spads   = r.spads;
+            const double dt = tof_last_ms ? std::min(1.0, (now - tof_last_ms) / 1000.0) : 0.0;
+            const double a_bad = dt > 0.0 ? 1.0 - std::exp(-dt / 30.0) : 1.0;
+            tof_bad_frac += a_bad * ((r.valid ? 0.0 : 1.0) - tof_bad_frac);
+            // The slow metrics track only VALID readings.  Folding the far-limit stand-in
+            // for a failed measurement into a clearance average would report the belly
+            // rising every time the sensor lost the floor -- exactly backwards.
+            if (r.valid) {
+                if (dt > 0.0 && tof_fresh_ms) {
+                    const double a_ema = 1.0 - std::exp(-dt / 30.0);
+                    const double a_min = 1.0 - std::exp(-dt / 60.0);
+                    tof_m_ema += a_ema * (tof_m - tof_m_ema);
+                    // Decay the min-hold back UP toward the current reading, so it
+                    // reports the recent worst rather than the worst ever.
+                    tof_m_min = std::min(tof_m, tof_m_min + a_min * (tof_m - tof_m_min));
+                } else {
+                    tof_m_ema = tof_m; tof_m_min = tof_m; tof_m_min_all = tof_m;
+                }
+                if (tof_m < tof_m_min_all) tof_m_min_all = tof_m;
+                tof_fresh_ms = now;
+            }
+            tof_last_ms = now;
+        } catch (const std::exception& e) {
+            tof_ok = false;
+            if (++tof_errors % 50 == 1) record("tof_error", {{"what", e.what()}, {"count", tof_errors}});
+        }
+    }
+
     void rescue(const char* why) {
         end_cal(why);
         armed_ch = -1;
@@ -269,6 +347,7 @@ struct State {
             if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
         }
         sample_ina();
+        sample_tof();
         const double vbat = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
         // SPEC 4.6 — low-voltage auto-safe.  The HAT powers the Pi too, so a dying pack
         // takes the whole robot down; go limp early and say so.
@@ -306,6 +385,23 @@ struct State {
                                    // energy number is confounded while it is true.
                                    {"charging", ina_i < -0.02},
                                    {"errors", ina_errors}}
+                             : json(nullptr)},
+                // Belly clearance.  raw_mm is the RECORD (the mount offset is a fit, and
+                // re-fitting it must re-derive every sample); m is what a consumer reads.
+                // status/signal/ambient ride WITH the number they qualify -- an invalid
+                // ToF reading is not a large or small distance, it is an arbitrary one,
+                // and it is indistinguishable from a good one at the consumer.
+                {"tof", tof ? json{{"ok", tof_ok}, {"raw_mm", tof_raw_mm}, {"m", tof_m},
+                                   {"valid", tof_valid}, {"status", tof_status},
+                                   {"signal_mcps", tof_signal}, {"ambient_mcps", tof_ambient},
+                                   {"spads", tof_spads},
+                                   {"m_ema", tof_m_ema}, {"m_min", tof_m_min}, {"m_min_all", tof_m_min_all},
+                                   {"bad_frac", tof_bad_frac},
+                                   {"offset_mm", tof->config().mount_offset_mm},
+                                   // How long since a measurement actually landed.  A part
+                                   // that stops ranging otherwise shows as a steady number.
+                                   {"age_ms", tof_fresh_ms ? now - tof_fresh_ms : -1},
+                                   {"errors", tof_errors}}
                              : json(nullptr)},
                 // Cost of the loop, in the units a control loop cares about: per cent of
                 // the tick BUDGET, with the tail (max) beside the middle because a mean
@@ -569,6 +665,7 @@ int main(int argc, char** argv) {
         else if (a == "--pose-slew") g_pose_slew_us = std::max(1, std::atoi(argv[i + 1]));
         else if (a == "--pose-stagger-ms") g_pose_stagger_ticks = std::max(0, std::atoi(argv[i + 1]) / 20);
         else if (a == "--r-shunt") g_r_shunt = std::atof(argv[i + 1]);
+        else if (a == "--tof-offset") g_tof_offset_mm = std::atof(argv[i + 1]);
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
@@ -586,6 +683,20 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         S.ina.reset();
         std::fprintf(stderr, "benchd: no INA219 (%s) — current telemetry disabled\n", e.what());
+    }
+    // Same contract: instrument only, absent part => "tof": null and nothing else moves.
+    // init() is the whole ~80-write boot sequence; it either completes or throws, because
+    // a half-configured VL53L0X ranges and is quietly wrong.
+    try {
+        Vl53l0xConfig tc; tc.mount_offset_mm = g_tof_offset_mm;
+        S.tof = std::make_unique<Vl53l0x>(S.bus, tc);
+        S.tof->init();
+        S.tof->start_continuous();
+        std::printf("ogma_benchd: VL53L0X 0x29 mount offset %.1f mm, budget %u us (continuous)\n",
+                    g_tof_offset_mm, S.tof->timing_budget_us());
+    } catch (const std::exception& e) {
+        S.tof.reset();
+        std::fprintf(stderr, "benchd: no VL53L0X (%s) — belly clearance disabled\n", e.what());
     }
     if (!S.log) std::fprintf(stderr, "benchd: cannot open %s (continuing without the record)\n", log_path.c_str());
     { std::string why; if (load_map(S, map_path, why)) std::printf("ogma_benchd: loaded map %s (%zu servos)\n", map_path.c_str(), S.map["servos"].size()); else std::printf("ogma_benchd: no map loaded (%s)\n", why.c_str()); }
@@ -626,7 +737,13 @@ int main(int argc, char** argv) {
         zmq_send(rep, out.data(), out.size(), 0);
     }
     tt.join(); tl.join();
-    { std::lock_guard<std::mutex> lk(S.m); S.record("shutdown", {}); }
+    {
+        std::lock_guard<std::mutex> lk(S.m);
+        // Leave the ToF stopped rather than free-running after we are gone: the part
+        // draws while it ranges, and the next daemon should meet an idle one.
+        if (S.tof) { try { S.tof->stop_continuous(); } catch (const std::exception&) {} }
+        S.record("shutdown", {});
+    }
     zmq_close(rep); zmq_close(pub); zmq_ctx_term(ctx);
     return 0;
 }

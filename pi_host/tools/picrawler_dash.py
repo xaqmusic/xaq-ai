@@ -267,6 +267,40 @@ class Dash:
             elif ina:
                 self._line(scr, y, 3, f"power  INA219 not reading (errors {ina.get('errors', '?')})", C(BAD))
                 y += 1
+            # Belly clearance (BOM 2 #4).  The status and the invalid rate sit ON the
+            # same lines as the millimetres deliberately: a ToF reading that failed the
+            # part's own checks is an arbitrary number, not a large or small one, and it
+            # is indistinguishable from a good one if the distance is shown alone.
+            tof = f.get("tof") or {}
+            if tof.get("ok"):
+                mm = float(tof.get("m", 0.0)) * 1000.0
+                bad = float(tof.get("bad_frac", 0.0))
+                age = int(tof.get("age_ms", -1))
+                stale = age < 0 or age > 2000
+                valid = bool(tof.get("valid"))
+                # Red is for a channel that is not reporting the belly: stopped, or the
+                # belly is actually down.  Amber is for one whose word is getting weaker.
+                bcol = (BAD if stale or (valid and mm <= 5.0)
+                        else WARN if not valid or bad > 0.25 else OK)
+                self._line(scr, y, 3,
+                           f"belly {mm:6.1f} mm [{bar(mm / 60.0, 16)}]"
+                           f"   raw {int(tof.get('raw_mm', 0)):4d} - {float(tof.get('offset_mm', 0.0)):.0f} off"
+                           f"   {str(tof.get('status', '?')):8s}"
+                           + ("   STALE — ranging stopped" if stale else ""), C(bcol))
+                y += 1
+                # The SLOW metric.  worst60 is a MIN-hold, not a peak: on this channel
+                # LOW is the dangerous end, so a peak-hold would report the safe extreme.
+                self._line(scr, y, 3,
+                           f"slow   ema30 {float(tof.get('m_ema', 0.0)) * 1000.0:6.1f} mm"
+                           f"   worst60 {float(tof.get('m_min', 0.0)) * 1000.0:5.1f}"
+                           f"   min {float(tof.get('m_min_all', 0.0)) * 1000.0:5.1f}"
+                           f"   invalid {bad * 100.0:3.0f}%"
+                           f"   sig {float(tof.get('signal_mcps', 0.0)):5.2f}"
+                           f" / amb {float(tof.get('ambient_mcps', 0.0)):5.2f} Mcps", C(DIM))
+                y += 1
+            elif tof:
+                self._line(scr, y, 3, f"belly  VL53L0X not reading (errors {tof.get('errors', '?')})", C(BAD))
+                y += 1
             adc = f.get("adc", [])
             self._line(scr, y, 3, "adc   " + "  ".join(f"A{i} {v}" for i, v in enumerate(adc)), C(DIM))
             y += 1
@@ -438,6 +472,11 @@ def main() -> None:
                 print(f"  power {float(_ina.get('i_a', 0)):+.3f} A  ema30 {float(_ina.get('i_ema', 0)):+.3f}"
                       f"  peak60 {float(_ina.get('i_peak', 0)):.3f}  spent {float(_ina.get('energy_j', 0)) / 1000:.3f} kJ"
                       + ("  CHARGING" if _ina.get("charging") else ""))
+            _tof = st.get("tof") or {}
+            if _tof.get("ok"):
+                print(f"  belly {float(_tof.get('m', 0)) * 1000:.1f} mm  ema30 {float(_tof.get('m_ema', 0)) * 1000:.1f}"
+                      f"  worst60 {float(_tof.get('m_min', 0)) * 1000:.1f}"
+                      f"  {_tof.get('status', '?')}  invalid {float(_tof.get('bad_frac', 0)) * 100:.0f}%")
             print(f"  vbat {float(st.get('vbat', 0)):.2f} V  tick {float(st.get('tick_hz', 0)):.2f} Hz"
                   f"  overruns {st.get('overruns')}")
         if d.sensors:
