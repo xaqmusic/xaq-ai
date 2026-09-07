@@ -396,10 +396,18 @@ func _update_belly_row() -> void:
 		var busy := bool(_tele.get("pose_move_active", false)) or bool(_tele.get("rescue_active", false))
 		_belly_graph.push(m, float(tof.get("m_ema", 0.0)), float(tof.get("m_min", 0.0)),
 			bad, valid and age >= 0 and age < 2000, busy)
+	# COLOUR REPORTS THE INSTRUMENT, NOT THE WORLD. A belly on the ground is a true
+	# reading of a real state, and colouring it red says "this number is wrong" about the
+	# one moment the number matters most. The trace already carries that: it turns red
+	# inside the drag band, which is where a state belongs. So this row stays the same
+	# 0.9 grey as vbat and power unless the CHANNEL is in trouble —
+	#   red   = ranging has stopped, i.e. the number on screen is stale
+	#   amber = the part is rejecting a sustained fraction of its own readings
+	# A single invalid sample is deliberately NOT amber: one frame of "saw nothing" is a
+	# world state too, and flashing on it would make an open floor look like a fault.
 	var col := Color(0.9, 0.9, 0.9)
-	if not valid or bad > TOF_BAD_FRAC_WARN: col = Color(1, 0.85, 0.4)
-	if age > 2000: col = Color(1, 0.3, 0.3)          # ranging has stopped
-	elif valid and m <= 0.005: col = Color(1, 0.3, 0.3)   # belly on the floor
+	if bad > TOF_BAD_FRAC_WARN: col = Color(1, 0.85, 0.4)
+	if age > 2000: col = Color(1, 0.3, 0.3)
 	_tele_lbls["belly"].add_theme_color_override("font_color", col)
 
 
