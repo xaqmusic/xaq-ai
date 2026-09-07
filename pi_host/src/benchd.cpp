@@ -400,7 +400,14 @@ struct State {
                                    {"offset_mm", tof->config().mount_offset_mm},
                                    // How long since a measurement actually landed.  A part
                                    // that stops ranging otherwise shows as a steady number.
-                                   {"age_ms", tof_fresh_ms ? now - tof_fresh_ms : -1},
+                                   // ⚠ CLAMPED AT ZERO, and not defensively: `now` is taken
+                                   // at the top of frame() and sample_tof() reads the clock
+                                   // again a few ms later, so a fresh reading lands in the
+                                   // FUTURE relative to this frame's timestamp.  Live
+                                   // bring-up published age_ms -2, which every consumer here
+                                   // reads as "no measurement yet" -- the self-check fails on
+                                   // a healthy part and the trace draws nothing but gaps.
+                                   {"age_ms", tof_fresh_ms ? std::max<int64_t>(0, now - tof_fresh_ms) : -1},
                                    {"errors", tof_errors}}
                              : json(nullptr)},
                 // Cost of the loop, in the units a control loop cares about: per cent of
