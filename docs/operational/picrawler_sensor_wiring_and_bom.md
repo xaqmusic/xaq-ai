@@ -904,7 +904,7 @@ in this channel. Re-fit with the belly deliberately flat, and treat sub-2 mm cle
 as "down" rather than as a number.
 
 **Anchoring at belly-down is the deliberate choice, not a convenience.** It folds the sensor's
-own bias into the offset (the same part read ~8 mm long against a bench target at 114 mm), and
+own bias into the offset (§9.7: the part reads 8–11 mm long against a physical ruler), and
 in exchange it puts the calibration exactly at the dangerous end of the channel. A belly
 sensor that is honest at 0 mm and slightly optimistic at 50 mm is the right trade; the reverse
 is not.
@@ -1004,9 +1004,8 @@ signal-to-ambient ratio moves before the status flips.
 2. **One surface only.** Every number above is off a hard indoor floor. §3.9 already found the
    *current* channel to be strongly surface-dependent; a ToF's return depends on the surface
    far more directly, and a dark or glossy floor is where `bad_frac` should be expected to move.
-3. **Two points, both static.** The channel held 0/107 invalid through a 12-servo move, which
-   is a dynamic-validity result, but linearity is anchored at 0 and checked once at 52 mm.
-   Nothing characterizes the middle or the behaviour past ~60 mm.
+3. ~~Two points, both static.~~ ✅ **RESOLVED 2026-09-07 — see §9.7.** Linearity is now
+   characterized across 1.5–90.5 mm, past the top of the operating band, at ±1 mm.
 4. **Not fed to anything.** Instrument only. Nothing in `benchd` or the brain consumes belly
    clearance yet; `gc_raw` in the sim is still a raycast.
 
@@ -1031,3 +1030,94 @@ signal-to-ambient ratio moves before the status flips.
 - ⚠ **`hat_tool tof` re-inits the part**, which soft-resets it underneath a running `benchd`.
   Read the daemon's telemetry instead of running the bench tool while it is up — the same
   caution as §3.10.2.
+
+### 9.7 Linearity across the working range — ✅ MEASURED 2026-09-07
+
+**Method.** The channel operates at raw **65–121 mm** (belly-down to standing), so the way to
+sweep it is to *raise* the robot, not to put objects under the sensor — belly-down is already
+the closest the part ever gets, and sliding shims beneath it tests a range the channel never
+uses. The robot sat in the `rescue` pose throughout, on blocks used as platforms, with the beam
+clearing the block edge to the surface below. One rolling capture off the live telemetry, then
+plateaus segmented from the step changes.
+
+Truth = block thickness + **1.5 mm**, the gap `rescue` holds between the belly and whatever it
+rests on (operator, measured).
+
+| point | truth | measured | predicted | residual |
+|---|---|---|---|---|
+| bare surface (start) | 1.5 mm | 0.50 | 1.53 | **−1.03** |
+| 59 mm block | 60.5 mm | 61.84 | 61.15 | **+0.69** |
+| 89 mm block | 90.5 mm | 91.01 | 91.47 | **−0.46** |
+| bare surface (end) | 1.5 mm | 2.32 | 1.53 | **+0.79** |
+| ~~19 mm block~~ | ~~20.5 mm~~ | ~~25.51~~ | — | **dropped, §9.7.1** |
+
+```
+belly = 1.0106 · h + 0.01 mm        scale error +1.06 %
+```
+
+**0 invalid in 1315 samples** spanning raw 64 → 156 mm, and **sd flat at 1.47–1.64 mm at every
+height** — noise does not grow with distance across this band. Maximum error over the 0–52 mm
+operating band: **0.56 mm**.
+
+Two results fall out of this that were not what it was measuring:
+
+- **The intercept is +0.01 mm, which independently confirms the mount offset.** An error in the
+  64.8 mm fit of §9.2 would appear here precisely as a nonzero intercept, and this data never
+  touched that fit.
+- **The two bare-surface plateaus share a truth and differ by 1.82 mm** — an independent
+  reproduction of the ±2 mm pose repeatability of §9.2, from a different measurement entirely.
+
+⚠ **Do NOT apply a scale correction.** +1.06 % is at most 0.56 mm across the working band,
+which is smaller than the ±2 mm pose term that already dominates. A second calibration constant
+dominated by a larger uncorrected one buys nothing but false precision.
+
+### 9.7.1 ⚠ The part reads 8–11 mm LONG against a ruler — and that is not a fault
+
+Two independent comparisons against a physical measurement, at very different distances:
+
+| ruler | sensor | delta |
+|---|---|---|
+| ~114 mm (bench target) | 121.9 mm | **+7.6 mm** |
+| 70 mm (desk to sensor) | 80.6 mm | **+10.5 mm** |
+
+This is the VL53L0X's **inherent ranging offset**: the distance it reports is referenced to an
+internal plane, not to the visible front face of the module. It is what ST's offset-calibration
+procedure exists to remove, and it is why it stayed invisible until now — **the block sweep
+measures DIFFERENCES, and a constant offset cancels in a slope.** Hence the +1.06 % scale with a
+zero intercept while an absolute ruler check is out by ~9 mm.
+
+Two consequences, both of which will otherwise be read as broken hardware:
+
+1. **`mount_offset_mm = 64.8` is a READING, not a physical distance.** The true standoff from
+   the optical face to the belly plane is ~9 mm less, about **56 mm**. Anyone who calipers the
+   boom will measure ~56 mm and conclude the calibration is wrong. It is not — anchoring at
+   belly-down absorbs the inherent offset by construction, which is the whole reason for
+   anchoring there instead of deriving the standoff from CAD.
+2. **A tape-measure check will always read ~9 mm long.** That is the documented expectation.
+
+### 9.7.2 The 19 mm point, and why it was dropped
+
+Recorded rather than silently omitted, because a discarded datapoint deserves the same
+treatment as a refuted lever: **it was dropped for a reason found independently of the fit, not
+for disagreeing with it.**
+
+It came in **+4.78 mm** high while every other point sat inside ±1 mm. Two placement faults,
+both identified by the operator at the bench, not inferred from the residual:
+
+- **The small block does not span the chassis bottom screws** the way the larger blocks do, so
+  it contacts the belly plate directly rather than the screw heads — the resting height it
+  produces is not `1.5 + 19`.
+- **During the sweep the sensor sat near the desk edge**, where the beam cleared the surface
+  entirely. Re-measuring the same nominal setup gave **127.4 mm** — a confident, zero-invalid
+  reading of the floor beyond the edge rather than the desk.
+
+Re-placed centred and not leaning it read **80.6 mm**, 10 mm from the sweep's 90.3 mm for the
+nominally identical configuration. **The placement moved, not the sensor.** A point whose truth
+value cannot be stated is not evidence either way, so it is excluded — and the linearity result
+rests on the three whose geometry was unambiguous.
+
+⚠ **The general lesson is about the beam, not the block.** A ToF near an edge returns a
+confident, valid, low-noise reading of whatever is beyond it. Nothing in the status, the signal
+rate or the invalid count flagged the 127 mm reading as wrong, because *it was not wrong* — it
+was an honest answer about a different surface. **Only knowing where the beam lands makes the
+number mean anything**, which is the same reason §9.5 still wants a leg sweep at the standing pose.
