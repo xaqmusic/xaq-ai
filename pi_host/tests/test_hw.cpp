@@ -3,6 +3,7 @@
 // 2026-08-28 (ADC read of A4 = 7.65 V pack; P0 moved at 1300/1500/1700 us).
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/Ina219.hpp"
+#include "ogma/hw/Vl53l0x.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include <cstdlib>
 #include <fstream>
@@ -156,6 +157,152 @@ TEST(Ina219Protocol, RejectsAShuntThatCannotBeCalibrated) {
     FakeI2cBus bus;
     EXPECT_THROW(Ina219(bus, 0.0), std::invalid_argument);
     EXPECT_THROW(Ina219::calibration_word(1e-9, 1e-9), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// VL53L0X — belly ToF (BOM §2 #4).  The encodings below are the datasheet's and
+// ST's API's; nothing here needs the part present.
+// ---------------------------------------------------------------------------
+
+struct TofFixture {
+    FakeI2cBus  bus;
+    Vl53l0x     tof{bus, Vl53l0xConfig{}, Vl53l0x::ADDR_DEFAULT};
+    TofFixture() { bus.expect_addr = Vl53l0x::ADDR_DEFAULT; }
+    // One measurement as the part lays it out at 0x14: 12 bytes, big-endian fields.
+    static std::vector<uint8_t> result(uint8_t dev_status, uint16_t mm, uint16_t spads_88,
+                                       uint16_t signal_97, uint16_t ambient_97) {
+        std::vector<uint8_t> b(12, 0);
+        b[0]  = uint8_t(dev_status << 3);
+        b[2]  = uint8_t(spads_88 >> 8);   b[3]  = uint8_t(spads_88 & 0xFF);
+        b[6]  = uint8_t(signal_97 >> 8);  b[7]  = uint8_t(signal_97 & 0xFF);
+        b[8]  = uint8_t(ambient_97 >> 8); b[9]  = uint8_t(ambient_97 & 0xFF);
+        b[10] = uint8_t(mm >> 8);         b[11] = uint8_t(mm & 0xFF);
+        return b;
+    }
+};
+
+TEST(Vl53l0xEncoding, TimeoutIsAByteMantissaWithAByteExponentAndRoundTrips) {
+    // decode is (LS << MS) + 1, so encode must be its inverse for any representable
+    // value.  Off-by-one here shifts the whole timing budget without failing loudly.
+    for (uint32_t mclks : {1u, 2u, 255u, 256u, 1000u, 4095u, 65535u}) {
+        const uint16_t enc = Vl53l0x::encode_timeout(mclks);
+        EXPECT_LE(Vl53l0x::decode_timeout(enc), mclks + (mclks >> 8) + 1) << "mclks " << mclks;
+        EXPECT_GE(Vl53l0x::decode_timeout(enc), mclks > 1 ? (mclks >> 1) : 1u) << "mclks " << mclks;
+    }
+    EXPECT_EQ(Vl53l0x::decode_timeout(Vl53l0x::encode_timeout(200)), 200);
+    EXPECT_EQ(Vl53l0x::encode_timeout(0), 0);
+}
+
+TEST(Vl53l0xEncoding, MacroPeriodAndVcselPeriodMatchTheDatasheet) {
+    // VCSEL period is stored as (pclks/2 - 1), so decoding is (reg + 1) << 1.  The
+    // part's defaults are 14 pclks pre-range and 10 final-range; both are read back off
+    // the die by the timing-budget code, so a wrong decode silently rescales the budget.
+    EXPECT_EQ(Vl53l0x::decode_vcsel_period(0x06), 14);
+    EXPECT_EQ(Vl53l0x::decode_vcsel_period(0x04), 10);
+    EXPECT_EQ(Vl53l0x::decode_vcsel_period(0x0E), 30);   // the widest ST allows
+    // macro period ns = (2304 * pclks * 1655 + 500) / 1000, worked out by hand at the
+    // pre-range default rather than restated as the formula.
+    EXPECT_EQ(Vl53l0x::calc_macro_period_ns(14), 53384u);
+    // us <-> mclks are inverses to within one macro period, which is the resolution.
+    const uint32_t us = Vl53l0x::timeout_mclks_to_us(1000, 14);
+    EXPECT_NEAR(double(Vl53l0x::timeout_us_to_mclks(us, 14)), 1000.0, 1.0);
+}
+
+TEST(Vl53l0xEncoding, RateFieldsAre97FixedPointNotIntegerMcps) {
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint97_to_mcps(128), 1.0);
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint97_to_mcps(32), 0.25);
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint97_to_mcps(0), 0.0);
+    // The SPAD field in the SAME 12 bytes is 8.8, not 9.7.  Reading it with the rates'
+    // scale is what turns 105 effective SPADs into "26884" on a dashboard.
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint88_to_count(26884), 105.015625);
+    EXPECT_DOUBLE_EQ(Vl53l0x::fixpoint88_to_count(256), 1.0);
+}
+
+TEST(Vl53l0xStatus, DeviceCodesMapToStsPalStatusAndNoneIsNotAFailureReason) {
+    using S = Vl53l0x::Status;
+    // The NoneFlag set: no measurement was produced.  Reporting these as SignalFail
+    // would invent a cause the part never claimed.
+    for (uint8_t c : {0, 5, 7, 12, 13, 14, 15}) EXPECT_EQ(Vl53l0x::decode_status(c), S::NoUpdate) << int(c);
+    for (uint8_t c : {1, 2, 3})                 EXPECT_EQ(Vl53l0x::decode_status(c), S::HardwareFail) << int(c);
+    for (uint8_t c : {6, 9})                    EXPECT_EQ(Vl53l0x::decode_status(c), S::PhaseFail) << int(c);
+    for (uint8_t c : {8, 10})                   EXPECT_EQ(Vl53l0x::decode_status(c), S::MinRangeFail) << int(c);
+    EXPECT_EQ(Vl53l0x::decode_status(4),  S::SignalFail);
+    EXPECT_EQ(Vl53l0x::decode_status(11), S::Valid);
+}
+
+TEST(Vl53l0xMount, ClearanceIsRawMinusTheFittedOffsetAndNeverGoesNegative) {
+    // The offset is calibration data, so the record keeps raw mm and this re-derives.
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(76, 20.0), 0.056);   // standing, 20 mm recess
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(30, 20.0), 0.010);   // near the crouch gate
+    // Belly on the floor reads the recess itself; a fit that is a hair long must floor
+    // at zero rather than report the chassis below the ground it is sitting on.
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(18, 20.0), 0.0);
+}
+
+TEST(Vl53l0xProtocol, ModelIdIsAPointerWriteThenAOneByteRead) {
+    TofFixture f;
+    f.bus.read_queue = {0xEE};
+    EXPECT_TRUE(f.tof.model_id_ok());
+    EXPECT_EQ(f.bus.writes.at(0), (std::vector<uint8_t>{Vl53l0x::REG_MODEL_ID}));
+    EXPECT_EQ(f.bus.byte_reads, 1);
+}
+
+TEST(Vl53l0xProtocol, InitRefusesAPartThatIsNotAVl53l0x) {
+    // An address that ACKs proves something is wired; only 0xEE proves it is this part.
+    TofFixture f;
+    f.bus.read_queue = {0x00};
+    EXPECT_THROW(f.tof.init(), std::runtime_error);
+}
+
+TEST(Vl53l0xProtocol, AMeasurementIsOneBlockReadSoStatusCannotPairWithTheNextRange) {
+    TofFixture f;
+    f.bus.read_queue = {0x04};                       // RESULT_INTERRUPT_STATUS: ready
+    const auto r12 = TofFixture::result(11, 75, 32 * 256, 256, 64);
+    f.bus.read_queue.insert(f.bus.read_queue.end(), r12.begin(), r12.end());
+
+    Vl53l0x::Reading r;
+    ASSERT_TRUE(f.tof.read_ready(r));
+    EXPECT_EQ(f.bus.block_reads, 1);                 // ONE transaction, not six
+    EXPECT_EQ(r.raw_mm, 75);
+    EXPECT_TRUE(r.valid);
+    EXPECT_EQ(r.status, Vl53l0x::Status::Valid);
+    EXPECT_DOUBLE_EQ(r.spads, 32.0);
+    EXPECT_DOUBLE_EQ(r.signal_mcps, 2.0);
+    EXPECT_DOUBLE_EQ(r.ambient_mcps, 0.5);
+    // The interrupt must be cleared, or every later read returns this same sample.
+    EXPECT_EQ(f.bus.writes.back(), (std::vector<uint8_t>{0x0B, 0x01}));
+}
+
+TEST(Vl53l0xProtocol, NotReadyReturnsFalseWithoutBlockingOrConsumingAResult) {
+    // benchd polls this while holding the bus mutex the 50 Hz servo tick also wants,
+    // so a not-ready poll must cost one register read and nothing else.
+    TofFixture f;
+    f.bus.read_queue = {0x00};
+    Vl53l0x::Reading r;
+    EXPECT_FALSE(f.tof.read_ready(r));
+    EXPECT_EQ(f.bus.block_reads, 0);
+    EXPECT_EQ(r.status, Vl53l0x::Status::NoUpdate);
+}
+
+TEST(Vl53l0xProtocol, AnInvalidReadingReportsTheFarLimitNotZero) {
+    // Zero would map "saw nothing" onto "something against the belly" — the opposite
+    // extreme, and the reading the height homeostat would react hardest to.
+    Vl53l0xConfig cfg; cfg.max_range_m = 1.2; cfg.mount_offset_mm = 20.0;
+    FakeI2cBus bus; bus.expect_addr = Vl53l0x::ADDR_DEFAULT;
+    Vl53l0x tof(bus, cfg);
+    bus.read_queue = {0x04};
+    const auto r12 = TofFixture::result(4, 8190, 0, 2, 900);   // signal fail, starved return
+    bus.read_queue.insert(bus.read_queue.end(), r12.begin(), r12.end());
+
+    Vl53l0x::Reading r;
+    ASSERT_TRUE(tof.read_ready(r));
+    EXPECT_FALSE(r.valid);
+    EXPECT_EQ(r.status, Vl53l0x::Status::SignalFail);
+    EXPECT_DOUBLE_EQ(r.distance_m, 1.2);
+    EXPECT_EQ(r.raw_mm, 8190);                       // the raw number still gets recorded
+    EXPECT_EQ(tof.invalid(), 1u);
+    // The confound is published, not swallowed: ambient swamping signal is the cause.
+    EXPECT_GT(r.ambient_mcps, r.signal_mcps);
 }
 
 TEST(RobotHatProtocol, TimerSetupWritesPrescalerAndPeriod) {
