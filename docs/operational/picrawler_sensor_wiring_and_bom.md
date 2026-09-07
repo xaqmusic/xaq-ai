@@ -30,7 +30,7 @@ connectors** — which, as it happens, it all does.
 | addr | device | bus |
 |---|---|---|
 | `0x14` | HAT MCU — servos + ADC | I²C |
-| `0x29` | VL53L0X belly ToF | I²C |
+| `0x29` | VL53L0X belly ToF | I²C — ✅ **PRESENT 2026-09-07**, model ID `0xEE` (§9) |
 | `0x40` | INA219 | I²C |
 | — | ICM-20948 | **SPI CE0** (off the I²C bus by design) |
 
@@ -45,7 +45,7 @@ connectors** — which, as it happens, it all does.
 | 1 | **ICM-20948** breakout | 1 | must expose **CS / SCK / SDI / SDO** for SPI | ✅ **CONFIRMED 2026-08-30** — the received board breaks out `NCS` and `ADO`, so SPI is available (§4) |
 | 2 | **INA219** breakout | 1 | I²C `0x40`, 26 V bus max ✓ | **shunt must be changed — see #3** |
 | 3 | **0.01 Ω shunt resistor** | 1 | 2512, ≥ 1 W, 1 % | replaces the stock 0.1 Ω (§3) |
-| 4 | **VL53L0X / VL53L1X** ToF | 1 | I²C `0x29` | belly clearance |
+| 4 | **VL53L0X / VL53L1X** ToF | 1 | I²C `0x29` | belly clearance — ✅ **FITTED AND CALIBRATED 2026-09-07 (§9)** |
 | 5 | **Circular FSR, 20 g – 2 kg** | 4 | active dia ~14–20 mm | feet |
 
 ### Passives and conditioning
@@ -333,7 +333,7 @@ value on all four channels so per-foot variation shows up in calibration rather 
 | 1 | Baseline, nothing added | `i2cdetect -y 1` shows **`0x14`** only — ✅ **PASS 2026-08-28** (needs `i2c-dev` in `/etc/modules` besides the overlay) |
 | 2 | INA219 inline on the battery | `0x40` appears; idle current is plausible; its bus voltage **agrees with A4's** reading |
 | 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 |
-| 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure |
+| 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure — ✅ **PASS 2026-09-07** (§9): `0x29` present with model ID `0xEE`; 259 readings at a bench target measured 121.9 mm ± 1.51 mm, 0 invalid; then validated on the robot at two points, belly-down and standing (§9.3) |
 | 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot |
 
 **After all four FSRs:** command the standing pose on a flat floor. The four `foot_load` values
@@ -847,3 +847,187 @@ register, so **`hat_tool ina capture` / `sag` run against a live benchd is mutua
 
 **`sudo systemctl stop ogma-benchd` before a capture**, as the §3.8 slew sweep already did. Every
 capture in §3.5–§3.9 predates benchd owning the part and is unaffected.
+
+---
+
+## 9. The VL53L0X belly rangefinder — ✅ FITTED AND CALIBRATED 2026-09-07
+
+The downward belly-clearance channel: the `gc_raw` / `gc_norm` signal the promoted height
+homeostat rides. **Not** the forward ultrasonic (§7) — separate sensors, separate jobs, and
+crossing them would corrupt a promoted lever silently.
+
+Driver: `pi_host/src/Vl53l0x.cpp`. Bench tool: `hat_tool tof probe|watch|log`.
+
+### 9.1 Mounting — as built
+
+Mounted on a **solid boom off one of the HAT's own mounting screws**, on a standoff that puts
+the module about **4 mm below the top of the HAT**, looking down.
+
+| concern | as built |
+|---|---|
+| which face points down | the one carrying the **two shiny apertures** — VCSEL emitter and SPAD receiver, ~2.8 mm apart. On this breakout the chip is on the component side, so the **board mounts component-side-down**, connector facing up |
+| cover glass | **none.** Open path to the floor. Any window over the aperture couples emitter light straight into the receiver, and fixing that needs an air gap, an opaque barrier between the apertures, and a crosstalk calibration |
+| protective film | **removed.** Left on it does not block the reading — it gives a plausible wrong one |
+| XSHUT | **not wired.** The breakout pulls it up; `0x29` answering is the proof |
+| rigidity | boom + standoff, no tape. Measured sd is **1.51 mm, identical to the same sensor's sd on a static bench target** — so the mount contributes no measurable noise, and the spread is all sensor |
+
+⚠ **The cone is ~25° full angle**, so the spot is `0.44 × distance` across: ~29 mm at the
+belly-down standoff, ~51 mm at the sensor's own height above the floor. **Anything that enters
+that cone reads as floor.** A leg segment swinging through it returns a short distance and the
+homeostat reads that as *belly grounded* — see §9.5.
+
+### 9.2 The mount offset — ✅ FITTED 2026-09-07
+
+⚠ **`mount_offset_mm` is calibration data, on the same contract as the INA219's `r_shunt`
+(§3.3).** The published record is `raw_mm` as the chip reported it; clearance is derived
+host-side, so a later re-fit re-derives every stored sample instead of stranding the record.
+
+**Method: one point, at the end that matters.** With the **belly flat on the floor** the true
+clearance is 0 by definition, so the offset is simply the raw reading there. 243 samples off
+the live telemetry channel, robot still:
+
+```
+raw_mm   mean 64.84   median 65   sd 1.51   min 61   max 70
+drift    first half 65.02 mm -> second half 64.66 mm   (-0.37 mm over 25 s)
+signal   23.21 Mcps   ambient 0.030 Mcps      invalid 0/243
+```
+
+Unimodal, no settling. **`mount_offset_mm = 64.8`**, and re-reading belly-down after applying
+it gives **0.4 mm ± 0.69** — inside the sensor's own noise of zero.
+
+⚠ **The fit is only as repeatable as the belly-down pose itself.** Re-measuring the same
+resting baseline later, after the robot had been through a stand and a return to `rescue`, gave
+**66.5–66.6 mm** rather than 64.84 — a real +1.8 mm, several times the standard error, from the
+body settling differently on sprawled legs. So **the offset carries roughly ±2 mm of pose
+uncertainty**, which is larger than the sensor's own 1.5 mm noise and is the dominant error term
+in this channel. Re-fit with the belly deliberately flat, and treat sub-2 mm clearance readings
+as "down" rather than as a number.
+
+**Anchoring at belly-down is the deliberate choice, not a convenience.** It folds the sensor's
+own bias into the offset (the same part read ~8 mm long against a bench target at 114 mm), and
+in exchange it puts the calibration exactly at the dangerous end of the channel. A belly
+sensor that is honest at 0 mm and slightly optimistic at 50 mm is the right trade; the reverse
+is not.
+
+⚠ **The value currently lives in the systemd unit**, as `--tof-offset 64.8` on
+`ExecStart`. That is where `benchd` can read it today and it is the wrong home — a fitted
+constant invisible to anyone reading this file. `r_shunt` has the identical problem (§3.3 says
+it belongs in calib JSON and it is also a flag). **Both should move to `pi_host/calib/` together.**
+
+### 9.3 Two-point validation — the standing pose, ✅ MEASURED 2026-09-07
+
+A one-point fit calibrates but cannot be wrong-checked. The second point is the saved `stand`
+pose, in which **the upper leg is horizontal to the ground** — which is the geometry doc's own
+reference stance, so the belly height is predictable rather than merely comparable.
+
+| | belly clearance | sd | invalid |
+|---|---|---|---|
+| belly down | **0.4 mm** | 0.69 | 0/28 |
+| standing (`stand` pose) | **52.1 mm** | 1.27 | 0/58 |
+| **through the move itself** | — | — | **0/107** |
+
+Landed pulse matched the target on all 12 channels (the §3.5.1 deadman trap was fed
+throughout). Peak **1.731 A**, minimum pack **7.72 V** — comfortable against the 3 A rail.
+
+**Reconciling 52.1 mm with CAD's 56.3 mm.** With the upper leg horizontal the knee axis sits
+at hip2 height, so belly = `L3·cos(shin angle) − 19 mm`. Using the **measured** `L3` = 76.5 mm
+(geometry §"measured vs CAD"):
+
+| shin angle from vertical | predicted belly |
+|---|---|
+| 0° | 57.5 mm |
+| **10°** | **56.3 mm** — reproduces the figure the geometry doc quotes |
+| 21.7° | **52.1 mm** — what was measured |
+
+So the observed clearance implies a shin about **12° further from vertical** than the CAD
+reference — real splay under load, plus a hand-saved `stand` pose that is not the CAD nominal.
+The trace supports it: the belly hit **54.2 mm** the instant the servos reached position and
+then relaxed to 51–53 mm, which is ~2 mm of the body settling onto its own legs.
+
+**This is a stance result, not a sensor error.** Sensor bias runs the other way — the part
+reads long, which would push standing *higher*.
+
+⚠ **Consequence for sim2real.** `picrawler_body.gd` normalizes on `GROUND_CLEARANCE_STAND =
+0.06`. The real robot standing is 52.1 mm, so real **`gc_norm` at stand is 0.87, not 1.0**.
+Anything tuned against a sim whose belly channel saturates at 1.0 meets a real one that never
+reaches it.
+
+### 9.4 What the channel publishes, and why it is more than millimetres
+
+Every measurement carries its range status, signal rate, ambient rate and effective SPAD count,
+and `benchd` republishes all of it beside the distance.
+
+**A ToF reading that failed the part's own checks is not a large number or a small one — it is
+an arbitrary one, and at a consumer it is indistinguishable from a good reading.** The part
+computes the status for free. The slow metrics follow from the same argument:
+
+| field | what it is for |
+|---|---|
+| `m_ema` | 30 s mean — how high the body is riding |
+| `m_min` | 60 s decaying **min**-hold. A *min*, because on this channel the dangerous end is LOW; the peak-hold that serves current (§3.10) would faithfully report the safe extreme |
+| `bad_frac` | 30 s EMA of the rate at which the part rejects its own readings — the channel's honesty meter. A ToF wedged at a plausible number with a 90 % invalid rate reads as a healthy belly on distance alone |
+| `age_ms` | time since a measurement actually landed. Without it a part that stops ranging shows up as a very steady number |
+
+An invalid reading is published as **`max_range_m`, not zero**, matching `Ultrasonic` (§7):
+nothing came back, so the far limit is the honest floor. Zero would map "saw nothing" onto
+"something against the belly" — the opposite extreme, and the one the homeostat reacts hardest to.
+
+⚠ **`Valid` here is weaker than ST's full API's valid.** The driver decodes the branches of
+ST's status mapping that depend on the device code alone; the full API also raises a sigma
+failure from an estimate this driver does not carry. Seen once on the bench: device code 11
+("valid") on a 0 mm reading with signal 0.64 Mcps against 4.32 ambient. **This is why the rates
+are published** — a consumer can be stricter than the device code, and a collapsing
+signal-to-ambient ratio moves before the status flips.
+
+### 9.5 What this does NOT establish
+
+1. **The cone is clear of the legs — partially proven.** §9.1 predicts that a leg entering the
+   spot returns as floor and reads as belly-down. ✅ **MEASURED 2026-09-07, negative result:**
+   with the belly grounded (so the body cannot fall and the sensor still sees the floor at its
+   full standoff), every hip1 and every hip2 was swept across its **full operating range**, one
+   at a time, on all four legs — 72 positions in total.
+
+   | axis | worst deviation from the resting baseline | invalid | signal |
+   |---|---|---|---|
+   | hip1 (horizontal swing) | **−0.6 to +2.5 mm** — inside the sensor's own noise | 0/98 | 24.1–25.2 Mcps |
+   | hip2 (femur lift) | **+3 to +9 mm, all POSITIVE** | 0/97 | 23.7–25.0 Mcps |
+
+   **The sign is the finding.** An object entering the beam can only shorten the reading, and
+   nothing shortened it. The hip2 excursions are all *longer*, which is the body being levered
+   up as a leg pushes on the floor — the ToF incidentally working as a tilt detector. So the
+   boom's placement clears the legs on both axes.
+
+   ⚠ **Still not complete.** This was measured belly-down with the other joints at rest. In a
+   gait the legs are drawn in under a *standing* body at hip2/knee combinations this sweep never
+   visited, and one joint at a time is not the same as a coordinated swing. **The remaining test
+   is a leg sweep at the standing pose.**
+2. **One surface only.** Every number above is off a hard indoor floor. §3.9 already found the
+   *current* channel to be strongly surface-dependent; a ToF's return depends on the surface
+   far more directly, and a dark or glossy floor is where `bad_frac` should be expected to move.
+3. **Two points, both static.** The channel held 0/107 invalid through a 12-servo move, which
+   is a dynamic-validity result, but linearity is anchored at 0 and checked once at 52 mm.
+   Nothing characterizes the middle or the behaviour past ~60 mm.
+4. **Not fed to anything.** Instrument only. Nothing in `benchd` or the brain consumes belly
+   clearance yet; `gc_raw` in the sim is still a raycast.
+
+### 9.6 Bring-up notes worth keeping
+
+- **The part boots unable to range.** Reference-SPAD selection out of the die's own NVM, ~80
+  tuning register writes ST publishes only as an opaque blob, and two reference calibrations.
+- ⚠ **`init()` must soft-reset first.** The stop variable at `0x91` is per-die and only valid
+  as read after a fresh boot, and `stop_continuous()` writes **zero** to it. So a second
+  `init()` reads `0x00`, replays it, and ranges wrongly — the part returned a correct 124 mm on
+  its first-ever init and then nothing but out-of-range on every init after, aimed at the same
+  target throughout. Metered on this die: **`0x3c` after a reset, `0x00` after a stop.**
+- **Timing budget** 33 000 µs requested reads back **32 908 µs** — the mclks encoding's own
+  quantization, and a useful sign the budget arithmetic round-trips against real registers.
+  Continuous back-to-back gives **~32 Hz** against `benchd`'s 10 Hz poll, so a fresh sample is
+  always waiting.
+- **Cost to the servo loop**, A/B against the pre-ToF binary on the same idle robot, 120
+  telemetry frames each, 20 ms tick budget: worst tick per 25-tick window went from a **3.5 %**
+  median (20.2 % tail) to **4.5–5.2 %** (14.8–26.7 % across two runs) — roughly +0.2–0.35 ms on
+  the one tick per telemetry frame that queues behind the bus mutex. **Zero overruns in every
+  run, tick flat at 50.00 Hz.** The tail is too noisy to call from single runs.
+- ⚠ **`hat_tool tof` re-inits the part**, which soft-resets it underneath a running `benchd`.
+  Read the daemon's telemetry instead of running the bench tool while it is up — the same
+  caution as §3.10.2.
