@@ -947,6 +947,12 @@ then relaxed to 51–53 mm, which is ~2 mm of the body settling onto its own leg
 **This is a stance result, not a sensor error.** Sensor bias runs the other way — the part
 reads long, which would push standing *higher*.
 
+⚠ **Standing repeats worse than belly-down.** Three separate recalls of the same `stand`
+pose measured **52.1 / 48.7 / 50.8 mm** — a 3.4 mm spread, against ±2 mm for belly-down (§9.2)
+and ±1 mm for the sensor itself (§9.7). The legs do not land identically. **So the channel's
+absolute accuracy in use is set by how repeatably the body settles, not by the sensor**, and
+any threshold on standing clearance needs to carry that 3 mm, not the sensor's 1 mm.
+
 ⚠ **Consequence for sim2real.** `picrawler_body.gd` normalizes on `GROUND_CLEARANCE_STAND =
 0.06`. The real robot standing is 52.1 mm, so real **`gc_norm` at stand is 0.87, not 1.0**.
 Anything tuned against a sim whose belly channel saturates at 1.0 meets a real one that never
@@ -997,10 +1003,50 @@ signal-to-ambient ratio moves before the status flips.
    up as a leg pushes on the floor — the ToF incidentally working as a tilt detector. So the
    boom's placement clears the legs on both axes.
 
-   ⚠ **Still not complete.** This was measured belly-down with the other joints at rest. In a
-   gait the legs are drawn in under a *standing* body at hip2/knee combinations this sweep never
-   visited, and one joint at a time is not the same as a coordinated swing. **The remaining test
-   is a leg sweep at the standing pose.**
+   ✅ **Extended to the STANDING pose 2026-09-07, also negative.** The operator's concern was
+   that a leg could pass under the sensor once the body is up — which the geometry makes
+   plausible: standing, the femur sits ~37 mm below the sensor, where the cone has narrowed to
+   only ~16 mm across, so clearance there is decided by boom placement rather than by margin.
+   Run in two stages, safest first:
+
+   | configuration | sweep | worst deviation | invalid |
+   |---|---|---|---|
+   | standing, **feet planted** | coxa ±300 µs, 4 legs | −0.5 to +3.7 mm | 0/180 |
+   | standing, **leg lifted** (knee tucked +350 µs) | coxa **full range**, 4 legs | −1.5 to +3.2 mm | 0/220 |
+
+   The lift is what makes the second row meaningful: unloading the foot allows the full coxa
+   range without stalling a planted leg against the floor, and it is the gait-like case. The
+   tuck lowered the belly by 2.5–4.8 mm on three of the four legs, which is that corner
+   unloading and the body settling — confirmation the foot actually left the floor. Current
+   stayed 0.57–0.89 A throughout with no stall, pack flat at 7.83–7.91 V.
+
+   **An intrusion here would have been unmissable rather than subtle**: a femur crossing the
+   beam sits ~37 mm below the sensor, so clearance would collapse toward zero, not drift.
+   Nothing of the kind appeared at any of 44 coxa positions.
+
+   **So there is nothing to map around** — no servo range needs restricting, which was the
+   option worth avoiding anyway (see §9.5.1).
+
+   ⚠ **What is still untested is COMBINATION, not range.** Every sweep moved one joint at a
+   time. A gait swings coxa, hip2 and knee together, and that space is not covered by the
+   union of single-axis sweeps. The evidence is strong that the boom is simply not over the
+   swing arc, but it is evidence from 4 configurations, not a proof over all of them.
+
+### 9.5.1 If a leg ever does occlude the beam, restricting its travel is the LAST option
+
+Recorded now, while it is cheap, because the instinct when an instrument gets occluded is to
+constrain the body around it — and that is backwards here (CLAUDE.md §1: imposed constraints
+fight the loop they ride on). In order:
+
+1. **Move the boom.** The occluding volume is a ~16 mm-wide cone at femur height. A centimetre
+   of relocation likely clears it, and costs nothing at the control layer.
+2. **Publish the confound rather than prevent it.** `benchd` already holds every joint angle,
+   so it can flag "leg in cone" beside the reading exactly as it already flags `bad_frac` and
+   `age_ms`, and a consumer discounts those samples. This keeps the leg's full range and makes
+   the channel honest about when it cannot see — the pattern the rest of this sensor follows.
+3. **Restrict the servo range** — only if the boom cannot move *and* the occlusion is wide
+   enough that flagging it would blind the channel too often. This buys instrument cleanliness
+   with permanent body capability, which is the wrong direction to trade.
 2. **One surface only.** Every number above is off a hard indoor floor. §3.9 already found the
    *current* channel to be strongly surface-dependent; a ToF's return depends on the surface
    far more directly, and a dark or glossy floor is where `bad_frac` should be expected to move.
