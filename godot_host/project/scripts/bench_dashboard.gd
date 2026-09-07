@@ -48,6 +48,14 @@ var _avg: Dictionary = {}              # last completed 1 s means
 const UI_FONT := 12
 const TOP_H := 84                      # top bar height the side panels hang from
 const INA_A4_TOL_V := 0.15             # BOM 3.4: ~1 % on the 20K/10K divider is ordinary
+# Belly geometry (geometry §G2 / picrawler_body.gd GROUND_CLEARANCE_STAND): 56.3 mm
+# standing at spawn, 9.5 mm at the crouch gate. A ToF reading outside a generous band
+# around that is not a clearance, it is a mount or an offset that has not been fitted.
+const TOF_PLAUSIBLE_MIN_M := 0.0
+const TOF_PLAUSIBLE_MAX_M := 0.30
+# Above this, the part is rejecting so many of its own measurements that the channel is
+# not reporting the belly any more. Rate, not distance — the millimetres cannot say it.
+const TOF_BAD_FRAC_WARN := 0.25
 var _cal_content: Control
 var _cal_min_btn: Button
 var _cal_min := false
@@ -73,6 +81,8 @@ var _widen_lbl: Label
 var _tick_meter: Control
 var _power_graph: Control
 var _power_seq := -1              # _update_labels runs per FRAME; the graph wants per SAMPLE
+var _belly_graph: Control
+var _belly_seq := -1
 var _video: Node                     # VideoClient — receive-only, see VideoClient.hpp
 var _view_tex: TextureRect           # what the CAMERA sees
 var _brain_tex: TextureRect          # what the BRAIN sees (the encoder's actual input)
@@ -171,7 +181,7 @@ func _build_ui() -> void:
 	_tele_min_btn = Button.new(); _tele_min_btn.text = "▼"; _tele_min_btn.custom_minimum_size.x = 26
 	_tele_min_btn.pressed.connect(_on_tele_min); lhdr.add_child(_tele_min_btn)
 	var lv := VBoxContainer.new(); lroot.add_child(lv); _tele_content = lv
-	for key in ["vbat", "power", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
+	for key in ["vbat", "power", "belly", "adc", "tick_hz", "cost", "cost_split", "mem", "overruns", "watchdog_trips", "deadman_ms_left", "armed_ch", "cal_ch", "age"]:
 		var l := _lbl(key + ": —"); _tele_lbls[key] = l; lv.add_child(l)
 		if key == "cost":
 			_tick_meter = (load("res://scripts/tick_meter.gd") as Script).new()
@@ -183,6 +193,12 @@ func _build_ui() -> void:
 			_power_graph = (load("res://scripts/current_graph.gd") as Script).new()
 			_power_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			lv.add_child(_power_graph)
+		# Belly contact is a TRANSIENT — a chassis that touches down mid-step and lifts
+		# again is invisible in a mean. The trace is where that shows.
+		if key == "belly":
+			_belly_graph = (load("res://scripts/clearance_graph.gd") as Script).new()
+			_belly_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			lv.add_child(_belly_graph)
 	lv.add_child(_lbl(" "))
 	lv.add_child(_lbl("BOOT SELF-CHECK  (SPEC §6)", 13))
 	for item in ["0x14 present", "Vbat plausible 6.0–8.4 V", "IMU WHO_AM_I = 0xEA", "INA219 ⟷ A4 agree", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
@@ -340,6 +356,51 @@ func _update_power_row() -> void:
 	elif amps >= 3.0: col = Color(1, 0.3, 0.3)
 	elif amps >= 2.25: col = Color(1, 0.85, 0.4)
 	_tele_lbls["power"].add_theme_color_override("font_color", col)
+
+
+# Belly clearance (BOM §2 #4). Instrument only — the height homeostat this will
+# eventually feed lives in the brain, not here.
+#
+# THE STATUS IS NOT DECORATION. A ToF measurement that failed the part's own checks is
+# not a large distance or a small one, it is an arbitrary one, and at a consumer it
+# looks exactly like a good reading. So the invalid rate gets its own number beside the
+# millimetres, and a bad reading colours the row rather than quietly moving it.
+func _update_belly_row() -> void:
+	var tof_v: Variant = _tele.get("tof")
+	if not (tof_v is Dictionary) or not bool((tof_v as Dictionary).get("ok", false)):
+		_tele_lbls["belly"].text = ("belly: —   (no VL53L0X, or a daemon that predates it)"
+			if tof_v == null else "belly: VL53L0X not reading")
+		_tele_lbls["belly"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		return
+	var tof: Dictionary = tof_v
+	var m := float(tof.get("m", 0.0))
+	var valid := bool(tof.get("valid", false))
+	var bad := float(tof.get("bad_frac", 0.0))
+	var age := int(tof.get("age_ms", -1))
+	# raw is shown beside the derived clearance because the offset between them is a
+	# FIT, not a fact — seeing both is how a drifting mount gets noticed.
+	_tele_lbls["belly"].text = "belly: %5.1f mm  (raw %d mm − %.0f offset)   %s   ema30 %5.1f  worst60 %5.1f  min %5.1f mm" % [
+		m * 1000.0, int(tof.get("raw_mm", 0)), float(tof.get("offset_mm", 0.0)),
+		str(tof.get("status", "?")),
+		float(tof.get("m_ema", 0.0)) * 1000.0, float(tof.get("m_min", 0.0)) * 1000.0,
+		float(tof.get("m_min_all", 0.0)) * 1000.0]
+	_tele_lbls["belly"].text += "\n       signal %.2f / ambient %.2f Mcps   spads %.0f   invalid %.0f%%   age %s" % [
+		float(tof.get("signal_mcps", 0.0)), float(tof.get("ambient_mcps", 0.0)),
+		float(tof.get("spads", 0.0)), bad * 100.0,
+		"—" if age < 0 else "%d ms" % age]
+	# Once per telemetry FRAME, not per rendered frame — same reason as the current
+	# graph: at 60 fps against a 10 Hz daemon the window would claim 60 s and hold 10.
+	var seq := int(_tele.get("seq", -1))
+	if _belly_graph and seq != _belly_seq:
+		_belly_seq = seq
+		var busy := bool(_tele.get("pose_move_active", false)) or bool(_tele.get("rescue_active", false))
+		_belly_graph.push(m, float(tof.get("m_ema", 0.0)), float(tof.get("m_min", 0.0)),
+			bad, valid and age >= 0 and age < 2000, busy)
+	var col := Color(0.9, 0.9, 0.9)
+	if not valid or bad > TOF_BAD_FRAC_WARN: col = Color(1, 0.85, 0.4)
+	if age > 2000: col = Color(1, 0.3, 0.3)          # ranging has stopped
+	elif valid and m <= 0.005: col = Color(1, 0.3, 0.3)   # belly on the floor
+	_tele_lbls["belly"].add_theme_color_override("font_color", col)
 
 
 func _update_cost_rows() -> void:
@@ -663,6 +724,7 @@ func _update_labels() -> void:
 		_tele_lbls["age"].text = "frame seq %s   age %d ms (1 s mean)" % [str(_tele.get("seq", "—")), int(_avg.get("age", 0.0))]
 	_update_cost_rows()
 	_update_power_row()
+	_update_belly_row()
 	_tele_lbls["overruns"].text = "overruns: %s   bus_errors: %s" % [str(_tele.get("overruns", "—")), str(_tele.get("bus_errors", "—"))]
 	_tele_lbls["watchdog_trips"].text = "watchdog_trips: %s   low_battery: %s   pi_throttled: %s" % [str(_tele.get("watchdog_trips", "—")), str(_tele.get("low_battery", "—")), str(_tele.get("pi_throttled", "—"))]
 	_tele_lbls["armed_ch"].text = "armed_ch: %s   rescue_pose: %s" % [str(_tele.get("armed_ch", "—")), str(_tele.get("rescue_pose", "NONE"))]
@@ -685,7 +747,28 @@ func _update_labels() -> void:
 	else:
 		_check_lbls["INA219 ⟷ A4 agree"].text = "○ INA219 ⟷ A4 agree — not fitted"
 		_check_lbls["INA219 ⟷ A4 agree"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	for item in ["IMU WHO_AM_I = 0xEA", "ToF plausible", "FSR sum ≈ 1.0 BW"]:
+	# ToF plausible — the tape-measure check's standing equivalent (BOM §6 step 4). It
+	# asks two things, because either alone passes on a broken sensor: is the distance
+	# in the band a belly can actually be at, and is the part accepting its own
+	# measurements? A ToF wedged at a plausible number with a 90 % invalid rate reads as
+	# perfect on distance alone.
+	var chk_tof: Variant = _tele.get("tof")
+	if chk_tof is Dictionary and bool((chk_tof as Dictionary).get("ok", false)):
+		var t: Dictionary = chk_tof
+		var tm := float(t.get("m", 0.0))
+		var tbad := float(t.get("bad_frac", 0.0))
+		var tage := int(t.get("age_ms", -1))
+		var live := tage >= 0 and tage < 2000
+		_set_check("ToF plausible",
+			_tele_fresh() and live and bool(t.get("valid", false))
+				and tm >= TOF_PLAUSIBLE_MIN_M and tm <= TOF_PLAUSIBLE_MAX_M
+				and tbad <= TOF_BAD_FRAC_WARN,
+			"%.1f mm   %s   invalid %.0f%%%s" % [tm * 1000.0, str(t.get("status", "?")),
+				tbad * 100.0, "" if live else "   STALE"])
+	else:
+		_check_lbls["ToF plausible"].text = "○ ToF plausible — not fitted"
+		_check_lbls["ToF plausible"].add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	for item in ["IMU WHO_AM_I = 0xEA", "FSR sum ≈ 1.0 BW"]:
 		_check_lbls[item].text = "○ %s — not fitted" % item
 
 	# rows: reflect the daemon's view of each channel
