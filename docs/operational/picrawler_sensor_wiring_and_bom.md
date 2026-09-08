@@ -1047,9 +1047,9 @@ fight the loop they ride on). In order:
 3. **Restrict the servo range** — only if the boom cannot move *and* the occlusion is wide
    enough that flagging it would blind the channel too often. This buys instrument cleanliness
    with permanent body capability, which is the wrong direction to trade.
-2. **One surface only.** Every number above is off a hard indoor floor. §3.9 already found the
-   *current* channel to be strongly surface-dependent; a ToF's return depends on the surface
-   far more directly, and a dark or glossy floor is where `bad_frac` should be expected to move.
+2. ~~One surface only.~~ ⚠ **PARTIALLY RESOLVED 2026-09-08 — see §9.8, and the answer was
+   not the one expected.** The optical worry was unfounded on the surfaces tried; the surface
+   that actually took the robot down did so *mechanically*. Still only two surfaces, both easy.
 3. ~~Two points, both static.~~ ✅ **RESOLVED 2026-09-07 — see §9.7.** Linearity is now
    characterized across 1.5–90.5 mm, past the top of the operating band, at ±1 mm.
 4. **Not fed to anything.** Instrument only. Nothing in `benchd` or the brain consumes belly
@@ -1167,3 +1167,111 @@ confident, valid, low-noise reading of whatever is beyond it. Nothing in the sta
 rate or the invalid count flagged the 127 mm reading as wrong, because *it was not wrong* — it
 was an honest answer about a different surface. **Only knowing where the beam lands makes the
 number mean anything**, which is the same reason §9.5 still wants a leg sweep at the standing pose.
+
+---
+
+## 9.8 Surface dependence — ✅ MEASURED 2026-09-08, and the threat was mechanical
+
+**Method (operator's).** Make the robot do **pushups** — a joint-space lerp between `rescue`
+and `stand`, 12 steps each way — so the same sweep of belly heights is replayed on each
+surface and readings compare at *matched poses*. No IK needed.
+
+⚠ **Read the OPTICS, not the height.** A surface changes both the return *and* the mechanics
+(compressibility, foot grip), so belly height at a matched pose is confounded and was not used
+as the comparison. `signal`, `ambient` and the effective SPAD count are surface properties at a
+given distance and are not.
+
+### 9.8.1 The finding that matters: signal rate is the WRONG metric
+
+| alpha | bare vinyl: belly / sig / spads | black cloth: belly / sig / spads |
+|---|---|---|
+| 0.00 | 1.4 mm · 24.3 · **13.0** | 0.0 mm · 26.7 · **6.0** |
+| 0.25 | 8.6 mm · 24.9 · **17.0** | 0.0 mm · 27.2 · **8.0** |
+| 0.50 | 17.0 mm · 23.9 · **21.6** | 11.0 mm · 24.5 · **13.8** |
+| 0.75 | 32.4 mm · 24.0 · **35.0** | 29.0 mm · 24.2 · **23.0** |
+| 1.00 | 50.5 mm · 23.4 · **49.8** | 46.6 mm · 24.1 · **36.8** |
+| median | sig 24.18 · spads 21.7 · 0/128 invalid | sig 24.48 · spads 13.4 · 0/125 invalid |
+
+**Signal rate is flat at ~24 Mcps on both surfaces at every distance — because the part
+REGULATES it.** It holds the return constant by recruiting more SPADs, so `signal_mcps` looks
+identical on a good surface and a bad one and reports almost nothing about either. The obvious
+thing to watch is the wrong thing to watch.
+
+**The effective SPAD count is the surface metric.** It rises with distance (13 → 50 on vinyl,
+6 → 37 on cloth) and is consistently **~40 % lower on black cloth**, which means the cloth is
+the *better* 940 nm reflector of the two. Which is the second lesson:
+
+⚠ **"Black" to the eye says nothing about 940 nm.** Most fabric dyes absorb across the visible
+band and reflect near-IR perfectly well. The intuitive worst-case test surface turned out to be
+the easier one, and a genuinely hostile surface would be one with low reflectance *at 940 nm* —
+not one that looks dark.
+
+**Headroom, and how to read it:** SPAD count at the TOP of the range is the number to watch.
+Bare vinyl needs ~50 at 50 mm of clearance. A surface roughly twice as poor would need ~100,
+and that is where the regulation runs out and `signal` finally starts to fall. **So the early
+warning is a rising SPAD count, and it moves long before `bad_frac` does.**
+
+### 9.8.2 ⚠ The surface that broke the robot broke it MECHANICALLY
+
+The first attempt ran on **black rubber** and **took the machine down**: a foot caught on the
+surface, stalled, and the Pi went. Operator's diagnosis, and it is §3.9's mechanism exactly —
+*"grip converts free motion into work and load torque then sets the current regardless of
+speed"* — plus §3.9.2, where a stall is what no duty budget prevents. The same pushups on vinyl
+peaked at **0.73–0.77 A**.
+
+**So the answer to "is this channel surface-dependent" is: less than feared optically, more
+than feared mechanically.** The optical worry that motivated the test found nothing on either
+surface; the surface property that mattered was friction, and it cost a shutdown.
+
+Two process failures came with it, both already predicted by this document and both repeated
+anyway:
+
+- **The capture was written to `/tmp`**, which is tmpfs, and the reboot cleared it (§3.10).
+  The baseline had to be re-run.
+- **The crash destroyed its own evidence again.** The last surviving `benchd` record was from
+  *before* the run — 0.52 A, 7.95 V, belly ~0 mm — and the final line is nulls. The measurement
+  that would have shown the stall current died with the machine that made it. What the session
+  did keep: peak 1.879 A over 99 minutes and pack never below 7.43 V, so this was **not** pack
+  sag — consistent with §3.8.1, where the cliff is the 5 V regulator and the INA219 cannot see it.
+
+### 9.8.3 Why the record now lives off-board — `tools/tele_record.py`
+
+The obvious fix was to `fsync()` `benchd`'s record. **It was tried and measured, and it is not
+available:**
+
+| | worst tick / window (median) | worst tick (max) | overruns / 12 s | tick_hz |
+|---|---|---|---|---|
+| without | 3.4–5.2 % | 12.9–26.7 % | 0 | 50.00 flat |
+| **fsync at 1 Hz** | **7.7 %** | **418.9 %** (~84 ms) | **54** | **min 35.8** |
+
+`record()` runs under the mutex the 50 Hz servo tick needs, and an SD fsync costs ~80 ms.
+**Durability bought with the control loop is not a trade this daemon may make**, and a longer
+cadence only makes the stall rarer, not smaller. Reverted, with the numbers left in the source
+so it is not retried.
+
+**The operator's answer was better than the one being built: record on another machine.**
+`benchd` already publishes every frame at 10 Hz, so a subscriber on the PC writes to a disk
+that cannot share the fate of the thing that browns out — no fsync, no page cache, no SD card,
+no extra thread on the robot, and zero cost to the loop.
+
+```sh
+python3 pi_host/tools/tele_record.py --host picrawler.local --out . --label <run>
+```
+
+⚠ **What it still cannot catch, stated so nobody over-trusts it.** It records what *arrived*.
+A hard power cut still loses whatever sat in the Pi's TCP buffer (`benchd` sets ZMQ `SNDHWM` 4),
+so expect to lose the last *frames* rather than the last *seconds*. And **a network drop is not
+the robot going quiet**: `seq` is monotonic from the daemon, so every gap is detected and
+written as an explicit `gap` record rather than left as a silent hole a reader would mistake
+for a still robot. The bare-vinyl run recorded 655 frames with 0 gaps.
+
+### 9.8.4 What this does NOT establish
+
+1. **Two surfaces, both easy.** Vinyl and black cloth. Untested: carpet (scatters *and*
+   compresses), gloss at a tilt (specular return steered away from the receiver, the case most
+   likely to produce genuine invalids), and anything genuinely low-reflectance at 940 nm.
+2. **Neither surface produced a single invalid reading**, so `bad_frac` has still never been
+   exercised in anger. The channel's honesty meter remains untested against a surface that
+   actually defeats it.
+3. **Rubber was never measured optically** — the run died before producing data, and the reason
+   was friction, not optics.
