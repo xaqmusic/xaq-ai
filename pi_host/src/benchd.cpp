@@ -59,6 +59,16 @@ double g_r_shunt = 0.01;
 // belly's 0-56 mm range clears the part's unreliable short end, and only a tape measure
 // knows by how much.  0 = flush, which is the pre-bench default and not a fitted value.
 double g_tof_offset_mm = 0.0;
+// ⚠ DO NOT fsync() THE RECORD FROM record().  It was tried 2026-09-08 and MEASURED: at a
+// 1 s cadence, under the mutex the 50 Hz servo tick needs, an SD fsync costs ~80 ms and the
+// loop fell to 35.8 Hz with 54 overruns in 12 s (worst tick 419 % of the 20 ms budget, against
+// 27 % without).  Durability bought with the control loop is not a trade this daemon may make.
+// The record surviving a brownout is a real requirement -- twice a crash has destroyed its own
+// evidence -- but the answer is to record on ANOTHER MACHINE (tools/tele_record.py), which
+// cannot share the fate of the one that died.  Leaving this comment so it is not retried.
+// The local record's flush() reaches the page cache and no further, which is why /tmp lost
+// everything (BOM 3.10) and $HOME still lost the tail of the stalled-leg shutdown.  That
+// gap is real, and it is closed OFF-BOARD rather than here.
 
 int64_t mono_ms() {
     timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
