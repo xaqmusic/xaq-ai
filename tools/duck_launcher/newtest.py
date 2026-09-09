@@ -5,13 +5,14 @@
         --title "attitude-row trace 0.5" \
         --set motor_epm_legs.model_trace=0.5 --set motor_epm_head.model_trace=0.5 \
         --why "temporal depth on the attitude rows so a torque becomes a lean inside the model" \
-        [--preset-from "★ PIPELINE 1/3"] [--seed 2] [--secs 7200] [--dry-run]
+        [--preset-from "R25"] [--seed 2] [--secs 7200] [--dry-run]
 
 Takes the next R number after every a1v2_r<nn>* config in mj_host/configs, writes
 mj_host/configs/a1v2_r<nn>_<slug>.json as a copy of --from with the --set overrides
 (module.param=value; value parsed as JSON, so 0.5, 1, true, [1,2] all work), names
 it "R<nn> · <title>" at launcher rank 1000 + nn, and appends a preset of the same
-name (the controls copied from --preset-from, the config swapped) with "series": nn.
+name (the controls copied from the base config's own preset when it has one, else from
+--preset-from or the pipeline preset; the config swapped) with "series": nn.
 The design doc's R numbering and the launcher's are then the same number.
 """
 
@@ -52,7 +53,9 @@ def main():
                     help="override a module param (repeatable); MODULE may be '*' for every MotorEPMv2")
     ap.add_argument("--why", default="", help="the description: motivation and what it is judged on")
     ap.add_argument("--hint", default="", help="the preset's hint (defaults to --why)")
-    ap.add_argument("--preset-from", default="★ PIPELINE 1/3", help="prefix of the preset whose controls to copy")
+    ap.add_argument("--preset-from", default=None,
+                    help="prefix of the preset whose controls to copy (default: the base config's own preset "
+                         "when it has one -- so a level-2 base yields a level-2 preset -- else the pipeline preset)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--secs", type=float)
     ap.add_argument("--state", action="append", default=[], metavar="CONTROL=VALUE",
@@ -88,7 +91,15 @@ def main():
         cfg["description"] = f"R{nn} ({a.title}), from {a.base}: {a.why}"
 
     presets = json.loads(PRESETS_FILE.read_text()) if PRESETS_FILE.exists() else []
-    src = next((p for p in presets if p["name"].startswith(a.preset_from)), None)
+    if a.preset_from is None:
+        # Inherit the BASE config's controls (mode, scene, secs) when it has a preset: R26 and
+        # R29 were minted from level-2 bases with the level-0 pipeline's controls (mode brain,
+        # from scratch, no arena scene) and launched in the wrong mode until fixed by hand.
+        src = next((p for p in presets if p.get("state", {}).get("config") == a.base), None)
+        if src is None:
+            src = next((p for p in presets if p["name"].startswith("★ PIPELINE 1/3")), None)
+    else:
+        src = next((p for p in presets if p["name"].startswith(a.preset_from)), None)
     state = dict(src["state"]) if src else {"mode": "brain", "start": "scratch", "ident_every": 12,
                                             "ident_until": 3000, "secs": 7200, "output": "headless",
                                             "save_brain": True, "battery": False}
