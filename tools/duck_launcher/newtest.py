@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--hint", default="", help="the preset's hint (defaults to --why)")
     ap.add_argument("--preset-from", default=None,
                     help="prefix of the preset whose controls to copy (default: the base config's own preset "
-                         "when it has one -- so a level-2 base yields a level-2 preset -- else the pipeline preset)")
+                         "when it has one -- so a level-2 base yields a level-2 preset -- else the R19 scratch preset)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--secs", type=float)
     ap.add_argument("--state", action="append", default=[], metavar="CONTROL=VALUE",
@@ -97,7 +97,10 @@ def main():
         # from scratch, no arena scene) and launched in the wrong mode until fixed by hand.
         src = next((p for p in presets if p.get("state", {}).get("config") == a.base), None)
         if src is None:
-            src = next((p for p in presets if p["name"].startswith("★ PIPELINE 1/3")), None)
+            # The old "★ PIPELINE 1/3" prefix matched nothing once the pipeline was renamed
+            # "(old lineage)": the fallback was the hard-coded defaults dict. The level-0
+            # scratch preset is now the R19 stack.
+            src = next((p for p in presets if p["name"].startswith("★ STACK · find from scratch")), None)
     else:
         src = next((p for p in presets if p["name"].startswith(a.preset_from)), None)
     state = dict(src["state"]) if src else {"mode": "brain", "start": "scratch", "ident_every": 12,
