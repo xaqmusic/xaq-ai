@@ -1,427 +1,539 @@
 [
- {
-  "name": "\u2605 STACK \u00b7 the R19 stand, resumed and left alone (watch)",
-  "hint": "duck_r19_s2 under R19: tall, still (0.02 mrad/tick), zero falls, with or without the deployed servo filter.",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "duck_r19_s2.json",
-   "secs": 600,
-   "output": "watch",
-   "push": 0,
-   "save_brain": false,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
+  {
+    "name": "★ STACK · the R19 stand, resumed and left alone (watch)",
+    "hint": "duck_r19_s2 under R19: tall, still (0.02 mrad/tick), zero falls, with or without the deployed servo filter.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 600,
+      "output": "watch",
+      "push": 0,
+      "save_brain": false,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PIPELINE (old lineage) 1/3 · find from scratch (R13, 2 h) — 1/6 seeds; the record of the pre-R19 path",
+    "hint": "Design doc §12.3/§12.6. Seed 2 stands by ~30 min (falls 8 → 3 → 1 → 0/min); other seeds fall-cycle. Tick 'battery' with seeds 1-6 for the race. ≈ 380 MB of JSONL.",
+    "state": {
+      "config": "a1v2_r13_tax001.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "seed": 2,
+      "secs": 7200,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "seeds": "1-6",
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PIPELINE (old lineage) 2/3 · gain hunt (R11, 30 min, from the latest saved brain)",
+    "hint": "Resume the find brain under R11: C norms shed, no falls, oscillation 12 → 11 mrad. Load-bearing — handing the find brain straight to R12c fails (§12.6).",
+    "state": {
+      "config": "a1v2_r11_hunt.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "(latest saved brain)",
+      "secs": 1800,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PIPELINE (old lineage) 3/3 · rest (R12c, 30 min, from the latest saved brain)",
+    "hint": "Resume the hunted brain under R12c: the efference rests at earned stillness, |dq| 11 → 0.1 mrad/tick, c 1.00. Watch it to see the oscillation stop.",
+    "state": {
+      "config": "a1v2_r12c_whole.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "(latest saved brain)",
+      "secs": 1800,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PROBE · push test — 3 N shoves on the R19 stand every 60 s (watch)",
+    "hint": "The (d) test on the current stand: 3 N is the edge (13/36 caught, fore-aft goes over); watch the ball go red, c dip to 0.90 and re-earn in ~20 s.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 420,
+      "output": "watch",
+      "push": 3,
+      "push_every": 60,
+      "push_hold": 0.1,
+      "push_from": 30,
+      "save_brain": false,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PROBE · envelope — 2 N shoves on a saved brain (the catch limit)",
+    "hint": "R19 catches 2 N 35/36 and 3 N 13/36. Change the force to bracket a brain's envelope; Report reads it. Point 'a saved brain' at the brain under test.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 420,
+      "output": "headless",
+      "push": 2,
+      "push_every": 60,
+      "push_hold": 0.1,
+      "push_from": 30,
+      "save_brain": false,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PROBE · byte-identity reference — r3, seed 6, 300 s (headless)",
+    "hint": "The guard: run it before touching code, keep the JSONL, run it again after, cmp.",
+    "state": {
+      "config": "a1v2_r3_consol.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 12,
+      "ident_until": 3000,
+      "seed": 6,
+      "secs": 300,
+      "output": "headless",
+      "push": 0,
+      "save_brain": false,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "PROBE · scaffold — shove Pollen's standing policy (5 N every 4 s, watch)",
+    "hint": "The RL reference: staggers and catches 5 N, knocked over at 10 N and stands back up. The envelope the brain is measured against.",
+    "state": {
+      "mode": "hold",
+      "secs": 24,
+      "output": "watch",
+      "push": 5,
+      "push_every": 4,
+      "push_hold": 0.1,
+      "push_from": 0,
+      "noise": 0,
+      "battery": false
+    }
+  },
+  {
+    "name": "PROBE · recovery harness — the stub brain that falls over (watch)",
+    "hint": "A brain that fails, the scaffold that picks it up, and the hand-off between them. Tests the harness, not the substrate.",
+    "state": {
+      "mode": "stub",
+      "secs": 60,
+      "output": "watch",
+      "push": 0,
+      "stub_amp": 0.25,
+      "stub_drift": 0.08,
+      "battery": false
+    }
+  },
+  {
+    "name": "★ STACK · find from scratch (R19, 2 h, headless, saves the brain) — every seed stands in 15 min",
+    "hint": "R19: a settle before every identification pulse window. All six seeds consolidate inside 15 min, 2-3 rescues in 2 h, tilt 0.35°, |u| 0.18; the brain catches 2 N shoves. Tick 'battery' for seeds 1-6.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "scratch",
+      "ident_every": 6,
+      "ident_until": 3000,
+      "seed": 2,
+      "secs": 7200,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "seeds": "1-6",
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "★ STACK · watch the catch — 2 N shoves on the R19 stand every 20 s (watch)",
+    "hint": "Resume duck_r19_s2 under R19 and shove it: the ball stays green, tilt peaks ~2.7° and the body is back inside 0.6 s. Raise to 3 N to see where it still goes over (fore-aft first).",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 300,
+      "output": "watch",
+      "push": 2,
+      "push_every": 20,
+      "push_hold": 0.1,
+      "push_from": 10,
+      "save_brain": false,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "★ STACK · the step — 3 N shoves on the R19 stand with the walker's hand-off (watch)",
+    "hint": "Phase 0/1a of the intent boundary: when the brain's own attitude-prior error passes 0.06 and is rising, the joints go to the walker (yellow ball), which staggers through it, then back to the brain. Measured across six brains: 3 N 36/36 upright (13/36 without), 5 N 30/36 (6/36 without), never at 1 N, two false hand-offs in 36 at 2 N.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 300,
+      "output": "watch",
+      "push": 3,
+      "push_every": 20,
+      "push_hold": 0.1,
+      "push_from": 10,
+      "step_lean": 6.5,
+      "step_twist": 0,
+      "step_twist_s": 0.5,
+      "save_brain": false,
+      "battery": false,
+      "step_trigger": "att",
+      "step_att": 0.06,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "★ STACK · a walk on request — 4 s forward at 0.3 m/s, then back to the reflex (watch)",
+    "hint": "Phase 1b of the intent boundary: at 10 s the joints go to Pollen's walking policy with a forward command (blue ball), it walks ~0.5 m, settles, and hands back to the brain, which is quiet again within seconds. Change vx/vy/vyaw to steer; the policy stands still below ~0.25 m/s.",
+    "state": {
+      "config": "a1v2_r19_settle_each.json",
+      "mode": "brain",
+      "start": "checkpoint",
+      "checkpoint": "duck_r19_s2.json",
+      "secs": 40,
+      "output": "watch",
+      "push": 0,
+      "step_lean": 6.5,
+      "step_trigger": "att",
+      "step_att": 0.06,
+      "walk_from": 10,
+      "walk_secs": 4,
+      "walk_vx": 0.3,
+      "walk_vy": 0,
+      "walk_vyaw": 0,
+      "save_brain": false,
+      "battery": false
+    }
+  },
+  {
+    "name": "R20 · level-2 identification — twist babble at the walker (700 s, headless, saves the brain)",
+    "series": 20,
+    "hint": "Phase 1e of the intent boundary: the same module one level up. Motors = the three twist commands to Pollen's walker, senses = the body's own velocity from contact odometry and the gyro. Held 1.5 s twist pulses, one axis at a time. The host prints the identified A at the end: a positive, dominant diagonal is the gate (passed: 0.0083 / 0.0040 / 0.0090).",
+    "state": {
+      "config": "a1v2_r20_l2_ident.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 700,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "R21 · level-2 prior: walk straight — prior-only (HK on spins); 0.21 m/s, straightness 0.90 (headless, 1500 s)",
+    "series": 21,
+    "hint": "The first level-2 control (design doc §16.5): a state prior on the sensed forward velocity (slot 0, target 0.75 of the 0.4 m/s range = 0.3 m/s) and on the yaw rate (slot 6, target 0), with the controller learning (ctrl_lr 0.1) through the A that R20 identified. Babble 600 s, then the prior drives. Judged on forward speed and heading drift over the control phase against the walker under a constant forward command, which drifts 5-8 deg/s by itself.",
+    "state": {
+      "config": "a1v2_r21_l2_straight.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1
+    }
+  },
+  {
+    "name": "R22 · level-2 heading regulation — shoves during the walk, the brain turns back (headless, 1500 s)",
+    "series": 22,
+    "hint": "The (d) test at the intent boundary (§16.6): after 600 s of babble the brain walks at the walker's top speed holding its heading; 2 N shoves every 40 s turn it 17-20°, and it is back within 3-4° twenty seconds later, 20/20, no rescues. The open-loop walker (--l2-twist 0.4 0 0) ends 109° off. Switch to watch to see it; the ball is blue while the walker drives.",
+    "state": {
+      "config": "a1v2_r22_l2_heading.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 2,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "push_every": 40,
+      "push_hold": 0.1,
+      "push_from": 700
+    }
+  },
+  {
+    "name": "R23 · level-2 avoidance in the arena — zero wall contacts, but an orbit (headless, 1500 s)",
+    "series": 23,
+    "hint": "Phase 2a: the ToF proximities enter the level-2 sense and a prior of zero on them plus the walk-forward prior gives 0 wall contacts in 25 min (open loop: 46/min; walk-straight: 194/min, pinned to a wall). But it orbits: 167 m inside nine 0.25 m cells. Avoidance is a constraint, not a drive — R24 adds the novelty drive. Watch it with scene_arena.xml; the beams draw from the head.",
+    "state": {
+      "config": "a1v2_r23_l2_avoid.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml"
+    }
+  },
+  {
+    "name": "R24 · level-2 map + surprise prior in the arena — NULL: the map learns, the prior has no gradient (headless, 1500 s)",
+    "series": 24,
+    "hint": "Phase 2b first probe (§17.3): the map EPM over place reaches 34 nodes for 33 cells under a touring walker and its surprise falls as the arena becomes familiar; but the identified A row for surprise is zero, so a prior on it moves nothing and the R23 orbit stays. Kept as the record.",
+    "state": {
+      "config": "a1v2_r24_l2_wander.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml"
+    }
+  },
+  {
+    "name": "R25 · level-2 wander by boredom + heading + avoidance — REGRESSION: rides the walls (headless, 1500 s)",
+    "series": 25,
+    "hint": "Phase 2b second probe (§17.4): with the heading prior back, the body rides the walls at ~290 contacts/min because the heading row outweighs the barely identified proximity rows; 32 boredom-driven heading changes did not change coverage. The arbitration question, measured. Run with --wander-bored 8 --wander-turn 90 for the rule.",
+    "state": {
+      "config": "a1v2_r25_l2_lookaround.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml"
+    }
+  },
+  {
+    "name": "R26 · level-2 keeps learning after the babble (babble_owns_a 0) — the regression gone at n=6",
+    "series": 26,
+    "hint": "WATCH (seed 2; 25 min in real time, the babble ends at 600 s): after the babble the body settles into a small loop — 1.3 wall contacts/min, 25 cells. Seed 5 is the other attractor: a tour of 60 cells at 52 contacts/min. n=6: 26 ± 35/min against R25's 295. Exactly the harness run (arena, reset noise 0.05).",
+    "state": {
+      "config": "a1v2_r26_l2_learn_after_babble.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 2,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R26 · moved wall (d): the +x wall shifts at 1100 s — R26 keeps its habits, contacts fall, the map does not grow",
+    "series": 26,
+    "hint": "WATCH (seed 2; 30 min): the +x wall moves at 1100 s. R26 keeps its loop — 0.9 contacts/min over the run, 28 cells, and the map does not grow (n=6 after the move: contacts 47 → 29/min, nodes 31 → 28). Robust, but no re-exploration: the (d) bar's re-inference half is NULL here.",
+    "state": {
+      "config": "a1v2_r26_l2_learn_after_babble.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1800,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 2,
+      "seed_random": false,
+      "arena_shift": 1100.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R27 · level-2 where-to-go: the play loop's novelty climb over the map sets the heading (§17.3 fork a)",
+    "series": 27,
+    "hint": "WATCH (seed 6): the play loop's novelty bearing sets the heading — the body tours 54 cells at 1.6 contacts/min and turns away from walls it knows. Seed 1 never leaves an orbit (12 cells, 8 map nodes: too few places for a route). n=6: 9 ± 9/min, 42 cells.",
+    "state": {
+      "config": "a1v2_r27_l2_play_heading.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R27 · moved wall (d): the +x wall shifts at 1100 s — play drives at the wall it 'knows' is open (253/min after the move)",
+    "series": 27,
+    "hint": "WATCH (seed 6): the seed that toured cleanly in the steady arena drives at the moved wall — the novel region is where the wall now stands: 222 contacts/min over the run (n=6 after the move: 253 ± 143, map +22 nodes). A learned direction beats the proximity priors when the two conflict.",
+    "state": {
+      "config": "a1v2_r27_l2_play_heading.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1800,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 1100.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R28 · level-2 avoid vs novelty ARBITRATED — the Cell recipe on the duck (need × competence over loops with bearings)",
+    "series": 28,
+    "hint": "WATCH (seed 5): near a wall the avoidance loop wins and puts its away-bearing on the heading reference — and the body barely turns: 43 contacts/min here, 71 ± 80 at n=6, seed 3 rides the wall at 224. The bearing form, kept for the record; R29 is the same seed in the release form.",
+    "state": {
+      "config": "a1v2_r28_l2_arbitrated.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 5,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R28 · moved wall (d): the +x wall shifts at 1100 s — the bearing form stops the burst hardest, and the re-exploration with it",
+    "series": 28,
+    "hint": "WATCH (seed 5): avoidance's bearing wins near the moved wall and stops the burst hardest (n=6 after the move: 114/min) and the re-exploration with it (nodes 42 → 33). This seed: 31 contacts/min over the run but a short path (74 m) — it moves little after the shift.",
+    "state": {
+      "config": "a1v2_r28_l2_arbitrated.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1800,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 5,
+      "seed_random": false,
+      "arena_shift": 1100.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R29 · level-2 arbitration, the release form — avoidance yields the heading to the reflex",
+    "series": 29,
+    "hint": "WATCH (seed 5): near a wall the avoidance loop wins and RELEASES the heading so the proximity reflex acts — 17 contacts/min here against R28's 43 on the same seed (n=6: 44 ± 62), still a tour (56 cells). In a known room play alone (R27) is the better avoider.",
+    "state": {
+      "config": "a1v2_r29_l2_release_form.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 5,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": ""
+    }
+  },
+  {
+    "name": "R29 · moved wall (d): the +x wall shifts at 1100 s — the release form cuts R27's burst by 40 % and keeps half its re-exploration",
+    "series": 29,
+    "hint": "WATCH (seed 5): after the wall moves the release form cuts R27's burst by 40 % (n=6 after the move: 149 vs 253/min) and keeps half its re-exploration (nodes +10 vs +22). This seed: 107 contacts/min over the run, 58 cells.",
+    "state": {
+      "config": "a1v2_r29_l2_release_form.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1800,
+      "output": "headless",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_arena.xml",
+      "noise": 0.05,
+      "seed": 5,
+      "seed_random": false,
+      "arena_shift": 1100.0,
+      "host_args": ""
+    }
   }
- },
- {
-  "name": "PIPELINE (old lineage) 1/3 \u00b7 find from scratch (R13, 2 h) \u2014 1/6 seeds; the record of the pre-R19 path",
-  "hint": "Design doc \u00a712.3/\u00a712.6. Seed 2 stands by ~30 min (falls 8 \u2192 3 \u2192 1 \u2192 0/min); other seeds fall-cycle. Tick 'battery' with seeds 1-6 for the race. \u2248 380 MB of JSONL.",
-  "state": {
-   "config": "a1v2_r13_tax001.json",
-   "mode": "brain",
-   "start": "scratch",
-   "ident_every": 12,
-   "ident_until": 3000,
-   "seed": 2,
-   "secs": 7200,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "seeds": "1-6",
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "PIPELINE (old lineage) 2/3 \u00b7 gain hunt (R11, 30 min, from the latest saved brain)",
-  "hint": "Resume the find brain under R11: C norms shed, no falls, oscillation 12 \u2192 11 mrad. Load-bearing \u2014 handing the find brain straight to R12c fails (\u00a712.6).",
-  "state": {
-   "config": "a1v2_r11_hunt.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "(latest saved brain)",
-   "secs": 1800,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "PIPELINE (old lineage) 3/3 \u00b7 rest (R12c, 30 min, from the latest saved brain)",
-  "hint": "Resume the hunted brain under R12c: the efference rests at earned stillness, |dq| 11 \u2192 0.1 mrad/tick, c 1.00. Watch it to see the oscillation stop.",
-  "state": {
-   "config": "a1v2_r12c_whole.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "(latest saved brain)",
-   "secs": 1800,
-   "output": "watch",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "PROBE \u00b7 push test \u2014 3 N shoves on the R19 stand every 60 s (watch)",
-  "hint": "The (d) test on the current stand: 3 N is the edge (13/36 caught, fore-aft goes over); watch the ball go red, c dip to 0.90 and re-earn in ~20 s.",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "duck_r19_s2.json",
-   "secs": 420,
-   "output": "watch",
-   "push": 3,
-   "push_every": 60,
-   "push_hold": 0.1,
-   "push_from": 30,
-   "save_brain": false,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "PROBE \u00b7 envelope \u2014 2 N shoves on a saved brain (the catch limit)",
-  "hint": "R19 catches 2 N 35/36 and 3 N 13/36. Change the force to bracket a brain's envelope; Report reads it. Point 'a saved brain' at the brain under test.",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "duck_r19_s2.json",
-   "secs": 420,
-   "output": "headless",
-   "push": 2,
-   "push_every": 60,
-   "push_hold": 0.1,
-   "push_from": 30,
-   "save_brain": false,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "PROBE \u00b7 byte-identity reference \u2014 r3, seed 6, 300 s (headless)",
-  "hint": "The guard: run it before touching code, keep the JSONL, run it again after, cmp.",
-  "state": {
-   "config": "a1v2_r3_consol.json",
-   "mode": "brain",
-   "start": "scratch",
-   "ident_every": 12,
-   "ident_until": 3000,
-   "seed": 6,
-   "secs": 300,
-   "output": "headless",
-   "push": 0,
-   "save_brain": false,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "PROBE \u00b7 scaffold \u2014 shove Pollen's standing policy (5 N every 4 s, watch)",
-  "hint": "The RL reference: staggers and catches 5 N, knocked over at 10 N and stands back up. The envelope the brain is measured against.",
-  "state": {
-   "mode": "hold",
-   "secs": 24,
-   "output": "watch",
-   "push": 5,
-   "push_every": 4,
-   "push_hold": 0.1,
-   "push_from": 0,
-   "noise": 0,
-   "battery": false
-  }
- },
- {
-  "name": "PROBE \u00b7 recovery harness \u2014 the stub brain that falls over (watch)",
-  "hint": "A brain that fails, the scaffold that picks it up, and the hand-off between them. Tests the harness, not the substrate.",
-  "state": {
-   "mode": "stub",
-   "secs": 60,
-   "output": "watch",
-   "push": 0,
-   "stub_amp": 0.25,
-   "stub_drift": 0.08,
-   "battery": false
-  }
- },
- {
-  "name": "\u2605 STACK \u00b7 find from scratch (R19, 2 h, headless, saves the brain) \u2014 every seed stands in 15 min",
-  "hint": "R19: a settle before every identification pulse window. All six seeds consolidate inside 15 min, 2-3 rescues in 2 h, tilt 0.35\u00b0, |u| 0.18; the brain catches 2 N shoves. Tick 'battery' for seeds 1-6.",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "scratch",
-   "ident_every": 6,
-   "ident_until": 3000,
-   "seed": 2,
-   "secs": 7200,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "seeds": "1-6",
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "\u2605 STACK \u00b7 watch the catch \u2014 2 N shoves on the R19 stand every 20 s (watch)",
-  "hint": "Resume duck_r19_s2 under R19 and shove it: the ball stays green, tilt peaks ~2.7\u00b0 and the body is back inside 0.6 s. Raise to 3 N to see where it still goes over (fore-aft first).",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "duck_r19_s2.json",
-   "secs": 300,
-   "output": "watch",
-   "push": 2,
-   "push_every": 20,
-   "push_hold": 0.1,
-   "push_from": 10,
-   "save_brain": false,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "\u2605 STACK \u00b7 the step \u2014 3 N shoves on the R19 stand with the walker's hand-off (watch)",
-  "hint": "Phase 0/1a of the intent boundary: when the brain's own attitude-prior error passes 0.06 and is rising, the joints go to the walker (yellow ball), which staggers through it, then back to the brain. Measured across six brains: 3 N 36/36 upright (13/36 without), 5 N 30/36 (6/36 without), never at 1 N, two false hand-offs in 36 at 2 N.",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "duck_r19_s2.json",
-   "secs": 300,
-   "output": "watch",
-   "push": 3,
-   "push_every": 20,
-   "push_hold": 0.1,
-   "push_from": 10,
-   "step_lean": 6.5,
-   "step_twist": 0,
-   "step_twist_s": 0.5,
-   "save_brain": false,
-   "battery": false,
-   "step_trigger": "att",
-   "step_att": 0.06,
-   "walk_from": -1
-  }
- },
- {
-  "name": "\u2605 STACK \u00b7 a walk on request \u2014 4 s forward at 0.3 m/s, then back to the reflex (watch)",
-  "hint": "Phase 1b of the intent boundary: at 10 s the joints go to Pollen's walking policy with a forward command (blue ball), it walks ~0.5 m, settles, and hands back to the brain, which is quiet again within seconds. Change vx/vy/vyaw to steer; the policy stands still below ~0.25 m/s.",
-  "state": {
-   "config": "a1v2_r19_settle_each.json",
-   "mode": "brain",
-   "start": "checkpoint",
-   "checkpoint": "duck_r19_s2.json",
-   "secs": 40,
-   "output": "watch",
-   "push": 0,
-   "step_lean": 6.5,
-   "step_trigger": "att",
-   "step_att": 0.06,
-   "walk_from": 10,
-   "walk_secs": 4,
-   "walk_vx": 0.3,
-   "walk_vy": 0,
-   "walk_vyaw": 0,
-   "save_brain": false,
-   "battery": false
-  }
- },
- {
-  "name": "R20 \u00b7 level-2 identification \u2014 twist babble at the walker (700 s, headless, saves the brain)",
-  "series": 20,
-  "hint": "Phase 1e of the intent boundary: the same module one level up. Motors = the three twist commands to Pollen's walker, senses = the body's own velocity from contact odometry and the gyro. Held 1.5 s twist pulses, one axis at a time. The host prints the identified A at the end: a positive, dominant diagonal is the gate (passed: 0.0083 / 0.0040 / 0.0090).",
-  "state": {
-   "config": "a1v2_r20_l2_ident.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 700,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "R21 \u00b7 level-2 prior: walk straight \u2014 prior-only (HK on spins); 0.21 m/s, straightness 0.90 (headless, 1500 s)",
-  "series": 21,
-  "hint": "The first level-2 control (design doc \u00a716.5): a state prior on the sensed forward velocity (slot 0, target 0.75 of the 0.4 m/s range = 0.3 m/s) and on the yaw rate (slot 6, target 0), with the controller learning (ctrl_lr 0.1) through the A that R20 identified. Babble 600 s, then the prior drives. Judged on forward speed and heading drift over the control phase against the walker under a constant forward command, which drifts 5-8 deg/s by itself.",
-  "state": {
-   "config": "a1v2_r21_l2_straight.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1
-  }
- },
- {
-  "name": "R22 \u00b7 level-2 heading regulation \u2014 shoves during the walk, the brain turns back (headless, 1500 s)",
-  "series": 22,
-  "hint": "The (d) test at the intent boundary (\u00a716.6): after 600 s of babble the brain walks at the walker's top speed holding its heading; 2 N shoves every 40 s turn it 17-20\u00b0, and it is back within 3-4\u00b0 twenty seconds later, 20/20, no rescues. The open-loop walker (--l2-twist 0.4 0 0) ends 109\u00b0 off. Switch to watch to see it; the ball is blue while the walker drives.",
-  "state": {
-   "config": "a1v2_r22_l2_heading.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 2,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "push_every": 40,
-   "push_hold": 0.1,
-   "push_from": 700
-  }
- },
- {
-  "name": "R23 \u00b7 level-2 avoidance in the arena \u2014 zero wall contacts, but an orbit (headless, 1500 s)",
-  "series": 23,
-  "hint": "Phase 2a: the ToF proximities enter the level-2 sense and a prior of zero on them plus the walk-forward prior gives 0 wall contacts in 25 min (open loop: 46/min; walk-straight: 194/min, pinned to a wall). But it orbits: 167 m inside nine 0.25 m cells. Avoidance is a constraint, not a drive \u2014 R24 adds the novelty drive. Watch it with scene_arena.xml; the beams draw from the head.",
-  "state": {
-   "config": "a1v2_r23_l2_avoid.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- },
- {
-  "name": "R24 \u00b7 level-2 map + surprise prior in the arena \u2014 NULL: the map learns, the prior has no gradient (headless, 1500 s)",
-  "series": 24,
-  "hint": "Phase 2b first probe (\u00a717.3): the map EPM over place reaches 34 nodes for 33 cells under a touring walker and its surprise falls as the arena becomes familiar; but the identified A row for surprise is zero, so a prior on it moves nothing and the R23 orbit stays. Kept as the record.",
-  "state": {
-   "config": "a1v2_r24_l2_wander.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- },
- {
-  "name": "R25 \u00b7 level-2 wander by boredom + heading + avoidance \u2014 REGRESSION: rides the walls (headless, 1500 s)",
-  "series": 25,
-  "hint": "Phase 2b second probe (\u00a717.4): with the heading prior back, the body rides the walls at ~290 contacts/min because the heading row outweighs the barely identified proximity rows; 32 boredom-driven heading changes did not change coverage. The arbitration question, measured. Run with --wander-bored 8 --wander-turn 90 for the rule.",
-  "state": {
-   "config": "a1v2_r25_l2_lookaround.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- },
- {
-  "name": "R26 \u00b7 level-2 keeps learning after the babble (babble_owns_a 0) \u2014 the regression gone at n=6",
-  "series": 26,
-  "hint": "WATCH: after the babble (600 s) the body either holds a small loop (four of six seeds) or tours the arena (two); either way the wall-riding of R25 is gone \u2014 295 \u2192 26 contacts/min at n=6.",
-  "state": {
-   "config": "a1v2_r26_l2_learn_after_babble.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- },
- {
-  "name": "R27 \u00b7 level-2 where-to-go: the play loop's novelty climb over the map sets the heading (\u00a717.3 fork a)",
-  "series": 27,
-  "hint": "WATCH: the play loop's bearing sets the heading \u2014 the body heads for the arena's unvisited parts and turns away from walls it knows (9 contacts/min, 5/6 seeds tour). Set secs 1800 and host arg --arena-shift 1100 to see it drive at a moved wall.",
-  "state": {
-   "config": "a1v2_r27_l2_play_heading.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- },
- {
-  "name": "R28 \u00b7 level-2 avoid vs novelty ARBITRATED \u2014 the Cell recipe on the duck (need \u00d7 competence over loops with bearings)",
-  "series": 28,
-  "hint": "WATCH: near a wall the avoidance loop wins and the body barely turns (the heading reference is a slow regulator) \u2014 71 contacts/min. The bearing form, kept for the record; compare R29.",
-  "state": {
-   "config": "a1v2_r28_l2_arbitrated.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- },
- {
-  "name": "R29 \u00b7 level-2 arbitration, the release form \u2014 avoidance yields the heading to the reflex",
-  "series": 29,
-  "hint": "WATCH: near a wall the avoidance loop wins and RELEASES the heading so the reflex acts \u2014 44 contacts/min in a known room (R27 9), and after a moved wall a 40 % smaller collision burst than R27 (149 vs 253).",
-  "state": {
-   "config": "a1v2_r29_l2_release_form.json",
-   "mode": "level2",
-   "start": "none",
-   "secs": 1500,
-   "output": "headless",
-   "push": 0,
-   "save_brain": true,
-   "battery": false,
-   "step_lean": 0,
-   "walk_from": -1,
-   "scene": "scene_arena.xml"
-  }
- }
 ]
