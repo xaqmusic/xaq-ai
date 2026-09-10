@@ -36,6 +36,12 @@ forward, upright, fovy 49°); **walls 1 m and an angled sun with shadows** (oper
 night; the 0.3 m walls were partly invisible to the ToF's upper rows — re-measured at n = 6:
 7.1 ± 6.0 walls/min, 151 ± 34 cells, 100 ± 20 nodes, no wall-rider).
 
+**Observation trap (2026-09-10):** the operator's first R30 watches ran 62–415 s on random
+seeds and showed a duck holding the centre — the first 600 s of a level-2 run are the babble;
+the tour starts at 600 s. The launcher now fast-forwards to 600 s (`--fast-until`, host pacer
++ viewer; the run is tick-identical) and has a ↻ presets button. The R30 preset's command is
+byte-identical to the sweep's run.
+
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
 a launcher preset that mirrors the harness line.

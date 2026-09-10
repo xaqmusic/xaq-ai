@@ -76,3 +76,15 @@ convention — **ROLE — mechanism · what you'll see** — for example
 Metadata is not read by the host, so this never changes a run. Presets live in
 `presets.json` beside the launcher: a name, a hint, and the control values to
 set. Add an experiment there, not in the code.
+
+## Watching a level-2 run
+
+The first 600 s of every level-2 run are the identification babble: the duck pulses its twist
+in place and does not tour until 600 s. The `level-2 watch: fast-forward until` control (the
+R26–R30 presets set it to 600) passes `--fast-until` to the host's pacer and to the viewer, so
+the babble goes by in seconds and the tour is watched at real time. The run is tick-for-tick
+the harness run: `--realtime` and `--fast-until` only touch the pacer (checked 2026-09-10).
+
+Presets minted by `newtest.py` while the launcher is open appear after **↻ presets**. Picking a
+config from the config list clears the preset and keeps whatever seed and controls were set —
+check the seed line before trusting a watched run against a harness number.

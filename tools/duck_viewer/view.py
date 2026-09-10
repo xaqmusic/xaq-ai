@@ -273,8 +273,12 @@ def status_line(frame):
     return line
 
 
-def watch(frames, realtime=True, title_every=25, cam_res=(64, 48)):
-    """Drive the interactive viewer from a stream of frames."""
+def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.0):
+    """Drive the interactive viewer from a stream of frames.
+
+    `fast_until`: frames before this many run-seconds are fast-forwarded — no pacing, one
+    frame in 25 drawn — and the wall clock re-bases where the pacing starts. With the host's
+    own --fast-until this skips a level-2 run's 600 s babble without changing the run."""
     _prefer_x11_window()
     # The brain-camera window renders offscreen through EGL, which needs no display and
     # leaves the viewer's own GLFW window alone. Set before mujoco is imported.
@@ -301,9 +305,18 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48)):
         started = time.perf_counter()
         n = 0
         last_drive = None
+        fast = fast_until > 0
         for frame in frames:
             if not viewer.is_running():
                 break
+            if fast and frame["t"] >= fast_until:
+                fast = False
+                started = time.perf_counter() - n / BRAIN_HZ          # the clock starts here
+                print(f"\n  t={frame['t']:6.2f}s  -> real time")
+            if fast:
+                n += 1
+                if n % 25:
+                    continue                                          # fast-forward: draw 2 fps of it
             data.qpos[:] = frame["qpos"]
             mujoco.mj_forward(model, data)
             viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
@@ -314,9 +327,11 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48)):
             if camwin is not None:
                 camwin.show(UI["cam"])
                 if UI["cam"]:
-                    camwin.set_hud(status_line(frame), UI["help"])
-                    if n % 4 == 0:                           # the ToF's rate, 12.5 Hz: the brain's frame rate
+                    camwin.set_hud(status_line(frame) + ("   [fast-forward]" if fast else ""), UI["help"])
+                    if n % 4 == 0 or fast:                   # the ToF's rate, 12.5 Hz: the brain's frame rate
                         camwin.update(data)
+            if fast:
+                continue
             n += 1
             drive = frame.get("drive")
             if drive != last_drive and last_drive is not None:
@@ -409,6 +424,8 @@ def main():
 
     p.add_argument("--scene", default=None, help="the MJCF the run used (default: scene.xml); the arena runs need scene_arena.xml")
     p.add_argument("--cam-res", default="64x48", help="the brain-camera window's render size WxH (default 64x48, the playroom plan's C1 start)")
+    p.add_argument("--fast-until", type=float, default=0.0, metavar="S",
+                   help="fast-forward the run's first S seconds (no pacing, 1 frame in 25 drawn); pair with the host's --fast-until S in live mode")
     rep = sub.add_parser("replay", help="watch a saved run")
     rep.add_argument("run")
     rep.add_argument("--fast", action="store_true", help="as fast as it draws")
@@ -440,7 +457,7 @@ def main():
                 yield line
 
         try:
-            n = watch(frames_from(stream()), cam_res=cam_res)
+            n = watch(frames_from(stream()), cam_res=cam_res, fast_until=a.fast_until)
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -451,7 +468,7 @@ def main():
 
     elif a.mode == "replay":
         with open(a.run) as f:
-            watch(frames_from(f), realtime=not a.fast, cam_res=cam_res)
+            watch(frames_from(f), realtime=not a.fast, cam_res=cam_res, fast_until=a.fast_until)
 
     elif a.mode == "record":
         stream = sys.stdin if a.run == "-" else open(a.run)

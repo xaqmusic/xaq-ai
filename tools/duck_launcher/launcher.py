@@ -71,7 +71,7 @@ DEFAULTS = dict(
     walk_from=-1.0, walk_secs=4.0, walk_vx=0.3, walk_vy=0.0, walk_vyaw=0.0,
     amp=HOST_AMP_DEFAULT, freeze_after=0.0, no_tilt_gate=False, servo_filter=False,
     noise=0.0, stub_amp=0.25, stub_drift=0.08,
-    arena_shift=0.0, host_args="",
+    arena_shift=0.0, fast_until=0.0, host_args="",
     ui_scale=0.0,                 # text size multiplier; 0 = from the display
 )
 
@@ -233,6 +233,9 @@ def host_args(s, seed, save_brain_path=None):
             a += ["--noise", fmt(float(s["noise"]))]
         if float(s["arena_shift"]) > 0:
             a += ["--arena-shift", fmt(float(s["arena_shift"]))]
+        if s["output"] == "watch" and float(s.get("fast_until", 0)) > 0:
+            # only the pacer reads it: the run is the same run, the babble goes by in seconds
+            a += ["--fast-until", fmt(float(s["fast_until"]))]
     elif mode == "stub":
         a += ["--stub-amp", fmt(float(s["stub_amp"])), "--stub-drift", fmt(float(s["stub_drift"]))]
     if float(s["push"]) > 0 and mode in ("brain", "hold"):
@@ -267,6 +270,8 @@ def plan(s, seed, name=None):
     args = host_args(s, seed, brain)
     host_cmd = [str(HOST)] + args
     scene_opt = ["--scene", s["scene"]] if s["scene"] and s["scene"] != "scene.xml" else []
+    if s["mode"] == "level2" and float(s.get("fast_until", 0)) > 0:
+        scene_opt += ["--fast-until", fmt(float(s["fast_until"]))]
     watch_cmd = [str(VIEWER_PY), str(VIEWER)] + scene_opt + ["live", "--save", str(jsonl),
                  f"--host-mode={args[0]}", "--"] + args[1:]
     return dict(name=name, jsonl=jsonl, err=err, brain=brain, scene=s["scene"],
@@ -545,6 +550,13 @@ def build_window():
     preset_box.grid(column=1, row=0, sticky="ew", padx=4)
     scale_row = ttk.Frame(fx)
     scale_row.grid(column=2, row=0, sticky="e")
+
+    def reload_presets():
+        # presets minted by newtest.py while the launcher is open (2026-09-10: R30 was, and
+        # the operator watched a random-seed config pick instead of the preset)
+        presets[:] = load_presets()
+        preset_box.configure(values=preset_labels(presets))
+    ttk.Button(scale_row, text="↻ presets", command=reload_presets, width=9).pack(side="left", padx=(0, 10))
     ttk.Label(scale_row, text="text × (0 = auto)").pack(side="left")
     spin(scale_row, V["ui_scale"], 0, 4, 0.25, width=5).pack(side="left", padx=(4, 0))
 
@@ -742,8 +754,10 @@ def build_window():
     spin(srow, V["stub_drift"], 0, 2, 0.02, width=6).pack(side="left", padx=(4, 0))
     ttk.Label(fe, text="level-2: move a wall at (s, 0 = never)").grid(column=0, row=6, sticky="w", pady=(6, 0))
     spin(fe, V["arena_shift"], 0, 86400, 100).grid(column=1, row=6, sticky="w", padx=4, pady=(6, 0))
-    ttk.Label(fe, text="extra host args (verbatim)").grid(column=0, row=7, sticky="w")
-    ttk.Entry(fe, textvariable=V["host_args"], width=28).grid(column=1, row=7, sticky="w", padx=4)
+    ttk.Label(fe, text="level-2 watch: fast-forward until (s, 0 = off)").grid(column=0, row=7, sticky="w")
+    spin(fe, V["fast_until"], 0, 86400, 100).grid(column=1, row=7, sticky="w", padx=4)
+    ttk.Label(fe, text="extra host args (verbatim)").grid(column=0, row=8, sticky="w")
+    ttk.Entry(fe, textvariable=V["host_args"], width=28).grid(column=1, row=8, sticky="w", padx=4)
 
     # -- command -------------------------------------------------------------------
     fc = frame("Command (this is the run; paste it into a shell to repeat it)", 0, 3, colspan=2)

@@ -71,10 +71,23 @@ constexpr double kFallenTiltDeg = 15.0;
 // whatever rate it asked for (measured: gap median 1 ms, max 275 ms).  With the host
 // pacing, ticks are 20 ms apart and the viewer's own pacing has nothing left to do.
 bool g_realtime = false;
+// --fast-until S (with --realtime): run unpaced until S seconds, then pace to the wall
+// clock from there. For watching a level-2 run whose first 600 s are the identification
+// babble: the run is the SAME run tick for tick (the pacer only sleeps), the babble goes by
+// in seconds, and the tour is watched at real time.
+int g_fast_until_ticks = 0;
+
 struct TickPacer {
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    void wait_for(int tick, double hz) const {
+    bool rebased = false;
+    void wait_for(int tick, double hz) {
         if (!g_realtime) return;
+        if (tick < g_fast_until_ticks) return;
+        if (!rebased) {                       // the clock starts when the pacing does
+            start = std::chrono::steady_clock::now() - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                            std::chrono::duration<double>(tick / hz));
+            rebased = true;
+        }
         std::this_thread::sleep_until(start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                                   std::chrono::duration<double>(tick / hz)));
     }
@@ -1468,6 +1481,7 @@ void usage() {
         "      twist and senses the body's own velocity (contact odometry + gyro).  Prints\n"
         "      the identified A's velocity rows against the commands at the end.  --push works\n"
         "      here too; --l2-twist VX VY VYAW replaces the brain's command (an open-loop baseline).\n"
+        "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
         "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
         "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
         "\n"
@@ -1539,6 +1553,8 @@ int main(int argc, char** argv) {
             g_servo_filter = true;
         } else if (a == "--realtime") {
             g_realtime = true;
+        } else if (a == "--fast-until") {
+            g_fast_until_ticks = int(std::stod(next("--fast-until")) * kBrainHz);
         } else if (a == "--save-brain") {
             g_save_brain = next("--save-brain");
         } else if (a == "--load-brain") {

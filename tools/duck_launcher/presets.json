@@ -539,13 +539,13 @@
  {
   "name": "R30 · the PLAYROOM: R27's play loop in the 4 m room (A1, the room is the lever)",
   "series": 30,
-  "hint": "WATCH (seed 6): the same play loop as R27 in the 4 m playroom generated from seed 1 (manifest beside the scene; walls 1 m, an angled sun). Furniture counts as wall contact; ball and block contact is the obj flag; the clock hand turns once per 20 s. n=6: 7.1 ± 6.0 walls/min, 151 ± 34 cells of 256, 100 ± 20 map nodes, 0.07 objs/min — nothing seeks the movables yet.",
+  "hint": "WATCH (seed 6): the same play loop as R27 in the 4 m playroom (seed-1 room, walls 1 m, an angled sun). THE FIRST 600 s ARE THE BABBLE — the duck identifies its twist model in place; the tour starts at 600 s, so this preset fast-forwards to there (the run is tick-for-tick the harness run). Furniture counts as wall contact; ball/block contact is the obj flag; the clock hand turns once per 20 s. n=6: 7.1 ± 6.0 walls/min, 151 ± 34 cells of 256, 100 ± 20 map nodes, 0.07 objs/min — nothing seeks the movables yet.",
   "state": {
    "config": "a1v2_r30_playroom.json",
    "mode": "level2",
    "start": "none",
    "secs": 1500.0,
-   "output": "headless",
+   "output": "watch",
    "push": 0,
    "save_brain": true,
    "battery": false,
@@ -556,19 +556,20 @@
    "seed": 6,
    "seed_random": false,
    "arena_shift": 0.0,
-   "host_args": ""
+   "host_args": "",
+   "fast_until": 600.0
   }
  },
  {
   "name": "R30 · moved ball (d): obj_ball0 jumps across the room at 1100 s — does the map re-explore where it went?",
   "series": 30,
-  "hint": "WATCH (seed 6): at 1100 s the red ball is relocated to (-1.2, 0.8), across the room from where the map knows it. The (d) test for the playroom: whether the novelty climb goes to the new place.",
+  "hint": "WATCH (seed 6): fast-forwards through the 600 s babble; at 1100 s the red ball is relocated to (-1.2, 0.8), across the room from where the map knows it. The (d) test for the playroom: whether the novelty climb goes to the new place.",
   "state": {
    "config": "a1v2_r30_playroom.json",
    "mode": "level2",
    "start": "none",
    "secs": 1800,
-   "output": "headless",
+   "output": "watch",
    "push": 0,
    "save_brain": true,
    "battery": false,
@@ -579,7 +580,8 @@
    "seed": 6,
    "seed_random": false,
    "arena_shift": 0.0,
-   "host_args": "--move obj_ball0 -1.2 0.8 1100"
+   "host_args": "--move obj_ball0 -1.2 0.8 1100",
+   "fast_until": 600.0
   }
  }
 ]

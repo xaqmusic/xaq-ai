@@ -48,6 +48,13 @@ Three keys are ours, listed in the HUD under the brain-camera image (with the st
 | `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block; the status line and the keys are its HUD | on |
 | `H` | the HUD text | on |
 
+**Watching a level-2 run: the first 600 s are the babble.** The duck pulses its twist in place
+to identify its own velocity model, and the tour starts at 600 s. `--fast-until 600` on the
+viewer (and, in `live` mode, on the host — the launcher sets both) fast-forwards that part: no
+pacing, one frame in 25 drawn, the HUD says `[fast-forward]`, and the wall clock starts where the
+pacing does. The run is the same run tick for tick — the host's flag only touches its pacer, and
+a run watched with `--realtime` is byte-identical to the headless one (checked 2026-09-10).
+
 The HUD is in the camera window rather than drawn into the MuJoCo window on purpose: label
 geoms placed in the free camera's frame lag the mouse between syncs and flash on every zoom.
 
