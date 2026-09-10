@@ -159,3 +159,47 @@ NOTICE. Machine-written code upstream carries `Co-Authored-By`, as PR-1 does.
 - Whether to open a Discussion before either PR, if they use Discussions.
 - Every push, every open, every reply.
 - The signing key custody for our component releases (who holds the private minisign key).
+
+## 8. The head: what to take to Pollen (2026-09-10)
+
+The first thing measured on their duck that needs something from their daemon. Written here
+in our terms; PR-2 and any follow-up carry it in theirs (§3's vocabulary rule).
+
+**The situation, in their terms.** A client that wants a steady head — for a camera, for a
+face that looks at you — has one channel: `robot.head`, four joint targets the walking policy
+tracks as part of its command vector. Two properties of the walking policy bound what any
+client can do through that channel, both measured on their MJCF with their `alpha_walking`
+policy in our host (design doc §17.12–17.14):
+
+1. **The policy moves the head on its own.** With the head command held at exactly zero, the
+   head-yaw joint moves at 1.2 rad/s RMS (69°/s), the neck pitch at 0.67, the head pitch at
+   0.48 and the roll at 0.45 — the gait's period, not the trunk's turning (the trunk's yaw rate
+   is 0.79). The camera on the head turns at 91°/s RMS about vertical.
+2. **The policy answers a head command 120–160 ms late** (its own tracking and the runtime's
+   head low-pass), a quarter of the 2.2 Hz gait period. A client-side reflex that counters the
+   jitter from the head IMU or the trunk gyro arrives late and adds motion; measured, every
+   such loop made the picture worse (frame difference 12.3 → 14–20 on a 64 × 48 frame).
+
+**The measurement that says what would help.** With the four head joints written directly —
+the policy keeping the legs and told nothing about the head — a small level-holding loop
+identified in 600 s of standing babble holds the head level (pitch and roll deviation 0.03–0.05
+against 0.20 and 0.09), halves the head's world rate, brings the camera's yaw motion from
+91 to 58°/s, and makes the picture steadier than the policy's own head (frame difference
+12.3 → 9.9), with the tour intact. Cost: rescues 0.05 → 0.19/min — the policy's balance used
+the head it no longer moves.
+
+**The ask, one thing.** A way for a client to own the head joints while the policy owns the
+legs: either a `robot.headJoints` intent that writes the four head servo targets directly (the
+policy's head outputs ignored while it is live), or a mode flag on `robot.head` with the same
+effect. Our host does exactly this with one flag (`--head-joints`); in `robotd` it is a
+change at the point where the policy's action becomes servo targets. Safety keeps the only
+write handle; when the client stops, the head returns to the policy.
+
+**How it travels.** PR-2 (the design document) states it as the boundary's second seam after
+the twist and the head command: "the head as a client-owned appendage". The daemon change is
+a separate, later PR, prepared and vetted like PR-1, opened at the operator's call — one thing
+per PR. The two findings above (the jitter, the lag) go to them as a measured note with the
+numbers and the method, without our vocabulary; the rescue cost is stated with it.
+
+**What we do not ask.** Nothing about the legs, the policy, or the walking envelope; nothing
+that requires our daemon to exist.

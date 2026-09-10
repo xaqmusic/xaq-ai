@@ -34,11 +34,14 @@ public:
     // One brain tick.  head_q = the four head joints' positions relative to HOME (what the
     // command asks for, sensed); head_g / head_w = the head IMU; g / w = the trunk IMU.
     // Returns the four head commands, radians from HOME.
+    // gait = one periodic proprioceptive signal of the gait (the left hip pitch relative to HOME),
+    // for the phase feed-forward below; ignored unless it is on.
     std::array<double, 4> tick(const std::array<double, 4>& head_q,
                                const std::array<double, 3>& head_g,
                                const std::array<double, 3>& head_w,
                                const std::array<double, 3>& g,
-                               const std::array<double, 3>& w);
+                               const std::array<double, 3>& w,
+                               double gait = 0.0);
 
     void on_reset();
     void set_learning(bool on);
@@ -58,6 +61,17 @@ public:
     // axis points down, so its yaw rate is gyro x (measured 2026-09-10: +0.34 with the trunk's
     // yaw rate, the same sign). With an ideal actuator the head's excursion shrinks by 1/(1+K).
     void set_rate_loop(double k, double tau_s) { rate_k_ = k; rate_tau_ = tau_s; }
+    // The gait-PHASE feed-forward on yaw (--head-phase LEAD_TICKS LEARN_S; 0 = off, byte-identical):
+    // the head's yaw jitter is periodic with the gait (2.2 Hz, §17.13), so it can be countered a
+    // quarter period AHEAD instead of a quarter period behind. Phase comes from the hip pitch's
+    // own upward crossings of its running mean (the stride clock; the doctrine's "feed it
+    // phase"); a 16-bin table over phase learns the head's yaw rate per bin for LEARN_S seconds
+    // after the babble with the command at zero, is integrated into the periodic yaw ANGLE the
+    // head will make, and is then frozen and commanded with the opposite sign LEAD_TICKS early —
+    // identify, then act, as the rest of the head loop. The honest signal is the residual: the
+    // measured rate minus the table's, printed at the end against the rate the table learned.
+    void set_phase(double lead_ticks, double learn_s) { phase_lead_ = lead_ticks; phase_learn_s_ = learn_s; }
+    std::vector<std::string> phase_report() const;
     std::array<double, 4> last_command() const { return last_cmd_; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
@@ -79,6 +93,14 @@ private:
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
     double vor_tau_ = 0.0, vor_lead_ = 0.0, vor_state_ = 0.0;
     double rate_k_ = 0.0, rate_tau_ = 0.0, rate_state_ = 0.0;
+    // the phase feed-forward
+    static constexpr int kPhaseBins = 16;
+    double phase_lead_ = 0.0, phase_learn_s_ = 0.0;
+    double gait_mean_ = 0.0; bool gait_mean_init_ = false; double gait_prev_ = 0.0;
+    uint64_t last_cross_ = 0; double period_ticks_ = 0.0; int crossings_ = 0;
+    std::array<double, kPhaseBins> rate_bin_{}; std::array<int, kPhaseBins> rate_n_{};
+    std::array<double, kPhaseBins> angle_bin_{}; bool phase_frozen_ = false;
+    double learn_ms_ = 0.0, act_ms_ = 0.0, act_res_ms_ = 0.0; uint64_t learn_n_ = 0, act_n_ = 0;
 };
 
 }  // namespace mjhost

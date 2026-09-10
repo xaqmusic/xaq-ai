@@ -64,8 +64,11 @@ with gain: the walker answers a head command 120–160 ms late and the jitter is
 frequency (2.2 Hz), a quarter period — no feedback loop through their walker can cancel it.
 R33 stands as the head loop. What remains, both predictive: a feed-forward locked to the gait
 PHASE (the doctrine's CPG → EPM; the counter-motion commanded a quarter period ahead), or the
-joints (Track A). The jitter itself is a finding for Pollen's outreach. **The H line pauses
-here for the operator's decision.**
+joints (Track A). The jitter itself is a finding for Pollen's outreach. **Both routes measured (§17.14):** Track A at the head (`--head-joints`, R34) is the first
+arm steadier than the walker's own head — picture 12.3 → 9.9, head rate halved, yaw 91 → 58°/s,
+level held, tour intact, rescues 0.05 → 0.19/min; the phase feed-forward finds a stride clock
+but no repeatable waveform (`NULL` on the head, `REGRESSION` on the tour). **Track A wins; the
+plan to Pollen is in the outreach plan §8.**
 Launcher: R31 (the babble), R32 (level, fast), R33 (level, slow).
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they

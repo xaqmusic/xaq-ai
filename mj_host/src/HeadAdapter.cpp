@@ -50,7 +50,8 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
                                         const std::array<double, 3>& hg,
                                         const std::array<double, 3>& hw,
                                         const std::array<double, 3>& g,
-                                        const std::array<double, 3>& w) {
+                                        const std::array<double, 3>& w,
+                                        double gait) {
     std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     auto* bus = instance_->bus();
     const auto publish = [&](const char* sensor, const std::vector<float>& values) {
@@ -102,6 +103,53 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
         vor_state_ -= vor_state_ * (dt / vor_tau_);     // the leak: a slow turn passes, a wobble is held
         last_cmd_[2] = std::clamp(-(vor_state_ + vor_lead_ * w[2]), -kHeadRange[2], kHeadRange[2]);
     }
+    if (phase_lead_ > 0.0 && tick_id_ >= babble_ticks_) {
+        // 1. the stride clock: upward crossings of the hip pitch through its own running mean
+        if (!gait_mean_init_) { gait_mean_ = gait; gait_prev_ = gait; gait_mean_init_ = true; }
+        gait_mean_ += (1.0 / 100.0) * (gait - gait_mean_);            // τ 2 s: the mean, not the stride
+        const bool up = (gait_prev_ - gait_mean_) <= 0.0 && (gait - gait_mean_) > 0.0;
+        gait_prev_ = gait;
+        if (up && tick_id_ - last_cross_ >= 8) {                       // ≥ 160 ms: not a wobble
+            const double p = double(tick_id_ - last_cross_);
+            if (last_cross_ > 0 && p >= 10.0 && p <= 60.0) {           // a gait: 0.2–1.2 s per stride
+                period_ticks_ = (period_ticks_ > 0.0) ? 0.8 * period_ticks_ + 0.2 * p : p;
+                ++crossings_;
+            }
+            last_cross_ = tick_id_;
+        }
+        const bool have_clock = period_ticks_ > 0.0 && crossings_ >= 3 && double(tick_id_ - last_cross_) < 2.0 * period_ticks_;
+        const double phase = have_clock ? std::fmod(double(tick_id_ - last_cross_) / period_ticks_, 1.0) : -1.0;
+        const uint64_t learn_until = babble_ticks_ + uint64_t(phase_learn_s_ * 50.0);
+        if (have_clock && tick_id_ < learn_until) {
+            // 2. learn: the head's yaw rate per phase bin, with the command at zero
+            const int b = int(phase * kPhaseBins) % kPhaseBins;
+            rate_bin_[size_t(b)] += 0.05 * (hw[0] - rate_bin_[size_t(b)]); ++rate_n_[size_t(b)];
+            learn_ms_ += hw[0] * hw[0]; ++learn_n_;
+            last_cmd_[2] = 0.0;
+        } else if (tick_id_ >= learn_until) {
+            if (!phase_frozen_) {
+                // 3. freeze: integrate the periodic rate into the periodic yaw angle, zero-mean
+                const double dt_bin = (period_ticks_ / kPhaseBins) / 50.0;
+                double acc = 0.0, mean = 0.0;
+                for (int i = 0; i < kPhaseBins; ++i) { acc += rate_bin_[size_t(i)] * dt_bin; angle_bin_[size_t(i)] = acc; mean += acc; }
+                mean /= kPhaseBins;
+                for (auto& a : angle_bin_) a -= mean;
+                phase_frozen_ = true;
+            }
+            // 4. act: the opposite of the angle the head is about to make, LEAD ticks early
+            if (have_clock) {
+                const double ph = std::fmod(phase + phase_lead_ / period_ticks_, 1.0);
+                const double x = ph * kPhaseBins; const int i0 = int(x) % kPhaseBins, i1 = (i0 + 1) % kPhaseBins;
+                const double f = x - std::floor(x);
+                const double a = (1.0 - f) * angle_bin_[size_t(i0)] + f * angle_bin_[size_t(i1)];
+                last_cmd_[2] = std::clamp(-a, -kHeadRange[2], kHeadRange[2]);
+                const int b = int(phase * kPhaseBins) % kPhaseBins;
+                act_ms_ += hw[0] * hw[0]; act_res_ms_ += (hw[0] - rate_bin_[size_t(b)]) * (hw[0] - rate_bin_[size_t(b)]); ++act_n_;
+            } else {
+                last_cmd_[2] = 0.0;                                     // no stride clock (standing): nothing to cancel
+            }
+        }
+    }
     if (rate_k_ > 0.0 && rate_tau_ > 0.0 && tick_id_ >= babble_ticks_) {
         constexpr double dt = 1.0 / 50.0;
         rate_state_ += hw[0] * dt;                       // the head's own yaw increment (gyro x: the down axis)
@@ -150,6 +198,23 @@ void HeadAdapter::set_learning(bool on) {
             }
         }
     }
+}
+
+std::vector<std::string> HeadAdapter::phase_report() const {
+    std::vector<std::string> out;
+    if (phase_lead_ <= 0.0) return out;
+    char buf[256];
+    double pk = 0.0; for (auto a : angle_bin_) pk = std::max(pk, std::fabs(a));
+    std::snprintf(buf, sizeof buf, "phase feed-forward: stride %.0f ticks (%.2f Hz) from %d crossings; learned yaw-rate RMS %.2f rad/s over %llu ticks; "
+                  "angle waveform ±%.3f rad; while acting: yaw-rate RMS %.2f, residual vs the table %.2f (%llu ticks)",
+                  period_ticks_, period_ticks_ > 0 ? 50.0 / period_ticks_ : 0.0, crossings_,
+                  learn_n_ ? std::sqrt(learn_ms_ / double(learn_n_)) : 0.0, (unsigned long long)learn_n_, pk,
+                  act_n_ ? std::sqrt(act_ms_ / double(act_n_)) : 0.0, act_n_ ? std::sqrt(act_res_ms_ / double(act_n_)) : 0.0, (unsigned long long)act_n_);
+    out.emplace_back(buf);
+    std::string tbl = "  yaw-rate table by phase bin:";
+    for (auto v : rate_bin_) { std::snprintf(buf, sizeof buf, " %+.2f", v); tbl += buf; }
+    out.emplace_back(tbl);
+    return out;
 }
 
 nlohmann::json HeadAdapter::brain_state() const { return instance_->snapshot_state(); }

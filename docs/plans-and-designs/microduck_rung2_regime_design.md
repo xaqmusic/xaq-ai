@@ -1635,3 +1635,53 @@ frequency. (2) **The joints** (Track A): the jitter is the actuator's noise, rem
 where the actuator is ours. And a third for Pollen: their policy's head-pose tracking leaves
 1.2 rad/s of yaw jitter at a fixed command, a measured finding on their model for the
 outreach. R33 remains the head loop; the H line pauses here for the operator's decision.
+
+### 17.14 Both routes tried: Track A at the head beats the walker's own head; the phase feed-forward finds no waveform (2026-09-10)
+
+The operator asked for both routes measured, even if marginal, before a plan goes to Pollen.
+
+**Track A at the head** (`--head-joints`): the head brain's two commands become the head
+joint targets (HOME + command) written over the walker's head outputs; the walker keeps the
+legs and is told nothing about the head. The actuator is the servo. Identified standing at the
+joints (`head2j_h1_s2`: pitch authority −0.075, roll +0.018 — nearly double the walker
+route's), then R33's level prior while walking, n = 6:
+
+| arm | 3-axis head rate (rad/s) | yaw rate | roll / pitch dev | walls/min | cells | rescues/min | frame diff (s6) | yaw / pitch / roll rotation (s6, °/s) |
+|---|---|---|---|---|---|---|---|---|
+| walker's own head (R30) | ~2.3 | 1.72 | 0.09 / 0.20 | 6.6 | 151 | 0.05 | 12.3 | 91 / 39 / 50 |
+| R33 (walker route, level) | 2.30 | 1.72 | 0.05 / 0.05 | 20 | 127 | 0.07 | 14.4 | 85 / 38 / 37 |
+| **J1 joints, level** | **1.18 ± 0.04** | **1.03** | **0.025 / 0.038** | 10.9 ± 9.3 | 144 | 0.19 | **9.9** | **58 / 40 / 28** |
+| J2 joints + rate loop K 1 | 1.57 | — | 0.08 | 44 | 145 | 0.27 | 11.1 | 52 / 29 / 36 |
+| J3 joints + rate loop K 2 | 2.36 | — | 0.16 | 24 | 163 | 1.05 | 14.9 | 68 / 89 / 96 |
+
+**J1 is the first arm steadier than the walker's own head on the operator's criterion**:
+the picture 12.3 → 9.9, the head's world rate halved, yaw 91 → 58°/s (the policy no longer
+jitters the joint; what remains is the trunk's own yaw), roll halved, level held at 0.03–0.05
+on every seed, the tour intact. The cost: rescues 0.05 → 0.19/min — the walker's balance
+apparently used the head it no longer moves (the head is 38 % of the mass), a number to carry
+into the ask. The rate loop on top of it fails again, now for a different reason: at the
+joints the lag is the servo's, but the remaining yaw is the trunk's, which the loop fights
+through a policy that then falls (J3 1.05 rescues/min). `WORKING`, loud, seed-consistent.
+
+**The gait-phase feed-forward** (`--head-phase LEAD LEARN_S`): a stride clock from the hip
+pitch's upward crossings of its running mean (found: 2.3–2.7 Hz, thousands of crossings), a
+16-bin table of the head's yaw rate learned for 100 s after the babble with the command at
+zero, integrated into the periodic yaw angle and commanded with the opposite sign LEAD ticks
+early (7 through the walker, 2 at the joints). Measured, n = 6: **the table explains nothing**
+— the residual against it equals the measured rate (1.58 of 1.59 through the walker, 0.84 of
+0.85 at the joints) and the learned angle waveform is ±0.014–0.017 rad, one degree. The yaw
+jitter is at the stride rate without being phase-locked to the stride. Through the walker
+(P1): head rate 2.39 (R33 2.30), picture 18.2, `REGRESSION`. At the joints (P2): head rate
+1.09 ± 0.23 vs J1's 1.18 — a tie within seeds — while the tour collapses (cells 82 vs 144,
+seed 3 riding a wall at 125/min with 36 cells); its seed-6 picture of 8.7 beats J1's 9.9 for
+the wrong reason: **the picture is blind to a duck that stops touring**, and must always be
+read with cells and path. `NULL` on the head, `REGRESSION` on the tour. Re-use: a phase
+estimate from the head's own rate rather than the hip; or the EPM form over (phase, rate) if
+the jitter turns out to be locked to something other than the hip.
+
+**The comparison the operator asked for.** Track A at the head wins, and not marginally:
+on the picture it is the only arm better than the walker, and it is better on every head
+number with the tour intact. Everything through Pollen's walker command — the level prior
+(R33), the trunk reflex, the head-gyro rate loop, the phase feed-forward — is bounded by two
+facts of their walker: it answers a head command 120–160 ms late, and its own policy jitters
+the head-yaw joint at 1.2 rad/s. That is the case to take to Pollen (outreach plan §8).

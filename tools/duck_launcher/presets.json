@@ -656,5 +656,29 @@
       "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2_h1_s2.json",
       "fast_until": 600
     }
+  },
+  {
+    "name": "R34 · TRACK A at the head: the head brain writes the head joints, level prior, walker keeps the legs (beats the walker's own head on the picture)",
+    "series": 34,
+    "hint": "WATCH (seed 6) against R30 and R33: the head is ours at the joints — level, and the yaw wobble down from 91 to 58 deg/s because the walking policy no longer jitters the head. Rescues 0.19/min (R30 0.05): the walker feels the head it no longer moves.",
+    "state": {
+      "config": "a1v2_r34_h2_head_joints.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500.0,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints",
+      "fast_until": 600
+    }
   }
 ]

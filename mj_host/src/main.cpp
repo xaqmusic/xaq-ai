@@ -1228,6 +1228,12 @@ std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 double g_head_vor_tau = 0.0, g_head_vor_lead = 0.0;   // --head-vor TAU LEAD: the yaw reflex in the head adapter
 double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the rate loop on the head's own gyro
+// --head-joints (Track A at the head, 2026-09-10): the head brain's four commands become the head
+// JOINT TARGETS (HOME + command), written over the walker's head outputs while the walker keeps the
+// legs. The actuator is then the servo, not the policy: no policy jitter on the head, a lag of a few
+// ticks instead of 120–160 ms. On the robot this needs a joints intent Pollen's daemon does not have.
+bool g_head_joints = false;
+double g_head_phase_lead = 0.0, g_head_phase_learn = 0.0;   // --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
@@ -1275,6 +1281,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::unique_ptr<HeadAdapter> head;
     if (!g_head_graph.empty()) {
         head = std::make_unique<HeadAdapter>(g_head_graph, seed);
+        if (g_head_joints) std::fprintf(stderr, "head joints: the head brain writes the four head joint targets (Track A at the head)\n");
+        if (g_head_phase_lead > 0.0) { head->set_phase(g_head_phase_lead, g_head_phase_learn);
+            std::fprintf(stderr, "head phase feed-forward: lead %.0f ticks, learning %.0f s after the babble\n", g_head_phase_lead, g_head_phase_learn); }
         if (g_head_rate_k > 0.0) { head->set_rate_loop(g_head_rate_k, g_head_rate_tau);
             std::fprintf(stderr, "head rate loop: K %.2f, tau %.2f s\n", g_head_rate_k, g_head_rate_tau); }
         if (g_head_vor_tau > 0.0) { head->set_vor(g_head_vor_tau, g_head_vor_lead);
@@ -1348,8 +1357,17 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const auto q = body.joint_positions();
             std::array<double, 4> head_q{};
             for (int i = 0; i < 4; ++i) head_q[size_t(i)] = q[size_t(5 + i)] - kHomePose[size_t(5 + i)];
-            const auto hcmd = head->tick(head_q, body.head_gravity(), body.head_gyro(), g, w);
+            const auto hcmd = head->tick(head_q, body.head_gravity(), body.head_gyro(), g, w,
+                                         q[2] - kHomePose[2]);            // the left hip pitch: the stride clock
             if (driver == Driver::Brain) command.head = hcmd;
+        }
+        std::array<double, 4> head_targets{};
+        bool head_owns_joints = false;
+        if (head && g_head_joints && driver == Driver::Brain) {
+            const auto hcmd = head->last_command();
+            for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)] + hcmd[size_t(i)];
+            head_owns_joints = true;
+            command.head = {0.0, 0.0, 0.0, 0.0};          // the walker is told nothing about the head
         }
 
         if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from && t % push_period == 0
@@ -1375,6 +1393,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 walk_targets[i] += alpha * (target - walk_targets[i]);
                 ctrl[i] = walk_targets[i];
             }
+            if (head_owns_joints)
+                for (int i = 0; i < 4; ++i) { ctrl[5 + i] = head_targets[size_t(i)]; walk_targets[5 + i] = head_targets[size_t(i)]; }
         }
         body.step(ctrl);
 
@@ -1486,6 +1506,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     }
     if (head) {
         for (const auto& line : head->readback()) std::fprintf(stderr, "  %s\n", line.c_str());
+        for (const auto& line : head->phase_report()) std::fprintf(stderr, "  %s\n", line.c_str());
         for (const auto& line : head->diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
         if (!g_save_head.empty()) {
             nlohmann::json snap;
@@ -1549,6 +1570,10 @@ void usage() {
         "      --no-backing: the forward command clamped at zero — no rear sensor, no step into the unseen.\n"
         "      --head-vor TAU LEAD: the yaw reflex in the head loop — minus the trunk's integrated yaw rate,\n"
         "      leaking to centre in TAU s, plus LEAD s of the rate itself (0 0 = off).\n"
+        "      --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward on yaw — the stride clock from the hip\n"
+        "      pitch, a 16-bin table of the head's yaw rate learned for LEARN_S s, then the opposite angle LEAD early.\n"
+        "      --head-joints: Track A at the head — the head brain's commands become the head JOINT targets\n"
+        "      (HOME + command) over the walker's head outputs; the walker keeps the legs.\n"
         "      --head-rate K TAU: the yaw command integrates minus K times the head's OWN yaw rate (its gyro),\n"
         "      leaking to centre in TAU s — counters whatever moves the head (0 0 = off).\n"
         "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
@@ -1659,6 +1684,10 @@ int main(int argc, char** argv) {
             g_arena_shift_s = std::stod(next("--arena-shift"));
         } else if (a == "--head-graph") {
             g_head_graph = next("--head-graph");
+        } else if (a == "--head-phase") {
+            g_head_phase_lead = std::stod(next("--head-phase")); g_head_phase_learn = std::stod(next("--head-phase"));
+        } else if (a == "--head-joints") {
+            g_head_joints = true;
         } else if (a == "--head-rate") {
             g_head_rate_k = std::stod(next("--head-rate")); g_head_rate_tau = std::stod(next("--head-rate"));
         } else if (a == "--head-vor") {
