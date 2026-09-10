@@ -126,6 +126,11 @@ public:
     // notes on why each is hardware-computable from the single trunk IMU.
     std::array<double, 3> accel() const;            // imu_accel, m/s^2, gravity included
     std::array<double, 3> head_gravity() const;     // projected gravity IN THE HEAD FRAME
+    // The head IMU's gyro (rad/s, head frame): the `head_gyro` sensor the playroom overlay
+    // adds on the head_imu site (H0). Zeros when the scene has no such sensor (the vendored
+    // model), so nothing else changes. Hardware: the ToF board's IMU.
+    std::array<double, 3> head_gyro() const;
+    bool has_head_gyro() const { return head_gyro_adr_ >= 0; }
     std::array<double, 2> head_com_trunk() const;   // head-subtree CoM offset, trunk frame x/y (m)
 
     // Trunk-frame angular velocity, rad/s, from the model's own gyro sensor.
@@ -165,6 +170,7 @@ private:
     std::array<int, kNumPolicyJoints> actuator_{};   // into d_->ctrl
     int trunk_body_  = -1;
     int    n_objects_ = 0;                    // bodies named obj_*
+    int    head_gyro_adr_ = -1;               // sensordata address of head_gyro, or -1
     bool   robot_contact(int i, int& other_geom) const;   // is contact i the robot's, and with which geom
     std::vector<char> qpos_is_robot_;         // per qpos index: does the robot own it (reset noise)
     std::array<double, 3> push_{};

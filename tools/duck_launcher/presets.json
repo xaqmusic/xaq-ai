@@ -583,5 +583,30 @@
    "host_args": "--move obj_ball0 -1.2 0.8 1100",
    "fast_until": 600.0
   }
+ },
+ {
+  "name": "R31 · H1 the HEAD LOOP: identification babble on the four head commands, the walker standing (watch the head)",
+  "series": 31,
+  "hint": "WATCH (seed 2): the head babbles for 600 s in 0.5 s holds at 0.3 of its trained ranges while the walker stands; the identified rows print at the end (stderr). n=5: every position diagonal positive, the pitches opposite-signed on head-gravity x, roll on y, 0 rescues. No fast-forward: the babble IS the thing to watch.",
+  "state": {
+   "config": "a1v2_r31_h1_head_babble.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 700.0,
+   "output": "watch",
+   "push": 2,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "push_every": 40,
+   "push_hold": 0.1,
+   "push_from": 700,
+   "seed": 2,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "fast_until": 0.0,
+   "host_args": "--l2-twist 0 0 0 --head-graph mj_host/configs/head_h1_babble.json"
+  }
  }
 ]

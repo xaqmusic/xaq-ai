@@ -26,8 +26,10 @@ Rules the generator keeps (plan §5.3, §5.5):
     fixed seeds and never adjusted to a result.
 
 The scene includes `robot_overlay_playroom.xml`, a generated copy of the vendored robot file
-with one line changed — the head camera, re-placed at the lens front and turned to face the
-ToF's forward, upright (CAMERA_LINE_NEW below). The vendored file itself is never edited.
+with two changes — the head camera, re-placed at the lens front and turned to face the
+ToF's forward, upright (CAMERA_LINE_NEW below), and a head IMU (a gyro and an orientation on
+the `head_imu` site, as Pollen's ToF board carries; SENSOR_LINE_NEW). The vendored file itself
+is never edited.
 
 --check loads the result through the host (`ogma_mjhost --load-only`) when the host is built.
 """
@@ -58,6 +60,15 @@ ROBOT_OVERLAY = MODEL_DIR / "robot_overlay_playroom.xml"
 CAMERA_LINE_OLD = '<camera name="head_camera" pos="0.0155 -9.13778e-05 -0.0733" quat="0 0 -1 0"/>'
 CAMERA_LINE_NEW = ('<camera name="head_camera" pos="0.0155 -9.0e-05 -0.0818" quat="0.707107 0 0 -0.707107" fovy="49"/>'
                    '<!-- OVERLAY: re-placed at the lens front, facing the ToF forward, upright; see playroom_gen.py -->')
+# H0 (playroom plan, the head loop): the head IMU. Pollen's ToF board carries one and tofd
+# reads it at 100 Hz; the vendored model has the `head_imu` site with no sensor on it. A
+# gyro and an orientation on that site are what the head loop senses. Sensors touch no
+# physics: a run is byte-identical with or without them.
+SENSOR_LINE_OLD = '<accelerometer name="imu_accel" site="imu"/>'
+SENSOR_LINE_NEW = ('<accelerometer name="imu_accel" site="imu"/>\n'
+                   '    <gyro name="head_gyro" site="head_imu"/>'
+                   '<!-- OVERLAY H0: the head IMU, as on the ToF board -->\n'
+                   '    <framequat name="head_orientation" objtype="site" objname="head_imu"/>')
 
 WALL_H = 1.00          # m (operator, 2026-09-10: raised from the arena's 0.3 so the camera sees room, not sky)
 WALL_T = 0.025
@@ -73,6 +84,9 @@ def write_robot_overlay():
     header = ('<!-- GENERATED OVERLAY of robot_allcollisions.xml by mj_host/tools/playroom_gen.py: the vendored\n'
               '     file with the head_camera line replaced (see CAMERA_LINE_NEW there). Do not edit; regenerate. -->\n')
     text = text.replace(CAMERA_LINE_OLD, CAMERA_LINE_NEW, 1)
+    if SENSOR_LINE_OLD not in text:
+        sys.exit(f"the vendored robot file no longer has the sensor line the head IMU is added after: {SENSOR_LINE_OLD}")
+    text = text.replace(SENSOR_LINE_OLD, SENSOR_LINE_NEW, 1)
     # the XML declaration must stay first; the header goes after it
     decl_end = text.index("?>") + 2 if text.startswith("<?xml") else 0
     ROBOT_OVERLAY.write_text(text[:decl_end] + "\n" + header + text[decl_end:].lstrip("\n"))

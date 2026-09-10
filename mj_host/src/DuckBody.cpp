@@ -95,6 +95,16 @@ DuckBody::DuckBody(const std::string& scene_path) {
         const char* name = mj_id2name(m_, mjOBJ_BODY, b);
         if (name && std::string(name).rfind("obj_", 0) == 0) ++n_objects_;
     }
+    {
+        const int sid = mj_name2id(m_, mjOBJ_SENSOR, "head_gyro");
+        head_gyro_adr_ = (sid >= 0) ? m_->sensor_adr[sid] : -1;
+    }
+}
+
+std::array<double, 3> DuckBody::head_gyro() const {
+    if (head_gyro_adr_ < 0) return {0.0, 0.0, 0.0};
+    const double* w = &d_->sensordata[head_gyro_adr_];
+    return {w[0], w[1], w[2]};
 }
 
 DuckBody::~DuckBody() {

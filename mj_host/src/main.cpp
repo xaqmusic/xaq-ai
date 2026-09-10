@@ -34,6 +34,7 @@
 #include "Observation.hpp"
 #include "Odometry.hpp"
 #include "IntentAdapter.hpp"
+#include "HeadAdapter.hpp"
 #include "Tof.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
@@ -1218,6 +1219,9 @@ double g_arena_shift_s = -1.0;   // > 0: at this time move wall_px from x = 1.0 
 struct MoveOp { std::string name; double x, y, at_s; bool done = false; };
 std::vector<MoveOp> g_moves;
 constexpr double kClockRadPerS = 2.0 * M_PI / 20.0;   // the clock hand: one turn per 20 s, visible at the camera's rate
+// --head-graph H.json: the head loop (playroom plan, H line) — a second brain whose motors are
+// the walker's four head commands and whose senses are the head IMU. Absent: byte-identical.
+std::string g_head_graph;
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
@@ -1261,6 +1265,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     }
     const bool has_clock = body.has_joint("clock_hand");
     const bool has_objects = body.n_objects() > 0;
+    std::unique_ptr<HeadAdapter> head;
+    if (!g_head_graph.empty()) {
+        head = std::make_unique<HeadAdapter>(g_head_graph, seed);
+        std::fprintf(stderr, "head graph %s  (head gyro sensor: %s)\n", g_head_graph.c_str(),
+                     body.has_head_gyro() ? "present" : "ABSENT — the scene has no head IMU; head gyro slots read zero");
+    }
 
     std::array<float, kActionLen> scaffold_last{}, walker_last{};
     std::array<double, kNumPolicyJoints> walk_targets = body.joint_positions();
@@ -1284,11 +1294,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             brain.set_learning(false);
             brain.on_reset();
             command.twist = {0.0, 0.0, 0.0};
+            if (head) { head->set_learning(false); head->on_reset(); command.head = {0.0, 0.0, 0.0, 0.0}; }
         } else if (recovery.handed_back_this_tick()) {
             brain.on_reset();
             brain.set_learning(true);
             walker_last.fill(0.0f);
             walk_targets = body.joint_positions();
+            if (head) { head->on_reset(); head->set_learning(true); }
         }
         const bool learning_now = (driver == Driver::Brain);
         if (!learning_now) ++frozen_ticks;
@@ -1311,6 +1323,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (has_clock) body.spin_joint("clock_hand", kClockRadPerS);
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         if (driver == Driver::Brain) command.twist = twist;
+        if (head) {
+            // The head loop: the four head joints (policy indices 5-8) relative to HOME are its
+            // sensed "joints"; the head IMU and the trunk IMU its senses; its output the head
+            // block of the walker's command vector.  The walker keeps every other joint.
+            const auto q = body.joint_positions();
+            std::array<double, 4> head_q{};
+            for (int i = 0; i < 4; ++i) head_q[size_t(i)] = q[size_t(5 + i)] - kHomePose[size_t(5 + i)];
+            const auto hcmd = head->tick(head_q, body.head_gravity(), body.head_gyro(), g, w);
+            if (driver == Driver::Brain) command.head = hcmd;
+        }
 
         if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from && t % push_period == 0
             && driver == Driver::Brain && (ticks - t) >= int(kRecoverWindowSecs * kBrainHz)) {
@@ -1402,6 +1424,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1);
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
+            if (head) {
+                const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
+                std::printf(",\"head\":[%.4f,%.4f,%.4f,%.4f],\"hg\":[%.4f,%.4f,%.4f],\"hw\":[%.4f,%.4f,%.4f]",
+                            hc[0], hc[1], hc[2], hc[3], hg[0], hg[1], hg[2], hw[0], hw[1], hw[2]);
+            }
             std::printf("}\n");
         }
     }
@@ -1438,6 +1465,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::fprintf(stderr, "\n");
             }
         }
+    }
+    if (head) {
+        for (const auto& line : head->readback()) std::fprintf(stderr, "  %s\n", line.c_str());
+        for (const auto& line : head->diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
     }
     if (g_wander_bored_s > 0.0)
         std::fprintf(stderr, "  wander: %d heading changes of %.0f deg after %.0f s of familiarity\n",
@@ -1484,6 +1515,8 @@ void usage() {
         "      twist and senses the body's own velocity (contact odometry + gyro).  Prints\n"
         "      the identified A's velocity rows against the commands at the end.  --push works\n"
         "      here too; --l2-twist VX VY VYAW replaces the brain's command (an open-loop baseline).\n"
+        "      --head-graph H.json adds the head loop: a second brain on the walker's four head commands,\n"
+        "      sensing the head IMU (the playroom overlay's); its identified rows are printed at the end.\n"
         "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
         "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
         "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
@@ -1590,6 +1623,8 @@ int main(int argc, char** argv) {
             g_wander_turn_deg = std::stod(next("--wander-turn"));
         } else if (a == "--arena-shift") {
             g_arena_shift_s = std::stod(next("--arena-shift"));
+        } else if (a == "--head-graph") {
+            g_head_graph = next("--head-graph");
         } else if (a == "--move") {
             MoveOp mv;
             mv.name = next("--move"); mv.x = std::stod(next("--move")); mv.y = std::stod(next("--move"));

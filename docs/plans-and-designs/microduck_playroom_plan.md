@@ -48,6 +48,10 @@ walls/min, **22.5 ± 23.7 objs/min** (it dribbles balls without seeking them), `
 **Observed: the table-leg wedge** (§17.8) — B2's first (d) scenario, and E1's stimulus for
 "a learned direction beats the proximity priors" at a 3 cm pillar.
 
+**H0 and H1 are built and `WORKING` (design doc §17.9):** the head IMU in the overlay; the head
+babble identifies the four commands seed-consistently with 0 rescues. Next on the H line: H2,
+the level-and-still prior while walking. Launcher: R31.
+
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
 a launcher preset that mirrors the harness line.
@@ -177,6 +181,65 @@ scripted get-up: that is the Pollen state the joints would otherwise be handed t
 rate from a fixed set of dropped poses within a bounded window; rescues per hour as the crutch
 meter (intent boundary doc §5). The (d) test: drop the duck mid-run.
 
+## 4b. The head loop — the H line (agreed 2026-09-10: head first)
+
+**Why the head, and why first.** The walker's command vector is seven numbers: the twist and
+four head targets (neck_pitch, head_pitch, head_yaw, head_roll, deltas from HOME; the host's
+`Command::head`, Pollen's `robot.head` on the robot — `Observation.hpp` slots 51–55). So a brain
+that owns the head needs **no joint access**: it commands the head through the walker's own
+channel and the walker tracks it, identically in the host and on hardware. Nothing is asked
+of Pollen; the legs stay theirs; every reporting rule of the ladder applies (the head's driver
+is named per joint). And a level, steady head removes most of the nuisance variation the visual
+EPM would otherwise absorb, so it belongs **before C2**.
+
+**The error, in the rewrite rule's terms.** Head-frame motion the brain did not command:
+head gravity off vertical, head angular rate not zero, both from the head IMU (Pollen's ToF
+board carries one, read at 100 Hz by tofd; the vendored model has the `head_imu` site with
+no sensor, so the overlay adds a gyro and an orientation there — H0). The behaviour that
+falls out is the neck counter-rotating the trunk's gait pitch: the vestibulo-collic reflex,
+why a chicken's head stays still while its body walks.
+
+| field | the head loop |
+|---|---|
+| infers | the trunk's motion one step ahead — what the neck must cancel |
+| sensors | head gravity, head gyro, the trunk IMU, the efference copy of its own head command; its "joints" are the four head positions relative to HOME in command units |
+| predicts | under its command the head gravity stays vertical and the head rate stays zero |
+| honest signal | the head-frame rate itself |
+| confidence | the head EPM's TLE |
+
+**Design choices made now.** Pitch and roll only; yaw follows the trunk (a stabilised yaw
+fights every turn). Babble amplitude small: the head is 38 % of the mass and the walker's
+balance feels it; rescues per minute is the guard. The actuator is a command the walker
+tracks with a lag (its head low-pass), so: babble holds long enough for the head to arrive,
+and identify from a still body first (the R19 lesson), then walking.
+
+**Metrics, with the blind one named.** Head gyro RMS and head-gravity deviation while walking
+at 0.2 m/s, against the walker's own head handling as the gain-0 control; rescues/min
+unchanged; and the operator's actual complaint measured directly — the mean frame-to-frame
+difference of the 64 × 48 brain frame over the tour (computable from any saved run through
+the viewer's renderer). The degenerate behaviour: a head locked rigidly to the trunk scores
+perfectly on joint motion and worst on world motion — so the world-frame gyro is the number,
+never the joint angles. The (d) test: the standing shove series, the head staying level.
+
+**Machinery.** `mj_host/src/HeadAdapter.*` — the twist adapter's code with four command
+dimensions and the head's trained ranges (±1.10, ±1.10, ±1.40, ±0.31 rad); `--head-graph
+H.json` on the level-2 host; the head brain freezes and resets with the twist brain on a
+rescue; the JSONL gains `head` (the four commands), `hg` (head gravity) and `hw` (head gyro)
+only when a head graph is present; the identified rows are printed at the end. Config
+`mj_host/configs/head_h1_babble.json`: `motor_epm_head` = MotorEPMv2 over the four commands,
+12 load slots = head gravity x, y | head gyro x, y, z | trunk gravity x, y | trunk gyro x, y,
+z | 2 spare; the H2 prior is `state_prior_indices [12, 13]` (head gravity x, y → 0).
+
+| # | lever | stimulus | metric | promote if |
+|---|---|---|---|---|
+| H0 | the head IMU in the overlay; `head_gyro()` in the body | — | byte-identity | arena and playroom runs unchanged. **Built 2026-09-10, `WORKING`** |
+| H1 | head babble while the walker stands (`--l2-twist 0 0 0`), 600 s, hold 25, scale 0.3 | the body's own head | the identified rows: position diagonal positive and dominant; both pitches on head-gravity x; roll on head-gravity y; rescues | signs consistent across seeds, no rescues. **Built 2026-09-10, `WORKING`: 5 seeds agree to ±5 %, 0 rescues (§17.9)** |
+| H2 | the head prior while walking (level + still), gain-0 = the walker's head | the R30 tour + the shove series | head gyro RMS, gravity deviation, rescues/min, the brain-frame difference | loud: the head visibly steadier, balance untouched |
+| H3 | the camera-stability number over R30 | the tour | frame-to-frame difference, H2 vs control | the number moves with the eye |
+
+**Hardware check before H2 counts there:** whether the head IMU's readings reach a client over
+the ToF socket or stay inside tofd.
+
 ## 5. The playroom
 
 The arena is an instrument. Each behaviour needs a stimulus it can be observed against and a
@@ -292,6 +355,7 @@ verdict in the design doc and the ledger. R-numbers are minted by `newtest.py` a
 
 | # | lever | stimulus | metric | promote if |
 |---|---|---|---|---|
+| H0–H3 | **the head loop** (§4b) — head first, agreed 2026-09-10 | | | |
 | V1 | xaq_voice `duck` patch + jaw | any run | ear and eye | the operator hears TLE |
 | A1 | playroom generator + `scene_playroom.xml`, primitives, four object classes, seeded manifest; R27 re-run on it | the room | R27's own metrics (contacts/min, cells, map nodes) on the new room | R27 is not degenerate here (no orbit, no wall-riding); the manifest is logged. **Built 2026-09-10, `WORKING` as an instrument (§17.8): 5/6 seeds tour, 140 cells, 98 nodes; operator's eye pending** |
 | C1 | head-camera render, no consumer | — | throughput; byte-identical logs | ≥ half of today's realtime factor kept |

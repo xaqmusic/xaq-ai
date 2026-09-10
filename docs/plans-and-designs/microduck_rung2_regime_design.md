@@ -1410,3 +1410,49 @@ and stayed there for the remaining 690 s: 83 rescues, every one given up after t
    learning, the rescue held back), and this trap is its first (d) scenario: dropped poses
    *and* wedged on a table leg. The six harness seeds never wedged (`down%` 0.14), which is
    why the number must be read per seed.
+
+### 17.9 H0 / H1 — the head loop: the head IMU, and the identification babble on the four head commands (2026-09-10)
+
+The playroom plan's H line (§4b there; agreed head-first the same day). The walker's command
+vector carries four head targets — neck_pitch, head_pitch, head_yaw, head_roll, deltas from
+HOME (`Observation.hpp` slots 51–55; Pollen's `robot.head`) — so a brain that owns the head
+needs no joint access: `mj_host/src/HeadAdapter.*` is the twist adapter's code with four
+command dimensions and the trained ranges (±1.10, ±1.10, ±1.40, ±0.31 rad), commanding the
+head through the walker and sensing the head IMU.
+
+**H0.** The overlay adds a gyro and an orientation on Pollen's `head_imu` site (their ToF board
+carries the IMU; tofd reads it at 100 Hz); `DuckBody::head_gyro()` reads it, zeros without it.
+Sensors touch no physics: the arena run and the playroom R30 run are byte-identical.
+
+**H1.** `configs/head_h1_babble.json`: `motor_epm_head` over the four commands, 12 load slots
+(head gravity x, y | head gyro x, y, z | trunk gravity x, y | trunk gyro x, y, z | 2 spare),
+`babble_ticks 30000`, `babble_hold 25` (0.5 s; the walker's head low-pass answers in ~10 ticks),
+`babble_scale 0.3` (±0.33 rad on the pitches), the prior off. Run with the twist brain overridden
+to zero (`--l2-twist 0 0 0`: the walker stands) in the playroom, 700 s, seeds 1–5. The
+identified A, rows vs the four commands, seed 2 (the other four agree to ±5 % on every entry):
+
+| row \ command | neck_pitch | head_pitch | head_yaw | head_roll |
+|---|---|---|---|---|
+| pos neck_pitch | **+0.0237** | +0.0226 | +0.0052 | +0.0015 |
+| pos head_pitch | +0.0040 | **+0.0555** | +0.0205 | +0.0014 |
+| pos head_yaw | −0.0009 | +0.0004 | **+0.0497** | +0.0147 |
+| pos head_roll | +0.0224 | +0.0074 | +0.0112 | **+0.0601** |
+| head gravity x | **−0.0041** | **+0.0083** | +0.0019 | +0.0004 |
+| head gravity y | +0.0056 | +0.0029 | −0.0102 | **+0.0132** |
+
+Read: every position diagonal positive; head_pitch, head_yaw and head_roll dominant; **the
+two pitches move head-gravity x with opposite signs** — at HOME both joints sit at +20° and
+the head is level, so the joints oppose each other, and a positive delta on the neck tilts the
+head one way while a positive delta on the head tilts it the other (the read-back agrees with
+the geometry, not a guess); roll moves head-gravity y; the yaw row on gravity y (−0.010) is a
+pitched head's yaw axis not being vertical. One coupling to know: a head_pitch command moves
+the neck joint almost as much as a neck_pitch command does (+0.0226 vs +0.0237) — the walker's
+policy treats the two pitches as one head pose. The gyro rows are small, as 0.5 s holds
+average a rate to nothing; the transients are there for a faster model. **0 rescues on every
+seed**: a 0.3-scale head babble does not fall the standing walker.
+
+**Verdict.** H0 `WORKING` (byte-identical elsewhere). H1 `WORKING`: the head identifies from a
+still body in one babble, seed-consistently, with the rows the H2 prior needs. Next, H2: the
+prior on slots 12, 13 (head gravity x, y → 0) while walking, A/B against the walker's own
+head, judged on head gyro RMS, gravity deviation, rescues/min and the brain-frame difference.
+Launcher: R31 (watch the head babble; the twist brain held at zero).

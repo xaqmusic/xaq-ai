@@ -65,6 +65,8 @@
     <gyro name="imu_ang_vel" site="imu"/>
     <velocimeter name="imu_lin_vel" site="imu"/>
     <accelerometer name="imu_accel" site="imu"/>
+    <gyro name="head_gyro" site="head_imu"/><!-- OVERLAY H0: the head IMU, as on the ToF board -->
+    <framequat name="head_orientation" objtype="site" objname="head_imu"/>
     <subtreeangmom name="root_angmom" body="trunk_base"/>
   </sensor>
   <!-- Additional additional.xml -->
