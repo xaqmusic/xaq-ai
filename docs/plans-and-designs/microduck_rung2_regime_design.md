@@ -1685,3 +1685,11 @@ number with the tour intact. Everything through Pollen's walker command — the 
 (R33), the trunk reflex, the head-gyro rate loop, the phase feed-forward — is bounded by two
 facts of their walker: it answers a head command 120–160 ms late, and its own policy jitters
 the head-yaw joint at 1.2 rad/s. That is the case to take to Pollen (outreach plan §8).
+
+**PROMOTED (the operator's eye, 2026-09-11):** "a significant improvement in stability compared
+to R30. While the head is not perfectly still the wobble is tolerable when viewing through the
+head camera, and the overall look of the duck walking is more interesting and birdlike. It is
+a win." R34 is the head loop: `★ HEAD` in the launcher; R32 retired from the list (its file
+kept); R33 kept as the walker-route comparison for the Pollen case. Before PR-2 the operator
+wants the behaviour set validated in the simulator with what exists — the exploration line
+resumes (playroom plan ▶ Resume here).

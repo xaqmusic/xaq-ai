@@ -25,57 +25,40 @@ unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this pl
 
 ## ▶ Resume here
 
-**A1 is built (2026-09-10, design doc §17.8): `WORKING` as an instrument, awaiting the
-operator's eye.** `mj_host/tools/playroom_gen.py --seed 1` → `scene_playroom.xml` + manifest;
-host flags `--move NAME X Y S`; the `obj` field; the sweep reads the manifest. R27's loop on
-it (1 m walls), n = 6: 151 cells of 256, 100 map nodes, 7.1 ± 6.0 walls/min, 0.07 objs/min,
-no escapes. Launcher: **R30** (seed 6) and its moved-ball (d) twin. Render the room to check
-it: the viewer's venv with `MUJOCO_GL=egl` and `mujoco.Renderer`. **The head camera is
-re-placed** (`robot_overlay_playroom.xml`, generated: at the lens front, facing the ToF's
-forward, upright, fovy 49°); **walls 1 m and an angled sun with shadows** (operator, the same
-night; the 0.3 m walls were partly invisible to the ToF's upper rows — re-measured at n = 6:
-7.1 ± 6.0 walls/min, 151 ± 34 cells, 100 ± 20 nodes, no wall-rider).
+**State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
+owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
+walking with a slow level prior on a frozen model; level on every seed, the camera steadier
+than the walker's own head (frame difference 12.3 → 9.9), the walk "more birdlike" (the
+operator's eye; design doc §17.9–17.14). The ask to Pollen is written (outreach plan §8) but
+**PR-2 waits**: the operator wants the behaviour set validated in the simulator first, with
+what exists.
 
-**Observation trap (2026-09-10):** the operator's first R30 watches ran 62–415 s on random
-seeds and showed a duck holding the centre — the first 600 s of a level-2 run are the babble;
-the tour starts at 600 s. The launcher now fast-forwards to 600 s (`--fast-until`, host pacer
-+ viewer; the run is tick-identical) and has a ↻ presets button. The R30 preset's command is
-byte-identical to the sweep's run.
+**Next: the exploration line, in this order**, each a lever with a preset and n = 6, on the
+★ HEAD stack (the steady camera is what makes the appearance map possible):
 
-**Corrected instruments (later the same day):** the `obj` flag counted a ball resting on the
-floor; both contact flags now count the robot's own contacts only. Corrected R30: 6.6 ± 5.8
-walls/min, **22.5 ± 23.7 objs/min** (it dribbles balls without seeking them), `down%` 0.14.
-**Observed: the table-leg wedge** (§17.8) — B2's first (d) scenario, and E1's stimulus for
-"a learned direction beats the proximity priors" at a 3 cm pillar.
+1. **C1** — the head-camera render in the host (an offscreen EGL render of `head_camera` at
+   64 × 48, the ToF's 12.5 Hz, published as `host.video.color`; no consumer → byte-identical;
+   the cost gate on the realtime factor). The viewer's camera window already shows the frame.
+2. **C2** — the visual EPM and the appearance-based place map (O10 on the duck): a frozen
+   projection over the frame, centred and normalised (CLAUDE.md §0 rule 2), the place vector
+   [visual latent; odometry pose × repeat] into `epm_place` with `pi_cell_size 0`. Metrics:
+   nodes vs places, bake rate on static vs moving objects, TLE, PCA vs nodes; (d) move a ball.
+3. **E1** — explore by appearance in R27's slot (the play loop's novelty from the visual map).
+   Metrics: coverage, contacts, time near objects vs walls, `down%`.
+4. **E2** — approach and poke: the bearing to what is novel and near. Metrics: pushes/min,
+   TLE after a push, time within a body length of movers. The table-leg wedge (§17.8) and the
+   backing-off behaviour (§17.11: backward commands are how it leaves a wall; `--no-backing`
+   is a regression) are the two known traps for these loops.
+5. Then the behaviour set of §3 as a whole, judged against Pollen's sentence: ten minutes
+   alone in the room, worth watching.
 
-**H0 and H1 `WORKING` (§17.9); H2 measured (§17.10): level loud, still null, the picture
-worse — not promoted.** The loop now owns two motors (head_pitch, head_roll; neck and yaw at
-zero), acts on the model it identified standing (frozen), and levels the head on every seed,
-but chases the gait to the pitch rail and shakes the camera more than the walker does. The operator watched R32: level fore-aft like a bird, working; the side tilt in turns is the
-roll joint against a banked body plus rail-chasing (§17.11). The slower prior (R33) cuts the
-rail-hitting and brings the frame difference to 14.4 (walker 12.3, fast prior 16.4):
-`PARTIAL`. No-backing on the twist loop: `REGRESSION` (walls ×5; the short backward commands
-are how it leaves a wall). Then (§17.12): yaw is the axis (91°/s on the walker's head, the largest share of the picture);
-unfreezing the model loses the level (F1), lookahead does not recover it (F2), a yaw-rate
-prior rails (Y1), and a trunk-gyro reflex (`--head-vor`, correct sign, 80 ms lag) adds motion —
-because the walker's own policy jitters the head-yaw joint at 1.2 rad/s with a zero command.
-A rate loop on the head's own gyro (§17.13, `--head-rate K TAU`) is also `REGRESSION`, worse
-with gain: the walker answers a head command 120–160 ms late and the jitter is at the gait
-frequency (2.2 Hz), a quarter period — no feedback loop through their walker can cancel it.
-R33 stands as the head loop. What remains, both predictive: a feed-forward locked to the gait
-PHASE (the doctrine's CPG → EPM; the counter-motion commanded a quarter period ahead), or the
-joints (Track A). The jitter itself is a finding for Pollen's outreach. **Both routes measured (§17.14):** Track A at the head (`--head-joints`, R34) is the first
-arm steadier than the walker's own head — picture 12.3 → 9.9, head rate halved, yaw 91 → 58°/s,
-level held, tour intact, rescues 0.05 → 0.19/min; the phase feed-forward finds a stride clock
-but no repeatable waveform (`NULL` on the head, `REGRESSION` on the tour). **Track A wins; the
-plan to Pollen is in the outreach plan §8.**
-Launcher: R31 (the babble), R32 (level, fast), R33 (level, slow).
+Read first: §3 (the loops), §5 (the room), §6 (the camera path), and design doc §17.8 (the
+room's baseline R30: 6.6 walls/min, 151 cells, the movables dribbled at 22/min). Mint every
+test with `newtest.py`; refuted arms get no preset; the picture metric is blind to a duck
+that stops touring (read it with cells and path).
 
-Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
-choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
-a launcher preset that mirrors the harness line.
-
----
+**Earlier resume notes** (A1, the camera fix, the observation trap, H0–H2) are in the
+sections below and in design doc §17.8–17.14.
 
 ## 1. The operator's direction (2026-09-10), in the rewrite rule's terms
 
