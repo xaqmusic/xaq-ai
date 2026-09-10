@@ -78,6 +78,23 @@ DuckBody::DuckBody(const std::string& scene_path) {
     accel_adr_ = m_->sensor_adr[require(m_, mjOBJ_SENSOR, "imu_accel", "sensor")];
     head_body_ = m_->site_bodyid[require(m_, mjOBJ_SITE, "head_imu", "site")];
     neck_root_ = require(m_, mjOBJ_BODY, "neck", "body");
+
+    // The playroom adds free bodies (balls, blocks) and a clock hinge after the robot in
+    // qpos. Reset noise must touch the robot's joints only: a normal deviate on a ball's
+    // quaternion is not "a slightly wrong pose". A qpos index is the robot's when the joint
+    // owning it sits in the trunk's kinematic tree (body_rootid).
+    const int robot_root = m_->body_rootid[trunk_body_];
+    qpos_is_robot_.assign(m_->nq, 0);
+    for (int j = 0; j < m_->njnt; ++j) {
+        if (m_->body_rootid[m_->jnt_bodyid[j]] != robot_root) continue;
+        const int adr = m_->jnt_qposadr[j];
+        const int n = (m_->jnt_type[j] == mjJNT_FREE) ? 7 : (m_->jnt_type[j] == mjJNT_BALL) ? 4 : 1;
+        for (int k = 0; k < n; ++k) qpos_is_robot_[adr + k] = 1;
+    }
+    for (int b = 0; b < m_->nbody; ++b) {
+        const char* name = mj_id2name(m_, mjOBJ_BODY, b);
+        if (name && std::string(name).rfind("obj_", 0) == 0) ++n_objects_;
+    }
 }
 
 DuckBody::~DuckBody() {
@@ -95,7 +112,8 @@ void DuckBody::reset(const std::string& keyframe, double joint_noise, uint64_t s
         // which is a different experiment from starting in a slightly wrong pose.
         std::mt19937_64 rng(seed);
         std::normal_distribution<double> n(0.0, joint_noise);
-        for (mjtSize i = 7; i < m_->nq; ++i) d_->qpos[i] += n(rng);
+        for (mjtSize i = 7; i < m_->nq; ++i)
+            if (qpos_is_robot_[i]) d_->qpos[i] += n(rng);      // the same draws as before on a robot-only scene
     }
     mj_forward(m_, d_);
 }
@@ -143,13 +161,53 @@ void DuckBody::move_geom(const char* name, const std::array<double, 3>& pos) {
 }
 
 bool DuckBody::touching_wall() const {
+    // Any static world geom that is not the floor or a rug: the arena's walls (as before —
+    // there the static geoms are exactly floor + wall_*), and the playroom's furniture.
     for (int i = 0; i < d_->ncon; ++i) {
         for (int g : {d_->contact[i].geom1, d_->contact[i].geom2}) {
+            if (m_->body_weldid[m_->geom_bodyid[g]] != 0) continue;      // moving body: not a wall
             const char* name = mj_id2name(m_, mjOBJ_GEOM, g);
-            if (name && std::string(name).rfind("wall", 0) == 0) return true;
+            const std::string n = name ? name : "";
+            if (n.rfind("floor", 0) == 0 || n.rfind("rug", 0) == 0) continue;
+            return true;
         }
     }
     return false;
+}
+
+bool DuckBody::touching_object() const {
+    for (int i = 0; i < d_->ncon; ++i) {
+        for (int g : {d_->contact[i].geom1, d_->contact[i].geom2}) {
+            const char* name = mj_id2name(m_, mjOBJ_BODY, m_->body_rootid[m_->geom_bodyid[g]]);
+            if (name && std::string(name).rfind("obj_", 0) == 0) return true;
+        }
+    }
+    return false;
+}
+
+void DuckBody::move_body(const char* name, double x, double y) {
+    const int bid = mj_name2id(m_, mjOBJ_BODY, name);
+    if (bid >= 0) {
+        if (m_->body_jntnum[bid] > 0 && m_->jnt_type[m_->body_jntadr[bid]] == mjJNT_FREE) {
+            const int adr = m_->jnt_qposadr[m_->body_jntadr[bid]];
+            const int dof = m_->jnt_dofadr[m_->body_jntadr[bid]];
+            d_->qpos[adr] = x; d_->qpos[adr + 1] = y;                     // z and the quaternion kept
+            for (int k = 0; k < 6; ++k) d_->qvel[dof + k] = 0.0;
+        } else {
+            m_->body_pos[3 * bid] = x; m_->body_pos[3 * bid + 1] = y;    // a static furniture body
+        }
+        mj_forward(m_, d_);
+        return;
+    }
+    const int gid = mj_name2id(m_, mjOBJ_GEOM, name);
+    if (gid < 0) throw std::runtime_error(std::string("no body or geom ") + name);
+    move_geom(name, {x, y, m_->geom_pos[3 * gid + 2]});
+}
+
+void DuckBody::spin_joint(const char* name, double rad_per_s) {
+    const int jid = mj_name2id(m_, mjOBJ_JOINT, name);
+    if (jid < 0) throw std::runtime_error(std::string("no joint ") + name);
+    d_->qvel[m_->jnt_dofadr[jid]] = rad_per_s;
 }
 
 void DuckBody::site_world(const char* site, std::array<double, 3>& pos, std::array<double, 9>& mat) const {

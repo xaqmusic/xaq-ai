@@ -1302,3 +1302,51 @@ contradicts) rather than its TLE. That is the Cell's disconfirmation problem (re
 arriving on the duck, and it is where the arbitration line stops for this phase. The
 escape counts (5 000–17 000 samples per run beyond the arena after the shift) say the
 shifted scene must be closed before the (d) reading is trusted at power.
+
+### 17.8 A1 — the playroom: the room is the lever, R27 unchanged (2026-09-10)
+
+The first lever of the [playroom plan](microduck_playroom_plan.md) §9: an arena that can show
+the behaviour set. `mj_host/tools/playroom_gen.py` generates `scene_playroom.xml` from a seed
+— a 4 m × 4 m room, walls 0.3 m, a rug, a table the duck walks under, two chairs, a shelf of
+coloured books, a wall clock whose hand the host turns once per 20 s (`gravcomp` on the hand:
+without it the hand hung at the bottom on the first run), two balls and two blocks as free
+bodies — and writes a manifest beside it (seed, hash, every object's class and position, and
+the qpos address of every non-robot entry). The host echoes the manifest at start, the sweep
+prints it, and the sweep now refuses to print a run that produced no JSONL as a row of zeros
+(the first sweep did exactly that: the host runs in `mj_host/` and a relative scene path
+missed). Textures are MuJoCo builtins with fixed seeds.
+
+**Host changes, gain-0.** Reset noise now perturbs the robot's own joints only (a ball's
+quaternion is not "a slightly wrong pose"); the `wall` instrument counts contact with any
+static world geom that is not floor or rug, so furniture counts; an `obj` field (contact with
+a movable, named `obj_*`) is printed only when the scene has movables; `--move NAME X Y S`
+relocates a movable, a furniture body or a world geom at S s (the (d) test; `--arena-shift`
+unchanged). **R27 seed 6 in the arena, 400 s, is byte-identical before and after** (md5
+`784d4acc…`, `mj_host/log/playroom/ref_r27_arena_s6_{before,after}.jsonl`); the gates pass.
+
+**R27's loop in the playroom, unchanged (R30 = R27's config, the scene swapped), n = 6,
+1500 s, noise 0.05, control phase 700–1500 s, room seed 1:**
+
+| | walls/min | cells (0.25 m) | map nodes | map TLE | objs/min | objects moved (m) | rescues/min | escaped |
+|---|---|---|---|---|---|---|---|---|
+| playroom (R30) | 33 ± 39 (5.1 / 6.5 / 17 / 23 / 39 / 108) | 140 ± 15 | 98 ± 9 | 0.20 | 0.07 | 3.7 ± 2.5 | 0.05 | 0 |
+| arena (R27, §17.6) | 9 ± 9 | 42 | ~30–40 | 0.21 → 0.14 | — | — | — | (gap) |
+
+Read with the room's size: the arena has 64 cells, the playroom 256, so 140 cells is 55 %
+of the room against the arena's 66 %, over a 4× area with a 1.5 m longer crossing. The map
+grows with the room (98 nodes). Wall contact attributes mostly to the walls, not the
+furniture: seed 2 (108/min) rides the walls (87 % of its contact ticks at a wall, 9 % at a
+chair), seed 5 splits wall and chair1, seed 6 (5/min) touches everything a little (54 % wall,
+16 % table, 12 % chair, 11 % shelf). The duck almost never touches a movable (0.07/min) —
+nothing seeks them yet, which is what E1/E2 are for — and still moves 3.7 m of ball per run
+by walking into them. No escapes: the room has no gap, so the moved-object (d) can be read
+without the arena's clip.
+
+**Verdict.** A1 `WORKING` as an instrument: generated, manifested, byte-identical elsewhere,
+every object class present, the (d) flag exercised (a ball, a chair and a wall moved at
+100/120/140 s in a test run). R27 on it is a *signal*, not a degenerate baseline: 5 of 6
+seeds tour (115–157 cells), one rides the walls. The operator's eye next, through the
+launcher's R30 preset (seed 6) and its moved-ball twin. **Found for C1:** Pollen's
+`head_camera` renders the inside of the duck's own head from the STAND keyframe (the
+rendered frame is the head shell's interior); the camera's frame, and which geom groups the
+render should exclude, are C1's first task.

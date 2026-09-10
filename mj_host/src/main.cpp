@@ -1201,6 +1201,10 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
 // ---------------------------------------------------------------------------
 
 double g_arena_shift_s = -1.0;   // > 0: at this time move wall_px from x = 1.0 to x = 0.5 (the (d) test)
+// --move NAME X Y AT_S: the playroom's (d) test — relocate a body or geom mid-run (repeatable).
+struct MoveOp { std::string name; double x, y, at_s; bool done = false; };
+std::vector<MoveOp> g_moves;
+constexpr double kClockRadPerS = 2.0 * M_PI / 20.0;   // the clock hand: one turn per 20 s, visible at the camera's rate
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
@@ -1226,6 +1230,24 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
 
     body.reset("STAND", reset_noise, seed);   // l2_sweep: --noise varies the start (was hardcoded 0: seeds only seeded the babble)
     std::fprintf(stderr, "level-2 graph %s%s\n", graph.c_str(), open_loop ? "  (open-loop override)" : "");
+    {
+        // A generated scene carries a manifest beside it (playroom_gen.py): echo its seed and
+        // hash so no two "varied" rooms can silently share a layout (the Cell's pillar trap).
+        const std::string man = scene.substr(0, scene.rfind('.')) + ".manifest.json";
+        std::ifstream in(man);
+        if (in) {
+            try {
+                nlohmann::json j; in >> j;
+                std::fprintf(stderr, "scene manifest: seed %lld  sha %s  objects %zu  half %.2f m\n",
+                             (long long)j.value("seed", -1), j.value("xml_sha256", "?").c_str(),
+                             j.value("objects", nlohmann::json::array()).size(), j.value("half", 0.0));
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "scene manifest: unreadable (%s)\n", e.what());
+            }
+        }
+    }
+    const bool has_clock = body.has_joint("clock_hand");
+    const bool has_objects = body.n_objects() > 0;
 
     std::array<float, kActionLen> scaffold_last{}, walker_last{};
     std::array<double, kNumPolicyJoints> walk_targets = body.joint_positions();
@@ -1267,6 +1289,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             shifted = true;
             std::fprintf(stderr, "  arena shift at %.0f s: wall_px moved to x = 0.5\n", g_arena_shift_s);
         }
+        for (auto& mv : g_moves) {
+            if (mv.done || t < int(mv.at_s * kBrainHz)) continue;
+            body.move_body(mv.name.c_str(), mv.x, mv.y);
+            mv.done = true;
+            std::fprintf(stderr, "  move at %.0f s: %s -> (%.2f, %.2f)\n", mv.at_s, mv.name.c_str(), mv.x, mv.y);
+        }
+        if (has_clock) body.spin_joint("clock_hand", kClockRadPerS);
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         if (driver == Driver::Brain) command.twist = twist;
 
@@ -1356,9 +1385,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             for (const auto& z : tof.zones()) std::printf("%d", int(z.cls));
             std::printf("\",\"tofr\":[");
             for (int i = 0; i < Tof::kZones; ++i) std::printf("%s%.2f", i ? "," : "", tof.zones()[i].range);
-            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"steer\":%d,\"map\":[%.3f,%d,%d,%d]}\n", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
+            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"steer\":%d,\"map\":[%.3f,%d,%d,%d]", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1);
+            if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
+            std::printf("}\n");
         }
     }
 
@@ -1437,6 +1468,8 @@ void usage() {
         "      twist and senses the body's own velocity (contact odometry + gyro).  Prints\n"
         "      the identified A's velocity rows against the commands at the end.  --push works\n"
         "      here too; --l2-twist VX VY VYAW replaces the brain's command (an open-loop baseline).\n"
+        "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
+        "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
         "\n"
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
@@ -1538,6 +1571,11 @@ int main(int argc, char** argv) {
             g_wander_turn_deg = std::stod(next("--wander-turn"));
         } else if (a == "--arena-shift") {
             g_arena_shift_s = std::stod(next("--arena-shift"));
+        } else if (a == "--move") {
+            MoveOp mv;
+            mv.name = next("--move"); mv.x = std::stod(next("--move")); mv.y = std::stod(next("--move"));
+            mv.at_s = std::stod(next("--move"));
+            g_moves.push_back(mv);
         } else if (a == "--l2-twist") {
             l2_twist[0] = std::stod(next("--l2-twist")); l2_twist[1] = std::stod(next("--l2-twist"));
             l2_twist[2] = std::stod(next("--l2-twist")); l2_open_loop = true;

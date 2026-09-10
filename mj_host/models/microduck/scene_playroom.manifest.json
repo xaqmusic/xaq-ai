@@ -1,0 +1,178 @@
+{
+ "seed": 1,
+ "half": 2.0,
+ "objects": [
+  {
+   "name": "wall_px",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.15,
+   "extent": 2.0
+  },
+  {
+   "name": "wall_nx",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.15,
+   "extent": 2.0
+  },
+  {
+   "name": "wall_py",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.15,
+   "extent": 2.0
+  },
+  {
+   "name": "wall_ny",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.15,
+   "extent": 2.0
+  },
+  {
+   "name": "rug",
+   "cls": "static",
+   "kind": "rug",
+   "x": -1.0421,
+   "y": 0.9902,
+   "z": 0.002,
+   "extent": 0.5
+  },
+  {
+   "name": "furn_table",
+   "cls": "static",
+   "kind": "table",
+   "x": -1.1169,
+   "y": -1.297,
+   "z": 0,
+   "extent": 0.45,
+   "yaw": 2.626
+  },
+  {
+   "name": "furn_chair0",
+   "cls": "static",
+   "kind": "chair",
+   "x": -1.5982,
+   "y": -0.1753,
+   "z": 0,
+   "extent": 0.22,
+   "yaw": 4.534
+  },
+  {
+   "name": "furn_chair1",
+   "cls": "static",
+   "kind": "chair",
+   "x": 1.2886,
+   "y": -1.5068,
+   "z": 0,
+   "extent": 0.22,
+   "yaw": 0.16
+  },
+  {
+   "name": "furn_shelf",
+   "cls": "static",
+   "kind": "shelf",
+   "x": 1.845,
+   "y": 1.054,
+   "z": 0,
+   "extent": 0.45,
+   "wall": "px"
+  },
+  {
+   "name": "clock",
+   "cls": "self_changing",
+   "kind": "clock",
+   "x": 0.373,
+   "y": -1.955,
+   "z": 0.45,
+   "extent": 0.1,
+   "wall": "ny"
+  },
+  {
+   "name": "obj_ball0",
+   "cls": "movable",
+   "kind": "ball",
+   "x": 0.7976,
+   "y": 0.0976,
+   "z": 0.0592,
+   "extent": 0.0592
+  },
+  {
+   "name": "obj_ball1",
+   "cls": "movable",
+   "kind": "ball",
+   "x": 1.5554,
+   "y": 0.1872,
+   "z": 0.0541,
+   "extent": 0.0541
+  },
+  {
+   "name": "obj_block0",
+   "cls": "movable",
+   "kind": "block",
+   "x": 0.6259,
+   "y": 0.9236,
+   "z": 0.0369,
+   "extent": 0.0369,
+   "yaw": 1.496
+  },
+  {
+   "name": "obj_block1",
+   "cls": "movable",
+   "kind": "block",
+   "x": -0.2937,
+   "y": 1.4588,
+   "z": 0.0485,
+   "extent": 0.0485,
+   "yaw": 1.449
+  }
+ ],
+ "xml_sha256": "3545cc239daba080",
+ "free_bodies": [
+  "obj_ball0",
+  "obj_ball1",
+  "obj_block0",
+  "obj_block1"
+ ],
+ "hinges": [
+  "clock_hand"
+ ],
+ "qpos_robot": 21,
+ "qpos_layout": [
+  [
+   "clock_hand",
+   21,
+   1
+  ],
+  [
+   "obj_ball0",
+   22,
+   7
+  ],
+  [
+   "obj_ball1",
+   29,
+   7
+  ],
+  [
+   "obj_block0",
+   36,
+   7
+  ],
+  [
+   "obj_block1",
+   43,
+   7
+  ]
+ ],
+ "nq": 50
+}

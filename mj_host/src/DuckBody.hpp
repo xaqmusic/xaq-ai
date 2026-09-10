@@ -82,6 +82,19 @@ public:
     bool touching_wall() const;
     // Relocate a world geom mid-episode (the (d) test: move a wall and watch the map re-learn).
     void move_geom(const char* name, const std::array<double, 3>& pos);
+    // The playroom's instruments and levers (mj_host/tools/playroom_gen.py). All world-frame,
+    // for the reader; no brain subscribes to any of them.
+    //   touching_object: contact with a movable body (named obj_*).
+    //   n_objects:       how many movable bodies the scene has (0 in the arena: the JSONL
+    //                    then carries no `obj` field, so arena logs stay byte-identical).
+    //   move_body:       relocate a movable (its free joint), a static furniture body, or a
+    //                    world geom, by name, to (x, y) keeping its height and orientation.
+    //   spin_joint:      hold a free hinge (the clock hand) at a constant rate.
+    bool touching_object() const;
+    int  n_objects() const { return n_objects_; }
+    void move_body(const char* name, double x, double y);
+    bool has_joint(const char* name) const { return mj_name2id(m_, mjOBJ_JOINT, name) >= 0; }
+    void spin_joint(const char* name, double rad_per_s);
     // A site's world pose (position and rotation matrix), for casting rays from it.
     void site_world(const char* site, std::array<double, 3>& pos, std::array<double, 9>& mat) const;
     // A site's pose relative to the trunk body frame — forward kinematics, a pure
@@ -151,6 +164,8 @@ private:
     std::array<int, kNumPolicyJoints> qvel_adr_{};   // into d_->qvel
     std::array<int, kNumPolicyJoints> actuator_{};   // into d_->ctrl
     int trunk_body_  = -1;
+    int    n_objects_ = 0;                    // bodies named obj_*
+    std::vector<char> qpos_is_robot_;         // per qpos index: does the robot own it (reset noise)
     std::array<double, 3> push_{};
     int push_ticks_ = 0;
     int quat_adr_    = -1;   // into d_->sensordata, framequat on the imu site

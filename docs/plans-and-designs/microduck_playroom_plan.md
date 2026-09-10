@@ -25,11 +25,17 @@ unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this pl
 
 ## ▶ Resume here
 
-Nothing built yet. The order is §9. The first three levers are independent and cheap: the
-voice on the simulator (§7, V1), the playroom generator (§5, A1), and the head-camera render
-with no consumer (§6, C1). Start with A1: it is the instrument everything after it is
-measured on. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships
-with a launcher preset that mirrors the harness line.
+**A1 is built (2026-09-10, design doc §17.8): `WORKING` as an instrument, awaiting the
+operator's eye.** `mj_host/tools/playroom_gen.py --seed 1` → `scene_playroom.xml` + manifest;
+host flags `--move NAME X Y S`; the `obj` field; the sweep reads the manifest. R27's loop on
+it, n = 6: 140 cells of 256, 98 map nodes, 33 ± 39 walls/min (one wall-rider), 0.07 objs/min,
+no escapes. Launcher: **R30** (seed 6) and its moved-ball (d) twin. Render the room to check
+it: the viewer's venv with `MUJOCO_GL=egl` and `mujoco.Renderer` (a top view is in the
+session log; the head camera looks into the duck's own head — C1's first task).
+
+Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
+choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
+a launcher preset that mirrors the harness line.
 
 ---
 
@@ -270,7 +276,7 @@ verdict in the design doc and the ledger. R-numbers are minted by `newtest.py` a
 | # | lever | stimulus | metric | promote if |
 |---|---|---|---|---|
 | V1 | xaq_voice `duck` patch + jaw | any run | ear and eye | the operator hears TLE |
-| A1 | playroom generator + `scene_playroom.xml`, primitives, four object classes, seeded manifest; R27 re-run on it | the room | R27's own metrics (contacts/min, cells, map nodes) on the new room | R27 is not degenerate here (no orbit, no wall-riding); the manifest is logged |
+| A1 | playroom generator + `scene_playroom.xml`, primitives, four object classes, seeded manifest; R27 re-run on it | the room | R27's own metrics (contacts/min, cells, map nodes) on the new room | R27 is not degenerate here (no orbit, no wall-riding); the manifest is logged. **Built 2026-09-10, `WORKING` as an instrument (§17.8): 5/6 seeds tour, 140 cells, 98 nodes; operator's eye pending** |
 | C1 | head-camera render, no consumer | — | throughput; byte-identical logs | ≥ half of today's realtime factor kept |
 | C2 | visual EPM + appearance map (O10 on the duck) | the room; one object moved at t | nodes vs places; bake rate static vs movers; TLE; PCA vs nodes | walls bake and movers stay novel; the map grows after the move at the right place |
 | E1 | explore-by-appearance in R27's slot | the room | coverage, contacts/min, time near objects vs walls | ≥ R27 on coverage, ≤ R27 on contacts |

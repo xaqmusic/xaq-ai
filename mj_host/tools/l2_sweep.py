@@ -86,7 +86,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         # a compact stream: the fields the metrics read (a full level-2 JSONL carries qpos and the
         # 64 ToF zones per tick -- ~75 MB per 1500 s run, which filled a tmpfs quota on first use)
         logdir.mkdir(parents=True, exist_ok=True)
-        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "tofs", "map")
+        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map")
         with open(logdir / f"{cfg.stem}_s{seed}.jsonl", "w") as f:
             for line in p.stdout.splitlines():
                 if not line.startswith("{"): continue
@@ -96,6 +96,10 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         (logdir / f"{cfg.stem}_s{seed}.stderr").write_text(p.stderr)
     err = p.stderr
     out = {"seed": seed, "rc": p.returncode}
+    if p.returncode != 0 or not any(l.startswith("{") for l in p.stdout.splitlines()):
+        # §3.2 rule 7: a run that did not happen must not print as a row of zeros
+        tail = " | ".join(p.stderr.strip().splitlines()[-2:])
+        print(f"  !! {cfg.stem} seed {seed}: host rc {p.returncode}, no JSONL — {tail}", file=sys.stderr)
     m = re.search(r"level-2 [\d.]+ s — (\d+) rescues, (\d+)% of the run walker-driven", err)
     out["rescues_min"] = int(m.group(1)) * 60.0 / secs if m else float("nan")
     out["driven_pct"] = float(m.group(2)) if m else float("nan")
@@ -106,6 +110,14 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     cells, xs, ys, winners = set(), [], [], set()
     path = 0.0; prev = None
     wall_eps = contact = n = 0; prev_wall = 0
+    obj_eps = 0; prev_obj = 0
+    # the playroom's manifest names every movable's qpos address: displacement is read from
+    # the JSONL's qpos, the same numbers the viewer draws
+    layout = []
+    man = Path(scene).with_suffix(".manifest.json") if scene else None
+    if man and man.exists():
+        layout = [(nm, adr) for nm, adr, nn in json.load(open(man)).get("qpos_layout", []) if nn == 7]
+    obj_start = {}; obj_end = {}
     tooclose = tle_sum = 0.0; novel = 0; escaped = 0; steer_avoid = steer_play = 0
     ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
           "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
@@ -132,6 +144,13 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         st_ = int(r.get("steer", 0)); steer_avoid += (st_ == 2); steer_play += (st_ == 1)
         if w and not prev_wall: wall_eps += 1
         prev_wall = w
+        o = int(r.get("obj", 0))
+        if o and not prev_obj: obj_eps += 1
+        prev_obj = o
+        if layout and "qpos" in r:
+            for nm, adr in layout:
+                obj_start.setdefault(nm, (r["qpos"][adr], r["qpos"][adr + 1]))
+                obj_end[nm] = (r["qpos"][adr], r["qpos"][adr + 1])
         tofs = r.get("tofs") or [0, 0, 0, 0]; tooclose += float(tofs[3]) if len(tofs) > 3 else 0.0
         mp = r.get("map") or []
         if len(mp) >= 3:
@@ -148,6 +167,8 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "span": (max(xs) - min(xs)) * (max(ys) - min(ys)) if xs else 0.0,
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
         "escaped": escaped, "avoid_pct": 100.0 * steer_avoid / max(1, n), "play_pct": 100.0 * steer_play / max(1, n),
+        "objs_min": obj_eps / minutes,
+        "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
     })
     return out
 
@@ -182,7 +203,7 @@ def main():
                     help="the level-2 scene (default: the 2 m arena -- the host's own default is the OPEN floor, where 'zero wall contacts' means no walls)")
     ap.add_argument("--noise", type=float, default=0.05, help="reset noise on the start pose, so seeds vary the start and not only the babble (host --noise)")
     ap.add_argument("--phase-at", type=float, default=None, help="split the control phase at this second (e.g. the --arena-shift time) and report cells / walls / nodes before and after -- the (d) reading")
-    ap.add_argument("--arena-half", type=float, default=1.05, help="samples with |x| or |y| beyond this (m) are ESCAPED (the shifted scene leaves a gap) and excluded from cells/span/path; the count is reported")
+    ap.add_argument("--arena-half", type=float, default=None, help="samples with |x| or |y| beyond this (m) are ESCAPED (the shifted scene leaves a gap) and excluded from cells/span/path; the count is reported (default: the scene manifest's half + 0.05, else 1.05 for the arena)")
     args = ap.parse_args()
     if not HOST.exists(): sys.exit(f"host binary missing: {HOST} (build with ./mj_host/run.sh build)")
     logdir = Path(args.logdir) if args.logdir else None
@@ -192,7 +213,14 @@ def main():
     cfgs += [make_arm(arm_base, spec, tmp) for spec in args.arm]
     ctrl = args.control_from if args.control_from is not None else control_from_default(cfgs[0])
     host_args = tuple(args.host_args.split())
-    print(f"level-2 sweep: {len(cfgs)} arms × {args.seeds} seeds × {args.secs} s, control phase from {ctrl:.0f} s, scene {Path(args.scene).name}, reset noise {args.noise}, host args {host_args or '-'}", file=sys.stderr)
+    args.scene = str(Path(args.scene).resolve())          # the host runs in mj_host/: a relative scene path would miss
+    man = Path(args.scene).with_suffix(".manifest.json")
+    if args.arena_half is None:
+        args.arena_half = (json.load(open(man)).get("half", 1.0) + 0.05) if man.exists() else 1.05
+    if man.exists():
+        mj = json.load(open(man))
+        print(f"scene manifest: seed {mj.get('seed')}  sha {mj.get('xml_sha256')}  objects {len(mj.get('objects', []))}  half {mj.get('half')} m", file=sys.stderr)
+    print(f"level-2 sweep: {len(cfgs)} arms × {args.seeds} seeds × {args.secs} s, control phase from {ctrl:.0f} s, scene {Path(args.scene).name}, reset noise {args.noise}, arena half {args.arena_half}, host args {host_args or '-'}", file=sys.stderr)
 
     jobs = [(c, s) for c in cfgs for s in range(1, args.seeds + 1)]
     results = {c: [] for c in cfgs}
@@ -206,7 +234,8 @@ def main():
     print(f"\n=== LEVEL-2 A/B, {args.seeds} seeds × {args.secs} s, control phase {ctrl:.0f}–{args.secs} s ===")
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
             ("cells", "cells"), ("span", "span m²"), ("nodes", "nodes"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
-            ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%")]
+            ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
+            ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

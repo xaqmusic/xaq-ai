@@ -643,7 +643,7 @@ def build_window():
     size_note.grid(column=2, row=4, columnspan=2, sticky="w")
 
     ttk.Label(fr, text="Scene").grid(column=0, row=5, sticky="w")
-    ttk.Combobox(fr, textvariable=V["scene"], values=["scene.xml", "scene_arena.xml", "scene_tofcheck.xml", "scene_walk.xml"],
+    ttk.Combobox(fr, textvariable=V["scene"], values=["scene.xml", "scene_arena.xml", "scene_playroom.xml", "scene_tofcheck.xml", "scene_walk.xml"],
                  state="readonly", width=14).grid(column=1, row=5, sticky="w")
 
     ttk.Label(fr, text="Output").grid(column=0, row=6, sticky="w")
