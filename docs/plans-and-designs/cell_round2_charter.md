@@ -193,6 +193,61 @@ ticks, the lesion over the middle third; food relocation is built in):
   drift, or the vocabulary map (A5), whose panorama half can re-anchor a drifted frame and
   whose grid half cannot — the comparison that would name the scaffold by contrast.
 
+## Round 4 — competence-graded arbitration (register O21; started 2026-09-06)
+
+Operator's order: this before any microduck work.
+
+**The lever.** A loop's precision should mean whether its prediction about the *world* holds
+while it acts, not whether its own output is smooth (the R3 lesson). `LoopCompetence`, one per
+loop, watches the loop's objective stream and the arbiter's gain for that loop; over each
+window of `horizon_ticks` (30) of continuous driving it checks once whether the objective
+moved as the loop predicts, and keeps the fraction of such checks that held as a competence
+`c` (an EMA, scale-free: no constant tuned to the objective's units; stagnation counts as not
+improved, so a policy whose world does not move earns no trust by constancy). While the loop
+is not driving, `c` relaxes toward the uninformed prior 0.5 (uncertainty grows without
+observation). It publishes a RealityToken with `expected_error = tle = 1 − c`; a
+`LateralVoter` at level 1 (`trust_source expected`, `group_balance false`) turns that into
+trust; the arbiter's `scoring_mode precision` selects by need × trust. The module absent is
+byte-identical; 4/4 unit tests.
+
+The loops' predictions, as configured: klino — `scent_max` rises while it runs; planner —
+`plan_value` rises as it closes on remembered food; play — the place EPM's TLE rises as it
+climbs; vision — `vision_value` rises as it homes.
+
+**Arms (n = 20, far-food + pillars, falloff 2.0, the study brain):** `r4` vs the four-loop
+efe base (1.50) and the two-loop brain (2.45); `r4_wrongsign` (`precision_sign −1`, valid
+with three live channels). What "works" means: the four-loop brain, play present, forages at
+the two-loop brain's level, with the planner taking the motor when hungry and competent and
+play yielding when its world stops getting more novel.
+
+**First form, the competence mean — `NULL` (2026-09-06).** 1.70 eats vs 1.50 (Δ +0.20,
+sd 1.28, t 0.7), 0.75 below the two-loop brain, at the floor, and its wrong-sign control at
+1.65 does not regress: the ordering the grading produces is not what decides eats. The
+probe shows the mechanism and its limit: play's competence falls below the prior (its
+novelty rarely rises over a driving window) and klino's rises when it drives — but the
+planner is never given the motor, so its competence is never observed, stays at the prior,
+and loses every tie; play still holds 0.66 of decisions while hunger is low because
+preference dominates near-uniform trusts. **That is a bandit problem inside competence
+grading**: a loop never selected never proves itself. The second form grades each loop by
+the upper credible bound of a Beta posterior over its competence (optimism about the
+unproven; counts forgotten while not driving so uncertainty grows), a one-parameter
+extension (`estimator beta`, `optimism κ`), default unchanged.
+
+**Second form — `PARTIAL`, not a capability (2026-09-06, n = 20).** Optimism does what it
+is for: play's share of decisions falls from 0.89 (efe) to 0.51 at κ = 1 and 0.39 at κ = 2,
+the planner's rises from 0.06 to 0.20 and 0.23, and the planner is now observed. Eats follow
+weakly: 1.60 at κ = 1 (Δ +0.10 vs the base), **1.95 at κ = 2 (Δ +0.45, sd 1.19, t 1.7,
+11+/6−)** — still 0.50 below the two-loop brain (t −1.2) and 0.85 below the specialist
+(t −2.6). The wrong-sign control at κ = 1 does not regress (1.80). Read together with R3 and
+the first form: **eats rise as play's share of the motor falls, and no ordering principle —
+units, bearing predictability, competence, optimistic competence — adds an effect detectable
+at twenty worlds.** With a novelty-seeking loop in the race, its presence costs the eats,
+not its weight or its rank. The round-4 machinery stands as the recipe's arbitration for the
+duck (a generic competence grader, a voter, the arbiter's precision mode, all gain-0); the
+Cell's verdict on it is recorded, and the two-loop brain remains the Cell instance.
+
+**Round 4 is closed.**
+
 ## What round 2 hands the duck
 
 The recipe's currency (a heading and a confidence per loop; a heading reference into the

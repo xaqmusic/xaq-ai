@@ -124,7 +124,15 @@ Three statements the doctrine requires, made explicit:
   no new constant), default `none`, byte-identical — `NULL` alone at n = 20. **Precision-weighted
   selection** (`scoring_mode precision`: per-loop EPMs over each loop's bearing → `LateralVoter`
   → preference × trust) is also `NULL` at n = 20: the planner takes five times more decisions
-  and eats do not move, because a loop's steadiness is not its competence (register O21). Klino's reach stays eat-calibrated: a
+  and eats do not move, because a loop's steadiness is not its competence (register O21).
+  **Competence-graded selection** (`LoopCompetence`: each loop graded by whether its own
+  objective moves as it predicts while it drives, a Beta posterior with optimism so an
+  untried loop gets tried → voter → `scoring_mode precision`) reshapes the decision shares as
+  designed (play 0.89 → 0.39 at κ = 2) and moves eats only weakly (+0.45 ± 1.19, `PARTIAL`);
+  its wrong-sign control does not regress. Across every arbitration form measured, eats
+  track how much of the motor a novelty loop holds, not which principle ranks the loops.
+  This machinery is the arbitration the duck inherits; the Cell's instance runs without the
+  novelty loop. Klino's reach stays eat-calibrated: a
   peak-normalised constant weak scent would read as full reach, which the lever's first form
   demonstrated by failing its own test. The gate's docstring names two pragmatic terms; the
   code takes the max over three, one of which is pre-multiplied by `vision_weight`.
