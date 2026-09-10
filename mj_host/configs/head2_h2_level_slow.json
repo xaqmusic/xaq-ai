@@ -1,0 +1,95 @@
+{
+ "metadata": {
+  "name": "H2/2 level, frozen, SLOW prior \u00b7 state_prior_lr 0.02 (was 0.1: a 200 ms step against a 200 ms actuator lag chased the gait to the rails)",
+  "description": "The head loop on TWO motors \u2014 head_pitch and head_roll \u2014 with neck_pitch and head_yaw held at zero (2026-09-10, after H2 on four motors wound every command to its rail: the two pitch joints are a redundant pair whose null space, neck up + head down, the sensor cannot see, and the prior's bias drifted into it). Load slots as head_h1: roll, pitch, down-shortfall | head gyro x,y,z | trunk gravity x,y | trunk gyro x,y,z | spare; with motor_dim 2 the load rows start at 6, so the level prior is state_prior_indices [6, 7]. H2: babble 0, state_prior on load slots 6,7 (roll, pitch) -> 0, gain 1, lr 0.1. model_lr 0 and state_model_lr 0: the model stays as H1 identified it on a still body; the module's own note warns that the closed-loop model after a babble can bear no resemblance to the babbled one, and the prior acts through whatever the model says. state_prior_lr 0.02: the Gauss-Newton step per tick is a fifth of the model-implied correction (a ~1 s time constant) instead of a tenth at 50 Hz (~200 ms, the walker's head lag) \u2014 the operator saw the head level fore-aft like a bird and the roll bang between its rails in turns; the roll and pitch commands sat at their rails on half the ticks.",
+  "launcher_rank": 0
+ },
+ "description": "H2/2 level, frozen, SLOW prior \u00b7 state_prior_lr 0.02 (was 0.1: a 200 ms step against a 200 ms actuator lag chased the gait to the rails)",
+ "modules": [
+  {
+   "id": "head_bridge",
+   "type": "JointSensorimotorBridge",
+   "params": {
+    "proprio_input_topic": "reality.proprio.head",
+    "action_topics": [
+     "action.head_pitch",
+     "action.head_roll"
+    ],
+    "output_topics": [
+     "reality.motor_limb.head"
+    ],
+    "proprio_indices": [
+     1.0,
+     3.0
+    ],
+    "group_size": 2,
+    "sensor_label_prefix": "motor_limb",
+    "load_topic": "reality.proprio.head_sense",
+    "load_slots": 12
+   }
+  },
+  {
+   "id": "motor_epm_head",
+   "type": "MotorEPMv2",
+   "params": {
+    "proprio_topics": [
+     "reality.motor_limb.head"
+    ],
+    "action_topics": [
+     "action.head_pitch",
+     "action.head_roll"
+    ],
+    "n_legs": 1,
+    "motor_dim": 2,
+    "model_lr": 0.0,
+    "ctrl_lr": 0.0,
+    "bias_lr": 0.0,
+    "reg_eps": 0.01,
+    "max_dctrl": 0.05,
+    "init_scale": 0.01,
+    "seed": 7171,
+    "babble_ticks": 0,
+    "babble_scale": 0.3,
+    "babble_isolate": 1.0,
+    "babble_hold": 25,
+    "babble_owns_a": 0,
+    "sat_lr": 0.0,
+    "c_init": 1.0,
+    "motor_gain": 1.0,
+    "explore_noise": 0.0,
+    "coupling_gain": 0.0,
+    "stroke_gain": 0.0,
+    "balance_gain": 0.0,
+    "heading_gain": 0.0,
+    "nav_gain": 0.0,
+    "postural_gain": 0.0,
+    "amp_homeo_gain": 0.0,
+    "height_homeo_gain": 0.0,
+    "coord_reward_drive": 0.0,
+    "panic_strength": 0.0,
+    "imu_topic": "reality.proprio.imu",
+    "state_model_lr": 0.0,
+    "model_trace": 0.05,
+    "reset_breaks_model_pairing": 1.0,
+    "state_prior_gain": 1.0,
+    "consolidate_gain": 0.0,
+    "state_prior_indices": [
+     6,
+     7
+    ],
+    "state_prior_targets": [
+     0.0,
+     0.0
+    ],
+    "state_prior_lr": 0.02,
+    "consolidate_n": 0
+   }
+  }
+ ],
+ "version": 1,
+ "runtime": {
+  "thread_pool": "per_instance",
+  "num_threads": 0
+ },
+ "edges": []
+}

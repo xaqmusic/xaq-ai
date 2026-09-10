@@ -1512,3 +1512,36 @@ Gauss–Newton step at `state_prior_lr 0.1` is a 200 ms time constant against a 
 actuator lag — the wind-up condition); a rate target on the frozen model; or feed-forward
 from the trunk gyro (the controller's rows over the trunk slots are what a vestibulo-collic
 reflex actually is). One lever at a time, from R32.
+
+### 17.11 The operator's eye on H2, the slow prior, and the no-backing clamp (2026-09-10)
+
+**The operator watched R32 and called it working:** the head stays level fore-aft "very much
+like a chicken or other bird that walks"; the side-to-side tilt appears when the robot turns;
+and once the robot backed into a wall and stayed there.
+
+**Roll in turns, read from the logs.** Over the six frozen-model seeds, the head's world-frame
+roll error is the same turning (|head yaw rate| > 1 rad/s) as straight (p95 0.076 vs 0.079; the
+walker's own 0.12–0.18), and the roll *rate* is the walker's. What changes in a turn is the
+roll *command*: its mean rises from +0.014 to +0.04–0.07 rad because the walker banks and the
+head counter-rolls to stay level, and it sits at its ±0.31 rad rail on a third to a half of all
+ticks, as the pitch command does at ±1.10. So the tilt seen from outside is the roll joint
+working relative to a banked body, plus the same rail-chasing that shakes the camera. In the
+simulator gravity comes from the orientation, so no precession reaches the sense; on hardware
+the IMU's gravity estimate will carry the centripetal term and that reading will need
+revisiting there.
+
+**The slow prior** (`head2_h2_level_slow.json`, `state_prior_lr 0.02` — a fifth of the
+model-implied correction per tick, a ~1 s time constant, instead of a tenth at 50 Hz against a
+~200 ms head lag), n = 6: pitch deviation 0.054 ± 0.009 (the walker 0.20; lr 0.1 gave 0.044),
+roll 0.048 (0.09; 0.041), head gyro 2.10 ± 0.07 (unchanged), rail-hitting pitch 39 % (from
+50 %) and roll 26 % (from 45 %), frame difference on seed 6 **14.4** (control 12.3, lr 0.1
+16.4). Direction right, the picture still worse than the walker's. `PARTIAL`; R33 to watch.
+
+**The no-backing clamp** (`--no-backing`, the twist brain's forward command clamped at zero
+— the body has no rear sensor on either side of the boundary, so a step backward is a step
+into the unseen). The operator's R32 watch had backward commands on 35 % of ticks in the
+tour, during turns, in 66 short runs (median 0.23 s, longest 3.5 s) and no wall stretch over
+4 s; no harness seed of any arm has one over 4 s either. Clamped, n = 6 on R30: **walls/min
+6.6 → 36.8 ± 28, path 156 → 133 m** — `REGRESSION`. The short backward commands are the loop
+backing *off* a wall; forbidden, it rides walls. Kept as a flag, off by default. Re-use: a
+rear sensor, or a clamp gated on "nothing ahead", neither of which this body has.

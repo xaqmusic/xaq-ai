@@ -51,9 +51,12 @@ walls/min, **22.5 ± 23.7 objs/min** (it dribbles balls without seeking them), `
 **H0 and H1 `WORKING` (§17.9); H2 measured (§17.10): level loud, still null, the picture
 worse — not promoted.** The loop now owns two motors (head_pitch, head_roll; neck and yaw at
 zero), acts on the model it identified standing (frozen), and levels the head on every seed,
-but chases the gait to the pitch rail and shakes the camera more than the walker does. Next
-on the H line, one at a time from R32: a slower prior, a rate target on the frozen model, or
-feed-forward from the trunk gyro. Launcher: R31 (the babble), R32 (the level head vs R30).
+but chases the gait to the pitch rail and shakes the camera more than the walker does. The operator watched R32: level fore-aft like a bird, working; the side tilt in turns is the
+roll joint against a banked body plus rail-chasing (§17.11). The slower prior (R33) cuts the
+rail-hitting and brings the frame difference to 14.4 (walker 12.3, fast prior 16.4):
+`PARTIAL`. No-backing on the twist loop: `REGRESSION` (walls ×5; the short backward commands
+are how it leaves a wall). Next on the H line: a rate target on the frozen model, or
+trunk-gyro feed-forward. Launcher: R31 (the babble), R32 (level, fast), R33 (level, slow).
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with

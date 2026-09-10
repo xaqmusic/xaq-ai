@@ -66,6 +66,12 @@ public:
     int last_steer() const { return last_steer_; }   // 0 none, 1 play, 2 avoidance (this tick)
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
+    // --no-backing (2026-09-10, operator's observation: the duck backs into a wall and stays):
+    // the forward command is clamped at zero. The body has no rear sensor — the ToF looks
+    // forward, on the robot as in the host — so a step backward is a step into the unseen.
+    // Off by default: byte-identical without the flag.
+    void set_no_backing(bool on) { no_backing_ = on; }
+    int backing_clamped() const { return backing_clamped_; }
 
     void on_reset();
     void set_learning(bool on);
@@ -96,6 +102,7 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
+    bool no_backing_ = false; int backing_clamped_ = 0;
 };
 
 }  // namespace mjhost

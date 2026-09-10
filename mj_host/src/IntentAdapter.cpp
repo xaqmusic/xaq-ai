@@ -136,6 +136,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     }
     ++tick_id_;
     if (has_override_) return override_;
+    if (no_backing_ && last_twist_[0] < 0.0) { last_twist_[0] = 0.0; ++backing_clamped_; }
     return last_twist_;
 }
 

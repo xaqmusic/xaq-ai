@@ -1225,6 +1225,7 @@ std::string g_head_graph;
 // --save-head F / --load-head F: the head brain's state alone (no body): H1 identifies the head
 // on a standing body and saves; H2 loads that into a walking run with the prior on.
 std::string g_save_head, g_load_head;
+bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
@@ -1237,6 +1238,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     IntentAdapter brain(graph, seed);
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
+    if (g_no_backing) brain.set_no_backing(true);
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
     std::array<float, 4> tof_summary{};
@@ -1488,6 +1490,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "head brain snapshot -> %s\n", g_save_head.c_str());
         }
     }
+    if (g_no_backing)
+        std::fprintf(stderr, "  no-backing: %d ticks of backward command clamped to zero\n", brain.backing_clamped());
     if (g_wander_bored_s > 0.0)
         std::fprintf(stderr, "  wander: %d heading changes of %.0f deg after %.0f s of familiarity\n",
                      brain.wander_turns(), g_wander_turn_deg, g_wander_bored_s);
@@ -1536,6 +1540,7 @@ void usage() {
         "      --head-graph H.json adds the head loop: a second brain on the walker's four head commands,\n"
         "      sensing the head IMU (the playroom overlay's); its identified rows are printed at the end.\n"
         "      --save-head F / --load-head F: the head brain's state alone (identify standing, act walking).\n"
+        "      --no-backing: the forward command clamped at zero — no rear sensor, no step into the unseen.\n"
         "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
         "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
         "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
@@ -1644,6 +1649,8 @@ int main(int argc, char** argv) {
             g_arena_shift_s = std::stod(next("--arena-shift"));
         } else if (a == "--head-graph") {
             g_head_graph = next("--head-graph");
+        } else if (a == "--no-backing") {
+            g_no_backing = true;
         } else if (a == "--save-head") {
             g_save_head = next("--save-head");
         } else if (a == "--load-head") {
