@@ -14,7 +14,17 @@ Three ways in:
     view.py record RUN.jsonl OUT.mp4   render one to video, no window needed
 
 `live` and `replay` open an interactive MuJoCo window: drag to orbit, scroll to
-zoom, space to pause, and every one of MuJoCo's own viewer keys works.
+zoom, space to pause, and every one of MuJoCo's own viewer keys works. Ours:
+
+    V   the ToF beams (off by default: 64 lines from the head hide the head)
+    C   the brain-camera window: what the head camera hands the brain, at the
+        brain's resolution (--cam-res, default 64x48) and rate (12.5 Hz), scaled up
+        without smoothing so the coarse frame is what you see
+    H   this hotkey overlay and the status line, drawn in the window
+
+The camera window renders the head camera from the same qpos the viewer draws, so it
+shows exactly the frame the host will publish once it renders (playroom plan C1); until
+then it is the preview of that frame, not a copy of it.
 """
 
 import argparse
@@ -168,8 +178,106 @@ def draw_tof(scn, frame, model, data, mujoco, np, beams):
         mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_LINE, 1.5, pos, tip)
 
 
+# ---- the operator's keys ------------------------------------------------------------
+# State the key callback flips; read by the watch loop each frame. Defaults: the beams
+# off (they hide the head), the help on, the camera window on.
+UI = {"tof": False, "help": True, "cam": True}
+HOTKEYS = [
+    "V  ToF beams     C  brain camera     H  this overlay",
+    "space  pause     drag  orbit     scroll  zoom     right-drag  pan",
+]
+
+
+def key_callback(keycode):
+    if keycode == ord("V"):
+        UI["tof"] = not UI["tof"]
+    elif keycode == ord("C"):
+        UI["cam"] = not UI["cam"]
+    elif keycode == ord("H"):
+        UI["help"] = not UI["help"]
+
+
+def draw_text(scn, cam, model, mujoco, np, lines, aspect=1.5):
+    """Text in the window, Godot-style, at the top-left: one invisible label geom per line,
+    placed each frame in the free camera's own frame so it stays put while the view orbits.
+    MuJoCo draws labels in a screen-space pass, so geometry never hides them.
+
+    The camera basis is MuJoCo's own for a free camera (checked against mjvGLCamera):
+    forward from azimuth/elevation, position = lookat - distance * forward."""
+    az, el = math.radians(cam.azimuth), math.radians(cam.elevation)
+    fwd = np.array([math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)])
+    pos = np.array(cam.lookat) - cam.distance * fwd
+    right = np.cross(fwd, [0.0, 0.0, 1.0])
+    nr = np.linalg.norm(right)
+    if nr < 1e-6:
+        return
+    right /= nr
+    up = np.cross(right, fwd)
+    dn = 0.5                                                 # m in front of the camera: past the near plane
+    h = dn * math.tan(math.radians(model.vis.global_.fovy / 2))
+    w = h * aspect
+    for k, text in enumerate(lines):
+        if scn.ngeom >= scn.maxgeom:
+            return
+        g = scn.geoms[scn.ngeom]
+        scn.ngeom += 1
+        p = pos + fwd * dn + right * (-0.94 * w) + up * (0.80 * h - k * 0.085 * h)
+        mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_SPHERE, np.array([0.0005, 0.0, 0.0]), p,
+                            np.eye(3).flatten(), np.array([0, 0, 0, 0], dtype=np.float32))
+        # MuJoCo's label font is ASCII: a degree sign draws as a black box
+        g.label = text.encode("ascii", "replace").decode().replace("?", " ")[:99]
+
+
+class CamWindow:
+    """A second window showing the head camera's frame at the brain's resolution.
+
+    Rendered here with an offscreen EGL renderer from the same model and qpos the viewer
+    draws, then handed to Tk as a PPM (no image library needed) and zoomed without
+    smoothing, so every one of the brain's pixels is a visible block."""
+
+    def __init__(self, model, mujoco, np, width, height, zoom=8):
+        import tkinter as tk
+        self.mujoco, self.np, self.tk = mujoco, np, tk
+        self.w, self.h, self.zoom = width, height, zoom
+        self.cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "head_camera")
+        self.renderer = mujoco.Renderer(model, height, width)
+        self.cam = mujoco.MjvCamera()
+        self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        self.cam.fixedcamid = self.cam_id
+        self.root = tk.Tk()
+        self.root.title(f"head camera -> brain   {width}x{height} @ 12.5 Hz   (C hides)")
+        self.root.resizable(False, False)
+        self.label = tk.Label(self.root, bd=0)
+        self.label.pack()
+        self.photo = None
+        self.shown = True
+
+    def update(self, data):
+        self.renderer.update_scene(data, self.cam)
+        img = self.renderer.render()
+        ppm = b"P6 %d %d 255\n" % (self.w, self.h) + self.np.ascontiguousarray(img).tobytes()
+        photo = self.tk.PhotoImage(data=ppm).zoom(self.zoom, self.zoom)
+        self.label.configure(image=photo)
+        self.photo = photo                                   # keep a reference or Tk drops it
+        self.root.update()
+
+    def show(self, on):
+        if on and not self.shown:
+            self.root.deiconify()
+        elif not on and self.shown:
+            self.root.withdraw()
+        self.shown = on
+        self.root.update()
+
+    def close(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+
 def status_line(frame):
-    line = f"  t={frame['t']:6.2f}s  tilt={frame['tilt']:6.2f}°  z={frame['z']:.4f}m"
+    line = f"  t={frame['t']:6.2f}s  tilt={frame['tilt']:5.2f} deg  z={frame['z']:.4f}m"
     if "drive" in frame:
         line += f"  {frame['drive']:8s}"
     if frame.get("cons"):
@@ -182,9 +290,12 @@ def status_line(frame):
     return line
 
 
-def watch(frames, realtime=True, title_every=25):
+def watch(frames, realtime=True, title_every=25, cam_res=(64, 48)):
     """Drive the interactive viewer from a stream of frames."""
     _prefer_x11_window()
+    # The brain-camera window renders offscreen through EGL, which needs no display and
+    # leaves the viewer's own GLFW window alone. Set before mujoco is imported.
+    os.environ.setdefault("MUJOCO_GL", "egl")
     mujoco = need("mujoco", "the viewer")
     np = need("numpy", "the status overlay")
     import mujoco.viewer
@@ -193,9 +304,16 @@ def watch(frames, realtime=True, title_every=25):
     data = mujoco.MjData(model)
 
     print(STATUS_LEGEND)
+    print("  keys: V ToF beams (off)   C brain camera   H hotkeys overlay")
     beams = _tof_beams(np)
+    camwin = None
+    if mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "head_camera") >= 0:
+        try:
+            camwin = CamWindow(model, mujoco, np, *cam_res)
+        except Exception as e:                               # no Tk, no EGL: the viewer still runs
+            print(f"  brain-camera window unavailable: {e}")
     with mujoco.viewer.launch_passive(model, data, show_left_ui=False,
-                                      show_right_ui=False) as viewer:
+                                      show_right_ui=False, key_callback=key_callback) as viewer:
         viewer.cam.distance, viewer.cam.elevation, viewer.cam.azimuth = 0.9, -12, 130
         started = time.perf_counter()
         n = 0
@@ -207,8 +325,15 @@ def watch(frames, realtime=True, title_every=25):
             mujoco.mj_forward(model, data)
             viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
             draw_status(viewer.user_scn, frame, mujoco, np)
-            draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
+            if UI["tof"]:
+                draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
+            if UI["help"]:
+                draw_text(viewer.user_scn, viewer.cam, model, mujoco, np, [status_line(frame).strip()] + HOTKEYS)
             viewer.sync()
+            if camwin is not None:
+                camwin.show(UI["cam"])
+                if UI["cam"] and n % 4 == 0:                 # the ToF's rate, 12.5 Hz: the brain's frame rate
+                    camwin.update(data)
             n += 1
             drive = frame.get("drive")
             if drive != last_drive and last_drive is not None:
@@ -225,6 +350,8 @@ def watch(frames, realtime=True, title_every=25):
                 if slack > 0:
                     time.sleep(slack)
         print()
+    if camwin is not None:
+        camwin.close()
     return n
 
 
@@ -298,6 +425,7 @@ def main():
     live.add_argument("host_args", nargs="*", help="passed through, e.g. --secs 30 --noise 0.05")
 
     p.add_argument("--scene", default=None, help="the MJCF the run used (default: scene.xml); the arena runs need scene_arena.xml")
+    p.add_argument("--cam-res", default="64x48", help="the brain-camera window's render size WxH (default 64x48, the playroom plan's C1 start)")
     rep = sub.add_parser("replay", help="watch a saved run")
     rep.add_argument("run")
     rep.add_argument("--fast", action="store_true", help="as fast as it draws")
@@ -307,6 +435,11 @@ def main():
     rec.add_argument("out")
 
     a = p.parse_args()
+    try:
+        cam_res = tuple(int(v) for v in a.cam_res.lower().split("x"))
+        assert len(cam_res) == 2 and min(cam_res) >= 8
+    except (ValueError, AssertionError):
+        sys.exit(f"--cam-res wants WxH, got {a.cam_res!r}")
     global SCENE
     if a.scene:
         SCENE = Path(a.scene) if Path(a.scene).is_absolute() else REPO / "mj_host/models/microduck" / a.scene
@@ -324,7 +457,7 @@ def main():
                 yield line
 
         try:
-            n = watch(frames_from(stream()))
+            n = watch(frames_from(stream()), cam_res=cam_res)
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -335,7 +468,7 @@ def main():
 
     elif a.mode == "replay":
         with open(a.run) as f:
-            watch(frames_from(f), realtime=not a.fast)
+            watch(frames_from(f), realtime=not a.fast, cam_res=cam_res)
 
     elif a.mode == "record":
         stream = sys.stdin if a.run == "-" else open(a.run)

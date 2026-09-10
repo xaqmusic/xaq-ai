@@ -40,6 +40,19 @@ tools/duck_viewer/.venv/bin/python tools/duck_viewer/view.py replay RUN.jsonl --
 pause, and all its usual keys. `live` paces to the wall clock, because the host runs far faster
 than real time and a run that flashes past is not an observation.
 
+Three keys are ours, listed in an overlay at the top-left of the window (with the status line):
+
+| key | what | default |
+|---|---|---|
+| `V` | the ToF's 64 beams from the head, coloured by class | off — they hide the head |
+| `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block | on |
+| `H` | the overlay itself | on |
+
+The camera window renders the head camera from the same `qpos` the viewer draws (an offscreen
+EGL renderer in the viewer process, handed to Tk as a PPM), so it shows exactly the frame the
+host will publish once it renders (playroom plan C1). Until then it is the preview of that
+frame, not a copy of it. Scenes without a `head_camera` (the vendored default) get no window.
+
 ## Every run is kept
 
 `run.sh watch` and `run.sh hold` write `mj_host/log/<mode>-<timestamp>.jsonl`, one JSON object
