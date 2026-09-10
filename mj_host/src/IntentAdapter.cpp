@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <nlohmann/json.hpp>
+#include <variant>
 
 #include "ogma/GraphConfig.hpp"
 #include "ogma/InProcessBus.hpp"
@@ -23,6 +24,50 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
                     it->second = ogma::ParamValue{int64_t(ogma::namespace_seed(seed, m.id))};
             }
     }
+    // The place vector's form follows the graph (see the header): the map EPM's declared width
+    // on reality.proprio.place_in, and whether an EPM consumes reality.proprio.depth_in.
+    bool have_map = false;
+    for (const auto& m : cfg.modules) {
+        auto it = m.params.find("input_topic");
+        if (it == m.params.end()) continue;
+        const auto* topic = std::get_if<std::string>(&it->second);
+        if (!topic) continue;
+        const auto get_int = [&](const char* k, int64_t dflt) {
+            auto jt = m.params.find(k);
+            if (jt == m.params.end()) return dflt;
+            const auto* d = std::get_if<int64_t>(&jt->second);
+            return d ? *d : dflt;
+        };
+        const auto get_str = [&](const char* k) {
+            auto jt = m.params.find(k);
+            if (jt == m.params.end()) return std::string();
+            const auto* d = std::get_if<std::string>(&jt->second);
+            return d ? *d : std::string();
+        };
+        if (*topic == "reality.proprio.place_in") {
+            have_map = true;
+            place_dims_ = int(get_int("proprio_state_dims", 12));
+        } else if (*topic == "reality.proprio.depth_in") {
+            if (get_int("proprio_state_dims", 0) != 64)
+                throw std::invalid_argument("IntentAdapter: the EPM on reality.proprio.depth_in must declare proprio_state_dims 64 (the ToF's 8x8)");
+            depth_dims_  = int(get_int("projection_dim", 128));
+            depth_topic_ = "reality." + get_str("modality_group") + "." + get_str("modality_name");
+        }
+    }
+    if (depth_dims_ > 0) {
+        place_form_ = PlaceForm::Stacked;
+        if (!have_map || place_dims_ != 4 + depth_dims_)
+            throw std::invalid_argument("IntentAdapter: with a depth EPM (projection_dim " + std::to_string(depth_dims_)
+                                        + ") the map EPM on reality.proprio.place_in must declare proprio_state_dims "
+                                        + std::to_string(4 + depth_dims_) + " (pose + depth latent); it declares " + std::to_string(place_dims_));
+    } else if (place_dims_ == 12) {
+        place_form_ = PlaceForm::Columns;
+    } else if (place_dims_ == 68) {
+        place_form_ = PlaceForm::Zones;
+    } else {
+        throw std::invalid_argument("IntentAdapter: the map EPM on reality.proprio.place_in declares proprio_state_dims "
+                                    + std::to_string(place_dims_) + "; the host builds 12 (pose + 8 column ranges), 68 (pose + 64 zone ranges) or 4 + a depth EPM's projection_dim");
+    }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
     inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path);
 }
@@ -34,7 +79,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                                           const std::array<double, 3>& w,
                                           const std::array<double, 3>& a,
                                           double odom_yaw, const std::array<float, 4>& tof,
-                                          const std::array<float, 12>* place) {
+                                          const PlaceInputs* place) {
     std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
     auto* bus = instance_->bus();
     const auto publish = [&](const char* sensor, const std::vector<float>& values) {
@@ -79,7 +124,30 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                       last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846),
                       unit(map_tle_),                    // slot 11: the map's surprise — novelty
                       tof[0], tof[1], tof[2], tof[3]});
-    if (place) publish("place_in", std::vector<float>(place->begin(), place->end()));
+    if (place) {
+        std::vector<float> v(place->pose.begin(), place->pose.end());
+        switch (place_form_) {
+            case PlaceForm::Columns: v.insert(v.end(), place->cols.begin(), place->cols.end()); break;
+            case PlaceForm::Zones:   v.insert(v.end(), place->zones.begin(), place->zones.end()); break;
+            case PlaceForm::Stacked: {
+                // The depth frame with its own mean taken out (CLAUDE.md §0 rule 2: the common mode --
+                // here mostly the floor in the lower rows -- would otherwise dominate the projection);
+                // the JL encoder normalises the scale.  Then the depth EPM's latent from its last tick.
+                float mean = 0.0f;
+                for (float z : place->zones) mean += z;
+                mean /= float(place->zones.size());
+                std::vector<float> d(place->zones.size());
+                for (size_t i = 0; i < d.size(); ++i) d[i] = place->zones[i] - mean;
+                publish("depth_in", d);
+                v.resize(size_t(place_dims_), 0.0f);
+                if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value(depth_topic_)))
+                    if (rt->latent.size() == depth_dims_)
+                        for (int i = 0; i < depth_dims_; ++i) v[size_t(4 + i)] = rt->latent[i];
+                break;
+            }
+        }
+        publish("place_in", v);
+    }
     // The Cell recipe's two egocentric inputs, for a loop that plans over the map: the unwrapped
     // heading and the body velocity as [lateral, forward] in command units.  Nothing in the
     // level-0..2 graphs reads them; a graph that does (R27's PlayLoop) is a new arm.
@@ -177,6 +245,16 @@ void IntentAdapter::set_learning(bool on) {
             }
         }
     }
+}
+
+std::string IntentAdapter::place_form_desc() const {
+    switch (place_form_) {
+        case PlaceForm::Columns: return "12 dims: x, y, cos, sin, the 8 ToF column ranges / 4 m";
+        case PlaceForm::Zones:   return "68 dims: x, y, cos, sin, the 64 ToF zone ranges / 4 m";
+        case PlaceForm::Stacked: return std::to_string(place_dims_) + " dims: x, y, cos, sin, the " + std::to_string(depth_dims_)
+                                        + "-dim latent of the depth EPM on " + depth_topic_ + " (the 64 zone ranges, frame mean out, on reality.proprio.depth_in)";
+    }
+    return "?";
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }

@@ -113,7 +113,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     out["driven_pct"] = float(m.group(2)) if m else float("nan")
     m = re.search(r"wander: (\d+) heading changes", err)
     out["turns"] = int(m.group(1)) if m else None
-    out["readback"] = " | ".join(l.strip() for l in err.splitlines() if re.match(r"\s+(vx|vy|vyaw)\s+:", l))
+    out["readback"] = " | ".join(l.strip() for l in err.splitlines() if re.match(r"\s+(vx|vy|vyaw)\s+:|place vector:", l))
     # ---- JSONL over the control phase (and, with --phase-at, the two halves around a perturbation)
     cells, xs, ys, winners = set(), [], [], set()
     path = 0.0; prev = None

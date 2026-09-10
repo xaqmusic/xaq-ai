@@ -1250,7 +1250,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
     std::array<float, 4> tof_summary{};
-    std::array<float, 12> place{};             // x/2, y/2, cos, sin, the 8 column ranges / 4 m
+    PlaceInputs place{};                      // the pose and the ToF in both reductions; the adapter picks the form
+    std::fprintf(stderr, "place vector: %s\n", brain.place_form_desc().c_str());
     int tof_ticks = 0;
     bool shifted = false;
     const int push_period = int(pushes.every_s * kBrainHz);
@@ -1411,10 +1412,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 ++tof_ticks;
             }
             {
+                place.pose = {float(p[0] / 2.0), float(p[1] / 2.0), float(std::cos(yaw)), float(std::sin(yaw))};
                 const auto col = tof.column_hit();
-                place = {float(p[0] / 2.0), float(p[1] / 2.0), float(std::cos(yaw)), float(std::sin(yaw)),
-                         float(col[0] / 4.0), float(col[1] / 4.0), float(col[2] / 4.0), float(col[3] / 4.0),
-                         float(col[4] / 4.0), float(col[5] / 4.0), float(col[6] / 4.0), float(col[7] / 4.0)};
+                for (int i = 0; i < Tof::kCols; ++i) place.cols[size_t(i)] = float(col[size_t(i)] / Tof::kMaxRangeM);
+                const auto& z = tof.zones();
+                for (int i = 0; i < Tof::kZones; ++i) {
+                    const double r = z[size_t(i)].range < 0.0 ? Tof::kMaxRangeM : z[size_t(i)].range;
+                    place.zones[size_t(i)] = float(std::clamp(r / Tof::kMaxRangeM, 0.0, 1.0));
+                }
             }
             if (have_prev) {
                 const double vx_w = (p[0] - prev_odom[0]) * kBrainHz, vy_w = (p[1] - prev_odom[1]) * kBrainHz;

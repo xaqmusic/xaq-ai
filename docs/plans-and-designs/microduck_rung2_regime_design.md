@@ -1693,3 +1693,99 @@ a win." R34 is the head loop: `★ HEAD` in the launcher; R32 retired from the l
 kept); R33 kept as the walker-route comparison for the Pollen case. Before PR-2 the operator
 wants the behaviour set validated in the simulator with what exists — the exploration line
 resumes (playroom plan ▶ Resume here).
+
+### 17.15 The exploration line's control arm: the ToF's own 8×8 in the place map (2026-09-11)
+
+**The question** (operator, 2026-09-11: lean on the ToF; the camera stays a demonstration for
+the ask to Pollen). Today's place vector is `[x/2, y/2, cos, sin, the 8 column ranges / 4 m]`
+(§17.3): eight ranges over a 45° cone look nearly the same from most spots in a 4 m room, so what
+tells one map node from another is mostly the odometry — a grid over a path integral wearing an
+EPM (the Cell audit's V1, on the duck). Before the camera (playroom plan C2) the cheapest richer
+geometry is the sensor's own 8×8 depth matrix, on the wire on the real robot. This is the arm the
+camera arm has to beat, and the pipeline it will share with the sensor swapped.
+
+**The host.** `IntentAdapter` now owns the place vector's *form*, read from the graph and echoed
+at start (`place vector: …`, captured by `l2_sweep` as a read-back): `Columns` when the map EPM on
+`reality.proprio.place_in` declares 12 (every existing config; byte-identical — R34 seed 6, 400 s,
+md5 `cc87df84…` before and after), `Zones` at 68, `Stacked` when the graph has an EPM on
+`reality.proprio.depth_in`. The host measures the pose and the ToF in both reductions every tick
+(`PlaceInputs`); the adapter publishes what the graph asked for.
+
+**R35 — the 64 zone ranges straight into the RBF place EPM: the encoder flattens it.** Seed 6,
+1500 s: 10 map nodes against R34's 67; the map's TLE 0.04–0.08 through the babble against
+0.1–0.2. Not the input: the logged 64-zone input needs 7 principal dimensions for 90 % of its
+variance, the 8 columns 6, and its raw pairwise spread is twice the columns' (0.258 vs 0.124).
+Re-encoding the logged control phase offline through the encoder's own rule (Halton centres,
+σ = 0.8 × mean nearest-centre distance, L2-normalised activations):
+
+| form | latent pairwise spread | 1 s apart |
+|---|---|---|
+| 12-D RBF as configured (96 centres, σ 0.61) — R34's map | 0.092 | 0.025 |
+| 68-D RBF as configured (544 centres, σ 1.32) — R35 | 0.048 | 0.016 |
+| 68-D RBF, per-dim ranges commissioned from the data | 0.050 | 0.017 |
+| 68-D RBF, depth centred and commissioned | 0.049 | 0.017 |
+| 36-D RBF over [pose ; a 32-D JL of the depth] | 0.047 | 0.018 |
+| `jl_state` 128 over [pose ; frame-centred depth] | 0.109 | 0.035 |
+| [pose ; 64-D JL of the frame-centred depth], Euclidean | 0.173 | 0.051 |
+
+The RBF grid's bandwidth in 68 dimensions makes every input the same activation profile, and
+neither commissioned ranges (`dim_autocal`'s form) nor centring recovers it; a JL projection, which
+preserves distances at any width, keeps the spread. `CLAUDE.md` §0 rule 2 in its other direction:
+the PCA said "several", the node count said "one", and the encoder was the reason. R35 is a
+measurement of the encoder, not of the idea (§3.2 rule 6, a weakened slice); its config stays for
+the record, no preset.
+
+**R36 — the stacked form, the plan's O10 with the sensor swapped.** A new EPM encoder kind,
+`jl_state` (`cpp_core`: the frozen JL projection over a `ProprioToken`, `FrozenJLEncoder::
+make_state_encoder`; takes no per-dim ranges; three unit tests; every existing config
+byte-identical). `depth_epm`: `jl_state` over the 64 zone slant ranges / 4 m with the frame's mean
+taken out (the host; the common mode is mostly the floor in the lower rows), 64-D latent, the same
+insertion gate and node budget as the map. `map_epm`: `jl_state` over `[pose ; depth latent]`
+(68 → 64), the RBF and its ranges gone, everything else R34's. Playroom, ★ HEAD stack, n = 6,
+1500 s, control 700–1500 s, paired with R34:
+
+| n = 6, paired | walls/min | cells | path m | distinct map winners | map TLE | objs/min | down % | resc/min | headW rms |
+|---|---|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 10.9 ± 9.3 | 144 ± 20 | 146.6 | 92 ± 13 | 0.18 | 16.8 | 0.38 | 0.19 | 1.18 |
+| **R36** depth stacked | **17.6 ± 12.2** (Δ +6.6, t +2.3, **6+/0−**) | 136 ± 27 (Δ −8, t −0.8) | 144.7 | **162 ± 42** (Δ +70, t +4.3, 6+/0−) | **0.24** (Δ +0.06, t +4.9, 6+/0−) | 17.8 | 0.40 | 0.18 | 1.17 |
+
+Per seed the map's live vocabulary ends at 57–110 nodes (R34: 55–78) with 105–197 *distinct
+winners* over the control phase — more distinct winners than the 128-node budget on four seeds,
+so the vocabulary churns (health-death pruning and re-insertion), and the map's running TLE ends
+at 0.17–0.40 (R34: 0.13–0.19). The depth EPM itself ends at 70–115 nodes, 41–50 baked, TLE
+0.20–0.52: the room has that many distinct views at this sensor's resolution, and it does not
+settle in 1500 s either.
+
+**Verdict, R36 as built: `REGRESSION` on wall contact (six of six seeds), `NULL` on coverage,
+ties on objects, falls and the head.** The mechanism reads straight off the numbers: the play loop
+climbs the map's TLE (R27), the depth-stacked map's TLE is higher and churning, and what is
+novel in it is what is *close* — a wall or a chair leg fills the frame with a pattern the
+vocabulary has not settled — so the bearing to novelty is the bearing to the nearest surface.
+§17.6's finding ("a learned direction beats the proximity priors") with a richer novelty field
+behind it. Context of the verdict: the play loop over the raw place TLE; R34's insertion gate
+(`min_insertion_error 0.06`, an absolute threshold set for the RBF latent's error scale) carried
+onto a latent whose errors run a third higher; the node budget unchanged; no (d) moved-object run.
+
+**The gate in its adaptive form does not rescue it.** The first suspect was the insertion gate:
+R34's `min_insertion_error 0.06` is an absolute threshold set for the RBF latent's error scale,
+carried onto a latent whose errors run a third higher. `insertion_autotune true` on both EPMs
+(the rank-based gate the EPM already has, `--arm` from R36, same seeds):
+
+| n = 6, paired | walls/min | cells | path m | distinct map winners | map TLE | objs/min | down % |
+|---|---|---|---|---|---|---|---|
+| R36 + adaptive gate | **45.8 ± 39.2** (vs R34: Δ +35, t +2.6, 5+/1−; two seeds ride the walls at 80 and 102/min) | 135 ± 24 (ties) | 133 (Δ −13, **0+/6−**) | 150 ± 28 | 0.23 | 13.6 | 0.34 |
+
+Worse, not better: the vocabulary still churns (94–170 distinct winners against 57–106 live
+nodes), and the path shortens on every seed because the body spends it against walls. The gate's
+scale was not the mechanism.
+
+**Re-use context.** What would justify the next try, in order: the novelty the play loop climbs
+taken from *baked* nodes or the transition term rather than the raw TLE of a churning vocabulary
+(so a place is interesting once the vocabulary has stopped moving under it, not while it is being
+tiled — the churn is the finding: the map now has enough resolution that it never stops
+re-tiling in 1500 s, and play chases the tiling); the avoidance loop's bearing arbitrated against
+play's (R28/R29's machinery, gain-0 on this stack); a node budget and a prune policy sized to the
+room's actual view count (the depth EPM says ~100 at this resolution). The moved-object (d) has
+not been read on any arm. **For C2 the pipeline is built:** the camera arm is R36's graph with
+`depth_epm`'s input swapped for the rendered frame — and the same trap waits for it, so E1 should
+be designed around the churn before the camera is rendered, not after.

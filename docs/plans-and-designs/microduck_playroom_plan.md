@@ -33,6 +33,20 @@ operator's eye; design doc §17.9–17.14). The ask to Pollen is written (outrea
 **PR-2 waits**: the operator wants the behaviour set validated in the simulator first, with
 what exists.
 
+**2026-09-11, later — the ToF control arm measured first (operator: lean on the ToF; the camera
+stays a demonstration for the ask to Pollen).** Design doc §17.15. The sensor's own 8×8 in the
+place map: straight into the RBF place EPM it collapses (R35: the RBF grid's bandwidth at 68 dims
+flattens the input — an encoder finding, offline-measured, a new `jl_state` EPM encoder kind is
+the fix); stacked as the plan's O10 form (R36: `depth_epm` → latent + pose → `map_epm`, both
+`jl_state`) it runs, the map grows to ~2× the nodes and does not stop re-tiling in 1500 s, and
+the play loop climbing that TLE drives the duck into surfaces: walls/min +6.6 on six of six seeds,
+coverage ties (`REGRESSION`); the adaptive insertion gate makes it worse (45.8/min). **What this
+settles for the line below:** the host and the EPM now carry the C2 pipeline (the camera arm is
+R36 with `depth_epm`'s input swapped for the frame), and E1 must not climb the raw place TLE of a
+vocabulary that is still being tiled — the novelty source (baked nodes, or the transition term)
+and the arbitration against avoidance come before the camera is rendered. R35/R36 configs stay,
+no presets (refuted arms get none).
+
 **Next: the exploration line, in this order**, each a lever with a preset and n = 6, on the
 ★ HEAD stack (the steady camera is what makes the appearance map possible):
 

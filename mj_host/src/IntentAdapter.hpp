@@ -25,6 +25,14 @@ namespace mjhost {
 // level-2 brain commands and senses in.
 constexpr double kTwistRangeVx = 0.4, kTwistRangeVy = 0.3, kTwistRangeVyaw = 1.0;
 
+// What the host measures for the place vector each tick: the dead-reckoned pose and the ToF in
+// both reductions.  Which of them the brain is given is the adapter's decision (PlaceForm).
+struct PlaceInputs {
+    std::array<float, 4>  pose{};    // x/2, y/2, cos yaw, sin yaw
+    std::array<float, 8>  cols{};    // the nearest Hit per column / 4 m (R24's reduction)
+    std::array<float, 64> zones{};   // every zone's slant range / 4 m, Empty = 1 (the sensor as it is)
+};
+
 class IntentAdapter {
 public:
     IntentAdapter(const std::string& graph_path, uint64_t seed);
@@ -44,10 +52,21 @@ public:
                                const std::array<double, 3>& accel,
                                double odom_yaw = 0.0,
                                const std::array<float, 4>& tof = {0.0f, 0.0f, 0.0f, 0.0f},
-                               const std::array<float, 12>* place = nullptr);
-    // The map: a slow EPM over the place vector (dead-reckoned x, y, heading, the eight
-    // column ranges) publishes reality.proprio.place; its surprise is the novelty the
-    // brain senses (slot 11) and, with a prior, seeks.
+                               const PlaceInputs* place = nullptr);
+    // The map: a slow EPM over the place vector (dead-reckoned x, y, heading, then the ToF)
+    // publishes reality.proprio.place; its surprise is the novelty the brain senses (slot 11)
+    // and, with a prior, seeks.  The vector's FORM follows the graph (2026-09-11, the
+    // exploration line's control arm), read at construction and echoed at start:
+    //   Columns  the map EPM on reality.proprio.place_in declares 12: pose + the 8 column ranges (R24 on)
+    //   Zones    it declares 68: pose + the 64 zone ranges (R35 -- the RBF flattens it; kept for the record)
+    //   Stacked  the graph has an EPM on reality.proprio.depth_in: the host publishes the 64 zone
+    //            ranges with the frame's mean taken out; that EPM's latent (its previous tick) is
+    //            appended to the pose -> place_in = [pose ; depth latent].  The map EPM must
+    //            declare 4 + that EPM's projection_dim.  The plan's O10 form with the sensor swapped.
+    enum class PlaceForm { Columns, Zones, Stacked };
+    PlaceForm   place_form() const { return place_form_; }
+    int         place_dims() const { return place_dims_; }
+    std::string place_form_desc() const;
     double map_tle() const { return map_tle_; }
     bool   map_novel() const { return map_novel_; }
     int    map_winner() const { return map_winner_; }
@@ -97,6 +116,9 @@ private:
     double map_tle_ = 0.0; bool map_novel_ = false; int map_winner_ = -1;
     double wander_bored_s_ = 0.0, wander_turn_deg_ = 90.0;
     double map_tle_long_ = 0.0; int bored_ticks_ = 0; int wander_turns_ = 0;
+    PlaceForm   place_form_ = PlaceForm::Columns;
+    int         place_dims_ = 12, depth_dims_ = 0;
+    std::string depth_topic_;
     uint64_t wander_rng_ = 0x9E3779B97F4A7C15ull;
     bool have_yaw_ = false;
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
