@@ -22,6 +22,9 @@ zoom, space to pause, and every one of MuJoCo's own viewer keys works. Ours:
         without smoothing so the coarse frame is what you see; the status line and
         these keys are its HUD, under the image
     H   that HUD text
+    W   outer walls fade to 15 % while the camera is on their far side (on by
+        default): a 1 m wall between a parked camera and the duck no longer hides
+        the moment worth seeing
 
 The camera window renders the head camera from the same qpos the viewer draws, so it
 shows exactly the frame the host will publish once it renders (playroom plan C1); until
@@ -185,8 +188,8 @@ def draw_tof(scn, frame, model, data, mujoco, np, beams):
 #
 # The HUD lives in the camera window, not the MuJoCo window: label geoms placed in the
 # free camera's frame lagged the mouse between syncs and flashed on every zoom (2026-09-10).
-UI = {"tof": False, "help": True, "cam": True}
-HOTKEYS = ("V  ToF beams     C  this window     H  this text\n"
+UI = {"tof": False, "help": True, "cam": True, "fade": True}
+HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  walls fade behind the camera\n"
            "space  pause     drag  orbit     scroll  zoom     right-drag  pan")
 
 
@@ -197,6 +200,53 @@ def key_callback(keycode):
         UI["cam"] = not UI["cam"]
     elif keycode == ord("H"):
         UI["help"] = not UI["help"]
+    elif keycode == ord("W"):
+        UI["fade"] = not UI["fade"]
+
+
+def free_camera_position(cam, np):
+    """Where MuJoCo's free camera is, from its lookat/distance/azimuth/elevation (the same
+    formula the renderer uses; checked against mjvGLCamera on 2026-09-10)."""
+    az, el = math.radians(cam.azimuth), math.radians(cam.elevation)
+    fwd = np.array([math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)])
+    return np.array(cam.lookat) - cam.distance * fwd
+
+
+class WallFader:
+    """Outer walls go to 15 % opacity while the camera is on their far side.
+
+    A long run is recorded with the camera parked at an angle, and a 1 m wall between the
+    camera and the duck hides the one moment worth seeing (the table-leg wedge, 2026-09-10,
+    was lost that way). Each wall_* box on the world body has one thin axis; the camera is
+    "behind" it when it lies beyond the wall's plane on the side away from the room. Only
+    the loaded model's colours change — the viewer simulates nothing, so nothing else can."""
+
+    ALPHA = 0.15
+
+    def __init__(self, model, mujoco, np):
+        self.model, self.np = model, np
+        self.walls = []                                   # (geom id, centre, outward unit normal, half-thickness)
+        for g in range(model.ngeom):
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, g)
+            if not name or not name.startswith("wall") or model.geom_bodyid[g] != 0:
+                continue
+            if model.geom_type[g] != mujoco.mjtGeom.mjGEOM_BOX:
+                continue
+            size, pos = model.geom_size[g], model.geom_pos[g]
+            axis = int(np.argmin(size[:2]))               # the thin horizontal axis
+            outward = np.zeros(3)
+            outward[axis] = 1.0 if pos[axis] >= 0 else -1.0
+            self.walls.append((g, pos.copy(), outward, float(size[axis])))
+        self.faded = set()
+
+    def update(self, cam, on=True):
+        pos = free_camera_position(cam, self.np) if on else None
+        for g, centre, outward, half in self.walls:
+            behind = on and float(self.np.dot(pos - centre, outward)) > half
+            alpha = self.ALPHA if behind else 1.0
+            if self.model.geom_rgba[g][3] != alpha:
+                self.model.geom_rgba[g][3] = alpha
+            (self.faded.add if behind else self.faded.discard)(g)
 
 
 class CamWindow:
@@ -291,8 +341,9 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
     data = mujoco.MjData(model)
 
     print(STATUS_LEGEND)
-    print("  keys: V ToF beams (off)   C brain-camera window   H its HUD text")
+    print("  keys: V ToF beams (off)   C brain-camera window   H its HUD text   W walls fade behind the camera (on)")
     beams = _tof_beams(np)
+    fader = WallFader(model, mujoco, np)
     camwin = None
     if mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "head_camera") >= 0:
         try:
@@ -320,6 +371,7 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
             data.qpos[:] = frame["qpos"]
             mujoco.mj_forward(model, data)
             viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
+            fader.update(viewer.cam, UI["fade"])
             draw_status(viewer.user_scn, frame, mujoco, np)
             if UI["tof"]:
                 draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
@@ -373,11 +425,13 @@ def record(frames, out_path, width=960, height=720):
 
     np = need("numpy", "the status overlay")
     beams = _tof_beams(np)
+    fader = WallFader(model, mujoco, np)
     images = []
     for frame in frames:
         data.qpos[:] = frame["qpos"]
         mujoco.mj_forward(model, data)
         camera.lookat[:] = (frame["x"], frame["y"], frame["z"])
+        fader.update(camera)
         renderer.update_scene(data, camera)
         draw_status(renderer.scene, frame, mujoco, np, reset=False)   # the same overlay as live
         draw_tof(renderer.scene, frame, model, data, mujoco, np, beams)
