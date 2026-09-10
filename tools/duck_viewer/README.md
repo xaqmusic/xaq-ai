@@ -40,13 +40,16 @@ tools/duck_viewer/.venv/bin/python tools/duck_viewer/view.py replay RUN.jsonl --
 pause, and all its usual keys. `live` paces to the wall clock, because the host runs far faster
 than real time and a run that flashes past is not an observation.
 
-Three keys are ours, listed in an overlay at the top-left of the window (with the status line):
+Three keys are ours, listed in the HUD under the brain-camera image (with the status line):
 
 | key | what | default |
 |---|---|---|
 | `V` | the ToF's 64 beams from the head, coloured by class | off — they hide the head |
-| `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block | on |
-| `H` | the overlay itself | on |
+| `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block; the status line and the keys are its HUD | on |
+| `H` | the HUD text | on |
+
+The HUD is in the camera window rather than drawn into the MuJoCo window on purpose: label
+geoms placed in the free camera's frame lag the mouse between syncs and flash on every zoom.
 
 The camera window renders the head camera from the same `qpos` the viewer draws (an offscreen
 EGL renderer in the viewer process, handed to Tk as a PPM), so it shows exactly the frame the
