@@ -47,6 +47,15 @@ vocabulary that is still being tiled — the novelty source (baked nodes, or the
 and the arbitration against avoidance come before the camera is rendered. R35/R36 configs stay,
 no presets (refuted arms get none).
 
+**2026-09-11, night — the operator's eye on R36 and the dither measured (design doc §17.16).** The
+circling the operator saw is R34's too: 286° turned per metre, the yaw command bang-bang, the
+map's current node flickering 130–155 times a minute among nodes closer together than the body's
+0.18 m turning radius, the play sub-goal re-chosen several times a second. Holding the sub-goal
+(R37, `commit_hold`) turns the dither into an orbit or a wall-ride: `REGRESSION` 0+/6− on cells and
+straightness. **The fork for the operator** before E1: a play target beyond the turning radius
+(a longer bearing horizon), places at the body's scale, or a proportional heading regulator from
+the identified yaw row. The sweep now reports `straight` and `switch/min`.
+
 **Next: the exploration line, in this order**, each a lever with a preset and n = 6, on the
 ★ HEAD stack (the steady camera is what makes the appearance map possible):
 

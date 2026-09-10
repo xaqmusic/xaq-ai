@@ -255,3 +255,27 @@ TEST(PlayLoop, StallWanderOffByDefault) {
     EXPECT_FALSE(f.play.forced_wander()) << "off by default → never forces wander regardless of stall";
     EXPECT_TRUE(f.play.climbing()) << "keeps climbing the uphill neighbour (prior behaviour)";
 }
+
+// R37 (duck, 2026-09-11): sub-goal commitment at the timescale of arrival.  The current node flickers
+// to one the committed target is not adjacent to; off, the target is dropped (re-chosen from the new
+// node's neighbours -- none here, so -1); on, it is held because it is still uphill.
+namespace {
+int committed_after_flicker(bool hold) {
+    Fixture f(hold ? ogma::ParamMap{{"commit_hold", true}} : ogma::ParamMap{});
+    f.run(0, 0, 0.0f);
+    f.run(1, 1, 0.0f);
+    f.run(2, 2, 0.0f, false, 1.0f);   // the frontier: novel
+    f.run(3, 1, PI);
+    f.run(4, 0, PI);
+    for (uint64_t t = 5; t < 12; ++t) f.run(t, 0, PI);   // value iteration settles: 0 -> 1 -> 2 is uphill
+    // off: the target is re-chosen from 0's neighbours each time the node changes -> 1 (the hop);
+    // on: the frontier 2, committed at node 1, is held through the move back to 0 (still uphill).
+    EXPECT_EQ(f.play.next_node(), hold ? 2 : 1);
+    f.run(12, 3, PI);                 // a fresh node, adjacent to nothing the target is
+    return f.play.next_node();
+}
+}  // namespace
+TEST(PlayLoop, CommitHoldKeepsTheSubGoalThroughCurrentNodeFlicker) {
+    EXPECT_EQ(committed_after_flicker(false), -1);
+    EXPECT_EQ(committed_after_flicker(true), 2);
+}

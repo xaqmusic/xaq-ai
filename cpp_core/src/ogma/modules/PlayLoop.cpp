@@ -31,6 +31,11 @@ int64_t get_int(ParamValue const& v, std::string const& k) {
     if (auto p = std::get_if<double>(&v))  return int64_t(*p);
     throw std::invalid_argument("PlayLoop: param '" + k + "' must be integer");
 }
+bool get_bool(ParamValue const& v, std::string const& k) {
+    if (auto p = std::get_if<bool>(&v)) return *p;
+    if (auto p = std::get_if<int64_t>(&v)) return *p != 0;
+    throw std::invalid_argument("PlayLoop: param '" + k + "' must be bool");
+}
 double get_double(ParamValue const& v, std::string const& k) {
     if (auto p = std::get_if<double>(&v))  return *p;
     if (auto p = std::get_if<int64_t>(&v)) return double(*p);
@@ -85,6 +90,7 @@ ParamSchema PlayLoop::params_schema() const {
         {"wander_stall_ticks",   ParamMutability::HotMutable, "WANDER-BEYOND fix: force the run-tumble WANDER (override the climb) when the map has not grown for this many ticks — the bug has mapped this region, so push PAST the frontier into unmapped ground instead of climbing freshly-baked nodes forever. A new node resets the counter → back to climb. 0 = off (climb-only). ~explore_cycle is the natural scale.", ParamValue{int64_t{0}}},
         {"frontier_bias",        ParamMutability::HotMutable, "FRONTIER-DIRECTED WANDER: bias the run-tumble wander toward UNEXPLORED ground (away from the habituation-weighted centroid of visited places) instead of a memoryless random walk — the maze-discovery fix. Effective pull = frontier_bias·max_hab (magnitude DERIVED from the explored-core confidence, no-tuning §6). 0 = off (diffusive run-and-tumble, prior behaviour, Δ=0); 1 = full outward (beat 0.5/0 monotonically, A/B lbend).", ParamValue{0.0}},
         {"explore_seed",         ParamMutability::ConstructionOnly, "Run-and-tumble wander RNG seed.", ParamValue{int64_t{11}}},
+        {"commit_hold",          ParamMutability::HotMutable, "SUB-GOAL COMMITMENT AT THE TIMESCALE OF ARRIVAL (duck R37, 2026-09-11).  Off (default, byte-identical): the committed next node is dropped whenever the current node changes to one it is not adjacent to -- and on the duck's map the current node changes 130-155 times a minute (nodes 8-13 cm apart with 23-47 cm of pose spread each), so the sub-goal is re-chosen several times a second, the bearing to a fresh target inside the body's 18 cm turning radius saturates the yaw command (|vyaw| 0.95, 50 sign flips a minute), and the body orbits (286 deg turned per metre travelled, straightness 0.14-0.24).  On: the committed node is held until REACHED (it becomes the current node) or until it is no longer uphill from wherever the body is (value(target) <= value(current)); adjacency is not required; and the bearing is taken from the loop's own live odometry to the target's position, not from the flickering current node's centroid.  A plan held until its prediction fails -- no timescale is set: arrival and the value field end it.", ParamValue{false}},
         {"pi_cell_size",  ParamMutability::HotMutable, "Path-integration place-code: >0 = place node IS the odometry grid cell (metres); 0 = use place_topic (panorama).", ParamValue{0.0}},
         {"eat_credit_alpha", ParamMutability::HotMutable, "EMA rate for the eat-credit success signal (telemetry).", ParamValue{0.01}},
     };
@@ -110,6 +116,7 @@ ParamMap PlayLoop::current_params() const {
     m["wander_stall_ticks"]   = ParamValue{int64_t(wander_stall_ticks_)};
     m["frontier_bias"]        = ParamValue{double(frontier_bias_)};
     m["explore_seed"]         = ParamValue{int64_t(explore_seed_)};
+    m["commit_hold"]          = ParamValue{commit_hold_};
     m["pi_cell_size"]  = ParamValue{double(pi_cell_size_)};
     m["eat_credit_alpha"] = ParamValue{double(eat_credit_alpha_)};
     return m;
@@ -128,6 +135,7 @@ void PlayLoop::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "explore_tumble_range") explore_tumble_range_ = float(get_double(value, k));
     else if (k == "wander_stall_ticks")   wander_stall_ticks_   = int(get_int(value, k));
     else if (k == "frontier_bias") frontier_bias_ = float(get_double(value, k));
+    else if (k == "commit_hold")   commit_hold_   = get_bool(value, k);
     else if (k == "pi_cell_size")  pi_cell_size_  = float(get_double(value, k));
     else if (k == "eat_credit_alpha") eat_credit_alpha_ = float(get_double(value, k));
 }
@@ -151,6 +159,7 @@ void PlayLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "explore_tumble_range", [&](auto const& v){ explore_tumble_range_ = float(get_double(v,"explore_tumble_range")); });
     apply_param(params, "wander_stall_ticks",   [&](auto const& v){ wander_stall_ticks_   = int(get_int(v,"wander_stall_ticks")); });
     apply_param(params, "frontier_bias",        [&](auto const& v){ frontier_bias_        = float(get_double(v,"frontier_bias")); });
+    apply_param(params, "commit_hold",          [&](auto const& v){ commit_hold_          = get_bool(v,"commit_hold"); });
     apply_param(params, "explore_seed",         [&](auto const& v){ explore_seed_         = uint64_t(get_int(v,"explore_seed")); });
     explore_rng_.seed(explore_seed_);
     apply_param(params, "pi_cell_size",  [&](auto const& v){ pi_cell_size_  = float(get_double(v,"pi_cell_size")); });
@@ -192,6 +201,14 @@ float PlayLoop::geo_bearing(int from, int to) const {
     double fx = fit->second.sx / fit->second.n, fy = fit->second.sy / fit->second.n;
     double tx = tit->second.sx / tit->second.n, ty = tit->second.sy / tit->second.n;
     double dx = tx - fx, dy = ty - fy;
+    if (dx == 0.0 && dy == 0.0) return std::numeric_limits<float>::quiet_NaN();
+    return float(std::atan2(-dx, -dy));  // forward dir(h) = (-sin h, -cos h)
+}
+
+float PlayLoop::geo_bearing_from_odo(int to) const {
+    auto tit = place_pos_.find(to);
+    if (tit == place_pos_.end() || tit->second.n == 0) return std::numeric_limits<float>::quiet_NaN();
+    double dx = tit->second.sx / tit->second.n - odo_x_, dy = tit->second.sy / tit->second.n - odo_y_;
     if (dx == 0.0 && dy == 0.0) return std::numeric_limits<float>::quiet_NaN();
     return float(std::atan2(-dx, -dy));  // forward dir(h) = (-sin h, -cos h)
 }
@@ -259,7 +276,10 @@ void PlayLoop::tick(uint64_t tick_id) {
 
     // ---- policy: SUB-GOAL COMMITMENT on the NOVELTY value field (climb to the frontier) ----
     bool keep_goal = (committed_next_ >= 0) && (cur_node_ >= 0) && (committed_next_ != cur_node_);
-    if (keep_goal) {
+    if (keep_goal && commit_hold_) {
+        // held until reached or no longer uphill; the current node's flicker does not drop it
+        keep_goal = value(committed_next_) > value(cur_node_) + 1e-4f;
+    } else if (keep_goal) {
         auto it = edges_.find(cur_node_);
         keep_goal = (it != edges_.end()) && (it->second.count(committed_next_) > 0) &&
                     (value(committed_next_) > value(cur_node_) + 1e-4f);
@@ -324,7 +344,8 @@ void PlayLoop::tick(uint64_t tick_id) {
     wandering_ = false;
     if (climbing_) {
         explore_active_ = false;                                     // EXPLORE-CLIMB: route to the frontier node
-        float target = geo_bearing(cur_node_, next_node_);
+        float target = commit_hold_ ? geo_bearing_from_odo(next_node_) : geo_bearing(cur_node_, next_node_);
+        if (std::isnan(target)) target = geo_bearing(cur_node_, next_node_);
         if (std::isnan(target)) target = edges_[cur_node_][next_node_].heading();
         float delta  = wrap_pi(target - cur_heading_);
         constexpr float kPiF = 3.14159265f;

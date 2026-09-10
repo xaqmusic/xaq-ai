@@ -1789,3 +1789,69 @@ room's actual view count (the depth EPM says ~100 at this resolution). The moved
 not been read on any arm. **For C2 the pipeline is built:** the camera arm is R36's graph with
 `depth_epm`'s input swapped for the rendered frame — and the same trap waits for it, so E1 should
 be designed around the churn before the camera is rendered, not after.
+
+### 17.16 The operator's eye on R36, the dither measured, and the hold refuted (2026-09-11)
+
+**The observation.** Watching R36 for 1000 s the operator saw the duck circling in the centre of
+the room with many similar map nodes there, and read it as: it needs to hold a trajectory for
+longer to find novel places. The harness agrees about the circling and it is not R36's alone —
+R34 does it too. Seed 6, control phase, both arms: **286° turned per metre travelled**, mean yaw
+rate 50°/s, the yaw command at |0.95| of its range with **48–50 sign flips a minute** (same-sign
+runs of 0.3 s), straightness over 20 s windows 0.24 (R34) and 0.14 (R36), where 1 is a line and 0
+is back where it started.
+
+**The mechanism, from the logs.** The map's current node changes **130–155 times a minute**
+(dwell 0.2 s): its nodes' pose centroids are 8–13 cm apart and each node's visits spread over
+23–47 cm, so several nodes claim the same spot and the winner flickers between them. The play
+loop drops its committed sub-goal whenever the current node is not adjacent to it, so the target
+is re-chosen several times a second; the bearing to a fresh target — usually inside the body's
+measured **turning radius of 0.18 m** (v/ω while moving and turning) — saturates the yaw command;
+the body swings past it and the next flicker picks another. New nodes are minted while walking,
+not while turning in place (0 % of mintings at low speed and high yaw rate), so the depth map
+does not mint novelty by spinning; R36 only makes the flicker denser (195 winners against 97).
+
+**R37 — `commit_hold` on the play loop, the operator's hypothesis in the loop's terms.** New
+`PlayLoop` param (off by default, byte-identical — R34 seed 6 md5 `cc87df84…` unchanged; a unit
+test): the committed node is held until *reached* (it becomes the current node) or until it is no
+longer uphill in the value field, adjacency no longer required, and the bearing is taken from the
+loop's own odometry to the target's position rather than from the flickering node's centroid. No
+timescale is set. The sweep gained two columns for this: `switch/min` (winner switches) and
+`straight` (the 20 s straightness, the complement cells and path are blind to). Playroom, ★ HEAD
+stack, n = 6, paired with R34:
+
+| n = 6, paired | walls/min | cells | straight | switch/min | distinct winners | resc/min | down % |
+|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 10.9 ± 9.3 | 144 ± 20 | 0.19 ± 0.07 | 133 ± 16 | 92 | 0.19 | 0.38 |
+| **R37** hold | 33.1 ± 37.4 (3+/3−) | **73 ± 50** (Δ −70, t −5.5, **0+/6−**) | **0.10 ± 0.08** (Δ −0.10, t −4.4, **0+/6−**) | 114 ± 19 (Δ −19, t −2.2) | 58 ± 30 (Δ −34, t −4.5) | 0.05 (Δ −0.14, 0+/6−) | 0.12 |
+
+Per seed it splits into two failures: seeds 3, 4 and 6 **orbit** (straightness 0.07–0.10, 23–63
+cells on 155 m of path, the y-range down to 1.2 m, zero walls) and seeds 1, 2 and 5 **ride the
+walls** (41–91/min, straightness 0.03). Holding the target does exactly what a target inside the
+turning radius predicts: the body circles it forever, "reached" never fires because the winner
+never settles on that node while the body orbits its centroid, and the value criterion never
+releases it because the orbit learns nothing. Fewer falls (0.05/min) because it walks less into
+things it cannot see. **`REGRESSION`**, six of six on the two metrics that matter, preset removed,
+config kept.
+
+**What the pair R36/R37 settles.** The dither and the orbit are two faces of one geometry: the
+play loop's targets are one hop away on a map whose hops are shorter than the body can turn.
+Dropping the target on every flicker gives a dither that at least drifts; holding it gives an
+orbit. Neither "how long to hold" nor "which sensor feeds the map" is the lever. The re-use
+context, in error terms, is a **fork for the operator**, because each option changes something
+the plan or the recipe has stated:
+
+1. **A target beyond the turning radius** — follow the value gradient several hops and bear on the
+   first node whose position is at least the body's turning radius away; arrival geometric
+   (within the target node's own pose spread, which the loop already accumulates). Derivable, no
+   timescale; but the recipe states the horizon as one step (§"Horizon", register O2), and this
+   is a longer horizon for the *bearing*, not the arbiter.
+2. **Places at the body's scale** — a place node that is a cell of the loop's own path integral
+   (`pi_cell_size` > 0, the grid the Cell audit demoted) or a map EPM whose insertion gate is set
+   so that nodes are farther apart than the turning radius. The second is a scale constant
+   (prohibition 5) unless derived from the body's motion.
+3. **The heading regulator** — the yaw command is bang-bang (|0.95| on average); a law whose gain
+   comes from the identified yaw row of A (the read-back prints it) would turn a saturated swing
+   into a proportional one and shrink the orbit radius the dither produces. This changes the
+   level-2 twist brain, not the play loop.
+
+The instruments for any of them are now in the sweep (`straight`, `switch/min`).

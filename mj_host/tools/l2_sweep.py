@@ -32,6 +32,9 @@ Per arm and seed, from the host's own JSONL (stdout) and summary (stderr):
               unless you read the per-seed lines)
   span        x-range × y-range (m)
   nodes       distinct map winners (the map EPM's live vocabulary)
+  switch/min  winner switches per minute -- how often the map's 'where am I' changes (R37: 130-155 on the duck)
+  straight    median over 20 s windows of net displacement / path length (1 = a line, 0 = an orbit) -- the
+              complement cells and path are blind to
   mapTLE      mean map TLE;  novel%  fraction of ticks the map called novel
   turns       the host's wander heading changes (stderr), if the wander rule is on
   rescues/min, walker-driven %, and the identified A rows (read-backs: a silent-confound arm
@@ -117,6 +120,8 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     # ---- JSONL over the control phase (and, with --phase-at, the two halves around a perturbation)
     cells, xs, ys, winners = set(), [], [], set()
     path = 0.0; prev = None
+    switches = 0; prev_w = None          # winner switches: how often the map's 'where am I' changes (R37)
+    win_pts = []                         # (x, y) per tick for the 20 s straightness windows
     wall_eps = contact = n = 0; prev_wall = 0
     obj_eps = 0; prev_obj = 0
     down = 0      # ticks with the trunk past 60 deg of tilt: on the floor, rescued or not (the table-leg trap, 2026-09-10)
@@ -151,7 +156,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         xs.append(x); ys.append(y)
         cells.add((math.floor(x / CELL_M), math.floor(y / CELL_M)))
         if prev is not None: path += math.hypot(x - prev[0], y - prev[1])
-        prev = (x, y)
+        prev = (x, y); win_pts.append((x, y))
         w = int(r.get("wall", 0)); contact += w
         st_ = int(r.get("steer", 0)); steer_avoid += (st_ == 2); steer_play += (st_ == 1)
         if w and not prev_wall: wall_eps += 1
@@ -172,6 +177,8 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         mp = r.get("map") or []
         if len(mp) >= 3:
             tle_sum += float(mp[0]); novel += int(mp[1]); winners.add(int(mp[2]))
+            if prev_w is not None and int(mp[2]) != prev_w and int(mp[2]) >= 0: switches += 1
+            if int(mp[2]) >= 0: prev_w = int(mp[2])
     minutes = max(1e-9, (secs - control_from) / 60.0)
     if phase_at is not None:
         mb = max(1e-9, (phase_at - control_from) / 60.0); ma = max(1e-9, (secs - phase_at) / 60.0)
@@ -183,6 +190,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "tooclose": tooclose / max(1, n), "path_m": path, "cells": len(cells),
         "span": (max(xs) - min(xs)) * (max(ys) - min(ys)) if xs else 0.0,
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
+        "switch_min": switches * 60.0 / max(1e-9, (secs - control_from)), "straight": _straightness(win_pts),
         "escaped": escaped, "avoid_pct": 100.0 * steer_avoid / max(1, n), "play_pct": 100.0 * steer_play / max(1, n),
         "objs_min": obj_eps / minutes, "down_pct": 100.0 * down / max(1, n),
         "head_w_rms": math.sqrt(hw2 / nh) if nh else float("nan"), "head_g_dev": math.sqrt(hg2 / nh) if nh else float("nan"),
@@ -195,6 +203,19 @@ def fmt(vals):
     vals = [v for v in vals if v is not None and not (isinstance(v, float) and math.isnan(v))]
     if not vals: return "     -      "
     return f"{statistics.mean(vals):7.2f}±{statistics.stdev(vals):5.2f}" if len(vals) > 1 else f"{vals[0]:7.2f}      "
+
+
+def _straightness(pts, window_ticks=1000):
+    """Median over 20 s windows of net displacement / path length: 1 = a line, 0 = back where it
+    started.  The blind-metric complement to cells and path (CLAUDE.md §3 rule 4): an orbit scores
+    cells and path and ~0 here."""
+    vals = []
+    for i in range(0, len(pts) - window_ticks, window_ticks):
+        seg = pts[i:i + window_ticks + 1]
+        p = sum(math.hypot(seg[k + 1][0] - seg[k][0], seg[k + 1][1] - seg[k][1]) for k in range(len(seg) - 1))
+        d = math.hypot(seg[-1][0] - seg[0][0], seg[-1][1] - seg[0][1])
+        vals.append(d / p if p > 0 else 0.0)
+    return statistics.median(vals) if vals else float("nan")
 
 
 def paired(a_rows, b_rows, key, better):
@@ -251,7 +272,7 @@ def main():
 
     print(f"\n=== LEVEL-2 A/B, {args.seeds} seeds × {args.secs} s, control phase {ctrl:.0f}–{args.secs} s ===")
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
-            ("cells", "cells"), ("span", "span m²"), ("nodes", "nodes"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
+            ("cells", "cells"), ("span", "span m²"), ("straight", "straight"), ("nodes", "nodes"), ("switch_min", "switch/min"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
             ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
             ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%"),
             ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev")]
@@ -263,7 +284,7 @@ def main():
         ref = cfgs[0]
         for c in cfgs[1:]:
             print(f"\n  PAIRED {c.stem} − {ref.stem}:")
-            for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("nodes", "higher"), ("map_tle", "-"), ("rescues_min", "lower")):
+            for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("straight", "higher"), ("nodes", "higher"), ("switch_min", "-"), ("map_tle", "-"), ("rescues_min", "lower")):
                 print(f"    {k:12s} {paired(results[ref], results[c], k, better)}")
     if args.phase_at is not None:
         print(f"\n  (d) split at {args.phase_at:.0f} s -- before | after:")
