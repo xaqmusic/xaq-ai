@@ -20,7 +20,12 @@
 
 ## ▶ Resume here
 
-**State on 2026-09-10.** Two threads, both waiting on a person.
+**State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
+path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);
+its §9 is the build order (A1 the playroom generator first, then C1 the head-camera render, V1 the
+voice on the simulator). Register rows O25–O29. Nothing built yet.
+
+**State on 2026-09-10, morning.** Two threads, both waiting on a person.
 
 1. **The gift PR is open.** [pollen-robotics/microduck#260](https://github.com/pollen-robotics/microduck/pull/260)
    — velocities and currents on `robot.state` — from the fork `xaqmusic/microduck`, re-vetted on
