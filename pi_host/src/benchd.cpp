@@ -10,6 +10,7 @@
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
+#include "ogma/hw/Ina219.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zmq.h>
@@ -49,6 +50,10 @@ constexpr double VBAT_RECOVER_V  = 6.7;    // hysteresis: arming allowed again a
 constexpr int NORMAL_SLEW_US     = 40;
 int g_pose_slew_us = 12;                   // 600 us/s: a 1000 us move takes ~1.7 s
 int g_pose_stagger_ticks = 5;              // 100 ms between channel starts
+// CALIBRATION DATA, not a constant (Ina219.hpp): at 10 mOhm the trace and solder are a
+// large fraction of the part, and a meter cannot reach it through ~200 mOhm of leads.
+// Placeholder until the bench fit; override with --r-shunt.
+double g_r_shunt = 0.01;
 
 int64_t mono_ms() {
     timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -95,6 +100,20 @@ struct State {
     bool deadman_tripped = false;
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
     int  throttled_poll = 0;
+    // Whole-robot bus current (BOM 3).  Instrument only -- nothing here consumes it.
+    // null when the part is absent, and benchd then behaves exactly as it did before.
+    std::unique_ptr<Ina219> ina;
+    bool    ina_ok      = false;
+    bool    ina_resync  = false;      // another process had reprogrammed CONFIG
+    double  ina_i       = 0.0;        // A, instantaneous (128-sample average on the part)
+    double  ina_v       = 0.0;        // V, INA219's own bus channel -- independent of A4
+    double  ina_i_ema   = 0.0;        // A, tau 30 s: the SLOW metric
+    double  ina_i_peak  = 0.0;        // A, decaying peak-hold, tau 60 s: the RECENT worst
+    double  ina_i_max   = 0.0;        // A, since start
+    double  ina_charge  = 0.0;        // A*s drawn since start
+    double  ina_energy  = 0.0;        // J drawn since start
+    int64_t ina_last_ms = 0;
+    int     ina_errors  = 0;
     TickBudget  budget{TICK_HZ, 25};    // 25 ticks = 0.5 s: fast enough to read as a meter
     int  load_cpu_us   = 0;             // synthetic load, gain-0 by default (see the 'load' verb)
     int  load_block_us = 0;
@@ -150,6 +169,38 @@ struct State {
     // channel goes to the saved `rescue` pose (slewed), which is what limp existed for —
     // no servo left straining into a hard stop.  Without a rescue pose the old register
     // write is issued and recorded as such (it does nothing on this hardware).
+    // Caller holds m (the bus is not thread-safe).  Never throws out: a missing or
+    // sulking INA219 must not cost the tick that keeps the servos fed.
+    void sample_ina() {
+        if (!ina) return;
+        try {
+            ina_resync = ina->ensure_configured();
+            const auto s2 = ina->read();
+            const int64_t now = mono_ms();
+            ina_i = s2.current_a; ina_v = s2.bus_v; ina_ok = true;
+            if (ina_i > ina_i_max) ina_i_max = ina_i;
+            if (ina_last_ms) {
+                const double dt = std::min(1.0, (now - ina_last_ms) / 1000.0);   // clamp a scheduling gap
+                ina_charge += ina_i * dt;
+                ina_energy += ina_i * ina_v * dt;
+                // Time-constant form, so the numbers keep their meaning if the rate changes.
+                const double a_ema = 1.0 - std::exp(-dt / 30.0);
+                const double a_pk  = 1.0 - std::exp(-dt / 60.0);
+                ina_i_ema += a_ema * (ina_i - ina_i_ema);
+                // Peak means WORST DRAW, so it floors at zero: while the charger is on,
+                // current is negative and a signed peak-hold would report the charge rate.
+                ina_i_peak = std::max({0.0, ina_i, ina_i_peak - a_pk * ina_i_peak});
+            } else {
+                ina_i_ema = ina_i;
+                ina_i_peak = std::max(0.0, ina_i);
+            }
+            ina_last_ms = now;
+        } catch (const std::exception& e) {
+            ina_ok = false;
+            if (++ina_errors % 50 == 1) record("ina_error", {{"what", e.what()}, {"count", ina_errors}});
+        }
+    }
+
     void rescue(const char* why) {
         end_cal(why);
         armed_ch = -1;
@@ -217,6 +268,7 @@ struct State {
             ++bus_errors; adc = last_adc;                          // keep the last good reading
             if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
         }
+        sample_ina();
         const double vbat = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
         // SPEC 4.6 — low-voltage auto-safe.  The HAT powers the Pi too, so a dying pack
         // takes the whole robot down; go limp early and say so.
@@ -243,6 +295,18 @@ struct State {
                 {"overruns", overruns}, {"bus_errors", bus_errors}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
                 {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
                 {"pi_throttled", pi_throttled},
+                // Whole-robot current: Pi + the 5 V regulator + all 12 servos (BOM 3).
+                // r_shunt is calibration data, so it rides with the numbers it derives.
+                {"ina", ina ? json{{"ok", ina_ok}, {"i_a", ina_i}, {"v", ina_v},
+                                   {"i_ema", ina_i_ema}, {"i_peak", ina_i_peak}, {"i_max", ina_i_max},
+                                   {"charge_as", ina_charge}, {"energy_j", ina_energy},
+                                   {"r_shunt", ina->r_shunt()}, {"resync", ina_resync},
+                                   // Charge current flows BACKWARDS through the shunt, so the
+                                   // sign is a plugged-in detector -- and a warning that every
+                                   // energy number is confounded while it is true.
+                                   {"charging", ina_i < -0.02},
+                                   {"errors", ina_errors}}
+                             : json(nullptr)},
                 // Cost of the loop, in the units a control loop cares about: per cent of
                 // the tick BUDGET, with the tail (max) beside the middle because a mean
                 // is blind to the spike that actually misses a deadline.  wall vs cpu
@@ -504,6 +568,7 @@ int main(int argc, char** argv) {
         else if (a == "--poses") poses_path = argv[i + 1]; else if (a == "--rescue") rescue_name_arg = argv[i + 1];
         else if (a == "--pose-slew") g_pose_slew_us = std::max(1, std::atoi(argv[i + 1]));
         else if (a == "--pose-stagger-ms") g_pose_stagger_ticks = std::max(0, std::atoi(argv[i + 1]) / 20);
+        else if (a == "--r-shunt") g_r_shunt = std::atof(argv[i + 1]);
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
@@ -512,6 +577,16 @@ int main(int argc, char** argv) {
     S.rescue_name = rescue_name_arg;
     std::printf("ogma_benchd: rescue pose '%s' %s\n", S.rescue_name.c_str(), S.has_rescue() ? "loaded" : "NOT SAVED YET — limp is impossible on this HAT, save one");
     try { S.mcu = std::make_unique<McuReset>(); } catch (const std::exception& e) { std::fprintf(stderr, "benchd: no MCU reset line (%s) — limp will be register-only, which this HAT ignores\n", e.what()); }
+    // Instrument only: nothing in this daemon reads the current back.  Absent part =>
+    // the frame carries "ina": null and every other behaviour is unchanged.
+    try {
+        S.ina = std::make_unique<Ina219>(S.bus, g_r_shunt);
+        S.ina->configure(ina219_telemetry_config());
+        std::printf("ogma_benchd: INA219 0x40 r_shunt %.5f ohm (telemetry config)\n", g_r_shunt);
+    } catch (const std::exception& e) {
+        S.ina.reset();
+        std::fprintf(stderr, "benchd: no INA219 (%s) — current telemetry disabled\n", e.what());
+    }
     if (!S.log) std::fprintf(stderr, "benchd: cannot open %s (continuing without the record)\n", log_path.c_str());
     { std::string why; if (load_map(S, map_path, why)) std::printf("ogma_benchd: loaded map %s (%zu servos)\n", map_path.c_str(), S.map["servos"].size()); else std::printf("ogma_benchd: no map loaded (%s)\n", why.c_str()); }
     S.record("start", {{"body", body}, {"i2c", dev}, {"rep", rep_port}, {"pub", pub_port}, {"vbat", S.hat.battery_volts()}, {"map_servos", S.map["servos"].size()}});

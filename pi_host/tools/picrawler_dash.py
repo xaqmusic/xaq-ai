@@ -241,6 +241,32 @@ class Dash:
                                   f"   watchdog {f.get('watchdog_trips', '?')}"
                                   f"   throttled {f.get('pi_throttled', '?')}", C(vcol))
             y += 1
+            # Whole-robot current (BOM 3): Pi + the 5 V regulator + all 12 servos.
+            # Colours track the HAT's 3 A rail rating, which is a datasheet fact --
+            # NOT the duty budget, which BOM 3.9 measured to be surface-dependent.
+            ina = f.get("ina") or {}
+            if ina.get("ok"):
+                cur = float(ina.get("i_a", 0.0))
+                charging = bool(ina.get("charging"))
+                icol = DIM if charging else (BAD if cur > 2.7 else WARN if cur > 2.0 else OK)
+                self._line(scr, y, 3,
+                           f"power {cur:+6.3f} A [{bar(cur / 3.0, 16)}]"
+                           f"   ina {float(ina.get('v', 0.0)):5.3f} V"
+                           + ("   CHARGING — energy numbers are confounded" if charging else ""),
+                           C(icol))
+                y += 1
+                # The SLOW metric: a 30 s mean, a 60 s decaying worst, and what the
+                # robot has actually spent.  Instantaneous current says nothing about duty.
+                self._line(scr, y, 3,
+                           f"slow   ema30 {float(ina.get('i_ema', 0.0)):+6.3f} A"
+                           f"   peak60 {float(ina.get('i_peak', 0.0)):5.3f}"
+                           f"   max {float(ina.get('i_max', 0.0)):5.3f}"
+                           f"   spent {float(ina.get('energy_j', 0.0)) / 1000.0:+7.3f} kJ"
+                           f" / {float(ina.get('charge_as', 0.0)):+7.1f} A·s", C(DIM))
+                y += 1
+            elif ina:
+                self._line(scr, y, 3, f"power  INA219 not reading (errors {ina.get('errors', '?')})", C(BAD))
+                y += 1
             adc = f.get("adc", [])
             self._line(scr, y, 3, "adc   " + "  ".join(f"A{i} {v}" for i, v in enumerate(adc)), C(DIM))
             y += 1
@@ -407,6 +433,11 @@ def main() -> None:
             print(f"  build {i.get('git_sha')}  binary {i['binary']['stat'].get('mtime')}"
                   f"  {i.get('hz')}Hz {'SCHED_FIFO' if i.get('realtime') else 'SCHED_OTHER'}")
         if st:
+            _ina = st.get("ina") or {}
+            if _ina.get("ok"):
+                print(f"  power {float(_ina.get('i_a', 0)):+.3f} A  ema30 {float(_ina.get('i_ema', 0)):+.3f}"
+                      f"  peak60 {float(_ina.get('i_peak', 0)):.3f}  spent {float(_ina.get('energy_j', 0)) / 1000:.3f} kJ"
+                      + ("  CHARGING" if _ina.get("charging") else ""))
             print(f"  vbat {float(st.get('vbat', 0)):.2f} V  tick {float(st.get('tick_hz', 0)):.2f} Hz"
                   f"  overruns {st.get('overruns')}")
         if d.sensors:
