@@ -410,6 +410,22 @@ reduces — and only after the authority check.
    2026-08-30**: the module drives GPIO22 (D3) directly and thousands of pings have been read
    without incident, so the HAT handles it. The high level was never metered with a scope;
    treat as "works", not as "characterised".
+8. **TODO — `bad_frac` has never been exercised.** The ToF's invalid-rate metric (§9.4) is the
+   channel's own honesty meter, and **every surface tried so far returned 0 invalid readings**
+   (§9.8): vinyl, black cloth, a desk, and a bench target. So the metric is shipped, plumbed to
+   both dashboards, and gating the "ToF plausible" self-check — on no evidence that it moves
+   when it should. **A metric that has only ever read zero is untested, not validated.**
+   Candidate surfaces, in order of likelihood: gloss at a slight tilt (specular return steered
+   away from the receiver — the case most likely to produce genuine invalids), deep carpet, and
+   anything actually low-reflectance at 940 nm rather than merely dark to the eye. Deferred
+   2026-09-08 by the operator; not blocking, because the channel is instrument-only and nothing
+   consumes it yet. **It blocks trusting `bad_frac` as a gate**, which is exactly what the
+   self-check currently does with it.
+9. **TODO — two fitted constants live in command-line flags.** `--r-shunt` (§3.3) and
+   `--tof-offset` (§9.2) are calibration data sitting on `ExecStart` in the systemd unit, where
+   this file cannot see them and a reinstall loses them. §3.3 already said `r_shunt` belongs in
+   calib JSON. **Move both to `pi_host/calib/` together**, since they have the identical
+   contract: a fitted number the record must carry so a later re-fit re-derives every sample.
 
 ### 3.5 Inrush across a pose recall — ✅ MEASURED 2026-09-05
 
