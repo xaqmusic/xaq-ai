@@ -93,7 +93,7 @@ decides *whether to drive forward* given how aligned the body is.
 |---|---|---|---|---|
 | `input_topic` = `percept.scent_compass` | Direct | `ProprioToken` `[cx=+right, cy=+forward, …]` | yes | The **desired** egocentric heading. In the de-scaffold stack this is rewired to `percept.bearing_inferred` (Stage 3) or `percept.motivated_heading` (Stage 2). |
 | `ang_vel_topic` = `reality.proprio.ang_vel` | Direct | `ProprioToken` (scalar ω, rad/tick) | yes | Clean steer-driven yaw rate; the signal `k_body` is learned from. |
-| `vel_topic` = `reality.proprio.vel_ego` | Direct | `ProprioToken` `[v_right, v_fwd]` (move_speed-norm) | only if `learn_advance` | Egocentric afferent velocity (actual displacement, frame-correct via the body's basis) — the food-independent basis of the advance reward. |
+| `vel_topic` = `reality.proprio.vel_ego` | Direct | `ProprioToken` `[v_right, v_fwd]` (move_speed-norm) | only if `learn_advance` | Egocentric afferent velocity (actual displacement, frame-correct via the body's basis) — the food-independent basis of the advance reward. **Only `v_fwd` (index 1) is read**; the lateral component is ignored. |
 
 ## Output Topics
 

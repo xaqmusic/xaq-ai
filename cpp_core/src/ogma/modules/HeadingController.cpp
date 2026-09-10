@@ -301,7 +301,7 @@ void HeadingController::handle_vel_ego(MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
     if (!pt) return;
-    if (pt->values.size() > 0) vel_right_ = float(pt->values[0]);
+    // values[0] is the lateral component; this module does not use it.
     if (pt->values.size() > 1) vel_fwd_   = float(pt->values[1]);
 }
 
