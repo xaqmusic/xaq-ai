@@ -32,7 +32,7 @@ connectors** — which, as it happens, it all does.
 | `0x14` | HAT MCU — servos + ADC | I²C |
 | `0x29` | VL53L0X belly ToF | I²C — ✅ **PRESENT 2026-09-07**, model ID `0xEE` (§9) |
 | `0x40` | INA219 | I²C |
-| — | ICM-20948 | **SPI CE0** (off the I²C bus by design) |
+| — | ICM-20948 | **SPI CE0** (off the I²C bus by design) — ✅ **PRESENT 2026-09-10**, `WHO_AM_I` `0xEA` (§4.0) |
 
 ---
 
@@ -243,7 +243,7 @@ anomalous sag and no source-impedance problem.
 
 ---
 
-## 4. IMU — ICM-20948 on SPI
+## 4. IMU — ICM-20948 on SPI — ✅ FITTED AND CALIBRATED 2026-09-10
 
 **Decision (2026-08-27): SPI, not I²C.** The HAT shares its I²C bus with all 12 servo writes,
 and host-side jitter integrates directly into dead-reckoned yaw. SPI removes that at the source
@@ -281,6 +281,226 @@ The 400 kHz setting still matters — the INA219 and ToF remain on I²C alongsid
 `WHO_AM_I` (`0x00`) = **`0xEA`** · the register map is **banked**, four banks via `REG_BANK_SEL`
 (`0x7F`) — unlike the flat MPU-6050/9150 map · **FIFO reads regardless of bus** · **never enable
 the internal I²C master**, which keeps the AK09916 magnetometer dark · **do not use the DMP.**
+
+### 4.0 Bring-up — ✅ MEASURED 2026-09-10
+
+`WHO_AM_I` = **`0xEA`** on **CE0** (`spidev0.0`); `spidev0.1` is empty. On first contact
+`PWR_MGMT_1` read `0x41` — the reset default with the sleep bit set, i.e. nothing had
+configured the part.
+
+**Clock integrity, 2000 `WHO_AM_I` reads per step: 0 bad at 1, 4, 7 and 10 MHz.** Run it at
+**≤ 7 MHz** regardless — that is the datasheet's register limit, and passing at 10 on a
+bench-quiet robot is not a licence to exceed it.
+
+Working configuration for everything below: **±4 g** (8192 LSB/g), **±500 dps** (65.5 LSB/dps),
+DLPF cfg 1 on both, ODR 225 Hz, and `USER_CTRL = 0x10` (`I2C_IF_DIS`) to lock SPI mode.
+Nothing else on the machine opens `spidev`; `ogma_host` and `ogma_benchd` never touch it.
+
+---
+
+### 4.1 Mounting and the body-frame axis map — ✅ MEASURED 2026-09-10
+
+**As built:** flat on the chassis below the Pi, component-side up, on standoffs. Flat is the
+one orientation that was constrained, and for a specific reason: a mount tilt is a *permanent*
+attitude bias, and `_up_est_body` (`picrawler_body.gd:5801`) is what rotates the FK inside
+`feet_y_gravity_cmd_imu` — the promoted swing-gate input. A tilted mount also rectifies
+pitch/roll into apparent yaw whenever the two are out of phase, which is what a gait produces,
+and that error exists *only while walking* — so the quasi-static-gated bias estimator is
+structurally blind to it.
+
+| concern | as built | why |
+|---|---|---|
+| board plane | parallel to the bottom plate | see above; residual tilt is calibrated in §4.2, not assumed away |
+| in-plane rotation | a multiple of 90° | keeps the remap an exact signed permutation instead of a fitted rotation matrix |
+| location | near chassis centre, on standoffs | the accelerometer measures proper acceleration *at its own location*: a lever arm `r` adds `ω×(ω×r) + α×r`, and at 30 mm a footfall's angular impulse is ~0.1 g of spurious lateral accel — arriving exactly when the trust gate is already closing |
+| rigidity | standoffs, no tape | the ToF boom is the precedent (§9.1: mount contributed no measurable noise). A compliant mount converts servo vibration into accel noise |
+| thermal | air gap, off the Pi and off the 5 V regulator | gyro ZRO moves with temperature and dead-reckoned yaw integrates it. **Measured: die 34 °C against the SoC's 39.7 °C**, so the placement is clear of the Pi's heat |
+| magnetic hygiene | **not a constraint here** | the decision not to enable the internal I²C master (§4) leaves the AK09916 dark. The usual dominant IMU placement constraint is void — route past servo leads and the battery run freely |
+
+#### The axis map
+
+| chip axis | body direction | sim axis |
+|---|---|---|
+| **+X** | **left** | `+X_sim` |
+| **+Y** | **backward (aft)** | `−Z_sim` |
+| **+Z** | **up** | `+Y_sim` |
+
+Handedness checks: right(−X) × forward(−Y) = +Z = up. The chip sits **180° in-plane** from a
+nose-along-+Y mounting, so the remap is a pure sign flip on two axes.
+
+```
+v_sim = ( +v_x , +v_z , −v_y )        # from chip (x, y, z)
+yaw rate = ω_sim.y = +gz_chip         # no sign flip
+```
+
+⚠ **The same matrix applies to accel and gyro — but only because its determinant is +1.**
+Angular velocity is a pseudovector: had the two frames differed by a reflection, the gyro would
+need an extra global sign flip the accelerometer does not, and getting that wrong yields a
+heading controller that steers confidently backwards. It is a proper rotation here. The check
+is recorded because the failure is silent.
+
+⚠ **In the sim body frame `+X` is LEFT, not right.** Forward is `+Z`, up is `+Y`, and the LEG
+NAMING MIRROR note (`picrawler_body.gd:325`, operator-diagnosed 2026-08-11) states it
+explicitly. Two sites contradict it — `_stridev_est`'s comment at `:1631` and the published
+`stride_v` topic description at `:2945` both say "right". **The geometry agrees with the mirror
+note, not with those labels.**
+
+#### How it was established
+
+Tilt the body, watch which axis moves. An accelerometer reads positive on whichever axis points
+skyward, so lifting the front sends the nose skyward and the forward axis goes **positive**;
+`ay` went negative, hence forward = **−Y**. Same argument on the left side for `+X`.
+
+| lift | Δax | Δay | tilt |
+|---|---|---|---|
+| front, run 1 | +0.032 | **−0.406** | 23.5° |
+| front, run 2 | +0.018 | **−0.336** | 22.0° |
+| left, run 1 | **+0.349** | +0.055 | 18.4° |
+| left, run 2 | **+0.293** | −0.051 | 15.3° |
+
+Cross-talk is 5–17% and **flips sign between the two left-lifts**, which is what hand-lift
+contamination looks like — random, not a real coupling. Two independent repeats, unambiguous.
+
+⚠ **Precise angles are irrelevant to a sign decode**, and commanding the legs to produce them
+would be worse, not better: it puts leg compliance between the chassis and the floor, and §9.3
+already measured the `stand` pose recalling to 52.1 / 48.7 / 50.8 mm. Hand lifts are the right
+instrument for this measurement.
+
+---
+
+### 4.2 The level reference — ✅ FITTED 2026-09-10
+
+⚠ **This constant is calibration data and belongs in `pi_host/calib/`.** §9.2 and §3.3 already
+flag `--tof-offset 64.8` and `r_shunt` as fitted constants stranded on the systemd unit's
+`ExecStart`, and say both should move. Do not add a third to the same wrong place.
+
+**Method: belly flat on the floor, rotated 180°, repeated.** The belly is the anchor for the
+same reason it anchors `mount_offset_mm` (§9.2) — it is the pose whose truth you can state
+rather than estimate. With the bottom plate on the floor there are **no legs in the chain**, so
+the chassis attitude *is* the floor's attitude. Rotating 180° then splits what is fixed in the
+body from what is fixed in the world:
+
+```
+r_A = M + S        M = (r_A + r_B)/2     mount tilt + accel bias   (fixed in the body)
+r_B = M - S        S = (r_A - r_B)/2     floor slope               (fixed in the world)
+```
+
+Five independent placements alternating between two headings, four rotations verified by
+integrating the gyro (bias removed using the bracketing plateaus' own means):
+**−176.8, −181.2, +175.9, +182.5 degrees** — all within ±4° of 180.
+
+| | ax | ay | |
+|---|---|---|---|
+| heading A, 3 placements | −0.03440 / −0.03436 / −0.03235 | +0.00279 / +0.00280 / +0.00289 | spread **0.05°** |
+| heading B, 2 placements | −0.03539 / −0.03694 | −0.01375 / −0.01425 | spread **0.05°** |
+| **body-fixed** `M` | **−0.03494** | **−0.00558** | → **2.03°** |
+| world-fixed `S` | +0.00123 | +0.00841 | → 0.49° (the floor) |
+
+```
+u0_chip = ( -0.03493, -0.00558, +0.99937 )      normalised body-up, body level
+```
+
+In sim frame that is `(−0.0349, +0.9998, +0.0056)` against an ideal `(0, 1, 0)` — leaning
+**2.00° toward body right, 0.32° toward body forward**. Store the 3-vector, not Euler angles;
+the correction is the rotation taking `u0` onto vertical, and the vector form has no ordering
+ambiguity. `|a|` at rest across all placements: **1.0004 g**.
+
+**Belly-flat repeats seven times better than standing** — 0.05° against 0.34° — and the same
+measurement taken standing gave a body-fixed term of **3.69°**. The 1.66° difference is the
+standing pose's own resting attitude, which is exactly the term the belly anchor removes.
+
+#### Stability — ✅ MEASURED 2026-09-10
+
+The operational question is *store it or re-estimate it at startup*, and that is answered by
+measuring whether it moves, not by decomposing it.
+
+| test | horizontal reference |
+|---|---|
+| 7 × `DEVICE_RESET`, robot untouched | holds to **0.071°** |
+| across a full reboot | shifts **0.016°** |
+| across all of the above plus the 5-placement run (~45 min) | holds to **0.07°** |
+
+**Control: belly clearance read 1.2 mm before and 1.2 mm after the reboot**, so the robot
+demonstrably did not move and the comparison is valid.
+
+**Verdict: store it.** It is stable well inside a tenth of a degree across re-initialisation.
+
+#### Gyro bias
+
+| | at die 34 °C |
+|---|---|
+| `gx` / `gy` / `gz` | +0.4 / −2.4 / **−0.17** dps |
+| `gz` spread within a session | 0.02–0.036 dps |
+| noise sd, all axes | ~0.15 dps |
+
+All three are far inside the ±5 dps untrimmed ZRO spec, and `gz` — the axis dead-reckoned yaw
+integrates — is the smallest. **Re-estimate the bias at every startup and never store it**
+(prohibition §5: adapt from the system's own dynamics rather than tuning a constant).
+
+⚠ At **28.8 °C** on the same day `gz` read **−0.020 dps**, against −0.17 at 34 °C. That is
+0.15 dps across 5.2 °C, far more than the 0.03 dps it moves across resets and a reboot at
+constant temperature — so **temperature, not turn-on, is the better-supported explanation**.
+Two points do not make a coefficient; see §4.3.
+
+#### Mount rigidity — ✅ MEASURED 2026-09-10
+
+Does the mount transmit servo vibration into the accelerometer? Compared with the body **at
+rest in every arm**, so any increase in accel variance is vibration through the mount rather
+than real body acceleration. Poses commanded with `pose.set` at its **default slew** — 12
+µs/tick, 600 µs/s, 100 ms stagger — which never leaves §3.8.2's budget.
+
+| arm | sd x / y / z (g) | ‖sd‖ | vs unarmed | peak A | min pack |
+|---|---|---|---|---|---|
+| unarmed, body at rest | 0.00323 / 0.00318 / 0.00319 | 0.00554 | — | 0.67 | 7.66 V |
+| **armed, holding `rescue`** | 0.00343 / 0.00333 / 0.00331 | 0.00581 | **×1.05** | 0.62 | 7.68 V |
+| **armed, holding `stand`** | 0.00331 / 0.00325 / 0.00366 | 0.00591 | **×1.07** | 0.78 | 7.61 V |
+
+**Energising twelve servos raises the accel noise floor by 5–7%.** Peak gyro was 3.1–3.3 dps
+in all three arms, indistinguishable. The standoff mount is not a buzz path, and the ToF boom
+precedent (§9.1) holds for this mount too.
+
+Peak current never exceeded **0.78 A** against the ≤ 1.90 A budget, and the pack stayed above
+7.6 V — nowhere near the 6.4 V limp threshold. Run on **vinyl** (§9.8.2).
+
+⚠ **This measures servos HOLDING, not working.** A holding servo contributes PWM dither and
+gear lash; a walking one adds load, reaction torque and real body acceleration. The dynamic
+case is still open (§4.3).
+
+⚠ **Ending the runner releases the deadman on purpose.** `benchd` then commands `rescue` once
+and disarms — the designed exit, and it is what `watchdog_trips` counts. Two trips on this date
+are the two run-endings, not faults.
+
+---
+
+### 4.3 What this does NOT establish
+
+1. **Mount tilt and accelerometer bias are still lumped** in the 2.03°. No rotation about
+   vertical can separate them — both are fixed in the chip frame. The X component is −35 mg,
+   inside this part class's own zero-g offset spec, so **the mount may be very nearly true and
+   most of that 2° may be the chip**. Splitting them needs a second attitude whose gravity
+   direction in the chassis frame is *known*; inversion is the clean case and **is not available
+   on this robot — the HAT and its wiring are on top, so it cannot rest on its back.**
+   ⚠ Pushups do not substitute. Over any maneuver starting and ending at rest,
+   `∫a_vert dt = 0`, so the mean measured `az` is `k + b` — precisely the degenerate
+   combination the static reading already gives. The maneuver adds no information and the mount
+   tilt never enters it.
+2. **Z bias and scale are unmeasured**, for the same reason. This is **operationally moot**:
+   the filter normalises the accel vector for direction, and the one place magnitude matters
+   alone is the trust gate at `:5845`, whose `IMU_ACC_GATE_FRAC = 0.5` means trust falls to
+   zero only at a 50% deviation from g. The measured 1.0004 g is 0.08% of the gate width.
+3. **Temperature is untested for the accel reference.** Every belly-flat number here was taken
+   at 34 °C ± 0.3. The gyro's behaviour across 5 °C (above) is the reason to expect the accel
+   reference to move too. **The cheap check is a cold start**: leave the robot belly-flat, come
+   back with the machine at room temperature, and re-read one heading — nothing moved, so the
+   floor term is unchanged and any shift is the constant itself.
+4. **The reboot was soft.** Die temperature was unchanged across it, so the chip's 3V3 almost
+   certainly never dropped. A true power cycle is untested.
+5. **Mount rigidity is measured for servos HOLDING, not working** (§4.2). Static hold costs
+   5–7% on the noise floor, i.e. nothing. What remains untested is the **dynamic** case — a
+   gait or pushups, where load, reaction torque and real body acceleration all arrive together
+   and the accel trust gate is already closing. ⚠ Run that on **vinyl, not rubber** — §9.8.2,
+   where a foot caught on rubber, stalled, and took the machine down. §9.3's pushups on vinyl
+   drew 0.73–0.77 A with no stall and are the known-good comparison.
 
 ---
 
@@ -332,7 +552,7 @@ value on all four channels so per-foot variation shows up in calibration rather 
 |---|---|---|
 | 1 | Baseline, nothing added | `i2cdetect -y 1` shows **`0x14`** only — ✅ **PASS 2026-08-28** (needs `i2c-dev` in `/etc/modules` besides the overlay) |
 | 2 | INA219 inline on the battery | `0x40` appears; idle current is plausible; its bus voltage **agrees with A4's** reading |
-| 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 |
+| 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 — ✅ **PASS 2026-09-10** (§4.0): `0xEA` on CE0, 0 bad reads in 2000 at each of 1/4/7/10 MHz, `az` = +0.9967 g with `ax`/`ay` at −0.035/+0.001. Mounting, axis map and level reference in §4.1–4.2 |
 | 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure — ✅ **PASS 2026-09-07** (§9): `0x29` present with model ID `0xEE`; 259 readings at a bench target measured 121.9 mm ± 1.51 mm, 0 invalid; then validated on the robot at two points, belly-down and standing (§9.3) |
 | 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot |
 
