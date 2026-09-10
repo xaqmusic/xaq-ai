@@ -1,7 +1,9 @@
 # Outreach to Pollen Robotics — the PRs as communication (2026-09-03)
 
-**Status: DRAFT for discussion. Nothing is pushed, opened, or sent; all of that is the
-operator's call (REPORTS.md §9.6).**
+**Status: PR-1 OPENED 2026-09-10 on the operator's go —
+[pollen-robotics/microduck#260](https://github.com/pollen-robotics/microduck/pull/260), from the fork
+`xaqmusic/microduck`, branch `state-velocities-currents`. PR-2 waits for its review (§2). Every further
+push, open, or reply remains the operator's call (REPORTS.md §9.6).**
 
 ## 1. The problem with a "big statement" PR, and its solution
 
