@@ -20,6 +20,26 @@
 
 ## ▶ Resume here
 
+**State on 2026-09-10.** Two threads, both waiting on a person.
+
+1. **The gift PR is open.** [pollen-robotics/microduck#260](https://github.com/pollen-robotics/microduck/pull/260)
+   — velocities and currents on `robot.state` — from the fork `xaqmusic/microduck`, re-vetted on
+   their 0.12.0 main with their whole `check` job and coverage job run here
+   ([outreach plan](microduck_outreach_plan.md) §2 carries the numbers and the harness notes). Their
+   CI waits on a maintainer's approval, as it does for every first-time fork. When the review lands:
+   draft the reply for the operator, change what is asked in the worktree `~/microduck-pr`, re-run
+   their gates, push on the operator's go. PR-2 (the design document, outreach plan §3) follows the
+   review.
+2. **The level-2 loops are measured and observed.** R26–R29 (design doc §17.5–17.7; n = 6, reproduced
+   at HEAD) were watched by the operator in the arena through launcher presets that mirror the
+   harness runs. The verdict: a good foundation; the next step is to **define the behaviour set** —
+   each behaviour as a loop in the recipe's five fields
+   ([recipe](loop_and_arbitration_recipe.md)), starting from Pollen's sixteen states
+   (§"The gap we fill") — and to **redesign the arena** so each behaviour has a stimulus and a
+   metric. A planning session first, then levers one at a time, each with a preset. Carried over:
+   the shifted scene's gap, node persistence (register O24), the "map too small to route" liveness
+   check (one seed identical across R27–R29 at 8 map nodes), the inert wander rule.
+
 **State on 2026-09-06.** Branch **`duck-l2`** (stacked on the Cell audit PRs #28 → #29). The
 level-2 line now has a seed-averaged harness (`mj_host/tools/l2_sweep.py`, design doc §17.5)
 and its first finding: R25's wall-riding regression reproduces on six of six seeds and the
