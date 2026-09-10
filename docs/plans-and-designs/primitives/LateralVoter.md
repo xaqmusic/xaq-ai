@@ -67,7 +67,7 @@ Higher-level voters (`level ≥ 1`) subscribe to `consensus.<level-1>` instead o
 | `association_enabled` | bool | HotMutable | false | — | Off in Phase 1; enables the Hebbian outer-product update in Phase 3. |
 | `association_decay` | double | HotMutable | 0.9999 | [0.99, 1.0) | Per-tick decay on association matrix entries. |
 | `association_max_size` | int64 | HotMutable | 10000 | [100, 1e6] | Cap on `(winner_a, winner_b)` entries; LRU evict beyond. |
-| `novelty_threshold` | double | HotMutable | 0.35 | (0, 1] | If `fused_tle > novelty_threshold`, the published consensus is flagged as a candidate for higher-level mitosis. (Phase 4 fractal mitosis uses this.) |
+| `novelty_threshold` | double | HotMutable | 0.35 | (0, 1] | **DEAD_PARAM (audit 2026-09-06): parsed and never read; `ConsensusToken` has no flag field — register O6.** As designed: if `fused_tle > novelty_threshold`, the published consensus is flagged as a candidate for higher-level mitosis. (Phase 4 fractal mitosis uses this.) |
 | `master_seed` | int64 | ConstructionOnly | 0 | — | RNG namespace `voter.<level>` for the trust-tie-break stochasticity. |
 
 ---

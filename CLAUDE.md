@@ -27,8 +27,10 @@ Three parts, one contract (`docs/plans-and-designs/primitives/EPM.md`):
 1. **A frozen encoder** — modality-shaped, not learned (JL projection for visual, Hopf
    filterbank for cochlear, RBF grid for proprioceptive, identity for stacking).
 2. **A GNG topology** — Growing Neural Gas: grows nodes where the input is novel, **bakes**
-   them once revisited enough, **splits** them (mitosis) where error persists after baking,
-   and prunes the stale. The vocabulary is *earned*, never declared.
+   them once revisited enough, *can* **split** them (mitosis) where error persists after
+   baking, and prunes the stale. The vocabulary is *earned*, never declared. **Mitosis is
+   default-off** (`mitosis_gatekeeper`; the v4 EPM never called it before 2026-09-05, and the
+   restored gate's absolute threshold never splits on the bench — [register O4](docs/plans-and-designs/open_items_register.md)).
 3. **A dual TLE** — `tle = α·quant_error + β·transition_surprise` (0.7 / 0.3 by default).
    Two distinct questions in one scalar: *am I in territory I know?* and *did I predict
    where I would go next?*
@@ -41,12 +43,17 @@ It publishes one `RealityToken` per tick — `winner_id`, `latent`, `tle`, `is_n
 - **It topologizes SURPRISE, not raw observation.** With a descending predictor present, the
   prediction is *subtracted before the GNG sees the input*
   (`gng_input = encode(obs) − predicted_latent`) — predictive coding in the substrate, not a
-  metaphor for it. Its TLE is then the universal learning signal (doctrine §1): if a module
+  metaphor for it. (The predictor's own update pairs that residual with the context one tick
+  late unless `residual_align` is on; default off, Kalman charter Stage 3.) Its TLE is then the universal learning signal (doctrine §1): if a module
   needs a "how well do I know this / how surprising is this" scalar, **that is TLE**.
-- **It self-sizes, and it stacks for free.** Baking / mitosis / pruning make resolution
-  follow the data (spawn where error is persistent, irreducible and localized — doctrine §5).
-  A Level-N EPM is *the same code* with `input_topic` on `consensus.0` and an identity
-  encoder, so hierarchy is configuration: the cognitive **map** is a slow EPM over consensus.
+- **It self-sizes, and it stacks for free — in the code, not yet in any live config.**
+  Baking / pruning make resolution follow the data (spawn where error is persistent,
+  irreducible and localized — doctrine §5; mitosis is default-off, above). A Level-N EPM is
+  *the same code* with `input_topic` on `consensus.0` and an identity encoder, so hierarchy
+  is configuration — **but no live configuration instantiates it** (every identity-encoder
+  config is archived; [register O5](docs/plans-and-designs/open_items_register.md)). The
+  cognitive **map** is meant to be a slow EPM over consensus; the Cell's shipped map is a
+  grid over a path integral ([audit V1](docs/reports/cell_system_audit_2026-09.md)).
 - **It is precision-weightable.** `1/(tle+ε)` is what the LateralVoter fuses on — trust is
   earned from predictive accuracy, never assigned by a designer.
 
@@ -62,8 +69,10 @@ It publishes one `RealityToken` per tick — `winner_id`, `latent`, `tle`, `is_n
 3. **Feed it phase.** `Clock/CPG → EPM → LateralVoter` is the shared temporal context and is
    **load-bearing** — a legged controller *only worked with it; the ablation broke it*.
 4. **Its diagnostics are first-class instruments** — `nodes`, `baked`, `tle`, `is_novel`,
-   mitosis. Never baking, never growing, or growing unbounded is usually a conditioning or
-   gating diagnosis (rule 2), not a verdict on the idea.
+   mitosis (when its gate is on). Never baking, never growing, or growing unbounded is
+   usually a conditioning or gating diagnosis (rule 2), not a verdict on the idea — **but
+   check the code path is live before diagnosing conditioning**: "mitosis never fires" was
+   filed as conditioning on the duck while the gatekeeper was never called.
 5. **Don't average raw features into it and call it learned.** EMA-ing a raw feature on
    reward events learns the background (doctrine §4).
 
@@ -118,7 +127,8 @@ the learned one.
 | Working on the picrawler | [`plan`](docs/plans-and-designs/picrawler_active_inference_plan.md) + [`gait findings`](docs/reports/picrawler_gait_loop_findings.md) |
 | Working on the **microduck** | [`microduck port plan`](docs/plans-and-designs/microduck_port_plan.md) — **start at "▶ Resume here"**. The MuJoCo host (`mj_host`), the duck's sensorimotor surface, and **two tracks**: framework work at the joints, and a community contribution at the intent boundary that augments Pollen's RL stack rather than competing with it. Branch `microduck`, **simulation only**; `./mj_host/run.sh gates` is the health check |
 | **Wiring a brain from scratch**, or checking what a config actually subscribes to | [`brain_builder/README.md`](brain_builder/README.md) — the Dear ImGui **brain builder**: the whole registry on a palette, the body's sources and sinks as nodes, drag-to-wire, validate, dry-run, publish. `./brain_builder/run.sh open <config>`; `brain_builder --validate <config>` from a script. Design in [`docs/plans-and-designs/brain_builder_plan.md`](docs/plans-and-designs/brain_builder_plan.md) |
-| Working on the Cell | [`cell report`](docs/reports/cell_markov_blanket_loops_report.md) |
+| Working on the Cell | [`cell report`](docs/reports/cell_markov_blanket_loops_report.md) (with its errata appendix) → the [**system audit**](docs/reports/cell_system_audit_2026-09.md) + [claim register](docs/reports/cell_system_audit_2026-09_appendix.md) → the [**Cell lever ledger**](docs/reports/cell_lever_ledger.md). **Nothing counts until `cell_liveness.py` passes** (§4) |
+| Building or arbitrating a LOOP, on any creature | [`loop_and_arbitration_recipe.md`](docs/plans-and-designs/loop_and_arbitration_recipe.md) — the loop unit, the five fields, the arbiter's formulas **as built**, the horizon (one step), the sign of play, the named scaffolds; and the [open-items register](docs/plans-and-designs/open_items_register.md), the one list of what is undecided |
 | Building a level ABOVE the fast loops (hierarchy, a slow EPM, fusing several EPMs) | [`slow-loop notes`](docs/plans-and-designs/slow_loop_design_notes.md) + [`fusion notes`](docs/plans-and-designs/fusion_notes.md) — **design-stage, nothing measured yet.** Both mark which parts are already shipped machinery (`consensus.0` stacking, `KeyframeAverager`, `GNGRollout`, a level ≥ 1 LateralVoter) and which are proposals |
 | Working on **xaq_voice** (sonification of TLE) | [`tools/xaq_voice/README.md`](tools/xaq_voice/README.md) — an **instrument, not a behaviour**; its only contract with the brain is the `lite` diag topic. Tune it with [the studio](tools/xaq_voice_studio/README.md); a new signal to sonify is a one-line, O(1) addition to a module's `diag_lite()` |
 | **Writing anything that LEAVES this repo** — a formal report (`docs/reports/`), or a PR / issue / commit in someone else's repository | [`REPORTS.md`](REPORTS.md) — **audience, structure, and the banned "Claudese".** §9 covers outward-facing work: **our jargon does not travel, one thing per PR, and opening one is always the operator's call**. Read it BEFORE the first line |
@@ -177,7 +187,9 @@ revisit if X" is a complete verdict; "dead" is not one.
 4. **Baseline validity.** Is the control healthy, or itself at a degenerate attractor?
 5. **Consumer.** Did the consumer actually fire? Verify with telemetry.
 6. **Faithfulness.** Did you build the mechanism, or a weakened slice of it?
-7. **Silent confound.** Did the arm you *think* you ran actually load?
+7. **Silent confound.** Did the arm you *think* you ran actually load? **Print every seed the
+   harness set** (the Cell's "20 varied worlds" shared one pillar layout for two months) and
+   assert the lever landed (`OGMA_DUMP_PARAMS=1`, the duck's read-backs).
 
 **Failing any of these means you measured your harness, not your idea.** Every one of these
 has produced a false verdict here; the ledger §7 has the cases.
@@ -231,6 +243,13 @@ godot4 --headless --fixed-fps 60 --quit-after 4000000 \
 ```
 
 - ~52 ticks/s. Run concurrent seeds on distinct `OGMA_INSPECTOR_PORT`s.
+- **Cell:** gate first, then battery —
+  `python3 godot_host/project/scripts_tools/cell_liveness.py --config res://addons/ami_ogma/configs/<cfg>.json`
+  (EPM liveness, arbiter wins and G terms, play `route_exists`, the world's seed line, params
+  landed), then `cell_coverage.py --config … --arm name:Type.param=val --n-explore 20 --vary-world --fwdlog --duration 240 --jobs $(nproc)`
+  (distinct world and play seeds per job, a seed manifest, paired t; `--legacy-seeding`
+  reproduces the pre-2026-09-06 fixed-world runs). Perturbations:
+  `cell_perturbation_d.py --vary-world --lesion vision|stick|scent_noise|heading_drift`.
 - Body diagnostics are JSON-per-line on stdout (`fwd_v`, `gc_raw`/`gc_norm`/`cy_norm`,
   `h_ema`/`h_max`/`h_bias`, chassis `y`, `knee[]`, `feet_y[]`, `auto_reset_count`).
 - **UI:** `[P]` toggles the per-metre path trail; `[1]`/`[2]` live-swap arena/corridor; the
@@ -294,6 +313,9 @@ C++/Python build and test: see [`AGENTS.md`](AGENTS.md). Commits are DCO-signed 
 | **the (a)–(d) bar** | The defensibility checklist: inferred-not-oracle · action-reduces-own-error · loop-isolation controls · perturbation→re-inference |
 | **(d) test** | Perturb mid-episode (relocate the goal, drop a sensor) and show re-inference + recovery — the sharpest single evidence |
 | **signal vs finding** | n=4–6 fixed-seed = *signal* (promote-or-kill only); n≥20 varied seeds + (d) = *finding* |
+| **liveness gate** | the check a config passes before any battery counts: its EPMs bake and move, every enabled loop wins a tick, the lever landed, the seed line is echoed (`cell_liveness.py`) |
+| **claim register** | the audit's row-per-claim table with file anchors a script re-checks (`tools/audit/claim_anchors.py`); a claim's status is scoped like a verdict |
+| **interesting artifact** | a mechanism that works on its own terms but fails this project's bar; recorded with its utility elsewhere (a game NPC, a baseline, an oracle) rather than discarded |
 
 ---
 

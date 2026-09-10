@@ -57,9 +57,9 @@ widening at higher levels isn't the wrong instinct. The problem is that literal 
 doubling collides with the low-power constraint.
 
 **Fix: concatenate to preserve distinctness, then run a fresh EPM (GNG + dual-TLE) on the
-concatenated vector to recompress to a fixed working size.** This is the shipped Level-N
-pattern rather than new machinery: a Level-1 EPM is the same code as a Level-0 EPM with
-`input_topic` on `consensus.0` and an identity encoder (`primitives/EPM.md`).
+concatenated vector to recompress to a fixed working size.** This is the Level-N
+pattern the code supports rather than new machinery: a Level-1 EPM is the same code as a Level-0 EPM with
+`input_topic` on `consensus.0` and an identity encoder (`primitives/EPM.md`) — *not yet instantiated by any live configuration (register O5, 2026-09-06)*.
 
 The tempting argument for EPM over PCA — PCA keeps the highest-variance directions while
 TLE-based clustering keeps whatever is hardest to predict — overstates the case, and
@@ -79,7 +79,7 @@ its regime while winning only ~2 % of arbiter ticks. That is a win-fraction, not
 variance, so it motivates the worry without measuring it.)
 
 The reasons to prefer the EPM here are cheaper and hold regardless: it is the pattern
-already shipped, it self-sizes through baking and mitosis, and its output carries a TLE
+already shipped, it self-sizes through baking (mitosis is default-off and unmeasured live — register O4), and its output carries a TLE
 the next level can gate on. A PCA truncation hands up a latent with no error attached.
 
 Bonus: this resolves the redundant/complementary distinction automatically. If two

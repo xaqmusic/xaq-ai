@@ -1023,6 +1023,7 @@ Dictionary OgmaBrain::get_module_metrics() const {
                 d["climbing"]    = pl->climbing();               // routing UP the novelty gradient toward the frontier
                 d["wandering"]   = pl->wandering();              // run-and-tumble BEYOND the frontier (unmapped ground)
                 d["forced_wander"] = pl->forced_wander();        // stall-wander overriding the climb (pushing past the frontier)
+                d["route_exists"] = pl->route_exists();          // the other climb term: a strictly-more-novel neighbour exists
                 d["have_frontier"] = pl->have_frontier();        // frontier-directed wander engaged (steering away from the visited centroid)
                 d["frontier_bearing"] = double(pl->frontier_bearing());
                 d["stale_explore"] = pl->stale_explore();        // ticks since the map last grew
@@ -1129,6 +1130,12 @@ Dictionary OgmaBrain::get_module_metrics() const {
         // --- EFEArbiter (Cell L2 — active-inference policy selection: the value race) ---
         else if (type == "EFEArbiter") {
             if (auto const* ar = dynamic_cast<const ogma::EFEArbiter*>(m)) {
+                d["trust_klino"]   = double(ar->trust_klino());     // round 3 precision mode: the voter's trust per loop
+                d["trust_planner"] = double(ar->trust_planner());
+                d["trust_play"]    = double(ar->trust_play());
+                d["trust_keys"]    = String(ar->trust_keys().c_str());
+                d["trust_updates"] = double(ar->trust_updates());
+                d["trust_rejected"] = double(ar->trust_rejected());
                 d["scoring_mode"] = String(ar->scoring_mode().c_str()); // "value_race" | "efe"
                 d["raw_klino"]    = double(ar->raw_klino());     // hunger × scent
                 d["raw_planner"]  = double(ar->raw_planner());   // food-route value (0 while exploring)

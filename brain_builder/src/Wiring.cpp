@@ -156,6 +156,16 @@ Wiring Wiring::build(Graph const& g, Catalogue const& cat, Body const* body, Tri
         TypeInfo const* ti = cat.find(n.type);
         if (ti) n.category = ti->category;
         ojson const& params = g.params(i);
+        // Audit instrument (2026-09-06): a key the schema does not declare is dropped
+        // silently at load (GraphConfig copies params verbatim; on_setup reads known
+        // keys only).  Surface it here so `brain_builder --validate` catches the
+        // class the Cell planner's seven dead keys belonged to.  Warning, not error:
+        // the exit code of --validate is unchanged.
+        if (ti)
+            for (auto const& [k, v] : params.items())
+                if (!(k.size() && k[0] == '_') && !ti->param(k))
+                    w.diagnostics.push_back({Diagnostic::Warning, n.name,
+                        "unknown param '" + k + "' is not in " + n.type + "'s schema and is dropped at load"});
 
         if (!ti) {
             n.setup_ok = false;

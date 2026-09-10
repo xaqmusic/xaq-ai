@@ -6,6 +6,10 @@
 // GraphConfig; modules are instantiated via the global ModuleRegistry,
 // each receives set_id() + on_setup() before the first tick().
 
+#include <cstdio>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+#include "ogma/GraphConfig.hpp"
 #include "ogma/OgmaInstance.hpp"
 
 #include <stdexcept>
@@ -39,10 +43,50 @@ OgmaInstance::OgmaInstance(GraphConfig config, std::unique_ptr<Bus> bus)
 
     // Instantiate every module declared in the config.
     auto& reg = ModuleRegistry::instance();
+    // Audit instruments (2026-09-06, cell system audit).  Neither changes behaviour:
+    //  * a config key the module's schema does not declare is silently dropped by
+    //    on_setup (apply_param reads known keys only) -- seven such keys sat on the
+    //    Cell planner's config block for months and read as live mechanism.  Warn
+    //    once per key on stderr so a dropped param can never be silent again.
+    //  * OGMA_DUMP_PARAMS=1 prints one JSON line per module with the params the
+    //    module reports as EFFECTIVE (current_params(); "source":"current"), or,
+    //    for modules that do not report, the declared config params ("declared").
+    //    A harness can then assert an arm's lever actually landed (CLAUDE.md 3.2
+    //    rule 7) instead of assuming it.
+    const bool dump_params = [] {
+        const char* e = std::getenv("OGMA_DUMP_PARAMS");
+        return e && *e && std::string(e) != "0";
+    }();
     for (auto const& spec : impl_->config.modules) {
         ModulePtr m = reg.create(spec.type);
         m->set_id(spec.id);
+        {
+            auto const schema = m->params_schema();
+            for (auto const& [k, v] : spec.params) {
+                if (!k.empty() && k[0] == '_') continue;            // _comment and friends
+                bool known = false;
+                for (auto const& ps : schema) if (ps.key == k) { known = true; break; }
+                if (!known)
+                    std::fprintf(stderr,
+                        "[ogma] config warning: module '%s' (%s) has unknown param '%s' -- ignored\n",
+                        spec.id.c_str(), spec.type.c_str(), k.c_str());
+            }
+        }
         m->on_setup(impl_->bus.get(), spec.params);
+        if (dump_params) {
+            nlohmann::json line;
+            line["event"]  = "PARAMS";
+            line["module"] = spec.id;
+            line["type"]   = spec.type;
+            auto cur = m->current_params();
+            line["source"] = cur.empty() ? "declared" : "current";
+            nlohmann::json pj = nlohmann::json::object();
+            for (auto const& [k, v] : cur.empty() ? spec.params : cur)
+                pj[k] = GraphConfig::param_to_json(v);
+            line["params"] = pj;
+            std::printf("%s\n", line.dump().c_str());
+            std::fflush(stdout);
+        }
         impl_->modules.push_back(std::move(m));
     }
 

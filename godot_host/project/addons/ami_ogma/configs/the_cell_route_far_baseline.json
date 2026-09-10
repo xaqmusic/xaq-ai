@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Cell \u2014 FAR-RELOCATE composition (baseline): route to remembered far food",
-    "description": "Composition test that DISCRIMINATES the planner. Open 24m arena so klino can earn the first eats (scent works locally). food_alternate between two FAR spots (\u00b18m = 16m gap) with scent_falloff_radius=6 (< the gap) -> after eating, klino goes BLIND to the relocated far food. play GROWS the map to discover it; the PLANNER must ROUTE to the remembered far region. A planner that remembers+routes beats one that doesn't. Gate: eat-rate that survives the relocation (routing) vs starving between discoveries (stumble).",
+    "description": "REPAIRED 2026-09-06 (audit L9): food_positions/spawn_pos are ROOM FRACTIONS (x room_size); the shipped +/-8.0 placed food and spawn ~190 m outside the 24 m arena. Now +/-0.333 = +/-8 m, a 16 m gap against scent falloff 6. Composition test that DISCRIMINATES the planner. Open 24m arena so klino can earn the first eats (scent works locally). food_alternate between two FAR spots (\u00b18m = 16m gap) with scent_falloff_radius=6 (< the gap) -> after eating, klino goes BLIND to the relocated far food. play GROWS the map to discover it; the PLANNER must ROUTE to the remembered far region. A planner that remembers+routes beats one that doesn't. Gate: eat-rate that survives the relocation (routing) vs starving between discoveries (stumble).",
     "env_target": "cell",
     "phase_tag": "composition.route_far.baseline",
     "reflex_modular": true,
@@ -23,21 +23,9 @@
     "food_respawn": true,
     "zone_colors": true,
     "zone_grid": 4,
-    "food_positions": [
-      [
-        -8.0,
-        0.0
-      ],
-      [
-        8.0,
-        0.0
-      ]
-    ],
+    "food_positions": [[-0.333, 0.0], [0.333, 0.0]],
     "food_alternate": true,
-    "spawn_pos": [
-      -8.0,
-      0.0
-    ],
+    "spawn_pos": [-0.333, 0.0],
     "_comment_quad": "QUAD adaptability env: 2x2 spiral of 4 zones (SW->SE->NE->NW) of increasing complexity, isolated by a + cross with 3 DROPPABLE connectors. Bug boxed in Z1; connectors open on wall_drop_period ticks (headless) or KEY_D (UI). One fixed food per zone. Demonstrates the planner+confinement-steer discovering new zones as they open.",
     "quad_complexity": 0,
     "quad_respawn_single": false,
@@ -79,8 +67,6 @@
       "params": {
         "place_topic": "reality.cognitive.place",
         "heading_topic": "reality.proprio.heading",
-        "scent_bearing_topic": "",
-        "scent_max_topic": "reality.proprio.scent_max",
         "hunger_topic": "reality.proprio.hunger",
         "eat_topic": "events.eat",
         "output_topic": "percept.nav_bearing",
@@ -90,11 +76,6 @@
         "food_decay": 1.0,
         "disconfirm": 0.1,
         "escape_gain": 1.0,
-        "short_alpha": 0.05,
-        "long_alpha": 0.005,
-        "progress_gate": 0.001,
-        "hunger_gate": 0.3,
-        "route_eps": 0.01,
         "wander_thrust": 0.0,
         "pi_cell_size": 70.0,
         "plan_value_topic": "reality.cognitive.plan_value",

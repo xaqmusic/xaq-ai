@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "Cell \u2014 MAZE FUSION + SCENT DROPOUT (bar d)",
-    "description": "Perturbation\u2192recovery: fused arm with ScentCompass.lesion_after_ticks=3600. At the lesion scent\u2192[0,0], w_scent\u21920, the fused agent rides on vision (when food is in line-of-sight).",
+    "description": "AUDIT 2026-09-06: the mechanism described below NEVER OPERATED in this config -- proprio_state_dims 2 vs the compass modules' 3-value tokens fed the EPMs zero vectors, so trust was a constant 0.5/0.5 and BearingFusion blended at 50/50 (Kalman charter Stage 1; audit R4). Use the_cell_maze_fusion__dims3.json for a live fusion. Perturbation\u2192recovery: fused arm with ScentCompass.lesion_after_ticks=3600. At the lesion scent\u2192[0,0], w_scent\u21920, the fused agent rides on vision (when food is in line-of-sight).",
     "env_target": "cell",
     "phase_tag": "6.12.maze.fusion.dropscent",
     "reflex_modular": true,

@@ -18,6 +18,7 @@
 #include "ogma/modules/ScentHomingLearner.hpp"
 #include "ogma/modules/SaccadeReflex.hpp"
 #include "ogma/modules/CylinderBuilder.hpp"
+#include "ogma/modules/PlaceVectorBuilder.hpp"
 #include "ogma/modules/ColumnBuilder.hpp"
 #include "ogma/modules/PlaceGraphPlanner.hpp"
 #include "ogma/modules/PlayLoop.hpp"
@@ -134,6 +135,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("ScentHomingLearner",   [](){ return std::make_unique<ScentHomingLearner>(); });
         reg.register_type("SaccadeReflex",         [](){ return std::make_unique<SaccadeReflex>(); });
         reg.register_type("CylinderBuilder",       [](){ return std::make_unique<CylinderBuilder>(); });
+        reg.register_type("PlaceVectorBuilder",    [](){ return std::make_unique<PlaceVectorBuilder>(); });   // Cell round 2, lever A5
         // 2026-06 — passive place-recorder (replaces saccade+cylinder mapping):
         // every record_every ticks publishes a column = view-feature + heading + IMU.
         reg.register_type("ColumnBuilder",         [](){ return std::make_unique<ColumnBuilder>(); });

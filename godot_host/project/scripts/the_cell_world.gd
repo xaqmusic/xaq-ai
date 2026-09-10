@@ -341,6 +341,11 @@ func _ready() -> void:
 	var env_obs_s: String = OS.get_environment("OGMA_OBSTACLE_SEED")
 	if env_obs_s != "":
 		obstacle_seed = env_obs_s.to_int()
+	elif _cell_meta.has("obstacle_seed"):
+		# 2026-09-06 (cell system audit): the harness's --vary-world has written
+		# metadata.obstacle_seed since 2026-07 and nothing read it -- every "varied
+		# world" shared one pillar layout.  Metadata now counts; the env still wins.
+		obstacle_seed = int(_cell_meta["obstacle_seed"])
 	else:
 		obstacle_seed = seed_value   # default: track the run seed
 	var env_terrain_a: String = OS.get_environment("OGMA_TERRAIN_AMPLITUDE")

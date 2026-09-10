@@ -96,6 +96,7 @@ public:
     float eat_credit()      const { return eat_credit_; }  // EMA of "episodes led to a real eat"
     int   stale_explore()   const { return stale_explore_; }   // ticks since the map last grew
     bool  forced_wander()   const { return forced_wander_; }   // stall-wander overriding the climb
+    bool  route_exists()    const { return last_route_exists_; }   // the other climb term (climb = route_exists && !forced_wander)
 
 private:
     struct Edge { float sum_sin = 0.0f, sum_cos = 0.0f; int count = 0;
@@ -165,6 +166,7 @@ private:
     int   committed_next_ = -1;
     int   stale_explore_ = 0;   // ticks since the map last GREW (a new node baked); resets on new ground
     bool  forced_wander_ = false;  // telemetry: the stall-wander is overriding the climb this tick
+    bool  last_route_exists_ = false;  // telemetry (audit 2026-09-06): a strictly-more-novel neighbour existed this tick
     // run-and-tumble explore state
     std::mt19937 explore_rng_{11};
     float explore_dir_       = 0.0f;

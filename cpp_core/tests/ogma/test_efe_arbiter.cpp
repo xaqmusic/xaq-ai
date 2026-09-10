@@ -16,6 +16,8 @@
 #include "ogma/modules/EFEArbiter.hpp"
 #include "ogma/modules/MotorBus.hpp"
 #include "ogma/InProcessBus.hpp"
+#include "ogma/Topics.hpp"
+#include <unordered_map>
 
 #include <cmath>
 #include <memory>
@@ -801,3 +803,100 @@ TEST(EFEArbiter, ForcePolicyVision) {
 
 
 
+
+// (A4, Cell round 2, 2026-09-06) pragmatic_norm=planner_peak — the UNITS repair.  In efe mode the
+// pragmatic reaches are raw (a planner holding a distant route reads plan_value≈0.15; a
+// scent-poor room reads scent≈0.04) while play's value and klino's z-spike are normalised
+// to their own peaks and sit at 1, so play wins by construction (audit V6).  With the
+// option on, each reach is a fraction of its own recent best: a planner holding the best
+// route it has seen reads 1 and, hungry, takes the motor from a saturated play value.
+TEST(EFEArbiter, PragmaticNormPeakLetsARoutedPlannerBeatSaturatedPlay) {
+    auto run_play = [](ogma::ParamMap extra) {
+        ogma::ParamMap p = {{"scoring_mode", std::string("efe")}, {"play_weight", 1.0},
+                            {"play_value_topic", std::string("reality.cognitive.play_value")}};
+        for (auto& [k, v] : extra) p[k] = v;
+        Fix f(p);
+        uint64_t t = 0;
+        int planner_wins = 0;
+        for (int i = 0; i < 400; ++i) {
+            f.bus.begin_tick(t);
+            f.bus.publish("reality.proprio.hunger",        p1(0.8f));
+            f.bus.publish("reality.proprio.scent_max",     p1(0.02f));     // scent-poor: klino blind
+            f.bus.publish("reality.cognitive.plan_value",  p1(0.15f));     // a route to distant remembered food
+            f.bus.publish("reality.cognitive.play_value",  p1(1.0f));      // play saturated at its own peak
+            f.arb.tick(t++);
+            f.bus.end_tick();
+            if (i >= 200 && f.arb.winner() == 1) ++planner_wins;
+        }
+        return std::make_pair(planner_wins, f.arb.g_prag_planner());
+    };
+    auto [wins_default, gp_default] = run_play({});
+    EXPECT_EQ(wins_default, 0) << "default (raw reach): g_prag_planner = 0.8·0.15 = " << gp_default
+                               << " never beats G_play ≈ 0.88 — the audit's finding";
+    EXPECT_NEAR(gp_default, 0.8f * 0.15f, 1e-4f);
+    auto [wins_peak, gp_peak] = run_play({{"pragmatic_norm", std::string("planner_peak")}});
+    EXPECT_NEAR(gp_peak, 0.8f, 1e-3f) << "peak-normalised: the route is the best seen → reach 1 → g_prag = hunger";
+    EXPECT_EQ(wins_peak, 200) << "and the planner holds the motor (gate = 1 − 0.8 = 0.2 → G_play 0.2 < 0.8)";
+}
+
+TEST(EFEArbiter, PragmaticNormDefaultIsByteIdentical) {
+    Fix a({{"scoring_mode", std::string("efe")}});
+    Fix b({{"scoring_mode", std::string("efe")}, {"pragmatic_norm", std::string("none")}});
+    uint64_t t = 0;
+    for (int i = 0; i < 300; ++i) {
+        float h = 0.3f + 0.6f * float(i % 7) / 6.0f, s = 0.05f * float(i % 5), pv = 0.2f * float(i % 3);
+        a.run(t, h, s, pv); b.run(t, h, s, pv); ++t;
+        ASSERT_EQ(a.arb.winner(), b.arb.winner());
+        ASSERT_FLOAT_EQ(a.arb.g_prag_planner(), b.arb.g_prag_planner());
+    }
+}
+
+// (Cell round 3, 2026-09-06) scoring_mode=precision — the loops as channels under LateralVoter
+// trust: score = preference precision × trust (hunger for klino/planner, play_weight × surplus
+// for play), selection by the same hysteresis.  The voter's trust arrives as a ConsensusToken.
+namespace {
+std::shared_ptr<ogma::ConsensusToken> trust_token(std::unordered_map<std::string, float> w) {
+    auto c = std::make_shared<ogma::ConsensusToken>(); c->trust_weights = std::move(w); c->level = 1; return c;
+}
+int run_precision(float sign, float hunger, std::unordered_map<std::string, float> w, float* out_gp = nullptr) {
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")},
+                        {"play_weight", 1.0}, {"play_value_topic", std::string("reality.cognitive.play_value")},
+                        {"precision_sign", double(sign)}};
+    Fix f(p);
+    uint64_t t = 0; int last = -1;
+    for (int i = 0; i < 300; ++i) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.proprio.hunger",        p1(hunger));
+        f.bus.publish("reality.proprio.scent_max",     p1(0.02f));
+        f.bus.publish("reality.cognitive.plan_value",  p1(0.2f));
+        f.bus.publish("reality.cognitive.play_value",  p1(1.0f));
+        f.bus.publish("consensus.1", trust_token(w));
+        f.arb.tick(t++);
+        f.bus.end_tick();
+        last = f.arb.winner();
+    }
+    if (out_gp) *out_gp = f.arb.g_prag_planner();
+    return last;
+}
+}  // namespace
+
+TEST(EFEArbiter, PrecisionModeSelectsByTrustTimesNeed) {
+    std::unordered_map<std::string, float> w = {{"reality.loop.klino", 0.2f}, {"reality.loop.planner", 0.9f}, {"reality.loop.play", 0.5f}};
+    float gp = 0.0f;
+    // hungry: planner 0.8·0.9 = 0.72 beats play (1−0.8)·0.5 = 0.10 and klino 0.8·0.2 = 0.16
+    EXPECT_EQ(run_precision(+1.0f, 0.8f, w, &gp), 1);
+    EXPECT_NEAR(gp, 0.72f, 1e-4f);
+    // full: play (1−0.1)·0.5 = 0.45 beats planner 0.1·0.9 = 0.09 — curiosity when there is surplus
+    EXPECT_EQ(run_precision(+1.0f, 0.1f, w), 2);
+    // the wrong-sign control scores by distrust: hungry → klino 0.8·0.8 = 0.64 beats planner 0.8·0.1
+    EXPECT_EQ(run_precision(-1.0f, 0.8f, w), 0);
+}
+
+TEST(EFEArbiter, PrecisionModeAbsentTrustScoresZero) {
+    // no voter token ever arrives → every trust 0 → scores 0 → the incumbent (klino, index 0) holds
+    ogma::ParamMap p = {{"scoring_mode", std::string("precision")}, {"trust_consensus_topic", std::string("consensus.1")}};
+    Fix f(p); uint64_t t = 0;
+    for (int i = 0; i < 50; ++i) f.run(t++, 0.9f, 0.5f, 0.9f);
+    EXPECT_FLOAT_EQ(f.arb.g_prag_planner(), 0.0f);
+    EXPECT_FLOAT_EQ(f.arb.g_prag_klino(), 0.0f);
+}

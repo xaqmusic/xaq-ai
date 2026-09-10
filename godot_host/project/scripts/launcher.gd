@@ -85,6 +85,10 @@ const _CELL_CONFIG_ALLOWLIST: Array = [
 	"the_cell_vision_demo.json",                  # VISION loop #4 -- forage by SIGHT in a scent-poor pillar room. (+170% was an n=5 signal; powered = +0.35 ns.) Slide vision_weight 0<->1.
 	# --- the study env + the loop ablations ---
 	"the_cell_arbiter_room_pillars_vision.json",  # THE LEAVE-ONE-OUT ABLATION ENV (powered n=20). Only PLAY is significant -- and NEGATIVE (remove it -> +68% eats).
+	# --- round 2/3 (2026-09-06): the far-food arena that DEMANDS memory (food alternates 16 m apart, scent falloff 2.0, pillars) ---
+	"the_cell_route_far_pillars__noplay.json",    # THE RECIPE'S CELL INSTANCE -- two loops (klino + planner), play ablated. WATCH: after each eat the bug returns to the OTHER site (14/20 runs); ties the reactive specialist (2.45 vs 2.80 eats), beats the random walk. Operator's eye = the promotion gate.
+	"the_cell_route_far_pillars.json",            # THE SAME BRAIN WITH PLAY (the four-loop study brain). WATCH: play holds ~90% of decisions while hungry; forages at the random-walk floor (1.50). Slide play_weight 1->0 live to see the planner take the motor.
+	"the_cell_chemotaxis_baseline__farfood.json", # the reactive specialist in the same arena (2.80 eats; its return leg is nearly chance at falloff 2.0).
 	"the_cell_play_only_lbend.json",              # PLAY ISOLATED -- 2.5x maze discovery, but discovery is NOT the eats lever (composition eats flat; play a net cost).
 	"the_cell_arbiter_open_klino2.json",          # 3-LOOP composition (pre-vision) -- the homeostatic forager play-when-FULL -> klino-when-HUNGRY; the base vision was added onto.
 	# --- reference baselines (fixed reflexes, NOT Markov-blanket loops) ---

@@ -57,7 +57,7 @@ The recurrent-predictor variant called out in `v4_algorithmic_gaps.md` Open Ques
 
 1. The predictor publishes one `PredictionToken` per declared target every tick.
 2. `PredictionToken.predicted_latent.dim == target_EPM.projection_dim`.
-3. The supervisory update for tick t uses `RealityToken_target(t-1)` (Feedback) and `ConsensusToken(t-1)` (held in a one-tick buffer because the consumer of the prediction — the target EPM — needs the prediction in the *current* tick before it has produced its `RealityToken(t)`). The predictor's tick(t):
+3. *(Audit note 2026-09-06: with `residual_align` off, the default, the residual at t−1 measures the prediction made at t−2 and is paired with the context of t−1 — a one-tick misalignment under which true RLS diverges; Kalman charter Stage 3.)* The supervisory update for tick t uses `RealityToken_target(t-1)` (Feedback) and `ConsensusToken(t-1)` (held in a one-tick buffer because the consumer of the prediction — the target EPM — needs the prediction in the *current* tick before it has produced its `RealityToken(t)`). The predictor's tick(t):
    1. reads `consensus.<level>(t)` (Direct) for forward pass,
    2. reads `reality.<modality>(t-1)` (Feedback) for supervisory update vs. its previous prediction,
    3. publishes `prediction.<modality>(t)` for the target EPM to consume (Feedback) at tick t+1.
