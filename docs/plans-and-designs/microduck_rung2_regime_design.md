@@ -1346,7 +1346,15 @@ without the arena's clip.
 every object class present, the (d) flag exercised (a ball, a chair and a wall moved at
 100/120/140 s in a test run). R27 on it is a *signal*, not a degenerate baseline: 5 of 6
 seeds tour (115–157 cells), one rides the walls. The operator's eye next, through the
-launcher's R30 preset (seed 6) and its moved-ball twin. **Found for C1:** Pollen's
-`head_camera` renders the inside of the duck's own head from the STAND keyframe (the
-rendered frame is the head shell's interior); the camera's frame, and which geom groups the
-render should exclude, are C1's first task.
+launcher's R30 preset (seed 6) and its moved-ball twin. **Found for C1, and fixed the same night (operator):** Pollen's
+`head_camera` sits 8.5 mm inside the lens looking along the head's +z — backward — with its
+up vector sideways, so a render from it shows the inside of the head rotated 90°. The
+vendored file is never edited, so `playroom_gen.py` writes `robot_overlay_playroom.xml`, a
+copy with one line changed: the camera at the lens's foremost vertex on the lens axis (body
+frame `0.0155 −9e−05 −0.0818`), turned to look along the ToF site's measured forward with
+the site's up as up (`quat 0.707107 0 0 −0.707107`), `fovy` 49° (the IMX219's ~62°
+horizontal field at 4:3). The playroom scene includes the overlay; the run is byte-identical
+with and without it (a camera has no physics), the gates pass. Rendered mid-run the frame is
+level and upright: rug, walls, a block — and a lot of sky, because the walls are 0.3 m and
+the camera is 12 cm off the floor. Whether the walls rise for the camera's sake is the
+operator's call before C2.

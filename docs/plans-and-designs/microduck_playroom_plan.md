@@ -30,8 +30,10 @@ operator's eye.** `mj_host/tools/playroom_gen.py --seed 1` → `scene_playroom.x
 host flags `--move NAME X Y S`; the `obj` field; the sweep reads the manifest. R27's loop on
 it, n = 6: 140 cells of 256, 98 map nodes, 33 ± 39 walls/min (one wall-rider), 0.07 objs/min,
 no escapes. Launcher: **R30** (seed 6) and its moved-ball (d) twin. Render the room to check
-it: the viewer's venv with `MUJOCO_GL=egl` and `mujoco.Renderer` (a top view is in the
-session log; the head camera looks into the duck's own head — C1's first task).
+it: the viewer's venv with `MUJOCO_GL=egl` and `mujoco.Renderer`. **The head camera is
+re-placed** (`robot_overlay_playroom.xml`, generated: at the lens front, facing the ToF's
+forward, upright, fovy 49°); a mid-run render is level and shows the room — and much sky over
+the 0.3 m walls, a wall-height decision for the operator before C2.
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
