@@ -71,6 +71,8 @@ DEFAULTS = dict(
     walk_from=-1.0, walk_secs=4.0, walk_vx=0.3, walk_vy=0.0, walk_vyaw=0.0,
     amp=HOST_AMP_DEFAULT, freeze_after=0.0, no_tilt_gate=False, servo_filter=False,
     noise=0.0, stub_amp=0.25, stub_drift=0.08,
+    arena_shift=0.0, host_args="",
+    ui_scale=0.0,                 # text size multiplier; 0 = from the display
 )
 
 
@@ -191,6 +193,8 @@ def run_name(s, seed):
     name = f"{stamp}_{stem}_s{seed}"
     if float(s["push"]) > 0:
         name += f"_push{fmt(float(s['push']))}"
+    if s["mode"] == "level2" and float(s.get("arena_shift", 0)) > 0:
+        name += f"_shift{fmt(float(s['arena_shift']))}"
     return name
 
 
@@ -221,6 +225,14 @@ def host_args(s, seed, save_brain_path=None):
     elif mode == "hold":
         if float(s["noise"]) > 0:
             a += ["--noise", fmt(float(s["noise"]))]
+    if mode == "level2":
+        # The level-2 harness (mj_host/tools/l2_sweep.py) runs every arm with reset noise and,
+        # for the moved-wall (d) test, an arena shift; a preset that mirrors a harness run
+        # carries both, so what the operator watches is the run that was measured.
+        if float(s["noise"]) > 0:
+            a += ["--noise", fmt(float(s["noise"]))]
+        if float(s["arena_shift"]) > 0:
+            a += ["--arena-shift", fmt(float(s["arena_shift"]))]
     elif mode == "stub":
         a += ["--stub-amp", fmt(float(s["stub_amp"])), "--stub-drift", fmt(float(s["stub_drift"]))]
     if float(s["push"]) > 0 and mode in ("brain", "hold"):
@@ -239,6 +251,8 @@ def host_args(s, seed, save_brain_path=None):
               "--walk-vx", fmt(float(s["walk_vx"])), "--walk-vy", fmt(float(s["walk_vy"])), "--walk-vyaw", fmt(float(s["walk_vyaw"]))]
     if mode == "level2" and save_brain_path:
         a += ["--save-brain", str(save_brain_path)]
+    if s.get("host_args", "").strip():
+        a += shlex.split(s["host_args"])      # verbatim, so a preset can carry any host flag
     if s["scene"] and s["scene"] != "scene.xml":
         a += [str(MODEL_DIR / s["scene"])]
     return a
@@ -371,6 +385,69 @@ def tail(path, n=40):
 
 
 # ---------------------------------------------------------------------------
+# Display scaling
+# ---------------------------------------------------------------------------
+
+SCALED_FONTS = ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont",
+                "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont",
+                "DuckSmall", "DuckMono")
+_font_base, _wrap_base = {}, {}
+
+
+def detect_ui_scale(root):
+    """The display's scale as an X client can see it. DUCK_LAUNCHER_SCALE wins, then GDK_SCALE,
+    then the larger of the DPI Tk was told (Xft.dpi) and the screen's physical DPI, in half
+    steps. A 4K panel under Wayland tells X clients 96 dpi and the text comes out unreadable;
+    the physical size catches that, and the "text ×" control is the remembered override."""
+    for var in ("DUCK_LAUNCHER_SCALE", "GDK_SCALE"):
+        v = os.environ.get(var)
+        if v:
+            try:
+                return max(0.5, float(v))
+            except ValueError:
+                pass
+    dpi = phys = 96.0
+    try:
+        dpi = float(root.winfo_fpixels("1i"))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        mm, px = float(root.winfo_screenmmwidth()), float(root.winfo_screenwidth())
+        if mm > 0:
+            phys = px / (mm / 25.4)
+    except Exception:  # noqa: BLE001
+        pass
+    return max(1.0, round(max(dpi, phys) / 96.0 * 2) / 2)
+
+
+def apply_ui_scale(root, factor):
+    """Scale every named font (every widget uses one), the tree's row height and the labels'
+    wrap widths by `factor`; live, so the control takes effect as it is changed."""
+    import tkinter.font as tkfont
+    from tkinter import ttk
+    for name in SCALED_FONTS:
+        try:
+            f = tkfont.nametofont(name)
+        except Exception:  # noqa: BLE001
+            continue
+        base = _font_base.setdefault(name, int(f.cget("size")))
+        size = max(1, int(round(abs(base) * factor)))
+        f.configure(size=size if base >= 0 else -size)
+    ttk.Style().configure("Treeview", rowheight=int(round(22 * factor)))
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        stack.extend(w.winfo_children())
+        try:
+            wrap = int(w.cget("wraplength"))
+        except Exception:  # noqa: BLE001
+            continue
+        if wrap > 0:
+            base = _wrap_base.setdefault(str(w), wrap)
+            w.configure(wraplength=int(base * factor))
+
+
+# ---------------------------------------------------------------------------
 # The window
 # ---------------------------------------------------------------------------
 
@@ -380,11 +457,17 @@ def build_window():
 
     root = tk.Tk()
     root.title("Microduck launcher")
-    root.minsize(980, 760)
+    root.minsize(900, 560)
     try:
         ttk.Style().theme_use("clam")
     except tk.TclError:
         pass
+
+    import tkinter.font as tkfont
+    root.duck_fonts = (   # referenced, or tkinter deletes the named font when the object dies
+        tkfont.Font(root=root, name="DuckSmall", family=tkfont.nametofont("TkDefaultFont", root=root).actual("family"), size=9),
+        tkfont.Font(root=root, name="DuckMono", family=tkfont.nametofont("TkFixedFont", root=root).actual("family"), size=9))
+    auto_scale = detect_ui_scale(root)
 
     state = load_state()
     presets = load_presets()
@@ -417,13 +500,37 @@ def build_window():
         return s
 
     # -- layout helpers ------------------------------------------------------
-    main = ttk.Frame(root, padding=8)
-    main.pack(fill="both", expand=True)
+    # The Experiment panel stays pinned at the top; everything below it scrolls, so the window
+    # fits a 1080-line display (the fixed layout ran past the bottom of one).
+    top = ttk.Frame(root, padding=(8, 8, 8, 0))
+    top.pack(fill="x")
+    top.columnconfigure(0, weight=1)
+    top.columnconfigure(1, weight=1)
+    body = ttk.Frame(root)
+    body.pack(fill="both", expand=True)
+    canvas = tk.Canvas(body, highlightthickness=0, borderwidth=0)
+    vbar = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=vbar.set)
+    vbar.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    main = ttk.Frame(canvas, padding=(8, 0, 8, 8))
+    main_win = canvas.create_window((0, 0), window=main, anchor="nw")
     main.columnconfigure(0, weight=1)
     main.columnconfigure(1, weight=1)
+    main.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(
+        main_win, width=e.width, height=max(e.height, main.winfo_reqheight())))
 
-    def frame(title, col, row, colspan=1, sticky="nsew"):
-        f = ttk.LabelFrame(main, text=title, padding=6)
+    def on_wheel(e):
+        w = root.winfo_containing(e.x_root, e.y_root)
+        if isinstance(w, (tk.Text, ttk.Treeview, ttk.Combobox, ttk.Spinbox)):
+            return                       # those scroll (or step) themselves
+        canvas.yview_scroll(-3 if (e.num == 4 or e.delta > 0) else 3, "units")
+    for seq in ("<Button-4>", "<Button-5>", "<MouseWheel>"):
+        root.bind_all(seq, on_wheel)
+
+    def frame(title, col, row, colspan=1, sticky="nsew", parent=None):
+        f = ttk.LabelFrame(main if parent is None else parent, text=title, padding=6)
         f.grid(column=col, row=row, columnspan=colspan, sticky=sticky, padx=4, pady=3)
         return f
 
@@ -431,11 +538,22 @@ def build_window():
         return ttk.Spinbox(parent, textvariable=var, from_=lo, to=hi, increment=inc, width=width)
 
     # -- experiment ----------------------------------------------------------
-    fx = frame("Experiment", 0, 0, colspan=2)
+    fx = frame("Experiment", 0, 0, colspan=2, parent=top)
     fx.columnconfigure(1, weight=1)
     ttk.Label(fx, text="Preset").grid(column=0, row=0, sticky="w")
     preset_box = ttk.Combobox(fx, values=preset_labels(presets), state="readonly", width=70)
     preset_box.grid(column=1, row=0, sticky="ew", padx=4)
+    scale_row = ttk.Frame(fx)
+    scale_row.grid(column=2, row=0, sticky="e")
+    ttk.Label(scale_row, text="text × (0 = auto)").pack(side="left")
+    spin(scale_row, V["ui_scale"], 0, 4, 0.25, width=5).pack(side="left", padx=(4, 0))
+
+    def ui_factor():
+        try:
+            v = float(V["ui_scale"].get())
+        except (TypeError, ValueError):
+            v = 0.0
+        return v if v > 0 else auto_scale
     preset_hint = ttk.Label(fx, text="", wraplength=880, foreground="#555")
     preset_hint.grid(column=0, row=1, columnspan=3, sticky="w", pady=(0, 4))
 
@@ -443,7 +561,7 @@ def build_window():
     config_box = ttk.Combobox(fx, state="readonly", width=70)
     config_box.grid(column=1, row=2, sticky="ew", padx=4)
     ttk.Checkbutton(fx, text="show all", variable=V["show_all"]).grid(column=2, row=2, sticky="w")
-    desc = tk.Text(fx, height=5, wrap="word", font=("TkDefaultFont", 9))
+    desc = tk.Text(fx, height=5, wrap="word", font="DuckSmall")
     desc.grid(column=0, row=3, columnspan=3, sticky="ew", pady=(4, 0))
     desc.configure(state="disabled")
 
@@ -616,17 +734,21 @@ def build_window():
     spin(fe, V["freeze_after"], 0, 86400, 60).grid(column=1, row=1, sticky="w", padx=4)
     ttk.Checkbutton(fe, text="--no-tilt-gate (learn at every tilt)", variable=V["no_tilt_gate"]).grid(column=0, row=2, columnspan=2, sticky="w")
     ttk.Checkbutton(fe, text="--servo-filter (robotd's deployed lag)", variable=V["servo_filter"]).grid(column=0, row=3, columnspan=2, sticky="w")
-    ttk.Label(fe, text="hold: reset noise").grid(column=0, row=4, sticky="w", pady=(6, 0))
+    ttk.Label(fe, text="hold / level-2: reset noise").grid(column=0, row=4, sticky="w", pady=(6, 0))
     spin(fe, V["noise"], 0, 1, 0.01).grid(column=1, row=4, sticky="w", padx=4, pady=(6, 0))
     ttk.Label(fe, text="stub: amp / drift").grid(column=0, row=5, sticky="w")
     srow = ttk.Frame(fe); srow.grid(column=1, row=5, sticky="w", padx=4)
     spin(srow, V["stub_amp"], 0, 2, 0.05, width=6).pack(side="left")
     spin(srow, V["stub_drift"], 0, 2, 0.02, width=6).pack(side="left", padx=(4, 0))
+    ttk.Label(fe, text="level-2: move a wall at (s, 0 = never)").grid(column=0, row=6, sticky="w", pady=(6, 0))
+    spin(fe, V["arena_shift"], 0, 86400, 100).grid(column=1, row=6, sticky="w", padx=4, pady=(6, 0))
+    ttk.Label(fe, text="extra host args (verbatim)").grid(column=0, row=7, sticky="w")
+    ttk.Entry(fe, textvariable=V["host_args"], width=28).grid(column=1, row=7, sticky="w", padx=4)
 
     # -- command -------------------------------------------------------------------
     fc = frame("Command (this is the run; paste it into a shell to repeat it)", 0, 3, colspan=2)
     fc.columnconfigure(0, weight=1)
-    cmd_text = tk.Text(fc, height=4, wrap="word", font=("TkFixedFont", 9))
+    cmd_text = tk.Text(fc, height=4, wrap="word", font="DuckMono")
     cmd_text.grid(column=0, row=0, sticky="ew")
 
     def refresh_command(*_):
@@ -661,7 +783,7 @@ def build_window():
     for c, w in (("status", 90), ("elapsed", 80), ("where", 700)):
         tree.heading(c, text=c); tree.column(c, width=w, anchor="w")
     tree.grid(column=0, row=1, sticky="ew", pady=4)
-    out = tk.Text(fl, height=12, wrap="none", font=("TkFixedFont", 9))
+    out = tk.Text(fl, height=12, wrap="none", font="DuckMono")
     out.grid(column=0, row=2, sticky="nsew")
     fl.rowconfigure(2, weight=1)
     main.rowconfigure(4, weight=1)
@@ -796,6 +918,12 @@ def build_window():
             preset_box.current(names.index(V["preset"].get()))
             preset_hint.configure(text=presets[names.index(V["preset"].get())].get("hint", ""))
     refresh_command()
+    apply_ui_scale(root, ui_factor())
+    V["ui_scale"].trace_add("write", lambda *_: apply_ui_scale(root, ui_factor()))
+    root.update_idletasks()
+    want_w = max(top.winfo_reqwidth(), main.winfo_reqwidth()) + 40
+    want_h = top.winfo_reqheight() + main.winfo_reqheight() + 16
+    root.geometry(f"{min(want_w, root.winfo_screenwidth() - 40)}x{min(want_h, root.winfo_screenheight() - 120)}")
     poll()
     root.protocol("WM_DELETE_WINDOW", lambda: (save_state(S()), root.destroy()))
     autoclose = os.environ.get("DUCK_LAUNCHER_AUTOCLOSE_MS")
@@ -818,7 +946,7 @@ def selftest():
         try:
             pl = plan(s, int(s["seed"]), name=f"selftest_{Path(s['config']).stem}_s{s['seed']}")
             print(f"[{p['name']}]\n  {shell_line(pl)}")
-            if s["mode"] == "brain" and not (CONFIG_DIR / s["config"]).exists():
+            if s["mode"] in ("brain", "level2") and not (CONFIG_DIR / s["config"]).exists():
                 print(f"  !! config missing: {s['config']}"); bad += 1
         except Exception as e:  # noqa: BLE001 — a broken preset must be named, not hidden
             print(f"[{p['name']}] !! {e}"); bad += 1

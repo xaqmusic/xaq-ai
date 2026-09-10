@@ -1160,3 +1160,145 @@ must yield to need"), now measured.  Two things to decide, the operator's:
    pull on one C.  With that in place the drive question (a level-3 "where to go" inference
    on the map versus a boredom-gated heading) can be answered on a controller that can
    hold more than one thing true.
+
+### 17.5 The harness, and the fork's first item at n = 6 (2026-09-06)
+
+Every table above was read at seed 2. `mj_host/tools/l2_sweep.py` now runs a level-2
+config from scratch over N seeds in parallel (the host is unpaced headless: 1500 s of sim in
+about twenty seconds of wall time) and reports the §17 metrics over the control phase, paired
+by seed, with the identified A rows read back. Two harness facts came out of its first use
+and are fixed: the level-2 command's scene defaults to the **open floor**, not the arena (a
+sweep that omits the scene reports zero wall contacts because there are no walls; the tables
+above did pass the arena), and the reset-noise flag never reached the level-2 command, so a
+"seed" varied only the babble. With the arena and reset noise 0.05:
+
+| arm (n = 6, 1500 s, control phase 700–1500 s) | walls/min | contact | TooClose | path | cells | span | map nodes |
+|---|---|---|---|---|---|---|---|
+| R23 avoidance | 0.0 ± 0.0 | 0 % | 0.00 | 167 m | **8.8 ± 1.9** | 0.29 m² | — |
+| R23 + `babble_owns_a 0` | 4.0 ± 9.0 (two seeds) | 1.2 % | 0.00 | 168 m | **29 ± 21** (6 of 6 up, t 2.3) | 1.5 m² | — |
+| R25 heading + avoidance + map | **295 ± 8** | 43 % | 0.79 | 87 m | 28 ± 0 | 3.5 m² | 89 ± 13 |
+| **R26 = R25 + `babble_owns_a 0`** | **26 ± 35** (Δ −269, t −17, 0+/6−) | 4.9 % | 0.06 | 157 m (+71, t 15) | 30 ± 19 | 1.9 m² | 35 ± 18 |
+
+**R23's orbit and R25's wall-riding are findings, not seed-2 readings: six of six each.** And
+the fork's item 1 alone (§17.4: let the state model keep learning after the babble, so the
+proximity rows are identified from real wall encounters) removes the regression on every
+seed — a ten-fold drop in wall contacts, a body that walks 157 m instead of scraping 87, a
+ToF that sees a wall 6 % of the time instead of 79 %, and a map that stops tiling wall
+texture (89 → 35 nodes). One flag, no new module; the identified yaw row goes from
+`[+0.004 −0.001 +0.009]` to a row that carries the proximities. Verdict: **`WORKING`, loud**
+(CLAUDE.md §3.3). R26 is the line's new base (`a1v2_r26_l2_learn_after_babble.json`,
+launcher rank 1026).
+
+Two things the seeds say that seed 2 could not: coverage is **bimodal** under the fix (four
+seeds hold 14–25 cells, two tour 49–60), so the orbit and the tour are both attractors and
+which one a seed finds is part of the next question; and the wall contacts that remain (two
+seeds at 52 and 85 per minute) are the touring seeds — the avoidance is weakest exactly where
+the coverage is best, which is the arbitration question in its next form.
+
+**The moved-wall (d) test at n = 6** (`--arena-shift 1100`, 1800 s, the control phase split
+at the shift):
+
+| arm | cells before \| after | walls/min before \| after | map nodes before \| after |
+|---|---|---|---|
+| R25 | 28 \| 128 ± 277 (one seed leaves the arena through the moved wall) | 296 \| 351 ± 204 | 52 \| 47 |
+| **R26** | 29 ± 20 \| 27 ± 19 | 47 ± 69 \| **29 ± 32** | 31 ± 16 \| 28 ± 10 |
+
+R26 is robust to the change (its contacts fall after the wall moves where R25's rise) and it
+does **not** re-explore: coverage holds and the map does not grow after the shift. The (d)
+bar's re-inference half is `NULL` for R26 as it stands — the body keeps its habits in the
+new room rather than mapping it — which is the coverage question again: what would make a
+moved wall a *direction*. Scene note: after the shift one R25 seed escaped the arena (a
+522 m² span), so the shifted scene has a gap the (d) reading must exclude or the metric must
+clip to the arena.
+
+**The wander rule on R26 at n = 6** (`--wander-bored 8 --wander-turn 90`, paired against R26
+without it): identical runs on five of six seeds, one seed changed (walls +80/min, nodes +20).
+The boredom trigger — the map's surprise below 0.8 of its own long average for 8 s — almost
+never fires under R26, whose map stays 27 % novel because the body keeps touring; the rule
+is inert here (`NULL`), and where it fired it bought nodes with wall contacts. What §17.4
+called the arbitration question now has its measured shape: R26 already has coverage and
+avoidance in one body without a wander rule; what it lacks is a *reason to go somewhere*
+(a drive with reach), which is the Cell recipe's pragmatic loop, not a heading jump.
+
+### 17.6 R27 — the fork's (a): novelty as a direction, the Cell's play loop over the map (2026-09-06)
+
+The operator's choice of the two §17.3 forks: a "where to go" belief on the map before any
+arbitration. Built as the Cell recipe's own loop: `PlayLoop` in the level-2 graph reads the
+map EPM's winner as its place (`pi_cell_size 0`), climbs the place-TLE novelty field
+(`wander_stall_ticks 0`, the Cell's A2, so the climb engages), and publishes an egocentric
+bearing; the `IntentAdapter` now publishes the unwrapped heading and the body velocity as
+`reality.proprio.heading` / `vel_ego`, and sets the heading reference behind sense slot 10
+from that bearing every tick when the topic exists (by presence: a graph without the loop is
+byte-identical). No new module; the loop the Cell dropped because it cost eats is the loop
+the duck wants, because coverage is the duck's goal. Config `a1v2_r27_l2_play_heading.json`,
+rank 1027.
+
+| n = 6, paired | walls/min | cells | span | map nodes | (d) moved wall: cells before \| after | walls before \| after | nodes before \| after |
+|---|---|---|---|---|---|---|---|
+| R26 | 26 ± 35 | 30 ± 19 | 1.9 m² | 35 ± 18 | 29 \| 27 | 47 \| 29 | 31 \| 28 |
+| **R27** | 9 ± 9 (Δ −16, t −1.1) | **42 ± 18** (Δ +12, t 1.7, 4+/1−) | 2.3 m² | 29 ± 13 | 37 \| 64 ± 69 (one seed leaves through the gap) | 13 \| **253 ± 143** (Δ +130, t 2.8) | 22 \| **49** (Δ +14, t 2.2, 5+/1−) |
+
+The loop steers on every tick (the host's own count). In the steady arena it is a `PARTIAL`
+at six seeds in the right direction on both blind-metric complements: more coverage with
+fewer contacts, five of six seeds touring, one still orbiting. Under the moved wall the
+(d) bar's re-inference half is now present — the map grows by half after the change,
+which R26's never did — and safety collapses: the novel region is where the wall now
+stands, the play bearing drives the body at it, and contacts go from 13 to 253 per minute
+while R26's fall. **A learned direction beats the proximity priors when the two conflict.**
+That is §17.4's item 2 in measured form, with a learned direction in place of a boredom
+jump: avoidance and novelty each have a bearing now, and the body has no arbitration
+between them but a linear pull on one C matrix. The Cell recipe's arbitration (need ×
+competence over loops with bearings; `LoopCompetence` → `LateralVoter` → `EFEArbiter`
+precision mode, all gain-0) is the next lever, with avoidance made a loop that emits a
+bearing rather than a prior in the matrix. Scene note again: the shifted wall leaves a gap
+one seed escapes through; the (d) metric must clip to the arena or the scene must close.
+
+### 17.7 R28 / R29 — the Cell recipe's arbitration on the duck: avoidance as a loop (2026-09-06)
+
+The measured form of §17.4's item 2: `TofAvoidLoop` (new, generic) turns the ToF summary
+into a bearing away from the nearest obstacle with that proximity as its need; the Cell's
+`LoopCompetence` grades each loop (avoidance: proximity falls while it drives; play: novelty
+rises; Beta + optimism), a `LateralVoter` turns competence into trust, `EFEArbiter`'s
+precision mode selects by need × trust with the nearest proximity as avoidance's "hunger"
+and its complement as play's surplus, and the `IntentAdapter` takes the winner's bearing as
+the heading reference (by presence of the arbiter; R27 and R26 stay byte-identical). The
+harness now records the winner per tick (`steer`), the steer shares, and clips samples that
+escape the arena.
+
+| n = 6, steady arena | walls/min | cells | avoid share | (d) moved wall: walls before \| after | nodes before \| after |
+|---|---|---|---|---|---|
+| R26 (no loops) | 26 ± 35 | 30 ± 19 | — | 47 \| 29 | 31 \| 28 |
+| R27 (play alone) | **9 ± 9** | 42 ± 18 | 0 | 13 \| **253 ± 143** | 22 \| **49** |
+| R28 (avoid's bearing wins) | 71 ± 80 | 54 ± 21 | 0.30 | 71 \| 114 ± 132 | 42 \| 33 |
+| R28 wrong-sign | 28 ± 23 | 52 ± 20 | 0.00 | — | — |
+| **R29 = release form** (avoid wins → the reference is released) | 44 ± 62 | 49 ± 19 | 0.23 | 45 \| 149 ± 151 | 31 \| 41 |
+
+**Why the bearing form fails, measured.** Past the babble, when avoidance won and set the
+heading reference to its away-bearing, the body barely turned: 0.14 rad in 0.5 s with no side
+preference at 0.5, 2 or 4 s. The heading reference is a slow regulator (§16.5 closed 3° in
+20 s) and the duck reaches a wall in two seconds. Avoidance's fast path is the proximity
+priors that R26 made work; only a slow direction belongs on the reference. So the
+arbitration is not one bearing against another but **"hold the novelty direction" against
+"yield to the reflex"**: R29 publishes avoidance's need with no bearing, and the adapter
+treats a winning loop with no bearing as *release* (the reference set to the current
+heading, so the heading prior stops fighting the proximity priors).
+
+**Verdict `PARTIAL`.** The trade-off is real and neither pole wins both regimes. In a known
+room play alone is the best avoider — walls stop being novel within minutes and the novelty
+climb turns away from them nine times in ten (P(turn left | wall on the right) 0.90 while
+play steers) — and every form that takes the motor from play near a wall costs contacts:
+R28 +62/min, R29 +34/min (4 of 4 seeds worse). After a wall moves, the new wall *is* novel and
+play drives at it; R29 cuts that burst by 40 % (253 → 149/min) while keeping half of R27's
+re-exploration (map +10 vs +22 nodes); R28 stops the burst harder (114) and the
+re-exploration with it. The wrong-sign control never lets avoidance win (its share 0.00), so
+here it is a play-alone arm with a different hysteresis, not a control of the ordering.
+
+What this hands the recipe: on a body whose only goal is coverage, the novelty loop is the
+pragmatic loop too, and a need-gated reflex that overrides it should fire only when the
+world has *changed* — the moved wall is novel and dangerous at once. The next form is not
+a better ranking but a competence signal that distinguishes "novel because unvisited" from
+"novel because it moved": the map's node *persistence* (a node whose prototype the world
+contradicts) rather than its TLE. That is the Cell's disconfirmation problem (register O9)
+arriving on the duck, and it is where the arbitration line stops for this phase. The
+escape counts (5 000–17 000 samples per run beyond the arena after the shift) say the
+shifted scene must be closed before the (d) reading is trusted at power.

@@ -1204,7 +1204,8 @@ double g_arena_shift_s = -1.0;   // > 0: at this time move wall_px from x = 1.0 
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
-               bool emit, const PushPlan& pushes = {}, const std::array<double, 3>* open_loop = nullptr) {
+               bool emit, const PushPlan& pushes = {}, const std::array<double, 3>* open_loop = nullptr,
+               double reset_noise = 0.0) {
     DuckBody body(scene);
     Policy scaffold(kStandScaffold);
     Policy walker(kWalkScaffold);
@@ -1223,7 +1224,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const int push_from   = int(pushes.from_s * kBrainHz);
     int push_index = 0, pushes_delivered = 0;
 
-    body.reset("STAND", 0.0, seed);
+    body.reset("STAND", reset_noise, seed);   // l2_sweep: --noise varies the start (was hardcoded 0: seeds only seeded the babble)
     std::fprintf(stderr, "level-2 graph %s%s\n", graph.c_str(), open_loop ? "  (open-loop override)" : "");
 
     std::array<float, kActionLen> scaffold_last{}, walker_last{};
@@ -1355,8 +1356,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             for (const auto& z : tof.zones()) std::printf("%d", int(z.cls));
             std::printf("\",\"tofr\":[");
             for (int i = 0; i < Tof::kZones; ++i) std::printf("%s%.2f", i ? "," : "", tof.zones()[i].range);
-            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"map\":[%.3f,%d,%d,%d]}\n", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
-                        body.touching_wall() ? 1 : 0, brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
+            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"steer\":%d,\"map\":[%.3f,%d,%d,%d]}\n", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
+                        body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1);
         }
     }
@@ -1583,7 +1584,7 @@ int main(int argc, char** argv) {
                                                 ident_every, ident_until, pushes, step, walk);
         if (mode == "--probe") return cmd_probe(scene, seconds, seed);
         if (mode == "--level2") return cmd_level2(scene, graph, seconds, seed, true, pushes,
-                                                  l2_open_loop ? &l2_twist : nullptr);
+                                                  l2_open_loop ? &l2_twist : nullptr, noise);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

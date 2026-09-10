@@ -1,0 +1,171 @@
+{
+ "metadata": {
+  "name": "R27 \u00b7 level-2 where-to-go: the play loop's novelty climb over the map sets the heading (\u00a717.3 fork a)",
+  "description": "R27 (2026-09-06): R26 + the Cell's PlayLoop reading the map EPM (reality.proprio.place) with the adapter's new heading/vel_ego topics; its egocentric bearing becomes the heading reference behind sense slot 10 every tick (IntentAdapter, by presence of percept.play_bearing). The bearing to the least-visited region as a learned direction: the (d) moved wall should now be re-explored (map nodes rise after the shift) and the R26 orbit seeds should tour. Measured with l2_sweep against R26.",
+  "env_target": "microduck",
+  "phase_tag": "intent boundary 1e",
+  "launcher_rank": 1027,
+  "scaffolds_active": [
+   "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
+  ]
+ },
+ "version": 1,
+ "runtime": {
+  "thread_pool": "per_instance",
+  "num_threads": 0
+ },
+ "modules": [
+  {
+   "id": "twist_bridge",
+   "type": "JointSensorimotorBridge",
+   "params": {
+    "proprio_input_topic": "reality.proprio.intent",
+    "action_topics": [
+     "action.vx",
+     "action.vy",
+     "action.vyaw"
+    ],
+    "output_topics": [
+     "reality.motor_limb.twist"
+    ],
+    "proprio_indices": [
+     0.0,
+     1.0,
+     2.0
+    ],
+    "group_size": 3,
+    "sensor_label_prefix": "motor_limb",
+    "load_topic": "reality.proprio.sense",
+    "load_slots": 16
+   }
+  },
+  {
+   "id": "motor_epm_intent",
+   "type": "MotorEPMv2",
+   "params": {
+    "proprio_topics": [
+     "reality.motor_limb.twist"
+    ],
+    "action_topics": [
+     "action.vx",
+     "action.vy",
+     "action.vyaw"
+    ],
+    "n_legs": 1,
+    "motor_dim": 3,
+    "model_lr": 0.02,
+    "ctrl_lr": 0.0,
+    "bias_lr": 0.0,
+    "reg_eps": 0.01,
+    "max_dctrl": 0.05,
+    "init_scale": 0.01,
+    "seed": 9090,
+    "babble_ticks": 30000,
+    "babble_scale": 0.8,
+    "babble_isolate": 1.0,
+    "babble_hold": 75,
+    "babble_owns_a": 0,
+    "sat_lr": 0.0,
+    "c_init": 1.0,
+    "motor_gain": 1.0,
+    "explore_noise": 0.02,
+    "coupling_gain": 0.0,
+    "stroke_gain": 0.0,
+    "balance_gain": 0.0,
+    "heading_gain": 0.0,
+    "nav_gain": 0.0,
+    "postural_gain": 0.0,
+    "amp_homeo_gain": 0.0,
+    "height_homeo_gain": 0.0,
+    "coord_reward_drive": 0.0,
+    "panic_strength": 0.0,
+    "imu_topic": "reality.proprio.imu",
+    "state_model_lr": 0.05,
+    "model_trace": 0.05,
+    "reset_breaks_model_pairing": 1.0,
+    "state_prior_gain": 1.0,
+    "consolidate_gain": 0.0,
+    "state_prior_indices": [
+     0,
+     -6,
+     -4,
+     -3,
+     -2
+    ],
+    "state_prior_targets": [
+     0.75,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "state_prior_lr": 0.1,
+    "consolidate_n": 0
+   }
+  },
+  {
+   "id": "map_epm",
+   "type": "EPM",
+   "params": {
+    "modality_group": "proprio",
+    "modality_name": "place",
+    "encoder_kind": "rbf",
+    "input_topic": "reality.proprio.place_in",
+    "proprio_state_dims": 12,
+    "dim_min": [
+     -0.6,
+     -0.6,
+     -1.0,
+     -1.0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "dim_max": [
+     0.6,
+     0.6,
+     1.0,
+     1.0,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "max_nodes": 128,
+    "master_seed": 4343,
+    "process_every_n_ticks": 5,
+    "mitosis_error_threshold": 0.1,
+    "health_death_spares_baked": true,
+    "min_insertion_error": 0.06
+   }
+  },
+  {
+   "id": "play",
+   "type": "PlayLoop",
+   "params": {
+    "place_topic": "reality.proprio.place",
+    "heading_topic": "reality.proprio.heading",
+    "vel_topic": "reality.proprio.vel_ego",
+    "output_topic": "percept.play_bearing",
+    "play_value_topic": "reality.cognitive.play_value",
+    "pi_cell_size": 0.0,
+    "wander_stall_ticks": 0,
+    "frontier_bias": 0.0,
+    "novelty_source": "tle",
+    "explore_seed": 11,
+    "_comment": "R27 (\u00a717.3 fork (a)): the Cell's play loop over the duck's map vocabulary -- the node is the map EPM's winner (pi_cell_size 0), the value field is the place TLE, the climb is the bearing to the most novel reachable node (wander_stall_ticks 0: the Cell's A2, so the climb engages). Its bearing sets the adapter's heading reference (sense slot 10); the heading prior turns the body. The loop the Cell dropped is the loop the duck wants: coverage is its goal."
+   }
+  }
+ ],
+ "edges": [],
+ "description": "R26 (level-2 keeps learning after the babble (babble_owns_a 0) \u2014 the regression gone at n=6), from a1v2_r25_l2_lookaround.json: the fork's item 1 (\u00a717.4): identified from real wall encounters after the babble, the proximity rows carry the avoidance and the heading prior no longer drags the body along walls; l2_sweep n=6 in the arena: 295 -> 26 wall contacts/min (t -17, 0+/6-), path 87 -> 157 m, TooClose 0.79 -> 0.06"
+}
