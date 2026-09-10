@@ -1628,6 +1628,10 @@ const STRIDE_V_BIAS_KI: float = 0.1       # PI bias-estimator gain (integral of 
 const STRIDE_V_SLIP_ALPHA: float = 0.05   # slip EMA (~0.4 s)
 const STRIDE_V_COAST_LEAK: float = 0.005  # leak toward 0 when no stance feet (~4 s tau)
 var _stridev_prev_loaded: Array = [false, false, false, false]
+# ⚠ "right" below is the LEG NAMING MIRROR (:325), not a sign error: the picrawler's forward
+# is +Z, so with Y up in a right-handed frame its +X is anatomically LEFT.  Every producer
+# and consumer in this stack labels +X "right" consistently, so the mirror is behaviorally
+# null — do NOT rename piecemeal; the note at :325 says why and where it must be resolved.
 var _stridev_est: Vector2 = Vector2.ZERO  # [x = right, y = forward] body frame, m/s
 var _stridev_bias: Vector2 = Vector2.ZERO # learned accel bias [x, z], m/s^2
 var _stridev_slip: float = 0.0
@@ -2942,10 +2946,10 @@ func _ready() -> void:
 	brain.register_source("EgoHeading", "reality.proprio.ego_heading",
 		"float32[1]: dead-reckoned heading, integrated from the modelled body-frame gyro (drifts, as real dead reckoning does)", true)
 	brain.register_source("VelEgo", "reality.proprio.vel_ego",
-		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc", true)
+		"float32[2]: [v_right, v_forward] body-frame velocity. ⚠ SOFT ORACLE (world velocity projected) — see sensor_legitimacy doc. ⚠ 'right' is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so +X is anatomically LEFT.", true)
 	# 2026-08-25 — PART V stage B: the LEGAL travel lane (gate A, ledger same date).
 	brain.register_source("StrideV", "reality.proprio.stride_v",
-		"float32[2]: [v_right, v_forward] body-frame velocity ESTIMATED from stance-leg FK " +
+		"float32[2]: [v_right, v_forward] body-frame velocity ESTIMATED from stance-leg FK. ⚠ 'right' is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so +X is anatomically LEFT. " +
 		"on servo forward-model commands, complementary-fused with the IMU. Fully Markov-" +
 		"compliant: commanded angles + foot_load + IMU, nothing else — the legal replacement " +
 		"lane for vel_ego. Gate A 2026-08-25: forward r≈0.75 vs truth at 1 s windows, " +
@@ -6278,6 +6282,8 @@ func _step_one() -> void:
 	eh.append(_ego_heading)
 	brain.publish_proprio(eh, "ego_heading")
 	# [v_right, v_forward] — index 1 is forward, which is the index RunTumbleNavV2 reads.
+	# ⚠ "right" is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so its +X
+	# is anatomically LEFT.
 	# ⚠ SOFT ORACLE, recorded as such: this is world-frame chassis velocity projected into the
 	# body frame, and sensor_legitimacy_and_the_feet_y_oracle.md flags fwd_v/lateral_v as "not
 	# free — worth its own pass".  A real legged robot has no odometry; estimating body speed
@@ -6295,6 +6301,8 @@ func _step_one() -> void:
 	# right.  The MotorEPM agency-reward search penalises |lateral_v| (coord_lat_
 	# penalty) so it self-discovers a straight, lateral-cancelling gait instead of
 	# the rear-fishtail crab the forward-only fitness left unpenalised.
+	# ⚠ MIRRORED (:325): +X is anatomically LEFT, so "its right" above is the mirror.
+	# The search penalises the MAGNITUDE, so the mirror does not change behaviour.
 	var lat_v: float = Vector2(_chassis.linear_velocity.x, _chassis.linear_velocity.z).dot(Vector2(cos(yaw), -sin(yaw)))
 	_last_lat_v = lat_v
 	var latp := PackedFloat64Array()
@@ -9668,6 +9676,8 @@ func _feet_y_array() -> Array:
 # (move posterior).  A planted foot whose local z increases (anterior) is doing
 # negative work; large |Δx| during stance means it pushes laterally → yaw, not
 # forward pull.  Ground truth, independent of nav intent.
+# ⚠ "right" above is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so its
+# +X is anatomically LEFT.
 func _foot_local_xz_array() -> Array:
 	var inv: Transform3D = _chassis.global_transform.affine_inverse()
 	var out: Array = []
@@ -10500,6 +10510,8 @@ func _trace_record(h1: Array, h2: Array, kn: Array, contact: Array, fwd_v: float
 		"sv_ns":   [_dbg_strido_ns, _dbg_strido_ns_tc],
 		# The PUBLISHED fused sensor [x=right, z=forward] — always defined (coasts on the
 		# IMU through full-swing ticks), so no ns gate applies to it.
+		# ⚠ "right" is the LEG NAMING MIRROR (:325): picrawler forward is +Z, so its
+		# +X is anatomically LEFT.
 		"sv_fuse": [snappedf(_stridev_est.x, 0.0001), snappedf(_stridev_est.y, 0.0001)],
 		"sv_slip": snappedf(_stridev_slip, 0.0001),
 		# The IMU linear-acceleration term feeding the fusion [x, z] — lets the filter
