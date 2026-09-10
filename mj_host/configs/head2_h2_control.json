@@ -1,10 +1,10 @@
 {
  "metadata": {
-  "name": "H1 \u00b7 the head loop: identification babble on the four head commands (walker holds the body)",
-  "description": "Playroom plan, the H line (2026-09-10). The same module code as the twist brain with four command dimensions: neck_pitch, head_pitch, head_yaw, head_roll as deltas from HOME in the walker's command vector (robot.head on the robot). Senses: the head's own joint positions in command units (the 'joints'), and 12 load slots = head roll, head pitch, head down-shortfall | head gyro x,y,z | trunk gravity x,y | trunk gyro x,y,z | 1 spare. H1: babble_ticks 30000 (600 s), hold 25 ticks (0.5 s \u2014 the walker's head low-pass answers in ~10), scale 0.3 of the trained ranges (\u00b10.33 rad pitch), prior off. The H1 gate is the identified A: the position diagonal positive and dominant; the pitches on head-gravity x; roll on head-gravity y. H2 turns the prior on (slots 12,13 = head roll, pitch (load slots 0,1 = head-gravity y, z) -> 0: level).",
+  "name": "H2/2 control \u00b7 restored from H1/2, motor_gain 0 (the walker's own head)",
+  "description": "The head loop on TWO motors \u2014 head_pitch and head_roll \u2014 with neck_pitch and head_yaw held at zero (2026-09-10, after H2 on four motors wound every command to its rail: the two pitch joints are a redundant pair whose null space, neck up + head down, the sensor cannot see, and the prior's bias drifted into it). Load slots as head_h1: roll, pitch, down-shortfall | head gyro x,y,z | trunk gravity x,y | trunk gyro x,y,z | spare; with motor_dim 2 the load rows start at 6, so the level prior is state_prior_indices [6, 7]. Control: motor_gain 0, no babble.",
   "launcher_rank": 0
  },
- "description": "H1 head babble (see metadata)",
+ "description": "H2/2 control \u00b7 restored from H1/2, motor_gain 0 (the walker's own head)",
  "modules": [
   {
    "id": "head_bridge",
@@ -12,21 +12,17 @@
    "params": {
     "proprio_input_topic": "reality.proprio.head",
     "action_topics": [
-     "action.neck_pitch",
      "action.head_pitch",
-     "action.head_yaw",
      "action.head_roll"
     ],
     "output_topics": [
      "reality.motor_limb.head"
     ],
     "proprio_indices": [
-     0.0,
      1.0,
-     2.0,
      3.0
     ],
-    "group_size": 4,
+    "group_size": 2,
     "sensor_label_prefix": "motor_limb",
     "load_topic": "reality.proprio.head_sense",
     "load_slots": 12
@@ -40,13 +36,11 @@
      "reality.motor_limb.head"
     ],
     "action_topics": [
-     "action.neck_pitch",
      "action.head_pitch",
-     "action.head_yaw",
      "action.head_roll"
     ],
     "n_legs": 1,
-    "motor_dim": 4,
+    "motor_dim": 2,
     "model_lr": 0.02,
     "ctrl_lr": 0.0,
     "bias_lr": 0.0,
@@ -54,14 +48,14 @@
     "max_dctrl": 0.05,
     "init_scale": 0.01,
     "seed": 7171,
-    "babble_ticks": 30000,
+    "babble_ticks": 0,
     "babble_scale": 0.3,
     "babble_isolate": 1.0,
     "babble_hold": 25,
     "babble_owns_a": 0,
     "sat_lr": 0.0,
     "c_init": 1.0,
-    "motor_gain": 1.0,
+    "motor_gain": 0.0,
     "explore_noise": 0.0,
     "coupling_gain": 0.0,
     "stroke_gain": 0.0,
@@ -80,8 +74,8 @@
     "state_prior_gain": 0.0,
     "consolidate_gain": 0.0,
     "state_prior_indices": [
-     12,
-     13
+     6,
+     7
     ],
     "state_prior_targets": [
      0.0,

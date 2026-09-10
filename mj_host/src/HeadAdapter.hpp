@@ -44,6 +44,9 @@ public:
     void set_learning(bool on);
     std::array<double, 4> last_command() const { return last_cmd_; }
     nlohmann::json brain_state() const;
+    // Restore a saved head brain (every module's working state) into this instance — the
+    // H2 protocol: identify standing (H1, saved), act walking (loaded here, the prior on).
+    void restore_brain_state(const nlohmann::json& s);
     std::vector<std::string> diagnostics() const;
     // The identified A's head-attitude rows against the four commands, for the H1 gate.
     std::vector<std::string> readback() const;
@@ -56,6 +59,7 @@ private:
     std::array<double, 4> last_cmd_{};
     std::map<std::string, double> frozen_rates_;
     bool frozen_ = false;
+    uint64_t babble_ticks_ = 0;                        // from the graph: the yaw command is masked after it
 };
 
 }  // namespace mjhost

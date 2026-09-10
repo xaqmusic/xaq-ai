@@ -1,10 +1,10 @@
 {
  "metadata": {
-  "name": "H1 \u00b7 the head loop: identification babble on the four head commands (walker holds the body)",
-  "description": "Playroom plan, the H line (2026-09-10). The same module code as the twist brain with four command dimensions: neck_pitch, head_pitch, head_yaw, head_roll as deltas from HOME in the walker's command vector (robot.head on the robot). Senses: the head's own joint positions in command units (the 'joints'), and 12 load slots = head roll, head pitch, head down-shortfall | head gyro x,y,z | trunk gravity x,y | trunk gyro x,y,z | 1 spare. H1: babble_ticks 30000 (600 s), hold 25 ticks (0.5 s \u2014 the walker's head low-pass answers in ~10), scale 0.3 of the trained ranges (\u00b10.33 rad pitch), prior off. The H1 gate is the identified A: the position diagonal positive and dominant; the pitches on head-gravity x; roll on head-gravity y. H2 turns the prior on (slots 12,13 = head roll, pitch (load slots 0,1 = head-gravity y, z) -> 0: level).",
+  "name": "H2 still \u00b7 the head brain restored from H1, prior: head gravity x,y -> 0 AND head gyro x,y -> 0",
+  "description": "H2b: level and still. As H2a plus load slots 15,16 = head gyro x,y (0.3 rad/s to unit), target 0.",
   "launcher_rank": 0
  },
- "description": "H1 head babble (see metadata)",
+ "description": "H2 still \u00b7 the head brain restored from H1, prior: head gravity x,y -> 0 AND head gyro x,y -> 0",
  "modules": [
   {
    "id": "head_bridge",
@@ -54,7 +54,7 @@
     "max_dctrl": 0.05,
     "init_scale": 0.01,
     "seed": 7171,
-    "babble_ticks": 30000,
+    "babble_ticks": 0,
     "babble_scale": 0.3,
     "babble_isolate": 1.0,
     "babble_hold": 25,
@@ -77,17 +77,21 @@
     "state_model_lr": 0.05,
     "model_trace": 0.05,
     "reset_breaks_model_pairing": 1.0,
-    "state_prior_gain": 0.0,
+    "state_prior_gain": 1.0,
     "consolidate_gain": 0.0,
     "state_prior_indices": [
      12,
-     13
+     13,
+     15,
+     16
     ],
     "state_prior_targets": [
      0.0,
+     0.0,
+     0.0,
      0.0
     ],
-    "state_prior_lr": 0.0,
+    "state_prior_lr": 0.1,
     "consolidate_n": 0
    }
   }

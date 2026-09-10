@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 #include <nlohmann/json.hpp>
 
@@ -23,6 +24,12 @@ HeadAdapter::HeadAdapter(const std::string& graph_path, uint64_t seed) {
                 if (it != m.params.end())
                     it->second = ogma::ParamValue{int64_t(ogma::namespace_seed(seed, m.id))};
             }
+    }
+    for (const auto& m : cfg.modules) {                // the babble's length, so the yaw mask waits for it
+        auto it = m.params.find("babble_ticks");
+        if (it == m.params.end()) continue;
+        if (auto i = std::get_if<int64_t>(&it->second)) babble_ticks_ = uint64_t(std::max<int64_t>(0, *i));
+        else if (auto d = std::get_if<double>(&it->second)) babble_ticks_ = uint64_t(std::max(0.0, *d));
     }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
     // No inspector surface: the twist brain owns the host's inspector port. The head brain's
@@ -55,12 +62,18 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
     for (int i = 0; i < 4; ++i) q[size_t(i)] = unit(head_q[size_t(i)] / kHeadRange[size_t(i)]);
     publish("head", q);
     publish("imu", {float(g[0]), float(g[1]), float(g[2]), float(w[0]), float(w[1]), float(w[2])});
-    // The 12-slot sense the bridge appends as load slots.  Slots 0-1: head gravity x, y (level
-    // is 0, 0); 2-4: head gyro, 0.3 rad/s to unit; 5-6: trunk gravity x, y; 7-9: trunk gyro;
-    // 10-11: spare.  A prior on slots 0, 1 (level) and 2, 3 (still) is H2.
-    publish("head_sense", {float(hg[0]), float(hg[1]), unit(0.3 * hw[0]), unit(0.3 * hw[1]), unit(0.3 * hw[2]),
+    // The 12-slot sense the bridge appends as load slots.  The head IMU's frame has its x
+    // axis DOWN when the camera is level (measured 2026-09-10: head joints at zero → camera
+    // forward = world +x, head gravity = (−1, 0, 0)), so a level head reads gravity (−1, 0, 0)
+    // and the errors are the y (roll) and z (pitch) components.  Slots 0-2 are those
+    // deviations — roll, pitch, and the down component's shortfall (hg_x + 1) — all ≈ 0 when
+    // level, so no large common-mode rides into the model (CLAUDE.md §0 rule 2; the first
+    // layout carried hg_x ≈ −1 on slot 0 and the idle controller turned it into a constant
+    // 0.3 rad command).  3-5: head gyro, 0.3 rad/s to unit; 6-7: trunk gravity x, y; 8-10:
+    // trunk gyro; 11: spare.  The H2 prior is on slots 0, 1 (level) and 3, 4 (still).
+    publish("head_sense", {float(hg[1]), float(hg[2]), float(hg[0] + 1.0), unit(0.3 * hw[0]), unit(0.3 * hw[1]), unit(0.3 * hw[2]),
                            float(g[0]), float(g[1]), unit(0.3 * w[0]), unit(0.3 * w[1]), unit(0.3 * w[2]),
-                           0.0f, 0.0f});
+                           0.0f});
 
     instance_->tick();
 
@@ -69,6 +82,12 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
         if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kActions[i])))
             last_cmd_[size_t(i)] = kHeadRange[size_t(i)] * std::clamp(double(act->accel), -1.0, 1.0);
     }
+    // Yaw follows the trunk (the plan's design choice, §4b): the head loop levels and steadies
+    // pitch and roll and never turns the head. Measured reason (H2, 2026-09-10): the
+    // controller's identity start makes an unpriored axis hold its position, and a head that
+    // holds its yaw while the body turns under it winds to the rail. The babble still moves
+    // yaw (the action is read above for the model's sake); only the command is masked.
+    if (tick_id_ >= babble_ticks_) last_cmd_[2] = 0.0;
     ++tick_id_;
     return last_cmd_;
 }
@@ -112,6 +131,10 @@ void HeadAdapter::set_learning(bool on) {
 }
 
 nlohmann::json HeadAdapter::brain_state() const { return instance_->snapshot_state(); }
+void HeadAdapter::restore_brain_state(const nlohmann::json& s) {
+    std::lock_guard<std::recursive_mutex> lk(instance_mtx_);
+    instance_->restore_state(s);
+}
 
 std::vector<std::string> HeadAdapter::diagnostics() const {
     std::vector<std::string> out;
@@ -135,23 +158,25 @@ std::vector<std::string> HeadAdapter::readback() const {
         const auto& leg = it.value().at("legs").at(0);
         const int rows = leg.at("rows_A").get<int>(), cols = leg.at("cols_A").get<int>();
         const auto A = leg.at("A").get<std::vector<double>>();
-        if (cols != 4 || rows < 12) continue;
+        if ((cols != 4 && cols != 2) || rows < 3 * cols + 6) continue;
         const auto at = [&](int i, int j) { return A[size_t(i) + size_t(rows) * size_t(j)]; };
-        static const char* const kCmd[4] = {"neck_pitch", "head_pitch", "head_yaw", "head_roll"};
+        // the four-motor graph commands all head joints; the two-motor graph head_pitch and head_roll
+        static const char* const kCmd4[4] = {"neck_pitch", "head_pitch", "head_yaw", "head_roll"};
+        static const char* const kCmd2[2] = {"head_pitch", "head_roll"};
+        const char* const* kCmd = (cols == 4) ? kCmd4 : kCmd2;
         char buf[256];
-        std::snprintf(buf, sizeof buf, "identified A of %s (row vs command %s/%s/%s/%s; want the position diagonal "
-                      "positive and dominant, the pitches on head-gravity x, roll on y):", it.key().c_str(),
-                      kCmd[0], kCmd[1], kCmd[2], kCmd[3]);
-        out.emplace_back(buf);
-        for (int i = 0; i < 4; ++i) {
-            std::snprintf(buf, sizeof buf, "  pos %-10s: %+.4f %+.4f %+.4f %+.4f", kCmd[i], at(3 * i, 0), at(3 * i, 1), at(3 * i, 2), at(3 * i, 3));
-            out.emplace_back(buf);
-        }
-        static const char* const kLoad[5] = {"head g_x  ", "head g_y  ", "head w_x  ", "head w_y  ", "head w_z  "};
-        for (int k = 0; k < 5 && 12 + k < rows; ++k) {
-            std::snprintf(buf, sizeof buf, "  %s    : %+.4f %+.4f %+.4f %+.4f", kLoad[k], at(12 + k, 0), at(12 + k, 1), at(12 + k, 2), at(12 + k, 3));
-            out.emplace_back(buf);
-        }
+        std::string head = "identified A of " + it.key() + " (row vs command";
+        for (int j = 0; j < cols; ++j) head += std::string(j ? "/" : " ") + kCmd[j];
+        head += "; want the position diagonal positive and dominant, the pitches on head pitch (g_z), roll on head roll (g_y)):";
+        out.emplace_back(head);
+        const auto row = [&](const std::string& label, int i) {
+            std::string line = "  " + label + ":";
+            for (int j = 0; j < cols; ++j) { std::snprintf(buf, sizeof buf, " %+.4f", at(i, j)); line += buf; }
+            out.emplace_back(line);
+        };
+        for (int i = 0; i < cols; ++i) row(std::string("pos ") + kCmd[i] + std::string(10 - std::min<size_t>(10, std::strlen(kCmd[i])), ' '), 3 * i);
+        static const char* const kLoad[6] = {"head roll     ", "head pitch    ", "head down     ", "head w_x      ", "head w_y      ", "head w_z      "};
+        for (int k = 0; k < 6 && 3 * cols + k < rows; ++k) row(kLoad[k], 3 * cols + k);
     }
     return out;
 }

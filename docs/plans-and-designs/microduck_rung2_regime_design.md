@@ -1456,3 +1456,59 @@ still body in one babble, seed-consistently, with the rows the H2 prior needs. N
 prior on slots 12, 13 (head gravity x, y → 0) while walking, A/B against the walker's own
 head, judged on head gyro RMS, gravity deviation, rescues/min and the brain-frame difference.
 Launcher: R31 (watch the head babble; the twist brain held at zero).
+
+### 17.10 H2 — the head prior while walking: level `WORKING`, still `NULL`, the picture `REGRESSION` (2026-09-10)
+
+**Protocol.** Identify standing, act walking: the H1 head brain is saved at the end of its
+standing babble (`--save-head`) and loaded into R30's tour (`--load-head`) with the prior on
+and no babble. The control is the same load with `motor_gain 0`, which is R30 exactly (the
+walker's own head; verified byte-identical on the tour's metrics). n = 6, 1500 s, control phase
+700–1500 s, the head metrics from the head IMU while upright: gyro RMS over x, y (the head's
+world motion, whatever the joints do), gravity deviation over roll and pitch (0 = level), and
+H3 — the mean frame-to-frame difference of the 64 × 48 brain frame at 12.5 Hz, rendered from
+the run's qpos (seed 6).
+
+**Four things had to be found before the reflex could be judged**, each a measurement, none a
+tuning:
+
+1. **The head IMU's frame.** Its x axis points down when the camera is level (head joints at
+   zero: camera forward = world +x, head gravity = (−1, 0, 0)). The first prior targeted x, y
+   → 0 and pitched the camera 90°, collapsing the map (the ToF is on the head). Roll and pitch
+   are the y and z components; the sense now carries the deviations, so level reads zero.
+2. **The idle head brain holds its last pose.** The controller starts as an identity on the
+   position slots (y = the sensed position), so with nothing driving it the head stays where
+   the babble left it — 0.3 rad off, yawed 40°, the ToF sideways, wall contacts ×8. The honest
+   gain-0 control is `motor_gain 0`.
+3. **Yaw winds to its rail.** An unpriored axis that holds its position while the trunk turns
+   under it reaches the rail; the adapter masks yaw after the babble (the plan's choice: yaw
+   follows the trunk).
+4. **The two pitch joints are a redundant pair.** Their null space (neck up, head down) is
+   invisible to the sensor, and the prior's bias drifted into it until both pitches sat at the
+   rails with `ctrl_damping` making no difference. The loop now owns two motors — head_pitch
+   and head_roll — with the neck held at zero (H1/2: head_pitch → pitch −0.043, roll → roll
+   +0.018, clean).
+5. And one from the module's own note: the closed-loop model after a babble "bore no
+   resemblance" to the babbled one; with the model learning while walking the prior acted
+   through a drifting A and the head went to 38° of deviation. **Frozen at the identified
+   values (`model_lr 0`)**, the prior does what it says.
+
+| arm (all n = 6) | head gyro RMS (rad/s) | roll dev | pitch dev | walls/min | rescues/min | frame diff (s6) |
+|---|---|---|---|---|---|---|
+| control = R30, the walker's head | 1.85 ± 0.13 | 0.090 | 0.197 | 6.6 ± 5.8 | 0.05 | 12.3 |
+| 4 motors, level (wrong frame) | 3.26 ± 0.72 | — | — | 46 | 0.11 | 18.6 |
+| 4 motors, level, yaw masked | 2.40 ± 0.12 | 0.27 | 0.16 | 9.7 ± 8.3 | 0.03 | — |
+| 4 motors, level, + ctrl_damping | 2.41 ± 0.21 | 0.23 | 0.19 | 62 ± 125 | 0.03 | — |
+| 2 motors, level, model learning | 2.86 ± 0.72 | 0.62 (roll + pitch) | | 13.5 ± 7.4 | 0.05 | — |
+| **2 motors, level, model frozen** | 2.11 ± 0.07 | **0.041 ± 0.002** | **0.044 ± 0.004** | 9.3 ± 8.9 | 0.02 | **16.4** |
+
+**Verdict, three parts.** *Level*: `WORKING`, loud — pitch deviation 0.20 → 0.044 and roll
+0.09 → 0.04 on every seed, the head visibly held level while the body walks (launcher R32
+against R30). *Still*: `NULL` — the head gyro is 14 % worse; the pitch command sits at its
+rail on half the ticks, chasing the 2 Hz gait through a one-step model and a lagged position
+channel. *The picture*: `REGRESSION` — frame difference 12.3 → 16.4; the operator's criterion
+is worse, because a level head that bangs the rail shakes the camera more than a walker's head
+that droops 11° and stays put. **Not promoted.** Re-use context: a slower prior (the 50 Hz
+Gauss–Newton step at `state_prior_lr 0.1` is a 200 ms time constant against a ~200 ms
+actuator lag — the wind-up condition); a rate target on the frozen model; or feed-forward
+from the trunk gyro (the controller's rows over the trunk slots are what a vestibulo-collic
+reflex actually is). One lever at a time, from R32.

@@ -1222,6 +1222,9 @@ constexpr double kClockRadPerS = 2.0 * M_PI / 20.0;   // the clock hand: one tur
 // --head-graph H.json: the head loop (playroom plan, H line) — a second brain whose motors are
 // the walker's four head commands and whose senses are the head IMU. Absent: byte-identical.
 std::string g_head_graph;
+// --save-head F / --load-head F: the head brain's state alone (no body): H1 identifies the head
+// on a standing body and saves; H2 loads that into a walking run with the prior on.
+std::string g_save_head, g_load_head;
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
@@ -1270,6 +1273,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         head = std::make_unique<HeadAdapter>(g_head_graph, seed);
         std::fprintf(stderr, "head graph %s  (head gyro sensor: %s)\n", g_head_graph.c_str(),
                      body.has_head_gyro() ? "present" : "ABSENT — the scene has no head IMU; head gyro slots read zero");
+        if (!g_load_head.empty()) {
+            std::ifstream in(g_load_head);
+            if (!in) throw std::runtime_error("--load-head: cannot open " + g_load_head);
+            nlohmann::json snap; in >> snap;
+            head->restore_brain_state(snap.at("graph"));
+            std::fprintf(stderr, "head brain restored from %s\n", g_load_head.c_str());
+        }
     }
 
     std::array<float, kActionLen> scaffold_last{}, walker_last{};
@@ -1469,6 +1479,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (head) {
         for (const auto& line : head->readback()) std::fprintf(stderr, "  %s\n", line.c_str());
         for (const auto& line : head->diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
+        if (!g_save_head.empty()) {
+            nlohmann::json snap;
+            snap["graph"] = head->brain_state();
+            snap["head_graph"] = g_head_graph;
+            std::ofstream out(g_save_head);
+            out << snap;
+            std::fprintf(stderr, "head brain snapshot -> %s\n", g_save_head.c_str());
+        }
     }
     if (g_wander_bored_s > 0.0)
         std::fprintf(stderr, "  wander: %d heading changes of %.0f deg after %.0f s of familiarity\n",
@@ -1517,6 +1535,7 @@ void usage() {
         "      here too; --l2-twist VX VY VYAW replaces the brain's command (an open-loop baseline).\n"
         "      --head-graph H.json adds the head loop: a second brain on the walker's four head commands,\n"
         "      sensing the head IMU (the playroom overlay's); its identified rows are printed at the end.\n"
+        "      --save-head F / --load-head F: the head brain's state alone (identify standing, act walking).\n"
         "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
         "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
         "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
@@ -1625,6 +1644,10 @@ int main(int argc, char** argv) {
             g_arena_shift_s = std::stod(next("--arena-shift"));
         } else if (a == "--head-graph") {
             g_head_graph = next("--head-graph");
+        } else if (a == "--save-head") {
+            g_save_head = next("--save-head");
+        } else if (a == "--load-head") {
+            g_load_head = next("--load-head");
         } else if (a == "--move") {
             MoveOp mv;
             mv.name = next("--move"); mv.x = std::stod(next("--move")); mv.y = std::stod(next("--move"));

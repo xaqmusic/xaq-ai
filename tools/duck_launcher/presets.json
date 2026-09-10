@@ -608,5 +608,29 @@
    "fast_until": 0.0,
    "host_args": "--l2-twist 0 0 0 --head-graph mj_host/configs/head_h1_babble.json"
   }
+ },
+ {
+  "name": "R32 · H2 the HEAD LOOP levels the head while walking: two motors, the identified model frozen, prior on (watch the head vs R30)",
+  "series": 32,
+  "hint": "WATCH (seed 6) against the R30 preset: the head held LEVEL while walking — pitch/roll deviation 0.04 vs the walker's 0.20/0.09 on every seed — but NOT stiller: head gyro 2.1 vs 1.85 rad/s (the prior chases the gait to the pitch rail half the time) and the brain-frame difference is WORSE (16.4 vs 12.3). Level WORKING, still NULL, the picture a REGRESSION; not promoted (§17.10).",
+  "state": {
+   "config": "a1v2_r32_h2_head_level.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 6,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_frozen.json --load-head mj_host/checkpoints/head2_h1_s2.json",
+   "fast_until": 600
+  }
  }
 ]

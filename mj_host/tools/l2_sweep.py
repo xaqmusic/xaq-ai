@@ -22,6 +22,10 @@ Per arm and seed, from the host's own JSONL (stdout) and summary (stderr):
   tooclose    mean TooClose fraction (tofs[3])
   path        metres travelled
   cells       distinct 0.25 m cells visited
+  headW rms   the head loop (--head-graph): RMS of the head gyro's x, y (rad/s) while upright -- the head's
+              WORLD motion, which a head locked to the trunk scores worst on; headG dev = RMS of the head
+              gravity's roll and pitch components (the IMU's x axis points down when level; 0 = level).
+              nan without a head graph.
   down%       ticks with the trunk past 60 deg of tilt -- on the floor, whether or not a rescue is running
               (a body wedged on a table leg shows here and nowhere else; the seeds' means hide a single 40 % run
               unless you read the per-seed lines)
@@ -89,7 +93,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         # a compact stream: the fields the metrics read (a full level-2 JSONL carries qpos and the
         # 64 ToF zones per tick -- ~75 MB per 1500 s run, which filled a tmpfs quota on first use)
         logdir.mkdir(parents=True, exist_ok=True)
-        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map")
+        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map", "hg", "hw", "head")
         with open(logdir / f"{cfg.stem}_s{seed}.jsonl", "w") as f:
             for line in p.stdout.splitlines():
                 if not line.startswith("{"): continue
@@ -115,6 +119,9 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     wall_eps = contact = n = 0; prev_wall = 0
     obj_eps = 0; prev_obj = 0
     down = 0      # ticks with the trunk past 60 deg of tilt: on the floor, rescued or not (the table-leg trap, 2026-09-10)
+    # the head loop (H2): head gyro RMS (x, y — the world motion of the head, whatever the joints do),
+    # head-gravity deviation from vertical, and the trunk's own pitch/roll rate for scale
+    hw2 = hg2 = tw2 = 0.0; nh = 0
     # the playroom's manifest names every movable's qpos address: displacement is read from
     # the JSONL's qpos, the same numbers the viewer draws
     layout = []
@@ -149,6 +156,9 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         if w and not prev_wall: wall_eps += 1
         prev_wall = w
         down += float(r.get("tilt", 0.0)) > 60.0
+        if "hw" in r and float(r.get("tilt", 0.0)) < 60.0:          # a head on the floor is not the loop's to keep still
+            # the head IMU's x axis points DOWN when the camera is level: roll and pitch are hg[1], hg[2]
+            hw = r["hw"]; hg = r["hg"]; hw2 += hw[0] ** 2 + hw[1] ** 2; hg2 += hg[1] ** 2 + hg[2] ** 2; nh += 1
         o = int(r.get("obj", 0))
         if o and not prev_obj: obj_eps += 1
         prev_obj = o
@@ -173,6 +183,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
         "escaped": escaped, "avoid_pct": 100.0 * steer_avoid / max(1, n), "play_pct": 100.0 * steer_play / max(1, n),
         "objs_min": obj_eps / minutes, "down_pct": 100.0 * down / max(1, n),
+        "head_w_rms": math.sqrt(hw2 / nh) if nh else float("nan"), "head_g_dev": math.sqrt(hg2 / nh) if nh else float("nan"),
         "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
     })
     return out
@@ -240,7 +251,8 @@ def main():
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
             ("cells", "cells"), ("span", "span m²"), ("nodes", "nodes"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
             ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
-            ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%")]
+            ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%"),
+            ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

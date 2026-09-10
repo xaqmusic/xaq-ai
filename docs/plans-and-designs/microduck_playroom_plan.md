@@ -48,9 +48,12 @@ walls/min, **22.5 ± 23.7 objs/min** (it dribbles balls without seeking them), `
 **Observed: the table-leg wedge** (§17.8) — B2's first (d) scenario, and E1's stimulus for
 "a learned direction beats the proximity priors" at a 3 cm pillar.
 
-**H0 and H1 are built and `WORKING` (design doc §17.9):** the head IMU in the overlay; the head
-babble identifies the four commands seed-consistently with 0 rescues. Next on the H line: H2,
-the level-and-still prior while walking. Launcher: R31.
+**H0 and H1 `WORKING` (§17.9); H2 measured (§17.10): level loud, still null, the picture
+worse — not promoted.** The loop now owns two motors (head_pitch, head_roll; neck and yaw at
+zero), acts on the model it identified standing (frozen), and levels the head on every seed,
+but chases the gait to the pitch rail and shakes the camera more than the walker does. Next
+on the H line, one at a time from R32: a slower prior, a rate target on the frozen model, or
+feed-forward from the trunk gyro. Launcher: R31 (the babble), R32 (the level head vs R30).
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
@@ -234,8 +237,8 @@ z | 2 spare; the H2 prior is `state_prior_indices [12, 13]` (head gravity x, y �
 |---|---|---|---|---|
 | H0 | the head IMU in the overlay; `head_gyro()` in the body | — | byte-identity | arena and playroom runs unchanged. **Built 2026-09-10, `WORKING`** |
 | H1 | head babble while the walker stands (`--l2-twist 0 0 0`), 600 s, hold 25, scale 0.3 | the body's own head | the identified rows: position diagonal positive and dominant; both pitches on head-gravity x; roll on head-gravity y; rescues | signs consistent across seeds, no rescues. **Built 2026-09-10, `WORKING`: 5 seeds agree to ±5 %, 0 rescues (§17.9)** |
-| H2 | the head prior while walking (level + still), gain-0 = the walker's head | the R30 tour + the shove series | head gyro RMS, gravity deviation, rescues/min, the brain-frame difference | loud: the head visibly steadier, balance untouched |
-| H3 | the camera-stability number over R30 | the tour | frame-to-frame difference, H2 vs control | the number moves with the eye |
+| H2 | the head prior while walking (level + still), gain-0 = the walker's head | the R30 tour + the shove series | head gyro RMS, gravity deviation, rescues/min, the brain-frame difference | loud: the head visibly steadier, balance untouched. **Measured 2026-09-10 (§17.10): level `WORKING` (pitch dev 0.20 → 0.04, every seed), still `NULL` (gyro +14 %), the picture `REGRESSION` (frame diff 12.3 → 16.4). Not promoted; R32 to watch. Found on the way: the IMU frame, the identity hold, the yaw rail, the pitch pair's null space, the drifting closed-loop model** |
+| H3 | the camera-stability number over R30 | the tour | frame-to-frame difference, H2 vs control | the number moves with the eye. **Built (offline from a run's qpos): control 12.3, every H2 arm worse** |
 
 **Hardware check before H2 counts there:** whether the head IMU's readings reach a client over
 the ToF socket or stay inside tofd.
