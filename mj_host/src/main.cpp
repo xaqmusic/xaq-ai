@@ -1449,6 +1449,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::fprintf(stderr, "level-2 %.0f s — %d rescues, %.0f%% of the run walker-driven; learning frozen %.0f%%\n",
                  seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / std::max(total, 1e-9),
                  100.0 * frozen_ticks / ticks);
+    if (recovery.gave_up() > 0)                        // a rescue the stand policy could not finish in 8 s: wedged, most likely
+        std::fprintf(stderr, "  rescues given up: %d of %d (longest %.1f s) — the body stayed down through them\n",
+                     recovery.gave_up(), recovery.rescues(), recovery.longest_recovery());
     for (const auto& line : brain.diagnostics()) std::fprintf(stderr, "  %s\n", line.c_str());
     return 0;
 }

@@ -22,6 +22,9 @@ Per arm and seed, from the host's own JSONL (stdout) and summary (stderr):
   tooclose    mean TooClose fraction (tofs[3])
   path        metres travelled
   cells       distinct 0.25 m cells visited
+  down%       ticks with the trunk past 60 deg of tilt -- on the floor, whether or not a rescue is running
+              (a body wedged on a table leg shows here and nowhere else; the seeds' means hide a single 40 % run
+              unless you read the per-seed lines)
   span        x-range × y-range (m)
   nodes       distinct map winners (the map EPM's live vocabulary)
   mapTLE      mean map TLE;  novel%  fraction of ticks the map called novel
@@ -111,6 +114,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
     path = 0.0; prev = None
     wall_eps = contact = n = 0; prev_wall = 0
     obj_eps = 0; prev_obj = 0
+    down = 0      # ticks with the trunk past 60 deg of tilt: on the floor, rescued or not (the table-leg trap, 2026-09-10)
     # the playroom's manifest names every movable's qpos address: displacement is read from
     # the JSONL's qpos, the same numbers the viewer draws
     layout = []
@@ -144,6 +148,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         st_ = int(r.get("steer", 0)); steer_avoid += (st_ == 2); steer_play += (st_ == 1)
         if w and not prev_wall: wall_eps += 1
         prev_wall = w
+        down += float(r.get("tilt", 0.0)) > 60.0
         o = int(r.get("obj", 0))
         if o and not prev_obj: obj_eps += 1
         prev_obj = o
@@ -167,7 +172,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "span": (max(xs) - min(xs)) * (max(ys) - min(ys)) if xs else 0.0,
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
         "escaped": escaped, "avoid_pct": 100.0 * steer_avoid / max(1, n), "play_pct": 100.0 * steer_play / max(1, n),
-        "objs_min": obj_eps / minutes,
+        "objs_min": obj_eps / minutes, "down_pct": 100.0 * down / max(1, n),
         "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
     })
     return out
@@ -235,7 +240,7 @@ def main():
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
             ("cells", "cells"), ("span", "span m²"), ("nodes", "nodes"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
             ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
-            ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m")]
+            ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

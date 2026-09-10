@@ -165,6 +165,7 @@ private:
     std::array<int, kNumPolicyJoints> actuator_{};   // into d_->ctrl
     int trunk_body_  = -1;
     int    n_objects_ = 0;                    // bodies named obj_*
+    bool   robot_contact(int i, int& other_geom) const;   // is contact i the robot's, and with which geom
     std::vector<char> qpos_is_robot_;         // per qpos index: does the robot own it (reset noise)
     std::array<double, 3> push_{};
     int push_ticks_ = 0;

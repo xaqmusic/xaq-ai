@@ -42,6 +42,12 @@ the tour starts at 600 s. The launcher now fast-forwards to 600 s (`--fast-until
 + viewer; the run is tick-identical) and has a ↻ presets button. The R30 preset's command is
 byte-identical to the sweep's run.
 
+**Corrected instruments (later the same day):** the `obj` flag counted a ball resting on the
+floor; both contact flags now count the robot's own contacts only. Corrected R30: 6.6 ± 5.8
+walls/min, **22.5 ± 23.7 objs/min** (it dribbles balls without seeking them), `down%` 0.14.
+**Observed: the table-leg wedge** (§17.8) — B2's first (d) scenario, and E1's stimulus for
+"a learned direction beats the proximity priors" at a 3 cm pillar.
+
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
 a launcher preset that mirrors the harness line.
@@ -293,7 +299,7 @@ verdict in the design doc and the ledger. R-numbers are minted by `newtest.py` a
 | E1 | explore-by-appearance in R27's slot | the room | coverage, contacts/min, time near objects vs walls | ≥ R27 on coverage, ≤ R27 on contacts |
 | E2 | approach and poke | movables | pushes/min; TLE after a push; time within one body length of movers | it spends more time at what answers than at what does not |
 | B1 | boredom-gated babble, untaxed | the standing brain | stance survival; re-consolidation time | the stance survives and re-consolidates |
-| B2 | the fallen regime open, rescue held back for a window | N dropped poses | self-righting rate; rescues/hour | loud or nothing (§3.3) — no excavating a marginal rate |
+| B2 | the fallen regime open, rescue held back for a window | N dropped poses **and the table-leg wedge** (design doc §17.8: a watched run stayed wedged 690 s through 83 given-up rescues — the stand policy is the rescue, and it has no "wedged" state) | self-righting rate; rescues/hour; `down%` per seed | loud or nothing (§3.3) — no excavating a marginal rate |
 | PR-3 | the voice verb | — | their CI | the operator's call |
 
 Carry-overs folded in: the shifted-scene gap (A1), O24 node persistence (C2/E1: a

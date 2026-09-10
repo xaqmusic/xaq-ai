@@ -1372,3 +1372,41 @@ The wall-rider is gone (seed 2: 108 → 7.8/min) and the room's contact rate is 
 2 m arena's 9/min over four times the area: the 0.3 m walls were partly invisible to the
 sensor, which is a measurement about the *old room*, not the loop. The §17.8 table above
 stays as the record of the 0.3 m room.
+
+**The instruments, corrected (2026-09-10, later).** The `obj` flag was true on every tick of
+every playroom run: `touching_object` counted *any* contact involving a movable, and a ball
+resting on the floor is one. `touching_wall` had the same hole (a block leaning on a chair
+leg would have counted). Both now count only contacts the robot is in; the arena is
+byte-identical, the playroom's physics is byte-identical (only the two fields change). The
+sweep gained `down%` (ticks with the trunk past 60° of tilt) and the level-2 summary prints
+rescues the harness gave up on. Re-measured, same runs:
+
+| 1 m walls, n = 6, corrected | walls/min | objs/min | objects moved (m) | down % |
+|---|---|---|---|---|
+| playroom (R30) | 6.6 ± 5.8 | 22.5 ± 23.7 | 5.1 ± 2.3 | 0.14 ± 0.18 |
+
+So the duck *does* run into the movables — twenty-odd contact episodes a minute, a ball
+dribbled along — without anything seeking them; 0.07/min was the broken flag. Everything
+else in the table above stands.
+
+**The table-leg trap (operator's observation, the same day).** In a watched run on a random
+seed (1069061822; log `mj_host/log/launcher/20260910-103450_*`) the duck walked into a table
+leg at 947.7 s, fell to 141° of tilt with its left foot on the leg and the trunk against it,
+and stayed there for the remaining 690 s: 83 rescues, every one given up after the harness's
+8 s (`give_up_s`), hand-back, 0.2 s debounce, hand-off again. Three things the log settles:
+
+1. **The rescue is the standing policy, not a get-up.** `Driver::Scaffold` runs
+   `alpha_stand`, which holds the standing pose. On a flat floor that happens to right the
+   body; wedged against a pillar it cannot, and nothing in the loop knows the difference.
+   The harness has no "wedged" state — it just cycles. The operator's reading is exact: the
+   sequence is not aware of its situation.
+2. **The sensor saw the leg and the loop drove on.** Two seconds before contact the ToF's
+   TooClose slot read 0.47 then 0.81 while `steer` stayed at play's bearing; a 3 cm cylinder
+   is R27's known failure at its smallest — a learned direction beats the proximity priors
+   (§17.6) — and the room now supplies that stimulus without an operator moving a wall.
+3. **At level 2 our brain is not at the joints.** Pollen's walker drives; the joint-level
+   brain that stood and caught (R19) is not in this loop at all. "It would have babbled its
+   way out" is therefore a claim about B2 of the playroom plan (the fallen regime opened to
+   learning, the rescue held back), and this trap is its first (d) scenario: dropped poses
+   *and* wedged on a table leg. The six harness seeds never wedged (`down%` 0.14), which is
+   why the number must be read per seed.

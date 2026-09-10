@@ -160,27 +160,42 @@ void DuckBody::move_geom(const char* name, const std::array<double, 3>& pos) {
     mj_forward(m_, d_);
 }
 
+// Both instruments ask about contacts the ROBOT is in. A ball resting on the floor or a
+// block leaning on a chair is a contact too, and counting those made `obj` true on every
+// tick of the first playroom runs (2026-09-10) and would let a block against a chair leg
+// count as a wall contact. In the arena every contact involves the robot, so this is
+// byte-identical there.
+bool DuckBody::robot_contact(int i, int& other_geom) const {
+    const int robot_root = m_->body_rootid[trunk_body_];
+    const int g1 = d_->contact[i].geom1, g2 = d_->contact[i].geom2;
+    const bool r1 = m_->body_rootid[m_->geom_bodyid[g1]] == robot_root;
+    const bool r2 = m_->body_rootid[m_->geom_bodyid[g2]] == robot_root;
+    if (r1 == r2) return false;                       // self-contact, or none of the robot
+    other_geom = r1 ? g2 : g1;
+    return true;
+}
+
 bool DuckBody::touching_wall() const {
     // Any static world geom that is not the floor or a rug: the arena's walls (as before —
     // there the static geoms are exactly floor + wall_*), and the playroom's furniture.
     for (int i = 0; i < d_->ncon; ++i) {
-        for (int g : {d_->contact[i].geom1, d_->contact[i].geom2}) {
-            if (m_->body_weldid[m_->geom_bodyid[g]] != 0) continue;      // moving body: not a wall
-            const char* name = mj_id2name(m_, mjOBJ_GEOM, g);
-            const std::string n = name ? name : "";
-            if (n.rfind("floor", 0) == 0 || n.rfind("rug", 0) == 0) continue;
-            return true;
-        }
+        int g;
+        if (!robot_contact(i, g)) continue;
+        if (m_->body_weldid[m_->geom_bodyid[g]] != 0) continue;          // moving body: not a wall
+        const char* name = mj_id2name(m_, mjOBJ_GEOM, g);
+        const std::string n = name ? name : "";
+        if (n.rfind("floor", 0) == 0 || n.rfind("rug", 0) == 0) continue;
+        return true;
     }
     return false;
 }
 
 bool DuckBody::touching_object() const {
     for (int i = 0; i < d_->ncon; ++i) {
-        for (int g : {d_->contact[i].geom1, d_->contact[i].geom2}) {
-            const char* name = mj_id2name(m_, mjOBJ_BODY, m_->body_rootid[m_->geom_bodyid[g]]);
-            if (name && std::string(name).rfind("obj_", 0) == 0) return true;
-        }
+        int g;
+        if (!robot_contact(i, g)) continue;
+        const char* name = mj_id2name(m_, mjOBJ_BODY, m_->body_rootid[m_->geom_bodyid[g]]);
+        if (name && std::string(name).rfind("obj_", 0) == 0) return true;
     }
     return false;
 }
