@@ -1227,6 +1227,7 @@ std::string g_head_graph;
 std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 double g_head_vor_tau = 0.0, g_head_vor_lead = 0.0;   // --head-vor TAU LEAD: the yaw reflex in the head adapter
+double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the rate loop on the head's own gyro
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
@@ -1274,6 +1275,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::unique_ptr<HeadAdapter> head;
     if (!g_head_graph.empty()) {
         head = std::make_unique<HeadAdapter>(g_head_graph, seed);
+        if (g_head_rate_k > 0.0) { head->set_rate_loop(g_head_rate_k, g_head_rate_tau);
+            std::fprintf(stderr, "head rate loop: K %.2f, tau %.2f s\n", g_head_rate_k, g_head_rate_tau); }
         if (g_head_vor_tau > 0.0) { head->set_vor(g_head_vor_tau, g_head_vor_lead);
             std::fprintf(stderr, "head VOR: tau %.2f s, lead %.3f s\n", g_head_vor_tau, g_head_vor_lead); }
         std::fprintf(stderr, "head graph %s  (head gyro sensor: %s)\n", g_head_graph.c_str(),
@@ -1546,6 +1549,8 @@ void usage() {
         "      --no-backing: the forward command clamped at zero — no rear sensor, no step into the unseen.\n"
         "      --head-vor TAU LEAD: the yaw reflex in the head loop — minus the trunk's integrated yaw rate,\n"
         "      leaking to centre in TAU s, plus LEAD s of the rate itself (0 0 = off).\n"
+        "      --head-rate K TAU: the yaw command integrates minus K times the head's OWN yaw rate (its gyro),\n"
+        "      leaking to centre in TAU s — counters whatever moves the head (0 0 = off).\n"
         "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
         "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
         "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
@@ -1654,6 +1659,8 @@ int main(int argc, char** argv) {
             g_arena_shift_s = std::stod(next("--arena-shift"));
         } else if (a == "--head-graph") {
             g_head_graph = next("--head-graph");
+        } else if (a == "--head-rate") {
+            g_head_rate_k = std::stod(next("--head-rate")); g_head_rate_tau = std::stod(next("--head-rate"));
         } else if (a == "--head-vor") {
             g_head_vor_tau = std::stod(next("--head-vor")); g_head_vor_lead = std::stod(next("--head-vor"));
         } else if (a == "--no-backing") {

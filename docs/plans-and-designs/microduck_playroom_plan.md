@@ -59,8 +59,13 @@ are how it leaves a wall). Then (§17.12): yaw is the axis (91°/s on the walker
 unfreezing the model loses the level (F1), lookahead does not recover it (F2), a yaw-rate
 prior rails (Y1), and a trunk-gyro reflex (`--head-vor`, correct sign, 80 ms lag) adds motion —
 because the walker's own policy jitters the head-yaw joint at 1.2 rad/s with a zero command.
-R33 stands as the head loop. Next: a rate loop against the head's own gyro with a position
-anchor, or the jitter removed at the joints (Track A); and the jitter is a finding for Pollen.
+A rate loop on the head's own gyro (§17.13, `--head-rate K TAU`) is also `REGRESSION`, worse
+with gain: the walker answers a head command 120–160 ms late and the jitter is at the gait
+frequency (2.2 Hz), a quarter period — no feedback loop through their walker can cancel it.
+R33 stands as the head loop. What remains, both predictive: a feed-forward locked to the gait
+PHASE (the doctrine's CPG → EPM; the counter-motion commanded a quarter period ahead), or the
+joints (Track A). The jitter itself is a finding for Pollen's outreach. **The H line pauses
+here for the operator's decision.**
 Launcher: R31 (the babble), R32 (level, fast), R33 (level, slow).
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they

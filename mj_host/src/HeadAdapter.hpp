@@ -51,6 +51,13 @@ public:
     // the joint ratio (a yaw command of theta turns the head theta against the trunk), so the
     // only free numbers are the two time constants.
     void set_vor(double tau_s, double lead_s) { vor_tau_ = tau_s; vor_lead_ = lead_s; }
+    // The rate loop against the head's OWN gyro (--head-rate K TAU; 0 = off, byte-identical):
+    // the yaw command integrates minus K times the head's measured yaw rate — whatever moves the
+    // head, the trunk's turn or the walking policy's own jitter of the joint — leaking back to
+    // centre in tau s (the position anchor a rate target alone lacked, Y1). The head IMU's x
+    // axis points down, so its yaw rate is gyro x (measured 2026-09-10: +0.34 with the trunk's
+    // yaw rate, the same sign). With an ideal actuator the head's excursion shrinks by 1/(1+K).
+    void set_rate_loop(double k, double tau_s) { rate_k_ = k; rate_tau_ = tau_s; }
     std::array<double, 4> last_command() const { return last_cmd_; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
@@ -71,6 +78,7 @@ private:
     uint64_t babble_ticks_ = 0;                        // from the graph: the yaw command is masked after it
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
     double vor_tau_ = 0.0, vor_lead_ = 0.0, vor_state_ = 0.0;
+    double rate_k_ = 0.0, rate_tau_ = 0.0, rate_state_ = 0.0;
 };
 
 }  // namespace mjhost

@@ -1601,3 +1601,37 @@ Refuted in this context: the fast prior, the learning model, the lookahead, a ya
 and the trunk-gyro reflex. The next lever is a rate loop against the head's own gyro with a
 position anchor, or a step down the ladder: the walker's head jitter is the actuator's noise,
 and Track A (the joints) is where it would be removed.
+
+### 17.13 The rate loop on the head's own gyro — refuted by the actuator's lag at the gait frequency (2026-09-10)
+
+`--head-rate K TAU` (off by default): the yaw command integrates minus K times the head's own
+yaw rate (the head IMU's x component, its down axis; measured +0.34 with the trunk's yaw rate,
+the same sign) and leaks to centre in TAU s — the position anchor Y1 lacked. On R33, K = 1
+and 2, TAU = 2 s, n = 6:
+
+| arm | head yaw rate RMS (rad/s) | 3-axis head rate | walls/min | frame diff (s6) | yaw rotation (s6, °/s) |
+|---|---|---|---|---|---|
+| R33 | 1.72 | 2.30 | 20 | 14.4 | 85 |
+| G1 K = 1 | 2.03 | 2.95 ± 0.22 | 44 ± 24 | 16.3 | 94 |
+| G2 K = 2 | 2.20 | 3.17 ± 0.17 | 42 ± 37 | 20.3 | 132 |
+
+`REGRESSION`, worse with gain — the signature of a lag-limited loop. The loop does what it
+says: the command's rate is −0.86 correlated with the measured head yaw rate at lag 0. But the
+joint's counter-motion arrives **6–8 ticks (120–160 ms) later** — the walker's head tracking,
+its policy and its low-pass — and the jitter it is countering sits at the **gait frequency**:
+the head yaw rate's spectrum peaks at 2.23 Hz with 44 % of its power in 2–3 Hz, where the hip
+pitch has 46 % of its own. A correction 120–160 ms late on a 450 ms period is 100–130° late:
+it adds energy. (The pitch axis carries an 8.3 Hz neck resonance, 82 % of its power — a
+different problem, not the gait's.)
+
+**What this closes, and what it opens.** Through Pollen's walker no feedback loop on the head
+can remove the gait's yaw jitter: the actuator answers a quarter period late, and the walker's
+own policy is the source. Two routes remain, both predictive in the sense the operator asked
+for. (1) **Phase, not feedback**: the jitter is periodic with the gait, so a feed-forward
+locked to the gait phase can command the counter-motion a quarter period *ahead* — the
+doctrine's "feed it phase" (CPG → EPM), the picrawler's stride model; the module carries a
+`step_phase`/CPG apparatus already. Its honest signal is the head gyro's residual at the gait
+frequency. (2) **The joints** (Track A): the jitter is the actuator's noise, removable only
+where the actuator is ours. And a third for Pollen: their policy's head-pose tracking leaves
+1.2 rad/s of yaw jitter at a fixed command, a measured finding on their model for the
+outreach. R33 remains the head loop; the H line pauses here for the operator's decision.

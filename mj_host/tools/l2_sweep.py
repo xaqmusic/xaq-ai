@@ -22,8 +22,9 @@ Per arm and seed, from the host's own JSONL (stdout) and summary (stderr):
   tooclose    mean TooClose fraction (tofs[3])
   path        metres travelled
   cells       distinct 0.25 m cells visited
-  headW rms   the head loop (--head-graph): RMS of the head gyro's x, y (rad/s) while upright -- the head's
-              WORLD motion, which a head locked to the trunk scores worst on; headG dev = RMS of the head
+  headW rms   the head loop (--head-graph): RMS of the head gyro over all three axes (rad/s) while upright --
+              the head's WORLD motion, which a head locked to the trunk scores worst on (before 2026-09-10
+              night it summed x, y only; x is the head's yaw); headG dev = RMS of the head
               gravity's roll and pitch components (the IMU's x axis points down when level; 0 = level).
               nan without a head graph.
   down%       ticks with the trunk past 60 deg of tilt -- on the floor, whether or not a rescue is running
@@ -158,7 +159,8 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         down += float(r.get("tilt", 0.0)) > 60.0
         if "hw" in r and float(r.get("tilt", 0.0)) < 60.0:          # a head on the floor is not the loop's to keep still
             # the head IMU's x axis points DOWN when the camera is level: roll and pitch are hg[1], hg[2]
-            hw = r["hw"]; hg = r["hg"]; hw2 += hw[0] ** 2 + hw[1] ** 2; hg2 += hg[1] ** 2 + hg[2] ** 2; nh += 1
+            # the head's rate over all three axes (its x axis is yaw: the IMU's x points down when level)
+            hw = r["hw"]; hg = r["hg"]; hw2 += hw[0] ** 2 + hw[1] ** 2 + hw[2] ** 2; hg2 += hg[1] ** 2 + hg[2] ** 2; nh += 1
         o = int(r.get("obj", 0))
         if o and not prev_obj: obj_eps += 1
         prev_obj = o

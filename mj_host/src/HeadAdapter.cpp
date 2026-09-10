@@ -102,6 +102,12 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
         vor_state_ -= vor_state_ * (dt / vor_tau_);     // the leak: a slow turn passes, a wobble is held
         last_cmd_[2] = std::clamp(-(vor_state_ + vor_lead_ * w[2]), -kHeadRange[2], kHeadRange[2]);
     }
+    if (rate_k_ > 0.0 && rate_tau_ > 0.0 && tick_id_ >= babble_ticks_) {
+        constexpr double dt = 1.0 / 50.0;
+        rate_state_ += hw[0] * dt;                       // the head's own yaw increment (gyro x: the down axis)
+        rate_state_ -= rate_state_ * (dt / rate_tau_);   // the anchor: leak to centre
+        last_cmd_[2] = std::clamp(-rate_k_ * rate_state_, -kHeadRange[2], kHeadRange[2]);
+    }
     ++tick_id_;
     return last_cmd_;
 }
@@ -115,6 +121,7 @@ void HeadAdapter::on_reset() {
     instance_->bus()->publish("events.reset", ev);
     last_cmd_ = {0.0, 0.0, 0.0, 0.0};
     vor_state_ = 0.0;
+    rate_state_ = 0.0;
 }
 
 void HeadAdapter::set_learning(bool on) {
