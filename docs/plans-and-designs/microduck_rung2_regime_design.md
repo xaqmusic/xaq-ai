@@ -1357,4 +1357,18 @@ horizontal field at 4:3). The playroom scene includes the overlay; the run is by
 with and without it (a camera has no physics), the gates pass. Rendered mid-run the frame is
 level and upright: rug, walls, a block — and a lot of sky, because the walls are 0.3 m and
 the camera is 12 cm off the floor. Whether the walls rise for the camera's sake is the
-operator's call before C2.
+operator's call before C2. **Decided the same night: walls 1 m, and the light moved off
+noon.** The camera-mounted headlight, which flattens every texture, is nearly off; one angled
+sun (elevation ~45°) casts shadows and a weak fill from the opposite side keeps the shadowed
+sides readable; shadow map 4096. Rendered: no saturated pixels in either view, textures
+crisp. **The taller walls change the runs from tick 3** — the ToF's upper rows used to pass
+over 0.3 m walls and now hit — so R30 was re-measured on the 1 m room:
+
+| 1 m walls, n = 6 | walls/min | cells | map nodes | map TLE | objs/min | objects moved (m) | rescues/min | escaped |
+|---|---|---|---|---|---|---|---|---|
+| playroom (R30) | 7.1 ± 6.0 (2.8 / 3.9 / 4.6 / 4.7 / 7.8 / 18.8) | 151 ± 34 | 100 ± 20 | 0.20 | 0.07 | 5.1 ± 2.3 | 0.05 | 0 |
+
+The wall-rider is gone (seed 2: 108 → 7.8/min) and the room's contact rate is now below the
+2 m arena's 9/min over four times the area: the 0.3 m walls were partly invisible to the
+sensor, which is a measurement about the *old room*, not the loop. The §17.8 table above
+stays as the record of the 0.3 m room.

@@ -28,12 +28,13 @@ unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this pl
 **A1 is built (2026-09-10, design doc §17.8): `WORKING` as an instrument, awaiting the
 operator's eye.** `mj_host/tools/playroom_gen.py --seed 1` → `scene_playroom.xml` + manifest;
 host flags `--move NAME X Y S`; the `obj` field; the sweep reads the manifest. R27's loop on
-it, n = 6: 140 cells of 256, 98 map nodes, 33 ± 39 walls/min (one wall-rider), 0.07 objs/min,
+it (1 m walls), n = 6: 151 cells of 256, 100 map nodes, 7.1 ± 6.0 walls/min, 0.07 objs/min,
 no escapes. Launcher: **R30** (seed 6) and its moved-ball (d) twin. Render the room to check
 it: the viewer's venv with `MUJOCO_GL=egl` and `mujoco.Renderer`. **The head camera is
 re-placed** (`robot_overlay_playroom.xml`, generated: at the lens front, facing the ToF's
-forward, upright, fovy 49°); a mid-run render is level and shows the room — and much sky over
-the 0.3 m walls, a wall-height decision for the operator before C2.
+forward, upright, fovy 49°); **walls 1 m and an angled sun with shadows** (operator, the same
+night; the 0.3 m walls were partly invisible to the ToF's upper rows — re-measured at n = 6:
+7.1 ± 6.0 walls/min, 151 ± 34 cells, 100 ± 20 nodes, no wall-rider).
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with
@@ -173,8 +174,9 @@ metric it moves. Four walls in an empty square test nothing R26 did not already 
 
 The duck is ~25 cm tall with a 62° camera at ~20 cm. A chair is four pillars and a roof; a
 table is a ceiling it walks under. Those are good stimuli *because* chair legs look duck-sized
-and never move. Room: **4 m × 4 m**, walls 0.3 m (visible to the ToF; low enough to watch
-over). At the walker's 0.21 m/s a crossing is ~20 s, so a 1500 s run covers the room several
+and never move. Room: **4 m × 4 m**, walls 1 m (operator, 2026-09-10: 0.3 m walls left the camera
+looking at sky and were partly invisible to the ToF's upper rows; the viewer looks in from
+above anyway). At the walker's 0.21 m/s a crossing is ~20 s, so a 1500 s run covers the room several
 times, which the map metrics need.
 
 ### 5.2 Object classes — sorted by how they change, which is the only sorting the brain sees
@@ -192,7 +194,8 @@ Real contrast — patterned textures on a plain floor — because a frozen rando
 structure at every scale in a pattern and none in a flat colour. Two rules, both from the
 picrawler ledger's loudest entry ("the camera was an oracle, and the optics were arbitrary"):
 **the encoder is fixed before the room is decorated, and the room is never adjusted to make a
-result appear.** Lighting is fixed and never a cue.
+result appear.** Lighting is fixed and never a cue: one angled sun that casts shadows, a weak fill, the
+camera headlight nearly off (it flattens textures); no saturated pixels in either view.
 
 ### 5.4 Assets, in the order to use them
 

@@ -539,7 +539,7 @@
  {
   "name": "R30 · the PLAYROOM: R27's play loop in the 4 m room (A1, the room is the lever)",
   "series": 30,
-  "hint": "WATCH (seed 6, 5 walls/min, 136 cells, 98 map nodes): the same play loop as R27 in the 4 m playroom generated from seed 1 (manifest beside the scene). Furniture counts as wall contact; ball and block contact is the obj flag; the clock hand turns once per 20 s. n=6: 33 ± 39 walls/min (seed 2 rides the walls at 108), 140 ± 15 cells of 256, 0.07 objs/min — nothing seeks the movables yet.",
+  "hint": "WATCH (seed 6): the same play loop as R27 in the 4 m playroom generated from seed 1 (manifest beside the scene; walls 1 m, an angled sun). Furniture counts as wall contact; ball and block contact is the obj flag; the clock hand turns once per 20 s. n=6: 7.1 ± 6.0 walls/min, 151 ± 34 cells of 256, 100 ± 20 map nodes, 0.07 objs/min — nothing seeks the movables yet.",
   "state": {
    "config": "a1v2_r30_playroom.json",
    "mode": "level2",

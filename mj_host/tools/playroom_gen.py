@@ -59,7 +59,7 @@ CAMERA_LINE_OLD = '<camera name="head_camera" pos="0.0155 -9.13778e-05 -0.0733" 
 CAMERA_LINE_NEW = ('<camera name="head_camera" pos="0.0155 -9.0e-05 -0.0818" quat="0.707107 0 0 -0.707107" fovy="49"/>'
                    '<!-- OVERLAY: re-placed at the lens front, facing the ToF forward, upright; see playroom_gen.py -->')
 
-WALL_H = 0.30          # m, as the arena: the ToF sees it, the operator sees over it
+WALL_H = 1.00          # m (operator, 2026-09-10: raised from the arena's 0.3 so the camera sees room, not sky)
 WALL_T = 0.025
 DUCK_KEEPOUT = 0.55    # m around the origin kept clear: the duck starts at (0, 0) facing +x
 
@@ -301,9 +301,14 @@ class Room:
     <include file="robot_overlay_playroom.xml" />
 
     <visual>
-        <headlight diffuse="0.7 0.7 0.7" ambient="0.35 0.35 0.35" specular="0.1 0.1 0.1" />
+        <!-- Lighting (operator, 2026-09-10): the headlight rides the camera and flattens every
+             texture, so it is nearly off; one angled sun casts the shadows; a weak fill from the
+             opposite side keeps the shadowed sides readable. Nothing here is a cue: fixed. -->
+        <headlight diffuse="0.15 0.15 0.15" ambient="0.12 0.12 0.12" specular="0 0 0" />
         <rgba haze="0.9 0.92 0.95 1" />
         <global azimuth="160" elevation="-20" />
+        <quality shadowsize="4096" />
+        <map shadowscale="1.2" shadowclip="1.0" />
     </visual>
 
     <asset>
@@ -311,8 +316,8 @@ class Room:
     </asset>
 
     <worldbody>
-        <light pos="0 0 3.5" dir="0 0 -1" directional="true" />
-        <light pos="{self.half:.1f} {-self.half:.1f} 2.5" dir="-0.5 0.5 -1" diffuse="0.3 0.3 0.3" directional="true" />
+        <light name="sun" pos="{self.half*1.5:.1f} {-self.half*1.2:.1f} 3.0" dir="-0.55 0.45 -0.70" diffuse="0.75 0.72 0.66" specular="0.15 0.15 0.15" directional="true" castshadow="true" />
+        <light name="fill" pos="{-self.half:.1f} {self.half:.1f} 2.0" dir="0.4 -0.4 -0.8" diffuse="0.22 0.23 0.26" specular="0 0 0" directional="true" castshadow="false" />
         {nl.join(self.world)}
     </worldbody>
     <keyframe>
