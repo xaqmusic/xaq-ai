@@ -1,0 +1,100 @@
+{
+ "metadata": {
+  "name": "H2/3 gaze \u00b7 restored from H1/3: prior on roll, pitch -> 0 AND head yaw rate -> 0 (hold gaze), slow prior, model learning",
+  "description": "Three motors \u2014 head_pitch, head_yaw, head_roll \u2014 neck at zero. Load rows start at 9: roll 9, pitch 10, down 11, head w_x 12, w_y 13, w_z 14, trunk g 15,16, trunk w 17,18,19. Yaw is the gaze axis (2026-09-10: it carries the largest share of the camera's motion, 91 deg/s RMS on the walker's head). Y1: babble 0, state_prior on load slots 9,10 (roll, pitch) and 14 (head w_z, 0.3 rad/s to unit) -> 0, gain 1, lr 0.02; model_lr 0.02, state_model_lr 0.05. The identity start on the yaw position holds the joint where the rate prior leaves it; a sustained turn winds it toward its \u00b11.4 rad rail \u2014 the number to read.",
+  "launcher_rank": 0
+ },
+ "description": "H2/3 gaze \u00b7 restored from H1/3: prior on roll, pitch -> 0 AND head yaw rate -> 0 (hold gaze), slow prior, model learning",
+ "modules": [
+  {
+   "id": "head_bridge",
+   "type": "JointSensorimotorBridge",
+   "params": {
+    "proprio_input_topic": "reality.proprio.head",
+    "action_topics": [
+     "action.head_pitch",
+     "action.head_yaw",
+     "action.head_roll"
+    ],
+    "output_topics": [
+     "reality.motor_limb.head"
+    ],
+    "proprio_indices": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "group_size": 3,
+    "sensor_label_prefix": "motor_limb",
+    "load_topic": "reality.proprio.head_sense",
+    "load_slots": 12
+   }
+  },
+  {
+   "id": "motor_epm_head",
+   "type": "MotorEPMv2",
+   "params": {
+    "proprio_topics": [
+     "reality.motor_limb.head"
+    ],
+    "action_topics": [
+     "action.head_pitch",
+     "action.head_yaw",
+     "action.head_roll"
+    ],
+    "n_legs": 1,
+    "motor_dim": 3,
+    "model_lr": 0.02,
+    "ctrl_lr": 0.0,
+    "bias_lr": 0.0,
+    "reg_eps": 0.01,
+    "max_dctrl": 0.05,
+    "init_scale": 0.01,
+    "seed": 7171,
+    "babble_ticks": 0,
+    "babble_scale": 0.3,
+    "babble_isolate": 1.0,
+    "babble_hold": 25,
+    "babble_owns_a": 0,
+    "sat_lr": 0.0,
+    "c_init": 1.0,
+    "motor_gain": 1.0,
+    "explore_noise": 0.0,
+    "coupling_gain": 0.0,
+    "stroke_gain": 0.0,
+    "balance_gain": 0.0,
+    "heading_gain": 0.0,
+    "nav_gain": 0.0,
+    "postural_gain": 0.0,
+    "amp_homeo_gain": 0.0,
+    "height_homeo_gain": 0.0,
+    "coord_reward_drive": 0.0,
+    "panic_strength": 0.0,
+    "imu_topic": "reality.proprio.imu",
+    "state_model_lr": 0.05,
+    "model_trace": 0.05,
+    "reset_breaks_model_pairing": 1.0,
+    "state_prior_gain": 1.0,
+    "consolidate_gain": 0.0,
+    "state_prior_indices": [
+     9,
+     10,
+     14
+    ],
+    "state_prior_targets": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "state_prior_lr": 0.02,
+    "consolidate_n": 0
+   }
+  }
+ ],
+ "version": 1,
+ "runtime": {
+  "thread_pool": "per_instance",
+  "num_threads": 0
+ },
+ "edges": []
+}

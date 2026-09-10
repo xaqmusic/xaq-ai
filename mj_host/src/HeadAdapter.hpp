@@ -42,6 +42,15 @@ public:
 
     void on_reset();
     void set_learning(bool on);
+    // The vestibulo-ocular reflex on the yaw axis (--head-vor TAU LEAD; 0 = off, byte-identical).
+    // The head yaw command is minus the trunk's yaw increment integrated from its gyro, leaking
+    // back to centre with time constant tau (s): the gait's yaw wobble is cancelled, a slow turn
+    // passes through. lead (s) adds minus the rate itself, a phase advance against the walker's
+    // head lag. Feed-forward from the trunk gyro — predictive, not reactive — as the operator
+    // asked (2026-09-10); yaw is the axis that carries most of the camera's motion. Its gain is
+    // the joint ratio (a yaw command of theta turns the head theta against the trunk), so the
+    // only free numbers are the two time constants.
+    void set_vor(double tau_s, double lead_s) { vor_tau_ = tau_s; vor_lead_ = lead_s; }
     std::array<double, 4> last_command() const { return last_cmd_; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
@@ -60,6 +69,8 @@ private:
     std::map<std::string, double> frozen_rates_;
     bool frozen_ = false;
     uint64_t babble_ticks_ = 0;                        // from the graph: the yaw command is masked after it
+    bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
+    double vor_tau_ = 0.0, vor_lead_ = 0.0, vor_state_ = 0.0;
 };
 
 }  // namespace mjhost

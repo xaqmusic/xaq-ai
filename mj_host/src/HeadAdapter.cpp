@@ -26,6 +26,14 @@ HeadAdapter::HeadAdapter(const std::string& graph_path, uint64_t seed) {
             }
     }
     for (const auto& m : cfg.modules) {                // the babble's length, so the yaw mask waits for it
+        // a graph that owns the yaw axis (an action.head_yaw topic) is not masked: yaw is then the
+        // loop's to hold — the gaze axis (2026-09-10: yaw carries the largest share of the picture's motion)
+        for (const char* key : {"action_topics"}) {
+            auto at = m.params.find(key);
+            if (at == m.params.end()) continue;
+            if (auto lst = std::get_if<std::vector<std::string>>(&at->second))
+                for (const auto& t : *lst) if (t == "action.head_yaw") mask_yaw_ = false;
+        }
         auto it = m.params.find("babble_ticks");
         if (it == m.params.end()) continue;
         if (auto i = std::get_if<int64_t>(&it->second)) babble_ticks_ = uint64_t(std::max<int64_t>(0, *i));
@@ -87,7 +95,13 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
     // controller's identity start makes an unpriored axis hold its position, and a head that
     // holds its yaw while the body turns under it winds to the rail. The babble still moves
     // yaw (the action is read above for the model's sake); only the command is masked.
-    if (tick_id_ >= babble_ticks_) last_cmd_[2] = 0.0;
+    if (mask_yaw_ && tick_id_ >= babble_ticks_) last_cmd_[2] = 0.0;
+    if (vor_tau_ > 0.0 && tick_id_ >= babble_ticks_) {
+        constexpr double dt = 1.0 / 50.0;
+        vor_state_ += w[2] * dt;                        // the trunk's yaw increment this tick
+        vor_state_ -= vor_state_ * (dt / vor_tau_);     // the leak: a slow turn passes, a wobble is held
+        last_cmd_[2] = std::clamp(-(vor_state_ + vor_lead_ * w[2]), -kHeadRange[2], kHeadRange[2]);
+    }
     ++tick_id_;
     return last_cmd_;
 }
@@ -100,6 +114,7 @@ void HeadAdapter::on_reset() {
     ev->intensity = 1.0f;
     instance_->bus()->publish("events.reset", ev);
     last_cmd_ = {0.0, 0.0, 0.0, 0.0};
+    vor_state_ = 0.0;
 }
 
 void HeadAdapter::set_learning(bool on) {
@@ -158,12 +173,13 @@ std::vector<std::string> HeadAdapter::readback() const {
         const auto& leg = it.value().at("legs").at(0);
         const int rows = leg.at("rows_A").get<int>(), cols = leg.at("cols_A").get<int>();
         const auto A = leg.at("A").get<std::vector<double>>();
-        if ((cols != 4 && cols != 2) || rows < 3 * cols + 6) continue;
+        if ((cols != 4 && cols != 3 && cols != 2) || rows < 3 * cols + 6) continue;
         const auto at = [&](int i, int j) { return A[size_t(i) + size_t(rows) * size_t(j)]; };
         // the four-motor graph commands all head joints; the two-motor graph head_pitch and head_roll
         static const char* const kCmd4[4] = {"neck_pitch", "head_pitch", "head_yaw", "head_roll"};
+        static const char* const kCmd3[3] = {"head_pitch", "head_yaw", "head_roll"};
         static const char* const kCmd2[2] = {"head_pitch", "head_roll"};
-        const char* const* kCmd = (cols == 4) ? kCmd4 : kCmd2;
+        const char* const* kCmd = (cols == 4) ? kCmd4 : (cols == 3) ? kCmd3 : kCmd2;
         char buf[256];
         std::string head = "identified A of " + it.key() + " (row vs command";
         for (int j = 0; j < cols; ++j) head += std::string(j ? "/" : " ") + kCmd[j];

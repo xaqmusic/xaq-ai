@@ -55,8 +55,13 @@ but chases the gait to the pitch rail and shakes the camera more than the walker
 roll joint against a banked body plus rail-chasing (§17.11). The slower prior (R33) cuts the
 rail-hitting and brings the frame difference to 14.4 (walker 12.3, fast prior 16.4):
 `PARTIAL`. No-backing on the twist loop: `REGRESSION` (walls ×5; the short backward commands
-are how it leaves a wall). Next on the H line: a rate target on the frozen model, or
-trunk-gyro feed-forward. Launcher: R31 (the babble), R32 (level, fast), R33 (level, slow).
+are how it leaves a wall). Then (§17.12): yaw is the axis (91°/s on the walker's head, the largest share of the picture);
+unfreezing the model loses the level (F1), lookahead does not recover it (F2), a yaw-rate
+prior rails (Y1), and a trunk-gyro reflex (`--head-vor`, correct sign, 80 ms lag) adds motion —
+because the walker's own policy jitters the head-yaw joint at 1.2 rad/s with a zero command.
+R33 stands as the head loop. Next: a rate loop against the head's own gyro with a position
+anchor, or the jitter removed at the joints (Track A); and the jitter is a finding for Pollen.
+Launcher: R31 (the babble), R32 (level, fast), R33 (level, slow).
 
 Next: the operator observes R30; then C1 (the render) or V1 (the voice), whichever they
 choose. Mint every test config with `tools/duck_launcher/newtest.py`; every lever ships with

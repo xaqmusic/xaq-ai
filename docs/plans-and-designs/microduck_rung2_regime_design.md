@@ -1545,3 +1545,59 @@ tour, during turns, in 66 short runs (median 0.23 s, longest 3.5 s) and no wall 
 6.6 → 36.8 ± 28, path 156 → 133 m** — `REGRESSION`. The short backward commands are the loop
 backing *off* a wall; forbidden, it rides walls. Kept as a flag, off by default. Re-use: a
 rear sensor, or a clamp gated on "nothing ahead", neither of which this body has.
+
+### 17.12 Yaw is the axis; the model must stay frozen; three levers refuted (2026-09-10)
+
+**The operator saw the improvement of R33 and named yaw as the largest remaining error.**
+Measured on seed 6 by splitting the brain-frame difference by the head's rotation between
+consecutive frames (from the logged orientations, at the camera's 12.5 Hz): the walker's head
+turns at **91°/s RMS about its vertical axis, 39 pitch, 50 roll**, and yaw carries the largest
+fitted share of the frame difference. R33 brings roll to 37 and leaves pitch and yaw where
+they were; yaw was masked to follow the trunk, and the gait's yaw wobble goes straight into
+the picture.
+
+Three levers on top of R33, each n = 6 with the seed-6 picture, each `REGRESSION`:
+
+| lever | level (roll+pitch dev) | frame diff (s6) | what happened |
+|---|---|---|---|
+| R33 (2 motors, slow prior, model frozen) | 0.07 | 14.4 | the reference |
+| F1 the model learning while walking (`model_lr 0.02`, `state_model_lr 0.05`) | 0.80 ± 0.19 | 15.7 | the identified pitch authority drifted −0.043 → −0.011 and the head left level; pitch and roll rotation 85 and 91°/s |
+| F2 F1 + `lookahead_gain 1` (act on the predicted state) | 0.41 ± 0.29 | 15.9 | no recovery; walls 66 ± 96 |
+| Y1 yaw as a third motor with a head-yaw-rate prior → 0 (model learning) | 0.77 ± 0.14 | 20.7 | the yaw joint at its ±1.4 rad rail 88–100 % of ticks on four seeds: a rate target with no position anchor winds up in every sustained turn |
+
+**Two conclusions.** The frozen model is not a shortcut: the closed-loop model drifts while
+walking, exactly as the module's own note warns, and with it the level goes; "be predictive
+rather than frozen" has to be done *outside* the model's learning — feed-forward from the
+trunk gyro that leaves the identified authority alone. And a yaw reflex cannot be a target on
+the module's state prior: it needs a position anchor with a leak — the vestibulo-ocular
+reflex's own form — which is the next lever (`--head-vor TAU LEAD` in the head adapter: minus
+the trunk's integrated yaw rate, leaking to centre in TAU s, plus LEAD s of the rate as a
+phase advance against the walker's head lag; 0 = off, byte-identical).
+
+**The yaw reflex, measured (V1 `--head-vor 2 0`, V2 `--head-vor 2 0.1`, on R33), n = 6:**
+level kept (roll + pitch dev 0.10, 0.11), head gyro 2.25 / 2.12, walls **65 ± 85 / 49 ± 28**
+(R33 20), frame difference **16.6 / 19.2** (R33 14.4), head yaw rotation 95 / 94°/s (R33 85).
+`REGRESSION`, both. The diagnosis from the seed-6 log: the reflex is correct and fast — the
+head-yaw joint's rate is anti-correlated with the trunk's yaw rate, peaking at a 4-tick (80 ms)
+lag, and the joint follows the command at 0.98 — and it still adds motion, because **the yaw
+wobble is not the trunk's**. With the head command held at exactly zero (R30, seed 6), the walker's
+own policy moves the head-yaw joint at **1.21 rad/s RMS (69°/s)**, the neck pitch at 0.67, the
+head pitch at 0.48 and the roll at 0.45, against a trunk yaw rate of 0.79: the walking policy jitters the head joints at
+the gait rate on its own, and a reflex integrating the trunk gyro cancels the wrong thing and
+piles its own counter-rotation on top. What the yaw axis needs is a loop against the *head's
+own* rate with a position anchor — the head gyro is the sensor, and the actuator is a policy
+that wiggles what it is told to hold — or, on the real duck, a question for Pollen: their
+walking policy's head-pose tracking leaves ~1 rad/s of yaw jitter at a fixed command, which a
+client cannot remove through `robot.head`. That is a measurement on their MJCF with their
+policy, and belongs in the outreach as a finding, not a complaint. Any head yaw also swings
+the ToF off the direction of travel, which is where the wall contacts come from; the same
+coupling exists on the hardware.
+
+**Where the head line stands (end of 2026-09-10).** R33 is the head loop as it works: two
+motors, identified standing, frozen, a slow level prior — level fore-aft and in roll like a
+walking bird, the operator's eye confirmed, and the camera still 17 % less steady than the
+walker's drooping head because the gait's yaw and the policy's own head jitter are untouched.
+Refuted in this context: the fast prior, the learning model, the lookahead, a yaw-rate prior,
+and the trunk-gyro reflex. The next lever is a rate loop against the head's own gyro with a
+position anchor, or a step down the ladder: the walker's head jitter is the actuator's noise,
+and Track A (the joints) is where it would be removed.
