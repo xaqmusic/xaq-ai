@@ -527,7 +527,10 @@ def build_window():
         main_win, width=e.width, height=max(e.height, main.winfo_reqheight())))
 
     def on_wheel(e):
-        w = root.winfo_containing(e.x_root, e.y_root)
+        try:
+            w = root.winfo_containing(e.x_root, e.y_root)
+        except KeyError:
+            return                       # the pointer is over a combobox's popdown list, a toplevel Tk cannot name
         if isinstance(w, (tk.Text, ttk.Treeview, ttk.Combobox, ttk.Spinbox)):
             return                       # those scroll (or step) themselves
         canvas.yview_scroll(-3 if (e.num == 4 or e.delta > 0) else 3, "units")

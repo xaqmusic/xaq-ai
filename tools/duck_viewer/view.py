@@ -22,9 +22,9 @@ zoom, space to pause, and every one of MuJoCo's own viewer keys works. Ours:
         without smoothing so the coarse frame is what you see; the status line and
         these keys are its HUD, under the image
     H   that HUD text
-    W   outer walls fade to 15 % while the camera is on their far side (on by
-        default): a 1 m wall between a parked camera and the duck no longer hides
-        the moment worth seeing
+    W   what stands between the camera and the duck fades to 15 % (on by default):
+        an outer wall while the camera is on its far side, a table or chair while
+        it blocks the line of sight — a parked camera no longer loses the moment
 
 The camera window renders the head camera from the same qpos the viewer draws, so it
 shows exactly the frame the host will publish once it renders (playroom plan C1); until
@@ -189,7 +189,7 @@ def draw_tof(scn, frame, model, data, mujoco, np, beams):
 # The HUD lives in the camera window, not the MuJoCo window: label geoms placed in the
 # free camera's frame lagged the mouse between syncs and flashed on every zoom (2026-09-10).
 UI = {"tof": False, "help": True, "cam": True, "fade": True}
-HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  walls fade behind the camera\n"
+HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  fade what hides the duck\n"
            "space  pause     drag  orbit     scroll  zoom     right-drag  pan")
 
 
@@ -213,40 +213,82 @@ def free_camera_position(cam, np):
 
 
 class WallFader:
-    """Outer walls go to 15 % opacity while the camera is on their far side.
+    """What stands between the camera and the duck fades to 15 % opacity.
 
     A long run is recorded with the camera parked at an angle, and a 1 m wall between the
     camera and the duck hides the one moment worth seeing (the table-leg wedge, 2026-09-10,
-    was lost that way). Each wall_* box on the world body has one thin axis; the camera is
-    "behind" it when it lies beyond the wall's plane on the side away from the room. Only
-    the loaded model's colours change — the viewer simulates nothing, so nothing else can."""
+    was lost that way). Two tests, both against the loaded model only — the viewer simulates
+    nothing, so nothing else can change:
+
+    * an outer wall (a `wall_*` box on the world body) fades while the camera is beyond its
+      plane on the side away from the room;
+    * a piece of furniture (a static `furn_*` body) fades while any of a small bundle of
+      rays from the camera to the duck's trunk hits one of its geoms before reaching the
+      duck — the table top when the camera looks down through it, a chair between them.
+      A fade holds for half a second after the last hit, so a grazing ray does not flicker.
+    """
 
     ALPHA = 0.15
+    HOLD = 25                                             # frames a fade outlives its last hit
 
     def __init__(self, model, mujoco, np):
-        self.model, self.np = model, np
+        self.model, self.mujoco, self.np = model, mujoco, np
         self.walls = []                                   # (geom id, centre, outward unit normal, half-thickness)
+        self.furniture = {}                               # body id -> [geom ids]
         for g in range(model.ngeom):
-            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, g)
-            if not name or not name.startswith("wall") or model.geom_bodyid[g] != 0:
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+            body = model.geom_bodyid[g]
+            if name.startswith("wall") and body == 0 and model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX:
+                size, pos = model.geom_size[g], model.geom_pos[g]
+                axis = int(np.argmin(size[:2]))           # the thin horizontal axis
+                outward = np.zeros(3)
+                outward[axis] = 1.0 if pos[axis] >= 0 else -1.0
+                self.walls.append((g, pos.copy(), outward, float(size[axis])))
                 continue
-            if model.geom_type[g] != mujoco.mjtGeom.mjGEOM_BOX:
-                continue
-            size, pos = model.geom_size[g], model.geom_pos[g]
-            axis = int(np.argmin(size[:2]))               # the thin horizontal axis
-            outward = np.zeros(3)
-            outward[axis] = 1.0 if pos[axis] >= 0 else -1.0
-            self.walls.append((g, pos.copy(), outward, float(size[axis])))
+            bname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body) or ""
+            if bname.startswith("furn_") and model.body_weldid[body] == 0:
+                self.furniture.setdefault(body, []).append(g)
+        self.hold = {}                                    # geom id -> frames left faded
         self.faded = set()
 
-    def update(self, cam, on=True):
+    def _ray_hits(self, data, origin, target):
+        """Furniture geoms that any ray of the bundle meets before the duck."""
+        mujoco, np = self.mujoco, self.np
+        hits = set()
+        for off in ((0, 0, 0), (0.12, 0, 0), (-0.12, 0, 0), (0, 0.12, 0), (0, -0.12, 0), (0, 0, 0.1)):
+            vec = (target + np.array(off, dtype=float)) - origin
+            reach = float(np.linalg.norm(vec))
+            if reach < 1e-6:
+                continue
+            for body, geoms in self.furniture.items():
+                for g in geoms:
+                    dist = mujoco.mju_rayGeom(data.geom_xpos[g], data.geom_xmat[g], self.model.geom_size[g],
+                                             origin, vec, int(self.model.geom_type[g]))
+                    if 0.0 <= dist < 1.0:             # mju_rayGeom returns the distance in units of |vec|
+                        hits.update(geoms)
+                        break
+        return hits
+
+    def update(self, cam, data=None, target=None, on=True):
         pos = free_camera_position(cam, self.np) if on else None
-        for g, centre, outward, half in self.walls:
-            behind = on and float(self.np.dot(pos - centre, outward)) > half
-            alpha = self.ALPHA if behind else 1.0
+        want = set()
+        if on:
+            for g, centre, outward, half in self.walls:
+                if float(self.np.dot(pos - centre, outward)) > half:
+                    want.add(g)
+            if data is not None and target is not None and self.furniture:
+                want |= self._ray_hits(data, pos, self.np.asarray(target, dtype=float))
+        for g in want:
+            self.hold[g] = self.HOLD
+        for g in list(self.hold):
+            self.hold[g] -= 1
+            if self.hold[g] <= 0 or not on:
+                del self.hold[g]
+        self.faded = set(self.hold)
+        for g in [g for g, *_ in self.walls] + [g for gs in self.furniture.values() for g in gs]:
+            alpha = self.ALPHA if g in self.faded else 1.0
             if self.model.geom_rgba[g][3] != alpha:
                 self.model.geom_rgba[g][3] = alpha
-            (self.faded.add if behind else self.faded.discard)(g)
 
 
 class CamWindow:
@@ -341,7 +383,7 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
     data = mujoco.MjData(model)
 
     print(STATUS_LEGEND)
-    print("  keys: V ToF beams (off)   C brain-camera window   H its HUD text   W walls fade behind the camera (on)")
+    print("  keys: V ToF beams (off)   C brain-camera window   H its HUD text   W fade what hides the duck (on)")
     beams = _tof_beams(np)
     fader = WallFader(model, mujoco, np)
     camwin = None
@@ -371,7 +413,7 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
             data.qpos[:] = frame["qpos"]
             mujoco.mj_forward(model, data)
             viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
-            fader.update(viewer.cam, UI["fade"])
+            fader.update(viewer.cam, data, (frame["x"], frame["y"], frame["z"]), UI["fade"])
             draw_status(viewer.user_scn, frame, mujoco, np)
             if UI["tof"]:
                 draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
@@ -431,7 +473,7 @@ def record(frames, out_path, width=960, height=720):
         data.qpos[:] = frame["qpos"]
         mujoco.mj_forward(model, data)
         camera.lookat[:] = (frame["x"], frame["y"], frame["z"])
-        fader.update(camera)
+        fader.update(camera, data, (frame["x"], frame["y"], frame["z"]))
         renderer.update_scene(data, camera)
         draw_status(renderer.scene, frame, mujoco, np, reset=False)   # the same overlay as live
         draw_tof(renderer.scene, frame, model, data, mujoco, np, beams)

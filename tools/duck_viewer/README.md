@@ -47,7 +47,7 @@ Three keys are ours, listed in the HUD under the brain-camera image (with the st
 | `V` | the ToF's 64 beams from the head, coloured by class | off — they hide the head |
 | `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block; the status line and the keys are its HUD | on |
 | `H` | the HUD text | on |
-| `W` | **walls fade** — an outer wall drops to 15 % opacity while the camera is on its far side, so a camera parked outside the room for a screen recording never has a 1 m wall between it and the duck | on |
+| `W` | **fade what hides the duck** — an outer wall drops to 15 % opacity while the camera is on its far side; a table, chair or shelf drops to 15 % while a bundle of rays from the camera to the duck's trunk hits it first (the table top when looking down through it, a chair in the line of sight); a fade holds half a second past its last hit so a grazing ray does not flicker | on |
 
 **Watching a level-2 run: the first 600 s are the babble.** The duck pulses its twist in place
 to identify its own velocity model, and the tour starts at 600 s. `--fast-until 600` on the
