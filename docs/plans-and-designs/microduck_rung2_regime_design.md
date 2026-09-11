@@ -2212,3 +2212,44 @@ Kalman-faithful quantity the token already carries) instead of the bake flag; th
 worth holding while it surprises the map more than the map expects to be surprised, and the
 bake threshold can then be the map's own choice (20). Re-use context for bake 20: with that
 dwell. Register O37 stays open with this as its next step.
+
+### 17.23 The dwell's signal, three forms (R44–R45 sweeps; R43 config, 2026-09-12)
+
+**The question left by §17.22:** the bake flag carried the dwell's novelty only because baking was
+slow; what should the gaze hold on, so that the map can bake fast and keep its views (O37) while
+the stop still ends when the place is known? Three forms, each a guarded flag on `--stop-gaze`,
+all on R42's babble (yaw sd 0.35, pitch sd 0.08), uncapped stops, n = 6:
+
+| n = 6 | dwell signal | bake | stop s | stand % | quiet-round ends | inserted / baked at stops | pruned | nodes / baked at the end | walls/min | cells | stands held |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R42 | the winner is unbaked | 50 | 31 | 35 | 92 % | 41 / 21 | 17.5 | 33 / 29 | 14 ± 12 | 111 | 65 / 66 |
+| R43 arm | the winner is unbaked | 20 | 12 | 12 | 100 % | 33 / 24.5 | 5.8 | 33.5 / 33 | 23 ± 28 | 131 | 66 / 66 |
+| residual K 1.0 | `quant_error` > K × `expected_error` | 50 | 48 | — | 24 % | 54 / 16.5 | 39 | 32 / 27 | 8.5 ± 9 | 85 | 66 / 66 |
+| residual K 1.0 | the same | 20 | 54 | 68 | 17 % | 55.5 / 32 | 21 | 42.7 / 40.5 | 3.1 ± 4 | 81 | 65 / 66 |
+| residual K 1.5 | the same | 50 / 20 | 10 | — | 98 % | 29 / 1.3 ; 23.5 / 11 | 27 ; 4 | 20 / 18 ; 24 / 23 | 32 ; 22 | 92 ; 121 | 65 ; 66 / 66 |
+| learning progress | surprised on arrival (K 1.0), held while `quant_error` > 0.5 × its arrival value | 50 | 50 | 58 | 26 % | 72 / 16 | 61 | 34 / 28 | 9.8 ± 16 | 71 | 66 / 66 |
+| **learning progress (R43)** | the same | **20** | 46 | 53 | 36 % | 53 / 30 | 17.5 | **43 / 42** | **10.2 ± 5.5** | 89 | **66 / 66** |
+
+- **The plain residual is a knife edge.** Against the channel's global expectation a view is
+  "surprising" about half the time by construction, so K 1.0 holds two thirds of the gazes and the
+  duck stands 68 % of the run with stops that never shorten (55 → 45 s; flat at 58 s with bake 20);
+  K 1.5 is the token's own `is_novel` percentile and ends every stop at 10 s with almost nothing
+  baked. No K serves both the map and the stop.
+- **Learning progress does what the doctrine says the dwell is for.** A view that surprised the
+  map on arrival is held while the prototype is still moving to it — its error above half its
+  arrival value — and released when learned; a known view ends at the minimum hold. With bake 20
+  the map is the fullest measured, **43 nodes with 42 baked at the end** and no baked view ever
+  pruned, on the tightest wall contact of the line (10.2 ± 5.5), with the stand untouched (66/66).
+  O37's aim is met in this form.
+- **What it costs, and what that cost is.** The stops run 46 s and the duck stands 53 % of the
+  run; the stop length does not fall over eleven stops (49 → 47 s). The reason is not the map: the
+  random babble keeps finding views the map has not seen — 53 insertions a run — so "six known
+  gazes in a row" rarely comes. Whether a stop should end when *this stop's* scene is learned or
+  when *random gazes* stop finding novelty is a design choice, and it is the balance of the
+  ten-minute story (walking against looking). Recorded as the open knob rather than tuned.
+
+**Verdict.** The learning-progress dwell with bake 20 `WORKING` for the map (O37 `RESOLVED` in this
+form: the place is learned whole and kept), `PARTIAL` for the stop's contingency (its ending is
+the babble's, not the place's). Config R43 carries it (preset). The stop's ending rule — the
+place's own learned-ness (e.g. the fraction of this stop's views baked) against the babble's
+quiet count — is the next design decision, the operator's.

@@ -1277,7 +1277,17 @@ struct StopPlan {
     // random steps (sd YAW, PITCH rad; pitch below level only up to PITCH, above it to PITCH/3) inside the
     // head's range, each held HOLD s and, while the view's winner is unbaked, up to MAX s; QUIET consecutive
     // known gazes end the stop.  The move is exploration, the dwell is the map's error.  PITCH 0 = yaw only.
-    double gaze_yaw_sd = 0.0, gaze_pitch_sd = 0.0, gaze_hold_s = 0.5, gaze_max_s = 6.0; int gaze_quiet = 6;   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
+    double gaze_yaw_sd = 0.0, gaze_pitch_sd = 0.0, gaze_hold_s = 0.5, gaze_max_s = 6.0; int gaze_quiet = 6;
+    // --stop-gaze-residual K: the dwell's novelty is the token's residual against its own expectation —
+    // the view is held while quant_error > K × expected_error (the channel's running TLE) — instead of the
+    // bake flag, which saturates once baking is fast (R43).  0 = the bake flag.
+    double gaze_residual_k = 0.0;
+    // --stop-gaze-learn F: the dwell's signal is LEARNING PROGRESS — a view that surprised the map on arrival
+    // (quant_error > K × expected_error, K from --stop-gaze-residual) is held while its error is still above
+    // F × its arrival value (the prototype has not yet moved to it), up to MAX.  A known view ends at HOLD.
+    // R44: the plain residual dwell is a knife edge (K 1.0 → the duck stands two thirds of the run and the
+    // stops never shorten; 1.5 → 10 s stops); progress is what the map's learning actually produces.
+    double gaze_learn_frac = 0.0;   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
                                                 // head brain's yaw steps through 0, +AMP, 0, −AMP, each held HOLD s,
                                                 // from the hand-back (or the walker's hold) to the stop's end. A
                                                 // scaffold for the channel; §12.2's target is the map's residual (W3).
@@ -1418,12 +1428,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const bool gaze_on = stop_on && g_stop.gaze_yaw_sd > 0.0;
     if (gaze_on && !head) throw std::runtime_error("--stop-gaze needs --head-graph");
     if (gaze_on && (look_on || scan_on)) throw std::runtime_error("--stop-gaze, --stop-look and --stop-scan are alternatives");
-    if (gaze_on) std::fprintf(stderr, "  gaze babble at stops: steps sd yaw %.2f pitch %.2f rad, hold %.1f s, up to %.1f s while the view is unbaked; %d known gazes in a row end the stop\n",
-                              g_stop.gaze_yaw_sd, g_stop.gaze_pitch_sd, g_stop.gaze_hold_s, g_stop.gaze_max_s, g_stop.gaze_quiet);
+    if (gaze_on) std::fprintf(stderr, "  gaze babble at stops: steps sd yaw %.2f pitch %.2f rad, hold %.1f s, up to %.1f s while the view is %s; %d known gazes in a row end the stop\n",
+                              g_stop.gaze_yaw_sd, g_stop.gaze_pitch_sd, g_stop.gaze_hold_s, g_stop.gaze_max_s,
+                              g_stop.gaze_learn_frac > 0.0 ? "still being learned (its error above F x arrival)" : g_stop.gaze_residual_k > 0.0 ? "more surprising than the map expects" : "unbaked", g_stop.gaze_quiet);
     std::mt19937 gaze_rng(uint32_t(seed * 7919u + 17u));
     std::normal_distribution<double> gaze_n(0.0, 1.0);
     const int gaze_hold_ticks = std::max(1, int(g_stop.gaze_hold_s * kBrainHz)), gaze_max_ticks = std::max(1, int(g_stop.gaze_max_s * kBrainHz));
     double gaze_yaw = 0.0, gaze_pitch = 0.0; int gaze_quiet_run = 0;
+    double gaze_qe0 = 0.0; bool gaze_arrival_novel = false;
     // the map's bookkeeping at stops (the operator, 2026-09-12: watch the baking): views inserted and baked at
     // stops, prunes, and whether a pruned id was ever baked (must stay 0 — the map's health sweep spares baked)
     int ins_stop = 0, bake_stop = 0, ins_walk = 0, bake_walk = 0, pruned_total = 0, pruned_baked = 0, node_mark2 = 0, baked_mark = 0;
@@ -1556,10 +1568,19 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (g_stop.gaze_pitch_sd > 0.0) head->set_pitch_override(true, gaze_pitch);
                     scan_target = gaze_yaw;
                     ++look_held; ++look_ticks;
-                    if (look_held > 10 && brain.map_winner() >= 0 && !baked_ids.count(brain.map_winner())) look_novel_seen = true;
+                    bool view_novel;
+                    if (g_stop.gaze_learn_frac > 0.0) {
+                        // arrival: the view surprised the map (relative to the channel's expectation); then: still learning it
+                        if (look_held == 11) { gaze_qe0 = brain.map_quant_error(); gaze_arrival_novel = gaze_qe0 > g_stop.gaze_residual_k * brain.map_expected_error(); }
+                        view_novel = look_held > 10 && gaze_arrival_novel && brain.map_quant_error() > g_stop.gaze_learn_frac * gaze_qe0;
+                    } else if (g_stop.gaze_residual_k > 0.0) {
+                        view_novel = brain.map_quant_error() > g_stop.gaze_residual_k * brain.map_expected_error();
+                    } else {
+                        view_novel = brain.map_winner() >= 0 && !baked_ids.count(brain.map_winner());
+                    }
+                    if (look_held > 10 && view_novel) look_novel_seen = true;
                     const bool done_min = look_held >= gaze_hold_ticks;
-                    const bool extend = look_novel_seen && look_held < gaze_max_ticks
-                                        && brain.map_winner() >= 0 && !baked_ids.count(brain.map_winner());   // until it bakes
+                    const bool extend = look_novel_seen && look_held < gaze_max_ticks && view_novel;   // until it bakes / stops surprising / is learned
                     if (done_min && !extend) {
                         if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
                         ++saccades; look_held = 0; look_novel_seen = false;
@@ -2006,6 +2027,10 @@ int main(int argc, char** argv) {
             g_stop.keep_head = true;
         } else if (a == "--stop-freeze-head") {
             g_stop.freeze_head = true;
+        } else if (a == "--stop-gaze-learn") {
+            g_stop.gaze_learn_frac = std::stod(next("--stop-gaze-learn"));
+        } else if (a == "--stop-gaze-residual") {
+            g_stop.gaze_residual_k = std::stod(next("--stop-gaze-residual"));
         } else if (a == "--stop-gaze") {
             g_stop.gaze_yaw_sd = std::stod(next("--stop-gaze")); g_stop.gaze_pitch_sd = std::stod(next("--stop-gaze"));
             g_stop.gaze_hold_s = std::stod(next("--stop-gaze")); g_stop.gaze_max_s = std::stod(next("--stop-gaze"));

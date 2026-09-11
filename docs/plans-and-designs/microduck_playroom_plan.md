@@ -76,8 +76,13 @@ the stop ending after six known gazes. Yaw + small pitch (sd 0.08): 65/66 stands
 inserts per run ~21 bake and the rest die unbaked before a revisit — the map's `baking_threshold`
 (50 visits) against a 6 s dwell is the next lever. **The baking threshold tried (R43, §17.22):** 20 keeps the map (prunes 17.5 → 5.8, every node
 baked) and empties the dwell's signal (stops 31 → 12 s, all on a quiet round) — a constant serving
-two consumers. `PARTIAL`. **Next: the dwell on the token's residual against its expected error
-(then bake 20 is free), W5 (§12.7b), W4.**
+two consumers. `PARTIAL`. **The dwell's signal settled (R43 config, §17.23).** The plain residual against the channel's
+expectation is a knife edge; **learning progress** — a view that surprised the map is held while its
+error is above half its arrival value — with bake 20 gives the fullest map (43 nodes, 42 baked, none
+pruned baked), 66/66 stands, 10 ± 6 walls/min. O37 resolved in that form. What remains is a design
+knob: the duck stands 53 % of the run because random gazes keep finding new views; the stop's
+ending rule (the place's own learned-ness vs the babble's quiet count) is the walking/looking balance
+and the operator's call. **Next: that rule (operator), W5 (§12.7b), W4.** Presets R39–R43.
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
