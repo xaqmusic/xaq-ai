@@ -41,6 +41,13 @@ struct Vec3f {
 
     // vector3.hpp:208
     float dot(const Vec3f& b) const { return x * b.x + y * b.y + z * b.z; }
+    // vector3.hpp:199 -- each component is one multiply MINUS one multiply, in that
+    // order.  Not a determinant expansion, not FMA-able: see the note on operator/.
+    Vec3f cross(const Vec3f& b) const {
+        return Vec3f((y * b.z) - (z * b.y),
+                     (z * b.x) - (x * b.z),
+                     (x * b.y) - (y * b.x));
+    }
     // vector3.hpp:488 -- squares first, then sums, then sqrt
     float length() const {
         const float x2 = x * x, y2 = y * y, z2 = z * z;
@@ -62,6 +69,27 @@ struct Vec3f {
     Vec3f operator/(float s) const { return Vec3f(x / s, y / s, z / s); }
     Vec3f operator+(const Vec3f& b) const { return Vec3f(x + b.x, y + b.y, z + b.z); }
     Vec3f operator-(const Vec3f& b) const { return Vec3f(x - b.x, y - b.y, z - b.z); }
+};
+
+// --- Vector2 -----------------------------------------------------------------
+// The stride_v fusion state (_stridev_est / _stridev_bias) is a GDScript Vector2, so
+// it is float32 storage with double-width arithmetic BETWEEN the stores.  That split
+// is the whole reason this type exists rather than a std::pair<double,double>:
+// narrowing at the constructor is what the original does, and doing it anywhere else
+// is a different number.
+struct Vec2f {
+    float x = 0.0f, y = 0.0f;
+
+    Vec2f() = default;
+    Vec2f(float ax, float ay) : x(ax), y(ay) {}
+
+    // vector2.cpp:46 -- ⚠ sqrt(x*x + y*y) DIRECTLY, unlike Vector3::length() which
+    // squares into temporaries first.  The two are not interchangeable in bits.
+    float length() const { return std::sqrt(x * x + y * y); }
+
+    Vec2f operator+(const Vec2f& b) const { return Vec2f(x + b.x, y + b.y); }
+    Vec2f operator-(const Vec2f& b) const { return Vec2f(x - b.x, y - b.y); }
+    Vec2f operator*(float s) const { return Vec2f(x * s, y * s); }
 };
 
 // --- Quaternion --------------------------------------------------------------

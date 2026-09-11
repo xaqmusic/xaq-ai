@@ -1599,7 +1599,9 @@ var _strido_prev_meas: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector
 # Servo forward-model state: per-joint first-order lag on the EFFECTIVE target (the
 # slew-limited command the PD actually tracks, _eff_target_* — itself pure efference).
 # Cleared on hard reset; re-seeded from the current effective target on first use.
-var _strido_lp: Array = []                    # 12 floats, index = leg*3 + joint
+# ⚠ NOW IN C++ — ogma::body::ServoForwardModel, bound as ServoLag (port doc Phase 4,
+# step (b)).  State and arithmetic both live there; this holds only the handle.
+var _servo_lag = null                         # ServoLag (GDExtension), made on first use
 const STRIDO_LP_ALPHA: float = 0.2
 var _strido_prev_loaded: Array = [false, false, false, false]
 var _strido_prev_contact: Array = [false, false, false, false]
@@ -1652,6 +1654,12 @@ var _stridev_prev_loaded: Array = [false, false, false, false]
 # is +Z, so with Y up in a right-handed frame its +X is anatomically LEFT.  Every producer
 # and consumer in this stack labels +X "right" consistently, so the mirror is behaviorally
 # null — do NOT rename piecemeal; the note at :325 says why and where it must be resolved.
+# ⚠ THE FUSION NOW RUNS IN C++ — ogma::body::StrideV, bound as StrideVNode (port doc
+# Phase 4, step (b)), so the sim and ogma_host share one estimator.  The three vars
+# below are MIRRORS for the trace/HUD, written FROM the filter each tick, never
+# computed here — the same arrangement _up_est_body has with ImuAttitude.
+var _stridev = null                       # StrideVNode (GDExtension), made on first use
+var _stridemath = null                    # StrideMath (GDExtension), stateless helpers
 var _stridev_est: Vector2 = Vector2.ZERO  # [x = right, y = forward] body frame, m/s
 var _stridev_bias: Vector2 = Vector2.ZERO # learned accel bias [x, z], m/s^2
 var _stridev_slip: float = 0.0
@@ -6642,10 +6650,17 @@ func _step_one() -> void:
 	# IK ⊕ IMU and nothing else.  It differs from the oracle by exactly the ABSOLUTE
 	# chassis height, which is the god's-eye part and the only part we drop.
 	var up_body: Vector3 = _ch_inv.basis * Vector3.UP
+	# ⚠ `foot·up − L3/2` IS ONE CONTRACT, SHARED BY FIVE VARIANTS, so all five call
+	# ogma::body::feet_y_gravity (port doc Phase 4, step (b)) rather than each spelling
+	# it out.  Both halves matter: WHICH `up` decides whether the channel is legal, and
+	# the offset is what puts the toe rather than the shin's midpoint at the origin.  A
+	# publisher that dropped it emits a plausible wrong number into a promoted input.
+	if _stridemath == null:
+		_stridemath = ClassDB.instantiate("StrideMath")
 	var feet_y_grav_arr := PackedFloat64Array()
 	for i in range(4):
 		var foot_body: Vector3 = _ch_inv * _lowers[i].global_transform.origin
-		feet_y_grav_arr.append(foot_body.dot(up_body) - L3 * 0.5)
+		feet_y_grav_arr.append(_stridemath.feet_y_gravity(foot_body, up_body, L3))
 	brain.publish_proprio(feet_y_grav_arr, "feet_y_gravity")
 
 	# ---- feet_y_gravity_cmd / _fk: the SIM-TO-REAL test (2026-07-25) ----------------
@@ -6674,12 +6689,28 @@ func _step_one() -> void:
 		var toe_cmd_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		var toe_cmdlp_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		var toe_meas_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
-		if _strido_lp.size() != 12:
-			_strido_lp.resize(12)
-			for k in range(4):
-				_strido_lp[k * 3]     = _eff_target_hip1[k]
-				_strido_lp[k * 3 + 1] = _eff_target_hip2[k]
-				_strido_lp[k * 3 + 2] = _eff_target_knee[k]
+		# Servo forward model — ogma::body::ServoForwardModel.  Seeds from the current
+		# effective target on first use (a lag starting at zero would spend its first
+		# ~100 ms reporting a leg folded flat, and those ticks feed a velocity).
+		if _servo_lag == null:
+			_servo_lag = ClassDB.instantiate("ServoLag")
+		var eff_targets := PackedFloat64Array()
+		eff_targets.resize(12)
+		for k in range(4):
+			eff_targets[k * 3]     = _eff_target_hip1[k]
+			eff_targets[k * 3 + 1] = _eff_target_hip2[k]
+			eff_targets[k * 3 + 2] = _eff_target_knee[k]
+		# ⚠ TWO GUARDS, KEPT APART.  The original seeds whenever this block runs but
+		# only advances once the toe offsets exist.  Those probably coincide, and
+		# "probably" is not something a byte-identity port should rest on — so the seed
+		# stays unguarded and the advance keeps the _toe_off_c guard it already had.
+		if not _servo_lag.seeded():
+			_servo_lag.seed(eff_targets)
+		if _toe_off_c.size() == 4:
+			# Once per tick, not once per leg.  (The original advanced leg i's three
+			# joints inside leg i's iteration — the same thing only because each leg
+			# touches only its own three indices.)
+			_servo_lag.advance(eff_targets, STRIDO_LP_ALPHA)
 		for i in range(4):
 			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
 			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
@@ -6690,16 +6721,11 @@ func _step_one() -> void:
 				+ servo_origins[servo_idx(i, 2)]
 			var lower_fk:  Transform3D = _fk_leg(i, hip1_angles[i], hip2_angles[i], knee_angles[i])[2]
 			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
-			fk_arr.append((rest_inv * lower_fk.origin).dot(up_body) - L3 * 0.5)
-			cmd_arr.append((rest_inv * lower_cmd.origin).dot(up_body) - L3 * 0.5)
+			fk_arr.append(_stridemath.feet_y_gravity(rest_inv * lower_fk.origin, up_body, L3))
+			cmd_arr.append(_stridemath.feet_y_gravity(rest_inv * lower_cmd.origin, up_body, L3))
 			if _toe_off_c.size() == 4:
-				# Servo forward model: first-order lag on the slew-limited effective
-				# target (which drove the physics that produced this tick's pose).
-				_strido_lp[i * 3]     += STRIDO_LP_ALPHA * (_eff_target_hip1[i] - _strido_lp[i * 3])
-				_strido_lp[i * 3 + 1] += STRIDO_LP_ALPHA * (_eff_target_hip2[i] - _strido_lp[i * 3 + 1])
-				_strido_lp[i * 3 + 2] += STRIDO_LP_ALPHA * (_eff_target_knee[i] - _strido_lp[i * 3 + 2])
 				var lower_clp: Transform3D = _fk_leg(i,
-					_strido_lp[i * 3], _strido_lp[i * 3 + 1], _strido_lp[i * 3 + 2])[2]
+					_servo_lag.get(i * 3), _servo_lag.get(i * 3 + 1), _servo_lag.get(i * 3 + 2))[2]
 				toe_cmd_b[i]   = rest_inv * (lower_cmd * _toe_off_c[i])
 				toe_cmdlp_b[i] = rest_inv * (lower_clp * _toe_off_c[i])
 				toe_meas_b[i]  = rest_inv * (lower_fk * _toe_off_c[i])
@@ -6746,8 +6772,8 @@ func _step_one() -> void:
 			var d3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
 				+ servo_origins[servo_idx(i, 2)]
 			var foot_b: Vector3 = rest_inv * _fk_leg(i, d1, d2, d3)[2].origin
-			acc_arr.append(foot_b.dot(up_acc) - L3 * 0.5)
-			imu_arr.append(foot_b.dot(_up_est_body) - L3 * 0.5)
+			acc_arr.append(_stridemath.feet_y_gravity(foot_b, up_acc, L3))
+			imu_arr.append(_stridemath.feet_y_gravity(foot_b, _up_est_body, L3))
 		brain.publish_proprio(acc_arr, "feet_y_gravity_cmd_acc")
 		brain.publish_proprio(imu_arr, "feet_y_gravity_cmd_imu")
 		# (attitude-error diagnostics are set in _imu_substep, at the sensor's own rate)
@@ -6782,16 +6808,21 @@ func _step_one() -> void:
 		# body (prev positions meaningless); hard reset invalidates via _do_hard_reset.
 		if _strido_prev_valid and _suspend_lift_y == 0.0 and _toe_off_c.size() == 4:
 			for i in range(4):
-				var v_clp_i: Vector3 = -((toe_cmdlp_b[i] - _strido_prev_cmdlp[i]) / TAU \
-					+ gyro_mean.cross((toe_cmdlp_b[i] + _strido_prev_cmdlp[i]) * 0.5))
-				var v_meas_i: Vector3 = -((toe_meas_b[i] - _strido_prev_meas[i]) / TAU \
-					+ gyro_mean.cross((toe_meas_b[i] + _strido_prev_meas[i]) * 0.5))
+				# ⚠ ALL FOUR VARIANTS SHARE ONE FORMULA — ogma::body::planted_foot_velocity
+				# (port doc Phase 4, step (b)).  Only `cmdlp` is ported as a channel; the
+				# other three are sim-only diagnostics.  They call the same code anyway,
+				# because the alternative is a C++ copy for the gated variant and a
+				# GDScript copy for the ungated ones, drifting silently apart.
+				var v_clp_i: Vector3 = _stridemath.planted_foot_velocity(
+					toe_cmdlp_b[i], _strido_prev_cmdlp[i], gyro_mean, TAU)
+				var v_meas_i: Vector3 = _stridemath.planted_foot_velocity(
+					toe_meas_b[i], _strido_prev_meas[i], gyro_mean, TAU)
 				_dbg_strido_vleg_clp[i] = v_clp_i.z
 				_dbg_strido_vleg_meas[i] = v_meas_i.z
 				if loaded_now[i] and _strido_prev_loaded[i]:
 					sv_cmdlp += v_clp_i
-					sv_cmd += -((toe_cmd_b[i] - _strido_prev_cmd[i]) / TAU \
-						+ gyro_mean.cross((toe_cmd_b[i] + _strido_prev_cmd[i]) * 0.5))
+					sv_cmd += _stridemath.planted_foot_velocity(
+						toe_cmd_b[i], _strido_prev_cmd[i], gyro_mean, TAU)
 					sv_meas += v_meas_i
 					sv_ns += 1
 				if contact_now[i] and _strido_prev_contact[i]:
@@ -6825,22 +6856,22 @@ func _step_one() -> void:
 		# (gravity removed via the honest fused attitude estimate — the IMU's own, never
 		# exact attitude) minus the LEARNED bias; correct toward stance-FK when stance
 		# feet exist, and let the innovation both teach the bias and feed `slip`.
-		var a_lin: Vector3 = _accel_body_last - 9.81 * _up_est_body
+		# ogma::body::StrideV — the PI complementary filter, now shared with ogma_host.
+		# The coast branch (no planted feet) is inside it: the FK anchor is gone there,
+		# and unleaked integration turns attitude error into phantom velocity within
+		# seconds, which is the shape a hardware audit fails on.
+		if _stridev == null:
+			_stridev = ClassDB.instantiate("StrideVNode")
+			_stridev.configure(STRIDE_V_FUSE_BETA, STRIDE_V_BIAS_KI, STRIDE_V_SLIP_ALPHA,
+				STRIDE_V_COAST_LEAK, 9.81)
+		var a_lin: Vector3 = _stridev.linear_accel(_accel_body_last, _up_est_body)
 		_dbg_stridev_alin = a_lin
-		var v_pred := Vector2(_stridev_est.x + (a_lin.x - _stridev_bias.x) * TAU,
-							  _stridev_est.y + (a_lin.z - _stridev_bias.y) * TAU)
-		if sv_ns_sensor > 0:
-			var v_fk := Vector2(sv_sensor.x / float(sv_ns_sensor),
-								sv_sensor.z / float(sv_ns_sensor))
-			var innov: Vector2 = v_fk - v_pred
-			_stridev_est = v_pred + STRIDE_V_FUSE_BETA * innov
-			_stridev_bias += -STRIDE_V_BIAS_KI * innov
-			_stridev_slip += STRIDE_V_SLIP_ALPHA * (innov.length() - _stridev_slip)
-		else:
-			# No planted feet: coast on the bias-corrected accelerometer with a slow
-			# leak — the FK anchor is gone and unleaked integration turns attitude
-			# error into phantom velocity within seconds (hardware-audit failure shape).
-			_stridev_est = v_pred * (1.0 - STRIDE_V_COAST_LEAK)
+		# sv_sensor is the SUM over planted feet; the filter takes the count and means
+		# it internally, so the stance rule stays here and the estimator stays shared.
+		_stridev.step(a_lin, sv_sensor, sv_ns_sensor, TAU)
+		_stridev_est = _stridev.est()
+		_stridev_bias = _stridev.bias()
+		_stridev_slip = _stridev.slip()
 		var sv_out := PackedFloat64Array()
 		sv_out.append(_stridev_est.x)
 		sv_out.append(_stridev_est.y)
@@ -10368,9 +10399,15 @@ func _do_hard_reset() -> void:
 	# meaningless — skip one displacement tick rather than log a phantom stride.  The
 	# servo forward-model state re-seeds from the post-reset effective targets.
 	_strido_prev_valid = false
-	_strido_lp.clear()
+	if _servo_lag != null:
+		_servo_lag.reset()
 	# stride_v sensor: a hard reset is a velocity discontinuity the fusion must not
-	# integrate across (the bus reset event tells consumers the same thing).
+	# integrate across (the bus reset event tells consumers the same thing).  The
+	# filter owns the state now, so it is reset THERE and the mirrors follow — zeroing
+	# only the mirrors would leave the estimator integrating across the teleport while
+	# the trace and HUD showed a clean zero.
+	if _stridev != null:
+		_stridev.reset()
 	_stridev_est = Vector2.ZERO
 	_stridev_bias = Vector2.ZERO
 	_stridev_slip = 0.0

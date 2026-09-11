@@ -1241,10 +1241,75 @@ lives: **`cpp_core/include/ogma/body/`** (e.g. `LegKinematics`, `ImuAttitude`,
 `StrideOdometry`, `FootLoad`), linked by both the GDExtension and `ogma_host`; the GDScript
 then calls into it, and the sim's byte-identity across that swap is the gain-0 gate.
 
-**Order:** (a) port `LegKinematics` + `ImuAttitude` and prove them against the sim's own
-FK/IMU debug outputs (`get_imu_debug()`, the FK spot table); (b) `StrideOdometry` +
-`feet_y_gravity_cmd_imu`; (c) the sim-honesty A/B on `imu`/`upright`/`joints` substitutes;
-(d) `ogma_host` on the Pi with the parts.
+**Order:** (a) ✅ `LegKinematics` + `ImuAttitude`; (b) ✅ `StrideOdometry` +
+`feet_y_gravity_cmd_imu`; (c) **NEXT** — the sim-honesty A/B on `imu`/`upright`/`joints`
+substitutes; (d) `ogma_host` on the Pi with the parts.
+
+### Step (a) · ✅ DONE — `LegKinematics` + `ImuAttitude`
+
+Both live in `cpp_core/include/ogma/body/`, both bit-verified against the GDScript
+original, and `pi_host`'s `Icm20948` was moved onto the shared filter so exactly one
+attitude implementation remains in the robot's process (it had carried a private
+Rodrigues copy — the same rotation and a different float).
+
+### Step (b) · ✅ DONE 2026-09-11 — `StrideOdometry` + `feet_y_gravity_cmd_imu`
+
+`cpp_core/include/ogma/body/StrideOdometry.hpp` — the stance-FK velocity primitive, the
+servo forward model, `feet_y_gravity`, and the `stride_v ⊕ slip` PI fusion. Bound as
+`ServoLag` / `StrideVNode` / `StrideMath`; `picrawler_body.gd` no longer implements any
+of them.
+
+**The cut follows step (a)'s rule — share the ESTIMATOR, never the simulation of a part
+we own.** The sim computes four stride variants and only `cmdlp` is one the robot can
+build (commanded angles through the servo lag, stance gated on published `foot_load`);
+`cmd`, `meas`, `tc` and `true` stay in GDScript as diagnostics. But all four share ONE
+formula, so `planted_foot_velocity` is public and the diagnostics call it too — the
+alternative leaves two implementations of the expression this port exists to unify,
+drifting apart because only one of them is gated.
+
+**Why this module was harder than the first two.** It ACCUMULATES. `est`, `bias` and
+`slip` carry forward every tick and `stride_v` is consumed by MotorEPMv2 and GainEvolver,
+so a 1-ULP divergence integrates rather than staying 1 ULP. Which makes the gate
+unusually sensitive — a feature, not a cost.
+
+⚠ **The widths are not uniform, and that is the whole difficulty.** `Array[float]` is
+DOUBLE, so the servo lag and the stance test run in double; `Vector2`/`Vector3` are
+float32 storage with double arithmetic between stores, narrowing at the constructor;
+and `_stridev_slip` is a bare `var x: float`, so slip accumulates in DOUBLE right beside
+two float32 accumulators in the same `if` block. Transcribed, not derived.
+
+**THE GAIN-0 GATE — two instruments, because the first one had a hole.**
+
+| run | result |
+|---|---|
+| 1200 ticks × seeds 7, 13, `continuous` | **IDENTICAL byte-for-byte**, 0 script errors |
+| 4999 ticks × seeds 7, 13, `instant_pause` (**14 / 15 hard resets**) | **IDENTICAL byte-for-byte**, 0 script errors |
+
+⚠ **The first gate was green over code it never ran.** `_do_hard_reset` — the path this
+port changes most (the filter owns the state now, so the reset had to move from zeroing
+GDScript vars to resetting the filter) — fires only on a gym switch, a manual reset, or
+an episode boundary, and `reset_mode=continuous` reaches none of them: `auto_reset_count`
+was 0 for all 1200 ticks. The `instant_pause` arm exists to run it. Same lesson as the
+step-(a) commit, from the other direction.
+
+**A wrong comment cost a build, and the mechanism is worth recording.** The declaration
+of `_strido_lp` said "cleared on hard reset"; a `grep | head` that truncated before line
+10410 said it never was. The port was written to the truncated evidence, asserted the
+comment was stale, and left a dangling reference that failed to parse — 421 k script
+errors and no trace at all. **The gate caught it because it produced nothing, which is
+the good failure mode.** The comment was right; the search was short.
+
+**Parity oracle:** `scripts_tools/stride_odometry_parity.gd` →
+`cpp_core/tests/body/stride_odometry_parity_check.cpp`. 900 steps, bit-exact on every
+field first try. Two things it does that the earlier two did not, both because StrideV
+branches: the oracle **asserts its own stance-count coverage** and the checker **exits
+non-zero on a coverage gap** rather than reporting a bit-exact pass over a branch it
+never entered — the coast branch (no planted feet) only fires on airborne ticks. The
+first load schedule reached stance counts 2 and 3 only, and said so.
+
+**Nothing was wired into `pi_host` here**, and deliberately: by SPEC §1.1 there is no
+brain→servo path, and the FSRs that would feed `foot_load` are unbuilt, so there is no
+consumer for `stride_v` on the robot yet. The estimator is in place for step (d).
 
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 
