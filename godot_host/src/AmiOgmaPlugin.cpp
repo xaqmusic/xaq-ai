@@ -12,6 +12,7 @@
 #include "OgmaBrain.hpp"
 #include "BenchClient.hpp"
 #include "VideoClient.hpp"
+#include "ImuAttitude.hpp"
 
 using namespace godot;
 
@@ -20,6 +21,7 @@ static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<OgmaBrain>();
     ClassDB::register_class<BenchClient>();
     ClassDB::register_class<VideoClient>();
+    ClassDB::register_class<ImuAttitude>();
 }
 
 static void uninitialize_ami_ogma_module(ModuleInitializationLevel p_level) {

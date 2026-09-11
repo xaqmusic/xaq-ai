@@ -1540,6 +1540,12 @@ var _dbg_att_err_imu: float = 0.0     # gyro-fused attitude error vs exact (deg)
 var _dbg_acc_mag: float = 0.0         # |accelerometer| m/s^2 (should hover near 9.81)
 var _dbg_acc_trust: float = 0.0       # adaptive correction gain actually applied
 var _prev_lin_vel: Vector3 = Vector3.ZERO   # for finite-differencing body acceleration
+# ⚠ THE FILTER ITSELF NOW LIVES IN C++ — cpp_core/include/ogma/body/ImuAttitude.hpp,
+# bound as the ImuAttitude class (port doc Phase 4, Order step (a)).  The two Vector3s
+# below are kept as the published mirrors of its state, because half the file and the
+# HUD read them; they are WRITTEN FROM the filter each substep, never computed here.
+# The swap is verified byte-identical — cpp_core/tests/body/imu_attitude_parity_check.cpp.
+var _imu_att = null                         # ImuAttitude (GDExtension), made on first use
 var _up_est_body: Vector3 = Vector3.ZERO    # complementary-filter gravity-up estimate (body frame)
 var _up_acc_last: Vector3 = Vector3.ZERO    # last accel-only gravity-up (body frame)
 var _accel_body_last: Vector3 = Vector3.ZERO  # last modelled accelerometer reading
@@ -5831,26 +5837,21 @@ func _imu_substep(dt: float) -> void:
 	# Dead-reckon the ego heading from the gyro's yaw component (this runs at the IMU's own
 	# substep rate, so use that dt rather than the brain tick).
 	_ego_heading = wrapf(_ego_heading + gyro_body.y * dt, -PI, PI)
-	_up_acc_last = accel_meas.normalized() if accel_meas.length() > 1e-4 else _up_acc_last
-
-	# --- complementary filter -------------------------------------------------
-	if _up_est_body.length() < 0.5:
-		_up_est_body = _up_acc_last
-	# Gyro propagation: a WORLD-fixed direction seen from the body frame rotates by
-	# −ω·dt.  Use an EXACT rotation — the first-order `v -= ω×v·dt` form leaves
-	# O((ω·dt)²) error per step, which integrates to radians over a run.
-	var w_mag: float = gyro_body.length()
-	if w_mag > 1e-6:
-		_up_est_body = (Basis(gyro_body / w_mag, -w_mag * dt) * _up_est_body).normalized()
-	# Adaptive-gain correction: the accelerometer only indicates "down" when the body is
-	# quasi-static; during a footfall it is measuring the impact.  Weight its trust by how
-	# close ‖a‖ is to g rather than accepting/rejecting outright (a hard gate starved it).
-	var acc_dev: float = absf(accel_meas.length() - 9.81) / 9.81
-	var trust: float = IMU_ACC_TRUST * clampf(1.0 - acc_dev / IMU_ACC_GATE_FRAC, 0.0, 1.0)
-	if trust > 0.0:
-		_up_est_body = (_up_est_body * (1.0 - trust) + _up_acc_last * trust).normalized()
-	_dbg_acc_mag = accel_meas.length()
-	_dbg_acc_trust = trust
+	# --- complementary filter — ogma::body::ImuAttitude ------------------------
+	# Ported to C++ so the sim and ogma_host run the SAME filter rather than two
+	# implementations that drift apart (port doc Phase 4, step (a)).  Everything it
+	# used to do inline is unchanged in behaviour AND in bits: accel-only gravity-up,
+	# the seed when the estimate is empty, exact-rotation gyro propagation, and the
+	# adaptive accel trust that weights the correction by how close ‖a‖ is to g
+	# (a hard accept/reject gate starved this filter, which is why it is adaptive).
+	if _imu_att == null:
+		_imu_att = ClassDB.instantiate("ImuAttitude")
+		_imu_att.configure(IMU_ACC_TRUST, IMU_ACC_GATE_FRAC, 9.81)
+	_imu_att.step(accel_meas, gyro_body, dt)
+	_up_acc_last   = _imu_att.up_accel()
+	_up_est_body   = _imu_att.up_fused()
+	_dbg_acc_mag   = _imu_att.acc_mag()
+	_dbg_acc_trust = _imu_att.trust()
 	var up_exact: Vector3 = w2b * Vector3.UP
 	_dbg_att_err_acc = rad_to_deg(_up_acc_last.angle_to(up_exact))
 	_dbg_att_err_imu = rad_to_deg(_up_est_body.angle_to(up_exact))
