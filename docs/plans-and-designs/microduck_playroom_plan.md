@@ -25,6 +25,19 @@ unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this pl
 
 ## ▶ Resume here
 
+**State on 2026-09-11, late — the walk-stop-look line is agreed and planned (§12).** The operator's
+read of R26–R38 in the room: the duck always stepping, avoiding and tiling a map is a Roomba, and
+the target is Pollen's sentence, ten minutes alone worth watching. The reframing that turns the
+rhythm into a brain rather than a timer: **a place is a stop** (§12.2) — the map inserts only while
+the body is still, the head saccades to the bearing of highest residual, and the walk begins when
+nothing at this stop is left to bake. Three modes with one learner (§12.3: remote control, autonomous,
+skill; learning never stops, only driving changes), the sixteen built-ins as regime data rather than
+trajectories (§12.4), an expression layer fired from brain events over the catalog that actually
+exists on Pollen's wire (§12.5), and a ten-minute instrument whose blind metric is variety and whose
+complement is contingency (§12.6). **Build order §12.7: W1 the hand-back at the joints first.**
+Decisions taken: the hand-back is competence-gated; the rhythm before skills-as-data; host and
+simulator only. Register O31–O34.
+
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
 walking with a slow level prior on a frozen model; level on every seed, the camera steadier
@@ -387,6 +400,9 @@ ordering principle"; on the duck the ordering principle is countable.
 
 ## 9. The levers, in order
 
+*2026-09-11, late: for the exploration line this order is superseded by §12.7 (the walk-stop-look
+line); H, V1, A1 and the camera path stand as written.*
+
 One at a time, gain-0-guarded, n = 6 for promote-or-kill, then the operator's eye, then the
 verdict in the design doc and the ledger. R-numbers are minted by `newtest.py` at build time.
 
@@ -425,3 +441,178 @@ check (A1's re-run of R27), the inert wander rule (E1 replaces it).
 | O27 | Play at the joints: the boredom gate, the untaxed play regime, the fallen regime opened to learning; getting up brought into the ladder's scope | `OPEN` |
 | O28 | PR-3, a streaming voice verb at Pollen | `DEFERRED` until PR-1 is reviewed |
 | O29 | The playroom generator and its seeded manifest as a harness requirement | `OPEN` |
+
+## 12. The walk-stop-look line (2026-09-11, late — agreed)
+
+*The operator's direction after watching the exploration line (R26–R38): what the duck does now —
+always stepping, avoiding, tiling a map — reads as a Roomba, and ten minutes of it is not worth
+watching. What was asked for: use the sixteen built-in poses and activities as scaffolding while
+leaving room for the body to be learned; a cold-started duck with no memory should stand up and look
+around; saccades in the mapping paradigm; walk a little, stop, look around; our brain at the stops,
+since it stands dynamically; babble and play, and learn to get up; and a hybrid in which active
+inference is a mode beside remote control, the two interchangeable. Each is restated below as the
+error it reduces, and the pieces that already exist are named.*
+
+### 12.1 What the Roomba feeling is, measured
+
+Design doc §17.16–17.17: the map's current node flickers 130–155 times a minute among nodes closer
+together than the 0.18 m turning radius, the play sub-goal is re-chosen several times a second, the
+yaw command is bang-bang, and the twist brain does not hold a bearing. The map is built while walking,
+from a wobbling body, against a reference that never settles. Every steering verdict measured a
+reference that was set, not followed.
+
+### 12.2 A place is a stop
+
+The place map is only well-conditioned when the body is still: the head brain halves the frame
+difference walking but the gait's 2.4 Hz is still in every view, and the dither above is the map
+being tiled from motion. So: **the map inserts only while the body is stationary.** At a stop the
+head saccades to the bearing where the place EPM's residual is highest, holds until that view bakes,
+and jumps to the next; when nothing at this stop is above the running spread, the only remaining
+gradient is elsewhere, the duck picks the least-baked bearing, turns in place to face it, and walks.
+The walk, stop, look rhythm is the map's own sampling schedule, not a timer. What falls out:
+
+- **Saccades are discrete for free.** The target is a GNG winner, so the head jumps and holds; no
+  scan pattern is written. This is E1 with the head as its first actuator.
+- **Places land at body scale.** Stops are separated by walks — the fork's item 2 (§17.16) without
+  a cell-size constant.
+- **Cold start is stand and look.** With an empty map there is no node to walk toward; the explore
+  loop's only available action is the head. Standing first is what the arbitration does when the
+  map is empty, not a rule.
+- **The stop length is the honest test.** A stop at a baked place is short; a stop at a new or moved
+  place is long. That is a claim a Roomba cannot make, and it is measurable (§12.6).
+
+**The prerequisite that does not go away.** The twist brain's yaw channel (§17.17) is still the lever
+before a chosen bearing can be walked to. This line lowers its bar: a bearing is chosen once per stop
+and held over a walk of a metre or two, which is the form that was loud (R22, hold-my-current-heading,
+20/20 after a shove). Facing the chosen bearing happens *while stationary*, through the walker's yaw
+rate with the view as the homing target (turn until the current view is the chosen node), so the
+learned yaw row is not on the path for the turn, only for the hold.
+
+**The head's yaw comes back, gated.** The head loop excluded yaw by design (§4b: a stabilised yaw
+fights every turn). Saccades need it, so the gate is stance: head yaw is the saccade's channel while
+the body is still and follows the trunk while walking. The promoted ★ HEAD is untouched on the walk.
+The gating is the design; the magnitude is tuning (`CLAUDE.md` §1 rule 4).
+
+### 12.3 Modes: three drivers, one learner
+
+The hybrid exists in pieces. Pollen's walker, our joint brain and our head brain each drive
+something; the step hand-off (§15) gives the joints to the walker past 6.5° of lean. Missing: the
+return trip and a command mux. Three modes, in the host now and at their daemon later, where a mode
+is simply which client sends `robot.move`:
+
+| mode | who drives | what learns |
+|---|---|---|
+| **remote control** | the operator's twist to the walker (a gamepad or the viewer's keys) | the level-2 model identifies from it — the efference copy is the twist whoever authored it. Driving the duck around teaches it its body; that is a community story and costs nothing |
+| **autonomous** | the loops. At a stop with the twist at zero the joints hand back to our brain, which stands and catches (R19) | everything |
+| **skill** | one of Pollen's one-shots, fired by our state (§12.5) | level 2; the regime EPM (§12.4) |
+
+**The rule that keeps it clean:** learning never stops in any mode, only driving changes (§5 rule 4,
+never disable a working loop). One nuance from the H line: the joint-level model identifies only when
+it drives, because identifying under the walker's closed loop gave the drifting model of §17.10; level
+2 learns in every mode. The mux is gain-0: with no operator input, nothing moves.
+
+**The hand-back is competence-gated** (decision, 2026-09-11). Early in a run the walker stands at
+the stops; as `LoopCompetence` on the standing regime rises, our brain does. "It takes over as it
+becomes confident" (§8) becomes visible inside the ten minutes — the standing dither the operator
+called "more random than standing still" is the visible sign — and the transitions, where the falls
+will come from, are counted as hand-offs per hour.
+
+### 12.4 The sixteen states as scaffold: regime data, not trajectories
+
+A skill puts the body into a regime the babble never visits, and that is what it is for here. A
+roulade is floor-regime data; sit toggle is a sitting regime and a nap with a scaffolded get-up built
+in; ground pick is a deep crouch with the camera at the floor; the rise of the sit-stand network is
+the fallen-to-upright route observed proprioceptively. The regime EPM (design doc §7–§10) identifies
+in each. What the brain may not do is copy the trajectory (`CLAUDE.md` §5 rule 6): its own get-up
+comes from rolling out the model it identified (§4's machinery: the regime EPM, `GNGRollout`, the
+hunt), with the scaffold held back and rescuing on failure. Identification, not distillation, is the
+line. §4 called floor time the data rather than the cost; the skills get the body there faster.
+
+### 12.5 The expression layer: the catalog, and what fires it
+
+**What exists on Pollen's wire** (their 0.12.0 main, `duck-ipc-proto/src/lib.rs`, `policies/`):
+
+| kind | items | notes |
+|---|---|---|
+| trained one-shot skills, `robot.do` | `roulade` (forward roll, ends on the floor, rises), `kick_left`, `kick_right`, `ground_pick` (a daemon-driven crouch phase), `sit_toggle` (latched) | each its own `.onnx`; the skill table is open — any network with a name, a duration, a twist and an unwind (`SkillParams`); priority roulade > kicks > ground pick > sit > stand > walk (`robotd/src/control.rs`) |
+| body pose, `robot.pose` | z −0.025..+0.010 m, roll and pitch ±0.26 rad, glided or snapped back (`active: false`) | a crouch, a lean, a tilt, a bob; the snap-back is a startle body |
+| head | `robot.head` four joints; `robot.look` a trunk-frame gaze point with the daemon's IK | the saccade's channel on hardware |
+| mouth, `robot.mouth` | 0..1 | nothing else moves it |
+| twist, `robot.move` | turn in place, speed | Zoomies is a twist burst, not a state |
+| voice bank, `robot.sound` | alarm, greet, inquire, peck, chirp, coo, wheee (held: loops while the notification keeps arriving) | one random variant per play; refused only by a robot with no voice |
+
+**What does not exist.** Stretch, Ruffle, Preen, Sneeze, Dance, Zoomies, Startle and the rest are
+states of the prototype runtime; their own ideas document says that module "exists nowhere in the
+daemon", and nothing public defines them. They were compositions of the channels above. There is no
+stretch to fire; there is a pose channel, a head, a mouth and a voice, and a stretch is a shape drawn
+on them.
+
+**Firing them from brain state.** Expression stays an output, not a loop (§3), and the only rule is
+that every firing is driven by a measured quantity — never a timer, never a random draw. The
+substrate's events are few:
+
+| brain event | expression |
+|---|---|
+| a saccade lands on a high-residual bearing | hold the gaze there; `inquire`; lean the pose forward a little; the mouth opens by the residual. If it bakes while looking: `chirp`, move on. If it is near and answers: the approach loop, with the kicks or ground pick as the payload on arrival |
+| a TLE spike above its running spread | `alarm`; the pose's snap-back. The spread-relative threshold rate-limits it for free |
+| a node bakes | `chirp` (as xaq_voice already does) |
+| the rest loop wins | `coo`; crouch the pose; close the mouth. Sit toggle here is a nap with a scaffolded get-up, and regime data (§12.4) |
+| walking fast toward something novel | `wheee`, held while the novelty gained per metre stays high, released when it falls |
+| our brain takes the joints at a stop | nothing yet; `greet` is tempting, the operator's eye decides |
+
+**The five composite emotes come from the brain, not a script.** Preen and ruffle are what the
+standing brain already does — the exploration dither — given the head and pose channels and gated to
+boredom (B1). A stretch is a slow pose excursion to the edge of the trained range when the self-model
+is stale. The discrete trained skills stay Pollen's; the composite gestures are the brain's own body
+exploration made visible; nothing is a trajectory.
+
+**Cost in the simulator.** The host vendors only the stand and walk networks (`scaffolds/README.md`);
+the five skills are the same fetch-by-hash and the same runner plus a skill window mirroring their
+priority order, off by default. The host's command carries the twist and the head; the pose block is
+an addition. Sound in sim is xaq_voice (V1); the bank tags become an event track the viewer draws on
+the timeline, so the operator sees when an emote fired and against which signal.
+
+### 12.6 The ten-minute instrument
+
+Before any of it, one instrument: a **behaviour histogram over ten minutes** — time in stop, look,
+walk, play, rest and skill; stops per run; saccades per stop; hand-offs; plus the doctrine's three
+loud signs (re-corrects when disturbed, steps, feels around what it bumps). **Its blind metric is
+variety itself**: a duck firing a random skill every twenty seconds scores varied and is a slot
+machine. The complement is **contingency** — stop length tracks the novelty at the stop; saccades per
+stop fall as places bake and rise at a moved object; emotes track the events in the table above, and
+never fire without one. Both numbers, always together.
+
+### 12.7 The levers, in order
+
+One at a time, gain-0-guarded, n = 6 for promote-or-kill, a preset each, then the operator's eye.
+This order supersedes §9's for the exploration line; C1/C2/E1/E2 continue afterwards with the map
+built on stops.
+
+| # | lever | stimulus | metric | promote if |
+|---|---|---|---|---|
+| W0 | the ten-minute instrument (§12.6) in the sweep and the viewer | any run | the histogram; contingency | it reads R34 and R38 as the operator saw them |
+| W1 | **the hand-back at the joints**: walker stopped, twist zero, our joint brain takes the joints from whatever pose the walker leaves them in; competence-gated | the R30 tour with stops | survival and catch rate after a hand-back; rescues/hour; hand-offs/hour falling | the stance survives the transition on every seed. Produces walk, stop, stand |
+| W2 | stance-gated head yaw: the saccade channel while still, trunk-following while walking | a stop | head yaw excursions at stops, zero on the walk; ★ HEAD's picture number unchanged walking | the walk is byte-identical to ★ HEAD |
+| W3 | insert-on-stop for the place map, the saccade target = the max-residual bearing, the stop ends when nothing is above the spread | the room; one object moved | nodes per stop; saccades per stop falling as places bake; stop length vs novelty; `switch/min` | stops are short at baked places and long at new or moved ones — loud or nothing |
+| W4 | the command mux and remote-control mode in the host and the viewer | the operator's hands | the level-2 model's identified rows after a driven session vs before; byte-identity with no input | the model improves under driving |
+| W5 | the twist brain's yaw channel (§17.17), now with one bearing per stop: turn-in-place under the view as homing target, then the R22 hold | a chosen bearing | `straight` ≥ 0.2 on every seed with the reference live | the duck walks where it looked |
+| X1 | expression events: the voice tags and the pose channel fired from the §12.5 table; the event track in the viewer | any run | emotes per event; emotes without an event (must be zero) | the operator hears and sees the error |
+| X2 | the skill runner in the host: five networks vendored by hash, a skill window in their priority order, the pose block on the command; off by default | a fired skill | byte-identity off; rescues around a skill | skills run in sim as on the robot |
+| then | B1/B2 with skills as regime data (§12.4); C1/C2 with the map on stops; E1/E2 | | | |
+
+### 12.8 Not done, in addition to §10
+
+- A walk/stop cycle on a timer, or a stop length that is a constant.
+- An emote from a random draw or a schedule; an emote without a brain event.
+- A copy of any skill's trajectory as the brain's own; the get-up is rolled out from an identified
+  model or it is Pollen's.
+- A daemon-side mode switch before the host's is measured (sim only, as the branch says).
+
+### 12.9 Register rows
+
+| id | item | state |
+|---|---|---|
+| O31 | A place is a stop: insert-on-stop, the saccade as the map's actuator, the stop ending on the residual; the turn-in-place under a homing target before the R22 hold | `OPEN` — W2, W3, W5 |
+| O32 | Modes: the command mux, remote control as identification data, the competence-gated hand-back at the joints | `OPEN` — W1, W4 |
+| O33 | The expression layer: events over Pollen's catalog; the skill runner and the pose block in the host | `OPEN` — X1, X2 |
+| O34 | The ten-minute instrument: the behaviour histogram and its contingency complement | `OPEN` — W0 |

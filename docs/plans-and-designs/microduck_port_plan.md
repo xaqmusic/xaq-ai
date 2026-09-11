@@ -20,6 +20,15 @@
 
 ## ▶ Resume here
 
+**State on 2026-09-11, late — the walk-stop-look line.** The operator's verdict on the exploration
+line as watched: a Roomba. The redesign is in the [playroom plan §12](microduck_playroom_plan.md)
+— **a place is a stop** (the map inserts only while still; the head saccades to the max-residual
+bearing; the walk begins when nothing at the stop is left to bake), three modes with one learner
+(remote control / autonomous / skill; learning never stops, only driving changes), the sixteen
+built-ins as regime data, an expression layer over the catalog that actually exists on Pollen's
+wire, and a ten-minute instrument. **Next lever: W1, the competence-gated hand-back of the joints
+to our brain at a stop.** Register O31–O34.
+
 **State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
 path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);
 its §9 is the build order (A1 the playroom generator first, then C1 the head-camera render, V1 the
