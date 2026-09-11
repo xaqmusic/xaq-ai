@@ -97,6 +97,7 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
     // holds its yaw while the body turns under it winds to the rail. The babble still moves
     // yaw (the action is read above for the model's sake); only the command is masked.
     if (mask_yaw_ && tick_id_ >= babble_ticks_) last_cmd_[2] = 0.0;
+    if (yaw_override_) last_cmd_[2] = std::clamp(yaw_target_, -kHeadRange[2], kHeadRange[2]);
     if (vor_tau_ > 0.0 && tick_id_ >= babble_ticks_) {
         constexpr double dt = 1.0 / 50.0;
         vor_state_ += w[2] * dt;                        // the trunk's yaw increment this tick

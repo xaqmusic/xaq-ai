@@ -680,5 +680,29 @@
       "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 60 --stop-secs 20 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json",
       "fast_until": 600
     }
+  },
+  {
+    "name": "R40 · W2 stop-and-LOOK: at each stop the head brain keeps the head and its yaw scans 0, +0.6, 0, -0.6 rad (1 s holds) while the R19 stander holds the legs",
+    "series": 40,
+    "hint": "WATCH (seed 6, fast-forward through the 600 s babble): every 60 s the duck stops for 20 s — the walker settles, the R19 stander takes the legs (green), the head brain keeps the head level and its yaw steps 0, +0.6, 0, −0.6 rad, 1 s each; then the walk resumes. n=6: 90/90 stands held, 0 rescues at stops, 13 ± 5 walls/min (R39 18 ± 24) with the head brain frozen through the stop (design doc §17.19).",
+    "state": {
+      "config": "a1v2_r40_w2_scan.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500.0,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 60 --stop-secs 20 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-scan 0.6 1.0 --stop-freeze-head",
+      "fast_until": 600
+    }
   }
 ]

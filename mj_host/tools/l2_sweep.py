@@ -117,7 +117,7 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         # a compact stream: the fields the metrics read (a full level-2 JSONL carries qpos and the
         # 64 ToF zones per tick -- ~75 MB per 1500 s run, which filled a tmpfs quota on first use)
         logdir.mkdir(parents=True, exist_ok=True)
-        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map", "hdg", "twist", "hg", "hw", "head", "stop", "satt", "event")
+        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map", "hdg", "twist", "hg", "hw", "head", "stop", "satt", "event", "scan")
         with open(logdir / f"{stem}_s{seed}.jsonl", "w") as f:
             for line in p.stdout.splitlines():
                 if not line.startswith("{"): continue
@@ -163,6 +163,7 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
     obj_start = {}; obj_end = {}
     tooclose = tle_sum = 0.0; novel = 0; escaped = 0; steer_avoid = steer_play = 0
     hist = {"walk": 0, "stopW": 0, "stand": 0, "resc": 0}       # W0: the behaviour histogram
+    yaw_stop, yaw_walk = [], []                                    # W2: the head-yaw joint (policy index 7) at stops vs walking
     ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
           "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
     for line in p.stdout.splitlines():
@@ -181,6 +182,8 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         n += 1
         drv = r.get("drive", "walk"); sp = int(r.get("stop", 0))
         hist["resc" if drv == "scaffold" else "stand" if drv == "stand" else "stopW" if sp else "walk"] += 1
+        q = r.get("q")
+        if q and drv != "scaffold": (yaw_stop if sp else yaw_walk).append(float(q[7]))
         x, y = float(r["x"]), float(r["y"])
         xs.append(x); ys.append(y)
         cells.add((math.floor(x / CELL_M), math.floor(y / CELL_M)))
@@ -225,6 +228,8 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         "head_w_rms": math.sqrt(hw2 / nh) if nh else float("nan"), "head_g_dev": math.sqrt(hg2 / nh) if nh else float("nan"),
         "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
         **{f"{k}_pct": 100.0 * v / max(1, n) for k, v in hist.items()},
+        "yaw_stop": statistics.pstdev(yaw_stop) if len(yaw_stop) > 1 else float("nan"),
+        "yaw_walk": statistics.pstdev(yaw_walk) if len(yaw_walk) > 1 else float("nan"),
     })
     return out
 
@@ -316,7 +321,8 @@ def main():
             ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev"),
             ("walk_pct", "walk%"), ("stopW_pct", "stopW%"), ("stand_pct", "stand%"), ("resc_pct", "resc%"),
             ("stops", "stops"), ("handbacks", "handbacks"), ("survived", "survived"), ("survive_pct", "survive%"),
-            ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc")]
+            ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc"),
+            ("yaw_stop", "yawStop sd"), ("yaw_walk", "yawWalk sd")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

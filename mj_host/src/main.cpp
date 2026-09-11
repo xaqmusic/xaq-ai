@@ -1264,6 +1264,11 @@ struct StopPlan {
     double settle_s = 2.0;          // at most this long waiting for stillness before the hand-back
     int    confirm_ticks = 3;
     bool   keep_head = false;
+    bool   freeze_head = false;     // --stop-freeze-head: the head brain's learning off through a stop even when it keeps the head
+    double scan_amp = 0.0, scan_hold_s = 1.0;   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
+                                                // head brain's yaw steps through 0, +AMP, 0, −AMP, each held HOLD s,
+                                                // from the hand-back (or the walker's hold) to the stop's end. A
+                                                // scaffold for the channel; §12.2's target is the map's residual (W3).
 };
 StopPlan g_stop;
 std::string g_stop_brain, g_stop_load;
@@ -1360,6 +1365,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             stander->restore_brain_state(snap.at("graph"));
         }
         stander->set_learning(false);
+        if (g_stop.keep_head) stander->freeze_module("motor_epm_head");   // the head is the head brain's: this module's commands are not applied
         std::fprintf(stderr, "stops: every %.0f s for %.0f s from %.0f s; the joint brain %s%s%s takes the legs when still",
                      g_stop.every_s, g_stop.secs, g_stop.from_s, g_stop_brain.c_str(),
                      g_stop_load.empty() ? "" : " restored from ", g_stop_load.c_str());
@@ -1379,6 +1385,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     long stand_ticks = 0;
     double stop_last_lean = 0.0;
     const char* stop_event = "";
+    const bool scan_on = stop_on && g_stop.scan_amp > 0.0;
+    if (scan_on && !head) throw std::runtime_error("--stop-scan needs --head-graph (the head brain carries the yaw)");
+    if (scan_on) std::fprintf(stderr, "  scan at stops: head yaw 0, %+.2f, 0, %+.2f rad, each held %.1f s\n", g_stop.scan_amp, -g_stop.scan_amp, g_stop.scan_hold_s);
+    const int scan_hold_ticks = std::max(1, int(g_stop.scan_hold_s * kBrainHz));
+    int scan_idx = 0, scan_left = 0; double scan_target = 0.0; bool scanning = false;
+    auto scan_stop = [&]() { scanning = false; scan_target = 0.0; if (head) head->set_yaw_override(false, 0.0); };
     auto end_stop_drive = [&](bool to_walker) {
         // the joint brain stops driving: freeze it, invalidate its pairing, and give the walker a
         // clean start from the pose the body is actually in (as the rescue hand-back does)
@@ -1406,6 +1418,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             command.twist = {0.0, 0.0, 0.0};
             if (head) { head->set_learning(false); head->on_reset(); command.head = {0.0, 0.0, 0.0, 0.0}; }
             if (stop_phase != StopPhase::None) {          // the stop ended in a fall
+                scan_stop();
                 if (stop_phase == StopPhase::Brain) end_stop_drive(false);
                 stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
             }
@@ -1444,7 +1457,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 ++stops_started; stop_event = "stop:start";
                 brain.set_learning(false);                 // its command is not applied during the stop
                 if (stander) stander->on_reset();          // a fresh pairing after the walk
-                if (head && stander && !g_stop.keep_head) head->set_learning(false);
+                if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
             }
             if (stop_phase != StopPhase::None) {
                 --stop_left;
@@ -1456,6 +1469,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (still || stop_settle_left == 0) {
                         double att = 0.0;
                         if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
+                        if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (!stander) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
                         } else if (g_stop.att_gate <= 0.0 || att < g_stop.att_gate) {
@@ -1478,11 +1492,18 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         stop_phase = StopPhase::Walker; ++stop_handoffs; stop_event = "stop:handoff";
                     }
                 }
+                if (scanning) {
+                    static const double kSeq[4] = {0.0, 1.0, 0.0, -1.0};
+                    if (--scan_left <= 0) { scan_idx = (scan_idx + 1) % 4; scan_left = scan_hold_ticks; }
+                    scan_target = kSeq[scan_idx] * g_stop.scan_amp;
+                    head->set_yaw_override(true, scan_target);
+                }
                 if (stop_left <= 0 && stop_phase != StopPhase::None) {
+                    scan_stop();
                     if (stop_phase == StopPhase::Brain) { ++stop_survived; end_stop_drive(true); }
                     stop_phase = StopPhase::None; stop_event = "stop:end";
                     brain.set_learning(true);
-                    if (head && stander && !g_stop.keep_head) { head->on_reset(); head->set_learning(true); }
+                    if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) { head->on_reset(); head->set_learning(true); }
                 }
             }
             if (stop_phase != StopPhase::None) command.twist = {0.0, 0.0, 0.0};
@@ -1620,6 +1641,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 double att = 0.0;
                 if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
                 std::printf(",\"stop\":%d,\"satt\":%.3f", int(stop_phase), att);
+                if (scan_on) std::printf(",\"scan\":%.2f", scanning ? scan_target : 0.0);
             }
             if (head) {
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
@@ -1739,7 +1761,8 @@ void usage() {
         "      --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward on yaw — the stride clock from the hip\n"
         "      pitch, a 16-bin table of the head's yaw rate learned for LEARN_S s, then the opposite angle LEAD early.\n"
         "      --stop-every S --stop-secs S [--stop-from S] --stop-brain CFG [--stop-load CKPT] [--stop-att X]\n"
-        "          [--stop-handoff-att Y | --stop-handoff-lean DEG] [--stop-settle-secs S] [--stop-keep-head]:\n"
+        "          [--stop-handoff-att Y | --stop-handoff-lean DEG] [--stop-settle-secs S] [--stop-keep-head]\n"
+        "          [--stop-scan AMP HOLD_S]:\n"
         "          scheduled stops (W1): the twist zeroed, and once still the legs handed to the joint brain\n"
         "          if its attitude error is below X; the walker takes them back on Y / DEG and at the end.\n"
         "      --head-joints: Track A at the head — the head brain's commands become the head JOINT targets\n"
@@ -1876,6 +1899,10 @@ int main(int argc, char** argv) {
             g_stop.settle_s = std::stod(next("--stop-settle-secs"));
         } else if (a == "--stop-keep-head") {
             g_stop.keep_head = true;
+        } else if (a == "--stop-freeze-head") {
+            g_stop.freeze_head = true;
+        } else if (a == "--stop-scan") {
+            g_stop.scan_amp = std::stod(next("--stop-scan")); g_stop.scan_hold_s = std::stod(next("--stop-scan"));
         } else if (a == "--head-joints") {
             g_head_joints = true;
         } else if (a == "--head-rate") {

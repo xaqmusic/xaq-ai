@@ -73,6 +73,10 @@ public:
     void set_phase(double lead_ticks, double learn_s) { phase_lead_ = lead_ticks; phase_learn_s_ = learn_s; }
     std::vector<std::string> phase_report() const;
     std::array<double, 4> last_command() const { return last_cmd_; }
+    // W2: the yaw command is the given target while on (the stance-gated saccade channel: at a stop,
+    // the head's yaw is the gaze axis; on the walk it follows the trunk as before). The loop does not
+    // own yaw (its model is pitch and roll), so nothing it learns pairs with this command.
+    void set_yaw_override(bool on, double target) { yaw_override_ = on; yaw_target_ = target; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
     // H2 protocol: identify standing (H1, saved), act walking (loaded here, the prior on).
@@ -91,6 +95,7 @@ private:
     bool frozen_ = false;
     uint64_t babble_ticks_ = 0;                        // from the graph: the yaw command is masked after it
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
+    bool yaw_override_ = false; double yaw_target_ = 0.0;
     double vor_tau_ = 0.0, vor_lead_ = 0.0, vor_state_ = 0.0;
     double rate_k_ = 0.0, rate_tau_ = 0.0, rate_state_ = 0.0;
     // the phase feed-forward

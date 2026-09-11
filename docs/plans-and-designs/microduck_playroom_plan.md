@@ -45,7 +45,15 @@ preset R39). The competence gate is `DEFERRED`: the joint brain's attitude error
 settled stance is ~0 on every hand-back, so there was nothing to gate. Found on the way: a stop
 exposes §17.17's saturation as a **deadlock** — resumed from a still body with a wall behind it the
 twist command saturates at full reverse and the body stays pinned (one seed, 900 s, in the
-walker-holds control) — so W5 must begin from exactly that state. **Next: W2.**
+walker-holds control) — so W5 must begin from exactly that state. 
+
+**W2 built and measured (R40, design doc §17.19).** The saccade channel: head yaw takes a stepped
+scan at the stop (a scaffold for the channel) and the trunk-following mask returns on the walk;
+yaw spreads 0.40 rad at stops, 0.02 walking; the stand held 267 of 267 hand-backs with the head
+brain on the head, zero rescues at stops. Caught and pinned: the head brain's prior learning through
+the stand raised wall contact on the walk (27 → 45 episodes/min); frozen through the stop it drops
+to 13 ± 5 walls/min, the cleanest stop arm (`WORKING`, operator's eye pending on preset R40).
+**Next: W3** — insert-on-stop, the saccade target from the map's residual by bearing.
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
@@ -601,7 +609,7 @@ built on stops.
 |---|---|---|---|---|
 | W0 | the ten-minute instrument (§12.6) in the sweep and the viewer | any run | the histogram; contingency | it reads R34 and R38 as the operator saw them | **Built 2026-09-11 (`l2_sweep.py`: `walk% stopW% stand% resc%` + the stop counters; `--host-arm`): R34 reads 99.1 % walk, 0.9 % rescue**
 | W1 | **the hand-back at the joints**: walker stopped, twist zero, our joint brain takes the joints from whatever pose the walker leaves them in; competence-gated | the R30 tour with stops | survival and catch rate after a hand-back; rescues/hour; hand-offs/hour falling | the stance survives the transition on every seed. Produces walk, stop, stand. **Built and measured 2026-09-11 (R39, design doc §17.18): `WORKING` at n = 6 — 87/89 stands held, tilt 2.2° → 0.5° in 1 s; the gate `DEFERRED` (nothing to gate, satt ≈ 0); the resume-from-still deadlock found (→ W5)** |
-| W2 | stance-gated head yaw: the saccade channel while still, trunk-following while walking | a stop | head yaw excursions at stops, zero on the walk; ★ HEAD's picture number unchanged walking | the walk is byte-identical to ★ HEAD |
+| W2 | stance-gated head yaw: the saccade channel while still, trunk-following while walking | a stop | head yaw excursions at stops, zero on the walk; ★ HEAD's picture number unchanged walking | the walk is byte-identical to ★ HEAD | **Built and measured 2026-09-11 (R40, design doc §17.19): `WORKING` — yaw sd 0.40 at stops / 0.02 walking, 267/267 stands held under the moving head; the head brain must be frozen through the stop (`--stop-freeze-head`), else wall contact on the walk rises 27 → 45/min**
 | W3 | insert-on-stop for the place map, the saccade target = the max-residual bearing, the stop ends when nothing is above the spread | the room; one object moved | nodes per stop; saccades per stop falling as places bake; stop length vs novelty; `switch/min` | stops are short at baked places and long at new or moved ones — loud or nothing |
 | W4 | the command mux and remote-control mode in the host and the viewer | the operator's hands | the level-2 model's identified rows after a driven session vs before; byte-identity with no input | the model improves under driving |
 | W5 | the twist brain's yaw channel (§17.17), now with one bearing per stop: turn-in-place under the view as homing target, then the R22 hold | a chosen bearing | `straight` ≥ 0.2 on every seed with the reference live | the duck walks where it looked |

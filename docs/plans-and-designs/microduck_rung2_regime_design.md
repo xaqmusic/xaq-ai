@@ -1987,3 +1987,56 @@ and is stiller than the walker's at every one. Not a promotion — the stop is a
 operator's eye is pending (preset R39, seed 6, fast-forward through the babble). The competence gate
 `DEFERRED` with its re-use context above; `--stop-keep-head` unmeasured; the resume-from-still
 deadlock recorded against §17.17 (W5). Next: W2, the stance-gated head yaw at the stop.
+
+### 17.19 W2 — the saccade channel: head yaw at the stop, and the stand under a swinging head (R40, 2026-09-11)
+
+**Built.** The head brain's yaw command, masked to zero since §4b (yaw follows the trunk), takes an
+override at a stop: `HeadAdapter::set_yaw_override`, driven by `--stop-scan AMP HOLD` — the yaw
+steps through 0, +AMP, 0, −AMP, each held HOLD s, from the hand-back (or the walker's hold) to the
+stop's end, then the mask returns for the walk. The scan is a **scaffold for the channel**: §12.2's
+target is the map's residual (W3); what W2 measures is whether the stand survives a head that moves
+(38 % of the mass), the yaw excursion at stops against zero on the walk, and the walk untouched.
+Two more flags fell out: `--stop-keep-head` (the head brain keeps the head through the stop, the
+joint brain's `motor_epm_head` frozen for the run by a new `OgmaBrainAdapter::freeze_module`, since
+its commands are not applied) and `--stop-freeze-head` (the head brain's learning off through the
+stop even when it keeps the head). With none of them, the W1 path is byte-identical (10 000 ticks).
+The sweep reports `yawStop sd` / `yawWalk sd` (the head-yaw joint's spread in each phase).
+
+**Measured.** Playroom, ★ HEAD stack, the R39 stops (every 60 s for 20 s from 600 s), n = 6, 1500 s,
+two sweeps paired by seed (the reference arm of the second is the first's `keepHead`, and it
+reproduces it to the digit — the host is deterministic per seed):
+
+| n = 6 | head at the stop | walls/min | cells | resc/min | stands held | handed off | rescued | yawStop sd | yawWalk sd | headG dev |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R39 (W1) | the joint brain's | 18.1 ± 23.6 | 106 | 0.17 | 87 / 89 | 2 | 1 | 0.01 | 0.01 | 0.12 |
+| keepHead | the head brain's, learning live | 35.1 ± 9.5 (4+/2−) | 118 | 0.12 | **89 / 89** | 0 | 0 | 0.00 | 0.01 | 0.04 |
+| keepHeadScan | the head brain's + the scan | 29.7 ± 18.4 (5+/1−) | 99 | 0.10 | **90 / 90** | 0 | 0 | **0.40** | 0.02 | 0.04 |
+| walkerScan | the walker holds + the scan | 14.3 ± 18.0 | 112 | 0.01 | — | — | — | 0.40 | 0.02 | 0.02 |
+| frozenHead | the head brain's, frozen through the stop | 18.6 ± 19.1 (1+/5− vs keepHead) | 118 | 0.11 | 89 / 89 | 0 | 0 | 0.00 | 0.01 | 0.04 |
+| **frozenHeadScan** | frozen + the scan (**R40**) | **13.3 ± 4.8** (0+/6− vs keepHead, t −5.0) | 102 | 0.13 | **88 / 88** | 0 | 0 | 0.40 | 0.02 | 0.04 |
+
+- **The channel works and the stand does not care.** Head yaw spreads 0.40 rad at stops (±0.61, the
+  joint tracks the step inside a few ticks) and 0.02 rad on the walk; every hand-back with the head
+  brain on the head held to the stop's end — 267 of 267 across the three keep-head arms, zero
+  handed off, zero rescued at a stop — where the joint brain's own head (W1) gave 87 of 89. The head
+  is also more level at the stop (gravity deviation 0.12 → 0.04): the R19 brain's head objective is
+  its own stance, not a level camera.
+- **The §3.2 catch, pinned in the same session.** The two keep-head arms with the head brain's
+  learning live raised wall contact through the *whole walk* (26.6 → 44.8 episodes per minute of
+  walking; not clustered at the resumes), on every seed. Hypothesis: the level prior's descent
+  (`state_prior_lr 0.02`, the model frozen) kept integrating through 20 s stands on a body it was not
+  identified on — the H2 drifting-model lesson (§17.10) one more time. Test: `--stop-freeze-head`.
+  Result: 35 → 19 walls/min and, with the scan, 13.3 ± 4.8 (0+/6−), below R39 and level with R34's
+  10.9 ± 9.3. The rule generalises: **a brain that keeps its actuator through a regime it was not
+  identified in is frozen through it, whether or not its commands are applied.**
+- **The stops themselves raise walking contact** (R34 10.9/min → R39's walk phase 26.6/min): a
+  resume from stillness is §17.17's defect in its mild form, and the R39 seed-1 deadlock its severe
+  one. W5's ground.
+
+**Verdict.** W2 `WORKING` at n = 6, loud: the saccade channel is live at the stops and silent on the
+walk, the stand is indifferent to the head moving, and R40 (frozen head brain + scan) is the
+cleanest stop arm measured. Not a promotion — the scan is a schedule, and the operator's eye is
+pending (preset R40, seed 6). `--stop-keep-head` without `--stop-freeze-head` is `REGRESSION` on
+wall contact (re-use: a head brain whose prior is identified standing as well as walking).
+Next: W3 — the stop inserts into the map and the saccade's target is the map's own residual by
+bearing, which replaces the scan.

@@ -31,6 +31,7 @@
 
 #include <array>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <utility>
@@ -84,6 +85,9 @@ public:
     void on_reset() override;
     void set_learning(bool on) override;
     void set_regime_learning(bool on);   // the learnable-regime gate (see note above)
+    // Freeze ONE MotorEPM module's learning for the rest of the run (W2: the joint brain's head module
+    // while another brain owns the head — its commands are not applied, so it must not fit the pairing).
+    void freeze_module(const std::string& id);
 
 private:
     void apply_freeze_state();
@@ -152,6 +156,7 @@ private:
     std::vector<std::pair<double, double>> range_;    // per policy joint, from the model
     // Learning rates parked while the scaffold drives, keyed "<module id>:<param>".
     std::map<std::string, double> frozen_rates_;
+    std::set<std::string> module_frozen_;              // never thawed by apply_freeze_state
     bool learning_ = true;        // the scaffold axis (BrainLike::set_learning)
     bool regime_ok_ = true;       // the regime axis
     bool frozen_now_ = false;     // what is actually applied (either axis)
