@@ -151,22 +151,27 @@ func _build_ui() -> void:
 	add_child(_imu_src)
 	_imu_scope = (load("res://scripts/imu_scope.gd") as Script).new()
 	_imu_scope.set("body", _imu_src)
-	# Bottom-right, clear of the top bar and of the 30 px status strip the side panels
-	# already leave.  It sat top-right and read as dim because the shaded top bar was
-	# drawn over it.
-	var iw: float = _imu_scope.custom_minimum_size.x
-	var ih: float = _imu_scope.custom_minimum_size.y
-	_imu_scope.anchor_left = 1.0; _imu_scope.anchor_right = 1.0
-	_imu_scope.anchor_top = 1.0;  _imu_scope.anchor_bottom = 1.0
-	_imu_scope.offset_right = -IMU_MARGIN_X
-	_imu_scope.offset_left  = -IMU_MARGIN_X - iw
-	_imu_scope.offset_bottom = -IMU_MARGIN_Y
-	_imu_scope.offset_top    = -IMU_MARGIN_Y - ih
 	# The shared panel is translucent so it can float over the sim body; over this
 	# dashboard it needs to read as a solid instrument.
 	_imu_scope.set("bg_alpha", 0.97)
 	_imu_scope.visible = false
+	# ⚠ ADD TO THE TREE BEFORE READING ITS SIZE.  imu_scope sets custom_minimum_size in
+	# _ready(), and _ready does not run until add_child(), so reading it first returns
+	# (0,0) -- which pins a zero-size rect at the corner that then grows right and down
+	# once the minimum lands, putting all but the top-left corner off-screen.
 	_ui.add_child(_imu_scope)
+	# Bottom-right, clear of the top bar and of the 30 px status strip the side panels
+	# already leave.  It sat top-right and read as dim because the shaded top bar was
+	# drawn over it.
+	var isz: Vector2 = _imu_scope.custom_minimum_size
+	if isz.x < 1.0 or isz.y < 1.0:
+		isz = Vector2(250, 330)          # the panel's own W x height, if _ready has not run
+	_imu_scope.anchor_left = 1.0; _imu_scope.anchor_right = 1.0
+	_imu_scope.anchor_top = 1.0;  _imu_scope.anchor_bottom = 1.0
+	_imu_scope.offset_right  = -IMU_MARGIN_X
+	_imu_scope.offset_left   = -IMU_MARGIN_X - isz.x
+	_imu_scope.offset_bottom = -IMU_MARGIN_Y
+	_imu_scope.offset_top    = -IMU_MARGIN_Y - isz.y
 	var topv := VBoxContainer.new(); top.add_child(topv)
 	var row := HBoxContainer.new(); topv.add_child(row)
 	row.add_child(_lbl("ogma_benchd @"))
