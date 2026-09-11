@@ -17,6 +17,10 @@ extends Control
 ## it is inert on bodies that do not model an IMU.
 
 var body: Node = null
+## Background opacity.  The sim floats this panel over the 3-D body and wants to see
+## through it; the bench dashboard sets it near-opaque so it reads as an instrument
+## rather than as a dim overlay.  Default keeps the sim's existing look unchanged.
+var bg_alpha: float = 0.82
 
 const W: float = 250.0            # panel width
 const BALL_R: float = 58.0        # attitude-ball radius (px)
@@ -61,7 +65,7 @@ func _draw() -> void:
 	if body == null or not body.has_method("get_imu_debug"):
 		return
 	var d: Dictionary = body.get_imu_debug()
-	var col_bg   := Color(0.05, 0.06, 0.09, 0.82)
+	var col_bg   := Color(0.05, 0.06, 0.09, bg_alpha)
 	var col_grid := Color(0.32, 0.36, 0.42, 0.9)
 	var col_fuse := Color(0.35, 0.95, 0.55)      # fused = the estimate we actually use
 	var col_acc  := Color(0.95, 0.45, 0.35)      # accel-only = what a bare accel would give

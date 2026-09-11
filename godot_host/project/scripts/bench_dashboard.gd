@@ -52,6 +52,8 @@ var _imu_scope: Control = null
 var _imu_btn: Button = null
 const UI_FONT := 12
 const TOP_H := 84                      # top bar height the side panels hang from
+const IMU_MARGIN_X := 12               # IMU scope inset from the right edge
+const IMU_MARGIN_Y := 38               # ...and from the bottom, clearing the status strip
 const INA_A4_TOL_V := 0.15             # BOM 3.4: ~1 % on the 20K/10K divider is ordinary
 # Belly geometry (geometry §G2 / picrawler_body.gd GROUND_CLEARANCE_STAND): 56.3 mm
 # standing at spawn, 9.5 mm at the crouch gate. A ToF reading outside a generous band
@@ -63,7 +65,7 @@ const TOF_PLAUSIBLE_MAX_M := 0.30
 const TOF_BAD_FRAC_WARN := 0.25
 var _cal_content: Control
 var _cal_min_btn: Button
-var _cal_min := false
+var _cal_min := true          # starts folded: calibration is done, and it is the widest panel
 var _tele_content: Control
 var _tele_min_btn: Button
 var _tele_min := false
@@ -149,8 +151,20 @@ func _build_ui() -> void:
 	add_child(_imu_src)
 	_imu_scope = (load("res://scripts/imu_scope.gd") as Script).new()
 	_imu_scope.set("body", _imu_src)
-	_imu_scope.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_imu_scope.position = Vector2(-266, 8)
+	# Bottom-right, clear of the top bar and of the 30 px status strip the side panels
+	# already leave.  It sat top-right and read as dim because the shaded top bar was
+	# drawn over it.
+	var iw: float = _imu_scope.custom_minimum_size.x
+	var ih: float = _imu_scope.custom_minimum_size.y
+	_imu_scope.anchor_left = 1.0; _imu_scope.anchor_right = 1.0
+	_imu_scope.anchor_top = 1.0;  _imu_scope.anchor_bottom = 1.0
+	_imu_scope.offset_right = -IMU_MARGIN_X
+	_imu_scope.offset_left  = -IMU_MARGIN_X - iw
+	_imu_scope.offset_bottom = -IMU_MARGIN_Y
+	_imu_scope.offset_top    = -IMU_MARGIN_Y - ih
+	# The shared panel is translucent so it can float over the sim body; over this
+	# dashboard it needs to read as a solid instrument.
+	_imu_scope.set("bg_alpha", 0.97)
 	_imu_scope.visible = false
 	_ui.add_child(_imu_scope)
 	var topv := VBoxContainer.new(); top.add_child(topv)
@@ -254,12 +268,13 @@ func _build_ui() -> void:
 	bcol.add_child(_brain_tex)
 	_video_lbl = _lbl("not connected", 11); lv.add_child(_video_lbl)
 
-	# ---- bottom-centre: the honesty label on the 3-D view ----------------------------
-	var cap := _lbl("3-D view = COMMANDED pose", 14)
-	cap.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	cap.offset_top = TOP_H + 4; cap.offset_bottom = TOP_H + 26     # under the top bar, clear of the body's own meters
-	cap.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
-	_ui.add_child(cap)
+	# The floating "3-D view = COMMANDED pose" caption used to live here, centred over the
+	# render area.  Removed 2026-09-11 (operator): it overlapped the calibration panel.
+	# ⚠ THE CLAIM IT MADE IS NOT DROPPED, only moved — it is the only statement in the UI
+	# that the 3-D body is FK-written from COMMANDED pulses rather than measured (hobby
+	# servos report nothing back), and losing it would leave the view looking like
+	# feedback.  It now rides in the calibration panel header, beside the sliders that do
+	# the commanding.
 
 	# ---- right: calibration panel -------------------------------------------------------
 	var right := PanelContainer.new(); _right_panel = right
@@ -270,6 +285,11 @@ func _build_ui() -> void:
 	var rroot := VBoxContainer.new(); rmargin.add_child(rroot)
 	var hdr := HBoxContainer.new(); rroot.add_child(hdr)
 	hdr.add_child(_lbl("SERVO CALIBRATION — robot on a stand", 13))
+	# See the note where the floating caption was removed: this is the UI's only statement
+	# that the 3-D body shows what was COMMANDED, not what the servos did.
+	var cmd_lbl := _lbl("· 3-D view = COMMANDED pose", 11)
+	cmd_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	hdr.add_child(cmd_lbl)
 	var rv := VBoxContainer.new(); rroot.add_child(rv); _cal_content = rv
 	rv.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var sv := Button.new(); sv.text = "SAVE MAP"; sv.pressed.connect(_on_save_map); hdr.add_child(sv)
@@ -288,6 +308,11 @@ func _build_ui() -> void:
 	# today's finding: P0 = rear-left knee
 	_rows[0]["phys"].select(PHYS_OPTIONS.find("RL"))
 	_rows[0]["joint"].select(JOINT_OPTIONS.find("knee"))
+
+	# Fold the calibration panel NOW rather than relying on _cal_min alone: the flag only
+	# records the state, _apply_min is what moves the panel's anchors and flips the arrow.
+	# Setting one without the other ships a panel that claims to be folded and is not.
+	_apply_min(_right_panel, _cal_content, _cal_min_btn, _cal_min)
 
 
 func _build_row(ch: int) -> Control:
