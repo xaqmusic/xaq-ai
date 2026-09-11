@@ -26,8 +26,9 @@ line as watched: a Roomba. The redesign is in the [playroom plan §12](microduck
 bearing; the walk begins when nothing at the stop is left to bake), three modes with one learner
 (remote control / autonomous / skill; learning never stops, only driving changes), the sixteen
 built-ins as regime data, an expression layer over the catalog that actually exists on Pollen's
-wire, and a ten-minute instrument. **Next lever: W1, the competence-gated hand-back of the joints
-to our brain at a stop.** Register O31–O34.
+wire, and a ten-minute instrument. W0 and W1 are built and measured (R39, design doc §17.18): the hand-back is loud (87/89 stands held, the
+stand stiller than the walker's), the gate deferred, a resume-from-still deadlock found for W5.
+**Next lever: W2, the stance-gated head yaw at the stop.** Register O31–O34.
 
 **State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
 path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);

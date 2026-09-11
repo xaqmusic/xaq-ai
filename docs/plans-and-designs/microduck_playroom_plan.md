@@ -38,6 +38,15 @@ complement is contingency (§12.6). **Build order §12.7: W1 the hand-back at th
 Decisions taken: the hand-back is competence-gated; the rhythm before skills-as-data; host and
 simulator only. Register O31–O34.
 
+**W0 and W1 built and measured (R39, design doc §17.18, night).** The hand-back is loud: 89 of 90
+stops handed the legs to the R19 stander, 87 held to the end, tilt 2.2° → 0.5° inside a second, the
+stand stiller than the walker's own at every hand-back (`WORKING`, n = 6, operator's eye pending on
+preset R39). The competence gate is `DEFERRED`: the joint brain's attitude error at the walker's
+settled stance is ~0 on every hand-back, so there was nothing to gate. Found on the way: a stop
+exposes §17.17's saturation as a **deadlock** — resumed from a still body with a wall behind it the
+twist command saturates at full reverse and the body stays pinned (one seed, 900 s, in the
+walker-holds control) — so W5 must begin from exactly that state. **Next: W2.**
+
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
 walking with a slow level prior on a frozen model; level on every seed, the camera steadier
@@ -590,8 +599,8 @@ built on stops.
 
 | # | lever | stimulus | metric | promote if |
 |---|---|---|---|---|
-| W0 | the ten-minute instrument (§12.6) in the sweep and the viewer | any run | the histogram; contingency | it reads R34 and R38 as the operator saw them |
-| W1 | **the hand-back at the joints**: walker stopped, twist zero, our joint brain takes the joints from whatever pose the walker leaves them in; competence-gated | the R30 tour with stops | survival and catch rate after a hand-back; rescues/hour; hand-offs/hour falling | the stance survives the transition on every seed. Produces walk, stop, stand |
+| W0 | the ten-minute instrument (§12.6) in the sweep and the viewer | any run | the histogram; contingency | it reads R34 and R38 as the operator saw them | **Built 2026-09-11 (`l2_sweep.py`: `walk% stopW% stand% resc%` + the stop counters; `--host-arm`): R34 reads 99.1 % walk, 0.9 % rescue**
+| W1 | **the hand-back at the joints**: walker stopped, twist zero, our joint brain takes the joints from whatever pose the walker leaves them in; competence-gated | the R30 tour with stops | survival and catch rate after a hand-back; rescues/hour; hand-offs/hour falling | the stance survives the transition on every seed. Produces walk, stop, stand. **Built and measured 2026-09-11 (R39, design doc §17.18): `WORKING` at n = 6 — 87/89 stands held, tilt 2.2° → 0.5° in 1 s; the gate `DEFERRED` (nothing to gate, satt ≈ 0); the resume-from-still deadlock found (→ W5)** |
 | W2 | stance-gated head yaw: the saccade channel while still, trunk-following while walking | a stop | head yaw excursions at stops, zero on the walk; ★ HEAD's picture number unchanged walking | the walk is byte-identical to ★ HEAD |
 | W3 | insert-on-stop for the place map, the saccade target = the max-residual bearing, the stop ends when nothing is above the spread | the room; one object moved | nodes per stop; saccades per stop falling as places bake; stop length vs novelty; `switch/min` | stops are short at baked places and long at new or moved ones — loud or nothing |
 | W4 | the command mux and remote-control mode in the host and the viewer | the operator's hands | the level-2 model's identified rows after a driven session vs before; byte-identity with no input | the model improves under driving |

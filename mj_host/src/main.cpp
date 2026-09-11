@@ -1138,20 +1138,13 @@ int cmd_probe(const std::string& scene, double seconds, uint64_t seed) {
 // --brain  (A1)
 // ---------------------------------------------------------------------------
 
-int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
-              double amplitude, bool emit, int ident_every = 0, int ident_until = 0,
-              const PushPlan& pushes = {}, const StepPlan& step = {}, const WalkPlan& walk = {}) {
-    DuckBody probe(scene);   // for the joint ranges the adapter reads by name
-
-    // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
-    // measured equilibrium, not the STAND keyframe: the keyframe is up to 0.10 rad
-    // from where alpha_stand actually balances, so u = 0 at the keyframe is a pose
-    // the body topples from in ~0.1 s and every handback began with a step-change
-    // lurch toward it.  Three scaffold-driven seconds, mean q over the final one.
-    // A scaffold-derived origin is a calibration in the same category as reading
-    // joint ranges from the model instead of transcribing them.
-    std::vector<double> stand_home(kNumPolicyJoints, 0.0);
-    std::vector<double> stand_hcom(2, 0.0);
+// STAND CALIBRATION (2026-08-31), shared by the joint-level run and the level-2 stops: the joint
+// brain's command origin is the SCAFFOLD'S measured equilibrium, not the STAND keyframe (see the note
+// in cmd_brain).  Three scaffold-driven seconds on a probe body, mean q over the final one.
+void calibrate_stand_home(DuckBody& probe, uint64_t seed, std::vector<double>& stand_home,
+                          std::vector<double>& stand_hcom) {
+    stand_home.assign(kNumPolicyJoints, 0.0);
+    stand_hcom.assign(2, 0.0);
     {
         Policy scaffold(kStandScaffold);
         probe.reset("STAND", 0.0, seed);
@@ -1184,6 +1177,22 @@ int cmd_brain(const std::string& scene, const std::string& graph, double seconds
                              "(max |delta| from keyframe %.4f rad; head CoM %+0.4f %+0.4f m)\n",
                      dmax, stand_hcom[0], stand_hcom[1]);
     }
+}
+
+int cmd_brain(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
+              double amplitude, bool emit, int ident_every = 0, int ident_until = 0,
+              const PushPlan& pushes = {}, const StepPlan& step = {}, const WalkPlan& walk = {}) {
+    DuckBody probe(scene);   // for the joint ranges the adapter reads by name
+
+    // STAND CALIBRATION (2026-08-31).  The brain's command origin is the SCAFFOLD'S
+    // measured equilibrium, not the STAND keyframe: the keyframe is up to 0.10 rad
+    // from where alpha_stand actually balances, so u = 0 at the keyframe is a pose
+    // the body topples from in ~0.1 s and every handback began with a step-change
+    // lurch toward it.  Three scaffold-driven seconds, mean q over the final one.
+    // A scaffold-derived origin is a calibration in the same category as reading
+    // joint ranges from the model instead of transcribing them.
+    std::vector<double> stand_home, stand_hcom;
+    calibrate_stand_home(probe, seed, stand_home, stand_hcom);
 
     OgmaBrainAdapter brain(probe, {graph, seed, amplitude, stand_home, stand_hcom});
     if (g_servo_filter) brain.set_servo_filter(true);
@@ -1235,6 +1244,29 @@ double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the 
 bool g_head_joints = false;
 double g_head_phase_lead = 0.0, g_head_phase_learn = 0.0;   // --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
+// --stop-every S --stop-secs S [--stop-from S]: the walk-stop-look line's stimulus (playroom plan
+// §12.7, W1).  A scheduled stop: the twist is zeroed and the walker stands; once the body is still the
+// LEGS are handed to the joint brain (--stop-brain CFG --stop-load CKPT, the R19 stander) if its own
+// attitude error is below --stop-att (the hand-back gate, the brain's own "I know this pose"; 0 = no
+// gate); the walker takes the legs back on the same signal the step hand-off uses (--stop-handoff-att,
+// else --stop-handoff-lean degrees) and at the end of the stop.  By default the joint brain owns all
+// fourteen joints at a stop (the regime it was validated in); --stop-keep-head leaves the head brain
+// on the head (Track A) across the stop.  Both brains that do not drive are frozen: the twist brain's
+// command is not applied during a stop and the joint brain's is not applied during a walk, so neither
+// may fit the pairing (the H2 lesson: a model identified under another driver's loop drifts).  Absent:
+// byte-identical.  A scaffold schedule, named as such; §12.2's stop is the map's, and this measures
+// the transition it will need.
+struct StopPlan {
+    double every_s = 0.0, secs = 0.0, from_s = 0.0;
+    double att_gate = 0.0;          // hand-back only if the joint brain's attitude error is below this
+    double handoff_att = 0.0;       // > 0: the walker takes the legs back on the brain's attitude error
+    double handoff_lean = 6.5;      // else on the lean, degrees (the step hand-off's own threshold)
+    double settle_s = 2.0;          // at most this long waiting for stillness before the hand-back
+    int    confirm_ticks = 3;
+    bool   keep_head = false;
+};
+StopPlan g_stop;
+std::string g_stop_brain, g_stop_load;
 
 int cmd_level2(const std::string& scene, const std::string& graph, double seconds, uint64_t seed,
                bool emit, const PushPlan& pushes = {}, const std::array<double, 3>* open_loop = nullptr,
@@ -1306,6 +1338,55 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const double dt = 1.0 / kBrainHz;
     const int ticks = int(seconds * kBrainHz);
 
+    // The joint brain at the stops (W1).  Calibrated and restored exactly as --brain does it; its
+    // learning is off until it drives.
+    const bool stop_on = g_stop.every_s > 0.0 && g_stop.secs > 0.0;
+    std::unique_ptr<OgmaBrainAdapter> stander;
+    const bool stop_walker_holds = (g_stop_brain == "walker");   // the control: the same stops, the walker stands them
+    if (stop_on && stop_walker_holds) {
+        std::fprintf(stderr, "stops: every %.0f s for %.0f s from %.0f s; the WALKER holds them (the control arm)\n",
+                     g_stop.every_s, g_stop.secs, g_stop.from_s);
+    } else if (stop_on) {
+        if (g_stop_brain.empty()) throw std::runtime_error("--stop-every needs --stop-brain CFG (or 'walker' for the control)");
+        DuckBody probe(scene);
+        std::vector<double> stand_home, stand_hcom;
+        calibrate_stand_home(probe, seed, stand_home, stand_hcom);
+        stander = std::make_unique<OgmaBrainAdapter>(probe, OgmaBrainAdapter::Config{g_stop_brain, seed, 0.35, stand_home, stand_hcom});
+        if (g_servo_filter) stander->set_servo_filter(true);
+        if (!g_stop_load.empty()) {
+            std::ifstream in(g_stop_load);
+            if (!in) throw std::runtime_error("--stop-load: cannot open " + g_stop_load);
+            nlohmann::json snap; in >> snap;
+            stander->restore_brain_state(snap.at("graph"));
+        }
+        stander->set_learning(false);
+        std::fprintf(stderr, "stops: every %.0f s for %.0f s from %.0f s; the joint brain %s%s%s takes the legs when still",
+                     g_stop.every_s, g_stop.secs, g_stop.from_s, g_stop_brain.c_str(),
+                     g_stop_load.empty() ? "" : " restored from ", g_stop_load.c_str());
+        if (g_stop.att_gate > 0.0) std::fprintf(stderr, " and its attitude error < %.3f", g_stop.att_gate);
+        std::fprintf(stderr, "; the walker takes them back %s%.3g%s; head %s\n",
+                     g_stop.handoff_att > 0.0 ? "on attitude error > " : "past ",
+                     g_stop.handoff_att > 0.0 ? g_stop.handoff_att : g_stop.handoff_lean,
+                     g_stop.handoff_att > 0.0 ? "" : " deg of lean",
+                     g_stop.keep_head ? "stays the head brain's" : "is the joint brain's during the stand");
+    }
+    enum class StopPhase { None, Settle, Brain, Walker };
+    StopPhase stop_phase = StopPhase::None;
+    const int stop_period = int(g_stop.every_s * kBrainHz), stop_ticks = int(g_stop.secs * kBrainHz);
+    const int stop_from = int(g_stop.from_s * kBrainHz), stop_settle_ticks = std::max(1, int(g_stop.settle_s * kBrainHz));
+    int stop_left = 0, stop_settle_left = 0, stop_confirm = 0;
+    int stops_started = 0, stop_handbacks = 0, stop_refused = 0, stop_handoffs = 0, stop_rescued = 0, stop_survived = 0;
+    long stand_ticks = 0;
+    double stop_last_lean = 0.0;
+    const char* stop_event = "";
+    auto end_stop_drive = [&](bool to_walker) {
+        // the joint brain stops driving: freeze it, invalidate its pairing, and give the walker a
+        // clean start from the pose the body is actually in (as the rescue hand-back does)
+        if (stander) { stander->set_learning(false); stander->on_reset(); }
+        if (to_walker) { walker_last.fill(0.0f); walk_targets = body.joint_positions(); }
+    };
+
+
     // The body's own velocity: odometry differenced in the world-of-boot frame and
     // rotated into the body frame by the odometry's own yaw; the yaw rate from the
     // gyro.  Both smoothed over ~10 ticks — contact odometry steps at anchor switches.
@@ -1318,11 +1399,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     for (int t = 0; t < ticks; ++t) {
         pacer.wait_for(t, kBrainHz);
         Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
+        stop_event = "";
         if (recovery.handed_off_this_tick()) {
             brain.set_learning(false);
             brain.on_reset();
             command.twist = {0.0, 0.0, 0.0};
             if (head) { head->set_learning(false); head->on_reset(); command.head = {0.0, 0.0, 0.0, 0.0}; }
+            if (stop_phase != StopPhase::None) {          // the stop ended in a fall
+                if (stop_phase == StopPhase::Brain) end_stop_drive(false);
+                stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
+            }
         } else if (recovery.handed_back_this_tick()) {
             brain.on_reset();
             brain.set_learning(true);
@@ -1351,6 +1437,56 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (has_clock) body.spin_joint("clock_hand", kClockRadPerS);
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         if (driver == Driver::Brain) command.twist = twist;
+        if (stop_on && driver == Driver::Brain) {
+            if (stop_phase == StopPhase::None && stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0
+                && (ticks - t) > stop_ticks) {
+                stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
+                ++stops_started; stop_event = "stop:start";
+                brain.set_learning(false);                 // its command is not applied during the stop
+                if (stander) stander->on_reset();          // a fresh pairing after the walk
+                if (head && stander && !g_stop.keep_head) head->set_learning(false);
+            }
+            if (stop_phase != StopPhase::None) {
+                --stop_left;
+                const bool still = g[2] < -0.999 && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
+                const double lean = std::atan2(std::hypot(g[0], g[1]), -g[2]) * (180.0 / M_PI);
+                if (stop_phase == StopPhase::Settle) {
+                    --stop_settle_left;
+                    if (stander) (void)stander->act(body); // observes, frozen: its attitude error is then fresh
+                    if (still || stop_settle_left == 0) {
+                        double att = 0.0;
+                        if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
+                        if (!stander) {
+                            stop_phase = StopPhase::Walker; stop_event = "stop:walker";
+                        } else if (g_stop.att_gate <= 0.0 || att < g_stop.att_gate) {
+                            stop_phase = StopPhase::Brain; ++stop_handbacks; stop_event = "stop:handback";
+                            stander->on_reset(); stander->set_learning(true); stop_confirm = 0; stop_last_lean = lean;
+                        } else {
+                            stop_phase = StopPhase::Walker; ++stop_refused; stop_event = "stop:refused";
+                        }
+                    }
+                } else if (stop_phase == StopPhase::Brain) {
+                    double sig = lean, thresh = g_stop.handoff_lean;
+                    if (g_stop.handoff_att > 0.0) {
+                        sig = 0.0; for (double v : stander->attitude_error()) sig = std::max(sig, v);
+                        thresh = g_stop.handoff_att;
+                    }
+                    if (sig > thresh && sig > stop_last_lean) ++stop_confirm; else stop_confirm = 0;
+                    stop_last_lean = sig;
+                    if (stop_confirm >= g_stop.confirm_ticks) {
+                        end_stop_drive(true);
+                        stop_phase = StopPhase::Walker; ++stop_handoffs; stop_event = "stop:handoff";
+                    }
+                }
+                if (stop_left <= 0 && stop_phase != StopPhase::None) {
+                    if (stop_phase == StopPhase::Brain) { ++stop_survived; end_stop_drive(true); }
+                    stop_phase = StopPhase::None; stop_event = "stop:end";
+                    brain.set_learning(true);
+                    if (head && stander && !g_stop.keep_head) { head->on_reset(); head->set_learning(true); }
+                }
+            }
+            if (stop_phase != StopPhase::None) command.twist = {0.0, 0.0, 0.0};
+        }
         if (head) {
             // The head loop: the four head joints (policy indices 5-8) relative to HOME are its
             // sensed "joints"; the head IMU and the trunk IMU its senses; its output the head
@@ -1385,6 +1521,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             scaffold_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i)
                 ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+        } else if (stop_phase == StopPhase::Brain) {
+            // The joint brain stands (W1): the legs are its; the head too unless --stop-keep-head.
+            // The learnable-regime gate as --brain applies it (near-upright only).
+            stander->set_regime_learning(g[2] < -0.90);
+            stander->sample_tle(g[2] < -0.5);
+            ctrl = stander->act(body);
+            if (head_owns_joints && g_stop.keep_head)
+                for (int i = 0; i < 4; ++i) ctrl[5 + i] = head_targets[size_t(i)];
+            walk_targets = ctrl;                 // the walker resumes from where the body is left
+            ++stand_ticks;
         } else {
             const auto action = walker.infer(build_observation(body, walker_last, command));
             walker_last = action;
@@ -1445,12 +1591,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::printf(",\"drive\":\"%s\","
                         "\"twist\":[%.3f,%.3f,%.3f],\"sensed\":[%.3f,%.3f,%.3f],"
                         "\"learning\":%s,\"event\":\"%s\",\"odom\":[%.4f,%.4f,%.4f],\"q\":[",
-                        driver == Driver::Brain ? "walk" : "scaffold",
+                        driver != Driver::Brain ? "scaffold" : stop_phase == StopPhase::Brain ? "stand" : "walk",
                         command.twist[0], command.twist[1], command.twist[2],
                         sensed[0], sensed[1], sensed[2],
                         learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
-                        : recovery.handed_back_this_tick() ? "reset:handback" : "",
+                        : recovery.handed_back_this_tick() ? "reset:handback"
+                        : stop_event[0]                    ? stop_event : "",
                         op[0], op[1], odom.yaw());
             const auto q = body.joint_positions();
             for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
@@ -1467,6 +1614,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1, brain.heading(), brain.heading_ref());
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
+            if (stop_on) {
+                // the stop phase (0 none, 1 settling under the walker, 2 the joint brain stands, 3 the walker
+                // holds it: gate refused or handed back) and the joint brain's own attitude error
+                double att = 0.0;
+                if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
+                std::printf(",\"stop\":%d,\"satt\":%.3f", int(stop_phase), att);
+            }
             if (head) {
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
                 std::printf(",\"head\":[%.4f,%.4f,%.4f,%.4f],\"hg\":[%.4f,%.4f,%.4f],\"hw\":[%.4f,%.4f,%.4f]",
@@ -1530,6 +1684,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (pushes.newtons > 0.0)
         std::fprintf(stderr, "  %.1f N shoves every %.1f s from %.0f s: %d delivered\n", pushes.newtons,
                      pushes.every_s, pushes.from_s, pushes_delivered);
+    if (stop_on) {
+        std::fprintf(stderr, "  stops: %d started, %d hand-backs, %d refused by the gate, %d survived to the end, "
+                             "%d handed back to the walker, %d rescued; the joint brain stood %.1f s\n",
+                     stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
+                     stand_ticks / kBrainHz);
+        if (stander) for (const auto& line : stander->diagnostics()) std::fprintf(stderr, "  stander: %s\n", line.c_str());
+    }
     const double total = recovery.brain_seconds() + recovery.scaffold_seconds();
     std::fprintf(stderr, "level-2 %.0f s — %d rescues, %.0f%% of the run walker-driven; learning frozen %.0f%%\n",
                  seconds, recovery.rescues(), 100.0 * recovery.brain_seconds() / std::max(total, 1e-9),
@@ -1577,6 +1738,10 @@ void usage() {
         "      leaking to centre in TAU s, plus LEAD s of the rate itself (0 0 = off).\n"
         "      --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward on yaw — the stride clock from the hip\n"
         "      pitch, a 16-bin table of the head's yaw rate learned for LEARN_S s, then the opposite angle LEAD early.\n"
+        "      --stop-every S --stop-secs S [--stop-from S] --stop-brain CFG [--stop-load CKPT] [--stop-att X]\n"
+        "          [--stop-handoff-att Y | --stop-handoff-lean DEG] [--stop-settle-secs S] [--stop-keep-head]:\n"
+        "          scheduled stops (W1): the twist zeroed, and once still the legs handed to the joint brain\n"
+        "          if its attitude error is below X; the walker takes them back on Y / DEG and at the end.\n"
         "      --head-joints: Track A at the head — the head brain's commands become the head JOINT targets\n"
         "      (HOME + command) over the walker's head outputs; the walker keeps the legs.\n"
         "      --head-rate K TAU: the yaw command integrates minus K times the head's OWN yaw rate (its gyro),\n"
@@ -1691,6 +1856,26 @@ int main(int argc, char** argv) {
             g_head_graph = next("--head-graph");
         } else if (a == "--head-phase") {
             g_head_phase_lead = std::stod(next("--head-phase")); g_head_phase_learn = std::stod(next("--head-phase"));
+        } else if (a == "--stop-every") {
+            g_stop.every_s = std::stod(next("--stop-every"));
+        } else if (a == "--stop-secs") {
+            g_stop.secs = std::stod(next("--stop-secs"));
+        } else if (a == "--stop-from") {
+            g_stop.from_s = std::stod(next("--stop-from"));
+        } else if (a == "--stop-brain") {
+            g_stop_brain = next("--stop-brain");
+        } else if (a == "--stop-load") {
+            g_stop_load = next("--stop-load");
+        } else if (a == "--stop-att") {
+            g_stop.att_gate = std::stod(next("--stop-att"));
+        } else if (a == "--stop-handoff-att") {
+            g_stop.handoff_att = std::stod(next("--stop-handoff-att"));
+        } else if (a == "--stop-handoff-lean") {
+            g_stop.handoff_lean = std::stod(next("--stop-handoff-lean"));
+        } else if (a == "--stop-settle-secs") {
+            g_stop.settle_s = std::stod(next("--stop-settle-secs"));
+        } else if (a == "--stop-keep-head") {
+            g_stop.keep_head = true;
         } else if (a == "--head-joints") {
             g_head_joints = true;
         } else if (a == "--head-rate") {

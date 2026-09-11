@@ -656,5 +656,29 @@
       "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints",
       "fast_until": 600
     }
+  },
+  {
+    "name": "R39 · W1 walk-stop-STAND: scheduled stops after the babble; the R19 joint brain takes the legs when still (★ HEAD stack)",
+    "series": 39,
+    "hint": "The walk-stop-look line's first lever (playroom plan §12.7 W1): every 60 s from 600 s the twist is zeroed for 20 s; once still, the legs (and head) are handed to the R19 stander (checkpoint duck_r19_s2), which stands and catches; the walker takes them back past 6.5 deg of lean or at the stop's end. Judged on survival at the hand-back, handoffs, rescues, and the W0 histogram; the control is the same stops held by the walker (--stop-brain walker). The lever lives in the host args, the graph is R34's.",
+    "state": {
+      "config": "a1v2_r39_w1_stops.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500.0,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 60 --stop-secs 20 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json",
+      "fast_until": 600
+    }
   }
 ]

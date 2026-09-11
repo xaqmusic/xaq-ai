@@ -1921,3 +1921,69 @@ prior's error in one identified step, `u = −e / A(idx, vyaw)`, clamped, which 
 half 2 is meant to converge to and here does not. The positive feedback on the own-rate copy is a
 second, older defect (R21) that a lesion would also expose. `straight` and the `hdg` field are the
 instruments; the bar is `straight` well above 0.2 on every seed *with* the play reference live.
+
+### 17.18 W1 — the hand-back at the joints: scheduled stops, and the R19 stander takes the legs (R39, 2026-09-11)
+
+**The line.** The walk-stop-look line (playroom plan §12) needs one transition before anything
+else: a walking duck stops, and the joint brain that stands and catches (R19) takes the legs from
+whatever pose the walker leaves them in. W1 measures that transition with a scaffold stimulus — a
+stop schedule — before §12.2's stop, which is the map's, exists.
+
+**Built.** `--stop-every S --stop-secs S --stop-from S` on the level-2 host: the twist is zeroed and
+the walker stands; once still (the identification settle's own criterion, at most 2 s) the legs —
+and the head, its validated regime — go to the joint brain named by `--stop-brain CFG --stop-load
+CKPT`, calibrated and restored exactly as `--brain` does it; the walker takes them back past 6.5° of
+rising lean (the step hand-off's threshold, `--stop-handoff-lean`, or the brain's attitude error,
+`--stop-handoff-att`) and at the stop's end. `--stop-att X` gates the hand-back on the joint brain's
+own attitude error (0 = ungated); `--stop-brain walker` is the control arm — the same stops, the
+walker holding them; `--stop-keep-head` leaves the head brain on the head (unmeasured). Both brains
+that do not drive are frozen and reset at the edges (the H2 lesson, §17.10). Absent, the tick
+stream is byte-identical (10 000 ticks of R34 compared). The JSONL gains `drive: stand`, the events
+`stop:start / handback / refused / handoff / end / rescued / walker`, and `stop` (the phase) with
+`satt` (the joint brain's attitude error) when the schedule is on. **W0**, the ten-minute
+instrument, is in `l2_sweep.py`: the behaviour histogram (`walk% stopW% stand% resc%`) and the stop
+counters, plus `--host-arm NAME:'ARGS'` for a lever that lives in the host. The viewer draws the
+stand green. R39 = R34's graph with the stops in the host args; preset on the ★ HEAD controls.
+
+**Measured.** Playroom, ★ HEAD stack, n = 6, 1500 s, stops every 60 s for 20 s from 600 s (15 per
+run, 14 in the 700–1500 s control phase), paired by seed:
+
+| n = 6 | walk% | stopW% | stand% | walls/min | cells | path m | straight | switch/min | resc/min | hand-backs | survived | handed off | rescued |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 99.1 | 0 | 0 | 10.9 ± 9.3 | 144 ± 20 | 147 ± 4 | 0.19 | 133 ± 16 | 0.19 | — | — | — | — |
+| stops, the walker holds | 67.2 | 32.0 | 0 | 29.9 ± 42.5 (3+/3−) | 70 ± 36 | 86 ± 32 | 0.15 | 76 ± 16 | 0.08 | — | — | — | — |
+| **stops, the joint brain stands** | 66.9 | 2.5 | **29.5** | 18.1 ± 23.6 (3+/3−) | 106 ± 26 | 97 ± 6 | 0.16 | 103 ± 13 | 0.17 | **89 / 90** | **87** | 2 | 1 |
+
+- **The hand-back is loud.** 89 of 90 stops handed the legs over (one stop was cut by a rescue
+  before stillness), 87 of 89 stands held to the stop's end, 2 went back to the walker on lean, 1
+  fell — all three on seed 1. Over the 77 control-phase hand-backs the tilt goes 2.23° at the
+  hand-back → 0.49° one second later → 0.39° at five; the joint brain stands at **0.49° mean
+  tilt** where the walker's own stand sits at 3.0–3.5° (walker-held stops, both arms). The
+  transition lurch is 0.02 rad/tick for ten ticks; the walker's resumption is the larger jump.
+- **The gate had nothing to gate.** `--stop-att` was 0 (ungated), and what a gate would have seen —
+  `satt` at the hand-back — is 0.0000, max 0.0020, on every hand-back: the joint brain's attitude
+  error at the walker's settled stance is not a discriminating competence signal. The
+  competence-gated hand-back of §12.3 is therefore **unmeasured**, not confirmed (a §3.2 rule 1
+  catch made before the verdict, not after). Its re-use context: a hand-back from a walker that has
+  not settled (`--stop-settle-secs 0`), or from a shoved body, where the error is not ~0.
+- **The stops cost a third of the tour, as they must.** Cells 144 → 106 and path 147 → 97 m are the
+  stimulus (30 % of the phase standing), not a regression; `switch/min` falls 133 → 103 because the
+  map stops re-tiling while the body is still — §12.2's premise in miniature.
+- **The §3.2 catch: a stop exposes §17.17's saturation as a deadlock.** In the walker-holds arm,
+  seed 1 resumes from a still body with the wall behind it; the twist command saturates at full
+  reverse (`[−0.40, −0.30, −1.0]`) and the body is pinned to the wall for the remaining 900 s — 14
+  of 14 windows pinned, 98 walls/min, 3 cells. The ToF faces away from the wall, and because the
+  body does not move nothing perturbs the loop; in R34 the same defect flips at 2.4 Hz because the
+  body is always moving. Under the joint brain the same seed is pinned for one window (1080 s) and
+  leaves through a lean → hand-off → rescue. That deadlock is the whole of the walker arm's walls/min
+  and the reason both stop arms tie R34 on walls (3+/3−). It is the resume-from-still form of the
+  twist brain's yaw defect and raises W5's priority: §12.2's turn-in-place under a homing target must
+  begin from exactly this state.
+- **W0 reads the stack as the operator saw it:** R34 is 99.1 % walk and 0.9 % rescue — the Roomba,
+  in one row. The stop arms are 67 % walk / 32 % stop; the joint-brain arm 29.5 % stand.
+
+**Verdict.** W1 `WORKING` at n = 6, loud on the transition: the stand survives 87 of 89 hand-backs
+and is stiller than the walker's at every one. Not a promotion — the stop is a schedule and the
+operator's eye is pending (preset R39, seed 6, fast-forward through the babble). The competence gate
+`DEFERRED` with its re-use context above; `--stop-keep-head` unmeasured; the resume-from-still
+deadlock recorded against §17.17 (W5). Next: W2, the stance-gated head yaw at the stop.

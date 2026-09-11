@@ -39,6 +39,14 @@ Per arm and seed, from the host's own JSONL (stdout) and summary (stderr):
   turns       the host's wander heading changes (stderr), if the wander rule is on
   rescues/min, walker-driven %, and the identified A rows (read-backs: a silent-confound arm
   cannot happen quietly, §3.2 rule 7).
+  W0, the ten-minute instrument (playroom plan §12.6): the BEHAVIOUR HISTOGRAM over the control phase --
+  walk%   ticks walking under the twist brain      stopW%  ticks in a scheduled stop held by the walker
+  stand%  ticks the joint brain owns the legs      resc%   ticks under the rescue scaffold
+  and the stop counters from the host's summary: stops, handbacks (the legs given to the joint brain),
+  survived (held to the stop's end), handoffs (given back on lean), refused (the gate), stopResc (a fall).
+  Its blind metric is variety; the complement is contingency (nothing here fires without an event).
+  --host-arm NAME:'ARGS' adds an arm that is the FIRST config with those host args appended (the lever
+  lives in the host, not the graph: R39's stops).
 Blind-metric complements (CLAUDE.md §3 rule 4): cells vs walls/min (an orbit scores 0 walls
 and 9 cells; a wall-rider scores many cells and hundreds of walls), path vs span.
 """
@@ -88,34 +96,52 @@ def control_from_default(cfg: Path) -> float:
     return 0.0
 
 
-def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tuple, logdir: Path | None,
+class Arm:
+    """A config plus the host args that make it an arm; `stem` names it in the tables."""
+    def __init__(self, cfg: Path, label: str | None = None, extra: tuple = ()):
+        self.cfg, self.extra = cfg, tuple(extra)
+        self.stem = label or cfg.stem
+    def __hash__(self): return hash((self.cfg, self.stem, self.extra))
+    def __eq__(self, o): return (self.cfg, self.stem, self.extra) == (o.cfg, o.stem, o.extra)
+
+
+def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, logdir: Path | None,
             scene: str = "", noise: float = 0.0, phase_at: float | None = None, arena_half: float = 1e9) -> dict:
+    cfg = arm.cfg if isinstance(arm, Arm) else Path(arm)
+    extra = arm.extra if isinstance(arm, Arm) else ()
+    stem = arm.stem if isinstance(arm, Arm) else cfg.stem
     cmd = [str(HOST), "--level2", *([scene] if scene else []), "--graph", str(cfg), "--secs", str(secs), "--seed", str(seed),
-           "--noise", str(noise), *host_args]
+           "--noise", str(noise), *host_args, *extra]
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=7200, cwd=str(REPO / "mj_host"))
     if logdir is not None:
         # a compact stream: the fields the metrics read (a full level-2 JSONL carries qpos and the
         # 64 ToF zones per tick -- ~75 MB per 1500 s run, which filled a tmpfs quota on first use)
         logdir.mkdir(parents=True, exist_ok=True)
-        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map", "hdg", "twist", "hg", "hw", "head")
-        with open(logdir / f"{cfg.stem}_s{seed}.jsonl", "w") as f:
+        keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map", "hdg", "twist", "hg", "hw", "head", "stop", "satt", "event")
+        with open(logdir / f"{stem}_s{seed}.jsonl", "w") as f:
             for line in p.stdout.splitlines():
                 if not line.startswith("{"): continue
                 try: row = json.loads(line)
                 except ValueError: continue
                 f.write(json.dumps({k: row[k] for k in keep if k in row}) + "\n")
-        (logdir / f"{cfg.stem}_s{seed}.stderr").write_text(p.stderr)
+        (logdir / f"{stem}_s{seed}.stderr").write_text(p.stderr)
     err = p.stderr
     out = {"seed": seed, "rc": p.returncode}
     if p.returncode != 0 or not any(l.startswith("{") for l in p.stdout.splitlines()):
         # §3.2 rule 7: a run that did not happen must not print as a row of zeros
         tail = " | ".join(p.stderr.strip().splitlines()[-2:])
-        print(f"  !! {cfg.stem} seed {seed}: host rc {p.returncode}, no JSONL — {tail}", file=sys.stderr)
+        print(f"  !! {stem} seed {seed}: host rc {p.returncode}, no JSONL — {tail}", file=sys.stderr)
     m = re.search(r"level-2 [\d.]+ s — (\d+) rescues, (\d+)% of the run walker-driven", err)
     out["rescues_min"] = int(m.group(1)) * 60.0 / secs if m else float("nan")
     out["driven_pct"] = float(m.group(2)) if m else float("nan")
     m = re.search(r"wander: (\d+) heading changes", err)
     out["turns"] = int(m.group(1)) if m else None
+    m = re.search(r"stops: (\d+) started, (\d+) hand-backs, (\d+) refused by the gate, (\d+) survived to the end, "
+                  r"(\d+) handed back to the walker, (\d+) rescued", err)
+    for k, v in zip(("stops", "handbacks", "refused", "survived", "handoffs", "stop_resc"),
+                    (int(x) for x in m.groups()) if m else [None] * 6):
+        out[k] = v
+    out["survive_pct"] = (100.0 * out["survived"] / out["handbacks"]) if m and out["handbacks"] else None
     out["readback"] = " | ".join(l.strip() for l in err.splitlines() if re.match(r"\s+(vx|vy|vyaw)\s+:|place vector:|\s+play \{", l))
     # ---- JSONL over the control phase (and, with --phase-at, the two halves around a perturbation)
     cells, xs, ys, winners = set(), [], [], set()
@@ -136,6 +162,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         layout = [(nm, adr) for nm, adr, nn in json.load(open(man)).get("qpos_layout", []) if nn == 7]
     obj_start = {}; obj_end = {}
     tooclose = tle_sum = 0.0; novel = 0; escaped = 0; steer_avoid = steer_play = 0
+    hist = {"walk": 0, "stopW": 0, "stand": 0, "resc": 0}       # W0: the behaviour histogram
     ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
           "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
     for line in p.stdout.splitlines():
@@ -152,6 +179,8 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
             mp0 = r.get("map") or []
             if len(mp0) >= 3: g["nodes"].add(int(mp0[2]))
         n += 1
+        drv = r.get("drive", "walk"); sp = int(r.get("stop", 0))
+        hist["resc" if drv == "scaffold" else "stand" if drv == "stand" else "stopW" if sp else "walk"] += 1
         x, y = float(r["x"]), float(r["y"])
         xs.append(x); ys.append(y)
         cells.add((math.floor(x / CELL_M), math.floor(y / CELL_M)))
@@ -195,6 +224,7 @@ def run_one(cfg: Path, seed: int, secs: int, control_from: float, host_args: tup
         "objs_min": obj_eps / minutes, "down_pct": 100.0 * down / max(1, n),
         "head_w_rms": math.sqrt(hw2 / nh) if nh else float("nan"), "head_g_dev": math.sqrt(hg2 / nh) if nh else float("nan"),
         "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
+        **{f"{k}_pct": 100.0 * v / max(1, n) for k, v in hist.items()},
     })
     return out
 
@@ -237,6 +267,8 @@ def main():
     ap.add_argument("--host-args", default="")
     ap.add_argument("--arm", action="append", default=[])
     ap.add_argument("--arm-base", default=None, help="the config --arm derives from (default: the first config)")
+    ap.add_argument("--host-arm", action="append", default=[], metavar="NAME:ARGS",
+                    help="an arm = the first config with these host args appended (for a lever that lives in the host)")
     ap.add_argument("--logdir", default=None)
     ap.add_argument("--scene", default=str(REPO / "mj_host/models/microduck/scene_arena.xml"),
                     help="the level-2 scene (default: the 2 m arena -- the host's own default is the OPEN floor, where 'zero wall contacts' means no walls)")
@@ -250,7 +282,13 @@ def main():
     cfgs = [Path(c).resolve() for c in args.configs]
     arm_base = Path(args.arm_base).resolve() if args.arm_base else cfgs[0]
     cfgs += [make_arm(arm_base, spec, tmp) for spec in args.arm]
-    ctrl = args.control_from if args.control_from is not None else control_from_default(cfgs[0])
+    cfgs = [Arm(c) for c in cfgs]
+    for spec in args.host_arm:
+        name, _, extra = spec.partition(":")
+        if not extra.strip(): sys.exit(f"--host-arm {name}: no host args -- a TAUTOLOGY, not an arm")
+        cfgs.append(Arm(cfgs[0].cfg, name, tuple(extra.split())))
+        print(f"[host-arm] {name}: {cfgs[0].cfg.name} + {extra.strip()}", file=sys.stderr)
+    ctrl = args.control_from if args.control_from is not None else control_from_default(cfgs[0].cfg)
     host_args = tuple(args.host_args.split())
     args.scene = str(Path(args.scene).resolve())          # the host runs in mj_host/: a relative scene path would miss
     man = Path(args.scene).with_suffix(".manifest.json")
@@ -275,7 +313,10 @@ def main():
             ("cells", "cells"), ("span", "span m²"), ("straight", "straight"), ("nodes", "nodes"), ("switch_min", "switch/min"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
             ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
             ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%"),
-            ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev")]
+            ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev"),
+            ("walk_pct", "walk%"), ("stopW_pct", "stopW%"), ("stand_pct", "stand%"), ("resc_pct", "resc%"),
+            ("stops", "stops"), ("handbacks", "handbacks"), ("survived", "survived"), ("survive_pct", "survive%"),
+            ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])
@@ -284,7 +325,8 @@ def main():
         ref = cfgs[0]
         for c in cfgs[1:]:
             print(f"\n  PAIRED {c.stem} − {ref.stem}:")
-            for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("straight", "higher"), ("nodes", "higher"), ("switch_min", "-"), ("map_tle", "-"), ("rescues_min", "lower")):
+            for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("straight", "higher"), ("nodes", "higher"), ("switch_min", "-"), ("map_tle", "-"), ("rescues_min", "lower"),
+                              ("stand_pct", "-"), ("survive_pct", "higher"), ("handoffs", "lower"), ("stop_resc", "lower")):
                 print(f"    {k:12s} {paired(results[ref], results[c], k, better)}")
     if args.phase_at is not None:
         print(f"\n  (d) split at {args.phase_at:.0f} s -- before | after:")
