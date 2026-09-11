@@ -46,6 +46,21 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
         };
         if (*topic == "reality.proprio.place_in") {
             have_map = true;
+            map_module_id_ = m.id;
+            // The EPM does not report its live params (Module::current_params is empty for it), so the
+            // map gate (set_map_learning) restores what the graph configured, else the EPM's own defaults.
+            const auto get_dbl = [&](const char* k, double dflt) {
+                auto jt = m.params.find(k);
+                if (jt == m.params.end()) return dflt;
+                if (const auto* d = std::get_if<double>(&jt->second)) return *d;
+                if (const auto* i = std::get_if<int64_t>(&jt->second)) return double(*i);
+                if (const auto* b = std::get_if<bool>(&jt->second)) return *b ? 1.0 : 0.0;
+                return dflt;
+            };
+            map_saved_["min_insertion_error"] = get_dbl("min_insertion_error", 0.02);
+            map_saved_["epsilon_b"]           = get_dbl("epsilon_b", 0.05);
+            map_saved_["epsilon_n"]           = get_dbl("epsilon_n", 0.003);
+            map_saved_["stale_prune_enabled"] = get_dbl("stale_prune_enabled", 1.0);
             place_dims_ = int(get_int("proprio_state_dims", 12));
         } else if (*topic == "reality.proprio.depth_in") {
             if (get_int("proprio_state_dims", 0) != 64)
@@ -62,11 +77,13 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
                                         + std::to_string(4 + depth_dims_) + " (pose + depth latent); it declares " + std::to_string(place_dims_));
     } else if (place_dims_ == 12) {
         place_form_ = PlaceForm::Columns;
+    } else if (place_dims_ == 13) {
+        place_form_ = PlaceForm::ColumnsGaze;   // W3: pose, the head yaw, the 8 column ranges — a VIEW
     } else if (place_dims_ == 68) {
         place_form_ = PlaceForm::Zones;
     } else {
         throw std::invalid_argument("IntentAdapter: the map EPM on reality.proprio.place_in declares proprio_state_dims "
-                                    + std::to_string(place_dims_) + "; the host builds 12 (pose + 8 column ranges), 68 (pose + 64 zone ranges) or 4 + a depth EPM's projection_dim");
+                                    + std::to_string(place_dims_) + "; the host builds 12 (pose + 8 column ranges), 13 (pose + head yaw + 8 column ranges), 68 (pose + 64 zone ranges) or 4 + a depth EPM's projection_dim");
     }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
     inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path);
@@ -128,6 +145,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         std::vector<float> v(place->pose.begin(), place->pose.end());
         switch (place_form_) {
             case PlaceForm::Columns: v.insert(v.end(), place->cols.begin(), place->cols.end()); break;
+            case PlaceForm::ColumnsGaze: v.push_back(place->head_yaw); v.insert(v.end(), place->cols.begin(), place->cols.end()); break;
             case PlaceForm::Zones:   v.insert(v.end(), place->zones.begin(), place->zones.end()); break;
             case PlaceForm::Stacked: {
                 // The depth frame with its own mean taken out (CLAUDE.md §0 rule 2: the common mode --
@@ -158,7 +176,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     instance_->tick();
     inspector_->publish_tick(tick_id_);
     if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.proprio.place"))) {
-        map_tle_ = rt->tle; map_novel_ = rt->is_novel; map_winner_ = rt->winner_id;
+        map_tle_ = rt->tle; map_novel_ = rt->is_novel; map_winner_ = rt->winner_id; map_baked_now_ = rt->just_baked;
     }
     // R27: a loop's bearing becomes the heading reference (cx = +right is a clockwise turn, i.e.
     // a negative yaw in the odometry's right-handed frame).  Absent loop -> nothing happens.
@@ -247,9 +265,29 @@ void IntentAdapter::set_learning(bool on) {
     }
 }
 
+void IntentAdapter::set_map_learning(bool on) {
+    if (map_module_id_.empty() || on == !map_frozen_) return;
+    map_frozen_ = !on;
+    for (auto* module : instance_->modules()) {
+        if (std::string(module->id()) != map_module_id_) continue;
+        if (map_frozen_) {
+            module->on_param_change("min_insertion_error", ogma::ParamValue{1e9});
+            module->on_param_change("epsilon_b",           ogma::ParamValue{0.0});
+            module->on_param_change("epsilon_n",           ogma::ParamValue{0.0});
+            module->on_param_change("stale_prune_enabled", ogma::ParamValue{false});
+        } else {
+            module->on_param_change("min_insertion_error", ogma::ParamValue{map_saved_["min_insertion_error"]});
+            module->on_param_change("epsilon_b",           ogma::ParamValue{map_saved_["epsilon_b"]});
+            module->on_param_change("epsilon_n",           ogma::ParamValue{map_saved_["epsilon_n"]});
+            module->on_param_change("stale_prune_enabled", ogma::ParamValue{map_saved_["stale_prune_enabled"] != 0.0});
+        }
+    }
+}
+
 std::string IntentAdapter::place_form_desc() const {
     switch (place_form_) {
         case PlaceForm::Columns: return "12 dims: x, y, cos, sin, the 8 ToF column ranges / 4 m";
+        case PlaceForm::ColumnsGaze: return "13 dims: x, y, cos, sin, head yaw / 1.4, the 8 ToF column ranges / 4 m (a view)";
         case PlaceForm::Zones:   return "68 dims: x, y, cos, sin, the 64 ToF zone ranges / 4 m";
         case PlaceForm::Stacked: return std::to_string(place_dims_) + " dims: x, y, cos, sin, the " + std::to_string(depth_dims_)
                                         + "-dim latent of the depth EPM on " + depth_topic_ + " (the 64 zone ranges, frame mean out, on reality.proprio.depth_in)";

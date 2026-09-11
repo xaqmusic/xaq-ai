@@ -704,5 +704,29 @@
       "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 60 --stop-secs 20 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-scan 0.6 1.0 --stop-freeze-head",
       "fast_until": 600
     }
+  },
+  {
+    "name": "R41 · W3 a place is a STOP: the map learns only while standing, a view is pose + gaze, the look is driven by the map's own novelty (a quiet round ends the stop)",
+    "series": 41,
+    "hint": "The walk-stop-look line's map (playroom plan §12.2, W3): the map EPM's insertion, adaptation and pruning are on only at stops; the place vector gains the head yaw so each bearing at a stop is its own view; at a stop the head steps 0, +0.6, -0.6 rad, holding each at least 1 s and up to 4 s while the map calls the view novel; a full round with nothing novel ends the stop early, so the stop's length is the map's. Judged on stop length vs novelty (contingency), saccades and nodes per stop, switch/min, cells, walls, and the moved-object (d).",
+    "state": {
+      "config": "a1v2_r41_w3_look.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500.0,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 60 --stop-secs 20 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --stop-look 0.6 1.0 4.0 --map-on-stop",
+      "fast_until": 600
+    }
   }
 ]

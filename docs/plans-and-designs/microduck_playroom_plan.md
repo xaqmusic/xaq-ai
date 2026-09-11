@@ -53,7 +53,15 @@ yaw spreads 0.40 rad at stops, 0.02 walking; the stand held 267 of 267 hand-back
 brain on the head, zero rescues at stops. Caught and pinned: the head brain's prior learning through
 the stand raised wall contact on the walk (27 → 45 episodes/min); frozen through the stop it drops
 to 13 ± 5 walls/min, the cleanest stop arm (`WORKING`, operator's eye pending on preset R40).
-**Next: W3** — insert-on-stop, the saccade target from the map's residual by bearing.
+**W3 built and measured (R41, design doc §17.20, 2026-09-12).** The map learns only while the body
+stands and looks (growth 2 on walks vs 33–48 at stops, every seed), a view is pose + head yaw,
+and the look holds a bearing while its view is unbaked and ends the stop after a quiet round.
+The walk between stops is the cleanest measured — 5.4 ± 4.4 walls/min against R34's 10.9 — with
+cells and path up and the stand untouched (89/90): `WORKING`. Contingency `PARTIAL`: stops end
+early (22 %) but do not shorten over 15 stops, because a view bakes only on revisit (50 processed
+ticks) and the run has few. Two harness catches on the way (§17.20): the EPM does not report live
+params, so the gate was inert until it used the configured values; and the token's `is_novel` is
+a percentile, not "unbaked". **Next: the moved-object (d) on R41, then W4 and W5 (§12.7b).**
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
@@ -610,12 +618,43 @@ built on stops.
 | W0 | the ten-minute instrument (§12.6) in the sweep and the viewer | any run | the histogram; contingency | it reads R34 and R38 as the operator saw them | **Built 2026-09-11 (`l2_sweep.py`: `walk% stopW% stand% resc%` + the stop counters; `--host-arm`): R34 reads 99.1 % walk, 0.9 % rescue**
 | W1 | **the hand-back at the joints**: walker stopped, twist zero, our joint brain takes the joints from whatever pose the walker leaves them in; competence-gated | the R30 tour with stops | survival and catch rate after a hand-back; rescues/hour; hand-offs/hour falling | the stance survives the transition on every seed. Produces walk, stop, stand. **Built and measured 2026-09-11 (R39, design doc §17.18): `WORKING` at n = 6 — 87/89 stands held, tilt 2.2° → 0.5° in 1 s; the gate `DEFERRED` (nothing to gate, satt ≈ 0); the resume-from-still deadlock found (→ W5)** |
 | W2 | stance-gated head yaw: the saccade channel while still, trunk-following while walking | a stop | head yaw excursions at stops, zero on the walk; ★ HEAD's picture number unchanged walking | the walk is byte-identical to ★ HEAD | **Built and measured 2026-09-11 (R40, design doc §17.19): `WORKING` — yaw sd 0.40 at stops / 0.02 walking, 267/267 stands held under the moving head; the head brain must be frozen through the stop (`--stop-freeze-head`), else wall contact on the walk rises 27 → 45/min**
-| W3 | insert-on-stop for the place map, the saccade target = the max-residual bearing, the stop ends when nothing is above the spread | the room; one object moved | nodes per stop; saccades per stop falling as places bake; stop length vs novelty; `switch/min` | stops are short at baked places and long at new or moved ones — loud or nothing |
+| W3 | insert-on-stop for the place map, the saccade target = the max-residual bearing, the stop ends when nothing is above the spread | the room; one object moved | nodes per stop; saccades per stop falling as places bake; stop length vs novelty; `switch/min` | stops are short at baked places and long at new or moved ones — loud or nothing  **Built and measured 2026-09-12 (R41, §17.20): `WORKING` on the map and the walk (5.4 walls/min, places = stops, 89/90 stands), `PARTIAL` on contingency (early stops yes, shortening no — views bake on revisit)** |
 | W4 | the command mux and remote-control mode in the host and the viewer | the operator's hands | the level-2 model's identified rows after a driven session vs before; byte-identity with no input | the model improves under driving |
 | W5 | the twist brain's yaw channel (§17.17), now with one bearing per stop: turn-in-place under the view as homing target, then the R22 hold | a chosen bearing | `straight` ≥ 0.2 on every seed with the reference live | the duck walks where it looked |
 | X1 | expression events: the voice tags and the pose channel fired from the §12.5 table; the event track in the viewer | any run | emotes per event; emotes without an event (must be zero) | the operator hears and sees the error |
 | X2 | the skill runner in the host: five networks vendored by hash, a skill window in their priority order, the pose block on the command; off by default | a fired skill | byte-identity off; rescues around a skill | skills run in sim as on the robot |
 | then | B1/B2 with skills as regime data (§12.4); C1/C2 with the map on stops; E1/E2 | | | |
+
+### 12.7b To-do from the operator's eye on R40 (2026-09-12): leaving a surface
+
+**Observed** (the operator, R40 seed 6): stop-and-look "looks good". The wall hits come when the
+duck is near a corner or a piece of furniture and *backs away from it into the wall behind* —
+a move nothing senses (the ToF covers 45° ahead). Backing is an option; turning is probably
+better; and avoidance should act only when proximity is close, so every area of the room stays
+reachable.
+
+**Measured on the same runs** (R40 frozen-head scan arm, six seeds, the walk phase): 1012 wall
+episodes, of which **950 are re-contacts inside a burst** (a contact in the prior 5 s) and 62 are
+fresh. Of the fresh ones, 1 follows a backward command, 36 follow a TooClose reading ahead, and
+**58 follow a hard turn** — the 0.18 m turning radius sweeps the body into the surface. So the
+eye's case (backing into the wall behind while something is ahead) lives inside the bursts, which
+this count cannot separate; and the larger fact is that **the duck does not leave a surface once
+it touches it** — 94 % of all contact episodes are the dither against something already touched
+(R37's bang-bang, §17.16). Backing was the only exit measured so far (`--no-backing` was a
+`REGRESSION`, §17.11), and turning next to a surface is the main way in.
+
+**The to-do, as levers** (W5's content, refined; not built):
+
+1. **Leave a surface by the move the sensor can see.** On contact or TooClose: turn until the ToF
+   sees free space ahead, then go forward; never back into what nothing senses. Gate: proximity.
+   Measure: burst length (re-contacts per episode), fresh collisions/min, `down%`. Re-use context
+   for the backing clamp: only once this exit exists.
+2. **Avoid only when close.** The avoidance's bearing pull off at range; a proximity gate on
+   TooClose alone, so the room's interior and its corners are reachable. Measure: cells, time near
+   walls vs interior, walls/min — read together (§3 rule 4: an orbit in the middle scores well).
+3. A rear sensor is a hardware ask, not a lever here.
+
+Deferred behind W3 by the operator's call; register O35.
 
 ### 12.8 Not done, in addition to §10
 
@@ -633,3 +672,4 @@ built on stops.
 | O32 | Modes: the command mux, remote control as identification data, the competence-gated hand-back at the joints | `OPEN` — W1, W4 |
 | O33 | The expression layer: events over Pollen's catalog; the skill runner and the pose block in the host | `OPEN` — X1, X2 |
 | O34 | The ten-minute instrument: the behaviour histogram and its contingency complement | `OPEN` — W0 |
+| O35 | Leaving a surface: turn to where the ToF sees free space rather than back into what nothing senses; avoid only when close (§12.7b, the operator's eye on R40) | `OPEN` — deferred behind W3 |

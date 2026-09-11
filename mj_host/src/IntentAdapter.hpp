@@ -29,6 +29,7 @@ constexpr double kTwistRangeVx = 0.4, kTwistRangeVy = 0.3, kTwistRangeVyaw = 1.0
 // both reductions.  Which of them the brain is given is the adapter's decision (PlaceForm).
 struct PlaceInputs {
     std::array<float, 4>  pose{};    // x/2, y/2, cos yaw, sin yaw
+    float                 head_yaw = 0.0f;   // the head-yaw joint from HOME / its range (W3: a view is pose + gaze)
     std::array<float, 8>  cols{};    // the nearest Hit per column / 4 m (R24's reduction)
     std::array<float, 64> zones{};   // every zone's slant range / 4 m, Empty = 1 (the sensor as it is)
 };
@@ -63,12 +64,17 @@ public:
     //            ranges with the frame's mean taken out; that EPM's latent (its previous tick) is
     //            appended to the pose -> place_in = [pose ; depth latent].  The map EPM must
     //            declare 4 + that EPM's projection_dim.  The plan's O10 form with the sensor swapped.
-    enum class PlaceForm { Columns, Zones, Stacked };
+    enum class PlaceForm { Columns, Zones, Stacked, ColumnsGaze };
     PlaceForm   place_form() const { return place_form_; }
     int         place_dims() const { return place_dims_; }
     std::string place_form_desc() const;
     double map_tle() const { return map_tle_; }
     bool   map_novel() const { return map_novel_; }
+    bool   map_baked_now() const { return map_baked_now_; }
+    // W3 (playroom plan §12.2, insert-on-stop): the map EPM's insertion, prototype adaptation and
+    // stale pruning off while the body walks and on while it stands and looks; the token keeps
+    // publishing (the play loop's node positions need a live winner).  Through hot-mutable params.
+    void set_map_learning(bool on);
     int    map_winner() const { return map_winner_; }
     int    map_nodes() const;
     // Wander (phase 2b, R25): when the map has been unsurprised — its surprise below a
@@ -116,6 +122,8 @@ private:
     double heading_ = 0.0, prev_yaw_ = 0.0;   // the odometry yaw, unwrapped: a continuous heading
     double heading_ref_ = 0.0;                // its slow running average — the heading "I have been keeping"
     double map_tle_ = 0.0; bool map_novel_ = false; int map_winner_ = -1;
+    bool map_baked_now_ = false; bool map_frozen_ = false; std::string map_module_id_;
+    std::map<std::string, double> map_saved_;          // the map's configured rates (schema defaults if absent; stale_prune as 0/1)
     double wander_bored_s_ = 0.0, wander_turn_deg_ = 90.0;
     double map_tle_long_ = 0.0; int bored_ticks_ = 0; int wander_turns_ = 0;
     PlaceForm   place_form_ = PlaceForm::Columns;

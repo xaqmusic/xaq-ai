@@ -2040,3 +2040,68 @@ pending (preset R40, seed 6). `--stop-keep-head` without `--stop-freeze-head` is
 wall contact (re-use: a head brain whose prior is identified standing as well as walking).
 Next: W3 — the stop inserts into the map and the saccade's target is the map's own residual by
 bearing, which replaces the scan.
+
+### 17.20 W3 — a place is a stop: the map learns only while standing, a view is pose + gaze, the look is the map's (R41, 2026-09-12)
+
+**Built.** Three pieces, each a flag on the level-2 host. (1) `--map-on-stop`: the map EPM's
+insertion, prototype adaptation and stale pruning are off while the body walks and on while it
+stands and looks (`IntentAdapter::set_map_learning`, through the EPM's hot-mutable
+`min_insertion_error`, `epsilon_b`, `epsilon_n`, `stale_prune_enabled`); the token keeps
+publishing, so the play loop's node positions stay live. (2) A 13-dim place form: pose, **the
+head-yaw joint / its range**, the 8 ToF column ranges — a *view*, so each bearing at a stop is its
+own node (`map_epm.proprio_state_dims 13`, config R41). (3) `--stop-look AMP HOLD MAX`: at a stop
+the head steps 0, +AMP, −AMP; each bearing is held at least HOLD s and, **while the view's winner
+is not a baked node**, up to MAX s; a full round with nothing unbaked ends the stop early
+(`stop:bored`). The baked set is a host-side lookup keyed by the EPM's own ids from the token's
+`just_baked`. Read-backs: map nodes grown on walks vs at stops, saccades, holds extended, stops
+ended by a quiet round, mean stop length. R34 and W1 paths byte-identical.
+
+**Two §3.2 catches before the numbers counted.** The first sweep's `look` and `lookLive` arms
+were byte-identical: the gate had read the EPM's live parameters through `Module::current_params`,
+which the EPM does not override (it is empty; MotorEPMv2's is not — why the joint-level freeze
+works), so nothing was changed. The gate now restores the graph's configured values and prints
+its growth read-back (2 nodes on walks — the GNG's two seeds — against 33–48 at stops; 13 on walks
+with the gate off). The second: the look's first novelty signal was the token's adaptive
+`is_novel`, which fires on ~25 % of ticks in every arm — a percentile, not "this view is unbaked"
+— and ended 1 stop in 15 early. §12.2 says *hold until the view bakes*; the baked-set test is that.
+
+**Measured.** Playroom, ★ HEAD stack, the R39 stops (every 60 s for 20 s from 600 s), the head
+brain on the head and frozen through the stop (R40's form), n = 6, 1500 s, paired by seed; the
+reference arm is the R41 graph with no look:
+
+| n = 6 | walls/min | cells | path m | nodes | switch/min | mapTLE | stands held | saccades | holds extended | stops ended early | stop s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R41 graph, no look | 33.1 ± 54.8 | 91 ± 21 | 89 | 60 ± 23 | 91 | 0.14 | 90 / 90 | — | — | — | 20 |
+| scan13 (W2's scan on the 13-dim map) | 21.8 ± 37.6 | 97 | 97 | 64 | 103 | 0.16 | 90 / 90 | — | — | — | 20 |
+| lookLive (the look, map learning everywhere) | 16.5 ± 15.3 | 88 | 112 | 70 ± 27 | 119 | 0.16 | 88 / 90 | 79 | 38 | **41 %** | **15.3** |
+| **look + map-on-stop (R41)** | **5.4 ± 4.4** (1+/5−) | **102 ± 25** | 106 | 44 ± 5 | 94 | 0.23 | **89 / 90** | 84 | 52 | 22 % | 18.4 |
+| for scale: R34 ★ HEAD (no stops); R40 | 10.9 ± 9.3; 13.3 ± 4.8 | 144; 102 | 147; 101 | 92; — | 133; — | 0.18; — | —; 88/88 | | | | |
+
+- **The map is the stop's.** Growth 2 on walks vs 33–48 at stops on every seed; 4.8 distinct
+  winners per stop (the three bearings and their transitions), 44 nodes for 15 stops. Places land
+  at the scale of stops, as §12.2 predicted, and the walk between them is the cleanest measured:
+  **5.4 walls/min**, below R34's 10.9 and R40's 13.3, with cells up (91 → 102) and path up
+  (89 → 106). The play loop's targets are now stop views rather than a tiling of the walk, and
+  `switch/min` stays at 94 where the live map's rises to 119.
+- **The stand is unchanged** (89 / 90, zero rescues at stops) with the head looking 250–280 s a run.
+- **Contingency, half present.** Stops end early on a quiet round (22 % under map-on-stop, 41 %
+  with the live map) and the look extends 52 of 84 holds on an unbaked view. But under
+  map-on-stop the stop length does **not** fall over the run (stops 1–5: 18.1 s; 11–15: 17.9 s),
+  while with the live map it does (18.2 → 13.2 s). The reason is the bake rule: a view bakes after
+  50 processed ticks as winner (5 s at `process_every_n_ticks 5`), which a 4 s hold cannot supply
+  in one visit, and 15 stops across a 4 m room rarely revisit a pose and bearing; the live map
+  bakes its views on the walks instead. So the stop length tracks *what the map has baked*, and
+  this run's map-on-stop has baked too little for it to shorten. `mapTLE` 0.23 says the same:
+  the walk is measured against stop views only.
+- **`is_novel` is not a novelty gate.** Recorded for every consumer of the token: it fires on a
+  quarter of ticks by construction (an adaptive threshold on the TLE's spread); "unbaked" is
+  the question §12.2 asks.
+
+**Verdict.** W3 `WORKING` at n = 6 on the map and the walk (a place is a stop; the cleanest walk
+measured; the stand untouched) and `PARTIAL` on contingency (stops end on a quiet round, and
+their length would fall with revisits the run does not contain). Not promoted; the operator's
+eye is pending (preset R41, seed 6). Re-use for the contingency half: a longer run or a smaller
+room (revisits), a hold long enough to bake a view (`look_max` ≥ 5 s, or the map's
+`baking_threshold` scaled to the hold), and the moved-object (d) test — a stop near a moved
+object should lengthen, which is the claim a Roomba cannot make. Next: that (d) test, then W4
+(the command mux) and W5 (leaving a surface, §12.7b).
