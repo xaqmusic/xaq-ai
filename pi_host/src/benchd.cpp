@@ -1,17 +1,25 @@
 // ogma_benchd — the calibration / validation daemon (pi_host/PROTOCOL.md).
 //
-// Three threads share one state under one mutex:
+// Four threads share one state under one mutex:
 //   tick        50 Hz, clock_nanosleep(TIMER_ABSTIME): re-issues the armed target while the
 //               client's deadman is fresh, then ServoDriver::tick() (slew, watchdog, at-limit)
 //   telemetry   10 Hz: ADC reads + the frame on the PUB socket + the local JSONL record
+//   imu        225 Hz: the ICM-20948 on SPI, sampled and filtered on its OWN thread
 //   main        the REP verb loop
 // The bus (/dev/i2c-1) is not thread-safe; every I2C access happens under the mutex.
+// ⚠ THE IMU IS THE EXCEPTION AND THAT IS THE WHOLE POINT OF PUTTING IT ON SPI.  It shares
+// no bus with the servo writes, so it samples at its own rate on its own thread and takes
+// the mutex only to publish a finished sample.  Sampling it from the telemetry frame
+// instead ran the attitude filter at 10 Hz, which ALIASES the motion it exists to track;
+// sampling it from the tick would put SPI inside the servo deadline.  Neither is right:
+// port doc sec 2, "fidelity high, transport 50 Hz, LOOP UNTOUCHED".
 // There is NO verb that starts a brain here, and none will be added (SPEC §1.1).
 #include "ogma/hw/ServoDriver.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
 #include "ogma/hw/Ina219.hpp"
 #include "ogma/hw/Vl53l0x.hpp"
+#include "ogma/hw/Icm20948.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zmq.h>
@@ -243,6 +251,17 @@ struct State {
     // this polls at 10, so a measurement is normally waiting -- but when it is not, this
     // returns immediately rather than waiting out a 33 ms conversion while holding the
     // bus mutex the 50 Hz servo tick needs.  A ToF must never cost a servo deadline.
+    // --- IMU (instrument only) -------------------------------------------------------
+    // ⚠ INSTRUMENT, NOT A LEVER.  Published so it can be WATCHED across hand-posed motions
+    // before anything consumes it -- the same admission rule the ultrasonic is under (BOM
+    // sec 7): it earns a lever only once someone can name the prediction error it reduces.
+    // On SPI, so it does not share the servo-contended I2C bus and nothing here competes
+    // with the 12 servo writes.
+    std::unique_ptr<Icm20948> imu;
+    ImuSample imu_s{};
+    bool      imu_ok     = false;
+    int       imu_errors = 0;
+
     void sample_tof() {
         if (!tof) return;
         try {
@@ -420,6 +439,29 @@ struct State {
                                    {"age_ms", tof_fresh_ms ? std::max<int64_t>(0, now - tof_fresh_ms) : -1},
                                    {"errors", tof_errors}}
                              : json(nullptr)},
+                // Attitude.  ⚠ There is NO ground truth on hardware, so the honest health
+                // reading is disagree_deg -- accelerometer-only gravity-up against the
+                // fused estimate, both computable on-robot.  When the filter is working
+                // the two sit close and the fused one is visibly steadier; when it is
+                // not, this is the number that says so.  a_norm_g is the second check
+                // (1.0004 g at rest, measured) and it is what the trust gate rides on.
+                // ⚠ gyro_bias is RE-ESTIMATED every run and deliberately never stored:
+                // measured drift is 0.02-0.036 dps within a session but 0.15 dps across
+                // 5 C, so a stored constant goes stale inside one warm-up.  bias_valid
+                // false means the seed window is still filling -- and seeding assumes the
+                // robot is STILL, so heading is not trustworthy until it flips true.
+                {"imu", imu ? json{{"ok", imu_ok},
+                                   {"up_fused", imu_s.up_fused}, {"up_accel", imu_s.up_accel},
+                                   {"accel_body", imu_s.accel_body}, {"gyro_body", imu_s.gyro_body},
+                                   {"a_norm_g", imu_s.a_norm_g}, {"trust", imu_s.trust},
+                                   {"disagree_deg", imu_s.disagree_deg},
+                                   {"temp_c", imu_s.temp_c}, {"dt_s", imu_s.dt_s},
+                                   {"gyro_bias_dps", imu_s.gyro_bias_dps},
+                                   {"bias_valid", imu_s.bias_valid},
+                                   {"bias_samples", imu_s.bias_samples},
+                                   {"who_am_i", imu->who_am_i()},
+                                   {"errors", imu_errors}}
+                             : json(nullptr)},
                 // Cost of the loop, in the units a control loop cares about: per cent of
                 // the tick BUDGET, with the tail (max) beside the middle because a mean
                 // is blind to the spike that actually misses a deadline.  wall vs cpu
@@ -512,6 +554,27 @@ void tick_thread(State& S) {
                             (c1.tv_sec - cpu0.tv_sec) * 1000000000L + (c1.tv_nsec - cpu0.tv_nsec)))
             S.tick_cost = S.budget.last();
         if (++win_ticks >= 100) { S.tick_hz_meas = win_ticks * 1000.0 / double(ms - win_start); win_start = ms; win_ticks = 0; }
+    }
+}
+
+// The IMU sampler.  ⚠ S.imu (the driver, and with it the filter state) is touched ONLY
+// here -- construction finishes before this thread starts and nothing else calls sample().
+// The mutex is taken just long enough to publish the finished sample, so the 50 Hz servo
+// tick never waits on SPI.
+void imu_thread(State& S) {
+    if (!S.imu) return;
+    const auto period = std::chrono::microseconds(1000000 / 225);
+    auto next = std::chrono::steady_clock::now();
+    while (g_run) {
+        next += period;
+        ImuSample s{};
+        const bool ok = S.imu->sample(s);
+        {
+            std::lock_guard<std::mutex> lk(S.m);
+            if (ok) { S.imu_s = s; S.imu_ok = true; }
+            else    { S.imu_ok = false; ++S.imu_errors; }
+        }
+        std::this_thread::sleep_until(next);
     }
 }
 
@@ -715,6 +778,21 @@ int main(int argc, char** argv) {
         S.tof.reset();
         std::fprintf(stderr, "benchd: no VL53L0X (%s) — belly clearance disabled\n", e.what());
     }
+    // Same contract again: absent or miswired part => "imu": null and nothing else moves.
+    // begin() includes the WHO_AM_I check, so a bad bus fails HERE, loudly, instead of
+    // producing plausible numbers that only look wrong after someone trusts them.
+    {
+        auto probe = std::make_unique<Icm20948>();
+        std::string why;
+        if (probe->begin(&why)) {
+            S.imu = std::move(probe);
+            std::printf("ogma_benchd: ICM-20948 SPI CE0, WHO_AM_I 0x%02X (instrument only)\n",
+                        S.imu->who_am_i());
+        } else {
+            std::fprintf(stderr, "benchd: no ICM-20948 (%s) — attitude telemetry disabled\n",
+                         why.c_str());
+        }
+    }
     if (!S.log) std::fprintf(stderr, "benchd: cannot open %s (continuing without the record)\n", log_path.c_str());
     { std::string why; if (load_map(S, map_path, why)) std::printf("ogma_benchd: loaded map %s (%zu servos)\n", map_path.c_str(), S.map["servos"].size()); else std::printf("ogma_benchd: no map loaded (%s)\n", why.c_str()); }
     S.record("start", {{"body", body}, {"i2c", dev}, {"rep", rep_port}, {"pub", pub_port}, {"vbat", S.hat.battery_volts()}, {"map_servos", S.map["servos"].size()}});
@@ -733,6 +811,7 @@ int main(int argc, char** argv) {
 
     std::thread tt(tick_thread, std::ref(S));
     std::thread tl(telemetry_thread, std::ref(S), pub);
+    std::thread ti(imu_thread, std::ref(S));
     while (g_run) {
         zmq_pollitem_t items[] = {{rep, 0, ZMQ_POLLIN, 0}};
         if (zmq_poll(items, 1, 100) <= 0) continue;
@@ -753,7 +832,7 @@ int main(int argc, char** argv) {
         std::string out = reply.dump();
         zmq_send(rep, out.data(), out.size(), 0);
     }
-    tt.join(); tl.join();
+    tt.join(); tl.join(); ti.join();
     {
         std::lock_guard<std::mutex> lk(S.m);
         // Leave the ToF stopped rather than free-running after we are gone: the part

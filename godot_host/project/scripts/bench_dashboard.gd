@@ -45,6 +45,11 @@ var _avg_sum: Dictionary = {}          # 1 s box-car of the numeric telemetry
 var _avg_n := 0
 var _avg_started := -1
 var _avg: Dictionary = {}              # last completed 1 s means
+# IMU instrument.  The SAME panel the sim uses (imu_scope.gd), fed through
+# bench_imu_source.gd — see that file for why the units are converted at the boundary.
+var _imu_src: Node = null
+var _imu_scope: Control = null
+var _imu_btn: Button = null
 const UI_FONT := 12
 const TOP_H := 84                      # top bar height the side panels hang from
 const INA_A4_TOL_V := 0.15             # BOM 3.4: ~1 % on the 20K/10K divider is ordinary
@@ -138,6 +143,16 @@ func _build_ui() -> void:
 	var top := PanelContainer.new()
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_ui.add_child(top)
+	# The instrument is built once and hidden; it costs nothing while invisible because
+	# imu_scope only redraws from its own _process, which stops with visibility.
+	_imu_src = (load("res://scripts/bench_imu_source.gd") as Script).new()
+	add_child(_imu_src)
+	_imu_scope = (load("res://scripts/imu_scope.gd") as Script).new()
+	_imu_scope.set("body", _imu_src)
+	_imu_scope.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_imu_scope.position = Vector2(-266, 8)
+	_imu_scope.visible = false
+	_ui.add_child(_imu_scope)
 	var topv := VBoxContainer.new(); top.add_child(topv)
 	var row := HBoxContainer.new(); topv.add_child(row)
 	row.add_child(_lbl("ogma_benchd @"))
@@ -147,6 +162,11 @@ func _build_ui() -> void:
 	var cb := Button.new(); cb.text = "CONNECT"; cb.pressed.connect(_on_connect); row.add_child(cb)
 	var db := Button.new(); db.text = "DISCONNECT"; db.pressed.connect(_on_disconnect); row.add_child(db)
 	var lb := Button.new(); lb.text = "RESCUE POSE"; lb.pressed.connect(_on_limp); row.add_child(lb)
+	_imu_btn = Button.new()
+	_imu_btn.text = "IMU SCOPE"
+	_imu_btn.toggle_mode = true
+	_imu_btn.pressed.connect(_on_imu_toggle)
+	row.add_child(_imu_btn)
 	lb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	_link_lbl = _lbl("link: disconnected"); row.add_child(_link_lbl)
 	var banner := HBoxContainer.new(); topv.add_child(banner)
@@ -672,8 +692,21 @@ func _process(delta: float) -> void:
 		if not t.is_empty():
 			_tele = t
 			_tele_ms = Time.get_ticks_msec()
+			if _imu_src != null:
+				_imu_src.call("set_frame", t)
 	_update_labels()
 	_drive_body()
+
+
+func _on_imu_toggle() -> void:
+	if _imu_scope == null:
+		return
+	_imu_scope.visible = _imu_btn.button_pressed
+	# Say WHY it is empty rather than drawing an idle panel: an absent part and a
+	# disconnected daemon look identical on a scope showing zeros.
+	if _imu_btn.button_pressed and (_imu_src == null or not bool(_imu_src.call("has_data"))):
+		print("BenchDashboard: IMU scope on, but no imu block in telemetry — ",
+			"part absent, daemon predates it, or link down.")
 
 
 func _tele_fresh() -> bool:

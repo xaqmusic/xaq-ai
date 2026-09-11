@@ -157,7 +157,15 @@ func _draw() -> void:
 	draw_string(_font, Vector2(8, y),
 		"accel↔fused disagree: %5.1f°   [on-robot]" % dis,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col_fuse if dis < 15.0 else col_warn)
-	draw_string(_font, Vector2(8, y + 12),
-		"sim truth err — fused %.1f°  accel %.1f°" % [
-			float(d.get("err_fused_deg", 0.0)), float(d.get("err_accel_deg", 0.0))],
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col_dim)
+	# ⚠ ABSENT, not zero, on hardware.  A real robot has no up_exact, so the bench source
+	# omits these keys rather than publishing 0.0 — which would render as a confident
+	# "0.0° error" and read as a perfect filter.  Test for the key, not the value.
+	if d.has("err_fused_deg"):
+		draw_string(_font, Vector2(8, y + 12),
+			"sim truth err — fused %.1f°  accel %.1f°" % [
+				float(d.get("err_fused_deg", 0.0)), float(d.get("err_accel_deg", 0.0))],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col_dim)
+	else:
+		draw_string(_font, Vector2(8, y + 12),
+			"sim truth err — n/a: no ground truth on hardware",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col_dim)

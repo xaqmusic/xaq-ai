@@ -19,6 +19,7 @@ add_library(ogma_hw
   src/McuReset.cpp
   src/Ina219.cpp
   src/Vl53l0x.cpp
+  src/Icm20948.cpp
   src/ResourceMonitor.cpp
 )
 target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
