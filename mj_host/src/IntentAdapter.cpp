@@ -178,7 +178,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.proprio.place"))) {
         map_tle_ = rt->tle; map_novel_ = rt->is_novel; map_winner_ = rt->winner_id; map_baked_now_ = rt->just_baked;
         map_node_count_ = rt->node_count; map_baked_count_ = rt->baked_count;
-        map_qe_ = rt->quant_error; map_expected_ = rt->expected_error;
+        map_qe_ = rt->quant_error; map_expected_ = rt->expected_error; map_trans_ = rt->transition_surp;
         map_pruned_ids_ = rt->just_pruned ? rt->pruned_ids : std::vector<int>{};
     }
     // R27: a loop's bearing becomes the heading reference (cx = +right is a clockwise turn, i.e.

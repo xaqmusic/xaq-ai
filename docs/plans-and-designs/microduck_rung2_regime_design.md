@@ -2253,3 +2253,69 @@ form: the place is learned whole and kept), `PARTIAL` for the stop's contingency
 the babble's, not the place's). Config R43 carries it (preset). The stop's ending rule — the
 place's own learned-ness (e.g. the fraction of this stop's views baked) against the babble's
 quiet count — is the next design decision, the operator's.
+
+### 17.24 W3d — the orienting reflex: a change at a still gaze ends the stop and the duck goes to look (R44 config; R46 sweeps, 2026-09-12)
+
+**Agreed with the operator.** Something changing during a stationary view — a ball rolling by, a
+person walking past — should trigger interest in that direction: the stop ends and the duck walks
+toward it. The signal is the map's own: while the head holds a bearing the view's winner should not
+change and its error should not jump; if they do with the gaze still, the world moved.
+
+**Built.** `--stop-orient K TURN_VX WALK_VX SECS`. While the gaze is still (arrived ~10 ticks, the
+token caught up ~10 more, three clean samples at the map's rate): the view's quant error more than
+K spreads above the hold's own running mean (the spread floored at 5 % of the mean), on two
+consecutive samples, **touching at least two different ToF columns** — the change detector. A
+first hit freezes the gaze on the surprise so the confirmation can come. Then: the stop ends
+(`stop:orient`), the body **pivots** to the gaze's world bearing (odometry yaw + head yaw; the
+walker does not turn on a yaw command alone, 0.03 rad/s, but at 0.2 m/s with full yaw it turns
+0.5–0.8 rad/s nearly in place), walks with a P on the dead-reckoned yaw until it has covered ~1 m
+(or reached a surface after 0.4 m), and stops there to look; SECS is the cap. The twist brain is
+frozen through it. Two stimuli, harness actions like a shove: `--roll-past DELAY SPEED` places
+`obj_ball0` inside the free space the gaze sees and rolls it across the view (stopped 1.5 s later);
+`--walk-past DELAY SPEED` carries the chair across — a person-sized mover. Both start once the
+hold's baseline is armed and just inside the view's edge, and retry at the next gaze when the gaze
+faces a surface. Read-backs: rolls and skips, changes prompted (within 3 s of a stimulus) and
+unprompted, orientations, arrivals, timeouts, reach to where the mover was.
+
+**Nine catches on the way, each measured before the rule changed** (the ledger's, kept here
+because each is a property of the sensor or the map a later consumer will meet again):
+a winner switch to an existing node is the map's own flicker, not a change (dropped);
+a per-view expectation kept across stops over-fires (the same node reached from another pose has
+another error level; dropped for the hold's own); the hold's expectation needs the token to have
+caught up (armed from tick 21, not 11); the pure-yaw pivot does not turn the walker; the stimulus
+landed exactly as a 6 s learning hold ended, and later exactly five ticks before a minimum hold
+ended (alignment artifacts of a tick-scheduled stimulus — it now starts when the detector is armed);
+a stimulus placed 1.2 m along a gaze that faces a wall lands inside the wall (placed at 0.7 of the
+range the ToF reports, skipped under 0.6 m); the head-pitch joint is positive DOWN (measured by the
+ToF's floor fraction; the babble's clamp had looked up); the ball keeps rolling and re-enters later
+(stopped after 1.5 s); and **the unprompted triggers are the sensor's edge flicker** — at every one
+a few ToF zones flipped between empty and a hit as the body swayed a thousandth of a radian, and
+the nearest-hit-per-column reduction carries one grazing ray into a whole column. A mover crosses
+columns; flicker stays in one — hence the two-column rule.
+
+**Measured.** R43's form (gaze babble, learning-progress dwell, bake 20, map at stops), the
+uncapped stops, n = 6, 1500 s:
+
+| n = 6 | stimulus per stop | stimuli / run | detected | unprompted / run | orientations | arrived | reach | stands held | rescues at stops | stop s | cells |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R43 (no reflex) | — | — | — | — | — | — | — | 65 / 65 | 1 | 54.5 | 70 |
+| reflex, nothing moved | — | — | — | 1.7 ± 1.6 | 1.7 | 1.5 | — | 66 / 66 | 1 | 50.5 | 66 |
+| reflex, a ball rolls past | the ball | 12.3 | **42 ± 14 %** | 1.0 ± 0.9 | 6.3 | 6.0 | **0.36 m** | 87 / 87 | 0 | 39.2 | 97 |
+| reflex, a chair carried past | the chair | 15.8 | **57 ± 12 %** | 1.8 ± 0.8 | 10.8 | 10.3 | — | 106 / 106 | 0 | 28.7 | 87 |
+
+- **It orients and it arrives.** 95 % of orientations reach the place (the rest time out); with the
+  ball, 0.36 m from where it was rolled. The stand is untouched: 259 of 259 hand-backs held across
+  the three reflex arms, no rescue at a stop. A change ends the stop early (54 → 29–39 s), which is
+  the walking/looking balance moving for a reason.
+- **Detection is the sensor's.** A person-sized mover is caught 57 % of the time and a 6 cm ball
+  42 %; the misses are the ToF's resolution (one column for the ball) and the stimulus crossing a
+  view the map was still learning. The false rate is about one orientation per fifteen minutes in
+  every arm, the edge-flicker residue the two-column rule leaves.
+- **The head's pitch now looks down** (the sign catch): the floor's objects are in the frame.
+
+**Verdict.** W3d `WORKING` at n = 6, loud on the behaviour (the duck sees a thing move, turns, walks
+to it, and looks), signal-strength on the detection rate. Not promoted; the operator's eye pending
+(preset R44: a chair carried past at every stop). The change detector is a host-side scaffold over
+the map's error and the sensor's columns; its substrate form is the approach loop of the plan's §3
+(E2) with the view-level transition surprise as its trigger, and the place cloud (§12, the operator's
+second point) is the level that should own "the scene changed". Next: the place cloud.

@@ -800,5 +800,29 @@
       "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 0.5 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5",
       "fast_until": 600
     }
+  },
+  {
+    "name": "R44 · W3d the ORIENTING REFLEX: something moves while the duck looks — the stop ends, it turns to the gaze's bearing and walks there; a chair is carried past at every stop",
+    "series": 44,
+    "hint": "Agreed 2026-09-12: a change during a still gaze should trigger interest in that direction. While the gaze is still, a jump of the view's error 4 spreads above the hold's own mean, confirmed on two samples that touch two different ToF columns (the sensor flickers at edges; a mover crosses columns), ends the stop; the body pivots to the gaze bearing and walks with a P on the dead-reckoned yaw until it has covered ~1 m, then stops to look. n=6: a person-sized mover (the chair) is caught 57 % of crossings, a rolling ball 42 %, one unprompted orientation per ~15 min, every orientation arrives, 0.36 m from where the ball was; the stand untouched (design doc §17.24).",
+    "state": {
+      "config": "a1v2_r44_w3d_orient.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500.0,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --stop-orient 4 0.2 0.25 15 --walk-past 6 0.8",
+      "fast_until": 600
+    }
   }
 ]

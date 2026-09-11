@@ -147,6 +147,11 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
     out["novel_holds"] = int(m.group(2)) if m else None
     out["bored_pct"] = (100.0 * int(m.group(3)) / max(1, int(m.group(4)))) if m else None
     out["stop_len"] = float(m.group(5)) if m else None
+    m = re.search(r"orient: (\d+) rolls \((\d+) skipped at a surface\), (\d+) changes \((\d+) within 3 s of a roll, (\d+) unprompted\), (\d+) orientations, (\d+) arrivals, (\d+) timeouts, mean reach ([\d.]+) m", err)
+    for k, v in zip(("rolls", "rolls_skipped", "changes", "prompted", "unprompted", "orientations", "arrivals", "orient_timeouts", "reach_m"),
+                    ([int(x) for x in m.groups()[:8]] + [float(m.group(9))]) if m else [None] * 9):
+        out[k] = v
+    out["detect_pct"] = (100.0 * out["prompted"] / out["rolls"]) if m and out["rolls"] else None
     m = re.search(r"map baking: inserted (\d+) at stops / (\d+) on walks, baked (\d+) at stops / (\d+) on walks, pruned (\d+) \(of which baked (\d+)\); (\d+) nodes, (\d+) baked at the end", err)
     for k, v in zip(("ins_stop", "ins_walk", "bake_stop", "bake_walk", "pruned", "pruned_baked", "nodes_end", "baked_end"),
                     (int(x) for x in m.groups()) if m else [None] * 8):
@@ -333,7 +338,8 @@ def main():
             ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc"),
             ("yaw_stop", "yawStop sd"), ("yaw_walk", "yawWalk sd"),
             ("saccades", "saccades"), ("novel_holds", "novelHolds"), ("bored_pct", "bored%"), ("stop_len", "stop s"),
-            ("ins_stop", "insStop"), ("bake_stop", "bakeStop"), ("pruned", "pruned"), ("pruned_baked", "prunedBaked"), ("nodes_end", "nodesEnd"), ("baked_end", "bakedEnd")]
+            ("ins_stop", "insStop"), ("bake_stop", "bakeStop"), ("pruned", "pruned"), ("pruned_baked", "prunedBaked"), ("nodes_end", "nodesEnd"), ("baked_end", "bakedEnd"),
+            ("rolls", "rolls"), ("rolls_skipped", "rollSkip"), ("changes", "changes"), ("prompted", "prompted"), ("detect_pct", "detect%"), ("unprompted", "unprompted"), ("orientations", "orients"), ("arrivals", "arrivals"), ("orient_timeouts", "timeouts"), ("reach_m", "reach m")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

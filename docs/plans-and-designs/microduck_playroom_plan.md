@@ -82,7 +82,13 @@ error is above half its arrival value — with bake 20 gives the fullest map (43
 pruned baked), 66/66 stands, 10 ± 6 walls/min. O37 resolved in that form. What remains is a design
 knob: the duck stands 53 % of the run because random gazes keep finding new views; the stop's
 ending rule (the place's own learned-ness vs the babble's quiet count) is the walking/looking balance
-and the operator's call. **Next: that rule (operator), W5 (§12.7b), W4.** Presets R39–R43.
+and the operator's call. **W3d, the orienting reflex (R44, §17.24, agreed 2026-09-12).** A change at a still gaze — the
+view's error jumping above the hold's own spread on two samples across two ToF columns — ends the
+stop; the duck pivots to the gaze's bearing, walks ~1 m and stops to look. n = 6: a chair carried
+past is caught 57 %, a rolling ball 42 %, one unprompted orientation per ~15 min (the sensor's edge
+flicker), 95 % arrive, 0.36 m from the ball; the stand untouched (259/259). `WORKING`, loud on the
+behaviour. **Next: the place cloud (a second EPM over the stop's view latents — the stop's ending
+rule and the owner of "the scene changed"), then W5 (§12.7b), W4.** Presets R39–R44.
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting

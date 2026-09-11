@@ -229,6 +229,29 @@ void DuckBody::move_body(const char* name, double x, double y) {
     move_geom(name, {x, y, m_->geom_pos[3 * gid + 2]});
 }
 
+void DuckBody::roll_body(const char* name, double x, double y, double vx, double vy) {
+    const int bid = mj_name2id(m_, mjOBJ_BODY, name);
+    if (bid < 0 || m_->body_jntnum[bid] == 0 || m_->jnt_type[m_->body_jntadr[bid]] != mjJNT_FREE)
+        throw std::runtime_error(std::string("roll_body: no movable ") + name);
+    const int adr = m_->jnt_qposadr[m_->body_jntadr[bid]];
+    const int dof = m_->jnt_dofadr[m_->body_jntadr[bid]];
+    d_->qpos[adr] = x; d_->qpos[adr + 1] = y;
+    for (int k = 0; k < 6; ++k) d_->qvel[dof + k] = 0.0;
+    d_->qvel[dof] = vx; d_->qvel[dof + 1] = vy;
+    mj_forward(m_, d_);
+}
+
+std::array<double, 2> DuckBody::body_xy(const char* name) const {
+    const int bid = mj_name2id(m_, mjOBJ_BODY, name);
+    if (bid < 0) throw std::runtime_error(std::string("body_xy: no body ") + name);
+    return {d_->xpos[3 * bid], d_->xpos[3 * bid + 1]};
+}
+
+double DuckBody::trunk_yaw() const {
+    const double* q = d_->qpos + 3;   // the free joint's quaternion w, x, y, z
+    return std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+}
+
 void DuckBody::spin_joint(const char* name, double rad_per_s) {
     const int jid = mj_name2id(m_, mjOBJ_JOINT, name);
     if (jid < 0) throw std::runtime_error(std::string("no joint ") + name);

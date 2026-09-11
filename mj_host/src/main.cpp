@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <map>
 #include <random>
 #include <set>
 #include <string>
@@ -1287,7 +1288,22 @@ struct StopPlan {
     // F × its arrival value (the prototype has not yet moved to it), up to MAX.  A known view ends at HOLD.
     // R44: the plain residual dwell is a knife edge (K 1.0 → the duck stands two thirds of the run and the
     // stops never shorten; 1.5 → 10 s stops); progress is what the map's learning actually produces.
-    double gaze_learn_frac = 0.0;   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
+    double gaze_learn_frac = 0.0;
+    // --stop-orient K TURN_VX WALK_VX SECS (the orienting reflex, agreed 2026-09-12): while the gaze is still, a
+    // view whose winner switches to an EXISTING node, or whose error jumps K spreads above the hold's own
+    // running mean (sampled at the map's rate, the spread floored at 5 % of the mean, two samples in a row),
+    // means the world changed, not the duck.  The stop ends, the body PIVOTS to the gaze's bearing — the walker
+    // does not turn on a yaw command alone (0.03 rad/s); at TURN_VX m/s with full yaw it turns 0.5-0.8 rad/s
+    // nearly in place — then walks (WALK_VX, a P on the dead-reckoned yaw) until the ToF sees a hit ahead
+    // within 0.4 m (arrived -> a new stop, to look at it) or SECS pass.  The twist brain is frozen through it.
+    // A scaffold approach controller, named as such (W5's turn-in-place).
+    double orient_k = 0.0, orient_turn_vx = 0.2, orient_vx = 0.25, orient_secs = 8.0;
+    // --roll-past DELAY SPEED: at every stop, DELAY s after the hand-back, a ball (obj_ball0) is placed 1.2 m
+    // along the gaze, half a metre to its right, and rolls left across the view at SPEED m/s -- the stimulus.
+    double roll_delay_s = 0.0, roll_speed = 0.0;
+    // --walk-past DELAY SPEED: as --roll-past, but a person-sized mover — furn_chair0 carried across the gaze
+    // at SPEED m/s (a static body moved every tick), 1.2 m out, from 0.6 m right to 0.6 m left; then put back.
+    double walk_delay_s = 0.0, walk_speed = 0.0;   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
                                                 // head brain's yaw steps through 0, +AMP, 0, −AMP, each held HOLD s,
                                                 // from the hand-back (or the walker's hold) to the stop's end. A
                                                 // scaffold for the channel; §12.2's target is the map's residual (W3).
@@ -1436,6 +1452,23 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const int gaze_hold_ticks = std::max(1, int(g_stop.gaze_hold_s * kBrainHz)), gaze_max_ticks = std::max(1, int(g_stop.gaze_max_s * kBrainHz));
     double gaze_yaw = 0.0, gaze_pitch = 0.0; int gaze_quiet_run = 0;
     double gaze_qe0 = 0.0; bool gaze_arrival_novel = false;
+    // the change detector (per hold, after arrival) and the reflex's state
+    const bool orient_on = stop_on && g_stop.orient_k > 0.0;
+    const bool roll_on = stop_on && g_stop.roll_speed > 0.0 && body.n_objects() > 0;
+    const bool walk_on = stop_on && g_stop.walk_speed > 0.0 && body.n_objects() > 0;
+    if (walk_on) std::fprintf(stderr, "  walk-past: %.1f s into every stop furn_chair0 is carried across the gaze at %.2f m/s\n", g_stop.walk_delay_s, g_stop.walk_speed);
+    int walk_left = 0; double walk_x = 0.0, walk_y = 0.0, walk_dx = 0.0, walk_dy = 0.0; std::array<double, 2> chair_home{};
+    if (walk_on) chair_home = body.body_xy("furn_chair0");
+    if (orient_on) std::fprintf(stderr, "  orienting reflex: a change at a still gaze (winner switch to a known node, or error > %.1f spreads above the hold's mean) ends the stop; pivot at %.2f m/s with full yaw, walk %.2f m/s, up to %.0f s\n",
+                                g_stop.orient_k, g_stop.orient_turn_vx, g_stop.orient_vx, g_stop.orient_secs);
+    if (roll_on) std::fprintf(stderr, "  roll-past: %.1f s into every stop obj_ball0 rolls across the gaze at %.2f m/s\n", g_stop.roll_delay_s, g_stop.roll_speed);
+    int hold_hits = 0, hold_n = 0; double hold_mean = 0.0, hold_var = 0.0; int max_id_seen = -1;
+    std::array<double, Tof::kCols> hold_cols{}; std::set<int> hit_cols;
+    enum class Orient { None, Turn, Walk }; Orient orient = Orient::None; double orient_bearing = 0.0; int orient_left = 0; double orient_x0 = 0.0, orient_y0 = 0.0;
+    int changes = 0, changes_prompted = 0, orientations = 0, arrivals = 0, orient_timeouts = 0, rolls = 0;
+    int last_roll_tick = -1000000, ticks_in_stop = 0, rolls_skipped = 0; bool rolled_this_stop = false, ball_stopped = true; double reach_sum = 0.0; int reach_n = 0; double roll_x = 0.0, roll_y = 0.0;
+    const char* orient_event = "";
+    auto wrap_pi = [](double a) { while (a > M_PI) a -= 2.0 * M_PI; while (a < -M_PI) a += 2.0 * M_PI; return a; };
     // the map's bookkeeping at stops (the operator, 2026-09-12: watch the baking): views inserted and baked at
     // stops, prunes, and whether a pruned id was ever baked (must stay 0 — the map's health sweep spares baked)
     int ins_stop = 0, bake_stop = 0, ins_walk = 0, bake_walk = 0, pruned_total = 0, pruned_baked = 0, node_mark2 = 0, baked_mark = 0;
@@ -1459,12 +1492,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     for (int t = 0; t < ticks; ++t) {
         pacer.wait_for(t, kBrainHz);
         Driver driver = recovery.update(body.gravity(), body.gyro(), dt);
-        stop_event = "";
+        stop_event = ""; orient_event = "";
         if (recovery.handed_off_this_tick()) {
             brain.set_learning(false);
             brain.on_reset();
             command.twist = {0.0, 0.0, 0.0};
             if (head) { head->set_learning(false); head->on_reset(); command.head = {0.0, 0.0, 0.0, 0.0}; }
+            if (orient != Orient::None) { orient = Orient::None; ++orient_timeouts; }
             if (stop_phase != StopPhase::None) {          // the stop ended in a fall
                 scan_stop(); if (looking) look_stop();
                 if (g_stop.map_on_stop) brain.set_map_learning(false);
@@ -1500,6 +1534,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         if (driver == Driver::Brain) command.twist = twist;
         if (stop_on) {
+            if (roll_on && !ball_stopped && t - last_roll_tick >= 75) { const auto b = body.body_xy("obj_ball0"); body.roll_body("obj_ball0", b[0], b[1], 0.0, 0.0); ball_stopped = true; }
+            if (walk_on && walk_left > 0) {                       // the chair carried across, then put back home
+                walk_x += walk_dx; walk_y += walk_dy; body.move_body("furn_chair0", walk_x, walk_y);
+                if (--walk_left == 0) body.move_body("furn_chair0", chair_home[0], chair_home[1]);
+            }
             if (brain.map_baked_now() && brain.map_winner() >= 0) baked_ids.insert(brain.map_winner());
             const int nn = brain.map_nodes();
             if (nn > nodes_mark) { (stop_phase == StopPhase::None ? grown_walk : grown_stop) += nn - nodes_mark; }
@@ -1534,6 +1573,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
                         if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = 0.0; scan_target = 0.0; }
+                        ticks_in_stop = 0; rolled_this_stop = false;
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
@@ -1567,7 +1607,75 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     head->set_yaw_override(true, gaze_yaw);
                     if (g_stop.gaze_pitch_sd > 0.0) head->set_pitch_override(true, gaze_pitch);
                     scan_target = gaze_yaw;
-                    ++look_held; ++look_ticks;
+                    ++look_held; ++look_ticks; ++ticks_in_stop;
+                    if (brain.map_winner() > max_id_seen) max_id_seen = brain.map_winner();
+                    // The expectation is the HOLD's: the running mean and spread of the quant error since the
+                    // head arrived (~10 ticks) and the token caught up (~10 more), armed after three samples at
+                    // the map's rate — 0.7 s into a hold; a ball crossing takes ~1.2 s.  A per-view memory kept
+                    // across stops was tried and over-fires (the same node reached from another pose has another
+                    // error level); the winner-switch rule was dropped (the map flickers between two nodes on
+                    // its own at a still gaze).  The hit must repeat on two consecutive samples.
+                    if (look_held == 21) { hold_n = 0; hold_mean = brain.map_quant_error(); hold_var = 0.0; hold_hits = 0; hold_cols = tof.column_hit(); hit_cols.clear(); }
+                    if (look_held > 21 && t % 5 == 0) {          // the map's own rate (process_every_n_ticks 5)
+                        const double qe = brain.map_quant_error();
+                        bool change = false;
+                        if (hold_n >= 3) {
+                            const double sd = std::max(std::sqrt(std::max(hold_var, 0.0)), 0.05 * hold_mean);
+                            const bool jumped = qe > hold_mean + g_stop.orient_k * sd;
+                            // the sensor flickers at edges on a still scene (a grazing ray flips a zone, and the nearest
+                            // hit per column carries it): a thing that MOVES changes different columns from one sample
+                            // to the next, flicker stays in one.  The hit's changed columns are collected; a change
+                            // needs two consecutive hits touching at least two distinct columns.
+                            if (jumped) {
+                                const auto cols = tof.column_hit();
+                                for (int c = 0; c < Tof::kCols; ++c) if (std::fabs(cols[size_t(c)] - hold_cols[size_t(c)]) > 0.10) hit_cols.insert(c);
+                                ++hold_hits;
+                            } else { hold_hits = 0; hit_cols.clear(); }
+                            change = orient_on && hold_hits >= 2 && hit_cols.size() >= 2;
+                        }
+                        if (hold_hits == 0) { hold_mean += 0.2 * (qe - hold_mean); hold_var += 0.2 * ((qe - hold_mean) * (qe - hold_mean) - hold_var); ++hold_n; }
+                        if (change) {
+                            ++changes; if (t - last_roll_tick <= 150) ++changes_prompted;
+                            orient_event = "change";
+                            // the reflex: the stop ends, the body goes where the gaze was
+                            orient_bearing = odom.yaw() + (body.joint_positions()[7] - kHomePose[7]);
+                            orient = Orient::Turn; orient_left = int(g_stop.orient_secs * kBrainHz); ++orientations;
+                            stop_left = 0;
+                        }
+                    }
+                    // the ball rolls while the duck is LOOKING: the first tick at or after the delay with the detector
+                    // armed (three clean samples into a hold), once per stop; and it is stopped 1.5 s later so a
+                    // later re-entry cannot count as an unprompted change
+                    // the movers start once the hold's baseline is armed (three clean samples) and just inside the
+                    // view, so the first armed sample sees them; a first hit latches the gaze (extend) for the confirmation
+                    if (walk_on && !rolled_this_stop && ticks_in_stop >= int(g_stop.walk_delay_s * kBrainHz) && hold_n == 3 && hold_hits == 0) {
+                        const auto cols0 = tof.column_hit();
+                        const double ahead0 = std::min(cols0[3], cols0[4]);
+                        const double dist = std::min(1.2, 0.7 * ahead0);
+                        if (dist >= 0.42) {
+                            const auto pd = body.trunk_position();
+                            const double th = body.trunk_yaw() + (body.joint_positions()[7] - kHomePose[7]);
+                            walk_x = pd[0] + dist * std::cos(th) + (0.35 * dist + 0.2) * std::sin(th); walk_y = pd[1] + dist * std::sin(th) - (0.35 * dist + 0.2) * std::cos(th);   // its near edge just inside the view
+                            walk_dx = -g_stop.walk_speed * std::sin(th) / kBrainHz; walk_dy = g_stop.walk_speed * std::cos(th) / kBrainHz;
+                            walk_left = int(1.2 / g_stop.walk_speed * kBrainHz);
+                            ++rolls; last_roll_tick = t; orient_event = "roll"; roll_x = pd[0] + dist * std::cos(th); roll_y = pd[1] + dist * std::sin(th); rolled_this_stop = true;
+                        } else { ++rolls_skipped; orient_event = "roll:skipped"; }
+                    }
+                    if (roll_on && !rolled_this_stop && ticks_in_stop >= int(g_stop.roll_delay_s * kBrainHz) && hold_n == 3 && hold_hits == 0) {
+                        // the ball is placed inside the free space the gaze sees: at 1.2 m, or 0.7 of the range the
+                        // ToF's centre columns report; a gaze at a surface closer than 0.6 m gets no roll (skipped)
+                        const auto cols0 = tof.column_hit();
+                        const double ahead0 = std::min(cols0[3], cols0[4]);
+                        const double dist = std::min(1.2, 0.7 * ahead0);
+                        if (dist >= 0.42) {
+                            const auto pd = body.trunk_position();
+                            const double th = body.trunk_yaw() + (body.joint_positions()[7] - kHomePose[7]);
+                            const double bx = pd[0] + dist * std::cos(th) + 0.35 * dist * std::sin(th), by = pd[1] + dist * std::sin(th) - 0.35 * dist * std::cos(th);   // just inside the view's right edge (tan 22.5° = 0.41)
+                            body.roll_body("obj_ball0", bx, by, -g_stop.roll_speed * std::sin(th), g_stop.roll_speed * std::cos(th));
+                            ++rolls; last_roll_tick = t; orient_event = "roll"; roll_x = bx; roll_y = by; ball_stopped = false;
+                            rolled_this_stop = true;
+                        } else { ++rolls_skipped; orient_event = "roll:skipped"; }
+                    }
                     bool view_novel;
                     if (g_stop.gaze_learn_frac > 0.0) {
                         // arrival: the view surprised the map (relative to the channel's expectation); then: still learning it
@@ -1580,13 +1688,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     }
                     if (look_held > 10 && view_novel) look_novel_seen = true;
                     const bool done_min = look_held >= gaze_hold_ticks;
-                    const bool extend = look_novel_seen && look_held < gaze_max_ticks && view_novel;   // until it bakes / stops surprising / is learned
+                    // a first hit of the change detector freezes the gaze on the surprise so the confirming sample
+                    // can come (six of fifteen rolls were seen and lost to a gaze step mid-crossing)
+                    const bool extend = (look_novel_seen && look_held < gaze_max_ticks && view_novel) || hold_hits >= 1;
                     if (done_min && !extend) {
                         if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
                         ++saccades; look_held = 0; look_novel_seen = false;
                         gaze_yaw   = std::clamp(gaze_yaw + g_stop.gaze_yaw_sd * gaze_n(gaze_rng), -0.7, 0.7);
                         if (g_stop.gaze_pitch_sd > 0.0)
-                            gaze_pitch = std::clamp(gaze_pitch + g_stop.gaze_pitch_sd * gaze_n(gaze_rng), -g_stop.gaze_pitch_sd * 2.0, g_stop.gaze_pitch_sd * 0.7);
+                            gaze_pitch = std::clamp(gaze_pitch + g_stop.gaze_pitch_sd * gaze_n(gaze_rng), -g_stop.gaze_pitch_sd * 0.7, g_stop.gaze_pitch_sd * 2.0);   // + is down (measured: the ToF's floor fraction rises with the joint)
                         if (gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
                     }
                 } else if (looking) {
@@ -1615,14 +1725,46 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (g_stop.map_on_stop) brain.set_map_learning(false);
                     stop_len_sum += (t - stop_started_tick) / kBrainHz; ++stop_len_n;
                     if (stop_phase == StopPhase::Brain) { ++stop_survived; end_stop_drive(true); }
-                    const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1;
+                    const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1 && orient == Orient::None;
                     if (bored) ++stops_bored;
-                    stop_phase = StopPhase::None; stop_event = bored ? "stop:bored" : "stop:end";
+                    stop_phase = StopPhase::None; stop_event = orient != Orient::None ? "stop:orient" : bored ? "stop:bored" : "stop:end";
                     brain.set_learning(true);
                     if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) { head->on_reset(); head->set_learning(true); }
                 }
             }
             if (stop_phase != StopPhase::None) command.twist = {0.0, 0.0, 0.0};
+            if (orient != Orient::None && stop_phase == StopPhase::None) {
+                brain.set_learning(false);                     // its command is not applied through the approach
+                const double e = wrap_pi(orient_bearing - odom.yaw());
+                const auto cols = tof.column_hit();
+                const double ahead = std::min(cols[3], cols[4]);   // the two centre columns, metres (max range if empty)
+                --orient_left;
+                const auto op = odom.position();
+                if (orient == Orient::Turn) {
+                    command.twist = {g_stop.orient_turn_vx, 0.0, e > 0.0 ? 1.0 : -1.0};   // the pivot
+                    if (std::fabs(e) < 0.15) { orient = Orient::Walk; orient_event = "orient:turned"; orient_x0 = op[0]; orient_y0 = op[1]; }
+                } else {
+                    command.twist = {g_stop.orient_vx, 0.0, std::clamp(1.5 * e, -0.6, 0.6)};
+                }
+                const double walked = orient == Orient::Walk ? std::hypot(op[0] - orient_x0, op[1] - orient_y0) : 0.0;
+                bool done = false;
+                // arrived: it has walked to where the change was (~1 m), or reached a surface after at least 0.4 m
+                if (orient == Orient::Walk && (walked >= 0.9 || (ahead > 0.0 && ahead < 0.4 && walked >= 0.4))) { ++arrivals; orient_event = "orient:arrived"; done = true; }
+                else if (orient_left <= 0) { ++orient_timeouts; orient_event = "orient:timeout"; done = true; }
+                if (done) {
+                    if (roll_on && t - last_roll_tick < 30 * 50) { const auto pd = body.trunk_position(); reach_sum += std::hypot(roll_x - pd[0], roll_y - pd[1]); ++reach_n; }   // distance to where the ball WAS rolled
+                    orient = Orient::None; command.twist = {0.0, 0.0, 0.0};
+                    brain.on_reset(); brain.set_learning(true);
+                    if (orient_event == std::string("orient:arrived") && stop_period > 0 && (ticks - t) > stop_ticks) {
+                        // arrived: a stop, to look at it
+                        stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
+                        ++stops_started; stop_started_tick = t; brain.set_learning(false);
+                        if (stander) stander->on_reset();
+                        if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
+                        command.twist = {0.0, 0.0, 0.0};
+                    }
+                }
+            }
         }
         if (head) {
             // The head loop: the four head joints (policy indices 5-8) relative to HOME are its
@@ -1735,7 +1877,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         learning_now ? "true" : "false",
                         recovery.handed_off_this_tick()    ? "reset:handoff"
                         : recovery.handed_back_this_tick() ? "reset:handback"
-                        : stop_event[0]                    ? stop_event : "",
+                        : stop_event[0]                    ? stop_event
+                        : orient_event[0]                  ? orient_event : "",
                         op[0], op[1], odom.yaw());
             const auto q = body.joint_positions();
             for (int i = 0; i < kNumPolicyJoints; ++i) std::printf("%s%.4f", i ? "," : "", q[i]);
@@ -1759,6 +1902,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
                 std::printf(",\"stop\":%d,\"satt\":%.3f", int(stop_phase), att);
                 if (scan_on || look_on) std::printf(",\"scan\":%.2f", (scanning || looking) ? scan_target : 0.0);
+                if (orient_on) std::printf(",\"orient\":%d,\"mqe\":[%.4f,%.4f,%.4f,%d]", int(orient), brain.map_quant_error(), brain.map_expected_error(), brain.map_transition(), look_held);
             }
             if (head) {
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
@@ -1833,6 +1977,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "  map baking: inserted %d at stops / %d on walks, baked %d at stops / %d on walks, pruned %d (of which baked %d); %d nodes, %d baked at the end\n",
                          ins_stop, ins_walk, bake_stop, bake_walk, pruned_total, pruned_baked, brain.map_node_count(), brain.map_baked_count());
         }
+        if (orient_on || roll_on || walk_on)
+            std::fprintf(stderr, "  orient: %d rolls (%d skipped at a surface), %d changes (%d within 3 s of a roll, %d unprompted), %d orientations, %d arrivals, %d timeouts, mean reach %.2f m to the roll\n",
+                         rolls, rolls_skipped, changes, changes_prompted, changes - changes_prompted, orientations, arrivals, orient_timeouts, reach_n ? reach_sum / reach_n : 0.0);
         if (look_on || gaze_on)
             std::fprintf(stderr, "  look: %d saccades, %d holds extended by novelty, %d of %d stops ended by a quiet round; mean stop %.1f s; the head looked for %.1f s\n",
                          saccades, novel_holds, stops_bored, stop_len_n, stop_len_n ? stop_len_sum / stop_len_n : 0.0, look_ticks / kBrainHz);
@@ -2027,6 +2174,13 @@ int main(int argc, char** argv) {
             g_stop.keep_head = true;
         } else if (a == "--stop-freeze-head") {
             g_stop.freeze_head = true;
+        } else if (a == "--stop-orient") {
+            g_stop.orient_k = std::stod(next("--stop-orient")); g_stop.orient_turn_vx = std::stod(next("--stop-orient"));
+            g_stop.orient_vx = std::stod(next("--stop-orient")); g_stop.orient_secs = std::stod(next("--stop-orient"));
+        } else if (a == "--walk-past") {
+            g_stop.walk_delay_s = std::stod(next("--walk-past")); g_stop.walk_speed = std::stod(next("--walk-past"));
+        } else if (a == "--roll-past") {
+            g_stop.roll_delay_s = std::stod(next("--roll-past")); g_stop.roll_speed = std::stod(next("--roll-past"));
         } else if (a == "--stop-gaze-learn") {
             g_stop.gaze_learn_frac = std::stod(next("--stop-gaze-learn"));
         } else if (a == "--stop-gaze-residual") {

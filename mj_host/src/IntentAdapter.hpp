@@ -73,6 +73,7 @@ public:
     bool   map_baked_now() const { return map_baked_now_; }
     int    map_node_count() const { return map_node_count_; }     // from the token, every tick
     double map_quant_error() const { return map_qe_; }            // the view's distance to its winner
+    double map_transition() const { return map_trans_; }          // the distance between consecutive winners (the TLE's second term)
     double map_expected_error() const { return map_expected_; }   // the channel's running expected TLE (Kalman-lessons Stage 2)
     int    map_baked_count() const { return map_baked_count_; }
     const std::vector<int>& map_pruned_ids() const { return map_pruned_ids_; }   // this tick's prunes
@@ -129,7 +130,7 @@ private:
     double map_tle_ = 0.0; bool map_novel_ = false; int map_winner_ = -1;
     bool map_baked_now_ = false; bool map_frozen_ = false; std::string map_module_id_;
     int map_node_count_ = 0, map_baked_count_ = 0; std::vector<int> map_pruned_ids_;
-    double map_qe_ = 0.0, map_expected_ = 0.0;
+    double map_qe_ = 0.0, map_expected_ = 0.0, map_trans_ = 0.0;
     std::map<std::string, double> map_saved_;          // the map's configured rates (schema defaults if absent; stale_prune as 0/1)
     double wander_bored_s_ = 0.0, wander_turn_deg_ = 90.0;
     double map_tle_long_ = 0.0; int bored_ticks_ = 0; int wander_turns_ = 0;

@@ -36,7 +36,8 @@ leaving a surface is §12.7b / O35. W3b (R42, §17.21): the gaze babbles at the 
 stop ending on the map's word; full pitch tips the stand (O36); half the inserted views die unbaked (O37).
 Bake threshold 20 (R43, §17.22): the map keeps its views but the dwell's novelty saturates — `PARTIAL`.
 The dwell on learning progress + bake 20 (R43, §17.23) learns the place whole (42 baked views kept); the stop's
-ending rule is the open knob (53 % standing). **Next: the ending rule (operator's), W5, W4.** Register O31–O37.
+ending rule is the open knob (53 % standing). W3d (R44, §17.24): the orienting reflex — a mover seen at a still gaze ends the stop and the duck walks to it
+(chair 57 %, ball 42 %, 95 % arrive, stand untouched). **Next: the place cloud (O38), then W5, W4.** Register O31–O38.
 
 **State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
 path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);

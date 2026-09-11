@@ -93,6 +93,11 @@ public:
     bool touching_object() const;
     int  n_objects() const { return n_objects_; }
     void move_body(const char* name, double x, double y);
+    // A movable placed at (x, y) and set rolling at (vx, vy): the orienting reflex's stimulus (a harness
+    // action, like a shove).  body_xy reads any body's world position (truth, for the harness's metrics).
+    void roll_body(const char* name, double x, double y, double vx, double vy);
+    std::array<double, 2> body_xy(const char* name) const;
+    double trunk_yaw() const;   // the trunk's world yaw (truth; the harness's use only)
     bool has_joint(const char* name) const { return mj_name2id(m_, mjOBJ_JOINT, name) >= 0; }
     void spin_joint(const char* name, double rad_per_s);
     // A site's world pose (position and rotation matrix), for casting rays from it.
