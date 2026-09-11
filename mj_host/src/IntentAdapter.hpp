@@ -81,6 +81,8 @@ public:
     // on percept.play_bearing ([cx = +right, cy = +forward], the Cell's PlayLoop) sets the heading
     // reference behind sense slot 10 each tick -- novelty becomes a direction.  By absence: a
     // graph without such a loop is byte-identical (the reference stays the slow running average).
+    double heading() const { return heading_; }          // the unwrapped own-yaw (rad) and the reference the
+    double heading_ref() const { return heading_ref_; }  // twist brain is held to: the JSONL's hdg field
     int play_steers() const { return play_steers_; }
     int last_steer() const { return last_steer_; }   // 0 none, 1 play, 2 avoidance (this tick)
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.

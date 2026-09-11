@@ -150,7 +150,11 @@ private:
     // established. frontier_bias∈[0,1] is the enable/ceiling; 1.0 (full outward) beat 0.5 and 0 monotonically
     // on discovery (2.5× faster to the far region, A/B lbend). 0 = OFF (memoryless run-and-tumble, Δ=0).
     float frontier_bias_        = 0.0f;
-    bool  commit_hold_          = false;   // R37: hold the sub-goal until reached or no longer uphill (see the schema)
+    bool  commit_hold_          = false;
+    bool  lookahead_            = false;   // R38: a target beyond the turning radius (see the schema)
+    float lookahead_reach_      = 0.0f;    // 0 = estimated online
+    int   lookahead_hops_       = 16;
+    float reach_ = 0.0f, w_mean_ = 0.0f, prev_heading_ = 0.0f;   // the running turning-radius estimate   // R37: hold the sub-goal until reached or no longer uphill (see the schema)
     uint64_t explore_seed_      = 11;
     float pi_cell_size_   = 0.0f;     // >0 = place node IS the odometry grid cell; 0 = use place_topic
     float eat_credit_alpha_ = 0.01f;  // EMA rate for the eat-credit success signal
@@ -165,7 +169,13 @@ private:
     int   cur_node_  = -1;
     int   next_node_ = -1;
     int   committed_next_ = -1;
-    float geo_bearing_from_odo(int to) const;   // bearing from the loop's live odometry to a node's position
+    float geo_bearing_from_odo(int to) const;
+    float node_dist(int n) const;               // odometry distance to a node's position (inf if unknown)
+    float reach_now() const;                    // the turning radius in use
+public:
+    float reach() const { return reach_now(); }   // telemetry
+    nlohmann::json diag_lite() const override;
+private:   // bearing from the loop's live odometry to a node's position
     int   stale_explore_ = 0;   // ticks since the map last GREW (a new node baked); resets on new ground
     bool  forced_wander_ = false;  // telemetry: the stall-wander is overriding the climb this tick
     bool  last_route_exists_ = false;  // telemetry (audit 2026-09-06): a strictly-more-novel neighbour existed this tick

@@ -279,3 +279,30 @@ TEST(PlayLoop, CommitHoldKeepsTheSubGoalThroughCurrentNodeFlicker) {
     EXPECT_EQ(committed_after_flicker(false), -1);
     EXPECT_EQ(committed_after_flicker(true), 2);
 }
+
+// R38 (duck, 2026-09-11): a target beyond the turning radius.  Four nodes in a line 10 odometry
+// units apart, the far one novel; back at node 0, the one-hop climb targets node 1 (inside a
+// 25-unit radius) while the lookahead walks the gradient to the first node at least 25 away: node 3.
+namespace {
+int lookahead_target(bool on) {
+    ogma::ParamMap pm = on ? ogma::ParamMap{{"lookahead", true}, {"lookahead_reach", 25.0}} : ogma::ParamMap{};
+    Fixture f(pm);
+    auto step = [&](uint64_t t, int node, float fwd, float tle = 0.0f) {
+        f.bus.begin_tick(t);
+        f.bus.publish("reality.cognitive.place", place(node, tle));
+        f.bus.publish("reality.proprio.heading", p1(0.0f));
+        f.bus.publish("reality.proprio.vel_ego", p2(0.0f, fwd));
+        f.play.tick(t);
+        f.bus.end_tick();
+    };
+    uint64_t t = 0;
+    for (int n = 0; n < 4; ++n) for (int k = 0; k < 10; ++k) step(t++, n, 1.0f, n == 3 ? 1.0f : 0.0f);   // out
+    for (int n = 2; n >= 0; --n) for (int k = 0; k < 10; ++k) step(t++, n, -1.0f);                     // back
+    for (int k = 0; k < 10; ++k) step(t++, 0, 0.0f);                                                   // settle
+    return f.play.next_node();
+}
+}  // namespace
+TEST(PlayLoop, LookaheadTargetsTheFirstNodeBeyondTheTurningRadius) {
+    EXPECT_EQ(lookahead_target(false), 1);
+    EXPECT_EQ(lookahead_target(true), 3);
+}

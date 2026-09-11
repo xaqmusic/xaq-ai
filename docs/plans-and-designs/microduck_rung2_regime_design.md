@@ -1855,3 +1855,69 @@ the plan or the recipe has stated:
    level-2 twist brain, not the play loop.
 
 The instruments for any of them are now in the sweep (`straight`, `switch/min`).
+
+### 17.17 Fork item 1 tried (R38, the lookahead target) — refuted, and the heading regulator found not to regulate (2026-09-11)
+
+**R38 — `lookahead` on the play loop** (operator: try item 1). New `PlayLoop` params, off by
+default (R34 byte-identical, a unit test): the sub-goal is the first node along the greedy uphill
+walk of the value field whose position is at least the body's turning radius from the loop's own
+odometry — held until the body is inside that radius or the node is no longer uphill, the bearing
+from the live odometry; the radius is the loop's own running estimate of forward speed / heading
+rate on turning ticks (no constant; `lookahead_reach` > 0 overrides it for tests). The read-back
+prints it (`play {… "reach": …}`, now a `diag_lite`): 14–22 odometry units on five seeds ≈
+0.11–0.17 m against the 0.18 m measured from the walk; seed 5 estimated 3.3 (its turning ticks
+were slow ones). Playroom, ★ HEAD stack, n = 6, paired with R34:
+
+| n = 6, paired | walls/min | cells | straight | switch/min | path m | resc/min | objs/min |
+|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 10.9 | 144 ± 20 | 0.19 ± 0.07 | 133 | 147 | 0.19 | 16.8 |
+| **R38** lookahead | 8.4 (ties, 3+/3−) | **110 ± 52** (Δ −34, t −2.1, 0+/5−) | **0.13 ± 0.06** (Δ −0.06, t −4.9, **0+/6−**) | 132 (ties) | 158 (Δ +11, 5+/1−) | 0.06 | 6.0 |
+
+Straighter it is not: worse on every seed. Seed 4 reproduces R37's orbit **to the metre** (23 cells,
+159.1 m, x-range 1.2) — the fallback clause ("the last uphill node if none is that far") re-chooses
+the same near node every tick at a local peak of the value field, which is R37's held target by
+another route. **`REGRESSION`**, preset removed, config kept. The lever's own premise held (the
+target was far and the reference quiet: 3 reference jumps a minute against R34's 102) and the body
+still did not go straight — which is the finding.
+
+**The heading regulator does not regulate.** The host now logs the heading and its reference
+per tick (`hdg`, a printed field; the physics byte-identical with it stripped), so the twist brain's
+yaw channel can be read directly. Seed 6, control phase:
+
+| | R34 | R38 |
+|---|---|---|
+| heading error \|e\| (rad), mean | 1.76 | 1.44 |
+| ticks with \|e\| > 0.8 rad | 80 % | 72 % |
+| \|vyaw\| command (of ±1) | 0.95 | 0.92 |
+| yaw-command sign flips / min | 50 | 140 |
+| reference jumps > 0.5 rad / min | 102 | 3 |
+| in windows where the reference is quiet: \|e\|, flips/min | 2.08 rad, 62 | 1.91 rad, 192 |
+| vyaw spectral peak | broadband | **2.39 Hz — the gait** (sensed yaw rate 2.41 Hz) |
+| linear fit of vyaw(t) on the senses(t−1): R² | 0.63 | 0.37 |
+| dominant term | heading error (coef −0.93, corr −0.76) | ToF right column (+1.97); heading error −0.12 |
+| own-yaw-rate copy: command has the same sign when \|rate\| > 0.3 | **83 %** | 65 % |
+
+In R34 the yaw command *does* answer the heading error — but the reference it is held to moves at
+4 rad/s because the play target flickers, so the error never closes, and a positive-feedback term on
+the body's own yaw-rate copy (R21's finding, §17.2: "dominated by the copy of its own yaw command")
+sustains the spin. In R38 the reference stands still and the learned yaw row lets go of the error
+altogether: learning is live through the control phase, the state prior's descent (`state_prior_lr
+0.1`, through the identified A) is one term among the C matrix's sixteen columns, and with nothing
+to chase the row settles on whatever else moves at the gait frequency — the right ToF column, the
+velocity copies — a saturated 2.4 Hz oscillation. Either way the body is not steered: with the
+reference still, the error sits at two radians.
+
+**Verdict on the fork.** Items 1 and 2 are moot while item 3 stands: nothing above the twist brain
+can hold a trajectory if the twist brain does not hold a heading. The heading loop's earlier
+verdicts (R22 `PARTIAL`, R27's "steers on every tick") measured that the reference was *set*, never
+that it was *followed*; this is the first measurement of the following, and it is the §3.2 catch
+of the line. **The lever is the yaw channel of the level-2 twist brain**, in the doctrine's terms:
+the prior's own error on slot 10 through the model's yaw authority (A's vyaw row, printed in every
+read-back) as the yaw command's *objective*, with the learned C's other columns unable to swamp it.
+Two honest forms, the operator's call: (a) a **lesion** first — hold C's yaw row to the heading
+column alone and read straightness (if it jumps, the swamping is proven and the mechanism is the
+prior's weight, not a new law); (b) the **model-implied step** — the yaw command that closes the
+prior's error in one identified step, `u = −e / A(idx, vyaw)`, clamped, which is what the prior's
+half 2 is meant to converge to and here does not. The positive feedback on the own-rate copy is a
+second, older defect (R21) that a lesion would also expose. `straight` and the `hdg` field are the
+instruments; the bar is `straight` well above 0.2 on every seed *with* the play reference live.

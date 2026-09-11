@@ -1463,9 +1463,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             for (const auto& z : tof.zones()) std::printf("%d", int(z.cls));
             std::printf("\",\"tofr\":[");
             for (int i = 0; i < Tof::kZones; ++i) std::printf("%s%.2f", i ? "," : "", tof.zones()[i].range);
-            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"steer\":%d,\"map\":[%.3f,%d,%d,%d]", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
+            std::printf("],\"tofs\":[%.2f,%.2f,%.2f,%.2f],\"wall\":%d,\"steer\":%d,\"map\":[%.3f,%d,%d,%d],\"hdg\":[%.3f,%.3f]", tof_summary[0], tof_summary[1], tof_summary[2], tof_summary[3],
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
-                        (t % 25 == 0) ? brain.map_nodes() : -1);
+                        (t % 25 == 0) ? brain.map_nodes() : -1, brain.heading(), brain.heading_ref());
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
             if (head) {
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();

@@ -56,6 +56,18 @@ straightness. **The fork for the operator** before E1: a play target beyond the 
 (a longer bearing horizon), places at the body's scale, or a proportional heading regulator from
 the identified yaw row. The sweep now reports `straight` and `switch/min`.
 
+**2026-09-11, later — fork item 1 tried and refuted (R38, design doc §17.17), and the real defect
+found.** A target beyond the turning radius, held: `REGRESSION` 0+/6− on straightness; one seed
+reproduces R37's orbit to the metre. With the reference then *still*, the twist brain's yaw command
+still saturates and flips (140–190/min) and the heading error sits at two radians: **the level-2
+twist brain does not hold a heading** — its learned yaw row answers the flickering reference in
+R34 and the gait's 2.4 Hz wobble in R38, with a positive-feedback term on its own yaw-rate copy
+(R21) either way. Every steering verdict so far measured that the reference was set, not followed.
+**The lever before anything in the line below is the yaw channel of the twist brain**: a lesion
+of C's yaw row to the heading column, or the model-implied step `u = −e / A(idx, vyaw)`; the bar
+is `straight` well above 0.2 on every seed with the play reference live. The `hdg` field and the
+`straight` / `switch/min` columns are the instruments.
+
 **Next: the exploration line, in this order**, each a lever with a preset and n = 6, on the
 ★ HEAD stack (the steady camera is what makes the appearance map possible):
 
