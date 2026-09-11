@@ -43,72 +43,9 @@
 
 #include <cmath>
 
+#include "ogma/body/GodotFloat.hpp"
+
 namespace ogma::body {
-
-// A float32 Vector3 whose operations match godot-cpp's bit for bit.  Deliberately
-// minimal: only what the filter uses, so there is less surface to drift.
-struct Vec3f {
-    float x = 0.0f, y = 0.0f, z = 0.0f;
-
-    Vec3f() = default;
-    Vec3f(float ax, float ay, float az) : x(ax), y(ay), z(az) {}
-
-    // godot-cpp vector3.hpp:208
-    float dot(const Vec3f& b) const { return x * b.x + y * b.y + z * b.z; }
-    // godot-cpp vector3.hpp:488 -- squares first, then sums, then sqrt
-    float length() const {
-        const float x2 = x * x, y2 = y * y, z2 = z * z;
-        return std::sqrt(x2 + y2 + z2);
-    }
-    float length_squared() const { return x * x + y * y + z * z; }
-    // godot-cpp vector3.hpp:504 -- per-component DIVISION, and zero stays zero
-    Vec3f normalized() const {
-        Vec3f v = *this;
-        const float lsq = v.length_squared();
-        if (lsq == 0.0f) { v.x = v.y = v.z = 0.0f; }
-        else {
-            const float len = std::sqrt(lsq);
-            v.x /= len; v.y /= len; v.z /= len;
-        }
-        return v;
-    }
-    Vec3f operator*(float s) const { return Vec3f(x * s, y * s, z * s); }
-    Vec3f operator+(const Vec3f& b) const { return Vec3f(x + b.x, y + b.y, z + b.z); }
-    Vec3f operator/(float s) const { return Vec3f(x / s, y / s, z / s); }
-};
-
-// Basis(axis, angle).xform(v), replicating godot-cpp basis.cpp set_axis_angle and
-// basis.hpp:308 xform.  The matrix is built and then applied, in that order and with
-// those groupings, because that is what the original does.
-inline Vec3f basis_axis_angle_xform(const Vec3f& axis, float angle, const Vec3f& v) {
-    const Vec3f axis_sq(axis.x * axis.x, axis.y * axis.y, axis.z * axis.z);
-    const float cosine = std::cos(angle);
-    float r00 = axis_sq.x + cosine * (1.0f - axis_sq.x);
-    float r11 = axis_sq.y + cosine * (1.0f - axis_sq.y);
-    float r22 = axis_sq.z + cosine * (1.0f - axis_sq.z);
-
-    const float sine = std::sin(angle);
-    const float t = 1 - cosine;
-
-    float xyzt = axis.x * axis.y * t;
-    float zyxs = axis.z * sine;
-    float r01 = xyzt - zyxs;
-    float r10 = xyzt + zyxs;
-
-    xyzt = axis.x * axis.z * t;
-    zyxs = axis.y * sine;
-    float r02 = xyzt + zyxs;
-    float r20 = xyzt - zyxs;
-
-    xyzt = axis.y * axis.z * t;
-    zyxs = axis.x * sine;
-    float r12 = xyzt - zyxs;
-    float r21 = xyzt + zyxs;
-
-    return Vec3f(Vec3f(r00, r01, r02).dot(v),
-                 Vec3f(r10, r11, r12).dot(v),
-                 Vec3f(r20, r21, r22).dot(v));
-}
 
 struct ImuAttitudeParams {
     // Mirrors IMU_ACC_TRUST / IMU_ACC_GATE_FRAC / the literal 9.81 in _imu_substep.
