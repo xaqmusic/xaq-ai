@@ -1045,6 +1045,20 @@ var _hip2_axes:   Array[Vector3] = []   # per-leg lateral, used for torque appli
 var _knee_axes:   Array[Vector3] = []   # same — knee axis is the same lateral as hip2
 # Construction-time world positions of the joint anchors per leg, used
 # by the calibration FK to compute body transforms from slider angles.
+# ⚠ FK NOW RUNS IN C++ — cpp_core/include/ogma/body/LegKinematics.hpp, bound as the
+# LegKinematics class (port doc Phase 4, step (a)).  It CACHES the anchors below, which
+# means it can go stale exactly the way _retarget_body_watchers()'s consumers can: see
+# the warning above that function.  _build_body() refreshes it as its last act, so both
+# the initial build and the live [B] morphology swap are covered.
+# The swap is verified byte-identical — cpp_core/tests/body/leg_kinematics_parity_check.cpp.
+var _legkin = null                          # LegKinematics (GDExtension)
+# Test hook, OFF by default (0 = never), so the build is gain-0 and byte-identical.
+# ⚠ EXISTS BECAUSE THE BYTE-IDENTITY GATE CANNOT SEE THIS BUG.  A trace diff proves the
+# FK port is exact on a run that never rebuilds the body; the anchor cache only goes
+# stale on the live [B] swap, which was reachable ONLY from a keypress and therefore
+# never exercised headlessly.  OGMA_PICRAWLER_BODY_SWAP_AT=<tick> performs the same swap
+# mid-run and prints a verdict.
+var _body_swap_at_tick: int = 0
 var _hip1_world_c: Array[Vector3] = []
 var _hip2_world_c: Array[Vector3] = []
 var _knee_world_c: Array[Vector3] = []
@@ -3273,6 +3287,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_AUTO_RESET_MAX_HEIGHT",
 			  "OGMA_PICRAWLER_AUTO_RESET_DWELL_TICKS",
 			  "OGMA_PICRAWLER_LEG_SYMMETRY", "OGMA_PICRAWLER_LEG_SYMMETRY_FR_BLEND",
+			  "OGMA_PICRAWLER_BODY_SWAP_AT",
 			  "OGMA_PICRAWLER_HOMEO_STEP_GAIN",
 			  "OGMA_PICRAWLER_HOMEO_PAYOUT_NORM",
 			  "OGMA_PICRAWLER_HOMEO_PHASE_COUPLE",
@@ -3386,6 +3401,8 @@ func _resolve_env() -> void:
 					push_warning("PicrawlerBody: ignoring OGMA_PICRAWLER_LEG_SYMMETRY=%s (expected off/lr_pairs/lr_and_fr_pairs)" % v)
 			"OGMA_PICRAWLER_LEG_SYMMETRY_FR_BLEND":
 				leg_symmetry_fr_blend = clamp(v.to_float(), 0.0, 1.0)
+			"OGMA_PICRAWLER_BODY_SWAP_AT":
+				_body_swap_at_tick = max(0, v.to_int())
 			"OGMA_PICRAWLER_HOMEO_STEP_GAIN":
 				homeo_step_gain = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_HOMEO_PAYOUT_NORM":
@@ -4660,6 +4677,18 @@ func _build_body() -> void:
 			hip1_spring_stiffness, hip1_spring_damping,
 			hip2_spring_stiffness, hip2_spring_damping,
 			knee_spring_stiffness, knee_spring_damping])
+	# ⚠ REFRESH THE FK CACHE BEFORE ANY CONSUMER, and _report_geometry() IS a consumer:
+	# its G2/G3 evidence sweep calls _toe_pose() -> _fk_leg().  Refreshing after it left
+	# _legkin null for five calls ("Nonexistent function 'fk' in base 'Nil'") — invisible
+	# in the trace, because that sweep is print-only, and a broken diagnostic regardless.
+	# The anchors are valid the moment the four _build_leg() calls above have appended
+	# them, so this goes there and not at the end.
+	#
+	# Both entry paths (_ready() and _rebuild_body()) run _build_body(), so refreshing
+	# HERE rather than at either call site is what stops a live [B] body swap leaving FK
+	# on the previous geometry — a stale cache would not fail loudly, it would publish
+	# confident poses for a body that no longer exists, into feet_y_gravity_cmd_imu.
+	_legkin_refresh()
 	_report_geometry()
 
 # Hand the (re)built chassis to everything that tracks it by REFERENCE rather
@@ -5658,12 +5687,7 @@ func _input(event: InputEvent) -> void:
 		# under the SAME brain, mid-run.  Watch TLE: a spike that then decays is
 		# re-inference against a changed morphology, and is the evidence.  A flat
 		# TLE means the swap did not reach anything the brain predicts with.
-		var next_body: String = "measured" if _geometry_name == "cad" else "cad"
-		var next_path: String = "res://addons/ami_ogma/body/%s.json" % next_body
-		if not FileAccess.file_exists(next_path):
-			_ui_notify("[body] %s.json not present" % next_body)
-		else:
-			_rebuild_body(next_path)
+		_swap_body_geometry()
 	elif key == KEY_1:
 		# Live gym swap — drop the experienced robot (brain intact) into the ARENA (donut).
 		_switch_gym("arena")
@@ -5979,6 +6003,8 @@ func _step_one() -> void:
 		return
 
 	tick_counter += 1
+	if _body_swap_at_tick > 0 and tick_counter == _body_swap_at_tick:
+		_swap_body_geometry()
 	step_in_episode += 1
 	# Controlled belly-on-ramp test: auto-drop onto the hump at the configured tick
 	# (headless; e.g. after the gait develops).  One-shot.
@@ -9392,32 +9418,45 @@ func _chassis_tilt(b: Basis) -> float:
 # return [T_coxa, T_upper, T_lower] world transforms.  Used by calibrate
 # mode to write body transforms directly (bypassing motors + joint
 # constraints) so the slider value IS the joint angle, exactly.
+# Push the freshly-built anchors into the C++ FK.  clear() first so a build that fails
+# part-way leaves legs UNSET — LegKinematics::fk() reports that loudly — rather than a
+# mix of old and new geometry, which would look like a working robot.
+# The live morphological swap, shared by [B] and by OGMA_PICRAWLER_BODY_SWAP_AT so the
+# hook exercises the REAL path rather than a parallel one that could drift from it.
+func _swap_body_geometry() -> void:
+	var next_body: String = "measured" if _geometry_name == "cad" else "cad"
+	var next_path: String = "res://addons/ami_ogma/body/%s.json" % next_body
+	if not FileAccess.file_exists(next_path):
+		_ui_notify("[body] %s.json not present" % next_body)
+		return
+	# Same joint angles either side of the swap.  The leg geometry genuinely changes,
+	# so FK MUST change; identical output is the signature of a stale anchor cache
+	# (which would not crash — it would publish poses for the old body).
+	var fk_before: String = ""
+	if _body_swap_at_tick > 0 and _legkin != null:
+		fk_before = str(_fk_leg(0, 0.21, -0.37, 0.53)[2].origin)
+	_rebuild_body(next_path)
+	if _body_swap_at_tick > 0 and _legkin != null:
+		var fk_after: String = str(_fk_leg(0, 0.21, -0.37, 0.53)[2].origin)
+		print("PicrawlerBody: [swap-check] geometry=%s legs_set=%d before=%s after=%s -> %s"
+			% [_geometry_name, _legkin.legs_set(), fk_before, fk_after,
+			   "STALE CACHE" if fk_after == fk_before else "cache refreshed"])
+
+func _legkin_refresh() -> void:
+	if _legkin == null:
+		_legkin = ClassDB.instantiate("LegKinematics")
+	_legkin.clear()
+	for i in range(4):
+		_legkin.set_leg(i,
+			_hip1_world_c[i], _hip2_world_c[i], _knee_world_c[i],
+			_coxa_rest_xform[i].origin, _upper_rest_xform[i].origin, _lower_rest_xform[i].origin,
+			_hip2_axes[i], _knee_axes[i])
+
 func _fk_leg(i: int, t1: float, t2: float, t3: float) -> Array:
-	var lift: Vector3 = Vector3(0, _suspend_lift_y, 0)
-	var hip1_w: Vector3 = _hip1_world_c[i] + lift
-	var hip2_w: Vector3 = _hip2_world_c[i] + lift
-	var knee_w: Vector3 = _knee_world_c[i] + lift
-	var coxa_c:  Vector3 = _coxa_rest_xform[i].origin  + lift
-	var upper_c: Vector3 = _upper_rest_xform[i].origin + lift
-	var lower_c: Vector3 = _lower_rest_xform[i].origin + lift
-	# Hip1 rotation around world UP at hip1 anchor.
-	var rot1: Basis = Basis(Quaternion(Vector3.UP, t1))
-	var h1: Transform3D = Transform3D(rot1, hip1_w - rot1 * hip1_w)
-	var t_coxa: Transform3D = h1 * Transform3D(Basis.IDENTITY, coxa_c)
-	# Hip2 rotation around the leg-local lateral (which has been rotated
-	# by hip1) at the hip2 anchor (which has also moved with hip1).
-	var hip2_w_now: Vector3 = h1 * hip2_w
-	var hip2_axis_now: Vector3 = rot1 * _hip2_axes[i]
-	var rot2: Basis = Basis(Quaternion(hip2_axis_now, t2))
-	var h2: Transform3D = Transform3D(rot2, hip2_w_now - rot2 * hip2_w_now)
-	var t_upper: Transform3D = h2 * h1 * Transform3D(Basis.IDENTITY, upper_c)
-	# Knee rotation — knee axis carried by both hip1 and hip2 rotations.
-	var knee_w_now: Vector3 = h2 * h1 * knee_w
-	var knee_axis_now: Vector3 = rot2 * rot1 * _knee_axes[i]
-	var rot3: Basis = Basis(Quaternion(knee_axis_now, t3))
-	var h3: Transform3D = Transform3D(rot3, knee_w_now - rot3 * knee_w_now)
-	var t_lower: Transform3D = h3 * h2 * h1 * Transform3D(Basis.IDENTITY, lower_c)
-	return [t_coxa, t_upper, t_lower]
+	# Ported to C++ so the sim and ogma_host share one forward kinematics rather than
+	# two that drift (port doc Phase 4, step (a)).  Returns [coxa, upper, lower] exactly
+	# as before, so the six call sites are untouched.
+	return _legkin.fk(i, t1, t2, t3, _suspend_lift_y)
 
 # Powered-servo torque model (docs/servo_dynamics.md):
 #   - PID-like with stiff Kp + heavy Kd, no Ki (matches metal-gear PWM tracker).

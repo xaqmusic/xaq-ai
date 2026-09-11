@@ -13,6 +13,7 @@
 #include "BenchClient.hpp"
 #include "VideoClient.hpp"
 #include "ImuAttitude.hpp"
+#include "LegKinematics.hpp"
 
 using namespace godot;
 
@@ -22,6 +23,7 @@ static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<BenchClient>();
     ClassDB::register_class<VideoClient>();
     ClassDB::register_class<ImuAttitude>();
+    ClassDB::register_class<LegKinematics>();
 }
 
 static void uninitialize_ami_ogma_module(ModuleInitializationLevel p_level) {

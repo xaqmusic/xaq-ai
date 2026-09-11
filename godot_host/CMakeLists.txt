@@ -78,6 +78,7 @@ add_library(ami_ogma_host SHARED
     src/BenchClient.cpp   # bench dashboard client (pi_host/PROTOCOL.md)
     src/VideoClient.cpp   # camera stream from ogma_host (receive-only)
     src/ImuAttitude.cpp   # binding for cpp_core/ogma/body/ImuAttitude (port step a)
+    src/LegKinematics.cpp # binding for cpp_core/ogma/body/LegKinematics (port step a)
 )
 
 # No "lib" prefix — we reference it as "ami_ogma_host.so" in the .gdextension.
