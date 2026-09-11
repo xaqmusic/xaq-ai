@@ -2097,11 +2097,32 @@ reference arm is the R41 graph with no look:
   quarter of ticks by construction (an adaptive threshold on the TLE's spread); "unbaked" is
   the question §12.2 asks.
 
+**The (d) test, three forms (2026-09-12).** A moved *ball* (R30's form, `--move obj_ball0 -1.2 0.8
+1100`): stops within 1 m of its new place did not lengthen (14.0 s, n = 9, none touching it) — the
+ball is 0.06 m, one ToF column at a metre, and the compact logs cannot say whether a stop faced
+it: inconclusive, a stimulus below the sensor. A moved *chair* (`--move furn_chair0 0.3 0.3
+1100`, four legs at the room's centre), stops still capped at 20 s: the map re-infers (nodes after
+the move 42.7 vs 34.5 unmoved; cells 78 vs 54; stops near the new chair see 7.1 distinct views
+against 4.5; 2 of 16 end on a quiet round against 6 of 23) but the length cannot show — 14 of 16
+run to the cap. **The chair with the stop uncapped** (`--stop-every 80 --stop-secs 60`: the stop
+ends on a quiet round or at 60 s, §12.2's stop, the map's own), n = 6, paired:
+
+| uncapped stops, n = 6 | all stops before 1100 s | all stops after | at the chair's new place, before | **after** | elsewhere after | stops at that place after |
+|---|---|---|---|---|---|---|
+| unmoved | 37.4 s (n = 42) | **34.5 s** (n = 23) | 39.4 s (n = 13) | 24.5 s (n = 3, all quiet) | 36.0 s | 3 |
+| chair moved at 1100 s | 37.2 s (n = 42) | **42.8 s** (n = 24) | 38.6 s (n = 13) | **45.7 s** (n = 15) | 38.0 s | **15** |
+
+Both halves of the contingency are now present at signal strength: with nothing moved the stops
+shorten as the map bakes (37.4 → 34.5 s; 10 of 11 end on a quiet round by the run's end), and a
+moved chair lengthens the stops at its place (38.6 → 45.7 s) and draws the duck there (3 → 15
+stops within 1.2 m; the play loop's novelty climbs to the change, R27's half). Wall contact after
+the move: 5.4/min moved vs 37.9 unmoved — the time spent standing near the change is time not
+spent riding walls; n = 6, read as a signal. The stand: 11 of 11 hand-backs held on every seed,
+the joint brain standing 300–400 s a run.
+
 **Verdict.** W3 `WORKING` at n = 6 on the map and the walk (a place is a stop; the cleanest walk
-measured; the stand untouched) and `PARTIAL` on contingency (stops end on a quiet round, and
+measured; the stand untouched) and, with the stop uncapped, **`WORKING` on contingency as a signal** — stops shorten as the map bakes and lengthen at a moved chair, which is the claim a Roomba cannot make; capped at 20 s it read `PARTIAL` (stops end on a quiet round, and
 their length would fall with revisits the run does not contain). Not promoted; the operator's
-eye is pending (preset R41, seed 6). Re-use for the contingency half: a longer run or a smaller
-room (revisits), a hold long enough to bake a view (`look_max` ≥ 5 s, or the map's
-`baking_threshold` scaled to the hold), and the moved-object (d) test — a stop near a moved
-object should lengthen, which is the claim a Roomba cannot make. Next: that (d) test, then W4
+eye is pending (preset R41, seed 6). The ball (d) is inconclusive (a stimulus below the sensor's resolution); the chair (d) is the
+evidence. To a finding: n ≥ 20 varied rooms and the uncapped stop as the default form. Next: W4
 (the command mux) and W5 (leaving a surface, §12.7b).

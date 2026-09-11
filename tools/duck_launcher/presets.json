@@ -708,7 +708,7 @@
   {
     "name": "R41 · W3 a place is a STOP: the map learns only while standing, a view is pose + gaze, the look is driven by the map's own novelty (a quiet round ends the stop)",
     "series": 41,
-    "hint": "The walk-stop-look line's map (playroom plan §12.2, W3): the map EPM's insertion, adaptation and pruning are on only at stops; the place vector gains the head yaw so each bearing at a stop is its own view; at a stop the head steps 0, +0.6, -0.6 rad, holding each at least 1 s and up to 4 s while the map calls the view novel; a full round with nothing novel ends the stop early, so the stop's length is the map's. Judged on stop length vs novelty (contingency), saccades and nodes per stop, switch/min, cells, walls, and the moved-object (d).",
+    "hint": "WATCH (seed 6, fast-forward through the 600 s babble): every 80 s the duck stops; the R19 stander takes the legs (green), the head brain keeps the head level and looks 0, +0.6, −0.6 rad, holding a bearing while the map has not baked that view; a round with nothing new ends the stop (up to 60 s). The map learns only at stops. n=6: stops shorten as the map bakes (37 → 35 s), 5.4 walls/min capped form, 11/11 stands held (design doc §17.20).",
     "state": {
       "config": "a1v2_r41_w3_look.json",
       "mode": "level2",
@@ -725,7 +725,31 @@
       "seed": 6,
       "seed_random": false,
       "arena_shift": 0.0,
-      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 60 --stop-secs 20 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --stop-look 0.6 1.0 4.0 --map-on-stop",
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --stop-look 0.6 1.0 4.0 --map-on-stop",
+      "fast_until": 600
+    }
+  },
+  {
+    "name": "R41 · moved chair (d): furn_chair0 jumps to the room's centre at 1100 s — the stops there lengthen and the duck comes to look",
+    "series": 41,
+    "hint": "WATCH (seed 6): as R41, and at 1100 s the chair is relocated to (0.3, 0.3). n=6: stops within 1.2 m of it go 38.6 → 45.7 s and the duck stops there 15 times where the unmoved run stops 3 (§17.20 addendum). The (d) test for a place that is a stop.",
+    "state": {
+      "config": "a1v2_r41_w3_look.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --stop-look 0.6 1.0 4.0 --map-on-stop --move furn_chair0 0.3 0.3 1100",
       "fast_until": 600
     }
   }

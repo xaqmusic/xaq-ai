@@ -61,7 +61,14 @@ cells and path up and the stand untouched (89/90): `WORKING`. Contingency `PARTI
 early (22 %) but do not shorten over 15 stops, because a view bakes only on revisit (50 processed
 ticks) and the run has few. Two harness catches on the way (§17.20): the EPM does not report live
 params, so the gate was inert until it used the configured values; and the token's `is_novel` is
-a percentile, not "unbaked". **Next: the moved-object (d) on R41, then W4 and W5 (§12.7b).**
+a percentile, not "unbaked". 
+
+**The (d) done, uncapped (§17.20 addendum).** With the stop ending on a quiet round or at 60 s,
+stops shorten as the map bakes (37.4 → 34.5 s, unmoved) and lengthen at a moved chair (38.6 →
+45.7 s at its place, and the duck stops there 15 times where the unmoved arm stops 3): the stop
+length is the map's, at signal strength. The ball (d) was below the sensor's resolution. Preset
+R41 now carries the uncapped stop; "R41 · moved chair (d)" moves the chair at 1100 s.
+**Next: W4 (the command mux) and W5 (leaving a surface, §12.7b).**
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting

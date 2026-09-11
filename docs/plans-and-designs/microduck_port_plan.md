@@ -30,8 +30,9 @@ wire, and a ten-minute instrument. W0 and W1 are built and measured (R39, design
 stand stiller than the walker's), the gate deferred, a resume-from-still deadlock found for W5.
 W2 measured too (R40, §17.19): the saccade channel is live at stops and silent on the walk, 267/267
 stands held under a moving head, the head brain frozen through the stop. W3 measured (R41, §17.20): the map learns only at stops, a view is pose + gaze, the look holds unbaked
-views — the cleanest walk measured (5.4 walls/min), contingency half present. The operator's to-do on
-leaving a surface is §12.7b / O35. **Next: the moved-object (d) on R41, then W4, W5.** Register O31–O35.
+views — the cleanest walk measured (5.4 walls/min); uncapped, the stop length is the map's: shorter as it
+bakes, longer at a moved chair (the (d), a signal). The operator's to-do on
+leaving a surface is §12.7b / O35. **Next: W4 (the command mux), W5 (leaving a surface).** Register O31–O35.
 
 **State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
 path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);
