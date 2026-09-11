@@ -74,8 +74,10 @@ the stop ending after six known gazes. Yaw + small pitch (sd 0.08): 65/66 stands
 92 % end on the map's word, 181 gaze steps a run — `WORKING`. Full pitch (sd 0.2) tips the stand
 (24/66): O36. **The baking read-back**: no baked view is ever pruned, but of ~41 views a stop
 inserts per run ~21 bake and the rest die unbaked before a revisit — the map's `baking_threshold`
-(50 visits) against a 6 s dwell is the next lever. **Next: the baking threshold, then W5 (§12.7b),
-W4.**
+(50 visits) against a 6 s dwell is the next lever. **The baking threshold tried (R43, §17.22):** 20 keeps the map (prunes 17.5 → 5.8, every node
+baked) and empties the dwell's signal (stops 31 → 12 s, all on a quiet round) — a constant serving
+two consumers. `PARTIAL`. **Next: the dwell on the token's residual against its expected error
+(then bake 20 is free), W5 (§12.7b), W4.**
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting

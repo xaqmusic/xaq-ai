@@ -2180,3 +2180,35 @@ with no cost to the stand and a fuller look, the stop ends on the map's own word
 `REGRESSION` on the stand (O36). The baking read-back is the instrument the operator asked for and
 its first reading is the next lever: half the views a stop inserts die unbaked. Not promoted
 (operator's eye pending, preset R42). Next: the baking threshold on the map, then W5.
+
+### 17.22 O37 tried: the map's baking threshold (R43, 2026-09-12)
+
+**The lever.** `map_epm.baking_threshold` 50 → 20 and → 10 (a config arm on R42's form; the gaze
+babble's dwell bakes a view in 2 s / 1 s of one winner instead of 5 s). n = 6, paired:
+
+| n = 6 | inserted at stops | baked at stops | pruned (baked) | nodes / baked at the end | stop s | quiet-round ends | saccades | stands held | cells | path m | mapTLE | walls/min |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R42 (threshold 50) | 41 | 21 | 17.5 (0) | 33 / 29 | 31.3 | 92 % | 181 | 65 / 66 | 111 | 94 | 0.22 | 14 ± 12 |
+| threshold 20 | 33 | 24.5 | **5.8** (0) | 33.5 / **33** | **11.7** | 100 % | 150 | 66 / 66 | 131 | 127 | 0.31 | 23 ± 28 |
+| threshold 10 | 30 | 24.5 | **3.3** (0) | 31 / 30 | **10.1** | 100 % | 160 | 64 / 66 | 138 | 133 | 0.32 | 19 ± 16 |
+
+- **The decay is gone.** At 20 the map keeps what it sees: 5.8 prunes a run against 17.5, and
+  every node standing at the end is baked (33 of 33.5). O37's aim, met by the constant.
+- **And the dwell loses its signal.** A view now bakes inside one gaze, so "the winner is
+  unbaked" is true for two seconds and then never; every stop ends on a quiet round at 10–12 s
+  instead of 31, with fewer views inserted (33 vs 41) and a map that fits the walk worse
+  (`mapTLE` 0.22 → 0.31, 6+/0−). The stop's contingency — long where the place is new — was
+  carried by the bake flag, and the bake flag was carrying it only because 50 visits was slow.
+  This is `CLAUDE.md` §5 rule 5 in the flesh: a constant tuned to a scale, and either setting
+  of it is wrong for one of the two consumers (the map's memory wants fast baking; the dwell's
+  novelty wants slow).
+- The stand is indifferent (66 / 66, 64 / 66); cells and path rise because the stops are
+  short; wall contact ties at this power.
+
+**Verdict.** `PARTIAL`: threshold 20 fixes the map's forgetting and breaks the dwell's novelty.
+Not promoted. The lever that separates the two: a dwell on the token's **residual against its
+own expectation** (`quant_error` vs `expected_error`, the channel's running TLE — the
+Kalman-faithful quantity the token already carries) instead of the bake flag; the view is
+worth holding while it surprises the map more than the map expects to be surprised, and the
+bake threshold can then be the map's own choice (20). Re-use context for bake 20: with that
+dwell. Register O37 stays open with this as its next step.
