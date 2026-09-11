@@ -71,6 +71,9 @@ public:
     double map_tle() const { return map_tle_; }
     bool   map_novel() const { return map_novel_; }
     bool   map_baked_now() const { return map_baked_now_; }
+    int    map_node_count() const { return map_node_count_; }     // from the token, every tick
+    int    map_baked_count() const { return map_baked_count_; }
+    const std::vector<int>& map_pruned_ids() const { return map_pruned_ids_; }   // this tick's prunes
     // W3 (playroom plan §12.2, insert-on-stop): the map EPM's insertion, prototype adaptation and
     // stale pruning off while the body walks and on while it stands and looks; the token keeps
     // publishing (the play loop's node positions need a live winner).  Through hot-mutable params.
@@ -123,6 +126,7 @@ private:
     double heading_ref_ = 0.0;                // its slow running average — the heading "I have been keeping"
     double map_tle_ = 0.0; bool map_novel_ = false; int map_winner_ = -1;
     bool map_baked_now_ = false; bool map_frozen_ = false; std::string map_module_id_;
+    int map_node_count_ = 0, map_baked_count_ = 0; std::vector<int> map_pruned_ids_;
     std::map<std::string, double> map_saved_;          // the map's configured rates (schema defaults if absent; stale_prune as 0/1)
     double wander_bored_s_ = 0.0, wander_turn_deg_ = 90.0;
     double map_tle_long_ = 0.0; int bored_ticks_ = 0; int wander_turns_ = 0;

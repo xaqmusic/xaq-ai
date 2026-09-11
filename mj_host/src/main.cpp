@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -1271,7 +1272,12 @@ struct StopPlan {
     // at least HOLD s and, while the map calls the view novel, up to MAX s; a full round with no
     // novelty ends the stop early (the stop's length becomes the map's, not the schedule's).
     double look_amp = 0.0, look_hold_s = 1.0, look_max_s = 4.0;
-    bool   map_on_stop = false;     // --map-on-stop: the map EPM learns only while the body stands and looks   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
+    bool   map_on_stop = false;     // --map-on-stop: the map EPM learns only while the body stands and looks
+    // --stop-gaze YAW PITCH HOLD MAX QUIET (W3b, the operator: babble, don't scan): at a stop the gaze takes
+    // random steps (sd YAW, PITCH rad; pitch below level only up to PITCH, above it to PITCH/3) inside the
+    // head's range, each held HOLD s and, while the view's winner is unbaked, up to MAX s; QUIET consecutive
+    // known gazes end the stop.  The move is exploration, the dwell is the map's error.  PITCH 0 = yaw only.
+    double gaze_yaw_sd = 0.0, gaze_pitch_sd = 0.0, gaze_hold_s = 0.5, gaze_max_s = 6.0; int gaze_quiet = 6;   // --stop-scan AMP HOLD: the look-around stimulus at a stop (W2) — the
                                                 // head brain's yaw steps through 0, +AMP, 0, −AMP, each held HOLD s,
                                                 // from the hand-back (or the walker's hold) to the stop's end. A
                                                 // scaffold for the channel; §12.2's target is the map's residual (W3).
@@ -1408,7 +1414,19 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     int saccades = 0, novel_holds = 0, stops_bored = 0; long look_ticks = 0; double stop_len_sum = 0.0; int stop_len_n = 0; int stop_started_tick = 0;
     std::set<int> baked_ids;                       // the map's baked winners, from the token's just_baked (a lookup keyed by the EPM's own ids)
     int nodes_walk0 = 0, grown_walk = 0, grown_stop = 0, nodes_mark = 0;   // the gate's read-back: map growth on walks vs at stops
-    auto look_stop = [&]() { looking = false; scan_target = 0.0; if (head) head->set_yaw_override(false, 0.0); };
+    auto look_stop = [&]() { looking = false; scan_target = 0.0; if (head) { head->set_yaw_override(false, 0.0); head->set_pitch_override(false, 0.0); } };
+    const bool gaze_on = stop_on && g_stop.gaze_yaw_sd > 0.0;
+    if (gaze_on && !head) throw std::runtime_error("--stop-gaze needs --head-graph");
+    if (gaze_on && (look_on || scan_on)) throw std::runtime_error("--stop-gaze, --stop-look and --stop-scan are alternatives");
+    if (gaze_on) std::fprintf(stderr, "  gaze babble at stops: steps sd yaw %.2f pitch %.2f rad, hold %.1f s, up to %.1f s while the view is unbaked; %d known gazes in a row end the stop\n",
+                              g_stop.gaze_yaw_sd, g_stop.gaze_pitch_sd, g_stop.gaze_hold_s, g_stop.gaze_max_s, g_stop.gaze_quiet);
+    std::mt19937 gaze_rng(uint32_t(seed * 7919u + 17u));
+    std::normal_distribution<double> gaze_n(0.0, 1.0);
+    const int gaze_hold_ticks = std::max(1, int(g_stop.gaze_hold_s * kBrainHz)), gaze_max_ticks = std::max(1, int(g_stop.gaze_max_s * kBrainHz));
+    double gaze_yaw = 0.0, gaze_pitch = 0.0; int gaze_quiet_run = 0;
+    // the map's bookkeeping at stops (the operator, 2026-09-12: watch the baking): views inserted and baked at
+    // stops, prunes, and whether a pruned id was ever baked (must stay 0 — the map's health sweep spares baked)
+    int ins_stop = 0, bake_stop = 0, ins_walk = 0, bake_walk = 0, pruned_total = 0, pruned_baked = 0, node_mark2 = 0, baked_mark = 0;
     auto end_stop_drive = [&](bool to_walker) {
         // the joint brain stops driving: freeze it, invalidate its pairing, and give the walker a
         // clean start from the pose the body is actually in (as the rescue hand-back does)
@@ -1474,6 +1492,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const int nn = brain.map_nodes();
             if (nn > nodes_mark) { (stop_phase == StopPhase::None ? grown_walk : grown_stop) += nn - nodes_mark; }
             nodes_mark = nn;
+            // from the token, every tick: insertions and bakes by phase, prunes and whether a baked id died
+            const int nc = brain.map_node_count(), bc = brain.map_baked_count();
+            for (int pid : brain.map_pruned_ids()) { ++pruned_total; if (baked_ids.count(pid)) ++pruned_baked; }
+            const int pr = int(brain.map_pruned_ids().size());
+            if (nc + pr > node_mark2) (stop_phase == StopPhase::None ? ins_walk : ins_stop) += nc + pr - node_mark2;
+            if (bc > baked_mark) (stop_phase == StopPhase::None ? bake_walk : bake_stop) += bc - baked_mark;
+            node_mark2 = nc; baked_mark = bc;
         }
         if (stop_on && driver == Driver::Brain) {
             if (stop_phase == StopPhase::None && stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0
@@ -1496,6 +1521,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
+                        if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = 0.0; scan_target = 0.0; }
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
@@ -1525,7 +1551,24 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     scan_target = kSeq[scan_idx] * g_stop.scan_amp;
                     head->set_yaw_override(true, scan_target);
                 }
-                if (looking) {
+                if (looking && gaze_on) {
+                    head->set_yaw_override(true, gaze_yaw);
+                    if (g_stop.gaze_pitch_sd > 0.0) head->set_pitch_override(true, gaze_pitch);
+                    scan_target = gaze_yaw;
+                    ++look_held; ++look_ticks;
+                    if (look_held > 10 && brain.map_winner() >= 0 && !baked_ids.count(brain.map_winner())) look_novel_seen = true;
+                    const bool done_min = look_held >= gaze_hold_ticks;
+                    const bool extend = look_novel_seen && look_held < gaze_max_ticks
+                                        && brain.map_winner() >= 0 && !baked_ids.count(brain.map_winner());   // until it bakes
+                    if (done_min && !extend) {
+                        if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
+                        ++saccades; look_held = 0; look_novel_seen = false;
+                        gaze_yaw   = std::clamp(gaze_yaw + g_stop.gaze_yaw_sd * gaze_n(gaze_rng), -0.7, 0.7);
+                        if (g_stop.gaze_pitch_sd > 0.0)
+                            gaze_pitch = std::clamp(gaze_pitch + g_stop.gaze_pitch_sd * gaze_n(gaze_rng), -g_stop.gaze_pitch_sd * 2.0, g_stop.gaze_pitch_sd * 0.7);
+                        if (gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
+                    }
+                } else if (looking) {
                     static const double kSeq[3] = {0.0, 1.0, -1.0};
                     scan_target = kSeq[look_idx] * g_stop.look_amp;
                     head->set_yaw_override(true, scan_target);
@@ -1551,7 +1594,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (g_stop.map_on_stop) brain.set_map_learning(false);
                     stop_len_sum += (t - stop_started_tick) / kBrainHz; ++stop_len_n;
                     if (stop_phase == StopPhase::Brain) { ++stop_survived; end_stop_drive(true); }
-                    const bool bored = look_on && (t - stop_started_tick) < stop_ticks - 1;
+                    const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1;
                     if (bored) ++stops_bored;
                     stop_phase = StopPhase::None; stop_event = bored ? "stop:bored" : "stop:end";
                     brain.set_learning(true);
@@ -1764,9 +1807,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                              "%d handed back to the walker, %d rescued; the joint brain stood %.1f s\n",
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
-        if (g_stop.map_on_stop || look_on)
+        if (g_stop.map_on_stop || look_on || gaze_on) {
             std::fprintf(stderr, "  map growth: %d nodes on walks, %d at stops; %zu baked ids seen\n", grown_walk, grown_stop, baked_ids.size());
-        if (look_on)
+            std::fprintf(stderr, "  map baking: inserted %d at stops / %d on walks, baked %d at stops / %d on walks, pruned %d (of which baked %d); %d nodes, %d baked at the end\n",
+                         ins_stop, ins_walk, bake_stop, bake_walk, pruned_total, pruned_baked, brain.map_node_count(), brain.map_baked_count());
+        }
+        if (look_on || gaze_on)
             std::fprintf(stderr, "  look: %d saccades, %d holds extended by novelty, %d of %d stops ended by a quiet round; mean stop %.1f s; the head looked for %.1f s\n",
                          saccades, novel_holds, stops_bored, stop_len_n, stop_len_n ? stop_len_sum / stop_len_n : 0.0, look_ticks / kBrainHz);
         if (stander) for (const auto& line : stander->diagnostics()) std::fprintf(stderr, "  stander: %s\n", line.c_str());
@@ -1820,7 +1866,8 @@ void usage() {
         "      pitch, a 16-bin table of the head's yaw rate learned for LEARN_S s, then the opposite angle LEAD early.\n"
         "      --stop-every S --stop-secs S [--stop-from S] --stop-brain CFG [--stop-load CKPT] [--stop-att X]\n"
         "          [--stop-handoff-att Y | --stop-handoff-lean DEG] [--stop-settle-secs S] [--stop-keep-head]\n"
-        "          [--stop-scan AMP HOLD_S | --stop-look AMP HOLD_S MAX_S] [--map-on-stop]:\n"
+        "          [--stop-scan AMP HOLD_S | --stop-look AMP HOLD_S MAX_S | --stop-gaze YAW_SD PITCH_SD HOLD_S MAX_S QUIET]\n"
+        "          [--map-on-stop]:\n"
         "          scheduled stops (W1): the twist zeroed, and once still the legs handed to the joint brain\n"
         "          if its attitude error is below X; the walker takes them back on Y / DEG and at the end.\n"
         "      --head-joints: Track A at the head — the head brain's commands become the head JOINT targets\n"
@@ -1959,6 +2006,10 @@ int main(int argc, char** argv) {
             g_stop.keep_head = true;
         } else if (a == "--stop-freeze-head") {
             g_stop.freeze_head = true;
+        } else if (a == "--stop-gaze") {
+            g_stop.gaze_yaw_sd = std::stod(next("--stop-gaze")); g_stop.gaze_pitch_sd = std::stod(next("--stop-gaze"));
+            g_stop.gaze_hold_s = std::stod(next("--stop-gaze")); g_stop.gaze_max_s = std::stod(next("--stop-gaze"));
+            g_stop.gaze_quiet = std::stoi(next("--stop-gaze"));
         } else if (a == "--stop-look") {
             g_stop.look_amp = std::stod(next("--stop-look")); g_stop.look_hold_s = std::stod(next("--stop-look")); g_stop.look_max_s = std::stod(next("--stop-look"));
         } else if (a == "--map-on-stop") {

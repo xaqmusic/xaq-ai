@@ -77,6 +77,9 @@ public:
     // the head's yaw is the gaze axis; on the walk it follows the trunk as before). The loop does not
     // own yaw (its model is pitch and roll), so nothing it learns pairs with this command.
     void set_yaw_override(bool on, double target) { yaw_override_ = on; yaw_target_ = target; }
+    // W3b: the gaze babble also moves head_pitch (looking down puts the floor's objects in more rows);
+    // the level prior's pitch command is replaced while on, its learning frozen through the stop.
+    void set_pitch_override(bool on, double target) { pitch_override_ = on; pitch_target_ = target; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
     // H2 protocol: identify standing (H1, saved), act walking (loaded here, the prior on).
@@ -96,6 +99,7 @@ private:
     uint64_t babble_ticks_ = 0;                        // from the graph: the yaw command is masked after it
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
     bool yaw_override_ = false; double yaw_target_ = 0.0;
+    bool pitch_override_ = false; double pitch_target_ = 0.0;
     double vor_tau_ = 0.0, vor_lead_ = 0.0, vor_state_ = 0.0;
     double rate_k_ = 0.0, rate_tau_ = 0.0, rate_state_ = 0.0;
     // the phase feed-forward

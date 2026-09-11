@@ -68,7 +68,14 @@ stops shorten as the map bakes (37.4 → 34.5 s, unmoved) and lengthen at a move
 45.7 s at its place, and the duck stops there 15 times where the unmoved arm stops 3): the stop
 length is the map's, at signal strength. The ball (d) was below the sensor's resolution. Preset
 R41 now carries the uncapped stop; "R41 · moved chair (d)" moves the chair at 1100 s.
-**Next: W4 (the command mux) and W5 (leaving a surface, §12.7b).**
+**W3b, the gaze babbles (R42, design doc §17.21, 2026-09-12).** The operator's replacement for
+the round: random gaze steps with error-driven dwell (hold while the view is unbaked, up to 6 s),
+the stop ending after six known gazes. Yaw + small pitch (sd 0.08): 65/66 stands held, stops 31 s,
+92 % end on the map's word, 181 gaze steps a run — `WORKING`. Full pitch (sd 0.2) tips the stand
+(24/66): O36. **The baking read-back**: no baked view is ever pruned, but of ~41 views a stop
+inserts per run ~21 bake and the rest die unbaked before a revisit — the map's `baking_threshold`
+(50 visits) against a 6 s dwell is the next lever. **Next: the baking threshold, then W5 (§12.7b),
+W4.**
 
 **State on 2026-09-11.** The head loop is done and promoted: `★ HEAD` (R34) — the head brain
 owns the two head joints (Track A at the head, `--head-joints`), identified standing, acting
@@ -662,6 +669,34 @@ it touches it** — 94 % of all contact episodes are the dither against somethin
 3. A rear sensor is a hardware ask, not a lever here.
 
 Deferred behind W3 by the operator's call; register O35.
+
+### 12.7c To-do (2026-09-12): standing stability while the head pitches (measured at n = 6 in R42: pitch sd 0.20 → 24/66 stands held; sd 0.08 → 65/66)
+
+**Observed** (the gaze-babble smoke, W3b): with the head brain frozen through the stop and the
+gaze babble moving head pitch (steps sd 0.2 rad, the joint reaching +0.57 rad), the joint brain's
+stand handed the legs back on lean at two of three stops and fell once; yaw babble alone leaves
+the stand untouched. The head is 38 % of the mass; a pitched head is a stance the R19 brain was
+never identified in (it stood with its own head at HOME), and at a stop its head module is frozen
+and its head commands are not applied (`--stop-keep-head`), so the catch cannot use the neck.
+
+**The operator's direction:** work on the stand's stability under head-pitch change; if the
+constraint is pitch *speed*, rate-limit the head babble.
+
+**Levers, in order of cost:**
+
+1. **Rate-limit the gaze** — a slew on the pitch (and yaw) override, rad/s, so the mass moves
+   slowly enough for the stance to follow. Cheap; a flag on `--stop-gaze`. Measure: stands held,
+   hand-offs, rescues at stops, against yaw-only and small-pitch babble.
+2. **Small pitch** — steps sd 0.08 rad (the `gazeYp` arm of R42) as the working range.
+3. **Identify the stance with the head pitched** — the R19 identification schedule with head
+   pitch excursions in the babble (the head module's rows learn what a pitched head does to the
+   trunk), then the hand-back with the joint brain's head commands *applied* (no keep-head) and
+   the gaze babble on top. The learned form; it is what makes the neck part of the catch.
+4. The attitude-error read-back (`satt`) as the hand-off signal in place of the lean threshold,
+   once it discriminates (W1 found it ~0 at the settled stance).
+
+Register O36.
+
 
 ### 12.8 Not done, in addition to §10
 

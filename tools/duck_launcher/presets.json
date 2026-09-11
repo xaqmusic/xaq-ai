@@ -752,5 +752,29 @@
       "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --stop-look 0.6 1.0 4.0 --map-on-stop --move furn_chair0 0.3 0.3 1100",
       "fast_until": 600
     }
+  },
+  {
+    "name": "R42 · W3b the gaze BABBLES: at a stop the head takes random yaw and small pitch steps, dwelling where the map has not baked the view; the stop ends when nothing new has been seen for a while",
+    "series": 42,
+    "hint": "The operator (2026-09-12): the three-bearing round is a schedule; let the head babble while standing and reduce the scene's error. Random gaze steps (sd yaw 0.35, pitch 0.08 rad) each held 0.5 s and, while the view's winner is unbaked, up to 6 s; six known gazes in a row end the stop. The map learns only at stops; the head brain keeps the head, frozen. n=6: 65/66 stands held, stops 31 s, 92 % end on a quiet round, 41 views inserted / 21 baked per run, no baked view ever pruned; full pitch (sd 0.2) tips the stand — register O36.",
+    "state": {
+      "config": "a1v2_r42_w3b_gaze.json",
+      "mode": "level2",
+      "start": "none",
+      "secs": 1500.0,
+      "output": "watch",
+      "push": 0,
+      "save_brain": true,
+      "battery": false,
+      "step_lean": 0,
+      "walk_from": -1,
+      "scene": "scene_playroom.xml",
+      "noise": 0.05,
+      "seed": 6,
+      "seed_random": false,
+      "arena_shift": 0.0,
+      "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 0.5 6 6",
+      "fast_until": 600
+    }
   }
 ]

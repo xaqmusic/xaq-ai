@@ -147,6 +147,10 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
     out["novel_holds"] = int(m.group(2)) if m else None
     out["bored_pct"] = (100.0 * int(m.group(3)) / max(1, int(m.group(4)))) if m else None
     out["stop_len"] = float(m.group(5)) if m else None
+    m = re.search(r"map baking: inserted (\d+) at stops / (\d+) on walks, baked (\d+) at stops / (\d+) on walks, pruned (\d+) \(of which baked (\d+)\); (\d+) nodes, (\d+) baked at the end", err)
+    for k, v in zip(("ins_stop", "ins_walk", "bake_stop", "bake_walk", "pruned", "pruned_baked", "nodes_end", "baked_end"),
+                    (int(x) for x in m.groups()) if m else [None] * 8):
+        out[k] = v
     out["readback"] = " | ".join(l.strip() for l in err.splitlines() if re.match(r"\s+(vx|vy|vyaw)\s+:|place vector:|\s+play \{", l))
     # ---- JSONL over the control phase (and, with --phase-at, the two halves around a perturbation)
     cells, xs, ys, winners = set(), [], [], set()
@@ -328,7 +332,8 @@ def main():
             ("stops", "stops"), ("handbacks", "handbacks"), ("survived", "survived"), ("survive_pct", "survive%"),
             ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc"),
             ("yaw_stop", "yawStop sd"), ("yaw_walk", "yawWalk sd"),
-            ("saccades", "saccades"), ("novel_holds", "novelHolds"), ("bored_pct", "bored%"), ("stop_len", "stop s")]
+            ("saccades", "saccades"), ("novel_holds", "novelHolds"), ("bored_pct", "bored%"), ("stop_len", "stop s"),
+            ("ins_stop", "insStop"), ("bake_stop", "bakeStop"), ("pruned", "pruned"), ("pruned_baked", "prunedBaked"), ("nodes_end", "nodesEnd"), ("baked_end", "bakedEnd")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:
         rows = sorted(results[c], key=lambda r: r["seed"])

@@ -2126,3 +2126,57 @@ their length would fall with revisits the run does not contain). Not promoted; t
 eye is pending (preset R41, seed 6). The ball (d) is inconclusive (a stimulus below the sensor's resolution); the chair (d) is the
 evidence. To a finding: n ≥ 20 varied rooms and the uncapped stop as the default form. Next: W4
 (the command mux) and W5 (leaving a surface, §12.7b).
+
+### 17.21 W3b — the gaze babbles: random steps, error-driven dwell, and the map's baking watched (R42, 2026-09-12)
+
+**The operator's direction.** The three-bearing round of §17.20 is a schedule wearing a saccade's
+clothes; let the head babble while standing so the error of the scene it takes in is what it
+reduces — it will look more alive and the place gets more detail. And watch the baking: an EPM
+that lets nodes decay suits locomotion and escape, not learning a place.
+
+**Built.** `--stop-gaze YAW_SD PITCH_SD HOLD MAX QUIET`: at a stop the gaze takes random steps
+(a normal step per move, yaw clamped to ±0.7 rad, pitch to [−2·sd, +0.7·sd]), each held HOLD s and,
+while the view's winner is not a baked node, up to MAX s — long enough to bake it in one dwell
+(50 processed ticks at `process_every_n_ticks 5` = 5 s) — and QUIET known gazes in a row end the
+stop. The move is exploration, the dwell is the map's error. A pitch override joins the yaw
+override in the head adapter. **The baking read-back**, from the token every tick: views inserted
+and baked by phase, prunes, and whether a pruned id was ever baked. In the GNG every prune path —
+isolation, stale prune, the health sweep with `health_death_spares_baked` (on in the map config) —
+spares baked nodes. W1 path byte-identical.
+
+**Measured.** R41's graph, the uncapped stops (every 80 s, up to 60 s), map only at stops, head
+brain frozen through the stop, n = 6, 1500 s:
+
+| n = 6 | stands held | handed off | rescued at stops | stop s | quiet-round ends | saccades | inserted at stops | baked at stops | pruned (baked) | nodes / baked at the end | walls/min | cells |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| the round (§17.20) | 66 / 66 | 0 | 0 | 36.5 | 71 % | 143 | 42 | 21 | 18 (0) | 31 / 28.5 | 23 ± 19 | 97 |
+| gaze, yaw only (sd 0.35) | 66 / 66 | 0 | 0 | 29.5 | 91 % | 168 | 45 | 20 | 34 (0) | 30 / 26.5 | 47 ± 43 | 96 |
+| gaze, yaw + pitch sd 0.20 | **24 / 66** | 42 | 34 | 26.6 | 92 % | 115 | 37 | 12 | 25 (0) | 26 / 21 | 16 ± 17 | 104 |
+| **gaze, yaw + pitch sd 0.08 (R42)** | **65 / 66** | 1 | 0 | 31.3 | 92 % | 181 | 41 | 21 | 18 (0) | 33 / 29 | 14 ± 12 | 111 |
+
+- **The babble stands, at a small pitch.** Yaw babble alone is as harmless as the round (66 of 66);
+  pitch steps of sd 0.20 rad tip the stand at 42 of 66 hand-backs and fall 34 times — the smoke's
+  two-of-three, at scale: a pitched head is a stance the R19 brain was never identified in, and
+  with its head module frozen the neck cannot join the catch (register O36, the operator's to-do:
+  work on the stand under pitch change; rate-limit the babble if pitch *speed* is the constraint).
+  At sd 0.08 the stand holds 65 of 66 with one hand-off and no fall, and it is the best arm on
+  cells (111) and wall contact (14 ± 12, 4 of 6 seeds under 17).
+- **Wall contact is seed noise across the arms** (two wall-riding seeds in the yaw-only arm at 92
+  and 113/min, different seeds elsewhere): the walk between stops is W5's problem, and the gaze
+  moves it only by moving where the map's nodes, hence the play loop's targets, fall.
+- **The baking, watched.** No baked view was ever pruned in any arm (`prunedBaked` 0 of 18–34
+  prunes per run): a baked view is permanent here, as the map config's `health_death_spares_baked`
+  intends. What decays is the *unbaked*: of 41–45 views inserted at stops per run, 20–21 bake
+  and 18–34 die before a revisit. The dwell can bake a view in 6 s only if one node stays the
+  winner through the hold; two views a gaze step apart share the hold and neither reaches 50
+  visits. So the place is learned by half. The levers: the map's `baking_threshold` (hot-mutable,
+  50 by default — 20 would bake in a 2 s dwell), or a dwell that counts the winner's visits
+  rather than seconds. Recorded, not built.
+- **The stop is the map's.** 92 % of stops end on a quiet round (71 % for the round), mean 31 s,
+  181 gaze steps a run — the head is never still and never on a schedule, which is what was asked.
+
+**Verdict.** W3b `WORKING` at n = 6 in the small-pitch form (R42): the babble replaces the round
+with no cost to the stand and a fuller look, the stop ends on the map's own word. Full pitch is
+`REGRESSION` on the stand (O36). The baking read-back is the instrument the operator asked for and
+its first reading is the next lever: half the views a stop inserts die unbaked. Not promoted
+(operator's eye pending, preset R42). Next: the baking threshold on the map, then W5.

@@ -32,7 +32,9 @@ W2 measured too (R40, §17.19): the saccade channel is live at stops and silent 
 stands held under a moving head, the head brain frozen through the stop. W3 measured (R41, §17.20): the map learns only at stops, a view is pose + gaze, the look holds unbaked
 views — the cleanest walk measured (5.4 walls/min); uncapped, the stop length is the map's: shorter as it
 bakes, longer at a moved chair (the (d), a signal). The operator's to-do on
-leaving a surface is §12.7b / O35. **Next: W4 (the command mux), W5 (leaving a surface).** Register O31–O35.
+leaving a surface is §12.7b / O35. W3b (R42, §17.21): the gaze babbles at the stop with error-driven dwell, 65/66 stands at a small pitch, the
+stop ending on the map's word; full pitch tips the stand (O36); half the inserted views die unbaked (O37).
+**Next: the map's baking threshold (O37), then W5 (leaving a surface), W4.** Register O31–O37.
 
 **State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
 path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);
