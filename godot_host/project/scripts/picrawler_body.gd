@@ -2389,6 +2389,29 @@ func _sg_pattern_offsets(name: String) -> Array:
 #
 # Opt-in (default off) so existing baselines reproduce byte-identically.
 @export var publish_tilt: bool = false
+# ---- SIM-HONESTY SUBSTITUTES (port doc Phase 4, step (c)) ----------------------------
+# The deployed config has never run on its legal inputs: five of the twelve topics it
+# consumes are oracle-fed (ledger ★★★ 2026-08-28).  These three switches replace the
+# oracle publishers with the honest ones the file ALREADY computes, so the A/B measures
+# what the robot can actually know — before any hardware result is attributed to the gait.
+#
+# ⚠ ALL DEFAULT FALSE and each is byte-identical off.  ⚠ ONE LEVER AT A TIME: they are
+# three separate substitutions with three separate consumers, and they are measured
+# separately before any combined arm (CLAUDE.md §3 rule 1).
+#
+# ⚠ WHAT THE CONSUMER MAP ACTUALLY SAYS, checked in the config rather than assumed —
+# two of the ledger's stated consumers do not exist in `native_measured`:
+#   upright -> GainEvolver.upright_topic only.  `tilt` is NOT in the config at all, so
+#             the tilt half of that switch is INERT here (kept for configs that read it).
+#   joints  -> JointSensorimotorBridge + 2x EPM (body_pose, body_pose_t).
+#   imu     -> MotorEPMv2 ONLY.  GainEvolver subscribes but `handle_imu` discards every
+#             value while `travel_topic` is set, and the config sets it to stride_v — so
+#             GainEvolver's flow term is ALREADY legal and this lever cannot move it.
+#             Of imu's four values MotorEPMv2 reads only [2] (fwd_v) and [3] (yaw rate);
+#             [0]/[1] (sin/cos yaw) have no consumer in this config.
+@export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
+@export var honest_joints:  bool = false   # joints from the servo forward model
+@export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
 
 # Ragdoll mode: when true, all servo torques are disabled.  Brain still
 # ticks (proprio published, predictions made), so the perception/learning
@@ -3232,6 +3255,15 @@ func _ready() -> void:
 
 	print("PicrawlerBody: built — chassis at y=%.3f, leg_strength=%.2f, reset_mode=%s" % [
 		STANDING_CHASSIS_Y, leg_strength, reset_mode])
+	# ⚠ RECEIPT FOR THE SIM-HONESTY ARMS (port doc step (c)).  Printed unconditionally, and
+	# naming the OFF state too, because the failure this guards against is an arm that
+	# silently did not load — CLAUDE.md §3.2's "did the arm you think you ran actually
+	# load?", which has produced a false verdict here before.  A run whose log does not
+	# say `honest[...]` is not evidence about anything.
+	print("PicrawlerBody: honest[upright=%s joints=%s imu=%s]" % [
+		"ON" if honest_upright else "off",
+		"ON" if honest_joints else "off",
+		"ON" if honest_imu else "off"])
 	print("  _chassis_rest_xform.origin = %v" % _chassis_rest_xform.origin)
 	for i in range(4):
 		print("  leg %d %s: coxa=%v upper=%v lower=%v" % [
@@ -3310,7 +3342,10 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_PYRAMID_COUNT",
 			  "OGMA_PICRAWLER_JOINT_BACKEND",
 			  "OGMA_PICRAWLER_JOINT_DAMPING",
-			  "OGMA_PICRAWLER_MOTOR_FREEPLAY"]:
+			  "OGMA_PICRAWLER_MOTOR_FREEPLAY",
+			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
+			  "OGMA_PICRAWLER_HONEST_JOINTS",
+			  "OGMA_PICRAWLER_HONEST_IMU"]:
 		var v: String = OS.get_environment(k)
 		if v == "": continue
 		match k:
@@ -3331,6 +3366,9 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_ANTIROT_SCALE":     antirot_scale     = max(0.001, v.to_float())
 			"OGMA_PICRAWLER_ANTIROT_GAIN":      antirot_gain      = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_TILT":      publish_tilt      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
+			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
+			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
 			"OGMA_PICRAWLER_PUBLISH_VISION":    publish_vision    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STABILIZED": vision_stabilized = (v != "0" and v != "")
 			"OGMA_PICRAWLER_VISION_STEER":      vision_steer      = (v != "0" and v != "")
@@ -6258,10 +6296,36 @@ func _step_one() -> void:
 			_ui_notify("[OUTER WALL] auto-reset at r=%.2f m" % chassis_r)
 
 	# ---- 2. Publish proprio ----
+	# ---- LEVER c3 · honest_imu --------------------------------------------------------
+	# `imu` is entirely god's-eye despite its name: world attitude and world velocity.
+	# The honest vector is built from three channels this file already publishes, so
+	# nothing new is invented here — only re-pointed:
+	#   [0,1] sin/cos yaw  -> sin/cos `_ego_heading`, dead-reckoned from the MODELLED
+	#                         body-frame gyro.  It drifts, exactly as it will on hardware.
+	#   [2]   fwd_v        -> `_stridev_est.y`, the stance-FK ⊕ IMU forward estimate.
+	#                         Same clamp and scale, so the token's shape is unchanged.
+	#   [3]   ang_v        -> yaw rate about the BODY's own up.  imu[3] carries the WORLD
+	#                         vertical component, and the two diverge exactly when the
+	#                         body tilts, which is when it matters.
+	#
+	# ⚠ ONE TICK OF LAG ON [2], AND IT IS DELIBERATE.  `_stridev_est` is updated later in
+	# this same tick (the stride block), so this reads the previous tick's estimate — 20 ms
+	# at 50 Hz.  Reordering to remove it would be less hardware-honest, not more: a real
+	# estimator's output is always at least one cycle behind the motion it describes.
+	#
+	# ⚠ FK READS A STABLE ~75 % OF TRUE SPEED and is NOT rescaled to match (prohibition 5).
+	# So this lever changes the channel's GAIN as well as its noise, and a consumer that
+	# had adapted to the oracle's scale must re-adapt.  That is part of what is measured.
 	var imu := PackedFloat64Array()
-	imu.append(sin(yaw)); imu.append(cos(yaw))
-	imu.append(clamp(fwd_v / 1.0, -1.0, 1.0))
-	imu.append(clamp(ang_v / PI,  -1.0, 1.0))
+	if honest_imu:
+		var _gyb: Basis = chassis_xform.basis
+		imu.append(sin(_ego_heading)); imu.append(cos(_ego_heading))
+		imu.append(clamp(_stridev_est.y / 1.0, -1.0, 1.0))
+		imu.append(clamp(_chassis.angular_velocity.dot(_gyb.y) / PI, -1.0, 1.0))
+	else:
+		imu.append(sin(yaw)); imu.append(cos(yaw))
+		imu.append(clamp(fwd_v / 1.0, -1.0, 1.0))
+		imu.append(clamp(ang_v / PI,  -1.0, 1.0))
 	# Per-metre waypoint (see the state block).  Uses the same path-length accumulation the
 	# red trail does, so the log and the picture cannot disagree.
 	var _wp_now := Vector2(_chassis.global_transform.origin.x, _chassis.global_transform.origin.z)
@@ -6547,11 +6611,55 @@ func _step_one() -> void:
 			vcp.append(_vision_compass.y)
 			brain.publish_proprio(vcp, "vision_compass")
 
+	# ---- SERVO FORWARD MODEL — advanced ONCE per tick, before its first consumer ------
+	# Hoisted here from the stride block (port doc step (c)) because `joints` needs it too
+	# and the stride block runs later.  ⚠ BYTE-IDENTICAL, and not by argument: nothing
+	# writes `_eff_target_*` between this point and the stride block's old advance site —
+	# the servo command stage that writes them runs LATER in the same tick (~:8217) — so
+	# the lag holds the same value at the stride read either way.  Both original guards
+	# are carried verbatim; dropping either would advance the lag on early ticks where it
+	# previously did not.
+	if _chassis_rest_xform != Transform3D():
+		if _servo_lag == null:
+			_servo_lag = ClassDB.instantiate("ServoLag")
+		var eff_t := PackedFloat64Array()
+		eff_t.resize(12)
+		for k in range(4):
+			eff_t[k * 3]     = _eff_target_hip1[k]
+			eff_t[k * 3 + 1] = _eff_target_hip2[k]
+			eff_t[k * 3 + 2] = _eff_target_knee[k]
+		# ⚠ TWO GUARDS, KEPT APART: the original seeds whenever the block runs but only
+		# advances once the toe offsets exist.  Those probably coincide, and "probably"
+		# is not something a byte-identity change should rest on.
+		if not _servo_lag.seeded():
+			_servo_lag.seed(eff_t)
+		if _toe_off_c.size() == 4:
+			_servo_lag.advance(eff_t, STRIDO_LP_ALPHA)
+
+	# ---- LEVER c2 · honest_joints -----------------------------------------------------
+	# `joints` publishes ACHIEVED hinge angles.  Hobby servos report nothing at all, so on
+	# hardware this channel can only ever be the servo forward model of the command — the
+	# same first-order lag the stride estimator runs on, and the same one measured to match
+	# the achieved angle at r 0.93-0.99 per joint.  The normalization is unchanged, so the
+	# token's shape and scale are identical and every consumer reads it unaltered.
+	#
+	# ⚠ This is the substitution with the WIDEST blast radius of the three: the Bridge's
+	# proprio input and BOTH body-pose EPMs read it, so it changes what the self-model is
+	# a model OF.  §5.6 is the precedent and its direction was surprising — the
+	# hardware-poorer `feet_y_gravity_cmd` beat the achieved-pose twin, because load
+	# deflection is noise from the gate's point of view.  Whether that repeats HERE is the
+	# question; a self-model may want the deflection that a gate did not.
 	var joints := PackedFloat64Array()
-	for i in range(4): joints.append(clamp(hip1_angles[i] / HIP1_LIMIT,    -1.0, 1.0))
-	for i in range(4): joints.append(clamp(hip2_angles[i] / HIP2_LIMIT,    -1.0, 1.0))
-	for i in range(4): joints.append(clamp((knee_angles[i] - KNEE_REST) / 1.0,
-											-1.0, 1.0))
+	if honest_joints and _servo_lag != null and _servo_lag.seeded():
+		for i in range(4): joints.append(clamp(_servo_lag.get(i * 3) / HIP1_LIMIT, -1.0, 1.0))
+		for i in range(4): joints.append(clamp(_servo_lag.get(i * 3 + 1) / HIP2_LIMIT, -1.0, 1.0))
+		for i in range(4): joints.append(clamp((_servo_lag.get(i * 3 + 2) - KNEE_REST) / 1.0,
+			-1.0, 1.0))
+	else:
+		for i in range(4): joints.append(clamp(hip1_angles[i] / HIP1_LIMIT,    -1.0, 1.0))
+		for i in range(4): joints.append(clamp(hip2_angles[i] / HIP2_LIMIT,    -1.0, 1.0))
+		for i in range(4): joints.append(clamp((knee_angles[i] - KNEE_REST) / 1.0,
+												-1.0, 1.0))
 	# --- 2026-08-02 · IMPORT I4: COLORED PROPRIOCEPTIVE NOISE --------------------------
 	# Every Playful Machine legged experiment wires its controller through
 	# ColorUniformNoise(0.1) — ~10% of range, TEMPORALLY CORRELATED — on every sensor,
@@ -6689,28 +6797,6 @@ func _step_one() -> void:
 		var toe_cmd_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		var toe_cmdlp_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		var toe_meas_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
-		# Servo forward model — ogma::body::ServoForwardModel.  Seeds from the current
-		# effective target on first use (a lag starting at zero would spend its first
-		# ~100 ms reporting a leg folded flat, and those ticks feed a velocity).
-		if _servo_lag == null:
-			_servo_lag = ClassDB.instantiate("ServoLag")
-		var eff_targets := PackedFloat64Array()
-		eff_targets.resize(12)
-		for k in range(4):
-			eff_targets[k * 3]     = _eff_target_hip1[k]
-			eff_targets[k * 3 + 1] = _eff_target_hip2[k]
-			eff_targets[k * 3 + 2] = _eff_target_knee[k]
-		# ⚠ TWO GUARDS, KEPT APART.  The original seeds whenever this block runs but
-		# only advances once the toe offsets exist.  Those probably coincide, and
-		# "probably" is not something a byte-identity port should rest on — so the seed
-		# stays unguarded and the advance keeps the _toe_off_c guard it already had.
-		if not _servo_lag.seeded():
-			_servo_lag.seed(eff_targets)
-		if _toe_off_c.size() == 4:
-			# Once per tick, not once per leg.  (The original advanced leg i's three
-			# joints inside leg i's iteration — the same thing only because each leg
-			# touches only its own three indices.)
-			_servo_lag.advance(eff_targets, STRIDO_LP_ALPHA)
 		for i in range(4):
 			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
 			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
@@ -6948,8 +7034,22 @@ func _step_one() -> void:
 	# perfectly upright, 0 = on its side, -1 = inverted.  A real IMU (accelerometer
 	# gravity vector) gives this — compliant, always on.  Used to gate keyframe
 	# baking on "am I in a valid posture" (don't learn from a flipped body).
+	# ---- LEVER c1 · honest_upright ----------------------------------------------------
+	# ⚠ THIS IS A FIDELITY SUBSTITUTION, NOT A LEGALITY ONE, and the distinction matters
+	# for how the result is read.  The ledger already rates `upright` LEGAL — basis.y.y is
+	# "literally what an accelerometer reads" — so nothing here is an oracle being removed.
+	# What changes is that the sim publishes the EXACT scalar while a real accelerometer
+	# measures gravity PLUS body linear acceleration, so during a bouncy gait "down"
+	# wobbles in step with the bounce (the §5.4 attitude gap).  `_up_est_body.y` is the
+	# same scalar as the complementary filter actually estimates it, contamination and all.
+	#
+	# The two are the same quantity: basis.y.y = body-up · world-up, and _up_est_body is
+	# world-up expressed in the body frame, so its .y is the same dot product.
 	var upright_arr := PackedFloat64Array()
-	upright_arr.append(_chassis.global_transform.basis.y.y)
+	if honest_upright and _up_est_body.length() > 0.5:
+		upright_arr.append(_up_est_body.y)
+	else:
+		upright_arr.append(_chassis.global_transform.basis.y.y)
 	brain.publish_proprio(upright_arr, "upright")
 
 	# 2026-06-03 — R1a per-leg foot-contact bucket signals (PremotorAI /
@@ -7217,6 +7317,15 @@ func _step_one() -> void:
 		var euler: Vector3 = basis.get_euler()    # (pitch, yaw, roll) per Godot XYZ
 		var pitch: float = euler.x
 		var roll:  float = euler.z
+		# honest_upright covers `tilt` too — same exact-basis→fused-estimate substitution.
+		# ⚠ INERT IN `native_measured`: that config names no tilt consumer, and
+		# publish_tilt defaults FALSE headless besides.  Kept so the switch means one
+		# thing ("attitude comes from the filter") rather than two.
+		if honest_upright and _up_est_body.length() > 0.5:
+			# Small-angle-free recovery of pitch/roll from the gravity estimate: the body
+			# frame's own tilt about X and Z is what the accelerometer resolves.
+			pitch = atan2(-_up_est_body.z, _up_est_body.y)
+			roll  = atan2(_up_est_body.x, _up_est_body.y)
 		var tilt_arr := PackedFloat64Array()
 		tilt_arr.append(sin(pitch))
 		tilt_arr.append(cos(pitch))
