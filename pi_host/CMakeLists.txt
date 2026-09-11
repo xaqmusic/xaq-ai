@@ -22,7 +22,13 @@ add_library(ogma_hw
   src/Icm20948.cpp
   src/ResourceMonitor.cpp
 )
-target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# ⚠ cpp_core/include is added as a HEADER-ONLY include path, NOT a link dependency.
+# ogma::body::ImuAttitude and GodotFloat.hpp pull in nothing (no Eigen, no godot-cpp, no
+# ogma_core objects), so the rationale at the top of this file still holds: ogma_hw does
+# not link the brain and still builds in seconds.  The alternative was a second copy of
+# the attitude filter on the robot, which is how sim and host drift apart.
+target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/../cpp_core/include)
 target_compile_options(ogma_hw PRIVATE -Wall -Wextra)
 
 add_executable(hat_tool tools/hat_tool.cpp)

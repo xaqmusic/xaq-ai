@@ -41,21 +41,6 @@ inline float vdot(const std::array<float,3>& a, const std::array<float,3>& b) {
     return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
 }
 
-// Rotate v about a unit axis k by angle rad (Rodrigues).  Used for the EXACT gyro
-// propagation below -- the first-order `v -= w x v dt` form leaves O((w dt)^2) error per
-// step, which integrates to radians over a run.
-std::array<float,3> rotate(const std::array<float,3>& v,
-                           const std::array<float,3>& k, float rad) {
-    const float c = std::cos(rad), s = std::sin(rad);
-    const std::array<float,3> kxv = {k[1]*v[2] - k[2]*v[1],
-                                     k[2]*v[0] - k[0]*v[2],
-                                     k[0]*v[1] - k[1]*v[0]};
-    const float kd = vdot(k, v) * (1.0f - c);
-    return {v[0]*c + kxv[0]*s + k[0]*kd,
-            v[1]*c + kxv[1]*s + k[1]*kd,
-            v[2]*c + kxv[2]*s + k[2]*kd};
-}
-
 // The measured level reference (chip frame) rotated onto chip +Z, i.e. the correction
 // that makes a level body read (0,0,1).
 //
@@ -76,7 +61,13 @@ std::array<float,3> level_correct(const std::array<float,3>& a,
     const float s = std::sqrt(vdot(axis, axis));
     if (s < 1e-7f) return a;                    // already aligned (or antiparallel)
     axis[0] /= s; axis[1] /= s; axis[2] /= s;
-    return rotate(a, axis, std::asin(s < 1.0f ? s : 1.0f));
+    // Same rotation primitive the filter uses -- Godot's build-a-matrix-then-xform, not
+    // Rodrigues.  Keeping one rotation in the process is the point of the consolidation.
+    const ogma::body::Vec3f r = ogma::body::basis_axis_angle_xform(
+        ogma::body::Vec3f(axis[0], axis[1], axis[2]),
+        std::asin(s < 1.0f ? s : 1.0f),
+        ogma::body::Vec3f(a[0], a[1], a[2]));
+    return {r.x, r.y, r.z};
 }
 
 // Chip frame -> sim body frame (+X left, +Y up, +Z forward).  MEASURED, BOM sec 4.1.
@@ -161,7 +152,7 @@ bool Icm20948::begin(std::string* err) {
         ok_ = false; return false;
     }
     ok_ = true; have_last_ = false; bias_n_ = 0;
-    bias_ = {0, 0, 0}; up_ = {0, 1, 0};
+    bias_ = {0, 0, 0}; att_.reset();
     return true;
 }
 
@@ -227,41 +218,26 @@ bool Icm20948::sample(ImuSample& out) {
     out.accel_body = to_body(alvl);
     out.gyro_body  = to_body(gcor);
 
-    std::array<float,3> up_acc = out.accel_body;
-    vnorm(up_acc);
-    if (amag > 1e-4f) out.up_accel = up_acc;
-
-    // ---- complementary filter (mirrors picrawler_body.gd:_imu_substep) --------------
-    if (std::sqrt(vdot(up_, up_)) < 0.5f) up_ = up_acc;
-    // Gyro propagation: a WORLD-fixed direction seen from the body rotates by -w dt.
-    const float wx = out.gyro_body[0] * float(M_PI) / 180.0f;
-    const float wy = out.gyro_body[1] * float(M_PI) / 180.0f;
-    const float wz = out.gyro_body[2] * float(M_PI) / 180.0f;
-    const float wmag = std::sqrt(wx*wx + wy*wy + wz*wz);
-    if (wmag > 1e-6f) {
-        const std::array<float,3> k = {wx / wmag, wy / wmag, wz / wmag};
-        up_ = rotate(up_, k, -wmag * dt);
-        vnorm(up_);
-    }
-    // Adaptive-gain correction: trust the accelerometer in proportion to how close |a|
-    // is to g.  A hard accept/reject gate starved this filter in sim.
-    const float acc_dev = std::fabs(amag - 1.0f);
-    float trust = cfg_.acc_trust * (1.0f - acc_dev / cfg_.acc_gate_frac);
-    if (trust < 0.0f) trust = 0.0f;
-    if (trust > cfg_.acc_trust) trust = cfg_.acc_trust;
-    if (trust > 0.0f && amag > 1e-4f) {
-        for (int i = 0; i < 3; ++i) up_[i] = up_[i] * (1.0f - trust) + up_acc[i] * trust;
-        vnorm(up_);
-    }
-    out.trust    = trust;
-    out.up_fused = up_;
-
+    // ---- complementary filter: ogma::body::ImuAttitude ------------------------------
+    // The SAME filter the sim runs, in the same parameterisation -- accel in m/s^2 with
+    // gravity 9.81 -- so the robot and the simulator cannot diverge by implementation.
+    // Everything it does is unchanged in behaviour: the seed when the estimate is empty,
+    // exact-rotation gyro propagation, and the accel trust weighted by how close |a| is
+    // to g (a hard accept/reject gate starved it in sim).
+    constexpr float G = 9.81f;
+    constexpr float DEG2RAD = float(M_PI) / 180.0f;
+    att_.step(ogma::body::Vec3f(out.accel_body[0] * G, out.accel_body[1] * G, out.accel_body[2] * G),
+              ogma::body::Vec3f(out.gyro_body[0] * DEG2RAD, out.gyro_body[1] * DEG2RAD,
+                                out.gyro_body[2] * DEG2RAD),
+              double(dt));
+    const ogma::body::Vec3f uf = att_.up_fused();
+    const ogma::body::Vec3f ua = att_.up_accel();
+    out.up_fused = {uf.x, uf.y, uf.z};
+    out.up_accel = {ua.x, ua.y, ua.z};
+    out.trust    = float(att_.trust());
     // THE health signal: with no ground truth on hardware, accel-vs-fused disagreement is
     // what says whether the filter is working.
-    float d = vdot(up_, up_acc);
-    if (d > 1.0f) d = 1.0f;
-    if (d < -1.0f) d = -1.0f;
-    out.disagree_deg = (amag > 1e-4f) ? std::acos(d) * 180.0f / float(M_PI) : 0.0f;
+    out.disagree_deg = att_.disagree_deg();
 
     out.ok = true;
     return true;

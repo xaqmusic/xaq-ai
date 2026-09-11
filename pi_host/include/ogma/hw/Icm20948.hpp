@@ -50,14 +50,18 @@
 // far more than a reset does, and a stored constant would be wrong by more than the
 // signal within one warm-up.
 //
-// WHERE THIS CODE BELONGS LATER.  The complementary filter is duplicated from the sim's
-// _imu_substep (picrawler_body.gd:5801) and is bit-comparable to it by design.  The port
-// doc's Order step (a) puts the shared version at cpp_core/include/ogma/body/
-// ImuAttitude.hpp, used by BOTH sim and host.  It lives here for now because ogma_hw is
-// deliberately independent of ogma_core (pi_host/CMakeLists.txt) so the driver builds in
-// seconds.  When step (a) happens, move it -- do not fork it.
+// THE FILTER IS NOT DUPLICATED HERE.  It was, briefly -- a private Rodrigues copy of the
+// sim's _imu_substep -- and that fork is exactly how a sim and its host drift apart.  Port
+// step (a) landed the shared version at cpp_core/include/ogma/body/ImuAttitude.hpp, which
+// is bit-verified against the GDScript original, and this driver now calls it.  The robot
+// and the simulator run the SAME attitude filter, in the same parameterisation (accel in
+// m/s^2, gravity 9.81), which is the whole point of having ported it.
+//
+// ⚠ That header is included, not linked: it is header-only and dependency-free, so
+// ogma_hw still does not depend on ogma_core (see pi_host/CMakeLists.txt).
 
 #include <array>
+#include "ogma/body/ImuAttitude.hpp"
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -145,7 +149,7 @@ private:
     int      errors_ = 0;
     int8_t   cur_bank_ = -1;
 
-    std::array<float, 3> up_    = {0, 1, 0};
+    ogma::body::ImuAttitude att_;          // the shared filter -- owns the up estimate
     std::array<float, 3> bias_  = {0, 0, 0};
     int      bias_n_ = 0;
     std::chrono::steady_clock::time_point last_{};
