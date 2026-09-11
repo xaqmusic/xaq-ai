@@ -1160,10 +1160,35 @@ with the robot the way the servo map does.
 - **The 20 g floor means light initial contact reads zero.** For stance detection that is a free
   noise floor. Touchdown *timing* was already assigned to the accelerometer, not the FSR
   (ledger 2026-08-24 ★3), so this costs nothing.
-- **Contact sensing is not a prerequisite for stride odometry.** The median across four legs lets
-  swing legs fall out as outliers with no contact input at all (ledger 2026-08-24 ★2). FSRs
-  sharpen that; there they are an optimization. They are **required** for the `foot_load` weight
-  unit and the G2 per-leg minima guard.
+- ⚠ **CORRECTED 2026-09-11 — contact sensing IS a prerequisite for stride odometry.** This
+  bullet previously read *"not a prerequisite … FSRs sharpen that; there they are an
+  optimization"*, on the strength of a median-across-four-legs consensus that would let swing
+  legs fall out as outliers with no contact input (ledger 2026-08-24 ★2). **That result was
+  re-scored and refuted in `★★★ 2026-08-25 — GATE A` ★3**, two days before this spec was
+  written, and the spec cited the superseded version:
+
+  | estimator | r_w50 |
+  |---|---|
+  | median-of-legs consensus, no contact input | **0.29–0.36** (slope 0.14–0.19) |
+  | `foot_load ≥ ~0.2` stance gate | **0.74–0.79** |
+
+  The mechanism is in the same entry: *"these gaits simply do not keep 3+ feet loaded (stance
+  count mode 3 with heavy 2s), so the median regularly includes swing legs."* Gate A ★2 also
+  establishes that the stance rule **is** `foot_load ≥ ~0.2` — a measured plateau, not a
+  chosen constant. The ledger's own re-use context for the median names it *"the fallback
+  estimator **if load sensing dies** on hardware"*: a degradation path, not a substitute.
+
+  **So the FSRs are load-bearing for the deployed gait**, not an optimization. The chain is
+  `FSR → foot_load → stance gate → stride_v → the legal `imu` vector → MotorEPMv2 +
+  GainEvolver`, and the deployed stack config wires `foot_contact_topic`, `foot_load_topic`
+  and `travel_topic: reality.proprio.stride_v` together. They remain **required** for the
+  `foot_load` weight unit and the G2 per-leg minima guard as well.
+
+  ⚠ **This does not make FSRs the next thing to build.** They are the most invasive change to
+  the robot and they sit at the END of a chain whose earlier links are unbuilt — there is no
+  `cpp_core/include/ogma/body/`, no `LegKinematics`/`ImuAttitude`/`StrideOdometry`, no host
+  IMU driver, and by SPEC §1.1 no brain→servo path at all. Fit them when there is a loop for
+  them to feed; see the **Order** at the end of Phase 4, whose steps (a)–(c) need no hardware.
 
 ### Consuming it — one recorded negative
 
