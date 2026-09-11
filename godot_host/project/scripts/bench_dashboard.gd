@@ -313,6 +313,10 @@ func _build_ui() -> void:
 	# records the state, _apply_min is what moves the panel's anchors and flips the arrow.
 	# Setting one without the other ships a panel that claims to be folded and is not.
 	_apply_min(_right_panel, _cal_content, _cal_min_btn, _cal_min)
+	# Draw the scope LAST so it survives the calibration panel being re-opened: siblings
+	# paint in tree order and the scope is created before the panels, so it would
+	# otherwise be buried the moment the operator un-folds calibration.
+	_ui.move_child(_imu_scope, -1)
 
 
 func _build_row(ch: int) -> Control:
