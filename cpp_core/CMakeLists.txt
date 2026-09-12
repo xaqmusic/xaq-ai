@@ -157,6 +157,20 @@ endif()
 # until its modules are absorbed.
 # ---------------------------------------------------------------------------
 
+# ── ⚠ FLOAT PARITY FOR ogma::body (port doc Phase 4, measured 2026-09-12) ──────────
+# The shared body helpers in cpp_core/include/ogma/body/ exist so the sim and the robot
+# produce the SAME NUMBERS, not merely the same physics.  On aarch64 GCC fuses `a*b+c`
+# into FMA by default; baseline x86-64 has no FMA and cannot, so the two architectures
+# silently disagree.  MEASURED on the robot against the x86-generated oracles:
+#   default          : leg_kinematics 400/400 MISMATCH (worst 3.1e-07)
+#                      imu_attitude   796/800 MISMATCH (worst 6.3e-07)
+#                      stride_odometry 900/900 MISMATCH
+#   -ffp-contract=off: ALL THREE bit-exact, worst |delta| 0.000e+00
+# It is a NO-OP on x86 (verified: GCC emits no FMA there at baseline), so this does not
+# move the sim's bits and the byte-identity gates still hold.  Contraction — not libm —
+# was the whole difference for these helpers.
+set(OGMA_FP_PARITY_FLAGS -ffp-contract=off)
+
 add_library(ogma_core
     src/ogma/Rng.cpp
     src/ogma/InProcessBus.cpp
@@ -239,6 +253,7 @@ add_library(ogma_core
     src/ogma/modules/GaitSelector.cpp
     src/ogma/golden/Replay.cpp
 )
+target_compile_options(ogma_core PRIVATE ${OGMA_FP_PARITY_FLAGS})
 
 target_include_directories(ogma_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

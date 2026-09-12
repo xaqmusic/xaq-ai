@@ -21,6 +21,22 @@
 //   * Dots sum strictly left to right, and Transform3D::operator*= computes the new
 //     origin with the OLD basis before multiplying the basis.  Order is semantics.
 //
+// ⚠ BUILD WITH -ffp-contract=off, OR THE ROBOT AND THE SIM DISAGREE.  On aarch64 GCC
+// fuses `a*b+c` into a single FMA by default; baseline x86-64 has no FMA and cannot, so
+// the same source produces different floats on the two machines.  Measured 2026-09-12,
+// the Pi against x86-generated oracles: by default ALL THREE helpers mismatch
+// (leg_kinematics 400/400, worst 3.1e-07; imu_attitude 796/800, worst 6.3e-07;
+// stride_odometry 900/900).  With -ffp-contract=off every one is bit-exact, worst
+// |delta| 0.000e+00.
+//
+// ⚠ This CORRECTS the port doc's earlier reading that "no compiler flag buys cross-arch
+// bit-parity".  That was measured on RunTumbleNavV2 — 4 000 stochastic steps of DOUBLE
+// precision leaning on libm — where per-architecture libm does remain after contraction
+// is disabled.  These helpers are float32 and their trig agreed across the pair as soon
+// as FMA was off, so for ogma::body contraction was the WHOLE difference.  Parity by
+// construction is therefore actually available here; it just has to be asked for.
+// The flag is set in cpp_core/CMakeLists.txt and pi_host/CMakeLists.txt.
+//
 // ⚠ SCALARS THAT COME FROM GDScript ARE DOUBLE.  GDScript's `float` is 64-bit, so a
 // value like an angle or a constant is held and combined in double and only narrows
 // where it is handed to one of these calls.  Callers must narrow at the boundary and

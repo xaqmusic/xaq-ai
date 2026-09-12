@@ -29,7 +29,9 @@ add_library(ogma_hw
 # the attitude filter on the robot, which is how sim and host drift apart.
 target_include_directories(ogma_hw PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                                           ${CMAKE_CURRENT_SOURCE_DIR}/../cpp_core/include)
-target_compile_options(ogma_hw PRIVATE -Wall -Wextra)
+# ⚠ -ffp-contract=off keeps ogma::body bit-identical to the sim on aarch64; see the
+# note in cpp_core/CMakeLists.txt for the measurement.  No-op on x86.
+target_compile_options(ogma_hw PRIVATE -Wall -Wextra -ffp-contract=off)
 
 add_executable(hat_tool tools/hat_tool.cpp)
 target_link_libraries(hat_tool PRIVATE ogma_hw)
@@ -45,7 +47,7 @@ FetchContent_MakeAvailable(json)
 add_executable(ogma_benchd src/benchd.cpp)
 target_include_directories(ogma_benchd PRIVATE ${ZMQ_INCLUDE_DIRS})
 target_link_libraries(ogma_benchd PRIVATE ogma_hw nlohmann_json::nlohmann_json ${ZMQ_LIBRARIES} pthread)
-target_compile_options(ogma_benchd PRIVATE -Wall -Wextra)
+target_compile_options(ogma_benchd PRIVATE -Wall -Wextra -ffp-contract=off)
 
 # ogma_sensors — the three physical input channels.  Kept OUT of ogma_hw so the
 # servo/driver layer keeps its seconds-long build and gains no ALSA/gpiod deps, but
