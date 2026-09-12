@@ -91,6 +91,13 @@ target_include_directories(ami_ogma_host PRIVATE
     ${json_SOURCE_DIR}/include
 )
 
+# ⚠ ogma::body must produce the SAME BITS here as on the robot — aarch64 GCC fuses
+# a*b+c into FMA by default and baseline x86-64 cannot, which made all three helpers
+# mismatch across machines until this was set (measured on the Pi 2026-09-12; see the
+# note in cpp_core/CMakeLists.txt).  A no-op on x86, and it matters the day the sim is
+# built on an ARM machine.
+target_compile_options(ami_ogma_host PRIVATE -ffp-contract=off)
+
 target_link_libraries(ami_ogma_host PRIVATE
     godot-cpp   # provides all Godot binding headers + implementations
     ogma_core   # statically embedded into the .so

@@ -500,9 +500,21 @@ architecture. Consequence for §1's parity argument: *same code* buys attributab
 bit-identical trajectories across machines. **Measured:** rebuilding with `-ffp-contract=off`
 still fails the test and moves μ from −2.74 to +2.94 — FMA contraction changes the trajectory
 but is not the whole difference (per-arch `libm` remains). No compiler flag buys cross-arch
-bit-parity: **golden replays are per-architecture**, and a test that asserts a hemisphere from
-one 4000-step seed is seed-fragile rather than a port defect (its owner should make it
-seed-robust).
+bit-parity **for that test**: golden replays of it are per-architecture, and a test that
+asserts a hemisphere from one 4000-step seed is seed-fragile rather than a port defect (its
+owner should make it seed-robust).
+
+> ⚠ **CORRECTED 2026-09-12 for `ogma::body`, which is the part the port depends on.** The
+> sentence above was generalized too far. Re-measured on the robot against the
+> x86-generated oracles, **`-ffp-contract=off` makes all three shared body helpers
+> bit-exact on aarch64** — `leg_kinematics` 400/400, `imu_attitude` 800/800,
+> `stride_odometry` 900/900, worst |delta| **0.000e+00**, where the default build
+> mismatched every one of them. RunTumbleNavV2 is double precision over 4 000 stochastic
+> steps leaning on `libm`, so per-arch `libm` survives contraction there; these helpers
+> are float32 and their trig agreed across the pair as soon as FMA was off. **Parity by
+> construction IS available for the body chain — it just has to be asked for.** The flag
+> is now set in `cpp_core`, `pi_host` and `godot_host`; it is a no-op on x86 (GCC emits no
+> FMA at baseline, verified), so the sim's byte-identity gates are unmoved.
 
 
 ### The bus map, as of 2026-08-27 (parts ordered)
@@ -1343,6 +1355,47 @@ the robot must give up cost **nothing and a little**, and the one it is forced o
 commanded joint angles — is the one that **helps**. The gait does not depend on the
 oracles the way the audit's framing implied. Still to substitute: `distress` (carries a
 units bug) and `target_compass` (needs `vision_compass`).
+
+### Step (d) · **IN PROGRESS — started 2026-09-12**
+
+**First result: the shared body chain now agrees bit-for-bit between sim and robot.**
+Built the three parity checkers on the Pi and replayed the x86 oracles:
+
+| build | leg_kinematics | imu_attitude | stride_odometry |
+|---|---|---|---|
+| default | **400/400 mismatch** (worst 3.1e-07) | **796/800 mismatch** (worst 6.3e-07) | **900/900 mismatch** |
+| `-ffp-contract=off` | 400/400 exact | 800/800 exact | 900/900 exact |
+
+The diagnosis came from an instrument the checker already carried: `imu_attitude` counts
+`up_accel` — sqrt and divide, **no trig** — separately, and it mismatched only 14/800
+against 796/800 overall. Arithmetic-only paths nearly clean, trig-bearing ones not, which
+points at FMA contraction rather than at the maths. Worst |delta| ~3e-7 on metre-scale
+links is 0.3 µm and was never physical error — but `stride_v` accumulates into MotorEPMv2
+and GainEvolver, and an accumulating estimator does not get to ignore 1 ULP per step.
+
+⚠ **The robot's IMU driver already uses the shared filter** (`Icm20948` holds an
+`ogma::body::ImuAttitude`), so until its build carries the flag it is running the same
+filter as the sim and producing **different bits**. One line in `pi_host/CMakeLists.txt`.
+
+**Hardware present as of 2026-09-12** (`i2cdetect -y 1`): `0x14` HAT, **`0x29` VL53L0X**,
+**`0x40` INA219** — the ToF and the current sensor are installed, which the bring-up log
+above predates. No `0x68`/`0x69`, so the ICM-20948 is on SPI as the bus map preferred.
+
+⚠ **BLOCKED ON A BRANCH DIVERGENCE, and it is the operator's call.** The robot's checkout
+is on its own `picrawler-dev` line that contains **none** of steps (a)–(c), and carries
+**~677 lines of uncommitted bench work** in `pi_host` (ToF integration in `benchd.cpp`,
+`Vl53l0x.hpp`, `hat_tool`, the dashboard). Wiring the derivation chain into `ogma_host`
+means editing exactly those files, so it is not safe to do blind from this side. The work
+done here is deliberately **branch-agnostic** — header-only helpers plus build flags —
+and touches nothing of that. Resolve the divergence before step (d) continues.
+
+**Remaining for step (d)**, once the trees are reconciled: publish the legal derived
+topics on the robot — `joints` from `ServoForwardModel` (step (c) measured this as the
+one substitution that *helps*), `feet_y_gravity_cmd_imu` from `LegKinematics` ⊕
+`ImuAttitude`, and `ground_clearance` from the now-installed VL53L0X. `stride_v` stays
+blocked on the FSRs, which feed its stance gate.
+
+---
 
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 
