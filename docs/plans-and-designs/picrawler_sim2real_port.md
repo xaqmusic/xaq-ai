@@ -1381,13 +1381,29 @@ filter as the sim and producing **different bits**. One line in `pi_host/CMakeLi
 **`0x40` INA219** — the ToF and the current sensor are installed, which the bring-up log
 above predates. No `0x68`/`0x69`, so the ICM-20948 is on SPI as the bus map preferred.
 
-⚠ **BLOCKED ON A BRANCH DIVERGENCE, and it is the operator's call.** The robot's checkout
-is on its own `picrawler-dev` line that contains **none** of steps (a)–(c), and carries
-**~677 lines of uncommitted bench work** in `pi_host` (ToF integration in `benchd.cpp`,
-`Vl53l0x.hpp`, `hat_tool`, the dashboard). Wiring the derivation chain into `ogma_host`
-means editing exactly those files, so it is not safe to do blind from this side. The work
-done here is deliberately **branch-agnostic** — header-only helpers plus build flags —
-and touches nothing of that. Resolve the divergence before step (d) continues.
+✅ **The robot is synced — 2026-09-12.** It now sits at the same commit as the laptop,
+working tree clean, `pi_host` rebuilt there (**42/42 `test_hw`**) and all three parity
+checks **bit-exact on aarch64 from the synced tree with the repo's own flag**.
+
+⚠ **A CORRECTION WORTH KEEPING, because it nearly caused damage.** This section first
+recorded the robot as being on a *divergent* branch carrying "~677 lines of uncommitted
+bench work", and recommended resolving the divergence before continuing. **Both halves
+were wrong, and the method that produced them is the lesson.** `git status` on the robot
+did show 7 modified and 12 untracked files — but the robot's HEAD was an **ancestor** of
+the laptop's, 40 commits behind on strictly linear history, and file-by-file comparison
+showed **every one of those files was already byte-identical to content committed
+upstream** (the sole exception being `GodotFloat.hpp`, where the robot held the *older*
+version). The "uncommitted work" was already-merged work sitting on a stale base.
+
+The error was inferring divergence from *"none of my commits are present"* without
+checking ancestry — absence of my commits is not divergence, exactly as absence in a
+truncated search is not absence. Acting on that reading — committing and pushing the
+robot's tree as new work — would have produced 19 duplicate commits of content already in
+history. **The check that settled it was `git merge-base --is-ancestor` plus a
+file-by-file diff against `HEAD`, not `git status`.** Sync was therefore a
+`git stash push -u` (nothing unique to lose, and preserved regardless) followed by
+`git merge --ff-only`; both pre-existing stashes survive and a tarball snapshot was taken
+first on both machines.
 
 **Remaining for step (d)**, once the trees are reconciled: publish the legal derived
 topics on the robot — `joints` from `ServoForwardModel` (step (c) measured this as the
