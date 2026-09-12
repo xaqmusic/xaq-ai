@@ -145,6 +145,30 @@ inline double feet_y_gravity(const Vec3f& foot_body, const Vec3f& up, double l3)
     return double(foot_body.dot(up)) - l3 * 0.5;
 }
 
+// --- ground_clearance --------------------------------------------------------
+//
+// The belly-ToF channel, normalized. `raw_m` is the measured belly-to-floor distance
+// in metres; the published signal is that over the STANDING clearance, clamped to
+// [0, 1]: ~0 = belly on a surface (dragging / high-centred), 1 = held fully up.
+//
+// ⚠ SHARED BECAUSE THE NORMALIZER IS A CONTRACT, not a unit conversion.  This feeds
+// the PROMOTED height homeostat -- the lever that replaced the god's-eye
+// `chassis_y_norm` and solved the hump -- and a hardware publisher that divided by a
+// different standing height would emit a plausible, wrong, silently-accepted number
+// into it.  The sim's own expression is
+// `clamp(gc_raw / GROUND_CLEARANCE_STAND, 0, 1)` with GROUND_CLEARANCE_STAND = 0.06;
+// this is that, once.
+//
+// ⚠ IT DOES NOT ENCODE VALIDITY, AND THE CALLER MUST.  A VL53L0X reading that failed
+// its internal sigma/signal checks is not a large number or a small one -- it is an
+// arbitrary one that looks exactly like a good reading here.  The status is the
+// confound channel and the part computes it for free; gate on it BEFORE calling this,
+// and publish the fact that you gated.  A clamp cannot tell you the sensor lied.
+inline double ground_clearance(double raw_m, double stand_m) {
+    const double v = raw_m / stand_m;
+    return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
+}
+
 // --- stride_v ⊕ slip ---------------------------------------------------------
 
 struct StrideVParams {

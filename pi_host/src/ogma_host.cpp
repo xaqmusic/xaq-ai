@@ -32,6 +32,10 @@
 #include "ogma/hw/AudioCapture.hpp"
 #include "ogma/hw/CameraCapture.hpp"
 #include "ogma/hw/Ultrasonic.hpp"
+#include "ogma/hw/Vl53l0x.hpp"
+#include "ogma/hw/I2cBus.hpp"
+#include "ogma/hw/SensorCalib.hpp"
+#include "ogma/body/StrideOdometry.hpp"
 
 #include <atomic>
 #include <cerrno>
@@ -70,6 +74,12 @@ struct Args {
     bool    mic        = false;
     bool    camera     = false;
     bool    range      = false;
+    // ⚠ OPT-IN, AND IT TAKES A BUS benchd HOLDS.  The VL53L0X is on /dev/i2c-1 with the
+    // HAT, and the README's standing rule is that only one process owns that bus at a
+    // time (it already says to stop benchd before hat_tool).  The two systemd units now
+    // declare Conflicts= so this cannot be arranged by accident, but the flag stays
+    // default-off so the bench keeps the belly readout unless the brain is asked for it.
+    bool    tof        = false;
 };
 
 void usage() {
@@ -109,6 +119,7 @@ int main(int argc, char** argv) {
         else if (v == "--mic")                    a.mic = true;
         else if (v == "--camera")                 a.camera = true;
         else if (v == "--range")                  a.range = true;
+        else if (v == "--tof")                    a.tof = true;
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -140,6 +151,27 @@ int main(int argc, char** argv) {
             return c;
         }()};
         ogma::hw::Ultrasonic    rangefinder{ogma::hw::Ultrasonic::Config{}};
+
+        // ---- belly ToF (VL53L0X) -------------------------------------------------
+        // The `gc_raw` channel the PROMOTED height homeostat rides — the lever that
+        // replaced the god's-eye chassis_y_norm and solved the hump.  Opened here so a
+        // failure is a startup error, and only when asked (it takes benchd's bus).
+        const auto calib = ogma::hw::SensorCalib::load();
+        std::unique_ptr<ogma::hw::LinuxI2cBus> i2c;
+        std::unique_ptr<ogma::hw::Vl53l0x>     tof;
+        if (a.tof) {
+            i2c = std::make_unique<ogma::hw::LinuxI2cBus>("/dev/i2c-1");
+            ogma::hw::Vl53l0xConfig tc;
+            tc.mount_offset_mm = calib.tof_mount_offset_mm;
+            tof = std::make_unique<ogma::hw::Vl53l0x>(*i2c, tc);
+            tof->init();
+            tof->start_continuous();
+            std::fprintf(stderr,
+                "ogma_host: VL53L0X 0x29 ready — calib %s (%s), mount_offset %.2f mm, "
+                "gc_stand %.3f m\n",
+                calib.source.c_str(), calib.loaded ? "loaded" : "MISSING, using defaults",
+                calib.tof_mount_offset_mm, calib.gc_stand_m);
+        }
         if (a.mic && !mic.start())
             std::fprintf(stderr, "ogma_host: mic: %s\n", mic.last_error().c_str());
         if (a.camera && !cam.start())
@@ -407,6 +439,39 @@ int main(int argc, char** argv) {
                     f->values[0] = float(r.distance_m);
                     f->values[1] = r.valid ? 1.0f : 0.0f;
                     bus->publish("sense.range", f);
+                }
+            }
+            if (tof) {
+                ogma::hw::Vl53l0x::Reading r;
+                if (tof->read_ready(r)) {
+                    // ⚠ THE STATUS IS THE CHANNEL, not a detail.  A reading that failed
+                    // the part's sigma/signal checks is not large or small — it is
+                    // ARBITRARY, and at the consumer it looks exactly like a good one.
+                    // So the raw reading and its status ALWAYS go out for diagnosis...
+                    auto d = std::make_shared<ogma::ProprioToken>();
+                    d->tick_id = uint64_t(ticks); d->producer_id = "host";
+                    d->sensor = "belly";
+                    d->values = { float(r.distance_m), float(int(r.status)),
+                                  float(r.signal_rate_mcps), float(r.ambient_rate_mcps) };
+                    bus->publish("sense.belly", d);
+
+                    // ...but the PROMOTED topic is published only on a good reading, and
+                    // is simply ABSENT otherwise.  That is this project's own rule for an
+                    // exactly-round null (the beacon publisher states it): a consumer that
+                    // needs the channel then fails loudly instead of reading a plausible
+                    // zero, which is the failure shape that has produced false verdicts
+                    // here before.  Never substitute a number for a missing measurement.
+                    if (r.status == ogma::hw::Vl53l0x::Status::Ok) {
+                        auto f2 = std::make_shared<ogma::ProprioToken>();
+                        f2->tick_id = uint64_t(ticks); f2->producer_id = "host";
+                        f2->sensor = "ground_clearance";
+                        // ONE value, and the same normalizer the sim uses — the token is
+                        // shape- and scale-identical to reality.proprio.ground_clearance
+                        // there, so a consumer cannot tell which body it is attached to.
+                        f2->values = { float(ogma::body::ground_clearance(
+                                           r.distance_m, calib.gc_stand_m)) };
+                        bus->publish("reality.proprio.ground_clearance", f2);
+                    }
                 }
             }
 

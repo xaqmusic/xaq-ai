@@ -93,6 +93,9 @@ public:
                                   Vector3 gyro_mean, double tau) const;
     // foot·up - L3/2.  Both halves are contract: see the cpp_core header.
     double  feet_y_gravity(Vector3 foot_body, Vector3 up, double l3) const;
+    // clamp(raw_m / stand_m, 0, 1) — the belly-ToF normalizer the height homeostat
+    // rides.  Shared so the robot cannot divide by a different standing height.
+    double  ground_clearance(double raw_m, double stand_m) const;
 
 protected:
     static void _bind_methods();

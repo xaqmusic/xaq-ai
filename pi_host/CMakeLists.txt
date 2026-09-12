@@ -128,6 +128,9 @@ if(PI_HOST_BUILD_BRAIN AND PI_HOST_HAVE_SENSORS)
   add_executable(ogma_host src/ogma_host.cpp)
   target_include_directories(ogma_host PRIVATE ${ZMQ_INCLUDE_DIRS})
   target_link_libraries(ogma_host PRIVATE ogma_hw ogma_sensors ogma_core ogma_infra ${ZMQ_LIBRARIES})
-  target_compile_options(ogma_host PRIVATE -Wall -Wextra)
+  # -ffp-contract=off: ogma_host now includes ogma::body (the belly-clearance
+  # normalizer), and that code only earns its name if it produces the same bits here as
+  # in the sim.  See the note in cpp_core/CMakeLists.txt.
+  target_compile_options(ogma_host PRIVATE -Wall -Wextra -ffp-contract=off)
   target_compile_definitions(ogma_host PRIVATE OGMA_HOST_GIT_SHA="${PI_HOST_GIT_SHA}")
 endif()

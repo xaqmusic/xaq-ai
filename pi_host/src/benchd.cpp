@@ -20,6 +20,7 @@
 #include "ogma/hw/Ina219.hpp"
 #include "ogma/hw/Vl53l0x.hpp"
 #include "ogma/hw/Icm20948.hpp"
+#include "ogma/hw/SensorCalib.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zmq.h>
@@ -63,6 +64,8 @@ int g_pose_stagger_ticks = 5;              // 100 ms between channel starts
 // large fraction of the part, and a meter cannot reach it through ~200 mOhm of leads.
 // Placeholder until the bench fit; override with --r-shunt.
 double g_r_shunt = 0.01;
+bool   g_r_shunt_override = false;
+bool   g_tof_override = false;
 // CALIBRATION DATA too (Vl53l0x.hpp): the ToF is recessed up inside the chassis so the
 // belly's 0-56 mm range clears the part's unreliable short end, and only a tape measure
 // knows by how much.  0 = flush, which is the pre-bench default and not a fitted value.
@@ -744,10 +747,25 @@ int main(int argc, char** argv) {
         else if (a == "--poses") poses_path = argv[i + 1]; else if (a == "--rescue") rescue_name_arg = argv[i + 1];
         else if (a == "--pose-slew") g_pose_slew_us = std::max(1, std::atoi(argv[i + 1]));
         else if (a == "--pose-stagger-ms") g_pose_stagger_ticks = std::max(0, std::atoi(argv[i + 1]) / 20);
-        else if (a == "--r-shunt") g_r_shunt = std::atof(argv[i + 1]);
-        else if (a == "--tof-offset") g_tof_offset_mm = std::atof(argv[i + 1]);
+        else if (a == "--r-shunt") { g_r_shunt = std::atof(argv[i + 1]); g_r_shunt_override = true; }
+        else if (a == "--tof-offset") { g_tof_offset_mm = std::atof(argv[i + 1]); g_tof_override = true; }
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
+    // ---- fitted constants: the calib FILE is the source, flags are the override ----
+    // These lived only on ExecStart, and the checked-in unit did not carry the ToF
+    // offset the live one did — so reinstalling from the repo silently dropped the belly
+    // calibration while the channel went on looking healthy.  The receipt below is the
+    // point: a run that does not say "sensors.json" was not using this robot's numbers.
+    {
+        const auto cal = ogma::hw::SensorCalib::load();
+        if (!g_tof_override)     g_tof_offset_mm = cal.tof_mount_offset_mm;
+        if (!g_r_shunt_override) g_r_shunt       = cal.ina_r_shunt_ohm;
+        std::printf("ogma_benchd: calib %s (%s) — tof_offset %.2f mm%s, r_shunt %.5f ohm%s\n",
+                    cal.source.c_str(), cal.loaded ? "loaded" : "MISSING, using defaults",
+                    g_tof_offset_mm, g_tof_override ? " [FLAG OVERRIDE]" : "",
+                    g_r_shunt, g_r_shunt_override ? " [FLAG OVERRIDE]" : "");
+    }
+
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
     const std::string log_path = log_dir + "/benchd_" + stamp_now() + ".jsonl";
     State S(dev, body, map_path, poses_path, log_path);

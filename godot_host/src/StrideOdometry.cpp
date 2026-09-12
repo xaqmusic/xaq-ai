@@ -109,6 +109,8 @@ void StrideMath::_bind_methods() {
                          &StrideMath::planted_foot_velocity);
     ClassDB::bind_method(D_METHOD("feet_y_gravity", "foot_body", "up", "l3"),
                          &StrideMath::feet_y_gravity);
+    ClassDB::bind_method(D_METHOD("ground_clearance", "raw_m", "stand_m"),
+                         &StrideMath::ground_clearance);
 }
 
 Vector3 StrideMath::planted_foot_velocity(Vector3 toe_now, Vector3 toe_prev,
@@ -120,6 +122,10 @@ Vector3 StrideMath::planted_foot_velocity(Vector3 toe_now, Vector3 toe_prev,
 
 double StrideMath::feet_y_gravity(Vector3 foot_body, Vector3 up, double l3) const {
     return ogma::body::feet_y_gravity(to_v(foot_body), to_v(up), l3);
+}
+
+double StrideMath::ground_clearance(double raw_m, double stand_m) const {
+    return ogma::body::ground_clearance(raw_m, stand_m);
 }
 
 }  // namespace godot

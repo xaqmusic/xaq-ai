@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "FITTED CONSTANTS FOR THIS PHYSICAL ROBOT — calibration data, not defaults.",
+    "They lived on the systemd unit's ExecStart, which the BOM doc (§9.2, §3.3) flags as",
+    "the wrong home twice over: a value invisible to anyone reading the docs, and one that",
+    "the checked-in unit did not carry, so reinstalling it silently dropped the ToF",
+    "calibration. Both now live here, the way servo_map.json and poses.json already do,",
+    "so they travel with the robot and BOTH programs read the same number.",
+    "CLI flags still override, for bench work."
+  ],
+  "tof": {
+    "mount_offset_mm": 64.8,
+    "_why": "The VL53L0X is recessed up inside the chassis so the belly's 0-56 mm working range sits above the part's unreliable short end. Anchored at BELLY-DOWN, which folds the part's own 8-11 mm long-reading bias into the offset and puts the calibration at the dangerous end of the channel. Re-fit after any belly re-assembly."
+  },
+  "ina219": {
+    "r_shunt_ohm": 0.01,
+    "_why": "At 10 mOhm the trace and solder resistance are a material fraction of the shunt, so this is a fitted value rather than the part's nominal. Raw counts are what get recorded; this only derives amps, so a re-fit can re-derive already-captured samples."
+  },
+  "ground_clearance": {
+    "stand_m": 0.06,
+    "_why": "The normalizer the promoted height homeostat rides: published signal = clamp(raw_m / stand_m, 0, 1). MUST match the sim's GROUND_CLEARANCE_STAND or the robot feeds a differently-scaled number into a promoted lever. Shared implementation: ogma::body::ground_clearance()."
+  }
+}

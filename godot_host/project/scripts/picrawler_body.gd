@@ -6999,7 +6999,10 @@ func _step_one() -> void:
 	# high-centered); higher = belly held up off the ground.  Replaces absolute Y.
 	_dbg_gc_raw = _compute_ground_clearance()   # cache raw metres for the ramp-debug diag
 	var clearance_arr := PackedFloat64Array()
-	clearance_arr.append(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0))
+	# ogma::body::ground_clearance — shared with the robot so the NORMALIZER cannot
+	# drift.  It feeds the promoted height homeostat; a publisher dividing by a
+	# different standing height emits a plausible wrong number into it.
+	clearance_arr.append(_stridemath.ground_clearance(_dbg_gc_raw, GROUND_CLEARANCE_STAND))
 	brain.publish_proprio(clearance_arr, "ground_clearance")
 	# Beacon magnitude.  Published every tick from the cached capture (the capture itself is
 	# sub-rated for CPU), matching how ground_clearance and the vision frame are handled.
