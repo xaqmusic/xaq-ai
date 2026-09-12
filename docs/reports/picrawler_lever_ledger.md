@@ -4785,3 +4785,108 @@ X → rescue recall then lands in 4.2 s with the throttle flags clean. Two instr
 instrument); and a first arm after boot cannot slew (no known position) — the stagger alone
 carried that case. Re-use context: the servo-BEC rebuild now has two measured reasons (no
 limp, shared-rail brownout); the INA219 quantifies the inrush margin before deciding.
+---
+
+### ★★★ 2026-09-11 — THE SIM-HONESTY A/B: the joint oracle was COSTING us, and one input is invisible at 6 000 ticks
+
+**Verdict: `WORKING` (signal) on `honest_joints`; `PARTIAL` (mild cost) on `honest_imu`;
+`TAUTOLOGY` on `honest_upright` at the measured horizon — a measurement outcome, not a
+verdict on the idea.** Port doc Phase 4 step (c). The switches ship gain-0 (`c09148f`),
+byte-identical off on a 1 200-tick continuous gate and a 4 999-tick `instant_pause` gate
+carrying 14/15 hard resets. Every arm prints a startup receipt naming its ON/off state,
+and all four were confirmed loaded before any number was read.
+
+**★ 1. THE 2026-08-28 CONSUMER MAP IS WRONG IN TWO PLACES.** Read against the config
+rather than against the audit's own summary:
+
+- **`tilt` is not in `native_measured` at all**, so the tilt half of the attitude
+  substitution has no consumer here (`publish_tilt` also defaults FALSE headless). Inert.
+- **`imu` reaches MotorEPMv2 ONLY.** GainEvolver subscribes, but `handle_imu` discards
+  every value while `travel_topic` is non-empty — and the config sets it to
+  `reality.proprio.stride_v`. **The flow term is therefore ALREADY legal**, which retires
+  the largest single exposure the legality audit recorded (flow accounted for 105 % of the
+  movement in J on `coupling_gain`'s landscape). Of `imu`'s four values MotorEPMv2 reads
+  only `[2]` and `[3]`; `sin/cos yaw` have no consumer in this config.
+
+**★★ 2. `honest_upright` IS INVISIBLE AT THE STANDARD PROTOCOL, and the reason
+generalizes beyond this lever.** All 46 metrics identical to baseline — not approximately,
+exactly. `upright`'s only consumer is GainEvolver, and GainEvolver's first generation was
+**measured at tick 34 020** (`warmup_ticks` 10 000 + `eval_window_ticks` 12 000, then one
+per ~24 000: 34 020 / 58 080 / 82 080 / 106 080 / 130 080). At 6 000 ticks `ge_tilt`,
+`ge_energy` and `ge_unl` all read **exactly 0.0** — the module buffers and scores nothing.
+**A 6 000-tick A/B cannot say anything about any GainEvolver-only input, and a `NULL`
+recorded there would have been a false verdict** (§3.2 checks 2 and 5). Re-use context:
+measure at >= 34 000 ticks, ideally >= 58 000 for two generations. ⚠ The same caveat
+applies retroactively to any claim about a GainEvolver-mediated quantity measured on the
+6 000-tick standard.
+
+**★★★ 3. `honest_joints` IS THE LOUD ONE, AND IT BUYS RHYTHM.** Feeding the Bridge and
+both body-pose EPMs the **servo forward model** instead of achieved hinge angles — the
+only joint signal an encoder-less robot can ever have — produces a markedly more rhythmic,
+more actively stepping gait. n=6 × 6 000, corridor, diff 0.3, Welch t:
+
+| metric | base | honest_joints | t |
+|---|---|---|---|
+| `plv_w` | 0.133 | **0.200** | **+14.2** |
+| `plv` | 0.072 | **0.152** | **+9.7** |
+| `swing_bout` | 5.70 | 7.13 | +8.5 |
+| `contact_duty` | 0.773 | 0.731 | −7.2 |
+| `steps` | 74.2 | **119.3** | **+6.7** |
+| `amp_min` | 0.626 | 0.506 | −6.3 |
+| `hk_value` | 5.52 | 5.04 | −5.8 |
+| `tle_spr` | 0.391 | 0.499 | +5.4 |
+| `step_cv_real` | 0.836 | **0.673** | −5.3 |
+| `td_plv` | 0.319 | 0.246 | −4.4 |
+| `scrub` | 0.094 | 0.115 | +4.0 |
+| `coh` | 0.489 | 0.536 | +3.6 |
+| `fwd_v` | 0.039 | 0.054 | +2.4 |
+| `tilt_sd` | 0.069 | 0.085 | +2.2 |
+| `straight` | 0.786 | 0.743 | −2.1 |
+| `net_z` | 6.01 ± 0.46 | **6.70 ± 0.62** | +2.0 |
+| `falls` | 0 | 0 | — |
+
+**Phase-locking doubles, stepping regularity improves by a third, and it covers ~11 % more
+ground** — while `flat_v` is unmoved (0.079 → 0.076), the **tenth** lever to leave that
+pinned (§5). It is not free: it walks 19 % further in path for 11 % more net displacement,
+with more scrub and tilt. Livelier and less directed, not simply better.
+
+**★ The self-model gets WORSE while the gait gets better** — `motor_tle` 0.229 → 0.263
+(t = +24.3), `tle_spr` +5.4. Worth recording because the naive prediction is the opposite:
+a lag-filtered input is *smoother*, so it should be easier to predict. The reason is in the
+same table — the body is taking 61 % more steps. **The residual rose because the behaviour
+got livelier, not because the signal got noisier**, a distinction `motor_tle` alone cannot
+make and `steps`/`plv` beside it can. ⚠ This is exactly the shape that would read as a
+REGRESSION if the self-model metric were judged on its own.
+
+**Direction check against §5.6:** the second time the hardware-POORER signal has won here,
+for the same structural reason — `feet_y_gravity_cmd` beat its achieved-pose twin because
+load deflection is noise to the consumer. Both cases are *commanded-vs-achieved*, so the
+honest reading is **removing servo deflection helps a consumer that wants intent**, not
+anything broader about impoverished sensing.
+
+**4. `honest_imu` costs little and destabilises slightly.** MotorEPMv2's `fwd_v_` becomes
+`stride_v` forward (~75 % of true scale, one tick lagged, NOT rescaled — prohibition 5)
+and its yaw rate becomes body-frame rather than world-vertical.
+
+| metric | base | honest_imu | t |
+|---|---|---|---|
+| `unstable` | 0.101 | 0.165 | **+2.6** |
+| `turns` | 0.001 ± 0.074 | −0.060 ± 0.021 | −1.8 |
+| `brt_plv` | 0.081 | 0.039 | −1.7 |
+| `net_z` | 6.01 ± 0.46 | 5.47 ± 0.61 | −1.6 |
+| `motor_tle` | 0.2290 | 0.2285 | ~0 |
+| `falls` | 0 | 0 | — |
+
+**No significant distance cost at n=6** and the self-model residual is untouched — but
+`unstable` rises 63 % and the turn bias becomes small, consistent and low-variance, the
+expected signature of a dead-reckoned heading that drifts. The scale-free parts of
+MotorEPMv2 absorbed the 25 % gain change by design (the `fwd_v` resonance divides by its
+own running spread); `coord_fit_accum_` does not, and is where the residual cost most
+plausibly sits.
+
+**Scope and power.** n=6 × 6 000 fixed-seed is a **signal**, promote-or-kill only — not a
+finding. `honest_joints`'s `net_z` at t = 2.0 is precisely the marginal case §3.3 says to
+confirm rather than excavate; its *loud* claims are `plv_w`, `plv`, `steps` and
+`step_cv_real`, all t > 5. **Not yet observed in the UI** (§3 rule 5) and nothing is
+promoted. `honest_upright` at >= 58 000 ticks is IN_FLIGHT.
+
