@@ -4921,3 +4921,51 @@ confirm rather than excavate; its *loud* claims are `plv_w`, `plv`, `steps` and
 `step_cv_real`, all t > 5. **Not yet observed in the UI** (§3 rule 5) and nothing is
 promoted.
 
+---
+
+### ★★ 2026-09-12 — THE ROBOT AND THE SIM DID NOT AGREE, AND ONE FLAG FIXED IT
+
+**Verdict: defect + fix (`WORKING`), measured on the robot.** Recorded because it touches
+`cpp_core`, and because it **corrects a conclusion already in this project's record.**
+
+The shared `ogma::body` helpers exist so sim and robot produce the same NUMBERS. They did
+not. Built the three parity checkers on the Pi and replayed the x86-generated oracles:
+
+| build | `leg_kinematics` | `imu_attitude` | `stride_odometry` |
+|---|---|---|---|
+| default | **400/400 mismatch** (worst 3.1e-07) | **796/800 mismatch** (worst 6.3e-07) | **900/900 mismatch** |
+| `-ffp-contract=off` | 400/400 **exact** | 800/800 **exact** | 900/900 **exact** |
+
+aarch64 GCC fuses `a*b+c` into FMA by default; baseline x86-64 has none and cannot.
+
+**★ This corrects the 2026-08-30 reading that "no compiler flag buys cross-arch
+bit-parity: golden replays are per-architecture."** That was measured on
+`RunTumbleNavV2` — 4 000 stochastic steps of DOUBLE precision leaning on `libm` — where
+per-arch `libm` genuinely does survive contraction being disabled. The body helpers are
+float32 and their trig agreed across the pair the moment FMA was off, so **for
+`ogma::body` contraction was the whole difference.** The earlier verdict stands for what
+it measured; it was the generalization that was wrong. Ledger §3.1: a refutation is about
+a mechanism IN A CONTEXT.
+
+**★ The diagnosis came free from an instrument the checker already had.**
+`imu_attitude_parity_check` counts `up_accel` — sqrt and divide, **no trig** —
+separately: 14/800 mismatched against 796/800 overall. Arithmetic-only paths nearly
+clean, trig-bearing ones not, which points at contraction rather than at the maths.
+**Distinguishing "rounding" from "a bug" is the difference between a flag and a rewrite**,
+and a bare pass/fail could not have done it.
+
+**Why 3e-7 was not "small enough to ignore."** On metre-scale links that is 0.3 µm, far
+below any physical error. But `stride_v` **accumulates** — `est`/`bias`/`slip` carry
+forward every tick into MotorEPMv2 and GainEvolver — and an accumulating estimator does
+not get to ignore 1 ULP per step.
+
+**Safe on the sim, verified rather than assumed:** GCC emits no FMA on baseline x86-64,
+so the flag is a no-op there; the 1200-tick byte-identity gate was re-run after adding it
+to `cpp_core`, `pi_host` AND `godot_host` and stayed IDENTICAL on both seeds.
+
+⚠ **Live consequence:** the robot's `Icm20948` already holds a shared
+`ogma::body::ImuAttitude`, so until its build carries the flag it runs the same filter as
+the sim and produces different bits. Re-use context: any future `ogma::body` helper is
+covered by the flag, but a NEW cross-arch claim needs its own oracle replay — this one is
+evidence about float32 arithmetic, not about `libm` in general.
+
