@@ -108,6 +108,9 @@ public:
     // Each MotorEPM's attitude-prior instant error (the gate subset's |e| mean), in graph
     // order: the brain's own saturation signal for the step hand-off.
     std::vector<double> attitude_error() const;
+    // The joint brain's own forward-model surprise (diag_lite motor_tle), for the body-error
+    // channel §17.28 found missing: nothing predicts the duck's body while the walker drives.
+    double motor_tle() const;
 
     // robotd's deployed joint-target low-pass (head 0.5, legs 0.7). Off = raw
     // commands (legacy, byte-identical).

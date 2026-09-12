@@ -46,6 +46,8 @@ constexpr double kStepDeg = 2.0 * kHalfDeg / (kCols - 1);
 
 struct Frame {
     double t = 0.0;
+    int64_t line = -1;              // index among the source file's JSON lines: the only safe join key
+    std::vector<float> cloudp;                // the host's CloudMap::break_profile, when logged
     std::vector<double> r;                    // 64 slant ranges, -1 = Empty
     std::vector<int>    cls;                  // 64 classes
     std::vector<std::array<double, 3>> pts;   // 64 levelled points, NaN = none
@@ -154,6 +156,11 @@ std::vector<float> make_view(std::string const& v, Frame const& f) {
     if (v == "full64_norm") return view_full64_norm(f);
     if (v == "heights8")    return view_heights8(f);
     if (v == "geom_shape")  return view_geom_shape(f);
+    // The HOST's own accumulated cloud, reduced: 8 azimuth sectors x (nearest floor-break range,
+    // its height, its vertical extent, its mass) + 4 globals.  This is the view the ToF studies
+    // argue for -- a small object is sub-pixel in a frame and tens of points in a sweep, so the
+    // vocabulary must sit over the SWEEP.  Requires --log-cloud-profile on the run.
+    if (v == "cloudp")      return f.cloudp;
     die("unknown view '" + v + "' (full64|cols8|geom|full64_dm|full64_norm|heights8|geom_shape)");
 }
 
@@ -235,17 +242,27 @@ int main(int argc, char** argv) {
     if (frames_path.empty() || out_path.empty() || arms.empty())
         die("need --frames, --out and at least one --epm");
 
+    // A cloudp arm can only be fed frames that HAVE a cloud profile -- the cloud exists only
+    // while the duck stands, and the host logs the profile on cast ticks.  Without this the
+    // dedupe alternates present/absent frames and the arm sees empty vectors half the time.
+    bool need_cloudp = false;
+    for (auto const& a : arms) if (a.view == "cloudp") need_cloudp = true;
+
     // ---- load the frames ----
     std::vector<Frame> frames;
     {
         std::ifstream in(frames_path);
         if (!in) die("cannot open " + frames_path);
         std::string line;
+        int64_t lineno = -1;
         while (std::getline(in, line)) {
             if (line.empty() || line[0] != '{') continue;
+            ++lineno;
             json j = json::parse(line);
             if (!j.contains("tofr")) continue;
+            if (need_cloudp && !j.contains("cldp")) continue;
             Frame f;
+            f.line = lineno;
             f.t = j.value("t", 0.0);
             f.trunk_z = j.value("z", 0.0);
             f.r = j["tofr"].get<std::vector<double>>();
@@ -253,6 +270,7 @@ int main(int argc, char** argv) {
             f.cls.assign(size_t(kZones), 0);
             for (int i = 0; i < kZones && i < int(z.size()); ++i) f.cls[size_t(i)] = z[size_t(i)] - '0';
             f.pts.assign(size_t(kZones), {std::nan(""), std::nan(""), std::nan("")});
+            if (j.contains("cldp")) f.cloudp = j["cldp"].get<std::vector<float>>();
             if (j.contains("tofp")) {
                 f.has_pts = true;
                 for (auto const& e : j["tofp"]) {
@@ -263,7 +281,7 @@ int main(int argc, char** argv) {
             // The host prints the current ToF state every tick but CASTS every fourth, so a raw
             // read would feed every frame four times and quadruple the GNG's visit counts (and
             // its baking).  Feed the distinct frames only: the sensor's own 12.5 Hz.
-            if (!frames.empty() && f.r == frames.back().r) continue;
+            if (!frames.empty() && f.r == frames.back().r && f.cloudp == frames.back().cloudp) continue;
             frames.push_back(std::move(f));
         }
     }
@@ -330,7 +348,7 @@ int main(int argc, char** argv) {
         for (auto& a : arms) a.epm->tick(uint64_t(fi));
         bus.end_tick();
 
-        json line{{"event", "tick"}, {"i", fi}, {"t", f.t}};
+        json line{{"event", "tick"}, {"i", fi}, {"t", f.t}, {"ln", f.line}};
         const bool want_latent = (int(fi) % std::max(1, latent_every)) == 0;
         for (auto const& a : arms) {
             auto tok = std::dynamic_pointer_cast<const ogma::RealityToken>(bus.last_value(a.topic));

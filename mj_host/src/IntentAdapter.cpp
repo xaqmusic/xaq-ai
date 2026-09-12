@@ -166,6 +166,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         }
         publish("place_in", v);
     }
+    if (place && place->cloud_valid)
+        publish("cloud_in", std::vector<float>(place->cloud.begin(), place->cloud.end()));
     // The Cell recipe's two egocentric inputs, for a loop that plans over the map: the unwrapped
     // heading and the body velocity as [lateral, forward] in command units.  Nothing in the
     // level-0..2 graphs reads them; a graph that does (R27's PlayLoop) is a new arm.

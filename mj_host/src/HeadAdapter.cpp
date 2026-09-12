@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "DuckBody.hpp"          // kBrainHz
 #include "ogma/GraphConfig.hpp"
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
@@ -97,8 +98,22 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
     // holds its yaw while the body turns under it winds to the rail. The babble still moves
     // yaw (the action is read above for the model's sake); only the command is masked.
     if (mask_yaw_ && tick_id_ >= babble_ticks_) last_cmd_[2] = 0.0;
-    if (yaw_override_) last_cmd_[2] = std::clamp(yaw_target_, -kHeadRange[2], kHeadRange[2]);
-    if (pitch_override_) last_cmd_[1] = std::clamp(pitch_target_, -kHeadRange[1], kHeadRange[1]);
+    const double yt = std::clamp(yaw_target_, -kHeadRange[2], kHeadRange[2]);
+    const double pt = std::clamp(pitch_target_, -kHeadRange[1], kHeadRange[1]);
+    if (slew_ > 0.0 && (yaw_override_ || pitch_override_)) {
+        // Prime on the first overridden tick so the slew starts from where the head IS, not from
+        // zero -- otherwise the limiter itself commands a sweep the moment the override turns on.
+        if (!slew_primed_) { yaw_held_ = last_cmd_[2]; pitch_held_ = last_cmd_[1]; slew_primed_ = true; }
+        const double step = slew_ / kBrainHz;
+        yaw_held_   += std::clamp(yt - yaw_held_,   -step, step);
+        pitch_held_ += std::clamp(pt - pitch_held_, -step, step);
+        if (yaw_override_)   last_cmd_[2] = yaw_held_;
+        if (pitch_override_) last_cmd_[1] = pitch_held_;
+    } else {
+        slew_primed_ = false;
+        if (yaw_override_)   last_cmd_[2] = yt;
+        if (pitch_override_) last_cmd_[1] = pt;
+    }
     if (vor_tau_ > 0.0 && tick_id_ >= babble_ticks_) {
         constexpr double dt = 1.0 / 50.0;
         vor_state_ += w[2] * dt;                        // the trunk's yaw increment this tick

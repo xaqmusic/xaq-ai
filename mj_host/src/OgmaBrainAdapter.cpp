@@ -386,6 +386,17 @@ std::vector<double> OgmaBrainAdapter::consolidation() const {
     return out;
 }
 
+double OgmaBrainAdapter::motor_tle() const {
+    double worst = -1.0;
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_lite();
+        if (d.contains("motor_tle")) worst = std::max(worst, d["motor_tle"].get<double>());
+    }
+    return worst;
+}
+
 std::vector<double> OgmaBrainAdapter::attitude_error() const {
     std::vector<double> out;
     for (auto* m : instance_->modules()) {

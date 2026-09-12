@@ -32,6 +32,12 @@ struct PlaceInputs {
     float                 head_yaw = 0.0f;   // the head-yaw joint from HOME / its range (W3: a view is pose + gaze)
     std::array<float, 8>  cols{};    // the nearest Hit per column / 4 m (R24's reduction)
     std::array<float, 64> zones{};   // every zone's slant range / 4 m, Empty = 1 (the sensor as it is)
+    // The STOP's point cloud, reduced (CloudMap::break_profile): 8 azimuth sectors x (nearest
+    // break range, its height, its vertical extent, its mass) + 4 globals.  Published on
+    // reality.proprio.cloud_in only while a cloud is open, so a graph without an EPM there is
+    // byte-identical.  §17.28: a small object exists in the SWEPT cloud and not in one cast.
+    std::array<float, 36> cloud{};
+    bool cloud_valid = false;
 };
 
 class IntentAdapter {

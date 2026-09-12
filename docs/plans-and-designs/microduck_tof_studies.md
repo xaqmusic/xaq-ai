@@ -9,7 +9,8 @@ that saved the speed question — measure that the signal exists before designin
 
 **Report and figures:** <https://claude.ai/code/artifact/468b1fff-ed27-483b-86a6-ca87d7c5459a>
 **Verdicts:** [`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md) §17.28.
-**Owning register rows:** O36, O38, O40.
+**Owning register rows:** O36, O38, O40, O41.
+**Follow-through:** design doc §17.29 — the cloud moved into the host (`CloudMap`), aiming the gaze came out `NULL` (and closed O36 by measurement), an EPM over the cloud gave the best vocabulary yet, and the body predictor gave a real contact channel.
 
 ---
 
@@ -95,12 +96,18 @@ them stays the GNG's to earn.
 
 ## 4. Open follow-ups this study names
 
-- The arm that would settle *why* the cloud helps: an EPM over **cloud-derived** features (height
-  histogram, break extent, edge pairs of the accumulated sweep) rather than single frames. The
-  studies show a small object exists only at the sweep level; nothing has yet put an EPM there.
-- De-rotating the cloud by the duck's own odometry yaw belongs **in the host**, not in the analysis —
-  measured worth: +7 % distinct voxels and +4 points of change detection.
-- The gaze babble's pitch is what decides whether floor objects are ever found (3 sweeps of 11).
-  That puts O36 on the critical path rather than beside it.
-- `motor_tle` is an EMA with a ~20-tick constant and cannot show a 100 ms event. Exposing the
-  instantaneous residual is a one-line change and is what M2 actually needs.
+All four were taken up immediately; §17.29 has the results. In short:
+
+- **Done** — the EPM over cloud-derived features: `CloudMap::break_profile` on
+  `reality.proprio.cloud_in`, and the best vocabulary this duck has had (16 nodes, all baked, 7
+  winner switches a minute). Its *semantics* remain open: the cloud only exists while standing, so
+  one run gives one pose per object.
+- **Done** — de-rotation is in the host (`--cloud`), gain-0 guarded.
+- **Wrong** — the gaze was not the constraint. Widening the pitch babble and biasing it downward both
+  come out `NULL`, and the geometry says why: at sd 0.2 the gaze already reaches 23° down, which
+  looks at the floor by the duck's feet. O36 closed by measurement on the way (65/65 stands at the
+  amplitude R42 measured as a regression).
+- **Done, partly** — the joint brain now predicts through the walk (`--body-predicts`), giving a
+  contact channel 2.7× the twist brain's. The instantaneous residual is still the open fix.
+- **Still open, and now the only thing in the way** — travel. Three independent measurements reduce
+  to it.

@@ -7,7 +7,7 @@ Drops qpos (50 floats/tick) but keeps the four free bodies' x,y -- the analysis 
 import json, sys
 FREE = {'obj_ball0': 22, 'obj_ball1': 29, 'obj_block0': 36, 'obj_block1': 43}
 KEEP = ("t","x","y","z","tilt","drive","wall","obj","tofs","tofr","tofz","map","hdg","twist",
-        "q","stop","satt","event","mtle","tofp")
+        "q","stop","satt","event","mtle","btle","tofp","cld","cldp")
 out = open(sys.argv[1], "w")
 n = 0
 for line in sys.stdin:

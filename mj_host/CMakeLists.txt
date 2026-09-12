@@ -101,6 +101,7 @@ add_executable(ogma_mjhost
   src/HeadAdapter.cpp
   src/InspectorSurface.cpp
   src/Tof.cpp
+  src/CloudMap.cpp
   src/Observation.cpp
   src/Policy.cpp
   src/Recovery.cpp

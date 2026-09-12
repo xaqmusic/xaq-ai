@@ -95,8 +95,14 @@ def main(npz_path, epm_path, out_json, from_t=700.0):
     # the bench's "i" indexes its own DEDUPED frame list, not the host tick; match on time,
     # which both sides carry (§3.2 rule 7 in miniature -- never join two streams by assumption)
     tt = np.array([tk["t"] for tk in ticks])
-    idx = np.clip(np.searchsorted(d["t"], tt), 0, len(d["t"]) - 1)
-    assert np.abs(d["t"][idx] - tt).max() < 0.03, "time join failed"
+    if "ln" in ticks[0]:
+        # the exact join: the bench's source line index, which survives POOLED frame files where
+        # several runs are concatenated and t restarts at each one
+        idx = np.array([tk["ln"] for tk in ticks])
+        assert np.abs(d["t"][idx] - tt).max() < 1e-3, "line join failed"   # t is float32 in the npz
+    else:
+        idx = np.clip(np.searchsorted(d["t"], tt), 0, len(d["t"]) - 1)
+        assert np.abs(d["t"][idx] - tt).max() < 0.03, "time join failed"
     keep = tt >= from_t
     idx_k = idx[keep]
     ticks_k = [tk for tk, kp in zip(ticks, keep) if kp]

@@ -156,6 +156,9 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
     for k, v in zip(("ins_stop", "ins_walk", "bake_stop", "bake_walk", "pruned", "pruned_baked", "nodes_end", "baked_end"),
                     (int(x) for x in m.groups()) if m else [None] * 8):
         out[k] = v
+    m = re.search(r"cloud: (\d+) stops accumulated, mean (\d+) voxels of which (\d+) break the floor", err)
+    out["cloud_vox"] = int(m.group(2)) if m else None
+    out["cloud_brk"] = int(m.group(3)) if m else None
     out["readback"] = " | ".join(l.strip() for l in err.splitlines() if re.match(r"\s+(vx|vy|vyaw)\s+:|place vector:|\s+play \{", l))
     # ---- JSONL over the control phase (and, with --phase-at, the two halves around a perturbation)
     cells, xs, ys, winners = set(), [], [], set()
@@ -375,7 +378,7 @@ def main():
             ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc"),
             ("yaw_stop", "yawStop sd"), ("yaw_walk", "yawWalk sd"),
             ("saccades", "saccades"), ("novel_holds", "novelHolds"), ("bored_pct", "bored%"), ("stop_len", "stop s"),
-            ("ins_stop", "insStop"), ("bake_stop", "bakeStop"), ("pruned", "pruned"), ("pruned_baked", "prunedBaked"), ("nodes_end", "nodesEnd"), ("baked_end", "bakedEnd"),
+            ("cloud_vox", "cloudVox"), ("cloud_brk", "cloudBrk"), ("ins_stop", "insStop"), ("bake_stop", "bakeStop"), ("pruned", "pruned"), ("pruned_baked", "prunedBaked"), ("nodes_end", "nodesEnd"), ("baked_end", "bakedEnd"),
             ("rolls", "rolls"), ("rolls_skipped", "rollSkip"), ("changes", "changes"), ("prompted", "prompted"), ("detect_pct", "detect%"), ("unprompted", "unprompted"), ("orientations", "orients"), ("arrivals", "arrivals"), ("orient_timeouts", "timeouts"), ("reach_m", "reach m")]
     print(f"{'arm':34s} " + " ".join(f"{lbl:>13s}" for _, lbl in keys))
     for c in cfgs:

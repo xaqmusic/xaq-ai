@@ -39,6 +39,7 @@
 #include "IntentAdapter.hpp"
 #include "HeadAdapter.hpp"
 #include "Tof.hpp"
+#include "CloudMap.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
 #include "OgmaBrainAdapter.hpp"
@@ -1247,6 +1248,18 @@ bool g_no_backing = false;   // --no-backing: the twist brain's forward command 
 //                     so a gaze babble at a stop composes them into an egocentric point cloud
 //                     with no extra geometry.  ~1.5 kB per cast at 12.5 Hz.
 bool g_log_motor_tle = false, g_log_tof_cloud = false;
+// --cloud [VOXEL_M]: accumulate the stop's point cloud in the host (CloudMap) -- gravity-levelled,
+// de-rotated by the duck's own odometry yaw, opened when the body comes to rest and closed when the
+// stop ends.  Its reduced break profile goes to reality.proprio.cloud_in for any graph EPM that
+// declares it, and its size/mass/change signal to the JSONL as "cld".  Absent: byte-identical.
+double g_cloud_voxel = 0.0;      // > 0 = on
+// --body-predicts (2026-09-12, §17.28's missing channel): the joint brain ticks on EVERY tick,
+// not only inside a stop, so it has an honest forward-model residual while the walker drives the
+// legs.  Its learning stays off throughout -- PREDICTING is not IDENTIFYING, and §17.10's
+// drifting model was a model identified under another driver's closed loop, which this is not.
+// Its command is never applied outside the stop it already owns.  Absent: byte-identical.
+bool g_body_predicts = false;
+bool   g_log_cloud_profile = false;   // --log-cloud-profile: the 36 dims per cast, for the bench
 double g_head_vor_tau = 0.0, g_head_vor_lead = 0.0;   // --head-vor TAU LEAD: the yaw reflex in the head adapter
 double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the rate loop on the head's own gyro
 // --head-joints (Track A at the head, 2026-09-10): the head brain's four commands become the head
@@ -1298,6 +1311,15 @@ struct StopPlan {
     // R44: the plain residual dwell is a knife edge (K 1.0 → the duck stands two thirds of the run and the
     // stops never shorten; 1.5 → 10 s stops); progress is what the map's learning actually produces.
     double gaze_learn_frac = 0.0;
+    // --stop-gaze-slew RAD_PER_S (2026-09-12, O36's own hypothesis + §17.28's need): the gaze
+    // override moves toward each new bearing at this rate instead of stepping to it.  0 = step.
+    double gaze_slew = 0.0;
+    // --stop-gaze-down RAD (2026-09-12, §17.28's geometry): the CENTRE of the pitch babble,
+    // positive down.  Widening the babble does not aim it: at sd 0.2 the gaze already reaches
+    // 23 deg down, and that looks at the floor 0.2 m from the duck's feet, where nothing is.
+    // A 4 cm block at 1 m sits ~7 deg below level, so what finds it is a NARROW band held
+    // there, not a wide sweep.  0 = centred on level, byte-identical.
+    double gaze_down = 0.0;
     // --stop-orient K TURN_VX WALK_VX SECS (the orienting reflex, agreed 2026-09-12): while the gaze is still, a
     // view whose winner switches to an EXISTING node, or whose error jumps K spreads above the hold's own
     // running mean (sampled at the map's rate, the spread floored at 5 % of the mean, two samples in a row),
@@ -1333,6 +1355,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_no_backing) brain.set_no_backing(true);
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
+    CloudMap cloud(CloudMap::Params{g_cloud_voxel > 0.0 ? g_cloud_voxel : 0.04});
+    const bool cloud_on = g_cloud_voxel > 0.0;
+    if (cloud_on) std::fprintf(stderr, "  cloud: the stop's sweep accumulated at %.0f mm voxels, de-rotated by the odometry yaw\n", g_cloud_voxel * 1000.0);
     std::array<float, 4> tof_summary{};
     PlaceInputs place{};                      // the pose and the ToF in both reductions; the adapter picks the form
     std::fprintf(stderr, "place vector: %s\n", brain.place_form_desc().c_str());
@@ -1453,6 +1478,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const bool gaze_on = stop_on && g_stop.gaze_yaw_sd > 0.0;
     if (gaze_on && !head) throw std::runtime_error("--stop-gaze needs --head-graph");
     if (gaze_on && (look_on || scan_on)) throw std::runtime_error("--stop-gaze, --stop-look and --stop-scan are alternatives");
+    if (g_stop.gaze_slew > 0.0) {
+        if (!head) throw std::runtime_error("--stop-gaze-slew needs --head-graph");
+        head->set_override_slew(g_stop.gaze_slew);
+        std::fprintf(stderr, "  gaze slew: the override moves at most %.2f rad/s (O36: pitch SPEED, not pitch)\n", g_stop.gaze_slew);
+    }
     if (gaze_on) std::fprintf(stderr, "  gaze babble at stops: steps sd yaw %.2f pitch %.2f rad, hold %.1f s, up to %.1f s while the view is %s; %d known gazes in a row end the stop\n",
                               g_stop.gaze_yaw_sd, g_stop.gaze_pitch_sd, g_stop.gaze_hold_s, g_stop.gaze_max_s,
                               g_stop.gaze_learn_frac > 0.0 ? "still being learned (its error above F x arrival)" : g_stop.gaze_residual_k > 0.0 ? "more surprising than the map expects" : "unbaked", g_stop.gaze_quiet);
@@ -1481,6 +1511,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // the map's bookkeeping at stops (the operator, 2026-09-12: watch the baking): views inserted and baked at
     // stops, prunes, and whether a pruned id was ever baked (must stay 0 — the map's health sweep spares baked)
     int ins_stop = 0, bake_stop = 0, ins_walk = 0, bake_walk = 0, pruned_total = 0, pruned_baked = 0, node_mark2 = 0, baked_mark = 0;
+    long cloud_vox_sum = 0, cloud_brk_sum = 0; int cloud_n = 0;   // the cloud's own read-back, per stop
     auto end_stop_drive = [&](bool to_walker) {
         // the joint brain stops driving: freeze it, invalidate its pairing, and give the walker a
         // clean start from the pose the body is actually in (as the rescue hand-back does)
@@ -1510,6 +1541,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (orient != Orient::None) { orient = Orient::None; ++orient_timeouts; }
             if (stop_phase != StopPhase::None) {          // the stop ended in a fall
                 scan_stop(); if (looking) look_stop();
+                if (cloud_on) cloud.close();
                 if (g_stop.map_on_stop) brain.set_map_learning(false);
                 if (stop_phase == StopPhase::Brain) end_stop_drive(false);
                 stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
@@ -1540,6 +1572,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "  move at %.0f s: %s -> (%.2f, %.2f)\n", mv.at_s, mv.name.c_str(), mv.x, mv.y);
         }
         if (has_clock) body.spin_joint("clock_hand", kClockRadPerS);
+        // The body predictor: observe every tick, frozen, so a stumble has somewhere to register.
+        // Skipped while the joint brain already drives (StopPhase::Brain ticks it itself below).
+        if (g_body_predicts && stander && stop_phase != StopPhase::Brain) (void)stander->act(body);
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         if (driver == Driver::Brain) command.twist = twist;
         if (stop_on) {
@@ -1581,8 +1616,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (stander) for (double v : stander->attitude_error()) att = std::max(att, v);
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
-                        if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = 0.0; scan_target = 0.0; }
+                        if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = g_stop.gaze_down; scan_target = 0.0; }
                         ticks_in_stop = 0; rolled_this_stop = false;
+                        // the body is still: this is the frame the cloud can be anchored in
+                        if (cloud_on) cloud.open(odom.yaw(), uint64_t(t));
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
@@ -1705,7 +1742,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         ++saccades; look_held = 0; look_novel_seen = false;
                         gaze_yaw   = std::clamp(gaze_yaw + g_stop.gaze_yaw_sd * gaze_n(gaze_rng), -0.7, 0.7);
                         if (g_stop.gaze_pitch_sd > 0.0)
-                            gaze_pitch = std::clamp(gaze_pitch + g_stop.gaze_pitch_sd * gaze_n(gaze_rng), -g_stop.gaze_pitch_sd * 0.7, g_stop.gaze_pitch_sd * 2.0);   // + is down (measured: the ToF's floor fraction rises with the joint)
+                            gaze_pitch = std::clamp(gaze_pitch + g_stop.gaze_pitch_sd * gaze_n(gaze_rng),
+                                                    g_stop.gaze_down - g_stop.gaze_pitch_sd * 0.7,
+                                                    g_stop.gaze_down + g_stop.gaze_pitch_sd * 2.0);   // + is down (measured: the ToF's floor fraction rises with the joint)
                         if (gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
                     }
                 } else if (looking) {
@@ -1732,6 +1771,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (looking && stop_left <= 0 && stop_event[0] == '\0') { /* ended by the look: named below */ }
                     if (looking) { look_stop(); }
                     if (g_stop.map_on_stop) brain.set_map_learning(false);
+                    if (cloud_on) { cloud_vox_sum += cloud.voxels(); cloud_brk_sum += cloud.break_voxels(); ++cloud_n; cloud.close(); }
                     stop_len_sum += (t - stop_started_tick) / kBrainHz; ++stop_len_n;
                     if (stop_phase == StopPhase::Brain) { ++stop_survived; end_stop_drive(true); }
                     const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1 && orient == Orient::None;
@@ -1844,10 +1884,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 tof.sense(body, p[2]);
                 tof_summary = tof.summary();
                 ++tof_ticks;
+                if (cloud.is_open()) cloud.add(tof.zones(), yaw, p[2], uint64_t(t));
             }
             {
                 place.pose = {float(p[0] / 2.0), float(p[1] / 2.0), float(std::cos(yaw)), float(std::sin(yaw))};
                 place.head_yaw = float((body.joint_positions()[7] - kHomePose[7]) / 1.4);   // the head-yaw joint / its range
+                place.cloud_valid = cloud.is_open() && cloud.voxels() > 0;
+                if (place.cloud_valid) place.cloud = cloud.break_profile();
                 const auto col = tof.column_hit();
                 for (int i = 0; i < Tof::kCols; ++i) place.cols[size_t(i)] = float(col[size_t(i)] / Tof::kMaxRangeM);
                 const auto& z = tof.zones();
@@ -1904,7 +1947,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1, brain.heading(), brain.heading_ref());
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
-            if (g_log_motor_tle) std::printf(",\"mtle\":%.5f", brain.motor_tle());
+            if (g_log_motor_tle) {
+                std::printf(",\"mtle\":%.5f", brain.motor_tle());
+                if (stander) std::printf(",\"btle\":%.5f", stander->motor_tle());
+            }
+            if (cloud_on && cloud.is_open())
+                std::printf(",\"cld\":[%d,%llu,%d,%.4f]", cloud.voxels(),
+                            static_cast<unsigned long long>(cloud.points()), cloud.break_voxels(),
+                            cloud.new_fraction(uint64_t(t), 50));
+            if (g_log_cloud_profile && cloud_on && cloud.is_open() && t % 4 == 0) {
+                const auto prof = cloud.break_profile();
+                std::printf(",\"cldp\":[");
+                for (size_t k = 0; k < prof.size(); ++k) std::printf("%s%.4f", k ? "," : "", prof[k]);
+                std::printf("]");
+            }
             if (g_log_tof_cloud && t % 4 == 0) {
                 std::printf(",\"tofp\":[");
                 const auto& zz = tof.zones();
@@ -1999,6 +2055,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "  map baking: inserted %d at stops / %d on walks, baked %d at stops / %d on walks, pruned %d (of which baked %d); %d nodes, %d baked at the end\n",
                          ins_stop, ins_walk, bake_stop, bake_walk, pruned_total, pruned_baked, brain.map_node_count(), brain.map_baked_count());
         }
+        if (cloud_n > 0)
+            std::fprintf(stderr, "  cloud: %d stops accumulated, mean %ld voxels of which %ld break the floor\n",
+                         cloud_n, cloud_vox_sum / cloud_n, cloud_brk_sum / cloud_n);
         if (orient_on || roll_on || walk_on)
             std::fprintf(stderr, "  orient: %d rolls (%d skipped at a surface), %d changes (%d within 3 s of a roll, %d unprompted), %d orientations, %d arrivals, %d timeouts, mean reach %.2f m to the roll\n",
                          rolls, rolls_skipped, changes, changes_prompted, changes - changes_prompted, orientations, arrivals, orient_timeouts, reach_n ? reach_sum / reach_n : 0.0);
@@ -2205,6 +2264,10 @@ int main(int argc, char** argv) {
             g_stop.roll_delay_s = std::stod(next("--roll-past")); g_stop.roll_speed = std::stod(next("--roll-past"));
         } else if (a == "--stop-gaze-learn") {
             g_stop.gaze_learn_frac = std::stod(next("--stop-gaze-learn"));
+        } else if (a == "--stop-gaze-down") {
+            g_stop.gaze_down = std::stod(next("--stop-gaze-down"));
+        } else if (a == "--stop-gaze-slew") {
+            g_stop.gaze_slew = std::stod(next("--stop-gaze-slew"));
         } else if (a == "--stop-gaze-residual") {
             g_stop.gaze_residual_k = std::stod(next("--stop-gaze-residual"));
         } else if (a == "--stop-gaze") {
@@ -2223,6 +2286,13 @@ int main(int argc, char** argv) {
             g_head_rate_k = std::stod(next("--head-rate")); g_head_rate_tau = std::stod(next("--head-rate"));
         } else if (a == "--head-vor") {
             g_head_vor_tau = std::stod(next("--head-vor")); g_head_vor_lead = std::stod(next("--head-vor"));
+        } else if (a == "--body-predicts") {
+            g_body_predicts = true;
+        } else if (a == "--cloud") {
+            g_cloud_voxel = 0.04;
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_cloud_voxel = std::stod(next("--cloud"));
+        } else if (a == "--log-cloud-profile") {
+            g_log_cloud_profile = true;
         } else if (a == "--log-motor-tle") {
             g_log_motor_tle = true;
         } else if (a == "--log-tof-cloud") {

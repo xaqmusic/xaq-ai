@@ -80,6 +80,13 @@ public:
     // W3b: the gaze babble also moves head_pitch (looking down puts the floor's objects in more rows);
     // the level prior's pitch command is replaced while on, its learning frozen through the stop.
     void set_pitch_override(bool on, double target) { pitch_override_ = on; pitch_target_ = target; }
+    // SLEW LIMIT on the override (2026-09-12, O36's own hypothesis): the gaze moves toward its
+    // target at no more than this many rad/s instead of stepping to it.  Measured motivation: a
+    // pitch babble at sd 0.2 rad tipped the R19 stand at 24 of 66 hand-backs (R42, §17.21) while
+    // sd 0.08 held 65 of 66 -- the operator's read was that pitch SPEED is the constraint, not
+    // pitch.  And the ToF studies (§17.28) need the gaze lower: floor objects are found in 3
+    // sweeps of 11 because a 4.6 deg babble rarely dwells on the floor.  0 = step, byte-identical.
+    void set_override_slew(double rad_per_s) { slew_ = rad_per_s; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
     // H2 protocol: identify standing (H1, saved), act walking (loaded here, the prior on).
@@ -100,6 +107,9 @@ private:
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
     bool yaw_override_ = false; double yaw_target_ = 0.0;
     bool pitch_override_ = false; double pitch_target_ = 0.0;
+    double slew_ = 0.0;                      // rad/s cap on the override's own motion; 0 = step (legacy)
+    double yaw_held_ = 0.0, pitch_held_ = 0.0;   // where the slewed override has actually got to
+    bool   slew_primed_ = false;
     double vor_tau_ = 0.0, vor_lead_ = 0.0, vor_state_ = 0.0;
     double rate_k_ = 0.0, rate_tau_ = 0.0, rate_state_ = 0.0;
     // the phase feed-forward

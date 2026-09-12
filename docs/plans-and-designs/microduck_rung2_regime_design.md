@@ -2617,3 +2617,95 @@ not in its input — object work belongs downstream of the sweep. De-rotation be
 gaze babble's pitch decides whether floor objects are found at all, which puts **O36 on the critical
 path** rather than beside it. And the viewpoint ceiling says the sensor line and the behaviour line
 are one line: novelty-toward-things needs a duck that travels.
+
+### 17.29 The four steps out of §17.28 — the cloud in the host, the gaze null, the cloud vocabulary, and a body that notices (R49–R51, 2026-09-12)
+
+The operator's go on the order §17.28 proposed. Each is guarded; each landed; two worked, one is a
+null with a bonus finding, and one cannot be settled on data this duck can produce.
+
+**Step 1a — the cloud moves into the host. `WORKING` as substrate.** `mj_host/src/CloudMap.{hpp,cpp}`:
+a voxel-hashed occupancy cloud at 4 cm, opened when the body comes to rest, closed when the stop
+ends, accumulating `TofZone::point_level` turned back by (yaw − anchor_yaw) from the contact
+odometry. Position is deliberately not corrected (0.9 cm of drift is below a voxel). It exposes its
+size, its floor-break mass, the `new_fraction` change signal, and a 36-dim **break profile** — 8
+azimuth sectors × (nearest break range, its height, its vertical extent, its mass) + 4 globals —
+published on `reality.proprio.cloud_in` for any graph EPM that declares it. `--cloud` absent
+reproduces the pre-change R46 run byte-for-byte (md5 `e4b5c3fa…`). Read-back: **11 stops per run,
+mean 883 voxels of which 124 break the floor.** The profile is per-sector arithmetic, not a
+clusterer — the vocabulary over it stays the EPM's (§0 rule 1).
+
+**Step 1b — aiming the gaze at the floor. `NULL`, and O36 does not reproduce.** Two levers, both
+built (`--stop-gaze-slew` on the head override, `--stop-gaze-down` as the pitch babble's centre),
+both landed (head-pitch command reaching +0.400 rad against the base's +0.229), neither moves the
+floor-object signal:
+
+| n = 6 | stands held | cloud voxels | break voxels / stop |
+|---|---|---|---|
+| pitch sd 0.08 (base) | **65 / 65** | 890 | 127.0 ± 27.1 |
+| pitch sd 0.20 | **65 / 65** | 1057 | 137.5 ± 10.8 |
+| pitch sd 0.20 + slew 0.6 rad/s | **65 / 65** | 1085 | 132.8 ± 39.8 |
+| pitch sd 0.05, centred 0.13 rad down | **65 / 65** | 913 | 113.3 ± 17.5 |
+| pitch sd 0.05, centred 0.22 rad down | **65 / 65** | 822 | 144.0 ± 23.6 |
+
+Break voxels move less than their own spread in every arm. Measured properly — points per sweep on
+a labelled block — the downward bias gives 43.2 → 58.7 (+36 %) on three stops, which is a direction
+and not a result. The geometry says why: at pitch sd 0.2 the gaze already reaches 23° down, and
+*that looks at the floor 0.2 m from the duck's feet*, where nothing is; a 4 cm block at a metre sits
+7° below level, and the band that finds it is narrow and already inside the sensor's cone. **The
+gaze was never the binding constraint.** Balls stay invisible at every gaze tried (0.5–1.2 points
+per sweep, found in 1 sweep of 16).
+
+The bonus finding is worth more than the lever: **O36's regression does not reproduce.** R42 measured
+24 of 66 stands held at pitch sd 0.2; on the R43 stack the same amplitude holds **65 of 65**, with
+and without a slew limit. The fix was not a slew — it was R43's dwell rule. O36 is closed by
+measurement, not by a lever, and the slew's own contribution is unproven.
+
+**Step 2 — an EPM over the cloud. The best vocabulary yet; the pose question still unanswerable.**
+The `cloudp` view (the host's own 36-dim profile) against the two frame views, one EPM each over the
+same stop frames. On a single seed it looked like mastery — I(W;O) 0.945, block F1 0.97, ball F1 1.00
+— and that reading is **wrong**: the cloud exists only while the duck stands, so the frames carry
+exactly *one pose per object*, `I(W;O | pose)` is 0.000, and the vocabulary is a stop-identity code.
+Pooling six runs into one EPM raises the ceiling to 3–8 poses per object and gives the honest table:
+
+| pooled, 6 seeds | nodes | baked | switch/min | I(W;O) | I(W;O \| pose) | F1 block / ball / chair / shelf |
+|---|---|---|---|---|---|---|
+| **cloudp** (36) | 16 | **16** | **7** | **1.546** | **0.128** | **0.91 / 0.90 / 0.94 / 0.96** |
+| cols8 (8) | 21 | 18 | 20 | 1.216 | 0.093 | 0.81 / 0.70 / 0.78 / 0.76 |
+| full64 (64) | 16 | 15 | 15 | 0.768 | 0.071 | 0.58 / 0.46 / 0.62 / 0.40 |
+
+The ordering is consistent and the cloud wins every column. Two honest limits on it: the conditional
+information still collapses 92 %, and with 3–8 pose cells per object there is almost no within-pose
+object variation left for it to explain — **the test is not yet runnable, it is only less unrunnable
+than before**. What *is* clean is the vocabulary's shape: **16 symbols, every one baked, changing
+seven times a minute** against the place map's 60–130 on the walk. That is the first thing in this
+duck stable enough to be a symbol, whatever it turns out to denote. (Pooling is a probe, not a
+trajectory: the duck teleports between runs, which is why 125 winner ids appear across a run that
+ends with 16 nodes.)
+
+**Step 3 — a body that notices. `WORKING` as a channel, `PARTIAL` as a detector.** `--body-predicts`
+ticks the joint brain on every tick with its learning off, so it has an honest forward-model residual
+while the walker drives. Predicting is not identifying: §17.10's drifting model was a model
+*identified* under another driver's closed loop, which this is not, and the command is never applied
+outside the stop it already owns. Across 6 seeds and **600 contact onsets** while the walker drives:
+
+| channel | peak at contact | before contact | above its own p99 |
+|---|---|---|---|
+| joint brain `btle` (new) | **+1.05 sd** | +0.10 sd | **15 %** |
+| twist brain `mtle` (all §17.28 had) | +0.39 sd | — | 3 % |
+
+A channel 2.7× stronger where there was effectively none, and behaviourally free: at n = 6 nothing
+moves (walls 3+/3−, rescues tie, stands 11/11 on every seed, `straight` +0.03 incidentally). It is
+not yet a clean detector — 15 % of contacts clear p99 — and the reason is visible in the numbers:
+the frozen model sits at a baseline of 1.55 with a spread of 0.13, so its dynamic range is
+compressed. The instantaneous residual rather than the EMA remains the open one-line fix.
+
+**Step 4 — travel. Not started, and now indicted three times over.** §17.28's viewpoint ceiling, step
+1b's finding that the gaze is not the constraint, and step 2's unanswerable conditional all reduce to
+the same sentence: *the duck does not go anywhere, so it never sees the same thing twice from a
+different place.* Every remaining question about an object vocabulary is downstream of that.
+
+**Verdicts.** 1a `WORKING` (substrate, guarded, read-back live). 1b `NULL` on both levers, with
+**O36 `RESOLVED` by measurement**. 2 `WORKING` on vocabulary quality, `DEFERRED` on the object-vs-pose
+question until the duck travels; re-use context: any run with tens of poses per object. 3 `WORKING`
+as a channel, `PARTIAL` as a detector; follow-up is the instantaneous residual. Nothing promoted;
+scale is n = 6 for every A/B and 600 onsets for step 3.
