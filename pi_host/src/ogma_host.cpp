@@ -376,6 +376,12 @@ int main(int argc, char** argv) {
         timespec next{};
         clock_gettime(CLOCK_MONOTONIC, &next);
         long ticks = 0, overruns = 0;
+        // ⚠ A SENSOR THAT PUBLISHED NOTHING LOOKS EXACTLY LIKE A HEALTHY ONE from
+        // outside the process, so the belly channel counts itself and says so at exit.
+        // "It ran with --tof and did not crash" is not evidence that a reading reached
+        // the bus (CLAUDE.md §3.2: did the consumer actually fire?).
+        long tof_reads = 0, tof_valid = 0;
+        ogma::hw::Vl53l0x::Reading tof_last{};
 
         while (g_run && (a.max_ticks == 0 || ticks < a.max_ticks)) {
             next.tv_nsec += period_ns;
@@ -444,6 +450,9 @@ int main(int argc, char** argv) {
             if (tof) {
                 ogma::hw::Vl53l0x::Reading r;
                 if (tof->read_ready(r)) {
+                    ++tof_reads;
+                    if (r.status == ogma::hw::Vl53l0x::Status::Valid) ++tof_valid;
+                    tof_last = r;
                     // ⚠ THE STATUS IS THE CHANNEL, not a detail.  A reading that failed
                     // the part's sigma/signal checks is not large or small — it is
                     // ARBITRARY, and at the consumer it looks exactly like a good one.
@@ -581,6 +590,17 @@ int main(int argc, char** argv) {
         if (!cam.last_error().empty())         std::fprintf(stderr, "ogma_host: camera died: %s\n", cam.last_error().c_str());
         if (!rangefinder.last_error().empty()) std::fprintf(stderr, "ogma_host: rangefinder died: %s\n", rangefinder.last_error().c_str());
         std::printf("ogma_host: stopped after %ld ticks (%ld overruns)\n", ticks, overruns);
+        if (tof) {
+            std::printf("ogma_host: belly ToF — %ld reads, %ld valid (%.1f%%), last "
+                        "raw %u mm -> %.3f m (status %s, signal %.2f ambient %.2f "
+                        "spads %.1f) -> ground_clearance %.4f\n",
+                        tof_reads, tof_valid,
+                        tof_reads ? 100.0 * double(tof_valid) / double(tof_reads) : 0.0,
+                        unsigned(tof_last.raw_mm), tof_last.distance_m,
+                        ogma::hw::Vl53l0x::status_name(tof_last.status),
+                        tof_last.signal_mcps, tof_last.ambient_mcps, tof_last.spads,
+                        ogma::body::ground_clearance(tof_last.distance_m, calib.gc_stand_m));
+        }
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ogma_host: %s\n", e.what());
