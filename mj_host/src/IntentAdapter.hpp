@@ -111,6 +111,10 @@ public:
     std::array<double, 3> last_twist() const { return last_twist_; }
     std::array<float, 3> last_sensed() const { return last_sensed_; }
     nlohmann::json brain_state() const;
+    // The twist brain's OWN forward-model surprise (diag_lite motor_tle).  The only body-error
+    // channel live while the walker drives the legs -- the joint brain is not even ticked then
+    // (main.cpp, the W-line) -- so a stumble can only show up here.  -1 = no such module.
+    double motor_tle() const;
     std::vector<std::string> diagnostics() const;
     uint64_t ticks() const { return tick_id_; }
 

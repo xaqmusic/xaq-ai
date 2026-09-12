@@ -300,6 +300,16 @@ std::string IntentAdapter::place_form_desc() const {
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
 
+double IntentAdapter::motor_tle() const {
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_lite();
+        if (d.contains("motor_tle")) return d["motor_tle"].get<double>();
+    }
+    return -1.0;
+}
+
 void IntentAdapter::set_wander(double bored_s, double turn_deg, uint64_t seed) {
     wander_bored_s_ = bored_s; wander_turn_deg_ = turn_deg;
     wander_rng_ ^= (seed + 1) * 0x9E3779B97F4A7C15ull;

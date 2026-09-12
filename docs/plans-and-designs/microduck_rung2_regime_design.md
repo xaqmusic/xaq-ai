@@ -2530,3 +2530,90 @@ the body (`refFollow` → 0), after which the same step would be worth re-readin
 Follow-ups: the proximity-only arm above; and for O39, wall contact was the term that dominated
 achieved speed (corr −0.81), so a walk that stops hitting things is the first thing the speed
 question needed.
+
+### 17.28 The ToF studies — the sensor can carry objects, the frame cannot, and the walk is the ceiling (2026-09-12)
+
+**Asked for** (the operator, after the W5 verdicts): an EPM on the sensor's full output with its PCA
+visible; several EPMs in different roles off the same sensor; and the point cloud a head babble
+builds, watched for change. Method, tooling and re-run commands are in
+[`microduck_tof_studies.md`](microduck_tof_studies.md); figures and the written report are the
+[study page](https://claude.ai/code/artifact/468b1fff-ed27-483b-86a6-ca87d7c5459a). Everything runs
+the **shipped EPM** over recorded frames (`cpp_core/bench/epm_tof_study`), 4 runs × 1500 s, seeds 6
+and 3, 16 790 distinct casts. World-derived labels judge the vocabularies and reach no brain.
+
+**M1 — acuity. A block is one pixel.** Class mix 9 % Empty / 2 % TooClose / 27 % Floor / 62 % Hit;
+8.7 % of returns sit in the 2–10 cm height band. Per cast, zones landing in the object's own height
+band: **block 1.2, ball 2.0, chair 6.3, shelf 6.7** (seed 3 agrees: 1.8 / 1.9 / 3.8). A 4 cm block at
+1 m subtends 2.3° against 5.625° zone spacing — it falls between beams more often than on one. Found
+on the way and fixed: `TofZone::point` was in the *raw* trunk frame; `point_level` is the
+gravity-levelled one, and the correction moved ~5 % of returns out of the low-object band.
+
+**M2 — the stumble channel is blind, and the event barely happens.** `stander->act` is called only
+inside a stop, so **the joint brain is asleep for the whole walk** and nothing predicts the body
+then. The one live channel, the twist brain's `motor_tle`, reads 0.360 at object contact against
+0.300 before (**−0.11 sd**, nothing above its own p99); wall contact manages +0.28 sd over 102
+onsets. The body does register it physically — tilt 3.5° → 5.6° — so the signature exists and no
+predictor watches it. And there were **9 object contacts on seed 6, 0 on seed 3, and no falls**:
+trip-and-investigate needs the trip arranged, like a shove. Caveat that bounds this: `motor_tle` is
+an EMA (τ ≈ 20 ticks) and cannot show a 100 ms event even in principle, so this measures the
+*available* channel as blind, not the body error as absent.
+
+**S1 — the full output is two-dimensional.** PCA of the raw 64: **PC1 holds 85 %** and two components
+hold 90 % (0.89 on seed 3). A nearest-centroid readout of object class from four raw PCs scores
+**0.450 against a 0.361 majority** on seed 6, and **0.284 against 0.646** on seed 3 — worse than
+naming the commonest class. The one common mode is *how far away whatever is ahead happens to be*;
+object identity is in the residual, exactly §0 rule 2's failure. On encoders, in this new context:
+`rbf` collapses the 64 to a latent needing **2** dims for 90 % of its variance where `jl_state` keeps
+**7** — R35's 2026-09-11 finding reproduced, and the encoder question settled for anything this wide.
+
+**S2 — every view's vocabulary is a pose code.** Six EPMs on the same stream (cols8, full64,
+full64_dm, full64_norm, heights8, geom_shape). Raw mutual information with object class reaches
+0.770 and a best-node "block" detector reaches F1 0.90 against a 0.36 base rate. Condition on the
+duck's pose — 1 m cell × heading octant — and **every arm loses 85–90 %** of it:
+
+| arm | I(W;O) | given place | given pose |
+|---|---|---|---|
+| cols8 | 0.770 | 0.648 | **0.113** |
+| full64_jl | 0.705 | 0.639 | **0.099** |
+| full64_dm | 0.614 | 0.564 | 0.078 |
+| geom_shape | 0.473 | 0.423 | 0.068 |
+| heights8 | 0.469 | 0.436 | 0.107 |
+
+Seed 3 agrees (0.050–0.096 residual). Removing the common mode does bend the ratio the right way —
+with the frame mean out, location information falls further than object information (0.396 → 0.299
+against 0.394 → 0.357) — and by far too little to carry a behaviour. **And there is a ceiling no
+encoder can lift: each object is viewed from 4–13 distinct poses in thirteen minutes** (a ball from
+*one* location cell and two poses on seed 3). The duck stands 63–70 % of the run and nets ~30 cm per
+walking bout, so it never sees the same thing from two places. **The sensor study is capped by the
+behaviour problem** — the standing-still the operator saw is what starves the object vocabulary.
+
+**S3 — the cloud is the level at which a small object exists.** At a stop the gaze already babbles
+and the levelled returns compose with no extra geometry. One cast returns 52 points; the sweep
+returns **37 635**, filling 2.7× the solid angle and **36× the distinct 4 cm voxels**. Points landing
+on an object, per cast → per sweep: shelf 25.95 → 19 465; chair 2.35 → 1 765; **block 0.058 → 43.2**;
+ball 0.002 → 1.2. A block goes from one point every seventeen casts to forty-three per sweep — the
+difference between absent from the representation and present in it — but only in **3 sweeps of 11**,
+because the babble (yaw sd 0.35 rad, pitch sd 0.08) rarely dwells on the floor.
+
+Two body properties decide it: over a 56 s stop the trunk holds *position* to **0.9 cm** (the R19
+stander is that still) but its *heading* drifts **9.7°**, which smears the cloud 17 cm at a metre.
+De-rotating each cast by the duck's own odometry yaw — accurate to 0.1°, so its own to make —
+recovers 7 % more distinct voxels. Change detection on a rolling ball, 605 windows of which 22
+carried motion, at a matched 5 % false-positive rate: **single frame 18 % (AUC 0.852) → cloud 41 %
+(0.866) → de-rotated cloud 45 % (0.879)**, a 2.5× gain on the best single-frame statistic. For scale,
+R44's live detector catches a ball 42 %.
+
+**Verdicts.** M1 `WORKING` as a characterisation — the sensor resolves furniture and is at its limit
+on floor objects. M2 the stumble channel `DEAD_CODE` in the measurement sense (the predictor is not
+ticked), the event `DEFERRED` until arranged. S1 the full frame `NULL` as an object input and the
+encoder question `RESOLVED` (`jl_state`). S2 **`NULL` for every view tried, with the cause located in
+the data rather than the encoder** — re-use context: a run in which the duck travels. S3 `WORKING`
+and the constructive result of the day: the cloud, de-rotated, with the gaze aimed at the floor.
+Scale: two seeds for M1/M2/S1/S2, which replicate; one seed and 22 positive windows for the
+detection number, which is a signal.
+
+**What this changes.** An EPM on single frames cannot hold a node meaning "block", because a block is
+not in its input — object work belongs downstream of the sweep. De-rotation belongs in the host. The
+gaze babble's pitch decides whether floor objects are found at all, which puts **O36 on the critical
+path** rather than beside it. And the viewpoint ceiling says the sensor line and the behaviour line
+are one line: novelty-toward-things needs a duck that travels.

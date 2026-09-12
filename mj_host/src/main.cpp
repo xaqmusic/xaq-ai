@@ -1238,6 +1238,15 @@ std::string g_head_graph;
 // on a standing body and saves; H2 loads that into a walking run with the prior on.
 std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
+// Two INSTRUMENTS for the ToF studies (2026-09-12), both gated so every existing log stays
+// byte-comparable and the physics is untouched either way:
+//   --log-motor-tle   adds "mtle": the twist brain's own forward-model surprise, per tick.  The
+//                     stumble channel: nothing else predicts the body while the walker drives.
+//   --log-tof-cloud   adds "tofp": [[zone, x, y, z], ...] for every Hit/Floor zone on a cast
+//                     tick -- the return points ALREADY in the TRUNK frame (Tof::TofZone::point),
+//                     so a gaze babble at a stop composes them into an egocentric point cloud
+//                     with no extra geometry.  ~1.5 kB per cast at 12.5 Hz.
+bool g_log_motor_tle = false, g_log_tof_cloud = false;
 double g_head_vor_tau = 0.0, g_head_vor_lead = 0.0;   // --head-vor TAU LEAD: the yaw reflex in the head adapter
 double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the rate loop on the head's own gyro
 // --head-joints (Track A at the head, 2026-09-10): the head brain's four commands become the head
@@ -1895,6 +1904,19 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1, brain.heading(), brain.heading_ref());
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
+            if (g_log_motor_tle) std::printf(",\"mtle\":%.5f", brain.motor_tle());
+            if (g_log_tof_cloud && t % 4 == 0) {
+                std::printf(",\"tofp\":[");
+                const auto& zz = tof.zones();
+                bool first = true;
+                for (int i = 0; i < Tof::kZones; ++i) {
+                    if (zz[size_t(i)].cls != TofZone::Hit && zz[size_t(i)].cls != TofZone::Floor) continue;
+                    std::printf("%s[%d,%.4f,%.4f,%.4f]", first ? "" : ",", i,
+                                zz[size_t(i)].point_level[0], zz[size_t(i)].point_level[1], zz[size_t(i)].point_level[2]);
+                    first = false;
+                }
+                std::printf("]");
+            }
             if (stop_on) {
                 // the stop phase (0 none, 1 settling under the walker, 2 the joint brain stands, 3 the walker
                 // holds it: gate refused or handed back) and the joint brain's own attitude error
@@ -2201,6 +2223,10 @@ int main(int argc, char** argv) {
             g_head_rate_k = std::stod(next("--head-rate")); g_head_rate_tau = std::stod(next("--head-rate"));
         } else if (a == "--head-vor") {
             g_head_vor_tau = std::stod(next("--head-vor")); g_head_vor_lead = std::stod(next("--head-vor"));
+        } else if (a == "--log-motor-tle") {
+            g_log_motor_tle = true;
+        } else if (a == "--log-tof-cloud") {
+            g_log_tof_cloud = true;
         } else if (a == "--no-backing") {
             g_no_backing = true;
         } else if (a == "--save-head") {

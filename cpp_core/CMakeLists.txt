@@ -632,4 +632,8 @@ gtest_discover_tests(test_keyframe_averager_streams)
 add_executable(epm_kalman_bench bench/epm_kalman_bench.cpp)
 target_link_libraries(epm_kalman_bench PRIVATE ogma_core pthread)
 
+# epm_tof_study — the real EPM over recorded duck ToF frames (the ToF studies, 2026-09-12)
+add_executable(epm_tof_study bench/epm_tof_study.cpp)
+target_link_libraries(epm_tof_study PRIVATE ogma_core pthread)
+
 endif() # OGMA_BUILD_TESTS
