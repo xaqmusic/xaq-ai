@@ -2673,10 +2673,32 @@ Pooling six runs into one EPM raises the ceiling to 3–8 poses per object and g
 | cols8 (8) | 21 | 18 | 20 | 1.216 | 0.093 | 0.81 / 0.70 / 0.78 / 0.76 |
 | full64 (64) | 16 | 15 | 15 | 0.768 | 0.071 | 0.58 / 0.46 / 0.62 / 0.40 |
 
-The ordering is consistent and the cloud wins every column. Two honest limits on it: the conditional
-information still collapses 92 %, and with 3–8 pose cells per object there is almost no within-pose
-object variation left for it to explain — **the test is not yet runnable, it is only less unrunnable
-than before**. What *is* clean is the vocabulary's shape: **16 symbols, every one baked, changing
+The ordering is consistent and the cloud wins every column.
+
+**Correction to this section's first reading (computed 2026-09-12, after the operator asked what the
+conditional meant).** It was reported here and in §17.28 that the conditional "collapses 85–92 %" as
+though that were a deficiency of the vocabulary. It is not: it is a property of the room and the
+itinerary. The quantity the conditional can reach is **H(object | pose) = 0.130 nats** against
+H(object) = 1.731 — *pose alone fixes 93 % of what is in view*, and no vocabulary can explain
+information that is not there. Against the ceiling that actually remains, over 45 pose cells at ~634
+frames each:
+
+| view | I(W;O \| pose) | of H(O \| pose) | shuffle control |
+|---|---|---|---|
+| **cloudp** | **0.128** | **98 %** | 0.001 |
+| cols8 | 0.093 | 72 % | 0.001 |
+| full64 | 0.071 | 55 % | 0.000 |
+
+Shuffling the winner within each pose cell gives 0.001, so the estimator bias is negligible and the
+numbers are real. **The cloud vocabulary extracts essentially all of the object information that
+survives knowing the duck's pose**; the frame views get 72 % and 55 % of it. The earlier "the test is
+not yet runnable" reading was wrong — the test ran, it simply had no denominator attached.
+
+What stays true, and is a different claim: this is a *within-distribution* result. It shows the
+vocabulary uses the object information present in the poses the duck actually visited. It does **not**
+show pose-*invariance* — that a node would fire for a block from a viewpoint the duck has never
+occupied — and only travel can test that. The absolute amount at stake is also small (0.13 nats of
+1.73), for the same reason. What *is* clean is the vocabulary's shape: **16 symbols, every one baked, changing
 seven times a minute** against the place map's 60–130 on the walk. That is the first thing in this
 duck stable enough to be a symbol, whatever it turns out to denote. (Pooling is a probe, not a
 trajectory: the duck teleports between runs, which is why 125 winner ids appear across a run that
@@ -2705,7 +2727,9 @@ the same sentence: *the duck does not go anywhere, so it never sees the same thi
 different place.* Every remaining question about an object vocabulary is downstream of that.
 
 **Verdicts.** 1a `WORKING` (substrate, guarded, read-back live). 1b `NULL` on both levers, with
-**O36 `RESOLVED` by measurement**. 2 `WORKING` on vocabulary quality, `DEFERRED` on the object-vs-pose
-question until the duck travels; re-use context: any run with tens of poses per object. 3 `WORKING`
+**O36 `RESOLVED` by measurement**. 2 `WORKING` on vocabulary quality *and* on the within-pose object
+content (98 % of the available 0.130 nats, against 72 % and 55 % for the frame views); `DEFERRED` on
+pose-INVARIANCE, which is a generalisation claim this data cannot test; re-use context: any run with
+tens of poses per object. 3 `WORKING`
 as a channel, `PARTIAL` as a detector; follow-up is the instantaneous residual. Nothing promoted;
 scale is n = 6 for every A/B and 600 onsets for step 3.
