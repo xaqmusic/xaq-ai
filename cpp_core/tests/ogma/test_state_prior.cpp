@@ -25,6 +25,10 @@
 //        plant that diverges under the bare HK rule is held near 0 by the prior,
 //        THROUGH the learned model (no hand-wired feedback anywhere in the test).
 //     7. HotParamRoundTrip — on_param_change round-trips current_params.
+//     8. IsolateHoldsCToThePriorsOwnColumns — state_prior_isolate (2026-09-12, the duck's
+//        W5 lesion): the gain-0 guard, that it ACTS when on, and that the kept-column
+//        count in diag says how many columns survived (the read-back a sweep asserts on,
+//        §3.2 rule 5 — the R47 arm was only trustable because spIso said 5).
 // =============================================================================
 
 #include <gtest/gtest.h>
@@ -932,4 +936,38 @@ TEST(StatePrior, HotParamRoundTrip) {
               (std::vector<double>{-1.0, 4.0}));
     EXPECT_EQ(std::get<std::vector<double>>(cp.at("state_prior_targets")),
               (std::vector<double>{0.0, 0.2}));
+}
+
+// =============================================================================
+// 8. state_prior_isolate — C's columns held to the prior's own indices (W5).
+//    Off must be invisible; on must act; and diag must SAY how many columns it
+//    kept, because a lesion nobody can read back is a lesion nobody can trust.
+// =============================================================================
+TEST(StatePrior, IsolateHoldsCToThePriorsOwnColumns) {
+    auto pn = base_params();                                // N: prior live, param absent
+    pn["state_prior_indices"] = std::vector<double>{-1.0};
+    pn["state_prior_targets"] = std::vector<double>{0.0};
+    pn["state_prior_gain"]    = 0.8;
+    auto pz = pn; pz["state_prior_isolate"] = 0.0;          // Z: configured, off
+    auto pi = pn; pi["state_prior_isolate"] = 1.0;          // I: the lesion
+
+    Fixture N(pn), Z(pz), I(pi);
+    double maxdiff_zn = 0.0, maxdiff_iz = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        N.run_tick(t, lean); Z.run_tick(t, lean); I.run_tick(t, lean);
+        if (t < 12) continue;                               // warmup: the babble owns the command
+        for (int j = 0; j < kMotors; ++j) {
+            maxdiff_zn = std::max(maxdiff_zn, double(std::fabs(N.accel(j) - Z.accel(j))));
+            maxdiff_iz = std::max(maxdiff_iz, double(std::fabs(I.accel(j) - Z.accel(j))));
+        }
+    }
+    EXPECT_LT(maxdiff_zn, 1e-6)
+        << "state_prior_isolate=0 must be byte-identical to the param being absent (the gain-0 guard)";
+    EXPECT_GT(maxdiff_iz, 1e-4)
+        << "the lesion changed nothing — it is not reaching C (the R47 arm would have been a false null)";
+
+    EXPECT_EQ(Z.m.diag_lite()["spIso"].get<int>(), -1) << "off must read as off, not as 0 columns kept";
+    EXPECT_EQ(I.m.diag_lite()["spIso"].get<int>(), 1)
+        << "one prior index -> exactly one surviving column; the count is the read-back a sweep asserts on";
 }

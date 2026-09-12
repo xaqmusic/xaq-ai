@@ -251,6 +251,24 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
          "own self-limiting rule. 0 = legacy shared C, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_isolate", ParamMutability::HotMutable,
+         "LESION (2026-09-12, the W5 fork item (a); design doc §17.17): when 1, the "
+         "controller's columns are held to the prior's OWN indices — after every update, "
+         "C(:, i) (and Cp's, in split mode) is zeroed for every state column i that is not a "
+         "resolved state_prior_indices entry. Measured motivation at the duck's intent boundary: "
+         "part 2's Gauss-Newton step writes the FULL outer product, C(j,:) += g·prev_xᵀ, so an "
+         "error on ONE index deposits content in EVERY column of every motor's row, with no "
+         "objective behind any of it. With the heading reference standing still (R38) the twist "
+         "brain's yaw row let go of the heading error altogether and settled on whatever else "
+         "moved at the gait frequency — the right ToF column at +1.97 against the heading's "
+         "−0.12 — a saturated 2.4 Hz oscillation with |vyaw| at 0.95 of range and the heading "
+         "error parked at 2 rad. This is the DIAGNOSTIC, not the fix: if straightness jumps with "
+         "it on, the swamping is proven and the mechanism is the prior's weight rather than a new "
+         "control law. h is untouched on purpose (h reaches, C balances — the measured role "
+         "dissociation; zeroing it would be a second lever). Per-leg path only, like the prior "
+         "itself. Read back as spIso in diag_lite (columns kept; -1 = off). 0 = off, "
+         "byte-identical (the gain-0 guard).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"consolidate_gain", ParamMutability::HotMutable,
          "EARNED CONSOLIDATION (2026-09-01): anneal ALL learning rates by a factor "
          "(1 − gain·c), where c ∈ [0,1] ramps up (τ ≈ 10 s) while BOTH hold — the state "
@@ -1103,6 +1121,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_calm"]    = state_prior_calm_;
     m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
     m["state_prior_split"]   = state_prior_split_;
+    m["state_prior_isolate"] = state_prior_isolate_;
     m["state_prior_damping"] = state_prior_damping_;
     m["regime_topic"] = regime_topic_;
     m["babble_owns_a"] = babble_owns_a_;
@@ -1291,6 +1310,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_calm",    [&](auto const& v){ state_prior_calm_    = get_double(v, "state_prior_calm"); });
     apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
     apply_param(params, "state_prior_split",   [&](auto const& v){ state_prior_split_   = get_double(v, "state_prior_split"); });
+    apply_param(params, "state_prior_isolate", [&](auto const& v){ state_prior_isolate_ = get_double(v, "state_prior_isolate"); });
     apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
     apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
     apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
@@ -2699,6 +2719,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_calm")    state_prior_calm_    = get_double(value, "state_prior_calm");
     else if (key == "state_prior_calm_fixed") state_prior_calm_fixed_ = get_double(value, "state_prior_calm_fixed");
     else if (key == "state_prior_split")   state_prior_split_   = get_double(value, "state_prior_split");
+    else if (key == "state_prior_isolate") state_prior_isolate_ = get_double(value, "state_prior_isolate");
     else if (key == "state_prior_damping") state_prior_damping_ = get_double(value, "state_prior_damping");
     else if (key == "state_prior_calm_indices") state_prior_calm_indices_ = get_double_vec(value, "state_prior_calm_indices");
     else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
@@ -4587,6 +4608,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     L.C *= (1.0f - d);
                     L.h *= (1.0f - d);
                 }
+                // STATE-PRIOR ISOLATION (the W5 lesion) — LAST writer of C in the update, so
+                // nothing downstream repopulates a column the lesion has taken out.  See the
+                // state_prior_isolate docstring for what it tests and why h is spared.
+                if (state_prior_isolate_ > 0.0 && !state_prior_indices_.empty()) {
+                    if (int(prior_col_keep_.size()) != n) prior_col_keep_.assign(size_t(n), 0);
+                    else std::fill(prior_col_keep_.begin(), prior_col_keep_.end(), 0);
+                    int kept = 0;
+                    for (double di : state_prior_indices_) {
+                        int idx = int(di);
+                        if (idx < 0) idx += n;
+                        if (idx < 0 || idx >= n) continue;          // out of range: skip, as part 2 does
+                        if (!prior_col_keep_[size_t(idx)]) { prior_col_keep_[size_t(idx)] = 1; ++kept; }
+                    }
+                    if (kept > 0) {                                  // every index out of range = no lesion
+                        for (int i = 0; i < n; ++i) {
+                            if (prior_col_keep_[size_t(i)]) continue;
+                            L.C.col(i).setZero();
+                            if (L.Cp.rows() == m && L.Cp.cols() == n) L.Cp.col(i).setZero();
+                        }
+                        state_prior_isolate_kept_ = kept;
+                    }
+                }
                 L.gain_ema = (1.0f - kTeleEmaAlpha) * L.gain_ema + kTeleEmaAlpha * Lp.norm();
                 L.sat_ema  = (1.0f - kTeleEmaAlpha) * L.sat_ema  + kTeleEmaAlpha * (sat / float(m));
             }
@@ -6234,6 +6277,7 @@ nlohmann::json MotorEPMv2::diag_lite() const {
         {"boredom",        boredom_},                       // sensorimotor predictability
         {"interest",       interest_},                      // curiosity drive
         {"hunger",         hunger_},                        // 0 sated → 1 starving
+        {"spIso",          state_prior_isolate_kept_},       // W5 lesion: columns C keeps; -1 = off
     };
 }
 

@@ -2400,3 +2400,73 @@ rail there is no forward-speed channel to modulate, and the 2× band the walker 
 through a body that is always turning. The body pose block is recorded as a second, untouched
 control surface (O39). Next: W5.
 
+### 17.26 W5, fork item (a) — the lesion refutes the swamping, and the reference is what will not stand still (R47, 2026-09-12)
+
+**The hypothesis under test**, §17.17's own words: the prior's Gauss-Newton step writes the full
+outer product `C(j,:) += g·prev_xᵀ`, so an error on one index deposits content in every column of
+every motor's row; hold the yaw row to the heading column and, *if straightness jumps, the swamping
+is proven and the mechanism is the prior's weight rather than a new law.*
+
+**Built.** `state_prior_isolate` (MotorEPMv2, HotMutable, default 0): after every update, C(:, i) —
+and Cp's, in split mode — is zeroed for every state column that is not a resolved
+`state_prior_indices` entry; h is spared (h reaches, C balances). Applied broader than §17.17's
+literal form, on purpose: confining the yaw row to the heading column alone would also delete the
+ToF columns, and avoidance through them is `WORKING` (§17.2) — the lesion should remove what has no
+objective behind it, not a measured mechanism. Read back as `spIso` in `diag_lite`.
+
+**Guard.** With the param absent the host reproduces the pre-change R46 run byte-for-byte —
+75 000 ticks, md5 `e4b5c3fa…` on both — which checks the gain-0 guard and the harness's
+reproducibility in one go. Arm: `--arm iso:motor_epm_intent.state_prior_isolate=1` on the R43 W3c
+stack (**not** the R44 one: the orienting scaffold owns 40 % of walking ticks there and would mask
+the lever). n = 6, 1500 s, control phase 700–1500 s. `spIso 5` on the twist brain, −1 on the head
+and stander brains — the lever landed, on the module it was aimed at and no other.
+
+| n = 6, paired | straight | hdgErr (rad) | \|vyaw\| | yawFlip/min | walls/min | path m |
+|---|---|---|---|---|---|---|
+| base (R43 W3c) | 0.09 ± 0.02 | 1.66 ± 0.09 | 0.95 ± 0.01 | 69 ± 17 | 14.8 ± 11.8 | 49.6 ± 9.0 |
+| **iso** (the lesion) | **0.08 ± 0.02** (Δ −0.01, t −3.5, **1+/5−**) | 1.63 ± 0.13 (t −0.8) | 0.89 ± 0.05 (t −3.7) | 57 ± 23 (t −1.4) | 22.0 ± 16.9 (5+/1−) | 40.2 ± 5.7 (0+/6−) |
+
+Straightness did not jump; it fell, on five of six seeds, and the body walked less and hit more.
+**`REGRESSION`, and the hypothesis is refuted** — with a mechanism, which is the useful part.
+
+**Why, in three measurements.**
+
+1. **The command was already aimed, and the lesion is what broke the aim.** Counting ticks where
+   the yaw command opposes the heading error: base **68.2 %** (62–79 % on every one of six seeds,
+   n = 84 k), lesion **43.9 %** — below a coin flip, and wild across seeds (6, 22, 37, 60, 67,
+   75 %). The reason is in the step's own algebra: `C(j,:) += g·prev_xᵀ` spreads the aim across the
+   *whole* state vector, so the command contribution is ≈ g·(prev_x·x) rather than one column's
+   product. **The cross-talk columns are where the heading feedback lives; the "swamping" is the
+   mechanism, not the defect.** This also re-motivates fork item (b) — the model-implied step
+   computes the aim explicitly instead of accumulating it — and it is untouched by this result.
+2. **The body does turn.** Achieved yaw rate at full command, from the unwrapped own-heading over
+   1 s windows: **0.36 rad/s at vx < 0.05** and **0.47 rad/s at vx > 0.20**, monotone and correctly
+   signed across the whole vx × vyaw grid, in both arms. (§17.24's "the walker does not turn on a
+   yaw command alone, 0.03 rad/s" is a *standing* hand-off number and does not carry to a walking
+   body — an inference worth correcting here, since it nearly became the diagnosis.) Also, for
+   O39: the duck turns half again as fast while moving, so **yaw authority and forward speed are
+   one channel, not two.**
+3. **The reference will not stand still, and it moves the way the body moves.** It jumps > 0.5 rad
+   **90 times a minute**, and — the number this section adds — it **follows the body at +0.50 rad
+   per radian turned** (0.5 s steps, jumps excluded, n = 48 k). Half of every correction the duck
+   makes is absorbed by its target turning with it. Inside quiet windows (≥ 2 s, no step above
+   0.1 rad) the error is 1.65 rad at the start and 1.68 rad two seconds later, closing on **44 %**
+   of windows, with \|vyaw\| at 0.95. A saturated, correctly-aimed command against a target that
+   retreats at half the rate it is chased.
+
+A fourth, smaller correction: the efference term is real but weaker than §17.17 read. Comparing the
+command with the *simultaneous* yaw rate scores 72 %, but the command causes that rate — the
+comparison is partly a tautology. Against the rate of 0.4 s **earlier** it is 65–68 %.
+
+**The instrument.** `refFollow` is now a sweep column (`l2_sweep.py`): radians of reference motion
+per radian of body turn, over 0.5 s steps with jumps excluded. ~0 is a target in the world, which
+turning closes; ~1 is a target that turns with the body, which turning cannot. **Any fix to this
+line is judged on moving it toward 0**, and neither §17.16's fork items 1 and 2 (`commit_hold`,
+`lookahead` — both `REGRESSION`) nor R38's quiet reference were ever measured against it.
+
+**Verdict.** Fork item (a) `REGRESSION`; re-use context: a config whose prior has *one* index, where
+the distributed aim has nowhere else to go. The yaw channel's controller is exonerated — it aims,
+and the body answers it. **The defect is upstream, in what sets the reference**, which is the play
+loop's target on a map whose winner switches 60 times a minute. Next is the operator's call between
+fork item (b) (the model-implied step, now the better-motivated of the two) and a reference-side
+lever judged on `refFollow`.

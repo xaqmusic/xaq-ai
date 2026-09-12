@@ -1560,6 +1560,9 @@ private:
     std::vector<double> state_prior_calm_indices_;  // the key's own indices (empty = all prior indices)
     double state_prior_calm_fixed_ = 0.0;       // >0 = pin the multiplier (designed gate, tuned magnitude)
     double state_prior_split_  = 0.0;           // 1 = prior writes its OWN matrix Cp; HK keeps C
+    double state_prior_isolate_ = 0.0;          // 1 = C's columns held to the prior's own indices (the W5 lesion)
+    int    state_prior_isolate_kept_ = -1;      // read-back: columns kept; -1 = never applied
+    std::vector<char> prior_col_keep_;          // scratch for the mask (no per-tick allocation)
     double state_prior_damping_ = 0.0;          // L2 brake on Cp ALONE (the split's whole point)
     // R1: the regime socket
     std::string regime_topic_;                  // RealityToken source; empty = banks off, byte-identical

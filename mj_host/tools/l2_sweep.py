@@ -178,6 +178,15 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
     tooclose = tle_sum = 0.0; novel = 0; escaped = 0; steer_avoid = steer_play = 0
     hist = {"walk": 0, "stopW": 0, "stand": 0, "resc": 0}       # W0: the behaviour histogram
     yaw_stop, yaw_walk = [], []                                    # W2: the head-yaw joint (policy index 7) at stops vs walking
+    # W5 (the twist brain's yaw channel, design doc §17.17): the instruments that measured it NOT
+    # regulating -- the heading error it is held to, how hard it commands, and how often it changes
+    # its mind.  Walking ticks only (a stop zeroes the twist; a rescue is not the brain's).
+    hdg_err = 0.0; vyaw_abs = 0.0; vx_cmd = 0.0; nyaw = 0; yaw_flips = 0; prev_vyaw = None
+    # refFollow (2026-09-12, W5): how many radians the heading REFERENCE moves per radian the
+    # body turns, over 0.5 s steps where the reference did not jump.  ~0 = a target in the world
+    # (turning closes the error); ~1 = a target that turns with the body, which turning cannot
+    # close.  Measured +0.50 on the W3c stack: half of every correction is cancelled.
+    ref_win = []; rf_h = []; rf_r = []
     ph = {"before": {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()},
           "after":  {"cells": set(), "walls": 0, "n": 0, "prev_wall": 0, "nodes": set()}}
     for line in p.stdout.splitlines():
@@ -198,6 +207,20 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         hist["resc" if drv == "scaffold" else "stand" if drv == "stand" else "stopW" if sp else "walk"] += 1
         q = r.get("q")
         if q and drv != "scaffold": (yaw_stop if sp else yaw_walk).append(float(q[7]))
+        if drv == "walk" and not sp:
+            tw = r.get("twist"); hd = r.get("hdg")
+            if tw and hd and len(hd) >= 2:
+                e = float(hd[0]) - float(hd[1])
+                e = (e + math.pi) % (2.0 * math.pi) - math.pi       # the error is an ANGLE: wrap it
+                hdg_err += abs(e); vyaw_abs += abs(float(tw[2])); vx_cmd += float(tw[0]); nyaw += 1
+                if prev_vyaw is not None and prev_vyaw * float(tw[2]) < 0.0: yaw_flips += 1
+                prev_vyaw = float(tw[2])
+                ref_win.append((float(hd[0]), float(hd[1])))
+                if len(ref_win) > 25:
+                    h0, r0 = ref_win[-26]; h1, r1 = ref_win[-1]
+                    dh = (h1 - h0 + math.pi) % (2*math.pi) - math.pi
+                    dr = (r1 - r0 + math.pi) % (2*math.pi) - math.pi
+                    if abs(dr) <= 0.5: rf_h.append(dh); rf_r.append(dr)   # a jump is not a follow
         x, y = float(r["x"]), float(r["y"])
         xs.append(x); ys.append(y)
         cells.add((math.floor(x / CELL_M), math.floor(y / CELL_M)))
@@ -242,6 +265,11 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         "head_w_rms": math.sqrt(hw2 / nh) if nh else float("nan"), "head_g_dev": math.sqrt(hg2 / nh) if nh else float("nan"),
         "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
         **{f"{k}_pct": 100.0 * v / max(1, n) for k, v in hist.items()},
+        "hdg_err": hdg_err / nyaw if nyaw else float("nan"),
+        "ref_follow": _slope(rf_h, rf_r),
+        "vyaw_abs": vyaw_abs / nyaw if nyaw else float("nan"),
+        "vx_cmd": vx_cmd / nyaw if nyaw else float("nan"),
+        "yaw_flips": yaw_flips * 60.0 * 50.0 / nyaw if nyaw else float("nan"),
         "yaw_stop": statistics.pstdev(yaw_stop) if len(yaw_stop) > 1 else float("nan"),
         "yaw_walk": statistics.pstdev(yaw_walk) if len(yaw_walk) > 1 else float("nan"),
     })
@@ -265,6 +293,14 @@ def _straightness(pts, window_ticks=1000):
         d = math.hypot(seg[-1][0] - seg[0][0], seg[-1][1] - seg[0][1])
         vals.append(d / p if p > 0 else 0.0)
     return statistics.median(vals) if vals else float("nan")
+
+
+def _slope(xs, ys):
+    """least squares dy/dx; the reference-follow slope (1 = the target turns with the body)."""
+    if len(xs) < 10: return float("nan")
+    mx = statistics.mean(xs); my = statistics.mean(ys)
+    sxx = sum((a - mx) ** 2 for a in xs)
+    return sum((a - mx) * (b - my) for a, b in zip(xs, ys)) / sxx if sxx else float("nan")
 
 
 def paired(a_rows, b_rows, key, better):
@@ -330,6 +366,7 @@ def main():
     print(f"\n=== LEVEL-2 A/B, {args.seeds} seeds × {args.secs} s, control phase {ctrl:.0f}–{args.secs} s ===")
     keys = [("walls_min", "walls/min"), ("contact_pct", "contact%"), ("tooclose", "tooclose"), ("path_m", "path m"),
             ("cells", "cells"), ("span", "span m²"), ("straight", "straight"), ("nodes", "nodes"), ("switch_min", "switch/min"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
+                  ("hdg_err", "hdgErr"), ("ref_follow", "refFollow"), ("vyaw_abs", "|vyaw|"), ("yaw_flips", "yawFlip/min"), ("vx_cmd", "vxCmd"),
             ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
             ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%"),
             ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev"),
@@ -348,7 +385,9 @@ def main():
         ref = cfgs[0]
         for c in cfgs[1:]:
             print(f"\n  PAIRED {c.stem} − {ref.stem}:")
-            for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("straight", "higher"), ("nodes", "higher"), ("switch_min", "-"), ("map_tle", "-"), ("rescues_min", "lower"),
+            for k, better in (("walls_min", "lower"), ("cells", "higher"), ("path_m", "-"), ("straight", "higher"), ("nodes", "higher"), ("switch_min", "-"), ("map_tle", "-"),
+                                    ("hdg_err", "lower"), ("ref_follow", "lower"), ("vyaw_abs", "lower"), ("yaw_flips", "lower"),
+                                    ("rescues_min", "lower"),
                               ("stand_pct", "-"), ("survive_pct", "higher"), ("handoffs", "lower"), ("stop_resc", "lower")):
                 print(f"    {k:12s} {paired(results[ref], results[c], k, better)}")
     if args.phase_at is not None:
