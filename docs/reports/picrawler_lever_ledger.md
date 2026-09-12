@@ -4790,8 +4790,8 @@ limp, shared-rail brownout); the INA219 quantifies the inrush margin before deci
 ### ★★★ 2026-09-11 — THE SIM-HONESTY A/B: the joint oracle was COSTING us, and one input is invisible at 6 000 ticks
 
 **Verdict: `WORKING` (signal) on `honest_joints`; `PARTIAL` (mild cost) on `honest_imu`;
-`TAUTOLOGY` on `honest_upright` at the measured horizon — a measurement outcome, not a
-verdict on the idea.** Port doc Phase 4 step (c). The switches ship gain-0 (`c09148f`),
+`NULL` — behaviorally FREE, consumer verified — on `honest_upright`.** Port doc Phase 4
+step (c). The switches ship gain-0 (`c09148f`),
 byte-identical off on a 1 200-tick continuous gate and a 4 999-tick `instant_pause` gate
 carrying 14/15 hard resets. Every arm prints a startup receipt naming its ON/off state,
 and all four were confirmed loaded before any number was read.
@@ -4884,9 +4884,40 @@ MotorEPMv2 absorbed the 25 % gain change by design (the `fwd_v` resonance divide
 own running spread); `coord_fit_accum_` does not, and is where the residual cost most
 plausibly sits.
 
+**★★ 5. `honest_upright` RE-MEASURED AT 60 000 TICKS: behaviorally FREE, and the
+consumer demonstrably fired.** n=4 × 60 000, both arms reaching **generation 2**
+(`ge_gen` 0 → 1 → 2), which is the horizon §2 above says is required.
+
+| | base | honest_upright |
+|---|---|---|
+| `ge_tilt` per seed | 0.0731 / 0.0263 / 0.0338 / 0.0408 | **0.0749 / 0.0290 / 0.0363 / 0.0431** |
+| `ge_acc` (accepts) | 2 / 1 / 1 / 1 | 2 / 1 / 1 / 1 |
+| `ge_vec` (evolved gains) | `[0.1794,1.9569,1.1386]` … | **bit-identical, all 4 seeds** |
+| all 45 seedavg metrics | — | **identical** |
+
+**The criterion sees a different world and takes the same path.** `ge_tilt` — the
+`w_tilt_sd` term, i.e. sd(upright) — is **higher in every seed** (+2.6 / +10.2 / +7.6 /
++5.5 %, mean +5.4 %), which is exactly what §5.4 predicts: the fused estimate carries
+accelerometer contamination the exact basis does not, so its variance is larger. But the
+perturbation never flipped an accept/reject decision, so the evolved gains came out
+bit-identical and behaviour with them.
+
+**This is a NULL that survives §3.2 rather than one that fails it.** Not a tautology (the
+values provably differ), not dead code (`ge_gen` = 2, `ge_acc` = 5 accepts across the four
+seeds), and the consumer was verified by telemetry rather than assumed. **Read it as: the
+attitude gap costs ~5 % of one criterion term and nothing at all of behaviour** — the
+cheapest of the three substitutions, and the one safest to take to hardware.
+
+⚠ **Scoped to the power, and the power here is a discrete-event count, not a seed count.**
+Two generations gave only **5 accept decisions across 4 seeds**; a 5 % perturbation of one
+of five weighted terms flipping none of them is weak evidence that it flips none *ever*.
+Re-use context for re-testing: more generations, a larger `w_tilt_sd`, or terrain where
+body acceleration — and therefore the accelerometer's contamination — is larger than a
+flat corridor's.
+
 **Scope and power.** n=6 × 6 000 fixed-seed is a **signal**, promote-or-kill only — not a
 finding. `honest_joints`'s `net_z` at t = 2.0 is precisely the marginal case §3.3 says to
 confirm rather than excavate; its *loud* claims are `plv_w`, `plv`, `steps` and
 `step_cv_real`, all t > 5. **Not yet observed in the UI** (§3 rule 5) and nothing is
-promoted. `honest_upright` at >= 58 000 ticks is IN_FLIGHT.
+promoted.
 

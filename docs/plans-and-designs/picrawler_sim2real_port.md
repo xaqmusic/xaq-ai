@@ -1242,8 +1242,8 @@ lives: **`cpp_core/include/ogma/body/`** (e.g. `LegKinematics`, `ImuAttitude`,
 then calls into it, and the sim's byte-identity across that swap is the gain-0 gate.
 
 **Order:** (a) ✅ `LegKinematics` + `ImuAttitude`; (b) ✅ `StrideOdometry` +
-`feet_y_gravity_cmd_imu`; (c) **NEXT** — the sim-honesty A/B on `imu`/`upright`/`joints`
-substitutes; (d) `ogma_host` on the Pi with the parts.
+`feet_y_gravity_cmd_imu`; (c) ✅ the sim-honesty A/B; (d) **NEXT** — `ogma_host` on the
+Pi with the parts.
 
 ### Step (a) · ✅ DONE — `LegKinematics` + `ImuAttitude`
 
@@ -1310,6 +1310,39 @@ first load schedule reached stance counts 2 and 3 only, and said so.
 **Nothing was wired into `pi_host` here**, and deliberately: by SPEC §1.1 there is no
 brain→servo path, and the FSRs that would feed `foot_load` are unbuilt, so there is no
 consumer for `stride_v` on the robot yet. The estimator is in place for step (d).
+
+### Step (c) · ✅ DONE 2026-09-12 — the sim-honesty A/B
+
+Three gain-0 switches (`c09148f`), measured one at a time. **Full verdicts and tables in
+the ledger, `★★★ 2026-09-11`.** What the port needs to carry forward:
+
+| substitute | verdict | what it means for the robot |
+|---|---|---|
+| `honest_joints` — servo forward model, not achieved angles | **`WORKING` (signal)** | The only joint signal hardware can have is **better**, not merely survivable: phase-locking doubles (`plv_w` t = +14.2), 61 % more steps, ~11 % more ground. Costs straightness, scrub, tilt |
+| `honest_imu` — `ego_heading` / `stride_v` / body gyro | **`PARTIAL`** | No significant distance cost; `unstable` +63 % and a small consistent turn bias — dead-reckoning drift, as expected |
+| `honest_upright` — fused attitude, not exact basis | **`NULL`, behaviorally free** | Criterion term `ge_tilt` +5.4 % (the attitude gap is real) but evolved gains bit-identical. The cheapest of the three |
+
+**Two corrections to the H3 audit table above, found by reading the config rather than the
+summary** — the table is left as written, with these noted:
+
+- **`tilt` has no consumer in `native_measured`.** The row is right about the sim
+  publishing the exact basis and wrong that it matters here.
+- **`imu` reaches MotorEPMv2 only.** GainEvolver's `handle_imu` discards every value
+  while `travel_topic` is set, and the config sets it to `stride_v`, so **the flow term
+  is already legal** — the single largest oracle exposure the legality audit recorded is
+  already closed. The row's "consumed by MotorEPMv2 AND GainEvolver" overstates it.
+
+⚠ **A HORIZON RULE THE REST OF THIS PLAN MUST RESPECT.** GainEvolver's first generation
+lands at **tick 34 020** (measured: `warmup_ticks` 10 000 + `eval_window_ticks` 12 000,
+then one per ~24 000). At the 6 000-tick standard its scoring terms read **exactly 0.0** —
+it buffers and scores nothing. **Any A/B of a GainEvolver-fed input must run ≥ 34 000
+ticks**, and the (d) test's perturbation design has to account for the same latency.
+
+**The headline for the port:** of the five oracle-fed topics, the two measured here that
+the robot must give up cost **nothing and a little**, and the one it is forced onto —
+commanded joint angles — is the one that **helps**. The gait does not depend on the
+oracles the way the audit's framing implied. Still to substitute: `distress` (carries a
+units bug) and `target_compass` (needs `vision_compass`).
 
 ## Phase 5 — Bring-up and the (d) test · recorded, not scheduled
 
