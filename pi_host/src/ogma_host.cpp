@@ -451,8 +451,13 @@ int main(int argc, char** argv) {
                     auto d = std::make_shared<ogma::ProprioToken>();
                     d->tick_id = uint64_t(ticks); d->producer_id = "host";
                     d->sensor = "belly";
-                    d->values = { float(r.distance_m), float(int(r.status)),
-                                  float(r.signal_rate_mcps), float(r.ambient_rate_mcps) };
+                    d->values.resize(6);
+                    d->values[0] = float(r.distance_m);   // offset-corrected metres
+                    d->values[1] = float(r.raw_mm);       // as the chip reported it
+                    d->values[2] = float(static_cast<uint8_t>(r.status));
+                    d->values[3] = float(r.signal_mcps);  // signal/ambient move BEFORE
+                    d->values[4] = float(r.ambient_mcps); // the status flips
+                    d->values[5] = float(r.spads);        // drop = fouled aperture
                     bus->publish("sense.belly", d);
 
                     // ...but the PROMOTED topic is published only on a good reading, and
@@ -461,15 +466,21 @@ int main(int argc, char** argv) {
                     // needs the channel then fails loudly instead of reading a plausible
                     // zero, which is the failure shape that has produced false verdicts
                     // here before.  Never substitute a number for a missing measurement.
-                    if (r.status == ogma::hw::Vl53l0x::Status::Ok) {
+                    // ⚠ `valid` and `distance_m` disagree DELIBERATELY on a bad read:
+                    // the driver reports max_range_m there, not zero, because zero maps
+                    // "saw nothing" onto "something against the belly" — the opposite
+                    // extreme and the worst available answer.  Gating on the status is
+                    // what keeps that honest floor out of a promoted lever.
+                    if (r.status == ogma::hw::Vl53l0x::Status::Valid) {
                         auto f2 = std::make_shared<ogma::ProprioToken>();
                         f2->tick_id = uint64_t(ticks); f2->producer_id = "host";
                         f2->sensor = "ground_clearance";
                         // ONE value, and the same normalizer the sim uses — the token is
                         // shape- and scale-identical to reality.proprio.ground_clearance
                         // there, so a consumer cannot tell which body it is attached to.
-                        f2->values = { float(ogma::body::ground_clearance(
-                                           r.distance_m, calib.gc_stand_m)) };
+                        f2->values.resize(1);
+                        f2->values[0] = float(ogma::body::ground_clearance(
+                                            r.distance_m, calib.gc_stand_m));
                         bus->publish("reality.proprio.ground_clearance", f2);
                     }
                 }
