@@ -2319,3 +2319,84 @@ to it, and looks), signal-strength on the detection rate. Not promoted; the oper
 the map's error and the sensor's columns; its substrate form is the approach loop of the plan's §3
 (E2) with the view-level transition surprise as its trigger, and the place cloud (§12, the operator's
 second point) is the level that should own "the scene changed". Next: the place cloud.
+
+### 17.25 The speed question: the map's error is a signal, the yaw rail is why it cannot be spent yet (R46 sweeps re-read, 2026-09-12)
+
+**The operator's question.** The duck walks at one slow pace; a speed that varied would be more
+engaging. What does the walking surface actually offer, and what should a speed be a function of?
+
+**The surface, as built.** Pollen's walker takes a 13-slot command (`Observation.hpp`): the twist
+(vx, vy, vyaw in trained ranges 0.4 / 0.3 / 1.0), the four head joints, and a **body pose block —
+`body_z`, `body_roll`, `body_pitch` — wired into the observation and set by nothing, on any run this
+project has made.** The forward speed itself is not scripted anywhere: it is a state prior,
+`state_prior_indices [0, …]` → `state_prior_targets [0.75, …]`, "I predict I am moving at 0.75 of
+the walker's vx range", descended through the identified A (§16.5). Two constants sit beside it: the
+orienting reflex's `TURN_VX` / `WALK_VX` (§17.24), a named scaffold, which is a literal fixed 0.25
+m/s for **40 % of the walking ticks** of an R44 run. The rest is the prior's own command. Below
+about 0.25 m/s the walker stands still (§16.2), so the usable forward band is ~0.25–0.5 — about 2×.
+
+**What was measured.** No new run: the R46 sweeps re-read (`reflexWalk`, n = 6, control phase
+700–1500 s, 78 526 brain-driven walking ticks), asking whether the map's error on the walk could be
+the thing a speed is a function of. With `--map-on-stop` the map does not learn while walking, so
+its TLE there is a clean read — *do I recognise where I am* — with nothing written back.
+
+| mapTLE, by phase | mean ± sd | p5 | p95 |
+|---|---|---|---|
+| at stops | 0.139 ± 0.093 | 0.022 | 0.324 |
+| the orient approach | 0.215 ± 0.101 | 0.088 | 0.404 |
+| **the brain-driven walk** | **0.299 ± 0.148** | 0.107 | 0.596 |
+
+Ordered the way the mechanism predicts — the map knows the places it learned at best — with ~5× of
+range and no saturation at either end. It is **not a wall proxy**: corr(ToF proximity ahead, mapTLE)
+= +0.17. And it carries **place that replicates**: a 0.25 m cell's value agrees across *separate*
+visits at split-half r = **+0.44** over 192 cells, between-cell sd 0.11.
+
+**The EMA, and the artifact it nearly produced.** The signal dithers — the map's winner switches
+143/min on the walk against 23/min at a stop, and TLE on a switch tick is 0.422 against 0.293 on a
+held one, so the transition term is most of the chatter. Smoothing looked like it bought a great
+deal, and did not:
+
+| | variance share between cells (ICC) | split-half r **across separate visits** |
+|---|---|---|
+| raw | 0.386 | **+0.438** |
+| EMA τ 0.5 s | 0.479 | +0.446 |
+| EMA τ 2 s | 0.588 | +0.405 |
+| EMA τ 5 s | 0.606 | +0.431 |
+| EMA τ 10 s | 0.609 | — |
+
+**The ICC column is an artifact and the right-hand column is the measurement.** A cell is visited in
+contiguous runs of ticks, so an EMA shrinks within-cell variance mechanically, whatever it does to
+the content; tested across separate visits the gain is flat. An EMA adds **no place information** to
+this signal. Its real job is narrower and still worth doing: at τ ≈ 0.5–1 s it removes the
+transition spikes (raw autocorrelation 0.64 at 0.1 s, 0.22 at 1 s, 0.04 at 2 s) without touching
+what replicates, and past ~1 s it buys only lag. A second term to subtract: mapTLE drifts
+**0.383 → 0.273** across the control phase as the map bakes — the same size as the between-cell sd —
+so the signal a drive should read is TLE against its own slow running average (`map_tle_long_`,
+τ 3000 ticks, already in `IntentAdapter` for the wander rule), not TLE.
+
+**Why the lever cannot be built on it yet.** The forward command does not reach the body:
+
+| on the walk, n = 6 | |
+|---|---|
+| \|vyaw\| > 0.9 | **94.3 % of walking ticks** (mean 0.968; sign flips 43/min) |
+| \|vyaw\| < 0.4 | 1.2 % — **no 2 s window in six seeds** |
+| corr(commanded vx, achieved speed) | +0.18 (1–5 s windows) |
+| corr(duty above the 0.25 dead zone, speed) | +0.19 |
+| corr(wall contact, speed) | **−0.81** |
+| speed across the full range of commanded duty, 0.24 → 1.00 | 0.167 → 0.201 m/s |
+
+The duck commands maximum yaw rate essentially all the time and flips its sign every 1.4 s; its
+speed is then set by whether it is jammed against a surface, not by what it asks for. This is
+§17.16's dither read at the command level, and it means a speed drive built now would fail §3.2
+rule 5 before it started — the consumer cannot fire. One confound to carry forward when it can:
+corr(mapTLE, instantaneous speed) is already −0.17 without anything asking for it, because wall
+contact produces both a low speed and an unusual view, so a "slow where surprised" arm must be
+judged off-wall or it will score on a mechanism it did not add.
+
+**Verdict.** The signal is `WORKING` **as a signal** — measured, place-bearing, non-degenerate, and
+its conditioning known (slow-average-relative, EMA τ ≈ 0.5–1 s, judged off-wall). The speed lever is
+`DEFERRED` behind **W5, the twist brain's yaw channel** (O31, §17.17): until \|vyaw\| comes off the
+rail there is no forward-speed channel to modulate, and the 2× band the walker offers cannot be seen
+through a body that is always turning. The body pose block is recorded as a second, untouched
+control surface (O39). Next: W5.
+
