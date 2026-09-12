@@ -1405,11 +1405,67 @@ file-by-file diff against `HEAD`, not `git status`.** Sync was therefore a
 `git merge --ff-only`; both pre-existing stashes survive and a tarball snapshot was taken
 first on both machines.
 
-**Remaining for step (d)**, once the trees are reconciled: publish the legal derived
-topics on the robot — `joints` from `ServoForwardModel` (step (c) measured this as the
-one substitution that *helps*), `feet_y_gravity_cmd_imu` from `LegKinematics` ⊕
-`ImuAttitude`, and `ground_clearance` from the now-installed VL53L0X. `stride_v` stays
-blocked on the FSRs, which feed its stance gate.
+#### ✅ The belly channel reaches the brain — measured on the robot 2026-09-12
+
+`ogma_host --tof` (default OFF) opens the VL53L0X and publishes
+`reality.proprio.ground_clearance` — the `gc_raw` channel the **promoted** height
+homeostat rides. Live, robot on the stand, 250 ticks at 50 Hz:
+
+```
+VL53L0X 0x29 ready — calib pi_host/calib/sensors.json (loaded), mount_offset 64.80 mm, gc_stand 0.060 m
+belly ToF — 162 reads, 162 valid (100.0%), last raw 157 mm -> 0.092 m
+            (status valid, signal 21.24 ambient 0.10 spads 158.0) -> ground_clearance 1.0000
+```
+
+The offset arithmetic checks out by hand (157 − 64.8 = 92.2 mm), validity is 100 %, and
+the signal-to-ambient ratio is ~200:1. **Two things in those numbers matter more than
+"it works":**
+
+- ⚠ **On the stand the channel is SATURATED.** 92 mm of belly clearance against a 60 mm
+  normalizer clamps to exactly 1.0000, so *the channel carries no information in this
+  posture*. Any bench test of the height homeostat against a stand-mounted robot is
+  testing a constant. Its dynamic range only exists with the body on the ground.
+- ⚠ **The sensor produces ~32 Hz against a 50 Hz tick** (162 samples in 250 ticks), so the
+  brain sees a fresh belly reading about two ticks in three and the same value on the
+  third. That is the part's timing budget, not a fault — but it is a transport fact a
+  consumer reasoning about belly *rate* needs, and it is why the driver's `read_ready()`
+  returning false is normal rather than an error.
+
+**The normalizer is now shared code**, `ogma::body::ground_clearance()`, and the sim was
+swapped onto it (byte-identity re-verified). A robot dividing by a different standing
+height would have fed a plausible, differently-scaled number into a promoted lever.
+
+**The status is published as a channel, not folded away.** `sense.belly` always carries
+raw mm, status, signal, ambient and spads; `reality.proprio.ground_clearance` is published
+**only on a valid reading and is absent otherwise** — this project's own rule for an
+exactly-round null. ⚠ The driver reports `distance_m = max_range_m` on a bad read (not
+zero, deliberately: zero would map "saw nothing" onto "something against the belly"), so
+gating on the status is what keeps that honest floor out of the homeostat.
+
+**`pi_host/calib/sensors.json`** now holds the ToF mount offset, the INA219 shunt and the
+`gc_stand` normalizer, with `SensorCalib` as the single loader and a printed receipt. They
+were CLI flags on `ExecStart` — and the **checked-in unit did not carry
+`--tof-offset 64.8` while the live one did**, so reinstalling the unit from the repo would
+have silently dropped the belly calibration and left the channel ~65 mm short while
+looking perfectly healthy.
+
+⚠ **OPERATOR ACTION: the systemd units now declare `Conflicts=` but the INSTALLED copies
+predate it.** Both `ogma-benchd` and `ogma-host` are `WantedBy=multi-user.target`, so
+today they both run; once `ogma_host` is given `--tof` they would interleave transactions
+on `/dev/i2c-1`, and an interleaved multi-byte read does not fail — it returns a plausible
+wrong number. Re-run `pi_host/systemd/install.sh` to pick the guard up. Not done from here:
+installing units is a deployment change.
+
+**Remaining for step (d), and a correction to this plan's own scope.** I wrote above that
+the remaining topics were `joints`, `feet_y_gravity_cmd_imu` and `ground_clearance`. Only
+the last was actually buildable: **the other two need the COMMANDED servo angles, which
+exist only in `ogma_benchd`, and SPEC §1.1 gives `ogma_host` no servo path by design.**
+So they are not "remaining work" on the sensor side at all — they are gated on the
+actuation architecture that §1.1 deliberately defers, and the scope line above was
+under-specified. `stride_v` remains blocked on the FSRs for its stance gate. What is
+genuinely next for step (d) is therefore the **IMU on SPI** (no I2C contention, driver
+already on the shared filter), which yields `upright`/`tilt` honestly; everything
+efference-derived waits on the actuation decision.
 
 ---
 
