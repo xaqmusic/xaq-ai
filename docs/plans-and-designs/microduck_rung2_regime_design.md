@@ -2470,3 +2470,63 @@ and the body answers it. **The defect is upstream, in what sets the reference**,
 loop's target on a map whose winner switches 60 times a minute. Next is the operator's call between
 fork item (b) (the model-implied step, now the better-motivated of the two) and a reference-side
 lever judged on `refFollow`.
+
+### 17.27 W5, fork item (b) — the model-implied step: avoidance becomes real, the heading does not (R48, 2026-09-12)
+
+**The lever.** §17.17's other form: *the yaw command that closes the prior's error in one
+identified step, `u = −e / A(idx, vyaw)`, clamped — what the prior's half 2 is meant to converge
+to and here does not.* Built as `state_prior_step_gain` (MotorEPMv2, HotMutable, default 0), in the
+general form rather than the yaw-only one: the ridge least-squares command over **all** the prior's
+rows, `y* = argmin ||A_p·y − e||² + reg_eps·||y||²`, clamped to ±1 per motor and added to the
+pre-tanh operating point. The ridge is the module's own `reg_eps` — no new constant, and the gain
+is still the model's own authority, which is the same justification part 2's descent has. The step
+the command carried is stored per leg and added back when the update reconstructs its operating
+point, or G would report the slope at a different point on the tanh than the body actually ran.
+
+**What it turns out to be, numerically.** With `reg_eps` 0.01 against `A_pᵀA_p` ~ 10⁻³, the ridge
+dominates and the solve reduces to `≈ A_pᵀe / reg_eps` — the same *direction* part 2 descends, applied
+straight to the command instead of accumulated into C. The read-back says it then rails:
+`spStep` 1.00. So what ships is a **model-signed saturating command**, not a deadbeat solve. That is
+the honest description and it is what the clamp in §17.17's own formulation implies for a channel
+whose authority is ~0.01 per tick.
+
+**Guard.** Param absent → the pre-change R46 run reproduced byte-for-byte, md5 `e4b5c3fa…`.
+`spStep` reads −1 off and its own size on. Unit test covers gain-0, that it acts, the read-back, and
+the **sign control with part 2 switched off** (`state_prior_lr` 0, `ctrl_lr` 0), so the pull toward
+the target is demonstrably the step's own doing. Same base and host args as R47; n = 6, 1500 s.
+
+| n = 6, paired | walls/min | contact% | eps / metre | cells | span m² | straight | hdgErr | refFollow | mapTLE | switch/min |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (R43 W3c) | 14.76 ± 11.82 | 3.31 | 4.58 | 69.7 ± 11.7 | 10.17 | 0.09 | 1.66 | 0.48 | 0.19 | 59.9 |
+| **step, gain 1.0** | **1.82 ± 1.64** (0+/6−, t −2.5) | **0.14** | **0.65** (1+/5−) | 73.8 ± 11.8 (ties) | 10.23 (ties) | 0.07 (2+/4−) | 1.57 (1+/5−, t −1.6) | 0.58 (worse) | 0.16 (0+/6−) | 42.1 (0+/6−) |
+| step, gain 0.3 | 3.25 ± 2.97 (0+/6−) | 0.48 | — | 69.8 (ties) | 7.48 | **0.07** (0+/6−, t −2.8) | 1.60 | 0.45 | 0.16 | 45.1 |
+
+- **Avoidance becomes real, and it is not the degenerate orbit.** Wall contact falls eight-fold on
+  every seed, and the blind metric's complement holds: cells and span **tie**. Per seed the loudest
+  case is seed 3 — the base's worst wall-rider, 34.1/min on 56 cells, becomes **0.0/min on 89
+  cells** over the same path length. Seed 5 likewise goes to zero. Normalised for walking time
+  (below), episodes per metre go 4.58 → 0.65, better on five of six seeds.
+- **The heading does not move.** `hdgErr` 1.66 → 1.57 is inside the noise (1+/5−, t −1.6),
+  `refFollow` gets *worse* (0.48 → 0.58), `straight` does not improve at gain 1.0 and is worse on
+  every seed at gain 0.3, and `yawFlip/min` rises 69 → 106 (6+/0−). **The lever was proposed as the
+  yaw channel's fix and it is not one.** §17.26's diagnosis survives item (b) as it survived item
+  (a): what holds the heading error open is the reference, not the law that chases it.
+- **Why avoidance and not heading**, by inference rather than measurement: the proximity rows of A
+  are weak (§17.2 measured 0.0009 against the command — "the babble rarely reached a wall"), so the
+  descent through them built almost nothing, while the computed step divides by `reg_eps` instead
+  and turns a weak-but-correctly-signed authority into a real command. The heading row is not
+  authority-starved in the same way; its problem is the target. The arm that would settle this —
+  the step restricted to the proximity indices — is one lever away and has not been run.
+- **The side effect must be named.** Stops now run to the 60 s cap on every seed (`bored%` 12.1 →
+  0.0, `stop s` 54.5 → 60.0, stand% 62.6 → 70.0), so walking time falls 285 → 217 s. That is O37's
+  open ending-rule knob moving, not a new pathology — a run of six consecutive known gazes is a
+  rare event either way (≈ 8 of 66 stops in the base) — but it is why the wall result is reported
+  per metre as well as per minute.
+
+**Verdict. `PARTIAL`** — `WORKING` and loud on avoidance, `NULL` on the heading channel it was
+aimed at. Not promoted: preset R48 for the operator's eye, and the stop-length interaction is the
+thing to watch while watching it. Re-use context for the null half: a reference that does not follow
+the body (`refFollow` → 0), after which the same step would be worth re-reading on the heading row.
+Follow-ups: the proximity-only arm above; and for O39, wall contact was the term that dominated
+achieved speed (corr −0.81), so a walk that stops hitting things is the first thing the speed
+question needed.

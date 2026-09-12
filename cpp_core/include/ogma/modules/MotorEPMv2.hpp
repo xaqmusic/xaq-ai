@@ -1282,6 +1282,8 @@ private:
         float               calm_state = 1.0f;    // the annealing ratchet (slow attack, fast release)
         float               calm_peak  = 0.1f;    // decaying peak-hold of the prior error (the reference)
         float               last_mult  = 1.0f;    // the calm multiplier the assembly last applied
+        Eigen::VectorXf     prior_step;           // the model-implied step the LAST command carried (empty/zero unless
+                                                  // state_prior_step_gain > 0); the update adds it back so G is honest
         Eigen::VectorXf     b;                    // n
         Eigen::MatrixXf     C;                    // m x n  (sensor → motor)
         Eigen::MatrixXf     Cphi;                 // m x 2  learned phase-conditioning (posture feed-forward)
@@ -1561,6 +1563,8 @@ private:
     double state_prior_calm_fixed_ = 0.0;       // >0 = pin the multiplier (designed gate, tuned magnitude)
     double state_prior_split_  = 0.0;           // 1 = prior writes its OWN matrix Cp; HK keeps C
     double state_prior_isolate_ = 0.0;          // 1 = C's columns held to the prior's own indices (the W5 lesion)
+    double state_prior_step_gain_ = 0.0;        // the MODEL-IMPLIED step: weight of the one-step command from A (W5 (b))
+    float  state_prior_step_norm_ = -1.0f;      // read-back: |the step| last applied; -1 = off
     int    state_prior_isolate_kept_ = -1;      // read-back: columns kept; -1 = never applied
     std::vector<char> prior_col_keep_;          // scratch for the mask (no per-tick allocation)
     double state_prior_damping_ = 0.0;          // L2 brake on Cp ALONE (the split's whole point)

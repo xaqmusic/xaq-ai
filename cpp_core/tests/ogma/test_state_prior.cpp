@@ -26,6 +26,9 @@
 //        THROUGH the learned model (no hand-wired feedback anywhere in the test).
 //     7. HotParamRoundTrip — on_param_change round-trips current_params.
 //     8. IsolateHoldsCToThePriorsOwnColumns — state_prior_isolate (2026-09-12, the duck's
+//     9. ModelImpliedStepClosesTheErrorItself — state_prior_step_gain (2026-09-12, W5 (b)):
+//        the gain-0 guard, that it acts, that it PULLS THE RIGHT WAY on its own (with the
+//        descent switched off, so nothing else could be doing it), and the diag read-back.
 //        W5 lesion): the gain-0 guard, that it ACTS when on, and that the kept-column
 //        count in diag says how many columns survived (the read-back a sweep asserts on,
 //        §3.2 rule 5 — the R47 arm was only trustable because spIso said 5).
@@ -970,4 +973,60 @@ TEST(StatePrior, IsolateHoldsCToThePriorsOwnColumns) {
     EXPECT_EQ(Z.m.diag_lite()["spIso"].get<int>(), -1) << "off must read as off, not as 0 columns kept";
     EXPECT_EQ(I.m.diag_lite()["spIso"].get<int>(), 1)
         << "one prior index -> exactly one surviving column; the count is the read-back a sweep asserts on";
+}
+
+// =============================================================================
+// 9. state_prior_step_gain — the command computed from the model, not accumulated
+//    into C (W5 fork item (b)).  The sign control matters most here: with the
+//    Gauss-Newton descent OFF (state_prior_lr 0) the step is the only thing that
+//    can move the plant, so a pull toward the target is the step's own doing.
+// =============================================================================
+TEST(StatePrior, ModelImpliedStepClosesTheErrorItself) {
+    auto pn = base_params();                                // N: prior configured, step absent
+    pn["state_prior_indices"] = std::vector<double>{-1.0};
+    pn["state_prior_targets"] = std::vector<double>{0.0};
+    pn["state_prior_gain"]    = 0.8;
+    auto pz = pn; pz["state_prior_step_gain"] = 0.0;        // Z: configured, off
+    auto ps = pn; ps["state_prior_step_gain"] = 1.0;        // S: the step
+
+    Fixture N(pn), Z(pz), S(ps);
+    double maxdiff_zn = 0.0, maxdiff_sz = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        N.run_tick(t, lean); Z.run_tick(t, lean); S.run_tick(t, lean);
+        if (t < 12) continue;
+        for (int j = 0; j < kMotors; ++j) {
+            maxdiff_zn = std::max(maxdiff_zn, double(std::fabs(N.accel(j) - Z.accel(j))));
+            maxdiff_sz = std::max(maxdiff_sz, double(std::fabs(S.accel(j) - Z.accel(j))));
+        }
+    }
+    EXPECT_LT(maxdiff_zn, 1e-6) << "state_prior_step_gain=0 must be byte-identical to the param being absent";
+    EXPECT_GT(maxdiff_sz, 1e-4) << "the step changed nothing — it is not reaching the command";
+    EXPECT_LT(Z.m.diag_lite()["spStep"].get<float>(), 0.0f) << "off must read as -1, not as a zero step";
+    EXPECT_GT(S.m.diag_lite()["spStep"].get<float>(), 0.0f) << "a live step must read back its own size";
+
+    // The sign control, with the descent OFF so only the step can act: a +target and a
+    // −target must drive the plant's own lean to opposite sides.  A lever whose sign does
+    // not matter is not a mechanism (the v2 plan's rule 4, as test 5 applies it to part 2).
+    auto plant = [](double target) {
+        auto p = base_params();
+        p["state_prior_indices"]  = std::vector<double>{-1.0};
+        p["state_prior_targets"]  = std::vector<double>{target};
+        p["state_prior_gain"]     = 1.0;
+        p["state_prior_lr"]       = 0.0;                    // part 2 silenced: the step acts alone
+        p["ctrl_lr"]              = 0.0;                    // and so is HK
+        p["state_prior_step_gain"] = 1.0;
+        Fixture f(p);
+        float lean = 0.0f;
+        for (uint64_t t = 0; t < 400; ++t) {
+            f.run_tick(t, lean);
+            if (t >= 12) lean += 0.02f * f.accel(0);        // a lean the first motor drives
+            lean = std::clamp(lean, -2.0f, 2.0f);
+        }
+        return lean;
+    };
+    const float up = plant(+0.6), down = plant(-0.6);
+    EXPECT_GT(up, down + 0.05f)
+        << "the model-implied step must pull toward its target: +0.6 gave " << up
+        << " and -0.6 gave " << down << " (sign or solve inverted)";
 }
