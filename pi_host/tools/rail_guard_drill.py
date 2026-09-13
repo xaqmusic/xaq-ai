@@ -41,11 +41,18 @@ r = rpc("rail.inject", bits=0x10000)
 check("rail.inject refuses without confirm", not r.get("ok", False), r.get("error", ""))
 
 # --- 2. inject a bit the current boot does not have ----------------------
-cur = int(st["pi_throttled"], 0)
-BIT = 0x10000 if not (cur & 0x10000) else 0x40000        # under-voltage, else throttling
-if cur & BIT:
-    print("! both sticky bits already set this boot — reboot for a clean drill"); sys.exit(2)
-print(f"\ninjecting 0x{BIT:X} (mask now 0x{cur:X}) ...")
+# ⚠ Choose a bit the guard has not ALREADY absorbed.  Its baseline advances every time it
+# fires, by design -- so a second drill re-injecting the first drill's bit is correctly a
+# non-event, and reads as "the poll never calls update()" when it is nothing of the kind.
+# The baseline, not the current mask, is what decides whether a bit can still be an event.
+base = st.get("rail_baseline", int(st["pi_throttled"], 0))
+CANDIDATES = [(0x10000, "under-voltage has occurred"), (0x40000, "throttling has occurred"),
+              (0x20000, "arm frequency capped"),       (0x80000, "soft temp limit")]
+BIT, WHY = next(((b, w) for b, w in CANDIDATES if not (base & b)), (0, ""))
+if not BIT:
+    print(f"! every candidate bit is already in the guard's baseline (0x{base:X}).\n"
+          f"  Restart ogma-benchd to re-baseline, then re-run."); sys.exit(2)
+print(f"\ninjecting 0x{BIT:X} ({WHY}) — baseline 0x{base:X}, real mask {st['pi_throttled']} ...")
 r = rpc("rail.inject", bits=BIT, confirm=True)
 check("rail.inject accepted", r.get("ok", False), json.dumps(r.get("result", r)))
 

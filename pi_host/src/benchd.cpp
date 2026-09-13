@@ -548,6 +548,10 @@ struct State {
                 {"rail_events", rail_events},
                 {"rail_guarded", mono_ms() < rail_guard_until_ms},
                 {"rail_inject", rail_inject},
+                // The guard's own reference.  Published because "nothing fired" is
+                // ambiguous without it: a bit already IN the baseline is history by
+                // design, not a broken guard.
+                {"rail_baseline", rail_guard.baseline()},
                 {"ina", ina ? json{{"ok", ina_ok}, {"i_a", ina_i}, {"v", ina_v},
                                    {"i_ema", ina_i_ema}, {"i_peak", ina_i_peak}, {"i_max", ina_i_max},
                                    {"charge_as", ina_charge}, {"energy_j", ina_energy},
