@@ -9,7 +9,7 @@ CONTROL phase (after the identification babble), paired against the first config
 Usage:
   python3 mj_host/tools/l2_sweep.py CFG.json [CFG2.json ...] [--seeds 6] [--secs 1500]
       [--control-from S] [--jobs J] [--host-args '--wander-bored 8 --wander-turn 90']
-      [--arm name:module.param=value[,module.param=value]]* [--logdir DIR]
+      [--arm name:module.param=value[,module.param=value]]* [--logdir DIR [--full-logs]]
 
   --control-from  start of the judged window in seconds; default = the config's
                   motor_epm_intent.babble_ticks / 50 Hz + 100 s (R23 judged 700–1500 s of a
@@ -56,6 +56,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 HOST = REPO / "mj_host/build/ogma_mjhost"
 CELL_M = 0.25
+FULL_LOGS = False          # --full-logs
 
 
 def _coerce(v):
@@ -119,7 +120,9 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         logdir.mkdir(parents=True, exist_ok=True)
         keep = ("t", "x", "y", "z", "tilt", "drive", "wall", "obj", "tofs", "map", "hdg", "twist", "hg", "hw", "head", "stop", "satt", "event", "scan")
         with open(logdir / f"{stem}_s{seed}.jsonl", "w") as f:
-            for line in p.stdout.splitlines():
+            if FULL_LOGS:                     # --full-logs: the host's stdout verbatim (cloud records, qpos, ToF zones)
+                f.write(p.stdout)
+            for line in ([] if FULL_LOGS else p.stdout.splitlines()):
                 if not line.startswith("{"): continue
                 try: row = json.loads(line)
                 except ValueError: continue
@@ -328,12 +331,15 @@ def main():
     ap.add_argument("--host-arm", action="append", default=[], metavar="NAME:ARGS",
                     help="an arm = the first config with these host args appended (for a lever that lives in the host)")
     ap.add_argument("--logdir", default=None)
+    ap.add_argument("--full-logs", action="store_true", help="with --logdir: keep the host's stdout verbatim (~110 MB per 1500 s playroom run) instead of the compact stream -- for offline cloud/object analysis")
     ap.add_argument("--scene", default=str(REPO / "mj_host/models/microduck/scene_arena.xml"),
                     help="the level-2 scene (default: the 2 m arena -- the host's own default is the OPEN floor, where 'zero wall contacts' means no walls)")
     ap.add_argument("--noise", type=float, default=0.05, help="reset noise on the start pose, so seeds vary the start and not only the babble (host --noise)")
     ap.add_argument("--phase-at", type=float, default=None, help="split the control phase at this second (e.g. the --arena-shift time) and report cells / walls / nodes before and after -- the (d) reading")
     ap.add_argument("--arena-half", type=float, default=None, help="samples with |x| or |y| beyond this (m) are ESCAPED (the shifted scene leaves a gap) and excluded from cells/span/path; the count is reported (default: the scene manifest's half + 0.05, else 1.05 for the arena)")
     args = ap.parse_args()
+    global FULL_LOGS
+    FULL_LOGS = bool(args.full_logs)
     if not HOST.exists(): sys.exit(f"host binary missing: {HOST} (build with ./mj_host/run.sh build)")
     logdir = Path(args.logdir) if args.logdir else None
     tmp = Path(tempfile.mkdtemp(prefix="l2sweep_"))

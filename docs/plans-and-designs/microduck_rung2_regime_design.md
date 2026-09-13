@@ -2858,3 +2858,95 @@ has. Colour is by the mean-height bands or by hits. One thing the first render t
 in the body view is not a fault. Seed 6's second place-8 cloud was anchored 11 cm from a wall and
 facing along it (yaw 169°), and a wall seen that way is a line whose far end reads tall, because the
 sensor's vertical fan widens with range.
+
+### 17.31 Small things on the floor: the stack rule, and a gaze that never holds (R52, 2026-09-13)
+
+**The operator's direction.** From the voxel viewer: the ToF is myopic, but objects on the floor are clear; a
+duck that walks around finding objects smaller than itself and trying to pick them up would make an
+interesting ten minutes, and voxels that stack taller are obstacles. Then, watching R46's stops: the gaze
+"moves to an angle, pauses, moves to another angle, pauses" for half a minute and never covers the angles the
+head can traverse, while the cloud could be accumulating the whole time the head moves.
+
+**The stack rule, measured before anything is built on it.** In the cloud's own frame: break-band voxels
+(2–20 cm mean height) grouped into 8-connected columns; each cluster's stack top is the contiguous chain of
+voxel heights over its footprint (dilated by one voxel) with a gap of max(10 cm, 0.12 × range), because the
+sensor's rows are 5.625° apart and the vertical spacing of its returns grows with distance. A cluster that
+tops out below 16 cm and spans at most 20 cm is a small thing; one that keeps rising is an obstacle. Scored
+against the scene manifest and the free bodies' simulated positions at filing (instrumentation, never an
+input) on R46 runs, seeds 1–5, which are out of sample: the range-scaled gap was chosen after seed 6 showed
+distant wall bases breaking a fixed gap's chain.
+
+| what counts as a thing | flagged | real objects among them | real objects caught |
+|---|---|---|---|
+| break band alone (the object EPM's input today) | 342 | 11 % | 100 % |
+| stack top < 16 cm, fixed 10 cm gap | 145 | 26 % | 100 % |
+| stack top < 16 cm, gap max(10 cm, 0.12 × range) | 70 | 53 % | 100 % |
+| stack top < 12 cm, same gap | 61 | 59 % | 97 % |
+
+What still passes: thin chair legs seen from far off (13; a leg's footprint is 8 cm against 12–16 cm for the
+objects), wall fragments (12), and six others. The break profile the object EPM reads cannot draw this line at
+all — every one of its terms lives inside 2–20 cm — which is §17.30's wall-base caveat. Three more facts from
+the same logs bear on seeking small things: they are seen at 0.6–2.2 m (median 1.3 m); the nearest floor
+return during a stop sits 0.42–0.67 m out (seed 6), so the last half-metre of an approach is blind at the
+stop's gaze; and a stop holds a detectable small object 0.15 times a minute with two balls and two blocks in
+the room. "Pick up" has no simulated counterpart yet: no MJCF variant has the mouth hinge, Pollen's
+`ground_pick` is a phase-scripted 4 s cycle (`robotd/src/control.rs`), and the skill runner (X2) is not in the
+host.
+
+**Built: `--stop-gaze-sweep SPEED YAW_MAX`.** Two measurements say why the babble cannot fill a cloud. During
+an R46 stop the head's joints move on **6 %** of the ticks and hold for the other 94, inside a yaw clamp of
+±0.7 rad against a joint range of ±2.97. And the simulated ToF casts one ray per zone, 5.6° apart, so a
+7–12 cm ball at 1.3 m (3–5°) can sit between rays for as long as the gaze holds. With the flag the gaze never
+holds: it moves at SPEED toward a cell of a yaw × pitch grid over its range (0.1 rad cells, the babble's pitch
+band), drawn at random among the cells this stop has looked at least. The error it descends is the stop's own
+coverage deficit, so it neither replays a fixed scan nor babbles back over what it has already seen. The
+hold's novelty rule runs unchanged on HOLD-long windows of the moving view, and the dwell becomes speed: a
+quarter of SPEED while the view is novel, up to MAX. At 12.5 Hz of ToF and 0.3 rad/s the beams advance 1.4° a
+frame. Guard: without the flag the seed-1 run's JSON reproduces the reference byte-for-byte (md5
+`28fc5942…`; the files differ only by the two banner lines the host prints when the inspector port binds).
+`l2_sweep.py` gains `--full-logs` so a harness run keeps the cloud records; `mj_host/tools/cloud_objects.py`
+scores both the rule (`rules`) and the arms (`arms`).
+
+**The A/B** (6 seeds × 1500 s, playroom, the R46 host arguments). A moving view keeps the place map
+surprised, so the babble's quiet rule rarely ends a sweep's stop early and the sweep stands longer. Hence two
+pairs: the arms as deployed, and an equal-length pair (QUIET 999: every stop the full 60 s, so only the head's
+motion differs).
+
+| n = 6 | head moving | voxels / cloud | objects ≤ 2 m in the babble's reach found | balls ≤ 2 m found | rule precision | real small things flagged / min | stands held |
+|---|---|---|---|---|---|---|---|
+| R46 babble | 6 % | 751 ± 165 | 42 / 63 (67 %) | 19 / 90 (21 %) | 0.62 | 0.34 ± 0.22 | 65 / 66 |
+| **R52 sweep, ±0.7 rad** | 97 % | **2 271 ± 417** | 75 / 100 (75 %) | 40 / 122 (33 %) | **0.92** | 0.53 ± 0.19 | 65 / 66 |
+| sweep, ±1.2 rad | 98 % | 2 399 ± 640 | 61 / 75 (81 %), and 11 / 116 beyond it | 41 / 110 (37 %) | 0.80 | 0.59 ± 0.19 | 63 / 66 |
+| babble, full-length stops | 5 % | 760 ± 167 | 41 / 61 (67 %) | 21 / 86 (24 %) | 0.68 | 0.33 ± 0.25 | 65 / 66 |
+| **sweep, full-length stops** | 97 % | 2 309 ± 391 | **94 / 109 (86 %)** | **50 / 124 (40 %)** | **0.98** | **0.67 ± 0.36** | 66 / 66 |
+
+Voxels per cloud rise on all six seeds in both pairs; objects in reach found rise on five of six in each (the
+sixth: seed 6 falls 87 → 64 % deployed and ties 87 / 86 % at equal length); balls rise on five of six in each.
+The voxel viewer shows it at a glance: both arms are identical until the first stop at 600 s, and at seed 6's
+first stop the two small objects the babble left as a few scattered voxels are solid clusters under the sweep,
+and its walls are continuous surfaces.
+
+The side effects, from the harness (sweep − babble, paired, n = 6): the place map calls **34 % of ticks novel
+against 18 %**, holds 5.7 more nodes (4+/0−) and switches winner 17 more times a minute (5+/1−) — its view is
+head yaw plus eight ToF column ranges, so a gaze that never holds is a view that never repeats. Stops rarely
+end early, so the duck stands 5 % more of the control phase and walks 7.4 m less (0+/6−), and meets walls less
+(14.8 → 4.6 per minute), which is walking less rather than avoiding better and is not claimed. The ±1.2 rad
+sweep's map holds 19.5 more nodes.
+
+**A sim-to-real caveat.** Part of the gain on balls comes from the simulated sensor: one ray per zone leaves
+gaps between zone centres that a moving gaze fills, while the real VL53L8CX integrates each zone's whole 5.6°
+cone, so a ball between centres still shifts that zone's return. The coverage gain (a head moving through 97 %
+of the stop, the whole reachable field swept) should transfer; the gain on balls probably overstates the
+hardware's. On the robot the head angle must also be matched to each ToF frame's timestamp; at 0.3 rad/s,
+30 ms of latency is 0.5°, a tenth of a zone.
+
+**Verdicts.** The stack rule `WORKING` as a sensor reduction: precision 0.11 → 0.53 out of sample at full recall
+(n = 6, a signal; not yet in `CloudMap`). R52, the gaze sweep at ±0.7 rad, `WORKING` on what it is for: clouds
+three times denser on every seed, the rule's precision 0.62 → 0.92, objects in reach found 67 → 75 % (86 % at
+equal stop length), balls 21 → 33 % (24 → 40 %), stands unchanged. Its effect on the place map is real and is
+the next design question rather than a reason to hold the gaze again. The ±1.2 rad sweep `PARTIAL`: the first
+sightings beyond the babble's reach (11 of 116 objects), at the cost of 63 / 66 stands, precision 0.80 and 19.5
+extra map nodes; re-use context: a stand that absorbs the head's swing, or a sweep that slows toward the ends
+of its range. Nothing promoted; presets R46 and R52 (seed 3) put the pair in front of the operator's eye. Open
+(O42): the place map should read the stop's cloud instead of a moving frame, and a stop should end when its
+cloud stops growing rather than when the map stops being surprised.

@@ -848,5 +848,53 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R46 · the CLOUD at every stop: the stop's ToF returns accumulate into a voxel cloud (ogma::CloudMap) filed under the map's place; the gaze BABBLES, holding each angle",
+  "series": 46,
+  "hint": "WATCH (seed 3, fast-forward through the 600 s babble; P draws the filed clouds, N solos a place): the R43 walk-stop-look duck with CloudMap listening. The control for R52: at each stop the head steps to a random angle within +-0.7 rad and HOLDS it 1-6 s -- its joints move on 6 % of the stop's ticks. n=6: 751 voxels a cloud, 67 % of the objects within 2 m and inside the babble's reach found, balls 21 %. Open a run's clouds afterwards with tools/run_voxel_viewer.sh LOG.jsonl (design doc §17.30, §17.31).",
+  "state": {
+   "config": "a1v2_r46_cloud.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 3,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R52 · the gaze SWEEPS: at a stop the head never holds -- it moves at 0.3 rad/s toward the angle it has looked at least, and the cloud fills in",
+  "series": 52,
+  "hint": "WATCH (seed 3, fast-forward through 600 s; compare with R46 on the same seed -- the runs are identical until the first stop): the head keeps moving through every stop (97 % of ticks against 6 %), slowing to a quarter where the map finds the view new. n=6 against R46: voxels a cloud 751 -> 2271 on every seed, objects in reach found 67 -> 75 % (86 % when both arms stand the full 60 s), balls 21 -> 33 % (24 -> 40 %), the stack rule's precision 0.62 -> 0.92, stands 65/66 both. What to watch for: stops now run nearly the full 60 s (a moving view keeps the place map surprised: novel 18 -> 34 %, 5.7 more nodes), so it walks 7 m less. Part of the ball gain is the simulated one-ray-per-zone sensor. WORKING, not promoted (design doc §17.31).",
+  "state": {
+   "config": "a1v2_r46_cloud.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 3,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.3 0.7",
+   "fast_until": 600
+  }
  }
 ]

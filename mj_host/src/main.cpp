@@ -1313,6 +1313,18 @@ struct StopPlan {
     // --stop-gaze-slew RAD_PER_S (2026-09-12, O36's own hypothesis + §17.28's need): the gaze
     // override moves toward each new bearing at this rate instead of stepping to it.  0 = step.
     double gaze_slew = 0.0;
+    // --stop-gaze-sweep SPEED YAW_MAX (2026-09-13, the operator watching R46: the babble "moves to an angle,
+    // pauses, moves to another angle, pauses" and never covers the angles the head can traverse, while the
+    // cloud could accumulate the whole time the head moves).  The gaze never holds.  It moves at SPEED rad/s
+    // toward a cell of a yaw x pitch grid over its range (0.1 rad cells; yaw within +-YAW_MAX, pitch within
+    // the babble's band), the target drawn at random among the cells this stop has looked at LEAST -- the
+    // error it descends is the stop's own coverage deficit, so it neither replays a fixed scan nor babbles
+    // back over what it has seen.  Arriving draws the next.  The hold's novelty rule runs unchanged on
+    // HOLD-long windows of the moving view; the dwell becomes speed: a novel window slows the move to a
+    // quarter (up to MAX s) instead of freezing it, and a window with nothing novel counts toward QUIET as a
+    // known gaze did.  At 12.5 Hz of ToF and 0.3 rad/s the beams advance 1.4 deg a frame against 5.6 deg
+    // between them.  Needs --stop-gaze.  0 = step-and-hold, byte-identical.
+    double gaze_sweep = 0.0, gaze_sweep_yaw = 0.7;
     // --stop-gaze-down RAD (2026-09-12, §17.28's geometry): the CENTRE of the pitch babble,
     // positive down.  Widening the babble does not aim it: at sd 0.2 the gaze already reaches
     // 23 deg down, and that looks at the floor 0.2 m from the duck's feet, where nothing is.
@@ -1498,6 +1510,19 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const bool roll_on = stop_on && g_stop.roll_speed > 0.0 && body.n_objects() > 0;
     const bool walk_on = stop_on && g_stop.walk_speed > 0.0 && body.n_objects() > 0;
     if (walk_on) std::fprintf(stderr, "  walk-past: %.1f s into every stop furn_chair0 is carried across the gaze at %.2f m/s\n", g_stop.walk_delay_s, g_stop.walk_speed);
+    const bool sweep_on = gaze_on && g_stop.gaze_sweep > 0.0;
+    if (g_stop.gaze_sweep > 0.0 && !gaze_on) throw std::runtime_error("--stop-gaze-sweep needs --stop-gaze (its pitch band, HOLD, MAX, QUIET and novelty rule)");
+    if (sweep_on && (orient_on || roll_on || walk_on)) throw std::runtime_error("--stop-gaze-sweep does not drive the change detector: no --stop-orient, --roll-past or --walk-past with it");
+    if (sweep_on && g_stop.gaze_slew > 0.0) throw std::runtime_error("--stop-gaze-sweep sets the override's slew itself; drop --stop-gaze-slew");
+    const double sweep_p_lo = g_stop.gaze_pitch_sd > 0.0 ? g_stop.gaze_down - g_stop.gaze_pitch_sd * 0.7 : g_stop.gaze_down;
+    const double sweep_p_hi = g_stop.gaze_pitch_sd > 0.0 ? g_stop.gaze_down + g_stop.gaze_pitch_sd * 2.0 : g_stop.gaze_down;
+    const int sweep_ny = std::max(1, int(std::ceil(2.0 * g_stop.gaze_sweep_yaw / 0.1 - 1e-9)));
+    const int sweep_np = std::max(1, int(std::ceil((sweep_p_hi - sweep_p_lo) / 0.1 - 1e-9)));
+    const double sweep_wy = 2.0 * g_stop.gaze_sweep_yaw / sweep_ny, sweep_wp = (sweep_p_hi - sweep_p_lo) / sweep_np;
+    std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
+    double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
+    if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
+                               g_stop.gaze_sweep, sweep_ny, sweep_np, g_stop.gaze_sweep_yaw, sweep_p_lo, sweep_p_hi);
     int walk_left = 0; double walk_x = 0.0, walk_y = 0.0, walk_dx = 0.0, walk_dy = 0.0; std::array<double, 2> chair_home{};
     if (walk_on) chair_home = body.body_xy("furn_chair0");
     if (orient_on) std::fprintf(stderr, "  orienting reflex: a change at a still gaze (winner switch to a known node, or error > %.1f spreads above the hold's mean) ends the stop; pivot at %.2f m/s with full yaw, walk %.2f m/s, up to %.0f s\n",
@@ -1634,6 +1659,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
                         if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = g_stop.gaze_down; scan_target = 0.0; }
+                        if (sweep_on) { std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false; }
                         ticks_in_stop = 0; rolled_this_stop = false;
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander) {
@@ -1664,7 +1690,47 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     scan_target = kSeq[scan_idx] * g_stop.scan_amp;
                     head->set_yaw_override(true, scan_target);
                 }
-                if (looking && gaze_on) {
+                if (looking && gaze_on && sweep_on) {
+                    // the gaze where the head has actually got to (the slewed override), counted into its cell
+                    const auto hc = head->last_command();
+                    const double cp = g_stop.gaze_pitch_sd > 0.0 ? hc[1] : sweep_p_lo;
+                    const int cy_i = std::clamp(int(std::floor((hc[2] + g_stop.gaze_sweep_yaw) / sweep_wy)), 0, sweep_ny - 1);
+                    const int cp_i = sweep_np == 1 ? 0 : std::clamp(int(std::floor((cp - sweep_p_lo) / sweep_wp)), 0, sweep_np - 1);
+                    if (ticks_in_stop > 0) ++sweep_count[size_t(cp_i * sweep_ny + cy_i)];
+                    const bool arrived = std::fabs(hc[2] - sweep_ty) < 1e-3 && (g_stop.gaze_pitch_sd <= 0.0 || std::fabs(hc[1] - sweep_tp) < 1e-3);
+                    if (!sweep_have_target || arrived) {        // the next target: at random among the least-looked-at cells
+                        const int least = *std::min_element(sweep_count.begin(), sweep_count.end());
+                        std::vector<int> ties;
+                        for (int c = 0; c < int(sweep_count.size()); ++c) if (sweep_count[size_t(c)] == least) ties.push_back(c);
+                        const int pick = ties[std::uniform_int_distribution<size_t>(0, ties.size() - 1)(gaze_rng)];
+                        sweep_ty = -g_stop.gaze_sweep_yaw + (pick % sweep_ny + 0.5) * sweep_wy;
+                        sweep_tp = sweep_p_lo + (pick / sweep_ny + 0.5) * sweep_wp;
+                        sweep_have_target = true; ++sweep_moves;
+                    }
+                    head->set_yaw_override(true, sweep_ty);
+                    if (g_stop.gaze_pitch_sd > 0.0) head->set_pitch_override(true, sweep_tp);
+                    scan_target = hc[2];
+                    ++look_held; ++look_ticks; ++ticks_in_stop;
+                    if (brain.map_winner() > max_id_seen) max_id_seen = brain.map_winner();
+                    // the hold's novelty rule, on a HOLD-long window of the moving view
+                    bool view_novel;
+                    if (g_stop.gaze_learn_frac > 0.0) {
+                        if (look_held == 11) { gaze_qe0 = brain.map_quant_error(); gaze_arrival_novel = gaze_qe0 > g_stop.gaze_residual_k * brain.map_expected_error(); }
+                        view_novel = look_held > 10 && gaze_arrival_novel && brain.map_quant_error() > g_stop.gaze_learn_frac * gaze_qe0;
+                    } else if (g_stop.gaze_residual_k > 0.0) {
+                        view_novel = brain.map_quant_error() > g_stop.gaze_residual_k * brain.map_expected_error();
+                    } else {
+                        view_novel = brain.map_winner() >= 0 && !baked_ids.count(brain.map_winner());
+                    }
+                    if (look_held > 10 && view_novel) look_novel_seen = true;
+                    const bool slow = look_novel_seen && view_novel && look_held < gaze_max_ticks;   // the dwell, as speed
+                    head->set_override_slew(slow ? 0.25 * g_stop.gaze_sweep : g_stop.gaze_sweep);
+                    if (look_held >= gaze_hold_ticks && !slow) {
+                        if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
+                        ++saccades; look_held = 0; look_novel_seen = false;
+                        if (gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
+                    }
+                } else if (looking && gaze_on) {
                     head->set_yaw_override(true, gaze_yaw);
                     if (g_stop.gaze_pitch_sd > 0.0) head->set_pitch_override(true, gaze_pitch);
                     scan_target = gaze_yaw;
@@ -1784,6 +1850,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (stop_left <= 0 && stop_phase != StopPhase::None) {
                     scan_stop();
                     if (looking && stop_left <= 0 && stop_event[0] == '\0') { /* ended by the look: named below */ }
+                    if (looking && sweep_on) { int seen = 0; for (int v : sweep_count) seen += v > 0; sweep_cover_sum += double(seen) / double(sweep_count.size()); ++sweep_cover_n; }
                     if (looking) { look_stop(); }
                     if (g_stop.map_on_stop) brain.set_map_learning(false);
                     stop_len_sum += (t - stop_started_tick) / kBrainHz; ++stop_len_n;
@@ -2105,6 +2172,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (orient_on || roll_on || walk_on)
             std::fprintf(stderr, "  orient: %d rolls (%d skipped at a surface), %d changes (%d within 3 s of a roll, %d unprompted), %d orientations, %d arrivals, %d timeouts, mean reach %.2f m to the roll\n",
                          rolls, rolls_skipped, changes, changes_prompted, changes - changes_prompted, orientations, arrivals, orient_timeouts, reach_n ? reach_sum / reach_n : 0.0);
+        if (sweep_on)
+            std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
+                         sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
         if (look_on || gaze_on)
             std::fprintf(stderr, "  look: %d saccades, %d holds extended by novelty, %d of %d stops ended by a quiet round; mean stop %.1f s; the head looked for %.1f s\n",
                          saccades, novel_holds, stops_bored, stop_len_n, stop_len_n ? stop_len_sum / stop_len_n : 0.0, look_ticks / kBrainHz);
@@ -2160,6 +2230,7 @@ void usage() {
         "      --stop-every S --stop-secs S [--stop-from S] --stop-brain CFG [--stop-load CKPT] [--stop-att X]\n"
         "          [--stop-handoff-att Y | --stop-handoff-lean DEG] [--stop-settle-secs S] [--stop-keep-head]\n"
         "          [--stop-scan AMP HOLD_S | --stop-look AMP HOLD_S MAX_S | --stop-gaze YAW_SD PITCH_SD HOLD_S MAX_S QUIET]\n"
+        "          [--stop-gaze-sweep SPEED YAW_MAX]  (with --stop-gaze: never hold; move toward the least-looked-at gaze)\n"
         "          [--map-on-stop]:\n"
         "          scheduled stops (W1): the twist zeroed, and once still the legs handed to the joint brain\n"
         "          if its attitude error is below X; the walker takes them back on Y / DEG and at the end.\n"
@@ -2310,6 +2381,8 @@ int main(int argc, char** argv) {
             g_stop.gaze_learn_frac = std::stod(next("--stop-gaze-learn"));
         } else if (a == "--stop-gaze-down") {
             g_stop.gaze_down = std::stod(next("--stop-gaze-down"));
+        } else if (a == "--stop-gaze-sweep") {
+            g_stop.gaze_sweep = std::stod(next("--stop-gaze-sweep")); g_stop.gaze_sweep_yaw = std::stod(next("--stop-gaze-sweep"));
         } else if (a == "--stop-gaze-slew") {
             g_stop.gaze_slew = std::stod(next("--stop-gaze-slew"));
         } else if (a == "--stop-gaze-residual") {
