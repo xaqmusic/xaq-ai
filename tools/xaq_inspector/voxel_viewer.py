@@ -454,6 +454,13 @@ def main(argv: list[str] | None = None) -> None:
     a = ap.parse_args(argv)
 
     path = Path(a.path)
+    if not path.exists():
+        # a repo-relative path typed from somewhere else in the repo (tools/, say) still resolves
+        repo = Path(__file__).resolve().parents[2]
+        if not path.is_absolute() and (repo / path).exists():
+            path = repo / path
+        else:
+            sys.exit(f"no such file: {a.path}  (looked in {Path.cwd()} and in the repo root {repo})")
     clouds = load_clouds(path)
     if not clouds:
         sys.exit(f"no clouds in {path} — the run needs a CloudMap in its graph and --cloud on the host")
