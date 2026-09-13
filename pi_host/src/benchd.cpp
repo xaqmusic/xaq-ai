@@ -53,6 +53,17 @@ constexpr int    DEADMAN_MS      = 1000;
 // an operator; it is a back-off, not a lockout, because the sticky bits never clear
 // without a reboot and a permanent refusal would need one.
 constexpr int64_t RAIL_GUARD_MS = 5000;
+// ⚠ TIME-BASED, NOT CALL-COUNTED.  These used to be "every 10th frame()", and frame() is
+// called by the telemetry thread at 10 Hz AND by every status RPC -- so the throttle poll
+// ran at (10 Hz + client poll rate)/10 and the guard got FASTER WHEN SOMEONE WAS WATCHING.
+// Measured: a drill polling status at 50 Hz saw 80 ms median detection where an unattended
+// robot gets 1 Hz.  Unattended is exactly when the guard has to work.
+//
+// The rates are set by cost, measured on this Pi: `vcgencmd get_throttled` is 1.5 ms
+// through popen, so 10 Hz costs ~1.5 % of one core and bounds detection at ~100 ms.
+// EXT5V is instrument-only and 2.9 ms, so it stays at 1 Hz -- there is nothing to react to.
+constexpr int64_t THROTTLE_POLL_MS = 100;
+constexpr int64_t EXT5V_POLL_MS    = 1000;
 // ToF stall detection lives in ogma::hw::TofRecoveryPolicy (tested there).
 constexpr int    CAL_TIMEOUT_MS  = 120000;
 constexpr int    OPER_MIN_US     = 900;    // operating envelope until calibration narrows it
@@ -163,7 +174,8 @@ struct State {
     unsigned rail_inject = 0;
     double   ext5v          = 0.0;       // the Pi's OWN measure of the rail the HAT feeds
     int64_t  ext5v_ms       = 0;
-    int  throttled_poll = 0;
+    int64_t throttled_next_ms = 0;   // deadlines, so the rate is OURS and not the client's
+    int64_t ext5v_next_ms     = 0;
     // Whole-robot bus current (BOM 3).  Instrument only -- nothing here consumes it.
     // null when the part is absent, and benchd then behaves exactly as it did before.
     std::unique_ptr<Ina219> ina;
@@ -490,23 +502,31 @@ struct State {
         } else if (low_battery && vbat > VBAT_RECOVER_V) {
             low_battery = false; record("battery_ok", {{"vbat", vbat}});
         }
-        if (++throttled_poll >= 10) {                          // once a second
-            throttled_poll = 0;
+        if (now >= throttled_next_ms) {
+            throttled_next_ms = now + THROTTLE_POLL_MS;
             // EXT5V is the Pi's own reading of the 5 V input the HAT feeds — the rail that
             // actually fails.  INSTRUMENT ONLY for now: published so its behaviour under
             // load can be watched before any threshold is chosen from it, which is the
-            // same admission rule every other sensor here is under.  Reading this ONE
-            // value runs at ~8 Hz; it is reading the whole ADC set that costs ~0.7 s.
-            if (FILE* f = popen("vcgencmd pmic_read_adc EXT5V_V 2>/dev/null", "r")) {
-                char b[128] = {0};
-                if (fgets(b, sizeof b, f)) {
-                    std::string t(b); auto eq = t.find('=');
-                    if (eq != std::string::npos) {
-                        try { ext5v = std::stod(t.substr(eq + 1)); ext5v_ms = mono_ms(); }
-                        catch (...) { /* a malformed line is not worth a tick */ }
+            // same admission rule every other sensor here is under.
+            //
+            // ⚠ Its own, SLOWER deadline.  Nothing reacts to it, so there is no latency
+            // requirement — and it costs 2.9 ms against get_throttled's 1.5 ms.  (An
+            // earlier note here said this call "runs at ~8 Hz".  That was the sample
+            // spacing of the operator's logging script, not the cost of the call; the
+            // call is 2.9 ms and would run at ~340 Hz.  See bom §3.8.8.4.)
+            if (now >= ext5v_next_ms) {
+                ext5v_next_ms = now + EXT5V_POLL_MS;
+                if (FILE* f = popen("vcgencmd pmic_read_adc EXT5V_V 2>/dev/null", "r")) {
+                    char b[128] = {0};
+                    if (fgets(b, sizeof b, f)) {
+                        std::string t(b); auto eq = t.find('=');
+                        if (eq != std::string::npos) {
+                            try { ext5v = std::stod(t.substr(eq + 1)); ext5v_ms = mono_ms(); }
+                            catch (...) { /* a malformed line is not worth a tick */ }
+                        }
                     }
+                    pclose(f);
                 }
-                pclose(f);
             }
             if (FILE* f = popen("vcgencmd get_throttled 2>/dev/null", "r")) {
                 char b[64] = {0}; if (fgets(b, sizeof b, f)) { std::string t(b); auto eq = t.find('='); if (eq != std::string::npos) { pi_throttled = t.substr(eq + 1); while (!pi_throttled.empty() && (pi_throttled.back() == '\n' || pi_throttled.back() == '\r')) pi_throttled.pop_back(); } }
