@@ -1316,13 +1316,26 @@ high-holding-current pose — from a low-torque starting pose the sign could rev
 client could command a channel into a rescue that was still moving. The back-off is now the
 later of the two deadlines (verified: 8.3 s).
 
-**(c) Does the sticky bit get SET before the Pi dies? — ❌ NOT TESTABLE BY INJECTION.**
+**(c) Does the sticky bit get SET before the Pi dies? — ❌ DEFERRED 2026-09-13, not testable by injection.**
 Injection *assumes* the bit appears; it can only measure what happens afterwards. Whether
 the PMIC latches bit 16 before a 500 ms collapse takes the board down is a hardware race,
 and the only instrument that could answer it is a real brownout. **So the guard is proven
 to react in ~100 ms to a bit that appears, and remains unproven against a collapse fast
 enough not to set one.** ⚠ Nothing in (a) or (b) speaks to this, and the 100 ms figure
 should not be quoted as if it did.
+
+**Deferred deliberately, with the conditions to revisit.** The 2026-08-29 collapse is
+reproducible on demand (X → rescue, twelve channels at 2000 µs/s), so the experiment exists
+— it was not run because it ends in the hard reset it is testing, risking the SD card, and
+the guard is worth shipping without it. **Revisit when** any of: the servo BEC (§3.8.8.1)
+is built, so a brownout no longer takes the Pi with it; a spare SD card or a read-only
+rootfs makes a reset cheap; or a bench supply can drive the 5 V rail down directly with no
+servos involved, which answers (c) without risking this robot at all — the cleanest form of
+the test, and the one to prefer if the hardware turns up.
+
+⚠ **Until then, do not let (a)'s 100 ms stand in for (c).** The guard is proven against the
+slow mode — which is the one that actually took the robot down on 2026-09-13, with 303 s of
+warning — and unproven against the fast one.
 
 
 ### 3.8.3 The surface changed, and it splits the sweep in two
