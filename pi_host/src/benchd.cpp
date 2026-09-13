@@ -708,6 +708,23 @@ json handle(State& S, const json& req) {   // caller holds m
         if (S.cal_ch != ch) S.driver.set_limits(ch, {lo, hi});
         return ok();
     }
+    if (verb == "tof.stall") {
+        // ⚠ FAULT INJECTION, and it is here because the alternative is worse.  The ToF
+        // drops out of continuous mode at roughly 1 in 600 pose moves, so verifying the
+        // recovery path by WAITING for it needs ~1800 trips for 95 % confidence — hours of
+        // servo cycling to exercise a few register writes.  Stopping ranging on demand
+        // reproduces the observed failure exactly (the part stays addressable, it simply
+        // stops producing measurements) and makes the recovery testable in seconds.
+        //
+        // Bench-only, like every verb on this channel: it cannot be reached by a brain,
+        // and it needs `confirm` so it cannot be tripped by a fat-fingered dashboard.
+        if (!S.tof) return err("no ToF");
+        if (!req.value("confirm", false)) return err("tof.stall needs confirm=true — it deliberately breaks the sensor");
+        try { S.tof->stop_continuous(); }
+        catch (const std::exception& e) { return err(std::string("stop_continuous: ") + e.what()); }
+        S.record("tof_stall_injected", {{"by", "verb"}});
+        return ok();
+    }
     if (verb == "cal.begin") {
         if (!ch_of(req, ch)) return err("bad ch");
         if (S.low_battery) return err("battery low — no calibration until it recovers");

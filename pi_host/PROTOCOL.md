@@ -60,6 +60,7 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
 | `limp` | — | `rescue_pose` | command the `rescue` pose on all 12 (see above); ends any widened state |
 | `servo.set` | `ch` 0–11, `us` | `clamped_us` | arms `ch`; clamped to its current limits; slewed by the driver |
 | `servo.limits` | `ch`, `min_us`, `max_us` | — | sets the OPERATING limits (persisted by `cal.save`) |
+| `tof.stall` | `confirm` (must be `true`) | — | **FAULT INJECTION.** Stops the VL53L0X ranging so the stall-recovery path can be exercised on demand. The part stays addressable and simply stops producing measurements — the observed failure exactly. Needed because the natural rate is ~1 in 600 pose moves, so verifying recovery by waiting costs hours to test a few register writes. Refused without `confirm` |
 | `cal.begin` | `ch` | `until_ms` | widen `ch` to 500–2500 for ≤120 s; refused if another channel is widened |
 | `cal.end` | — | — | restore operating limits on the widened channel |
 | `cal.map` | `ch`, `physical` (`FL`/`FR`/`RL`/`RR`), `joint` (`hip1`/`hip2`/`knee`), `sign` ±1, `origin_us`, optional `min_us`/`max_us` | — | record one channel's anatomy + calibration; `sim_leg` is derived (below) |
