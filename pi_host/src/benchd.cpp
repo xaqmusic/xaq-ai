@@ -19,6 +19,7 @@
 #include "ogma/hw/McuReset.hpp"
 #include "ogma/hw/Ina219.hpp"
 #include "ogma/hw/Vl53l0x.hpp"
+#include "ogma/hw/TofRecovery.hpp"
 #include "ogma/hw/Icm20948.hpp"
 #include "ogma/hw/SensorCalib.hpp"
 
@@ -46,6 +47,7 @@ using namespace ogma::hw;
 namespace {
 
 constexpr int    DEADMAN_MS      = 1000;
+// ToF stall detection lives in ogma::hw::TofRecoveryPolicy (tested there).
 constexpr int    CAL_TIMEOUT_MS  = 120000;
 constexpr int    OPER_MIN_US     = 900;    // operating envelope until calibration narrows it
 constexpr int    OPER_MAX_US     = 2100;
@@ -163,6 +165,21 @@ struct State {
     int64_t tof_last_ms   = 0;
     int64_t tof_fresh_ms  = 0;        // when a measurement last actually arrived
     int     tof_errors    = 0;
+    // ---- ToF stall recovery (2026-09-13) --------------------------------------------
+    // ⚠ THE PART STOPS RANGING AND DOES NOT RESTART ITSELF.  Observed: a deadman rescue
+    // (a twelve-channel move) dropped the VL53L0X out of continuous mode and read_ready()
+    // returned false forever after, so the LAST GOOD READING stood while age_ms climbed
+    // to four minutes -- ok=true, status=valid, and completely stale.  The INA219 on the
+    // same bus and the same 3V3 was untouched throughout, so this is specific to the part
+    // with the most state, not a bus or supply event.  ~1 in 600 pose moves.
+    //
+    // ground_clearance is the PROMOTED height homeostat's input, so a silent freeze means
+    // defending a clearance the robot had minutes ago.  Recovery is not optional.
+    int64_t tof_recover_ms   = 0;     // last recovery ATTEMPT, for the cooldown
+    int     tof_since_fresh  = 0;     // recovery attempts since a measurement last landed
+    int     tof_restarts     = 0;     // cheap: stop/start continuous
+    int     tof_reinits      = 0;     // expensive: the full boot sequence
+    int     tof_unreachable  = 0;     // model id did not answer -- not a ranging problem
     TickBudget  budget{TICK_HZ, 25};    // 25 ticks = 0.5 s: fast enough to read as a meter
     int  load_cpu_us   = 0;             // synthetic load, gain-0 by default (see the 'load' verb)
     int  load_block_us = 0;
@@ -265,18 +282,66 @@ struct State {
     bool      imu_ok     = false;
     int       imu_errors = 0;
 
+    // Escalating, cheapest first, and every step counted.  ⚠ THIS RUNS UNDER `m`, like
+    // every other bus access (I2cBus is not thread-safe and the servo tick shares it), so
+    // it stalls the servo loop for its duration.  That is why it escalates rather than
+    // reaching for init(): a stop/start is a couple of register writes, while init() is
+    // the whole ~80-write boot sequence plus two reference calibrations.  The driver
+    // watchdog is 25 ticks (500 ms), so even the expensive path stays well inside it.
+    //
+    // ⚠ COUNTED AND PUBLISHED ON PURPOSE.  A silent auto-recovery would paper over the
+    // electrical marginality that causes this instead of surfacing it -- and the SPLIT
+    // between restarts and reinits is diagnostic: if a cheap restart keeps working, the
+    // part is losing its ranging state; if only a full init does, it is losing config.
+    TofRecoveryPolicy tof_policy{};
+
+    void tof_recover(int64_t age_ms, bool full) {
+        const int64_t t0 = mono_ms();
+        try {
+            if (!tof->model_id_ok()) {
+                // Not a ranging failure -- the part is not answering at all.  Do not
+                // hammer it: that is a wiring or power fault and a retry cannot fix it.
+                ++tof_unreachable;
+                record("tof_unreachable", {{"age_ms", age_ms}, {"count", tof_unreachable}});
+                return;
+            }
+            if (full) { tof->init(); tof->start_continuous(); ++tof_reinits; }
+            else      { tof->stop_continuous(); tof->start_continuous(); ++tof_restarts; }
+            ++tof_since_fresh;
+            record("tof_recover", {{"kind", full ? "reinit" : "restart"},
+                                   {"age_ms", age_ms}, {"took_ms", mono_ms() - t0},
+                                   {"restarts", tof_restarts}, {"reinits", tof_reinits}});
+        } catch (const std::exception& e) {
+            ++tof_errors;
+            record("tof_recover_failed", {{"what", e.what()}, {"age_ms", age_ms}});
+        }
+    }
+
     void sample_tof() {
         if (!tof) return;
         try {
             Vl53l0x::Reading r;
             const int64_t now = mono_ms();
             if (!tof->read_ready(r)) {
-                // Not an error: the previous reading stands, and tof_fresh_ms ages so a
-                // stalled part is visible as staleness rather than as a frozen number.
+                // Not an error BY ITSELF: the previous reading stands, and tof_fresh_ms
+                // ages so a stalled part is visible as staleness rather than as a frozen
+                // number.  But visible is not enough -- nothing was acting on it, which is
+                // how a four-minute-old reading kept being published as healthy.
                 tof_ok = true;
+                const int64_t age = tof_fresh_ms ? now - tof_fresh_ms : 0;
+                // 1 s is ~30 missed measurements at the 32.9 ms timing budget: far past
+                // ambiguity, and not a number fitted to anything.
+                if (tof_fresh_ms) {
+                    const auto act = tof_policy.decide(age, now, tof_recover_ms, tof_since_fresh);
+                    if (act != TofRecoveryPolicy::Action::None) {
+                        tof_recover_ms = now;
+                        tof_recover(age, act == TofRecoveryPolicy::Action::Reinit);
+                    }
+                }
                 return;
             }
             tof_ok      = true;
+            tof_since_fresh = 0;          // recovery worked (or was never needed)
             tof_raw_mm  = r.raw_mm;
             tof_m       = r.distance_m;
             tof_valid   = r.valid;
@@ -429,6 +494,10 @@ struct State {
                                    {"spads", tof_spads},
                                    {"m_ema", tof_m_ema}, {"m_min", tof_m_min}, {"m_min_all", tof_m_min_all},
                                    {"bad_frac", tof_bad_frac},
+                                   // Recovery is counted so the marginality that causes
+                                   // it stays visible instead of being papered over.
+                                   {"restarts", tof_restarts}, {"reinits", tof_reinits},
+                                   {"unreachable", tof_unreachable},
                                    {"offset_mm", tof->config().mount_offset_mm},
                                    // How long since a measurement actually landed.  A part
                                    // that stops ranging otherwise shows as a steady number.

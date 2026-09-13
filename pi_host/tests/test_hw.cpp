@@ -620,3 +620,46 @@ TEST(LinuxI2cBus, TheClaimIsReleasedWhenTheOwnerGoesAway) {
 
     std::filesystem::remove(path);
 }
+
+// ---------------------------------------------------------------------------
+// ToF stall recovery policy.  The failure this guards is a sensor that keeps
+// publishing a HEALTHY-LOOKING reading forever (ok=true, status=valid) that is
+// minutes old, on the promoted height homeostat's input.
+#include "ogma/hw/TofRecovery.hpp"
+using ogma::hw::TofRecoveryPolicy;
+
+TEST(TofRecovery, FreshReadingsAreNeverRecovered) {
+    TofRecoveryPolicy p;
+    EXPECT_EQ(p.decide(0,    10000, 0, 0), TofRecoveryPolicy::Action::None);
+    EXPECT_EQ(p.decide(999,  10000, 0, 0), TofRecoveryPolicy::Action::None);
+    // Exactly at the threshold is still not stale — the comparison is strict, so a part
+    // ranging right at the budget cannot be restarted out of a working state.
+    EXPECT_EQ(p.decide(1000, 10000, 0, 0), TofRecoveryPolicy::Action::None);
+}
+
+TEST(TofRecovery, TheFirstStallGetsTheCHEAPFixAndTheSecondGetsTheExpensiveOne) {
+    TofRecoveryPolicy p;
+    // A stop/start is a couple of register writes; init() is the whole boot sequence, and
+    // both run under the bus mutex the servo tick shares.  Reaching for the expensive one
+    // first would stall the servo loop on every transient.
+    EXPECT_EQ(p.decide(1500, 10000, 0, 0), TofRecoveryPolicy::Action::Restart);
+    EXPECT_EQ(p.decide(1500, 10000, 0, 1), TofRecoveryPolicy::Action::Reinit);
+    EXPECT_EQ(p.decide(1500, 10000, 0, 5), TofRecoveryPolicy::Action::Reinit);
+}
+
+TEST(TofRecovery, ANeverAttemptedRecoveryIsNotInsideACooldown) {
+    // ⚠ last_attempt_ms == 0 means "never tried", not "tried at time zero".  Read the
+    // other way, the FIRST stall after boot waits out a cooldown that never happened —
+    // and the first stall is the one that matters, because nothing is recovering yet.
+    TofRecoveryPolicy p;
+    EXPECT_EQ(p.decide(1500, 500, 0, 0), TofRecoveryPolicy::Action::Restart);
+}
+
+TEST(TofRecovery, TheCooldownStopsADeadPartBeingHammeredEveryFrame) {
+    // Each attempt costs the servo loop bus time.  A part that will never come back must
+    // not convert into a permanent stall of the thing that still works.
+    TofRecoveryPolicy p;
+    EXPECT_EQ(p.decide(9000, 11000, 10000, 1), TofRecoveryPolicy::Action::None);   // 1 s later
+    EXPECT_EQ(p.decide(9000, 13000, 10000, 1), TofRecoveryPolicy::Action::None);   // exactly 3 s
+    EXPECT_EQ(p.decide(9000, 13001, 10000, 1), TofRecoveryPolicy::Action::Reinit); // past it
+}
