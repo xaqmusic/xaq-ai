@@ -581,6 +581,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"height_lift_knee", ParamMutability::HotMutable,
          "COMPLETE THE LIFT.  Fraction of the height homeostat's hip2 lift also applied to the KNEE, same sign.  MEASURED 2026-08-07: hip2 and the knee agree on sign only 50.8% of ticks (chance), and the panic pathway's own comment records that opposite signs mean the knee UN-TUCKS and fights the hip2 lift so the chassis does not rise -- 'same sign = a coherent anti-gravity push'.  Panic already drives both joints for that reason; the height homeostat drives hip2 alone, a one-joint version of a two-joint action.  This completes it.  Not an imposed coordination topology: it adds no new coupling between joints, it extends an existing anti-gravity command to the joint the codebase already measured as necessary.  0 = off, byte-identical.",
          ParamValue{0.0}},
+        {"height_windup_guard", ParamMutability::HotMutable,
+         "ANTI-WINDUP on the adaptive height setpoint. 0 = off (byte-identical). 1 = only let height_ground_gain RAISE height_k_eff while height_bias is not already positive. The rise/decay asymmetry that height_ground_gain relies on is correct when grounding is intermittent and becomes a one-way ratchet when it is not: a body that settles near the grounded threshold walks its setpoint to kHeightKMax, the target goes unreachable, and the integrator winds. Measured on the measured body: height_k_eff 0.56->0.92 on 3/3 seeds (cad's never leaves 0.300) with chassis peaks 2.2-2.7x the settled height. Grounded while already lifting is evidence the target cannot be REACHED, not that it is too low. A gate, not a magnitude — and 0 is neutral lift, not a fitted threshold.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
         {"height_ground_gain", ParamMutability::HotMutable,
          "BELLY-GROUNDING SETPOINT ADAPTATION.  `height_k` is a hand-set fraction of the discovered max clearance, and measurement shows it sits BELOW where the body actually rides (tgt 0.30 vs chassis_h_ema 0.39-0.44), so the height homeostat integrates NEGATIVE and commands hip2 DOWN while the belly is simultaneously grounding (p1 clearance 4mm; 58-64% of the first 200 ticks under 10mm).  When > 0 the setpoint fraction RISES while the belly is grounded and decays back toward height_k when it is not, so the target is discovered from the body's own contact experience instead of asserted.  Acts mainly at rest and during stand-up, where fwd_progress is low and height_rest_frac ~ 1; the measured incline fade is left untouched.  0 = off, byte-identical.",
          ParamValue{0.0}},
@@ -795,6 +798,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["boredom_escalation_rate"] = boredom_escalation_rate_;
     m["height_homeo_gain"] = height_homeo_gain_;
     m["height_k"]          = height_k_;
+    m["height_windup_guard"] = height_windup_guard_;
     m["height_topic"]      = height_topic_;
     m["panic_on"]          = panic_on_;
     m["panic_off"]         = panic_off_;
@@ -960,6 +964,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "height_homeo_gain", [&](auto const& v){ height_homeo_gain_ = get_double(v, "height_homeo_gain"); });
     apply_param(params, "height_k", [&](auto const& v){ height_k_ = get_double(v, "height_k"); });
     apply_param(params, "height_ground_gain", [&](auto const& v){ height_ground_gain_ = get_double(v, "height_ground_gain"); });
+    apply_param(params, "height_windup_guard", [&](auto const& v){ height_windup_guard_ = get_double(v, "height_windup_guard"); });
     apply_param(params, "height_lift_knee", [&](auto const& v){ height_lift_knee_ = get_double(v, "height_lift_knee"); });
     apply_param(params, "stance_lift_hip2", [&](auto const& v){ stance_lift_hip2_ = get_double(v, "stance_lift_hip2"); });
     apply_param(params, "support_select_gain", [&](auto const& v){ support_select_gain_ = get_double(v, "support_select_gain"); });
@@ -2275,6 +2280,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "height_homeo_gain") height_homeo_gain_ = get_double(value, "height_homeo_gain");
     else if (key == "height_k") height_k_ = get_double(value, "height_k");
     else if (key == "height_ground_gain") height_ground_gain_ = get_double(value, "height_ground_gain");
+    else if (key == "height_windup_guard") height_windup_guard_ = get_double(value, "height_windup_guard");
     else if (key == "height_lift_knee") height_lift_knee_ = get_double(value, "height_lift_knee");
     else if (key == "stance_lift_hip2") stance_lift_hip2_ = get_double(value, "stance_lift_hip2");
     else if (key == "support_select_gain") support_select_gain_ = get_double(value, "support_select_gain");
@@ -2596,8 +2602,40 @@ void MotorEPMv2::tick(uint64_t tick_id) {
             // Rise fast on contact, decay slowly back toward the configured floor.  The
             // asymmetry is the point: grounding is evidence the target is too low, while
             // NOT grounding is only weak evidence it is too high.
-            if (grounded) height_k_eff_ += float(height_ground_gain_) * (kHeightKMax - height_k_eff_);
-            else          height_k_eff_ -= float(height_ground_gain_) * 0.05f * (height_k_eff_ - float(height_k_));
+            // ⚠ ANTI-WINDUP GATE (height_windup_guard).  The asymmetry above is sound
+            // when grounding is INTERMITTENT and pathological when it is not: at ~5 %
+            // grounding duty the 20:1 ratio still ratchets net-upward, so a body that
+            // settles near the threshold walks its setpoint to kHeightKMax and stays
+            // there.  Measured on the measured body (ledger 2026-09-13): height_k_eff
+            // 0.56 -> 0.92 on 3/3 seeds while cad's never left 0.300, and the chassis
+            // lurched to 2.2-2.7x its settled height getting there.
+            //
+            // THE GATE IS THE DESIGN, the magnitude is untouched.  Raise the target only
+            // while the lift is NOT already trying: if height_bias_ is positive the
+            // homeostat is ALREADY commanding hip2 up and the belly is still down, which
+            // is evidence the target is UNREACHABLE, not that it is too low.  Raising it
+            // then only winds an integrator that is already doing everything it can.
+            //
+            // Zero is a NEUTRAL point, not a tuned threshold -- height_bias_ is signed
+            // lift authority about neutral -- so this adds no constant fitted to a
+            // signal's scale (prohibition 5).  Grounded-and-already-lifting HOLDS: it
+            // neither raises (futile) nor decays (the belly really is down).
+            const bool lift_already_trying =
+                (height_windup_guard_ > 0.0) && (height_bias_ > 0.0f);
+            // ⚠ UNREACHABLE MUST DECAY, NOT HOLD.  The first version of this gate only
+            // SUPPRESSED the rise, and it was measured: the ratchet stopped
+            // (height_k_eff 0.92 -> ~0.49 on 3/3 seeds) and the chassis lurch did not
+            // change at all (peak 0.118/0.113/0.128 against a base of
+            // 0.118/0.122/0.148).  Holding parks the setpoint at whatever it had already
+            // climbed to before the lift engaged, and the integrator goes on winding
+            // against it.  Grounded WHILE ALREADY LIFTING is positive evidence the
+            // target is too HIGH to reach, so the honest response is to lower it -- the
+            // same decay the not-grounded branch uses, for the same reason.
+            if (grounded && !lift_already_trying) {
+                height_k_eff_ += float(height_ground_gain_) * (kHeightKMax - height_k_eff_);
+            } else {
+                height_k_eff_ -= float(height_ground_gain_) * 0.05f * (height_k_eff_ - float(height_k_));
+            }
             height_k_eff_ = std::clamp(height_k_eff_, float(height_k_), kHeightKMax);
         } else {
             height_k_eff_ = float(height_k_);

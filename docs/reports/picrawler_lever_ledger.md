@@ -4994,6 +4994,70 @@ link from "lower peak excursion" to "fewer tipovers" is **inference, not measure
 promote-or-kill run needs an arm long enough to produce falls, and the honest complement
 to peak height is the fall count itself.
 
+### ★★★ 2026-09-13 — THE AS-BUILT BELLY ToF CANNOT SEE THE BELLY, and the anti-windup fixed the wrong thing
+
+**Verdicts: `NULL` on `height_windup_guard` (mechanism fired, target unmoved);
+`WORKING` as a hardware finding on the boom ToF model.** Two levers, measured separately,
+both shipping gain-0 and OFF. Follows the ratchet diagnosis above.
+
+**1. `height_windup_guard` — the ratchet stops, and the lurch does not.** Gate: only let
+`height_ground_gain` raise `height_k_eff` while `height_bias` is not already positive
+(grounded-while-already-lifting is evidence the target is UNREACHABLE, not too low).
+Arena, measured body, n=3 × 3000:
+
+| arm | `height_k_eff` end | `height_bias` | **chassis_y peak** | tilt |
+|---|---|---|---|---|
+| base | 0.917 / 0.891 / 0.909 | +0.08 / +0.89 / +1.50 | **0.118 / 0.122 / 0.148** | 0.083–0.101 |
+| guard v1 (hold) | **0.479 / 0.503 / 0.495** | +0.97 / +0.91 / +0.49 | 0.118 / 0.113 / 0.128 | 0.083–0.102 |
+| guard v2 (decay) | **0.405 / 0.420 / 0.410** | +0.95 / +0.07 / +0.42 | 0.118 / 0.113 / 0.116 | 0.089 / **0.174** / **0.178** |
+| `height_ground_gain=0` | 0.300 (flat) | −0.20 / +0.17 / −0.20 | **0.076 / 0.084 / 0.069** | 0.079–0.101 |
+
+**The gate demonstrably fires** — the ratchet is halted in both forms — **and the chassis
+lurch does not move.** v2 also nearly doubles tilt on 2/3 seeds. ★ **WHY: the damage is
+done before the gate can act.** `height_k_eff` is already **0.561 at the first diag
+(t = 60)**, ratcheted from 0.300 during the spawn second while the belly is flat on the
+floor and `height_bias` is still negative — precisely the state the gate is designed to
+*permit*. The runaway to 0.9 is cosmetic; the lurch is set by the first sixty ticks.
+Re-use context: a fix must act on the SPAWN transient (initial pose, or an initial
+setpoint that does not treat "lying on the floor at t=0" as evidence), not on the
+steady-state ratchet.
+
+**2. ★★★ THE BOOM ToF IS BLIND TO BELLY GROUNDING — a hardware finding, not a sim one.**
+The as-built sensor is on a boom **70 mm aft** of centre at **+77 mm** (top of the HAT),
+not under the belly. Modelled faithfully (ray along body-down from the boom tip, with the
+lever arm and the tilt resolved out using the *fused* attitude estimate). Both readings
+computed in the same run, boom vs a belly-centre truth ray:
+
+| | boom reads | belly truth | over-report | corr | belly grounded | **boom missed** |
+|---|---|---|---|---|---|---|
+| boom+comp | 31.6 mm | 5.7 mm | **+25.9 mm** | +0.80 | 21/50 samples | **21 of 21 (100 %)** |
+| boom raw | 32.1 mm | 7.0 mm | **+25.0 mm** | +0.78 | 20/50 samples | **20 of 20 (100 %)** |
+
+**It tracks well (r ≈ 0.8) and is offset high by ~26 mm, and it missed every single
+belly-grounding event.** ⚠ **And that is why it appeared to "fix" the ratchet**: with the
+boom model on, `height_k_eff` stays at 0.32–0.35 instead of climbing to 0.92 and the peak
+drops to 0.071–0.084 — **not because the loop got healthier but because the sensor stopped
+reporting the grounding that drives it.** A channel that removes a pathology by not
+observing it is the worst possible pass.
+
+⚠ **Tilt compensation cannot fix this, and it is important to say why.** The correction
+resolves the sensor's own height change out of the reading — but the boom is measuring a
+*different patch of ground*, 70 mm behind the belly centre, and under pitch the belly's
+LEADING edge is what strikes while the boom is furthest from it. The residual is
+geometric, not trigonometric. Re-use context for the hardware: either the offset is
+characterised and subtracted as calibration (it is stable — r ≈ 0.8), or belly contact
+needs an observation that is actually at the belly.
+
+**Both ship gain-0 and OFF**: `height_windup_guard` (MotorEPMv2 param) and
+`tof_boom` / `tof_tilt_comp` (body exports, with a `tof[...]` startup receipt). Byte
+identity re-verified after every step. `gc_belly` is published as a diagnostic whenever
+the boom model is on, and is `-1` otherwise so "not modelled" cannot be read as zero.
+
+⚠ **Still not measured: tipovers.** At difficulty 0.8 over 8000 ticks the arena produced
+**3 auto-resets on one seed of three** — roughly one event per 8000 ticks. The outcome the
+operator cares about is too rare here to A/B at reasonable cost, so every number above is
+a MECHANISM measurement and the link to tipping remains inference.
+
 ### ★★ 2026-09-12 — THE ROBOT AND THE SIM DID NOT AGREE, AND ONE FLAG FIXED IT
 
 **Verdict: defect + fix (`WORKING`), measured on the robot.** Recorded because it touches

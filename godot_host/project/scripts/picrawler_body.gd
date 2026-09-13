@@ -850,6 +850,10 @@ var _chassis_com_valid: bool = false
 # Measured two-box body: the top of the RPi / Robot-HAT stack.  The belly-up
 # auto-reset keys off this; see _LEGACY_INVERTED_REST_H.
 var _chassis_top_local: float = 0.021
+# Underside of the lowest chassis box, rel the chassis origin — the BELLY plane.  For a
+# multi-box body it is NOT -CHASSIS_Y/2: the measured body's origin is not its centre
+# (boxes span -26 mm to +77 mm), and using the half-height there is a 25 mm error.
+var _chassis_bottom_local: float = -0.021
 # Walking-trail UI helper (sibling node found at _build time); cached so
 # _do_hard_reset() can wipe its X-markers without re-traversing the tree.
 # Burst-onset probe state — see the trigger in _clip_record().
@@ -2409,6 +2413,26 @@ func _sg_pattern_offsets(name: String) -> Array:
 #             GainEvolver's flow term is ALREADY legal and this lever cannot move it.
 #             Of imu's four values MotorEPMv2 reads only [2] (fwd_v) and [3] (yaw rate);
 #             [0]/[1] (sin/cos yaw) have no consumer in this config.
+# ---- BOOM-MOUNTED BELLY ToF (the as-built sensor) -------------------------------------
+# The real VL53L0X is NOT under the belly centre: it is on a boom out the BACK, at the
+# height of the top of the Robot HAT.  That geometry is not cosmetic — it puts a long
+# lever arm on PITCH, so nose-down/nose-up changes the reading far more than the belly
+# actually moves, and the ray is cast along a tilted body axis besides.
+#
+# ⚠ DEFAULT OFF and byte-identical: turning it on CHANGES A PROMOTED INPUT
+# (ground_clearance feeds the height homeostat), so it is a lever, not a bug fix.
+var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is on
+@export var tof_boom: bool = false
+# Sensor position in the BODY frame, metres.  Defaults are the as-built boom: 70 mm aft
+# of centre (forward is +Z, so the boom is -Z) and level with the top of the HAT, which
+# the geometry receipt reports as +77.0 mm rel the chassis origin on the measured body.
+# y <= 0 means "use the body's own measured top surface" so the two cannot disagree.
+@export var tof_boom_z: float = -0.07
+@export var tof_boom_y: float = 0.0
+# Negate the tilt effect using the FUSED attitude estimate — never an exact basis, so it
+# is exactly what the robot can compute.  0 = publish the raw along-ray reading (what a
+# naive driver would emit); 1 = resolve it to true belly clearance.
+@export var tof_tilt_comp: bool = false
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
 @export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
@@ -3260,6 +3284,9 @@ func _ready() -> void:
 	# silently did not load — CLAUDE.md §3.2's "did the arm you think you ran actually
 	# load?", which has produced a false verdict here before.  A run whose log does not
 	# say `honest[...]` is not evidence about anything.
+	print("PicrawlerBody: tof[boom=%s tilt_comp=%s z=%+.3f y=%+.3f]" % [
+		"ON" if tof_boom else "off", "ON" if tof_tilt_comp else "off",
+		tof_boom_z, tof_boom_y if tof_boom_y > 0.0 else _chassis_top_local])
 	print("PicrawlerBody: honest[upright=%s joints=%s imu=%s]" % [
 		"ON" if honest_upright else "off",
 		"ON" if honest_joints else "off",
@@ -3343,6 +3370,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_JOINT_BACKEND",
 			  "OGMA_PICRAWLER_JOINT_DAMPING",
 			  "OGMA_PICRAWLER_MOTOR_FREEPLAY",
+			  "OGMA_PICRAWLER_TOF_BOOM",
+			  "OGMA_PICRAWLER_TOF_TILT_COMP",
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU"]:
@@ -3366,6 +3395,8 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_ANTIROT_SCALE":     antirot_scale     = max(0.001, v.to_float())
 			"OGMA_PICRAWLER_ANTIROT_GAIN":      antirot_gain      = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_TILT":      publish_tilt      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_TOF_BOOM":          tof_boom          = (v != "0" and v != "")
+			"OGMA_PICRAWLER_TOF_TILT_COMP":     tof_tilt_comp     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
@@ -4498,12 +4529,15 @@ func _recompute_derived_geometry() -> void:
 
 	# Topmost chassis surface = what touches down when the robot is on its back.
 	_chassis_top_local = CHASSIS_Y * 0.5
+	_chassis_bottom_local = -CHASSIS_Y * 0.5
 	if not _chassis_boxes.is_empty():
 		_chassis_top_local = -INF
+		_chassis_bottom_local = INF
 		for spec in _chassis_boxes:
 			var sz: Vector3 = spec["size"]
 			var off: Vector3 = spec["offset"]
 			_chassis_top_local = max(_chassis_top_local, off.y + sz.y * 0.5)
+			_chassis_bottom_local = min(_chassis_bottom_local, off.y - sz.y * 0.5)
 
 	# target_height / peak_height follow the body's standing height, but ONLY
 	# while still sitting at the class-level literal.  An explicit scene, env
@@ -10049,6 +10083,32 @@ func _compute_ground_clearance() -> float:
 	# starts with clear space above whatever the belly rests on (per the operator's
 	# note) and fires down THROUGH the chassis interior — it can never clip into the
 	# obstacle.  belly is CHASSIS_Y/2 below centre → total sensor-to-belly = that + 2cm.
+	# ---- BOOM MOUNT (tof_boom) --------------------------------------------------
+	# The as-built sensor is on a boom out the BACK of the robot, level with the top of
+	# the HAT — not under the belly centre.  Two consequences, and the second is the one
+	# that bites:
+	#   1. The ray still leaves along BODY-down (it is bolted to a tilting robot), so the
+	#      along-ray distance is longer than the vertical drop by 1/cos(tilt).
+	#   2. ⚠ THE BOOM IS A LEVER ARM ON PITCH.  70 mm aft means a nose-down pitch raises
+	#      the sensor while the belly itself barely moves, so an uncompensated reading
+	#      reports clearance the belly does not have — and it reports it most confidently
+	#      exactly when the body is pitched, which is when belly-strike is likeliest.
+	# Both are corrected below from the FUSED attitude estimate, which is what the robot
+	# can actually compute (never the exact basis).
+	if tof_boom:
+		# ⚠ MEASURE WHETHER THE SENSOR CAN SEE THE THING IT DEFENDS.  A boom 70 mm aft and
+		# at HAT height looks at ground the belly is not touching, so it can report healthy
+		# clearance while the belly's leading edge drags — a confident, valid, wrong
+		# reading, and the failure is silent.  The belly-centre ray is computed anyway and
+		# kept as the truth proxy so the gap is a measurement, not an argument.
+		_dbg_gc_belly = _compute_ground_clearance_centre(space_state, down)
+		return _compute_ground_clearance_boom(space_state, down)
+	return _compute_ground_clearance_centre(space_state, down)
+
+# The belly-CENTRE downward ray: the original model, and now also the truth proxy the
+# boom arm is scored against.
+func _compute_ground_clearance_centre(space_state: PhysicsDirectSpaceState3D,
+									  down: Vector3) -> float:
 	var sensor_up: float = CHASSIS_Y * 0.5 + 0.02
 	var origin: Vector3 = _chassis.global_transform.origin + (-down) * 0.02
 	var query := PhysicsRayQueryParameters3D.new()
@@ -10061,6 +10121,53 @@ func _compute_ground_clearance() -> float:
 		return GROUND_CLEARANCE_RANGE
 	# Sensor-to-surface distance minus the sensor-to-belly offset = belly clearance.
 	return max(0.0, origin.distance_to(hit.position) - sensor_up)
+
+# The as-built belly ToF: on a boom, aft and high, casting along body-down.
+#
+# GEOMETRY.  Sensor sits at body-frame s = (0, boom_y, boom_z) with boom_z negative
+# (aft; forward is +Z) and boom_y at the top of the HAT.  The ray leaves along body-down.
+#
+# THE CORRECTION, and why each term is there.  Let `up` be world-up expressed in the BODY
+# frame — i.e. the fused gravity estimate, the only attitude a robot has.
+#   * The ray descends at `up.y` metres of ALTITUDE per metre travelled, so a measured
+#     distance d is a vertical drop of `d * up.y`.  (up.y is exactly `upright`.)
+#   * The sensor itself sits `s · up` above the chassis origin, vertically — and THIS is
+#     the term the boom makes large: with s_z = -0.07, a pitch of only 10 deg moves it
+#     12 mm, comparable to the whole belly clearance the homeostat defends.
+#   * The belly plane is `_chassis_bottom_local` below the origin (NOT CHASSIS_Y/2 — the
+#     measured body's origin is not its centre).
+# so   belly_clearance = d*up.y - (s · up) + _chassis_bottom_local
+#
+# With tof_tilt_comp off this returns the RAW along-ray reading minus the level-pose
+# offset — what a driver that ignored attitude would publish.  That arm exists so the
+# correction can be shown to be worth something rather than assumed.
+func _compute_ground_clearance_boom(space_state: PhysicsDirectSpaceState3D,
+									down: Vector3) -> float:
+	var by: float = tof_boom_y if tof_boom_y > 0.0 else _chassis_top_local
+	var s_body := Vector3(0.0, by, tof_boom_z)
+	var xf: Transform3D = _chassis.global_transform
+	var origin: Vector3 = xf * s_body
+	var query := PhysicsRayQueryParameters3D.new()
+	query.from = origin
+	query.to = origin + down * (GROUND_CLEARANCE_RANGE + CHASSIS_Y)
+	query.collision_mask = _LAYER_WORLD
+	query.hit_from_inside = true
+	var hit := space_state.intersect_ray(query)
+	if hit.is_empty():
+		return GROUND_CLEARANCE_RANGE
+	var d: float = origin.distance_to(hit.position)
+	if not tof_tilt_comp:
+		# Uncompensated: subtract only the LEVEL-POSE height of the sensor above the
+		# belly.  Correct at zero tilt and increasingly wrong away from it — deliberately.
+		return max(0.0, d - (by - _chassis_bottom_local))
+	# ⚠ The fused estimate, not the exact basis: this is the legal signal, and it is the
+	# one the robot will use.  Fall back to the exact body-up only before the filter has
+	# a value at all (first ticks), so the channel is never silently un-corrected.
+	var up: Vector3 = _up_est_body if _up_est_body.length() > 0.5 \
+		else (xf.basis.inverse() * Vector3.UP)
+	var vertical_drop: float = d * up.y
+	var sensor_above_origin: float = s_body.dot(up)
+	return max(0.0, vertical_drop - sensor_above_origin + _chassis_bottom_local)
 
 func _compute_target_loom() -> float:
 	# Phase H1 V6 — proxy looming: count rays in a forward FOV grid that
@@ -11258,6 +11365,9 @@ func _emit_jsonl(h1: Array, h2: Array, kn: Array,
 	# comparison. h_ema/h_max/h_bias pulled from MotorEPM's snapshot = the homeostat's
 	# smoothed height, self-discovered ceiling, and the integrated lift bias driving hip2.
 	line["gc_raw"]  = snappedf(_dbg_gc_raw, 0.0001)
+	# Belly-centre truth proxy, published ONLY while the boom model is on.  -1 = not
+	# modelled, which is distinguishable from a real reading of 0.
+	line["gc_belly"] = snappedf(_dbg_gc_belly, 0.0001)
 	line["gc_norm"] = snappedf(clamp(_dbg_gc_raw / GROUND_CLEARANCE_STAND, 0.0, 1.0), 0.001)
 	line["cy_norm"] = snappedf(clamp(chassis_y / target_height, 0.0, 1.0), 0.001)
 	# TRUE swing fraction from the physics foot-contact sensor — the ground truth against

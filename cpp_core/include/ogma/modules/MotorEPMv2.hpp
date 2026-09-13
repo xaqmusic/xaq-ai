@@ -1054,6 +1054,8 @@ private:
     float   chassis_h_ema_ = 0.0f;                    // smoothed height (spike-robust)
     float   height_k_eff_  = -1.0f;   // adapted setpoint fraction; <0 = uninitialised
     double  height_ground_gain_ = 0.0; // 0 = off, byte-identical
+    // Anti-windup gate on the ratchet above; 0 = off, byte-identical.  See the param doc.
+    double  height_windup_guard_ = 0.0;
     // 2026-08-07 — COMPLETE THE LIFT: drive the KNEE with the height bias too.
     //
     // MEASURED: hip2 and the knee agree on sign only 50.8% +- 1.1% of ticks — a coin
