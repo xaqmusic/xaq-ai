@@ -5058,6 +5058,36 @@ the boom model is on, and is `-1` otherwise so "not modelled" cannot be read as 
 operator cares about is too rare here to A/B at reasonable cost, so every number above is
 a MECHANISM measurement and the link to tipping remains inference.
 
+**★★★ ADDENDUM 2026-09-13 — every number above was taken on a GHOST CHASSIS, and the
+default is now solid.** `chassis_collides` defaulted **false**, `native_measured` declares
+an empty `body_env`, and **`seedavg.py` does not set it either** — so for a body that
+cannot touch the ground with its belly, "belly grounding" meant the belly
+**interpenetrating the floor**. That is a different physics, not a conservative
+approximation, and it sits underneath the one channel the promoted height homeostat rides.
+Other configs carry a prose warning about exactly this; the benchmark did not.
+
+**The boom-blindness result was re-measured with a solid belly and is UNCHANGED:**
+
+| | boom | belly truth | over-report | r | missed |
+|---|---|---|---|---|---|
+| ghost chassis | 30.7 mm | 5.2 mm | +25.5 mm | +0.836 | 22/22 (100 %) |
+| **solid chassis** | 30.7 mm | 5.2 mm | **+25.4 mm** | +0.790 | **23/23 (100 %)** |
+
+So the finding stands on its own and did not depend on the ghost body.
+
+**What the solid chassis does change** (arena, measured body, belly-centre sensor, n=3):
+peak chassis height falls (0.090 / 0.127 / 0.107 against a ghost 0.148 — the belly can no
+longer sink through the floor), and **tilt becomes erratic rather than worse**: 0.213 /
+0.102 / 0.071 against a ghost 0.092, with the single auto-reset of the whole comparison on
+the same seed that hit 0.213. n=3 and one event: a hint that the solid belly adds variance,
+nothing more.
+
+⚠ **CONSEQUENCE FOR THE RECORD:** figures taken before 2026-09-13 are not directly
+comparable to figures after it unless the arm set `OGMA_PICRAWLER_CHASSIS_COLLIDE`
+explicitly. Reproducing a historical number now requires setting it to **0** and saying so.
+The startup receipt prints the state unconditionally — ON or off, default or override — so
+no run is ambiguous about it again.
+
 ### ★★ 2026-09-12 — THE ROBOT AND THE SIM DID NOT AGREE, AND ONE FLAG FIXED IT
 
 **Verdict: defect + fix (`WORKING`), measured on the robot.** Recorded because it touches

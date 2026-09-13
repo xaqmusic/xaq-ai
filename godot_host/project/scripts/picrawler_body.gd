@@ -808,10 +808,24 @@ const _LAYER_CHASSIS: int = 1 << 2   # chassis-only layer — floor.mask does
 # drag)" for hump traversal; the real mechanism is worse than frictionless drag — there is no
 # belly contact at all.
 #
-# DEFAULT OFF, so every historical number stays reproducible and this is a LEVER rather than a
-# silent re-basing of the whole campaign (CLAUDE.md §3: gain-0-guarded, A/B'd, then promoted
-# on evidence).  Turn it on with the export, OGMA_PICRAWLER_CHASSIS_COLLIDE=1, or [J].
-@export var chassis_collides: bool = false
+# ⚠ DEFAULT FLIPPED TO **ON**, 2026-09-13, BY OPERATOR DECISION — and this IS the re-basing
+# the paragraph above warned about, so it is named rather than slipped in.
+#
+# WHY IT WAS OFF: so every historical number stayed reproducible and this stayed a LEVER.
+# WHY IT IS NOW ON: a ghost chassis cannot touch the ground, so every belly/clearance result
+# in the ledger was measured on a body for which "belly grounding" meant the belly
+# INTERPENETRATING the floor.  That is not a conservative approximation, it is a different
+# physics, and it silently invalidates the one channel the promoted height homeostat rides.
+# The 2026-09-13 boom-ToF and height-ratchet work is the case in point: both were measured
+# on a ghost body before this flip and both were re-checked after it.
+#
+# ⚠ CONSEQUENCE FOR THE RECORD, stated plainly: numbers taken before this date are NOT
+# directly comparable to numbers taken after it unless the arm set the env var explicitly.
+# `seedavg.py` does NOT set it, so most of the campaign ran ghost.  To reproduce a
+# historical figure, set OGMA_PICRAWLER_CHASSIS_COLLIDE=0 and say so.
+#
+# The startup receipt prints the state unconditionally, ON or off, so no run is ambiguous.
+@export var chassis_collides: bool = true
 # Sliding friction of the chassis shell against the world, INDEPENDENT of the feet (mu=1.5)
 # and the climbing wedges (3.0).  0.20 ~ plastic on concrete.  Raise it to make a downed
 # robot stick where it falls; drop it toward 0 for a body that slides freely on its belly.
@@ -2781,6 +2795,13 @@ func _ready() -> void:
 		# is physically different from the one that ran.
 		print("PicrawlerBody: \u26a0 OGMA_PICRAWLER_CHASSIS_COLLIDE=%s \u2014 chassis %s" % [
 			ccl, "COLLIDES with the world" if chassis_collides else "is a ghost (historical)"])
+	# ⚠ UNCONDITIONAL RECEIPT.  The block above only spoke when the env var was set, so a
+	# run on the DEFAULT said nothing at all about whether its belly could touch the floor —
+	# and that default has now changed, which makes silence the worst option.  A run whose
+	# log does not carry this line is not evidence about belly clearance.
+	print("PicrawlerBody: chassis_collides = %s%s" % [
+		"ON (solid belly)" if chassis_collides else "off (GHOST belly — historical)",
+		"" if ccl != "" else "  [default]"])
 	var cfr: String = OS.get_environment("OGMA_PICRAWLER_CHASSIS_FRICTION")
 	if cfr != "":
 		chassis_friction = cfr.to_float()
