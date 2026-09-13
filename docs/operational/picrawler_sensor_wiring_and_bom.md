@@ -992,6 +992,47 @@ reason not to push it: at lower SoC `V0` falls and `R` rises, so **the cliff mov
 — a nearly-drained pack is the worst time to run the one test that deliberately approaches
 it. **Re-run on a charged pack.**
 
+### 3.8.6 The BRAIN path at slew 40 vs 50 — ✅ MEASURED 2026-09-13
+
+All twelve channels commanded continuously via `servo.set` (the **normal** slew path, not
+`pose.set`'s staggered pose slew), body standing on vinyl, alternating
+`stand ↔ stand_tall`, **ABBA-interleaved** with `--normal-slew` set per arm.
+
+| arm order | slew | `i_max` (A) | throttled |
+|---|---|---|---|
+| 1 | 40 | 2.130 | `0x0` |
+| 2 | 50 | 1.917 | `0x0` |
+| 3 | 50 | 1.729 | `0x0` |
+| 4 | 40 | 1.635 | `0x0` |
+
+**★ The raw sequence declines monotonically — 2.130 → 1.917 → 1.729 → 1.635 — which is
+session drift, not a slew effect, and is exactly what ABBA exists to expose.** A reading
+of arms 1 and 2 alone would have said "slew 50 draws 10 % less"; a reading of arms 2 and 4
+would have said "slew 50 draws 17 % more". Both would have been reading the battery.
+
+ABBA puts A at positions 1 and 4 and B at 2 and 3, the same mean position, so a linear
+drift cancels: **slew 50 is −0.059 A (−3.2 %) against slew 40 — no penalty**, consistent
+with §3.8.4's per-servo result and with the saturation argument. **No throttle event in
+any arm.**
+
+⚠ **THE REAL FINDING IS NOT THE SLEW, IT IS THE SAG.** Three of the four arms **aborted on
+the `vbat < 7.0` guard**, at 6.82–6.96 V, around the fourth cycle. Between cycles the pack
+reads 7.7–7.9 V, so this is **~0.9 V of transient sag under sustained twelve-channel
+driving** — and it recovers, so the pack is not flat.
+
+That matters more for first power-on than either slew number. Pose moves are staggered and
+intermittent; **the brain drives every joint every tick, which is a heavier duty cycle than
+anything measured before today.** Against the HAT's 6.0 V input minimum, a pack resting at
+7.8 V has roughly 0.9 V of margin under that load — and a pack resting at 7.0 V would sag
+to about 6.1 V, which is at the edge. **The usable battery window for continuous brain
+operation is therefore much narrower than the pack's nominal 6.0–8.4 V range**, and the
+limit is sag under load, not capacity.
+
+**Re-use context:** the low-battery auto-safe trips at `VBAT_LIMP_V` = 6.4 V, which under
+continuous brain driving would be reached at a resting voltage around 7.3 V — i.e. the
+robot will rescue-pose itself while the pack still looks half full. That is the right
+behaviour and worth knowing before it surprises someone mid-run.
+
 ### 3.8.3 The surface changed, and it splits the sweep in two
 
 **Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
