@@ -544,12 +544,18 @@ struct State {
                 // supply dipped just now.  Drop the load — the servos ARE the load — and
                 // refuse arming briefly so the rail is not immediately re-loaded.
                 ++rail_events;
-                rail_guard_until_ms = mono_ms() + RAIL_GUARD_MS;
                 record("rail_undervolt", {{"throttled", pi_throttled}, {"new_bits", fresh},
                                           {"ext5v", ext5v}, {"vbat", vbat},
                                           {"count", rail_events},
                                           {"injected", (fresh & rail_inject) != 0}});
                 rescue("rail under-voltage");
+                // ⚠ The back-off must OUTLAST the recall it just started.  RAIL_GUARD_MS is
+                // 5 s; the staggered rescue recall runs ~8.2 s (3000 + 12*stagger*20 + 4000,
+                // measured).  servo.set checks neither pose_move_active nor rescue_active, so
+                // a 5 s back-off leaves ~3 s in which a client can command a channel into a
+                // rescue that is still moving -- fighting the very recovery the guard
+                // ordered.  Take the later of the two.
+                rail_guard_until_ms = std::max(mono_ms() + RAIL_GUARD_MS, rescue_until_ms);
             }
         }
         bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= driver.armed(c);
