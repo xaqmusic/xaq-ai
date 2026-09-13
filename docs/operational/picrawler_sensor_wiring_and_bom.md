@@ -1179,10 +1179,23 @@ failing rail.
 
 ⚠ **The earlier note that `pmic_read_adc` is "~0.7 s per read and useless for transients" was
 wrong, and the error was in what was being timed.** ~0.7 s is the cost of reading the
-*entire* ADC set. Naming one value costs **85 ms median — 8.2 Hz** (measured from the
-operator's own `~/ext5v.log`, 2026-08-30). That is not fast enough for a 50 ms inrush dip,
-but it is entirely fast enough to watch a rail sag under sustained driving, which is the
-regime §3.8.6 and §3.8.7 are about.
+*entire* ADC set. Naming one value is far cheaper.
+
+⚠⚠ **And the first correction of it, written earlier the same day, was also wrong — in the
+same way.** It said one value costs "85 ms median, 8.2 Hz", taken from the spacing of
+samples in the operator's `~/ext5v.log`. **That is the cadence of the logging script, not
+the cost of the call.** Timed directly on this Pi, n=50:
+
+| call | median | p95 | max |
+|---|---|---|---|
+| `vcgencmd get_throttled` (via `popen`, as `benchd` does it) | **1.5 ms** | 1.7 | 2.4 |
+| `vcgencmd pmic_read_adc EXT5V_V` (via `popen`) | **2.9 ms** | 3.1 | 4.5 |
+| *(for contrast)* spacing of samples in `~/ext5v.log` | 85 ms | 292 | — |
+
+So `EXT5V_V` would run at ~340 Hz and `get_throttled` at ~650 Hz. **Twice now the sampling
+rate of whatever was doing the reading has been recorded as a property of the part being
+read** — first the whole-ADC-set cost, then a shell script's loop. The lesson is the same
+both times: time the call, do not infer it from a log.
 
 **It is published as instrument-only.** `benchd` reports `ext5v` with an age in its status,
 and **no threshold is taken from it** — per the project's sensor-admission rule, a new
@@ -1256,6 +1269,61 @@ second run reported *"the poll never calls update()"* — the guard was fine; it
 the first run's bit, exactly as designed. And the back-off first printed `~1.8 s` against a
 5 s setting — the preceding 3 s hold had already spent the window. **Both times the
 instrument was measuring its own after-effects and reporting them as product defects.**
+
+#### 3.8.9.1 The fast-collapse question — ✅ two thirds answered, one third untestable
+
+The §3.8.7 failure was *slow*: `0x50000` appeared and sat there for **303 s** before the
+reset. The 2026-08-29 failure was *fast*: the Pi was gone **0.5 s** after `pose.set`. A
+guard that needs a second to notice is irrelevant to the second case, so the question is
+how much of that 500 ms the software actually spends.
+
+**(a) Detection latency — ✅ MEASURED, and a real defect fell out of it.** Injecting at
+random poll phase, reading both timestamps from the daemon's own monotonic clock:
+
+| | median | p95 | max |
+|---|---|---|---|
+| detection latency, n=20 | **46 ms** | 101 | **101 ms** |
+
+⚠ **The first attempt measured 80 ms and was wrong, because the instrument was creating
+the result.** The poll was `if (++throttled_poll >= 10)` inside `frame()` — and `frame()`
+is called by the telemetry thread at 10 Hz **and by every `status` RPC**. The drill polls
+status at 50 Hz while waiting, which drove the poll to ~6 Hz. **The guard was faster when
+someone was watching, and an unattended robot got the full 1 Hz** — unattended being
+exactly when the guard is the only thing looking at the rail. Now deadline-based at 100 ms,
+proven by interleaving watched and unwatched trials in one run: medians 52 ms and 34.5 ms,
+both capped at ~100 ms.
+
+**(b) The cost of the guard's own response — ✅ MEASURED, and the worry was unfounded.**
+
+⚠ **`rescue()` does not shed load. It cannot.** There is no limp on this HAT once
+initialized (§3.8.7); the servos are energized and holding whatever happens. `rescue()`
+calls `begin_pose_move()` on twelve channels — *added* current, on a rail that has just
+reported sagging — and a rescue recall is what took the Pi down on 2026-08-29. Measured
+from `stand`, over the full 8.2 s recall:
+
+| | mean | peak |
+|---|---|---|
+| holding in `stand` | 0.649 A | 0.690 A |
+| the guard's rescue recall | 0.604 A | **0.636 A (0.92×)** |
+
+**The recall draws less than standing still does**, and the pack sagged no further. Two
+reasons: the stagger fix (one channel per 100 ms at 600 µs/s, not twelve at 2000 µs/s) and
+`rescue` being a lower-torque pose than `stand`. ⚠ Measured *from `stand`*, which is a
+high-holding-current pose — from a low-torque starting pose the sign could reverse.
+
+**A gap found while measuring it:** `RAIL_GUARD_MS` is 5 s, the recall runs **8.2 s**, and
+`servo.set` checks neither `pose_move_active` nor `rescue_active` — leaving ~3 s in which a
+client could command a channel into a rescue that was still moving. The back-off is now the
+later of the two deadlines (verified: 8.3 s).
+
+**(c) Does the sticky bit get SET before the Pi dies? — ❌ NOT TESTABLE BY INJECTION.**
+Injection *assumes* the bit appears; it can only measure what happens afterwards. Whether
+the PMIC latches bit 16 before a 500 ms collapse takes the board down is a hardware race,
+and the only instrument that could answer it is a real brownout. **So the guard is proven
+to react in ~100 ms to a bit that appears, and remains unproven against a collapse fast
+enough not to set one.** ⚠ Nothing in (a) or (b) speaks to this, and the 100 ms figure
+should not be quoted as if it did.
+
 
 ### 3.8.3 The surface changed, and it splits the sweep in two
 
