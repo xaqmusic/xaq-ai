@@ -958,6 +958,40 @@ vinyl against 2.62 A on leather), and large travel. The recommendation to raise 
 rests on the marginal cost being ~zero in the brain's regime, not on a twelve-channel
 re-verification.
 
+### 3.8.5 Twelve channels, loaded, on vinyl — ✅ MEASURED 2026-09-13
+
+`rescue → stand → stand_tall → stand → rescue`, 3 cycles, robot standing on vinyl,
+`vcgencmd get_throttled` as the tripwire (§3.6's method — the only direct evidence of the
+rail failing, and it is binary and sticky).
+
+| pose | i_a range (A) | vbat under load |
+|---|---|---|
+| rescue | 0.65 – 1.13 | 7.57 – 7.63 |
+| stand | 1.10 – 1.36 | 7.43 – 7.61 |
+| **stand_tall** | **1.43 – 1.75** | **7.40** |
+
+**Worst 1.746 A against a 3.0 A rail rating and a 3.5 A working budget — 58 % and 50 %.
+`0x0` throttled throughout.** `stand_tall` is the costliest, as more work against gravity
+should be. Lower than §3.5's 2.481 A loaded `stand` recall, which started from a different
+pose and therefore travelled further.
+
+⚠ **The averaging understates a transient.** `ina_i` is a 128-sample average on the part
+(~68 ms) read at 10 Hz, and the failure is a regulator current limit that trips fast. §3.6
+found raw peak only ~4 % above its 10 ms average at K=12, so the understatement is
+probably small — but **`get_throttled` staying `0x0` is the load-bearing evidence here,
+not the current figure.**
+
+⚠ **THIS IS THE POSE PATH, NOT THE BRAIN PATH.** `pose.set` uses `g_pose_slew_us` with a
+100 ms stagger; the brain commands every joint every tick at the *normal* slew. So this
+does not exercise the 40 → 50 recommendation. A `--normal-slew` flag now exists for
+exactly that test (it was a compile-time constant), and the brain-like A/B —
+all 12 channels driven via `servo.set`, `stand ↔ stand_tall`, ABBA at 40 and 50 — **was
+attempted and aborted on its own `vbat < 7.0` guard** at 6.83–6.93 V under load. Resting
+voltage recovered to 7.49 V, so the pack was sagging rather than flat, but §3.7 is the
+reason not to push it: at lower SoC `V0` falls and `R` rises, so **the cliff moves closer**
+— a nearly-drained pack is the worst time to run the one test that deliberately approaches
+it. **Re-run on a charged pack.**
+
 ### 3.8.3 The surface changed, and it splits the sweep in two
 
 **Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
