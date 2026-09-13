@@ -1150,6 +1150,46 @@ is not.
 constant invisible to anyone reading this file. `r_shunt` has the identical problem (§3.3 says
 it belongs in calib JSON and it is also a flag). **Both should move to `pi_host/calib/` together.**
 
+### 9.2.1 ⚠ THE ToF STOPS RANGING AND NEVER RESTARTS — observed 2026-09-13
+
+**Symptom:** the operator saw the ToF "stopped". Telemetry read `tof.ok = true`,
+`status = valid`, `raw_mm = 158` — a perfectly healthy-looking reading that was
+**240 seconds old**. `errors = 0`, `bus_errors = 0`. Nothing was flagged.
+
+**Cause, from the record.** The last fresh sample is at `t_mono = 238425173`; **0.2 s
+later a deadman fired (trip 601) and commanded the rescue pose**, and no measurement ever
+arrived again. A rescue is a twelve-channel move. The correlation is exact.
+
+**The part is fine.** With `benchd` stopped, `hat_tool tof probe` reports model `0xEE`,
+raw 69 mm, `valid`, signal 24.5 Mcps — immediately. `hat_tool` runs `init()` before it
+reads; **the VL53L0X had lost its continuous-ranging state**, and nothing in `benchd`
+restores it. Restarting `benchd` also fixes it, for the same reason.
+
+⚠ **`sample_tof()` treats a missing measurement as "not an error" forever.**
+`read_ready()` polls `data_ready()`; if the part is no longer ranging that is false on
+every call, so the previous reading stands, `age_ms` climbs, and **no code path ever
+re-initialises the sensor**. The staleness is published and nothing acts on it.
+
+**Rate: ~1 failure in 600 pose moves.** It survived 600 deadman rescues in this session
+and died on the 601st, so this is a marginal transient (a supply dip on the shared rail
+during a twelve-servo move is the obvious candidate — the ToF's 3V3 comes off the HAT),
+not a deterministic logic fault. Rare, and therefore easy to not see coming.
+
+⚠ **WHY THIS MATTERS FOR FIRST POWER-ON.** `ground_clearance` is the **promoted** height
+homeostat's input — the lever that replaced the god's-eye `chassis_y_norm` and solved the
+hump. If it freezes mid-walk, the homeostat keeps defending a belly clearance the robot
+had *minutes* ago, while reporting itself healthy. Worse, the freeze is most likely during
+a large multi-servo move, which is exactly when the body is least settled.
+
+**Open — the fix is not yet written.** `benchd` needs to re-initialise the part when a
+measurement has been missing for much longer than the timing budget (32.9 ms, so healthy
+readings arrive ~30 Hz; ~1 s of silence is ~30 missed measurements and is not ambiguous).
+⚠ Two constraints on that fix: `sample_tof()` runs inside `frame()`, which holds the
+state mutex the servo tick also takes, and a VL53L0X `init()` is the long boot sequence
+(SPAD selection, ~80 tuning writes, two calibrations) — so it must **not** run inline
+under the lock. And any auto-recovery must be **counted and published**, or it will hide
+the electrical marginality that causes it rather than surfacing it.
+
 ### 9.3 Two-point validation — the standing pose, ✅ MEASURED 2026-09-07
 
 A one-point fit calibrates but cannot be wrong-checked. The second point is the saved `stand`
