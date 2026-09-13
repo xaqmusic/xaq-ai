@@ -4782,7 +4782,9 @@ stayed latched off until power-cycled). **A4 battery voltage never saw it**: the
 rescue path start channels one every 100 ms, shortest travel first, at 600 µs/s; the same
 X → rescue recall then lands in 4.2 s with the throttle flags clean. Two instrument notes:
 `vcgencmd pmic_read_adc` takes ~0.7 s per read, useless for rail transients (the INA219 is the
-instrument); and a first arm after boot cannot slew (no known position) — the stagger alone
+instrument) — ⚠ **corrected 2026-09-13: that is the cost of reading the WHOLE ADC set. Naming
+one value, `pmic_read_adc EXT5V_V`, costs 85 ms median (8.2 Hz), and it is the only direct
+view of the 5 V rail that actually fails — see bom §3.8.8.4**; and a first arm after boot cannot slew (no known position) — the stagger alone
 carried that case. Re-use context: the servo-BEC rebuild now has two measured reasons (no
 limp, shared-rail brownout); the INA219 quantifies the inrush margin before deciding.
 ---
