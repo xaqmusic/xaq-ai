@@ -1213,15 +1213,53 @@ restart demonstrably did not take. The decision lives in `ogma::hw::TofRecoveryP
 struct no test can reach. `tof.restarts` / `tof.reinits` / `tof.unreachable` are published
 in telemetry.
 
-⚠ **VERIFIED BY UNIT TEST AND BY DEPLOYMENT, NOT AGAINST A REALLY-STALLED PART.** The
-policy is tested, the daemon builds and runs on the robot (48/48 `test_hw`), and the
-counters are live and reading zero on a healthy sensor. What has **not** been exercised is
-the recovery firing against an actually-stalled VL53L0X, because stalling one on purpose
-needs bus access `benchd` holds exclusively (§the `flock` claim), and its own startup
-`init()` makes a stop-it-then-restart-the-daemon test vacuous. **The counters are the
-detector**: the next natural occurrence — ~1 in 600 pose moves — will say both that it
-fired and which level was needed. Treat "recovery works" as unproven until a non-zero
-`restarts` or `reinits` appears with `age_ms` returning to 0.
+✅ **VERIFIED ON THE ROBOT 2026-09-13, deterministically.** Waiting for the natural event
+was tried first and abandoned as underpowered: a soak produced **128 deadman trips in 520
+cycles** (the rescue's own `rescue_until_ms` window swallows some gaps) with no stall, and
+at a ~1-in-600 rate even 600 trips leaves P(zero events) ≈ 37 %. Roughly 1800 trips would
+be needed for 95 % confidence — hours of servo cycling to exercise a few register writes.
+
+So the stall is now **injected** (`tof.stall confirm=true`, PROTOCOL §verbs), which
+reproduces the observed failure exactly: the part stays addressable and simply stops
+producing measurements. Sampled at 10 Hz:
+
+| t (s) | age_ms | raw_mm | clearance_m | status | valid | restarts |
+|---|---|---|---|---|---|---|
+| 0.00 | 0 | 70 | 0.0052 | valid | true | 0 |
+| 0.11–0.93 | 102→928 | 8191 | 1.2000 | signal | **false** | 0 |
+| **1.04** | 1033 | 8191 | 1.2000 | signal | false | **1** |
+| 1.14 | 0 | 68 | 0.0032 | valid | true | 1 |
+
+**The cheap restart was sufficient** (`reinits` stayed 0), it fired at the 1 s threshold,
+and it did not thrash afterwards.
+
+### ⚠ 9.2.2 THE TEST FOUND A WORSE BUG THAN THE ONE IT WAS VERIFYING
+
+The **first** injection run, before the fix below, published this for the whole second
+between the stall and the recovery:
+
+```
+  t=0.11 .. 0.94   raw_mm = 0   clearance = 0.0000 m   status = valid   valid = TRUE
+```
+
+Stopping continuous ranging emits one final reading of `raw_mm = 0` carrying
+`status = Valid`, and `raw_to_clearance_m()` floors the resulting negative at **0.0**. So
+the channel handed the **promoted** height homeostat a confident *"the belly is on the
+floor"* — precisely the input that drives its setpoint ratchet (ledger 2026-09-13). This
+is the project's exactly-round-null shape, except **zero is not a neutral null on this
+channel, it is the alarm value**. Absence would have been safe; a plausible extreme was
+not.
+
+**Fixed:** `valid = (status == Valid) && raw_mm != 0`. After it, the same injection
+reports `raw 8191 / status signal / valid false / 1.2000 m` — the far-limit stand-in the
+driver already uses for "saw nothing", which errs toward *belly held high* and is the safe
+direction. `ogma_host` gates its publish on `status == Valid`, so the promoted topic goes
+**absent** rather than wrong.
+
+⚠ **The validity bound is deliberately not tighter.** "Reject anything at or below
+`mount_offset_mm`" is tempting — a target closer than the 64.8 mm recess is geometrically
+impossible — but **belly-on-the-floor reads `raw ≈ mount_offset`** and noise puts it either
+side, so that rule would discard the one measurement this channel exists to make.
 
 **The original diagnosis, for the record.** `benchd` needs to re-initialise the part when a
 measurement has been missing for much longer than the timing budget (32.9 ms, so healthy
