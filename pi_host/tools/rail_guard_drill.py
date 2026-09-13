@@ -58,6 +58,7 @@ while time.time() - t0 < 3.0:
 check("the 1 Hz poll reached the guard", fired is not None,
       f"fired after {fired:.2f}s" if fired else "no event in 3 s — the poll never calls update()")
 if fired is None: sys.exit(1)
+t_event = t0 + fired          # measure the back-off from HERE, not from the expiry loop
 
 check("rail_events incremented by exactly 1", st["rail_events"] == base_events + 1,
       f"{base_events} -> {st['rail_events']}")
@@ -88,7 +89,14 @@ while time.time() - t0 < GUARD_MS/1000 + 4:
     st = rpc("status")
     if not st["rail_guarded"]: break
     time.sleep(0.2)
-check("the back-off expired on its own", not st["rail_guarded"], f"after ~{time.time()-t0:.1f}s")
+held = time.time() - t_event
+# ⚠ Measured from the EVENT, not from this loop — the 3 s hold above already spent most
+# of the back-off, so timing it from here would report ~1.8 s and prove nothing about the
+# configured 5 s.  Both bounds matter: too short re-loads a dipping rail, too long reads
+# downstream as a dead servo bus.
+check("the back-off expired on its own", not st["rail_guarded"], f"held {held:.1f}s")
+check(f"it lasted the configured {GUARD_MS/1000:.0f}s", abs(held - GUARD_MS/1000) < 1.2,
+      f"{held:.1f}s vs {GUARD_MS/1000:.0f}s (+/- the 0.2 s poll and 1 s status granularity)")
 r = rpc("servo.set", ch=0, us=1500)
 check("servo.set works again once clear", r.get("ok", False), r.get("error", ""))
 rpc("limp")
