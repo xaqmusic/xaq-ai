@@ -1033,6 +1033,53 @@ continuous brain driving would be reached at a resting voltage around 7.3 V — 
 robot will rescue-pose itself while the pack still looks half full. That is the right
 behaviour and worth knowing before it surprises someone mid-run.
 
+### ★★★ 3.8.7 THE 6.4 V AUTO-SAFE CANNOT PROTECT THE PI — measured 2026-09-13
+
+An endurance run (continuous twelve-channel driving, `stand ↔ stand_tall`, default slew 40)
+was intended to find how long the robot lasts before the low-battery auto-safe trips.
+**It never tripped. The Pi hard-reset instead**, and the numbers at the moment of death are
+the finding:
+
+| last telemetry before the reset | |
+|---|---|
+| `vbat` | **7.66 V** (auto-safe is 6.4 V) |
+| `i_a` | **0.92 A** (rail rating 3.0 A) |
+| `i_max` over the whole run | 2.249 A |
+| `vbat` minimum over the whole run | 6.86 V |
+| `pi_throttled` | `0x50000`, sticky, **set 303 s earlier** |
+
+**Neither monitored quantity predicted the failure.** The pack was healthy at 7.66 V, and
+the current was 0.92 A — *below* the 2.25 A the same run had already survived. Read either
+instrument alone and nothing was wrong.
+
+**★ This extends §3.8.1 rather than merely confirming it.** That section established the
+cliff is the 5 V regulator's current limit, not pack sag. What today adds is that **the
+INA219 cannot see it either** — it sits on the *battery* side of that regulator, so it
+measures the input to the thing that is failing, not the failing rail. Two independent
+electrical instruments, both blind to the actual fault.
+
+**★★ `vcgencmd get_throttled` bit 16 IS the early warning, and it gave 5 minutes.** It
+went non-zero at `t_mono = 1299818` — with `vbat` at 7.77 V and only 0.82 A flowing, an
+entirely unremarkable moment — and the Pi ran another **303 seconds** before dying. That
+bit monitors the Pi's own 5 V supply, which is exactly the rail that fails.
+
+⚠ **`benchd` polls `pi_throttled` at 1 Hz, publishes it, and acts on nothing.** The
+low-battery auto-safe watches `vbat`, which this run shows is the wrong quantity. The
+robot had five minutes of warning on an instrument it was already reading.
+
+⚠ **The LIVE bits are useless at 1 Hz.** Across the whole run not one poll caught bits 0–3
+(`under-voltage NOW`, `currently throttled`) set — the events are shorter than the poll
+interval. Only the sticky history bits (16, 18) were ever observed. So a guard must watch
+for **new sticky bits appearing** against a baseline captured at start, not for a live bit.
+A reboot clears them (confirmed: `0x0` after the reset), which is what makes a start-time
+baseline meaningful.
+
+**Consequence for first power-on.** There is currently no protection against the failure
+mode that has now taken the robot down three times (2026-08-29, the network drop earlier
+today, and this). The endurance question as posed — "how long until the auto-safe trips" —
+**has no answer, because the Pi dies first.** The real endurance limit is thermal/electrical
+on the 5 V rail, not battery capacity.
+
 ### 3.8.3 The surface changed, and it splits the sweep in two
 
 **Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
