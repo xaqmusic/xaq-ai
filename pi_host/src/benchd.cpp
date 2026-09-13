@@ -156,6 +156,11 @@ struct State {
     RailGuard rail_guard{};              // sticky-mask transition detector (tested there)
     int      rail_events    = 0;         // how many NEW under-voltage/throttle events
     int64_t  rail_guard_until_ms = 0;    // arming refused while set, to let the rail recover
+    // ⚠ FAULT INJECTION, and it MUST be visible in the frame.  This mask is OR'd into the
+    // polled one, so a consumer that reads rail_events cannot otherwise tell a real rail
+    // dip from a drill.  A confounded number looks exactly like a good one; publish the
+    // state that invalidates it.
+    unsigned rail_inject = 0;
     double   ext5v          = 0.0;       // the Pi's OWN measure of the rail the HAT feeds
     int64_t  ext5v_ms       = 0;
     int  throttled_poll = 0;
@@ -510,6 +515,10 @@ struct State {
             // ---- the guard proper -------------------------------------------------
             unsigned thr = 0;
             try { thr = unsigned(std::stoul(pi_throttled, nullptr, 0)); } catch (...) { thr = 0; }
+            // Injected bits join the mask HERE, upstream of the guard, so a drill runs the
+            // identical path a real dip runs: same update(), same rescue, same back-off.
+            // Injecting further down would test a copy of the mechanism, not the mechanism.
+            thr |= rail_inject;
             if (unsigned fresh = rail_guard.update(thr)) {
                 // A sticky bit that was NOT set at startup has appeared: the Pi's own
                 // supply dipped just now.  Drop the load — the servos ARE the load — and
@@ -518,7 +527,8 @@ struct State {
                 rail_guard_until_ms = mono_ms() + RAIL_GUARD_MS;
                 record("rail_undervolt", {{"throttled", pi_throttled}, {"new_bits", fresh},
                                           {"ext5v", ext5v}, {"vbat", vbat},
-                                          {"count", rail_events}});
+                                          {"count", rail_events},
+                                          {"injected", (fresh & rail_inject) != 0}});
                 rescue("rail under-voltage");
             }
         }
@@ -537,6 +547,7 @@ struct State {
                 {"ext5v", ext5v}, {"ext5v_age_ms", ext5v_ms ? mono_ms() - ext5v_ms : -1},
                 {"rail_events", rail_events},
                 {"rail_guarded", mono_ms() < rail_guard_until_ms},
+                {"rail_inject", rail_inject},
                 {"ina", ina ? json{{"ok", ina_ok}, {"i_a", ina_i}, {"v", ina_v},
                                    {"i_ema", ina_i_ema}, {"i_peak", ina_i_peak}, {"i_max", ina_i_max},
                                    {"charge_as", ina_charge}, {"energy_j", ina_energy},
@@ -795,6 +806,23 @@ json handle(State& S, const json& req) {   // caller holds m
         catch (const std::exception& e) { return err(std::string("stop_continuous: ") + e.what()); }
         S.record("tof_stall_injected", {{"by", "verb"}});
         return ok();
+    }
+    if (verb == "rail.inject") {
+        // ⚠ FAULT INJECTION.  RailGuard's LOGIC has unit tests; what those cannot reach is
+        // the WIRING — that the poll actually calls it, that rescue actually fires, that
+        // servo.set/pose.set/cal.begin actually refuse afterwards.  Waiting for a real dip
+        // to check that means waiting for the failure that hard-resets the Pi.
+        //
+        // Bits are OR'd into the polled mask, so this cannot CLEAR a real bit, only add.
+        // Setting bits=0 removes the injection; it does not reset the guard's baseline,
+        // because the baseline having moved is exactly what a real event leaves behind.
+        if (!req.value("confirm", false)) return err("rail.inject needs confirm=true — it commands the rescue pose");
+        const auto bits = req.value("bits", 0u);
+        if (bits & 0xFFF00000u) return err("bits outside the throttle mask (0x000FFFFF)");
+        S.rail_inject = bits;
+        S.record("rail_inject", {{"bits", bits}});
+        return ok({{"rail_inject", S.rail_inject}, {"baseline", S.rail_guard.baseline()},
+                   {"note", "OR'd into the next ~1 Hz poll"}});
     }
     if (verb == "cal.begin") {
         if (!ch_of(req, ch)) return err("bad ch");
