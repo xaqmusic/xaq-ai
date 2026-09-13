@@ -2849,3 +2849,12 @@ still untested, and still gated on travel. Cache-by-place `WORKING` as a store, 
 judge — dead-reckoned alignment and a coarse place key; re-use context: content-based registration, or
 revisits close enough in time that odometry has not drifted. Replay `WORKING`. The three bugs fixed, with
 the claims they carried withdrawn or re-measured above. Nothing promoted.
+
+**The static voxel viewer (built after the above).** `tools/run_voxel_viewer.sh RUN.jsonl` opens every
+filed cloud of a run in an interactive 3D view (`tools/xaq_inspector/voxel_viewer.py`, PyQt6 +
+pyqtgraph's GL view, no brain connection; usage in the inspector README). World lays the clouds out at
+their anchors, which are instrumentation. Body shows one cloud in its own frame, which is what the duck
+has. Colour is by the mean-height bands or by hits. One thing the first render taught: a thin streak
+in the body view is not a fault. Seed 6's second place-8 cloud was anchored 11 cm from a wall and
+facing along it (yaw 169°), and a wall seen that way is a line whose far end reads tall, because the
+sensor's vertical fan widens with range.
