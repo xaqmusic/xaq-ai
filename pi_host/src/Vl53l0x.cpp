@@ -437,7 +437,21 @@ Vl53l0x::Reading Vl53l0x::decode_result(const uint8_t b[12]) {
     r.signal_mcps   = fixpoint97_to_mcps(uint16_t((uint16_t(b[6]) << 8) | b[7]));
     r.ambient_mcps  = fixpoint97_to_mcps(uint16_t((uint16_t(b[8]) << 8) | b[9]));
     r.raw_mm        = uint16_t((uint16_t(b[10]) << 8) | b[11]);
-    r.valid         = r.status == Status::Valid;
+    // ⚠ A RAW OF ZERO IS A SENTINEL, NOT A DISTANCE — and on this channel it is the
+    // most dangerous value the part can emit.  Observed 2026-09-13: stopping continuous
+    // ranging produced one final reading of raw_mm = 0 carrying status = Valid, and
+    // raw_to_clearance_m floors the negative result at 0.0, so `ground_clearance`
+    // published a confident 0.000 m — "the belly is on the floor" — to the PROMOTED
+    // height homeostat, which is exactly the input that drives its setpoint ratchet.
+    // Absence would have been safe; this is worse than absence.
+    //
+    // ⚠ THE BOUND IS DELIBERATELY NOT TIGHTER.  The tempting rule is "reject anything at
+    // or below mount_offset_mm", since a target closer than the recess is geometrically
+    // impossible.  But belly-ON-THE-FLOOR reads raw ~= mount_offset (64.8 mm) and noise
+    // puts it either side, so that rule would throw away the one measurement this channel
+    // exists to make.  Zero is separated from a real belly touch by the whole recess, and
+    // is the value actually observed on a stopped part.
+    r.valid         = r.status == Status::Valid && r.raw_mm != 0;
     r.distance_m    = r.valid ? raw_to_clearance_m(r.raw_mm, cfg_.mount_offset_mm)
                               : cfg_.max_range_m;
     r.seq           = ++seq_;

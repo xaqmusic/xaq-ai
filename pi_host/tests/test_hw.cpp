@@ -663,3 +663,20 @@ TEST(TofRecovery, TheCooldownStopsADeadPartBeingHammeredEveryFrame) {
     EXPECT_EQ(p.decide(9000, 13000, 10000, 1), TofRecoveryPolicy::Action::None);   // exactly 3 s
     EXPECT_EQ(p.decide(9000, 13001, 10000, 1), TofRecoveryPolicy::Action::Reinit); // past it
 }
+
+TEST(Vl53l0xValidity, ARawOfZeroIsNotAMeasurementAndMustNotReadAsZeroClearance) {
+    // ⚠ THE FAILURE THIS PINS.  A stopped part emitted raw_mm = 0 with status = Valid, and
+    // the clearance conversion floors a negative at 0.0 — so the channel published a
+    // confident 0.000 m, "belly on the floor", into the promoted height homeostat for a
+    // full second.  Absence would have been safe; a plausible extreme was not.
+    //
+    // The conversion itself is what makes zero dangerous rather than merely wrong, so it
+    // is asserted directly: below the recess it floors, and the floor is the alarm value.
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(0, 64.8), 0.0);
+    EXPECT_DOUBLE_EQ(Vl53l0x::raw_to_clearance_m(60, 64.8), 0.0);
+    // ...and a genuine belly touch sits at the recess itself, which is why the validity
+    // bound is zero and NOT "at or below the offset": that rule would discard exactly the
+    // reading this channel exists to make.
+    EXPECT_NEAR(Vl53l0x::raw_to_clearance_m(65, 64.8), 0.0002, 1e-6);
+    EXPECT_NEAR(Vl53l0x::raw_to_clearance_m(120, 64.8), 0.0552, 1e-6);
+}
