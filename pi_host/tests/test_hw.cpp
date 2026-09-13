@@ -710,6 +710,29 @@ TEST(RailGuard, OneEventFiresOnceRatherThanOnEveryPoll) {
     EXPECT_EQ(g.update(0x10000u), 0u);
 }
 
+TEST(RailGuard, TheBaselineTRACKSTheMaskAndDoesNotAccumulate) {
+    // update() does `baseline_ = mask`, not `baseline_ |= mask`.  On real hardware the two
+    // are identical, because the sticky bits are monotonic within a boot -- the mask never
+    // loses a bit, so replacing and OR-ing give the same answer.  They diverge only when a
+    // bit can go away, and then REPLACING is the behaviour we want: the live bits (0-3) do
+    // clear, and a second under-voltage dip is a second event that deserves a second
+    // back-off, not a repeat to be swallowed.
+    //
+    // ⚠ This is pinned because the fault-injection drill depends on it and it is otherwise
+    // invisible: injected bits CAN be withdrawn, so the drill is re-runnable without
+    // restarting the daemon.  A later change to |= would silently make the drill a
+    // one-shot-per-boot tool, passing its first run and reporting "the poll never calls
+    // update()" on every run after.
+    RailGuard g;
+    g.update(0x0u);
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);
+    EXPECT_EQ(g.baseline(), 0x10000u);
+    EXPECT_EQ(g.update(0x0u), 0u);            // the bit withdrawn: not an event ...
+    EXPECT_EQ(g.baseline(), 0x10000u);        // ... and the baseline does NOT follow it down
+    EXPECT_EQ(g.update(0x40000u), 0x40000u);  // a different bit fires ...
+    EXPECT_EQ(g.baseline(), 0x40000u);        // ... and REPLACES the baseline, dropping 0x10000
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);  // so the first bit can fire a second time
+}
 TEST(RailGuard, ASecondDistinctBitIsASecondEvent) {
     // 0x50000 is bits 16 and 18 together, which is what the field failure actually showed.
     // Throttling appearing after under-voltage is new information, not a repeat.

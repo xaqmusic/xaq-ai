@@ -41,10 +41,14 @@ r = rpc("rail.inject", bits=0x10000)
 check("rail.inject refuses without confirm", not r.get("ok", False), r.get("error", ""))
 
 # --- 2. inject a bit the current boot does not have ----------------------
-# ⚠ Choose a bit the guard has not ALREADY absorbed.  Its baseline advances every time it
-# fires, by design -- so a second drill re-injecting the first drill's bit is correctly a
-# non-event, and reads as "the poll never calls update()" when it is nothing of the kind.
-# The baseline, not the current mask, is what decides whether a bit can still be an event.
+# ⚠ Choose a bit that is not the guard's CURRENT baseline.  It advances every time the
+# guard fires, so a drill re-injecting the previous drill's bit is correctly a non-event --
+# and reads as "the poll never calls update()" when it is nothing of the kind.  The
+# baseline, not the real mask, decides whether a bit can still be an event.
+#
+# The baseline REPLACES rather than accumulates (pinned in test_hw.cpp), so alternating
+# between two candidates is enough and the exhaustion branch below is a safety net rather
+# than a real four-run limit.
 base = st.get("rail_baseline", int(st["pi_throttled"], 0))
 CANDIDATES = [(0x10000, "under-voltage has occurred"), (0x40000, "throttling has occurred"),
               (0x20000, "arm frequency capped"),       (0x80000, "soft temp limit")]
