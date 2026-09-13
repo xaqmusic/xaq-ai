@@ -1204,7 +1204,26 @@ hump. If it freezes mid-walk, the homeostat keeps defending a belly clearance th
 had *minutes* ago, while reporting itself healthy. Worse, the freeze is most likely during
 a large multi-servo move, which is exactly when the body is least settled.
 
-**Open — the fix is not yet written.** `benchd` needs to re-initialise the part when a
+**✅ FIXED 2026-09-13 — escalating recovery, counted.** `benchd` now checks
+`model_id_ok()` first (a part that does not answer at all is a wiring or power fault, not
+a ranging one, and is counted as `unreachable` rather than hammered), then tries a cheap
+`stop/start` of continuous mode, and only escalates to a full `init()` if the cheap
+restart demonstrably did not take. The decision lives in `ogma::hw::TofRecoveryPolicy`
+(header-only, four unit tests) because `benchd`'s copy sits inside a thread-and-socket
+struct no test can reach. `tof.restarts` / `tof.reinits` / `tof.unreachable` are published
+in telemetry.
+
+⚠ **VERIFIED BY UNIT TEST AND BY DEPLOYMENT, NOT AGAINST A REALLY-STALLED PART.** The
+policy is tested, the daemon builds and runs on the robot (48/48 `test_hw`), and the
+counters are live and reading zero on a healthy sensor. What has **not** been exercised is
+the recovery firing against an actually-stalled VL53L0X, because stalling one on purpose
+needs bus access `benchd` holds exclusively (§the `flock` claim), and its own startup
+`init()` makes a stop-it-then-restart-the-daemon test vacuous. **The counters are the
+detector**: the next natural occurrence — ~1 in 600 pose moves — will say both that it
+fired and which level was needed. Treat "recovery works" as unproven until a non-zero
+`restarts` or `reinits` appears with `age_ms` returning to 0.
+
+**The original diagnosis, for the record.** `benchd` needs to re-initialise the part when a
 measurement has been missing for much longer than the timing budget (32.9 ms, so healthy
 readings arrive ~30 Hz; ~1 s of silence is ~30 missed measurements and is not ambiguous).
 ⚠ Two constraints on that fix: `sample_tof()` runs inside `frame()`, which holds the
