@@ -60,6 +60,11 @@ constexpr double VBAT_RECOVER_V  = 6.7;    // hysteresis: arming allowed again a
 // Pi out (2026-08-29, reproduced: telemetry gone 0.5 s after pose.set, Pi rebooted).  So a
 // pose starts its channels one at a time and slews them gently; servo.set keeps the fast slew.
 constexpr int NORMAL_SLEW_US     = 40;
+// ⚠ The NORMAL slew is what the brain's commands ride — pose moves use g_pose_slew_us and
+// are a different path.  It was a compile-time constant, which made the one setting a sim
+// study actually recommends changing (40 -> 50, ledger 2026-09-13) untestable without a
+// rebuild.  Flag, not a new default: the default is still NORMAL_SLEW_US.
+int g_normal_slew_us = NORMAL_SLEW_US;
 int g_pose_slew_us = 12;                   // 600 us/s: a 1000 us move takes ~1.7 s
 int g_pose_stagger_ticks = 5;              // 100 ms between channel starts
 // CALIBRATION DATA, not a constant (Ina219.hpp): at 10 mOhm the trace and solder are a
@@ -418,7 +423,7 @@ struct State {
                 pose_stagger_left = g_pose_stagger_ticks;
             } else --pose_stagger_left;
         } else if (driver.settled()) {
-            driver.set_slew_us_per_tick(NORMAL_SLEW_US);
+            driver.set_slew_us_per_tick(g_normal_slew_us);
             pose_move_active = false;
             record("pose.landed", {});
         }
@@ -835,6 +840,7 @@ int main(int argc, char** argv) {
         else if (a == "--pose-stagger-ms") g_pose_stagger_ticks = std::max(0, std::atoi(argv[i + 1]) / 20);
         else if (a == "--r-shunt") { g_r_shunt = std::atof(argv[i + 1]); g_r_shunt_override = true; }
         else if (a == "--tof-offset") { g_tof_offset_mm = std::atof(argv[i + 1]); g_tof_override = true; }
+        else if (a == "--normal-slew") g_normal_slew_us = std::max(1, std::atoi(argv[i + 1]));
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     // ---- fitted constants: the calib FILE is the source, flags are the override ----
@@ -846,6 +852,8 @@ int main(int argc, char** argv) {
         const auto cal = ogma::hw::SensorCalib::load();
         if (!g_tof_override)     g_tof_offset_mm = cal.tof_mount_offset_mm;
         if (!g_r_shunt_override) g_r_shunt       = cal.ina_r_shunt_ohm;
+        std::printf("ogma_benchd: normal slew %d us/tick (%.2f rad/s at 545.2 us/rad)\n",
+                    g_normal_slew_us, g_normal_slew_us * 50.0 / 545.2);
         std::printf("ogma_benchd: calib %s (%s) — tof_offset %.2f mm%s, r_shunt %.5f ohm%s\n",
                     cal.source.c_str(), cal.loaded ? "loaded" : "MISSING, using defaults",
                     g_tof_offset_mm, g_tof_override ? " [FLAG OVERRIDE]" : "",
