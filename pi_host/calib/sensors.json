@@ -27,5 +27,11 @@
       0.99937
     ],
     "_why": "Chip-frame body-up with the belly flat on a level floor (BOM \u00a74.2: five placements over four verified 180\u00b0 rotations, 0.05\u00b0 repeatability, floor slope 0.49\u00b0 subtracted out). It lumps mount tilt together with accelerometer bias, unsplit, and is applied to the ACCELEROMETER ONLY. Icm20948Config's default carries the same 2026-09-10 fit and its comment asked for exactly this file; re-fit after any IMU remount."
+  },
+  "servo": {
+    "us_per_rad": 545.2,
+    "measured_on": "ch0 RL knee, 2026-09-13",
+    "_why": "MEASURED, not the datasheet default. Command a known us delta and measure the toe's swept chord against the known tibia radius L3=76.5 mm: angle = 2*asin(chord/2L3). Seven marks at 100 us steps on paper, PWM held through each mark against ServoDriver's 0.5 s watchdog (a limped channel settles wherever gravity leaves it, which looks like a held position and is not one). Gap-average 549.0 and the 700->1300 chord 545.2 agree to 0.7%; chord/arc ratio 0.958 against a predicted 0.950 confirms the marks lie on a true 76.5 mm arc. INDEPENDENT CHECK: at this scale the calibrated knee envelope 600-2300 us spans 178.6 deg, i.e. the servo's full ~180 deg mechanical travel \u2014 at the standard 636.6 us/rad it would be 153 deg, leaving 27 deg unexplained. The standard assumption was 14% wrong.",
+    "_caveat": "One channel (RL knee). Part-to-part scale should hold within a few percent \u2014 the per-channel origin_us differences in servo_map.json are horn mounting, not scale \u2014 but this has not been checked on a second joint. The 600->700 gap was discarded: it starts from a PARKED (limped) position whose true angle is not the commanded one, and it was the clear outlier (449 vs 509-588 us/rad)."
   }
 }

@@ -5118,37 +5118,57 @@ been measured not to be the limit.**
 
 **The deployed `ServoDriver` default is 40 µs/tick = 3.14 rad/s — half the sim's speed.**
 
-**★★ 3. WHAT THE BUDGET COSTS THE GAIT** (corridor, measured body, n=3 × 6000, the sim's
-speed cap swept to each hardware setting):
+**★★ 3. THE SCALE WAS MEASURED ON THE BENCH, and the standard was 14 % wrong.**
+`us_per_rad` = **545.2**, not the 636.6 the datasheet default implies — so the servo
+sweeps more angle per microsecond than assumed. Method: command a known µs step, mark the
+toe on paper, measure the swept chord against the known tibia radius `L3` = 76.5 mm
+(`angle = 2·asin(chord / 2L3)`). Seven marks at 100 µs steps.
 
-| `MAX_SERVO_SPEED` | net_z | fwd_v | steps | tilt_sd | contact_duty |
-|---|---|---|---|---|---|
-| 6.00 rad/s (~76 µs, sim today) | **6.31 ± 0.66** | 0.110 | **34** | 0.0565 | 0.779 |
-| 3.93 rad/s (50 µs, budget) | **4.14 ± 0.21** | 0.066 | 21 | 0.0533 | 0.850 |
-| 3.14 rad/s (40 µs, **deployed**) | **3.28 ± 0.21** | 0.056 | **4** | 0.0456 | 0.889 |
-| 1.57 rad/s (20 µs) | **0.44 ± 0.13** | 0.024 | **0** | **0.1614** | 0.839 |
+Three checks agree: the six-gap average gives **549.0** and the single 700→1300 chord gives
+**545.2** (0.7 % apart, different error structure); chord/arc = 0.958 against a predicted
+0.950, confirming the marks lie on a true 76.5 mm arc; and — the convincing one, because
+nobody measured it for this — at 545 µs/rad the *already-calibrated* knee envelope
+600–2300 µs spans **178.6°**, a hobby servo's full mechanical travel. At 636.6 it would
+have been 153°, leaving 27° unexplained.
 
-**At the deployed slew the robot will cover ~52 % of the distance the sim shows, with
-almost no recognisable stepping** (4 against 34) and the highest contact duty of the set —
-it shuffles rather than steps. At the budget ceiling it is 66 %.
+⚠ **A watchdog nearly corrupted it.** `ServoDriver` limps a channel after 25 ticks (0.5 s)
+with no new command, so a single `servo.set` holds for half a second and then drops PWM —
+after which the leg settles wherever gravity leaves it, **which looks exactly like a held
+position**. The first two marks were taken that way and were discarded; every mark after
+was taken with a 5 Hz keepalive holding the channel. The `600→700` gap was dropped for the
+same reason (it starts from a parked, limped position) and was the clear outlier: 449
+µs/rad against 509–588 for the rest.
 
-**★ 4. SLOWER IS NOT MONOTONICALLY SAFER.** At 20 µs/tick the gait **collapses**: 0.44 m,
-zero steps, and **tilt_sd triples** (0.161 against 0.046–0.057 everywhere else). Below
-~3 rad/s the body cannot keep up with its own postural demands and simply wobbles. So the
-safe window is **not "as slow as possible"** — it is roughly **40–50 µs/tick**: stable,
-inside the measured current budget, at half to two-thirds of the sim's performance.
+**★★ 4. WHAT THE BUDGET COSTS THE GAIT** — corridor, measured body, n=3 × 6000, with the
+sim's speed cap set to each *measured-scale* hardware slew:
 
-**Consequence for first power-on.** The evolved gains were searched at 6.0 rad/s, so the
-operating point itself was found under a servo speed the current budget does not allow.
-Either the gait runs degraded at the budget, or it runs at ~2.6 A on a rail rated 3 A —
-and §3.8.2 flags every number in that budget as **vinyl-optimistic**, since grip converts
-free motion into work (the same move measured 1.90 A on vinyl and 2.62 A on leather).
+| `MAX_SERVO_SPEED` | = slew | net_z | fwd_v | steps | tilt_sd | contact |
+|---|---|---|---|---|---|---|
+| 6.00 rad/s | 65 µs/tick (**sim today, over budget**) | **6.31 ± 0.66** | 0.110 | 34 | 0.0565 | 0.779 |
+| **4.59 rad/s** | **50 µs/tick (budget ceiling, ≤ 1.90 A)** | **4.63 ± 0.19** | 0.083 | **35** | **0.0440** | 0.835 |
+| 3.67 rad/s | 40 µs/tick (**deployed default**) | 3.69 ± 0.46 | 0.066 | **13** | 0.0523 | 0.855 |
+| 1.83 rad/s | 20 µs/tick | 0.68 ± 0.18 | 0.028 | **0** | 0.1035 | 0.897 |
 
-⚠ **The µs/rad scale is the STANDARD, not this robot's measured one.** `servo_map.json`
-stores a calibrated *envelope*, not an angle-per-microsecond, so the whole conversion
-rests on 636.6 µs/rad and **wants a bench check before any of this is acted on** — command
-a known angle change, measure the µs delta. n=3 is a signal, not a finding, and falls were
-not captured in this set.
+**★★★ THE BUDGET CEILING IS NOT A COMPROMISE — IT IS THE BEST-BEHAVED POINT MEASURED.**
+At 50 µs/tick the gait keeps **all** its stepping (35 against the over-budget 34), runs at
+the **lowest tilt_sd of the whole set** (0.0440), and has by far the **tightest seed
+spread** (± 0.19 against ± 0.66). It costs 27 % of distance against a setting that is
+outside the current budget anyway. The deployed 40 µs/tick is materially worse than 50 on
+every axis: distance −20 %, stepping **13 against 35**, tilt worse, variance worse.
+
+**RECOMMENDATION FOR FIRST POWER-ON: raise `ServoDriver::slew_us_per_tick` from 40 to 50.**
+It is inside §3.8.2's measured ≤ 1.90 A budget, it is the most stable setting measured, and
+it recovers the stepping that 40 loses. The safest available setting and the best-behaving
+one are the same setting, which is not the trade-off this study expected to find.
+
+⚠ **Slower is still not safer.** At 20 µs/tick the gait collapses — zero steps and tilt_sd
+doubles. Below ~2 rad/s the body cannot keep up with its own postural demands.
+
+⚠ **Scope.** n=3 is a signal, not a finding; falls were not captured; the scale is one
+channel (RL knee), and part-to-part variation is unchecked. §3.8.2's current figures are
+vinyl-measured and flagged optimistic — grip converts free motion into work, and the same
+move cost 1.90 A on vinyl against 2.62 A on leather — so **re-verify 50 µs/tick on the
+actual test surface before relying on it.**
 
 **Shipped:** `MAX_SERVO_SPEED` is `const` → `var` with an `OGMA_PICRAWLER_MAX_SERVO_SPEED`
 override and a startup receipt naming the µs/tick equivalent and the budget. Default
