@@ -2,13 +2,6 @@
 # Checked in 2026-09-01: this was live on the robot but existed only in
 # /etc/systemd/system, so the deployment was undocumented and unreproducible.
 [Unit]
-# ⚠ STRUCTURAL BUS GUARD, not a matter of restraint (SPEC §1.1 applies the same
-# reasoning to actuation).  ogma_host takes /dev/i2c-1 for the belly ToF when started with --tof,
-# and the README's standing rule is that only ONE process owns that bus at a time.
-# Both units are WantedBy=multi-user.target, so without this they would simply both
-# start at boot and interleave transactions on one device — and an interleaved
-# multi-byte read does not fail, it returns a plausible wrong number.
-Conflicts=ogma-host.service
 Description=xaq PiCrawler bench daemon (ogma_benchd) — calibration channel, bench mode only
 After=local-fs.target
 

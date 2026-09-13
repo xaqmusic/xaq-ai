@@ -586,3 +586,37 @@ TEST(CameraCapture, StrideIsTheRowPitchAndPaddingNeverEntersTheAverage) {
     for (uint8_t v : dst) EXPECT_EQ(int(v), 0) << "ISP padding leaked into the image";
 }
 #endif  // PI_HOST_HAVE_SENSORS
+
+// ---------------------------------------------------------------------------
+// The I2C bus claim.  LinuxI2cBus's constructor is open() + flock(LOCK_EX|LOCK_NB),
+// and nothing else touches the device, so a regular file exercises the guard exactly.
+#include "ogma/hw/I2cBus.hpp"
+
+TEST(LinuxI2cBus, SecondOpenerIsRefusedRatherThanInterleaved) {
+    // ⚠ WHY THIS IS A TEST AND NOT A COMMENT.  Two processes on one I2C device do not
+    // collide visibly: a register read is write(pointer) then read, and another
+    // transaction landing between them returns a DIFFERENT register's contents as a
+    // perfectly plausible number.  The failure mode is a good-looking wrong value, so
+    // the guard has to be asserted rather than assumed.
+    const auto path = std::filesystem::temp_directory_path() / "ogma_i2c_claim_test";
+    { std::ofstream mk(path); mk << "x"; }
+
+    ogma::hw::LinuxI2cBus first(path.string());              // takes the claim
+    EXPECT_THROW({ ogma::hw::LinuxI2cBus second(path.string()); }, std::runtime_error);
+
+    std::filesystem::remove(path);
+}
+
+TEST(LinuxI2cBus, TheClaimIsReleasedWhenTheOwnerGoesAway) {
+    // A lock that outlived its holder would be worse than none: the bus would be
+    // permanently unavailable after any crash, and the fix would look like a reboot.
+    // flock is tied to the descriptor, so close() releases it — assert that, because
+    // the whole design rests on a crash not wedging the robot.
+    const auto path = std::filesystem::temp_directory_path() / "ogma_i2c_release_test";
+    { std::ofstream mk(path); mk << "x"; }
+
+    { ogma::hw::LinuxI2cBus owner(path.string()); }          // scope ends -> close()
+    EXPECT_NO_THROW({ ogma::hw::LinuxI2cBus after(path.string()); });
+
+    std::filesystem::remove(path);
+}

@@ -14,13 +14,6 @@
 # up, so other camera consumers will find the device busy.  `systemctl stop
 # ogma-host` before using rpicam-still/rpicam-vid by hand.
 [Unit]
-# ⚠ STRUCTURAL BUS GUARD, not a matter of restraint (SPEC §1.1 applies the same
-# reasoning to actuation).  ogma_benchd holds /dev/i2c-1 for the servos and the bench sensors,
-# and the README's standing rule is that only ONE process owns that bus at a time.
-# Both units are WantedBy=multi-user.target, so without this they would simply both
-# start at boot and interleave transactions on one device — and an interleaved
-# multi-byte read does not fail, it returns a plausible wrong number.
-Conflicts=ogma-benchd.service
 Description=xaq PiCrawler brain (ogma_host) — senses only, no actuation
 # Deliberately NOT After=network-online.target: SPEC §4.7 — the network must never
 # be a boot dependency.  The brain starts regardless of which link came up, or none.

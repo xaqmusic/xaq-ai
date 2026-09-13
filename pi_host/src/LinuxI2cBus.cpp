@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
+#include <sys/file.h>
 #include <chrono>
 #include <thread>
 
@@ -20,6 +21,37 @@ LinuxI2cBus::LinuxI2cBus(const std::string& dev) {
     fd_ = ::open(dev.c_str(), O_RDWR);
     if (fd_ < 0)
         throw std::runtime_error("LinuxI2cBus: open " + dev + ": " + std::strerror(errno));
+
+    // ⚠ EXCLUSIVE CLAIM ON THE BUS, and it is here rather than in systemd on purpose.
+    //
+    // Several programs want /dev/i2c-1 — ogma_benchd (servos + bench sensors), hat_tool,
+    // and now ogma_host when it is given --tof.  The kernel will happily let all of them
+    // open it, and then their transactions INTERLEAVE.  That does not fail: a register
+    // read is a write(pointer) followed by a read, and another process's write landing
+    // between the two returns a different register's contents as a perfectly plausible
+    // number.  The INA219 driver already carries a test pinning exactly this shape.
+    //
+    // The README's rule ("stop benchd before hat_tool") is that hazard managed by
+    // convention.  A `Conflicts=` between the two units was the first attempt and was
+    // WRONG: ogma_host only touches this bus with --tof, its unit does not pass it, and
+    // mutual exclusion would have broken the operator's working arrangement of running
+    // the brain and the bench together.  The contention is on the DEVICE, so the claim
+    // belongs on the device — and this way it covers hat_tool and any future tool for
+    // free, however it was started.
+    //
+    // LOCK_EX|LOCK_NB: whoever has it keeps it, and the loser fails LOUDLY at startup
+    // naming the holder, instead of silently reading a plausible wrong number forever.
+    // The lock is released by close() and by process death, so a crash cannot wedge it.
+    if (::flock(fd_, LOCK_EX | LOCK_NB) < 0) {
+        const int e = errno;
+        ::close(fd_);
+        fd_ = -1;
+        throw std::runtime_error(
+            "LinuxI2cBus: " + dev + " is already claimed by another process (" +
+            std::strerror(e) + "). Only one owner at a time — the transactions of two "
+            "would interleave and return plausible wrong values rather than failing. "
+            "Stop the other holder (usually: sudo systemctl stop ogma-benchd).");
+    }
 }
 
 LinuxI2cBus::~LinuxI2cBus() {
