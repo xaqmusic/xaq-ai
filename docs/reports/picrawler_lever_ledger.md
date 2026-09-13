@@ -5131,13 +5131,27 @@ nobody measured it for this — at 545 µs/rad the *already-calibrated* knee env
 600–2300 µs spans **178.6°**, a hobby servo's full mechanical travel. At 636.6 it would
 have been 153°, leaving 27° unexplained.
 
-⚠ **A watchdog nearly corrupted it.** `ServoDriver` limps a channel after 25 ticks (0.5 s)
-with no new command, so a single `servo.set` holds for half a second and then drops PWM —
-after which the leg settles wherever gravity leaves it, **which looks exactly like a held
-position**. The first two marks were taken that way and were discarded; every mark after
-was taken with a 5 Hz keepalive holding the channel. The `600→700` gap was dropped for the
-same reason (it starts from a parked, limped position) and was the clear outlier: 449
-µs/rad against 509–588 for the rest.
+⚠ **A DEADMAN NEARLY CORRUPTED IT — and "limp" is the wrong word for what it does.**
+`ServoDriver`'s own 25-tick watchdog writes pulse 0, **which this HAT ignores**: the V4
+cannot de-energise a servo from software at all (measured 2026-08-29 — pulse 0/1/ARR
+ignored, stopped timer ignored, MCU held in reset 30 s and the servo still powered). The
+real safe action is one layer up: **benchd's deadman (`DEADMAN_MS` = 1000) commands the
+saved `rescue` POSE**, and `benchd::limp_all()` is literally `rescue(why)`. Nothing goes
+slack; the robot *moves to rescue*.
+
+**That is what makes it dangerous to a measurement.** A rescue excursion of 100–200 µs is
+a centimetre or two at the toe and reads as nothing happening — which is exactly why the
+first marks looked fine. It only announced itself at 900 µs, where the excursion was
+~31 mm and the operator saw the leg go and come back. Every mark used was re-taken with a
+**5 Hz keepalive** holding the client fresh (benchd then re-commands every armed channel
+each tick, so the driver watchdog never fires either). The `600→700` gap was dropped for
+the same reason — it starts from a position the deadman had already pulled to rescue — and
+it was the clear outlier at 449 µs/rad against 509–588.
+
+★ **The arc check is what licenses trusting the rest.** If the femur had wandered between
+marks the toe positions could not lie on a clean 76.5 mm arc, and they do (chord/arc 0.958
+against a predicted 0.950). A geometric consistency check earned more here than any amount
+of care at the bench could have.
 
 **★★ 4. WHAT THE BUDGET COSTS THE GAIT** — corridor, measured body, n=3 × 6000, with the
 sim's speed cap set to each *measured-scale* hardware slew:

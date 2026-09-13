@@ -7,8 +7,18 @@
 //                measured linkage hard stops + margin (Phase 2)
 //   slew         at most `slew_us_per_tick` change per tick(): legs are 42 % of
 //                body mass and a 50 Hz step command slams the gear train
-//   watchdog     no command() for `watchdog_ticks` -> limp_all().  pulse 0, so
-//                pulses STOP; "pause" (holding the last pulse) is a different
+//   watchdog     no command() for `watchdog_ticks` -> limp_all(), which writes pulse 0
+//                and disarms.  ⚠ ON THIS HAT PULSE 0 IS A NO-OP: the V4 cannot
+//                de-energise a servo from software at all (measured 2026-08-29 —
+//                pulse 0/1/ARR ignored, stopped timer ignored, MCU held in reset
+//                30 s and the servo still powered).  So this watchdog does NOT
+//                make anything go slack; it stops the driver refreshing, and the
+//                servo simply holds its last pulse.  THE ACTUAL SAFE ACTION LIVES
+//                ONE LAYER UP: benchd's deadman (DEADMAN_MS = 1000) commands the
+//                saved `rescue` POSE, and benchd::limp_all() is literally
+//                `rescue(why)`.  A bench operator sees the robot move TO RESCUE,
+//                not go limp — and if that move is small it can pass for nothing
+//                happening, which is how it corrupts a measurement quietly.
 //                wire action and is never the safe one (SPEC §4.1)
 //   time-at-limit  per-channel seconds spent commanded AT a clamp bound — a
 //                sustained stall against carpet is invisible without current
