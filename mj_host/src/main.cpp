@@ -1259,6 +1259,12 @@ double g_cloud_voxel = 0.0;      // > 0 = on
 // Its command is never applied outside the stop it already owns.  Absent: byte-identical.
 bool g_body_predicts = false;
 bool   g_log_cloud_profile = false;   // --log-cloud-profile: the 36 dims per cast, for the bench
+// --map-view cloud (2026-09-13, the operator: "feed the map the cloud"): the place map's view slots -- head yaw and the
+// eight column ranges -- carry the stop's CLOUD as a gaze-invariant view (ogma::CloudMap::view: nearest off-floor
+// return per sector over +-64 deg / 4 m) instead of the frame in front of a moving head; head yaw reads 0.  While no
+// cloud is open (the walk) the slots hold the last cloud's view, so the walk is matched by its pose against the
+// places the stops learned.  R52 measured why: a sweeping gaze is a view that never repeats (novel 18 -> 34 %).
+bool   g_map_view_cloud = false;
 double g_head_vor_tau = 0.0, g_head_vor_lead = 0.0;   // --head-vor TAU LEAD: the yaw reflex in the head adapter
 double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the rate loop on the head's own gyro
 // --head-joints (Track A at the head, 2026-09-10): the head brain's four commands become the head
@@ -1325,6 +1331,15 @@ struct StopPlan {
     // known gaze did.  At 12.5 Hz of ToF and 0.3 rad/s the beams advance 1.4 deg a frame against 5.6 deg
     // between them.  Needs --stop-gaze.  0 = step-and-hold, byte-identical.
     double gaze_sweep = 0.0, gaze_sweep_yaw = 0.7;
+    // --stop-gaze-sweep-slow F: the sweep's speed while the map finds the window's view novel, as a fraction of SPEED.
+    // 0.25 is R52; 1 = one speed throughout.  R52's head sat at the quarter speed on 69 % of stop ticks, because a
+    // moving frame kept the map surprised -- the slow-down, not SPEED, set how fast it looked around.
+    double gaze_sweep_slow = 0.25;
+    // --stop-cloud-end F (2026-09-13, the operator: "end stops on cloud growth"): a stop ends once the open cloud's
+    // growth -- new voxels over the last 2 s -- has stayed below F x the highest growth this stop has shown, for a
+    // further 2 s.  Scale-free: each stop is judged against its own peak, never a voxel count.  It replaces the
+    // gaze's quiet rule; a cloud filed mid-stop (the trunk moved) starts the judgement over.  0 = off, byte-identical.
+    double cloud_end_frac = 0.0;
     // --stop-gaze-down RAD (2026-09-12, §17.28's geometry): the CENTRE of the pitch babble,
     // positive down.  Widening the babble does not aim it: at sd 0.2 the gaze already reaches
     // 23 deg down, and that looks at the floor 0.2 m from the duck's feet, where nothing is.
@@ -1523,6 +1538,21 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
                                g_stop.gaze_sweep, sweep_ny, sweep_np, g_stop.gaze_sweep_yaw, sweep_p_lo, sweep_p_hi);
+    if (sweep_on && g_stop.gaze_sweep_slow != 0.25)
+        std::fprintf(stderr, "  gaze sweep while the view is novel: %.2f x the speed\n", g_stop.gaze_sweep_slow);
+    const bool cloud_end_on = stop_on && g_stop.cloud_end_frac > 0.0;
+    if (g_stop.cloud_end_frac > 0.0 && !(cloud_on && brain.cloud_present()))
+        throw std::runtime_error("--stop-cloud-end needs --cloud and a CloudMap in the graph");
+    if (cloud_end_on)
+        std::fprintf(stderr, "  stops end on the cloud: once its growth over 2 s stays below %.2f of this stop's own peak for 2 s more (the quiet rule is off)\n",
+                     g_stop.cloud_end_frac);
+    const int kCloudWin = int(2.0 * kBrainHz);
+    std::vector<int> cg_vox; double cg_peak = 0.0; int cg_below = 0, stops_cloud_ended = 0;
+    if (g_map_view_cloud && !(cloud_on && brain.cloud_present()))
+        throw std::runtime_error("--map-view cloud needs --cloud and a CloudMap in the graph");
+    if (g_map_view_cloud)
+        std::fprintf(stderr, "  map view: the stop's CLOUD (nearest off-floor return per sector over +-64 deg / 4 m), held through the walk; head yaw reads 0\n");
+    std::array<float, 8> map_view_held; map_view_held.fill(1.0f);
     int walk_left = 0; double walk_x = 0.0, walk_y = 0.0, walk_dx = 0.0, walk_dy = 0.0; std::array<double, 2> chair_home{};
     if (walk_on) chair_home = body.body_xy("furn_chair0");
     if (orient_on) std::fprintf(stderr, "  orienting reflex: a change at a still gaze (winner switch to a known node, or error > %.1f spreads above the hold's mean) ends the stop; pivot at %.2f m/s with full yaw, walk %.2f m/s, up to %.0f s\n",
@@ -1724,11 +1754,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     }
                     if (look_held > 10 && view_novel) look_novel_seen = true;
                     const bool slow = look_novel_seen && view_novel && look_held < gaze_max_ticks;   // the dwell, as speed
-                    head->set_override_slew(slow ? 0.25 * g_stop.gaze_sweep : g_stop.gaze_sweep);
+                    head->set_override_slew(slow ? g_stop.gaze_sweep_slow * g_stop.gaze_sweep : g_stop.gaze_sweep);
                     if (look_held >= gaze_hold_ticks && !slow) {
                         if (look_novel_seen) { ++novel_holds; gaze_quiet_run = 0; } else ++gaze_quiet_run;
                         ++saccades; look_held = 0; look_novel_seen = false;
-                        if (gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
+                        if (!cloud_end_on && gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
                     }
                 } else if (looking && gaze_on) {
                     head->set_yaw_override(true, gaze_yaw);
@@ -1826,7 +1856,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             gaze_pitch = std::clamp(gaze_pitch + g_stop.gaze_pitch_sd * gaze_n(gaze_rng),
                                                     g_stop.gaze_down - g_stop.gaze_pitch_sd * 0.7,
                                                     g_stop.gaze_down + g_stop.gaze_pitch_sd * 2.0);   // + is down (measured: the ToF's floor fraction rises with the joint)
-                        if (gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
+                        if (!cloud_end_on && gaze_quiet_run >= g_stop.gaze_quiet) stop_left = 0;   // nothing new in a while: the stop ends
                     }
                 } else if (looking) {
                     static const double kSeq[3] = {0.0, 1.0, -1.0};
@@ -1845,6 +1875,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             if (!look_round_novel) stop_left = 0;         // nothing novel anywhere: the stop ends
                             look_round_novel = false;
                         }
+                    }
+                }
+                if (cloud_end_on && stop_phase != StopPhase::None && stop_left > 0) {
+                    if (brain.cloud_open()) {
+                        cg_vox.push_back(brain.cloud_voxels());
+                        const size_t n = cg_vox.size();
+                        if (n > size_t(kCloudWin)) {
+                            const double growth = double(cg_vox[n - 1] - cg_vox[n - 1 - size_t(kCloudWin)]) / 2.0;   // voxels a second
+                            cg_peak = std::max(cg_peak, growth);
+                            cg_below = (cg_peak > 0.0 && growth < g_stop.cloud_end_frac * cg_peak) ? cg_below + 1 : 0;
+                            if (cg_below >= kCloudWin) { stop_left = 0; ++stops_cloud_ended; }   // the cloud has stopped growing
+                        }
+                    } else if (!cg_vox.empty()) {
+                        cg_vox.clear(); cg_peak = 0.0; cg_below = 0;           // the cloud was filed mid-stop: judge the next afresh
                     }
                 }
                 if (stop_left <= 0 && stop_phase != StopPhase::None) {
@@ -1989,6 +2033,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 }
                 const auto col = tof.column_hit();
                 for (int i = 0; i < Tof::kCols; ++i) place.cols[size_t(i)] = float(col[size_t(i)] / Tof::kMaxRangeM);
+                if (g_map_view_cloud) {                        // --map-view cloud: the stop's cloud is the view
+                    if (brain.cloud_open()) {
+                        const auto cv = brain.cloud_view();
+                        if (cv.size() == map_view_held.size()) std::copy(cv.begin(), cv.end(), map_view_held.begin());
+                    }
+                    place.head_yaw = 0.0f;
+                    place.cols = map_view_held;
+                }
                 const auto& z = tof.zones();
                 for (int i = 0; i < Tof::kZones; ++i) {
                     const double r = z[size_t(i)].range < 0.0 ? Tof::kMaxRangeM : z[size_t(i)].range;
@@ -2172,6 +2224,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (orient_on || roll_on || walk_on)
             std::fprintf(stderr, "  orient: %d rolls (%d skipped at a surface), %d changes (%d within 3 s of a roll, %d unprompted), %d orientations, %d arrivals, %d timeouts, mean reach %.2f m to the roll\n",
                          rolls, rolls_skipped, changes, changes_prompted, changes - changes_prompted, orientations, arrivals, orient_timeouts, reach_n ? reach_sum / reach_n : 0.0);
+        if (cloud_end_on)
+            std::fprintf(stderr, "  cloud end: %d of %d stops ended when the cloud stopped growing\n", stops_cloud_ended, stops_started);
         if (sweep_on)
             std::fprintf(stderr, "  sweep: %d moves; the gaze grid covered %.0f %% of its cells per stop (%d stops); 'saccades' below count HOLD-long windows\n",
                          sweep_moves, 100.0 * sweep_cover_sum / std::max(1, sweep_cover_n), sweep_cover_n);
@@ -2231,6 +2285,7 @@ void usage() {
         "          [--stop-handoff-att Y | --stop-handoff-lean DEG] [--stop-settle-secs S] [--stop-keep-head]\n"
         "          [--stop-scan AMP HOLD_S | --stop-look AMP HOLD_S MAX_S | --stop-gaze YAW_SD PITCH_SD HOLD_S MAX_S QUIET]\n"
         "          [--stop-gaze-sweep SPEED YAW_MAX]  (with --stop-gaze: never hold; move toward the least-looked-at gaze)\n"
+        "          [--stop-gaze-sweep-slow F] [--stop-cloud-end F] [--map-view cloud|frame]\n"
         "          [--map-on-stop]:\n"
         "          scheduled stops (W1): the twist zeroed, and once still the legs handed to the joint brain\n"
         "          if its attitude error is below X; the walker takes them back on Y / DEG and at the end.\n"
@@ -2408,6 +2463,14 @@ int main(int argc, char** argv) {
         } else if (a == "--cloud") {
             g_cloud_voxel = 0.04;
             if (i + 1 < argc && argv[i + 1][0] != '-') g_cloud_voxel = std::stod(next("--cloud"));
+        } else if (a == "--map-view") {
+            const std::string v = next("--map-view");
+            if (v != "cloud" && v != "frame") throw std::runtime_error("--map-view takes cloud or frame");
+            g_map_view_cloud = v == "cloud";
+        } else if (a == "--stop-cloud-end") {
+            g_stop.cloud_end_frac = std::stod(next("--stop-cloud-end"));
+        } else if (a == "--stop-gaze-sweep-slow") {
+            g_stop.gaze_sweep_slow = std::stod(next("--stop-gaze-sweep-slow"));
         } else if (a == "--log-cloud-profile") {
             g_log_cloud_profile = true;
         } else if (a == "--log-motor-tle") {

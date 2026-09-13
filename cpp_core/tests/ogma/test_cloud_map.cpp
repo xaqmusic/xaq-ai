@@ -19,10 +19,13 @@
 //     7. AFlatFloorIsNotAFloorBreak — a voxel is classified by the mean height of its points.  The
 //        ground layer's CENTRE is exactly break_lo, and a centre test counted the whole floor as
 //        things standing on it — in the break profile the object EPM learns from.
+//     8. ViewIsTheNearestOffFloorReturnPerSector — the cloud as a place map's view: empty with no cloud,
+//        unmoved by a bare floor, and the nearest thing standing up in the sectors it stands in.
 // =============================================================================
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -238,4 +241,26 @@ TEST(CloudMap, AFlatFloorIsNotAFloorBreak) {
     EXPECT_EQ(tok->values[4 * ogma::CloudMap::kSectors + 0], 0.0f) << "break mass must be zero on a bare floor";
     const auto& dump = r.m.last_filed_voxels();
     EXPECT_TRUE(dump.empty()) << "nothing filed yet";
+}
+
+TEST(CloudMap, ViewIsTheNearestOffFloorReturnPerSector) {
+    Rig r(params());
+    for (float v : r.m.view()) EXPECT_EQ(v, 1.0f) << "no cloud open: an empty view";
+    std::vector<Pt> floor;
+    for (int i = 0; i < 8; ++i)
+        for (int j = 0; j < 8; ++j)
+            floor.push_back({0.605 + 0.1 * i, -0.395 + 0.1 * j, 0.01});
+    r.cast(true, 0.0, 0.0, 0.0, 3, floor);
+    ASSERT_TRUE(r.m.is_open());
+    for (float v : r.m.view()) EXPECT_EQ(v, 1.0f) << "a bare floor is not something to see";
+    r.cast(true, 0.0, 0.0, 0.0, 3, patch());
+    const auto v = r.m.view();
+    ASSERT_EQ(int(v.size()), ogma::CloudMap::kSectors);
+    // the patch starts 0.82 m out (its nearest voxel centre) and spans bearings within about +-12 deg
+    const float nearest = *std::min_element(v.begin(), v.end());
+    EXPECT_NEAR(nearest, 0.82f / 4.0f, 0.01f) << "the nearest off-floor return, over 4 m";
+    EXPECT_LT(v[3], 1.0f);
+    EXPECT_LT(v[4], 1.0f);
+    EXPECT_EQ(v[0], 1.0f) << "nothing out at -60 deg";
+    EXPECT_EQ(v[size_t(ogma::CloudMap::kSectors - 1)], 1.0f) << "nothing out at +60 deg";
 }

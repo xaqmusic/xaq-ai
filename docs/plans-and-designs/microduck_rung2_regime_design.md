@@ -2950,3 +2950,94 @@ extra map nodes; re-use context: a stand that absorbs the head's swing, or a swe
 of its range. Nothing promoted; presets R46 and R52 (seed 3) put the pair in front of the operator's eye. Open
 (O42): the place map should read the stop's cloud instead of a moving frame, and a stop should end when its
 cloud stops growing rather than when the map stops being surprised.
+
+### 17.32 The map reads the cloud, stops end on it, and how fast the head can look (R53–R55, 2026-09-13)
+
+**The operator's direction**, on §17.31's open item: feed the map the cloud and end stops on cloud growth; and,
+if possible, let the head traverse faster, as long as the cloud still renders well enough to find small
+objects and walls.
+
+**Built, each behind its own flag, all three off by default.**
+- **R53 `--map-view cloud`.** `ogma::CloudMap::view()` is the cloud as a view: across ±64° of its own de-rotated
+  frame (a ±0.7 rad sweep plus half the sensor's field), 8 sectors, each the nearest voxel whose mean height
+  clears the floor, divided by 4 m (the frame columns' own scale; empty = 1). With the flag, the place map's
+  view slots carry it instead of the frame in front of a moving head, and head yaw reads 0. The map's 13-dim
+  input and its config are unchanged. While no cloud is open (the walk), the slots hold the last cloud's view,
+  so a walk is matched by pose against the places the stops learned. `test_cloud_map`
+  `ViewIsTheNearestOffFloorReturnPerSector`: empty with no cloud, a bare floor is not a view, the nearest
+  standing thing lands in its sectors.
+- **R54 `--stop-cloud-end F`.** A stop ends once the open cloud's growth (new voxels over the last 2 s) has
+  stayed below F × the highest growth this stop has shown, for 2 s more. It is scale-free, since each stop is
+  judged against its own peak, and it replaces the gaze's quiet rule. F = 0.1 came from R52's full-length
+  stops: it would have ended them at a median 16 s holding 62 % of their 60 s voxels (F 0.05: 24 s, 72 %;
+  0.2: 12 s, 54 %).
+- **R55 `--stop-gaze-sweep-slow F`.** The sweep's speed while the map finds the view novel, as a fraction of
+  SPEED (0.25 is R52). Measured first: R52's head sat at the quarter speed on **69 %** of stop ticks, so the
+  slow-down, not SPEED, set how fast it looked around. R55 is the sweep at one constant speed (F = 1) at 0.3,
+  0.6, 1.0 and 1.5 rad/s.
+
+Guards: CloudMap 8/8, schema defaults 1/1; the flags absent, seed 1 of R46 and of R52 reproduce their A/B logs'
+JSON lines (md5 `28fc5942…`, `4b182be6…`).
+
+**The ladder** (l2_sweep, 6 seeds × 1500 s, playroom, R46 host arguments; R52 as the control; each arm adds to
+the one above it, the speed arms to R54).
+
+| n = 6 | stop (s) | stands held | map switch / min | map nodes | map TLE | straight | path (m) | cells | walls / min |
+|---|---|---|---|---|---|---|---|---|---|
+| R52 sweep (control) | 58.5 | 65 / 66 | 77.4 | 46.5 | 0.17 | 0.08 | 42 | 62 | 4.6 |
+| R53 + the map reads the cloud | 35.8 | 64 / 66 | **24.9** | 39.0 | 0.25 | 0.18 | 85 | 112 | 8.2 |
+| R54 + stops end on growth | **23.6** | 66 / 66 | 23.5 | 31.8 | 0.29 | 0.16 | 108 | 105 | 5.0 |
+| R55 constant 0.3 rad/s | 26.6 | 66 / 66 | 23.2 | 31.8 | 0.26 | 0.17 | 104 | 107 | 8.0 |
+| constant 0.6 rad/s | 24.0 | 64 / 66 | 24.1 | 26.3 | 0.27 | 0.26 | 105 | 147 | 23.7 |
+| constant 1.0 rad/s | 25.5 | 63 / 63 | 20.5 | 23.7 | 0.27 | 0.17 | 103 | 113 | 22.7 |
+| constant 1.5 rad/s | 24.3 | 66 / 66 | 20.0 | 22.3 | 0.25 | 0.18 | 109 | 81 | 4.6 |
+
+| n = 6 | head speed p50 (rad/s) | voxels / cloud | objects ≤ 2 m in reach found | balls found | rule precision | walls and furniture read as small |
+|---|---|---|---|---|---|---|
+| R52 | 0.08 | 2 271 | 75 / 100 (75 %) | 40 / 122 (33 %) | 0.92 | 3 / 221 (1.4 %) |
+| R53 | 0.08 | 1 806 | 47 / 58 (81 %) | 30 / 85 (35 %) | 0.72 | 14 / 297 (4.7 %) |
+| R54 | 0.11 | 1 463 | 52 / 73 (71 %) | 31 / 83 (37 %) | 0.84 | 8 / 302 (2.6 %) |
+| **R55 0.3** | 0.30 | 2 026 | **58 / 69 (84 %)** | 29 / 81 (36 %) | **0.86** | 9 / 345 (2.6 %) |
+| **R55 0.6** | 0.60 | 1 691 | 39 / 46 (85 %) | 19 / 82 (23 %) | 0.82 | 9 / 393 (2.3 %) |
+| R55 1.0 | 1.00 | 1 669 | 46 / 62 (74 %) | 26 / 93 (28 %) | 0.73 | 14 / 369 (3.8 %) |
+| R55 1.5 | 1.49 | 2 281 | 52 / 60 (87 %) | 22 / 65 (34 %) | 0.71 | 11 / 312 (3.5 %) |
+
+**What it says.**
+1. **The map reading the cloud is loud.** Winner switches fall from 77 to 25 a minute on every seed; walks
+   straighten on every seed (+0.10); the map settles on fewer places (46 → 39, nearly all baked); and stops
+   shorten to 36 s even under the quiet rule, because a sweeping gaze no longer surprises it. The cost is the
+   map's own error, up 0.08–0.13 on every seed: on the walk the held view is the last stop's, so the node the
+   pose finds fits less closely. The per-stop cloud also thins, as R53's stops are shorter while the slow-down
+   still holds the head at 0.08 rad/s (precision 0.92 → 0.72).
+2. **Ending on growth sets the tempo.** Stops fall from 58.5 to 23.6 s, 62 of 66 end on growth, and every
+   stand holds. The duck walks 66 m more and reaches 43 more cells (both 6+/0−). Per-stop quality is uneven:
+   two seeds find only 2 of 5 objects in reach.
+3. **Turning the slow-down off recovers the cloud at the same tempo.** At a constant 0.3 rad/s: 2 026 voxels a
+   cloud in 27 s against R52's 2 271 in 58 s, objects in reach 84 % (75–93 % on every seed), precision 0.86.
+   The dwell had cost the cloud more than it gave it.
+4. **Faster: small things hold, obstacles fray, and stops do not shorten.**
+   - Objects in reach and balls show no reliable trend with speed (84 / 85 / 74 / 87 %, 36 / 23 / 28 / 34 %).
+     The ToF still interleaves at 1.5 rad/s, 6.9° a frame, because a 24 s stop makes some 25 passes.
+   - The obstacle side degrades above 0.6 rad/s: precision 0.86 / 0.82 / 0.73 / 0.71, walls and furniture
+     read as small 2.6 / 2.3 / 3.8 / 3.5 %, and per-seed precision floors of 0.57 at 1.0 and 0.22 at 1.5.
+   - Stop length is 24–27 s at every speed. The growth rule is relative to the stop's own peak, and a faster
+     head raises the peak along with everything else, so how long a stop lasts is F's to set, not the head's.
+5. **Walking twice as much** gives the walk's own wall problem twice the room to show. Walls tie at 0.3
+   (8.0 against 4.6, t 0.6), while 0.6 and 1.0 read 23.7 and 22.7 a minute with single seeds at 45–62. The
+   rate does not rise with speed (1.5 reads 4.6) and R48's step is not in this stack, so none of it is
+   attributed to the head. The 1.0 arm's 63 stops are one seed's 13 walking rescues pushing its stops past
+   the schedule; every stop that started held.
+
+**A sim-to-real caveat on speed.** The simulated ToF reads the head's pose at the instant of the cast. On the
+robot a 30 ms mismatch between a frame and its head angle is 0.9° at 0.6 rad/s but 1.7–2.6° at 1.0–1.5, a
+third to a half of a zone, so the hardware's ceiling is probably lower than the simulation's.
+
+**Verdicts.** R53, the map reading the cloud: `WORKING`, loud on the map's steadiness (switches −52 a minute,
+6+/0−), with its error up as the cost. R54, stops ending on cloud growth: `WORKING` (stops 2.5× shorter,
+stands 66 / 66), per-stop quality uneven. R55, a constant sweep: `WORKING` at 0.3–0.6 rad/s, and `PARTIAL`
+at 1.0–1.5, where small objects hold but walls start breaking into false small things, and speed buys no
+shorter stops. The stack for the operator's eye is R53 + R54 + a constant 0.6 rad/s: the fastest speed whose
+object and obstacle numbers both hold, with balls (19 of 82) the thing to watch, and 0.3 as the quality
+reference. Presets R55 (0.6) and R55b (1.5), seed 5. Nothing promoted. Re-use context for the fast sweep: a
+head-angle timestamp per frame on the robot, or a wall-continuity term that does not break at speed. Open:
+the map's error on the walk (a held view is a stale one), and F as the tempo knob.

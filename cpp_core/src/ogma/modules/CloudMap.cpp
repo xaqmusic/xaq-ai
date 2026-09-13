@@ -84,6 +84,12 @@ ParamSchema CloudMap::params_schema() const {
         {"max_range", ParamMutability::HotMutable,
          "Beyond this the cloud is the room's walls rather than its contents (metres).",
          ParamValue{2.5}, ParamValue{0.2}, ParamValue{10.0}},
+        {"view_half_fov", ParamMutability::HotMutable,
+         "Degrees either side of straight ahead that view() divides into kSectors: the whole reach of a stop's "
+         "gaze (a +-0.7 rad sweep plus half the sensor's 45 deg field).", ParamValue{64.0}, ParamValue{5.0}, ParamValue{180.0}},
+        {"view_range", ParamMutability::HotMutable,
+         "The range view() divides by (metres): 4 m, the scale of the frame's own nearest-hit-per-column, so a place "
+         "map fed the cloud sees values on the scale it saw before.", ParamValue{4.0}, ParamValue{0.2}, ParamValue{10.0}},
         {"max_voxels", ParamMutability::HotMutable,
          "Hard cap on one cloud, so a runaway cannot eat memory.", ParamValue{int64_t{400000}}, ParamValue{int64_t{100}}, ParamValue{int64_t{5000000}}},
         {"move_ticks", ParamMutability::HotMutable,
@@ -120,6 +126,8 @@ ParamMap CloudMap::current_params() const {
     m["break_hi"] = break_hi_;
     m["half_fov"] = half_fov_;
     m["max_range"] = max_range_;
+    m["view_half_fov"] = view_half_fov_;
+    m["view_range"] = view_range_;
     m["max_voxels"] = int64_t{max_voxels_};
     m["still_ticks"] = int64_t{still_ticks_};
     m["move_ticks"] = int64_t{move_ticks_};
@@ -136,6 +144,8 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "break_hi")   break_hi_ = get_d(one, "break_hi", break_hi_);
     else if (k == "half_fov")   half_fov_ = get_d(one, "half_fov", half_fov_);
     else if (k == "max_range")  max_range_ = get_d(one, "max_range", max_range_);
+    else if (k == "view_half_fov") view_half_fov_ = get_d(one, "view_half_fov", view_half_fov_);
+    else if (k == "view_range") view_range_ = get_d(one, "view_range", view_range_);
     else if (k == "max_voxels") max_voxels_ = int(get_d(one, "max_voxels", max_voxels_));
     else if (k == "still_ticks") still_ticks_ = int(get_d(one, "still_ticks", still_ticks_));
     else if (k == "move_ticks") move_ticks_ = int(get_d(one, "move_ticks", move_ticks_));
@@ -154,6 +164,8 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     break_hi_   = get_d(params, "break_hi", break_hi_);
     half_fov_   = get_d(params, "half_fov", half_fov_);
     max_range_  = get_d(params, "max_range", max_range_);
+    view_half_fov_ = get_d(params, "view_half_fov", view_half_fov_);
+    view_range_ = get_d(params, "view_range", view_range_);
     max_voxels_ = int(get_d(params, "max_voxels", max_voxels_));
     still_ticks_ = int(get_d(params, "still_ticks", still_ticks_));
     move_ticks_ = int(get_d(params, "move_ticks", move_ticks_));
@@ -328,6 +340,25 @@ void CloudMap::tick(uint64_t tick_id) {
         out->values[1] = float(revisit_change_);
         bus_->publish(change_topic_, out);
     }
+}
+
+std::vector<float> CloudMap::view() const {
+    std::vector<float> out(size_t(kSectors), 1.0f);
+    const double span = 2.0 * view_half_fov_;
+    for (auto const& [k, vv] : vox_) {
+        int ix, iy, iz; unkey(k, ix, iy, iz);
+        const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));   // mean point height
+        if (h < break_lo_) continue;
+        const double x = (double(ix) + 0.5) * voxel_m_;
+        const double y = (double(iy) + 0.5) * voxel_m_;
+        const double r = std::hypot(x, y);
+        if (r < 1e-6) continue;
+        const double az = std::atan2(y, x) * 180.0 / kPi;
+        if (std::fabs(az) > view_half_fov_) continue;
+        const int sec = std::clamp(int((az + view_half_fov_) / span * kSectors), 0, kSectors - 1);
+        out[size_t(sec)] = std::min(out[size_t(sec)], float(std::clamp(r / view_range_, 0.0, 1.0)));
+    }
+    return out;
 }
 
 std::vector<float> CloudMap::profile() const {

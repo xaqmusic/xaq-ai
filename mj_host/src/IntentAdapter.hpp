@@ -140,6 +140,7 @@ public:
     std::vector<int32_t> cloud_filed_voxels() const;
     double cloud_voxel_m()   const;
     std::vector<float> cloud_profile() const;   // the break profile the module publishes, this tick
+    std::vector<float> cloud_view() const;      // the cloud as a gaze-invariant view (--map-view cloud), this tick
     std::vector<std::string> diagnostics() const;
     uint64_t ticks() const { return tick_id_; }
 

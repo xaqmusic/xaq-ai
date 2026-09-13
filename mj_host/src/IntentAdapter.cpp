@@ -331,6 +331,10 @@ std::vector<float> IntentAdapter::cloud_profile() const {
     auto* c = find_cloud(*instance_);
     return c ? c->profile() : std::vector<float>{};
 }
+std::vector<float> IntentAdapter::cloud_view() const {
+    auto* c = find_cloud(*instance_);
+    return c ? c->view() : std::vector<float>{};
+}
 double IntentAdapter::cloud_voxel_m() const {
     auto* c = find_cloud(*instance_);
     if (!c) return 0.0;

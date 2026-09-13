@@ -189,7 +189,7 @@ def score_log(path: str, gapk: float) -> dict:
     half, lay, movable, furniture = load_scene()
     res = dict(clouds=0, vox=[], brk=[], flagged=0, flagged_real=0, near=0, found=0, hits=[], ball_near=0,
                ball_found=0, field_near=0, field_found=0, wide_near=0, wide_found=0, stop_ticks=0, moving=0,
-               yaw_span=[], open_ticks=0, seconds=0.0)
+               yaw_span=[], open_ticks=0, seconds=0.0, obst=0, obst_small=0, speeds=[])
     prev, yaws = None, []
     for line in open(path):
         if not line.startswith('{"t"'):
@@ -202,8 +202,10 @@ def score_log(path: str, gapk: float) -> dict:
             y, p = rec["q"][HEAD_YAW_Q], rec["q"][HEAD_PITCH_Q]
             res["stop_ticks"] += 1
             res["open_ticks"] += "cld" in rec
-            if prev is not None and (abs(y - prev[0]) > 1e-3 or abs(p - prev[1]) > 1e-3):
-                res["moving"] += 1
+            if prev is not None:
+                res["speeds"].append(50.0 * math.hypot(y - prev[0], p - prev[1]))
+                if abs(y - prev[0]) > 1e-3 or abs(p - prev[1]) > 1e-3:
+                    res["moving"] += 1
             prev = (y, p)
             yaws.append(y)
         else:
@@ -222,10 +224,14 @@ def score_log(path: str, gapk: float) -> dict:
         res["brk"].append(int(((h >= BREAK_LO) & (h < BREAK_HI)).sum()))
         objs = objects_at(rec, lay, movable)
         for cl in clusters(V, h, vm, gapk):
+            wx, wy = to_world(c["anchor"], cl["cx"], cl["cy"])
+            lab = label(wx, wy, objs, half, furniture)
+            if lab in ("wall", "chair", "table", "shelf"):       # obstacles: a good cloud reads them as TALL
+                res["obst"] += 1
+                res["obst_small"] += is_small(cl)
             if is_small(cl):
                 res["flagged"] += 1
-                wx, wy = to_world(c["anchor"], cl["cx"], cl["cy"])
-                res["flagged_real"] += label(wx, wy, objs, half, furniture) in ("ball", "block")
+                res["flagged_real"] += lab in ("ball", "block")
         off = h >= BREAK_LO
         bx, by = (V[off, 0] + 0.5) * vm, (V[off, 1] + 0.5) * vm
         wx, wy, hits = ca * bx - sa * by + ax, sa * bx + ca * by + ay, V[off, 3]
@@ -281,6 +287,11 @@ def cmd_arms(specs: list[str], gapk: float) -> None:
         print(f"{'':>12}      | SMALL clusters {tot('flagged')}, real {tot('flagged_real')} (precision "
               f"{tot('flagged_real') / max(1, tot('flagged')):.2f}); real per minute of run "
               f"{ms([60 * r['flagged_real'] / r['seconds'] for r in per if r['seconds']])}")
+        speeds = np.concatenate([np.array(r["speeds"]) for r in per if r["speeds"]] or [np.zeros(1)])
+        moving = speeds[speeds > 0.05]
+        print(f"{'':>12}      | obstacle clusters (walls, chairs, table, shelf) misread as SMALL: {tot('obst_small')}/{tot('obst')} "
+              f"({100 * tot('obst_small') / max(1, tot('obst')):.1f} %); head speed while moving p50/p90 "
+              f"{np.percentile(moving, 50) if moving.size else 0:.2f}/{np.percentile(moving, 90) if moving.size else 0:.2f} rad/s")
         print(f"{'':>12}      | head moving {ms([100 * r['moving'] / max(1, r['stop_ticks']) for r in per])} % of stop ticks; "
               f"yaw span p50 {ms([float(np.median(r['yaw_span'])) for r in per if r['yaw_span']])} rad; cloud open "
               f"{ms([100 * r['open_ticks'] / max(1, r['stop_ticks']) for r in per])} % of stop ticks")

@@ -103,6 +103,13 @@ public:
     // is given is the weak link.  Registering the clouds by their own CONTENT is the open fix.
     double   revisit_anchor_dist() const { return revisit_dist_; }
     std::vector<float> profile() const;
+    // The cloud as a gaze-invariant VIEW, for a place map (2026-09-13, the operator: "feed the map the cloud").
+    // Per azimuth sector across +-view_half_fov of the cloud's own de-rotated frame (sector 0 on the right, as in
+    // the profile), the horizontal range of the nearest voxel whose mean height clears the floor (break_lo),
+    // divided by view_range; 1 where a sector holds none.  The reduction a nearest-hit-per-column is, taken over
+    // the whole swept cloud instead of one frame: a sweeping gaze does not move it, and a cloud that has stopped
+    // growing has stopped changing it.  All 1 while no cloud is open (filing clears the voxels).
+    std::vector<float> view() const;
 
     // The voxel set of the cloud last FILED, as flat [ix, iy, iz, hits, mean_height_mm] 5-tuples —
     // what a viewer draws.  Empty until a cloud closes.  Voxel indices, not metres: multiply by
@@ -139,6 +146,7 @@ private:
     std::string input_topic_, place_topic_, output_topic_, change_topic_;
     double voxel_m_ = 0.04, break_lo_ = 0.02, break_hi_ = 0.20;
     double half_fov_ = 40.0, max_range_ = 2.5;
+    double view_half_fov_ = 64.0, view_range_ = 4.0;
     int    max_voxels_ = 400000, still_ticks_ = 25, cache_size_ = 8, new_window_ = 50;
     int    move_ticks_ = 25;
 
