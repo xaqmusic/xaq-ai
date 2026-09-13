@@ -1033,6 +1033,91 @@ continuous brain driving would be reached at a resting voltage around 7.3 V — 
 robot will rescue-pose itself while the pack still looks half full. That is the right
 behaviour and worth knowing before it surprises someone mid-run.
 
+### ★★★ 3.9 THE POWER MODS — separating the servo rail, and riding out the dip
+
+> **Status: SPECIFIED, NOT BUILT.** Written after §3.8.7, which is the measurement that
+> makes them worth the effort. Both are reversible and neither requires cutting the pack.
+
+**The problem in one line:** the HAT's single **5 V / 3 A DC-DC feeds the Pi and all twelve
+servos**, so a servo transient pulls the rail the Pi lives on — and §3.8.7 measured the Pi
+dying from that at `vbat` 7.66 V with 0.92 A of bus current, with *both* electrical
+instruments blind because they sit on the battery side of that regulator.
+
+---
+
+#### 3.9.1 Mod A — a separate BEC for the servos ★ the real fix
+
+Give the servos their own regulator from the pack and leave the Pi on the HAT's. The two
+loads stop sharing a rail, and a servo inrush can no longer reach the Pi.
+
+| item | spec that matters | note |
+|---|---|---|
+| Step-down BEC / UBEC | **5 V out, ≥ 6 A continuous**, 2S input (6.0–8.4 V) | 12 × MG90S stall is far above steady draw; size for inrush, not average |
+| Input pigtail | JST XH 2.54 3-pin, 22 AWG on `+`/`−` | taps the same pack, **downstream of the INA219** so whole-robot current is still measured |
+| Output | to the servo rail only | |
+| Common ground | **mandatory** — BEC `−` bonded to HAT `−` | signal ground for the PWM lines; without it the servo signals have no reference |
+
+⚠ **The HAT's servo 5 V and the Pi's 5 V are the same net on the board** (§3.8.1 is the
+evidence: the failure is that regulator's current limit). **This mod is therefore not a
+plug-in — it requires physically isolating the HAT's servo-rail feed** so the BEC drives
+the servo headers while the HAT continues to power the Pi. Confirm the board's rail
+topology with a meter before cutting anything; if the servo headers cannot be separated,
+Mod A becomes "power the servos from the BEC through a separate breakout" rather than a
+modification to the HAT.
+
+**Three measured reasons, accumulated independently:**
+1. **No limp is possible** on this HAT (2026-08-29) — a separate rail with its own switch
+   restores a true power-off safe state.
+2. **Shared-rail brownout** (2026-08-29 pose recall).
+3. **§3.8.7** — the Pi dying with a healthy pack and unremarkable bus current, which no
+   battery-side budgeting can prevent.
+
+⚠ **It does not remove the need for the software guard.** The BEC decouples the *servos*
+from the Pi; it does nothing about the Pi's own consumption or a sagging pack, and
+`get_throttled` remains the only instrument that sees the Pi's supply.
+
+---
+
+#### 3.9.2 Mod B — bulk capacitance at the Pi's 5 V input ★ cheap, partial, do it anyway
+
+A brownout is a *transient*. Local energy storage rides it out.
+
+| item | spec that matters | note |
+|---|---|---|
+| Electrolytic | **1000–2200 µF, ≥ 10 V, low-ESR**, 105 °C | ESR is the spec that matters — a high-ESR can cannot deliver current fast enough to be useful |
+| Placement | **as close to the Pi's 5 V input as the wiring allows** | the point is to be inside the inductance of the run; a cap at the HAT end helps much less |
+| Optional | 0.1 µF ceramic in parallel | the electrolytic is poor at high frequency |
+
+⚠ **Inrush is the hazard this mod introduces.** A discharged 2200 µF across the rail at
+power-on is briefly a short, which can trip the regulator or weld a connector — the
+failure being traded for is not free. If it misbehaves at switch-on, an inrush limiter
+(NTC thermistor in series, or a soft-start) is the fix, not a smaller cap.
+
+**What it will and will not do.** It buys milliseconds — enough for a servo inrush spike,
+**not** enough for a sustained twelve-channel overload. §3.8.6 measured ~0.9 V of sag
+under *continuous* driving; no practical capacitor holds that up. Mod B is for the sharp
+edge, Mod A is for the sustained load, and they address different halves of the problem.
+
+---
+
+#### 3.9.3 What NOT to do
+
+⚠ **Do not power the Pi over USB-C while the HAT is connected.** The standing rule
+(§Power) is one supply path at a time. A second source backfeeding the HAT's regulator is
+a worse failure than the one being fixed.
+
+⚠ **Do not raise `PSU_MAX_CURRENT` hoping for headroom.** It tells the firmware what the
+supply can deliver — mainly to budget USB — and does not change brownout behaviour.
+Claiming 5 A from a 3 A DC-DC removes a conservatism without adding a watt. Checked on
+this robot: the EEPROM sets only `BOOT_UART` and `BOOT_ORDER`, and the firmware exposes no
+brownout-tolerance key at all (`POWER_OFF_ON_HALT`, `PSU_MAX_CURRENT`, `WAKE_ON_GPIO` are
+the power-related ones).
+
+⚠ **The Pi 5 already throttles rather than dying, and it is not enough.** §3.8.7 shows it
+ran **303 s** with under-voltage and throttling flags set before the reset. The graceful
+degradation people reach for on a Pi 4 is present and was already doing its job; the kill
+is the PMIC refusing a deeper collapse, and there is no knob for that.
+
 ### ★★★ 3.8.7 THE 6.4 V AUTO-SAFE CANNOT PROTECT THE PI — measured 2026-09-13
 
 An endurance run (continuous twelve-channel driving, `stand ↔ stand_tall`, default slew 40)
