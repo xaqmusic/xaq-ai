@@ -680,3 +680,42 @@ TEST(Vl53l0xValidity, ARawOfZeroIsNotAMeasurementAndMustNotReadAsZeroClearance) 
     EXPECT_NEAR(Vl53l0x::raw_to_clearance_m(65, 64.8), 0.0002, 1e-6);
     EXPECT_NEAR(Vl53l0x::raw_to_clearance_m(120, 64.8), 0.0552, 1e-6);
 }
+
+// ---------------------------------------------------------------------------
+#include "ogma/hw/RailGuard.hpp"
+using ogma::hw::RailGuard;
+
+TEST(RailGuard, BitsAlreadySetAtStartupAreHistoryAndNeverFire) {
+    // The sticky mask survives until a reboot, so a robot started after an earlier event
+    // begins life with bits set.  Treating those as "it just happened" would rescue-pose
+    // the robot on every single start.
+    RailGuard g;
+    EXPECT_EQ(g.update(0x50000u), 0u);
+    EXPECT_EQ(g.update(0x50000u), 0u);
+}
+
+TEST(RailGuard, ANewlyAppearingStickyBitIsTheEvent) {
+    RailGuard g;
+    g.update(0x0u);                                   // clean boot
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);          // under-voltage HAS OCCURRED
+}
+
+TEST(RailGuard, OneEventFiresOnceRatherThanOnEveryPoll) {
+    // The bit stays set for the rest of the boot, so a naive test fires ~once a second
+    // forever — which would hold the robot in rescue and look like a dead servo bus.
+    RailGuard g;
+    g.update(0x0u);
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);
+    EXPECT_EQ(g.update(0x10000u), 0u);
+    EXPECT_EQ(g.update(0x10000u), 0u);
+}
+
+TEST(RailGuard, ASecondDistinctBitIsASecondEvent) {
+    // 0x50000 is bits 16 and 18 together, which is what the field failure actually showed.
+    // Throttling appearing after under-voltage is new information, not a repeat.
+    RailGuard g;
+    g.update(0x0u);
+    EXPECT_EQ(g.update(0x10000u), 0x10000u);
+    EXPECT_EQ(g.update(0x50000u), 0x40000u);
+    EXPECT_EQ(g.update(0x50000u), 0u);
+}

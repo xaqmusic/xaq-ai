@@ -20,6 +20,7 @@
 #include "ogma/hw/Ina219.hpp"
 #include "ogma/hw/Vl53l0x.hpp"
 #include "ogma/hw/TofRecovery.hpp"
+#include "ogma/hw/RailGuard.hpp"
 #include "ogma/hw/Icm20948.hpp"
 #include "ogma/hw/SensorCalib.hpp"
 
@@ -47,6 +48,11 @@ using namespace ogma::hw;
 namespace {
 
 constexpr int    DEADMAN_MS      = 1000;
+// How long arming stays refused after a rail under-voltage event.  Long enough that a
+// caller cannot immediately re-load the rail that just dipped, short enough not to strand
+// an operator; it is a back-off, not a lockout, because the sticky bits never clear
+// without a reboot and a permanent refusal would need one.
+constexpr int64_t RAIL_GUARD_MS = 5000;
 // ToF stall detection lives in ogma::hw::TofRecoveryPolicy (tested there).
 constexpr int    CAL_TIMEOUT_MS  = 120000;
 constexpr int    OPER_MIN_US     = 900;    // operating envelope until calibration narrows it
@@ -132,6 +138,26 @@ struct State {
     bool pose_move_active = false;
     bool deadman_tripped = false;
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
+    // ---- 5 V RAIL GUARD (2026-09-13) -------------------------------------------------
+    // ⚠ THE LOW-BATTERY AUTO-SAFE WATCHES THE WRONG RAIL.  Measured: the Pi hard-reset
+    // with vbat at 7.66 V (auto-safe fires at 6.4) and only 0.92 A flowing — below what
+    // the same run had already survived.  The cliff is the HAT's 5 V regulator, and the
+    // INA219 sits on the BATTERY side of it, so neither instrument can see the fault.
+    //
+    // `get_throttled` bit 16 CAN: it watches the Pi's own supply, and in that run it went
+    // non-zero 303 SECONDS before the reset.  Five minutes of warning, on a value this
+    // daemon was already reading once a second and doing nothing with.
+    //
+    // ⚠ THE LIVE BITS (0-3) ARE USELESS AT 1 Hz — across the whole run not one poll caught
+    // them set, because the events are shorter than the interval.  Only the STICKY history
+    // bits were ever observed.  So the guard watches for sticky bits APPEARING against a
+    // baseline taken at startup; a reboot clears them (confirmed 0x0 after the reset),
+    // which is what makes a start-time baseline meaningful rather than arbitrary.
+    RailGuard rail_guard{};              // sticky-mask transition detector (tested there)
+    int      rail_events    = 0;         // how many NEW under-voltage/throttle events
+    int64_t  rail_guard_until_ms = 0;    // arming refused while set, to let the rail recover
+    double   ext5v          = 0.0;       // the Pi's OWN measure of the rail the HAT feeds
+    int64_t  ext5v_ms       = 0;
     int  throttled_poll = 0;
     // Whole-robot bus current (BOM 3).  Instrument only -- nothing here consumes it.
     // null when the part is absent, and benchd then behaves exactly as it did before.
@@ -461,9 +487,39 @@ struct State {
         }
         if (++throttled_poll >= 10) {                          // once a second
             throttled_poll = 0;
+            // EXT5V is the Pi's own reading of the 5 V input the HAT feeds — the rail that
+            // actually fails.  INSTRUMENT ONLY for now: published so its behaviour under
+            // load can be watched before any threshold is chosen from it, which is the
+            // same admission rule every other sensor here is under.  Reading this ONE
+            // value runs at ~8 Hz; it is reading the whole ADC set that costs ~0.7 s.
+            if (FILE* f = popen("vcgencmd pmic_read_adc EXT5V_V 2>/dev/null", "r")) {
+                char b[128] = {0};
+                if (fgets(b, sizeof b, f)) {
+                    std::string t(b); auto eq = t.find('=');
+                    if (eq != std::string::npos) {
+                        try { ext5v = std::stod(t.substr(eq + 1)); ext5v_ms = mono_ms(); }
+                        catch (...) { /* a malformed line is not worth a tick */ }
+                    }
+                }
+                pclose(f);
+            }
             if (FILE* f = popen("vcgencmd get_throttled 2>/dev/null", "r")) {
                 char b[64] = {0}; if (fgets(b, sizeof b, f)) { std::string t(b); auto eq = t.find('='); if (eq != std::string::npos) { pi_throttled = t.substr(eq + 1); while (!pi_throttled.empty() && (pi_throttled.back() == '\n' || pi_throttled.back() == '\r')) pi_throttled.pop_back(); } }
                 pclose(f);
+            }
+            // ---- the guard proper -------------------------------------------------
+            unsigned thr = 0;
+            try { thr = unsigned(std::stoul(pi_throttled, nullptr, 0)); } catch (...) { thr = 0; }
+            if (unsigned fresh = rail_guard.update(thr)) {
+                // A sticky bit that was NOT set at startup has appeared: the Pi's own
+                // supply dipped just now.  Drop the load — the servos ARE the load — and
+                // refuse arming briefly so the rail is not immediately re-loaded.
+                ++rail_events;
+                rail_guard_until_ms = mono_ms() + RAIL_GUARD_MS;
+                record("rail_undervolt", {{"throttled", pi_throttled}, {"new_bits", fresh},
+                                          {"ext5v", ext5v}, {"vbat", vbat},
+                                          {"count", rail_events}});
+                rescue("rail under-voltage");
             }
         }
         bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= driver.armed(c);
@@ -478,6 +534,9 @@ struct State {
                 {"pi_throttled", pi_throttled},
                 // Whole-robot current: Pi + the 5 V regulator + all 12 servos (BOM 3).
                 // r_shunt is calibration data, so it rides with the numbers it derives.
+                {"ext5v", ext5v}, {"ext5v_age_ms", ext5v_ms ? mono_ms() - ext5v_ms : -1},
+                {"rail_events", rail_events},
+                {"rail_guarded", mono_ms() < rail_guard_until_ms},
                 {"ina", ina ? json{{"ok", ina_ok}, {"i_a", ina_i}, {"v", ina_v},
                                    {"i_ema", ina_i_ema}, {"i_peak", ina_i_peak}, {"i_max", ina_i_max},
                                    {"charge_as", ina_charge}, {"energy_j", ina_energy},
@@ -695,6 +754,13 @@ json handle(State& S, const json& req) {   // caller holds m
     if (verb == "status") { json f = S.frame(); f["map"] = S.map; return ok(f); }
     if (verb == "limp")   { S.rescue("verb"); return ok({{"rescue_pose", S.has_rescue() ? json(S.rescue_name) : json(nullptr)}}); }
     if (verb == "mode")   return req.value("mode", "") == "bench" ? ok({{"mode", "bench"}}) : err("only 'bench' exists here; the brain's modes live in ogma_host");
+    if (verb == "servo.set" || verb == "pose.set") {
+        // ⚠ Refuse to RE-LOAD a rail that just dipped.  The servos are the load, so the
+        // back-off has to gate the two verbs that drive them; without this the guard drops
+        // to rescue and the very next command puts the load straight back on.
+        if (now < S.rail_guard_until_ms)
+            return err("5 V rail under-voltage — backing off, retry shortly");
+    }
     if (verb == "servo.set") {
         if (!ch_of(req, ch)) return err("bad ch");
         if (S.low_battery) return err("battery low — limp until it recovers above " + std::to_string(VBAT_RECOVER_V) + " V");
@@ -733,6 +799,7 @@ json handle(State& S, const json& req) {   // caller holds m
     if (verb == "cal.begin") {
         if (!ch_of(req, ch)) return err("bad ch");
         if (S.low_battery) return err("battery low — no calibration until it recovers");
+        if (now < S.rail_guard_until_ms) return err("5 V rail under-voltage — backing off");
         if (S.cal_ch >= 0 && S.cal_ch != ch) return err("channel " + std::to_string(S.cal_ch) + " is already widened; cal.end first");
         for (int c = 0; c < ServoDriver::N; ++c) if (c != ch && S.driver.armed(c)) { S.driver.limp_all(); S.record("one-at-a-time", {{"why", "cal.begin"}, {"ch", ch}}); break; }
         S.cal_ch = ch; S.cal_until_ms = now + CAL_TIMEOUT_MS;
