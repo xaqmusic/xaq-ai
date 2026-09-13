@@ -62,9 +62,23 @@ hold, pos = trace(pos)
 base = rpc("status").get("rail_baseline", 0)
 bit  = 0x40000 if (base & 0x10000) else 0x10000
 print(f"-> injecting 0x{bit:X}; the guard should recall rescue ...")
-t_inj = time.time()
+ev0 = rpc("status")["rail_events"]
 rpc("rail.inject", bits=bit, confirm=True)
-settle(30); time.sleep(1.0)
+# ⚠ Wait for the guard to FIRE before waiting for the move to finish.  settle() called
+# straight after the inject returns True immediately -- the guard has not fired yet, so
+# pose_move_active is still false and "settled" means "has not started".  The first run of
+# this script captured 0.9 s that way and reported the response drawing LESS than holding.
+t0 = time.time()
+while time.time() - t0 < 5.0:
+    if rpc("status")["rail_events"] > ev0: break
+    time.sleep(0.02)
+else: sys.exit("the guard never fired")
+t0 = time.time()
+while time.time() - t0 < 30.0:                 # now follow the recall to its end
+    s_ = rpc("status")
+    if not s_.get("pose_move_active") and not s_.get("pose_queue") and not s_.get("rescue_active"): break
+    time.sleep(0.2)
+time.sleep(0.5)
 resp, pos = trace(pos)
 rpc("rail.inject", bits=0, confirm=True)
 
