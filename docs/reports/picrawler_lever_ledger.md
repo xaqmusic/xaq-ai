@@ -4923,6 +4923,77 @@ promoted.
 
 ---
 
+### ★★★ 2026-09-13 — THE MEASURED BODY'S CHASSIS LURCH IS A RATCHET, AND `height_k` CANNOT REACH IT
+
+**Verdict: diagnosis (`WORKING` as a diagnosis) + `PARTIAL` signal on the ablation.**
+Operator observation: the measured body sits higher than cad and tips over more, and the
+real robot has no roll cage. **The observation is right and the proposed lever is the
+wrong one** — which is worth recording, because the lever has no authority over the thing
+being observed (the §412 rule, applied before building rather than after).
+
+**★ 1. THE COMMANDED HEIGHT IS NOT THE DIFFERENCE.** `standing_y` is 0.0820 (cad) vs
+0.0823 (measured) — 0.3 mm. And the *settled* ride height is the same in both bodies
+(0.054–0.064 m). What differs is a **transient**.
+
+**★★ 2. THE MECHANISM IS A ONE-WAY RATCHET IN THE ADAPTIVE SETPOINT.** The height target
+is `height_k_eff × chassis_h_max`, and `height_k_eff` is adapted by `height_ground_gain`:
+
+```
+if (grounded) height_k_eff += gain * (kHeightKMax - height_k_eff);        // fast, toward 0.95
+else          height_k_eff -= gain * 0.05 * (height_k_eff - height_k);    // 20x slower
+```
+
+The asymmetry is deliberate and sound *when grounding is intermittent* — grounding is
+strong evidence the target is too low, not-grounding is weak evidence it is too high. **On
+the measured body the belly is on the floor at spawn** (`gc_raw` 0.000 at tick 60), so the
+ratchet starts immediately and the 20× decay never recovers it. Measured, arena, 3 seeds:
+
+| | `height_k_eff` | `height_bias` | `gc_raw` | **chassis_y PEAK** | settled |
+|---|---|---|---|---|---|
+| cad | **0.300 → 0.300** (never moves) | −0.500 | 33 mm | 0.080 | 0.054 |
+| measured s7 | 0.561 → **0.917** | +0.075 | 2.9 mm | **0.118** | 0.054 |
+| measured s13 | 0.553 → **0.891** | +0.890 | 13.0 mm | **0.122** | 0.064 |
+| measured s21 | 0.565 → **0.909** | **+1.500 (railed)** | 5.3 mm | **0.148** | 0.056 |
+
+**The body lurches to 2.2–2.7× its settled height.** `chassis_h_max` is itself set by that
+lurch — and `picrawler_body.gd:11532` already suspected the shape: *"h_max above is the
+worst: a monotonic max with no decay and no reset, and it sets the height setpoint."* The
+loop closes on itself: a windup excursion records a high ceiling, the high ceiling sustains
+the demand, the demand sustains the windup. cad never enters it because its belly never
+grounds at spawn.
+
+**★★★ 3. `height_k` HAS NO AUTHORITY OVER THIS.** The obvious fix — lower the target — cannot
+work, because `height_k` is only the **floor** of the adapted fraction
+(`clamp(height_k_eff, height_k, kHeightKMax)`). With `height_k_eff` ratcheted to 0.9,
+lowering the floor from 0.30 changes nothing. Ten minutes of reading, and it saves the
+campaign that §412 was written about.
+
+**4. ABLATION — `height_ground_gain = 0` on the measured body**, arena, n=3 × 3000:
+
+| | peak chassis_y | settled | `gc_raw` | tilt mean |
+|---|---|---|---|---|
+| base (gg 0.01) | 0.118 / 0.122 / 0.148 | 0.054–0.064 | 2.9–13.0 mm | 0.083–0.101 |
+| ablated (gg 0) | **0.076 / 0.084 / 0.069** | 0.056–0.066 | **5.0–14.7 mm** | 0.079–0.101 |
+
+**Peak height down 38–53 %, 3/3 seeds, no overlap — and it costs nothing measured**: ride
+height unchanged, belly clearance the same or slightly *better*, tilt unchanged,
+`height_bias` sits near neutral instead of railing.
+
+⚠ **THIS IS NOT A PROMOTION, AND `height_ground_gain` IS NOT REFUTED.** It was measured
+`WORKING` on the **cad-era** body (2026-08-27, corridor n=6, `%<10 mm` 11.4 → 5.3) and its
+re-use context never covered a body whose belly grounds at spawn. Refuted *in a context*
+(§3.1), and ablating it globally would give back what it bought on cad. The candidates
+worth an A/B are (a) per-body gain, (b) **anti-windup**: grounding while `height_k_eff` is
+already high is evidence the target is UNREACHABLE, not that it is too low — only ratchet
+up if raising it actually improved clearance; (c) decay or reset `chassis_h_max`, which the
+code comment already flags as a monotonic ratchet with no reset.
+
+⚠ **THE OUTCOME WAS NOT MEASURED, ONLY THE MECHANISM.** **Zero falls and zero auto-resets
+in every arm** at 3000 ticks — so the tipovers are the operator's UI observation, and the
+link from "lower peak excursion" to "fewer tipovers" is **inference, not measurement**. A
+promote-or-kill run needs an arm long enough to produce falls, and the honest complement
+to peak height is the fall count itself.
+
 ### ★★ 2026-09-12 — THE ROBOT AND THE SIM DID NOT AGREE, AND ONE FLAG FIXED IT
 
 **Verdict: defect + fix (`WORKING`), measured on the robot.** Recorded because it touches
