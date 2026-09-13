@@ -98,3 +98,33 @@ verified working — reach for that and say so, and this note gets replaced by a
 
 Hand-offs are also printed as their own line in the terminal (`t=… -> scaffold`), and the
 status line carries the driver, `c`, the active push and any harness event.
+
+## The sweep clouds (2026-09-13)
+
+A run whose graph declares `CloudMap` and whose host ran with `--cloud` writes one `cloudv` record
+each time a cloud is filed: the stop's voxels as `[ix, iy, iz, hits, mean_height_mm]` in the cloud's
+own body-anchored frame, plus the **world** pose it was anchored on. That pose is instrumentation for
+this viewer — it is how a body-anchored cloud gets drawn beside the furniture it describes — and no
+brain reads it.
+
+- `P` toggles the clouds; `N` steps through them one place at a time, then back to all of them.
+- Voxels are coloured by the **mean height of the points in them**, not the voxel centre: grey is the
+  floor, orange is the 2–20 cm band where something stands on the floor, blue is furniture height,
+  pale is wall tops. Logs written before 2026-09-13 carry 4-tuples and fall back to the centre, which
+  draws the whole floor orange.
+- Replay accumulates clouds as the run goes, so the room fills in as the duck visits it.
+
+## Recording a long run
+
+`record` streams frames to the encoder one at a time, so its memory is flat in the run's length (about
+0.7 GB). It used to keep every frame and write at the end — fine for an 8 s clip, fatal for a 1500 s
+playroom run: 75 000 frames at 2 MB each, and on 2026-09-13 the kernel killed it at 23.9 GB. For a long
+run, render a window:
+
+```sh
+.venv/bin/python view.py --scene scene_playroom.xml record RUN.jsonl OUT.mp4 --from 600 --to 1500 --every 10
+```
+
+`--from`/`--to` are run seconds; `--every N` keeps every Nth frame, so that example is an 86 s video.
+Filed clouds are carried through skipped frames, so a window that opens after a stop still shows them.
+

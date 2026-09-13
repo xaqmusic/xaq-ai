@@ -23,6 +23,7 @@
 #include "ogma/modules/TofAvoidLoop.hpp"
 #include "ogma/modules/ColumnBuilder.hpp"
 #include "ogma/modules/PlaceGraphPlanner.hpp"
+#include "ogma/modules/CloudMap.hpp"
 #include "ogma/modules/PlayLoop.hpp"
 #include "ogma/modules/RunTumbleNav.hpp"
 #include "ogma/modules/RunTumbleNavV2.hpp"
@@ -148,6 +149,11 @@ ModuleRegistry& ModuleRegistry::instance() {
         // minus traverse" — GROWS the shared place-map by ascending novelty→frontier
         // (run-and-tumble beyond the mapped graph) instead of routing to remembered food.
         reg.register_type("PlayLoop",              [](){ return std::make_unique<PlayLoop>(); });
+        // 2026-09-13 — the microduck's sweep cloud, with a cache keyed by the map's own place.
+        // A small object is sub-pixel in one ToF cast and tens of points in a gaze sweep
+        // (design doc §17.28), so this is the level at which one exists; an EPM on its output
+        // earns the vocabulary.  Default-off: no input_topic, no accumulation, no publish.
+        reg.register_type("CloudMap",              [](){ return std::make_unique<CloudMap>(); });
         reg.register_type("RunTumbleNav",          [](){ return std::make_unique<RunTumbleNav>(); });
         reg.register_type("RunTumbleNavV2",        [](){ return std::make_unique<RunTumbleNavV2>(); });
         reg.register_type("VisualHomingNav",       [](){ return std::make_unique<VisualHomingNav>(); });

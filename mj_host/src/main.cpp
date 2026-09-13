@@ -39,7 +39,6 @@
 #include "IntentAdapter.hpp"
 #include "HeadAdapter.hpp"
 #include "Tof.hpp"
-#include "CloudMap.hpp"
 #include "Policy.hpp"
 #include "Recovery.hpp"
 #include "OgmaBrainAdapter.hpp"
@@ -1355,9 +1354,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_no_backing) brain.set_no_backing(true);
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
-    CloudMap cloud(CloudMap::Params{g_cloud_voxel > 0.0 ? g_cloud_voxel : 0.04});
+    // The cloud lives in the graph now (ogma::CloudMap).  The host's job is to hand it one cast
+    // at a time and to read its numbers back out for the log; --cloud turns the PUBLICATION on.
     const bool cloud_on = g_cloud_voxel > 0.0;
-    if (cloud_on) std::fprintf(stderr, "  cloud: the stop's sweep accumulated at %.0f mm voxels, de-rotated by the odometry yaw\n", g_cloud_voxel * 1000.0);
+    if (cloud_on)
+        std::fprintf(stderr, "  cloud: publishing ToF return points on reality.proprio.tof_points%s\n",
+                     brain.cloud_present() ? " (a CloudMap module is listening)" : " — NO CloudMap in the graph, nothing will accumulate");
     std::array<float, 4> tof_summary{};
     PlaceInputs place{};                      // the pose and the ToF in both reductions; the adapter picks the form
     std::fprintf(stderr, "place vector: %s\n", brain.place_form_desc().c_str());
@@ -1511,7 +1513,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // the map's bookkeeping at stops (the operator, 2026-09-12: watch the baking): views inserted and baked at
     // stops, prunes, and whether a pruned id was ever baked (must stay 0 — the map's health sweep spares baked)
     int ins_stop = 0, bake_stop = 0, ins_walk = 0, bake_walk = 0, pruned_total = 0, pruned_baked = 0, node_mark2 = 0, baked_mark = 0;
-    long cloud_vox_sum = 0, cloud_brk_sum = 0; int cloud_n = 0;   // the cloud's own read-back, per stop
+    long cloud_vox_sum = 0; int cloud_n = 0;   // the cloud's own read-back, per stop
+    // the world pose the open cloud was anchored on, latched on the module's open edge: the
+    // viewer's only way to place a body-anchored cloud beside the room.  Instrumentation.
+    double cloud_anchor_wx = 0.0, cloud_anchor_wy = 0.0, cloud_anchor_wyaw = 0.0;
+    bool   cloud_was_open = false;
     auto end_stop_drive = [&](bool to_walker) {
         // the joint brain stops driving: freeze it, invalidate its pairing, and give the walker a
         // clean start from the pose the body is actually in (as the rescue hand-back does)
@@ -1541,7 +1547,6 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (orient != Orient::None) { orient = Orient::None; ++orient_timeouts; }
             if (stop_phase != StopPhase::None) {          // the stop ended in a fall
                 scan_stop(); if (looking) look_stop();
-                if (cloud_on) cloud.close();
                 if (g_stop.map_on_stop) brain.set_map_learning(false);
                 if (stop_phase == StopPhase::Brain) end_stop_drive(false);
                 stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
@@ -1576,6 +1581,18 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         // Skipped while the joint brain already drives (StopPhase::Brain ticks it itself below).
         if (g_body_predicts && stander && stop_phase != StopPhase::Brain) (void)stander->act(body);
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
+        // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
+        if (cloud_on) {
+            const bool now_open = brain.cloud_open();
+            if (now_open && !cloud_was_open) {
+                const auto wp = body.trunk_position();
+                const auto q = body.imu_quat();
+                cloud_anchor_wx = wp[0]; cloud_anchor_wy = wp[1];
+                cloud_anchor_wyaw = std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]),
+                                               1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
+            }
+            cloud_was_open = now_open;
+        }
         if (driver == Driver::Brain) command.twist = twist;
         if (stop_on) {
             if (roll_on && !ball_stopped && t - last_roll_tick >= 75) { const auto b = body.body_xy("obj_ball0"); body.roll_body("obj_ball0", b[0], b[1], 0.0, 0.0); ball_stopped = true; }
@@ -1618,8 +1635,6 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
                         if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = g_stop.gaze_down; scan_target = 0.0; }
                         ticks_in_stop = 0; rolled_this_stop = false;
-                        // the body is still: this is the frame the cloud can be anchored in
-                        if (cloud_on) cloud.open(odom.yaw(), uint64_t(t));
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander) {
                             stop_phase = StopPhase::Walker; stop_event = "stop:walker";
@@ -1771,7 +1786,6 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     if (looking && stop_left <= 0 && stop_event[0] == '\0') { /* ended by the look: named below */ }
                     if (looking) { look_stop(); }
                     if (g_stop.map_on_stop) brain.set_map_learning(false);
-                    if (cloud_on) { cloud_vox_sum += cloud.voxels(); cloud_brk_sum += cloud.break_voxels(); ++cloud_n; cloud.close(); }
                     stop_len_sum += (t - stop_started_tick) / kBrainHz; ++stop_len_n;
                     if (stop_phase == StopPhase::Brain) { ++stop_survived; end_stop_drive(true); }
                     const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1 && orient == Orient::None;
@@ -1884,13 +1898,28 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 tof.sense(body, p[2]);
                 tof_summary = tof.summary();
                 ++tof_ticks;
-                if (cloud.is_open()) cloud.add(tof.zones(), yaw, p[2], uint64_t(t));
             }
             {
                 place.pose = {float(p[0] / 2.0), float(p[1] / 2.0), float(std::cos(yaw)), float(std::sin(yaw))};
                 place.head_yaw = float((body.joint_positions()[7] - kHomePose[7]) / 1.4);   // the head-yaw joint / its range
-                place.cloud_valid = cloud.is_open() && cloud.voxels() > 0;
-                if (place.cloud_valid) place.cloud = cloud.break_profile();
+                // one cast for the CloudMap module: stillness, the heading it de-rotates against,
+                // the trunk height, then every return already levelled with z above the floor
+                place.tof_points_valid = cloud_on;
+                if (cloud_on) {
+                    const bool still = g[2] < -0.999 && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
+                    place.tof_points[0] = still ? 1.0f : 0.0f;
+                    place.tof_points[1] = float(yaw);
+                    place.tof_points[2] = float(p[2]);
+                    place.tof_points[3] = float(p[0]);      // the dead-reckoned position: what lines
+                    place.tof_points[4] = float(p[1]);      // two visits to one place up
+                    const auto& zz = tof.zones();
+                    for (int i = 0; i < Tof::kZones; ++i) {
+                        const bool ok = zz[size_t(i)].cls == TofZone::Hit || zz[size_t(i)].cls == TofZone::Floor;
+                        place.tof_points[size_t(5 + 3 * i + 0)] = ok ? float(zz[size_t(i)].point_level[0]) : std::numeric_limits<float>::quiet_NaN();
+                        place.tof_points[size_t(5 + 3 * i + 1)] = ok ? float(zz[size_t(i)].point_level[1]) : std::numeric_limits<float>::quiet_NaN();
+                        place.tof_points[size_t(5 + 3 * i + 2)] = ok ? float(zz[size_t(i)].point_level[2] + p[2]) : std::numeric_limits<float>::quiet_NaN();
+                    }
+                }
                 const auto col = tof.column_hit();
                 for (int i = 0; i < Tof::kCols; ++i) place.cols[size_t(i)] = float(col[size_t(i)] / Tof::kMaxRangeM);
                 const auto& z = tof.zones();
@@ -1951,15 +1980,30 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::printf(",\"mtle\":%.5f", brain.motor_tle());
                 if (stander) std::printf(",\"btle\":%.5f", stander->motor_tle());
             }
-            if (cloud_on && cloud.is_open())
-                std::printf(",\"cld\":[%d,%llu,%d,%.4f]", cloud.voxels(),
-                            static_cast<unsigned long long>(cloud.points()), cloud.break_voxels(),
-                            cloud.new_fraction(uint64_t(t), 50));
-            if (g_log_cloud_profile && cloud_on && cloud.is_open() && t % 4 == 0) {
-                const auto prof = cloud.break_profile();
+            if (cloud_on && brain.cloud_open())
+                std::printf(",\"cld\":[%d,%d,%.4f,%.4f,%d]", brain.cloud_voxels(), brain.cloud_break(),
+                            brain.cloud_newfrac(), brain.cloud_revisit(), brain.cloud_cached());
+            // --log-cloud-profile: the MODULE's 36-dim break profile on every cast while a cloud is open —
+            // what an object EPM subscribed to reality.proprio.cloud receives, for the offline bench.
+            if (g_log_cloud_profile && cloud_on && brain.cloud_open() && t % 4 == 0) {
+                const auto prof = brain.cloud_profile();
                 std::printf(",\"cldp\":[");
                 for (size_t k = 0; k < prof.size(); ++k) std::printf("%s%.4f", k ? "," : "", prof[k]);
                 std::printf("]");
+            }
+            // THE REPLAY PAYLOAD.  On the tick a cloud is filed, its whole voxel set goes to the log
+            // once, with the world pose it was anchored on so a viewer can place it beside the
+            // furniture.  That pose is INSTRUMENTATION for the viewer; no brain reads the log.
+            if (cloud_on && brain.cloud_just_closed()) {
+                const auto vx = brain.cloud_filed_voxels();
+                std::printf(",\"cloudv\":{\"place\":%d,\"voxel_m\":%.4f,\"revisit\":%.4f,\"revisit_dist\":%.4f,"
+                            "\"anchor\":[%.4f,%.4f,%.4f],\"vox\":[",
+                            brain.cloud_place(), brain.cloud_voxel_m(), brain.cloud_revisit(), brain.cloud_revisit_dist(),
+                            cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw);
+                for (size_t k = 0; k + 4 < vx.size(); k += 5)        // [ix, iy, iz, hits, mean height mm]
+                    std::printf("%s[%d,%d,%d,%d,%d]", k ? "," : "", vx[k], vx[k + 1], vx[k + 2], vx[k + 3], vx[k + 4]);
+                std::printf("]}");
+                ++cloud_n; cloud_vox_sum += int(vx.size() / 5);
             }
             if (g_log_tof_cloud && t % 4 == 0) {
                 std::printf(",\"tofp\":[");
@@ -2056,8 +2100,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                          ins_stop, ins_walk, bake_stop, bake_walk, pruned_total, pruned_baked, brain.map_node_count(), brain.map_baked_count());
         }
         if (cloud_n > 0)
-            std::fprintf(stderr, "  cloud: %d stops accumulated, mean %ld voxels of which %ld break the floor\n",
-                         cloud_n, cloud_vox_sum / cloud_n, cloud_brk_sum / cloud_n);
+            std::fprintf(stderr, "  cloud: %d clouds filed, mean %ld voxels; %d cached by place\n",
+                         cloud_n, cloud_vox_sum / cloud_n, brain.cloud_cached());
         if (orient_on || roll_on || walk_on)
             std::fprintf(stderr, "  orient: %d rolls (%d skipped at a surface), %d changes (%d within 3 s of a roll, %d unprompted), %d orientations, %d arrivals, %d timeouts, mean reach %.2f m to the roll\n",
                          rolls, rolls_skipped, changes, changes_prompted, changes - changes_prompted, orientations, arrivals, orient_timeouts, reach_n ? reach_sum / reach_n : 0.0);

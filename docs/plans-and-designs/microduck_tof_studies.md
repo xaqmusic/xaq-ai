@@ -10,7 +10,12 @@ that saved the speed question — measure that the signal exists before designin
 **Report and figures:** <https://claude.ai/code/artifact/468b1fff-ed27-483b-86a6-ca87d7c5459a>
 **Verdicts:** [`microduck_rung2_regime_design.md`](microduck_rung2_regime_design.md) §17.28.
 **Owning register rows:** O36, O38, O40, O41.
-**Follow-through:** design doc §17.29 — the cloud moved into the host (`CloudMap`), aiming the gaze came out `NULL` (and closed O36 by measurement), an EPM over the cloud gave the best vocabulary yet, and the body predictor gave a real contact channel.
+**Corrections (2026-09-13, §17.30):** this study's de-rotation was applied with the wrong sign — its
+"+7 % distinct voxels" was smear and the de-rotated cloud's 45 % detection is withdrawn (41 %, the same
+as without de-rotation); and the break profile classified voxels by their centre, so 82 % of what it
+called floor breaks was bare ground. `CloudMap` is now an ogma module with both fixed, a unit test that
+pins the sign, and a cache keyed by place.
+**Follow-through:** design doc §17.29–17.30 — the cloud moved into the host (`CloudMap`), aiming the gaze came out `NULL` (and closed O36 by measurement), an EPM over the cloud gave the best vocabulary yet, and the body predictor gave a real contact channel.
 
 ---
 

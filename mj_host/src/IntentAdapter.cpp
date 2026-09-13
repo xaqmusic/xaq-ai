@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "ogma/GraphConfig.hpp"
+#include "ogma/modules/CloudMap.hpp"
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
 #include "ogma/Rng.hpp"
@@ -166,8 +167,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         }
         publish("place_in", v);
     }
-    if (place && place->cloud_valid)
-        publish("cloud_in", std::vector<float>(place->cloud.begin(), place->cloud.end()));
+    if (place && place->tof_points_valid)
+        publish("tof_points", std::vector<float>(place->tof_points.begin(), place->tof_points.end()));
     // The Cell recipe's two egocentric inputs, for a loop that plans over the map: the unwrapped
     // heading and the body velocity as [lateral, forward] in command units.  Nothing in the
     // level-0..2 graphs reads them; a graph that does (R27's PlayLoop) is a new arm.
@@ -301,6 +302,44 @@ std::string IntentAdapter::place_form_desc() const {
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
+
+namespace {
+// The one CloudMap in the graph, or nullptr.  Looked up each call: there is at most one, the
+// module list is short, and this runs only where the host logs.
+const ogma::CloudMap* find_cloud(ogma::OgmaInstance& inst) {
+    for (auto* m : inst.modules())
+        if (auto* c = dynamic_cast<const ogma::CloudMap*>(m)) return c;
+    return nullptr;
+}
+}  // namespace
+
+bool IntentAdapter::cloud_present() const { return find_cloud(*instance_) != nullptr; }
+bool IntentAdapter::cloud_open() const { auto* c = find_cloud(*instance_); return c && c->is_open(); }
+bool IntentAdapter::cloud_just_closed() const { auto* c = find_cloud(*instance_); return c && c->just_closed(); }
+int  IntentAdapter::cloud_voxels() const { auto* c = find_cloud(*instance_); return c ? c->voxels() : 0; }
+int  IntentAdapter::cloud_break() const { auto* c = find_cloud(*instance_); return c ? c->break_voxels() : 0; }
+int  IntentAdapter::cloud_place() const { auto* c = find_cloud(*instance_); return c ? c->last_key() : -1; }
+double IntentAdapter::cloud_newfrac() const { auto* c = find_cloud(*instance_); return c ? c->new_fraction() : 0.0; }
+double IntentAdapter::cloud_revisit() const { auto* c = find_cloud(*instance_); return c ? c->revisit_change() : -1.0; }
+double IntentAdapter::cloud_revisit_dist() const { auto* c = find_cloud(*instance_); return c ? c->revisit_anchor_dist() : -1.0; }
+int  IntentAdapter::cloud_cached() const { auto* c = find_cloud(*instance_); return c ? c->cached() : 0; }
+std::vector<int32_t> IntentAdapter::cloud_filed_voxels() const {
+    auto* c = find_cloud(*instance_);
+    return c ? c->last_filed_voxels() : std::vector<int32_t>{};
+}
+std::vector<float> IntentAdapter::cloud_profile() const {
+    auto* c = find_cloud(*instance_);
+    return c ? c->profile() : std::vector<float>{};
+}
+double IntentAdapter::cloud_voxel_m() const {
+    auto* c = find_cloud(*instance_);
+    if (!c) return 0.0;
+    const auto p = c->current_params();
+    auto it = p.find("voxel_m");
+    if (it == p.end()) return 0.0;
+    if (auto d = std::get_if<double>(&it->second)) return *d;
+    return 0.0;
+}
 
 double IntentAdapter::motor_tle() const {
     for (auto* m : instance_->modules()) {

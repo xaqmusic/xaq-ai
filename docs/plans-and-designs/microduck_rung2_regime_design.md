@@ -2598,10 +2598,13 @@ because the babble (yaw sd 0.35 rad, pitch sd 0.08) rarely dwells on the floor.
 Two body properties decide it: over a 56 s stop the trunk holds *position* to **0.9 cm** (the R19
 stander is that still) but its *heading* drifts **9.7°**, which smears the cloud 17 cm at a metre.
 De-rotating each cast by the duck's own odometry yaw — accurate to 0.1°, so its own to make —
-recovers 7 % more distinct voxels. Change detection on a rolling ball, 605 windows of which 22
+was reported here to recover 7 % more distinct voxels. **Corrected 2026-09-13 (§17.30):** the rotation
+was applied with the wrong sign and the 7 % was the doubled smear; with the correct sign the sweep
+changes by −1 % and +4 % on two runs. Change detection on a rolling ball, 605 windows of which 22
 carried motion, at a matched 5 % false-positive rate: **single frame 18 % (AUC 0.852) → cloud 41 %
-(0.866) → de-rotated cloud 45 % (0.879)**, a 2.5× gain on the best single-frame statistic. For scale,
-R44's live detector catches a ball 42 %.
+(0.866)**, a 2.3× gain on the best single-frame statistic; the de-rotated cloud also reads 41 % (0.865)
+with the correct sign — the 45 % first reported here came from the wrong one. For scale, R44's live
+detector catches a ball 42 %.
 
 **Verdicts.** M1 `WORKING` as a characterisation — the sensor resolves furniture and is at its limit
 on floor objects. M2 the stumble channel `DEAD_CODE` in the measurement sense (the predictor is not
@@ -2613,7 +2616,7 @@ Scale: two seeds for M1/M2/S1/S2, which replicate; one seed and 22 positive wind
 detection number, which is a signal.
 
 **What this changes.** An EPM on single frames cannot hold a node meaning "block", because a block is
-not in its input — object work belongs downstream of the sweep. De-rotation belongs in the host. The
+not in its input — object work belongs downstream of the sweep. De-rotation belongs in the host (it is there now, and matters little — §17.30). The
 gaze babble's pitch decides whether floor objects are found at all, which puts **O36 on the critical
 path** rather than beside it. And the viewpoint ceiling says the sensor line and the behaviour line
 are one line: novelty-toward-things needs a duck that travels.
@@ -2728,8 +2731,121 @@ different place.* Every remaining question about an object vocabulary is downstr
 
 **Verdicts.** 1a `WORKING` (substrate, guarded, read-back live). 1b `NULL` on both levers, with
 **O36 `RESOLVED` by measurement**. 2 `WORKING` on vocabulary quality *and* on the within-pose object
-content (98 % of the available 0.130 nats, against 72 % and 55 % for the frame views); `DEFERRED` on
+content (98 % of the available 0.130 nats, against 72 % and 55 % for the frame views — measured on a break profile later found to be 82 % bare floor; on the fixed profile it is 95 % against 75 % and 64 %, §17.30); `DEFERRED` on
 pose-INVARIANCE, which is a generalisation claim this data cannot test; re-use context: any run with
 tens of poses per object. 3 `WORKING`
 as a channel, `PARTIAL` as a detector; follow-up is the instantaneous residual. Nothing promoted;
 scale is n = 6 for every A/B and 600 onsets for step 3.
+
+### 17.30 The cloud becomes a module — and three bugs its first replay exposed (R46, 2026-09-13)
+
+**The operator's decisions.** `CloudMap` becomes an ogma module; its cache is keyed by the map's own
+place (the map EPM's winner); the duck viewer gets replay first; the inspector follows later as a
+standalone static voxel viewer.
+
+**Built.** `ogma::CloudMap` (`cpp_core/src/ogma/modules/CloudMap.{hpp,cpp}`, registered). The host no
+longer accumulates anything — `mj_host/src/CloudMap.*` is deleted — and instead publishes one cast per
+sense tick on `reality.proprio.tof_points`: `[still, yaw, trunk_z, odom_x, odom_y, 64 × (x, y, z)]`,
+gravity-levelled, z above the floor, NaN for a zone with no return. All of it the body's own. The
+module opens a cloud after `still_ticks` (25) of stillness and files it after `move_ticks` (25) of
+motion — hysteresis that is load-bearing: closing on the first non-still tick chopped one stop's sweep
+into fragments of 50, 70 and 943 voxels, because the gaze babble jogs the trunk's gyro past any
+instantaneous stillness test. A filed cloud is cached under the MODAL map winner while it was open
+(LRU, `cache_size` 8), and a revisit is judged once, at file time, against the cloud filed under the
+same key, aligned through the two odometry anchors. It publishes the 36-dim break profile on
+`reality.proprio.cloud` and `[new_fraction, revisit_change]` on `percept.cloud_change`. Config
+`a1v2_r46_cloud.json` = R43 + `CloudMap` + `object_epm` (jl_state over the profile). The JSONL gains
+`cld` per tick while a cloud is open, a `cloudv` record per filed cloud (voxels as
+`[ix, iy, iz, hits, mean_height_mm]`, the world pose it was anchored on — instrumentation for the
+viewer — plus `revisit` and `revisit_dist`), and `cldp` under `--log-cloud-profile`. The duck viewer
+draws filed clouds at their world anchor, coloured by mean point height (`P` toggles, `N` solos a
+place), in live, replay and record.
+
+**Guards.** On the final binary `--cloud` absent reproduces the R46 reference byte-for-byte (md5
+`e4b5c3fa…`). `test_cloud_map` 7/7 (inert without an input, the hysteresis, the de-rotation sign,
+cache and identical revisit, alignment through the pose, profile bounds, a flat floor is not a break);
+schema-defaults 1/1, state prior 23/23, motor EPM 36/36. Read-back, seed 6, 1500 s: 11 clouds, one per
+stop, ~840 voxels, 8 cached.
+
+**What the cache does and does not do yet.** The map mints new nodes at nearly every stop — the places
+filed were `[5, 8, 6, 15, 12, 17, 22, 8, 37, 39, 44]`, one genuine revisit in 1500 s. On that revisit
+the two anchors were **55.5 cm and 28.8° apart**. Aligned by the true poses, 0.639 of the new cloud was
+absent from the old; aligned by the odometry, 0.824; unaligned, 0.864. The transform does real work;
+the pose it is given is the weak link — dead reckoning drifts 4–6 % of distance travelled (§16.3),
+minutes separate the visits, and one map node spans more ground than a voxel comparison tolerates.
+`revisit_dist` is logged beside every judgement so the number is never read alone. The open fix is
+registering the two clouds by their own content. (A first version judged revisits mid-accumulation
+against whichever winner led early — another place's cloud — and was moved to file time.)
+
+**Three bugs, and the claims they carried.**
+
+1. **The OOM.** `view.py record` kept every rendered frame in a list and wrote the video at the end —
+   fine for the 8 s clips it was built for. Pointed at a 1500 s playroom run (75 000 frames at
+   2.07 MB), the kernel killed it at **23.9 GB RSS** (08:35:33). It now streams to the encoder, peaks
+   at 711 MB for 4 300 frames, and takes `--from / --to / --every`.
+
+2. **The de-rotation had the wrong sign** — in the module and in the offline analysis behind §17.28.
+   A body that yaws +d sees a world-fixed point rotated by −d, so undoing it takes R(+d); R(−d) was
+   applied, which doubles the heading smear. Writing the unit test caught it: a synthetic body turned
+   0.5 rad put **64 of 64** voxels in new cells. On 11 real stops (seed 6) the as-built sign was
+   sharpest on none and worse than no rotation at all (14 156 distinct voxels against 13 134); the
+   correct sign was sharpest in total (12 795). **Withdrawn from §17.28:** the "+7 % distinct voxels"
+   (the smear, read as detail — for a static scene more distinct voxels is worse) and the de-rotated
+   cloud's "45 %" detection. **Re-measured with the correct sign:** sweep voxels −1 % (seed 6) and
+   +4 % (the rolling-ball run) — de-rotation barely matters at ~10° of drift — and ball detection at a
+   matched 5 % false-positive rate is **41 % for the cloud with or without de-rotation** (AUC 0.866 /
+   0.865). The cloud's 41 % against a single frame's 18 % stands; it never depended on de-rotation.
+
+3. **The floor was being counted as things standing on it.** Voxels were classified by their centre;
+   the ground layer spans 0–4 cm, its centre is exactly `break_lo` (0.02 m), and `0.02 < 0.02` is
+   false — so every ground voxel landed in the floor-break band. In the R46 dumps **4 326 of the 5 277
+   voxels (82 %) the break profile counted were bare ground**, 93–96 % on some stops. That profile is
+   the object EPM's input, and the host-side profile §17.29 measured on had the same test. Voxels are
+   now classified by the mean height of the points in them: the same stop's cone reads **56 % ground,
+   13 % floor break**. The replay shows it — the floor draws grey, and the break band hugs the ball, the
+   block and the base of the walls. (A wall's bottom 20 cm is a floor break by definition, so it is the
+   profile's range and extent terms, not the band, that must tell a wall base from an object.)
+
+**And a verification trap worth recording.** The first round of verification ran on a stale binary:
+a parallel host build, its output filtered to lowercase `error`, never ran, so the gain-0 check, the
+R46 run and a replay all came from code built before any fix. The unfiltered rebuild then surfaced a
+`printf` with one more argument than specifiers — adding `revisit_dist` had shifted the logged anchor
+by one field and dropped the world yaw. Both are fixed and everything above is from the final binary.
+Never filter a build to "error": the warning was the bug.
+
+**The object EPM, re-measured on the fixed profile.**
+On the module's own profile, with the floor classified by mean point height, six seeds pooled into
+one EPM per arm (33 474 frames, 45 pose cells; H(object) 1.705 nats and H(object | pose) 0.136, so
+pose alone fixes 92 % of what is in view):
+
+| view | nodes | baked | switch/min | I(W;O \| pose) | of ceiling | shuffle floor | F1 block / ball / chair / shelf |
+|---|---|---|---|---|---|---|---|
+| **cloud profile** | 16 | **16** | **6** | **0.129** | **95 %** | 0.001 | **0.95 / 0.96 / 0.91 / 0.93** |
+| 8 column minima | 21 | 20 | 21 | 0.102 | 75 % | 0.001 | 0.85 / 0.70 / 0.73 / 0.73 |
+| 64 raw zones | 16 | 14 | 13 | 0.087 | 64 % | 0.001 | 0.61 / 0.41 / 0.67 / 0.41 |
+
+The ordering survives the fix and so does the gap: with the floor out of the profile, the cloud
+vocabulary captures 95 % of the object information pose leaves, twenty points above the column minima,
+and it is steadier than before (six winner switches a minute). §17.29's 98 / 72 / 55 cannot be compared
+number for number, and the reason is worth recording because it looked like a confound and is not one.
+The frame arms moved too (72 → 75 %, 55 → 64 %), which would mean the duck had walked differently — so
+passivity was checked directly: on seed 1 the R43 graph with the points published, the R46 graph with
+its modules idle, and the R46 graph with them running all reproduce the reference byte-for-byte (md5
+`e4b5c3fa…`). The walk is unchanged. What changed is which frames the bench sees: it feeds only frames
+that carry a profile, the old host cloud was open exactly during scheduled stops, and the module opens
+on the body's own stillness. Its windows differ, reach more poses (a block from 12 pose cells rather
+than 8), and hand all three arms the same different set. The honest comparison is within a run, and
+within this one the cloud leads every column.
+
+An observation on the stillness rule: per seed the module filed 11, 12, 11, 14, 11 and 17 clouds against
+11 scheduled stops, and two runs averaged 491 voxels a cloud against ~840 for the rest — stillness
+opening a cloud outside a stop, or a stop split where the body moved for longer than `move_ticks`. The
+cache keys on place, so this is not wrong, but a cloud of a few hundred voxels is a thinner comparison.
+
+**Verdicts.** `CloudMap` as a module `WORKING` (substrate, guarded, tested, and passive — the walk is
+byte-identical with it running). The object vocabulary over it `WORKING` on within-pose object content
+(95 % of the ceiling on the fixed profile, against 75 % and 64 % for the frame views); pose invariance
+still untested, and still gated on travel. Cache-by-place `WORKING` as a store, `PARTIAL` as a revisit
+judge — dead-reckoned alignment and a coarse place key; re-use context: content-based registration, or
+revisits close enough in time that odometry has not drifted. Replay `WORKING`. The three bugs fixed, with
+the claims they carried withdrawn or re-measured above. Nothing promoted.

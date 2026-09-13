@@ -183,14 +183,72 @@ def draw_tof(scn, frame, model, data, mujoco, np, beams):
         mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_LINE, 1.5, pos, tip)
 
 
+# ---- the sweep clouds ---------------------------------------------------------------
+# A cloud is what the duck accumulated while standing still at one place: the ToF's returns,
+# gravity-levelled, de-rotated by its own odometry yaw, voxelised at 4 cm.  The host writes one
+# `cloudv` record per cloud when it files it (ogma::CloudMap), carrying the voxels in the cloud's
+# own body-anchored frame plus the WORLD pose it was anchored on.  That pose is instrumentation:
+# it exists so the cloud can be drawn beside the furniture it describes, which is the only way to
+# see at a glance whether the cloud is right.  The duck never reads it.
+#
+# Height colours the voxels, because height is the feature that tells the kinds apart (design doc
+# §17.28).  The 2-20 cm band an object on the floor occupies is drawn opaque and everything else
+# faint, so a small thing standing on the floor is where the eye lands.
+CLOUD_BANDS = (                      # (height below, rgba)
+    (0.02, (0.42, 0.47, 0.55, 0.25)),          # the floor itself: faint grey-blue
+    (0.20, (0.92, 0.41, 0.20, 0.95)),          # THE BREAK BAND: something stands here
+    (0.45, (0.16, 0.47, 0.84, 0.55)),          # chair/table height
+    (9.99, (0.40, 0.62, 0.80, 0.30)),          # wall tops, the shelf, the clock
+)
+
+
+def cloud_rgba(h):
+    for below, rgba in CLOUD_BANDS:
+        if h < below:
+            return rgba
+    return CLOUD_BANDS[-1][1]
+
+
+def draw_clouds(scn, clouds, mujoco, np, only=None):
+    """Append every carried cloud as voxel boxes at the world pose it was anchored on.
+    `only` = draw just that place id.  Returns the number of voxels drawn."""
+    eye = np.eye(3).flatten()
+    drawn = 0
+    for rec in clouds:
+        if only is not None and rec["place"] != only:
+            continue
+        v = rec["voxel_m"]
+        ax, ay, ayaw = rec["anchor"]
+        ca, sa = math.cos(ayaw), math.sin(ayaw)
+        half = np.array([v * 0.5, v * 0.5, v * 0.5])
+        for vox in rec["vox"]:
+            if scn.ngeom >= scn.maxgeom:
+                return drawn
+            ix, iy, iz = vox[0], vox[1], vox[2]
+            px, py = (ix + 0.5) * v, (iy + 0.5) * v
+            wz = (iz + 0.5) * v
+            # colour by the MEAN height of the points in the voxel (the 5th value, mm), not the centre:
+            # the ground layer's centre is exactly 2 cm, and a centre test drew the whole floor in the
+            # break colour.  Logs from before 2026-09-13 carry 4-tuples and fall back to the centre.
+            h = vox[4] / 1000.0 if len(vox) > 4 else wz
+            g = scn.geoms[scn.ngeom]
+            scn.ngeom += 1
+            mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_BOX, half,
+                                np.array([ca * px - sa * py + ax, sa * px + ca * py + ay, wz]), eye,
+                                np.array(cloud_rgba(h), dtype=np.float32))
+            drawn += 1
+    return drawn
+
+
 # ---- the operator's keys ------------------------------------------------------------
 # State the key callback flips; read by the watch loop each frame. Defaults: the beams
 # off (they hide the head), the camera window on, its HUD text on.
 #
 # The HUD lives in the camera window, not the MuJoCo window: label geoms placed in the
 # free camera's frame lagged the mouse between syncs and flashed on every zoom (2026-09-10).
-UI = {"tof": False, "help": True, "cam": True, "fade": True}
+UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": True, "solo": None}
 HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  fade what hides the duck\n"
+           "P  sweep clouds  N  next cloud alone / all\n"
            "space  pause     drag  orbit     scroll  zoom     right-drag  pan")
 
 
@@ -203,6 +261,10 @@ def key_callback(keycode):
         UI["help"] = not UI["help"]
     elif keycode == ord("W"):
         UI["fade"] = not UI["fade"]
+    elif keycode == ord("P"):
+        UI["cloud"] = not UI["cloud"]
+    elif keycode == ord("N"):
+        UI["solo"] = "advance"          # the watch loop resolves this against the clouds it has
 
 
 def free_camera_position(cam, np):
@@ -367,6 +429,8 @@ def status_line(frame):
 
 
 def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.0):
+    # the sweep clouds the run has filed so far, newest per place; and which one is soloed
+    clouds, solo_at = [], None
     """Drive the interactive viewer from a stream of frames.
 
     `fast_until`: frames before this many run-seconds are fast-forwarded — no pacing, one
@@ -415,7 +479,27 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
             mujoco.mj_forward(model, data)
             viewer.cam.lookat[:] = (frame["x"], frame["y"], frame["z"])
             fader.update(viewer.cam, data, (frame["x"], frame["y"], frame["z"]), UI["fade"])
+            # a cloud the host filed on this tick joins the set we carry (replay accumulates
+            # them as the run goes, so the room fills in as the duck visits it)
+            if "cloudv" in frame:
+                rec = frame["cloudv"]
+                clouds = [c for c in clouds if c["place"] != rec["place"]] + [rec]
+            if UI["solo"] == "advance":
+                places = sorted({c["place"] for c in clouds})
+                if not places:
+                    UI["solo"] = None
+                elif solo_at is None:
+                    solo_at = 0
+                elif solo_at + 1 >= len(places):
+                    solo_at = None
+                else:
+                    solo_at += 1
+                UI["solo"] = None
             draw_status(viewer.user_scn, frame, mujoco, np)
+            if UI["cloud"] and clouds:
+                places = sorted({c["place"] for c in clouds})
+                only = places[solo_at] if solo_at is not None and solo_at < len(places) else None
+                draw_clouds(viewer.user_scn, clouds, mujoco, np, only=only)
             if UI["tof"]:
                 draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
             viewer.sync()
@@ -448,7 +532,7 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
     return n
 
 
-def record(frames, out_path, width=960, height=720):
+def record(frames, out_path, width=960, height=720, t_from=0.0, t_to=None, every=1):
     os.environ.setdefault("MUJOCO_GL", "egl")
     mujoco = need("mujoco", "rendering")
     imageio = need("imageio", "writing video")
@@ -469,21 +553,42 @@ def record(frames, out_path, width=960, height=720):
     np = need("numpy", "the status overlay")
     beams = _tof_beams(np)
     fader = WallFader(model, mujoco, np)
-    images = []
-    for frame in frames:
+    rec_clouds = []                      # the sweep clouds filed so far, newest per place
+    written = 0
+    # STREAMED to the encoder, one frame at a time.  This used to collect every frame in a list and
+    # write at the end — fine for the 8 s clips it was built for, fatal for a long run: 960x720x3 is
+    # 2.07 MB a frame, a 1500 s playroom run is 75 000 frames, and on 2026-09-13 the kernel killed it
+    # at 23.9 GB, eleven thousand frames in.  Memory is now flat in the run's length.
+    writer = iio.get_writer(out_path, fps=int(BRAIN_HZ), quality=8, macro_block_size=1)
+    try:
+      for n, frame in enumerate(frames):
+        # a filed cloud is an EVENT: carry it even through frames we skip, or a window that opens
+        # after a stop draws the room empty
+        if "cloudv" in frame:
+            rec = frame["cloudv"]
+            rec_clouds[:] = [c for c in rec_clouds if c["place"] != rec["place"]] + [rec]
+        t = frame.get("t", 0.0)
+        if t_to is not None and t > t_to:
+            break
+        if t < t_from or n % every:
+            continue
         data.qpos[:] = frame["qpos"]
         mujoco.mj_forward(model, data)
         camera.lookat[:] = (frame["x"], frame["y"], frame["z"])
         fader.update(camera, data, (frame["x"], frame["y"], frame["z"]))
         renderer.update_scene(data, camera)
         draw_status(renderer.scene, frame, mujoco, np, reset=False)   # the same overlay as live
+        if rec_clouds:
+            draw_clouds(renderer.scene, rec_clouds, mujoco, np)
         draw_tof(renderer.scene, frame, model, data, mujoco, np, beams)
-        images.append(renderer.render().copy())
-    if not images:
-        sys.exit("no frames — did the host write anything?")
-    iio.mimwrite(out_path, images, fps=int(BRAIN_HZ), quality=8, macro_block_size=1)
-    print(f"wrote {out_path}  ({len(images)} frames, {len(images)/BRAIN_HZ:.1f} s)")
-    return len(images)
+        writer.append_data(renderer.render())
+        written += 1
+    finally:
+        writer.close()
+    if not written:
+        sys.exit("no frames in that window — did the host write anything, and do --from/--to cover it?")
+    print(f"wrote {out_path}  ({written} frames, {written/BRAIN_HZ:.1f} s of video)")
+    return written
 
 
 def _prefer_x11_window():
@@ -530,6 +635,10 @@ def main():
     rec = sub.add_parser("record", help="render a run to video")
     rec.add_argument("run", help="a saved run, or - to read stdin")
     rec.add_argument("out")
+    rec.add_argument("--from", dest="t_from", type=float, default=0.0, metavar="S", help="start at this run second")
+    rec.add_argument("--to", dest="t_to", type=float, default=None, metavar="S", help="stop at this run second")
+    rec.add_argument("--every", type=int, default=1, metavar="N",
+                     help="keep every Nth frame (a 1500 s run at --every 10 is a 150 s video)")
 
     a = p.parse_args()
     try:
@@ -569,7 +678,7 @@ def main():
 
     elif a.mode == "record":
         stream = sys.stdin if a.run == "-" else open(a.run)
-        record(frames_from(stream), a.out)
+        record(frames_from(stream), a.out, t_from=a.t_from, t_to=a.t_to, every=max(1, a.every))
 
 
 if __name__ == "__main__":

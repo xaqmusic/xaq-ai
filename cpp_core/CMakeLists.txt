@@ -170,6 +170,7 @@ add_library(ogma_core
     src/ogma/DiagPublisher.cpp
     src/ogma/modules/NeurochemState.cpp
     src/ogma/modules/EPM.cpp
+    src/ogma/modules/CloudMap.cpp
     src/ogma/modules/LateralVoter.cpp
     src/ogma/modules/HomeostaticDrive.cpp
     src/ogma/modules/ActionDecoder.cpp
@@ -595,6 +596,9 @@ gtest_discover_tests(test_motor_fader_streams)
 gtest_discover_tests(test_motor_epm)
 gtest_discover_tests(test_postural_prior)
 gtest_discover_tests(test_state_prior)
+add_executable(test_cloud_map tests/ogma/test_cloud_map.cpp)
+target_link_libraries(test_cloud_map PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_cloud_map)
 gtest_discover_tests(test_keyframe_gait)
 gtest_discover_tests(test_body_rhythm_tracker)
 gtest_discover_tests(test_gain_evolver)

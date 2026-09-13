@@ -35,7 +35,7 @@ def cloud_in(d, lo, hi, derotate_from=None):
     over a stop (measured below) -- 17 cm of smear at a metre, against a 4 cm block.  With
     derotate_from set, each cast is turned back by its own (yaw - yaw_ref) before it joins the cloud.
     The duck has that yaw from its own contact odometry to 0.1 deg (design doc §16.3), so this is a
-    correction it can make itself, not an oracle."""
+    correction it can make itself, not an oracle.  The rotation applied is R(+(yaw - yaw_ref))."""
     m = (d["cloud_i"] >= lo) & (d["cloud_i"] < hi)
     ci = d["cloud_i"][m]
     pts = d["cloud"][m]                      # casts x 64 x 3
@@ -44,7 +44,9 @@ def cloud_in(d, lo, hi, derotate_from=None):
     p[:, :, 2] = pts[:, :, 2] + z[:, None]   # z becomes height above the floor
     if derotate_from is not None:
         dy = d["hdg"][ci, 0] - d["hdg"][derotate_from, 0]
-        c, s_ = np.cos(-dy), np.sin(-dy)
+        # R(+dy): the body turned +dy, so the world it sees is turned -dy.  This was R(-dy) until
+        # 2026-09-13, which doubled the smear; §17.28's '+7 % voxels' and '41 -> 45 %' used it.
+        c, s_ = np.cos(dy), np.sin(dy)
         x0, y0 = p[:, :, 0].copy(), p[:, :, 1].copy()
         p[:, :, 0] = c[:, None] * x0 - s_[:, None] * y0
         p[:, :, 1] = s_[:, None] * x0 + c[:, None] * y0
