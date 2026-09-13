@@ -1192,6 +1192,71 @@ software guard (`ogma::hw::RailGuard`) still triggers on `get_throttled` alone. 
 reset, rather than inferring it from a flag that only records that something already went
 wrong.
 
+### ★★★ 3.8.9 THE SOFTWARE GUARD — ✅ BUILT AND DRILLED 2026-09-13
+
+The mods in §3.8.8 are unbuilt. This is what protects the robot until they are, and it is
+the *only* thing that acts on the failing rail today.
+
+**What it watches.** `ogma::hw::RailGuard` takes `vcgencmd get_throttled` at 1 Hz and fires
+on a bit that was **not set at startup** appearing.
+
+⚠ **The sticky bits, not the live ones — and that is a measurement, not a preference.**
+Across the entire §3.8.7 run that ended in a hard reset, **no 1 Hz poll ever caught a live
+bit set**: the dips are shorter than the interval. A guard written against bits 0–3 would
+never fire and would look correct while doing nothing. Only the sticky history bits (16
+"has occurred", 18 "throttling has occurred") were ever observed.
+
+⚠ **The baseline is what makes a sticky bit usable.** Sticky bits do not clear without a
+reboot, so their presence says only "sometime since boot". What is actionable is a bit
+*appearing*. A reboot clears them — confirmed `0x0` after the reset — which is what makes a
+start-time baseline a real reference.
+
+**What it does.** On a fresh bit: command the `rescue` pose (the servos *are* the load),
+count the event, and **refuse `servo.set` / `pose.set` / `cal.begin` for 5 s**. Without
+that refusal the guard drops to rescue and the very next command re-loads the rail it just
+backed off.
+
+| published | means |
+|---|---|
+| `rail_events` | how many fresh-bit events since start |
+| `rail_baseline` | the guard's reference — without it, "nothing fired" cannot be told from a broken guard |
+| `rail_guarded` | the 5 s back-off is latched |
+| `rail_inject` | ⚠ **a drill is in progress** — `rail_events` is counting fault injection, not the rail |
+| `ext5v` | instrument only, no threshold taken from it (§3.8.8.4) |
+
+#### The drill — and why unit tests were not enough
+
+The transition logic has five unit tests. None can reach the question that decides whether
+the robot is protected: **is it connected?** A guard whose poll never calls `update()`,
+whose event never reaches `rescue()`, or whose back-off never refuses `servo.set` passes
+every unit test while doing nothing — and waiting for a real dip to find out means waiting
+for the failure that hard-resets the Pi.
+
+So `rail.inject` ORs bits into the polled mask **upstream of the guard**, running the
+identical path a real dip runs. `pi_host/tools/rail_guard_drill.py` checks the seven things
+the unit tests cannot. ✅ **All 17 checks pass on the robot** (`0x10000` injected against a
+clean `0x0` boot):
+
+| checked | measured |
+|---|---|
+| the 1 Hz poll reaches the guard | fired **0.21 s** after injection |
+| `rail_events` moves by exactly 1 | 0 → 1 |
+| the rescue pose is commanded | `rescue_active: true` |
+| `servo.set` / `pose.set` / `cal.begin` refuse | all three, with the rail message |
+| a held bit does not re-fire every poll | still 1 after 3 further polls |
+| the back-off lasts its configured 5 s | **5.0 s**, timed from the event |
+| clearing the injection is not itself an event | `rail_events` unchanged |
+
+⚠ **The re-fire check is not padding.** A guard that fired once a second for the rest of
+the boot would hold the robot in rescue permanently and present downstream as a dead servo
+bus — a failure that looks nothing like its cause.
+
+⚠ **Two drill results were misread before being checked, both in the same direction.** A
+second run reported *"the poll never calls update()"* — the guard was fine; it had absorbed
+the first run's bit, exactly as designed. And the back-off first printed `~1.8 s` against a
+5 s setting — the preceding 3 s hold had already spent the window. **Both times the
+instrument was measuring its own after-effects and reporting them as product defects.**
+
 ### 3.8.3 The surface changed, and it splits the sweep in two
 
 **Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
