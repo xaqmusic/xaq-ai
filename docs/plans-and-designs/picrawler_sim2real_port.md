@@ -1456,6 +1456,58 @@ on `/dev/i2c-1`, and an interleaved multi-byte read does not fail — it returns
 wrong number. Re-run `pi_host/systemd/install.sh` to pick the guard up. Not done from here:
 installing units is a deployment change.
 
+#### ✅ The IMU reaches the brain — measured on the robot 2026-09-13
+
+`ogma_host --imu` (default OFF) publishes `reality.proprio.upright` and
+`reality.proprio.tilt` from the ICM-20948's **fused** gravity estimate, plus
+`sense.imu_health`. Live, robot on the stand, 600 ticks:
+
+```
+ICM-20948 ready (who_am_i 0xEA) — level_ref [-0.03493 -0.00558 0.99937] from pi_host/calib/sensors.json (loaded)
+IMU — 600 samples, disagree 0.367 deg, |a| 1.0017 g, trust 0.0199,
+      bias CONVERGED (600 samples) [0.395 -2.592 -0.189 dps],
+      up_fused [0.0009 0.9999 -0.0134] -> upright 0.9999
+```
+
+- **600 samples in 600 ticks — 1:1 with the loop**, in contrast to the ToF's ~2-in-3.
+  The IMU is on SPI and keeps up; the belly channel is the one with a transport gap.
+- `disagree` 0.367° and `|a|` 1.0017 g: the filter agrees with the accelerometer to a
+  third of a degree at rest, which is the only health signal a robot has.
+- ⚠ **The gyro bias estimate is −2.59 dps on the body-up axis.** Uncorrected that is
+  ~156°/minute of phantom yaw — and it is worth reading beside step (c)'s `honest_imu`
+  result, where the dead-reckoned heading produced a small consistent turn bias. The
+  estimator converged here, but *this is the magnitude it is holding back*, and nothing
+  removes it while the body is moving and the still-window never opens.
+
+**The derived forms are shared contracts, and the sim was swapped onto them**
+(`ogma::body::upright_from_up`, `pitch_roll_from_up`) so the two cannot drift. `upright`
+is provably the same scalar as the sim's `basis.y.y`; `tilt` goes out as
+`[sin p, cos p, sin r, cos r]` because raw radians wrap at ±π and an EPM reads that as a
+jump in the world. **Step (c) measured this substitution as behaviourally free**, so the
+channel was validated in sim before it existed on the robot.
+
+**`level_ref` joined the calib file**, which `Icm20948Config`'s own comment had asked for.
+A dead IMU is a **startup failure**, not an absent topic — `upright` gates keyframe baking.
+
+#### Bus arbitration: the guard went on the DEVICE, not the services
+
+The first attempt was `Conflicts=` between the two units, and it was **wrong — caught
+before installing.** `ogma_host` touches `/dev/i2c-1` only under `--tof`, its unit does
+not pass it, and the operator deliberately runs both services; mutual exclusion would have
+removed a working arrangement to solve a problem that only exists under a flag, and
+`install.sh` enables both units, so a symmetric `Conflicts=` would have made the boot
+state ambiguous. `LinuxI2cBus` now takes `flock(LOCK_EX|LOCK_NB)` instead: it covers
+`hat_tool` (until now guarded only by the README's convention) and any future tool however
+started, bites only when someone actually opens the bus, and makes the loser fail loudly
+naming the remedy. Two tests pin it — including that the claim **dies with its owner**, so
+a crash cannot wedge the bus into looking like it needs a reboot.
+
+**Units installed 2026-09-13**, binaries rebuilt into `pi_host/build` first so the
+flagless unit could not run a stale binary that knew nothing of `sensors.json` — which
+would have silently zeroed the 64.8 mm belly offset. Verified after: benchd prints
+`calib pi_host/calib/sensors.json (loaded) — tof_offset 64.80 mm`, 44/44 `test_hw`, and
+both services coexist as before.
+
 **Remaining for step (d), and a correction to this plan's own scope.** I wrote above that
 the remaining topics were `joints`, `feet_y_gravity_cmd_imu` and `ground_clearance`. Only
 the last was actually buildable: **the other two need the COMMANDED servo angles, which
