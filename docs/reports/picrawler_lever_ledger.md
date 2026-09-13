@@ -5088,6 +5088,72 @@ explicitly. Reproducing a historical number now requires setting it to **0** and
 The startup receipt prints the state unconditionally — ON or off, default or override — so
 no run is ambiguous about it again.
 
+### ★★★ 2026-09-13 — THE SIM HAS BEEN WALKING AT A SERVO SPEED THE ROBOT'S CURRENT BUDGET FORBIDS
+
+**Verdict: sim2real gap (`WORKING` as a diagnosis).** Asked to study slew limiting and
+round-robin as brownout mitigations. **Round-robin needs no study — it is already
+refuted on hardware**, and the slew question turned out to be a live gap rather than an
+open design choice.
+
+**★ 1. CONCURRENCY WAS NEVER THE BINDING CONSTRAINT.** BOM §3.6 swept K = 1…12 servos per
+tick at slew 40: **all twelve at once is 2.19–2.57 A**, with **zero throttle events in 28
+trials**, against a ≤ 3.5 A working budget. §3.8.2 states it outright: *"the duty budget is
+a slew cap, not a concurrency cap; §3.6's concurrency sweep found no boundary because it
+held the variable that matters fixed."* §3.6.1 adds that the deployed 100 ms stagger is
+**defeated by its own gentleness** — travel time (1567 ms) exceeds the launch window
+(1200 ms), so every channel ends up moving together anyway; a true K=3 would need a
+~520 ms stagger. **A priority round-robin would be regulating a quantity that has already
+been measured not to be the limit.**
+
+**★★★ 2. THE SIM RUNS AT ~76 µs/tick EQUIVALENT, WHICH IS THE "AT THE EDGE" ROW.**
+`MAX_SERVO_SPEED = 6.0 rad/s`; at the standard hobby-servo scale (500–2500 µs = 180°,
+636.6 µs/rad) that is **76 µs/tick** at the 50 Hz tick. Against §3.8.2's measured budget:
+
+| slew | peak battery A | verdict | rad/s |
+|---|---|---|---|
+| ≤ 50 µs/tick | ≤ 1.90 | ✅ the budget | 3.93 |
+| **76 µs/tick** | — | **⚠ the sim sits here** | **6.00** |
+| 80 µs/tick | 2.61 | ⚠ at the edge | 6.28 |
+| ≥ 200 µs/tick | ~3.00 | ❌ over the 5 V rail's 3 A rating | 15.7 |
+
+**The deployed `ServoDriver` default is 40 µs/tick = 3.14 rad/s — half the sim's speed.**
+
+**★★ 3. WHAT THE BUDGET COSTS THE GAIT** (corridor, measured body, n=3 × 6000, the sim's
+speed cap swept to each hardware setting):
+
+| `MAX_SERVO_SPEED` | net_z | fwd_v | steps | tilt_sd | contact_duty |
+|---|---|---|---|---|---|
+| 6.00 rad/s (~76 µs, sim today) | **6.31 ± 0.66** | 0.110 | **34** | 0.0565 | 0.779 |
+| 3.93 rad/s (50 µs, budget) | **4.14 ± 0.21** | 0.066 | 21 | 0.0533 | 0.850 |
+| 3.14 rad/s (40 µs, **deployed**) | **3.28 ± 0.21** | 0.056 | **4** | 0.0456 | 0.889 |
+| 1.57 rad/s (20 µs) | **0.44 ± 0.13** | 0.024 | **0** | **0.1614** | 0.839 |
+
+**At the deployed slew the robot will cover ~52 % of the distance the sim shows, with
+almost no recognisable stepping** (4 against 34) and the highest contact duty of the set —
+it shuffles rather than steps. At the budget ceiling it is 66 %.
+
+**★ 4. SLOWER IS NOT MONOTONICALLY SAFER.** At 20 µs/tick the gait **collapses**: 0.44 m,
+zero steps, and **tilt_sd triples** (0.161 against 0.046–0.057 everywhere else). Below
+~3 rad/s the body cannot keep up with its own postural demands and simply wobbles. So the
+safe window is **not "as slow as possible"** — it is roughly **40–50 µs/tick**: stable,
+inside the measured current budget, at half to two-thirds of the sim's performance.
+
+**Consequence for first power-on.** The evolved gains were searched at 6.0 rad/s, so the
+operating point itself was found under a servo speed the current budget does not allow.
+Either the gait runs degraded at the budget, or it runs at ~2.6 A on a rail rated 3 A —
+and §3.8.2 flags every number in that budget as **vinyl-optimistic**, since grip converts
+free motion into work (the same move measured 1.90 A on vinyl and 2.62 A on leather).
+
+⚠ **The µs/rad scale is the STANDARD, not this robot's measured one.** `servo_map.json`
+stores a calibrated *envelope*, not an angle-per-microsecond, so the whole conversion
+rests on 636.6 µs/rad and **wants a bench check before any of this is acted on** — command
+a known angle change, measure the µs delta. n=3 is a signal, not a finding, and falls were
+not captured in this set.
+
+**Shipped:** `MAX_SERVO_SPEED` is `const` → `var` with an `OGMA_PICRAWLER_MAX_SERVO_SPEED`
+override and a startup receipt naming the µs/tick equivalent and the budget. Default
+unchanged, gain-0 verified against a stashed baseline (1200 ticks × seeds 7/13, identical).
+
 ### ★★ 2026-09-12 — THE ROBOT AND THE SIM DID NOT AGREE, AND ONE FLAG FIXED IT
 
 **Verdict: defect + fix (`WORKING`), measured on the robot.** Recorded because it touches

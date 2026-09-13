@@ -173,7 +173,21 @@ const MAX_SERVO_TORQUE: float = 0.15      # Nm — gentle enough that motor reac
 										  # exceed Euler stability and look like flailing.
 										  # 0.3 Nm still gives ~20× headroom over the
 										  # gravitational moment at hip2 (~0.013 Nm).
-const MAX_SERVO_SPEED: float = 6.0        # rad/s — matches doc spec (6-10).  Now that joints
+# ⚠ const -> var 2026-09-13, so the HARDWARE's slew budget can be imposed on the sim.
+# OGMA_PICRAWLER_MAX_SERVO_SPEED overrides it; the default is unchanged, so gain-0.
+#
+# ⚠ THE SIM HAS BEEN FASTER THAN THE ROBOT IS ALLOWED TO BE.  At the standard hobby-servo
+# scale (500-2500 us = 180 deg, 636.6 us/rad) 6.0 rad/s is ~76 us/tick at the 50 Hz tick,
+# and BOM §3.8.2's measured duty budget reads:
+#     <= 50 us/tick (3.93 rad/s) -> <= 1.90 A   ✅ the budget
+#        80 us/tick (6.28 rad/s) ->    2.61 A   ⚠ at the edge
+#     >= 200 us/tick             ->   ~3.00 A   ❌ over the 5 V rail's 3 A rating
+# So the sim sits on the "at the edge" row, while the DEPLOYED ServoDriver default is
+# 40 us/tick = 3.14 rad/s — half the sim's speed.  Whatever gait the sim settles on is
+# therefore not the gait the robot will execute on first power-on.
+# ⚠ The us/rad scale is the STANDARD, not this robot's measured one; the servo map stores
+# a calibrated envelope, not an angle-per-microsecond, so it wants a bench check.
+var MAX_SERVO_SPEED: float = 6.0          # rad/s — matches doc spec (6-10).  Now that joints
 										  # use right-handed bases (constraint solver stable)
 										  # and chassis is suspended during calibration,
 										  # higher speed is safe.  At 6 rad/s a full ±80° throw
@@ -3305,6 +3319,8 @@ func _ready() -> void:
 	# silently did not load — CLAUDE.md §3.2's "did the arm you think you ran actually
 	# load?", which has produced a false verdict here before.  A run whose log does not
 	# say `honest[...]` is not evidence about anything.
+	print("PicrawlerBody: max_servo_speed = %.2f rad/s  (~%.0f us/tick at the 50 Hz tick; BOM §3.8.2 budget is <=50)"
+		% [MAX_SERVO_SPEED, MAX_SERVO_SPEED * (2000.0 / PI) / 50.0])
 	print("PicrawlerBody: tof[boom=%s tilt_comp=%s z=%+.3f y=%+.3f]" % [
 		"ON" if tof_boom else "off", "ON" if tof_tilt_comp else "off",
 		tof_boom_z, tof_boom_y if tof_boom_y > 0.0 else _chassis_top_local])
@@ -3391,6 +3407,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_JOINT_BACKEND",
 			  "OGMA_PICRAWLER_JOINT_DAMPING",
 			  "OGMA_PICRAWLER_MOTOR_FREEPLAY",
+			  "OGMA_PICRAWLER_MAX_SERVO_SPEED",
 			  "OGMA_PICRAWLER_TOF_BOOM",
 			  "OGMA_PICRAWLER_TOF_TILT_COMP",
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
@@ -3416,6 +3433,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_ANTIROT_SCALE":     antirot_scale     = max(0.001, v.to_float())
 			"OGMA_PICRAWLER_ANTIROT_GAIN":      antirot_gain      = max(0.0, v.to_float())
 			"OGMA_PICRAWLER_PUBLISH_TILT":      publish_tilt      = (v != "0" and v != "")
+			"OGMA_PICRAWLER_MAX_SERVO_SPEED":   MAX_SERVO_SPEED   = max(0.1, v.to_float())
 			"OGMA_PICRAWLER_TOF_BOOM":          tof_boom          = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOF_TILT_COMP":     tof_tilt_comp     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
