@@ -7050,7 +7050,9 @@ func _step_one() -> void:
 	# world-up expressed in the body frame, so its .y is the same dot product.
 	var upright_arr := PackedFloat64Array()
 	if honest_upright and _up_est_body.length() > 0.5:
-		upright_arr.append(_up_est_body.y)
+		# ogma::body::upright_from_up — shared with the robot, which publishes the same
+		# scalar from its own fused estimate.
+		upright_arr.append(_imu_att.upright_from_up(_up_est_body))
 	else:
 		upright_arr.append(_chassis.global_transform.basis.y.y)
 	brain.publish_proprio(upright_arr, "upright")
@@ -7325,10 +7327,12 @@ func _step_one() -> void:
 		# publish_tilt defaults FALSE headless besides.  Kept so the switch means one
 		# thing ("attitude comes from the filter") rather than two.
 		if honest_upright and _up_est_body.length() > 0.5:
-			# Small-angle-free recovery of pitch/roll from the gravity estimate: the body
-			# frame's own tilt about X and Z is what the accelerometer resolves.
-			pitch = atan2(-_up_est_body.z, _up_est_body.y)
-			roll  = atan2(_up_est_body.x, _up_est_body.y)
+			# ogma::body::pitch_roll_from_up — the body frame's own tilt about X and Z is
+			# what the accelerometer resolves, so atan2 against the vertical component is
+			# exact over the full range.  Shared with the robot.
+			var pr: Vector2 = _imu_att.pitch_roll_from_up(_up_est_body)
+			pitch = pr.x
+			roll  = pr.y
 		var tilt_arr := PackedFloat64Array()
 		tilt_arr.append(sin(pitch))
 		tilt_arr.append(cos(pitch))

@@ -1,7 +1,7 @@
 {
   "_comment": [
-    "FITTED CONSTANTS FOR THIS PHYSICAL ROBOT — calibration data, not defaults.",
-    "They lived on the systemd unit's ExecStart, which the BOM doc (§9.2, §3.3) flags as",
+    "FITTED CONSTANTS FOR THIS PHYSICAL ROBOT \u2014 calibration data, not defaults.",
+    "They lived on the systemd unit's ExecStart, which the BOM doc (\u00a79.2, \u00a73.3) flags as",
     "the wrong home twice over: a value invisible to anyone reading the docs, and one that",
     "the checked-in unit did not carry, so reinstalling it silently dropped the ToF",
     "calibration. Both now live here, the way servo_map.json and poses.json already do,",
@@ -19,5 +19,13 @@
   "ground_clearance": {
     "stand_m": 0.06,
     "_why": "The normalizer the promoted height homeostat rides: published signal = clamp(raw_m / stand_m, 0, 1). MUST match the sim's GROUND_CLEARANCE_STAND or the robot feeds a differently-scaled number into a promoted lever. Shared implementation: ogma::body::ground_clearance()."
+  },
+  "imu": {
+    "level_ref": [
+      -0.03493,
+      -0.00558,
+      0.99937
+    ],
+    "_why": "Chip-frame body-up with the belly flat on a level floor (BOM \u00a74.2: five placements over four verified 180\u00b0 rotations, 0.05\u00b0 repeatability, floor slope 0.49\u00b0 subtracted out). It lumps mount tilt together with accelerometer bias, unsplit, and is applied to the ACCELEROMETER ONLY. Icm20948Config's default carries the same 2026-09-10 fit and its comment asked for exactly this file; re-fit after any IMU remount."
   }
 }

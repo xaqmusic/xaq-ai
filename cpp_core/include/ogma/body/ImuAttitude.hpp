@@ -136,4 +136,35 @@ private:
     float acc_mag_ = 0.0f;
 };
 
+
+// --- what the attitude estimate MEANS to a consumer --------------------------
+//
+// Two derived signals, shared because both are CONTRACTS the sim and the robot must
+// agree on rather than obvious conversions.
+//
+// `up` is world-up expressed in the BODY frame -- the filter's own estimate, never an
+// exact basis.  Step (c) measured substituting it for the sim's exact basis as
+// behaviourally free (ledger 2026-09-11), so these are the forms the robot publishes
+// and the forms the sim publishes when honest_upright is on.
+
+// `upright`: +1 upright, 0 on its side, -1 inverted.
+//
+// ⚠ It is the SAME SCALAR as the sim's `basis.y.y`, and that identity is the whole
+// reason the substitution is legal: basis.y.y is body-up . world-up, and `up` is
+// world-up in the body frame, so its y component is that same dot product.  A consumer
+// cannot tell which body produced it, which is the point.
+inline double upright_from_up(const Vec3f& up) { return double(up.y); }
+
+// `tilt`: pitch and roll recovered from the gravity estimate, in radians.
+//
+// ⚠ NOT small-angle, and not from a basis: the accelerometer resolves the body's own
+// tilt about X and Z directly, so atan2 against the vertical component is exact over
+// the full range and degrades gracefully as the body goes past horizontal -- where a
+// small-angle form would quietly stop meaning anything.  Published as [sin, cos] per
+// axis by the caller, because raw radians wrap at +-pi and an EPM sees that as a jump.
+inline void pitch_roll_from_up(const Vec3f& up, double& pitch, double& roll) {
+    pitch = std::atan2(-double(up.z), double(up.y));
+    roll  = std::atan2( double(up.x), double(up.y));
+}
+
 }  // namespace ogma::body

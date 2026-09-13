@@ -11,6 +11,8 @@ void ImuAttitude::_bind_methods() {
     ClassDB::bind_method(D_METHOD("trust"), &ImuAttitude::trust);
     ClassDB::bind_method(D_METHOD("acc_mag"), &ImuAttitude::acc_mag);
     ClassDB::bind_method(D_METHOD("disagree_deg"), &ImuAttitude::disagree_deg);
+    ClassDB::bind_method(D_METHOD("upright_from_up", "up"), &ImuAttitude::upright_from_up);
+    ClassDB::bind_method(D_METHOD("pitch_roll_from_up", "up"), &ImuAttitude::pitch_roll_from_up);
     ClassDB::bind_method(D_METHOD("reset"), &ImuAttitude::reset);
     ClassDB::bind_method(D_METHOD("configure", "acc_trust", "acc_gate_frac", "gravity"),
                          &ImuAttitude::configure);
@@ -29,6 +31,16 @@ Vector3 ImuAttitude::up_fused() const {
 Vector3 ImuAttitude::up_accel() const {
     const auto& v = f_.up_accel();
     return Vector3(v.x, v.y, v.z);
+}
+
+double ImuAttitude::upright_from_up(Vector3 up) const {
+    return ogma::body::upright_from_up(ogma::body::Vec3f(up.x, up.y, up.z));
+}
+
+Vector2 ImuAttitude::pitch_roll_from_up(Vector3 up) const {
+    double p = 0.0, r = 0.0;
+    ogma::body::pitch_roll_from_up(ogma::body::Vec3f(up.x, up.y, up.z), p, r);
+    return Vector2(real_t(p), real_t(r));
 }
 
 double ImuAttitude::trust()        const { return f_.trust(); }

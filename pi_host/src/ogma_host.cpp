@@ -33,6 +33,7 @@
 #include "ogma/hw/CameraCapture.hpp"
 #include "ogma/hw/Ultrasonic.hpp"
 #include "ogma/hw/Vl53l0x.hpp"
+#include "ogma/hw/Icm20948.hpp"
 #include "ogma/hw/I2cBus.hpp"
 #include "ogma/hw/SensorCalib.hpp"
 #include "ogma/body/StrideOdometry.hpp"
@@ -80,6 +81,10 @@ struct Args {
     // declare Conflicts= so this cannot be arranged by accident, but the flag stays
     // default-off so the bench keeps the belly readout unless the brain is asked for it.
     bool    tof        = false;
+    // ⚠ SPI, NOT I2C — so unlike --tof this contends with nothing.  benchd reads the
+    // same part today; both can hold /dev/spidev0.0 without interleaving because each
+    // transfer is one full-duplex ioctl, not a pointer-write followed by a read.
+    bool    imu        = false;
 };
 
 void usage() {
@@ -120,6 +125,7 @@ int main(int argc, char** argv) {
         else if (v == "--camera")                 a.camera = true;
         else if (v == "--range")                  a.range = true;
         else if (v == "--tof")                    a.tof = true;
+        else if (v == "--imu")                    a.imu = true;
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -171,6 +177,32 @@ int main(int argc, char** argv) {
                 "gc_stand %.3f m\n",
                 calib.source.c_str(), calib.loaded ? "loaded" : "MISSING, using defaults",
                 calib.tof_mount_offset_mm, calib.gc_stand_m);
+        }
+
+        // ---- IMU (ICM-20948, SPI) ------------------------------------------------
+        // Publishes `upright` and `tilt` from the FUSED gravity estimate — the honest
+        // forms, not an exact basis, which is all a robot has.  Step (c) measured that
+        // substitution in sim as behaviourally free (ledger 2026-09-11), so this is the
+        // validated channel rather than a hopeful one.
+        std::unique_ptr<ogma::hw::Icm20948> imu;
+        if (a.imu) {
+            ogma::hw::Icm20948Config ic;
+            ic.level_ref = calib.imu_level_ref;
+            imu = std::make_unique<ogma::hw::Icm20948>(ic);
+            std::string err;
+            if (!imu->begin(&err)) {
+                // A dead IMU must be a startup failure, not a silently absent topic:
+                // `upright` gates keyframe baking, and a consumer that never sees it
+                // behaves differently from one that sees it wrong — but neither should
+                // be discovered halfway through a run.
+                std::fprintf(stderr, "ogma_host: ICM-20948 begin failed: %s\n", err.c_str());
+                return 3;
+            }
+            std::fprintf(stderr,
+                "ogma_host: ICM-20948 ready (who_am_i 0x%02X) — level_ref [%.5f %.5f %.5f] "
+                "from %s (%s)\n",
+                imu->who_am_i(), ic.level_ref[0], ic.level_ref[1], ic.level_ref[2],
+                calib.source.c_str(), calib.loaded ? "loaded" : "MISSING, using defaults");
         }
         if (a.mic && !mic.start())
             std::fprintf(stderr, "ogma_host: mic: %s\n", mic.last_error().c_str());
@@ -382,6 +414,8 @@ int main(int argc, char** argv) {
         // the bus (CLAUDE.md §3.2: did the consumer actually fire?).
         long tof_reads = 0, tof_valid = 0;
         ogma::hw::Vl53l0x::Reading tof_last{};
+        long imu_reads = 0;
+        ogma::hw::ImuSample imu_last{};
 
         while (g_run && (a.max_ticks == 0 || ticks < a.max_ticks)) {
             next.tv_nsec += period_ns;
@@ -494,6 +528,52 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+            if (imu) {
+                ogma::hw::ImuSample m;
+                if (imu->sample(m) && m.ok) {
+                    ++imu_reads;
+                    imu_last = m;
+                    const ogma::body::Vec3f up(m.up_fused[0], m.up_fused[1], m.up_fused[2]);
+
+                    // `upright` — the SAME SCALAR the sim publishes from basis.y.y, via
+                    // the shared contract, so a consumer cannot tell the bodies apart.
+                    auto u = std::make_shared<ogma::ProprioToken>();
+                    u->tick_id = uint64_t(ticks); u->producer_id = "host";
+                    u->sensor = "upright";
+                    u->values.resize(1);
+                    u->values[0] = float(ogma::body::upright_from_up(up));
+                    bus->publish("reality.proprio.upright", u);
+
+                    // `tilt` — [sin p, cos p, sin r, cos r].  The unit-circle encoding is
+                    // the sim's and is not decoration: raw radians wrap at ±π and an EPM
+                    // reads that discontinuity as a jump in the world.
+                    double pitch = 0.0, roll = 0.0;
+                    ogma::body::pitch_roll_from_up(up, pitch, roll);
+                    auto t = std::make_shared<ogma::ProprioToken>();
+                    t->tick_id = uint64_t(ticks); t->producer_id = "host";
+                    t->sensor = "tilt";
+                    t->values.resize(4);
+                    t->values[0] = float(std::sin(pitch)); t->values[1] = float(std::cos(pitch));
+                    t->values[2] = float(std::sin(roll));  t->values[3] = float(std::cos(roll));
+                    bus->publish("reality.proprio.tilt", t);
+
+                    // ⚠ THE HEALTH SIGNAL IS A CHANNEL.  There is no ground-truth attitude
+                    // on a robot, so accel-vs-fused disagreement is the only thing that
+                    // says whether the filter is working — and the gyro bias estimator's
+                    // convergence is the only thing that says whether to believe it yet.
+                    // Both ride here rather than being inferred from the attitude itself.
+                    auto h = std::make_shared<ogma::ProprioToken>();
+                    h->tick_id = uint64_t(ticks); h->producer_id = "host";
+                    h->sensor = "imu_health";
+                    h->values.resize(5);
+                    h->values[0] = m.disagree_deg;
+                    h->values[1] = m.a_norm_g;
+                    h->values[2] = m.trust;
+                    h->values[3] = m.bias_valid ? 1.0f : 0.0f;
+                    h->values[4] = float(m.bias_samples);
+                    bus->publish("sense.imu_health", h);
+                }
+            }
 
             {
                 std::lock_guard<std::mutex> lk(inst_mtx);
@@ -590,6 +670,23 @@ int main(int argc, char** argv) {
         if (!cam.last_error().empty())         std::fprintf(stderr, "ogma_host: camera died: %s\n", cam.last_error().c_str());
         if (!rangefinder.last_error().empty()) std::fprintf(stderr, "ogma_host: rangefinder died: %s\n", rangefinder.last_error().c_str());
         std::printf("ogma_host: stopped after %ld ticks (%ld overruns)\n", ticks, overruns);
+        if (imu) {
+            // Same reason the belly channel counts itself: from outside the process an
+            // IMU publishing nothing looks exactly like one publishing well.  bias_valid
+            // is the number to read first — attitude from an unconverged gyro bias is a
+            // confident wrong answer, and the estimator needs ~8 s of stillness.
+            std::printf("ogma_host: IMU — %ld samples, disagree %.3f deg, |a| %.4f g, "
+                        "trust %.4f, bias %s (%d samples) [%.3f %.3f %.3f dps], "
+                        "up_fused [%.4f %.4f %.4f] -> upright %.4f\n",
+                        imu_reads, imu_last.disagree_deg, imu_last.a_norm_g, imu_last.trust,
+                        imu_last.bias_valid ? "CONVERGED" : "not converged",
+                        imu_last.bias_samples,
+                        imu_last.gyro_bias_dps[0], imu_last.gyro_bias_dps[1],
+                        imu_last.gyro_bias_dps[2],
+                        imu_last.up_fused[0], imu_last.up_fused[1], imu_last.up_fused[2],
+                        ogma::body::upright_from_up(ogma::body::Vec3f(
+                            imu_last.up_fused[0], imu_last.up_fused[1], imu_last.up_fused[2])));
+        }
         if (tof) {
             std::printf("ogma_host: belly ToF — %ld reads, %ld valid (%.1f%%), last "
                         "raw %u mm -> %.3f m (status %s, signal %.2f ambient %.2f "

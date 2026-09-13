@@ -19,6 +19,7 @@
 // maths moved.
 
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include "ogma/body/ImuAttitude.hpp"
@@ -36,6 +37,10 @@ public:
     double  trust() const;
     double  acc_mag() const;
     double  disagree_deg() const;
+    // The two derived contracts (ogma::body): `upright` is the same scalar as the sim's
+    // basis.y.y, and pitch/roll come from the gravity estimate by atan2, not small-angle.
+    double  upright_from_up(Vector3 up) const;
+    Vector2 pitch_roll_from_up(Vector3 up) const;
     void    reset();
     // Defaults already mirror IMU_ACC_TRUST / IMU_ACC_GATE_FRAC / 9.81.  ⚠ These are
     // DOUBLE on purpose: GDScript's literals are, and a float32 9.81f is a different

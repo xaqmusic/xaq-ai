@@ -22,6 +22,7 @@
 // calibration.  An override is PRINTED, so a run whose log does not mention one was
 // using the file.
 
+#include <array>
 #include <fstream>
 #include <string>
 #include <nlohmann/json.hpp>
@@ -33,6 +34,10 @@ struct SensorCalib {
     double ina_r_shunt_ohm     = 0.01;   // INA219, trace+solder included
     double gc_stand_m          = 0.06;   // ground_clearance normalizer; matches the
                                          // sim's GROUND_CLEARANCE_STAND by contract
+    // ICM-20948 chip-frame body-up, belly flat on a level floor.  Mount tilt + accel
+    // bias, unsplit, accelerometer-only.  Default is the 2026-09-10 fit, which is also
+    // Icm20948Config's default — so a missing calib file changes nothing here.
+    std::array<float, 3> imu_level_ref = {-0.03493f, -0.00558f, +0.99937f};
     bool   loaded = false;
     std::string source;                  // path actually read, for the receipt
 
@@ -53,6 +58,11 @@ struct SensorCalib {
                 c.ina_r_shunt_ohm = j["ina219"]["r_shunt_ohm"].get<double>();
             if (j.contains("ground_clearance") && j["ground_clearance"].contains("stand_m"))
                 c.gc_stand_m = j["ground_clearance"]["stand_m"].get<double>();
+            if (j.contains("imu") && j["imu"].contains("level_ref")) {
+                const auto& lr = j["imu"]["level_ref"];
+                if (lr.is_array() && lr.size() == 3)
+                    for (int i = 0; i < 3; ++i) c.imu_level_ref[size_t(i)] = lr[size_t(i)].get<float>();
+            }
             c.loaded = true;
         } catch (...) {
             // A malformed calib file is worse than none: it means someone edited it and
