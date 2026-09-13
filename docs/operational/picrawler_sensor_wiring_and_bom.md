@@ -919,6 +919,45 @@ is any path that bypasses slew limiting entirely. **The budget is a slew cap; co
 ⚠ **Every number in that budget was measured on low-friction vinyl (§3.8.3) and is therefore
 optimistic.** Re-verify slew 50 and 80 on a high-friction surface before relying on them.
 
+### 3.8.4 Slew 40 vs 50 at the NORMAL slew — ✅ MEASURED 2026-09-13
+
+§3.8 swept **pose** slew over `rescue`↔`X` (up to 2000 µs of travel, twelve channels).
+The sim study recommends raising `ServoDriver::slew_us_per_tick` — the **normal** slew the
+brain's commands ride — from 40 to 50, so the question is what that costs *in the regime
+the brain actually uses*: small per-tick corrections, not pose slams.
+
+One channel (ch0 RL knee, 700→1300 = 600 µs travel, the range verified clear), `ina sag`
+at ~940 Hz, **ABBA-interleaved 3 reps** because hardware A/B has no seed and pack decay
+confounds arm order exactly like a lever effect (Phase 5).
+
+| slew µs/tick | n | baseline A | peak A | **10 ms-avg A** | servo's own share | min pack V |
+|---|---|---|---|---|---|---|
+| 40 | 6 | 0.566 | 0.752 | **0.677 ± 0.017** | 0.111 | 7.67 |
+| 50 | 6 | 0.572 | 0.740 | **0.672 ± 0.018** | 0.100 | 7.67 |
+
+**40 → 50 costs nothing: −0.005 A, −0.7 %, inside the ±0.018 spread.** The servo's own
+share over baseline is if anything slightly lower at 50. That is consistent with §3.8's
+saturation finding read the other way round — both 40 and 50 are far below the servo's own
+maximum velocity (saturation is ~200 µs/tick), so raising the cap mostly *shortens the
+move* rather than raising the draw.
+
+**The measured per-servo share, 0.10–0.11 A, brackets §3.6's 0.135 A** and is a little
+lower, as an unloaded leg on a stand should be.
+
+⚠ **WHAT THIS DOES NOT COVER, and the extrapolation that must not be trusted.** Scaling
+the per-servo share linearly gives 0.57 + 12 × 0.111 = **1.90 A** at slew 40 — but §3.6
+*measured* K=12 at slew 40 as **2.19–2.57 A**. The linear form understates by 15–25 %,
+exactly as §3.6 warned (the relation is "mildly convex", so a linear budget is "slightly
+optimistic at the top end"). **Where a direct measurement and an extrapolation disagree,
+the measurement wins** — this one is evidence about the *marginal cost of the slew change*,
+not about the twelve-channel aggregate.
+
+Still unmeasured for this change: twelve concurrent channels, **legs under real body
+load** (§3.8.3: grip converts free motion into work, and the same move cost 1.90 A on
+vinyl against 2.62 A on leather), and large travel. The recommendation to raise 40 → 50
+rests on the marginal cost being ~zero in the brain's regime, not on a twelve-channel
+re-verification.
+
 ### 3.8.3 The surface changed, and it splits the sweep in two
 
 **Slew 20–500 ran on a low-friction vinyl floor; slew 800, 1300 and 2000 ran on a leather
