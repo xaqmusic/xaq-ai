@@ -1171,9 +1171,32 @@ every call, so the previous reading stands, `age_ms` climbs, and **no code path 
 re-initialises the sensor**. The staleness is published and nothing acts on it.
 
 **Rate: ~1 failure in 600 pose moves.** It survived 600 deadman rescues in this session
-and died on the 601st, so this is a marginal transient (a supply dip on the shared rail
-during a twelve-servo move is the obvious candidate — the ToF's 3V3 comes off the HAT),
-not a deterministic logic fault. Rare, and therefore easy to not see coming.
+and died on the 601st, so this is a marginal transient, not a deterministic logic fault.
+Rare, and therefore easy to not see coming.
+
+**★ THE INA219 WAS UNAFFECTED, which narrows it.** Through the whole ±8 s window around
+the stall the INA219 — **same I²C bus, same HAT 3V3** — reported `ok = true` and
+`errors = 0` without a break, and `vbat` sat flat at 7.85–7.95 V with no dip. So this was
+**not** a bus-wide corruption event and **not** a supply collapse deep enough to disturb
+every device. (Battery voltage staying flat does not by itself clear the 5 V/3V3 rails —
+§3.8.1 already established the real cliff is the regulator's current limit, not pack sag —
+but a dip that reset the VL53L0X while leaving the INA219 untouched has to be either very
+localised or a difference in the parts' sensitivity.)
+
+The two devices are not comparable in how much state they hold: the INA219 has a handful
+of config registers, while the VL53L0X carries an elaborate ranging state machine set up
+by a long boot sequence. **A perturbation too small to trouble the INA219 can still drop
+the ToF out of continuous mode**, which is consistent with everything observed.
+
+⚠ **A SEPARATE I²C CONNECTOR DOES NOT GIVE A SEPARATE BUS ON THIS HAT.** §1's interface
+table: the 4-pin P2.54 header and the SH1.0 QWIIC connector are **both GPIO2/3**, sharing
+the HAT's on-board 10 K pull-ups. Re-terminating the ToF onto QWIIC improves the
+*mechanical* connection — shorter leads, a positive-latching connector instead of parallel
+flying leads, less noise pickup and one less intermittent-contact failure mode, all of
+which are worth having — but it is electrically the same bus and would not have prevented
+this. A genuinely separate bus would need a second I²C, and §1 records that only GPIO7 and
+GPIO20 are unlisted, neither broken out (and GPIO20 is now the speaker enable), so there
+is no free pair for an `i2c-gpio` overlay.
 
 ⚠ **WHY THIS MATTERS FOR FIRST POWER-ON.** `ground_clearance` is the **promoted** height
 homeostat's input — the lever that replaced the god's-eye `chassis_y_norm` and solved the
