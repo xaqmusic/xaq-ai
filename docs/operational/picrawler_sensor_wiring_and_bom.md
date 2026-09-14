@@ -1080,48 +1080,109 @@ today, and this). The endurance question as posed — "how long until the auto-s
 **has no answer, because the Pi dies first.** The real endurance limit is thermal/electrical
 on the 5 V rail, not battery capacity.
 
-### ★★★ 3.8.8 THE POWER MODS — separating the servo rail, and riding out the dip
+### ★★★ 3.8.8 THE POWER MODS — giving the Pi its own rail, and instrumenting the one it leaves
 
 > **Status: SPECIFIED, NOT BUILT.** Written after §3.8.7, which is the measurement that
-> makes them worth the effort. Both are reversible and neither requires cutting the pack.
+> makes them worth the effort. All three are reversible and none requires cutting the pack.
+> ⚠ **Mod A was re-specified 2026-09-14** around the operator's topology, which is better
+> than the original on every axis; the superseded version is kept at the end of §3.8.8.1
+> because the reason it was wrong is worth carrying.
 
 **The problem in one line:** the HAT's single **5 V / 3 A DC-DC feeds the Pi and all twelve
 servos**, so a servo transient pulls the rail the Pi lives on — and §3.8.7 measured the Pi
 dying from that at `vbat` 7.66 V with 0.92 A of bus current, with *both* electrical
 instruments blind because they sit on the battery side of that regulator.
 
+**The fix in one line:** **move the Pi, not the servos.** Lift the two header pins that feed
+5 V from the HAT to the Pi, and give the Pi its own regulator off the pack.
+
 ---
 
-#### 3.8.8.1 Mod A — a separate BEC for the servos ★ the real fix
+#### 3.8.8.1 Mod A — take the Pi OFF the HAT's rail ★ the real fix
 
-Give the servos their own regulator from the pack and leave the Pi on the HAT's. The two
-loads stop sharing a rail, and a servo inrush can no longer reach the Pi.
+**The topology.** The pack feeds the INA219 as it does today. After the shunt the line
+branches: one branch to the HAT (which keeps its 5 V / 3 A DC-DC and keeps feeding all
+twelve servos), one branch to a new BEC that feeds **only the Pi**. The HAT's 5 V is then
+disconnected from the Pi by lifting the two header pins that carry it.
+
+```
+        ┌── HAT ── 5 V/3 A DC-DC ── 12 servos        (pins 2+4 to the Pi: LIFTED)
+pack ──[INA219]──┤
+        └── new BEC ── 5 V ── Pi (GPIO 2/4)          ── grounds stay bonded
+```
+
+**Why this way round.** The earlier specification moved the *servos* to the new BEC. This is
+better on four counts, and every one of them matters more than the effort saved:
+
+1. **The cut moves from a PCB trace to a connector.** Isolating the HAT's servo-rail feed
+   meant cutting copper on a shared net. Lifting two header pins modifies neither board.
+2. **The servos GAIN headroom.** They stop sharing the 3 A DC-DC with the Pi and get all of
+   it, instead of being migrated to an unproven supply.
+3. **The new supply carries the QUIET load.** The Pi's draw is near-constant; the servos are
+   the transient source. Putting the well-understood load on the new part is the lower-risk
+   assignment, and it leaves the known-sagging regulator feeding what it was sized for.
+4. **The Pi comes off the regulator that is the documented failure point** (§3.8.1, §3.8.7).
 
 | item | spec that matters | note |
 |---|---|---|
-| Step-down BEC / UBEC | **5 V out, ≥ 6 A continuous**, 2S input (6.0–8.4 V) | 12 × MG90S stall is far above steady draw; size for inrush, not average |
-| Input pigtail | JST XH 2.54 3-pin, 22 AWG on `+`/`−` | taps the same pack, **downstream of the INA219** so whole-robot current is still measured |
-| Output | to the servo rail only | |
-| Common ground | **mandatory** — BEC `−` bonded to HAT `−` | signal ground for the PWM lines; without it the servo signals have no reference |
+| Step-down BEC / UBEC | **5 V out, ≥ 3 A**, 2S input (6.0–8.4 V) | the Pi alone; 3 A is ample, and 5 A buys margin for USB peripherals |
+| **Transient response** | ⚠ **must hold ≥ 4.8 V under load steps** | below that the Pi reports under-voltage and the original problem is rebuilt with extra steps |
+| Input pigtail | JST XH 2.54, 22 AWG on `+`/`−` | taps the pack **downstream of the INA219**, so whole-robot current still totalizes |
+| Inline fuse | **2–3 A on the BEC input** | a GPIO 5 V feed bypasses the Pi's own input protection — the fuse is yours to provide |
+| Output | to the Pi's **GPIO pins 2 and 4** (5 V) | standard practice for HATs and UPS boards |
+| Common ground | **mandatory — every GPIO ground stays bonded** | the servo PWM lines reference the Pi's ground; lift those and the signals have nothing to swing against |
 
-⚠ **The HAT's servo 5 V and the Pi's 5 V are the same net on the board** (§3.8.1 is the
-evidence: the failure is that regulator's current limit). **This mod is therefore not a
-plug-in — it requires physically isolating the HAT's servo-rail feed** so the BEC drives
-the servo headers while the HAT continues to power the Pi. Confirm the board's rail
-topology with a meter before cutting anything; if the servo headers cannot be separated,
-Mod A becomes "power the servos from the BEC through a separate breakout" rather than a
-modification to the HAT.
+**Lift pins 2 and 4 only, and do it reversibly.** In order of preference:
 
-**Three measured reasons, accumulated independently:**
-1. **No limp is possible** on this HAT (2026-08-29) — a separate rail with its own switch
-   restores a true power-off safe state.
+| method | reversible? | note |
+|---|---|---|
+| **Pass-through / stacking header with positions 2 and 4 omitted** ★ | ✅ fully | neither board is modified; this is the one to use |
+| Kapton over the HAT's socket contacts for 2 and 4 | ⚠ mostly | crude; tape can shift and make intermittent contact — the worst failure kind |
+| Clipping the pins on the Pi's own header | ❌ never | destroys the Pi's header for any future HAT |
+
+⚠ **Meter before committing.** Confirm that pins 2 and 4 are in fact both driven by the HAT,
+and that the HAT is not back-feeding 3.3 V on pin 1 or 17. It almost certainly is not — the
+Pi generates 3.3 V — but *"almost certainly"* on a rail topology is exactly how the
+superseded version of this mod got written.
+
+**Three measured reasons this mod exists, accumulated independently:**
+1. **No limp is possible** on this HAT (2026-08-29) — a separate Pi rail means the servo
+   rail can have its own switch without taking the computer down with it.
 2. **Shared-rail brownout** (2026-08-29 pose recall).
 3. **§3.8.7** — the Pi dying with a healthy pack and unremarkable bus current, which no
    battery-side budgeting can prevent.
 
-⚠ **It does not remove the need for the software guard.** The BEC decouples the *servos*
-from the Pi; it does nothing about the Pi's own consumption or a sagging pack, and
-`get_throttled` remains the only instrument that sees the Pi's supply.
+**A consequence worth more than the reliability fix.** Today a brownout kills the Pi, and a
+fatal event has no gradient — it destroys the learner rather than teaching it. After this
+mod the same brownout stops being fatal: the servos sag, and the Pi is alive to notice.
+**It moves the failure from outside the Markov blanket to inside it**, from an event that
+ends the run to a sensation the brain can have. That is the argument for doing it before
+first brain-on, not after.
+
+⚠ **Expect the failure to change species, not to disappear.** Servo-rail sag will start
+resetting the **HAT MCU** instead of the Pi. The driver already handles that — `forget_timers()`
+re-programs every channel after an MCU reset, and `benchd` runs SunFounder's own recovery
+every 20th bus error — but that path has never been deliberately exercised, and it should be
+once the mod is in.
+
+⚠ **It does not remove the need for the software guard** (§3.8.9), and it *does* take away
+the guard's best signal — see §3.8.8.5, which is not optional if this mod is built.
+
+<details><summary>⚠ <b>SUPERSEDED 2026-09-13 — the original Mod A, and why it was worse</b></summary>
+
+The first specification moved the **servos** to a new ≥ 6 A BEC and left the Pi on the HAT.
+It carried this warning, which is still true and is what makes it the wrong choice:
+
+> ⚠ The HAT's servo 5 V and the Pi's 5 V are the same net on the board, so this mod is not
+> a plug-in — it requires physically isolating the HAT's servo-rail feed.
+
+Both versions fix the shared rail. The superseded one pays for it with a board modification
+on a shared net, migrates the *transient* load onto the unproven part, and leaves the Pi
+alone on a 3 A supply it does not need — while the servos, which do need it, are the ones
+moved. **The error was framing the problem as "the servos need their own supply" when it was
+always "the Pi needs to stop sharing one."** Same separation, opposite and much cheaper cut.
+
+</details>
 
 ---
 
@@ -1132,7 +1193,7 @@ A brownout is a *transient*. Local energy storage rides it out.
 | item | spec that matters | note |
 |---|---|---|
 | Electrolytic | **1000–2200 µF, ≥ 10 V, low-ESR**, 105 °C | ESR is the spec that matters — a high-ESR can cannot deliver current fast enough to be useful |
-| Placement | **as close to the Pi's 5 V input as the wiring allows** | the point is to be inside the inductance of the run; a cap at the HAT end helps much less |
+| Placement | **as close to the Pi's 5 V input as the wiring allows** | the point is to be inside the inductance of the run; a cap at the far end helps much less |
 | Optional | 0.1 µF ceramic in parallel | the electrolytic is poor at high frequency |
 
 ⚠ **Inrush is the hazard this mod introduces.** A discharged 2200 µF across the rail at
@@ -1145,6 +1206,10 @@ failure being traded for is not free. If it misbehaves at switch-on, an inrush l
 under *continuous* driving; no practical capacitor holds that up. Mod B is for the sharp
 edge, Mod A is for the sustained load, and they address different halves of the problem.
 
+⚠ **With Mod A built, this cap belongs on the NEW rail** — at the Pi's end of the BEC run,
+not at the HAT. It is then guarding the BEC's transient response, which is the spec most
+likely to disappoint on a cheap part.
+
 ---
 
 #### 3.8.8.3 What NOT to do
@@ -1152,6 +1217,13 @@ edge, Mod A is for the sustained load, and they address different halves of the 
 ⚠ **Do not power the Pi over USB-C while the HAT is connected.** The standing rule
 (§Power) is one supply path at a time. A second source backfeeding the HAT's regulator is
 a worse failure than the one being fixed.
+
+⚠ **Mod A does not repeal that rule — it changes what it points at.** Once pins 2 and 4 are
+lifted, USB-C no longer back-feeds the *HAT*; it collides with the **BEC** instead, and the
+two 5 V sources fight across the Pi's input. The rule stays "one source for the Pi", and the
+source is now the BEC. **Put that on a label on the robot**, not only in this document — the
+person most likely to plug in a USB-C cable for a quick bench session is the one who has
+stopped thinking about the power topology.
 
 ⚠ **Do not raise `PSU_MAX_CURRENT` hoping for headroom.** It tells the firmware what the
 supply can deliver — mainly to budget USB — and does not change brownout behaviour.
@@ -1204,6 +1276,57 @@ software guard (`ogma::hw::RailGuard`) still triggers on `get_throttled` alone. 
 `EXT5V_V` buys right now is the ability to say what the rail was doing *before* the next
 reset, rather than inferring it from a flag that only records that something already went
 wrong.
+
+
+---
+
+#### 3.8.8.5 Mod C — an INA219 on the SERVO rail ★ required if Mod A is built
+
+**Is it necessary? Yes — and it is a better instrument than the one it replaces.**
+
+**What the split costs us.** `get_throttled` only works as a servo-load warning *by accident*:
+the servos and the Pi share a rail, so servo trouble shows up in the Pi's own supply flags.
+Mod A breaks that coupling deliberately. Afterwards the servo rail can sag as far as it
+likes and **the Pi's flags stay clean** — the guard in §3.8.9 will correctly go quiet and
+stop being a load signal at all. Building Mod A without Mod C trades a fatal failure for an
+*invisible* one.
+
+**Where it goes: a voltage tap on the servo 5 V rail.**
+
+| | |
+|---|---|
+| what it measures | **the HAT's 5 V DC-DC output** — the rail that has never had an instrument on it |
+| where to tap | the `+` and `−` pins of any **spare servo header** |
+| wiring | ⚠ **tie `Vin+` and `Vin−` together** to the 5 V rail — bus-voltage mode, no series element, no insertion loss |
+| ⚠ VCC | **from the Pi's clean side**, so the instrument survives the event it is measuring |
+| address | `0x40` is taken by the pack sensor; **strap `A0` for `0x41`**. `Ina219(bus, r_shunt, addr)` already takes the address |
+| rate | single-shot 12-bit is **532 µs (~1.9 kHz)** — see the §3.10 table |
+
+⚠ **Do not put the shunt in series with the servo rail.** That rail is internal to the HAT
+and distributed to the headers; inserting a series element means cutting into it, which is
+exactly the board modification Mod A was chosen to avoid. **Voltage is the missing signal
+anyway** — per-branch current is largely recoverable from the existing INA219, since the
+Pi's draw is near-constant and total − Pi ≈ servos.
+
+⚠ **Do NOT use the HAT's ADC for this.** Two independent reasons, the second fatal:
+1. `A0`–`A3` are committed to the FSRs (§5), and `A4` is the pack divider.
+2. **The ADC lives on the HAT MCU at `0x14`, which is powered by the servo rail.** An
+   instrument that browns out with the thing it is measuring reports nothing at the only
+   moment it matters. **This is the same error as the present INA219 sitting on the battery
+   side of the regulator that fails** (§3.8.7) — made once already, and the whole reason
+   this section exists.
+
+**Why it is an upgrade, not a patch.** Everything that has ever watched a failing rail here
+has been too slow or on the wrong side of it: `vbat` and the pack INA219 are upstream of the
+DC-DC, `get_throttled` is a sticky bit rather than a volt, and `EXT5V_V` polls at 100 ms
+(§3.8.9.1). At ~1.9 kHz on the rail that actually sags, **this would be the first instrument
+on the robot capable of resolving the 50 ms dip** that §3.5 measured and nothing has since
+been able to see directly.
+
+⚠ **Admit it instrument-only first.** Publish it, watch it under load, prove it separates
+the states it claims to — *then* let something act on it. Every sensor here is under that
+rule, and this one arrives with a strong prior about what it will show, which is precisely
+when the rule earns its keep.
 
 ### ★★★ 3.8.9 THE SOFTWARE GUARD — ✅ BUILT AND DRILLED 2026-09-13
 
@@ -1327,8 +1450,9 @@ should not be quoted as if it did.
 **Deferred deliberately, with the conditions to revisit.** The 2026-08-29 collapse is
 reproducible on demand (X → rescue, twelve channels at 2000 µs/s), so the experiment exists
 — it was not run because it ends in the hard reset it is testing, risking the SD card, and
-the guard is worth shipping without it. **Revisit when** any of: the servo BEC (§3.8.8.1)
-is built, so a brownout no longer takes the Pi with it; a spare SD card or a read-only
+the guard is worth shipping without it. **Revisit when** any of: Mod A (§3.8.8.1)
+is built, so a brownout no longer takes the Pi with it — note that it also makes this test
+*safe to run*, which is the cheapest way it could be answered; a spare SD card or a read-only
 rootfs makes a reset cheap; or a bench supply can drive the 5 V rail down directly with no
 servos involved, which answers (c) without risking this robot at all — the cleanest form of
 the test, and the one to prefer if the hardware turns up.
