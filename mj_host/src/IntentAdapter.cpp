@@ -184,6 +184,10 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         map_qe_ = rt->quant_error; map_expected_ = rt->expected_error; map_trans_ = rt->transition_surp;
         map_pruned_ids_ = rt->just_pruned ? rt->pruned_ids : std::vector<int>{};
     }
+    thing_seen_ = false;
+    if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.cognitive.thing"))) {
+        if (rt->tick_id == tick_id_) { thing_seen_ = true; thing_winner_ = rt->winner_id; thing_tle_ = rt->tle; thing_nodes_ = rt->node_count; }
+    }
     // R27: a loop's bearing becomes the heading reference (cx = +right is a clockwise turn, i.e.
     // a negative yaw in the odometry's right-handed frame).  Absent loop -> nothing happens.
     // R28: with an arbiter in the graph, the WINNING loop's bearing sets the reference (gains are
@@ -334,6 +338,30 @@ std::vector<float> IntentAdapter::cloud_profile() const {
 std::vector<float> IntentAdapter::cloud_view() const {
     auto* c = find_cloud(*instance_);
     return c ? c->view() : std::vector<float>{};
+}
+bool IntentAdapter::cloud_things_on() const {
+    auto* c = find_cloud(*instance_);
+    if (!c) return false;
+    const auto p = c->current_params();
+    for (const char* k : {"things_topic", "thing_bearing_topic"}) {
+        auto it = p.find(k);
+        if (it == p.end()) continue;
+        if (auto sv = std::get_if<std::string>(&it->second)) if (!sv->empty()) return true;
+    }
+    return false;
+}
+std::vector<ogma::CloudMap::Thing> IntentAdapter::cloud_things() const {
+    auto* c = find_cloud(*instance_);
+    return c ? c->things() : std::vector<ogma::CloudMap::Thing>{};
+}
+int IntentAdapter::cloud_attended() const { auto* c = find_cloud(*instance_); return c ? c->attended() : -1; }
+std::array<float, 3> IntentAdapter::cloud_thing_bearing() const {
+    auto* c = find_cloud(*instance_);
+    return c ? c->thing_bearing() : std::array<float, 3>{0.0f, 0.0f, 0.0f};
+}
+std::vector<ogma::CloudMap::Thing> IntentAdapter::cloud_filed_things() const {
+    auto* c = find_cloud(*instance_);
+    return c ? c->last_filed_things() : std::vector<ogma::CloudMap::Thing>{};
 }
 double IntentAdapter::cloud_voxel_m() const {
     auto* c = find_cloud(*instance_);

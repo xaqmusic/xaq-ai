@@ -40,6 +40,8 @@ std::vector<TopicSpec> CloudMap::output_topics() const {
     std::vector<TopicSpec> t;
     if (!output_topic_.empty()) t.emplace_back(output_topic_, std::type_index(typeid(ProprioToken)));
     if (!change_topic_.empty()) t.emplace_back(change_topic_, std::type_index(typeid(ProprioToken)));
+    if (!things_topic_.empty()) t.emplace_back(things_topic_, std::type_index(typeid(ProprioToken)));
+    if (!thing_bearing_topic_.empty()) t.emplace_back(thing_bearing_topic_, std::type_index(typeid(ProprioToken)));
     return t;
 }
 
@@ -106,6 +108,49 @@ ParamSchema CloudMap::params_schema() const {
         {"cache_size", ParamMutability::HotMutable,
          "How many filed clouds to keep, evicting least-recently-filed.  0 = no cache.",
          ParamValue{int64_t{8}}, ParamValue{int64_t{0}}, ParamValue{int64_t{256}}},
+        {"things_topic", ParamMutability::ConstructionOnly,
+         "Optional ProprioToken of kThing values describing the ATTENDED THING -- the nearest cluster of the "
+         "open cloud whose stack tops out under small_top (the stack rule, design doc §17.31, run in the "
+         "module): [top / break_hi, footprint / small_ext, aspect, columns / 25, hits per column / 20, "
+         "chain / 5, range / max_range, lowest height / break_hi].  World-sized and without a bearing, so an "
+         "EPM on it earns a vocabulary of THINGS rather than of poses (`microduck_things_phase.md` T1).  "
+         "Published only while a thing is attended.  Empty = not computed.",
+         ParamValue{std::string("")}},
+        {"thing_bearing_topic", ParamMutability::ConstructionOnly,
+         "Optional ProprioToken [vx = +right, vy = +forward, proximity] to the attended thing in the BODY "
+         "frame this tick (the cloud's frame turned back by the yaw drift since the anchor) -- the shape "
+         "VisualBearing emits, so VisualHomingNav consumes it unchanged.  proximity = 1 - range / "
+         "things_range; all 0 when nothing small is in reach or no cloud is open.  Empty = not published.",
+         ParamValue{std::string("")}},
+        {"small_top", ParamMutability::HotMutable,
+         "A cluster whose stack chain tops out below this (metres) is a small thing; one that keeps rising is "
+         "an obstacle.  0.16 measured at precision 0.53 out of sample (0.92 with the sweep) at full recall.",
+         ParamValue{0.16}, ParamValue{0.02}, ParamValue{1.0}},
+        {"small_ext", ParamMutability::HotMutable,
+         "...and whose footprint spans at most this (metres).", ParamValue{0.20}, ParamValue{0.04}, ParamValue{2.0}},
+        {"small_ext_min", ParamMutability::HotMutable,
+         "...and at least this (metres; 0 = no floor).  A one-voxel footprint (4 cm) is a fragment, not a thing: "
+         "on R57 (n = 6) the attended cluster was a real object on 73 % of ticks with no floor, 86 % at two "
+         "columns (0.08) and 93 % at three (0.12), the losses being wall bases and chair legs seen as single "
+         "columns.  A real ball is one column early in a sweep too, so the floor delays attention until the "
+         "thing is sampled, which is the point.", ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"things_shape", ParamMutability::ConstructionOnly,
+         "Publish the SHAPE-ONLY descriptor (kThingShape = 5 dims: top, footprint, aspect, lowest height, chain) "
+         "instead of the full one (kThing = 8, adding columns, hits per column and range).  See the header: "
+         "with the sampling dims in, the vocabulary followed the sweep's fill-in state rather than the thing.",
+         ParamValue{false}},
+        {"gap_min", ParamMutability::HotMutable,
+         "The stack chain's gap floor (metres): two heights further apart than max(gap_min, gap_k x range) are "
+         "not one stack.", ParamValue{0.10}, ParamValue{0.0}, ParamValue{1.0}},
+        {"gap_k", ParamMutability::HotMutable,
+         "The gap's growth per metre of range: the sensor's rows are 5.6 deg apart, so the vertical spacing of "
+         "returns up a face grows with distance.  0 = a fixed gap.", ParamValue{0.12}, ParamValue{0.0}, ParamValue{1.0}},
+        {"things_range", ParamMutability::HotMutable,
+         "A small thing is attended only within this range (metres).  0 = max_range.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{10.0}},
+        {"things_every", ParamMutability::HotMutable,
+         "Recompute the clusters every this-many ticks while the cloud is open (the sensor casts every 4).",
+         ParamValue{int64_t{4}}, ParamValue{int64_t{1}}, ParamValue{int64_t{1000}}},
         {"new_window_ticks", ParamMutability::HotMutable,
          "The window new_fraction asks about: of the voxels touched in the last this-many ticks, "
          "how many were first seen inside it.  A one-second window detected a rolling ball 45 % of "
@@ -133,6 +178,16 @@ ParamMap CloudMap::current_params() const {
     m["move_ticks"] = int64_t{move_ticks_};
     m["cache_size"] = int64_t{cache_size_};
     m["new_window_ticks"] = int64_t{new_window_};
+    m["things_topic"] = ParamValue{things_topic_};
+    m["thing_bearing_topic"] = ParamValue{thing_bearing_topic_};
+    m["small_top"] = small_top_;
+    m["small_ext"] = small_ext_;
+    m["small_ext_min"] = small_ext_min_;
+    m["things_shape"] = things_shape_;
+    m["gap_min"] = gap_min_;
+    m["gap_k"] = gap_k_;
+    m["things_range"] = things_range_;
+    m["things_every"] = int64_t{things_every_};
     return m;
 }
 
@@ -151,6 +206,13 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "move_ticks") move_ticks_ = int(get_d(one, "move_ticks", move_ticks_));
     else if (k == "cache_size") cache_size_ = int(get_d(one, "cache_size", cache_size_));
     else if (k == "new_window_ticks") new_window_ = int(get_d(one, "new_window_ticks", new_window_));
+    else if (k == "small_top")  small_top_ = get_d(one, "small_top", small_top_);
+    else if (k == "small_ext")  small_ext_ = get_d(one, "small_ext", small_ext_);
+    else if (k == "small_ext_min") small_ext_min_ = get_d(one, "small_ext_min", small_ext_min_);
+    else if (k == "gap_min")    gap_min_ = get_d(one, "gap_min", gap_min_);
+    else if (k == "gap_k")      gap_k_ = get_d(one, "gap_k", gap_k_);
+    else if (k == "things_range") things_range_ = get_d(one, "things_range", things_range_);
+    else if (k == "things_every") things_every_ = std::max(1, int(get_d(one, "things_every", things_every_)));
 }
 
 void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
@@ -171,6 +233,17 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     move_ticks_ = int(get_d(params, "move_ticks", move_ticks_));
     cache_size_ = int(get_d(params, "cache_size", cache_size_));
     new_window_ = int(get_d(params, "new_window_ticks", new_window_));
+    things_topic_ = get_s(params, "things_topic");
+    thing_bearing_topic_ = get_s(params, "thing_bearing_topic");
+    small_top_  = get_d(params, "small_top", small_top_);
+    small_ext_  = get_d(params, "small_ext", small_ext_);
+    small_ext_min_ = get_d(params, "small_ext_min", small_ext_min_);
+    things_shape_ = get_d(params, "things_shape", 0.0) > 0.5;
+    gap_min_    = get_d(params, "gap_min", gap_min_);
+    gap_k_      = get_d(params, "gap_k", gap_k_);
+    things_range_ = get_d(params, "things_range", things_range_);
+    things_every_ = std::max(1, int(get_d(params, "things_every", things_every_)));
+    things_on_ = !things_topic_.empty() || !thing_bearing_topic_.empty();
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
@@ -237,6 +310,10 @@ void CloudMap::file_cloud(uint64_t tick) {
         filed_vox_.push_back(int32_t(std::lround(1000.0 * double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits)))));
     }
     filed_anchor_yaw_ = anchor_yaw_;
+    filed_things_ = things_on_ ? cluster_things() : std::vector<Thing>{};
+    things_.clear();
+    attended_ = -1;
+    bearing_ = {0.0f, 0.0f, 0.0f};
     // THE REVISIT JUDGEMENT, made once, on a finished cloud, against the place it is filed under.
     // Computed mid-accumulation it keyed onto whichever node happened to be winning first, which is
     // a different place's cloud (measured 2026-09-13: 0.86 either way, i.e. two frames that never
@@ -296,8 +373,8 @@ void CloudMap::tick(uint64_t tick_id) {
 
     if (still) { ++still_run_; move_run_ = 0; } else { ++move_run_; still_run_ = 0; }
     if (!open_ && still_run_ >= still_ticks_) open_cloud(yaw, ox, oy, tick_id);
-    if (open_ && move_run_ >= move_ticks_) { file_cloud(tick_id); return; }
-    if (!open_) return;
+    if (open_ && move_run_ >= move_ticks_) { file_cloud(tick_id); publish_bearing(tick_id); return; }
+    if (!open_) { publish_bearing(tick_id); return; }
     // a twitch does not end the cloud, but nor does it contribute: the de-rotation's premise is a
     // still trunk, so a moving tick is simply skipped and the sweep resumes when the body settles.
     if (still) add_cast(pt->values, yaw, trunk_z, tick_id);
@@ -321,6 +398,21 @@ void CloudMap::tick(uint64_t tick_id) {
     }
     // The revisit judgement is made at FILE time, on a finished cloud — see file_cloud.
 
+    if (things_on_) {
+        if (tick_id % uint64_t(things_every_) == 0) update_things(yaw);
+        else if (attended_ >= 0) update_bearing(yaw);   // the body's yaw drifts between recomputes
+        if (!things_topic_.empty() && attended_ >= 0) {
+            auto out = std::make_shared<ProprioToken>();
+            out->tick_id = tick_id;
+            out->producer_id = std::string(id());
+            out->sensor = "thing";
+            const auto d = thing_descriptor(things_[size_t(attended_)]);
+            out->values = Eigen::VectorXf::Map(d.data(), long(d.size()));
+            bus_->publish(things_topic_, out);
+        }
+        publish_bearing(tick_id);
+    }
+
     if (!output_topic_.empty()) {
         auto out = std::make_shared<ProprioToken>();
         out->tick_id = tick_id;
@@ -340,6 +432,138 @@ void CloudMap::tick(uint64_t tick_id) {
         out->values[1] = float(revisit_change_);
         bus_->publish(change_topic_, out);
     }
+}
+
+// The stack rule (design doc §17.31), as cloud_objects.py scores it offline, on the live voxels.
+std::vector<CloudMap::Thing> CloudMap::cluster_things() const {
+    std::vector<Thing> out;
+    if (vox_.empty()) return out;
+    struct Col { std::vector<std::pair<double, uint32_t>> hs; bool seed = false; };
+    std::unordered_map<int64_t, Col> cols;   // keyed by (ix, iy, 0)
+    for (auto const& [k, vv] : vox_) {
+        int ix, iy, iz; unkey(k, ix, iy, iz);
+        const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
+        if (h < break_lo_) continue;
+        auto& c = cols[key_of(ix, iy, 0)];
+        c.hs.emplace_back(h, vv.hits);
+        if (h < break_hi_) c.seed = true;
+    }
+    std::unordered_map<int64_t, bool> seen;
+    for (auto const& [k0, c0] : cols) {
+        if (!c0.seed || seen.count(k0)) continue;
+        std::vector<int64_t> stack{k0}, comp;
+        seen[k0] = true;
+        while (!stack.empty()) {
+            const int64_t a = stack.back(); stack.pop_back();
+            comp.push_back(a);
+            int ax, ay, az; unkey(a, ax, ay, az);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dy = -1; dy <= 1; ++dy) {
+                    if (!dx && !dy) continue;
+                    const int64_t b = key_of(ax + dx, ay + dy, 0);
+                    auto it = cols.find(b);
+                    if (it == cols.end() || !it->second.seed || seen.count(b)) continue;
+                    seen[b] = true;
+                    stack.push_back(b);
+                }
+        }
+        Thing t;
+        double xmin = 1e9, xmax = -1e9, ymin = 1e9, ymax = -1e9, sx = 0.0, sy = 0.0;
+        t.lo = 1e9;
+        for (int64_t k : comp) {
+            int x, y, z; unkey(k, x, y, z);
+            const double px = (double(x) + 0.5) * voxel_m_, py = (double(y) + 0.5) * voxel_m_;
+            xmin = std::min(xmin, px); xmax = std::max(xmax, px);
+            ymin = std::min(ymin, py); ymax = std::max(ymax, py);
+            sx += px; sy += py;
+            for (auto const& [h, n] : cols[k].hs) {
+                t.hits += double(n);
+                if (h >= break_lo_ && h < break_hi_) t.lo = std::min(t.lo, h);
+            }
+        }
+        t.ncols = int(comp.size());
+        t.cx = sx / double(comp.size()); t.cy = sy / double(comp.size());
+        t.rng = std::hypot(t.cx, t.cy);
+        const double ex = xmax - xmin + voxel_m_, ey = ymax - ymin + voxel_m_;
+        t.ext = std::max(ex, ey); t.ext_min = std::min(ex, ey);
+        // the chain: every height over the DILATED footprint, climbed from lo while each step is within the gap
+        const double gap = std::max(gap_min_, gap_k_ * t.rng);
+        std::vector<double> heights;
+        std::unordered_map<int64_t, bool> dil;
+        for (int64_t k : comp) {
+            int x, y, z; unkey(k, x, y, z);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const int64_t b = key_of(x + dx, y + dy, 0);
+                    if (dil.count(b)) continue;
+                    dil[b] = true;
+                    auto it = cols.find(b);
+                    if (it == cols.end()) continue;
+                    for (auto const& [h, n] : it->second.hs) { (void)n; heights.push_back(h); }
+                }
+        }
+        std::sort(heights.begin(), heights.end());
+        t.top = t.lo;
+        for (double h : heights) {
+            if (h < t.lo) continue;
+            if (h > t.top + gap) break;
+            t.top = std::max(t.top, h);
+        }
+        t.chain = int(std::lround((t.top - t.lo) / voxel_m_)) + 1;
+        t.small = t.top < small_top_ && t.ext <= small_ext_ && t.ext >= small_ext_min_ - 1e-9;
+        out.push_back(t);
+    }
+    std::sort(out.begin(), out.end(), [](const Thing& a, const Thing& b) { return a.rng < b.rng; });
+    return out;
+}
+
+std::vector<float> CloudMap::thing_descriptor(const Thing& t) const {
+    const auto u = [](double v) { return float(std::clamp(v, 0.0, 1.0)); };
+    if (things_shape_)
+        return {u(t.top / break_hi_), u(t.ext / small_ext_), u(t.ext > 1e-9 ? t.ext_min / t.ext : 0.0),
+                u(t.lo / break_hi_), u(double(t.chain) / 5.0)};
+    return {u(t.top / break_hi_), u(t.ext / small_ext_), u(t.ext > 1e-9 ? t.ext_min / t.ext : 0.0),
+            u(double(t.ncols) / 25.0), u(t.hits / double(std::max(1, t.ncols)) / 20.0),
+            u(double(t.chain) / 5.0), u(t.rng / max_range_), u(t.lo / break_hi_)};
+}
+
+void CloudMap::update_bearing(double yaw) {
+    bearing_ = {0.0f, 0.0f, 0.0f};
+    if (attended_ < 0 || attended_ >= int(things_.size())) return;
+    const Thing& t = things_[size_t(attended_)];
+    if (t.rng < 1e-6) return;
+    // the cloud's frame is the anchor's; the body has since yawed by d, so the thing it sees is turned by -d
+    double d = yaw - anchor_yaw_;
+    while (d > kPi) d -= 2.0 * kPi;
+    while (d < -kPi) d += 2.0 * kPi;
+    const double c = std::cos(-d), s = std::sin(-d);
+    const double bx = c * t.cx - s * t.cy, by = s * t.cx + c * t.cy;   // body frame: x forward, y left
+    const double reach = things_range_ > 0.0 ? things_range_ : max_range_;
+    bearing_[0] = float(-by / t.rng);                                   // +right
+    bearing_[1] = float(bx / t.rng);                                    // +forward
+    bearing_[2] = float(std::clamp(1.0 - t.rng / reach, 0.0, 1.0));
+}
+
+// Every tick the topic exists, open cloud or not: while the body walks the cloud is closed and nothing is
+// attended, and a consumer must read that as proximity 0 rather than the last stop's stale bearing.
+void CloudMap::publish_bearing(uint64_t tick_id) {
+    if (thing_bearing_topic_.empty()) return;
+    auto out = std::make_shared<ProprioToken>();
+    out->tick_id = tick_id;
+    out->producer_id = std::string(id());
+    out->sensor = "thing_bearing";
+    out->values = Eigen::VectorXf(3);
+    out->values[0] = bearing_[0]; out->values[1] = bearing_[1]; out->values[2] = bearing_[2];
+    bus_->publish(thing_bearing_topic_, out);
+}
+
+void CloudMap::update_things(double yaw) {
+    things_ = cluster_things();
+    attended_ = -1;
+    const double reach = things_range_ > 0.0 ? things_range_ : max_range_;
+    for (size_t i = 0; i < things_.size(); ++i)                        // sorted by range: the first small one is the nearest
+        if (things_[i].small && things_[i].rng <= reach) { attended_ = int(i); break; }
+    update_bearing(yaw);
 }
 
 std::vector<float> CloudMap::view() const {
@@ -407,6 +631,9 @@ nlohmann::json CloudMap::diag_lite() const {
         {"newfrac", new_frac_}, {"revisit", revisit_change_},
         {"cached", int(cache_.size())}, {"filed", filed_count_}, {"place", last_key_},
         {"overlap", revisit_overlap_}, {"revisit_dist", revisit_dist_},
+        {"things", int(things_.size())},
+        {"small", int(std::count_if(things_.begin(), things_.end(), [](const Thing& t) { return t.small; }))},
+        {"attended", attended_ >= 0 && attended_ < int(things_.size()) ? things_[size_t(attended_)].rng : -1.0},
     };
 }
 

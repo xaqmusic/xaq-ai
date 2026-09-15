@@ -20,6 +20,13 @@
 
 ## ▶ Resume here
 
+**State on 2026-09-15, later: the things phase is open. Start at [`microduck_things_phase.md`](microduck_things_phase.md).**
+The operator's direction: map-making is not the interesting thing; the duck should seek what is smaller than
+itself, interact with it, and be surprised when it answers. The plan reads the voxels at three timescales and
+builds the interaction cycle first: things as a `CloudMap` output and a thing EPM (T1, O45), the seek loop
+racing play (T2, O46), the gaze following the thing with an approach cloud and touch (T3, O47), the stop
+starting on error (T4, O43), then change per place (T5, O48) and within a stop (T6, O49).
+
 **State on 2026-09-15: the cloud phase is closed. Start at [`microduck_cloud_phase.md`](microduck_cloud_phase.md).**
 The duck now glances. At each stop the head sweeps at a steady 0.6 rad/s, the ToF's returns accumulate into
 a voxel cloud (`ogma::CloudMap`), the place map learns from that cloud's view, and the stop ends when the

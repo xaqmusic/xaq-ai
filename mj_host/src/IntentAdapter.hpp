@@ -16,6 +16,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include "InspectorSurface.hpp"
+#include "ogma/modules/CloudMap.hpp"   // CloudMap::Thing, the things phase (T1)
 
 namespace ogma { class OgmaInstance; }
 
@@ -91,6 +92,10 @@ public:
     // publishing (the play loop's node positions need a live winner).  Through hot-mutable params.
     void set_map_learning(bool on);
     int    map_winner() const { return map_winner_; }
+    int    thing_winner_ = -1;   // the thing EPM's token this tick (things phase T1)
+    double thing_tle_ = 0.0;
+    int    thing_nodes_ = 0;
+    bool   thing_seen_ = false;
     int    map_nodes() const;
     // Wander (phase 2b, R25): when the map has been unsurprised — its surprise below a
     // fraction of its own long average — for bored_s seconds, the heading the brain keeps
@@ -141,6 +146,19 @@ public:
     double cloud_voxel_m()   const;
     std::vector<float> cloud_profile() const;   // the break profile the module publishes, this tick
     std::vector<float> cloud_view() const;      // the cloud as a gaze-invariant view (--map-view cloud), this tick
+    // THINGS (the things phase, T1): the module's clusters of the open cloud, which is attended, its body-frame
+    // bearing, and the clusters of the cloud last filed.  Present only when the graph gives CloudMap a things
+    // topic; the host logs them and reads nothing back into the body.
+    bool cloud_things_on() const;
+    std::vector<ogma::CloudMap::Thing> cloud_things() const;
+    int  cloud_attended() const;
+    std::array<float, 3> cloud_thing_bearing() const;
+    std::vector<ogma::CloudMap::Thing> cloud_filed_things() const;
+    // The thing EPM's token (reality.cognitive.thing), if a graph has one: winner, tle, node count; winner -1 = none.
+    int    thing_winner() const { return thing_winner_; }
+    double thing_tle()    const { return thing_tle_; }
+    int    thing_nodes()  const { return thing_nodes_; }
+    bool   thing_seen()   const { return thing_seen_; }
     std::vector<std::string> diagnostics() const;
     uint64_t ticks() const { return tick_id_; }
 

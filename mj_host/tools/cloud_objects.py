@@ -11,6 +11,12 @@ compact stream drops the cloud records, qpos and joint positions.
   cloud_objects.py arms NAME=GLOB [NAME=GLOB ...]
       per arm and seed: the head's motion through the stops, cloud size, the objects within 2 m found, balls found,
       and the rule's precision -- the R52 gaze-sweep A/B
+  cloud_objects.py things LOG...
+      the things phase's T1 (microduck_things_phase.md): the MODULE's stack rule against this file's, cluster by
+      cluster on the same filed clouds (faithfulness); what the ATTENDED thing really was, per tick ("thg", labelled
+      with the anchor the next "cloudv" carries); and the thing EPM's nodes by object kind ("tepm"): purity, and how
+      many poses each real object was attended from under how many winners (the pose-invariance reading O40 could
+      not make)
 
 The reduction runs in the cloud's own body-anchored frame, which is what a brain could compute: break-band voxels
 (mean point height 2-20 cm) grouped into 8-connected columns; each cluster's STACK TOP is the contiguous chain of
@@ -327,6 +333,132 @@ def cmd_arms(specs: list[str], gapk: float) -> None:
               f"{ms([100 * r['open_ticks'] / max(1, r['stop_ticks']) for r in per])} % of stop ticks")
 
 
+# ------------------------------------------------------------------------------------------------ things
+
+def cmd_things(paths: list[str], gapk: float) -> None:
+    half, lay, movable, furniture = load_scene()
+    faithful = dict(clouds=0, n_mod=0, n_py=0, matched=0, small_agree=0, small_mod=0, small_py=0, top_dev=[], ext_dev=[])
+    att_rows = []                       # one per attended tick, labelled
+    tick_rows = dict(ticks=0, attended=0, small_seen=0)
+    for p in paths:
+        pending = []                    # "thg" ticks waiting for their cloud's anchor
+        for line in open(p):
+            if not line.startswith('{"t"'):
+                continue
+            if '"thg"' not in line and '"cloudv"' not in line:
+                continue
+            rec = json.loads(line)
+            th = rec.get("thg")
+            if th is not None:
+                tick_rows["ticks"] += 1
+                tick_rows["small_seen"] += th[1] > 0
+                if th[2] >= 0:
+                    tick_rows["attended"] += 1
+                    pending.append((rec["t"], th, rec.get("tepm")))
+            c = rec.get("cloudv")
+            if not c:
+                continue
+            objs = objects_at(rec, lay, movable)
+            names = [o["name"] for o in movable]
+            for t, th, tepm in pending:
+                wx, wy = to_world(c["anchor"], th[3], th[4])
+                lab = label(wx, wy, objs, half, furniture)
+                # which object, by name, for the pose count
+                d, which = min((math.hypot(wx - ox, wy - oy) - e, nm) for (k, ox, oy, e), nm in zip(objs, names))
+                att_rows.append(dict(run=p, t=t, lab=lab, obj=which if d < 0.08 else None, rng=th[5], ext=th[6], top=th[7],
+                                     ncols=th[8], hits=th[9], chain=th[10], winner=tepm[0] if tepm else None,
+                                     tle=tepm[1] if tepm else None, anchor=tuple(round(a, 2) for a in c["anchor"])))
+            pending = []
+            # FAITHFULNESS: the module's clusters of this filed cloud against this file's rule on the same voxels
+            mod = rec.get("things")
+            if mod is None or not c.get("vox"):
+                continue
+            V, h = mean_heights(c)
+            py = clusters(V, h, c["voxel_m"], gapk)
+            faithful["clouds"] += 1
+            faithful["n_mod"] += len(mod)
+            faithful["n_py"] += len(py)
+            faithful["small_mod"] += sum(m[8] for m in mod)
+            faithful["small_py"] += sum(is_small(q) for q in py)
+            used = set()
+            for m in mod:
+                best = min(((math.hypot(m[0] - q["cx"], m[1] - q["cy"]), i) for i, q in enumerate(py) if i not in used),
+                           default=(9.0, -1))
+                if best[0] < 0.03 and best[1] >= 0:
+                    used.add(best[1])
+                    q = py[best[1]]
+                    faithful["matched"] += 1
+                    faithful["small_agree"] += bool(m[8]) == is_small(q)
+                    faithful["top_dev"].append(abs(m[4] - q["top"]))
+                    faithful["ext_dev"].append(abs(m[3] - q["ext"]))
+    f = faithful
+    print(f"FAITHFULNESS over {f['clouds']} filed clouds: module clusters {f['n_mod']}, offline rule {f['n_py']}, matched by "
+          f"centroid (< 3 cm) {f['matched']}; SMALL verdict agrees on {f['small_agree']}/{f['matched']} "
+          f"(module small {f['small_mod']}, offline small {f['small_py']}); |top| dev p50/p90 "
+          f"{100 * np.percentile(f['top_dev'], 50) if f['top_dev'] else 0:.1f}/{100 * np.percentile(f['top_dev'], 90) if f['top_dev'] else 0:.1f} cm, "
+          f"|footprint| dev p90 {100 * np.percentile(f['ext_dev'], 90) if f['ext_dev'] else 0:.1f} cm")
+    tr = tick_rows
+    print(f"\nATTENTION: {tr['ticks']} thing ticks; a small cluster in view on {tr['small_seen']} ({100 * tr['small_seen'] / max(1, tr['ticks']):.0f} %); "
+          f"attended on {tr['attended']}; labelled {len(att_rows)}")
+    real = lambda r: r["lab"] in ("ball", "block")
+    if att_rows:
+        n_real = sum(real(r) for r in att_rows)
+        print(f"  the attended thing was a real object on {n_real}/{len(att_rows)} ticks (precision {n_real / len(att_rows):.2f}); by label:",
+              dict(collections.Counter(r["lab"] for r in att_rows).most_common()))
+        print(f"  {'label':>8} {'n':>5} | range p10/50/90 m | columns p50 | hits/col p50 | top p50 cm | chain p50")
+        for lab, n in collections.Counter(r["lab"] for r in att_rows).most_common():
+            rs = [r for r in att_rows if r["lab"] == lab]
+            rng = "/".join(f"{np.percentile([x['rng'] for x in rs], q):.2f}" for q in (10, 50, 90))
+            print(f"  {lab:>8} {n:5d} | {rng:>17} | {np.median([x['ncols'] for x in rs]):11.0f} | "
+                  f"{np.median([x['hits'] / max(1, x['ncols']) for x in rs]):12.1f} | {100 * np.median([x['top'] for x in rs]):10.0f} | "
+                  f"{np.median([x['chain'] for x in rs]):9.0f}")
+        # THE THING EPM: node purity by label, and poses per object under how many winners
+        wr = [r for r in att_rows if r["winner"] is not None and r["winner"] >= 0]
+        if wr:
+            # Node ids are PER RUN (each seed grows its own EPM), so purity is scored per run and averaged;
+            # pooling ids across runs mixed unrelated nodes and read 0.56 where the runs themselves read 0.87.
+            per = []
+            for run in sorted({r["run"] for r in wr}):
+                rs = [r for r in wr if r["run"] == run]
+                by_node = collections.defaultdict(collections.Counter)
+                for r in rs:
+                    by_node[r["winner"]][r["lab"]] += 1
+                pure = sum(max(c.values()) for c in by_node.values()) / len(rs)
+                chance = max(collections.Counter(r["lab"] for r in rs).values()) / len(rs)
+                per.append((run, len(by_node), len(rs), pure, chance))
+            print(f"\nTHING EPM, per run (nodes seen, attended ticks, majority-label purity, chance = largest label's share):")
+            for run, nn, n, pure, chance in per:
+                print(f"  {os.path.basename(run):>28}: {nn:3d} nodes {n:5d} ticks  purity {pure:.2f}  chance {chance:.2f}  (+{pure - chance:.2f})")
+            print(f"  mean over runs: nodes {statistics.mean(x[1] for x in per):.1f}, purity {statistics.mean(x[3] for x in per):.2f} "
+                  f"± {statistics.stdev(x[3] for x in per) if len(per) > 1 else 0:.2f}, chance {statistics.mean(x[4] for x in per):.2f}, "
+                  f"purity - chance {statistics.mean(x[3] - x[4] for x in per):+.2f} ± {statistics.stdev(x[3] - x[4] for x in per) if len(per) > 1 else 0:.2f}")
+            run0 = per[0][0]
+            by_node = collections.defaultdict(collections.Counter)
+            for r in wr:
+                if r["run"] == run0:
+                    by_node[r["winner"]][r["lab"]] += 1
+            print(f"  the first run's nodes:")
+            for node, cnt in sorted(by_node.items(), key=lambda kv: -sum(kv[1].values()))[:8]:
+                print(f"    node {node:3d}: {sum(cnt.values()):5d} ticks  {dict(cnt.most_common(3))}")
+            by_obj = collections.defaultdict(lambda: dict(poses=set(), winners=collections.Counter()))
+            for r in wr:
+                if r["obj"]:
+                    by_obj[(r["run"], r["obj"])]["poses"].add(r["anchor"])
+                    by_obj[(r["run"], r["obj"])]["winners"][r["winner"]] += 1
+            if by_obj:
+                shares = collections.defaultdict(list)
+                for (run, nm), d in by_obj.items():
+                    shares[nm].append(max(d["winners"].values()) / sum(d["winners"].values()))
+                print("  per real object, over runs: poses attended from (mean), modal winner's share (mean +- sd) -- pose invariance")
+                for nm in sorted(shares):
+                    poses = [len(d["poses"]) for (run, n2), d in by_obj.items() if n2 == nm]
+                    print(f"    {nm:>10}: {statistics.mean(poses):4.1f} poses, modal share {statistics.mean(shares[nm]):.2f} "
+                          f"± {statistics.stdev(shares[nm]) if len(shares[nm]) > 1 else 0:.2f} over {len(shares[nm])} runs")
+            tles = [r["tle"] for r in wr if r["tle"] is not None]
+            if tles:
+                print(f"  TLE at the attended thing p10/50/90 {np.percentile(tles, 10):.3f}/{np.percentile(tles, 50):.3f}/{np.percentile(tles, 90):.3f}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -336,9 +468,14 @@ def main() -> None:
     a = sub.add_parser("arms", help="per-arm cloud and object scores, NAME=GLOB per arm")
     a.add_argument("arms", nargs="+")
     a.add_argument("--gapk", type=float, default=0.12)
+    th = sub.add_parser("things", help="the module's things against the manifest and the offline rule (things phase T1)")
+    th.add_argument("logs", nargs="+")
+    th.add_argument("--gapk", type=float, default=0.12)
     args = ap.parse_args()
     if args.cmd == "rules":
         cmd_rules(args.logs, args.gapk)
+    elif args.cmd == "things":
+        cmd_things(args.logs, args.gapk)
     else:
         cmd_arms(args.arms, args.gapk)
 

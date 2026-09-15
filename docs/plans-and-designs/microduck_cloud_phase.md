@@ -154,7 +154,7 @@ Check these before trusting a result.
 
 ## 8. Open for the next phase
 
-Ranked by what the operator has pointed at.
+Ranked by what the operator has pointed at. **Taken up by [`microduck_things_phase.md`](microduck_things_phase.md) (2026-09-15).**
 
 1. **When to stop (O43).** Stops still come on a timer, every 80 s from 600 s, so shorter stops lengthened
    the walks instead of adding glances. What should *start* a stop is the next design question, and by the

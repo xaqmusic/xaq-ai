@@ -1387,6 +1387,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (cloud_on)
         std::fprintf(stderr, "  cloud: publishing ToF return points on reality.proprio.tof_points%s\n",
                      brain.cloud_present() ? " (a CloudMap module is listening)" : " — NO CloudMap in the graph, nothing will accumulate");
+    // THINGS: the graph asked CloudMap for a things or thing-bearing topic (the things phase, T1); the host
+    // then logs the attended thing ("thg"), the thing EPM ("tepm") and the filed clusters ("things").
+    const bool things_on = cloud_on && brain.cloud_things_on();
+    if (things_on) std::fprintf(stderr, "  things: CloudMap runs the stack rule on the open cloud; logging thg / tepm / things\n");
     std::array<float, 4> tof_summary{};
     PlaceInputs place{};                      // the pose and the ToF in both reductions; the adapter picks the form
     std::fprintf(stderr, "place vector: %s\n", brain.place_form_desc().c_str());
@@ -2110,6 +2114,25 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 for (size_t k = 0; k < prof.size(); ++k) std::printf("%s%.4f", k ? "," : "", prof[k]);
                 std::printf("]");
             }
+            // THINGS (the things phase, T1).  While a cloud is open and the graph asks for things, every
+            // compute tick logs the attended thing -- in the CLOUD's frame (the anchor's), so the scorer
+            // labels it with the anchor the next "cloudv" record carries -- and the thing EPM's token:
+            //   "thg": [things, small, attended, cx, cy, rng, ext, top, ncols, hits, chain, vx, vy, prox]
+            //   "tepm": [winner, tle, nodes]  (only on ticks the EPM published)
+            if (cloud_on && things_on && brain.cloud_open() && t % 4 == 0) {
+                const auto th = brain.cloud_things();
+                const int at = brain.cloud_attended();
+                const int small = int(std::count_if(th.begin(), th.end(), [](const ogma::CloudMap::Thing& x) { return x.small; }));
+                const auto b = brain.cloud_thing_bearing();
+                if (at >= 0 && at < int(th.size())) {
+                    const auto& x = th[size_t(at)];
+                    std::printf(",\"thg\":[%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%.3f,%.3f,%.3f]",
+                                int(th.size()), small, at, x.cx, x.cy, x.rng, x.ext, x.top, x.ncols, x.hits, x.chain, b[0], b[1], b[2]);
+                } else {
+                    std::printf(",\"thg\":[%d,%d,-1]", int(th.size()), small);
+                }
+                if (brain.thing_seen()) std::printf(",\"tepm\":[%d,%.4f,%d]", brain.thing_winner(), brain.thing_tle(), brain.thing_nodes());
+            }
             // THE REPLAY PAYLOAD.  On the tick a cloud is filed, its whole voxel set goes to the log
             // once, with the world pose it was anchored on so a viewer can place it beside the
             // furniture.  That pose is INSTRUMENTATION for the viewer; no brain reads the log.
@@ -2122,6 +2145,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 for (size_t k = 0; k + 4 < vx.size(); k += 5)        // [ix, iy, iz, hits, mean height mm]
                     std::printf("%s[%d,%d,%d,%d,%d]", k ? "," : "", vx[k], vx[k + 1], vx[k + 2], vx[k + 3], vx[k + 4]);
                 std::printf("]}");
+                // the module's clusters of the filed cloud, for the faithfulness check against the offline rule:
+                //   "things": [[cx, cy, rng, ext, top, ncols, hits, chain, small], ...]
+                if (things_on) {
+                    const auto th = brain.cloud_filed_things();
+                    std::printf(",\"things\":[");
+                    for (size_t k = 0; k < th.size(); ++k)
+                        std::printf("%s[%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%d]", k ? "," : "", th[k].cx, th[k].cy, th[k].rng,
+                                    th[k].ext, th[k].top, th[k].ncols, th[k].hits, th[k].chain, th[k].small ? 1 : 0);
+                    std::printf("]");
+                }
                 ++cloud_n; cloud_vox_sum += int(vx.size() / 5);
             }
             if (g_log_tof_cloud && t % 4 == 0) {

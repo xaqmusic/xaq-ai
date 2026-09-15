@@ -21,6 +21,17 @@
 //        things standing on it — in the break profile the object EPM learns from.
 //     8. ViewIsTheNearestOffFloorReturnPerSector — the cloud as a place map's view: empty with no cloud,
 //        unmoved by a bare floor, and the nearest thing standing up in the sectors it stands in.
+//     9. ThingsAreOffWithoutATopic — the things reduction is not computed and nothing is published unless
+//        a graph asks for it (the things phase's gain-0 guard).
+//    10. ASmallCubeIsAThingAndARisingPostIsNot — the stack rule in the module: a 12 cm cube is small and
+//        attended; a narrow post whose heights chain up past small_top is an obstacle even though its
+//        footprint is small; the descriptor is kThing values in [0,1] and the bearing points at the cube.
+//    11. BearingTurnsWithTheBodysYawDrift — the bearing is in the BODY frame: the cloud is anchored on the
+//        opening yaw, and a body that has since yawed left sees the same thing to its right.
+//    12. FilingKeepsTheThingsAndClearsTheAttention — the filed cloud's clusters survive for the record;
+//        the live list, the attention and the bearing are cleared, and the bearing topic reads 0.
+//    13. AFootprintFloorLeavesFragmentsUnattended — small_ext_min: a one-column fragment is not attended,
+//        the cube behind it is; and things_shape publishes the 5-dim descriptor without the sampling dims.
 // =============================================================================
 
 #include <gtest/gtest.h>
@@ -263,4 +274,153 @@ TEST(CloudMap, ViewIsTheNearestOffFloorReturnPerSector) {
     EXPECT_LT(v[4], 1.0f);
     EXPECT_EQ(v[0], 1.0f) << "nothing out at -60 deg";
     EXPECT_EQ(v[size_t(ogma::CloudMap::kSectors - 1)], 1.0f) << "nothing out at +60 deg";
+}
+
+// ---------------------------------------------------------------------------------------------- things
+
+namespace {
+
+ParamMap things_params() {
+    ParamMap p = params();
+    p["things_topic"] = std::string("out.thing");
+    p["thing_bearing_topic"] = std::string("out.thing_bearing");
+    p["things_every"] = int64_t{1};
+    return p;
+}
+
+// A 12 cm cube standing a little under a metre ahead: a 3 x 3 x 3 lattice of returns 4 cm apart, each a
+// quarter-voxel off the boundaries, heights 3 / 7 / 11 cm.  Stack top 11 cm, footprint 12 cm: SMALL.
+std::vector<Pt> cube() {
+    std::vector<Pt> w;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            for (int k = 0; k < 3; ++k) w.push_back({0.81 + 0.04 * i, -0.03 + 0.04 * j, 0.03 + 0.04 * k});
+    return w;
+}
+
+// A narrow post 1.5 m ahead and to the left: 8 cm wide, returns every 4 cm from 3 cm up to 35 cm.  Its
+// footprint would pass as small; its chain climbs past small_top and it is an obstacle.
+std::vector<Pt> post() {
+    std::vector<Pt> w;
+    for (int j = 0; j < 2; ++j)
+        for (int k = 0; k < 9; ++k) w.push_back({1.51, 0.31 + 0.04 * j, 0.03 + 0.04 * k});
+    return w;
+}
+
+// Feed a world of any size as as many still casts as it takes (a cast carries at most kZones points).
+void cast_world(Rig& r, double yaw, const std::vector<Pt>& body_pts, int winner = 3) {
+    for (size_t at = 0; at < body_pts.size(); at += size_t(ogma::CloudMap::kZones)) {
+        std::vector<Pt> chunk(body_pts.begin() + long(at),
+                              body_pts.begin() + long(std::min(body_pts.size(), at + size_t(ogma::CloudMap::kZones))));
+        r.cast(true, yaw, 0.0, 0.0, winner, chunk);
+    }
+}
+
+std::vector<Pt> scene() {
+    auto w = cube();
+    const auto p = post();
+    w.insert(w.end(), p.begin(), p.end());
+    return w;
+}
+
+}  // namespace
+
+TEST(CloudMap, ThingsAreOffWithoutATopic) {
+    Rig r(params());
+    cast_world(r, 0.0, scene());
+    EXPECT_TRUE(r.m.is_open());
+    EXPECT_TRUE(r.m.things().empty()) << "no things topic: the reduction is not run";
+    EXPECT_EQ(r.m.attended(), -1);
+    EXPECT_EQ(r.bus.last_value("out.thing"), nullptr);
+    EXPECT_EQ(r.bus.last_value("out.thing_bearing"), nullptr);
+    EXPECT_EQ(r.m.cluster_things().size(), 2u) << "the reduction itself still works on demand";
+}
+
+TEST(CloudMap, ASmallCubeIsAThingAndARisingPostIsNot) {
+    Rig r(things_params());
+    cast_world(r, 0.0, scene());
+    const auto& th = r.m.things();
+    ASSERT_EQ(th.size(), 2u) << "two 8-connected break-band clusters";
+    // sorted by range: the cube first
+    EXPECT_NEAR(th[0].rng, std::hypot(0.85, 0.01), 0.03);
+    EXPECT_TRUE(th[0].small);
+    EXPECT_NEAR(th[0].top, 0.11, 0.02);
+    EXPECT_NEAR(th[0].ext, 0.12, 1e-6);
+    EXPECT_EQ(th[0].ncols, 9);
+    EXPECT_EQ(th[0].chain, 3);
+    EXPECT_FALSE(th[1].small) << "the post's footprint is small but its chain climbs to 35 cm";
+    EXPECT_NEAR(th[1].ext, 0.08, 1e-6);
+    EXPECT_GT(th[1].top, 0.3);
+    EXPECT_EQ(r.m.attended(), 0);
+
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing"));
+    ASSERT_NE(tok, nullptr);
+    ASSERT_EQ(tok->values.size(), ogma::CloudMap::kThing);
+    for (int i = 0; i < tok->values.size(); ++i) {
+        EXPECT_GE(tok->values[i], 0.0f) << "dim " << i;
+        EXPECT_LE(tok->values[i], 1.0f) << "dim " << i;
+    }
+    EXPECT_NEAR(tok->values[0], 0.11 / 0.20, 0.1) << "top / break_hi";
+    EXPECT_NEAR(tok->values[1], 0.12 / 0.20, 1e-5) << "footprint / small_ext";
+    EXPECT_NEAR(tok->values[2], 1.0, 1e-5) << "a cube is round in plan";
+
+    auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
+    ASSERT_NE(b, nullptr);
+    ASSERT_EQ(b->values.size(), 3);
+    EXPECT_NEAR(b->values[0], 0.0, 0.05) << "straight ahead: no rightward component";
+    EXPECT_NEAR(b->values[1], 1.0, 0.01) << "forward";
+    EXPECT_NEAR(b->values[2], 1.0 - th[0].rng / 2.5, 1e-4) << "proximity = 1 - range / max_range (things_range 0)";
+}
+
+TEST(CloudMap, BearingTurnsWithTheBodysYawDrift) {
+    Rig r(things_params());
+    const auto world = cube();
+    cast_world(r, 0.0, seen_from(world, 0.0, 0.0, 0.0));             // anchored on yaw 0, the cube dead ahead
+    ASSERT_EQ(r.m.attended(), 0);
+    // the trunk drifts 0.3 rad to the LEFT while standing; the same world, seen from yaw 0.3
+    cast_world(r, 0.3, seen_from(world, 0.0, 0.0, 0.3));
+    ASSERT_EQ(r.m.things().size(), 1u) << "the de-rotation keeps one cluster";
+    const auto b = r.m.thing_bearing();
+    EXPECT_NEAR(b[0], std::sin(0.3), 0.03) << "the cube is now to the body's RIGHT";
+    EXPECT_NEAR(b[1], std::cos(0.3), 0.03);
+}
+
+TEST(CloudMap, FilingKeepsTheThingsAndClearsTheAttention) {
+    Rig r(things_params());
+    cast_world(r, 0.0, scene());
+    ASSERT_EQ(r.m.attended(), 0);
+    for (int i = 0; i < 6 && r.m.is_open(); ++i) r.cast(false, 0.0, 0.0, 0.0, 3, {});
+    ASSERT_FALSE(r.m.is_open());
+    EXPECT_EQ(r.m.last_filed_things().size(), 2u) << "the filed cloud's clusters are kept for the record";
+    EXPECT_TRUE(r.m.last_filed_things()[0].small);
+    EXPECT_TRUE(r.m.things().empty());
+    EXPECT_EQ(r.m.attended(), -1);
+    const auto b = r.m.thing_bearing();
+    EXPECT_EQ(b[0], 0.0f); EXPECT_EQ(b[1], 0.0f); EXPECT_EQ(b[2], 0.0f);
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
+    ASSERT_NE(tok, nullptr);
+    EXPECT_EQ(tok->values[2], 0.0f) << "nothing attended reads as proximity 0";
+}
+
+TEST(CloudMap, AFootprintFloorLeavesFragmentsUnattended) {
+    ParamMap p = things_params();
+    p["small_ext_min"] = 0.08;
+    p["things_shape"] = true;
+    Rig r(p);
+    // a single-column fragment 0.5 m ahead (one voxel footprint, 5 cm up), and the cube behind it
+    auto world = cube();
+    world.push_back({0.51, 0.01, 0.05});
+    cast_world(r, 0.0, world);
+    const auto& th = r.m.things();
+    ASSERT_EQ(th.size(), 2u);
+    EXPECT_NEAR(th[0].ext, 0.04, 1e-6) << "the fragment is nearest";
+    EXPECT_FALSE(th[0].small) << "a 4 cm footprint is below the floor";
+    EXPECT_TRUE(th[1].small);
+    EXPECT_EQ(r.m.attended(), 1) << "attention passes over the fragment to the cube";
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing"));
+    ASSERT_NE(tok, nullptr);
+    EXPECT_EQ(tok->values.size(), ogma::CloudMap::kThingShape);
+    EXPECT_EQ(r.m.thing_dims(), ogma::CloudMap::kThingShape);
+    EXPECT_NEAR(tok->values[1], 0.12 / 0.20, 1e-5) << "footprint / small_ext";
+    EXPECT_NEAR(tok->values[4], 3.0 / 5.0, 1e-5) << "chain / 5";
 }

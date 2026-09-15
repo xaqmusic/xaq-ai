@@ -52,6 +52,7 @@
 #include "ogma/Module.hpp"
 #include "ogma/Topics.hpp"
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <string>
@@ -67,6 +68,30 @@ public:
     static constexpr int kSectors = 8;                   // azimuth sectors across the swept cone
     static constexpr int kProfile = kSectors * 4 + 4;    // 8 × (range, height, extent, mass) + 4 globals
     static constexpr int kZones   = 64;                  // the sensor's returns per cast
+    static constexpr int kThing   = 8;                   // the attended thing's FULL descriptor (thing_descriptor)
+    static constexpr int kThingShape = 5;                // ...and its SHAPE-ONLY form (things_shape true)
+
+    // THINGS (the things phase, 2026-09-15, `microduck_things_phase.md` T1).  The stack rule of design doc
+    // §17.31, run on the OPEN cloud: break-band voxels grouped into 8-connected columns; a cluster's stack top
+    // is the contiguous chain of heights over its dilated footprint with a gap of max(gap_min, gap_k x range),
+    // because the sensor's rows are 5.6 deg apart and the vertical spacing of returns grows with range.  A
+    // cluster whose stack tops out under small_top and spans at most small_ext is SMALL: a thing the duck
+    // could interact with (about five voxels high).  One that keeps rising is an obstacle.  Everything here
+    // is in the cloud's own de-rotated frame; nothing decides that two returns are the same object.
+    //
+    // A thing does not grow on approach: a voxel is world-sized.  Its SAMPLING grows -- hits per column, and
+    // whether top/ext/chain read the same from one sweep to the next -- so the descriptor carries density
+    // and range, and the error an approach reduces is the descriptor's own instability.
+    struct Thing {
+        double cx = 0.0, cy = 0.0;     // footprint centroid, cloud frame (x forward, y left), metres
+        double rng = 0.0;              // horizontal range of the centroid
+        double ext = 0.0, ext_min = 0.0;   // footprint's larger and smaller span (+ one voxel)
+        double lo = 0.0, top = 0.0;    // lowest break-band height, and the stack top the chain reaches
+        int    ncols = 0;              // footprint columns
+        double hits = 0.0;             // returns over the footprint (all heights)
+        int    chain = 0;              // voxel levels from lo to top
+        bool   small = false;          // the rule's verdict
+    };
 
     CloudMap() = default;
     ~CloudMap() override = default;
@@ -111,6 +136,26 @@ public:
     // growing has stopped changing it.  All 1 while no cloud is open (filing clears the voxels).
     std::vector<float> view() const;
 
+    // The clusters of the open cloud, as last computed (every things_every ticks while open; empty when closed),
+    // and which one is attended: the nearest SMALL thing within things_range, or -1.
+    const std::vector<Thing>& things() const { return things_; }
+    int attended() const { return attended_; }
+    // The world-sized descriptor a thing EPM earns its vocabulary over, in [0,1].  FULL (kThing):
+    // [top / break_hi, ext / small_ext, ext_min / ext (aspect), ncols / 25, hits per column / 20,
+    //  chain / 5, rng / max_range, lo / break_hi].  No bearing: a vocabulary of things, not of poses.
+    // SHAPE-ONLY (kThingShape, things_shape true): [top / break_hi, ext / small_ext, aspect, lo / break_hi,
+    //  chain / 5] -- the sampling dims (columns, hits, range) left out.  Measured on R57 (n = 6, 4 903 attended
+    //  ticks): with them in, the EPM's 35 nodes followed the sweep's fill-in state (majority-label purity 0.56,
+    //  each object under 4+ winners with a modal share of 0.10-0.17); shape-only bins of the same ticks reach
+    //  0.76.  Sampling belongs to the attention gate and the pull, not to the vocabulary (`CLAUDE.md` §0 rule 2).
+    std::vector<float> thing_descriptor(const Thing& t) const;
+    int thing_dims() const { return things_shape_ ? kThingShape : kThing; }
+    // The attended thing's bearing in the BODY frame this tick, [vx = +right, vy = +forward, proximity]:
+    // the shape VisualBearing emits, so VisualHomingNav consumes it unchanged.  All 0 when nothing is attended.
+    std::array<float, 3> thing_bearing() const { return bearing_; }
+    std::vector<Thing> cluster_things() const;   // recompute from the current voxels (tests, the host's filing record)
+    const std::vector<Thing>& last_filed_things() const { return filed_things_; }   // the clusters of the cloud last filed
+
     // The voxel set of the cloud last FILED, as flat [ix, iy, iz, hits, mean_height_mm] 5-tuples —
     // what a viewer draws.  Empty until a cloud closes.  Voxel indices, not metres: multiply by
     // voxel_m and add half a voxel for the centre; colour by the mean height, not the centre.
@@ -141,9 +186,20 @@ private:
     void open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick);
     void file_cloud(uint64_t tick);
     void add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, uint64_t tick);
+    void update_things(double yaw);
+    void update_bearing(double yaw);
+    void publish_bearing(uint64_t tick_id);
 
     Bus* bus_ = nullptr;
     std::string input_topic_, place_topic_, output_topic_, change_topic_;
+    std::string things_topic_, thing_bearing_topic_;
+    double small_top_ = 0.16, small_ext_ = 0.20, small_ext_min_ = 0.0, gap_min_ = 0.10, gap_k_ = 0.12, things_range_ = 0.0;
+    bool   things_shape_ = false;
+    int    things_every_ = 4;
+    bool   things_on_ = false;
+    std::vector<Thing>   things_, filed_things_;
+    int                  attended_ = -1;
+    std::array<float, 3> bearing_{0.0f, 0.0f, 0.0f};
     double voxel_m_ = 0.04, break_lo_ = 0.02, break_hi_ = 0.20;
     double half_fov_ = 40.0, max_range_ = 2.5;
     double view_half_fov_ = 64.0, view_range_ = 4.0;

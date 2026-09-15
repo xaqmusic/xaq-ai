@@ -3110,3 +3110,79 @@ map in a very short amount of time." R56 is `★ CLOUD` in the launcher, superse
 phase. Its summary is [`microduck_cloud_phase.md`](microduck_cloud_phase.md): the promoted run, what the phase
 learned, the tools, the traps, and the open questions for the next one (register O43, when to stop; O44,
 seeking small things).
+
+### 17.34 The things phase opens: the stack rule in the module, the attended thing, and a vocabulary of things (R57–R59, 2026-09-15)
+
+**The direction.** The operator, on `★ CLOUD`: map-making is not the interesting thing for the duck to be doing;
+it should seek what is smaller than itself, interact with it, and be surprised when it answers. The plan is
+[`microduck_things_phase.md`](microduck_things_phase.md) (register O45–O50); this section is its T1, the
+sensor side, built passive before any loop reads it. Two corrections from the discussion shaped it: a thing does
+not grow on approach (a voxel is world-sized; its sampling grows, so the error an approach reduces is the
+descriptor's precision), and the head should look where the thing is (a gaze error, T3), not tilt on a script.
+
+**Built.** `ogma::CloudMap` runs §17.31's stack rule on the OPEN cloud every `things_every` ticks (4, the
+sensor's cadence): break-band voxels into 8-connected columns, each cluster's stack top the contiguous chain of
+heights over its dilated footprint with a gap of max(`gap_min`, `gap_k` × range), SMALL when the top is under
+`small_top` (0.16) and the footprint within [`small_ext_min`, `small_ext`] (0, 0.20). The nearest small cluster
+is ATTENDED. Two new topics, both empty by default so a graph without them is byte-identical: `things_topic`
+carries the attended thing's descriptor, world-sized and in [0,1] and without a bearing (top, footprint, aspect,
+columns, hits per column, chain, range, lowest height), published only while a thing is attended; and
+`thing_bearing_topic` carries `[vx = +right, vy = +forward, proximity]` in the BODY frame, the cloud's frame
+turned back by the yaw drift since the anchor, the shape `VisualBearing` emits so `VisualHomingNav` consumes it
+unchanged, and it is published every tick the topic exists, reading proximity 0 while the body walks (a
+consumer must not home on the last stop's stale bearing). The host logs `thg` (the attended thing per compute
+tick, in the cloud's frame), `tepm` (the thing EPM's token) and `things` (the filed cloud's clusters), and
+`cloud_objects.py things` scores them against the manifest. R57 (`a1v2_r57_things.json`) is R46 plus the
+topics and a thing EPM (`rbf`, 8 dims, bake 20). Tests 9–13 of `test_cloud_map` pin the default-off contract,
+the rule on a cube and a rising post, the bearing's frame, filing, and the floor.
+
+**Guards.** R46 on the pre-change and post-change binaries: the same md5 over every JSON line (760 s, seed 3).
+R57 against R46 on the post-change binary: 38 000 lines identical once `thg`/`tepm`/`things` are stripped, and
+at n = 6 × 1500 s R57's `arms` scores equal R56's F 0.45 arm to the last digit (13.0 clouds a run, 1 296
+voxels a cloud, precision 0.76, walls 70 %). The module's clusters against the offline rule on the same 78
+filed clouds: 583 of 583 matched by centroid agree on the verdict, top and footprint deviating by 0.0 cm.
+
+**Measured, n = 6 × 1500 s, the playroom, `★ CLOUD`'s arguments** (4 903 attended ticks on R57):
+
+| | R57 (no floor, full descriptor) | R58 (floor 0.08, shape-only descriptor) | R59 (floor 0.08, full descriptor) |
+|---|---|---|---|
+| a small cluster in view, % of thing ticks | 68 | 55 | 55 |
+| the attended thing is a real object (precision) | 0.73 | **0.82** (5+/1−) | **0.82** (5+/1−) |
+| balls attended, ticks | 1 452 | 1 395 | 1 395 |
+| thing EPM nodes seen per run | 23.7 | 14.7 | 21.2 |
+| per-run majority-label purity (chance) | **0.87 ± 0.05** (0.43) | 0.83 ± 0.07 (0.52) | **0.91 ± 0.07** (0.52) |
+| purity − chance | **+0.44 ± 0.06** | +0.30 ± 0.15 | +0.38 ± 0.16 |
+
+What the attended thing was on R57: block 2 112, ball 1 452, chair 605, wall 557, table 87, other 75, shelf 15.
+The misses are one-column clusters (columns p50 = 1, hits per column 4–8 against the objects' 4–5 columns
+and 8–18 hits): a wall base or a chair leg that the sweep has landed a few rays on. Offline on the same ticks:
+requiring the attended cluster to be UNCHANGED for K recomputes changes nothing (K 0 → 12: 0.73 → 0.75, at
+57 % of ticks kept), because a fragment that gets no more rays is as stable as a ball; requiring two columns
+gives 0.86 at 73 % kept and three 0.93 at 61 %. Hence `small_ext_min`, a floor on the footprint in the rule's
+own units (0.08 m = two columns): a real ball is one column early in a sweep too, so the floor delays attention
+until the thing is sampled, which is the point.
+
+**Two catches on the way (§3.2).** First, the thing EPM's purity was read at 0.56 when the scorer pooled node
+ids across runs; every seed grows its own EPM, so node 9 in one run is unrelated to node 9 in another. Scored
+per run it is 0.87. Second, R58 bundled two changes, and they disagreed: the floor raised precision on five of
+six seeds (seed 3: 0.56 → 0.49), while the shape-only descriptor LOWERED the vocabulary's purity (+0.44 →
++0.30). Offline bins over (top, footprint) had read 0.76 and suggested the sampling dims were noise; in the
+EPM they are shape. On R57 a block's flat face returns 18 hits per column and a ball's curved face 8, and the
+first run's nodes divide the two cleanly (node 11: 106 block, 6 ball; node 10: 69 ball). R59 is the floor
+alone.
+
+**Pose invariance, still untestable.** Each real object is attended from 1.3–2.6 poses a run, and its modal
+winner holds 0.40–0.66 of its ticks. O40's limitation stands: the duck does not travel enough for the test.
+
+R59 keeps R58's attention exactly (the floor decides attention, the descriptor does not) and R57's vocabulary:
+per-run purity 0.91 ± 0.07, 21 nodes a run. Purity minus chance is the weaker comparison here, since the floor
+also raises chance (fewer fragment labels among the attended ticks: 0.43 → 0.52).
+
+**Verdicts.** T1's reduction `WORKING` as a sensor (exact against the offline rule; attention on a real object
+on 82 % of attended ticks with the floor, up on five of six seeds). The thing EPM's vocabulary `WORKING` on kind (per-run purity 0.87 against chance 0.43, blocks
+and balls under separate nodes) with the FULL descriptor; the shape-only descriptor `REGRESSION` on it
+(re-use context: a sensor whose returns per column do not depend on the surface, or a descriptor that carries
+curvature explicitly). The stability gate on attention `NULL` offline, not built (re-use: a moving scene, where
+stability would mean something). R59 is the T1 config the seek loop (T2) builds on. Passive on every seed:
+the walk is byte-identical to `★ CLOUD`, so there is nothing for the operator's eye yet; presets R57–R59
+(seed 3) show the cloud panel's counts at each stop.
