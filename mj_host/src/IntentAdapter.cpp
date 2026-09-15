@@ -219,11 +219,15 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         else if (g_play > 0.5)  { bearing_topic = "percept.play_bearing";  steer_code = 1; }
         else bearing_topic = nullptr;
     }
-    seek_present_ = false;
+    seek_present_ = false; seek_arrived_ = false;
     if (auto sv = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.seek_value")))
         if (sv->values.size() > 0) { seek_present_ = true; seek_value_ = sv->values[0]; }
     if (auto sr = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.seek_range")))
         if (sr->values.size() > 0) seek_range_ = sr->values[0];
+    // ARRIVAL (things phase T4): the loop drops a target it has reached -- its need goes to 0 with the range
+    // under its arrive threshold -- and the host may start a stop on it (--stop-on-arrive).
+    if (seek_present_ && seek_value_prev_ > 0.0 && seek_value_ == 0.0 && seek_range_ < 0.3) seek_arrived_ = true;
+    seek_value_prev_ = seek_present_ ? seek_value_ : 0.0;
     if (bearing_topic)
     if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(bearing_topic))) {
         if (pb->values.size() >= 2) {

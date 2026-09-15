@@ -15,6 +15,10 @@ compact stream drops the cloud records, qpos and joint positions.
       the things phase's T2: every SEEK EPISODE (a held target, from the stop that set it to the tick its need returns
       to 0) with what the target really was (the last attended thing of that stop, labelled by the manifest), the body's
       closest approach to the target's true position, whether an object was touched, and how the episode ended
+  cloud_objects.py stops LOG...
+      the things phase's T4: every STOP by how it started (the timer, or the seek loop's arrival), how far the nearest
+      object was when it began, and whether the stop's cloud attended a real object and at what range -- did a reached
+      thing get looked at
   cloud_objects.py things LOG...
       the things phase's T1 (microduck_things_phase.md): the MODULE's stack rule against this file's, cluster by
       cluster on the same filed clouds (faithfulness); what the ATTENDED thing really was, per tick ("thg", labelled
@@ -533,6 +537,56 @@ def cmd_seek(paths: list[str]) -> None:
               f"{sum(d < 0.4 for d in dmins[lab])}/{len(dmins[lab])}, an object touched during {touched[lab]}")
 
 
+# ------------------------------------------------------------------------------------------------ stops
+
+def cmd_stops(paths: list[str]) -> None:
+    half, lay, movable, furniture = load_scene()
+    rows = []
+    for path in paths:
+        cur = None; pending = []
+        for line in open(path):
+            if not line.startswith('{"t"'):
+                continue
+            r = json.loads(line)
+            ev = r.get("event") or ""
+            if ev in ("stop:start", "stop:arrive"):
+                q = r["qpos"]; objs = objects_at(r, lay, movable)
+                dn, kind = min((math.hypot(q[0] - ox, q[1] - oy), k) for k, ox, oy, e in objs)
+                cur = dict(run=os.path.basename(path), t=r["t"], how=ev.split(":")[1], near=dn, near_kind=kind, att=[], seek=r.get("seek"))
+                pending = []
+            th = r.get("thg")
+            if cur is not None and th is not None and th[2] >= 0:
+                pending.append(th)
+            c = r.get("cloudv")
+            if cur is not None and c:
+                objs = objects_at(r, lay, movable)
+                for th in pending:
+                    wx, wy = to_world(c["anchor"], th[3], th[4])
+                    cur["att"].append((label(wx, wy, objs, half, furniture), th[5]))
+                pending = []
+                rows.append(cur); cur = None
+    by = collections.defaultdict(list)
+    for r in rows:
+        by[r["how"]].append(r)
+    print(f"{len(rows)} stops with a filed cloud over {len(paths)} runs")
+    for how, rs in by.items():
+        near = [r["near"] for r in rs]
+        real_att = [any(l in ("ball", "block") for l, _ in r["att"]) for r in rs]
+        real_near = [any(l in ("ball", "block") and rg < 0.8 for l, rg in r["att"]) for r in rs]
+        print(f"  started by {how:>6}: {len(rs):3d} stops; nearest object at the start p10/50/90 "
+              f"{'/'.join(f'{np.percentile(near, q):.2f}' for q in (10, 50, 90))} m, within 0.5 m on {sum(d < 0.5 for d in near)}; "
+              f"the cloud attended a real object during {sum(real_att)} ({sum(real_near)} within 0.8 m); "
+              f"nothing attended on {sum(not r['att'] for r in rs)}")
+    arr = by.get("arrive", [])
+    if arr:
+        print("  arrival stops, one per line: nearest object (kind, m) -> what the cloud attended (label, range)")
+        for r in arr:
+            att = collections.Counter(l for l, _ in r["att"]).most_common(2)
+            rmin = {l: min(rg for l2, rg in r["att"] if l2 == l) for l, _ in att}
+            print(f"    {r['run']:>24} t {r['t']:7.1f}: {r['near_kind']:>5} {r['near']:.2f} m -> "
+                  + (", ".join(f"{l} x{n} (nearest {rmin[l]:.2f} m)" for l, n in att) if att else "nothing"))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -542,6 +596,8 @@ def main() -> None:
     a = sub.add_parser("arms", help="per-arm cloud and object scores, NAME=GLOB per arm")
     a.add_argument("arms", nargs="+")
     a.add_argument("--gapk", type=float, default=0.12)
+    sp = sub.add_parser("stops", help="every stop by how it started and what its cloud attended (things phase T4)")
+    sp.add_argument("logs", nargs="+")
     sk = sub.add_parser("seek", help="every seek episode against the manifest (things phase T2)")
     sk.add_argument("logs", nargs="+")
     th = sub.add_parser("things", help="the module's things against the manifest and the offline rule (things phase T1)")
@@ -554,6 +610,8 @@ def main() -> None:
         cmd_things(args.logs, args.gapk)
     elif args.cmd == "seek":
         cmd_seek(args.logs)
+    elif args.cmd == "stops":
+        cmd_stops(args.logs)
     else:
         cmd_arms(args.arms, args.gapk)
 

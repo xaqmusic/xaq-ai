@@ -1,6 +1,6 @@
 # Microduck: the things phase. Seeking what is smaller than itself, and being surprised when it answers
 
-Status: plan, building · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
+Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, nothing promoted · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
 
 *The phase after the cloud ([`microduck_cloud_phase.md`](microduck_cloud_phase.md), `★ CLOUD` R56).
 The operator's direction, restated in the rewrite rule's terms, then the loops that read the voxels at
@@ -185,6 +185,15 @@ A stop starts on an error, not a timer: arrival at the attended thing (proximity
 thing lost into the blind zone with touch pending), or the place map's walk-time error above its own running
 spread (the signal O39 measured, 0.30 walking against 0.14 at stops). The 80 s timer is retired in the arm
 and kept in the control.
+
+**Measured 2026-09-15 (design doc §17.36; R60a, n = 6 × 1500 s).** Built as `--stop-on-arrive` with the timer
+kept as the floor. Loud as a mechanism: 32 arrival stops over six runs, beginning a median 0.21 m from a real
+object (29 of 31 within 0.5 m). What T3 predicted then shows: at 12 of 31 the cloud attends nothing and at most
+of the rest another thing a metre off, because the thing reached is below a level gaze. Where it was visible
+(0.3 m) the duck looped stop-walk-stop at it four times in 30 s: lingering without habituation. Costs: walk
+82 → 54 %, path down on every seed, walls back to the base's level, a quarter of stops at the 60 s cap. **T4
+`WORKING` as a mechanism, `PARTIAL` as a behaviour; not promoted; preset R60a.** Next, in order: T3's gaze at
+the reached thing, then habituation through the thing EPM's error, then the (d) tests.
 
 ### T5. The per-place change, localised
 

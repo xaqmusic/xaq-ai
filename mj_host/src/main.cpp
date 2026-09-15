@@ -1347,6 +1347,7 @@ struct StopPlan {
     // A 4 cm block at 1 m sits ~7 deg below level, so what finds it is a NARROW band held
     // there, not a wide sweep.  0 = centred on level, byte-identical.
     double gaze_down = 0.0;
+    bool   on_arrive = false;      // --stop-on-arrive (things phase T4): a stop starts when the seek loop reaches its target
     // --stop-orient K TURN_VX WALK_VX SECS (the orienting reflex, agreed 2026-09-12): while the gaze is still, a
     // view whose winner switches to an EXISTING node, or whose error jumps K spreads above the hold's own
     // running mean (sampled at the map's rate, the spread floored at 5 % of the mean, two samples in a row),
@@ -1381,6 +1382,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
+    if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
     // The cloud lives in the graph now (ogma::CloudMap).  The host's job is to hand it one cast
@@ -1489,6 +1491,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const int stop_from = int(g_stop.from_s * kBrainHz), stop_settle_ticks = std::max(1, int(g_stop.settle_s * kBrainHz));
     int stop_left = 0, stop_settle_left = 0, stop_confirm = 0;
     int stops_started = 0, stop_handbacks = 0, stop_refused = 0, stop_handoffs = 0, stop_rescued = 0, stop_survived = 0;
+    int stops_arrive = 0;                                   // of those, started by the seek loop's arrival (T4)
     long stand_ticks = 0;
     double stop_last_lean = 0.0;
     const char* stop_event = "";
@@ -1674,10 +1677,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             node_mark2 = nc; baked_mark = bc;
         }
         if (stop_on && driver == Driver::Brain) {
-            if (stop_phase == StopPhase::None && stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0
+            // T4 (things phase): a stop starts on an ERROR as well as on the timer -- the seek loop reaching the
+            // thing it walked to.  The timer stays as the floor (a duck that has seen nothing still glances).
+            const bool arrive_now = g_stop.on_arrive && stop_phase == StopPhase::None && t >= stop_from && brain.seek_arrived();
+            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
-                ++stops_started; stop_event = "stop:start"; stop_started_tick = t;
+                ++stops_started; stop_event = arrive_now ? "stop:arrive" : "stop:start"; stop_started_tick = t;
+                if (arrive_now) ++stops_arrive;
                 brain.set_learning(false);                 // its command is not applied during the stop
                 if (stander) stander->on_reset();          // a fresh pairing after the walk
                 if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
@@ -2250,6 +2257,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                              "%d handed back to the walker, %d rescued; the joint brain stood %.1f s\n",
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
+        if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
         if (g_stop.map_on_stop || look_on || gaze_on) {
             std::fprintf(stderr, "  map growth: %d nodes on walks, %d at stops; %zu baked ids seen\n", grown_walk, grown_stop, baked_ids.size());
             std::fprintf(stderr, "  map baking: inserted %d at stops / %d on walks, baked %d at stops / %d on walks, pruned %d (of which baked %d); %d nodes, %d baked at the end\n",
@@ -2516,6 +2524,8 @@ int main(int argc, char** argv) {
             g_log_tof_cloud = true;
         } else if (a == "--seek-gate") {
             g_seek_gate = true;
+        } else if (a == "--stop-on-arrive") {
+            g_stop.on_arrive = true;
         } else if (a == "--no-backing") {
             g_no_backing = true;
         } else if (a == "--save-head") {

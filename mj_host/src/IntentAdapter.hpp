@@ -119,6 +119,8 @@ public:
     int  seek_gated() const { return seek_gated_; }   // ticks the gate zeroed a slot
     // The seek loop's token (reality.cognitive.seek_value / seek_range), if a graph has one.
     bool   seek_present() const { return seek_present_; }
+    bool   seek_arrived() const { return seek_arrived_; }   // this tick: a held target's need went to 0 with the range under 0.3 m
+    double seek_ego()     const { return seek_ego_; }       // the seek bearing last set, body frame (rad, + = right)
     double seek_value()   const { return seek_value_; }
     double seek_range()   const { return seek_range_; }
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
@@ -202,6 +204,7 @@ private:
     int last_steer_ = 0;
     bool seek_gate_ = false; int seek_gated_ = 0;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
+    bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int  seek_steers_ = 0;
     double seek_ego_ = 0.0;                   // the seek bearing this tick, body frame (rad, + = right)
     bool no_backing_ = false; int backing_clamped_ = 0;

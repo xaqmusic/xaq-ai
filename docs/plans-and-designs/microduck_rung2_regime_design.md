@@ -3251,3 +3251,54 @@ to the things it saw, walls do not rise, and the interaction the phase is for ne
 before it can be read. Not promoted; preset R60 (seed 3, fast-forward through 600 s) puts the first walk-to-a-
 thing in front of the operator's eye; R60g the gated form. Next: T4's arrival stop, then T3's gaze at the
 thing, so that a thing reached is a thing looked at.
+
+### 17.36 A stop that starts on arrival (R60a, things phase T4, 2026-09-15)
+
+**Built.** `--stop-on-arrive`: a stop starts when the seek loop drops a target it has reached (its need goes to
+0 with the range under 0.3 m), with the same settle, hand-back, sweep and cloud as a timer stop, and the same
+ending on the cloud's growth. The 80 s timer stays as the floor, so a duck that has seen nothing still
+glances (the plan's "retire the timer" is deferred until the map's walk-time error is the second trigger).
+`cloud_objects.py stops` scores every stop by how it started, how near the nearest object was when it began,
+and what its cloud attended; `l2_sweep.py` gains `stopsArrive`. R46 stays byte-identical (md5 `cb24520c…`).
+
+**Measured, n = 6 × 1500 s, against R60** (the same seeds, the same arguments plus the flag):
+
+| | R60 seek | **R60a seek + arrival stops** |
+|---|---|---|
+| stops a run · of which on arrival | 10.8 · — | 15.3 ± 2.4 · **5.3 ± 3.3** (32 of 92) |
+| nearest object when an arrival stop begins, p10 / p50 / p90 | — | **0.13 / 0.21 / 0.29 m** (29 of 31 within 0.5 m) |
+| nearest object when a timer stop begins, p50 | 1.14 m (seed 5) | 1.00 m (13 of 47 within 0.5 m) |
+| the arrival stop's cloud attends a real object · one within 0.8 m · nothing | — | 18 / 31 · 8 / 31 · **12 / 31** |
+| stop length p50 · mean (arrival / timer) | 14.5 s | 10.9 / 12.8 s · 20.9 / 28.7 s (25 of 92 reach the 60 s cap) |
+| walk / stand, % of the control phase | 82 / 16 | 54 / 44 |
+| path · cells | 124 m · 124 | 81 m (6 / 6 down) · 89 (5 / 6 down) |
+| walls / min | 12.4 ± 14.4 | 20.4 ± 20.7 (3 / 6 up; seed 4: 8.2 → 56.1) |
+| object contacts / min · objects moved | 19.2 · 3.4 m | 3.2 · 2.5 m |
+| map TLE on the walk · nodes | 0.31 · 23 | 0.21 · 27 |
+| stands held | 63 / 65 | 92 / 92 |
+
+**Reading it.** The mechanism is loud: an arrival stop begins a median 0.21 m from a real object, by dead
+reckoning from a bearing fixed at the previous stop. The duck walks to a thing it saw and stops beside it.
+What it then does is the phase's next finding, and it is what T3 predicted. At 12 of 31 arrival stops the
+cloud attends nothing, and at most of the rest it attends a *different* thing 0.8–1.3 m away: the thing
+reached sits at 0.2 m, below a level gaze, which first sees the floor at about 0.5 m. The thing reached is the
+thing not looked at. Where the reached thing sat at 0.3 m or more it was seen (seed 1 at 772–800 s: ball at
+0.30, 0.24, 0.27, 0.26 m, attended at 0.33, 0.30, 0.29 m), and the duck then did the degenerate thing:
+attend it, fix it as a target at 0.3 m, walk, arrive at once, stop, four times in 30 s. That is lingering
+without habituation; the thing EPM's error at an attended thing (the plan's pull) is what should let it go.
+
+The costs are those of standing: walk time falls from 82 % to 54 %, path and coverage with it (path down on
+every seed), wall contacts return to the base's level on three seeds (seed 4's 56 / min is a duck stopping and
+starting beside furniture), and a quarter of the stops now run to the 60 s cap, which the cloud's growth rule
+had ended in 10 s before (O37's ending question, re-opened by a cloud that keeps growing next to a thing).
+Object contacts fall from 19 to 3 a minute because the duck now stops at the thing instead of stumbling
+through it; displacement falls with it. Read together: the duck reaches things and stands by them, and cannot
+yet see or push what it reached.
+
+**Verdicts.** T4 `WORKING` as a mechanism (arrival stops at 0.21 m, 29 / 31 within 0.5 m), `PARTIAL` as a
+behaviour: the reached thing is invisible to the stop, and without habituation the duck loops at a visible one.
+Not promoted; preset R60a (seed 1, fast-forward through 600 s, where four arrival stops at a ball follow one
+another from 772 s) for the operator's eye. The two levers this hands the plan, in order: **T3's gaze at the
+reached thing** (the sweep centred on the target's bearing and expected elevation, about 35° down at 0.3 m,
+which O36 showed the stand can take), and **habituation** (the seek need weighted by the thing EPM's error at
+the attended thing, so a thing looked at four times lets the duck go). Then the (d) tests with a moved ball.
