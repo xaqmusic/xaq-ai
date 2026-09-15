@@ -20,6 +20,14 @@
 
 ## ▶ Resume here
 
+**State on 2026-09-15: the cloud phase is closed. Start at [`microduck_cloud_phase.md`](microduck_cloud_phase.md).**
+The duck now glances. At each stop the head sweeps at a steady 0.6 rad/s, the ToF's returns accumulate into
+a voxel cloud (`ogma::CloudMap`), the place map learns from that cloud's view, and the stop ends when the
+cloud stops growing: about 10 s, with the walls and the small things on the floor still found. The operator
+promoted it by eye as `★ CLOUD` (R56; design doc §17.28–17.33). The phase page carries the exact run, what was
+learned, the tools (the voxel viewer, `cloud_objects.py`), the traps, and the open questions: **when to stop
+(O43)** and **seeking small things (O44)**. The entries below are the history.
+
 **State on 2026-09-11, late — the walk-stop-look line.** The operator's verdict on the exploration
 line as watched: a Roomba. The redesign is in the [playroom plan §12](microduck_playroom_plan.md)
 — **a place is a stop** (the map inserts only while still; the head saccades to the max-residual

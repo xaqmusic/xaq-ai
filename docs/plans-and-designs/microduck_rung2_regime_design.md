@@ -3104,3 +3104,9 @@ or less) and precision is 0.72. Recommended for the operator's eye: F 0.45 (pres
 the edge (R56b) and F 0.3 as the middle between quality and tempo. Nothing promoted; n = 6 is a signal. Open:
 the stop's schedule is still a timer (every 80 s from 600 s), so a shorter stop lengthens the walk rather than
 adding glances. Whether the duck should stop more often, and on what, is the next question this raises.
+
+**PROMOTED (the operator's eye, 2026-09-15):** R56 at threshold 0.45: "the robot is able to make a very solid
+map in a very short amount of time." R56 is `★ CLOUD` in the launcher, superseding R55. This closes the cloud
+phase. Its summary is [`microduck_cloud_phase.md`](microduck_cloud_phase.md): the promoted run, what the phase
+learned, the tools, the traps, and the open questions for the next one (register O43, when to stop; O44,
+seeking small things).

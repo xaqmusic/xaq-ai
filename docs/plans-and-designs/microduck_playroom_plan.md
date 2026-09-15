@@ -25,6 +25,11 @@ unit), [`open_items_register.md`](open_items_register.md) (O25–O29 are this pl
 
 ## ▶ Resume here
 
+**State on 2026-09-15: the stop's look is built and promoted (`★ CLOUD`, R56).** §12's "a place is a stop"
+now runs on a cloud. The gaze sweeps, the map reads the stop's voxel cloud, and the stop ends when the cloud
+stops growing, after about 10 s. The summary and the next questions (when to stop, O43; seeking small
+things, O44) are in [`microduck_cloud_phase.md`](microduck_cloud_phase.md).
+
 **State on 2026-09-11, late — the walk-stop-look line is agreed and planned (§12).** The operator's
 read of R26–R38 in the room: the duck always stepping, avoiding and tiling a map is a Roomba, and
 the target is Pollen's sentence, ten minutes alone worth watching. The reframing that turns the

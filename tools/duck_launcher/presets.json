@@ -898,9 +898,9 @@
   }
  },
  {
-  "name": "★ CLOUD · R55 · the map reads the CLOUD, a stop ends when its cloud stops growing, and the head sweeps at a steady 0.6 rad/s",
+  "name": "R55 · the map reads the CLOUD, a stop ends when its cloud stops growing, and the head sweeps at a steady 0.6 rad/s (superseded by R56)",
   "series": 55,
-  "hint": "PROMOTED (the operator's eye, 2026-09-15: \"the best choice to promote -- faster head movement looks unnatural and does not seem to speed up stops\"). WATCH (seed 5, fast-forward through 600 s): stops are short now (about 24 s against R52's 58) and end when the cloud stops filling in, not on a timer; the head sweeps at one steady speed through the whole stop; the duck walks twice as far between stops. n=6: map winner switches 77 -> 25 a minute, objects within 2 m in reach found 85 %, walls and furniture misread as small 2.3 %, stands 64/66. Watch the balls (23 %, the weakest number) and the walls on the longer walks. Compare R55b for the fastest head. PROMOTED (design doc §17.32).",
+  "hint": "SUPERSEDED by ★ CLOUD R56 (2026-09-15). PROMOTED (the operator's eye, 2026-09-15: \"the best choice to promote -- faster head movement looks unnatural and does not seem to speed up stops\"). WATCH (seed 5, fast-forward through 600 s): stops are short now (about 24 s against R52's 58) and end when the cloud stops filling in, not on a timer; the head sweeps at one steady speed through the whole stop; the duck walks twice as far between stops. n=6: map winner switches 77 -> 25 a minute, objects within 2 m in reach found 85 %, walls and furniture misread as small 2.3 %, stands 64/66. Watch the balls (23 %, the weakest number) and the walls on the longer walks. Compare R55b for the fastest head. PROMOTED (design doc §17.32).",
   "state": {
    "config": "a1v2_r46_cloud.json",
    "mode": "level2",
@@ -946,9 +946,9 @@
   }
  },
  {
-  "name": "R56 · the GLANCE: ★ CLOUD with stops ending sooner -- the cloud's growth threshold at 0.45, a stop of about 10 s",
+  "name": "★ CLOUD · R56 · the GLANCE: the head sweeps, the map reads the cloud, and a stop ends when the cloud stops growing (threshold 0.45, about 10 s)",
   "series": 56,
-  "hint": "WATCH (seed 3, fast-forward through 600 s): the promoted R55 look with one change -- a stop ends once the cloud's growth falls below 45 % of its own peak (R55: 10 %). Stops of 7-15 s (median 10.5 s against R55's 20.7): the duck glances around and moves on. n=6 against R55: walls located 66 -> 70 % of the in-reach wall, objects within 2 m in reach found 85 -> 72 %, balls 23 -> 34 %, stands 66/66; the cost is walls and furniture read as small 2.3 -> 4.3 %. Compare R56b for the floor. WORKING, not promoted (design doc §17.33).",
+  "hint": "PROMOTED (the operator's eye, 2026-09-15: \"the robot is able to make a very solid map in a very short amount of time\"). WATCH (seed 3, fast-forward through 600 s): the R55 look with one change -- a stop ends once the cloud's growth falls below 45 % of its own peak (R55: 10 %). Stops of 7-15 s (median 10.5 s against R55's 20.7): the duck glances around and moves on. n=6 against R55: walls located 66 -> 70 % of the in-reach wall, objects within 2 m in reach found 85 -> 72 %, balls 23 -> 34 %, stands 66/66; the cost is walls and furniture read as small 2.3 -> 4.3 %. Compare R56b for the floor. PROMOTED (design doc §17.33).",
   "state": {
    "config": "a1v2_r46_cloud.json",
    "mode": "level2",
