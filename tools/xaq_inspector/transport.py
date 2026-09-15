@@ -48,13 +48,16 @@ class ControlClient:
 
     def close(self) -> None:
         with self._lock:
-            if self._sock is not None:
-                try:
-                    self._sock.close()
-                except OSError:
-                    pass
-                self._sock = None
-                self._buf = b""
+            self._drop_locked()
+
+    def _drop_locked(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+        self._buf = b""
 
     def set_endpoint(self, host: str, port: int) -> None:
         """Point at a different brain.  Drops any live socket so the next
@@ -87,12 +90,19 @@ class ControlClient:
         msg = json.dumps({"verb": verb, **kwargs}) + "\n"
         with self._lock:
             assert self._sock is not None
-            self._sock.sendall(msg.encode())
-            while b"\n" not in self._buf:
-                chunk = self._sock.recv(4096)
-                if not chunk:
-                    raise ConnectionError("control socket closed by peer")
-                self._buf += chunk
+            try:
+                self._sock.sendall(msg.encode())
+                while b"\n" not in self._buf:
+                    chunk = self._sock.recv(4096)
+                    if not chunk:
+                        raise ConnectionError("control socket closed by peer")
+                    self._buf += chunk
+            except OSError:
+                # A timeout or reset can leave this request's reply still in flight,
+                # and the next call would read it as its own.  Drop the connection so
+                # the next call dials fresh rather than pairing replies off by one.
+                self._drop_locked()
+                raise
             line, _, rest = self._buf.partition(b"\n")
             self._buf = rest
         return json.loads(line.decode())
