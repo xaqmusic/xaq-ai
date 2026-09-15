@@ -13,7 +13,7 @@ Backend support shipped alongside this widget; older brain binaries
 that don't expose the per-tick fields fall back to EMA-only.
 
 Event markers fire whenever:
-  * gng.last_step_baked  changes  → gold line
+  * gng.last_step_baked  rises    → gold line
   * gng.mitosis_count    changes  → magenta line
   * gng.last_death_step  changes  → red line
 
@@ -116,10 +116,13 @@ class EpmTlePlot(QWidget):
 
         # Detect events.  GNG counters are cumulative-style integers; a
         # change from one tick to the next means an event fired.
-        baked_step  = int(gng.get("last_step_baked", 0))
+        # `last_step_baked` is a per-step bool in the C++ GNG (gng.cpp to_json), not a
+        # counter: mark its rising edge only, or each bake draws a second line when the
+        # flag clears.  Sampled at the diag rate, so bakes between samples go unmarked.
+        baked_step  = int(bool(gng.get("last_step_baked", False)))
         mitosis_cnt = int(gng.get("mitosis_count",   0))
         death_step  = int(gng.get("last_death_step", 0))
-        if self._last_baked_step is not None and baked_step != self._last_baked_step:
+        if self._last_baked_step is not None and baked_step and not self._last_baked_step:
             self._add_marker((255, 215, 0))     # gold
         if self._last_mitosis    is not None and mitosis_cnt != self._last_mitosis:
             self._add_marker((255,   0, 255))   # magenta
