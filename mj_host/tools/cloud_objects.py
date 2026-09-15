@@ -11,6 +11,10 @@ compact stream drops the cloud records, qpos and joint positions.
   cloud_objects.py arms NAME=GLOB [NAME=GLOB ...]
       per arm and seed: the head's motion through the stops, cloud size, the objects within 2 m found, balls found,
       and the rule's precision -- the R52 gaze-sweep A/B
+  cloud_objects.py seek LOG...
+      the things phase's T2: every SEEK EPISODE (a held target, from the stop that set it to the tick its need returns
+      to 0) with what the target really was (the last attended thing of that stop, labelled by the manifest), the body's
+      closest approach to the target's true position, whether an object was touched, and how the episode ended
   cloud_objects.py things LOG...
       the things phase's T1 (microduck_things_phase.md): the MODULE's stack rule against this file's, cluster by
       cluster on the same filed clouds (faithfulness); what the ATTENDED thing really was, per tick ("thg", labelled
@@ -459,6 +463,76 @@ def cmd_things(paths: list[str], gapk: float) -> None:
                 print(f"  TLE at the attended thing p10/50/90 {np.percentile(tles, 10):.3f}/{np.percentile(tles, 50):.3f}/{np.percentile(tles, 90):.3f}")
 
 
+# ------------------------------------------------------------------------------------------------ seek
+
+def seek_episodes(path: str) -> tuple[list, float]:
+    """Seek episodes of one run: from the tick a target is first held to the tick its need returns to 0.  The target
+    is the LAST attended thing of the stop that set it (its world position through the next cloudv's anchor)."""
+    half, lay, movable, furniture = load_scene()
+    eps, cur, pending, last_att = [], None, [], None
+    obj0 = objlast = None
+    for line in open(path):
+        if not line.startswith('{"t"'):
+            continue
+        r = json.loads(line)
+        t, q = r["t"], r["qpos"]
+        objs = objects_at(r, lay, movable)
+        if t >= 700:
+            if obj0 is None:
+                obj0 = [(ox, oy) for _, ox, oy, _ in objs]
+            objlast = [(ox, oy) for _, ox, oy, _ in objs]
+        th = r.get("thg")
+        if th is not None and th[2] >= 0:
+            pending.append((t, th))
+        c = r.get("cloudv")
+        if c and pending:
+            t0, th0 = pending[-1]
+            wx, wy = to_world(c["anchor"], th0[3], th0[4])
+            last_att = dict(t=t0, wx=wx, wy=wy, lab=label(wx, wy, objs, half, furniture), rng=th0[5])
+            pending = []
+        sk = r.get("seek")
+        if not sk:
+            continue
+        held = sk[0] > 0
+        if held and cur is None:
+            cur = dict(t0=t, target=None, dmin=9.0, touched=0, walls=0, steer3=0, ticks=0, end=None)
+        if cur is not None:
+            if r.get("stop", 0) == 0 and cur["target"] is None and last_att is not None:
+                cur["target"] = last_att
+            cur["ticks"] += 1
+            cur["steer3"] += r.get("steer") == 3
+            cur["touched"] += r.get("obj", 0)
+            cur["walls"] += r.get("wall", 0)
+            if cur["target"]:
+                cur["dmin"] = min(cur["dmin"], math.hypot(q[0] - cur["target"]["wx"], q[1] - cur["target"]["wy"]))
+            if not held:
+                cur["end"] = "arrive" if sk[1] < 0.3 else "forget"
+                cur["t1"] = t
+                eps.append(cur)
+                cur = None
+    moved = sum(math.hypot(a[0] - b[0], a[1] - b[1]) for a, b in zip(obj0, objlast)) if obj0 and objlast else 0.0
+    return eps, moved
+
+
+def cmd_seek(paths: list[str]) -> None:
+    tot, dmins, ends, touched = collections.Counter(), collections.defaultdict(list), collections.Counter(), collections.Counter()
+    for path in paths:
+        eps, moved = seek_episodes(path)
+        labs = collections.Counter((e["target"] or {}).get("lab", "none") for e in eps)
+        print(f"{os.path.basename(path)}: {len(eps)} episodes, targets {dict(labs)}, objects moved over the control phase {moved:.2f} m")
+        for e in eps:
+            lab = (e["target"] or {}).get("lab", "none")
+            tot[lab] += 1; dmins[lab].append(e["dmin"]); ends[e["end"]] += 1
+            touched[lab] += e["touched"] > 0
+            print(f"   t {e['t0']:6.1f}-{e.get('t1', 0):6.1f} target {lab:>6} at {(e['target'] or {}).get('rng', 0):.2f} m: closest "
+                  f"{e['dmin']:.2f} m, seek won {100 * e['steer3'] / max(1, e['ticks']):3.0f} % of {e['ticks'] / 50:5.1f} s, "
+                  f"touched an object on {e['touched']} ticks, wall ticks {e['walls']}, end {e['end']}")
+    print(f"\nEPISODES by target: {dict(tot)}; ends: {dict(ends)}")
+    for lab in tot:
+        print(f"  {lab:>6}: closest approach p50 {statistics.median(dmins[lab]):.2f} m, within 0.4 m on "
+              f"{sum(d < 0.4 for d in dmins[lab])}/{len(dmins[lab])}, an object touched during {touched[lab]}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -468,6 +542,8 @@ def main() -> None:
     a = sub.add_parser("arms", help="per-arm cloud and object scores, NAME=GLOB per arm")
     a.add_argument("arms", nargs="+")
     a.add_argument("--gapk", type=float, default=0.12)
+    sk = sub.add_parser("seek", help="every seek episode against the manifest (things phase T2)")
+    sk.add_argument("logs", nargs="+")
     th = sub.add_parser("things", help="the module's things against the manifest and the offline rule (things phase T1)")
     th.add_argument("logs", nargs="+")
     th.add_argument("--gapk", type=float, default=0.12)
@@ -476,6 +552,8 @@ def main() -> None:
         cmd_rules(args.logs, args.gapk)
     elif args.cmd == "things":
         cmd_things(args.logs, args.gapk)
+    elif args.cmd == "seek":
+        cmd_seek(args.logs)
     else:
         cmd_arms(args.arms, args.gapk)
 

@@ -154,6 +154,16 @@ Blind metric: contacts, which a duck crashing into furniture satisfies; its comp
 things against walls, and re-approach after a displacement. The first (d): move a ball while the duck walks;
 it should re-find it at its next stop at that place.
 
+**Measured 2026-09-15 (design doc §17.35; R60, n = 6 × 1500 s).** Built as `BearingSeekLoop`, a generic loop
+that fixes the thing's position by dead reckoning while the bearing is live and homes to it while the cloud is
+closed, on the arbiter's vision channel against play. Loud at the episode level: 21 episodes, 17 at a real
+object, blocks approached to a median 0.27 m (7 of 11 within 0.4 m, three into contact), arrival by dead
+reckoning ends 20 of 21. Walls fall on four seeds of six (21.7 → 12.4 a minute), coverage and stands tie.
+Object displacement is blind here (the base already moves the room's objects 3.5 m a run by stumbling), so
+interaction waits on T4. The sector gate on the avoid prior is a `REGRESSION` on walls (28.9 a minute; a target
+by a wall is what it hides). **T2 `WORKING` as a mechanism, `PARTIAL` as a behaviour; not promoted; preset R60
+for the operator's eye.** Next: T4 before T3.
+
 ### T3. Looking, the approach cloud, and touch
 
 Three small levers that make the approach seen rather than blind:

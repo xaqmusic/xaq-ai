@@ -182,6 +182,7 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         layout = [(nm, adr) for nm, adr, nn in json.load(open(man)).get("qpos_layout", []) if nn == 7]
     obj_start = {}; obj_end = {}
     tooclose = tle_sum = 0.0; novel = 0; escaped = 0; steer_avoid = steer_play = 0
+    steer_seek = seek_held = seek_ends = 0; prev_seek_value = 0.0
     hist = {"walk": 0, "stopW": 0, "stand": 0, "resc": 0}       # W0: the behaviour histogram
     yaw_stop, yaw_walk = [], []                                    # W2: the head-yaw joint (policy index 7) at stops vs walking
     # W5 (the twist brain's yaw channel, design doc §17.17): the instruments that measured it NOT
@@ -233,7 +234,12 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         if prev is not None: path += math.hypot(x - prev[0], y - prev[1])
         prev = (x, y); win_pts.append((x, y))
         w = int(r.get("wall", 0)); contact += w
-        st_ = int(r.get("steer", 0)); steer_avoid += (st_ == 2); steer_play += (st_ == 1)
+        st_ = int(r.get("steer", 0)); steer_avoid += (st_ == 2); steer_play += (st_ == 1); steer_seek += (st_ == 3)
+        sk = r.get("seek")
+        if sk:
+            seek_held += sk[0] > 0.0
+            if prev_seek_value > 0.0 and sk[0] == 0.0: seek_ends += 1     # a held target dropped: arrived or forgotten
+            prev_seek_value = sk[0]
         if w and not prev_wall: wall_eps += 1
         prev_wall = w
         down += float(r.get("tilt", 0.0)) > 60.0
@@ -267,6 +273,7 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
         "nodes": len(winners), "map_tle": tle_sum / max(1, n), "novel_pct": 100.0 * novel / max(1, n),
         "switch_min": switches * 60.0 / max(1e-9, (secs - control_from)), "straight": _straightness(win_pts),
         "escaped": escaped, "avoid_pct": 100.0 * steer_avoid / max(1, n), "play_pct": 100.0 * steer_play / max(1, n),
+        "seek_pct": 100.0 * steer_seek / max(1, n), "seek_held_pct": 100.0 * seek_held / max(1, n), "seek_ends": seek_ends,
         "objs_min": obj_eps / minutes, "down_pct": 100.0 * down / max(1, n),
         "head_w_rms": math.sqrt(hw2 / nh) if nh else float("nan"), "head_g_dev": math.sqrt(hg2 / nh) if nh else float("nan"),
         "obj_moved_m": sum(math.hypot(obj_end[k][0] - obj_start[k][0], obj_end[k][1] - obj_start[k][1]) for k in obj_end),
@@ -377,6 +384,7 @@ def main():
             ("cells", "cells"), ("span", "span m²"), ("straight", "straight"), ("nodes", "nodes"), ("switch_min", "switch/min"), ("map_tle", "mapTLE"), ("novel_pct", "novel%"),
                   ("hdg_err", "hdgErr"), ("ref_follow", "refFollow"), ("vyaw_abs", "|vyaw|"), ("yaw_flips", "yawFlip/min"), ("vx_cmd", "vxCmd"),
             ("turns", "turns"), ("rescues_min", "resc/min"), ("driven_pct", "driven%"), ("escaped", "escaped"), ("avoid_pct", "avoid%"), ("play_pct", "play%"),
+            ("seek_pct", "seek%"), ("seek_held_pct", "seekHeld%"), ("seek_ends", "seekEnds"),
             ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%"),
             ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev"),
             ("walk_pct", "walk%"), ("stopW_pct", "stopW%"), ("stand_pct", "stand%"), ("resc_pct", "resc%"),

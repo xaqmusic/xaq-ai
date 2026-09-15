@@ -137,11 +137,18 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     publish("imu", {float(g[0]), float(g[1]), float(g[2]), float(w[0]), float(w[1]), float(w[2])});
     // The 12-slot sense the bridge appends as load slots: attitude, rates, accel, the
     // sensed velocity again, two spare.
+    std::array<float, 4> tof_s = tof;
+    if (seek_gate_ && last_steer_ == 3 && seek_present_) {
+        // the seek loop won the reference last tick: the slot of its target's sector reads free
+        // (slots 12/13/14 = columns 0-2 / 3-4 / 5-7 = left / ahead / right; the sector by the bearing)
+        const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1);
+        if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
+    }
     publish("sense", {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
                       unit(a[0] / 20.0), unit(a[1] / 20.0), unit(a[2] / 20.0),
                       last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846),
                       unit(map_tle_),                    // slot 11: the map's surprise — novelty
-                      tof[0], tof[1], tof[2], tof[3]});
+                      tof_s[0], tof_s[1], tof_s[2], tof_s[3]});
     if (place) {
         std::vector<float> v(place->pose.begin(), place->pose.end());
         switch (place_form_) {
@@ -173,6 +180,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // heading and the body velocity as [lateral, forward] in command units.  Nothing in the
     // level-0..2 graphs reads them; a graph that does (R27's PlayLoop) is a new arm.
     publish("heading", {float(heading_)});
+    // The dead-reckoned pose as [x, y, yaw] for a loop that remembers a POSITION (BearingSeekLoop, things
+    // phase T2): the place pose carries x/2 and y/2; the yaw is the unwrapped heading (same frame).
+    if (place) publish("odom", {float(2.0 * place->pose[0]), float(2.0 * place->pose[1]), float(heading_)});
     publish("vel_ego", {unit(vel_body[1] / kTwistRangeVy), unit(vel_body[0] / kTwistRangeVx)});
     publish("tof", {tof[0], tof[1], tof[2], tof[3]});   // the ToF summary on its own topic (an avoidance LOOP reads it)
 
@@ -197,16 +207,30 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         auto g = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(topic));
         return (g && g->values.size() > 0) ? double(g->values[0]) : -1.0;
     };
-    const double g_avoid = gain_of("arbiter.gain.klino"), g_play = gain_of("arbiter.gain.play");
+    // T2 (things phase): the arbiter's vision channel is the SEEK loop on the duck (BearingSeekLoop on
+    // percept.seek_bearing); its gain is arbiter.gain.vision.  Steer code 3.
+    const double g_avoid = gain_of("arbiter.gain.klino"), g_play = gain_of("arbiter.gain.play"), g_seek = gain_of("arbiter.gain.vision");
     last_steer_ = 0;
     const char* bearing_topic = "percept.play_bearing";
-    if (g_avoid >= 0.0 || g_play >= 0.0) bearing_topic = (g_avoid > 0.5) ? "percept.avoid_bearing" : ((g_play > 0.5) ? "percept.play_bearing" : nullptr);
+    int steer_code = 1;
+    if (g_avoid >= 0.0 || g_play >= 0.0 || g_seek >= 0.0) {
+        if (g_avoid > 0.5)      { bearing_topic = "percept.avoid_bearing"; steer_code = 2; }
+        else if (g_seek > 0.5)  { bearing_topic = "percept.seek_bearing";  steer_code = 3; }
+        else if (g_play > 0.5)  { bearing_topic = "percept.play_bearing";  steer_code = 1; }
+        else bearing_topic = nullptr;
+    }
+    seek_present_ = false;
+    if (auto sv = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.seek_value")))
+        if (sv->values.size() > 0) { seek_present_ = true; seek_value_ = sv->values[0]; }
+    if (auto sr = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.seek_range")))
+        if (sr->values.size() > 0) seek_range_ = sr->values[0];
     if (bearing_topic)
     if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(bearing_topic))) {
         if (pb->values.size() >= 2) {
             const double cx = pb->values[0], cy = pb->values[1];
-            if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); ++play_steers_; last_steer_ = (g_avoid > 0.5) ? 2 : 1; if (g_avoid > 0.5) ++avoid_steers_; }
-            else if (g_avoid > 0.5 || g_play > 0.5) { heading_ref_ = heading_; ++play_steers_; last_steer_ = (g_avoid > 0.5) ? 2 : 1; if (g_avoid > 0.5) ++avoid_steers_; }   // a winner with NO bearing releases the reference: no direction held, the reflex acts
+            const auto won = [&]() { ++play_steers_; last_steer_ = steer_code; if (steer_code == 2) ++avoid_steers_; if (steer_code == 3) ++seek_steers_; };
+            if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); won(); if (steer_code == 3) seek_ego_ = std::atan2(cx, cy); }
+            else if (g_avoid > 0.5 || g_play > 0.5 || g_seek > 0.5) { heading_ref_ = heading_; won(); }   // a winner with NO bearing releases the reference: no direction held, the reflex acts
         }
     }
     // Wander: boredom is the map's surprise sitting below 0.8 of its own long average

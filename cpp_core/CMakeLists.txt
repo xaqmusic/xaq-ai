@@ -209,6 +209,7 @@ add_library(ogma_core
     src/ogma/modules/PlaceVectorBuilder.cpp
     src/ogma/modules/LoopCompetence.cpp
     src/ogma/modules/TofAvoidLoop.cpp
+    src/ogma/modules/BearingSeekLoop.cpp
     src/ogma/modules/ColumnBuilder.cpp
     src/ogma/modules/PlaceGraphPlanner.cpp
     src/ogma/modules/PlayLoop.cpp
@@ -596,6 +597,9 @@ gtest_discover_tests(test_motor_fader_streams)
 gtest_discover_tests(test_motor_epm)
 gtest_discover_tests(test_postural_prior)
 gtest_discover_tests(test_state_prior)
+add_executable(test_bearing_seek_loop tests/ogma/test_bearing_seek_loop.cpp)
+target_link_libraries(test_bearing_seek_loop PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_bearing_seek_loop)
 add_executable(test_cloud_map tests/ogma/test_cloud_map.cpp)
 target_link_libraries(test_cloud_map PRIVATE ogma_core GTest::gtest_main pthread)
 gtest_discover_tests(test_cloud_map)

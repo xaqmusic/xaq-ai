@@ -1238,6 +1238,7 @@ std::string g_head_graph;
 // on a standing body and saves; H2 loads that into a walking run with the prior on.
 std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
+bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
 // Two INSTRUMENTS for the ToF studies (2026-09-12), both gated so every existing log stays
 // byte-comparable and the physics is untouched either way:
 //   --log-motor-tle   adds "mtle": the twist brain's own forward-model surprise, per tick.  The
@@ -1379,6 +1380,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
+    if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
     // The cloud lives in the graph now (ogma::CloudMap).  The host's job is to hand it one cast
@@ -2099,6 +2101,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         body.touching_wall() ? 1 : 0, brain.last_steer(), brain.map_tle(), brain.map_novel() ? 1 : 0, brain.map_winner(),
                         (t % 25 == 0) ? brain.map_nodes() : -1, brain.heading(), brain.heading_ref());
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
+            // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
+            if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
             if (g_log_motor_tle) {
                 std::printf(",\"mtle\":%.5f", brain.motor_tle());
                 if (stander) std::printf(",\"btle\":%.5f", stander->motor_tle());
@@ -2510,6 +2514,8 @@ int main(int argc, char** argv) {
             g_log_motor_tle = true;
         } else if (a == "--log-tof-cloud") {
             g_log_tof_cloud = true;
+        } else if (a == "--seek-gate") {
+            g_seek_gate = true;
         } else if (a == "--no-backing") {
             g_no_backing = true;
         } else if (a == "--save-head") {

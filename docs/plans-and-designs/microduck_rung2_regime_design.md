@@ -3186,3 +3186,68 @@ curvature explicitly). The stability gate on attention `NULL` offline, not built
 stability would mean something). R59 is the T1 config the seek loop (T2) builds on. Passive on every seed:
 the walk is byte-identical to `★ CLOUD`, so there is nothing for the operator's eye yet; presets R57–R59
 (seed 3) show the cloud panel's counts at each stop.
+
+### 17.35 The seek loop: the duck walks to a thing it saw, remembering where it was (R60, things phase T2, 2026-09-15)
+
+**Built.** `ogma::BearingSeekLoop` (new, generic, registered): the duck sees a small thing only while it stands
+(the cloud exists at a stop and the thing bearing reads proximity 0 the moment the body walks), so a loop that
+walked toward things would be silent for the whole walk unless it remembered where the thing was. While the
+bearing is live the loop fixes the thing's POSITION by dead reckoning (the body's odometry pose, published by
+the adapter as `reality.proprio.odom`, plus the bearing and the range the proximity encodes); while the bearing
+is silent it homes to that position, re-aiming as the body moves and turns, until the remaining range falls
+under `arrive_m` (0.25) or its confidence decays to the floor (`forget_ticks` 3000, about 60 s to 0.37). The
+Cell's `VisualHomingNav` remembered an allocentric bearing through an occlusion; the duck has range, so the
+belief is a position and arrival is the loop's own. Its need is the confidence in the held target; its honest
+signal, for `LoopCompetence` (sign −1), the range left. R60 (`a1v2_r60_seek.json`) is R59 plus the loop and
+R28's arbitration with seek on the arbiter's vision channel: G_seek = need × trust, G_play = (1 − need) ×
+trust; the adapter takes the winner's bearing (steer 3). A host flag `--seek-gate` (R60g) makes the ToF sense
+slot of the target's sector read free while seek holds the reference, so the twist brain's proximity prior does
+not push the body off the thing it walks to. Four unit tests pin the loop (`test_bearing_seek_loop`); the
+unchanged R46 config is byte-identical on the new binary (md5 `cb24520c…`); `l2_sweep.py` gains `seek%`,
+`seekHeld%` and `seekEnds`; `cloud_objects.py seek` scores every episode against the manifest.
+
+**The smoke run first** (seed 3, 900 s): at the first stop the loop fixed a target at 1.52 m, the body homed
+to it on the walk (range 1.52 → 0.30 m over 46 s, seek winning every tick), and once the range stopped falling
+the arbiter handed the reference back to play. The target was a wall base the rule had read as small (the
+18 % false-positive class of T1), 17 cm from the wall; the frames are right (the attended cluster's world
+position from the anchor matches the direction the body took) and the dead-reckoned endpoint sat 0.5 m from it.
+
+**Measured, n = 6 × 1500 s, the playroom, `★ CLOUD`'s arguments, against R59:**
+
+| | R59 (base) | **R60 seek** | R60g seek + gate |
+|---|---|---|---|
+| seek wins the reference, % of ticks | — | 28 ± 8 | 24 ± 10 |
+| a target held, % of ticks | — | 55 ± 16 | 49 ± 20 |
+| seek episodes (all seeds) | — | 21 | 23 |
+| targets that were real objects | — | 17 / 21 (11 blocks, 6 balls) | 20 / 23 |
+| blocks: closest approach p50 · within 0.4 m · an object touched | — | **0.27 m · 7 / 11 · 3** | 0.24 m · 11 / 14 · 3 |
+| balls: closest approach p50 · within 0.4 m · touched | — | 0.52 m · 1 / 6 · 0 | 0.45 m · 3 / 6 · 2 |
+| episodes ending by arrival / forgetting | — | 20 / 1 | 21 / 2 |
+| walls / min (per seed, down vs base) | 21.7 ± 23.2 | **12.4 ± 14.4** (4 / 6) | 28.9 ± 26.9 (2 / 6; seed 4: 13.9 → 80.9) |
+| cells | 145 ± 33 | 124 ± 29 (3 / 6 down) | 131 ± 34 |
+| object contacts / min · objects moved, m | 14.1 ± 18.8 · 3.5 ± 2.0 | 19.2 ± 26.8 · 3.4 ± 2.2 | 5.9 ± 7.8 · 3.0 ± 2.1 |
+| stands held · stops · stop length | 66 / 66 · 11 · 15.0 s | 63 / 65 · 10.8 · 14.5 s | 66 / 66 · 11 · 15.4 s |
+
+**Reading it.** The mechanism is loud at the episode level: 21 episodes, 17 of them at a real object, and for
+blocks the body comes within 0.4 m of the thing's true position on 7 of 11 by dead reckoning alone, three times
+into contact (two episodes of 15–19 s pushing a block). Balls are harder (median 0.52 m): the ball is the
+thing most likely to have moved between the stop that fixed it and the walk (the base already displaces the
+room's four movables by 3.5 m a run through the duck's ordinary stumbling), and its cluster centroid is the
+least stable. Arrival by dead reckoning ends 20 of 21 episodes. On the aggregate metrics the lever ties or
+helps: wall contacts fall on four seeds of six (the seek heading is a steady direction, like play's), coverage
+ties, stands hold. Object contacts and displacement are blind here: the base moves objects 3.5 m a run
+without seeking anything, so "interaction" cannot be read from displacement until the duck stops at the
+thing (T4) and something distinguishes a sought contact from a stumbled one.
+
+**The gate.** Blinding the target's ToF sector while seek holds the reference brings the body closer (blocks
+11 / 14 within 0.4 m, balls 3 / 6) at the cost of the walls: 28.9 / min against 12.4, up on four seeds of six,
+seed 4 to 80.9. A held target 17 cm from a wall, or a wall behind the thing, is exactly what the sector gate
+hides. `REGRESSION` in this form; re-use context: a gate limited to the last half metre of the approach, or one
+that opens only for a target whose vocabulary node is a thing's rather than a wall's (the thing EPM separates
+them at purity 0.9).
+
+**Verdicts.** T2's seek loop `WORKING` as a mechanism and `PARTIAL` as a behaviour at n = 6: it takes the duck
+to the things it saw, walls do not rise, and the interaction the phase is for needs the stop at arrival (T4)
+before it can be read. Not promoted; preset R60 (seed 3, fast-forward through 600 s) puts the first walk-to-a-
+thing in front of the operator's eye; R60g the gated form. Next: T4's arrival stop, then T3's gaze at the
+thing, so that a thing reached is a thing looked at.

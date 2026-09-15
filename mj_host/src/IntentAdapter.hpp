@@ -110,7 +110,17 @@ public:
     double heading() const { return heading_; }          // the unwrapped own-yaw (rad) and the reference the
     double heading_ref() const { return heading_ref_; }  // twist brain is held to: the JSONL's hdg field
     int play_steers() const { return play_steers_; }
-    int last_steer() const { return last_steer_; }   // 0 none, 1 play, 2 avoidance (this tick)
+    int last_steer() const { return last_steer_; }   // 0 none, 1 play, 2 avoidance, 3 seek (this tick)
+    // THE SEEK GATE (things phase T2, `--seek-gate`): while the seek loop holds the heading reference, the
+    // ToF sense slot of the sector its target lies in reads 0, so the twist brain's proximity prior does
+    // not push the body off the thing it is walking to.  Gated by the state it exploits (a held seek
+    // target, its sector); off = byte-identical.
+    void set_seek_gate(bool on) { seek_gate_ = on; }
+    int  seek_gated() const { return seek_gated_; }   // ticks the gate zeroed a slot
+    // The seek loop's token (reality.cognitive.seek_value / seek_range), if a graph has one.
+    bool   seek_present() const { return seek_present_; }
+    double seek_value()   const { return seek_value_; }
+    double seek_range()   const { return seek_range_; }
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }
     // --no-backing (2026-09-10, operator's observation: the duck backs into a wall and stays):
@@ -190,6 +200,10 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
+    bool seek_gate_ = false; int seek_gated_ = 0;
+    bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
+    int  seek_steers_ = 0;
+    double seek_ego_ = 0.0;                   // the seek bearing this tick, body frame (rad, + = right)
     bool no_backing_ = false; int backing_clamped_ = 0;
 };
 
