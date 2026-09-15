@@ -28,6 +28,12 @@ pip install -r requirements.txt
 tools/run_inspector.sh
 ```
 
+To reuse the transport or widgets from another project, install it as a package:
+
+```bash
+pip install -e tools/xaq_inspector   # provides the `xaq_inspector` package and an `xaq-inspector` command
+```
+
 Run `tools/run_inspector.sh` from the repo root (or anywhere — it locates
 itself). **Don't run `python -m xaq_inspector` directly unless your CWD is
 `tools/`** (the parent of this package) — `xaq_inspector` is a plain
