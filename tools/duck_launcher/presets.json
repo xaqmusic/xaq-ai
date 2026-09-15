@@ -898,9 +898,9 @@
   }
  },
  {
-  "name": "R55 · the map reads the CLOUD, a stop ends when its cloud stops growing, and the head sweeps at a steady 0.6 rad/s",
+  "name": "★ CLOUD · R55 · the map reads the CLOUD, a stop ends when its cloud stops growing, and the head sweeps at a steady 0.6 rad/s",
   "series": 55,
-  "hint": "WATCH (seed 5, fast-forward through 600 s): stops are short now (about 24 s against R52's 58) and end when the cloud stops filling in, not on a timer; the head sweeps at one steady speed through the whole stop; the duck walks twice as far between stops. n=6: map winner switches 77 -> 25 a minute, objects within 2 m in reach found 85 %, walls and furniture misread as small 2.3 %, stands 64/66. Watch the balls (23 %, the weakest number) and the walls on the longer walks. Compare R55b for the fastest head. WORKING, not promoted (design doc §17.32).",
+  "hint": "PROMOTED (the operator's eye, 2026-09-15: \"the best choice to promote -- faster head movement looks unnatural and does not seem to speed up stops\"). WATCH (seed 5, fast-forward through 600 s): stops are short now (about 24 s against R52's 58) and end when the cloud stops filling in, not on a timer; the head sweeps at one steady speed through the whole stop; the duck walks twice as far between stops. n=6: map winner switches 77 -> 25 a minute, objects within 2 m in reach found 85 %, walls and furniture misread as small 2.3 %, stands 64/66. Watch the balls (23 %, the weakest number) and the walls on the longer walks. Compare R55b for the fastest head. PROMOTED (design doc §17.32).",
   "state": {
    "config": "a1v2_r46_cloud.json",
    "mode": "level2",
@@ -942,6 +942,54 @@
    "seed_random": false,
    "arena_shift": 0.0,
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 1.5 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.1",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R56 · the GLANCE: ★ CLOUD with stops ending sooner -- the cloud's growth threshold at 0.45, a stop of about 10 s",
+  "series": 56,
+  "hint": "WATCH (seed 3, fast-forward through 600 s): the promoted R55 look with one change -- a stop ends once the cloud's growth falls below 45 % of its own peak (R55: 10 %). Stops of 7-15 s (median 10.5 s against R55's 20.7): the duck glances around and moves on. n=6 against R55: walls located 66 -> 70 % of the in-reach wall, objects within 2 m in reach found 85 -> 72 %, balls 23 -> 34 %, stands 66/66; the cost is walls and furniture read as small 2.3 -> 4.3 %. Compare R56b for the floor. WORKING, not promoted (design doc §17.33).",
+  "state": {
+   "config": "a1v2_r46_cloud.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 3,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R56b · as R56 at threshold 0.6 -- the shortest stops the rule allows (about 8 s)",
+  "series": 56,
+  "hint": "WATCH (seed 3): stops of 7-12 s, at the floor the 2 s judgement windows set. n=6: walls located 62 % and a quarter of clouds locate 29 % or less, the cloud 41 % thinner than R55's, precision 0.72, balls 23 %. PARTIAL (design doc §17.33).",
+  "state": {
+   "config": "a1v2_r46_cloud.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 3,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.6",
    "fast_until": 600
   }
  }

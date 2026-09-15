@@ -43,6 +43,10 @@ GAP_MIN = 0.10
 NEAR_M = 2.0                                                   # objects this close to a cloud's anchor are "in reach"
 BABBLE_FIELD = 0.7 + math.radians(22.5)                        # the babble's yaw clamp + half the sensor's field
 HEAD_YAW_Q, HEAD_PITCH_Q = 7, 6                                # joint order: duck-control's JOINT_NAMES minus the mouth
+WALL_T = 0.025                                                 # playroom_gen.py: a wall's half-thickness (inner face at half - WALL_T)
+WALL_REACH = 2.4                                               # m: CloudMap keeps returns to max_range 2.5
+WALL_BEARINGS = np.radians(np.arange(-64, 65, 2))              # across the cloud view's +-64 deg
+WALL_BEARING_TOL, WALL_RANGE_TOL = math.radians(2.0), 0.12
 
 
 def load_scene(path: Path = MANIFEST):
@@ -189,7 +193,8 @@ def score_log(path: str, gapk: float) -> dict:
     half, lay, movable, furniture = load_scene()
     res = dict(clouds=0, vox=[], brk=[], flagged=0, flagged_real=0, near=0, found=0, hits=[], ball_near=0,
                ball_found=0, field_near=0, field_found=0, wide_near=0, wide_found=0, stop_ticks=0, moving=0,
-               yaw_span=[], open_ticks=0, seconds=0.0, obst=0, obst_small=0, speeds=[])
+               yaw_span=[], open_ticks=0, seconds=0.0, obst=0, obst_small=0, speeds=[], wall_expected=0,
+               wall_seen=0, wall_seen_per_cloud=[])
     prev, yaws = None, []
     for line in open(path):
         if not line.startswith('{"t"'):
@@ -251,6 +256,27 @@ def score_log(path: str, gapk: float) -> dict:
             key = "field" if bearing <= BABBLE_FIELD else "wide"
             res[f"{key}_near"] += 1
             res[f"{key}_found"] += found
+        # WALLS LOCATED: of the bearings across the view (every 2 deg over +-64) whose room wall lies within WALL_REACH of
+        # the anchor, the share where the cloud holds an off-floor voxel within 2 deg and 12 cm of that wall's true range.
+        # "An idea of where the walls are": furniture standing in front of a wall hides it the same in every arm.
+        ob = np.arctan2((V[off, 1] + 0.5) * vm, (V[off, 0] + 0.5) * vm)
+        orng = np.hypot((V[off, 0] + 0.5) * vm, (V[off, 1] + 0.5) * vm)
+        inner = half - WALL_T
+        expected = seen = 0
+        for b in WALL_BEARINGS:
+            dx, dy = math.cos(ayaw + b), math.sin(ayaw + b)
+            tx = (math.copysign(inner, dx) - ax) / dx if abs(dx) > 1e-9 else math.inf
+            ty = (math.copysign(inner, dy) - ay) / dy if abs(dy) > 1e-9 else math.inf
+            dist = min(tx, ty)
+            if not 0.0 < dist <= WALL_REACH:
+                continue
+            expected += 1
+            dbear = np.abs(np.angle(np.exp(1j * (ob - b))))
+            seen += bool(np.any((dbear <= WALL_BEARING_TOL) & (np.abs(orng - dist) <= WALL_RANGE_TOL)))
+        res["wall_expected"] += expected
+        res["wall_seen"] += seen
+        if expected:
+            res["wall_seen_per_cloud"].append(seen / expected)
     return res
 
 
@@ -292,6 +318,10 @@ def cmd_arms(specs: list[str], gapk: float) -> None:
         print(f"{'':>12}      | obstacle clusters (walls, chairs, table, shelf) misread as SMALL: {tot('obst_small')}/{tot('obst')} "
               f"({100 * tot('obst_small') / max(1, tot('obst')):.1f} %); head speed while moving p50/p90 "
               f"{np.percentile(moving, 50) if moving.size else 0:.2f}/{np.percentile(moving, 90) if moving.size else 0:.2f} rad/s")
+        print(f"{'':>12}      | walls located: {tot('wall_seen')}/{tot('wall_expected')} bearings within {WALL_REACH} m "
+              f"({100 * tot('wall_seen') / max(1, tot('wall_expected')):.0f} %); per seed "
+              f"{ms([100 * r['wall_seen'] / r['wall_expected'] for r in per if r['wall_expected']])} %; per cloud p25/p50 "
+              + "/".join(f"{100 * np.percentile(sum((r['wall_seen_per_cloud'] for r in per), []), q):.0f}" for q in (25, 50)) + " %")
         print(f"{'':>12}      | head moving {ms([100 * r['moving'] / max(1, r['stop_ticks']) for r in per])} % of stop ticks; "
               f"yaw span p50 {ms([float(np.median(r['yaw_span'])) for r in per if r['yaw_span']])} rad; cloud open "
               f"{ms([100 * r['open_ticks'] / max(1, r['stop_ticks']) for r in per])} % of stop ticks")

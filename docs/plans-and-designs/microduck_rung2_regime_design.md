@@ -3041,3 +3041,66 @@ object and obstacle numbers both hold, with balls (19 of 82) the thing to watch,
 reference. Presets R55 (0.6) and R55b (1.5), seed 5. Nothing promoted. Re-use context for the fast sweep: a
 head-angle timestamp per frame on the robot, or a wall-continuity term that does not break at speed. Open:
 the map's error on the walk (a held view is a stale one), and F as the tempo knob.
+
+**PROMOTED (the operator's eye, 2026-09-15):** R55 at 0.6 rad/s is "the best choice to promote. Faster head
+movement looks unnatural and does not seem to speed up stops." R53 + R54 + a constant 0.6 rad/s sweep is the
+stop's look: `★ CLOUD` in the launcher. R55b (1.5 rad/s) stays in the list as the measured edge. The operator's
+next step, and why: the shorter the stop, the more interesting the robot. It glances around, has an idea of
+where the walls are even if not a perfect one, and still finds the smaller objects that matter most. The growth
+threshold is the knob for that (§17.33).
+
+### 17.33 How short a stop can be: the growth threshold (R56, 2026-09-15)
+
+**The question.** The operator, promoting R55: the shorter the stop, the more interesting the duck. It glances
+around, has an idea of where the walls are even if not a perfect one, and still finds the smaller things that
+matter most. On R55 the stop's length belongs to `--stop-cloud-end F`; §17.32 showed head speed does not move
+it. The study is F: 0.1 (R55 itself), 0.2, 0.3, 0.45 and 0.6, at 6 seeds × 1500 s each, with the rest of the
+R55 stack untouched. The base arm reproduces §17.32's 0.6 rad/s arm exactly (stands 64 / 66, mean stop
+24.0 s), a free determinism check.
+
+**A wall measure for "an idea of where the walls are"** (`cloud_objects.py arms`, added for this). Take every
+2° across the cloud view's ±64°. Among those bearings whose room wall lies within 2.4 m of the stop (the cloud
+keeps returns to 2.5 m), it counts the share where the cloud holds an off-floor voxel within 2° and 12 cm of
+that wall's true range. Furniture standing in front of a wall hides it equally in every arm. As a check on the
+measure itself, R52's 58 s stops locate 70 % and R55's 24 s stops 66 %.
+
+| F (n = 6) | stop p10 / p50 / p90 (s) | cloud open | voxels / cloud | walls located | objects ≤ 2 m in reach found | balls found | rule precision | walls and furniture read as small | real small things flagged / min | stands held |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.1 (R55) | 11.8 / 20.7 / 35.9 | 93 % | 1 691 | 66 % | 39 / 46 (85 %) | 19 / 82 (23 %) | 0.82 | 2.3 % | 0.33 | 64 / 66 |
+| 0.2 | 9.0 / 18.1 / 26.0 | 80 % | 1 473 | 60 % | 51 / 69 (74 %) | 20 / 82 (24 %) | 0.89 | 1.0 % | 0.43 | 61 / 63 |
+| 0.3 | 10.1 / 13.6 / 25.8 | 63 % | 1 528 | 70 % | 71 / 89 (80 %) | 35 / 115 (30 %) | 0.82 | 3.7 % | 0.59 | 66 / 66 |
+| **0.45** | 7.3 / **10.5** / 15.3 | 54 % | 1 296 | **70 %** | 56 / 78 (72 %) | 30 / 87 (34 %) | 0.76 | 4.3 % | 0.45 | 66 / 66 |
+| 0.6 | 6.6 / 8.4 / 12.1 | 58 % | 1 004 | 62 % | 47 / 66 (71 %) | 21 / 93 (23 %) | 0.72 | 3.8 % | 0.35 | 64 / 64 |
+
+"Cloud open" is the share of a stop's ticks with the cloud open.
+
+**What it says.**
+1. **Stops halve and tighten.** From F 0.1 to 0.45 the median stop falls from 20.7 to 10.5 s and the 90th
+   percentile from 35.9 to 15.3 s, and every stand holds.
+2. **The walls hold.** 60–70 % of the in-reach wall is located at every F up to 0.45 (70 ± 4 % per seed at
+   0.45). At 0.6 it slips to 62 %, and the worst quarter of clouds locate 29 % or less.
+3. **Small things hold, within seed noise.**
+   - Objects in reach: 85 % at 0.1, then 71–80 % from 0.2 to 0.6.
+   - Balls: 23–34 %, with no trend.
+   - Real small things flagged per minute of run, which counts the walking the shorter stops buy: highest at
+     0.3 (0.59), 0.45 at F 0.45, against R55's 0.33.
+4. **The obstacle side is what shortening costs.** Precision is 0.82–0.89 up to F 0.3, then 0.76 and 0.72,
+   and walls and furniture read as small rise from 1–2 % to about 4 %. A shorter cloud has fewer returns up
+   a wall's face to chain its stack.
+5. **There is a floor.** A stop cannot end before its cloud has opened (half a second of stillness after the
+   settle) and been judged over two 2 s windows. So at F 0.45–0.6 the cloud is open for only 54–58 % of the
+   stop, and F 0.6's 10th-percentile stop (6.6 s) sits on that floor. Stops much under 8 s would need the
+   window shortened, not F.
+6. **Behaviour.** The duck stands 5–12 % less of the control phase and walks 9–25 m more a run (5+/1− to
+   6+/0−), wall contacts a minute tie at every F (sd 9–29), and the map's error rises a little further
+   (+0.02–0.05). One line is unexplained: at F 0.3 cells fall by 50 and straightness by 0.13 on every seed,
+   and neither neighbouring F shows it.
+
+**Verdicts.** F 0.1 → 0.45 `WORKING` for the operator's aim: the median stop halves (20.7 → 10.5 s) while the
+walls are still located (70 %) and small things still found (objects in reach 72 %, balls 34 %), at the cost of
+the obstacle side (precision 0.82 → 0.76, misreads 2.3 → 4.3 %). F 0.6 `PARTIAL`: its stops are the shortest
+(8.4 s) and sit on the floor, but the cloud is 41 % thinner, the walls slip (62 %, a quarter of clouds at 29 %
+or less) and precision is 0.72. Recommended for the operator's eye: F 0.45 (preset R56, seed 3), with F 0.6 as
+the edge (R56b) and F 0.3 as the middle between quality and tempo. Nothing promoted; n = 6 is a signal. Open:
+the stop's schedule is still a timer (every 80 s from 600 s), so a shorter stop lengthens the walk rather than
+adding glances. Whether the duck should stop more often, and on what, is the next question this raises.
