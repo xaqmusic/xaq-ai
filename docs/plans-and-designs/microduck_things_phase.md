@@ -164,6 +164,16 @@ interaction waits on T4. The sector gate on the avoid prior is a `REGRESSION` on
 by a wall is what it hides). **T2 `WORKING` as a mechanism, `PARTIAL` as a behaviour; not promoted; preset R60
 for the operator's eye.** Next: T4 before T3.
 
+**The walk between stops (2026-09-17, design doc §17.37).** The operator watched R60a circle. Two causes,
+one of them a sign: the play loop's bearing had been mirrored on the duck since R27 (its frame is a
+reflection of the body's odometry; `PlayLoop.heading_sign −1` fixes it, register O51), and the twist brain's
+yaw channel does not close on a steady reference (a heading reflex on `action.vyaw`, `--heading-reflex`,
+does). R64 = R60 + `heading_sign −1` + R48's model-implied step: the reference stands still, coverage and
+path up, objects moved doubled, walls 20 → 15 a minute; the reflex on top straightens the walks further and
+brings the seek episodes to 7 of 8 blocks within 0.4 m, at the cost of walls. **Presets R64 and R64r for the
+operator's eye.** The seek loop (T2) and the arrival stop (T4) stand as measured; the walk they ride on is
+now the un-mirrored one.
+
 ### T3. Looking, the approach cloud, and touch
 
 Three small levers that make the approach seen rather than blind:

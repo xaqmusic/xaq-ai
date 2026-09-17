@@ -189,6 +189,15 @@ private:   // bearing from the loop's live odometry to a node's position
     float turn_dir_  = 1.0f;
     bool  turning_   = false;
     float cur_heading_ = 0.0f;
+    // heading_sign (2026-09-17, the duck): the loop's frame has forward(h) = (-sin h, -cos h), in which a
+    // positive heading step is a CLOCKWISE turn.  A consumer whose heading is a right-handed yaw
+    // (counter-clockwise positive: the duck's odometry) sees this frame as a REFLECTION of its own, and a
+    // reflection reverses the turn sense: the loop's "turn right" is that body's left, and a reference set
+    // from the bearing runs ahead of the heading at twice the body's own turn rate (measured: the Roomba
+    // orbit of the design doc §17.16-17.17).  -1 multiplies the incoming heading, which turns the reflection
+    // into a rotation (position and bearing both), so the loop's right is the body's right.  +1 = the Cell's
+    // frame, byte-identical.
+    float heading_sign_ = 1.0f;
     // eat-credit
     bool  eat_in_window_ = false;
     float eat_credit_    = 0.0f;

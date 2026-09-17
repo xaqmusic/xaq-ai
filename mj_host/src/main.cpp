@@ -1239,6 +1239,7 @@ std::string g_head_graph;
 std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
+double g_hr_tau = 0.0, g_hr_damp = 0.0, g_hr_gate = 1.0;   // --heading-reflex TAU DAMP GATE (2026-09-17): a hold on own yaw through action.vyaw
 // Two INSTRUMENTS for the ToF studies (2026-09-12), both gated so every existing log stays
 // byte-comparable and the physics is untouched either way:
 //   --log-motor-tle   adds "mtle": the twist brain's own forward-model surprise, per tick.  The
@@ -1383,6 +1384,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_no_backing) brain.set_no_backing(true);
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
+        std::fprintf(stderr, "  heading reflex: while a loop holds the reference, vyaw closes the heading error in %.2f s (damping %.2f on the sensed rate), mixed with the brain's yaw by proximity (gate %.2f)\n", g_hr_tau, g_hr_damp, g_hr_gate); }
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
     // The cloud lives in the graph now (ogma::CloudMap).  The host's job is to hand it one cast
@@ -2110,6 +2113,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
+            if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
             if (g_log_motor_tle) {
                 std::printf(",\"mtle\":%.5f", brain.motor_tle());
                 if (stander) std::printf(",\"btle\":%.5f", stander->motor_tle());
@@ -2526,6 +2530,8 @@ int main(int argc, char** argv) {
             g_seek_gate = true;
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
+        } else if (a == "--heading-reflex") {
+            g_hr_tau = std::stod(next("--heading-reflex")); g_hr_damp = std::stod(next("--heading-reflex")); g_hr_gate = std::stod(next("--heading-reflex"));
         } else if (a == "--no-backing") {
             g_no_backing = true;
         } else if (a == "--save-head") {

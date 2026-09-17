@@ -116,6 +116,17 @@ public:
     // not push the body off the thing it is walking to.  Gated by the state it exploits (a held seek
     // target, its sector); off = byte-identical.
     void set_seek_gate(bool on) { seek_gate_ = on; }
+    // THE HEADING REFLEX (2026-09-17, `--heading-reflex TAU DAMP GATE`).  The twist brain's yaw column
+    // does not hold a heading (design doc §17.17: with a quiet reference the error sits at two radians and
+    // the command saturates at the gait frequency), so every loop's bearing -- play's, seek's -- goes into a
+    // channel that circles.  The picrawler's answer (`CLAUDE.md` §1): a proportional hold on the body's own
+    // dead-reckoned yaw through the authoritative channel.  Here: while a loop holds the reference, the
+    // yaw command is the one that closes the heading error in TAU seconds (in the walker's own units, so
+    // no constant is tuned to the signal), damped by the sensed yaw rate; it is MIXED with the brain's own
+    // yaw command by proximity -- nothing within a metre: the reflex owns yaw; a wall at hand: the brain's
+    // avoidance owns it.  Gated by the state it exploits (a held reference, a clear field).  Off = byte-identical.
+    void set_heading_reflex(double tau_s, double damp, double tof_gate) { hr_tau_ = tau_s; hr_damp_ = damp; hr_gate_ = tof_gate; }
+    double heading_reflex_share() const { return hr_share_; }   // the reflex's share of the yaw command this tick
     int  seek_gated() const { return seek_gated_; }   // ticks the gate zeroed a slot
     // The seek loop's token (reality.cognitive.seek_value / seek_range), if a graph has one.
     bool   seek_present() const { return seek_present_; }
@@ -203,6 +214,7 @@ private:
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
     bool seek_gate_ = false; int seek_gated_ = 0;
+    double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int  seek_steers_ = 0;

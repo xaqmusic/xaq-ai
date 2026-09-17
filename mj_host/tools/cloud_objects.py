@@ -15,6 +15,10 @@ compact stream drops the cloud records, qpos and joint positions.
       the things phase's T2: every SEEK EPISODE (a held target, from the stop that set it to the tick its need returns
       to 0) with what the target really was (the last attended thing of that stop, labelled by the manifest), the body's
       closest approach to the target's true position, whether an object was touched, and how the episode ended
+  cloud_objects.py heading LOG...
+      the circling (2026-09-17): on walking ticks, by which loop holds the reference (play / seek), the heading error's
+      median and the share under 0.3 rad, the REFERENCE's own motion (rad/s; a reference that turns at the body's rate
+      is a target inside the turning radius), the yaw command on its rail, and the heading reflex's share
   cloud_objects.py stops LOG...
       the things phase's T4: every STOP by how it started (the timer, or the seek loop's arrival), how far the nearest
       object was when it began, and whether the stop's cloud attended a real object and at what range -- did a reached
@@ -537,6 +541,51 @@ def cmd_seek(paths: list[str]) -> None:
               f"{sum(d < 0.4 for d in dmins[lab])}/{len(dmins[lab])}, an object touched during {touched[lab]}")
 
 
+# ------------------------------------------------------------------------------------------------ heading
+
+def cmd_heading(paths: list[str], control_from: float = 700.0) -> None:
+    err = {1: [], 3: []}; refmove = {1: [], 3: []}; rail = {1: [], 3: []}; share = []; straight_w = []
+    for p in paths:
+        prev = None; xs = []; ys = []
+        for line in open(p):
+            if not line.startswith('{"t"'):
+                continue
+            r = json.loads(line)
+            if r["t"] < control_from or r.get("stop", 0):
+                prev = None
+                if len(xs) > 500:
+                    path = float(np.sum(np.hypot(np.diff(xs), np.diff(ys))))
+                    straight_w.append(math.hypot(xs[-1] - xs[0], ys[-1] - ys[0]) / max(path, 1e-6))
+                xs, ys = [], []
+                continue
+            xs.append(r["x"]); ys.append(r["y"])
+            st = r.get("steer", 0)
+            if "hr" in r:
+                share.append(r["hr"])
+            if st not in err:
+                prev = None
+                continue
+            h, ref = r["hdg"]
+            err[st].append(abs(math.atan2(math.sin(h - ref), math.cos(h - ref))))
+            rail[st].append(abs(r["twist"][2]) > 0.9)
+            if prev is not None and prev[0] == st:
+                refmove[st].append(abs(ref - prev[1]) * 50.0)
+            prev = (st, ref)
+    print(f"{len(paths)} runs, walking ticks from {control_from:.0f} s")
+    for st, name in ((1, "play"), (3, "seek")):
+        e = np.array(err[st]); m = np.array(refmove[st]); rl = np.array(rail[st])
+        if not len(e):
+            print(f"  {name}: no ticks"); continue
+        print(f"  {name:>4}: {len(e):6d} ticks; |heading error| median {np.median(e):.2f} rad, under 0.3 rad on {100 * np.mean(e < 0.3):3.0f} %; "
+              f"the reference moves {np.median(m) if len(m) else 0:.2f} rad/s (median), faster than 0.5 rad/s on {100 * np.mean(m > 0.5) if len(m) else 0:3.0f} %; "
+              f"|vyaw| > 0.9 on {100 * rl.mean():3.0f} %")
+    if share:
+        sh = np.array(share)
+        print(f"  heading reflex share: mean {sh.mean():.2f}; owns the yaw (1.0) on {100 * np.mean(sh > 0.99):.0f} % of walking ticks")
+    if straight_w:
+        print(f"  straightness per walk (net / path, walks over 10 s): p25/p50/p75 {'/'.join(f'{np.percentile(straight_w, q):.2f}' for q in (25, 50, 75))} over {len(straight_w)} walks")
+
+
 # ------------------------------------------------------------------------------------------------ stops
 
 def cmd_stops(paths: list[str]) -> None:
@@ -596,6 +645,8 @@ def main() -> None:
     a = sub.add_parser("arms", help="per-arm cloud and object scores, NAME=GLOB per arm")
     a.add_argument("arms", nargs="+")
     a.add_argument("--gapk", type=float, default=0.12)
+    hd = sub.add_parser("heading", help="the heading error, the reference's own motion and the yaw rail by which loop holds the reference")
+    hd.add_argument("logs", nargs="+")
     sp = sub.add_parser("stops", help="every stop by how it started and what its cloud attended (things phase T4)")
     sp.add_argument("logs", nargs="+")
     sk = sub.add_parser("seek", help="every seek episode against the manifest (things phase T2)")
@@ -612,6 +663,8 @@ def main() -> None:
         cmd_seek(args.logs)
     elif args.cmd == "stops":
         cmd_stops(args.logs)
+    elif args.cmd == "heading":
+        cmd_heading(args.logs)
     else:
         cmd_arms(args.arms, args.gapk)
 

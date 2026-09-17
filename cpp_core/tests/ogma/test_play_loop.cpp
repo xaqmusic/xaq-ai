@@ -2,6 +2,7 @@
 // novelty→frontier (run-and-tumble beyond the mapped graph), NOT routing to food.
 // "PlaceGraphPlanner minus traverse": same map overlay, novelty value-field, no food.
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include "ogma/modules/PlayLoop.hpp"
 #include "ogma/InProcessBus.hpp"
 
@@ -305,4 +306,30 @@ int lookahead_target(bool on) {
 TEST(PlayLoop, LookaheadTargetsTheFirstNodeBeyondTheTurningRadius) {
     EXPECT_EQ(lookahead_target(false), 1);
     EXPECT_EQ(lookahead_target(true), 3);
+}
+
+
+// heading_sign (2026-09-17): the loop's frame is a reflection of a right-handed consumer's.  A body that
+// walks forward at heading +pi/2 goes to -x in the loop's frame with the Cell's sign; with heading_sign -1
+// the same walk goes to +x (a rotation of the consumer's frame, not a reflection), and a target that a
+// right-handed body has on its LEFT (a larger yaw) reads as a LEFT turn (fx < 0) instead of a right one.
+TEST(PlayLoop, HeadingSignTurnsTheReflectionIntoARotation) {
+    auto walk = [](float sign) {
+        ogma::ParamMap p; p["heading_sign"] = double(sign); p["pi_cell_size"] = 0.0;
+        Fixture f(p);
+        for (int t = 0; t < 10; ++t) {
+            f.bus.begin_tick(uint64_t(t));
+            f.bus.publish("reality.cognitive.place", place(0, 0.0f));
+            f.bus.publish("reality.proprio.heading", p1(PI / 2));
+            f.bus.publish("reality.proprio.vel_ego", p2(0.0f, 1.0f));      // forward
+            f.play.tick(uint64_t(t));
+            f.bus.end_tick();
+        }
+        auto d = f.play.diag_snapshot();
+        return std::make_pair(d["odo_x"].get<double>(), d["odo_y"].get<double>());
+    };
+    auto cell = walk(1.0f), duck = walk(-1.0f);
+    EXPECT_LT(cell.first, -5.0) << "the Cell's frame: forward at +pi/2 is -x";
+    EXPECT_GT(duck.first, +5.0) << "heading_sign -1: forward at +pi/2 is +x";
+    EXPECT_NEAR(cell.second, 0.0, 1e-4); EXPECT_NEAR(duck.second, 0.0, 1e-4);
 }

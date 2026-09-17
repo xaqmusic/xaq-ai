@@ -90,6 +90,7 @@ ParamSchema PlayLoop::params_schema() const {
         {"wander_stall_ticks",   ParamMutability::HotMutable, "WANDER-BEYOND fix: force the run-tumble WANDER (override the climb) when the map has not grown for this many ticks — the bug has mapped this region, so push PAST the frontier into unmapped ground instead of climbing freshly-baked nodes forever. A new node resets the counter → back to climb. 0 = off (climb-only). ~explore_cycle is the natural scale.", ParamValue{int64_t{0}}},
         {"frontier_bias",        ParamMutability::HotMutable, "FRONTIER-DIRECTED WANDER: bias the run-tumble wander toward UNEXPLORED ground (away from the habituation-weighted centroid of visited places) instead of a memoryless random walk — the maze-discovery fix. Effective pull = frontier_bias·max_hab (magnitude DERIVED from the explored-core confidence, no-tuning §6). 0 = off (diffusive run-and-tumble, prior behaviour, Δ=0); 1 = full outward (beat 0.5/0 monotonically, A/B lbend).", ParamValue{0.0}},
         {"explore_seed",         ParamMutability::ConstructionOnly, "Run-and-tumble wander RNG seed.", ParamValue{int64_t{11}}},
+        {"heading_sign",         ParamMutability::HotMutable, "Multiplies the incoming heading.  The loop's frame has forward(h) = (-sin h, -cos h): a positive step is a clockwise turn.  For a consumer whose heading is a right-handed yaw (counter-clockwise positive: the duck's odometry) that frame is a reflection, and its 'turn right' comes out as the body's left -- a reference that runs ahead of the heading at twice the body's turn rate (the duck's orbit, design doc §17.16-17.17, found 2026-09-17).  -1 makes the frame a rotation of the consumer's: right is right.  +1 (default) = the Cell's frame, byte-identical.", ParamValue{1.0}},
         {"lookahead",            ParamMutability::HotMutable, "A TARGET BEYOND THE TURNING RADIUS (duck R38, 2026-09-11; design doc §17.16 fork item 1).  Off (default, byte-identical).  On: the sub-goal is the first node along the novelty value gradient (greedy uphill walk from the current node, at most lookahead_hops hops) whose position is at least the body's turning radius from the loop's own odometry position -- or the last uphill node if none is that far; it is held until the body is INSIDE that radius of it (it can no longer be steered at without orbiting) or it is no longer uphill; the bearing is from the live odometry to it.  The radius is the loop's own running estimate of forward speed / heading rate on turning ticks (lookahead_reach 0), in the loop's odometry units, or lookahead_reach when > 0.  R37 (a held one-hop target) orbited; R34 (a dropped one) dithered -- both because the target sat inside the turning radius.", ParamValue{false}},
         {"lookahead_reach",      ParamMutability::HotMutable, "lookahead: the turning radius in the loop's odometry units (command-unit-ticks); 0 = estimated online from the loop's own inputs (EMA over explore_cycle ticks of |v| / |dheading| on ticks turning faster than the running mean).", ParamValue{0.0}},
         {"lookahead_hops",       ParamMutability::HotMutable, "lookahead: the uphill walk's hop budget (a bound on cost, not a horizon that is meant to bind).", ParamValue{int64_t{16}}},
@@ -119,6 +120,7 @@ ParamMap PlayLoop::current_params() const {
     m["wander_stall_ticks"]   = ParamValue{int64_t(wander_stall_ticks_)};
     m["frontier_bias"]        = ParamValue{double(frontier_bias_)};
     m["explore_seed"]         = ParamValue{int64_t(explore_seed_)};
+    m["heading_sign"]         = ParamValue{double(heading_sign_)};
     m["commit_hold"]          = ParamValue{commit_hold_};
     m["lookahead"]            = ParamValue{lookahead_};
     m["lookahead_reach"]      = ParamValue{double(lookahead_reach_)};
@@ -141,6 +143,7 @@ void PlayLoop::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "explore_tumble_range") explore_tumble_range_ = float(get_double(value, k));
     else if (k == "wander_stall_ticks")   wander_stall_ticks_   = int(get_int(value, k));
     else if (k == "frontier_bias") frontier_bias_ = float(get_double(value, k));
+    else if (k == "heading_sign") heading_sign_ = float(get_double(value, k));
     else if (k == "commit_hold")   commit_hold_   = get_bool(value, k);
     else if (k == "lookahead")       lookahead_       = get_bool(value, k);
     else if (k == "lookahead_reach") lookahead_reach_ = float(get_double(value, k));
@@ -168,6 +171,7 @@ void PlayLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "explore_tumble_range", [&](auto const& v){ explore_tumble_range_ = float(get_double(v,"explore_tumble_range")); });
     apply_param(params, "wander_stall_ticks",   [&](auto const& v){ wander_stall_ticks_   = int(get_int(v,"wander_stall_ticks")); });
     apply_param(params, "frontier_bias",        [&](auto const& v){ frontier_bias_        = float(get_double(v,"frontier_bias")); });
+    apply_param(params, "heading_sign",         [&](auto const& v){ heading_sign_         = float(get_double(v,"heading_sign")); });
     apply_param(params, "commit_hold",          [&](auto const& v){ commit_hold_          = get_bool(v,"commit_hold"); });
     apply_param(params, "lookahead",            [&](auto const& v){ lookahead_            = get_bool(v,"lookahead"); });
     apply_param(params, "lookahead_reach",      [&](auto const& v){ lookahead_reach_      = float(get_double(v,"lookahead_reach")); });
@@ -245,7 +249,7 @@ void PlayLoop::tick(uint64_t tick_id) {
                   :                                          pt->tle;
     }
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(heading_topic_)))
-        if (pt->values.size() > 0) cur_heading_ = float(pt->values[0]);
+        if (pt->values.size() > 0) cur_heading_ = heading_sign_ * float(pt->values[0]);
     float vlat = 0.0f, vfwd = 0.0f;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(vel_topic_))) {
         if (pt->values.size() > 0) vlat = float(pt->values[0]);
@@ -539,6 +543,7 @@ nlohmann::json PlayLoop::diag_snapshot() const {
         {"route_exists", last_route_exists_},  // a strictly-more-novel neighbour exists (the other climb term)
         {"stale_explore", stale_explore_},    // ticks since the map last grew
         {"cur_heading", cur_heading_},
+        {"odo_x", odo_x_}, {"odo_y", odo_y_},
         {"n_nodes", int(value_.size())},
         {"nodes", nodes},
         {"node_pos", node_pos},

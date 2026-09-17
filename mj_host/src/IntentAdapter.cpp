@@ -258,6 +258,20 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kActions[i])))
             last_twist_[i] = kRanges[i] * std::clamp(double(act->accel), -1.0, 1.0);
     }
+    // The heading reflex (see the header).  Only while a loop's bearing set the reference this tick.
+    hr_share_ = 0.0;
+    if (hr_tau_ > 0.0 && last_steer_ != 0) {
+        double err = heading_ - heading_ref_;                       // + = the body points left of the reference
+        while (err > 3.14159265358979323846) err -= 2.0 * 3.14159265358979323846;
+        while (err < -3.14159265358979323846) err += 2.0 * 3.14159265358979323846;
+        // the yaw rate that closes the error in tau seconds, minus damping on the sensed rate, in rad/s
+        const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
+        const double reflex = std::clamp(want, -kTwistRangeVyaw, kTwistRangeVyaw);
+        // the share: 1 with nothing within the gate's reach, 0 at a wall (the brain's avoidance keeps the yaw)
+        const double near = std::max({double(tof[0]), double(tof[1]), double(tof[2])});
+        hr_share_ = std::clamp(1.0 - near / std::max(1e-6, hr_gate_), 0.0, 1.0);
+        last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
+    }
     ++tick_id_;
     if (has_override_) return override_;
     if (no_backing_ && last_twist_[0] < 0.0) { last_twist_[0] = 0.0; ++backing_clamped_; }

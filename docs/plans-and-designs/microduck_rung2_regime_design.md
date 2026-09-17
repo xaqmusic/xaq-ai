@@ -3302,3 +3302,116 @@ another from 772 s) for the operator's eye. The two levers this hands the plan, 
 reached thing** (the sweep centred on the target's bearing and expected elevation, about 35° down at 0.3 m,
 which O36 showed the stand can take), and **habituation** (the seek need weighted by the thing EPM's error at
 the attended thing, so a thing looked at four times lets the duck go). Then the (d) tests with a moved ball.
+
+### 17.37 The circling: a heading reflex, and the play loop's mirrored bearing (R60a → R64, 2026-09-17)
+
+**The operator's eye on R60a (seed 1).** "The duck walks in a small clockwise circle for much of the run
+between stops; it isn't until 930 s that it looks across to the other side of the room and scans the balls
+and blocks; it does end up in the vicinity of the small objects and continues its circling there. A more
+random walk would be more interesting, which may occur if the robot is trying to reduce its yaw error
+relative to a small-object target."
+
+**What the circle is made of** (`cloud_objects.py heading`, new: on walking ticks, by which loop holds the
+reference). Two things, both in the ledger already, and one of them wrong.
+
+- *Under play* (74 % of walking ticks on R60a): the reference runs ahead of the heading at the body's own
+  turn rate (median 0.70 rad/s; faster than 0.5 rad/s on 56 % of ticks), the error sits at 1.56 rad and
+  never closes, and the yaw command is on its rail (|vyaw| > 0.9 on 93 %). This is §17.16–17.17's orbit.
+- *Under seek* (26 %): the reference is quiet (0.10 rad/s), and the body still circles: the command holds
+  +1 while the error crosses zero and grows to 1.4 rad before it flips, with the ToF clear. At forward
+  speed a saturated yaw is a circle of about half a metre. This is §17.17's "the regulator does not
+  regulate".
+
+**Lever 1, the heading reflex** (`--heading-reflex TAU DAMP GATE`, off by default, R46 byte-identical): the
+picrawler's answer (`CLAUDE.md` §1) on the duck's authoritative yaw channel. While a loop holds the
+reference, `action.vyaw` becomes the rate that closes the heading error in TAU seconds (1.0), damped by the
+sensed yaw rate (0.3), in the walker's own units; it is mixed with the twist brain's own yaw by proximity
+(nothing within a metre: the reflex owns the yaw; a wall at hand: the brain's avoidance owns it). Gated by
+the state it exploits. On R60a, n = 6: |vyaw| on the rail 96 → 64 %, cells 89 → 129 (5 / 6 up), span 9.2 →
+12.7 m², straightness 0.15 → 0.21, walls tie (20.4 → 21.0, sd 21 → 6), stands hold. Under seek the error
+closes: median 1.36 → 0.43 rad (under 0.3 rad on 40 % of ticks against 11 %). Under play it does not (1.56
+→ 1.80), because the reference still turns at 0.6 rad/s. `WORKING` on the channel.
+
+**Lever 2, the target inside the turning radius: two built answers retried on the reflex.** R38's
+`lookahead` (its re-use context was a regulator that regulates): the reference still moves at 0.60 rad/s
+under play, walls 64 / min, `REGRESSION` again. The play loop's run-and-tumble wander forced on walks
+(`wander_stall_ticks` 100, `explore_cycle` 250, R62, the operator's random walk): the reference moves at
+1.50 rad/s, faster than before, `REGRESSION` — and the trace of why is the finding of the day.
+
+**The finding: the play loop's bearing has been mirrored since R27.** On an R62 walk the reference runs
+away from the heading at about twice the body's turn rate: `ref = 2·heading − target`. The play loop is
+the Cell's, and its frame has forward(h) = (−sin h, −cos h): a positive heading step is a clockwise turn.
+The duck's heading is a right-handed odometry yaw, counter-clockwise positive. Seen from the duck, the
+loop's frame is a reflection (x, y ↦ −y, −x), and a reflection reverses the turn sense: the loop's "turn
+right" (fx > 0) is the duck's left. The adapter turns the body clockwise for fx > 0 (R27, the documented
+contract), the body's response reads in the loop's frame as a turn the other way, the bearing error grows,
+and the loop keeps saying "right": a perpetual circle. The seek loop (§17.35) was written in the duck's
+frame, which is why its reference is quiet and the reflex closes on it.
+
+Fix: `PlayLoop.heading_sign` (default +1, byte-identical; a unit test pins the frames: a body walking
+forward at +π/2 goes to −x in the Cell's frame and to +x with −1). −1 multiplies the incoming heading,
+which turns the reflection into a rotation, so the loop's position integration and its bearing are both
+in the duck's handedness. R63 = R60 + `heading_sign −1`.
+
+**What the un-mirrored play loop does, n = 6:**
+
+| | R60a | + reflex | R63 (sign) | R63 + reflex |
+|---|---|---|---|---|
+| the reference's motion under play, median · > 0.5 rad/s | 0.70 · 56 % | 0.60 · 53 % | **0.00 · 16 %** | **0.00 · 16 %** |
+| refFollow | 0.30 | 0.44 | **0.11** | **0.16** |
+| heading error under play · under seek, median | 1.56 · 1.36 | 1.80 · 0.43 | 1.34 · 1.46 | **1.12 · 0.26** |
+| \|vyaw\| > 0.9, play · seek | 93 · 90 % | 50 · 10 % | 96 · 94 % | **21 · 4 %** |
+| straightness per walk p50 | 0.13 | 0.22 | 0.14 | 0.23 |
+| cells · span m² | 89 · 9.2 | 129 · 12.7 | 78 · 9.8 | 106 · 12.5 |
+| walls / min · contact % | 20 · 2.3 | 21 · 3.4 | **47 · 14** | **49 · 12** |
+| object contacts / min · moved m | 3.2 · 2.5 | 8.9 · 2.9 | 43 · 2.9 | 5.1 · 2.1 |
+| stands held · arrival stops | 92/92 · 5.3 | 94/95 · 6.0 | 85/85 · 4.0 | 85/89 · 5.0 |
+
+The premise holds at once: with the sign right the reference under play stands still (refFollow 0.11, the
+lowest measured on this body), and with the reflex the seek error closes to 0.26 rad and the yaw command
+leaves its rail on both loops. The cost is as loud: wall contacts double. Novelty in a known room is at its
+edges, and the mirrored bearing had been an accidental avoider, turning the duck away from what it aimed
+at — which is what "play alone is the best avoider in a known room" (§17.7) was measuring. Nothing above
+the twist brain's proximity prior now stops the body at a wall, and that prior alone was never enough
+(R48's model-implied step was the loud avoider, 14.8 → 1.8 / min, and is not in the `★ CLOUD` stack).
+
+**R64 = R63 + R48's model-implied step** (`state_prior_step_gain 1.0`), with and without the reflex, and with the
+reflex releasing at half a metre instead of one (`--heading-reflex 1.0 0.3 0.5`):
+
+| n = 6 | R60a | **R64, no reflex** | R64 + reflex (gate 1.0) | R64 + reflex (gate 0.5) |
+|---|---|---|---|---|
+| the reference's motion under play, median · > 0.5 rad/s | 0.70 · 56 % | **0.00 · 15 %** | 0.00 · 13 % | 0.00 · 18 % |
+| heading error under play · seek, median | 1.56 · 1.36 | 1.05 · 1.61 | **0.89 · 0.91** | 1.13 · 0.61 |
+| \|vyaw\| > 0.9 (all walking ticks) | 96 % | 93 % | **47 %** | 69 % |
+| straightness (harness) · per walk p50 | 0.15 · 0.13 | 0.22 · 0.15 | **0.29 · 0.24** | 0.29 · 0.21 |
+| cells · span m² · path m | 89 · 9.2 · 81 | 126 · 12.4 · **96** | 139 · **14.2** · 90 | **144** · 13.0 · 86 |
+| walls / min (per seed vs R60a) · contact % | 20.4 ± 20.7 · 2.3 | **14.7 ± 7.1** (3 / 6 down; none above 24) · **1.4** | 43.1 ± 10.3 · 6.9 | 32.1 ± 20.7 · 4.3 |
+| object contacts / min · objects moved m | 3.2 · 2.5 | 11.3 · **5.1** | 10.7 · 3.7 | 6.2 · 4.3 |
+| seek episodes: blocks within 0.4 m · touched | 7 / 11 · 3 (R60) | — | **7 / 8 · 6**; balls 5 / 10 · 4 | — |
+| rescues / min · walk % · arrival stops | 0.04 · 54 · 5.3 | 0.05 · 65 · 3.8 | 0.07 · 68 · 4.2 | 0.19 · 59 · 5.2 |
+
+Without the reflex, R64 is the cleanest walk this body has had: the reference stands still, coverage rises
+on five seeds of six, the path on four, objects moved double, and wall contacts fall from 20 to 15 a minute
+with the seed spread gone (R60a ran 0–56, R64 3–24) — while the yaw command is still on its rail 93 % of
+the time and the error still sits near a radian. The body goes where the reference points, in wide arcs.
+With the reflex the walks are straighter (0.29) and the error closes (0.89 rad under play, 0.26 under seek
+on R63), and the seek episodes are the strongest measured (blocks reached within 0.4 m on 7 of 8, 6 into
+contact), but the walls come back (43 a minute; 32 with the gate at half a metre, at the cost of rescues
+0.19 a minute). Half a second before 78 % of R64+reflex's wall contacts the ToF had the wall within 0.7 m
+and the brain already owned most of the yaw; the error to the reference was a radian: the reference itself
+lies at or beyond the wall (a novel node at the room's edge, a wall base attended as a thing), and a
+heading held to it wins against the avoidance in the last half metre.
+
+**Verdicts, and what they re-open.** `heading_sign −1` with R48's step (R64) `WORKING`: the reference stands
+still and the walk goes where it points, with coverage up and walls down against R60a; **preset R64 (seed 1)
+is the candidate for the operator's eye**, and R64r (the reflex at half a metre) the straighter version to
+judge beside it. The heading reflex `WORKING` on the channel (the first time a loop's bearing has been
+followed on this body: the error closes, the yaw leaves its rail) and `PARTIAL` as a behaviour in this
+stack, since a heading held to a reference at a wall costs contacts; re-use context: a reference that the
+cloud has checked for free space, or a seek target whose vocabulary node is a thing's and not a wall base's.
+`heading_sign −1` alone (R63) is a `REGRESSION` on walls, and a confound on the record: every verdict in which the play loop set
+the reference — R27–R29 (§17.6–17.7), the playroom's R27 (§17.8), R34–R38 (§17.16–17.17), R47–R48
+(§17.26–17.27) — measured a mirrored bearing. Their behavioural verdicts are `ABLATED` by this finding
+(the mechanism operated, on the wrong sign); their measurement lessons stand (the reference's motion, the
+rail, refFollow, the instruments). `lookahead` and `commit_hold` were refuted on the mirror and are open
+again. §3.2's rule 7: the arm that ran was not the arm that was thought to run.
