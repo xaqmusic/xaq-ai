@@ -3540,3 +3540,55 @@ a mechanism (safe, and it answers); the walking kick `REGRESSION` (falls). Prese
 at arrival). What it hands the plan: the outcome loop needs to SEE the outcome, and a thing at 0.21 m sits
 below a level gaze (§17.36, 12 of 31 arrival stops attended nothing); so T3, the gaze at the reached thing,
 comes before the loop that learns what a kick does.
+
+### 17.40 The gaze at the reached thing, and the loop that learns what a kick does (R65–R66, 2026-09-17)
+
+**T3, the gaze at the reached thing** (`--stop-gaze-at-thing`, off by default; R46 byte-identical). At an
+arrival stop the sweep's pitch band is centred on the reached thing's elevation (atan2 of the sensor's
+height over its range, clamped to 0.2–0.55 rad down, ±0.12) and its yaw on the thing's bearing. n = 6 on R64
+with arrival stops: arrival stops whose cloud attended a real object within 0.8 m, 5 of 28 against 1 of 23;
+"nothing attended" 13 of 28 against 8 of 23; rescues 0.05 → 0.20 a minute, walk 65 → 57 %. A thing at 0.2 m
+lies 45° under the beak, past the 31° the band reaches and past the 23° the stand was shown to take (O36),
+so the head goes down, the stand pays, and the thing is still at the field's edge. `PARTIAL` on what it is
+for and a `REGRESSION` on the stand; not adopted. The outcome loop below observes from a step back instead.
+
+**The outcome loop** (`ogma::SkillOutcomeLoop`, new, generic; four unit tests): the operator's framing —
+our brain learning what the robot's pre-built intents do is an error we can reduce — as one loop, for the
+kick, on one question: does the thing answer? While the attended thing's bearing is live the loop fixes its
+position in the odometry frame; at the seek loop's arrival it requests a kick by name on `intent.skill`
+(the side by the thing's bearing) when the thing's node has an uncertain answer — fewer than two recorded
+outcomes, or a spread above the mean spread over nodes; the next live bearing within 0.6 m of the fixed
+position is the same thing, moved, and its distance is the outcome, folded into the node's running mean and
+variance; a thing not seen again within the window is UNKNOWN, and nothing is learned from it. The surprise,
+|observed − predicted| in the node's spread, goes out on `reality.cognitive.outcome`. The host fires a bus
+request from standing at the next hand-back (never into a walk), and logs each observed outcome as `outc`.
+R65 = R64 + the loop, run with arrival stops and no host flag: the graph asks.
+
+| n = 6 × 1500 s | R64 (no kick) | **R65: the loop asks** | R66: a 100 s window | **R65 + unwind (back off 1.5 s, then look)** |
+|---|---|---|---|---|
+| kicks requested · fired · falls | — | 26 · 23 · 0 | 13 · 13 · 0 | **27 · 27 · 0** |
+| outcomes observed · unknown · nodes known | — | 5 · 19 · 0 | 0 · 11 · 0 | **12 · 15 · 1** |
+| the observed answer, m (p10–p90) | — | — | — | 0.03–0.10 |
+| walls / min · rescues / min | 14.7 · 0.05 | 15.2 · 0.07 | — | 12.0 · 0.11 |
+| stops · arrival + look stops · walk % | 14.3 · 3.8 · 65 | 14.7 · 4.5 · 74 | — | 18.8 · 9.3 · 61 |
+| objects moved, m · cells | 5.1 · 126 | 3.6 · 141 | — | 2.9 · 138 |
+
+**Reading it.** The boundary works from the graph's side: the loop asks, the host runs Pollen's network from
+standing, nothing falls. What starves the learning is SEEING the answer: a kicked thing sits under the beak,
+and 19 of 24 outcomes were unknown; a longer window (R66) made it worse, since a pending outcome blocks the
+next request and the thing was never re-found within the radius from a later, farther stop. The daemon's own
+`unwind` is the answer to that (`--skill-unwind VX SECS`): after the kick the stop ends, the body backs off
+for 1.5 s, and a fresh stop looks at the thing from half a metre. Observed outcomes 5 → 12 of 27, one node
+reached two samples, walls fall to 12 a minute, at the cost of the extra stops (walk 61 %) and a few more
+rescues from backing. The answers themselves are 3–10 cm: a kick that connects moves a ball or a block by a
+few centimetres, and the fixed position's own error (odometry, the cluster's centroid) is of that order, so
+the per-node statistics need several samples before "answers" and "does not" separate. At one kick every
+three minutes they do not, in fifteen. The mechanism is whole; its loudness waits on more arrivals.
+
+**Verdicts.** T3's gaze `PARTIAL` / `REGRESSION` on the stand, not adopted. The outcome loop `WORKING` as a
+mechanism (the intent requested by name, the answer learned per node when seen), `PARTIAL` as a behaviour
+(too few answers to habituate on in a run); the unwind `WORKING` for what it is for (observed outcomes ×2.4)
+and is the form to carry. R66 `NULL`. Presets R65 and R65u. Next: more arrivals per run (the seek loop's
+share, and the timer stop's floor), and the outcome's precision (the thing re-fixed from the look stop's
+cloud rather than the arrival's), before the habituation can be read; then the get-up (the roulade after a
+fall, O27) on the same runner.

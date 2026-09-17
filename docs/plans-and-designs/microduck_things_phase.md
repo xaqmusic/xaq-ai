@@ -1,6 +1,6 @@
 # Microduck: the things phase. Seeking what is smaller than itself, and being surprised when it answers
 
-Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, nothing promoted · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
+Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, the kick cycle `WORKING` as a mechanism (§17.39–17.40), nothing promoted · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
 
 *The phase after the cloud ([`microduck_cloud_phase.md`](microduck_cloud_phase.md), `★ CLOUD` R56).
 The operator's direction, restated in the rewrite rule's terms, then the loops that read the voxels at
@@ -188,6 +188,18 @@ Three small levers that make the approach seen rather than blind:
   cloud's view.
 - Touch: the joint brain's instantaneous residual on the bus, gated on its own running spread, as the event
   the cycle's "bump" needs.
+
+**Measured 2026-09-17 (design doc §17.40).** The gaze at the reached thing: `PARTIAL` on what it is for (5 of
+28 arrival stops attend a real object within 0.8 m against 1 of 23) and a `REGRESSION` on the stand (rescues
+×4): a thing at 0.2 m lies 45° under the beak. Not adopted; the outcome loop observes from a step back
+instead (the daemon's unwind). Touch (the joint brain's residual) sees every fall and few contacts (§17.38);
+the approach cloud is unbuilt.
+
+**The interaction, as built (§17.39–17.40, register O54):** `SkillOutcomeLoop` asks for Pollen's kick by name
+on `intent.skill` at an uncertain arrival; the host fires it from standing, the body backs off and stops to
+look; the thing's displacement is the answer, learned per thing node; unseen is unknown. 27 kicks over six
+runs, none fall, 12 answers observed at 3–10 cm, one node known. `WORKING` as a mechanism, `PARTIAL` as a
+behaviour: the habituation needs more answers per run than one kick every three minutes gives.
 
 ### T4. When to stop (O43)
 

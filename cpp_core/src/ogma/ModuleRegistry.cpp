@@ -22,6 +22,7 @@
 #include "ogma/modules/LoopCompetence.hpp"
 #include "ogma/modules/TofAvoidLoop.hpp"
 #include "ogma/modules/BearingSeekLoop.hpp"
+#include "ogma/modules/SkillOutcomeLoop.hpp"
 #include "ogma/modules/ColumnBuilder.hpp"
 #include "ogma/modules/PlaceGraphPlanner.hpp"
 #include "ogma/modules/CloudMap.hpp"
@@ -143,6 +144,7 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("LoopCompetence",        [](){ return std::make_unique<LoopCompetence>(); });       // Cell round 4, register O21
         reg.register_type("TofAvoidLoop",          [](){ return std::make_unique<TofAvoidLoop>(); });         // duck §17.6: avoidance as a loop with a bearing
         reg.register_type("BearingSeekLoop",       [](){ return std::make_unique<BearingSeekLoop>(); });      // duck things phase T2: seeking a thing seen only at stops
+        reg.register_type("SkillOutcomeLoop",      [](){ return std::make_unique<SkillOutcomeLoop>(); });     // duck things phase: learning what a kick does (O54)
         // 2026-06 — passive place-recorder (replaces saccade+cylinder mapping):
         // every record_every ticks publishes a column = view-feature + heading + IMU.
         reg.register_type("ColumnBuilder",         [](){ return std::make_unique<ColumnBuilder>(); });

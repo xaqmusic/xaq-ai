@@ -1248,6 +1248,10 @@ double g_hr_tau = 0.0, g_hr_damp = 0.0, g_hr_gate = 1.0;   // --heading-reflex T
 // a scaffold.  --skill-on-arrive NAME fires one when the seek loop reaches its target (the first test of
 // "does the thing answer"); --skill-at SECS NAME fires one on the clock (a scripted check).
 std::string g_skill_on_arrive;           // "" = off
+// --skill-unwind VX SECS: the daemon's `unwind` -- after a skill fired at a stop, the body backs off at VX for
+// SECS, then stops again to look.  A kicked thing sits under the beak, below a level gaze (§17.36); half a
+// metre back it is in the field, so the kick's OUTCOME can be seen (the outcome loop's honest signal).
+double g_skill_unwind_vx = 0.0, g_skill_unwind_s = 0.0;
 double      g_skill_at_s = 0.0; std::string g_skill_at_name;
 struct SkillDef { const char* name; const char* file; double duration_s; };
 constexpr SkillDef kSkills[] = {
@@ -1368,6 +1372,7 @@ struct StopPlan {
     // there, not a wide sweep.  0 = centred on level, byte-identical.
     double gaze_down = 0.0;
     bool   on_arrive = false;      // --stop-on-arrive (things phase T4): a stop starts when the seek loop reaches its target
+    bool   gaze_at_thing = false;  // --stop-gaze-at-thing (T3): at an arrival stop the sweep's band is centred on the reached thing's bearing and elevation
     double on_stuck = 0.0;         // --stop-on-stuck K: a stop starts when a forward stall exceeds K x the body's own median stall (0 = off)
     // --stop-orient K TURN_VX WALK_VX SECS (the orienting reflex, agreed 2026-09-12): while the gaze is still, a
     // view whose winner switches to an EXISTING node, or whose error jumps K spreads above the hold's own
@@ -1404,9 +1409,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_no_backing) brain.set_no_backing(true);
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stop.on_stuck > 0.0) { brain.set_stuck(g_stop.on_stuck); std::fprintf(stderr, "  stop on stuck: a stop starts when a forward stall exceeds %.1f x the body's own median stall length\n", g_stop.on_stuck); }
     if (!g_skill_on_arrive.empty()) std::fprintf(stderr, "  skill on arrive: %s (Pollen's network, a window at standing tuning with a zero command) fired from standing at the arrival stop's hand-back\n", g_skill_on_arrive.c_str());
     if (g_skill_at_s > 0.0) std::fprintf(stderr, "  skill at %.1f s: %s\n", g_skill_at_s, g_skill_at_name.c_str());
+    if (g_skill_unwind_s > 0.0) std::fprintf(stderr, "  skill unwind: after a skill at a stop the body backs off at %.2f for %.1f s, then stops to look\n", g_skill_unwind_vx, g_skill_unwind_s);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
         std::fprintf(stderr, "  heading reflex: while a loop holds the reference, vyaw closes the heading error in %.2f s (damping %.2f on the sensed rate), mixed with the brain's yaw by proximity (gate %.2f)\n", g_hr_tau, g_hr_damp, g_hr_gate); }
     Odometry odom;
@@ -1477,6 +1484,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::unique_ptr<Policy> skill_policy; std::string skill_policy_name;
     bool skill_active = false; int skill_left = 0; std::string skill_name; std::array<float, kActionLen> skill_last{};
     int skills_fired = 0, skills_requested = 0; bool skill_then_stop = false; std::string skill_pending;
+    int unwind_left = 0, unwinds = 0; bool unwind_then_stop = false;
     const auto skill_start = [&](const std::string& name) {
         const SkillDef* d = skill_def(name);
         if (!d) return false;
@@ -1577,11 +1585,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_stop.gaze_sweep > 0.0 && !gaze_on) throw std::runtime_error("--stop-gaze-sweep needs --stop-gaze (its pitch band, HOLD, MAX, QUIET and novelty rule)");
     if (sweep_on && (orient_on || roll_on || walk_on)) throw std::runtime_error("--stop-gaze-sweep does not drive the change detector: no --stop-orient, --roll-past or --walk-past with it");
     if (sweep_on && g_stop.gaze_slew > 0.0) throw std::runtime_error("--stop-gaze-sweep sets the override's slew itself; drop --stop-gaze-slew");
-    const double sweep_p_lo = g_stop.gaze_pitch_sd > 0.0 ? g_stop.gaze_down - g_stop.gaze_pitch_sd * 0.7 : g_stop.gaze_down;
-    const double sweep_p_hi = g_stop.gaze_pitch_sd > 0.0 ? g_stop.gaze_down + g_stop.gaze_pitch_sd * 2.0 : g_stop.gaze_down;
+    const double sweep_p_lo0 = g_stop.gaze_pitch_sd > 0.0 ? g_stop.gaze_down - g_stop.gaze_pitch_sd * 0.7 : g_stop.gaze_down;
+    const double sweep_p_hi0 = g_stop.gaze_pitch_sd > 0.0 ? g_stop.gaze_down + g_stop.gaze_pitch_sd * 2.0 : g_stop.gaze_down;
     const int sweep_ny = std::max(1, int(std::ceil(2.0 * g_stop.gaze_sweep_yaw / 0.1 - 1e-9)));
-    const int sweep_np = std::max(1, int(std::ceil((sweep_p_hi - sweep_p_lo) / 0.1 - 1e-9)));
-    const double sweep_wy = 2.0 * g_stop.gaze_sweep_yaw / sweep_ny, sweep_wp = (sweep_p_hi - sweep_p_lo) / sweep_np;
+    const int sweep_np = std::max(1, int(std::ceil((sweep_p_hi0 - sweep_p_lo0) / 0.1 - 1e-9)));
+    const double sweep_wy = 2.0 * g_stop.gaze_sweep_yaw / sweep_ny;
+    // The band is PER STOP (T3, --stop-gaze-at-thing): at an arrival stop it is centred on the reached thing's
+    // elevation (the sensor sits about 0.2 m up; a thing at the arrival range is 25-35 deg below level) and
+    // its bearing; at every other stop it is the default.  The grid keeps its cell count; the width follows.
+    double sweep_p_lo = sweep_p_lo0, sweep_p_hi = sweep_p_hi0, sweep_wp = (sweep_p_hi0 - sweep_p_lo0) / sweep_np, sweep_yc = 0.0;
+    bool stop_is_arrive = false;
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
@@ -1720,10 +1733,19 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // thing it walked to.  The timer stays as the floor (a duck that has seen nothing still glances).
             // a skill at arrival: the window runs first, and the arrival stop (if any) starts when it ends
             bool skill_arrive_done = false;
-            if (skill_active && skill_left == 0) { skill_active = false; if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; } }
+            if (skill_active && skill_left == 0) {
+                skill_active = false;
+                if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; }
+                if (g_skill_unwind_s > 0.0 && stop_phase == StopPhase::Brain) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
+            }
             if (!skill_active && stop_phase == StopPhase::None && t >= stop_from) {
                 const int req = brain.skill_request();      // a module's request through the bus, by name (id)
-                if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:request"; ++skills_requested; }
+                if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0]))) {
+                    // fired from standing, at the next stop's hand-back (a kick fired into a walk falls, §17.39);
+                    // with no stop due, the daemon's way: at once
+                    if (g_stop.on_arrive) { skill_pending = kSkills[req].name; stop_event = "skill:request"; ++skills_requested; }
+                    else if (skill_start(kSkills[req].name)) { stop_event = "skill:request"; ++skills_requested; }
+                }
                 else if (!g_skill_on_arrive.empty() && brain.seek_arrived()) {
                     // The kick is fired FROM STANDING, after the arrival stop's hand-back (measured 2026-09-17:
                     // fired mid-walk, a zero-command window toppled the body on 28 % of kicks); the side follows
@@ -1740,6 +1762,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : "stop:start"); stop_started_tick = t;
+                stop_is_arrive = arrive_now;
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
                 brain.set_learning(false);                 // its command is not applied during the stop
@@ -1759,7 +1782,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         if (scan_on) { scanning = true; scan_idx = 0; scan_left = scan_hold_ticks; }
                         if (look_on) { looking = true; look_idx = 0; look_held = 0; look_novel_seen = false; look_round_novel = false; scan_target = 0.0; }
                         if (gaze_on) { looking = true; look_held = 0; look_novel_seen = false; gaze_quiet_run = 0; gaze_yaw = 0.0; gaze_pitch = g_stop.gaze_down; scan_target = 0.0; }
-                        if (sweep_on) { std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false; }
+                        if (sweep_on) {
+                            std::fill(sweep_count.begin(), sweep_count.end(), 0); sweep_have_target = false;
+                            if (g_stop.gaze_at_thing && stop_is_arrive) {
+                                const double centre = std::clamp(std::atan2(0.2, std::max(0.05, brain.seek_range()) + 0.15), 0.2, 0.55);
+                                sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp(brain.seek_ego(), -0.5, 0.5);
+                            } else { sweep_p_lo = sweep_p_lo0; sweep_p_hi = sweep_p_hi0; sweep_yc = 0.0; }
+                            sweep_wp = (sweep_p_hi - sweep_p_lo) / sweep_np;
+                        }
                         ticks_in_stop = 0; rolled_this_stop = false;
                         if (g_stop.map_on_stop) brain.set_map_learning(true);
                         if (!stander) {
@@ -1795,7 +1825,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     // the gaze where the head has actually got to (the slewed override), counted into its cell
                     const auto hc = head->last_command();
                     const double cp = g_stop.gaze_pitch_sd > 0.0 ? hc[1] : sweep_p_lo;
-                    const int cy_i = std::clamp(int(std::floor((hc[2] + g_stop.gaze_sweep_yaw) / sweep_wy)), 0, sweep_ny - 1);
+                    const int cy_i = std::clamp(int(std::floor((hc[2] - sweep_yc + g_stop.gaze_sweep_yaw) / sweep_wy)), 0, sweep_ny - 1);
                     const int cp_i = sweep_np == 1 ? 0 : std::clamp(int(std::floor((cp - sweep_p_lo) / sweep_wp)), 0, sweep_np - 1);
                     if (ticks_in_stop > 0) ++sweep_count[size_t(cp_i * sweep_ny + cy_i)];
                     const bool arrived = std::fabs(hc[2] - sweep_ty) < 1e-3 && (g_stop.gaze_pitch_sd <= 0.0 || std::fabs(hc[1] - sweep_tp) < 1e-3);
@@ -1804,7 +1834,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         std::vector<int> ties;
                         for (int c = 0; c < int(sweep_count.size()); ++c) if (sweep_count[size_t(c)] == least) ties.push_back(c);
                         const int pick = ties[std::uniform_int_distribution<size_t>(0, ties.size() - 1)(gaze_rng)];
-                        sweep_ty = -g_stop.gaze_sweep_yaw + (pick % sweep_ny + 0.5) * sweep_wy;
+                        sweep_ty = sweep_yc - g_stop.gaze_sweep_yaw + (pick % sweep_ny + 0.5) * sweep_wy;
                         sweep_tp = sweep_p_lo + (pick / sweep_ny + 0.5) * sweep_wp;
                         sweep_have_target = true; ++sweep_moves;
                     }
@@ -1978,6 +2008,18 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 }
             }
             if (stop_phase != StopPhase::None) command.twist = {0.0, 0.0, 0.0};
+            // the unwind: back off, then a stop to look at what the kick did
+            if (unwind_left > 0 && stop_phase == StopPhase::None) {
+                command.twist = {-std::fabs(g_skill_unwind_vx), 0.0, 0.0};
+                brain.set_learning(false);
+                if (--unwind_left == 0 && unwind_then_stop && (ticks - t) > stop_ticks) {
+                    unwind_then_stop = false;
+                    stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
+                    ++stops_started; ++stops_arrive; stop_event = "stop:look"; stop_started_tick = t; stop_is_arrive = true;
+                    if (stander) stander->on_reset();
+                    if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
+                }
+            }
             if (orient != Orient::None && stop_phase == StopPhase::None) {
                 brain.set_learning(false);                     // its command is not applied through the approach
                 const double e = wrap_pi(orient_bearing - odom.yaw());
@@ -2178,6 +2220,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
             if (skill_active) std::printf(",\"skill\":\"%s\"", skill_name.c_str());
+            { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
+              if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4])); }
             // live changes a client made through the inspector this tick: the run's record must show them
             {
                 const auto pe = brain.take_inspector_events();
@@ -2336,7 +2380,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall\n", stops_stuck, stops_started, g_stop.on_stuck);
-        if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph)\n", skills_fired, skills_requested);
+        if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_stop.map_on_stop || look_on || gaze_on) {
             std::fprintf(stderr, "  map growth: %d nodes on walks, %d at stops; %zu baked ids seen\n", grown_walk, grown_stop, baked_ids.size());
             std::fprintf(stderr, "  map baking: inserted %d at stops / %d on walks, baked %d at stops / %d on walks, pruned %d (of which baked %d); %d nodes, %d baked at the end\n",
@@ -2605,11 +2649,15 @@ int main(int argc, char** argv) {
             g_seek_gate = true;
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
+        } else if (a == "--stop-gaze-at-thing") {
+            g_stop.gaze_at_thing = true;
         } else if (a == "--stop-on-stuck") {
             g_stop.on_stuck = std::stod(next("--stop-on-stuck"));
         } else if (a == "--skill-on-arrive") {
             g_skill_on_arrive = next("--skill-on-arrive");
             if (g_skill_on_arrive != "kick" && !skill_def(g_skill_on_arrive)) throw std::runtime_error("--skill-on-arrive: unknown skill " + g_skill_on_arrive + " (kick = the side by the thing's bearing, kick_left, kick_right, roulade)");
+        } else if (a == "--skill-unwind") {
+            g_skill_unwind_vx = std::stod(next("--skill-unwind")); g_skill_unwind_s = std::stod(next("--skill-unwind"));
         } else if (a == "--skill-at") {
             g_skill_at_s = std::stod(next("--skill-at")); g_skill_at_name = next("--skill-at");
             if (!skill_def(g_skill_at_name)) throw std::runtime_error("--skill-at: unknown skill " + g_skill_at_name);

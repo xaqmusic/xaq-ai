@@ -1328,5 +1328,74 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-on-arrive kick",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R66 · the outcome loop with a 100 s observation window (the thing seen again from the next stop counts)",
+  "series": 66,
+  "hint": "R65: 19 of 24 kick outcomes unknown within 30 s -- the kicked thing sits under the beak, below the level gaze, and the next stop is 80 s away. A 100 s window lets the next stop's cloud answer. Judged on: outcomes observed / unknown, nodes known, surprise.",
+  "state": {
+   "config": "a1v2_r66_outcome100.json",
+   "mode": "brain",
+   "start": "scratch",
+   "ident_every": 6,
+   "ident_until": 3000,
+   "seed": 4,
+   "secs": 7200,
+   "output": "headless",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "seeds": "1-6",
+   "step_lean": 0,
+   "walk_from": -1
+  }
+ },
+ {
+  "name": "R65 · the OUTCOME loop: the graph asks for a kick by name at an uncertain arrival, and learns per thing node what the kick did",
+  "series": 65,
+  "hint": "WATCH (seed 1, fast-forward through 600 s): at an arrival the loop asks for a kick on the intent boundary; the host fires Pollen's network from standing at the stop's hand-back. n=6 (design doc §17.40): 26 requests, 23 kicks, no fall; but 19 of 24 outcomes UNKNOWN -- the kicked thing sits under the beak. Compare R65u.",
+  "state": {
+   "config": "a1v2_r65_outcome.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R65u · the outcome loop + the daemon's UNWIND: after the kick the duck backs off 1.5 s and stops to LOOK at what it did (--skill-unwind 0.3 1.5)",
+  "series": 65,
+  "hint": "THE WHOLE CYCLE in sim: see a thing, walk to it, stop, kick, step back, look, read the answer, learn it per thing node. WATCH (seed 1, fast-forward through 600 s). n=6 (design doc §17.40): 27 kicks, no fall, 12 answers observed (3-10 cm), one node known; walls 15 -> 12/min, walk 61 %, rescues 0.11/min. WORKING as a mechanism, PARTIAL as a behaviour (too few answers per run to habituate on). The form to carry.",
+  "state": {
+   "config": "a1v2_r65_outcome.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5",
+   "fast_until": 600
+  }
  }
 ]
