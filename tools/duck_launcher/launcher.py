@@ -559,6 +559,8 @@ def build_window():
         # the operator watched a random-seed config pick instead of the preset)
         presets[:] = load_presets()
         preset_box.configure(values=preset_labels(presets))
+        configs[:] = scan_configs()          # and the configs those presets name
+        refresh_configs()
     ttk.Button(scale_row, text="↻ presets", command=reload_presets, width=9).pack(side="left", padx=(0, 10))
     ttk.Label(scale_row, text="text × (0 = auto)").pack(side="left")
     spin(scale_row, V["ui_scale"], 0, 4, 0.25, width=5).pack(side="left", padx=(4, 0))
@@ -584,6 +586,13 @@ def build_window():
 
     def refresh_configs(*_):
         nonlocal config_entries
+        # A config minted while the launcher is open (newtest.py) is not in the list scanned at
+        # startup; a preset naming it then fell back to the FIRST entry -- head2_h1_babble, a graph
+        # with no CloudMap -- and the run ended at once (the operator, 2026-09-17, on R64; R30 had
+        # the same trap for the seed).  Rescan whenever the wanted file is not listed.
+        cur = V["config"].get()
+        if cur and not any(c["file"] == cur for c in configs):
+            configs[:] = scan_configs()
         curated = [c for c in configs if c["rank"] is not None]
         curated.sort(key=lambda c: c["rank"])
         rest = [c for c in configs if c["rank"] is None]
@@ -593,8 +602,14 @@ def build_window():
         cur = V["config"].get()
         idx = next((i for i, c in enumerate(config_entries) if c["file"] == cur), None)
         if idx is None and config_entries:
-            idx = 0
-            V["config"].set(config_entries[0]["file"])
+            if cur:
+                # never substitute silently: say what could not be found and leave the field as is
+                preset_hint.configure(text=f"config {cur!r} is not in mj_host/configs -- nothing selected; "
+                                           f"the preset cannot run until it exists", foreground="#a00")
+                config_box.set("")
+            else:
+                idx = 0
+                V["config"].set(config_entries[0]["file"])
         if idx is not None:
             config_box.current(idx)
         show_desc()
@@ -628,7 +643,7 @@ def build_window():
             if k in V:
                 V[k].set(v)
         V["preset"].set(p["name"])
-        preset_hint.configure(text=p.get("hint", ""))
+        preset_hint.configure(text=p.get("hint", ""), foreground="#555")
         refresh_configs()
         refresh_checkpoints()
 
@@ -822,6 +837,9 @@ def build_window():
 
     def do_launch():
         s = S()
+        if not (CONFIG_DIR / s["config"]).exists():
+            messagebox.showerror("config", f"{s['config']!r} is not in mj_host/configs -- press ↻ presets, or pick a config")
+            return
         if s["seed_random"]:
             V["seed"].set(random.randint(0, 2**31 - 1))
             s = S()
