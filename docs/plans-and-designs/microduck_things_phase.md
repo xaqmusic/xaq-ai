@@ -235,6 +235,13 @@ harness's mid-stop move, and on hardware means a hand.
 
 ## 8. Traps carried forward
 
+- **A preset must carry the harness argv of the arm it names.** `newtest.py` copies the controls of the
+  base config's LAST preset and prints the host args; check them against the arm you measured (R61–R64
+  lacked `--stop-on-arrive` for a day; design doc §17.38).
+- **A replay shorter than the run is not a replay:** a stop is not started with under 60 s left.
+- **The host is deterministic**; when a watched run differs from a measured one, compare the argv and the
+  JSONL's `patch:` events before suspecting the physics.
+
 - Arms that differ only at stops are identical until 600 s, so the first stop is a clean visual A/B.
 - The EPM's `is_novel` is a percentile, not a novelty measure.
 - Read head motion from the joints, not the command.

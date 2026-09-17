@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace ogma { class OgmaInstance; class DiagPublisher; class LiveGraph; }
 namespace ami_ogma { namespace control { class ControlServer; } }
@@ -29,6 +30,11 @@ public:
     ~InspectorSurface();
     void publish_tick(uint64_t tick_id);
     bool active() const { return active_; }
+    // Every live change a client made to the brain since the last call (set_param, apply_patch), as
+    // "patch:<module>.<key>" / "patch:graph".  The host prints them into the run's JSONL, so a watched
+    // run's record shows what was changed under it (2026-09-17: a watched run and a measured one can
+    // only be compared if every difference is on the record).
+    std::vector<std::string> take_events();
 
 private:
     ogma::OgmaInstance& instance_;
@@ -37,6 +43,7 @@ private:
     std::unique_ptr<ogma::LiveGraph> live_;
     std::unique_ptr<ami_ogma::control::ControlServer> control_;
     bool active_ = false;
+    std::vector<std::string> events_;      // guarded by mtx_
 };
 
 }  // namespace mjhost

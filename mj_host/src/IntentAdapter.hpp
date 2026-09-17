@@ -127,6 +127,16 @@ public:
     // avoidance owns it.  Gated by the state it exploits (a held reference, a clear field).  Off = byte-identical.
     void set_heading_reflex(double tau_s, double damp, double tof_gate) { hr_tau_ = tau_s; hr_damp_ = damp; hr_gate_ = tof_gate; }
     double heading_reflex_share() const { return hr_share_; }   // the reflex's share of the yaw command this tick
+    // STUCK (things phase, 2026-09-17, `--stop-on-stuck K`): the body's own forward-model error as a DURATION.
+    // A stall is a run of ticks on which the brain commands forward (> 0.75 of range) and the body's sensed
+    // forward velocity stays under 0.25 of range.  Walking is full of short stalls (the gait: median 0.22 s,
+    // p99 1.2 s, measured n = 6 on R64); a push against a leg or a wall is a stall of 2-8 s, and every stall
+    // of 2 s or more in those runs was one.  So the signal is the stall's length against the body's own
+    // running median stall length: stuck = longer than K medians.  No level is tuned; the scale is the body's.
+    void set_stuck(double k) { stuck_k_ = k; }
+    bool stuck_now() const { return stuck_now_; }       // this tick: a stall crossed K x the running median
+    double stall_s() const { return stall_run_ / 50.0; }
+    double stall_median_s() const { return stall_med_ / 50.0; }
     int  seek_gated() const { return seek_gated_; }   // ticks the gate zeroed a slot
     // The seek loop's token (reality.cognitive.seek_value / seek_range), if a graph has one.
     bool   seek_present() const { return seek_present_; }
@@ -183,6 +193,7 @@ public:
     int    thing_nodes()  const { return thing_nodes_; }
     bool   thing_seen()   const { return thing_seen_; }
     std::vector<std::string> diagnostics() const;
+    std::vector<std::string> take_inspector_events();   // live changes a client made since the last call
     uint64_t ticks() const { return tick_id_; }
 
 private:
@@ -215,6 +226,7 @@ private:
     int last_steer_ = 0;
     bool seek_gate_ = false; int seek_gated_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
+    double stuck_k_ = 0.0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int  seek_steers_ = 0;

@@ -258,6 +258,19 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kActions[i])))
             last_twist_[i] = kRanges[i] * std::clamp(double(act->accel), -1.0, 1.0);
     }
+    // STUCK (see the header): the stall run and its running median.  Read before the reflex so the
+    // command it judges is the brain's own; the sensed velocity is the body's answer to last tick's.
+    stuck_now_ = false;
+    if (stuck_k_ > 0.0) {
+        const bool stalled = last_twist_[0] / kTwistRangeVx > 0.75 && last_sensed_[0] < 0.25f;
+        if (stalled) {
+            ++stall_run_;
+            if (!stuck_fired_ && double(stall_run_) > stuck_k_ * stall_med_ && stall_run_ >= 50) { stuck_now_ = true; stuck_fired_ = true; }
+        } else {
+            if (stall_run_ > 0) stall_med_ += 0.05 * (double(stall_run_) - stall_med_);   // a slow median-like tracker of stall lengths
+            stall_run_ = 0; stuck_fired_ = false;
+        }
+    }
     // The heading reflex (see the header).  Only while a loop's bearing set the reference this tick.
     hr_share_ = 0.0;
     if (hr_tau_ > 0.0 && last_steer_ != 0) {
@@ -348,6 +361,7 @@ std::string IntentAdapter::place_form_desc() const {
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
+std::vector<std::string> IntentAdapter::take_inspector_events() { return inspector_ ? inspector_->take_events() : std::vector<std::string>{}; }
 
 namespace {
 // The one CloudMap in the graph, or nullptr.  Looked up each call: there is at most one, the

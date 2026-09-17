@@ -52,7 +52,7 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
                 auto errors = ogma::LiveGraph::validate_offline(batch);
                 if (!errors.empty()) return {{"status", "error"}, {"message", errors.front()}, {"errors", errors}};
                 std::lock_guard<std::recursive_mutex> lk(mtx_);
-                try { return live_->apply(std::move(batch)); }
+                try { auto r = live_->apply(std::move(batch)); events_.push_back("patch:graph"); return r; }
                 catch (const std::exception& e) { return {{"status", "error"}, {"message", e.what()}}; }
             }
             std::lock_guard<std::recursive_mutex> lk(mtx_);
@@ -102,6 +102,7 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
                     else return {{"status", "error"}, {"message", "set_param: unsupported value type"}};
                     m->on_param_change(key, v);
                     live_->record_set_param(id, key, v);
+                    events_.push_back("patch:" + id + "." + key);
                     return {{"status", "ok"}, {"graph_version", int64_t(live_->version())}};
                 }
                 return {{"status", "error"}, {"message", "unknown verb: " + verb}};
@@ -123,6 +124,12 @@ InspectorSurface::InspectorSurface(ogma::OgmaInstance& instance, std::recursive_
 InspectorSurface::~InspectorSurface() {
     if (control_) control_->stop();
     if (diag_) diag_->stop();
+}
+
+std::vector<std::string> InspectorSurface::take_events() {
+    std::lock_guard<std::recursive_mutex> lk(mtx_);
+    std::vector<std::string> out; out.swap(events_);
+    return out;
 }
 
 void InspectorSurface::publish_tick(uint64_t tick_id) {

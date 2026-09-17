@@ -3415,3 +3415,90 @@ the reference — R27–R29 (§17.6–17.7), the playroom's R27 (§17.8), R34–
 (the mechanism operated, on the wrong sign); their measurement lessons stand (the reference's motion, the
 rail, refFollow, the instruments). `lookahead` and `commit_hold` were refuted on the mirror and are open
 again. §3.2's rule 7: the arm that ran was not the arm that was thought to run.
+
+### 17.38 The body's errors as triggers, the watched walk, and the run's record (2026-09-17, after the operator's eye on R64)
+
+**The operator's eye on R64** (seed 1, the launcher): "the directional fix is a big improvement; the robot is
+traversing much faster." Three events: at ~880 s it runs into a table leg; at ~945 and ~1200 s it trips over a
+block. "Those must be triggering big TLE spikes; great opportunities for the robot to stop and look, or
+trigger the pre-built skills — a loop that uses the emotes and skills as an output to reduce error on its
+body or the environment." Agreed, with the boundary settled: a skill fires by NAME at the intent boundary,
+the simulator stands in for the daemon, and what the brain learns is what each intent does.
+
+**What the events are in the log.** The watched run's record has them: 18 s pushing against the table leg
+with the forward command at full and the body not moving (`wall` flag on 146 ticks: the playroom's
+furniture counts as a wall), and two falls over blocks (tilt 120° and 131°, `obj` on 78 and 96 ticks; the
+rescue stood it up). The harness's seed-1 run does not have them, because the watched run was a different
+arm (below).
+
+**Do the brain's error channels see them?** R64 with `--log-motor-tle --body-predicts`, n = 6, each channel
+scored against its own walking distribution (median and MAD):
+
+| event (on walks, from 700 s) | count | twist brain `mtle` > 3 robust sd | joint brain `btle` | forward residual |
+|---|---|---|---|---|
+| a fall (tilt > 60°) | 30 | **100 %** | **100 %** | 57 % |
+| a contact onset (wall, furniture, object) | 2 327 | 14 % | 17 % | 15 % |
+| a push of 2 s (commanded forward, not moving) | 11 | 9 % | 18 % | 36 % |
+
+Falls are loud in every channel (and in tilt). Contacts mostly are not: a leaning or glancing contact
+changes nothing the body predicts. A push is not a spike at all — the walker achieves about half of its
+commanded speed at the best of times (the 2 s mean forward residual is 0.51 ± 0.27 while walking and 0.63
+during a push), so no level separates it. What separates it is DURATION: walking stalls (commanded forward
+above 0.75 of range, sensed under 0.25) last 0.22 s at the median and 1.2 s at the 99th percentile, while
+every stall of 2 s or more in the six runs (11 of them, 2–8 s) was a push against a wall or furniture.
+
+**Lever: the stuck stop** (`--stop-on-stuck K`, off by default; R46 byte-identical): a stop starts when a
+stall has lasted longer than K times the body's own running median stall length (K = 8, about 1.8 s), with
+the same settle, sweep and cloud as any stop. The body's forward-model error as a duration against its own
+scale. Measured on R64w (below), n = 6: 12 stuck stops over six runs, 8 of them at a wall or furniture, seed 5
+(no stall past the threshold) byte-identical to its control; long pushes 8 → 5. Walk time 79 → 71 %, path
+115 → 100 m, straightness 0.28 → 0.21, walls tie (22 → 23 / min, per seed both ways), rescues tie.
+`WORKING` as a mechanism, `NULL` as a behaviour: the duck stops, looks, and resumes toward the same
+reference, and pushes again. The stop has to change what the walk is for — drop the seek target it could not
+reach, and let the stop's cloud bake the node play was climbing to — before it is a behaviour. Preset R64s.
+
+**The run's record: three catches (§3.2 rule 7).** Chasing why the watched run and the harness's run of
+the same seed diverged at 613.58 s:
+
+1. **The host is deterministic.** Five headless replays of seed 1 are identical to each other and to the
+   harness's run over all 75 000 ticks, with the inspector bound, blocked, or carrying a read-only client
+   that subscribes every module's diag. Two replays of 700 s diverged from the harness at 680 s only because
+   a stop is not started with under 60 s of run left; a short replay is not a replay.
+2. **The watched run was a different arm.** `newtest.py` copies the controls of the first preset naming the
+   base config; R60 has two (R60 and R60a, which differ only by `--stop-on-arrive`), so R61–R64 were minted
+   without the arrival-stop flag every measured arm carried. The launcher ran R64 without arrival stops;
+   the harness measured it with them. Fixed: `newtest.py` copies the LAST preset of the base config and
+   prints the copied host args; presets R61–R64 and R64r corrected; the walk the operator watched is its
+   own preset, R64w, measured below. The launcher's start-up scan of configs was the earlier half of the same
+   trap (the R64 launch that "closed at once" ran `head2_h1_babble.json`); fixed the same day.
+3. **A live parameter change under a watched run was not on its record.** `set_param` and `apply_patch`
+   through the inspector now print into the JSONL as `patch:<module>.<key>` / `patch:graph`, so a watched run
+   can always be compared with a measured one.
+
+Also noted for O41: R64 with `--log-motor-tle --body-predicts` is not the same run as R64 without them
+(stops 15.5 against 13.7, cells 159 against 126 at n = 6); the earlier "behaviourally free" reading needs a
+byte-identity check before the channel is used as an input.
+
+**The walk the operator watched (R64w = R64, timer stops only), n = 6, beside the measured R64:**
+
+| | R60 | R64 (arrival stops, §17.37) | **R64w (watched)** |
+|---|---|---|---|
+| walls / min · contact % | 12.4 · 1.7 | 14.7 · 1.4 | 22.1 ± 18.5 · 2.6 |
+| path m · cells · straightness | 124 · 124 · 0.17 | 96 · 126 · 0.22 | 115 · 140 ± 58 · 0.28 |
+| walk % · stand % · stops | 82 · 16 · 10.8 | 65 · 33 · 13.7 | 79 · 19 · 11 |
+| objects moved m · rescues / min | 3.4 · 0.13 | 5.1 · 0.05 | 2.6 · 0.07 |
+| refFollow · heading error | 0.27 · 1.50 | 0.12 · 1.28 | 0.08 · 1.26 |
+
+The walk the operator liked is the un-mirrored play with the step and no arrival stops: the fastest and
+straightest cover of the room this body has made, at the cost of a third more wall contact than with the
+arrival stops. Both are on the record; the choice is the operator's eye.
+
+**The skill runner, opened.** Pollen's one-shot networks are the walker's architecture (61 observations, 14
+actions; the files are 793 685 bytes to the walker's 793 705): `ball_kick_left.onnx`, `ball_kick_right.onnx`
+and `roulade.onnx` fetched at the walker's pinned commit `3954496` (SHA-256 `d6928284…`, `147a32c3…`,
+`3d60da08…`; the current release seeds them from the `microduck-policies` Hub repository instead). Their
+daemon runs a kick as a 0.5 s window and a roulade as 1 s: the network sees an all-zero command, runs at
+standing tuning, then unwinds and hands back to the gait, in the priority roulade > kick > ground pick >
+sit > stand > walk. The build that follows: the host runs a requested skill exactly so, a loop requests it
+by name through the bus (`intent.skill`), and the brain's side is a model of what the intent does — the
+cloud before and after a kick, the gravity vector after a roll — whose error is the thing reduced.

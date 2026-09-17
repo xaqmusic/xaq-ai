@@ -95,7 +95,11 @@ def main():
         # Inherit the BASE config's controls (mode, scene, secs) when it has a preset: R26 and
         # R29 were minted from level-2 bases with the level-0 pipeline's controls (mode brain,
         # from scratch, no arena scene) and launched in the wrong mode until fixed by hand.
-        src = next((p for p in presets if p.get("state", {}).get("config") == a.base), None)
+        # ...and of those, the LAST one added: a config can carry several presets that differ only
+        # in host args (R60 and R60a), and copying the first minted R61-R64 without the arrival-stop
+        # flag the harness ran with -- what the operator watched was not what was measured
+        # (2026-09-17).  The copied host args are printed below so a drift is visible at mint time.
+        src = next((p for p in reversed(presets) if p.get("state", {}).get("config") == a.base), None)
         if src is None:
             # The old "★ PIPELINE 1/3" prefix matched nothing once the pipeline was renamed
             # "(old lineage)": the fallback was the hard-coded defaults dict. The level-0
@@ -107,6 +111,10 @@ def main():
                                             "ident_until": 3000, "secs": 7200, "output": "headless",
                                             "save_brain": True, "battery": False}
     state["config"] = out_name
+    if src:
+        print(f"controls copied from preset {src['name'][:60]!r}")
+        print(f"  host_args: {state.get('host_args', '')}")
+        print("  CHECK these against the harness argv of the arm this test will be measured with")
     if a.seed is not None:
         state["seed"] = a.seed
     if a.secs is not None:

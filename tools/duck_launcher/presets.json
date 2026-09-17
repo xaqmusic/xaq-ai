@@ -1140,7 +1140,7 @@
  {
   "name": "R61 · SEEK + the heading REFLEX + play's target beyond the turning radius (R38's lookahead, retried now that the regulator regulates)",
   "series": 61,
-  "hint": "MEASURED (n=6, with the heading reflex): REGRESSION -- the reference under play still moves at 0.60 rad/s and walls 64/min. Refuted on the mirrored bearing (O51); open again on R64. Design doc §17.37.",
+  "hint": "(preset corrected 2026-09-17: it lacked --stop-on-arrive, which every measured arm had) MEASURED (n=6, with the heading reflex): REGRESSION -- the reference under play still moves at 0.60 rad/s and walls 64/min. Refuted on the mirrored bearing (O51); open again on R64. Design doc §17.37.",
   "state": {
    "config": "a1v2_r61_lookahead.json",
    "mode": "level2",
@@ -1157,14 +1157,14 @@
    "seed": 1,
    "seed_random": false,
    "arena_shift": 0.0,
-   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45",
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive",
    "fast_until": 600
   }
  },
  {
   "name": "R62 · SEEK + the heading REFLEX + play's run-and-tumble WANDER on walks (a held random heading, 5 s runs)",
   "series": 62,
-  "hint": "MEASURED (n=6, with the heading reflex): REGRESSION -- the reference under play moved at 1.5 rad/s, and its trace is what exposed the play loop's mirrored bearing (O51). Retry on R64. Design doc §17.37.",
+  "hint": "(preset corrected 2026-09-17: it lacked --stop-on-arrive, which every measured arm had) MEASURED (n=6, with the heading reflex): REGRESSION -- the reference under play moved at 1.5 rad/s, and its trace is what exposed the play loop's mirrored bearing (O51). Retry on R64. Design doc §17.37.",
   "state": {
    "config": "a1v2_r62_wander.json",
    "mode": "level2",
@@ -1181,14 +1181,14 @@
    "seed": 1,
    "seed_random": false,
    "arena_shift": 0.0,
-   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45",
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive",
    "fast_until": 600
   }
  },
  {
   "name": "R63 · SEEK + the play loop in the duck's own handedness (heading_sign -1): its right is the body's right",
   "series": 63,
-  "hint": "MEASURED (n=6): the premise holds -- with the sign right the reference under play stands still (0.00 rad/s, refFollow 0.11, the lowest measured); with the heading reflex the seek error closes to 0.26 rad and the yaw leaves its rail. Walls double (20 -> 47-49/min): the mirrored bearing had been an accidental avoider. Superseded by R64 (R48's step added). Design doc §17.37.",
+  "hint": "(preset corrected 2026-09-17: it lacked --stop-on-arrive, which every measured arm had) MEASURED (n=6): the premise holds -- with the sign right the reference under play stands still (0.00 rad/s, refFollow 0.11, the lowest measured); with the heading reflex the seek error closes to 0.26 rad and the yaw leaves its rail. Walls double (20 -> 47-49/min): the mirrored bearing had been an accidental avoider. Superseded by R64 (R48's step added). Design doc §17.37.",
   "state": {
    "config": "a1v2_r63_playsign.json",
    "mode": "level2",
@@ -1205,14 +1205,62 @@
    "seed": 1,
    "seed_random": false,
    "arena_shift": 0.0,
-   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45",
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive",
    "fast_until": 600
   }
  },
  {
   "name": "R64 · SEEK + play in the duck's handedness + R48's model-implied step (the loud avoider), with the heading reflex",
   "series": 64,
-  "hint": "THE CANDIDATE for the operator's eye after the circling (2026-09-17). WATCH (seed 1, fast-forward through 600 s): the walks between stops go where the play or seek reference points, in wide arcs, instead of circling. n=6 vs R60a: the reference stands still under play (0.00 rad/s), coverage 89 -> 126 cells (5/6 up), path 81 -> 96 m, objects moved 2.5 -> 5.1 m, walls 20 -> 15/min with the spread gone (R60a 0-56, R64 3-24), straightness 0.15 -> 0.22, stands hold. The yaw command is still on its rail 93 % and the heading error still ~1 rad: the body follows in arcs. Compare R64r for the straight version. Design doc §17.37.",
+  "hint": "(preset corrected 2026-09-17: it lacked --stop-on-arrive, which every measured arm had) THE CANDIDATE for the operator's eye after the circling (2026-09-17). WATCH (seed 1, fast-forward through 600 s): the walks between stops go where the play or seek reference points, in wide arcs, instead of circling. n=6 vs R60a: the reference stands still under play (0.00 rad/s), coverage 89 -> 126 cells (5/6 up), path 81 -> 96 m, objects moved 2.5 -> 5.1 m, walls 20 -> 15/min with the spread gone (R60a 0-56, R64 3-24), straightness 0.15 -> 0.22, stands hold. The yaw command is still on its rail 93 % and the heading error still ~1 rad: the body follows in arcs. Compare R64r for the straight version. Design doc §17.37.",
+  "state": {
+   "config": "a1v2_r64_step.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R64r · as R64 with the heading REFLEX (yaw closes the heading error in 1 s, released within 0.5 m of anything)",
+  "series": 64,
+  "hint": "(preset corrected 2026-09-17: it lacked --stop-on-arrive, which every measured arm had) WATCH (seed 1): the straight version -- while a loop holds the reference the yaw command closes the heading error (--heading-reflex 1.0 0.3 0.5). n=6: straightness 0.29 (R64 0.22), cells 144, the seek error 0.61 rad (R64 1.61), the yaw off its rail (69 % against 93 %); the cost is walls 15 -> 32/min and rescues 0.05 -> 0.19/min: a heading held to a reference AT a wall (a novel edge node, a wall base taken for a thing) beats the avoidance in the last half metre. WORKING on the channel, PARTIAL as a behaviour. Design doc §17.37.",
+  "state": {
+   "config": "a1v2_r64_step.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --heading-reflex 1.0 0.3 0.5 --stop-on-arrive",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R64w · the WALK the operator watched on 2026-09-17: R64 without arrival stops (timer stops only)",
+  "series": 64,
+  "hint": "The run the operator watched and liked on 2026-09-17 ('the directional fix is a big improvement; the robot is traversing much faster'); through a preset drift it had no --stop-on-arrive while the measured R64 did, so it is its own arm now. n=6 (design doc §17.38): walls 22/min (R64 with arrival stops 15), path 115 m, cells 140, straightness 0.28, walk 79 %, rescues 0.07/min. Seed 1: pushes a table leg ~880 s, falls over a block ~945 and ~1200 s. Timer stops every 80 s only.",
   "state": {
    "config": "a1v2_r64_step.json",
    "mode": "level2",
@@ -1234,9 +1282,9 @@
   }
  },
  {
-  "name": "R64r · as R64 with the heading REFLEX (yaw closes the heading error in 1 s, released within 0.5 m of anything)",
+  "name": "R64s · the watched walk + a STUCK stop: a forward stall longer than 8x the body's own median stall starts a stop (--stop-on-stuck 8)",
   "series": 64,
-  "hint": "WATCH (seed 1): the straight version -- while a loop holds the reference the yaw command closes the heading error (--heading-reflex 1.0 0.3 0.5). n=6: straightness 0.29 (R64 0.22), cells 144, the seek error 0.61 rad (R64 1.61), the yaw off its rail (69 % against 93 %); the cost is walls 15 -> 32/min and rescues 0.05 -> 0.19/min: a heading held to a reference AT a wall (a novel edge node, a wall base taken for a thing) beats the avoidance in the last half metre. WORKING on the channel, PARTIAL as a behaviour. Design doc §17.37.",
+  "hint": "MEASURED (n=6, design doc §17.38): 12 stuck stops over six runs, 8 at a wall or furniture; the long pushes 8 -> 5; walk 79 -> 71 %, path 115 -> 100 m, walls tie. WORKING as a mechanism, NULL as a behaviour: the duck stops, looks and resumes toward the same reference. WATCH (seed 1): the stop at the table leg ~880 s. Next: the stuck stop drops the seek target and bakes play's node.",
   "state": {
    "config": "a1v2_r64_step.json",
    "mode": "level2",
@@ -1253,7 +1301,7 @@
    "seed": 1,
    "seed_random": false,
    "arena_shift": 0.0,
-   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --heading-reflex 1.0 0.3 0.5",
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-stuck 8",
    "fast_until": 600
   }
  }
