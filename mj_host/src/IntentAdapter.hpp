@@ -194,6 +194,9 @@ public:
     bool   thing_seen()   const { return thing_seen_; }
     std::vector<std::string> diagnostics() const;
     std::vector<std::string> take_inspector_events();   // live changes a client made since the last call
+    // SKILLS AT THE INTENT BOUNDARY: a module publishes `intent.skill` (ProprioToken [id, request]) with
+    // request 1 on the tick it wants one; ids: 0 kick_left, 1 kick_right, 2 roulade.  -1 = none this tick.
+    int skill_request() const { return skill_request_; }
     uint64_t ticks() const { return tick_id_; }
 
 private:
@@ -229,6 +232,7 @@ private:
     double stuck_k_ = 0.0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
+    int skill_request_ = -1; uint64_t skill_request_tick_ = 0;
     int  seek_steers_ = 0;
     double seek_ego_ = 0.0;                   // the seek bearing this tick, body frame (rad, + = right)
     bool no_backing_ = false; int backing_clamped_ = 0;

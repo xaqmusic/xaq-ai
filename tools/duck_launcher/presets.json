@@ -1304,5 +1304,29 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-stuck 8",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R64k · R64 + a KICK from standing at every arrival: Pollen's kick network, run as their daemon runs it, the side by the thing's bearing (--skill-on-arrive kick)",
+  "series": 64,
+  "hint": "WATCH (seed 2 or 4, fast-forward through 600 s): the duck walks to a thing, stops, the stander takes the legs, then a half-second kick with the foot on the thing's side, then the sweep. n=6 (design doc §17.39): 27 kicks, no fall, the nearest object moved > 5 cm after 19 % (blocks 25 %, balls 9 %); walls and rescues tie with R64. The first skill fired at the intent boundary in sim. Next: the gaze at the reached thing, then the loop that learns what a kick does.",
+  "state": {
+   "config": "a1v2_r64_step.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 4,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-on-arrive kick",
+   "fast_until": 600
+  }
  }
 ]

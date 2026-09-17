@@ -224,6 +224,10 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (sv->values.size() > 0) { seek_present_ = true; seek_value_ = sv->values[0]; }
     if (auto sr = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.seek_range")))
         if (sr->values.size() > 0) seek_range_ = sr->values[0];
+    // a skill request from the graph (O54): a fresh token with request > 0.5 on this tick
+    skill_request_ = -1;
+    if (auto sk = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("intent.skill")))
+        if (sk->values.size() >= 2 && sk->values[1] > 0.5f && sk->tick_id == tick_id_) skill_request_ = int(std::lround(sk->values[0]));
     // ARRIVAL (things phase T4): the loop drops a target it has reached -- its need goes to 0 with the range
     // under its arrive threshold -- and the host may start a stop on it (--stop-on-arrive).
     if (seek_present_ && seek_value_prev_ > 0.0 && seek_value_ == 0.0 && seek_range_ < 0.3) seek_arrived_ = true;

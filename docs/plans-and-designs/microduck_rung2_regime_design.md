@@ -3502,3 +3502,41 @@ standing tuning, then unwinds and hands back to the gait, in the priority roulad
 sit > stand > walk. The build that follows: the host runs a requested skill exactly so, a loop requests it
 by name through the bus (`intent.skill`), and the brain's side is a model of what the intent does — the
 cloud before and after a kick, the gravity vector after a roll — whose error is the thing reduced.
+
+### 17.39 Skills at the intent boundary: the kick, from the walk and from standing (2026-09-17)
+
+**Built.** The host runs one of Pollen's one-shot networks as their daemon runs it (`robotd/src/control.rs`):
+a window of the skill's duration (a kick 0.5 s, a roulade 1 s) in which the network sees an all-zero command
+and drives every joint at standing tuning, then the gait resumes from where the body was left; the stander,
+if it was standing, resumes from there too. Requested by NAME: from the graph through `intent.skill`
+(a ProprioToken `[id, request]`, the adapter's `skill_request()`), or for the first measurement by a host
+flag, `--skill-on-arrive NAME` (the seek loop's arrival) and `--skill-at SECS NAME` (a scripted check).
+`kick` picks the side from the thing's bearing. The networks `ball_kick_left.onnx`, `ball_kick_right.onnx`
+and `roulade.onnx` are fetched at the walker's pinned commit (`fetch_scaffolds.sh`, hashes in the scaffolds
+README) and load with the walker's shape (61 observations, 14 actions). Off = byte-identical (md5 `cb24520c…`).
+On the robot the same request is `robot.do{skill}`; nothing here is a trajectory of ours.
+
+**Measured, n = 6 × 1500 s on R64 with arrival stops.** Per arrival, the nearest object's displacement over
+the following seconds, and the body:
+
+| | R64 (arrival stop, no kick) | kick fired MID-WALK at arrival, then the stop | **kick fired FROM STANDING, after the stop's hand-back** |
+|---|---|---|---|
+| arrivals · nearest object at | 23 · 0.22 m | 25 · 0.28 m | 27 · 0.21 m |
+| the object moved > 5 cm within 3–4 s | 4 % (balls 8 %, blocks 0 %) | 16 % (balls 20 %, blocks 10 %) | **19 % (blocks 25 %, balls 9 %)** |
+| max tilt in the window p90 · falls | 9° · 0 % | 101° · **28 %** | 6° · **0 %** |
+| walls / min · rescues / min | 14.7 · 0.05 | 22.8 · 0.15 | 16.5 · 0.07 |
+| objects moved (whole run) · walk % | 5.1 m · 65 | 3.0 m · 72 | 3.8 m · 75 |
+
+A kick fired into a walk at full command topples the body a quarter of the time: their daemon runs the
+kick at standing tuning, and the window's zero command from a walking state is a stumble, not a kick.
+Fired from standing (the arrival stop settles, the stander takes the legs, the kick runs, the stander
+resumes) it is safe on every kick, and the thing answers one time in five, blocks more than balls. The
+remaining four in five are the foot missing: the thing sits at 0.21 m at a bearing the network does not
+read, and a ball that is touched rolls out of the window's reach. Which foot, and how far the thing is from
+it, is what a loop that learns the kick's outcome would have to learn.
+
+**Verdicts.** The skill runner `WORKING` as the intent boundary's stand-in; the standing kick `WORKING` as
+a mechanism (safe, and it answers); the walking kick `REGRESSION` (falls). Preset R64k (the standing kick
+at arrival). What it hands the plan: the outcome loop needs to SEE the outcome, and a thing at 0.21 m sits
+below a level gaze (§17.36, 12 of 31 arrival stops attended nothing); so T3, the gaze at the reached thing,
+comes before the loop that learns what a kick does.
