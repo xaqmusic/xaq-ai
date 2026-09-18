@@ -3592,3 +3592,49 @@ and is the form to carry. R66 `NULL`. Presets R65 and R65u. Next: more arrivals 
 share, and the timer stop's floor), and the outcome's precision (the thing re-fixed from the look stop's
 cloud rather than the arrival's), before the habituation can be read; then the get-up (the roulade after a
 fall, O27) on the same runner.
+
+### 17.41 The peck: a second intent, and the choice between them (R67, 2026-09-18)
+
+**The operator's eye on R65u:** "the kick and look cycle works." And two asks: the reach-down pick as a
+second way to explore ("very similar to a kick, like a peck; I don't expect anything to be picked up"),
+and a creative way to choose when to kick and when to peck.
+
+**Built.** Pollen's ground pick is not a window but a PHASE their daemon drives: the network sees
+`[cos 2πφ, sin 2πφ, 0]` in the twist slots while φ runs from 0 to 0.7 over a 4 s period, so a 2.8 s
+reach-down at standing tuning (`robotd/src/control.rs`, `DEFAULT_GROUND_PICK_END_PHASE`). The host runs it
+so, as the skill `peck` (`alpha_ground_pick.onnx`, from the `microduck-policies` Hub set at `v1`, the set a
+fresh board is seeded with; `fetch_scaffolds.sh` fetches it by hash). Fired alone from seed 1's walk: the
+body drops from 12 to 8.5 cm, the knees and ankles fold, it leans to 24° and stands again at the end.
+Nothing is grasped (no MJCF has the mouth hinge), and nothing was meant to be.
+
+**The choice.** The outcome loop keeps its per-thing statistics per INTENT, and at an arrival asks for the
+one whose answer for this thing it knows least: fewer recorded outcomes first, then the larger spread, then
+the one it did not try last (`peck_id`; −1 keeps R65 byte-identical; a unit test pins the alternation). A
+creature that has kicked a block twice and never pecked it pecks; one that knows both leaves it alone. The
+outcome measure is the same for both, the thing's displacement, which is what "does it answer" means here.
+
+| n = 6 × 1500 s, arrival stops, the unwind | R65u (kick only) | **R67 (kick and peck)** |
+|---|---|---|
+| requests · windows fired (kick / peck) · falls | 27 · 27 (27 / —) · 0 | 31 · 29 (16 / 13) · **0** |
+| outcomes observed · unknown | 12 · 15 | 13 (kick 9, peck 4) · 18 |
+| the observed answer, m (p10–p90): kick · peck | 0.03–0.10 · — | 0.06–0.17 · 0.05–0.22 |
+| walls / min · rescues / min · walk % | 12.0 · 0.11 · 61 | 17.9 · 0.11 · 66 |
+| stops · stands held · objects moved m | 18.8 · 18.5 · 2.9 | 17.8 · 15.7 · 3.2 |
+
+**Reading it.** The choice does what it says: the loop alternates, the peck runs from standing without a
+fall, and a peck moves a thing about as often and as far as a kick does, which is the peck being a
+forward lean onto the thing at 0.2 m. The learning is where R65u left it: too few answers per run for a node
+to reach two samples of either intent (none did), so the habituation cannot yet be read, and the answers'
+scale (5–20 cm) is within the fixed position's own error. Walls rise from 12 to 18 a minute, within the
+spread. `WORKING` as a mechanism; the behaviour's loudness still waits on more arrivals per run. Preset R67.
+
+**The get-up question** (the operator: how would a roulade get-up differ from the current one). The current
+get-up is the host's `Recovery`: when projected gravity says the body is down (past 60°, held 200 ms, the
+daemon's own late detector), the host hands the joints to the standing scaffold until the body is upright,
+then hands them back; the brain observes it frozen and never decides it. A roulade get-up would change who
+decides and what is fired: the brain, from its own gravity error, would request an intent by name through
+the boundary, and the intent's outcome (gravity back to upright, or not) would be learned like the kick's.
+Whether Pollen's roulade rises from an arbitrary fallen pose is unmeasured — it is a forward roll trained
+from standing that ends on the floor and rises — and their walker already carries fall recovery in one
+network; so the roll may be the wrong intent for a fall and the right one for a trick. The measurement is
+cheap once wanted: fire `roulade` when the body is down instead of the scaffold, and count the rises.

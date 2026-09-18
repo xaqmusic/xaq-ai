@@ -64,6 +64,7 @@ public:
     int    unknown()   const { return unknown_; }
     double last_surprise() const { return last_surprise_; }
     const std::unordered_map<int, Stat>& stats() const { return stats_; }
+    static int key_of(int node, int intent) { return node * 2 + intent; }   // intent 0 = kick, 1 = peck
 
 private:
     std::string bearing_topic_ = "percept.thing_bearing";
@@ -77,6 +78,10 @@ private:
     int    min_samples_ = 2, observe_ticks_ = 1500, min_conf_ticks_ = 5;
     double explore_gain_ = 1.0;
     int    skill_left_ = 0, skill_right_ = 1;
+    // a second intent (the peck, Pollen's ground pick): -1 = the kick only.  With two, the loop asks for the
+    // one whose answer for THIS thing it knows least -- fewer recorded outcomes, then the larger spread,
+    // then the one it did not try last.  A creature that has kicked a block twice and never pecked it pecks.
+    int    peck_id_ = -1; int last_intent_ = 1;   // intent 0 = kick (either side), 1 = peck
 
     // the thing as last seen: fixed position, node
     bool   seen_ = false; double tx_ = 0.0, ty_ = 0.0; int node_ = -1; int seen_run_ = 0;
@@ -85,7 +90,8 @@ private:
     // the kick in flight: the fixed position and node before it, the wait for the outcome
     bool   pending_ = false; double kx_ = 0.0, ky_ = 0.0; int knode_ = -1; int wait_ = 0; uint64_t kicked_tick_ = 0;
     bool   request_now_ = false; int request_id_ = 0;
-    std::unordered_map<int, Stat> stats_;
+    std::unordered_map<int, Stat> stats_;          // keyed by key_of(node, intent)
+    int    kintent_ = 0;
     int    requests_ = 0, observed_ = 0, unknown_ = 0;
     double last_surprise_ = 0.0, last_pred_ = 0.0, last_obs_ = 0.0; int last_node_ = -1;
 };

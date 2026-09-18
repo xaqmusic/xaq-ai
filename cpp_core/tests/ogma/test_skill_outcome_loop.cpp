@@ -64,7 +64,7 @@ TEST(SkillOutcomeLoop, TheAnswerIsTheThingSeenAgainWithinTheRadius) {
     // the thing is seen again, 0.3 m further along +x: from the body at (0.8, 0) it is 0.5 m ahead (prox 0.8)
     for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.8f, 3, 0.0f, 0.2f);
     EXPECT_EQ(r.m.observed(), 1);
-    auto st = r.m.stats().at(3);
+    auto st = r.m.stats().at(ogma::SkillOutcomeLoop::key_of(3, 0));
     EXPECT_EQ(st.n, 1);
     EXPECT_NEAR(st.mean, 0.3, 0.05) << "the displacement from the fixed position";
     auto oc = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.outcome"));
@@ -81,7 +81,7 @@ TEST(SkillOutcomeLoop, NotSeenIsNotZero) {
     for (int i = 0; i < 120; ++i) r.step(0.8, 0, 0, 0, 0, 0, 5, 0.0f, 0.2f);
     EXPECT_EQ(r.m.unknown(), 1);
     EXPECT_EQ(r.m.observed(), 0);
-    EXPECT_EQ(r.m.stats().count(5) ? r.m.stats().at(5).n : 0, 0) << "nothing learned from an unseen outcome";
+    EXPECT_EQ(r.m.stats().count(ogma::SkillOutcomeLoop::key_of(5, 0)) ? r.m.stats().at(ogma::SkillOutcomeLoop::key_of(5, 0)).n : 0, 0) << "nothing learned from an unseen outcome";
 }
 
 TEST(SkillOutcomeLoop, AKnownThingIsLeftAlone) {
@@ -97,4 +97,24 @@ TEST(SkillOutcomeLoop, AKnownThingIsLeftAlone) {
     }
     r.see_then_arrive(7);
     EXPECT_EQ(r.m.requests(), 2) << "a node known with no spread is not kicked again";
+}
+
+// Two intents: the loop asks for the one whose answer for this thing it knows least.  After a kick's outcome
+// is recorded the next arrival at the same node asks for the PECK (id 3); after the peck's, the kick again.
+TEST(SkillOutcomeLoop, TheLeastKnownIntentIsAsked) {
+    ogma::ParamMap p; p["peck_id"] = int64_t{3}; p["min_samples"] = int64_t{3};
+    Rig r(p);
+    std::vector<int> asked;
+    for (int k = 0; k < 3; ++k) {
+        r.see_then_arrive(7);
+        ASSERT_EQ(r.m.requests(), k + 1);
+        asked.push_back(r.request_id());
+        for (int i = 0; i < 40; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+        for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.9f, 7, 0.0f, 0.2f);   // seen again: an outcome
+        ASSERT_EQ(r.m.observed(), k + 1);
+        for (int i = 0; i < 10; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+    }
+    EXPECT_NE(asked[0], 3) << "the first asks for a kick (the last intent starts as the peck)";
+    EXPECT_EQ(asked[1], 3) << "the kick answered once, the peck never: the peck";
+    EXPECT_NE(asked[2], 3) << "both answered once with the same spread: the one not tried last, the kick";
 }

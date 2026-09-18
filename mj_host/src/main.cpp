@@ -1253,11 +1253,17 @@ std::string g_skill_on_arrive;           // "" = off
 // metre back it is in the field, so the kick's OUTCOME can be seen (the outcome loop's honest signal).
 double g_skill_unwind_vx = 0.0, g_skill_unwind_s = 0.0;
 double      g_skill_at_s = 0.0; std::string g_skill_at_name;
-struct SkillDef { const char* name; const char* file; double duration_s; };
+// A skill is a window; the ground pick (here "peck") is a PHASE the daemon drives: the observation's
+// twist slots carry [cos 2*pi*phase, sin 2*pi*phase, 0] while phase runs 0 -> end_phase (0.7) over
+// `period` (4 s), i.e. a 2.8 s window (robotd/src/control.rs; robotd-params DEFAULT_GROUND_PICK_END_PHASE).
+// Nothing is grasped in simulation (no MJCF has the mouth hinge); the operator's framing (2026-09-18):
+// the peck is another way to explore -- a reach-down, like a kick -- and the outcome loop chooses which.
+struct SkillDef { const char* name; const char* file; double duration_s; double phase_period_s; };
 constexpr SkillDef kSkills[] = {
-    {"kick_left",  "ball_kick_left.onnx",  0.5},
-    {"kick_right", "ball_kick_right.onnx", 0.5},
-    {"roulade",    "roulade.onnx",         1.0},
+    {"kick_left",  "ball_kick_left.onnx",    0.5, 0.0},
+    {"kick_right", "ball_kick_right.onnx",   0.5, 0.0},
+    {"roulade",    "roulade.onnx",           1.0, 0.0},
+    {"peck",       "alpha_ground_pick.onnx", 2.8, 4.0},
 };
 const SkillDef* skill_def(const std::string& n) {
     for (const auto& d : kSkills) if (n == d.name) return &d;
@@ -1482,14 +1488,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     std::array<float, kActionLen> scaffold_last{}, walker_last{};
     // the skill window (see g_skill_on_arrive): the network, loaded on first use; the window's own last action
     std::unique_ptr<Policy> skill_policy; std::string skill_policy_name;
-    bool skill_active = false; int skill_left = 0; std::string skill_name; std::array<float, kActionLen> skill_last{};
+    bool skill_active = false; int skill_left = 0, skill_total = 0; std::string skill_name; std::array<float, kActionLen> skill_last{};
+    double skill_phase_period = 0.0;
     int skills_fired = 0, skills_requested = 0; bool skill_then_stop = false; std::string skill_pending;
     int unwind_left = 0, unwinds = 0; bool unwind_then_stop = false;
     const auto skill_start = [&](const std::string& name) {
         const SkillDef* d = skill_def(name);
         if (!d) return false;
         if (skill_policy_name != name) { skill_policy = std::make_unique<Policy>(kModelDir + "/scaffolds/" + d->file); skill_policy_name = name; }
-        skill_active = true; skill_left = std::max(1, int(d->duration_s * kBrainHz)); skill_name = name; skill_last.fill(0.0f);
+        skill_active = true; skill_left = std::max(1, int(d->duration_s * kBrainHz)); skill_total = skill_left; skill_name = name; skill_last.fill(0.0f);
+        skill_phase_period = d->phase_period_s;
         ++skills_fired;
         return true;
     };
@@ -2088,8 +2096,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             for (int i = 0; i < kNumPolicyJoints; ++i)
                 ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
         } else if (skill_active) {
-            // a skill's window, from standing or from the walk: the network drives every joint at standing tuning
-            const auto action = skill_policy->infer(build_observation(body, skill_last, Command{}));
+            // a skill's window, from standing or from the walk: the network drives every joint at standing tuning;
+            // a phase-driven skill (the peck) sees its phase in the twist slots, as the daemon feeds it
+            Command sc{};
+            if (skill_phase_period > 0.0) {
+                const double phase = double(skill_total - skill_left) / kBrainHz / skill_phase_period;
+                sc.twist = {std::cos(2.0 * M_PI * phase), std::sin(2.0 * M_PI * phase), 0.0};
+            }
+            const auto action = skill_policy->infer(build_observation(body, skill_last, sc));
             skill_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i) { ctrl[i] = kHomePose[i] + kStandingActionScale * action[i]; walk_targets[i] = ctrl[i]; }
             if (skill_left > 0) --skill_left;
@@ -2221,7 +2235,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
             if (skill_active) std::printf(",\"skill\":\"%s\"", skill_name.c_str());
             { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
-              if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4])); }
+              if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
             // live changes a client made through the inspector this tick: the run's record must show them
             {
                 const auto pe = brain.take_inspector_events();
@@ -2655,7 +2669,7 @@ int main(int argc, char** argv) {
             g_stop.on_stuck = std::stod(next("--stop-on-stuck"));
         } else if (a == "--skill-on-arrive") {
             g_skill_on_arrive = next("--skill-on-arrive");
-            if (g_skill_on_arrive != "kick" && !skill_def(g_skill_on_arrive)) throw std::runtime_error("--skill-on-arrive: unknown skill " + g_skill_on_arrive + " (kick = the side by the thing's bearing, kick_left, kick_right, roulade)");
+            if (g_skill_on_arrive != "kick" && !skill_def(g_skill_on_arrive)) throw std::runtime_error("--skill-on-arrive: unknown skill " + g_skill_on_arrive + " (kick = the side by the thing's bearing, kick_left, kick_right, roulade, peck)");
         } else if (a == "--skill-unwind") {
             g_skill_unwind_vx = std::stod(next("--skill-unwind")); g_skill_unwind_s = std::stod(next("--skill-unwind"));
         } else if (a == "--skill-at") {
