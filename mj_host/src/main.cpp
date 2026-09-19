@@ -1241,6 +1241,7 @@ bool g_no_backing = false;   // --no-backing: the twist brain's forward command 
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
+double g_stuck_escape_s = 0.0;   // --stuck-escape SECS (2026-09-19): after a stuck stop, hold the reference at the cloud view's freest sector for SECS
 double g_hr_tau = 0.0, g_hr_damp = 0.0, g_hr_gate = 1.0;   // --heading-reflex TAU DAMP GATE (2026-09-17): a hold on own yaw through action.vyaw
 // SKILLS AT THE INTENT BOUNDARY (2026-09-17, register O54).  A skill is one of Pollen's one-shot networks,
 // requested BY NAME and run as their daemon runs it (robotd/src/control.rs): a window of `duration` seconds
@@ -1419,6 +1420,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
+    if (g_stuck_escape_s > 0.0) std::fprintf(stderr, "  stuck escape: after a stuck stop the reference is held at the cloud view's freest sector for %.1f s\n", g_stuck_escape_s);
     if (g_ref_free > 0.0) { brain.set_ref_free(g_ref_free); std::fprintf(stderr, "  ref free-space gate: a bearing into a ToF sector with proximity above %.2f releases the reference\n", g_ref_free); }
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
@@ -1612,7 +1614,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // elevation (the sensor sits about 0.2 m up; a thing at the arrival range is 25-35 deg below level) and
     // its bearing; at every other stop it is the default.  The grid keeps its cell count; the width follows.
     double sweep_p_lo = sweep_p_lo0, sweep_p_hi = sweep_p_hi0, sweep_wp = (sweep_p_hi0 - sweep_p_lo0) / sweep_np, sweep_yc = 0.0;
-    bool stop_is_arrive = false;
+    bool stop_is_arrive = false, stop_is_stuck = false; int escapes = 0;
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
@@ -1783,7 +1785,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : "stop:start"); stop_started_tick = t;
-                stop_is_arrive = arrive_now;
+                stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now;
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
                 brain.set_learning(false);                 // its command is not applied during the stop
@@ -2024,6 +2026,18 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     const bool bored = (look_on || gaze_on) && (t - stop_started_tick) < stop_ticks - 1 && orient == Orient::None;
                     if (bored) ++stops_bored;
                     stop_phase = StopPhase::None; stop_event = orient != Orient::None ? "stop:orient" : bored ? "stop:bored" : "stop:end";
+                    if (stop_is_stuck && g_stuck_escape_s > 0.0) {
+                        // the escape: the freest sector of the stop's cloud view (8 sectors across +-64 deg, 1 = nothing
+                        // off the floor within 4 m; sector 0 on the right), ties to the one nearest straight ahead
+                        const auto view = brain.cloud_view();
+                        if (view.size() == 8) {
+                            int best = -1; double bv = -1.0;
+                            for (int k = 0; k < 8; ++k) { const double v = view[size_t(k)] - 0.01 * std::fabs(k - 3.5); if (v > bv) { bv = v; best = k; } }
+                            const double bearing = (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;   // + = right, as the loops' bearings
+                            brain.set_ref_hold(bearing, int(g_stuck_escape_s * kBrainHz)); ++escapes; stop_event = "stop:escape";
+                        }
+                        stop_is_stuck = false;
+                    }
                     brain.set_learning(true);
                     if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) { head->on_reset(); head->set_learning(true); }
                 }
@@ -2421,7 +2435,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
-        if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall\n", stops_stuck, stops_started, g_stop.on_stuck);
+        if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s fired %d times, the body upright within 2 s of the window %d times\n", g_skill_when_down.c_str(), down_skills, down_rises);
         if (g_stop.map_on_stop || look_on || gaze_on) {
@@ -2692,6 +2706,8 @@ int main(int argc, char** argv) {
             g_seek_gate = true;
         } else if (a == "--ref-unwrap") {
             g_ref_unwrap = true;
+        } else if (a == "--stuck-escape") {
+            g_stuck_escape_s = std::stod(next("--stuck-escape"));
         } else if (a == "--ref-free") {
             g_ref_free = std::stod(next("--ref-free"));
         } else if (a == "--stop-on-arrive") {

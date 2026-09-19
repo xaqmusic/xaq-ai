@@ -237,6 +237,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // under its arrive threshold -- and the host may start a stop on it (--stop-on-arrive).
     if (seek_present_ && seek_value_prev_ > 0.0 && seek_value_ == 0.0 && seek_range_ < 0.3) seek_arrived_ = true;
     seek_value_prev_ = seek_present_ ? seek_value_ : 0.0;
+    if (ref_hold_left_ > 0) {                     // the escape holds the reference; the loops wait
+        --ref_hold_left_; heading_ref_ = ref_hold_; ++play_steers_; last_steer_ = 4; bearing_topic = nullptr;
+    }
     if (bearing_topic)
     if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(bearing_topic))) {
         if (pb->values.size() >= 2) {

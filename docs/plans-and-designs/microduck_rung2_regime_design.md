@@ -3757,3 +3757,28 @@ stack `WORKING` on the channel (agreement 64 %, error 1.44 → 0.99, the rail 83
 and `PARTIAL` as a behaviour (walls down on four seeds, two seeds stuck at surfaces). The free-space gate
 `NULL` (the errors close, the walls do not). The continuous reference `REGRESSION` (§17.42). Preset R67r (the
 reflex on R67) for the operator's eye beside R67; nothing promoted.
+
+### 17.44 The escape: a stuck stop that turns toward free space (2026-09-19, last)
+
+**Built** (`--stuck-escape SECS`, off; guard byte-identical with the record fields stripped): when a stuck stop
+ends, the host takes the stop's cloud view (eight sectors across ±64°, each the nearest off-floor return over
+4 m) and holds the reference at the freest sector's bearing for SECS, the loops' bearings ignored meanwhile
+(steer code 4), so the reflex turns the body out of the surface before play or seek can aim it back in.
+`cloud_objects.py heading` and the sweep count the escapes.
+
+**Measured, n = 6, on R67 + the reflex + `--stop-on-stuck 8 --stuck-escape 4`:** 8 stuck stops over six runs,
+8 escapes. Where it fired it worked: seeds 5 and 6, the reflex arm's two stuck seeds, fall from 216 and 318 s
+in wall bursts to 85 and 78 (walls 45 → 15 and 58 → 16 a minute). Seed 1 diverged into a 111 s burst the
+detector never saw (walls 6 → 90); seconds in bursts over the six seeds 802 → 717, a tie. The stall detector
+reads a forward speed under 0.1 m/s, and most bursts are the body SLIDING along a surface at walking speed,
+commanded forward, making no progress toward its reference. `PARTIAL`: the escape is the right act and the
+detector misses most of what it is for. Next form of the detector: progress toward the reference — the
+body's velocity along the reference's direction, against the body's own distribution while walking — which
+would see a slide as it sees a push.
+
+**Where the walk stands at the end of 2026-09-19.** The circle the operator watched is understood in full
+and its parts are on the record with numbers: the mirrored bearing (fixed), the yaw column turning the wrong
+way for a large error (the reflex fixes it: 41 → 64 % agreement, the rail 83 → 22 %), the loop's committed
+turn holding the wrong command, and a reference that flips at ±π (its brake, left alone). What remains is
+O35 in a new form: a reflex that follows its loops faithfully into a surface on some seeds, and a detector
+that does not yet see a slide. R67 and R67r are the arms for the operator's eye; nothing is promoted.

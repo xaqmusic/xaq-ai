@@ -148,6 +148,8 @@ def run_one(arm, seed: int, secs: int, control_from: float, host_args: tuple, lo
     m = re.search(r"arrival stops: (\d+) of (\d+) started when the seek loop reached its target", err)
     out["stops_arrive"] = int(m.group(1)) if m else None
     m = re.search(r"stuck stops: (\d+) of (\d+) started when a forward stall", err)
+    m2 = re.search(r"; (\d+) escapes", err)
+    out["escapes"] = int(m2.group(1)) if m2 else None
     out["stops_stuck"] = int(m.group(1)) if m else None
     m = re.search(r"look: (\d+) saccades, (\d+) holds extended by novelty, (\d+) of (\d+) stops ended by a quiet round; mean stop ([\d.]+) s", err)
     out["saccades"] = int(m.group(1)) if m else None
@@ -392,7 +394,7 @@ def main():
             ("objs_min", "objs/min"), ("obj_moved_m", "objMoved m"), ("down_pct", "down%"),
             ("head_w_rms", "headW rms"), ("head_g_dev", "headG dev"),
             ("walk_pct", "walk%"), ("stopW_pct", "stopW%"), ("stand_pct", "stand%"), ("resc_pct", "resc%"),
-            ("stops", "stops"), ("stops_arrive", "stopsArrive"), ("stops_stuck", "stopsStuck"), ("handbacks", "handbacks"), ("survived", "survived"), ("survive_pct", "survive%"),
+            ("stops", "stops"), ("stops_arrive", "stopsArrive"), ("stops_stuck", "stopsStuck"), ("escapes", "escapes"), ("handbacks", "handbacks"), ("survived", "survived"), ("survive_pct", "survive%"),
             ("handoffs", "handoffs"), ("refused", "refused"), ("stop_resc", "stopResc"),
             ("yaw_stop", "yawStop sd"), ("yaw_walk", "yawWalk sd"),
             ("saccades", "saccades"), ("novel_holds", "novelHolds"), ("bored_pct", "bored%"), ("stop_len", "stop s"),

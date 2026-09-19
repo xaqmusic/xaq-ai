@@ -140,6 +140,12 @@ public:
     // avoidance acts unopposed and the reflex stands down.  Measured need: with the reflex the body follows
     // the loops (64 %), and on two seeds of six a reference held into a wall costs 45-58 contacts a minute.
     void set_ref_free(double p) { ref_free_ = p; }
+    // THE ESCAPE (2026-09-19, `--stuck-escape SECS`): after a stuck stop the reference is HELD for a while at a
+    // heading the host chose from the cloud's view (the freest sector), the loops' bearings ignored meanwhile,
+    // so the reflex turns the body out of the surface before play or seek can aim it back in (O35: the bad
+    // seeds are long bursts at a surface).  Steer code 4 while it holds.
+    void set_ref_hold(double bearing_rel, int ticks) { ref_hold_ = heading_ - bearing_rel; ref_hold_left_ = ticks; }
+    int  ref_hold_left() const { return ref_hold_left_; }
     int  ref_released() const { return ref_released_; }
     double heading_reflex_share() const { return hr_share_; }   // the reflex's share of the yaw command this tick
     // STUCK (things phase, 2026-09-17, `--stop-on-stuck K`): the body's own forward-model error as a DURATION.
@@ -249,6 +255,7 @@ private:
     int last_steer_ = 0;
     bool seek_gate_ = false; int seek_gated_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
+    double ref_hold_ = 0.0; int ref_hold_left_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
     double stuck_k_ = 0.0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
