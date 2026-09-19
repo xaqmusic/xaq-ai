@@ -111,6 +111,7 @@ public:
 
     // ---- accessors (tests, telemetry, the viewer's dump) ----
     bool     is_open()       const { return open_; }
+    bool     is_walking_cloud() const { return open_ && walking_cloud_; }
     bool     just_closed()   const { return just_closed_; }   // true on the tick a cloud was filed
     int      voxels()        const { return int(vox_.size()); }
     uint64_t points()        const { return points_; }
@@ -197,6 +198,13 @@ private:
     bool   things_shape_ = false;
     int    things_every_ = 4;
     bool   things_on_ = false;
+    // THE WALKING CLOUD (2026-09-19, the operator: "are we using any ToF data while the robot is walking?").
+    // With walk_cloud on, a cloud is also open while the body MOVES: each cast is translated by the odometry's
+    // displacement from the anchor (the cast token carries x, y) and de-rotated as at a stop, and the cloud is
+    // filed and reopened every walk_reset_m of travel so the odometry's drift (4-6 % of distance) stays under a
+    // voxel.  A walking cloud is never cached as a place (it belongs to no stop); the things reduction runs on it,
+    // so the seek loop gets LIVE bearings on the walk instead of a remembered position.  Off = byte-identical.
+    bool   walk_cloud_ = false; double walk_reset_m_ = 1.0; bool walking_cloud_ = false;
     std::vector<Thing>   things_, filed_things_;
     int                  attended_ = -1;
     std::array<float, 3> bearing_{0.0f, 0.0f, 0.0f};

@@ -126,6 +126,14 @@ public:
     // yaw command by proximity -- nothing within a metre: the reflex owns yaw; a wall at hand: the brain's
     // avoidance owns it.  Gated by the state it exploits (a held reference, a clear field).  Off = byte-identical.
     void set_heading_reflex(double tau_s, double damp, double tof_gate) { hr_tau_ = tau_s; hr_damp_ = damp; hr_gate_ = tof_gate; }
+    // A CONTINUOUS REFERENCE (2026-09-19, `--ref-unwrap`).  The reference is rebuilt from the winning loop's
+    // bearing every tick as heading - atan2(cx, cy); a bearing that flickers across +-pi (the thing behind the
+    // body) flips it by 2 pi, the error flips between +3.0 and -3.1, the yaw command flips sign every few ticks,
+    // and the body jitters in place instead of turning round (measured on R67 seed 1 at 1030 s; under play the
+    // same flip at each pass behind reverses the turn and keeps the orbit alive: the "reference that will not
+    // stand still" of §17.26).  With this on, each new reference is taken modulo 2 pi nearest the previous one,
+    // so the turn direction persists through the back; the sense slot and the reflex clamp instead of wrapping.
+    void set_ref_unwrap(bool on) { ref_unwrap_ = on; }
     double heading_reflex_share() const { return hr_share_; }   // the reflex's share of the yaw command this tick
     // STUCK (things phase, 2026-09-17, `--stop-on-stuck K`): the body's own forward-model error as a DURATION.
     // A stall is a run of ticks on which the brain commands forward (> 0.75 of range) and the body's sensed
@@ -199,6 +207,9 @@ public:
     int skill_request() const { return skill_request_; }
     // the outcome loop's token this tick, [node, predicted, observed, surprise, samples]; empty when none was observed
     std::vector<float> outcome_now() const { return outcome_; }
+    // the play loop's bearing this tick and its state (climbing / wandering / next node), for the record
+    std::array<float, 2> play_bearing() const { return play_bearing_; }
+    nlohmann::json play_state() const;
     uint64_t ticks() const { return tick_id_; }
 
 private:
@@ -230,12 +241,14 @@ private:
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
     bool seek_gate_ = false; int seek_gated_ = 0;
+    bool ref_unwrap_ = false;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
     double stuck_k_ = 0.0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int skill_request_ = -1; uint64_t skill_request_tick_ = 0;
     std::vector<float> outcome_;
+    std::array<float, 2> play_bearing_{0.0f, 0.0f};
     int  seek_steers_ = 0;
     double seek_ego_ = 0.0;                   // the seek bearing this tick, body frame (rad, + = right)
     bool no_backing_ = false; int backing_clamped_ = 0;

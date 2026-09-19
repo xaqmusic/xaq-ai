@@ -148,6 +148,14 @@ ParamSchema CloudMap::params_schema() const {
         {"things_range", ParamMutability::HotMutable,
          "A small thing is attended only within this range (metres).  0 = max_range.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{10.0}},
+        {"walk_cloud", ParamMutability::HotMutable,
+         "Also accumulate while the body MOVES: casts translated by the odometry's displacement from the anchor, "
+         "the cloud filed and reopened every walk_reset_m of travel, never cached as a place.  The things "
+         "reduction runs on it, so a thing is attended on the walk (2026-09-19).  Off = byte-identical.",
+         ParamValue{false}},
+        {"walk_reset_m", ParamMutability::HotMutable,
+         "Metres of travel after which a walking cloud is filed and a fresh one anchored (the odometry drifts "
+         "4-6 % of distance: one voxel per metre).", ParamValue{1.0}, ParamValue{0.1}, ParamValue{10.0}},
         {"things_every", ParamMutability::HotMutable,
          "Recompute the clusters every this-many ticks while the cloud is open (the sensor casts every 4).",
          ParamValue{int64_t{4}}, ParamValue{int64_t{1}}, ParamValue{int64_t{1000}}},
@@ -188,6 +196,8 @@ ParamMap CloudMap::current_params() const {
     m["gap_k"] = gap_k_;
     m["things_range"] = things_range_;
     m["things_every"] = int64_t{things_every_};
+    m["walk_cloud"] = walk_cloud_;
+    m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
 
@@ -213,6 +223,8 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "gap_k")      gap_k_ = get_d(one, "gap_k", gap_k_);
     else if (k == "things_range") things_range_ = get_d(one, "things_range", things_range_);
     else if (k == "things_every") things_every_ = std::max(1, int(get_d(one, "things_every", things_every_)));
+    else if (k == "walk_cloud")  walk_cloud_ = get_d(one, "walk_cloud", 0.0) > 0.5;
+    else if (k == "walk_reset_m") walk_reset_m_ = get_d(one, "walk_reset_m", walk_reset_m_);
 }
 
 void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
@@ -244,6 +256,8 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     things_range_ = get_d(params, "things_range", things_range_);
     things_every_ = std::max(1, int(get_d(params, "things_every", things_every_)));
     things_on_ = !things_topic_.empty() || !thing_bearing_topic_.empty();
+    walk_cloud_ = get_d(params, "walk_cloud", 0.0) > 0.5;
+    walk_reset_m_ = get_d(params, "walk_reset_m", walk_reset_m_);
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
@@ -268,13 +282,20 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
     // R(+d): the body turned +d, so the world it sees is turned -d; turning each cast back by +d puts it
     // on the anchor's frame.  (It was R(-d) until 2026-09-13, which doubled the smear — see the header.)
     const double c = std::cos(d), s = std::sin(d);
+    // a walking cloud: the body has also MOVED since the anchor; the displacement, turned into the anchor's frame
+    double tx = 0.0, ty = 0.0;
+    if (walking_cloud_ && v.size() >= 5) {
+        const double dx = double(v[3]) - anchor_x_, dy = double(v[4]) - anchor_y_;
+        const double ca = std::cos(-anchor_yaw_), sa = std::sin(-anchor_yaw_);
+        tx = ca * dx - sa * dy; ty = sa * dx + ca * dy;
+    }
     for (int i = 0; i < kZones; ++i) {
         const int b = 5 + 3 * i;
         if (b + 2 >= int(v.size())) break;
         const double px = double(v[b]), py = double(v[b + 1]), hz = double(v[b + 2]);
         if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(hz)) continue;
-        const double x = c * px - s * py;
-        const double y = s * px + c * py;
+        const double x = c * px - s * py + tx;
+        const double y = s * px + c * py + ty;
         if (std::hypot(x, y) > max_range_) continue;
         ++points_;
         const int ix = int(std::floor(x / voxel_m_));
@@ -321,7 +342,7 @@ void CloudMap::file_cloud(uint64_t tick) {
     revisit_change_ = -1.0;
     revisit_overlap_ = 0;
     revisit_dist_ = -1.0;
-    if (cache_size_ > 0 && key >= 0 && !vox_.empty()) {
+    if (cache_size_ > 0 && key >= 0 && !vox_.empty() && !walking_cloud_) {
         auto prev = cache_.find(key);
         if (prev != cache_.end()) {
             const auto& oc = prev->second;
@@ -345,7 +366,7 @@ void CloudMap::file_cloud(uint64_t tick) {
             revisit_change_ = overlap ? double(missing) / double(overlap) : -1.0;
         }
     }
-    if (cache_size_ > 0 && key >= 0) {
+    if (cache_size_ > 0 && key >= 0 && !walking_cloud_) {
         auto it = cache_.find(key);
         if (it == cache_.end() && int(cache_.size()) >= cache_size_ && !lru_.empty()) {
             cache_.erase(lru_.front());                      // least recently filed goes
@@ -372,12 +393,23 @@ void CloudMap::tick(uint64_t tick_id) {
     const double ox = double(pt->values[3]), oy = double(pt->values[4]);
 
     if (still) { ++still_run_; move_run_ = 0; } else { ++move_run_; still_run_ = 0; }
-    if (!open_ && still_run_ >= still_ticks_) open_cloud(yaw, ox, oy, tick_id);
-    if (open_ && move_run_ >= move_ticks_) { file_cloud(tick_id); publish_bearing(tick_id); return; }
-    if (!open_) { publish_bearing(tick_id); return; }
-    // a twitch does not end the cloud, but nor does it contribute: the de-rotation's premise is a
-    // still trunk, so a moving tick is simply skipped and the sweep resumes when the body settles.
-    if (still) add_cast(pt->values, yaw, trunk_z, tick_id);
+    if (walk_cloud_) {
+        // a stop's cloud opens on stillness and files when the body leaves, as before; between stops a WALKING
+        // cloud is open, translated by the odometry, filed and reopened every walk_reset_m of travel or when
+        // the body becomes still (so the stop's cloud starts clean).  A walking cloud is never cached.
+        if (open_ && !walking_cloud_ && move_run_ >= move_ticks_) { file_cloud(tick_id); open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = true; }
+        else if (open_ && walking_cloud_ && still_run_ >= still_ticks_) { file_cloud(tick_id); open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = false; }
+        else if (open_ && walking_cloud_ && std::hypot(ox - anchor_x_, oy - anchor_y_) > walk_reset_m_) { file_cloud(tick_id); open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = true; }
+        else if (!open_) { open_cloud(yaw, ox, oy, tick_id); walking_cloud_ = still_run_ < still_ticks_; }
+        add_cast(pt->values, yaw, trunk_z, tick_id);
+    } else {
+        if (!open_ && still_run_ >= still_ticks_) open_cloud(yaw, ox, oy, tick_id);
+        if (open_ && move_run_ >= move_ticks_) { file_cloud(tick_id); publish_bearing(tick_id); return; }
+        if (!open_) { publish_bearing(tick_id); return; }
+        // a twitch does not end the cloud, but nor does it contribute: the de-rotation's premise is a
+        // still trunk, so a moving tick is simply skipped and the sweep resumes when the body settles.
+        if (still) add_cast(pt->values, yaw, trunk_z, tick_id);
+    }
 
     // the place, for the cache key: count every tick's winner while the cloud is open
     if (!place_topic_.empty())
@@ -631,7 +663,7 @@ nlohmann::json CloudMap::diag_lite() const {
         {"newfrac", new_frac_}, {"revisit", revisit_change_},
         {"cached", int(cache_.size())}, {"filed", filed_count_}, {"place", last_key_},
         {"overlap", revisit_overlap_}, {"revisit_dist", revisit_dist_},
-        {"things", int(things_.size())},
+        {"things", int(things_.size())}, {"walking", walking_cloud_},
         {"small", int(std::count_if(things_.begin(), things_.end(), [](const Thing& t) { return t.small; }))},
         {"attended", attended_ >= 0 && attended_ < int(things_.size()) ? things_[size_t(attended_)].rng : -1.0},
     };

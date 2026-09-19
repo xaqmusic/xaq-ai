@@ -543,6 +543,7 @@ nlohmann::json PlayLoop::diag_snapshot() const {
         {"route_exists", last_route_exists_},  // a strictly-more-novel neighbour exists (the other climb term)
         {"stale_explore", stale_explore_},    // ticks since the map last grew
         {"cur_heading", cur_heading_},
+        {"wandering", wandering_}, {"explore_dir", explore_dir_}, {"explore_active", explore_active_},
         {"odo_x", odo_x_}, {"odo_y", odo_y_},
         {"n_nodes", int(value_.size())},
         {"nodes", nodes},

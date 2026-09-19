@@ -3638,3 +3638,68 @@ Whether Pollen's roulade rises from an arbitrary fallen pose is unmeasured — i
 from standing that ends on the floor and rises — and their walker already carries fall recovery in one
 network; so the roll may be the wrong intent for a fall and the right one for a trick. The measurement is
 cheap once wanted: fire `roulade` when the body is down instead of the scaffold, and count the rises.
+
+### 17.42 The orbit's second cause (a reference that flips by 2π), the ToF on the walk, and the roll as a get-up (R68–R70, 2026-09-19)
+
+**The operator's eye on R67** (seed 1): "around 1060 s the robot started circling again and ignoring small
+objects"; and: "are we using any ToF data while the robot is walking?"; and: proceed with the roulade
+experiments.
+
+**What the circle was, this time.** R67 carries the un-mirrored play, so the mirror is not it. From the
+run's record: from 1041 s play holds the reference and the reference turns at the body's rate (−15 rad per
+20 s); the seek loop holds a target the whole time, at 2–3.4 m, and its need decays from 0.86 to 0.18 while
+its range grows, since the body circles away from it. R38's lookahead and R37's committed sub-goal, both
+built for the orbit and both refuted on the mirror, were retried on R67 (R68, R69): neither quiets the
+reference (turning faster than 0.5 rad/s on 23 % and 29 % of play's ticks against 19 %), coverage falls
+(142 → 123 and 116 cells), `NULL`. So the orbit is not the target's distance.
+
+The record gained play's bearing and state per tick (`pb`, `pl`) and seed 1 was replayed. Two things
+appear. Under seek at 1030 s the seek target is BEHIND the body: the reference alternates by 2π from one
+tick to the next (−8.78, −2.49, −8.77 …), the error between +3.0 and −3.1, and the yaw command flips
+sign every few ticks; the body jitters in place and never turns round. The reference is rebuilt from the
+winning loop's bearing every tick as heading − atan2(cx, cy), and a bearing that flickers across ±π flips
+it by a full turn. Under play from 1041 s the bearing sweeps through the body frame once every seven
+seconds while the body turns a circle every eleven — the orbit — and at each pass behind the same flip
+reverses the turn, which is what keeps the orbit alive. This is the "reference that will not stand still"
+of §17.26, its jumps of more than 0.5 rad ninety times a minute; it survived the mirror's fix because it
+is a second defect on the same line.
+
+**Lever: a continuous reference** (`--ref-unwrap`, off by default; the physics byte-identical with it off,
+md5 `cb24520c…` once the two new record fields are stripped). Each new reference is taken modulo 2π
+nearest the reference held so far, so the turn direction persists through the back; the sense slot and
+the heading reflex clamp the error at ±π instead of re-wrapping it. Measured: it does what it says and it makes the circle worse. Seed 1 replayed, 1000–1200 s: reference jumps
+of more than 3 rad 60 → 2, but the heading turns −79 rad against −51, the body travels 22.6 m of path for
+0.4 m of net displacement, and n = 6 gives walls 18 → 6 a minute with coverage 142 → 60 cells and the yaw
+on its rail 94 % of the time: a duck spinning in place. So the flip was not the orbit's cause but its
+brake: play's bearing genuinely rotates with the body, and with nothing reversing the turn the spin never
+ends. `REGRESSION`, off. What rotates play's bearing with the body is in the loop's own geometry — its
+position is integrated in command-unit ticks from a lateral and a forward velocity with different scales,
+and its target is a node's mean position in that frame — and that is the open question (O56), to be
+answered by logging the loop's own odometry beside the body's before any further lever.
+
+**The ToF on the walk, as it stood.** Every 4 ticks the ToF's four proximity slots feed the twist brain's
+sense (the avoidance prior) and the place map's view holds the last stop's cloud; the cloud, and with it
+the things and the seek bearing, existed only at stops. Between stops the seek loop homed to a remembered
+position. The cast is taken in the gravity-levelled trunk frame with the head's pose folded in by forward
+kinematics, so head motion is not the obstacle in simulation (on the robot each frame must be timestamped
+against its head angle, §7 of the cloud phase). What was missing was translation.
+
+**Lever: the walking cloud** (`CloudMap.walk_cloud`, off by default, two unit tests): between stops a
+cloud stays open, each cast translated by the odometry's displacement from the anchor (the cast token
+already carries x and y) and de-rotated as at a stop, filed and re-anchored every metre of travel so the
+odometry's drift stays under a voxel; never cached as a place; the things reduction runs on it. R70 = R67
++ the walking cloud, n = 6: things attended on walking ticks 18 601 against 178 — the sensor works. The
+behaviour above it does not, yet: with a live bearing on every walk the seek loop holds the reference
+80 % of the time (28 % before), walls 18 → 55 a minute, the stands 4 of 17 stops, coverage 142 → 178
+cells. The loops were built for a thing seen at a stop and remembered on the walk; fed a live bearing
+they chase, and a fifth of what they chase is a wall base. `WORKING` as a sensor, `REGRESSION` as a
+behaviour in this stack; re-use context: seek's need gated by the thing's vocabulary node and by the
+free space ahead, and the arrival stop reading the walking cloud.
+
+**The roll as a get-up** (`--skill-when-down NAME`): when the recovery declares the body down, the named
+skill drives the joints first, and the scaffold's rescue continues if the body is not upright when the
+window ends. R67 + roulade, n = 6: 11 falls, the roulade fired at each, the body upright within 2 s of the
+window on **none**; walls 18 → 28 ± 38 (one seed's flailing). `NULL` as a get-up, as the priority table of
+their daemon suggested: the roll is a trick from standing, and their walker already carries the fall
+recovery. The difference a brain-requested get-up would make — who decides and a learnable outcome —
+stands, but the intent for it is not the roll.

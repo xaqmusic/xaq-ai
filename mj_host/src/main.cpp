@@ -1239,6 +1239,7 @@ std::string g_head_graph;
 std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
+bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_hr_tau = 0.0, g_hr_damp = 0.0, g_hr_gate = 1.0;   // --heading-reflex TAU DAMP GATE (2026-09-17): a hold on own yaw through action.vyaw
 // SKILLS AT THE INTENT BOUNDARY (2026-09-17, register O54).  A skill is one of Pollen's one-shot networks,
 // requested BY NAME and run as their daemon runs it (robotd/src/control.rs): a window of `duration` seconds
@@ -1252,6 +1253,10 @@ std::string g_skill_on_arrive;           // "" = off
 // SECS, then stops again to look.  A kicked thing sits under the beak, below a level gaze (§17.36); half a
 // metre back it is in the field, so the kick's OUTCOME can be seen (the outcome loop's honest signal).
 double g_skill_unwind_vx = 0.0, g_skill_unwind_s = 0.0;
+// --skill-when-down NAME (2026-09-19, the roulade experiment): when the recovery declares the body DOWN, fire
+// the named skill first (its window drives the joints instead of the scaffold); if the body is not upright
+// when the window ends, the scaffold's rescue continues as before.  Counts rises inside the window.
+std::string g_skill_when_down;
 double      g_skill_at_s = 0.0; std::string g_skill_at_name;
 // A skill is a window; the ground pick (here "peck") is a PHASE the daemon drives: the observation's
 // twist slots carry [cos 2*pi*phase, sin 2*pi*phase, 0] while phase runs 0 -> end_phase (0.7) over
@@ -1413,12 +1418,14 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
+    if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stop.on_stuck > 0.0) { brain.set_stuck(g_stop.on_stuck); std::fprintf(stderr, "  stop on stuck: a stop starts when a forward stall exceeds %.1f x the body's own median stall length\n", g_stop.on_stuck); }
     if (!g_skill_on_arrive.empty()) std::fprintf(stderr, "  skill on arrive: %s (Pollen's network, a window at standing tuning with a zero command) fired from standing at the arrival stop's hand-back\n", g_skill_on_arrive.c_str());
     if (g_skill_at_s > 0.0) std::fprintf(stderr, "  skill at %.1f s: %s\n", g_skill_at_s, g_skill_at_name.c_str());
+    if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s drives the joints when the body goes down, before the scaffold's rescue\n", g_skill_when_down.c_str());
     if (g_skill_unwind_s > 0.0) std::fprintf(stderr, "  skill unwind: after a skill at a stop the body backs off at %.2f for %.1f s, then stops to look\n", g_skill_unwind_vx, g_skill_unwind_s);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
         std::fprintf(stderr, "  heading reflex: while a loop holds the reference, vyaw closes the heading error in %.2f s (damping %.2f on the sensed rate), mixed with the brain's yaw by proximity (gate %.2f)\n", g_hr_tau, g_hr_damp, g_hr_gate); }
@@ -1492,6 +1499,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double skill_phase_period = 0.0;
     int skills_fired = 0, skills_requested = 0; bool skill_then_stop = false; std::string skill_pending;
     int unwind_left = 0, unwinds = 0; bool unwind_then_stop = false;
+    int down_skills = 0, down_rises = 0; bool down_skill_running = false; int down_rise_watch = 0;
     const auto skill_start = [&](const std::string& name) {
         const SkillDef* d = skill_def(name);
         if (!d) return false;
@@ -1666,6 +1674,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (recovery.handed_off_this_tick()) {
             brain.set_learning(false);
             brain.on_reset();
+            if (!g_skill_when_down.empty() && !skill_active && skill_start(g_skill_when_down)) { ++down_skills; down_skill_running = true; stop_event = "skill:down"; }
             command.twist = {0.0, 0.0, 0.0};
             if (head) { head->set_learning(false); head->on_reset(); command.head = {0.0, 0.0, 0.0, 0.0}; }
             if (orient != Orient::None) { orient = Orient::None; ++orient_timeouts; }
@@ -1676,6 +1685,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 stop_phase = StopPhase::None; stop_left = 0; ++stop_rescued; stop_event = "stop:rescued";
             }
         } else if (recovery.handed_back_this_tick()) {
+            if (down_rise_watch > 0) { ++down_rises; down_rise_watch = 0; }   // upright within the watch after the roll: the roll rose
             brain.on_reset();
             brain.set_learning(true);
             walker_last.fill(0.0f);
@@ -1743,6 +1753,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             bool skill_arrive_done = false;
             if (skill_active && skill_left == 0) {
                 skill_active = false;
+                if (down_skill_running) { down_skill_running = false; down_rise_watch = int(2.0 * kBrainHz); }
                 if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; }
                 if (g_skill_unwind_s > 0.0 && stop_phase == StopPhase::Brain) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
             }
@@ -2089,8 +2100,18 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             ++pushes_delivered;
         }
 
+        if (down_rise_watch > 0) --down_rise_watch;
         std::array<double, kNumPolicyJoints> ctrl{};
-        if (driver == Driver::Scaffold) {
+        if (driver == Driver::Scaffold && skill_active && down_skill_running) {
+            // the roll drives the joints while the body is down; the scaffold waits for the window to end
+            Command sc{};
+            if (skill_phase_period > 0.0) { const double phase = double(skill_total - skill_left) / kBrainHz / skill_phase_period; sc.twist = {std::cos(2.0 * M_PI * phase), std::sin(2.0 * M_PI * phase), 0.0}; }
+            const auto action = skill_policy->infer(build_observation(body, skill_last, sc));
+            skill_last = action;
+            for (int i = 0; i < kNumPolicyJoints; ++i) ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+            scaffold_last.fill(0.0f);
+            if (skill_left > 0) --skill_left;
+        } else if (driver == Driver::Scaffold) {
             const auto action = scaffold.infer(build_observation(body, scaffold_last, Command{}));
             scaffold_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i)
@@ -2234,6 +2255,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
             if (skill_active) std::printf(",\"skill\":\"%s\"", skill_name.c_str());
+            // the play loop, for the record: its bearing every tick, its state every 10 (2026-09-19, the orbit)
+            { const auto pb = brain.play_bearing(); std::printf(",\"pb\":[%.3f,%.3f]", pb[0], pb[1]);
+              if (t % 10 == 0) { const auto ps = brain.play_state();
+                  if (!ps.is_null()) std::printf(",\"pl\":[%d,%d,%d,%.2f]", ps.value("climbing", false) ? 1 : 0, ps.value("wandering", false) ? 1 : 0, ps.value("next_node", -1), ps.value("explore_dir", 0.0)); } }
             { const auto oc = brain.outcome_now();   // the outcome loop: [node, predicted, observed, surprise, samples]
               if (!oc.empty()) std::printf(",\"outc\":[%d,%.3f,%.3f,%.2f,%d,%d]", int(oc[0]), oc[1], oc[2], oc[3], int(oc[4]), oc.size() > 5 ? int(oc[5]) : 0); }
             // live changes a client made through the inspector this tick: the run's record must show them
@@ -2395,6 +2420,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall\n", stops_stuck, stops_started, g_stop.on_stuck);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
+        if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s fired %d times, the body upright within 2 s of the window %d times\n", g_skill_when_down.c_str(), down_skills, down_rises);
         if (g_stop.map_on_stop || look_on || gaze_on) {
             std::fprintf(stderr, "  map growth: %d nodes on walks, %d at stops; %zu baked ids seen\n", grown_walk, grown_stop, baked_ids.size());
             std::fprintf(stderr, "  map baking: inserted %d at stops / %d on walks, baked %d at stops / %d on walks, pruned %d (of which baked %d); %d nodes, %d baked at the end\n",
@@ -2661,6 +2687,8 @@ int main(int argc, char** argv) {
             g_log_tof_cloud = true;
         } else if (a == "--seek-gate") {
             g_seek_gate = true;
+        } else if (a == "--ref-unwrap") {
+            g_ref_unwrap = true;
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {
@@ -2670,6 +2698,9 @@ int main(int argc, char** argv) {
         } else if (a == "--skill-on-arrive") {
             g_skill_on_arrive = next("--skill-on-arrive");
             if (g_skill_on_arrive != "kick" && !skill_def(g_skill_on_arrive)) throw std::runtime_error("--skill-on-arrive: unknown skill " + g_skill_on_arrive + " (kick = the side by the thing's bearing, kick_left, kick_right, roulade, peck)");
+        } else if (a == "--skill-when-down") {
+            g_skill_when_down = next("--skill-when-down");
+            if (!skill_def(g_skill_when_down)) throw std::runtime_error("--skill-when-down: unknown skill " + g_skill_when_down);
         } else if (a == "--skill-unwind") {
             g_skill_unwind_vx = std::stod(next("--skill-unwind")); g_skill_unwind_s = std::stod(next("--skill-unwind"));
         } else if (a == "--skill-at") {

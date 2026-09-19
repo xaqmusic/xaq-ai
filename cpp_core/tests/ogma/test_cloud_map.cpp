@@ -424,3 +424,30 @@ TEST(CloudMap, AFootprintFloorLeavesFragmentsUnattended) {
     EXPECT_NEAR(tok->values[1], 0.12 / 0.20, 1e-5) << "footprint / small_ext";
     EXPECT_NEAR(tok->values[4], 3.0 / 5.0, 1e-5) << "chain / 5";
 }
+
+
+// The walking cloud (2026-09-19): with walk_cloud on, casts from a MOVING body are translated by the odometry's
+// displacement from the anchor, so a world-fixed patch seen from 0.4 m further on lands on the voxels the first
+// cast made; without it a moving tick contributes nothing.  A walking cloud is never cached as a place.
+TEST(CloudMap, AWalkingCloudTranslatesByTheOdometry) {
+    ParamMap p = params();
+    p["walk_cloud"] = true; p["walk_reset_m"] = 2.0;
+    Rig r(p);
+    const auto world = patch();
+    r.cast(false, 0.0, 0.0, 0.0, 3, seen_from(world, 0.0, 0.0, 0.0));     // moving from the first tick: a walking cloud opens
+    ASSERT_TRUE(r.m.is_walking_cloud());
+    const int v0 = r.m.voxels();
+    ASSERT_GT(v0, 40);
+    r.cast(false, 0.0, 0.4, 0.0, 3, seen_from(world, 0.4, 0.0, 0.0));     // 0.4 m further along +x (ten voxels)
+    EXPECT_LE(r.m.voxels() - v0, v0 / 10) << "translated by the odometry, the second cast lands on the first's voxels";
+    r.cast(false, 0.0, 2.5, 0.0, 3, seen_from(world, 2.5, 0.0, 0.0));     // past walk_reset_m: filed and reopened
+    EXPECT_EQ(r.m.cached(), 0) << "a walking cloud is never cached as a place";
+    EXPECT_TRUE(r.m.is_walking_cloud());
+}
+
+TEST(CloudMap, WithoutWalkCloudAMovingTickContributesNothing) {
+    Rig r(params());
+    r.cast(false, 0.0, 0.0, 0.0, 3, patch());
+    EXPECT_FALSE(r.m.is_open());
+    EXPECT_EQ(r.m.voxels(), 0);
+}

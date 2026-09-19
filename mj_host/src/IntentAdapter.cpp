@@ -229,6 +229,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     if (auto sk = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("intent.skill")))
         if (sk->values.size() >= 2 && sk->values[1] > 0.5f && sk->tick_id == tick_id_) skill_request_ = int(std::lround(sk->values[0]));
     outcome_.clear();
+    if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("percept.play_bearing")))
+        if (pb->values.size() >= 2) play_bearing_ = {pb->values[0], pb->values[1]};
     if (auto oc = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.outcome")))
         if (oc->values.size() >= 5 && oc->tick_id == tick_id_ && oc->values[4] > 0.5f) outcome_.assign(oc->values.data(), oc->values.data() + oc->values.size());
     // ARRIVAL (things phase T4): the loop drops a target it has reached -- its need goes to 0 with the range
@@ -240,7 +242,14 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (pb->values.size() >= 2) {
             const double cx = pb->values[0], cy = pb->values[1];
             const auto won = [&]() { ++play_steers_; last_steer_ = steer_code; if (steer_code == 2) ++avoid_steers_; if (steer_code == 3) ++seek_steers_; };
-            if (cx * cx + cy * cy > 1e-6) { heading_ref_ = heading_ - std::atan2(cx, cy); won(); if (steer_code == 3) seek_ego_ = std::atan2(cx, cy); }
+            if (cx * cx + cy * cy > 1e-6) {
+                double want = heading_ - std::atan2(cx, cy);
+                if (ref_unwrap_) {   // continuous: the same direction modulo 2 pi, nearest the reference held so far
+                    while (want - heading_ref_ > 3.14159265358979323846) want -= 2.0 * 3.14159265358979323846;
+                    while (want - heading_ref_ < -3.14159265358979323846) want += 2.0 * 3.14159265358979323846;
+                }
+                heading_ref_ = want; won(); if (steer_code == 3) seek_ego_ = std::atan2(cx, cy);
+            }
             else if (g_avoid > 0.5 || g_play > 0.5 || g_seek > 0.5) { heading_ref_ = heading_; won(); }   // a winner with NO bearing releases the reference: no direction held, the reflex acts
         }
     }
@@ -282,8 +291,11 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     hr_share_ = 0.0;
     if (hr_tau_ > 0.0 && last_steer_ != 0) {
         double err = heading_ - heading_ref_;                       // + = the body points left of the reference
-        while (err > 3.14159265358979323846) err -= 2.0 * 3.14159265358979323846;
-        while (err < -3.14159265358979323846) err += 2.0 * 3.14159265358979323846;
+        if (ref_unwrap_) err = std::clamp(err, -3.14159265358979323846, 3.14159265358979323846);   // continuous: never re-wrapped
+        else {
+            while (err > 3.14159265358979323846) err -= 2.0 * 3.14159265358979323846;
+            while (err < -3.14159265358979323846) err += 2.0 * 3.14159265358979323846;
+        }
         // the yaw rate that closes the error in tau seconds, minus damping on the sensed rate, in rad/s
         const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
         const double reflex = std::clamp(want, -kTwistRangeVyaw, kTwistRangeVyaw);
@@ -368,6 +380,10 @@ std::string IntentAdapter::place_form_desc() const {
 }
 
 nlohmann::json IntentAdapter::brain_state() const { return instance_->snapshot_state(); }
+nlohmann::json IntentAdapter::play_state() const {
+    auto* m = instance_->module("play");
+    return m ? m->diag_lite() : nlohmann::json();
+}
 std::vector<std::string> IntentAdapter::take_inspector_events() { return inspector_ ? inspector_->take_events() : std::vector<std::string>{}; }
 
 namespace {

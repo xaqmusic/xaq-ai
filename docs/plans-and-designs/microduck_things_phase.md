@@ -245,6 +245,12 @@ harness's mid-stop move, and on hardware means a hand.
 2. Move a ball during a stop: the stop ends and the body turns toward it (T6).
 3. Lesion the thing bearing mid-run: the duck falls back to play's coverage without a regression in walls.
 
+**The walk, 2026-09-19 (design doc §17.42).** The operator saw R67 circle again at 1060 s. The mirror is
+fixed; a second defect on the same line was found (the reference flips by 2π when a bearing crosses ±π) and
+turned out to be the orbit's brake, not its cause: play's bearing rotates with the body (O56, open). The
+walking cloud is built and works as a sensor (O55); the loops above it need gating before it is a behaviour.
+The roll is not a get-up (11 falls, 0 rises).
+
 ## 8. Traps carried forward
 
 - **A preset must carry the harness argv of the arm it names.** `newtest.py` copies the controls of the
