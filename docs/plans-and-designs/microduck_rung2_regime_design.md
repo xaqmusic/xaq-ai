@@ -3703,3 +3703,57 @@ window on **none**; walls 18 → 28 ± 38 (one seed's flailing). `NULL` as a get
 their daemon suggested: the roll is a trick from standing, and their walker already carries the fall
 recovery. The difference a brain-requested get-up would make — who decides and a learnable outcome —
 stands, but the intent for it is not the roll.
+
+### 17.43 The orbit, resolved to its parts: the yaw column turns the wrong way, and the loop's committed turn holds it there (2026-09-19, later)
+
+**Measured before any lever.** On R67 seed 1 the map's nodes are views, smeared over 0.5–1 m of position
+(median spread 0.53 m over nodes with more than 50 ticks), and the play target's centroid sits 0.8–1.2 m from
+the body through the circle — outside the turning radius, so the orbit is not a near target (the premise
+R37/R38 were built on). With the sign fix in place the loop's arithmetic makes the reference the target's
+own direction, a constant for a fixed target; a reference that turns with the body means the body is not
+doing what the loop asks. The record answers: play asks a turn of more than 0.6 rad on 57 % of its ticks, and
+the body turns that way over the next second on **41 %** of them — worse than chance. The twist brain's
+learned yaw column has the wrong sign under play's error (§17.17's "does not regulate", now with a number),
+and the loop's own committed turn does the rest: past 90° off it holds the turn's sign and clamps the
+bearing at 0.92π until the target is within 36°; a body turning the wrong way never gets there, so the clamp
+holds the wrong command indefinitely (the emitted bearing sits at exactly −2.89 through the circle).
+
+**The reflex, on the stack as it stands.** R64r's heading reflex (a hold on own yaw through `action.vyaw`,
+mixed with the brain's yaw by proximity) was set aside for its wall cost on R64. On R67 seed 1: agreement
+41 → 62 %, circling windows 4 → 1 of 25, wall ticks 460 → 293 with the one-metre gate; the half-metre gate
+49 %, walls 1 567 — near a wall the brain's yaw owns the channel and turns wrong there too. 
+
+| n = 6 × 1500 s, the R67 stack | R67 | **R67 + reflex (gate 1.0)** | R67 + reflex + free-space gate |
+|---|---|---|---|
+| the body turns the way play asks (> 0.6 rad asked) | 41 % | **64 %** | 61 % |
+| heading error, median · under play · under seek | 1.44 · 1.27 · 1.50 | **0.99 · 0.81 · 0.61** | 0.87 · 0.74 · 0.42 |
+| the reference turning > 0.5 rad/s under play · \|vyaw\| on the rail | 19 % · 83 % | 11 % · **22 %** | 19 % · 15 % |
+| straightness (harness · per walk p50) | 0.25 · 0.17 | 0.27 · 0.23 | 0.25 · 0.23 |
+| walls / min (per seed) | 17.9 ± 6.4 (12, 20, 20, 28, 12, 16) | 25.8 ± 20.9 (**6, 16, 12, 17**, 45, 58) | 34.7 ± 28.8 (14, 6, 9, 58, 74, 47) |
+| cells · rescues / min · stands | 142 · 0.11 · 15.7 / 17.8 | 137 · **0.04** · 15.5 / 17.8 | 127 · 0.10 · 15.2 / 17.7 |
+| kicks requested · outcomes observed | 31 · 13 | 32 · 13 | 32 · 10 |
+
+The reflex does what the diagnosis says: the body follows the loops, the error closes by a third, the yaw
+leaves its rail, and rescues fall by two thirds. Walls fall on four seeds and blow up on two, the failure of
+R64r again: a reference held into a wall, and a reflex that holds it there while the brain's avoidance, with
+its share of the yaw shrinking as the wall nears, cannot turn the body away. The lever for that is the one
+named as the reflex's re-use context in §17.37: **a reference the sensor has checked for free space**
+(`--ref-free P`): a loop's bearing into a ToF sector nearer than P is not held; the reference is released to
+the heading (R29's release form), the reflex stands down, and the avoidance acts unopposed.
+
+Measured (proximity above 0.6, a hit within 0.4 m of the bearing's sector; the reference released on 4 408
+ticks in one run): the errors close further, and the walls do not. Released, the yaw belongs to the twist
+brain, whose avoidance is what fails at those surfaces. The bad seeds are not many collisions but a few long
+bursts: on the reflex arm seeds 4–6 spend 108, 217 and 318 s of the 800 in 10–19 bursts, the longest 34–80 s;
+with the gate 289, 374 and 180 s, the longest 120 s. That is O35's "cannot leave a surface", now with a
+reference held into it. The stuck stop of §17.38 was built for that and was `NULL` because the stop changed
+nothing about the reference; a stuck stop that releases the reference and turns toward the free space the
+cloud shows is the lever this hands the next session.
+
+**Verdicts.** The orbit is resolved to its parts: the mirrored bearing (§17.37, fixed), the twist brain's
+yaw column turning the wrong way for a large error (measured: 41 % agreement), and the play loop's
+committed-turn clamp holding the wrong command (7 134 clamped ticks a run). The heading reflex on the R67
+stack `WORKING` on the channel (agreement 64 %, error 1.44 → 0.99, the rail 83 → 22 %, rescues 0.11 → 0.04)
+and `PARTIAL` as a behaviour (walls down on four seeds, two seeds stuck at surfaces). The free-space gate
+`NULL` (the errors close, the walls do not). The continuous reference `REGRESSION` (§17.42). Preset R67r (the
+reflex on R67) for the operator's eye beside R67; nothing promoted.

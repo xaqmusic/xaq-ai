@@ -1240,6 +1240,7 @@ std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
+double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
 double g_hr_tau = 0.0, g_hr_damp = 0.0, g_hr_gate = 1.0;   // --heading-reflex TAU DAMP GATE (2026-09-17): a hold on own yaw through action.vyaw
 // SKILLS AT THE INTENT BOUNDARY (2026-09-17, register O54).  A skill is one of Pollen's one-shot networks,
 // requested BY NAME and run as their daemon runs it (robotd/src/control.rs): a window of `duration` seconds
@@ -1418,6 +1419,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
+    if (g_ref_free > 0.0) { brain.set_ref_free(g_ref_free); std::fprintf(stderr, "  ref free-space gate: a bearing into a ToF sector with proximity above %.2f releases the reference\n", g_ref_free); }
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
@@ -2253,6 +2255,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
+            if (g_ref_free > 0.0 && t % 50 == 0) std::printf(",\"rfree\":%d", brain.ref_released());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
             if (skill_active) std::printf(",\"skill\":\"%s\"", skill_name.c_str());
             // the play loop, for the record: its bearing every tick, its state every 10 (2026-09-19, the orbit)
@@ -2689,6 +2692,8 @@ int main(int argc, char** argv) {
             g_seek_gate = true;
         } else if (a == "--ref-unwrap") {
             g_ref_unwrap = true;
+        } else if (a == "--ref-free") {
+            g_ref_free = std::stod(next("--ref-free"));
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {

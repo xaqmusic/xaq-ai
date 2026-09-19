@@ -242,7 +242,15 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (pb->values.size() >= 2) {
             const double cx = pb->values[0], cy = pb->values[1];
             const auto won = [&]() { ++play_steers_; last_steer_ = steer_code; if (steer_code == 2) ++avoid_steers_; if (steer_code == 3) ++seek_steers_; };
-            if (cx * cx + cy * cy > 1e-6) {
+            // the free-space gate: a bearing into occupied space is not held
+            bool blocked = false;
+            if (ref_free_ > 0.0 && cx * cx + cy * cy > 1e-6) {
+                const double ego = std::atan2(cx, cy);                              // + = right
+                const int slot = ego < -0.3 ? 0 : (ego > 0.3 ? 2 : 1);              // left / ahead / right
+                if (std::fabs(ego) < 1.2 && double(tof[size_t(slot)]) > ref_free_) blocked = true;
+            }
+            if (blocked) { heading_ref_ = heading_; won(); ++ref_released_; }
+            else if (cx * cx + cy * cy > 1e-6) {
                 double want = heading_ - std::atan2(cx, cy);
                 if (ref_unwrap_) {   // continuous: the same direction modulo 2 pi, nearest the reference held so far
                     while (want - heading_ref_ > 3.14159265358979323846) want -= 2.0 * 3.14159265358979323846;

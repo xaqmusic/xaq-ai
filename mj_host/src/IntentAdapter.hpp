@@ -134,6 +134,13 @@ public:
     // stand still" of §17.26).  With this on, each new reference is taken modulo 2 pi nearest the previous one,
     // so the turn direction persists through the back; the sense slot and the reflex clamp instead of wrapping.
     void set_ref_unwrap(bool on) { ref_unwrap_ = on; }
+    // THE FREE-SPACE GATE ON THE REFERENCE (2026-09-19, `--ref-free P`): a loop's bearing is held as the
+    // reference only if the ToF sector it points into is freer than P (proximity 1 - range / 1 m); a bearing
+    // into a wall releases the reference (the reference = the heading, R29's release form) so the twist brain's
+    // avoidance acts unopposed and the reflex stands down.  Measured need: with the reflex the body follows
+    // the loops (64 %), and on two seeds of six a reference held into a wall costs 45-58 contacts a minute.
+    void set_ref_free(double p) { ref_free_ = p; }
+    int  ref_released() const { return ref_released_; }
     double heading_reflex_share() const { return hr_share_; }   // the reflex's share of the yaw command this tick
     // STUCK (things phase, 2026-09-17, `--stop-on-stuck K`): the body's own forward-model error as a DURATION.
     // A stall is a run of ticks on which the brain commands forward (> 0.75 of range) and the body's sensed
@@ -241,7 +248,7 @@ private:
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
     bool seek_gate_ = false; int seek_gated_ = 0;
-    bool ref_unwrap_ = false;
+    bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
     double stuck_k_ = 0.0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;

@@ -545,20 +545,28 @@ def cmd_seek(paths: list[str]) -> None:
 
 def cmd_heading(paths: list[str], control_from: float = 700.0) -> None:
     err = {1: [], 3: []}; refmove = {1: [], 3: []}; rail = {1: [], 3: []}; share = []; straight_w = []
+    agree_n = agree_yes = clamp_n = 0     # the body turns the way PLAY asks (2026-09-19): sign of the requested turn vs the heading's change over 1 s
     for p in paths:
-        prev = None; xs = []; ys = []
+        prev = None; xs = []; ys = []; hist = []
         for line in open(p):
             if not line.startswith('{"t"'):
                 continue
             r = json.loads(line)
             if r["t"] < control_from or r.get("stop", 0):
-                prev = None
+                prev = None; hist = []
                 if len(xs) > 500:
                     path = float(np.sum(np.hypot(np.diff(xs), np.diff(ys))))
                     straight_w.append(math.hypot(xs[-1] - xs[0], ys[-1] - ys[0]) / max(path, 1e-6))
                 xs, ys = [], []
                 continue
             xs.append(r["x"]); ys.append(r["y"])
+            if "pb" in r:
+                hist.append((r.get("steer", 0), math.atan2(r["pb"][0], r["pb"][1]), r["hdg"][0]))
+                if len(hist) > 50:
+                    st0, ang0, h0 = hist[-51]
+                    if st0 == 1 and abs(ang0) > 0.6:
+                        agree_n += 1; agree_yes += (-ang0 > 0) == (r["hdg"][0] - h0 > 0)
+                    if abs(abs(ang0) - 2.89) < 0.02: clamp_n += 1
             st = r.get("steer", 0)
             if "hr" in r:
                 share.append(r["hr"])
@@ -584,6 +592,9 @@ def cmd_heading(paths: list[str], control_from: float = 700.0) -> None:
         print(f"  heading reflex share: mean {sh.mean():.2f}; owns the yaw (1.0) on {100 * np.mean(sh > 0.99):.0f} % of walking ticks")
     if straight_w:
         print(f"  straightness per walk (net / path, walks over 10 s): p25/p50/p75 {'/'.join(f'{np.percentile(straight_w, q):.2f}' for q in (25, 50, 75))} over {len(straight_w)} walks")
+    if agree_n:
+        print(f"  play asks a turn of more than 0.6 rad on {agree_n} ticks; the body turns THAT way over the next second on {100 * agree_yes / agree_n:.0f} % of them; "
+              f"the bearing sits at the loop's committed-turn clamp (0.92 pi) on {clamp_n} ticks")
 
 
 # ------------------------------------------------------------------------------------------------ stops
