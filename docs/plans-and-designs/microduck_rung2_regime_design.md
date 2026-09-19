@@ -3782,3 +3782,14 @@ way for a large error (the reflex fixes it: 41 → 64 % agreement, the rail 83 �
 turn holding the wrong command, and a reference that flips at ±π (its brake, left alone). What remains is
 O35 in a new form: a reflex that follows its loops faithfully into a surface on some seeds, and a detector
 that does not yet see a slide. R67 and R67r are the arms for the operator's eye; nothing is promoted.
+
+**Addendum, the progress-based stall** (`--stuck-progress`, off): the stall is then no progress toward the
+reference (the body's velocity along the reference's direction under 0.25 of range while commanded forward),
+so a slide along a surface counts. n = 6 on R67 + reflex + stuck 8 + escape 4: 26 stuck stops over six runs
+(8 before), and walls 28 → 37 a minute, seconds in bursts 717 → 934, the longest bursts shorter (33–80 s
+against 47–111) and more numerous. The escape works each time and the loops aim the body back at the same
+surface four seconds later: the surfaces are where play's novel nodes and seek's wall-base targets lie, and
+an exit reflex cannot change what the targets want. `REGRESSION` in this form; the question it leaves is the
+loops', not the reflex's: a play value field in which a node at a wall stops being novel once the body has
+stood at it, and a seek need that does not hold a wall base (its vocabulary node knows the difference at
+purity 0.9). Both are the next levers on the walk, and both are the operator's call on design before a build.

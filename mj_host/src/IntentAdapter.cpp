@@ -289,7 +289,14 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // command it judges is the brain's own; the sensed velocity is the body's answer to last tick's.
     stuck_now_ = false;
     if (stuck_k_ > 0.0) {
-        const bool stalled = last_twist_[0] / kTwistRangeVx > 0.75 && last_sensed_[0] < 0.25f;
+        bool stalled = last_twist_[0] / kTwistRangeVx > 0.75 && last_sensed_[0] < 0.25f;
+        if (stuck_progress_) {
+            double e = heading_ - heading_ref_;
+            while (e > 3.14159265358979323846) e -= 2.0 * 3.14159265358979323846;
+            while (e < -3.14159265358979323846) e += 2.0 * 3.14159265358979323846;
+            const double progress = (vel_body[0] * std::cos(e) - vel_body[1] * std::sin(e)) / kTwistRangeVx;
+            stalled = last_twist_[0] / kTwistRangeVx > 0.75 && progress < 0.25;
+        }
         if (stalled) {
             ++stall_run_;
             if (!stuck_fired_ && double(stall_run_) > stuck_k_ * stall_med_ && stall_run_ >= 50) { stuck_now_ = true; stuck_fired_ = true; }

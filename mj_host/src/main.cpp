@@ -1241,6 +1241,7 @@ bool g_no_backing = false;   // --no-backing: the twist brain's forward command 
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
+bool g_stuck_progress = false;   // --stuck-progress (2026-09-19): the stall is no progress toward the reference, not low forward speed
 double g_stuck_escape_s = 0.0;   // --stuck-escape SECS (2026-09-19): after a stuck stop, hold the reference at the cloud view's freest sector for SECS
 double g_hr_tau = 0.0, g_hr_damp = 0.0, g_hr_gate = 1.0;   // --heading-reflex TAU DAMP GATE (2026-09-17): a hold on own yaw through action.vyaw
 // SKILLS AT THE INTENT BOUNDARY (2026-09-17, register O54).  A skill is one of Pollen's one-shot networks,
@@ -1420,6 +1421,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (open_loop) brain.set_override(*open_loop);
     if (g_wander_bored_s > 0.0) brain.set_wander(g_wander_bored_s, g_wander_turn_deg, seed);
     if (g_no_backing) brain.set_no_backing(true);
+    if (g_stuck_progress) { brain.set_stuck_progress(true); std::fprintf(stderr, "  stuck by progress: a stall is no progress toward the reference (a slide along a surface counts)\n"); }
     if (g_stuck_escape_s > 0.0) std::fprintf(stderr, "  stuck escape: after a stuck stop the reference is held at the cloud view's freest sector for %.1f s\n", g_stuck_escape_s);
     if (g_ref_free > 0.0) { brain.set_ref_free(g_ref_free); std::fprintf(stderr, "  ref free-space gate: a bearing into a ToF sector with proximity above %.2f releases the reference\n", g_ref_free); }
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
@@ -2706,6 +2708,8 @@ int main(int argc, char** argv) {
             g_seek_gate = true;
         } else if (a == "--ref-unwrap") {
             g_ref_unwrap = true;
+        } else if (a == "--stuck-progress") {
+            g_stuck_progress = true;
         } else if (a == "--stuck-escape") {
             g_stuck_escape_s = std::stod(next("--stuck-escape"));
         } else if (a == "--ref-free") {
