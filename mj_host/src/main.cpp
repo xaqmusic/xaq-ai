@@ -1256,6 +1256,7 @@ std::string g_skill_on_arrive;           // "" = off
 // SECS, then stops again to look.  A kicked thing sits under the beak, below a level gaze (§17.36); half a
 // metre back it is in the field, so the kick's OUTCOME can be seen (the outcome loop's honest signal).
 double g_skill_unwind_vx = 0.0, g_skill_unwind_s = 0.0;
+double g_skill_unwind_aim = 0.0;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
 // --skill-when-down NAME (2026-09-19, the roulade experiment): when the recovery declares the body DOWN, fire
 // the named skill first (its window drives the joints instead of the scaffold); if the body is not upright
 // when the window ends, the scaffold's rescue continues as before.  Counts rises inside the window.
@@ -1433,6 +1434,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_skill_at_s > 0.0) std::fprintf(stderr, "  skill at %.1f s: %s\n", g_skill_at_s, g_skill_at_name.c_str());
     if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s drives the joints when the body goes down, before the scaffold's rescue\n", g_skill_when_down.c_str());
     if (g_skill_unwind_s > 0.0) std::fprintf(stderr, "  skill unwind: after a skill at a stop the body backs off at %.2f for %.1f s, then stops to look\n", g_skill_unwind_vx, g_skill_unwind_s);
+    if (g_skill_unwind_aim > 0.0 && g_skill_unwind_s <= 0.0) throw std::runtime_error("--skill-unwind-aim needs --skill-unwind (the unwind it aims)");
+    if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: the unwind's yaw keeps the nose on the kicked thing (gain %.2f on its bearing) and the look stop's sweep is centred on it\n", g_skill_unwind_aim);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
         std::fprintf(stderr, "  heading reflex: while a loop holds the reference, vyaw closes the heading error in %.2f s (damping %.2f on the sensed rate), mixed with the brain's yaw by proximity (gate %.2f)\n", g_hr_tau, g_hr_damp, g_hr_gate); }
     Odometry odom;
@@ -1617,6 +1620,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // its bearing; at every other stop it is the default.  The grid keeps its cell count; the width follows.
     double sweep_p_lo = sweep_p_lo0, sweep_p_hi = sweep_p_hi0, sweep_wp = (sweep_p_hi0 - sweep_p_lo0) / sweep_np, sweep_yc = 0.0;
     bool stop_is_arrive = false, stop_is_stuck = false; int escapes = 0;
+    bool stop_is_look = false; int look_aimed = 0;   // the look stop after an unwind (--skill-unwind-aim)
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
@@ -1792,7 +1796,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : "stop:start"); stop_started_tick = t;
-                stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now;
+                stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now; stop_is_look = false;
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
                 brain.set_learning(false);                 // its command is not applied during the stop
@@ -1817,6 +1821,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             if (g_stop.gaze_at_thing && stop_is_arrive) {
                                 const double centre = std::clamp(std::atan2(0.2, std::max(0.05, brain.seek_range()) + 0.15), 0.2, 0.55);
                                 sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp(brain.seek_ego(), -0.5, 0.5);
+                            } else if (g_skill_unwind_aim > 0.0 && stop_is_look && brain.thing_pos_present()) {
+                                // the look stop after an unwind: the sweep's yaw is centred on the kicked thing's
+                                // remembered bearing (the pitch band stays: T3's pitch cost the stand, §17.40)
+                                sweep_p_lo = sweep_p_lo0; sweep_p_hi = sweep_p_hi0; sweep_yc = std::clamp(brain.thing_ego(), -0.5, 0.5); ++look_aimed;
                             } else { sweep_p_lo = sweep_p_lo0; sweep_p_hi = sweep_p_hi0; sweep_yc = 0.0; }
                             sweep_wp = (sweep_p_hi - sweep_p_lo) / sweep_np;
                         }
@@ -2053,11 +2061,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the unwind: back off, then a stop to look at what the kick did
             if (unwind_left > 0 && stop_phase == StopPhase::None) {
                 command.twist = {-std::fabs(g_skill_unwind_vx), 0.0, 0.0};
+                // --skill-unwind-aim: back off with the nose kept on the kicked thing (its bearing + = right; the
+                // twist's yaw + = left), so the look stop that follows has it ahead instead of off the sweep
+                if (g_skill_unwind_aim > 0.0 && brain.thing_pos_present())
+                    command.twist[2] = std::clamp(-g_skill_unwind_aim * brain.thing_ego(), -1.0, 1.0);
                 brain.set_learning(false);
                 if (--unwind_left == 0 && unwind_then_stop && (ticks - t) > stop_ticks) {
                     unwind_then_stop = false;
                     stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
-                    ++stops_started; ++stops_arrive; stop_event = "stop:look"; stop_started_tick = t; stop_is_arrive = true;
+                    ++stops_started; ++stops_arrive; stop_event = "stop:look"; stop_started_tick = t; stop_is_arrive = true; stop_is_look = true;
                     if (stander) stander->on_reset();
                     if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
                 }
@@ -2444,6 +2456,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
+        if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
         if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s fired %d times, the body upright within 2 s of the window %d times\n", g_skill_when_down.c_str(), down_skills, down_rises);
         if (g_stop.map_on_stop || look_on || gaze_on) {
             std::fprintf(stderr, "  map growth: %d nodes on walks, %d at stops; %zu baked ids seen\n", grown_walk, grown_stop, baked_ids.size());
@@ -2731,6 +2744,8 @@ int main(int argc, char** argv) {
         } else if (a == "--skill-when-down") {
             g_skill_when_down = next("--skill-when-down");
             if (!skill_def(g_skill_when_down)) throw std::runtime_error("--skill-when-down: unknown skill " + g_skill_when_down);
+        } else if (a == "--skill-unwind-aim") {
+            g_skill_unwind_aim = std::stod(next("--skill-unwind-aim"));
         } else if (a == "--skill-unwind") {
             g_skill_unwind_vx = std::stod(next("--skill-unwind")); g_skill_unwind_s = std::stod(next("--skill-unwind"));
         } else if (a == "--skill-at") {

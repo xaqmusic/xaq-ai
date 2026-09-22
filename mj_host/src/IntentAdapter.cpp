@@ -183,6 +183,15 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // The dead-reckoned pose as [x, y, yaw] for a loop that remembers a POSITION (BearingSeekLoop, things
     // phase T2): the place pose carries x/2 and y/2; the yaw is the unwrapped heading (same frame).
     if (place) publish("odom", {float(2.0 * place->pose[0]), float(2.0 * place->pose[1]), float(heading_)});
+    thing_present_ = false;
+    if (place)
+        if (auto nt = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value("reality.cognitive.outcome_need")))
+            if (nt->values.size() >= 3) {
+                const double dx = double(nt->values[1]) - 2.0 * place->pose[0], dy = double(nt->values[2]) - 2.0 * place->pose[1];
+                const double c = std::cos(heading_), s = std::sin(heading_);
+                const double fwd = c * dx + s * dy, left = -s * dx + c * dy;
+                thing_rng_ = std::hypot(dx, dy); thing_ego_ = std::atan2(-left, fwd); thing_present_ = thing_rng_ > 1e-3;
+            }
     publish("vel_ego", {unit(vel_body[1] / kTwistRangeVy), unit(vel_body[0] / kTwistRangeVx)});
     publish("tof", {tof[0], tof[1], tof[2], tof[3]});   // the ToF summary on its own topic (an avoidance LOOP reads it)
 

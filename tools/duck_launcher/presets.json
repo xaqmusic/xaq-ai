@@ -1399,9 +1399,9 @@
   }
  },
  {
-  "name": "R67 · the outcome loop with TWO intents, the kick and the PECK (Pollen's ground pick): at an arrival the one whose answer for this thing is least known",
+  "name": "★ THINGS · R67 · the outcome loop with TWO intents, the kick and the PECK (Pollen's ground pick): at an arrival the one whose answer for this thing is least known",
   "series": 67,
-  "hint": "WATCH (seed 1, fast-forward through 600 s): at an arrival the loop asks for a KICK or a PECK -- whichever answer it knows least for this thing -- the host runs Pollen's network from standing (the peck: a 2.8 s reach-down, the body drops to 8.5 cm and leans to 24 deg), then backs off and looks. n=6 (design doc §17.41): 31 requests, 16 kicks / 13 pecks, no fall, 13 answers observed (kick 6-17 cm, peck 5-22 cm); walls 12 -> 18/min within the spread. WORKING as a mechanism.",
+  "hint": "PROMOTED 2026-09-22 (the operator's eye: the circling is mostly solved; interaction is interesting, wandering is boring). The walk with play's mirror fixed (heading_sign -1) + R48's step + the seek loop + the arrival stop + Pollen's kick and peck from standing + the outcome loop with the unwind. WATCH (seed 1, fast-forward through 600 s): at an arrival the loop asks for a KICK or a PECK -- whichever answer it knows least for this thing -- the host runs Pollen's network from standing (the peck: a 2.8 s reach-down, the body drops to 8.5 cm and leans to 24 deg), then backs off and looks. n=6 (design doc §17.41): 31 requests, 16 kicks / 13 pecks, no fall, 13 answers observed (kick 6-17 cm, peck 5-22 cm); walls 12 -> 18/min within the spread. WORKING as a mechanism.",
   "state": {
    "config": "a1v2_r67_peck.json",
    "mode": "level2",
@@ -1473,7 +1473,7 @@
  {
   "name": "R70 · R67 + the WALKING cloud: casts accumulated on the walk, translated by the odometry, so things are attended between stops",
   "series": 70,
-  "hint": "MEASURED (n=6): the walking cloud WORKS as a sensor (things attended on 18 601 walking ticks against 178) and is a REGRESSION as a behaviour in this stack: with a live bearing on every walk the seek loop holds the reference 80 % of the time, walls 18 -> 55/min, stands 4 of 17. WATCH (seed 1) to see the duck chase things between stops. Re-use: seek's need gated by the thing's node and free space (design doc §17.42, O55).",
+  "hint": "OPERATOR'S EYE 2026-09-22: the wall voxels looked rotated 45 deg -- that was the VIEWER: the host latched the cloud's world pose only on an open edge, and a walking cloud files and reopens on one tick (48 clouds under one anchor). Fixed in the host (13/13 anchors within 4 mm, 0.7 deg); the odometry itself is 1 deg and 0.93 of the truth per 10 s of walking. The behaviour verdict (REGRESSION: stands 4/17, seek 80 %) stands. MEASURED (n=6): the walking cloud WORKS as a sensor (things attended on 18 601 walking ticks against 178) and is a REGRESSION as a behaviour in this stack: with a live bearing on every walk the seek loop holds the reference 80 % of the time, walls 18 -> 55/min, stands 4 of 17. WATCH (seed 1) to see the duck chase things between stops. Re-use: seek's need gated by the thing's node and free space (design doc §17.42, O55).",
   "state": {
    "config": "a1v2_r70_walkcloud.json",
    "mode": "level2",
@@ -1497,7 +1497,7 @@
  {
   "name": "R67r · R67 + the heading REFLEX: the body follows the loops (64 % of asked turns against 41 %), the circle dissolves, two seeds stick at a surface",
   "series": 67,
-  "hint": "WATCH (seed 1, fast-forward through 600 s): R67 with --heading-reflex 1.0 0.3 1.0. n=6 (design doc §17.43): the body turns the way play asks on 64 % of ticks (41 %), heading error 1.44 -> 0.99 rad, the yaw off its rail (83 -> 22 %), rescues 0.11 -> 0.04/min, coverage ties; walls down on seeds 1-4 (12->6, 20->16, 20->12, 28->17), up on seeds 5-6 (12->45, 16->58) as long bursts at a surface (O35). WORKING on the channel, PARTIAL as a behaviour. Compare R67 (no reflex) for the circle at ~1060 s.",
+  "hint": "OPERATOR'S EYE 2026-09-22: \"spending a lot of time staring at the walls\" -- confirmed: the reflex makes the walk bimodal (three seeds at things, three at walls; seed 1 stops 4 at things / 8 at walls against R67's 12 / 3, cloud_objects.py where). PARTIAL, not promoted; re-use once the loops' targets are things (R71). WATCH (seed 1, fast-forward through 600 s): R67 with --heading-reflex 1.0 0.3 1.0. n=6 (design doc §17.43): the body turns the way play asks on 64 % of ticks (41 %), heading error 1.44 -> 0.99 rad, the yaw off its rail (83 -> 22 %), rescues 0.11 -> 0.04/min, coverage ties; walls down on seeds 1-4 (12->6, 20->16, 20->12, 28->17), up on seeds 5-6 (12->45, 16->58) as long bursts at a surface (O35). WORKING on the channel, PARTIAL as a behaviour. Compare R67 (no reflex) for the circle at ~1060 s.",
   "state": {
    "config": "a1v2_r67_peck.json",
    "mode": "level2",
@@ -1515,6 +1515,54 @@
    "seed_random": false,
    "arena_shift": 0.0,
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --heading-reflex 1.0 0.3 1.0",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R71 · the LINGER: what the intents still have to tell about a thing renews the seek loop's need, so the duck goes back to a thing it does not understand and leaves one it does",
+  "series": 71,
+  "hint": "MEASURED n=6 (design doc §17.45): NULL as a behaviour in this form -- renewals 20 over six runs, answers observed 11/31, nodes known 0 (the need never resolves: the look stop sees the thing again one time in three), walls 18 -> 29/min on one seed's account, stops at things 9.5 -> 8.5. The mechanism is upstream-limited by the look; see R71a. The operator (2026-09-22): interaction is interesting, wandering and looking are boring; linger where there is something to learn. The outcome loop publishes the unknown intents' share at the last attended thing with its position; after an arrival drops the seek target, a need above renew_min re-arms it with confidence = need. Habituation is the same rule: a thing whose kick and peck are both known renews nothing, and play takes the body away.",
+  "state": {
+   "config": "a1v2_r71_linger.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R71a · R71 + the unwind AIMED: after a kick or peck the nose stays on the thing while backing off, and the look stop's sweep is centred on it",
+  "series": 71,
+  "hint": "MEASURED n=6 (design doc §17.45): PARTIAL on the interesting scale -- stops at things 9.5 (R67) -> 10.5 a run, stop-seconds at things 133 -> 173, walls back to 18/min, stands 29 -> 36 %; NULL on learning (answers observed 10/30, nodes known 0): the unknown answers are now skills fired where no thing was (9 of 30, wall bases / legs / dead-reckoned places), and only 2 of 30 skills moved their thing by more than 5 cm. WATCH (seed 1, fast-forward through 600 s): after a kick or peck the nose turns onto the thing while backing off and the look stop sweeps about it. Next lever: the PUSH intent and an answer for a thing that rolls away.",
+  "state": {
+   "config": "a1v2_r71_linger.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0",
    "fast_until": 600
   }
  }

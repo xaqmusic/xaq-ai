@@ -8,6 +8,8 @@
 //   3. NotSeenIsNotZero — no sighting within observe_ticks: the outcome is unknown and nothing is learned.
 //   4. AKnownThingIsLeftAlone — after min_samples outcomes with no spread, the same node's arrival asks for
 //      nothing: habituation.
+//   6. TheNeedIsTheUnknownIntentsShare — with two intents the need reads 1 before any answer, 0 while an
+//      outcome is in flight, 1/2 once the kick's answer is known, 0 once both are: what renews the seek.
 // =============================================================================
 #include <gtest/gtest.h>
 #include <cmath>
@@ -117,4 +119,33 @@ TEST(SkillOutcomeLoop, TheLeastKnownIntentIsAsked) {
     EXPECT_NE(asked[0], 3) << "the first asks for a kick (the last intent starts as the peck)";
     EXPECT_EQ(asked[1], 3) << "the kick answered once, the peck never: the peck";
     EXPECT_NE(asked[2], 3) << "both answered once with the same spread: the one not tried last, the kick";
+}
+
+TEST(SkillOutcomeLoop, TheNeedIsTheUnknownIntentsShare) {
+    ogma::ParamMap p; p["peck_id"] = int64_t{3}; p["min_samples"] = int64_t{1}; p["explore_gain"] = 0.0;
+    p["need_topic"] = std::string("reality.cognitive.outcome_need");
+    Rig r(p);
+    auto need = [&]() { return std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.outcome_need"))->values[0]; };
+    r.step(0, 0, 0, 0, 0, 0, 7, 0.0f, 9.0f);
+    EXPECT_FLOAT_EQ(need(), 0.0f) << "nothing seen yet";
+    for (int i = 0; i < 8; ++i) r.step(0, 0, 0, 0.0f, 1.0f, 0.6f, 7, 1.0f, 1.0f);
+    EXPECT_FLOAT_EQ(need(), 1.0f) << "a thing seen, both intents unknown";
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.outcome_need"));
+    EXPECT_NEAR(tok->values[1], 1.0f, 0.05f) << "the thing's fixed position travels with the need";
+    r.step(0.8, 0, 0, 0, 0, 0, 7, 1.0f, 0.2f);
+    r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);                                          // the arrival: a kick asked
+    ASSERT_EQ(r.m.requests(), 1);
+    EXPECT_FLOAT_EQ(need(), 0.0f) << "an outcome in flight: the loop looks, it does not ask";
+    for (int i = 0; i < 40; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.9f, 7, 0.0f, 0.2f);   // seen again: the kick's answer
+    ASSERT_EQ(r.m.observed(), 1);
+    EXPECT_FLOAT_EQ(need(), 0.5f) << "the kick known, the peck not";
+    for (int i = 0; i < 10; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+    r.see_then_arrive(7);
+    ASSERT_EQ(r.m.requests(), 2);
+    EXPECT_EQ(r.request_id(), 3) << "the peck";
+    for (int i = 0; i < 40; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.9f, 7, 0.0f, 0.2f);
+    ASSERT_EQ(r.m.observed(), 2);
+    EXPECT_FLOAT_EQ(need(), 0.0f) << "both answered: nothing left to ask this thing";
 }

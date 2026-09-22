@@ -3873,3 +3873,52 @@ R67 + the two topics; preset R71 (seed 1). The prediction, at n = 6 against R67:
 observed answers per run, more nodes known, stops at things up and stop-seconds at walls down, cells and
 walls within the spread; the failure mode to watch is a duck that shuttles between a thing and its look stop
 without the outcome ever being observed (need stuck at 1 with `unknown` climbing).
+
+**R71 measured (n = 6, 1500 s, against R67).** Requests 29 → 31, answers observed 13 → 11 (unknown 16 → 20),
+renewals 20 over six runs, arrival stops 48 of 107 → 54 of 110; seek held the reference 63 → 81 % of the walk;
+walls 17.9 → 29.0 a minute (± 19: one seed at 37), contact 1.9 → 3.3 %; stops at things 9.5 → 8.5 a run, at
+walls 3.5 → 5.3, stop-seconds at walls 46 → 95; cells 142 → 139. Nodes known: 0 in every run, the need 1.0 at
+every run's end — the ladder the test climbs (1 → ½ → 0) is never climbed on the duck, because a node × intent
+needs two observed answers and the look stop sees the thing again about one time in three. **`NULL` as a
+behaviour in this form, `REGRESSION` on walls on one seed.** The renewal re-arms what the outcome loop last
+fixed, and on the seeds where that was a wall base (the attention's 18 % misses) it re-arms the wall.
+
+**Why the answer is not seen — the diagnosis that sets the next lever.** Every skill in R67 and R71 (60) was
+matched to the nearest movable thing at its start and that thing's true position 8 s later: the unknown
+outcomes are NOT balls that rolled out of the 0.6 m match radius (0 of 36); in 33 of 36 the thing had not
+moved at all, and the median true displacement after a kick or a peck is 0.00 m (the thing answers one time
+in five, §17.39). The thing was simply not seen again. At the look stop after the unwind, the cases the loop
+observed had the thing 0.33 m ahead (IQR 0.29–0.36) and 17° off the nose; the cases it did not had it at
+0.75 m (IQR 0.24–2.33) and 55° off, ten of fourteen beyond the sweep's ±34°. Two sources: a skill fired
+where no movable thing was within 0.5 m (5 of 29 in R67, 11 of 31 in R71 — wall bases and furniture legs the
+cloud attends as things, and arrivals by dead reckoning at a place the thing is not), and a thing that is to
+the SIDE after the skill (the kick's foot, the peck's crouch, a turn during the window) while the unwind backs
+straight off and the look stop sweeps ±0.6 rad about the nose. Nothing in the loops can learn across an answer
+they never see; the look is the bottleneck, and it is a gaze error on a remembered bearing — the operator's
+own framing of the head (T1's correction).
+
+**R71a: the unwind AIMED** (`--skill-unwind-aim GAIN`, off = byte-identical): the outcome loop's need topic
+carries the thing's fixed position; the adapter turns it into a bearing in the body frame; during the unwind
+the twist's yaw keeps the nose on it (−GAIN × bearing, clamped), and the look stop's sweep is centred on that
+bearing in yaw (the pitch band stays — T3's pitch part cost the stand, §17.40). The sweep's yaw centre already
+existed for `--stop-gaze-at-thing`; this is that half of it, on the look stop, from the kicked thing's position
+rather than the last seek bearing. Prediction: answers observed up from a third toward two thirds, nodes
+known > 0, renewals that lead to a second intent at the same thing; walls back to R67's.
+
+**R71a measured (n = 6, against R71 and R67).** Skills 30 (17 unwinds, all 17 look stops aimed); answers
+observed 10 of 30 (R71 11 of 31, R67 13 of 29); renewals 20; nodes known 0, need 1.0 at every end. On the
+interesting scale the aim undid the linger's cost and a little more: stops at things 9.5 (R67) → 8.5 (R71) →
+10.5 a run, stop-seconds at things 133 → 138 → 173, at walls 46 → 95 → 55; walls 17.9 → 29.0 → 18.5 a minute;
+cells 142 → 139 → 131, stands 29 → 32 → 36 %, rescues 0.8 → 1.2 → 0.5 %. The look's geometry moved as
+predicted: at the look stop the observed answers had the thing 0.38 m ahead and 12° off the nose, and the
+UNKNOWN ones no longer had it to the side (34° median, 3 of 7 beyond 35°, against 55° and 10 of 14) — they had
+it 2.17 m away: the skill had been fired where no movable thing was within 0.5 m (9 of 30). And of 30 skills,
+2 moved their thing by more than 5 cm. **`PARTIAL` on the interesting scale (a signal at n = 6, all within
+the spread), `NULL` on learning: the ladder is not climbed because the boundary's intents mostly do not
+touch anything.** The linger and the aim are kept (both off by flag; R71a is the arm for the operator's eye)
+and the phase's next lever is no longer the look — it is the intent vocabulary's reach: a kick from standing
+at 0.19 m reaches the thing one time in five, and a third of the requests go to a wall base or a furniture
+leg the cloud attends as a thing, or to a dead-reckoned place the thing is not. A PUSH (a short walk into the
+thing from standing, the walker's own intent at the boundary) is the one thing in the runtime that moves a
+thing every time it is pointed at one — the base walk moves objects 3.5 m a run by stumbling — and a thing
+that rolls beyond the match radius must count as an answer, not an unknown.

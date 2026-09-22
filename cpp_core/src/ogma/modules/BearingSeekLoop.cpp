@@ -33,8 +33,10 @@ BearingSeekLoop::~BearingSeekLoop() = default;
 std::string_view BearingSeekLoop::type_name() const { return "BearingSeekLoop"; }
 
 std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
-    return { TopicSpec{bearing_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
-             TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
+    std::vector<TopicSpec> v{ TopicSpec{bearing_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
+                              TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
+    if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    return v;
 }
 std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))},
@@ -71,6 +73,15 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "While the thing is unseen the confidence decays by 1/this per tick (about this many ticks of memory).", ParamValue{3000.0}},
         {"floor", ParamMutability::HotMutable,
             "Confidence below which the remembered target is dropped.", ParamValue{0.05}},
+        {"renew_topic", ParamMutability::ConstructionOnly,
+            "ProprioToken [need, x, y] (SkillOutcomeLoop need_topic): what is still unknown about the last attended thing and where it is. "
+            "After an arrival, a need above renew_min re-arms the target there with confidence = need (the linger). Empty = off.",
+            ParamValue{std::string("")}},
+        {"renew_min", ParamMutability::HotMutable,
+            "The need above which a dropped target is renewed.", ParamValue{0.25}},
+        {"renew_range", ParamMutability::HotMutable,
+            "A renewal only within this range (metres) of the thing; never within 1.5 x arrive_m (that would be an arrival without a walk).",
+            ParamValue{2.0}},
     };
 }
 
@@ -81,6 +92,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["range_topic"] = ParamValue{range_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
+    m["renew_topic"] = ParamValue{renew_topic_}; m["renew_min"] = ParamValue{double(renew_min_)}; m["renew_range"] = ParamValue{renew_range_};
     return m;
 }
 
@@ -97,6 +109,9 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "arrive_m",        [&](auto const& v){ arrive_m_      = get_double(v,"arrive_m"); });
     apply_param(params, "forget_ticks",    [&](auto const& v){ forget_ticks_  = std::max(1.0, get_double(v,"forget_ticks")); });
     apply_param(params, "floor",           [&](auto const& v){ floor_         = float(get_double(v,"floor")); });
+    apply_param(params, "renew_topic",     [&](auto const& v){ renew_topic_   = get_string(v,"renew_topic"); });
+    apply_param(params, "renew_min",       [&](auto const& v){ renew_min_     = float(get_double(v,"renew_min")); });
+    apply_param(params, "renew_range",     [&](auto const& v){ renew_range_   = get_double(v,"renew_range"); });
 }
 
 void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -106,6 +121,8 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "arrive_m")        arrive_m_ = get_double(value, k);
     else if (k == "forget_ticks")    forget_ticks_ = std::max(1.0, get_double(value, k));
     else if (k == "floor")           floor_ = float(get_double(value, k));
+    else if (k == "renew_min")       renew_min_ = float(get_double(value, k));
+    else if (k == "renew_range")     renew_range_ = get_double(value, k);
     else throw std::invalid_argument("BearingSeekLoop: param '" + k + "' is construction-only / unknown");
 }
 
@@ -120,6 +137,19 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     }
     seen_ = prox > min_conf_ && (vx * vx + vy * vy) > 1e-6f;
     const double c = std::cos(pyaw_), s = std::sin(pyaw_);
+    // the renewal: with no target held (the arrival's tick has passed -- the value read 0 for one tick, which
+    // is the arrival the outcome loop sees) and nothing in view, a need still open at the thing re-arms it
+    if (!renew_topic_.empty() && !have_target_ && !seen_ && have_pose_) {
+        if (auto rt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(renew_topic_))) {
+            if (rt->values.size() >= 3 && rt->values[0] > renew_min_) {
+                const double rr = std::hypot(double(rt->values[1]) - px_, double(rt->values[2]) - py_);
+                if (rr > 1.5 * arrive_m_ && rr < renew_range_) {
+                    tx_ = rt->values[1]; ty_ = rt->values[2]; have_target_ = true;
+                    conf_ = std::clamp(rt->values[0], 0.0f, 1.0f); ++renewals_;
+                }
+            }
+        }
+    }
     if (seen_ && have_pose_) {
         // fix the thing's position: the body's pose plus the bearing (body frame: +x forward, +y left)
         // at the range the proximity encodes
@@ -171,16 +201,16 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
 
 nlohmann::json BearingSeekLoop::snapshot_state() const {
     return nlohmann::json{{"version", 1}, {"have_target", have_target_}, {"tx", tx_}, {"ty", ty_}, {"conf", conf_},
-                          {"arrivals", arrivals_}, {"forgets", forgets_}};
+                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}};
 }
 void BearingSeekLoop::restore_state(nlohmann::json const& s) {
     if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
     have_target_ = s.value("have_target", false); tx_ = s.value("tx", 0.0); ty_ = s.value("ty", 0.0);
-    conf_ = s.value("conf", 0.0f); arrivals_ = s.value("arrivals", 0); forgets_ = s.value("forgets", 0);
+    conf_ = s.value("conf", 0.0f); arrivals_ = s.value("arrivals", 0); forgets_ = s.value("forgets", 0); renewals_ = s.value("renewals", 0);
 }
 nlohmann::json BearingSeekLoop::diag_lite() const {
     return nlohmann::json{{"seen", seen_}, {"target", have_target_}, {"value", value_}, {"range", range_left_},
-                          {"arrivals", arrivals_}, {"forgets", forgets_}};
+                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}};
 }
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();

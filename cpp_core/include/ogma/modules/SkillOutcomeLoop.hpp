@@ -63,6 +63,7 @@ public:
     int    observed()  const { return observed_; }
     int    unknown()   const { return unknown_; }
     double last_surprise() const { return last_surprise_; }
+    double need() const { return need_; }
     const std::unordered_map<int, Stat>& stats() const { return stats_; }
     static int key_of(int node, int intent) { return node * 2 + intent; }   // intent 0 = kick, 1 = peck
 
@@ -74,6 +75,11 @@ private:
     std::string pose_topic_    = "reality.proprio.odom";
     std::string skill_topic_   = "intent.skill";
     std::string outcome_topic_ = "reality.cognitive.outcome";
+    // the need (2026-09-22, the linger): [need, x, y] -- how much of what the intents do to the last attended
+    // thing is still unknown (1 - the known intents' share; 0 while an outcome is in flight or nothing was
+    // seen) and the thing's fixed position.  The seek loop's renew_topic reads it.  Empty = not published.
+    std::string need_topic_;
+    double need_ = 0.0;
     double proximity_range_ = 2.5, arrive_range_ = 0.3, match_radius_ = 0.6;
     int    min_samples_ = 2, observe_ticks_ = 1500, min_conf_ticks_ = 5;
     double explore_gain_ = 1.0;

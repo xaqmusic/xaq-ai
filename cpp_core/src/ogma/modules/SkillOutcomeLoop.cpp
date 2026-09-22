@@ -40,8 +40,10 @@ std::vector<TopicSpec> SkillOutcomeLoop::input_topics() const {
              TopicSpec{pose_topic_,       std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
 }
 std::vector<TopicSpec> SkillOutcomeLoop::output_topics() const {
-    return { TopicSpec{skill_topic_,   std::type_index(typeid(ProprioToken))},
-             TopicSpec{outcome_topic_, std::type_index(typeid(ProprioToken))} };
+    std::vector<TopicSpec> v{ TopicSpec{skill_topic_,   std::type_index(typeid(ProprioToken))},
+                              TopicSpec{outcome_topic_, std::type_index(typeid(ProprioToken))} };
+    if (!need_topic_.empty()) v.push_back(TopicSpec{need_topic_, std::type_index(typeid(ProprioToken))});
+    return v;
 }
 
 ParamSchema SkillOutcomeLoop::params_schema() const {
@@ -53,6 +55,7 @@ ParamSchema SkillOutcomeLoop::params_schema() const {
         {"pose_topic",       ParamMutability::ConstructionOnly, "The body's dead-reckoned [x, y, yaw].", ParamValue{std::string("reality.proprio.odom")}},
         {"skill_topic",      ParamMutability::ConstructionOnly, "The intent boundary: ProprioToken [skill id, request] with request 1 on the tick a skill is asked for.", ParamValue{std::string("intent.skill")}},
         {"outcome_topic",    ParamMutability::ConstructionOnly, "The loop's honest signal: [node, predicted displacement, observed displacement, surprise, samples] on the tick an outcome is observed; zeros otherwise.", ParamValue{std::string("reality.cognitive.outcome")}},
+        {"need_topic",       ParamMutability::ConstructionOnly, "[need, x, y]: the share of intents whose answer for the last attended thing is still unknown (by min_samples and explore_gain), 0 while an outcome is in flight, and the thing's fixed position -- a seek loop's renew_topic (the linger). Empty = not published.", ParamValue{std::string("")}},
         {"proximity_range",  ParamMutability::HotMutable, "The bearing's proximity scale (metres): range = (1 - proximity) x this.", ParamValue{2.5}},
         {"arrive_range",     ParamMutability::HotMutable, "The seek range under which a need falling to 0 is an arrival (metres).", ParamValue{0.3}},
         {"match_radius",     ParamMutability::HotMutable, "A bearing after the kick whose fixed position lies within this of the kicked thing's is the same thing, moved (metres).", ParamValue{0.6}},
@@ -71,6 +74,7 @@ ParamMap SkillOutcomeLoop::current_params() const {
     m["bearing_topic"] = ParamValue{bearing_topic_}; m["thing_topic"] = ParamValue{thing_topic_};
     m["seek_value_topic"] = ParamValue{seek_value_topic_}; m["seek_range_topic"] = ParamValue{seek_range_topic_};
     m["pose_topic"] = ParamValue{pose_topic_}; m["skill_topic"] = ParamValue{skill_topic_}; m["outcome_topic"] = ParamValue{outcome_topic_};
+    m["need_topic"] = ParamValue{need_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["arrive_range"] = ParamValue{arrive_range_}; m["match_radius"] = ParamValue{match_radius_};
     m["min_samples"] = ParamValue{int64_t{min_samples_}}; m["observe_ticks"] = ParamValue{int64_t{observe_ticks_}}; m["min_conf_ticks"] = ParamValue{int64_t{min_conf_ticks_}};
     m["explore_gain"] = ParamValue{explore_gain_}; m["skill_left"] = ParamValue{int64_t{skill_left_}}; m["skill_right"] = ParamValue{int64_t{skill_right_}};
@@ -88,6 +92,7 @@ void SkillOutcomeLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "pose_topic",       [&](auto const& v){ pose_topic_ = get_string(v,"pose_topic"); });
     apply_param(params, "skill_topic",      [&](auto const& v){ skill_topic_ = get_string(v,"skill_topic"); });
     apply_param(params, "outcome_topic",    [&](auto const& v){ outcome_topic_ = get_string(v,"outcome_topic"); });
+    apply_param(params, "need_topic",       [&](auto const& v){ need_topic_ = get_string(v,"need_topic"); });
     apply_param(params, "proximity_range",  [&](auto const& v){ proximity_range_ = get_double(v,"proximity_range"); });
     apply_param(params, "arrive_range",     [&](auto const& v){ arrive_range_ = get_double(v,"arrive_range"); });
     apply_param(params, "match_radius",     [&](auto const& v){ match_radius_ = get_double(v,"match_radius"); });
@@ -151,13 +156,22 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
         } else if (wait_ > observe_ticks_) { ++unknown_; pending_ = false; }
     }
 
+    // the rule an arrival asks by: a node x intent is uncertain with fewer than min_samples outcomes, or a
+    // spread above explore_gain x the mean spread of the known ones.  The need below is the same rule.
+    double mean_sd = 0.0; int nn = 0;
+    for (auto const& [k, s] : stats_) if (s.n >= min_samples_) { mean_sd += std::sqrt(s.var()); ++nn; }
+    mean_sd = nn ? mean_sd / nn : 0.0;
+    const auto uncertain_at = [&](int nd, int intent) {
+        const auto it = stats_.find(key_of(nd, intent));
+        if (it == stats_.end()) return true;
+        const Stat& st = it->second;
+        return st.n < min_samples_ || (explore_gain_ > 0.0 && std::sqrt(st.var()) > explore_gain_ * mean_sd);
+    };
+
     // the arrival: the seek need falls to 0 with the range under arrive_range -- kick if the answer is uncertain
     request_now_ = false;
     if (seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_) {
         const int nd = node_ < 0 ? 0 : node_;
-        double mean_sd = 0.0; int nn = 0;
-        for (auto const& [k, s] : stats_) if (s.n >= min_samples_) { mean_sd += std::sqrt(s.var()); ++nn; }
-        mean_sd = nn ? mean_sd / nn : 0.0;
         // the intent whose answer for this thing is least known
         int intent = 0;
         if (peck_id_ >= 0) {
@@ -166,9 +180,7 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
             else if (std::fabs(std::sqrt(k.var()) - std::sqrt(q.var())) > 1e-9) intent = std::sqrt(k.var()) > std::sqrt(q.var()) ? 0 : 1;
             else intent = 1 - last_intent_;
         }
-        const Stat& st = stats_[key_of(nd, intent)];
-        const bool uncertain = st.n < min_samples_ || (explore_gain_ > 0.0 && std::sqrt(st.var()) > explore_gain_ * mean_sd);
-        if (uncertain) {
+        if (uncertain_at(nd, intent)) {
             // the side: the thing's bearing from the body now (+ left in the body frame => the left foot)
             const double dx = tx_ - px_, dy = ty_ - py_, c = std::cos(pyaw_), s = std::sin(pyaw_);
             const double by = -s * dx + c * dy;
@@ -188,6 +200,22 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
     oc->values = Eigen::VectorXf::Zero(6);
     if (outcome_now) { oc->values[0] = float(last_node_); oc->values[1] = float(last_pred_); oc->values[2] = float(last_obs_); oc->values[3] = float(last_surprise_); oc->values[4] = float(stats_[key_of(last_node_, kintent_)].n); oc->values[5] = float(kintent_); }
     bus_->publish(outcome_topic_, oc);
+
+    // the need: what the intents still have to tell about the last attended thing.  Zero while an outcome is
+    // in flight (the loop is looking, not asking) and before anything was seen; else the unknown intents' share.
+    need_ = 0.0;
+    if (seen_ && !pending_) {
+        const int nd = node_ < 0 ? 0 : node_;
+        const int intents = peck_id_ >= 0 ? 2 : 1;
+        int open = 0; for (int i = 0; i < intents; ++i) if (uncertain_at(nd, i)) ++open;
+        need_ = double(open) / intents;
+    }
+    if (!need_topic_.empty()) {
+        auto nt = std::make_shared<ProprioToken>();
+        nt->tick_id = tick_id; nt->producer_id = sk->producer_id; nt->sensor = "outcome_need";
+        nt->values = Eigen::VectorXf(3); nt->values[0] = float(need_); nt->values[1] = float(tx_); nt->values[2] = float(ty_);
+        bus_->publish(need_topic_, nt);
+    }
 }
 
 nlohmann::json SkillOutcomeLoop::snapshot_state() const {
@@ -205,7 +233,7 @@ void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
 nlohmann::json SkillOutcomeLoop::diag_lite() const {
     int pecks = 0; for (auto const& [k, s] : stats_) if (k % 2) pecks += s.n;
     return nlohmann::json{{"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}, {"pending", pending_}, {"peck_outcomes", pecks},
-                          {"node", node_}, {"surprise", last_surprise_}, {"nodes_known", int(std::count_if(stats_.begin(), stats_.end(), [&](auto const& kv){ return kv.second.n >= min_samples_; }))}};
+                          {"node", node_}, {"surprise", last_surprise_}, {"need", need_}, {"nodes_known", int(std::count_if(stats_.begin(), stats_.end(), [&](auto const& kv){ return kv.second.n >= min_samples_; }))}};
 }
 nlohmann::json SkillOutcomeLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();

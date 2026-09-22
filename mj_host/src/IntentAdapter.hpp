@@ -226,6 +226,12 @@ public:
     int skill_request() const { return skill_request_; }
     // the outcome loop's token this tick, [node, predicted, observed, surprise, samples]; empty when none was observed
     std::vector<float> outcome_now() const { return outcome_; }
+    // the last attended thing's position from the outcome loop's need topic (reality.cognitive.outcome_need
+    // [need, x, y], odometry frame), as a bearing in the body frame (+ = right, like seek_ego) and a range:
+    // what the host aims the unwind and the look stop at (--skill-unwind-aim).  Absent topic = not present.
+    bool   thing_pos_present() const { return thing_present_; }
+    double thing_ego()   const { return thing_ego_; }
+    double thing_range() const { return thing_rng_; }
     // the play loop's bearing this tick and its state (climbing / wandering / next node), for the record
     std::array<float, 2> play_bearing() const { return play_bearing_; }
     nlohmann::json play_state() const;
@@ -267,6 +273,7 @@ private:
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int skill_request_ = -1; uint64_t skill_request_tick_ = 0;
+    bool thing_present_ = false; double thing_ego_ = 0.0, thing_rng_ = 0.0;
     std::vector<float> outcome_;
     std::array<float, 2> play_bearing_{0.0f, 0.0f};
     int  seek_steers_ = 0;

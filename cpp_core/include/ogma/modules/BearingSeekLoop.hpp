@@ -72,6 +72,13 @@ private:
     double arrive_m_        = 0.25;   // the remaining range at which the target counts as reached
     double forget_ticks_    = 3000.0; // confidence decays by 1/forget_ticks per tick while the thing is unseen
     float  floor_           = 0.05f;  // ...and the target is dropped below this
+    // the renewal (2026-09-22, the linger): a token [need, x, y] from the loop that learns what intents do at
+    // the thing (SkillOutcomeLoop need_topic).  After an arrival drops the target, a need above renew_min at a
+    // position between 1.5 x arrive_m and renew_range away re-arms it with confidence = need: the duck goes
+    // back to a thing it does not yet understand and leaves one it does.  Empty = off (byte-identical).
+    std::string renew_topic_;
+    float  renew_min_       = 0.25f;
+    double renew_range_     = 2.0;
 
     bool   seen_ = false, have_target_ = false;
     double tx_ = 0.0, ty_ = 0.0;          // the remembered position, odometry frame
@@ -79,7 +86,9 @@ private:
     bool   have_pose_ = false;
     float  conf_ = 0.0f, value_ = 0.0f, cx_ = 0.0f, cy_ = 0.0f;
     double range_left_ = 0.0;
-    int    arrivals_ = 0, forgets_ = 0;
+    int    arrivals_ = 0, forgets_ = 0, renewals_ = 0;
+public:
+    int renewals() const { return renewals_; }
 };
 
 } // namespace ogma

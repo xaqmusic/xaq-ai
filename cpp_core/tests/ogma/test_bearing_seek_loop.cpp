@@ -8,6 +8,9 @@
 //      RIGHT at 0.6 m, and the loop says so without seeing it.
 //   3. ArrivalDropsTheTarget — within arrive_m the target is dropped and counted; value 0, bearing 0.
 //   4. ForgettingDropsTheTarget — unseen for long enough the confidence decays below the floor.
+//   5. AnOpenNeedRenewsTheTarget — after an arrival, a need token [need, x, y] re-arms the target there with
+//      confidence = need, but not on the arrival's own tick (that tick's zero IS the arrival), not within
+//      1.5 x arrive_m, and not when the need is under renew_min.
 // =============================================================================
 #include <gtest/gtest.h>
 #include <cmath>
@@ -22,6 +25,11 @@ struct Rig {
     ogma::BearingSeekLoop m;
     uint64_t t = 0;
     explicit Rig(ogma::ParamMap p = {}) { m.set_id("seek"); m.on_setup(&bus, p); }
+    void renew(float need, double x, double y) {
+        auto n = std::make_shared<ogma::ProprioToken>();
+        n->values = Eigen::VectorXf(3); n->values << need, float(x), float(y);
+        bus.publish("reality.cognitive.outcome_need", n);
+    }
     void step(double x, double y, double yaw, float vx, float vy, float prox) {
         bus.begin_tick(t);
         auto pose = std::make_shared<ogma::ProprioToken>();
@@ -89,4 +97,30 @@ TEST(BearingSeekLoop, ForgettingDropsTheTarget) {
     r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);                                 // 0.9^7 = 0.48 < 0.5
     EXPECT_FALSE(r.m.have_target());
     EXPECT_EQ(r.m.forgets(), 1);
+}
+
+TEST(BearingSeekLoop, AnOpenNeedRenewsTheTarget) {
+    ogma::ParamMap p; p["renew_topic"] = std::string("reality.cognitive.outcome_need"); p["arrive_m"] = 0.25;
+    Rig r(p);
+    auto value = [&]() { return std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.seek_value"))->values[0]; };
+    for (int i = 0; i < 5; ++i) r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);      // a thing 1 m ahead
+    r.step(0.9, 0, 0, 0, 0, 0);                                          // walked to 0.1 m: the arrival
+    EXPECT_FLOAT_EQ(value(), 0.0f);
+    EXPECT_EQ(r.m.arrivals(), 1);
+    // a need at the thing published BEFORE the next tick: the arrival tick already passed, so it renews
+    r.renew(1.0f, 1.0, 0.0);
+    r.step(0.5, 0, 0, 0, 0, 0);                                          // backed off to 0.5 m
+    EXPECT_NEAR(value(), 1.0f, 0.01f) << "renewed with confidence = need (one tick of forgetting already applied)";
+    EXPECT_EQ(r.m.renewals(), 1);
+    auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("percept.seek_bearing"));
+    EXPECT_GT(b->values[1], 0.9f) << "the thing is ahead again";
+    r.step(0.9, 0, 0, 0, 0, 0);                                          // walked back: a second arrival
+    EXPECT_EQ(r.m.arrivals(), 2);
+    EXPECT_FLOAT_EQ(value(), 0.0f) << "the arrival reads 0 for its tick even with the need still open";
+    r.step(0.9, 0, 0, 0, 0, 0);
+    EXPECT_EQ(r.m.renewals(), 1) << "no renewal within 1.5 x arrive_m of the thing";
+    r.renew(0.1f, 1.0, 0.0);
+    r.step(0.5, 0, 0, 0, 0, 0);
+    EXPECT_EQ(r.m.renewals(), 1) << "a need under renew_min does not renew";
+    EXPECT_FLOAT_EQ(value(), 0.0f);
 }
