@@ -1655,6 +1655,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // the world pose the open cloud was anchored on, latched on the module's open edge: the
     // viewer's only way to place a body-anchored cloud beside the room.  Instrumentation.
     double cloud_anchor_wx = 0.0, cloud_anchor_wy = 0.0, cloud_anchor_wyaw = 0.0;
+    // the anchor of the cloud just FILED, for the replay payload: with the walking cloud a cloud files
+    // and the next opens on the same tick (no open edge), so the open cloud's latch must not be the
+    // filed cloud's pose (R70: every cloud after the first was drawn at the first one's pose, walls 45 deg off)
+    double cloud_filed_wx = 0.0, cloud_filed_wy = 0.0, cloud_filed_wyaw = 0.0;
     bool   cloud_was_open = false;
     auto end_stop_drive = [&](bool to_walker) {
         // the joint brain stops driving: freeze it, invalidate its pairing, and give the walker a
@@ -1724,7 +1728,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
             const bool now_open = brain.cloud_open();
-            if (now_open && !cloud_was_open) {
+            if (brain.cloud_just_closed()) { cloud_filed_wx = cloud_anchor_wx; cloud_filed_wy = cloud_anchor_wy; cloud_filed_wyaw = cloud_anchor_wyaw; }
+            if (now_open && (!cloud_was_open || brain.cloud_just_closed())) {
                 const auto wp = body.trunk_position();
                 const auto q = body.imu_quat();
                 cloud_anchor_wx = wp[0]; cloud_anchor_wy = wp[1];
@@ -2331,7 +2336,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::printf(",\"cloudv\":{\"place\":%d,\"voxel_m\":%.4f,\"revisit\":%.4f,\"revisit_dist\":%.4f,"
                             "\"anchor\":[%.4f,%.4f,%.4f],\"vox\":[",
                             brain.cloud_place(), brain.cloud_voxel_m(), brain.cloud_revisit(), brain.cloud_revisit_dist(),
-                            cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw);
+                            cloud_filed_wx, cloud_filed_wy, cloud_filed_wyaw);
                 for (size_t k = 0; k + 4 < vx.size(); k += 5)        // [ix, iy, iz, hits, mean height mm]
                     std::printf("%s[%d,%d,%d,%d,%d]", k ? "," : "", vx[k], vx[k + 1], vx[k + 2], vx[k + 3], vx[k + 4]);
                 std::printf("]}");

@@ -3793,3 +3793,83 @@ an exit reflex cannot change what the targets want. `REGRESSION` in this form; t
 loops', not the reflex's: a play value field in which a node at a wall stops being novel once the body has
 stood at it, and a seek need that does not hold a wall base (its vocabulary node knows the difference at
 purity 0.9). Both are the next levers on the walk, and both are the operator's call on design before a build.
+
+### 17.45 The operator's eye on R67r, R69 and R70: the interesting scale, the walk promoted, and the cloud that was drawn at one pose (2026-09-22)
+
+**What the operator saw.** R67r (the heading reflex): "the robot seems to be spending a lot of time staring at
+the walls"; earlier configs interacted with the small objects more, so a regression on the *interesting* scale
+if the numbers agree; the circling is gone. R69: good early interactions with the balls, some circling in a
+corner, wandering, then repeated interactions with the purple block from 1060 s. R70: the wall voxels in the
+viewer "rotated 45 degrees relative to the real walls". The rule they gave for the phase from here: any time
+the robot interacts with an object is interesting; wandering and looking get boring quickly; a wider
+vocabulary of behaviours is encouraged; the circling is mostly solved, so promote that and move on to object
+interactions and lingering in areas of interest with play that involves the whole body, not only reducing
+the map's error.
+
+**The instrument the eye asked for** (`cloud_objects.py where`): every stop by WHERE the body stands when it
+starts, at a small thing (within 0.6 m of a movable object's edge), at a wall (within 0.35 m of one), or on
+open floor, and the seconds of stop spent in each. Per seed, n = 6, 1500 s:
+
+| arm | stops at a thing | at a wall | open floor | stop-seconds at things / walls | thing/wall stops per seed |
+|---|---|---|---|---|---|
+| R65u (kick only) | 12.2 | 2.2 | 4.3 | 217 / 23 | 16/1 8/3 3/3 17/4 15/1 14/1 |
+| R67 (kick + peck) | 9.5 | 3.5 | 4.8 | 133 / 46 | 12/3 8/3 3/3 7/6 17/2 10/4 |
+| R67r (+ reflex) | 9.2 | 4.0 | 4.7 | 193 / 52 | **4/8** 12/2 22/1 11/0 **1/4** **5/9** |
+| R69 (commit_hold) | 9.3 | 3.8 | 4.7 | 125 / 79 | 16/3 5/2 1/8 7/7 15/1 12/2 |
+
+The means agree with nothing; the per-seed column agrees with the eye exactly. The reflex makes the walk
+*bimodal*: three seeds stand at things (22/1, 12/2, 11/0) and three at walls (4/8, 5/9, 1/4), and seed 1, the
+preset's seed, is a wall seed. The reflex follows its loops faithfully, and the loops' targets are, on half
+the seeds, play's novel nodes at walls (§17.44). The sweep's own columns say the same in aggregate: walls
+17.9 → 25.8 a minute (± 21), contact 1.9 → 4.6 %, objects moved 0.34 → 0.05 m, seek's share 28 → 22 %; the
+heading error 1.44 → 0.99 rad and the same 29 skills fired in each of the three arms. **The reflex:
+`PARTIAL`; not promoted.** Re-use context: once the loops' targets are things (the linger below), a reflex
+that follows them is what the eye wants.
+
+The peck cost something too: R65u stood at things 12.2 times a run for 217 s, R67 9.5 times for 133 s. A
+peck is 2.8 s of skill and the same unwind and look as a kick, so it is not the time; it is the second
+intent's second arrival at a thing that the walk does not make (§17.41: 31 requests a run against R65u's 27,
+but 13 pecks spread over 6 runs). Within the spread at n = 6, and the linger is the lever aimed at it.
+
+**Promoted: the walk with the mirror fixed** (`PlayLoop.heading_sign −1`, in every config since R63, with
+R48's step, the seek loop, the arrival stop, the skill runner from standing, the outcome loop with two
+intents and the unwind) — the R67 stack, as **`★ THINGS`**, the operator's call on the circling ("mostly
+solved"). What is NOT in it: the reflex, the reference unwrap, the free reference, the stuck stops, the escape,
+the progress stall, the walking cloud, the roll when down — all flags, all off. R69's corner circling is the
+residue §17.43 named (the yaw column, play's committed turn), unchanged by commit_hold (`NULL`, §17.42).
+
+**The rotated walls (R70) were the viewer's, not the odometry's.** The replay payload carries the world pose
+the cloud was anchored on, latched by the host on the module's *open edge* (cloud closed → open). With
+`walk_cloud` a cloud files and the next opens on the same tick, so there is no edge: the R70 record has 48
+clouds filed under ONE anchor, and the viewer drew every cloud after the first at the first one's pose, turned
+by whatever the body had turned since. The odometry itself was measured against the ground truth on the same
+logs: over 10 s windows of walking its displacement is 1.3° off in direction (IQR −3.4..+0.3°) at 0.92–0.94
+of the true length, its heading error is zero modulo a turn, and its position carries a fixed offset of about
+1 m acquired before the first stop (the babble). The fix latches on the file-and-reopen tick as well and emits
+the FILED cloud's anchor: R70 seed 1 rebuilt, 13 clouds, 13 anchors, each within 4 mm and 0.7° (max 7 mm,
+3.0°) of the body's pose on its open tick. The R46 guard is byte-identical (`cb24520c`, the pb/pl fields
+stripped): a config without the walking cloud never has a file-and-reopen tick. O55's sensor verdict stands;
+the operator's 45° was §2's "instrumentation" drawn wrong.
+
+**The next lever, written by the rewrite rule: the LINGER (R71).** The behaviour asked for is "stay at a thing
+and do things to it; leave when it is boring." The error it minimises already exists: the outcome loop's
+uncertainty about what each intent does to *this* thing (`SkillOutcomeLoop`, §17.40–17.41: per node × intent,
+unknown under `min_samples` outcomes or a spread above the known mean). Today that error is consulted once,
+at an arrival, and then the seek target is dropped and play's novel nodes carry the body to a wall. The
+lever hands it to the loop that owns the body's target:
+
+- `SkillOutcomeLoop.need_topic` publishes `[need, x, y]`: the share of intents whose answer for the last
+  attended thing is still unknown (1 before any answer, 1/2 once the kick's is known, 0 once both are), 0
+  while an outcome is in flight (the loop is looking, not asking), and the thing's fixed position.
+- `BearingSeekLoop.renew_topic` reads it: after an arrival has dropped the target (its zero for one tick IS
+  the arrival the outcome loop sees), a need above `renew_min` (0.25) at a position between 1.5 × `arrive_m`
+  and `renew_range` (2.0 m) re-arms the target there with confidence = need. The duck that backed off 0.45 m
+  after a kick and saw the thing again from its look stop walks back for the peck; the duck that knows both
+  answers is renewed by nothing, and play takes it away. Habituation and lingering are one rule.
+
+Both default off (empty topics): byte-identical. Tests: the need's ladder 1 → 0 → 1/2 → 0 (`test_skill_outcome_loop`,
+6 tests) and the renewal's four guards (`test_bearing_seek_loop`, 5 tests). Config `a1v2_r71_linger.json` =
+R67 + the two topics; preset R71 (seed 1). The prediction, at n = 6 against R67: more requests and more
+observed answers per run, more nodes known, stops at things up and stop-seconds at walls down, cells and
+walls within the spread; the failure mode to watch is a duck that shuttles between a thing and its look stop
+without the outcome ever being observed (need stuck at 1 with `unknown` climbing).

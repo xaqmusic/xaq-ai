@@ -1,6 +1,6 @@
 # Microduck: the things phase. Seeking what is smaller than itself, and being surprised when it answers
 
-Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, the kick cycle `WORKING` as a mechanism (§17.39–17.40), nothing promoted · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
+Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, the kick and peck cycle `WORKING` as a mechanism (§17.39–17.41); **`★ THINGS` = R67 promoted 2026-09-22** (the walk with the mirror fixed, the seek, the arrival stop, the skills from standing, the outcome loop) · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
 
 *The phase after the cloud ([`microduck_cloud_phase.md`](microduck_cloud_phase.md), `★ CLOUD` R56).
 The operator's direction, restated in the rewrite rule's terms, then the loops that read the voxels at
@@ -250,6 +250,15 @@ fixed; a second defect on the same line was found (the reference flips by 2π wh
 turned out to be the orbit's brake, not its cause: play's bearing rotates with the body (O56, open). The
 walking cloud is built and works as a sensor (O55); the loops above it need gating before it is a behaviour.
 The roll is not a get-up (11 falls, 0 rises).
+
+**The operator's eye, 2026-09-22 (design doc §17.45): `★ THINGS` = R67.** R67r stares at walls on half the
+seeds (the reflex follows its loops into play's wall nodes: seed 1 stops 4 at things / 8 at walls against
+R67's 12 / 3; `cloud_objects.py where`), `PARTIAL`, not promoted; R69's corner circling is §17.43's residue;
+R70's walls "rotated 45°" were the viewer's anchor (the host latched the cloud's world pose only on an open
+edge, and the walking cloud files and reopens on one tick: 48 clouds under one anchor), fixed, the odometry
+itself 1° and 0.93 of the truth per 10 s of walking. The circling is "mostly solved" by the operator's eye,
+so the R67 stack is promoted and the phase turns to what they asked for: interaction over wandering, a wider
+vocabulary of intents, and lingering where there is something to learn. First lever: R71, the linger.
 
 ## 8. Traps carried forward
 

@@ -23,6 +23,11 @@ compact stream drops the cloud records, qpos and joint positions.
       the things phase's T4: every STOP by how it started (the timer, or the seek loop's arrival), how far the nearest
       object was when it began, and whether the stop's cloud attended a real object and at what range -- did a reached
       thing get looked at
+  cloud_objects.py where LOG...
+      the operator's "interesting" scale (2026-09-22): every STOP by WHERE the body is when it starts -- at a small
+      thing (within 0.6 m of a movable object's edge), at a wall (within 0.35 m of one), or on open floor -- with
+      the seconds of stop spent in each, per seed.  A walk that stands at walls is boring; one that stands at
+      things is not.  Reads the full log (x, y, qpos, stop).
   cloud_objects.py things LOG...
       the things phase's T1 (microduck_things_phase.md): the MODULE's stack rule against this file's, cluster by
       cluster on the same filed clouds (faithfulness); what the ATTENDED thing really was, per tick ("thg", labelled
@@ -599,6 +604,51 @@ def cmd_heading(paths: list[str], control_from: float = 700.0) -> None:
 
 # ------------------------------------------------------------------------------------------------ stops
 
+def cmd_where(paths: list[str]) -> None:
+    """Every stop by where the body stands when it starts: at a thing, at a wall, or on open floor."""
+    half, lay, movable, _furniture = load_scene()
+
+    def classify(rec: dict) -> str:
+        x, y = rec["x"], rec["y"]
+        d_thing = min(math.hypot(x - ox, y - oy) - e for _k, ox, oy, e in objects_at(rec, lay, movable))
+        d_wall = half - max(abs(x), abs(y))
+        if d_thing < 0.6:
+            return "thing"
+        if d_wall < 0.35:
+            return "wall"
+        return "open"
+
+    keys = ("thing", "wall", "open")
+    per: list[tuple[str, dict, dict]] = []
+    for path in paths:
+        cnt = {k: 0 for k in keys}
+        secs = {k: 0.0 for k in keys}
+        prev, cls, t_prev = 0, None, None
+        with open(path) as fh:
+            for line in fh:
+                if '"stop":' not in line or '"qpos"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                s = rec.get("stop", 0)
+                if s and not prev:
+                    cls = classify(rec)
+                    cnt[cls] += 1
+                if s and cls and t_prev is not None:
+                    secs[cls] += rec["t"] - t_prev
+                prev, t_prev = s, rec["t"]
+        per.append((Path(path).stem, cnt, secs))
+    n = len(per) or 1
+    tot = {k: sum(c[k] for _s, c, _t in per) / n for k in keys}
+    tsec = {k: sum(t[k] for _s, _c, t in per) / n for k in keys}
+    print(f"{'log':34s} stops   thing  wall  open | stop-seconds  thing  wall  open")
+    for stem, c, t in per:
+        print(f"{stem:34s} {sum(c.values()):5d}   {c['thing']:5d} {c['wall']:5d} {c['open']:5d} | {t['thing']:12.0f} {t['wall']:5.0f} {t['open']:5.0f}")
+    print(f"{'mean per seed':34s} {sum(tot.values()):5.1f}   {tot['thing']:5.1f} {tot['wall']:5.1f} {tot['open']:5.1f} | {tsec['thing']:12.0f} {tsec['wall']:5.0f} {tsec['open']:5.0f}")
+
+
 def cmd_stops(paths: list[str]) -> None:
     half, lay, movable, furniture = load_scene()
     rows = []
@@ -660,6 +710,8 @@ def main() -> None:
     hd.add_argument("logs", nargs="+")
     sp = sub.add_parser("stops", help="every stop by how it started and what its cloud attended (things phase T4)")
     sp.add_argument("logs", nargs="+")
+    wh = sub.add_parser("where", help="every stop by where the body stands: at a thing, at a wall, or on open floor (the interesting scale)")
+    wh.add_argument("logs", nargs="+")
     sk = sub.add_parser("seek", help="every seek episode against the manifest (things phase T2)")
     sk.add_argument("logs", nargs="+")
     th = sub.add_parser("things", help="the module's things against the manifest and the offline rule (things phase T1)")
@@ -674,6 +726,8 @@ def main() -> None:
         cmd_seek(args.logs)
     elif args.cmd == "stops":
         cmd_stops(args.logs)
+    elif args.cmd == "where":
+        cmd_where(args.logs)
     elif args.cmd == "heading":
         cmd_heading(args.logs)
     else:
