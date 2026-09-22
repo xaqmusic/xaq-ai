@@ -66,6 +66,7 @@ ParamSchema SkillOutcomeLoop::params_schema() const {
         {"skill_left",       ParamMutability::ConstructionOnly, "The id of the left kick on the boundary.", ParamValue{int64_t{0}}},
         {"skill_right",      ParamMutability::ConstructionOnly, "The id of the right kick.", ParamValue{int64_t{1}}},
         {"peck_id",          ParamMutability::ConstructionOnly, "The id of the peck (Pollen's ground pick) on the boundary; -1 = the kick only.  With two intents the loop asks for the one whose answer for this thing it knows least (fewer outcomes, then the larger spread, then the one not tried last).", ParamValue{int64_t{-1}}},
+        {"push_id",          ParamMutability::ConstructionOnly, "The id of the push (the walker into the thing for a window) on the boundary; -1 = absent.  A third intent in the same least-known rule.", ParamValue{int64_t{-1}}},
     };
 }
 
@@ -78,7 +79,7 @@ ParamMap SkillOutcomeLoop::current_params() const {
     m["proximity_range"] = ParamValue{proximity_range_}; m["arrive_range"] = ParamValue{arrive_range_}; m["match_radius"] = ParamValue{match_radius_};
     m["min_samples"] = ParamValue{int64_t{min_samples_}}; m["observe_ticks"] = ParamValue{int64_t{observe_ticks_}}; m["min_conf_ticks"] = ParamValue{int64_t{min_conf_ticks_}};
     m["explore_gain"] = ParamValue{explore_gain_}; m["skill_left"] = ParamValue{int64_t{skill_left_}}; m["skill_right"] = ParamValue{int64_t{skill_right_}};
-    m["peck_id"] = ParamValue{int64_t{peck_id_}};
+    m["peck_id"] = ParamValue{int64_t{peck_id_}}; m["push_id"] = ParamValue{int64_t{push_id_}};
     return m;
 }
 
@@ -103,6 +104,8 @@ void SkillOutcomeLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "skill_left",       [&](auto const& v){ skill_left_ = int(get_double(v,"skill_left")); });
     apply_param(params, "skill_right",      [&](auto const& v){ skill_right_ = int(get_double(v,"skill_right")); });
     apply_param(params, "peck_id",          [&](auto const& v){ peck_id_ = int(get_double(v,"peck_id")); });
+    apply_param(params, "push_id",          [&](auto const& v){ push_id_ = int(get_double(v,"push_id")); });
+    last_intent_ = intents().back();
 }
 
 void SkillOutcomeLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -172,19 +175,30 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
     request_now_ = false;
     if (seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_) {
         const int nd = node_ < 0 ? 0 : node_;
-        // the intent whose answer for this thing is least known
-        int intent = 0;
-        if (peck_id_ >= 0) {
-            const Stat& k = stats_[key_of(nd, 0)]; const Stat& q = stats_[key_of(nd, 1)];
-            if (k.n != q.n) intent = k.n < q.n ? 0 : 1;
-            else if (std::fabs(std::sqrt(k.var()) - std::sqrt(q.var())) > 1e-9) intent = std::sqrt(k.var()) > std::sqrt(q.var()) ? 0 : 1;
-            else intent = 1 - last_intent_;
+        // the intent whose answer for this thing is least known: the fewest outcomes, then the largest
+        // spread, then one not tried last (the vocabulary cycles at a thing)
+        const auto avail = intents();
+        int intent = avail[0];
+        if (avail.size() > 1) {
+            auto n_of  = [&](int i) { auto it = stats_.find(key_of(nd, i)); return it == stats_.end() ? 0 : it->second.n; };
+            auto sd_of = [&](int i) { auto it = stats_.find(key_of(nd, i)); return it == stats_.end() ? 0.0 : std::sqrt(it->second.var()); };
+            int best_n = n_of(avail[0]); for (int i : avail) best_n = std::min(best_n, n_of(i));
+            std::vector<int> cand; for (int i : avail) if (n_of(i) == best_n) cand.push_back(i);
+            if (cand.size() > 1) {
+                double best_sd = -1.0; for (int i : cand) best_sd = std::max(best_sd, sd_of(i));
+                std::vector<int> c2; for (int i : cand) if (std::fabs(sd_of(i) - best_sd) <= 1e-9) c2.push_back(i);
+                cand = c2;
+            }
+            intent = cand[0];
+            // among ties, the one after the last asked in the cycle (the last starts as the vocabulary's end,
+            // so the first ask is its first intent, the kick)
+            for (size_t k = 0; k < cand.size(); ++k) if (cand[k] == last_intent_) { intent = cand[(k + 1) % cand.size()]; break; }
         }
         if (uncertain_at(nd, intent)) {
             // the side: the thing's bearing from the body now (+ left in the body frame => the left foot)
             const double dx = tx_ - px_, dy = ty_ - py_, c = std::cos(pyaw_), s = std::sin(pyaw_);
             const double by = -s * dx + c * dy;
-            request_id_ = intent == 1 ? peck_id_ : (by >= 0.0 ? skill_left_ : skill_right_);
+            request_id_ = intent == 1 ? peck_id_ : intent == 2 ? push_id_ : (by >= 0.0 ? skill_left_ : skill_right_);
             request_now_ = true; ++requests_; last_intent_ = intent; kintent_ = intent;
             pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; wait_ = 0; kicked_tick_ = tick_id;
         }
@@ -206,9 +220,9 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
     need_ = 0.0;
     if (seen_ && !pending_) {
         const int nd = node_ < 0 ? 0 : node_;
-        const int intents = peck_id_ >= 0 ? 2 : 1;
-        int open = 0; for (int i = 0; i < intents; ++i) if (uncertain_at(nd, i)) ++open;
-        need_ = double(open) / intents;
+        const auto avail = intents();
+        int open = 0; for (int i : avail) if (uncertain_at(nd, i)) ++open;
+        need_ = double(open) / double(avail.size());
     }
     if (!need_topic_.empty()) {
         auto nt = std::make_shared<ProprioToken>();
@@ -231,8 +245,8 @@ void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
     requests_ = s.value("requests", 0); observed_ = s.value("observed", 0); unknown_ = s.value("unknown", 0);
 }
 nlohmann::json SkillOutcomeLoop::diag_lite() const {
-    int pecks = 0; for (auto const& [k, s] : stats_) if (k % 2) pecks += s.n;
-    return nlohmann::json{{"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}, {"pending", pending_}, {"peck_outcomes", pecks},
+    int pecks = 0, pushes = 0; for (auto const& [k, s] : stats_) { if (k % kMaxIntents == 1) pecks += s.n; if (k % kMaxIntents == 2) pushes += s.n; }
+    return nlohmann::json{{"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}, {"pending", pending_}, {"peck_outcomes", pecks}, {"push_outcomes", pushes},
                           {"node", node_}, {"surprise", last_surprise_}, {"need", need_}, {"nodes_known", int(std::count_if(stats_.begin(), stats_.end(), [&](auto const& kv){ return kv.second.n >= min_samples_; }))}};
 }
 nlohmann::json SkillOutcomeLoop::diag_snapshot() const {

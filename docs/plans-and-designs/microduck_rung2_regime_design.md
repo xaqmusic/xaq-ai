@@ -3922,3 +3922,46 @@ leg the cloud attends as a thing, or to a dead-reckoned place the thing is not. 
 thing from standing, the walker's own intent at the boundary) is the one thing in the runtime that moves a
 thing every time it is pointed at one — the base walk moves objects 3.5 m a run by stumbling — and a thing
 that rolls beyond the match radius must count as an answer, not an unknown.
+
+### 17.46 The push: a third intent, and the vocabulary that cycles at a thing (R72, 2026-09-22)
+
+**The lever, by the rewrite rule.** The operator asked for a wider vocabulary of behaviours and for
+interaction over wandering. §17.45's diagnosis: the boundary's two intents mostly do not touch the thing (a
+kick from standing at 0.19 m moves it one time in five; 2 of 30 skills in R71a moved their thing by more than
+5 cm), so the outcome loop has nothing to learn from and the linger has nothing to hold. The one intent in the
+runtime that moves a thing every time it is pointed at one is the walk itself: the base run moves objects
+3.5 m a run by stumbling into them (§17.35's blind metric, read the other way). So the third intent is the
+robot's own `move`, from standing, into the thing: **the push**, a window of 1.2 s in which the walker is
+driven at 0.25 m/s forward (the walk's own scale and low-pass, the head as the walk holds it), then the same
+unwind and look as a kick. On the robot it is `move` for 1.2 s; on the host it is a skill with no network
+(`kSkills` entry `push`, `file = nullptr`, `push_vx`), id 4 on the boundary.
+
+The loop's rule generalises without a new rule: `SkillOutcomeLoop.push_id` (−1 = absent) adds a third row
+per thing node; the least-known choice is the fewest recorded outcomes, then the largest spread, then the one
+after the last asked in the cycle — kick, peck, push — so a duck at a new thing tries all three before it has
+an opinion, and the need (§17.45) counts the three. `key_of` is now `node × 4 + intent` (a saved outcome
+state from before this change does not restore meaningfully; none is promoted). Tests: 7 (the cycle at one
+thing, the need's fall to 0 after each is known twice, the habituation that follows). Config
+`a1v2_r72_push.json` = R71 + `push_id 4`, run with R71a's flags (the aim); preset R72, seed 1.
+
+Two things to read in the measurement: whether the push's answers are SEEN (a pushed ball may roll beyond
+the 0.6 m match radius — the `skills` instrument counts "rolled beyond the radius" separately from "not
+seen"), and the falls: a walker started from the R19 stand into a thing and stopped after 1.2 s is the step
+hand-off of R48 (`★ STACK · the step`) plus a contact.
+
+**R72 measured (n = 6, 1500 s, against R71a and R67).** Requests 46, skills fired 39 (kick 15, peck 13, push
+11; R71a 30), answers observed 16 of 39 (R71a 10 of 30, R67 13 of 29), renewals 26, nodes known 0. On the
+interesting scale the best arm so far: stops at things 12.0 a run (R67 9.5, R71a 10.5), stop-seconds at
+things 191 (133, 173), at walls 62 (46, 55); walls 15.7 a minute (17.9, 18.5); stands 39 % (29, 36); arrival
+stops 11.7 of 21 (8.0 of 17.8); cells 135 (142, 131); rescues 0.5 % (0.8, 0.5), nine over six runs. But the
+push did not reach either: 1 of 11 pushes moved its thing by more than 5 cm (the kicks 0 of 15, the pecks
+1 of 13), and 13 of the 39 skills fired with no movable thing within 0.5 m. **`PARTIAL` on the interesting
+scale (a consistent signal at n = 6 across R71a and R72: more stops at things, fewer at walls, more stands,
+within the spread), `NULL` on the intents' reach.** The `skills` instrument (`cloud_objects.py skills`)
+carries the split.
+Why the push does not reach: in its 1.2 s window the body travels 0.06 m (median over the 11; the walker
+started from the stand is still getting under way — the low-pass and the gait's first step), and only 5 of
+the 11 had the thing within 0.3 m and 30° at the start (three had no thing within a metre, two had it 51–61°
+to the side). The one push that answered (0.35 m, a ball at 0.07 m) is what the intent is for. Re-use
+context: a window long enough to walk the thing's distance (3 s ≈ 0.5 m) aimed at its bearing, fired only at
+a thing seen now within reach (O59).

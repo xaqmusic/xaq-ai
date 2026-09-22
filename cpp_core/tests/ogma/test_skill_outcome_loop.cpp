@@ -149,3 +149,29 @@ TEST(SkillOutcomeLoop, TheNeedIsTheUnknownIntentsShare) {
     ASSERT_EQ(r.m.observed(), 2);
     EXPECT_FLOAT_EQ(need(), 0.0f) << "both answered: nothing left to ask this thing";
 }
+
+// Three intents: the least-known rule cycles the vocabulary at one thing -- kick, then peck, then push
+// (fewest outcomes first, ties broken by the one after the last), and the need counts all three.
+TEST(SkillOutcomeLoop, ThreeIntentsAreCycledAtAThing) {
+    ogma::ParamMap p; p["peck_id"] = int64_t{3}; p["push_id"] = int64_t{4}; p["min_samples"] = int64_t{2}; p["explore_gain"] = 0.0;
+    p["need_topic"] = std::string("reality.cognitive.outcome_need");
+    Rig r(p);
+    std::vector<int> asked;
+    for (int k = 0; k < 6; ++k) {
+        r.see_then_arrive(7);
+        ASSERT_EQ(r.m.requests(), k + 1);
+        asked.push_back(r.request_id());
+        for (int i = 0; i < 40; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+        for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.9f, 7, 0.0f, 0.2f);   // seen again: an outcome
+        ASSERT_EQ(r.m.observed(), k + 1);
+        for (int i = 0; i < 10; ++i) r.step(0.8, 0, 0, 0, 0, 0, 7, 0.0f, 0.2f);
+    }
+    EXPECT_NE(asked[0], 3); EXPECT_NE(asked[0], 4);
+    EXPECT_EQ(asked[1], 3) << "the kick answered once: the peck";
+    EXPECT_EQ(asked[2], 4) << "the peck answered once: the push";
+    EXPECT_NE(asked[3], 3); EXPECT_NE(asked[3], 4);
+    auto need = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.outcome_need"))->values[0];
+    EXPECT_FLOAT_EQ(need, 0.0f) << "each of the three known twice: nothing left to ask";
+    r.see_then_arrive(7);
+    EXPECT_EQ(r.m.requests(), 6) << "a thing whose three answers are known is left alone";
+}

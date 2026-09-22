@@ -65,7 +65,8 @@ public:
     double last_surprise() const { return last_surprise_; }
     double need() const { return need_; }
     const std::unordered_map<int, Stat>& stats() const { return stats_; }
-    static int key_of(int node, int intent) { return node * 2 + intent; }   // intent 0 = kick, 1 = peck
+    static constexpr int kMaxIntents = 4;
+    static int key_of(int node, int intent) { return node * kMaxIntents + intent; }   // intent 0 = kick, 1 = peck, 2 = push
 
 private:
     std::string bearing_topic_ = "percept.thing_bearing";
@@ -87,7 +88,11 @@ private:
     // a second intent (the peck, Pollen's ground pick): -1 = the kick only.  With two, the loop asks for the
     // one whose answer for THIS thing it knows least -- fewer recorded outcomes, then the larger spread,
     // then the one it did not try last.  A creature that has kicked a block twice and never pecked it pecks.
-    int    peck_id_ = -1; int last_intent_ = 1;   // intent 0 = kick (either side), 1 = peck
+    int    peck_id_ = -1; int last_intent_ = 1;   // intent 0 = kick (either side), 1 = peck, 2 = push
+    // a third intent (the push: the walker into the thing, §17.46): -1 = absent.  The intents present are
+    // the vocabulary the least-known rule cycles through at each thing.
+    int    push_id_ = -1;
+    std::vector<int> intents() const { std::vector<int> v{0}; if (peck_id_ >= 0) v.push_back(1); if (push_id_ >= 0) v.push_back(2); return v; }
 
     // the thing as last seen: fixed position, node
     bool   seen_ = false; double tx_ = 0.0, ty_ = 0.0; int node_ = -1; int seen_run_ = 0;

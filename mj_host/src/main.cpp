@@ -1267,12 +1267,17 @@ double      g_skill_at_s = 0.0; std::string g_skill_at_name;
 // `period` (4 s), i.e. a 2.8 s window (robotd/src/control.rs; robotd-params DEFAULT_GROUND_PICK_END_PHASE).
 // Nothing is grasped in simulation (no MJCF has the mouth hinge); the operator's framing (2026-09-18):
 // the peck is another way to explore -- a reach-down, like a kick -- and the outcome loop chooses which.
-struct SkillDef { const char* name; const char* file; double duration_s; double phase_period_s; };
+// The PUSH (2026-09-22, §17.46): not a network but the walker with a forward command for a window -- the
+// robot's own `move` intent, from standing, into the thing.  The one intent in the runtime that moves a thing
+// every time it is pointed at one (the base walk moves objects 3.5 m a run by stumbling; a kick from standing
+// one time in five).  file = nullptr marks it; push_vx is its command.
+struct SkillDef { const char* name; const char* file; double duration_s; double phase_period_s; double push_vx; };
 constexpr SkillDef kSkills[] = {
-    {"kick_left",  "ball_kick_left.onnx",    0.5, 0.0},
-    {"kick_right", "ball_kick_right.onnx",   0.5, 0.0},
-    {"roulade",    "roulade.onnx",           1.0, 0.0},
-    {"peck",       "alpha_ground_pick.onnx", 2.8, 4.0},
+    {"kick_left",  "ball_kick_left.onnx",    0.5, 0.0, 0.0},
+    {"kick_right", "ball_kick_right.onnx",   0.5, 0.0, 0.0},
+    {"roulade",    "roulade.onnx",           1.0, 0.0, 0.0},
+    {"peck",       "alpha_ground_pick.onnx", 2.8, 4.0, 0.0},
+    {"push",       nullptr,                  1.2, 0.0, 0.25},
 };
 const SkillDef* skill_def(const std::string& n) {
     for (const auto& d : kSkills) if (n == d.name) return &d;
@@ -1505,16 +1510,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // the skill window (see g_skill_on_arrive): the network, loaded on first use; the window's own last action
     std::unique_ptr<Policy> skill_policy; std::string skill_policy_name;
     bool skill_active = false; int skill_left = 0, skill_total = 0; std::string skill_name; std::array<float, kActionLen> skill_last{};
-    double skill_phase_period = 0.0;
+    double skill_phase_period = 0.0; double skill_push_vx = 0.0;
     int skills_fired = 0, skills_requested = 0; bool skill_then_stop = false; std::string skill_pending;
     int unwind_left = 0, unwinds = 0; bool unwind_then_stop = false;
     int down_skills = 0, down_rises = 0; bool down_skill_running = false; int down_rise_watch = 0;
     const auto skill_start = [&](const std::string& name) {
         const SkillDef* d = skill_def(name);
         if (!d) return false;
-        if (skill_policy_name != name) { skill_policy = std::make_unique<Policy>(kModelDir + "/scaffolds/" + d->file); skill_policy_name = name; }
+        if (d->file && skill_policy_name != name) { skill_policy = std::make_unique<Policy>(kModelDir + "/scaffolds/" + d->file); skill_policy_name = name; }
         skill_active = true; skill_left = std::max(1, int(d->duration_s * kBrainHz)); skill_total = skill_left; skill_name = name; skill_last.fill(0.0f);
-        skill_phase_period = d->phase_period_s;
+        skill_phase_period = d->phase_period_s; skill_push_vx = d->file ? 0.0 : d->push_vx;
         ++skills_fired;
         return true;
     };
@@ -2151,6 +2156,21 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             scaffold_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i)
                 ctrl[i] = kHomePose[i] + kStandingActionScale * action[i];
+        } else if (skill_active && skill_push_vx > 0.0) {
+            // the PUSH's window: the walker, a forward command, exactly the walk's own drive (scale, low-pass)
+            Command pc{}; pc.twist = {skill_push_vx, 0.0, 0.0};
+            const auto action = walker.infer(build_observation(body, walker_last, pc));
+            walker_last = action;
+            for (int i = 0; i < kNumPolicyJoints; ++i) {
+                const double target = kHomePose[i] + kWalkingActionScale * action[i];
+                const double alpha = (i >= 5 && i <= 8) ? kWalkLowpassHead : kWalkLowpassLegs;
+                walk_targets[i] += alpha * (target - walk_targets[i]);
+                ctrl[i] = walk_targets[i];
+            }
+            if (head_owns_joints)
+                for (int i = 0; i < 4; ++i) { ctrl[5 + i] = head_targets[size_t(i)]; walk_targets[5 + i] = head_targets[size_t(i)]; }
+            if (skill_left > 0) --skill_left;
+            if (skill_left == 0 && stop_phase == StopPhase::Brain && stander) stander->on_reset();
         } else if (skill_active) {
             // a skill's window, from standing or from the walk: the network drives every joint at standing tuning;
             // a phase-driven skill (the peck) sees its phase in the twist slots, as the daemon feeds it

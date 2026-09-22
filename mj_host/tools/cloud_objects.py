@@ -28,6 +28,12 @@ compact stream drops the cloud records, qpos and joint positions.
       thing (within 0.6 m of a movable object's edge), at a wall (within 0.35 m of one), or on open floor -- with
       the seconds of stop spent in each, per seed.  A walk that stands at walls is boring; one that stands at
       things is not.  Reads the full log (x, y, qpos, stop).
+  cloud_objects.py skills LOG...
+      every SKILL fired (kick / peck / push, from the record's `skill` field) against the manifest: the nearest movable
+      thing at its start and that thing's true displacement 8 s later; whether the outcome loop observed an answer
+      within 36 s; and at the look stop after the unwind, the thing's range and bearing off the nose.  Splits the
+      unknown answers into "rolled beyond the match radius", "moved a little", "stayed", and "no thing within 0.5 m"
+      (a wall base or a leg the cloud attended as a thing, or a dead-reckoned arrival at a place the thing is not).
   cloud_objects.py things LOG...
       the things phase's T1 (microduck_things_phase.md): the MODULE's stack rule against this file's, cluster by
       cluster on the same filed clouds (faithfulness); what the ATTENDED thing really was, per tick ("thg", labelled
@@ -604,6 +610,71 @@ def cmd_heading(paths: list[str], control_from: float = 700.0) -> None:
 
 # ------------------------------------------------------------------------------------------------ stops
 
+def cmd_skills(paths: list[str]) -> None:
+    """Every skill fired against the manifest: did it reach, did the loop see the answer, and where was the thing at the look."""
+    half, lay, movable, _furniture = load_scene()
+
+    def yaw_of(q):
+        w, x, y, z = q
+        return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+
+    rows = []
+    for path in paths:
+        recs = [json.loads(l) for l in open(path) if l.startswith('{"t":')]
+        prev, i = "", 0
+        while i < len(recs):
+            r = recs[i]
+            sk = r.get("skill", "")
+            if sk and sk != prev:
+                x, y = r["x"], r["y"]
+                d, kind, ox, oy = min((math.hypot(x - ox, y - oy) - e, k, ox, oy) for k, ox, oy, e in objects_at(r, lay, movable))
+                j = i
+                while j < len(recs) and recs[j]["t"] < r["t"] + 8:
+                    j += 1
+                later = [(ox2, oy2) for k2, ox2, oy2, _e in objects_at(recs[min(j, len(recs) - 1)], lay, movable)
+                         if k2 == kind and math.hypot(ox2 - ox, oy2 - oy) < 1.5]
+                disp = min(math.hypot(ox2 - ox, oy2 - oy) for ox2, oy2 in later) if later else float("nan")
+                observed = any(recs[m].get("outc") and recs[m]["outc"][2] for m in range(i, min(len(recs), i + 1800)))
+                # the look stop: the first stop after the skill's window (and the stop that hosted it)
+                j = i
+                while j < len(recs) and recs[j].get("skill", "") == sk:
+                    j += 1
+                while j < len(recs) and recs[j].get("stop", 0):
+                    j += 1
+                while j < len(recs) and not recs[j].get("stop", 0) and recs[j]["t"] < r["t"] + 12:
+                    j += 1
+                rng = brg = float("nan")
+                if j < len(recs) and recs[j].get("stop", 0):
+                    s = recs[j]
+                    h = yaw_of(s["qpos"][3:7])
+                    _dd, _kk, tx, ty = min((math.hypot(s["x"] - ox2, s["y"] - oy2) - e2, k2, ox2, oy2)
+                                           for k2, ox2, oy2, e2 in objects_at(s, lay, movable) if k2 == kind)
+                    rng = math.hypot(tx - s["x"], ty - s["y"])
+                    brg = math.degrees((math.atan2(ty - s["y"], tx - s["x"]) - h + math.pi) % (2 * math.pi) - math.pi)
+                rows.append(dict(log=Path(path).stem, t=r["t"], skill=sk, kind=kind, d0=d, disp=disp, observed=observed, rng=rng, brg=brg))
+            prev = sk
+            i += 1
+    n = len(rows)
+    if not n:
+        print("no skills in these logs")
+        return
+    obs = [r for r in rows if r["observed"]]
+    unk = [r for r in rows if not r["observed"]]
+    far = [r for r in unk if r["d0"] > 0.5]
+    rolled = [r for r in unk if r["d0"] <= 0.5 and r["disp"] > 0.6]
+    little = [r for r in unk if r["d0"] <= 0.5 and 0.1 < r["disp"] <= 0.6]
+    stayed = [r for r in unk if r["d0"] <= 0.5 and r["disp"] <= 0.1]
+    by_skill = collections.Counter(r["skill"] for r in rows)
+    print(f"skills {n} ({', '.join(f'{k} {v}' for k, v in sorted(by_skill.items()))}); moved their thing > 5 cm: {sum(1 for r in rows if r['disp'] > 0.05)}"
+          f" ({', '.join(f'{k} {sum(1 for r in rows if r[chr(115)+chr(107)+chr(105)+chr(108)+chr(108)] == k and r[chr(100)+chr(105)+chr(115)+chr(112)] > 0.05)}/{v}' for k, v in sorted(by_skill.items()))})")
+    print(f"answers observed by the loop {len(obs)}; unknown {len(unk)} = no thing within 0.5 m {len(far)} + rolled beyond 0.6 m {len(rolled)} + moved 0.1-0.6 m {len(little)} + stayed {len(stayed)}")
+    for label, v in (("observed", obs), ("unknown", unk)):
+        vv = [r for r in v if not math.isnan(r["rng"])]
+        if vv:
+            print(f"  at the look stop, {label} (n={len(vv)}): thing range median {statistics.median(r['rng'] for r in vv):.2f} m, |bearing| median {statistics.median(abs(r['brg']) for r in vv):.0f} deg, beyond 35 deg {sum(1 for r in vv if abs(r['brg']) > 35)}")
+    print("  true displacement 8 s after a skill, median by skill: " + ", ".join(f"{k} {statistics.median(r['disp'] for r in rows if r['skill'] == k):.2f} m" for k in sorted(by_skill)))
+
+
 def cmd_where(paths: list[str]) -> None:
     """Every stop by where the body stands when it starts: at a thing, at a wall, or on open floor."""
     half, lay, movable, _furniture = load_scene()
@@ -710,6 +781,8 @@ def main() -> None:
     hd.add_argument("logs", nargs="+")
     sp = sub.add_parser("stops", help="every stop by how it started and what its cloud attended (things phase T4)")
     sp.add_argument("logs", nargs="+")
+    sl = sub.add_parser("skills", help="every skill fired against the manifest: reach, the answer seen or not, the thing at the look stop")
+    sl.add_argument("logs", nargs="+")
     wh = sub.add_parser("where", help="every stop by where the body stands: at a thing, at a wall, or on open floor (the interesting scale)")
     wh.add_argument("logs", nargs="+")
     sk = sub.add_parser("seek", help="every seek episode against the manifest (things phase T2)")
@@ -728,6 +801,8 @@ def main() -> None:
         cmd_stops(args.logs)
     elif args.cmd == "where":
         cmd_where(args.logs)
+    elif args.cmd == "skills":
+        cmd_skills(args.logs)
     elif args.cmd == "heading":
         cmd_heading(args.logs)
     else:
