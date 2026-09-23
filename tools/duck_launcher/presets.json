@@ -1637,5 +1637,53 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R75 · FIRE AT WHAT YOU SEE: an arrival only arms the outcome loop; the kick, peck or push goes out when the thing is seen live within 0.5 m and ahead, from standing at the stop",
+  "series": 75,
+  "hint": "MEASURED n=6 (design doc §17.48): the gate STARVES -- 2 skills in six runs, 29 misses: at an arrival stop the reached thing (0.19 m) is below the level gaze; the cloud attends something within 0.5 m on 3 of 49 arrival stops. Both skills fired were seen and answered. NULL as a behaviour in this form; the sighting gate opens to 1 m in R76 with the push that walks the distance.",
+  "state": {
+   "config": "a1v2_r75_reach.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R76 · the intent that REACHES: a sighting within 1 m arms the loop; within 0.35 m the kick, peck and push cycle, beyond it only the push, whose window walks the seen distance with its nose on the thing",
+  "series": 76,
+  "hint": "MEASURED n=6 (design doc §17.48): 9 skills in six runs, all pushes; answers observed 7 of 9 (the best rate of the phase) and the first node KNOWN; but stops at things 12.0 -> 7.0 a run (REGRESSION on interest), pushes travel 0.10 m in 1.5 s windows and the two 5 s ones end ON the thing without moving it (the walker stops at contact); 2 of 9 moved their thing. PARTIAL on learning, NULL on reach. WATCH (seed 1: pushes at 616 s and 736 s). The blocker under O59 is the gaze at the reached thing (O36).",
+  "state": {
+   "config": "a1v2_r76_reachpush.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --push-reach 0.25 5.0",
+   "fast_until": 600
+  }
  }
 ]

@@ -4042,3 +4042,47 @@ own caveat), and the target follows each. Re-use context: a re-fix that must be 
 within the sweep's ±0.6 rad of the nose, at a radius under 0.25 m, in the last metre only — or the honest
 form, a live bearing that competes with the remembered one by precision, as the voter fuses. Kept off; the
 stop-end fix stays (it is what any walking cloud needs).
+
+### 17.48 O59: fire at what you see, and the intent that reaches (R75, R76, 2026-09-23)
+
+**The two levers, on the operator's "proceed".** (a) `SkillOutcomeLoop.reach_m`: an arrival only ARMS the
+loop (for `armed_ticks`); the request goes out on the first tick the thing's bearing is live within reach and
+ahead (forward cosine ≥ `reach_cos`), and a window that lapses is a *miss*, counted. The host honours a
+request that arrives mid-stop from standing at once (the same `skill:stand` as the deferred path). (b) The
+push that reaches: `--push-reach VX MAX_S` sizes the push's window to the seen distance, (range + 0.15 m) / VX
+between 0.6 s and MAX_S, from the need topic's position, and keeps the nose on the thing with the unwind aim's
+gain; and `reach_short_m` lets a kick or a peck be asked for only within that range, the push alone beyond it.
+A/B on R72 (the promoted stack + push), R71a's flags.
+
+**R75 (reach 0.5 m, n = 6): the gate starves.** Two skills in six runs (R72: 39), 29 misses; both fired were
+seen and answered (0.29 m, moved 0). The reason, from the record: at the 49 arrival stops the reached thing
+was within 0.5 m on 40 (0.19 m median), and the cloud attended something within 0.5 m on 3 — the reached
+thing sits below the level gaze (T3, §17.40) and what the sweep attends is 0.93 m away. Stops at things 12.0
+→ 9.3 a run but stop-seconds at things 191 → 238 (the armed stops run their 30 s), walls 15.7 → 14.2, cells
+135 → 112. **`NULL` as a behaviour in this form: the rule is right and the gaze cannot feed it at 0.2 m.**
+The re-use is exactly R76: open the sighting gate to what the gaze CAN see (1 m) and let only the intent that
+walks the distance answer beyond a kick's reach.
+
+**R76 measured (reach 1 m, the push that walks the distance; n = 6, against R72).** Nine skills in six runs,
+all pushes (R72: 39); answers observed 7 of 9 — the best rate of the phase (R72 16 of 39) — and the first
+node ever KNOWN (seed 1: two pushes on one block, both seen); misses 15 of 24 armings. On the interesting
+scale a cost: stops at things 12.0 → 7.0 a run, stop-seconds at things 191 → 158; walls 15.7 → 12.3 a minute,
+stands 39 → 43 %, cells and rescues tie. The pushes: six of nine had a 1.5 s window (the need position 0.25 m
+off) and travelled 0.10–0.13 m — the walker started from the stand moves at 0.07 m/s over its first two
+seconds — and the two 5 s windows travelled 0.36–0.38 m and ENDED ON the thing (0.01 and 0.06 m) without
+moving it (0.05, 0.00 m): the walker stops at the contact rather than pushing through. Two of nine moved
+their thing (a ball at 0.26 m, 0.19 m; the block, 0.05 m). And at the arrival stops themselves the cloud
+attended something within 1 m and ahead on 2 of 33 — the pushes fired from later sightings, not from the
+arrival. **`PARTIAL` on learning (the answers are honest when the rule fires), `REGRESSION` on the interesting
+scale, `NULL` on reach.** Not promoted; preset R76 for the eye.
+
+**What O59 taught, for the phase.** Every rule that fires at what the duck sees starves on the same fact: at
+a stop the level gaze does not see the thing the duck has walked to (0.19 m away, 45° under the beak; T3,
+§17.40), and what it does see is 0.9 m off. The kick and the peck cannot reach what the gaze can see, and the
+push that could is a walker that needs two seconds to get going and stops at contact. The lever under all of
+this is not another intent rule but the gaze at the reached thing — the pitch that T3 tried and the stand
+refused (rescues ×4) — which is O36: a stand that tolerates the head's pitch. That is the design decision for
+the operator before more intent levers: (a) O36 first (the stander with the head pitched down at arrival
+stops), then O59's rules as built; or (b) a push that pushes — a longer window at the walk's own speed and a
+contact rule that keeps driving through the thing — measured on its own with the roll and the other spice
+already in hand.

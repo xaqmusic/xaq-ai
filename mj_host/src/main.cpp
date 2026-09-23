@@ -1262,7 +1262,11 @@ double g_skill_unwind_aim = 0.0;
 // body's own odometry: over the last SECS of walking the heading turned more than TURNS full turns while the
 // dead-reckoned position moved less than NET metres.  The response is a skill by name at the boundary (the
 // roulade: a novel orientation), at most one per 30 s.  Off = byte-identical.
-std::string g_spin_skill; double g_spin_turns = 1.0, g_spin_net = 0.5, g_spin_secs = 20.0;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
+std::string g_spin_skill; double g_spin_turns = 1.0, g_spin_net = 0.5, g_spin_secs = 20.0;
+// --push-reach VX MAX_S (O59, §17.48): the push's window walks the SEEN distance -- (range + 0.15 m) / VX seconds,
+// between 0.6 s and MAX_S, from the outcome loop's need topic position -- and its yaw keeps the nose on the
+// thing (the unwind aim's gain).  R72's 1.2 s push at 0.25 m/s travelled 0.06 m.  Off = the table's window.
+double g_push_vx = 0.0, g_push_max_s = 0.0;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
 // --skill-when-down NAME (2026-09-19, the roulade experiment): when the recovery declares the body DOWN, fire
 // the named skill first (its window drives the joints instead of the scaffold); if the body is not upright
 // when the window ends, the scaffold's rescue continues as before.  Counts rises inside the window.
@@ -1447,6 +1451,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_skill_unwind_s > 0.0) std::fprintf(stderr, "  skill unwind: after a skill at a stop the body backs off at %.2f for %.1f s, then stops to look\n", g_skill_unwind_vx, g_skill_unwind_s);
     if (g_skill_unwind_aim > 0.0 && g_skill_unwind_s <= 0.0) throw std::runtime_error("--skill-unwind-aim needs --skill-unwind (the unwind it aims)");
     if (!g_spin_skill.empty() && !skill_def(g_spin_skill)) throw std::runtime_error("--skill-on-spin: unknown skill " + g_spin_skill);
+    if (g_push_vx > 0.0) std::fprintf(stderr, "  push reach: the push walks the seen distance at %.2f m/s (window (range + 0.15) / vx, 0.6 to %.1f s) with its nose on the thing\n", g_push_vx, g_push_max_s);
     if (!g_spin_skill.empty()) std::fprintf(stderr, "  skill on spin: %s when the heading turns more than %.1f turns in %.0f s of walking with under %.2f m of travel (at most one per 30 s)\n", g_spin_skill.c_str(), g_spin_turns, g_spin_secs, g_spin_net);
     if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: the unwind's yaw keeps the nose on the kicked thing (gain %.2f on its bearing) and the look stop's sweep is centred on it\n", g_skill_unwind_aim);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
@@ -1528,6 +1533,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (d->file && skill_policy_name != name) { skill_policy = std::make_unique<Policy>(kModelDir + "/scaffolds/" + d->file); skill_policy_name = name; }
         skill_active = true; skill_left = std::max(1, int(d->duration_s * kBrainHz)); skill_total = skill_left; skill_name = name; skill_last.fill(0.0f);
         skill_phase_period = d->phase_period_s; skill_push_vx = d->file ? 0.0 : d->push_vx;
+        if (!d->file && g_push_vx > 0.0) {
+            skill_push_vx = g_push_vx;
+            const double secs = brain.thing_pos_present() ? std::clamp((brain.thing_range() + 0.15) / g_push_vx, 0.6, g_push_max_s) : d->duration_s;
+            skill_left = std::max(1, int(secs * kBrainHz)); skill_total = skill_left;
+        }
         ++skills_fired;
         return true;
     };
@@ -1873,6 +1883,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         }
                     }
                 } else if (stop_phase == StopPhase::Brain) {
+                    // a module's request DURING the stop (SkillOutcomeLoop.reach_m: it asks when it sees the thing within
+                    // reach, which is at a stop): the skill starts from standing at once, as a deferred one does
+                    if (!skill_active && unwind_left == 0) {
+                        const int req = brain.skill_request();
+                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; }
+                    }
                     double sig = lean, thresh = g_stop.handoff_lean;
                     if (g_stop.handoff_att > 0.0) {
                         sig = 0.0; for (double v : stander->attitude_error()) sig = std::max(sig, v);
@@ -2188,6 +2204,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         } else if (skill_active && skill_push_vx > 0.0) {
             // the PUSH's window: the walker, a forward command, exactly the walk's own drive (scale, low-pass)
             Command pc{}; pc.twist = {skill_push_vx, 0.0, 0.0};
+            if (g_push_vx > 0.0 && g_skill_unwind_aim > 0.0 && brain.thing_pos_present())
+                pc.twist[2] = std::clamp(-g_skill_unwind_aim * brain.thing_ego(), -1.0, 1.0);   // the nose on the thing
             const auto action = walker.infer(build_observation(body, walker_last, pc));
             walker_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i) {
@@ -2794,6 +2812,8 @@ int main(int argc, char** argv) {
         } else if (a == "--skill-when-down") {
             g_skill_when_down = next("--skill-when-down");
             if (!skill_def(g_skill_when_down)) throw std::runtime_error("--skill-when-down: unknown skill " + g_skill_when_down);
+        } else if (a == "--push-reach") {
+            g_push_vx = std::stod(next("--push-reach")); g_push_max_s = std::stod(next("--push-reach"));
         } else if (a == "--skill-on-spin") {
             g_spin_skill = next("--skill-on-spin"); g_spin_turns = std::stod(next("--skill-on-spin")); g_spin_net = std::stod(next("--skill-on-spin")); g_spin_secs = std::stod(next("--skill-on-spin"));
         } else if (a == "--skill-unwind-aim") {

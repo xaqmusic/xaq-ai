@@ -66,6 +66,10 @@ ParamSchema SkillOutcomeLoop::params_schema() const {
         {"skill_left",       ParamMutability::ConstructionOnly, "The id of the left kick on the boundary.", ParamValue{int64_t{0}}},
         {"skill_right",      ParamMutability::ConstructionOnly, "The id of the right kick.", ParamValue{int64_t{1}}},
         {"peck_id",          ParamMutability::ConstructionOnly, "The id of the peck (Pollen's ground pick) on the boundary; -1 = the kick only.  With two intents the loop asks for the one whose answer for this thing it knows least (fewer outcomes, then the larger spread, then the one not tried last).", ParamValue{int64_t{-1}}},
+        {"reach_m",          ParamMutability::HotMutable, "Fire at what you see: an arrival only arms the loop; the request goes out when the thing's bearing is live within this range (metres) and ahead. 0 = request on the arrival tick.", ParamValue{0.0}},
+        {"reach_short_m",    ParamMutability::HotMutable, "With reach_m: a kick or a peck is asked for only when the sighting is within this range; beyond it only the push (if present).", ParamValue{0.35}},
+        {"reach_cos",        ParamMutability::HotMutable, "The bearing's forward component (cosine) a live sighting needs to count as ahead.", ParamValue{0.7}},
+        {"armed_ticks",      ParamMutability::HotMutable, "How long after an arrival the loop stays armed for a sighting within reach (a miss is counted when it lapses).", ParamValue{int64_t{1500}}},
         {"push_id",          ParamMutability::ConstructionOnly, "The id of the push (the walker into the thing for a window) on the boundary; -1 = absent.  A third intent in the same least-known rule.", ParamValue{int64_t{-1}}},
     };
 }
@@ -80,6 +84,8 @@ ParamMap SkillOutcomeLoop::current_params() const {
     m["min_samples"] = ParamValue{int64_t{min_samples_}}; m["observe_ticks"] = ParamValue{int64_t{observe_ticks_}}; m["min_conf_ticks"] = ParamValue{int64_t{min_conf_ticks_}};
     m["explore_gain"] = ParamValue{explore_gain_}; m["skill_left"] = ParamValue{int64_t{skill_left_}}; m["skill_right"] = ParamValue{int64_t{skill_right_}};
     m["peck_id"] = ParamValue{int64_t{peck_id_}}; m["push_id"] = ParamValue{int64_t{push_id_}};
+    m["reach_m"] = ParamValue{reach_m_}; m["reach_cos"] = ParamValue{reach_cos_}; m["armed_ticks"] = ParamValue{int64_t{armed_ticks_}};
+    m["reach_short_m"] = ParamValue{reach_short_m_};
     return m;
 }
 
@@ -105,6 +111,10 @@ void SkillOutcomeLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "skill_right",      [&](auto const& v){ skill_right_ = int(get_double(v,"skill_right")); });
     apply_param(params, "peck_id",          [&](auto const& v){ peck_id_ = int(get_double(v,"peck_id")); });
     apply_param(params, "push_id",          [&](auto const& v){ push_id_ = int(get_double(v,"push_id")); });
+    apply_param(params, "reach_m",          [&](auto const& v){ reach_m_ = get_double(v,"reach_m"); });
+    apply_param(params, "reach_cos",        [&](auto const& v){ reach_cos_ = get_double(v,"reach_cos"); });
+    apply_param(params, "reach_short_m",    [&](auto const& v){ reach_short_m_ = get_double(v,"reach_short_m"); });
+    apply_param(params, "armed_ticks",      [&](auto const& v){ armed_ticks_ = int(get_double(v,"armed_ticks")); });
     last_intent_ = intents().back();
 }
 
@@ -117,6 +127,10 @@ void SkillOutcomeLoop::on_param_change(std::string_view key, ParamValue const& v
     else if (k == "observe_ticks")   observe_ticks_ = int(get_double(value, k));
     else if (k == "min_conf_ticks")  min_conf_ticks_ = int(get_double(value, k));
     else if (k == "explore_gain")    explore_gain_ = get_double(value, k);
+    else if (k == "reach_m")         reach_m_ = get_double(value, k);
+    else if (k == "reach_cos")       reach_cos_ = get_double(value, k);
+    else if (k == "reach_short_m")   reach_short_m_ = get_double(value, k);
+    else if (k == "armed_ticks")     armed_ticks_ = int(get_double(value, k));
     else throw std::invalid_argument("SkillOutcomeLoop: param '" + k + "' is construction-only / unknown");
 }
 
@@ -171,13 +185,18 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
         return st.n < min_samples_ || (explore_gain_ > 0.0 && std::sqrt(st.var()) > explore_gain_ * mean_sd);
     };
 
-    // the arrival: the seek need falls to 0 with the range under arrive_range -- kick if the answer is uncertain
+    // the ask: the least-known intent for this thing's node, if its answer is still uncertain
     request_now_ = false;
-    if (seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_) {
+    const auto ask = [&](uint64_t now, double range_seen) {
         const int nd = node_ < 0 ? 0 : node_;
         // the intent whose answer for this thing is least known: the fewest outcomes, then the largest
         // spread, then one not tried last (the vocabulary cycles at a thing)
-        const auto avail = intents();
+        auto avail = intents();
+        if (range_seen > reach_short_m_) {                                  // beyond a kick's reach: only the push
+            std::vector<int> far; for (int i : avail) if (i == 2) far.push_back(i);
+            avail = far;
+        }
+        if (avail.empty()) return;
         int intent = avail[0];
         if (avail.size() > 1) {
             auto n_of  = [&](int i) { auto it = stats_.find(key_of(nd, i)); return it == stats_.end() ? 0 : it->second.n; };
@@ -200,7 +219,23 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
             const double by = -s * dx + c * dy;
             request_id_ = intent == 1 ? peck_id_ : intent == 2 ? push_id_ : (by >= 0.0 ? skill_left_ : skill_right_);
             request_now_ = true; ++requests_; last_intent_ = intent; kintent_ = intent;
-            pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; wait_ = 0; kicked_tick_ = tick_id;
+            pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; wait_ = 0; kicked_tick_ = now;
+        }
+    };
+    // the arrival: the seek need falls to 0 with the range under arrive_range
+    const bool arrival = seek_prev_ > 0.0f && seek_v == 0.0f && seek_r < arrive_range_ && seen_ && !pending_;
+    if (reach_m_ <= 0.0) {
+        if (arrival) ask(tick_id, 0.0);                                // the old rule: ask on the arrival tick
+    } else {
+        if (arrival) armed_left_ = armed_ticks_;                       // fire at what you see: arm, then wait for a sighting within reach
+        if (armed_left_ > 0) {
+            --armed_left_;
+            if (fixed && !pending_) {
+                const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
+                const double range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
+                if (range <= reach_m_ && vy / n >= reach_cos_) { ask(tick_id, range); armed_left_ = 0; }
+            }
+            if (armed_left_ == 0 && !request_now_) ++misses_;
         }
     }
     seek_prev_ = seek_v;
@@ -246,7 +281,7 @@ void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json SkillOutcomeLoop::diag_lite() const {
     int pecks = 0, pushes = 0; for (auto const& [k, s] : stats_) { if (k % kMaxIntents == 1) pecks += s.n; if (k % kMaxIntents == 2) pushes += s.n; }
-    return nlohmann::json{{"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}, {"pending", pending_}, {"peck_outcomes", pecks}, {"push_outcomes", pushes},
+    return nlohmann::json{{"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}, {"pending", pending_}, {"peck_outcomes", pecks}, {"push_outcomes", pushes}, {"misses", misses_}, {"armed", armed_left_ > 0},
                           {"node", node_}, {"surprise", last_surprise_}, {"need", need_}, {"nodes_known", int(std::count_if(stats_.begin(), stats_.end(), [&](auto const& kv){ return kv.second.n >= min_samples_; }))}};
 }
 nlohmann::json SkillOutcomeLoop::diag_snapshot() const {

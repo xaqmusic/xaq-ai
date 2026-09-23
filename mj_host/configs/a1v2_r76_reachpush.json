@@ -1,0 +1,379 @@
+{
+  "metadata": {
+    "name": "R76 \u00b7 the intent that REACHES: a sighting within 1 m arms the loop; within 0.35 m the kick, peck and push cycle, beyond it only the push, whose window walks the seen distance with its nose on the thing",
+    "description": "R27 (2026-09-06): R26 + the Cell's PlayLoop reading the map EPM (reality.proprio.place) with the adapter's new heading/vel_ego topics; its egocentric bearing becomes the heading reference behind sense slot 10 every tick (IntentAdapter, by presence of percept.play_bearing). The bearing to the least-visited region as a learned direction: the (d) moved wall should now be re-explored (map nodes rise after the shift) and the R26 orbit seeds should tour. Measured with l2_sweep against R26.",
+    "env_target": "microduck",
+    "phase_tag": "things phase, O54",
+    "launcher_rank": 1076,
+    "scaffolds_active": [
+      "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
+    ]
+  },
+  "version": 1,
+  "runtime": {
+    "thread_pool": "per_instance",
+    "num_threads": 0
+  },
+  "modules": [
+    {
+      "id": "twist_bridge",
+      "type": "JointSensorimotorBridge",
+      "params": {
+        "proprio_input_topic": "reality.proprio.intent",
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "output_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "proprio_indices": [
+          0.0,
+          1.0,
+          2.0
+        ],
+        "group_size": 3,
+        "sensor_label_prefix": "motor_limb",
+        "load_topic": "reality.proprio.sense",
+        "load_slots": 16
+      }
+    },
+    {
+      "id": "motor_epm_intent",
+      "type": "MotorEPMv2",
+      "params": {
+        "proprio_topics": [
+          "reality.motor_limb.twist"
+        ],
+        "action_topics": [
+          "action.vx",
+          "action.vy",
+          "action.vyaw"
+        ],
+        "n_legs": 1,
+        "motor_dim": 3,
+        "model_lr": 0.02,
+        "ctrl_lr": 0.0,
+        "bias_lr": 0.0,
+        "reg_eps": 0.01,
+        "max_dctrl": 0.05,
+        "init_scale": 0.01,
+        "seed": 9090,
+        "babble_ticks": 30000,
+        "babble_scale": 0.8,
+        "babble_isolate": 1.0,
+        "babble_hold": 75,
+        "babble_owns_a": 0,
+        "sat_lr": 0.0,
+        "c_init": 1.0,
+        "motor_gain": 1.0,
+        "explore_noise": 0.02,
+        "coupling_gain": 0.0,
+        "stroke_gain": 0.0,
+        "balance_gain": 0.0,
+        "heading_gain": 0.0,
+        "nav_gain": 0.0,
+        "postural_gain": 0.0,
+        "amp_homeo_gain": 0.0,
+        "height_homeo_gain": 0.0,
+        "coord_reward_drive": 0.0,
+        "panic_strength": 0.0,
+        "imu_topic": "reality.proprio.imu",
+        "state_model_lr": 0.05,
+        "model_trace": 0.05,
+        "reset_breaks_model_pairing": 1.0,
+        "state_prior_gain": 1.0,
+        "consolidate_gain": 0.0,
+        "state_prior_indices": [
+          0,
+          -6,
+          -4,
+          -3,
+          -2
+        ],
+        "state_prior_targets": [
+          0.75,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "state_prior_lr": 0.1,
+        "consolidate_n": 0,
+        "state_prior_step_gain": 1.0
+      }
+    },
+    {
+      "id": "map_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "proprio",
+        "modality_name": "place",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.place_in",
+        "proprio_state_dims": 13,
+        "dim_min": [
+          -0.6,
+          -0.6,
+          -1.0,
+          -1.0,
+          -1.0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "dim_max": [
+          0.6,
+          0.6,
+          1.0,
+          1.0,
+          1.0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "max_nodes": 128,
+        "master_seed": 4343,
+        "process_every_n_ticks": 5,
+        "mitosis_error_threshold": 0.1,
+        "health_death_spares_baked": true,
+        "min_insertion_error": 0.06,
+        "baking_threshold": 20
+      }
+    },
+    {
+      "id": "play",
+      "type": "PlayLoop",
+      "params": {
+        "place_topic": "reality.proprio.place",
+        "heading_topic": "reality.proprio.heading",
+        "vel_topic": "reality.proprio.vel_ego",
+        "output_topic": "percept.play_bearing",
+        "play_value_topic": "reality.cognitive.play_value",
+        "pi_cell_size": 0.0,
+        "wander_stall_ticks": 0,
+        "frontier_bias": 0.0,
+        "novelty_source": "tle",
+        "explore_seed": 11,
+        "_comment": "R27 (\u00a717.3 fork (a)): the Cell's play loop over the duck's map vocabulary -- the node is the map EPM's winner (pi_cell_size 0), the value field is the place TLE, the climb is the bearing to the most novel reachable node (wander_stall_ticks 0: the Cell's A2, so the climb engages). Its bearing sets the adapter's heading reference (sense slot 10); the heading prior turns the body. The loop the Cell dropped is the loop the duck wants: coverage is its goal.",
+        "heading_sign": -1
+      }
+    },
+    {
+      "id": "cloud",
+      "type": "CloudMap",
+      "params": {
+        "input_topic": "reality.proprio.tof_points",
+        "place_topic": "reality.proprio.place",
+        "output_topic": "reality.proprio.cloud",
+        "change_topic": "percept.cloud_change",
+        "voxel_m": 0.04,
+        "break_lo": 0.02,
+        "break_hi": 0.2,
+        "half_fov": 40.0,
+        "max_range": 2.5,
+        "still_ticks": 25,
+        "cache_size": 8,
+        "new_window_ticks": 50,
+        "_comment": "The sweep's cloud, opened by the body's own stillness and cached by the map's place (\u00a717.28-17.29). A small object is sub-pixel in one cast and tens of points in a sweep, so this is the level at which one exists. T1 (2026-09-15): the stack rule (\u00a717.31) runs in the module on the open cloud; the nearest SMALL cluster is attended, its world-sized descriptor goes to the thing EPM and its body-frame bearing to percept.thing_bearing (VisualBearing's shape). Nothing consumes the bearing yet: T1 is passive.",
+        "things_topic": "reality.proprio.thing",
+        "thing_bearing_topic": "percept.thing_bearing",
+        "small_top": 0.16,
+        "small_ext": 0.2,
+        "gap_min": 0.1,
+        "gap_k": 0.12,
+        "things_range": 0.0,
+        "things_every": 4,
+        "small_ext_min": 0.08
+      }
+    },
+    {
+      "id": "object_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "cognitive",
+        "modality_name": "object",
+        "encoder_kind": "jl_state",
+        "input_topic": "reality.proprio.cloud",
+        "proprio_state_dims": 36,
+        "projection_dim": 104,
+        "baking_threshold": 20,
+        "min_insertion_error": 0.06,
+        "max_nodes": 128,
+        "master_seed": 4646,
+        "_comment": "The object vocabulary, over the CLOUD's reduction rather than a single frame. Measured (\u00a717.29): 16 nodes all baked, 7 winner switches a minute against a place map's 60-130, and 98 % of the object information that survives knowing the body's pose (a raw 8x8 frame gets 55 %)."
+      }
+    },
+    {
+      "id": "thing_epm",
+      "type": "EPM",
+      "params": {
+        "modality_group": "cognitive",
+        "modality_name": "thing",
+        "encoder_kind": "rbf",
+        "input_topic": "reality.proprio.thing",
+        "proprio_state_dims": 8,
+        "dim_min": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "dim_max": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "max_nodes": 64,
+        "master_seed": 4747,
+        "baking_threshold": 20,
+        "min_insertion_error": 0.06,
+        "health_death_spares_baked": true,
+        "_comment": "The vocabulary of THINGS (things phase T1): one token per tick while a small cluster is attended, [top, footprint, aspect, columns, hits per column, chain, range, lowest height], world-sized and without a bearing. Its transition term measures the attended thing's stability from one recompute to the next, which is the precision an approach would raise; its TLE at the attended thing is the pull T2 will use."
+      }
+    },
+    {
+      "id": "seek",
+      "type": "BearingSeekLoop",
+      "params": {
+        "bearing_topic": "percept.thing_bearing",
+        "pose_topic": "reality.proprio.odom",
+        "output_topic": "percept.seek_bearing",
+        "value_topic": "reality.cognitive.seek_value",
+        "range_topic": "reality.cognitive.seek_range",
+        "proximity_range": 2.5,
+        "min_conf": 0.02,
+        "arrive_m": 0.25,
+        "forget_ticks": 3000.0,
+        "floor": 0.05,
+        "_comment": "T2: the seek loop. While CloudMap attends a small thing (at a stop) the loop fixes its position by dead reckoning; when the cloud closes and the body walks it homes to that position, re-aiming as the body turns, and drops it on arrival (0.25 m) or after ~60 s. Its need is the confidence in the held target; its honest signal the range left.",
+        "renew_topic": "reality.cognitive.outcome_need",
+        "renew_min": 0.25,
+        "renew_range": 2.0
+      }
+    },
+    {
+      "id": "comp_seek",
+      "type": "LoopCompetence",
+      "params": {
+        "objective_topic": "reality.cognitive.seek_range",
+        "gain_topic": "arbiter.gain.vision",
+        "modality_group": "loop",
+        "modality_name": "seek",
+        "objective_field": "value",
+        "sign": -1.0,
+        "horizon_ticks": 30,
+        "alpha": 0.05,
+        "forget": 0.001,
+        "estimator": "beta",
+        "optimism": 1.0,
+        "_comment": "seeking works while the range to the target FALLS under its own drive (sign -1)."
+      }
+    },
+    {
+      "id": "comp_play",
+      "type": "LoopCompetence",
+      "params": {
+        "objective_topic": "reality.proprio.place",
+        "gain_topic": "arbiter.gain.play",
+        "modality_group": "loop",
+        "modality_name": "play",
+        "objective_field": "tle",
+        "sign": 1.0,
+        "horizon_ticks": 30,
+        "alpha": 0.05,
+        "forget": 0.001,
+        "estimator": "beta",
+        "optimism": 1.0
+      }
+    },
+    {
+      "id": "voter_loops",
+      "type": "LateralVoter",
+      "params": {
+        "level": 1,
+        "input_pattern": "reality.loop.",
+        "group_balance": false,
+        "informativeness_gain": 0.0,
+        "activity_gain": 0.0,
+        "trust_source": "expected",
+        "trust_power": 1.0,
+        "master_seed": 3
+      }
+    },
+    {
+      "id": "arbiter",
+      "type": "EFEArbiter",
+      "params": {
+        "scoring_mode": "precision",
+        "trust_consensus_topic": "consensus.1",
+        "trust_key_play": "reality.loop.play",
+        "trust_key_vision": "reality.loop.seek",
+        "hunger_topic": "reality.cognitive.seek_value",
+        "vision_value_topic": "reality.cognitive.seek_value",
+        "vision_weight": 1.0,
+        "play_value_topic": "reality.cognitive.play_value",
+        "play_weight": 1.0,
+        "vision_gain_topic": "arbiter.gain.vision",
+        "play_gain_topic": "arbiter.gain.play",
+        "klino_gain_topic": "arbiter.gain.klino",
+        "planner_gain_topic": "arbiter.gain.planner",
+        "precision_sign": 1.0,
+        "master_seed": 11,
+        "_comment": "R28's precision race with SEEK on the vision channel: G_seek = seek need x seek trust, G_play = (1 - seek need) x play trust. No avoidance loop: klino's trust key is absent, so it never wins; avoidance stays the twist brain's proximity prior (and the --seek-gate lever releases it toward the thing)."
+      }
+    },
+    {
+      "id": "outcome",
+      "type": "SkillOutcomeLoop",
+      "params": {
+        "bearing_topic": "percept.thing_bearing",
+        "thing_topic": "reality.cognitive.thing",
+        "seek_value_topic": "reality.cognitive.seek_value",
+        "seek_range_topic": "reality.cognitive.seek_range",
+        "pose_topic": "reality.proprio.odom",
+        "skill_topic": "intent.skill",
+        "outcome_topic": "reality.cognitive.outcome",
+        "proximity_range": 2.5,
+        "arrive_range": 0.3,
+        "match_radius": 0.6,
+        "min_samples": 2,
+        "observe_ticks": 1500,
+        "min_conf_ticks": 5,
+        "explore_gain": 1.0,
+        "skill_left": 0,
+        "skill_right": 1,
+        "_comment": "Learning what the kick does (O54). At an arrival, if the reached thing's node has fewer than two recorded outcomes, or a spread above the mean spread over nodes, the loop asks for a kick on intent.skill (the side by the thing's bearing); the host fires it from standing at the stop's hand-back. The thing's next sighting within 0.6 m of where it was, inside 30 s, is the outcome; unseen = unknown, not zero. The surprise against the node's own spread is published on reality.cognitive.outcome.",
+        "peck_id": 3,
+        "need_topic": "reality.cognitive.outcome_need",
+        "push_id": 4,
+        "reach_m": 1.0,
+        "reach_cos": 0.7,
+        "armed_ticks": 1500,
+        "reach_short_m": 0.35
+      }
+    }
+  ],
+  "edges": [],
+  "description": "R76 (the intent that REACHES: a sighting within 1 m arms the loop; within 0.35 m the kick, peck and push cycle, beyond it only the push, whose window walks the seen distance with its nose on the thing), from a1v2_r75_reach.json: R75 (reach 0.5 m) fired 2 skills in six runs: at an arrival stop the reached thing (0.19 m) sits below the level gaze and the cloud attends something within 0.5 m on 3 of 49 stops, at 0.93 m on the rest. So the sighting gate opens to 1 m and the intent must reach: beyond 0.35 m only the push, run with --push-reach 0.25 5.0 (the window is (range + 0.15) / 0.25 s, the yaw on the thing)."
+}

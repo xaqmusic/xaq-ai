@@ -175,3 +175,45 @@ TEST(SkillOutcomeLoop, ThreeIntentsAreCycledAtAThing) {
     r.see_then_arrive(7);
     EXPECT_EQ(r.m.requests(), 6) << "a thing whose three answers are known is left alone";
 }
+
+// Fire at what you see (O59): with reach_m an arrival only arms the loop; the request waits for the thing seen
+// live within reach and ahead, and a window that lapses without one is a miss, not a kick.
+TEST(SkillOutcomeLoop, ARequestWaitsForTheThingSeenWithinReach) {
+    ogma::ParamMap p; p["reach_m"] = 0.5; p["reach_cos"] = 0.7; p["armed_ticks"] = int64_t{100};
+    Rig r(p);
+    r.see_then_arrive(3);
+    EXPECT_FALSE(r.requested()) << "the arrival arms, it does not ask";
+    EXPECT_TRUE(r.m.armed());
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.6f, 3, 0.0f, 0.2f);   // seen 1 m ahead: beyond reach
+    EXPECT_EQ(r.m.requests(), 0);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.9f, 0.4f, 0.9f, 3, 0.0f, 0.2f);   // 0.25 m away but 66 deg to the right: not ahead
+    EXPECT_EQ(r.m.requests(), 0);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.86f, 3, 0.0f, 0.2f);  // 0.35 m dead ahead: ask
+    EXPECT_EQ(r.m.requests(), 1);
+    EXPECT_FALSE(r.m.armed());
+    // a second arrival with nothing within reach before the window lapses: a miss
+    for (int i = 0; i < 60; ++i) r.step(0.8, 0, 0, 0, 0, 0, 3, 0.0f, 0.2f);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.86f, 3, 0.0f, 0.2f);  // the outcome: seen again
+    ASSERT_EQ(r.m.observed(), 1);
+    r.see_then_arrive(3);
+    for (int i = 0; i < 120; ++i) r.step(0.8, 0, 0, 0, 0, 0, 3, 0.0f, 0.2f);
+    EXPECT_EQ(r.m.requests(), 1);
+    EXPECT_EQ(r.m.misses(), 1) << "the window lapsed with nothing seen within reach";
+}
+
+// Beyond a kick's reach only the push is asked for; within it the kick, peck and push cycle as before.
+TEST(SkillOutcomeLoop, BeyondAKicksReachOnlyThePushIsAsked) {
+    ogma::ParamMap p; p["reach_m"] = 1.0; p["reach_short_m"] = 0.35; p["peck_id"] = int64_t{3}; p["push_id"] = int64_t{4}; p["armed_ticks"] = int64_t{200};
+    Rig r(p);
+    r.see_then_arrive(3);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.64f, 3, 0.0f, 0.2f);  // seen 0.9 m dead ahead
+    ASSERT_EQ(r.m.requests(), 1);
+    EXPECT_EQ(r.request_id(), 4) << "at 0.9 m the push is the intent that reaches";
+    for (int i = 0; i < 60; ++i) r.step(0.8, 0, 0, 0, 0, 0, 3, 0.0f, 0.2f);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.64f, 3, 0.0f, 0.2f);  // the outcome
+    ASSERT_EQ(r.m.observed(), 1);
+    r.see_then_arrive(3);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.9f, 3, 0.0f, 0.2f);   // seen 0.25 m ahead: the kick's reach
+    ASSERT_EQ(r.m.requests(), 2);
+    EXPECT_NE(r.request_id(), 4) << "within reach the least-known of all three: the kick (the push has one answer)";
+}

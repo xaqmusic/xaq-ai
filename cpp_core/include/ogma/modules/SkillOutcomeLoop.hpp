@@ -92,6 +92,19 @@ private:
     // a third intent (the push: the walker into the thing, §17.46): -1 = absent.  The intents present are
     // the vocabulary the least-known rule cycles through at each thing.
     int    push_id_ = -1;
+    // fire at what you SEE (2026-09-23, O59): with reach_m > 0 an arrival only ARMS the loop for armed_ticks;
+    // the request goes out on the first tick the thing's bearing is live within reach_m and ahead (forward
+    // component >= reach_cos), so a skill is never fired at a dead-reckoned place the thing has left, nor at a
+    // thing off to the side.  0 = the old rule (request on the arrival tick).
+    double reach_m_ = 0.0, reach_cos_ = 0.7; int armed_ticks_ = 1500;
+    // the intents that REACH: a kick or a peck only when the sighting is within reach_short_m; beyond it only
+    // the push (which walks the distance) is asked for, and with no push the sighting is waited out
+    double reach_short_m_ = 0.35;
+    int    armed_left_ = 0, misses_ = 0;
+public:
+    int misses() const { return misses_; }
+    bool armed() const { return armed_left_ > 0; }
+private:
     std::vector<int> intents() const { std::vector<int> v{0}; if (peck_id_ >= 0) v.push_back(1); if (push_id_ >= 0) v.push_back(2); return v; }
 
     // the thing as last seen: fixed position, node
