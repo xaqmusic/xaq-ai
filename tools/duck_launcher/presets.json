@@ -1589,5 +1589,53 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R73 · R72 + the ROLL on a spin: when the body has turned more than a full turn in 20 s of walking without moving half a metre, the forward roll -- a novel orientation to break the cycle",
+  "series": 73,
+  "hint": "MEASURED n=6 (design doc §17.47): WORKING as a mechanism -- 16 spins detected, 13 rolls fired; the roll at 709 s breaks R72's 750-850 s spin (seed 1), two later ones do not break a second; spin windows 11 -> 10 over six runs (NULL on the total), stops at things 12.0 -> 11.7 a run, walls 15.7 -> 18.6/min, cells tie; rescues 9 -> 55 = three recovery hand-offs per roll (the scaffold's rise, ~5 s), not new falls. WATCH (seed 1, fast-forward through 600 s; the first roll at 709 s): the duck rolls, is stood back up, and walks off facing 50-110 deg elsewhere.",
+  "state": {
+   "config": "a1v2_r72_push.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --skill-on-spin roulade 1.0 0.5 20",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R74 · the walk RE-FIX: the walking cloud attends things on the approach and the seek loop refines its held target from them (never a new one), so the arrival is where the thing IS",
+  "series": 74,
+  "hint": "MEASURED n=6 (design doc §17.47): REGRESSION on its own prediction -- at the arrival stop the thing within 0.35 m and 30 deg on 4 of 32 (R72: 16 of 43); stops at things 12.0 -> 5.7 a run; seek holds the reference 93 % of the walk, walls 15.7 -> 20/min. The re-fix drifts to wall bases and legs within 0.5 m of the held target. A host fix that stays: the stop-end rule now ignores a walking cloud (the first run ended every stop at 1.4 s -- R70's true collapse). WATCH (seed 1) only to see the walking cloud attend things on the approach in the cloud panel.",
+  "state": {
+   "config": "a1v2_r74_walkrefix.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0",
+   "fast_until": 600
+  }
  }
 ]

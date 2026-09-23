@@ -426,6 +426,7 @@ const ogma::CloudMap* find_cloud(ogma::OgmaInstance& inst) {
 bool IntentAdapter::cloud_present() const { return find_cloud(*instance_) != nullptr; }
 bool IntentAdapter::cloud_open() const { auto* c = find_cloud(*instance_); return c && c->is_open(); }
 bool IntentAdapter::cloud_just_closed() const { auto* c = find_cloud(*instance_); return c && c->just_closed(); }
+bool IntentAdapter::cloud_walking() const { auto* c = find_cloud(*instance_); return c && c->is_walking_cloud(); }
 int  IntentAdapter::cloud_voxels() const { auto* c = find_cloud(*instance_); return c ? c->voxels() : 0; }
 int  IntentAdapter::cloud_break() const { auto* c = find_cloud(*instance_); return c ? c->break_voxels() : 0; }
 int  IntentAdapter::cloud_place() const { auto* c = find_cloud(*instance_); return c ? c->last_key() : -1; }

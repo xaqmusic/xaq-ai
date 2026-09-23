@@ -82,6 +82,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"renew_range", ParamMutability::HotMutable,
             "A renewal only within this range (metres) of the thing; never within 1.5 x arrive_m (that would be an arrival without a walk).",
             ParamValue{2.0}},
+        {"walk_refix_m", ParamMutability::HotMutable,
+            "A bearing flagged as seen from a WALKING cloud (the token's 4th value) refines a held target when its fix lies within this of it, "
+            "and never sets a new one; 0 = walking bearings are ignored.  The approach is then by sight.",
+            ParamValue{0.0}},
     };
 }
 
@@ -93,6 +97,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["renew_topic"] = ParamValue{renew_topic_}; m["renew_min"] = ParamValue{double(renew_min_)}; m["renew_range"] = ParamValue{renew_range_};
+    m["walk_refix_m"] = ParamValue{walk_refix_m_};
     return m;
 }
 
@@ -112,6 +117,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "renew_topic",     [&](auto const& v){ renew_topic_   = get_string(v,"renew_topic"); });
     apply_param(params, "renew_min",       [&](auto const& v){ renew_min_     = float(get_double(v,"renew_min")); });
     apply_param(params, "renew_range",     [&](auto const& v){ renew_range_   = get_double(v,"renew_range"); });
+    apply_param(params, "walk_refix_m",    [&](auto const& v){ walk_refix_m_  = get_double(v,"walk_refix_m"); });
 }
 
 void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -123,20 +129,35 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "floor")           floor_ = float(get_double(value, k));
     else if (k == "renew_min")       renew_min_ = float(get_double(value, k));
     else if (k == "renew_range")     renew_range_ = get_double(value, k);
+    else if (k == "walk_refix_m")    walk_refix_m_ = get_double(value, k);
     else throw std::invalid_argument("BearingSeekLoop: param '" + k + "' is construction-only / unknown");
 }
 
 void BearingSeekLoop::tick(uint64_t tick_id) {
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(pose_topic_)))
         if (pt->values.size() >= 3) { px_ = pt->values[0]; py_ = pt->values[1]; pyaw_ = pt->values[2]; have_pose_ = true; }
-    float vx = 0.0f, vy = 0.0f, prox = 0.0f;
+    float vx = 0.0f, vy = 0.0f, prox = 0.0f; bool walking = false;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(bearing_topic_))) {
         if (pt->values.size() > 0) vx   = float(pt->values[0]);
         if (pt->values.size() > 1) vy   = float(pt->values[1]);
         if (pt->values.size() > 2) prox = float(pt->values[2]);
+        if (pt->values.size() > 3) walking = pt->values[3] > 0.5f;
     }
     seen_ = prox > min_conf_ && (vx * vx + vy * vy) > 1e-6f;
     const double c = std::cos(pyaw_), s = std::sin(pyaw_);
+    // a walking bearing: only a re-fix of a held target within walk_refix_m; otherwise as if unseen
+    if (seen_ && walking) {
+        bool refix = false;
+        if (walk_refix_m_ > 0.0 && have_target_ && have_pose_) {
+            const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
+            const double fwd = vy / n, left = -vx / n, range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
+            const double bx = fwd * range, by = left * range;
+            const double fx = px_ + c * bx - s * by, fy = py_ + s * bx + c * by;
+            refix = std::hypot(fx - tx_, fy - ty_) <= walk_refix_m_;
+            if (refix) ++refixes_;
+        }
+        if (!refix) seen_ = false;
+    }
     // the renewal: with no target held (the arrival's tick has passed -- the value read 0 for one tick, which
     // is the arrival the outcome loop sees) and nothing in view, a need still open at the thing re-arms it
     if (!renew_topic_.empty() && !have_target_ && !seen_ && have_pose_) {
@@ -210,7 +231,7 @@ void BearingSeekLoop::restore_state(nlohmann::json const& s) {
 }
 nlohmann::json BearingSeekLoop::diag_lite() const {
     return nlohmann::json{{"seen", seen_}, {"target", have_target_}, {"value", value_}, {"range", range_left_},
-                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}};
+                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}, {"refixes", refixes_}};
 }
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();

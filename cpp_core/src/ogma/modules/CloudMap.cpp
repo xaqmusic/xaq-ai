@@ -584,8 +584,11 @@ void CloudMap::publish_bearing(uint64_t tick_id) {
     out->tick_id = tick_id;
     out->producer_id = std::string(id());
     out->sensor = "thing_bearing";
-    out->values = Eigen::VectorXf(3);
+    // [vx=+right, vy=+forward, proximity, walking]: the fourth value says the attended thing is seen from a
+    // WALKING cloud (walk_cloud), so a consumer can refine a held target from it without taking a new one
+    out->values = Eigen::VectorXf(4);
     out->values[0] = bearing_[0]; out->values[1] = bearing_[1]; out->values[2] = bearing_[2];
+    out->values[3] = (open_ && walking_cloud_) ? 1.0f : 0.0f;
     bus_->publish(thing_bearing_topic_, out);
 }
 

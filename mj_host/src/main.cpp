@@ -1256,7 +1256,13 @@ std::string g_skill_on_arrive;           // "" = off
 // SECS, then stops again to look.  A kicked thing sits under the beak, below a level gaze (§17.36); half a
 // metre back it is in the field, so the kick's OUTCOME can be seen (the outcome loop's honest signal).
 double g_skill_unwind_vx = 0.0, g_skill_unwind_s = 0.0;
-double g_skill_unwind_aim = 0.0;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
+double g_skill_unwind_aim = 0.0;
+// --skill-on-spin NAME TURNS NET SECS (2026-09-23, §17.47): the frustration the operator saw at 750-850 s of
+// R72 -- the body turning in place near the blocks, play's reference turning with it -- as a detector on the
+// body's own odometry: over the last SECS of walking the heading turned more than TURNS full turns while the
+// dead-reckoned position moved less than NET metres.  The response is a skill by name at the boundary (the
+// roulade: a novel orientation), at most one per 30 s.  Off = byte-identical.
+std::string g_spin_skill; double g_spin_turns = 1.0, g_spin_net = 0.5, g_spin_secs = 20.0;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
 // --skill-when-down NAME (2026-09-19, the roulade experiment): when the recovery declares the body DOWN, fire
 // the named skill first (its window drives the joints instead of the scaffold); if the body is not upright
 // when the window ends, the scaffold's rescue continues as before.  Counts rises inside the window.
@@ -1440,6 +1446,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s drives the joints when the body goes down, before the scaffold's rescue\n", g_skill_when_down.c_str());
     if (g_skill_unwind_s > 0.0) std::fprintf(stderr, "  skill unwind: after a skill at a stop the body backs off at %.2f for %.1f s, then stops to look\n", g_skill_unwind_vx, g_skill_unwind_s);
     if (g_skill_unwind_aim > 0.0 && g_skill_unwind_s <= 0.0) throw std::runtime_error("--skill-unwind-aim needs --skill-unwind (the unwind it aims)");
+    if (!g_spin_skill.empty() && !skill_def(g_spin_skill)) throw std::runtime_error("--skill-on-spin: unknown skill " + g_spin_skill);
+    if (!g_spin_skill.empty()) std::fprintf(stderr, "  skill on spin: %s when the heading turns more than %.1f turns in %.0f s of walking with under %.2f m of travel (at most one per 30 s)\n", g_spin_skill.c_str(), g_spin_turns, g_spin_secs, g_spin_net);
     if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: the unwind's yaw keeps the nose on the kicked thing (gain %.2f on its bearing) and the look stop's sweep is centred on it\n", g_skill_unwind_aim);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
         std::fprintf(stderr, "  heading reflex: while a loop holds the reference, vyaw closes the heading error in %.2f s (damping %.2f on the sensed rate), mixed with the brain's yaw by proximity (gate %.2f)\n", g_hr_tau, g_hr_damp, g_hr_gate); }
@@ -1626,6 +1634,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     double sweep_p_lo = sweep_p_lo0, sweep_p_hi = sweep_p_hi0, sweep_wp = (sweep_p_hi0 - sweep_p_lo0) / sweep_np, sweep_yc = 0.0;
     bool stop_is_arrive = false, stop_is_stuck = false; int escapes = 0;
     bool stop_is_look = false; int look_aimed = 0;   // the look stop after an unwind (--skill-unwind-aim)
+    // the spin detector's ring of the odometry pose (x, y, unwrapped heading) over g_spin_secs
+    const int spin_win = std::max(1, int(g_spin_secs * kBrainHz));
+    std::vector<std::array<double, 3>> spin_ring(size_t(spin_win), std::array<double, 3>{0.0, 0.0, 0.0});
+    double spin_heading = 0.0, spin_prev_yaw = 0.0; bool spin_have_yaw = false; int spin_walk_run = 0, spins = 0, spin_rolls = 0, spin_last_roll = -100000;
     std::vector<int> sweep_count(sweep_on ? size_t(sweep_ny * sweep_np) : 0, 0);
     double sweep_ty = 0.0, sweep_tp = 0.0, sweep_cover_sum = 0.0; bool sweep_have_target = false; int sweep_moves = 0, sweep_cover_n = 0;
     if (sweep_on) std::fprintf(stderr, "  gaze SWEEP at stops: never holds; %.2f rad/s (a quarter while the view is novel) toward the least-looked-at of %d x %d gaze cells, yaw +-%.2f rad, pitch %+.3f..%+.3f\n",
@@ -1793,6 +1805,21 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     stop_event = "skill:arrive";
                 }
                 else if (g_skill_at_s > 0.0 && t == int(g_skill_at_s * kBrainHz) && skill_start(g_skill_at_name)) { stop_event = "skill:at"; }
+                else if (!g_spin_skill.empty() && unwind_left == 0) {
+                    // the spin: the body's own odometry, unwrapped, against its value spin_win ticks ago, on a run of walking ticks
+                    const auto op = odom.position(); const double yw = odom.yaw();
+                    if (spin_have_yaw) { double d = yw - spin_prev_yaw; while (d > M_PI) d -= 2.0 * M_PI; while (d < -M_PI) d += 2.0 * M_PI; spin_heading += d; }
+                    spin_prev_yaw = yw; spin_have_yaw = true;
+                    const auto old = spin_ring[size_t(t % spin_win)];
+                    spin_ring[size_t(t % spin_win)] = {op[0], op[1], spin_heading};
+                    ++spin_walk_run;
+                    if (spin_walk_run >= spin_win && std::fabs(spin_heading - old[2]) > g_spin_turns * 2.0 * M_PI
+                        && std::hypot(op[0] - old[0], op[1] - old[1]) < g_spin_net) {
+                        ++spins;
+                        if (t - spin_last_roll > int(30.0 * kBrainHz) && skill_start(g_spin_skill)) { ++spin_rolls; spin_last_roll = t; stop_event = "skill:spin"; }
+                        spin_walk_run = 0;   // one detection per window
+                    }
+                }
             }
             const bool arrive_now = g_stop.on_arrive && stop_phase == StopPhase::None && t >= stop_from && !skill_active
                                     && (brain.seek_arrived() || skill_arrive_done);
@@ -1801,7 +1828,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                 ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : "stop:start"); stop_started_tick = t;
-                stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now; stop_is_look = false;
+                stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now; stop_is_look = false; spin_walk_run = 0;
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
                 brain.set_learning(false);                 // its command is not applied during the stop
@@ -2022,7 +2049,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     }
                 }
                 if (cloud_end_on && stop_phase != StopPhase::None && stop_left > 0) {
-                    if (brain.cloud_open()) {
+                    // the growth judged is the STOP's cloud: a walking cloud (walk_cloud) still open at the stop's
+                    // start is not it (R74: its file-and-reopen read as "stopped growing" and ended every stop at 1.4 s)
+                    if (brain.cloud_open() && !brain.cloud_walking()) {
                         cg_vox.push_back(brain.cloud_voxels());
                         const size_t n = cg_vox.size();
                         if (n > size_t(kCloudWin)) {
@@ -2244,7 +2273,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 const auto col = tof.column_hit();
                 for (int i = 0; i < Tof::kCols; ++i) place.cols[size_t(i)] = float(col[size_t(i)] / Tof::kMaxRangeM);
                 if (g_map_view_cloud) {                        // --map-view cloud: the stop's cloud is the view
-                    if (brain.cloud_open()) {
+                    if (brain.cloud_open() && !brain.cloud_walking()) {   // a walking cloud (walk_cloud) is the seek loop's, not the map's
                         const auto cv = brain.cloud_view();
                         if (cv.size() == map_view_held.size()) std::copy(cv.begin(), cv.end(), map_view_held.begin());
                     }
@@ -2477,6 +2506,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
+        if (!g_spin_skill.empty()) std::fprintf(stderr, "  spins: %d detected (> %.1f turns in %.0f s with under %.2f m of travel); %d %s fired\n", spins, g_spin_turns, g_spin_secs, g_spin_net, spin_rolls, g_spin_skill.c_str());
         if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s fired %d times, the body upright within 2 s of the window %d times\n", g_skill_when_down.c_str(), down_skills, down_rises);
         if (g_stop.map_on_stop || look_on || gaze_on) {
             std::fprintf(stderr, "  map growth: %d nodes on walks, %d at stops; %zu baked ids seen\n", grown_walk, grown_stop, baked_ids.size());
@@ -2764,6 +2794,8 @@ int main(int argc, char** argv) {
         } else if (a == "--skill-when-down") {
             g_skill_when_down = next("--skill-when-down");
             if (!skill_def(g_skill_when_down)) throw std::runtime_error("--skill-when-down: unknown skill " + g_skill_when_down);
+        } else if (a == "--skill-on-spin") {
+            g_spin_skill = next("--skill-on-spin"); g_spin_turns = std::stod(next("--skill-on-spin")); g_spin_net = std::stod(next("--skill-on-spin")); g_spin_secs = std::stod(next("--skill-on-spin"));
         } else if (a == "--skill-unwind-aim") {
             g_skill_unwind_aim = std::stod(next("--skill-unwind-aim"));
         } else if (a == "--skill-unwind") {

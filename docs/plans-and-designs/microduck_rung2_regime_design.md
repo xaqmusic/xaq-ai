@@ -3965,3 +3965,80 @@ the 11 had the thing within 0.3 m and 30° at the start (three had no thing with
 to the side). The one push that answered (0.35 m, a ball at 0.07 m) is what the intent is for. Re-use
 context: a window long enough to walk the thing's distance (3 s ≈ 0.5 m) aimed at its bearing, fired only at
 a thing seen now within reach (O59).
+
+### 17.47 The spin as frustration, the roll as its answer, and the approach by sight (R73, R74, 2026-09-23)
+
+**What the operator saw in R72 (seed 1).** Between 750 and 850 s the duck circled near the blocks and balls;
+they read it as a turning-radius failure — a heading or place it could not reach — and asked (a) for a metric
+of that frustration, (b) for the forward roll as the behaviour that breaks the cycle with a novel orientation,
+(c) whether the walking cloud could find things on the approach and fine-tune the position before the kick or
+peck, which lands beside the thing rather than in front of it.
+
+**The window, read from the record.** From 740 to 826 s play holds the reference and the reference itself
+turns at the body's rate (−2673° → −5841° in 86 s: O56, the reference that rotates with the body), the
+heading error sits beyond 90° on most ticks, the body walks at 0.3 m/s in a circle of 0.3 m: 17.6 m of path
+for 0.5 m of net displacement and 3165° of turn in 120 s, the block 0.3–0.6 m away the whole time. Not a
+target inside the turning radius, then, but the orbit of §17.43 in its play form — and the operator's word
+for it is the right one: the loop asks for a heading it never reaches.
+
+**The frustration metric.** Three already exist in parts: the sweep's `straight` and `hdgErr`, the host's
+progress stall (§17.44: no progress toward the reference while commanded forward), and the loop's own
+competence (the range left, sign −1, which the arbiter's trust reads). None names the spin. The one that
+does, on the body's own odometry only: *in 20 s of walking the heading turned more than a full turn while
+the dead-reckoned position moved less than half a metre.* Offline (`cloud_objects.py spins`), spin windows
+per seed at n = 6: R67 [6, 1, 14, 0, 7, 0], R71a [6, 3, 8, 2, 2, 2], R72 [6, 0, 1, 2, 2, 0] — seed 1's six
+are the operator's 750–850 s. It is a property of the walk (R67's seed 3 spends 140 s in it), not of the
+things levers.
+
+**The roll, measured alone first.** Pollen's roulade fired mid-walk at 650 s on two seeds: a 1 s roll to 82°
+and 49° of tilt, the host's recovery scaffold (Pollen's late fall detector stands in) up in about 4 s, the
+walker back by 656 s, the heading 50–110° from where it was, nothing broken (3 rescues in each 720 s run,
+the roll's among them). On the robot the daemon's own recovery would do the rising; in simulation the
+scaffold is named as such.
+
+**R73: the roll on a spin** (`--skill-on-spin NAME TURNS NET SECS`, off = byte-identical). The host keeps a
+ring of the odometry pose over SECS of walking ticks (a stop or a skill resets the run) and, when the rule
+above fires, asks for the skill by name at the boundary, at most once per 30 s; `spins` and the rolls fired
+are counted and the sweep carries them. This is the stall detector's sibling (§17.44) with a different
+answer: not an exit reflex toward free space, which the loops undid four seconds later, but a fall and a
+rise that leave the body facing elsewhere, with play's committed turn and the twist brain's yaw history
+reset by the recovery's hand-back. Prediction: spin windows down on the seeds that have them, walls and cells
+within the spread, a few rescues more, and — the operator's scale — something to watch.
+
+**R74: the approach by sight.** At R72's 43 arrival stops the thing was 0.18 m away (median) but 34° off the
+nose, within 0.35 m AND 30° on 16 of 43, and more than 0.5 m away on 13 — the arrival is by dead reckoning to
+a position fixed from a stop a metre back, and the last 0.3 m of the approach are blind. The walking cloud
+(O55) sees the thing on the approach; what made it a `REGRESSION` as a behaviour in R70 was that every
+walking sighting became a seek target (seek 80 % of the walk, walls 55 a minute) — and, found now, that
+the map's place vector read the walking cloud as its view (`--map-view cloud`), so the map vocabulary
+collapsed to 6 nodes. Two changes: the bearing token carries a fourth value, *seen from a walking cloud*,
+and `BearingSeekLoop.walk_refix_m` (0 = off) lets such a bearing only REFINE a target already held, when its
+fix lies within that distance of it — never set one; and the host's map view holds the stop's cloud through
+a walking cloud. Config `a1v2_r74_walkrefix.json` = R72 + `cloud.walk_cloud` + `seek.walk_refix_m 0.5`.
+Prediction: at the arrival stop the thing within 0.35 m and 30° on most arrivals, skills fired with no thing
+within 0.5 m down from 13 of 39, and the map's node count back at R72's; the number to fear is walls.
+
+**R73 measured (n = 6, against R72).** Spins detected 16, rolls fired 13 (one per 30 s at most); spin
+windows 11 → 10 over six runs — seed 1's six windows moved from 700–850 s to 1380–1500 s: the roll at 709 s
+broke the operator's spin, and the two at 1405 and 1459 s did not break the later one. Rescues 9 → 55: three
+per roll (at 709, 711, 713 s — the recovery scaffold's rise takes three hand-offs, about 5 s; on the robot the
+daemon's own recovery), not new falls. Stops at things 12.0 → 11.7 a run, stop-seconds at things 191 → 211,
+walls 15.7 → 18.6 a minute, cells 135 → 136, stands 39 → 38 %, hdgErr 1.31 → 1.36. **`WORKING` as a
+mechanism — the detector names the operator's frustration and the roll leaves the duck facing elsewhere
+— `NULL` on the spin total at n = 6 (10 against 11 windows), a tie on everything else, and a new behaviour
+for the eye.** Kept as a flag (preset R73). The brain-side form is the re-use: the roll as an intent the
+arbiter prefers when the holding loop's competence has fallen (O60).
+
+**R74 measured (n = 6, against R72), after one host fix.** The first run ended every stop at 1.4 s: the
+stop-end rule read the walking cloud's file-and-reopen as "the cloud stopped growing" — the true cause of
+R70's collapse (stands 4 of 17, 6 map nodes), now gated to the stop's own cloud. Rerun: stops 16 s, nodes 31,
+the sensor live (4 000–12 000 re-fix ticks a run). And a `REGRESSION` on its own prediction: at the arrival
+stop the thing within 0.35 m and 30° on 4 of 32 (R72: 16 of 43), more than 0.5 m away on 18 (13 of 43), the
+median 0.56 m and 86° off the nose; stops at things 12.0 → 5.7 a run, stop-seconds at things 191 → 73; seek
+held the reference 77 → 93 % of the walk, walls 15.7 → 20 a minute; answers observed 11 of 30 (tie); the
+skills that reached rose to 5 of 30 (2 of 39). The re-fix drifts: within 0.5 m of a held target the walking
+cloud offers wall bases, chair legs and the same thing seen from a moving, less exact anchor (the operator's
+own caveat), and the target follows each. Re-use context: a re-fix that must be the NEAREST small thing and
+within the sweep's ±0.6 rad of the nose, at a radius under 0.25 m, in the last metre only — or the honest
+form, a live bearing that competes with the remembered one by precision, as the voter fuses. Kept off; the
+stop-end fix stays (it is what any walking cloud needs).

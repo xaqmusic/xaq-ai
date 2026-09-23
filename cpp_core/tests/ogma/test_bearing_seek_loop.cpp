@@ -8,6 +8,8 @@
 //      RIGHT at 0.6 m, and the loop says so without seeing it.
 //   3. ArrivalDropsTheTarget — within arrive_m the target is dropped and counted; value 0, bearing 0.
 //   4. ForgettingDropsTheTarget — unseen for long enough the confidence decays below the floor.
+//   6. AWalkingBearingOnlyRefinesAHeldTarget — a bearing flagged as walking never sets a target; with
+//      walk_refix_m it moves a held target by up to that much (the approach by sight).
 //   5. AnOpenNeedRenewsTheTarget — after an arrival, a need token [need, x, y] re-arms the target there with
 //      confidence = need, but not on the arrival's own tick (that tick's zero IS the arrival), not within
 //      1.5 x arrive_m, and not when the need is under renew_min.
@@ -30,13 +32,13 @@ struct Rig {
         n->values = Eigen::VectorXf(3); n->values << need, float(x), float(y);
         bus.publish("reality.cognitive.outcome_need", n);
     }
-    void step(double x, double y, double yaw, float vx, float vy, float prox) {
+    void step(double x, double y, double yaw, float vx, float vy, float prox, bool walking = false) {
         bus.begin_tick(t);
         auto pose = std::make_shared<ogma::ProprioToken>();
         pose->values = Eigen::VectorXf(3); pose->values << float(x), float(y), float(yaw);
         bus.publish("reality.proprio.odom", pose);
         auto b = std::make_shared<ogma::ProprioToken>();
-        b->values = Eigen::VectorXf(3); b->values << vx, vy, prox;
+        b->values = Eigen::VectorXf(4); b->values << vx, vy, prox, (walking ? 1.0f : 0.0f);
         bus.publish("percept.thing_bearing", b);
         m.tick(t);
         bus.end_tick();
@@ -123,4 +125,23 @@ TEST(BearingSeekLoop, AnOpenNeedRenewsTheTarget) {
     r.step(0.5, 0, 0, 0, 0, 0);
     EXPECT_EQ(r.m.renewals(), 1) << "a need under renew_min does not renew";
     EXPECT_FLOAT_EQ(value(), 0.0f);
+}
+
+TEST(BearingSeekLoop, AWalkingBearingOnlyRefinesAHeldTarget) {
+    ogma::ParamMap p; p["walk_refix_m"] = 0.5;
+    Rig r(p);
+    auto value = [&]() { return std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.seek_value"))->values[0]; };
+    for (int i = 0; i < 5; ++i) r.step(0, 0, 0, 0.0f, 1.0f, 0.6f, true);   // a thing 1 m ahead, seen while WALKING
+    EXPECT_FLOAT_EQ(value(), 0.0f) << "a walking bearing sets no target";
+    EXPECT_EQ(r.m.refixes(), 0);
+    for (int i = 0; i < 5; ++i) r.step(0, 0, 0, 0.0f, 1.0f, 0.6f, false);  // the same thing from a stop: the target
+    EXPECT_FLOAT_EQ(value(), 1.0f);
+    // walking toward it, the thing is seen 0.2 m to the right of the remembered spot: the target follows
+    r.step(0.5, 0, 0, 0.37f, 1.0f, 0.79f, true);                            // from (0.5,0): the thing at (1.0,-0.2) is ~0.54 m off, 0.37 right / 1 fwd
+    EXPECT_EQ(r.m.refixes(), 1);
+    auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("percept.seek_bearing"));
+    EXPECT_GT(b->values[0], 0.1f) << "the bearing now points a little right, where the thing is";
+    // a walking sighting 2 m from the held target is another thing: ignored, the target stays
+    r.step(0.5, 0, 0, 0.0f, 1.0f, 0.2f, true);                              // something 2 m ahead
+    EXPECT_EQ(r.m.refixes(), 1);
 }

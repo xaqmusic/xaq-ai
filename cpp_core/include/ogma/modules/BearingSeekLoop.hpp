@@ -79,6 +79,14 @@ private:
     std::string renew_topic_;
     float  renew_min_       = 0.25f;
     double renew_range_     = 2.0;
+    // the walk re-fix (2026-09-23, §17.47): a bearing flagged as seen from a WALKING cloud (the token's 4th
+    // value) only refines a target already held, when its fix lies within walk_refix_m of it; it never sets
+    // one.  The approach is then by sight and the arrival is where the thing IS.  0 = walking bearings ignored.
+    double walk_refix_m_    = 0.0;
+    int    refixes_ = 0;
+public:
+    int refixes() const { return refixes_; }
+private:
 
     bool   seen_ = false, have_target_ = false;
     double tx_ = 0.0, ty_ = 0.0;          // the remembered position, odometry frame

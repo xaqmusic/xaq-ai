@@ -28,6 +28,11 @@ compact stream drops the cloud records, qpos and joint positions.
       thing (within 0.6 m of a movable object's edge), at a wall (within 0.35 m of one), or on open floor -- with
       the seconds of stop spent in each, per seed.  A walk that stands at walls is boring; one that stands at
       things is not.  Reads the full log (x, y, qpos, stop).
+  cloud_objects.py spins LOG...
+      the operator's "frustration" (2026-09-23): 20 s windows of walking (from 600 s, under 20 % stop) in which the body
+      turned more than a full turn while its net displacement stayed under 0.5 m -- the spin near the blocks at
+      750-850 s of R72 seed 1.  Per log: the count, and the seconds spent spinning.  The host's --skill-on-spin uses
+      the same rule on the body's own odometry.
   cloud_objects.py skills LOG...
       every SKILL fired (kick / peck / push, from the record's `skill` field) against the manifest: the nearest movable
       thing at its start and that thing's true displacement 8 s later; whether the outcome loop observed an answer
@@ -610,6 +615,36 @@ def cmd_heading(paths: list[str], control_from: float = 700.0) -> None:
 
 # ------------------------------------------------------------------------------------------------ stops
 
+def cmd_spins(paths: list[str], win_s: float = 20.0, turns: float = 1.0, net_m: float = 0.5) -> None:
+    """Windows of walking in which the body turned more than `turns` full turns without moving `net_m`."""
+
+    def yaw_of(q):
+        w, x, y, z = q
+        return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+
+    for path in paths:
+        T, X, Y, H, S = [], [], [], [], []
+        for line in open(path):
+            if not line.startswith('{"t":'):
+                continue
+            r = json.loads(line)
+            T.append(r["t"]); X.append(r["x"]); Y.append(r["y"]); H.append(yaw_of(r["qpos"][3:7])); S.append(1 if r.get("stop", 0) else 0)
+        if len(T) < 3:
+            continue
+        dt = T[1] - T[0]
+        W = max(2, int(win_s / dt))
+        Hu = np.unwrap(np.array(H)); X = np.array(X); Y = np.array(Y); S = np.array(S); T = np.array(T)
+        n = 0; secs = 0.0; first = None
+        for i in range(0, len(T) - W, W // 2):
+            if T[i] < 600 or S[i:i + W].mean() > 0.2:
+                continue
+            if abs(Hu[i + W] - Hu[i]) > turns * 2 * math.pi and math.hypot(X[i + W] - X[i], Y[i + W] - Y[i]) < net_m:
+                n += 1; secs += win_s / 2
+                if first is None:
+                    first = T[i]
+        print(f"{Path(path).stem:34s} spin windows {n:3d}  spinning {secs:5.0f} s  first at {first if first is not None else '-'}")
+
+
 def cmd_skills(paths: list[str]) -> None:
     """Every skill fired against the manifest: did it reach, did the loop see the answer, and where was the thing at the look."""
     half, lay, movable, _furniture = load_scene()
@@ -781,6 +816,8 @@ def main() -> None:
     hd.add_argument("logs", nargs="+")
     sp = sub.add_parser("stops", help="every stop by how it started and what its cloud attended (things phase T4)")
     sp.add_argument("logs", nargs="+")
+    sn = sub.add_parser("spins", help="20 s windows of walking in which the body turned a full turn without moving half a metre (the frustration)")
+    sn.add_argument("logs", nargs="+")
     sl = sub.add_parser("skills", help="every skill fired against the manifest: reach, the answer seen or not, the thing at the look stop")
     sl.add_argument("logs", nargs="+")
     wh = sub.add_parser("where", help="every stop by where the body stands: at a thing, at a wall, or on open floor (the interesting scale)")
@@ -803,6 +840,8 @@ def main() -> None:
         cmd_where(args.logs)
     elif args.cmd == "skills":
         cmd_skills(args.logs)
+    elif args.cmd == "spins":
+        cmd_spins(args.logs)
     elif args.cmd == "heading":
         cmd_heading(args.logs)
     else:

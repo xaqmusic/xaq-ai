@@ -194,6 +194,7 @@ public:
     bool   cloud_present()   const;
     bool   cloud_open()      const;
     bool   cloud_just_closed() const;
+    bool   cloud_walking()   const;      // the open cloud is a WALKING cloud (CloudMap.walk_cloud): not the map's view
     int    cloud_voxels()    const;
     int    cloud_break()     const;
     int    cloud_place()     const;

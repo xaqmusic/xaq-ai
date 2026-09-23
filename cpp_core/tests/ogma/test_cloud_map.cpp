@@ -366,7 +366,8 @@ TEST(CloudMap, ASmallCubeIsAThingAndARisingPostIsNot) {
 
     auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
     ASSERT_NE(b, nullptr);
-    ASSERT_EQ(b->values.size(), 3);
+    ASSERT_EQ(b->values.size(), 4);
+    EXPECT_FLOAT_EQ(b->values[3], 0.0f) << "seen from a stop, not a walking cloud";
     EXPECT_NEAR(b->values[0], 0.0, 0.05) << "straight ahead: no rightward component";
     EXPECT_NEAR(b->values[1], 1.0, 0.01) << "forward";
     EXPECT_NEAR(b->values[2], 1.0 - th[0].rng / 2.5, 1e-4) << "proximity = 1 - range / max_range (things_range 0)";
@@ -443,6 +444,8 @@ TEST(CloudMap, AWalkingCloudTranslatesByTheOdometry) {
     r.cast(false, 0.0, 2.5, 0.0, 3, seen_from(world, 2.5, 0.0, 0.0));     // past walk_reset_m: filed and reopened
     EXPECT_EQ(r.m.cached(), 0) << "a walking cloud is never cached as a place";
     EXPECT_TRUE(r.m.is_walking_cloud());
+    if (auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing")))
+        { ASSERT_EQ(int(b->values.size()), 4); EXPECT_FLOAT_EQ(b->values[3], 1.0f) << "the bearing token says: seen from a walking cloud"; }
 }
 
 TEST(CloudMap, WithoutWalkCloudAMovingTickContributesNothing) {
