@@ -21,7 +21,7 @@ import glob, json, os, statistics as st, sys, time, zmq
 
 ENDPOINT, LOG_DIR = "tcp://127.0.0.1:5590", os.path.expanduser("~/xaq-ai/pi_host/log")
 CYCLES  = int(sys.argv[1]) if len(sys.argv) > 1 else 6
-RATE_MS = 50
+RATE_MS = 100          # the floor: frame() is called at 10 Hz, so 50 was never honoured
 _ctx = zmq.Context()
 
 def rpc(verb, _allow_err=False, **kw):
