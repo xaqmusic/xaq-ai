@@ -57,10 +57,14 @@ def move(pose, timeout=40):
 
 def point(slew, stagger, poses):
     """One ladder rung.  Returns (row, failure_reason or None)."""
-    r = rpc("limits.set", slew_us=slew, stagger_ms=stagger, confirm=True)
+    # ⚠ pose_slew_us, NOT slew_us.  begin_pose_move overwrites the normal slew on every
+    # pose.set, so sweeping slew_us against pose moves sweeps nothing -- the first run of
+    # this script did that and produced nine identical rows that read as a clean ceiling.
+    r = rpc("limits.set", pose_slew_us=slew, stagger_ms=stagger, confirm=True)
     if not r.get("ok"): return None, f"limits.set refused: {r.get('error')}"
     b = rpc("status")
     pos = os.path.getsize(path)
+    t_start = time.time()
     i_peak, vbat_min = 0.0, 99.0
     for _ in range(CYCLES):
         for pose in poses:
@@ -69,8 +73,9 @@ def point(slew, stagger, poses):
             i_peak  = max(i_peak, ina.get("i_peak", 0) or 0)
             vbat_min = min(vbat_min, s["vbat"])
     a = rpc("status")
+    secs = time.time() - t_start
     ev, _ = ext5v_since(pos)
-    row = dict(slew=slew, stagger=stagger, i_peak=i_peak, vbat_min=vbat_min,
+    row = dict(slew=slew, stagger=stagger, secs=secs, i_peak=i_peak, vbat_min=vbat_min,
                ext5v_min=min(ev) if ev else None, n=len(ev),
                bus_err=a["bus_errors"] - b["bus_errors"],
                wd=a["watchdog_trips"] - b["watchdog_trips"],
@@ -89,18 +94,22 @@ if s0["vbat"] < VBAT_FLOOR: sys.exit(f"vbat {s0['vbat']:.2f} already below the {
 rpc("ext5v.rate", ms=100)
 print(f"start vbat={s0['vbat']:.2f}  thr={s0['pi_throttled']}  ext5v={s0['ext5v']}\n"
       f"posture: OPERATOR-REPORTED 'on the floor on its belly' — servos are NOT bearing the chassis\n")
-hdr = f"{'slew':>5} {'stag':>5} {'i_peak':>7} {'vbat_lo':>8} {'ext5v_lo':>9} {'bus':>4} {'wd':>3} {'thr':>8}"
+# ⚠ `secs` is the tripwire.  If raising the slew does not shorten the moves, the knob is not
+# in the path being driven -- which is how the first run of this sweep fooled itself.
+hdr = (f"{'pslew':>6} {'stag':>5} {'secs':>6} {'i_peak':>7} {'vbat_lo':>8} {'ext5v_lo':>9} "
+       f"{'bus':>4} {'wd':>3} {'thr':>8}")
 rows, stopped = [], None
 try:
-    print("== ladder 1: slew, stagger held at 100 ms, rescue<->stand ==")
+    print("== ladder 1: POSE slew, stagger held at 100 ms, rescue<->stand ==")
     print(hdr)
-    for slew in (40, 60, 80, 120, 200, 400, 800, 1300, 2000):
+    for slew in (12, 20, 30, 40, 60, 100, 150, 250, 400):   # pose slew: 12 = 600 us/s default
         row, why = point(slew, 100, ("stand", "rescue"))
         if row is None: stopped = why; break
         rows.append(row)
-        print(f"{row['slew']:>5} {row['stagger']:>5} {row['i_peak']:>7.3f} {row['vbat_min']:>8.2f} "
-              f"{(row['ext5v_min'] or 0):>9.4f} {row['bus_err']:>4} {row['wd']:>3} {row['thr']:>8}")
-        if why: stopped = f"slew {slew}: {why}"; break
+        print(f"{row['slew']:>6} {row['stagger']:>5} {row['secs']:>6.1f} {row['i_peak']:>7.3f} "
+              f"{row['vbat_min']:>8.2f} {(row['ext5v_min'] or 0):>9.4f} {row['bus_err']:>4} "
+              f"{row['wd']:>3} {row['thr']:>8}")
+        if why: stopped = f"pose_slew {slew}: {why}"; break
     if not stopped:
         print("\n== ladder 2: stagger, at the top slew the ladder reached, X<->rescue (the 2026-08-29 case) ==")
         print(hdr)
@@ -113,7 +122,7 @@ try:
                   f"{(row['ext5v_min'] or 0):>9.4f} {row['bus_err']:>4} {row['wd']:>3} {row['thr']:>8}")
             if why: stopped = f"slew {top} stagger {stag}: {why}"; break
 finally:
-    rpc("limits.set", slew_us=40, stagger_ms=100, confirm=True)
+    rpc("limits.set", slew_us=40, pose_slew_us=12, stagger_ms=100, confirm=True)
     rpc("ext5v.rate", ms=1000)
     rpc("pose.set", name="rescue")
     print("\nrestored: slew 40, stagger 100 ms, rescue pose, ext5v 1 s")

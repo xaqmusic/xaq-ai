@@ -861,20 +861,34 @@ json handle(State& S, const json& req) {   // caller holds m
         // HAT MCU instead, which is recoverable, but it IS still a failure.  Needs confirm.
         if (!req.value("confirm", false))
             return err("limits.set needs confirm=true — slew and stagger are the brownout levers");
+        // ⚠ TWO SLEWS, AND POSE MOVES USE THE OTHER ONE.  begin_pose_move() calls
+        // set_slew_us_per_tick(g_pose_slew_us) on every pose.set, so setting the NORMAL slew
+        // (what the brain's own commands ride) and then driving poses tests nothing: the
+        // pose path overwrites it immediately.  The first ceiling sweep did exactly that and
+        // produced nine identical rows -- same current, same duration, 0.02 V of pack sag
+        // across the whole ladder -- reading as "no failure up to slew 2000" when it was one
+        // test run nine times at 600 us/s.  A sweep of the pose path must set pose_slew_us.
         if (req.contains("slew_us")) {
             const int v = req.value("slew_us", g_normal_slew_us);
             if (v < 1 || v > 4000) return err("slew_us out of 1-4000");
             g_normal_slew_us = v;
             S.driver.set_slew_us_per_tick(v);
         }
+        if (req.contains("pose_slew_us")) {
+            const int v = req.value("pose_slew_us", g_pose_slew_us);
+            if (v < 1 || v > 4000) return err("pose_slew_us out of 1-4000");
+            g_pose_slew_us = v;
+        }
         if (req.contains("stagger_ms")) {
             const int v = req.value("stagger_ms", g_pose_stagger_ticks * 20);
             if (v < 0 || v > 2000) return err("stagger_ms out of 0-2000");
             g_pose_stagger_ticks = v / 20;
         }
-        S.record("limits.set", {{"slew_us", g_normal_slew_us},
+        S.record("limits.set", {{"slew_us", g_normal_slew_us}, {"pose_slew_us", g_pose_slew_us},
                                 {"stagger_ms", g_pose_stagger_ticks * 20}});
-        return ok({{"slew_us", g_normal_slew_us}, {"stagger_ms", g_pose_stagger_ticks * 20}});
+        return ok({{"slew_us", g_normal_slew_us}, {"pose_slew_us", g_pose_slew_us},
+                   {"stagger_ms", g_pose_stagger_ticks * 20},
+                   {"note", "pose.set uses pose_slew_us; slew_us is what the brain's commands ride"}});
     }
     if (verb == "ext5v.rate") {
         // Bench-only: raise the EXT5V sample rate for a measurement, then put it back.
