@@ -89,6 +89,20 @@ connectors** — which, as it happens, it all does.
 
 **Decision (2026-08-27): the INA219 goes inline on the battery input, not on the servo rail.**
 
+> ### ⚠ RE-PLUMBED 2026-09-25 — the Pi is now UPSTREAM of the shunt
+> After Mod A (§3.8.8.1) the Pi has its own BEC, and its `+` tap was moved **above** the
+> shunt. **The INA219 therefore measures the HAT branch alone — twelve servos, the HAT MCU
+> and the 5 V regulator's losses — not the whole robot.**
+>
+> ⚠⚠ **NO INA219 CURRENT READING FROM BEFORE 2026-09-25 IS COMPARABLE TO ONE AFTER IT.**
+> Different quantity, not a different calibration. `i_a`, `i_ema`, `i_peak`, `i_max`,
+> `charge_as` and `energy_j` all changed basis on that date; every §3.5–§3.8 figure predates
+> it and includes the Pi. §3.8.3 is what an unrecorded mid-sweep change costs, so this is
+> stamped here rather than discovered later.
+>
+> **`vbat` is unaffected** — it is the **A4** divider (`adc[4]`), never the INA219, so pack
+> voltage still means what it always did and remains the independent brownout check.
+
 The 5 V servo rail is **internal to the HAT** — the regulator feeds P0–P11 directly and there is
 no exposed break point. The alternatives were cutting the regulator's output trace (permanent
 board modification) or feeding the servos from an external BEC (a rebuild). Neither is worth it,
@@ -99,18 +113,20 @@ an energy term is the more honest quantity anyway."*
 Only the `+` leg is broken by the shunt; `−` and the mid tap pass straight through.
 
 ```
-  2S pack, 3-wire            INA219                      Robot HAT V4
-  6.0–8.4 V              (0.01 Ω shunt)
-   ┌──────────┐  XH2.54   ┌──────────┐     XH2.54      ┌──────────────┐
-   │ +   8.4V ├──22AWG───►│ Vin+     │                 │              │
-   │          │           │      Vin−├──22AWG─────────►│ PWR IN  +    │
-   │ mid 4.2V ├──26AWG────── straight through ────────►│ PWR IN  mid  │
-   │ −   0.0V ├──22AWG────── straight through ────────►│ PWR IN  −    │
-   └──────────┘                │                       │              │
-                               │ I²C 0x40 + 3V3 + GND  │              │
-                               └──────────────────────►│ QWIIC / I²C  │
-                                                       └──────────────┘
-  measures: Pi 5 + 5 V regulator + all 12 servos (whole-robot current)
+  2S pack (6.0-8.4 V)       INA219 -- 0.01 ohm, in the `+` leg      Robot HAT V4
+  ---------------------------------------------------------------------------------
+   +   8.4 V --22AWG--+-------> Vin+ --[shunt]-- Vin- --22AWG-------> PWR IN  +
+   mid 4.2 V --26AWG--|--------------  straight through  -----------> PWR IN  mid
+   -   0.0 V --22AWG--|--+-----------  straight through  -----------> PWR IN  -
+                      |  |
+                      |  |            I2C 0x40 + 3V3 + GND  --------> QWIIC / I2C
+                      |  |
+                      +--+-----> Pi BEC --> 5 V --> Pi GPIO pins 2 + 4   (Mod A)
+
+  INA219 measures THE HAT BRANCH ONLY: 12 servos + HAT MCU + the regulator's own losses.
+  The Pi's draw bypasses the shunt entirely.
+  Ground is common -- the shunt is in `+`, never the return, which is what makes an
+  upstream tap a two-wire change with no ground offset between the Pi and the HAT.
 ```
 
 ⚠ **The shunt goes in the `+` leg, never the return.** A shunt in `−` lifts the HAT's ground
@@ -126,8 +142,17 @@ transients, and adding 300 mV of series drop right before that threshold is a br
 
 - **A4 stays on battery voltage.** It is the independent brownout check and the
   one-servo-at-a-time stall detector during calibration (~100 mV sag ≈ 40 counts).
-- **The Pi's own draw is common-mode**, roughly constant across a gait. Subtract an idle
-  baseline before the energy term consumes it.
+- ⚠ **The Pi's draw used to be common-mode in this channel, and the instruction here was to
+  subtract an idle baseline. That is obsolete — the rewire removes it in hardware.** Better
+  than subtracting: a baseline is an estimate that drifts with CPU load, wifi bursts and
+  sensor activity, none of which are limb effort. **What is left is a signal about the body**,
+  which is the point — a small directional signal riding on a large common-mode is exactly
+  what an EPM's insertion gate collapses to one node.
+- **Recovering whole-robot total, if something needs it:** `servo + Pi`, where the Pi's share
+  is near-constant and is measurable once as `idle_before − idle_after` across the rewire.
+  ⚠ **Not yet measured** — the robot was off the network when this was written. Run it: idle
+  `i_ema` should fall by the Pi's share (~0.3–0.4 A at the pack, from a ~0.6 A pre-rewire
+  idle). **If idle current does NOT drop, the tap is still below the shunt.**
 
 ### 3.1 Building the inline module non-destructively
 
@@ -139,7 +164,13 @@ cable cut in half** — both halves are then guaranteed to mate.
 
 ⚠ **Wire gauge, and the contact that carries everything.** The third pin does **not** share the
 load (§3.2), so the whole draw — ~2.3 A steady, plausibly 4–7 A on servo transients — goes
-through **one 3 A-rated XH contact**, at or past its rating on the peaks. Nothing in the module
+through **one 3 A-rated XH contact**, at or past its rating on the peaks.
+
+> ⚠ **The 2026-09-25 rewire does NOT relieve this, and it is easy to assume it did.** Moving
+> the Pi's tap above the shunt reduces the current through the **INA219 module** (its screw
+> terminals and traces) by the Pi's share. It changes nothing for any connector **upstream of
+> the tap** — if the tap is at the pack connector, that contact still carries servos *and* Pi,
+> exactly as before. Only a tap made directly at the cells would move that load off it. Nothing in the module
 can fix that, but two things stop it getting worse: stock XH extension cable is usually 26 AWG,
 marginal at 2–3 A continuous and poor on transients, so **crimp 22 AWG silicone** on `+` and `−`
 (XH terminals accept 22–28 AWG; the mid tap carries only balance current, so stock 26 AWG is
@@ -1131,7 +1162,7 @@ better on four counts, and every one of them matters more than the effort saved:
 |---|---|---|
 | Step-down BEC / UBEC | **5 V out, ≥ 3 A**, 2S input (6.0–8.4 V) | the Pi alone; 3 A is ample, and 5 A buys margin for USB peripherals |
 | **Transient response** | ⚠ **must hold ≥ 4.8 V under load steps** | below that the Pi reports under-voltage and the original problem is rebuilt with extra steps |
-| Input pigtail | JST XH 2.54, 22 AWG on `+`/`−` | taps the pack **downstream of the INA219**, so whole-robot current still totalizes |
+| Input pigtail | JST XH 2.54, 22 AWG on `+`/`−` | ⚠ **taps the pack `+` UPSTREAM of the shunt (as rewired 2026-09-25)**, so the INA219 sees the servos alone. Ground is common regardless — the shunt is in `+`, never the return |
 | Inline fuse | **2–3 A on the BEC input** | a GPIO 5 V feed bypasses the Pi's own input protection — the fuse is yours to provide |
 | Output | to the Pi's **GPIO pins 2 and 4** (5 V) | standard practice for HATs and UPS boards |
 | Common ground | **mandatory — every GPIO ground stays bonded** | the servo PWM lines reference the Pi's ground; lift those and the signals have nothing to swing against |
@@ -1190,7 +1221,18 @@ always "the Pi needs to stop sharing one."** Same separation, opposite and much 
 
 ---
 
-#### 3.8.8.2 Mod B — bulk capacitance at the Pi's 5 V input ★ cheap, partial, do it anyway
+#### 3.8.8.2 Mod B — bulk capacitance at the Pi's 5 V input ⚠️ DOWNGRADED TO *SKIP IT* 2026-09-25
+
+> ⚠ **This said "cheap, partial, do it anyway" and that advice was written when the Pi's rail
+> was the thing at risk. It is not any more.** §3.8.8.6 measured the Pi's rail moving **4 mV**
+> at 2.07 A of servo current. There is no transient left for a capacitor to absorb, and Mod B
+> carries a real hazard of its own (inrush — see below). **Do not fit it** unless `EXT5V` is
+> observed actually dipping. The rest of this subsection is kept for that case, and for the
+> record of why the recommendation changed.
+>
+> **The one cheap thing that IS still worth doing:** the BEC sits at ~5.06 V with an idle
+> minimum of 5.0009 V, leaving ~0.2 V to the Pi's ~4.8 V undervolt threshold where the HAT
+> gave ~0.45 V. If the BEC has a trimpot, **~5.15 V buys that margin back for free.**
 
 A brownout is a *transient*. Local energy storage rides it out.
 
@@ -1333,6 +1375,11 @@ rule, and this one arrives with a strong prior about what it will show, which is
 when the rule earns its keep.
 
 #### ★★★ 3.8.8.6 WHAT MOD A BOUGHT — ✅ MEASURED 2026-09-25
+
+> ⚠ **BASIS: every current figure below was taken BEFORE the 2026-09-25 rewire, so `i_peak`
+> includes the Pi's draw.** Subtract its near-constant share (~0.3–0.4 A at the pack) to
+> compare with anything measured after. The `EXT5V` and failure-signature results are
+> unaffected — they never depended on the shunt.
 
 **Conditions, because they bound every number here.** Robot **on the floor on its belly** —
 the servos are *not* bearing the chassis. Pack **7.1–7.5 V**, not full. **Mod C is NOT
