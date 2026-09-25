@@ -1098,7 +1098,11 @@ instruments blind because they sit on the battery side of that regulator.
 
 ---
 
-#### 3.8.8.1 Mod A — take the Pi OFF the HAT's rail ★ the real fix
+#### 3.8.8.1 Mod A — take the Pi OFF the HAT's rail ★ ✅ BUILT AND VALIDATED 2026-09-25
+
+> **✅ FITTED by the operator 2026-09-25** — separate BEC feeding the Pi, HAT 5 V pins lifted.
+> **Validated: at 2.07 A of servo current the Pi's own rail does not move.** §3.8.7 measured
+> the Pi *dying* at 0.92 A of bus current when the rail was shared. Evidence in §3.8.8.6.
 
 **The topology.** The pack feeds the INA219 as it does today. After the shunt the line
 branches: one branch to the HAT (which keeps its 5 V / 3 A DC-DC and keeps feeding all
@@ -1328,6 +1332,99 @@ the states it claims to — *then* let something act on it. Every sensor here is
 rule, and this one arrives with a strong prior about what it will show, which is precisely
 when the rule earns its keep.
 
+#### ★★★ 3.8.8.6 WHAT MOD A BOUGHT — ✅ MEASURED 2026-09-25
+
+**Conditions, because they bound every number here.** Robot **on the floor on its belly** —
+the servos are *not* bearing the chassis. Pack **7.1–7.5 V**, not full. **Mod C is NOT
+fitted**, so there is still no instrument on the servo rail. Treat every figure as a
+**floor** for a standing robot on a charged pack, not as the limit (§3.8.3 is what happens
+when a sweep's conditions go unrecorded).
+
+**(1) The separation holds at brownout-scale current.** Three `rescue ↔ stand` cycles:
+
+| | idle | under load |
+|---|---|---|
+| `EXT5V` mean | 5.0365 V | 5.0377 V |
+| `EXT5V` min | 5.0009 V | **5.0049 V** |
+| n | 35 | 148 over 16.1 s |
+
+**Worst-case movement of the Pi's rail: −0.004 V — the load minimum is 4 mV *higher* than
+the idle minimum, i.e. noise.** Meanwhile `i_peak` reached **2.068 A** and the pack sagged
+7.49 → 7.35 V, so the load was real. `throttled` `0x0`, 0 bus errors, 0 watchdog trips.
+
+⚠ **Read that against §3.8.7: the Pi died at 0.92 A of bus current on the shared rail.** At
+more than twice that current its rail is now flat. That is the mod working.
+
+**(2) The ceiling moved a long way.** Pose slew swept with the stagger held, then the stagger
+shrunk at the top slew using `X ↔ rescue` — the exact 2026-08-29 case:
+
+| pose slew | stagger | median move | i_peak | vbat min | bus err | verdict |
+|---|---|---|---|---|---|---|
+| 12 *(old default, 600 µs/s)* | 100 ms | 2.89 s | 3.37 A | 7.14 V | 0 | ✅ |
+| 400 | 100 ms | 1.39 s | 3.55 A | 7.32 V | 0 | ✅ |
+| 400 | 60 ms | **0.99 s** | 3.76 A | 7.10 V | 0 | ✅ **new recommended limit** |
+| 400 | 40 ms | 0.77 s | 3.76 A | **6.56 V** | **122** | ❌ cliff |
+
+**`pose_slew` 400 with a 60 ms stagger runs a pose recall in 0.99 s against the old 2.89 s —
+2.9× faster, with no failure signature at any point.** The old limits were set to protect a
+rail the Pi no longer lives on, and they were roughly 3× more conservative than the hardware
+needs.
+
+⚠ **Diminishing returns are structural, not a measurement artifact.** 33× the slew bought
+only 2.03× the speed, because twelve channels at a 100 ms stagger is a 1.2 s floor no slew
+can cross. **Past ~150 the stagger is the limit, not the slew** — which is why ladder 2 is
+where the cliff appeared.
+
+**(3) The failure changed species, exactly as predicted — and that is the real prize.** The
+cliff produced **122 I²C bus errors and nothing else**: no reset, no throttle flag, no
+watchdog trip, `rail_events` 0, `EXT5V` min 4.982 V. The Pi stayed up (36 min uptime), kept
+ticking at 50.0 Hz, and **kept the log that recorded its own failure**. Before the mod this
+same class of event took the computer down and the telemetry with it.
+
+⚠ **The stagger-40 cliff is CONFOUNDED with pack sag and is not cleanly a rail limit.** `vbat`
+fell to **6.56 V**, against the 6.4 V auto-safe — 0.54 V below the previous point. §3.7 already
+established source impedance as the governing term, so on a charged pack this cliff will sit
+further out. Do not quote "stagger 40 fails" as a hardware property.
+
+⚠ **`i_peak` here is a ~68 ms average, so the true peaks are higher than 3.76 A.** The INA219's
+telemetry config is 128-sample averaging (§3 table); the 532 µs single-shot config is what
+§3.8's figures used. By power balance 3.76 A at 7.1 V is roughly **4 A on the servo 5 V rail —
+above the HAT DC-DC's 3 A rating**, which is the likely mechanism for the MCU struggling. ⚠
+**Inferred, not measured: that is precisely the number Mod C would give directly.**
+
+#### ⚠⚠ 3.8.8.7 The harness measured a stationary robot four times
+
+Recorded because the failure mode is general and it nearly put four fabricated results into
+this document.
+
+`pose.set` takes `us` as an array of 12. The test harness called `pose.set name=<pose>`, which
+returns `{"ok":false,"error":"us must be an array of 12"}` — **and the harness discarded every
+reply.** The robot therefore stood still through a Mod A acceptance test and three ceiling
+sweeps, each of which reported clean results: "the Pi's rail moves 5.4 mV under load", "no
+failure from slew 40 to 2000", "stagger 0 is safe". All of it was a robot at rest.
+
+**Four signals said so and each was explained away instead of investigated:**
+
+| signal | what it meant |
+|---|---|
+| identical current across a 50× slew range | nothing was changing |
+| identical 12.1 s point duration | that was the harness's own 3 s timeout, ×4 moves |
+| **0.02 V of pack sag across an entire ladder** | §3.8.6 sees ~0.9 V under real driving — **the loudest signal, and the one ignored longest** |
+| no `pose.set` / `pose.landed` records in the JSONL at all | the verb never succeeded |
+
+**Three fixes, in order of how much they generalize:**
+1. **The harness raises on `ok:false`.** A test that ignores error replies cannot detect that
+   it is doing nothing. This single property is what let all four measurements pass.
+2. **Timing comes from the daemon's own records** (`pose.set` → `pose.landed`), never from
+   polling. Polling reported the harness's timeout as the robot's move duration.
+3. **The sweep proves its own lever moved** before it may claim a ceiling — it compares median
+   move time across the slew range and refuses the table if nothing changed. It must fail
+   *loudly* when it cannot evaluate that; an earlier version skipped the check silently, which
+   is the exact condition it exists to catch.
+
+⚠ The same bug also voided §3.8.9.1(b) from 2026-09-13, which is marked withdrawn rather than
+deleted.
+
 ### ★★★ 3.8.9 THE SOFTWARE GUARD — ✅ BUILT AND DRILLED 2026-09-13
 
 The mods in §3.8.8 are unbuilt. This is what protects the robot until they are, and it is
@@ -1416,7 +1513,15 @@ exactly when the guard is the only thing looking at the rail. Now deadline-based
 proven by interleaving watched and unwatched trials in one run: medians 52 ms and 34.5 ms,
 both capped at ~100 ms.
 
-**(b) The cost of the guard's own response — ✅ MEASURED, and the worry was unfounded.**
+**(b) The cost of the guard's own response — ⚠️ WITHDRAWN 2026-09-25, the robot never moved.**
+
+> ⚠⚠ **THE MEASUREMENT BELOW IS VOID AND IS KEPT ONLY TO MARK THE ERROR.** The script drove
+> the robot with `pose.set name=stand`. **`pose.set` takes `us` as an array of 12 and has
+> never accepted a name** — every call returned `{"ok":false,"error":"us must be an array of
+> 12"}`, and the harness discarded the reply. So the robot never left `rescue`: the
+> "holding in stand" figure and the "guard's rescue recall" figure are the same pose, and the
+> 0.92× was noise between two identical states. **Re-measure before quoting any of it.**
+> The harness now raises on `ok:false` rather than ignoring it (§3.8.8.6).
 
 ⚠ **`rescue()` does not shed load. It cannot.** There is no limp on this HAT once
 initialized (§3.8.7); the servos are energized and holding whatever happens. `rescue()`
