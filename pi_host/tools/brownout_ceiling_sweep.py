@@ -24,12 +24,28 @@ VBAT_FLOOR = 7.00          # stop well above the 6.4 V auto-safe so the pack is 
 CYCLES     = 2             # per point; the ladder is long and the pack is finite
 _ctx = zmq.Context()
 
-def rpc(verb, **kw):
+def rpc(verb, _allow_err=False, **kw):
+    """⚠ RAISES on ok:false unless _allow_err.  This is not defensive style, it is the fix for
+    the defect that invalidated four measurements: move() called rpc("pose.set", name=...) and
+    DISCARDED the reply.  pose.set takes `us` as an array of 12 and has never accepted a name,
+    so every call returned {"ok":false,"error":"us must be an array of 12"} and the robot never
+    moved -- through a separation test and three ceiling sweeps, all of which reported clean
+    results measured on a stationary robot.  A harness that ignores error replies cannot detect
+    that it is doing nothing."""
     s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 25000); s.setsockopt(zmq.LINGER, 0)
     s.connect(ENDPOINT); s.send_string(json.dumps({"verb": verb, **kw}))
-    try:    return json.loads(s.recv_string())
-    except zmq.Again: return {"ok": False, "error": "TIMEOUT"}
+    try:    r = json.loads(s.recv_string())
+    except zmq.Again: r = {"ok": False, "error": "TIMEOUT"}
     finally: s.close()
+    if not r.get("ok") and not _allow_err:
+        raise RuntimeError(f"{verb} failed: {r.get('error')}  (sent {kw})")
+    return r
+
+_pose_cache = {}
+def pose_us(name):
+    """Named poses are recalled by VALUE: there is no recall-by-name verb."""
+    if name not in _pose_cache: _pose_cache[name] = rpc("pose.get", name=name)["us"]
+    return _pose_cache[name]
 
 path = sorted(glob.glob(os.path.join(LOG_DIR, "benchd_*.jsonl")))[-1]
 def ext5v_since(pos):
@@ -65,7 +81,7 @@ def moves_since(pos):
 
 def move(pose, timeout=40):
     """Command a pose and wait for it to land.  Timing comes from moves_since(), not here."""
-    rpc("pose.set", name=pose)
+    rpc("pose.set", us=pose_us(pose))
     t0 = time.time()
     while time.time() - t0 < timeout:
         s = rpc("status")
@@ -148,9 +164,10 @@ try:
                   f"{(row['ext5v_min'] or 0):>9.4f} {row['bus_err']:>4} {row['wd']:>3} {row['thr']:>8}")
             if why: stopped = f"slew {top} stagger {stag}: {why}"; break
 finally:
-    rpc("limits.set", slew_us=40, pose_slew_us=12, stagger_ms=100, confirm=True)
-    rpc("ext5v.rate", ms=1000)
-    rpc("pose.set", name="rescue")
+    # _allow_err: a cleanup exception would replace the real failure with its own
+    rpc("limits.set", _allow_err=True, slew_us=40, pose_slew_us=12, stagger_ms=100, confirm=True)
+    rpc("ext5v.rate", _allow_err=True, ms=1000)
+    rpc("pose.set", _allow_err=True, us=pose_us("rescue"))
     print("\nrestored: slew 40, stagger 100 ms, rescue pose, ext5v 1 s")
 
 s1 = rpc("status")
@@ -161,7 +178,11 @@ print(f"end vbat={s1['vbat']:.2f} (started {s0['vbat']:.2f})  thr={s1['pi_thrott
 # connected.  A clean ladder is only evidence if the ladder did something, so prove it from
 # the daemon's own move times before any ceiling is claimed.
 l1 = [r for r in rows if r["stagger"] == 100 and r["nmoves"]]
-if len(l1) >= 2:
+if len(l1) < 2:
+    print(f"\n⚠⚠ NO CEILING CLAIMED, AND NO LEVER CHECK POSSIBLE: only {len(l1)} of "
+          f"{len([r for r in rows if r['stagger']==100])} ladder-1 points recorded any completed "
+          f"move at all.  The robot may not have moved.  Do not read this table.")
+elif len(l1) >= 2:
     lo, hi = l1[0], l1[-1]
     ratio = (lo["secs"] / hi["secs"]) if hi["secs"] else 0.0
     moved = ratio > 1.5

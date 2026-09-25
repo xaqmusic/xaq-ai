@@ -24,12 +24,28 @@ CYCLES  = int(sys.argv[1]) if len(sys.argv) > 1 else 6
 RATE_MS = 50
 _ctx = zmq.Context()
 
-def rpc(verb, **kw):
-    s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 20000); s.setsockopt(zmq.LINGER, 0)
+def rpc(verb, _allow_err=False, **kw):
+    """⚠ RAISES on ok:false unless _allow_err.  This is not defensive style, it is the fix for
+    the defect that invalidated four measurements: move() called rpc("pose.set", name=...) and
+    DISCARDED the reply.  pose.set takes `us` as an array of 12 and has never accepted a name,
+    so every call returned {"ok":false,"error":"us must be an array of 12"} and the robot never
+    moved -- through a separation test and three ceiling sweeps, all of which reported clean
+    results measured on a stationary robot.  A harness that ignores error replies cannot detect
+    that it is doing nothing."""
+    s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 25000); s.setsockopt(zmq.LINGER, 0)
     s.connect(ENDPOINT); s.send_string(json.dumps({"verb": verb, **kw}))
-    try:    return json.loads(s.recv_string())
-    except zmq.Again: return {"ok": False, "error": "TIMEOUT"}
+    try:    r = json.loads(s.recv_string())
+    except zmq.Again: r = {"ok": False, "error": "TIMEOUT"}
     finally: s.close()
+    if not r.get("ok") and not _allow_err:
+        raise RuntimeError(f"{verb} failed: {r.get('error')}  (sent {kw})")
+    return r
+
+_pose_cache = {}
+def pose_us(name):
+    """Named poses are recalled by VALUE: there is no recall-by-name verb."""
+    if name not in _pose_cache: _pose_cache[name] = rpc("pose.get", name=name)["us"]
+    return _pose_cache[name]
 
 path = sorted(glob.glob(os.path.join(LOG_DIR, "benchd_*.jsonl")))[-1]
 def ext5v_since(pos):
@@ -45,7 +61,7 @@ def ext5v_since(pos):
 
 def move(pose, timeout=40):
     """pose.set, then wait for the move to START and only then to finish."""
-    rpc("pose.set", name=pose)
+    rpc("pose.set", us=pose_us(pose))
     t0 = time.time()
     while time.time() - t0 < 3.0:                       # wait for it to BEGIN
         if rpc("status").get("pose_move_active"): break

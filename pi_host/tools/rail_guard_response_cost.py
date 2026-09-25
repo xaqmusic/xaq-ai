@@ -18,12 +18,28 @@ import glob, json, os, statistics as st, sys, time, zmq
 ENDPOINT, LOG_DIR = "tcp://127.0.0.1:5590", os.path.expanduser("~/xaq-ai/pi_host/log")
 _ctx = zmq.Context()
 
-def rpc(verb, **kw):
-    s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 15000); s.setsockopt(zmq.LINGER, 0)
+def rpc(verb, _allow_err=False, **kw):
+    """⚠ RAISES on ok:false unless _allow_err.  This is not defensive style, it is the fix for
+    the defect that invalidated four measurements: move() called rpc("pose.set", name=...) and
+    DISCARDED the reply.  pose.set takes `us` as an array of 12 and has never accepted a name,
+    so every call returned {"ok":false,"error":"us must be an array of 12"} and the robot never
+    moved -- through a separation test and three ceiling sweeps, all of which reported clean
+    results measured on a stationary robot.  A harness that ignores error replies cannot detect
+    that it is doing nothing."""
+    s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 25000); s.setsockopt(zmq.LINGER, 0)
     s.connect(ENDPOINT); s.send_string(json.dumps({"verb": verb, **kw}))
-    try:    return json.loads(s.recv_string())
-    except zmq.Again: return {"ok": False, "error": "TIMEOUT"}
+    try:    r = json.loads(s.recv_string())
+    except zmq.Again: r = {"ok": False, "error": "TIMEOUT"}
     finally: s.close()
+    if not r.get("ok") and not _allow_err:
+        raise RuntimeError(f"{verb} failed: {r.get('error')}  (sent {kw})")
+    return r
+
+_pose_cache = {}
+def pose_us(name):
+    """Named poses are recalled by VALUE: there is no recall-by-name verb."""
+    if name not in _pose_cache: _pose_cache[name] = rpc("pose.get", name=name)["us"]
+    return _pose_cache[name]
 
 def settle(timeout=25):
     t0 = time.time()
@@ -51,7 +67,7 @@ s0 = rpc("status")
 print(f"start: vbat={s0['vbat']:.2f}  rail_events={s0['rail_events']}  mask={s0['pi_throttled']}")
 if s0["vbat"] < 7.0: sys.exit(f"vbat {s0['vbat']:.2f} too low for a clean current measurement")
 
-print("-> stand ..."); rpc("pose.set", name="stand")
+print("-> stand ..."); rpc("pose.set", us=pose_us("stand"))
 if not settle(): sys.exit("stand did not settle")
 time.sleep(1.0)
 
