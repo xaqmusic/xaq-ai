@@ -160,9 +160,8 @@ try:
             row, why = point(top, stag, ("X", "rescue"))
             if row is None: stopped = why; break
             rows.append(row)
-            print(f"{row['slew']:>5} {row['stagger']:>5} {row['i_peak']:>7.3f} {row['vbat_min']:>8.2f} "
-                  f"{(row['ext5v_min'] or 0):>9.4f} {row['bus_err']:>4} {row['wd']:>3} {row['thr']:>8}")
-            if why: stopped = f"slew {top} stagger {stag}: {why}"; break
+            show(row)
+            if why: stopped = f"pose_slew {top} stagger {stag}: {why}"; break
 finally:
     # _allow_err: a cleanup exception would replace the real failure with its own
     rpc("limits.set", _allow_err=True, slew_us=40, pose_slew_us=12, stagger_ms=100, confirm=True)
