@@ -850,14 +850,48 @@ json handle(State& S, const json& req) {   // caller holds m
         S.record("tof_stall_injected", {{"by", "verb"}});
         return ok();
     }
+    if (verb == "limits.set") {
+        // Bench-only: slew and pose stagger at runtime, so a ceiling sweep does not need a
+        // service restart per point.  These were command-line flags only (--normal-slew,
+        // --pose-stagger-ms), which made a sweep a sequence of restarts and lost the
+        // daemon's own state between points.
+        //
+        // ⚠ THESE ARE THE BROWNOUT LEVERS.  Raising slew and shrinking the stagger is
+        // exactly what took the Pi down on 2026-08-29; after Mod A the failure lands on the
+        // HAT MCU instead, which is recoverable, but it IS still a failure.  Needs confirm.
+        if (!req.value("confirm", false))
+            return err("limits.set needs confirm=true — slew and stagger are the brownout levers");
+        if (req.contains("slew_us")) {
+            const int v = req.value("slew_us", g_normal_slew_us);
+            if (v < 1 || v > 4000) return err("slew_us out of 1-4000");
+            g_normal_slew_us = v;
+            S.driver.set_slew_us_per_tick(v);
+        }
+        if (req.contains("stagger_ms")) {
+            const int v = req.value("stagger_ms", g_pose_stagger_ticks * 20);
+            if (v < 0 || v > 2000) return err("stagger_ms out of 0-2000");
+            g_pose_stagger_ticks = v / 20;
+        }
+        S.record("limits.set", {{"slew_us", g_normal_slew_us},
+                                {"stagger_ms", g_pose_stagger_ticks * 20}});
+        return ok({{"slew_us", g_normal_slew_us}, {"stagger_ms", g_pose_stagger_ticks * 20}});
+    }
     if (verb == "ext5v.rate") {
         // Bench-only: raise the EXT5V sample rate for a measurement, then put it back.
         // Below 500 ms each sample is also written to the JSONL as its own record.
+        // ⚠ THE FLOOR IS 100 ms AND IT IS NOT NEGOTIABLE HERE.  The deadline is checked
+        // inside frame(), which the telemetry thread calls at 10 Hz -- so asking for 50 ms
+        // delivers 10 Hz.  The first run of the separation test asked for 50 and got 10
+        // without being told, which is the same class of lie as a starved sampler: a number
+        // that is accepted and then quietly not honoured.  Refuse it instead.
         const int ms = req.value("ms", int(EXT5V_POLL_MS));
-        if (ms < 20 || ms > 60000) return err("ms out of 20-60000");
+        if (ms < 100 || ms > 60000)
+            return err("ms out of 100-60000 — the floor is frame()'s 10 Hz call rate, "
+                       "not the cost of the call (which is 2.9 ms)");
         g_ext5v_poll_ms = ms;
         S.record("ext5v.rate", {{"ms", ms}});
-        return ok({{"ms", g_ext5v_poll_ms}, {"recording_each_sample", ms < 500}});
+        return ok({{"ms", g_ext5v_poll_ms}, {"effective_hz", 1000.0 / std::max<int64_t>(ms, 100)},
+                   {"recording_each_sample", ms < 500}});
     }
     if (verb == "rail.inject") {
         // ⚠ FAULT INJECTION.  RailGuard's LOGIC has unit tests; what those cannot reach is
