@@ -42,16 +42,37 @@ def ext5v_since(pos):
             if r.get("kind") == "ext5v": out.append(r["data"]["v"])
         return out, fh.tell()
 
+def moves_since(pos):
+    """(pose.set -> pose.landed) durations on the DAEMON's clock, and the new file position.
+
+    ⚠ WHY NOT TIME IT FROM HERE.  move() used to wait for pose_move_active to go true, with a
+    3 s timeout.  At high slew the move finishes before any status poll observes it, so that
+    loop timed out EVERY time and every point came back at 12.1 s regardless of slew -- my own
+    timeout, reported as the robot's move duration, masking the one signal that would have
+    shown the lever was not connected.  The daemon already records pose.set and pose.landed;
+    the interval between them is the truth and costs nothing.
+    """
+    out, pending = [], None
+    with open(path) as fh:
+        fh.seek(pos)
+        for line in fh:
+            try: r = json.loads(line)
+            except Exception: continue
+            if r.get("kind") == "pose.set":    pending = r["t_mono_ms"]
+            elif r.get("kind") == "pose.landed" and pending is not None:
+                out.append((r["t_mono_ms"] - pending) / 1000.0); pending = None
+        return out, fh.tell()
+
 def move(pose, timeout=40):
+    """Command a pose and wait for it to land.  Timing comes from moves_since(), not here."""
     rpc("pose.set", name=pose)
-    t0 = time.time()
-    while time.time() - t0 < 3.0:
-        if rpc("status").get("pose_move_active"): break
-        time.sleep(0.02)
     t0 = time.time()
     while time.time() - t0 < timeout:
         s = rpc("status")
-        if not s.get("pose_move_active") and not s.get("pose_queue"): return s
+        if not s.get("pose_move_active") and not s.get("pose_queue"):
+            time.sleep(0.25)                      # let pose.landed reach the log
+            s2 = rpc("status")
+            if not s2.get("pose_move_active"): return s2
         time.sleep(0.05)
     return rpc("status")
 
@@ -64,7 +85,6 @@ def point(slew, stagger, poses):
     if not r.get("ok"): return None, f"limits.set refused: {r.get('error')}"
     b = rpc("status")
     pos = os.path.getsize(path)
-    t_start = time.time()
     i_peak, vbat_min = 0.0, 99.0
     for _ in range(CYCLES):
         for pose in poses:
@@ -73,9 +93,10 @@ def point(slew, stagger, poses):
             i_peak  = max(i_peak, ina.get("i_peak", 0) or 0)
             vbat_min = min(vbat_min, s["vbat"])
     a = rpc("status")
-    secs = time.time() - t_start
-    ev, _ = ext5v_since(pos)
-    row = dict(slew=slew, stagger=stagger, secs=secs, i_peak=i_peak, vbat_min=vbat_min,
+    ev, pos2 = ext5v_since(pos)
+    durs, _ = moves_since(pos)
+    secs = st.median(durs) if durs else float("nan")
+    row = dict(slew=slew, stagger=stagger, secs=secs, nmoves=len(durs), i_peak=i_peak, vbat_min=vbat_min,
                ext5v_min=min(ev) if ev else None, n=len(ev),
                bus_err=a["bus_errors"] - b["bus_errors"],
                wd=a["watchdog_trips"] - b["watchdog_trips"],
@@ -96,8 +117,15 @@ print(f"start vbat={s0['vbat']:.2f}  thr={s0['pi_throttled']}  ext5v={s0['ext5v'
       f"posture: OPERATOR-REPORTED 'on the floor on its belly' — servos are NOT bearing the chassis\n")
 # ⚠ `secs` is the tripwire.  If raising the slew does not shorten the moves, the knob is not
 # in the path being driven -- which is how the first run of this sweep fooled itself.
-hdr = (f"{'pslew':>6} {'stag':>5} {'secs':>6} {'i_peak':>7} {'vbat_lo':>8} {'ext5v_lo':>9} "
-       f"{'bus':>4} {'wd':>3} {'thr':>8}")
+# ⚠ `move_s` is the tripwire and it is measured by the DAEMON.  If raising the slew does not
+# shorten the moves, the knob is not in the path being driven -- which fooled this sweep twice:
+# once by setting the wrong global, once by reporting my own poll timeout as the move time.
+hdr = (f"{'pslew':>6} {'stag':>5} {'move_s':>7} {'n':>3} {'i_peak':>7} {'vbat_lo':>8} "
+       f"{'ext5v_lo':>9} {'bus':>4} {'wd':>3} {'thr':>8}")
+def show(r):
+    print(f"{r['slew']:>6} {r['stagger']:>5} {r['secs']:>7.2f} {r['nmoves']:>3} {r['i_peak']:>7.3f} "
+          f"{r['vbat_min']:>8.2f} {(r['ext5v_min'] or 0):>9.4f} {r['bus_err']:>4} "
+          f"{r['wd']:>3} {r['thr']:>8}")
 rows, stopped = [], None
 try:
     print("== ladder 1: POSE slew, stagger held at 100 ms, rescue<->stand ==")
@@ -106,9 +134,7 @@ try:
         row, why = point(slew, 100, ("stand", "rescue"))
         if row is None: stopped = why; break
         rows.append(row)
-        print(f"{row['slew']:>6} {row['stagger']:>5} {row['secs']:>6.1f} {row['i_peak']:>7.3f} "
-              f"{row['vbat_min']:>8.2f} {(row['ext5v_min'] or 0):>9.4f} {row['bus_err']:>4} "
-              f"{row['wd']:>3} {row['thr']:>8}")
+        show(row)
         if why: stopped = f"pose_slew {slew}: {why}"; break
     if not stopped:
         print("\n== ladder 2: stagger, at the top slew the ladder reached, X<->rescue (the 2026-08-29 case) ==")
@@ -131,6 +157,20 @@ s1 = rpc("status")
 print(f"\nstopped: {stopped or 'nothing failed — the ladder ran out before the robot did'}")
 print(f"end vbat={s1['vbat']:.2f} (started {s0['vbat']:.2f})  thr={s1['pi_throttled']}  "
       f"bus_err={s1['bus_errors']}  wd={s1['watchdog_trips']}  rail_events={s1['rail_events']}")
+# ⚠ THE SELF-CHECK.  Two sweeps have now reported "no failure" while the lever was not
+# connected.  A clean ladder is only evidence if the ladder did something, so prove it from
+# the daemon's own move times before any ceiling is claimed.
+l1 = [r for r in rows if r["stagger"] == 100 and r["nmoves"]]
+if len(l1) >= 2:
+    lo, hi = l1[0], l1[-1]
+    ratio = (lo["secs"] / hi["secs"]) if hi["secs"] else 0.0
+    moved = ratio > 1.5
+    print(f"\nlever check: pose_slew {lo['slew']} -> {hi['slew']} ({hi['slew']/lo['slew']:.0f}x) "
+          f"moved the median move time {lo['secs']:.2f}s -> {hi['secs']:.2f}s ({ratio:.2f}x faster)")
+    if not moved:
+        print("⚠ NO CEILING CLAIMED: the slew lever did not change how long the moves take, so "
+              "'nothing failed' says nothing about slew.  Find why the knob is not in the path "
+              "before reading anything else in this table.")
 if rows:
     best = max(rows, key=lambda r: r["i_peak"])
     print(f"highest current seen: {best['i_peak']:.3f} A at slew {best['slew']}, stagger {best['stagger']} ms")
