@@ -63,7 +63,15 @@ constexpr int64_t RAIL_GUARD_MS = 5000;
 // through popen, so 10 Hz costs ~1.5 % of one core and bounds detection at ~100 ms.
 // EXT5V is instrument-only and 2.9 ms, so it stays at 1 Hz -- there is nothing to react to.
 constexpr int64_t THROTTLE_POLL_MS = 100;
-constexpr int64_t EXT5V_POLL_MS    = 1000;
+constexpr int64_t EXT5V_POLL_MS    = 1000;   // default; ext5v.rate can raise it for a test
+// ⚠ RUNTIME, and it has to be benchd that does the sampling.  A test script polling
+// `vcgencmd pmic_read_adc` at 20 Hz alongside this daemon contends for the VideoCore
+// mailbox: measured 2026-09-25, one call wedged and took the sampler thread with it
+// (subprocess cleanup blocked on an uninterruptible child), which looked exactly like a
+// quiet rail -- 1 sample across six pose cycles, reported as a clean PASS by the first
+// version of the separation test.  One owner of the mailbox, and everyone else reads the
+// record it writes.
+int64_t g_ext5v_poll_ms = EXT5V_POLL_MS;
 // ToF stall detection lives in ogma::hw::TofRecoveryPolicy (tested there).
 constexpr int    CAL_TIMEOUT_MS  = 120000;
 constexpr int    OPER_MIN_US     = 900;    // operating envelope until calibration narrows it
@@ -515,7 +523,7 @@ struct State {
             // spacing of the operator's logging script, not the cost of the call; the
             // call is 2.9 ms and would run at ~340 Hz.  See bom §3.8.8.4.)
             if (now >= ext5v_next_ms) {
-                ext5v_next_ms = now + EXT5V_POLL_MS;
+                ext5v_next_ms = now + g_ext5v_poll_ms;
                 if (FILE* f = popen("vcgencmd pmic_read_adc EXT5V_V 2>/dev/null", "r")) {
                     char b[128] = {0};
                     if (fgets(b, sizeof b, f)) {
@@ -527,6 +535,11 @@ struct State {
                     }
                     pclose(f);
                 }
+                // In fast mode the 10 Hz telemetry frame is too coarse to be the record,
+                // so each sample gets its own line.  Gated on the rate so normal running
+                // does not grow the log by 10x for a channel nothing acts on.
+                if (g_ext5v_poll_ms < 500)
+                    record("ext5v", {{"v", ext5v}, {"vbat", vbat}, {"i_a", ina_i}});
             }
             if (FILE* f = popen("vcgencmd get_throttled 2>/dev/null", "r")) {
                 char b[64] = {0}; if (fgets(b, sizeof b, f)) { std::string t(b); auto eq = t.find('='); if (eq != std::string::npos) { pi_throttled = t.substr(eq + 1); while (!pi_throttled.empty() && (pi_throttled.back() == '\n' || pi_throttled.back() == '\r')) pi_throttled.pop_back(); } }
@@ -836,6 +849,15 @@ json handle(State& S, const json& req) {   // caller holds m
         catch (const std::exception& e) { return err(std::string("stop_continuous: ") + e.what()); }
         S.record("tof_stall_injected", {{"by", "verb"}});
         return ok();
+    }
+    if (verb == "ext5v.rate") {
+        // Bench-only: raise the EXT5V sample rate for a measurement, then put it back.
+        // Below 500 ms each sample is also written to the JSONL as its own record.
+        const int ms = req.value("ms", int(EXT5V_POLL_MS));
+        if (ms < 20 || ms > 60000) return err("ms out of 20-60000");
+        g_ext5v_poll_ms = ms;
+        S.record("ext5v.rate", {{"ms", ms}});
+        return ok({{"ms", g_ext5v_poll_ms}, {"recording_each_sample", ms < 500}});
     }
     if (verb == "rail.inject") {
         // ⚠ FAULT INJECTION.  RailGuard's LOGIC has unit tests; what those cannot reach is
