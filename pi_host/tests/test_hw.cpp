@@ -683,8 +683,52 @@ TEST(Vl53l0xValidity, ARawOfZeroIsNotAMeasurementAndMustNotReadAsZeroClearance) 
 
 // ---------------------------------------------------------------------------
 #include "ogma/hw/RailGuard.hpp"
+#include "ogma/body/StrideOdometry.hpp"
+using ogma::body::Vec3f;
 using ogma::hw::RailGuard;
 
+TEST(TofBoom, AtZeroTiltCompensatedEqualsUncompensated) {
+    // The whole point of the correction is that it does NOTHING when level -- that is what
+    // makes the fitted level-pose offset still the right anchor (BOM §9.2).
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    const double d = 0.120, H = 0.0648, z = -0.070;
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(d, up, H, z),
+                ogma::body::ground_clearance_boom_uncomp(d, H), 1e-12);
+}
+TEST(TofBoom, BellyDownReadsZeroWhenTheOffsetMatchesTheStandoff) {
+    // BOM §9.9 measured the standoff at 68.0 mm in the X pose, belly ON the floor, and the
+    // stored 64.8 therefore reports +3.2 mm of clearance with the belly flat.  Pinned so the
+    // permissive direction cannot be forgotten: a threshold of "clearance < 0" never fires.
+    const Vec3f up(0.0f, 1.0f, 0.0f);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(0.068, up, 0.068, -0.070), 0.0, 1e-12);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(0.068, up, 0.0648, -0.070), 0.0032, 1e-9);
+}
+TEST(TofBoom, PitchMovesTheRawReadingFarMoreThanTheBelly) {
+    // The measurement that justifies the correction existing.  Hold the belly at a true
+    // 20 mm and pitch the body 10°; the naive reading moves by ~12 mm, the corrected one
+    // does not move at all.
+    const double H = 0.0648, z = -0.070, true_clear = 0.020;
+    const double th = 10.0 * M_PI / 180.0;
+    // up in the body frame for a pitch of th about X: pitch = atan2(-up.z, up.y)
+    const Vec3f up(0.0f, float(std::cos(th)), float(-std::sin(th)));
+    // the along-ray range that a body at this attitude with this clearance would return
+    const double d = (true_clear + H * std::cos(th) + z * (-std::sin(th))) / std::cos(th);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(d, up, H, z), true_clear, 1e-9);
+    const double naive = ogma::body::ground_clearance_boom_uncomp(d, H);
+    EXPECT_GT(std::fabs(naive - true_clear), 0.010);   // the naive reading is >10 mm out
+}
+TEST(TofBoom, TheAftBoomSignIsNoseDownReadsHigh) {
+    // ⚠ A SIGN ERROR HERE DOUBLES THE ARTEFACT INSTEAD OF REMOVING IT, and still looks
+    // plausible.  Boom is AFT (z<0): nose-DOWN lifts the tail, so the sensor rises and the
+    // naive reading grows.  Pinned as an inequality on the naive arm so the fixture states
+    // which way the hardware actually leans.
+    const double H = 0.0648, z = -0.070;
+    const double th = 8.0 * M_PI / 180.0;             // nose-down
+    const Vec3f up(0.0f, float(std::cos(th)), float(std::sin(th)));
+    const double true_clear = 0.020;
+    const double d = (true_clear + H * std::cos(th) + z * std::sin(th)) / std::cos(th);
+    EXPECT_NEAR(ogma::body::ground_clearance_boom(d, up, H, z), true_clear, 1e-9);
+}
 TEST(RailGuard, BitsAlreadySetAtStartupAreHistoryAndNeverFire) {
     // The sticky mask survives until a reboot, so a robot started after an earlier event
     // begins life with bits set.  Treating those as "it just happened" would rescue-pose

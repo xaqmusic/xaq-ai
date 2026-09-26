@@ -169,6 +169,60 @@ inline double ground_clearance(double raw_m, double stand_m) {
     return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
 }
 
+// --- belly clearance from a BOOM-mounted ToF ---------------------------------
+//
+// The as-built sensor is not under the belly centre: it rides a boom ~70 mm AFT and near
+// the top of the HAT (BOM §9.1), casting along BODY-down because it is bolted to a
+// tilting robot.  Two consequences, and the second is what makes this a contract rather
+// than a unit conversion:
+//
+//   1. The ray descends `up.y` metres of altitude per metre travelled, so an along-ray
+//      range d is a vertical drop of `d * up.y`.  (`up.y` is exactly `upright`.)
+//   2. ⚠ THE BOOM IS A LEVER ARM ON PITCH.  70 mm aft means 10° of pitch moves the
+//      sensor ~12 mm while the belly barely moves.  BOM §9.9 measured the pose signal
+//      this defends at ~1.5 mm, so UNCOMPENSATED THIS CHANNEL IS CLOSER TO A PITCH
+//      SENSOR THAN A HEIGHT SENSOR, by an order of magnitude -- and it is most wrong
+//      exactly when the body is pitched, which is when belly-strike is likeliest.
+//
+// `up` is world-up in the BODY frame: the FUSED gravity estimate (ImuAttitude::up_fused),
+// never an exact basis, because the estimate is the only attitude a robot has.
+//
+// ⚠ THE SENSOR OFFSET IS EXPRESSED RELATIVE TO THE BELLY PLANE, NOT THE BODY ORIGIN, and
+// that is deliberate.  Writing it about the origin needs a third number -- how far the
+// belly sits below the origin -- which the robot has never fitted and which cancels
+// exactly when the offset is taken from the belly.  What is left is `sensor_above_belly`,
+// which IS the fitted `tof.mount_offset_mm`, and `boom_z`.  Both are calibration data the
+// robot already owns.
+//
+// ⚠ THIS CORRECTS A BUG IN THE SIM'S OWN FORM, found while porting it.  picrawler_body.gd's
+// _compute_ground_clearance_boom derives the sensor term as a projection (`s · up`) and
+// then adds the belly offset UN-projected (`+ _chassis_bottom_local` where the geometry
+// requires `+ bottom * up.y`).  The two agree at zero tilt and diverge by
+// `bottom * (1 - cos θ)`: about -0.3 mm at 10°, -2.8 mm at 30°, in the conservative
+// direction.  Small, real, and invisible at the level pose where it was checked.
+// ⚠ So the sim's `tof_tilt_comp` ON arm CHANGES when it swaps onto this.  The gain-0
+// guard still holds -- the lever defaults OFF and the OFF path is untouched -- but the ON
+// arm is not byte-identical, and must not be claimed as such.
+//
+// Returns metres, floored at 0: a negative clearance means the belly is already through
+// the surface, which is a reading about the model rather than the world.
+inline double ground_clearance_boom(double along_ray_m, const Vec3f& up,
+                                    double sensor_above_belly_m, double boom_z_m) {
+    const double vertical_drop      = along_ray_m * double(up.y);
+    const double sensor_above_belly = sensor_above_belly_m * double(up.y)
+                                    + boom_z_m * double(up.z);
+    const double v = vertical_drop - sensor_above_belly;
+    return v < 0.0 ? 0.0 : v;
+}
+
+// What a driver that ignored attitude would publish: the along-ray range minus the
+// LEVEL-POSE offset.  Correct at zero tilt and increasingly wrong away from it --
+// deliberately kept so the correction can be MEASURED against it rather than assumed.
+inline double ground_clearance_boom_uncomp(double along_ray_m, double sensor_above_belly_m) {
+    const double v = along_ray_m - sensor_above_belly_m;
+    return v < 0.0 ? 0.0 : v;
+}
+
 // --- stride_v ⊕ slip ---------------------------------------------------------
 
 struct StrideVParams {
