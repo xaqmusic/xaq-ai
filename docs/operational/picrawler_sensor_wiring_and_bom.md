@@ -2037,6 +2037,79 @@ state mutex the servo tick also takes, and a VL53L0X `init()` is the long boot s
 under the lock. And any auto-recovery must be **counted and published**, or it will hide
 the electrical marginality that causes it rather than surfacing it.
 
+### ★★★ 9.9 THE BOOM RE-READ, AND WHY CALIBRATION MUST NOT MOVE INTO BRAIN INIT — ✅ 2026-09-26
+
+Prompted by an operator observation (±~3 mm of fluctuation standing still) and a question worth
+its own section: *should ToF height calibration be part of brain init?* Measured on vinyl,
+`pose_slew` 12 / stagger 100, signal **24.2 Mcps** against **0.031** ambient (SNR ~780:1, so the
+part is healthy and every number below is its ranging noise at strong return, not a weak echo).
+
+| pose | raw | sd | n | clearance (stored offset) | pitch | roll |
+|---|---|---|---|---|---|---|
+| `rescue` | 69.0 mm | 1.24 | 49 | +0.0042 m | +0.03° | +0.71° |
+| **`X` (belly ON floor)** | **68.0 mm** | 1.97 | 76 | **+0.0032 m** | −0.01° | +0.82° |
+| `rescue` again | 70.0 mm | 1.35 | 45 | +0.0052 m | +0.03° | +0.73° |
+
+**Four results, and the third is the one that decides the question.**
+
+**(1) The stored offset is 3.2 mm PERMISSIVE.** Belly-down measures 68.0 mm against a stored
+64.8, so with the belly flat on the floor the channel still reports **+3.2 mm of clearance**. ⚠
+The direction matters: **a threshold written as `clearance < 0` can never fire.**
+
+**(2) The 2026-09-26 91 mm excursion did not reproduce.** `rescue` read 69.0 and 70.0 mm either
+side of the X measurement — **1.0 mm apart**. That earlier 0.0952 m sample was a one-off and
+should not be treated as a channel property; what it does justify is never trusting a single
+clearance sample.
+
+**(3) ⚠⚠ `rescue` and `X` are only ~1.5 mm apart in raw range, against a sd of 1.5–2.0 mm — an
+SNR of about 1.** The pose that holds the belly *off* the floor and the pose that puts it *on*
+the floor are, to this sensor, nearly the same reading. **This is the argument against a
+boot-time calibration, and it is a measurement rather than a preference:** an init procedure
+would anchor on a reference it cannot resolve from its neighbour, using a handful of samples,
+and inject more error than the 3.2 mm it set out to correct. §9.2's careful multi-point fit is
+better than anything a boot routine can produce, which is why the 3.2 mm above is **recorded and
+deliberately not applied**.
+
+**(4) Attitude costs nothing in a static pose — and dominates in a moving one.** Pitch was
+**±0.03°** in both poses, so none of the spread above is tilt. But the boom sits ~70 mm aft
+(§9.1), so pitch enters at ~`70·sin θ` — **about 12 mm per 10°**. Set that beside result (3):
+**the signal of interest is ~1.5 mm and the pitch artifact is tens of mm.** During a gait this
+channel is closer to a pitch sensor than a height sensor, by an order of magnitude.
+
+⚠ **Hardware applies NO tilt compensation.** The sim has `tof_boom` (`tof_boom_z = -0.07`) and
+`tof_tilt_comp`, both defaulting off; `benchd` has neither, and `tof_m` is `raw − offset` with no
+attitude term. **This, not calibration drift, is the thing to fix first** — no calibration
+repairs a channel that is measuring the wrong quantity.
+
+#### 9.9.1 So: what SHOULD happen at init, and what the FSR toes actually break
+
+**The question conflates two constants that fail differently.**
+
+| constant | what it is | do the ~1 cm FSR toes break it? |
+|---|---|---|
+| `tof.mount_offset_mm` = 64.8 | sensor → belly-plane geometry, anchored belly-down | **No.** Belly-down means the belly is on the floor; toe length does not move the belly plane relative to a HAT-mounted boom. ⚠ Confirm the longer toes still *reach* belly-down in `X` |
+| `ground_clearance.stand_m` = 0.06 | the normalizer the promoted height homeostat rides | **Yes** — longer legs stand taller. ⚠ And it *must* match the sim's `GROUND_CLEARANCE_STAND`, so it cannot be re-fitted on the robot alone |
+
+**Recommended, in the order the measurements justify:**
+
+1. **Tilt compensation on hardware**, matching the sim's `tof_tilt_comp`, publishing raw *and*
+   compensated *and* the pitch used — result (4) makes this the only change that matters for a
+   moving robot, and publishing the pitch is the rule about confounds riding in the channel.
+2. **An init-time health CHECK, never a calibration.** In `X`, compare against prediction and
+   **fail loudly** on disagreement past the noise floor. It catches a fitted toe module, a
+   bumped boom, or the wrong surface, without silently moving a constant. ⚠ Its gate must clear
+   ~3 sd ≈ **6 mm**; anything tighter will cry wolf on result (3)'s noise alone.
+3. **One absolute number, and make it the grounding threshold** — in raw mm against the measured
+   standoff with an explicit margin, **not** `clearance < 0` (result 1), and **not** tighter than
+   ~6 mm (result 3). Toe length never enters it.
+4. **Make `stand_m` adaptive** rather than fitted, per CLAUDE.md §5 — a running normalizer
+   absorbs a 1 cm leg change in seconds and deletes the FSR problem. ⚠ It feeds a **promoted**
+   lever and is shared with the sim, so it is a two-body port under the gain-0 / byte-identity
+   bar, not a constant to edit.
+
+⚠ **A boot-time absolute zero would be wrong for a further reason:** §9.8 measured surface
+dependence, so a zero taken on vinyl at boot is a zero for vinyl — and terrain is the point.
+
 ### 9.3 Two-point validation — the standing pose, ✅ MEASURED 2026-09-07
 
 A one-point fit calibrates but cannot be wrong-checked. The second point is the saved `stand`

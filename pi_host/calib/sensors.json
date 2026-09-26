@@ -10,7 +10,7 @@
   ],
   "tof": {
     "mount_offset_mm": 64.8,
-    "_why": "The VL53L0X is recessed up inside the chassis so the belly's 0-56 mm working range sits above the part's unreliable short end. Anchored at BELLY-DOWN, which folds the part's own 8-11 mm long-reading bias into the offset and puts the calibration at the dangerous end of the channel. Re-fit after any belly re-assembly."
+    "_why": "The sensor rides a SOLID BOOM off one of the HAT's mounting screws, ~4 mm below the top of the HAT, looking down (BOM \u00a79.1 'as built'; it cannot go inside the chassis because the battery is there). Sitting high puts the belly's 0-56 mm working range above the part's unreliable short end. Anchored at BELLY-DOWN, which folds the part's own 8-11 mm long-reading bias into the offset and puts the calibration at the dangerous end of the channel. Re-fit after any belly re-assembly. \u26a0 An earlier version of this note said the sensor was 'recessed up inside the chassis', which described a mount that has never existed on this robot -- the number was right and its stated reason was wrong. \u26a0 RE-READ 2026-09-26 against the X pose: belly-down measures 68.0 mm (sd 1.97, n=76), so this 64.8 is 3.2 mm PERMISSIVE and clearance reads +0.0032 m with the belly flat on the floor. Deliberately NOT re-fitted from that sample -- see BOM \u00a79.9."
   },
   "ina219": {
     "r_shunt_ohm": 0.01,

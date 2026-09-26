@@ -49,7 +49,7 @@ def sample(label, secs):
         if t.get("ok"):
             if t.get("valid", True) and t.get("raw_mm"):
                 raw.append(t["raw_mm"]); m.append(t.get("m"))
-                sig.append(t.get("signal", 0)); amb.append(t.get("ambient", 0))
+                sig.append(t.get("signal_mcps", 0)); amb.append(t.get("ambient_mcps", 0))
             else: bad += 1
         if imu.get("ok"):
             p, r = tilt_deg(imu.get("up_fused")); pit.append(p); rol.append(r)
