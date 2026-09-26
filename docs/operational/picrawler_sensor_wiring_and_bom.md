@@ -2110,6 +2110,86 @@ repairs a channel that is measuring the wrong quantity.
 ⚠ **A boot-time absolute zero would be wrong for a further reason:** §9.8 measured surface
 dependence, so a zero taken on vinyl at boot is a zero for vinyl — and terrain is the point.
 
+### ★★★ 9.10 BOOM TILT COMPENSATION — ✅ BUILT AND VALIDATED 2026-09-26
+
+`ogma::body::ground_clearance_boom()`, shared by both bodies, computing
+
+```
+belly_clearance = d·up.y − ( H·up.y + boom_z·up.z )        H = sensor-above-belly, boom_z = −0.070
+```
+
+with `up` the **fused** gravity estimate (`ImuAttitude::up_fused`) — never an exact basis,
+because the estimate is the only attitude a robot has.
+
+⚠ **The offset is taken from the BELLY PLANE, not the body origin, and that is what made the
+port possible.** About the origin the formula needs a third number — how far the belly sits
+below it — which this robot has never fitted. Taken from the belly it cancels exactly, leaving
+`H` (which *is* the fitted `mount_offset_mm`) and `boom_z`. Both are calibration data already
+owned, and `H` is **derived** from the loaded offset rather than duplicated, so the two cannot
+drift apart.
+
+**Validated on the robot by its own predicted magnitude**, which is the only test that works
+here: pitching by trimming leg lengths changes the belly height too, so "clearance stays
+constant" would prove nothing. What *is* predictable from attitude alone is the size of the
+correction, so that is what was checked.
+
+| knee trim | pitch | `comp_delta` | `−boom_z·up.z` | residual |
+|---|---|---|---|---|
+| 0 | −0.84° | +1.01 mm | +1.02 mm | −0.02 mm |
+| +120 µs | +0.94° | −1.17 mm | −1.15 mm | −0.02 mm |
+| −120 µs | **−3.51°** | **+4.19 mm** | +4.28 mm | **−0.09 mm** |
+
+**Sign correct at 4/4 tilted points** (nose-up → negative correction), checked separately
+because ⚠ **a sign error doubles the artefact instead of removing it and still looks
+plausible.**
+
+★ **The residual is not noise — it is the term the prediction omits.** The check predicted only
+the leading `−boom_z·up.z`, dropping `(d−H)(up.y−1)`. At 3.51° that term is
+`0.053 × (1−cos 3.51°) = 0.10 mm`, against an observed **0.09 mm**. So the deployed formula is
+confirmed in its second-order behaviour, not merely its slope. ⚠ And that term is **not**
+negligible at gait pitches: ~1.8 mm at 15°, which is why `benchd` uses the full form and the
+approximation above is only the yardstick.
+
+⚠ **TESTED RANGE IS ONLY −3.5° TO +0.9°.** ±120 µs of knee trim turned out to be a weak pitch
+lever — ±12.6° of knee angle bought under 4° of chassis pitch. Extrapolation to the 10–15°
+a gait reaches is **model-based, not measured.** Worth re-running with larger trims, or by
+resting the robot on a wedge, before the correction is trusted at gait amplitudes.
+
+#### 9.10.1 Shipped at gain 0, and what remains
+
+⚠ **`m_comp` is published ALONGSIDE `m`, never instead of it.** `m` feeds the **promoted**
+height homeostat through `ground_clearance()`; substituting the corrected value underneath it
+would change a promoted input with no A/B — a lever masquerading as a bug fix. The frame now
+carries `m_comp`, `comp_delta` and **`comp_valid`**, the last because the correction needs
+attitude and must say so rather than quietly emitting the uncorrected number under the
+corrected name.
+
+**Remaining, in order:**
+1. **Swap the sim onto the shared helper.** ⚠ Its `tof_tilt_comp` ON arm will **change**, because
+   the helper fixes a real error there (§9.10.2). The gain-0 guard still holds — the lever
+   defaults off and the OFF path is untouched — so *byte-identity applies to the OFF arm only*
+   and must not be claimed for the ON arm.
+2. **Re-run the tilt sweep at gait amplitudes** (see the range caveat above).
+3. **A/B `m_comp` against `m`** into the homeostat. Only then does the correction become the
+   published channel.
+
+#### ⚠ 9.10.2 The port found a bug in the sim it came from
+
+`picrawler_body.gd`'s `_compute_ground_clearance_boom` derives the sensor term correctly as a
+projection (`s · up`) and then adds the belly offset **un-projected**: it returns
+`d*up.y − (s·up) + _chassis_bottom_local` where the geometry requires `+ bottom * up.y`.
+
+The two agree exactly at zero tilt — which is where it was checked — and diverge by
+`bottom·(1 − cos θ)`: about **−0.3 mm at 10°, −2.8 mm at 30°**, conservative in direction.
+Small, real, and invisible at the level pose. Folding the belly offset into the sensor position
+removes the term entirely rather than correcting it in place, which is why the shared helper
+takes two parameters where the sim used three.
+
+⚠ **Side-finding worth keeping:** in `stand` the boom reads **~118 mm** against **68 mm**
+belly-down, so the chassis lifts ~50 mm. That is a far better posture measurement than the
+§9.9 attempt to infer posture from clearance in `rescue` vs `X`, where the two poses sat
+~1.5 mm apart — inside the noise.
+
 ### 9.3 Two-point validation — the standing pose, ✅ MEASURED 2026-09-07
 
 A one-point fit calibrates but cannot be wrong-checked. The second point is the saved `stand`
