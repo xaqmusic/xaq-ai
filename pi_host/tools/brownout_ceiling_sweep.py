@@ -129,8 +129,18 @@ s0 = rpc("status")
 if not s0.get("ok"): sys.exit(f"daemon not answering: {s0}")
 if s0["vbat"] < VBAT_FLOOR: sys.exit(f"vbat {s0['vbat']:.2f} already below the {VBAT_FLOOR} V floor")
 rpc("ext5v.rate", ms=100)
-print(f"start vbat={s0['vbat']:.2f}  thr={s0['pi_throttled']}  ext5v={s0['ext5v']}\n"
-      f"posture: OPERATOR-REPORTED 'on the floor on its belly' — servos are NOT bearing the chassis\n")
+# ⚠ POSTURE IS AN ARGUMENT, NOT A STRING LITERAL.  It was hardcoded as "on its belly" and
+# stayed that way into a run where the operator had said only "on the floor" -- a results table
+# asserting a condition nobody checked.  Load is dominated by whether the servos bear the
+# chassis, so this is not decoration: it is the single biggest term in every current figure.
+POSTURE = os.environ.get("SWEEP_POSTURE", "").strip()
+if not POSTURE:
+    sys.exit("set SWEEP_POSTURE to the operator-reported posture, e.g.\n"
+             "  SWEEP_POSTURE='on the floor, standing, bearing weight' python3 ...\n"
+             "It is recorded verbatim with the results and it bounds every current number.")
+print(f"start vbat={s0['vbat']:.2f}  thr={s0['pi_throttled']}  ext5v={s0['ext5v']}")
+print(f"posture: OPERATOR-REPORTED — {POSTURE}")
+print(f"⚠ INA219 basis: post-2026-09-25 rewire, so this is SERVO current, Pi excluded.\n")
 # ⚠ `secs` is the tripwire.  If raising the slew does not shorten the moves, the knob is not
 # in the path being driven -- which is how the first run of this sweep fooled itself.
 # ⚠ `move_s` is the tripwire and it is measured by the DAEMON.  If raising the slew does not
@@ -194,4 +204,5 @@ elif len(l1) >= 2:
 if rows:
     best = max(rows, key=lambda r: r["i_peak"])
     print(f"highest current seen: {best['i_peak']:.3f} A at slew {best['slew']}, stagger {best['stagger']} ms")
-    print("⚠ belly posture + 7.5 V pack: treat every number here as a FLOOR, not a limit.")
+    print(f"⚠ conditions: {POSTURE}; pack {s0['vbat']:.2f} -> {s1['vbat']:.2f} V. "
+          f"Every number is bounded by those, and they are not the same across runs.")
