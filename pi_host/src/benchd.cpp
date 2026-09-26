@@ -416,9 +416,15 @@ struct State {
             // The boom correction (§9.9, ogma::body::ground_clearance_boom).  Needs attitude, so it
             // is only valid once the IMU filter has a fused up -- and says so rather than quietly
             // publishing the uncorrected number under the corrected name.
-            if (imu && imu_ok && imu_s.up_fused.length() > 0.5f) {
+            // ⚠ imu_s.up_fused is a std::array<float,3> on the wire, not a Vec3f -- the
+            // sample struct is plain data so it can cross the telemetry boundary.  Rebuild
+            // the vector here rather than changing that struct.
+            const auto& uf = imu_s.up_fused;
+            const ogma::body::Vec3f up_b(uf[0], uf[1], uf[2]);
+            const float up_len2 = uf[0]*uf[0] + uf[1]*uf[1] + uf[2]*uf[2];
+            if (imu && imu_ok && up_len2 > 0.25f) {          // |up| > 0.5
                 tof_m_comp = ogma::body::ground_clearance_boom(
-                    double(tof_raw_mm) / 1000.0, imu_s.up_fused,
+                    double(tof_raw_mm) / 1000.0, up_b,
                     g_tof_boom_above_belly_m, g_tof_boom_z_m);
                 tof_comp_delta = tof_m_comp - tof_m;
                 tof_comp_valid = true;
