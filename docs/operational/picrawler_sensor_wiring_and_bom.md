@@ -2150,10 +2150,28 @@ confirmed in its second-order behaviour, not merely its slope. ⚠ And that term
 negligible at gait pitches: ~1.8 mm at 15°, which is why `benchd` uses the full form and the
 approximation above is only the yardstick.
 
-⚠ **TESTED RANGE IS ONLY −3.5° TO +0.9°.** ±120 µs of knee trim turned out to be a weak pitch
-lever — ±12.6° of knee angle bought under 4° of chassis pitch. Extrapolation to the 10–15°
-a gait reaches is **model-based, not measured.** Worth re-running with larger trims, or by
-resting the robot on a wedge, before the correction is trusted at gait amplitudes.
+⚠ **TESTED RANGE IS ONLY −3.5° TO +0.9°.** Differential knee trim measured out at
+**~0.0125 °/µs** — ±120 µs buys ±1.5° about the baseline, a 4.45° span from ±12.6° of knee
+angle. Extrapolation to the 10–15° a gait reaches is **model-based, not measured.**
+
+⚠ **And knee trim cannot get there.** 10° would need ~±800 µs of differential trim, which puts
+`stand`'s 1455–1620 µs knees at 2255–2420 — at or past the 2300–2400 envelope. **Use a wedge**
+to validate at gait amplitude, not a bigger trim.
+
+**The deadman was ruled out as a confound, positively rather than by silence.** `sensors.json`'s
+servo note warns that with no fresh client command `benchd` commands the **rescue pose**, and
+that a small excursion "looks like nothing happening" — which would have faked exactly this weak
+response. Three checks say it did not happen here:
+1. `handle()` sets `last_client_ms` on **every** verb including `status`, and the sampler polled
+   at 10 Hz, so `client_fresh` never lapsed;
+2. the `deadman` records in the JSONL sit **139–185 s after the last `pose.set`** — the idle
+   stretch after the script exited, not inside it;
+3. pitch responded **monotonically** to trim in both directions, which a pose being pulled back
+   to rescue could not produce.
+
+⚠ **Minor, noted in passing:** while idle and armed, the deadman re-fires on a **~9.2 s cycle**
+(the 8.2 s rescue window plus the 1 s deadman), re-commanding rescue indefinitely. Harmless
+when already in that pose, but it is why `watchdog_trips` climbs on a robot nobody is driving.
 
 #### 9.10.1 Shipped at gain 0, and what remains
 
