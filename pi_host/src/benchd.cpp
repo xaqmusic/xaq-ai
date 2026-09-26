@@ -21,6 +21,7 @@
 #include "ogma/hw/Vl53l0x.hpp"
 #include "ogma/hw/TofRecovery.hpp"
 #include "ogma/hw/RailGuard.hpp"
+#include "ogma/body/StrideOdometry.hpp"   // ground_clearance_boom
 #include "ogma/hw/Icm20948.hpp"
 #include "ogma/hw/SensorCalib.hpp"
 
@@ -102,6 +103,11 @@ bool   g_tof_override = false;
 // belly's 0-56 mm range clears the part's unreliable short end, and only a tape measure
 // knows by how much.  0 = flush, which is the pre-bench default and not a fitted value.
 double g_tof_offset_mm = 0.0;
+// Boom geometry (BOM §9.1 "as built").  ⚠ sensor-above-belly is the SAME fitted number as
+// the mount offset -- expressing the offset from the belly plane is what removes the need
+// for a third constant the robot has never measured (see ground_clearance_boom).
+double g_tof_boom_above_belly_m = 0.0648;   // = tof.mount_offset_mm, overridden from calib
+double g_tof_boom_z_m           = -0.070;   // 70 mm AFT; forward is +Z, so negative
 // ⚠ DO NOT fsync() THE RECORD FROM record().  It was tried 2026-09-08 and MEASURED: at a
 // 1 s cadence, under the mutex the 50 Hz servo tick needs, an SD fsync costs ~80 ms and the
 // loop fell to 35.8 Hz with 54 overruns in 12 s (worst tick 419 % of the 20 ms budget, against
@@ -204,6 +210,13 @@ struct State {
     bool    tof_ok        = false;
     uint16_t tof_raw_mm   = 0;        // as the chip reported it, before the offset
     double  tof_m         = 0.0;      // belly clearance, m -- raw minus the mount offset
+    // ⚠ PUBLISHED ALONGSIDE tof_m, NEVER INSTEAD OF IT.  tof_m feeds the PROMOTED height
+    // homeostat through ground_clearance(); swapping the boom correction in underneath it
+    // would change a promoted input with no A/B, which is a lever masquerading as a fix.
+    // So the corrected value ships as its own channel at gain 0 until it is measured.
+    double  tof_m_comp    = 0.0;      // belly clearance with the boom's pitch lever removed
+    double  tof_comp_delta = 0.0;     // comp - uncomp, m: how much the correction is doing
+    bool    tof_comp_valid = false;   // false when the IMU has no attitude to correct with
     bool    tof_valid     = false;
     std::string tof_status = "noupdate";
     double  tof_signal    = 0.0;      // Mcps returned off the target
@@ -400,6 +413,18 @@ struct State {
             tof_since_fresh = 0;          // recovery worked (or was never needed)
             tof_raw_mm  = r.raw_mm;
             tof_m       = r.distance_m;
+            // The boom correction (§9.9, ogma::body::ground_clearance_boom).  Needs attitude, so it
+            // is only valid once the IMU filter has a fused up -- and says so rather than quietly
+            // publishing the uncorrected number under the corrected name.
+            if (imu && imu_ok && imu_s.up_fused.length() > 0.5f) {
+                tof_m_comp = ogma::body::ground_clearance_boom(
+                    double(tof_raw_mm) / 1000.0, imu_s.up_fused,
+                    g_tof_boom_above_belly_m, g_tof_boom_z_m);
+                tof_comp_delta = tof_m_comp - tof_m;
+                tof_comp_valid = true;
+            } else {
+                tof_m_comp = tof_m; tof_comp_delta = 0.0; tof_comp_valid = false;
+            }
             tof_valid   = r.valid;
             tof_status  = Vl53l0x::status_name(r.status);
             tof_signal  = r.signal_mcps;
@@ -610,6 +635,9 @@ struct State {
                                    {"valid", tof_valid}, {"status", tof_status},
                                    {"signal_mcps", tof_signal}, {"ambient_mcps", tof_ambient},
                                    {"spads", tof_spads},
+                                   {"m_comp", tof_m_comp}, {"comp_delta", tof_comp_delta},
+                                   {"comp_valid", tof_comp_valid},
+                                   {"boom_z_m", g_tof_boom_z_m},
                                    {"m_ema", tof_m_ema}, {"m_min", tof_m_min}, {"m_min_all", tof_m_min_all},
                                    {"bad_frac", tof_bad_frac},
                                    // Recovery is counted so the marginality that causes
@@ -1046,6 +1074,13 @@ int main(int argc, char** argv) {
     {
         const auto cal = ogma::hw::SensorCalib::load();
         if (!g_tof_override)     g_tof_offset_mm = cal.tof_mount_offset_mm;
+        // ⚠ ONE NUMBER, TWO USES.  The boom correction's sensor-above-belly IS the mount
+        // offset -- see ground_clearance_boom on why expressing it from the belly plane
+        // removes the third constant.  Deriving it here rather than duplicating it in
+        // sensors.json means the two cannot drift apart, which is the failure the calib
+        // file was created to stop (its own header records the offset living in two places
+        // and one of them silently losing it).
+        g_tof_boom_above_belly_m = g_tof_offset_mm / 1000.0;
         if (!g_r_shunt_override) g_r_shunt       = cal.ina_r_shunt_ohm;
         std::printf("ogma_benchd: normal slew %d us/tick (%.2f rad/s at 545.2 us/rad)\n",
                     g_normal_slew_us, g_normal_slew_us * 50.0 / 545.2);
