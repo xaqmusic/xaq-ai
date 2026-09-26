@@ -1439,6 +1439,78 @@ telemetry config is 128-sample averaging (§3 table); the 532 µs single-shot co
 above the HAT DC-DC's 3 A rating**, which is the likely mechanism for the MCU struggling. ⚠
 **Inferred, not measured: that is precisely the number Mod C would give directly.**
 
+#### ★★★ 3.8.8.8 THE CHARGED-PACK SWEEP — the pose path ran out before the robot did, ✅ 2026-09-26
+
+**Conditions.** Pi **upstream of the shunt**, so every current here is **servo-only**. Pack
+**7.96 → 7.91 V** (charged). Robot on the floor, operator-reported; `stand` measured to roughly
+double holding current over `rescue`, so it bears some weight.
+
+**The reference currents, now that the Pi is out of the channel:**
+
+| state | servo current |
+|---|---|
+| idle, holding `rescue` | **0.059 A** |
+| holding `rescue` (later sample) | 0.10–0.15 A |
+| holding `stand` | **0.213 A** |
+| peak during any pose move | **1.77 A** |
+
+⚠ **The Pi was ~0.50–0.55 A at the pack — most of the pre-rewire idle current.** Servo effort
+used to be a modulation on a 0.55 A offset and is now essentially the whole signal: about a
+**10× gain in usable dynamic range** for an effort percept, which is the real reason the rewire
+was worth doing.
+
+**The result: there is no cliff inside the adjustable range.**
+
+| pose slew | stagger | median move | i_peak | vbat min | failures |
+|---|---|---|---|---|---|
+| 12 *(old default)* | 100 ms | 2.87 s | 1.45 A | 7.85 V | none |
+| 400 | 100 ms | 1.43 s | 1.60 A | 7.88 V | none |
+| 400 | 20 ms | 0.55 s | 1.61 A | 7.84 V | none |
+| **400** | **0 ms** | **0.33 s** | 1.71 A | 7.88 V | **none** |
+
+**`pose_slew` 400 with zero stagger is the complete 2026-08-29 condition** — twelve channels
+starting together at high slew, the thing that took the Pi down in 0.5 s — and it lands a pose
+recall in **0.33 s against the old 2.87 s, 8.7× faster**, with no bus errors, no watchdog trip,
+no throttle flag and 0.05 V of pack sag.
+
+⚠⚠ **This did NOT find the ceiling. The ladder ran out.** `pose_slew` 400 / stagger 0 is the most
+aggressive move the pose path can express, so the honest claim is bounded: *the pose path's
+limits are no longer the binding constraint on a charged pack.* Finding the actual cliff needs a
+harder load than pose-to-pose motion — continuous driving, or the §3.6 concurrency path.
+
+#### ⚠ 3.8.8.9 The two sweeps are NOT comparable, and that is my error
+
+At the identical commanded point (`pose_slew` 400, stagger 100) the 2026-09-25 sweep peaked at
+**3.55 A** and this one at **1.70 A**. Removing the Pi explains only ~0.5 A of that.
+
+**Three variables changed between the runs at once:**
+1. the Pi left the measurement (−~0.5 A),
+2. the pack went from 7.1–7.5 V to 7.96 V,
+3. posture may differ — the earlier run's posture came from a **hardcoded string** and was
+   never checked (§3.8.8.7's sibling defect, fixed by making it a required argument).
+
+**So the 1.85 A difference is unattributable, and CLAUDE.md §3 rule 1 — one lever at a time —
+was broken.** Neither sweep is wrong; they are answers to different questions and must not be
+read as a before/after pair.
+
+**What the pair does jointly establish, and it is the useful part:** the earlier sweep found a
+real cliff (122 I²C bus errors) with `vbat` at **6.56 V**; this one found none with `vbat` never
+below **7.84 V**. **The cliff moves with pack voltage** — which §3.7 already predicted, source
+impedance being the governing term.
+
+⚠ **Therefore do not replace the old constant with a new one.** A fixed slew/stagger limit is
+the wrong *shape* of answer: whatever value is safe at 7.9 V is not safe at 7.1 V, and the
+2026-09-25 run is the evidence. Per CLAUDE.md §5 — *don't tune a constant to a signal's scale,
+adapt it from the system's own running dynamics* — the limit should be **scheduled on pack
+voltage, or better, closed on observed sag**. Mod C (§3.8.8.5) is what makes the closed-loop
+version possible, since it is the only way to see the rail the sag happens on.
+
+⚠ **Open, found while checking posture: the belly ToF returned three different clearances for
+two poses** — `rescue` 0.0952 m, `stand` 0.0522 m, `rescue` again 0.0042 m — every sample marked
+valid, n=29 each. Only the 0.0042 m figure is consistent with a belly-down chassis. Unresolved;
+it has the shape of a confident valid reading of the wrong thing, so treat clearance as
+unreliable until §9 is re-checked. It was not used for any number above.
+
 #### ⚠⚠ 3.8.8.7 The harness measured a stationary robot four times
 
 Recorded because the failure mode is general and it nearly put four fabricated results into
