@@ -2204,6 +2204,55 @@ pushes `ERROR: Parse JSON failed ... at _emit_jsonl`. It is present **identicall
 after** the swap, so it is pre-existing and not caused by this change — but the sim is throwing
 a parse error on every diag line and nothing has been chasing it.
 
+#### ⚠⚠ 9.10.3 THE CORRECTION ASSUMES HORIZONTAL GROUND — and terrain is where that breaks
+
+**Derived 2026-09-27 while planning the gait-amplitude sweep. Not yet measured; the test is
+scripted (`tof_ground_truth_check.py --mode slope`).** Written down before measuring because it
+is a *signed, quantified* prediction and it points the wrong way.
+
+`ground_clearance_boom` infers the boom's geometry relative to the ground from **gravity-
+referenced attitude**. That is only the same thing when the ground is horizontal. Two cases the
+sensor set cannot distinguish:
+
+| | pitch vs **gravity** | pitch vs **ground** | raw reading | which arm is right |
+|---|---|---|---|---|
+| chassis pitches on level floor *(gait)* | α | α | changes by ~`boom_z·sin α` | **compensated** |
+| chassis aligned to a slope *(terrain)* | α | **0** | **unchanged** | **uncompensated** |
+
+On a slope with the chassis parallel to it and true perpendicular clearance `c`, the ray is
+perpendicular to the surface so `d = H + c`, and the formula returns
+
+```
+c·cos α + boom_z·sin α          instead of          c
+```
+
+⚠ **The error term is `boom_z·sin α` — 18 mm at 15° — and its sign depends on heading:**
+
+- **Nose-up / climbing:** under-reports clearance. Conservative, harmless.
+- **Nose-down / descending:** ⚠ **over-reports by ~18 mm.** Phantom clearance, in the dangerous
+  direction, and worst exactly when the belly's leading edge is nearest the ground.
+
+⚠ **And the arms swap: on a slope-aligned chassis the UNCOMPENSATED reading `d − H` is exactly
+`c`, i.e. correct.** So neither arm is right in general, and the discriminator — pitch relative
+to the *ground* rather than to gravity — is not in the channel. A single-point rangefinder
+cannot supply it.
+
+**This is a bigger problem than the one §9.10 set out to fix.** The boom lever is ~12 mm per 10°
+on level ground; the slope error is ~18 mm at 15° and it is the *unsafe* sign. Terrain is the
+stated goal, so this is on the critical path.
+
+**What an actual fix needs — a surface-normal estimate, which means a new observation:**
+1. **Two range points fore/aft.** Their difference *is* ground pitch relative to the body, which
+   is precisely the missing quantity. The second VL53L0X would be doing real work here, not
+   redundancy.
+2. **The FSR toes.** Which feet are loaded, and how hard, constrains the supporting plane.
+3. ⚠ **Not a better single-point correction.** Per CLAUDE.md §1 step 2: the signal is absent from
+   the channel, so the fix is a **sensor**, not a smarter formula. This is the belly-ToF story
+   repeating one level up — the hump was a missing observation, and so is this.
+
+⚠ **Until it is resolved, do not promote `m_comp` over `m` for terrain work.** §9.10.1's step 3
+(A/B into the homeostat) is safe to run on flat ground and **is not a terrain result.**
+
 #### ⚠ 9.10.2 The port found a bug in the sim it came from
 
 `picrawler_body.gd`'s `_compute_ground_clearance_boom` derives the sensor term correctly as a
