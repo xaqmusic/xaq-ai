@@ -10175,7 +10175,20 @@ func _compute_ground_clearance_centre(space_state: PhysicsDirectSpaceState3D,
 #     12 mm, comparable to the whole belly clearance the homeostat defends.
 #   * The belly plane is `_chassis_bottom_local` below the origin (NOT CHASSIS_Y/2 — the
 #     measured body's origin is not its centre).
-# so   belly_clearance = d*up.y - (s · up) + _chassis_bottom_local
+# so   belly_clearance = d*up.y - (s · up) + _chassis_bottom_local * up.y
+#
+# ⚠ THAT LAST TERM USED TO BE WRITTEN UN-PROJECTED — `+ _chassis_bottom_local`, with no
+# `* up.y` — and it was wrong.  The derivation above says the sensor term is a projection
+# and then failed to project the belly term the same way.  The forms agree EXACTLY at zero
+# tilt, which is where this was checked, and diverge by `bottom * (1 - cos θ)`: about
+# -0.3 mm at 10° and -2.8 mm at 30°.  Small, real, conservative in direction, and invisible
+# at the level pose.
+#
+# The shared helper does not correct the term in place — it REMOVES it, by expressing the
+# sensor offset relative to the belly plane instead of the origin, where it cancels exactly.
+# That is also what let the robot use the same code: about the origin the formula needs a
+# third constant (belly-below-origin) that the robot has never fitted; about the belly it
+# needs only the fitted mount offset.  BOM §9.10.2.
 #
 # With tof_tilt_comp off this returns the RAW along-ray reading minus the level-pose
 # offset — what a driver that ignored attitude would publish.  That arm exists so the
@@ -10195,18 +10208,29 @@ func _compute_ground_clearance_boom(space_state: PhysicsDirectSpaceState3D,
 	if hit.is_empty():
 		return GROUND_CLEARANCE_RANGE
 	var d: float = origin.distance_to(hit.position)
+	# ⚠ SHARED ARITHMETIC (ogma::body::ground_clearance_boom via StrideMath).  Only the
+	# raycast is the sim's own; the geometry is the robot's too, so it lives in cpp_core.
+	# The sensor-above-belly height is the SINGLE parameter that replaced this function's
+	# old (by, _chassis_bottom_local) pair — see the note below on why that is a FIX.
+	var sensor_above_belly: float = by - _chassis_bottom_local
+	# ⚠ Lazy-init, matching _step_one()'s idiom: this function can run EARLIER in a tick
+	# than the feet_y_gravity path that also instantiates it, so relying on that one would
+	# make the first tick return max range.
+	if _stridemath == null:
+		_stridemath = ClassDB.instantiate("StrideMath")
+	if _stridemath == null:
+		# Never silently fall back to a different formula: a missing extension is a build
+		# problem, and a plausible number here would hide it inside a promoted input.
+		push_error("picrawler_body: StrideMath unavailable — boom ToF cannot be computed")
+		return GROUND_CLEARANCE_RANGE
 	if not tof_tilt_comp:
-		# Uncompensated: subtract only the LEVEL-POSE height of the sensor above the
-		# belly.  Correct at zero tilt and increasingly wrong away from it — deliberately.
-		return max(0.0, d - (by - _chassis_bottom_local))
+		return _stridemath.ground_clearance_boom_uncomp(d, sensor_above_belly)
 	# ⚠ The fused estimate, not the exact basis: this is the legal signal, and it is the
 	# one the robot will use.  Fall back to the exact body-up only before the filter has
 	# a value at all (first ticks), so the channel is never silently un-corrected.
 	var up: Vector3 = _up_est_body if _up_est_body.length() > 0.5 \
 		else (xf.basis.inverse() * Vector3.UP)
-	var vertical_drop: float = d * up.y
-	var sensor_above_origin: float = s_body.dot(up)
-	return max(0.0, vertical_drop - sensor_above_origin + _chassis_bottom_local)
+	return _stridemath.ground_clearance_boom(d, up, sensor_above_belly, tof_boom_z)
 
 func _compute_target_loom() -> float:
 	# Phase H1 V6 — proxy looming: count rays in a forward FOV grid that

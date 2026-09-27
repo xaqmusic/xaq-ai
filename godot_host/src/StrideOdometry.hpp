@@ -96,6 +96,21 @@ public:
     // clamp(raw_m / stand_m, 0, 1) — the belly-ToF normalizer the height homeostat
     // rides.  Shared so the robot cannot divide by a different standing height.
     double  ground_clearance(double raw_m, double stand_m) const;
+    // The BOOM-mounted belly ToF (BOM §9.1/§9.10).  `up` is the FUSED gravity estimate in
+    // the body frame; `sensor_above_belly` is the level-pose sensor-to-belly height, which
+    // on the robot IS the fitted tof.mount_offset_mm.
+    //
+    // ⚠ TWO PARAMETERS WHERE THE GDSCRIPT ORIGINAL USED THREE, and that is the fix, not a
+    // simplification.  Taking the offset from the BELLY PLANE instead of the body origin
+    // cancels the "how far is the belly below the origin" term exactly.  The original added
+    // that term UN-projected (`+ _chassis_bottom_local` where the geometry needs
+    // `+ bottom * up.y`), so the two agree at zero tilt -- where it was checked -- and
+    // diverge by bottom*(1 - cos θ): ~-0.3 mm at 10°, ~-2.8 mm at 30°.
+    double  ground_clearance_boom(double along_ray_m, Vector3 up,
+                                  double sensor_above_belly_m, double boom_z_m) const;
+    // What a driver ignoring attitude would publish.  Kept so the correction can be
+    // MEASURED against it rather than assumed.
+    double  ground_clearance_boom_uncomp(double along_ray_m, double sensor_above_belly_m) const;
 
 protected:
     static void _bind_methods();

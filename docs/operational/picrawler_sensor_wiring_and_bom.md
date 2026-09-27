@@ -2183,13 +2183,26 @@ attitude and must say so rather than quietly emitting the uncorrected number und
 corrected name.
 
 **Remaining, in order:**
-1. **Swap the sim onto the shared helper.** ⚠ Its `tof_tilt_comp` ON arm will **change**, because
-   the helper fixes a real error there (§9.10.2). The gain-0 guard still holds — the lever
-   defaults off and the OFF path is untouched — so *byte-identity applies to the OFF arm only*
-   and must not be claimed for the ON arm.
+1. ✅ **DONE 2026-09-27 — the sim is swapped onto the shared helper**, via `StrideMath`
+   (`ground_clearance_boom`, `ground_clearance_boom_uncomp`). Only the raycast stays in
+   GDScript; the geometry is the robot's too, so it lives in `cpp_core`.
+   **Gate: byte-identical on the `tof_boom=ON / tof_tilt_comp=OFF` arm** — the arm where the
+   swapped code actually runs — over a 400-step seed-7 corridor run. Full stdout matched as
+   well, differing *only* in stack-trace line numbers shifted by the added comments.
+   ⚠ **State the gate's size, not just its verdict: 6 diagnostic lines, 18 `gc_*` values.**
+   Adequate to catch a changed formula, thin as a regression net.
+   ⚠ **The ON arm's change is NOT observable in that run**, and that is expected rather than
+   reassuring: the corridor posture sits at `tilt` ≈ 0.001 rad, where the divergence
+   `bottom·(1−cos θ)` is ~10⁻⁸ m — far below the 0.0001 snap. **The C++ unit tests are what
+   pin the ON arm**, not this run; a sim check of it needs real tilt.
 2. **Re-run the tilt sweep at gait amplitudes** (see the range caveat above).
 3. **A/B `m_comp` against `m`** into the homeostat. Only then does the correction become the
    published channel.
+
+⚠ **Unrelated, found while running the parity check and left alone:** every diagnostic emission
+pushes `ERROR: Parse JSON failed ... at _emit_jsonl`. It is present **identically before and
+after** the swap, so it is pre-existing and not caused by this change — but the sim is throwing
+a parse error on every diag line and nothing has been chasing it.
 
 #### ⚠ 9.10.2 The port found a bug in the sim it came from
 

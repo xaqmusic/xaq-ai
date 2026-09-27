@@ -111,6 +111,12 @@ void StrideMath::_bind_methods() {
                          &StrideMath::feet_y_gravity);
     ClassDB::bind_method(D_METHOD("ground_clearance", "raw_m", "stand_m"),
                          &StrideMath::ground_clearance);
+    ClassDB::bind_method(D_METHOD("ground_clearance_boom", "along_ray_m", "up",
+                                  "sensor_above_belly_m", "boom_z_m"),
+                         &StrideMath::ground_clearance_boom);
+    ClassDB::bind_method(D_METHOD("ground_clearance_boom_uncomp", "along_ray_m",
+                                  "sensor_above_belly_m"),
+                         &StrideMath::ground_clearance_boom_uncomp);
 }
 
 Vector3 StrideMath::planted_foot_velocity(Vector3 toe_now, Vector3 toe_prev,
@@ -126,6 +132,21 @@ double StrideMath::feet_y_gravity(Vector3 foot_body, Vector3 up, double l3) cons
 
 double StrideMath::ground_clearance(double raw_m, double stand_m) const {
     return ogma::body::ground_clearance(raw_m, stand_m);
+}
+
+double StrideMath::ground_clearance_boom(double along_ray_m, Vector3 up,
+                                         double sensor_above_belly_m,
+                                         double boom_z_m) const {
+    // Vector3 components are float32; the shared helper widens them exactly where the
+    // arithmetic needs doubles, which is what the GDScript original did too.
+    return ogma::body::ground_clearance_boom(
+        along_ray_m, ogma::body::Vec3f(up.x, up.y, up.z),
+        sensor_above_belly_m, boom_z_m);
+}
+
+double StrideMath::ground_clearance_boom_uncomp(double along_ray_m,
+                                                double sensor_above_belly_m) const {
+    return ogma::body::ground_clearance_boom_uncomp(along_ray_m, sensor_above_belly_m);
 }
 
 }  // namespace godot
