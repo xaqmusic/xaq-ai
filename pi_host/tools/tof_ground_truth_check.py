@@ -34,7 +34,18 @@ import argparse, json, math, os, statistics as st, sys, time, zmq
 
 ENDPOINT = "tcp://127.0.0.1:5590"
 STORE    = os.path.expanduser("~/xaq-ai/pi_host/log/tof_truth_check.jsonl")
-FOOT_SPAN_M = 0.233        # fore-aft toe span, from the sim's foot_xz receipt
+# ⚠ FITTED ON THE ROBOT, in the `stand` pose, 2026-09-27 -- NOT the sim's 0.233 receipt.
+# Two shims under the front feet back the span out independently, from the pitch each one
+# produced over the level baseline (-0.94°):  46 mm -> 12.47° -> 208.0 ± 0.9 mm
+#                                             61 mm -> 16.12° -> 211.1 ± 0.7 mm
+# The sim's foot_xz gives 233 mm, ~11% wider.  Both can be right: that receipt is the sim's
+# nominal pose and this is the robot's saved `stand`, which is a different geometry.  A
+# robot-side setup check wants the robot's number.
+# ⚠ The 1.5% growth between the two shims is ~3σ and real -- most likely the rounded toe's
+# contact point rolling as the leg angle changes.  It BOUNDS front-leg compliance at a couple
+# of percent rather than leaving it unknown, which is what the two-point sweep was for: had
+# the legs been absorbing the lift, the implied span would have grown WITH shim height.
+FOOT_SPAN_M = 0.210        # fore-aft toe span in `stand`, fitted (see above)
 _ctx = zmq.Context()
 
 def rpc(verb, _allow_err=False, **kw):
@@ -111,9 +122,20 @@ rec = dict(t=time.time(), mode=a.mode, end=a.end, shim_mm=a.shim_mm, label=a.lab
 if a.mode == "shim":
     if a.shim_mm:
         exp = math.degrees(math.atan2(a.shim_mm / 1000.0, FOOT_SPAN_M))
-        sign = +1 if a.end == "front" else -1
+        # ⚠ NOSE-UP IS NEGATIVE PITCH HERE, and the first version of this line had it
+        # backwards.  `pitch_deg` is atan2(-up.z, up.y); the axis map (BOM §4.1) makes the
+        # sim body frame +Z FORWARD, and pitching the nose up puts the world-up vector's
+        # forward component POSITIVE (up.z = +sin θ) -- so up.z > 0 and pitch_deg < 0.
+        # MEASURED 2026-09-27: front feet on a shim, pitch went -0.94° -> -13.41°.
+        # Shimming the FRONT therefore predicts a NEGATIVE pitch.  With the sign inverted
+        # this printed a ~24° gap and read exactly like "the legs absorbed the shim".
+        sign = -1 if a.end == "front" else +1
         print(f"\n  shim {a.shim_mm:.0f} mm at the {a.end} over a {FOOT_SPAN_M*1000:.0f} mm toe span "
               f"predicts {sign*exp:+.2f}° of pitch; measured {r['pitch_deg']:+.2f}°")
+        print(f"  implied toe span = shim/tan(pitch) = "
+              f"{a.shim_mm/math.tan(math.radians(abs(r['pitch_deg']))):.0f} mm "
+              f"(nominal {FOOT_SPAN_M*1000:.0f}) — ⚠ this ignores the pre-shim baseline pitch, "
+              f"so read it with the level run")
         print(f"  ⚠ a large gap here means the legs absorbed the shim rather than the chassis "
               f"pitching — the setup, not the correction.")
     # THE check: the full prediction, both terms.  At gait amplitude the second term is no
