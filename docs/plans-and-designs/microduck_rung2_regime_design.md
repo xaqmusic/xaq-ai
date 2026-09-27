@@ -4254,3 +4254,62 @@ nodes late in the run (28 → 29 during that stop), so six *known* gazes in a ro
 rule ends only 17 of 33 stops. It is the map growing, not the duck getting slower; the 60 s cap is what the
 eye sees. The cheap knob is the cap (`--stop-secs 30`) or letting the cloud's growth alone end a stop that
 the gaze cannot; both are a preset's argv, to be measured when the operator wants it — "not a big issue".
+
+**R81 measured (n = 6) — a loop, then a fix.** Steps onto a thing: 295, 7, 204, 333, 301, 24 a run; skills
+fired 11; walls 9.6 → 99 a minute, arrival stops 17.8 → 3.7. The step that ended beyond reach started the skill,
+whose start began another step: with the walker making 0.06 m over a 1.2 s window from the stand and the
+window sized on 0.25 m/s, the closing step rarely closed, and the pair looped for minutes, chasing a
+remembered centre into the wall. Two fixes: one step per request (the skill that follows a step never steps
+again), and the step ends by the odometry — the remembered centre within REACH — under a ceiling sized on the
+walker's real start-up speed (0.1 m/s, at most 3 s). Rerun as R81b.
+
+**R81b measured (one step per request, the step ended by the odometry; n = 6).** The loop is gone: 29 steps
+for 40 skills (kick 17, peck 12, push 11). But the step closes little — the thing's edge 0.21 → 0.17 m over a
+1.4 s window (6 of 29 to within 0.08 m), because the walker from the stand barely moves in a second — and the
+thing is 37° off the nose when the step begins and 49° when the peck does: a peck straight ahead misses a
+thing beside it. Pecks moved 0 of 12 (two of them at 0.04 and 0.07 m), kicks 2 of 17, pushes 3 of 11; no fall
+followed a skill (the rescues 6 → 17 are the walk's). On the interesting scale a `REGRESSION` against R79:
+stops at things 17.0 → 11.8 a run, walls 9.6 → 14.6, stands 46 → 34 %, nodes known 14 → 6. The reach is
+angular as much as radial: the closing step must FACE the thing before it walks. R81c: the step turns in
+place while the thing is more than 0.2 rad off the nose, then walks, and ends when the centre is within reach
+AND on the nose, under a ceiling sized on both (at most 4 s).
+
+**R81c measured (the step faces the thing first; n = 6).** The most skills of any arm — 64 (kick 26, peck 21,
+push 17) after 47 steps — stops at things 17.2 a run and nodes known 12, a tie with R79 on the interesting
+scale; and **things moved 0 of 111.** The step does not step: over its 1.9 s window the thing's edge goes
+0.17 → 0.15 m and its bearing 28° → 27°, and 4 of 47 steps end within reach and on the nose. The walker from
+the stand neither turns in place nor walks in under two seconds (it needs about two to get under way, §17.46),
+and a kick or a peck fired the moment it is asked to stop connects with nothing. **`REGRESSION` on reach in
+all three forms of the closing step (R81, R81b, R81c); the walker is not a stepping tool from the stand.**
+Kept as a flag, off. What has moved things in this phase: a kick from a SETTLED stand with the thing 0.05–0.08 m
+off (R79, 4 of 14), and the push — walking into the thing (R77, 5 of 16; R81b, 3 of 11).
+
+**R82: the skill from the walk.** The operator's rule — "contact with the head/beak even if it results in a
+fall; perturb the environment as much as possible" — lifts the constraint the runner has carried since
+§17.39, where the mid-walk kick fell 28 % of the time and was moved to the arrival stop's hand-back.
+`--skill-now`: a request at the arrival tick fires at once, from the walk, with the body still closing on the
+thing at 0.25 m by dead reckoning and moving at 0.3 m/s. Prediction: things moved up (the foot arrives at the
+thing at speed), falls up (rescues), the answers seen down (a fall is not a look). Preset R82. The eye decides
+what a fall is worth.
+
+**R82 measured (n = 6, against ★ R79).** Contact: the PECK from the walk moved its thing 5 of 11 (R79: 1 of
+19; every other arm 0–2 of ~20), the push 5 of 12, the kicks 0 of 16 (fired at 0.29–0.46 m, the foot never
+arrives); things moved 10 of 39 against R79's 9 of 60 — and the falls the operator priced in did not come:
+3 of 39 skills were followed by a fall within 8 s, rescues 0.32 → 0.63 %. The beak reaches from the walk
+because the body is still closing on the thing when the reach-down begins. The cost is the rest of the cycle:
+a skill fired at the arrival tick pre-empts the arrival stop (arrival stops 17.8 → 0; stops 26 → 11, the timer's
+only), and the unwind and look ran only from a stop, so 2 of 39 answers were seen, nodes known 0, stops at
+things 17.0 → 4.0 a run, walls 9.6 → 28 a minute. **Contact `WORKING`, the cycle `REGRESSION`.** Fix: the
+unwind and the look follow a skill fired from the walk as they follow one from standing; rerun as R82b.
+
+**R82b measured (the unwind and look after a skill from the walk; n = 6, against ★ R79).** The cycle is
+back: skills 49 (kick 18, peck 17, push 14), answers observed 26 (R82: 2), nodes known 7, arrival stops 7.8
+(R82: 0; R79: 17.8), stop-seconds at things 274 (R79 231), stops at things 11.5 a run (17.0), walls 12.0 a
+minute (9.6), cells 110 (117), stands 48 % (46). The peck from the walk keeps its reach — 3 of 17 moved their
+thing here, 5 of 11 in R82: 8 of 28 against 1 of 19 from the stand — and now pays: 8 of the 49 skills were
+followed by a fall within 8 s (4 of the 17 pecks, 4 of the 18 kicks), rescues 0.32 → 0.70 %. The kicks from
+the walk do not reach (1 of 18: fired at 0.15–0.22 m, the foot swings before the body arrives). **`PARTIAL`:
+the peck's contact `WORKING` from the walk (the operator's ask), the cycle a tie, the interesting scale down
+(stops at things 17 → 11.5) and the falls doubled — the price the operator named.** The eye decides; R79 stays
+`★`. If the contact is worth the price, the form to carry is R82b's flag with the kicks left to the stand
+(the peck alone from the walk) — one line in the host, measured next if asked.

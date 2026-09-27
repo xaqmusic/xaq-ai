@@ -1761,7 +1761,7 @@
  {
   "name": "R81 · R79 + the CLOSING STEP: a kick or a peck asked for with the thing beyond 0.10 m begins as a step onto it, and the skill follows from wherever the step left the body",
   "series": 81,
-  "hint": "WATCH (seed 1, fast-forward through 600 s): at a stop the duck sees the thing, steps onto it, and kicks or pecks at once -- contact even at the price of a fall (the operator, 2026-09-27). Numbers to follow (design doc §17.51).",
+  "hint": "MEASURED n=6 x3 (design doc §17.51): REGRESSION on reach in all three forms -- the walker from the stand neither turns nor walks in under two seconds, so the step closes 0.17 -> 0.15 m and things moved 0 of 111 (R79: 9); the first form looped (300 steps a run) and the second fell short. Kept as a flag, off. Skills 64 and stops at things 17.2 tie R79.",
   "state": {
    "config": "a1v2_r79_kind.json",
    "mode": "level2",
@@ -1779,6 +1779,30 @@
    "seed_random": false,
    "arena_shift": 0.0,
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --skill-approach 0.10 0.25",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R82 · R79 + the skill FROM THE WALK: a request at the arrival tick fires at once, the body still closing on the thing -- contact even at the price of a fall",
+  "series": 82,
+  "hint": "MEASURED n=6 (design doc §17.51; the binary now runs the R82b form -- the unwind and look follow a skill from the walk): the PECK from the walk reaches -- 8 of 28 pecks moved their thing across R82/R82b against 1 of 19 from the stand (R79) -- and 8 of 49 skills were followed by a fall (rescues 0.32 -> 0.70 %); answers seen 26/49, nodes known 7; stops at things 17 -> 11.5 a run, walls 9.6 -> 12/min, cells tie. PARTIAL: contact WORKING, the interesting scale down, falls doubled -- the price the operator named. WATCH (seed 4: 13 skills, 5 rescues; seed 1: 8 skills, 2 known).",
+  "state": {
+   "config": "a1v2_r79_kind.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --skill-now",
    "fast_until": 600
   }
  },

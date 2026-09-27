@@ -1273,7 +1273,12 @@ double g_push_vx = 0.0, g_push_max_s = 0.0;
 // one is asked for and the seen thing's centre is beyond REACH, the duck first STEPS onto it -- the walker at
 // VX for (range - REACH) / VX seconds, nose on the thing, at most 3 s -- and the skill follows at once, from
 // wherever the step left the body (the operator: contact even at the price of a fall).  Off = as before.
-double g_approach_reach = 0.0, g_approach_vx = 0.0; std::string skill_after;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
+double g_approach_reach = 0.0, g_approach_vx = 0.0; std::string skill_after; bool skill_from_step = false;
+// --skill-now (2026-09-27, the operator: "contact even if it results in a fall"): a module's request at the
+// arrival tick fires AT ONCE, from the walk, with the body still closing on the thing -- instead of waiting for
+// the arrival stop's hand-back (R64k measured the mid-walk kick at 28 % falls and the thing answering 19 %;
+// from standing 0 falls, and R79's kicks reach only from 0.05-0.08 m).  Off = the deferred form.
+bool g_skill_now = false;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
 // --skill-when-down NAME (2026-09-19, the roulade experiment): when the recovery declares the body DOWN, fire
 // the named skill first (its window drives the joints instead of the scaffold); if the body is not upright
 // when the window ends, the scaffold's rescue continues as before.  Counts rises inside the window.
@@ -1461,6 +1466,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (!g_spin_skill.empty() && !skill_def(g_spin_skill)) throw std::runtime_error("--skill-on-spin: unknown skill " + g_spin_skill);
     if (g_push_vx > 0.0) std::fprintf(stderr, "  push reach: the push walks the seen distance at %.2f m/s (window (range + 0.15) / vx, 0.6 to %.1f s) with its nose on the thing\n", g_push_vx, g_push_max_s);
     if (g_approach_reach > 0.0) std::fprintf(stderr, "  approach: a kick or a peck asked for with the thing beyond %.2f m begins as a step onto it (%.2f m/s, at most 3 s)\n", g_approach_reach, g_approach_vx);
+    if (g_skill_now) std::fprintf(stderr, "  skill now: a request at the arrival tick fires at once, from the walk (contact even at the price of a fall)\n");
     if (!g_spin_skill.empty()) std::fprintf(stderr, "  skill on spin: %s when the heading turns more than %.1f turns in %.0f s of walking with under %.2f m of travel (at most one per 30 s)\n", g_spin_skill.c_str(), g_spin_turns, g_spin_secs, g_spin_net);
     if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: the unwind's yaw keeps the nose on the kicked thing (gain %.2f on its bearing) and the look stop's sweep is centred on it\n", g_skill_unwind_aim);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
@@ -1543,11 +1549,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (!d) return false;
         // the closing step: a kick or a peck asked for with the thing seen beyond its reach begins as a step onto it
         if (g_approach_reach > 0.0 && d->file && (name == "peck" || name.rfind("kick", 0) == 0) && brain.thing_pos_present()
-            && brain.thing_range() > g_approach_reach && skill_after.empty()) {
+            && brain.thing_range() > g_approach_reach && skill_after.empty() && !skill_from_step) {   // one step per request (R81: a loop of 300)
             const SkillDef* push = skill_def("push");
             skill_active = true; skill_name = "approach"; skill_last.fill(0.0f); skill_phase_period = 0.0;
             skill_push_vx = g_approach_vx > 0.0 ? g_approach_vx : push->push_vx;
-            const double secs = std::clamp((brain.thing_range() - g_approach_reach) / skill_push_vx, 0.2, 3.0);
+            // the window is a ceiling: the step ends by the odometry when the centre is within reach; the walker from
+            // the stand makes ~0.1 m/s over its first seconds, so the ceiling is sized on that, at most 3 s
+            // ...and on the turn first: the thing is 37-49 deg off the nose when a peck is asked for (R81b), and a
+            // peck straight ahead misses a thing beside it -- the step faces it (in place) before it walks
+            const double secs = std::clamp(std::fabs(brain.thing_ego()) / 0.8 + (brain.thing_range() - g_approach_reach) / 0.1, 0.5, 4.0);
             skill_left = std::max(1, int(secs * kBrainHz)); skill_total = skill_left;
             skill_after = name; ++approaches;
             return true;
@@ -1819,20 +1829,22 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (skill_active && skill_left == 0 && !skill_after.empty()) {
                 // the step is done: the skill it was for runs now, from where the step left the body
                 const std::string nxt = skill_after; skill_after.clear(); skill_active = false;
-                if (skill_start(nxt)) stop_event = "skill:reach";
+                skill_from_step = true; if (skill_start(nxt)) stop_event = "skill:reach"; skill_from_step = false;
             }
             if (skill_active && skill_left == 0) {
                 skill_active = false;
                 if (down_skill_running) { down_skill_running = false; down_rise_watch = int(2.0 * kBrainHz); }
                 if (skill_then_stop) { skill_then_stop = false; skill_arrive_done = true; }
-                if (g_skill_unwind_s > 0.0 && stop_phase == StopPhase::Brain) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
+                // the unwind and the look follow a skill from standing -- and, with --skill-now, one fired from the walk
+                // (R82: without it the arrival stop never came, and 2 of 39 answers were seen)
+                if (g_skill_unwind_s > 0.0 && (stop_phase == StopPhase::Brain || (g_skill_now && stop_phase == StopPhase::None && skill_name != "approach"))) { stop_left = 0; unwind_left = int(g_skill_unwind_s * kBrainHz); unwind_then_stop = true; ++unwinds; }
             }
             if (!skill_active && stop_phase == StopPhase::None && t >= stop_from) {
                 const int req = brain.skill_request();      // a module's request through the bus, by name (id)
                 if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0]))) {
                     // fired from standing, at the next stop's hand-back (a kick fired into a walk falls, §17.39);
                     // with no stop due, the daemon's way: at once
-                    if (g_stop.on_arrive) { skill_pending = kSkills[req].name; stop_event = "skill:request"; ++skills_requested; }
+                    if (g_stop.on_arrive && !g_skill_now) { skill_pending = kSkills[req].name; stop_event = "skill:request"; ++skills_requested; }
                     else if (skill_start(kSkills[req].name)) { stop_event = "skill:request"; ++skills_requested; }
                 }
                 else if (!g_skill_on_arrive.empty() && brain.seek_arrived()) {
@@ -2238,8 +2250,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         } else if (skill_active && skill_push_vx > 0.0) {
             // the PUSH's window: the walker, a forward command, exactly the walk's own drive (scale, low-pass)
             Command pc{}; pc.twist = {skill_push_vx, 0.0, 0.0};
-            if (g_push_vx > 0.0 && g_skill_unwind_aim > 0.0 && brain.thing_pos_present())
+            if ((g_push_vx > 0.0 || skill_name == "approach") && g_skill_unwind_aim > 0.0 && brain.thing_pos_present())
                 pc.twist[2] = std::clamp(-g_skill_unwind_aim * brain.thing_ego(), -1.0, 1.0);   // the nose on the thing
+            if (skill_name == "approach" && brain.thing_pos_present()) {
+                // the closing step: FACE the thing first (turn in place while it is more than 0.2 rad off the nose),
+                // then walk onto it; it ends by the odometry -- centre within reach and nose on it -- or at the ceiling
+                const double ego = brain.thing_ego();
+                if (std::fabs(ego) > 0.2) pc.twist = {0.0, 0.0, std::clamp(-1.5 * ego, -1.0, 1.0)};
+                if (brain.thing_range() <= g_approach_reach && std::fabs(ego) < 0.3 && skill_left > 1) skill_left = 1;
+            }
             const auto action = walker.infer(build_observation(body, walker_last, pc));
             walker_last = action;
             for (int i = 0; i < kNumPolicyJoints; ++i) {
@@ -2853,6 +2872,8 @@ int main(int argc, char** argv) {
         } else if (a == "--skill-when-down") {
             g_skill_when_down = next("--skill-when-down");
             if (!skill_def(g_skill_when_down)) throw std::runtime_error("--skill-when-down: unknown skill " + g_skill_when_down);
+        } else if (a == "--skill-now") {
+            g_skill_now = true;
         } else if (a == "--skill-approach") {
             g_approach_reach = std::stod(next("--skill-approach")); g_approach_vx = std::stod(next("--skill-approach"));
         } else if (a == "--push-reach") {
