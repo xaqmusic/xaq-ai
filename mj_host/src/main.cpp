@@ -1320,6 +1320,7 @@ bool   g_log_cloud_profile = false;   // --log-cloud-profile: the 36 dims per ca
 // cloud is open (the walk) the slots hold the last cloud's view, so the walk is matched by its pose against the
 // places the stops learned.  R52 measured why: a sweeping gaze is a view that never repeats (novel 18 -> 34 %).
 bool   g_map_view_cloud = false;
+bool   g_log_com = false;   // --log-com (O36): the record carries "com":[forward, left, height] of the whole body over the feet
 double g_head_vor_tau = 0.0, g_head_vor_lead = 0.0;   // --head-vor TAU LEAD: the yaw reflex in the head adapter
 double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the rate loop on the head's own gyro
 // --head-joints (Track A at the head, 2026-09-10): the head brain's four commands become the head
@@ -2354,6 +2355,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (has_objects) std::printf(",\"obj\":%d", body.touching_object() ? 1 : 0);
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
+            if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
             if (g_ref_free > 0.0 && t % 50 == 0) std::printf(",\"rfree\":%d", brain.ref_released());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
@@ -2755,6 +2757,10 @@ int main(int argc, char** argv) {
             g_stop.gaze_slew = std::stod(next("--stop-gaze-slew"));
         } else if (a == "--stop-gaze-residual") {
             g_stop.gaze_residual_k = std::stod(next("--stop-gaze-residual"));
+        } else if (a == "--stop-gaze-down") {
+            g_stop.gaze_down = std::stod(next("--stop-gaze-down"));   // the sweep's pitch centre at every stop (+ is down); 0 = level
+        } else if (a == "--log-com") {
+            g_log_com = true;
         } else if (a == "--stop-gaze") {
             g_stop.gaze_yaw_sd = std::stod(next("--stop-gaze")); g_stop.gaze_pitch_sd = std::stod(next("--stop-gaze"));
             g_stop.gaze_hold_s = std::stod(next("--stop-gaze")); g_stop.gaze_max_s = std::stod(next("--stop-gaze"));

@@ -247,6 +247,18 @@ std::array<double, 2> DuckBody::body_xy(const char* name) const {
     return {d_->xpos[3 * bid], d_->xpos[3 * bid + 1]};
 }
 
+std::array<double, 3> DuckBody::com_over_feet() const {
+    const int root = mj_name2id(m_, mjOBJ_BODY, "trunk_base");
+    const int gl = mj_name2id(m_, mjOBJ_GEOM, "left_foot_collision"), gr = mj_name2id(m_, mjOBJ_GEOM, "right_foot_collision");
+    if (root < 0 || gl < 0 || gr < 0) return {0.0, 0.0, 0.0};
+    const double cx = d_->subtree_com[3 * root], cy = d_->subtree_com[3 * root + 1], cz = d_->subtree_com[3 * root + 2];
+    const double fx = 0.5 * (d_->geom_xpos[3 * gl] + d_->geom_xpos[3 * gr]), fy = 0.5 * (d_->geom_xpos[3 * gl + 1] + d_->geom_xpos[3 * gr + 1]);
+    const double fz = 0.5 * (d_->geom_xpos[3 * gl + 2] + d_->geom_xpos[3 * gr + 2]);
+    const double yaw = trunk_yaw(), c = std::cos(yaw), s = std::sin(yaw);
+    const double dx = cx - fx, dy = cy - fy;
+    return {c * dx + s * dy, -s * dx + c * dy, cz - fz};
+}
+
 double DuckBody::trunk_yaw() const {
     const double* q = d_->qpos + 3;   // the free joint's quaternion w, x, y, z
     return std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));

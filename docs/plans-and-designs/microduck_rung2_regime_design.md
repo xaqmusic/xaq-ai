@@ -4086,3 +4086,56 @@ the operator before more intent levers: (a) O36 first (the stander with the head
 stops), then O59's rules as built; or (b) a push that pushes — a longer window at the walk's own speed and a
 contact rule that keeps driving through the thing — measured on its own with the roll and the other spice
 already in hand.
+
+### 17.49 O36: the stand with the head down — measured, and it holds (2026-09-27)
+
+**The operator's direction.** R75 and R76 fired almost nothing to the eye (2 and 9 skills in six runs; R76
+walked backward at 700–740 s of seed 1 — the twist brain's forward command flipping sign with its saturated
+yaw, the orbit of §17.43 in yet another dress, not the unwind); R73 remains the most interesting arm. So O36:
+"the robot should be able to stand with the head angled down as long as its hips shift back to compensate for
+the change in CoG. Let's investigate."
+
+**What the record already said.** The standard stop's gaze sweep never pitches the head below +0.16 rad (its
+band is `gaze_pitch_sd` × (−0.7 .. +2.0) about a centre that was 0 and had no flag). T3's `--stop-gaze-at-thing`
+centred the band at 0.2–0.55 rad at arrival stops and the rescues rose ×4 (§17.40); that was read as "the
+stand refuses the head's pitch", and O59's gates starved on a gaze that could not see the reached thing.
+
+**The instrument.** `--stop-gaze-down RAD` sets the sweep's pitch centre at every stop, and `--log-com`
+writes the whole body's centre of mass over the midpoint of the two soles, in the heading frame, to the
+record (MuJoCo's subtree CoM; the sole geoms; truth for the harness). Both off = byte-identical (guard
+`cb24520c`).
+
+**Measured (R67 stack, 3 seeds × 1100 s, stops from 600 s), head pitched at four centres:**
+
+| pitch centre (rad) | head_pitch joint | CoM forward of the soles' midpoint | trunk grav_x | hip pitch | stops · survived · rescued at stops |
+|---|---|---|---|---|---|
+| 0 (the standard) | +0.45 | −0.5 cm | −0.001 | −0.415 | 8 · 95 % · 0 |
+| 0.3 | +0.82 | +0.2 cm | +0.007 | −0.415 | 16 · 83 % · 0.3 |
+| 0.5 | +1.04 | +0.5 cm | +0.009 | −0.415 | 15 · 81 % · 0 |
+| 0.7 | +1.25 (72°) | +0.6 cm | +0.010 | −0.415 | 8 · 95 % · 0 |
+
+The head is a quarter of the duck (189 g of 740) but it pivots close to the trunk: pitched to 72° it moves
+the whole body's centre of mass **1.1 cm** forward, the trunk leans 0.6°, and the hips do not move at all —
+the R19 stand holds its pose and the ankles carry the offset, well inside a 6 cm sole. No stop was rescued
+at 0.5 or 0.7 rad; the hand-offs to the walker past 6.5° of lean rose a little at 0.3–0.5 (survival 95 → 83 %)
+and not at 0.7. **The stand tolerates the head down. The hips need not shift; the CoG the operator asked
+about moves a centimetre.** T3's rescues came from something other than the pitch — the next measurement
+(R77 below) puts the gaze at the thing back on the R72 stack with the CoM on the record to find it.
+
+Two side effects worth the eye: with the head down the stops DOUBLE (8 → 16 at 0.3 rad, 15 at 0.5) because a
+gaze that sees the floor sees the things on it, and the seek loop's arrivals follow — exactly the sightings
+O59's gate starved for — and the sweep's pitch band at 0.7 rad covers +0.64 .. +0.86, which is where a
+reached thing at 0.2 m sits (45° = 0.79 rad under the beak, §17.40).
+
+**R77: the gaze at the reached thing, on the promoted stack (R72 + `--stop-gaze-at-thing`, n = 6, 1500 s).**
+The arm the phase has been looking for. Skills 39 → 55 (kick 20, peck 19, push 16), answers observed 16 → 31,
+things moved by more than 5 cm 2 → 10 (the pushes 5 of 16, the right kick 3 of 9), stops at things 12.0 →
+14.3 a run (stop-seconds 191 → 182, at walls 62 → 100), arrival stops 11.7 → 16.5 of 24.8, walls 15.7 → 13.5
+a minute, contact 2.2 → 1.2 %, stands 39 → 43 %, rescues 0.49 → 0.26 % — and ONE stop rescued in six runs
+(stop survival 90 → 87 %). At the look stop the thing sits 0.28 m ahead and 18° off the nose whether the
+answer is seen or not; the unknowns are now the thing that did not move (14 of 24) and 7 fired at nothing.
+Nodes known still 0 (55 requests over 30 nodes × 3 intents; the ladder needs two answers per cell). **T3's
+verdict is reversed on this stack: the gaze at the thing is `WORKING`, no cost to the stand.** Its 2026-09-17
+rescues ×4 belonged to R64's walk (the reflex-less orbit arriving at things at speed) and the R60a-era
+stop, not to the head's pitch. Preset R77 for the eye; not promoted before it. R78 = R75's gate (fire at what
+you see within 0.5 m) on R77, running.

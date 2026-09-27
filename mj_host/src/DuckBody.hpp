@@ -151,6 +151,9 @@ public:
 
     // Trunk position in the world frame. Same rule: instrumentation only.
     std::array<double, 3> trunk_position() const;
+    // O36 instrument: the whole robot's centre of mass over the feet -- [forward, left, height] in the trunk's
+    // heading frame, relative to the midpoint of the two sole geoms (truth, for the harness's record)
+    std::array<double, 3> com_over_feet() const;
 
     // Full generalized position, including the trunk's free joint. Not an
     // observation and never published to a brain: it is what a viewer needs in
