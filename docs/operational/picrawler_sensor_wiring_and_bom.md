@@ -2207,7 +2207,9 @@ corrected name.
    pin the ON arm**, not this run; a sim check of it needs real tilt.
 2. ✅ **DONE 2026-09-27 — the gait-amplitude sweep, on shims.** §9.10.4 below.
 3. **A/B `m_comp` against `m`** into the homeostat. Only then does the correction become the
-   published channel.
+   published channel. ⚠ **FLAT GROUND ONLY, and it is now measurement rather than caution that
+   says so:** §9.10.5 measured the slope case in both headings, and climbing over-reports by
+   12 mm at 12°. An A/B on a level floor is legitimate and **is not a terrain result**.
 
 ⚠ **Unrelated, found while running the parity check and left alone:** every diagnostic emission
 pushes `ERROR: Parse JSON failed ... at _emit_jsonl`. It is present **identically before and
@@ -2275,9 +2277,9 @@ breaks. What this sweep does buy §9.10.3 is the empirical sign anchor its predi
 
 #### ⚠⚠ 9.10.3 THE CORRECTION ASSUMES HORIZONTAL GROUND — and terrain is where that breaks
 
-**Derived 2026-09-27 while planning the gait-amplitude sweep. Not yet measured; the test is
-scripted (`tof_ground_truth_check.py --mode slope`).** Written down before measuring because it
-is a *signed, quantified* prediction and it points the wrong way.
+**Derived 2026-09-27 while planning the gait-amplitude sweep, and ✅ MEASURED THE SAME DAY in
+both headings — see §9.10.5.** Written down before measuring because it is a *signed,
+quantified* prediction and it points the wrong way. It does.
 
 `ground_clearance_boom` infers the boom's geometry relative to the ground from **gravity-
 referenced attitude**. That is only the same thing when the ground is horizontal. Two cases the
@@ -2319,12 +2321,9 @@ reported = c·up.y − boom_z·up.z  =  c·up.y + 0.070·up.z          (boom_z =
 - **Nose-down / descending** (`up.z = −sin α`): under-reports by ~20 mm (33.1 mm against
   53 mm). Conservative, harmless.
 
-⚠ **Still derived, not measured** — `--mode slope` is what closes it. But the chain it rests on
-is now measured rather than assumed: physical nose-up → `up.z > 0` → positive correction, at
-n=115 with a 4 µm residual (§9.10.4). **The slope test therefore has a signed prediction that
-contradicts what this section used to say**, which makes it a much sharper test than it was:
-set the robot **nose-up on the incline** and `m_comp` should drift *upward* while the
-uncompensated reading stays put.
+✅ **MEASURED 2026-09-27, both headings, on an inclined box — §9.10.5.** Nose-up over-reports,
+nose-down under-reports, residuals +0.01 and −0.00 mm. The original pairing is falsified on the
+robot, not merely re-derived.
 
 ⚠ **And the arms swap: on a slope-aligned chassis the UNCOMPENSATED reading `d − H` is exactly
 `c`, i.e. correct.** So neither arm is right in general, and the discriminator — pitch relative
@@ -2346,6 +2345,52 @@ stated goal, so this is on the critical path.
 
 ⚠ **Until it is resolved, do not promote `m_comp` over `m` for terrain work.** §9.10.1's step 3
 (A/B into the homeostat) is safe to run on flat ground and **is not a terrain result.**
+
+#### ★★★ 9.10.5 THE SLOPE CASE, MEASURED — ✅ 2026-09-27, both headings
+
+§9.10.3 closed empirically. Robot standing inside a box tilted to **11.02°**, `stand` held
+throughout by `pose_hold.py`, `--mode slope`. The level reference and the nose-up runs share
+**one continuous stand**; nose-down is a fresh recall (see the pose-repeatability note below).
+
+| | pitch | `comp_delta` | **correction drift** | predicted (lead / 2nd-order) | residual |
+|---|---|---|---|---|---|
+| level reference | −1.04° | +1.25 mm | — | — | — |
+| **nose-up / climbing** | −12.06° | +13.46 mm | **+12.21 mm** | +12.20 (+13.36 / −1.16) | **+0.01 mm** |
+| **nose-down / descending** | +10.03° | −12.97 mm | **−14.22 mm** | −14.22 (−13.47 / −0.75) | **−0.00 mm** |
+
+n=112–114 per point, **0 samples rejected**, `raw_sd` 1.6–1.9 mm.
+
+★ **THE PHYSICAL CONTENT IS THE INVARIANCE, NOT THE RESIDUAL.** As in §9.10.4 the
+correction-drift match is algebra and cannot come out otherwise. What cannot be derived from
+the formula is that **the uncompensated reading did not move at all — 0.00 mm across 13° of
+tilt, within one continuous stand.** That is the chassis genuinely parallel to the surface with
+the ray perpendicular to it, so `d − H` **is** the true clearance — which is what makes the
+compensated arm, the one that moved 12–17 mm, demonstrably the wrong one. **The arms swap, and
+now it is measured rather than argued.**
+
+★ **THE ASYMMETRY CONFIRMS THE SECOND-ORDER TERM BY A SIGN, NOT A FIT.** One box angle, so a
+lead-only model predicts near-symmetric drift: `|−13.47|` against `|+13.36|`, an asymmetry of
+**0.11 mm**. The second-order term is negative in *both* headings, so it shrinks the positive
+drift and deepens the negative one — predicting **2.02 mm** of asymmetry. **Measured: 2.01 mm.**
+A 20× discrimination between the two models, decided by a sign rather than a magnitude.
+
+⚠ **The nose-down run is a DIFFERENT POSE RECALL and its uncompensated reading moved −3.00 mm.**
+The keepalive died between the two headings (a `timeout` on the operator's side, not the
+robot's) and the robot re-stood. §9.3 measured `stand` recalling to **52.1 / 48.7 / 50.8 mm**,
+so 3 mm is pose repeatability. **It does not touch the test**, which compares the correction's
+change and is immune to a shift in the stand underneath it — but it is why the invariance claim
+above is stated *within one stand* rather than across recalls.
+
+⚠ **This is what the tooling looked like before the run and why three fixes came out of it.**
+The nose-up run PASSED with all three defects present — it compared `d_cmp` against the
+correction drift alone (invisible while `d_unc` was exactly 0.00), used a prediction crude
+enough that a 4 mm gate absorbed its own 2.5 mm error, and printed a hardcoded warning
+contradicting the run it had just made. **A passing measurement is not evidence that the
+harness is sound**; the second heading is what exposed all three.
+
+★ **The operational conclusion is unchanged and now rests on measurement:** do not promote
+`m_comp` over `m` for terrain. Climbing is the unsafe heading. The fix remains a surface-normal
+estimate — a new observation, per §9.10.3's list — not a better single-point formula.
 
 #### ⚠ 9.10.2 The port found a bug in the sim it came from
 
