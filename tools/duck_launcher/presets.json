@@ -1687,9 +1687,9 @@
   }
  },
  {
-  "name": "★ THINGS · R77 · R72 + the GAZE AT THE REACHED THING: at an arrival stop the head's sweep is centred on the thing's bearing and pitched to its elevation (T3, back on the promoted stack)",
+  "name": "R77 · R72 + the GAZE AT THE REACHED THING: at an arrival stop the head's sweep is centred on the thing's bearing and pitched to its elevation (T3, back on the promoted stack)",
   "series": 77,
-  "hint": "PROMOTED 2026-09-27 (the operator's eye: \"the robot looking down is stable and interesting\"). MEASURED n=6 (design doc §17.49): the best arm of the phase -- skills 39 -> 55, answers seen 16 -> 31, things moved > 5 cm 2 -> 10 (pushes 5/16, kicks 3/9), stops at things 12.0 -> 14.3 a run, arrival stops 11.7 -> 16.5, walls 15.7 -> 13.5/min, rescues 0.49 -> 0.26 %, ONE stop rescued in six runs. T3's 'rescues x4' did not reproduce: the stand holds the head down (O36 measured: 72 deg of head pitch moves the CoM 1.1 cm; the hips need not shift). WATCH (seed 1, fast-forward through 600 s): at an arrival the head dips onto the thing before the kick, peck or push.",
+  "hint": "SUPERSEDED by ★ THINGS R79 (2026-09-27). PROMOTED 2026-09-27 (the operator's eye: \"the robot looking down is stable and interesting\"). MEASURED n=6 (design doc §17.49): the best arm of the phase -- skills 39 -> 55, answers seen 16 -> 31, things moved > 5 cm 2 -> 10 (pushes 5/16, kicks 3/9), stops at things 12.0 -> 14.3 a run, arrival stops 11.7 -> 16.5, walls 15.7 -> 13.5/min, rescues 0.49 -> 0.26 %, ONE stop rescued in six runs. T3's 'rescues x4' did not reproduce: the stand holds the head down (O36 measured: 72 deg of head pitch moves the CoM 1.1 cm; the hips need not shift). WATCH (seed 1, fast-forward through 600 s): at an arrival the head dips onto the thing before the kick, peck or push.",
   "state": {
    "config": "a1v2_r72_push.json",
    "mode": "level2",
@@ -1735,9 +1735,9 @@
   }
  },
  {
-  "name": "R79 · the KIND: a second, coarser thing vocabulary (an EPM of at most 4 nodes over the same descriptor) keys the outcome table, so an answer can become known",
+  "name": "★ THINGS · R79 · the KIND: a second, coarser thing vocabulary (an EPM of at most 4 nodes over the same descriptor) keys the outcome table, so an answer can become known",
   "series": 79,
-  "hint": "MEASURED n=6 (design doc §17.50): WORKING -- the outcome table climbs for the first time: nodes KNOWN 14 over six runs (R77: 0), the need at a thing falls to 0.33 / 0 on two seeds; skills 55 -> 60, answers seen 31 -> 44, stops at things 14.3 -> 17.0 a run, stop-seconds 182 -> 231, walls 13.5 -> 9.6/min, things moved 10 -> 9; the kind's purity is coarse (0.78 vs chance 0.66). WATCH (seed 1: 15 skills, 5 cells known).",
+  "hint": "PROMOTED 2026-09-27 (the operator's eye: kicked the block several times and lingered to play; the peck lands a little short). MEASURED n=6 (design doc §17.50): WORKING -- the outcome table climbs for the first time: nodes KNOWN 14 over six runs (R77: 0), the need at a thing falls to 0.33 / 0 on two seeds; skills 55 -> 60, answers seen 31 -> 44, stops at things 14.3 -> 17.0 a run, stop-seconds 182 -> 231, walls 13.5 -> 9.6/min, things moved 10 -> 9; the kind's purity is coarse (0.78 vs chance 0.66). WATCH (seed 1: 15 skills, 5 cells known).",
   "state": {
    "config": "a1v2_r79_kind.json",
    "mode": "level2",
@@ -1755,6 +1755,30 @@
    "seed_random": false,
    "arena_shift": 0.0,
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R81 · R79 + the CLOSING STEP: a kick or a peck asked for with the thing beyond 0.10 m begins as a step onto it, and the skill follows from wherever the step left the body",
+  "series": 81,
+  "hint": "WATCH (seed 1, fast-forward through 600 s): at a stop the duck sees the thing, steps onto it, and kicks or pecks at once -- contact even at the price of a fall (the operator, 2026-09-27). Numbers to follow (design doc §17.51).",
+  "state": {
+   "config": "a1v2_r79_kind.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --skill-approach 0.10 0.25",
    "fast_until": 600
   }
  },

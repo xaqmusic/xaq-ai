@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -1266,7 +1267,13 @@ std::string g_spin_skill; double g_spin_turns = 1.0, g_spin_net = 0.5, g_spin_se
 // --push-reach VX MAX_S (O59, §17.48): the push's window walks the SEEN distance -- (range + 0.15 m) / VX seconds,
 // between 0.6 s and MAX_S, from the outcome loop's need topic position -- and its yaw keeps the nose on the
 // thing (the unwind aim's gain).  R72's 1.2 s push at 0.25 m/s travelled 0.06 m.  Off = the table's window.
-double g_push_vx = 0.0, g_push_max_s = 0.0;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
+double g_push_vx = 0.0, g_push_max_s = 0.0;
+// --skill-approach REACH VX (O59's last form, 2026-09-27): the peck and the kick reach a thing only from about
+// 8 cm off its edge (R79: every moved thing was at 0.05-0.08 m; 7 pecks within 0.15 m moved nothing).  When
+// one is asked for and the seen thing's centre is beyond REACH, the duck first STEPS onto it -- the walker at
+// VX for (range - REACH) / VX seconds, nose on the thing, at most 3 s -- and the skill follows at once, from
+// wherever the step left the body (the operator: contact even at the price of a fall).  Off = as before.
+double g_approach_reach = 0.0, g_approach_vx = 0.0; std::string skill_after;   // --skill-unwind-aim GAIN: the unwind yaws the nose toward the kicked thing and the look stop's sweep is centred on it
 // --skill-when-down NAME (2026-09-19, the roulade experiment): when the recovery declares the body DOWN, fire
 // the named skill first (its window drives the joints instead of the scaffold); if the body is not upright
 // when the window ends, the scaffold's rescue continues as before.  Counts rises inside the window.
@@ -1453,6 +1460,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_skill_unwind_aim > 0.0 && g_skill_unwind_s <= 0.0) throw std::runtime_error("--skill-unwind-aim needs --skill-unwind (the unwind it aims)");
     if (!g_spin_skill.empty() && !skill_def(g_spin_skill)) throw std::runtime_error("--skill-on-spin: unknown skill " + g_spin_skill);
     if (g_push_vx > 0.0) std::fprintf(stderr, "  push reach: the push walks the seen distance at %.2f m/s (window (range + 0.15) / vx, 0.6 to %.1f s) with its nose on the thing\n", g_push_vx, g_push_max_s);
+    if (g_approach_reach > 0.0) std::fprintf(stderr, "  approach: a kick or a peck asked for with the thing beyond %.2f m begins as a step onto it (%.2f m/s, at most 3 s)\n", g_approach_reach, g_approach_vx);
     if (!g_spin_skill.empty()) std::fprintf(stderr, "  skill on spin: %s when the heading turns more than %.1f turns in %.0f s of walking with under %.2f m of travel (at most one per 30 s)\n", g_spin_skill.c_str(), g_spin_turns, g_spin_secs, g_spin_net);
     if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: the unwind's yaw keeps the nose on the kicked thing (gain %.2f on its bearing) and the look stop's sweep is centred on it\n", g_skill_unwind_aim);
     if (g_hr_tau > 0.0) { brain.set_heading_reflex(g_hr_tau, g_hr_damp, g_hr_gate);
@@ -1526,11 +1534,24 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     bool skill_active = false; int skill_left = 0, skill_total = 0; std::string skill_name; std::array<float, kActionLen> skill_last{};
     double skill_phase_period = 0.0; double skill_push_vx = 0.0;
     int skills_fired = 0, skills_requested = 0; bool skill_then_stop = false; std::string skill_pending;
+    int approaches = 0;                              // --skill-approach: steps taken onto a thing before a kick or a peck
     int unwind_left = 0, unwinds = 0; bool unwind_then_stop = false;
     int down_skills = 0, down_rises = 0; bool down_skill_running = false; int down_rise_watch = 0;
-    const auto skill_start = [&](const std::string& name) {
+    std::function<bool(const std::string&)> skill_start;
+    skill_start = [&](const std::string& name) -> bool {
         const SkillDef* d = skill_def(name);
         if (!d) return false;
+        // the closing step: a kick or a peck asked for with the thing seen beyond its reach begins as a step onto it
+        if (g_approach_reach > 0.0 && d->file && (name == "peck" || name.rfind("kick", 0) == 0) && brain.thing_pos_present()
+            && brain.thing_range() > g_approach_reach && skill_after.empty()) {
+            const SkillDef* push = skill_def("push");
+            skill_active = true; skill_name = "approach"; skill_last.fill(0.0f); skill_phase_period = 0.0;
+            skill_push_vx = g_approach_vx > 0.0 ? g_approach_vx : push->push_vx;
+            const double secs = std::clamp((brain.thing_range() - g_approach_reach) / skill_push_vx, 0.2, 3.0);
+            skill_left = std::max(1, int(secs * kBrainHz)); skill_total = skill_left;
+            skill_after = name; ++approaches;
+            return true;
+        }
         if (d->file && skill_policy_name != name) { skill_policy = std::make_unique<Policy>(kModelDir + "/scaffolds/" + d->file); skill_policy_name = name; }
         skill_active = true; skill_left = std::max(1, int(d->duration_s * kBrainHz)); skill_total = skill_left; skill_name = name; skill_last.fill(0.0f);
         skill_phase_period = d->phase_period_s; skill_push_vx = d->file ? 0.0 : d->push_vx;
@@ -1795,6 +1816,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // a skill at arrival: the window runs first, and the arrival stop (if any) starts when it ends
             bool skill_arrive_done = false;
             bool req_consumed = false;   // a module's request already started this tick (so the deferral below does not double it)
+            if (skill_active && skill_left == 0 && !skill_after.empty()) {
+                // the step is done: the skill it was for runs now, from where the step left the body
+                const std::string nxt = skill_after; skill_after.clear(); skill_active = false;
+                if (skill_start(nxt)) stop_event = "skill:reach";
+            }
             if (skill_active && skill_left == 0) {
                 skill_active = false;
                 if (down_skill_running) { down_skill_running = false; down_rise_watch = int(2.0 * kBrainHz); }
@@ -2534,6 +2560,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
+        if (g_approach_reach > 0.0) std::fprintf(stderr, "  approach: %d steps onto a thing before a kick or a peck\n", approaches);
         if (!g_spin_skill.empty()) std::fprintf(stderr, "  spins: %d detected (> %.1f turns in %.0f s with under %.2f m of travel); %d %s fired\n", spins, g_spin_turns, g_spin_secs, g_spin_net, spin_rolls, g_spin_skill.c_str());
         if (!g_skill_when_down.empty()) std::fprintf(stderr, "  skill when down: %s fired %d times, the body upright within 2 s of the window %d times\n", g_skill_when_down.c_str(), down_skills, down_rises);
         if (g_stop.map_on_stop || look_on || gaze_on) {
@@ -2826,6 +2853,8 @@ int main(int argc, char** argv) {
         } else if (a == "--skill-when-down") {
             g_skill_when_down = next("--skill-when-down");
             if (!skill_def(g_skill_when_down)) throw std::runtime_error("--skill-when-down: unknown skill " + g_skill_when_down);
+        } else if (a == "--skill-approach") {
+            g_approach_reach = std::stod(next("--skill-approach")); g_approach_vx = std::stod(next("--skill-approach"));
         } else if (a == "--push-reach") {
             g_push_vx = std::stod(next("--push-reach")); g_push_max_s = std::stod(next("--push-reach"));
         } else if (a == "--skill-on-spin") {

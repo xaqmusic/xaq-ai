@@ -4226,3 +4226,31 @@ range rarely falls under 0.15 m before the target is forgotten or the body bumps
 becomes R64's again. Things moved 3 of 21 (the right kick 2 of 5). Not kept. The reach stays with O59 in a
 different form: the closing step must be by SIGHT at the stop (the pitched gaze sees the thing at 0.26 m; a
 short step onto it before the kick), not by a tighter dead-reckoned arrival.
+
+### 17.51 On `★ THINGS` R79: the closing step, and why the stops lengthen (2026-09-27)
+
+**Promoted: `★ THINGS` = R79.** The operator's eye: "the robot successfully kicked the block several times and
+lingered to play"; the peck "slightly off — just slightly too far back from the object to make contact with
+the beak"; and "the robot should make contact with the head/beak even if it results in a fall — we want the
+robot to perturb its environment as much as possible." Also: the looking grows longer as a run goes on.
+
+**Reach, measured on R79's 41 kicks and pecks.** Every thing that moved had its edge 0.05–0.08 m from the
+body when the skill began (the left kick 4 of 14 at 0.05–0.07 m; the peck 1 of 19, at 0.08 m); seven pecks
+within 0.15 m and six left kicks within 0.15 m moved nothing. The reach of both intents is a hand's width;
+the stop, by dead reckoning, leaves the thing 0.12–0.20 m off (median). A tighter arrival did not close it
+(R80). **The closing step** (`--skill-approach REACH VX`, off = as before): when a kick or a peck is asked for
+and the seen thing's centre is beyond REACH, the duck first steps onto it — the walker at VX for
+(range − REACH) / VX seconds, at most 3 s, the nose kept on the thing — and the skill follows at once from
+wherever the step left the body; the unwind and the look follow the skill as before. The step is `move` and
+the skill is `do`: two of the daemon's verbs in sequence, from the stop. R81 = R79 + `--skill-approach 0.10
+0.25` (preset R81). Prediction: pecks and kicks that move their thing up from 5 of 41; the price the operator
+has accepted, more falls (a peck from a body still settling from a step), to be counted.
+
+**Why the stops lengthen.** In R79 the stops from 600 to 900 s are ended by the gaze's "six known gazes in a
+row" rule 60 times, by a hand-off 15 times, by the 60 s cap once; from 900 to 1200 s the cap ends 18 of 49,
+and the stops' median length climbs from 8 s to 60 s in the 1050–1200 s window. In a capped stop the map's
+token sits on one winner while its novelty flag flickers on every few gazes — the map is still inserting
+nodes late in the run (28 → 29 during that stop), so six *known* gazes in a row never come, and the cloud
+rule ends only 17 of 33 stops. It is the map growing, not the duck getting slower; the 60 s cap is what the
+eye sees. The cheap knob is the cap (`--stop-secs 30`) or letting the cloud's growth alone end a stop that
+the gaze cannot; both are a preset's argv, to be measured when the operator wants it — "not a big issue".
