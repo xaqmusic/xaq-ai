@@ -4208,3 +4208,21 @@ starts there; `arrive_m 0.15` (with the outcome loop's `arrive_range` 0.2) ends 
 where a kick from standing reaches. Prediction: things moved up, the thing's range at the look stop down from
 0.28 m, more contacts on arrival (the base moves objects by walking into them — interesting on the operator's
 scale, and a fall risk to watch: rescues).
+
+**R79 measured (n = 6, against ★ R77).** The ladder climbs: nodes KNOWN 14 over six runs (5, 0, 0, 3, 3, 3; R77
+0), and on two seeds the need at the last attended thing fell to 0.33 and 0 — the first time habituation
+has had anything to act on. Skills 55 → 60 (kick 22, peck 19, push 19), answers observed 31 → 44, things
+moved 10 → 9, stops at things 14.3 → 17.0 a run, stop-seconds at things 182 → 231, walls 13.5 → 9.6 a minute,
+cells 131 → 117, stands 43 → 46 %, rescues tie. The kind itself is coarse in the way feared: purity 0.78
+against a chance of 0.66 (+0.12 ± 0.10; the fine vocabulary was +0.30–0.44), four nodes with blocks and balls
+mixed under some — so what the table learns is "this kind of thing, roughly". **`WORKING` as the mechanism
+O62 asked for; `PARTIAL` on the kind's purity.** The re-use: a kind that is the fine EPM's own baked-node
+clusters (topology, not a second GNG) would carry the fine vocabulary's purity into the coarse key.
+
+**R80 measured (n = 6, against ★ R77): `REGRESSION`.** Arriving at 0.15 m by dead reckoning is arriving
+rarely: arrival stops 16.5 → 5.8 a run, skills 55 → 21, stops at things 14.3 → 7.0, stop-seconds at things
+182 → 99, walls 13.5 → 28.3 a minute, stands 43 → 24 %, rescues 0.26 → 0.84 %. The seek loop's dead-reckoned
+range rarely falls under 0.15 m before the target is forgotten or the body bumps the thing, so the walk
+becomes R64's again. Things moved 3 of 21 (the right kick 2 of 5). Not kept. The reach stays with O59 in a
+different form: the closing step must be by SIGHT at the stop (the pitched gaze sees the thing at 0.26 m; a
+short step onto it before the kick), not by a tighter dead-reckoned arrival.
