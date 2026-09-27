@@ -2205,7 +2205,7 @@ corrected name.
    reassuring: the corridor posture sits at `tilt` ≈ 0.001 rad, where the divergence
    `bottom·(1−cos θ)` is ~10⁻⁸ m — far below the 0.0001 snap. **The C++ unit tests are what
    pin the ON arm**, not this run; a sim check of it needs real tilt.
-2. ✅ **DONE 2026-09-27 — the gait-amplitude sweep, on shims.** §9.10.4 below.
+2. **Gait-amplitude sweep run 2026-09-27 on shims — `IN_FLIGHT`, not closed.** §9.10.4 below.
 3. **A/B `m_comp` against `m`** into the homeostat. Only then does the correction become the
    published channel. ⚠ **FLAT GROUND ONLY, and it is now measurement rather than caution that
    says so:** §9.10.5 measured the slope case in both headings, and climbing over-reports by
@@ -2216,9 +2216,13 @@ pushes `ERROR: Parse JSON failed ... at _emit_jsonl`. It is present **identicall
 after** the swap, so it is pre-existing and not caused by this change — but the sim is throwing
 a parse error on every diag line and nothing has been chasing it.
 
-#### ★★★ 9.10.4 THE GAIT-AMPLITUDE SWEEP — ✅ MEASURED 2026-09-27, on shims
+#### 9.10.4 THE GAIT-AMPLITUDE SWEEP — `IN_FLIGHT` 2026-09-27, on shims
 
-§9.10's range caveat closed. Front feet on a block, floor level, `stand` held throughout by
+> ⚠ **`IN_FLIGHT`, one afternoon, one placement per condition, no repeats — a signal, not a
+> finding.** The sign is solid; the magnitudes are provisional and the setup was observed to
+> move. **Read the status block at the end of §9.10.5 before quoting any number here.**
+
+§9.10's range caveat addressed at amplitude. Front feet on a block, floor level, `stand` held throughout by
 `pi_host/tools/pose_hold.py` (the deadman folds an unattended standing robot in one second).
 Two shims, so compliance is bounded rather than assumed.
 
@@ -2277,9 +2281,10 @@ breaks. What this sweep does buy §9.10.3 is the empirical sign anchor its predi
 
 #### ⚠⚠ 9.10.3 THE CORRECTION ASSUMES HORIZONTAL GROUND — and terrain is where that breaks
 
-**Derived 2026-09-27 while planning the gait-amplitude sweep, and ✅ MEASURED THE SAME DAY in
-both headings — see §9.10.5.** Written down before measuring because it is a *signed,
-quantified* prediction and it points the wrong way. It does.
+**Derived 2026-09-27 while planning the gait-amplitude sweep. A same-day bench run in both
+headings is CONSISTENT with it and reversed the sign as predicted (§9.10.5) — but that run is
+`IN_FLIGHT`, not a closing measurement.** Written down before measuring because it is a
+*signed, quantified* prediction and it points the wrong way.
 
 `ground_clearance_boom` infers the boom's geometry relative to the ground from **gravity-
 referenced attitude**. That is only the same thing when the ground is horizontal. Two cases the
@@ -2321,9 +2326,11 @@ reported = c·up.y − boom_z·up.z  =  c·up.y + 0.070·up.z          (boom_z =
 - **Nose-down / descending** (`up.z = −sin α`): under-reports by ~20 mm (33.1 mm against
   53 mm). Conservative, harmless.
 
-✅ **MEASURED 2026-09-27, both headings, on an inclined box — §9.10.5.** Nose-up over-reports,
-nose-down under-reports, residuals +0.01 and −0.00 mm. The original pairing is falsified on the
-robot, not merely re-derived.
+**A bench run on 2026-09-27 in both headings reverses the sign with heading as predicted here
+(§9.10.5), so the ORIGINAL pairing — phantom clearance on descending — does not survive even a
+provisional look.** The *direction* is what that run establishes; its magnitudes are
+`IN_FLIGHT`. ⚠ **The arbiter is the brain's closed-loop behaviour on terrain, not bench
+precision** — see §9.10.5's closing note.
 
 ⚠ **And the arms swap: on a slope-aligned chassis the UNCOMPENSATED reading `d − H` is exactly
 `c`, i.e. correct.** So neither arm is right in general, and the discriminator — pitch relative
@@ -2346,9 +2353,12 @@ stated goal, so this is on the critical path.
 ⚠ **Until it is resolved, do not promote `m_comp` over `m` for terrain work.** §9.10.1's step 3
 (A/B into the homeostat) is safe to run on flat ground and **is not a terrain result.**
 
-#### ★★★ 9.10.5 THE SLOPE CASE, MEASURED — ✅ 2026-09-27, both headings
+#### 9.10.5 THE SLOPE CASE — `IN_FLIGHT` 2026-09-27, both headings
 
-§9.10.3 closed empirically. Robot standing inside a box tilted to **11.02°**, `stand` held
+> ⚠ **`IN_FLIGHT`. The DIRECTION is what this establishes; the magnitudes are provisional.**
+> Status block at the end of this section — read it before quoting a number.
+
+§9.10.3 exercised on the bench. Robot standing inside a box tilted to **11.02°**, `stand` held
 throughout by `pose_hold.py`, `--mode slope`. The level reference and the nose-up runs share
 **one continuous stand**; nose-down is a fresh recall (see the pose-repeatability note below).
 
@@ -2368,11 +2378,17 @@ the ray perpendicular to it, so `d − H` **is** the true clearance — which is
 compensated arm, the one that moved 12–17 mm, demonstrably the wrong one. **The arms swap, and
 now it is measured rather than argued.**
 
-★ **THE ASYMMETRY CONFIRMS THE SECOND-ORDER TERM BY A SIGN, NOT A FIT.** One box angle, so a
-lead-only model predicts near-symmetric drift: `|−13.47|` against `|+13.36|`, an asymmetry of
-**0.11 mm**. The second-order term is negative in *both* headings, so it shrinks the positive
-drift and deepens the negative one — predicting **2.02 mm** of asymmetry. **Measured: 2.01 mm.**
-A 20× discrimination between the two models, decided by a sign rather than a magnitude.
+**The asymmetry is consistent with the second-order term, and that is all it is.** One box
+angle, so a lead-only model predicts near-symmetric drift — `|−13.47|` against `|+13.36|`,
+0.11 mm of asymmetry — while the second-order term, negative in *both* headings, predicts
+**2.02 mm**. Observed **2.01 mm**.
+
+> ⚠ **CLAIM WALKED BACK 2026-09-27, the same day it was made.** This was first written up as
+> "confirms the second-order term by a sign, not a fit — a 20× discrimination". **It is not.**
+> Both candidate models were compared against `comp_delta`, which `benchd` computes *using the
+> full formula*, so the full formula was always going to win. Like the residuals above, it is
+> an internal-consistency check wearing the clothes of a physical one. The distinction is the
+> whole point of the ⚠ block above and it was violated three paragraphs later.
 
 ⚠ **The nose-down run is a DIFFERENT POSE RECALL and its uncompensated reading moved −3.00 mm.**
 The keepalive died between the two headings (a `timeout` on the operator's side, not the
@@ -2388,9 +2404,40 @@ enough that a 4 mm gate absorbed its own 2.5 mm error, and printed a hardcoded w
 contradicting the run it had just made. **A passing measurement is not evidence that the
 harness is sound**; the second heading is what exposed all three.
 
-★ **The operational conclusion is unchanged and now rests on measurement:** do not promote
-`m_comp` over `m` for terrain. Climbing is the unsafe heading. The fix remains a surface-normal
-estimate — a new observation, per §9.10.3's list — not a better single-point formula.
+**The operational conclusion is unchanged:** do not promote `m_comp` over `m` for terrain.
+Climbing is the unsafe heading. The fix remains a surface-normal estimate — a new observation,
+per §9.10.3's list — not a better single-point formula.
+
+##### ⚠ WHY §9.10.4 AND §9.10.5 ARE `IN_FLIGHT` AND NOT CLOSED — operator's call, 2026-09-27
+
+**Scale the claim to the power (CLAUDE.md §3 rule 7).** Both sections are **one afternoon, one
+box, one set of shims, one placement per condition, no repeats.** That is a *signal* — enough
+to promote-or-kill a direction — and it is not a finding. The sections were first written up
+with ✅ and ★★★ against sub-0.1 mm residuals, which reads far above the power that was actually
+behind them.
+
+**What is solid, and what is not:**
+
+| | status |
+|---|---|
+| **The SIGN** — nose-up → positive correction; climbing over-reports | **Solid.** Pitch is read from the IMU directly, never inferred from shim height, so a setup that shifts cannot flip it |
+| Order of magnitude — ~12–18 mm at 10–15° | Solid enough to act on |
+| Exact magnitudes, the toe-span fit, the 0.458 origin fraction | **Provisional.** All depend on the shim and box holding still |
+| The <0.1 mm residuals and the asymmetry | **Internal consistency, not world evidence** — see the ⚠ blocks above |
+
+⚠ **THE SETUP WAS OBSERVED TO MOVE, and it is recorded here rather than smoothed out.** Pitch
+stepped **−11.4° → −13.4°** partway through the 46 mm placement (roll squaring up from +1.1° to
+−0.1° at the same moment, so the feet were still seating). The stand shifted **3.00 mm** between
+the two slope headings. The two shims disagree by **1.5%, ~3σ**, on the toe span. A tilted box
+with a robot standing in it is not a metrology fixture, and the numbers above should be read as
+carrying that, not the residuals' implied precision.
+
+★ **THE ARBITER IS THE BRAIN, NOT THE BENCH.** Operator's judgement, and it is the doctrine's:
+this robot has already demonstrated good adaptivity at well above this noise level, so what
+decides whether the boom correction is worth anything on terrain is **closed-loop behaviour with
+the brain running** — error spiking on contact, the body feeling around, traversal — not a
+millimetre on a bench. **Re-open both sections against that**, per §9.10.1 step 3, and treat
+everything above as the instrument characterisation it is.
 
 #### ⚠ 9.10.2 The port found a bug in the sim it came from
 
