@@ -35,6 +35,13 @@ on the main disk on purpose: a run writes about 190 MB of JSONL per sim-hour,
 and `/tmp` is a quota'd tmpfs that takes the shell down when it fills. The
 window shows the estimate next to the duration.
 
+**Every experiment run headless has a preset**, and a preset mirrors the harness's argv exactly
+(mode, scene, seed, duration, reset noise, arena shift, every host flag). Picking a **config** by name
+loads that config's own preset when one names it, so the window shows the same setup the headless run
+used; a config no preset names is only the graph, with the controls left as they were (2026-09-27: the
+train room lived in the R84 preset's scene and host flags, and the config pick had shown the plain room).
+The scene list is every `scene_*.xml` in `mj_host/models/microduck`.
+
 ## Naming: milestones, probes, and the series
 
 The two lists are read top to bottom, and each entry says what it is by its prefix:

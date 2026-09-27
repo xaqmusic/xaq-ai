@@ -624,9 +624,20 @@ def build_window():
         desc.configure(state="disabled")
 
     def on_config_pick(_):
+        # A config picked by name loads ITS OWN preset when one names it (the operator, 2026-09-27: picking
+        # a1v2_r84_train.json showed the plain playroom -- the preset carried the train room and the host flags,
+        # the config pick did not).  Every experiment run headless has a preset that mirrors its harness argv;
+        # the config on its own is only the graph.  A config no preset names clears the preset, as before.
         i = config_box.current()
         if 0 <= i < len(config_entries):
-            V["config"].set(config_entries[i]["file"])
+            cfg = config_entries[i]["file"]
+            own = [j for j, p in enumerate(presets) if p.get("state", {}).get("config") == cfg]
+            if own:
+                j = next((j for j in own if presets[j].get("series")), own[0])
+                preset_box.current(j)
+                apply_preset(idx=j)
+                return
+            V["config"].set(cfg)
             V["preset"].set("")
             preset_box.set("")
             preset_hint.configure(text="")
@@ -634,8 +645,8 @@ def build_window():
     config_box.bind("<<ComboboxSelected>>", on_config_pick)
     V["show_all"].trace_add("write", refresh_configs)
 
-    def apply_preset(_=None):
-        i = preset_box.current()
+    def apply_preset(_=None, idx=None):
+        i = preset_box.current() if idx is None else idx
         if not (0 <= i < len(presets)):
             return
         p = presets[i]
@@ -673,8 +684,10 @@ def build_window():
     size_note.grid(column=2, row=4, columnspan=2, sticky="w")
 
     ttk.Label(fr, text="Scene").grid(column=0, row=5, sticky="w")
-    ttk.Combobox(fr, textvariable=V["scene"], values=["scene.xml", "scene_arena.xml", "scene_playroom.xml", "scene_tofcheck.xml", "scene_walk.xml"],
-                 state="readonly", width=14).grid(column=1, row=5, sticky="w")
+    # every scene the model directory holds (a generated room such as scene_playroom_train.xml included), scene.xml first
+    scenes = ["scene.xml"] + sorted(q.name for q in MODEL_DIR.glob("scene_*.xml"))
+    ttk.Combobox(fr, textvariable=V["scene"], values=scenes,
+                 state="readonly", width=24).grid(column=1, row=5, sticky="w")
 
     ttk.Label(fr, text="Output").grid(column=0, row=6, sticky="w")
     orow = ttk.Frame(fr); orow.grid(column=1, row=6, columnspan=3, sticky="w")
