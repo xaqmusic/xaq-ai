@@ -58,7 +58,10 @@ Built 2026-09-27, off by default, the plain playroom byte-identical (`playroom_g
   floor (0.35 m from the walls, 0.25 m from everything but the rug, clear of the duck's start), and writes the
   track into the scene as `<custom><numeric name="train_path">` = [cx, cy, a, b, yaw]. The sleepers are
   non-colliding and 4 mm tall: floor to the ToF. The seed-1 room's track: centre (−1.02, +0.72), 0.60 × 0.40 m,
-  perimeter 3.17 m, over the rug (`scene_playroom_train.xml`).
+  perimeter 3.17 m (`scene_playroom_train.xml`). With the train the **rug lies in the middle of the floor**, around
+  the duck's start (the operator, after stage 0: under the track it z-fought the sleepers); the seed's random draw
+  and keep-out for it are kept, so every other placement is the plain room's, and the track is the same one stage 0
+  measured.
 - **`--train SPEED RUN_S STOP_S`** drives it kinematically (pose and velocity written every tick, so contacts
   meet a mover that does not yield) at SPEED for RUN_S, still for STOP_S, repeating; the phase of the schedule
   and the start along the track follow the **seed** (six seeds meet it at six points of the cycle) unless

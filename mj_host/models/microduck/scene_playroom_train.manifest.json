@@ -42,8 +42,8 @@
    "name": "rug",
    "cls": "static",
    "kind": "rug",
-   "x": -1.0421,
-   "y": 0.9902,
+   "x": 0.0,
+   "y": 0.0,
    "z": 0.002,
    "extent": 0.5
   },
@@ -154,7 +154,7 @@
    "perimeter": 3.173
   }
  ],
- "xml_sha256": "db7fe21e062b2987",
+ "xml_sha256": "847b85e86d00bb77",
  "free_bodies": [
   "obj_ball0",
   "obj_ball1",

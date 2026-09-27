@@ -16,7 +16,7 @@ Its objects are sorted by the only thing the brain can see — how they change:
 
 --train (chasing moving things, stage 0, 2026-09-27) adds `mov_train0`, a toy-engine-sized box on an oval
 track placed LAST, on floor that everything else left free (0.35 m from the walls, 0.25 m from every placed
-thing but the rug, clear of the duck's start), and writes the track as <custom><numeric name="train_path"> = [cx, cy,
+thing, the rug included, clear of the duck's start); the rug itself moves to the middle of the floor, and writes the track as <custom><numeric name="train_path"> = [cx, cy,
 a, b, yaw] so the host reads the geometry from the scene it loads.  The room before the train is the same
 room the seed gives without it (the train draws no random numbers until everything else is placed).  Its
 height (6 cm) and footprint (12 x 5 cm) sit inside CloudMap's small-thing band, so a STOPPED train is a
@@ -194,7 +194,14 @@ class Room:
     def rug(self):
         # Non-colliding, group 0: the camera sees a pattern on the floor, the ToF reads floor.
         x, y = self.place(0.5, margin=0.05)
-        self.rug_xy = (x, y)   # the train's track may cross the rug: it is floor
+        self.rug_drawn = (x, y, 0.5)   # the keep-out entry the seed made (kept, for the later placements)
+        if self.with_train:
+            # The operator, 2026-09-27: the rug under the track z-fights the sleepers.  With the train the rug lies in
+            # the MIDDLE of the floor, around the duck's start.  The random draw and the keep-out entry above stay
+            # exactly as the seed made them, so every later placement is the plain room's; only the geom moves,
+            # and the track keeps clear of where the rug really is.
+            x, y = 0.0, 0.0
+        self.rug_xy = (x, y)
         W = self.world.append
         W(f'<geom name="rug" type="box" size="0.5 0.35 0.002" pos="{x:.3f} {y:.3f} 0.002" material="rug_mat" contype="0" conaffinity="0"/>')
         self.record("rug", "static", "rug", x, y, 0.002, 0.5)
@@ -294,7 +301,8 @@ class Room:
         """The toy train and its oval track, placed after everything else on the free floor."""
         W = self.world.append
         lim = self.half - WALL_T - 0.35
-        solid = [p for p in self.placed if (p[0], p[1]) != self.rug_xy]
+        # the keep-outs of everything real: the seed's rug entry stands for empty floor now, the rug lies at rug_xy
+        solid = [q for q in self.placed if q != self.rug_drawn] + [(self.rug_xy[0], self.rug_xy[1], 0.5)]
         fit = None
         for a, b in ((0.9, 0.55), (0.8, 0.5), (0.7, 0.45), (0.6, 0.4), (0.5, 0.35)):
             for _ in range(1500):
