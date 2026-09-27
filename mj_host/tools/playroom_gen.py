@@ -2,7 +2,7 @@
 """playroom_gen — generate the duck's playroom scene from a seed, with a manifest.
 
     mj_host/tools/playroom_gen.py [--seed 1] [--half 2.0] [--out scene_playroom.xml]
-                                  [--balls 2 --blocks 2 --chairs 2] [--check]
+                                  [--balls 2 --blocks 2 --chairs 2] [--train] [--check]
 
 The playroom is the arena for the behaviour set (docs/plans-and-designs/microduck_playroom_plan.md
 §5): a room the duck's own size sees as pillars, ceilings and things that answer when pushed.
@@ -11,7 +11,16 @@ Its objects are sorted by the only thing the brain can see — how they change:
   static, immovable   walls, a table, chairs, a shelf, a rug     (bake fast, go quiet)
   movable by the duck balls, blocks — free bodies with mass      (its own action changes them)
   self-changing       a wall clock whose hand the host turns     (novelty that never answers)
+  self-moving         a toy train on a closed track (--train)    (the host drives it: --train SPEED RUN STOP)
   operator-moved      any of the above, via the host's --move    (the (d) test)
+
+--train (chasing moving things, stage 0, 2026-09-27) adds `mov_train0`, a toy-engine-sized box on an oval
+track placed LAST, on floor that everything else left free (0.35 m from the walls, 0.25 m from every placed
+thing but the rug, clear of the duck's start), and writes the track as <custom><numeric name="train_path"> = [cx, cy,
+a, b, yaw] so the host reads the geometry from the scene it loads.  The room before the train is the same
+room the seed gives without it (the train draws no random numbers until everything else is placed).  Its
+height (6 cm) and footprint (12 x 5 cm) sit inside CloudMap's small-thing band, so a STOPPED train is a
+thing the existing vocabulary sees; the sleepers are non-colliding and 4 mm tall, floor to the ToF.
 
 Rules the generator keeps (plan §5.3, §5.5):
   * everything is placed from --seed and written to <out>.manifest.json; the host and the
@@ -105,10 +114,13 @@ def arena_keyframes():
 
 
 class Room:
-    def __init__(self, seed, half, n_balls, n_blocks, n_chairs):
+    def __init__(self, seed, half, n_balls, n_blocks, n_chairs, train=False):
         self.seed, self.half = seed, half
         self.rng = random.Random(seed)
         self.n_balls, self.n_blocks, self.n_chairs = n_balls, n_blocks, n_chairs
+        self.with_train = train
+        self.train_path = None   # [cx, cy, a, b, yaw] once placed
+        self.custom = []         # <custom> numeric lines
         self.assets = []       # xml lines
         self.world = []        # xml lines
         self.free_bodies = []  # (name, x, y, z[, yaw]) in the order they appear
@@ -162,6 +174,9 @@ class Room:
         T('<material name="block1_mat" rgba="0.8 0.2 0.8 1"/>')
         T('<material name="block2_mat" rgba="0.1 0.8 0.85 1"/>')
         T('<material name="clock_face_mat" rgba="0.98 0.98 0.95 1"/>')
+        if self.with_train:   # only with the train: the plain room stays byte-identical
+            T('<material name="train_mat" rgba="0.85 0.15 0.10 1"/>')
+            T('<material name="sleeper_mat" rgba="0.25 0.22 0.20 1"/>')
         T('<material name="clock_hand_mat" rgba="0.05 0.05 0.05 1"/>')
 
     # ---- the room ----------------------------------------------------------------------
@@ -179,6 +194,7 @@ class Room:
     def rug(self):
         # Non-colliding, group 0: the camera sees a pattern on the floor, the ToF reads floor.
         x, y = self.place(0.5, margin=0.05)
+        self.rug_xy = (x, y)   # the train's track may cross the rug: it is floor
         W = self.world.append
         W(f'<geom name="rug" type="box" size="0.5 0.35 0.002" pos="{x:.3f} {y:.3f} 0.002" material="rug_mat" contype="0" conaffinity="0"/>')
         self.record("rug", "static", "rug", x, y, 0.002, 0.5)
@@ -274,6 +290,66 @@ class Room:
         self.qpos_layout.append((f"obj_block{i}", "free"))
         self.record(f"obj_block{i}", "movable", "block", x, y, s, s, yaw=round(yaw, 3))
 
+    def train(self):
+        """The toy train and its oval track, placed after everything else on the free floor."""
+        W = self.world.append
+        lim = self.half - WALL_T - 0.35
+        solid = [p for p in self.placed if (p[0], p[1]) != self.rug_xy]
+        fit = None
+        for a, b in ((0.9, 0.55), (0.8, 0.5), (0.7, 0.45), (0.6, 0.4), (0.5, 0.35)):
+            for _ in range(1500):
+                cx, cy = self.rng.uniform(-lim + a, lim - a), self.rng.uniform(-lim + a, lim - a)
+                yaw = self.rng.uniform(0, math.pi)
+                ok = True
+                for i in range(64):
+                    th = 2 * math.pi * i / 64
+                    lx, ly = a * math.cos(th), b * math.sin(th)
+                    x = cx + math.cos(yaw) * lx - math.sin(yaw) * ly
+                    y = cy + math.sin(yaw) * lx + math.cos(yaw) * ly
+                    if abs(x) > lim or abs(y) > lim or math.hypot(x, y) < DUCK_KEEPOUT + 0.15:
+                        ok = False; break
+                    if any(math.hypot(x - px, y - py) < pr + 0.25 for px, py, pr in solid):
+                        ok = False; break
+                if ok:
+                    fit = (cx, cy, a, b, yaw); break
+            if fit:
+                break
+        if not fit:
+            sys.exit("could not place the train's track on the free floor (try another seed or fewer chairs)")
+        cx, cy, a, b, yaw = fit
+        self.train_path = [round(v, 4) for v in fit]
+        # the sleepers: 48 flat, non-colliding boxes along the ellipse, for the eye; floor to the ToF
+        n = 48
+        for i in range(n):
+            th = 2 * math.pi * i / n
+            lx, ly = a * math.cos(th), b * math.sin(th)
+            x = cx + math.cos(yaw) * lx - math.sin(yaw) * ly
+            y = cy + math.sin(yaw) * lx + math.cos(yaw) * ly
+            tx, ty = -a * math.sin(th), b * math.cos(th)
+            tyaw = math.atan2(math.sin(yaw) * tx + math.cos(yaw) * ty, math.cos(yaw) * tx - math.sin(yaw) * ty)
+            W(f'<geom name="track_sleeper{i}" type="box" size="0.02 0.035 0.002" pos="{x:.3f} {y:.3f} 0.002" euler="0 0 {tyaw:.3f}" '
+              'material="sleeper_mat" contype="0" conaffinity="0"/>')
+        # the train at the track's origin (arc length 0: the +a end), facing along the track
+        x0 = cx + math.cos(yaw) * a
+        y0 = cy + math.sin(yaw) * a
+        yaw0 = yaw + math.pi / 2
+        W(f'<body name="mov_train0" pos="{x0:.3f} {y0:.3f} 0.030" euler="0 0 {yaw0:.3f}">')
+        W('  <freejoint/>')
+        W('  <geom name="mov_train0_geom" type="box" size="0.06 0.025 0.03" material="train_mat" mass="0.15" friction="0.6"/>')
+        W('  <geom name="mov_train0_cab" type="box" size="0.02 0.022 0.015" pos="-0.03 0 0.045" material="train_mat" mass="0.02"/>')
+        W('</body>')
+        self.free_bodies.append(("mov_train0", x0, y0, 0.03, yaw0))
+        self.qpos_layout.append(("mov_train0", "free"))
+        self.custom.append(f'<numeric name="train_path" data="{cx:.4f} {cy:.4f} {a:.4f} {b:.4f} {yaw:.4f}"/>')
+        per = 0.0
+        px, py = a, 0.0
+        for i in range(1, 721):
+            th = 2 * math.pi * i / 720
+            x, y = a * math.cos(th), b * math.sin(th)
+            per += math.hypot(x - px, y - py); px, py = x, y
+        self.record("mov_train0", "self_moving", "train", x0, y0, 0.03, 0.12, yaw=round(yaw0, 3),
+                    path=self.train_path, perimeter=round(per, 3))
+
     # ---- assembly ----------------------------------------------------------------------
     def build(self):
         self.textures()
@@ -288,6 +364,8 @@ class Room:
             self.ball(i)
         for i in range(self.n_blocks):
             self.block(i)
+        if self.with_train:
+            self.train()
 
     def keyframes(self):
         lines = []
@@ -308,11 +386,12 @@ class Room:
 
     def xml(self):
         nl = "\n        "
+        custom = f"\n    <custom>\n        {nl.join(self.custom)}\n    </custom>" if self.custom else ""
         return f'''<mujoco model="scene_playroom">
     <!-- GENERATED by mj_host/tools/playroom_gen.py --seed {self.seed} --half {self.half}
-         --balls {self.n_balls} --blocks {self.n_blocks} --chairs {self.n_chairs}.
+         --balls {self.n_balls} --blocks {self.n_blocks} --chairs {self.n_chairs}{" --train" if self.with_train else ""}.
          Do not edit by hand: regenerate. The manifest is beside this file. -->
-    <include file="robot_overlay_playroom.xml" />
+    <include file="robot_overlay_playroom.xml" />{custom}
 
     <visual>
         <!-- Lighting (operator, 2026-09-10): the headlight rides the camera and flattens every
@@ -348,12 +427,15 @@ def main():
     ap.add_argument("--balls", type=int, default=2)
     ap.add_argument("--blocks", type=int, default=2)
     ap.add_argument("--chairs", type=int, default=2)
-    ap.add_argument("--out", default="scene_playroom.xml", help="file name in mj_host/models/microduck (or a path)")
+    ap.add_argument("--train", action="store_true", help="add the toy train on its oval track (default --out scene_playroom_train.xml)")
+    ap.add_argument("--out", default=None, help="file name in mj_host/models/microduck (or a path); default scene_playroom.xml")
     ap.add_argument("--check", action="store_true", help="load the result through the host when it is built")
     a = ap.parse_args()
 
+    if a.out is None:
+        a.out = "scene_playroom_train.xml" if a.train else "scene_playroom.xml"
     write_robot_overlay()
-    room = Room(a.seed, a.half, a.balls, a.blocks, a.chairs)
+    room = Room(a.seed, a.half, a.balls, a.blocks, a.chairs, train=a.train)
     room.build()
     text = room.xml()
     out = Path(a.out) if Path(a.out).is_absolute() or "/" in a.out else MODEL_DIR / a.out
@@ -375,7 +457,11 @@ def main():
     objs = room.manifest["objects"]
     print(f"playroom seed {a.seed}: {out.name}  half {a.half} m  {len(objs)} objects "
           f"({sum(o['cls']=='static' for o in objs)} static, {sum(o['cls']=='movable' for o in objs)} movable, "
-          f"{sum(o['cls']=='self_changing' for o in objs)} self-changing)  sha {room.manifest['xml_sha256']}")
+          f"{sum(o['cls']=='self_changing' for o in objs)} self-changing"
+          f"{', 1 self-moving' if room.train_path else ''})  sha {room.manifest['xml_sha256']}")
+    if room.train_path:
+        cx, cy, ta, tb, tyaw = room.train_path
+        print(f"  train track: centre ({cx:+.2f}, {cy:+.2f})  {ta:.2f} x {tb:.2f} m  yaw {tyaw:.2f}  perimeter {objs[-1]['perimeter']:.2f} m")
     for o in objs:
         if o["cls"] != "static" or o["kind"] not in ("wall",):
             print(f"  {o['name']:16s} {o['cls']:14s} at ({o['x']:+.2f}, {o['y']:+.2f})")

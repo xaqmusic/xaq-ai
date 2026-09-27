@@ -387,6 +387,7 @@ void CloudMap::tick(uint64_t tick_id) {
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(input_topic_));
     if (!pt || pt->values.size() < 3) return;
     if (pt->values.size() < 5) return;
+    last_tick_ = tick_id;
     const bool still = pt->values[0] > 0.5f;
     const double yaw = double(pt->values[1]);
     const double trunk_z = double(pt->values[2]);
@@ -467,18 +468,25 @@ void CloudMap::tick(uint64_t tick_id) {
 }
 
 // The stack rule (design doc §17.31), as cloud_objects.py scores it offline, on the live voxels.
-std::vector<CloudMap::Thing> CloudMap::cluster_things() const {
+std::vector<CloudMap::Thing> CloudMap::cluster_things() const { return cluster_things(0); }
+
+std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const {
     std::vector<Thing> out;
     if (vox_.empty()) return out;
-    struct Col { std::vector<std::pair<double, uint32_t>> hs; bool seed = false; };
+    struct Col { std::vector<std::pair<double, uint32_t>> hs; bool seed = false; int n = 0, fresh = 0; double age = 0.0, agew = 0.0, nhits = 0.0; };
     std::unordered_map<int64_t, Col> cols;   // keyed by (ix, iy, 0)
     for (auto const& [k, vv] : vox_) {
+        if (vv.last < since_tick) continue;   // the recency window (cluster_recent); 0 = every voxel
         int ix, iy, iz; unkey(k, ix, iy, iz);
         const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
         if (h < break_lo_) continue;
         auto& c = cols[key_of(ix, iy, 0)];
         c.hs.emplace_back(h, vv.hits);
         if (h < break_hi_) c.seed = true;
+        ++c.n;
+        if (since_tick > 0 && vv.first >= since_tick) ++c.fresh;
+        c.age += double(vv.last - vv.first);
+        c.agew += double(vv.hits) * double(vv.last - vv.first); c.nhits += double(vv.hits);
     }
     std::unordered_map<int64_t, bool> seen;
     for (auto const& [k0, c0] : cols) {
@@ -515,6 +523,13 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things() const {
         }
         t.ncols = int(comp.size());
         t.cx = sx / double(comp.size()); t.cy = sy / double(comp.size());
+        {
+            int n = 0, fresh = 0; double age = 0.0, agew = 0.0, nhits = 0.0;
+            for (int64_t k : comp) { const auto& c = cols[k]; n += c.n; fresh += c.fresh; age += c.age; agew += c.agew; nhits += c.nhits; }
+            t.fresh = since_tick > 0 && n > 0 ? double(fresh) / double(n) : 0.0;
+            t.age = n > 0 ? age / double(n) : 0.0;
+            t.age_w = nhits > 0.0 ? agew / nhits : 0.0;
+        }
         t.rng = std::hypot(t.cx, t.cy);
         const double ex = xmax - xmin + voxel_m_, ey = ymax - ymin + voxel_m_;
         t.ext = std::max(ex, ey); t.ext_min = std::min(ex, ey);

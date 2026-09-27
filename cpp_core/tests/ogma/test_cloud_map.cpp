@@ -454,3 +454,36 @@ TEST(CloudMap, WithoutWalkCloudAMovingTickContributesNothing) {
     EXPECT_FALSE(r.m.is_open());
     EXPECT_EQ(r.m.voxels(), 0);
 }
+
+// MOVERS (chasing moving things, 2026-09-27, stage 0): the recency window.  A cloud accumulates, so a thing that
+// moves smears; cluster_recent runs the same rule over only the voxels seen in the last N ticks, so a cluster has a
+// position at a time.  A cube cast at 0.85 m and again, ten casts later, at 1.25 m is in the whole cloud twice and
+// is one small cube at its LATEST position through a short window.
+TEST(CloudMap, ARecencyWindowSeesAMovedCubeWhereItIsNow) {
+    Rig r(things_params());
+    cast_world(r, 0.0, cube());                       // the cube at 0.81-0.89 m
+    for (int i = 0; i < 10; ++i) r.cast(true, 0.0, 0.0, 0.0, 3, {});   // ten empty casts pass
+    std::vector<Pt> moved;
+    for (auto p : cube()) { p[0] += 0.40; moved.push_back(p); }
+    cast_world(r, 0.0, moved);                        // the same cube 40 cm further out
+    const auto all = r.m.cluster_things();
+    ASSERT_EQ(all.size(), 2u) << "the whole cloud keeps both positions: the cube is in it twice";
+    const auto recent = r.m.cluster_recent(3);
+    ASSERT_EQ(recent.size(), 1u) << "through a 3-tick window only the latest cast's voxels remain";
+    EXPECT_TRUE(recent[0].small);
+    EXPECT_NEAR(recent[0].cx, 0.85 + 0.40, 0.03);
+    EXPECT_EQ(r.m.last_tick(), r.t - 1);
+    EXPECT_EQ(r.m.cluster_recent(1000).size(), 2u) << "a window wider than the run sees both positions";
+    // freshness: the cube's voxels at the new position were first seen inside the window
+    EXPECT_NEAR(recent[0].fresh, 1.0, 1e-9) << "every voxel of a thing that just moved is new to the cloud";
+    EXPECT_NEAR(recent[0].age, 0.0, 1e-9);
+    // the same cube cast again where it is, three ticks later: through a one-tick window its voxels are all
+    // re-hits, first seen before the window -- not fresh.  This is what tells a mover from a static thing.
+    for (int i = 0; i < 2; ++i) r.cast(true, 0.0, 0.0, 0.0, 3, {});
+    cast_world(r, 0.0, moved);
+    const auto again = r.m.cluster_recent(1);
+    ASSERT_EQ(again.size(), 1u);
+    EXPECT_NEAR(again[0].fresh, 0.0, 1e-9) << "a thing seen where it was is not fresh";
+    EXPECT_NEAR(again[0].age, 3.0, 1e-9) << "its voxels are three ticks old";
+    EXPECT_NEAR(r.m.cluster_things()[0].fresh, 0.0, 1e-9) << "the whole-cloud rule reports no freshness";
+}

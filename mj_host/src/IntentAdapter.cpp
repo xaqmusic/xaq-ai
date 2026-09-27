@@ -465,6 +465,10 @@ std::vector<ogma::CloudMap::Thing> IntentAdapter::cloud_things() const {
     auto* c = find_cloud(*instance_);
     return c ? c->things() : std::vector<ogma::CloudMap::Thing>{};
 }
+std::vector<ogma::CloudMap::Thing> IntentAdapter::cloud_things_recent(uint64_t window_ticks) const {
+    auto* c = find_cloud(*instance_);
+    return c && c->is_open() ? c->cluster_recent(window_ticks) : std::vector<ogma::CloudMap::Thing>{};
+}
 int IntentAdapter::cloud_attended() const { auto* c = find_cloud(*instance_); return c ? c->attended() : -1; }
 std::array<float, 3> IntentAdapter::cloud_thing_bearing() const {
     auto* c = find_cloud(*instance_);

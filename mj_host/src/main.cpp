@@ -1231,6 +1231,55 @@ double g_arena_shift_s = -1.0;   // > 0: at this time move wall_px from x = 1.0 
 // --move NAME X Y AT_S: the playroom's (d) test — relocate a body or geom mid-run (repeatable).
 struct MoveOp { std::string name; double x, y, at_s; bool done = false; };
 std::vector<MoveOp> g_moves;
+// THE TRAIN (chasing moving things, stage 0, 2026-09-27; the operator: "a toy train or car on a track that stops
+// and starts at regular intervals").  --train SPEED RUN_S STOP_S drives the scene's `mov_train0` body around the
+// closed track the scene carries in its <custom><numeric name="train_path"> block (playroom_gen.py --train):
+// SPEED m/s for RUN_S seconds, still for STOP_S, repeating.  A stopped train is a remembered thing; a moving one
+// is the stimulus; each transition is a (d) test.  The phase of the schedule and the start along the track are
+// spread by the SEED (six seeds meet the train at six points of its cycle) unless --train-phase S pins them.
+// Kinematic: the body's pose and velocity are written every tick, so the walker meets a mover that does not
+// yield.  Off = byte-identical.  The record carries "train": [x, y, yaw, vx, vy, moving] -- truth, for the scorer.
+struct TrainPlan { double speed = 0.0, run_s = 8.0, stop_s = 8.0, phase_s = -1.0; };
+TrainPlan g_train;
+// --log-movers WINDOW_S (stage 0's instrument): on every cast tick with a cloud open, the stack rule's clusters
+// over only the voxels seen in the last WINDOW_S seconds (CloudMap::cluster_recent) -- "mvc": [[cx, cy, ext,
+// top, ncols, hits, small, fresh, age_s, age_w_s], ...] in the cloud's frame (fresh: the share of the cluster's voxels
+// first seen inside the window; age_s: their mean age; age_w_s: the same weighted by hits), "mva": [wx, wy, wyaw] the anchor's world pose (truth,
+// for the scorer's labels) and "mvw": 1 for a walking cloud.  Off = byte-identical.
+double g_log_movers_s = 0.0;
+// A closed track: an ellipse of semi-axes a (along yaw) and b about (cx, cy), walked by ARC LENGTH so the
+// train's speed is what the flag says everywhere on it.
+struct TrackPath {
+    double cx = 0.0, cy = 0.0, a = 0.0, b = 0.0, yaw = 0.0, length = 0.0;
+    std::vector<double> cum, ang;   // cumulative arc length at each sampled parameter
+    void build(const std::vector<double>& v) {
+        cx = v[0]; cy = v[1]; a = v[2]; b = v[3]; yaw = v[4];
+        const int n = 720;
+        cum.assign(n + 1, 0.0); ang.assign(n + 1, 0.0);
+        double px = 0.0, py = 0.0;
+        for (int i = 0; i <= n; ++i) {
+            const double th = 2.0 * M_PI * double(i) / double(n);
+            const double x = a * std::cos(th), y = b * std::sin(th);
+            ang[size_t(i)] = th;
+            if (i) cum[size_t(i)] = cum[size_t(i - 1)] + std::hypot(x - px, y - py);
+            px = x; py = y;
+        }
+        length = cum.back();
+    }
+    // world pose and unit tangent at arc length s (wrapped)
+    void at(double s, double& x, double& y, double& tyaw) const {
+        s = std::fmod(s, length); if (s < 0.0) s += length;
+        const auto it = std::upper_bound(cum.begin(), cum.end(), s);
+        const size_t i = size_t(std::max<long>(1, it - cum.begin()));
+        const double f = (cum[i] - cum[i - 1]) > 1e-12 ? (s - cum[i - 1]) / (cum[i] - cum[i - 1]) : 0.0;
+        const double th = ang[i - 1] + f * (ang[i] - ang[i - 1]);
+        const double lx = a * std::cos(th), ly = b * std::sin(th);
+        const double tx = -a * std::sin(th), ty = b * std::cos(th);
+        const double c = std::cos(yaw), sn = std::sin(yaw);
+        x = cx + c * lx - sn * ly; y = cy + sn * lx + c * ly;
+        tyaw = std::atan2(sn * tx + c * ty, c * tx - sn * ty);
+    }
+};
 constexpr double kClockRadPerS = 2.0 * M_PI / 20.0;   // the clock hand: one turn per 20 s, visible at the camera's rate
 // --head-graph H.json: the head loop (playroom plan, H line) — a second brain whose motors are
 // the walker's four head commands and whose senses are the head IMU. Absent: byte-identical.
@@ -1512,6 +1561,27 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
     }
     const bool has_clock = body.has_joint("clock_hand");
+    // the train: its track from the scene, its schedule from the flag, its phase from the seed
+    const bool train_on = g_train.speed > 0.0;
+    TrackPath track;
+    double train_s = 0.0, train_x = 0.0, train_y = 0.0, train_yaw = 0.0, train_vx = 0.0, train_vy = 0.0;
+    bool train_moving = false;
+    double train_phase = 0.0;
+    if (train_on) {
+        const auto v = body.numeric("train_path");
+        if (v.size() < 5) throw std::runtime_error("--train: the scene has no train_path (generate it with playroom_gen.py --train)");
+        track.build(v);
+        const double cycle = g_train.run_s + g_train.stop_s;
+        train_phase = g_train.phase_s >= 0.0 ? g_train.phase_s : double(seed % 6) * cycle / 6.0;
+        train_s = g_train.phase_s >= 0.0 ? 0.0 : double(seed % 6) * track.length / 6.0;
+        track.at(train_s, train_x, train_y, train_yaw);
+        body.place_free_body("mov_train0", train_x, train_y, 0.03, train_yaw, 0.0, 0.0, 0.0);
+        std::fprintf(stderr, "  train: %.2f m/s, runs %.0f s / stops %.0f s (cycle %.0f s), track centre (%.2f, %.2f) %.2f x %.2f m yaw %.2f, "
+                             "perimeter %.2f m; phase %.1f s, start %.2f m along (seed %llu)\n",
+                     g_train.speed, g_train.run_s, g_train.stop_s, cycle, track.cx, track.cy, track.a, track.b, track.yaw,
+                     track.length, train_phase, train_s, (unsigned long long)seed);
+    }
+    if (g_log_movers_s > 0.0) std::fprintf(stderr, "  movers: logging the cloud's clusters through a %.2f s recency window on every cast (mvc / mva / mvw)\n", g_log_movers_s);
     const bool has_objects = body.n_objects() > 0;
     std::unique_ptr<HeadAdapter> head;
     if (!g_head_graph.empty()) {
@@ -1784,6 +1854,20 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             std::fprintf(stderr, "  move at %.0f s: %s -> (%.2f, %.2f)\n", mv.at_s, mv.name.c_str(), mv.x, mv.y);
         }
         if (has_clock) body.spin_joint("clock_hand", kClockRadPerS);
+        if (train_on) {
+            const double cycle = g_train.run_s + g_train.stop_s;
+            const double at = std::fmod(double(t) / kBrainHz + train_phase, cycle);
+            train_moving = at < g_train.run_s;
+            if (train_moving) train_s += g_train.speed / kBrainHz;
+            double nx, ny, nyaw;
+            track.at(train_s, nx, ny, nyaw);
+            const double sp = train_moving ? g_train.speed : 0.0;
+            train_vx = sp * std::cos(nyaw); train_vy = sp * std::sin(nyaw);
+            // the yaw rate along the track, for contacts: the heading change per metre times the speed
+            double dyaw = nyaw - train_yaw; while (dyaw > M_PI) dyaw -= 2.0 * M_PI; while (dyaw < -M_PI) dyaw += 2.0 * M_PI;
+            train_x = nx; train_y = ny; train_yaw = nyaw;
+            body.place_free_body("mov_train0", train_x, train_y, 0.03, train_yaw, train_vx, train_vy, train_moving ? dyaw * kBrainHz : 0.0);
+        }
         // The body predictor: observe every tick, frozen, so a stumble has somewhere to register.
         // Skipped while the joint brain already drives (StopPhase::Brain ticks it itself below).
         if (g_body_predicts && stander && stop_phase != StopPhase::Brain) (void)stander->act(body);
@@ -2408,6 +2492,17 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the seek loop, if the graph has one (things phase T2): its need and the range left to its target
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
+            if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
+            // MOVERS (stage 0): the clusters through the recency window, on cast ticks with a cloud open
+            if (g_log_movers_s > 0.0 && cloud_on && t % 4 == 0 && brain.cloud_open()) {
+                const auto th = brain.cloud_things_recent(uint64_t(std::lround(g_log_movers_s * kBrainHz)));
+                std::printf(",\"mvw\":%d,\"mva\":[%.4f,%.4f,%.4f],\"mvc\":[", brain.cloud_walking() ? 1 : 0,
+                            cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw);
+                for (size_t k = 0; k < th.size(); ++k)
+                    std::printf("%s[%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%.2f,%.2f,%.2f]", k ? "," : "", th[k].cx, th[k].cy, th[k].ext, th[k].top,
+                                th[k].ncols, th[k].hits, th[k].small ? 1 : 0, th[k].fresh, th[k].age / kBrainHz, th[k].age_w / kBrainHz);
+                std::printf("]");
+            }
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
             if (g_ref_free > 0.0 && t % 50 == 0) std::printf(",\"rfree\":%d", brain.ref_released());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
@@ -2665,6 +2760,10 @@ void usage() {
         "      --fast-until S (with --realtime): unpaced until S s, then real time — watch the tour, skip the babble.\n"
         "      --arena-shift S moves wall_px at S s; --move NAME X Y S relocates a playroom body or\n"
         "      geom at S s (repeatable) — the (d) tests.  A generated scene's manifest is echoed.\n"
+        "      --train SPEED RUN_S STOP_S drives the scene's toy train (playroom_gen.py --train) round its track\n"
+        "      at SPEED m/s for RUN_S s, still for STOP_S s, repeating; the phase and the start along the track\n"
+        "      follow the seed unless --train-phase S.  --log-movers WINDOW_S logs the cloud's clusters through a\n"
+        "      recency window on every cast (\"mvc\"), the stage-0 instrument for chasing moving things.\n"
         "\n"
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
@@ -2900,6 +2999,12 @@ int main(int argc, char** argv) {
             mv.name = next("--move"); mv.x = std::stod(next("--move")); mv.y = std::stod(next("--move"));
             mv.at_s = std::stod(next("--move"));
             g_moves.push_back(mv);
+        } else if (a == "--train") {
+            g_train.speed = std::stod(next("--train")); g_train.run_s = std::stod(next("--train")); g_train.stop_s = std::stod(next("--train"));
+        } else if (a == "--train-phase") {
+            g_train.phase_s = std::stod(next("--train-phase"));
+        } else if (a == "--log-movers") {
+            g_log_movers_s = std::stod(next("--log-movers"));
         } else if (a == "--l2-twist") {
             l2_twist[0] = std::stod(next("--l2-twist")); l2_twist[1] = std::stod(next("--l2-twist"));
             l2_twist[2] = std::stod(next("--l2-twist")); l2_open_loop = true;

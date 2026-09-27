@@ -241,6 +241,26 @@ void DuckBody::roll_body(const char* name, double x, double y, double vx, double
     mj_forward(m_, d_);
 }
 
+void DuckBody::place_free_body(const char* name, double x, double y, double z, double yaw, double vx, double vy, double wz) {
+    const int bid = mj_name2id(m_, mjOBJ_BODY, name);
+    if (bid < 0 || m_->body_jntnum[bid] == 0 || m_->jnt_type[m_->body_jntadr[bid]] != mjJNT_FREE)
+        throw std::runtime_error(std::string("place_free_body: no movable ") + name);
+    const int adr = m_->jnt_qposadr[m_->body_jntadr[bid]];
+    const int dof = m_->jnt_dofadr[m_->body_jntadr[bid]];
+    d_->qpos[adr] = x; d_->qpos[adr + 1] = y; d_->qpos[adr + 2] = z;
+    d_->qpos[adr + 3] = std::cos(0.5 * yaw); d_->qpos[adr + 4] = 0.0; d_->qpos[adr + 5] = 0.0; d_->qpos[adr + 6] = std::sin(0.5 * yaw);
+    for (int k = 0; k < 6; ++k) d_->qvel[dof + k] = 0.0;
+    d_->qvel[dof] = vx; d_->qvel[dof + 1] = vy; d_->qvel[dof + 5] = wz;
+    mj_forward(m_, d_);
+}
+
+std::vector<double> DuckBody::numeric(const char* name) const {
+    const int id = mj_name2id(m_, mjOBJ_NUMERIC, name);
+    if (id < 0) return {};
+    const int adr = m_->numeric_adr[id], n = m_->numeric_size[id];
+    return std::vector<double>(m_->numeric_data + adr, m_->numeric_data + adr + n);
+}
+
 std::array<double, 2> DuckBody::body_xy(const char* name) const {
     const int bid = mj_name2id(m_, mjOBJ_BODY, name);
     if (bid < 0) throw std::runtime_error(std::string("body_xy: no body ") + name);

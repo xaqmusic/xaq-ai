@@ -91,6 +91,12 @@ public:
         double hits = 0.0;             // returns over the footprint (all heights)
         int    chain = 0;              // voxel levels from lo to top
         bool   small = false;          // the rule's verdict
+        // MOVERS (cluster_recent): of the cluster's voxels inside the window, the share FIRST seen inside it, and
+        // their mean age in ticks (the last tick seen minus the first).  A thing that moves keeps entering voxels
+        // the cloud has never held, so its voxels stay fresh for as long as it moves; a static thing's voxels are
+        // re-hit and age, however much the subset the window sees flickers.  0 / 0 from cluster_things().
+        double fresh = 0.0, age = 0.0;
+        double age_w = 0.0;            // the same age weighted by each voxel's hits: a re-hit voxel counts for its returns
     };
 
     CloudMap() = default;
@@ -155,6 +161,15 @@ public:
     // the shape VisualBearing emits, so VisualHomingNav consumes it unchanged.  All 0 when nothing is attended.
     std::array<float, 3> thing_bearing() const { return bearing_; }
     std::vector<Thing> cluster_things() const;   // recompute from the current voxels (tests, the host's filing record)
+    // MOVERS (chasing moving things, 2026-09-27, stage 0's instrument): the same stack rule over only the voxels
+    // seen in the last `window_ticks` -- a cloud accumulates, so a thing that moves leaves a smear the whole-cloud
+    // rule reads as one long obstacle; the recency window is what lets a cluster have a position at a TIME.
+    // Every voxel already carries its last-seen tick; nothing else is added.  All clusters, small or not: a
+    // mover is defined by its motion, not its size.
+    std::vector<Thing> cluster_recent(uint64_t window_ticks) const {
+        return cluster_things(last_tick_ > window_ticks ? last_tick_ - window_ticks : 0);
+    }
+    uint64_t last_tick() const { return last_tick_; }
     const std::vector<Thing>& last_filed_things() const { return filed_things_; }   // the clusters of the cloud last filed
 
     // The voxel set of the cloud last FILED, as flat [ix, iy, iz, hits, mean_height_mm] 5-tuples —
@@ -187,6 +202,7 @@ private:
     void open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick);
     void file_cloud(uint64_t tick);
     void add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, uint64_t tick);
+    std::vector<Thing> cluster_things(uint64_t since_tick) const;   // ...over voxels last seen at or after since_tick
     void update_things(double yaw);
     void update_bearing(double yaw);
     void publish_bearing(uint64_t tick_id);
@@ -217,7 +233,7 @@ private:
     bool     open_ = false, just_closed_ = false;
     int      still_run_ = 0, move_run_ = 0;
     double   anchor_yaw_ = 0.0, anchor_x_ = 0.0, anchor_y_ = 0.0;
-    uint64_t opened_tick_ = 0, points_ = 0;
+    uint64_t opened_tick_ = 0, points_ = 0, last_tick_ = 0;
     int      break_vox_ = 0;
     double   new_frac_ = 0.0, revisit_change_ = -1.0;
     std::unordered_map<int64_t, Vox> vox_;

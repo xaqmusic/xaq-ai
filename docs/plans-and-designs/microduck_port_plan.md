@@ -20,7 +20,10 @@
 
 ## ▶ Resume here
 
-**State on 2026-09-27: the things phase is closed. Start at [`microduck_things_phase.md`](microduck_things_phase.md) §10–13.**
+**State on 2026-09-27 evening: the chase phase is open, stage 0 measured. Start at [`microduck_chase_phase.md`](microduck_chase_phase.md) §6, then §4–5.**
+The train room, the train driver, the movers instrument and the scorer are built; the signal that separates a moving
+thing from the static room in the walking cloud is the voxels' own age (the centroid's velocity is a null); stage 1 is
+the mover gate on that age and a moving fix in the seek loop. The things phase before it: [`microduck_things_phase.md`](microduck_things_phase.md) §10–13.
 The duck sees a small thing in its cloud, walks to it, stops beside it with its head pitched onto it, kicks, pecks
 or pushes it, backs off to look at what it did, and learns per kind of thing what each intent does; a thing
 whose answers are known loses its pull. The operator promoted the stack by eye three times in the phase

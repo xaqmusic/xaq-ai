@@ -4345,3 +4345,68 @@ arriving at all. Both belong to the next phase's design, not to a lever tonight.
 findings, and what to carry into the next push, chasing moving things. The launcher's presets were pruned 82 → 13
 (the rest in `tools/duck_launcher/presets_archive.json`, argv intact) and 46 refuted configs lost their rank (files
 kept, names keep their verdicts).
+
+### 17.53 The chase phase opens: a toy train on a track, and what the walking cloud says about a thing that moves (stage 0, 2026-09-27)
+
+**The operator's direction** (the phase page [`microduck_chase_phase.md`](microduck_chase_phase.md) §1): chase moving
+objects, using the ToF while walking to tell whether part of the cloud is changing relative to the rest; a
+predictable mover for the playroom — "a toy train or car on a track that stops and starts at regular intervals";
+home in on *any* cluster moving relative to the world frame. The design discussion (§2 there) put the error as the
+seek loop's own residual — a thing not where the assumption "things do not move" predicted it — and ranked a moving
+fix inside the seek loop first, a separate chase loop second, T6's free space third, with a stage 0 that measures
+the signal before any loop rides it.
+
+**Built, all off by default and byte-identical off** (the R83 argv on the plain room, seed 3, 300 s: the JSON stream's
+md5 `6b9a0b3a…` before and after, twice): `playroom_gen.py --train` (the train, its track in the scene's `<custom>`
+block, the plain room regenerating unchanged), `--train SPEED RUN STOP` (kinematic, seed-phased), `--log-movers W`
+(`CloudMap::cluster_recent`: the stack rule over the voxels seen in the last W seconds, each cluster with the share
+of its voxels first seen in the window, their mean age and their hit-weighted age; two unit tests),
+`mover_tracks.py` (labels by truth, tracks, velocities, gates), the R84 preset.
+
+**R84 = R83 + `walk_cloud`, the train room, `--train 0.2 8 8 --log-movers 0.5`, n = 6 × 1500 s.** The walk is R74's,
+as expected with the walking cloud ungated: walls 31.1 ± 24.3 a minute (seeds 3.1 to 68.5), seek 37.6 % of the
+walk, play 62.4 %, stands 34 %, stops 16.8 with 7.2 arrivals, rescues 0.12 a minute, path 84 m, cells 134. Not a
+lever, not compared.
+
+**The train is seen.** 104 847 walking casts with a cloud open (139.8 min), 4.4 clusters a cast. With the train
+within 2 m and 0.6 rad of the head's look, a cluster lies within 0.22 m of it on 35 / 76 / 65 / 29 % of casts by
+half-metre bin while it moves and 41 / 80 / 74 / 34 % while it stands.
+
+**The centroid's velocity: `NULL` as a separator.** Estimated over the last 0.5 s of a track (nearest-neighbour
+association under 0.10 m between casts of one cloud): compact static clusters 0.053 / 0.188 / **0.378** m/s (p50 /
+p90 / p99), wide ones (over 0.25 m) 0.140 / 0.376 / 0.626, balls and blocks 0.048 / 0.148 / 0.349, the stopped
+train 0.050 / 0.130 / 0.250, the **moving train 0.092 / 0.208 / 0.332** against a true 0.20; velocity error median
+0.157 m/s; the common mode (the median over compact static tracks) 0.030 m/s p50, 0.113 p90, and subtracting it
+moves the static p99 from 0.378 to 0.350. Recall on the moving train at 1 / 1.5 / 2 × the static p99: 0 / 0 / 0,
+with 19 / 2.3 / 0.34 static clusters over the threshold a minute. A window's smear lags the centroid and the
+sampling's flicker moves a static centroid faster than the train moves.
+
+**The voxels' age: the separator.** Over clusters tracked for at least 0.5 s in clouds older than 1 s (271 759
+samples): mean voxel age p10 / p25 / p50 / p90 — static 0.26 / 1.62 / **7.07** / 41.7 s, wide 0.72 / 2.37 / 7.38 /
+26.6, balls and blocks 0.44 / 1.55 / 6.36 / 28.0, the stopped train 0.12 / 0.40 / **0.96** / 6.21, the **moving
+train 0.06 / 0.13 / 0.26 / 10.7**. Freshness (the share first seen in the window): static 0.09 p50 and 0.71 p90,
+the moving train 0.50 p50. Gates, per minute of walking cloud:
+
+| gate | recall, moving train | stopped train passing | everything else / min | of which within 1.5 m | direction error p50 |
+|---|---|---|---|---|---|
+| age < 0.3 s | 0.55 | 0.20 | 167 | 51 | 0.31 rad |
+| age < 0.5 s | 0.69 | 0.32 | 237 | 88 | 0.31 |
+| age < 1.0 s | 0.77 | 0.51 | 358 | 158 | 0.33 |
+| fresh ≥ 0.7 | 0.29 | 0.17 | 158 | — | 0.32 |
+| age / watched < 0.15, watched ≥ 1 s | 0.45 | 0.11 | 68 | — | 0.31 |
+
+At age < 0.3 s the false alarms by range: 1.7 / 13.4 / 36.3 / 59.9 a minute by half-metre bin; by class 141
+compact static, 16 wide, 10 balls and blocks; by sampling they are not the sparse clusters (0–4 returns in the
+window: 23 a minute) but the well-sampled ones (16 and over: 77) — big things sliding into view. The moving train's
+old-voxel tail (p90 10.7 s) is the train re-entering its own trail on a 3.17 m closed track within one cloud's
+life; a rolling ball does not do this. The **hit-weighted age** (`age_w`, a re-hit voxel counting for its returns; the
+third sweep, the same seeds reproducing the same ages to the digit) buys a little: at 0.3 s recall 0.40 with 128 a
+minute (34 within 1.5 m) against the plain age's 0.55 / 167 / 51; at matched recall about a sixth fewer false
+alarms — the weighting cannot help where the false alarm is a thing whose voxels are all new.
+
+**Verdict.** Stage 0 `WORKING`: the signal exists in the walking cloud at the reach's range, and it is the voxels'
+own age, not the centroid's velocity (that form `NULL`, re-use: a longer window or a tracker with a motion model
+might read the speed, but the age already answers the question the speed was asked). The confounds are named and
+each has its remover in the loop: a thing newly in view ages out within a second (persistence under the loop's own
+prediction), the far fragments fall to the last-metre gate. Stage 1 builds the gate and the moving fix (the phase
+page §5). Register: O63 updated, O64 opened.

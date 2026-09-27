@@ -97,6 +97,12 @@ public:
     // action, like a shove).  body_xy reads any body's world position (truth, for the harness's metrics).
     void roll_body(const char* name, double x, double y, double vx, double vy);
     std::array<double, 2> body_xy(const char* name) const;
+    // THE TRAIN (chasing moving things, 2026-09-27): a free body driven KINEMATICALLY -- its pose and velocity
+    // written every tick, so contacts see a mover that does not yield (a toy train on its track).  A harness
+    // action; no brain reads any of it.  numeric() reads a <custom><numeric> block of the scene (the track's
+    // geometry lives in the model, beside the body it belongs to); empty when the scene has none.
+    void place_free_body(const char* name, double x, double y, double z, double yaw, double vx, double vy, double wz);
+    std::vector<double> numeric(const char* name) const;
     double trunk_yaw() const;   // the trunk's world yaw (truth; the harness's use only)
     bool has_joint(const char* name) const { return mj_name2id(m_, mjOBJ_JOINT, name) >= 0; }
     void spin_joint(const char* name, double rad_per_s);

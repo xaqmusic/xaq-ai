@@ -212,6 +212,8 @@ public:
     // topic; the host logs them and reads nothing back into the body.
     bool cloud_things_on() const;
     std::vector<ogma::CloudMap::Thing> cloud_things() const;
+    // MOVERS (stage 0's instrument): the clusters of the open cloud through a recency window of window_ticks
+    std::vector<ogma::CloudMap::Thing> cloud_things_recent(uint64_t window_ticks) const;
     int  cloud_attended() const;
     std::array<float, 3> cloud_thing_bearing() const;
     std::vector<ogma::CloudMap::Thing> cloud_filed_things() const;
