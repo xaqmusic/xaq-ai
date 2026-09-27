@@ -4139,3 +4139,44 @@ verdict is reversed on this stack: the gaze at the thing is `WORKING`, no cost t
 rescues ×4 belonged to R64's walk (the reflex-less orbit arriving at things at speed) and the R60a-era
 stop, not to the head's pitch. Preset R77 for the eye; not promoted before it. R78 = R75's gate (fire at what
 you see within 0.5 m) on R77, running.
+
+**R78: O59's gate on R77 (R75's `reach_m 0.5` + the gaze at the thing, n = 6).** The gate is fed now and it
+is perfectly honest: 12 skills fired, 12 answers observed (the first arm with no unknown), at the look stop the
+thing 0.22 m ahead and 13° off the nose; stop-seconds at things 182 → 260 (the most of the phase), walls 13.5 →
+10.6 a minute, stop survival 87 → 99 %, stands 43 → 51 %. And it fires a fifth as often as R77 (12 against
+55): 21 requests were made, 9 of them dropped by the host — a request that landed while the stop was still
+settling, or during a skill's own window or its unwind, was read only in the standing phase — and 20 armings
+lapsed as misses. One thing moved in twelve. **`PARTIAL`: honest answers and a calmer walk, `REGRESSION` on
+the interaction count against R77.** The dropped requests are fixed (kept as pending, fired at the next
+hand-back) and R78 is rerun as R78b below.
+
+**Why nothing is ever "known" (every arm since R65).** The outcome table is keyed by the thing EPM's node ×
+intent — about 30 nodes × 3 intents = 90 cells — and a run makes 12–55 requests. Two answers per cell is a
+bar the phase's request rate cannot reach; the ladder that habituation and the linger need never climbs.
+The vocabulary that decides the cell is finer than the question ("what does a kick do to a ball") by a factor
+of ten: the thing EPM separates balls from blocks at purity 0.9 but with ~7 nodes per kind. The fix is not a
+lower bar but a coarser key — the node's kind, as the EPM's own baked-node clusters give it, or the descriptor's
+first two dimensions — and it is the next design item after the operator's eye (O62).
+
+**R78b (the dropped requests kept as pending, n = 6) — and a double fire.** Skills 46, the loop's own
+requests 25, every one of them answered (25 of 25 seen; the `skills` instrument reads 37 of 46 because the
+duplicates below are counted too); the first nodes ever KNOWN (seed 5: two); stops at things 16.0 a run,
+stop-seconds at things 262, both the phase's best; walls 14.4, rescues 0.26 → 0.73 %. The record shows why
+46 and not 25: each request fired TWICE — started at once from standing (`skill:stand`) and, on the same
+tick, read again by the new deferral as "landed during a skill's window" and kept as pending, so the same
+skill ran again 3 s later at the look stop's hand-back with the thing 0.45 m back. The duplicate is what
+raised the rescues. Fixed (a request started this tick is not deferred); rerun as R78c.
+
+**R78c (the double fire fixed; n = 6, against R77 and R72).** Requests 36, skills 35, answers observed 36 of
+36 by the loop's own count (31 of 35 by the instrument's stricter matching; the 4 unknown had the thing 0.38 m
+ahead and 12° off) — the first arm in which every ask is answered — and nodes KNOWN 3 (two seeds). On the
+interesting scale it is the linger the operator asked for in §17.45: stops at things 18.2 a run (R77 14.3,
+R72 12.0), stop-seconds at things 358 (182, 191), at walls 45 (100, 62), walls 7.5 a minute (13.5, 15.7),
+stands 53 % (43, 39), rescues 0.49 % (0.26, 0.49), stop survival 93 %. Its costs: cells 104 (131, 135) — a
+duck that stays with things covers less room — and things moved 1 of 35 (R77 10 of 55): the gate fires at a
+thing seen within 0.5 m from where the duck already stands (0.26 m at the look), and a kick or a peck from
+there does not reach it, while R77's ten came from arrivals at 0.18 m. **`WORKING` as the linger-and-learn
+arm (every answer seen, the first known nodes, the fewest walls of the phase), `PARTIAL` on the interesting
+scale against R77 (more standing at things, fewer things moved).** Both are for the operator's eye; the
+recommendation is R77 as the `★` candidate on their scale and R78c as the learning form to carry once the
+outcome table's key is coarse enough to be climbed (O62) and the reach is closed (O59).

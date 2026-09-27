@@ -1709,5 +1709,29 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R78 · R77 + FIRE AT WHAT YOU SEE (R75's gate, 0.5 m): the kick, peck or push goes out only when the pitched gaze sees the thing within reach and ahead",
+  "series": 78,
+  "hint": "MEASURED n=6 (design doc §17.49, R78c after two host fixes -- dropped and doubled requests): the LINGER arm -- 35 skills, EVERY ask answered (36/36), the first known nodes (3); stops at things 18.2 a run (R77 14.3), stop-seconds at things 358 (182), walls 7.5/min (13.5), stands 53 %; but cells 104 (131) and things moved 1/35 (R77 10/55): a kick from the stop's own spot at 0.26 m does not reach. WORKING as linger-and-learn, PARTIAL on the interesting scale against R77. WATCH (seed 5 or 6: ten skills each, the head dipping onto the thing before each).",
+  "state": {
+   "config": "a1v2_r75_reach.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing",
+   "fast_until": 600
+  }
  }
 ]

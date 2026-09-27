@@ -1794,6 +1794,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // thing it walked to.  The timer stays as the floor (a duck that has seen nothing still glances).
             // a skill at arrival: the window runs first, and the arrival stop (if any) starts when it ends
             bool skill_arrive_done = false;
+            bool req_consumed = false;   // a module's request already started this tick (so the deferral below does not double it)
             if (skill_active && skill_left == 0) {
                 skill_active = false;
                 if (down_skill_running) { down_skill_running = false; down_rise_watch = int(2.0 * kBrainHz); }
@@ -1888,7 +1889,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     // reach, which is at a stop): the skill starts from standing at once, as a deferred one does
                     if (!skill_active && unwind_left == 0) {
                         const int req = brain.skill_request();
-                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; }
+                        if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_start(kSkills[req].name)) { stop_event = "skill:stand"; ++skills_requested; req_consumed = true; }
                     }
                     double sig = lean, thresh = g_stop.handoff_lean;
                     if (g_stop.handoff_att > 0.0) {
@@ -1901,6 +1902,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         end_stop_drive(true);
                         stop_phase = StopPhase::Walker; ++stop_handoffs; stop_event = "stop:handoff";
                     }
+                }
+                if (!req_consumed && ((stop_phase != StopPhase::None && stop_phase != StopPhase::Brain) || (stop_phase == StopPhase::Brain && (skill_active || unwind_left > 0)))) {
+                    // a request that lands while the stop settles, or during a skill's own window or its unwind, is not lost:
+                    // it fires at the next hand-back like a deferred arrival request (R78 dropped 9 of 21 requests here)
+                    const int req = brain.skill_request();
+                    if (req >= 0 && req < int(sizeof(kSkills) / sizeof(kSkills[0])) && skill_pending.empty()) { skill_pending = kSkills[req].name; stop_event = "skill:request"; ++skills_requested; }
                 }
                 if (scanning) {
                     static const double kSeq[4] = {0.0, 1.0, 0.0, -1.0};
