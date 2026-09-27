@@ -4,7 +4,6 @@
     "description": "Phase 1e of the intent boundary (design doc \u00a716.4): the same module code one level up. The 'motors' are the three twist commands (vx, vy, vyaw) to Pollen's walking policy, the 'senses' are the body's own velocity from contact odometry and the gyro, normalised by the trained command ranges (0.4, 0.3, 1.0). Identification by held twist pulses (babble_hold 75 ticks = 1.5 s, scale 0.8 of range \u2014 above the walker's ~0.25 m/s standing regime), one motor at a time, alternating sign. Judged on the identified A: the velocity rows against the commands must be positive on the diagonal and dominant, per axis, against the walker's measured response (\u00a716.2). No prior, no controller learning: identification only.",
     "env_target": "microduck",
     "phase_tag": "intent boundary 1e",
-    "launcher_rank": 1031,
     "scaffolds_active": [
       "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
     ]

@@ -4,7 +4,6 @@
     "description": "R28 (2026-09-06): R27 + avoidance as a loop (TofAvoidLoop, a bearing away from the nearest obstacle, its need = that proximity) + LoopCompetence per loop (avoid: proximity falls while it drives; play: novelty rises) + LateralVoter + EFEArbiter in precision mode (need x competence, winner-take-all with hysteresis); the IntentAdapter takes the WINNER's bearing as the heading reference. Measured with l2_sweep vs R26/R27 on contacts vs coverage, and the moved wall. Wrong-sign control: EFEArbiter.precision_sign=-1.",
     "env_target": "microduck",
     "phase_tag": "intent boundary 1e",
-    "launcher_rank": 1029,
     "scaffolds_active": [
       "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
     ]

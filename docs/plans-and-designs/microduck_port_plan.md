@@ -20,6 +20,18 @@
 
 ## ▶ Resume here
 
+**State on 2026-09-27: the things phase is closed. Start at [`microduck_things_phase.md`](microduck_things_phase.md) §10–13.**
+The duck sees a small thing in its cloud, walks to it, stops beside it with its head pitched onto it, kicks, pecks
+or pushes it, backs off to look at what it did, and learns per kind of thing what each intent does; a thing
+whose answers are known loses its pull. The operator promoted the stack by eye three times in the phase
+(`★ THINGS` R67 → R77 → R79 → R83, the last on their eye for R80's closer arrival; design doc §17.34–17.52).
+The launcher's preset list was pruned to the promoted stacks, the guard, and three arms for the eye
+(`tools/duck_launcher/presets_archive.json` keeps the rest). **The next push, in a fresh context, is
+chasing moving things:** the phase page's §13 lists what to carry into that design — what reaches and what
+does not, the walking cloud as a working sensor whose loops were built for a remembered thing (O55), the
+orienting reflex that refuses a sweeping gaze (T6), the balls that roll out of the match radius, and the
+moved-ball (d) tests the harness already has (§7). Design discussion first; the operator decides the fork.
+
 **State on 2026-09-15, later: the things phase is open. Start at [`microduck_things_phase.md`](microduck_things_phase.md).**
 The operator's direction: map-making is not the interesting thing; the duck should seek what is smaller than
 itself, interact with it, and be surprised when it answers. The plan reads the voxels at three timescales and

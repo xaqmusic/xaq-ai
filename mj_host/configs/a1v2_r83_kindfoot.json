@@ -1,9 +1,10 @@
 {
  "metadata": {
-  "name": "R60 · SEEK: a loop that walks to the attended thing, remembering where it was, racing play in the arbiter (things phase T2)",
+  "name": "★ THINGS · R83 · the KIND at the FOOT: the R79 stack with the seek loop arriving at 0.15 m and the outcome loop's arrival range 0.2 m",
   "description": "R27 (2026-09-06): R26 + the Cell's PlayLoop reading the map EPM (reality.proprio.place) with the adapter's new heading/vel_ego topics; its egocentric bearing becomes the heading reference behind sense slot 10 every tick (IntentAdapter, by presence of percept.play_bearing). The bearing to the least-visited region as a learned direction: the (d) moved wall should now be re-explored (map nodes rise after the shift) and the R26 orbit seeds should tour. Measured with l2_sweep against R26.",
   "env_target": "microduck",
-  "phase_tag": "things phase T2",
+  "phase_tag": "things phase, O54",
+  "launcher_rank": 5,
   "scaffolds_active": [
    "alpha_walking.onnx drives the joints throughout — the level-2 body; alpha_stand rescues falls"
   ]
@@ -99,7 +100,8 @@
      0.0
     ],
     "state_prior_lr": 0.1,
-    "consolidate_n": 0
+    "consolidate_n": 0,
+    "state_prior_step_gain": 1.0
    }
   },
   {
@@ -164,7 +166,8 @@
     "frontier_bias": 0.0,
     "novelty_source": "tle",
     "explore_seed": 11,
-    "_comment": "R27 (§17.3 fork (a)): the Cell's play loop over the duck's map vocabulary -- the node is the map EPM's winner (pi_cell_size 0), the value field is the place TLE, the climb is the bearing to the most novel reachable node (wander_stall_ticks 0: the Cell's A2, so the climb engages). Its bearing sets the adapter's heading reference (sense slot 10); the heading prior turns the body. The loop the Cell dropped is the loop the duck wants: coverage is its goal."
+    "_comment": "R27 (§17.3 fork (a)): the Cell's play loop over the duck's map vocabulary -- the node is the map EPM's winner (pi_cell_size 0), the value field is the place TLE, the climb is the bearing to the most novel reachable node (wander_stall_ticks 0: the Cell's A2, so the climb engages). Its bearing sets the adapter's heading reference (sense slot 10); the heading prior turns the body. The loop the Cell dropped is the loop the duck wants: coverage is its goal.",
+    "heading_sign": -1
    }
   },
   {
@@ -250,6 +253,43 @@
    }
   },
   {
+   "id": "thing_kind_epm",
+   "type": "EPM",
+   "params": {
+    "modality_group": "cognitive",
+    "modality_name": "thing_kind",
+    "encoder_kind": "rbf",
+    "input_topic": "reality.proprio.thing",
+    "proprio_state_dims": 8,
+    "dim_min": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "dim_max": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "max_nodes": 4,
+    "master_seed": 4748,
+    "baking_threshold": 20,
+    "min_insertion_error": 0.25,
+    "health_death_spares_baked": true,
+    "_comment": "O62: the KIND -- the same descriptor as thing_epm, at most 4 nodes and a coarse insertion floor, so its winner is the kind of thing (ball / block / a wall base) rather than one of ~30 views of it. The outcome loop keys its table by this token."
+   }
+  },
+  {
    "id": "seek",
    "type": "BearingSeekLoop",
    "params": {
@@ -260,10 +300,13 @@
     "range_topic": "reality.cognitive.seek_range",
     "proximity_range": 2.5,
     "min_conf": 0.02,
-    "arrive_m": 0.25,
+    "arrive_m": 0.15,
     "forget_ticks": 3000.0,
     "floor": 0.05,
-    "_comment": "T2: the seek loop. While CloudMap attends a small thing (at a stop) the loop fixes its position by dead reckoning; when the cloud closes and the body walks it homes to that position, re-aiming as the body turns, and drops it on arrival (0.25 m) or after ~60 s. Its need is the confidence in the held target; its honest signal the range left."
+    "_comment": "T2: the seek loop. While CloudMap attends a small thing (at a stop) the loop fixes its position by dead reckoning; when the cloud closes and the body walks it homes to that position, re-aiming as the body turns, and drops it on arrival (0.25 m) or after ~60 s. Its need is the confidence in the held target; its honest signal the range left.",
+    "renew_topic": "reality.cognitive.outcome_need",
+    "renew_min": 0.25,
+    "renew_range": 2.0
    }
   },
   {
@@ -336,8 +379,34 @@
     "master_seed": 11,
     "_comment": "R28's precision race with SEEK on the vision channel: G_seek = seek need x seek trust, G_play = (1 - seek need) x play trust. No avoidance loop: klino's trust key is absent, so it never wins; avoidance stays the twist brain's proximity prior (and the --seek-gate lever releases it toward the thing)."
    }
+  },
+  {
+   "id": "outcome",
+   "type": "SkillOutcomeLoop",
+   "params": {
+    "bearing_topic": "percept.thing_bearing",
+    "thing_topic": "reality.cognitive.thing_kind",
+    "seek_value_topic": "reality.cognitive.seek_value",
+    "seek_range_topic": "reality.cognitive.seek_range",
+    "pose_topic": "reality.proprio.odom",
+    "skill_topic": "intent.skill",
+    "outcome_topic": "reality.cognitive.outcome",
+    "proximity_range": 2.5,
+    "arrive_range": 0.2,
+    "match_radius": 0.6,
+    "min_samples": 2,
+    "observe_ticks": 1500,
+    "min_conf_ticks": 5,
+    "explore_gain": 1.0,
+    "skill_left": 0,
+    "skill_right": 1,
+    "_comment": "Learning what the kick does (O54). At an arrival, if the reached thing's node has fewer than two recorded outcomes, or a spread above the mean spread over nodes, the loop asks for a kick on intent.skill (the side by the thing's bearing); the host fires it from standing at the stop's hand-back. The thing's next sighting within 0.6 m of where it was, inside 30 s, is the outcome; unseen = unknown, not zero. The surprise against the node's own spread is published on reality.cognitive.outcome.",
+    "peck_id": 3,
+    "need_topic": "reality.cognitive.outcome_need",
+    "push_id": 4
+   }
   }
  ],
  "edges": [],
- "description": "R60 (2026-09-15), from a1v2_r59_floor.json: the things phase's T2. BearingSeekLoop reads CloudMap's thing bearing (only live at stops), remembers the thing's dead-reckoned position, and homes to it on the walk; LoopCompetence grades it on the range left; the R28 voter + EFEArbiter (precision) race it against play; the adapter takes the winner's bearing (steer 3 = seek). Measured against R59 on: seek share, object contacts and displacement, walls/min, stands; with and without --seek-gate."
+ "description": "R83 (the kind at the foot), from a1v2_r79_kind.json: R80's closer arrival (seek.arrive_m 0.15, outcome.arrive_range 0.2) on the promoted R79 stack (the kind keys the outcome table). The operator's eye on R80 (2026-09-27): 'the closer distance for interaction is a win'; R80 itself was minted on R77 and lacked the kind. Run as R79 (the gaze at the thing)."
 }

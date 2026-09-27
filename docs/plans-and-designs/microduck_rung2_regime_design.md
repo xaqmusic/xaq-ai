@@ -4313,3 +4313,35 @@ the peck's contact `WORKING` from the walk (the operator's ask), the cycle a tie
 (stops at things 17 → 11.5) and the falls doubled — the price the operator named.** The eye decides; R79 stays
 `★`. If the contact is worth the price, the form to carry is R82b's flag with the kicks left to the stand
 (the peck alone from the walk) — one line in the host, measured next if asked.
+
+### 17.52 The phase closes: R83, the closer arrival on the kind, promoted on the operator's eye (2026-09-27)
+
+**The operator's call.** After the R81/R82 report: "let's be sure we are using R80 as our promoted latest config —
+the closer distance for interaction is a win." R80 was minted on R77 and carries no kind (§17.50), so the stack the
+eye asked for is R79 with R80's two numbers, `seek.arrive_m 0.15` and `outcome.arrive_range 0.2`: **R83**,
+`a1v2_r83_kindfoot.json`, on R79's harness flags. Measured at n = 6 before the star moved.
+
+**R83 measured (n = 6, against ★ R79).** Every aggregate is R80's to the last decimal: walls 9.6 → 28.3 a minute,
+arrival stops 17.8 → 5.8 a run, stops 26 → 16, stops at things 17.0 → 7.0 (stop-seconds at things 231 → 99),
+skills 60 → 21 (kick 9, peck 8, push 4), things moved 9 → 3, answers observed 44 → 8, nodes known 14 → 0, stands
+46 → 24 %, walk 48 → 71 %, rescues 0.32 → 0.84 %, cells 117 → 147, path 73 → 102 m. The identity with R80 is not a
+confound (§3.2 rule 7 checked): the kind's records are on R83's log (2266 `tkind` lines on seed 1, none on R80's),
+and the kind changes a choice only once a cell holds two answers, which no cell does in 21 skills over six runs —
+the least-known cycle asked the same intents at the same moments and the physics followed. Per seed, the preset's
+seed 1 is the phase's exception again (§17.45): R79 s1 26 stops at things / 327 s / 15 skills / 3 moved / 13 answers;
+R83 s1 16 / 297 s / 8 / 1 / 4; seeds 3, 4 and 6 are wall seeds (59, 31, 42 walls a minute). Where an arrival does
+complete the thing is closer — the eye's win — but the dead-reckoned range falls under 0.15 m a third as often
+before the target is forgotten or bumped, and the walk between arrivals is R64's.
+
+**Verdict and promotion.** On the harness `REGRESSION` on the interesting scale, as R80 (§17.50); on the operator's
+eye the closer interaction is worth it, and the eye is the gate (CLAUDE.md §3 rule 5): **`★ THINGS` = R83**, preset
+"★ THINGS · R83" (seed 1), with R79 kept one line below as the comparison arm. Re-use: the closer arrival wants a
+target that is not forgotten on the way — a seek target renewed from the pitched gaze in the last half metre (O61's
+re-use) would give R83's closeness with R79's arrival count; and the peck from the walk (R82b) reaches without
+arriving at all. Both belong to the next phase's design, not to a lever tonight.
+
+**The phase closes here.** Entry point for a cold start: the phase page
+[`microduck_things_phase.md`](microduck_things_phase.md) §10–13 — the promoted run, the phase in one table, the
+findings, and what to carry into the next push, chasing moving things. The launcher's presets were pruned 82 → 13
+(the rest in `tools/duck_launcher/presets_archive.json`, argv intact) and 46 refuted configs lost their rank (files
+kept, names keep their verdicts).

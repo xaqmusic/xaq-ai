@@ -4,7 +4,6 @@
     "description": "R27 (2026-09-06): R26 + the Cell's PlayLoop reading the map EPM (reality.proprio.place) with the adapter's new heading/vel_ego topics; its egocentric bearing becomes the heading reference behind sense slot 10 every tick (IntentAdapter, by presence of percept.play_bearing). The bearing to the least-visited region as a learned direction: the (d) moved wall should now be re-explored (map nodes rise after the shift) and the R26 orbit seeds should tour. Measured with l2_sweep against R26.",
     "env_target": "microduck",
     "phase_tag": "intent boundary 1e",
-    "launcher_rank": 1037,
     "scaffolds_active": [
       "alpha_walking.onnx drives the joints throughout \u2014 the level-2 body; alpha_stand rescues falls"
     ]

@@ -6,8 +6,7 @@
     "phase_tag": "A1 (first brain)",
     "scaffolds_active": [
       "alpha_stand.onnx via the A2 recovery harness \u2014 drives only while the body is down, with all learning rates zeroed"
-    ],
-    "launcher_rank": 40
+    ]
   },
   "version": 1,
   "runtime": {

@@ -41,7 +41,7 @@ The two lists are read top to bottom, and each entry says what it is by its pref
 
 | class | prefix | rank band | meaning |
 |---|---|---|---|
-| milestone | `★ STACK`, `★ PIPELINE n/3` | < 100 | the promoted state: the stand, the three stages that make it from nothing |
+| milestone | `★ STACK`, `★ HEAD`, `★ CLOUD`, `★ THINGS` | < 100 | the promoted state: the stand, the head brain, the glance, the things cycle |
 | probe | `PROBE · …` | 100–999 | an instrument, not a hypothesis: the push test, the envelope, the byte-identity guard, the scaffold, the stub |
 | series | `R<nn> · …` | 1000 + nn | the tests of the current campaign, in the order they were made; the newest carries **◀ latest** |
 
@@ -59,7 +59,8 @@ which takes the next number, writes the config with the overrides and the name
 name whose controls are copied from `★ PIPELINE 1/3` (from scratch, 2 h, saves the
 brain). At a milestone, prune: drop `launcher_rank` from the refuted tests (the files
 stay, their names keep the verdict), rename the winner to a ★ role and give it a low
-rank, and delete its series preset. `--selftest` checks every preset still builds.
+rank, and move its series preset to `presets_archive.json` (not read by the launcher; the exact
+argv of every measured arm is kept there and in the design doc). `--selftest` checks every preset still builds.
 
 ## Exposing a config
 
@@ -75,7 +76,9 @@ convention — **ROLE — mechanism · what you'll see** — for example
 
 Metadata is not read by the host, so this never changes a run. Presets live in
 `presets.json` beside the launcher: a name, a hint, and the control values to
-set. Add an experiment there, not in the code.
+set. Add an experiment there, not in the code. At a milestone the list is pruned to the `★` stacks,
+the guard, and the arms still waiting for the operator's eye; the retired presets go to
+`presets_archive.json` beside it (last pruned 2026-09-27, 82 → 13).
 
 ## Watching a level-2 run
 

@@ -1,6 +1,6 @@
 # Microduck: the things phase. Seeking what is smaller than itself, and being surprised when it answers
 
-Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, the kick and peck cycle `WORKING` as a mechanism (§17.39–17.41); **`★ THINGS` = R79 promoted 2026-09-27** (R77 + the KIND keying the outcome table; R77 was `★` for a day) — earlier: **R77** (R67's stack — the walk with the mirror fixed, the seek, the arrival stop, the kick / peck / push from standing, the outcome loop with the aimed unwind — plus the GAZE AT THE REACHED THING; R67 was `★` 2026-09-22 to 2026-09-27) · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
+Status: **closed 2026-09-27; `★ THINGS` = R83** — the R79 stack (the un-mirrored walk, the seek loop, the arrival stop, the kick / peck / push from standing, the outcome loop keyed by the KIND, the aimed unwind, the gaze at the reached thing) with R80's closer arrival, promoted on the operator's eye; lineage `★` R67 (2026-09-22) → R77 → R79 → R83 (all 2026-09-27) · Dates: 2026-09-15 → 2026-09-27 · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §10.**
 
 *The phase after the cloud ([`microduck_cloud_phase.md`](microduck_cloud_phase.md), `★ CLOUD` R56).
 The operator's direction, restated in the rewrite rule's terms, then the loops that read the voxels at
@@ -265,6 +265,15 @@ vocabulary of intents, and lingering where there is something to learn. First le
 - **A preset must carry the harness argv of the arm it names.** `newtest.py` copies the controls of the
   base config's LAST preset and prints the host args; check them against the arm you measured (R61–R64
   lacked `--stop-on-arrive` for a day; design doc §17.38).
+- **`newtest.py` numbers a config by the highest `a1v2_r<nn>` CONFIG, not preset.** A preset-only arm (R77, R78, R81, R82)
+  leaves a gap, and the next minted config takes a number a preset already owns (r73 → r74 and r77 → r79 were renamed).
+  Check the minted filename.
+- **Six `--full-logs` hosts at once trip Claude Code's low-memory watchdog** (six × ~75 MB of buffered stdout); run
+  `--jobs 3` under `systemd-run --user --scope -p MemoryMax=14G -p MemorySwapMax=0`.
+- **The byte-identity guard strips the record fields the phase added** (`pb`, `pl`, `tkind`, `com`, `thg`…): compare
+  `grep '^{' LOG | md5sum` after stripping, against `cb24520c…` (the R46 config, 760 s, seed 3).
+- **The eye reads one seed and the walk is bimodal across seeds** (R67r, R80/R83: three seeds at things, three at walls).
+  Put the per-seed column of `cloud_objects.py where` beside every mean.
 - **A replay shorter than the run is not a replay:** a stop is not started with under 60 s left.
 - **The host is deterministic**; when a watched run differs from a measured one, compare the argv and the
   JSONL's `patch:` events before suspecting the physics.
@@ -288,3 +297,144 @@ vocabulary of intents, and lingering where there is something to learn. First le
 | O50 | The room as a slow EPM over thing tokens keyed by place (O5's first live instance); deferred behind T1–T5 |
 
 O43 (when to stop) is T4; O44 (seeking small things) is the phase.
+
+---
+
+## 10. Where the duck is (the close, 2026-09-27)
+
+The operator's direction at the start: seek what is smaller than itself, interact with it, be surprised when it
+answers. At the end, on R79: "the robot successfully kicked the block several times and lingered to play"; on
+R80's closer arrival: "the closer distance for interaction is a win." Every number below is derived, with its
+verdict and caveats, in the design doc §17.34–17.52.
+
+**Promoted stacks** (launcher presets, `tools/duck_launcher`; the list was pruned to these, the guard, and three
+arms for the eye on 2026-09-27 — the retired presets are in `presets_archive.json`, argv intact):
+
+| star | what | promoted |
+|---|---|---|
+| `★ STACK` | the R19 stand at the joints: the joint brain takes the legs when the body is still | earlier |
+| `★ HEAD` | R34: the head brain owns the head joints | 2026-09-11 |
+| `★ CLOUD` | R56: the stop's glance — the head sweeps, the cloud accumulates, the map reads it | 2026-09-15 |
+| **`★ THINGS`** | **R83: the interaction cycle** (§11) — R79 with the arrival at 0.15 m | **2026-09-27** |
+
+**The promoted run**, as the harness runs it (from `mj_host/`; the preset uses seed 1):
+
+```sh
+./build/ogma_mjhost --level2 models/microduck/scene_playroom.xml --graph configs/a1v2_r83_kindfoot.json \
+  --secs 1500 --seed 1 --noise 0.05 \
+  --head-graph configs/head2_h2_level_slow.json --load-head checkpoints/head2j_h1_s2.json --head-joints \
+  --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain configs/a1v2_r19_settle_each.json \
+  --stop-load checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop \
+  --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 \
+  --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 \
+  --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing
+```
+
+For a seed-averaged A/B pass everything after `--noise 0.05` as `--host-args` to `l2_sweep.py` (`--seeds 6 --secs 1500
+--jobs 3 --full-logs --logdir mj_host/log/things_t3/<arm>`), and read the sweep's printed "host args" line before
+trusting the run. The graph is R72's (the push) plus `thing_kind_epm` and the two arrival numbers; R79
+(`a1v2_r79_kind.json`, arrival 0.25 m) is the comparison arm, one line below in the launcher.
+
+**Where the eye and the harness disagree.** R83's aggregates at n = 6 are R80's to the decimal (the kind changes no
+choice until a cell holds two answers, and none does in 21 skills): against R79, arrival stops 17.8 → 5.8 a run,
+stops at things 17 → 7, skills 60 → 21, things moved 9 → 3, answers seen 44 → 8, walls 9.6 → 28 a minute, stands
+46 → 24 %. Seed 1, the preset's, is the good seed on both arms (R83: 16 stops at things, 297 s). The operator's eye
+is the gate and it chose the closer interaction; the harness verdict stands in the record as `REGRESSION` on the
+interesting scale, with its re-use (§13, item 1).
+
+## 11. What a run does now
+
+- **0–600 s:** the identification babble, walking.
+- **The walk:** the twist brain drives; the play loop (in the duck's own handedness since R63) and the seek loop race
+  in the arbiter for the heading reference. The seek loop fixes an attended small thing's position by dead reckoning
+  while the cloud sees it and homes to it while the cloud is closed; the linger renews a dropped target while the
+  outcome loop still has intents to learn at it.
+- **A stop starts on arrival** (0.15 m by dead reckoning) or on the 80 s timer:
+  1. The walker settles, the R19 joint brain takes the legs, the head brain's learning is frozen.
+  2. **The gaze goes to the thing.** The sweep is centred on the reached thing's bearing and pitched to its
+     elevation; the stand holds it (a head 72° down moves the whole-body CoM 1 cm; O36 dissolved).
+  3. **The cloud accumulates**, the things reduction attends the nearest small stack, the thing EPM (fine, ~30
+     nodes) and the KIND EPM (4 nodes) read its descriptor.
+  4. **The outcome loop asks for an intent by name** on `intent.skill` — the least-known of kick, peck and push for
+     this kind, cycling — and the host runs Pollen's network from standing at the hand-back (the kick 0.5 s, the
+     peck 2.8 s phase-driven, the push = the walker into the thing for 1.2 s).
+  5. **The unwind and the look:** the body backs off 1.5 s with its nose on the thing and stops to look; the thing's
+     displacement is the answer; unseen is unknown.
+  6. **Habituation:** a kind whose intents are known loses its pull (the need falls to 0), and the seek target is
+     no longer renewed there.
+- **A stop ends** on six known gazes in a row, on the cloud's growth rule, or at the 60 s cap (late in a run the
+  cap, because the map keeps inserting; §17.51).
+
+## 12. The phase in one table
+
+n = 6 seeds × 1500 s in the playroom, against the arm named, unless stated. Verdict vocabulary as CLAUDE.md §3.1.
+
+| step | § | what was learned | verdict |
+|---|---|---|---|
+| T1 things + a thing EPM (R57–R59) | 17.34 | The stack rule in the module is exact against the offline rule; the attended thing is real 73–82 % of ticks; the thing EPM sorts kinds at purity 0.87 (hits per column separates a ball from a block). | `WORKING` |
+| T2 the seek loop (R60) | 17.35 | Blocks approached to a median 0.27 m, arrival by dead reckoning 20/21; walls down on 4 seeds; the avoid-prior gate at the target `REGRESSION`. | `WORKING` / `PARTIAL` |
+| T4 the arrival stop (R60a) | 17.36 | 32 arrival stops a median 0.21 m from a real object; the reached thing is under a level gaze at 12/31. | `WORKING` / `PARTIAL` |
+| The circling (R61–R64) | 17.37 | Play's bearing was MIRRORED on the duck since R27 (`heading_sign −1`); the twist brain's yaw does not close on a steady reference (`--heading-reflex`). R64: objects moved ×2, walls 20 → 15. | fix + `PARTIAL` |
+| Stop triggers from the body (R64s) | 17.38 | Falls loud in the residual, contacts not; a push is a stall duration. | `NULL` behaviour |
+| The skill runner; the kick (R64k) | 17.39 | Pollen's one-shot networks run as their daemon runs them; mid-walk kick 28 % falls, from standing 0; the thing answers 19 %. | `WORKING` |
+| The outcome loop + the unwind (R65, R65u) | 17.40 | Kick what you don't know; the look after backing off sees 12/27 answers. | `WORKING` / `PARTIAL` |
+| The peck; two intents (R67) | 17.41 | 31 requests, 13 answers, 0 falls. | **`★` 2026-09-22** |
+| Lookahead / commit_hold retried (R68, R69); `--ref-unwrap`; the walking cloud (R70); roulade as a get-up | 17.42 | The 2π flip was the orbit's brake; the walking cloud is a `WORKING` sensor and a `REGRESSION` behaviour (O55); 11 falls, 0 rises. | `NULL` / `REGRESSION` |
+| The orbit resolved; the reflex on R67 (R67r); stuck stop, escape, progress stall | 17.43–17.44 | The yaw column turns the wrong way for large errors; the reflex follows its loops into play's wall nodes on half the seeds (O57). | `PARTIAL` |
+| The interesting scale; the anchor bug | 17.45 | `cloud_objects.py where` = stops at a thing / wall / open; R70's 45° walls were the viewer's anchor latch (fixed). | instrument + fix |
+| The linger (R71); the aimed unwind (R71a) | 17.45 | Renewals 20/6 runs, nothing learned; aimed: stops at things 9.5 → 10.5. | `NULL` / `PARTIAL` |
+| The push (R72) | 17.46 | Stops at things 12/run, the best arm then; the push moved its thing 1/11. | `PARTIAL` |
+| The spin as frustration; the roll (R73) | 17.47 | `cloud_objects.py spins`; 13 rolls break the watched spin, the total ties. | `WORKING` mech / `NULL` |
+| The walk re-fix (R74) | 17.47 | The re-fix drifts to wall bases and legs; the stop-end rule now ignores a walking cloud (fix stays). | `REGRESSION` |
+| Fire at what you see (R75); the intent that reaches (R76) | 17.48 | The gate starves under a level gaze (3/49 stops); the push from the stand travels 0.07 m/s. | `NULL` |
+| O36 the stand with the head down | 17.49 | Head to 72° moves the CoM 1.1 cm; 0 rescues. | dissolved |
+| The gaze at the reached thing (R77) | 17.49 | Skills 39 → 55, answers seen 16 → 31, things moved 2 → 10. | **`★` 2026-09-27** |
+| The reach gate on R77 (R78c) | 17.49 | 36/36 asks answered, stops at things 18.2; things moved 1/35. | `PARTIAL` (linger-and-learn) |
+| The KIND keys the outcome table (R79) | 17.50 | Nodes known 14/6 runs (first ever), skills 60, seen 44, stops at things 17, walls 9.6. | **`★` 2026-09-27** |
+| The arrival at the foot (R80) | 17.50 | Arrival stops 16.5 → 5.8, walls ×2, stands halved. | `REGRESSION` on the harness |
+| The closing step (R81, three forms) | 17.51 | The walker from the stand neither turns nor walks in < 2 s; things moved 0/111. | `REGRESSION` |
+| The skill from the walk (R82, R82b) | 17.51 | The peck reaches from the walk 8/28 (1/19 from the stand); kicks 1/18; falls 8/49; the cycle restored in R82b. | `PARTIAL` |
+| **R80's arrival on R79 (R83)** | 17.52 | Aggregates = R80's; seed 1 good; the eye chose the closer interaction. | **`★ THINGS`, 2026-09-27** |
+
+## 13. What to carry into the next phase: chasing moving things
+
+The operator's next push, in a fresh context. Findings from this phase that bear on it, ranked:
+
+1. **The reach is by sight and from the walk, not from a stop.** Things moved only when the edge was 0.05–0.08 m
+   from the body at a settled stand, or when the body was still closing (the peck from the walk, the push). Every
+   form of closing the last 10 cm from the stand failed: a tighter dead-reckoned arrival arrives rarely (R80/R83), a
+   step from the stand does not step (R81). A moving thing is met on the move or not at all.
+2. **The loops were built for a remembered thing.** The seek loop fixes a position once and dead-reckons; the
+   walking cloud sees things on 18 601 walking ticks (O55) but every attempt to let a live sighting steer the walk
+   regressed (R70, R74) because the live candidates within 0.5 m are wall bases and legs. The gate the live target
+   needs is the vocabulary's (a small thing by the stack rule, within the sweep's ±0.6 rad, in the last metre) and
+   a precision-weighted fusion with the remembered position, not a replacement. The bearing token's fourth value
+   (a walking sighting) is already on the bus.
+3. **Things that answer roll away.** The balls are 40 g with low rolling friction; a kick sends one beyond the 0.6 m
+   match radius and the outcome is "unknown" — the skills instrument already labels it "rolled". For chasing, that
+   rolling ball is the stimulus: the error is a thing that is not where it was predicted to be.
+4. **The ancestor is the orienting reflex** (R44, §17.24): a change at a still gaze ends the stop and the duck walks
+   to it, 95 % arrival; it refuses a sweeping gaze. T6 (free-space bookkeeping under a sweeping gaze) and T5
+   (per-place change with a bearing) are the unbuilt halves of this plan's §3 and are what "the ball moved while I
+   watched" needs.
+5. **The eye reads one seed.** The walk is bimodal across seeds (three at things, three at walls) on every arm from
+   R67r on; the operator's preset seed is a thing seed. Put the per-seed column beside the mean in every report.
+6. **The spin is frustration** (`cloud_objects.py spins`; O60): play's reference rotating with the body (O56). The
+   roll breaks the spin it fires in; the arbiter does not yet prefer it.
+7. **Falls are an accepted price** for contact ("perturb the environment"); skills from the walk double the
+   rescues. The recovery scaffold's rise is ~5 s and 3 hand-offs.
+8. **Stops lengthen late** because the map keeps inserting and the "six known gazes" rule stops firing; the knob is
+   the cap (`--stop-secs 30`, unmeasured).
+
+**Instruments to reuse:** `cloud_objects.py where | skills | spins | stops | seek | heading | things --field tkind`;
+the sweep's `spins`, `spinRolls`, `stopsArrive` columns; `--log-com`; the (d) tests of §7 (a moved ball while
+walking, a moved ball during a stop, a lesioned thing bearing) are all in the harness already.
+
+**Open register rows:** O55 (the walking cloud), O56 (play's geometry), O57 (the reflex's bimodality), O59 (the
+reach), O60 (the spin), O61 (the approach by sight), O62 (the kind's purity), **O63 (this phase's hand-off)**.
+
+**Questions for the design discussion**, by the rewrite rule: what error does chasing minimise — a thing's
+predicted position against its seen one, or a bearing rate; which sensor carries it — the walking cloud at 12.5 Hz
+and 4 cm voxels (a ball at 0.3 m/s crosses seven voxels a second; a held cloud smears it, a per-cast bearing does
+not); which loop owns it — `BearingSeekLoop` with a live, gated re-fix, or a new loop whose need is the thing's
+motion; and how it enters the arbiter beside play and seek.
