@@ -207,6 +207,10 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.cognitive.thing"))) {
         if (rt->tick_id == tick_id_) { thing_seen_ = true; thing_winner_ = rt->winner_id; thing_tle_ = rt->tle; thing_nodes_ = rt->node_count; }
     }
+    kind_seen_ = false;
+    if (auto rt = std::dynamic_pointer_cast<const ogma::RealityToken>(bus->last_value("reality.cognitive.thing_kind"))) {
+        if (rt->tick_id == tick_id_) { kind_seen_ = true; kind_winner_ = rt->winner_id; kind_tle_ = rt->tle; kind_nodes_ = rt->node_count; }
+    }
     // R27: a loop's bearing becomes the heading reference (cx = +right is a clockwise turn, i.e.
     // a negative yaw in the odometry's right-handed frame).  Absent loop -> nothing happens.
     // R28: with an arbiter in the graph, the WINNING loop's bearing sets the reference (gains are

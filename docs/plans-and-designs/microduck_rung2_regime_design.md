@@ -4180,3 +4180,31 @@ arm (every answer seen, the first known nodes, the fewest walls of the phase), `
 scale against R77 (more standing at things, fewer things moved).** Both are for the operator's eye; the
 recommendation is R77 as the `★` candidate on their scale and R78c as the learning form to carry once the
 outcome table's key is coarse enough to be climbed (O62) and the reach is closed (O59).
+
+**Promoted (2026-09-27): `★ THINGS` = R77.** The operator's eye: "the robot looking down is stable and
+interesting"; R78 "ambiguous and not an improvement over R77". The promoted run is R72's stack with
+`--stop-gaze-at-thing` (preset `★ THINGS · R77`, seed 1; harness argv = the standard stops + `--stop-on-arrive
+--skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing` on `a1v2_r72_push.json`). The
+reach gate (R75's `reach_m`), the linger's renewal, the roll on a spin, the walking cloud and its re-fix stay
+as options, off. Next, on R77: O62 (a coarser outcome key) and the reach (the approach ending with the thing
+at the foot).
+
+### 17.50 On `★ THINGS` R77: the kind as the outcome's key (O62) and the arrival at the foot (O59) — R79, R80 (2026-09-27)
+
+**R79, the kind.** The outcome table's key has been the thing EPM's winner × intent: ~30 nodes a run (the
+vocabulary separates balls from blocks at purity 0.9, with some seven nodes per kind) × 3 intents, and a run
+asks 12–55 times, so no cell reaches `min_samples` = 2 and nothing is known (§17.49). The coarser key is not a
+hand-rolled clusterer (CLAUDE.md §0 rule 1) but a second EPM over the same descriptor with `max_nodes 4` and a
+coarser insertion floor (0.25 against 0.06), `thing_kind_epm` on `reality.cognitive.thing_kind`; the outcome
+loop's `thing_topic` reads it. Nothing else changes: the fine vocabulary still drives attention and the seek.
+The record carries the kind token as `tkind`; `cloud_objects.py things --field tkind` scores its purity by
+object kind. Prediction: nodes known > 0 on most seeds, the linger's need able to fall, requests per known
+cell ≥ 2; the risk is a kind that lumps a wall base with a block (purity), in which case the table learns
+that "blocks" sometimes do not move — which is true of wall bases.
+
+**R80, the arrival at the foot.** R77's ten moved things came from arrivals where the thing was 0.18 m off;
+R78c's one from a kick at 0.26 m. The seek loop arrives by dead reckoning at `arrive_m` 0.25 and the stop
+starts there; `arrive_m 0.15` (with the outcome loop's `arrive_range` 0.2) ends the approach with the thing
+where a kick from standing reaches. Prediction: things moved up, the thing's range at the look stop down from
+0.28 m, more contacts on arrival (the base moves objects by walking into them — interesting on the operator's
+scale, and a fall risk to watch: rescues).

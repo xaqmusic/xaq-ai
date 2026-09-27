@@ -2415,6 +2415,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     std::printf(",\"thg\":[%d,%d,-1]", int(th.size()), small);
                 }
                 if (brain.thing_seen()) std::printf(",\"tepm\":[%d,%.4f,%d]", brain.thing_winner(), brain.thing_tle(), brain.thing_nodes());
+                if (brain.kind_seen()) std::printf(",\"tkind\":[%d,%.4f,%d]", brain.kind_winner(), brain.kind_tle(), brain.kind_nodes());
             }
             // THE REPLAY PAYLOAD.  On the tick a cloud is filed, its whole voxel set goes to the log
             // once, with the world pose it was anchored on so a viewer can place it beside the

@@ -363,6 +363,9 @@ def cmd_arms(specs: list[str], gapk: float) -> None:
 
 # ------------------------------------------------------------------------------------------------ things
 
+EPM_FIELD = "tepm"   # the token field the purity is scored on: tepm (thing_epm) or tkind (thing_kind_epm, O62)
+
+
 def cmd_things(paths: list[str], gapk: float) -> None:
     half, lay, movable, furniture = load_scene()
     faithful = dict(clouds=0, n_mod=0, n_py=0, matched=0, small_agree=0, small_mod=0, small_py=0, top_dev=[], ext_dev=[])
@@ -382,7 +385,7 @@ def cmd_things(paths: list[str], gapk: float) -> None:
                 tick_rows["small_seen"] += th[1] > 0
                 if th[2] >= 0:
                     tick_rows["attended"] += 1
-                    pending.append((rec["t"], th, rec.get("tepm")))
+                    pending.append((rec["t"], th, rec.get(EPM_FIELD)))
             c = rec.get("cloudv")
             if not c:
                 continue
@@ -827,7 +830,10 @@ def main() -> None:
     th = sub.add_parser("things", help="the module's things against the manifest and the offline rule (things phase T1)")
     th.add_argument("logs", nargs="+")
     th.add_argument("--gapk", type=float, default=0.12)
+    th.add_argument("--field", default="tepm", help="the EPM token field to score purity on: tepm (the thing vocabulary) or tkind (the kind, O62)")
     args = ap.parse_args()
+    global EPM_FIELD
+    EPM_FIELD = getattr(args, "field", "tepm")
     if args.cmd == "rules":
         cmd_rules(args.logs, args.gapk)
     elif args.cmd == "things":

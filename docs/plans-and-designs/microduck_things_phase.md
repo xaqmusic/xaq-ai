@@ -1,6 +1,6 @@
 # Microduck: the things phase. Seeking what is smaller than itself, and being surprised when it answers
 
-Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, the kick and peck cycle `WORKING` as a mechanism (§17.39–17.41); **`★ THINGS` = R67 promoted 2026-09-22** (the walk with the mirror fixed, the seek, the arrival stop, the skills from standing, the outcome loop) · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
+Status: building; T1 `WORKING`, T2 and T4 `WORKING` / `PARTIAL`, the kick and peck cycle `WORKING` as a mechanism (§17.39–17.41); **`★ THINGS` = R77 promoted 2026-09-27** (R67's stack — the walk with the mirror fixed, the seek, the arrival stop, the kick / peck / push from standing, the outcome loop with the aimed unwind — plus the GAZE AT THE REACHED THING; R67 was `★` 2026-09-22 to 2026-09-27) · Started: 2026-09-15 · Branch: `duck-l2` · Simulation only
 
 *The phase after the cloud ([`microduck_cloud_phase.md`](microduck_cloud_phase.md), `★ CLOUD` R56).
 The operator's direction, restated in the rewrite rule's terms, then the loops that read the voxels at

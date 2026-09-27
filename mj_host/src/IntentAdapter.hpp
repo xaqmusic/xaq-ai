@@ -219,6 +219,11 @@ public:
     int    thing_winner() const { return thing_winner_; }
     double thing_tle()    const { return thing_tle_; }
     int    thing_nodes()  const { return thing_nodes_; }
+    // the KIND (O62): a second, coarser thing vocabulary on reality.cognitive.thing_kind, when a graph has one
+    bool   kind_seen()    const { return kind_seen_; }
+    int    kind_winner()  const { return kind_winner_; }
+    double kind_tle()     const { return kind_tle_; }
+    int    kind_nodes()   const { return kind_nodes_; }
     bool   thing_seen()   const { return thing_seen_; }
     std::vector<std::string> diagnostics() const;
     std::vector<std::string> take_inspector_events();   // live changes a client made since the last call
@@ -275,6 +280,7 @@ private:
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int skill_request_ = -1; uint64_t skill_request_tick_ = 0;
     bool thing_present_ = false; double thing_ego_ = 0.0, thing_rng_ = 0.0;
+    bool kind_seen_ = false; int kind_winner_ = -1; double kind_tle_ = 0.0; int kind_nodes_ = 0;
     std::vector<float> outcome_;
     std::array<float, 2> play_bearing_{0.0f, 0.0f};
     int  seek_steers_ = 0;
