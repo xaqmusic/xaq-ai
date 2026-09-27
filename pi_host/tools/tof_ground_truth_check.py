@@ -172,21 +172,62 @@ else:  # slope
     else:
         d_unc = r["uncomp_m"] - ref["uncomp_m"]
         d_cmp = r["comp_m"]   - ref["comp_m"]
-        pred_err = BZ * r["up_z"] * -1.0      # = -boom_z*up.z, the term the formula wrongly adds
-        # On a slope-aligned chassis: uncomp should be INVARIANT, comp should drift by boom_z*sin a
-        drift_pred = BZ * math.sin(math.radians(r["pitch_deg"]))
+        # ⚠ PREDICT THE DRIFT AS A DIFFERENCE FROM THE REFERENCE, AND USE BOTH TERMS.  The
+        # first version used `boom_z*sin(pitch_now)`, which drops two things: the reference
+        # run's OWN pitch (a level box is never level -- ours sat at -1.04°) and the
+        # second-order term.  MEASURED 2026-09-27: it predicted +14.63 mm against a measured
+        # +12.16 mm and "passed" only because the gate was 4 mm wide.  The full form below
+        # predicted +12.196 against +12.161 -- a 0.034 mm residual.  ⚠ The 2.5 mm was the
+        # APPROXIMATION, not the physics, and a gate loose enough to absorb your own sloppy
+        # prediction cannot fail for the right reason either.  Hence 1.5 mm.
+        lead       = -BZ * (r["up_z"] - ref["up_z"])
+        second     = r["uncomp_m"] * (r["up_y"] - 1.0) - ref["uncomp_m"] * (ref["up_y"] - 1.0)
+        drift_pred = lead + second
         print(f"\n  vs the level reference (pitch {ref['pitch_deg']:+.2f}° -> {r['pitch_deg']:+.2f}°):")
         print(f"    uncompensated moved {d_unc*1000:+7.2f} mm   "
-              f"(should be ~0: the ray is perpendicular to the surface either way)")
-        print(f"    compensated   moved {d_cmp*1000:+7.2f} mm   "
-              f"predicted boom_z*sin(pitch) = {drift_pred*1000:+7.2f} mm")
-        verdict = "CONFIRMED" if abs(d_cmp - drift_pred) < 4.0/1000 and abs(d_unc) < 6.0/1000 else "UNEXPECTED"
+              f"(~0 WITHIN ONE STAND: the ray is perpendicular to the surface either way;\n"
+              f"                                 across pose recalls expect up to ~3.4 mm, §9.3)")
+        # ⚠ TEST THE CORRECTION'S CHANGE, NOT THE CLEARANCE'S.  By definition
+        # m_comp = m + comp_delta, so d_cmp = d_unc + drift_pred: any shift in the underlying
+        # stand carries straight through to the compensated reading and is NOT a failure of
+        # the correction.  The first version compared d_cmp against drift_pred alone.
+        # ⚠ MEASURED 2026-09-27, and this is why it survived a passing run: the level and
+        # nose-up runs shared ONE continuous stand, so d_unc was exactly 0.00 and the missing
+        # term was invisible.  The nose-down run was a fresh recall (the keepalive had died
+        # and the robot re-stood), d_unc came in at -3.00 mm, and the "residual" was -3.06 --
+        # the same number wearing a different name.  §9.3 already measured `stand` recalling
+        # to 52.1 / 48.7 / 50.8 mm, so 3 mm is pose repeatability, not a result.
+        # Comparing d_delta against drift_pred is immune to all of it.
+        d_delta   = r["comp_delta_m"] - ref["comp_delta_m"]
+        resid     = d_delta - drift_pred
+        same_pose = abs(d_unc) < 1.0/1000
+        print(f"    compensated   moved {d_cmp*1000:+7.2f} mm   = uncomp drift "
+              f"{d_unc*1000:+.2f} + correction drift {d_delta*1000:+.2f}")
+        print(f"    THE TEST — correction drift {d_delta*1000:+7.2f} mm   predicted "
+              f"{drift_pred*1000:+7.2f} mm  (lead {lead*1000:+.2f}, 2nd-order {second*1000:+.2f})")
+        print(f"    residual            {resid*1000:+7.2f} mm")
+        if not same_pose:
+            print(f"  ⚠ the stand moved {d_unc*1000:+.2f} mm between the reference and this run, so "
+                  f"this is a DIFFERENT POSE RECALL,\n     not one stand tilted. §9.3 measured that "
+                  f"spread at 3.4 mm. It does not affect the test above.")
+        verdict = "CONFIRMED" if abs(resid) < 1.5/1000 else "UNEXPECTED"
         print(f"\n  §9.10.3 prediction {verdict}.")
         if verdict == "CONFIRMED":
-            print(f"  ⚠ So on a slope the UNCOMPENSATED arm is the correct one and the compensated "
-                  f"arm is not.\n     Nose-DOWN this over-reports clearance — the dangerous sign. "
-                  f"Do not promote m_comp for terrain.")
-        rec.update(d_uncomp_m=d_unc, d_comp_m=d_cmp, drift_pred_m=drift_pred, verdict=verdict)
+            # ⚠ REPORT THE DIRECTION MEASURED, NEVER A REMEMBERED ONE.  The first version
+            # hardcoded "nose-DOWN over-reports", inherited from §9.10.3's original text --
+            # which was itself inverted.  It therefore printed a claim CONTRADICTING the run
+            # it had just made (nose-up, over-reporting).  Three copies of one inverted sign:
+            # the doc, its commit message, and here.  Derive it instead and it cannot go stale.
+            heading = "NOSE-UP / climbing" if r["pitch_deg"] < 0 else "NOSE-DOWN / descending"
+            worse   = "OVER-reports clearance — PHANTOM CLEARANCE, the dangerous sign" \
+                      if d_cmp > 0 else "under-reports clearance — conservative"
+            print(f"  ⚠ On a slope the UNCOMPENSATED arm is the correct one and the compensated "
+                  f"arm is not.")
+            print(f"  ⚠ MEASURED HERE: {heading} at {abs(r['pitch_deg']):.1f}° — the compensated "
+                  f"arm {worse},\n     by {abs(d_cmp)*1000:.1f} mm. Do not promote m_comp for terrain.")
+        rec.update(d_uncomp_m=d_unc, d_comp_m=d_cmp, d_delta_m=d_delta, resid_m=resid,
+                   drift_pred_m=drift_pred, drift_lead_m=lead, drift_second_m=second,
+                   same_pose=same_pose, verdict=verdict)
 
 os.makedirs(os.path.dirname(STORE), exist_ok=True)
 with open(STORE, "a") as f: f.write(json.dumps(rec) + "\n")
