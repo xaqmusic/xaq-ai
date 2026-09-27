@@ -2139,9 +2139,19 @@ correction, so that is what was checked.
 | +120 µs | +0.94° | −1.17 mm | −1.15 mm | −0.02 mm |
 | −120 µs | **−3.51°** | **+4.19 mm** | +4.28 mm | **−0.09 mm** |
 
-**Sign correct at 4/4 tilted points** (nose-up → negative correction), checked separately
+**Sign correct at 4/4 tilted points** (nose-up → **positive** correction), checked separately
 because ⚠ **a sign error doubles the artefact instead of removing it and still looks
 plausible.**
+
+> ⚠ **CORRECTED 2026-09-27: this parenthetical originally read "nose-up → negative
+> correction", which is backwards.** The table above was right and only the label was wrong,
+> so nothing downstream of the measurement moved — but the same inverted reading DID
+> propagate into §9.10.3's safety claim, where it mattered. **Nose-up is NEGATIVE
+> `pitch_deg`**: `pitch_deg = atan2(−up.z, up.y)`, and the axis map (§4.1) makes the sim body
+> frame `+Z` forward, so pitching the nose up drives `up.z` **positive** and `pitch_deg`
+> negative. Measured directly: front feet on a 46 mm shim took pitch from −0.94° to −13.41°
+> with `up.z = +0.232` and `comp_delta = +14.6 mm`. Read the table with that in mind — its
+> −3.51° row is a **nose-up** point.
 
 ★ **The residual is not noise — it is the term the prediction omits.** The check predicted only
 the leading `−boom_z·up.z`, dropping `(d−H)(up.y−1)`. At 3.51° that term is
@@ -2195,7 +2205,7 @@ corrected name.
    reassuring: the corridor posture sits at `tilt` ≈ 0.001 rad, where the divergence
    `bottom·(1−cos θ)` is ~10⁻⁸ m — far below the 0.0001 snap. **The C++ unit tests are what
    pin the ON arm**, not this run; a sim check of it needs real tilt.
-2. **Re-run the tilt sweep at gait amplitudes** (see the range caveat above).
+2. ✅ **DONE 2026-09-27 — the gait-amplitude sweep, on shims.** §9.10.4 below.
 3. **A/B `m_comp` against `m`** into the homeostat. Only then does the correction become the
    published channel.
 
@@ -2203,6 +2213,65 @@ corrected name.
 pushes `ERROR: Parse JSON failed ... at _emit_jsonl`. It is present **identically before and
 after** the swap, so it is pre-existing and not caused by this change — but the sim is throwing
 a parse error on every diag line and nothing has been chasing it.
+
+#### ★★★ 9.10.4 THE GAIT-AMPLITUDE SWEEP — ✅ MEASURED 2026-09-27, on shims
+
+§9.10's range caveat closed. Front feet on a block, floor level, `stand` held throughout by
+`pi_host/tools/pose_hold.py` (the deadman folds an unattended standing robot in one second).
+Two shims, so compliance is bounded rather than assumed.
+
+| shim | pitch | `comp_delta` pred → meas | residual | 2nd-order term | `m_comp` | rise vs level | origin fraction | implied toe span |
+|---|---|---|---|---|---|---|---|---|
+| — (level) | −0.94° | — → +1.13 mm | — | −0.01 mm | 53.33 mm | — | — | — |
+| **46 mm** | **−13.41°** | +14.591 → **+14.595 mm** | **+0.004 mm** | −1.64 mm (11%) | 74.78 mm | +21.45 mm | **0.466** | 208.0 ± 0.9 mm |
+| **61 mm** | **−17.06°** | +17.754 → **+17.748 mm** | **−0.005 mm** | −2.78 mm (16%) | 80.97 mm | +27.64 mm | **0.453** | 211.1 ± 0.7 mm |
+
+n=115 and n=114, **0 samples rejected**, `raw_sd` 1.46 / 1.47 mm against §9.1's measured 1.51 mm.
+**−17.06° is 4.9× §9.10's −3.51° maximum**, and past the 10–15° a gait reaches. Records in
+`pi_host/log/tof_truth_check.jsonl`.
+
+⚠ **THE RESIDUAL IS VERY NEARLY A TAUTOLOGY, AND MUST NOT BE THE HEADLINE.** Expanding,
+`comp_delta = m_comp − m = uncomp·(up.y−1) − boom_z·up.z`, and the script's prediction is *that
+same expression* rebuilt from the same published `up` and `d`. A 4 µm residual is real evidence
+— it says the C++ clamps nothing, that `up` and `d` are mutually fresh, and that `comp_valid`
+means what it claims — but it could not have come out otherwise. §9.10 was already explicit
+that this is validation "by its own predicted magnitude"; at gait amplitude it is worth saying
+twice, because a 4 µm number reads far stronger than it is.
+
+★ **What IS a physical check, and what §9.10 could not do.** Knee trim changes belly height
+while it pitches, which is why §9.10 had no external reference. **A shim does not**: the front
+feet rise by a known amount, rotation is about the rear contact, so the mid-chassis rise is
+predictable from geometry alone. `m_comp` puts the body origin at **0.466 and 0.453** of the
+toe span (fit through origin **0.458**) — the midpoint, where a symmetric quadruped's origin
+belongs. The uncompensated arm says **0.174 and 0.180**, off by a factor of 2.6. Two points
+make that a line rather than a coincidence. **This is the correction being graded against the
+world rather than against its own algebra, and it passes.**
+
+★ **The second-order term `(d−H)(up.y−1)` is now unambiguous.** −1.64 mm at 13.41° (11% of the
+signal) and −2.78 mm at 17.06° (16%), where §9.10 had 0.09 mm at 3.51° and could fairly have
+been accused of fitting noise. The deployed full form is confirmed; the leading-term
+approximation is only the yardstick, exactly as §9.10 said.
+
+★ **Front-leg compliance is bounded POSITIVELY, not ruled out by silence.** The two shims back
+the toe span out independently as **208.0 ± 0.9** and **211.1 ± 0.7 mm**. Had the legs been
+absorbing the lift, the implied span would have grown *with* shim height. It grew 1.5% — ~3σ
+and real, most plausibly the rounded toe's contact point rolling as the leg angle changes —
+which bounds compliance at a couple of percent. **One shim could not have said this**; the
+second point is what turns a ratio into a line.
+
+⚠ **`FOOT_SPAN_M` was the sim's 0.233 receipt and is ~11% wide of the robot.** Refitted to
+0.210 from the two rows above. Both numbers can be right — that receipt is the sim's nominal
+pose, this is the robot's saved `stand` — but a robot-side setup check wants the robot's.
+
+⚠ **Still only ONE SIGN.** Every point here is nose-up, because a rear shim occludes the boom
+(operator's constraint, and it is a real one — the boom is 70 mm aft). §9.10's small-amplitude
+sweep has both signs; the large-amplitude sweep has one. **Nose-down at gait amplitude is
+unmeasured**, and it is the sign §9.10.3 calls conservative, so the gap is in the harmless
+direction — but it is a gap.
+
+⚠ **This is the LEVEL-GROUND case and is not a terrain result.** §9.10.3 is untouched by it:
+every row here has the floor horizontal, which is exactly the assumption that section says
+breaks. What this sweep does buy §9.10.3 is the empirical sign anchor its prediction hangs on.
 
 #### ⚠⚠ 9.10.3 THE CORRECTION ASSUMES HORIZONTAL GROUND — and terrain is where that breaks
 
@@ -2226,11 +2295,36 @@ perpendicular to the surface so `d = H + c`, and the formula returns
 c·cos α + boom_z·sin α          instead of          c
 ```
 
-⚠ **The error term is `boom_z·sin α` — 18 mm at 15° — and its sign depends on heading:**
+⚠⚠ **CORRECTED 2026-09-27 — THE TWO CASES BELOW WERE THE WRONG WAY ROUND, and this is the
+safety-relevant one.** The original text put the phantom clearance on *descending*. It is on
+**climbing**. The magnitude (~18 mm at 15°) and the arms-swap conclusion were both right; only
+the heading label was inverted, inherited from §9.10's parenthetical above. ⚠ **The error is
+also in commit c9de3f4's message**, which cannot be rewritten — read this section, not that
+log entry. Tellingly, the original's own physical clause ("worst exactly when the belly's
+leading edge is nearest the ground") describes **climbing**, so its reasoning and its label
+already contradicted each other; that disagreement was the tell and it was not caught.
 
-- **Nose-up / climbing:** under-reports clearance. Conservative, harmless.
-- **Nose-down / descending:** ⚠ **over-reports by ~18 mm.** Phantom clearance, in the dangerous
-  direction, and worst exactly when the belly's leading edge is nearest the ground.
+**Write the error term in `up.z`, not in an α whose sign convention was never stated** — `up.z`
+is a published quantity and cannot be read two ways:
+
+```
+reported = c·up.y − boom_z·up.z  =  c·up.y + 0.070·up.z          (boom_z = −0.070)
+```
+
+⚠ **The error term is `−boom_z·up.z` — 18 mm at 15° — and its sign follows heading:**
+
+- ⚠ **Nose-up / climbing** (`up.z = +sin α`): **over-reports by ~16 mm** at 15° on a 53 mm
+  clearance (69.3 mm reported against 53 mm true). **Phantom clearance, the dangerous
+  direction**, and worst exactly when the belly's leading edge is nearest the ground.
+- **Nose-down / descending** (`up.z = −sin α`): under-reports by ~20 mm (33.1 mm against
+  53 mm). Conservative, harmless.
+
+⚠ **Still derived, not measured** — `--mode slope` is what closes it. But the chain it rests on
+is now measured rather than assumed: physical nose-up → `up.z > 0` → positive correction, at
+n=115 with a 4 µm residual (§9.10.4). **The slope test therefore has a signed prediction that
+contradicts what this section used to say**, which makes it a much sharper test than it was:
+set the robot **nose-up on the incline** and `m_comp` should drift *upward* while the
+uncompensated reading stays put.
 
 ⚠ **And the arms swap: on a slope-aligned chassis the UNCOMPENSATED reading `d − H` is exactly
 `c`, i.e. correct.** So neither arm is right in general, and the discriminator — pitch relative
