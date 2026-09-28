@@ -83,10 +83,15 @@ WALL_BEARINGS = np.radians(np.arange(-64, 65, 2))              # across the clou
 WALL_BEARING_TOL, WALL_RANGE_TOL = math.radians(2.0), 0.12
 
 
-def load_scene(path: Path = MANIFEST):
+def load_scene(path: Path = None):
+    # the manifest of the scene the log was run in: CLOUD_OBJECTS_MANIFEST=PATH, else the plain playroom
+    # (2026-09-28: the train room has its own layout and a self-moving thing; labelling its logs against the plain
+    # room read every stop at the train as open floor)
+    if path is None:
+        path = Path(os.environ.get("CLOUD_OBJECTS_MANIFEST", MANIFEST))
     m = json.load(open(path))
     lay = {n: i for n, i, _k in m["qpos_layout"]}
-    movable = [o for o in m["objects"] if o["cls"] == "movable"]
+    movable = [o for o in m["objects"] if o["cls"] in ("movable", "self_moving")]   # the train counts as a thing
     furniture = [o for o in m["objects"] if o["kind"] in ("chair", "table", "shelf")]
     return m["half"], lay, movable, furniture
 

@@ -1471,6 +1471,7 @@ struct StopPlan {
     // there, not a wide sweep.  0 = centred on level, byte-identical.
     double gaze_down = 0.0;
     bool   on_arrive = false;      // --stop-on-arrive (things phase T4): a stop starts when the seek loop reaches its target
+    bool   on_chase = false;       // --stop-on-chase (2026-09-28): a stop ENDS when the seek loop confirms a chase -- the orienting reflex's substrate form: the thing moved while I watched, follow it
     bool   gaze_at_thing = false;  // --stop-gaze-at-thing (T3): at an arrival stop the sweep's band is centred on the reached thing's bearing and elevation
     double on_stuck = 0.0;         // --stop-on-stuck K: a stop starts when a forward stall exceeds K x the body's own median stall (0 = off)
     // --stop-orient K TURN_VX WALK_VX SECS (the orienting reflex, agreed 2026-09-12): while the gaze is still, a
@@ -1512,6 +1513,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stop.on_stuck > 0.0) { brain.set_stuck(g_stop.on_stuck); std::fprintf(stderr, "  stop on stuck: a stop starts when a forward stall exceeds %.1f x the body's own median stall length\n", g_stop.on_stuck); }
     if (!g_skill_on_arrive.empty()) std::fprintf(stderr, "  skill on arrive: %s (Pollen's network, a window at standing tuning with a zero command) fired from standing at the arrival stop's hand-back\n", g_skill_on_arrive.c_str());
@@ -1774,6 +1776,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      g_stop.cloud_end_frac);
     const int kCloudWin = int(2.0 * kBrainHz);
     std::vector<int> cg_vox; double cg_peak = 0.0; int cg_below = 0, stops_cloud_ended = 0;
+    bool chase_prev = false; int stops_chase_ended = 0;
     if (g_map_view_cloud && !(cloud_on && brain.cloud_present()))
         throw std::runtime_error("--map-view cloud needs --cloud and a CloudMap in the graph");
     if (g_map_view_cloud)
@@ -1970,6 +1973,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const bool arrive_now = g_stop.on_arrive && stop_phase == StopPhase::None && t >= stop_from && !skill_active
                                     && (brain.seek_arrived() || skill_arrive_done);
             const bool stuck_now = g_stop.on_stuck > 0.0 && stop_phase == StopPhase::None && t >= stop_from && brain.stuck_now();
+            // a chase confirmed during a stop ends it: the thing moved while I watched, follow it
+            const bool chase_edge = chase_on && brain.chase_active() && !chase_prev;
+            chase_prev = chase_on && brain.chase_active();
+            if (g_stop.on_chase && chase_edge && stop_phase != StopPhase::None && stop_left > 0) {
+                stop_left = 0; ++stops_chase_ended; stop_event = "stop:chase";
+            }
             if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
@@ -2705,7 +2714,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
-        if (chase_on) std::fprintf(stderr, "  chases: %d started, %d mover candidates seen by the cloud\n", brain.chases(), brain.mover_cands());
+        if (chase_on) std::fprintf(stderr, "  chases: %d started, %d mover candidates seen by the cloud; %d stops ended on a chase\n", brain.chases(), brain.mover_cands(), stops_chase_ended);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
@@ -2799,6 +2808,7 @@ void usage() {
         "      at SPEED m/s for RUN_S s, still for STOP_S s, repeating; the phase and the start along the track\n"
         "      follow the seed unless --train-phase S.  --log-movers WINDOW_S logs the cloud's clusters through a\n"
         "      recency window on every cast (\"mvc\"), the stage-0 instrument for chasing moving things.\n"
+        "      --stop-on-chase ends a stop when the seek loop confirms a chase (the walker follows the mover).\n"
         "      --log-cloud-live logs the cloud as the module builds it: the voxels each cast touches, a cloud's opening\n"
         "      (with its anchor's world pose) and the places the cache forgets -- what the duck viewer draws as the live cloud.\n"
         "\n"
@@ -2996,6 +3006,8 @@ int main(int argc, char** argv) {
             g_stuck_escape_s = std::stod(next("--stuck-escape"));
         } else if (a == "--ref-free") {
             g_ref_free = std::stod(next("--ref-free"));
+        } else if (a == "--stop-on-chase") {
+            g_stop.on_chase = true;
         } else if (a == "--stop-on-arrive") {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {

@@ -114,6 +114,16 @@ private:
     // stays put is a static thing newly in view (R85 chased 447 of those in six runs); 0 = not required.
     double chase_min_v_ = 0.0;
     double cand_x0_ = 0.0, cand_y0_ = 0.0;
+    // chase_stop_v (2026-09-28, the operator's eye: the duck walked to where the train HAD passed and pecked at the
+    // place): a chase that ends with the thing still moving (its last velocity above this, m/s) is DROPPED -- the
+    // thing left the view, it is not at the predicted place; only a thing that had slowed below this is remembered
+    // where it stopped.  A position belongs to a thing while the thing is stationary.  0 = always remembered.
+    double chase_stop_v_ = 0.0;
+    int    chases_lost_ = 0, chases_stopped_ = 0;
+public:
+    int chases_lost()    const { return chases_lost_; }
+    int chases_stopped() const { return chases_stopped_; }
+private:
     int    chase_confirm_ = 2, chase_confirm_ticks_ = 25, chase_forget_ticks_ = 50;
     bool   have_cand_ = false, chasing_ = false, mover_seen_ = false;
     double cand_x_ = 0.0, cand_y_ = 0.0, cand_vx_ = 0.0, cand_vy_ = 0.0;

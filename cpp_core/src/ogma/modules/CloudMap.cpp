@@ -205,6 +205,10 @@ ParamSchema CloudMap::params_schema() const {
          "Candidates only within this range (metres): stage 0's false alarms rise fourfold from the first metre to the "
          "second; the reach is from the walk in the last metre.",
          ParamValue{1.5}},
+        {"things_skip_movers", ParamMutability::HotMutable,
+         "The things reduction does not attend a cluster whose (hit-weighted) voxel age is under mover_age_k x the oldest "
+         "cluster's: a passing thing's smear is not a thing with a place.  false = as before (R57-R89).",
+         ParamValue{false}},
         {"mover_ext_max", ParamMutability::HotMutable,
          "Candidates no wider than this footprint (m): a wall base's visible part slides with the view and reads young; "
          "0 = any size (the operator's 'any moving cluster' -- the size gate is a measured retreat, §17.55).",
@@ -248,6 +252,7 @@ ParamMap CloudMap::current_params() const {
     m["vacate_window_ticks"] = int64_t(vacate_window_); m["vacate_radius"] = vacate_radius_; m["vacate_beyond_m"] = vacate_beyond_; m["mover_vacated"] = int64_t(mover_vacated_);
     m["mover_topic"] = ParamValue{mover_topic_}; m["mover_window_ticks"] = int64_t(mover_window_);
     m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_; m["mover_ext_max"] = mover_ext_max_;
+    m["things_skip_movers"] = things_skip_movers_;
     m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
@@ -284,6 +289,7 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mover_window_ticks") mover_window_ = std::max(1, int(get_d(one, "mover_window_ticks", mover_window_)));
     else if (k == "mover_age_k") mover_age_k_ = get_d(one, "mover_age_k", mover_age_k_);
     else if (k == "mover_range") mover_range_ = get_d(one, "mover_range", mover_range_);
+    else if (k == "things_skip_movers") things_skip_movers_ = get_d(one, "things_skip_movers", 0.0) > 0.5;
     else if (k == "mover_ext_max") mover_ext_max_ = get_d(one, "mover_ext_max", mover_ext_max_);
     else if (k == "mover_weighted") mover_weighted_ = get_d(one, "mover_weighted", 1.0) > 0.5;
 }
@@ -330,6 +336,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     mover_range_ = get_d(params, "mover_range", mover_range_);
     mover_weighted_ = get_d(params, "mover_weighted", 1.0) > 0.5;
     mover_ext_max_ = get_d(params, "mover_ext_max", mover_ext_max_);
+    things_skip_movers_ = get_d(params, "things_skip_movers", 0.0) > 0.5;
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
@@ -803,9 +810,13 @@ void CloudMap::update_things(double yaw) {
     const double reach = things_range_ > 0.0 ? things_range_ : max_range_;
     // sorted by range from the anchor; on a walking cloud the BODY's range is what the reach means, so the nearest
     // small thing by body range within reach is attended (identical on a stop's cloud, where the body is the anchor)
-    double best = 1e9;
+    double best = 1e9, oldest = 0.0;
+    if (things_skip_movers_)
+        for (auto const& t : things_) oldest = std::max(oldest, mover_weighted_ ? t.age_w : t.age);
     for (size_t i = 0; i < things_.size(); ++i) {
         if (!things_[i].small) continue;
+        if (things_skip_movers_ && oldest > 0.0 && (mover_weighted_ ? things_[i].age_w : things_[i].age) < mover_age_k_ * oldest)
+            continue;                                                     // young against the cloud's own: a mover, not a place
         double bx, by, rng; body_rel(things_[i], yaw, bx, by, rng);
         if (rng <= reach && rng < best) { best = rng; attended_ = int(i); }
     }

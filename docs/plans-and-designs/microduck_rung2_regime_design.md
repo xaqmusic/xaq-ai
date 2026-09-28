@@ -4561,3 +4561,49 @@ remembered targets), seek 58 % of the walk. **Verdict: `PARTIAL` on the train, `
 power** — bringing the stimulus to the walk doubled the train's chases without touching the false ones, so the
 false ones are the design's own, not the room's. The sliding fragment (O64) is the mechanism to remove before the
 chase can be judged; the room is now right for judging it.
+
+### 17.57 A position belongs to a thing while it is still (R90; 2026-09-28)
+
+**The operator's eye on R89, with the new cloud view:** "I observed the robot measure the train passing while
+standing. Then it proceeded to the location where the train was during the measurement (smear of voxels) and
+pecked in that location. The train was no longer there. Our brain should be learning the difference between
+stationary and moving objects." The gap was the chase's own: a chase that lost its sightings kept the last predicted
+position as a remembered target ("where it stopped is where to go and look"), and the thing had not stopped, it had
+left the cone; one level down, a passing thing's short smear at a stop reads as a small thing and the seek loop
+fixes its place.
+
+**Built, one principle in three parts (R90 = R89 + these; each guarded, R83's md5 unchanged):**
+`BearingSeekLoop.chase_stop_v` 0.05 — a chase that ends with the thing still moving is dropped, only a thing that had
+slowed is remembered where it stopped; `CloudMap.things_skip_movers` — the things reduction never attends a cluster
+whose voxels are young by the mover rule; `--stop-on-chase` — a stop ends when a chase is confirmed, so the walker
+follows (the orienting reflex's substrate form). Two unit tests. The viewer's chase marker is now a yellow arrow.
+
+**Measured (n = 6, the big track, R84 the control in the same sweep).**
+
+| | R84 | R89 (motion, the corner-track gate) | **R90** |
+|---|---|---|---|
+| walls / min | 14.7 ± 10.1 | 18.1 ± 20.0 | **6.5 ± 3.8** |
+| rescues / min · down % · stop rescues | 0.13 · 0.36 · 0.33 | 0.25 · 0.52 · 0.67 | **0.06 · 0.10 · 0.17** |
+| stops / at a thing / open floor (a run) | 17.8 / 8.7 / 6.5 | 21.8 / 10.0 / 8.5 | 22.3 / **12.7** / 6.8 |
+| arrival stops | 8.5 | 12.5 | 13.0 |
+| chases (at the moving train) in six runs | — | 71 (8) | 67 (8) |
+| stops ended on a chase, six runs | — | — | 12 |
+| skills · with no thing within 0.5 m | 29 · 8 | 44 · 12 | 45 · 15 |
+| seek % of the walk | 39 | 58 | 52 |
+
+- **The walk: `WORKING`, loud.** Walls halve against the control and fall to a third of R89's, with the spread
+  collapsing (3.8 against 20); rescues halve, falls a third, stop rescues halve. Dropping a lost chase instead of
+  remembering it removed the false targets that had sent the duck into walls, and the stops at things rose 8.7 → 12.7
+  a run. Every seed under 12 walls a minute.
+- **The gap, in part.** Open-floor stops are the control's (6.8 against 6.5, R89's 8.5); but skills fired with
+  nothing within half a metre are 15 of 45 — the seek loop still reaches places a thing has left. The remaining
+  cases are not the chase's: a thing seen standing at a stop (the train in its eight seconds still, a ball it
+  kicked) and walked to after it moved. That is the (d) test's own answer, and the remedy is the operator's
+  sentence: the brain has to *learn* that a kind of thing moves.
+- **The chase itself** is unchanged by this lever: 67 chases, 8 at the moving train (12 %), the closest approach to
+  a moving train 0.6–1.6 m by seed; 12 stops ended on a confirmed chase in six runs.
+
+**Verdict.** R90 `WORKING` on the walk and `PARTIAL` on the gap; not promoted without the eye. **Re-use / the next
+lever:** the age of a cluster's voxels into the thing descriptor, so the kind EPM earns a *moving kind* and the
+outcome loop learns that its intents get no answer from one — habituation then ends the pecks at places, by the
+brain's own account rather than a rule.

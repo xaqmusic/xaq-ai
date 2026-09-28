@@ -265,6 +265,10 @@ private:
     std::string mover_topic_;
     int    mover_window_ = 25; double mover_age_k_ = 0.06, mover_range_ = 1.5; bool mover_weighted_ = true;
     double mover_ext_max_ = 0.0;            // candidates no wider than this (m); 0 = any size
+    // things_skip_movers (2026-09-28): the things reduction does not ATTEND a cluster whose voxels are young by the
+    // mover rule (a passing thing's smear at a stop reads as a small thing, and the seek loop then fixes a place
+    // the thing has left -- the operator watched the duck peck at one).  A thing has a place while it is still.
+    bool   things_skip_movers_ = false;
     std::vector<Thing> recent_;             // the window's clusters, as last computed
     int    mover_ = -1, mover_cands_ = 0;   // the attended mover (index into recent_) and candidates seen in all
     double mover_age_s_ = 0.0, mover_oldest_s_ = 0.0;

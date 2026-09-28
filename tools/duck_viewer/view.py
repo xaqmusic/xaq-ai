@@ -363,26 +363,27 @@ def draw_chase(scn, frame, mujoco, np):
         return bx + c * dx - s_ * dy, by + s_ * dx + c * dy
 
     eye = np.eye(3).flatten()
-    if ch[7]:                                              # a candidate held
+    if ch[7]:                                              # a candidate held: a pale ring on the floor
         wx, wy = world(ch[8], ch[9])
         if scn.ngeom < scn.maxgeom:
             g = scn.geoms[scn.ngeom]; scn.ngeom += 1
             mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_CYLINDER, np.array([0.12, 0.004, 0.0]),
-                                np.array([wx, wy, 0.006]), eye, np.array((1.0, 0.85, 0.1, 0.55), dtype=np.float32))
-    if ch[0]:                                              # chasing: the predicted target and its velocity
-        wx, wy = world(ch[2], ch[3])
-        if scn.ngeom < scn.maxgeom:
-            g = scn.geoms[scn.ngeom]; scn.ngeom += 1
-            mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_SPHERE, np.array([0.05, 0.0, 0.0]),
-                                np.array([wx, wy, 0.08]), eye, np.array((0.9, 0.15, 0.1, 0.9), dtype=np.float32))
+                                np.array([wx, wy, 0.006]), eye, np.array((0.95, 0.95, 0.85, 0.45), dtype=np.float32))
+    if ch[0]:                                              # chasing: a YELLOW ARROW from the predicted target along the velocity
+        wx, wy = world(ch[2], ch[3])                       # (the operator, 2026-09-28: the red ball was the play area's own)
         vx, vy = ch[4], ch[5]
-        if (vx * vx + vy * vy) > 1e-4 and scn.ngeom < scn.maxgeom:
-            wvx, wvy = c * vx - s_ * vy, s_ * vx + c * vy
+        sp = math.hypot(vx, vy)
+        if scn.ngeom < scn.maxgeom:
+            if sp > 1e-3:
+                wvx, wvy = (c * vx - s_ * vy) / sp, (s_ * vx + c * vy) / sp
+            else:
+                wvx, wvy = 1.0, 0.0
+            length = 0.15 + 0.5 * sp                       # 15 cm for a standing target, half a second of travel more
             g = scn.geoms[scn.ngeom]; scn.ngeom += 1
             mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_ARROW, np.zeros(3), np.zeros(3), eye,
-                                np.array((0.9, 0.15, 0.1, 0.9), dtype=np.float32))
-            mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_ARROW, 0.012, np.array([wx, wy, 0.08]),
-                                 np.array([wx + wvx * 0.5, wy + wvy * 0.5, 0.08]))
+                                np.array((1.0, 0.85, 0.1, 0.95), dtype=np.float32))
+            mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_ARROW, 0.016, np.array([wx, wy, 0.10]),
+                                 np.array([wx + wvx * length, wy + wvy * length, 0.10]))
 
 
 # ---- the operator's keys ------------------------------------------------------------

@@ -106,6 +106,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "The target is the candidate's predicted position this far ahead (seconds of its velocity).", ParamValue{0.3}},
         {"chase_v_max", ParamMutability::HotMutable,
             "A fix implying a faster mover than this (m/s) is another cluster, not a confirmation.", ParamValue{1.0}},
+        {"chase_stop_v", ParamMutability::HotMutable,
+            "A chase that ends with the thing still moving faster than this (m/s) is dropped, not remembered: the thing left the "
+            "view.  Below it the thing stopped and its place is remembered.  0 = always remembered (the first form).", ParamValue{0.0}},
         {"chase_min_v", ParamMutability::HotMutable,
             "A candidate is chased only if it has moved: its velocity and its displacement per second since the first sighting at "
             "least this (m/s).  A young cluster that stays put is a thing newly in view.  0 = not required.", ParamValue{0.0}},
@@ -124,7 +127,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["mover_topic"] = ParamValue{mover_topic_}; m["chase_gate_m"] = ParamValue{chase_gate_m_};
     m["chase_confirm"] = ParamValue{int64_t(chase_confirm_)}; m["chase_confirm_ticks"] = ParamValue{int64_t(chase_confirm_ticks_)};
     m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
-    m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_};
+    m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_}; m["chase_stop_v"] = ParamValue{chase_stop_v_};
     return m;
 }
 
@@ -153,6 +156,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_lead_s",    [&](auto const& v){ chase_lead_s_  = get_double(v,"chase_lead_s"); });
     apply_param(params, "chase_v_max",     [&](auto const& v){ chase_v_max_   = get_double(v,"chase_v_max"); });
     apply_param(params, "chase_min_v",     [&](auto const& v){ chase_min_v_   = get_double(v,"chase_min_v"); });
+    apply_param(params, "chase_stop_v",    [&](auto const& v){ chase_stop_v_  = get_double(v,"chase_stop_v"); });
 }
 
 void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -172,6 +176,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_lead_s")    chase_lead_s_ = get_double(value, k);
     else if (k == "chase_v_max")     chase_v_max_ = get_double(value, k);
     else if (k == "chase_min_v")     chase_min_v_ = get_double(value, k);
+    else if (k == "chase_stop_v")    chase_stop_v_ = get_double(value, k);
     else throw std::invalid_argument("BearingSeekLoop: param '" + k + "' is construction-only / unknown");
 }
 
@@ -315,8 +320,14 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
     }
     if (have_cand_ && tick_id - cand_tick_ > uint64_t(chase_forget_ticks_)) {
         if (chasing_) {
-            // the chase ends where the thing was last predicted to be: an ordinary remembered target from here
-            tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f;
+            const bool stopped = chase_stop_v_ <= 0.0 || std::hypot(cand_vx_, cand_vy_) < chase_stop_v_;
+            if (stopped) {
+                // the thing stopped: where it was last seen is an ordinary remembered target from here
+                tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_;
+            } else {
+                // the thing left the view still moving: it is not at the place; nothing to go and look at
+                have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++chases_lost_;
+            }
         }
         chasing_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
     }

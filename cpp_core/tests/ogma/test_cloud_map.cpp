@@ -600,3 +600,26 @@ TEST(CloudMap, RaysThroughWhereAThingWasMarkItVacated) {
     EXPECT_EQ(q.m.vacated_total(), 0u);
     EXPECT_EQ(q.m.cluster_recent(60)[0].vacated, 0);
 }
+
+// things_skip_movers (2026-09-28): a cube that has stood for 60 casts and a NEARER cube that moves 2 cm a cast:
+// the plain reduction attends the nearer (moving) one; with the switch the moving cube is young against the
+// standing one's age and the standing cube is attended.  A thing has a place while it is still.
+TEST(CloudMap, ThingsSkipMoversAttendsTheStandingCubeNotTheNearerMovingOne) {
+    for (bool skip : {false, true}) {
+        ParamMap p = things_params();
+        p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+        p["things_skip_movers"] = skip;
+        Rig r(p);
+        for (int i = 0; i < 60; ++i) cast_world(r, 0.0, cube());               // the standing cube at 0.85 m
+        for (int k = 0; k < 8; ++k) {
+            std::vector<Pt> mover;
+            for (auto q : cube()) { q[0] -= 0.30 - 0.005 * k; q[1] += 0.45; mover.push_back(q); }   // nearer, to the left, creeping (its smear stays SMALL)
+            cast_world(r, 0.0, cube());
+            cast_world(r, 0.0, mover);
+        }
+        ASSERT_GE(r.m.attended(), 0);
+        const auto& a = r.m.things()[size_t(r.m.attended())];
+        if (skip) { EXPECT_NEAR(a.cy, 0.0, 0.05) << "the standing cube"; }
+        else      { EXPECT_NEAR(a.cy, 0.45, 0.10) << "the nearer, moving cube"; }
+    }
+}

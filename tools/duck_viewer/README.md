@@ -135,9 +135,10 @@ follows them:
 - a **walking cloud vanishes** when the module files it (every metre of travel, or when the body stands);
 - a **remembered place** (a stop's cloud) stays, drawn at a third of the strength, until the cache lets it
   go; `N` steps through the remembered places one at a time;
-- the **chase** (`M`): a yellow ring on the floor is the candidate the seek loop holds, a red ball with an
-  arrow is the target it is chasing and the velocity it believes; both are the loop's own odometry-frame
-  positions put into the world through the body's true pose, exactly as the scorer labels them;
+- the **chase** (`M`): a pale ring on the floor is the candidate the seek loop holds; a **yellow arrow** starts
+  at the target it is chasing and points along the velocity it believes, longer the faster (the red ball was
+  the play area's own, so it went); both are the loop's own odometry-frame positions put into the world through
+  the body's true pose, exactly as the scorer labels them;
 - the camera window's line reads `cloud: walking 16136 vox, oldest 99.9s  remembered 3` — the module's
   own count, and how long the oldest voxel has been held.
 

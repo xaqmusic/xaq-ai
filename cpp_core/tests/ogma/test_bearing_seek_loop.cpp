@@ -257,3 +257,34 @@ TEST(BearingSeekLoop, WithChaseMinVAThingThatStaysPutIsNotChased) {
     }
     EXPECT_TRUE(moving.m.chasing()) << "moved 0.14 m over 0.72 s: chased";
 }
+
+TEST(BearingSeekLoop, AChaseLostWhileMovingIsDroppedAndOneThatStoppedIsRemembered) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05;
+    Rig lost(p);
+    for (int k = 0; k < 10; ++k) {                       // walking away at 0.2 m/s, then gone from the view
+        lost.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); lost.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) lost.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(lost.m.chasing());
+    for (int i = 0; i < 60; ++i) lost.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(lost.m.chasing());
+    EXPECT_FALSE(lost.m.have_target()) << "it left the view still moving: no place to go and look";
+    EXPECT_EQ(lost.m.chases_lost(), 1); EXPECT_EQ(lost.m.chases_stopped(), 0);
+    Rig stopped(p);
+    for (int k = 0; k < 10; ++k) {                       // the same, then six more sightings at the same spot: it stopped
+        stopped.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    const double last = 1.0 + 0.2 * 36.0 / 50.0;
+    for (int k = 0; k < 8; ++k) {
+        stopped.mover(0.0f, 1.0f, prox_of(last)); stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(stopped.m.chasing());
+    for (int i = 0; i < 60; ++i) stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(stopped.m.chasing());
+    EXPECT_TRUE(stopped.m.have_target()) << "it stopped: remembered where it stands";
+    EXPECT_NEAR(stopped.m.target_x(), last, 0.05);
+    EXPECT_EQ(stopped.m.chases_stopped(), 1);
+}

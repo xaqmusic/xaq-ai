@@ -216,6 +216,14 @@ train 5, static clusters 54; walls 18 ± 20 against R84's 14.7, rescues doubled.
 `REGRESSION` on the walk: the false chases are the design's own, not the room's, and the room is now right for
 removing them.
 
+**R90, a position belongs to a thing while it is still (§17.57):** the operator watched the duck walk to where the
+train had passed and peck at the place. A chase that loses a moving thing is now dropped, not remembered; the things
+reduction never attends a young cluster; a stop ends on a confirmed chase. On the big track against R84: walls 14.7
+→ **6.5** a minute (R89 18.1), rescues halved, falls a third, stops at things 8.7 → 12.7; skills at nothing 8 → 15 of
+29 → 45 — the remaining reaches at places are things seen standing that moved after, the (d) test's own answer.
+`WORKING` on the walk, `PARTIAL` on the gap. Next: the voxel age into the thing descriptor, so the kind EPM earns
+a moving kind and the outcome loop learns that it answers nothing.
+
 **Where this leaves the design (for the discussion).** Keep R89's chase; bring the stimulus to the walk before
 touching the gate again (a track through the middle of the room, or the ball rolled across the walk as
 `--roll-past` rolls it across a stop); the one confound left is the sliding fragment, whose remover is geometric
