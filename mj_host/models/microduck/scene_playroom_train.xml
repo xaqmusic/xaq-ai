@@ -4,7 +4,8 @@
          Do not edit by hand: regenerate. The manifest is beside this file. -->
     <include file="robot_overlay_playroom.xml" />
     <custom>
-        <numeric name="train_path" data="-1.0201 0.7200 0.6000 0.4000 1.2744"/>
+        <numeric name="train_path" data="0.0000 0.0000 1.5250 0.8000 1.5708"/>
+        <numeric name="train_z" data="0.0500"/>
     </custom>
 
     <visual>
@@ -59,14 +60,14 @@
         <geom name="wall_py" type="box" size="2.0 0.025 0.5" pos="0 2.0 0.5" material="wall2_mat"/>
         <geom name="wall_ny" type="box" size="2.0 0.025 0.5" pos="0 -2.0 0.5" material="wall3_mat"/>
         <geom name="rug" type="box" size="0.5 0.35 0.002" pos="0.000 0.000 0.002" material="rug_mat" contype="0" conaffinity="0"/>
-        <body name="furn_table" pos="-1.117 -1.297 0" euler="0 0 2.626">
+        <body name="furn_table" pos="1.257 -1.359 0" euler="0 0 2.462">
           <geom name="furn_table_top" type="box" size="0.40 0.28 0.015" pos="0 0 0.36" material="wood_mat"/>
           <geom name="furn_table_leg0" type="cylinder" size="0.03 0.1725" pos="0.350 0.230 0.1725" material="wood_mat"/>
           <geom name="furn_table_leg1" type="cylinder" size="0.03 0.1725" pos="0.350 -0.230 0.1725" material="wood_mat"/>
           <geom name="furn_table_leg2" type="cylinder" size="0.03 0.1725" pos="-0.350 0.230 0.1725" material="wood_mat"/>
           <geom name="furn_table_leg3" type="cylinder" size="0.03 0.1725" pos="-0.350 -0.230 0.1725" material="wood_mat"/>
         </body>
-        <body name="furn_chair0" pos="-1.598 -0.175 0" euler="0 0 4.534">
+        <body name="furn_chair0" pos="-1.338 -1.551 0" euler="0 0 0.091">
           <geom name="furn_chair0_seat" type="box" size="0.16 0.16 0.012" pos="0 0 0.22" material="stripe_mat"/>
           <geom name="furn_chair0_back" type="box" size="0.012 0.16 0.16" pos="-0.15 0 0.39" material="stripe_mat"/>
           <geom name="furn_chair0_leg0" type="cylinder" size="0.018 0.105" pos="0.130 0.130 0.105" material="stripe_mat"/>
@@ -74,7 +75,7 @@
           <geom name="furn_chair0_leg2" type="cylinder" size="0.018 0.105" pos="-0.130 0.130 0.105" material="stripe_mat"/>
           <geom name="furn_chair0_leg3" type="cylinder" size="0.018 0.105" pos="-0.130 -0.130 0.105" material="stripe_mat"/>
         </body>
-        <body name="furn_chair1" pos="1.289 -1.507 0" euler="0 0 0.160">
+        <body name="furn_chair1" pos="-1.254 0.401 0" euler="0 0 2.164">
           <geom name="furn_chair1_seat" type="box" size="0.16 0.16 0.012" pos="0 0 0.22" material="dots_mat"/>
           <geom name="furn_chair1_back" type="box" size="0.012 0.16 0.16" pos="-0.15 0 0.39" material="dots_mat"/>
           <geom name="furn_chair1_leg0" type="cylinder" size="0.018 0.105" pos="0.130 0.130 0.105" material="dots_mat"/>
@@ -82,7 +83,7 @@
           <geom name="furn_chair1_leg2" type="cylinder" size="0.018 0.105" pos="-0.130 0.130 0.105" material="dots_mat"/>
           <geom name="furn_chair1_leg3" type="cylinder" size="0.018 0.105" pos="-0.130 -0.130 0.105" material="dots_mat"/>
         </body>
-        <body name="furn_shelf" pos="1.845 1.054 0" euler="0 0 3.142">
+        <body name="furn_shelf" pos="1.845 -0.798 0" euler="0 0 3.142">
           <geom name="furn_shelf_body" type="box" size="0.12 0.40 0.30" pos="0 0 0.30" material="wood_mat"/>
           <geom name="furn_shelf_book0" type="box" size="0.10 0.05 0.14" pos="0.03 -0.330 0.74" rgba="0.8 0.1 0.1 1"/>
           <geom name="furn_shelf_book1" type="box" size="0.10 0.05 0.14" pos="0.03 -0.200 0.74" rgba="0.1 0.5 0.9 1"/>
@@ -91,87 +92,135 @@
           <geom name="furn_shelf_book4" type="box" size="0.10 0.05 0.14" pos="0.03 0.190 0.74" rgba="0.6 0.2 0.7 1"/>
           <geom name="furn_shelf_book5" type="box" size="0.10 0.05 0.14" pos="0.03 0.320 0.74" rgba="0.9 0.5 0.1 1"/>
         </body>
-        <body name="clock" pos="0.373 -1.955 0.45" euler="0 0 1.571">
+        <body name="clock" pos="0.055 1.955 0.45" euler="0 0 -1.571">
           <geom name="clock_face" type="cylinder" size="0.10 0.008" euler="0 1.5708 0" material="clock_face_mat" contype="0" conaffinity="0"/>
           <body name="clock_hand" pos="0.012 0 0" gravcomp="1">
             <joint name="clock_hand" type="hinge" axis="1 0 0" damping="0" limited="false"/>
             <geom name="clock_hand_geom" type="box" size="0.004 0.006 0.045" pos="0 0 0.045" material="clock_hand_mat" contype="0" conaffinity="0" mass="0.005"/>
           </body>
         </body>
-        <body name="obj_ball0" pos="0.798 0.098 0.059">
+        <body name="obj_ball0" pos="-0.162 -0.636 0.039">
           <freejoint/>
-          <geom name="obj_ball0_geom" type="sphere" size="0.059" material="ball0_mat" mass="0.04" friction="0.6 0.005 0.0001"/>
+          <geom name="obj_ball0_geom" type="sphere" size="0.039" material="ball0_mat" mass="0.04" friction="0.6 0.005 0.0001"/>
         </body>
-        <body name="obj_ball1" pos="1.555 0.187 0.054">
+        <body name="obj_ball1" pos="-1.694 -0.403 0.047">
           <freejoint/>
-          <geom name="obj_ball1_geom" type="sphere" size="0.054" material="ball1_mat" mass="0.04" friction="0.6 0.005 0.0001"/>
+          <geom name="obj_ball1_geom" type="sphere" size="0.047" material="ball1_mat" mass="0.04" friction="0.6 0.005 0.0001"/>
         </body>
-        <body name="obj_block0" pos="0.626 0.924 0.037" euler="0 0 1.496">
+        <body name="obj_block0" pos="1.413 0.036 0.038" euler="0 0 0.328">
           <freejoint/>
-          <geom name="obj_block0_geom" type="box" size="0.037 0.037 0.037" material="block0_mat" mass="0.08" friction="0.5"/>
+          <geom name="obj_block0_geom" type="box" size="0.038 0.038 0.038" material="block0_mat" mass="0.08" friction="0.5"/>
         </body>
-        <body name="obj_block1" pos="-0.294 1.459 0.049" euler="0 0 1.449">
+        <body name="obj_block1" pos="-1.699 -1.246 0.042" euler="0 0 1.129">
           <freejoint/>
-          <geom name="obj_block1_geom" type="box" size="0.049 0.049 0.049" material="block1_mat" mass="0.08" friction="0.5"/>
+          <geom name="obj_block1_geom" type="box" size="0.042 0.042 0.042" material="block1_mat" mass="0.08" friction="0.5"/>
         </body>
-        <geom name="track_sleeper0" type="box" size="0.02 0.035 0.002" pos="-0.845 1.294 0.002" euler="0 0 2.845" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper1" type="box" size="0.02 0.035 0.002" pos="-0.896 1.304 0.002" euler="0 0 3.040" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper2" type="box" size="0.02 0.035 0.002" pos="-0.950 1.304 0.002" euler="0 0 -3.056" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper3" type="box" size="0.02 0.035 0.002" pos="-1.005 1.295 0.002" euler="0 0 -2.882" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper4" type="box" size="0.02 0.035 0.002" pos="-1.060 1.275 0.002" euler="0 0 -2.724" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper5" type="box" size="0.02 0.035 0.002" pos="-1.114 1.246 0.002" euler="0 0 -2.583" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper6" type="box" size="0.02 0.035 0.002" pos="-1.167 1.208 0.002" euler="0 0 -2.455" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper7" type="box" size="0.02 0.035 0.002" pos="-1.217 1.162 0.002" euler="0 0 -2.340" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper8" type="box" size="0.02 0.035 0.002" pos="-1.264 1.108 0.002" euler="0 0 -2.235" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper9" type="box" size="0.02 0.035 0.002" pos="-1.307 1.048 0.002" euler="0 0 -2.137" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper10" type="box" size="0.02 0.035 0.002" pos="-1.344 0.981 0.002" euler="0 0 -2.044" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper11" type="box" size="0.02 0.035 0.002" pos="-1.377 0.911 0.002" euler="0 0 -1.955" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper12" type="box" size="0.02 0.035 0.002" pos="-1.403 0.837 0.002" euler="0 0 -1.867" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper13" type="box" size="0.02 0.035 0.002" pos="-1.422 0.761 0.002" euler="0 0 -1.780" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper14" type="box" size="0.02 0.035 0.002" pos="-1.435 0.684 0.002" euler="0 0 -1.690" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper15" type="box" size="0.02 0.035 0.002" pos="-1.441 0.608 0.002" euler="0 0 -1.598" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper16" type="box" size="0.02 0.035 0.002" pos="-1.439 0.534 0.002" euler="0 0 -1.500" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper17" type="box" size="0.02 0.035 0.002" pos="-1.430 0.463 0.002" euler="0 0 -1.394" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper18" type="box" size="0.02 0.035 0.002" pos="-1.415 0.397 0.002" euler="0 0 -1.279" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper19" type="box" size="0.02 0.035 0.002" pos="-1.392 0.336 0.002" euler="0 0 -1.152" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper20" type="box" size="0.02 0.035 0.002" pos="-1.363 0.281 0.002" euler="0 0 -1.010" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper21" type="box" size="0.02 0.035 0.002" pos="-1.328 0.235 0.002" euler="0 0 -0.852" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper22" type="box" size="0.02 0.035 0.002" pos="-1.288 0.196 0.002" euler="0 0 -0.679" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper23" type="box" size="0.02 0.035 0.002" pos="-1.244 0.166 0.002" euler="0 0 -0.491" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper24" type="box" size="0.02 0.035 0.002" pos="-1.195 0.146 0.002" euler="0 0 -0.296" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper25" type="box" size="0.02 0.035 0.002" pos="-1.144 0.136 0.002" euler="0 0 -0.101" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper26" type="box" size="0.02 0.035 0.002" pos="-1.090 0.135 0.002" euler="0 0 0.086" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper27" type="box" size="0.02 0.035 0.002" pos="-1.036 0.145 0.002" euler="0 0 0.260" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper28" type="box" size="0.02 0.035 0.002" pos="-0.981 0.165 0.002" euler="0 0 0.417" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper29" type="box" size="0.02 0.035 0.002" pos="-0.926 0.194 0.002" euler="0 0 0.559" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper30" type="box" size="0.02 0.035 0.002" pos="-0.874 0.232 0.002" euler="0 0 0.686" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper31" type="box" size="0.02 0.035 0.002" pos="-0.823 0.278 0.002" euler="0 0 0.802" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper32" type="box" size="0.02 0.035 0.002" pos="-0.776 0.332 0.002" euler="0 0 0.907" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper33" type="box" size="0.02 0.035 0.002" pos="-0.734 0.392 0.002" euler="0 0 1.005" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper34" type="box" size="0.02 0.035 0.002" pos="-0.696 0.459 0.002" euler="0 0 1.098" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper35" type="box" size="0.02 0.035 0.002" pos="-0.664 0.529 0.002" euler="0 0 1.187" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper36" type="box" size="0.02 0.035 0.002" pos="-0.638 0.603 0.002" euler="0 0 1.274" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper37" type="box" size="0.02 0.035 0.002" pos="-0.618 0.679 0.002" euler="0 0 1.362" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper38" type="box" size="0.02 0.035 0.002" pos="-0.605 0.756 0.002" euler="0 0 1.451" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper39" type="box" size="0.02 0.035 0.002" pos="-0.600 0.832 0.002" euler="0 0 1.544" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper40" type="box" size="0.02 0.035 0.002" pos="-0.601 0.906 0.002" euler="0 0 1.642" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper41" type="box" size="0.02 0.035 0.002" pos="-0.610 0.977 0.002" euler="0 0 1.747" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper42" type="box" size="0.02 0.035 0.002" pos="-0.626 1.043 0.002" euler="0 0 1.862" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper43" type="box" size="0.02 0.035 0.002" pos="-0.648 1.104 0.002" euler="0 0 1.990" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper44" type="box" size="0.02 0.035 0.002" pos="-0.677 1.159 0.002" euler="0 0 2.131" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper45" type="box" size="0.02 0.035 0.002" pos="-0.712 1.205 0.002" euler="0 0 2.289" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper46" type="box" size="0.02 0.035 0.002" pos="-0.752 1.244 0.002" euler="0 0 2.463" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <geom name="track_sleeper47" type="box" size="0.02 0.035 0.002" pos="-0.796 1.274 0.002" euler="0 0 2.650" material="sleeper_mat" contype="0" conaffinity="0"/>
-        <body name="mov_train0" pos="-0.845 1.294 0.030" euler="0 0 2.845">
+        <geom name="track_sleeper0" type="box" size="0.02 0.05 0.002" pos="-0.000 1.525 0.002" euler="0 0 -3.142" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper1" type="box" size="0.02 0.05 0.002" pos="-0.052 1.522 0.002" euler="0 0 -3.017" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper2" type="box" size="0.02 0.05 0.002" pos="-0.104 1.512 0.002" euler="0 0 -2.896" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper3" type="box" size="0.02 0.05 0.002" pos="-0.156 1.496 0.002" euler="0 0 -2.779" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper4" type="box" size="0.02 0.05 0.002" pos="-0.207 1.473 0.002" euler="0 0 -2.669" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper5" type="box" size="0.02 0.05 0.002" pos="-0.257 1.444 0.002" euler="0 0 -2.567" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper6" type="box" size="0.02 0.05 0.002" pos="-0.306 1.409 0.002" euler="0 0 -2.473" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper7" type="box" size="0.02 0.05 0.002" pos="-0.354 1.368 0.002" euler="0 0 -2.387" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper8" type="box" size="0.02 0.05 0.002" pos="-0.400 1.321 0.002" euler="0 0 -2.308" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper9" type="box" size="0.02 0.05 0.002" pos="-0.444 1.268 0.002" euler="0 0 -2.236" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper10" type="box" size="0.02 0.05 0.002" pos="-0.487 1.210 0.002" euler="0 0 -2.170" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper11" type="box" size="0.02 0.05 0.002" pos="-0.527 1.147 0.002" euler="0 0 -2.110" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper12" type="box" size="0.02 0.05 0.002" pos="-0.566 1.078 0.002" euler="0 0 -2.054" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper13" type="box" size="0.02 0.05 0.002" pos="-0.601 1.006 0.002" euler="0 0 -2.002" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper14" type="box" size="0.02 0.05 0.002" pos="-0.635 0.928 0.002" euler="0 0 -1.953" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper15" type="box" size="0.02 0.05 0.002" pos="-0.665 0.847 0.002" euler="0 0 -1.908" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper16" type="box" size="0.02 0.05 0.002" pos="-0.693 0.762 0.002" euler="0 0 -1.865" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper17" type="box" size="0.02 0.05 0.002" pos="-0.718 0.674 0.002" euler="0 0 -1.824" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper18" type="box" size="0.02 0.05 0.002" pos="-0.739 0.584 0.002" euler="0 0 -1.785" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper19" type="box" size="0.02 0.05 0.002" pos="-0.758 0.490 0.002" euler="0 0 -1.747" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper20" type="box" size="0.02 0.05 0.002" pos="-0.773 0.395 0.002" euler="0 0 -1.710" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper21" type="box" size="0.02 0.05 0.002" pos="-0.785 0.298 0.002" euler="0 0 -1.675" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper22" type="box" size="0.02 0.05 0.002" pos="-0.793 0.199 0.002" euler="0 0 -1.640" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper23" type="box" size="0.02 0.05 0.002" pos="-0.798 0.100 0.002" euler="0 0 -1.605" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper24" type="box" size="0.02 0.05 0.002" pos="-0.800 -0.000 0.002" euler="0 0 -1.571" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper25" type="box" size="0.02 0.05 0.002" pos="-0.798 -0.100 0.002" euler="0 0 -1.536" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper26" type="box" size="0.02 0.05 0.002" pos="-0.793 -0.199 0.002" euler="0 0 -1.502" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper27" type="box" size="0.02 0.05 0.002" pos="-0.785 -0.298 0.002" euler="0 0 -1.467" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper28" type="box" size="0.02 0.05 0.002" pos="-0.773 -0.395 0.002" euler="0 0 -1.431" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper29" type="box" size="0.02 0.05 0.002" pos="-0.758 -0.490 0.002" euler="0 0 -1.395" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper30" type="box" size="0.02 0.05 0.002" pos="-0.739 -0.584 0.002" euler="0 0 -1.357" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper31" type="box" size="0.02 0.05 0.002" pos="-0.717 -0.674 0.002" euler="0 0 -1.318" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper32" type="box" size="0.02 0.05 0.002" pos="-0.693 -0.763 0.002" euler="0 0 -1.277" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper33" type="box" size="0.02 0.05 0.002" pos="-0.665 -0.847 0.002" euler="0 0 -1.234" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper34" type="box" size="0.02 0.05 0.002" pos="-0.635 -0.928 0.002" euler="0 0 -1.188" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper35" type="box" size="0.02 0.05 0.002" pos="-0.601 -1.006 0.002" euler="0 0 -1.140" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper36" type="box" size="0.02 0.05 0.002" pos="-0.566 -1.078 0.002" euler="0 0 -1.088" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper37" type="box" size="0.02 0.05 0.002" pos="-0.527 -1.147 0.002" euler="0 0 -1.032" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper38" type="box" size="0.02 0.05 0.002" pos="-0.487 -1.210 0.002" euler="0 0 -0.971" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper39" type="box" size="0.02 0.05 0.002" pos="-0.444 -1.268 0.002" euler="0 0 -0.905" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper40" type="box" size="0.02 0.05 0.002" pos="-0.400 -1.321 0.002" euler="0 0 -0.833" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper41" type="box" size="0.02 0.05 0.002" pos="-0.354 -1.368 0.002" euler="0 0 -0.755" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper42" type="box" size="0.02 0.05 0.002" pos="-0.306 -1.409 0.002" euler="0 0 -0.668" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper43" type="box" size="0.02 0.05 0.002" pos="-0.257 -1.444 0.002" euler="0 0 -0.574" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper44" type="box" size="0.02 0.05 0.002" pos="-0.207 -1.473 0.002" euler="0 0 -0.472" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper45" type="box" size="0.02 0.05 0.002" pos="-0.156 -1.496 0.002" euler="0 0 -0.362" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper46" type="box" size="0.02 0.05 0.002" pos="-0.104 -1.512 0.002" euler="0 0 -0.246" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper47" type="box" size="0.02 0.05 0.002" pos="-0.052 -1.522 0.002" euler="0 0 -0.124" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper48" type="box" size="0.02 0.05 0.002" pos="0.000 -1.525 0.002" euler="0 0 0.000" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper49" type="box" size="0.02 0.05 0.002" pos="0.052 -1.522 0.002" euler="0 0 0.124" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper50" type="box" size="0.02 0.05 0.002" pos="0.104 -1.512 0.002" euler="0 0 0.246" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper51" type="box" size="0.02 0.05 0.002" pos="0.156 -1.496 0.002" euler="0 0 0.362" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper52" type="box" size="0.02 0.05 0.002" pos="0.207 -1.473 0.002" euler="0 0 0.472" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper53" type="box" size="0.02 0.05 0.002" pos="0.257 -1.444 0.002" euler="0 0 0.574" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper54" type="box" size="0.02 0.05 0.002" pos="0.306 -1.409 0.002" euler="0 0 0.668" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper55" type="box" size="0.02 0.05 0.002" pos="0.354 -1.368 0.002" euler="0 0 0.755" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper56" type="box" size="0.02 0.05 0.002" pos="0.400 -1.321 0.002" euler="0 0 0.833" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper57" type="box" size="0.02 0.05 0.002" pos="0.444 -1.268 0.002" euler="0 0 0.905" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper58" type="box" size="0.02 0.05 0.002" pos="0.487 -1.210 0.002" euler="0 0 0.971" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper59" type="box" size="0.02 0.05 0.002" pos="0.527 -1.147 0.002" euler="0 0 1.032" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper60" type="box" size="0.02 0.05 0.002" pos="0.566 -1.078 0.002" euler="0 0 1.088" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper61" type="box" size="0.02 0.05 0.002" pos="0.601 -1.006 0.002" euler="0 0 1.140" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper62" type="box" size="0.02 0.05 0.002" pos="0.635 -0.928 0.002" euler="0 0 1.188" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper63" type="box" size="0.02 0.05 0.002" pos="0.665 -0.847 0.002" euler="0 0 1.234" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper64" type="box" size="0.02 0.05 0.002" pos="0.693 -0.762 0.002" euler="0 0 1.277" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper65" type="box" size="0.02 0.05 0.002" pos="0.718 -0.674 0.002" euler="0 0 1.318" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper66" type="box" size="0.02 0.05 0.002" pos="0.739 -0.584 0.002" euler="0 0 1.357" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper67" type="box" size="0.02 0.05 0.002" pos="0.758 -0.490 0.002" euler="0 0 1.395" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper68" type="box" size="0.02 0.05 0.002" pos="0.773 -0.395 0.002" euler="0 0 1.431" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper69" type="box" size="0.02 0.05 0.002" pos="0.785 -0.298 0.002" euler="0 0 1.467" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper70" type="box" size="0.02 0.05 0.002" pos="0.793 -0.199 0.002" euler="0 0 1.502" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper71" type="box" size="0.02 0.05 0.002" pos="0.798 -0.100 0.002" euler="0 0 1.536" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper72" type="box" size="0.02 0.05 0.002" pos="0.800 0.000 0.002" euler="0 0 1.571" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper73" type="box" size="0.02 0.05 0.002" pos="0.798 0.100 0.002" euler="0 0 1.605" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper74" type="box" size="0.02 0.05 0.002" pos="0.793 0.199 0.002" euler="0 0 1.640" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper75" type="box" size="0.02 0.05 0.002" pos="0.785 0.298 0.002" euler="0 0 1.675" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper76" type="box" size="0.02 0.05 0.002" pos="0.773 0.395 0.002" euler="0 0 1.710" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper77" type="box" size="0.02 0.05 0.002" pos="0.758 0.490 0.002" euler="0 0 1.747" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper78" type="box" size="0.02 0.05 0.002" pos="0.739 0.584 0.002" euler="0 0 1.785" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper79" type="box" size="0.02 0.05 0.002" pos="0.717 0.674 0.002" euler="0 0 1.824" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper80" type="box" size="0.02 0.05 0.002" pos="0.693 0.763 0.002" euler="0 0 1.865" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper81" type="box" size="0.02 0.05 0.002" pos="0.665 0.847 0.002" euler="0 0 1.908" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper82" type="box" size="0.02 0.05 0.002" pos="0.635 0.928 0.002" euler="0 0 1.953" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper83" type="box" size="0.02 0.05 0.002" pos="0.601 1.006 0.002" euler="0 0 2.002" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper84" type="box" size="0.02 0.05 0.002" pos="0.566 1.078 0.002" euler="0 0 2.054" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper85" type="box" size="0.02 0.05 0.002" pos="0.527 1.147 0.002" euler="0 0 2.110" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper86" type="box" size="0.02 0.05 0.002" pos="0.487 1.210 0.002" euler="0 0 2.170" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper87" type="box" size="0.02 0.05 0.002" pos="0.444 1.268 0.002" euler="0 0 2.236" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper88" type="box" size="0.02 0.05 0.002" pos="0.400 1.321 0.002" euler="0 0 2.308" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper89" type="box" size="0.02 0.05 0.002" pos="0.354 1.368 0.002" euler="0 0 2.387" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper90" type="box" size="0.02 0.05 0.002" pos="0.306 1.409 0.002" euler="0 0 2.473" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper91" type="box" size="0.02 0.05 0.002" pos="0.257 1.444 0.002" euler="0 0 2.567" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper92" type="box" size="0.02 0.05 0.002" pos="0.207 1.473 0.002" euler="0 0 2.669" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper93" type="box" size="0.02 0.05 0.002" pos="0.156 1.496 0.002" euler="0 0 2.779" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper94" type="box" size="0.02 0.05 0.002" pos="0.104 1.512 0.002" euler="0 0 2.896" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <geom name="track_sleeper95" type="box" size="0.02 0.05 0.002" pos="0.052 1.522 0.002" euler="0 0 3.017" material="sleeper_mat" contype="0" conaffinity="0"/>
+        <body name="mov_train0" pos="-0.000 1.525 0.050" euler="0 0 3.142">
           <freejoint/>
-          <geom name="mov_train0_geom" type="box" size="0.06 0.025 0.03" material="train_mat" mass="0.15" friction="0.6"/>
-          <geom name="mov_train0_cab" type="box" size="0.02 0.022 0.015" pos="-0.03 0 0.045" material="train_mat" mass="0.02"/>
+          <geom name="mov_train0_geom" type="box" size="0.09 0.05 0.05" material="train_mat" mass="0.3" friction="0.6"/>
+          <geom name="mov_train0_cab" type="box" size="0.03 0.045 0.02" pos="-0.050 0 0.070" material="train_mat" mass="0.03"/>
         </body>
     </worldbody>
     <keyframe>
-        <key name="INIT" qpos="0 0 0.12 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.798 0.098 0.059 1 0 0 0 1.555 0.187 0.054 1 0 0 0 0.626 0.924 0.037 0.733125 0 0 0.680094 -0.294 1.459 0.049 0.748973 0 0 0.662600 -0.845 1.294 0.030 0.147659 0 0 0.989038" ctrl="0 0 0 0 0 0 0 0 0 0 0 0 0 0"/>
-        <key name="STAND" qpos="0 0 0.12 1 0 0 0 0 -0.0873 -0.5236 0 0.5236 0.3491 -0.3491 0 0 0 0.0873 0.5236 0 -0.5236 0 0.798 0.098 0.059 1 0 0 0 1.555 0.187 0.054 1 0 0 0 0.626 0.924 0.037 0.733125 0 0 0.680094 -0.294 1.459 0.049 0.748973 0 0 0.662600 -0.845 1.294 0.030 0.147659 0 0 0.989038" ctrl="0 -0.0873 -0.5236 0 0.5236 0.3491 -0.3491 0 0 0 0.0873 0.5236 0 -0.5236"/>
-        <key name="SIT" qpos="0 0 0.07 1 0 0 0 0 0 -0.5236 1.0472 0 0.5 1.6 0 0 0 0 0.5236 -1.0472 0 0 0.798 0.098 0.059 1 0 0 0 1.555 0.187 0.054 1 0 0 0 0.626 0.924 0.037 0.733125 0 0 0.680094 -0.294 1.459 0.049 0.748973 0 0 0.662600 -0.845 1.294 0.030 0.147659 0 0 0.989038" ctrl="0 0 -0.5236 1.0472 0 0.5 1.6 0 0 0 0 0.5236 -1.0472 0"/>
-        <key name="FOLD" qpos="0 0 0.07 1 0 0 0 0 0 1.57 1.57 0 1 1 0 0 0 0 -1.57 -1.57 0 0 0.798 0.098 0.059 1 0 0 0 1.555 0.187 0.054 1 0 0 0 0.626 0.924 0.037 0.733125 0 0 0.680094 -0.294 1.459 0.049 0.748973 0 0 0.662600 -0.845 1.294 0.030 0.147659 0 0 0.989038" ctrl="0 0 1.57 1.57 0 1 1 0 0 0 0 -1.57 -1.57 0"/>
+        <key name="INIT" qpos="0 0 0.12 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.162 -0.636 0.039 1 0 0 0 -1.694 -0.403 0.047 1 0 0 0 1.413 0.036 0.038 0.986546 0 0 0.163483 -1.699 -1.246 0.042 0.844818 0 0 0.535054 -0.000 1.525 0.050 -0.000002 0 0 1.000000" ctrl="0 0 0 0 0 0 0 0 0 0 0 0 0 0"/>
+        <key name="STAND" qpos="0 0 0.12 1 0 0 0 0 -0.0873 -0.5236 0 0.5236 0.3491 -0.3491 0 0 0 0.0873 0.5236 0 -0.5236 0 -0.162 -0.636 0.039 1 0 0 0 -1.694 -0.403 0.047 1 0 0 0 1.413 0.036 0.038 0.986546 0 0 0.163483 -1.699 -1.246 0.042 0.844818 0 0 0.535054 -0.000 1.525 0.050 -0.000002 0 0 1.000000" ctrl="0 -0.0873 -0.5236 0 0.5236 0.3491 -0.3491 0 0 0 0.0873 0.5236 0 -0.5236"/>
+        <key name="SIT" qpos="0 0 0.07 1 0 0 0 0 0 -0.5236 1.0472 0 0.5 1.6 0 0 0 0 0.5236 -1.0472 0 0 -0.162 -0.636 0.039 1 0 0 0 -1.694 -0.403 0.047 1 0 0 0 1.413 0.036 0.038 0.986546 0 0 0.163483 -1.699 -1.246 0.042 0.844818 0 0 0.535054 -0.000 1.525 0.050 -0.000002 0 0 1.000000" ctrl="0 0 -0.5236 1.0472 0 0.5 1.6 0 0 0 0 0.5236 -1.0472 0"/>
+        <key name="FOLD" qpos="0 0 0.07 1 0 0 0 0 0 1.57 1.57 0 1 1 0 0 0 0 -1.57 -1.57 0 0 -0.162 -0.636 0.039 1 0 0 0 -1.694 -0.403 0.047 1 0 0 0 1.413 0.036 0.038 0.986546 0 0 0.163483 -1.699 -1.246 0.042 0.844818 0 0 0.535054 -0.000 1.525 0.050 -0.000002 0 0 1.000000" ctrl="0 0 1.57 1.57 0 1 1 0 0 0 0 -1.57 -1.57 0"/>
     </keyframe>
 </mujoco>

@@ -51,38 +51,38 @@
    "name": "furn_table",
    "cls": "static",
    "kind": "table",
-   "x": -1.1169,
-   "y": -1.297,
+   "x": 1.2571,
+   "y": -1.3593,
    "z": 0,
    "extent": 0.45,
-   "yaw": 2.626
+   "yaw": 2.462
   },
   {
    "name": "furn_chair0",
    "cls": "static",
    "kind": "chair",
-   "x": -1.5982,
-   "y": -0.1753,
+   "x": -1.3378,
+   "y": -1.5514,
    "z": 0,
    "extent": 0.22,
-   "yaw": 4.534
+   "yaw": 0.091
   },
   {
    "name": "furn_chair1",
    "cls": "static",
    "kind": "chair",
-   "x": 1.2886,
-   "y": -1.5068,
+   "x": -1.2535,
+   "y": 0.4006,
    "z": 0,
    "extent": 0.22,
-   "yaw": 0.16
+   "yaw": 2.164
   },
   {
    "name": "furn_shelf",
    "cls": "static",
    "kind": "shelf",
    "x": 1.845,
-   "y": 1.054,
+   "y": -0.7981,
    "z": 0,
    "extent": 0.45,
    "wall": "px"
@@ -91,70 +91,75 @@
    "name": "clock",
    "cls": "self_changing",
    "kind": "clock",
-   "x": 0.373,
-   "y": -1.955,
+   "x": 0.0548,
+   "y": 1.955,
    "z": 0.45,
    "extent": 0.1,
-   "wall": "ny"
+   "wall": "py"
   },
   {
    "name": "obj_ball0",
    "cls": "movable",
    "kind": "ball",
-   "x": 0.7976,
-   "y": 0.0976,
-   "z": 0.0592,
-   "extent": 0.0592
+   "x": -0.1618,
+   "y": -0.6357,
+   "z": 0.0392,
+   "extent": 0.0392
   },
   {
    "name": "obj_ball1",
    "cls": "movable",
    "kind": "ball",
-   "x": 1.5554,
-   "y": 0.1872,
-   "z": 0.0541,
-   "extent": 0.0541
+   "x": -1.6941,
+   "y": -0.4034,
+   "z": 0.0468,
+   "extent": 0.0468
   },
   {
    "name": "obj_block0",
    "cls": "movable",
    "kind": "block",
-   "x": 0.6259,
-   "y": 0.9236,
-   "z": 0.0369,
-   "extent": 0.0369,
-   "yaw": 1.496
+   "x": 1.4133,
+   "y": 0.0358,
+   "z": 0.0384,
+   "extent": 0.0384,
+   "yaw": 0.328
   },
   {
    "name": "obj_block1",
    "cls": "movable",
    "kind": "block",
-   "x": -0.2937,
-   "y": 1.4588,
-   "z": 0.0485,
-   "extent": 0.0485,
-   "yaw": 1.449
+   "x": -1.6989,
+   "y": -1.2457,
+   "z": 0.0421,
+   "extent": 0.0421,
+   "yaw": 1.129
   },
   {
    "name": "mov_train0",
    "cls": "self_moving",
    "kind": "train",
-   "x": -0.8449,
-   "y": 1.2938,
-   "z": 0.03,
-   "extent": 0.12,
-   "yaw": 2.845,
+   "x": -0.0,
+   "y": 1.525,
+   "z": 0.05,
+   "extent": 0.18,
+   "yaw": 3.142,
    "path": [
-    -1.0201,
-    0.72,
-    0.6,
-    0.4,
-    1.2744
+    0.0,
+    0.0,
+    1.525,
+    0.8,
+    1.5708
    ],
-   "perimeter": 3.173
+   "perimeter": 7.483,
+   "size": [
+    0.18,
+    0.1,
+    0.14
+   ]
   }
  ],
- "xml_sha256": "847b85e86d00bb77",
+ "xml_sha256": "170c5230fc1f52a7",
  "free_bodies": [
   "obj_ball0",
   "obj_ball1",

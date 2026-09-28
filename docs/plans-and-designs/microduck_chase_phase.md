@@ -53,15 +53,19 @@ what makes a thing a target; the kind vocabulary can label it afterwards so a kn
 
 Built 2026-09-27, off by default, the plain playroom byte-identical (`playroom_gen.py` regenerates it unchanged):
 
-- **`playroom_gen.py --train`** adds `mov_train0` — a box 12 × 5 × 6 cm, inside the stack rule's small-thing
-  band, so a *stopped* train is a thing the existing vocabulary sees — on an oval track placed last on the free
-  floor (0.35 m from the walls, 0.25 m from everything but the rug, clear of the duck's start), and writes the
-  track into the scene as `<custom><numeric name="train_path">` = [cx, cy, a, b, yaw]. The sleepers are
-  non-colliding and 4 mm tall: floor to the ToF. The seed-1 room's track: centre (−1.02, +0.72), 0.60 × 0.40 m,
-  perimeter 3.17 m (`scene_playroom_train.xml`). With the train the **rug lies in the middle of the floor**, around
-  the duck's start (the operator, after stage 0: under the track it z-fought the sleepers); the seed's random draw
-  and keep-out for it are kept, so every other placement is the plain room's, and the track is the same one stage 0
-  measured.
+- **`playroom_gen.py --train`** adds `mov_train0` on an oval track and writes the track into the scene as
+  `<custom><numeric name="train_path">` = [cx, cy, a, b, yaw] (and `train_z`). The sleepers are non-colliding and
+  4 mm tall: floor to the ToF. **Two rooms have existed.** Stages 0 and 1 (R84–R89) were measured on the *first*:
+  a 12 × 5 × 6 cm train on a 0.60 × 0.40 m oval placed last on the free floor in the room's −x +y corner
+  (perimeter 3.17 m), the rug moved to the middle of the floor after stage 0. **The second, from the operator's
+  eye on R89 ("the robot is not really interacting with the train at all… make the track larger, wider and longer;
+  it can stretch almost the entire distance between the green wall and the wall across from it; make the train
+  itself larger, similar to the purple block"): the track is laid FIRST, centred on the room with its long axis
+  along y (the green wall is +y), 1.52 × 0.80 m to 0.45 m of the walls, perimeter 7.48 m; the train a block-sized
+  18 × 10 × 10 cm box; the furniture and the things are placed clear of the track (0.25 m), so the train room's
+  small things land elsewhere than the plain room's; the rug lies inside the oval around the duck's start.** The
+  track draws no random numbers, so the plain playroom stays byte-identical. Why the train and not the ball, in
+  the operator's words: a regular schedule, a known velocity, and control by the seed.
 - **`--train SPEED RUN_S STOP_S`** drives it kinematically (pose and velocity written every tick, so contacts
   meet a mover that does not yield) at SPEED for RUN_S, still for STOP_S, repeating; the phase of the schedule
   and the start along the track follow the **seed** (six seeds meet it at six points of the cycle) unless

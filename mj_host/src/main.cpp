@@ -1566,16 +1566,17 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     TrackPath track;
     double train_s = 0.0, train_x = 0.0, train_y = 0.0, train_yaw = 0.0, train_vx = 0.0, train_vy = 0.0;
     bool train_moving = false;
-    double train_phase = 0.0;
+    double train_phase = 0.0, train_z = 0.03;
     if (train_on) {
         const auto v = body.numeric("train_path");
         if (v.size() < 5) throw std::runtime_error("--train: the scene has no train_path (generate it with playroom_gen.py --train)");
         track.build(v);
+        { const auto z = body.numeric("train_z"); if (!z.empty()) train_z = z[0]; }   // the body's rest height (its half height)
         const double cycle = g_train.run_s + g_train.stop_s;
         train_phase = g_train.phase_s >= 0.0 ? g_train.phase_s : double(seed % 6) * cycle / 6.0;
         train_s = g_train.phase_s >= 0.0 ? 0.0 : double(seed % 6) * track.length / 6.0;
         track.at(train_s, train_x, train_y, train_yaw);
-        body.place_free_body("mov_train0", train_x, train_y, 0.03, train_yaw, 0.0, 0.0, 0.0);
+        body.place_free_body("mov_train0", train_x, train_y, train_z, train_yaw, 0.0, 0.0, 0.0);
         std::fprintf(stderr, "  train: %.2f m/s, runs %.0f s / stops %.0f s (cycle %.0f s), track centre (%.2f, %.2f) %.2f x %.2f m yaw %.2f, "
                              "perimeter %.2f m; phase %.1f s, start %.2f m along (seed %llu)\n",
                      g_train.speed, g_train.run_s, g_train.stop_s, cycle, track.cx, track.cy, track.a, track.b, track.yaw,
@@ -1868,7 +1869,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             // the yaw rate along the track, for contacts: the heading change per metre times the speed
             double dyaw = nyaw - train_yaw; while (dyaw > M_PI) dyaw -= 2.0 * M_PI; while (dyaw < -M_PI) dyaw += 2.0 * M_PI;
             train_x = nx; train_y = ny; train_yaw = nyaw;
-            body.place_free_body("mov_train0", train_x, train_y, 0.03, train_yaw, train_vx, train_vy, train_moving ? dyaw * kBrainHz : 0.0);
+            body.place_free_body("mov_train0", train_x, train_y, train_z, train_yaw, train_vx, train_vy, train_moving ? dyaw * kBrainHz : 0.0);
         }
         // The body predictor: observe every tick, frozen, so a stumble has somewhere to register.
         // Skipped while the joint brain already drives (StopPhase::Brain ticks it itself below).

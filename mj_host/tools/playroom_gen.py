@@ -14,13 +14,14 @@ Its objects are sorted by the only thing the brain can see — how they change:
   self-moving         a toy train on a closed track (--train)    (the host drives it: --train SPEED RUN STOP)
   operator-moved      any of the above, via the host's --move    (the (d) test)
 
---train (chasing moving things, stage 0, 2026-09-27) adds `mov_train0`, a toy-engine-sized box on an oval
-track placed LAST, on floor that everything else left free (0.35 m from the walls, 0.25 m from every placed
-thing, the rug included, clear of the duck's start); the rug itself moves to the middle of the floor, and writes the track as <custom><numeric name="train_path"> = [cx, cy,
-a, b, yaw] so the host reads the geometry from the scene it loads.  The room before the train is the same
-room the seed gives without it (the train draws no random numbers until everything else is placed).  Its
-height (6 cm) and footprint (12 x 5 cm) sit inside CloudMap's small-thing band, so a STOPPED train is a
-thing the existing vocabulary sees; the sleepers are non-colliding and 4 mm tall, floor to the ToF.
+--train (chasing moving things, 2026-09-27; redesigned the same night on the operator's eye) adds `mov_train0`,
+a block-sized box (18 x 10 x 10 cm) on an oval track laid FIRST: centred on the room, its long axis along y (from
+near the green wall to near the wall across), TRACK_WALL_CLEAR of the walls, TRACK_HALF_WIDTH wide; the furniture
+and the things are then placed clear of it (TRACK_CLEAR), the rug lies in the middle of the floor inside it, and
+the track is written as <custom><numeric name="train_path"> = [cx, cy, a, b, yaw] (and train_z) so the host reads
+the geometry from the scene it loads.  The track draws no random numbers, so the plain room stays byte-identical;
+the train room's small things land elsewhere than the plain room's.  A STOPPED train sits inside CloudMap's
+small-thing band (top 10 cm < 16); the sleepers are non-colliding and 4 mm tall, floor to the ToF.
 
 Rules the generator keeps (plan §5.3, §5.5):
   * everything is placed from --seed and written to <out>.manifest.json; the host and the
@@ -82,6 +83,15 @@ SENSOR_LINE_NEW = ('<accelerometer name="imu_accel" site="imu"/>\n'
 WALL_H = 1.00          # m (operator, 2026-09-10: raised from the arena's 0.3 so the camera sees room, not sky)
 WALL_T = 0.025
 DUCK_KEEPOUT = 0.55    # m around the origin kept clear: the duck starts at (0, 0) facing +x
+# The train's track (--train, redesigned 2026-09-27 on the operator's eye: "make the track larger, wider and longer;
+# it can stretch almost the entire distance between the green wall and the wall across from it; make the train
+# itself larger, similar to the purple block"): an oval centred on the room, its long axis along y (the green wall
+# is +y), reaching to TRACK_WALL_CLEAR of the walls, laid BEFORE the furniture and the things so they are placed
+# around it; the train a box the size of a block.  The plain room draws no random numbers for it and stays the same.
+TRACK_WALL_CLEAR = 0.45   # m from the walls to the track's far ends
+TRACK_HALF_WIDTH = 0.80   # m, the oval's short semi-axis (along x)
+TRACK_CLEAR = 0.25        # m kept clear on either side of the track when the room is placed
+TRAIN_HALF = (0.09, 0.05, 0.05)   # the train's box, half sizes (18 x 10 x 10 cm: a block's height and width)
 
 
 def write_robot_overlay():
@@ -120,6 +130,7 @@ class Room:
         self.n_balls, self.n_blocks, self.n_chairs = n_balls, n_blocks, n_chairs
         self.with_train = train
         self.train_path = None   # [cx, cy, a, b, yaw] once placed
+        self.track_pts = []      # points along the track, for the keep-out of everything placed after it
         self.custom = []         # <custom> numeric lines
         self.assets = []       # xml lines
         self.world = []        # xml lines
@@ -137,6 +148,8 @@ class Room:
             x, y = self.rng.uniform(-lim, lim), self.rng.uniform(-lim, lim)
             if math.hypot(x, y) < DUCK_KEEPOUT + radius:
                 continue
+            if self.track_pts and any(math.hypot(x - tx, y - ty) < radius + TRACK_CLEAR for tx, ty in self.track_pts):
+                continue   # the train's track was laid first (--train): nothing stands on or beside it
             if all(math.hypot(x - px, y - py) > radius + pr + margin for px, py, pr in self.placed):
                 self.placed.append((x, y, radius))
                 return x, y
@@ -297,37 +310,23 @@ class Room:
         self.qpos_layout.append((f"obj_block{i}", "free"))
         self.record(f"obj_block{i}", "movable", "block", x, y, s, s, yaw=round(yaw, 3))
 
+    def lay_track(self):
+        """The oval, before anything is placed: centred on the room, long axis along y, to TRACK_WALL_CLEAR of the walls."""
+        a = self.half - WALL_T - TRACK_WALL_CLEAR
+        b = min(TRACK_HALF_WIDTH, a)
+        cx, cy, yaw = 0.0, 0.0, math.pi / 2          # the +a end at +y: the green wall's side
+        self.train_path = [cx, cy, round(a, 4), round(b, 4), round(yaw, 4)]
+        self.track_pts = []
+        for i in range(160):
+            th = 2 * math.pi * i / 160
+            lx, ly = a * math.cos(th), b * math.sin(th)
+            self.track_pts.append((cx + math.cos(yaw) * lx - math.sin(yaw) * ly, cy + math.sin(yaw) * lx + math.cos(yaw) * ly))
+
     def train(self):
-        """The toy train and its oval track, placed after everything else on the free floor."""
+        """The sleepers and the train body, emitted after the things so the free bodies' qpos order is the worldbody's."""
         W = self.world.append
-        lim = self.half - WALL_T - 0.35
-        # the keep-outs of everything real: the seed's rug entry stands for empty floor now, the rug lies at rug_xy
-        solid = [q for q in self.placed if q != self.rug_drawn] + [(self.rug_xy[0], self.rug_xy[1], 0.5)]
-        fit = None
-        for a, b in ((0.9, 0.55), (0.8, 0.5), (0.7, 0.45), (0.6, 0.4), (0.5, 0.35)):
-            for _ in range(1500):
-                cx, cy = self.rng.uniform(-lim + a, lim - a), self.rng.uniform(-lim + a, lim - a)
-                yaw = self.rng.uniform(0, math.pi)
-                ok = True
-                for i in range(64):
-                    th = 2 * math.pi * i / 64
-                    lx, ly = a * math.cos(th), b * math.sin(th)
-                    x = cx + math.cos(yaw) * lx - math.sin(yaw) * ly
-                    y = cy + math.sin(yaw) * lx + math.cos(yaw) * ly
-                    if abs(x) > lim or abs(y) > lim or math.hypot(x, y) < DUCK_KEEPOUT + 0.15:
-                        ok = False; break
-                    if any(math.hypot(x - px, y - py) < pr + 0.25 for px, py, pr in solid):
-                        ok = False; break
-                if ok:
-                    fit = (cx, cy, a, b, yaw); break
-            if fit:
-                break
-        if not fit:
-            sys.exit("could not place the train's track on the free floor (try another seed or fewer chairs)")
-        cx, cy, a, b, yaw = fit
-        self.train_path = [round(v, 4) for v in fit]
-        # the sleepers: 48 flat, non-colliding boxes along the ellipse, for the eye; floor to the ToF
-        n = 48
+        cx, cy, a, b, yaw = self.train_path
+        n = 96
         for i in range(n):
             th = 2 * math.pi * i / n
             lx, ly = a * math.cos(th), b * math.sin(th)
@@ -335,33 +334,36 @@ class Room:
             y = cy + math.sin(yaw) * lx + math.cos(yaw) * ly
             tx, ty = -a * math.sin(th), b * math.cos(th)
             tyaw = math.atan2(math.sin(yaw) * tx + math.cos(yaw) * ty, math.cos(yaw) * tx - math.sin(yaw) * ty)
-            W(f'<geom name="track_sleeper{i}" type="box" size="0.02 0.035 0.002" pos="{x:.3f} {y:.3f} 0.002" euler="0 0 {tyaw:.3f}" '
+            W(f'<geom name="track_sleeper{i}" type="box" size="0.02 0.05 0.002" pos="{x:.3f} {y:.3f} 0.002" euler="0 0 {tyaw:.3f}" '
               'material="sleeper_mat" contype="0" conaffinity="0"/>')
-        # the train at the track's origin (arc length 0: the +a end), facing along the track
+        hx, hy, hz = TRAIN_HALF
         x0 = cx + math.cos(yaw) * a
         y0 = cy + math.sin(yaw) * a
         yaw0 = yaw + math.pi / 2
-        W(f'<body name="mov_train0" pos="{x0:.3f} {y0:.3f} 0.030" euler="0 0 {yaw0:.3f}">')
+        W(f'<body name="mov_train0" pos="{x0:.3f} {y0:.3f} {hz:.3f}" euler="0 0 {yaw0:.3f}">')
         W('  <freejoint/>')
-        W('  <geom name="mov_train0_geom" type="box" size="0.06 0.025 0.03" material="train_mat" mass="0.15" friction="0.6"/>')
-        W('  <geom name="mov_train0_cab" type="box" size="0.02 0.022 0.015" pos="-0.03 0 0.045" material="train_mat" mass="0.02"/>')
+        W(f'  <geom name="mov_train0_geom" type="box" size="{hx} {hy} {hz}" material="train_mat" mass="0.3" friction="0.6"/>')
+        W(f'  <geom name="mov_train0_cab" type="box" size="0.03 {hy - 0.005:.3f} 0.02" pos="{-(hx - 0.04):.3f} 0 {hz + 0.02:.3f}" material="train_mat" mass="0.03"/>')
         W('</body>')
-        self.free_bodies.append(("mov_train0", x0, y0, 0.03, yaw0))
+        self.free_bodies.append(("mov_train0", x0, y0, hz, yaw0))
         self.qpos_layout.append(("mov_train0", "free"))
         self.custom.append(f'<numeric name="train_path" data="{cx:.4f} {cy:.4f} {a:.4f} {b:.4f} {yaw:.4f}"/>')
+        self.custom.append(f'<numeric name="train_z" data="{hz:.4f}"/>')
         per = 0.0
         px, py = a, 0.0
         for i in range(1, 721):
             th = 2 * math.pi * i / 720
             x, y = a * math.cos(th), b * math.sin(th)
             per += math.hypot(x - px, y - py); px, py = x, y
-        self.record("mov_train0", "self_moving", "train", x0, y0, 0.03, 0.12, yaw=round(yaw0, 3),
-                    path=self.train_path, perimeter=round(per, 3))
+        self.record("mov_train0", "self_moving", "train", x0, y0, hz, 2 * hx, yaw=round(yaw0, 3),
+                    path=self.train_path, perimeter=round(per, 3), size=[2 * hx, 2 * hy, 2 * hz + 0.04])
 
     # ---- assembly ----------------------------------------------------------------------
     def build(self):
         self.textures()
         self.walls()
+        if self.with_train:
+            self.lay_track()
         self.rug()
         self.table()
         for i in range(self.n_chairs):
