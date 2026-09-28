@@ -52,8 +52,8 @@ connectors** — which, as it happens, it all does.
 
 | # | item | qty | note |
 |---|---|---|---|
-| 6 | FSR divider resistor `R_g` | 4 | **value is set by measurement, not chosen** — §5. Buy an assortment (1 kΩ–100 kΩ, 1 % metal film) and fit after measuring |
-| 7 | **ADC input cap `C`** | 4 | **value is set by `R_g`, not chosen** — §5.2. Buy a range (0.1 / 0.47 / 1.0 / 2.2 / 10 µF, X7R or better) and fit after `R_g` is measured. One across each ADC input to ground, at the connector |
+| 6 | FSR divider resistor `R_g` | 4 | ✅ **MEASURED 11 kΩ** (2026-09-28, §5.6) — lands the calibration point at exact mid-scale. 10 k or 12 k if 11 k is not in the assortment; 1 % metal film |
+| 7 | **ADC input cap `C`** | 4 | ✅ **1.5 µF** at the 50 Hz tick (2026-09-28, §5.6), X7R or better, across each ADC input to ground at the connector. ⚠ **1.0 µF does not filter** — 28.9 Hz against a 25 Hz Nyquist. 6.8 µF if the read ever stays at 10 Hz |
 
 ### Connectors and cable
 
@@ -712,8 +712,8 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 | **E1** ✅ | **Meter the ADC connector** | a meter | ✅ **DONE 2026-09-27 — VCC is 3.3 V, labelled on the PCB**, so the divider's top rail is the connector itself. Pin order still to be read off the same silkscreen |
 | **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
 | **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
-| **E3** ✅ | **Bench `R_fsr` vs mass, bare sensor**, loaded through a flat Ø5.5 puck proxy at 0 / 50 / 100 / 175 / 300 / 590 g. **Ohmmeter — this is the one step that is the meter's** (§5.5) | FSR, masses, DMM | the **decade** `R_g` will land in, so the right resistors and caps can be bought. ⚠ Not the final value — backing stiffness and puck geometry change it, so §5's in-situ measurement still governs |
-| **E4** | `R_g` = `R_fsr`(175 g) **in the assembled foot**, read off the ADC through a trial `R_g` (§5.5), not off a meter; then `C` from the §5.2 table | a finished foot | `R_fsr` at 175 g for all four feet, with the creep transient visible in the log. Median sets `R_g` |
+| ~~E3~~ | ~~bare-sensor bench estimate~~ | — | **skipped — overtaken by E4**, which the operator ran directly on the real assembly (§5.6). Better measurement, so the decade step was never needed |
+| **E4** ✅ | `R_g` = `R_fsr`(175 g) **in the assembled foot** | a finished foot, masses, scale, DMM | ✅ **DONE 2026-09-28 (§5.6): 11 kΩ → `C` = 1.5 µF.** One foot. ⚠ **Repeat on the other three** — `R_g` is one value for all four channels, so it comes from their median (§5.5) |
 | **E5** | Wire one foot, confirm counts rise monotonically with the mass series, then the other three | — | §6 step 5 |
 
 **Reading the records:** `pi_host/tools/adc_fast_report.py` (newest log by default, `--fft`
@@ -780,117 +780,112 @@ their `R_fsr`(175 g), never foot #1's number.
   its magnetometer is unused today, which is precisely how a stray field becomes a silent
   confound the day someone switches it on.
 
-### 5.6 ✅ Measured 2026-09-27 — `R_g` = 15 kΩ, `C` = 1.0 µF
+### 5.6 ✅ MEASURED 2026-09-28 — `R_g` = 11 kΩ, `C` = 1.5 µF
 
-**Method (operator): not the bare-sensor bench test E3 specified — the real thing.** The
-assembled foot/toe with its **spherical bump**, on the **real leg**, robot on the short stand
-with the servos **unpowered**, leg angled so the foot presses down onto a digital scale, and
-the load set by adding magnets to the leg and moving them until the scale read the target.
+**Method (operator): the real assembly, not a bench proxy.** Foot/toe **glued to the real
+leg**, robot on the short stand, servos unpowered, leg angled so the foot presses down onto a
+digital scale, load set by adding magnets to the leg until the scale read the target. ✅ The
+magnets were checked against the scale and do not affect it.
 
-**That is better than the planned E3 and it is really E4**: the scale reads the force the foot
-actually applies, through the real load path and the real actuator, so `R_g` below is the
-in-situ number §5 asks for rather than a decade estimate. Three caveats come with the method,
-in §5.6.1.
+The scale reads the force the foot actually applies, through the real load path and the real
+actuator, so this is the in-situ measurement §5 asks for.
 
-Resistance settled at each mass. **Counts are computed for
-`R_g` = 15 kΩ** (the nearest standard value to the 14.2 kΩ read at the calibration point):
-
-| mass | `R_fsr` | counts | local `n` | counts/g |
+| mass | `R_fsr` | counts @ `R_g` = 11 k | local `n` | counts/g |
 |---|---|---|---|---|
-| 20 g | 75 k → **92.5 k** (rose, then steady) | 571 | — | — |
-| 50 g | **30.0 k** | 1365 | 1.23 | 26.5 |
-| 100 g | 35 k → **33.0 k** | 1280 | **−0.14** ⚠ | **−1.7** ⚠ |
-| 175 g | **14.2 k** steady | 2104 | 1.51 | 11.0 |
-| 300 g | 13.5 k → **11.0 k** | 2362 | 0.47 | 2.1 |
-| 500 g | **10.5 k** | 2409 | 0.09 | 0.2 |
+| 30 g | 25.0 k | 1251 | — | — |
+| 50 g | 17.0 k | 1609 | 0.75 | 17.9 |
+| 100 g | 14.0 k | 1802 | 0.28 | 3.9 |
+| **175 g** | **11.0 k** | **2048** | 0.43 | 3.3 |
+| 300 g | 8.6 k | 2298 | 0.46 | 2.0 |
+| 500 g | 6.0 k | 2650 | 0.70 | 1.8 |
 
-`n` is the local power-law exponent, `R ∝ F⁻ⁿ`. Overall 20 → 500 g it is **0.68**, which is
-an ordinary FSR; the interest is in how unevenly it is spread.
+`n` is the local power-law exponent `R ∝ F⁻ⁿ`; overall it is **0.51**.
 
-**What this settles.** `R_fsr`(175 g) = 14.2 kΩ → **`R_g` = 15 kΩ**, 6 % off the ideal and
-worth 99.9 % of peak sensitivity (§5.5). `Z_src` is then 7.5 kΩ loaded and 15 kΩ unloaded,
-so from §5.2:
+**The components this settles:**
 
-| sampling | target f_c | **`C`** |
+| | value | why |
 |---|---|---|
-| 50 Hz tick (`adc.rate`) | 22.5 Hz | **1.0 µF** |
-| 10 Hz frame, if the read never moves | 4.5 Hz | **4.7 µF** |
+| **`R_g`** | **11 kΩ** | = `R_fsr`(175 g), which lands the calibration point at **2048 counts — exact mid-scale**. 10 k or 12 k cost nothing if 11 k is not in the assortment (§5.5) |
+| **`C`** | **1.5 µF** | `Z_src` = 5.5 kΩ loaded → f_c 19.3 Hz, τ 8.2 ms ≈ 0.43 tick. **1.0 µF gives 28.9 Hz, which is above the 25 Hz Nyquist and does not filter**; 2.2 µF works but costs 0.63 tick |
+| if the read stays at 10 Hz | 6.8 µF | f_c 4.5 Hz |
 
-**The 0.1 µF in the original BOM is 10× too small**, exactly as §5.2 predicted for a `R_g` in
-the 10 kΩ decade. Divider current is 110 µA per foot, 440 µA for four — no constraint. And
-`Z_src` peaking at 15 kΩ is a modest impedance, so **E2's unity-gain-buffer contingency is
-unlikely to be needed**; E2 still has to say so rather than be assumed.
+**Where the published channel lands**, extrapolating the top segment at `n` = 0.70:
 
-### 5.6.1 ⚠ What the method puts into the numbers
-
-**1. `R_g` and `C` are hostage to the bump decision.** These are the values for the **spherical
-bump**. Flattening it (§3.2) spreads the same force from a sub-millimetre patch to ~19.6 mm² —
-a contact area two to three orders larger — and FSR conductance follows area, so `R_fsr` at
-175 g will move, probably **well below** 14.2 kΩ. **Do not fit `R_g` or buy `C` until the bump
-geometry is settled**; the two decisions are one decision. Re-run this same measurement on the
-flat-bump toe and take the values from that.
-
-**2. ⚠ The channel is an AXIAL force sensor and the scale reads VERTICAL.** The bump presses
-along the foot's axis and tangential load bypasses the film entirely through the boss/bore
-bearing (§2), so the FSR sees `F·cos θ` with θ the angle between the lower leg and vertical,
-while the scale reads `F`. They agree only when the leg is vertical. **The sim's `foot_load` is
-a contact normal force, so this is a real sim-to-real gap, not a calibration constant** — at
-the standing pose (~10° from vertical) it is 1.5 %, but a gait sweeping to 30° makes it 13 %,
-on a channel whose graded term carries weight 1.0. θ is computable from the servo commands via
-`LegKinematics`, so the fix is the usual one: **publish the factor beside the reading** rather
-than let a consumer assume the two are the same quantity. Record the leg angle used for the
-calibration either way.
-
-**3. ⚠⚠ The unpowered leg probably sagged, and it would flatten the curve exactly where the
-curve flattens.** Static torque at hip2, taking the lever as `L2` = 48 mm with the upper leg
-horizontal:
-
-| load | force | torque at hip2 |
+| state | `foot_load` | counts |
 |---|---|---|
-| 100 g | 0.98 N | 0.047 N·m |
-| **175 g** | 1.72 N | **0.082 N·m** |
-| 300 g | 2.94 N | 0.141 N·m |
-| 500 g | 4.91 N | **0.235 N·m** |
+| swing leg (`R_fsr` ~ MΩ) | 0 | **45** |
+| stance threshold (118 g) | 0.20 | **1632** |
+| four feet down (148 g) | 0.25 | ~1850 |
+| calibration point (175 g) | 0.30 | 2048 |
+| single-leg support (590 g) | 1.00 | 2757 |
+| software clamp (1180 g) | 2.00 | 3155 |
 
-An MG90S stalls around **0.18–0.22 N·m powered**, and unpowered it holds only gearbox friction —
-far less. So the pose was very likely giving way from somewhere around 175 g, and as it gives
-way θ grows, which reduces the axial fraction the sensor sees while the scale reading is held
-constant by adding magnets. **That is a flattening with the same signature as sensor saturation,
-and it starts at the same load.** Correlation, not proof — the lever arm is an estimate and the
-pose is not recorded — but it has to be ruled out before the flattening is attributed to
-anything else.
+**Swing to stance is 45 → 1632 counts, a factor of 36.** The promoted `foot_load ≥ ~0.2` gate
+has no resolution problem whatever the noise floor turns out to be.
 
-**To separate them:** brace the leg so the geometry cannot move, mark the joint positions, and
-confirm they are unchanged at 20 g and at 500 g. If the pose holds and the curve still flattens,
-the flattening is real and belongs to the bump or the part.
+### 5.6.1 ✅ The flat bump fixed the curve — but two things changed at once
 
-### 5.6.2 ⚠ Two things in the data are not yet understood, and neither is a verdict on the sensor
+Against the spherical-bump run of 2026-09-27 (§5.6.2), on the same masses:
 
-**1. 100 g reads higher than 50 g.** A 10 % inversion, and the channel is non-monotone across
-it — which would make `counts → grams` unfittable in that region if it were real. It is very
-probably **creep timing rather than force**: the same run shows 13.5 k → 11.0 k at 300 g, an
-18 % fall *during a single reading*, which is larger than the inversion. A point read early
-and a point read late are not on the same curve. **The fix is protocol, not parts: a fixed
-dwell — place, wait T, read — identical at every mass, with T recorded.** Re-run 50 g and
-100 g that way before fitting anything.
+| segment | spherical `n` | **flat `n`** |
+|---|---|---|
+| 50 → 100 g | **−0.14** (non-monotone) | 0.28 |
+| 100 → 175 g | 1.51 | 0.43 |
+| 175 → 300 g | 0.47 | 0.46 |
+| 300 → 500 g | **0.09** (collapsed) | **0.70** |
 
-**2. The curve flattens hard above 175 g:** `n` falls 1.51 → 0.47 → 0.09, and 300 → 500 g
-moves the channel 47 counts. **Three candidates, and the harness is one of them:** the
-spherical bump saturating its contact area (the §3.2 prediction), the pose sagging under an
-unpowered servo (§5.6.1 item 3), or the part itself compressing. The actuator *is* now known —
-the spherical bump — so the §3.2 prediction is live rather than hypothetical, but a brace and
-a repeat is what separates it from the harness. **The A/B is cheap: same masses, flat-bump toe,
-compare `n` above 175 g.**
+**Both faults are gone.** The curve is monotone, and the top-end collapse that made 300 → 500 g
+worth 47 counts is replaced by a segment that holds sensitivity to the end of the range —
+1.8 counts/g at 500 g against 0.23 before.
 
-**Where it leaves the gait.** The band that matters is 148–197 g (four feet down to three),
-which lands at **~2100 counts — mid-scale — at 2 to 11 counts per gram**, and the stance
-threshold (`foot_load` ≥ 0.2, 118 g) sits around 1500. The steep part of this sensor is under
-the light loads the gait actually spends its time at, and the compressed part is above them.
-That is the right way round for the `unloaded` term and the G2 per-leg minima guard, both of
-which read the light end.
+⚠ **Two variables changed together: the bump was flattened AND the foot was glued to the leg.**
+By the one-lever rule this does not attribute the improvement, and it should not be written up
+as the flat bump having been proven. What it does do is make the flat bump the shipping choice
+on evidence plus the §3.2 argument, rather than on the argument alone.
 
-⚠ These are **in-situ numbers for the spherical-bump toe**, which is the right basis — and
-exactly why they do not survive the bump change (§5.6.1 item 1).
+**What the pairing does settle, by elimination:** §5.6.2 item 3 proposed that the old top-end
+collapse was the **unpowered leg sagging** as hip2 torque passed an MG90S's holding limit. The
+torques are unchanged here — same masses, same unpowered servos, same pose — and the collapse
+is gone. **So sag was not the cause.** That leaves the bump's contact saturation and a foot
+slipping on an unglued leg joint, both of which this build has fixed.
+
+⚠ **Still open, and unaffected by any of this: the axial-vs-vertical gap.** The bump presses
+along the foot's axis and tangential load bypasses the film through the boss/bore bearing, so
+the FSR sees `F·cos θ` while the scale reads `F`. The sim's `foot_load` is a contact normal
+force. 1.5 % at the standing pose, 13 % at a 30° sweep, on a channel whose graded term carries
+weight 1.0. θ is computable from the servo commands via `LegKinematics`, so publish the factor
+beside the reading rather than let a consumer assume the two are the same quantity. **Record
+the leg angle this calibration was taken at.**
+
+⚠ **And FSR creep is still unmeasured.** The drift seen on 2026-09-27 was mechanical settling,
+not the sensor — so §8 item 5 has not been answered, it has merely been cleared of a confound.
+Hold 175 g on the glued assembly for 60 s and record the drift.
+
+**A correction to what this file predicted.** §5.6.1 of 2026-09-27 said flattening the bump
+would spread contact over ~19.6 mm² instead of a sub-millimetre patch and would therefore move
+`R_fsr` at 175 g "well below" 14.2 kΩ. It moved to 11.0 kΩ — the right direction, a fifth of
+the size the area argument implied. FSR conductance does not simply follow contact area:
+spreading the load lowers the pressure, and the two effects substantially cancel. The practical
+consequence is the reassuring one — **actuator geometry moves the operating resistance far less
+than it moves the linearity**, so `R_g` is not fragile to a bump respin.
+
+### 5.6.2 The spherical-bump run (2026-09-27), kept as the comparison
+
+Same method, same masses, the toe's original **spherical** bump, foot **not** glued to the leg.
+`R_fsr`(175 g) was 14.2 kΩ → `R_g` would have been 15 kΩ.
+
+| mass | `R_fsr` | local `n` | counts/g @ 15 k |
+|---|---|---|---|
+| 20 g | 75 k → 92.5 k (rose, then steady) | — | — |
+| 50 g | 30.0 k | 1.23 | 26.5 |
+| 100 g | 35 k → 33.0 k | **−0.14** | **−1.7** |
+| 175 g | 14.2 k steady | 1.51 | 11.0 |
+| 300 g | 13.5 k → 11.0 k | 0.47 | 2.1 |
+| 500 g | 10.5 k | **0.09** | **0.23** |
+
+Two faults, both since explained. The **non-monotone 50 → 100 g** and the **drift within single
+readings** were the foot settling on an unglued leg joint, not FSR creep — which is why they
+disappeared when it was glued. The **top-end collapse** is discussed in §5.6.1.
 
 ⚠ **The contingency E2 and E3 exist to catch:** if `R_fsr` at 175 g lands well above E2's
 maximum usable `Z_src`, the node is too high-impedance for this ADC on a wire that runs the

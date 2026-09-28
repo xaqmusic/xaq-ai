@@ -7,8 +7,9 @@
 > [`picrawler_sensor_wiring_and_bom.md`](picrawler_sensor_wiring_and_bom.md) §5.
 > **This file is the mechanical half, and it supersedes that spec's "Mounting" section.**
 
-**Status, 2026-09-27: parts printed and the fit measured good; not yet assembled.** The one
-open design question is the bump's face — §3.2. Everything below the
+**Status, 2026-09-28: the flat-bump toe is printed, the foot is glued to a leg, and the
+divider is sized from it** — `R_g` = 11 kΩ, `C` = 1.5 µF (wiring doc §5.6). §3.2's argument
+for flattening the bump is now backed by a measured curve as well: see §3.4. Everything below the
 "Derived geometry" heading is measured off the CAD; everything under "Open at the bench" is not.
 
 ## Source files
@@ -266,6 +267,30 @@ by eye, dropping its term from 0.50 to ~0.08 and the budget to ~0.35 mm, which m
 safe. It also makes re-assembly repeatable, which matters because the calibration has to be
 re-checked after any foot is taken apart. The recess raises the sensor 0.15 mm, so the
 shoulder-to-rim gap in §1.3 becomes 1.05 mm; nothing else in the stack moves.
+
+### 3.4 ✅ Measured 2026-09-28 — the flat bump, on the real leg
+
+The flat Ø5 face was printed and the foot glued to a real leg; the load curve was taken by
+pressing it onto a scale (wiring doc §5.6). Against the spherical bump on the same masses:
+
+| segment | spherical `n` | **flat `n`** |
+|---|---|---|
+| 50 → 100 g | **−0.14** (non-monotone) | 0.28 |
+| 175 → 300 g | 0.47 | 0.46 |
+| 300 → 500 g | **0.09** (collapsed) | **0.70** |
+
+The non-monotone region and the top-end collapse are both gone, and the channel holds
+1.8 counts/g at 500 g where the spherical bump gave 0.23. ⚠ **Two variables moved together** —
+the bump was flattened and the foot was glued — so this does not attribute the improvement,
+and the flat face is the shipping choice on the §3.2 argument *plus* this evidence rather than
+on a clean A/B.
+
+**One prediction here was wrong in magnitude.** §3.2 reasoned from contact area that flattening
+would drop `R_fsr` sharply. It went 14.2 kΩ → 11.0 kΩ, a fifth of what the area argument
+implied: spreading the load also lowers the pressure, and the two effects largely cancel. The
+useful consequence is that **actuator geometry moves the operating resistance far less than it
+moves the linearity** — so `R_g` is not fragile to a future bump respin, and §3.3's diameter
+question can be reopened without re-sizing the divider.
 
 **The reprint is cheap and the question is measurable.** Print one toe of each, and run the
 creep test that is already open (wiring doc §8 item 5, §7 item 7 here): 175 g held for 60 s,
