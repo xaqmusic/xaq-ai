@@ -712,8 +712,8 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 | **E1** ✅ | **Meter the ADC connector** | a meter | ✅ **DONE 2026-09-27 — VCC is 3.3 V, labelled on the PCB**, so the divider's top rail is the connector itself. Pin order still to be read off the same silkscreen |
 | **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
 | **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
-| **E3** | **Bench `R_fsr` vs mass, bare sensor**, loaded through a flat Ø5.5 puck proxy at 0 / 50 / 100 / 175 / 300 / 590 g | FSR, masses, DMM | the **decade** `R_g` will land in, so the right resistors and caps can be bought. ⚠ Not the final value — backing stiffness and puck geometry change it, so §5's in-situ measurement still governs |
-| **E4** | `R_g` = `R_fsr`(175 g) **in the assembled foot**; then `C` from the §5.2 table | a finished foot | — |
+| **E3** | **Bench `R_fsr` vs mass, bare sensor**, loaded through a flat Ø5.5 puck proxy at 0 / 50 / 100 / 175 / 300 / 590 g. **Ohmmeter — this is the one step that is the meter's** (§5.5) | FSR, masses, DMM | the **decade** `R_g` will land in, so the right resistors and caps can be bought. ⚠ Not the final value — backing stiffness and puck geometry change it, so §5's in-situ measurement still governs |
+| **E4** | `R_g` = `R_fsr`(175 g) **in the assembled foot**, read off the ADC through a trial `R_g` (§5.5), not off a meter; then `C` from the §5.2 table | a finished foot | `R_fsr` at 175 g for all four feet, with the creep transient visible in the log. Median sets `R_g` |
 | **E5** | Wire one foot, confirm counts rise monotonically with the mass series, then the other three | — | §6 step 5 |
 
 **Reading the records:** `pi_host/tools/adc_fast_report.py` (newest log by default, `--fft`
@@ -723,6 +723,57 @@ leave no other trace:
 ```sh
 python3 pi_host/tools/bench_verb.py mark text="Zsrc=5k cap=none servos=hold"
 ```
+
+### 5.5 Ohmmeter or ADC? — two measurements, two answers
+
+**The counts → grams curve is the ADC's, always.** Its input is counts, and it has to carry
+every offset, gain error and quantization the real channel has. A curve fitted from ohmmeter
+readings and converted analytically would be a calibration of a different instrument — and
+would throw away the one thing calibration is for.
+
+**Sizing `R_g` is the ohmmeter's, once, and only to find the decade.** That is E3: bare sensor,
+flat puck proxy, mass series, one reading each. It needs to be right to a factor of two, and
+the meter is the fastest way there.
+
+**After that the ADC is a better ohmmeter than the ohmmeter**, because the divider inverts:
+
+```
+R_fsr = R_g · (4095/counts − 1)
+```
+
+Fit any trial `R_g` from the assortment in roughly the right decade, run the mass series, and
+every reading gives `R_fsr` **through the real circuit, at the real excitation, with the real
+mechanics, logged over time so the creep transient is visible**. An ohmmeter hands you one
+settled number and hides that transient, which matters on a part whose creep is ~10 % and is
+the thing §8 item 5 is waiting to measure. One pass therefore yields both the `R_g` decision
+and a first look at the curve's shape.
+
+**And `R_g` barely needs to be right.** The divider's sensitivity `dV/d(ln R_fsr)` peaks at
+`R_fsr` = `R_g` and the peak is flat:
+
+| `R_fsr` / `R_g` | counts at that point | sensitivity kept |
+|---|---|---|
+| 1 (the target) | 2048 | 100 % |
+| 2 or ½ | 1365 | **89 %** |
+| 4 or ¼ | 819 | 64 % |
+| 10 or ⅒ | 372 | 33 % |
+
+So being a factor of two out costs 11 %. **Do not agonise over the assortment** — pick the
+nearest value and spend the effort on the curve instead.
+
+⚠ **One `R_g` for all four channels** (§5), so it is chosen from all four feet — the median of
+their `R_fsr`(175 g), never foot #1's number.
+
+**Practical, for the meter half:**
+
+- **Unloaded reads OL.** An FSR above its force floor is megohms; that is the part working,
+  not a fault.
+- **Pin the range.** Autoranging while the reading drifts under creep returns whichever range
+  it happened to settle on.
+- **Load through the real actuator geometry.** A different puck is a different resistance, which
+  is exactly why E3's number is explicitly not the final one.
+- **Measure at the board end.** With the 3-pin lead unplugged, the two conductors are the FSR's
+  terminals, so an assembled foot can be read without disturbing the toe or the wire tension.
 
 ⚠ **The contingency E2 and E3 exist to catch:** if `R_fsr` at 175 g lands well above E2's
 maximum usable `Z_src`, the node is too high-impedance for this ADC on a wire that runs the
