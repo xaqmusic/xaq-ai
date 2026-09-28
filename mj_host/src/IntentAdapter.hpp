@@ -184,6 +184,14 @@ public:
     double chase_vy()      const;
     bool   mover_seen()    const;
     int    mover_cands()   const;
+    bool   chase_have_cand() const;
+    double chase_cand_x()  const;
+    double chase_cand_y()  const;
+    // THE LIVE VIEW: the voxels the cloud touched this cast, whether the cloud last filed was a walking one, the
+    // place the cache evicted this tick (-1 none)
+    std::vector<int32_t> cloud_cast_voxels() const;
+    bool   cloud_filed_walking() const;
+    int    cloud_evicted() const;
     double seek_range()   const { return seek_range_; }
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }

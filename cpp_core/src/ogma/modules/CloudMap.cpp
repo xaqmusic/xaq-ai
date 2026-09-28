@@ -362,6 +362,7 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
         const double ca = std::cos(-anchor_yaw_), sa = std::sin(-anchor_yaw_);
         tx = ca * dx - sa * dy; ty = sa * dx + ca * dy;
     }
+    cast_vox_.clear();
     for (int i = 0; i < kZones; ++i) {
         const int b = 5 + 3 * i;
         if (b + 2 >= int(v.size())) break;
@@ -382,6 +383,8 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
         ++vv.hits;
         vv.zsum += float(hz);
         vv.last = tick;
+        cast_vox_.push_back(ix); cast_vox_.push_back(iy); cast_vox_.push_back(iz);
+        cast_vox_.push_back(int32_t(std::lround(1000.0 * double(vv.zsum) / double(vv.hits))));
     }
     // VACATED voxels: with the origin appended to the cast, walk each returning ray and mark the occupied off-floor
     // voxels it passes through the core of (not hit this cast; the last 1.5 voxels before the return left alone)
@@ -428,6 +431,7 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
 void CloudMap::file_cloud(uint64_t tick) {
     open_ = false;
     just_closed_ = true;
+    filed_walking_ = walking_cloud_;
     ++filed_count_;
     // the place this cloud belongs to: the MODAL winner while it was open
     int key = -1, best = 0;
@@ -481,6 +485,7 @@ void CloudMap::file_cloud(uint64_t tick) {
     if (cache_size_ > 0 && key >= 0 && !walking_cloud_) {
         auto it = cache_.find(key);
         if (it == cache_.end() && int(cache_.size()) >= cache_size_ && !lru_.empty()) {
+            evicted_ = lru_.front();
             cache_.erase(lru_.front());                      // least recently filed goes
             lru_.pop_front();
         }
@@ -495,6 +500,7 @@ void CloudMap::file_cloud(uint64_t tick) {
 
 void CloudMap::tick(uint64_t tick_id) {
     just_closed_ = false;
+    evicted_ = -1;
     if (!bus_ || input_topic_.empty()) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(input_topic_));
     if (!pt || pt->values.size() < 3) return;

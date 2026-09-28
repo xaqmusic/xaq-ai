@@ -75,6 +75,11 @@ Built 2026-09-27, off by default, the plain playroom byte-identical (`playroom_g
   [cx, cy, ext, top, ncols, hits, small, **fresh, age_s, age_w_s**] per cluster in the cloud's frame (fresh: the
   share of its voxels first seen inside the window; age: their mean age; age_w: hit-weighted), `"mva"` the
   anchor's world pose, `"mvw"` 1 for a walking cloud.
+- **The live cloud view** (`--log-cloud-live`, on every preset from R84; `tools/duck_viewer/README.md`): the viewer
+  draws the cloud as the module holds it — the open cloud fading with each voxel's age, a walking cloud vanishing
+  when filed, remembered places dim until evicted, the chase's candidate and target as markers. Built 2026-09-27
+  on the operator's ask ("more similar to what the robot is perceiving; if the robot is forgetting places, work
+  that into the UI").
 - **`mj_host/tools/mover_tracks.py`** scores a full log: labels every cluster by truth (train / obj / static /
   wide — a static cluster wider than 0.25 m, whose *visible* part slides with the field of view), tracks them
   across casts of one cloud, fits a velocity over the window, and reports visibility, speed distributions,

@@ -112,7 +112,37 @@ brain reads it.
   floor, orange is the 2–20 cm band where something stands on the floor, blue is furniture height,
   pale is wall tops. Logs written before 2026-09-13 carry 4-tuples and fall back to the centre, which
   draws the whole floor orange.
-- Replay accumulates clouds as the run goes, so the room fills in as the duck visits it.
+- Replay accumulates clouds as the run goes, so the room fills in as the duck visits it — **on a log
+  without the live events below.** That union is not what the duck perceives (see next).
+
+## The cloud as the duck holds it (2026-09-27)
+
+The operator, watching the chase phase: "I can see the smear of the moving objects and the accumulated
+errors. Is there a way to improve the voxel view so it is more similar to what the robot is perceiving? If
+the robot is forgetting places then let's work that into the UI." `ogma::CloudMap` holds **one open
+cloud** (every voxel since its anchor, each with the tick it was last seen), **forgets** a walking cloud the
+moment it files it (never cached), and **remembers** a stop's cloud by place in a cache of eight, least
+recently filed evicted. The union above kept every filed cloud on screen forever.
+
+With the host's `--log-cloud-live` (on every chase-phase preset from R84) the record carries the module's
+own events — `cldo` a cloud opens (its anchor's world pose, walking or not), `cldn` the voxels each cast
+touched, `cloudv` a cloud filed (now with `walking`), `cldx` a place the cache evicted — and the view
+follows them:
+
+- the **open cloud** is drawn bright where a voxel was seen in the last 0.5 s (the movers' recency window)
+  and fading with each voxel's age over ~6 s to a floor, so the smear of a mover reads as a tail that dies
+  and a static thing settles to a dim, steady block; `A` toggles the fading;
+- a **walking cloud vanishes** when the module files it (every metre of travel, or when the body stands);
+- a **remembered place** (a stop's cloud) stays, drawn at a third of the strength, until the cache lets it
+  go; `N` steps through the remembered places one at a time;
+- the **chase** (`M`): a yellow ring on the floor is the candidate the seek loop holds, a red ball with an
+  arrow is the target it is chasing and the velocity it believes; both are the loop's own odometry-frame
+  positions put into the world through the body's true pose, exactly as the scorer labels them;
+- the camera window's line reads `cloud: walking 16136 vox, oldest 99.9s  remembered 3` — the module's
+  own count, and how long the oldest voxel has been held.
+
+The scene holds 10 000 geoms; a long walking cloud can exceed it (a duck that babbles within a metre keeps
+one cloud open for minutes), so the freshest voxels are drawn first and the oldest are what the cap drops.
 
 ## Recording a long run
 

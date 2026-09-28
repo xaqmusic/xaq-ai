@@ -1247,6 +1247,13 @@ TrainPlan g_train;
 // first seen inside the window; age_s: their mean age; age_w_s: the same weighted by hits), "mva": [wx, wy, wyaw] the anchor's world pose (truth,
 // for the scorer's labels) and "mvw": 1 for a walking cloud.  Off = byte-identical.
 double g_log_movers_s = 0.0;
+// --log-cloud-live (2026-09-27, the operator: "make the voxel view more similar to what the robot is perceiving; if the
+// robot is forgetting places, work that into the UI"): the record carries what the cloud module DOES, cast by cast --
+// "cldo": [wx, wy, wyaw, walking] on the tick a cloud opens (the anchor's world pose: instrumentation for the viewer),
+// "cldn": [[ix, iy, iz, mm], ...] the voxels this cast touched while a cloud is open, "cldx": place when the cache
+// evicts a remembered place; and "cloudv" gains "walking" (a walking cloud is forgotten on filing, a stop's is
+// remembered by place).  A viewer can then grow, age, forget and remember exactly as the module does.  Off = byte-identical.
+bool g_log_cloud_live = false;
 // A closed track: an ellipse of semi-axes a (along yaw) and b about (cx, cy), walked by ARC LENGTH so the
 // train's speed is what the flag says everywhere on it.
 struct TrackPath {
@@ -1791,6 +1798,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // the world pose the open cloud was anchored on, latched on the module's open edge: the
     // viewer's only way to place a body-anchored cloud beside the room.  Instrumentation.
     double cloud_anchor_wx = 0.0, cloud_anchor_wy = 0.0, cloud_anchor_wyaw = 0.0;
+    bool   cloud_opened_now = false;
     // the anchor of the cloud just FILED, for the replay payload: with the walking cloud a cloud files
     // and the next opens on the same tick (no open edge), so the open cloud's latch must not be the
     // filed cloud's pose (R70: every cloud after the first was drawn at the first one's pose, walls 45 deg off)
@@ -1879,7 +1887,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (cloud_on) {
             const bool now_open = brain.cloud_open();
             if (brain.cloud_just_closed()) { cloud_filed_wx = cloud_anchor_wx; cloud_filed_wy = cloud_anchor_wy; cloud_filed_wyaw = cloud_anchor_wyaw; }
-            if (now_open && (!cloud_was_open || brain.cloud_just_closed())) {
+            cloud_opened_now = now_open && (!cloud_was_open || brain.cloud_just_closed());
+            if (cloud_opened_now) {
                 const auto wp = body.trunk_position();
                 const auto q = body.imu_quat();
                 cloud_anchor_wx = wp[0]; cloud_anchor_wy = wp[1];
@@ -2500,9 +2509,23 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
-            // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick]
-            if (chase_on) std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d]", brain.chase_active() ? 1 : 0, brain.chase_n(),
-                                      brain.seek_target_x(), brain.seek_target_y(), brain.chase_vx(), brain.chase_vy(), brain.mover_seen() ? 1 : 0);
+            // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick,
+            // ...and [7..9]: a candidate held, its position (odometry frame)
+            if (chase_on) std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%d,%.3f,%.3f]", brain.chase_active() ? 1 : 0, brain.chase_n(),
+                                      brain.seek_target_x(), brain.seek_target_y(), brain.chase_vx(), brain.chase_vy(), brain.mover_seen() ? 1 : 0,
+                                      brain.chase_have_cand() ? 1 : 0, brain.chase_cand_x(), brain.chase_cand_y());
+            // THE LIVE VIEW (--log-cloud-live): the cloud as the module builds, forgets and remembers it
+            if (g_log_cloud_live && cloud_on) {
+                if (cloud_opened_now) std::printf(",\"cldo\":[%.4f,%.4f,%.4f,%d]", cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw, brain.cloud_walking() ? 1 : 0);
+                if (t % 4 == 0 && brain.cloud_open()) {
+                    const auto cv = brain.cloud_cast_voxels();
+                    std::printf(",\"cldn\":[");
+                    for (size_t k = 0; k + 3 < cv.size(); k += 4) std::printf("%s[%d,%d,%d,%d]", k ? "," : "", cv[k], cv[k + 1], cv[k + 2], cv[k + 3]);
+                    std::printf("]");
+                }
+                const int ev = brain.cloud_evicted();
+                if (ev >= 0) std::printf(",\"cldx\":%d", ev);
+            }
             // MOVERS (stage 0): the clusters through the recency window, on cast ticks with a cloud open
             if (g_log_movers_s > 0.0 && cloud_on && t % 4 == 0 && brain.cloud_open()) {
                 const auto th = brain.cloud_things_recent(uint64_t(std::lround(g_log_movers_s * kBrainHz)));
@@ -2573,9 +2596,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (cloud_on && brain.cloud_just_closed()) {
                 const auto vx = brain.cloud_filed_voxels();
                 std::printf(",\"cloudv\":{\"place\":%d,\"voxel_m\":%.4f,\"revisit\":%.4f,\"revisit_dist\":%.4f,"
-                            "\"anchor\":[%.4f,%.4f,%.4f],\"vox\":[",
+                            "\"anchor\":[%.4f,%.4f,%.4f],%s\"vox\":[",
                             brain.cloud_place(), brain.cloud_voxel_m(), brain.cloud_revisit(), brain.cloud_revisit_dist(),
-                            cloud_filed_wx, cloud_filed_wy, cloud_filed_wyaw);
+                            cloud_filed_wx, cloud_filed_wy, cloud_filed_wyaw,
+                            g_log_cloud_live ? (brain.cloud_filed_walking() ? "\"walking\":1," : "\"walking\":0,") : "");
                 for (size_t k = 0; k + 4 < vx.size(); k += 5)        // [ix, iy, iz, hits, mean height mm]
                     std::printf("%s[%d,%d,%d,%d,%d]", k ? "," : "", vx[k], vx[k + 1], vx[k + 2], vx[k + 3], vx[k + 4]);
                 std::printf("]}");
@@ -2775,6 +2799,8 @@ void usage() {
         "      at SPEED m/s for RUN_S s, still for STOP_S s, repeating; the phase and the start along the track\n"
         "      follow the seed unless --train-phase S.  --log-movers WINDOW_S logs the cloud's clusters through a\n"
         "      recency window on every cast (\"mvc\"), the stage-0 instrument for chasing moving things.\n"
+        "      --log-cloud-live logs the cloud as the module builds it: the voxels each cast touches, a cloud's opening\n"
+        "      (with its anchor's world pose) and the places the cache forgets -- what the duck viewer draws as the live cloud.\n"
         "\n"
         "  ogma_mjhost --brain [scene.xml] [--graph G.json] [--secs S] [--seed N] [--amp R]\n"
         "                      [--load-brain F] [--save-brain F]\n"
@@ -3014,6 +3040,8 @@ int main(int argc, char** argv) {
             g_train.speed = std::stod(next("--train")); g_train.run_s = std::stod(next("--train")); g_train.stop_s = std::stod(next("--train"));
         } else if (a == "--train-phase") {
             g_train.phase_s = std::stod(next("--train-phase"));
+        } else if (a == "--log-cloud-live") {
+            g_log_cloud_live = true;
         } else if (a == "--log-movers") {
             g_log_movers_s = std::stod(next("--log-movers"));
         } else if (a == "--l2-twist") {

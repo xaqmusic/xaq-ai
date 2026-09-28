@@ -240,15 +240,160 @@ def draw_clouds(scn, clouds, mujoco, np, only=None):
     return drawn
 
 
+# ---- the cloud as the module holds it -------------------------------------------------
+# What the duck PERCEIVES is not the union of every cloud it ever filed.  ogma::CloudMap holds one OPEN
+# cloud (every voxel since its anchor, each with the tick it was last seen), FORGETS a walking cloud the
+# moment it files it (never cached), and REMEMBERS a stop's cloud by place in a cache of eight, least
+# recently filed evicted.  Drawing every filed cloud forever (the view until 2026-09-27) showed the
+# operator smears and stale clouds the module had already dropped.  With the host's --log-cloud-live the
+# record carries the module's own events -- "cldo" a cloud opens (anchor world pose, walking?), "cldn"
+# the voxels each cast touched, "cloudv" a cloud filed (now with "walking"), "cldx" a place evicted --
+# and this view follows them: the open cloud drawn bright where fresh and fading with each voxel's age
+# (the smear of a mover reads as a tail that dies), a walking cloud vanishing when filed, a remembered
+# place drawn dim until the cache lets it go.  Old logs without the events fall back to the union.
+LIVE_FRESH_S = 0.5          # the movers' recency window: drawn at full strength
+LIVE_FADE_S = 6.0           # ...then fading to the floor over this long (a walking cloud lives ~5 s per metre)
+LIVE_FLOOR = 0.30           # the faintest an old voxel of the open cloud gets (relative to its band's own alpha)
+REMEMBERED_ALPHA = 0.35     # a cached stop cloud, relative to the open cloud's colours
+CACHE_SIZE = 8              # CloudMap cache_size on every duck config
+
+
+class CloudView:
+    def __init__(self):
+        self.live = None            # dict(anchor=(x, y, yaw), walking=bool, vox={key: [ix, iy, iz, mm, last_t]}, voxel_m)
+        self.remembered = []        # filed stop clouds, oldest first (the cache's LRU order)
+        self.legacy = []            # filed clouds of a log without the live events, newest per place
+        self.events = False         # the log carries the live events
+
+    def feed(self, frame):
+        t = frame.get("t", 0.0)
+        if "cldo" in frame:
+            self.events = True
+            ax, ay, ayaw, walking = frame["cldo"]
+            self.live = dict(anchor=(ax, ay, ayaw), walking=bool(walking), vox={}, voxel_m=0.04, t0=t)
+        if "cldn" in frame and self.live is not None:
+            vox = self.live["vox"]
+            for ix, iy, iz, mm in frame["cldn"]:
+                e = vox.get((ix, iy, iz))
+                if e is None:
+                    vox[(ix, iy, iz)] = [ix, iy, iz, mm, t]
+                else:
+                    e[3] = mm; e[4] = t
+        if "cloudv" in frame:
+            rec = frame["cloudv"]
+            if "walking" in rec:
+                self.events = True
+                if not rec["walking"]:
+                    self.remembered = [c for c in self.remembered if c["place"] != rec["place"]] + [rec]
+                    del self.remembered[:-CACHE_SIZE]
+                # filed: the open cloud is gone (a walking one forgotten, a stop's remembered above) until the next cldo
+                self.live = None
+            else:
+                self.legacy = [c for c in self.legacy if c["place"] != rec["place"]] + [rec]
+        if "cldx" in frame:
+            self.remembered = [c for c in self.remembered if c["place"] != frame["cldx"]]
+
+    def places(self):
+        return sorted({c["place"] for c in (self.remembered if self.events else self.legacy)})
+
+    def draw(self, scn, t, mujoco, np, age_fade=True, only=None):
+        if not self.events:
+            return draw_clouds(scn, self.legacy, mujoco, np, only=only)
+        drawn = 0
+        if only is None and self.live is not None and self.live["vox"]:
+            v = self.live["voxel_m"]
+            ax, ay, ayaw = self.live["anchor"]
+            ca, sa = math.cos(ayaw), math.sin(ayaw)
+            half = np.array([v * 0.5, v * 0.5, v * 0.5])
+            eye = np.eye(3).flatten()
+            # freshest first: the scene holds 10 000 geoms and a long walking cloud can exceed it, and what
+            # the module perceives NOW must not be what the cap drops
+            for ix, iy, iz, mm, last in sorted(self.live["vox"].values(), key=lambda e: -e[4]):
+                if scn.ngeom >= scn.maxgeom:
+                    return drawn
+                px, py, wz = (ix + 0.5) * v, (iy + 0.5) * v, (iz + 0.5) * v
+                r, g_, b, a = cloud_rgba(mm / 1000.0)
+                if age_fade:
+                    age = t - last
+                    k = 1.0 if age <= LIVE_FRESH_S else max(LIVE_FLOOR, 1.0 - (age - LIVE_FRESH_S) / LIVE_FADE_S)
+                    a = a * k
+                g = scn.geoms[scn.ngeom]
+                scn.ngeom += 1
+                mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_BOX, half,
+                                    np.array([ca * px - sa * py + ax, sa * px + ca * py + ay, wz]), eye,
+                                    np.array((r, g_, b, a), dtype=np.float32))
+                drawn += 1
+        # the remembered places, dim
+        saved = CLOUD_BANDS
+        try:
+            globals()["CLOUD_BANDS"] = tuple((h, (r, g_, b, a * REMEMBERED_ALPHA)) for h, (r, g_, b, a) in saved)
+            drawn += draw_clouds(scn, self.remembered, mujoco, np, only=only)
+        finally:
+            globals()["CLOUD_BANDS"] = saved
+        return drawn
+
+    def status(self, t):
+        if not self.events:
+            return ""
+        if self.live is None:
+            s = "cloud: none open"
+        else:
+            vox = self.live["vox"]
+            oldest = max((t - e[4] for e in vox.values()), default=0.0)
+            s = f"cloud: {'walking' if self.live['walking'] else 'stop'} {len(vox)} vox, oldest {oldest:4.1f}s"
+        return s + f"  remembered {len(self.remembered)}"
+
+
+def draw_chase(scn, frame, mujoco, np):
+    """The chase's candidate (a yellow ring on the floor) and its chased target (red, with the velocity as an
+    arrow), from the "chase" record: positions in the ODOMETRY frame, put into the world through the body's own
+    pose (odometry [x, y, yaw] against the true trunk pose), the same way the scorer labels them."""
+    ch = frame.get("chase")
+    od = frame.get("odom")
+    if not ch or not od or len(ch) < 10:
+        return
+    q = frame["qpos"]
+    byaw = math.atan2(2.0 * (q[3] * q[6] + q[4] * q[5]), 1.0 - 2.0 * (q[5] * q[5] + q[6] * q[6]))
+    dth = byaw - od[2]
+    c, s_ = math.cos(dth), math.sin(dth)
+    bx, by = frame["x"], frame["y"]
+
+    def world(px, py):
+        dx, dy = px - od[0], py - od[1]
+        return bx + c * dx - s_ * dy, by + s_ * dx + c * dy
+
+    eye = np.eye(3).flatten()
+    if ch[7]:                                              # a candidate held
+        wx, wy = world(ch[8], ch[9])
+        if scn.ngeom < scn.maxgeom:
+            g = scn.geoms[scn.ngeom]; scn.ngeom += 1
+            mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_CYLINDER, np.array([0.12, 0.004, 0.0]),
+                                np.array([wx, wy, 0.006]), eye, np.array((1.0, 0.85, 0.1, 0.55), dtype=np.float32))
+    if ch[0]:                                              # chasing: the predicted target and its velocity
+        wx, wy = world(ch[2], ch[3])
+        if scn.ngeom < scn.maxgeom:
+            g = scn.geoms[scn.ngeom]; scn.ngeom += 1
+            mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_SPHERE, np.array([0.05, 0.0, 0.0]),
+                                np.array([wx, wy, 0.08]), eye, np.array((0.9, 0.15, 0.1, 0.9), dtype=np.float32))
+        vx, vy = ch[4], ch[5]
+        if (vx * vx + vy * vy) > 1e-4 and scn.ngeom < scn.maxgeom:
+            wvx, wvy = c * vx - s_ * vy, s_ * vx + c * vy
+            g = scn.geoms[scn.ngeom]; scn.ngeom += 1
+            mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_ARROW, np.zeros(3), np.zeros(3), eye,
+                                np.array((0.9, 0.15, 0.1, 0.9), dtype=np.float32))
+            mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_ARROW, 0.012, np.array([wx, wy, 0.08]),
+                                 np.array([wx + wvx * 0.5, wy + wvy * 0.5, 0.08]))
+
+
 # ---- the operator's keys ------------------------------------------------------------
 # State the key callback flips; read by the watch loop each frame. Defaults: the beams
 # off (they hide the head), the camera window on, its HUD text on.
 #
 # The HUD lives in the camera window, not the MuJoCo window: label geoms placed in the
 # free camera's frame lagged the mouse between syncs and flashed on every zoom (2026-09-10).
-UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": True, "solo": None}
+UI = {"tof": False, "help": True, "cam": True, "fade": True, "cloud": True, "solo": None, "age": True, "chase": True}
 HOTKEYS = ("V  ToF beams     C  this window     H  this text     W  fade what hides the duck\n"
-           "P  sweep clouds  N  next cloud alone / all\n"
+           "P  clouds        N  next remembered place alone / all     A  age fading     M  chase markers\n"
            "space  pause     drag  orbit     scroll  zoom     right-drag  pan")
 
 
@@ -265,6 +410,10 @@ def key_callback(keycode):
         UI["cloud"] = not UI["cloud"]
     elif keycode == ord("N"):
         UI["solo"] = "advance"          # the watch loop resolves this against the clouds it has
+    elif keycode == ord("A"):
+        UI["age"] = not UI["age"]
+    elif keycode == ord("M"):
+        UI["chase"] = not UI["chase"]
 
 
 def free_camera_position(cam, np):
@@ -425,12 +574,18 @@ def status_line(frame):
         line += f"  push {push[0]:+.1f},{push[1]:+.1f} N"
     if frame.get("event"):
         line += f"  {frame['event']}"
+    ch = frame.get("chase")
+    if ch and len(ch) >= 10:
+        if ch[0]:
+            line += f"  CHASING v={math.hypot(ch[4], ch[5]):.2f} m/s"
+        elif ch[7]:
+            line += f"  candidate x{ch[1]}"
     return line
 
 
 def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.0):
     # the sweep clouds the run has filed so far, newest per place; and which one is soloed
-    clouds, solo_at = [], None
+    cloudview, solo_at = CloudView(), None      # the cloud as the module holds it (or the filed union, on an old log)
     """Drive the interactive viewer from a stream of frames.
 
     `fast_until`: frames before this many run-seconds are fast-forwarded — no pacing, one
@@ -481,11 +636,9 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
             fader.update(viewer.cam, data, (frame["x"], frame["y"], frame["z"]), UI["fade"])
             # a cloud the host filed on this tick joins the set we carry (replay accumulates
             # them as the run goes, so the room fills in as the duck visits it)
-            if "cloudv" in frame:
-                rec = frame["cloudv"]
-                clouds = [c for c in clouds if c["place"] != rec["place"]] + [rec]
+            cloudview.feed(frame)
             if UI["solo"] == "advance":
-                places = sorted({c["place"] for c in clouds})
+                places = cloudview.places()
                 if not places:
                     UI["solo"] = None
                 elif solo_at is None:
@@ -496,17 +649,19 @@ def watch(frames, realtime=True, title_every=25, cam_res=(64, 48), fast_until=0.
                     solo_at += 1
                 UI["solo"] = None
             draw_status(viewer.user_scn, frame, mujoco, np)
-            if UI["cloud"] and clouds:
-                places = sorted({c["place"] for c in clouds})
+            if UI["cloud"]:
+                places = cloudview.places()
                 only = places[solo_at] if solo_at is not None and solo_at < len(places) else None
-                draw_clouds(viewer.user_scn, clouds, mujoco, np, only=only)
+                cloudview.draw(viewer.user_scn, frame["t"], mujoco, np, age_fade=UI["age"], only=only)
+            if UI["chase"]:
+                draw_chase(viewer.user_scn, frame, mujoco, np)
             if UI["tof"]:
                 draw_tof(viewer.user_scn, frame, model, data, mujoco, np, beams)
             viewer.sync()
             if camwin is not None:
                 camwin.show(UI["cam"])
                 if UI["cam"]:
-                    camwin.set_hud(status_line(frame) + ("   [fast-forward]" if fast else ""), UI["help"])
+                    camwin.set_hud(status_line(frame) + "  " + cloudview.status(frame["t"]) + ("   [fast-forward]" if fast else ""), UI["help"])
                     if n % 4 == 0 or fast:                   # the ToF's rate, 12.5 Hz: the brain's frame rate
                         camwin.update(data)
             if fast:
@@ -553,7 +708,7 @@ def record(frames, out_path, width=960, height=720, t_from=0.0, t_to=None, every
     np = need("numpy", "the status overlay")
     beams = _tof_beams(np)
     fader = WallFader(model, mujoco, np)
-    rec_clouds = []                      # the sweep clouds filed so far, newest per place
+    cloudview = CloudView()              # the cloud as the module holds it (or the filed union, on an old log)
     written = 0
     # STREAMED to the encoder, one frame at a time.  This used to collect every frame in a list and
     # write at the end — fine for the 8 s clips it was built for, fatal for a long run: 960x720x3 is
@@ -564,9 +719,7 @@ def record(frames, out_path, width=960, height=720, t_from=0.0, t_to=None, every
       for n, frame in enumerate(frames):
         # a filed cloud is an EVENT: carry it even through frames we skip, or a window that opens
         # after a stop draws the room empty
-        if "cloudv" in frame:
-            rec = frame["cloudv"]
-            rec_clouds[:] = [c for c in rec_clouds if c["place"] != rec["place"]] + [rec]
+        cloudview.feed(frame)
         t = frame.get("t", 0.0)
         if t_to is not None and t > t_to:
             break
@@ -578,8 +731,8 @@ def record(frames, out_path, width=960, height=720, t_from=0.0, t_to=None, every
         fader.update(camera, data, (frame["x"], frame["y"], frame["z"]))
         renderer.update_scene(data, camera)
         draw_status(renderer.scene, frame, mujoco, np, reset=False)   # the same overlay as live
-        if rec_clouds:
-            draw_clouds(renderer.scene, rec_clouds, mujoco, np)
+        cloudview.draw(renderer.scene, t, mujoco, np)
+        draw_chase(renderer.scene, frame, mujoco, np)
         draw_tof(renderer.scene, frame, model, data, mujoco, np, beams)
         writer.append_data(renderer.render())
         written += 1

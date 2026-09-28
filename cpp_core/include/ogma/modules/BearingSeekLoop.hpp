@@ -103,6 +103,9 @@ public:
     double chase_vx()       const { return cand_vx_; }
     double chase_vy()       const { return cand_vy_; }
     bool   mover_seen()     const { return mover_seen_; }
+    bool   have_cand()      const { return have_cand_; }
+    double cand_x()         const { return cand_x_; }
+    double cand_y()         const { return cand_y_; }
 private:
     std::string mover_topic_;
     double chase_gate_m_ = 0.35, chase_lead_s_ = 0.3, chase_v_max_ = 1.0;

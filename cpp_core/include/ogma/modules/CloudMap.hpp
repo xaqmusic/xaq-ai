@@ -194,6 +194,14 @@ public:
     // voxel_m and add half a voxel for the centre; colour by the mean height, not the centre.
     const std::vector<int32_t>& last_filed_voxels() const { return filed_vox_; }
     double   last_anchor_yaw() const { return filed_anchor_yaw_; }
+    // THE LIVE VIEW (2026-09-27, the operator: "make the voxel view more similar to what the robot is perceiving"):
+    // the voxels this cast touched, as [ix, iy, iz, mean_height_mm] 4-tuples, so a viewer can grow the OPEN cloud
+    // as the module does and age it as the module does (every voxel's last-seen tick); whether the cloud last filed
+    // was a WALKING one (forgotten on filing, never cached) or a stop's (cached by place, remembered); and the place
+    // the cache evicted this tick, or -1.  Instrumentation: nothing here changes the module.
+    const std::vector<int32_t>& last_cast_voxels() const { return cast_vox_; }
+    bool     last_filed_walking() const { return filed_walking_; }
+    int      last_evicted()       const { return evicted_; }
 
 private:
     // zsum: the running sum of the points' own heights.  A voxel is classified by the MEAN height of
@@ -293,6 +301,9 @@ private:
     int      last_key_ = -1, filed_count_ = 0;
     std::vector<int32_t> filed_vox_;
     double   filed_anchor_yaw_ = 0.0;
+    std::vector<int32_t> cast_vox_;
+    bool     filed_walking_ = false;
+    int      evicted_ = -1;
     int      revisit_overlap_ = 0;   // voxels the comparison actually had to work with
     double   revisit_dist_ = -1.0;   // dead-reckoned separation of the two anchors, metres
 };
