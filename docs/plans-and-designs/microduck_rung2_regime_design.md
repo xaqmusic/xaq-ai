@@ -4539,3 +4539,25 @@ of the moving train in six runs, on every gate tried. Two causes, separable:
 
 Re-use for the next design discussion: keep R89's chase (the motion requirement is what returned the walk); bring
 the stimulus to the walk before touching the gate again; and treat the sliding fragment as the one confound left.
+
+### 17.56 The big track: the stimulus brought to the walk (R84, R89 on the redesigned room; 2026-09-27, late)
+
+**The operator's eye on R89:** "the wall stuck issue is mostly resolved. However, the robot is not really interacting
+with the train at all." Their redesign: the track larger, wider and longer, stretching almost the whole way between
+the green wall and the wall across from it; the train larger, like the purple block; the train over the ball for its
+regular schedule, known velocity and control by the seed. Built (`playroom_gen.py --train`, the plain room
+byte-identical): a 1.52 × 0.80 m oval centred on the room, its long axis along y, laid first with the furniture and
+the things placed clear of it; an 18 × 10 × 10 cm train; perimeter 7.48 m, so a run of 8 s at 0.2 m/s covers a
+fifth of a lap.
+
+**Measured (n = 6, R84 and R89 together on the new room).** The opportunity tripled: the train is in the ToF's cone
+within 1.5 m while moving on 4 745 walking casts (the corner track: about 1 600), on 31–49 % of which a cluster lies
+within 0.22 m of its centre (the corner track's 65–80 %: the longer train and its smear put the centroid further
+from the centre, partly the label's radius). R84 walks at 14.7 ± 10.1 walls a minute (12.4 on the corner track: a
+tie), cells 139, objects touched 4.6 a minute. **R89: 71 chases in six runs, 8 at the moving train (11 %, from 4 %),
+5 at the stopped train, 54 at static clusters (76 %)**; the closest approach to a moving train 0.8–2.6 m by seed;
+walls 18.1 ± 20.0 (seed 2 at 54.9), rescues 0.25 against 0.13, arrival stops 12.5 against 8.5 (the false chases'
+remembered targets), seek 58 % of the walk. **Verdict: `PARTIAL` on the train, `REGRESSION` on the walk at this
+power** — bringing the stimulus to the walk doubled the train's chases without touching the false ones, so the
+false ones are the design's own, not the room's. The sliding fragment (O64) is the mechanism to remove before the
+chase can be judged; the room is now right for judging it.

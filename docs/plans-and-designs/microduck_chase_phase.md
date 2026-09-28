@@ -196,7 +196,7 @@ the voxels the thing LEFT. Stage 1b: the cast carries the sensor origin, every r
 off-floor voxels it passes through as vacated, a cluster counts its trail, and the candidate needs one (R87 the
 instrument, R88 the chase with a trail; measured in §17.55).
 
-**Stage 1b and 1c, measured (§17.55).** The trail at 4 cm voxels is `NULL`: a trail on 68 % of static clusters
+**Stage 1b and 1c, measured (§17.55; the corner track).** The trail at 4 cm voxels is `NULL`: a trail on 68 % of static clusters
 and 80 % of the moving train's, because any surface crossing a voxel fills it partly and a ray through the empty
 part reaches the floor or wall behind as readily as the floor behind a train that has gone. R89 (the candidate
 must have MOVED, be compact and within 1.2 m): chases 447 → 72 in six runs, the walk's ownership back to play
@@ -204,6 +204,12 @@ must have MOVED, be compact and within 1.2 m): chases 447 → 72 in six runs, th
 a mechanism and `NULL` for the train in this room at this power — the train comes within the chase's reach too
 seldom (681 moving-train samples against 200 000 static in six runs), and what survives every gate is a fragment
 of the room sliding into view as the body turns.
+
+**On the big track (§17.56):** the opportunity tripled (4 745 walking casts with the moving train in the cone
+within 1.5 m); R89 chased the moving train 8 times in six runs (11 % of its 71 chases, from 4 %), the stopped
+train 5, static clusters 54; walls 18 ± 20 against R84's 14.7, rescues doubled. `PARTIAL` on the train,
+`REGRESSION` on the walk: the false chases are the design's own, not the room's, and the room is now right for
+removing them.
 
 **Where this leaves the design (for the discussion).** Keep R89's chase; bring the stimulus to the walk before
 touching the gate again (a track through the middle of the room, or the ball rolled across the walk as
