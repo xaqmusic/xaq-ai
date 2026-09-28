@@ -487,3 +487,83 @@ TEST(CloudMap, ARecencyWindowSeesAMovedCubeWhereItIsNow) {
     EXPECT_NEAR(again[0].age, 3.0, 1e-9) << "its voxels are three ticks old";
     EXPECT_NEAR(r.m.cluster_things()[0].fresh, 0.0, 1e-9) << "the whole-cloud rule reports no freshness";
 }
+
+// MOVERS (the chase phase, stage 1): the candidate.  A cube that has stood for 60 casts and a second cube that
+// moves 2 cm a cast: through a 25-tick window the mover's voxels are young against the oldest cluster's, the
+// standing cube's are not, and mover_topic names the mover.  Without the topic the bus carries nothing.
+TEST(CloudMap, AYoungClusterAgainstTheCloudsOwnAgeIsTheMover) {
+    ParamMap p = things_params();
+    p["mover_topic"] = std::string("out.mover");
+    p["mover_window_ticks"] = int64_t{25};
+    p["mover_age_k"] = 0.3;
+    Rig r(p);
+    for (int i = 0; i < 60; ++i) cast_world(r, 0.0, cube());               // the standing cube, 60 casts
+    EXPECT_EQ(r.m.mover_index(), -1) << "one cluster: nothing to be young against";
+    std::vector<Pt> mover;
+    for (int k = 0; k < 8; ++k) {
+        mover.clear();
+        for (auto q : cube()) { q[0] += 0.4 + 0.02 * k; q[1] += 0.5; mover.push_back(q); }   // a second cube, left and ahead, moving
+        cast_world(r, 0.0, cube());
+        cast_world(r, 0.0, mover);
+    }
+    ASSERT_GE(r.m.mover_index(), 0) << "the moving cube is the candidate";
+    const auto& cl = r.m.mover_clusters();
+    EXPECT_NEAR(cl[size_t(r.m.mover_index())].cy, 0.5, 0.1) << "the mover is the cube to the left";
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.mover"));
+    ASSERT_NE(tok, nullptr);
+    ASSERT_EQ(tok->values.size(), 5);
+    EXPECT_LT(tok->values[0], -0.2f) << "to the left: a negative +right component";
+    EXPECT_GT(tok->values[1], 0.8f);
+    EXPECT_GT(tok->values[2], 0.0f);
+    EXPECT_LT(tok->values[3], tok->values[4] * 0.3f) << "young against the oldest";
+    Rig plain(things_params());
+    for (int i = 0; i < 5; ++i) cast_world(plain, 0.0, cube());
+    EXPECT_EQ(plain.bus.last_value("out.mover"), nullptr) << "no topic, nothing published";
+}
+
+// walk_things false (O65): a walking cloud attends nothing and the bearing reads proximity 0, while a stop's cloud
+// attends as before; the mover candidate still reads the walking cloud.
+TEST(CloudMap, WalkThingsFalseAttendsNothingOnTheWalk) {
+    ParamMap p = things_params();
+    p["walk_cloud"] = true; p["walk_reset_m"] = 5.0; p["walk_things"] = false;
+    p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+    Rig r(p);
+    for (int i = 0; i < 60; ++i) r.cast(false, 0.0, 0.0, 0.0, 3, cube());   // moving from the first tick: a walking cloud
+    for (int k = 0; k < 8; ++k) {
+        std::vector<Pt> mover;
+        for (auto q : cube()) { q[0] += 0.4 + 0.02 * k; q[1] += 0.5; mover.push_back(q); }
+        for (size_t at = 0; at < cube().size(); at += size_t(ogma::CloudMap::kZones)) r.cast(false, 0.0, 0.0, 0.0, 3, cube());
+        r.cast(false, 0.0, 0.0, 0.0, 3, mover);
+    }
+    EXPECT_TRUE(r.m.is_walking_cloud());
+    EXPECT_EQ(r.m.attended(), -1) << "things at stops only";
+    auto b = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
+    ASSERT_NE(b, nullptr);
+    EXPECT_FLOAT_EQ(b->values[2], 0.0f) << "proximity 0: nothing attended on the walk";
+    EXPECT_GE(r.m.mover_index(), 0) << "the mover candidate still reads the walking cloud";
+}
+
+// The walking cloud's bearing is relative to the BODY, not the anchor (2026-09-27, §17.54): a cube 0.85 m ahead at
+// the anchor reads 0.45 m ahead once the body has walked 0.4 m toward it, and ahead-right once the body has stepped
+// left.  (Before the fix every static thing on a walk read as moving at the body's speed.)
+TEST(CloudMap, AWalkingCloudsBearingIsFromTheBodyNotTheAnchor) {
+    ParamMap p = things_params();
+    p["walk_cloud"] = true; p["walk_reset_m"] = 5.0;
+    Rig r(p);
+    const auto world = cube();                                          // at x 0.81-0.89, y -0.03..0.05
+    r.cast(false, 0.0, 0.0, 0.0, 3, seen_from(world, 0.0, 0.0, 0.0));  // a walking cloud opens at the origin
+    auto b0 = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
+    ASSERT_NE(b0, nullptr);
+    EXPECT_NEAR(b0->values[2], 1.0 - 0.85 / 2.5, 0.02);
+    r.cast(false, 0.0, 0.4, 0.0, 3, seen_from(world, 0.4, 0.0, 0.0));  // the body 0.4 m along +x
+    auto b1 = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
+    ASSERT_NE(b1, nullptr);
+    EXPECT_NEAR(b1->values[2], 1.0 - 0.45 / 2.5, 0.03) << "0.45 m ahead of the body now, not 0.85";
+    EXPECT_NEAR(b1->values[1], 1.0, 0.02) << "still straight ahead";
+    r.cast(false, 0.0, 0.4, 0.3, 3, seen_from(world, 0.4, 0.3, 0.0));  // and 0.3 m to the LEFT of the line
+    auto b2 = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing_bearing"));
+    ASSERT_NE(b2, nullptr);
+    EXPECT_GT(b2->values[0], 0.4f) << "the cube is now ahead-RIGHT";
+    EXPECT_NEAR(std::hypot(b2->values[0], b2->values[1]), 1.0, 1e-4);
+    EXPECT_NEAR(b2->values[2], 1.0 - std::hypot(0.45, 0.3) / 2.5, 0.03);
+}

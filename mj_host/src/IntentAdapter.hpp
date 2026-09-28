@@ -170,6 +170,17 @@ public:
     bool   seek_arrived() const { return seek_arrived_; }   // this tick: a held target's need went to 0 with the range under 0.3 m
     double seek_ego()     const { return seek_ego_; }       // the seek bearing last set, body frame (rad, + = right)
     double seek_value()   const { return seek_value_; }
+    // THE CHASE (chase phase, stage 1): the seek loop's chase state, read from the module for the record
+    double seek_target_x() const;   // the seek loop's held target, odometry frame (0 when none)
+    double seek_target_y() const;
+    bool   chase_present() const;
+    bool   chase_active()  const;
+    int    chase_n()       const;
+    int    chases()        const;
+    double chase_vx()      const;
+    double chase_vy()      const;
+    bool   mover_seen()    const;
+    int    mover_cands()   const;
     double seek_range()   const { return seek_range_; }
     // A constant command in place of the brain's (an open-loop baseline); NaN = off.
     void set_override(const std::array<double, 3>& twist) { override_ = twist; has_override_ = true; }

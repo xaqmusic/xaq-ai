@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stage 0 measured 2026-09-27** (the stimulus, the instrument, the signal); no lever built yet; `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6.**
+Status: **stage 0 measured 2026-09-27** (the stimulus, the instrument, the signal); no lever built yet; `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -153,6 +153,12 @@ generator flag, the host's train driver and the movers instrument, the scorer, t
 stage 0's measurement above. Next: stage 1, the mover gate and the moving fix, off by default, byte-identical when
 off, n = 6 in the train room, scored on stops at things, walls a minute, falls, and movers chased and reached.
 
+**The walk under the walking cloud (O65).** The operator, watching R84 seed 1: caught in a corner from 893 s with
+several falls, the wall hugging worse than R83's. The profile: wall episodes 256 → 944 on seed 1 against R83, most
+of them from 800 to 1400 s with play steering; the seek loop took no more targets. R84 and R85 share that walk, so
+the chase A/B is fair, but no chase stack is promoted on it; `CloudMap.walk_things false` (things at stops only, the
+mover still on the walk) is the first lever against it (R86).
+
 **Traps of this stage:** the walking cloud is off in R83 (`walk_cloud` false) — a movers instrument on R83's
 config logs nothing between stops; the train room is a separate scene file (`scene_playroom_train.xml`), and a
 sweep needs `--scene` pointed at it; the plain playroom must regenerate byte-identical after any generator change
@@ -161,3 +167,17 @@ its own trail within a cloud's life, which reads as old voxels on a moving thing
 
 **Register rows:** O63 (the phase), O64 (the mover gate's false alarms: newly-in-view things and sliding
 fragments), O55, O61, O49.
+
+## 7. Stage 1, built and measured (2026-09-27 evening; design doc §17.54)
+
+**Built:** the mover candidate (`CloudMap.mover_topic`: the young cluster against the oldest one's age, within 1.5 m,
+any size) and the chase (`BearingSeekLoop.mover_topic`: a candidate confirmed by its own prediction over 0.5 s, then
+the predicted position as the target, need 1, no arrival, forgotten after 1 s into a remembered target); six unit
+tests; the `"chase"` record; `mover_tracks.py --chases`. Arms: R85 = R84 + the chase; R86 = R85 + `walk_things false`
+(the things reduction at stops only, O65). Presets R85 and R86, the R84 argv.
+
+**The first arm found a bug, not a verdict.** R85 on R84's control chased the room: 338 chases in six runs, one at
+the moving train, the chased "movers" reading the body's own speed. The walking cloud's bearing was taken from the
+cloud's anchor rather than the body, so every static cluster read as moving at the body's velocity once the body had
+walked from the anchor — the same bearing that fed R74's walk re-fix (O61). Fixed with a unit test; R84, R85 and R86
+re-measured together on the fixed bearing (§17.54 for the numbers).

@@ -4410,3 +4410,42 @@ might read the speed, but the age already answers the question the speed was ask
 each has its remover in the loop: a thing newly in view ages out within a second (persistence under the loop's own
 prediction), the far fragments fall to the last-metre gate. Stage 1 builds the gate and the moving fix (the phase
 page §5). Register: O63 updated, O64 opened.
+
+### 17.54 Stage 1 of the chase: the mover candidate, the moving fix, and the bearing that was taken from the anchor (R85, R86; 2026-09-27 evening)
+
+**Built** (the phase page §5's design, off by default): `CloudMap.mover_topic` — the cluster of the open cloud, through
+the recency window, whose hit-weighted mean voxel age is under `mover_age_k` (0.06) × the OLDEST cluster's age in the
+window (the cloud's own proof of how long it has been watching; a fresh cloud vouches for nothing), within
+`mover_range` (1.5 m), any size, the nearest published as [vx, vy, proximity, age, oldest]; and the CHASE in
+`BearingSeekLoop.mover_topic` — a sighting held as a candidate with a position in the odometry frame, confirmed by a
+later sighting within `chase_gate_m` (0.35) of where the candidate should now be, chased after `chase_confirm` (2)
+sightings spread over `chase_confirm_ticks` (25): the target its predicted position `chase_lead_s` (0.3) ahead, the
+need 1, no arrival, forgotten after `chase_forget_ticks` (50) unseen into an ordinary remembered target. Four unit
+tests on the loop, two on the candidate. R85 = R84 + both topics; the record carries `"chase"`; `mover_tracks.py
+--chases` labels every chase by what its target really was, through the body's own pose.
+
+**R85, the first arm (n = 6, R84's control, the same room and argv): the chase chased the room.** 338 chases in six
+runs (56 a run, 1.2 s each, 82 s of chasing a run): 301 at static clusters, 33 at balls and blocks, 3 at the stopped
+train, **1 at the moving train**; the closest approach to a moving train 1.4–2.4 m by seed. The walk changed with it:
+seek held the reference 38 → 78 % of the walk (play 62 → 22 %), walls 31 → 19 a minute, rescues 0.12 → 0.09,
+stands and stops the same. Not a gate that fails on the room's flicker: the seed-1 smoke run showed 9 chases in 240 s
+with the chased "movers" reading 0.2–0.3 m/s — the body's own speed.
+
+**The bug.** `CloudMap::update_bearing` (and the mover's copy) turned the cluster's ANCHOR-frame position into the
+body frame by the yaw drift alone. On a stop's cloud the body is the anchor (translation is ignored on purpose,
+the header's point 3). On a WALKING cloud the body has moved up to `walk_reset_m` from the anchor, so the bearing
+and the range were those from the anchor: a fix in the odometry frame then equals the thing's true position plus
+the body's displacement since the anchor — every static cluster reads as a thing moving at the body's velocity,
+and the chase, asked to confirm a thing that follows its own prediction, confirmed the room. Fixed (`body_rel`:
+the body's displacement, in the anchor's frame, taken off before the turn; the attended thing and the mover chosen
+by the range from the BODY; a unit test with the body 0.4 m along and 0.3 m beside the line). Stop clouds are
+untouched by construction (R83's guard: md5 `6b9a0b3a…` before and after). **The same bearing fed R74's walk re-fix
+(§17.47, O61): "the re-fix drifts to wall bases and legs within 0.5 m" is what a fix that carries the body's
+displacement does. O61's verdict stands as measured; its re-use context is now this fix.**
+
+**O65, the walk under the walking cloud** (the operator's eye on R84 seed 1: the corner from 893 s, several falls):
+wall episodes 256 → 944 on seed 1 against R83, most between 800 and 1400 s with play steering; seek's targets from
+sightings 11 → 10, renewals 0 in both, arrivals 9 → 5 — not seek's targets. `CloudMap.walk_things false` (the
+things reduction at stops only, the mover still on the walk) is the first lever: R86 = R85 + it. The bearing bug
+touched this walk too (the attended thing on the walk fed the thing and kind EPMs and the outcome loop at the
+wrong range), so R84, R85 and R86 are re-measured together on the fixed bearing.

@@ -34,7 +34,7 @@ The go/no-go for stage 1 (the mover gate): a gate on the cloud's own per-voxel a
 and stays quiet on the static room.
 
 usage:
-  mover_tracks.py LOG... [--scene mj_host/models/microduck/scene_playroom_train.xml] [--window 0.5]
+  mover_tracks.py LOG... [--scene mj_host/models/microduck/scene_playroom_train.xml] [--window 0.5] [--chases]
                          [--gate 0.10] [--label-m 0.22] [--compact-m 0.25] [--svg out.svg] [--svg-fresh out.svg] [--per-seed]
 """
 import argparse
@@ -277,6 +277,90 @@ def score_log(path, layout, objs, window, gate, label_m, compact_m):
                 out["speeds_cm"][key].append(sp_cm)
             out["rows"].append((tsec, key, vt, sp, sp_cm, c["rng"], c["fresh"], c["age"], cloud_age, track_age, dir_err, c["hits"], c["age_w"]))
     return out
+
+
+def score_chases(path, layout, objs, label_m):
+    """THE CHASE (stage 1): every chase episode from the "chase" records -- [chasing, n, tx, ty, vx, vy, mover_seen] with the
+    target in the ODOMETRY frame -- labelled by truth through the body's own pose: target_world = body_world +
+    R(yaw_true - yaw_odom) (target_odom - body_odom).  Per episode: start, length, what it chased (the label of the target
+    at the start and over the episode), the closest true approach to the train while it moved, and how it ended."""
+    eps = []
+    cur = None
+    for line in open(path):
+        if not line.startswith("{") or '"chase"' not in line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        ch = r["chase"]
+        chasing = int(ch[0]) == 1
+        tick = r["tick"]
+        tr = r.get("train")
+        qpos = r["qpos"]
+        bx, by = r["x"], r["y"]
+        byaw = quat_yaw(qpos[3], qpos[4], qpos[5], qpos[6])
+        ox, oy, oyaw = r["odom"]
+        if chasing:
+            # the target in the world through the body's pose
+            dx, dy = ch[2] - ox, ch[3] - oy
+            dth = byaw - oyaw
+            wx = bx + math.cos(dth) * dx - math.sin(dth) * dy
+            wy = by + math.sin(dth) * dx + math.cos(dth) * dy
+            label = "static"
+            d_train = float("inf")
+            if tr:
+                d_train = math.hypot(wx - tr[0], wy - tr[1])
+                if d_train < label_m:
+                    label = "train_moving" if int(tr[5]) == 1 else "train_stopped"
+            if label == "static":
+                for o in objs:
+                    if math.hypot(wx - qpos[layout[o][0]], wy - qpos[layout[o][0] + 1]) < label_m:
+                        label = "obj"; break
+            body_to_train = math.hypot(bx - tr[0], by - tr[1]) if tr else float("inf")
+            if cur is None:
+                cur = dict(start=tick, end=tick, labels=defaultdict(int), first=label, closest=body_to_train,
+                           closest_moving=body_to_train if (tr and int(tr[5]) == 1) else float("inf"), walls=0, wall_prev=0)
+            cur["end"] = tick
+            cur["labels"][label] += 1
+            cur["closest"] = min(cur["closest"], body_to_train)
+            if tr and int(tr[5]) == 1:
+                cur["closest_moving"] = min(cur["closest_moving"], body_to_train)
+            w = r.get("wall", 0)
+            if w and not cur["wall_prev"]:
+                cur["walls"] += 1
+            cur["wall_prev"] = w
+        elif cur is not None:
+            cur["end_event"] = r.get("event", "")
+            eps.append(cur); cur = None
+    if cur is not None:
+        eps.append(cur)
+    return eps
+
+
+def report_chases(all_eps, secs_per_log):
+    print("\n7. THE CHASE (stage 1): every chase episode, what it really chased (the truth label of its target), per seed")
+    print("   seed  chases   s/chase  train-moving  train-stopped  obj  static   closest to a MOVING train (m, p50)   walls in chases")
+    for seed, eps in all_eps:
+        if not eps:
+            print(f"   {str(seed):5s}      0"); continue
+        by = defaultdict(int)
+        for e in eps:
+            by[max(e["labels"], key=e["labels"].get)] += 1
+        lens = [(e["end"] - e["start"]) / HZ for e in eps]
+        cm = [e["closest_moving"] for e in eps if e["closest_moving"] < 10]
+        print(f"   {str(seed):5s}  {len(eps):6d}   {statistics.median(lens):6.1f}   {by['train_moving']:8d}   {by['train_stopped']:10d}   {by['obj']:4d}   {by['static']:5d}"
+              f"   {fmt(pct(cm, .5), 2) if cm else '  -  '} (n={len(cm)})                 {sum(e['walls'] for e in eps)}")
+    tot = [e for _, eps in all_eps for e in eps]
+    if tot:
+        by = defaultdict(int)
+        for e in tot:
+            by[max(e["labels"], key=e["labels"].get)] += 1
+        n = len(tot)
+        print(f"   all: {n} chases over {len(all_eps)} logs ({n / max(1, len(all_eps)):.1f} a run); by target: train moving {by['train_moving']}"
+              f" ({by['train_moving'] / n:.2f}), stopped {by['train_stopped']}, balls/blocks {by['obj']}, static {by['static']} ({by['static'] / n:.2f});"
+              f" median length {statistics.median((e['end'] - e['start']) / HZ for e in tot):.1f} s;"
+              f" seconds chasing a run {sum((e['end'] - e['start']) / HZ for e in tot) / max(1, len(all_eps)):.0f}")
 
 
 def fmt(x, d=3):
@@ -546,8 +630,17 @@ def main():
     ap.add_argument("--svg-fresh", default=None, help="the freshness scatter")
     ap.add_argument("--svg-age", default=None, help="the voxel-age scatter (log scale)")
     ap.add_argument("--per-seed", action="store_true")
+    ap.add_argument("--chases", action="store_true", help="stage 1: score the chase episodes of the 'chase' records only")
     a = ap.parse_args()
     _m, layout, objs = load_manifest(a.scene)
+    if a.chases:
+        all_eps = []
+        for p in a.logs:
+            eps = score_chases(Path(p), layout, objs, a.label_m)
+            m = re.search(r"_s(\d+)\.jsonl$", Path(p).name)
+            all_eps.append((int(m.group(1)) if m else Path(p).stem, eps))
+        report_chases(all_eps, 0)
+        return
     results = [score_log(Path(p), layout, objs, a.window, a.gate, a.label_m, a.compact_m) for p in a.logs]
     report(results, a.window, a.per_seed)
     if a.svg:

@@ -36,6 +36,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{bearing_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!mover_topic_.empty()) v.push_back(TopicSpec{mover_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
 }
 std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
@@ -86,6 +87,25 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "A bearing flagged as seen from a WALKING cloud (the token's 4th value) refines a held target when its fix lies within this of it, "
             "and never sets a new one; 0 = walking bearings are ignored.  The approach is then by sight.",
             ParamValue{0.0}},
+        {"mover_topic", ParamMutability::ConstructionOnly,
+            "THE CHASE: ProprioToken [vx=+right, vy=+forward, proximity, age, oldest] (CloudMap mover_topic) -- a cluster whose voxels are "
+            "young against the cloud's own.  Sightings that follow their own prediction become a chased target with a velocity; "
+            "see the header.  Empty = off.",
+            ParamValue{std::string("")}},
+        {"chase_gate_m", ParamMutability::HotMutable,
+            "A sighting confirms the candidate when its fix lies within this (metres) of the candidate's predicted position.", ParamValue{0.35}},
+        {"chase_confirm", ParamMutability::HotMutable,
+            "Sightings (including the first) before the candidate is chased.", ParamValue{int64_t{2}}},
+        {"chase_confirm_ticks", ParamMutability::HotMutable,
+            "...spread over at least this many ticks: a static thing newly in view is young for under a second and must age out first.",
+            ParamValue{int64_t{25}}},
+        {"chase_forget_ticks", ParamMutability::HotMutable,
+            "No confirming sighting for this many ticks ends the chase; the last predicted position stays as a remembered target.",
+            ParamValue{int64_t{50}}},
+        {"chase_lead_s", ParamMutability::HotMutable,
+            "The target is the candidate's predicted position this far ahead (seconds of its velocity).", ParamValue{0.3}},
+        {"chase_v_max", ParamMutability::HotMutable,
+            "A fix implying a faster mover than this (m/s) is another cluster, not a confirmation.", ParamValue{1.0}},
     };
 }
 
@@ -98,6 +118,10 @@ ParamMap BearingSeekLoop::current_params() const {
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["renew_topic"] = ParamValue{renew_topic_}; m["renew_min"] = ParamValue{double(renew_min_)}; m["renew_range"] = ParamValue{renew_range_};
     m["walk_refix_m"] = ParamValue{walk_refix_m_};
+    m["mover_topic"] = ParamValue{mover_topic_}; m["chase_gate_m"] = ParamValue{chase_gate_m_};
+    m["chase_confirm"] = ParamValue{int64_t(chase_confirm_)}; m["chase_confirm_ticks"] = ParamValue{int64_t(chase_confirm_ticks_)};
+    m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
+    m["chase_v_max"] = ParamValue{chase_v_max_};
     return m;
 }
 
@@ -118,6 +142,13 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "renew_min",       [&](auto const& v){ renew_min_     = float(get_double(v,"renew_min")); });
     apply_param(params, "renew_range",     [&](auto const& v){ renew_range_   = get_double(v,"renew_range"); });
     apply_param(params, "walk_refix_m",    [&](auto const& v){ walk_refix_m_  = get_double(v,"walk_refix_m"); });
+    apply_param(params, "mover_topic",     [&](auto const& v){ mover_topic_   = get_string(v,"mover_topic"); });
+    apply_param(params, "chase_gate_m",    [&](auto const& v){ chase_gate_m_  = get_double(v,"chase_gate_m"); });
+    apply_param(params, "chase_confirm",   [&](auto const& v){ chase_confirm_ = std::max(1, int(get_double(v,"chase_confirm"))); });
+    apply_param(params, "chase_confirm_ticks", [&](auto const& v){ chase_confirm_ticks_ = std::max(0, int(get_double(v,"chase_confirm_ticks"))); });
+    apply_param(params, "chase_forget_ticks", [&](auto const& v){ chase_forget_ticks_ = std::max(1, int(get_double(v,"chase_forget_ticks"))); });
+    apply_param(params, "chase_lead_s",    [&](auto const& v){ chase_lead_s_  = get_double(v,"chase_lead_s"); });
+    apply_param(params, "chase_v_max",     [&](auto const& v){ chase_v_max_   = get_double(v,"chase_v_max"); });
 }
 
 void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -130,6 +161,12 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "renew_min")       renew_min_ = float(get_double(value, k));
     else if (k == "renew_range")     renew_range_ = get_double(value, k);
     else if (k == "walk_refix_m")    walk_refix_m_ = get_double(value, k);
+    else if (k == "chase_gate_m")    chase_gate_m_ = get_double(value, k);
+    else if (k == "chase_confirm")   chase_confirm_ = std::max(1, int(get_double(value, k)));
+    else if (k == "chase_confirm_ticks") chase_confirm_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "chase_forget_ticks") chase_forget_ticks_ = std::max(1, int(get_double(value, k)));
+    else if (k == "chase_lead_s")    chase_lead_s_ = get_double(value, k);
+    else if (k == "chase_v_max")     chase_v_max_ = get_double(value, k);
     else throw std::invalid_argument("BearingSeekLoop: param '" + k + "' is construction-only / unknown");
 }
 
@@ -171,7 +208,18 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
             }
         }
     }
-    if (seen_ && have_pose_) {
+    // the chase: a mover sighting becomes a candidate, confirms by its own prediction, and preempts the static fix
+    if (!mover_topic_.empty() && have_pose_) chase_tick(tick_id, c, s);
+    if (chasing_) {
+        const double dt = double(tick_id - cand_tick_) / 50.0 + chase_lead_s_;
+        tx_ = cand_x_ + cand_vx_ * dt; ty_ = cand_y_ + cand_vy_ * dt;
+        have_target_ = true; conf_ = 1.0f; ++chase_ticks_;
+        const double dx = tx_ - px_, dy = ty_ - py_;
+        range_left_ = std::hypot(dx, dy);
+        const double bx = c * dx + s * dy, by = -s * dx + c * dy;
+        if (range_left_ > 1e-6) { cx_ = float(-by / range_left_); cy_ = float(bx / range_left_); }
+        else { cx_ = 0.0f; cy_ = 0.0f; }
+    } else if (seen_ && have_pose_) {
         // fix the thing's position: the body's pose plus the bearing (body frame: +x forward, +y left)
         // at the range the proximity encodes
         const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
@@ -217,6 +265,49 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         r->tick_id = tick_id; r->producer_id = out->producer_id; r->sensor = "seek_range";
         r->values = Eigen::VectorXf::Constant(1, float(range_left_));
         bus_->publish(range_topic_, r);
+    }
+}
+
+void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
+    float mx = 0.0f, my = 0.0f, mprox = 0.0f;
+    if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(mover_topic_))) {
+        if (pt->tick_id == tick_id && pt->values.size() >= 3) { mx = pt->values[0]; my = pt->values[1]; mprox = pt->values[2]; }
+    }
+    mover_seen_ = mprox > min_conf_ && (mx * mx + my * my) > 1e-6f;
+    if (mover_seen_) {
+        const double n = std::sqrt(double(mx) * mx + double(my) * my);
+        const double fwd = my / n, left = -mx / n, range = std::max(0.0, 1.0 - double(mprox)) * proximity_range_;
+        const double bx = fwd * range, by = left * range;
+        const double fx = px_ + c * bx - s * by, fy = py_ + s * bx + c * by;   // the sighting, odometry frame
+        if (have_cand_ && tick_id > cand_tick_) {
+            const double dt = double(tick_id - cand_tick_) / 50.0;
+            const double ex = cand_x_ + cand_vx_ * dt, ey = cand_y_ + cand_vy_ * dt;   // where the candidate should be
+            const double miss = std::hypot(fx - ex, fy - ey);
+            const double vx = (fx - cand_x_) / dt, vy = (fy - cand_y_) / dt;
+            if (miss <= chase_gate_m_ && std::hypot(vx, vy) <= chase_v_max_) {
+                // a confirmation: the velocity follows the sightings (a new candidate's first step sets it outright)
+                const double a = cand_n_ >= 2 ? 0.5 : 1.0;
+                cand_vx_ = (1.0 - a) * cand_vx_ + a * vx; cand_vy_ = (1.0 - a) * cand_vy_ + a * vy;
+                cand_x_ = fx; cand_y_ = fy; cand_tick_ = tick_id; ++cand_n_;
+            } else if (!chasing_) {
+                // an unconfirmed candidate that did not follow: this sighting is the new candidate
+                cand_x_ = fx; cand_y_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+            }
+            // (a chased target ignores a stray sighting; it is another thing)
+        } else if (!have_cand_) {
+            have_cand_ = true;
+            cand_x_ = fx; cand_y_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+        }
+        if (!chasing_ && cand_n_ >= chase_confirm_ && tick_id - cand_first_ >= uint64_t(chase_confirm_ticks_)) {
+            chasing_ = true; ++chases_;
+        }
+    }
+    if (have_cand_ && tick_id - cand_tick_ > uint64_t(chase_forget_ticks_)) {
+        if (chasing_) {
+            // the chase ends where the thing was last predicted to be: an ordinary remembered target from here
+            tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f;
+        }
+        chasing_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
     }
 }
 

@@ -8,6 +8,7 @@
 
 #include "ogma/GraphConfig.hpp"
 #include "ogma/modules/CloudMap.hpp"
+#include "ogma/modules/BearingSeekLoop.hpp"
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
 #include "ogma/Rng.hpp"
@@ -427,6 +428,31 @@ const ogma::CloudMap* find_cloud(ogma::OgmaInstance& inst) {
 }
 }  // namespace
 
+namespace {
+const ogma::BearingSeekLoop* find_seek(ogma::OgmaInstance& inst) {
+    for (auto* m : inst.modules())
+        if (auto* c = dynamic_cast<const ogma::BearingSeekLoop*>(m)) return c;
+    return nullptr;
+}
+}  // namespace
+bool IntentAdapter::chase_present() const {
+    auto* q = find_seek(*instance_);
+    if (!q) return false;
+    const auto p = q->current_params();
+    auto it = p.find("mover_topic");
+    if (it == p.end()) return false;
+    auto sv = std::get_if<std::string>(&it->second);
+    return sv && !sv->empty();
+}
+double IntentAdapter::seek_target_x() const { auto* q = find_seek(*instance_); return q && q->have_target() ? q->target_x() : 0.0; }
+double IntentAdapter::seek_target_y() const { auto* q = find_seek(*instance_); return q && q->have_target() ? q->target_y() : 0.0; }
+bool   IntentAdapter::chase_active() const { auto* q = find_seek(*instance_); return q && q->chasing(); }
+int    IntentAdapter::chase_n()      const { auto* q = find_seek(*instance_); return q ? q->chase_n() : 0; }
+int    IntentAdapter::chases()       const { auto* q = find_seek(*instance_); return q ? q->chases() : 0; }
+double IntentAdapter::chase_vx()     const { auto* q = find_seek(*instance_); return q ? q->chase_vx() : 0.0; }
+double IntentAdapter::chase_vy()     const { auto* q = find_seek(*instance_); return q ? q->chase_vy() : 0.0; }
+bool   IntentAdapter::mover_seen()   const { auto* q = find_seek(*instance_); return q && q->mover_seen(); }
+int    IntentAdapter::mover_cands()  const { auto* c = find_cloud(*instance_); return c ? c->mover_candidates() : 0; }
 bool IntentAdapter::cloud_present() const { return find_cloud(*instance_) != nullptr; }
 bool IntentAdapter::cloud_open() const { auto* c = find_cloud(*instance_); return c && c->is_open(); }
 bool IntentAdapter::cloud_just_closed() const { auto* c = find_cloud(*instance_); return c && c->just_closed(); }

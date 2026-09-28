@@ -1581,6 +1581,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      g_train.speed, g_train.run_s, g_train.stop_s, cycle, track.cx, track.cy, track.a, track.b, track.yaw,
                      track.length, train_phase, train_s, (unsigned long long)seed);
     }
+    const bool chase_on = brain.chase_present();
+    if (chase_on) std::fprintf(stderr, "  chase: the seek loop chases a mover of the cloud (young voxels, confirmed by its own prediction); logging \"chase\"\n");
     if (g_log_movers_s > 0.0) std::fprintf(stderr, "  movers: logging the cloud's clusters through a %.2f s recency window on every cast (mvc / mva / mvw)\n", g_log_movers_s);
     const bool has_objects = body.n_objects() > 0;
     std::unique_ptr<HeadAdapter> head;
@@ -2493,6 +2495,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (brain.seek_present()) std::printf(",\"seek\":[%.3f,%.3f,%d]", brain.seek_value(), brain.seek_range(), brain.seek_gated());
             if (g_log_com) { const auto cm = body.com_over_feet(); std::printf(",\"com\":[%.4f,%.4f,%.4f]", cm[0], cm[1], cm[2]); }
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
+            // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick]
+            if (chase_on) std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d]", brain.chase_active() ? 1 : 0, brain.chase_n(),
+                                      brain.seek_target_x(), brain.seek_target_y(), brain.chase_vx(), brain.chase_vy(), brain.mover_seen() ? 1 : 0);
             // MOVERS (stage 0): the clusters through the recency window, on cast ticks with a cloud open
             if (g_log_movers_s > 0.0 && cloud_on && t % 4 == 0 && brain.cloud_open()) {
                 const auto th = brain.cloud_things_recent(uint64_t(std::lround(g_log_movers_s * kBrainHz)));
@@ -2671,6 +2676,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
+        if (chase_on) std::fprintf(stderr, "  chases: %d started, %d mover candidates seen by the cloud\n", brain.chases(), brain.mover_cands());
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);

@@ -86,6 +86,34 @@ private:
     int    refixes_ = 0;
 public:
     int refixes() const { return refixes_; }
+    // THE CHASE (the chase phase, stage 1, 2026-09-27): the moving fix.  CloudMap's mover_topic names a cluster whose
+    // voxels are young against the cloud's own -- a thing that is not where "things do not move" predicted it
+    // (design doc §17.53).  The loop holds such a sighting as a CANDIDATE with a position in the odometry frame;
+    // a later sighting within chase_gate_m of where the candidate would now be (its position plus its velocity
+    // times the time since) confirms it and updates the velocity; after chase_confirm sightings spread over at
+    // least chase_confirm_ticks the candidate is CHASED: the target is its predicted position a chase_lead_s ahead,
+    // re-fixed by every confirming sighting, the need 1, and arrival does not drop it (a mover's error is never
+    // fulfilled by standing where it was).  With no confirming sighting for chase_forget_ticks the chase ends and
+    // the last predicted position stays as an ordinary remembered target: where it stopped is where to go and
+    // look.  A static thing newly in view is young for under a second and ages out before it confirms; a fragment
+    // sliding along a wall does not follow the prediction.  Empty mover_topic = off, byte-identical.
+    bool   chasing()        const { return chasing_; }
+    int    chase_n()        const { return cand_n_; }
+    int    chases()         const { return chases_; }
+    double chase_vx()       const { return cand_vx_; }
+    double chase_vy()       const { return cand_vy_; }
+    bool   mover_seen()     const { return mover_seen_; }
+private:
+    std::string mover_topic_;
+    double chase_gate_m_ = 0.35, chase_lead_s_ = 0.3, chase_v_max_ = 1.0;
+    int    chase_confirm_ = 2, chase_confirm_ticks_ = 25, chase_forget_ticks_ = 50;
+    bool   have_cand_ = false, chasing_ = false, mover_seen_ = false;
+    double cand_x_ = 0.0, cand_y_ = 0.0, cand_vx_ = 0.0, cand_vy_ = 0.0;
+    uint64_t cand_tick_ = 0, cand_first_ = 0;
+    int    cand_n_ = 0, chases_ = 0, chase_ticks_ = 0;
+    void   chase_tick(uint64_t tick_id, double c, double s);
+public:
+    int chase_ticks() const { return chase_ticks_; }
 private:
 
     bool   seen_ = false, have_target_ = false;

@@ -42,6 +42,7 @@ std::vector<TopicSpec> CloudMap::output_topics() const {
     if (!change_topic_.empty()) t.emplace_back(change_topic_, std::type_index(typeid(ProprioToken)));
     if (!things_topic_.empty()) t.emplace_back(things_topic_, std::type_index(typeid(ProprioToken)));
     if (!thing_bearing_topic_.empty()) t.emplace_back(thing_bearing_topic_, std::type_index(typeid(ProprioToken)));
+    if (!mover_topic_.empty()) t.emplace_back(mover_topic_, std::type_index(typeid(ProprioToken)));
     return t;
 }
 
@@ -165,6 +166,31 @@ ParamSchema CloudMap::params_schema() const {
          "the time at a matched 5 % false-positive rate offline — measured with the wrong-signed "
          "de-rotation, so re-measure before leaning on it.",
          ParamValue{int64_t{50}}, ParamValue{int64_t{2}}, ParamValue{int64_t{2000}}},
+        {"walk_things", ParamMutability::HotMutable,
+         "With walk_cloud: whether the things reduction (attended thing, descriptor, bearing) runs on a WALKING cloud.  "
+         "false = things at stops only, as without walk_cloud; the mover candidate still reads the walking cloud.  "
+         "R84 (true) made seed 1 a wall walk (O65).",
+         ParamValue{true}},
+        {"mover_topic", ParamMutability::ConstructionOnly,
+         "MOVERS (the chase phase): ProprioToken [vx=+right, vy=+forward, proximity, age_ticks, oldest_ticks] to the nearest cluster "
+         "of the open cloud whose voxels are young against the cloud's own (see the header); zeros when none.  "
+         "Empty = off, byte-identical.",
+         ParamValue{std::string("")}},
+        {"mover_window_ticks", ParamMutability::HotMutable,
+         "The recency window the clusters are taken through (ticks); 25 = 0.5 s at 50 Hz (stage 0's window).",
+         ParamValue{int64_t{25}}},
+        {"mover_age_k", ParamMutability::HotMutable,
+         "A cluster is a mover candidate when its mean voxel age is under this fraction of the OLDEST cluster's age in the "
+         "window -- the threshold follows the cloud's own watching, never a constant.  Stage 0: the moving train 0.26 s "
+         "against static 7 s, so 0.06 puts the gate near 0.4 s once the cloud has watched for 7 s.",
+         ParamValue{0.06}, ParamValue{0.0}, ParamValue{1.0}},
+        {"mover_range", ParamMutability::HotMutable,
+         "Candidates only within this range (metres): stage 0's false alarms rise fourfold from the first metre to the "
+         "second; the reach is from the walk in the last metre.",
+         ParamValue{1.5}},
+        {"mover_weighted", ParamMutability::HotMutable,
+         "true: the hit-weighted voxel age (a re-hit voxel counts for its returns); false: the plain mean.",
+         ParamValue{true}},
     };
 }
 
@@ -197,6 +223,9 @@ ParamMap CloudMap::current_params() const {
     m["things_range"] = things_range_;
     m["things_every"] = int64_t{things_every_};
     m["walk_cloud"] = walk_cloud_;
+    m["walk_things"] = walk_things_;
+    m["mover_topic"] = ParamValue{mover_topic_}; m["mover_window_ticks"] = int64_t(mover_window_);
+    m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_;
     m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
@@ -225,6 +254,11 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "things_every") things_every_ = std::max(1, int(get_d(one, "things_every", things_every_)));
     else if (k == "walk_cloud")  walk_cloud_ = get_d(one, "walk_cloud", 0.0) > 0.5;
     else if (k == "walk_reset_m") walk_reset_m_ = get_d(one, "walk_reset_m", walk_reset_m_);
+    else if (k == "walk_things") walk_things_ = get_d(one, "walk_things", 1.0) > 0.5;
+    else if (k == "mover_window_ticks") mover_window_ = std::max(1, int(get_d(one, "mover_window_ticks", mover_window_)));
+    else if (k == "mover_age_k") mover_age_k_ = get_d(one, "mover_age_k", mover_age_k_);
+    else if (k == "mover_range") mover_range_ = get_d(one, "mover_range", mover_range_);
+    else if (k == "mover_weighted") mover_weighted_ = get_d(one, "mover_weighted", 1.0) > 0.5;
 }
 
 void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
@@ -258,6 +292,12 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     things_on_ = !things_topic_.empty() || !thing_bearing_topic_.empty();
     walk_cloud_ = get_d(params, "walk_cloud", 0.0) > 0.5;
     walk_reset_m_ = get_d(params, "walk_reset_m", walk_reset_m_);
+    walk_things_ = get_d(params, "walk_things", 1.0) > 0.5;
+    mover_topic_ = get_s(params, "mover_topic");
+    mover_window_ = std::max(1, int(get_d(params, "mover_window_ticks", mover_window_)));
+    mover_age_k_ = get_d(params, "mover_age_k", mover_age_k_);
+    mover_range_ = get_d(params, "mover_range", mover_range_);
+    mover_weighted_ = get_d(params, "mover_weighted", 1.0) > 0.5;
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
@@ -392,6 +432,7 @@ void CloudMap::tick(uint64_t tick_id) {
     const double yaw = double(pt->values[1]);
     const double trunk_z = double(pt->values[2]);
     const double ox = double(pt->values[3]), oy = double(pt->values[4]);
+    cur_x_ = ox; cur_y_ = oy;
 
     if (still) { ++still_run_; move_run_ = 0; } else { ++move_run_; still_run_ = 0; }
     if (walk_cloud_) {
@@ -431,7 +472,11 @@ void CloudMap::tick(uint64_t tick_id) {
     }
     // The revisit judgement is made at FILE time, on a finished cloud — see file_cloud.
 
-    if (things_on_) {
+    if (things_on_ && !walk_things_ && open_ && walking_cloud_) {
+        // things at stops only: a walking cloud attends nothing and the bearing reads zeros (proximity 0)
+        things_.clear(); attended_ = -1; bearing_ = {0.0f, 0.0f, 0.0f};
+        publish_bearing(tick_id);
+    } else if (things_on_) {
         if (tick_id % uint64_t(things_every_) == 0) update_things(yaw);
         else if (attended_ >= 0) update_bearing(yaw);   // the body's yaw drifts between recomputes
         if (!things_topic_.empty() && attended_ >= 0) {
@@ -444,6 +489,11 @@ void CloudMap::tick(uint64_t tick_id) {
             bus_->publish(things_topic_, out);
         }
         publish_bearing(tick_id);
+    }
+    if (!mover_topic_.empty()) {
+        if (tick_id % uint64_t(things_every_) == 0) update_movers(yaw, tick_id);
+        else if (mover_ >= 0) mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
+        publish_mover(tick_id);
     }
 
     if (!output_topic_.empty()) {
@@ -577,18 +627,7 @@ std::vector<float> CloudMap::thing_descriptor(const Thing& t) const {
 void CloudMap::update_bearing(double yaw) {
     bearing_ = {0.0f, 0.0f, 0.0f};
     if (attended_ < 0 || attended_ >= int(things_.size())) return;
-    const Thing& t = things_[size_t(attended_)];
-    if (t.rng < 1e-6) return;
-    // the cloud's frame is the anchor's; the body has since yawed by d, so the thing it sees is turned by -d
-    double d = yaw - anchor_yaw_;
-    while (d > kPi) d -= 2.0 * kPi;
-    while (d < -kPi) d += 2.0 * kPi;
-    const double c = std::cos(-d), s = std::sin(-d);
-    const double bx = c * t.cx - s * t.cy, by = s * t.cx + c * t.cy;   // body frame: x forward, y left
-    const double reach = things_range_ > 0.0 ? things_range_ : max_range_;
-    bearing_[0] = float(-by / t.rng);                                   // +right
-    bearing_[1] = float(bx / t.rng);                                    // +forward
-    bearing_[2] = float(std::clamp(1.0 - t.rng / reach, 0.0, 1.0));
+    bearing_ = bearing_of(things_[size_t(attended_)], yaw);   // relative to the BODY (body_rel), stop or walk
 }
 
 // Every tick the topic exists, open cloud or not: while the body walks the cloud is closed and nothing is
@@ -607,12 +646,84 @@ void CloudMap::publish_bearing(uint64_t tick_id) {
     bus_->publish(thing_bearing_topic_, out);
 }
 
+void CloudMap::body_rel(const Thing& t, double yaw, double& bx, double& by, double& rng) const {
+    // the body's displacement from the anchor, in the anchor's frame (zero for a stop's cloud: translation ignored)
+    double tx = 0.0, ty = 0.0;
+    if (walking_cloud_) {
+        const double dx = cur_x_ - anchor_x_, dy = cur_y_ - anchor_y_;
+        const double ca = std::cos(-anchor_yaw_), sa = std::sin(-anchor_yaw_);
+        tx = ca * dx - sa * dy; ty = sa * dx + ca * dy;
+    }
+    const double rx = t.cx - tx, ry = t.cy - ty;                        // the cluster relative to the body, anchor frame
+    double d = yaw - anchor_yaw_;                                       // the body has since yawed by d: turn by -d
+    while (d > kPi) d -= 2.0 * kPi;
+    while (d < -kPi) d += 2.0 * kPi;
+    const double c = std::cos(-d), s = std::sin(-d);
+    bx = c * rx - s * ry; by = s * rx + c * ry;                         // body frame: x forward, y left
+    rng = std::hypot(bx, by);
+}
+
+std::array<float, 3> CloudMap::bearing_of(const Thing& t, double yaw) const {
+    std::array<float, 3> b{0.0f, 0.0f, 0.0f};
+    double bx, by, rng;
+    body_rel(t, yaw, bx, by, rng);
+    if (rng < 1e-6) return b;
+    const double reach = things_range_ > 0.0 ? things_range_ : max_range_;
+    b[0] = float(-by / rng);                                            // +right
+    b[1] = float(bx / rng);                                             // +forward
+    b[2] = float(std::clamp(1.0 - rng / reach, 0.0, 1.0));
+    return b;
+}
+
+void CloudMap::update_movers(double yaw, uint64_t tick_id) {
+    mover_ = -1; mover_bearing_ = {0.0f, 0.0f, 0.0f}; mover_age_s_ = 0.0; mover_oldest_s_ = 0.0;
+    recent_.clear();
+    if (!open_) return;
+    // a cloud vouches for nothing until it has watched for two windows
+    if (tick_id < opened_tick_ + 2 * uint64_t(mover_window_)) return;
+    recent_ = cluster_recent(uint64_t(mover_window_));
+    if (recent_.size() < 2) return;
+    double oldest = 0.0;
+    for (auto const& t : recent_) oldest = std::max(oldest, mover_weighted_ ? t.age_w : t.age);
+    if (oldest <= 0.0) return;
+    const double thr = mover_age_k_ * oldest;
+    double best = 1e9;
+    for (size_t i = 0; i < recent_.size(); ++i) {
+        const Thing& t = recent_[i];
+        const double age = mover_weighted_ ? t.age_w : t.age;
+        double bx, by, rng; body_rel(t, yaw, bx, by, rng);                // the range from the BODY, not the anchor
+        if (rng > mover_range_ || age >= thr) continue;
+        ++mover_cands_;
+        if (rng < best) { best = rng; mover_ = int(i); mover_age_s_ = age; mover_oldest_s_ = oldest; }
+    }
+    if (mover_ >= 0) mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
+}
+
+void CloudMap::publish_mover(uint64_t tick_id) {
+    auto out = std::make_shared<ProprioToken>();
+    out->tick_id = tick_id;
+    out->producer_id = std::string(id());
+    out->sensor = "mover_bearing";
+    out->values = Eigen::VectorXf::Zero(5);
+    if (mover_ >= 0) {
+        out->values[0] = mover_bearing_[0]; out->values[1] = mover_bearing_[1]; out->values[2] = mover_bearing_[2];
+        out->values[3] = float(mover_age_s_); out->values[4] = float(mover_oldest_s_);   // ticks
+    }
+    bus_->publish(mover_topic_, out);
+}
+
 void CloudMap::update_things(double yaw) {
     things_ = cluster_things();
     attended_ = -1;
     const double reach = things_range_ > 0.0 ? things_range_ : max_range_;
-    for (size_t i = 0; i < things_.size(); ++i)                        // sorted by range: the first small one is the nearest
-        if (things_[i].small && things_[i].rng <= reach) { attended_ = int(i); break; }
+    // sorted by range from the anchor; on a walking cloud the BODY's range is what the reach means, so the nearest
+    // small thing by body range within reach is attended (identical on a stop's cloud, where the body is the anchor)
+    double best = 1e9;
+    for (size_t i = 0; i < things_.size(); ++i) {
+        if (!things_[i].small) continue;
+        double bx, by, rng; body_rel(things_[i], yaw, bx, by, rng);
+        if (rng <= reach && rng < best) { best = rng; attended_ = int(i); }
+    }
     update_bearing(yaw);
 }
 
@@ -684,6 +795,8 @@ nlohmann::json CloudMap::diag_lite() const {
         {"things", int(things_.size())}, {"walking", walking_cloud_},
         {"small", int(std::count_if(things_.begin(), things_.end(), [](const Thing& t) { return t.small; }))},
         {"attended", attended_ >= 0 && attended_ < int(things_.size()) ? things_[size_t(attended_)].rng : -1.0},
+        {"mover", mover_ >= 0 && mover_ < int(recent_.size()) ? recent_[size_t(mover_)].rng : -1.0},
+        {"mover_cands", mover_cands_},
     };
 }
 

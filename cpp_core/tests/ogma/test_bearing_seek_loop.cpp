@@ -32,8 +32,18 @@ struct Rig {
         n->values = Eigen::VectorXf(3); n->values << need, float(x), float(y);
         bus.publish("reality.cognitive.outcome_need", n);
     }
+    // THE CHASE: a mover sighting on percept.mover_bearing this tick (the token must carry the tick, as CloudMap's does)
+    float mvx = 0.0f, mvy = 0.0f, mprox = 0.0f;
+    void mover(float vx, float vy, float prox) { mvx = vx; mvy = vy; mprox = prox; }
     void step(double x, double y, double yaw, float vx, float vy, float prox, bool walking = false) {
         bus.begin_tick(t);
+        if (mprox > 0.0f) {
+            auto mv = std::make_shared<ogma::ProprioToken>();
+            mv->tick_id = t;
+            mv->values = Eigen::VectorXf(5); mv->values << mvx, mvy, mprox, 10.0f, 300.0f;
+            bus.publish("percept.mover_bearing", mv);
+            mprox = 0.0f;
+        }
         auto pose = std::make_shared<ogma::ProprioToken>();
         pose->values = Eigen::VectorXf(3); pose->values << float(x), float(y), float(yaw);
         bus.publish("reality.proprio.odom", pose);
@@ -144,4 +154,88 @@ TEST(BearingSeekLoop, AWalkingBearingOnlyRefinesAHeldTarget) {
     // a walking sighting 2 m from the held target is another thing: ignored, the target stays
     r.step(0.5, 0, 0, 0.0f, 1.0f, 0.2f, true);                              // something 2 m ahead
     EXPECT_EQ(r.m.refixes(), 1);
+}
+
+// =============================================================================
+// THE CHASE (the chase phase, stage 1, 2026-09-27): the moving fix.
+// =============================================================================
+namespace {
+ogma::ParamMap chase_params() {
+    ogma::ParamMap p;
+    p["mover_topic"] = std::string("percept.mover_bearing");
+    p["proximity_range"] = 2.5;
+    return p;
+}
+// a mover straight ahead at range r, seen from the origin: bearing (0, 1), proximity 1 - r / 2.5
+float prox_of(double r) { return float(1.0 - r / 2.5); }
+}  // namespace
+
+TEST(BearingSeekLoop, AMoverThatFollowsItsOwnPredictionIsChased) {
+    Rig r(chase_params());
+    // sightings every 4 ticks of a thing walking away along +x at 0.2 m/s from 1.0 m; the body stands at the origin
+    for (int k = 0; k < 10; ++k) {
+        const double range = 1.0 + 0.2 * (4.0 * k / 50.0);
+        r.mover(0.0f, 1.0f, prox_of(range));
+        r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        if (k < 6) EXPECT_FALSE(r.m.chasing()) << "not before chase_confirm_ticks (25) have passed since the first sighting, k=" << k;
+    }
+    EXPECT_TRUE(r.m.chasing()) << "ten sightings over 36 ticks, each where the last predicted";
+    EXPECT_EQ(r.m.chases(), 1);
+    EXPECT_NEAR(r.m.chase_vx(), 0.2, 0.05) << "the velocity follows the sightings";
+    EXPECT_NEAR(r.m.chase_vy(), 0.0, 0.02);
+    EXPECT_TRUE(r.m.have_target());
+    EXPECT_EQ(r.m.value(), 1.0f) << "a chase is a need of 1";
+    // the target is ahead of the last sighting by the lead
+    EXPECT_GT(r.m.target_x(), 1.0 + 0.2 * 36.0 / 50.0);
+    auto out = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("percept.seek_bearing"));
+    ASSERT_NE(out, nullptr);
+    EXPECT_NEAR(out->values[1], 1.0, 1e-3) << "straight ahead";
+    // no arrival while chasing: the body walks onto the target and the target stays
+    r.mover(0.0f, 1.0f, prox_of(1.2));
+    r.step(1.15, 0, 0, 0.0f, 0.0f, 0.0f);   // the body is 5 cm from the fix... no: the fix is at 1.15 + 1.2
+    EXPECT_TRUE(r.m.chasing());
+    EXPECT_EQ(r.m.arrivals(), 0);
+}
+
+TEST(BearingSeekLoop, AChaseEndsWhereTheThingWasLastSeenAndIsRemembered) {
+    Rig r(chase_params());
+    for (int k = 0; k < 10; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0)));
+        r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    const double last_x = 1.0 + 0.2 * 36.0 / 50.0;
+    for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // nothing seen for 60 ticks > chase_forget_ticks 50
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_TRUE(r.m.have_target()) << "the last predicted position stays as a remembered target";
+    EXPECT_NEAR(r.m.target_x(), last_x, 0.05);
+    EXPECT_GT(r.m.value(), 0.9f);
+    EXPECT_EQ(r.m.chases(), 1);
+}
+
+TEST(BearingSeekLoop, AThingNewlyInViewIsNotChasedAndAJumpIsNotAConfirmation) {
+    Rig r(chase_params());
+    // two sightings 4 ticks apart, then nothing: a static thing that aged out before chase_confirm_ticks
+    r.mover(0.0f, 1.0f, prox_of(1.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    r.mover(0.0f, 1.0f, prox_of(1.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_EQ(r.m.chase_n(), 2);
+    for (int i = 0; i < 60; ++i) { r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); EXPECT_FALSE(r.m.chasing()); }
+    EXPECT_EQ(r.m.chase_n(), 0) << "the candidate is forgotten";
+    EXPECT_FALSE(r.m.have_target()) << "an unconfirmed candidate leaves no target";
+    // a jump: 1.0 m ahead, then 2.0 m ahead four ticks later (12.5 m/s) -- another cluster, a fresh candidate
+    r.mover(0.0f, 1.0f, prox_of(1.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    r.mover(0.0f, 1.0f, prox_of(2.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_EQ(r.m.chase_n(), 1) << "the far sighting replaced the candidate instead of confirming it";
+    EXPECT_EQ(r.m.chases(), 0);
+}
+
+TEST(BearingSeekLoop, WithoutAMoverTopicNothingChanges) {
+    Rig r;   // no mover_topic
+    r.mover(0.0f, 1.0f, prox_of(1.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    r.mover(0.0f, 1.0f, prox_of(1.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.chasing()); EXPECT_EQ(r.m.chase_n(), 0); EXPECT_FALSE(r.m.have_target());
 }

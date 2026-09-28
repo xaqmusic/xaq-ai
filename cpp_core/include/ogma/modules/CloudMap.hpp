@@ -160,6 +160,19 @@ public:
     // The attended thing's bearing in the BODY frame this tick, [vx = +right, vy = +forward, proximity]:
     // the shape VisualBearing emits, so VisualHomingNav consumes it unchanged.  All 0 when nothing is attended.
     std::array<float, 3> thing_bearing() const { return bearing_; }
+    // MOVERS (the chase phase, stage 1, 2026-09-27): the cluster of the open cloud, through the recency window, whose
+    // voxels are YOUNG against the cloud's own -- measured at stage 0 (design doc §17.53): a thing that moves keeps
+    // entering voxels the cloud has never held, so its voxels are as old as one voxel crossing takes (0.26 s for a
+    // train at 0.2 m/s) while a static thing's are as old as the watching (7 s).  A candidate: hit-weighted mean voxel
+    // age under mover_age_k x the OLDEST cluster's age in the window (the cloud's own proof of how long it has been
+    // watching; a fresh cloud vouches for nothing and yields no candidate), within mover_range, any size.  The nearest
+    // candidate is published on mover_topic as [vx=+right, vy=+forward, proximity, age_s, oldest_s]; zeros when none.
+    // Nothing here decides that two sightings are one mover: that is the loop's (BearingSeekLoop's chase).
+    bool mover_seen() const { return mover_ >= 0; }
+    std::array<float, 3> mover_bearing() const { return mover_bearing_; }
+    const std::vector<Thing>& mover_clusters() const { return recent_; }
+    int mover_index() const { return mover_; }
+    int mover_candidates() const { return mover_cands_; }
     std::vector<Thing> cluster_things() const;   // recompute from the current voxels (tests, the host's filing record)
     // MOVERS (chasing moving things, 2026-09-27, stage 0's instrument): the same stack rule over only the voxels
     // seen in the last `window_ticks` -- a cloud accumulates, so a thing that moves leaves a smear the whole-cloud
@@ -206,6 +219,16 @@ private:
     void update_things(double yaw);
     void update_bearing(double yaw);
     void publish_bearing(uint64_t tick_id);
+    void update_movers(double yaw, uint64_t tick_id);
+    void publish_mover(uint64_t tick_id);
+    std::array<float, 3> bearing_of(const Thing& t, double yaw) const;
+    // A cluster's position relative to the BODY, in the body's frame, and its range from the body.  The cloud's
+    // frame is the anchor's; a stop's body is the anchor (translation ignored, header point 3), but a WALKING body
+    // has moved since -- up to walk_reset_m -- so the anchor-frame position must have the body's displacement
+    // taken off before it is turned into the body's frame.  Until 2026-09-27 the bearing and the range were taken
+    // from the ANCHOR on a walking cloud (R74's walk re-fix, O61; the chase's first arm, §17.54): every static
+    // cluster then read as a thing moving at the body's own velocity.
+    void body_rel(const Thing& t, double yaw, double& bx, double& by, double& rng) const;
 
     Bus* bus_ = nullptr;
     std::string input_topic_, place_topic_, output_topic_, change_topic_;
@@ -221,6 +244,17 @@ private:
     // voxel.  A walking cloud is never cached as a place (it belongs to no stop); the things reduction runs on it,
     // so the seek loop gets LIVE bearings on the walk instead of a remembered position.  Off = byte-identical.
     bool   walk_cloud_ = false; double walk_reset_m_ = 1.0; bool walking_cloud_ = false;
+    // walk_things (2026-09-27, O65): whether the THINGS reduction (the attended thing, its descriptor and bearing)
+    // runs on a walking cloud.  R84 (walk_cloud on, things on the walk) turned seed 1 into a wall walk (wall
+    // episodes 256 -> 944 against R83) though the seek loop took no more targets; false = things only at stops, as
+    // in R83, while the mover candidate (mover_topic) still reads the walking cloud.  true = R84's behaviour.
+    bool   walk_things_ = true;
+    std::string mover_topic_;
+    int    mover_window_ = 25; double mover_age_k_ = 0.06, mover_range_ = 1.5; bool mover_weighted_ = true;
+    std::vector<Thing> recent_;             // the window's clusters, as last computed
+    int    mover_ = -1, mover_cands_ = 0;   // the attended mover (index into recent_) and candidates seen in all
+    double mover_age_s_ = 0.0, mover_oldest_s_ = 0.0;
+    std::array<float, 3> mover_bearing_{0.0f, 0.0f, 0.0f};
     std::vector<Thing>   things_, filed_things_;
     int                  attended_ = -1;
     std::array<float, 3> bearing_{0.0f, 0.0f, 0.0f};
@@ -233,6 +267,7 @@ private:
     bool     open_ = false, just_closed_ = false;
     int      still_run_ = 0, move_run_ = 0;
     double   anchor_yaw_ = 0.0, anchor_x_ = 0.0, anchor_y_ = 0.0;
+    double   cur_x_ = 0.0, cur_y_ = 0.0;   // the body's odometry position this tick (the cast token's)
     uint64_t opened_tick_ = 0, points_ = 0, last_tick_ = 0;
     int      break_vox_ = 0;
     double   new_frac_ = 0.0, revisit_change_ = -1.0;
