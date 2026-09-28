@@ -209,6 +209,22 @@ ParamSchema CloudMap::params_schema() const {
          "The things reduction does not attend a cluster whose (hit-weighted) voxel age is under mover_age_k x the oldest "
          "cluster's: a passing thing's smear is not a thing with a place.  false = as before (R57-R89).",
          ParamValue{false}},
+        {"iso_height", ParamMutability::HotMutable,
+         "ISOLATION: a cluster's tall_near counts the open cloud's voxels with mean height at or above this (m) within iso_radius "
+         "of its centroid -- the wall above a wall base, the seat above a chair leg; nothing above a ball or the train.",
+         ParamValue{0.25}},
+        {"iso_radius", ParamMutability::HotMutable, "...within this radius (m) of the cluster's centroid.", ParamValue{0.25}},
+        {"mover_isolated", ParamMutability::HotMutable,
+         "The mover candidate must be isolated (tall_near 0): a young fragment of a wall base or a chair is not a mover.",
+         ParamValue{false}},
+        {"things_isolated", ParamMutability::HotMutable,
+         "The attended thing must be isolated (tall_near 0): a ball under a table is lost, a wall base is never a thing.",
+         ParamValue{false}},
+        {"things_age_dim", ParamMutability::HotMutable,
+         "The thing descriptor carries one more value: the cluster's hit-weighted voxel age against the oldest cluster's, in "
+         "[0,1] -- so the kind vocabulary can earn a MOVING kind and the outcome loop learn what it answers.  Changes the "
+         "descriptor's length; the thing / kind EPMs read it from the token.",
+         ParamValue{false}},
         {"mover_ext_max", ParamMutability::HotMutable,
          "Candidates no wider than this footprint (m): a wall base's visible part slides with the view and reads young; "
          "0 = any size (the operator's 'any moving cluster' -- the size gate is a measured retreat, §17.55).",
@@ -253,6 +269,8 @@ ParamMap CloudMap::current_params() const {
     m["mover_topic"] = ParamValue{mover_topic_}; m["mover_window_ticks"] = int64_t(mover_window_);
     m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_; m["mover_ext_max"] = mover_ext_max_;
     m["things_skip_movers"] = things_skip_movers_;
+    m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
+    m["things_isolated"] = things_isolated_; m["things_age_dim"] = things_age_dim_;
     m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
@@ -289,6 +307,11 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "mover_window_ticks") mover_window_ = std::max(1, int(get_d(one, "mover_window_ticks", mover_window_)));
     else if (k == "mover_age_k") mover_age_k_ = get_d(one, "mover_age_k", mover_age_k_);
     else if (k == "mover_range") mover_range_ = get_d(one, "mover_range", mover_range_);
+    else if (k == "iso_height") iso_height_ = get_d(one, "iso_height", iso_height_);
+    else if (k == "iso_radius") iso_radius_ = get_d(one, "iso_radius", iso_radius_);
+    else if (k == "mover_isolated") mover_isolated_ = get_d(one, "mover_isolated", 0.0) > 0.5;
+    else if (k == "things_isolated") things_isolated_ = get_d(one, "things_isolated", 0.0) > 0.5;
+    else if (k == "things_age_dim") things_age_dim_ = get_d(one, "things_age_dim", 0.0) > 0.5;
     else if (k == "things_skip_movers") things_skip_movers_ = get_d(one, "things_skip_movers", 0.0) > 0.5;
     else if (k == "mover_ext_max") mover_ext_max_ = get_d(one, "mover_ext_max", mover_ext_max_);
     else if (k == "mover_weighted") mover_weighted_ = get_d(one, "mover_weighted", 1.0) > 0.5;
@@ -337,6 +360,11 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     mover_weighted_ = get_d(params, "mover_weighted", 1.0) > 0.5;
     mover_ext_max_ = get_d(params, "mover_ext_max", mover_ext_max_);
     things_skip_movers_ = get_d(params, "things_skip_movers", 0.0) > 0.5;
+    iso_height_ = get_d(params, "iso_height", iso_height_);
+    iso_radius_ = get_d(params, "iso_radius", iso_radius_);
+    mover_isolated_ = get_d(params, "mover_isolated", 0.0) > 0.5;
+    things_isolated_ = get_d(params, "things_isolated", 0.0) > 0.5;
+    things_age_dim_ = get_d(params, "things_age_dim", 0.0) > 0.5;
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
@@ -670,6 +698,19 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
             for (auto const& vc : vacated_)
                 if (vc.tick >= lo && std::hypot(vc.x - t.cx, vc.y - t.cy) <= vacate_radius_) ++t.vacated;
         }
+        if (mover_isolated_ || things_isolated_ || since_tick > 0) {
+            // the tall voxels of the WHOLE open cloud near the centroid (not only the window's), so a young fragment at the
+            // foot of a wall knows the wall above it
+            const int r = int(std::ceil(iso_radius_ / voxel_m_)) + 1;
+            const int cx0 = int(std::floor(t.cx / voxel_m_)), cy0 = int(std::floor(t.cy / voxel_m_));
+            for (auto const& [k, vv] : vox_) {
+                int ix, iy, iz; unkey(k, ix, iy, iz);
+                if (std::abs(ix - cx0) > r || std::abs(iy - cy0) > r) continue;
+                const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
+                if (h < iso_height_) continue;
+                if (std::hypot((ix + 0.5) * voxel_m_ - t.cx, (iy + 0.5) * voxel_m_ - t.cy) <= iso_radius_) ++t.tall_near;
+            }
+        }
         t.rng = std::hypot(t.cx, t.cy);
         const double ex = xmax - xmin + voxel_m_, ey = ymax - ymin + voxel_m_;
         t.ext = std::max(ex, ey); t.ext_min = std::min(ex, ey);
@@ -706,12 +747,18 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
 
 std::vector<float> CloudMap::thing_descriptor(const Thing& t) const {
     const auto u = [](double v) { return float(std::clamp(v, 0.0, 1.0)); };
+    std::vector<float> d;
     if (things_shape_)
-        return {u(t.top / break_hi_), u(t.ext / small_ext_), u(t.ext > 1e-9 ? t.ext_min / t.ext : 0.0),
-                u(t.lo / break_hi_), u(double(t.chain) / 5.0)};
-    return {u(t.top / break_hi_), u(t.ext / small_ext_), u(t.ext > 1e-9 ? t.ext_min / t.ext : 0.0),
-            u(double(t.ncols) / 25.0), u(t.hits / double(std::max(1, t.ncols)) / 20.0),
-            u(double(t.chain) / 5.0), u(t.rng / max_range_), u(t.lo / break_hi_)};
+        d = {u(t.top / break_hi_), u(t.ext / small_ext_), u(t.ext > 1e-9 ? t.ext_min / t.ext : 0.0),
+             u(t.lo / break_hi_), u(double(t.chain) / 5.0)};
+    else
+        d = {u(t.top / break_hi_), u(t.ext / small_ext_), u(t.ext > 1e-9 ? t.ext_min / t.ext : 0.0),
+             u(double(t.ncols) / 25.0), u(t.hits / double(std::max(1, t.ncols)) / 20.0),
+             u(double(t.chain) / 5.0), u(t.rng / max_range_), u(t.lo / break_hi_)};
+    // the age dim: the thing's voxel age against the oldest cluster's -- 1 = as old as anything here (still), near 0 = young
+    // (moving); a vocabulary over it can earn the difference the operator asked for
+    if (things_age_dim_) d.push_back(u(things_oldest_ > 0.0 ? (mover_weighted_ ? t.age_w : t.age) / things_oldest_ : 1.0));
+    return d;
 }
 
 void CloudMap::update_bearing(double yaw) {
@@ -785,6 +832,7 @@ void CloudMap::update_movers(double yaw, uint64_t tick_id) {
         if (rng > mover_range_ || age >= thr) continue;
         if (mover_vacated_ > 0 && t.vacated < mover_vacated_) continue;   // no trail, no mover
         if (mover_ext_max_ > 0.0 && t.ext > mover_ext_max_) continue;      // too wide to be a thing
+        if (mover_isolated_ && t.tall_near > 0) continue;                  // at the foot of something tall: part of it
         ++mover_cands_;
         if (rng < best) { best = rng; mover_ = int(i); mover_age_s_ = age; mover_oldest_s_ = oldest; }
     }
@@ -811,12 +859,13 @@ void CloudMap::update_things(double yaw) {
     // sorted by range from the anchor; on a walking cloud the BODY's range is what the reach means, so the nearest
     // small thing by body range within reach is attended (identical on a stop's cloud, where the body is the anchor)
     double best = 1e9, oldest = 0.0;
-    if (things_skip_movers_)
-        for (auto const& t : things_) oldest = std::max(oldest, mover_weighted_ ? t.age_w : t.age);
+    for (auto const& t : things_) oldest = std::max(oldest, mover_weighted_ ? t.age_w : t.age);
+    things_oldest_ = oldest;
     for (size_t i = 0; i < things_.size(); ++i) {
         if (!things_[i].small) continue;
         if (things_skip_movers_ && oldest > 0.0 && (mover_weighted_ ? things_[i].age_w : things_[i].age) < mover_age_k_ * oldest)
             continue;                                                     // young against the cloud's own: a mover, not a place
+        if (things_isolated_ && things_[i].tall_near > 0) continue;       // at the foot of something tall: part of it
         double bx, by, rng; body_rel(things_[i], yaw, bx, by, rng);
         if (rng <= reach && rng < best) { best = rng; attended_ = int(i); }
     }

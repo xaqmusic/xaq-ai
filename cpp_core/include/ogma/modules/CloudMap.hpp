@@ -101,6 +101,11 @@ public:
         // passed THROUGH within vacate_window_ticks after being occupied -- a thing that moved away leaves them; a
         // static thing newly in view, or a fragment sliding into view, leaves none.  0 with vacate_window_ticks 0.
         int    vacated = 0;
+        // ISOLATION (2026-09-28, the operator: "predict a blob of voxels is part of a larger object by the proximity of
+        // other voxels in its area, especially those higher than our small target objects; smaller objects will be
+        // isolated into low blobs"): the voxels of the whole open cloud higher than iso_height within iso_radius of the
+        // centroid.  A wall base has the wall above it, a chair leg its seat; a ball, a block or the train has none.
+        int    tall_near = 0;
     };
 
     CloudMap() = default;
@@ -160,7 +165,7 @@ public:
     //  each object under 4+ winners with a modal share of 0.10-0.17); shape-only bins of the same ticks reach
     //  0.76.  Sampling belongs to the attention gate and the pull, not to the vocabulary (`CLAUDE.md` §0 rule 2).
     std::vector<float> thing_descriptor(const Thing& t) const;
-    int thing_dims() const { return things_shape_ ? kThingShape : kThing; }
+    int thing_dims() const { return (things_shape_ ? kThingShape : kThing) + (things_age_dim_ ? 1 : 0); }
     // The attended thing's bearing in the BODY frame this tick, [vx = +right, vy = +forward, proximity]:
     // the shape VisualBearing emits, so VisualHomingNav consumes it unchanged.  All 0 when nothing is attended.
     std::array<float, 3> thing_bearing() const { return bearing_; }
@@ -269,6 +274,11 @@ private:
     // mover rule (a passing thing's smear at a stop reads as a small thing, and the seek loop then fixes a place
     // the thing has left -- the operator watched the duck peck at one).  A thing has a place while it is still.
     bool   things_skip_movers_ = false;
+    // isolation (see Thing::tall_near): the mover candidate and / or the attended thing must be isolated from tall
+    // structure; the descriptor may carry the voxel age (things_age_dim) so the kind vocabulary can EARN a moving kind
+    double iso_height_ = 0.25, iso_radius_ = 0.25;
+    bool   mover_isolated_ = false, things_isolated_ = false, things_age_dim_ = false;
+    double things_oldest_ = 0.0;            // the oldest cluster's age at the last things update (the age dim's scale)
     std::vector<Thing> recent_;             // the window's clusters, as last computed
     int    mover_ = -1, mover_cands_ = 0;   // the attended mover (index into recent_) and candidates seen in all
     double mover_age_s_ = 0.0, mover_oldest_s_ = 0.0;

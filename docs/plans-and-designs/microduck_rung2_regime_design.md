@@ -4607,3 +4607,49 @@ follows (the orienting reflex's substrate form). Two unit tests. The viewer's ch
 lever:** the age of a cluster's voxels into the thing descriptor, so the kind EPM earns a *moving kind* and the
 outcome loop learns that its intents get no answer from one — habituation then ends the pecks at places, by the
 brain's own account rather than a rule.
+
+### 17.58 Isolation, and the age in the descriptor (R91, R92, R93; 2026-09-28)
+
+**The operator's two asks, with the new cloud view.** "Go ahead with the voxel age in the descriptor. I am still
+seeing the target ring skipping around and often choosing walls, especially later in the run. I wonder if we can
+predict a blob of voxels is part of a larger object by the proximity of other voxels in its area, especially those
+groups that are higher than our small target objects? Smaller objects will be isolated into low blobs. A ball under a
+table gets lost, but it could keep the focus off the walls, which is the bigger issue." Two levers, two arms on R90.
+
+**Built.** `Thing::tall_near` — the open cloud's voxels with mean height at or above `iso_height` (0.25 m) within
+`iso_radius` (0.25 m) of the cluster's centroid; `mover_isolated` and `things_isolated` require it to be zero for
+the candidate and for the attended thing; `things_age_dim` appends the cluster's hit-weighted voxel age against
+the oldest cluster's to the descriptor (the thing and kind EPMs read nine values). A unit test: a cube at the foot
+of a post has tall voxels near it and is passed over for a lone cube further away. The `mvc` record carries
+`tall_near`, so the instrument can score isolation offline.
+
+**Isolation as a measurement (R91's logs, the stage-0 scorer).** The share of clusters with nothing tall within
+0.25 m: static 0.06, wide 0.01, balls and blocks 0.64, the stopped train 0.92, **the moving train 0.95**. The gate
+"hit-weighted age under 0.3 s AND isolated": recall 0.44 on the moving train with **13 false candidates a minute**
+(5.6 within 1.5 m) — against 128 (34) for the age alone (§17.53). **This is the discriminator stage 0 lacked, and it
+is the operator's.** The sliding fragment (O64) is a fragment of something tall.
+
+**Measured (n = 6, the big track, R84 and R90 as the controls, the same seeds).**
+
+| | R84 | R90 | R91 = R90 + isolation (mover and thing) | R92 = R90 + the age dim |
+|---|---|---|---|---|
+| chases (at the moving train), six runs | — | 67 (8) | **19 (8, 42 %)** | 69 (9) |
+| walls / min | 14.7 ± 10.1 | 6.5 ± 3.8 | 18.9 ± 13.0 | 11.5 ± 4.5 |
+| rescues / min · down % | 0.13 · 0.36 | 0.06 · 0.10 | 0.15 · 0.51 | 0.09 · 0.22 |
+| seek % of the walk | 39 | 52 | 37 | 52 |
+| stops / at a thing / arrivals | 17.8 / 8.7 / 8.5 | 22.3 / 12.7 / 13.0 | 17.8 / 8.7 / 7.5 | 22.2 / 11.7 / 12.8 |
+| skills · at nothing | 29 · 8 | 45 · 15 | 28 · **5** | 44 · 15 |
+| the train's kind, modal share | — | 0.90 | — | 0.70 |
+
+- **R91: the chase came clean and the walk went back.** Chases 67 → 19 in six runs, the moving train 12 → 42 % of
+  them, static targets 49 → 7; skills at nothing 15 → 5. But `things_isolated` also refused the stops' targets
+  near furniture and walls (the room's balls and blocks stand within a few voxels of them), seek fell to 37 % of
+  the walk, and the walls returned to R84's, bimodal (seeds 3 and 4 at 38 and 32 a minute). `WORKING` on the
+  candidate, `REGRESSION` on the thing: the two uses of one measure pull apart, so **R93 = R90 + `mover_isolated`
+  alone** (in flight).
+- **R92: the age in the descriptor is `NULL` at this power.** Chases, stops, skills at nothing all R90's; walls
+  11.5 against 6.5 (within one spread); and the kind vocabulary did not sharpen — the train's modal share fell
+  0.90 → 0.70 while the blocks stayed at 0.58–0.66. One value in nine under a random projection is the small
+  signal on a large common mode of CLAUDE.md §0 rule 2: the shape dims own the vocabulary. Re-use: a vocabulary
+  of its own over [age ratio, fresh] (two dims, two or three nodes: still, moving, just stopped) feeding the
+  outcome table as a second key, rather than one more column in the shape's.

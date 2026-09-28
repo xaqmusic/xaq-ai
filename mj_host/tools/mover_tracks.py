@@ -188,7 +188,8 @@ def score_log(path, layout, objs, window, gate, label_m, compact_m):
                 label = "wide"
             clusters.append(dict(cx=cx, cy=cy, label=label, rng=rng, ext=c[2], hits=c[5],
                                  fresh=c[7] if len(c) > 8 else float("nan"), age=c[8] if len(c) > 8 else float("nan"),
-                                 age_w=c[9] if len(c) > 9 else float("nan"), vacated=c[10] if len(c) > 10 else float("nan")))
+                                 age_w=c[9] if len(c) > 9 else float("nan"), vacated=c[10] if len(c) > 10 else float("nan"),
+                                 tall=c[11] if len(c) > 11 else float("nan")))
         out["clusters"] += len(clusters)
 
         # the train's visibility: is it in the ToF's cone at all (within 2 m and 0.6 rad of where the head looks)
@@ -260,7 +261,7 @@ def score_log(path, layout, objs, window, gate, label_m, compact_m):
                 key += "@stop"
             if t.id not in vels:
                 # no velocity yet (a track under three casts): still a freshness sample
-                out["rows"].append((tsec, key, vt, float("nan"), float("nan"), c["rng"], c["fresh"], c["age"], cloud_age, track_age, float("nan"), c["hits"], c["age_w"], c["vacated"]))
+                out["rows"].append((tsec, key, vt, float("nan"), float("nan"), c["rng"], c["fresh"], c["age"], cloud_age, track_age, float("nan"), c["hits"], c["age_w"], c["vacated"], c["tall"]))
                 continue
             vx, vy = vels[t.id]
             sp = math.hypot(vx, vy)
@@ -275,7 +276,7 @@ def score_log(path, layout, objs, window, gate, label_m, compact_m):
             out["speeds"][key].append(sp)
             if cm:
                 out["speeds_cm"][key].append(sp_cm)
-            out["rows"].append((tsec, key, vt, sp, sp_cm, c["rng"], c["fresh"], c["age"], cloud_age, track_age, dir_err, c["hits"], c["age_w"], c["vacated"]))
+            out["rows"].append((tsec, key, vt, sp, sp_cm, c["rng"], c["fresh"], c["age"], cloud_age, track_age, dir_err, c["hits"], c["age_w"], c["vacated"], c["tall"]))
     return out
 
 
@@ -495,6 +496,19 @@ def report(results, window, per_seed):
                     fa = sum(1 for row in others if row[12] < A and row[13] >= 1) / max(1e-9, mins)
                     fa_near = sum(1 for row in others if row[12] < A and row[13] >= 1 and row[5] < 1.5) / max(1e-9, mins)
                     print(f"                                                    |  {A:.1f}      {rec:.2f}         {fmt(st, 2)}     {fa:6.2f}       {fa_near:6.2f}")
+            if any(len(row) > 14 and not math.isnan(row[14]) for row in mv):
+                print("\n   ISOLATION (tall voxels within 0.25 m): share of clusters with none, and the gate 'hit-weighted age < A AND isolated'")
+                print("   label            n    isolated  |  A (s)  recall(moving)  stopped  others/min  others<1.5m/min")
+                for key in ("static", "wide", "obj", "train_stopped", "train_moving"):
+                    rs = [row for row in by.get(key, []) if len(row) > 14 and not math.isnan(row[14])]
+                    if rs:
+                        print(f"   {key:14s} {len(rs):6d}     {sum(1 for row in rs if row[14] == 0) / len(rs):.2f}")
+                for A in (0.3, 0.5, 1.0):
+                    rec = sum(1 for row in mv if row[12] < A and row[14] == 0) / len(mv)
+                    st = sum(1 for row in stopped if row[12] < A and row[14] == 0) / len(stopped) if stopped else float("nan")
+                    fa = sum(1 for row in others if row[12] < A and row[14] == 0) / max(1e-9, mins)
+                    fa_near = sum(1 for row in others if row[12] < A and row[14] == 0 and row[5] < 1.5) / max(1e-9, mins)
+                    print(f"                                     |  {A:.1f}      {rec:.2f}         {fmt(st, 2)}     {fa:6.2f}       {fa_near:6.2f}")
             print(f"\n   an AGE GATE, no tracker (the module's own numbers: the cloud older than {2 * window:.1f} s, the cluster's mean"
                   f" voxel age under A): recall on the moving train,\n   the stopped train passing, everything else passing per minute"
                   f" of walking cloud ({mins:.1f} min) -- and of those, the share within 1.5 m")

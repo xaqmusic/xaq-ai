@@ -1243,7 +1243,7 @@ struct TrainPlan { double speed = 0.0, run_s = 8.0, stop_s = 8.0, phase_s = -1.0
 TrainPlan g_train;
 // --log-movers WINDOW_S (stage 0's instrument): on every cast tick with a cloud open, the stack rule's clusters
 // over only the voxels seen in the last WINDOW_S seconds (CloudMap::cluster_recent) -- "mvc": [[cx, cy, ext,
-// top, ncols, hits, small, fresh, age_s, age_w_s, vacated], ...] in the cloud's frame (fresh: the share of the cluster's voxels
+// top, ncols, hits, small, fresh, age_s, age_w_s, vacated, tall_near], ...] in the cloud's frame (fresh: the share of the cluster's voxels
 // first seen inside the window; age_s: their mean age; age_w_s: the same weighted by hits), "mva": [wx, wy, wyaw] the anchor's world pose (truth,
 // for the scorer's labels) and "mvw": 1 for a walking cloud.  Off = byte-identical.
 double g_log_movers_s = 0.0;
@@ -2541,8 +2541,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::printf(",\"mvw\":%d,\"mva\":[%.4f,%.4f,%.4f],\"mvc\":[", brain.cloud_walking() ? 1 : 0,
                             cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw);
                 for (size_t k = 0; k < th.size(); ++k)
-                    std::printf("%s[%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%.2f,%.2f,%.2f,%d]", k ? "," : "", th[k].cx, th[k].cy, th[k].ext, th[k].top,
-                                th[k].ncols, th[k].hits, th[k].small ? 1 : 0, th[k].fresh, th[k].age / kBrainHz, th[k].age_w / kBrainHz, th[k].vacated);
+                    std::printf("%s[%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%.2f,%.2f,%.2f,%d,%d]", k ? "," : "", th[k].cx, th[k].cy, th[k].ext, th[k].top,
+                                th[k].ncols, th[k].hits, th[k].small ? 1 : 0, th[k].fresh, th[k].age / kBrainHz, th[k].age_w / kBrainHz, th[k].vacated, th[k].tall_near);
                 std::printf("]");
             }
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());

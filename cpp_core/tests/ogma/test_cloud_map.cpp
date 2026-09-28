@@ -623,3 +623,35 @@ TEST(CloudMap, ThingsSkipMoversAttendsTheStandingCubeNotTheNearerMovingOne) {
         else      { EXPECT_NEAR(a.cy, 0.45, 0.10) << "the nearer, moving cube"; }
     }
 }
+
+// ISOLATION (2026-09-28, the operator): a cube at the foot of a post has tall voxels near it; a cube on open floor
+// has none.  With mover_isolated the young cube by the post is not the candidate; with things_isolated it is not
+// attended; and things_age_dim appends the age to the descriptor.
+TEST(CloudMap, ACubeAtTheFootOfAPostIsPartOfIt) {
+    ParamMap p = things_params();
+    p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+    p["things_isolated"] = true; p["mover_isolated"] = true; p["things_age_dim"] = true;
+    Rig r(p);
+    // a post at 0.85 m (8 cm wide, up to 35 cm) with a cube against its foot, and a lone cube 1.4 m ahead-right
+    std::vector<Pt> world;
+    for (int j = 0; j < 2; ++j) for (int k = 0; k < 9; ++k) world.push_back({0.85, 0.19 + 0.04 * j, 0.03 + 0.04 * k});
+    for (auto q : cube()) world.push_back(q);                                        // the cube at 0.81-0.89, y -0.03..0.05: two empty columns from the post, 18 cm from its centroid
+    for (auto q : cube()) { q[0] += 0.56; q[1] -= 0.6; world.push_back(q); }          // the lone cube (14 voxels along: off the boundaries)
+    for (int i = 0; i < 40; ++i) cast_world(r, 0.0, world);
+    const auto& th = r.m.things();
+    ASSERT_GE(th.size(), 2u);
+    int lone = -1, footed = -1;
+    for (size_t i = 0; i < th.size(); ++i) { if (th[i].small && th[i].cy < -0.3) lone = int(i); if (th[i].small && std::fabs(th[i].cy) < 0.1) footed = int(i); }
+    ASSERT_GE(lone, 0); ASSERT_GE(footed, 0);
+    EXPECT_GT(th[size_t(footed)].tall_near, 0) << "the post stands within 0.25 m of the cube at its foot";
+    EXPECT_EQ(th[size_t(lone)].tall_near, 0) << "nothing tall near the lone cube";
+    std::string dump;
+    for (size_t i = 0; i < th.size(); ++i)
+        dump += "[" + std::to_string(i) + "] cx " + std::to_string(th[i].cx) + " cy " + std::to_string(th[i].cy) + " top " + std::to_string(th[i].top) +
+                " ext " + std::to_string(th[i].ext) + " small " + std::to_string(th[i].small) + " tall " + std::to_string(th[i].tall_near) + "\n";
+    EXPECT_EQ(r.m.attended(), lone) << "the nearer cube by the post is part of the post; the lone cube is the thing\n" << dump;
+    auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.thing"));
+    ASSERT_NE(tok, nullptr);
+    EXPECT_EQ(tok->values.size(), ogma::CloudMap::kThing + 1) << "the age dim appended";
+    EXPECT_NEAR(tok->values[ogma::CloudMap::kThing], 1.0, 0.05) << "as old as anything here: still";
+}
