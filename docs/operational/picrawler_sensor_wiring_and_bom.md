@@ -712,7 +712,7 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 | **E1** ✅ | **Meter the ADC connector** | a meter | ✅ **DONE 2026-09-27 — VCC is 3.3 V, labelled on the PCB**, so the divider's top rail is the connector itself. Pin order still to be read off the same silkscreen |
 | **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
 | **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
-| **E3** | **Bench `R_fsr` vs mass, bare sensor**, loaded through a flat Ø5.5 puck proxy at 0 / 50 / 100 / 175 / 300 / 590 g. **Ohmmeter — this is the one step that is the meter's** (§5.5) | FSR, masses, DMM | the **decade** `R_g` will land in, so the right resistors and caps can be bought. ⚠ Not the final value — backing stiffness and puck geometry change it, so §5's in-situ measurement still governs |
+| **E3** ✅ | **Bench `R_fsr` vs mass, bare sensor**, loaded through a flat Ø5.5 puck proxy at 0 / 50 / 100 / 175 / 300 / 590 g. **Ohmmeter — this is the one step that is the meter's** (§5.5) | FSR, masses, DMM | the **decade** `R_g` will land in, so the right resistors and caps can be bought. ⚠ Not the final value — backing stiffness and puck geometry change it, so §5's in-situ measurement still governs |
 | **E4** | `R_g` = `R_fsr`(175 g) **in the assembled foot**, read off the ADC through a trial `R_g` (§5.5), not off a meter; then `C` from the §5.2 table | a finished foot | `R_fsr` at 175 g for all four feet, with the creep transient visible in the log. Median sets `R_g` |
 | **E5** | Wire one foot, confirm counts rise monotonically with the mass series, then the other three | — | §6 step 5 |
 
@@ -774,6 +774,65 @@ their `R_fsr`(175 g), never foot #1's number.
   is exactly why E3's number is explicitly not the final one.
 - **Measure at the board end.** With the 3-pin lead unplugged, the two conductors are the FSR's
   terminals, so an assembled foot can be read without disturbing the toe or the wire tension.
+
+### 5.6 ✅ E3 measured 2026-09-27 — `R_g` = 15 kΩ, `C` = 1.0 µF
+
+Bare sensor, operator's meter, resistance settled at each mass. **Counts are computed for
+`R_g` = 15 kΩ** (the nearest standard value to the 14.2 kΩ read at the calibration point):
+
+| mass | `R_fsr` | counts | local `n` | counts/g |
+|---|---|---|---|---|
+| 20 g | 75 k → **92.5 k** (rose, then steady) | 571 | — | — |
+| 50 g | **30.0 k** | 1365 | 1.23 | 26.5 |
+| 100 g | 35 k → **33.0 k** | 1280 | **−0.14** ⚠ | **−1.7** ⚠ |
+| 175 g | **14.2 k** steady | 2104 | 1.51 | 11.0 |
+| 300 g | 13.5 k → **11.0 k** | 2362 | 0.47 | 2.1 |
+| 500 g | **10.5 k** | 2409 | 0.09 | 0.2 |
+
+`n` is the local power-law exponent, `R ∝ F⁻ⁿ`. Overall 20 → 500 g it is **0.68**, which is
+an ordinary FSR; the interest is in how unevenly it is spread.
+
+**What this settles.** `R_fsr`(175 g) = 14.2 kΩ → **`R_g` = 15 kΩ**, 6 % off the ideal and
+worth 99.9 % of peak sensitivity (§5.5). `Z_src` is then 7.5 kΩ loaded and 15 kΩ unloaded,
+so from §5.2:
+
+| sampling | target f_c | **`C`** |
+|---|---|---|
+| 50 Hz tick (`adc.rate`) | 22.5 Hz | **1.0 µF** |
+| 10 Hz frame, if the read never moves | 4.5 Hz | **4.7 µF** |
+
+**The 0.1 µF in the original BOM is 10× too small**, exactly as §5.2 predicted for a `R_g` in
+the 10 kΩ decade. Divider current is 110 µA per foot, 440 µA for four — no constraint. And
+`Z_src` peaking at 15 kΩ is a modest impedance, so **E2's unity-gain-buffer contingency is
+unlikely to be needed**; E2 still has to say so rather than be assumed.
+
+**⚠ Two things in this data are not yet understood, and neither is a verdict on the sensor.**
+
+**1. 100 g reads higher than 50 g.** A 10 % inversion, and the channel is non-monotone across
+it — which would make `counts → grams` unfittable in that region if it were real. It is very
+probably **creep timing rather than force**: the same run shows 13.5 k → 11.0 k at 300 g, an
+18 % fall *during a single reading*, which is larger than the inversion. A point read early
+and a point read late are not on the same curve. **The fix is protocol, not parts: a fixed
+dwell — place, wait T, read — identical at every mass, with T recorded.** Re-run 50 g and
+100 g that way before fitting anything.
+
+**2. The curve flattens hard above 175 g:** `n` falls 1.51 → 0.47 → 0.09, and 300 → 500 g
+moves the channel 47 counts. Early contact-area saturation is what a **small actuator**
+produces, so ⚠ **the actuator used for this run has to be recorded** — E3 specifies a flat
+Ø5.5 proxy, and pressing with a mass directly, or with anything rounded, measures the
+actuator rather than the sensor. If it was a flat Ø5.5, the compression is the part's and
+§3.3's diameter choice should be revisited against it.
+
+**Where it leaves the gait.** The band that matters is 148–197 g (four feet down to three),
+which lands at **~2100 counts — mid-scale — at 2 to 11 counts per gram**, and the stance
+threshold (`foot_load` ≥ 0.2, 118 g) sits around 1500. The steep part of this sensor is under
+the light loads the gait actually spends its time at, and the compressed part is above them.
+That is the right way round for the `unloaded` term and the G2 per-leg minima guard, both of
+which read the light end.
+
+⚠ These are **bare-sensor** numbers and `R_g` is provisional (§5.4 E3): the assembled foot
+re-measures in situ through a trial `R_g` (§5.5), because backing stiffness and the real bump
+geometry both move `R_fsr`.
 
 ⚠ **The contingency E2 and E3 exist to catch:** if `R_fsr` at 175 g lands well above E2's
 maximum usable `Z_src`, the node is too high-impedance for this ADC on a wire that runs the
