@@ -73,6 +73,21 @@ constexpr int64_t EXT5V_POLL_MS    = 1000;   // default; ext5v.rate can raise it
 // version of the separation test.  One owner of the mailbox, and everyone else reads the
 // record it writes.
 int64_t g_ext5v_poll_ms = EXT5V_POLL_MS;
+// ---- fast ADC sampling, bench only (bom §5.4 step E0) -------------------------------
+// The ADC is read in frame(), which the telemetry thread calls at 10 Hz.  That is right
+// for `vbat` and useless for characterising the foot FSRs: `foot_load` is a tick-rate
+// channel, its divider's RC is the ONLY anti-alias filter anywhere in the chain, and the
+// noise it has to reject -- servo PWM edges, the 5 V regulator -- is all above a 10 Hz
+// record's 5 Hz Nyquist.  A 10 Hz log of a 50 Hz channel cannot measure what the filter
+// is for.
+//
+// OFF by default.  At 0 nothing here executes and every existing path is untouched.
+//
+// ⚠ THE FLOOR IS THE TICK PERIOD, because this samples from tick_thread.  20 ms is 50 Hz
+// and nothing faster can be honoured, so anything faster is REFUSED rather than accepted
+// and quietly rounded -- see ext5v.rate's header for what that lie costs.
+constexpr int64_t ADC_FAST_MIN_MS = 20;      // == 1000/TICK_HZ; static_assert below
+int64_t g_adc_poll_ms = 0;                   // 0 = off
 // ToF stall detection lives in ogma::hw::TofRecoveryPolicy (tested there).
 constexpr int    CAL_TIMEOUT_MS  = 120000;
 constexpr int    OPER_MIN_US     = 900;    // operating envelope until calibration narrows it
@@ -80,6 +95,8 @@ constexpr int    OPER_MAX_US     = 2100;
 constexpr int    FULL_MIN_US     = 500;    // the servo's full travel — cal.begin only
 constexpr int    FULL_MAX_US     = 2500;
 constexpr double TICK_HZ         = 50.0;
+static_assert(ADC_FAST_MIN_MS == int64_t(1000.0 / TICK_HZ),
+              "adc.rate's floor is the tick period -- if TICK_HZ moves, move the floor");
 constexpr double VBAT_LIMP_V     = 6.4;    // HAT minimum is 6.0: limp and refuse arming below this
 constexpr double VBAT_RECOVER_V  = 6.7;    // hysteresis: arming allowed again above this
 // Pose moves: twelve servos starting at once on the 5 V/3 A DC-DC the Pi shares browned the
@@ -190,6 +207,7 @@ struct State {
     int64_t  ext5v_ms       = 0;
     int64_t throttled_next_ms = 0;   // deadlines, so the rate is OURS and not the client's
     int64_t ext5v_next_ms     = 0;
+    int64_t adc_fast_next_ms  = 0;   // fast ADC deadline; the rate is ours, not the client's
     // Whole-robot bus current (BOM 3).  Instrument only -- nothing here consumes it.
     // null when the part is absent, and benchd then behaves exactly as it did before.
     std::unique_ptr<Ina219> ina;
@@ -768,6 +786,31 @@ void tick_thread(State& S) {
                 S.record("mcu_reset", {{"why", "persistent bus errors"}, {"count", S.bus_errors}});
             }
         }
+        // ---- fast ADC sampling ------------------------------------------------
+        // Gain-0: g_adc_poll_ms is 0 unless adc.rate asked for it, and at 0 this is one
+        // integer compare.  It sits INSIDE the budget span on purpose -- the question E0
+        // exists to answer is what four extra I2C reads per tick cost, so the cost has to
+        // land in tick_cost and tick_hz where it can be read.  Its own try/catch so an ADC
+        // NACK is not filed as a servo one, and its own `us` so the read cost is measured
+        // rather than assumed.
+        if (g_adc_poll_ms > 0 && ms >= S.adc_fast_next_ms) {
+            S.adc_fast_next_ms = ms + g_adc_poll_ms;
+            try {
+                timespec r0, r1;
+                clock_gettime(CLOCK_MONOTONIC, &r0);
+                json a = json::array();
+                for (int c = 0; c < 4; ++c) a.push_back(S.hat.adc_raw(c));   // A0-A3, the feet
+                clock_gettime(CLOCK_MONOTONIC, &r1);
+                S.record("adc_fast", {{"a", a},
+                                      {"us", (r1.tv_sec - r0.tv_sec) * 1000000L
+                                             + (r1.tv_nsec - r0.tv_nsec) / 1000L}});
+            } catch (const std::exception& e) {
+                ++S.bus_errors;
+                if (S.bus_errors % 50 == 1)
+                    S.record("bus_error", {{"where", "adc_fast"}, {"what", e.what()},
+                                           {"count", S.bus_errors}});
+            }
+        }
         if (S.driver.watchdog_tripped()) { S.armed_ch = -1; S.end_cal("watchdog"); }   // after a rescue has landed
         if (S.load_cpu_us > 0) burn_cpu_us(S.load_cpu_us);
         if (S.load_block_us > 0) { timespec b{0, long(S.load_block_us) * 1000L}; nanosleep(&b, nullptr); }
@@ -940,6 +983,42 @@ json handle(State& S, const json& req) {   // caller holds m
         S.record("ext5v.rate", {{"ms", ms}});
         return ok({{"ms", g_ext5v_poll_ms}, {"effective_hz", 1000.0 / std::max<int64_t>(ms, 100)},
                    {"recording_each_sample", ms < 500}});
+    }
+    if (verb == "mark") {
+        // A labelled fence post in the local record.  Physical changes -- a resistor
+        // swapped, a cap fitted, the robot moved onto carpet -- leave NO trace in the log,
+        // so a sweep's segments would otherwise have to be reconstructed afterwards from
+        // wall-clock notes.  That reconstruction is where a sweep silently mislabels an arm.
+        // One verb, and the evidence labels itself.
+        const std::string text = req.value("text", "");
+        if (text.empty() || text.size() > 200) return err("text required, 1-200 chars");
+        S.record("mark", {{"text", text}});
+        return ok({{"text", text}});
+    }
+    if (verb == "adc.rate") {
+        // Bench-only: sample A0-A3 from the 50 Hz tick and write each sample to the JSONL,
+        // so the FSR divider can be characterised at the rate it will actually run at.
+        // `ms` = 0 turns it off, which is the default and the shipping state.
+        //
+        // ⚠ 20 ms floor, and it is the tick period rather than the cost of the read: this
+        // runs once per tick, so 20 ms is 50 Hz and that is the end of it.  Asking for 10
+        // and silently getting 20 is the failure ext5v.rate refuses, so refuse it here too.
+        //
+        // The read cost itself is NOT asserted anywhere.  Four channels is twelve ioctls on
+        // a 400 kHz bus (bom §3's dtparam) -- order 1-2 ms once kernel overhead is counted,
+        // but that is an estimate, which is exactly why every adc_fast record carries its
+        // own measured `us`.  Read the number; do not trust this comment.
+        const int ms = req.value("ms", 0);
+        if (ms != 0 && (ms < int(ADC_FAST_MIN_MS) || ms > 60000))
+            return err("ms must be 0 (off) or 20-60000 — the floor is the 50 Hz tick this "
+                       "samples from, not the cost of the read (see each record's `us`)");
+        g_adc_poll_ms = ms;
+        S.record("adc.rate", {{"ms", ms}});
+        return ok({{"ms", ms}, {"effective_hz", ms ? 1000.0 / ms : 0.0},
+                   {"channels", "A0-A3"}, {"record_kind", "adc_fast"},
+                   {"note", ms ? "each sample is its own JSONL line; watch tick_hz and "
+                                 "overruns in `status` while it runs"
+                               : "off — frame()'s 10 Hz read is the only ADC sampling"}});
     }
     if (verb == "rail.inject") {
         // ⚠ FAULT INJECTION.  RailGuard's LOGIC has unit tests; what those cannot reach is
