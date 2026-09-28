@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stage 0 and stage 1 measured 2026-09-27** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
+Status: **stages 0–1 measured 2026-09-27/28 (R84–R93)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -223,6 +223,15 @@ reduction never attends a young cluster; a stop ends on a confirmed chase. On th
 29 → 45 — the remaining reaches at places are things seen standing that moved after, the (d) test's own answer.
 `WORKING` on the walk, `PARTIAL` on the gap. Next: the voxel age into the thing descriptor, so the kind EPM earns
 a moving kind and the outcome loop learns that it answers nothing.
+
+**R91–R93, isolation and the age dim (§17.58):** the operator's isolation idea — a cluster with tall voxels near
+it is part of something tall — is the discriminator stage 0 lacked: 95 % of the moving train's clusters are
+isolated against 6 % of static ones, and "young and isolated" fires 13 times a minute instead of 128. On the mover
+candidate alone (R93) the chase is the phase's cleanest: 25 chases in six runs, 8 at the moving train and 6 at the
+stopped one, 7 at static clusters (from 49). The walk ties the control within its spread and loses R90's halved
+walls, which turn out to have been false chases becoming stops (an interesting artifact). The age in the
+descriptor (R92) is `NULL` at n = 6: one value in nine under the projection; re-use, a vocabulary of its own over
+[age ratio, fresh].
 
 **Where this leaves the design (for the discussion).** Keep R89's chase; bring the stimulus to the walk before
 touching the gate again (a track through the middle of the room, or the ball rolled across the walk as

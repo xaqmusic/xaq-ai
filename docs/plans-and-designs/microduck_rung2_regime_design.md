@@ -4653,3 +4653,24 @@ is the operator's.** The sliding fragment (O64) is a fragment of something tall.
   signal on a large common mode of CLAUDE.md §0 rule 2: the shape dims own the vocabulary. Re-use: a vocabulary
   of its own over [age ratio, fresh] (two dims, two or three nodes: still, moving, just stopped) feeding the
   outcome table as a second key, rather than one more column in the shape's.
+
+**R93 = R90 + `mover_isolated` alone, measured (n = 6).** Chases 67 → **25** in six runs: 8 at the moving train
+(32 %), 6 at the stopped train, 4 at balls and blocks, 7 at static clusters (28 %, from 73 %); the closest approach
+to a moving train 0.46–0.95 m on the four seeds that chased it; 6 stops ended on a chase. Skills 24, at nothing 6.
+**The chase is the cleanest of the phase: `WORKING` on the candidate, and the operator's ask — the ring off the
+walls — is met.** The walk, though, is a `REGRESSION` at this power: walls 24.0 ± 14.2 (R84 14.7 ± 10.1, R90 6.5 ±
+3.8), three wall seeds at 22, 37 and 45 a minute; stands 24 % (R90 38), stops 16.5 (22.3), arrivals 6.7 (13.0).
+
+**What that says about R90.** R90's halved walls came with 13 arrival stops a run and 38 % standing; R93 differs
+from it only in refusing the candidates at the foot of tall things, and it loses six arrival stops a run with them.
+So a good part of R90's walk was **false chases turning into stops**: a young fragment at a wall base chased for a
+second, "stopped" by the loop's own account (its velocity under `chase_stop_v`), remembered, walked to, stood at.
+Standing is not wall contact, so the walls fell. An interesting artifact (CLAUDE.md §6): R90's number is real and
+its cause is not the chase working. The clean chase (R93) walks like the control does, bimodally, and at n = 6 the
+control's own spread (10) covers most of the difference.
+
+**Verdict.** R93 `WORKING` on the chase, `PARTIAL` on the walk (a tie with the control within the spread, a
+regression against R90's artifact); not promoted without the eye. O64 (the sliding fragment) is answered by
+isolation: it is a fragment of something tall. **Next:** the walk itself — the stops are what keep the duck off
+the walls, and a chase that ends at a moving thing gives none; the stop's trigger, not the chase's gate, is the
+lever (O43's question returns: what should START a stop, when the thing chased is gone).
