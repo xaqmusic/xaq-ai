@@ -774,10 +774,25 @@ their `R_fsr`(175 g), never foot #1's number.
   is exactly why E3's number is explicitly not the final one.
 - **Measure at the board end.** With the 3-pin lead unplugged, the two conductors are the FSR's
   terminals, so an assembled foot can be read without disturbing the toe or the wire tension.
+- **⚠ If the load is set with magnets, prove the scale is not reading them.** Most scale
+  platforms are steel. Move a magnet without changing the geometry: if the reading shifts, the
+  scale is measuring attraction as well as weight. And keep magnets away from the ICM-20948 —
+  its magnetometer is unused today, which is precisely how a stray field becomes a silent
+  confound the day someone switches it on.
 
-### 5.6 ✅ E3 measured 2026-09-27 — `R_g` = 15 kΩ, `C` = 1.0 µF
+### 5.6 ✅ Measured 2026-09-27 — `R_g` = 15 kΩ, `C` = 1.0 µF
 
-Bare sensor, operator's meter, resistance settled at each mass. **Counts are computed for
+**Method (operator): not the bare-sensor bench test E3 specified — the real thing.** The
+assembled foot/toe with its **spherical bump**, on the **real leg**, robot on the short stand
+with the servos **unpowered**, leg angled so the foot presses down onto a digital scale, and
+the load set by adding magnets to the leg and moving them until the scale read the target.
+
+**That is better than the planned E3 and it is really E4**: the scale reads the force the foot
+actually applies, through the real load path and the real actuator, so `R_g` below is the
+in-situ number §5 asks for rather than a decade estimate. Three caveats come with the method,
+in §5.6.1.
+
+Resistance settled at each mass. **Counts are computed for
 `R_g` = 15 kΩ** (the nearest standard value to the 14.2 kΩ read at the calibration point):
 
 | mass | `R_fsr` | counts | local `n` | counts/g |
@@ -806,7 +821,50 @@ the 10 kΩ decade. Divider current is 110 µA per foot, 440 µA for four — no 
 `Z_src` peaking at 15 kΩ is a modest impedance, so **E2's unity-gain-buffer contingency is
 unlikely to be needed**; E2 still has to say so rather than be assumed.
 
-**⚠ Two things in this data are not yet understood, and neither is a verdict on the sensor.**
+### 5.6.1 ⚠ What the method puts into the numbers
+
+**1. `R_g` and `C` are hostage to the bump decision.** These are the values for the **spherical
+bump**. Flattening it (§3.2) spreads the same force from a sub-millimetre patch to ~19.6 mm² —
+a contact area two to three orders larger — and FSR conductance follows area, so `R_fsr` at
+175 g will move, probably **well below** 14.2 kΩ. **Do not fit `R_g` or buy `C` until the bump
+geometry is settled**; the two decisions are one decision. Re-run this same measurement on the
+flat-bump toe and take the values from that.
+
+**2. ⚠ The channel is an AXIAL force sensor and the scale reads VERTICAL.** The bump presses
+along the foot's axis and tangential load bypasses the film entirely through the boss/bore
+bearing (§2), so the FSR sees `F·cos θ` with θ the angle between the lower leg and vertical,
+while the scale reads `F`. They agree only when the leg is vertical. **The sim's `foot_load` is
+a contact normal force, so this is a real sim-to-real gap, not a calibration constant** — at
+the standing pose (~10° from vertical) it is 1.5 %, but a gait sweeping to 30° makes it 13 %,
+on a channel whose graded term carries weight 1.0. θ is computable from the servo commands via
+`LegKinematics`, so the fix is the usual one: **publish the factor beside the reading** rather
+than let a consumer assume the two are the same quantity. Record the leg angle used for the
+calibration either way.
+
+**3. ⚠⚠ The unpowered leg probably sagged, and it would flatten the curve exactly where the
+curve flattens.** Static torque at hip2, taking the lever as `L2` = 48 mm with the upper leg
+horizontal:
+
+| load | force | torque at hip2 |
+|---|---|---|
+| 100 g | 0.98 N | 0.047 N·m |
+| **175 g** | 1.72 N | **0.082 N·m** |
+| 300 g | 2.94 N | 0.141 N·m |
+| 500 g | 4.91 N | **0.235 N·m** |
+
+An MG90S stalls around **0.18–0.22 N·m powered**, and unpowered it holds only gearbox friction —
+far less. So the pose was very likely giving way from somewhere around 175 g, and as it gives
+way θ grows, which reduces the axial fraction the sensor sees while the scale reading is held
+constant by adding magnets. **That is a flattening with the same signature as sensor saturation,
+and it starts at the same load.** Correlation, not proof — the lever arm is an estimate and the
+pose is not recorded — but it has to be ruled out before the flattening is attributed to
+anything else.
+
+**To separate them:** brace the leg so the geometry cannot move, mark the joint positions, and
+confirm they are unchanged at 20 g and at 500 g. If the pose holds and the curve still flattens,
+the flattening is real and belongs to the bump or the part.
+
+### 5.6.2 ⚠ Two things in the data are not yet understood, and neither is a verdict on the sensor
 
 **1. 100 g reads higher than 50 g.** A 10 % inversion, and the channel is non-monotone across
 it — which would make `counts → grams` unfittable in that region if it were real. It is very
@@ -817,11 +875,12 @@ dwell — place, wait T, read — identical at every mass, with T recorded.** Re
 100 g that way before fitting anything.
 
 **2. The curve flattens hard above 175 g:** `n` falls 1.51 → 0.47 → 0.09, and 300 → 500 g
-moves the channel 47 counts. Early contact-area saturation is what a **small actuator**
-produces, so ⚠ **the actuator used for this run has to be recorded** — E3 specifies a flat
-Ø5.5 proxy, and pressing with a mass directly, or with anything rounded, measures the
-actuator rather than the sensor. If it was a flat Ø5.5, the compression is the part's and
-§3.3's diameter choice should be revisited against it.
+moves the channel 47 counts. **Three candidates, and the harness is one of them:** the
+spherical bump saturating its contact area (the §3.2 prediction), the pose sagging under an
+unpowered servo (§5.6.1 item 3), or the part itself compressing. The actuator *is* now known —
+the spherical bump — so the §3.2 prediction is live rather than hypothetical, but a brace and
+a repeat is what separates it from the harness. **The A/B is cheap: same masses, flat-bump toe,
+compare `n` above 175 g.**
 
 **Where it leaves the gait.** The band that matters is 148–197 g (four feet down to three),
 which lands at **~2100 counts — mid-scale — at 2 to 11 counts per gram**, and the stance
@@ -830,9 +889,8 @@ the light loads the gait actually spends its time at, and the compressed part is
 That is the right way round for the `unloaded` term and the G2 per-leg minima guard, both of
 which read the light end.
 
-⚠ These are **bare-sensor** numbers and `R_g` is provisional (§5.4 E3): the assembled foot
-re-measures in situ through a trial `R_g` (§5.5), because backing stiffness and the real bump
-geometry both move `R_fsr`.
+⚠ These are **in-situ numbers for the spherical-bump toe**, which is the right basis — and
+exactly why they do not survive the bump change (§5.6.1 item 1).
 
 ⚠ **The contingency E2 and E3 exist to catch:** if `R_fsr` at 175 g lands well above E2's
 maximum usable `Z_src`, the node is too high-impedance for this ADC on a wire that runs the
