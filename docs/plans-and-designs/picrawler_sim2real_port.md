@@ -1074,6 +1074,13 @@ unless a vocabulary over range states is genuinely wanted.
 Four circular FSRs, **20 g – 2 kg**, one per foot, on the Robot HAT's existing ADC **A0–A3**.
 No new bus. **A4 stays on battery voltage** — it is the brownout and calibration-stall detector.
 
+> ⚠ **The parts fitted are Ø10.0, 20 g – 6 kg, 0.40 thick** (measured 2026-09-27) — wider
+> range than specced here, and the divider sized by measurement below absorbs it. **What the
+> wider range does change is that the actuator's area now sets where the robot sits on the
+> curve**, since a sensor's force range is quoted against an actuator covering the sensing
+> area. On the printed toe's Ø5.0 bump the gait's 148–197 g lands at 74–98 kPa, mid-band —
+> [`../operational/picrawler_foot_fsr_mod.md`](../operational/picrawler_foot_fsr_mod.md) §3.
+
 ### The operating point — and why 20 g – 2 kg is the right part
 
 `foot_load` is published as a **fraction of total body weight**, not in newtons:
@@ -1129,6 +1136,16 @@ at. Use the same `R_g` on all four channels so per-foot differences show up in c
 than in hardware.
 
 ### Mounting — the puck is more of the design than the sensor is
+
+> ⚠ **SUPERSEDED 2026-09-27 — the foot is designed and printed.** The record is
+> [`../operational/picrawler_foot_fsr_mod.md`](../operational/picrawler_foot_fsr_mod.md):
+> source CAD, derived dimensions, the load path and the constants a longer leg re-baselines.
+> **The four rules below were the right rules and the built part answers three of them**, so
+> they stay as the reasoning rather than as instructions. Rule 1's puck is the toe's moulded
+> Ø5.01 × 0.50 bump; rule 2's slip layer is the Ø11.00-boss-in-Ø11.51-bore joint, which takes
+> shear on a resin bearing; rule 3's compliant backing is the upper foot's 0.50 mm socket
+> floor. Rule 4 — tail routing — is still on the builder, and the toe has a 68° window through
+> its bore wall for it.
 
 1. **A rigid disc, slightly SMALLER than the active area.** Force must arrive through a puck that
    stays inside the active circle. A puck that overlaps the inactive border ring loads the

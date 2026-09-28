@@ -46,14 +46,14 @@ connectors** — which, as it happens, it all does.
 | 2 | **INA219** breakout | 1 | I²C `0x40`, 26 V bus max ✓ | **shunt must be changed — see #3** |
 | 3 | **0.01 Ω shunt resistor** | 1 | 2512, ≥ 1 W, 1 % | replaces the stock 0.1 Ω (§3) |
 | 4 | **VL53L0X / VL53L1X** ToF | 1 | I²C `0x29` | belly clearance — ✅ **FITTED AND CALIBRATED 2026-09-07 (§9)** |
-| 5 | **Circular FSR, 20 g – 2 kg** | 4 | active dia ~14–20 mm | feet |
+| 5 | **Circular FSR** | 4 | **FITTED PART: Ø10.0 disc, 20 g – 6 kg, 0.40 thick** — measured 2026-09-27 | fits the Ø11.00 sensor face with 0.5 mm margin. Range is wider than the specced 20 g – 2 kg, which the measured `R_g` absorbs (§5) — [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §3 |
 
 ### Passives and conditioning
 
 | # | item | qty | note |
 |---|---|---|---|
 | 6 | FSR divider resistor `R_g` | 4 | **value is set by measurement, not chosen** — §5. Buy an assortment (1 kΩ–100 kΩ, 1 % metal film) and fit after measuring |
-| 7 | 0.1 µF ceramic | 4 | one across each ADC input to ground, anti-alias / noise |
+| 7 | **ADC input cap `C`** | 4 | **value is set by `R_g`, not chosen** — §5.2. Buy a range (0.1 / 0.47 / 1.0 / 2.2 / 10 µF, X7R or better) and fit after `R_g` is measured. One across each ADC input to ground, at the connector |
 
 ### Connectors and cable
 
@@ -69,11 +69,16 @@ connectors** — which, as it happens, it all does.
 
 ### Mechanical — the foot stack (§5)
 
+> ⚠ **SUPERSEDED 2026-09-27 by the printed foot/toe assembly** —
+> [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md). Items 14–16 were the loose-parts
+> plan; the printed pair does all three jobs as moulded features, so **do not buy them**.
+
 | # | item | qty | note |
 |---|---|---|---|
-| 14 | Rigid puck disc | 4 | **slightly SMALLER than the FSR active area.** 3D-print or Delrin. This is the toe cap |
-| 15 | PTFE shim / low-friction slip layer | 4 | **shear isolation — the main failure mode** |
-| 16 | Compliant backing pad | 4 | spreads point contact across the puck |
+| 14 | ~~Rigid puck disc~~ | — | **superseded** — the toe's integral Ø5.01 × 0.50 bump is the puck |
+| 15 | ~~PTFE shim / low-friction slip layer~~ | — | **superseded** — the Ø11.00 boss in the Ø11.51 bore takes shear on a resin bearing, 0.25 mm of float before it bites |
+| 16 | ~~Compliant backing pad~~ | — | **superseded** — the sensor backs onto the upper foot's 0.50 mm socket floor (deflects ~1.6 µm at 148 g, so it is a backing, not a spring) |
+| 16b | **Wire, for the toe tie** | 4 | through the 2.00 × 2.00 channel in each part. **Its tension sets the zero offset** — tie, then calibrate |
 
 ### Bench / calibration
 
@@ -537,34 +542,156 @@ are the two run-endings, not faults.
 
 ## 5. FSRs — foot wiring
 
-Full conditioning, mounting and calibration spec is in the port doc
-(`## SPEC — foot FSRs`). The wiring half:
+Full conditioning and calibration spec is in the port doc (`## SPEC — foot FSRs`); the
+**mounting** half moved to [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) when the
+foot was designed. The wiring half:
 
 ```
-        3.3 V  ◄── ⚠ see hazard note below
-          │
-        [ FSR ]        (in the foot)
-          │
-          ├──────────────► A_n  signal   (ADC, 12-bit, 3.3 V ref)
-          │
-        [ R_g ]  ── measured, not chosen
-          │
-         GND
-                        ┌── 0.1 µF ──┐
-              A_n ──────┴────────────┴────── GND
+     HAT 3V3 ──┬─────────────────────────────┐   (one net; see "ratiometric" below)
+               │                             │
+               │                          [ FSR ]   ← in the foot, 2 conductors up the leg
+               │                             │
+               │        ┌────────────────────┴──────► A_n   (ADC, 12-bit, 3.3 V ref)
+               │        │                    │
+               │      [ R_g ]              [ C ]     ← both AT THE BOARD, C at the connector
+               │        │                    │
+     GND ──────┴────────┴────────────────────┘
+
+     R_g : measured, never chosen — see below.   C : chosen AFTER R_g — see §5.2.
 ```
 
 ⚠ **Confirm the 3-pin connector's pin ORDER and its VCC rail against the board silkscreen before
 powering anything.** Two hazards:
 
 1. **Pin order is not documented** in the vendor hardware page — do not assume signal/VCC/GND.
-2. **If the ADC connector's VCC pin is 5 V, do NOT use it as the divider's top rail.** The
-   divider would present up to 5 V to a **3.3 V-referenced** ADC input. Take 3.3 V from the SPI
-   header or an I²C connector instead.
+2. ~~**If the ADC connector's VCC pin is 5 V, do NOT use it as the divider's top rail.**~~
+   ✅ **RESOLVED 2026-09-27 — the ADC connector's VCC is 3.3 V, labelled on the PCB.** So the
+   divider's top rail comes straight off the ADC connector; no jumper to the SPI header, and
+   the 5 V-into-a-3.3 V-input hazard does not exist on this connector. ⚠ Pin *order* within
+   the 3-pin connector is the other half of hazard 1 — confirm signal/VCC/GND off the same
+   silkscreen before plugging a foot in.
 
 **`R_g` is set by measurement:** assemble one foot completely, rest **175 g** on it (the
 mid-stance operating point), measure `R_fsr` in place, set `R_g` to that value, and use the same
 value on all four channels so per-foot variation shows up in calibration rather than in hardware.
+
+**This is why the substituted 20 g – 6 kg part costs less than it looks.** The divider is
+re-centred on whatever sensor is fitted, so the range change moves resolution within the
+gait's 148–197 g band, not the operating point. Read the counts-per-gram across 50 → 300 g off
+the fitted curve rather than arguing it in advance.
+
+### 5.1 Where each part goes, and why
+
+**`R_g` lives at the board, not at the foot.** The divider node's impedance is `R_fsr ∥ R_g`
+either way, so placement buys nothing electrically — it is decided by conductor count. With
+`R_g` at the board the leg carries **two** conductors (3V3 up, sensor return down); with `R_g`
+at the foot it carries three, plus a resistor to mount and strain-relieve at the end of a limb
+whose mass budget is 2 g.
+
+**`C` sits at the ADC connector**, across the input pin to ground, as close to the header as it
+will go. It is the reservoir the MCU's sample-and-hold draws from, so it wants to be on the
+chip's side of the wire, not the foot's.
+
+**Take 3V3 from any HAT 3V3 pin — they are one net, and that should make the channel
+ratiometric.** The divider's output is `3.3 · R_g/(R_g + R_fsr)`; if the MCU's ADC references
+its own supply, a wobble on the rail moves numerator and reference together and cancels to
+first order. That cancellation is free, and it is the second reason not to feed the divider
+from a 5 V pin — but it is a **prediction, not a datum**: an MCU with an internal bandgap
+reference would not cancel at all. ⚠ **E2 tests it in one step** — hold a fixed divider on A0,
+load the 3V3 rail, and watch whether the counts move.
+
+**Power is not a constraint.** At the operating point the divider draws `3.3/(2·R_g)` — 165 µA
+per foot at `R_g` = 10 kΩ, 0.66 mA for all four. Nothing here trades against the servo rail.
+
+### 5.2 ⚠ The cap cannot be chosen until `R_g` is known
+
+BOM item 7 says "0.1 µF, anti-alias / noise". **That is a value with no number behind it**, and
+it is right only for one decade of `R_g`.
+
+The RC corner is set by the *source* impedance, which is the divider itself:
+
+```
+Z_src = R_fsr ∥ R_g          f_c = 1 / (2π · Z_src · C)
+```
+
+At the calibration point `R_fsr` = `R_g`, so `Z_src` = `R_g`/2:
+
+| if `R_g` lands at | `Z_src` | `C` for f_c ≈ 22 Hz | what 0.1 µF would actually give |
+|---|---|---|---|
+| 1 kΩ | 500 Ω | 14 µF | 3.2 kHz — no filtering at all |
+| 10 kΩ | 5 kΩ | **1.5 µF** | 320 Hz — ~15× too fast |
+| 100 kΩ | 50 kΩ | **0.15 µF** | 32 Hz — about right |
+| 1 MΩ | 500 kΩ | 15 nF | 3.2 Hz — over-filtered |
+
+**So buy a range of caps the way §2 item 6 buys a range of resistors** (0.1 / 0.47 / 1.0 / 2.2 /
+10 µF, X7R or better) and fit after `R_g` is measured. A ceramic's capacitance falls with DC
+bias, so at 1.65 V on a 16 V-rated part expect the fitted corner to sit a little above the
+table; measure it rather than trusting the marking.
+
+**Why ≈22 Hz — and ⚠ it depends on a rate that is not 50 Hz today.** This RC is **the only
+anti-alias filter in the chain.** The HAT MCU samples the pin and we read the result over I²C;
+nothing between the foot and the published channel band-limits anything, so servo PWM edges,
+brush noise and the 5 V regulator all fold down into the band unless they are removed *before*
+the sampler. The rule is `f_c ≈ 0.45 · f_sample`, and
+
+> ⚠ **the ADC is read at 10 Hz right now, not 50.** `benchd.cpp:525` reads all five channels
+> inside the telemetry frame builder, which runs at 10 Hz — see §5.4 step **E0**. At 10 Hz the
+> right corner is **4.5 Hz**, which needs caps about 5× larger than the table below. **Settle
+> the sample rate before buying the capacitor**, because the two are the same decision.
+
+### ⚠ 5.2.1 Unfiltered servo pickup would look like creep, not like noise
+
+The HAT's servo frame is **49.95 Hz** (PROTOCOL.md) and the tick samples at **50 Hz**. Anything
+coupled in at the frame rate therefore folds to **|50 − 49.95| = 0.05 Hz — a wander with a
+~20 second period.**
+
+That is the same shape, the same timescale and the same sign as **FSR creep**, which is the
+quantity the graded `unloaded` criterion term (weight 1.0) is built on and which §8 item 5 has
+been waiting to measure. **So an unfiltered divider would not present as a noisy channel. It
+would present as a sensor that creeps, and it would be believed** — a confound wearing the
+costume of the signal.
+
+Two things follow. The RC is not a polish item; it is what stops a servo artifact from being
+read as sensor physics. And **the creep test has to be run with the servos powered and the
+filter fitted**, because a creep number taken on a quiet bench measures a different robot.
+
+`adc_fast_report.py` separates the two on purpose: `sigma` is the raw spread, `white` is
+`stdev(diff)/√2` — the part that behaves like white noise — and `wander` is the spread of 1 s
+block means. A beat shows up as `wander` many times what white noise alone would give, while
+`white` stays flat. `--fft` names the frequency.
+
+Three consequences worth carrying:
+
+1. **The filter is load-dependent.** Unloaded, `R_fsr` → MΩ and `Z_src` → `R_g`, so **f_c halves
+   when the foot is in the air** and rises again as it loads. The channel's bandwidth is a
+   function of the thing it is measuring.
+2. **It is slowest near the stance threshold**, which is exactly where the promoted
+   `foot_load ≥ ~0.2` gate lives: at that load `R_fsr` is still ~1.5–2× `R_g`, so `Z_src` is
+   ~0.6·`R_g` against 0.5·`R_g` at calibration — about 25 % slower than the table implies.
+3. **Budget the delay.** At f_c = 22 Hz, τ ≈ 7.2 ms ≈ **0.38 of a 52 Hz tick**. Touchdown
+   *timing* is the accelerometer's job (ledger 2026-08-24 ★3), so a smear of that size on the
+   load channel is affordable — but it is not zero, and the stance gate rides it.
+
+The sample-and-hold's own requirement is easy by comparison: any `C` from 10 nF up is thousands
+of times the MCU's sampling capacitor, so settling is satisfied by every value in the table.
+
+### 5.3 ⚠ A broken FSR reads exactly like a lifted foot
+
+With `R_g` to ground, an open sensor — snapped tail, failed bond, unplugged foot — leaves the
+node pulled to 0 V. **That is the same reading as a swing leg**, on the channel the stance gate
+and `stride_v` depend on.
+
+| fault | the channel reads | tells itself apart from |
+|---|---|---|
+| FSR open, tail broken, bad bond | **0 counts** | nothing — identical to swing |
+| `R_g` missing or open | high, near full scale | loaded foot, but never falls |
+| FSR shorted | full scale, constant | — |
+| connector unplugged at the header | floating; **measure this first** (the example frame in `pi_host/PROTOCOL.md` shows A0–A3 at 3209–3575 counts with nothing fitted, so probably high) | — |
+
+A pull-up would separate the first case, and would also destroy the ratiometric divider, so
+**do it in software instead**: a foot that never crosses the stance threshold across a window
+of walking is broken, not light. Free, needs no hardware, and it is the same discipline as
+publishing the states that invalidate a reading.
 
 | foot | ADC | leg (⚠ **by anatomy, not by sim name** — see the port doc's leg-naming mirror) |
 |---|---|---|
@@ -572,6 +699,36 @@ value on all four channels so per-foot variation shows up in calibration rather 
 | front-right | A1 | drives sim `fl_*` |
 | rear-left | A2 | drives sim `rr_*` |
 | rear-right | A3 | drives sim `rl_*` |
+
+### 5.4 The bench order — and what can be done before the feet exist
+
+The ADC path is already built and live: `RobotHat::adc_raw()` (`pi_host/src/RobotHat.cpp:50`)
+selects a channel with `(7−ch)|0x10` and reads two bytes, and **all five channels already ship
+in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no foot — E0 is a daemon change, and E1 needs only a meter.
+
+| # | step | needs | pass condition |
+|---|---|---|---|
+| **E0** ✅ | **BUILT 2026-09-27 — `adc.rate` (PROTOCOL.md).** `frame()` reads A0–A4 at 10 Hz, which cannot characterise a tick-rate channel; the verb adds an **opt-in** sampler in `tick_thread` writing `adc_fast` records at up to 50 Hz. **Off by default** (`ms` = 0), so an un-called daemon runs the old path. ⚠ **Scripts must not poll the ADC themselves** — `rail_separation_test.py`'s own header records what two owners of one resource cost: six pose cycles reported as a clean PASS off a single sample | — | ⚠ **still to run on the robot:** `tick_hz` unmoved and `bus_errors` flat with `adc.rate ms=20`, i.e. 4× today's I²C load in the tick. Each record carries its own `us`, so the read cost is measured rather than assumed |
+| **E1** ✅ | **Meter the ADC connector** | a meter | ✅ **DONE 2026-09-27 — VCC is 3.3 V, labelled on the PCB**, so the divider's top rail is the connector itself. Pin order still to be read off the same silkscreen |
+| **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
+| **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
+| **E3** | **Bench `R_fsr` vs mass, bare sensor**, loaded through a flat Ø5.5 puck proxy at 0 / 50 / 100 / 175 / 300 / 590 g | FSR, masses, DMM | the **decade** `R_g` will land in, so the right resistors and caps can be bought. ⚠ Not the final value — backing stiffness and puck geometry change it, so §5's in-situ measurement still governs |
+| **E4** | `R_g` = `R_fsr`(175 g) **in the assembled foot**; then `C` from the §5.2 table | a finished foot | — |
+| **E5** | Wire one foot, confirm counts rise monotonically with the mass series, then the other three | — | §6 step 5 |
+
+**Reading the records:** `pi_host/tools/adc_fast_report.py` (newest log by default, `--fft`
+for spectral peaks, `--csv` to dump samples). Label the arms as you go — the physical ones
+leave no other trace:
+
+```sh
+python3 pi_host/tools/bench_verb.py mark text="Zsrc=5k cap=none servos=hold"
+```
+
+⚠ **The contingency E2 and E3 exist to catch:** if `R_fsr` at 175 g lands well above E2's
+maximum usable `Z_src`, the node is too high-impedance for this ADC on a wire that runs the
+length of a moving leg, and the fix is a unity-gain buffer at the board — not a smaller `R_g`,
+which would throw away the divider's sensitivity at the operating point. **Find that out on the
+bench, not after four feet are glued.**
 
 ---
 
@@ -585,7 +742,7 @@ value on all four channels so per-foot variation shows up in calibration rather 
 | 2 | INA219 inline on the battery | `0x40` appears; idle current is plausible; its bus voltage **agrees with A4's** reading |
 | 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 — ✅ **PASS 2026-09-10** (§4.0): `0xEA` on CE0, 0 bad reads in 2000 at each of 1/4/7/10 MHz, `az` = +0.9967 g with `ax`/`ay` at −0.035/+0.001. Mounting, axis map and level reference in §4.1–4.2 |
 | 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure — ✅ **PASS 2026-09-07** (§9): `0x29` present with model ID `0xEE`; 259 readings at a bench target measured 121.9 mm ± 1.51 mm, 0 invalid; then validated on the robot at two points, belly-down and standing (§9.3) |
-| 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot |
+| 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot. ⚠ **Tie the toe wire BEFORE calibrating** — its tension is the zero offset ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2), so a re-tension invalidates that foot's curve |
 
 **After all four FSRs:** command the standing pose on a flat floor. The four `foot_load` values
 should sum to ≈ 1.0 (one body weight) and be roughly equal. **If they sum well below 1.0 the
@@ -644,8 +801,10 @@ reduces — and only after the authority check.
 
 ## 8. Open — must be resolved at the bench, not from documentation
 
-1. **3-pin connector pin order and VCC rail voltage** (ADC / digital / servo) — not in the vendor
-   hardware page. Read the silkscreen. §5 hazard 2 depends on this.
+1. **3-pin connector pin order** (ADC / digital / servo) — not in the vendor hardware page.
+   ✅ **The ADC connector's VCC half is closed: 3.3 V, labelled on the PCB (2026-09-27)**, so
+   §5's hazard 2 is gone for the ADC. Pin order within the connector, and the rails on the
+   digital and servo headers, are still unread.
 2. **5 V regulator current rating** — undocumented. Relevant only if the servo rail is ever
    revisited; the battery-input placement sidesteps it.
 3. **Actual gait current draw** — measure with the inline meter (#18) before trusting the 0.01 Ω
@@ -655,6 +814,8 @@ reduces — and only after the authority check.
    received board exposes `NCS` and `ADO`, so SPI is available. Pin map in §4.
 5. **FSR creep** — hold 175 g for 60 s and record the drift **before** the graded `unloaded`
    criterion term is trusted. If it is large, that term wants the threshold, not the magnitude.
+   ⚠ Measure it on the **assembled** foot: the wire preload and the unbacked socket floor are
+   both in the path ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2).
 6. **Ultrasonic mounting height and pitch** — the role is settled (forward, obstacle avoidance),
    but height and downward pitch set what it can see of the floor ahead. Record both.
 7. ~~**Whether the ultrasonic module's echo is already level-shifted**~~ — ⚠ **partially resolved
@@ -2089,6 +2250,13 @@ repairs a channel that is measuring the wrong quantity.
 |---|---|---|
 | `tof.mount_offset_mm` = 64.8 | sensor → belly-plane geometry, anchored belly-down | **No.** Belly-down means the belly is on the floor; toe length does not move the belly plane relative to a HAT-mounted boom. ⚠ Confirm the longer toes still *reach* belly-down in `X` |
 | `ground_clearance.stand_m` = 0.06 | the normalizer the promoted height homeostat rides | **Yes** — longer legs stand taller. ⚠ And it *must* match the sim's `GROUND_CLEARANCE_STAND`, so it cannot be re-fitted on the robot alone |
+
+⚠ **UPDATE 2026-09-27 — "the ~1 cm toes" are 1.7 cm.** The foot is designed and printed, and
+its stack measures 19.90 mm from the socket mouth to the ground contact
+([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §1.3). At the likely 3 mm of leg
+insertion that is **+16.9 mm of `L3`** and **+16.6 mm of standing height — 28 % of the 60 mm
+normalizer**, against 22 % more `L3`. Recommendation 4 below is the one that survives this;
+recommendations 1–3 are unaffected, and `mount_offset_mm` still does not move.
 
 **Recommended, in the order the measurements justify:**
 
