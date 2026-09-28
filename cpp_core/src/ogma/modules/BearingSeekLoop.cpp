@@ -106,6 +106,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "The target is the candidate's predicted position this far ahead (seconds of its velocity).", ParamValue{0.3}},
         {"chase_v_max", ParamMutability::HotMutable,
             "A fix implying a faster mover than this (m/s) is another cluster, not a confirmation.", ParamValue{1.0}},
+        {"chase_min_v", ParamMutability::HotMutable,
+            "A candidate is chased only if it has moved: its velocity and its displacement per second since the first sighting at "
+            "least this (m/s).  A young cluster that stays put is a thing newly in view.  0 = not required.", ParamValue{0.0}},
     };
 }
 
@@ -121,7 +124,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["mover_topic"] = ParamValue{mover_topic_}; m["chase_gate_m"] = ParamValue{chase_gate_m_};
     m["chase_confirm"] = ParamValue{int64_t(chase_confirm_)}; m["chase_confirm_ticks"] = ParamValue{int64_t(chase_confirm_ticks_)};
     m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
-    m["chase_v_max"] = ParamValue{chase_v_max_};
+    m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_};
     return m;
 }
 
@@ -149,6 +152,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_forget_ticks", [&](auto const& v){ chase_forget_ticks_ = std::max(1, int(get_double(v,"chase_forget_ticks"))); });
     apply_param(params, "chase_lead_s",    [&](auto const& v){ chase_lead_s_  = get_double(v,"chase_lead_s"); });
     apply_param(params, "chase_v_max",     [&](auto const& v){ chase_v_max_   = get_double(v,"chase_v_max"); });
+    apply_param(params, "chase_min_v",     [&](auto const& v){ chase_min_v_   = get_double(v,"chase_min_v"); });
 }
 
 void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& value) {
@@ -167,6 +171,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_forget_ticks") chase_forget_ticks_ = std::max(1, int(get_double(value, k)));
     else if (k == "chase_lead_s")    chase_lead_s_ = get_double(value, k);
     else if (k == "chase_v_max")     chase_v_max_ = get_double(value, k);
+    else if (k == "chase_min_v")     chase_min_v_ = get_double(value, k);
     else throw std::invalid_argument("BearingSeekLoop: param '" + k + "' is construction-only / unknown");
 }
 
@@ -291,15 +296,21 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 cand_x_ = fx; cand_y_ = fy; cand_tick_ = tick_id; ++cand_n_;
             } else if (!chasing_) {
                 // an unconfirmed candidate that did not follow: this sighting is the new candidate
-                cand_x_ = fx; cand_y_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+                cand_x_ = cand_x0_ = fx; cand_y_ = cand_y0_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
             }
             // (a chased target ignores a stray sighting; it is another thing)
         } else if (!have_cand_) {
             have_cand_ = true;
-            cand_x_ = fx; cand_y_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+            cand_x_ = cand_x0_ = fx; cand_y_ = cand_y0_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
         }
         if (!chasing_ && cand_n_ >= chase_confirm_ && tick_id - cand_first_ >= uint64_t(chase_confirm_ticks_)) {
-            chasing_ = true; ++chases_;
+            bool moved = true;
+            if (chase_min_v_ > 0.0) {
+                const double watched = double(tick_id - cand_first_) / 50.0;
+                const double disp = std::hypot(cand_x_ - cand_x0_, cand_y_ - cand_y0_);
+                moved = std::hypot(cand_vx_, cand_vy_) >= chase_min_v_ && watched > 0.0 && disp / watched >= chase_min_v_;
+            }
+            if (moved) { chasing_ = true; ++chases_; }
         }
     }
     if (have_cand_ && tick_id - cand_tick_ > uint64_t(chase_forget_ticks_)) {

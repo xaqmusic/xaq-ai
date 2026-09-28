@@ -40,7 +40,10 @@ struct PlaceInputs {
     // sweep, its cache and its reduction all live in ogma::CloudMap, where the inspector and the
     // brain builder can see them.  Absent: no publication, so a graph without the module is
     // byte-identical.
-    std::array<float, 5 + 3 * 64> tof_points{};
+    // ...then, appended (2026-09-27, the chase phase): the sensor's own origin [x, y, z] in the same frame, z above the
+    // floor, so the cloud can tell which voxels a ray passed through (vacated voxels).  Old consumers read the first
+    // 5 + 3 * 64 values as before.
+    std::array<float, 5 + 3 * 64 + 3> tof_points{};
     bool tof_points_valid = false;
 };
 

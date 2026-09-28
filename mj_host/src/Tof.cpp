@@ -66,6 +66,7 @@ void Tof::sense(const DuckBody& body, double trunk_height_m) {
     const auto g = body.gravity();
     const auto level = level_from_gravity(g);
     const auto sensor_level = qrot(level, sensor_pos);
+    origin_level_ = sensor_level;
     const double above_floor = sensor_level[2] + trunk_height_m;
     const double floor_threshold = above_floor * kFloorSafety;
 

@@ -239,3 +239,21 @@ TEST(BearingSeekLoop, WithoutAMoverTopicNothingChanges) {
     r.mover(0.0f, 1.0f, prox_of(1.0)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
     EXPECT_FALSE(r.m.chasing()); EXPECT_EQ(r.m.chase_n(), 0); EXPECT_FALSE(r.m.have_target());
 }
+
+TEST(BearingSeekLoop, WithChaseMinVAThingThatStaysPutIsNotChased) {
+    ogma::ParamMap p = chase_params();
+    p["chase_min_v"] = 0.1;
+    Rig still(p);
+    for (int k = 0; k < 10; ++k) {                       // the same spot, 1.0 m ahead, ten sightings over 36 ticks
+        still.mover(0.0f, 1.0f, prox_of(1.0)); still.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) still.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    EXPECT_FALSE(still.m.chasing()) << "young, persistent, but it has not moved";
+    EXPECT_EQ(still.m.chases(), 0);
+    Rig moving(p);
+    for (int k = 0; k < 10; ++k) {                       // the thing walking away at 0.2 m/s
+        moving.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); moving.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) moving.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    EXPECT_TRUE(moving.m.chasing()) << "moved 0.14 m over 0.72 s: chased";
+}

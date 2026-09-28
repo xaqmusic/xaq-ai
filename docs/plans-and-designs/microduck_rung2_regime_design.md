@@ -4449,3 +4449,67 @@ sightings 11 → 10, renewals 0 in both, arrivals 9 → 5 — not seek's targets
 things reduction at stops only, the mover still on the walk) is the first lever: R86 = R85 + it. The bearing bug
 touched this walk too (the attended thing on the walk fed the thing and kind EPMs and the outcome loop at the
 wrong range), so R84, R85 and R86 are re-measured together on the fixed bearing.
+
+**Measured on the fixed bearing (n = 6 × 1500 s, the three arms in one sweep, the same seeds).**
+
+| arm | walls / min | cells | seek % of the walk | rescues / min | stops / arrivals | objects touched / min | chases a run (at the moving train) |
+|---|---|---|---|---|---|---|---|
+| R84 (control, the fixed bearing) | **12.4 ± 9.5** | 119 | 43 | 0.06 | 18.2 / 8.3 | 22.8 | — |
+| R85 = R84 + the chase | 13.0 ± 8.6 | 140 | 88 | 0.13 | 18.3 / 9.0 | 10.2 | 74.5 (3.0) |
+| R86 = R85 + `walk_things false` | 20.3 ± 12.3 | 132 | 86 | 0.18 | 18.2 / 8.2 | 5.9 | 82.5 (1.7) |
+
+- **The bearing fix is the loud result of the evening, and it is O65's answer.** R84 on the fixed bearing walks
+  at 12.4 walls a minute against 31.1 on the anchor-relative bearing (the same config, the same seeds, the same
+  room): seed 1, the operator's, 68.5 → 6.1 a minute, its 900–1100 s windows 150 → 25–30 wall episodes per 100 s
+  with one rescue. That is below R83's 28.3 (things phase §17.52): the walking cloud, given a bearing from where
+  the body is, helps the walk rather than wrecking it. `WORKING` as a fix; the walk's verdict on the walking cloud
+  (O55) turns from `REGRESSION` to *better than the stack without it*, at n = 6, awaiting the eye.
+- **`walk_things false` (R86) is a `REGRESSION` on the fixed bearing** (walls 13 → 20, rescues up): the things
+  reduction on the walk was never the cause; the wrong range was. O65's lever is withdrawn; the switch stays,
+  default true (R84's behaviour), as a lesion for tests.
+- **The chase (R85), on the age gate with persistence, `NULL` for the train and a `REGRESSION` for the walk's
+  ownership.** 447 chases in six runs, 73 % at static clusters, 21 % at balls and blocks, 4 % (18) at the moving
+  train; the closest approach to a moving train 1.5–2.3 m by seed; seek holds the reference 88 % of the walk
+  (play 12 %) because each false chase leaves a remembered target with confidence 1. Walls tie the control,
+  rescues double, objects touched halve. The candidate gate does what stage 0 said it would: a young cluster that
+  persists half a second is, most of the time, a static thing whose voxels are being entered for the first time as
+  the body turns — and the persistence test, asked only "is a young cluster still near where I predicted", is
+  satisfied by a thing that stays put. **The confirmation must ask for the other half of a change: the voxels the
+  thing LEFT.** Built next (§17.55): the cast carries the sensor's origin, every returning ray marks the occupied
+  off-floor voxels it passes through the core of as vacated, a cluster counts its trail within 0.25 m over the
+  last second, and the candidate needs one (R87 the instrument, R88 the chase with a trail).
+
+### 17.55 The trail: vacated voxels as the other half of a change (R87, R88; 2026-09-27 night)
+
+**Built.** The cast token carries the sensor's own origin (three values appended; old consumers unchanged). With
+`CloudMap.vacate_window_ticks` on, every returning ray is walked from the origin toward its return and an occupied
+off-floor voxel it passes through the core of (within 0.3 voxel of the centre on every axis), not hit this cast, is
+marked vacated; a cluster counts the vacated voxels within `vacate_radius` (0.25 m) of its centroid over the window
+(`Thing::vacated`, the `mvc` record's eleventh field); `mover_vacated` makes the candidate need one. A unit test:
+rays through where a cube stood, on their way to a wall, mark its voxels. Byte-identical off (R83's guard; and the
+R84 instrument arm reproduces the fixed-bearing R84 to the decimal, the record differing only in the field).
+
+**The first form marked the room.** With the ray allowed to stop 1.5 voxels short of its return, 85 % of static
+clusters, 93 % of wide ones, 92 % of the balls and blocks and 85 % of the moving train's carried a "trail" — no
+information at all. An oblique static surface fills its voxels partly, and a ray through the empty part reaches
+its own return a voxel or two further along the surface. R88 (the chase needing a trail, on that form) is a
+`REGRESSION` on every column: walls 12 → 22 a minute, rescues 0.06 → 0.45, down 0.2 → 8.6 %, 405 chases with 5
+at the moving train. Withdrawn with the form.
+
+**The second form** (`vacate_beyond_m`, 0.20): a traversed voxel is vacated only when the ray's return lies at least
+0.2 m beyond it — a thing that left exposes the floor or the wall behind it, much further than the next voxel of
+its own surface. Measured next on the instrument arm (R87 re-run).
+
+**The second form, measured (R87 re-run, n = 6):** a trail on 68 % of static clusters, 66 % of wide ones, 82 % of
+the balls and blocks, 81 % of the stopped train's and 80 % of the moving train's. The gate "hit-weighted age under
+0.3 s and a trail": recall 0.43 on the moving train with 97 false alarms a minute (25 within 1.5 m), against 0.46 and
+128 (34) for the age alone — a quarter fewer, not a discriminator. **Verdict: the trail at this resolution is
+`NULL`.** A 4 cm voxel is partly filled by any surface that crosses it, and a ray through its empty part reaches
+the floor or the wall behind a chair leg 0.2 m further as readily as it reaches the floor behind a train that has
+gone. Re-use: finer voxels near the body, or a trail counted at the CLUSTER level (most of a cluster's former
+voxels traversed, not any one), or the real sensor's multi-target returns. The code stays, default off.
+
+**The next arm, R89 (the chase asked to see motion):** `BearingSeekLoop.chase_min_v` 0.1 — a candidate is chased
+only if its velocity and its displacement per second watched are both at least 0.1 m/s (a young thing that stays
+put is a thing newly in view); `chase_v_max` 0.6; `CloudMap.mover_ext_max` 0.35 (a measured retreat from "any
+size": the wide clusters are wall bases whose visible part slides with the view) and `mover_range` 1.2.

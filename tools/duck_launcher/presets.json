@@ -380,5 +380,77 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5",
    "fast_until": 600
   }
+ },
+ {
+  "name": "R87 · the TRAIL instrument: R84 with vacated-voxel bookkeeping (every returning ray marks the occupied voxels it passes through; a cluster counts those within 0.25 m) -- stage 0's question asked of the trail",
+  "series": 87,
+  "hint": "STAGE 1b's INSTRUMENT (2026-09-27 night): R84 (the walking cloud, the train room, the fixed body-relative bearing) + vacated-voxel bookkeeping in CloudMap; the mvc record carries each cluster's trail count. Not a lever. Scored by mover_tracks.py: does 'young AND a trail' catch the moving train and stay quiet on the room. WATCH: nothing chases; the walk is R84's on the fixed bearing (walls 12/min at n=6).",
+  "state": {
+   "config": "a1v2_r87_vacate.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R88 · the CHASE with a TRAIL: R85's chase where the mover candidate must have vacated voxels behind it (mover_vacated 1, vacate_window_ticks 50)",
+  "series": 88,
+  "hint": "STAGE 1b's LEVER (2026-09-27 night): R85's chase, with the mover candidate required to have vacated voxels behind it (a trail). Control: R84 (fixed bearing). WATCH: does the duck turn toward and follow the running train; does it still chase wall bases.",
+  "state": {
+   "config": "a1v2_r88_chasetrail.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5",
+   "fast_until": 600
+  }
+ },
+ {
+  "name": "R89 · the CHASE asked to see MOTION: R85 where a candidate is chased only if it moved (chase_min_v 0.1, v_max 0.6), is no wider than 0.35 m and within 1.2 m",
+  "series": 89,
+  "hint": "STAGE 1's third chase arm (2026-09-27 night): the chase of R85 confirms a candidate only if it MOVED (velocity and displacement >= 0.1 m/s), is compact (<= 0.35 m) and within 1.2 m. Control: R84 on the fixed bearing (walls 12/min). WATCH: does the duck turn toward and follow the running train; how often it starts after nothing.",
+  "state": {
+   "config": "a1v2_r89_chasemove.json",
+   "mode": "level2",
+   "start": "none",
+   "secs": 1500.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": true,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 600 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5",
+   "fast_until": 600
+  }
  }
 ]

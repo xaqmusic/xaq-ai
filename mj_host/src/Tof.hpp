@@ -38,6 +38,9 @@ public:
     void sense(const DuckBody& body, double trunk_height_m);
 
     const std::array<TofZone, kZones>& zones() const { return zones_; }
+    // The sensor's own position in the GRAVITY-LEVELLED trunk frame at the last cast (the origin every return's
+    // ray starts from): what a cloud needs to know which voxels a ray passed THROUGH (CloudMap's vacated voxels).
+    const std::array<double, 3>& origin_level() const { return origin_level_; }
     // The nearest Hit per column (m; kMaxRangeM if none), left to right as seen.
     std::array<double, kCols> column_hit() const;
     int too_close() const;
@@ -51,6 +54,7 @@ public:
 private:
     std::array<std::array<double, 3>, kZones> beams_{};
     std::array<TofZone, kZones> zones_{};
+    std::array<double, 3> origin_level_{};
 };
 
 }  // namespace mjhost

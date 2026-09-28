@@ -106,6 +106,11 @@ public:
 private:
     std::string mover_topic_;
     double chase_gate_m_ = 0.35, chase_lead_s_ = 0.3, chase_v_max_ = 1.0;
+    // chase_min_v (2026-09-27 night, §17.55): a candidate is chased only if it has MOVED -- its velocity and its
+    // displacement since the first sighting both at least this (m/s, and m per second watched).  A young cluster that
+    // stays put is a static thing newly in view (R85 chased 447 of those in six runs); 0 = not required.
+    double chase_min_v_ = 0.0;
+    double cand_x0_ = 0.0, cand_y0_ = 0.0;
     int    chase_confirm_ = 2, chase_confirm_ticks_ = 25, chase_forget_ticks_ = 50;
     bool   have_cand_ = false, chasing_ = false, mover_seen_ = false;
     double cand_x_ = 0.0, cand_y_ = 0.0, cand_vx_ = 0.0, cand_vy_ = 0.0;

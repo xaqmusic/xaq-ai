@@ -181,3 +181,13 @@ the moving train, the chased "movers" reading the body's own speed. The walking 
 cloud's anchor rather than the body, so every static cluster read as moving at the body's velocity once the body had
 walked from the anchor — the same bearing that fed R74's walk re-fix (O61). Fixed with a unit test; R84, R85 and R86
 re-measured together on the fixed bearing (§17.54 for the numbers).
+
+**On the fixed bearing (n = 6):** the fix itself is the loud result — R84 walks at 12.4 walls a minute against 31.1
+before and R83's 28.3, seed 1 from 68.5 to 6.1; O65 is answered by it, and `walk_things false` (R86) is a
+`REGRESSION` (walls 20). The chase on the age gate (R85) is `NULL` for the train and a `REGRESSION` for the walk's
+ownership: 447 chases, 4 % at the moving train, seek holding the reference 88 % of the walk. A young cluster that
+persists half a second is mostly a static thing whose voxels are being entered as the body turns, and "still near
+the prediction" is satisfied by a thing that stays put. The confirmation must ask for the other half of a change:
+the voxels the thing LEFT. Stage 1b: the cast carries the sensor origin, every returning ray marks the occupied
+off-floor voxels it passes through as vacated, a cluster counts its trail, and the candidate needs one (R87 the
+instrument, R88 the chase with a trail; measured in §17.55).

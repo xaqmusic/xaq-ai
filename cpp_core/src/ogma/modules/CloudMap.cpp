@@ -171,6 +171,23 @@ ParamSchema CloudMap::params_schema() const {
          "false = things at stops only, as without walk_cloud; the mover candidate still reads the walking cloud.  "
          "R84 (true) made seed 1 a wall walk (O65).",
          ParamValue{true}},
+        {"vacate_window_ticks", ParamMutability::HotMutable,
+         "VACATED voxels (T6's first half): with the cast's sensor origin, every returning ray's voxels are traversed and an "
+         "occupied off-floor voxel the ray passes through the core of (not hit this cast, the last 1.5 voxels before the "
+         "return excluded) is marked vacated; a cluster counts those within vacate_radius of its centroid marked in the last "
+         "this-many ticks.  A thing that moved away leaves them; a static thing does not.  0 = off, byte-identical.",
+         ParamValue{int64_t{0}}},
+        {"vacate_beyond_m", ParamMutability::HotMutable,
+         "A traversed voxel counts as vacated only when the ray's return lies at least this far beyond it (m).  An oblique "
+         "static surface fills its voxels partly, and rays pass through the empty part to a return a voxel or two along it "
+         "(measured 2026-09-27: 85 % of static clusters carried a 'trail' at 1.5 voxels); a thing that left exposes the "
+         "floor or the wall behind it, much further.",
+         ParamValue{0.20}},
+        {"vacate_radius", ParamMutability::HotMutable,
+         "Radius (m) around a cluster's centroid within which vacated voxels count as its trail.", ParamValue{0.25}},
+        {"mover_vacated", ParamMutability::HotMutable,
+         "The mover candidate must have at least this many vacated voxels in its trail (needs vacate_window_ticks); 0 = not required.",
+         ParamValue{int64_t{0}}},
         {"mover_topic", ParamMutability::ConstructionOnly,
          "MOVERS (the chase phase): ProprioToken [vx=+right, vy=+forward, proximity, age_ticks, oldest_ticks] to the nearest cluster "
          "of the open cloud whose voxels are young against the cloud's own (see the header); zeros when none.  "
@@ -188,6 +205,10 @@ ParamSchema CloudMap::params_schema() const {
          "Candidates only within this range (metres): stage 0's false alarms rise fourfold from the first metre to the "
          "second; the reach is from the walk in the last metre.",
          ParamValue{1.5}},
+        {"mover_ext_max", ParamMutability::HotMutable,
+         "Candidates no wider than this footprint (m): a wall base's visible part slides with the view and reads young; "
+         "0 = any size (the operator's 'any moving cluster' -- the size gate is a measured retreat, §17.55).",
+         ParamValue{0.0}},
         {"mover_weighted", ParamMutability::HotMutable,
          "true: the hit-weighted voxel age (a re-hit voxel counts for its returns); false: the plain mean.",
          ParamValue{true}},
@@ -224,8 +245,9 @@ ParamMap CloudMap::current_params() const {
     m["things_every"] = int64_t{things_every_};
     m["walk_cloud"] = walk_cloud_;
     m["walk_things"] = walk_things_;
+    m["vacate_window_ticks"] = int64_t(vacate_window_); m["vacate_radius"] = vacate_radius_; m["vacate_beyond_m"] = vacate_beyond_; m["mover_vacated"] = int64_t(mover_vacated_);
     m["mover_topic"] = ParamValue{mover_topic_}; m["mover_window_ticks"] = int64_t(mover_window_);
-    m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_;
+    m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_; m["mover_ext_max"] = mover_ext_max_;
     m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
@@ -254,10 +276,15 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "things_every") things_every_ = std::max(1, int(get_d(one, "things_every", things_every_)));
     else if (k == "walk_cloud")  walk_cloud_ = get_d(one, "walk_cloud", 0.0) > 0.5;
     else if (k == "walk_reset_m") walk_reset_m_ = get_d(one, "walk_reset_m", walk_reset_m_);
+    else if (k == "vacate_window_ticks") vacate_window_ = std::max(0, int(get_d(one, "vacate_window_ticks", vacate_window_)));
+    else if (k == "vacate_beyond_m") vacate_beyond_ = get_d(one, "vacate_beyond_m", vacate_beyond_);
+    else if (k == "vacate_radius") vacate_radius_ = get_d(one, "vacate_radius", vacate_radius_);
+    else if (k == "mover_vacated") mover_vacated_ = std::max(0, int(get_d(one, "mover_vacated", mover_vacated_)));
     else if (k == "walk_things") walk_things_ = get_d(one, "walk_things", 1.0) > 0.5;
     else if (k == "mover_window_ticks") mover_window_ = std::max(1, int(get_d(one, "mover_window_ticks", mover_window_)));
     else if (k == "mover_age_k") mover_age_k_ = get_d(one, "mover_age_k", mover_age_k_);
     else if (k == "mover_range") mover_range_ = get_d(one, "mover_range", mover_range_);
+    else if (k == "mover_ext_max") mover_ext_max_ = get_d(one, "mover_ext_max", mover_ext_max_);
     else if (k == "mover_weighted") mover_weighted_ = get_d(one, "mover_weighted", 1.0) > 0.5;
 }
 
@@ -293,15 +320,21 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     walk_cloud_ = get_d(params, "walk_cloud", 0.0) > 0.5;
     walk_reset_m_ = get_d(params, "walk_reset_m", walk_reset_m_);
     walk_things_ = get_d(params, "walk_things", 1.0) > 0.5;
+    vacate_window_ = std::max(0, int(get_d(params, "vacate_window_ticks", vacate_window_)));
+    vacate_radius_ = get_d(params, "vacate_radius", vacate_radius_);
+    vacate_beyond_ = get_d(params, "vacate_beyond_m", vacate_beyond_);
+    mover_vacated_ = std::max(0, int(get_d(params, "mover_vacated", mover_vacated_)));
     mover_topic_ = get_s(params, "mover_topic");
     mover_window_ = std::max(1, int(get_d(params, "mover_window_ticks", mover_window_)));
     mover_age_k_ = get_d(params, "mover_age_k", mover_age_k_);
     mover_range_ = get_d(params, "mover_range", mover_range_);
     mover_weighted_ = get_d(params, "mover_weighted", 1.0) > 0.5;
+    mover_ext_max_ = get_d(params, "mover_ext_max", mover_ext_max_);
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
     vox_.clear();
+    vacated_.clear();
     winner_hist_.clear();
     anchor_yaw_ = anchor_yaw;
     anchor_x_ = ax;
@@ -349,6 +382,45 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
         ++vv.hits;
         vv.zsum += float(hz);
         vv.last = tick;
+    }
+    // VACATED voxels: with the origin appended to the cast, walk each returning ray and mark the occupied off-floor
+    // voxels it passes through the core of (not hit this cast; the last 1.5 voxels before the return left alone)
+    const int nb = 5 + 3 * kZones;
+    if (vacate_window_ > 0 && v.size() >= nb + 3 && std::isfinite(v[nb]) && std::isfinite(v[nb + 1]) && std::isfinite(v[nb + 2])) {
+        const double ox = c * double(v[nb]) - s * double(v[nb + 1]) + tx;
+        const double oy = s * double(v[nb]) + c * double(v[nb + 1]) + ty;
+        const double oz = double(v[nb + 2]);
+        const double step = voxel_m_ / 3.0, core = voxel_m_ * 0.3, stop_short = std::max(1.5 * voxel_m_, vacate_beyond_);
+        for (int i = 0; i < kZones; ++i) {
+            const int b = 5 + 3 * i;
+            const double px = double(v[b]), py = double(v[b + 1]), hz = double(v[b + 2]);
+            if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(hz)) continue;
+            const double x1 = c * px - s * py + tx, y1 = s * px + c * py + ty, z1 = hz;
+            const double dx = x1 - ox, dy = y1 - oy, dz = z1 - oz;
+            const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (len <= stop_short) continue;
+            const double ux = dx / len, uy = dy / len, uz = dz / len;
+            int64_t prev = 0;
+            for (double r = step; r < len - stop_short; r += step) {
+                const double x = ox + ux * r, y = oy + uy * r, z = oz + uz * r;
+                if (std::hypot(x, y) > max_range_) break;
+                const int ix = int(std::floor(x / voxel_m_)), iy = int(std::floor(y / voxel_m_)), iz = int(std::floor(z / voxel_m_));
+                const int64_t k = key_of(ix, iy, iz);
+                if (k == prev) continue;
+                prev = k;
+                // the core test: the sample within 0.3 voxel of the centre on every axis
+                if (std::fabs(x - (ix + 0.5) * voxel_m_) > core || std::fabs(y - (iy + 0.5) * voxel_m_) > core ||
+                    std::fabs(z - (iz + 0.5) * voxel_m_) > core) continue;
+                auto it = vox_.find(k);
+                if (it == vox_.end() || it->second.hits == 0 || it->second.last == tick || it->second.vacated == tick) continue;
+                const double h = double(it->second.zsum) / double(it->second.hits);
+                if (h < break_lo_) continue;                                 // the floor's own voxels are not a trail
+                it->second.vacated = tick;
+                ++vacated_total_;
+                vacated_.push_back(Vacated{tick, (ix + 0.5) * voxel_m_, (iy + 0.5) * voxel_m_});
+            }
+        }
+        while (!vacated_.empty() && vacated_.front().tick + uint64_t(vacate_window_) < tick) vacated_.pop_front();
     }
     (void)trunk_z;   // the host already folded it into z: the input's z IS height above the floor
 }
@@ -580,6 +652,11 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
             t.age = n > 0 ? age / double(n) : 0.0;
             t.age_w = nhits > 0.0 ? agew / nhits : 0.0;
         }
+        if (vacate_window_ > 0) {
+            const uint64_t lo = last_tick_ > uint64_t(vacate_window_) ? last_tick_ - uint64_t(vacate_window_) : 0;
+            for (auto const& vc : vacated_)
+                if (vc.tick >= lo && std::hypot(vc.x - t.cx, vc.y - t.cy) <= vacate_radius_) ++t.vacated;
+        }
         t.rng = std::hypot(t.cx, t.cy);
         const double ex = xmax - xmin + voxel_m_, ey = ymax - ymin + voxel_m_;
         t.ext = std::max(ex, ey); t.ext_min = std::min(ex, ey);
@@ -693,6 +770,8 @@ void CloudMap::update_movers(double yaw, uint64_t tick_id) {
         const double age = mover_weighted_ ? t.age_w : t.age;
         double bx, by, rng; body_rel(t, yaw, bx, by, rng);                // the range from the BODY, not the anchor
         if (rng > mover_range_ || age >= thr) continue;
+        if (mover_vacated_ > 0 && t.vacated < mover_vacated_) continue;   // no trail, no mover
+        if (mover_ext_max_ > 0.0 && t.ext > mover_ext_max_) continue;      // too wide to be a thing
         ++mover_cands_;
         if (rng < best) { best = rng; mover_ = int(i); mover_age_s_ = age; mover_oldest_s_ = oldest; }
     }
@@ -796,7 +875,7 @@ nlohmann::json CloudMap::diag_lite() const {
         {"small", int(std::count_if(things_.begin(), things_.end(), [](const Thing& t) { return t.small; }))},
         {"attended", attended_ >= 0 && attended_ < int(things_.size()) ? things_[size_t(attended_)].rng : -1.0},
         {"mover", mover_ >= 0 && mover_ < int(recent_.size()) ? recent_[size_t(mover_)].rng : -1.0},
-        {"mover_cands", mover_cands_},
+        {"mover_cands", mover_cands_}, {"vacated", vacated_total_},
     };
 }
 

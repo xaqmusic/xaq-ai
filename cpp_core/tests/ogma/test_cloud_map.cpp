@@ -101,10 +101,13 @@ struct Rig {
         m.on_setup(&bus, p);
     }
 
+    // the sensor origin appended to the cast (NaN = not carried); vacated voxels need it
+    Pt origin{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
     void cast(bool still, double yaw, double ox, double oy, int winner, std::vector<Pt> const& pts) {
         bus.begin_tick(t);
         auto tok = std::make_shared<ogma::ProprioToken>();
-        tok->values = Eigen::VectorXf::Constant(kCast, std::numeric_limits<float>::quiet_NaN());
+        tok->values = Eigen::VectorXf::Constant(kCast + 3, std::numeric_limits<float>::quiet_NaN());
+        for (int k = 0; k < 3; ++k) tok->values[kCast + k] = float(origin[size_t(k)]);
         tok->values[0] = still ? 1.0f : 0.0f;
         tok->values[1] = float(yaw);
         tok->values[2] = 0.12f;
@@ -566,4 +569,34 @@ TEST(CloudMap, AWalkingCloudsBearingIsFromTheBodyNotTheAnchor) {
     EXPECT_GT(b2->values[0], 0.4f) << "the cube is now ahead-RIGHT";
     EXPECT_NEAR(std::hypot(b2->values[0], b2->values[1]), 1.0, 1e-4);
     EXPECT_NEAR(b2->values[2], 1.0 - std::hypot(0.45, 0.3) / 2.5, 0.03);
+}
+
+// VACATED voxels (T6's first half, 2026-09-27): a cube seen for ten casts from an origin 10 cm up, then the same
+// rays reaching a wall 2 m out (the cube gone): the rays pass through the cube's old voxels, which are marked
+// vacated; a cluster there counts them.  Without the origin, or with the window off, nothing is marked.
+TEST(CloudMap, RaysThroughWhereAThingWasMarkItVacated) {
+    ParamMap p = things_params();
+    p["vacate_window_ticks"] = int64_t{50};
+    Rig r(p);
+    r.origin = {0.0, 0.0, 0.10};
+    for (int i = 0; i < 10; ++i) cast_world(r, 0.0, cube());               // the cube at 0.81-0.89 m, heights 3-11 cm
+    EXPECT_EQ(r.m.vacated_total(), 0u) << "rays that END on the cube pass through nothing of it";
+    // the cube is gone: the rays that hit it now reach a wall at 2.0 m, at heights that carry them through its voxels
+    std::vector<Pt> wall;
+    for (int j = 0; j < 3; ++j)
+        for (int k = 0; k < 3; ++k) wall.push_back({2.0, -0.03 + 0.04 * j, 0.10 + (0.03 + 0.04 * k - 0.10) * (2.0 / 0.85)});
+    cast_world(r, 0.0, wall);
+    EXPECT_GT(r.m.vacated_total(), 0u) << "the cube's voxels lie on the way to the wall";
+    const auto cl = r.m.cluster_recent(60);
+    ASSERT_GE(cl.size(), 1u);
+    const auto cube_it = std::find_if(cl.begin(), cl.end(), [](const ogma::CloudMap::Thing& t) { return t.cx < 1.5; });
+    ASSERT_NE(cube_it, cl.end());
+    EXPECT_GE(cube_it->vacated, 1) << "the cube's cluster has a trail";
+    // without the window the same casts mark nothing
+    Rig q(things_params());
+    q.origin = {0.0, 0.0, 0.10};
+    for (int i = 0; i < 10; ++i) cast_world(q, 0.0, cube());
+    cast_world(q, 0.0, wall);
+    EXPECT_EQ(q.m.vacated_total(), 0u);
+    EXPECT_EQ(q.m.cluster_recent(60)[0].vacated, 0);
 }

@@ -97,6 +97,10 @@ public:
         // re-hit and age, however much the subset the window sees flickers.  0 / 0 from cluster_things().
         double fresh = 0.0, age = 0.0;
         double age_w = 0.0;            // the same age weighted by each voxel's hits: a re-hit voxel counts for its returns
+        // VACATED (2026-09-27, T6's first half): off-floor voxels within vacate_radius of the centroid that a ray has
+        // passed THROUGH within vacate_window_ticks after being occupied -- a thing that moved away leaves them; a
+        // static thing newly in view, or a fragment sliding into view, leaves none.  0 with vacate_window_ticks 0.
+        int    vacated = 0;
     };
 
     CloudMap() = default;
@@ -196,7 +200,8 @@ private:
     // what landed in it, never by its centre: the ground layer spans 0-4 cm, its centre is exactly
     // break_lo, and a centre test put every floor voxel in the floor-break band (found 2026-09-13 in
     // the replay, where the whole floor drew in the break colour).
-    struct Vox { uint32_t hits = 0; uint64_t first = 0; uint64_t last = 0; float zsum = 0.0f; };
+    struct Vox { uint32_t hits = 0; uint64_t first = 0; uint64_t last = 0; float zsum = 0.0f; uint64_t vacated = 0; };
+    struct Vacated { uint64_t tick; double x, y; };   // a recently vacated off-floor voxel's centre, cloud frame
     // A cached cloud carries the POSE it was anchored on, not just the heading: two visits to one
     // place stand up to a place-cell's width apart (~0.25 m = six voxels), so comparing them needs
     // the rigid transform between the two anchors, which the odometry gives for free.  Without it
@@ -251,6 +256,7 @@ private:
     bool   walk_things_ = true;
     std::string mover_topic_;
     int    mover_window_ = 25; double mover_age_k_ = 0.06, mover_range_ = 1.5; bool mover_weighted_ = true;
+    double mover_ext_max_ = 0.0;            // candidates no wider than this (m); 0 = any size
     std::vector<Thing> recent_;             // the window's clusters, as last computed
     int    mover_ = -1, mover_cands_ = 0;   // the attended mover (index into recent_) and candidates seen in all
     double mover_age_s_ = 0.0, mover_oldest_s_ = 0.0;
@@ -268,6 +274,15 @@ private:
     int      still_run_ = 0, move_run_ = 0;
     double   anchor_yaw_ = 0.0, anchor_x_ = 0.0, anchor_y_ = 0.0;
     double   cur_x_ = 0.0, cur_y_ = 0.0;   // the body's odometry position this tick (the cast token's)
+    int      vacate_window_ = 0;           // vacate_window_ticks: 0 = no ray traversal (byte-identical)
+    double   vacate_radius_ = 0.25;
+    double   vacate_beyond_ = 0.20;        // the ray must reach at least this far beyond the voxel it passes through
+    int      mover_vacated_ = 0;           // the candidate needs at least this many vacated voxels (0 = not required)
+    std::deque<Vacated> vacated_;          // the recently vacated voxels, oldest first
+    uint64_t vacated_total_ = 0;
+public:
+    uint64_t vacated_total() const { return vacated_total_; }
+private:
     uint64_t opened_tick_ = 0, points_ = 0, last_tick_ = 0;
     int      break_vox_ = 0;
     double   new_frac_ = 0.0, revisit_change_ = -1.0;
