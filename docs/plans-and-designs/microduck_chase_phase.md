@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stage 0 measured 2026-09-27** (the stimulus, the instrument, the signal); no lever built yet; `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
+Status: **stage 0 and stage 1 measured 2026-09-27** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -191,3 +191,18 @@ the prediction" is satisfied by a thing that stays put. The confirmation must as
 the voxels the thing LEFT. Stage 1b: the cast carries the sensor origin, every returning ray marks the occupied
 off-floor voxels it passes through as vacated, a cluster counts its trail, and the candidate needs one (R87 the
 instrument, R88 the chase with a trail; measured in §17.55).
+
+**Stage 1b and 1c, measured (§17.55).** The trail at 4 cm voxels is `NULL`: a trail on 68 % of static clusters
+and 80 % of the moving train's, because any surface crossing a voxel fills it partly and a ray through the empty
+part reaches the floor or wall behind as readily as the floor behind a train that has gone. R89 (the candidate
+must have MOVED, be compact and within 1.2 m): chases 447 → 72 in six runs, the walk's ownership back to play
+(seek 88 → 58 %), and still **3 chases of the moving train in six runs**. The verdict: the chase is `WORKING` as
+a mechanism and `NULL` for the train in this room at this power — the train comes within the chase's reach too
+seldom (681 moving-train samples against 200 000 static in six runs), and what survives every gate is a fragment
+of the room sliding into view as the body turns.
+
+**Where this leaves the design (for the discussion).** Keep R89's chase; bring the stimulus to the walk before
+touching the gate again (a track through the middle of the room, or the ball rolled across the walk as
+`--roll-past` rolls it across a stop); the one confound left is the sliding fragment, whose remover is geometric
+(along its own surface, correlated with the body's yaw rate) or T6 at a finer resolution — the real sensor's
+multi-target returns would give the trail directly.

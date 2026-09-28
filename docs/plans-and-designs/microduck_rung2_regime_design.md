@@ -4513,3 +4513,29 @@ voxels traversed, not any one), or the real sensor's multi-target returns. The c
 only if its velocity and its displacement per second watched are both at least 0.1 m/s (a young thing that stays
 put is a thing newly in view); `chase_v_max` 0.6; `CloudMap.mover_ext_max` 0.35 (a measured retreat from "any
 size": the wide clusters are wall bases whose visible part slides with the view) and `mover_range` 1.2.
+
+**R89 measured (n = 6, against R84 on the fixed bearing and R85).** Chases 447 → **72** in six runs (12 a run, 1.3 s
+each, 18 s of chasing a run): 65 at static clusters, 3 at balls and blocks, 1 at the stopped train, **3 at the
+moving train**; the closest approach to a moving train 0.9–1.9 m by seed (3.2 on seed 3). The walk's ownership is
+back: seek 88 → 58 % (control 43 %), play 12 → 42 %; walls 18.0 ± 17.0 against 12.4 ± 9.5 (one wall seed each
+way; a tie at this power), rescues 0.12, stands and stops the control's. Mover candidates seen by the cloud
+1 100–1 800 a run (R85: 1 900–3 600).
+
+**Stage 1's verdict.** The chase as a loop is `WORKING` mechanically (a moving thing that follows its own prediction
+is chased, the unit tests and the seed-1 smoke), and `NULL` for the train at this power in this room: three chases
+of the moving train in six runs, on every gate tried. Two causes, separable:
+1. **Opportunity.** The train is a cluster of the walking cloud on 65–80 % of casts within 1.5 m (§17.53), but the
+   walk brings it within 1.2 m of a moving train seldom: 681 moving-train cluster samples in six runs against
+   200 000 static ones. The track sits in a corner of the room the walk visits little, and the chase's range gate
+   is the last metre. A stimulus that comes to the duck — a track through the middle, or the ball rolled across
+   the WALK as `--roll-past` rolls it across a stop — is the (d) test this needs.
+2. **The room's own young clusters.** Every gate measured leaves a stream of static candidates: the age (167 a
+   minute), the age with persistence (74 chases a run), the trail (`NULL` at 4 cm voxels), motion (12 chases a
+   run, 90 % static). What remains after "young, persistent, compact, near and moving" is a fragment of the room
+   sliding into view as the body turns, which moves in the odometry frame by construction. Its remover is
+   geometric — the sliding is along the surface it belongs to and correlated with the body's own yaw rate — or
+   T6 proper at a resolution the sensor supports (the real VL53L8CX reports several targets a zone, which is a
+   thing behind a thing, and would give the trail directly).
+
+Re-use for the next design discussion: keep R89's chase (the motion requirement is what returned the walk); bring
+the stimulus to the walk before touching the gate again; and treat the sliding fragment as the one confound left.
