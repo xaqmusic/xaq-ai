@@ -466,6 +466,7 @@ int    IntentAdapter::chases_yielded() const { auto* q = find_seek(*instance_); 
 int    IntentAdapter::yield_drops() const { auto* q = find_seek(*instance_); return q ? q->yield_drops() : 0; }
 int    IntentAdapter::static_yielded() const { auto* q = find_seek(*instance_); return q ? q->static_yielded() : 0; }
 int    IntentAdapter::static_yield_drops() const { auto* q = find_seek(*instance_); return q ? q->static_yield_drops() : 0; }
+int    IntentAdapter::progress_forgets() const { auto* q = find_seek(*instance_); return q ? q->progress_forgets() : 0; }
 int    IntentAdapter::walk_takes() const { auto* q = find_seek(*instance_); return q ? q->walk_takes() : 0; }
 double IntentAdapter::chase_gaze_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_gaze_ego() : std::numeric_limits<double>::quiet_NaN(); }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }

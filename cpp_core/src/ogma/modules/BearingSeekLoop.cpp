@@ -121,6 +121,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"yield_topic", ParamMutability::ConstructionOnly,
             "THE YIELD: ProprioToken [tall_count, range] (CloudMap target_tall_topic) -- the tall voxels around this loop's held target.  Empty = off.",
             ParamValue{std::string("")}},
+        {"progress_walk_m", ParamMutability::HotMutable,
+            "THE PROGRESS FORGET: for every this many metres the body walks with a static target held, the range left must have shrunk by progress_m, or the target is forgotten -- a dead-reckoned position the world refutes (a wall between, an orbit).  0 = off.",
+            ParamValue{0.0}},
+        {"progress_m", ParamMutability::HotMutable, "The range the walk must gain per progress_walk_m of walking (metres).", ParamValue{0.05}},
         {"static_yield_tall", ParamMutability::HotMutable,
             "A held STATIC target with at least this many tall voxels within a body length (the cloud's target_tall count) is dropped, and the place is not-a-thing for forget_ticks: a sighting within chase_gate_m of it is not taken.  0 = off.",
             ParamValue{int64_t{0}}},
@@ -163,6 +167,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)};
     m["chase_memory_holds"] = ParamValue{chase_memory_holds_};
     m["static_yield_tall"] = ParamValue{int64_t(static_yield_tall_)};
+    m["progress_walk_m"] = progress_walk_m_; m["progress_m"] = progress_m_;
     m["yield_topic"] = ParamValue{yield_topic_}; m["chase_yield_tall"] = ParamValue{int64_t(chase_yield_tall_)}; m["chase_yield_look"] = ParamValue{chase_yield_look_}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
     m["chase_pull_recover_ticks"] = ParamValue{chase_pull_recover_ticks_};
     return m;
@@ -200,6 +205,8 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_yield_tall", [&](auto const& v){ chase_yield_tall_ = std::max(0, int(get_double(v,"chase_yield_tall"))); });
     apply_param(params, "chase_yield_look", [&](auto const& v){ chase_yield_look_ = get_double(v,"chase_yield_look") > 0.5; });
     apply_param(params, "static_yield_tall", [&](auto const& v){ static_yield_tall_ = std::max(0, int(get_double(v,"static_yield_tall"))); });
+    apply_param(params, "progress_walk_m", [&](auto const& v){ progress_walk_m_ = get_double(v,"progress_walk_m"); });
+    apply_param(params, "progress_m", [&](auto const& v){ progress_m_ = get_double(v,"progress_m"); });
     apply_param(params, "chase_memory_holds", [&](auto const& v){ chase_memory_holds_ = get_double(v,"chase_memory_holds") > 0.5; });
     apply_param(params, "chase_memory_ticks", [&](auto const& v){ chase_memory_ticks_ = std::max(0, int(get_double(v,"chase_memory_ticks"))); });
     apply_param(params, "chase_pull_decay", [&](auto const& v){ chase_pull_decay_ = std::clamp(get_double(v,"chase_pull_decay"), 0.0, 1.0); });
@@ -229,6 +236,8 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_yield_tall") chase_yield_tall_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_yield_look") chase_yield_look_ = get_double(value, k) > 0.5;
     else if (k == "static_yield_tall") static_yield_tall_ = std::max(0, int(get_double(value, k)));
+    else if (k == "progress_walk_m") progress_walk_m_ = get_double(value, k);
+    else if (k == "progress_m") progress_m_ = get_double(value, k);
     else if (k == "chase_memory_holds") chase_memory_holds_ = get_double(value, k) > 0.5;
     else if (k == "chase_memory_ticks") chase_memory_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_pull_decay") chase_pull_decay_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -238,7 +247,10 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
 
 void BearingSeekLoop::tick(uint64_t tick_id) {
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(pose_topic_)))
-        if (pt->values.size() >= 3) { px_ = pt->values[0]; py_ = pt->values[1]; pyaw_ = pt->values[2]; have_pose_ = true; }
+        if (pt->values.size() >= 3) {
+            if (have_pose_) walked_ += std::hypot(double(pt->values[0]) - px_, double(pt->values[1]) - py_);
+            px_ = pt->values[0]; py_ = pt->values[1]; pyaw_ = pt->values[2]; have_pose_ = true;
+        }
     float vx = 0.0f, vy = 0.0f, prox = 0.0f; bool walking = false;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(bearing_topic_))) {
         if (pt->values.size() > 0) vx   = float(pt->values[0]);
@@ -346,6 +358,16 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     // a held static target at the foot of tall structure -- the cloud's count around the target the loop published
     // (a tick old, so a target held under two ticks is not judged by its predecessor's count) -- is dropped, and
     // the place is not-a-thing for forget_ticks.  The chase's yield is the same rule for a mover.
+    // THE PROGRESS FORGET (2026-09-29, §17.81): with a static target held, every progress_walk_m of walking must shrink
+    // the range left by progress_m; a walk that does not close on its target -- a wall between, an orbit -- forgets it
+    if (progress_walk_m_ > 0.0 && have_target_ && !chasing_ && !coasting_) {
+        if (tick_id == target_set_tick_) { walked_ = 0.0; best_range_ = range_left_; }
+        else if (walked_ >= progress_walk_m_) {
+            if (best_range_ - range_left_ < progress_m_) { have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++progress_forgets_; }
+            else best_range_ = range_left_;
+            walked_ = 0.0;
+        }
+    } else { walked_ = 0.0; best_range_ = 1e9; }
     if (have_syield_ && tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
     if (static_yield_tall_ > 0 && have_target_ && !chasing_ && !coasting_ && have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_) {
         // a target set at the yielded place by any path (a sighting, the renewal, a mover that stopped): refused

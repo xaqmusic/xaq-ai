@@ -572,3 +572,21 @@ TEST(BearingSeekLoop, AStaticTargetYieldsNearTallStructure) {
     EXPECT_EQ(r2.m.static_yielded(), 1) << "no second yield";
 }
 
+TEST(BearingSeekLoop, AWalkThatDoesNotCloseForgetsItsTarget) {
+    ogma::ParamMap p; p["progress_walk_m"] = 0.5; p["progress_m"] = 0.05; p["forget_ticks"] = 3000.0; p["arrive_m"] = 0.15;
+    Rig r(p);
+    // a thing 1.5 m ahead, taken at a stop
+    for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.5));
+    ASSERT_TRUE(r.m.have_target());
+    // the body walks SIDEWAYS (y) half a metre: the range barely changes -> forgotten
+    for (int i = 1; i <= 30; ++i) r.step(0, 0.02 * i, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.have_target()) << "half a metre walked, the range not closed";
+    EXPECT_EQ(r.m.progress_forgets(), 1);
+    // taken again, and the body walks TOWARD it: kept all the way to the arrival
+    for (int i = 0; i < 3; ++i) r.step(0, 0.6, 0, 0.0f, 1.0f, prox_of(1.5));
+    ASSERT_TRUE(r.m.have_target());
+    for (int i = 1; i <= 60; ++i) r.step(0.02 * i, 0.6, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(r.m.have_target()) << "1.2 m walked toward it: still held";
+    EXPECT_EQ(r.m.progress_forgets(), 1);
+}
+

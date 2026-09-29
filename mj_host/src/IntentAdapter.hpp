@@ -193,7 +193,8 @@ public:
     int    chases_yielded() const;
     int    yield_drops() const;                   // sightings dropped at a yielded place
     int    static_yielded() const;                // static targets dropped at the foot of tall structure (static_yield_tall)
-    int    static_yield_drops() const;                 // chases that yielded near tall structure (chase_yield_tall)                     // targets started from a walking sighting (walk_take_range)
+    int    static_yield_drops() const;
+    int    progress_forgets() const;              // static targets forgotten because the walk did not close on them (progress_walk_m)                 // chases that yielded near tall structure (chase_yield_tall)                     // targets started from a walking sighting (walk_take_range)
     std::array<double, 3> chase_last_judgement() const;   // miss (m), implied speed (m/s), decision code    // the bearing the head should turn to (rad, + = right), NaN when nothing moving is in mind
     bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
     int    chases_reacquired() const;
