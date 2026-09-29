@@ -872,6 +872,76 @@ spreading the load lowers the pressure, and the two effects substantially cancel
 consequence is the reassuring one — **actuator geometry moves the operating resistance far less
 than it moves the linearity**, so `R_g` is not fragile to a bump respin.
 
+### 5.7 ⚠ AS BUILT: `R_g` = 15 kΩ, `C` = 1.0 µF — and why that is fine
+
+The parts on hand are 15 kΩ and 1.0 µF, not §5.6's 11 kΩ / 1.5 µF. **The two substitutions
+partly cancel**, because a larger `R_g` raises the source impedance the cap works against:
+
+| build | `Z_src` loaded | f_c | τ | servo-frame line (49.95 Hz) kept |
+|---|---|---|---|---|
+| 11 k + 1.5 µF (ideal) | 5.50 k | 19.3 Hz | 0.43 tick | 36 % |
+| **15 k + 1.0 µF (as built)** | **6.35 k** | **25.1 Hz** | **0.33 tick** | **45 %** |
+| 11 k + 1.0 µF | 5.50 k | 28.9 Hz | 0.29 tick | 50 % |
+
+**`R_g` = 15 kΩ costs 2.4 % of peak sensitivity** at the 175 g operating point — §5.5's flat
+peak, exactly as advertised. And f_c lands at **25.1 Hz, essentially on the 25 Hz Nyquist**,
+against 28.9 Hz for the nominal `R_g` with the same cap.
+
+What the substitution does cost is anti-alias margin: the servo-frame line survives at 45 %
+rather than 36 %. **Whether that matters is measurable, not arguable** — it is precisely what
+V6 below reads. Fit what is on hand, measure, and buy capacitance only if the 0.05 Hz beat
+shows (§5.2.1). Two 1 µF in parallel would give f_c 12.5 Hz if it does.
+
+**Predicted counts on A0, `R_g` = 15 kΩ**, from the same assembly's DMM curve (§5.6):
+
+| mass | `R_fsr` (DMM) | **predicted counts** |
+|---|---|---|
+| in the air | ≳ 1 MΩ | **≲ 60** |
+| 30 g | 25.0 k | 1536 |
+| 50 g | 17.0 k | 1920 |
+| 100 g | 14.0 k | 2118 |
+| 175 g | 11.0 k | 2362 |
+| 300 g | 8.6 k | 2603 |
+| 500 g | 6.0 k | 2925 |
+
+### 5.7.1 Verifying the built channel — V1 to V6
+
+**The decisive comparison is not counts against a table. It is `R_fsr` against the meter**:
+
+```
+R_fsr = R_g · (4095/counts − 1)
+```
+
+The DMM curve in §5.6 was taken on **this same assembly**, so inverting the ADC's counts and
+comparing puts two independent instruments on one physical thing. Agreement validates the whole
+path at once — divider, rail, reference, gain — and disagreement says *where*:
+
+| what the inverted `R_fsr` does | what it means |
+|---|---|
+| matches the DMM curve within a few % | ✅ the channel is right |
+| off by the **same factor at every load** | `R_g` is not 15 kΩ — measure the fitted part |
+| too low, and **counts clip at 4095** under load | the divider's top rail is 5 V, not 3.3 V |
+| **falls** as load rises | FSR and `R_g` are swapped — sensor must be on the high side |
+| jumps or drifts with leg position | tail flexing at the sensor, or a marginal connector |
+
+| # | step | power | expected |
+|---|---|---|---|
+| **V1** | **Lead unplugged.** Across the two FSR conductors at the lead's free end: unloaded, then a finger press. Then `R_g` in place, and VCC↔GND | off | OL/MΩ unloaded → tens of kΩ pressed (proves sensor + tail + connector); `R_g` = 15 k ±1 %; VCC↔GND **not** shorted |
+| **V2** | Plug in. Foot **in the air**, read A0 | on | **≲ 60 counts.** ⚠ Proves nothing on its own — §5.3: an open FSR reads the same. Anywhere from ~0 to ~100 is acceptable; what matters is low and *stable* |
+| **V3** | **Press the toe with a finger, release** | on | **counts jump past 2000 and return within a second.** This is the real end-to-end proof, and it costs nothing — do it before the scale comes out |
+| **V4** | The mass series against the table above, one reading per mass at a **fixed dwell** | on | inverted `R_fsr` within a few % of the DMM curve |
+| **V5** | DMM on the ADC input pin while a steady load sits on the foot | on | `V_dmm` = counts × 3.3/4095 within ~1 %. **Separates "the divider made the wrong voltage" from "the ADC read it wrong"** — and it is the ratiometric check §5.1 owed |
+| **V6** | `adc.rate ms=20`, then `mark` + 60 s each of: unloaded/servos limp · 175 g/limp · 175 g/servos holding. Then `adc_fast_report.py --fft` | on | **`wander×` near 1 and no 0.05 Hz line.** This is E2/E2b run on the real channel instead of a resistor dummy, and it is what decides whether 1.0 µF is enough |
+
+⚠ **A1–A3 are unconnected and will read floating garbage.** Expected, not a fault — and useful:
+they sit in the same log as A0, so anything that appears on all four at once is the ADC or the
+rail, not the foot.
+
+⚠ **`R_g` is one value for all four channels** (§5), so the other three feet get **this** 15 kΩ
+regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
+calibration curve is for — which is the design, not a compromise: the operator's decision not to
+re-run the curve on all four feet only defers the *curves*, not this resistor.
+
 ### 5.6.2 The spherical-bump run (2026-09-27), kept as the comparison
 
 Same method, same masses, the toe's original **spherical** bump, foot **not** glued to the leg.
