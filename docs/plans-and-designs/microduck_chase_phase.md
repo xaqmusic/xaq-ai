@@ -288,6 +288,14 @@ gains; the confirmation's knobs cannot raise the chase-per-crossing rate above o
 standing limit is the chase's start, and the next lever is the age gradient across the window's voxels as a
 single-cast velocity. **The stack for the eye: R99 on the loaded brain.**
 
+**The chase's start had two defects (§17.69), found from the operator's eye on R99 seed 6:** the cloud's mover
+bearing was taken as a new sighting every tick (four per recompute, dragging the velocity to zero: a crossing train
+read as still), and a per-step speed test read centroid jitter as 1 m/s (a crossing at half a metre replaced every
+half second). Fixed: sightings by the cloud's recompute tick, the speed and velocity over a ring of the last 0.8 s.
+On the same six seeds R99 goes from 14 to 47 chases, 22 at the moving train, 8 re-acquired, crossings chased 27 →
+52 %, the walk unchanged. Small things taken from a walking sighting within a metre (R106, §17.70) is live and a
+tie on the outcome. The fixed chase is confirmed on seeds 7–18 in §17.71.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
