@@ -4999,3 +4999,23 @@ loop's own losses turn into 32 looks, and the walk is the walk of §17.65 (walls
 cost the eye should weigh: seconds chasing a run 4 → 14 and stops ended on a chase 5 → 23 — the duck now breaks
 off a look to follow the train, which is what was asked. The base also gains (the fix is in the loop both share),
 and the priority's lead over it widens from 14/17 to 47/21.
+
+### 17.70 Sweep 11: small things taken from the walk (R106; 2026-09-29, late)
+
+`BearingSeekLoop.walk_take_range` 1.0: a bearing seen from a walking cloud starts a target when its fix is within a
+metre, no target is held and no lost mover is in mind — R74's refusal of walking sightings removed, now that the
+bearing it was made for is fixed. On R99, the fixed chase, six seeds.
+
+| | R99 | R106 = R99 + the take from the walk |
+|---|---|---|
+| targets taken from the walk, six runs | 0 | 187 |
+| walls / min · rescues / min | 11.3 ± 8.1 · 0.17 | 12.3 ± 7.7 · 0.22 |
+| stops · at a thing · arrivals | 17.0 · 9.3 · 5.5 | 17.8 · 9.5 · 6.3 |
+| skills · answers observed | 19 · 8 | 23 · 10 |
+| chases (moving train) · re-acquired | 47 (22, 47 %) · 8 | 44 (15, 34 %) · 7 |
+
+**`PARTIAL`.** The mechanism is live — thirty-one targets a run taken from the walk — and it does what the eye asked
+(the walk turns to a block it passes), but the outcome barely moves: arrivals +0.8 a run, skills +4, walls and
+rescues a tie within the spread, and the chase's purity falls from 47 to 34 % because a taken block competes with a
+mover that has not yet confirmed. Not in the recommended stack by the numbers; an arm for the eye (preset R106),
+and on the confirmation's twelve seeds (sweep 12) beside R99.
