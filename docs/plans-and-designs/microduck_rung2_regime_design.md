@@ -5514,3 +5514,26 @@ speed under a quarter of range, the stall test's own term). Measured as sweeps 4
 - **The consequence is the missing piece, not the sense.** The escape backs off and the reference walks the body
   back; the target the surface refutes is still held. Lever 1b: a stall fired by contact drops the seek loop's
   target (`--contact-forget`), measured in sweeps 51–52.
+
+**Lever 1b (sweeps 51–52, `--contact-forget`).** A stall fired by contact drops the seek target (177 of 228
+firings dropped one). Seeds 1–6: walls 35.6 → 33.8 (a tie; the chases back to 24 from 15, falls up); seeds 7–18:
+31.4 → 39.2; pooled 37.4 ± 20.8, three runs past 60 (R112: 31.5, two). `REGRESSION`. The walk without the
+target is play's, and play walks back to the wall.
+
+**Verdict on the contact consumers, n = 18 each (2026-09-29, late night).** The sense is `WORKING` as an
+observation: the ToF's too-close share reads 1.0 at every trap while the range slots read empty, on the sensor
+the duck has and on the part Pollen ships. The four consequences imposed on it — the stop and escape, the
+reflex's release, the cloud's filing, the target's drop — are `NULL` or `REGRESSION` on the pooled walls, each
+loud on one seed set and reversed on the other, because each returns the body to the wall by a different road:
+the escape's six seconds end and the reference walks back; the released yaw goes to a walker whose avoidance
+never learned contact; the filed wall changes the escape's direction and not the walk's; the dropped target
+hands the walk to play, which has the same wall in its node. The doctrine's through-line holds (§1: learned
+cooperates, imposed fights): the walker's own sense already carries the share as slot 15, and the identification
+restored for these runs never saw a push — the babble that produced it was a walk in the open. **The lever that
+follows from tonight is a learned one: a babble that includes contact** (the walker pushed into walls and
+things while its identification learns), so the avoidance that owns the yaw at contact has seen contact. That is
+the re-use context for all four consumers, and the cheap one — the contact stall as a stop trigger — is the
+instrument to keep on for it (it fires where it should and nowhere else).
+
+**The arm stands: R112 on the reflex and seek gate** (preset "R112 · the PROGRESS forget"), with the contact
+presets beside it for the eye. R108 on the wall metric alone.

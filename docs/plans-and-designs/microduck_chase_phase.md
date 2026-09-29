@@ -367,6 +367,14 @@ held, arrivals nearly triple, the heading error a third. Walls tie the eye's arm
 traps in eighteen where the body pushes at a surface its ToF reads as empty at contact. Every escape-side wall
 lever was null; the floor is a sensor's (a return at contact), the next lever. Preset "R112 · the PROGRESS forget".
 
+**The contact consumers (§17.84, sweeps 39–52, n = 18 each):** the ToF's too-close share is the contact sense
+(1.0 at every trap, the range slots empty) and it is confirmed as an observation; four consequences imposed on it
+— the stall stop and escape, the reflex's release at contact, the cloud filing contact, the target dropped at
+contact — tie or regress on the pooled walls, each returning the body to the wall by another road. Learned
+cooperates, imposed fights: the walker carries the share as sense slot 15 and its restored identification never
+saw a push. Next: a babble that includes contact, with the contact stall kept as the instrument. The arm stands:
+R112 on the reflex and seek gate.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
