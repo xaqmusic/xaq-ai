@@ -145,6 +145,19 @@ private:
     // a single mover sighting within chase_gate_m of where it should now be re-acquires the chase at once, no
     // confirmation wait.  Where it went is what the look (--stop-on-lost) turns the head toward.  0 = off.
     int    chase_memory_ticks_ = 0;
+    // THE YIELD (2026-09-29): yield_topic carries the cloud's count of tall voxels around this loop's held target
+    // (CloudMap target_tall_topic); a chase or a coast whose target stands within a body length of tall structure --
+    // chase_yield_tall voxels or more -- yields: it is lost (the memory, the look) instead of run into the wall the
+    // thing turned away from.  Empty topic or 0 = off.
+    std::string yield_topic_; int chase_yield_tall_ = 0; int chases_yielded_ = 0;
+    // the yielded place, remembered as not-a-mover for chase_memory_ticks: a sighting within chase_gate_m of it is dropped
+    bool have_yield_ = false; double yield_x_ = 0.0, yield_y_ = 0.0; uint64_t yield_tick_ = 0; int yield_drops_ = 0;
+    void yield_to_structure(uint64_t tick_id);
+public:
+    int chases_yielded() const { return chases_yielded_; }
+    int yield_drops() const { return yield_drops_; }
+    bool yield_live() const { return have_yield_; }
+private:
     // chase_memory_holds (2026-09-29, the operator: "we should definitely be prioritizing the moving objects" -- measured:
     // in the five seconds after a chase ends a static target is held on 87 % of ticks, the block beside the track): while
     // the memory of a lost mover lives, no NEW static target is taken; the mover keeps its priority until forgotten.

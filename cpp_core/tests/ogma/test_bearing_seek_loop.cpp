@@ -454,3 +454,46 @@ TEST(BearingSeekLoop, AWalkingSightingCloseByStartsATargetWhenNothingIsHeld) {
     off.step(0, 0, 0, 0.0f, 1.0f, 1.0f - 0.8f / 2.5f, true);
     EXPECT_FALSE(off.m.have_target());
 }
+
+TEST(BearingSeekLoop, AChaseYieldsNearTallStructure) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_memory_ticks"] = int64_t{250};
+    p["yield_topic"] = std::string("percept.target_tall"); p["chase_yield_tall"] = int64_t{1};
+    Rig r(p);
+    for (int k = 0; k < 10; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    // the cloud reports tall structure around the target
+    r.bus.begin_tick(r.t);
+    auto y = std::make_shared<ogma::ProprioToken>(); y->values = Eigen::VectorXf(2); y->values << 4.0f, 1.2f;
+    r.bus.publish("percept.target_tall", y);
+    r.bus.end_tick();
+    r.mover(0.0f, 1.0f, prox_of(1.2)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.chasing()) << "yielded";
+    EXPECT_EQ(r.m.chases_yielded(), 1);
+    EXPECT_EQ(r.m.chases_lost(), 0) << "a yield is not a loss: nothing to look for, no mover in mind";
+    EXPECT_FALSE(r.m.chase_lost_now());
+    EXPECT_FALSE(r.m.memory_live());
+    EXPECT_TRUE(r.m.yield_live()) << "the place is remembered as not-a-mover";
+    EXPECT_FALSE(r.m.have_target());
+    // the same sighting again, at the yielded place: dropped, no candidate, no chase (sweep 13's churn)
+    for (int k = 0; k < 6; ++k) {
+        r.bus.begin_tick(r.t); r.bus.publish("percept.target_tall", y); r.bus.end_tick();
+        r.mover(0.0f, 1.0f, prox_of(1.2 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_EQ(r.m.chases_yielded(), 1);
+    EXPECT_GE(r.m.yield_drops(), 6);
+    EXPECT_FALSE(r.m.have_target());
+    // a sighting well off the place is a fresh candidate: it confirms and is chased (the cloud reports no tall structure there)
+    auto y0 = std::make_shared<ogma::ProprioToken>(); y0->values = Eigen::VectorXf(2); y0->values << 0.0f, 1.0f;
+    r.bus.begin_tick(r.t); r.bus.publish("percept.target_tall", y0); r.bus.end_tick();
+    for (int k = 0; k < 10; ++k) {
+        r.mover(1.0f, 0.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    EXPECT_TRUE(r.m.chasing()) << "a thing elsewhere is chased";
+}

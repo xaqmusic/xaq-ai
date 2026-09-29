@@ -5054,3 +5054,55 @@ signal had hidden. **The eye decides the trade**: preset "R94 · loaded + the ST
 MOVER's PRIORITY" for the pursuit; both on the fixed chase. What would reconcile them is the chase knowing the
 walls — a pursuit that yields when its predicted target runs to within a body length of tall structure, the
 isolation measure the candidate already uses, applied to the target (unbuilt).
+
+### 17.72 Sweep 13–14: the pursuit that yields near tall structure (R107), built, measured, and found churning (2026-09-29, night)
+
+**Built.** The cloud places the seek loop's held target back into its own frame (the inverse of `body_rel`: the
+bearing token on `percept.seek_bearing` and the range on `reality.cognitive.seek_range`) and counts the voxels at
+or above `iso_height` (0.25 m) within `target_iso_radius` (0.35 m, a body length) of it, published on
+`percept.target_tall` as `[count, range]`. The seek loop (`yield_topic`, `chase_yield_tall 1`) yields a chase or a
+coast whose target has a tall voxel that close. R107 = R99 + the yield; the gain-0 guard byte-identical (R83 plain,
+md5 `6b9a0b3a…`). As built, the yield went through `lose()`: the memory of the mover kept, the lost look started.
+
+R99 and R107 on seeds 1–6 (sweep 13) and 7–18 (sweep 14), 600 s, the campaign base (the loaded brain, the stuck
+stop and escape, chase vx 0.35):
+
+| | R99, 1–6 | R107, 1–6 | R99, 7–18 | R107, 7–18 | R99, n = 18 | R107, n = 18 |
+|---|---|---|---|---|---|---|
+| walls / min, mean ± sd | 11.3 ± 8.1 | 14.1 ± 18.7 | 35.2 ± 32.2 | 18.1 ± 15.3 | 27.2 ± 28.7 · median 19.0 | **16.8 ± 16.1 · median 8.5** |
+| seeds over 60 walls a minute | 0 | 0 (seed 6: 52) | 2 (94, 98) | 0 (max 48) | 2 of 18 | 0 of 18 |
+| R107 lower on the same seed | | 4 of 6 | | 8 of 12 | | 12 of 18; paired −10.4 ± 6.8 (sem) |
+| rescues / min · down % | 0.17 · 0.28 | 0.17 · 0.33 | 0.28 · 0.30 | 0.33 · 0.43 | 0.24 | 0.28 |
+| stops a run · stand % | 17.0 · 32 | 29.5 · 35 | 18.0 · 33 | 27.3 · 35 | | |
+| chases (moving train, share) | 47 (22, 47 %) | 115 (32, 28 %) | 70 (13, 19 %) | 250 (76, 30 %) | 117 (35, 30 %) | 365 (108, 30 %) |
+| yielded · re-acquired · lost looks | 0 · 8 · 32 | 93 · 78 · 94 | 0 · 10 · 54 | 195 · 178 · 175 | 0 · 18 · 86 | **288 · 256 · 269** |
+| median chase length · seconds chasing a run | 1.6 s · 14 | **0.0 s** · 7 | 1.2 s | 0.0 s | | |
+| walk m/s | 0.179 | 0.178 | 0.159 | 0.178 | | |
+
+**Where the yields fire** (`yield_where.py`: each chase's start mapped into the world through the body's pose):
+every one of seed 1's twenty and 59 of seeds 2–6's 63 within 0.4 m of a wall or a piece of furniture — the median
+yield 0.28–0.31 m from furniture and 0.8–1.3 m from a wall. It is chair1 beside the track's western leg (its centre
+0.45 m from the leg, its back 0.3 m from the passing train), not the track's ends: those run 0.45 m from the walls,
+beyond the 0.35 m radius, so the wall case the lever was built for is out of its reach as configured, and the chair
+case, which it was not built for, is in it. By label the yields are the train moving 13, the train stopped 25,
+static 12, small things 13 (seeds 2–6).
+
+**The churn.** Seed 1: 41 chases started, 36 re-acquired while coasting, 39 yielded, 39 lost looks; the yields at
+110.6, 110.7, 110.7, 110.8, 110.9, 111.0, 111.1 s at the same place. The yield's `lose()` left the memory of a mover
+at the yielded place; the next fresh sighting there matched the memory's prediction, re-acquired it (`chases_reacquired`),
+and yielded again a tick later — a chase, a stop and a look per cast for as long as the thing stayed in view.
+288 of 365 chases ended on their first tick; a run has twelve more stops than R99 and stands 3 points more.
+
+**What the numbers mean.** The walls fell — pooled n = 18 from 27 to 17 a minute, the median 19 → 8.5, both of R99's
+trapped runs gone, lower on twelve of eighteen seeds — to the stack's level (19) with R99's priority still in the
+config. But the pursuit was destroyed in the same stroke (median chase 0 s, the seconds chasing halved, a stop per
+yield), and the fall in walls cannot be credited to the yield's geometry: it came with twelve extra standing looks a
+run, and a duck standing looks at fewer walls. R107 as built is a weakened slice of the mechanism (§3.2 item 6):
+`PARTIAL` on the walk (an interesting artifact, the walls bought with stops), `REGRESSION` on the pursuit.
+
+**The fix (R108, `yield_to_structure()`).** A yield is not a loss: the thing at the foot of tall structure is part
+of that structure, so there is nothing to look for and no mover to keep in mind — no look, no memory. The PLACE
+is remembered as not-a-mover for `chase_memory_ticks` (5 s): a sighting within `chase_gate_m` (0.35 m) of it is
+dropped (`yield_drops`, in the host's summary); one further off is a fresh candidate again. Same parameters as
+R107; the guard byte-identical (md5 `6b9a0b3a…`); the seek loop's test extended (the yield leaves no look and no
+memory, the same sighting is dropped, a thing elsewhere is chased). Measured in §17.73 (sweeps 15–16).

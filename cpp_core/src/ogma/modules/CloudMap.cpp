@@ -33,6 +33,8 @@ std::vector<TopicSpec> CloudMap::input_topics() const {
         t.emplace_back(input_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false);
     if (!place_topic_.empty())
         t.emplace_back(place_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false);
+    if (!target_topic_.empty()) t.emplace_back(target_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false);
+    if (!target_range_topic_.empty()) t.emplace_back(target_range_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false);
     return t;
 }
 
@@ -43,6 +45,7 @@ std::vector<TopicSpec> CloudMap::output_topics() const {
     if (!things_topic_.empty()) t.emplace_back(things_topic_, std::type_index(typeid(ProprioToken)));
     if (!thing_bearing_topic_.empty()) t.emplace_back(thing_bearing_topic_, std::type_index(typeid(ProprioToken)));
     if (!mover_topic_.empty()) t.emplace_back(mover_topic_, std::type_index(typeid(ProprioToken)));
+    if (!target_tall_topic_.empty()) t.emplace_back(target_tall_topic_, std::type_index(typeid(ProprioToken)));
     return t;
 }
 
@@ -188,6 +191,15 @@ ParamSchema CloudMap::params_schema() const {
         {"mover_vacated", ParamMutability::HotMutable,
          "The mover candidate must have at least this many vacated voxels in its trail (needs vacate_window_ticks); 0 = not required.",
          ParamValue{int64_t{0}}},
+        {"target_topic", ParamMutability::ConstructionOnly,
+         "THE TARGET'S SURROUNDINGS: the seek loop's bearing token [cx=+right, cy=+forward, value] (its output_topic); with "
+         "target_range_topic, the held target is placed in the cloud and the tall voxels around it counted.  Empty = off.",
+         ParamValue{std::string("")}},
+        {"target_range_topic", ParamMutability::ConstructionOnly, "The seek loop's range token (its range_topic).", ParamValue{std::string("")}},
+        {"target_tall_topic", ParamMutability::ConstructionOnly,
+         "ProprioToken [tall_count, range]: the open cloud's voxels at or above iso_height within target_iso_radius of the held "
+         "target; zeros when no target is held or no cloud is open.", ParamValue{std::string("")}},
+        {"target_iso_radius", ParamMutability::HotMutable, "A body length: the radius (m) around the target.", ParamValue{0.35}},
         {"mover_topic", ParamMutability::ConstructionOnly,
          "MOVERS (the chase phase): ProprioToken [vx=+right, vy=+forward, proximity, age_ticks, oldest_ticks] to the nearest cluster "
          "of the open cloud whose voxels are young against the cloud's own (see the header); zeros when none.  "
@@ -274,6 +286,8 @@ ParamMap CloudMap::current_params() const {
     m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_; m["mover_ext_max"] = mover_ext_max_;
     m["things_skip_movers"] = things_skip_movers_;
     m["mover_range_hold"] = mover_range_hold_; m["mover_hold_gate"] = mover_hold_gate_;
+    m["target_topic"] = ParamValue{target_topic_}; m["target_range_topic"] = ParamValue{target_range_topic_};
+    m["target_tall_topic"] = ParamValue{target_tall_topic_}; m["target_iso_radius"] = target_iso_radius_;
     m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
     m["things_isolated"] = things_isolated_; m["things_age_dim"] = things_age_dim_;
     m["walk_reset_m"] = walk_reset_m_;
@@ -318,6 +332,7 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "things_isolated") things_isolated_ = get_d(one, "things_isolated", 0.0) > 0.5;
     else if (k == "things_age_dim") things_age_dim_ = get_d(one, "things_age_dim", 0.0) > 0.5;
     else if (k == "things_skip_movers") things_skip_movers_ = get_d(one, "things_skip_movers", 0.0) > 0.5;
+    else if (k == "target_iso_radius") target_iso_radius_ = get_d(one, "target_iso_radius", target_iso_radius_);
     else if (k == "mover_range_hold") mover_range_hold_ = get_d(one, "mover_range_hold", mover_range_hold_);
     else if (k == "mover_hold_gate") mover_hold_gate_ = get_d(one, "mover_hold_gate", mover_hold_gate_);
     else if (k == "mover_ext_max") mover_ext_max_ = get_d(one, "mover_ext_max", mover_ext_max_);
@@ -367,6 +382,8 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     mover_weighted_ = get_d(params, "mover_weighted", 1.0) > 0.5;
     mover_ext_max_ = get_d(params, "mover_ext_max", mover_ext_max_);
     mover_range_hold_ = get_d(params, "mover_range_hold", mover_range_hold_);
+    target_topic_ = get_s(params, "target_topic"); target_range_topic_ = get_s(params, "target_range_topic");
+    target_tall_topic_ = get_s(params, "target_tall_topic"); target_iso_radius_ = get_d(params, "target_iso_radius", target_iso_radius_);
     mover_hold_gate_ = get_d(params, "mover_hold_gate", mover_hold_gate_);
     things_skip_movers_ = get_d(params, "things_skip_movers", 0.0) > 0.5;
     iso_height_ = get_d(params, "iso_height", iso_height_);
@@ -618,6 +635,7 @@ void CloudMap::tick(uint64_t tick_id) {
         else if (mover_ >= 0) mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
         publish_mover(tick_id);
     }
+    if (!target_tall_topic_.empty()) publish_target_tall(yaw, tick_id);
 
     if (!output_topic_.empty()) {
         auto out = std::make_shared<ProprioToken>();
@@ -857,6 +875,47 @@ void CloudMap::update_movers(double yaw, uint64_t tick_id) {
     } else {
         mover_prev_ = false;
     }
+}
+
+void CloudMap::publish_target_tall(double yaw, uint64_t tick_id) {
+    target_tall_ = 0; double range = 0.0;
+    float cx = 0.0f, cy = 0.0f, val = 0.0f;
+    if (auto bt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_topic_)))
+        if (bt->values.size() >= 3) { cx = bt->values[0]; cy = bt->values[1]; val = bt->values[2]; }
+    if (auto rt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_range_topic_)))
+        if (rt->values.size() >= 1) range = double(rt->values[0]);
+    if (open_ && val > 0.0f && (cx * cx + cy * cy) > 1e-6f && range > 0.0) {
+        // the target in the body frame (x forward, y left), then into the cloud's frame: the inverse of body_rel
+        const double n = std::sqrt(double(cx) * cx + double(cy) * cy);
+        const double bx = double(cy) / n * range, by = -double(cx) / n * range;
+        double d = yaw - anchor_yaw_;
+        while (d > kPi) d -= 2.0 * kPi;
+        while (d < -kPi) d += 2.0 * kPi;
+        const double c = std::cos(d), s = std::sin(d);
+        double tx = 0.0, ty = 0.0;
+        if (walking_cloud_) {
+            const double dx = cur_x_ - anchor_x_, dy = cur_y_ - anchor_y_;
+            const double ca = std::cos(-anchor_yaw_), sa = std::sin(-anchor_yaw_);
+            tx = ca * dx - sa * dy; ty = sa * dx + ca * dy;
+        }
+        const double gx = c * bx - s * by + tx, gy = s * bx + c * by + ty;
+        const int r = int(std::ceil(target_iso_radius_ / voxel_m_)) + 1;
+        const int gx0 = int(std::floor(gx / voxel_m_)), gy0 = int(std::floor(gy / voxel_m_));
+        for (auto const& [k, vv] : vox_) {
+            int ix, iy, iz; unkey(k, ix, iy, iz);
+            if (std::abs(ix - gx0) > r || std::abs(iy - gy0) > r) continue;
+            const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
+            if (h < iso_height_) continue;
+            if (std::hypot((ix + 0.5) * voxel_m_ - gx, (iy + 0.5) * voxel_m_ - gy) <= target_iso_radius_) ++target_tall_;
+        }
+    }
+    auto out = std::make_shared<ProprioToken>();
+    out->tick_id = tick_id;
+    out->producer_id = std::string(id());
+    out->sensor = "target_tall";
+    out->values = Eigen::VectorXf(2);
+    out->values[0] = float(target_tall_); out->values[1] = float(range);
+    bus_->publish(target_tall_topic_, out);
 }
 
 void CloudMap::publish_mover(uint64_t tick_id) {

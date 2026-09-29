@@ -38,6 +38,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!mover_topic_.empty()) v.push_back(TopicSpec{mover_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!yield_topic_.empty()) v.push_back(TopicSpec{yield_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
 }
 std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
@@ -117,6 +118,12 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "OBJECT PERMANENCE: when a chased thing's sightings stop, its predicted position keeps moving at the last velocity for up "
             "to this many ticks (the need falling 1 -> 0), a sighting near the prediction resumes the chase, and the loss is reported "
             "at the end.  0 = the loss at once.", ParamValue{int64_t{0}}},
+        {"yield_topic", ParamMutability::ConstructionOnly,
+            "THE YIELD: ProprioToken [tall_count, range] (CloudMap target_tall_topic) -- the tall voxels around this loop's held target.  Empty = off.",
+            ParamValue{std::string("")}},
+        {"chase_yield_tall", ParamMutability::HotMutable,
+            "A chase or coast whose target has at least this many tall voxels within a body length yields (lost: the memory, the look).  0 = off.",
+            ParamValue{int64_t{0}}},
         {"chase_memory_ticks", ParamMutability::HotMutable,
             "PERMANENCE IN RECOGNITION: a lost mover is kept in mind (position and velocity, extrapolated) for this many ticks without "
             "driving the walk; one mover sighting within chase_gate_m of where it should now be re-acquires the chase at once.  0 = off.",
@@ -148,7 +155,8 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
     m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_}; m["chase_stop_v"] = ParamValue{chase_stop_v_};
     m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)};
-    m["chase_memory_holds"] = ParamValue{chase_memory_holds_}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
+    m["chase_memory_holds"] = ParamValue{chase_memory_holds_};
+    m["yield_topic"] = ParamValue{yield_topic_}; m["chase_yield_tall"] = ParamValue{int64_t(chase_yield_tall_)}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
     m["chase_pull_recover_ticks"] = ParamValue{chase_pull_recover_ticks_};
     return m;
 }
@@ -181,6 +189,8 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_min_v",     [&](auto const& v){ chase_min_v_   = get_double(v,"chase_min_v"); });
     apply_param(params, "chase_stop_v",    [&](auto const& v){ chase_stop_v_  = get_double(v,"chase_stop_v"); });
     apply_param(params, "chase_permanence_ticks", [&](auto const& v){ chase_permanence_ticks_ = std::max(0, int(get_double(v,"chase_permanence_ticks"))); });
+    apply_param(params, "yield_topic",     [&](auto const& v){ yield_topic_   = get_string(v,"yield_topic"); });
+    apply_param(params, "chase_yield_tall", [&](auto const& v){ chase_yield_tall_ = std::max(0, int(get_double(v,"chase_yield_tall"))); });
     apply_param(params, "chase_memory_holds", [&](auto const& v){ chase_memory_holds_ = get_double(v,"chase_memory_holds") > 0.5; });
     apply_param(params, "chase_memory_ticks", [&](auto const& v){ chase_memory_ticks_ = std::max(0, int(get_double(v,"chase_memory_ticks"))); });
     apply_param(params, "chase_pull_decay", [&](auto const& v){ chase_pull_decay_ = std::clamp(get_double(v,"chase_pull_decay"), 0.0, 1.0); });
@@ -207,6 +217,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_min_v")     chase_min_v_ = get_double(value, k);
     else if (k == "chase_stop_v")    chase_stop_v_ = get_double(value, k);
     else if (k == "chase_permanence_ticks") chase_permanence_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "chase_yield_tall") chase_yield_tall_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_memory_holds") chase_memory_holds_ = get_double(value, k) > 0.5;
     else if (k == "chase_memory_ticks") chase_memory_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_pull_decay") chase_pull_decay_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -263,6 +274,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         if (tick_id - mem_tick_ > uint64_t(chase_memory_ticks_)) have_memory_ = false;
         else mem_dt_ = double(tick_id - mem_tick_) / 50.0;
     }
+    if (have_yield_ && tick_id - yield_tick_ > uint64_t(chase_memory_ticks_)) have_yield_ = false;
     if (chasing_ || coasting_) {
         const double dt = double(tick_id - cand_tick_) / 50.0 + chase_lead_s_;
         tx_ = cand_x_ + cand_vx_ * dt; ty_ = cand_y_ + cand_vy_ * dt;
@@ -326,6 +338,15 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
 
 void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
     lost_now_ = false; last_decision_ = 0;
+    // the yield: the pursuit does not run into tall structure the thing turned away from
+    if ((chasing_ || coasting_) && chase_yield_tall_ > 0 && !yield_topic_.empty()) {
+        if (auto yt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(yield_topic_)))
+            if (yt->values.size() >= 1 && int(yt->values[0]) >= chase_yield_tall_) {
+                ++chases_yielded_;
+                yield_to_structure(tick_id);
+                return;
+            }
+    }
     float mx = 0.0f, my = 0.0f, mprox = 0.0f; bool fresh = true;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(mover_topic_))) {
         if (pt->tick_id == tick_id && pt->values.size() >= 3) {
@@ -342,7 +363,9 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
         const double fwd = my / n, left = -mx / n, range = std::max(0.0, 1.0 - double(mprox)) * proximity_range_;
         const double bx = fwd * range, by = left * range;
         const double fx = px_ + c * bx - s * by, fy = py_ + s * bx + c * by;   // the sighting, odometry frame
-        if (have_cand_ && tick_id > cand_tick_) {
+        if (have_yield_ && tick_id - yield_tick_ <= uint64_t(chase_memory_ticks_) && std::hypot(fx - yield_x_, fy - yield_y_) <= chase_gate_m_) {
+            ++yield_drops_;   // a sighting at the yielded place: part of the tall structure there, not a mover (sweep 13: the same sighting re-started the chase every tick)
+        } else if (have_cand_ && tick_id > cand_tick_) {
             const double dt = double(tick_id - cand_tick_) / 50.0;
             const double ex = cand_x_ + cand_vx_ * dt, ey = cand_y_ + cand_vy_ * dt;   // where the candidate should be
             const double miss = std::hypot(fx - ex, fy - ey);
@@ -447,6 +470,17 @@ void BearingSeekLoop::lose(uint64_t tick_id, double c, double s) {
     have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++chases_lost_;
     pull_ *= chase_pull_decay_;
     if (chase_memory_ticks_ > 0) { have_memory_ = true; mem_x_ = lx; mem_y_ = ly; mem_vx_ = cand_vx_; mem_vy_ = cand_vy_; mem_tick_ = tick_id; }
+    chasing_ = false; coasting_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
+}
+
+void BearingSeekLoop::yield_to_structure(uint64_t tick_id) {
+    // the thing stands at the foot of tall structure: it is part of that structure, not a mover.  Nothing to look for
+    // and no mover to keep in mind (sweep 13, 2026-09-29: a yield that went through lose() left the memory, the next
+    // sighting re-acquired it and yielded again, 288 of 365 chases ending on their first tick).  The PLACE is remembered
+    // as not-a-mover for the memory's lifetime: a sighting within the gate of it is dropped, one further off is a fresh
+    // candidate again.
+    if (chase_memory_ticks_ > 0) { have_yield_ = true; yield_x_ = tx_; yield_y_ = ty_; yield_tick_ = tick_id; }
+    have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f;
     chasing_ = false; coasting_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
 }
 

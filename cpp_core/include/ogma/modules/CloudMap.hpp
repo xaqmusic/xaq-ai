@@ -276,6 +276,17 @@ private:
     // continuation is not.  0 = off.
     double mover_range_hold_ = 0.0, mover_hold_gate_ = 0.4;
     bool   mover_prev_ = false; double mover_px_ = 0.0, mover_py_ = 0.0, mover_dx_ = 0.0, mover_dy_ = 0.0;
+    // THE TARGET'S SURROUNDINGS (2026-09-29, the pursuit that yields near tall structure): the seek loop's target
+    // (its bearing and range, body frame) placed in the cloud's frame, and the open cloud's voxels at or above
+    // iso_height within target_iso_radius of it counted; published on target_tall_topic as [count, range].  A chase
+    // whose target stands at the foot of a wall is about to meet the wall the thing turned away from.  Empty = off.
+    std::string target_topic_, target_range_topic_, target_tall_topic_;
+    double target_iso_radius_ = 0.35;
+    int    target_tall_ = 0;
+    void   publish_target_tall(double yaw, uint64_t tick_id);
+public:
+    int target_tall() const { return target_tall_; }
+private:
     // things_skip_movers (2026-09-28): the things reduction does not ATTEND a cluster whose voxels are young by the
     // mover rule (a passing thing's smear at a stop reads as a small thing, and the seek loop then fixes a place
     // the thing has left -- the operator watched the duck peck at one).  A thing has a place while it is still.

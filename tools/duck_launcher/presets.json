@@ -1147,5 +1147,55 @@
    "fast_until": 0,
    "checkpoint": "duck_r94_s1.brain.json"
   }
+ },
+ {
+  "name": "R107 · the pursuit that YIELDS near tall structure: R99 where the cloud counts tall voxels within a body length of the seek loop's held target and a chase whose target stands at the foot of a wall yields into the memory and the look (chase_yield_tall 1)",
+  "series": 107,
+  "hint": "The reconciling lever (2026-09-29, after n = 18 showed the priority's pursuit costing walls): the cloud counts the tall voxels within a body length (0.35 m) of the seek loop's held target, and a chase whose target stands at the foot of a wall YIELDS -- into the memory and the look -- instead of running into the wall the train turned away from. R99 + it, the loaded brain, the fixed chase. WATCH: the dash after the train ending short of the wall, the head turning after it; the summary's 'chases yielded'.",
+  "state": {
+   "config": "a1v2_r107_yield.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35",
+   "fast_until": 0,
+   "checkpoint": "duck_r94_s1.brain.json"
+  }
+ },
+ {
+  "name": "R108 · the yield that FORGETS: a chase that yields near tall structure keeps no memory and starts no look; the yielded place is not-a-mover for 5 s (R107 churned: 288 of 365 chases ended on their first tick)",
+  "series": 108,
+  "hint": "R107's build fixed (2026-09-29): its yield went through lose(), left the memory of a mover, and the next sighting re-acquired and yielded again, every tick -- a stop per yield, the pursuit halved, while walls fell 27 -> 17/min (n = 18). Now the yield FORGETS: no look, no mover memory; the yielded place is remembered as not-a-mover for chase_memory_ticks and a sighting within the gate of it is dropped. Same parameters as R107. WATCH: the train passing chair1 (the yields fire there, 0.3 m from its back) and the wall ends; the summary's 'chases yielded' and 'sightings dropped'.",
+  "state": {
+   "config": "a1v2_r108_yield_forgets.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35",
+   "fast_until": 0,
+   "checkpoint": "duck_r94_s1.brain.json"
+  }
  }
 ]

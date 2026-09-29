@@ -299,6 +299,16 @@ seeds R99 walks at 27 walls a minute against the stack's 19 and pursues half aga
 35 at the moving train, 18 re-acquisitions). The eye decides the trade: the stack for the walk, R99 for the
 pursuit; a pursuit that yields near tall structure would reconcile them.
 
+**The yield near tall structure (R107, §17.72):** built as designed — the cloud counts the tall voxels within a
+body length of the seek loop's held target, and a chase whose target has one yields. On eighteen seeds it takes the
+walls from 27 to 17 a minute (the stack's level, R99's priority kept; both of R99's trapped runs gone) — and destroys
+the pursuit: 288 of 365 chases ended on their first tick. The yield went through the loss, left the memory of a
+mover, and the next sighting re-acquired and yielded again, a stop and a look per cast; the walls it bought came
+with twelve extra standing looks a run. And the yields fire at the chair beside the track's western leg (its back
+0.3 m from the passing train), not at the track's ends, which run 0.45 m from the walls and beyond the 0.35 m radius.
+`PARTIAL` on the walk (an artifact of the stops), `REGRESSION` on the pursuit; the mechanism as built was a weakened
+slice. R108 fixes the build: a yield forgets (no look, no memory) and the yielded place is not-a-mover for 5 s.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at

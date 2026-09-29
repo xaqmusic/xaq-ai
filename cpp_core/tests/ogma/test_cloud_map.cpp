@@ -685,3 +685,31 @@ TEST(CloudMap, AMoverBeingFollowedStaysACandidateBeyondTheStartRange) {
     }
     EXPECT_EQ(far2, 0) << "without the hold, nothing past 1.2 m";
 }
+
+// THE TARGET'S SURROUNDINGS (2026-09-29): the seek loop's target placed in the cloud and the tall voxels around it counted.
+TEST(CloudMap, TallStructureAroundTheHeldTargetIsCounted) {
+    ParamMap p = things_params();
+    p["target_topic"] = std::string("in.seek"); p["target_range_topic"] = std::string("in.seek_range");
+    p["target_tall_topic"] = std::string("out.target_tall");
+    Rig r(p);
+    std::vector<Pt> world;
+    for (int j = 0; j < 2; ++j) for (int k = 0; k < 9; ++k) world.push_back({0.85, 0.19 + 0.04 * j, 0.03 + 0.04 * k});   // a post ahead-left
+    for (int i = 0; i < 5; ++i) cast_world(r, 0.0, world);
+    auto aim = [&](double cx, double cy, double range) {
+        r.bus.begin_tick(r.t);
+        auto b = std::make_shared<ogma::ProprioToken>(); b->values = Eigen::VectorXf(3); b->values << float(cx), float(cy), 1.0f;
+        r.bus.publish("in.seek", b);
+        auto g = std::make_shared<ogma::ProprioToken>(); g->values = Eigen::VectorXf::Constant(1, float(range));
+        r.bus.publish("in.seek_range", g);
+        r.bus.end_tick();
+        cast_world(r, 0.0, world);
+        auto out = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.target_tall"));
+        return out ? int(out->values[0]) : -1;
+    };
+    // a target at the post's foot (0.85 ahead, 0.21 left: bearing +left = negative cx): tall voxels around it
+    const double n1 = std::hypot(0.85, 0.21);
+    EXPECT_GT(aim(-0.21 / n1, 0.85 / n1, n1), 0) << "the post stands within a body length of the target";
+    // a target 1.6 m ahead-right: nothing tall near it
+    const double n2 = std::hypot(1.4, 0.8);
+    EXPECT_EQ(aim(0.8 / n2, 1.4 / n2, n2), 0);
+}
