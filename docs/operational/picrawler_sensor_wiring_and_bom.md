@@ -998,10 +998,30 @@ shorted FSR (4095), and any break in the signal wiring or the ADC itself (the fl
 
 D1–D3 together also *map* the lead, which is what settles candidate **a**.
 
-**Then read the HAT's header, power on, nothing plugged in.** GND is 0 V, VCC is 3.30 V, and
-**the signal pin sits at ~2.82 V** — the floating value from §5.7.2, which makes the three pins
-tell themselves apart by voltage alone. Confirm it by watching the instrument rather than the
-meter: a 10 kΩ from the suspected signal pin to GND should drop A0 to ~0 in the dash.
+**Then identify the HAT's header pins — ⚠ but NOT by metering the signal pin.**
+
+> ⚠ **CORRECTION 2026-09-29. An earlier version of this section said the signal pin would meter
+> ~2.82 V and that the three pins could therefore be told apart by voltage alone. That is
+> wrong, and it is wrong in a way worth keeping.** A floating ADC pin has no source worth the
+> name — §5.7.2's ~3500 counts is residual charge on the mux, replenished only by leakage — so
+> **a 10 MΩ voltmeter is a heavier load than the thing it is measuring** and reads whatever the
+> leakage can hold against it, not the value the ADC sees. The instrument and the meter are
+> looking at different quantities.
+>
+> Measured in practice: **SIG to GND = 1.0 V**, which is ~100 nA into 10 MΩ, i.e. an effective
+> **~23 MΩ** to the 3.3 V rail. That is consistent, uninformative about the pinout, and
+> **irrelevant to the divider** — in parallel with `R_fsr` it shifts the operating point by
+> **0.02 %**. (Unloaded it does move 2 counts to ~5; the unloaded reading is leakage either way.)
+
+**VCC and GND still meter honestly** (3.30 V and 0 V) because both are driven. For the third
+pin, **drive it and watch the instrument** — the ADC is what *defines* the signal pin:
+
+| with the lead unplugged and power on | A0 in the dash |
+|---|---|
+| 10 kΩ from the suspected SIG pin to **GND** | → ~0 |
+| 10 kΩ from the same pin to **VCC** | → near 4095 |
+
+Both move ⇒ that is the signal pin **and** the ADC path works. Neither moves ⇒ wrong pin.
 
 ### 5.6.2 The spherical-bump run (2026-09-27), kept as the comparison
 
