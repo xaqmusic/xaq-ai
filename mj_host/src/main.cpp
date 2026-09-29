@@ -1406,6 +1406,10 @@ std::string g_load_brain_modules = "motor_epm_intent";   // --load-brain-modules
 // a mover, the forward command is raised to at least VX -- the walker's trained range reaches 0.4 m/s and the brain's own
 // pace is ~0.22.  A global lean (--body-pitch, --head-forward) bought falls; speed spent only on the chase.  0 = off.
 double g_chase_vx = 0.0;
+// --chase-gaze GAIN (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to
+// reacquire the moving target"): on the walk, the head yaw target is offset by GAIN x the bearing of the chased target,
+// or of the lost mover's extrapolated memory, clamped to +-0.7 rad; nothing moving in mind = the head brain's own.  0 = off.
+double g_chase_gaze = 0.0;
 double g_head_phase_lead = 0.0, g_head_phase_learn = 0.0;   // --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 // --stop-every S --stop-secs S [--stop-from S]: the walk-stop-look line's stimulus (playroom plan
@@ -1524,6 +1528,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_chase_gaze > 0.0) std::fprintf(stderr, "  chase gaze: on the walk the head yaw turns toward the chased target or the lost mover's memory (gain %.2f, +-0.7 rad)\n", g_chase_gaze);
     if (g_chase_vx > 0.0) std::fprintf(stderr, "  chase vx: the forward command raised to at least %.2f m/s while a mover is chased or coasted after\n", g_chase_vx);
     if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
     if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
@@ -2373,6 +2378,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const auto hcmd = head->last_command();
             for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)] + hcmd[size_t(i)];
             head_targets[0] += g_head_forward; head_targets[1] += g_head_forward;   // the neck and head pitched forward
+            if (g_chase_gaze > 0.0 && chase_on && stop_phase == StopPhase::None) {
+                const double ge = brain.chase_gaze_ego();                    // + = right; the head yaw joint is + left
+                if (std::isfinite(ge)) head_targets[2] += std::clamp(-g_chase_gaze * ge, -0.7, 0.7);
+            }
             head_owns_joints = true;
             command.head = {0.0, 0.0, 0.0, 0.0};          // the walker is told nothing about the head
         }
@@ -2763,7 +2772,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
-        if (chase_on) std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase\n", brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost);
+        if (chase_on) { const auto cf = brain.chase_cand_fates();
+            std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out\n",
+                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3]); }
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
@@ -2861,6 +2872,7 @@ void usage() {
         "      --load-brain F restores a level-2 brain saved by --save-brain (the body at its reset): no babble;\n"
         "      --load-brain-modules LIST (default motor_epm_intent, the identification; all = everything).\n"
         "      --chase-vx VX raises the forward command to at least VX while a mover is chased (the pursuit at speed).\n"
+        "      --chase-gaze GAIN turns the head yaw toward the chased target, or the lost mover's memory, while walking.\n"
         "      --head-forward RAD offsets the neck and head pitch targets (the head over the feet); --body-pitch RAD\n"
         "      sets the walker's body_pitch command slot -- the speed levers, 0 = off.\n"
         "      --stop-on-lost starts a stop when a chase is lost, the sweep centred on where the thing went (a look, not a walk).\n"
@@ -3028,6 +3040,8 @@ int main(int argc, char** argv) {
             g_stop.scan_amp = std::stod(next("--stop-scan")); g_stop.scan_hold_s = std::stod(next("--stop-scan"));
         } else if (a == "--load-brain-modules") {
             g_load_brain_modules = next("--load-brain-modules");
+        } else if (a == "--chase-gaze") {
+            g_chase_gaze = std::stod(next("--chase-gaze"));
         } else if (a == "--chase-vx") {
             g_chase_vx = std::stod(next("--chase-vx"));
         } else if (a == "--head-forward") {

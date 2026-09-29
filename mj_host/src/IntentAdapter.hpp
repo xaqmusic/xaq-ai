@@ -184,6 +184,8 @@ public:
     double chase_vy()      const;
     bool   mover_seen()    const;
     int    mover_cands()   const;
+    double chase_gaze_ego() const;
+    std::array<int, 4> chase_cand_fates() const;   // replaced, too fast, still, timed out    // the bearing the head should turn to (rad, + = right), NaN when nothing moving is in mind
     bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
     int    chases_reacquired() const;
     void   restore_brain_state(nlohmann::json const& s);

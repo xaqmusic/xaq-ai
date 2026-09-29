@@ -9,6 +9,7 @@
 #include "ogma/GraphConfig.hpp"
 #include "ogma/modules/CloudMap.hpp"
 #include "ogma/modules/BearingSeekLoop.hpp"
+#include <limits>
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
 #include "ogma/Rng.hpp"
@@ -453,6 +454,8 @@ double IntentAdapter::chase_vx()     const { auto* q = find_seek(*instance_); re
 double IntentAdapter::chase_vy()     const { auto* q = find_seek(*instance_); return q ? q->chase_vy() : 0.0; }
 bool   IntentAdapter::mover_seen()   const { auto* q = find_seek(*instance_); return q && q->mover_seen(); }
 int    IntentAdapter::mover_cands()  const { auto* c = find_cloud(*instance_); return c ? c->mover_candidates() : 0; }
+std::array<int, 4> IntentAdapter::chase_cand_fates() const { auto* q = find_seek(*instance_); return q ? std::array<int, 4>{q->cand_replaced(), q->cand_fast(), q->cand_still(), q->cand_timeout()} : std::array<int, 4>{0, 0, 0, 0}; }
+double IntentAdapter::chase_gaze_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_gaze_ego() : std::numeric_limits<double>::quiet_NaN(); }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }
 int    IntentAdapter::chases_reacquired() const { auto* q = find_seek(*instance_); return q ? q->chases_reacquired() : 0; }
 void   IntentAdapter::restore_brain_state(nlohmann::json const& s) { instance_->restore_state(s); }

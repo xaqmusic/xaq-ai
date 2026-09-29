@@ -392,3 +392,26 @@ TEST(BearingSeekLoop, ALostMoverSeenWhereItShouldBeIsReacquiredAtOnce) {
     q.mover(0.5f, 0.866f, prox_of(1.0)); q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // 30 deg to the right, 1 m out
     EXPECT_FALSE(q.m.chasing()); EXPECT_EQ(q.m.chases_reacquired(), 0); EXPECT_EQ(q.m.chase_n(), 1);
 }
+
+TEST(BearingSeekLoop, TheMemoryHoldsOffAStaticTargetAndTheGazeFollowsTheLostThing) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_memory_ticks"] = int64_t{250}; p["chase_memory_holds"] = true;
+    Rig r(p);
+    for (int k = 0; k < 10; ++k) {                       // the mover walks away along +x, then out of sight
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    ASSERT_EQ(r.m.chases_lost(), 1);
+    EXPECT_TRUE(r.m.memory_live());
+    // a static thing to the left, in view: NOT taken while the memory lives
+    r.step(0, 0, 0, -0.7f, 0.7f, prox_of(0.8));
+    EXPECT_FALSE(r.m.have_target()) << "the block beside the track does not take the mover's place";
+    const double g = r.m.chase_gaze_ego();
+    EXPECT_TRUE(std::isfinite(g)); EXPECT_NEAR(g, 0.0, 0.1) << "the gaze goes where the thing went: straight ahead";
+    for (int i = 0; i < 260; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // the memory expires
+    EXPECT_FALSE(r.m.memory_live());
+    EXPECT_FALSE(std::isfinite(r.m.chase_gaze_ego()));
+    r.step(0, 0, 0, -0.7f, 0.7f, prox_of(0.8));
+    EXPECT_TRUE(r.m.have_target()) << "with nothing moving in mind, the static thing is a target again";
+}

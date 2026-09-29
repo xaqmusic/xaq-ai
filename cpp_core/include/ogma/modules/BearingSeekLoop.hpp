@@ -23,6 +23,7 @@
 // has.  Module absent = byte-identical.
 #pragma once
 
+#include <limits>
 #include <string>
 #include <nlohmann/json.hpp>
 #include "ogma/Module.hpp"
@@ -136,10 +137,24 @@ private:
     // a single mover sighting within chase_gate_m of where it should now be re-acquires the chase at once, no
     // confirmation wait.  Where it went is what the look (--stop-on-lost) turns the head toward.  0 = off.
     int    chase_memory_ticks_ = 0;
-    bool   have_memory_ = false; double mem_x_ = 0.0, mem_y_ = 0.0, mem_vx_ = 0.0, mem_vy_ = 0.0; uint64_t mem_tick_ = 0;
+    // chase_memory_holds (2026-09-29, the operator: "we should definitely be prioritizing the moving objects" -- measured:
+    // in the five seconds after a chase ends a static target is held on 87 % of ticks, the block beside the track): while
+    // the memory of a lost mover lives, no NEW static target is taken; the mover keeps its priority until forgotten.
+    bool   chase_memory_holds_ = false;
+    bool   have_memory_ = false; double mem_x_ = 0.0, mem_y_ = 0.0, mem_vx_ = 0.0, mem_vy_ = 0.0, mem_dt_ = 0.0; uint64_t mem_tick_ = 0;
     double chase_pull_decay_ = 1.0, chase_pull_recover_ticks_ = 3000.0, pull_ = 1.0;
     bool   coasting_ = false; uint64_t coast_from_ = 0;
     int    chases_reacquired_ = 0;
+    // why candidates do not become chases (2026-09-29): replaced (the next sighting missed the prediction by more than the
+    // gate), too fast (implied a speed over chase_v_max), still (chase_min_v failed at confirmation), timed out (forgotten
+    // unconfirmed).  A crossing became a candidate 9 times in 10 and a chase 1 in 4 (sweep 6); these say which gate.
+    int    cand_replaced_ = 0, cand_fast_ = 0, cand_still_ = 0, cand_timeout_ = 0;
+public:
+    int cand_replaced() const { return cand_replaced_; }
+    int cand_fast()     const { return cand_fast_; }
+    int cand_still()    const { return cand_still_; }
+    int cand_timeout()  const { return cand_timeout_; }
+private:
     void   lose(uint64_t tick_id, double c, double s);
 public:
     bool   coasting()          const { return coasting_; }
@@ -150,6 +165,11 @@ public:
     int    chases_lost()    const { return chases_lost_; }
     int    chases_stopped() const { return chases_stopped_; }
     bool   chase_lost_now() const { return lost_now_; }
+    // THE GAZE (2026-09-29, the operator: "the robot should be able to turn its head while it's walking to try to reacquire
+    // the moving target"): the bearing (body frame, + = right) the head should turn to -- the chased or coasted target's,
+    // else the lost mover's extrapolated memory's; NaN when there is nothing moving to look for.
+    double chase_gaze_ego() const;
+    bool   memory_live() const { return have_memory_; }
     double chase_lost_ego() const { return lost_ego_; }
     double chase_lost_range() const { return lost_range_; }
 private:

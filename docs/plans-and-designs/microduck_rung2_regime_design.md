@@ -4848,3 +4848,45 @@ without the eye; preset R98.
 The stack for the eye: **R94 + `--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35` on the identification-only
 brain** (preset "R94 · loaded + the STACK"); the interaction-rich variant with body pitch 0.05 and the recognition
 permanence (R98) are the two arms worth a look beside it.
+
+### 17.65 The campaign, sweep 6: the mover's priority, the follow beyond the start range, the gaze (2026-09-29)
+
+**The operator's eye on the campaign's presets:** "I did see the robot start to pursue the train in some occurrences,
+but then would get distracted by the block that was lying nearby. We should definitely be prioritizing the moving
+objects. … plenty of occasions where the moving train could move across the duck's visual path, but because the
+duck is performing some other tasks, such as walking, it doesn't notice … the robot should be able to turn its head
+while it's walking in order to try to reacquire the moving target."
+
+**Measured first, on the stack's logs.** While a chase is active, seek holds the heading on every tick (1 056 of
+1 056): the arbiter is not where the mover loses. In the five seconds after a chase ends a static target is held on
+87 % of ticks — the block takes the train's place the moment it is lost. And the train crosses the cone (within
+1.5 m and 0.4 rad of the head's look, moving, for a second or more) 22 times in six runs; a candidate follows on
+17–22 of them, a chase on 5. The crossings are noticed; the confirmation is where three in four die.
+
+**Built.** `BearingSeekLoop.chase_memory_holds`: while a lost mover is in mind (R98's five seconds) no new static
+target is taken (R99 = R98 + it). `CloudMap.mover_range_hold` 2.5 m: a mover already published stays a candidate
+beyond the 1.2 m start range when a young, isolated cluster lies within 0.4 m of where it would now be (R100 = R99
++ it). `--chase-gaze GAIN`: on the walk the head yaw target is offset toward the chased target or the lost mover's
+memory (±0.7 rad). Two unit tests; the scorer now reports the post-chase static share and the crossings, candidate
+and chased.
+
+| arm (the stack, loaded brain, 600 s, n = 6) | walls / min | rescues · down % | chases (moving train) | crossings: candidate · chased | after-chase static share |
+|---|---|---|---|---|---|
+| R98 the stack + recognition permanence | 18.4 ± 19.7 | 0.22 · 0.36 | 13 (7) | 21: 17 · 5 | 0.85 |
+| **R99 + the mover's priority** | **10.3 ± 6.8** | **0.12 · 0.22** | 14 (6) | 22: 19 · 6 | 0.86 |
+| R100 + the follow to 2.5 m | = R99 | = | = | = | = |
+| R100 + `--chase-gaze 1.0` | 16.1 ± 12.8 | 0.18 · 0.36 | 10 (3) | 14: 13 · 4 | 0.96 |
+
+- **The mover's priority is the campaign's best walk**: walls 18 → 10 with every seed under 24 (5.6, 6.0, 7.5, 7.4,
+  11.9, 23.3), rescues and falls halved, stops and arrivals up. The swerve to the block was costing walls. The
+  post-chase static share does not fall because most chases end with the train *stopped* (its eight still seconds),
+  and a stopped thing's place is a legitimate target; the priority only bars a new static target after a loss.
+- **The follow beyond 1.2 m changed no decision** (R100 = R99 to the decimal): the train receding past the start
+  range is not how chases end at this speed.
+- **The gaze at gain 1: `NULL` here** — fewer chases, fewer crossings counted (the head follows the train, so each
+  crossing is one long one), objects touched down. A moving cone on the walk may unsettle the cloud the candidate is
+  read from; and the head brain's own loop is written over. Re-use: a smaller gain, or the gaze only while a memory
+  lives, measured with the head-window replay.
+- **The confirmation is the loss.** Sweep 7 turns each of its three knobs alone on R99 — the gate 0.35 → 0.5 m,
+  the motion 0.1 → 0.05 m/s, the wait 0.5 → 0.3 s — with the loop now counting why candidates fail (replaced,
+  too fast, still, timed out).

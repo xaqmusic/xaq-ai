@@ -655,3 +655,33 @@ TEST(CloudMap, ACubeAtTheFootOfAPostIsPartOfIt) {
     EXPECT_EQ(tok->values.size(), ogma::CloudMap::kThing + 1) << "the age dim appended";
     EXPECT_NEAR(tok->values[ogma::CloudMap::kThing], 1.0, 0.05) << "as old as anything here: still";
 }
+
+// mover_range_hold (2026-09-29): a creeping cube followed from 1.0 m stays the candidate as it passes 1.2 m, out to the hold range.
+TEST(CloudMap, AMoverBeingFollowedStaysACandidateBeyondTheStartRange) {
+    ParamMap p = things_params();
+    p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+    p["mover_range"] = 1.2; p["mover_range_hold"] = 2.5;
+    Rig r(p);
+    for (int i = 0; i < 60; ++i) cast_world(r, 0.0, cube());               // the standing cube at 0.85 m (the oldest)
+    int published_far = 0;
+    for (int k = 0; k < 40; ++k) {
+        std::vector<Pt> mover;
+        for (auto q : cube()) { q[0] += 0.10 + 0.02 * k; q[1] += 0.5; mover.push_back(q); }   // from 0.95 m out to 1.75 m, 2 cm a cast
+        cast_world(r, 0.0, cube());
+        cast_world(r, 0.0, mover);
+        if (r.m.mover_index() >= 0 && r.m.mover_clusters()[size_t(r.m.mover_index())].rng > 1.2) ++published_far;
+    }
+    EXPECT_GT(published_far, 10) << "followed out past 1.2 m";
+    Rig q(things_params());
+    ParamMap p2 = things_params(); p2["mover_topic"] = std::string("out.mover"); p2["mover_window_ticks"] = int64_t{25}; p2["mover_age_k"] = 0.3; p2["mover_range"] = 1.2;
+    Rig r2(p2);
+    for (int i = 0; i < 60; ++i) cast_world(r2, 0.0, cube());
+    int far2 = 0;
+    for (int k = 0; k < 40; ++k) {
+        std::vector<Pt> mover;
+        for (auto qq : cube()) { qq[0] += 0.10 + 0.02 * k; qq[1] += 0.5; mover.push_back(qq); }
+        cast_world(r2, 0.0, cube()); cast_world(r2, 0.0, mover);
+        if (r2.m.mover_index() >= 0 && r2.m.mover_clusters()[size_t(r2.m.mover_index())].rng > 1.2) ++far2;
+    }
+    EXPECT_EQ(far2, 0) << "without the hold, nothing past 1.2 m";
+}

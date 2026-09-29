@@ -270,6 +270,12 @@ private:
     std::string mover_topic_;
     int    mover_window_ = 25; double mover_age_k_ = 0.06, mover_range_ = 1.5; bool mover_weighted_ = true;
     double mover_ext_max_ = 0.0;            // candidates no wider than this (m); 0 = any size
+    // mover_range_hold (2026-09-29): a mover already being followed stays a candidate out to this range -- a young,
+    // isolated cluster within mover_hold_gate of where the last published mover would now be (its last position plus
+    // its displacement per update) is published beyond mover_range.  The start of a chase is gated close; its
+    // continuation is not.  0 = off.
+    double mover_range_hold_ = 0.0, mover_hold_gate_ = 0.4;
+    bool   mover_prev_ = false; double mover_px_ = 0.0, mover_py_ = 0.0, mover_dx_ = 0.0, mover_dy_ = 0.0;
     // things_skip_movers (2026-09-28): the things reduction does not ATTEND a cluster whose voxels are young by the
     // mover rule (a passing thing's smear at a stop reads as a small thing, and the seek loop then fixes a place
     // the thing has left -- the operator watched the duck peck at one).  A thing has a place while it is still.

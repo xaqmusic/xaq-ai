@@ -225,6 +225,10 @@ ParamSchema CloudMap::params_schema() const {
          "[0,1] -- so the kind vocabulary can earn a MOVING kind and the outcome loop learn what it answers.  Changes the "
          "descriptor's length; the thing / kind EPMs read it from the token.",
          ParamValue{false}},
+        {"mover_range_hold", ParamMutability::HotMutable,
+         "A mover already being followed stays a candidate out to this range (m): a young, isolated cluster within mover_hold_gate of "
+         "where the last published mover would now be is published beyond mover_range.  0 = off.", ParamValue{0.0}},
+        {"mover_hold_gate", ParamMutability::HotMutable, "...within this (m) of the last mover's predicted position.", ParamValue{0.4}},
         {"mover_ext_max", ParamMutability::HotMutable,
          "Candidates no wider than this footprint (m): a wall base's visible part slides with the view and reads young; "
          "0 = any size (the operator's 'any moving cluster' -- the size gate is a measured retreat, §17.55).",
@@ -269,6 +273,7 @@ ParamMap CloudMap::current_params() const {
     m["mover_topic"] = ParamValue{mover_topic_}; m["mover_window_ticks"] = int64_t(mover_window_);
     m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_; m["mover_ext_max"] = mover_ext_max_;
     m["things_skip_movers"] = things_skip_movers_;
+    m["mover_range_hold"] = mover_range_hold_; m["mover_hold_gate"] = mover_hold_gate_;
     m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
     m["things_isolated"] = things_isolated_; m["things_age_dim"] = things_age_dim_;
     m["walk_reset_m"] = walk_reset_m_;
@@ -313,6 +318,8 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "things_isolated") things_isolated_ = get_d(one, "things_isolated", 0.0) > 0.5;
     else if (k == "things_age_dim") things_age_dim_ = get_d(one, "things_age_dim", 0.0) > 0.5;
     else if (k == "things_skip_movers") things_skip_movers_ = get_d(one, "things_skip_movers", 0.0) > 0.5;
+    else if (k == "mover_range_hold") mover_range_hold_ = get_d(one, "mover_range_hold", mover_range_hold_);
+    else if (k == "mover_hold_gate") mover_hold_gate_ = get_d(one, "mover_hold_gate", mover_hold_gate_);
     else if (k == "mover_ext_max") mover_ext_max_ = get_d(one, "mover_ext_max", mover_ext_max_);
     else if (k == "mover_weighted") mover_weighted_ = get_d(one, "mover_weighted", 1.0) > 0.5;
 }
@@ -359,6 +366,8 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     mover_range_ = get_d(params, "mover_range", mover_range_);
     mover_weighted_ = get_d(params, "mover_weighted", 1.0) > 0.5;
     mover_ext_max_ = get_d(params, "mover_ext_max", mover_ext_max_);
+    mover_range_hold_ = get_d(params, "mover_range_hold", mover_range_hold_);
+    mover_hold_gate_ = get_d(params, "mover_hold_gate", mover_hold_gate_);
     things_skip_movers_ = get_d(params, "things_skip_movers", 0.0) > 0.5;
     iso_height_ = get_d(params, "iso_height", iso_height_);
     iso_radius_ = get_d(params, "iso_radius", iso_radius_);
@@ -370,6 +379,7 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
     vox_.clear();
     vacated_.clear();
+    mover_prev_ = false;
     winner_hist_.clear();
     anchor_yaw_ = anchor_yaw;
     anchor_x_ = ax;
@@ -825,18 +835,28 @@ void CloudMap::update_movers(double yaw, uint64_t tick_id) {
     if (oldest <= 0.0) return;
     const double thr = mover_age_k_ * oldest;
     double best = 1e9;
+    // the last published mover, carried forward by its own displacement (cloud frame)
+    const double hx = mover_px_ + mover_dx_, hy = mover_py_ + mover_dy_;
     for (size_t i = 0; i < recent_.size(); ++i) {
         const Thing& t = recent_[i];
         const double age = mover_weighted_ ? t.age_w : t.age;
         double bx, by, rng; body_rel(t, yaw, bx, by, rng);                // the range from the BODY, not the anchor
-        if (rng > mover_range_ || age >= thr) continue;
+        const bool held = mover_range_hold_ > 0.0 && mover_prev_ && rng <= mover_range_hold_ && std::hypot(t.cx - hx, t.cy - hy) <= mover_hold_gate_;
+        if ((rng > mover_range_ && !held) || age >= thr) continue;
         if (mover_vacated_ > 0 && t.vacated < mover_vacated_) continue;   // no trail, no mover
         if (mover_ext_max_ > 0.0 && t.ext > mover_ext_max_) continue;      // too wide to be a thing
         if (mover_isolated_ && t.tall_near > 0) continue;                  // at the foot of something tall: part of it
         ++mover_cands_;
         if (rng < best) { best = rng; mover_ = int(i); mover_age_s_ = age; mover_oldest_s_ = oldest; }
     }
-    if (mover_ >= 0) mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
+    if (mover_ >= 0) {
+        mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
+        const Thing& m = recent_[size_t(mover_)];
+        if (mover_prev_) { mover_dx_ = m.cx - mover_px_; mover_dy_ = m.cy - mover_py_; } else { mover_dx_ = 0.0; mover_dy_ = 0.0; }
+        mover_px_ = m.cx; mover_py_ = m.cy; mover_prev_ = true;
+    } else {
+        mover_prev_ = false;
+    }
 }
 
 void CloudMap::publish_mover(uint64_t tick_id) {
