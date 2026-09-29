@@ -4993,7 +4993,7 @@ The block at 306 s is not a defect: the seek loop takes no target from a *walkin
 | stops · at a thing | 13.5 · 8.3 → 17.3 · 8.3 | 15.8 · 8.2 → 17.0 · 7.5 |
 | seconds chasing a run | 4 → 5 | 4 → **14** |
 
-Per seed, R99's chases: 5, 9, 9, 8, 7, 9 — every seed. **`WORKING`, loud**: the pursuit tripled and its purity held
+Per seed, R99's chases: 4, 7, 7, 12, 8, 9 (re-acquired 1, 2, 0, 1, 1, 3) — every seed. **`WORKING`, loud**: the pursuit tripled and its purity held
 (47 % of chases at the moving train, the train stopped another 19 %), the memory re-acquires it eight times, the
 loop's own losses turn into 32 looks, and the walk is the walk of §17.65 (walls 11 ± 8, every seed under 23). The
 cost the eye should weigh: seconds chasing a run 4 → 14 and stops ended on a chase 5 → 23 — the duck now breaks
