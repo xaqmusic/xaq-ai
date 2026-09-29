@@ -85,9 +85,16 @@ private:
     // value) only refines a target already held, when its fix lies within walk_refix_m of it; it never sets
     // one.  The approach is then by sight and the arrival is where the thing IS.  0 = walking bearings ignored.
     double walk_refix_m_    = 0.0;
+    // walk_take_range (2026-09-29, the operator: "the robot seems to be ignoring the smaller objects when they are close
+    // by"): a bearing seen from a WALKING cloud may START a target when its fix lies within this range, no target is held
+    // and no lost mover is in mind.  R70/R74 refused walking sightings because they drifted to wall bases and legs -- the
+    // anchor-relative bearing (§17.54), since fixed.  0 = a walking sighting never starts a target (R74's rule).
+    double walk_take_range_ = 0.0;
+    int    walk_takes_ = 0;
     int    refixes_ = 0;
 public:
     int refixes() const { return refixes_; }
+    int walk_takes() const { return walk_takes_; }
     // THE CHASE (the chase phase, stage 1, 2026-09-27): the moving fix.  CloudMap's mover_topic names a cluster whose
     // voxels are young against the cloud's own -- a thing that is not where "things do not move" predicted it
     // (design doc §17.53).  The loop holds such a sighting as a CANDIDATE with a position in the odometry frame;

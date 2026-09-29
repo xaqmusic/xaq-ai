@@ -88,6 +88,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "A bearing flagged as seen from a WALKING cloud (the token's 4th value) refines a held target when its fix lies within this of it, "
             "and never sets a new one; 0 = walking bearings are ignored.  The approach is then by sight.",
             ParamValue{0.0}},
+        {"walk_take_range", ParamMutability::HotMutable,
+            "A bearing seen from a WALKING cloud may start a target when its fix is within this range (m), no target is held and no "
+            "lost mover is in mind.  0 = never (R74's rule, made for a bearing that was wrong).", ParamValue{0.0}},
         {"mover_topic", ParamMutability::ConstructionOnly,
             "THE CHASE: ProprioToken [vx=+right, vy=+forward, proximity, age, oldest] (CloudMap mover_topic) -- a cluster whose voxels are "
             "young against the cloud's own.  Sightings that follow their own prediction become a chased target with a velocity; "
@@ -139,7 +142,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
     m["renew_topic"] = ParamValue{renew_topic_}; m["renew_min"] = ParamValue{double(renew_min_)}; m["renew_range"] = ParamValue{renew_range_};
-    m["walk_refix_m"] = ParamValue{walk_refix_m_};
+    m["walk_refix_m"] = ParamValue{walk_refix_m_}; m["walk_take_range"] = ParamValue{walk_take_range_};
     m["mover_topic"] = ParamValue{mover_topic_}; m["chase_gate_m"] = ParamValue{chase_gate_m_};
     m["chase_confirm"] = ParamValue{int64_t(chase_confirm_)}; m["chase_confirm_ticks"] = ParamValue{int64_t(chase_confirm_ticks_)};
     m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
@@ -167,6 +170,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "renew_min",       [&](auto const& v){ renew_min_     = float(get_double(v,"renew_min")); });
     apply_param(params, "renew_range",     [&](auto const& v){ renew_range_   = get_double(v,"renew_range"); });
     apply_param(params, "walk_refix_m",    [&](auto const& v){ walk_refix_m_  = get_double(v,"walk_refix_m"); });
+    apply_param(params, "walk_take_range", [&](auto const& v){ walk_take_range_ = get_double(v,"walk_take_range"); });
     apply_param(params, "mover_topic",     [&](auto const& v){ mover_topic_   = get_string(v,"mover_topic"); });
     apply_param(params, "chase_gate_m",    [&](auto const& v){ chase_gate_m_  = get_double(v,"chase_gate_m"); });
     apply_param(params, "chase_confirm",   [&](auto const& v){ chase_confirm_ = std::max(1, int(get_double(v,"chase_confirm"))); });
@@ -193,6 +197,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "renew_min")       renew_min_ = float(get_double(value, k));
     else if (k == "renew_range")     renew_range_ = get_double(value, k);
     else if (k == "walk_refix_m")    walk_refix_m_ = get_double(value, k);
+    else if (k == "walk_take_range") walk_take_range_ = get_double(value, k);
     else if (k == "chase_gate_m")    chase_gate_m_ = get_double(value, k);
     else if (k == "chase_confirm")   chase_confirm_ = std::max(1, int(get_double(value, k)));
     else if (k == "chase_confirm_ticks") chase_confirm_ticks_ = std::max(0, int(get_double(value, k)));
@@ -224,15 +229,19 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     // a walking bearing: only a re-fix of a held target within walk_refix_m; otherwise as if unseen
     if (seen_ && walking) {
         bool refix = false;
+        const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
+        const double range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
         if (walk_refix_m_ > 0.0 && have_target_ && have_pose_) {
-            const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
-            const double fwd = vy / n, left = -vx / n, range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
+            const double fwd = vy / n, left = -vx / n;
             const double bx = fwd * range, by = left * range;
             const double fx = px_ + c * bx - s * by, fy = py_ + s * bx + c * by;
             refix = std::hypot(fx - tx_, fy - ty_) <= walk_refix_m_;
             if (refix) ++refixes_;
         }
-        if (!refix) seen_ = false;
+        // the take from the walk: a small thing close by, nothing held, nothing moving in mind
+        const bool take = walk_take_range_ > 0.0 && !have_target_ && !chasing_ && !coasting_ && !have_memory_ && range <= walk_take_range_;
+        if (take) ++walk_takes_;
+        if (!refix && !take) seen_ = false;
     }
     // the renewal: with no target held (the arrival's tick has passed -- the value read 0 for one tick, which
     // is the arrival the outcome loop sees) and nothing in view, a need still open at the thing re-arms it

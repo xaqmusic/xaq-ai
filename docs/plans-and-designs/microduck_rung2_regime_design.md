@@ -4960,3 +4960,42 @@ the campaign's highest (preset "R99 · the MOVER's PRIORITY"). What the operator
   confirmation moves it without buying the room (§17.66–17.67). **The next lever is the substrate's: the age
   gradient across the window's voxels as a single-cast velocity** (§17.67), which would let a crossing be chased
   on its first sighting.
+
+### 17.69 The chase's start had two defects; fixed, the pursuit triples (sweep 10; 2026-09-29, late)
+
+**The operator's eye on R99 seed 6** ("306 s: the robot gains attention of the green block, the attention ring is
+visible, ignores it completely; 522 s: the train in view, again ignores it. Is our attention mechanism regressing?")
+and a per-sighting trace in the record (the chase record's fields 11–13: the miss from the prediction, the implied
+speed, the decision). Two defects, both in the chase's start, both mine:
+
+1. **Duplicate sightings.** `CloudMap` recomputes its clusters every four ticks but publishes the mover bearing every
+   tick (re-aimed for yaw drift). The loop took every token as a sighting: four confirmations per real one, each
+   pulling the velocity estimate half-way to zero, until a crossing train read as *still*. Fixed: the token carries
+   the recompute tick as a sixth value and a sighting is new only when it changes.
+2. **A per-step speed test.** The "too fast" test compared consecutive casts 80 ms apart: a centroid jitter of 8 cm
+   read as 1 m/s, over the 0.6 m/s cap, and the candidate was replaced — the 518 s crossing at half a metre was
+   replaced every half second. Fixed: the speed and the velocity are taken over a ring of the last 0.8 s of
+   sightings (long enough to average the jitter, short enough to see a thing that just stopped).
+
+The block at 306 s is not a defect: the seek loop takes no target from a *walking* sighting (R74's rule, `walk_refix_m`
+0), made for the anchor-relative bearing that §17.54 fixed. R106 measures its removal (sweep 11).
+
+**Seed 6 replayed on the fix:** 1 chase → 9 (3 re-acquired), four at the moving train within 0.5–1.1 m, six lost looks.
+
+**Sweep 10 (n = 6, the base and R99 on the fixed loop, the same seeds as sweeps 6–9):**
+
+| | R94 base, before → fixed | R99, before (§17.65) → fixed |
+|---|---|---|
+| chases in six runs (at the moving train) | 17 (5) → 21 (6) | 14 (6) → **47 (22)** |
+| re-acquired after a loss · lost looks | 0 · 10 → 0 · 16 | 1 · 3 → **8 · 32** |
+| train crossings chased | 5 of 22 → 5 of 17 | 6 of 22 → **14 of 27 (52 %)** |
+| walls / min · rescues / min | 27.2 · 0.62 → 12.0 · 0.15 | 10.3 · 0.12 → 11.3 · 0.17 |
+| stops · at a thing | 13.5 · 8.3 → 17.3 · 8.3 | 15.8 · 8.2 → 17.0 · 7.5 |
+| seconds chasing a run | 4 → 5 | 4 → **14** |
+
+Per seed, R99's chases: 5, 9, 9, 8, 7, 9 — every seed. **`WORKING`, loud**: the pursuit tripled and its purity held
+(47 % of chases at the moving train, the train stopped another 19 %), the memory re-acquires it eight times, the
+loop's own losses turn into 32 looks, and the walk is the walk of §17.65 (walls 11 ± 8, every seed under 23). The
+cost the eye should weigh: seconds chasing a run 4 → 14 and stops ended on a chase 5 → 23 — the duck now breaks
+off a look to follow the train, which is what was asked. The base also gains (the fix is in the loop both share),
+and the priority's lead over it widens from 14/17 to 47/21.

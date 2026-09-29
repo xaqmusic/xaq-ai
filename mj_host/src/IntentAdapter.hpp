@@ -186,6 +186,7 @@ public:
     int    mover_cands()   const;
     double chase_gaze_ego() const;
     std::array<int, 4> chase_cand_fates() const;   // replaced, too fast, still, timed out
+    int    walk_takes() const;                     // targets started from a walking sighting (walk_take_range)
     std::array<double, 3> chase_last_judgement() const;   // miss (m), implied speed (m/s), decision code    // the bearing the head should turn to (rad, + = right), NaN when nothing moving is in mind
     bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
     int    chases_reacquired() const;

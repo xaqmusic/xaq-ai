@@ -2774,8 +2774,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
         if (chase_on) { const auto cf = brain.chase_cand_fates();
-            std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out\n",
-                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3]); }
+            std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d\n",
+                         brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes()); }
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);

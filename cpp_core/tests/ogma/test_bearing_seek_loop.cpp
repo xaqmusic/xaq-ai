@@ -439,3 +439,18 @@ TEST(BearingSeekLoop, RepeatedTokensAreOneSightingAndAJitteryCrossingIsChased) {
     EXPECT_NEAR(r.m.chase_vy(), -0.2, 0.08) << "moving to the right (body y is left): -0.2 m/s in y";
     EXPECT_LE(r.m.chase_n(), 12) << "at most one sighting per recompute";
 }
+
+TEST(BearingSeekLoop, AWalkingSightingCloseByStartsATargetWhenNothingIsHeld) {
+    ogma::ParamMap p; p["walk_take_range"] = 1.0;
+    Rig r(p);
+    r.step(0, 0, 0, 0.0f, 1.0f, 1.0f - 0.8f / 2.5f, true);   // a thing 0.8 m ahead, seen from a WALKING cloud
+    EXPECT_TRUE(r.m.have_target()) << "taken from the walk";
+    EXPECT_NEAR(r.m.target_x(), 0.8, 0.02);
+    EXPECT_EQ(r.m.walk_takes(), 1);
+    Rig far(p);
+    far.step(0, 0, 0, 0.0f, 1.0f, 1.0f - 1.6f / 2.5f, true);   // 1.6 m: beyond the take range
+    EXPECT_FALSE(far.m.have_target());
+    Rig off;                                                     // walk_take_range 0: R74's rule
+    off.step(0, 0, 0, 0.0f, 1.0f, 1.0f - 0.8f / 2.5f, true);
+    EXPECT_FALSE(off.m.have_target());
+}
