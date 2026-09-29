@@ -4890,3 +4890,25 @@ and chased.
 - **The confirmation is the loss.** Sweep 7 turns each of its three knobs alone on R99 — the gate 0.35 → 0.5 m,
   the motion 0.1 → 0.05 m/s, the wait 0.5 → 0.3 s — with the loop now counting why candidates fail (replaced,
   too fast, still, timed out).
+
+### 17.66 The campaign, sweep 7: the confirmation's three knobs, and why candidates fail (2026-09-29)
+
+The loop now counts why a candidate was not chased. On R99, six runs: **replaced 0, too fast 0, still 240, timed out
+161.** No candidate ever missed the gate or implied too high a speed — so the gate at 0.5 m (R101) is R99's run to
+the decimal. Candidates fail the motion test (their displacement per second watched under 0.1 m/s at confirmation)
+or get no second sighting within a second.
+
+| arm (R99 + one knob, 600 s, n = 6) | walls / min | rescues · down % | chases (moving train) | still · timed out |
+|---|---|---|---|---|
+| R99 | 10.3 ± 6.8 | 0.12 · 0.22 | 14 (6, 43 %) | 240 · 161 |
+| R101 gate 0.5 m | = R99 | = | = | = |
+| R102 motion 0.05 m/s | 12.8 ± 5.0 | 0.23 · 0.60 | 18 (6, 33 %) | 176 · 169 |
+| R103 wait 0.3 s | 21.7 ± 18.0 | 0.15 · 0.27 | 12 (4, 33 %) | 586 · 159 |
+
+- **The motion test is doing its work**: relaxing it (R102) admits four more chases, none of them the train, and
+  costs walls and rescues; shortening the wait (R103) makes it fail more (586) and the walls double. The still
+  candidates are mostly the static room, rightly refused.
+- **Where the train is lost:** its displacement over the 0.5 s watch is 0.1 m — the threshold itself — and the
+  window centroid jitters by that much, so the train passes the test about half the time. The remedy is not less
+  motion but a longer watch: over a second the train travels 0.2 m and the jitter does not grow. Sweep 8: R104
+  `chase_confirm_ticks 50`, and R105 the same with the motion at 0.08 m/s.
