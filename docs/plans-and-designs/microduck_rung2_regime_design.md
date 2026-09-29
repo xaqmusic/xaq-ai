@@ -4912,3 +4912,23 @@ or get no second sighting within a second.
   window centroid jitters by that much, so the train passes the test about half the time. The remedy is not less
   motion but a longer watch: over a second the train travels 0.2 m and the jitter does not grow. Sweep 8: R104
   `chase_confirm_ticks 50`, and R105 the same with the motion at 0.08 m/s.
+
+### 17.67 The campaign, sweep 8: the longer watch (2026-09-29)
+
+| arm (R99 + the watch, 600 s, n = 6) | walls / min | rescues · down % | chases (moving train) | still · timed out |
+|---|---|---|---|---|
+| R99, the watch at 0.5 s | 10.3 ± 6.8 | 0.12 · 0.22 | 14 (6) | 240 · 161 |
+| R104, the watch at 1 s | 14.5 ± 9.7 | 0.15 · 0.35 | **3 (0)** | 38 · 159 |
+| R105, at 1 s with the motion at 0.08 m/s | 14.5 ± 9.6 | 0.18 · 0.42 | 2 (0) | 32 · 141 |
+
+**`REGRESSION`.** A candidate that must be sighted for a full second before it is chased is almost never chased: the
+train's sightings on a crossing come and go with the candidate gate's own flicker (isolation, the 1.2 m start
+range, the window's clusters splitting and merging), and the confirmation is only evaluated when a sighting
+arrives. The 0.5 s watch with the motion at 0.1 m/s stands. **The standing limit of the pursuit is now measured
+from both sides:** a crossing becomes a candidate nine times in ten and a chase one in four; the loss is the motion
+test on a displacement (0.1 m in 0.5 s) that sits at the centroid's own jitter, and neither a looser test (R102)
+nor a longer look (R104) buys the train without buying the room or losing the candidate. **Re-use, the substrate
+form:** the smear itself carries the velocity — the window's voxels are fresh at the leading edge and older at
+the trail, so the vector from the oldest voxels' centroid to the freshest voxels' centroid over their age
+difference is a single-cast velocity with no tracker and no wait; a static cluster's age gradient is random. That
+is the next lever for the chase's start, and it is the cloud's to compute.
