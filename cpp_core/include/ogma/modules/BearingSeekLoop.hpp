@@ -131,6 +131,12 @@ private:
     // recovers by 1/chase_pull_recover_ticks per tick; the need while chasing is the pull.  A thing that keeps getting
     // away loses its hold, the way a known kind does.  1 = no decay.
     int    chase_permanence_ticks_ = 0;
+    // PERMANENCE IN RECOGNITION (2026-09-29, after coasting regressed -- §17.61): chase_memory_ticks -- a lost mover is
+    // kept in mind (its last predicted position and velocity, extrapolated) for this long WITHOUT driving the walk;
+    // a single mover sighting within chase_gate_m of where it should now be re-acquires the chase at once, no
+    // confirmation wait.  Where it went is what the look (--stop-on-lost) turns the head toward.  0 = off.
+    int    chase_memory_ticks_ = 0;
+    bool   have_memory_ = false; double mem_x_ = 0.0, mem_y_ = 0.0, mem_vx_ = 0.0, mem_vy_ = 0.0; uint64_t mem_tick_ = 0;
     double chase_pull_decay_ = 1.0, chase_pull_recover_ticks_ = 3000.0, pull_ = 1.0;
     bool   coasting_ = false; uint64_t coast_from_ = 0;
     int    chases_reacquired_ = 0;

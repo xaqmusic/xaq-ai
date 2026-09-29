@@ -113,6 +113,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "OBJECT PERMANENCE: when a chased thing's sightings stop, its predicted position keeps moving at the last velocity for up "
             "to this many ticks (the need falling 1 -> 0), a sighting near the prediction resumes the chase, and the loss is reported "
             "at the end.  0 = the loss at once.", ParamValue{int64_t{0}}},
+        {"chase_memory_ticks", ParamMutability::HotMutable,
+            "PERMANENCE IN RECOGNITION: a lost mover is kept in mind (position and velocity, extrapolated) for this many ticks without "
+            "driving the walk; one mover sighting within chase_gate_m of where it should now be re-acquires the chase at once.  0 = off.",
+            ParamValue{int64_t{0}}},
         {"chase_pull_decay", ParamMutability::HotMutable,
             "Every loss multiplies the chase's pull (its need while chasing) by this; 1 = no decay.", ParamValue{1.0}},
         {"chase_pull_recover_ticks", ParamMutability::HotMutable,
@@ -136,7 +140,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_confirm"] = ParamValue{int64_t(chase_confirm_)}; m["chase_confirm_ticks"] = ParamValue{int64_t(chase_confirm_ticks_)};
     m["chase_forget_ticks"] = ParamValue{int64_t(chase_forget_ticks_)}; m["chase_lead_s"] = ParamValue{chase_lead_s_};
     m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_}; m["chase_stop_v"] = ParamValue{chase_stop_v_};
-    m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
+    m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
     m["chase_pull_recover_ticks"] = ParamValue{chase_pull_recover_ticks_};
     return m;
 }
@@ -168,6 +172,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_min_v",     [&](auto const& v){ chase_min_v_   = get_double(v,"chase_min_v"); });
     apply_param(params, "chase_stop_v",    [&](auto const& v){ chase_stop_v_  = get_double(v,"chase_stop_v"); });
     apply_param(params, "chase_permanence_ticks", [&](auto const& v){ chase_permanence_ticks_ = std::max(0, int(get_double(v,"chase_permanence_ticks"))); });
+    apply_param(params, "chase_memory_ticks", [&](auto const& v){ chase_memory_ticks_ = std::max(0, int(get_double(v,"chase_memory_ticks"))); });
     apply_param(params, "chase_pull_decay", [&](auto const& v){ chase_pull_decay_ = std::clamp(get_double(v,"chase_pull_decay"), 0.0, 1.0); });
     apply_param(params, "chase_pull_recover_ticks", [&](auto const& v){ chase_pull_recover_ticks_ = std::max(1.0, get_double(v,"chase_pull_recover_ticks")); });
 }
@@ -191,6 +196,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_min_v")     chase_min_v_ = get_double(value, k);
     else if (k == "chase_stop_v")    chase_stop_v_ = get_double(value, k);
     else if (k == "chase_permanence_ticks") chase_permanence_ticks_ = std::max(0, int(get_double(value, k)));
+    else if (k == "chase_memory_ticks") chase_memory_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_pull_decay") chase_pull_decay_ = std::clamp(get_double(value, k), 0.0, 1.0);
     else if (k == "chase_pull_recover_ticks") chase_pull_recover_ticks_ = std::max(1.0, get_double(value, k));
     else throw std::invalid_argument("BearingSeekLoop: param '" + k + "' is construction-only / unknown");
@@ -328,6 +334,15 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
         } else if (!have_cand_) {
             have_cand_ = true;
             cand_x_ = cand_x0_ = fx; cand_y_ = cand_y0_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+            // the memory of a lost mover: a sighting where it should now be is the same thing, back in view
+            if (have_memory_ && tick_id > mem_tick_ && tick_id - mem_tick_ <= uint64_t(chase_memory_ticks_)) {
+                const double dt = double(tick_id - mem_tick_) / 50.0;
+                if (std::hypot(fx - (mem_x_ + mem_vx_ * dt), fy - (mem_y_ + mem_vy_ * dt)) <= chase_gate_m_) {
+                    cand_vx_ = mem_vx_; cand_vy_ = mem_vy_; cand_n_ = chase_confirm_;
+                    cand_first_ = tick_id >= uint64_t(chase_confirm_ticks_) ? tick_id - uint64_t(chase_confirm_ticks_) : 0;
+                    chasing_ = true; ++chases_; ++chases_reacquired_; have_memory_ = false;
+                }
+            }
         }
         if (!chasing_ && cand_n_ >= chase_confirm_ && tick_id - cand_first_ >= uint64_t(chase_confirm_ticks_)) {
             bool moved = true;
@@ -372,6 +387,7 @@ void BearingSeekLoop::lose(uint64_t tick_id, double c, double s) {
     lost_ego_ = std::atan2(-by, bx); lost_range_ = std::hypot(bx, by); lost_now_ = true;
     have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++chases_lost_;
     pull_ *= chase_pull_decay_;
+    if (chase_memory_ticks_ > 0) { have_memory_ = true; mem_x_ = lx; mem_y_ = ly; mem_vx_ = cand_vx_; mem_vy_ = cand_vy_; mem_tick_ = tick_id; }
     chasing_ = false; coasting_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
 }
 

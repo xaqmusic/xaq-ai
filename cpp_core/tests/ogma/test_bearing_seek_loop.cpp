@@ -363,3 +363,32 @@ TEST(BearingSeekLoop, ThePullDecaysWithEachLossAndRecovers) {
     for (int i = 0; i < 2000; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
     EXPECT_GT(r.m.pull(), 0.99) << "recovered";
 }
+
+TEST(BearingSeekLoop, ALostMoverSeenWhereItShouldBeIsReacquiredAtOnce) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_memory_ticks"] = int64_t{250};
+    Rig r(p);
+    for (int k = 0; k < 10; ++k) {                       // walking away along +x at 0.2 m/s, then out of sight
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    ASSERT_EQ(r.m.chases_lost(), 1);
+    EXPECT_FALSE(r.m.have_target()) << "the memory does not drive the walk";
+    for (int i = 0; i < 100; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // two more seconds pass
+    // it reappears where it should be: 1.0 + 0.2 x (36 + 60 + 100 + 1) / 50 s along
+    const double where = 1.0 + 0.2 * (36.0 + 61.0 + 100.0) / 50.0;
+    r.mover(0.0f, 1.0f, prox_of(where)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(r.m.chasing()) << "one sighting where it should be: the chase resumes at once";
+    EXPECT_EQ(r.m.chases_reacquired(), 1);
+    EXPECT_NEAR(r.m.chase_vx(), 0.2, 0.05) << "with the remembered velocity";
+    // a sighting far from where it should be is a new candidate, not the memory
+    Rig q(p);
+    for (int k = 0; k < 10; ++k) {
+        q.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    for (int i = 0; i < 160; ++i) q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    q.mover(0.5f, 0.866f, prox_of(1.0)); q.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // 30 deg to the right, 1 m out
+    EXPECT_FALSE(q.m.chasing()); EXPECT_EQ(q.m.chases_reacquired(), 0); EXPECT_EQ(q.m.chase_n(), 1);
+}
