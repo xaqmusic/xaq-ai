@@ -4786,3 +4786,29 @@ The two keepers together on the base's seeds, plus the pursuit at the walker's t
 
 **The stack goes to a confirmation on twelve seeds the signal never used (7–18), 600 s, against the base:
 n = 18 paired in all (§17.63).**
+
+### 17.63 The campaign, sweep 4: the stack confirmed on twelve seeds it never saw (2026-09-29)
+
+The stack (`--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35` on R94, the identification-only brain, 600 s)
+against the base on seeds 7–18, paired; then pooled with sweeps 2–3's seeds 1–6: **n = 18**.
+
+| | base, seeds 7–18 | stack, seeds 7–18 | base, n = 18 | stack, n = 18 |
+|---|---|---|---|---|
+| walls / min, mean ± sd | 45.0 ± 46.7 | 23.1 ± 16.2 | 39.0 ± 39.4 | **21.6 ± 16.4** |
+| walls / min, median · worst seed | 18.4 · 127 | 21.1 · 50 | 22.5 · 127 | 18.2 · **56** |
+| seeds over 60 walls a minute (a wall ridden for minutes) | 5 | 0 | **6** | **0** |
+| rescues / min | 0.26 | 0.27 | 0.38 | 0.24 |
+| stops · at a thing · arrivals (a run) | 15.0 · 7.1 · 8.3 | 17.0 · 9.2 · 9.5 | | |
+| chases (moving train), twelve runs | 26 (6, 23 %) | 23 (8, 35 %) | | |
+| skills · answers observed, twelve runs | 54 · 27 | 64 · 30 | | |
+| stand % · walk m/s | 20 · 0.165 | 28 · 0.177 | | |
+
+**Verdict: the stack is `WORKING` on what the operator asked for first — not being stuck against walls — and a
+signal on the rest.** The tail is the finding: six of eighteen base runs ride a wall for minutes (60–127 episodes a
+minute); no stack run does, the worst at 56 and the spread halved. The median ties (a run that never traps is the
+same run either way; the stack is better on 12 of 18). Rescues 0.38 → 0.24 pooled, a tie on seeds 7–18 where the
+base fell little. The pursuit: the moving train a third of chases on both seed sets against a quarter and a fifth,
+objects touched, stops at things, skills and answers all up, the walk 7 % faster, more standing (the stuck stop's
+looks). Not promoted without the eye — preset "R94 · loaded + the STACK". What the stack does not do: the trap is
+shortened and moved, not prevented (a run at 50 walls a minute remains), and the chase count is unchanged at two a
+run in ten minutes — the pursuit is purer, not more frequent.
