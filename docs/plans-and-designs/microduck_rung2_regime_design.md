@@ -5246,3 +5246,42 @@ The mechanism was a weakened slice again (§3.2 item 6): a hold on the heading t
 arrival happens. **The pair** the things phase built for the last metre is the seek gate (`--seek-gate`, T2: while
 seek holds the reference its target's ToF sector reads free to the walker's sense) — extended now to the reflex's
 release (the same sector is free for `near`; off = byte-identical). Measured in §17.77 (sweeps 21–22).
+
+### 17.77 Sweeps 21–22: the reflex with the seek gate — the walk goes where the loops point, and brushes the walls (2026-09-29, night)
+
+R108 + `--heading-reflex 1.0 0.3 1.0 --seek-gate` (the seek target's ToF sector free for the walker's sense AND for
+the reflex's release) on seeds 1–6 (sweep 21) and 7–18 (sweep 22), against R108's runs and the reflex alone (§17.76).
+
+| n = 18 | R108 | + reflex | **+ reflex + seek gate** |
+|---|---|---|---|
+| walls / min, mean ± sd · median · max | 19.2 ± 27.2 · 11.8 · 124 | 28.5 ± 34.0 · 17.1 · 153 | 29.8 ± 14.0 · 29.6 · **62** (higher on 15 of 18) |
+| seconds a run touching a wall (1–6) | 7 | 16 | 15 |
+| stuck stops · rescues / min | 36 · 0.24 | 28 · — | **26** · 0.19 |
+| closing · tangential · opening (target held, walking) | 32 · 40 · 27 % | 32 · 47 · 21 % | **40 · 42 · 19 %** |
+| seek holds the heading · closing under it | 54 % · 38 % | 60 % · 39 % | **65 % · 46 %** |
+| heading error while seek steers, median | 1.2 rad | 0.7 | **0.5** |
+| arrival stops a run | 5.4 | 6.3 | **8.3** |
+| attended on the walk nearer than the held target, not taken | 7.0 a run | 4.5 | 5.6 |
+| near-misses a run | 2.9 | 3.5 | 3.2 |
+| chases (moving train, share) | 93 (27, 29 %) | — | 81 (27, 33 %) |
+
+- **The walk closes.** With the target's sector free the reflex is no longer released at the thing: closing 32 → 40 %
+  over the whole walk and 38 → 46 % under seek, the heading error a third of the control's, arrivals half again as
+  many, the corner trap gone from the tail (the worst run 62 a minute against 124 and 153; stuck stops 36 → 26).
+  The chase keeps its size and gains purity (33 % at the moving train).
+- **The walls are brushed, not ridden.** The mean doubles but the spread halves: every seed between 7 and 62, the
+  median 12 → 30, fifteen seconds a run in contact. Where: 73 % of the walking wall episodes come with seek holding
+  the heading (the control: 44 %), the seek target a median 0.39 m from the nearest wall and 0.45 m away — the
+  walk now reaches the things that stand by the walls (the ball in the corner) and the body, arriving within
+  0.15 m of them, touches the wall beside them; and only 20 % of the episodes have a small thing within 0.6 m of
+  the body (the control 47 %), so most are en route — a body that follows its reference straight, through the
+  brushes the control's wandering avoided.
+
+**Verdict, n = 18.** `PARTIAL`, and the arm for the eye on the operator's own criterion (a thing of interest is
+walked to, not past): preset **"R108 · + the heading reflex + the SEEK GATE"**. The wall metric now counts
+something different from the campaign's traps — brushing beside things and en route — and whether that is a cost
+is the eye's call. Two levers follow from the where: (1) a seek target within a body length of tall structure
+yields as the chase does (`percept.target_tall` is already published for the held target; a static-target yield
+is one parameter away), which drops the things by the walls and the wall brushes with them; (2) the arrival
+radius measured from the thing's near edge, so the body stops short of the thing and of what stands behind it.
+The nearer attended thing replacing a held target (5.6 episodes a run) is the third.

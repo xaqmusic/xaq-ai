@@ -334,6 +334,13 @@ released within a metre of the thing (a ToF hit inside its gate), so the last me
 back (19 → 28 a minute). `NULL` on the closing, `REGRESSION` on the walls. Next: the seek gate covering the
 reflex's release (§17.77). Instrument: `mj_host/tools/walk_closing.py`.
 
+**The reflex with the seek gate (§17.77, n = 18):** the walk goes where the loops point — closing 32 → 40 %, the
+heading error 1.2 → 0.5 rad, arrivals 5.4 → 8.3 a run, stuck stops 36 → 26, no run past 62 walls a minute — and
+brushes the walls beside the things it now reaches and en route (median 12 → 30 a minute, 15 s a run in contact).
+`PARTIAL`; the arm for the eye on the operator's criterion: preset "R108 · + the heading reflex + the SEEK GATE".
+Next levers: a static target that yields near tall structure (one parameter on the published count), the arrival
+radius from the thing's edge, the nearer attended thing replacing a held target.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
