@@ -5457,3 +5457,28 @@ eighteen in a trap the walk's floor sets — the body pushing at a surface its T
 does not move. The floor is a sensor's: a return at contact that the walker and the stuck detector can act on —
 the rewrite rule's second step, not a smarter policy. That is the next lever, and the one the camera boundary
 should carry.
+
+### 17.84 The contact consumers (2026-09-29, night): the ToF's near field is the contact sense
+
+**The finding behind it.** In both of §17.83's traps the ToF summary's fourth slot — the share of zones classed
+too-close, a horizontal range under `kMinRangeM` (0.10 m) — reads 1.0 for the whole burst, every one of the 64
+zones, while the three range slots read 0.0: a too-close zone is not a hit with a range, so every consumer that
+asks "is something ahead" of the range slots is blind exactly at contact. The sensor sees the wall. The walker's
+sense carries the share as slot 15 (the restored identification never learned it: the babble did not push into
+walls); the reflex's release, the free-space gate and the stuck detector take the maximum of the three range slots
+and see nothing. The real part reports the same thing (the VL53L5CX's per-zone status under its minimum range), so
+the channel exists on Pollen's hardware unchanged. Three consumers, one guarded lever each, on the arm R112 (the
+progress forget on the reflex and seek gate), in the operator's order:
+
+1. `--stuck-contact T` — a forward push with the too-close share above T is a stall, no adaptive bar;
+2. `--contact-release` — the reflex's release and the free-space gate take the share as proximity;
+3. `--contact-cloud` — too-close zones are filed in the cloud as occupied at the body's edge.
+
+**Lever 1, first form (sweeps 39–40: push + contact for a second).** Seeds 1–6: walls 17.8 → 26.9 (seed 6: 70),
+arrivals 14.5 → 9.5, chases 25 → 16, closing 55 → 49 %; seeds 7–18: walls 38.4 → 40.0, the traps gone — the
+longest burst 77 → 11 s, bursts of 5 s or more 0.8 → 0.4 a run, contact time 33 → 22 s a run, closing 48 → 55 %,
+arrivals 14.9 → 12.3, chases 59 → 36. It fired 387 times in eighteen runs (21 a run), 20 of seed set 1–6's 22
+stuck stops at a wall and none at a thing — but on brushes the body was still sliding past, with the escape's
+six seconds paid each time: two minutes a run of escaping, and the pursuit and the arrivals paid for it. The rule
+lacked the stall half of its own definition. **Refined**: push, contact, and no forward motion (the sensed forward
+speed under a quarter of range, the stall test's own term). Measured as sweeps 45–46, then levers 2 and 3 on top.

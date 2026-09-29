@@ -161,13 +161,20 @@ public:
     // --stuck-cmd F (2026-09-29): the forward command that counts as pushing, as a fraction of range (0.75 = the original;
     // in the eye's arm's long wall bursts the command sits at half range with the body not moving at all)
     void set_stuck_cmd(double f) { stuck_cmd_frac_ = f; }
+    // THE CONTACT CONSUMERS (2026-09-29, §17.84): the ToF's near-field class -- zones under its 10 cm minimum, the
+    // summary's fourth slot -- reads 1.0 at a wall the three range slots read as empty.  (1) --stuck-contact T: a
+    // forward push with the too-close share above T is a stall by definition, no adaptive bar; (2) --contact-release:
+    // the reflex's release and the free-space gate take the too-close share as proximity too.  Off = byte-identical.
+    void set_stuck_contact(double t) { stuck_contact_ = t; }
+    void set_contact_release(bool on) { contact_release_ = on; }
     // PROGRESS, not speed (2026-09-19, `--stuck-progress`): a stall is then "commanded forward and making no
     // progress toward the reference" -- the body's velocity along the reference's direction, in the body
     // frame, under 0.25 of range -- so a body sliding along a surface at walking speed with its reference into
     // the surface is as stuck as one pushing.  The reference's direction in the body frame is (cos e, -sin e)
     // with e = heading - reference and +y left.
     void set_stuck_progress(bool on) { stuck_progress_ = on; }
-    bool stuck_now() const { return stuck_now_; }       // this tick: a stall crossed K x the running median
+    bool stuck_now() const { return stuck_now_; }
+    int  contact_stucks() const { return contact_stucks_; }   // stalls fired by contact (--stuck-contact)       // this tick: a stall crossed K x the running median
     double stall_s() const { return stall_run_ / 50.0; }
     double stall_median_s() const { return stall_med_ / 50.0; }
     int  seek_gated() const { return seek_gated_; }   // ticks the gate zeroed a slot
@@ -317,7 +324,7 @@ private:
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
-    double stuck_k_ = 0.0; double stuck_cmd_frac_ = 0.75; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false; bool stuck_progress_ = false;
+    double stuck_k_ = 0.0; double stuck_cmd_frac_ = 0.75; double stuck_contact_ = 0.0; int contact_run_ = 0; bool contact_fired_ = false; bool contact_release_ = false; int contact_stucks_ = 0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false; bool stuck_progress_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int skill_request_ = -1; uint64_t skill_request_tick_ = 0;

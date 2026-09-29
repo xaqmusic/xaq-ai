@@ -256,7 +256,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         --ref_hold_left_; heading_ref_ = ref_hold_; ++play_steers_; last_steer_ = 4; bearing_topic = nullptr;
         // the escape over: the stuck detector re-arms (sweep 32, seed 14: one escape failed and the stall ran 90 s
         // without a second, since the detector re-armed only on a tick that was not stalled)
-        if (ref_hold_left_ == 0) { stuck_fired_ = false; stall_run_ = 0; }
+        if (ref_hold_left_ == 0) { stuck_fired_ = false; stall_run_ = 0; contact_fired_ = false; contact_run_ = 0; }
     }
     if (bearing_topic)
     if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(bearing_topic))) {
@@ -271,6 +271,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                 // the seek gate covers this check too (2026-09-29): the thing walked to is a hit in its own sector
                 const bool own = seek_gate_ && steer_code == 3 && seek_present_;
                 if (!own && std::fabs(ego) < 1.2 && double(tof[size_t(slot)]) > ref_free_) blocked = true;
+                if (contact_release_ && double(tof[3]) > ref_free_) blocked = true;
             }
             if (blocked) { heading_ref_ = heading_; won(); ++ref_released_; }
             else if (cx * cx + cy * cy > 1e-6) {
@@ -317,6 +318,14 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             const double progress = (vel_body[0] * std::cos(e) - vel_body[1] * std::sin(e)) / kTwistRangeVx;
             stalled = last_twist_[0] / kTwistRangeVx > stuck_cmd_frac_ && progress < 0.25;
         }
+        // the contact stall: pushing forward into the ToF's near field (the too-close share above the gate) for a second
+        if (stuck_contact_ > 0.0) {
+            // pushing, in contact, and not moving (sweeps 39-40: without the third term it fired on every brush along a
+            // wall the body was still sliding past, 21 times a run, and each firing cost a six-second escape)
+            const bool pushing = last_twist_[0] / kTwistRangeVx > 0.4 && double(tof[3]) > stuck_contact_ && last_sensed_[0] < 0.25f;
+            if (pushing) { ++contact_run_; if (!contact_fired_ && contact_run_ >= 50) { stuck_now_ = true; contact_fired_ = true; ++contact_stucks_; } }
+            else { contact_run_ = 0; contact_fired_ = false; }
+        }
         if (stalled) {
             ++stall_run_;
             if (!stuck_fired_ && double(stall_run_) > stuck_k_ * stall_med_ && stall_run_ >= 50) { stuck_now_ = true; stuck_fired_ = true; }
@@ -342,7 +351,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)
         std::array<float, 4> tof_r = tof;
         if (seek_gate_ && last_steer_ == 3) { const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1); tof_r[size_t(slot)] = 0.0f; }
-        const double near = std::max({double(tof_r[0]), double(tof_r[1]), double(tof_r[2])});
+        double near = std::max({double(tof_r[0]), double(tof_r[1]), double(tof_r[2])});
+        if (contact_release_) near = std::max(near, double(tof[3]));   // contact: the reflex lets go
         hr_share_ = std::clamp(1.0 - near / std::max(1e-6, hr_gate_), 0.0, 1.0);
         last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
     }

@@ -1298,6 +1298,8 @@ std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
+double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
+bool g_contact_release = false, g_contact_cloud = false;   // --contact-release, --contact-cloud (§17.84)
 double g_stuck_cmd = 0.75;   // --stuck-cmd F: the forward command that counts as pushing (fraction of range) for the stuck stop
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
 bool g_stuck_progress = false;   // --stuck-progress (2026-09-19): the stall is no progress toward the reference, not low forward speed
@@ -1536,6 +1538,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
+    if (g_stuck_contact > 0.0) { brain.set_stuck_contact(g_stuck_contact); std::fprintf(stderr, "  stuck on contact: a forward push with the ToF's too-close share above %.2f for a second is a stall\n", g_stuck_contact); }
+    if (g_contact_release) { brain.set_contact_release(true); std::fprintf(stderr, "  contact release: the heading reflex and the free-space gate take the ToF's too-close share as proximity\n"); }
+    if (g_contact_cloud) std::fprintf(stderr, "  contact cloud: the ToF's too-close zones are filed in the cloud as occupied at the body's edge\n");
     if (g_stuck_cmd != 0.75) { brain.set_stuck_cmd(g_stuck_cmd); std::fprintf(stderr, "  stuck command: a forward command above %.2f of range with no forward speed counts as a stall\n", g_stuck_cmd); }
     if (g_stop.on_stuck > 0.0) { brain.set_stuck(g_stop.on_stuck); std::fprintf(stderr, "  stop on stuck: a stop starts when a forward stall exceeds %.1f x the body's own median stall length\n", g_stop.on_stuck); }
     if (!g_skill_on_arrive.empty()) std::fprintf(stderr, "  skill on arrive: %s (Pollen's network, a window at standing tuning with a zero command) fired from standing at the arrival stop's hand-back\n", g_skill_on_arrive.c_str());
@@ -2500,7 +2505,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     place.tof_points[4] = float(p[1]);      // two visits to one place up
                     const auto& zz = tof.zones();
                     for (int i = 0; i < Tof::kZones; ++i) {
-                        const bool ok = zz[size_t(i)].cls == TofZone::Hit || zz[size_t(i)].cls == TofZone::Floor;
+                        const bool ok = zz[size_t(i)].cls == TofZone::Hit || zz[size_t(i)].cls == TofZone::Floor
+                                     || (g_contact_cloud && zz[size_t(i)].cls == TofZone::TooClose);
                         place.tof_points[size_t(5 + 3 * i + 0)] = ok ? float(zz[size_t(i)].point_level[0]) : std::numeric_limits<float>::quiet_NaN();
                         place.tof_points[size_t(5 + 3 * i + 1)] = ok ? float(zz[size_t(i)].point_level[1]) : std::numeric_limits<float>::quiet_NaN();
                         place.tof_points[size_t(5 + 3 * i + 2)] = ok ? float(zz[size_t(i)].point_level[2] + p[2]) : std::numeric_limits<float>::quiet_NaN();
@@ -2778,7 +2784,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (chase_on) { const auto cf = brain.chase_cand_fates();
             std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d; chases yielded near tall structure: %d, sightings dropped at a yielded place: %d; static targets yielded near tall structure: %d, sightings dropped there: %d; targets forgotten for no progress: %d\n",
                          brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets()); }
-        if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
+        if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes; %d stalls fired by contact\n",
+                     stops_stuck, stops_started, g_stop.on_stuck, escapes, brain.contact_stucks());
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
         if (g_approach_reach > 0.0) std::fprintf(stderr, "  approach: %d steps onto a thing before a kick or a peck\n", approaches);
@@ -3094,6 +3101,12 @@ int main(int argc, char** argv) {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {
             g_stop.gaze_at_thing = true;
+        } else if (a == "--stuck-contact") {
+            g_stuck_contact = std::stod(next("--stuck-contact"));
+        } else if (a == "--contact-release") {
+            g_contact_release = true;
+        } else if (a == "--contact-cloud") {
+            g_contact_cloud = true;
         } else if (a == "--stuck-cmd") {
             g_stuck_cmd = std::stod(next("--stuck-cmd"));
         } else if (a == "--stop-on-stuck") {
