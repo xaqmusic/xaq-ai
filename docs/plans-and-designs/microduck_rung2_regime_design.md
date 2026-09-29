@@ -4728,3 +4728,38 @@ The loaded brain walks from the first second (vx 0.22 m/s mean in the first two 
 - **Permanence and the pull are unmeasurable at 1.5 chases a run**: two losses in six runs, one re-acquisition;
   the pull's arm is the base's run to the decimal (a need of 0.6 still wins the arbiter). Sweep 2 adds the
   mover's reach at 1.5 m (R97) for more starts, and both ride the corrected harness.
+
+### 17.61 The campaign, sweep 2: every arm on the identification-only brain (2026-09-29)
+
+The harness corrected (`--load-brain-modules motor_epm_intent` by default): the intent EPM's identification
+restored, the map, play field, cloud cache and outcome table fresh; the first two minutes a walk at 0.17 m/s with
+three stops. Eight arms, six seeds, 600 s, the same seeds.
+
+| arm | walls / min | rescues / min · down % | stops · at a thing | chases (moving train) · lost looks | skills | walk m/s |
+|---|---|---|---|---|---|---|
+| R94 base | 27.2 ± 23.6 | 0.62 · 3.71 | 13.5 · 8.3 | 17 (5) · 10 | 21 | 0.166 |
+| **+ `--stop-on-stuck 8 --stuck-escape 6`** | **18.7 ± 18.5** | **0.23 · 0.34** | 16.0 · 9.2 | 12 (1) · 5 | 27 | 0.177 |
+| **+ `--chase-vx 0.35`** | 24.3 ± 14.1 | 0.45 · 1.26 | 13.7 · 7.3 | 16 (**6, 38 %**) · — | 23 | 0.176 |
+| + `--body-pitch 0.05` | 25.6 ± 15.8 | 0.20 · 0.60 | 14.0 · 6.5 | 12 (3) · 5 | 27 | 0.173 |
+| + `--head-forward 0.08` | 28.8 ± 19.9 | 0.35 · 0.41 | 10.5 · 4.0 | 9 (3) · 3 | 11 | 0.168 |
+| R95 permanence (coasting 3 s) | 44.5 ± 52.0 | 0.42 · 1.39 | 11.3 · 5.5 | 11 (5), 0 re-acquired · 7 | 13 | 0.168 |
+| R96 the pull's decay | = base | = | = | = | = | = |
+| R97 the reach at 1.5 m | 23.2 ± 23.4 | 0.68 · 3.91 | 12.0 · 7.0 | 22 (4; 13 static) · 8 | 15 | 0.166 |
+
+- **The stuck stop and escape: `WORKING`.** Rescues a third of the base's and falls a tenth, walls 27 → 19,
+  stops and stops at things up, more standing (30 % of the run). The cost: fewer chases and one at the moving
+  train — the stuck stop fires where the chase would have started, or the escape holds the reference. Kept.
+- **The pursuit at speed (`--chase-vx 0.35`): a signal.** The moving train 29 → 38 % of chases, objects
+  touched up, walls a little down; falls between. Kept, and sweep 3 tries 0.4, the walker's trained top.
+- **The leans, at half the angle: `NULL`.** Body pitch 0.05 no longer falls (0.60 %) and gains 4 % of speed;
+  head forward 0.08 changes nothing. The operator's centre-of-gravity idea does not turn into speed on this walker:
+  the trained policy holds its own pitch, and a commanded lean is either absorbed or, past 0.1 rad, paid in falls.
+  Body pitch 0.05 rides along in sweep 3's three-lever stack for one more look.
+- **Permanence by coasting: `REGRESSION` in this context.** One seed at 150 walls a minute: after the train
+  leaves the cone the coasting target leads across the track toward the wall it went behind, and no re-sighting
+  ever came (0 of 11). A moving thing's predicted path in a room with walls needs the map to say where a thing
+  can go; without it the look (R94) is the safer permanence. Re-use: coasting bounded by the cloud's free space.
+- **The pull's decay: `NULL`** — the base's run to the decimal on every seed; a need of 0.6 still wins the
+  arbiter, so no decision changed. Re-use: a decay that reaches the arbiter's margin, or the outcome table.
+- **The reach at 1.5 m: `NULL`** — chases 17 → 22, all of the gain static (8 → 13), walls the same. The stage-0
+  finding holds: past 1.2 m the false candidates grow faster than the true ones.
