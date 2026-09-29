@@ -276,6 +276,9 @@ reach `NULL`. Sweep 3: the stack of the two keepers holds both gains (walls 27 �
 train 38 %); body pitch 0.05 on it is the interaction-rich variant for the eye. The confirmation on seeds 7–18 is in
 §17.63.
 
+**The readout for the eye:** <https://claude.ai/code/artifact/10ffc001-5858-47af-98a1-973dc9bba9ac> — the four
+items' standing, every arm's line, the eighteen-seed confirmation.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
