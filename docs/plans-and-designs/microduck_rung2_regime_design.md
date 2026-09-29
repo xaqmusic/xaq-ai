@@ -5427,3 +5427,33 @@ Three forms of the progress forget's aftermath, each on the eye's arm, R112, see
 form, with the stuck re-arm kept — measured as the arm in §17.83 (sweeps 37–38). Lesson for the ledger: on this
 duck the outcome loop's renewal is load-bearing for engagement; a forget or yield that bars it hands the walk to
 play, and play walks the walls.
+
+### 17.83 Sweeps 37–38: the stuck detector's re-arm is null; the arm, and where the night ends (2026-09-29, night)
+
+| n = 18 | R108 | eye's arm (reflex + seek gate) | **R112, the progress forget, on it** | R112 + the re-arm |
+|---|---|---|---|---|
+| walls / min, mean ± sd · median · max | 19.2 ± 27.2 · 12 · 124 | 29.8 ± 14.0 · 30 · 62 | 31.5 ± 23.4 · 27 · 90 | 32.9 ± 26.6 · 23 · 90 |
+| runs over 60 walls a minute | 1 | 1 | 2 | 3 |
+| closing on the held target (1–6 · 7–18) | 32 · 33 % | 40 · 39 % | **55 · 48 %** | 55 · 51 % |
+| opening | 27 % | 20 · 19 % | **8 · 8 %** | 9 · 8 % |
+| play holds the heading with a target held | 44 % | 29–35 % | **0–2 %** | 1–2 % |
+| heading error under seek, median | 1.2 rad | 0.5–0.6 | **0.4** | 0.4 |
+| arrival stops a run (host) | 5.4 | 12.7 · 13.3 | **14.5 · 14.9** | 15.0 · 15.6 |
+| stuck stops | 36 | 26 | 36 | 35 |
+| rescues / min | 0.24 | 0.19 | 0.19 | 0.21 |
+
+The re-arm (§17.81's second fix) fires nowhere it was meant to: seeds 14 and 16 are tick-identical to the as-built
+runs (the stall there never re-crosses the detector's adaptive bar), ten of twelve seeds unchanged, seed 6 trapped
+worse. `NULL`; it stays in the code as the detector's correct behaviour and changes nothing measured.
+
+**Where the night ends.** On the operator's criterion — a thing of interest walked to, not past — the arm is
+**R112 on the reflex and seek gate** (preset "R112 · the PROGRESS forget"): the walk closes on its target on half
+its seconds where R108 closed on a third, opens on a twelfth where R108 opened on a quarter, play never holds the
+heading while a target is held, arrivals nearly triple R108's, the heading error a third. The walls tie the eye's
+arm at 30 a minute against R108's 19: the brushes beside the things now reached and en route, and two runs in
+eighteen in a trap the walk's floor sets — the body pushing at a surface its ToF reads as empty at contact
+(seed 9 under play, seed 14 under seek; O35's blind zone). Every escape-side lever on that floor was null
+(§17.78–17.80, 17.83) and the target-side one that moved the walk (the progress forget) cannot see a body that
+does not move. The floor is a sensor's: a return at contact that the walker and the stuck detector can act on —
+the rewrite rule's second step, not a smarter policy. That is the next lever, and the one the camera boundary
+should carry.

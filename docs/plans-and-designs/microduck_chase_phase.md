@@ -361,6 +361,12 @@ fixed and measured in §17.82.
 closing 72 %, walls doubled under play); the renewal is load-bearing for engagement. The as-built progress forget
 with the stuck re-arm is the arm (§17.83).
 
+**Where the night ends (§17.83, n = 18):** the arm on the operator's criterion is R112 (the progress forget) on the
+reflex and seek gate: closing 48–55 % (R108: 32), opening 8 % (27), play never holds the heading with a target
+held, arrivals nearly triple, the heading error a third. Walls tie the eye's arm at 30 a minute (R108: 19) with two
+traps in eighteen where the body pushes at a surface its ToF reads as empty at contact. Every escape-side wall
+lever was null; the floor is a sensor's (a return at contact), the next lever. Preset "R112 · the PROGRESS forget".
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
