@@ -1197,5 +1197,30 @@
    "fast_until": 0,
    "checkpoint": "duck_r94_s1.brain.json"
   }
+ },
+ {
+  "name": "R109 · the yield that LOOKS: a chase that yields near tall structure starts a look at the target (no memory; the place not-a-mover for 5 s)",
+  "series": 109,
+  "hint": "R108 + chase_yield_look (2026-09-29): sweep 15 had the silent yield tie R99 on walls (seeds 1-6) with the churn gone, but 29 chases against 47 -- R99's lost looks (32 a run against 11) were where the train was found again. Here the yield starts the lost stop centred on the target's bearing; no mover memory, so no churn. WATCH: the duck stopping short of the chair or wall and looking after the train, then chasing it again once it has moved on.",
+  "state": {
+   "config": "a1v2_r109_yield_looks.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35",
+   "fast_until": 0,
+   "checkpoint": "duck_r94_s1.brain.json"
+  }
  }
 ]

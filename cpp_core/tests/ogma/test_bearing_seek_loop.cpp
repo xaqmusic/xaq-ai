@@ -497,3 +497,28 @@ TEST(BearingSeekLoop, AChaseYieldsNearTallStructure) {
     }
     EXPECT_TRUE(r.m.chasing()) << "a thing elsewhere is chased";
 }
+
+TEST(BearingSeekLoop, AYieldMayLookWithoutRemembering) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_memory_ticks"] = int64_t{250};
+    p["yield_topic"] = std::string("percept.target_tall"); p["chase_yield_tall"] = int64_t{1}; p["chase_yield_look"] = true;
+    Rig r(p);
+    for (int k = 0; k < 10; ++k) {
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    r.bus.begin_tick(r.t);
+    auto y = std::make_shared<ogma::ProprioToken>(); y->values = Eigen::VectorXf(2); y->values << 2.0f, 1.2f;
+    r.bus.publish("percept.target_tall", y);
+    r.bus.end_tick();
+    r.mover(0.0f, 1.0f, prox_of(1.2)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_EQ(r.m.chases_yielded(), 1);
+    EXPECT_TRUE(r.m.chase_lost_now()) << "the yield looks";
+    EXPECT_NEAR(r.m.chase_lost_ego(), 0.0, 0.05) << "at the target's bearing: straight ahead";
+    EXPECT_GT(r.m.chase_lost_range(), 1.0);
+    EXPECT_FALSE(r.m.memory_live()) << "but remembers no mover";
+    EXPECT_TRUE(r.m.yield_live());
+}
+

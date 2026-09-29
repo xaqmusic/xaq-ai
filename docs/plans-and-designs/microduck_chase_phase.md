@@ -309,6 +309,13 @@ with twelve extra standing looks a run. And the yields fire at the chair beside 
 `PARTIAL` on the walk (an artifact of the stops), `REGRESSION` on the pursuit; the mechanism as built was a weakened
 slice. R108 fixes the build: a yield forgets (no look, no memory) and the yielded place is not-a-mover for 5 s.
 
+**The yield that forgets (R108, §17.73, n = 18):** the churn gone (37 yields, 74 dropped sightings, the median chase
+a second long), the yields at walls and furniture and none at the moving train; walls 27 → 19 a minute — the
+stack's level with R99's priority kept, R99's two trapped runs gone (one of R108's own trapped by the walk's corner
+failure, 3 stuck escapes that did not free it); the pursuit four fifths of R99's (93 chases against 117, the train
+27 against 35, the same share) because a silent yield walks on where R99's lost look had found the train again.
+`PARTIAL`, the first arm that holds both the walk and the pursuit. Next: the yield that LOOKS (R109), measured in §17.74.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at

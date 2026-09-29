@@ -152,6 +152,7 @@ private:
     std::string yield_topic_; int chase_yield_tall_ = 0; int chases_yielded_ = 0;
     // the yielded place, remembered as not-a-mover for chase_memory_ticks: a sighting within chase_gate_m of it is dropped
     bool have_yield_ = false; double yield_x_ = 0.0, yield_y_ = 0.0; uint64_t yield_tick_ = 0; int yield_drops_ = 0;
+    bool chase_yield_look_ = false;   // the yield starts a look at the target's bearing (lost_now_), no memory
     void yield_to_structure(uint64_t tick_id);
 public:
     int chases_yielded() const { return chases_yielded_; }

@@ -5106,3 +5106,44 @@ is remembered as not-a-mover for `chase_memory_ticks` (5 s): a sighting within `
 dropped (`yield_drops`, in the host's summary); one further off is a fresh candidate again. Same parameters as
 R107; the guard byte-identical (md5 `6b9a0b3a…`); the seek loop's test extended (the yield leaves no look and no
 memory, the same sighting is dropped, a thing elsewhere is chased). Measured in §17.73 (sweeps 15–16).
+
+### 17.73 Sweeps 15–16: the yield that forgets (R108) on eighteen seeds (2026-09-29, night)
+
+R99 and R108 (R107's parameters on the fixed yield: no look, no memory, the yielded place not-a-mover for 5 s) on
+seeds 1–6 (sweep 15) and 7–18 (sweep 16), 600 s, the campaign base. R99's rows are the same runs as §17.72.
+
+| | R99, 1–6 | R108, 1–6 | R99, 7–18 | R108, 7–18 | R99, n = 18 | R108, n = 18 |
+|---|---|---|---|---|---|---|
+| walls / min, mean ± sd | 11.3 ± 8.1 | 11.3 ± 6.7 | 35.2 ± 32.2 | 23.1 ± 32.8 | 27.2 ± 28.7 · median 19.0 | **19.2 ± 27.2 · median 11.8** |
+| seeds over 60 walls a minute | 0 | 0 | 2 (94, 98) | 1 (seed 7: 124) | 2 of 18 | 1 of 18 (13.0 without it) |
+| R108 lower on the same seed | | 2 of 6 | | 8 of 12 | | 10 of 18; paired −8.1 ± 7.9 (sem) |
+| rescues / min · down % | 0.17 · 0.28 | 0.15 · 0.35 | 0.28 · 0.30 | 0.28 · 0.48 | 0.24 · 0.29 | 0.24 · 0.44 |
+| stops a run · stand % | 17.0 · 32 | 16.3 · 28 | 18.0 · 33 | 19.1 · 30 | | |
+| chases (moving train, share) | 47 (22, 47 %) | 29 (7, 24 %) | 70 (13, 19 %) | 64 (20, 31 %) | 117 (35, 30 %) | 93 (27, 29 %) |
+| yielded · dropped sightings | 0 · 0 | 13 · 10 | 0 · 0 | 24 · 64 | | 37 · 74 |
+| re-acquired · lost looks · stops ended on a chase | 8 · 32 · 23 | 3 · 11 · 13 | 10 · 54 · 37 | 9 · 34 · 31 | 18 · 86 · 60 | 12 · 45 · 44 |
+| median chase length · seconds chasing a run | 1.6 s · 14 | 1.1 s · 5 | 1.2 s · 8 | 1.0 s · 5 | | |
+| path m · cells · walk m/s | 65 · 109 · 0.179 | 69 · 115 · 0.176 | 57 · 103 · 0.159 | 65 · 119 · 0.178 | | |
+
+- **The churn is gone.** 37 yields in eighteen runs (R107: 288), 74 sightings dropped at a yielded place, the median
+  chase a second long again, re-acquisitions 12 (R107's 256 were the churn). The yields fire where the lever was
+  built to fire: `yield_where.py` on seeds 1–6 puts all six first-tick yields within 0.4 m of a wall or furniture
+  (two at a wall face, the target beyond it; the rest at the table and chair1), none at the moving train.
+- **The walls: R99's reversal is undone, to the stack's level.** Pooled 27 → 19 a minute (the stack, §17.71: 19),
+  the median 19 → 12, lower on ten of eighteen seeds and on eight of the twelve where R99 reversed; R99's two
+  trapped runs (94, 98) are 18 and 19 on R108. One R108 run is trapped instead — seed 7, 124 a minute, 3 stuck
+  escapes that did not free it, 5 chases and one yield: the walk's own corner failure (the stuck stop's `PARTIAL`
+  from §17.60), not the yield's. Rescues tie; down-time 0.29 → 0.44 % (a few more falls, within the sd).
+- **The pursuit pays, less than R107 did.** 93 chases against R99's 117 (5.2 a run against 6.5), the moving train
+  27 against 35 at the same share (29 %), 12 re-acquisitions against 18, the seconds chasing a run about half. The
+  loss is not the yields themselves (37) but what R99 did after a chase ran to the chair or the wall: it lost the
+  thing and LOOKED (86 lost looks against 45), and the look — a stop centred on where the train went — was where
+  the train was found again (60 of R99's chases started from a stop). A silent yield walks on: the duck covers more
+  room (65 m and 119 cells against 57 and 103 on seeds 7–18, at the walk's full speed) and sees the train less.
+
+**Verdict, n = 18.** R108 `PARTIAL`, and the better trade so far: the stack's walk (19 walls a minute, one trap in
+eighteen) with four fifths of R99's pursuit — the first arm that holds both. The reconciling mechanism works as a
+mechanism; what it gives away is the look after the yield. **R109 (`chase_yield_look`)**: the yield starts the
+lost look at the target's bearing (no memory, so no churn; the place still not-a-mover) — the duck stops short of
+the chair or the wall and watches the train go by, and a train that has moved a body length on is a fresh candidate
+from the stop. Measured in §17.74 (sweep 17, seeds 1–6, against R99's runs).

@@ -121,6 +121,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"yield_topic", ParamMutability::ConstructionOnly,
             "THE YIELD: ProprioToken [tall_count, range] (CloudMap target_tall_topic) -- the tall voxels around this loop's held target.  Empty = off.",
             ParamValue{std::string("")}},
+        {"chase_yield_look", ParamMutability::HotMutable,
+            "A yield near tall structure starts a look at the target's bearing (the host's lost stop) instead of ending silently; no memory either way.  Default off.",
+            ParamValue{false}},
         {"chase_yield_tall", ParamMutability::HotMutable,
             "A chase or coast whose target has at least this many tall voxels within a body length yields (lost: the memory, the look).  0 = off.",
             ParamValue{int64_t{0}}},
@@ -156,7 +159,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_}; m["chase_stop_v"] = ParamValue{chase_stop_v_};
     m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)};
     m["chase_memory_holds"] = ParamValue{chase_memory_holds_};
-    m["yield_topic"] = ParamValue{yield_topic_}; m["chase_yield_tall"] = ParamValue{int64_t(chase_yield_tall_)}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
+    m["yield_topic"] = ParamValue{yield_topic_}; m["chase_yield_tall"] = ParamValue{int64_t(chase_yield_tall_)}; m["chase_yield_look"] = ParamValue{chase_yield_look_}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
     m["chase_pull_recover_ticks"] = ParamValue{chase_pull_recover_ticks_};
     return m;
 }
@@ -191,6 +194,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "chase_permanence_ticks", [&](auto const& v){ chase_permanence_ticks_ = std::max(0, int(get_double(v,"chase_permanence_ticks"))); });
     apply_param(params, "yield_topic",     [&](auto const& v){ yield_topic_   = get_string(v,"yield_topic"); });
     apply_param(params, "chase_yield_tall", [&](auto const& v){ chase_yield_tall_ = std::max(0, int(get_double(v,"chase_yield_tall"))); });
+    apply_param(params, "chase_yield_look", [&](auto const& v){ chase_yield_look_ = get_double(v,"chase_yield_look") > 0.5; });
     apply_param(params, "chase_memory_holds", [&](auto const& v){ chase_memory_holds_ = get_double(v,"chase_memory_holds") > 0.5; });
     apply_param(params, "chase_memory_ticks", [&](auto const& v){ chase_memory_ticks_ = std::max(0, int(get_double(v,"chase_memory_ticks"))); });
     apply_param(params, "chase_pull_decay", [&](auto const& v){ chase_pull_decay_ = std::clamp(get_double(v,"chase_pull_decay"), 0.0, 1.0); });
@@ -218,6 +222,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_stop_v")    chase_stop_v_ = get_double(value, k);
     else if (k == "chase_permanence_ticks") chase_permanence_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_yield_tall") chase_yield_tall_ = std::max(0, int(get_double(value, k)));
+    else if (k == "chase_yield_look") chase_yield_look_ = get_double(value, k) > 0.5;
     else if (k == "chase_memory_holds") chase_memory_holds_ = get_double(value, k) > 0.5;
     else if (k == "chase_memory_ticks") chase_memory_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_pull_decay") chase_pull_decay_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -480,6 +485,14 @@ void BearingSeekLoop::yield_to_structure(uint64_t tick_id) {
     // as not-a-mover for the memory's lifetime: a sighting within the gate of it is dropped, one further off is a fresh
     // candidate again.
     if (chase_memory_ticks_ > 0) { have_yield_ = true; yield_x_ = tx_; yield_y_ = ty_; yield_tick_ = tick_id; }
+    if (chase_yield_look_) {
+        // the yield LOOKS (sweep 15: a silent yield ended the pursuit where a lost look had fed the next chase): the
+        // host may start a stop centred on the target's bearing; no memory, the place still not-a-mover
+        const double dx = tx_ - px_, dy = ty_ - py_;
+        const double c = std::cos(pyaw_), s = std::sin(pyaw_);
+        const double bx = c * dx + s * dy, by = -s * dx + c * dy;
+        lost_ego_ = std::atan2(-by, bx); lost_range_ = std::hypot(bx, by); lost_now_ = true;
+    }
     have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f;
     chasing_ = false; coasting_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
 }
