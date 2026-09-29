@@ -896,7 +896,7 @@ shows (§5.2.1). Two 1 µF in parallel would give f_c 12.5 Hz if it does.
 
 | mass | `R_fsr` (DMM) | **predicted counts** |
 |---|---|---|
-| in the air | ≳ 1 MΩ | **≲ 60** |
+| in the air | ≫ 1 MΩ | **0–60** — see §5.7.3; a genuinely open FSR reads 0–2 |
 | 30 g | 25.0 k | 1536 |
 | 50 g | 17.0 k | 1920 |
 | 100 g | 14.0 k | 2118 |
@@ -941,6 +941,67 @@ rail, not the foot.
 regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### 5.7.2 ✅ Characterised 2026-09-29 — the HAT's ADC carries charge between channels
+
+Observed with the foot on A0 and A1–A3 unconnected:
+
+| | A0 | A1 | A2 | A3 | A4 (battery) |
+|---|---|---|---|---|---|
+| foot connected | **0–2** | 98 | 345 | 506 | 3260 |
+| foot unplugged | ~3500 | ~3500 | ~3500 | ~3500 | 3260 |
+
+**A1–A3's low, monotonically climbing values are sample-and-hold charge carryover, not a
+fault and not pull-ups.** `benchd.cpp:525` reads the channels in order A0 → A4; A0 is driven
+hard to 0, and a floating pin cannot recharge the sampling capacitor within the aperture, so
+the reading climbs back over successive channels — 0.08 V → 0.28 V → 0.41 V — until A4's
+low-impedance battery divider drives it properly again. A pull-up would hold the floating
+channels at a fixed value **regardless of A0**; these track A0, so it is carryover.
+
+⚠ **Floating ADC inputs on this HAT sit near 2.82 V (~3500 counts)** and are meaningless. Read
+nothing into A1–A3 until they have feet on them.
+
+**This is direct evidence that the 1 µF is doing real work.** It is roughly five orders larger
+than the MCU's sampling capacitor, so A0 cannot inherit charge from A4's 2.63 V the way A1–A3
+inherit from A0 — the external cap supplies the sample and the mux's history is swamped. The
+cap was sized in §5.2 as an anti-alias filter; this is a second, independent reason it has to
+be there.
+
+### 5.7.3 ⚠ DIAGNOSIS 2026-09-29 — A0 reads 0 and does not respond to a press
+
+**What the observation already proves, before any meter comes out:**
+
+| | |
+|---|---|
+| ✅ **the ADC and the signal path to A0 are good** | unplugging the foot lets A0 float to ~3500 with the others; plugging it in pulls it to 0. The ADC is reading that pin and the lead's signal conductor reaches it |
+| ✅ **0–2 counts is not itself wrong** | at `R_g` = 15 kΩ that implies `R_fsr` ≥ **30 MΩ**, which an unloaded FSR genuinely is. §5.7's "≲ 60 counts" assumed 1 MΩ and underestimated the part |
+| ❌ **the fault is that pressing does nothing** | that, and only that |
+
+**Ruled out by the same observation:** signal and VCC swapped (A0 would read *high*, not 0), a
+shorted FSR (4095), and any break in the signal wiring or the ADC itself (the float test).
+
+**Three candidates remain, and all three produce exactly this signature:**
+
+| # | candidate | why it reads 0 and ignores a press |
+|---|---|---|
+| **a** | **the lead's signal and GND are swapped** | the divider node lands on the HAT's GND pin, grounding it, while `R_g`'s bottom lands on the signal pin — so A0 sees 15 kΩ to ground. The FSR then sits between VCC and GND, where it changes nothing visible. ⚠ **§8 item 1's pin order has never been read**; only the VCC *voltage* was confirmed |
+| **b** | **3.3 V is not reaching the FSR's top** | no current source, so the node sits at 0 through `R_g` whatever the sensor does |
+| **c** | **the FSR or its tail is open** | same node behaviour, and the press cannot reach a broken sensor |
+
+**Separating them is V1, which was skipped — two minutes, power off, lead unplugged:**
+
+| # | measure, at the lead's free end | reads |
+|---|---|---|
+| **D1** | across the two conductors that run to the sensor, **while pressing the toe** | **changes** (MΩ → tens of kΩ) ⇒ sensor and tail are fine, so the fault is **a** or **b**. **No change** ⇒ candidate **c**, and nothing else matters until it is fixed |
+| **D2** | node conductor → GND conductor | `R_g` = 15 kΩ (let the cap finish charging) |
+| **D3** | VCC conductor → GND conductor | `R_fsr` + `R_g`; ≫ MΩ unloaded, falls under a press |
+
+D1–D3 together also *map* the lead, which is what settles candidate **a**.
+
+**Then read the HAT's header, power on, nothing plugged in.** GND is 0 V, VCC is 3.30 V, and
+**the signal pin sits at ~2.82 V** — the floating value from §5.7.2, which makes the three pins
+tell themselves apart by voltage alone. Confirm it by watching the instrument rather than the
+meter: a 10 kΩ from the suspected signal pin to GND should drop A0 to ~0 in the dash.
 
 ### 5.6.2 The spherical-bump run (2026-09-27), kept as the comparison
 
