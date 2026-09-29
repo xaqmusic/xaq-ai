@@ -352,6 +352,12 @@ of range); `--stuck-cmd 0.4` is measured in §17.80.
 **`--stuck-cmd 0.4` (§17.80):** two more stuck stops in six runs, the walls not better; killed. The long bursts are
 a held target beyond the wall; next, the seek loop forgets a target the walk does not close on (§17.81).
 
+**The progress forget (R112, §17.81, n = 18):** the seek loop forgets a target the walk does not close on (half a
+metre walked, under 5 cm gained): closing 40 → 48–55 %, opening 8 %, play never holds the heading with a target
+held, arrivals up — the loudest move on the operator's criterion. The walls tie with two trapped seeds, traced to
+two defects (the renewal re-arming a forgotten place every tick; the stuck detector firing once per stall), both
+fixed and measured in §17.82.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at

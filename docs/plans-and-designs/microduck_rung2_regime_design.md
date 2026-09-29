@@ -5357,3 +5357,40 @@ null; the bursts' anatomy says why: in 34 of 60 seek-held long bursts the target
 beyond the wall the body pushes on, a dead-reckoned position the world refutes — and no escape rule addresses a
 target that should not be held. The seek loop's honest signal is the range left; a range that does not shrink
 while the body walks is the loop's own error to act on (§17.81).
+
+### 17.81 Sweeps 31–32: the progress forget (R112) — the walk closes, and two defects hold the corner (2026-09-29, night)
+
+The seek loop acting on its own honest signal: with a static target held, every `progress_walk_m` (0.5 m) of
+walking must shrink the range left by `progress_m` (0.05 m), or the target is forgotten — a dead-reckoned position
+the world refutes (a wall between, an orbit). R112 = R108 + it, on the eye's arm (reflex + seek gate), seeds 1–6
+(sweep 31) and 7–18 (sweep 32), against the eye's arm's own runs (§17.77):
+
+| | eye's arm, 1–6 | R112, 1–6 | eye's arm, 7–18 | R112, 7–18 | eye's arm, n = 18 | R112, n = 18 |
+|---|---|---|---|---|---|---|
+| walls / min, mean ± sd | 20.4 ± 7.8 | **17.8 ± 9.1** | 34.6 ± 14.2 | 38.4 ± 25.5 | 29.8 ± 14.0 · median 30 · max 62 | 31.5 ± 23.4 · median 27 · **max 90** |
+| lower than the eye's arm on the seed | | 4 of 6 | | 7 of 12 | | 11 of 18 |
+| closing · tangential · opening | 40 · 41 · 20 % | **55 · 37 · 8 %** | 39 · 43 · 19 % | **48 · 44 · 8 %** | | |
+| seek holds the heading · play | 69 · 29 % | **98 · 0 %** | 62 · 35 % | **95 · 2 %** | | |
+| heading error while seek steers, median | 0.59 rad | **0.41** | 0.45 | **0.38** | | |
+| arrival stops a run (host) | 12.7 | **14.5** | 13.3 | **14.9** | | |
+| attended on the walk, not taken | 7.3 a run | 3.7 | 4.8 | 3.2 | | |
+| targets forgotten for no progress | — | 25 a run | — | 32 a run | | 520 |
+| stuck stops | 6 | 10 | 20 | 26 | 26 | 36 |
+| rescues / min · down % | 0.12 · 0.39 | 0.20 · 0.20 | 0.23 · 0.39 | 0.18 · 0.32 | | |
+| wall bursts ≥ 5 s a run · longest | 0.3 · 15 s | 0.5 · 8 s | 1.3 · 25 s | 0.8 · **77 s** | | |
+
+- **The walk goes where it looks, at last.** Closing 40 → 55 % on seeds 1–6 and 39 → 48 % on 7–18, the opening
+  share 20 → 8, the heading error 0.4 rad, arrivals up on both sets, and play never holds the heading while a
+  target is held — a target going nowhere is dropped before its need decays to play's level.
+- **The walls tie on average and trap on two seeds** (14: 90 a minute, 16: 77; the eye's arm had 7 and 62 there),
+  one burst of 77 s. Seed 14's burst, traced tick by tick (510–600 s): the body sits in the corner at (−1.9, −1.9)
+  and never moves; the odometry drifts 1.1 m on the gait's sway, so the seek range "grows" 0.35 → 1.37 m; the
+  progress forget fires — and the outcome loop's renewal (`renew_topic`) re-arms the same position the next tick,
+  resetting the window, 25 times a second; the stuck stop fires once at 513 s, its escape (6 s) fails, and it never
+  fires again, because the detector re-arms only on a tick that is not stalled. Two defects, neither a lever:
+  **a forgotten place must refuse the renewal** (the static yield's refusal, §17.78, now shared: the place is
+  not-a-thing for `forget_ticks`), and **the stuck detector re-arms when its escape ends**. Both built (guard
+  byte-identical); measured in §17.82 (sweeps 33–34).
+
+**Verdict as built, n = 18.** `WORKING` on the walk's closing (the loudest move of the campaign on the operator's
+criterion), `PARTIAL` on the walls pending the two fixes.

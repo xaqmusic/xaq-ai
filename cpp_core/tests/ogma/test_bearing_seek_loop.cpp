@@ -590,3 +590,20 @@ TEST(BearingSeekLoop, AWalkThatDoesNotCloseForgetsItsTarget) {
     EXPECT_EQ(r.m.progress_forgets(), 1);
 }
 
+TEST(BearingSeekLoop, AForgottenPlaceRefusesTheRenewal) {
+    ogma::ParamMap p; p["progress_walk_m"] = 0.5; p["progress_m"] = 0.05; p["forget_ticks"] = 3000.0; p["arrive_m"] = 0.15;
+    p["renew_topic"] = std::string("reality.cognitive.outcome_need"); p["renew_min"] = 0.25; p["renew_range"] = 2.0;
+    Rig r(p);
+    for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.5));     // the thing at (1.5, 0)
+    ASSERT_TRUE(r.m.have_target());
+    for (int i = 1; i <= 30; ++i) r.step(0, 0.02 * i, 0, 0.0f, 0.0f, 0.0f);    // sideways: forgotten
+    ASSERT_FALSE(r.m.have_target());
+    // an outcome need at the forgotten place, every tick, while the body sways in place: not re-armed
+    for (int i = 0; i < 100; ++i) {
+        r.renew(0.9f, 1.5, 0.0);
+        r.step(0.01 * (i % 2), 0.6, 0, 0.0f, 0.0f, 0.0f);
+    }
+    EXPECT_FALSE(r.m.have_target()) << "the renewal at the forgotten place is refused";
+    EXPECT_EQ(r.m.progress_forgets(), 1) << "no second forget: the window never re-opened there";
+}
+

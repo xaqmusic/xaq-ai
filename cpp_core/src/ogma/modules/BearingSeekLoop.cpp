@@ -360,16 +360,22 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     // the place is not-a-thing for forget_ticks.  The chase's yield is the same rule for a mover.
     // THE PROGRESS FORGET (2026-09-29, §17.81): with a static target held, every progress_walk_m of walking must shrink
     // the range left by progress_m; a walk that does not close on its target -- a wall between, an orbit -- forgets it
-    if (progress_walk_m_ > 0.0 && have_target_ && !chasing_ && !coasting_) {
+    if (have_syield_ && tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
+    if (progress_walk_m_ > 0.0 && have_target_ && !chasing_ && !coasting_ && !(have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_)) {
         if (tick_id == target_set_tick_) { walked_ = 0.0; best_range_ = range_left_; }
         else if (walked_ >= progress_walk_m_) {
-            if (best_range_ - range_left_ < progress_m_) { have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++progress_forgets_; }
+            if (best_range_ - range_left_ < progress_m_) {
+                // forgotten -- and the place refused for forget_ticks (sweep 32, seed 14: the outcome loop's renewal
+                // re-armed the forgotten target every tick and reset the window; 90 s in a corner)
+                have_syield_ = true; syield_x_ = tx_; syield_y_ = ty_; syield_tick_ = tick_id;
+                have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++progress_forgets_;
+            }
             else best_range_ = range_left_;
             walked_ = 0.0;
         }
     } else { walked_ = 0.0; best_range_ = 1e9; }
     if (have_syield_ && tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
-    if (static_yield_tall_ > 0 && have_target_ && !chasing_ && !coasting_ && have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_) {
+    if ((static_yield_tall_ > 0 || progress_walk_m_ > 0.0) && have_target_ && !chasing_ && !coasting_ && have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_) {
         // a target set at the yielded place by any path (a sighting, the renewal, a mover that stopped): refused
         // (sweep 23: the renewal re-armed the yielded place and it yielded again two ticks later, 1 700 times a run)
         have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yield_drops_;

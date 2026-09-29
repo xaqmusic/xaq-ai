@@ -254,6 +254,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     seek_value_prev_ = seek_present_ ? seek_value_ : 0.0;
     if (ref_hold_left_ > 0) {                     // the escape holds the reference; the loops wait
         --ref_hold_left_; heading_ref_ = ref_hold_; ++play_steers_; last_steer_ = 4; bearing_topic = nullptr;
+        // the escape over: the stuck detector re-arms (sweep 32, seed 14: one escape failed and the stall ran 90 s
+        // without a second, since the detector re-armed only on a tick that was not stalled)
+        if (ref_hold_left_ == 0) { stuck_fired_ = false; stall_run_ = 0; }
     }
     if (bearing_topic)
     if (auto pb = std::dynamic_pointer_cast<const ogma::ProprioToken>(bus->last_value(bearing_topic))) {
