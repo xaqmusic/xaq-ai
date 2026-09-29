@@ -275,8 +275,10 @@ nlohmann::json SkillOutcomeLoop::snapshot_state() const {
 void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
     if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
     stats_.clear();
-    for (auto const& [k, v] : s.value("stats", nlohmann::json::object()).items())
-        stats_[std::stoi(k)] = Stat{v.value("n", 0), v.value("mean", 0.0), v.value("m2", 0.0)};
+    // a snapshot taken with no cell yet carries "stats": null (a default json is null, not {}); read it as empty
+    const nlohmann::json stats = s.contains("stats") && s["stats"].is_object() ? s["stats"] : nlohmann::json::object();
+    for (auto const& [k, v] : stats.items())
+        if (v.is_object()) stats_[std::stoi(k)] = Stat{v.value("n", 0), v.value("mean", 0.0), v.value("m2", 0.0)};
     requests_ = s.value("requests", 0); observed_ = s.value("observed", 0); unknown_ = s.value("unknown", 0);
 }
 nlohmann::json SkillOutcomeLoop::diag_lite() const {

@@ -185,7 +185,11 @@ void OgmaInstance::restore_state(nlohmann::json const& s) {
             std::string id(m->id());
             auto it = s["modules"].find(id);
             if (it != s["modules"].end() && !it->is_null()) {
-                m->restore_state(*it);
+                try {
+                    m->restore_state(*it);
+                } catch (const std::exception& e) {
+                    throw std::runtime_error("restore_state: module '" + id + "' (" + std::string(m->type_name()) + "): " + e.what());
+                }
             }
         }
     }

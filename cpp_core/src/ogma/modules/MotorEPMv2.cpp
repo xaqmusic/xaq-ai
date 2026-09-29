@@ -6309,7 +6309,8 @@ nlohmann::json MotorEPMv2::snapshot_state() const {
     mod["stroke_gate_mean"]   = stroke_gate_mean_;
     mod["stroke_gate_spread"] = stroke_gate_spread_;
     mod["stroke_load_ema"]    = stroke_load_ema_;
-    return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}};
+    // wb_steps: the whole-body babble counter (2026-09-29) -- a restored brain must not babble again
+    return nlohmann::json{{"version", 2}, {"legs", legs}, {"module", mod}, {"wb_steps", wb_steps_}};
 }
 
 // The high-rate payload (xaq_voice at up to 60 Hz).  Every field is an already-computed
@@ -6802,6 +6803,7 @@ void MotorEPMv2::restore_state(nlohmann::json const& s) {
     if (version != 1 && version != 2)
         throw std::runtime_error("MotorEPMv2::restore_state: unknown version " + std::to_string(version));
     auto const& legs = s.at("legs");
+    wb_steps_ = s.value("wb_steps", int64_t(0));
     legs_.assign(n_legs_, Leg{});
     int m = motor_dim_;
     for (int leg = 0; leg < n_legs_ && leg < int(legs.size()); ++leg) {

@@ -252,6 +252,11 @@ def host_args(s, seed, save_brain_path=None):
     if mode == "brain" and float(s["walk_from"]) >= 0:
         a += ["--walk-from", fmt(float(s["walk_from"])), "--walk-secs", fmt(float(s["walk_secs"])),
               "--walk-vx", fmt(float(s["walk_vx"])), "--walk-vy", fmt(float(s["walk_vy"])), "--walk-vyaw", fmt(float(s["walk_vyaw"]))]
+    if mode == "level2" and s["start"] == "checkpoint":
+        # a level-2 brain saved by --save-brain (2026-09-29): the walk from the first second, no babble
+        ckpt = resolve_checkpoint(s["checkpoint"])
+        if ckpt:
+            a += ["--load-brain", ckpt]
     if mode == "level2" and save_brain_path:
         a += ["--save-brain", str(save_brain_path)]
     if s.get("host_args", "").strip():

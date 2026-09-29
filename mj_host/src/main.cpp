@@ -1396,6 +1396,10 @@ double g_head_rate_k = 0.0, g_head_rate_tau = 0.0;    // --head-rate K TAU: the 
 // legs. The actuator is then the servo, not the policy: no policy jitter on the head, a lag of a few
 // ticks instead of 120–160 ms. On the robot this needs a joints intent Pollen's daemon does not have.
 bool g_head_joints = false;
+// --head-forward RAD / --body-pitch RAD (2026-09-29, the operator: "the duck rescues itself by walking faster; moving the
+// centre of gravity forward might raise its speed"): an offset on the neck and head pitch joint targets (positive =
+// down / forward, the head over the feet), and the walker's own body_pitch command slot, wired and never set.  0 = off.
+double g_head_forward = 0.0, g_body_pitch = 0.0;
 double g_head_phase_lead = 0.0, g_head_phase_learn = 0.0;   // --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 // --stop-every S --stop-secs S [--stop-from S]: the walk-stop-look line's stimulus (playroom plan
@@ -1514,6 +1518,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
+    if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
@@ -1554,6 +1560,16 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     int push_index = 0, pushes_delivered = 0;
 
     body.reset("STAND", reset_noise, seed);   // l2_sweep: --noise varies the start (was hardcoded 0: seeds only seeded the babble)
+    // --load-brain F (2026-09-29, the operator: "do we need the babble phase as part of every single run?"): the
+    // level-2 brain's state from a run that did its identification (--save-brain), the BODY left at its reset --
+    // the first ten minutes are then the walk, not the babble.  The head brain and the stand brain load as before.
+    if (!g_load_brain.empty()) {
+        std::ifstream in(g_load_brain);
+        if (!in) throw std::runtime_error("--load-brain: cannot open " + g_load_brain);
+        nlohmann::json snap; in >> snap;
+        brain.restore_brain_state(snap.at("graph"));
+        std::fprintf(stderr, "level-2 brain restored from %s (the body at its reset; no babble)\n", g_load_brain.c_str());
+    }
     std::fprintf(stderr, "level-2 graph %s%s\n", graph.c_str(), open_loop ? "  (open-loop override)" : "");
     {
         // A generated scene carries a manifest beside it (playroom_gen.py): echo its seed and
@@ -1904,6 +1920,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             cloud_was_open = now_open;
         }
         if (driver == Driver::Brain) command.twist = twist;
+        if (g_body_pitch != 0.0 && driver == Driver::Brain) command.body_pitch = g_body_pitch;
         if (stop_on) {
             if (roll_on && !ball_stopped && t - last_roll_tick >= 75) { const auto b = body.body_xy("obj_ball0"); body.roll_body("obj_ball0", b[0], b[1], 0.0, 0.0); ball_stopped = true; }
             if (walk_on && walk_left > 0) {                       // the chair carried across, then put back home
@@ -2335,6 +2352,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (head && g_head_joints && driver == Driver::Brain) {
             const auto hcmd = head->last_command();
             for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)] + hcmd[size_t(i)];
+            head_targets[0] += g_head_forward; head_targets[1] += g_head_forward;   // the neck and head pitched forward
             head_owns_joints = true;
             command.head = {0.0, 0.0, 0.0, 0.0};          // the walker is told nothing about the head
         }
@@ -2531,9 +2549,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
             // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick,
             // ...and [7..9]: a candidate held, its position (odometry frame)
-            if (chase_on) std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%d,%.3f,%.3f]", brain.chase_active() ? 1 : 0, brain.chase_n(),
+            if (chase_on) std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%d,%.3f,%.3f,%d]", brain.chase_active() ? 1 : 0, brain.chase_n(),
                                       brain.seek_target_x(), brain.seek_target_y(), brain.chase_vx(), brain.chase_vy(), brain.mover_seen() ? 1 : 0,
-                                      brain.chase_have_cand() ? 1 : 0, brain.chase_cand_x(), brain.chase_cand_y());
+                                      brain.chase_have_cand() ? 1 : 0, brain.chase_cand_x(), brain.chase_cand_y(), brain.chase_coasting() ? 1 : 0);
             // THE LIVE VIEW (--log-cloud-live): the cloud as the module builds, forgets and remembers it
             if (g_log_cloud_live && cloud_on) {
                 if (cloud_opened_now) std::printf(",\"cldo\":[%.4f,%.4f,%.4f,%d]", cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw, brain.cloud_walking() ? 1 : 0);
@@ -2725,7 +2743,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
-        if (chase_on) std::fprintf(stderr, "  chases: %d started, %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase\n", brain.chases(), brain.mover_cands(), stops_chase_ended, stops_lost);
+        if (chase_on) std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase\n", brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
@@ -2820,6 +2838,9 @@ void usage() {
         "      follow the seed unless --train-phase S.  --log-movers WINDOW_S logs the cloud's clusters through a\n"
         "      recency window on every cast (\"mvc\"), the stage-0 instrument for chasing moving things.\n"
         "      --stop-on-chase ends a stop when the seek loop confirms a chase (the walker follows the mover).\n"
+        "      --load-brain F restores a level-2 brain saved by --save-brain (the body at its reset): no babble.\n"
+        "      --head-forward RAD offsets the neck and head pitch targets (the head over the feet); --body-pitch RAD\n"
+        "      sets the walker's body_pitch command slot -- the speed levers, 0 = off.\n"
         "      --stop-on-lost starts a stop when a chase is lost, the sweep centred on where the thing went (a look, not a walk).\n"
         "      --log-cloud-live logs the cloud as the module builds it: the voxels each cast touches, a cloud's opening\n"
         "      (with its anchor's world pose) and the places the cache forgets -- what the duck viewer draws as the live cloud.\n"
@@ -2983,6 +3004,10 @@ int main(int argc, char** argv) {
             g_stop.map_on_stop = true;
         } else if (a == "--stop-scan") {
             g_stop.scan_amp = std::stod(next("--stop-scan")); g_stop.scan_hold_s = std::stod(next("--stop-scan"));
+        } else if (a == "--head-forward") {
+            g_head_forward = std::stod(next("--head-forward"));
+        } else if (a == "--body-pitch") {
+            g_body_pitch = std::stod(next("--body-pitch"));
         } else if (a == "--head-joints") {
             g_head_joints = true;
         } else if (a == "--head-rate") {

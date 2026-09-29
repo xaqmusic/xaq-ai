@@ -308,3 +308,58 @@ TEST(BearingSeekLoop, ALostChaseSaysWhereTheThingWentForOneTick) {
     EXPECT_GT(range, 1.0 + 0.2 * 36.0 / 50.0) << "beyond where it was last seen, by its velocity over the forget time";
     EXPECT_LT(range, 2.0);
 }
+
+// OBJECT PERMANENCE and the pull's decay (2026-09-29).
+TEST(BearingSeekLoop, ALostThingCoastsAtItsVelocityAndIsReacquiredWherePredicted) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_permanence_ticks"] = int64_t{150};
+    Rig r(p);
+    for (int k = 0; k < 10; ++k) {                       // walking away along +x at 0.2 m/s
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);   // out of sight past chase_forget_ticks
+    EXPECT_FALSE(r.m.chasing());
+    EXPECT_TRUE(r.m.coasting()) << "the thing is kept moving in mind";
+    EXPECT_TRUE(r.m.have_target());
+    EXPECT_GT(r.m.value(), 0.4f); EXPECT_LT(r.m.value(), 1.0f) << "the need falls over the permanence";
+    const double tx1 = r.m.target_x();
+    for (int i = 0; i < 25; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_GT(r.m.target_x(), tx1 + 0.05) << "the predicted position moves on at 0.2 m/s";
+    const double where = r.m.target_x() - 0.2 * 0.3;    // the target is the lead ahead of the prediction
+    r.mover(0.0f, 1.0f, prox_of(where)); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(r.m.chasing()) << "found near where predicted";
+    EXPECT_FALSE(r.m.coasting());
+    EXPECT_EQ(r.m.chases_reacquired(), 1);
+    EXPECT_EQ(r.m.chases_lost(), 0);
+    for (int i = 0; i < 60 + 150 + 5; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.coasting()); EXPECT_FALSE(r.m.have_target());
+    EXPECT_EQ(r.m.chases_lost(), 1);
+}
+
+TEST(BearingSeekLoop, ThePullDecaysWithEachLossAndRecovers) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05; p["chase_pull_decay"] = 0.5; p["chase_pull_recover_ticks"] = 1000.0;
+    Rig r(p);
+    auto chase_and_lose = [&]() {
+        for (int k = 0; k < 10; ++k) {
+            r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+            for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        }
+        for (int i = 0; i < 60; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    };
+    chase_and_lose();
+    EXPECT_NEAR(r.m.pull(), 0.5, 0.07) << "halved by the loss (a little recovered since)";
+    chase_and_lose();
+    EXPECT_LT(r.m.pull(), 0.45) << "halved again (a little recovered since)";
+    float v = 0.0f;
+    for (int k = 0; k < 8; ++k) {                        // eight sightings over 28 ticks: past chase_confirm_ticks
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        v = r.m.value();
+    }
+    EXPECT_TRUE(r.m.chasing()); EXPECT_LT(v, 0.5f) << "the need while chasing is the pull";
+    for (int i = 0; i < 2000; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_GT(r.m.pull(), 0.99) << "recovered";
+}

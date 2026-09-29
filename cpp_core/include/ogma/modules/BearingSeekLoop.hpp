@@ -123,6 +123,23 @@ private:
     // the loss, for a host that turns it into a LOOK (--stop-on-lost, 2026-09-29): true on the tick a chase is dropped
     // with the thing still moving, with the bearing (body frame, + = right) and range of where it was last predicted
     bool   lost_now_ = false; double lost_ego_ = 0.0, lost_range_ = 0.0;
+    // OBJECT PERMANENCE (2026-09-29, the operator: "some form of object permanence, especially for moving objects"):
+    // chase_permanence_ticks -- when the sightings stop with the thing still moving, the target keeps moving at its
+    // last velocity for up to this long, the need falling from 1 to 0 over it (COASTING), and a sighting near the
+    // prediction takes the chase up again; at the end the loss is reported (the look).  0 = the loss at once.
+    // THE PULL'S DECAY (habituation): chase_pull_decay -- every loss multiplies the chase's pull by this, and the pull
+    // recovers by 1/chase_pull_recover_ticks per tick; the need while chasing is the pull.  A thing that keeps getting
+    // away loses its hold, the way a known kind does.  1 = no decay.
+    int    chase_permanence_ticks_ = 0;
+    double chase_pull_decay_ = 1.0, chase_pull_recover_ticks_ = 3000.0, pull_ = 1.0;
+    bool   coasting_ = false; uint64_t coast_from_ = 0;
+    int    chases_reacquired_ = 0;
+    void   lose(uint64_t tick_id, double c, double s);
+public:
+    bool   coasting()          const { return coasting_; }
+    int    chases_reacquired() const { return chases_reacquired_; }
+    double pull()              const { return pull_; }
+private:
 public:
     int    chases_lost()    const { return chases_lost_; }
     int    chases_stopped() const { return chases_stopped_; }

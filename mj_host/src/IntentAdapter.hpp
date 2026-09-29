@@ -184,6 +184,9 @@ public:
     double chase_vy()      const;
     bool   mover_seen()    const;
     int    mover_cands()   const;
+    bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
+    int    chases_reacquired() const;
+    void   restore_brain_state(nlohmann::json const& s);
     bool   chase_lost_now() const;    // this tick a chase was dropped with the thing still moving...
     double chase_lost_ego() const;    // ...and where it was last predicted: bearing (rad, + = right) and range from the body
     double chase_lost_range() const;
