@@ -5019,3 +5019,38 @@ bearing it was made for is fixed. On R99, the fixed chase, six seeds.
 rescues a tie within the spread, and the chase's purity falls from 47 to 34 % because a taken block competes with a
 mover that has not yet confirmed. Not in the recommended stack by the numbers; an arm for the eye (preset R106),
 and on the confirmation's twelve seeds (sweep 12) beside R99.
+
+### 17.71 Sweep 12: the fixed chase on twelve seeds it never saw, and the priority's reversal (2026-09-29, late)
+
+The stack (R94 + stuck stop and escape + chase vx 0.35, the campaign base), R99 (+ the mover's memory and priority)
+and R106 (+ the take from the walk) on seeds 7–18, 600 s, the fixed chase; then pooled with seeds 1–6 (sweeps 10–11).
+
+| | the stack, 7–18 | R99, 7–18 | R106, 7–18 | the stack, n = 18 | R99, n = 18 |
+|---|---|---|---|---|---|
+| walls / min, mean ± sd · median · max | 22.4 ± 23.5 · 13.8 · 88 | 35.2 ± 32.2 · 22.1 · 98 | 32.3 ± 32.0 · 22.4 · 98 | **18.9** | 27.2 |
+| seeds over 60 walls a minute | 1 | 2 | 2 | 1 of 18 | 2 of 18 |
+| rescues / min · down % | 0.26 · 0.43 | 0.28 · 0.30 | 0.36 · 0.41 | 0.22 | 0.24 |
+| chases, twelve runs (moving train) | 58 (17, 29 %) | 70 (13, 19 %) | 71 (22, 31 %) | 79 (23) | **117 (35)** |
+| re-acquired · lost looks | 0 · 47 | 10 · 54 | 8 · 52 | 0 · 63 | 18 · 86 |
+| stops · at a thing · skills | 18.2 · — · 53 | 18.0 · — · 46 | 17.1 · — · 42 | | |
+| walk m/s | 0.179 | 0.159 | 0.163 | | |
+
+- **The fix confirms**: the chase is alive on every seed set — the stack 4.8 chases a run on the fresh seeds, R99
+  5.8, crossings chased 38 % on the stack (27 % before the fix on seeds 1–6).
+- **The priority's walk does not confirm.** On seeds 1–6 R99 walked at 10 walls a minute against the stack's 12;
+  on seeds 7–18 at 35 against 22, with two runs trapped past 60. Pooled over eighteen seeds R99 is *worse* on walls
+  (27 against 19), a tie on rescues and falls, and it pursues more: 117 chases against 79, 35 at the moving train
+  against 23, 18 re-acquisitions against none, a fifth slower on the walk (the time spent chasing and looking). The
+  purity is a tie (30 % against 29 %). The walls come with the pursuit: the track's long ends run 0.45 m from the
+  walls, and a duck chasing the train toward an end at 0.35 m/s meets the wall the train turns away from; more
+  chases, more of those. And five seconds without a static target after each of 86 losses is five seconds under
+  play, which walks the walls.
+- **The take from the walk (R106)** is R99 with a better chase purity (31 %) and the same walls: still a `PARTIAL`.
+
+**Verdicts, n = 18 on the fixed chase.** The stack: `WORKING` on the walk (walls 19, one trap in eighteen, rescues
+0.22) and now a live pursuit (4.4 chases a run). R99: `PARTIAL` — the pursuit-heavy form (6.5 chases a run, the
+train re-acquired after a loss, the operator's stated first priority) at a cost in walls (27) that the seeds 1–6
+signal had hidden. **The eye decides the trade**: preset "R94 · loaded + the STACK" for the walk, "R99 · the
+MOVER's PRIORITY" for the pursuit; both on the fixed chase. What would reconcile them is the chase knowing the
+walls — a pursuit that yields when its predicted target runs to within a body length of tall structure, the
+isolation measure the candidate already uses, applied to the target (unbuilt).
