@@ -926,7 +926,7 @@ path at once — divider, rail, reference, gain — and disagreement says *where
 
 | # | step | power | expected |
 |---|---|---|---|
-| **V1** | **Lead unplugged.** Across the two FSR conductors at the lead's free end: unloaded, then a finger press. Then `R_g` in place, and VCC↔GND | off | OL/MΩ unloaded → tens of kΩ pressed (proves sensor + tail + connector); `R_g` = 15 k ±1 %; VCC↔GND **not** shorted |
+| **V1** | **Three ohm readings at the foot's own 3-pin connector**, power off and unplugged — see §5.7.4. This is the whole build as one unit | off | the table in §5.7.4, and the three readings **identify the pinout by themselves** |
 | **V2** | Plug in. Foot **in the air**, read A0 | on | **≲ 60 counts.** ⚠ Proves nothing on its own — §5.3: an open FSR reads the same. Anywhere from ~0 to ~100 is acceptable; what matters is low and *stable* |
 | **V3** | **Press the toe with a finger, release** | on | **counts jump past 2000 and return within a second.** This is the real end-to-end proof, and it costs nothing — do it before the scale comes out |
 | **V4** | The mass series against the table above, one reading per mass at a **fixed dwell** | on | inverted `R_fsr` within a few % of the DMM curve |
@@ -941,6 +941,52 @@ rail, not the foot.
 regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### 5.7.4 V1 in full — three readings at the foot connector
+
+**Measure at the foot's own 3-pin connector, at its free end, power off and unplugged.** That
+single position has the entire build behind it — sensor, tail, both solder joints, `R_g`, the
+cap and the connector — so it answers "is my circuit correct" as one question. ⚠ Confirming the
+**FSR alone** does not cover the tail, the joints or the connector, which is where a working
+sensor still produces a dead channel.
+
+Only three pairs exist, and each one isolates a different part of the build:
+
+| pair | reads, unloaded | under a firm finger press | what it proves |
+|---|---|---|---|
+| **VCC ↔ SIG** | OL / ≫ MΩ | **~10–30 kΩ** | the sensor **and** its tail, joints and connector pin |
+| **SIG ↔ GND** | **15 kΩ** (steady; let the cap finish charging, τ ≈ 15 ms) | 15 kΩ, unchanged | `R_g` is fitted, and the cap is across it rather than in series |
+| **VCC ↔ GND** | OL / ≫ MΩ | **the sum of the other two** | the two halves are actually in series on a common node — the topology, not just the parts |
+
+**The third reading is the one people skip and it is the one that catches a miswire.** Parts
+one and two can both be right while the node is not common.
+
+#### The readings name the pins, so your wiring notes do not have to
+
+- the pin in **both** the press-sensitive pair and the 15 kΩ pair is **SIG**
+- of the other two, the one in the press-sensitive pair is **VCC**, the one in the 15 kΩ pair
+  is **GND**
+
+#### Failure signatures
+
+| reading | means |
+|---|---|
+| VCC↔SIG never leaves OL under a press | open tail, a dry joint, or a bad crimp — **the sensor may still be fine** |
+| SIG↔GND reads OL | `R_g` not connected, or the cap is in **series** instead of parallel |
+| SIG↔GND reads ~0 | `R_g` shorted, or a shorted cap |
+| VCC↔GND ≠ the sum | the node is not common: a bridge, or `R_g` tied to the wrong pin |
+
+#### Then the orientation, which is the remaining candidate
+
+With the connector's own pinout known, compare it to the header: **VCC and GND meter honestly
+(3.30 V, 0 V) because both are driven**, and SIG is the third — confirmed by driving it and
+watching A0 (§5.7.3), never by metering it.
+
+⚠ **Every orientation of this connector is electrically safe**, so the empirical test is
+legitimate: nothing on either side exceeds 3.3 V, and every path through the foot is
+current-limited by `R_g` (220 µA) or by the FSR (megohms). **Plug it in, note A0, unplug, rotate
+180°, plug in, note A0.** A reversed lead swaps SIG and GND, which is candidate **a** in §5.7.3
+and reads exactly the 0-counts-no-response being chased.
 
 ### 5.7.2 ✅ Characterised 2026-09-29 — the HAT's ADC carries charge between channels
 
