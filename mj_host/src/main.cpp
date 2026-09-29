@@ -17,6 +17,7 @@
 // than in somebody's memory.
 
 #include <algorithm>
+#include <sstream>
 #include <cmath>
 #include <functional>
 #include <cstdio>
@@ -1400,6 +1401,11 @@ bool g_head_joints = false;
 // centre of gravity forward might raise its speed"): an offset on the neck and head pitch joint targets (positive =
 // down / forward, the head over the feet), and the walker's own body_pitch command slot, wired and never set.  0 = off.
 double g_head_forward = 0.0, g_body_pitch = 0.0;
+std::string g_load_brain_modules = "motor_epm_intent";   // --load-brain-modules: which modules a level-2 --load-brain restores ("all" = every one)
+// --chase-vx VX (2026-09-29, the operator: "pursuing moving targets rapidly"): while the seek loop chases (or coasts after)
+// a mover, the forward command is raised to at least VX -- the walker's trained range reaches 0.4 m/s and the brain's own
+// pace is ~0.22.  A global lean (--body-pitch, --head-forward) bought falls; speed spent only on the chase.  0 = off.
+double g_chase_vx = 0.0;
 double g_head_phase_lead = 0.0, g_head_phase_learn = 0.0;   // --head-phase LEAD_TICKS LEARN_S: the gait-phase feed-forward
 double g_wander_bored_s = 0.0, g_wander_turn_deg = 90.0;   // --wander-bored S [--wander-turn DEG]
 // --stop-every S --stop-secs S [--stop-from S]: the walk-stop-look line's stimulus (playroom plan
@@ -1518,6 +1524,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_chase_vx > 0.0) std::fprintf(stderr, "  chase vx: the forward command raised to at least %.2f m/s while a mover is chased or coasted after\n", g_chase_vx);
     if (g_head_forward != 0.0) std::fprintf(stderr, "  head forward: the neck and head pitch targets offset by %.2f rad (the head over the feet)\n", g_head_forward);
     if (g_body_pitch != 0.0) std::fprintf(stderr, "  body pitch: the walker's body_pitch command slot set to %.2f rad\n", g_body_pitch);
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
@@ -1567,8 +1574,19 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         std::ifstream in(g_load_brain);
         if (!in) throw std::runtime_error("--load-brain: cannot open " + g_load_brain);
         nlohmann::json snap; in >> snap;
-        brain.restore_brain_state(snap.at("graph"));
-        std::fprintf(stderr, "level-2 brain restored from %s (the body at its reset; no babble)\n", g_load_brain.c_str());
+        nlohmann::json graph = snap.at("graph");
+        // --load-brain-modules LIST (default: motor_epm_intent -- the IDENTIFICATION only): a saved run's map, play
+        // field, cloud cache and outcome table are keyed to ITS odometry frame and ITS habituation; restored whole
+        // into a body at the origin they put the duck in a room it thinks it knows from somewhere else (campaign
+        // sweep 1: walls 42 +- 46 a minute).  The babble is the intent EPM's, so that is what a fresh run needs.
+        if (g_load_brain_modules != "all" && graph.contains("modules") && graph["modules"].is_object()) {
+            nlohmann::json kept = nlohmann::json::object();
+            std::stringstream ss(g_load_brain_modules); std::string id;
+            while (std::getline(ss, id, ',')) if (graph["modules"].contains(id)) kept[id] = graph["modules"][id];
+            graph["modules"] = kept;
+        }
+        brain.restore_brain_state(graph);
+        std::fprintf(stderr, "level-2 brain restored from %s (modules: %s; the body at its reset; no babble)\n", g_load_brain.c_str(), g_load_brain_modules.c_str());
     }
     std::fprintf(stderr, "level-2 graph %s%s\n", graph.c_str(), open_loop ? "  (open-loop override)" : "");
     {
@@ -1921,6 +1939,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         }
         if (driver == Driver::Brain) command.twist = twist;
         if (g_body_pitch != 0.0 && driver == Driver::Brain) command.body_pitch = g_body_pitch;
+        if (g_chase_vx > 0.0 && driver == Driver::Brain && chase_on && (brain.chase_active() || brain.chase_coasting()) && stop_phase == StopPhase::None)
+            command.twist[0] = std::max(command.twist[0], g_chase_vx);     // the pursuit at speed
         if (stop_on) {
             if (roll_on && !ball_stopped && t - last_roll_tick >= 75) { const auto b = body.body_xy("obj_ball0"); body.roll_body("obj_ball0", b[0], b[1], 0.0, 0.0); ball_stopped = true; }
             if (walk_on && walk_left > 0) {                       // the chair carried across, then put back home
@@ -2838,7 +2858,9 @@ void usage() {
         "      follow the seed unless --train-phase S.  --log-movers WINDOW_S logs the cloud's clusters through a\n"
         "      recency window on every cast (\"mvc\"), the stage-0 instrument for chasing moving things.\n"
         "      --stop-on-chase ends a stop when the seek loop confirms a chase (the walker follows the mover).\n"
-        "      --load-brain F restores a level-2 brain saved by --save-brain (the body at its reset): no babble.\n"
+        "      --load-brain F restores a level-2 brain saved by --save-brain (the body at its reset): no babble;\n"
+        "      --load-brain-modules LIST (default motor_epm_intent, the identification; all = everything).\n"
+        "      --chase-vx VX raises the forward command to at least VX while a mover is chased (the pursuit at speed).\n"
         "      --head-forward RAD offsets the neck and head pitch targets (the head over the feet); --body-pitch RAD\n"
         "      sets the walker's body_pitch command slot -- the speed levers, 0 = off.\n"
         "      --stop-on-lost starts a stop when a chase is lost, the sweep centred on where the thing went (a look, not a walk).\n"
@@ -3004,6 +3026,10 @@ int main(int argc, char** argv) {
             g_stop.map_on_stop = true;
         } else if (a == "--stop-scan") {
             g_stop.scan_amp = std::stod(next("--stop-scan")); g_stop.scan_hold_s = std::stod(next("--stop-scan"));
+        } else if (a == "--load-brain-modules") {
+            g_load_brain_modules = next("--load-brain-modules");
+        } else if (a == "--chase-vx") {
+            g_chase_vx = std::stod(next("--chase-vx"));
         } else if (a == "--head-forward") {
             g_head_forward = std::stod(next("--head-forward"));
         } else if (a == "--body-pitch") {

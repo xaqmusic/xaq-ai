@@ -4699,3 +4699,32 @@ finding: three seeds loud in its favour, one corner trap, and eight events a run
 §3.3's own warning about a lever that fires rarely. Not promoted without the eye (preset R94, seed 1: three lost
 looks). **Re-use:** the corner trap is the stuck stop's to answer (`--stop-on-stuck`, `--stuck-escape`), not this
 lever's; and a look that finds nothing should count as an answer to the outcome table one day.
+
+### 17.60 The campaign, sweep 1: the loaded brain, the stuck stop, permanence, the pull, and two leans (2026-09-29)
+
+**The harness** (chase phase §8): `--load-brain` for level 2 from `checkpoints/duck_r94_s1.brain.json`, the body at its
+reset, stops from the first second, 600 s a run, the judged window from 30 s; six arms on six seeds in one sweep.
+The loaded brain walks from the first second (vx 0.22 m/s mean in the first two minutes, against the babble's 0.00).
+
+| arm (600 s, n = 6) | walls / min | rescues / min · down % | stops · at a thing · open | chases (train) · lost looks | skills · at nothing | walk m/s |
+|---|---|---|---|---|---|---|
+| R94, the whole brain restored | 41.7 ± 46.2 | 0.20 · 0.29 | 11.3 · 5.2 · 4.5 | 9 (2) · 2 | 17 · 5 | 0.165 |
+| + `--stop-on-stuck 8 --stuck-escape 6` | 30.8 ± 18.5 | 0.18 · 0.53 | 13.8 · 6.3 · 4.7 | 10 (3) · 4 | 21 · 6 | 0.174 |
+| R95 permanence (3 s) | 37.2 ± 49.0 | 0.18 · 0.23 | 10.7 · 4.3 · 5.3 | 10 (3), 1 re-acquired · 2 | 13 · 6 | 0.166 |
+| R96 the pull's decay | = R94 | = | = | = | = | = |
+| `--head-forward 0.15` | 34.5 ± 28.0 | **0.60 · 1.25** | 11.7 · 5.0 · 5.8 | 17 (5) · 7 | 15 · 7 | 0.162 |
+| `--body-pitch 0.1` | 22.9 ± 10.8 | **0.87 · 7.36** | 14.2 · **9.8** · 3.8 | 9 (2) · 3 | **29** · 6 | 0.174 |
+
+- **The whole restored brain is the wrong harness.** Walls 42 ± 46: a saved run's map, play field, cloud cache and
+  outcome table are keyed to *its* odometry frame and *its* habituation; put into a body at the origin they place
+  the duck in a room it believes it knows from somewhere else. The babble is the intent EPM's alone, so
+  `--load-brain-modules` now restores the identification only by default (sweep 2 re-measures every arm on it).
+- **The stuck stop and escape**: walls 42 → 31 with the spread halved, stops up, the chases the same — a signal in
+  the right direction, to be re-read on the corrected harness.
+- **The leans buy falls, not speed.** Head forward 0.15 rad: rescues ×3, speed unchanged; body pitch 0.1: falls
+  7.4 % of ticks (one seed past 15 %), speed +5 %, and — the interesting artifact — the most stops at things and
+  skills of the sweep (the pitched trunk arrives at things). Sweep 2 tries both at half the angle, and spends the
+  speed where the operator wants it: `--chase-vx 0.35` raises the forward command only while a mover is chased.
+- **Permanence and the pull are unmeasurable at 1.5 chases a run**: two losses in six runs, one re-acquisition;
+  the pull's arm is the base's run to the decimal (a need of 0.6 still wins the arbiter). Sweep 2 adds the
+  mover's reach at 1.5 m (R97) for more starts, and both ride the corrected harness.
