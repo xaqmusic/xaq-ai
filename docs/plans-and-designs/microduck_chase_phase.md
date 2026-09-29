@@ -357,6 +357,9 @@ metre walked, under 5 cm gained): closing 40 → 48–55 %, opening 8 %, play ne
 held, arrivals up — the loudest move on the operator's criterion. The walls tie with two trapped seeds, traced to
 two defects (the renewal re-arming a forgotten place every tick; the stuck detector firing once per stall), both
 fixed and measured in §17.82.
+**What a forgotten place may refuse (§17.82):** barring the renewal empties the loop (a target held a quarter less,
+closing 72 %, walls doubled under play); the renewal is load-bearing for engagement. The as-built progress forget
+with the stuck re-arm is the arm (§17.83).
 
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,

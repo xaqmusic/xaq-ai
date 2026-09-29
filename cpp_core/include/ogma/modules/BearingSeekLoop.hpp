@@ -157,7 +157,8 @@ private:
     int static_yield_tall_ = 0; int static_yielded_ = 0; int static_yield_drops_ = 0;
     // the progress forget
     double progress_walk_m_ = 0.0, progress_m_ = 0.05, walked_ = 0.0, best_range_ = 1e9; int progress_forgets_ = 0;
-    bool have_syield_ = false; double syield_x_ = 0.0, syield_y_ = 0.0; uint64_t syield_tick_ = 0;
+    bool have_syield_ = false, syield_static_ = false; double syield_x_ = 0.0, syield_y_ = 0.0; uint64_t syield_tick_ = 0;
+    int target_src_ = 0;   // the held static target's source: 1 a sighting, 2 the renewal, 3 a mover that stopped
     uint64_t target_set_tick_ = 0; double target_px_ = 0.0, target_py_ = 0.0;
 public:
     int static_yielded() const { return static_yielded_; }

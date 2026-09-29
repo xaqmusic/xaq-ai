@@ -278,7 +278,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         if (!refix && !take) seen_ = false;
     }
     // a sighting at a place a static target yielded from (the foot of tall structure): not a thing, for forget_ticks
-    if (seen_ && have_syield_ && have_pose_) {
+    if (seen_ && have_syield_ && syield_static_ && have_pose_) {
         if (tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
         else {
             const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
@@ -296,7 +296,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
             if (rt->values.size() >= 3 && rt->values[0] > renew_min_) {
                 const double rr = std::hypot(double(rt->values[1]) - px_, double(rt->values[2]) - py_);
                 if (rr > 1.5 * arrive_m_ && rr < renew_range_) {
-                    tx_ = rt->values[1]; ty_ = rt->values[2]; have_target_ = true; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_;
+                    tx_ = rt->values[1]; ty_ = rt->values[2]; have_target_ = true; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_; target_src_ = 2;
                     conf_ = std::clamp(rt->values[0], 0.0f, 1.0f); ++renewals_;
                 }
             }
@@ -332,7 +332,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         tx_ = px_ + c * bx - s * by;
         ty_ = py_ + s * bx + c * by;
         if (!have_target_ || std::hypot(tx_ - target_px_, ty_ - target_py_) > chase_gate_m_) target_set_tick_ = tick_id;
-        target_px_ = tx_; target_py_ = ty_;
+        target_px_ = tx_; target_py_ = ty_; target_src_ = 1;
         have_target_ = true;
         conf_ = 1.0f;
         range_left_ = range;
@@ -361,13 +361,14 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
     // THE PROGRESS FORGET (2026-09-29, §17.81): with a static target held, every progress_walk_m of walking must shrink
     // the range left by progress_m; a walk that does not close on its target -- a wall between, an orbit -- forgets it
     if (have_syield_ && tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
-    if (progress_walk_m_ > 0.0 && have_target_ && !chasing_ && !coasting_ && !(have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_)) {
+    if (progress_walk_m_ > 0.0 && have_target_ && !chasing_ && !coasting_) {
         if (tick_id == target_set_tick_) { walked_ = 0.0; best_range_ = range_left_; }
         else if (walked_ >= progress_walk_m_) {
             if (best_range_ - range_left_ < progress_m_) {
-                // forgotten -- and the place refused for forget_ticks (sweep 32, seed 14: the outcome loop's renewal
-                // re-armed the forgotten target every tick and reset the window; 90 s in a corner)
-                have_syield_ = true; syield_x_ = tx_; syield_y_ = ty_; syield_tick_ = tick_id;
+                // forgotten.  The place is NOT refused: the outcome loop's renewal may re-arm it and the window restarts
+                // (sweeps 33-35: refusing the renewal, with or without the sightings, left the loop without a target a
+                // quarter more of the walk and play's walk doubled the walls; the corner that motivated the refusal --
+                // seed 14, §17.81 -- is the stuck detector's, re-armed now when its escape ends)
                 have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++progress_forgets_;
             }
             else best_range_ = range_left_;
@@ -375,15 +376,19 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         }
     } else { walked_ = 0.0; best_range_ = 1e9; }
     if (have_syield_ && tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
-    if ((static_yield_tall_ > 0 || progress_walk_m_ > 0.0) && have_target_ && !chasing_ && !coasting_ && have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_) {
-        // a target set at the yielded place by any path (a sighting, the renewal, a mover that stopped): refused
-        // (sweep 23: the renewal re-armed the yielded place and it yielded again two ticks later, 1 700 times a run)
+    if (static_yield_tall_ > 0 && have_target_ && !chasing_ && !coasting_ && have_syield_ && syield_static_
+        && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_) {
+        // a target set at the yielded place: refused -- by any path at a static-yielded place (sweep 23: the renewal
+        // re-armed it and it yielded again two ticks later, 1 700 times a run); by the RENEWAL alone at a place the
+        // progress forget refuted (sweep 33: refusing the sightings too left the loop without a target a quarter more
+        // of the walk, and play's walk doubled the walls) -- the renewal is the outcome loop's old need, a fresh
+        // sighting is new evidence
         have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yield_drops_;
     }
     if (static_yield_tall_ > 0 && have_target_ && !chasing_ && !coasting_ && !yield_topic_.empty() && tick_id >= target_set_tick_ + 2) {
         if (auto yt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(yield_topic_)))
             if (yt->values.size() >= 1 && int(yt->values[0]) >= static_yield_tall_) {
-                have_syield_ = true; syield_x_ = tx_; syield_y_ = ty_; syield_tick_ = tick_id;
+                have_syield_ = true; syield_static_ = true; syield_x_ = tx_; syield_y_ = ty_; syield_tick_ = tick_id;
                 have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yielded_;
             }
     }
@@ -501,7 +506,7 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
             const bool stopped = chase_stop_v_ <= 0.0 || std::hypot(cand_vx_, cand_vy_) < chase_stop_v_;
             if (stopped) {
                 // the thing stopped: where it was last seen is an ordinary remembered target from here
-                tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_;
+                tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_; target_src_ = 3;
                 chasing_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
             } else if (chase_permanence_ticks_ > 0) {
                 // the thing left the view still moving: keep it moving in mind (coasting), the candidate kept for a re-sighting

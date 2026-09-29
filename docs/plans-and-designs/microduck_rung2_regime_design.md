@@ -5394,3 +5394,36 @@ the world refutes (a wall between, an orbit). R112 = R108 + it, on the eye's arm
 
 **Verdict as built, n = 18.** `WORKING` on the walk's closing (the loudest move of the campaign on the operator's
 criterion), `PARTIAL` on the walls pending the two fixes.
+
+### 17.82 Sweeps 33–35: what a forgotten place may refuse — the renewal is load-bearing (2026-09-29, night)
+
+Three forms of the progress forget's aftermath, each on the eye's arm, R112, seeds 1–6 (and 7–18 for the first):
+
+| seeds 1–6 | as built (§17.81): the renewal re-arms at once | refuse everything there for 60 s | refuse the renewal, take a sighting |
+|---|---|---|---|
+| walls / min | **17.8 ± 9.1** (max 31) | 39.4 ± 17.8 (max 63) | 39.7 ± 26.4 (seed 1: 84) |
+| a target held on the walk | 227 s a run | 167 s | 160 s |
+| closing · opening | 55 · 8 % | **72 · 4 %** | **71 · 4 %** |
+| heading error under seek | 0.41 rad | 0.31 | 0.31 |
+| arrival stops (host) · the loop's arrivals | 14.5 · 50 | 13.8 · 54 | 12.3 · 45 |
+| forgets · renewals | 147 · — | 50 · 22 179 refused | 62 · 40 523 refused |
+| stuck stops | 10 | 6 | 3 |
+| chases (moving train) | 25 (9) | 12 (6) | 22 (13) |
+| wall bursts ≥ 5 s a run · longest | 0.5 · 8 s | 0.5 · 21 s | 1.7 · 23 s |
+| seeds 7–18: walls · max · closing | 38.4 · 90 · 48 % | 34.2 · 120 · 69 % | — |
+
+- **Refusing the renewal empties the loop.** With the forgotten place barred to the outcome loop's need, the walk
+  holds a target a quarter less of the time; what it keeps it closes on beautifully (72 %), and the rest of the
+  walk is play's, which doubles the walls. Admitting a fresh sighting changes nothing: the sightings at stops are
+  too few to refill what the renewal did. The renewal — "a need still open at the thing re-arms it" — is the
+  loop's engagement, and the progress forget's churn with it (a forget, a renewal, a restarted window) is cheap
+  everywhere but a corner the body cannot leave, which is the stuck detector's business, not the target's.
+- **The stuck detector's re-arm** (fires again when its escape ends, §17.81) did not multiply escapes (26 on seeds
+  7–18 both ways) and shortened seed 14 (90 → 42) and 16 (77 → 11) while seed 9 found a new trap (120): under play,
+  no target, pushing at the east wall with the ToF reading nothing at contact — the walker's blind zone against a
+  surface (O35), a sensor's gap, not a loop's.
+
+**Verdict.** The refusal `REGRESSION` in both forms; the as-built progress forget (the renewal admitted) is the
+form, with the stuck re-arm kept — measured as the arm in §17.83 (sweeps 37–38). Lesson for the ledger: on this
+duck the outcome loop's renewal is load-bearing for engagement; a forget or yield that bars it hands the walk to
+play, and play walks the walls.
