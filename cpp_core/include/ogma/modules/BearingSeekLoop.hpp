@@ -23,6 +23,7 @@
 // has.  Module absent = byte-identical.
 #pragma once
 
+#include <deque>
 #include <limits>
 #include <string>
 #include <nlohmann/json.hpp>
@@ -149,6 +150,19 @@ private:
     // gate), too fast (implied a speed over chase_v_max), still (chase_min_v failed at confirmation), timed out (forgotten
     // unconfirmed).  A crossing became a candidate 9 times in 10 and a chase 1 in 4 (sweep 6); these say which gate.
     int    cand_replaced_ = 0, cand_fast_ = 0, cand_still_ = 0, cand_timeout_ = 0;
+    // the last sighting's judgement, for the record: miss from the prediction (m), implied speed (m/s), and the decision
+    // (0 none this tick, 1 confirmed, 2 replaced: missed the gate, 3 replaced: too fast, 4 a new candidate, 5 chased, 6 still)
+    double last_miss_ = 0.0, last_speed_ = 0.0; int last_decision_ = 0;
+    double last_seq_ = -1.0;   // the mover token's recompute tick last taken as a sighting (a token without it: every one)
+    // the candidate's recent sightings (tick, x, y), kept for chase_v_window_s: the velocity is the displacement across
+    // this ring, long enough to average the centroid's jitter and short enough to see a thing that just stopped
+    std::deque<std::array<double, 3>> sight_;
+    double chase_v_window_s_ = 0.8;
+public:
+    double last_miss()  const { return last_miss_; }
+    double last_speed() const { return last_speed_; }
+    int    last_decision() const { return last_decision_; }
+private:
 public:
     int cand_replaced() const { return cand_replaced_; }
     int cand_fast()     const { return cand_fast_; }

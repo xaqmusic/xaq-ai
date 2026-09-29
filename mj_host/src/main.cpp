@@ -2578,9 +2578,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (train_on) std::printf(",\"train\":[%.4f,%.4f,%.4f,%.3f,%.3f,%d]", train_x, train_y, train_yaw, train_vx, train_vy, train_moving ? 1 : 0);
             // THE CHASE (stage 1): [chasing, sightings held, target x, y (odometry frame), its velocity, a mover seen this tick,
             // ...and [7..9]: a candidate held, its position (odometry frame)
-            if (chase_on) std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%d,%.3f,%.3f,%d]", brain.chase_active() ? 1 : 0, brain.chase_n(),
-                                      brain.seek_target_x(), brain.seek_target_y(), brain.chase_vx(), brain.chase_vy(), brain.mover_seen() ? 1 : 0,
-                                      brain.chase_have_cand() ? 1 : 0, brain.chase_cand_x(), brain.chase_cand_y(), brain.chase_coasting() ? 1 : 0);
+            if (chase_on) { const auto jg = brain.chase_last_judgement();   // ...[11..13]: the last sighting's miss, implied speed, decision
+                std::printf(",\"chase\":[%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%d,%.3f,%.3f,%d,%.3f,%.2f,%d]", brain.chase_active() ? 1 : 0, brain.chase_n(),
+                            brain.seek_target_x(), brain.seek_target_y(), brain.chase_vx(), brain.chase_vy(), brain.mover_seen() ? 1 : 0,
+                            brain.chase_have_cand() ? 1 : 0, brain.chase_cand_x(), brain.chase_cand_y(), brain.chase_coasting() ? 1 : 0, jg[0], jg[1], int(jg[2])); }
             // THE LIVE VIEW (--log-cloud-live): the cloud as the module builds, forgets and remembers it
             if (g_log_cloud_live && cloud_on) {
                 if (cloud_opened_now) std::printf(",\"cldo\":[%.4f,%.4f,%.4f,%d]", cloud_anchor_wx, cloud_anchor_wy, cloud_anchor_wyaw, brain.cloud_walking() ? 1 : 0);

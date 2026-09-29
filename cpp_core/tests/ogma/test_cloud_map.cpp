@@ -514,7 +514,7 @@ TEST(CloudMap, AYoungClusterAgainstTheCloudsOwnAgeIsTheMover) {
     EXPECT_NEAR(cl[size_t(r.m.mover_index())].cy, 0.5, 0.1) << "the mover is the cube to the left";
     auto tok = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.mover"));
     ASSERT_NE(tok, nullptr);
-    ASSERT_EQ(tok->values.size(), 5);
+    ASSERT_EQ(tok->values.size(), 6);
     EXPECT_LT(tok->values[0], -0.2f) << "to the left: a negative +right component";
     EXPECT_GT(tok->values[1], 0.8f);
     EXPECT_GT(tok->values[2], 0.0f);

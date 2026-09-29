@@ -316,12 +316,18 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
 }
 
 void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
-    lost_now_ = false;
-    float mx = 0.0f, my = 0.0f, mprox = 0.0f;
+    lost_now_ = false; last_decision_ = 0;
+    float mx = 0.0f, my = 0.0f, mprox = 0.0f; bool fresh = true;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(mover_topic_))) {
-        if (pt->tick_id == tick_id && pt->values.size() >= 3) { mx = pt->values[0]; my = pt->values[1]; mprox = pt->values[2]; }
+        if (pt->tick_id == tick_id && pt->values.size() >= 3) {
+            mx = pt->values[0]; my = pt->values[1]; mprox = pt->values[2];
+            // a sighting is new only when the cloud recomputed its clusters (the token's sixth value); the bearing alone
+            // is re-aimed every tick and would otherwise count four times over
+            if (pt->values.size() >= 6) { fresh = double(pt->values[5]) != last_seq_; if (fresh) last_seq_ = double(pt->values[5]); }
+        }
     }
     mover_seen_ = mprox > min_conf_ && (mx * mx + my * my) > 1e-6f;
+    if (mover_seen_ && !fresh) mover_seen_ = false;   // the same sighting again: nothing new to judge
     if (mover_seen_) {
         const double n = std::sqrt(double(mx) * mx + double(my) * my);
         const double fwd = my / n, left = -mx / n, range = std::max(0.0, 1.0 - double(mprox)) * proximity_range_;
@@ -332,21 +338,38 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
             const double ex = cand_x_ + cand_vx_ * dt, ey = cand_y_ + cand_vy_ * dt;   // where the candidate should be
             const double miss = std::hypot(fx - ex, fy - ey);
             const double vx = (fx - cand_x_) / dt, vy = (fy - cand_y_) / dt;
-            if (miss <= chase_gate_m_ && std::hypot(vx, vy) <= chase_v_max_) {
-                // a confirmation: the velocity follows the sightings (a new candidate's first step sets it outright)
-                const double a = cand_n_ >= 2 ? 0.5 : 1.0;
-                cand_vx_ = (1.0 - a) * cand_vx_ + a * vx; cand_vy_ = (1.0 - a) * cand_vy_ + a * vy;
+            // the speed test over the WATCH, not the last step: a centroid's jitter of 8 cm between casts 80 ms apart reads
+            // as 1 m/s and replaced a crossing train at half a metre (2026-09-29); under 0.2 s of watching the gate alone judges
+            const double watched = double(tick_id - cand_first_) / 50.0;
+            // the speed over the ring of recent sightings (chase_v_window_s), not one step: a centroid's per-step jitter is 1 m/s
+            while (!sight_.empty() && double(tick_id) - sight_.front()[0] > chase_v_window_s_ * 50.0) sight_.pop_front();
+            double speed_w = 0.0, rvx = vx, rvy = vy;
+            if (!sight_.empty()) {
+                const double rdt = double(tick_id - uint64_t(sight_.front()[0])) / 50.0;
+                if (rdt >= 0.2) { rvx = (fx - sight_.front()[1]) / rdt; rvy = (fy - sight_.front()[2]) / rdt; speed_w = std::hypot(rvx, rvy); }
+            }
+            last_miss_ = miss; last_speed_ = speed_w;
+            const bool ok = miss <= chase_gate_m_ && speed_w <= chase_v_max_;
+            last_decision_ = ok ? 1 : (miss <= chase_gate_m_ ? 3 : 2);
+            if (ok) {
+                // a confirmation: the velocity is the displacement since the FIRST sighting over the watch once there is
+                // 0.2 s of it (a centroid's per-step jitter is 1 m/s; over a second it is 0.04), the first steps' own before
+                if (speed_w > 0.0 || (!sight_.empty() && double(tick_id - uint64_t(sight_.front()[0])) / 50.0 >= 0.2)) { cand_vx_ = rvx; cand_vy_ = rvy; }
+                else { const double a = cand_n_ >= 2 ? 0.5 : 1.0; cand_vx_ = (1.0 - a) * cand_vx_ + a * vx; cand_vy_ = (1.0 - a) * cand_vy_ + a * vy; }
+                sight_.push_back({double(tick_id), fx, fy});
                 cand_x_ = fx; cand_y_ = fy; cand_tick_ = tick_id; ++cand_n_;
                 if (coasting_) { coasting_ = false; chasing_ = true; ++chases_reacquired_; }   // found where predicted: the chase resumes
             } else if (!chasing_ && !coasting_) {
                 // an unconfirmed candidate that did not follow: this sighting is the new candidate
                 if (miss <= chase_gate_m_) ++cand_fast_; else ++cand_replaced_;
                 cand_x_ = cand_x0_ = fx; cand_y_ = cand_y0_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+                sight_.clear(); sight_.push_back({double(tick_id), fx, fy});
             }
             // (a chased target ignores a stray sighting; it is another thing)
         } else if (!have_cand_) {
-            have_cand_ = true;
+            have_cand_ = true; last_decision_ = 4; last_miss_ = 0.0; last_speed_ = 0.0;
             cand_x_ = cand_x0_ = fx; cand_y_ = cand_y0_ = fy; cand_vx_ = 0.0; cand_vy_ = 0.0; cand_tick_ = cand_first_ = tick_id; cand_n_ = 1;
+            sight_.clear(); sight_.push_back({double(tick_id), fx, fy});
             // the memory of a lost mover: a sighting where it should now be is the same thing, back in view
             if (have_memory_ && tick_id > mem_tick_ && tick_id - mem_tick_ <= uint64_t(chase_memory_ticks_)) {
                 const double dt = double(tick_id - mem_tick_) / 50.0;
@@ -364,7 +387,7 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 const double disp = std::hypot(cand_x_ - cand_x0_, cand_y_ - cand_y0_);
                 moved = std::hypot(cand_vx_, cand_vy_) >= chase_min_v_ && watched > 0.0 && disp / watched >= chase_min_v_;
             }
-            if (moved) { chasing_ = true; ++chases_; } else ++cand_still_;
+            if (moved) { chasing_ = true; ++chases_; last_decision_ = 5; } else { ++cand_still_; last_decision_ = 6; }
         }
     }
     if (coasting_ && tick_id - coast_from_ >= uint64_t(chase_permanence_ticks_)) {

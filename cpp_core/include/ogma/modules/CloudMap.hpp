@@ -288,6 +288,7 @@ private:
     std::vector<Thing> recent_;             // the window's clusters, as last computed
     int    mover_ = -1, mover_cands_ = 0;   // the attended mover (index into recent_) and candidates seen in all
     double mover_age_s_ = 0.0, mover_oldest_s_ = 0.0;
+    uint64_t mover_tick_ = 0;               // the tick the candidate was last recomputed (the token's sixth value)
     std::array<float, 3> mover_bearing_{0.0f, 0.0f, 0.0f};
     std::vector<Thing>   things_, filed_things_;
     int                  attended_ = -1;

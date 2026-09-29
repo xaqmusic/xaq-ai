@@ -823,7 +823,7 @@ std::array<float, 3> CloudMap::bearing_of(const Thing& t, double yaw) const {
 }
 
 void CloudMap::update_movers(double yaw, uint64_t tick_id) {
-    mover_ = -1; mover_bearing_ = {0.0f, 0.0f, 0.0f}; mover_age_s_ = 0.0; mover_oldest_s_ = 0.0;
+    mover_ = -1; mover_bearing_ = {0.0f, 0.0f, 0.0f}; mover_age_s_ = 0.0; mover_oldest_s_ = 0.0; mover_tick_ = tick_id;
     recent_.clear();
     if (!open_) return;
     // a cloud vouches for nothing until it has watched for two windows
@@ -864,10 +864,15 @@ void CloudMap::publish_mover(uint64_t tick_id) {
     out->tick_id = tick_id;
     out->producer_id = std::string(id());
     out->sensor = "mover_bearing";
-    out->values = Eigen::VectorXf::Zero(5);
+    // [vx, vy, proximity, age, oldest, recompute_tick]: the bearing is re-aimed every tick for yaw drift, but the
+    // SIGHTING is new only when the clusters were recomputed (every things_every ticks) -- a consumer estimating
+    // velocity must count sightings by the sixth value, not by ticks (2026-09-29: four identical tokens per
+    // recompute dragged the chase's velocity to zero and read a crossing train as still)
+    out->values = Eigen::VectorXf::Zero(6);
     if (mover_ >= 0) {
         out->values[0] = mover_bearing_[0]; out->values[1] = mover_bearing_[1]; out->values[2] = mover_bearing_[2];
         out->values[3] = float(mover_age_s_); out->values[4] = float(mover_oldest_s_);   // ticks
+        out->values[5] = float(mover_tick_);
     }
     bus_->publish(mover_topic_, out);
 }

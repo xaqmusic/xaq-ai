@@ -34,13 +34,15 @@ struct Rig {
     }
     // THE CHASE: a mover sighting on percept.mover_bearing this tick (the token must carry the tick, as CloudMap's does)
     float mvx = 0.0f, mvy = 0.0f, mprox = 0.0f;
-    void mover(float vx, float vy, float prox) { mvx = vx; mvy = vy; mprox = prox; }
+    double mseq = -1.0;   // the token's recompute tick (a sixth value); -1 = the old five-value token
+    void mover(float vx, float vy, float prox, double seq = -1.0) { mvx = vx; mvy = vy; mprox = prox; mseq = seq; }
     void step(double x, double y, double yaw, float vx, float vy, float prox, bool walking = false) {
         bus.begin_tick(t);
         if (mprox > 0.0f) {
             auto mv = std::make_shared<ogma::ProprioToken>();
             mv->tick_id = t;
-            mv->values = Eigen::VectorXf(5); mv->values << mvx, mvy, mprox, 10.0f, 300.0f;
+            if (mseq >= 0.0) { mv->values = Eigen::VectorXf(6); mv->values << mvx, mvy, mprox, 10.0f, 300.0f, float(mseq); }
+            else { mv->values = Eigen::VectorXf(5); mv->values << mvx, mvy, mprox, 10.0f, 300.0f; }
             bus.publish("percept.mover_bearing", mv);
             mprox = 0.0f;
         }
@@ -277,7 +279,7 @@ TEST(BearingSeekLoop, AChaseLostWhileMovingIsDroppedAndOneThatStoppedIsRemembere
         for (int i = 0; i < 3; ++i) stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
     }
     const double last = 1.0 + 0.2 * 36.0 / 50.0;
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < 14; ++k) {                       // 1.1 s still: the velocity ring (0.8 s) holds only still sightings
         stopped.mover(0.0f, 1.0f, prox_of(last)); stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
         for (int i = 0; i < 3; ++i) stopped.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
     }
@@ -414,4 +416,26 @@ TEST(BearingSeekLoop, TheMemoryHoldsOffAStaticTargetAndTheGazeFollowsTheLostThin
     EXPECT_FALSE(std::isfinite(r.m.chase_gaze_ego()));
     r.step(0, 0, 0, -0.7f, 0.7f, prox_of(0.8));
     EXPECT_TRUE(r.m.have_target()) << "with nothing moving in mind, the static thing is a target again";
+}
+
+// 2026-09-29: the cloud recomputes every four ticks but publishes the bearing every tick.  Repeated tokens with the same
+// recompute tick are not new sightings (they dragged the velocity to zero); and a crossing whose centroid jitters by 8 cm
+// between casts is still chased, because the speed is judged over the watch, not the last step.
+TEST(BearingSeekLoop, RepeatedTokensAreOneSightingAndAJitteryCrossingIsChased) {
+    ogma::ParamMap p = chase_params();
+    p["chase_min_v"] = 0.1;
+    Rig r(p);
+    // a thing crossing left to right at 0.2 m/s, 0.6 m ahead, seen every 4 ticks with +-4 cm of jitter, the token
+    // repeated on the three ticks between (the same recompute tick)
+    for (int k = 0; k < 12; ++k) {
+        const double x = -0.3 + 0.2 * (4.0 * k / 50.0) + ((k % 2) ? 0.04 : -0.04);   // right of the body = +vx
+        const double n = std::hypot(x, 0.6);
+        for (int i = 0; i < 4; ++i) {
+            r.mover(float(x / n), float(0.6 / n), prox_of(n), double(4 * k));
+            r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        }
+    }
+    EXPECT_TRUE(r.m.chasing()) << "a jittery crossing, chased";
+    EXPECT_NEAR(r.m.chase_vy(), -0.2, 0.08) << "moving to the right (body y is left): -0.2 m/s in y";
+    EXPECT_LE(r.m.chase_n(), 12) << "at most one sighting per recompute";
 }
