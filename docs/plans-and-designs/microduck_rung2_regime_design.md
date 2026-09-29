@@ -5205,3 +5205,44 @@ FORGETS"). The floor under every arm is the walk's corner trap, which lands on o
 (R99 seeds 11 and 14, R108 seed 7, R109 seeds 1 and 6) and which the stuck escape does not free; the next walk lever
 is there (O49's free space, or an escape that turns rather than backs). The pursuit's next lever is the look after
 a yield (R109's purity) once that floor is raised.
+
+### 17.76 Sweeps 19–20: the heading reflex on the campaign's arm — the channel closes, the walk does not (2026-09-29, night)
+
+**The operator's eye on R108 seed 1** (walks past the train it attends at 0.59 m, circles the green block, ignores
+the red ball after a stop) traced through the log to one mechanism: the seek loop held a target 92 % of the run,
+and the body did not walk to it. `walk_closing.py` (the new instrument) on R108's eighteen runs: a target held on
+the walk 354 s a run; the range closing on 32 % of one-second windows, tangential 40 %, opening 27 %; with seek
+holding the heading (54 %) closing 38 %; the heading error's median 1.26 rad; the yaw command's sign agreeing with
+the reference on 49–67 % of firm half-seconds at every error size — a coin flip. The walker's yaw column does not
+hold a heading (§17.17, §17.37), and the campaign's arguments never carried the heading reflex, set aside on
+2026-09-22 (O57: the loops' targets were play's wall nodes then). R108 + `--heading-reflex 1.0 0.3 1.0` on seeds
+1–6 (sweep 19) and 7–18 (sweep 20), against R108's own runs (seed-deterministic):
+
+| n = 18 | R108 | R108 + reflex |
+|---|---|---|
+| walls / min, mean ± sd · median | 19.2 ± 27.2 · 11.8 | **28.5 ± 34.0 · 17.1** (higher on 14 of 18; seed 7: 153, seed 1: 38) |
+| stuck stops · escapes | 36 · 34 | 28 · 27 |
+| yaw command toward the reference, \|err\| 0.3–1.5 rad | 57–67 % | **79–80 %** |
+| heading error while seek steers, median | 1.26 rad (1–6) · 1.12 (7–18) | **0.74 · 0.70** |
+| closing · tangential · opening (target held, walking) | 32 · 40 · 28 % (1–6); 33 · 40 · 27 (7–18) | 31 · 48 · 22 %; 33 · 47 · 21 |
+| closing with seek steering, target 1.0–1.5 m | 41 % | **61 %** |
+| closing with seek steering, target under 0.5 m · tangential | 46 · 41 % | 34 · **60 %** (twice the windows) |
+| attended on the walk nearer than the held target, not taken | 8.5 (1–6) · 6.2 (7–18) a run | **4.0 · 4.7** |
+| arrival stops · near-misses a run | 5.0 · 2.2 (1–6); 5.6 · 3.3 (7–18) | 6.3 · 4.2; 6.3 · 3.1 |
+| chases (1–6) · re-acquired · yields · dropped | 29 · 3 · 13 · 10 | 23 · 2 · 9 · 54 |
+
+- **On the channel the reflex does what §17.37 measured**: agreement 57–67 → 79–80 %, the heading error halved,
+  and where the field is clear the walk goes where seek points (closing 61 % at 1–1.5 m).
+- **Within a metre of the thing it is released.** The reflex's share is `1 − near/gate` on the raw ToF field, and
+  the thing walked to is a ToF hit: inside the gate the walker's own avoidance owns yaw again and orbits the
+  thing — under 0.5 m the tangential share goes 41 → 60 % over twice the windows, near-misses 2.2 → 4.2 a run on
+  seeds 1–6. The closing share over the whole walk does not move (32 → 31, 33 → 33).
+- **The walls come back** (O57's cost): play holds the heading 37–41 % of the time and the reflex follows it
+  faithfully; walls 19 → 28 a minute, higher on 14 of 18 seeds, seed 7's trap deeper (124 → 153) — while the stuck
+  stops fall 36 → 28: the reflex's walls are brushed in passing, not the corner trap.
+
+**Verdict, n = 18.** The reflex alone: `WORKING` on the channel, `NULL` on the closing, `REGRESSION` on the walls.
+The mechanism was a weakened slice again (§3.2 item 6): a hold on the heading that lets go exactly where the
+arrival happens. **The pair** the things phase built for the last metre is the seek gate (`--seek-gate`, T2: while
+seek holds the reference its target's ToF sector reads free to the walker's sense) — extended now to the reflex's
+release (the same sector is free for `near`; off = byte-identical). Measured in §17.77 (sweeps 21–22).

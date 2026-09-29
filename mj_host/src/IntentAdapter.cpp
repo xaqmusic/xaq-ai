@@ -333,7 +333,11 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
         const double reflex = std::clamp(want, -kTwistRangeVyaw, kTwistRangeVyaw);
         // the share: 1 with nothing within the gate's reach, 0 at a wall (the brain's avoidance keeps the yaw)
-        const double near = std::max({double(tof[0]), double(tof[1]), double(tof[2])});
+        // the seek gate covers the reflex too (2026-09-29, sweep 19: the reflex closed on its target at 1-1.5 m and was
+        // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)
+        std::array<float, 4> tof_r = tof;
+        if (seek_gate_ && last_steer_ == 3) { const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1); tof_r[size_t(slot)] = 0.0f; }
+        const double near = std::max({double(tof_r[0]), double(tof_r[1]), double(tof_r[2])});
         hr_share_ = std::clamp(1.0 - near / std::max(1e-6, hr_gate_), 0.0, 1.0);
         last_twist_[2] = hr_share_ * reflex + (1.0 - hr_share_) * last_twist_[2];
     }

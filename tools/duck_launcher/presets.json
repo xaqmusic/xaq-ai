@@ -1224,6 +1224,31 @@
   }
  },
  {
+  "name": "R108 · + the heading reflex + the SEEK GATE: the thing walked to is not an obstacle (--seek-gate; the reflex's release ignores the target's sector)",
+  "series": 108.6,
+  "hint": "Sweep 19 (2026-09-29): the reflex halves the heading error and closes on its target at 1-1.5 m (61 % of windows, from 41 %) but is released within a metre of it -- the thing is a ToF hit inside the reflex's gate -- and the walker's avoidance orbits the thing (near-misses 2.2 -> 4.2 a run, walls 11 -> 18). The seek gate (things phase T2) frees the target's sector for the walker's sense, and now for the reflex's release too. WATCH: the last metre -- the duck walking straight onto the block or ball and the arrival stop; and the walls.",
+  "state": {
+   "config": "a1v2_r108_yield_forgets.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate",
+   "fast_until": 0,
+   "checkpoint": "duck_r94_s1.brain.json"
+  }
+ },
+ {
   "name": "R110 · the yield's REACH: R108 with the tall-structure radius at 0.5 m, so the track's ends (0.45 m from the walls) are within it",
   "series": 110,
   "hint": "R108 + cloud.target_iso_radius 0.5 (2026-09-29). R108's yields fired at the chair beside the track and at wall faces, never at the track's ends: those run 0.45 m from the walls, beyond the 0.35 m body length. WATCH: the dash after the train toward an end stopping short of the wall; 'chases yielded' in the summary.",
