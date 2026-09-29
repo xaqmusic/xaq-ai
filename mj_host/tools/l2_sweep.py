@@ -338,6 +338,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("configs", nargs="+")
     ap.add_argument("--seeds", type=int, default=6)
+    ap.add_argument("--seed-from", type=int, default=1, help="the first seed (2026-09-29: a confirmation on seeds a signal did not use, e.g. --seeds 12 --seed-from 7)")
     ap.add_argument("--secs", type=int, default=1500)
     ap.add_argument("--control-from", type=float, default=None)
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) // 2))
@@ -379,7 +380,7 @@ def main():
         print(f"scene manifest: seed {mj.get('seed')}  sha {mj.get('xml_sha256')}  objects {len(mj.get('objects', []))}  half {mj.get('half')} m", file=sys.stderr)
     print(f"level-2 sweep: {len(cfgs)} arms × {args.seeds} seeds × {args.secs} s, control phase from {ctrl:.0f} s, scene {Path(args.scene).name}, reset noise {args.noise}, arena half {args.arena_half}, host args {host_args or '-'}", file=sys.stderr)
 
-    jobs = [(c, s) for c in cfgs for s in range(1, args.seeds + 1)]
+    jobs = [(c, s) for c in cfgs for s in range(args.seed_from, args.seed_from + args.seeds)]
     results = {c: [] for c in cfgs}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
         futs = {ex.submit(run_one, c, s, args.secs, ctrl, host_args, logdir, args.scene, args.noise, args.phase_at, args.arena_half): (c, s) for c, s in jobs}

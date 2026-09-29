@@ -261,6 +261,15 @@ are a walk at the brain's own pace (vx 0.22 m/s mean, seek and play steering, th
 a zero-mean identification (vx 0.00). The launcher's "a saved brain" start now works for level 2 (presets "on the
 LOADED brain"). The sweep's judged window starts at 30 s (`--control-from 30`).
 
+**Measured (§17.60–17.62).** Sweep 1 showed the whole restored brain to be the wrong harness (walls 42 ± 46: a saved
+map, play field and cache keyed to another odometry frame and another habituation); the identification alone is
+restored now. On that harness (sweep 2, eight arms): the stuck stop and escape `WORKING` (falls a tenth, walls −31 %),
+the pursuit at speed a signal (the moving train 38 % of chases), the leans `NULL` (a commanded lean is absorbed or
+paid in falls), coasting permanence a `REGRESSION` (the prediction leads into walls), the pull's decay and the wider
+reach `NULL`. Sweep 3: the stack of the two keepers holds both gains (walls 27 → 19, rescues 0.62 → 0.20, the
+train 38 %); body pitch 0.05 on it is the interaction-rich variant for the eye. The confirmation on seeds 7–18 is in
+§17.63.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at

@@ -4763,3 +4763,26 @@ three stops. Eight arms, six seeds, 600 s, the same seeds.
   arbiter, so no decision changed. Re-use: a decay that reaches the arbiter's margin, or the outcome table.
 - **The reach at 1.5 m: `NULL`** — chases 17 → 22, all of the gain static (8 → 13), walls the same. The stage-0
   finding holds: past 1.2 m the false candidates grow faster than the true ones.
+
+### 17.62 The campaign, sweep 3: the stack (2026-09-29)
+
+The two keepers together on the base's seeds, plus the pursuit at the walker's top and the three-lever form.
+
+| arm (600 s, n = 6) | walls / min | rescues / min · down % | stops · at a thing · arrivals | chases (moving train) | skills · answers | walk m/s |
+|---|---|---|---|---|---|---|
+| R94 base | 27.2 ± 23.6 | 0.62 · 3.71 | 13.5 · 8.3 · 5.3 | 17 (5, 29 %) | 21 · 8 | 0.166 |
+| **the stack**: stuck stop and escape + chase vx 0.35 | **18.7 ± 19.5** | **0.20 · 0.34** | 15.0 · 8.2 · 6.7 | 13 (5, 38 %) | 24 · 7 | 0.176 |
+| the stack, chase vx 0.4 | 20.1 ± 19.4 | 0.18 · 0.32 | 14.2 · 7.5 · 5.2 | 9 (4, 44 %) | 18 · 6 | 0.173 |
+| the stack + body pitch 0.05 | 21.3 ± 19.2 | 0.22 · 0.28 | **17.5 · 10.5 · 9.8** | 13 (6, 46 %) | **35 · 18** | 0.176 |
+
+- **The stack holds both keepers' gains**: walls 27 → 19, rescues a third, falls a tenth, the moving train 29 → 38 %
+  of chases, objects touched 8 → 13 a minute, the walk 6 % faster. The corner trap is not gone — one seed in each arm
+  still rides a wall for minutes (the base's seed 4 at 72, the stack's at 56, another seed in each variant) — the
+  stuck stop shortens it and moves it, it does not prevent it.
+- **The pursuit at 0.4** buys a purer chase (44 %) with fewer chases; a tie with 0.35 on everything else. 0.35 stays.
+- **Body pitch 0.05 on the stack** is the interaction-rich variant: the most stops at things, arrivals, skills (35)
+  and answers observed (18) of the campaign — the pitched trunk arrives at things and its pecks land — at the same
+  falls. `NULL` alone, a `PARTIAL` on the stack; for the eye, not for the stack by numbers.
+
+**The stack goes to a confirmation on twelve seeds the signal never used (7–18), 600 s, against the base:
+n = 18 paired in all (§17.63).**
