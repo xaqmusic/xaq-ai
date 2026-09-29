@@ -546,19 +546,37 @@ Full conditioning and calibration spec is in the port doc (`## SPEC — foot FSR
 **mounting** half moved to [`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) when the
 foot was designed. The wiring half:
 
-```
-     HAT 3V3 ──┬─────────────────────────────┐   (one net; see "ratiometric" below)
-               │                             │
-               │                          [ FSR ]   ← in the foot, 2 conductors up the leg
-               │                             │
-               │        ┌────────────────────┴──────► A_n   (ADC, 12-bit, 3.3 V ref)
-               │        │                    │
-               │      [ R_g ]              [ C ]     ← both AT THE BOARD, C at the connector
-               │        │                    │
-     GND ──────┴────────┴────────────────────┘
+> ⚠ **The drawing that used to be here was wrong and it cost a build.** Its left-hand rail ran
+> unbroken from `3V3` down to `GND` — a short, as drawn — and it put `R_g` and `C` on separate
+> stubs at different heights, which reads as a series chain. The operator built `3V3 → FSR → C
+> → GND` with `R_g` from `GND` to `SIG`; see §5.7.5. **`R_g` and `C` go between the SAME two
+> points.**
 
-     R_g : measured, never chosen — see below.   C : chosen AFTER R_g — see §5.2.
 ```
+   HAT ADC                                                     in the foot
+   connector                                              ┌───────────────┐
+              ┌────────────────────────────────────────┬──┤      FSR      │
+   VCC ●──────┘                                        │  └───────────────┘
+   (3V3)                                               │
+                                                       │
+                                                    ── ● ──  NODE
+                                                       │     three things meet here,
+   SIG ●───────────────────────────────────────────────┤     and only here
+   (A_n)                                               │
+                                          ┌────────────┴────────────┐
+                                          │                         │
+                                       ┌──┴──┐                   ┌──┴──┐
+                                       │ R_g │ 15 k              │  C  │ 1 µF
+                                       └──┬──┘                   └──┬──┘
+                                          │                         │
+   GND ●──────────────────────────────────┴─────────────────────────┘
+
+   FSR  : 3V3  → NODE        R_g : NODE → GND        C : NODE → GND
+   `R_g` and `C` are BOTH across NODE→GND, so they are in parallel with each other and
+   NOTHING is ever in series with the signal.  `R_g` is measured (§5.6); `C` follows it (§5.2).
+```
+
+![divider schematic](../plans-and-designs/CAD/Picrawler/picrawler_fsr_divider.svg)
 
 ⚠ **Confirm the 3-pin connector's pin ORDER and its VCC rail against the board silkscreen before
 powering anything.** Two hazards:
@@ -941,6 +959,44 @@ rail, not the foot.
 regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### 5.7.5 ✅ FOUND 2026-09-29 — the cap was built in series, and the doc caused it
+
+**The three V1 readings identified it uniquely:**
+
+| pair | measured | the correct circuit would give |
+|---|---|---|
+| VCC ↔ SIG | **OL, no change on a press** | ~10–30 kΩ pressed |
+| SIG ↔ GND | **15 kΩ steady** | 15 kΩ steady ✓ |
+| VCC ↔ GND | **OL** | ~25–45 kΩ pressed |
+
+**As built:** `3V3 → FSR → node → C → GND`, with `R_g` from `GND` to `SIG`. That is `R_g` and
+`C` having swapped places. Every observation follows from it:
+
+- **VCC↔SIG is OL** — the only route is through `C`, which blocks DC.
+- **VCC↔GND is OL** — same cap, same block.
+- **SIG↔GND is 15 kΩ** — `R_g`, and nothing else.
+- **A0 reads 0 and never moves** — `SIG` is tied to ground through `R_g` and connects to nothing
+  else at all.
+
+⚠ **It is not a high-pass, it is an open**, and the distinction is the confirming evidence: a
+series cap in the signal path would still pass a *transient* on each press. The operator saw
+**no effect whatever**, because `SIG` never touches the sensor branch — the FSR and `C` form
+their own loop from `3V3` to `GND` that the ADC pin is not part of.
+
+**The fix is two joints.** `C` is already in the right place (NODE → GND):
+
+1. Move `R_g`'s upper leg from `SIG` to **NODE** — beside the cap, not in place of it.
+2. Run `SIG` to **NODE** — i.e. to the FSR's lower terminal.
+
+**The one sentence that prevents it:** ⚠ **`SIG` lands on the FSR's lower terminal, and both
+`R_g` and `C` hang from that same point down to `GND`.**
+
+**Root cause is the schematic in §5, not the reading of it.** That drawing shorted `3V3` to
+`GND` down its left-hand rail and hung `R_g` and `C` from stubs at different heights, which
+reads as a chain. It has been redrawn, and an SVG added beside it. Recorded here because a
+documentation defect that survives into a built circuit is a finding, not an embarrassment:
+the next person reads the same page.
 
 ### 5.7.4 V1 in full — three readings at the foot connector
 
