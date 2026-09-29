@@ -188,7 +188,9 @@ public:
     std::array<int, 4> chase_cand_fates() const;   // replaced, too fast, still, timed out
     int    walk_takes() const;
     int    chases_yielded() const;
-    int    yield_drops() const;                   // sightings dropped at a yielded place                 // chases that yielded near tall structure (chase_yield_tall)                     // targets started from a walking sighting (walk_take_range)
+    int    yield_drops() const;                   // sightings dropped at a yielded place
+    int    static_yielded() const;                // static targets dropped at the foot of tall structure (static_yield_tall)
+    int    static_yield_drops() const;                 // chases that yielded near tall structure (chase_yield_tall)                     // targets started from a walking sighting (walk_take_range)
     std::array<double, 3> chase_last_judgement() const;   // miss (m), implied speed (m/s), decision code    // the bearing the head should turn to (rad, + = right), NaN when nothing moving is in mind
     bool   chase_coasting() const;    // the target is the lost thing's prediction, coasting (chase_permanence_ticks)
     int    chases_reacquired() const;

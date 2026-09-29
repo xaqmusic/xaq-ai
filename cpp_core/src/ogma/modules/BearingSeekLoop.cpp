@@ -121,6 +121,9 @@ ParamSchema BearingSeekLoop::params_schema() const {
         {"yield_topic", ParamMutability::ConstructionOnly,
             "THE YIELD: ProprioToken [tall_count, range] (CloudMap target_tall_topic) -- the tall voxels around this loop's held target.  Empty = off.",
             ParamValue{std::string("")}},
+        {"static_yield_tall", ParamMutability::HotMutable,
+            "A held STATIC target with at least this many tall voxels within a body length (the cloud's target_tall count) is dropped, and the place is not-a-thing for forget_ticks: a sighting within chase_gate_m of it is not taken.  0 = off.",
+            ParamValue{int64_t{0}}},
         {"chase_yield_look", ParamMutability::HotMutable,
             "A yield near tall structure starts a look at the target's bearing (the host's lost stop) instead of ending silently; no memory either way.  Default off.",
             ParamValue{false}},
@@ -159,6 +162,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["chase_v_max"] = ParamValue{chase_v_max_}; m["chase_min_v"] = ParamValue{chase_min_v_}; m["chase_stop_v"] = ParamValue{chase_stop_v_};
     m["chase_permanence_ticks"] = ParamValue{int64_t(chase_permanence_ticks_)}; m["chase_memory_ticks"] = ParamValue{int64_t(chase_memory_ticks_)};
     m["chase_memory_holds"] = ParamValue{chase_memory_holds_};
+    m["static_yield_tall"] = ParamValue{int64_t(static_yield_tall_)};
     m["yield_topic"] = ParamValue{yield_topic_}; m["chase_yield_tall"] = ParamValue{int64_t(chase_yield_tall_)}; m["chase_yield_look"] = ParamValue{chase_yield_look_}; m["chase_pull_decay"] = ParamValue{chase_pull_decay_};
     m["chase_pull_recover_ticks"] = ParamValue{chase_pull_recover_ticks_};
     return m;
@@ -195,6 +199,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "yield_topic",     [&](auto const& v){ yield_topic_   = get_string(v,"yield_topic"); });
     apply_param(params, "chase_yield_tall", [&](auto const& v){ chase_yield_tall_ = std::max(0, int(get_double(v,"chase_yield_tall"))); });
     apply_param(params, "chase_yield_look", [&](auto const& v){ chase_yield_look_ = get_double(v,"chase_yield_look") > 0.5; });
+    apply_param(params, "static_yield_tall", [&](auto const& v){ static_yield_tall_ = std::max(0, int(get_double(v,"static_yield_tall"))); });
     apply_param(params, "chase_memory_holds", [&](auto const& v){ chase_memory_holds_ = get_double(v,"chase_memory_holds") > 0.5; });
     apply_param(params, "chase_memory_ticks", [&](auto const& v){ chase_memory_ticks_ = std::max(0, int(get_double(v,"chase_memory_ticks"))); });
     apply_param(params, "chase_pull_decay", [&](auto const& v){ chase_pull_decay_ = std::clamp(get_double(v,"chase_pull_decay"), 0.0, 1.0); });
@@ -223,6 +228,7 @@ void BearingSeekLoop::on_param_change(std::string_view key, ParamValue const& va
     else if (k == "chase_permanence_ticks") chase_permanence_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_yield_tall") chase_yield_tall_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_yield_look") chase_yield_look_ = get_double(value, k) > 0.5;
+    else if (k == "static_yield_tall") static_yield_tall_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_memory_holds") chase_memory_holds_ = get_double(value, k) > 0.5;
     else if (k == "chase_memory_ticks") chase_memory_ticks_ = std::max(0, int(get_double(value, k)));
     else if (k == "chase_pull_decay") chase_pull_decay_ = std::clamp(get_double(value, k), 0.0, 1.0);
@@ -259,6 +265,18 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         if (take) ++walk_takes_;
         if (!refix && !take) seen_ = false;
     }
+    // a sighting at a place a static target yielded from (the foot of tall structure): not a thing, for forget_ticks
+    if (seen_ && have_syield_ && have_pose_) {
+        if (tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
+        else {
+            const double n = std::sqrt(double(vx) * vx + double(vy) * vy);
+            const double range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
+            const double fwd = vy / n, left = -vx / n;
+            const double bx = fwd * range, by = left * range;
+            const double fx = px_ + c * bx - s * by, fy = py_ + s * bx + c * by;
+            if (std::hypot(fx - syield_x_, fy - syield_y_) <= chase_gate_m_) { seen_ = false; ++static_yield_drops_; }
+        }
+    }
     // the renewal: with no target held (the arrival's tick has passed -- the value read 0 for one tick, which
     // is the arrival the outcome loop sees) and nothing in view, a need still open at the thing re-arms it
     if (!renew_topic_.empty() && !have_target_ && !seen_ && have_pose_) {
@@ -266,7 +284,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
             if (rt->values.size() >= 3 && rt->values[0] > renew_min_) {
                 const double rr = std::hypot(double(rt->values[1]) - px_, double(rt->values[2]) - py_);
                 if (rr > 1.5 * arrive_m_ && rr < renew_range_) {
-                    tx_ = rt->values[1]; ty_ = rt->values[2]; have_target_ = true;
+                    tx_ = rt->values[1]; ty_ = rt->values[2]; have_target_ = true; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_;
                     conf_ = std::clamp(rt->values[0], 0.0f, 1.0f); ++renewals_;
                 }
             }
@@ -301,6 +319,8 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         const double bx = fwd * range, by = left * range;                // body frame
         tx_ = px_ + c * bx - s * by;
         ty_ = py_ + s * bx + c * by;
+        if (!have_target_ || std::hypot(tx_ - target_px_, ty_ - target_py_) > chase_gate_m_) target_set_tick_ = tick_id;
+        target_px_ = tx_; target_py_ = ty_;
         have_target_ = true;
         conf_ = 1.0f;
         range_left_ = range;
@@ -321,6 +341,23 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         }
     } else {
         cx_ = 0.0f; cy_ = 0.0f; conf_ = 0.0f;
+    }
+    // THE STATIC YIELD (2026-09-29, the operator: the walk now reaches its targets and gets bound up near walls):
+    // a held static target at the foot of tall structure -- the cloud's count around the target the loop published
+    // (a tick old, so a target held under two ticks is not judged by its predecessor's count) -- is dropped, and
+    // the place is not-a-thing for forget_ticks.  The chase's yield is the same rule for a mover.
+    if (have_syield_ && tick_id - syield_tick_ > uint64_t(forget_ticks_)) have_syield_ = false;
+    if (static_yield_tall_ > 0 && have_target_ && !chasing_ && !coasting_ && have_syield_ && std::hypot(tx_ - syield_x_, ty_ - syield_y_) <= chase_gate_m_) {
+        // a target set at the yielded place by any path (a sighting, the renewal, a mover that stopped): refused
+        // (sweep 23: the renewal re-armed the yielded place and it yielded again two ticks later, 1 700 times a run)
+        have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yield_drops_;
+    }
+    if (static_yield_tall_ > 0 && have_target_ && !chasing_ && !coasting_ && !yield_topic_.empty() && tick_id >= target_set_tick_ + 2) {
+        if (auto yt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(yield_topic_)))
+            if (yt->values.size() >= 1 && int(yt->values[0]) >= static_yield_tall_) {
+                have_syield_ = true; syield_x_ = tx_; syield_y_ = ty_; syield_tick_ = tick_id;
+                have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++static_yielded_;
+            }
     }
     value_ = have_target_ ? conf_ : 0.0f;
 
@@ -436,7 +473,7 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
             const bool stopped = chase_stop_v_ <= 0.0 || std::hypot(cand_vx_, cand_vy_) < chase_stop_v_;
             if (stopped) {
                 // the thing stopped: where it was last seen is an ordinary remembered target from here
-                tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_;
+                tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_; target_set_tick_ = tick_id; target_px_ = tx_; target_py_ = ty_;
                 chasing_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
             } else if (chase_permanence_ticks_ > 0) {
                 // the thing left the view still moving: keep it moving in mind (coasting), the candidate kept for a re-sighting

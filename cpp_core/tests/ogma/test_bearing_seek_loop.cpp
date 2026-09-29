@@ -522,3 +522,53 @@ TEST(BearingSeekLoop, AYieldMayLookWithoutRemembering) {
     EXPECT_TRUE(r.m.yield_live());
 }
 
+TEST(BearingSeekLoop, AStaticTargetYieldsNearTallStructure) {
+    ogma::ParamMap p = chase_params();
+    p["yield_topic"] = std::string("percept.target_tall"); p["static_yield_tall"] = int64_t{1}; p["forget_ticks"] = 3000.0;
+    p["renew_topic"] = std::string("reality.cognitive.outcome_need"); p["renew_min"] = 0.25; p["renew_range"] = 2.0;
+    Rig r(p);
+    auto tall = [&](float n) { r.bus.begin_tick(r.t); auto y = std::make_shared<ogma::ProprioToken>(); y->values = Eigen::VectorXf(2); y->values << n, 1.0f; r.bus.publish("percept.target_tall", y); r.bus.end_tick(); };
+    // a thing seen at a stop, straight ahead at 1 m, nothing tall around it: taken and held
+    tall(0.0f);
+    for (int i = 0; i < 4; ++i) r.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.0));
+    ASSERT_TRUE(r.m.have_target());
+    // the cloud reports tall structure around the held target: dropped
+    tall(3.0f);
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.have_target()) << "yielded";
+    EXPECT_EQ(r.m.static_yielded(), 1);
+    // the same sighting again: not a thing (dropped), no target
+    for (int i = 0; i < 4; ++i) r.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.0));
+    EXPECT_FALSE(r.m.have_target());
+    EXPECT_GE(r.m.static_yield_drops(), 4);
+    EXPECT_EQ(r.m.static_yielded(), 1);
+    // a thing elsewhere (to the right at 1 m), nothing tall: taken
+    tall(0.0f);
+    for (int i = 0; i < 4; ++i) r.step(0, 0, 0, 1.0f, 0.0f, prox_of(1.0));
+    EXPECT_TRUE(r.m.have_target()) << "a thing elsewhere is taken";
+    // a fresh target is not judged by its predecessor's stale count on its first tick
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    tall(3.0f);
+    r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r.m.have_target()) << "an older target is judged by the count";
+    EXPECT_EQ(r.m.static_yielded(), 2);
+    tall(0.0f);
+    for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, -1.0f, prox_of(1.0));   // behind, 1 m: a new place
+    ASSERT_TRUE(r.m.have_target());
+    // the count of the target just taken arrives a tick later: a target under two ticks old is not dropped by a stale count
+    Rig r2(p);
+    r2.bus.begin_tick(r2.t); { auto y = std::make_shared<ogma::ProprioToken>(); y->values = Eigen::VectorXf(2); y->values << 3.0f, 1.0f; r2.bus.publish("percept.target_tall", y); } r2.bus.end_tick();
+    r2.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.0));
+    EXPECT_TRUE(r2.m.have_target()) << "first tick: the count is the predecessor's";
+    r2.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.0));
+    EXPECT_TRUE(r2.m.have_target()) << "second tick: still not judged";
+    r2.step(0, 0, 0, 0.0f, 1.0f, prox_of(1.0));
+    EXPECT_FALSE(r2.m.have_target()) << "third tick: judged and dropped";
+    // the renewal (an outcome need at the yielded place) does not re-arm it
+    auto need = std::make_shared<ogma::ProprioToken>(); need->values = Eigen::VectorXf(3); need->values << 0.9f, 1.0f, 0.0f;   // the yielded place: 1 m ahead of the body at the origin, x forward
+    r2.bus.begin_tick(r2.t); r2.bus.publish("reality.cognitive.outcome_need", need); r2.bus.end_tick();
+    for (int i = 0; i < 3; ++i) r2.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    EXPECT_FALSE(r2.m.have_target()) << "a renewal at the yielded place is refused";
+    EXPECT_EQ(r2.m.static_yielded(), 1) << "no second yield";
+}
+

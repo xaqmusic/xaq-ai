@@ -153,6 +153,14 @@ private:
     // the yielded place, remembered as not-a-mover for chase_memory_ticks: a sighting within chase_gate_m of it is dropped
     bool have_yield_ = false; double yield_x_ = 0.0, yield_y_ = 0.0; uint64_t yield_tick_ = 0; int yield_drops_ = 0;
     bool chase_yield_look_ = false;   // the yield starts a look at the target's bearing (lost_now_), no memory
+    // the static yield: a held static target at the foot of tall structure is dropped; the place is not-a-thing for forget_ticks
+    int static_yield_tall_ = 0; int static_yielded_ = 0; int static_yield_drops_ = 0;
+    bool have_syield_ = false; double syield_x_ = 0.0, syield_y_ = 0.0; uint64_t syield_tick_ = 0;
+    uint64_t target_set_tick_ = 0; double target_px_ = 0.0, target_py_ = 0.0;
+public:
+    int static_yielded() const { return static_yielded_; }
+    int static_yield_drops() const { return static_yield_drops_; }
+private:
     void yield_to_structure(uint64_t tick_id);
 public:
     int chases_yielded() const { return chases_yielded_; }
