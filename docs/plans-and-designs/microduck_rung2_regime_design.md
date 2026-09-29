@@ -4932,3 +4932,31 @@ form:** the smear itself carries the velocity — the window's voxels are fresh 
 the trail, so the vector from the oldest voxels' centroid to the freshest voxels' centroid over their age
 difference is a single-cast velocity with no tracker and no wait; a static cluster's age gradient is random. That
 is the next lever for the chase's start, and it is the cloud's to compute.
+
+### 17.68 The campaign, sweep 9: the gaze at smaller gains, and the campaign's second close (2026-09-29)
+
+| arm (R99 + the gaze, 600 s, n = 6) | walls / min | rescues · down % | chases (moving train) | crossings: candidate · chased |
+|---|---|---|---|---|
+| R99 | 10.3 ± 6.8 | 0.12 · 0.22 | 14 (6) | 22: 19 · 6 |
+| `--chase-gaze 0.5` | 12.5 ± 6.3 | 0.20 · 0.62 | 11 (4) | 18: 17 · 6 |
+| `--chase-gaze 0.3` | 15.8 ± 5.9 | 0.20 · 0.48 | 12 (5) | — |
+
+**`NULL` at every gain** (1.0 in §17.65, 0.5, 0.3): the head turned toward the chase on the walk buys no chases and
+costs a little of the walk. The form is wrong, not the idea: a yaw offset written over the head brain's own targets
+fights the loop that keeps the head level and steady, and a cone that turns while the body turns unsettles the
+walking cloud the candidate is read from. Re-use: the gaze as an intent the head brain fulfils (its own prediction
+to keep the mover centred), and the head's replay window to see what it did — not a host offset.
+
+**The campaign's second close (2026-09-29).** The stack for the eye is **R99 on the identification-only brain**:
+R94 + `--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35` + `chase_memory_ticks 250` + `chase_memory_holds` —
+walls 10.3 ± 6.8 a minute with every seed under 24 (the campaign's base: 27 ± 24; the original R94 from scratch:
+24 ± 14 on the corner track's numbers), rescues 0.12, the moving train 43 % of chases, stops at things and arrivals
+the campaign's highest (preset "R99 · the MOVER's PRIORITY"). What the operator asked for and what stands:
+- **prioritise moving objects** — done in the loop (the priority) and measured (the swerve to the block is gone
+  from the walls, though a *stopped* train's place is still a legitimate target, and should be);
+- **turn the head while walking to re-acquire** — `NULL` as a host offset at three gains; the re-use above;
+- **pursue rapidly** — the pursuit at 0.35 m/s, kept; the chase's START is the standing limit: a crossing becomes a
+  chase one time in four, on a displacement that sits at the window centroid's jitter, and neither knob of the
+  confirmation moves it without buying the room (§17.66–17.67). **The next lever is the substrate's: the age
+  gradient across the window's voxels as a single-cast velocity** (§17.67), which would let a crossing be chased
+  on its first sighting.

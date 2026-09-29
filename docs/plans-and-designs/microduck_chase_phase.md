@@ -159,7 +159,8 @@ speed scatters and the gate table, six seeds.
 
 **2026-09-29, after the campaign (§8; design doc §17.60–17.64):** the harness is the identification-only loaded
 brain, 600 s a run, stops from the first second (the launcher's "on the LOADED brain" presets). The stack that
-came out of it — R94 + `--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35` — is confirmed on eighteen seeds: no run
+came out of it — R94 + `--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35`, then R99 with the mover's priority on
+top (walls 10 a minute, §17.65) — is confirmed on eighteen seeds (the R94 form): no run
 rides a wall for minutes (the base: six of eighteen), walls 39 → 22 a minute pooled, rescues 0.38 → 0.24, the
 moving train a third of chases, more stops at things and answers; not promoted without the eye (preset "R94 ·
 loaded + the STACK"). The leans are `NULL`, coasting permanence a `REGRESSION`, the pull's decay `NULL`;
@@ -278,6 +279,14 @@ train 38 %); body pitch 0.05 on it is the interaction-rich variant for the eye. 
 
 **The readout for the eye:** <https://claude.ai/code/artifact/10ffc001-5858-47af-98a1-973dc9bba9ac> — the four
 items' standing, every arm's line, the eighteen-seed confirmation.
+
+**Sweeps 6–9 (§17.65–17.68), after the operator's second look:** the mover's priority (a lost mover in mind bars
+new static targets) is the campaign's best walk — R99, walls 18 → 10 a minute, every seed under 24, the train 43 %
+of chases; the follow beyond 1.2 m changed nothing; the head turned toward the chase on the walk is `NULL` at three
+gains; the confirmation's knobs cannot raise the chase-per-crossing rate above one in four without buying the room
+(the gate never binds; the motion test and the timeouts are the losses; a longer watch loses the candidate). The
+standing limit is the chase's start, and the next lever is the age gradient across the window's voxels as a
+single-cast velocity. **The stack for the eye: R99 on the loaded brain.**
 
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
