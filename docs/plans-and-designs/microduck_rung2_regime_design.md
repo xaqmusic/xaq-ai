@@ -5147,3 +5147,61 @@ mechanism; what it gives away is the look after the yield. **R109 (`chase_yield_
 lost look at the target's bearing (no memory, so no churn; the place still not-a-mover) — the duck stops short of
 the chair or the wall and watches the train go by, and a train that has moved a body length on is a fresh candidate
 from the stop. Measured in §17.74 (sweep 17, seeds 1–6, against R99's runs).
+
+### 17.74 Sweep 17: the yield that looks (R109) — a regression on the walk at n = 6 (2026-09-29, night)
+
+R108 + `chase_yield_look` (the yield raises the lost look at the target's bearing; no memory; the place still
+not-a-mover) against R99's runs on seeds 1–6.
+
+| seeds 1–6 | R99 | R108 (§17.73) | R109 |
+|---|---|---|---|
+| walls / min | 11.3 ± 8.1 | 11.3 ± 6.7 | **30.7 ± 23.7** (seeds 1 and 6: 53, 66) |
+| rescues / min · down % | 0.17 · 0.28 | 0.15 · 0.35 | 0.27 · 0.44 |
+| chases (moving train, share) | 47 (22, 47 %) | 29 (7, 24 %) | 32 (19, **59 %**) |
+| yielded · dropped · lost looks · stops ended on a chase | 0 · 0 · 32 · 23 | 13 · 10 · 11 · 13 | 20 · 70 · 29 · 20 |
+| median chase · seconds chasing a run | 1.6 s · 14 | 1.1 s · 5 | 0.9 s · 5 |
+
+- **The pursuit's purity is the best of the campaign** — 19 of 32 chases at the moving train, against R99's 22 of
+  47 — and 20 of its chases started from a stop: the look after the yield does find the train again, as §17.73
+  predicted. But the pursuit is not larger (32 chases against 47; the seconds chasing a run 5).
+- **The walk regresses**, and not through the looks: on the two bad seeds the wall episodes come from minute 3–4
+  on (seed 1 per minute 0, 0, 0, 19, 70, 64, 99, 140, 78, 36; seed 6 peaks at 287 in its sixth minute), with two
+  stuck stops and two escapes each that did not free the duck, and only 33 of 506 and 88 of 627 episodes within
+  15 s of a lost look (3 and 5 a run). The same seeds walk at 3 and 22 on R99 and 13 and 23 on R108. It is the walk's
+  corner trap (§17.60's `PARTIAL` on the stuck escape) landing on two runs of six, where R108 met it on one of
+  eighteen and R99 on two; whether the extra standing beside walls and furniture (stand 35 % against 32) raises the
+  odds of it is what n = 6 cannot say.
+
+**Verdict.** R109 `REGRESSION` on the walk at n = 6 (a signal, enough to kill: §3 rule 7), the pursuit's purity a
+signal the other way. Re-use context: once the walk's corner trap is solved (the stuck escape that frees, or a
+free-space map, O49), the yield that looks is the form to retry — it is the only arm that finds the train again
+without a memory to churn on. Not confirmed on seeds 7–18; R108 stays the arm.
+
+### 17.75 Sweep 18: the yield's reach (R110, radius 0.5 m) — no better, killed at n = 6 (2026-09-29, night)
+
+R108 against R108 + `cloud.target_iso_radius 0.5` on seeds 1–6: with the track's ends 0.45 m from the walls, a
+wider radius was the knob that would put the wall case within the yield's reach.
+
+| seeds 1–6 | R108 | R110 |
+|---|---|---|
+| walls / min | 11.3 ± 6.7 | 18.1 ± 12.7 (seeds 1, 3, 4: 27, 34, 26; seed 6: 2.3) |
+| rescues / min · down % | 0.15 · 0.35 | 0.18 · 0.33 |
+| chases (moving train, share) | 29 (7, 24 %) | 27 (6, 22 %) |
+| yielded · dropped · lost looks | 13 · 10 · 11 | 17 · 39 · 10 |
+| median chase · seconds chasing a run | 1.1 s · 5 | 0.3 s · 3 |
+| yields at the moving train (`yield_where`) | 0 of 6 first-tick | 1 of 11 |
+
+The wider radius yields more (17), drops four times the sightings (39), cuts the chase to a third of a second, and
+neither fires at the train's ends (one of eleven first-tick yields at the moving train) nor improves the walk
+(11 → 18 walls a minute, worse on three seeds of six). The pursuit is the same size. `NULL` on the pursuit,
+`REGRESSION` on the walk at n = 6; killed. The track's ends are not where the yield's help was needed after all:
+R108's walls at the stack's level came from the chair and the wall faces the chase ran at, and the run to an end
+that loses the train there is the walk's ordinary business.
+
+**Where the campaign stands (2026-09-29, night).** The arm is **R108** — R99's priority on the fixed chase with the
+yield that forgets: the stack's walk (19 walls a minute, one trap in eighteen), four fifths of R99's pursuit (5.2
+chases a run, 29 % at the moving train, 12 re-acquisitions), a preset for the eye ("R108 · the yield that
+FORGETS"). The floor under every arm is the walk's corner trap, which lands on one or two runs in eighteen of each
+(R99 seeds 11 and 14, R108 seed 7, R109 seeds 1 and 6) and which the stuck escape does not free; the next walk lever
+is there (O49's free space, or an escape that turns rather than backs). The pursuit's next lever is the look after
+a yield (R109's purity) once that floor is raised.

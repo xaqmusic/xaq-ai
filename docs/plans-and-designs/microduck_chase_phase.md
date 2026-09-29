@@ -316,6 +316,16 @@ failure, 3 stuck escapes that did not free it); the pursuit four fifths of R99's
 27 against 35, the same share) because a silent yield walks on where R99's lost look had found the train again.
 `PARTIAL`, the first arm that holds both the walk and the pursuit. Next: the yield that LOOKS (R109), measured in §17.74.
 
+**The yield that looks (R109, §17.74, n = 6):** the campaign's purest pursuit (19 of 32 chases at the moving train,
+20 started from the look after a yield) and a `REGRESSION` on the walk (31 walls a minute against 11): two runs of six
+trapped by the walk's corner failure from the third minute, their episodes not following the looks. Killed at n = 6;
+retry once the corner trap is solved. R108 stays the arm.
+
+**The yield's reach (R110, radius 0.5 m, §17.75, n = 6):** more yields, four times the dropped sightings, the chase
+cut to a third of a second, the walk worse (11 → 18) and the yields still not at the train's ends. Killed. **The
+campaign's arm is R108**; the floor under every arm is the walk's corner trap (one or two runs in eighteen of each
+arm, the stuck escape does not free it), and that is the next walk lever. Readout: the artifact above.
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
