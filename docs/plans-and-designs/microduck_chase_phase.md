@@ -157,7 +157,13 @@ speed scatters and the gate table, six seeds.
 
 ## 6. Where the duck is (for a cold start)
 
-`★ THINGS` = R83 is unchanged (things phase §10). This phase has, as of 2026-09-27 evening: the train room and its
+**2026-09-29, after the campaign (§8; design doc §17.60–17.64):** the harness is the identification-only loaded
+brain, 600 s a run, stops from the first second (the launcher's "on the LOADED brain" presets). The stack that
+came out of it — R94 + `--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35` — is confirmed on eighteen seeds: no run
+rides a wall for minutes (the base: six of eighteen), walls 39 → 22 a minute pooled, rescues 0.38 → 0.24, the
+moving train a third of chases, more stops at things and answers; not promoted without the eye (preset "R94 ·
+loaded + the STACK"). The leans are `NULL`, coasting permanence a `REGRESSION`, the pull's decay `NULL`;
+permanence in recognition (R98) is measured in §17.64. `★ THINGS` = R83 is unchanged (things phase §10). This phase has, as of 2026-09-27 evening: the train room and its
 generator flag, the host's train driver and the movers instrument, the scorer, the R84 instrument preset, and
 stage 0's measurement above. Next: stage 1, the mover gate and the moving fix, off by default, byte-identical when
 off, n = 6 in the train room, scored on stops at things, walls a minute, falls, and movers chased and reached.
