@@ -4812,3 +4812,39 @@ objects touched, stops at things, skills and answers all up, the walk 7 % faster
 looks). Not promoted without the eye — preset "R94 · loaded + the STACK". What the stack does not do: the trap is
 shortened and moved, not prevented (a run at 50 walls a minute remains), and the chase count is unchanged at two a
 run in ten minutes — the pursuit is purer, not more frequent.
+
+### 17.64 The campaign, sweep 5: permanence in recognition on the stack (2026-09-29), and the campaign's close
+
+R98 = R94 + `chase_memory_ticks 250`: a lost mover kept in mind for 5 s (its last predicted position and velocity,
+extrapolated) without driving the walk; one mover sighting within the chase gate of where it should now be
+re-acquires the chase at once. On the stack, six seeds, 600 s, against the stack.
+
+| | the stack | + recognition permanence (R98) |
+|---|---|---|
+| walls / min · rescues / min · down % | 18.7 · 0.20 · 0.34 | 18.4 · 0.22 · 0.36 |
+| stops · at a thing · arrivals | 15.0 · 8.2 · 6.7 | 15.0 · 7.8 · 6.5 |
+| chases (moving train) | 13 (5, 38 %) | 13 (**7, 54 %**), 1 re-acquired |
+| answers observed · skills at nothing | 7 · 6 | 9 · 6 |
+
+**Verdict: a signal, safe.** The walk is the stack's to the decimal; the chases are the same in number and purer
+(the moving train 38 → 54 %), one re-acquisition in six runs, two more answers observed. The mechanism fires
+rarely because the chase fires rarely (two a run), which is the campaign's standing limit. Not in the stack
+without the eye; preset R98.
+
+**The campaign, closed (2026-09-29).** The operator's four items, as they stand:
+1. **The babble is gone from the observation runs.** A saved brain's identification alone is restored
+   (`--load-brain`, `--load-brain-modules motor_epm_intent`), the map and the loops fresh; the first ten minutes are
+   a walk from the first second. The whole restored brain was measured and refused (§17.60).
+2. **The head over the centre of gravity does not buy speed on this walker.** A commanded lean is absorbed
+   (0.05 rad: +4 % of speed, no falls) or paid in falls (0.1 rad: 7 % of ticks down); the speed that helps is the
+   pursuit's own, `--chase-vx 0.35` (§17.61–17.62).
+3. **Object permanence:** coasting after a lost mover is a `REGRESSION` (it leads into walls, §17.61); permanence
+   in recognition is a safe signal (this section) beside the look (§17.59). The real form the operator named — a
+   slow loop that seeks a target that has left the field of view — wants a prediction of where a thing *can* go
+   (the map's free space) and, for the train, its schedule; that is the design discussion for the camera boundary.
+4. **The two levers proposed at the last hand-off:** the stuck stop and escape `WORKING` (no run rides a wall for
+   minutes, n = 18); a look that finds nothing as an answer `NULL` in the pull's form (no decision changed) — its
+   re-use is the outcome table.
+The stack for the eye: **R94 + `--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35` on the identification-only
+brain** (preset "R94 · loaded + the STACK"); the interaction-rich variant with body pitch 0.05 and the recognition
+permanence (R98) are the two arms worth a look beside it.
