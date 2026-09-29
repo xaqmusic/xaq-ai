@@ -809,18 +809,21 @@ actuator, so this is the in-situ measurement §5 asks for.
 | **`C`** | **1.5 µF** | `Z_src` = 5.5 kΩ loaded → f_c 19.3 Hz, τ 8.2 ms ≈ 0.43 tick. **1.0 µF gives 28.9 Hz, which is above the 25 Hz Nyquist and does not filter**; 2.2 µF works but costs 0.63 tick |
 | if the read stays at 10 Hz | 6.8 µF | f_c 4.5 Hz |
 
-**Where the published channel lands**, extrapolating the top segment at `n` = 0.70:
+**Where the published channel lands.** Points between measured masses are interpolated on
+log-log between their bracketing pair; only 590 g and the clamp extrapolate the top segment.
+⚠ An earlier version of this table extrapolated the top segment *downwards* and put the stance
+threshold at 1632 counts — wrong by 240 counts on a figure that gates a promoted lever.
 
 | state | `foot_load` | counts |
 |---|---|---|
 | swing leg (`R_fsr` ~ MΩ) | 0 | **45** |
-| stance threshold (118 g) | 0.20 | **1632** |
-| four feet down (148 g) | 0.25 | ~1850 |
+| stance threshold (118 g) | 0.20 | **1874** |
+| four feet down (148 g) | 0.25 | 1974 |
 | calibration point (175 g) | 0.30 | 2048 |
 | single-leg support (590 g) | 1.00 | 2757 |
 | software clamp (1180 g) | 2.00 | 3155 |
 
-**Swing to stance is 45 → 1632 counts, a factor of 36.** The promoted `foot_load ≥ ~0.2` gate
+**Swing to stance is 45 → 1874 counts, a factor of 42.** The promoted `foot_load ≥ ~0.2` gate
 has no resolution problem whatever the noise floor turns out to be.
 
 ### 5.6.1 ✅ The flat bump fixed the curve — but two things changed at once
