@@ -1298,6 +1298,7 @@ std::string g_save_head, g_load_head;
 bool g_no_backing = false;   // --no-backing: the twist brain's forward command clamped at zero (no rear sensor)
 bool g_seek_gate = false;    // --seek-gate: while the seek loop holds the reference, its target's ToF sector reads free (things phase T2)
 bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference continuous modulo 2 pi (see IntentAdapter::set_ref_unwrap)
+double g_stuck_cmd = 0.75;   // --stuck-cmd F: the forward command that counts as pushing (fraction of range) for the stuck stop
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
 bool g_stuck_progress = false;   // --stuck-progress (2026-09-19): the stall is no progress toward the reference, not low forward speed
 double g_stuck_escape_s = 0.0;   // --stuck-escape SECS (2026-09-19): after a stuck stop, hold the reference at the cloud view's freest sector for SECS
@@ -1535,6 +1536,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
+    if (g_stuck_cmd != 0.75) { brain.set_stuck_cmd(g_stuck_cmd); std::fprintf(stderr, "  stuck command: a forward command above %.2f of range with no forward speed counts as a stall\n", g_stuck_cmd); }
     if (g_stop.on_stuck > 0.0) { brain.set_stuck(g_stop.on_stuck); std::fprintf(stderr, "  stop on stuck: a stop starts when a forward stall exceeds %.1f x the body's own median stall length\n", g_stop.on_stuck); }
     if (!g_skill_on_arrive.empty()) std::fprintf(stderr, "  skill on arrive: %s (Pollen's network, a window at standing tuning with a zero command) fired from standing at the arrival stop's hand-back\n", g_skill_on_arrive.c_str());
     if (g_skill_at_s > 0.0) std::fprintf(stderr, "  skill at %.1f s: %s\n", g_skill_at_s, g_skill_at_name.c_str());
@@ -3092,6 +3094,8 @@ int main(int argc, char** argv) {
             g_stop.on_arrive = true;
         } else if (a == "--stop-gaze-at-thing") {
             g_stop.gaze_at_thing = true;
+        } else if (a == "--stuck-cmd") {
+            g_stuck_cmd = std::stod(next("--stuck-cmd"));
         } else if (a == "--stop-on-stuck") {
             g_stop.on_stuck = std::stod(next("--stop-on-stuck"));
         } else if (a == "--skill-on-arrive") {

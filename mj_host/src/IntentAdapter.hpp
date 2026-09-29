@@ -158,6 +158,9 @@ public:
     // of 2 s or more in those runs was one.  So the signal is the stall's length against the body's own
     // running median stall length: stuck = longer than K medians.  No level is tuned; the scale is the body's.
     void set_stuck(double k) { stuck_k_ = k; }
+    // --stuck-cmd F (2026-09-29): the forward command that counts as pushing, as a fraction of range (0.75 = the original;
+    // in the eye's arm's long wall bursts the command sits at half range with the body not moving at all)
+    void set_stuck_cmd(double f) { stuck_cmd_frac_ = f; }
     // PROGRESS, not speed (2026-09-19, `--stuck-progress`): a stall is then "commanded forward and making no
     // progress toward the reference" -- the body's velocity along the reference's direction, in the body
     // frame, under 0.25 of range -- so a body sliding along a surface at walking speed with its reference into
@@ -313,7 +316,7 @@ private:
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
-    double stuck_k_ = 0.0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false; bool stuck_progress_ = false;
+    double stuck_k_ = 0.0; double stuck_cmd_frac_ = 0.75; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false; bool stuck_progress_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int skill_request_ = -1; uint64_t skill_request_tick_ = 0;

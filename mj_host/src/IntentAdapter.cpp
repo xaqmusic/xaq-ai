@@ -265,7 +265,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             if (ref_free_ > 0.0 && cx * cx + cy * cy > 1e-6) {
                 const double ego = std::atan2(cx, cy);                              // + = right
                 const int slot = ego < -0.3 ? 0 : (ego > 0.3 ? 2 : 1);              // left / ahead / right
-                if (std::fabs(ego) < 1.2 && double(tof[size_t(slot)]) > ref_free_) blocked = true;
+                // the seek gate covers this check too (2026-09-29): the thing walked to is a hit in its own sector
+                const bool own = seek_gate_ && steer_code == 3 && seek_present_;
+                if (!own && std::fabs(ego) < 1.2 && double(tof[size_t(slot)]) > ref_free_) blocked = true;
             }
             if (blocked) { heading_ref_ = heading_; won(); ++ref_released_; }
             else if (cx * cx + cy * cy > 1e-6) {
@@ -304,13 +306,13 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     // command it judges is the brain's own; the sensed velocity is the body's answer to last tick's.
     stuck_now_ = false;
     if (stuck_k_ > 0.0) {
-        bool stalled = last_twist_[0] / kTwistRangeVx > 0.75 && last_sensed_[0] < 0.25f;
+        bool stalled = last_twist_[0] / kTwistRangeVx > stuck_cmd_frac_ && last_sensed_[0] < 0.25f;
         if (stuck_progress_) {
             double e = heading_ - heading_ref_;
             while (e > 3.14159265358979323846) e -= 2.0 * 3.14159265358979323846;
             while (e < -3.14159265358979323846) e += 2.0 * 3.14159265358979323846;
             const double progress = (vel_body[0] * std::cos(e) - vel_body[1] * std::sin(e)) / kTwistRangeVx;
-            stalled = last_twist_[0] / kTwistRangeVx > 0.75 && progress < 0.25;
+            stalled = last_twist_[0] / kTwistRangeVx > stuck_cmd_frac_ && progress < 0.25;
         }
         if (stalled) {
             ++stall_run_;

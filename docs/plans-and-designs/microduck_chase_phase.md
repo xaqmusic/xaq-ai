@@ -341,6 +341,17 @@ brushes the walls beside the things it now reaches and en route (median 12 → 3
 Next levers: a static target that yields near tall structure (one parameter on the published count), the arrival
 radius from the thing's edge, the nearer attended thing replacing a held target.
 
+**The static yield (R111, §17.78, n = 6):** the things by the walls are dropped (139 in six runs) and the walls
+rise with the rescues (20 → 27 a minute, 0.12 → 0.35): the wall contact was never the wall-adjacent targets, and a
+loop without a target hands the walk to play. Killed. The neighbour count cannot tell a wall fragment from a thing
+(13 vs 18 columns within 0.3 m); a row rule needs the line.
+
+**The free-space gate on the reference (§17.79, n = 6):** a tie on the walls, a cost on the closing (40 → 33 %); killed.
+The long wall bursts are a forward stall at half range the stuck detector does not count (its bar is three quarters
+of range); `--stuck-cmd 0.4` is measured in §17.80.
+**`--stuck-cmd 0.4` (§17.80):** two more stuck stops in six runs, the walls not better; killed. The long bursts are
+a held target beyond the wall; next, the seek loop forgets a target the walk does not close on (§17.81).
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at

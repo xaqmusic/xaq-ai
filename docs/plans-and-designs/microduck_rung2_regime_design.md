@@ -5285,3 +5285,75 @@ yields as the chase does (`percept.target_tall` is already published for the hel
 is one parameter away), which drops the things by the walls and the wall brushes with them; (2) the arrival
 radius measured from the thing's near edge, so the body stops short of the thing and of what stands behind it.
 The nearer attended thing replacing a held target (5.6 episodes a run) is the third.
+
+### 17.78 Sweeps 23 and 25: the static yield near tall structure (R111) — killed at n = 6 (2026-09-29, night)
+
+The operator's choice after §17.77 ("bound up near walls"): the chase's yield rule on static targets. Where the
+eye's arm's static targets come from (c21–c22, 436 targets): sightings at stops 73 % (the target a median 0.33 m
+from a wall, a quarter within 3 cm — tiny fragments of a wall's base band, 8 cm and two columns, the ToF's zone
+spacing at a metre splitting the band into "small isolated" pieces), sightings on the walk 14 %, renewals 13 %,
+movers that stopped 1 %. `static_yield_tall 1` (`seek`): a held static target with a tall voxel within a body
+length of it (the cloud's `target_tall` count, a tick old) is dropped and the place is not-a-thing for
+`forget_ticks`; a target set there by any path is refused. The first build (sweep 23) churned — the renewal
+re-armed the yielded place and it yielded again two ticks later, 1 700 times a run, the arrival stops 12.7 →
+1.5 — and was fixed at the target. The fixed build on the eye's arm (reflex + seek gate), seeds 1–6, sweep 25:
+
+| seeds 1–6 | eye's arm (§17.77) | + the static yield |
+|---|---|---|
+| walls / min | 20.4 ± 7.8 (max 34) | 27.0 ± 22.1 (seed 4: 67; 2 of 6 better) |
+| rescues / min · down % | 0.12 · 0.39 | 0.35 · 0.64 |
+| static targets yielded · refused | — | 139 · 54 434 (the renewal, every tick) |
+| a target held on the walk | 298 s a run | 176 s |
+| arrivals (the loop's count) | 58 | 41 |
+| closing · under seek | 40 · 47 % | 41 · 50 % |
+| attended on the walk, not taken | 7.3 a run | 10.3 |
+| chases (moving train) | 30 (13) | 33 (12) |
+
+The yield fires (139 in six runs, at the wall fragments), the walk closes as before on what it keeps, and the
+walls do not fall: they rise, with the rescues. Dropping the things by the walls leaves the loop without a target
+a third more of the walk, and the walk without a target is play's, which brushes as many walls. The wall contact
+was never the wall-adjacent targets. `REGRESSION` on the walk at n = 6, `NULL` on the walls; killed. Re-use: with a
+row rule that tells a wall's base from a thing at the sighting (the operator's "long continuous rows", which the
+neighbour count alone cannot — a fragment has 13 cloud columns within 0.3 m, a thing 18, the floor and other
+things filling the ring either way), the same yield stops the *approach* rather than the target.
+
+### 17.79 Sweep 27: the free-space gate on the reference, retried on the eye's arm — a tie, killed (2026-09-29, night)
+
+Where the eye's arm's wall contact is (c21–c22, `wall_bursts`): 16 contact bursts a run, 24 s a run in contact
+(R108: 11 and 14), the median burst half a second, and about five bursts of 5 s or more a run that hold two fifths
+of the contact time. In those long bursts seek holds the heading on 60 of 95, a target is held on 84, the stuck
+stop fired inside 5; the body pushes forward at half range (command 0.21 of 0.40) and does not move (sensed
+forward speed 0.00), a stall the stuck detector does not count because its trigger wants the command above three
+quarters of range. The free-space gate (`--ref-free 0.6`, §17.44: `NULL` on R67 without the stuck escape) on the
+eye's arm, the seek target's own sector exempt (the seek gate), seeds 1–6:
+
+| seeds 1–6 | eye's arm (§17.77) | + `--ref-free 0.6` |
+|---|---|---|
+| walls / min | 20.4 ± 7.8 | 19.5 ± 16.6 (seed 1: 34 → 15; seed 5: 24 → 52) |
+| rescues / min | 0.12 | 0.22 |
+| references released | — | 1 358 a run |
+| closing · under seek | 40 · 47 % | 33 · 42 % |
+| arrivals (the loop's count) | 58 | 49 |
+
+A tie on the walls with a trap moved from one seed to another, and a cost on the walk: a released reference is
+the heading itself, and the walk closes less. `NULL`, killed at n = 6; the 2026-09-19 verdict stands in the new
+context. Next: the stall the bursts actually show — the stuck stop's forward-command bar lowered (`--stuck-cmd 0.4`,
+byte-identical at 0.75), so pushing at a wall without moving starts the stop and the escape (§17.80).
+
+### 17.80 Sweep 29: the stuck stop's bar lowered (`--stuck-cmd 0.4`) — the detector still does not fire; killed (2026-09-29, night)
+
+| seeds 1–6 | eye's arm | + `--stuck-cmd 0.4` |
+|---|---|---|
+| walls / min | 20.4 ± 7.8 | 25.8 ± 16.2 (worse on 4, 5, 6) |
+| stuck stops · escapes | 6 · 6 | 8 · 8 |
+| rescues / min · down % | 0.12 · 0.39 | 0.20 · 0.21 |
+| closing · arrivals (the loop's count) | 40 % · 58 | 40 % · 50 |
+| bursts ≥ 5 s a run · share of contact time | 0.3 · 22 % | 0.8 · 38 % |
+
+Two more stuck stops in six runs: the trigger's other half — a stall run longer than eight times the body's own
+running median of stall lengths — moves with the bar, since the shorter stalls now counted raise the median. The
+long bursts are not shortened. `NULL`, killed at n = 6. Three levers on the eye's arm's walls (§17.78–17.80) are
+null; the bursts' anatomy says why: in 34 of 60 seek-held long bursts the target is half a metre or more away —
+beyond the wall the body pushes on, a dead-reckoned position the world refutes — and no escape rule addresses a
+target that should not be held. The seek loop's honest signal is the range left; a range that does not shrink
+while the body walks is the loop's own error to act on (§17.81).
