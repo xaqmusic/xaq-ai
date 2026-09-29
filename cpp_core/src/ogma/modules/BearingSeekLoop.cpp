@@ -279,6 +279,7 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
 }
 
 void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
+    lost_now_ = false;
     float mx = 0.0f, my = 0.0f, mprox = 0.0f;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(mover_topic_))) {
         if (pt->tick_id == tick_id && pt->values.size() >= 3) { mx = pt->values[0]; my = pt->values[1]; mprox = pt->values[2]; }
@@ -325,7 +326,13 @@ void BearingSeekLoop::chase_tick(uint64_t tick_id, double c, double s) {
                 // the thing stopped: where it was last seen is an ordinary remembered target from here
                 tx_ = cand_x_; ty_ = cand_y_; have_target_ = true; conf_ = 1.0f; ++chases_stopped_;
             } else {
-                // the thing left the view still moving: it is not at the place; nothing to go and look at
+                // the thing left the view still moving: it is not at the place; nothing to walk to -- but where it was
+                // last predicted to be is where to LOOK (the host may start a stop on lost_now_)
+                const double dt = double(tick_id - cand_tick_) / 50.0;
+                const double lx = cand_x_ + cand_vx_ * dt, ly = cand_y_ + cand_vy_ * dt;
+                const double dx = lx - px_, dy = ly - py_;
+                const double bx = c * dx + s * dy, by = -s * dx + c * dy;          // body frame: x forward, y left
+                lost_ego_ = std::atan2(-by, bx); lost_range_ = std::hypot(bx, by); lost_now_ = true;
                 have_target_ = false; conf_ = 0.0f; cx_ = 0.0f; cy_ = 0.0f; ++chases_lost_;
             }
         }

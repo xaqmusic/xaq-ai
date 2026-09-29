@@ -288,3 +288,23 @@ TEST(BearingSeekLoop, AChaseLostWhileMovingIsDroppedAndOneThatStoppedIsRemembere
     EXPECT_NEAR(stopped.m.target_x(), last, 0.05);
     EXPECT_EQ(stopped.m.chases_stopped(), 1);
 }
+
+TEST(BearingSeekLoop, ALostChaseSaysWhereTheThingWentForOneTick) {
+    ogma::ParamMap p = chase_params();
+    p["chase_stop_v"] = 0.05;
+    Rig r(p);
+    for (int k = 0; k < 10; ++k) {                       // walking away along +x at 0.2 m/s
+        r.mover(0.0f, 1.0f, prox_of(1.0 + 0.2 * (4.0 * k / 50.0))); r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+    ASSERT_TRUE(r.m.chasing());
+    int lost_ticks = 0; double ego = 9.0, range = 0.0;
+    for (int i = 0; i < 60; ++i) {
+        r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+        if (r.m.chase_lost_now()) { ++lost_ticks; ego = r.m.chase_lost_ego(); range = r.m.chase_lost_range(); }
+    }
+    EXPECT_EQ(lost_ticks, 1) << "the loss is reported on one tick";
+    EXPECT_NEAR(ego, 0.0, 0.05) << "it went straight ahead";
+    EXPECT_GT(range, 1.0 + 0.2 * 36.0 / 50.0) << "beyond where it was last seen, by its velocity over the forget time";
+    EXPECT_LT(range, 2.0);
+}

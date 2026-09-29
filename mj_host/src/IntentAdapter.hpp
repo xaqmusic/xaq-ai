@@ -184,6 +184,9 @@ public:
     double chase_vy()      const;
     bool   mover_seen()    const;
     int    mover_cands()   const;
+    bool   chase_lost_now() const;    // this tick a chase was dropped with the thing still moving...
+    double chase_lost_ego() const;    // ...and where it was last predicted: bearing (rad, + = right) and range from the body
+    double chase_lost_range() const;
     bool   chase_have_cand() const;
     double chase_cand_x()  const;
     double chase_cand_y()  const;

@@ -1471,6 +1471,7 @@ struct StopPlan {
     // there, not a wide sweep.  0 = centred on level, byte-identical.
     double gaze_down = 0.0;
     bool   on_arrive = false;      // --stop-on-arrive (things phase T4): a stop starts when the seek loop reaches its target
+    bool   on_lost = false;        // --stop-on-lost (2026-09-29): a stop starts when a chase is LOST (the thing left the view still moving), its sweep centred on where the thing was last predicted -- a look, not a walk
     bool   on_chase = false;       // --stop-on-chase (2026-09-28): a stop ENDS when the seek loop confirms a chase -- the orienting reflex's substrate form: the thing moved while I watched, follow it
     bool   gaze_at_thing = false;  // --stop-gaze-at-thing (T3): at an arrival stop the sweep's band is centred on the reached thing's bearing and elevation
     double on_stuck = 0.0;         // --stop-on-stuck K: a stop starts when a forward stall exceeds K x the body's own median stall (0 = off)
@@ -1513,6 +1514,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_ref_unwrap) { brain.set_ref_unwrap(true); std::fprintf(stderr, "  ref unwrap: the heading reference is continuous modulo 2 pi (a bearing behind the body no longer flips it)\n"); }
     if (g_seek_gate) { brain.set_seek_gate(true); std::fprintf(stderr, "  seek gate: the seek target's ToF sector reads free while seek holds the reference\n"); }
     if (g_stop.on_arrive) std::fprintf(stderr, "  stop on arrive: a stop starts when the seek loop reaches its target (the timer stays as the floor)\n");
+    if (g_stop.on_lost) std::fprintf(stderr, "  stop on lost: a stop starts when a chase is lost, its sweep centred on where the thing was last predicted (a look, not a walk)\n");
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stop.on_stuck > 0.0) { brain.set_stuck(g_stop.on_stuck); std::fprintf(stderr, "  stop on stuck: a stop starts when a forward stall exceeds %.1f x the body's own median stall length\n", g_stop.on_stuck); }
@@ -1777,6 +1779,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     const int kCloudWin = int(2.0 * kBrainHz);
     std::vector<int> cg_vox; double cg_peak = 0.0; int cg_below = 0, stops_cloud_ended = 0;
     bool chase_prev = false; int stops_chase_ended = 0;
+    bool stop_is_lost = false; int stops_lost = 0; double lost_ego = 0.0, lost_range = 0.0;
     if (g_map_view_cloud && !(cloud_on && brain.cloud_present()))
         throw std::runtime_error("--map-view cloud needs --cloud and a CloudMap in the graph");
     if (g_map_view_cloud)
@@ -1973,19 +1976,23 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const bool arrive_now = g_stop.on_arrive && stop_phase == StopPhase::None && t >= stop_from && !skill_active
                                     && (brain.seek_arrived() || skill_arrive_done);
             const bool stuck_now = g_stop.on_stuck > 0.0 && stop_phase == StopPhase::None && t >= stop_from && brain.stuck_now();
+            const bool lost_now = g_stop.on_lost && chase_on && stop_phase == StopPhase::None && t >= stop_from && !skill_active && brain.chase_lost_now();
+            if (lost_now) { lost_ego = brain.chase_lost_ego(); lost_range = brain.chase_lost_range(); }
             // a chase confirmed during a stop ends it: the thing moved while I watched, follow it
             const bool chase_edge = chase_on && brain.chase_active() && !chase_prev;
             chase_prev = chase_on && brain.chase_active();
             if (g_stop.on_chase && chase_edge && stop_phase != StopPhase::None && stop_left > 0) {
                 stop_left = 0; ++stops_chase_ended; stop_event = "stop:chase";
             }
-            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now)
+            if (stop_phase == StopPhase::None && ((stop_period > 0 && t >= stop_from && (t - stop_from) % stop_period == 0) || arrive_now || stuck_now || lost_now)
                 && (ticks - t) > stop_ticks) {
                 stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
-                ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : "stop:start"); stop_started_tick = t;
+                ++stops_started; stop_event = arrive_now ? "stop:arrive" : (stuck_now ? "stop:stuck" : (lost_now ? "stop:lost" : "stop:start")); stop_started_tick = t;
                 stop_is_arrive = arrive_now; stop_is_stuck = stuck_now && !arrive_now; stop_is_look = false; spin_walk_run = 0;
+                stop_is_lost = lost_now && !arrive_now && !stuck_now;
                 if (arrive_now) ++stops_arrive;
                 if (stuck_now && !arrive_now) ++stops_stuck;
+                if (stop_is_lost) ++stops_lost;
                 brain.set_learning(false);                 // its command is not applied during the stop
                 if (stander) stander->on_reset();          // a fresh pairing after the walk
                 if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
@@ -2008,6 +2015,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                             if (g_stop.gaze_at_thing && stop_is_arrive) {
                                 const double centre = std::clamp(std::atan2(0.2, std::max(0.05, brain.seek_range()) + 0.15), 0.2, 0.55);
                                 sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp(brain.seek_ego(), -0.5, 0.5);
+                            } else if (stop_is_lost) {
+                                // the look after a lost chase: the sweep centred on where the thing was last predicted
+                                const double centre = std::clamp(std::atan2(0.2, std::max(0.05, lost_range) + 0.15), 0.2, 0.55);
+                                sweep_p_lo = centre - 0.12; sweep_p_hi = centre + 0.12; sweep_yc = std::clamp(lost_ego, -0.5, 0.5);
                             } else if (g_skill_unwind_aim > 0.0 && stop_is_look && brain.thing_pos_present()) {
                                 // the look stop after an unwind: the sweep's yaw is centred on the kicked thing's
                                 // remembered bearing (the pitch band stays: T3's pitch cost the stand, §17.40)
@@ -2714,7 +2725,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      stops_started, stop_handbacks, stop_refused, stop_survived, stop_handoffs, stop_rescued,
                      stand_ticks / kBrainHz);
         if (g_stop.on_arrive) std::fprintf(stderr, "  arrival stops: %d of %d started when the seek loop reached its target\n", stops_arrive, stops_started);
-        if (chase_on) std::fprintf(stderr, "  chases: %d started, %d mover candidates seen by the cloud; %d stops ended on a chase\n", brain.chases(), brain.mover_cands(), stops_chase_ended);
+        if (chase_on) std::fprintf(stderr, "  chases: %d started, %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase\n", brain.chases(), brain.mover_cands(), stops_chase_ended, stops_lost);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes\n", stops_stuck, stops_started, g_stop.on_stuck, escapes);
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
         if (g_skill_unwind_aim > 0.0) std::fprintf(stderr, "  unwind aim: %d look stops had the sweep centred on the kicked thing's bearing (gain %.2f on the unwind's yaw)\n", look_aimed, g_skill_unwind_aim);
@@ -2809,6 +2820,7 @@ void usage() {
         "      follow the seed unless --train-phase S.  --log-movers WINDOW_S logs the cloud's clusters through a\n"
         "      recency window on every cast (\"mvc\"), the stage-0 instrument for chasing moving things.\n"
         "      --stop-on-chase ends a stop when the seek loop confirms a chase (the walker follows the mover).\n"
+        "      --stop-on-lost starts a stop when a chase is lost, the sweep centred on where the thing went (a look, not a walk).\n"
         "      --log-cloud-live logs the cloud as the module builds it: the voxels each cast touches, a cloud's opening\n"
         "      (with its anchor's world pose) and the places the cache forgets -- what the duck viewer draws as the live cloud.\n"
         "\n"
@@ -3006,6 +3018,8 @@ int main(int argc, char** argv) {
             g_stuck_escape_s = std::stod(next("--stuck-escape"));
         } else if (a == "--ref-free") {
             g_ref_free = std::stod(next("--ref-free"));
+        } else if (a == "--stop-on-lost") {
+            g_stop.on_lost = true;
         } else if (a == "--stop-on-chase") {
             g_stop.on_chase = true;
         } else if (a == "--stop-on-arrive") {

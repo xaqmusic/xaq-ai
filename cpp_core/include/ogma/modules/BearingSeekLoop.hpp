@@ -120,9 +120,15 @@ private:
     // where it stopped.  A position belongs to a thing while the thing is stationary.  0 = always remembered.
     double chase_stop_v_ = 0.0;
     int    chases_lost_ = 0, chases_stopped_ = 0;
+    // the loss, for a host that turns it into a LOOK (--stop-on-lost, 2026-09-29): true on the tick a chase is dropped
+    // with the thing still moving, with the bearing (body frame, + = right) and range of where it was last predicted
+    bool   lost_now_ = false; double lost_ego_ = 0.0, lost_range_ = 0.0;
 public:
-    int chases_lost()    const { return chases_lost_; }
-    int chases_stopped() const { return chases_stopped_; }
+    int    chases_lost()    const { return chases_lost_; }
+    int    chases_stopped() const { return chases_stopped_; }
+    bool   chase_lost_now() const { return lost_now_; }
+    double chase_lost_ego() const { return lost_ego_; }
+    double chase_lost_range() const { return lost_range_; }
 private:
     int    chase_confirm_ = 2, chase_confirm_ticks_ = 25, chase_forget_ticks_ = 50;
     bool   have_cand_ = false, chasing_ = false, mover_seen_ = false;

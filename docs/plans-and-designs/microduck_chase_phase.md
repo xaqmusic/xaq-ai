@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stages 0–1 measured 2026-09-27/28 (R84–R93)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
+Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -232,6 +232,12 @@ stopped one, 7 at static clusters (from 49). The walk ties the control within it
 walls, which turn out to have been false chases becoming stops (an interesting artifact). The age in the
 descriptor (R92) is `NULL` at n = 6: one value in nine under the projection; re-use, a vocabulary of its own over
 [age ratio, fresh].
+
+**R94, a lost chase starts a look (§17.59):** a stop on the loop's own loss, the sweep centred on where the thing
+went; a chase confirmed during it ends it. Fired 8 times in six runs; chases at the moving train 8 → 10 of 23 (43 %,
+the phase's best); walls by seed 22 → 7, 37 → 3, two unchanged (identical records), one corner trap (seed 4, 172 a
+minute) that the stuck stop and escape exist for. `WORKING` as a mechanism, `PARTIAL` on the chase, a signal on the
+walk. Presets R91–R94 in the launcher.
 
 **Where this leaves the design (for the discussion).** Keep R89's chase; bring the stimulus to the walk before
 touching the gate again (a track through the middle of the room, or the ball rolled across the walk as

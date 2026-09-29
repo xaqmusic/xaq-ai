@@ -4674,3 +4674,28 @@ regression against R90's artifact); not promoted without the eye. O64 (the slidi
 isolation: it is a fragment of something tall. **Next:** the walk itself — the stops are what keep the duck off
 the walls, and a chase that ends at a moving thing gives none; the stop's trigger, not the chase's gate, is the
 lever (O43's question returns: what should START a stop, when the thing chased is gone).
+
+### 17.59 A lost chase starts a look, not a walk (R94 = R93 + `--stop-on-lost`; 2026-09-29)
+
+**Built.** The seek loop reports the tick a chase is dropped with the thing still moving, with the bearing and range
+of where the thing was last predicted (`chase_lost_now / _ego / _range`); the host's `--stop-on-lost` starts a
+stop on it, the sweep's yaw centred on that bearing and its pitch band on that range, as the arrival stop centres
+on the reached thing; with `--stop-on-chase` already on, a chase confirmed during the look ends it — chase, lose,
+look where it went, chase again. A unit test. The record's event reads `stop:lost`. Paired against R93 in one
+sweep (`--host-arm`), the same seeds.
+
+**Measured (n = 6, the big track).** The lever fired 8 times in six runs (1.3 a run: seeds 1, 2, 4, 6; none on 3
+and 5, whose records are byte-identical between the arms — the guard in the data). Chases 25 → 23, at the moving
+train 8 → **10 (43 %)**, static 7 → 8; the closest approach to a moving train under a metre on three seeds. The walk,
+paired by seed (walls a minute, R93 → R94): 22.4 → **7.0**, 9.4 → 8.5, 9.6 = 9.6, 44.6 → **172**, 21.4 = 21.4, 36.6 →
+**2.7**; the mean 24.0 → 36.9 ± 66.6 is one seed, the median 22 → 9. Rescues 0.17 → 0.09, falls 0.34 → 0.17 %, stands
+24 → 30 %, stops 16.5 → 17.8. Seed 4 — already R93's worst — rides the walls from 700 s and sits in the −x −y corner
+from 1000 s to the end (300–550 wall episodes per 100 s), two of the run's lost looks taken there: the corner trap
+of O65's kind, which the stuck stop and escape (R64s, §17.44) exist for and this argv does not carry.
+
+**Verdict.** The mechanism `WORKING` (a look at where the thing went, from the loop's own loss); on the chase a
+`PARTIAL` (43 % of chases at the moving train, the best of the phase, at n = 6); on the walk a *signal*, not a
+finding: three seeds loud in its favour, one corner trap, and eight events a run's worth of divergence — CLAUDE.md
+§3.3's own warning about a lever that fires rarely. Not promoted without the eye (preset R94, seed 1: three lost
+looks). **Re-use:** the corner trap is the stuck stop's to answer (`--stop-on-stuck`, `--stuck-escape`), not this
+lever's; and a look that finds nothing should count as an answer to the outcome table one day.
