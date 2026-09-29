@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7.**
+Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7 and §8.**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -155,27 +155,6 @@ speed scatters and the gate table, six seeds.
   at matched recall (§17.53) — the weighting cannot help where a false alarm's voxels are all new; T6's free space
   along each ray (O49) as the detector that would also see a thing *leave*.
 
-## 8. The campaign harness (2026-09-29): the first ten minutes from a saved brain
-
-The operator, stepping away: an autonomous run toward a duck that pursues moving targets rapidly, avoids being stuck
-against walls, and shows more behaviours in the first ten minutes; and four items — the stuck stop and escape into
-the chase stack; a look that finds nothing counting as an answer; no babble in every run if a saved brain will do;
-the head forward over the centre of gravity as a speed lever; object permanence for a moving target that has left
-the field of view. Every lever guarded, six seeds, the record here and in §17.60 on.
-
-**The harness.** `--load-brain F` now restores a level-2 brain saved by `--save-brain` (the body left at its reset;
-the head and stand brains load as before; the intent EPM's whole-body babble counter is in the snapshot, so a
-restored brain does not babble again). The checkpoint is `checkpoints/duck_r94_s1.brain.json` — R94, seed 1, the
-full 1500 s on the big track. A campaign run is then 600 s with stops from the first second; its first two minutes
-are a walk at the brain's own pace (vx 0.22 m/s mean, seek and play steering, three stops) where the babble's are
-a zero-mean identification (vx 0.00). The launcher's "a saved brain" start now works for level 2 (presets "on the
-LOADED brain"). The sweep's judged window starts at 30 s (`--control-from 30`).
-
-**The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
-things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
-re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
-every loss); `--head-forward 0.15` and `--body-pitch 0.1` (the speed levers). Measured in §17.60.
-
 ## 6. Where the duck is (for a cold start)
 
 `★ THINGS` = R83 is unchanged (things phase §10). This phase has, as of 2026-09-27 evening: the train room and its
@@ -265,3 +244,24 @@ touching the gate again (a track through the middle of the room, or the ball rol
 `--roll-past` rolls it across a stop); the one confound left is the sliding fragment, whose remover is geometric
 (along its own surface, correlated with the body's yaw rate) or T6 at a finer resolution — the real sensor's
 multi-target returns would give the trail directly.
+
+## 8. The campaign harness (2026-09-29): the first ten minutes from a saved brain
+
+The operator, stepping away: an autonomous run toward a duck that pursues moving targets rapidly, avoids being stuck
+against walls, and shows more behaviours in the first ten minutes; and four items — the stuck stop and escape into
+the chase stack; a look that finds nothing counting as an answer; no babble in every run if a saved brain will do;
+the head forward over the centre of gravity as a speed lever; object permanence for a moving target that has left
+the field of view. Every lever guarded, six seeds, the record here and in §17.60 on.
+
+**The harness.** `--load-brain F` now restores a level-2 brain saved by `--save-brain` (the body left at its reset;
+the head and stand brains load as before; the intent EPM's whole-body babble counter is in the snapshot, so a
+restored brain does not babble again). The checkpoint is `checkpoints/duck_r94_s1.brain.json` — R94, seed 1, the
+full 1500 s on the big track. A campaign run is then 600 s with stops from the first second; its first two minutes
+are a walk at the brain's own pace (vx 0.22 m/s mean, seek and play steering, three stops) where the babble's are
+a zero-mean identification (vx 0.00). The launcher's "a saved brain" start now works for level 2 (presets "on the
+LOADED brain"). The sweep's judged window starts at 30 s (`--control-from 30`).
+
+**The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
+things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
+re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
+every loss); `--head-forward 0.15` and `--body-pitch 0.1` (the speed levers). Measured in §17.60.
