@@ -174,7 +174,10 @@ public:
     // with e = heading - reference and +y left.
     void set_stuck_progress(bool on) { stuck_progress_ = on; }
     bool stuck_now() const { return stuck_now_; }
-    int  contact_stucks() const { return contact_stucks_; }   // stalls fired by contact (--stuck-contact)       // this tick: a stall crossed K x the running median
+    int  contact_stucks() const { return contact_stucks_; }   // stalls fired by contact (--stuck-contact)
+    bool stuck_by_contact() const { return stuck_by_contact_; }   // this tick's stuck_now came from the contact rule
+    void forget_seek_target();                                    // lever 1b: the seek loop drops its target
+    int  contact_forgets() const;       // this tick: a stall crossed K x the running median
     double stall_s() const { return stall_run_ / 50.0; }
     double stall_median_s() const { return stall_med_ / 50.0; }
     int  seek_gated() const { return seek_gated_; }   // ticks the gate zeroed a slot
@@ -324,7 +327,7 @@ private:
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;
-    double stuck_k_ = 0.0; double stuck_cmd_frac_ = 0.75; double stuck_contact_ = 0.0; int contact_run_ = 0; bool contact_fired_ = false; bool contact_release_ = false; int contact_stucks_ = 0; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false; bool stuck_progress_ = false;
+    double stuck_k_ = 0.0; double stuck_cmd_frac_ = 0.75; double stuck_contact_ = 0.0; int contact_run_ = 0; bool contact_fired_ = false; bool contact_release_ = false; int contact_stucks_ = 0; bool stuck_by_contact_ = false; int stall_run_ = 0; double stall_med_ = 12.5; bool stuck_now_ = false, stuck_fired_ = false; bool stuck_progress_ = false;
     bool seek_present_ = false; double seek_value_ = 0.0, seek_range_ = 0.0;
     bool seek_arrived_ = false; double seek_value_prev_ = 0.0;
     int skill_request_ = -1; uint64_t skill_request_tick_ = 0;

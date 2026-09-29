@@ -308,7 +308,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     }
     // STUCK (see the header): the stall run and its running median.  Read before the reflex so the
     // command it judges is the brain's own; the sensed velocity is the body's answer to last tick's.
-    stuck_now_ = false;
+    stuck_now_ = false; stuck_by_contact_ = false;
     if (stuck_k_ > 0.0) {
         bool stalled = last_twist_[0] / kTwistRangeVx > stuck_cmd_frac_ && last_sensed_[0] < 0.25f;
         if (stuck_progress_) {
@@ -323,7 +323,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             // pushing, in contact, and not moving (sweeps 39-40: without the third term it fired on every brush along a
             // wall the body was still sliding past, 21 times a run, and each firing cost a six-second escape)
             const bool pushing = last_twist_[0] / kTwistRangeVx > 0.4 && double(tof[3]) > stuck_contact_ && last_sensed_[0] < 0.25f;
-            if (pushing) { ++contact_run_; if (!contact_fired_ && contact_run_ >= 50) { stuck_now_ = true; contact_fired_ = true; ++contact_stucks_; } }
+            if (pushing) { ++contact_run_; if (!contact_fired_ && contact_run_ >= 50) { stuck_now_ = true; stuck_by_contact_ = true; contact_fired_ = true; ++contact_stucks_; } }
             else { contact_run_ = 0; contact_fired_ = false; }
         }
         if (stalled) {
@@ -480,6 +480,8 @@ int    IntentAdapter::yield_drops() const { auto* q = find_seek(*instance_); ret
 int    IntentAdapter::static_yielded() const { auto* q = find_seek(*instance_); return q ? q->static_yielded() : 0; }
 int    IntentAdapter::static_yield_drops() const { auto* q = find_seek(*instance_); return q ? q->static_yield_drops() : 0; }
 int    IntentAdapter::progress_forgets() const { auto* q = find_seek(*instance_); return q ? q->progress_forgets() : 0; }
+void   IntentAdapter::forget_seek_target() { if (auto* q = const_cast<ogma::BearingSeekLoop*>(find_seek(*instance_))) q->forget_target(); }
+int    IntentAdapter::contact_forgets() const { auto* q = find_seek(*instance_); return q ? q->contact_forgets() : 0; }
 int    IntentAdapter::walk_takes() const { auto* q = find_seek(*instance_); return q ? q->walk_takes() : 0; }
 double IntentAdapter::chase_gaze_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_gaze_ego() : std::numeric_limits<double>::quiet_NaN(); }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }

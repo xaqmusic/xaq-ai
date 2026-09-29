@@ -5482,3 +5482,35 @@ stuck stops at a wall and none at a thing — but on brushes the body was still 
 six seconds paid each time: two minutes a run of escaping, and the pursuit and the arrivals paid for it. The rule
 lacked the stall half of its own definition. **Refined**: push, contact, and no forward motion (the sensed forward
 speed under a quarter of range, the stall test's own term). Measured as sweeps 45–46, then levers 2 and 3 on top.
+
+**Levers 1–3 measured (sweeps 45–50, the refined lever 1 as the base; R112 the control; n = 18 each).**
+
+| | R112 | L1 · contact stall | L1 + L2 · release | L1 + L2 + L3 · cloud |
+|---|---|---|---|---|
+| walls / min, n = 18, mean ± sd · median · max | 31.5 ± 23.4 · 27 · 90 | 32.8 ± 20.6 · 27 · 90 | 29.6 ± 20.1 · 24 · 93 | 30.9 ± 23.5 · 26 · 108 |
+| runs over 60 · over 40 | 2 · 4 | 1 · 6 | 1 · 3 | 1 · 5 |
+| seeds 1–6: walls · contact s a run · longest burst | 17.8 · 15 · 8 s | 35.6 · 24 · 11 s | 43.8 · 32 · 21 s | 27.6 · 19 · 9 s |
+| seeds 7–18: walls · contact s a run · longest burst | 38.4 · 33 · 77 s | 31.4 · 24 · 32 s | **22.5 · 13 · 8 s** | 32.5 · 22 · 29 s |
+| rescues / min · down % (7–18) | 0.18 · 0.32 | 0.12 · **0.08** | 0.12 · 0.16 | 0.24 · 0.42 |
+| rescues / min · down % (1–6) | 0.20 · 0.20 | 0.15 · 0.15 | 0.35 · 0.82 | 0.15 · 0.45 |
+| closing (1–6 · 7–18) | 55 · 48 % | 52 · 53 % | 48 · 58 % | 57 · 54 % |
+| arrival stops (1–6 · 7–18) | 14.5 · 14.9 | 11.2 · 13.3 | 11.2 · 15.0 | 12.3 · 13.8 |
+| chases (1–6 · 7–18) | 25 · 59 | 15 · 33 | 13 · 48 | 20 · 57 |
+| contact stalls fired, 18 runs | — | 285 | 331 | 382 |
+
+- **The sense is right and every consumer of it is loud on one seed set and quiet or wrong on the other.** The
+  contact stall fires at walls (20 of 22 of a set's stuck stops at a wall, none at a thing) and shortens the traps
+  on seeds 7–18 (77 → 32 s, falls to a quarter) while worsening seeds 1–6 (18 → 36), since each firing is a
+  six-second escape and 57 % of escapes walk straight back under a seek target held beyond the wall. The release
+  gives seeds 7–18 the campaign's best wall tail (max 38, 13 s a run in contact, one long burst in twelve runs,
+  arrivals and chases up) and seeds 1–6 their worst (seed 1: 93, falls ×4): yaw handed at contact to a walker
+  whose avoidance never learned contact. The cloud filing undoes the release's damage on 1–6 (44 → 28, the
+  longest burst 21 → 9 s) and undoes its gain on 7–18 (22 → 33).
+- **Pooled over eighteen seeds every arm ties R112 within a run's noise** (30 ± 20 a minute, one run past 60).
+  The wall count on this arm is set by which seeds fall into the walk's chaotic traps, and a lever that moves the
+  tail on one set moves it back on the other. §3.3's rule applies: a lever that only shows after averaging is not
+  the capability. `NULL` on the pooled walls for all three, with named signals — L1 on falls, L1+L2 on the tail of
+  seeds 7–18 — and the sense itself confirmed (`WORKING` as an observation: 1.0 at every trap).
+- **The consequence is the missing piece, not the sense.** The escape backs off and the reference walks the body
+  back; the target the surface refutes is still held. Lever 1b: a stall fired by contact drops the seek loop's
+  target (`--contact-forget`), measured in sweeps 51–52.
