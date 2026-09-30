@@ -160,6 +160,12 @@ ParamSchema MotorEPMv2::params_schema() const {
          "applied AFTER the keyframe/plan blend, so it wins where indices collide. Per-leg path "
          "only, like the objective sockets (the whole_body_c path carries neither). Empty = off.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_motors", ParamMutability::HotMutable,
+         "THE PRIOR'S MOTOR MASK (2026-09-30, §17.86): parallel to state_prior_indices, the number of LEADING motors "
+         "that prior index may descend through (0 = all). A motor that moves the sensor can satisfy a sensor prior by "
+         "looking away (the seven-motor walker's head pitch carries the largest authority over the ToF's contact "
+         "share); the ToF priors then descend through the twist motors only. Empty = no mask (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
         {"state_prior_targets", ParamMutability::HotMutable,
          "Target values x* for state_prior_indices, parallel arrays. A mismatch in length "
          "disables the prior (and shows as state_prior_active=false in diag — check it, per §3.2 "
@@ -1132,7 +1138,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["intent_yaw_gain"] = intent_yaw_gain_;
     m["lookahead_gain"] = lookahead_gain_;
     m["lookahead_mode"] = lookahead_mode_;
-    m["state_prior_indices"] = state_prior_indices_;
+    m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1323,6 +1329,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lookahead_gain", [&](auto const& v){ lookahead_gain_ = get_double(v, "lookahead_gain"); });
     apply_param(params, "lookahead_mode", [&](auto const& v){ lookahead_mode_ = get_double(v, "lookahead_mode"); });
     apply_param(params, "state_prior_indices", [&](auto const& v){ state_prior_indices_ = get_double_vec(v, "state_prior_indices"); });
+    apply_param(params, "state_prior_motors", [&](auto const& v){ state_prior_motors_ = get_double_vec(v, "state_prior_motors"); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
     apply_param(params, "state_prior_lr",      [&](auto const& v){ state_prior_lr_      = get_double(v, "state_prior_lr"); });
@@ -2733,6 +2740,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "plan_fade") plan_fade_ = get_double(value, "plan_fade");
     else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
     else if (key == "state_prior_indices") state_prior_indices_ = get_double_vec(value, "state_prior_indices");
+    else if (key == "state_prior_motors") state_prior_motors_ = get_double_vec(value, "state_prior_motors");
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
     else if (key == "state_prior_lr")      state_prior_lr_      = get_double(value, "state_prior_lr");
@@ -4507,7 +4515,9 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                     Gt[j] = 1.0f - t * t;
                                 }
                             }
+                            const int motor_limit = (k < state_prior_motors_.size() && state_prior_motors_[k] > 0.0) ? int(state_prior_motors_[k]) : m;
                             for (int j = 0; j < m; ++j) {
+                                if (j >= motor_limit) continue;   // the prior's motor mask: this index does not descend through motor j
                                 const float g = lw_k * e * L.A(idx, j) * Gt[j] / anorm;
                                 Cdst.row(j).noalias() += g * L.prev_x.transpose();
                                 // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate

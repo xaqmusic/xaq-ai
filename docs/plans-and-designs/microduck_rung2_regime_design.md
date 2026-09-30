@@ -5709,3 +5709,32 @@ the head's motion, not its reach**: with the intent driving it the head joints m
 three times the head brain's 0.018) because the controller emits a fresh head command every 20 ms, which the
 policy was not trained to track and no servo could follow. The fix is the walker's own kind: a low-pass on the
 intent's head command (`--intent-head F TAU`, 0.3 s), measured with and without the tilt prior (sweeps 66–67).
+
+**The filtered head (sweeps 66–67) and where the falls come from.** A 0.3 s low-pass on the intent's head
+command: with the tilt prior, walls 48, closing 48 %, falls 9.7; without it, closing **62 %** (the best of the
+campaign), arrivals 21.5, walk 0.20 m/s, falls 9.0. The head joints still step 0.038 rad a tick (the control's
+0.018), so the joints' motion is the policy's own tracking, not the command's jitter, and the falls did not
+move. **The falls' anatomy** (the two seconds before each fall from a walk): the control falls in fast forward
+turns (yaw rate 0.52 rad/s, forward 0.23 m/s, the yaw command 0.63); the seven-motor arms fall **walking
+backwards** (forward −0.05 m/s, the yaw command 0.16, the head yaw 0.18 rad). The seven-motor controller backs up
+because its model barely knows what forward does: identified from scratch in a 1 m room, where a forward pulse
+meets a wall within two seconds, its authority of `vx` over the sensed forward speed is 0.009 (the room table),
+so the speed prior (state 0 → 0.75) has nothing to descend and the controller drifts backward, where the policy
+falls. The regime the operator proposed had the order right: **identify in the open, then the contact room as
+the second babble.** Chained: the seven motors babbled 600 s in the plain playroom, rebabbled 600 s in the 1 m
+room, then the two arms (sweeps 68–69).
+
+**The open-then-room brain (sweeps 68–69) and the head that stays turned.** Identifying in the open first
+(vx's authority over forward speed 0.029, three times the room's) and rebabbling in the room (33 s of contact,
+one fall; the room erodes the forward row to 0.011 and makes head yaw the strongest heading motor, −0.045, and
+head pitch the strongest contact motor, +0.070 — the sensor-pointing channel) did not move the falls: with the
+tilt prior 10.5 a run (turn 0.06 rad/s, contact 49 s), without it 15.3 (turn 0.15, closing 56 %). The backing
+before a fall is not the difference — the control commands backward on 23 % of walking ticks too. **The
+difference is the head**: yawed past 0.3 rad on 73–80 % of walking ticks in every seven-motor arm, never in the
+control. The controller found heading authority in head yaw and holds the head turned, so the ToF points sideways
+(every range prior then steers against a view that is not the walk's), the pursuit's sightings come from the
+side, and the policy falls backing up with a turned head. A permanently turned head is the degenerate use of a
+steering motor, the sensor-pointing cheat in another form. Two masks follow: the ToF and contact priors descend
+through the twist motors only (`state_prior_motors`, sweeps 70–71 on the first ordering), and, re-identified
+with head yaw as the last motor, the heading and tilt priors through everything but head yaw — the head leans,
+it does not steer by yaw (sweep 72).

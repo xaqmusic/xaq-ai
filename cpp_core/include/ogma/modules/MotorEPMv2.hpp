@@ -1567,7 +1567,8 @@ private:
     // NOT the mechanism — the HK dC update is sign-blind and amplifies the error):
     //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
     //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
-    std::vector<double> state_prior_indices_;   // state indices; NEGATIVE = from the end (−1 = last)
+    std::vector<double> state_prior_indices_;
+    std::vector<double> state_prior_motors_;   // parallel: leading motors each prior index may descend through (0 = all)   // state indices; NEGATIVE = from the end (−1 = last)
     std::vector<double> state_prior_targets_;   // target values x*, parallel to indices
     double state_prior_gain_    = 0.0;          // weight w ∈ [0,1]; 0 = off, byte-identical
     double state_prior_lr_     = 0.1;           // fraction of the GN-normalised correction per tick (C half)
