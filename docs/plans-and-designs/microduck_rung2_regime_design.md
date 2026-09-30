@@ -5738,3 +5738,17 @@ steering motor, the sensor-pointing cheat in another form. Two masks follow: the
 through the twist motors only (`state_prior_motors`, sweeps 70–71 on the first ordering), and, re-identified
 with head yaw as the last motor, the heading and tilt priors through everything but head yaw — the head leans,
 it does not steer by yaw (sweep 72).
+
+**The ToF mask alone (sweeps 70–71).** With the ToF and contact priors held to the twist motors and the heading
+prior still free to use head yaw: the head yawed past 0.3 rad on 82 % of the walk (from 76), contact 60 s,
+falls 10.0 with the tilt prior; falls 17.0 and one run down for six minutes without it. `NULL` on its own — the
+turned head is the heading prior's, and the mask that matters is the one on the heading (sweep 72).
+
+**Head yaw out of every prior (sweep 72, the second identification with head yaw last).** The room table gives
+head roll the largest authority over the heading error (+0.055) and the contact share (+0.068), head yaw −0.030
+on the heading. With the heading and tilt priors kept off head yaw and the ToF priors on the twist: the head
+yawed past 0.3 rad on **93 %** of the walk, falls 12.7, contact 27 s, walls 26, turn 0.07 rad/s, closing 51 %.
+The turned head is not the prior's descent: it is the controller's own learning on that motor, and no mask
+on the prior reaches it. **Head yaw as a walker motor is unusable as built** — the gaze stays the head brain's.
+The clean form of the operator's hypothesis, the lean, is six motors: the twist with neck pitch, head pitch and
+head roll (sweep 73).
