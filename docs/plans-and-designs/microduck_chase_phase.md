@@ -413,3 +413,59 @@ needs the walker's ToF slots in the body frame.
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
 every loss); `--head-forward 0.15` and `--body-pitch 0.1` (the speed levers). Measured in §17.60.
+
+## 9. Where we are (2026-09-30 evening, for a cold start)
+
+**Read first:** this section, then design doc §17.72–17.86 (each sweep's record, one lever at a time), then §8 above.
+
+**The arms, and what each is for.** Every arm is a launcher preset that mirrors its harness line; the eye is the
+promotion gate.
+- **★ R113 · the CONTACT prior on the CONTACT brain** — the campaign's arm on the operator's criterion (a thing of
+  interest is walked to, not past) with the still head the ToF wants. Config `a1v2_r113_contact_prior.json`,
+  checkpoint `duck_contact_s1.brain.json`, host line = the campaign base (`--stop-on-stuck 8 --stuck-escape 6
+  --chase-vx 0.35`) + `--heading-reflex 1.0 0.3 1.0 --seek-gate`. What it carries: the progress forget (R112,
+  a target the walk does not close on is forgotten, §17.81–17.83), the heading reflex with the seek gate covering
+  the reflex's release (§17.77), the mover's priority and the yield that forgets (R99/R108, §17.65–17.73), the
+  contact-babbled identification (§17.85) with the too-close share in the walker's prior.
+- **R108 · the yield that FORGETS** — the arm on the wall metric alone (19 walls/min, n = 18).
+- **R113 · SIX motors, the LEAN, the head home at stops** — the expressive alternative (§17.86): neck pitch, head
+  pitch and head roll as the walker's motors, `--intent-head 0.4 --head-slew 1.0 --head-home 1.5`, checkpoint
+  `duck_contact6_s1`. Turns toward a large error +70 %, arrivals +38 %, falls at the three-motor rate, walls +35 %,
+  the head pitched or rolled on a quarter of the walk. The BEFORE presets beside it reproduce the resonance.
+- **BABBLE ROOM** presets — the contact regime itself (`--rebabble 600` in the 1 m room, `--save-brain`), three
+  and seven motors.
+
+**Numbers to know (n = 18 unless said).** R108: walls 19, contact 30 s a run. Reflex + seek gate: closing 32 → 40 %.
+R112: closing 48–55 %, play never holds the heading with a target held, arrivals ×2.7 over R108. The contact
+brain: contact 30 → 16 s, the longest wall burst 77 → 17 s, walls 31 → 24. The lean, n = 18: turn 0.06 → 0.10
+rad/s, arrivals 10.4 → 14.4, falls 2.0 → 2.7, walls 21 → 28.
+
+**Instruments** (all in `mj_host/tools/` or the session scratchpad noted in memory): `walk_closing.py` (does the walk
+go where its loops point: closing share, heading error, yaw-command agreement, attended-not-taken, near-misses),
+`yield_where.py` (where chases start, in the world), the host's summary lines (chases, yields, forgets, contact
+stalls, the walker's authority table over its ToF slots after the restore and at the end); scratch: `turn_readout.py`
+(the turn toward a large error, the error closed within 3 s), `stop_readout.py` (falls at stops, the head's ringing),
+`head_readout.py` (the head's pose and speed on the walk), `seven_readout.sh`, `contact_readout.sh`.
+
+**Open levers, in the order the record suggests.**
+1. *Looking around while walking* (the operator's wish, §17.86 end): rotate the walker's ToF summary slots from the
+   head's frame into the body's (the walker's avoidance reads the head's view; a yawed head doubled the walls),
+   THEN a head-brain yaw sweep on the walk (the stop's gaze sweep exists; a walk form does not). Head yaw is not a
+   walker motor: parked sideways in four forms.
+2. *The lean's falls-versus-walls*: the hand-off is solved; the walls it brushes (28 vs 21) are the eye's call.
+3. *The room's dose* for the contact regime (600 s in a 1 m room is the dose; 1200 s loses the walk; the room
+   erodes the forward row — identify in the open first for a from-scratch brain), and the prior's share at n ≥ 20
+   varied worlds.
+4. *The pursuit*: the chase's start is the standing limit (§17.68); permanence in pursuit unbuilt (O63).
+5. *The walls' floor*: the corner trap where the ToF reads empty at contact is now a learned avoidance's business
+   (the contact brain), not an escape's — the four imposed consumers were null (§17.84).
+
+**Traps recorded this campaign (memory has them too).** A forget or yield in the seek loop that also bars the
+outcome loop's renewal empties the loop and hands the walk to play (§17.82). `pkill` patterns must be bracketed so
+they do not match the calling shell; a killed chain script loses its `sweep done` marker. The host runs from
+`mj_host/`, so `--load-brain checkpoints/...`. `--head-rate` is an older head-brain flag; the slew is `--head-slew`.
+A restored brain will not babble again unless `--rebabble S` reopens the per-leg counter. The ToF's too-close share
+is confounded under a pitching head (the floor enters the near field): read wall contact and bursts for head arms.
+
+**The readout for the eye:** <https://claude.ai/code/artifact/10ffc001-5858-47af-98a1-973dc9bba9ac> — eighty sweeps,
+every arm's line, and the seven looks the operator took, each with what it found.
