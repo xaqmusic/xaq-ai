@@ -5752,3 +5752,31 @@ The turned head is not the prior's descent: it is the controller's own learning 
 on the prior reaches it. **Head yaw as a walker motor is unusable as built** — the gaze stays the head brain's.
 The clean form of the operator's hypothesis, the lean, is six motors: the twist with neck pitch, head pitch and
 head roll (sweep 73).
+
+**The lean (sweep 73, six motors: the twist with neck pitch, head pitch, head roll; head yaw the head brain's).**
+
+| seeds 1–6 | control: 3 motors, room brain (63) | 7 motors (62) | 7, tilt prior (65) | 7, filtered head (67) | 7 v2, yaw masked (72) | **6, the lean (73)** |
+|---|---|---|---|---|---|---|
+| yaw rate toward the reference, \|err\| > 1 rad, median · p75 | 0.04 · 0.31 | 0.16 · 0.53 | 0.22 · 0.54 | 0.12 · 0.42 | 0.07 · 0.38 | **0.13 · 0.53** |
+| the error closed by 0.5 rad within 3 s | 33 % | 46 % | 46 % | 41 % | 40 % | **46 %** |
+| closing on the target | 46 % | 58 % | 58 % | **62 %** | 51 % | 52 % |
+| walk m/s · arrival stops | 0.175 · 15.5 | 0.211 · 23.3 | 0.199 · 19.5 | 0.202 · 21.5 | 0.198 · 15.8 | 0.206 · 21.2 |
+| head yawed past 0.3 rad, share of the walk | 0 % | 73 % | — | — | 93 % | **1 %** |
+| walls / min · wall contact s · longest burst | 17 · 16 · 12 s | 30 · 32 · 22 s | 31 · 22 · 23 s | 28 · — · — | 26 · 27 · 15 s | 31 · 24 · **9 s** |
+| falls a run | **3.0** | 13.3 | 10.5 | 9.0 | 12.7 | 11.7 |
+
+**Verdict, §17.86 (n = 6 each, 2026-09-30).** The head is a steering motor and the walker learns to use it: in
+every form the seven- and six-motor walkers turn toward a large heading error three to five times faster than
+the three-motor one, close on their targets more, walk a fifth faster and arrive half again as often — the
+operator's hypothesis, measured, and the circling's cause named (the three-motor command's turning radius, not
+the body's). With head yaw among the motors the controller holds the head turned on three quarters of the walk
+whatever the prior is allowed to descend through, so head yaw stays the head brain's; the lean (neck pitch, head
+pitch, head roll) keeps the gaze straight and keeps the manoeuvrability. **What every form pays is falls: four
+times the control's**, and neither the head's amplitude (0.2 of range), nor its smoothing (0.3 s), nor a tilt
+objective, nor an open-first identification moved that below nine a run. The falls come backing up with the
+head pitched or turned, states the policy meets only under this controller. `PARTIAL`: the manoeuvrability
+`WORKING`, the balance unsolved. Re-use: the falls are the next lever, and the candidates are the policy's own
+envelope (a rate limit on the head command in the walker's own units; a prior on the sensed backward speed) —
+measured before any of this rides in the arm. The arm stays R113 on the three-motor contact brain. The contact
+instrument on the ToF's too-close share is confounded under a pitching head (looking down puts the floor in the
+near field); the wall-contact and burst measures are the ones to read for the head arms.
