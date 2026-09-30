@@ -5537,3 +5537,29 @@ instrument to keep on for it (it fires where it should and nowhere else).
 
 **The arm stands: R112 on the reflex and seek gate** (preset "R112 · the PROGRESS forget"), with the contact
 presets beside it for the eye. R108 on the wall metric alone.
+
+### 17.85 The contact regime: a babble that includes contact (2026-09-30)
+
+**What the walker's avoidance is** (`MotorEPMv2`, the intent module on the twist channel). The identification is
+600 s of random twists, each held 1.5 s (`babble_ticks 30000`, `babble_hold 75`, `babble_scale 0.8`), learning a
+forward model `A` (motor → sensor) whose row for each state element is the model's estimate of the motors'
+authority over it. The avoidance is a **state prior**: `state_prior_indices [0, −6, −4, −3, −2]` with targets
+`[0.75, 0, 0, 0, 0]` — the three ToF range slots (left, ahead, right, counted from the end of the state) held at
+zero, the prior's error descended through `A`'s own authority row. The too-close share is the last element (−1)
+and is **not in the prior**; and even with the objective, a model that never saw a push has a zero authority row
+there and nothing to descend. That is why §17.84's four imposed consumers fought: nothing in the walker's model
+knows what a push does.
+
+**The regime, in the operator's shape.** (1) A contact room: `playroom_gen.py --babble-room` — a 2 m square
+(`--half 1.0`), walls, a post (a 4 cm cylinder to 0.5 m), a box (24 cm, to 0.28 m), one chair; nothing else.
+(2) The second babble: the current identification (`duck_r94_s1`) loaded, its babble window reopened
+(`--rebabble 600`: the per-leg `steps_seen` and the whole-body counter set back), 600 s of random twists in the
+room with the model learning, saved (`--save-brain checkpoints/duck_contact_s1.brain.json`). (3) The objective,
+separately: R113 = R112 + the too-close share in the prior (`state_prior_indices [..., −1]`, target 0), with the
+seek gate covering the share while the target is within reach (`--seek-gate-contact 0.3`: the thing walked onto
+fills the near field at the arrival). Instrument: the host prints the walker's authority over the four ToF slots
+after the restore and at the end (the abs-sum of `A`'s row).
+
+**The first run did not babble.** The whole-body counter was set back and the per-leg path, which the duck
+runs, keeps its own (`steps_seen`): the run walked under control for 620 s — and still met contact 42 s in its
+second minute, since the model learns under control too. Fixed; the authority read from the per-leg `A`.

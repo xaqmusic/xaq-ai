@@ -1,0 +1,77 @@
+{
+ "seed": 1,
+ "half": 1.0,
+ "objects": [
+  {
+   "name": "wall_px",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.0
+  },
+  {
+   "name": "wall_nx",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.0
+  },
+  {
+   "name": "wall_py",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.0
+  },
+  {
+   "name": "wall_ny",
+   "cls": "static",
+   "kind": "wall",
+   "x": 0,
+   "y": 0,
+   "z": 0.5,
+   "extent": 1.0
+  },
+  {
+   "name": "furn_chair0",
+   "cls": "static",
+   "kind": "chair",
+   "x": 0.5531,
+   "y": -0.5981,
+   "z": 0,
+   "extent": 0.22,
+   "yaw": 4.924
+  },
+  {
+   "name": "furn_box",
+   "cls": "static",
+   "kind": "box",
+   "x": -0.5543,
+   "y": -0.6428,
+   "z": 0,
+   "extent": 0.16,
+   "yaw": 0.091
+  },
+  {
+   "name": "furn_post",
+   "cls": "static",
+   "kind": "post",
+   "x": -0.6053,
+   "y": 0.1934,
+   "z": 0,
+   "extent": 0.05
+  }
+ ],
+ "xml_sha256": "b6bebc3b7e6fed71",
+ "free_bodies": [],
+ "hinges": [],
+ "qpos_robot": 21,
+ "qpos_layout": [],
+ "nq": 21
+}

@@ -9,6 +9,7 @@
 #include "ogma/GraphConfig.hpp"
 #include "ogma/modules/CloudMap.hpp"
 #include "ogma/modules/BearingSeekLoop.hpp"
+#include "ogma/modules/MotorEPMv2.hpp"
 #include <limits>
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
@@ -145,6 +146,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         // (slots 12/13/14 = columns 0-2 / 3-4 / 5-7 = left / ahead / right; the sector by the bearing)
         const int slot = seek_ego_ < -0.3 ? 0 : (seek_ego_ > 0.3 ? 2 : 1);
         if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
+        if (seek_gate_contact_m_ > 0.0 && seek_range_ > 0.0 && seek_range_ <= seek_gate_contact_m_ && tof_s[3] > 0.0f) { tof_s[3] = 0.0f; ++seek_gated_contact_; }
     }
     publish("sense", {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
                       unit(a[0] / 20.0), unit(a[1] / 20.0), unit(a[2] / 20.0),
@@ -481,6 +483,12 @@ int    IntentAdapter::static_yielded() const { auto* q = find_seek(*instance_); 
 int    IntentAdapter::static_yield_drops() const { auto* q = find_seek(*instance_); return q ? q->static_yield_drops() : 0; }
 int    IntentAdapter::progress_forgets() const { auto* q = find_seek(*instance_); return q ? q->progress_forgets() : 0; }
 void   IntentAdapter::forget_seek_target() { if (auto* q = const_cast<ogma::BearingSeekLoop*>(find_seek(*instance_))) q->forget_target(); }
+void IntentAdapter::rebabble(int ticks) { for (auto* m : instance_->modules()) if (auto* w = dynamic_cast<ogma::MotorEPMv2*>(const_cast<ogma::Module*>(m))) w->rebabble(ticks); }
+std::array<double, 4> IntentAdapter::tof_authority() const {
+    for (auto* m : instance_->modules()) if (auto* w = dynamic_cast<const ogma::MotorEPMv2*>(m))
+        return {w->wb_authority_from_end(3), w->wb_authority_from_end(2), w->wb_authority_from_end(1), w->wb_authority_from_end(0)};
+    return {0.0, 0.0, 0.0, 0.0};
+}
 int    IntentAdapter::contact_forgets() const { auto* q = find_seek(*instance_); return q ? q->contact_forgets() : 0; }
 int    IntentAdapter::walk_takes() const { auto* q = find_seek(*instance_); return q ? q->walk_takes() : 0; }
 double IntentAdapter::chase_gaze_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_gaze_ego() : std::numeric_limits<double>::quiet_NaN(); }

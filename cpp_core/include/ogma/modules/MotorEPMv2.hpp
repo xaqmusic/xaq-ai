@@ -876,6 +876,18 @@ private:
     Eigen::VectorXf     prevPrevYw_;           // Δy needs two steps of command history
     bool                wb_ready_ = false, wb_have_prev_ = false;
     int64_t             wb_steps_ = 0;
+public:
+    // THE SECOND BABBLE (2026-09-29, §17.85): a restored brain may reopen its babble window for TICKS more ticks of
+    // random twists with the model learning -- the contact room's regime.  The whole-body path only.
+    void rebabble(int64_t ticks) { wb_steps_ = std::max<int64_t>(0, babble_ticks_ - ticks); for (auto& L : legs_) L.steps_seen = std::max<int64_t>(0, babble_ticks_ - ticks); }
+    // the model's authority over a state element counted from the end (0 = the last: the ToF's too-close share on
+    // the duck; 1..3 = right, ahead, left): the abs-sum of that row of Aw_, 0 when the model has never moved it
+    double wb_authority_from_end(int k) const {
+        if (Aw_.rows() > k && k >= 0) return double(Aw_.row(int(Aw_.rows()) - 1 - k).cwiseAbs().sum());
+        if (!legs_.empty() && legs_[0].A.rows() > k && k >= 0) return double(legs_[0].A.row(int(legs_[0].A.rows()) - 1 - k).cwiseAbs().sum());   // the per-leg path (the duck's)
+        return 0.0;
+    }
+private:
     float               wb_tle_ema_ = 0.0f;
     // ---- 2026-08-03 · INTER-LEG PLV, replacing gait_coherence as the coordination read.
     // gait_coherence() is the Kuramoto order parameter of the four phases AT AN INSTANT.

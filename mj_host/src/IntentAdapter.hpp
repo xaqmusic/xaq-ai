@@ -119,6 +119,9 @@ public:
     // not push the body off the thing it is walking to.  Gated by the state it exploits (a held seek
     // target, its sector); off = byte-identical.
     void set_seek_gate(bool on) { seek_gate_ = on; }
+    // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
+    // share reads 0 to the walker's sense -- the thing walked onto fills the near field at the arrival.  0 = off.
+    void set_seek_gate_contact(double r) { seek_gate_contact_m_ = r; }
     // THE HEADING REFLEX (2026-09-17, `--heading-reflex TAU DAMP GATE`).  The twist brain's yaw column
     // does not hold a heading (design doc §17.17: with a quiet reference the error sits at two radians and
     // the command saturates at the gait frequency), so every loop's bearing -- play's, seek's -- goes into a
@@ -177,6 +180,9 @@ public:
     int  contact_stucks() const { return contact_stucks_; }   // stalls fired by contact (--stuck-contact)
     bool stuck_by_contact() const { return stuck_by_contact_; }   // this tick's stuck_now came from the contact rule
     void forget_seek_target();                                    // lever 1b: the seek loop drops its target
+    // the second babble (§17.85) and the walker's authority over its four ToF slots [left, ahead, right, contact]
+    void rebabble(int ticks);
+    std::array<double, 4> tof_authority() const;
     int  contact_forgets() const;       // this tick: a stall crossed K x the running median
     double stall_s() const { return stall_run_ / 50.0; }
     double stall_median_s() const { return stall_med_ / 50.0; }
@@ -323,7 +329,7 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
-    bool seek_gate_ = false; int seek_gated_ = 0;
+    bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;
     double hr_tau_ = 0.0, hr_damp_ = 0.0, hr_gate_ = 1.0, hr_share_ = 0.0;

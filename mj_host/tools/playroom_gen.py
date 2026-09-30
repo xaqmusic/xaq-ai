@@ -124,8 +124,9 @@ def arena_keyframes():
 
 
 class Room:
-    def __init__(self, seed, half, n_balls, n_blocks, n_chairs, train=False):
+    def __init__(self, seed, half, n_balls, n_blocks, n_chairs, train=False, babble=False):
         self.seed, self.half = seed, half
+        self.babble = babble     # THE BABBLE ROOM (2026-09-29, §17.85): a small room with obstacles at ToF height and nothing else
         self.rng = random.Random(seed)
         self.n_balls, self.n_blocks, self.n_chairs = n_balls, n_blocks, n_chairs
         self.with_train = train
@@ -359,9 +360,24 @@ class Room:
                     path=self.train_path, perimeter=round(per, 3), size=[2 * hx, 2 * hy, 2 * hz + 0.04])
 
     # ---- assembly ----------------------------------------------------------------------
+    def post(self):
+        x, y = self.place(0.05)
+        self.world.append(f'<geom name="furn_post" type="cylinder" size="0.04 0.25" pos="{x:.3f} {y:.3f} 0.25" material="wood_mat"/>')
+        self.record("furn_post", "static", "post", x, y, 0, 0.05)
+
+    def box(self):
+        x, y = self.place(0.16)
+        yaw = self.rng.uniform(0, 2 * math.pi)
+        self.world.append(f'<geom name="furn_box" type="box" size="0.12 0.12 0.14" pos="{x:.3f} {y:.3f} 0.14" euler="0 0 {yaw:.3f}" material="stripe_mat"/>')
+        self.record("furn_box", "static", "box", x, y, 0, 0.16, yaw=round(yaw, 3))
+
     def build(self):
         self.textures()
         self.walls()
+        if self.babble:
+            # the contact room: walls, a post, a box, one chair; no rug, table, shelf, clock, toys or train
+            self.chair(0); self.box(); self.post()   # the largest first, so the small room places all three
+            return
         if self.with_train:
             self.lay_track()
         self.rug()
@@ -438,14 +454,17 @@ def main():
     ap.add_argument("--blocks", type=int, default=2)
     ap.add_argument("--chairs", type=int, default=2)
     ap.add_argument("--train", action="store_true", help="add the toy train on its oval track (default --out scene_playroom_train.xml)")
+    ap.add_argument("--babble-room", action="store_true", help="the contact room (§17.85): walls, a post, a box, a chair, nothing else; default --half 1.0, --out scene_babble_room.xml")
     ap.add_argument("--out", default=None, help="file name in mj_host/models/microduck (or a path); default scene_playroom.xml")
     ap.add_argument("--check", action="store_true", help="load the result through the host when it is built")
     a = ap.parse_args()
 
+    if a.babble_room and a.half == 2.0:
+        a.half = 1.0
     if a.out is None:
-        a.out = "scene_playroom_train.xml" if a.train else "scene_playroom.xml"
+        a.out = "scene_babble_room.xml" if a.babble_room else ("scene_playroom_train.xml" if a.train else "scene_playroom.xml")
     write_robot_overlay()
-    room = Room(a.seed, a.half, a.balls, a.blocks, a.chairs, train=a.train)
+    room = Room(a.seed, a.half, 0 if a.babble_room else a.balls, 0 if a.babble_room else a.blocks, 1 if a.babble_room else a.chairs, train=a.train and not a.babble_room, babble=a.babble_room)
     room.build()
     text = room.xml()
     out = Path(a.out) if Path(a.out).is_absolute() or "/" in a.out else MODEL_DIR / a.out
