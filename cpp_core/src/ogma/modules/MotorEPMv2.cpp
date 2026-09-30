@@ -2,6 +2,7 @@
 #include "ogma/modules/MotorEPMv2.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <random>
 #include <sstream>
@@ -166,6 +167,20 @@ ParamSchema MotorEPMv2::params_schema() const {
          "looking away (the seven-motor walker's head pitch carries the largest authority over the ToF's contact "
          "share); the ToF priors then descend through the twist motors only. Empty = no mask (byte-identical).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_weights", ParamMutability::HotMutable,
+         "THE PRIOR'S PER-INDEX PRECISION (2026-10-01, the lean's settle): parallel to state_prior_indices, a weight on "
+         "that index's descent, C and h alike (1 = as before). Two priors that pull one motor in opposite directions "
+         "settle where their weighted gradients balance, so the weight is the one number the trade between them is "
+         "made in (the six-motor walker's head: the speed prior leans it, a level prior brings it home). Empty = all 1 "
+         "(byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_grow_at", ParamMutability::HotMutable,
+         "GROW ON RESTORE (2026-10-01): a restored module whose state arrives WIDER than its snapshot inserts the new "
+         "elements at this index of the new layout -- the model's rows, the controller's columns, the state model's "
+         "rows and columns all zero there (an unidentified sense: no authority, no feedback) -- instead of dropping "
+         "every frame. A second babble (--rebabble) then identifies the new rows while the old ones keep what they "
+         "learned. -1 = off (a wider frame is dropped, as before).",
+         ParamValue{int64_t(-1)}, ParamValue{int64_t(-1)}, ParamValue{int64_t(4096)}},
         {"state_prior_targets", ParamMutability::HotMutable,
          "Target values x* for state_prior_indices, parallel arrays. A mismatch in length "
          "disables the prior (and shows as state_prior_active=false in diag — check it, per §3.2 "
@@ -1139,6 +1154,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["lookahead_gain"] = lookahead_gain_;
     m["lookahead_mode"] = lookahead_mode_;
     m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
+    m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1330,6 +1346,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "lookahead_mode", [&](auto const& v){ lookahead_mode_ = get_double(v, "lookahead_mode"); });
     apply_param(params, "state_prior_indices", [&](auto const& v){ state_prior_indices_ = get_double_vec(v, "state_prior_indices"); });
     apply_param(params, "state_prior_motors", [&](auto const& v){ state_prior_motors_ = get_double_vec(v, "state_prior_motors"); });
+    apply_param(params, "state_prior_weights", [&](auto const& v){ state_prior_weights_ = get_double_vec(v, "state_prior_weights"); });
+    apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
     apply_param(params, "state_prior_lr",      [&](auto const& v){ state_prior_lr_      = get_double(v, "state_prior_lr"); });
@@ -2741,6 +2759,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "plan_puppet_gain") plan_puppet_gain_ = get_double(value, "plan_puppet_gain");
     else if (key == "state_prior_indices") state_prior_indices_ = get_double_vec(value, "state_prior_indices");
     else if (key == "state_prior_motors") state_prior_motors_ = get_double_vec(value, "state_prior_motors");
+    else if (key == "state_prior_weights") state_prior_weights_ = get_double_vec(value, "state_prior_weights");
+    else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
     else if (key == "state_prior_lr")      state_prior_lr_      = get_double(value, "state_prior_lr");
@@ -3030,6 +3050,35 @@ void MotorEPMv2::ensure_leg_init(int leg, int n) {
     L.initialized = true;
 }
 
+// GROW ON RESTORE (state_grow_at): insert k zero state elements at index g of every n-sized member of the leg.
+// Zero rows of A = no authority identified; zero columns of C / Cp / Cdep = no feedback from the new sense; zero rows
+// and columns of Bx = no state dynamics.  The old elements keep what they learned, at their shifted positions.
+void MotorEPMv2::grow_leg(Leg& L, int g, int k) {
+    const int n0 = L.n, n1 = n0 + k;
+    g = std::clamp(g, 0, n0);
+    auto rows = [&](Eigen::MatrixXf& M) {           // insert k zero ROWS at g (n0 x c -> n1 x c)
+        if (M.rows() != n0) return;
+        Eigen::MatrixXf R = Eigen::MatrixXf::Zero(n1, M.cols());
+        R.topRows(g) = M.topRows(g); R.bottomRows(n0 - g) = M.bottomRows(n0 - g); M = R; };
+    auto cols = [&](Eigen::MatrixXf& M) {           // insert k zero COLUMNS at g (r x n0 -> r x n1)
+        if (M.cols() != n0) return;
+        Eigen::MatrixXf R = Eigen::MatrixXf::Zero(M.rows(), n1);
+        R.leftCols(g) = M.leftCols(g); R.rightCols(n0 - g) = M.rightCols(n0 - g); M = R; };
+    auto vec = [&](Eigen::VectorXf& v) {
+        if (v.size() != n0) return;
+        Eigen::VectorXf R = Eigen::VectorXf::Zero(n1);
+        R.head(g) = v.head(g); R.tail(n0 - g) = v.tail(n0 - g); v = R; };
+    rows(L.A); rows(L.Bx); cols(L.Bx); cols(L.C); cols(L.Cp); cols(L.Cdep);
+    vec(L.b); vec(L.x); vec(L.prev_x); vec(L.pulse_x0); vec(L.pulse_dplus);
+    for (auto& bk : L.banks) {
+        rows(bk.A); rows(bk.Bx); cols(bk.Bx); cols(bk.C);
+        if (bk.b.size() == n0) vec(bk.b);
+    }
+    L.n = n1;
+    std::fprintf(stderr, "  MotorEPMv2 %s: the state grew %d -> %d, %d unidentified element(s) inserted at %d\n",
+                 id_.c_str(), n0, n1, k, g);
+}
+
 void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
     if (!input_allowed(payload->producer_id)) return;
     auto pt = std::dynamic_pointer_cast<const ProprioToken>(payload);
@@ -3037,6 +3086,7 @@ void MotorEPMv2::handle_proprio(int leg, MessagePtr payload) {
     int n = int(pt->values.size());
     ensure_leg_init(leg, n);
     Leg& L = legs_[leg];
+    if (L.n != n && state_grow_at_ >= 0 && n > L.n) grow_leg(L, state_grow_at_, n - L.n);
     if (L.n != n) return;            // dimensionality must be stable
     L.x = pt->values;
     // Capture the spawn pose (first frame = body standing) as the postural rest
@@ -4458,8 +4508,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             // note for the §12.5 measurement behind it.
                             const float gw = (consolidate_n_ > 0.0 && int(k) < int(consolidate_n_))
                                              ? float(state_prior_gate_weight_) : 1.0f;
-                            const float lw_k  = gw * lw_raw;
-                            const float hlw_k = gw * hlw_raw;
+                            // state_prior_weights: this index's own precision (empty = 1, byte-identical)
+                            const float pw = (k < state_prior_weights_.size()) ? float(state_prior_weights_[k]) : 1.0f;
+                            const float lw_k  = gw * lw_raw * pw;
+                            const float hlw_k = gw * hlw_raw * pw;
                             if (reach_k) reach_lw_last_ = lw_k;
                             const bool split = state_prior_split_ > 0.0;
                             if (split && L.Cp.rows() != m) L.Cp = Eigen::MatrixXf::Zero(m, n);
@@ -4983,6 +5035,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     if (idx < 0 || idx >= L.n) continue;      // out of range: skip, as the descent does
                     Ap.row(kk) = L.A.row(idx);
                     ep[kk] = float(state_prior_targets_[size_t(k)]) - L.x[idx];
+                    // state_prior_weights: a weighted least squares, the row and its error scaled by sqrt(w)
+                    // (absent = 1, byte-identical; 0 = the row has no say in the step)
+                    if (size_t(k) < state_prior_weights_.size()) {
+                        const float sw = std::sqrt(std::max(0.0f, float(state_prior_weights_[size_t(k)])));
+                        Ap.row(kk) *= sw; ep[kk] *= sw;
+                    }
                     ++kk;
                 }
                 if (kk > 0) {

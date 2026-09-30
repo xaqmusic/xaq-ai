@@ -469,3 +469,99 @@ is confounded under a pitching head (the floor enters the near field): read wall
 
 **The readout for the eye:** <https://claude.ai/code/artifact/10ffc001-5858-47af-98a1-973dc9bba9ac> — eighty sweeps,
 every arm's line, and the seven looks the operator took, each with what it found.
+
+## 10. The head: a lean that settles, a head that holds still when it matters (2026-10-01 →)
+
+**The operator's direction (2026-09-30 night, watching the six-motor lean before the hand-off fix):** the nod as the
+duck comes to a stop and the head's motion on the walk are interesting and give the duck personality, and a nod
+toward a small thing on the floor fits its interest in it, as long as nothing falls. But the brain must also be
+able to hold the head still when it needs a stable voxel cloud on the walk. Build that as a learned lever: the
+head free to move and ring while looking around, and able to settle when the percept needs it. Their forks: **the
+six-motor lean** carries the free head, **the sensor-realism lever** goes in, and first **the lean's own habit**:
+R113's lean walks with the head pitched down going forward and up going backward. An inverted pendulum leans into
+an acceleration and comes back once the pace is steady; the head should too — addressed in the small babble room
+first, then observed in the playroom. **Grow-on-restore** for the new sense (keep the brain, identify the new rows
+in a second babble).
+
+**The plan, in the rewrite rule's terms.**
+- *Stability is precision, not a behaviour.* The head holds still to the degree some loop needs its percept: a
+  prior on percept surprise whose precision rises while a loop consumes the cloud (a held target, a chase) and falls
+  to zero when nothing is attended. The pigeon's head-bob is the biology (the hold phase locks the head in space
+  while the body walks under it; the bird sees then).
+- *The nod as an epistemic act.* A ToF zone is 5.6°; a 4 cm thing at 0.5 m subtends 4.6°, under a zone. A few degrees
+  of pitch across it moves the zone boundaries across the thing — dithering, the peering of birds and insects before
+  a strike. The error the nod descends is the attended thing's uncertainty (the kind EPM's TLE).
+- *The sensor check changes the order.* In simulation the ToF casts instantly from the forward-kinematic pose into
+  the gravity-levelled trunk frame (`Tof.hpp`), so head motion costs the cloud nothing; the real sensor integrates
+  over time and its pose lags. The costs that exist now are the walker's ToF slots in the head's frame, the attended
+  thing's flicker, and possibly the mover gate's false alarms.
+- **Stages.** **A** measure the lean as it is (`mj_host/tools/lean_readout.py`). **B** the head's attitude as a walker
+  sense, grown on restore, identified by a rebabble in the room. **C** a head-level prior at a swept precision (the
+  mid-ranging trade: the twist carries the steady speed, the head the transients), in the room, then n = 6 in the
+  playroom, then the eye. **D** the sensor-realism lever (the cast over the sensor's integration window and the
+  pose's lag). Then stability as gated precision, then the nod as dithering at arrival stops, the peck last.
+
+### 10.1 Stage A, measured on the saved sweeps (2026-10-01)
+
+`lean_readout.py` over walking ticks: the head's attitude pitch (−hg[2], + = nose down), forward speed and
+acceleration through a 0.5 s box (the stride out). Seeds 1–6, 600 s, the playroom:
+
+| | 3 motors (sweep 63) | the lean, before the fix (73) | the lean, head home at stops (77) |
+|---|---|---|---|
+| head pitch at a forward cruise (\|a\| < 0.06 m/s² for 1 s) | +0.00 rad | **+0.31** | **+0.52** |
+| accelerating · decelerating | +0.01 · −0.01 | +0.36 · +0.18 | +0.55 · +0.35 |
+| at 0.2–0.3 m/s, median | — | **+0.79** (45° down) | +0.79 |
+| backing (v < −0.03 m/s): median · p10 | −0.01 | +0.10 · **−0.36** (up) | +0.31 · −0.16 |
+| pitch = … + b·v + c·a | b 0.02, c 0.03 | **b 1.72**, c −0.01 | **b 1.45**, c 0.14 |
+
+The operator's reading, measured: the lean follows SPEED, not acceleration (0.17 rad of pitch per 0.1 m/s, nothing on
+acceleration once speed is in); 45° down at the fast walk; a head-up tail on a fifth of the backing. The still-head
+walker holds the head level (sd 0.014 rad).
+
+**The cause, read in the saved brain (`duck_contact6_s1`).** The walker's forward-speed prior (sensed vx → 0.75 of
+range, 0.30 m/s) descends through all six motors in proportion to the authority the babble found: head pitch and neck
+pitch move forward speed about as much as `vx` does (+0.010, −0.013 against +0.015). The prior's tonic half (`h`) is an
+integrator, and the head motors' tonics sit at the rails (neck pitch `h` −2.15, tanh −0.97; head pitch +1.14). Two
+reasons nothing takes them back: the speed target is above what the walk reaches (0.30 against 0.20 m/s), so its
+error never closes; and **the walker cannot sense its head** — its state is the twist's three joints and sixteen sense
+slots, none of them the head. No error anywhere reads "head down". (The head brain's own four-motor H2 showed the same
+null-space drift: the two pitch joints wound to their rails, `head2_h2_level_slow.json`'s description.)
+
+**Three instrument and faithfulness catches (§3.2), found reading the state's layout.** The state is
+`[pos, act, delta]` per twist joint, then the sense (16 slots from state index 9):
+1. **The §17.86 "tilt prior" on state 3 and 4 is sensed lateral speed and the `vy` command**, not the trunk's gravity
+   (state 9 and 10). It rides in the six- and seven-motor configs (`a1v2_r113_six.json`, `…_seven_tilt*.json`) and in
+   the starred six-motor preset; §17.86's "the tilt prior halves contact" is a lateral-speed prior's result. Kept as
+   is in the arms below (one lever at a time); the re-use is a real tilt prior on 9, 10 (11, 12 with the head sense).
+2. **The host's authority table printed rows 1 and 2 as "sensed vy" and "sensed wz"**; they are `vx`'s action echo
+   and delta (the real rows are 3 and 6). §17.86's room table's "sensed wz" row is therefore `vx`'s delta. Fixed
+   (stderr only), with the columns now named from the graph's action topics (the lean's sixth column, head roll,
+   printed as `head_y`).
+3. **The prior's model-implied step (`state_prior_step_gain`, on in every intent config) ignores
+   `state_prior_motors`**: the mask arms of §17.86 (sweeps 70–72) masked the slow descent and not the per-tick step,
+   a weakened slice of the mask. "Head yaw held sideways whatever the mask" stands for the descent only; sweep 80
+   (yaw the only head motor) is unaffected. Not fixed here (it would move the six-motor arm); a lever of its own.
+
+### 10.2 Built (2026-10-01), all off by default, both guards byte-identical
+
+- `MotorEPMv2.state_prior_weights` — a per-index precision on the prior, in the descent (C and h) and in the
+  model-implied step (a weighted least squares, each row and its error by √w). Empty = byte-identical.
+- `MotorEPMv2.state_grow_at` — **grow on restore**: a restored module whose state arrives wider than its snapshot
+  inserts the new elements at this index (the model's rows, the controller's columns, the state model's rows and
+  columns all zero: an unidentified sense) instead of dropping every frame. −1 = off.
+- Host `--intent-head-sense` — the head's roll and pitch (head-frame gravity y, z; 0 = level, the head brain's own
+  level error) at the FRONT of the walker's sense, so every negative prior index keeps its element; the graph
+  declares `load_slots 18`.
+- `playroom_gen.py --babble-room --half 1.0 --out scene_babble_room2m.xml` — the 2 m room (a post, a box, a chair) for
+  the rebabble and for watching a lean settle (the 1 m contact room gives a forward pulse two seconds).
+- Configs `a1v2_contact_room6h` (the rebabble), `a1v2_r113_six_h` (the head sensed, no level prior: the control),
+  `a1v2_r113_six_level03 / 10 / 30` (+ the level prior on state 9, 10 at precision 0.3 / 1 / 3 against the speed
+  prior's 1).
+- Guards: R83 plain (300 s, seed 3) `6b9a0b3a…` as before; the starred six-motor preset (150 s, seed 2) old build
+  against new `915e1391…` both.
+
+**The rebabble (stage B):** `duck_contact6_s1` loaded into `a1v2_contact_room6h` with the head sensed: the state grew
+25 → 27, then 600 s of the structured babble in the 2 m room (2 rescues), saved as `duck_contact6h_s1`. The head's
+pitch row after it: `vx` −0.021, `vyaw` +0.021, neck pitch +0.028, head pitch −0.016, head roll −0.024; the roll row
++0.025 on the head motors. Head pitch's authority over sensed speed fell to zero in the rebabble (neck pitch keeps
+−0.012). Preset "LEAN · the REBABBLE with the head SENSED".

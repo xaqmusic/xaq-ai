@@ -124,6 +124,14 @@ public:
     // (kHeadRange) the actions span; 0 = off (the head actions, if the graph publishes them, are ignored: byte-identical).
     void set_intent_head(double f, double tau_s = 0.0) { intent_head_frac_ = f; intent_head_alpha_ = tau_s > 0.0 ? 1.0 - std::exp(-0.02 / tau_s) : 1.0; }
     bool intent_head() const { return intent_head_frac_ > 0.0; }
+    // THE HEAD'S ATTITUDE AS A WALKER SENSE (2026-10-01, the lean's settle; --intent-head-sense): the six-motor walker
+    // commands neck and head pitch and roll but senses none of it -- its state has no head, so no error anywhere reads
+    // "head down" and the speed prior's tonic holds the head wherever it wound.  On: two slots at the FRONT of the
+    // sense (the load block's first two elements: head-frame gravity y = roll, z = pitch, 0 = level, the head brain's
+    // own level error) -- at the front so every negative prior index (heading, ToF, contact) keeps its element.
+    // The graph declares load_slots 18.  Off = byte-identical.
+    void set_head_sense(bool on) { head_sense_ = on; }
+    void feed_head_gravity(const std::array<double, 3>& hg) { head_g_ = hg; }
     std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
     void set_seek_gate(bool on) { seek_gate_ = on; }
     // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
@@ -337,6 +345,7 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
+    bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;

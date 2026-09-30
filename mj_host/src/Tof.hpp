@@ -48,6 +48,21 @@ public:
     // (1 − range / 1 m over columns 0-2, 3-4, 5-7; 0 = nothing within a metre) and the
     // TooClose fraction.
     std::array<float, 4> summary() const;
+    // THE REAL SENSOR'S TIMING (2026-10-01, --tof-real SPREAD LAG; 0 0 = off, byte-identical).  The simulated cast
+    // reads the head pose at the instant of the cast; the VL53L8CX builds an 8x8 frame from FOUR integrations in
+    // sequence (datasheet DS14161; 5 ms each by default, the VCSEL on for the whole period in continuous mode at up to
+    // 15 Hz), and the robot composes the frame with the head pose it reads when the frame arrives.  On: sub-frame k
+    // (zones by the 2x2 interleave, k = (row % 2) * 2 + col % 2 -- an assumption about the SPAD groups) is cast from the
+    // sensor's pose LAG + SPREAD * (3 - k) / 4 seconds ago (interpolated between recorded ticks), and every return is
+    // reprojected with the CURRENT pose.  A still head loses nothing; a moving head misplaces its points by the angle
+    // it turned in between -- the cost of head motion the instantaneous cast gives away.  record() every tick.
+    void set_realism(double spread_s, double lag_s) { spread_s_ = spread_s; lag_s_ = lag_s; }
+    bool realism() const { return spread_s_ > 0.0 || lag_s_ > 0.0; }
+    void record(const DuckBody& body);
+    // The instrument: the last cast's mean and max distance (m) between each Hit/Floor return as composed (the current
+    // pose) and where it truly was (its sub-frame's pose) -- the registration error the timing costs.  0 when off.
+    double reg_error_mean() const { return reg_mean_; }
+    double reg_error_max() const { return reg_max_; }
     // Beam directions in the site frame (forward = +x, left = +y, up = +z).
     const std::array<std::array<double, 3>, kZones>& beams() const { return beams_; }
 
@@ -55,6 +70,11 @@ private:
     std::array<std::array<double, 3>, kZones> beams_{};
     std::array<TofZone, kZones> zones_{};
     std::array<double, 3> origin_level_{};
+    double spread_s_ = 0.0, lag_s_ = 0.0, reg_mean_ = 0.0, reg_max_ = 0.0;
+    static constexpr int kHist = 16;                   // 0.32 s of 50 Hz ticks
+    std::array<std::array<double, 3>, kHist> hist_pos_{};
+    std::array<std::array<double, 4>, kHist> hist_quat_{};
+    int hist_n_ = 0, hist_head_ = -1;                  // hist_head_ = the newest entry
 };
 
 }  // namespace mjhost

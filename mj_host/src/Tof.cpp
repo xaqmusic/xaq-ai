@@ -54,6 +54,18 @@ Tof::Tof() {
     }
 }
 
+void Tof::record(const DuckBody& body) {
+    std::array<double, 3> pos;
+    std::array<double, 9> mat;
+    body.site_world("tof", pos, mat);
+    mjtNum q[4];
+    mju_mat2Quat(q, mat.data());
+    hist_head_ = (hist_head_ + 1) % kHist;
+    hist_pos_[size_t(hist_head_)] = pos;
+    hist_quat_[size_t(hist_head_)] = {q[0], q[1], q[2], q[3]};
+    hist_n_ = std::min(hist_n_ + 1, kHist);
+}
+
 void Tof::sense(const DuckBody& body, double trunk_height_m) {
     const mjModel* m = body.model();
     const mjData* d = body.data();
@@ -71,14 +83,51 @@ void Tof::sense(const DuckBody& body, double trunk_height_m) {
     const double floor_threshold = above_floor * kFloorSafety;
 
     static const mjtByte kWorldOnly[mjNGROUP] = {1, 0, 0, 0, 0, 0};
+    // --tof-real: the four sub-frames' sensor poses in the world, interpolated from the recorded ticks (0.02 s apart)
+    std::array<std::array<double, 3>, 4> sub_pos{};
+    std::array<std::array<double, 9>, 4> sub_mat{};
+    const bool real = realism() && hist_n_ >= 2;
+    if (real) {
+        for (int k = 0; k < 4; ++k) {
+            const double ago = std::max(0.0, lag_s_ + spread_s_ * double(3 - k) / 4.0) / 0.02;   // in ticks
+            const double a = std::min(ago, double(hist_n_ - 1));
+            const int i0 = int(std::floor(a)), i1 = std::min(i0 + 1, hist_n_ - 1);
+            const double f = a - double(i0);
+            const auto& p0 = hist_pos_[size_t((hist_head_ - i0 + kHist) % kHist)];
+            const auto& p1 = hist_pos_[size_t((hist_head_ - i1 + kHist) % kHist)];
+            auto q0 = hist_quat_[size_t((hist_head_ - i0 + kHist) % kHist)];
+            auto q1 = hist_quat_[size_t((hist_head_ - i1 + kHist) % kHist)];
+            if (q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3] < 0.0) for (auto& c : q1) c = -c;
+            mjtNum q[4];
+            for (int c = 0; c < 4; ++c) q[c] = (1.0 - f) * q0[size_t(c)] + f * q1[size_t(c)];
+            mju_normalize4(q);
+            for (int c = 0; c < 3; ++c) sub_pos[size_t(k)][size_t(c)] = (1.0 - f) * p0[size_t(c)] + f * p1[size_t(c)];
+            mju_quat2Mat(sub_mat[size_t(k)].data(), q);
+        }
+    }
+    double reg_sum = 0.0; int reg_n = 0;
+    reg_max_ = 0.0;
     for (int i = 0; i < kZones; ++i) {
         TofZone& z = zones_[i];
         z = TofZone{};
-        const auto dir_world = rot(smat.data(), beams_[i]);
+        const int sub = ((i / kCols) % 2) * 2 + (i % kCols) % 2;
+        const double* from = real ? sub_pos[size_t(sub)].data() : spos.data();
+        const auto dir_world = rot(real ? sub_mat[size_t(sub)].data() : smat.data(), beams_[i]);
         int geomid = -1;
-        const mjtNum r = mj_ray(m, d, spos.data(), dir_world.data(), kWorldOnly, 1, -1, &geomid, nullptr);
+        const mjtNum r = mj_ray(m, d, from, dir_world.data(), kWorldOnly, 1, -1, &geomid, nullptr);
         if (r < 0.0 || r > kMaxRangeM) continue;             // Empty
         z.range = r;
+        if (real) {
+            // composed with the current pose against the true return from the sub-frame's pose, in the world
+            const auto now_dir = rot(smat.data(), beams_[i]);
+            double e2 = 0.0;
+            for (int c = 0; c < 3; ++c) {
+                const double dc = (spos[size_t(c)] + r * now_dir[size_t(c)]) - (from[c] + r * dir_world[size_t(c)]);
+                e2 += dc * dc;
+            }
+            const double e = std::sqrt(e2);
+            reg_sum += e; ++reg_n; reg_max_ = std::max(reg_max_, e);
+        }
         const auto dir = qrot(sensor_quat, beams_[i]);        // the beam in the trunk frame
         const auto dir_level = qrot(level, dir);
         const double downward = -dir_level[2];
@@ -96,6 +145,7 @@ void Tof::sense(const DuckBody& body, double trunk_height_m) {
         z.cls = TofZone::Hit;
         z.horizontal = horizontal;
     }
+    reg_mean_ = reg_n ? reg_sum / reg_n : 0.0;
 }
 
 std::array<double, Tof::kCols> Tof::column_hit() const {

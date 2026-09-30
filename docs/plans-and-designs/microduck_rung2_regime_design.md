@@ -5869,3 +5869,88 @@ body's first, or the avoidance reads a sideways view — the enabling lever befo
 the cloud already casts in the head's true pose, so the map is unaffected). Presets: "★ R113 · the CONTACT
 prior on the CONTACT brain" (three motors, the still head) is the arm; "R113 · SIX motors, the LEAN, the head
 home at stops" the expressive alternative for the eye.
+
+### 17.87 The lean that settles: the head sensed, a level prior, grow on restore (2026-10-01)
+
+**The operator's direction** (chase phase §10): the six-motor lean's head motion and its nod at stops are wanted
+(personality, and a nod at a small thing on the floor fits the duck's interest in it) as long as nothing falls, and
+the brain must be able to hold the head still when it needs a stable cloud. First the lean's own habit: the head
+down going forward, up going backward, held as long as the pace is. An inverted pendulum leans into an acceleration
+and comes back at a steady pace. Worked in the small room first, then the playroom; the new sense grown on restore.
+
+**Stage A (the saved sweeps; `mj_host/tools/lean_readout.py`).** The head's attitude pitch (−hg[2], + = nose down)
+against forward speed and acceleration, each through a 0.5 s box. The still three-motor walker: level (sd 0.014 rad).
+The lean (sweeps 73, 77): 0.31 / 0.52 rad down at a forward cruise, 0.79 (45°) at 0.2–0.3 m/s, a head-up tail on a
+fifth of the backing; pitch = … + 1.4–1.7·v + 0.0·a. The lean follows SPEED. **The cause, in the saved brain:** the
+speed prior (sensed vx → 0.75 of range) descends through every motor with authority over forward speed, head pitch
+and neck pitch among them (+0.010, −0.013 against vx's +0.015); its tonic half is an integrator and the head
+motors' tonics sit at the rails (neck `h` −2.15, head pitch +1.14). The walker has no head in its state, so no error
+reads "head down", and the speed target is never met: **the vx command sits at its rail (0.40 m/s) on 47–68 % of
+walking ticks** while the walk reaches ~0.2 m/s. Mid-ranging needs the slow actuator able to carry the steady load;
+here only the head can still add speed.
+
+**Three §3.2 catches, found reading the state's layout** (`[pos, act, delta]` per twist joint, then the sense from
+index 9): the "tilt prior" on state 3, 4 of the six- and seven-motor configs is sensed lateral speed and the vy
+command, not the trunk's gravity (9, 10) — §17.86's "the tilt prior halves contact" is a lateral-speed prior's
+result; the host's authority table printed rows 1, 2 as "sensed vy / wz" (they are vx's action echo and delta; fixed,
+and the columns now named from the graph's action topics, the lean's sixth column having printed as head_y); and the
+prior's model-implied step ignores `state_prior_motors`, so §17.86's mask arms (sweeps 70–72) masked the slow descent
+only — a weakened slice of the mask; sweep 80 (yaw the only head motor) is unaffected.
+
+**Built** (off by default; guards byte-identical: R83 plain `6b9a0b3a…`, the starred six-motor preset old build
+against new `915e1391…`): `MotorEPMv2.state_prior_weights` (per-index precision, in the descent and as √w rows of the
+step's weighted least squares), `MotorEPMv2.state_grow_at` (grow on restore: a wider state's new elements inserted
+unidentified — zero model rows, zero controller and state-model columns), host `--intent-head-sense` (head-frame
+gravity y, z at the front of the walker's sense, load_slots 18), `scene_babble_room2m.xml` (the 2 m room: a post, a
+box, a chair), host `--tof-real SPREAD LAG` (below).
+
+**Stage B, the rebabble.** `duck_contact6_s1` into `a1v2_contact_room6h` with the head sensed: 25 → 27 elements, 600 s
+of the structured babble in the 2 m room (2 rescues), saved `duck_contact6h_s1`. The new rows identified (head pitch:
+vx −0.021, vyaw +0.021, neck +0.028, head pitch −0.016, head roll −0.024), the old ones re-identified beside them.
+
+**Stage C, the level prior (state 9, 10 → 0) at a swept precision against the speed prior's 1.** The room, n = 3 (300 s):
+
+| 2 m room, seeds 1–3 | old lean brain | sensed, no prior | level 0.3 | **level 1** | level 3 |
+|---|---|---|---|---|---|
+| pitch per 0.1 m/s · per 0.2 m/s² | +0.26 · −0.04 | +0.10 · +0.03 | +0.01 · +0.08 | **−0.02 · +0.14** | −0.02 · +0.12 |
+| acceleration's share of the pitch's variance | 0 % | 0 % | 3 % | **27 %** | 16 % |
+| cruise · accelerating · decelerating (rad down) | +0.44 · +0.31 · +0.10 | +0.36 · +0.52 · +0.36 | +0.24 · +0.44 · +0.27 | **+0.18 · +0.36 · +0.12** | +0.12 · +0.20 · +0.01 |
+| walk m/s · arrival stops · down % | — | 0.166 · 6.7 · 3.4 | 0.156 · 2.7 · 0.8 | **0.144 · 6.0 · 0.05** | 0.134 · 1.3 · 0.3 |
+
+The playroom, seeds 1–6, 600 s (sweep h3; the old lean brain is sweep 77 on the same seeds and harness):
+
+| playroom, seeds 1–6 | ★ lean, old brain (77) | sensed, no prior | level 0.3 | **level 1** |
+|---|---|---|---|---|
+| pitch per 0.1 m/s · per 0.2 m/s² | +0.15 · +0.03 | +0.22 · −0.01 | +0.16 · +0.02 | **+0.04 · +0.09** |
+| cruise · accelerating · decelerating (rad down) | 0.52 · 0.55 · 0.35 | 0.57 · 0.52 · 0.29 | 0.45 · 0.50 · 0.30 | **0.24 · 0.39 · 0.16** |
+| sd of the head's pitch on the walk | 0.33 | 0.37 | 0.33 | **0.20** |
+| after an acceleration, pitch at 0 / 1 / 2 s | 0.55 / 0.55 / 0.56 | 0.67 / 0.63 / 0.62 | — | 0.33 / 0.33 / 0.34 |
+| falls a run · within 3 s of a stop's start | 2.7 · 2.2 | 2.8 · 2.3 | 2.3 · 1.7 | **1.0 · 0.3** |
+| the stop's ringing, p90 (rad/s) · rescues / min | 1.92 · 0.27 | 1.91 · 0.28 | 1.67 · 0.23 | **0.85 · 0.10** |
+| the error closed by 0.5 rad within 3 s · closing | 42 % · 53 % | 44 % · 54 % | 45 % · 58 % | **60 %** · 49 % |
+| walk m/s · walls / min · arrival stops | 0.197 · 27 · 22.5 | 0.212 · 17 · 19.0 | 0.198 · 24 · 20.7 | 0.175 · 17 · 18.3 |
+
+- **Sensing the head changes nothing by itself** (the no-prior arm leans as before): the error must be given.
+- **The level prior at 1 decouples the lean from speed** (its speed coefficient down four fifths in the playroom and
+  to zero in the room), halves the head's motion, and **cuts the falls to a third** (2.8 → 1.0 a run, at stops 2.3 →
+  0.3; the stop's ringing halved) — the head arrives at a stop nearer level, so the hand-off has less to undo. Costs:
+  a sixth of the walk's speed, five points of closing.
+- **What it does not do is settle**: after an acceleration the head stays where it is for the next two seconds in
+  every arm; the prior moves the head's equilibrium (0.55 → 0.33 rad down) rather than making the lean a transient.
+  The rail explains why: the speed error never closes, so the speed prior pushes through the head at every pace.
+- **The reachable-target probe (room, n = 3, sweep h4):** the speed target at 0.5 of range without the level prior
+  gives a slow partial settle (0.52 → 0.43 rad over 2 s) and the lean still on speed; with the level prior the walk
+  crawls (0.117 m/s, 2.3 arrivals); at 0.6 with the level prior it looks like the level prior alone. `NULL` as a lever;
+  the re-use is a target adapted from the body's own achieved speed rather than a set one.
+
+**Verdict (n = 6, a signal):** the level prior at 1 is `PARTIAL` on the operator's picture — the lean off speed, half
+the motion, a third of the falls — and `NULL` on the settle within a steady pace. The confirmation on seeds 7–18 and
+the ToF's real timing are measured next (below).
+
+**The ToF's real timing (`--tof-real SPREAD LAG`, Tof::set_realism; 0 0 = off, byte-identical).** The VL53L8CX builds
+an 8×8 frame from four integrations in sequence (datasheet DS14161; 5 ms each by default in autonomous mode, the
+VCSEL on for the whole period in continuous mode, at most 15 Hz), and the robot composes a frame with the head pose
+it reads on arrival. On: sub-frame k (the 2×2 zone interleave, an assumption about the SPAD groups) is cast from the
+sensor's pose LAG + SPREAD·(3 − k)/4 s ago (interpolated between recorded ticks) and reprojected with the current pose;
+the JSON stream carries the cast's registration error (`tre`: mean, max, m). The arm measured: continuous mode at
+15 Hz (SPREAD 0.066) and a 30 ms readback (LAG 0.03) — both assumptions to confirm against Pollen's driver settings.

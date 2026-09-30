@@ -891,6 +891,7 @@ public:
     }
     int state_dim() const { return legs_.empty() ? 0 : int(legs_[0].A.rows()); }
     int motor_dim() const { return legs_.empty() ? 0 : int(legs_[0].A.cols()); }
+    const std::vector<std::string>& action_topics() const { return action_topics_; }
     double wb_authority_from_end(int k) const {
         if (Aw_.rows() > k && k >= 0) return double(Aw_.row(int(Aw_.rows()) - 1 - k).cwiseAbs().sum());
         if (!legs_.empty() && legs_[0].A.rows() > k && k >= 0) return double(legs_[0].A.row(int(legs_[0].A.rows()) - 1 - k).cwiseAbs().sum());   // the per-leg path (the duck's)
@@ -1346,6 +1347,7 @@ private:
         bool                step_locked  = false; // false ⇒ the stroke falls back to L.phase
     };
     std::vector<Leg> legs_;
+    void grow_leg(Leg& L, int at, int k);        // state_grow_at: insert k unidentified state elements at `at`
 
     static constexpr float kTeleEmaAlpha   = 0.02f;
     static constexpr float kKneeEmaAlpha   = 0.01f;   // slow mean for the phase reference
@@ -1568,6 +1570,8 @@ private:
     //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
     //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
     std::vector<double> state_prior_indices_;
+    std::vector<double> state_prior_weights_;  // parallel: each prior index's precision (empty = 1)
+    int state_grow_at_ = -1;                   // grow on restore: where a wider state's new elements go (-1 = off)
     std::vector<double> state_prior_motors_;   // parallel: leading motors each prior index may descend through (0 = all)   // state indices; NEGATIVE = from the end (−1 = last)
     std::vector<double> state_prior_targets_;   // target values x*, parallel to indices
     double state_prior_gain_    = 0.0;          // weight w ∈ [0,1]; 0 = off, byte-identical

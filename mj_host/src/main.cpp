@@ -1301,6 +1301,8 @@ bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
+double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
+bool g_intent_head_sense = false;   // --intent-head-sense: the head's roll and pitch at the front of the walker's sense (the graph declares load_slots 18)
 double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0, g_head_home_s = 0.0; bool g_tell_head = false;   // --head-home S: for S s after a stop begins the head's targets are HOME (slewed), then the head brain's   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
 double g_rebabble_s = 0.0;   // --rebabble S: a restored brain reopens its babble window for S seconds (§17.85, the contact room)
 double g_stuck_cmd = 0.75;   // --stuck-cmd F: the forward command that counts as pushing (fraction of range) for the stuck stop
@@ -1545,6 +1547,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_home_s > 0.0) std::fprintf(stderr, "  head home: for %.1f s after a stop begins the head's targets are home (slewed), then the head brain's -- the level loop starts from level, not from where the walk left the head\n", g_head_home_s);
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
+    if (g_intent_head_sense) { brain.set_head_sense(true); std::fprintf(stderr, "  intent head sense: the head's roll and pitch (head-frame gravity y, z) lead the walker's sense (load_slots 18)\n"); }
     if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
     if (g_contact_forget) std::fprintf(stderr, "  contact forget: a stall fired by contact drops the seek loop's target (the position the surface refutes)\n");
@@ -1567,6 +1570,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         std::fprintf(stderr, "  heading reflex: while a loop holds the reference, vyaw closes the heading error in %.2f s (damping %.2f on the sensed rate), mixed with the brain's yaw by proximity (gate %.2f)\n", g_hr_tau, g_hr_damp, g_hr_gate); }
     Odometry odom;
     Tof tof;                                  // the 8x8 depth matrix, cast every 4 ticks (12.5 Hz, the real sensor's rate)
+    if (g_tof_spread > 0.0 || g_tof_lag > 0.0) {
+        tof.set_realism(g_tof_spread, g_tof_lag);
+        std::fprintf(stderr, "  tof real: the frame's four sub-frames cast from the sensor's poses %.3f s apart ending %.3f s ago, reprojected with the current pose\n", g_tof_spread / 4.0, g_tof_lag);
+    }
     // The cloud lives in the graph now (ogma::CloudMap).  The host's job is to hand it one cast
     // at a time and to read its numbers back out for the log; --cloud turns the PUBLICATION on.
     const bool cloud_on = g_cloud_voxel > 0.0;
@@ -1947,6 +1954,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         // The body predictor: observe every tick, frozen, so a stumble has somewhere to register.
         // Skipped while the joint brain already drives (StopPhase::Brain ticks it itself below).
         if (g_body_predicts && stander && stop_phase != StopPhase::Brain) (void)stander->act(body);
+        if (g_intent_head_sense) brain.feed_head_gravity(body.head_gravity());
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
@@ -2529,6 +2537,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             odom.update(feet, body.imu_quat());
             const auto p = odom.position();
             const double yaw = odom.yaw();
+            if (tof.realism()) tof.record(body);   // --tof-real: the sensor's pose every tick, for the frame's timing
             if (t % 4 == 0) {
                 tof.sense(body, p[2]);
                 tof_summary = tof.summary();
@@ -2756,6 +2765,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (scan_on || look_on) std::printf(",\"scan\":%.2f", (scanning || looking) ? scan_target : 0.0);
                 if (orient_on) std::printf(",\"orient\":%d,\"mqe\":[%.4f,%.4f,%.4f,%d]", int(orient), brain.map_quant_error(), brain.map_expected_error(), brain.map_transition(), look_held);
             }
+            if (tof.realism()) std::printf(",\"tre\":[%.4f,%.4f]", tof.reg_error_mean(), tof.reg_error_max());   // --tof-real: the last cast's registration error, m
             if (head) {
                 const auto hg = body.head_gravity(); const auto hw = body.head_gyro(); const auto hc = head->last_command();
                 std::printf(",\"head\":[%.4f,%.4f,%.4f,%.4f],\"hg\":[%.4f,%.4f,%.4f],\"hw\":[%.4f,%.4f,%.4f]",
@@ -3156,6 +3166,11 @@ int main(int argc, char** argv) {
             g_tell_head = true;
         } else if (a == "--head-slew") {
             g_head_rate = std::stod(next("--head-slew"));
+        } else if (a == "--tof-real") {
+            g_tof_spread = std::stod(next("--tof-real"));
+            g_tof_lag = std::stod(next("--tof-real"));
+        } else if (a == "--intent-head-sense") {
+            g_intent_head_sense = true;
         } else if (a == "--intent-head") {
             g_intent_head = std::stod(next("--intent-head"));
             // the optional TAU: only a number takes it (the launcher puts the scene path right after the host args)

@@ -149,11 +149,16 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (tof_s[size_t(slot)] > 0.0f) { tof_s[size_t(slot)] = 0.0f; ++seek_gated_; }
         if (seek_gate_contact_m_ > 0.0 && seek_range_ > 0.0 && seek_range_ <= seek_gate_contact_m_ && tof_s[3] > 0.0f) { tof_s[3] = 0.0f; ++seek_gated_contact_; }
     }
-    publish("sense", {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
+    {
+        std::vector<float> sense = {float(g[0]), float(g[1]), unit(0.3 * w[1]), unit(0.3 * w[0]), unit(0.3 * w[2]),
                       unit(a[0] / 20.0), unit(a[1] / 20.0), unit(a[2] / 20.0),
                       last_sensed_[0], last_sensed_[1], unit((heading_ - heading_ref_) / 3.14159265358979323846),
                       unit(map_tle_),                    // slot 11: the map's surprise — novelty
-                      tof_s[0], tof_s[1], tof_s[2], tof_s[3]});
+                      tof_s[0], tof_s[1], tof_s[2], tof_s[3]};
+        // --intent-head-sense: the head's roll and pitch (head-frame gravity y, z; 0 = level) at the front
+        if (head_sense_) sense.insert(sense.begin(), {unit(head_g_[1]), unit(head_g_[2])});
+        publish("sense", sense);
+    }
     if (place) {
         std::vector<float> v(place->pose.begin(), place->pose.end());
         switch (place_form_) {
@@ -502,12 +507,24 @@ void IntentAdapter::print_authority_table(const char* when) const {
     for (auto* m : instance_->modules()) if ((w = dynamic_cast<const ogma::MotorEPMv2*>(m))) break;
     if (!w || w->state_dim() == 0) return;
     const int M = w->motor_dim();
-    static const char* const kMotors[7] = {"vx", "vy", "vyaw", "neck_p", "head_p", "head_y", "head_r"};
+    // the columns named from the graph's own action topics (before 2026-10-01 a fixed seven-motor list: the six-motor
+    // lean's sixth column, head ROLL, printed as "head_y")
     std::fprintf(stderr, "  walker authority %s (rows: the state; columns: the motors)\n    %-10s", when, "");
-    for (int j = 0; j < M && j < 7; ++j) std::fprintf(stderr, " %7s", kMotors[j]);
+    for (int j = 0; j < M && j < 7; ++j) {
+        std::string nm = j < int(w->action_topics().size()) ? w->action_topics()[size_t(j)] : std::string("?");
+        if (nm.rfind("action.", 0) == 0) nm = nm.substr(7);
+        if (nm == "neck_pitch") nm = "neck_p"; else if (nm == "head_pitch") nm = "head_p";
+        else if (nm == "head_yaw") nm = "head_y"; else if (nm == "head_roll") nm = "head_r";
+        std::fprintf(stderr, " %7s", nm.c_str());
+    }
     std::fprintf(stderr, "\n");
-    const struct { const char* name; int row; } rows[] = {{"sensed vx", 0}, {"sensed vy", 1}, {"sensed wz", 2}, {"heading e", -6}, {"tof left", -4}, {"tof ahead", -3}, {"tof right", -2}, {"contact", -1}};
+    // The state is [pos, act, delta] per twist joint, then the sense: sensed vx / vy / wz are rows 0 / 3 / 6 (before
+    // 2026-10-01 this table printed rows 1 and 2 as "sensed vy" and "sensed wz": vx's action echo and delta).
+    // (with the head sense on, a snapshot restored before its first frame still has the old width: no head rows yet)
+    const int hs = (head_sense_ && w->state_dim() == 9 + 18) ? 2 : 0;
+    const struct { const char* name; int row; } rows[] = {{"sensed vx", 0}, {"sensed vy", 3}, {"sensed wz", 6}, {"head roll", hs ? 9 : -99}, {"head pitch", hs ? 10 : -99}, {"tilt fwd", 9 + hs}, {"tilt side", 10 + hs}, {"heading e", -6}, {"tof left", -4}, {"tof ahead", -3}, {"tof right", -2}, {"contact", -1}};
     for (const auto& r : rows) {
+        if (r.row == -99) continue;
         std::fprintf(stderr, "    %-10s", r.name);
         for (int j = 0; j < M && j < 7; ++j) std::fprintf(stderr, " %+7.3f", w->authority_cell(r.row, j));
         std::fprintf(stderr, "\n");
