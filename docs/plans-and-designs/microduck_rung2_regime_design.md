@@ -5584,3 +5584,28 @@ it does not ride in the arms, and the arrival risk under the contact prior is me
 authority row over the contact slot 0.016 → 0.043, the left slot 0.022 → 0.031, and the ahead and right rows
 0.022 → 0.008 and 0.020 → 0.012 — the model relearned its near field in a room where the ahead range is always
 short. Liveness passed on contact; the walk itself is what the arms must also measure.
+
+**The three arms, seeds 1–6 (sweeps 54, 57, 58; R112 on the current brain the control, sweep 31).**
+
+| seeds 1–6 | R112, current brain | R113 prior, current brain | R112, contact brain | **R113 prior, contact brain** |
+|---|---|---|---|---|
+| walls / min | 17.8 ± 9.1 | 37.4 ± 18.8 (seed 6: 75) | 28.4 ± 12.9 | 21.5 ± 10.8 |
+| rescues / min · down % | 0.20 · 0.20 | 0.48 · 0.64 | 0.23 · 0.34 | 0.15 · 0.47 |
+| too-close share > ½ while walking, s a run · pushing | 17 · 6 | 36 · 9 | 22 · 8 | 21 · 6 |
+| wall contact s a run · bursts ≥ 5 s · longest | 15 · 0.5 · 8 s | 39 · 1.5 · 41 s | 23 · 1.0 · 22 s | 17 · 0.5 · 17 s |
+| arrival stops · closing | 14.5 · 55 % | 16.2 · 51 % | 18.8 · 54 % | 17.7 · 50 % |
+| contact authority at the end (seed 1) | — | 0.085 | 0.034 | 0.054 |
+
+- **The prior on a model that never saw a push is a regression** (walls doubled, rescues ×2.4, contact ×2): it
+  descends an authority row the model invents under control, and the walk pays. The operator's premise, measured.
+- **The contact brain alone is worse than the current one** (walls 18 → 28, contact 17 → 22 s): the second babble
+  in a 1 m room relearned the near field where the ahead range is always short (its ahead row 0.022 → 0.008), and
+  the walk carried that into the playroom.
+- **The prior on the contact brain recovers both** — 37 → 21 against the prior alone, 28 → 21 against the brain
+  alone — the objective and the learned authority need each other, which is the regime's whole claim. Against
+  R112 it is a tie on walls and contact (21 vs 18 a minute, 21 vs 17 s), with more arrivals and the lowest rescues.
+
+**Verdict at n = 6.** The mechanism `WORKING` (the interaction is loud); the pair `NULL` against R112 on the
+outcome. What it wants is a richer room: 16 s of face-on pushing in ten minutes gave a contact row of 0.043
+against range rows of 0.02–0.03, and eroded the ahead row. Next: the pair and the contact brain on seeds 7–18,
+and a 1200 s babble's checkpoint on the pair (sweeps 59–61).
