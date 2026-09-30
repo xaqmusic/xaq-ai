@@ -12,6 +12,7 @@ no Godot, and — at this layer — no `ogma_core` either, so the driver rebuild
 | `ServoDriver` | the safety envelope below the brain: clamp · slew · watchdog → pulse 0 · time-at-limit |
 | `hat_tool` | bench CLI over the driver (never a bypass): `vbat` · `adc` · `limp` · `pulse` · `sweep` |
 | `test_hw` | byte-level protocol tests + envelope tests, no hardware needed |
+| `tools/foot_cal_sweep.py` | the robot probes its own foot sensors with its own weight — knee stepped up and back down on each `<foot>_down` pose. **Counts, not grams**; it answers the cross-foot and hysteresis questions without a length constant. ⚠ runs a deadman keepalive |
 | `tools/adc_fast_report.py` | reads the `adc_fast` records `adc.rate` writes and reports level, noise and **wander** per channel. Foot-FSR bench steps E2/E2b. ⚠ reads the record, never the bus |
 | **`ogma_benchd`** | the bench daemon — [`PROTOCOL.md`](PROTOCOL.md): ZMQ REP verbs (`:5590`) + PUB telemetry (`:5591`) over the driver; 50 Hz tick thread, 10 Hz telemetry, local JSONL record in `log/`, servo map in `calib/servo_map.json`. **Bench mode only, deadman on the calibration channel only, one servo at a time, `cal.begin` is the audited widened envelope.** No verb starts a brain |
 

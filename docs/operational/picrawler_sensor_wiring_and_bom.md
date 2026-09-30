@@ -731,6 +731,7 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 | **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
 | **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
 | ~~E3~~ | ~~bare-sensor bench estimate~~ | — | **skipped — overtaken by E4**, which the operator ran directly on the real assembly (§5.6). Better measurement, so the decade step was never needed |
+| **E6** | **The robot probes its own feet** — `foot_cal_sweep.py`, poses `<foot>_down`, knee stepped up and back down | the poses, benchd | a closing hysteresis loop on every foot, and four comparable curves. ⚠ **counts, not grams** (§5.7.8), and it does not reach below ~175 g |
 | **E4** ✅ | `R_g` = `R_fsr`(175 g) **in the assembled foot** | a finished foot, masses, scale, DMM | ✅ **DONE 2026-09-28 (§5.6): 11 kΩ → `C` = 1.5 µF.** One foot. ⚠ **Repeat on the other three** — `R_g` is one value for all four channels, so it comes from their median (§5.5) |
 | **E5** | Wire one foot, confirm counts rise monotonically with the mass series, then the other three | — | §6 step 5 |
 
@@ -959,6 +960,73 @@ rail, not the foot.
 regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### ★ 5.7.8 The robot probes its own feet — `foot_cal_sweep.py`
+
+> **Operator, 2026-09-30:** weights and a scale are cumbersome and error-prone; use the
+> robot's own body weight. Poses (`front_left_down`, `rear_right_down`, …) prop one corner up
+> off a belly-down rest, with the opposite side of the chassis flat on the ground as the lever.
+
+**This is the better instrument, and the reason is not convenience.** §5.6.1 lists what the
+scale method puts into its own numbers — a hand-posed leg, so `cos θ` differs between feet; a
+pose that sags under unpowered servos; a dwell set by whatever the operator's hands did that
+time. **Every one of those is a variable the robot removes by loading its own feet**: its own
+mass, its own load path, the pose regime it actually operates in, and identical treatment on
+all four. It is also repeatable on command, which matters more than any accuracy argument —
+§5 requires a re-check after every foot re-assembly, and a procedure that takes an afternoon
+does not get run.
+
+**The statics.** Belly tipped onto one edge plus one foot is a determinate two-support beam,
+so moments about the contact line give
+
+```
+F_foot = W · a / b            W = 590 g,  a = edge→CoG,  b = edge→foot contact  (horizontal)
+```
+
+⚠ **The body must actually tip onto an edge.** A belly lying flat is a distributed contact and
+the split is indeterminate — the foot then carries an unknown share, not a computable one.
+
+#### ⚠ What the tool does NOT do, and why
+
+`foot_cal_sweep.py` reports **counts against a pose step**, per foot, up and back down. **It
+does not convert to grams**, for two reasons that are both worth fixing before it does:
+
+1. **`b` needs FK, and FK must not be duplicated.** `ogma::body::fk_leg` is header-only and
+   reachable, but it needs per-leg world anchors benchd does not build — and `cpp_core`'s own
+   CMakeLists records the rule: a second copy of that maths in Python *is* how sim and host
+   drift apart. **Expose the contact point from benchd, or do not compute force.**
+2. **It would inherit a known-wrong constant.** The printed foot added ~16.9 mm to `L3` and the
+   geometry has not been re-baselined, so `b` is out by up to 17 mm — **a 15–25 % force error
+   before anything else goes in.**
+
+**What needs no geometry at all is the comparison, and the comparison is the blocking
+question.** §5.7.7 could not say whether A2's and A3's stalls were repeatable nonlinearity (a
+curve absorbs it) or slack (no curve can). `us_per_rad` is a property of the part rather than
+the channel, so **equal microsecond steps are equal angle steps on every leg** — stepping each
+leg through the same offsets from its own mirrored pose puts all four under the same geometry,
+and the up-and-down sweep answers repeatability directly. Both without a single length constant.
+
+| the sweep reads | the verdict |
+|---|---|
+| loop closes — worst up-minus-down comparable to the per-point sd | repeatable nonlinearity; **calibrate and move on** |
+| loop does not close | **slack in the toe-to-foot linkage**; fix it, because the reading depends on how the load was reached and a curve is a function of load alone |
+
+#### ⚠ It cannot reach the light end
+
+Order of magnitude, with the fulcrum at the far belly edge and the CoG near chassis centre
+(`a` ≈ 45 mm), `b` sweeping from about 60 mm to full reach: **F ≈ 175–440 g**. That brackets
+the gait band (148–197 g) and nothing below it.
+
+**§5.7.7's stalls are at 30–100 g**, and the stance threshold is 118 g. So this sweep decides
+the repeatability question and gives the working-range curve; **the light end still needs the
+scale, or a pose family where two feet share the load.** Do not read a clean sweep as clearance
+of a fault that lives below its reach.
+
+⚠⚠ **The keepalive is not optional.** benchd's deadman commands the saved rescue pose when no
+client command is fresh, and this HAT cannot limp a servo — "safe" is a pose, not slack.
+`calib/sensors.json` records what that cost the servo-scale fit: a 100–200 µs rescue excursion
+looks like nothing happening while it silently replaces the commanded angle. The tool runs a
+ping thread throughout, and anything else driving this robot must too.
 
 ### ★ 5.7.7 RUN THE MASS SERIES ON EVERY FOOT — it is a LINKAGE test, not just a calibration
 
