@@ -1424,6 +1424,31 @@
   }
  },
  {
+  "name": "R113 · SEVEN motors BEFORE the hand-off fix (the resonance at the moment of standing, for the eye)",
+  "series": 113.71,
+  "hint": "The seven-motor walker exactly as first watched (2026-09-30): no slew across the ownership change, no head home at stops. WATCH: the head ringing on the pitch axis as the duck stops, the backward falls with the head pitched up, the head held yawed on the walk. Beside it, the fixed presets show the difference.",
+  "state": {
+   "config": "a1v2_r113_seven.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head 0.4",
+   "fast_until": 0,
+   "checkpoint": "duck_contact7_s1.brain.json"
+  }
+ },
+ {
   "name": "R113 · SIX motors, the LEAN, the head home at stops: the expressive walker that keeps its feet (--intent-head 0.4 --head-slew 1.0 --head-home 1.5) (the expressive alternative: the head moves on the walk)",
   "series": 113.8,
   "hint": "§17.86 (2026-09-30, the operator: more expressive, more alive, the seeking more accurate -- and the head rings on the pitch axis at the moment of standing and the duck falls backwards). The walker's motors are the twist with neck pitch, head pitch and head roll (head yaw stays the head brain's); at every stop the head comes home first at a servo's rate and the head brain's gaze takes over from level. Six seeds: falls 11.7 -> 2.7 a run (the three-motor walker's 3.0), the ringing halved, turning x3, closing 53 %, arrivals 22 a run. WATCH: the head settling home as the duck stops, then the gaze; the lean into turns on the walk.",
@@ -1471,6 +1496,31 @@
    "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --stuck-contact 0.5",
    "fast_until": 0,
    "checkpoint": "duck_r94_s1.brain.json"
+  }
+ },
+ {
+  "name": "R113 · SIX motors, the LEAN, BEFORE the hand-off fix (the resonance, for the eye)",
+  "series": 113.81,
+  "hint": "The six-motor lean without the slew and the head home at stops: 11.7 falls a run, 9.5 of them within 3 s of a stop's start, the head's pitch speed 1.64 rad/s in a stop's first two seconds. WATCH the moment of standing.",
+  "state": {
+   "config": "a1v2_r113_six.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head 0.4",
+   "fast_until": 0,
+   "checkpoint": "duck_contact6_s1.brain.json"
   }
  },
  {
