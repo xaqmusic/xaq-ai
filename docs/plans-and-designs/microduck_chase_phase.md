@@ -401,6 +401,12 @@ walker's rate (2.7 against 2.0 on eighteen seeds) with the lean's gains kept (tu
 53 %) and walls the cost (28 against 21). `WORKING` on the request, `PARTIAL` overall; the eye decides the walls
 against the aliveness. Preset "★ R113 · SIX motors, the LEAN, the head home at stops".
 
+**Yaw only (sweep 80):** the head parked sideways on 91 % of the walk, no steering gain, walls doubled (the
+walker's ToF slots read the head's frame). Head yaw is not a walker motor. The still three-motor walker is the
+arm for the ToF; the lean the expressive alternative; looking around on the walk is a gaze lever that first
+needs the walker's ToF slots in the body frame.
+
+
 
 
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the

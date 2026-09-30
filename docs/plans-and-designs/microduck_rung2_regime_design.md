@@ -5847,3 +5847,25 @@ walker keeps its feet, and the eye decides the walls against the aliveness. Pres
 LEAN, the head home at stops" (checkpoint `duck_contact6_s1`, `--intent-head 0.4 --head-slew 1.0 --head-home
 1.5`). Ledger: `--tell-head` `REGRESSION`; the slew alone halves the ringing and not the falls; the room's
 second babble erodes the forward row (identify in the open first); head yaw as a motor is held sideways.
+
+**The operator's eye on the lean (2026-09-30, evening):** the head tilted most of the time and moving a lot,
+a worry for the ToF's accuracy on the walk; the roll the strangest and the least stable; looking around while
+walking is what is wanted, so yaw only, with the stability of before. Measured on the lean: the head pitched
+more than 0.2 rad from its median on 28 % of walking ticks and rolled on 15 %, the head joints moving at 2.4 rad/s
+against the still head's 1.1. **Yaw as the only head motor (four motors, sweep 80, open then room, the slew and
+the head home):** the head yawed past 0.2 rad on **91 %** of the walk with pitch and roll level (3 %), the turn
+toward a large error 0.02 rad/s (below the three-motor control's 0.04), closing 51 %, walls **42** a minute
+(the control 17), falls 2.0. `REGRESSION`. The controller parks a yaw motor sideways whatever it is allowed to
+descend through (the fourth time measured), and a head looking sideways points the walker's own ToF slots —
+left, ahead, right, in the head's frame — away from the walk, so the avoidance steers against the wrong view
+and the walls double. **Head yaw is not a walker motor.**
+
+**What the eye's two wishes need, separately.** (1) The ToF's accuracy and the stable head: the three-motor
+walker, whose head the head brain holds level — the manoeuvrability the lean bought (turn +70 %, arrivals +38 %)
+costs exactly the head motion the operator distrusts, and the choice between them is the eye's. (2) Looking
+around while walking is a gaze, not a steering motor: the head brain's yaw sweeping on the walk (the stop's gaze
+sweep exists, a walk form does not), and it needs the walker's ToF slots rotated from the head's frame into the
+body's first, or the avoidance reads a sideways view — the enabling lever before any gaze on the walk (unbuilt;
+the cloud already casts in the head's true pose, so the map is unaffected). Presets: "★ R113 · the CONTACT
+prior on the CONTACT brain" (three motors, the still head) is the arm; "R113 · SIX motors, the LEAN, the head
+home at stops" the expressive alternative for the eye.

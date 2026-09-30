@@ -1424,7 +1424,7 @@
   }
  },
  {
-  "name": "★ R113 · SIX motors, the LEAN, the head home at stops: the expressive walker that keeps its feet (--intent-head 0.4 --head-slew 1.0 --head-home 1.5)",
+  "name": "R113 · SIX motors, the LEAN, the head home at stops: the expressive walker that keeps its feet (--intent-head 0.4 --head-slew 1.0 --head-home 1.5) (the expressive alternative: the head moves on the walk)",
   "series": 113.8,
   "hint": "§17.86 (2026-09-30, the operator: more expressive, more alive, the seeking more accurate -- and the head rings on the pitch axis at the moment of standing and the duck falls backwards). The walker's motors are the twist with neck pitch, head pitch and head roll (head yaw stays the head brain's); at every stop the head comes home first at a servo's rate and the head brain's gaze takes over from level. Six seeds: falls 11.7 -> 2.7 a run (the three-motor walker's 3.0), the ringing halved, turning x3, closing 53 %, arrivals 22 a run. WATCH: the head settling home as the duck stops, then the gaze; the lean into turns on the walk.",
   "state": {
