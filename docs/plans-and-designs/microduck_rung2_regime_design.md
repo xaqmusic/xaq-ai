@@ -5780,3 +5780,21 @@ envelope (a rate limit on the head command in the walker's own units; a prior on
 measured before any of this rides in the arm. The arm stays R113 on the three-motor contact brain. The contact
 instrument on the ToF's too-close share is confounded under a pitching head (looking down puts the floor in the
 near field); the wall-contact and burst measures are the ones to read for the head arms.
+
+**The operator's eye on the seven-motor walk (2026-09-30):** more expressive and more alive, the seeking more
+accurate — and the head rings on the pitch axis at the moment of standing, and the duck sometimes falls backwards
+with the head pitched up as it stops; the previous embodiment's still head was good for the gaze and the ToF.
+Measured on the six-motor arm: 9.5 of its 11.7 falls a run come within 3 s of a stop's start, the head pitched
+back 0.43 rad half a second before; the head's pitch speed in a stop's first two seconds 1.64 rad/s (the control
+0.33). **It is the hand-off**: at a stop the head brain takes the joints from wherever the intent's steering
+left them and its level loop starts with a large error; when the walk resumes the intent's command jumps back.
+`--head-slew R`: both targets slew from the head's current position at a servo's rate across an ownership
+change (1.0 rad/s), a property of the embodiment, not a policy (sweep 74).
+
+**The slew (sweep 75, `--head-slew 1.0`, the six-motor arm):** the head's pitch speed in a stop's first two
+seconds 1.64 → 1.01 rad/s (the control 0.33), falls 11.7 → 8.5 a run — and 8.0 of them still within 3 s of a
+stop's start, the head pitched back 0.39 rad half a second before. The slew bounds the ringing; it does not
+change where the head is when the stand begins. The second thing hidden in the hand-off: with the head brain
+owning the joints, the policy's head command is zeroed ("the walker is told nothing about the head"), a choice
+from the level-head regime; the standing policy balances for a head at home while carrying one pitched back.
+`--tell-head`: the policy's head command is the head's own targets as offsets from home (sweep 76).
