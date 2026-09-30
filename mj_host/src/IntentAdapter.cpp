@@ -157,6 +157,8 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
                       tof_s[0], tof_s[1], tof_s[2], tof_s[3]};
         // --intent-head-sense: the head's roll and pitch (head-frame gravity y, z; 0 = level) at the front
         if (head_sense_) sense.insert(sense.begin(), {unit(head_g_[1]), unit(head_g_[2])});
+        // --intent-fore-sense: where the head sits fore-aft, first of all (in front of the head sense if both are on)
+        if (fore_sense_) sense.insert(sense.begin(), unit(head_fore_));
         publish("sense", sense);
     }
     if (place) {
@@ -314,6 +316,9 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kActions[i])))
             last_twist_[i] = kRanges[i] * std::clamp(double(act->accel), -1.0, 1.0);
     }
+    if (translate_frac_ > 0.0)
+        if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value("action.head_fore")))
+            fore_target_ = translate_frac_ * 1.10 * std::clamp(double(act->accel), -1.0, 1.0);
     if (intent_head_frac_ > 0.0) {
         // the four head commands as motors (§17.86): a fraction of the ranges the walking policy was trained on
         static const char* const kHeadActions[4] = {"action.neck_pitch", "action.head_pitch", "action.head_yaw", "action.head_roll"};

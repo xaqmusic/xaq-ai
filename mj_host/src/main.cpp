@@ -1302,6 +1302,7 @@ double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the To
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
+double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
 bool g_intent_head_sense = false;   // --intent-head-sense: the head's roll and pitch at the front of the walker's sense (the graph declares load_slots 18)
 double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0, g_head_home_s = 0.0; bool g_tell_head = false;   // --head-home S: for S s after a stop begins the head's targets are HOME (slewed), then the head brain's   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
 double g_rebabble_s = 0.0;   // --rebabble S: a restored brain reopens its babble window for S seconds (§17.85, the contact room)
@@ -1547,6 +1548,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_home_s > 0.0) std::fprintf(stderr, "  head home: for %.1f s after a stop begins the head's targets are home (slewed), then the head brain's -- the level loop starts from level, not from where the walk left the head\n", g_head_home_s);
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
+    if (g_translate > 0.0) {
+        if (!g_head_joints) throw std::runtime_error("--intent-head-translate rides on the head brain's joints: it needs --head-joints");
+        brain.set_intent_translate(g_translate);
+        std::fprintf(stderr, "  intent head translate: the walker's action.head_fore slides the head fore-aft (neck and head pitch together, the view unchanged), %.2f of the 1.10 rad range, at most %.2f rad/s, centred at stops; the policy is told it\n", g_translate, g_translate_rate);
+    }
+    if (g_fore_sense) { brain.set_fore_sense(true); std::fprintf(stderr, "  intent fore sense: where the head sits fore-aft leads the walker's sense (one more load slot)\n"); }
     if (g_intent_head_sense) { brain.set_head_sense(true); std::fprintf(stderr, "  intent head sense: the head's roll and pitch (head-frame gravity y, z) lead the walker's sense (load_slots 18)\n"); }
     if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
@@ -1955,6 +1962,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         // Skipped while the joint brain already drives (StopPhase::Brain ticks it itself below).
         if (g_body_predicts && stander && stop_phase != StopPhase::Brain) (void)stander->act(body);
         if (g_intent_head_sense) brain.feed_head_gravity(body.head_gravity());
+        if (g_fore_sense) {   // the measured synergy: the mean of the two pitch joints from home, + = the head forward (both negative)
+            const auto qf = body.joint_positions();
+            const double fore = -0.5 * ((qf[5] - kHomePose[5]) + (qf[6] - kHomePose[6]));
+            brain.feed_head_fore(fore / (std::max(g_translate, 0.05) * 1.10));
+        }
         const auto twist = brain.tick(vel_body, g, w, a, odom.yaw(), tof_summary, &place);
         // latch the world pose on the module's open edge (the anchor the viewer places a cloud at)
         if (cloud_on) {
@@ -2413,6 +2425,15 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             }
             head_owns_joints = true;
             command.head = {0.0, 0.0, 0.0, 0.0};          // the walker is told nothing about the head
+            if (g_translate > 0.0) {
+                // the bird's neck: the walker's translation on top of the head brain's joints, rate-limited like a
+                // servo, centred at stops; the policy is told it (it was trained to carry a commanded head)
+                static double fore = 0.0;
+                const double want = stop_phase == StopPhase::None ? brain.head_fore_target() : 0.0;
+                fore += std::clamp(want - fore, -g_translate_rate / kBrainHz, g_translate_rate / kBrainHz);
+                head_targets[0] -= fore; head_targets[1] -= fore;
+                command.head[0] = -fore; command.head[1] = -fore;
+            }
         }
         if (g_intent_head > 0.0 && driver == Driver::Brain && stop_phase == StopPhase::None) {
             // the seven-motor identification (§17.86): on the walk the intent's head actions are the policy's head
@@ -3169,6 +3190,11 @@ int main(int argc, char** argv) {
         } else if (a == "--tof-real") {
             g_tof_spread = std::stod(next("--tof-real"));
             g_tof_lag = std::stod(next("--tof-real"));
+        } else if (a == "--intent-head-translate") {
+            g_translate = std::stod(next("--intent-head-translate"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_translate_rate = std::stod(next("--intent-head-translate"));
+        } else if (a == "--intent-fore-sense") {
+            g_fore_sense = true;
         } else if (a == "--intent-head-sense") {
             g_intent_head_sense = true;
         } else if (a == "--intent-head") {

@@ -132,6 +132,20 @@ public:
     // The graph declares load_slots 18.  Off = byte-identical.
     void set_head_sense(bool on) { head_sense_ = on; }
     void feed_head_gravity(const std::array<double, 3>& hg) { head_g_ = hg; }
+    // THE BIRD'S NECK (2026-10-01, the operator: move the head fore-aft over the body like a walking bird instead of
+    // pitching it; --intent-head-translate F): the walker's fourth motor, action.head_fore, is the head's TRANSLATION --
+    // neck pitch and head pitch moved together, which leaves the view's attitude unchanged (forward kinematics: they
+    // tilt the view by equal and opposite amounts) and slides the head, 38 % of the body's mass, fore-aft (at 0.44 rad
+    // the robot's centre of mass moves 0.76 cm, against 0.48 cm and a 25 deg tilt for head pitch alone).  F = the
+    // fraction of the trained pitch range (1.10 rad) the action spans; the host rate-limits it like a servo and writes
+    // it on top of the head brain's joints (the head brain keeps the tilt: the gaze).  0 = off, byte-identical.
+    void set_intent_translate(double f) { translate_frac_ = f; }
+    double intent_translate() const { return translate_frac_; }
+    double head_fore_target() const { return fore_target_; }   // radians of the synergy, + = the head forward
+    // --intent-fore-sense: where the head sits fore-aft (the measured synergy, in units of the motor's span) at the
+    // FRONT of the walker's sense (the graph declares one more load slot).  Off = byte-identical.
+    void set_fore_sense(bool on) { fore_sense_ = on; }
+    void feed_head_fore(double unit) { head_fore_ = unit; }
     std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
     void set_seek_gate(bool on) { seek_gate_ = on; }
     // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
@@ -346,6 +360,7 @@ private:
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
     bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
+    double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;

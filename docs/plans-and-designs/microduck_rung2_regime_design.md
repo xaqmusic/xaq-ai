@@ -6000,3 +6000,51 @@ needs the cloud; "level" is a different error (the view, the balance) and the tw
 the level prior's precision gated by the loop's state (off while turning toward a target, on at a cruise and at stops)
 would keep the falls and give the steering back; the gaze-in-space prior (the head gyro to zero, the head brain's H2
 "still" slots, the VOR feed-forward of the H line) is the stability stage's error.
+
+### 17.88 The bird's neck: the head slides fore-aft, the view stays level (2026-10-01)
+
+**The operator's eye on the level lean (§17.87):** the head nods fore and aft a lot and it seems to unsettle the walk;
+the neck and head pitch joints can move the head forward and back relative to the body's centre of gravity instead of
+pitching it, as any bird does while it walks.
+
+**The geometry (forward kinematics of `scene.xml`).** Neck pitch and head pitch tilt the view by equal and opposite
+amounts (neck +0.3 rad: the ToF's axis +17°; head pitch +0.3: −17°), so moving both joints TOGETHER keeps the view's
+attitude exactly and slides the head fore-aft: at 0.44 rad the head's centre of mass moves 2.0 cm and the robot's 0.76
+cm, with 0° of tilt; head pitch alone moves the robot's 0.48 cm and tilts the view 25°. The head is 38 % of the mass.
+**A catch:** `--head-forward` (§17.60) adds the same positive offset to both joints, which moves the head BACK (the ToF
+−1.0 cm at +0.2 rad) — §17.60's "head forward" was a head-back lever.
+
+**What the nod was (the saved sweeps, the joints split into the two modes).** Translation T = (neck + head)/2, pitch
+P = (neck − head)/2. The lean before the level prior used both (sd 0.22 each; only P followed speed, r −0.57). The
+level prior shrank the slow pitch (0.22 → 0.13) and GREW the stride-band pitch 40 % (0.061 → 0.086 rad), faster
+(p90 0.93 → 1.04 rad/s): the prior corrects the tilt every tick against the stride's bob through a lagging actuator,
+the H2 head brain's own lesson (its `state_prior_lr` 0.02). That is the nod the operator saw, and the doubled
+registration error of §17.87.
+
+**Built** (off by default; guards byte-identical: R83 `6b9a0b3a…`, six-motor `915e1391…`): host
+`--intent-head-translate F [RATE]` — the walker's fourth motor `action.head_fore` slides the head (both pitch joints
+by −T, T ≤ F·1.10 rad, rate-limited at RATE rad/s like a servo, centred at stops), written on top of the head brain's
+joints (the head brain keeps the tilt: `--head-joints` required), and the walking policy is told it in its head
+command; host `--intent-fore-sense` — where the head sits fore-aft leads the walker's sense (load_slots 17).
+Identification by the recipe (600 s on the open playroom, 600 s in the 2 m room, seed 1) for both arms:
+`duck_fore_s1` (twist + head_fore) and the control `duck_ctrl3_s1` (the twist). The new motor's authority: the trunk's
+forward tilt +0.022 (the centre of mass moving), forward speed −0.006 open / −0.001 after the room — the walker
+credits a forward head with slowing, not speeding (the policy, told the head, compensates). The neck servo sags
+~0.14 rad under the extended head's weight; the head brain's level loop takes it out of the view.
+
+**The playroom, seeds 1–6 (sweeps f3, f4; configs `a1v2_r113_fore`, `…_fore_c03`, `…_fore_c10` = + a centring
+prior on the fore-aft slot at precision 0.3 / 1):**
+
+| seeds 1–6 | control: three motors | the bird's neck | + centring 0.3 | **+ centring 1** |
+|---|---|---|---|---|
+| the view's pitch at a cruise (sd on the walk) | 0.000 (0.029) | 0.000 (0.031) | 0.000 (0.031) | 0.000 (0.032) |
+| head fore-aft: accelerating · cruise · decelerating · backing (+ = forward) | −0.02 · −0.02 · −0.02 · −0.05 | **+0.11** · −0.46 · −0.05 · −0.06 | −0.10 · −0.05 · −0.16 · −0.24 | −0.03 · **−0.06** · −0.08 · −0.08 |
+| the error closed by 0.5 rad within 3 s · turn toward it (median) | 30 % · 0.03 rad/s | 46 % · 0.13 | 33 % · 0.07 | **47 % · 0.14** |
+| closing on the target | 53 % | **65 %** | 56 % | 58 % |
+| falls a run · walls / min · arrivals · walk m/s | 2.5 · 26 · 17.5 · 0.175 | 1.5 · 41 ± 40 · 18.2 · 0.186 | 2.8 · 41 · 17.7 · 0.177 | 2.2 · **27** · 17.2 · 0.179 |
+
+In the room (n = 3) the same shape: the view level everywhere (sd 0.015–0.020), the stride-band pitch at the still
+head's level (0.018–0.024, against the level lean's 0.086). **The nod is gone and the view is the still head's**;
+the translation is a steering motor as the pitch was (§17.86), without tilting the ToF. Without a centring prior the
+head reaches forward as the body accelerates and parks back at a cruise (the speed prior's unmet tonic, now in the
+translation); at centring 1 it is centred at a cruise and reaches back as the body slows and backs.

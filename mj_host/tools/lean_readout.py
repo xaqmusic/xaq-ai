@@ -14,11 +14,15 @@ Reported per glob:
     DECELERATING (|a| > a_move), BACKING (v < -0.03 m/s, any a), and the stand's (stop phase: the gaze's own);
   - the settle: after a forward acceleration ends with the pace kept 2 s, the mean pitch 0 / 0.5 / 1 / 1.5 / 2 s on.
 The target signature: pitch rides on a, not on v; cruise pitch = the level; the settle within ~1 s.
-Usage: lean_readout.py "glob" ["glob" ...]  [--from S]  (S = skip the first S s of each run, e.g. a babble)
+Usage: lean_readout.py "glob" ["glob" ...]  [--from S]  [--channel pitch|fore]
+  (S = skip the first S s of each run; --channel fore reads the head's fore-aft TRANSLATION, rad of the synergy, + = forward,
+   the bird's-neck motor of 2026-10-01, instead of the view's pitch)
 """
 import glob, json, math, sys
 
 DT = 0.02
+HOME = 0.3491        # the neck and head pitch joints' home (DuckBody.cpp kHomePose)
+CHANNEL = 'pitch'    # --channel fore: the head's fore-aft TRANSLATION instead (the mean of the two pitch joints from home, + = forward)
 BOX = 25            # 0.5 s
 A_CRUISE, A_MOVE = 0.06, 0.12   # m/s^2
 V_FWD, V_SLOW = 0.08, 0.03       # m/s
@@ -39,9 +43,9 @@ def runs(pattern, t_from):
                     yield seg, None
                     seg = []
                 if r['drive'] == 'stand':
-                    yield None, -r['hg'][2]
+                    yield None, (-r['hg'][2]) if CHANNEL == 'pitch' else -0.5 * ((r['q'][5] - HOME) + (r['q'][6] - HOME))
                 continue
-            seg.append((r['sensed'][0] * 0.4, -r['hg'][2], r['q'][5], r['q'][6]))
+            seg.append((r['sensed'][0] * 0.4, (-r['hg'][2]) if CHANNEL == 'pitch' else -0.5 * ((r['q'][5] - HOME) + (r['q'][6] - HOME)), r['q'][5], r['q'][6]))
         if seg:
             yield seg, None
 
@@ -149,17 +153,19 @@ def analyse(pattern, t_from):
         return sum((a - mx) * (b - my) for a, b in zip(x, y)) / (len(x) * sx * sy)
     c_neck = corr([c[0] for c in cq], [c[1] for c in cq]); c_head = corr([c[0] for c in cq], [c[2] for c in cq])
     print(f"{pattern}  ({nruns} runs, {len(rows) * DT / max(1, nruns):.0f} s of walk a run; pitch ~ neck q r={c_neck:+.2f}, head q r={c_head:+.2f})")
-    print(f"  pitch = {b0:+.3f} {bv:+.3f}*v {ba:+.3f}*a    (per 0.1 m/s: {0.1 * bv:+.3f} rad; per 0.2 m/s^2: {0.2 * ba:+.3f} rad;"
-          f" sd v {sd(vv):.3f} m/s, sd a {sd(aa):.3f} m/s^2, sd pitch {sd(pp):.3f})")
-    print(f"  share of the pitch's variance: v {bv * bv * sd(vv) ** 2 / sd(pp) ** 2 * 100:.0f} %, a {ba * ba * sd(aa) ** 2 / sd(pp) ** 2 * 100:.0f} %")
+    print(f"  {CHANNEL} = {b0:+.3f} {bv:+.3f}*v {ba:+.3f}*a    (per 0.1 m/s: {0.1 * bv:+.3f} rad; per 0.2 m/s^2: {0.2 * ba:+.3f} rad;"
+          f" sd v {sd(vv):.3f} m/s, sd a {sd(aa):.3f} m/s^2, sd {CHANNEL} {sd(pp):.3f})")
+    print(f"  share of the {CHANNEL}'s variance: v {bv * bv * sd(vv) ** 2 / sd(pp) ** 2 * 100:.0f} %, a {ba * ba * sd(aa) ** 2 / sd(pp) ** 2 * 100:.0f} %")
     st = phases['stand']
-    print("  mean pitch (rad, + = down):  " + "  ".join(f"{k} {mean(v):+.3f} ({len(v) * DT / max(1, nruns):.0f} s)" for k, v in phases.items()))
+    print(f"  mean {CHANNEL} (rad, + = {'down' if CHANNEL == 'pitch' else 'forward'}):  " + "  ".join(f"{k} {mean(v):+.3f} ({len(v) * DT / max(1, nruns):.0f} s)" for k, v in phases.items()))
     if settle[0.0]:
         print(f"  settle after {len(settle[0.0])} forward accelerations: " + "  ".join(f"{k:.1f}s {mean(v):+.3f}" for k, v in settle.items()))
 
 
 if __name__ == '__main__':
     args = sys.argv[1:]; t_from = 0.0
+    if '--channel' in args:
+        k = args.index('--channel'); CHANNEL = args[k + 1]; del args[k:k + 2]
     if '--from' in args:
         k = args.index('--from'); t_from = float(args[k + 1]); del args[k:k + 2]
     for g in args:
