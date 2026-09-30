@@ -1,4 +1,5 @@
 #include "IntentAdapter.hpp"
+#include "HeadAdapter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -308,6 +309,13 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kActions[i])))
             last_twist_[i] = kRanges[i] * std::clamp(double(act->accel), -1.0, 1.0);
     }
+    if (intent_head_frac_ > 0.0) {
+        // the four head commands as motors (§17.86): a fraction of the ranges the walking policy was trained on
+        static const char* const kHeadActions[4] = {"action.neck_pitch", "action.head_pitch", "action.head_yaw", "action.head_roll"};
+        for (int i = 0; i < 4; ++i)
+            if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kHeadActions[i])))
+                last_head_[size_t(i)] = intent_head_frac_ * kHeadRange[size_t(i)] * std::clamp(double(act->accel), -1.0, 1.0);
+    }
     // STUCK (see the header): the stall run and its running median.  Read before the reflex so the
     // command it judges is the brain's own; the sensed velocity is the body's answer to last tick's.
     stuck_now_ = false; stuck_by_contact_ = false;
@@ -488,6 +496,22 @@ std::array<double, 4> IntentAdapter::tof_authority() const {
     for (auto* m : instance_->modules()) if (auto* w = dynamic_cast<const ogma::MotorEPMv2*>(m))
         return {w->wb_authority_from_end(3), w->wb_authority_from_end(2), w->wb_authority_from_end(1), w->wb_authority_from_end(0)};
     return {0.0, 0.0, 0.0, 0.0};
+}
+void IntentAdapter::print_authority_table(const char* when) const {
+    const ogma::MotorEPMv2* w = nullptr;
+    for (auto* m : instance_->modules()) if ((w = dynamic_cast<const ogma::MotorEPMv2*>(m))) break;
+    if (!w || w->state_dim() == 0) return;
+    const int M = w->motor_dim();
+    static const char* const kMotors[7] = {"vx", "vy", "vyaw", "neck_p", "head_p", "head_y", "head_r"};
+    std::fprintf(stderr, "  walker authority %s (rows: the state; columns: the motors)\n    %-10s", when, "");
+    for (int j = 0; j < M && j < 7; ++j) std::fprintf(stderr, " %7s", kMotors[j]);
+    std::fprintf(stderr, "\n");
+    const struct { const char* name; int row; } rows[] = {{"sensed vx", 0}, {"sensed vy", 1}, {"sensed wz", 2}, {"heading e", -6}, {"tof left", -4}, {"tof ahead", -3}, {"tof right", -2}, {"contact", -1}};
+    for (const auto& r : rows) {
+        std::fprintf(stderr, "    %-10s", r.name);
+        for (int j = 0; j < M && j < 7; ++j) std::fprintf(stderr, " %+7.3f", w->authority_cell(r.row, j));
+        std::fprintf(stderr, "\n");
+    }
 }
 int    IntentAdapter::contact_forgets() const { auto* q = find_seek(*instance_); return q ? q->contact_forgets() : 0; }
 int    IntentAdapter::walk_takes() const { auto* q = find_seek(*instance_); return q ? q->walk_takes() : 0; }

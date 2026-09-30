@@ -118,6 +118,12 @@ public:
     // ToF sense slot of the sector its target lies in reads 0, so the twist brain's proximity prior does
     // not push the body off the thing it is walking to.  Gated by the state it exploits (a held seek
     // target, its sector); off = byte-identical.
+    // THE SEVEN-MOTOR IDENTIFICATION (2026-09-30, §17.86): the walker's full command vector -- the twist and the four
+    // head commands the policy was trained on -- as the intent's motors.  F = the fraction of the trained head ranges
+    // (kHeadRange) the actions span; 0 = off (the head actions, if the graph publishes them, are ignored: byte-identical).
+    void set_intent_head(double f) { intent_head_frac_ = f; }
+    bool intent_head() const { return intent_head_frac_ > 0.0; }
+    std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
     void set_seek_gate(bool on) { seek_gate_ = on; }
     // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
     // share reads 0 to the walker's sense -- the thing walked onto fills the near field at the arrival.  0 = off.
@@ -183,6 +189,7 @@ public:
     // the second babble (§17.85) and the walker's authority over its four ToF slots [left, ahead, right, contact]
     void rebabble(int ticks);
     std::array<double, 4> tof_authority() const;
+    void print_authority_table(const char* when) const;   // rows: sensed vx, vy, wz, heading error, ToF x4; columns: the motors
     int  contact_forgets() const;       // this tick: a stall crossed K x the running median
     double stall_s() const { return stall_run_ / 50.0; }
     double stall_median_s() const { return stall_med_ / 50.0; }
@@ -329,6 +336,7 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
+    double intent_head_frac_ = 0.0; std::array<double, 4> last_head_{};
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;

@@ -882,6 +882,15 @@ public:
     void rebabble(int64_t ticks) { wb_steps_ = std::max<int64_t>(0, babble_ticks_ - ticks); for (auto& L : legs_) L.steps_seen = std::max<int64_t>(0, babble_ticks_ - ticks); }
     // the model's authority over a state element counted from the end (0 = the last: the ToF's too-close share on
     // the duck; 1..3 = right, ahead, left): the abs-sum of that row of Aw_, 0 when the model has never moved it
+    // one cell of the per-leg model: the authority of motor `col` over state element `row` (0 = the first; negative = from the end)
+    double authority_cell(int row, int col) const {
+        if (legs_.empty()) return 0.0;
+        const auto& A = legs_[0].A; const int N = int(A.rows());
+        if (row < 0) row += N;
+        return (row >= 0 && row < N && col >= 0 && col < int(A.cols())) ? double(A(row, col)) : 0.0;
+    }
+    int state_dim() const { return legs_.empty() ? 0 : int(legs_[0].A.rows()); }
+    int motor_dim() const { return legs_.empty() ? 0 : int(legs_[0].A.cols()); }
     double wb_authority_from_end(int k) const {
         if (Aw_.rows() > k && k >= 0) return double(Aw_.row(int(Aw_.rows()) - 1 - k).cwiseAbs().sum());
         if (!legs_.empty() && legs_[0].A.rows() > k && k >= 0) return double(legs_[0].A.row(int(legs_[0].A.rows()) - 1 - k).cwiseAbs().sum());   // the per-leg path (the duck's)

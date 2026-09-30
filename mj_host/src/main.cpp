@@ -1301,6 +1301,7 @@ bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
+double g_intent_head = 0.0;   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
 double g_rebabble_s = 0.0;   // --rebabble S: a restored brain reopens its babble window for S seconds (§17.85, the contact room)
 double g_stuck_cmd = 0.75;   // --stuck-cmd F: the forward command that counts as pushing (fraction of range) for the stuck stop
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
@@ -1541,6 +1542,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stuck_contact > 0.0) { brain.set_stuck_contact(g_stuck_contact); std::fprintf(stderr, "  stuck on contact: a forward push with the ToF's too-close share above %.2f for a second is a stall\n", g_stuck_contact); }
+    if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges; the head brain owns the head at stops\n", g_intent_head); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
     if (g_contact_forget) std::fprintf(stderr, "  contact forget: a stall fired by contact drops the seek loop's target (the position the surface refutes)\n");
     if (g_contact_release) { brain.set_contact_release(true); std::fprintf(stderr, "  contact release: the heading reflex and the free-space gate take the ToF's too-close share as proximity\n"); }
@@ -1604,6 +1606,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         brain.restore_brain_state(graph);
         { const auto au = brain.tof_authority();
           std::fprintf(stderr, "  walker authority over the ToF slots after the restore [left, ahead, right, contact]: %.3f %.3f %.3f %.3f\n", au[0], au[1], au[2], au[3]); }
+        brain.print_authority_table("after the restore");
         if (g_rebabble_s > 0.0) { brain.rebabble(int(g_rebabble_s * kBrainHz)); std::fprintf(stderr, "  rebabble: the restored brain babbles for %.0f s more (random twists, the model learning) before control\n", g_rebabble_s); }
         std::fprintf(stderr, "level-2 brain restored from %s (modules: %s; the body at its reset; no babble)\n", g_load_brain.c_str(), g_load_brain_modules.c_str());
     }
@@ -2400,6 +2403,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             head_owns_joints = true;
             command.head = {0.0, 0.0, 0.0, 0.0};          // the walker is told nothing about the head
         }
+        if (g_intent_head > 0.0 && driver == Driver::Brain && stop_phase == StopPhase::None) {
+            // the seven-motor identification (§17.86): on the walk the intent's head actions are the policy's head
+            // command, tracked by the walker as it was trained to; the head brain's joint ownership waits for a stop
+            command.head = brain.head_command(); head_owns_joints = false;
+        }
 
         if (pushes.newtons > 0.0 && push_period > 0 && t > 0 && t >= push_from && t % push_period == 0
             && driver == Driver::Brain && (ticks - t) >= int(kRecoverWindowSecs * kBrainHz)) {
@@ -2785,6 +2793,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                      pushes.every_s, pushes.from_s, pushes_delivered);
     { const auto au = brain.tof_authority();
       std::fprintf(stderr, "  walker authority over the ToF slots at the end [left, ahead, right, contact]: %.3f %.3f %.3f %.3f\n", au[0], au[1], au[2], au[3]); }
+    brain.print_authority_table("at the end");
     if (stop_on) {
         std::fprintf(stderr, "  stops: %d started, %d hand-backs, %d refused by the gate, %d survived to the end, "
                              "%d handed back to the walker, %d rescued; the joint brain stood %.1f s\n",
@@ -3113,6 +3122,8 @@ int main(int argc, char** argv) {
             g_stop.gaze_at_thing = true;
         } else if (a == "--seek-gate-contact") {
             g_seek_gate_contact = std::stod(next("--seek-gate-contact"));
+        } else if (a == "--intent-head") {
+            g_intent_head = std::stod(next("--intent-head"));
         } else if (a == "--rebabble") {
             g_rebabble_s = std::stod(next("--rebabble"));
         } else if (a == "--stuck-contact") {
