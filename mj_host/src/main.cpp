@@ -3124,7 +3124,8 @@ int main(int argc, char** argv) {
             g_seek_gate_contact = std::stod(next("--seek-gate-contact"));
         } else if (a == "--intent-head") {
             g_intent_head = std::stod(next("--intent-head"));
-            if (i + 1 < argc && argv[i + 1][0] != '-') g_intent_head_tau = std::stod(next("--intent-head"));
+            // the optional TAU: only a number takes it (the launcher puts the scene path right after the host args)
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_intent_head_tau = std::stod(next("--intent-head"));
         } else if (a == "--rebabble") {
             g_rebabble_s = std::stod(next("--rebabble"));
         } else if (a == "--stuck-contact") {
