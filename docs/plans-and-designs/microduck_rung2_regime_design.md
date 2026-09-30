@@ -5823,3 +5823,27 @@ is halved and the rare fall left is a different one (the head pitched down, +0.3
 operator's request — the resonance damped, the feet kept — with the walls (27 against 17) the remaining cost and
 the confirmation on seeds 7–18 in flight (sweep 78). Preset "★ R113 · SIX motors, the LEAN, the head home at
 stops"; the seven-motor preset carries the same hand-off.
+
+**Eighteen seeds (sweeps 77–79; the three-motor room brain on all eighteen the control).**
+
+| n = 18 | 3 motors, room brain | **6 motors, the lean, the head home at stops** |
+|---|---|---|
+| falls a run · within 3 s of a stop's start | 2.0 · 0.2 | 2.7 · 1.9 |
+| head pitch speed in a stop's first 2 s (7–18) | 0.31 rad/s | 0.64 |
+| yaw rate toward the reference, \|err\| > 1 rad, median | 0.06 rad/s | **0.10** |
+| the error closed by 0.5 rad within 3 s | 37 % | **42 %** |
+| closing on the target | 50 % | **53 %** |
+| arrival stops a run (the loop's arrivals) | 10.4 | **14.4** |
+| walk m/s (7–18) | 0.171 | 0.190 |
+| walls / min, mean ± sd · median · max | 20.7 ± 12.5 · 17.5 · 48 | 28.3 ± 14.5 · 29.3 · 52 |
+
+**Verdict, n = 18 (2026-09-30, evening).** On the operator's request the hand-off protocol is `WORKING`: the
+resonance is damped (the head's pitch speed at a stop's start a third of the unprotected lean's 1.64 rad/s)
+and the falls are back at the three-motor walker's rate, with the lean's gains kept and confirmed on the fresh
+seeds — more modestly than six seeds said (the control walks well there): the turn toward a large error +70 %,
+the error closed within three seconds +5 points, closing +3, arrivals +38 %, a tenth faster. The cost is the
+walls (28 against 21 a minute, brushes rather than traps: the worst run 52). `PARTIAL` overall — the expressive
+walker keeps its feet, and the eye decides the walls against the aliveness. Preset "★ R113 · SIX motors, the
+LEAN, the head home at stops" (checkpoint `duck_contact6_s1`, `--intent-head 0.4 --head-slew 1.0 --head-home
+1.5`). Ledger: `--tell-head` `REGRESSION`; the slew alone halves the ringing and not the falls; the room's
+second babble erodes the forward row (identify in the open first); head yaw as a motor is held sideways.

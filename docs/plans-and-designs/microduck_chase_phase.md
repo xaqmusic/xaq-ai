@@ -393,6 +393,15 @@ smoothing, a tilt objective and an open-first identification did not move it. `P
 lever. Presets: "BABBLE ROOM · SEVEN motors", "R113 · SEVEN motors". The arm stays R113 on the three-motor
 contact brain.
 
+**The hand-off (§17.86, the operator's eye on the seven-motor walk: expressive, alive, the seeking more accurate,
+and the head ringing on the pitch axis at the moment of standing with backward falls):** 9.5 of the lean's 11.7
+falls a run came within 3 s of a stop's start. A servo-rate slew across the ownership change halves the ringing;
+the head coming HOME first at every stop, the gaze taking over from level, returns the falls to the three-motor
+walker's rate (2.7 against 2.0 on eighteen seeds) with the lean's gains kept (turn +70 %, arrivals +38 %, closing
+53 %) and walls the cost (28 against 21). `WORKING` on the request, `PARTIAL` overall; the eye decides the walls
+against the aliveness. Preset "★ R113 · SIX motors, the LEAN, the head home at stops".
+
+
 
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
