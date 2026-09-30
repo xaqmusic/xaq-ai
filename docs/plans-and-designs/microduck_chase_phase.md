@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §6, then §7 and §8.**
+Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §9 (the resting point, 2026-09-30), then §10 (the head: the lean that settles and the ToF's real timing, 2026-10-01).**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -565,3 +565,27 @@ null-space drift: the two pitch joints wound to their rails, `head2_h2_level_slo
 pitch row after it: `vx` −0.021, `vyaw` +0.021, neck pitch +0.028, head pitch −0.016, head roll −0.024; the roll row
 +0.025 on the head motors. Head pitch's authority over sensed speed fell to zero in the rebabble (neck pitch keeps
 −0.012). Preset "LEAN · the REBABBLE with the head SENSED".
+
+### 10.3 Stages C and D, measured (2026-10-01; design doc §17.87)
+
+- **The level prior at 1** (the head's attitude → level, at the speed prior's precision) on the rebabbled brain:
+  falls a run 3.3 → 1.1 pooled over eighteen seeds (confirmed on seeds 7–18: 3.5 → 1.2, at stops 2.6 → 1.0), the
+  lean off speed and on acceleration (0.39 rad down accelerating, 0.17 at a cruise, 0.18 decelerating; the old
+  brain 0.55 / 0.52 / 0.35), the head's motion halved. Costs: closing 52 → 41 %, the turn toward a large error
+  slower, the walk a sixth slower — head pitch was a steering motor. `PARTIAL`: the eye decides.
+- **The head sense alone** (no prior): `NULL`. **A reachable speed target** (the rail): `NULL` as a probe.
+- **The ToF's real timing** (`--tof-real 0.066 0.03`, assumptions: continuous mode at 15 Hz, a 30 ms readback): the
+  registration error on the walk is 4.7 cm for the still head, 5.4 for the lean, **10.7 for the level lean**, and it
+  follows the head's angular SPEED (2 cm below 0.3 rad/s, 7–13 cm above 2), not its attitude. The level prior holds
+  the attitude by moving the head; the still head is carried at 0.6–2 rad/s by the gait's sway.
+
+**What this changes in the plan.** The stability stage's error is the head's angular rate in space (a gaze held
+still, the pigeon's hold phase; the head IMU senses it; the head brain's H2 "still" slots and the H line's VOR
+exist), with its precision gated by when a loop needs the cloud — not "level". Level is the view's and the balance's
+error, and it is what cut the falls. The next levers, one at a time: (1) the level prior's precision gated by the
+loop (relaxed while turning toward a target, full at a cruise and at stops) to keep the falls and give the steering
+back; (2) the head's angular rate as the walker's sense and its prior, gated by the seek or chase engagement, measured
+on `tre` under the real timing; (3) the nod as dithering at small things once (2) exists.
+
+Presets: "LEAN · ROOM · …" (the old brain, the sensed control, level 1, level 3), "LEAN · PLAYROOM · …" (level 1, the
+control), "LEAN · the REBABBLE …", "TOF REAL · the still head …", "TOF REAL · the lean + the LEVEL prior …".

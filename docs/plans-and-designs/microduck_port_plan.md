@@ -20,6 +20,11 @@
 
 ## ▶ Resume here
 
+**2026-10-01: the head (chase phase §10, design doc §17.87).** The lean's head followed speed; with the head sensed
+(grown on restore) and a level prior it leans on acceleration, and falls drop to a third — for steering and, under
+the ToF's real frame timing (`--tof-real`), for the cloud: the cloud needs a head still in space, not a level one.
+Next levers are listed at the end of §10.3.
+
 **State on 2026-09-30 evening: the chase phase's campaign is at a resting point. Start at
 [`microduck_chase_phase.md`](microduck_chase_phase.md) §9 (the cold start: the arms, the numbers, the instruments,
 the open levers in order, the traps), then design doc §17.72–17.86.** The arm on the operator's criterion is

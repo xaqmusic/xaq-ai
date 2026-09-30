@@ -1030,3 +1030,87 @@ TEST(StatePrior, ModelImpliedStepClosesTheErrorItself) {
         << "the model-implied step must pull toward its target: +0.6 gave " << up
         << " and -0.6 gave " << down << " (sign or solve inverted)";
 }
+
+// =============================================================================
+// 10. state_prior_weights (2026-10-01, the lean's settle): weight 1 is byte-identical to no weights at all (the
+//     guard), and weight 0 on the only index takes the prior's descent and step out (the command differs from w = 1).
+// =============================================================================
+TEST(StatePrior, WeightsOneIsIdenticalZeroSilences) {
+    auto pe = base_params();                                // E: prior, no weights
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.0};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    auto p1 = pe; p1["state_prior_weights"] = std::vector<double>{1.0};
+    auto p0 = pe; p0["state_prior_weights"] = std::vector<double>{0.0};
+    Fixture E(pe), W1(p1), W0(p0);
+    double d1 = 0.0, d0 = 0.0;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); W1.run_tick(t, lean); W0.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            d1 = std::max(d1, double(std::fabs(E.accel(j) - W1.accel(j))));
+            d0 = std::max(d0, double(std::fabs(E.accel(j) - W0.accel(j))));
+        }
+    }
+    EXPECT_EQ(d1, 0.0) << "weight 1 must be byte-identical to no weights";
+    EXPECT_GT(d0, 1e-4) << "weight 0 must take the index's descent and step out";
+}
+
+// =============================================================================
+// 11. state_grow_at (2026-10-01, grow on restore): a snapshot of a 10-element state restored into a module fed
+//     12-element frames grows at the index given -- the old model rows kept at their shifted positions, the new rows
+//     zero (unidentified) -- and without the param the wider frames are dropped (the old contract).
+// =============================================================================
+namespace {
+void tick_width(ogma::InProcessBus& bus, ogma::MotorEPMv2& m, uint64_t t, int width, int lean_idx, float lean,
+                float extra) {
+    bus.begin_tick(t);
+    auto pt = std::make_shared<ogma::ProprioToken>();
+    pt->values = Eigen::VectorXf::Zero(width);
+    const double ph = 0.15 * double(t);
+    for (int j = 0; j < kMotors; ++j) {
+        pt->values[3 * j + 0] = float(0.30 * std::sin(ph + j));
+        pt->values[3 * j + 1] = float(0.20 * std::cos(ph + j));
+        pt->values[3 * j + 2] = float(0.30 * 0.15 * std::cos(ph + j));
+    }
+    for (int k = 3 * kMotors; k < lean_idx; ++k) pt->values[k] = extra;   // the grown elements
+    pt->values[lean_idx] = lean;
+    pt->sensor = "proprio";
+    bus.publish("sp.p0", pt);
+    m.tick(t);
+    bus.end_tick();
+}
+}  // namespace
+
+TEST(StatePrior, GrowOnRestoreInsertsUnidentifiedRows) {
+    auto p = base_params();
+    p["state_model_lr"] = 0.05;                               // Bx present, so its rows and columns grow too
+    Fixture F(p);
+    for (uint64_t t = 0; t < 200; ++t) F.run_tick(t, wobble(t));
+    ASSERT_EQ(F.m.state_dim(), kStateN);
+    const nlohmann::json snap = F.m.snapshot_state();
+    std::vector<std::vector<double>> A0(kStateN, std::vector<double>(kMotors));
+    for (int r = 0; r < kStateN; ++r)
+        for (int j = 0; j < kMotors; ++j) A0[size_t(r)][size_t(j)] = F.m.authority_cell(r, j);
+
+    // the restored module learns nothing (model_lr 0, state_model_lr 0) so the grown model can be read exactly
+    auto pg = p; pg["model_lr"] = 0.0; pg["state_model_lr"] = 0.0; pg["state_grow_at"] = int64_t{3 * kMotors};
+    ogma::InProcessBus bus; ogma::MotorEPMv2 g; g.set_id("grown"); g.on_setup(&bus, pg); g.restore_state(snap);
+    const int W = kStateN + 2;
+    for (uint64_t t = 200; t < 205; ++t) tick_width(bus, g, t, W, W - 1, wobble(t), 0.3f);
+    ASSERT_EQ(g.state_dim(), W) << "the state must have grown";
+    for (int j = 0; j < kMotors; ++j) {
+        for (int r = 0; r < 3 * kMotors; ++r) EXPECT_EQ(g.authority_cell(r, j), A0[size_t(r)][size_t(j)]) << r;
+        EXPECT_EQ(g.authority_cell(3 * kMotors, j), 0.0);        // the new rows: unidentified
+        EXPECT_EQ(g.authority_cell(3 * kMotors + 1, j), 0.0);
+        EXPECT_EQ(g.authority_cell(W - 1, j), A0[size_t(kLeanIdx)][size_t(j)]);   // the lean row, shifted by two
+    }
+    EXPECT_TRUE(std::isfinite(double(std::dynamic_pointer_cast<const ogma::ActionOut>(bus.last_value("sp.a0"))->accel)));
+
+    // without state_grow_at the wider frames are dropped: the state keeps its snapshot's width
+    auto pd = p; pd["model_lr"] = 0.0;
+    ogma::InProcessBus bus2; ogma::MotorEPMv2 d; d.set_id("dropped"); d.on_setup(&bus2, pd); d.restore_state(snap);
+    for (uint64_t t = 200; t < 205; ++t) tick_width(bus2, d, t, W, W - 1, wobble(t), 0.3f);
+    EXPECT_EQ(d.state_dim(), kStateN);
+}

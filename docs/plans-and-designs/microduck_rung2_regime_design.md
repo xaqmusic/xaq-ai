@@ -5954,3 +5954,49 @@ it reads on arrival. On: sub-frame k (the 2×2 zone interleave, an assumption ab
 sensor's pose LAG + SPREAD·(3 − k)/4 s ago (interpolated between recorded ticks) and reprojected with the current pose;
 the JSON stream carries the cast's registration error (`tre`: mean, max, m). The arm measured: continuous mode at
 15 Hz (SPREAD 0.066) and a 30 ms readback (LAG 0.03) — both assumptions to confirm against Pollen's driver settings.
+
+**The confirmation, seeds 7–18 (sweep h5, n = 12):**
+
+| seeds 7–18 | head sensed, no prior | **level prior at 1** |
+|---|---|---|
+| falls a run · within 3 s of a stop's start | 3.5 · 2.6 | **1.2 · 1.0** |
+| rescues / min · down % | 0.35 · 0.70 | **0.12 · 0.10** |
+| head pitch accelerating · cruise · decelerating (rad down) | 0.57 · 0.59 · 0.39 | **0.39 · 0.17 · 0.18** |
+| pitch per 0.1 m/s · per 0.2 m/s² | +0.26 · −0.03 | **−0.07 · +0.15** |
+| the error closed by 0.5 rad within 3 s · closing · tangential | 42 % · 52 % · 35 % | 48 % · **41 % · 53 %** |
+| walk m/s · walls / min · arrival stops | 0.193 · 31 · 18.2 | 0.162 · 33 · 16.7 |
+
+Pooled over eighteen seeds the falls go 3.3 → 1.1 a run. On the fresh seeds the lean has the operator's shape at the
+phase level: 0.39 rad down while the body accelerates, 0.17 at a cruise; the return is complete by the time the
+acceleration ends (the settle window, which starts there, reads flat at 0.21). A 0.17–0.2 rad offset at a cruise
+remains. The cost is the steering: closing 52 → 41 %, the turn toward a large error slower (median 0.14 → 0.08
+rad/s), tangential walking 35 → 53 % — head pitch was a steering motor (§17.86), and a level head gives it back.
+
+**The ToF's real timing (sweeps h6, h7; seeds 1–6; `--tof-real 0.066 0.03`; `mj_host/tools/tre_readout.py`):**
+
+| mean registration error (p90) | on the walk | at stops | casts with the head turning > 2 rad/s |
+|---|---|---|---|
+| three motors, the still head (`duck_contact3_s1`) | 4.7 cm (9.1) | 2.8 cm | 4 % |
+| the lean, head sensed, no prior | 5.4 cm (11.7) | 2.7 cm | 45 % |
+| the lean + the level prior at 1 | **10.7 cm (19.6)** | 3.8 cm | 51 % |
+
+By the head's angular speed on the walk (all arms alike): about 2 cm below 0.3 rad/s, 3 cm at 0.3–0.6, 4–5 cm at
+0.6–1, 5–9 cm at 1–2, 7–13 cm above 2. **The registration error follows the head's angular SPEED, not its attitude**,
+and the level prior, which holds the attitude by moving the head, doubles it. Even the three-motor still head turns at
+0.6–2 rad/s on three quarters of its walking casts: the trunk's gait sway carries it. The behaviour under the timing,
+n = 6 against the same seeds without it (sweep h3): the sensed lean's rescues 0.28 → 0.63 and arrivals 19.0 → 15.7; the
+level lean's walls 16.6 → 10.6 and arrivals 18.3 → 20.2 — mixed, not read further at this power. The numbers scale with
+the timing assumed (continuous mode at 15 Hz, a 30 ms readback); the datasheet's autonomous default (four 5 ms
+integrations) would shrink the spread, not the readback lag.
+
+**Verdicts (2026-10-01).** Stage A: the lean follows speed (measured; the cause in the saved brain). Grow on restore:
+`WORKING` (unit-tested; the rebabble identified the new rows beside the old). The head sense alone: `NULL` (an
+observation without an error changes nothing). **The level prior at 1: `WORKING` on falls** (a third, n = 18 pooled,
+confirmed on fresh seeds) **and on the lean's shape** (on acceleration, off speed, 0.17 rad at a cruise), `REGRESSION`
+on the steering (closing −11 points on the fresh seeds) and on the cloud under the real timing (registration error
+×2); `PARTIAL` overall — the eye decides. The reachable speed target: `NULL` (probe). **The design consequence:** the
+stability the cloud needs is a head still IN SPACE — its angular rate, which the head IMU senses — gated by when a loop
+needs the cloud; "level" is a different error (the view, the balance) and the two conflict on a walking body. Re-use:
+the level prior's precision gated by the loop's state (off while turning toward a target, on at a cruise and at stops)
+would keep the falls and give the steering back; the gaze-in-space prior (the head gyro to zero, the head brain's H2
+"still" slots, the VOR feed-forward of the H line) is the stability stage's error.
