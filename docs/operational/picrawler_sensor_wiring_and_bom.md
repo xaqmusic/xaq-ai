@@ -960,6 +960,103 @@ regardless of what their own `R_fsr` turns out to be. Per-foot variation is what
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
 
+### ★ 5.7.7 RUN THE MASS SERIES ON EVERY FOOT — it is a LINKAGE test, not just a calibration
+
+> **Operator, 2026-09-30, and it is the rule:** ⚠ **check each leg with the mass series before
+> proceeding.** It is the only thing that verifies the toe-to-foot linkage, and a fault there is
+> invisible from any other measurement — the sensor ohms out fine, the divider verifies fine,
+> and the channel still misreports force by a factor of several.
+
+**Measured 2026-09-30, all four feet, `R_g` = 15 kΩ, counts:**
+
+| mass | A0 front-left | A1 front-right | A2 rear-left | A3 rear-right | predicted |
+|---|---|---|---|---|---|
+| 30 g | 1336 | ~600 ⚠ unreliable | 770 | 1300 | 1536 |
+| 50 g | 1732 | 1160 | 1170 | 2250 | 1920 |
+| 100 g | 2170 | 1840 | 1270 | 2370 | 2118 |
+| 175 g | **2350** | **2140** | **1950** | **2740** | 2362 |
+| 300 g | 2513 | 2717 | 2340 | 3100 | 2603 |
+| 500 g | 2800 | 2830 | 2700 | 3670 | 2925 |
+
+**All four are monotone**, so every linkage transmits *something*. That is where the good news
+stops.
+
+#### ✅ First, what A0 proves about the electronics
+
+Inverted through `R_fsr = R_g·(4095/counts − 1)`, A0 reads **11.14 kΩ** at 175 g against the
+**11.0 kΩ** the meter measured on that same foot — **1.3 % agreement**. Two independent
+instruments on one physical thing. **The divider, the rail, the reference and the ADC gain are
+validated end to end**, and V5's ratiometric check is effectively answered by it.
+
+Everything below is therefore mechanical. None of it is the circuit.
+
+#### ⚠ The spread is far too large to be the harness
+
+Same 175 g on the scale, each foot's resistance read back through A0's own curve:
+
+| foot | `R_fsr` at 175 g | reads as |
+|---|---|---|
+| A0 front-left | 11.14 kΩ | **170 g** |
+| A1 front-right | 13.70 kΩ | **105 g** |
+| A2 rear-left | 16.50 kΩ | **56 g** |
+| A3 rear-right | 7.42 kΩ | **370 g** |
+
+**A factor of 6.6 between the extremes.** The method's own variation — leg angle (`cos θ`),
+pose sag, magnet placement — is bounded at roughly 2× even at an implausible 60° of tilt.
+**A factor of 6.6 is the linkage, not the bench.**
+
+#### ⚠ Two feet stall in the 50 → 100 g band
+
+Sensitivity across that band, where the gait's stance threshold sits:
+
+| foot | 30→50 g | **50→100 g** | 100→175 g |
+|---|---|---|---|
+| A0 front-left | 19.8 | **8.8** | 2.4 |
+| A1 front-right | 28.0 | **13.6** | 4.0 |
+| A2 rear-left | 20.0 | **2.0** ⚠ | 9.1 |
+| A3 rear-right | 47.5 | **2.4** ⚠ | 4.9 |
+
+*(counts per gram)*
+
+**A2 and A3 nearly stop responding between 50 g and 100 g, then catch up.** Their local
+exponent drops to 0.17 across that band and jumps back to 1.26 and 0.69 after it. That is the
+signature of **slack being taken up** — the toe moving before the bump loads the film. A1 shows
+the same thing lower down: nothing reliable below 50 g, and a 30 g tap giving ~600 counts.
+
+**A0, the foot that was built and characterised first, is the only one with a smooth curve.**
+
+#### What a per-foot calibration can and cannot absorb
+
+| | |
+|---|---|
+| ✅ **the level difference** | each foot gets its own curve; a foot reading 1950 at 175 g simply maps 1950 → 175 g |
+| ⚠ **lost resolution** | 2.0 counts/g against A0's 8.8 means a few counts of noise is several grams, right where the `foot_load ≥ 0.2` stance gate lives |
+| ❌ **hysteresis** | if the stall is slack, the reading depends on *how the load was reached*. A curve is a function of load alone and cannot represent that |
+
+⚠ **The shape alone does not condemn a foot — repeatability does.** A repeatable bilinear
+response is a nonlinearity a curve absorbs. **Run each series up AND back down.** If the loading
+and unloading curves land on each other, calibrate and move on; if they separate, the linkage
+has slack and must be fixed before any curve is fitted.
+
+#### Per-foot checks, when a curve looks wrong
+
+1. **The shoulder-to-rim gap** should be ~0.90 mm and visible on every foot (§1.3). A foot with
+   a noticeably smaller gap has its wire over-tensioned or its parts bottoming.
+2. **Wire tension** sets the zero offset (§2). Compare unloaded counts across feet — A0 reads
+   0–4; a foot reading much higher is preloaded.
+3. **Bump concentricity** — §3.3's budget is 0.8 mm worst case on a Ø5 puck over a Ø7 active
+   area. Past that the puck edge lands on the inactive border ring, which is exactly a response
+   that is low and badly shaped.
+4. **Epoxy in the bore or on the sensor face**, which changes the load path.
+5. **The leg angle used for each foot** — record it. It does not explain 6.6×, but it is a real
+   `cos θ` term (§5.6.1) and it should not be left as an unknown on top of a mechanical one.
+
+#### ⚠ A3 has little headroom
+
+At 500 g it already reads 3670 of 4095. Extrapolating its own top segment puts single-leg
+support (590 g) near 3780 and the 1180 g software clamp around 4010 — **inside the ADC's range,
+but barely.** Watch A3 for clipping once the robot stands on one leg.
+
 ### 5.7.6 ✅ V1–V3 PASS 2026-09-30 — the channel is live on A0
 
 Rewired per §5.7.5 (`R_g`'s upper leg moved to NODE, `SIG` run to NODE). Observed on A0:
@@ -1188,7 +1285,7 @@ bench, not after four feet are glued.**
 | 2 | INA219 inline on the battery | `0x40` appears; idle current is plausible; its bus voltage **agrees with A4's** reading |
 | 3 | ICM-20948 on SPI | `ls /dev/spidev*` shows `spidev0.0`; `WHO_AM_I` = **`0xEA`**; at rest one accel axis reads ≈ 1 g and the other two ≈ 0 — ✅ **PASS 2026-09-10** (§4.0): `0xEA` on CE0, 0 bad reads in 2000 at each of 1/4/7/10 MHz, `az` = +0.9967 g with `ax`/`ay` at −0.035/+0.001. Mounting, axis map and level reference in §4.1–4.2 |
 | 4 | VL53L0X on I²C | `0x29` appears; distance tracks a tape measure — ✅ **PASS 2026-09-07** (§9): `0x29` present with model ID `0xEE`; 259 readings at a bench target measured 121.9 mm ± 1.51 mm, 0 invalid; then validated on the robot at two points, belly-down and standing (§9.3) |
-| 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot. ⚠ **Tie the toe wire BEFORE calibrating** — its tension is the zero offset ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2), so a re-tension invalidates that foot's curve |
+| 5 | FSRs, **one foot at a time** | counts rise monotonically with the known-mass series; fit and store per foot. ★ **The series is a LINKAGE test on every foot, not only a calibration — §5.7.7.** Monotone is not sufficient: compare the four curves against each other, and re-run each one loading *and* unloading. ⚠ **Tie the toe wire BEFORE calibrating** — its tension is the zero offset ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2), so a re-tension invalidates that foot's curve |
 
 **After all four FSRs:** command the standing pose on a flat floor. The four `foot_load` values
 should sum to ≈ 1.0 (one body weight) and be roughly equal. **If they sum well below 1.0 the
