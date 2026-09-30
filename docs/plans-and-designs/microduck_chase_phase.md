@@ -589,3 +589,17 @@ on `tre` under the real timing; (3) the nod as dithering at small things once (2
 
 Presets: "LEAN · ROOM · …" (the old brain, the sensed control, level 1, level 3), "LEAN · PLAYROOM · …" (level 1, the
 control), "LEAN · the REBABBLE …", "TOF REAL · the still head …", "TOF REAL · the lean + the LEVEL prior …".
+
+### 10.4 The bird's neck (2026-10-01; design doc §17.88)
+
+The operator, watching the level lean: the head nods fore and aft and unsettles the walk; move it over the body with
+the two pitch joints like a walking bird instead. The joints tilt the view equally and oppositely, so moving them
+together slides the head (0.76 cm of the robot's centre of mass at 0.44 rad) with the view unchanged; the nod was the
+level prior chasing the stride's bob. Built: the walker's fourth motor `action.head_fore` (`--intent-head-translate
+0.6`, the policy told, the head brain keeping the tilt) and its sense (`--intent-fore-sense`); identified by the recipe
+(`duck_fore_s1`, control `duck_ctrl3_s1`). Over eighteen seeds: the view is the still head's and so is the cloud's
+registration error under the real timing (4.8 cm against 4.7; the level lean 10.7) — **the nod is gone**. Without a
+centring prior the head reaches forward into an acceleration (+0.12 rad) and drifts back at a cruise (−0.38); closing
+50 → 60 %, the walk +8 %, falls 2.0 → 2.6 (`PARTIAL`). With the centring prior at 1 the head is centred at a cruise and
+everything ties the control (`NULL`). Next: the centring prior gated by the pace — on at a steady pace, off while the
+speed error changes — to keep the reach and drop the drift. Presets "BIRD · ROOM · …", "BIRD · PLAYROOM · …".

@@ -6048,3 +6048,29 @@ head's level (0.018–0.024, against the level lean's 0.086). **The nod is gone 
 the translation is a steering motor as the pitch was (§17.86), without tilting the ToF. Without a centring prior the
 head reaches forward as the body accelerates and parks back at a cruise (the speed prior's unmet tonic, now in the
 translation); at centring 1 it is centred at a cruise and reaches back as the body slows and backs.
+
+**The confirmation, seeds 7–18 (sweeps f5, f6), and pooled over eighteen:**
+
+| | control: three motors | the bird's neck | + centring 1 |
+|---|---|---|---|
+| seeds 7–18: falls · walls · arrivals · walk m/s | 1.7 · 31 · 17.7 · 0.172 | 3.2 · 28 · 18.6 · 0.188 | 1.6 · 40 · 16.6 · 0.170 |
+| seeds 7–18: closing · closed within 3 s · turn median | 48 % · 35 % · 0.07 | 58 % · 39 % · 0.10 | 49 % · 33 % · 0.05 |
+| seeds 7–18: head fore-aft accelerating · cruise | −0.01 · −0.02 | **+0.12 · −0.38** | −0.05 · −0.06 |
+| **n = 18: falls · walls · closing · closed within 3 s · walk m/s** | **2.0 · 29 · 50 % · 33 % · 0.173** | **2.6 · 32 · 60 % · 41 % · 0.187** | **1.8 · 36 · 52 % · 38 % · 0.173** |
+
+**The ToF's real timing (sweeps f7, f8, seeds 1–6, `--tof-real 0.066 0.03`):** the registration error on the walk
+4.7 cm for the still head, **4.8 for the bird's neck, 4.9 with centring** (the level lean of §17.87: 10.7); at stops
+2.3 / 2.5 / 2.7. The translation leaves the view where the still head keeps it.
+
+**Verdicts (2026-10-01).** **The nod: solved** — the view as level as the still head's (pitch sd 0.03, stride band
+0.02) and the cloud's registration error the still head's under the real timing; `WORKING` on the operator's
+complaint. **The bird's neck without a centring prior: `PARTIAL`** — closing +10 points and the walk +8 % over
+eighteen seeds (the translation steers without tilting the ToF), the head reaching FORWARD as the body accelerates
+(+0.12 rad) and then drifting BACK at a cruise (−0.38: the speed prior's unmet tonic, and the walker credits a forward
+head with slowing); falls 2.0 → 2.6 (seeds 7–18: 1.7 → 3.2). **Centring at 1: `NULL`** against the control — the head
+centred at a cruise and back as it slows, falls, closing and turning a tie, walls a little worse; the seeds 1–6
+steering gain did not replicate. The operator's lean shape (forward into the acceleration, home at a steady pace) is
+the no-prior arm's acceleration phase without its cruise; between the two, the centring at 0.3 (seeds 1–6 only) sits
+in between. Re-use: the drift is the speed prior's unmet target (§17.87's rail); a centring prior gated by the pace
+(on at a cruise, off while the speed error is changing) is the form that would keep the reach and drop the drift —
+the same gate §17.87 names for the level prior. Presets "BIRD · …" for the eye.
