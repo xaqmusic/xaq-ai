@@ -1160,3 +1160,3188 @@ must yield to need"), now measured.  Two things to decide, the operator's:
    pull on one C.  With that in place the drive question (a level-3 "where to go" inference
    on the map versus a boredom-gated heading) can be answered on a controller that can
    hold more than one thing true.
+
+### 17.5 The harness, and the fork's first item at n = 6 (2026-09-06)
+
+Every table above was read at seed 2. `mj_host/tools/l2_sweep.py` now runs a level-2
+config from scratch over N seeds in parallel (the host is unpaced headless: 1500 s of sim in
+about twenty seconds of wall time) and reports the §17 metrics over the control phase, paired
+by seed, with the identified A rows read back. Two harness facts came out of its first use
+and are fixed: the level-2 command's scene defaults to the **open floor**, not the arena (a
+sweep that omits the scene reports zero wall contacts because there are no walls; the tables
+above did pass the arena), and the reset-noise flag never reached the level-2 command, so a
+"seed" varied only the babble. With the arena and reset noise 0.05:
+
+| arm (n = 6, 1500 s, control phase 700–1500 s) | walls/min | contact | TooClose | path | cells | span | map nodes |
+|---|---|---|---|---|---|---|---|
+| R23 avoidance | 0.0 ± 0.0 | 0 % | 0.00 | 167 m | **8.8 ± 1.9** | 0.29 m² | — |
+| R23 + `babble_owns_a 0` | 4.0 ± 9.0 (two seeds) | 1.2 % | 0.00 | 168 m | **29 ± 21** (6 of 6 up, t 2.3) | 1.5 m² | — |
+| R25 heading + avoidance + map | **295 ± 8** | 43 % | 0.79 | 87 m | 28 ± 0 | 3.5 m² | 89 ± 13 |
+| **R26 = R25 + `babble_owns_a 0`** | **26 ± 35** (Δ −269, t −17, 0+/6−) | 4.9 % | 0.06 | 157 m (+71, t 15) | 30 ± 19 | 1.9 m² | 35 ± 18 |
+
+**R23's orbit and R25's wall-riding are findings, not seed-2 readings: six of six each.** And
+the fork's item 1 alone (§17.4: let the state model keep learning after the babble, so the
+proximity rows are identified from real wall encounters) removes the regression on every
+seed — a ten-fold drop in wall contacts, a body that walks 157 m instead of scraping 87, a
+ToF that sees a wall 6 % of the time instead of 79 %, and a map that stops tiling wall
+texture (89 → 35 nodes). One flag, no new module; the identified yaw row goes from
+`[+0.004 −0.001 +0.009]` to a row that carries the proximities. Verdict: **`WORKING`, loud**
+(CLAUDE.md §3.3). R26 is the line's new base (`a1v2_r26_l2_learn_after_babble.json`,
+launcher rank 1026).
+
+Two things the seeds say that seed 2 could not: coverage is **bimodal** under the fix (four
+seeds hold 14–25 cells, two tour 49–60), so the orbit and the tour are both attractors and
+which one a seed finds is part of the next question; and the wall contacts that remain (two
+seeds at 52 and 85 per minute) are the touring seeds — the avoidance is weakest exactly where
+the coverage is best, which is the arbitration question in its next form.
+
+**The moved-wall (d) test at n = 6** (`--arena-shift 1100`, 1800 s, the control phase split
+at the shift):
+
+| arm | cells before \| after | walls/min before \| after | map nodes before \| after |
+|---|---|---|---|
+| R25 | 28 \| 128 ± 277 (one seed leaves the arena through the moved wall) | 296 \| 351 ± 204 | 52 \| 47 |
+| **R26** | 29 ± 20 \| 27 ± 19 | 47 ± 69 \| **29 ± 32** | 31 ± 16 \| 28 ± 10 |
+
+R26 is robust to the change (its contacts fall after the wall moves where R25's rise) and it
+does **not** re-explore: coverage holds and the map does not grow after the shift. The (d)
+bar's re-inference half is `NULL` for R26 as it stands — the body keeps its habits in the
+new room rather than mapping it — which is the coverage question again: what would make a
+moved wall a *direction*. Scene note: after the shift one R25 seed escaped the arena (a
+522 m² span), so the shifted scene has a gap the (d) reading must exclude or the metric must
+clip to the arena.
+
+**The wander rule on R26 at n = 6** (`--wander-bored 8 --wander-turn 90`, paired against R26
+without it): identical runs on five of six seeds, one seed changed (walls +80/min, nodes +20).
+The boredom trigger — the map's surprise below 0.8 of its own long average for 8 s — almost
+never fires under R26, whose map stays 27 % novel because the body keeps touring; the rule
+is inert here (`NULL`), and where it fired it bought nodes with wall contacts. What §17.4
+called the arbitration question now has its measured shape: R26 already has coverage and
+avoidance in one body without a wander rule; what it lacks is a *reason to go somewhere*
+(a drive with reach), which is the Cell recipe's pragmatic loop, not a heading jump.
+
+### 17.6 R27 — the fork's (a): novelty as a direction, the Cell's play loop over the map (2026-09-06)
+
+The operator's choice of the two §17.3 forks: a "where to go" belief on the map before any
+arbitration. Built as the Cell recipe's own loop: `PlayLoop` in the level-2 graph reads the
+map EPM's winner as its place (`pi_cell_size 0`), climbs the place-TLE novelty field
+(`wander_stall_ticks 0`, the Cell's A2, so the climb engages), and publishes an egocentric
+bearing; the `IntentAdapter` now publishes the unwrapped heading and the body velocity as
+`reality.proprio.heading` / `vel_ego`, and sets the heading reference behind sense slot 10
+from that bearing every tick when the topic exists (by presence: a graph without the loop is
+byte-identical). No new module; the loop the Cell dropped because it cost eats is the loop
+the duck wants, because coverage is the duck's goal. Config `a1v2_r27_l2_play_heading.json`,
+rank 1027.
+
+| n = 6, paired | walls/min | cells | span | map nodes | (d) moved wall: cells before \| after | walls before \| after | nodes before \| after |
+|---|---|---|---|---|---|---|---|
+| R26 | 26 ± 35 | 30 ± 19 | 1.9 m² | 35 ± 18 | 29 \| 27 | 47 \| 29 | 31 \| 28 |
+| **R27** | 9 ± 9 (Δ −16, t −1.1) | **42 ± 18** (Δ +12, t 1.7, 4+/1−) | 2.3 m² | 29 ± 13 | 37 \| 64 ± 69 (one seed leaves through the gap) | 13 \| **253 ± 143** (Δ +130, t 2.8) | 22 \| **49** (Δ +14, t 2.2, 5+/1−) |
+
+The loop steers on every tick (the host's own count). In the steady arena it is a `PARTIAL`
+at six seeds in the right direction on both blind-metric complements: more coverage with
+fewer contacts, five of six seeds touring, one still orbiting. Under the moved wall the
+(d) bar's re-inference half is now present — the map grows by half after the change,
+which R26's never did — and safety collapses: the novel region is where the wall now
+stands, the play bearing drives the body at it, and contacts go from 13 to 253 per minute
+while R26's fall. **A learned direction beats the proximity priors when the two conflict.**
+That is §17.4's item 2 in measured form, with a learned direction in place of a boredom
+jump: avoidance and novelty each have a bearing now, and the body has no arbitration
+between them but a linear pull on one C matrix. The Cell recipe's arbitration (need ×
+competence over loops with bearings; `LoopCompetence` → `LateralVoter` → `EFEArbiter`
+precision mode, all gain-0) is the next lever, with avoidance made a loop that emits a
+bearing rather than a prior in the matrix. Scene note again: the shifted wall leaves a gap
+one seed escapes through; the (d) metric must clip to the arena or the scene must close.
+
+### 17.7 R28 / R29 — the Cell recipe's arbitration on the duck: avoidance as a loop (2026-09-06)
+
+The measured form of §17.4's item 2: `TofAvoidLoop` (new, generic) turns the ToF summary
+into a bearing away from the nearest obstacle with that proximity as its need; the Cell's
+`LoopCompetence` grades each loop (avoidance: proximity falls while it drives; play: novelty
+rises; Beta + optimism), a `LateralVoter` turns competence into trust, `EFEArbiter`'s
+precision mode selects by need × trust with the nearest proximity as avoidance's "hunger"
+and its complement as play's surplus, and the `IntentAdapter` takes the winner's bearing as
+the heading reference (by presence of the arbiter; R27 and R26 stay byte-identical). The
+harness now records the winner per tick (`steer`), the steer shares, and clips samples that
+escape the arena.
+
+| n = 6, steady arena | walls/min | cells | avoid share | (d) moved wall: walls before \| after | nodes before \| after |
+|---|---|---|---|---|---|
+| R26 (no loops) | 26 ± 35 | 30 ± 19 | — | 47 \| 29 | 31 \| 28 |
+| R27 (play alone) | **9 ± 9** | 42 ± 18 | 0 | 13 \| **253 ± 143** | 22 \| **49** |
+| R28 (avoid's bearing wins) | 71 ± 80 | 54 ± 21 | 0.30 | 71 \| 114 ± 132 | 42 \| 33 |
+| R28 wrong-sign | 28 ± 23 | 52 ± 20 | 0.00 | — | — |
+| **R29 = release form** (avoid wins → the reference is released) | 44 ± 62 | 49 ± 19 | 0.23 | 45 \| 149 ± 151 | 31 \| 41 |
+
+**Why the bearing form fails, measured.** Past the babble, when avoidance won and set the
+heading reference to its away-bearing, the body barely turned: 0.14 rad in 0.5 s with no side
+preference at 0.5, 2 or 4 s. The heading reference is a slow regulator (§16.5 closed 3° in
+20 s) and the duck reaches a wall in two seconds. Avoidance's fast path is the proximity
+priors that R26 made work; only a slow direction belongs on the reference. So the
+arbitration is not one bearing against another but **"hold the novelty direction" against
+"yield to the reflex"**: R29 publishes avoidance's need with no bearing, and the adapter
+treats a winning loop with no bearing as *release* (the reference set to the current
+heading, so the heading prior stops fighting the proximity priors).
+
+**Verdict `PARTIAL`.** The trade-off is real and neither pole wins both regimes. In a known
+room play alone is the best avoider — walls stop being novel within minutes and the novelty
+climb turns away from them nine times in ten (P(turn left | wall on the right) 0.90 while
+play steers) — and every form that takes the motor from play near a wall costs contacts:
+R28 +62/min, R29 +34/min (4 of 4 seeds worse). After a wall moves, the new wall *is* novel and
+play drives at it; R29 cuts that burst by 40 % (253 → 149/min) while keeping half of R27's
+re-exploration (map +10 vs +22 nodes); R28 stops the burst harder (114) and the
+re-exploration with it. The wrong-sign control never lets avoidance win (its share 0.00), so
+here it is a play-alone arm with a different hysteresis, not a control of the ordering.
+
+What this hands the recipe: on a body whose only goal is coverage, the novelty loop is the
+pragmatic loop too, and a need-gated reflex that overrides it should fire only when the
+world has *changed* — the moved wall is novel and dangerous at once. The next form is not
+a better ranking but a competence signal that distinguishes "novel because unvisited" from
+"novel because it moved": the map's node *persistence* (a node whose prototype the world
+contradicts) rather than its TLE. That is the Cell's disconfirmation problem (register O9)
+arriving on the duck, and it is where the arbitration line stops for this phase. The
+escape counts (5 000–17 000 samples per run beyond the arena after the shift) say the
+shifted scene must be closed before the (d) reading is trusted at power.
+
+### 17.8 A1 — the playroom: the room is the lever, R27 unchanged (2026-09-10)
+
+The first lever of the [playroom plan](microduck_playroom_plan.md) §9: an arena that can show
+the behaviour set. `mj_host/tools/playroom_gen.py` generates `scene_playroom.xml` from a seed
+— a 4 m × 4 m room, walls 0.3 m, a rug, a table the duck walks under, two chairs, a shelf of
+coloured books, a wall clock whose hand the host turns once per 20 s (`gravcomp` on the hand:
+without it the hand hung at the bottom on the first run), two balls and two blocks as free
+bodies — and writes a manifest beside it (seed, hash, every object's class and position, and
+the qpos address of every non-robot entry). The host echoes the manifest at start, the sweep
+prints it, and the sweep now refuses to print a run that produced no JSONL as a row of zeros
+(the first sweep did exactly that: the host runs in `mj_host/` and a relative scene path
+missed). Textures are MuJoCo builtins with fixed seeds.
+
+**Host changes, gain-0.** Reset noise now perturbs the robot's own joints only (a ball's
+quaternion is not "a slightly wrong pose"); the `wall` instrument counts contact with any
+static world geom that is not floor or rug, so furniture counts; an `obj` field (contact with
+a movable, named `obj_*`) is printed only when the scene has movables; `--move NAME X Y S`
+relocates a movable, a furniture body or a world geom at S s (the (d) test; `--arena-shift`
+unchanged). **R27 seed 6 in the arena, 400 s, is byte-identical before and after** (md5
+`784d4acc…`, `mj_host/log/playroom/ref_r27_arena_s6_{before,after}.jsonl`); the gates pass.
+
+**R27's loop in the playroom, unchanged (R30 = R27's config, the scene swapped), n = 6,
+1500 s, noise 0.05, control phase 700–1500 s, room seed 1:**
+
+| | walls/min | cells (0.25 m) | map nodes | map TLE | objs/min | objects moved (m) | rescues/min | escaped |
+|---|---|---|---|---|---|---|---|---|
+| playroom (R30) | 33 ± 39 (5.1 / 6.5 / 17 / 23 / 39 / 108) | 140 ± 15 | 98 ± 9 | 0.20 | 0.07 | 3.7 ± 2.5 | 0.05 | 0 |
+| arena (R27, §17.6) | 9 ± 9 | 42 | ~30–40 | 0.21 → 0.14 | — | — | — | (gap) |
+
+Read with the room's size: the arena has 64 cells, the playroom 256, so 140 cells is 55 %
+of the room against the arena's 66 %, over a 4× area with a 1.5 m longer crossing. The map
+grows with the room (98 nodes). Wall contact attributes mostly to the walls, not the
+furniture: seed 2 (108/min) rides the walls (87 % of its contact ticks at a wall, 9 % at a
+chair), seed 5 splits wall and chair1, seed 6 (5/min) touches everything a little (54 % wall,
+16 % table, 12 % chair, 11 % shelf). The duck almost never touches a movable (0.07/min) —
+nothing seeks them yet, which is what E1/E2 are for — and still moves 3.7 m of ball per run
+by walking into them. No escapes: the room has no gap, so the moved-object (d) can be read
+without the arena's clip.
+
+**Verdict.** A1 `WORKING` as an instrument: generated, manifested, byte-identical elsewhere,
+every object class present, the (d) flag exercised (a ball, a chair and a wall moved at
+100/120/140 s in a test run). R27 on it is a *signal*, not a degenerate baseline: 5 of 6
+seeds tour (115–157 cells), one rides the walls. The operator's eye next, through the
+launcher's R30 preset (seed 6) and its moved-ball twin. **Found for C1, and fixed the same night (operator):** Pollen's
+`head_camera` sits 8.5 mm inside the lens looking along the head's +z — backward — with its
+up vector sideways, so a render from it shows the inside of the head rotated 90°. The
+vendored file is never edited, so `playroom_gen.py` writes `robot_overlay_playroom.xml`, a
+copy with one line changed: the camera at the lens's foremost vertex on the lens axis (body
+frame `0.0155 −9e−05 −0.0818`), turned to look along the ToF site's measured forward with
+the site's up as up (`quat 0.707107 0 0 −0.707107`), `fovy` 49° (the IMX219's ~62°
+horizontal field at 4:3). The playroom scene includes the overlay; the run is byte-identical
+with and without it (a camera has no physics), the gates pass. Rendered mid-run the frame is
+level and upright: rug, walls, a block — and a lot of sky, because the walls are 0.3 m and
+the camera is 12 cm off the floor. Whether the walls rise for the camera's sake is the
+operator's call before C2. **Decided the same night: walls 1 m, and the light moved off
+noon.** The camera-mounted headlight, which flattens every texture, is nearly off; one angled
+sun (elevation ~45°) casts shadows and a weak fill from the opposite side keeps the shadowed
+sides readable; shadow map 4096. Rendered: no saturated pixels in either view, textures
+crisp. **The taller walls change the runs from tick 3** — the ToF's upper rows used to pass
+over 0.3 m walls and now hit — so R30 was re-measured on the 1 m room:
+
+| 1 m walls, n = 6 | walls/min | cells | map nodes | map TLE | objs/min | objects moved (m) | rescues/min | escaped |
+|---|---|---|---|---|---|---|---|---|
+| playroom (R30) | 7.1 ± 6.0 (2.8 / 3.9 / 4.6 / 4.7 / 7.8 / 18.8) | 151 ± 34 | 100 ± 20 | 0.20 | 0.07 | 5.1 ± 2.3 | 0.05 | 0 |
+
+The wall-rider is gone (seed 2: 108 → 7.8/min) and the room's contact rate is now below the
+2 m arena's 9/min over four times the area: the 0.3 m walls were partly invisible to the
+sensor, which is a measurement about the *old room*, not the loop. The §17.8 table above
+stays as the record of the 0.3 m room.
+
+**The instruments, corrected (2026-09-10, later).** The `obj` flag was true on every tick of
+every playroom run: `touching_object` counted *any* contact involving a movable, and a ball
+resting on the floor is one. `touching_wall` had the same hole (a block leaning on a chair
+leg would have counted). Both now count only contacts the robot is in; the arena is
+byte-identical, the playroom's physics is byte-identical (only the two fields change). The
+sweep gained `down%` (ticks with the trunk past 60° of tilt) and the level-2 summary prints
+rescues the harness gave up on. Re-measured, same runs:
+
+| 1 m walls, n = 6, corrected | walls/min | objs/min | objects moved (m) | down % |
+|---|---|---|---|---|
+| playroom (R30) | 6.6 ± 5.8 | 22.5 ± 23.7 | 5.1 ± 2.3 | 0.14 ± 0.18 |
+
+So the duck *does* run into the movables — twenty-odd contact episodes a minute, a ball
+dribbled along — without anything seeking them; 0.07/min was the broken flag. Everything
+else in the table above stands.
+
+**The table-leg trap (operator's observation, the same day).** In a watched run on a random
+seed (1069061822; log `mj_host/log/launcher/20260910-103450_*`) the duck walked into a table
+leg at 947.7 s, fell to 141° of tilt with its left foot on the leg and the trunk against it,
+and stayed there for the remaining 690 s: 83 rescues, every one given up after the harness's
+8 s (`give_up_s`), hand-back, 0.2 s debounce, hand-off again. Three things the log settles:
+
+1. **The rescue is the standing policy, not a get-up.** `Driver::Scaffold` runs
+   `alpha_stand`, which holds the standing pose. On a flat floor that happens to right the
+   body; wedged against a pillar it cannot, and nothing in the loop knows the difference.
+   The harness has no "wedged" state — it just cycles. The operator's reading is exact: the
+   sequence is not aware of its situation.
+2. **The sensor saw the leg and the loop drove on.** Two seconds before contact the ToF's
+   TooClose slot read 0.47 then 0.81 while `steer` stayed at play's bearing; a 3 cm cylinder
+   is R27's known failure at its smallest — a learned direction beats the proximity priors
+   (§17.6) — and the room now supplies that stimulus without an operator moving a wall.
+3. **At level 2 our brain is not at the joints.** Pollen's walker drives; the joint-level
+   brain that stood and caught (R19) is not in this loop at all. "It would have babbled its
+   way out" is therefore a claim about B2 of the playroom plan (the fallen regime opened to
+   learning, the rescue held back), and this trap is its first (d) scenario: dropped poses
+   *and* wedged on a table leg. The six harness seeds never wedged (`down%` 0.14), which is
+   why the number must be read per seed.
+
+### 17.9 H0 / H1 — the head loop: the head IMU, and the identification babble on the four head commands (2026-09-10)
+
+The playroom plan's H line (§4b there; agreed head-first the same day). The walker's command
+vector carries four head targets — neck_pitch, head_pitch, head_yaw, head_roll, deltas from
+HOME (`Observation.hpp` slots 51–55; Pollen's `robot.head`) — so a brain that owns the head
+needs no joint access: `mj_host/src/HeadAdapter.*` is the twist adapter's code with four
+command dimensions and the trained ranges (±1.10, ±1.10, ±1.40, ±0.31 rad), commanding the
+head through the walker and sensing the head IMU.
+
+**H0.** The overlay adds a gyro and an orientation on Pollen's `head_imu` site (their ToF board
+carries the IMU; tofd reads it at 100 Hz); `DuckBody::head_gyro()` reads it, zeros without it.
+Sensors touch no physics: the arena run and the playroom R30 run are byte-identical.
+
+**H1.** `configs/head_h1_babble.json`: `motor_epm_head` over the four commands, 12 load slots
+(head gravity x, y | head gyro x, y, z | trunk gravity x, y | trunk gyro x, y, z | 2 spare),
+`babble_ticks 30000`, `babble_hold 25` (0.5 s; the walker's head low-pass answers in ~10 ticks),
+`babble_scale 0.3` (±0.33 rad on the pitches), the prior off. Run with the twist brain overridden
+to zero (`--l2-twist 0 0 0`: the walker stands) in the playroom, 700 s, seeds 1–5. The
+identified A, rows vs the four commands, seed 2 (the other four agree to ±5 % on every entry):
+
+| row \ command | neck_pitch | head_pitch | head_yaw | head_roll |
+|---|---|---|---|---|
+| pos neck_pitch | **+0.0237** | +0.0226 | +0.0052 | +0.0015 |
+| pos head_pitch | +0.0040 | **+0.0555** | +0.0205 | +0.0014 |
+| pos head_yaw | −0.0009 | +0.0004 | **+0.0497** | +0.0147 |
+| pos head_roll | +0.0224 | +0.0074 | +0.0112 | **+0.0601** |
+| head gravity x | **−0.0041** | **+0.0083** | +0.0019 | +0.0004 |
+| head gravity y | +0.0056 | +0.0029 | −0.0102 | **+0.0132** |
+
+Read: every position diagonal positive; head_pitch, head_yaw and head_roll dominant; **the
+two pitches move head-gravity x with opposite signs** — at HOME both joints sit at +20° and
+the head is level, so the joints oppose each other, and a positive delta on the neck tilts the
+head one way while a positive delta on the head tilts it the other (the read-back agrees with
+the geometry, not a guess); roll moves head-gravity y; the yaw row on gravity y (−0.010) is a
+pitched head's yaw axis not being vertical. One coupling to know: a head_pitch command moves
+the neck joint almost as much as a neck_pitch command does (+0.0226 vs +0.0237) — the walker's
+policy treats the two pitches as one head pose. The gyro rows are small, as 0.5 s holds
+average a rate to nothing; the transients are there for a faster model. **0 rescues on every
+seed**: a 0.3-scale head babble does not fall the standing walker.
+
+**Verdict.** H0 `WORKING` (byte-identical elsewhere). H1 `WORKING`: the head identifies from a
+still body in one babble, seed-consistently, with the rows the H2 prior needs. Next, H2: the
+prior on slots 12, 13 (head gravity x, y → 0) while walking, A/B against the walker's own
+head, judged on head gyro RMS, gravity deviation, rescues/min and the brain-frame difference.
+Launcher: R31 (watch the head babble; the twist brain held at zero).
+
+### 17.10 H2 — the head prior while walking: level `WORKING`, still `NULL`, the picture `REGRESSION` (2026-09-10)
+
+**Protocol.** Identify standing, act walking: the H1 head brain is saved at the end of its
+standing babble (`--save-head`) and loaded into R30's tour (`--load-head`) with the prior on
+and no babble. The control is the same load with `motor_gain 0`, which is R30 exactly (the
+walker's own head; verified byte-identical on the tour's metrics). n = 6, 1500 s, control phase
+700–1500 s, the head metrics from the head IMU while upright: gyro RMS over x, y (the head's
+world motion, whatever the joints do), gravity deviation over roll and pitch (0 = level), and
+H3 — the mean frame-to-frame difference of the 64 × 48 brain frame at 12.5 Hz, rendered from
+the run's qpos (seed 6).
+
+**Four things had to be found before the reflex could be judged**, each a measurement, none a
+tuning:
+
+1. **The head IMU's frame.** Its x axis points down when the camera is level (head joints at
+   zero: camera forward = world +x, head gravity = (−1, 0, 0)). The first prior targeted x, y
+   → 0 and pitched the camera 90°, collapsing the map (the ToF is on the head). Roll and pitch
+   are the y and z components; the sense now carries the deviations, so level reads zero.
+2. **The idle head brain holds its last pose.** The controller starts as an identity on the
+   position slots (y = the sensed position), so with nothing driving it the head stays where
+   the babble left it — 0.3 rad off, yawed 40°, the ToF sideways, wall contacts ×8. The honest
+   gain-0 control is `motor_gain 0`.
+3. **Yaw winds to its rail.** An unpriored axis that holds its position while the trunk turns
+   under it reaches the rail; the adapter masks yaw after the babble (the plan's choice: yaw
+   follows the trunk).
+4. **The two pitch joints are a redundant pair.** Their null space (neck up, head down) is
+   invisible to the sensor, and the prior's bias drifted into it until both pitches sat at the
+   rails with `ctrl_damping` making no difference. The loop now owns two motors — head_pitch
+   and head_roll — with the neck held at zero (H1/2: head_pitch → pitch −0.043, roll → roll
+   +0.018, clean).
+5. And one from the module's own note: the closed-loop model after a babble "bore no
+   resemblance" to the babbled one; with the model learning while walking the prior acted
+   through a drifting A and the head went to 38° of deviation. **Frozen at the identified
+   values (`model_lr 0`)**, the prior does what it says.
+
+| arm (all n = 6) | head gyro RMS (rad/s) | roll dev | pitch dev | walls/min | rescues/min | frame diff (s6) |
+|---|---|---|---|---|---|---|
+| control = R30, the walker's head | 1.85 ± 0.13 | 0.090 | 0.197 | 6.6 ± 5.8 | 0.05 | 12.3 |
+| 4 motors, level (wrong frame) | 3.26 ± 0.72 | — | — | 46 | 0.11 | 18.6 |
+| 4 motors, level, yaw masked | 2.40 ± 0.12 | 0.27 | 0.16 | 9.7 ± 8.3 | 0.03 | — |
+| 4 motors, level, + ctrl_damping | 2.41 ± 0.21 | 0.23 | 0.19 | 62 ± 125 | 0.03 | — |
+| 2 motors, level, model learning | 2.86 ± 0.72 | 0.62 (roll + pitch) | | 13.5 ± 7.4 | 0.05 | — |
+| **2 motors, level, model frozen** | 2.11 ± 0.07 | **0.041 ± 0.002** | **0.044 ± 0.004** | 9.3 ± 8.9 | 0.02 | **16.4** |
+
+**Verdict, three parts.** *Level*: `WORKING`, loud — pitch deviation 0.20 → 0.044 and roll
+0.09 → 0.04 on every seed, the head visibly held level while the body walks (launcher R32
+against R30). *Still*: `NULL` — the head gyro is 14 % worse; the pitch command sits at its
+rail on half the ticks, chasing the 2 Hz gait through a one-step model and a lagged position
+channel. *The picture*: `REGRESSION` — frame difference 12.3 → 16.4; the operator's criterion
+is worse, because a level head that bangs the rail shakes the camera more than a walker's head
+that droops 11° and stays put. **Not promoted.** Re-use context: a slower prior (the 50 Hz
+Gauss–Newton step at `state_prior_lr 0.1` is a 200 ms time constant against a ~200 ms
+actuator lag — the wind-up condition); a rate target on the frozen model; or feed-forward
+from the trunk gyro (the controller's rows over the trunk slots are what a vestibulo-collic
+reflex actually is). One lever at a time, from R32.
+
+### 17.11 The operator's eye on H2, the slow prior, and the no-backing clamp (2026-09-10)
+
+**The operator watched R32 and called it working:** the head stays level fore-aft "very much
+like a chicken or other bird that walks"; the side-to-side tilt appears when the robot turns;
+and once the robot backed into a wall and stayed there.
+
+**Roll in turns, read from the logs.** Over the six frozen-model seeds, the head's world-frame
+roll error is the same turning (|head yaw rate| > 1 rad/s) as straight (p95 0.076 vs 0.079; the
+walker's own 0.12–0.18), and the roll *rate* is the walker's. What changes in a turn is the
+roll *command*: its mean rises from +0.014 to +0.04–0.07 rad because the walker banks and the
+head counter-rolls to stay level, and it sits at its ±0.31 rad rail on a third to a half of all
+ticks, as the pitch command does at ±1.10. So the tilt seen from outside is the roll joint
+working relative to a banked body, plus the same rail-chasing that shakes the camera. In the
+simulator gravity comes from the orientation, so no precession reaches the sense; on hardware
+the IMU's gravity estimate will carry the centripetal term and that reading will need
+revisiting there.
+
+**The slow prior** (`head2_h2_level_slow.json`, `state_prior_lr 0.02` — a fifth of the
+model-implied correction per tick, a ~1 s time constant, instead of a tenth at 50 Hz against a
+~200 ms head lag), n = 6: pitch deviation 0.054 ± 0.009 (the walker 0.20; lr 0.1 gave 0.044),
+roll 0.048 (0.09; 0.041), head gyro 2.10 ± 0.07 (unchanged), rail-hitting pitch 39 % (from
+50 %) and roll 26 % (from 45 %), frame difference on seed 6 **14.4** (control 12.3, lr 0.1
+16.4). Direction right, the picture still worse than the walker's. `PARTIAL`; R33 to watch.
+
+**The no-backing clamp** (`--no-backing`, the twist brain's forward command clamped at zero
+— the body has no rear sensor on either side of the boundary, so a step backward is a step
+into the unseen). The operator's R32 watch had backward commands on 35 % of ticks in the
+tour, during turns, in 66 short runs (median 0.23 s, longest 3.5 s) and no wall stretch over
+4 s; no harness seed of any arm has one over 4 s either. Clamped, n = 6 on R30: **walls/min
+6.6 → 36.8 ± 28, path 156 → 133 m** — `REGRESSION`. The short backward commands are the loop
+backing *off* a wall; forbidden, it rides walls. Kept as a flag, off by default. Re-use: a
+rear sensor, or a clamp gated on "nothing ahead", neither of which this body has.
+
+### 17.12 Yaw is the axis; the model must stay frozen; three levers refuted (2026-09-10)
+
+**The operator saw the improvement of R33 and named yaw as the largest remaining error.**
+Measured on seed 6 by splitting the brain-frame difference by the head's rotation between
+consecutive frames (from the logged orientations, at the camera's 12.5 Hz): the walker's head
+turns at **91°/s RMS about its vertical axis, 39 pitch, 50 roll**, and yaw carries the largest
+fitted share of the frame difference. R33 brings roll to 37 and leaves pitch and yaw where
+they were; yaw was masked to follow the trunk, and the gait's yaw wobble goes straight into
+the picture.
+
+Three levers on top of R33, each n = 6 with the seed-6 picture, each `REGRESSION`:
+
+| lever | level (roll+pitch dev) | frame diff (s6) | what happened |
+|---|---|---|---|
+| R33 (2 motors, slow prior, model frozen) | 0.07 | 14.4 | the reference |
+| F1 the model learning while walking (`model_lr 0.02`, `state_model_lr 0.05`) | 0.80 ± 0.19 | 15.7 | the identified pitch authority drifted −0.043 → −0.011 and the head left level; pitch and roll rotation 85 and 91°/s |
+| F2 F1 + `lookahead_gain 1` (act on the predicted state) | 0.41 ± 0.29 | 15.9 | no recovery; walls 66 ± 96 |
+| Y1 yaw as a third motor with a head-yaw-rate prior → 0 (model learning) | 0.77 ± 0.14 | 20.7 | the yaw joint at its ±1.4 rad rail 88–100 % of ticks on four seeds: a rate target with no position anchor winds up in every sustained turn |
+
+**Two conclusions.** The frozen model is not a shortcut: the closed-loop model drifts while
+walking, exactly as the module's own note warns, and with it the level goes; "be predictive
+rather than frozen" has to be done *outside* the model's learning — feed-forward from the
+trunk gyro that leaves the identified authority alone. And a yaw reflex cannot be a target on
+the module's state prior: it needs a position anchor with a leak — the vestibulo-ocular
+reflex's own form — which is the next lever (`--head-vor TAU LEAD` in the head adapter: minus
+the trunk's integrated yaw rate, leaking to centre in TAU s, plus LEAD s of the rate as a
+phase advance against the walker's head lag; 0 = off, byte-identical).
+
+**The yaw reflex, measured (V1 `--head-vor 2 0`, V2 `--head-vor 2 0.1`, on R33), n = 6:**
+level kept (roll + pitch dev 0.10, 0.11), head gyro 2.25 / 2.12, walls **65 ± 85 / 49 ± 28**
+(R33 20), frame difference **16.6 / 19.2** (R33 14.4), head yaw rotation 95 / 94°/s (R33 85).
+`REGRESSION`, both. The diagnosis from the seed-6 log: the reflex is correct and fast — the
+head-yaw joint's rate is anti-correlated with the trunk's yaw rate, peaking at a 4-tick (80 ms)
+lag, and the joint follows the command at 0.98 — and it still adds motion, because **the yaw
+wobble is not the trunk's**. With the head command held at exactly zero (R30, seed 6), the walker's
+own policy moves the head-yaw joint at **1.21 rad/s RMS (69°/s)**, the neck pitch at 0.67, the
+head pitch at 0.48 and the roll at 0.45, against a trunk yaw rate of 0.79: the walking policy jitters the head joints at
+the gait rate on its own, and a reflex integrating the trunk gyro cancels the wrong thing and
+piles its own counter-rotation on top. What the yaw axis needs is a loop against the *head's
+own* rate with a position anchor — the head gyro is the sensor, and the actuator is a policy
+that wiggles what it is told to hold — or, on the real duck, a question for Pollen: their
+walking policy's head-pose tracking leaves ~1 rad/s of yaw jitter at a fixed command, which a
+client cannot remove through `robot.head`. That is a measurement on their MJCF with their
+policy, and belongs in the outreach as a finding, not a complaint. Any head yaw also swings
+the ToF off the direction of travel, which is where the wall contacts come from; the same
+coupling exists on the hardware.
+
+**Where the head line stands (end of 2026-09-10).** R33 is the head loop as it works: two
+motors, identified standing, frozen, a slow level prior — level fore-aft and in roll like a
+walking bird, the operator's eye confirmed, and the camera still 17 % less steady than the
+walker's drooping head because the gait's yaw and the policy's own head jitter are untouched.
+Refuted in this context: the fast prior, the learning model, the lookahead, a yaw-rate prior,
+and the trunk-gyro reflex. The next lever is a rate loop against the head's own gyro with a
+position anchor, or a step down the ladder: the walker's head jitter is the actuator's noise,
+and Track A (the joints) is where it would be removed.
+
+### 17.13 The rate loop on the head's own gyro — refuted by the actuator's lag at the gait frequency (2026-09-10)
+
+`--head-rate K TAU` (off by default): the yaw command integrates minus K times the head's own
+yaw rate (the head IMU's x component, its down axis; measured +0.34 with the trunk's yaw rate,
+the same sign) and leaks to centre in TAU s — the position anchor Y1 lacked. On R33, K = 1
+and 2, TAU = 2 s, n = 6:
+
+| arm | head yaw rate RMS (rad/s) | 3-axis head rate | walls/min | frame diff (s6) | yaw rotation (s6, °/s) |
+|---|---|---|---|---|---|
+| R33 | 1.72 | 2.30 | 20 | 14.4 | 85 |
+| G1 K = 1 | 2.03 | 2.95 ± 0.22 | 44 ± 24 | 16.3 | 94 |
+| G2 K = 2 | 2.20 | 3.17 ± 0.17 | 42 ± 37 | 20.3 | 132 |
+
+`REGRESSION`, worse with gain — the signature of a lag-limited loop. The loop does what it
+says: the command's rate is −0.86 correlated with the measured head yaw rate at lag 0. But the
+joint's counter-motion arrives **6–8 ticks (120–160 ms) later** — the walker's head tracking,
+its policy and its low-pass — and the jitter it is countering sits at the **gait frequency**:
+the head yaw rate's spectrum peaks at 2.23 Hz with 44 % of its power in 2–3 Hz, where the hip
+pitch has 46 % of its own. A correction 120–160 ms late on a 450 ms period is 100–130° late:
+it adds energy. (The pitch axis carries an 8.3 Hz neck resonance, 82 % of its power — a
+different problem, not the gait's.)
+
+**What this closes, and what it opens.** Through Pollen's walker no feedback loop on the head
+can remove the gait's yaw jitter: the actuator answers a quarter period late, and the walker's
+own policy is the source. Two routes remain, both predictive in the sense the operator asked
+for. (1) **Phase, not feedback**: the jitter is periodic with the gait, so a feed-forward
+locked to the gait phase can command the counter-motion a quarter period *ahead* — the
+doctrine's "feed it phase" (CPG → EPM), the picrawler's stride model; the module carries a
+`step_phase`/CPG apparatus already. Its honest signal is the head gyro's residual at the gait
+frequency. (2) **The joints** (Track A): the jitter is the actuator's noise, removable only
+where the actuator is ours. And a third for Pollen: their policy's head-pose tracking leaves
+1.2 rad/s of yaw jitter at a fixed command, a measured finding on their model for the
+outreach. R33 remains the head loop; the H line pauses here for the operator's decision.
+
+### 17.14 Both routes tried: Track A at the head beats the walker's own head; the phase feed-forward finds no waveform (2026-09-10)
+
+The operator asked for both routes measured, even if marginal, before a plan goes to Pollen.
+
+**Track A at the head** (`--head-joints`): the head brain's two commands become the head
+joint targets (HOME + command) written over the walker's head outputs; the walker keeps the
+legs and is told nothing about the head. The actuator is the servo. Identified standing at the
+joints (`head2j_h1_s2`: pitch authority −0.075, roll +0.018 — nearly double the walker
+route's), then R33's level prior while walking, n = 6:
+
+| arm | 3-axis head rate (rad/s) | yaw rate | roll / pitch dev | walls/min | cells | rescues/min | frame diff (s6) | yaw / pitch / roll rotation (s6, °/s) |
+|---|---|---|---|---|---|---|---|---|
+| walker's own head (R30) | ~2.3 | 1.72 | 0.09 / 0.20 | 6.6 | 151 | 0.05 | 12.3 | 91 / 39 / 50 |
+| R33 (walker route, level) | 2.30 | 1.72 | 0.05 / 0.05 | 20 | 127 | 0.07 | 14.4 | 85 / 38 / 37 |
+| **J1 joints, level** | **1.18 ± 0.04** | **1.03** | **0.025 / 0.038** | 10.9 ± 9.3 | 144 | 0.19 | **9.9** | **58 / 40 / 28** |
+| J2 joints + rate loop K 1 | 1.57 | — | 0.08 | 44 | 145 | 0.27 | 11.1 | 52 / 29 / 36 |
+| J3 joints + rate loop K 2 | 2.36 | — | 0.16 | 24 | 163 | 1.05 | 14.9 | 68 / 89 / 96 |
+
+**J1 is the first arm steadier than the walker's own head on the operator's criterion**:
+the picture 12.3 → 9.9, the head's world rate halved, yaw 91 → 58°/s (the policy no longer
+jitters the joint; what remains is the trunk's own yaw), roll halved, level held at 0.03–0.05
+on every seed, the tour intact. The cost: rescues 0.05 → 0.19/min — the walker's balance
+apparently used the head it no longer moves (the head is 38 % of the mass), a number to carry
+into the ask. The rate loop on top of it fails again, now for a different reason: at the
+joints the lag is the servo's, but the remaining yaw is the trunk's, which the loop fights
+through a policy that then falls (J3 1.05 rescues/min). `WORKING`, loud, seed-consistent.
+
+**The gait-phase feed-forward** (`--head-phase LEAD LEARN_S`): a stride clock from the hip
+pitch's upward crossings of its running mean (found: 2.3–2.7 Hz, thousands of crossings), a
+16-bin table of the head's yaw rate learned for 100 s after the babble with the command at
+zero, integrated into the periodic yaw angle and commanded with the opposite sign LEAD ticks
+early (7 through the walker, 2 at the joints). Measured, n = 6: **the table explains nothing**
+— the residual against it equals the measured rate (1.58 of 1.59 through the walker, 0.84 of
+0.85 at the joints) and the learned angle waveform is ±0.014–0.017 rad, one degree. The yaw
+jitter is at the stride rate without being phase-locked to the stride. Through the walker
+(P1): head rate 2.39 (R33 2.30), picture 18.2, `REGRESSION`. At the joints (P2): head rate
+1.09 ± 0.23 vs J1's 1.18 — a tie within seeds — while the tour collapses (cells 82 vs 144,
+seed 3 riding a wall at 125/min with 36 cells); its seed-6 picture of 8.7 beats J1's 9.9 for
+the wrong reason: **the picture is blind to a duck that stops touring**, and must always be
+read with cells and path. `NULL` on the head, `REGRESSION` on the tour. Re-use: a phase
+estimate from the head's own rate rather than the hip; or the EPM form over (phase, rate) if
+the jitter turns out to be locked to something other than the hip.
+
+**The comparison the operator asked for.** Track A at the head wins, and not marginally:
+on the picture it is the only arm better than the walker, and it is better on every head
+number with the tour intact. Everything through Pollen's walker command — the level prior
+(R33), the trunk reflex, the head-gyro rate loop, the phase feed-forward — is bounded by two
+facts of their walker: it answers a head command 120–160 ms late, and its own policy jitters
+the head-yaw joint at 1.2 rad/s. That is the case to take to Pollen (outreach plan §8).
+
+**PROMOTED (the operator's eye, 2026-09-11):** "a significant improvement in stability compared
+to R30. While the head is not perfectly still the wobble is tolerable when viewing through the
+head camera, and the overall look of the duck walking is more interesting and birdlike. It is
+a win." R34 is the head loop: `★ HEAD` in the launcher; R32 retired from the list (its file
+kept); R33 kept as the walker-route comparison for the Pollen case. Before PR-2 the operator
+wants the behaviour set validated in the simulator with what exists — the exploration line
+resumes (playroom plan ▶ Resume here).
+
+### 17.15 The exploration line's control arm: the ToF's own 8×8 in the place map (2026-09-11)
+
+**The question** (operator, 2026-09-11: lean on the ToF; the camera stays a demonstration for
+the ask to Pollen). Today's place vector is `[x/2, y/2, cos, sin, the 8 column ranges / 4 m]`
+(§17.3): eight ranges over a 45° cone look nearly the same from most spots in a 4 m room, so what
+tells one map node from another is mostly the odometry — a grid over a path integral wearing an
+EPM (the Cell audit's V1, on the duck). Before the camera (playroom plan C2) the cheapest richer
+geometry is the sensor's own 8×8 depth matrix, on the wire on the real robot. This is the arm the
+camera arm has to beat, and the pipeline it will share with the sensor swapped.
+
+**The host.** `IntentAdapter` now owns the place vector's *form*, read from the graph and echoed
+at start (`place vector: …`, captured by `l2_sweep` as a read-back): `Columns` when the map EPM on
+`reality.proprio.place_in` declares 12 (every existing config; byte-identical — R34 seed 6, 400 s,
+md5 `cc87df84…` before and after), `Zones` at 68, `Stacked` when the graph has an EPM on
+`reality.proprio.depth_in`. The host measures the pose and the ToF in both reductions every tick
+(`PlaceInputs`); the adapter publishes what the graph asked for.
+
+**R35 — the 64 zone ranges straight into the RBF place EPM: the encoder flattens it.** Seed 6,
+1500 s: 10 map nodes against R34's 67; the map's TLE 0.04–0.08 through the babble against
+0.1–0.2. Not the input: the logged 64-zone input needs 7 principal dimensions for 90 % of its
+variance, the 8 columns 6, and its raw pairwise spread is twice the columns' (0.258 vs 0.124).
+Re-encoding the logged control phase offline through the encoder's own rule (Halton centres,
+σ = 0.8 × mean nearest-centre distance, L2-normalised activations):
+
+| form | latent pairwise spread | 1 s apart |
+|---|---|---|
+| 12-D RBF as configured (96 centres, σ 0.61) — R34's map | 0.092 | 0.025 |
+| 68-D RBF as configured (544 centres, σ 1.32) — R35 | 0.048 | 0.016 |
+| 68-D RBF, per-dim ranges commissioned from the data | 0.050 | 0.017 |
+| 68-D RBF, depth centred and commissioned | 0.049 | 0.017 |
+| 36-D RBF over [pose ; a 32-D JL of the depth] | 0.047 | 0.018 |
+| `jl_state` 128 over [pose ; frame-centred depth] | 0.109 | 0.035 |
+| [pose ; 64-D JL of the frame-centred depth], Euclidean | 0.173 | 0.051 |
+
+The RBF grid's bandwidth in 68 dimensions makes every input the same activation profile, and
+neither commissioned ranges (`dim_autocal`'s form) nor centring recovers it; a JL projection, which
+preserves distances at any width, keeps the spread. `CLAUDE.md` §0 rule 2 in its other direction:
+the PCA said "several", the node count said "one", and the encoder was the reason. R35 is a
+measurement of the encoder, not of the idea (§3.2 rule 6, a weakened slice); its config stays for
+the record, no preset.
+
+**R36 — the stacked form, the plan's O10 with the sensor swapped.** A new EPM encoder kind,
+`jl_state` (`cpp_core`: the frozen JL projection over a `ProprioToken`, `FrozenJLEncoder::
+make_state_encoder`; takes no per-dim ranges; three unit tests; every existing config
+byte-identical). `depth_epm`: `jl_state` over the 64 zone slant ranges / 4 m with the frame's mean
+taken out (the host; the common mode is mostly the floor in the lower rows), 64-D latent, the same
+insertion gate and node budget as the map. `map_epm`: `jl_state` over `[pose ; depth latent]`
+(68 → 64), the RBF and its ranges gone, everything else R34's. Playroom, ★ HEAD stack, n = 6,
+1500 s, control 700–1500 s, paired with R34:
+
+| n = 6, paired | walls/min | cells | path m | distinct map winners | map TLE | objs/min | down % | resc/min | headW rms |
+|---|---|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 10.9 ± 9.3 | 144 ± 20 | 146.6 | 92 ± 13 | 0.18 | 16.8 | 0.38 | 0.19 | 1.18 |
+| **R36** depth stacked | **17.6 ± 12.2** (Δ +6.6, t +2.3, **6+/0−**) | 136 ± 27 (Δ −8, t −0.8) | 144.7 | **162 ± 42** (Δ +70, t +4.3, 6+/0−) | **0.24** (Δ +0.06, t +4.9, 6+/0−) | 17.8 | 0.40 | 0.18 | 1.17 |
+
+Per seed the map's live vocabulary ends at 57–110 nodes (R34: 55–78) with 105–197 *distinct
+winners* over the control phase — more distinct winners than the 128-node budget on four seeds,
+so the vocabulary churns (health-death pruning and re-insertion), and the map's running TLE ends
+at 0.17–0.40 (R34: 0.13–0.19). The depth EPM itself ends at 70–115 nodes, 41–50 baked, TLE
+0.20–0.52: the room has that many distinct views at this sensor's resolution, and it does not
+settle in 1500 s either.
+
+**Verdict, R36 as built: `REGRESSION` on wall contact (six of six seeds), `NULL` on coverage,
+ties on objects, falls and the head.** The mechanism reads straight off the numbers: the play loop
+climbs the map's TLE (R27), the depth-stacked map's TLE is higher and churning, and what is
+novel in it is what is *close* — a wall or a chair leg fills the frame with a pattern the
+vocabulary has not settled — so the bearing to novelty is the bearing to the nearest surface.
+§17.6's finding ("a learned direction beats the proximity priors") with a richer novelty field
+behind it. Context of the verdict: the play loop over the raw place TLE; R34's insertion gate
+(`min_insertion_error 0.06`, an absolute threshold set for the RBF latent's error scale) carried
+onto a latent whose errors run a third higher; the node budget unchanged; no (d) moved-object run.
+
+**The gate in its adaptive form does not rescue it.** The first suspect was the insertion gate:
+R34's `min_insertion_error 0.06` is an absolute threshold set for the RBF latent's error scale,
+carried onto a latent whose errors run a third higher. `insertion_autotune true` on both EPMs
+(the rank-based gate the EPM already has, `--arm` from R36, same seeds):
+
+| n = 6, paired | walls/min | cells | path m | distinct map winners | map TLE | objs/min | down % |
+|---|---|---|---|---|---|---|---|
+| R36 + adaptive gate | **45.8 ± 39.2** (vs R34: Δ +35, t +2.6, 5+/1−; two seeds ride the walls at 80 and 102/min) | 135 ± 24 (ties) | 133 (Δ −13, **0+/6−**) | 150 ± 28 | 0.23 | 13.6 | 0.34 |
+
+Worse, not better: the vocabulary still churns (94–170 distinct winners against 57–106 live
+nodes), and the path shortens on every seed because the body spends it against walls. The gate's
+scale was not the mechanism.
+
+**Re-use context.** What would justify the next try, in order: the novelty the play loop climbs
+taken from *baked* nodes or the transition term rather than the raw TLE of a churning vocabulary
+(so a place is interesting once the vocabulary has stopped moving under it, not while it is being
+tiled — the churn is the finding: the map now has enough resolution that it never stops
+re-tiling in 1500 s, and play chases the tiling); the avoidance loop's bearing arbitrated against
+play's (R28/R29's machinery, gain-0 on this stack); a node budget and a prune policy sized to the
+room's actual view count (the depth EPM says ~100 at this resolution). The moved-object (d) has
+not been read on any arm. **For C2 the pipeline is built:** the camera arm is R36's graph with
+`depth_epm`'s input swapped for the rendered frame — and the same trap waits for it, so E1 should
+be designed around the churn before the camera is rendered, not after.
+
+### 17.16 The operator's eye on R36, the dither measured, and the hold refuted (2026-09-11)
+
+**The observation.** Watching R36 for 1000 s the operator saw the duck circling in the centre of
+the room with many similar map nodes there, and read it as: it needs to hold a trajectory for
+longer to find novel places. The harness agrees about the circling and it is not R36's alone —
+R34 does it too. Seed 6, control phase, both arms: **286° turned per metre travelled**, mean yaw
+rate 50°/s, the yaw command at |0.95| of its range with **48–50 sign flips a minute** (same-sign
+runs of 0.3 s), straightness over 20 s windows 0.24 (R34) and 0.14 (R36), where 1 is a line and 0
+is back where it started.
+
+**The mechanism, from the logs.** The map's current node changes **130–155 times a minute**
+(dwell 0.2 s): its nodes' pose centroids are 8–13 cm apart and each node's visits spread over
+23–47 cm, so several nodes claim the same spot and the winner flickers between them. The play
+loop drops its committed sub-goal whenever the current node is not adjacent to it, so the target
+is re-chosen several times a second; the bearing to a fresh target — usually inside the body's
+measured **turning radius of 0.18 m** (v/ω while moving and turning) — saturates the yaw command;
+the body swings past it and the next flicker picks another. New nodes are minted while walking,
+not while turning in place (0 % of mintings at low speed and high yaw rate), so the depth map
+does not mint novelty by spinning; R36 only makes the flicker denser (195 winners against 97).
+
+**R37 — `commit_hold` on the play loop, the operator's hypothesis in the loop's terms.** New
+`PlayLoop` param (off by default, byte-identical — R34 seed 6 md5 `cc87df84…` unchanged; a unit
+test): the committed node is held until *reached* (it becomes the current node) or until it is no
+longer uphill in the value field, adjacency no longer required, and the bearing is taken from the
+loop's own odometry to the target's position rather than from the flickering node's centroid. No
+timescale is set. The sweep gained two columns for this: `switch/min` (winner switches) and
+`straight` (the 20 s straightness, the complement cells and path are blind to). Playroom, ★ HEAD
+stack, n = 6, paired with R34:
+
+| n = 6, paired | walls/min | cells | straight | switch/min | distinct winners | resc/min | down % |
+|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 10.9 ± 9.3 | 144 ± 20 | 0.19 ± 0.07 | 133 ± 16 | 92 | 0.19 | 0.38 |
+| **R37** hold | 33.1 ± 37.4 (3+/3−) | **73 ± 50** (Δ −70, t −5.5, **0+/6−**) | **0.10 ± 0.08** (Δ −0.10, t −4.4, **0+/6−**) | 114 ± 19 (Δ −19, t −2.2) | 58 ± 30 (Δ −34, t −4.5) | 0.05 (Δ −0.14, 0+/6−) | 0.12 |
+
+Per seed it splits into two failures: seeds 3, 4 and 6 **orbit** (straightness 0.07–0.10, 23–63
+cells on 155 m of path, the y-range down to 1.2 m, zero walls) and seeds 1, 2 and 5 **ride the
+walls** (41–91/min, straightness 0.03). Holding the target does exactly what a target inside the
+turning radius predicts: the body circles it forever, "reached" never fires because the winner
+never settles on that node while the body orbits its centroid, and the value criterion never
+releases it because the orbit learns nothing. Fewer falls (0.05/min) because it walks less into
+things it cannot see. **`REGRESSION`**, six of six on the two metrics that matter, preset removed,
+config kept.
+
+**What the pair R36/R37 settles.** The dither and the orbit are two faces of one geometry: the
+play loop's targets are one hop away on a map whose hops are shorter than the body can turn.
+Dropping the target on every flicker gives a dither that at least drifts; holding it gives an
+orbit. Neither "how long to hold" nor "which sensor feeds the map" is the lever. The re-use
+context, in error terms, is a **fork for the operator**, because each option changes something
+the plan or the recipe has stated:
+
+1. **A target beyond the turning radius** — follow the value gradient several hops and bear on the
+   first node whose position is at least the body's turning radius away; arrival geometric
+   (within the target node's own pose spread, which the loop already accumulates). Derivable, no
+   timescale; but the recipe states the horizon as one step (§"Horizon", register O2), and this
+   is a longer horizon for the *bearing*, not the arbiter.
+2. **Places at the body's scale** — a place node that is a cell of the loop's own path integral
+   (`pi_cell_size` > 0, the grid the Cell audit demoted) or a map EPM whose insertion gate is set
+   so that nodes are farther apart than the turning radius. The second is a scale constant
+   (prohibition 5) unless derived from the body's motion.
+3. **The heading regulator** — the yaw command is bang-bang (|0.95| on average); a law whose gain
+   comes from the identified yaw row of A (the read-back prints it) would turn a saturated swing
+   into a proportional one and shrink the orbit radius the dither produces. This changes the
+   level-2 twist brain, not the play loop.
+
+The instruments for any of them are now in the sweep (`straight`, `switch/min`).
+
+### 17.17 Fork item 1 tried (R38, the lookahead target) — refuted, and the heading regulator found not to regulate (2026-09-11)
+
+**R38 — `lookahead` on the play loop** (operator: try item 1). New `PlayLoop` params, off by
+default (R34 byte-identical, a unit test): the sub-goal is the first node along the greedy uphill
+walk of the value field whose position is at least the body's turning radius from the loop's own
+odometry — held until the body is inside that radius or the node is no longer uphill, the bearing
+from the live odometry; the radius is the loop's own running estimate of forward speed / heading
+rate on turning ticks (no constant; `lookahead_reach` > 0 overrides it for tests). The read-back
+prints it (`play {… "reach": …}`, now a `diag_lite`): 14–22 odometry units on five seeds ≈
+0.11–0.17 m against the 0.18 m measured from the walk; seed 5 estimated 3.3 (its turning ticks
+were slow ones). Playroom, ★ HEAD stack, n = 6, paired with R34:
+
+| n = 6, paired | walls/min | cells | straight | switch/min | path m | resc/min | objs/min |
+|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 10.9 | 144 ± 20 | 0.19 ± 0.07 | 133 | 147 | 0.19 | 16.8 |
+| **R38** lookahead | 8.4 (ties, 3+/3−) | **110 ± 52** (Δ −34, t −2.1, 0+/5−) | **0.13 ± 0.06** (Δ −0.06, t −4.9, **0+/6−**) | 132 (ties) | 158 (Δ +11, 5+/1−) | 0.06 | 6.0 |
+
+Straighter it is not: worse on every seed. Seed 4 reproduces R37's orbit **to the metre** (23 cells,
+159.1 m, x-range 1.2) — the fallback clause ("the last uphill node if none is that far") re-chooses
+the same near node every tick at a local peak of the value field, which is R37's held target by
+another route. **`REGRESSION`**, preset removed, config kept. The lever's own premise held (the
+target was far and the reference quiet: 3 reference jumps a minute against R34's 102) and the body
+still did not go straight — which is the finding.
+
+**The heading regulator does not regulate.** The host now logs the heading and its reference
+per tick (`hdg`, a printed field; the physics byte-identical with it stripped), so the twist brain's
+yaw channel can be read directly. Seed 6, control phase:
+
+| | R34 | R38 |
+|---|---|---|
+| heading error \|e\| (rad), mean | 1.76 | 1.44 |
+| ticks with \|e\| > 0.8 rad | 80 % | 72 % |
+| \|vyaw\| command (of ±1) | 0.95 | 0.92 |
+| yaw-command sign flips / min | 50 | 140 |
+| reference jumps > 0.5 rad / min | 102 | 3 |
+| in windows where the reference is quiet: \|e\|, flips/min | 2.08 rad, 62 | 1.91 rad, 192 |
+| vyaw spectral peak | broadband | **2.39 Hz — the gait** (sensed yaw rate 2.41 Hz) |
+| linear fit of vyaw(t) on the senses(t−1): R² | 0.63 | 0.37 |
+| dominant term | heading error (coef −0.93, corr −0.76) | ToF right column (+1.97); heading error −0.12 |
+| own-yaw-rate copy: command has the same sign when \|rate\| > 0.3 | **83 %** | 65 % |
+
+In R34 the yaw command *does* answer the heading error — but the reference it is held to moves at
+4 rad/s because the play target flickers, so the error never closes, and a positive-feedback term on
+the body's own yaw-rate copy (R21's finding, §17.2: "dominated by the copy of its own yaw command")
+sustains the spin. In R38 the reference stands still and the learned yaw row lets go of the error
+altogether: learning is live through the control phase, the state prior's descent (`state_prior_lr
+0.1`, through the identified A) is one term among the C matrix's sixteen columns, and with nothing
+to chase the row settles on whatever else moves at the gait frequency — the right ToF column, the
+velocity copies — a saturated 2.4 Hz oscillation. Either way the body is not steered: with the
+reference still, the error sits at two radians.
+
+**Verdict on the fork.** Items 1 and 2 are moot while item 3 stands: nothing above the twist brain
+can hold a trajectory if the twist brain does not hold a heading. The heading loop's earlier
+verdicts (R22 `PARTIAL`, R27's "steers on every tick") measured that the reference was *set*, never
+that it was *followed*; this is the first measurement of the following, and it is the §3.2 catch
+of the line. **The lever is the yaw channel of the level-2 twist brain**, in the doctrine's terms:
+the prior's own error on slot 10 through the model's yaw authority (A's vyaw row, printed in every
+read-back) as the yaw command's *objective*, with the learned C's other columns unable to swamp it.
+Two honest forms, the operator's call: (a) a **lesion** first — hold C's yaw row to the heading
+column alone and read straightness (if it jumps, the swamping is proven and the mechanism is the
+prior's weight, not a new law); (b) the **model-implied step** — the yaw command that closes the
+prior's error in one identified step, `u = −e / A(idx, vyaw)`, clamped, which is what the prior's
+half 2 is meant to converge to and here does not. The positive feedback on the own-rate copy is a
+second, older defect (R21) that a lesion would also expose. `straight` and the `hdg` field are the
+instruments; the bar is `straight` well above 0.2 on every seed *with* the play reference live.
+
+### 17.18 W1 — the hand-back at the joints: scheduled stops, and the R19 stander takes the legs (R39, 2026-09-11)
+
+**The line.** The walk-stop-look line (playroom plan §12) needs one transition before anything
+else: a walking duck stops, and the joint brain that stands and catches (R19) takes the legs from
+whatever pose the walker leaves them in. W1 measures that transition with a scaffold stimulus — a
+stop schedule — before §12.2's stop, which is the map's, exists.
+
+**Built.** `--stop-every S --stop-secs S --stop-from S` on the level-2 host: the twist is zeroed and
+the walker stands; once still (the identification settle's own criterion, at most 2 s) the legs —
+and the head, its validated regime — go to the joint brain named by `--stop-brain CFG --stop-load
+CKPT`, calibrated and restored exactly as `--brain` does it; the walker takes them back past 6.5° of
+rising lean (the step hand-off's threshold, `--stop-handoff-lean`, or the brain's attitude error,
+`--stop-handoff-att`) and at the stop's end. `--stop-att X` gates the hand-back on the joint brain's
+own attitude error (0 = ungated); `--stop-brain walker` is the control arm — the same stops, the
+walker holding them; `--stop-keep-head` leaves the head brain on the head (unmeasured). Both brains
+that do not drive are frozen and reset at the edges (the H2 lesson, §17.10). Absent, the tick
+stream is byte-identical (10 000 ticks of R34 compared). The JSONL gains `drive: stand`, the events
+`stop:start / handback / refused / handoff / end / rescued / walker`, and `stop` (the phase) with
+`satt` (the joint brain's attitude error) when the schedule is on. **W0**, the ten-minute
+instrument, is in `l2_sweep.py`: the behaviour histogram (`walk% stopW% stand% resc%`) and the stop
+counters, plus `--host-arm NAME:'ARGS'` for a lever that lives in the host. The viewer draws the
+stand green. R39 = R34's graph with the stops in the host args; preset on the ★ HEAD controls.
+
+**Measured.** Playroom, ★ HEAD stack, n = 6, 1500 s, stops every 60 s for 20 s from 600 s (15 per
+run, 14 in the 700–1500 s control phase), paired by seed:
+
+| n = 6 | walk% | stopW% | stand% | walls/min | cells | path m | straight | switch/min | resc/min | hand-backs | survived | handed off | rescued |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R34 ★ HEAD | 99.1 | 0 | 0 | 10.9 ± 9.3 | 144 ± 20 | 147 ± 4 | 0.19 | 133 ± 16 | 0.19 | — | — | — | — |
+| stops, the walker holds | 67.2 | 32.0 | 0 | 29.9 ± 42.5 (3+/3−) | 70 ± 36 | 86 ± 32 | 0.15 | 76 ± 16 | 0.08 | — | — | — | — |
+| **stops, the joint brain stands** | 66.9 | 2.5 | **29.5** | 18.1 ± 23.6 (3+/3−) | 106 ± 26 | 97 ± 6 | 0.16 | 103 ± 13 | 0.17 | **89 / 90** | **87** | 2 | 1 |
+
+- **The hand-back is loud.** 89 of 90 stops handed the legs over (one stop was cut by a rescue
+  before stillness), 87 of 89 stands held to the stop's end, 2 went back to the walker on lean, 1
+  fell — all three on seed 1. Over the 77 control-phase hand-backs the tilt goes 2.23° at the
+  hand-back → 0.49° one second later → 0.39° at five; the joint brain stands at **0.49° mean
+  tilt** where the walker's own stand sits at 3.0–3.5° (walker-held stops, both arms). The
+  transition lurch is 0.02 rad/tick for ten ticks; the walker's resumption is the larger jump.
+- **The gate had nothing to gate.** `--stop-att` was 0 (ungated), and what a gate would have seen —
+  `satt` at the hand-back — is 0.0000, max 0.0020, on every hand-back: the joint brain's attitude
+  error at the walker's settled stance is not a discriminating competence signal. The
+  competence-gated hand-back of §12.3 is therefore **unmeasured**, not confirmed (a §3.2 rule 1
+  catch made before the verdict, not after). Its re-use context: a hand-back from a walker that has
+  not settled (`--stop-settle-secs 0`), or from a shoved body, where the error is not ~0.
+- **The stops cost a third of the tour, as they must.** Cells 144 → 106 and path 147 → 97 m are the
+  stimulus (30 % of the phase standing), not a regression; `switch/min` falls 133 → 103 because the
+  map stops re-tiling while the body is still — §12.2's premise in miniature.
+- **The §3.2 catch: a stop exposes §17.17's saturation as a deadlock.** In the walker-holds arm,
+  seed 1 resumes from a still body with the wall behind it; the twist command saturates at full
+  reverse (`[−0.40, −0.30, −1.0]`) and the body is pinned to the wall for the remaining 900 s — 14
+  of 14 windows pinned, 98 walls/min, 3 cells. The ToF faces away from the wall, and because the
+  body does not move nothing perturbs the loop; in R34 the same defect flips at 2.4 Hz because the
+  body is always moving. Under the joint brain the same seed is pinned for one window (1080 s) and
+  leaves through a lean → hand-off → rescue. That deadlock is the whole of the walker arm's walls/min
+  and the reason both stop arms tie R34 on walls (3+/3−). It is the resume-from-still form of the
+  twist brain's yaw defect and raises W5's priority: §12.2's turn-in-place under a homing target must
+  begin from exactly this state.
+- **W0 reads the stack as the operator saw it:** R34 is 99.1 % walk and 0.9 % rescue — the Roomba,
+  in one row. The stop arms are 67 % walk / 32 % stop; the joint-brain arm 29.5 % stand.
+
+**Verdict.** W1 `WORKING` at n = 6, loud on the transition: the stand survives 87 of 89 hand-backs
+and is stiller than the walker's at every one. Not a promotion — the stop is a schedule and the
+operator's eye is pending (preset R39, seed 6, fast-forward through the babble). The competence gate
+`DEFERRED` with its re-use context above; `--stop-keep-head` unmeasured; the resume-from-still
+deadlock recorded against §17.17 (W5). Next: W2, the stance-gated head yaw at the stop.
+
+### 17.19 W2 — the saccade channel: head yaw at the stop, and the stand under a swinging head (R40, 2026-09-11)
+
+**Built.** The head brain's yaw command, masked to zero since §4b (yaw follows the trunk), takes an
+override at a stop: `HeadAdapter::set_yaw_override`, driven by `--stop-scan AMP HOLD` — the yaw
+steps through 0, +AMP, 0, −AMP, each held HOLD s, from the hand-back (or the walker's hold) to the
+stop's end, then the mask returns for the walk. The scan is a **scaffold for the channel**: §12.2's
+target is the map's residual (W3); what W2 measures is whether the stand survives a head that moves
+(38 % of the mass), the yaw excursion at stops against zero on the walk, and the walk untouched.
+Two more flags fell out: `--stop-keep-head` (the head brain keeps the head through the stop, the
+joint brain's `motor_epm_head` frozen for the run by a new `OgmaBrainAdapter::freeze_module`, since
+its commands are not applied) and `--stop-freeze-head` (the head brain's learning off through the
+stop even when it keeps the head). With none of them, the W1 path is byte-identical (10 000 ticks).
+The sweep reports `yawStop sd` / `yawWalk sd` (the head-yaw joint's spread in each phase).
+
+**Measured.** Playroom, ★ HEAD stack, the R39 stops (every 60 s for 20 s from 600 s), n = 6, 1500 s,
+two sweeps paired by seed (the reference arm of the second is the first's `keepHead`, and it
+reproduces it to the digit — the host is deterministic per seed):
+
+| n = 6 | head at the stop | walls/min | cells | resc/min | stands held | handed off | rescued | yawStop sd | yawWalk sd | headG dev |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R39 (W1) | the joint brain's | 18.1 ± 23.6 | 106 | 0.17 | 87 / 89 | 2 | 1 | 0.01 | 0.01 | 0.12 |
+| keepHead | the head brain's, learning live | 35.1 ± 9.5 (4+/2−) | 118 | 0.12 | **89 / 89** | 0 | 0 | 0.00 | 0.01 | 0.04 |
+| keepHeadScan | the head brain's + the scan | 29.7 ± 18.4 (5+/1−) | 99 | 0.10 | **90 / 90** | 0 | 0 | **0.40** | 0.02 | 0.04 |
+| walkerScan | the walker holds + the scan | 14.3 ± 18.0 | 112 | 0.01 | — | — | — | 0.40 | 0.02 | 0.02 |
+| frozenHead | the head brain's, frozen through the stop | 18.6 ± 19.1 (1+/5− vs keepHead) | 118 | 0.11 | 89 / 89 | 0 | 0 | 0.00 | 0.01 | 0.04 |
+| **frozenHeadScan** | frozen + the scan (**R40**) | **13.3 ± 4.8** (0+/6− vs keepHead, t −5.0) | 102 | 0.13 | **88 / 88** | 0 | 0 | 0.40 | 0.02 | 0.04 |
+
+- **The channel works and the stand does not care.** Head yaw spreads 0.40 rad at stops (±0.61, the
+  joint tracks the step inside a few ticks) and 0.02 rad on the walk; every hand-back with the head
+  brain on the head held to the stop's end — 267 of 267 across the three keep-head arms, zero
+  handed off, zero rescued at a stop — where the joint brain's own head (W1) gave 87 of 89. The head
+  is also more level at the stop (gravity deviation 0.12 → 0.04): the R19 brain's head objective is
+  its own stance, not a level camera.
+- **The §3.2 catch, pinned in the same session.** The two keep-head arms with the head brain's
+  learning live raised wall contact through the *whole walk* (26.6 → 44.8 episodes per minute of
+  walking; not clustered at the resumes), on every seed. Hypothesis: the level prior's descent
+  (`state_prior_lr 0.02`, the model frozen) kept integrating through 20 s stands on a body it was not
+  identified on — the H2 drifting-model lesson (§17.10) one more time. Test: `--stop-freeze-head`.
+  Result: 35 → 19 walls/min and, with the scan, 13.3 ± 4.8 (0+/6−), below R39 and level with R34's
+  10.9 ± 9.3. The rule generalises: **a brain that keeps its actuator through a regime it was not
+  identified in is frozen through it, whether or not its commands are applied.**
+- **The stops themselves raise walking contact** (R34 10.9/min → R39's walk phase 26.6/min): a
+  resume from stillness is §17.17's defect in its mild form, and the R39 seed-1 deadlock its severe
+  one. W5's ground.
+
+**Verdict.** W2 `WORKING` at n = 6, loud: the saccade channel is live at the stops and silent on the
+walk, the stand is indifferent to the head moving, and R40 (frozen head brain + scan) is the
+cleanest stop arm measured. Not a promotion — the scan is a schedule, and the operator's eye is
+pending (preset R40, seed 6). `--stop-keep-head` without `--stop-freeze-head` is `REGRESSION` on
+wall contact (re-use: a head brain whose prior is identified standing as well as walking).
+Next: W3 — the stop inserts into the map and the saccade's target is the map's own residual by
+bearing, which replaces the scan.
+
+### 17.20 W3 — a place is a stop: the map learns only while standing, a view is pose + gaze, the look is the map's (R41, 2026-09-12)
+
+**Built.** Three pieces, each a flag on the level-2 host. (1) `--map-on-stop`: the map EPM's
+insertion, prototype adaptation and stale pruning are off while the body walks and on while it
+stands and looks (`IntentAdapter::set_map_learning`, through the EPM's hot-mutable
+`min_insertion_error`, `epsilon_b`, `epsilon_n`, `stale_prune_enabled`); the token keeps
+publishing, so the play loop's node positions stay live. (2) A 13-dim place form: pose, **the
+head-yaw joint / its range**, the 8 ToF column ranges — a *view*, so each bearing at a stop is its
+own node (`map_epm.proprio_state_dims 13`, config R41). (3) `--stop-look AMP HOLD MAX`: at a stop
+the head steps 0, +AMP, −AMP; each bearing is held at least HOLD s and, **while the view's winner
+is not a baked node**, up to MAX s; a full round with nothing unbaked ends the stop early
+(`stop:bored`). The baked set is a host-side lookup keyed by the EPM's own ids from the token's
+`just_baked`. Read-backs: map nodes grown on walks vs at stops, saccades, holds extended, stops
+ended by a quiet round, mean stop length. R34 and W1 paths byte-identical.
+
+**Two §3.2 catches before the numbers counted.** The first sweep's `look` and `lookLive` arms
+were byte-identical: the gate had read the EPM's live parameters through `Module::current_params`,
+which the EPM does not override (it is empty; MotorEPMv2's is not — why the joint-level freeze
+works), so nothing was changed. The gate now restores the graph's configured values and prints
+its growth read-back (2 nodes on walks — the GNG's two seeds — against 33–48 at stops; 13 on walks
+with the gate off). The second: the look's first novelty signal was the token's adaptive
+`is_novel`, which fires on ~25 % of ticks in every arm — a percentile, not "this view is unbaked"
+— and ended 1 stop in 15 early. §12.2 says *hold until the view bakes*; the baked-set test is that.
+
+**Measured.** Playroom, ★ HEAD stack, the R39 stops (every 60 s for 20 s from 600 s), the head
+brain on the head and frozen through the stop (R40's form), n = 6, 1500 s, paired by seed; the
+reference arm is the R41 graph with no look:
+
+| n = 6 | walls/min | cells | path m | nodes | switch/min | mapTLE | stands held | saccades | holds extended | stops ended early | stop s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R41 graph, no look | 33.1 ± 54.8 | 91 ± 21 | 89 | 60 ± 23 | 91 | 0.14 | 90 / 90 | — | — | — | 20 |
+| scan13 (W2's scan on the 13-dim map) | 21.8 ± 37.6 | 97 | 97 | 64 | 103 | 0.16 | 90 / 90 | — | — | — | 20 |
+| lookLive (the look, map learning everywhere) | 16.5 ± 15.3 | 88 | 112 | 70 ± 27 | 119 | 0.16 | 88 / 90 | 79 | 38 | **41 %** | **15.3** |
+| **look + map-on-stop (R41)** | **5.4 ± 4.4** (1+/5−) | **102 ± 25** | 106 | 44 ± 5 | 94 | 0.23 | **89 / 90** | 84 | 52 | 22 % | 18.4 |
+| for scale: R34 ★ HEAD (no stops); R40 | 10.9 ± 9.3; 13.3 ± 4.8 | 144; 102 | 147; 101 | 92; — | 133; — | 0.18; — | —; 88/88 | | | | |
+
+- **The map is the stop's.** Growth 2 on walks vs 33–48 at stops on every seed; 4.8 distinct
+  winners per stop (the three bearings and their transitions), 44 nodes for 15 stops. Places land
+  at the scale of stops, as §12.2 predicted, and the walk between them is the cleanest measured:
+  **5.4 walls/min**, below R34's 10.9 and R40's 13.3, with cells up (91 → 102) and path up
+  (89 → 106). The play loop's targets are now stop views rather than a tiling of the walk, and
+  `switch/min` stays at 94 where the live map's rises to 119.
+- **The stand is unchanged** (89 / 90, zero rescues at stops) with the head looking 250–280 s a run.
+- **Contingency, half present.** Stops end early on a quiet round (22 % under map-on-stop, 41 %
+  with the live map) and the look extends 52 of 84 holds on an unbaked view. But under
+  map-on-stop the stop length does **not** fall over the run (stops 1–5: 18.1 s; 11–15: 17.9 s),
+  while with the live map it does (18.2 → 13.2 s). The reason is the bake rule: a view bakes after
+  50 processed ticks as winner (5 s at `process_every_n_ticks 5`), which a 4 s hold cannot supply
+  in one visit, and 15 stops across a 4 m room rarely revisit a pose and bearing; the live map
+  bakes its views on the walks instead. So the stop length tracks *what the map has baked*, and
+  this run's map-on-stop has baked too little for it to shorten. `mapTLE` 0.23 says the same:
+  the walk is measured against stop views only.
+- **`is_novel` is not a novelty gate.** Recorded for every consumer of the token: it fires on a
+  quarter of ticks by construction (an adaptive threshold on the TLE's spread); "unbaked" is
+  the question §12.2 asks.
+
+**The (d) test, three forms (2026-09-12).** A moved *ball* (R30's form, `--move obj_ball0 -1.2 0.8
+1100`): stops within 1 m of its new place did not lengthen (14.0 s, n = 9, none touching it) — the
+ball is 0.06 m, one ToF column at a metre, and the compact logs cannot say whether a stop faced
+it: inconclusive, a stimulus below the sensor. A moved *chair* (`--move furn_chair0 0.3 0.3
+1100`, four legs at the room's centre), stops still capped at 20 s: the map re-infers (nodes after
+the move 42.7 vs 34.5 unmoved; cells 78 vs 54; stops near the new chair see 7.1 distinct views
+against 4.5; 2 of 16 end on a quiet round against 6 of 23) but the length cannot show — 14 of 16
+run to the cap. **The chair with the stop uncapped** (`--stop-every 80 --stop-secs 60`: the stop
+ends on a quiet round or at 60 s, §12.2's stop, the map's own), n = 6, paired:
+
+| uncapped stops, n = 6 | all stops before 1100 s | all stops after | at the chair's new place, before | **after** | elsewhere after | stops at that place after |
+|---|---|---|---|---|---|---|
+| unmoved | 37.4 s (n = 42) | **34.5 s** (n = 23) | 39.4 s (n = 13) | 24.5 s (n = 3, all quiet) | 36.0 s | 3 |
+| chair moved at 1100 s | 37.2 s (n = 42) | **42.8 s** (n = 24) | 38.6 s (n = 13) | **45.7 s** (n = 15) | 38.0 s | **15** |
+
+Both halves of the contingency are now present at signal strength: with nothing moved the stops
+shorten as the map bakes (37.4 → 34.5 s; 10 of 11 end on a quiet round by the run's end), and a
+moved chair lengthens the stops at its place (38.6 → 45.7 s) and draws the duck there (3 → 15
+stops within 1.2 m; the play loop's novelty climbs to the change, R27's half). Wall contact after
+the move: 5.4/min moved vs 37.9 unmoved — the time spent standing near the change is time not
+spent riding walls; n = 6, read as a signal. The stand: 11 of 11 hand-backs held on every seed,
+the joint brain standing 300–400 s a run.
+
+**Verdict.** W3 `WORKING` at n = 6 on the map and the walk (a place is a stop; the cleanest walk
+measured; the stand untouched) and, with the stop uncapped, **`WORKING` on contingency as a signal** — stops shorten as the map bakes and lengthen at a moved chair, which is the claim a Roomba cannot make; capped at 20 s it read `PARTIAL` (stops end on a quiet round, and
+their length would fall with revisits the run does not contain). Not promoted; the operator's
+eye is pending (preset R41, seed 6). The ball (d) is inconclusive (a stimulus below the sensor's resolution); the chair (d) is the
+evidence. To a finding: n ≥ 20 varied rooms and the uncapped stop as the default form. Next: W4
+(the command mux) and W5 (leaving a surface, §12.7b).
+
+### 17.21 W3b — the gaze babbles: random steps, error-driven dwell, and the map's baking watched (R42, 2026-09-12)
+
+**The operator's direction.** The three-bearing round of §17.20 is a schedule wearing a saccade's
+clothes; let the head babble while standing so the error of the scene it takes in is what it
+reduces — it will look more alive and the place gets more detail. And watch the baking: an EPM
+that lets nodes decay suits locomotion and escape, not learning a place.
+
+**Built.** `--stop-gaze YAW_SD PITCH_SD HOLD MAX QUIET`: at a stop the gaze takes random steps
+(a normal step per move, yaw clamped to ±0.7 rad, pitch to [−2·sd, +0.7·sd]), each held HOLD s and,
+while the view's winner is not a baked node, up to MAX s — long enough to bake it in one dwell
+(50 processed ticks at `process_every_n_ticks 5` = 5 s) — and QUIET known gazes in a row end the
+stop. The move is exploration, the dwell is the map's error. A pitch override joins the yaw
+override in the head adapter. **The baking read-back**, from the token every tick: views inserted
+and baked by phase, prunes, and whether a pruned id was ever baked. In the GNG every prune path —
+isolation, stale prune, the health sweep with `health_death_spares_baked` (on in the map config) —
+spares baked nodes. W1 path byte-identical.
+
+**Measured.** R41's graph, the uncapped stops (every 80 s, up to 60 s), map only at stops, head
+brain frozen through the stop, n = 6, 1500 s:
+
+| n = 6 | stands held | handed off | rescued at stops | stop s | quiet-round ends | saccades | inserted at stops | baked at stops | pruned (baked) | nodes / baked at the end | walls/min | cells |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| the round (§17.20) | 66 / 66 | 0 | 0 | 36.5 | 71 % | 143 | 42 | 21 | 18 (0) | 31 / 28.5 | 23 ± 19 | 97 |
+| gaze, yaw only (sd 0.35) | 66 / 66 | 0 | 0 | 29.5 | 91 % | 168 | 45 | 20 | 34 (0) | 30 / 26.5 | 47 ± 43 | 96 |
+| gaze, yaw + pitch sd 0.20 | **24 / 66** | 42 | 34 | 26.6 | 92 % | 115 | 37 | 12 | 25 (0) | 26 / 21 | 16 ± 17 | 104 |
+| **gaze, yaw + pitch sd 0.08 (R42)** | **65 / 66** | 1 | 0 | 31.3 | 92 % | 181 | 41 | 21 | 18 (0) | 33 / 29 | 14 ± 12 | 111 |
+
+- **The babble stands, at a small pitch.** Yaw babble alone is as harmless as the round (66 of 66);
+  pitch steps of sd 0.20 rad tip the stand at 42 of 66 hand-backs and fall 34 times — the smoke's
+  two-of-three, at scale: a pitched head is a stance the R19 brain was never identified in, and
+  with its head module frozen the neck cannot join the catch (register O36, the operator's to-do:
+  work on the stand under pitch change; rate-limit the babble if pitch *speed* is the constraint).
+  At sd 0.08 the stand holds 65 of 66 with one hand-off and no fall, and it is the best arm on
+  cells (111) and wall contact (14 ± 12, 4 of 6 seeds under 17).
+- **Wall contact is seed noise across the arms** (two wall-riding seeds in the yaw-only arm at 92
+  and 113/min, different seeds elsewhere): the walk between stops is W5's problem, and the gaze
+  moves it only by moving where the map's nodes, hence the play loop's targets, fall.
+- **The baking, watched.** No baked view was ever pruned in any arm (`prunedBaked` 0 of 18–34
+  prunes per run): a baked view is permanent here, as the map config's `health_death_spares_baked`
+  intends. What decays is the *unbaked*: of 41–45 views inserted at stops per run, 20–21 bake
+  and 18–34 die before a revisit. The dwell can bake a view in 6 s only if one node stays the
+  winner through the hold; two views a gaze step apart share the hold and neither reaches 50
+  visits. So the place is learned by half. The levers: the map's `baking_threshold` (hot-mutable,
+  50 by default — 20 would bake in a 2 s dwell), or a dwell that counts the winner's visits
+  rather than seconds. Recorded, not built.
+- **The stop is the map's.** 92 % of stops end on a quiet round (71 % for the round), mean 31 s,
+  181 gaze steps a run — the head is never still and never on a schedule, which is what was asked.
+
+**Verdict.** W3b `WORKING` at n = 6 in the small-pitch form (R42): the babble replaces the round
+with no cost to the stand and a fuller look, the stop ends on the map's own word. Full pitch is
+`REGRESSION` on the stand (O36). The baking read-back is the instrument the operator asked for and
+its first reading is the next lever: half the views a stop inserts die unbaked. Not promoted
+(operator's eye pending, preset R42). Next: the baking threshold on the map, then W5.
+
+### 17.22 O37 tried: the map's baking threshold (R43, 2026-09-12)
+
+**The lever.** `map_epm.baking_threshold` 50 → 20 and → 10 (a config arm on R42's form; the gaze
+babble's dwell bakes a view in 2 s / 1 s of one winner instead of 5 s). n = 6, paired:
+
+| n = 6 | inserted at stops | baked at stops | pruned (baked) | nodes / baked at the end | stop s | quiet-round ends | saccades | stands held | cells | path m | mapTLE | walls/min |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R42 (threshold 50) | 41 | 21 | 17.5 (0) | 33 / 29 | 31.3 | 92 % | 181 | 65 / 66 | 111 | 94 | 0.22 | 14 ± 12 |
+| threshold 20 | 33 | 24.5 | **5.8** (0) | 33.5 / **33** | **11.7** | 100 % | 150 | 66 / 66 | 131 | 127 | 0.31 | 23 ± 28 |
+| threshold 10 | 30 | 24.5 | **3.3** (0) | 31 / 30 | **10.1** | 100 % | 160 | 64 / 66 | 138 | 133 | 0.32 | 19 ± 16 |
+
+- **The decay is gone.** At 20 the map keeps what it sees: 5.8 prunes a run against 17.5, and
+  every node standing at the end is baked (33 of 33.5). O37's aim, met by the constant.
+- **And the dwell loses its signal.** A view now bakes inside one gaze, so "the winner is
+  unbaked" is true for two seconds and then never; every stop ends on a quiet round at 10–12 s
+  instead of 31, with fewer views inserted (33 vs 41) and a map that fits the walk worse
+  (`mapTLE` 0.22 → 0.31, 6+/0−). The stop's contingency — long where the place is new — was
+  carried by the bake flag, and the bake flag was carrying it only because 50 visits was slow.
+  This is `CLAUDE.md` §5 rule 5 in the flesh: a constant tuned to a scale, and either setting
+  of it is wrong for one of the two consumers (the map's memory wants fast baking; the dwell's
+  novelty wants slow).
+- The stand is indifferent (66 / 66, 64 / 66); cells and path rise because the stops are
+  short; wall contact ties at this power.
+
+**Verdict.** `PARTIAL`: threshold 20 fixes the map's forgetting and breaks the dwell's novelty.
+Not promoted. The lever that separates the two: a dwell on the token's **residual against its
+own expectation** (`quant_error` vs `expected_error`, the channel's running TLE — the
+Kalman-faithful quantity the token already carries) instead of the bake flag; the view is
+worth holding while it surprises the map more than the map expects to be surprised, and the
+bake threshold can then be the map's own choice (20). Re-use context for bake 20: with that
+dwell. Register O37 stays open with this as its next step.
+
+### 17.23 The dwell's signal, three forms (R44–R45 sweeps; R43 config, 2026-09-12)
+
+**The question left by §17.22:** the bake flag carried the dwell's novelty only because baking was
+slow; what should the gaze hold on, so that the map can bake fast and keep its views (O37) while
+the stop still ends when the place is known? Three forms, each a guarded flag on `--stop-gaze`,
+all on R42's babble (yaw sd 0.35, pitch sd 0.08), uncapped stops, n = 6:
+
+| n = 6 | dwell signal | bake | stop s | stand % | quiet-round ends | inserted / baked at stops | pruned | nodes / baked at the end | walls/min | cells | stands held |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R42 | the winner is unbaked | 50 | 31 | 35 | 92 % | 41 / 21 | 17.5 | 33 / 29 | 14 ± 12 | 111 | 65 / 66 |
+| R43 arm | the winner is unbaked | 20 | 12 | 12 | 100 % | 33 / 24.5 | 5.8 | 33.5 / 33 | 23 ± 28 | 131 | 66 / 66 |
+| residual K 1.0 | `quant_error` > K × `expected_error` | 50 | 48 | — | 24 % | 54 / 16.5 | 39 | 32 / 27 | 8.5 ± 9 | 85 | 66 / 66 |
+| residual K 1.0 | the same | 20 | 54 | 68 | 17 % | 55.5 / 32 | 21 | 42.7 / 40.5 | 3.1 ± 4 | 81 | 65 / 66 |
+| residual K 1.5 | the same | 50 / 20 | 10 | — | 98 % | 29 / 1.3 ; 23.5 / 11 | 27 ; 4 | 20 / 18 ; 24 / 23 | 32 ; 22 | 92 ; 121 | 65 ; 66 / 66 |
+| learning progress | surprised on arrival (K 1.0), held while `quant_error` > 0.5 × its arrival value | 50 | 50 | 58 | 26 % | 72 / 16 | 61 | 34 / 28 | 9.8 ± 16 | 71 | 66 / 66 |
+| **learning progress (R43)** | the same | **20** | 46 | 53 | 36 % | 53 / 30 | 17.5 | **43 / 42** | **10.2 ± 5.5** | 89 | **66 / 66** |
+
+- **The plain residual is a knife edge.** Against the channel's global expectation a view is
+  "surprising" about half the time by construction, so K 1.0 holds two thirds of the gazes and the
+  duck stands 68 % of the run with stops that never shorten (55 → 45 s; flat at 58 s with bake 20);
+  K 1.5 is the token's own `is_novel` percentile and ends every stop at 10 s with almost nothing
+  baked. No K serves both the map and the stop.
+- **Learning progress does what the doctrine says the dwell is for.** A view that surprised the
+  map on arrival is held while the prototype is still moving to it — its error above half its
+  arrival value — and released when learned; a known view ends at the minimum hold. With bake 20
+  the map is the fullest measured, **43 nodes with 42 baked at the end** and no baked view ever
+  pruned, on the tightest wall contact of the line (10.2 ± 5.5), with the stand untouched (66/66).
+  O37's aim is met in this form.
+- **What it costs, and what that cost is.** The stops run 46 s and the duck stands 53 % of the
+  run; the stop length does not fall over eleven stops (49 → 47 s). The reason is not the map: the
+  random babble keeps finding views the map has not seen — 53 insertions a run — so "six known
+  gazes in a row" rarely comes. Whether a stop should end when *this stop's* scene is learned or
+  when *random gazes* stop finding novelty is a design choice, and it is the balance of the
+  ten-minute story (walking against looking). Recorded as the open knob rather than tuned.
+
+**Verdict.** The learning-progress dwell with bake 20 `WORKING` for the map (O37 `RESOLVED` in this
+form: the place is learned whole and kept), `PARTIAL` for the stop's contingency (its ending is
+the babble's, not the place's). Config R43 carries it (preset). The stop's ending rule — the
+place's own learned-ness (e.g. the fraction of this stop's views baked) against the babble's
+quiet count — is the next design decision, the operator's.
+
+### 17.24 W3d — the orienting reflex: a change at a still gaze ends the stop and the duck goes to look (R44 config; R46 sweeps, 2026-09-12)
+
+**Agreed with the operator.** Something changing during a stationary view — a ball rolling by, a
+person walking past — should trigger interest in that direction: the stop ends and the duck walks
+toward it. The signal is the map's own: while the head holds a bearing the view's winner should not
+change and its error should not jump; if they do with the gaze still, the world moved.
+
+**Built.** `--stop-orient K TURN_VX WALK_VX SECS`. While the gaze is still (arrived ~10 ticks, the
+token caught up ~10 more, three clean samples at the map's rate): the view's quant error more than
+K spreads above the hold's own running mean (the spread floored at 5 % of the mean), on two
+consecutive samples, **touching at least two different ToF columns** — the change detector. A
+first hit freezes the gaze on the surprise so the confirmation can come. Then: the stop ends
+(`stop:orient`), the body **pivots** to the gaze's world bearing (odometry yaw + head yaw; the
+walker does not turn on a yaw command alone, 0.03 rad/s, but at 0.2 m/s with full yaw it turns
+0.5–0.8 rad/s nearly in place), walks with a P on the dead-reckoned yaw until it has covered ~1 m
+(or reached a surface after 0.4 m), and stops there to look; SECS is the cap. The twist brain is
+frozen through it. Two stimuli, harness actions like a shove: `--roll-past DELAY SPEED` places
+`obj_ball0` inside the free space the gaze sees and rolls it across the view (stopped 1.5 s later);
+`--walk-past DELAY SPEED` carries the chair across — a person-sized mover. Both start once the
+hold's baseline is armed and just inside the view's edge, and retry at the next gaze when the gaze
+faces a surface. Read-backs: rolls and skips, changes prompted (within 3 s of a stimulus) and
+unprompted, orientations, arrivals, timeouts, reach to where the mover was.
+
+**Nine catches on the way, each measured before the rule changed** (the ledger's, kept here
+because each is a property of the sensor or the map a later consumer will meet again):
+a winner switch to an existing node is the map's own flicker, not a change (dropped);
+a per-view expectation kept across stops over-fires (the same node reached from another pose has
+another error level; dropped for the hold's own); the hold's expectation needs the token to have
+caught up (armed from tick 21, not 11); the pure-yaw pivot does not turn the walker; the stimulus
+landed exactly as a 6 s learning hold ended, and later exactly five ticks before a minimum hold
+ended (alignment artifacts of a tick-scheduled stimulus — it now starts when the detector is armed);
+a stimulus placed 1.2 m along a gaze that faces a wall lands inside the wall (placed at 0.7 of the
+range the ToF reports, skipped under 0.6 m); the head-pitch joint is positive DOWN (measured by the
+ToF's floor fraction; the babble's clamp had looked up); the ball keeps rolling and re-enters later
+(stopped after 1.5 s); and **the unprompted triggers are the sensor's edge flicker** — at every one
+a few ToF zones flipped between empty and a hit as the body swayed a thousandth of a radian, and
+the nearest-hit-per-column reduction carries one grazing ray into a whole column. A mover crosses
+columns; flicker stays in one — hence the two-column rule.
+
+**Measured.** R43's form (gaze babble, learning-progress dwell, bake 20, map at stops), the
+uncapped stops, n = 6, 1500 s:
+
+| n = 6 | stimulus per stop | stimuli / run | detected | unprompted / run | orientations | arrived | reach | stands held | rescues at stops | stop s | cells |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R43 (no reflex) | — | — | — | — | — | — | — | 65 / 65 | 1 | 54.5 | 70 |
+| reflex, nothing moved | — | — | — | 1.7 ± 1.6 | 1.7 | 1.5 | — | 66 / 66 | 1 | 50.5 | 66 |
+| reflex, a ball rolls past | the ball | 12.3 | **42 ± 14 %** | 1.0 ± 0.9 | 6.3 | 6.0 | **0.36 m** | 87 / 87 | 0 | 39.2 | 97 |
+| reflex, a chair carried past | the chair | 15.8 | **57 ± 12 %** | 1.8 ± 0.8 | 10.8 | 10.3 | — | 106 / 106 | 0 | 28.7 | 87 |
+
+- **It orients and it arrives.** 95 % of orientations reach the place (the rest time out); with the
+  ball, 0.36 m from where it was rolled. The stand is untouched: 259 of 259 hand-backs held across
+  the three reflex arms, no rescue at a stop. A change ends the stop early (54 → 29–39 s), which is
+  the walking/looking balance moving for a reason.
+- **Detection is the sensor's.** A person-sized mover is caught 57 % of the time and a 6 cm ball
+  42 %; the misses are the ToF's resolution (one column for the ball) and the stimulus crossing a
+  view the map was still learning. The false rate is about one orientation per fifteen minutes in
+  every arm, the edge-flicker residue the two-column rule leaves.
+- **The head's pitch now looks down** (the sign catch): the floor's objects are in the frame.
+
+**Verdict.** W3d `WORKING` at n = 6, loud on the behaviour (the duck sees a thing move, turns, walks
+to it, and looks), signal-strength on the detection rate. Not promoted; the operator's eye pending
+(preset R44: a chair carried past at every stop). The change detector is a host-side scaffold over
+the map's error and the sensor's columns; its substrate form is the approach loop of the plan's §3
+(E2) with the view-level transition surprise as its trigger, and the place cloud (§12, the operator's
+second point) is the level that should own "the scene changed". Next: the place cloud.
+
+### 17.25 The speed question: the map's error is a signal, the yaw rail is why it cannot be spent yet (R46 sweeps re-read, 2026-09-12)
+
+**The operator's question.** The duck walks at one slow pace; a speed that varied would be more
+engaging. What does the walking surface actually offer, and what should a speed be a function of?
+
+**The surface, as built.** Pollen's walker takes a 13-slot command (`Observation.hpp`): the twist
+(vx, vy, vyaw in trained ranges 0.4 / 0.3 / 1.0), the four head joints, and a **body pose block —
+`body_z`, `body_roll`, `body_pitch` — wired into the observation and set by nothing, on any run this
+project has made.** The forward speed itself is not scripted anywhere: it is a state prior,
+`state_prior_indices [0, …]` → `state_prior_targets [0.75, …]`, "I predict I am moving at 0.75 of
+the walker's vx range", descended through the identified A (§16.5). Two constants sit beside it: the
+orienting reflex's `TURN_VX` / `WALK_VX` (§17.24), a named scaffold, which is a literal fixed 0.25
+m/s for **40 % of the walking ticks** of an R44 run. The rest is the prior's own command. Below
+about 0.25 m/s the walker stands still (§16.2), so the usable forward band is ~0.25–0.5 — about 2×.
+
+**What was measured.** No new run: the R46 sweeps re-read (`reflexWalk`, n = 6, control phase
+700–1500 s, 78 526 brain-driven walking ticks), asking whether the map's error on the walk could be
+the thing a speed is a function of. With `--map-on-stop` the map does not learn while walking, so
+its TLE there is a clean read — *do I recognise where I am* — with nothing written back.
+
+| mapTLE, by phase | mean ± sd | p5 | p95 |
+|---|---|---|---|
+| at stops | 0.139 ± 0.093 | 0.022 | 0.324 |
+| the orient approach | 0.215 ± 0.101 | 0.088 | 0.404 |
+| **the brain-driven walk** | **0.299 ± 0.148** | 0.107 | 0.596 |
+
+Ordered the way the mechanism predicts — the map knows the places it learned at best — with ~5× of
+range and no saturation at either end. It is **not a wall proxy**: corr(ToF proximity ahead, mapTLE)
+= +0.17. And it carries **place that replicates**: a 0.25 m cell's value agrees across *separate*
+visits at split-half r = **+0.44** over 192 cells, between-cell sd 0.11.
+
+**The EMA, and the artifact it nearly produced.** The signal dithers — the map's winner switches
+143/min on the walk against 23/min at a stop, and TLE on a switch tick is 0.422 against 0.293 on a
+held one, so the transition term is most of the chatter. Smoothing looked like it bought a great
+deal, and did not:
+
+| | variance share between cells (ICC) | split-half r **across separate visits** |
+|---|---|---|
+| raw | 0.386 | **+0.438** |
+| EMA τ 0.5 s | 0.479 | +0.446 |
+| EMA τ 2 s | 0.588 | +0.405 |
+| EMA τ 5 s | 0.606 | +0.431 |
+| EMA τ 10 s | 0.609 | — |
+
+**The ICC column is an artifact and the right-hand column is the measurement.** A cell is visited in
+contiguous runs of ticks, so an EMA shrinks within-cell variance mechanically, whatever it does to
+the content; tested across separate visits the gain is flat. An EMA adds **no place information** to
+this signal. Its real job is narrower and still worth doing: at τ ≈ 0.5–1 s it removes the
+transition spikes (raw autocorrelation 0.64 at 0.1 s, 0.22 at 1 s, 0.04 at 2 s) without touching
+what replicates, and past ~1 s it buys only lag. A second term to subtract: mapTLE drifts
+**0.383 → 0.273** across the control phase as the map bakes — the same size as the between-cell sd —
+so the signal a drive should read is TLE against its own slow running average (`map_tle_long_`,
+τ 3000 ticks, already in `IntentAdapter` for the wander rule), not TLE.
+
+**Why the lever cannot be built on it yet.** The forward command does not reach the body:
+
+| on the walk, n = 6 | |
+|---|---|
+| \|vyaw\| > 0.9 | **94.3 % of walking ticks** (mean 0.968; sign flips 43/min) |
+| \|vyaw\| < 0.4 | 1.2 % — **no 2 s window in six seeds** |
+| corr(commanded vx, achieved speed) | +0.18 (1–5 s windows) |
+| corr(duty above the 0.25 dead zone, speed) | +0.19 |
+| corr(wall contact, speed) | **−0.81** |
+| speed across the full range of commanded duty, 0.24 → 1.00 | 0.167 → 0.201 m/s |
+
+The duck commands maximum yaw rate essentially all the time and flips its sign every 1.4 s; its
+speed is then set by whether it is jammed against a surface, not by what it asks for. This is
+§17.16's dither read at the command level, and it means a speed drive built now would fail §3.2
+rule 5 before it started — the consumer cannot fire. One confound to carry forward when it can:
+corr(mapTLE, instantaneous speed) is already −0.17 without anything asking for it, because wall
+contact produces both a low speed and an unusual view, so a "slow where surprised" arm must be
+judged off-wall or it will score on a mechanism it did not add.
+
+**Verdict.** The signal is `WORKING` **as a signal** — measured, place-bearing, non-degenerate, and
+its conditioning known (slow-average-relative, EMA τ ≈ 0.5–1 s, judged off-wall). The speed lever is
+`DEFERRED` behind **W5, the twist brain's yaw channel** (O31, §17.17): until \|vyaw\| comes off the
+rail there is no forward-speed channel to modulate, and the 2× band the walker offers cannot be seen
+through a body that is always turning. The body pose block is recorded as a second, untouched
+control surface (O39). Next: W5.
+
+### 17.26 W5, fork item (a) — the lesion refutes the swamping, and the reference is what will not stand still (R47, 2026-09-12)
+
+**The hypothesis under test**, §17.17's own words: the prior's Gauss-Newton step writes the full
+outer product `C(j,:) += g·prev_xᵀ`, so an error on one index deposits content in every column of
+every motor's row; hold the yaw row to the heading column and, *if straightness jumps, the swamping
+is proven and the mechanism is the prior's weight rather than a new law.*
+
+**Built.** `state_prior_isolate` (MotorEPMv2, HotMutable, default 0): after every update, C(:, i) —
+and Cp's, in split mode — is zeroed for every state column that is not a resolved
+`state_prior_indices` entry; h is spared (h reaches, C balances). Applied broader than §17.17's
+literal form, on purpose: confining the yaw row to the heading column alone would also delete the
+ToF columns, and avoidance through them is `WORKING` (§17.2) — the lesion should remove what has no
+objective behind it, not a measured mechanism. Read back as `spIso` in `diag_lite`.
+
+**Guard.** With the param absent the host reproduces the pre-change R46 run byte-for-byte —
+75 000 ticks, md5 `e4b5c3fa…` on both — which checks the gain-0 guard and the harness's
+reproducibility in one go. Arm: `--arm iso:motor_epm_intent.state_prior_isolate=1` on the R43 W3c
+stack (**not** the R44 one: the orienting scaffold owns 40 % of walking ticks there and would mask
+the lever). n = 6, 1500 s, control phase 700–1500 s. `spIso 5` on the twist brain, −1 on the head
+and stander brains — the lever landed, on the module it was aimed at and no other.
+
+| n = 6, paired | straight | hdgErr (rad) | \|vyaw\| | yawFlip/min | walls/min | path m |
+|---|---|---|---|---|---|---|
+| base (R43 W3c) | 0.09 ± 0.02 | 1.66 ± 0.09 | 0.95 ± 0.01 | 69 ± 17 | 14.8 ± 11.8 | 49.6 ± 9.0 |
+| **iso** (the lesion) | **0.08 ± 0.02** (Δ −0.01, t −3.5, **1+/5−**) | 1.63 ± 0.13 (t −0.8) | 0.89 ± 0.05 (t −3.7) | 57 ± 23 (t −1.4) | 22.0 ± 16.9 (5+/1−) | 40.2 ± 5.7 (0+/6−) |
+
+Straightness did not jump; it fell, on five of six seeds, and the body walked less and hit more.
+**`REGRESSION`, and the hypothesis is refuted** — with a mechanism, which is the useful part.
+
+**Why, in three measurements.**
+
+1. **The command was already aimed, and the lesion is what broke the aim.** Counting ticks where
+   the yaw command opposes the heading error: base **68.2 %** (62–79 % on every one of six seeds,
+   n = 84 k), lesion **43.9 %** — below a coin flip, and wild across seeds (6, 22, 37, 60, 67,
+   75 %). The reason is in the step's own algebra: `C(j,:) += g·prev_xᵀ` spreads the aim across the
+   *whole* state vector, so the command contribution is ≈ g·(prev_x·x) rather than one column's
+   product. **The cross-talk columns are where the heading feedback lives; the "swamping" is the
+   mechanism, not the defect.** This also re-motivates fork item (b) — the model-implied step
+   computes the aim explicitly instead of accumulating it — and it is untouched by this result.
+2. **The body does turn.** Achieved yaw rate at full command, from the unwrapped own-heading over
+   1 s windows: **0.36 rad/s at vx < 0.05** and **0.47 rad/s at vx > 0.20**, monotone and correctly
+   signed across the whole vx × vyaw grid, in both arms. (§17.24's "the walker does not turn on a
+   yaw command alone, 0.03 rad/s" is a *standing* hand-off number and does not carry to a walking
+   body — an inference worth correcting here, since it nearly became the diagnosis.) Also, for
+   O39: the duck turns half again as fast while moving, so **yaw authority and forward speed are
+   one channel, not two.**
+3. **The reference will not stand still, and it moves the way the body moves.** It jumps > 0.5 rad
+   **90 times a minute**, and — the number this section adds — it **follows the body at +0.50 rad
+   per radian turned** (0.5 s steps, jumps excluded, n = 48 k). Half of every correction the duck
+   makes is absorbed by its target turning with it. Inside quiet windows (≥ 2 s, no step above
+   0.1 rad) the error is 1.65 rad at the start and 1.68 rad two seconds later, closing on **44 %**
+   of windows, with \|vyaw\| at 0.95. A saturated, correctly-aimed command against a target that
+   retreats at half the rate it is chased.
+
+A fourth, smaller correction: the efference term is real but weaker than §17.17 read. Comparing the
+command with the *simultaneous* yaw rate scores 72 %, but the command causes that rate — the
+comparison is partly a tautology. Against the rate of 0.4 s **earlier** it is 65–68 %.
+
+**The instrument.** `refFollow` is now a sweep column (`l2_sweep.py`): radians of reference motion
+per radian of body turn, over 0.5 s steps with jumps excluded. ~0 is a target in the world, which
+turning closes; ~1 is a target that turns with the body, which turning cannot. **Any fix to this
+line is judged on moving it toward 0**, and neither §17.16's fork items 1 and 2 (`commit_hold`,
+`lookahead` — both `REGRESSION`) nor R38's quiet reference were ever measured against it.
+
+**Verdict.** Fork item (a) `REGRESSION`; re-use context: a config whose prior has *one* index, where
+the distributed aim has nowhere else to go. The yaw channel's controller is exonerated — it aims,
+and the body answers it. **The defect is upstream, in what sets the reference**, which is the play
+loop's target on a map whose winner switches 60 times a minute. Next is the operator's call between
+fork item (b) (the model-implied step, now the better-motivated of the two) and a reference-side
+lever judged on `refFollow`.
+
+### 17.27 W5, fork item (b) — the model-implied step: avoidance becomes real, the heading does not (R48, 2026-09-12)
+
+**The lever.** §17.17's other form: *the yaw command that closes the prior's error in one
+identified step, `u = −e / A(idx, vyaw)`, clamped — what the prior's half 2 is meant to converge
+to and here does not.* Built as `state_prior_step_gain` (MotorEPMv2, HotMutable, default 0), in the
+general form rather than the yaw-only one: the ridge least-squares command over **all** the prior's
+rows, `y* = argmin ||A_p·y − e||² + reg_eps·||y||²`, clamped to ±1 per motor and added to the
+pre-tanh operating point. The ridge is the module's own `reg_eps` — no new constant, and the gain
+is still the model's own authority, which is the same justification part 2's descent has. The step
+the command carried is stored per leg and added back when the update reconstructs its operating
+point, or G would report the slope at a different point on the tanh than the body actually ran.
+
+**What it turns out to be, numerically.** With `reg_eps` 0.01 against `A_pᵀA_p` ~ 10⁻³, the ridge
+dominates and the solve reduces to `≈ A_pᵀe / reg_eps` — the same *direction* part 2 descends, applied
+straight to the command instead of accumulated into C. The read-back says it then rails:
+`spStep` 1.00. So what ships is a **model-signed saturating command**, not a deadbeat solve. That is
+the honest description and it is what the clamp in §17.17's own formulation implies for a channel
+whose authority is ~0.01 per tick.
+
+**Guard.** Param absent → the pre-change R46 run reproduced byte-for-byte, md5 `e4b5c3fa…`.
+`spStep` reads −1 off and its own size on. Unit test covers gain-0, that it acts, the read-back, and
+the **sign control with part 2 switched off** (`state_prior_lr` 0, `ctrl_lr` 0), so the pull toward
+the target is demonstrably the step's own doing. Same base and host args as R47; n = 6, 1500 s.
+
+| n = 6, paired | walls/min | contact% | eps / metre | cells | span m² | straight | hdgErr | refFollow | mapTLE | switch/min |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (R43 W3c) | 14.76 ± 11.82 | 3.31 | 4.58 | 69.7 ± 11.7 | 10.17 | 0.09 | 1.66 | 0.48 | 0.19 | 59.9 |
+| **step, gain 1.0** | **1.82 ± 1.64** (0+/6−, t −2.5) | **0.14** | **0.65** (1+/5−) | 73.8 ± 11.8 (ties) | 10.23 (ties) | 0.07 (2+/4−) | 1.57 (1+/5−, t −1.6) | 0.58 (worse) | 0.16 (0+/6−) | 42.1 (0+/6−) |
+| step, gain 0.3 | 3.25 ± 2.97 (0+/6−) | 0.48 | — | 69.8 (ties) | 7.48 | **0.07** (0+/6−, t −2.8) | 1.60 | 0.45 | 0.16 | 45.1 |
+
+- **Avoidance becomes real, and it is not the degenerate orbit.** Wall contact falls eight-fold on
+  every seed, and the blind metric's complement holds: cells and span **tie**. Per seed the loudest
+  case is seed 3 — the base's worst wall-rider, 34.1/min on 56 cells, becomes **0.0/min on 89
+  cells** over the same path length. Seed 5 likewise goes to zero. Normalised for walking time
+  (below), episodes per metre go 4.58 → 0.65, better on five of six seeds.
+- **The heading does not move.** `hdgErr` 1.66 → 1.57 is inside the noise (1+/5−, t −1.6),
+  `refFollow` gets *worse* (0.48 → 0.58), `straight` does not improve at gain 1.0 and is worse on
+  every seed at gain 0.3, and `yawFlip/min` rises 69 → 106 (6+/0−). **The lever was proposed as the
+  yaw channel's fix and it is not one.** §17.26's diagnosis survives item (b) as it survived item
+  (a): what holds the heading error open is the reference, not the law that chases it.
+- **Why avoidance and not heading**, by inference rather than measurement: the proximity rows of A
+  are weak (§17.2 measured 0.0009 against the command — "the babble rarely reached a wall"), so the
+  descent through them built almost nothing, while the computed step divides by `reg_eps` instead
+  and turns a weak-but-correctly-signed authority into a real command. The heading row is not
+  authority-starved in the same way; its problem is the target. The arm that would settle this —
+  the step restricted to the proximity indices — is one lever away and has not been run.
+- **The side effect must be named.** Stops now run to the 60 s cap on every seed (`bored%` 12.1 →
+  0.0, `stop s` 54.5 → 60.0, stand% 62.6 → 70.0), so walking time falls 285 → 217 s. That is O37's
+  open ending-rule knob moving, not a new pathology — a run of six consecutive known gazes is a
+  rare event either way (≈ 8 of 66 stops in the base) — but it is why the wall result is reported
+  per metre as well as per minute.
+
+**Verdict. `PARTIAL`** — `WORKING` and loud on avoidance, `NULL` on the heading channel it was
+aimed at. Not promoted: preset R48 for the operator's eye, and the stop-length interaction is the
+thing to watch while watching it. Re-use context for the null half: a reference that does not follow
+the body (`refFollow` → 0), after which the same step would be worth re-reading on the heading row.
+Follow-ups: the proximity-only arm above; and for O39, wall contact was the term that dominated
+achieved speed (corr −0.81), so a walk that stops hitting things is the first thing the speed
+question needed.
+
+### 17.28 The ToF studies — the sensor can carry objects, the frame cannot, and the walk is the ceiling (2026-09-12)
+
+**Asked for** (the operator, after the W5 verdicts): an EPM on the sensor's full output with its PCA
+visible; several EPMs in different roles off the same sensor; and the point cloud a head babble
+builds, watched for change. Method, tooling and re-run commands are in
+[`microduck_tof_studies.md`](microduck_tof_studies.md); figures and the written report are the
+[study page](https://claude.ai/code/artifact/468b1fff-ed27-483b-86a6-ca87d7c5459a). Everything runs
+the **shipped EPM** over recorded frames (`cpp_core/bench/epm_tof_study`), 4 runs × 1500 s, seeds 6
+and 3, 16 790 distinct casts. World-derived labels judge the vocabularies and reach no brain.
+
+**M1 — acuity. A block is one pixel.** Class mix 9 % Empty / 2 % TooClose / 27 % Floor / 62 % Hit;
+8.7 % of returns sit in the 2–10 cm height band. Per cast, zones landing in the object's own height
+band: **block 1.2, ball 2.0, chair 6.3, shelf 6.7** (seed 3 agrees: 1.8 / 1.9 / 3.8). A 4 cm block at
+1 m subtends 2.3° against 5.625° zone spacing — it falls between beams more often than on one. Found
+on the way and fixed: `TofZone::point` was in the *raw* trunk frame; `point_level` is the
+gravity-levelled one, and the correction moved ~5 % of returns out of the low-object band.
+
+**M2 — the stumble channel is blind, and the event barely happens.** `stander->act` is called only
+inside a stop, so **the joint brain is asleep for the whole walk** and nothing predicts the body
+then. The one live channel, the twist brain's `motor_tle`, reads 0.360 at object contact against
+0.300 before (**−0.11 sd**, nothing above its own p99); wall contact manages +0.28 sd over 102
+onsets. The body does register it physically — tilt 3.5° → 5.6° — so the signature exists and no
+predictor watches it. And there were **9 object contacts on seed 6, 0 on seed 3, and no falls**:
+trip-and-investigate needs the trip arranged, like a shove. Caveat that bounds this: `motor_tle` is
+an EMA (τ ≈ 20 ticks) and cannot show a 100 ms event even in principle, so this measures the
+*available* channel as blind, not the body error as absent.
+
+**S1 — the full output is two-dimensional.** PCA of the raw 64: **PC1 holds 85 %** and two components
+hold 90 % (0.89 on seed 3). A nearest-centroid readout of object class from four raw PCs scores
+**0.450 against a 0.361 majority** on seed 6, and **0.284 against 0.646** on seed 3 — worse than
+naming the commonest class. The one common mode is *how far away whatever is ahead happens to be*;
+object identity is in the residual, exactly §0 rule 2's failure. On encoders, in this new context:
+`rbf` collapses the 64 to a latent needing **2** dims for 90 % of its variance where `jl_state` keeps
+**7** — R35's 2026-09-11 finding reproduced, and the encoder question settled for anything this wide.
+
+**S2 — every view's vocabulary is a pose code.** Six EPMs on the same stream (cols8, full64,
+full64_dm, full64_norm, heights8, geom_shape). Raw mutual information with object class reaches
+0.770 and a best-node "block" detector reaches F1 0.90 against a 0.36 base rate. Condition on the
+duck's pose — 1 m cell × heading octant — and **every arm loses 85–90 %** of it:
+
+| arm | I(W;O) | given place | given pose |
+|---|---|---|---|
+| cols8 | 0.770 | 0.648 | **0.113** |
+| full64_jl | 0.705 | 0.639 | **0.099** |
+| full64_dm | 0.614 | 0.564 | 0.078 |
+| geom_shape | 0.473 | 0.423 | 0.068 |
+| heights8 | 0.469 | 0.436 | 0.107 |
+
+Seed 3 agrees (0.050–0.096 residual). Removing the common mode does bend the ratio the right way —
+with the frame mean out, location information falls further than object information (0.396 → 0.299
+against 0.394 → 0.357) — and by far too little to carry a behaviour. **And there is a ceiling no
+encoder can lift: each object is viewed from 4–13 distinct poses in thirteen minutes** (a ball from
+*one* location cell and two poses on seed 3). The duck stands 63–70 % of the run and nets ~30 cm per
+walking bout, so it never sees the same thing from two places. **The sensor study is capped by the
+behaviour problem** — the standing-still the operator saw is what starves the object vocabulary.
+
+**S3 — the cloud is the level at which a small object exists.** At a stop the gaze already babbles
+and the levelled returns compose with no extra geometry. One cast returns 52 points; the sweep
+returns **37 635**, filling 2.7× the solid angle and **36× the distinct 4 cm voxels**. Points landing
+on an object, per cast → per sweep: shelf 25.95 → 19 465; chair 2.35 → 1 765; **block 0.058 → 43.2**;
+ball 0.002 → 1.2. A block goes from one point every seventeen casts to forty-three per sweep — the
+difference between absent from the representation and present in it — but only in **3 sweeps of 11**,
+because the babble (yaw sd 0.35 rad, pitch sd 0.08) rarely dwells on the floor.
+
+Two body properties decide it: over a 56 s stop the trunk holds *position* to **0.9 cm** (the R19
+stander is that still) but its *heading* drifts **9.7°**, which smears the cloud 17 cm at a metre.
+De-rotating each cast by the duck's own odometry yaw — accurate to 0.1°, so its own to make —
+was reported here to recover 7 % more distinct voxels. **Corrected 2026-09-13 (§17.30):** the rotation
+was applied with the wrong sign and the 7 % was the doubled smear; with the correct sign the sweep
+changes by −1 % and +4 % on two runs. Change detection on a rolling ball, 605 windows of which 22
+carried motion, at a matched 5 % false-positive rate: **single frame 18 % (AUC 0.852) → cloud 41 %
+(0.866)**, a 2.3× gain on the best single-frame statistic; the de-rotated cloud also reads 41 % (0.865)
+with the correct sign — the 45 % first reported here came from the wrong one. For scale, R44's live
+detector catches a ball 42 %.
+
+**Verdicts.** M1 `WORKING` as a characterisation — the sensor resolves furniture and is at its limit
+on floor objects. M2 the stumble channel `DEAD_CODE` in the measurement sense (the predictor is not
+ticked), the event `DEFERRED` until arranged. S1 the full frame `NULL` as an object input and the
+encoder question `RESOLVED` (`jl_state`). S2 **`NULL` for every view tried, with the cause located in
+the data rather than the encoder** — re-use context: a run in which the duck travels. S3 `WORKING`
+and the constructive result of the day: the cloud, de-rotated, with the gaze aimed at the floor.
+Scale: two seeds for M1/M2/S1/S2, which replicate; one seed and 22 positive windows for the
+detection number, which is a signal.
+
+**What this changes.** An EPM on single frames cannot hold a node meaning "block", because a block is
+not in its input — object work belongs downstream of the sweep. De-rotation belongs in the host (it is there now, and matters little — §17.30). The
+gaze babble's pitch decides whether floor objects are found at all, which puts **O36 on the critical
+path** rather than beside it. And the viewpoint ceiling says the sensor line and the behaviour line
+are one line: novelty-toward-things needs a duck that travels.
+
+### 17.29 The four steps out of §17.28 — the cloud in the host, the gaze null, the cloud vocabulary, and a body that notices (R49–R51, 2026-09-12)
+
+The operator's go on the order §17.28 proposed. Each is guarded; each landed; two worked, one is a
+null with a bonus finding, and one cannot be settled on data this duck can produce.
+
+**Step 1a — the cloud moves into the host. `WORKING` as substrate.** `mj_host/src/CloudMap.{hpp,cpp}`:
+a voxel-hashed occupancy cloud at 4 cm, opened when the body comes to rest, closed when the stop
+ends, accumulating `TofZone::point_level` turned back by (yaw − anchor_yaw) from the contact
+odometry. Position is deliberately not corrected (0.9 cm of drift is below a voxel). It exposes its
+size, its floor-break mass, the `new_fraction` change signal, and a 36-dim **break profile** — 8
+azimuth sectors × (nearest break range, its height, its vertical extent, its mass) + 4 globals —
+published on `reality.proprio.cloud_in` for any graph EPM that declares it. `--cloud` absent
+reproduces the pre-change R46 run byte-for-byte (md5 `e4b5c3fa…`). Read-back: **11 stops per run,
+mean 883 voxels of which 124 break the floor.** The profile is per-sector arithmetic, not a
+clusterer — the vocabulary over it stays the EPM's (§0 rule 1).
+
+**Step 1b — aiming the gaze at the floor. `NULL`, and O36 does not reproduce.** Two levers, both
+built (`--stop-gaze-slew` on the head override, `--stop-gaze-down` as the pitch babble's centre),
+both landed (head-pitch command reaching +0.400 rad against the base's +0.229), neither moves the
+floor-object signal:
+
+| n = 6 | stands held | cloud voxels | break voxels / stop |
+|---|---|---|---|
+| pitch sd 0.08 (base) | **65 / 65** | 890 | 127.0 ± 27.1 |
+| pitch sd 0.20 | **65 / 65** | 1057 | 137.5 ± 10.8 |
+| pitch sd 0.20 + slew 0.6 rad/s | **65 / 65** | 1085 | 132.8 ± 39.8 |
+| pitch sd 0.05, centred 0.13 rad down | **65 / 65** | 913 | 113.3 ± 17.5 |
+| pitch sd 0.05, centred 0.22 rad down | **65 / 65** | 822 | 144.0 ± 23.6 |
+
+Break voxels move less than their own spread in every arm. Measured properly — points per sweep on
+a labelled block — the downward bias gives 43.2 → 58.7 (+36 %) on three stops, which is a direction
+and not a result. The geometry says why: at pitch sd 0.2 the gaze already reaches 23° down, and
+*that looks at the floor 0.2 m from the duck's feet*, where nothing is; a 4 cm block at a metre sits
+7° below level, and the band that finds it is narrow and already inside the sensor's cone. **The
+gaze was never the binding constraint.** Balls stay invisible at every gaze tried (0.5–1.2 points
+per sweep, found in 1 sweep of 16).
+
+The bonus finding is worth more than the lever: **O36's regression does not reproduce.** R42 measured
+24 of 66 stands held at pitch sd 0.2; on the R43 stack the same amplitude holds **65 of 65**, with
+and without a slew limit. The fix was not a slew — it was R43's dwell rule. O36 is closed by
+measurement, not by a lever, and the slew's own contribution is unproven.
+
+**Step 2 — an EPM over the cloud. The best vocabulary yet; the pose question still unanswerable.**
+The `cloudp` view (the host's own 36-dim profile) against the two frame views, one EPM each over the
+same stop frames. On a single seed it looked like mastery — I(W;O) 0.945, block F1 0.97, ball F1 1.00
+— and that reading is **wrong**: the cloud exists only while the duck stands, so the frames carry
+exactly *one pose per object*, `I(W;O | pose)` is 0.000, and the vocabulary is a stop-identity code.
+Pooling six runs into one EPM raises the ceiling to 3–8 poses per object and gives the honest table:
+
+| pooled, 6 seeds | nodes | baked | switch/min | I(W;O) | I(W;O \| pose) | F1 block / ball / chair / shelf |
+|---|---|---|---|---|---|---|
+| **cloudp** (36) | 16 | **16** | **7** | **1.546** | **0.128** | **0.91 / 0.90 / 0.94 / 0.96** |
+| cols8 (8) | 21 | 18 | 20 | 1.216 | 0.093 | 0.81 / 0.70 / 0.78 / 0.76 |
+| full64 (64) | 16 | 15 | 15 | 0.768 | 0.071 | 0.58 / 0.46 / 0.62 / 0.40 |
+
+The ordering is consistent and the cloud wins every column.
+
+**Correction to this section's first reading (computed 2026-09-12, after the operator asked what the
+conditional meant).** It was reported here and in §17.28 that the conditional "collapses 85–92 %" as
+though that were a deficiency of the vocabulary. It is not: it is a property of the room and the
+itinerary. The quantity the conditional can reach is **H(object | pose) = 0.130 nats** against
+H(object) = 1.731 — *pose alone fixes 93 % of what is in view*, and no vocabulary can explain
+information that is not there. Against the ceiling that actually remains, over 45 pose cells at ~634
+frames each:
+
+| view | I(W;O \| pose) | of H(O \| pose) | shuffle control |
+|---|---|---|---|
+| **cloudp** | **0.128** | **98 %** | 0.001 |
+| cols8 | 0.093 | 72 % | 0.001 |
+| full64 | 0.071 | 55 % | 0.000 |
+
+Shuffling the winner within each pose cell gives 0.001, so the estimator bias is negligible and the
+numbers are real. **The cloud vocabulary extracts essentially all of the object information that
+survives knowing the duck's pose**; the frame views get 72 % and 55 % of it. The earlier "the test is
+not yet runnable" reading was wrong — the test ran, it simply had no denominator attached.
+
+What stays true, and is a different claim: this is a *within-distribution* result. It shows the
+vocabulary uses the object information present in the poses the duck actually visited. It does **not**
+show pose-*invariance* — that a node would fire for a block from a viewpoint the duck has never
+occupied — and only travel can test that. The absolute amount at stake is also small (0.13 nats of
+1.73), for the same reason. What *is* clean is the vocabulary's shape: **16 symbols, every one baked, changing
+seven times a minute** against the place map's 60–130 on the walk. That is the first thing in this
+duck stable enough to be a symbol, whatever it turns out to denote. (Pooling is a probe, not a
+trajectory: the duck teleports between runs, which is why 125 winner ids appear across a run that
+ends with 16 nodes.)
+
+**Step 3 — a body that notices. `WORKING` as a channel, `PARTIAL` as a detector.** `--body-predicts`
+ticks the joint brain on every tick with its learning off, so it has an honest forward-model residual
+while the walker drives. Predicting is not identifying: §17.10's drifting model was a model
+*identified* under another driver's closed loop, which this is not, and the command is never applied
+outside the stop it already owns. Across 6 seeds and **600 contact onsets** while the walker drives:
+
+| channel | peak at contact | before contact | above its own p99 |
+|---|---|---|---|
+| joint brain `btle` (new) | **+1.05 sd** | +0.10 sd | **15 %** |
+| twist brain `mtle` (all §17.28 had) | +0.39 sd | — | 3 % |
+
+A channel 2.7× stronger where there was effectively none, and behaviourally free: at n = 6 nothing
+moves (walls 3+/3−, rescues tie, stands 11/11 on every seed, `straight` +0.03 incidentally). It is
+not yet a clean detector — 15 % of contacts clear p99 — and the reason is visible in the numbers:
+the frozen model sits at a baseline of 1.55 with a spread of 0.13, so its dynamic range is
+compressed. The instantaneous residual rather than the EMA remains the open one-line fix.
+
+**Step 4 — travel. Not started, and now indicted three times over.** §17.28's viewpoint ceiling, step
+1b's finding that the gaze is not the constraint, and step 2's unanswerable conditional all reduce to
+the same sentence: *the duck does not go anywhere, so it never sees the same thing twice from a
+different place.* Every remaining question about an object vocabulary is downstream of that.
+
+**Verdicts.** 1a `WORKING` (substrate, guarded, read-back live). 1b `NULL` on both levers, with
+**O36 `RESOLVED` by measurement**. 2 `WORKING` on vocabulary quality *and* on the within-pose object
+content (98 % of the available 0.130 nats, against 72 % and 55 % for the frame views — measured on a break profile later found to be 82 % bare floor; on the fixed profile it is 95 % against 75 % and 64 %, §17.30); `DEFERRED` on
+pose-INVARIANCE, which is a generalisation claim this data cannot test; re-use context: any run with
+tens of poses per object. 3 `WORKING`
+as a channel, `PARTIAL` as a detector; follow-up is the instantaneous residual. Nothing promoted;
+scale is n = 6 for every A/B and 600 onsets for step 3.
+
+### 17.30 The cloud becomes a module — and three bugs its first replay exposed (R46, 2026-09-13)
+
+**The operator's decisions.** `CloudMap` becomes an ogma module; its cache is keyed by the map's own
+place (the map EPM's winner); the duck viewer gets replay first; the inspector follows later as a
+standalone static voxel viewer.
+
+**Built.** `ogma::CloudMap` (`cpp_core/src/ogma/modules/CloudMap.{hpp,cpp}`, registered). The host no
+longer accumulates anything — `mj_host/src/CloudMap.*` is deleted — and instead publishes one cast per
+sense tick on `reality.proprio.tof_points`: `[still, yaw, trunk_z, odom_x, odom_y, 64 × (x, y, z)]`,
+gravity-levelled, z above the floor, NaN for a zone with no return. All of it the body's own. The
+module opens a cloud after `still_ticks` (25) of stillness and files it after `move_ticks` (25) of
+motion — hysteresis that is load-bearing: closing on the first non-still tick chopped one stop's sweep
+into fragments of 50, 70 and 943 voxels, because the gaze babble jogs the trunk's gyro past any
+instantaneous stillness test. A filed cloud is cached under the MODAL map winner while it was open
+(LRU, `cache_size` 8), and a revisit is judged once, at file time, against the cloud filed under the
+same key, aligned through the two odometry anchors. It publishes the 36-dim break profile on
+`reality.proprio.cloud` and `[new_fraction, revisit_change]` on `percept.cloud_change`. Config
+`a1v2_r46_cloud.json` = R43 + `CloudMap` + `object_epm` (jl_state over the profile). The JSONL gains
+`cld` per tick while a cloud is open, a `cloudv` record per filed cloud (voxels as
+`[ix, iy, iz, hits, mean_height_mm]`, the world pose it was anchored on — instrumentation for the
+viewer — plus `revisit` and `revisit_dist`), and `cldp` under `--log-cloud-profile`. The duck viewer
+draws filed clouds at their world anchor, coloured by mean point height (`P` toggles, `N` solos a
+place), in live, replay and record.
+
+**Guards.** On the final binary `--cloud` absent reproduces the R46 reference byte-for-byte (md5
+`e4b5c3fa…`). `test_cloud_map` 7/7 (inert without an input, the hysteresis, the de-rotation sign,
+cache and identical revisit, alignment through the pose, profile bounds, a flat floor is not a break);
+schema-defaults 1/1, state prior 23/23, motor EPM 36/36. Read-back, seed 6, 1500 s: 11 clouds, one per
+stop, ~840 voxels, 8 cached.
+
+**What the cache does and does not do yet.** The map mints new nodes at nearly every stop — the places
+filed were `[5, 8, 6, 15, 12, 17, 22, 8, 37, 39, 44]`, one genuine revisit in 1500 s. On that revisit
+the two anchors were **55.5 cm and 28.8° apart**. Aligned by the true poses, 0.639 of the new cloud was
+absent from the old; aligned by the odometry, 0.824; unaligned, 0.864. The transform does real work;
+the pose it is given is the weak link — dead reckoning drifts 4–6 % of distance travelled (§16.3),
+minutes separate the visits, and one map node spans more ground than a voxel comparison tolerates.
+`revisit_dist` is logged beside every judgement so the number is never read alone. The open fix is
+registering the two clouds by their own content. (A first version judged revisits mid-accumulation
+against whichever winner led early — another place's cloud — and was moved to file time.)
+
+**Three bugs, and the claims they carried.**
+
+1. **The OOM.** `view.py record` kept every rendered frame in a list and wrote the video at the end —
+   fine for the 8 s clips it was built for. Pointed at a 1500 s playroom run (75 000 frames at
+   2.07 MB), the kernel killed it at **23.9 GB RSS** (08:35:33). It now streams to the encoder, peaks
+   at 711 MB for 4 300 frames, and takes `--from / --to / --every`.
+
+2. **The de-rotation had the wrong sign** — in the module and in the offline analysis behind §17.28.
+   A body that yaws +d sees a world-fixed point rotated by −d, so undoing it takes R(+d); R(−d) was
+   applied, which doubles the heading smear. Writing the unit test caught it: a synthetic body turned
+   0.5 rad put **64 of 64** voxels in new cells. On 11 real stops (seed 6) the as-built sign was
+   sharpest on none and worse than no rotation at all (14 156 distinct voxels against 13 134); the
+   correct sign was sharpest in total (12 795). **Withdrawn from §17.28:** the "+7 % distinct voxels"
+   (the smear, read as detail — for a static scene more distinct voxels is worse) and the de-rotated
+   cloud's "45 %" detection. **Re-measured with the correct sign:** sweep voxels −1 % (seed 6) and
+   +4 % (the rolling-ball run) — de-rotation barely matters at ~10° of drift — and ball detection at a
+   matched 5 % false-positive rate is **41 % for the cloud with or without de-rotation** (AUC 0.866 /
+   0.865). The cloud's 41 % against a single frame's 18 % stands; it never depended on de-rotation.
+
+3. **The floor was being counted as things standing on it.** Voxels were classified by their centre;
+   the ground layer spans 0–4 cm, its centre is exactly `break_lo` (0.02 m), and `0.02 < 0.02` is
+   false — so every ground voxel landed in the floor-break band. In the R46 dumps **4 326 of the 5 277
+   voxels (82 %) the break profile counted were bare ground**, 93–96 % on some stops. That profile is
+   the object EPM's input, and the host-side profile §17.29 measured on had the same test. Voxels are
+   now classified by the mean height of the points in them: the same stop's cone reads **56 % ground,
+   13 % floor break**. The replay shows it — the floor draws grey, and the break band hugs the ball, the
+   block and the base of the walls. (A wall's bottom 20 cm is a floor break by definition, so it is the
+   profile's range and extent terms, not the band, that must tell a wall base from an object.)
+
+**And a verification trap worth recording.** The first round of verification ran on a stale binary:
+a parallel host build, its output filtered to lowercase `error`, never ran, so the gain-0 check, the
+R46 run and a replay all came from code built before any fix. The unfiltered rebuild then surfaced a
+`printf` with one more argument than specifiers — adding `revisit_dist` had shifted the logged anchor
+by one field and dropped the world yaw. Both are fixed and everything above is from the final binary.
+Never filter a build to "error": the warning was the bug.
+
+**The object EPM, re-measured on the fixed profile.**
+On the module's own profile, with the floor classified by mean point height, six seeds pooled into
+one EPM per arm (33 474 frames, 45 pose cells; H(object) 1.705 nats and H(object | pose) 0.136, so
+pose alone fixes 92 % of what is in view):
+
+| view | nodes | baked | switch/min | I(W;O \| pose) | of ceiling | shuffle floor | F1 block / ball / chair / shelf |
+|---|---|---|---|---|---|---|---|
+| **cloud profile** | 16 | **16** | **6** | **0.129** | **95 %** | 0.001 | **0.95 / 0.96 / 0.91 / 0.93** |
+| 8 column minima | 21 | 20 | 21 | 0.102 | 75 % | 0.001 | 0.85 / 0.70 / 0.73 / 0.73 |
+| 64 raw zones | 16 | 14 | 13 | 0.087 | 64 % | 0.001 | 0.61 / 0.41 / 0.67 / 0.41 |
+
+The ordering survives the fix and so does the gap: with the floor out of the profile, the cloud
+vocabulary captures 95 % of the object information pose leaves, twenty points above the column minima,
+and it is steadier than before (six winner switches a minute). §17.29's 98 / 72 / 55 cannot be compared
+number for number, and the reason is worth recording because it looked like a confound and is not one.
+The frame arms moved too (72 → 75 %, 55 → 64 %), which would mean the duck had walked differently — so
+passivity was checked directly: on seed 1 the R43 graph with the points published, the R46 graph with
+its modules idle, and the R46 graph with them running all reproduce the reference byte-for-byte (md5
+`e4b5c3fa…`). The walk is unchanged. What changed is which frames the bench sees: it feeds only frames
+that carry a profile, the old host cloud was open exactly during scheduled stops, and the module opens
+on the body's own stillness. Its windows differ, reach more poses (a block from 12 pose cells rather
+than 8), and hand all three arms the same different set. The honest comparison is within a run, and
+within this one the cloud leads every column.
+
+An observation on the stillness rule: per seed the module filed 11, 12, 11, 14, 11 and 17 clouds against
+11 scheduled stops, and two runs averaged 491 voxels a cloud against ~840 for the rest — stillness
+opening a cloud outside a stop, or a stop split where the body moved for longer than `move_ticks`. The
+cache keys on place, so this is not wrong, but a cloud of a few hundred voxels is a thinner comparison.
+
+**Verdicts.** `CloudMap` as a module `WORKING` (substrate, guarded, tested, and passive — the walk is
+byte-identical with it running). The object vocabulary over it `WORKING` on within-pose object content
+(95 % of the ceiling on the fixed profile, against 75 % and 64 % for the frame views); pose invariance
+still untested, and still gated on travel. Cache-by-place `WORKING` as a store, `PARTIAL` as a revisit
+judge — dead-reckoned alignment and a coarse place key; re-use context: content-based registration, or
+revisits close enough in time that odometry has not drifted. Replay `WORKING`. The three bugs fixed, with
+the claims they carried withdrawn or re-measured above. Nothing promoted.
+
+**The static voxel viewer (built after the above).** `tools/run_voxel_viewer.sh RUN.jsonl` opens every
+filed cloud of a run in an interactive 3D view (`tools/xaq_inspector/voxel_viewer.py`, PyQt6 +
+pyqtgraph's GL view, no brain connection; usage in the inspector README). World lays the clouds out at
+their anchors, which are instrumentation. Body shows one cloud in its own frame, which is what the duck
+has. Colour is by the mean-height bands or by hits. One thing the first render taught: a thin streak
+in the body view is not a fault. Seed 6's second place-8 cloud was anchored 11 cm from a wall and
+facing along it (yaw 169°), and a wall seen that way is a line whose far end reads tall, because the
+sensor's vertical fan widens with range.
+
+### 17.31 Small things on the floor: the stack rule, and a gaze that never holds (R52, 2026-09-13)
+
+**The operator's direction.** From the voxel viewer: the ToF is myopic, but objects on the floor are clear; a
+duck that walks around finding objects smaller than itself and trying to pick them up would make an
+interesting ten minutes, and voxels that stack taller are obstacles. Then, watching R46's stops: the gaze
+"moves to an angle, pauses, moves to another angle, pauses" for half a minute and never covers the angles the
+head can traverse, while the cloud could be accumulating the whole time the head moves.
+
+**The stack rule, measured before anything is built on it.** In the cloud's own frame: break-band voxels
+(2–20 cm mean height) grouped into 8-connected columns; each cluster's stack top is the contiguous chain of
+voxel heights over its footprint (dilated by one voxel) with a gap of max(10 cm, 0.12 × range), because the
+sensor's rows are 5.625° apart and the vertical spacing of its returns grows with distance. A cluster that
+tops out below 16 cm and spans at most 20 cm is a small thing; one that keeps rising is an obstacle. Scored
+against the scene manifest and the free bodies' simulated positions at filing (instrumentation, never an
+input) on R46 runs, seeds 1–5, which are out of sample: the range-scaled gap was chosen after seed 6 showed
+distant wall bases breaking a fixed gap's chain.
+
+| what counts as a thing | flagged | real objects among them | real objects caught |
+|---|---|---|---|
+| break band alone (the object EPM's input today) | 342 | 11 % | 100 % |
+| stack top < 16 cm, fixed 10 cm gap | 145 | 26 % | 100 % |
+| stack top < 16 cm, gap max(10 cm, 0.12 × range) | 70 | 53 % | 100 % |
+| stack top < 12 cm, same gap | 61 | 59 % | 97 % |
+
+What still passes: thin chair legs seen from far off (13; a leg's footprint is 8 cm against 12–16 cm for the
+objects), wall fragments (12), and six others. The break profile the object EPM reads cannot draw this line at
+all — every one of its terms lives inside 2–20 cm — which is §17.30's wall-base caveat. Three more facts from
+the same logs bear on seeking small things: they are seen at 0.6–2.2 m (median 1.3 m); the nearest floor
+return during a stop sits 0.42–0.67 m out (seed 6), so the last half-metre of an approach is blind at the
+stop's gaze; and a stop holds a detectable small object 0.15 times a minute with two balls and two blocks in
+the room. "Pick up" has no simulated counterpart yet: no MJCF variant has the mouth hinge, Pollen's
+`ground_pick` is a phase-scripted 4 s cycle (`robotd/src/control.rs`), and the skill runner (X2) is not in the
+host.
+
+**Built: `--stop-gaze-sweep SPEED YAW_MAX`.** Two measurements say why the babble cannot fill a cloud. During
+an R46 stop the head's joints move on **6 %** of the ticks and hold for the other 94, inside a yaw clamp of
+±0.7 rad against a joint range of ±2.97. And the simulated ToF casts one ray per zone, 5.6° apart, so a
+7–12 cm ball at 1.3 m (3–5°) can sit between rays for as long as the gaze holds. With the flag the gaze never
+holds: it moves at SPEED toward a cell of a yaw × pitch grid over its range (0.1 rad cells, the babble's pitch
+band), drawn at random among the cells this stop has looked at least. The error it descends is the stop's own
+coverage deficit, so it neither replays a fixed scan nor babbles back over what it has already seen. The
+hold's novelty rule runs unchanged on HOLD-long windows of the moving view, and the dwell becomes speed: a
+quarter of SPEED while the view is novel, up to MAX. At 12.5 Hz of ToF and 0.3 rad/s the beams advance 1.4° a
+frame. Guard: without the flag the seed-1 run's JSON reproduces the reference byte-for-byte (md5
+`28fc5942…`; the files differ only by the two banner lines the host prints when the inspector port binds).
+`l2_sweep.py` gains `--full-logs` so a harness run keeps the cloud records; `mj_host/tools/cloud_objects.py`
+scores both the rule (`rules`) and the arms (`arms`).
+
+**The A/B** (6 seeds × 1500 s, playroom, the R46 host arguments). A moving view keeps the place map
+surprised, so the babble's quiet rule rarely ends a sweep's stop early and the sweep stands longer. Hence two
+pairs: the arms as deployed, and an equal-length pair (QUIET 999: every stop the full 60 s, so only the head's
+motion differs).
+
+| n = 6 | head moving | voxels / cloud | objects ≤ 2 m in the babble's reach found | balls ≤ 2 m found | rule precision | real small things flagged / min | stands held |
+|---|---|---|---|---|---|---|---|
+| R46 babble | 6 % | 751 ± 165 | 42 / 63 (67 %) | 19 / 90 (21 %) | 0.62 | 0.34 ± 0.22 | 65 / 66 |
+| **R52 sweep, ±0.7 rad** | 97 % | **2 271 ± 417** | 75 / 100 (75 %) | 40 / 122 (33 %) | **0.92** | 0.53 ± 0.19 | 65 / 66 |
+| sweep, ±1.2 rad | 98 % | 2 399 ± 640 | 61 / 75 (81 %), and 11 / 116 beyond it | 41 / 110 (37 %) | 0.80 | 0.59 ± 0.19 | 63 / 66 |
+| babble, full-length stops | 5 % | 760 ± 167 | 41 / 61 (67 %) | 21 / 86 (24 %) | 0.68 | 0.33 ± 0.25 | 65 / 66 |
+| **sweep, full-length stops** | 97 % | 2 309 ± 391 | **94 / 109 (86 %)** | **50 / 124 (40 %)** | **0.98** | **0.67 ± 0.36** | 66 / 66 |
+
+Voxels per cloud rise on all six seeds in both pairs; objects in reach found rise on five of six in each (the
+sixth: seed 6 falls 87 → 64 % deployed and ties 87 / 86 % at equal length); balls rise on five of six in each.
+The voxel viewer shows it at a glance: both arms are identical until the first stop at 600 s, and at seed 6's
+first stop the two small objects the babble left as a few scattered voxels are solid clusters under the sweep,
+and its walls are continuous surfaces.
+
+The side effects, from the harness (sweep − babble, paired, n = 6): the place map calls **34 % of ticks novel
+against 18 %**, holds 5.7 more nodes (4+/0−) and switches winner 17 more times a minute (5+/1−) — its view is
+head yaw plus eight ToF column ranges, so a gaze that never holds is a view that never repeats. Stops rarely
+end early, so the duck stands 5 % more of the control phase and walks 7.4 m less (0+/6−), and meets walls less
+(14.8 → 4.6 per minute), which is walking less rather than avoiding better and is not claimed. The ±1.2 rad
+sweep's map holds 19.5 more nodes.
+
+**A sim-to-real caveat.** Part of the gain on balls comes from the simulated sensor: one ray per zone leaves
+gaps between zone centres that a moving gaze fills, while the real VL53L8CX integrates each zone's whole 5.6°
+cone, so a ball between centres still shifts that zone's return. The coverage gain (a head moving through 97 %
+of the stop, the whole reachable field swept) should transfer; the gain on balls probably overstates the
+hardware's. On the robot the head angle must also be matched to each ToF frame's timestamp; at 0.3 rad/s,
+30 ms of latency is 0.5°, a tenth of a zone.
+
+**Verdicts.** The stack rule `WORKING` as a sensor reduction: precision 0.11 → 0.53 out of sample at full recall
+(n = 6, a signal; not yet in `CloudMap`). R52, the gaze sweep at ±0.7 rad, `WORKING` on what it is for: clouds
+three times denser on every seed, the rule's precision 0.62 → 0.92, objects in reach found 67 → 75 % (86 % at
+equal stop length), balls 21 → 33 % (24 → 40 %), stands unchanged. Its effect on the place map is real and is
+the next design question rather than a reason to hold the gaze again. The ±1.2 rad sweep `PARTIAL`: the first
+sightings beyond the babble's reach (11 of 116 objects), at the cost of 63 / 66 stands, precision 0.80 and 19.5
+extra map nodes; re-use context: a stand that absorbs the head's swing, or a sweep that slows toward the ends
+of its range. Nothing promoted; presets R46 and R52 (seed 3) put the pair in front of the operator's eye. Open
+(O42): the place map should read the stop's cloud instead of a moving frame, and a stop should end when its
+cloud stops growing rather than when the map stops being surprised.
+
+### 17.32 The map reads the cloud, stops end on it, and how fast the head can look (R53–R55, 2026-09-13)
+
+**The operator's direction**, on §17.31's open item: feed the map the cloud and end stops on cloud growth; and,
+if possible, let the head traverse faster, as long as the cloud still renders well enough to find small
+objects and walls.
+
+**Built, each behind its own flag, all three off by default.**
+- **R53 `--map-view cloud`.** `ogma::CloudMap::view()` is the cloud as a view: across ±64° of its own de-rotated
+  frame (a ±0.7 rad sweep plus half the sensor's field), 8 sectors, each the nearest voxel whose mean height
+  clears the floor, divided by 4 m (the frame columns' own scale; empty = 1). With the flag, the place map's
+  view slots carry it instead of the frame in front of a moving head, and head yaw reads 0. The map's 13-dim
+  input and its config are unchanged. While no cloud is open (the walk), the slots hold the last cloud's view,
+  so a walk is matched by pose against the places the stops learned. `test_cloud_map`
+  `ViewIsTheNearestOffFloorReturnPerSector`: empty with no cloud, a bare floor is not a view, the nearest
+  standing thing lands in its sectors.
+- **R54 `--stop-cloud-end F`.** A stop ends once the open cloud's growth (new voxels over the last 2 s) has
+  stayed below F × the highest growth this stop has shown, for 2 s more. It is scale-free, since each stop is
+  judged against its own peak, and it replaces the gaze's quiet rule. F = 0.1 came from R52's full-length
+  stops: it would have ended them at a median 16 s holding 62 % of their 60 s voxels (F 0.05: 24 s, 72 %;
+  0.2: 12 s, 54 %).
+- **R55 `--stop-gaze-sweep-slow F`.** The sweep's speed while the map finds the view novel, as a fraction of
+  SPEED (0.25 is R52). Measured first: R52's head sat at the quarter speed on **69 %** of stop ticks, so the
+  slow-down, not SPEED, set how fast it looked around. R55 is the sweep at one constant speed (F = 1) at 0.3,
+  0.6, 1.0 and 1.5 rad/s.
+
+Guards: CloudMap 8/8, schema defaults 1/1; the flags absent, seed 1 of R46 and of R52 reproduce their A/B logs'
+JSON lines (md5 `28fc5942…`, `4b182be6…`).
+
+**The ladder** (l2_sweep, 6 seeds × 1500 s, playroom, R46 host arguments; R52 as the control; each arm adds to
+the one above it, the speed arms to R54).
+
+| n = 6 | stop (s) | stands held | map switch / min | map nodes | map TLE | straight | path (m) | cells | walls / min |
+|---|---|---|---|---|---|---|---|---|---|
+| R52 sweep (control) | 58.5 | 65 / 66 | 77.4 | 46.5 | 0.17 | 0.08 | 42 | 62 | 4.6 |
+| R53 + the map reads the cloud | 35.8 | 64 / 66 | **24.9** | 39.0 | 0.25 | 0.18 | 85 | 112 | 8.2 |
+| R54 + stops end on growth | **23.6** | 66 / 66 | 23.5 | 31.8 | 0.29 | 0.16 | 108 | 105 | 5.0 |
+| R55 constant 0.3 rad/s | 26.6 | 66 / 66 | 23.2 | 31.8 | 0.26 | 0.17 | 104 | 107 | 8.0 |
+| constant 0.6 rad/s | 24.0 | 64 / 66 | 24.1 | 26.3 | 0.27 | 0.26 | 105 | 147 | 23.7 |
+| constant 1.0 rad/s | 25.5 | 63 / 63 | 20.5 | 23.7 | 0.27 | 0.17 | 103 | 113 | 22.7 |
+| constant 1.5 rad/s | 24.3 | 66 / 66 | 20.0 | 22.3 | 0.25 | 0.18 | 109 | 81 | 4.6 |
+
+| n = 6 | head speed p50 (rad/s) | voxels / cloud | objects ≤ 2 m in reach found | balls found | rule precision | walls and furniture read as small |
+|---|---|---|---|---|---|---|
+| R52 | 0.08 | 2 271 | 75 / 100 (75 %) | 40 / 122 (33 %) | 0.92 | 3 / 221 (1.4 %) |
+| R53 | 0.08 | 1 806 | 47 / 58 (81 %) | 30 / 85 (35 %) | 0.72 | 14 / 297 (4.7 %) |
+| R54 | 0.11 | 1 463 | 52 / 73 (71 %) | 31 / 83 (37 %) | 0.84 | 8 / 302 (2.6 %) |
+| **R55 0.3** | 0.30 | 2 026 | **58 / 69 (84 %)** | 29 / 81 (36 %) | **0.86** | 9 / 345 (2.6 %) |
+| **R55 0.6** | 0.60 | 1 691 | 39 / 46 (85 %) | 19 / 82 (23 %) | 0.82 | 9 / 393 (2.3 %) |
+| R55 1.0 | 1.00 | 1 669 | 46 / 62 (74 %) | 26 / 93 (28 %) | 0.73 | 14 / 369 (3.8 %) |
+| R55 1.5 | 1.49 | 2 281 | 52 / 60 (87 %) | 22 / 65 (34 %) | 0.71 | 11 / 312 (3.5 %) |
+
+**What it says.**
+1. **The map reading the cloud is loud.** Winner switches fall from 77 to 25 a minute on every seed; walks
+   straighten on every seed (+0.10); the map settles on fewer places (46 → 39, nearly all baked); and stops
+   shorten to 36 s even under the quiet rule, because a sweeping gaze no longer surprises it. The cost is the
+   map's own error, up 0.08–0.13 on every seed: on the walk the held view is the last stop's, so the node the
+   pose finds fits less closely. The per-stop cloud also thins, as R53's stops are shorter while the slow-down
+   still holds the head at 0.08 rad/s (precision 0.92 → 0.72).
+2. **Ending on growth sets the tempo.** Stops fall from 58.5 to 23.6 s, 62 of 66 end on growth, and every
+   stand holds. The duck walks 66 m more and reaches 43 more cells (both 6+/0−). Per-stop quality is uneven:
+   two seeds find only 2 of 5 objects in reach.
+3. **Turning the slow-down off recovers the cloud at the same tempo.** At a constant 0.3 rad/s: 2 026 voxels a
+   cloud in 27 s against R52's 2 271 in 58 s, objects in reach 84 % (75–93 % on every seed), precision 0.86.
+   The dwell had cost the cloud more than it gave it.
+4. **Faster: small things hold, obstacles fray, and stops do not shorten.**
+   - Objects in reach and balls show no reliable trend with speed (84 / 85 / 74 / 87 %, 36 / 23 / 28 / 34 %).
+     The ToF still interleaves at 1.5 rad/s, 6.9° a frame, because a 24 s stop makes some 25 passes.
+   - The obstacle side degrades above 0.6 rad/s: precision 0.86 / 0.82 / 0.73 / 0.71, walls and furniture
+     read as small 2.6 / 2.3 / 3.8 / 3.5 %, and per-seed precision floors of 0.57 at 1.0 and 0.22 at 1.5.
+   - Stop length is 24–27 s at every speed. The growth rule is relative to the stop's own peak, and a faster
+     head raises the peak along with everything else, so how long a stop lasts is F's to set, not the head's.
+5. **Walking twice as much** gives the walk's own wall problem twice the room to show. Walls tie at 0.3
+   (8.0 against 4.6, t 0.6), while 0.6 and 1.0 read 23.7 and 22.7 a minute with single seeds at 45–62. The
+   rate does not rise with speed (1.5 reads 4.6) and R48's step is not in this stack, so none of it is
+   attributed to the head. The 1.0 arm's 63 stops are one seed's 13 walking rescues pushing its stops past
+   the schedule; every stop that started held.
+
+**A sim-to-real caveat on speed.** The simulated ToF reads the head's pose at the instant of the cast. On the
+robot a 30 ms mismatch between a frame and its head angle is 0.9° at 0.6 rad/s but 1.7–2.6° at 1.0–1.5, a
+third to a half of a zone, so the hardware's ceiling is probably lower than the simulation's.
+
+**Verdicts.** R53, the map reading the cloud: `WORKING`, loud on the map's steadiness (switches −52 a minute,
+6+/0−), with its error up as the cost. R54, stops ending on cloud growth: `WORKING` (stops 2.5× shorter,
+stands 66 / 66), per-stop quality uneven. R55, a constant sweep: `WORKING` at 0.3–0.6 rad/s, and `PARTIAL`
+at 1.0–1.5, where small objects hold but walls start breaking into false small things, and speed buys no
+shorter stops. The stack for the operator's eye is R53 + R54 + a constant 0.6 rad/s: the fastest speed whose
+object and obstacle numbers both hold, with balls (19 of 82) the thing to watch, and 0.3 as the quality
+reference. Presets R55 (0.6) and R55b (1.5), seed 5. Nothing promoted. Re-use context for the fast sweep: a
+head-angle timestamp per frame on the robot, or a wall-continuity term that does not break at speed. Open:
+the map's error on the walk (a held view is a stale one), and F as the tempo knob.
+
+**PROMOTED (the operator's eye, 2026-09-15):** R55 at 0.6 rad/s is "the best choice to promote. Faster head
+movement looks unnatural and does not seem to speed up stops." R53 + R54 + a constant 0.6 rad/s sweep is the
+stop's look: `★ CLOUD` in the launcher. R55b (1.5 rad/s) stays in the list as the measured edge. The operator's
+next step, and why: the shorter the stop, the more interesting the robot. It glances around, has an idea of
+where the walls are even if not a perfect one, and still finds the smaller objects that matter most. The growth
+threshold is the knob for that (§17.33).
+
+### 17.33 How short a stop can be: the growth threshold (R56, 2026-09-15)
+
+**The question.** The operator, promoting R55: the shorter the stop, the more interesting the duck. It glances
+around, has an idea of where the walls are even if not a perfect one, and still finds the smaller things that
+matter most. On R55 the stop's length belongs to `--stop-cloud-end F`; §17.32 showed head speed does not move
+it. The study is F: 0.1 (R55 itself), 0.2, 0.3, 0.45 and 0.6, at 6 seeds × 1500 s each, with the rest of the
+R55 stack untouched. The base arm reproduces §17.32's 0.6 rad/s arm exactly (stands 64 / 66, mean stop
+24.0 s), a free determinism check.
+
+**A wall measure for "an idea of where the walls are"** (`cloud_objects.py arms`, added for this). Take every
+2° across the cloud view's ±64°. Among those bearings whose room wall lies within 2.4 m of the stop (the cloud
+keeps returns to 2.5 m), it counts the share where the cloud holds an off-floor voxel within 2° and 12 cm of
+that wall's true range. Furniture standing in front of a wall hides it equally in every arm. As a check on the
+measure itself, R52's 58 s stops locate 70 % and R55's 24 s stops 66 %.
+
+| F (n = 6) | stop p10 / p50 / p90 (s) | cloud open | voxels / cloud | walls located | objects ≤ 2 m in reach found | balls found | rule precision | walls and furniture read as small | real small things flagged / min | stands held |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.1 (R55) | 11.8 / 20.7 / 35.9 | 93 % | 1 691 | 66 % | 39 / 46 (85 %) | 19 / 82 (23 %) | 0.82 | 2.3 % | 0.33 | 64 / 66 |
+| 0.2 | 9.0 / 18.1 / 26.0 | 80 % | 1 473 | 60 % | 51 / 69 (74 %) | 20 / 82 (24 %) | 0.89 | 1.0 % | 0.43 | 61 / 63 |
+| 0.3 | 10.1 / 13.6 / 25.8 | 63 % | 1 528 | 70 % | 71 / 89 (80 %) | 35 / 115 (30 %) | 0.82 | 3.7 % | 0.59 | 66 / 66 |
+| **0.45** | 7.3 / **10.5** / 15.3 | 54 % | 1 296 | **70 %** | 56 / 78 (72 %) | 30 / 87 (34 %) | 0.76 | 4.3 % | 0.45 | 66 / 66 |
+| 0.6 | 6.6 / 8.4 / 12.1 | 58 % | 1 004 | 62 % | 47 / 66 (71 %) | 21 / 93 (23 %) | 0.72 | 3.8 % | 0.35 | 64 / 64 |
+
+"Cloud open" is the share of a stop's ticks with the cloud open.
+
+**What it says.**
+1. **Stops halve and tighten.** From F 0.1 to 0.45 the median stop falls from 20.7 to 10.5 s and the 90th
+   percentile from 35.9 to 15.3 s, and every stand holds.
+2. **The walls hold.** 60–70 % of the in-reach wall is located at every F up to 0.45 (70 ± 4 % per seed at
+   0.45). At 0.6 it slips to 62 %, and the worst quarter of clouds locate 29 % or less.
+3. **Small things hold, within seed noise.**
+   - Objects in reach: 85 % at 0.1, then 71–80 % from 0.2 to 0.6.
+   - Balls: 23–34 %, with no trend.
+   - Real small things flagged per minute of run, which counts the walking the shorter stops buy: highest at
+     0.3 (0.59), 0.45 at F 0.45, against R55's 0.33.
+4. **The obstacle side is what shortening costs.** Precision is 0.82–0.89 up to F 0.3, then 0.76 and 0.72,
+   and walls and furniture read as small rise from 1–2 % to about 4 %. A shorter cloud has fewer returns up
+   a wall's face to chain its stack.
+5. **There is a floor.** A stop cannot end before its cloud has opened (half a second of stillness after the
+   settle) and been judged over two 2 s windows. So at F 0.45–0.6 the cloud is open for only 54–58 % of the
+   stop, and F 0.6's 10th-percentile stop (6.6 s) sits on that floor. Stops much under 8 s would need the
+   window shortened, not F.
+6. **Behaviour.** The duck stands 5–12 % less of the control phase and walks 9–25 m more a run (5+/1− to
+   6+/0−), wall contacts a minute tie at every F (sd 9–29), and the map's error rises a little further
+   (+0.02–0.05). One line is unexplained: at F 0.3 cells fall by 50 and straightness by 0.13 on every seed,
+   and neither neighbouring F shows it.
+
+**Verdicts.** F 0.1 → 0.45 `WORKING` for the operator's aim: the median stop halves (20.7 → 10.5 s) while the
+walls are still located (70 %) and small things still found (objects in reach 72 %, balls 34 %), at the cost of
+the obstacle side (precision 0.82 → 0.76, misreads 2.3 → 4.3 %). F 0.6 `PARTIAL`: its stops are the shortest
+(8.4 s) and sit on the floor, but the cloud is 41 % thinner, the walls slip (62 %, a quarter of clouds at 29 %
+or less) and precision is 0.72. Recommended for the operator's eye: F 0.45 (preset R56, seed 3), with F 0.6 as
+the edge (R56b) and F 0.3 as the middle between quality and tempo. Nothing promoted; n = 6 is a signal. Open:
+the stop's schedule is still a timer (every 80 s from 600 s), so a shorter stop lengthens the walk rather than
+adding glances. Whether the duck should stop more often, and on what, is the next question this raises.
+
+**PROMOTED (the operator's eye, 2026-09-15):** R56 at threshold 0.45: "the robot is able to make a very solid
+map in a very short amount of time." R56 is `★ CLOUD` in the launcher, superseding R55. This closes the cloud
+phase. Its summary is [`microduck_cloud_phase.md`](microduck_cloud_phase.md): the promoted run, what the phase
+learned, the tools, the traps, and the open questions for the next one (register O43, when to stop; O44,
+seeking small things).
+
+### 17.34 The things phase opens: the stack rule in the module, the attended thing, and a vocabulary of things (R57–R59, 2026-09-15)
+
+**The direction.** The operator, on `★ CLOUD`: map-making is not the interesting thing for the duck to be doing;
+it should seek what is smaller than itself, interact with it, and be surprised when it answers. The plan is
+[`microduck_things_phase.md`](microduck_things_phase.md) (register O45–O50); this section is its T1, the
+sensor side, built passive before any loop reads it. Two corrections from the discussion shaped it: a thing does
+not grow on approach (a voxel is world-sized; its sampling grows, so the error an approach reduces is the
+descriptor's precision), and the head should look where the thing is (a gaze error, T3), not tilt on a script.
+
+**Built.** `ogma::CloudMap` runs §17.31's stack rule on the OPEN cloud every `things_every` ticks (4, the
+sensor's cadence): break-band voxels into 8-connected columns, each cluster's stack top the contiguous chain of
+heights over its dilated footprint with a gap of max(`gap_min`, `gap_k` × range), SMALL when the top is under
+`small_top` (0.16) and the footprint within [`small_ext_min`, `small_ext`] (0, 0.20). The nearest small cluster
+is ATTENDED. Two new topics, both empty by default so a graph without them is byte-identical: `things_topic`
+carries the attended thing's descriptor, world-sized and in [0,1] and without a bearing (top, footprint, aspect,
+columns, hits per column, chain, range, lowest height), published only while a thing is attended; and
+`thing_bearing_topic` carries `[vx = +right, vy = +forward, proximity]` in the BODY frame, the cloud's frame
+turned back by the yaw drift since the anchor, the shape `VisualBearing` emits so `VisualHomingNav` consumes it
+unchanged, and it is published every tick the topic exists, reading proximity 0 while the body walks (a
+consumer must not home on the last stop's stale bearing). The host logs `thg` (the attended thing per compute
+tick, in the cloud's frame), `tepm` (the thing EPM's token) and `things` (the filed cloud's clusters), and
+`cloud_objects.py things` scores them against the manifest. R57 (`a1v2_r57_things.json`) is R46 plus the
+topics and a thing EPM (`rbf`, 8 dims, bake 20). Tests 9–13 of `test_cloud_map` pin the default-off contract,
+the rule on a cube and a rising post, the bearing's frame, filing, and the floor.
+
+**Guards.** R46 on the pre-change and post-change binaries: the same md5 over every JSON line (760 s, seed 3).
+R57 against R46 on the post-change binary: 38 000 lines identical once `thg`/`tepm`/`things` are stripped, and
+at n = 6 × 1500 s R57's `arms` scores equal R56's F 0.45 arm to the last digit (13.0 clouds a run, 1 296
+voxels a cloud, precision 0.76, walls 70 %). The module's clusters against the offline rule on the same 78
+filed clouds: 583 of 583 matched by centroid agree on the verdict, top and footprint deviating by 0.0 cm.
+
+**Measured, n = 6 × 1500 s, the playroom, `★ CLOUD`'s arguments** (4 903 attended ticks on R57):
+
+| | R57 (no floor, full descriptor) | R58 (floor 0.08, shape-only descriptor) | R59 (floor 0.08, full descriptor) |
+|---|---|---|---|
+| a small cluster in view, % of thing ticks | 68 | 55 | 55 |
+| the attended thing is a real object (precision) | 0.73 | **0.82** (5+/1−) | **0.82** (5+/1−) |
+| balls attended, ticks | 1 452 | 1 395 | 1 395 |
+| thing EPM nodes seen per run | 23.7 | 14.7 | 21.2 |
+| per-run majority-label purity (chance) | **0.87 ± 0.05** (0.43) | 0.83 ± 0.07 (0.52) | **0.91 ± 0.07** (0.52) |
+| purity − chance | **+0.44 ± 0.06** | +0.30 ± 0.15 | +0.38 ± 0.16 |
+
+What the attended thing was on R57: block 2 112, ball 1 452, chair 605, wall 557, table 87, other 75, shelf 15.
+The misses are one-column clusters (columns p50 = 1, hits per column 4–8 against the objects' 4–5 columns
+and 8–18 hits): a wall base or a chair leg that the sweep has landed a few rays on. Offline on the same ticks:
+requiring the attended cluster to be UNCHANGED for K recomputes changes nothing (K 0 → 12: 0.73 → 0.75, at
+57 % of ticks kept), because a fragment that gets no more rays is as stable as a ball; requiring two columns
+gives 0.86 at 73 % kept and three 0.93 at 61 %. Hence `small_ext_min`, a floor on the footprint in the rule's
+own units (0.08 m = two columns): a real ball is one column early in a sweep too, so the floor delays attention
+until the thing is sampled, which is the point.
+
+**Two catches on the way (§3.2).** First, the thing EPM's purity was read at 0.56 when the scorer pooled node
+ids across runs; every seed grows its own EPM, so node 9 in one run is unrelated to node 9 in another. Scored
+per run it is 0.87. Second, R58 bundled two changes, and they disagreed: the floor raised precision on five of
+six seeds (seed 3: 0.56 → 0.49), while the shape-only descriptor LOWERED the vocabulary's purity (+0.44 →
++0.30). Offline bins over (top, footprint) had read 0.76 and suggested the sampling dims were noise; in the
+EPM they are shape. On R57 a block's flat face returns 18 hits per column and a ball's curved face 8, and the
+first run's nodes divide the two cleanly (node 11: 106 block, 6 ball; node 10: 69 ball). R59 is the floor
+alone.
+
+**Pose invariance, still untestable.** Each real object is attended from 1.3–2.6 poses a run, and its modal
+winner holds 0.40–0.66 of its ticks. O40's limitation stands: the duck does not travel enough for the test.
+
+R59 keeps R58's attention exactly (the floor decides attention, the descriptor does not) and R57's vocabulary:
+per-run purity 0.91 ± 0.07, 21 nodes a run. Purity minus chance is the weaker comparison here, since the floor
+also raises chance (fewer fragment labels among the attended ticks: 0.43 → 0.52).
+
+**Verdicts.** T1's reduction `WORKING` as a sensor (exact against the offline rule; attention on a real object
+on 82 % of attended ticks with the floor, up on five of six seeds). The thing EPM's vocabulary `WORKING` on kind (per-run purity 0.87 against chance 0.43, blocks
+and balls under separate nodes) with the FULL descriptor; the shape-only descriptor `REGRESSION` on it
+(re-use context: a sensor whose returns per column do not depend on the surface, or a descriptor that carries
+curvature explicitly). The stability gate on attention `NULL` offline, not built (re-use: a moving scene, where
+stability would mean something). R59 is the T1 config the seek loop (T2) builds on. Passive on every seed:
+the walk is byte-identical to `★ CLOUD`, so there is nothing for the operator's eye yet; presets R57–R59
+(seed 3) show the cloud panel's counts at each stop.
+
+### 17.35 The seek loop: the duck walks to a thing it saw, remembering where it was (R60, things phase T2, 2026-09-15)
+
+**Built.** `ogma::BearingSeekLoop` (new, generic, registered): the duck sees a small thing only while it stands
+(the cloud exists at a stop and the thing bearing reads proximity 0 the moment the body walks), so a loop that
+walked toward things would be silent for the whole walk unless it remembered where the thing was. While the
+bearing is live the loop fixes the thing's POSITION by dead reckoning (the body's odometry pose, published by
+the adapter as `reality.proprio.odom`, plus the bearing and the range the proximity encodes); while the bearing
+is silent it homes to that position, re-aiming as the body moves and turns, until the remaining range falls
+under `arrive_m` (0.25) or its confidence decays to the floor (`forget_ticks` 3000, about 60 s to 0.37). The
+Cell's `VisualHomingNav` remembered an allocentric bearing through an occlusion; the duck has range, so the
+belief is a position and arrival is the loop's own. Its need is the confidence in the held target; its honest
+signal, for `LoopCompetence` (sign −1), the range left. R60 (`a1v2_r60_seek.json`) is R59 plus the loop and
+R28's arbitration with seek on the arbiter's vision channel: G_seek = need × trust, G_play = (1 − need) ×
+trust; the adapter takes the winner's bearing (steer 3). A host flag `--seek-gate` (R60g) makes the ToF sense
+slot of the target's sector read free while seek holds the reference, so the twist brain's proximity prior does
+not push the body off the thing it walks to. Four unit tests pin the loop (`test_bearing_seek_loop`); the
+unchanged R46 config is byte-identical on the new binary (md5 `cb24520c…`); `l2_sweep.py` gains `seek%`,
+`seekHeld%` and `seekEnds`; `cloud_objects.py seek` scores every episode against the manifest.
+
+**The smoke run first** (seed 3, 900 s): at the first stop the loop fixed a target at 1.52 m, the body homed
+to it on the walk (range 1.52 → 0.30 m over 46 s, seek winning every tick), and once the range stopped falling
+the arbiter handed the reference back to play. The target was a wall base the rule had read as small (the
+18 % false-positive class of T1), 17 cm from the wall; the frames are right (the attended cluster's world
+position from the anchor matches the direction the body took) and the dead-reckoned endpoint sat 0.5 m from it.
+
+**Measured, n = 6 × 1500 s, the playroom, `★ CLOUD`'s arguments, against R59:**
+
+| | R59 (base) | **R60 seek** | R60g seek + gate |
+|---|---|---|---|
+| seek wins the reference, % of ticks | — | 28 ± 8 | 24 ± 10 |
+| a target held, % of ticks | — | 55 ± 16 | 49 ± 20 |
+| seek episodes (all seeds) | — | 21 | 23 |
+| targets that were real objects | — | 17 / 21 (11 blocks, 6 balls) | 20 / 23 |
+| blocks: closest approach p50 · within 0.4 m · an object touched | — | **0.27 m · 7 / 11 · 3** | 0.24 m · 11 / 14 · 3 |
+| balls: closest approach p50 · within 0.4 m · touched | — | 0.52 m · 1 / 6 · 0 | 0.45 m · 3 / 6 · 2 |
+| episodes ending by arrival / forgetting | — | 20 / 1 | 21 / 2 |
+| walls / min (per seed, down vs base) | 21.7 ± 23.2 | **12.4 ± 14.4** (4 / 6) | 28.9 ± 26.9 (2 / 6; seed 4: 13.9 → 80.9) |
+| cells | 145 ± 33 | 124 ± 29 (3 / 6 down) | 131 ± 34 |
+| object contacts / min · objects moved, m | 14.1 ± 18.8 · 3.5 ± 2.0 | 19.2 ± 26.8 · 3.4 ± 2.2 | 5.9 ± 7.8 · 3.0 ± 2.1 |
+| stands held · stops · stop length | 66 / 66 · 11 · 15.0 s | 63 / 65 · 10.8 · 14.5 s | 66 / 66 · 11 · 15.4 s |
+
+**Reading it.** The mechanism is loud at the episode level: 21 episodes, 17 of them at a real object, and for
+blocks the body comes within 0.4 m of the thing's true position on 7 of 11 by dead reckoning alone, three times
+into contact (two episodes of 15–19 s pushing a block). Balls are harder (median 0.52 m): the ball is the
+thing most likely to have moved between the stop that fixed it and the walk (the base already displaces the
+room's four movables by 3.5 m a run through the duck's ordinary stumbling), and its cluster centroid is the
+least stable. Arrival by dead reckoning ends 20 of 21 episodes. On the aggregate metrics the lever ties or
+helps: wall contacts fall on four seeds of six (the seek heading is a steady direction, like play's), coverage
+ties, stands hold. Object contacts and displacement are blind here: the base moves objects 3.5 m a run
+without seeking anything, so "interaction" cannot be read from displacement until the duck stops at the
+thing (T4) and something distinguishes a sought contact from a stumbled one.
+
+**The gate.** Blinding the target's ToF sector while seek holds the reference brings the body closer (blocks
+11 / 14 within 0.4 m, balls 3 / 6) at the cost of the walls: 28.9 / min against 12.4, up on four seeds of six,
+seed 4 to 80.9. A held target 17 cm from a wall, or a wall behind the thing, is exactly what the sector gate
+hides. `REGRESSION` in this form; re-use context: a gate limited to the last half metre of the approach, or one
+that opens only for a target whose vocabulary node is a thing's rather than a wall's (the thing EPM separates
+them at purity 0.9).
+
+**Verdicts.** T2's seek loop `WORKING` as a mechanism and `PARTIAL` as a behaviour at n = 6: it takes the duck
+to the things it saw, walls do not rise, and the interaction the phase is for needs the stop at arrival (T4)
+before it can be read. Not promoted; preset R60 (seed 3, fast-forward through 600 s) puts the first walk-to-a-
+thing in front of the operator's eye; R60g the gated form. Next: T4's arrival stop, then T3's gaze at the
+thing, so that a thing reached is a thing looked at.
+
+### 17.36 A stop that starts on arrival (R60a, things phase T4, 2026-09-15)
+
+**Built.** `--stop-on-arrive`: a stop starts when the seek loop drops a target it has reached (its need goes to
+0 with the range under 0.3 m), with the same settle, hand-back, sweep and cloud as a timer stop, and the same
+ending on the cloud's growth. The 80 s timer stays as the floor, so a duck that has seen nothing still
+glances (the plan's "retire the timer" is deferred until the map's walk-time error is the second trigger).
+`cloud_objects.py stops` scores every stop by how it started, how near the nearest object was when it began,
+and what its cloud attended; `l2_sweep.py` gains `stopsArrive`. R46 stays byte-identical (md5 `cb24520c…`).
+
+**Measured, n = 6 × 1500 s, against R60** (the same seeds, the same arguments plus the flag):
+
+| | R60 seek | **R60a seek + arrival stops** |
+|---|---|---|
+| stops a run · of which on arrival | 10.8 · — | 15.3 ± 2.4 · **5.3 ± 3.3** (32 of 92) |
+| nearest object when an arrival stop begins, p10 / p50 / p90 | — | **0.13 / 0.21 / 0.29 m** (29 of 31 within 0.5 m) |
+| nearest object when a timer stop begins, p50 | 1.14 m (seed 5) | 1.00 m (13 of 47 within 0.5 m) |
+| the arrival stop's cloud attends a real object · one within 0.8 m · nothing | — | 18 / 31 · 8 / 31 · **12 / 31** |
+| stop length p50 · mean (arrival / timer) | 14.5 s | 10.9 / 12.8 s · 20.9 / 28.7 s (25 of 92 reach the 60 s cap) |
+| walk / stand, % of the control phase | 82 / 16 | 54 / 44 |
+| path · cells | 124 m · 124 | 81 m (6 / 6 down) · 89 (5 / 6 down) |
+| walls / min | 12.4 ± 14.4 | 20.4 ± 20.7 (3 / 6 up; seed 4: 8.2 → 56.1) |
+| object contacts / min · objects moved | 19.2 · 3.4 m | 3.2 · 2.5 m |
+| map TLE on the walk · nodes | 0.31 · 23 | 0.21 · 27 |
+| stands held | 63 / 65 | 92 / 92 |
+
+**Reading it.** The mechanism is loud: an arrival stop begins a median 0.21 m from a real object, by dead
+reckoning from a bearing fixed at the previous stop. The duck walks to a thing it saw and stops beside it.
+What it then does is the phase's next finding, and it is what T3 predicted. At 12 of 31 arrival stops the
+cloud attends nothing, and at most of the rest it attends a *different* thing 0.8–1.3 m away: the thing
+reached sits at 0.2 m, below a level gaze, which first sees the floor at about 0.5 m. The thing reached is the
+thing not looked at. Where the reached thing sat at 0.3 m or more it was seen (seed 1 at 772–800 s: ball at
+0.30, 0.24, 0.27, 0.26 m, attended at 0.33, 0.30, 0.29 m), and the duck then did the degenerate thing:
+attend it, fix it as a target at 0.3 m, walk, arrive at once, stop, four times in 30 s. That is lingering
+without habituation; the thing EPM's error at an attended thing (the plan's pull) is what should let it go.
+
+The costs are those of standing: walk time falls from 82 % to 54 %, path and coverage with it (path down on
+every seed), wall contacts return to the base's level on three seeds (seed 4's 56 / min is a duck stopping and
+starting beside furniture), and a quarter of the stops now run to the 60 s cap, which the cloud's growth rule
+had ended in 10 s before (O37's ending question, re-opened by a cloud that keeps growing next to a thing).
+Object contacts fall from 19 to 3 a minute because the duck now stops at the thing instead of stumbling
+through it; displacement falls with it. Read together: the duck reaches things and stands by them, and cannot
+yet see or push what it reached.
+
+**Verdicts.** T4 `WORKING` as a mechanism (arrival stops at 0.21 m, 29 / 31 within 0.5 m), `PARTIAL` as a
+behaviour: the reached thing is invisible to the stop, and without habituation the duck loops at a visible one.
+Not promoted; preset R60a (seed 1, fast-forward through 600 s, where four arrival stops at a ball follow one
+another from 772 s) for the operator's eye. The two levers this hands the plan, in order: **T3's gaze at the
+reached thing** (the sweep centred on the target's bearing and expected elevation, about 35° down at 0.3 m,
+which O36 showed the stand can take), and **habituation** (the seek need weighted by the thing EPM's error at
+the attended thing, so a thing looked at four times lets the duck go). Then the (d) tests with a moved ball.
+
+### 17.37 The circling: a heading reflex, and the play loop's mirrored bearing (R60a → R64, 2026-09-17)
+
+**The operator's eye on R60a (seed 1).** "The duck walks in a small clockwise circle for much of the run
+between stops; it isn't until 930 s that it looks across to the other side of the room and scans the balls
+and blocks; it does end up in the vicinity of the small objects and continues its circling there. A more
+random walk would be more interesting, which may occur if the robot is trying to reduce its yaw error
+relative to a small-object target."
+
+**What the circle is made of** (`cloud_objects.py heading`, new: on walking ticks, by which loop holds the
+reference). Two things, both in the ledger already, and one of them wrong.
+
+- *Under play* (74 % of walking ticks on R60a): the reference runs ahead of the heading at the body's own
+  turn rate (median 0.70 rad/s; faster than 0.5 rad/s on 56 % of ticks), the error sits at 1.56 rad and
+  never closes, and the yaw command is on its rail (|vyaw| > 0.9 on 93 %). This is §17.16–17.17's orbit.
+- *Under seek* (26 %): the reference is quiet (0.10 rad/s), and the body still circles: the command holds
+  +1 while the error crosses zero and grows to 1.4 rad before it flips, with the ToF clear. At forward
+  speed a saturated yaw is a circle of about half a metre. This is §17.17's "the regulator does not
+  regulate".
+
+**Lever 1, the heading reflex** (`--heading-reflex TAU DAMP GATE`, off by default, R46 byte-identical): the
+picrawler's answer (`CLAUDE.md` §1) on the duck's authoritative yaw channel. While a loop holds the
+reference, `action.vyaw` becomes the rate that closes the heading error in TAU seconds (1.0), damped by the
+sensed yaw rate (0.3), in the walker's own units; it is mixed with the twist brain's own yaw by proximity
+(nothing within a metre: the reflex owns the yaw; a wall at hand: the brain's avoidance owns it). Gated by
+the state it exploits. On R60a, n = 6: |vyaw| on the rail 96 → 64 %, cells 89 → 129 (5 / 6 up), span 9.2 →
+12.7 m², straightness 0.15 → 0.21, walls tie (20.4 → 21.0, sd 21 → 6), stands hold. Under seek the error
+closes: median 1.36 → 0.43 rad (under 0.3 rad on 40 % of ticks against 11 %). Under play it does not (1.56
+→ 1.80), because the reference still turns at 0.6 rad/s. `WORKING` on the channel.
+
+**Lever 2, the target inside the turning radius: two built answers retried on the reflex.** R38's
+`lookahead` (its re-use context was a regulator that regulates): the reference still moves at 0.60 rad/s
+under play, walls 64 / min, `REGRESSION` again. The play loop's run-and-tumble wander forced on walks
+(`wander_stall_ticks` 100, `explore_cycle` 250, R62, the operator's random walk): the reference moves at
+1.50 rad/s, faster than before, `REGRESSION` — and the trace of why is the finding of the day.
+
+**The finding: the play loop's bearing has been mirrored since R27.** On an R62 walk the reference runs
+away from the heading at about twice the body's turn rate: `ref = 2·heading − target`. The play loop is
+the Cell's, and its frame has forward(h) = (−sin h, −cos h): a positive heading step is a clockwise turn.
+The duck's heading is a right-handed odometry yaw, counter-clockwise positive. Seen from the duck, the
+loop's frame is a reflection (x, y ↦ −y, −x), and a reflection reverses the turn sense: the loop's "turn
+right" (fx > 0) is the duck's left. The adapter turns the body clockwise for fx > 0 (R27, the documented
+contract), the body's response reads in the loop's frame as a turn the other way, the bearing error grows,
+and the loop keeps saying "right": a perpetual circle. The seek loop (§17.35) was written in the duck's
+frame, which is why its reference is quiet and the reflex closes on it.
+
+Fix: `PlayLoop.heading_sign` (default +1, byte-identical; a unit test pins the frames: a body walking
+forward at +π/2 goes to −x in the Cell's frame and to +x with −1). −1 multiplies the incoming heading,
+which turns the reflection into a rotation, so the loop's position integration and its bearing are both
+in the duck's handedness. R63 = R60 + `heading_sign −1`.
+
+**What the un-mirrored play loop does, n = 6:**
+
+| | R60a | + reflex | R63 (sign) | R63 + reflex |
+|---|---|---|---|---|
+| the reference's motion under play, median · > 0.5 rad/s | 0.70 · 56 % | 0.60 · 53 % | **0.00 · 16 %** | **0.00 · 16 %** |
+| refFollow | 0.30 | 0.44 | **0.11** | **0.16** |
+| heading error under play · under seek, median | 1.56 · 1.36 | 1.80 · 0.43 | 1.34 · 1.46 | **1.12 · 0.26** |
+| \|vyaw\| > 0.9, play · seek | 93 · 90 % | 50 · 10 % | 96 · 94 % | **21 · 4 %** |
+| straightness per walk p50 | 0.13 | 0.22 | 0.14 | 0.23 |
+| cells · span m² | 89 · 9.2 | 129 · 12.7 | 78 · 9.8 | 106 · 12.5 |
+| walls / min · contact % | 20 · 2.3 | 21 · 3.4 | **47 · 14** | **49 · 12** |
+| object contacts / min · moved m | 3.2 · 2.5 | 8.9 · 2.9 | 43 · 2.9 | 5.1 · 2.1 |
+| stands held · arrival stops | 92/92 · 5.3 | 94/95 · 6.0 | 85/85 · 4.0 | 85/89 · 5.0 |
+
+The premise holds at once: with the sign right the reference under play stands still (refFollow 0.11, the
+lowest measured on this body), and with the reflex the seek error closes to 0.26 rad and the yaw command
+leaves its rail on both loops. The cost is as loud: wall contacts double. Novelty in a known room is at its
+edges, and the mirrored bearing had been an accidental avoider, turning the duck away from what it aimed
+at — which is what "play alone is the best avoider in a known room" (§17.7) was measuring. Nothing above
+the twist brain's proximity prior now stops the body at a wall, and that prior alone was never enough
+(R48's model-implied step was the loud avoider, 14.8 → 1.8 / min, and is not in the `★ CLOUD` stack).
+
+**R64 = R63 + R48's model-implied step** (`state_prior_step_gain 1.0`), with and without the reflex, and with the
+reflex releasing at half a metre instead of one (`--heading-reflex 1.0 0.3 0.5`):
+
+| n = 6 | R60a | **R64, no reflex** | R64 + reflex (gate 1.0) | R64 + reflex (gate 0.5) |
+|---|---|---|---|---|
+| the reference's motion under play, median · > 0.5 rad/s | 0.70 · 56 % | **0.00 · 15 %** | 0.00 · 13 % | 0.00 · 18 % |
+| heading error under play · seek, median | 1.56 · 1.36 | 1.05 · 1.61 | **0.89 · 0.91** | 1.13 · 0.61 |
+| \|vyaw\| > 0.9 (all walking ticks) | 96 % | 93 % | **47 %** | 69 % |
+| straightness (harness) · per walk p50 | 0.15 · 0.13 | 0.22 · 0.15 | **0.29 · 0.24** | 0.29 · 0.21 |
+| cells · span m² · path m | 89 · 9.2 · 81 | 126 · 12.4 · **96** | 139 · **14.2** · 90 | **144** · 13.0 · 86 |
+| walls / min (per seed vs R60a) · contact % | 20.4 ± 20.7 · 2.3 | **14.7 ± 7.1** (3 / 6 down; none above 24) · **1.4** | 43.1 ± 10.3 · 6.9 | 32.1 ± 20.7 · 4.3 |
+| object contacts / min · objects moved m | 3.2 · 2.5 | 11.3 · **5.1** | 10.7 · 3.7 | 6.2 · 4.3 |
+| seek episodes: blocks within 0.4 m · touched | 7 / 11 · 3 (R60) | — | **7 / 8 · 6**; balls 5 / 10 · 4 | — |
+| rescues / min · walk % · arrival stops | 0.04 · 54 · 5.3 | 0.05 · 65 · 3.8 | 0.07 · 68 · 4.2 | 0.19 · 59 · 5.2 |
+
+Without the reflex, R64 is the cleanest walk this body has had: the reference stands still, coverage rises
+on five seeds of six, the path on four, objects moved double, and wall contacts fall from 20 to 15 a minute
+with the seed spread gone (R60a ran 0–56, R64 3–24) — while the yaw command is still on its rail 93 % of
+the time and the error still sits near a radian. The body goes where the reference points, in wide arcs.
+With the reflex the walks are straighter (0.29) and the error closes (0.89 rad under play, 0.26 under seek
+on R63), and the seek episodes are the strongest measured (blocks reached within 0.4 m on 7 of 8, 6 into
+contact), but the walls come back (43 a minute; 32 with the gate at half a metre, at the cost of rescues
+0.19 a minute). Half a second before 78 % of R64+reflex's wall contacts the ToF had the wall within 0.7 m
+and the brain already owned most of the yaw; the error to the reference was a radian: the reference itself
+lies at or beyond the wall (a novel node at the room's edge, a wall base attended as a thing), and a
+heading held to it wins against the avoidance in the last half metre.
+
+**Verdicts, and what they re-open.** `heading_sign −1` with R48's step (R64) `WORKING`: the reference stands
+still and the walk goes where it points, with coverage up and walls down against R60a; **preset R64 (seed 1)
+is the candidate for the operator's eye**, and R64r (the reflex at half a metre) the straighter version to
+judge beside it. The heading reflex `WORKING` on the channel (the first time a loop's bearing has been
+followed on this body: the error closes, the yaw leaves its rail) and `PARTIAL` as a behaviour in this
+stack, since a heading held to a reference at a wall costs contacts; re-use context: a reference that the
+cloud has checked for free space, or a seek target whose vocabulary node is a thing's and not a wall base's.
+`heading_sign −1` alone (R63) is a `REGRESSION` on walls, and a confound on the record: every verdict in which the play loop set
+the reference — R27–R29 (§17.6–17.7), the playroom's R27 (§17.8), R34–R38 (§17.16–17.17), R47–R48
+(§17.26–17.27) — measured a mirrored bearing. Their behavioural verdicts are `ABLATED` by this finding
+(the mechanism operated, on the wrong sign); their measurement lessons stand (the reference's motion, the
+rail, refFollow, the instruments). `lookahead` and `commit_hold` were refuted on the mirror and are open
+again. §3.2's rule 7: the arm that ran was not the arm that was thought to run.
+
+### 17.38 The body's errors as triggers, the watched walk, and the run's record (2026-09-17, after the operator's eye on R64)
+
+**The operator's eye on R64** (seed 1, the launcher): "the directional fix is a big improvement; the robot is
+traversing much faster." Three events: at ~880 s it runs into a table leg; at ~945 and ~1200 s it trips over a
+block. "Those must be triggering big TLE spikes; great opportunities for the robot to stop and look, or
+trigger the pre-built skills — a loop that uses the emotes and skills as an output to reduce error on its
+body or the environment." Agreed, with the boundary settled: a skill fires by NAME at the intent boundary,
+the simulator stands in for the daemon, and what the brain learns is what each intent does.
+
+**What the events are in the log.** The watched run's record has them: 18 s pushing against the table leg
+with the forward command at full and the body not moving (`wall` flag on 146 ticks: the playroom's
+furniture counts as a wall), and two falls over blocks (tilt 120° and 131°, `obj` on 78 and 96 ticks; the
+rescue stood it up). The harness's seed-1 run does not have them, because the watched run was a different
+arm (below).
+
+**Do the brain's error channels see them?** R64 with `--log-motor-tle --body-predicts`, n = 6, each channel
+scored against its own walking distribution (median and MAD):
+
+| event (on walks, from 700 s) | count | twist brain `mtle` > 3 robust sd | joint brain `btle` | forward residual |
+|---|---|---|---|---|
+| a fall (tilt > 60°) | 30 | **100 %** | **100 %** | 57 % |
+| a contact onset (wall, furniture, object) | 2 327 | 14 % | 17 % | 15 % |
+| a push of 2 s (commanded forward, not moving) | 11 | 9 % | 18 % | 36 % |
+
+Falls are loud in every channel (and in tilt). Contacts mostly are not: a leaning or glancing contact
+changes nothing the body predicts. A push is not a spike at all — the walker achieves about half of its
+commanded speed at the best of times (the 2 s mean forward residual is 0.51 ± 0.27 while walking and 0.63
+during a push), so no level separates it. What separates it is DURATION: walking stalls (commanded forward
+above 0.75 of range, sensed under 0.25) last 0.22 s at the median and 1.2 s at the 99th percentile, while
+every stall of 2 s or more in the six runs (11 of them, 2–8 s) was a push against a wall or furniture.
+
+**Lever: the stuck stop** (`--stop-on-stuck K`, off by default; R46 byte-identical): a stop starts when a
+stall has lasted longer than K times the body's own running median stall length (K = 8, about 1.8 s), with
+the same settle, sweep and cloud as any stop. The body's forward-model error as a duration against its own
+scale. Measured on R64w (below), n = 6: 12 stuck stops over six runs, 8 of them at a wall or furniture, seed 5
+(no stall past the threshold) byte-identical to its control; long pushes 8 → 5. Walk time 79 → 71 %, path
+115 → 100 m, straightness 0.28 → 0.21, walls tie (22 → 23 / min, per seed both ways), rescues tie.
+`WORKING` as a mechanism, `NULL` as a behaviour: the duck stops, looks, and resumes toward the same
+reference, and pushes again. The stop has to change what the walk is for — drop the seek target it could not
+reach, and let the stop's cloud bake the node play was climbing to — before it is a behaviour. Preset R64s.
+
+**The run's record: three catches (§3.2 rule 7).** Chasing why the watched run and the harness's run of
+the same seed diverged at 613.58 s:
+
+1. **The host is deterministic.** Five headless replays of seed 1 are identical to each other and to the
+   harness's run over all 75 000 ticks, with the inspector bound, blocked, or carrying a read-only client
+   that subscribes every module's diag. Two replays of 700 s diverged from the harness at 680 s only because
+   a stop is not started with under 60 s of run left; a short replay is not a replay.
+2. **The watched run was a different arm.** `newtest.py` copies the controls of the first preset naming the
+   base config; R60 has two (R60 and R60a, which differ only by `--stop-on-arrive`), so R61–R64 were minted
+   without the arrival-stop flag every measured arm carried. The launcher ran R64 without arrival stops;
+   the harness measured it with them. Fixed: `newtest.py` copies the LAST preset of the base config and
+   prints the copied host args; presets R61–R64 and R64r corrected; the walk the operator watched is its
+   own preset, R64w, measured below. The launcher's start-up scan of configs was the earlier half of the same
+   trap (the R64 launch that "closed at once" ran `head2_h1_babble.json`); fixed the same day.
+3. **A live parameter change under a watched run was not on its record.** `set_param` and `apply_patch`
+   through the inspector now print into the JSONL as `patch:<module>.<key>` / `patch:graph`, so a watched run
+   can always be compared with a measured one.
+
+Also noted for O41: R64 with `--log-motor-tle --body-predicts` is not the same run as R64 without them
+(stops 15.5 against 13.7, cells 159 against 126 at n = 6); the earlier "behaviourally free" reading needs a
+byte-identity check before the channel is used as an input.
+
+**The walk the operator watched (R64w = R64, timer stops only), n = 6, beside the measured R64:**
+
+| | R60 | R64 (arrival stops, §17.37) | **R64w (watched)** |
+|---|---|---|---|
+| walls / min · contact % | 12.4 · 1.7 | 14.7 · 1.4 | 22.1 ± 18.5 · 2.6 |
+| path m · cells · straightness | 124 · 124 · 0.17 | 96 · 126 · 0.22 | 115 · 140 ± 58 · 0.28 |
+| walk % · stand % · stops | 82 · 16 · 10.8 | 65 · 33 · 13.7 | 79 · 19 · 11 |
+| objects moved m · rescues / min | 3.4 · 0.13 | 5.1 · 0.05 | 2.6 · 0.07 |
+| refFollow · heading error | 0.27 · 1.50 | 0.12 · 1.28 | 0.08 · 1.26 |
+
+The walk the operator liked is the un-mirrored play with the step and no arrival stops: the fastest and
+straightest cover of the room this body has made, at the cost of a third more wall contact than with the
+arrival stops. Both are on the record; the choice is the operator's eye.
+
+**The skill runner, opened.** Pollen's one-shot networks are the walker's architecture (61 observations, 14
+actions; the files are 793 685 bytes to the walker's 793 705): `ball_kick_left.onnx`, `ball_kick_right.onnx`
+and `roulade.onnx` fetched at the walker's pinned commit `3954496` (SHA-256 `d6928284…`, `147a32c3…`,
+`3d60da08…`; the current release seeds them from the `microduck-policies` Hub repository instead). Their
+daemon runs a kick as a 0.5 s window and a roulade as 1 s: the network sees an all-zero command, runs at
+standing tuning, then unwinds and hands back to the gait, in the priority roulade > kick > ground pick >
+sit > stand > walk. The build that follows: the host runs a requested skill exactly so, a loop requests it
+by name through the bus (`intent.skill`), and the brain's side is a model of what the intent does — the
+cloud before and after a kick, the gravity vector after a roll — whose error is the thing reduced.
+
+### 17.39 Skills at the intent boundary: the kick, from the walk and from standing (2026-09-17)
+
+**Built.** The host runs one of Pollen's one-shot networks as their daemon runs it (`robotd/src/control.rs`):
+a window of the skill's duration (a kick 0.5 s, a roulade 1 s) in which the network sees an all-zero command
+and drives every joint at standing tuning, then the gait resumes from where the body was left; the stander,
+if it was standing, resumes from there too. Requested by NAME: from the graph through `intent.skill`
+(a ProprioToken `[id, request]`, the adapter's `skill_request()`), or for the first measurement by a host
+flag, `--skill-on-arrive NAME` (the seek loop's arrival) and `--skill-at SECS NAME` (a scripted check).
+`kick` picks the side from the thing's bearing. The networks `ball_kick_left.onnx`, `ball_kick_right.onnx`
+and `roulade.onnx` are fetched at the walker's pinned commit (`fetch_scaffolds.sh`, hashes in the scaffolds
+README) and load with the walker's shape (61 observations, 14 actions). Off = byte-identical (md5 `cb24520c…`).
+On the robot the same request is `robot.do{skill}`; nothing here is a trajectory of ours.
+
+**Measured, n = 6 × 1500 s on R64 with arrival stops.** Per arrival, the nearest object's displacement over
+the following seconds, and the body:
+
+| | R64 (arrival stop, no kick) | kick fired MID-WALK at arrival, then the stop | **kick fired FROM STANDING, after the stop's hand-back** |
+|---|---|---|---|
+| arrivals · nearest object at | 23 · 0.22 m | 25 · 0.28 m | 27 · 0.21 m |
+| the object moved > 5 cm within 3–4 s | 4 % (balls 8 %, blocks 0 %) | 16 % (balls 20 %, blocks 10 %) | **19 % (blocks 25 %, balls 9 %)** |
+| max tilt in the window p90 · falls | 9° · 0 % | 101° · **28 %** | 6° · **0 %** |
+| walls / min · rescues / min | 14.7 · 0.05 | 22.8 · 0.15 | 16.5 · 0.07 |
+| objects moved (whole run) · walk % | 5.1 m · 65 | 3.0 m · 72 | 3.8 m · 75 |
+
+A kick fired into a walk at full command topples the body a quarter of the time: their daemon runs the
+kick at standing tuning, and the window's zero command from a walking state is a stumble, not a kick.
+Fired from standing (the arrival stop settles, the stander takes the legs, the kick runs, the stander
+resumes) it is safe on every kick, and the thing answers one time in five, blocks more than balls. The
+remaining four in five are the foot missing: the thing sits at 0.21 m at a bearing the network does not
+read, and a ball that is touched rolls out of the window's reach. Which foot, and how far the thing is from
+it, is what a loop that learns the kick's outcome would have to learn.
+
+**Verdicts.** The skill runner `WORKING` as the intent boundary's stand-in; the standing kick `WORKING` as
+a mechanism (safe, and it answers); the walking kick `REGRESSION` (falls). Preset R64k (the standing kick
+at arrival). What it hands the plan: the outcome loop needs to SEE the outcome, and a thing at 0.21 m sits
+below a level gaze (§17.36, 12 of 31 arrival stops attended nothing); so T3, the gaze at the reached thing,
+comes before the loop that learns what a kick does.
+
+### 17.40 The gaze at the reached thing, and the loop that learns what a kick does (R65–R66, 2026-09-17)
+
+**T3, the gaze at the reached thing** (`--stop-gaze-at-thing`, off by default; R46 byte-identical). At an
+arrival stop the sweep's pitch band is centred on the reached thing's elevation (atan2 of the sensor's
+height over its range, clamped to 0.2–0.55 rad down, ±0.12) and its yaw on the thing's bearing. n = 6 on R64
+with arrival stops: arrival stops whose cloud attended a real object within 0.8 m, 5 of 28 against 1 of 23;
+"nothing attended" 13 of 28 against 8 of 23; rescues 0.05 → 0.20 a minute, walk 65 → 57 %. A thing at 0.2 m
+lies 45° under the beak, past the 31° the band reaches and past the 23° the stand was shown to take (O36),
+so the head goes down, the stand pays, and the thing is still at the field's edge. `PARTIAL` on what it is
+for and a `REGRESSION` on the stand; not adopted. The outcome loop below observes from a step back instead.
+
+**The outcome loop** (`ogma::SkillOutcomeLoop`, new, generic; four unit tests): the operator's framing —
+our brain learning what the robot's pre-built intents do is an error we can reduce — as one loop, for the
+kick, on one question: does the thing answer? While the attended thing's bearing is live the loop fixes its
+position in the odometry frame; at the seek loop's arrival it requests a kick by name on `intent.skill`
+(the side by the thing's bearing) when the thing's node has an uncertain answer — fewer than two recorded
+outcomes, or a spread above the mean spread over nodes; the next live bearing within 0.6 m of the fixed
+position is the same thing, moved, and its distance is the outcome, folded into the node's running mean and
+variance; a thing not seen again within the window is UNKNOWN, and nothing is learned from it. The surprise,
+|observed − predicted| in the node's spread, goes out on `reality.cognitive.outcome`. The host fires a bus
+request from standing at the next hand-back (never into a walk), and logs each observed outcome as `outc`.
+R65 = R64 + the loop, run with arrival stops and no host flag: the graph asks.
+
+| n = 6 × 1500 s | R64 (no kick) | **R65: the loop asks** | R66: a 100 s window | **R65 + unwind (back off 1.5 s, then look)** |
+|---|---|---|---|---|
+| kicks requested · fired · falls | — | 26 · 23 · 0 | 13 · 13 · 0 | **27 · 27 · 0** |
+| outcomes observed · unknown · nodes known | — | 5 · 19 · 0 | 0 · 11 · 0 | **12 · 15 · 1** |
+| the observed answer, m (p10–p90) | — | — | — | 0.03–0.10 |
+| walls / min · rescues / min | 14.7 · 0.05 | 15.2 · 0.07 | — | 12.0 · 0.11 |
+| stops · arrival + look stops · walk % | 14.3 · 3.8 · 65 | 14.7 · 4.5 · 74 | — | 18.8 · 9.3 · 61 |
+| objects moved, m · cells | 5.1 · 126 | 3.6 · 141 | — | 2.9 · 138 |
+
+**Reading it.** The boundary works from the graph's side: the loop asks, the host runs Pollen's network from
+standing, nothing falls. What starves the learning is SEEING the answer: a kicked thing sits under the beak,
+and 19 of 24 outcomes were unknown; a longer window (R66) made it worse, since a pending outcome blocks the
+next request and the thing was never re-found within the radius from a later, farther stop. The daemon's own
+`unwind` is the answer to that (`--skill-unwind VX SECS`): after the kick the stop ends, the body backs off
+for 1.5 s, and a fresh stop looks at the thing from half a metre. Observed outcomes 5 → 12 of 27, one node
+reached two samples, walls fall to 12 a minute, at the cost of the extra stops (walk 61 %) and a few more
+rescues from backing. The answers themselves are 3–10 cm: a kick that connects moves a ball or a block by a
+few centimetres, and the fixed position's own error (odometry, the cluster's centroid) is of that order, so
+the per-node statistics need several samples before "answers" and "does not" separate. At one kick every
+three minutes they do not, in fifteen. The mechanism is whole; its loudness waits on more arrivals.
+
+**Verdicts.** T3's gaze `PARTIAL` / `REGRESSION` on the stand, not adopted. The outcome loop `WORKING` as a
+mechanism (the intent requested by name, the answer learned per node when seen), `PARTIAL` as a behaviour
+(too few answers to habituate on in a run); the unwind `WORKING` for what it is for (observed outcomes ×2.4)
+and is the form to carry. R66 `NULL`. Presets R65 and R65u. Next: more arrivals per run (the seek loop's
+share, and the timer stop's floor), and the outcome's precision (the thing re-fixed from the look stop's
+cloud rather than the arrival's), before the habituation can be read; then the get-up (the roulade after a
+fall, O27) on the same runner.
+
+### 17.41 The peck: a second intent, and the choice between them (R67, 2026-09-18)
+
+**The operator's eye on R65u:** "the kick and look cycle works." And two asks: the reach-down pick as a
+second way to explore ("very similar to a kick, like a peck; I don't expect anything to be picked up"),
+and a creative way to choose when to kick and when to peck.
+
+**Built.** Pollen's ground pick is not a window but a PHASE their daemon drives: the network sees
+`[cos 2πφ, sin 2πφ, 0]` in the twist slots while φ runs from 0 to 0.7 over a 4 s period, so a 2.8 s
+reach-down at standing tuning (`robotd/src/control.rs`, `DEFAULT_GROUND_PICK_END_PHASE`). The host runs it
+so, as the skill `peck` (`alpha_ground_pick.onnx`, from the `microduck-policies` Hub set at `v1`, the set a
+fresh board is seeded with; `fetch_scaffolds.sh` fetches it by hash). Fired alone from seed 1's walk: the
+body drops from 12 to 8.5 cm, the knees and ankles fold, it leans to 24° and stands again at the end.
+Nothing is grasped (no MJCF has the mouth hinge), and nothing was meant to be.
+
+**The choice.** The outcome loop keeps its per-thing statistics per INTENT, and at an arrival asks for the
+one whose answer for this thing it knows least: fewer recorded outcomes first, then the larger spread, then
+the one it did not try last (`peck_id`; −1 keeps R65 byte-identical; a unit test pins the alternation). A
+creature that has kicked a block twice and never pecked it pecks; one that knows both leaves it alone. The
+outcome measure is the same for both, the thing's displacement, which is what "does it answer" means here.
+
+| n = 6 × 1500 s, arrival stops, the unwind | R65u (kick only) | **R67 (kick and peck)** |
+|---|---|---|
+| requests · windows fired (kick / peck) · falls | 27 · 27 (27 / —) · 0 | 31 · 29 (16 / 13) · **0** |
+| outcomes observed · unknown | 12 · 15 | 13 (kick 9, peck 4) · 18 |
+| the observed answer, m (p10–p90): kick · peck | 0.03–0.10 · — | 0.06–0.17 · 0.05–0.22 |
+| walls / min · rescues / min · walk % | 12.0 · 0.11 · 61 | 17.9 · 0.11 · 66 |
+| stops · stands held · objects moved m | 18.8 · 18.5 · 2.9 | 17.8 · 15.7 · 3.2 |
+
+**Reading it.** The choice does what it says: the loop alternates, the peck runs from standing without a
+fall, and a peck moves a thing about as often and as far as a kick does, which is the peck being a
+forward lean onto the thing at 0.2 m. The learning is where R65u left it: too few answers per run for a node
+to reach two samples of either intent (none did), so the habituation cannot yet be read, and the answers'
+scale (5–20 cm) is within the fixed position's own error. Walls rise from 12 to 18 a minute, within the
+spread. `WORKING` as a mechanism; the behaviour's loudness still waits on more arrivals per run. Preset R67.
+
+**The get-up question** (the operator: how would a roulade get-up differ from the current one). The current
+get-up is the host's `Recovery`: when projected gravity says the body is down (past 60°, held 200 ms, the
+daemon's own late detector), the host hands the joints to the standing scaffold until the body is upright,
+then hands them back; the brain observes it frozen and never decides it. A roulade get-up would change who
+decides and what is fired: the brain, from its own gravity error, would request an intent by name through
+the boundary, and the intent's outcome (gravity back to upright, or not) would be learned like the kick's.
+Whether Pollen's roulade rises from an arbitrary fallen pose is unmeasured — it is a forward roll trained
+from standing that ends on the floor and rises — and their walker already carries fall recovery in one
+network; so the roll may be the wrong intent for a fall and the right one for a trick. The measurement is
+cheap once wanted: fire `roulade` when the body is down instead of the scaffold, and count the rises.
+
+### 17.42 The orbit's second cause (a reference that flips by 2π), the ToF on the walk, and the roll as a get-up (R68–R70, 2026-09-19)
+
+**The operator's eye on R67** (seed 1): "around 1060 s the robot started circling again and ignoring small
+objects"; and: "are we using any ToF data while the robot is walking?"; and: proceed with the roulade
+experiments.
+
+**What the circle was, this time.** R67 carries the un-mirrored play, so the mirror is not it. From the
+run's record: from 1041 s play holds the reference and the reference turns at the body's rate (−15 rad per
+20 s); the seek loop holds a target the whole time, at 2–3.4 m, and its need decays from 0.86 to 0.18 while
+its range grows, since the body circles away from it. R38's lookahead and R37's committed sub-goal, both
+built for the orbit and both refuted on the mirror, were retried on R67 (R68, R69): neither quiets the
+reference (turning faster than 0.5 rad/s on 23 % and 29 % of play's ticks against 19 %), coverage falls
+(142 → 123 and 116 cells), `NULL`. So the orbit is not the target's distance.
+
+The record gained play's bearing and state per tick (`pb`, `pl`) and seed 1 was replayed. Two things
+appear. Under seek at 1030 s the seek target is BEHIND the body: the reference alternates by 2π from one
+tick to the next (−8.78, −2.49, −8.77 …), the error between +3.0 and −3.1, and the yaw command flips
+sign every few ticks; the body jitters in place and never turns round. The reference is rebuilt from the
+winning loop's bearing every tick as heading − atan2(cx, cy), and a bearing that flickers across ±π flips
+it by a full turn. Under play from 1041 s the bearing sweeps through the body frame once every seven
+seconds while the body turns a circle every eleven — the orbit — and at each pass behind the same flip
+reverses the turn, which is what keeps the orbit alive. This is the "reference that will not stand still"
+of §17.26, its jumps of more than 0.5 rad ninety times a minute; it survived the mirror's fix because it
+is a second defect on the same line.
+
+**Lever: a continuous reference** (`--ref-unwrap`, off by default; the physics byte-identical with it off,
+md5 `cb24520c…` once the two new record fields are stripped). Each new reference is taken modulo 2π
+nearest the reference held so far, so the turn direction persists through the back; the sense slot and
+the heading reflex clamp the error at ±π instead of re-wrapping it. Measured: it does what it says and it makes the circle worse. Seed 1 replayed, 1000–1200 s: reference jumps
+of more than 3 rad 60 → 2, but the heading turns −79 rad against −51, the body travels 22.6 m of path for
+0.4 m of net displacement, and n = 6 gives walls 18 → 6 a minute with coverage 142 → 60 cells and the yaw
+on its rail 94 % of the time: a duck spinning in place. So the flip was not the orbit's cause but its
+brake: play's bearing genuinely rotates with the body, and with nothing reversing the turn the spin never
+ends. `REGRESSION`, off. What rotates play's bearing with the body is in the loop's own geometry — its
+position is integrated in command-unit ticks from a lateral and a forward velocity with different scales,
+and its target is a node's mean position in that frame — and that is the open question (O56), to be
+answered by logging the loop's own odometry beside the body's before any further lever.
+
+**The ToF on the walk, as it stood.** Every 4 ticks the ToF's four proximity slots feed the twist brain's
+sense (the avoidance prior) and the place map's view holds the last stop's cloud; the cloud, and with it
+the things and the seek bearing, existed only at stops. Between stops the seek loop homed to a remembered
+position. The cast is taken in the gravity-levelled trunk frame with the head's pose folded in by forward
+kinematics, so head motion is not the obstacle in simulation (on the robot each frame must be timestamped
+against its head angle, §7 of the cloud phase). What was missing was translation.
+
+**Lever: the walking cloud** (`CloudMap.walk_cloud`, off by default, two unit tests): between stops a
+cloud stays open, each cast translated by the odometry's displacement from the anchor (the cast token
+already carries x and y) and de-rotated as at a stop, filed and re-anchored every metre of travel so the
+odometry's drift stays under a voxel; never cached as a place; the things reduction runs on it. R70 = R67
++ the walking cloud, n = 6: things attended on walking ticks 18 601 against 178 — the sensor works. The
+behaviour above it does not, yet: with a live bearing on every walk the seek loop holds the reference
+80 % of the time (28 % before), walls 18 → 55 a minute, the stands 4 of 17 stops, coverage 142 → 178
+cells. The loops were built for a thing seen at a stop and remembered on the walk; fed a live bearing
+they chase, and a fifth of what they chase is a wall base. `WORKING` as a sensor, `REGRESSION` as a
+behaviour in this stack; re-use context: seek's need gated by the thing's vocabulary node and by the
+free space ahead, and the arrival stop reading the walking cloud.
+
+**The roll as a get-up** (`--skill-when-down NAME`): when the recovery declares the body down, the named
+skill drives the joints first, and the scaffold's rescue continues if the body is not upright when the
+window ends. R67 + roulade, n = 6: 11 falls, the roulade fired at each, the body upright within 2 s of the
+window on **none**; walls 18 → 28 ± 38 (one seed's flailing). `NULL` as a get-up, as the priority table of
+their daemon suggested: the roll is a trick from standing, and their walker already carries the fall
+recovery. The difference a brain-requested get-up would make — who decides and a learnable outcome —
+stands, but the intent for it is not the roll.
+
+### 17.43 The orbit, resolved to its parts: the yaw column turns the wrong way, and the loop's committed turn holds it there (2026-09-19, later)
+
+**Measured before any lever.** On R67 seed 1 the map's nodes are views, smeared over 0.5–1 m of position
+(median spread 0.53 m over nodes with more than 50 ticks), and the play target's centroid sits 0.8–1.2 m from
+the body through the circle — outside the turning radius, so the orbit is not a near target (the premise
+R37/R38 were built on). With the sign fix in place the loop's arithmetic makes the reference the target's
+own direction, a constant for a fixed target; a reference that turns with the body means the body is not
+doing what the loop asks. The record answers: play asks a turn of more than 0.6 rad on 57 % of its ticks, and
+the body turns that way over the next second on **41 %** of them — worse than chance. The twist brain's
+learned yaw column has the wrong sign under play's error (§17.17's "does not regulate", now with a number),
+and the loop's own committed turn does the rest: past 90° off it holds the turn's sign and clamps the
+bearing at 0.92π until the target is within 36°; a body turning the wrong way never gets there, so the clamp
+holds the wrong command indefinitely (the emitted bearing sits at exactly −2.89 through the circle).
+
+**The reflex, on the stack as it stands.** R64r's heading reflex (a hold on own yaw through `action.vyaw`,
+mixed with the brain's yaw by proximity) was set aside for its wall cost on R64. On R67 seed 1: agreement
+41 → 62 %, circling windows 4 → 1 of 25, wall ticks 460 → 293 with the one-metre gate; the half-metre gate
+49 %, walls 1 567 — near a wall the brain's yaw owns the channel and turns wrong there too. 
+
+| n = 6 × 1500 s, the R67 stack | R67 | **R67 + reflex (gate 1.0)** | R67 + reflex + free-space gate |
+|---|---|---|---|
+| the body turns the way play asks (> 0.6 rad asked) | 41 % | **64 %** | 61 % |
+| heading error, median · under play · under seek | 1.44 · 1.27 · 1.50 | **0.99 · 0.81 · 0.61** | 0.87 · 0.74 · 0.42 |
+| the reference turning > 0.5 rad/s under play · \|vyaw\| on the rail | 19 % · 83 % | 11 % · **22 %** | 19 % · 15 % |
+| straightness (harness · per walk p50) | 0.25 · 0.17 | 0.27 · 0.23 | 0.25 · 0.23 |
+| walls / min (per seed) | 17.9 ± 6.4 (12, 20, 20, 28, 12, 16) | 25.8 ± 20.9 (**6, 16, 12, 17**, 45, 58) | 34.7 ± 28.8 (14, 6, 9, 58, 74, 47) |
+| cells · rescues / min · stands | 142 · 0.11 · 15.7 / 17.8 | 137 · **0.04** · 15.5 / 17.8 | 127 · 0.10 · 15.2 / 17.7 |
+| kicks requested · outcomes observed | 31 · 13 | 32 · 13 | 32 · 10 |
+
+The reflex does what the diagnosis says: the body follows the loops, the error closes by a third, the yaw
+leaves its rail, and rescues fall by two thirds. Walls fall on four seeds and blow up on two, the failure of
+R64r again: a reference held into a wall, and a reflex that holds it there while the brain's avoidance, with
+its share of the yaw shrinking as the wall nears, cannot turn the body away. The lever for that is the one
+named as the reflex's re-use context in §17.37: **a reference the sensor has checked for free space**
+(`--ref-free P`): a loop's bearing into a ToF sector nearer than P is not held; the reference is released to
+the heading (R29's release form), the reflex stands down, and the avoidance acts unopposed.
+
+Measured (proximity above 0.6, a hit within 0.4 m of the bearing's sector; the reference released on 4 408
+ticks in one run): the errors close further, and the walls do not. Released, the yaw belongs to the twist
+brain, whose avoidance is what fails at those surfaces. The bad seeds are not many collisions but a few long
+bursts: on the reflex arm seeds 4–6 spend 108, 217 and 318 s of the 800 in 10–19 bursts, the longest 34–80 s;
+with the gate 289, 374 and 180 s, the longest 120 s. That is O35's "cannot leave a surface", now with a
+reference held into it. The stuck stop of §17.38 was built for that and was `NULL` because the stop changed
+nothing about the reference; a stuck stop that releases the reference and turns toward the free space the
+cloud shows is the lever this hands the next session.
+
+**Verdicts.** The orbit is resolved to its parts: the mirrored bearing (§17.37, fixed), the twist brain's
+yaw column turning the wrong way for a large error (measured: 41 % agreement), and the play loop's
+committed-turn clamp holding the wrong command (7 134 clamped ticks a run). The heading reflex on the R67
+stack `WORKING` on the channel (agreement 64 %, error 1.44 → 0.99, the rail 83 → 22 %, rescues 0.11 → 0.04)
+and `PARTIAL` as a behaviour (walls down on four seeds, two seeds stuck at surfaces). The free-space gate
+`NULL` (the errors close, the walls do not). The continuous reference `REGRESSION` (§17.42). Preset R67r (the
+reflex on R67) for the operator's eye beside R67; nothing promoted.
+
+### 17.44 The escape: a stuck stop that turns toward free space (2026-09-19, last)
+
+**Built** (`--stuck-escape SECS`, off; guard byte-identical with the record fields stripped): when a stuck stop
+ends, the host takes the stop's cloud view (eight sectors across ±64°, each the nearest off-floor return over
+4 m) and holds the reference at the freest sector's bearing for SECS, the loops' bearings ignored meanwhile
+(steer code 4), so the reflex turns the body out of the surface before play or seek can aim it back in.
+`cloud_objects.py heading` and the sweep count the escapes.
+
+**Measured, n = 6, on R67 + the reflex + `--stop-on-stuck 8 --stuck-escape 4`:** 8 stuck stops over six runs,
+8 escapes. Where it fired it worked: seeds 5 and 6, the reflex arm's two stuck seeds, fall from 216 and 318 s
+in wall bursts to 85 and 78 (walls 45 → 15 and 58 → 16 a minute). Seed 1 diverged into a 111 s burst the
+detector never saw (walls 6 → 90); seconds in bursts over the six seeds 802 → 717, a tie. The stall detector
+reads a forward speed under 0.1 m/s, and most bursts are the body SLIDING along a surface at walking speed,
+commanded forward, making no progress toward its reference. `PARTIAL`: the escape is the right act and the
+detector misses most of what it is for. Next form of the detector: progress toward the reference — the
+body's velocity along the reference's direction, against the body's own distribution while walking — which
+would see a slide as it sees a push.
+
+**Where the walk stands at the end of 2026-09-19.** The circle the operator watched is understood in full
+and its parts are on the record with numbers: the mirrored bearing (fixed), the yaw column turning the wrong
+way for a large error (the reflex fixes it: 41 → 64 % agreement, the rail 83 → 22 %), the loop's committed
+turn holding the wrong command, and a reference that flips at ±π (its brake, left alone). What remains is
+O35 in a new form: a reflex that follows its loops faithfully into a surface on some seeds, and a detector
+that does not yet see a slide. R67 and R67r are the arms for the operator's eye; nothing is promoted.
+
+**Addendum, the progress-based stall** (`--stuck-progress`, off): the stall is then no progress toward the
+reference (the body's velocity along the reference's direction under 0.25 of range while commanded forward),
+so a slide along a surface counts. n = 6 on R67 + reflex + stuck 8 + escape 4: 26 stuck stops over six runs
+(8 before), and walls 28 → 37 a minute, seconds in bursts 717 → 934, the longest bursts shorter (33–80 s
+against 47–111) and more numerous. The escape works each time and the loops aim the body back at the same
+surface four seconds later: the surfaces are where play's novel nodes and seek's wall-base targets lie, and
+an exit reflex cannot change what the targets want. `REGRESSION` in this form; the question it leaves is the
+loops', not the reflex's: a play value field in which a node at a wall stops being novel once the body has
+stood at it, and a seek need that does not hold a wall base (its vocabulary node knows the difference at
+purity 0.9). Both are the next levers on the walk, and both are the operator's call on design before a build.
+
+### 17.45 The operator's eye on R67r, R69 and R70: the interesting scale, the walk promoted, and the cloud that was drawn at one pose (2026-09-22)
+
+**What the operator saw.** R67r (the heading reflex): "the robot seems to be spending a lot of time staring at
+the walls"; earlier configs interacted with the small objects more, so a regression on the *interesting* scale
+if the numbers agree; the circling is gone. R69: good early interactions with the balls, some circling in a
+corner, wandering, then repeated interactions with the purple block from 1060 s. R70: the wall voxels in the
+viewer "rotated 45 degrees relative to the real walls". The rule they gave for the phase from here: any time
+the robot interacts with an object is interesting; wandering and looking get boring quickly; a wider
+vocabulary of behaviours is encouraged; the circling is mostly solved, so promote that and move on to object
+interactions and lingering in areas of interest with play that involves the whole body, not only reducing
+the map's error.
+
+**The instrument the eye asked for** (`cloud_objects.py where`): every stop by WHERE the body stands when it
+starts, at a small thing (within 0.6 m of a movable object's edge), at a wall (within 0.35 m of one), or on
+open floor, and the seconds of stop spent in each. Per seed, n = 6, 1500 s:
+
+| arm | stops at a thing | at a wall | open floor | stop-seconds at things / walls | thing/wall stops per seed |
+|---|---|---|---|---|---|
+| R65u (kick only) | 12.2 | 2.2 | 4.3 | 217 / 23 | 16/1 8/3 3/3 17/4 15/1 14/1 |
+| R67 (kick + peck) | 9.5 | 3.5 | 4.8 | 133 / 46 | 12/3 8/3 3/3 7/6 17/2 10/4 |
+| R67r (+ reflex) | 9.2 | 4.0 | 4.7 | 193 / 52 | **4/8** 12/2 22/1 11/0 **1/4** **5/9** |
+| R69 (commit_hold) | 9.3 | 3.8 | 4.7 | 125 / 79 | 16/3 5/2 1/8 7/7 15/1 12/2 |
+
+The means agree with nothing; the per-seed column agrees with the eye exactly. The reflex makes the walk
+*bimodal*: three seeds stand at things (22/1, 12/2, 11/0) and three at walls (4/8, 5/9, 1/4), and seed 1, the
+preset's seed, is a wall seed. The reflex follows its loops faithfully, and the loops' targets are, on half
+the seeds, play's novel nodes at walls (§17.44). The sweep's own columns say the same in aggregate: walls
+17.9 → 25.8 a minute (± 21), contact 1.9 → 4.6 %, objects moved 0.34 → 0.05 m, seek's share 28 → 22 %; the
+heading error 1.44 → 0.99 rad and the same 29 skills fired in each of the three arms. **The reflex:
+`PARTIAL`; not promoted.** Re-use context: once the loops' targets are things (the linger below), a reflex
+that follows them is what the eye wants.
+
+The peck cost something too: R65u stood at things 12.2 times a run for 217 s, R67 9.5 times for 133 s. A
+peck is 2.8 s of skill and the same unwind and look as a kick, so it is not the time; it is the second
+intent's second arrival at a thing that the walk does not make (§17.41: 31 requests a run against R65u's 27,
+but 13 pecks spread over 6 runs). Within the spread at n = 6, and the linger is the lever aimed at it.
+
+**Promoted: the walk with the mirror fixed** (`PlayLoop.heading_sign −1`, in every config since R63, with
+R48's step, the seek loop, the arrival stop, the skill runner from standing, the outcome loop with two
+intents and the unwind) — the R67 stack, as **`★ THINGS`**, the operator's call on the circling ("mostly
+solved"). What is NOT in it: the reflex, the reference unwrap, the free reference, the stuck stops, the escape,
+the progress stall, the walking cloud, the roll when down — all flags, all off. R69's corner circling is the
+residue §17.43 named (the yaw column, play's committed turn), unchanged by commit_hold (`NULL`, §17.42).
+
+**The rotated walls (R70) were the viewer's, not the odometry's.** The replay payload carries the world pose
+the cloud was anchored on, latched by the host on the module's *open edge* (cloud closed → open). With
+`walk_cloud` a cloud files and the next opens on the same tick, so there is no edge: the R70 record has 48
+clouds filed under ONE anchor, and the viewer drew every cloud after the first at the first one's pose, turned
+by whatever the body had turned since. The odometry itself was measured against the ground truth on the same
+logs: over 10 s windows of walking its displacement is 1.3° off in direction (IQR −3.4..+0.3°) at 0.92–0.94
+of the true length, its heading error is zero modulo a turn, and its position carries a fixed offset of about
+1 m acquired before the first stop (the babble). The fix latches on the file-and-reopen tick as well and emits
+the FILED cloud's anchor: R70 seed 1 rebuilt, 13 clouds, 13 anchors, each within 4 mm and 0.7° (max 7 mm,
+3.0°) of the body's pose on its open tick. The R46 guard is byte-identical (`cb24520c`, the pb/pl fields
+stripped): a config without the walking cloud never has a file-and-reopen tick. O55's sensor verdict stands;
+the operator's 45° was §2's "instrumentation" drawn wrong.
+
+**The next lever, written by the rewrite rule: the LINGER (R71).** The behaviour asked for is "stay at a thing
+and do things to it; leave when it is boring." The error it minimises already exists: the outcome loop's
+uncertainty about what each intent does to *this* thing (`SkillOutcomeLoop`, §17.40–17.41: per node × intent,
+unknown under `min_samples` outcomes or a spread above the known mean). Today that error is consulted once,
+at an arrival, and then the seek target is dropped and play's novel nodes carry the body to a wall. The
+lever hands it to the loop that owns the body's target:
+
+- `SkillOutcomeLoop.need_topic` publishes `[need, x, y]`: the share of intents whose answer for the last
+  attended thing is still unknown (1 before any answer, 1/2 once the kick's is known, 0 once both are), 0
+  while an outcome is in flight (the loop is looking, not asking), and the thing's fixed position.
+- `BearingSeekLoop.renew_topic` reads it: after an arrival has dropped the target (its zero for one tick IS
+  the arrival the outcome loop sees), a need above `renew_min` (0.25) at a position between 1.5 × `arrive_m`
+  and `renew_range` (2.0 m) re-arms the target there with confidence = need. The duck that backed off 0.45 m
+  after a kick and saw the thing again from its look stop walks back for the peck; the duck that knows both
+  answers is renewed by nothing, and play takes it away. Habituation and lingering are one rule.
+
+Both default off (empty topics): byte-identical. Tests: the need's ladder 1 → 0 → 1/2 → 0 (`test_skill_outcome_loop`,
+6 tests) and the renewal's four guards (`test_bearing_seek_loop`, 5 tests). Config `a1v2_r71_linger.json` =
+R67 + the two topics; preset R71 (seed 1). The prediction, at n = 6 against R67: more requests and more
+observed answers per run, more nodes known, stops at things up and stop-seconds at walls down, cells and
+walls within the spread; the failure mode to watch is a duck that shuttles between a thing and its look stop
+without the outcome ever being observed (need stuck at 1 with `unknown` climbing).
+
+**R71 measured (n = 6, 1500 s, against R67).** Requests 29 → 31, answers observed 13 → 11 (unknown 16 → 20),
+renewals 20 over six runs, arrival stops 48 of 107 → 54 of 110; seek held the reference 63 → 81 % of the walk;
+walls 17.9 → 29.0 a minute (± 19: one seed at 37), contact 1.9 → 3.3 %; stops at things 9.5 → 8.5 a run, at
+walls 3.5 → 5.3, stop-seconds at walls 46 → 95; cells 142 → 139. Nodes known: 0 in every run, the need 1.0 at
+every run's end — the ladder the test climbs (1 → ½ → 0) is never climbed on the duck, because a node × intent
+needs two observed answers and the look stop sees the thing again about one time in three. **`NULL` as a
+behaviour in this form, `REGRESSION` on walls on one seed.** The renewal re-arms what the outcome loop last
+fixed, and on the seeds where that was a wall base (the attention's 18 % misses) it re-arms the wall.
+
+**Why the answer is not seen — the diagnosis that sets the next lever.** Every skill in R67 and R71 (60) was
+matched to the nearest movable thing at its start and that thing's true position 8 s later: the unknown
+outcomes are NOT balls that rolled out of the 0.6 m match radius (0 of 36); in 33 of 36 the thing had not
+moved at all, and the median true displacement after a kick or a peck is 0.00 m (the thing answers one time
+in five, §17.39). The thing was simply not seen again. At the look stop after the unwind, the cases the loop
+observed had the thing 0.33 m ahead (IQR 0.29–0.36) and 17° off the nose; the cases it did not had it at
+0.75 m (IQR 0.24–2.33) and 55° off, ten of fourteen beyond the sweep's ±34°. Two sources: a skill fired
+where no movable thing was within 0.5 m (5 of 29 in R67, 11 of 31 in R71 — wall bases and furniture legs the
+cloud attends as things, and arrivals by dead reckoning at a place the thing is not), and a thing that is to
+the SIDE after the skill (the kick's foot, the peck's crouch, a turn during the window) while the unwind backs
+straight off and the look stop sweeps ±0.6 rad about the nose. Nothing in the loops can learn across an answer
+they never see; the look is the bottleneck, and it is a gaze error on a remembered bearing — the operator's
+own framing of the head (T1's correction).
+
+**R71a: the unwind AIMED** (`--skill-unwind-aim GAIN`, off = byte-identical): the outcome loop's need topic
+carries the thing's fixed position; the adapter turns it into a bearing in the body frame; during the unwind
+the twist's yaw keeps the nose on it (−GAIN × bearing, clamped), and the look stop's sweep is centred on that
+bearing in yaw (the pitch band stays — T3's pitch part cost the stand, §17.40). The sweep's yaw centre already
+existed for `--stop-gaze-at-thing`; this is that half of it, on the look stop, from the kicked thing's position
+rather than the last seek bearing. Prediction: answers observed up from a third toward two thirds, nodes
+known > 0, renewals that lead to a second intent at the same thing; walls back to R67's.
+
+**R71a measured (n = 6, against R71 and R67).** Skills 30 (17 unwinds, all 17 look stops aimed); answers
+observed 10 of 30 (R71 11 of 31, R67 13 of 29); renewals 20; nodes known 0, need 1.0 at every end. On the
+interesting scale the aim undid the linger's cost and a little more: stops at things 9.5 (R67) → 8.5 (R71) →
+10.5 a run, stop-seconds at things 133 → 138 → 173, at walls 46 → 95 → 55; walls 17.9 → 29.0 → 18.5 a minute;
+cells 142 → 139 → 131, stands 29 → 32 → 36 %, rescues 0.8 → 1.2 → 0.5 %. The look's geometry moved as
+predicted: at the look stop the observed answers had the thing 0.38 m ahead and 12° off the nose, and the
+UNKNOWN ones no longer had it to the side (34° median, 3 of 7 beyond 35°, against 55° and 10 of 14) — they had
+it 2.17 m away: the skill had been fired where no movable thing was within 0.5 m (9 of 30). And of 30 skills,
+2 moved their thing by more than 5 cm. **`PARTIAL` on the interesting scale (a signal at n = 6, all within
+the spread), `NULL` on learning: the ladder is not climbed because the boundary's intents mostly do not
+touch anything.** The linger and the aim are kept (both off by flag; R71a is the arm for the operator's eye)
+and the phase's next lever is no longer the look — it is the intent vocabulary's reach: a kick from standing
+at 0.19 m reaches the thing one time in five, and a third of the requests go to a wall base or a furniture
+leg the cloud attends as a thing, or to a dead-reckoned place the thing is not. A PUSH (a short walk into the
+thing from standing, the walker's own intent at the boundary) is the one thing in the runtime that moves a
+thing every time it is pointed at one — the base walk moves objects 3.5 m a run by stumbling — and a thing
+that rolls beyond the match radius must count as an answer, not an unknown.
+
+### 17.46 The push: a third intent, and the vocabulary that cycles at a thing (R72, 2026-09-22)
+
+**The lever, by the rewrite rule.** The operator asked for a wider vocabulary of behaviours and for
+interaction over wandering. §17.45's diagnosis: the boundary's two intents mostly do not touch the thing (a
+kick from standing at 0.19 m moves it one time in five; 2 of 30 skills in R71a moved their thing by more than
+5 cm), so the outcome loop has nothing to learn from and the linger has nothing to hold. The one intent in the
+runtime that moves a thing every time it is pointed at one is the walk itself: the base run moves objects
+3.5 m a run by stumbling into them (§17.35's blind metric, read the other way). So the third intent is the
+robot's own `move`, from standing, into the thing: **the push**, a window of 1.2 s in which the walker is
+driven at 0.25 m/s forward (the walk's own scale and low-pass, the head as the walk holds it), then the same
+unwind and look as a kick. On the robot it is `move` for 1.2 s; on the host it is a skill with no network
+(`kSkills` entry `push`, `file = nullptr`, `push_vx`), id 4 on the boundary.
+
+The loop's rule generalises without a new rule: `SkillOutcomeLoop.push_id` (−1 = absent) adds a third row
+per thing node; the least-known choice is the fewest recorded outcomes, then the largest spread, then the one
+after the last asked in the cycle — kick, peck, push — so a duck at a new thing tries all three before it has
+an opinion, and the need (§17.45) counts the three. `key_of` is now `node × 4 + intent` (a saved outcome
+state from before this change does not restore meaningfully; none is promoted). Tests: 7 (the cycle at one
+thing, the need's fall to 0 after each is known twice, the habituation that follows). Config
+`a1v2_r72_push.json` = R71 + `push_id 4`, run with R71a's flags (the aim); preset R72, seed 1.
+
+Two things to read in the measurement: whether the push's answers are SEEN (a pushed ball may roll beyond
+the 0.6 m match radius — the `skills` instrument counts "rolled beyond the radius" separately from "not
+seen"), and the falls: a walker started from the R19 stand into a thing and stopped after 1.2 s is the step
+hand-off of R48 (`★ STACK · the step`) plus a contact.
+
+**R72 measured (n = 6, 1500 s, against R71a and R67).** Requests 46, skills fired 39 (kick 15, peck 13, push
+11; R71a 30), answers observed 16 of 39 (R71a 10 of 30, R67 13 of 29), renewals 26, nodes known 0. On the
+interesting scale the best arm so far: stops at things 12.0 a run (R67 9.5, R71a 10.5), stop-seconds at
+things 191 (133, 173), at walls 62 (46, 55); walls 15.7 a minute (17.9, 18.5); stands 39 % (29, 36); arrival
+stops 11.7 of 21 (8.0 of 17.8); cells 135 (142, 131); rescues 0.5 % (0.8, 0.5), nine over six runs. But the
+push did not reach either: 1 of 11 pushes moved its thing by more than 5 cm (the kicks 0 of 15, the pecks
+1 of 13), and 13 of the 39 skills fired with no movable thing within 0.5 m. **`PARTIAL` on the interesting
+scale (a consistent signal at n = 6 across R71a and R72: more stops at things, fewer at walls, more stands,
+within the spread), `NULL` on the intents' reach.** The `skills` instrument (`cloud_objects.py skills`)
+carries the split.
+Why the push does not reach: in its 1.2 s window the body travels 0.06 m (median over the 11; the walker
+started from the stand is still getting under way — the low-pass and the gait's first step), and only 5 of
+the 11 had the thing within 0.3 m and 30° at the start (three had no thing within a metre, two had it 51–61°
+to the side). The one push that answered (0.35 m, a ball at 0.07 m) is what the intent is for. Re-use
+context: a window long enough to walk the thing's distance (3 s ≈ 0.5 m) aimed at its bearing, fired only at
+a thing seen now within reach (O59).
+
+### 17.47 The spin as frustration, the roll as its answer, and the approach by sight (R73, R74, 2026-09-23)
+
+**What the operator saw in R72 (seed 1).** Between 750 and 850 s the duck circled near the blocks and balls;
+they read it as a turning-radius failure — a heading or place it could not reach — and asked (a) for a metric
+of that frustration, (b) for the forward roll as the behaviour that breaks the cycle with a novel orientation,
+(c) whether the walking cloud could find things on the approach and fine-tune the position before the kick or
+peck, which lands beside the thing rather than in front of it.
+
+**The window, read from the record.** From 740 to 826 s play holds the reference and the reference itself
+turns at the body's rate (−2673° → −5841° in 86 s: O56, the reference that rotates with the body), the
+heading error sits beyond 90° on most ticks, the body walks at 0.3 m/s in a circle of 0.3 m: 17.6 m of path
+for 0.5 m of net displacement and 3165° of turn in 120 s, the block 0.3–0.6 m away the whole time. Not a
+target inside the turning radius, then, but the orbit of §17.43 in its play form — and the operator's word
+for it is the right one: the loop asks for a heading it never reaches.
+
+**The frustration metric.** Three already exist in parts: the sweep's `straight` and `hdgErr`, the host's
+progress stall (§17.44: no progress toward the reference while commanded forward), and the loop's own
+competence (the range left, sign −1, which the arbiter's trust reads). None names the spin. The one that
+does, on the body's own odometry only: *in 20 s of walking the heading turned more than a full turn while
+the dead-reckoned position moved less than half a metre.* Offline (`cloud_objects.py spins`), spin windows
+per seed at n = 6: R67 [6, 1, 14, 0, 7, 0], R71a [6, 3, 8, 2, 2, 2], R72 [6, 0, 1, 2, 2, 0] — seed 1's six
+are the operator's 750–850 s. It is a property of the walk (R67's seed 3 spends 140 s in it), not of the
+things levers.
+
+**The roll, measured alone first.** Pollen's roulade fired mid-walk at 650 s on two seeds: a 1 s roll to 82°
+and 49° of tilt, the host's recovery scaffold (Pollen's late fall detector stands in) up in about 4 s, the
+walker back by 656 s, the heading 50–110° from where it was, nothing broken (3 rescues in each 720 s run,
+the roll's among them). On the robot the daemon's own recovery would do the rising; in simulation the
+scaffold is named as such.
+
+**R73: the roll on a spin** (`--skill-on-spin NAME TURNS NET SECS`, off = byte-identical). The host keeps a
+ring of the odometry pose over SECS of walking ticks (a stop or a skill resets the run) and, when the rule
+above fires, asks for the skill by name at the boundary, at most once per 30 s; `spins` and the rolls fired
+are counted and the sweep carries them. This is the stall detector's sibling (§17.44) with a different
+answer: not an exit reflex toward free space, which the loops undid four seconds later, but a fall and a
+rise that leave the body facing elsewhere, with play's committed turn and the twist brain's yaw history
+reset by the recovery's hand-back. Prediction: spin windows down on the seeds that have them, walls and cells
+within the spread, a few rescues more, and — the operator's scale — something to watch.
+
+**R74: the approach by sight.** At R72's 43 arrival stops the thing was 0.18 m away (median) but 34° off the
+nose, within 0.35 m AND 30° on 16 of 43, and more than 0.5 m away on 13 — the arrival is by dead reckoning to
+a position fixed from a stop a metre back, and the last 0.3 m of the approach are blind. The walking cloud
+(O55) sees the thing on the approach; what made it a `REGRESSION` as a behaviour in R70 was that every
+walking sighting became a seek target (seek 80 % of the walk, walls 55 a minute) — and, found now, that
+the map's place vector read the walking cloud as its view (`--map-view cloud`), so the map vocabulary
+collapsed to 6 nodes. Two changes: the bearing token carries a fourth value, *seen from a walking cloud*,
+and `BearingSeekLoop.walk_refix_m` (0 = off) lets such a bearing only REFINE a target already held, when its
+fix lies within that distance of it — never set one; and the host's map view holds the stop's cloud through
+a walking cloud. Config `a1v2_r74_walkrefix.json` = R72 + `cloud.walk_cloud` + `seek.walk_refix_m 0.5`.
+Prediction: at the arrival stop the thing within 0.35 m and 30° on most arrivals, skills fired with no thing
+within 0.5 m down from 13 of 39, and the map's node count back at R72's; the number to fear is walls.
+
+**R73 measured (n = 6, against R72).** Spins detected 16, rolls fired 13 (one per 30 s at most); spin
+windows 11 → 10 over six runs — seed 1's six windows moved from 700–850 s to 1380–1500 s: the roll at 709 s
+broke the operator's spin, and the two at 1405 and 1459 s did not break the later one. Rescues 9 → 55: three
+per roll (at 709, 711, 713 s — the recovery scaffold's rise takes three hand-offs, about 5 s; on the robot the
+daemon's own recovery), not new falls. Stops at things 12.0 → 11.7 a run, stop-seconds at things 191 → 211,
+walls 15.7 → 18.6 a minute, cells 135 → 136, stands 39 → 38 %, hdgErr 1.31 → 1.36. **`WORKING` as a
+mechanism — the detector names the operator's frustration and the roll leaves the duck facing elsewhere
+— `NULL` on the spin total at n = 6 (10 against 11 windows), a tie on everything else, and a new behaviour
+for the eye.** Kept as a flag (preset R73). The brain-side form is the re-use: the roll as an intent the
+arbiter prefers when the holding loop's competence has fallen (O60).
+
+**R74 measured (n = 6, against R72), after one host fix.** The first run ended every stop at 1.4 s: the
+stop-end rule read the walking cloud's file-and-reopen as "the cloud stopped growing" — the true cause of
+R70's collapse (stands 4 of 17, 6 map nodes), now gated to the stop's own cloud. Rerun: stops 16 s, nodes 31,
+the sensor live (4 000–12 000 re-fix ticks a run). And a `REGRESSION` on its own prediction: at the arrival
+stop the thing within 0.35 m and 30° on 4 of 32 (R72: 16 of 43), more than 0.5 m away on 18 (13 of 43), the
+median 0.56 m and 86° off the nose; stops at things 12.0 → 5.7 a run, stop-seconds at things 191 → 73; seek
+held the reference 77 → 93 % of the walk, walls 15.7 → 20 a minute; answers observed 11 of 30 (tie); the
+skills that reached rose to 5 of 30 (2 of 39). The re-fix drifts: within 0.5 m of a held target the walking
+cloud offers wall bases, chair legs and the same thing seen from a moving, less exact anchor (the operator's
+own caveat), and the target follows each. Re-use context: a re-fix that must be the NEAREST small thing and
+within the sweep's ±0.6 rad of the nose, at a radius under 0.25 m, in the last metre only — or the honest
+form, a live bearing that competes with the remembered one by precision, as the voter fuses. Kept off; the
+stop-end fix stays (it is what any walking cloud needs).
+
+### 17.48 O59: fire at what you see, and the intent that reaches (R75, R76, 2026-09-23)
+
+**The two levers, on the operator's "proceed".** (a) `SkillOutcomeLoop.reach_m`: an arrival only ARMS the
+loop (for `armed_ticks`); the request goes out on the first tick the thing's bearing is live within reach and
+ahead (forward cosine ≥ `reach_cos`), and a window that lapses is a *miss*, counted. The host honours a
+request that arrives mid-stop from standing at once (the same `skill:stand` as the deferred path). (b) The
+push that reaches: `--push-reach VX MAX_S` sizes the push's window to the seen distance, (range + 0.15 m) / VX
+between 0.6 s and MAX_S, from the need topic's position, and keeps the nose on the thing with the unwind aim's
+gain; and `reach_short_m` lets a kick or a peck be asked for only within that range, the push alone beyond it.
+A/B on R72 (the promoted stack + push), R71a's flags.
+
+**R75 (reach 0.5 m, n = 6): the gate starves.** Two skills in six runs (R72: 39), 29 misses; both fired were
+seen and answered (0.29 m, moved 0). The reason, from the record: at the 49 arrival stops the reached thing
+was within 0.5 m on 40 (0.19 m median), and the cloud attended something within 0.5 m on 3 — the reached
+thing sits below the level gaze (T3, §17.40) and what the sweep attends is 0.93 m away. Stops at things 12.0
+→ 9.3 a run but stop-seconds at things 191 → 238 (the armed stops run their 30 s), walls 15.7 → 14.2, cells
+135 → 112. **`NULL` as a behaviour in this form: the rule is right and the gaze cannot feed it at 0.2 m.**
+The re-use is exactly R76: open the sighting gate to what the gaze CAN see (1 m) and let only the intent that
+walks the distance answer beyond a kick's reach.
+
+**R76 measured (reach 1 m, the push that walks the distance; n = 6, against R72).** Nine skills in six runs,
+all pushes (R72: 39); answers observed 7 of 9 — the best rate of the phase (R72 16 of 39) — and the first
+node ever KNOWN (seed 1: two pushes on one block, both seen); misses 15 of 24 armings. On the interesting
+scale a cost: stops at things 12.0 → 7.0 a run, stop-seconds at things 191 → 158; walls 15.7 → 12.3 a minute,
+stands 39 → 43 %, cells and rescues tie. The pushes: six of nine had a 1.5 s window (the need position 0.25 m
+off) and travelled 0.10–0.13 m — the walker started from the stand moves at 0.07 m/s over its first two
+seconds — and the two 5 s windows travelled 0.36–0.38 m and ENDED ON the thing (0.01 and 0.06 m) without
+moving it (0.05, 0.00 m): the walker stops at the contact rather than pushing through. Two of nine moved
+their thing (a ball at 0.26 m, 0.19 m; the block, 0.05 m). And at the arrival stops themselves the cloud
+attended something within 1 m and ahead on 2 of 33 — the pushes fired from later sightings, not from the
+arrival. **`PARTIAL` on learning (the answers are honest when the rule fires), `REGRESSION` on the interesting
+scale, `NULL` on reach.** Not promoted; preset R76 for the eye.
+
+**What O59 taught, for the phase.** Every rule that fires at what the duck sees starves on the same fact: at
+a stop the level gaze does not see the thing the duck has walked to (0.19 m away, 45° under the beak; T3,
+§17.40), and what it does see is 0.9 m off. The kick and the peck cannot reach what the gaze can see, and the
+push that could is a walker that needs two seconds to get going and stops at contact. The lever under all of
+this is not another intent rule but the gaze at the reached thing — the pitch that T3 tried and the stand
+refused (rescues ×4) — which is O36: a stand that tolerates the head's pitch. That is the design decision for
+the operator before more intent levers: (a) O36 first (the stander with the head pitched down at arrival
+stops), then O59's rules as built; or (b) a push that pushes — a longer window at the walk's own speed and a
+contact rule that keeps driving through the thing — measured on its own with the roll and the other spice
+already in hand.
+
+### 17.49 O36: the stand with the head down — measured, and it holds (2026-09-27)
+
+**The operator's direction.** R75 and R76 fired almost nothing to the eye (2 and 9 skills in six runs; R76
+walked backward at 700–740 s of seed 1 — the twist brain's forward command flipping sign with its saturated
+yaw, the orbit of §17.43 in yet another dress, not the unwind); R73 remains the most interesting arm. So O36:
+"the robot should be able to stand with the head angled down as long as its hips shift back to compensate for
+the change in CoG. Let's investigate."
+
+**What the record already said.** The standard stop's gaze sweep never pitches the head below +0.16 rad (its
+band is `gaze_pitch_sd` × (−0.7 .. +2.0) about a centre that was 0 and had no flag). T3's `--stop-gaze-at-thing`
+centred the band at 0.2–0.55 rad at arrival stops and the rescues rose ×4 (§17.40); that was read as "the
+stand refuses the head's pitch", and O59's gates starved on a gaze that could not see the reached thing.
+
+**The instrument.** `--stop-gaze-down RAD` sets the sweep's pitch centre at every stop, and `--log-com`
+writes the whole body's centre of mass over the midpoint of the two soles, in the heading frame, to the
+record (MuJoCo's subtree CoM; the sole geoms; truth for the harness). Both off = byte-identical (guard
+`cb24520c`).
+
+**Measured (R67 stack, 3 seeds × 1100 s, stops from 600 s), head pitched at four centres:**
+
+| pitch centre (rad) | head_pitch joint | CoM forward of the soles' midpoint | trunk grav_x | hip pitch | stops · survived · rescued at stops |
+|---|---|---|---|---|---|
+| 0 (the standard) | +0.45 | −0.5 cm | −0.001 | −0.415 | 8 · 95 % · 0 |
+| 0.3 | +0.82 | +0.2 cm | +0.007 | −0.415 | 16 · 83 % · 0.3 |
+| 0.5 | +1.04 | +0.5 cm | +0.009 | −0.415 | 15 · 81 % · 0 |
+| 0.7 | +1.25 (72°) | +0.6 cm | +0.010 | −0.415 | 8 · 95 % · 0 |
+
+The head is a quarter of the duck (189 g of 740) but it pivots close to the trunk: pitched to 72° it moves
+the whole body's centre of mass **1.1 cm** forward, the trunk leans 0.6°, and the hips do not move at all —
+the R19 stand holds its pose and the ankles carry the offset, well inside a 6 cm sole. No stop was rescued
+at 0.5 or 0.7 rad; the hand-offs to the walker past 6.5° of lean rose a little at 0.3–0.5 (survival 95 → 83 %)
+and not at 0.7. **The stand tolerates the head down. The hips need not shift; the CoG the operator asked
+about moves a centimetre.** T3's rescues came from something other than the pitch — the next measurement
+(R77 below) puts the gaze at the thing back on the R72 stack with the CoM on the record to find it.
+
+Two side effects worth the eye: with the head down the stops DOUBLE (8 → 16 at 0.3 rad, 15 at 0.5) because a
+gaze that sees the floor sees the things on it, and the seek loop's arrivals follow — exactly the sightings
+O59's gate starved for — and the sweep's pitch band at 0.7 rad covers +0.64 .. +0.86, which is where a
+reached thing at 0.2 m sits (45° = 0.79 rad under the beak, §17.40).
+
+**R77: the gaze at the reached thing, on the promoted stack (R72 + `--stop-gaze-at-thing`, n = 6, 1500 s).**
+The arm the phase has been looking for. Skills 39 → 55 (kick 20, peck 19, push 16), answers observed 16 → 31,
+things moved by more than 5 cm 2 → 10 (the pushes 5 of 16, the right kick 3 of 9), stops at things 12.0 →
+14.3 a run (stop-seconds 191 → 182, at walls 62 → 100), arrival stops 11.7 → 16.5 of 24.8, walls 15.7 → 13.5
+a minute, contact 2.2 → 1.2 %, stands 39 → 43 %, rescues 0.49 → 0.26 % — and ONE stop rescued in six runs
+(stop survival 90 → 87 %). At the look stop the thing sits 0.28 m ahead and 18° off the nose whether the
+answer is seen or not; the unknowns are now the thing that did not move (14 of 24) and 7 fired at nothing.
+Nodes known still 0 (55 requests over 30 nodes × 3 intents; the ladder needs two answers per cell). **T3's
+verdict is reversed on this stack: the gaze at the thing is `WORKING`, no cost to the stand.** Its 2026-09-17
+rescues ×4 belonged to R64's walk (the reflex-less orbit arriving at things at speed) and the R60a-era
+stop, not to the head's pitch. Preset R77 for the eye; not promoted before it. R78 = R75's gate (fire at what
+you see within 0.5 m) on R77, running.
+
+**R78: O59's gate on R77 (R75's `reach_m 0.5` + the gaze at the thing, n = 6).** The gate is fed now and it
+is perfectly honest: 12 skills fired, 12 answers observed (the first arm with no unknown), at the look stop the
+thing 0.22 m ahead and 13° off the nose; stop-seconds at things 182 → 260 (the most of the phase), walls 13.5 →
+10.6 a minute, stop survival 87 → 99 %, stands 43 → 51 %. And it fires a fifth as often as R77 (12 against
+55): 21 requests were made, 9 of them dropped by the host — a request that landed while the stop was still
+settling, or during a skill's own window or its unwind, was read only in the standing phase — and 20 armings
+lapsed as misses. One thing moved in twelve. **`PARTIAL`: honest answers and a calmer walk, `REGRESSION` on
+the interaction count against R77.** The dropped requests are fixed (kept as pending, fired at the next
+hand-back) and R78 is rerun as R78b below.
+
+**Why nothing is ever "known" (every arm since R65).** The outcome table is keyed by the thing EPM's node ×
+intent — about 30 nodes × 3 intents = 90 cells — and a run makes 12–55 requests. Two answers per cell is a
+bar the phase's request rate cannot reach; the ladder that habituation and the linger need never climbs.
+The vocabulary that decides the cell is finer than the question ("what does a kick do to a ball") by a factor
+of ten: the thing EPM separates balls from blocks at purity 0.9 but with ~7 nodes per kind. The fix is not a
+lower bar but a coarser key — the node's kind, as the EPM's own baked-node clusters give it, or the descriptor's
+first two dimensions — and it is the next design item after the operator's eye (O62).
+
+**R78b (the dropped requests kept as pending, n = 6) — and a double fire.** Skills 46, the loop's own
+requests 25, every one of them answered (25 of 25 seen; the `skills` instrument reads 37 of 46 because the
+duplicates below are counted too); the first nodes ever KNOWN (seed 5: two); stops at things 16.0 a run,
+stop-seconds at things 262, both the phase's best; walls 14.4, rescues 0.26 → 0.73 %. The record shows why
+46 and not 25: each request fired TWICE — started at once from standing (`skill:stand`) and, on the same
+tick, read again by the new deferral as "landed during a skill's window" and kept as pending, so the same
+skill ran again 3 s later at the look stop's hand-back with the thing 0.45 m back. The duplicate is what
+raised the rescues. Fixed (a request started this tick is not deferred); rerun as R78c.
+
+**R78c (the double fire fixed; n = 6, against R77 and R72).** Requests 36, skills 35, answers observed 36 of
+36 by the loop's own count (31 of 35 by the instrument's stricter matching; the 4 unknown had the thing 0.38 m
+ahead and 12° off) — the first arm in which every ask is answered — and nodes KNOWN 3 (two seeds). On the
+interesting scale it is the linger the operator asked for in §17.45: stops at things 18.2 a run (R77 14.3,
+R72 12.0), stop-seconds at things 358 (182, 191), at walls 45 (100, 62), walls 7.5 a minute (13.5, 15.7),
+stands 53 % (43, 39), rescues 0.49 % (0.26, 0.49), stop survival 93 %. Its costs: cells 104 (131, 135) — a
+duck that stays with things covers less room — and things moved 1 of 35 (R77 10 of 55): the gate fires at a
+thing seen within 0.5 m from where the duck already stands (0.26 m at the look), and a kick or a peck from
+there does not reach it, while R77's ten came from arrivals at 0.18 m. **`WORKING` as the linger-and-learn
+arm (every answer seen, the first known nodes, the fewest walls of the phase), `PARTIAL` on the interesting
+scale against R77 (more standing at things, fewer things moved).** Both are for the operator's eye; the
+recommendation is R77 as the `★` candidate on their scale and R78c as the learning form to carry once the
+outcome table's key is coarse enough to be climbed (O62) and the reach is closed (O59).
+
+**Promoted (2026-09-27): `★ THINGS` = R77.** The operator's eye: "the robot looking down is stable and
+interesting"; R78 "ambiguous and not an improvement over R77". The promoted run is R72's stack with
+`--stop-gaze-at-thing` (preset `★ THINGS · R77`, seed 1; harness argv = the standard stops + `--stop-on-arrive
+--skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing` on `a1v2_r72_push.json`). The
+reach gate (R75's `reach_m`), the linger's renewal, the roll on a spin, the walking cloud and its re-fix stay
+as options, off. Next, on R77: O62 (a coarser outcome key) and the reach (the approach ending with the thing
+at the foot).
+
+### 17.50 On `★ THINGS` R77: the kind as the outcome's key (O62) and the arrival at the foot (O59) — R79, R80 (2026-09-27)
+
+**R79, the kind.** The outcome table's key has been the thing EPM's winner × intent: ~30 nodes a run (the
+vocabulary separates balls from blocks at purity 0.9, with some seven nodes per kind) × 3 intents, and a run
+asks 12–55 times, so no cell reaches `min_samples` = 2 and nothing is known (§17.49). The coarser key is not a
+hand-rolled clusterer (CLAUDE.md §0 rule 1) but a second EPM over the same descriptor with `max_nodes 4` and a
+coarser insertion floor (0.25 against 0.06), `thing_kind_epm` on `reality.cognitive.thing_kind`; the outcome
+loop's `thing_topic` reads it. Nothing else changes: the fine vocabulary still drives attention and the seek.
+The record carries the kind token as `tkind`; `cloud_objects.py things --field tkind` scores its purity by
+object kind. Prediction: nodes known > 0 on most seeds, the linger's need able to fall, requests per known
+cell ≥ 2; the risk is a kind that lumps a wall base with a block (purity), in which case the table learns
+that "blocks" sometimes do not move — which is true of wall bases.
+
+**R80, the arrival at the foot.** R77's ten moved things came from arrivals where the thing was 0.18 m off;
+R78c's one from a kick at 0.26 m. The seek loop arrives by dead reckoning at `arrive_m` 0.25 and the stop
+starts there; `arrive_m 0.15` (with the outcome loop's `arrive_range` 0.2) ends the approach with the thing
+where a kick from standing reaches. Prediction: things moved up, the thing's range at the look stop down from
+0.28 m, more contacts on arrival (the base moves objects by walking into them — interesting on the operator's
+scale, and a fall risk to watch: rescues).
+
+**R79 measured (n = 6, against ★ R77).** The ladder climbs: nodes KNOWN 14 over six runs (5, 0, 0, 3, 3, 3; R77
+0), and on two seeds the need at the last attended thing fell to 0.33 and 0 — the first time habituation
+has had anything to act on. Skills 55 → 60 (kick 22, peck 19, push 19), answers observed 31 → 44, things
+moved 10 → 9, stops at things 14.3 → 17.0 a run, stop-seconds at things 182 → 231, walls 13.5 → 9.6 a minute,
+cells 131 → 117, stands 43 → 46 %, rescues tie. The kind itself is coarse in the way feared: purity 0.78
+against a chance of 0.66 (+0.12 ± 0.10; the fine vocabulary was +0.30–0.44), four nodes with blocks and balls
+mixed under some — so what the table learns is "this kind of thing, roughly". **`WORKING` as the mechanism
+O62 asked for; `PARTIAL` on the kind's purity.** The re-use: a kind that is the fine EPM's own baked-node
+clusters (topology, not a second GNG) would carry the fine vocabulary's purity into the coarse key.
+
+**R80 measured (n = 6, against ★ R77): `REGRESSION`.** Arriving at 0.15 m by dead reckoning is arriving
+rarely: arrival stops 16.5 → 5.8 a run, skills 55 → 21, stops at things 14.3 → 7.0, stop-seconds at things
+182 → 99, walls 13.5 → 28.3 a minute, stands 43 → 24 %, rescues 0.26 → 0.84 %. The seek loop's dead-reckoned
+range rarely falls under 0.15 m before the target is forgotten or the body bumps the thing, so the walk
+becomes R64's again. Things moved 3 of 21 (the right kick 2 of 5). Not kept. The reach stays with O59 in a
+different form: the closing step must be by SIGHT at the stop (the pitched gaze sees the thing at 0.26 m; a
+short step onto it before the kick), not by a tighter dead-reckoned arrival.
+
+### 17.51 On `★ THINGS` R79: the closing step, and why the stops lengthen (2026-09-27)
+
+**Promoted: `★ THINGS` = R79.** The operator's eye: "the robot successfully kicked the block several times and
+lingered to play"; the peck "slightly off — just slightly too far back from the object to make contact with
+the beak"; and "the robot should make contact with the head/beak even if it results in a fall — we want the
+robot to perturb its environment as much as possible." Also: the looking grows longer as a run goes on.
+
+**Reach, measured on R79's 41 kicks and pecks.** Every thing that moved had its edge 0.05–0.08 m from the
+body when the skill began (the left kick 4 of 14 at 0.05–0.07 m; the peck 1 of 19, at 0.08 m); seven pecks
+within 0.15 m and six left kicks within 0.15 m moved nothing. The reach of both intents is a hand's width;
+the stop, by dead reckoning, leaves the thing 0.12–0.20 m off (median). A tighter arrival did not close it
+(R80). **The closing step** (`--skill-approach REACH VX`, off = as before): when a kick or a peck is asked for
+and the seen thing's centre is beyond REACH, the duck first steps onto it — the walker at VX for
+(range − REACH) / VX seconds, at most 3 s, the nose kept on the thing — and the skill follows at once from
+wherever the step left the body; the unwind and the look follow the skill as before. The step is `move` and
+the skill is `do`: two of the daemon's verbs in sequence, from the stop. R81 = R79 + `--skill-approach 0.10
+0.25` (preset R81). Prediction: pecks and kicks that move their thing up from 5 of 41; the price the operator
+has accepted, more falls (a peck from a body still settling from a step), to be counted.
+
+**Why the stops lengthen.** In R79 the stops from 600 to 900 s are ended by the gaze's "six known gazes in a
+row" rule 60 times, by a hand-off 15 times, by the 60 s cap once; from 900 to 1200 s the cap ends 18 of 49,
+and the stops' median length climbs from 8 s to 60 s in the 1050–1200 s window. In a capped stop the map's
+token sits on one winner while its novelty flag flickers on every few gazes — the map is still inserting
+nodes late in the run (28 → 29 during that stop), so six *known* gazes in a row never come, and the cloud
+rule ends only 17 of 33 stops. It is the map growing, not the duck getting slower; the 60 s cap is what the
+eye sees. The cheap knob is the cap (`--stop-secs 30`) or letting the cloud's growth alone end a stop that
+the gaze cannot; both are a preset's argv, to be measured when the operator wants it — "not a big issue".
+
+**R81 measured (n = 6) — a loop, then a fix.** Steps onto a thing: 295, 7, 204, 333, 301, 24 a run; skills
+fired 11; walls 9.6 → 99 a minute, arrival stops 17.8 → 3.7. The step that ended beyond reach started the skill,
+whose start began another step: with the walker making 0.06 m over a 1.2 s window from the stand and the
+window sized on 0.25 m/s, the closing step rarely closed, and the pair looped for minutes, chasing a
+remembered centre into the wall. Two fixes: one step per request (the skill that follows a step never steps
+again), and the step ends by the odometry — the remembered centre within REACH — under a ceiling sized on the
+walker's real start-up speed (0.1 m/s, at most 3 s). Rerun as R81b.
+
+**R81b measured (one step per request, the step ended by the odometry; n = 6).** The loop is gone: 29 steps
+for 40 skills (kick 17, peck 12, push 11). But the step closes little — the thing's edge 0.21 → 0.17 m over a
+1.4 s window (6 of 29 to within 0.08 m), because the walker from the stand barely moves in a second — and the
+thing is 37° off the nose when the step begins and 49° when the peck does: a peck straight ahead misses a
+thing beside it. Pecks moved 0 of 12 (two of them at 0.04 and 0.07 m), kicks 2 of 17, pushes 3 of 11; no fall
+followed a skill (the rescues 6 → 17 are the walk's). On the interesting scale a `REGRESSION` against R79:
+stops at things 17.0 → 11.8 a run, walls 9.6 → 14.6, stands 46 → 34 %, nodes known 14 → 6. The reach is
+angular as much as radial: the closing step must FACE the thing before it walks. R81c: the step turns in
+place while the thing is more than 0.2 rad off the nose, then walks, and ends when the centre is within reach
+AND on the nose, under a ceiling sized on both (at most 4 s).
+
+**R81c measured (the step faces the thing first; n = 6).** The most skills of any arm — 64 (kick 26, peck 21,
+push 17) after 47 steps — stops at things 17.2 a run and nodes known 12, a tie with R79 on the interesting
+scale; and **things moved 0 of 111.** The step does not step: over its 1.9 s window the thing's edge goes
+0.17 → 0.15 m and its bearing 28° → 27°, and 4 of 47 steps end within reach and on the nose. The walker from
+the stand neither turns in place nor walks in under two seconds (it needs about two to get under way, §17.46),
+and a kick or a peck fired the moment it is asked to stop connects with nothing. **`REGRESSION` on reach in
+all three forms of the closing step (R81, R81b, R81c); the walker is not a stepping tool from the stand.**
+Kept as a flag, off. What has moved things in this phase: a kick from a SETTLED stand with the thing 0.05–0.08 m
+off (R79, 4 of 14), and the push — walking into the thing (R77, 5 of 16; R81b, 3 of 11).
+
+**R82: the skill from the walk.** The operator's rule — "contact with the head/beak even if it results in a
+fall; perturb the environment as much as possible" — lifts the constraint the runner has carried since
+§17.39, where the mid-walk kick fell 28 % of the time and was moved to the arrival stop's hand-back.
+`--skill-now`: a request at the arrival tick fires at once, from the walk, with the body still closing on the
+thing at 0.25 m by dead reckoning and moving at 0.3 m/s. Prediction: things moved up (the foot arrives at the
+thing at speed), falls up (rescues), the answers seen down (a fall is not a look). Preset R82. The eye decides
+what a fall is worth.
+
+**R82 measured (n = 6, against ★ R79).** Contact: the PECK from the walk moved its thing 5 of 11 (R79: 1 of
+19; every other arm 0–2 of ~20), the push 5 of 12, the kicks 0 of 16 (fired at 0.29–0.46 m, the foot never
+arrives); things moved 10 of 39 against R79's 9 of 60 — and the falls the operator priced in did not come:
+3 of 39 skills were followed by a fall within 8 s, rescues 0.32 → 0.63 %. The beak reaches from the walk
+because the body is still closing on the thing when the reach-down begins. The cost is the rest of the cycle:
+a skill fired at the arrival tick pre-empts the arrival stop (arrival stops 17.8 → 0; stops 26 → 11, the timer's
+only), and the unwind and look ran only from a stop, so 2 of 39 answers were seen, nodes known 0, stops at
+things 17.0 → 4.0 a run, walls 9.6 → 28 a minute. **Contact `WORKING`, the cycle `REGRESSION`.** Fix: the
+unwind and the look follow a skill fired from the walk as they follow one from standing; rerun as R82b.
+
+**R82b measured (the unwind and look after a skill from the walk; n = 6, against ★ R79).** The cycle is
+back: skills 49 (kick 18, peck 17, push 14), answers observed 26 (R82: 2), nodes known 7, arrival stops 7.8
+(R82: 0; R79: 17.8), stop-seconds at things 274 (R79 231), stops at things 11.5 a run (17.0), walls 12.0 a
+minute (9.6), cells 110 (117), stands 48 % (46). The peck from the walk keeps its reach — 3 of 17 moved their
+thing here, 5 of 11 in R82: 8 of 28 against 1 of 19 from the stand — and now pays: 8 of the 49 skills were
+followed by a fall within 8 s (4 of the 17 pecks, 4 of the 18 kicks), rescues 0.32 → 0.70 %. The kicks from
+the walk do not reach (1 of 18: fired at 0.15–0.22 m, the foot swings before the body arrives). **`PARTIAL`:
+the peck's contact `WORKING` from the walk (the operator's ask), the cycle a tie, the interesting scale down
+(stops at things 17 → 11.5) and the falls doubled — the price the operator named.** The eye decides; R79 stays
+`★`. If the contact is worth the price, the form to carry is R82b's flag with the kicks left to the stand
+(the peck alone from the walk) — one line in the host, measured next if asked.
+
+### 17.52 The phase closes: R83, the closer arrival on the kind, promoted on the operator's eye (2026-09-27)
+
+**The operator's call.** After the R81/R82 report: "let's be sure we are using R80 as our promoted latest config —
+the closer distance for interaction is a win." R80 was minted on R77 and carries no kind (§17.50), so the stack the
+eye asked for is R79 with R80's two numbers, `seek.arrive_m 0.15` and `outcome.arrive_range 0.2`: **R83**,
+`a1v2_r83_kindfoot.json`, on R79's harness flags. Measured at n = 6 before the star moved.
+
+**R83 measured (n = 6, against ★ R79).** Every aggregate is R80's to the last decimal: walls 9.6 → 28.3 a minute,
+arrival stops 17.8 → 5.8 a run, stops 26 → 16, stops at things 17.0 → 7.0 (stop-seconds at things 231 → 99),
+skills 60 → 21 (kick 9, peck 8, push 4), things moved 9 → 3, answers observed 44 → 8, nodes known 14 → 0, stands
+46 → 24 %, walk 48 → 71 %, rescues 0.32 → 0.84 %, cells 117 → 147, path 73 → 102 m. The identity with R80 is not a
+confound (§3.2 rule 7 checked): the kind's records are on R83's log (2266 `tkind` lines on seed 1, none on R80's),
+and the kind changes a choice only once a cell holds two answers, which no cell does in 21 skills over six runs —
+the least-known cycle asked the same intents at the same moments and the physics followed. Per seed, the preset's
+seed 1 is the phase's exception again (§17.45): R79 s1 26 stops at things / 327 s / 15 skills / 3 moved / 13 answers;
+R83 s1 16 / 297 s / 8 / 1 / 4; seeds 3, 4 and 6 are wall seeds (59, 31, 42 walls a minute). Where an arrival does
+complete the thing is closer — the eye's win — but the dead-reckoned range falls under 0.15 m a third as often
+before the target is forgotten or bumped, and the walk between arrivals is R64's.
+
+**Verdict and promotion.** On the harness `REGRESSION` on the interesting scale, as R80 (§17.50); on the operator's
+eye the closer interaction is worth it, and the eye is the gate (CLAUDE.md §3 rule 5): **`★ THINGS` = R83**, preset
+"★ THINGS · R83" (seed 1), with R79 kept one line below as the comparison arm. Re-use: the closer arrival wants a
+target that is not forgotten on the way — a seek target renewed from the pitched gaze in the last half metre (O61's
+re-use) would give R83's closeness with R79's arrival count; and the peck from the walk (R82b) reaches without
+arriving at all. Both belong to the next phase's design, not to a lever tonight.
+
+**The phase closes here.** Entry point for a cold start: the phase page
+[`microduck_things_phase.md`](microduck_things_phase.md) §10–13 — the promoted run, the phase in one table, the
+findings, and what to carry into the next push, chasing moving things. The launcher's presets were pruned 82 → 13
+(the rest in `tools/duck_launcher/presets_archive.json`, argv intact) and 46 refuted configs lost their rank (files
+kept, names keep their verdicts).

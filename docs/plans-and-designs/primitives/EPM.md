@@ -10,7 +10,7 @@
 
 An EPM (Episodic Predictive Module) is the bath's per-modality clusterer. It owns:
 
-1. **A frozen encoder** — JL projection (visual), Hopf filterbank (cochlear), or RBF grid (proprioceptive). Stateless except for Hopf's per-band MOC EMA. Selected at construction time by `params.modality`.
+1. **A frozen encoder** — JL projection (visual; also `jl_state` over a wide homogeneous state vector such as a depth matrix), Hopf filterbank (cochlear), or RBF grid (proprioceptive, ≲ 12 heterogeneous dims — past that its bandwidth flattens the input; see `jl_state`). Stateless except for Hopf's per-band MOC EMA. Selected at construction time by `params.modality`.
 2. **A GNG topology** — Growing Neural Gas with two-gate baking, mitosis, biological health, and stale-prune. State is per-instance and serializable. Reuses `cpp_core/include/v3/gng.hpp` directly.
 3. **A dual-TLE estimator** — `tle = α·quant_error + β·transition_surprise`. The combined error drives mitosis decisions and is the headline scalar published in `RealityToken`.
 
@@ -52,6 +52,7 @@ The exact topic name is derived from `params.modality_group` and `params.modalit
 | `modality_group` | string | ConstructionOnly | — | `video`/`audio`/`proprio` | Determines the topic-name prefix. Required. |
 | `modality_name` | string | ConstructionOnly | — | — | Trailing component of the output topic. Required. |
 | `encoder_kind` | string | ConstructionOnly | — | `jl`/`hopf`/`rbf`/`identity` | Selects the encoder backend. Required. Identity is for Level-N EPMs. |
+| | | | | `jl_state` | The frozen JL projection over a **ProprioToken** of `proprio_state_dims` values (L2-normalised before and after; `FrozenJLEncoder::make_state_encoder`). For a wide, homogeneous state such as a depth matrix: the RBF grid's bandwidth in that many dimensions makes every input the same activation profile (measured on the duck's 64-zone ToF, 2026-09-11: the raw input spread doubled against the 8-column form, the RBF latent spread fell to 0.6×, and neither commissioned ranges nor centring recovered it; the JL latent kept it). Takes no `dim_min`/`dim_max` (throws) — condition the vector at the source; `projection_dim` explicit (no auto-derivation). Added 2026-09-11 for the duck's R36. |
 | `input_topic` | string | ConstructionOnly | — | — | The single subscribed observation topic. Required. |
 | `projection_dim` | int64 | ConstructionOnly | 128 | [16, 1024] | Encoder output dim = GNG input dim. |
 | `baking_threshold` | int64 | HotMutable | 50 | [10, 500] | Visit count required to bake a node. **⚠ The 50 is the schema's advertised default only.** The runtime hands a config's params to `on_setup` verbatim (`OgmaInstance.cpp:45`) and never merges schema defaults, so an EPM whose config *omits* this key runs `GNG::Config`'s own default of **100**. Measured 2026-09-05 (Kalman-lessons Stage 0): 105 EPM instances across 40 configs omit it. State it explicitly in every config; the picrawler stack does. |

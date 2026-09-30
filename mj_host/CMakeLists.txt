@@ -98,6 +98,7 @@ add_executable(ogma_mjhost
   src/DuckBody.cpp
   src/Odometry.cpp
   src/IntentAdapter.cpp
+  src/HeadAdapter.cpp
   src/InspectorSurface.cpp
   src/Tof.cpp
   src/Observation.cpp

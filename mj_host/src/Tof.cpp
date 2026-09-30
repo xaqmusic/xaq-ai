@@ -82,6 +82,7 @@ void Tof::sense(const DuckBody& body, double trunk_height_m) {
         const auto dir_level = qrot(level, dir);
         const double downward = -dir_level[2];
         z.point = {sensor_pos[0] + r * dir[0], sensor_pos[1] + r * dir[1], sensor_pos[2] + r * dir[2]};
+        z.point_level = qrot(level, z.point);
         if (above_floor > 0.0 && downward > 0.0 && r * downward >= floor_threshold) {
             z.cls = TofZone::Floor;
             continue;

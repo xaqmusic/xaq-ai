@@ -266,6 +266,26 @@ void OgmaBrainAdapter::set_regime_learning(bool on) {
     apply_freeze_state();
 }
 
+void OgmaBrainAdapter::freeze_module(const std::string& id) {
+    static const char* const kRates[] = {"model_lr", "ctrl_lr", "bias_lr", "sat_lr",
+                                         "state_prior_lr", "state_prior_h_lr", "state_model_lr"};
+    module_frozen_.insert(id);
+    bool found = false;
+    for (auto* module : instance_->modules()) {
+        if (std::string(module->id()) != id) continue;
+        found = true;
+        const auto params = module->current_params();
+        for (const char* rate : kRates) {
+            auto it = params.find(rate);
+            if (it == params.end()) continue;
+            if (const double* v = std::get_if<double>(&it->second)) frozen_rates_[id + ":" + rate] = *v;
+            module->on_param_change(rate, ogma::ParamValue{0.0});
+        }
+        std::fprintf(stderr, "  freeze: %s for the rest of the run (its commands are not applied)\n", id.c_str());
+    }
+    if (!found) std::fprintf(stderr, "  !! freeze_module: no module %s in this graph\n", id.c_str());
+}
+
 void OgmaBrainAdapter::apply_freeze_state() {
     const bool on = learning_ && regime_ok_;   // frozen iff EITHER axis says frozen
     if (on == !frozen_now_) return;
@@ -299,6 +319,7 @@ void OgmaBrainAdapter::apply_freeze_state() {
                     std::fprintf(stderr, "  freeze: %s %s %.4f -> 0\n", id.c_str(), rate, *v);
             }
             if (on) {
+                if (module_frozen_.count(id)) continue;    // frozen for good (freeze_module)
                 auto saved = frozen_rates_.find(key);
                 if (saved != frozen_rates_.end())
                     module->on_param_change(rate, ogma::ParamValue{saved->second});
@@ -363,6 +384,17 @@ std::vector<double> OgmaBrainAdapter::consolidation() const {
         out.push_back(d.contains("consolidate_c") ? d["consolidate_c"].get<double>() : 0.0);
     }
     return out;
+}
+
+double OgmaBrainAdapter::motor_tle() const {
+    double worst = -1.0;
+    for (auto* m : instance_->modules()) {
+        const std::string type(m->type_name());
+        if (type != "MotorEPM" && type != "MotorEPMv2") continue;
+        const auto d = m->diag_lite();
+        if (d.contains("motor_tle")) worst = std::max(worst, d["motor_tle"].get<double>());
+    }
+    return worst;
 }
 
 std::vector<double> OgmaBrainAdapter::attitude_error() const {

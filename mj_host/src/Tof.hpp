@@ -19,6 +19,11 @@ struct TofZone {
     double range = -1.0;               // slant range of the return, m (-1 = none)
     double horizontal = 0.0;           // horizontal range (Hit)
     std::array<double, 3> point{};     // the return, in the trunk frame (Floor / Hit)
+    // The same return in the GRAVITY-LEVELLED trunk frame: origin at the trunk, +z up by measured
+    // gravity, +x/+y turning with the body.  This is the frame a point CLOUD wants -- the head may
+    // sweep and the trunk may tilt a few degrees between casts and the points still compose, which
+    // the raw trunk frame does not (2 m x sin 3 deg = 10 cm of apparent height, against a 4 cm block).
+    std::array<double, 3> point_level{};
 };
 
 class Tof {

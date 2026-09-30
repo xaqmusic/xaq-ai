@@ -40,6 +40,30 @@ tools/duck_viewer/.venv/bin/python tools/duck_viewer/view.py replay RUN.jsonl --
 pause, and all its usual keys. `live` paces to the wall clock, because the host runs far faster
 than real time and a run that flashes past is not an observation.
 
+Three keys are ours, listed in the HUD under the brain-camera image (with the status line):
+
+| key | what | default |
+|---|---|---|
+| `V` | the ToF's 64 beams from the head, coloured by class | off — they hide the head |
+| `C` | the **brain-camera window**: the head camera's frame at the brain's resolution (`--cam-res`, default `64x48`) and rate (12.5 Hz), scaled up without smoothing so each of the brain's pixels is a block; the status line and the keys are its HUD | on |
+| `H` | the HUD text | on |
+| `W` | **fade what hides the duck** — an outer wall drops to 15 % opacity while the camera is on its far side; a table, chair or shelf drops to 15 % while a bundle of rays from the camera to the duck's trunk hits it first (the table top when looking down through it, a chair in the line of sight); a fade holds half a second past its last hit so a grazing ray does not flicker | on |
+
+**Watching a level-2 run: the first 600 s are the babble.** The duck pulses its twist in place
+to identify its own velocity model, and the tour starts at 600 s. `--fast-until 600` on the
+viewer (and, in `live` mode, on the host — the launcher sets both) fast-forwards that part: no
+pacing, one frame in 25 drawn, the HUD says `[fast-forward]`, and the wall clock starts where the
+pacing does. The run is the same run tick for tick — the host's flag only touches its pacer, and
+a run watched with `--realtime` is byte-identical to the headless one (checked 2026-09-10).
+
+The HUD is in the camera window rather than drawn into the MuJoCo window on purpose: label
+geoms placed in the free camera's frame lag the mouse between syncs and flash on every zoom.
+
+The camera window renders the head camera from the same `qpos` the viewer draws (an offscreen
+EGL renderer in the viewer process, handed to Tk as a PPM), so it shows exactly the frame the
+host will publish once it renders (playroom plan C1). Until then it is the preview of that
+frame, not a copy of it. Scenes without a `head_camera` (the vendored default) get no window.
+
 ## Every run is kept
 
 `run.sh watch` and `run.sh hold` write `mj_host/log/<mode>-<timestamp>.jsonl`, one JSON object
@@ -74,3 +98,33 @@ verified working — reach for that and say so, and this note gets replaced by a
 
 Hand-offs are also printed as their own line in the terminal (`t=… -> scaffold`), and the
 status line carries the driver, `c`, the active push and any harness event.
+
+## The sweep clouds (2026-09-13)
+
+A run whose graph declares `CloudMap` and whose host ran with `--cloud` writes one `cloudv` record
+each time a cloud is filed: the stop's voxels as `[ix, iy, iz, hits, mean_height_mm]` in the cloud's
+own body-anchored frame, plus the **world** pose it was anchored on. That pose is instrumentation for
+this viewer — it is how a body-anchored cloud gets drawn beside the furniture it describes — and no
+brain reads it.
+
+- `P` toggles the clouds; `N` steps through them one place at a time, then back to all of them.
+- Voxels are coloured by the **mean height of the points in them**, not the voxel centre: grey is the
+  floor, orange is the 2–20 cm band where something stands on the floor, blue is furniture height,
+  pale is wall tops. Logs written before 2026-09-13 carry 4-tuples and fall back to the centre, which
+  draws the whole floor orange.
+- Replay accumulates clouds as the run goes, so the room fills in as the duck visits it.
+
+## Recording a long run
+
+`record` streams frames to the encoder one at a time, so its memory is flat in the run's length (about
+0.7 GB). It used to keep every frame and write at the end — fine for an 8 s clip, fatal for a 1500 s
+playroom run: 75 000 frames at 2 MB each, and on 2026-09-13 the kernel killed it at 23.9 GB. For a long
+run, render a window:
+
+```sh
+.venv/bin/python view.py --scene scene_playroom.xml record RUN.jsonl OUT.mp4 --from 600 --to 1500 --every 10
+```
+
+`--from`/`--to` are run seconds; `--every N` keeps every Nth frame, so that example is an 86 s video.
+Filed clouds are carried through skipped frames, so a window that opens after a stop still shows them.
+

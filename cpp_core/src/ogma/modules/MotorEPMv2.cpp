@@ -251,6 +251,43 @@ ParamSchema MotorEPMv2::params_schema() const {
          "the squelch and the L2 brake act on HK's C alone, and Cp grows under the descent's "
          "own self-limiting rule. 0 = legacy shared C, byte-identical.",
          ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_isolate", ParamMutability::HotMutable,
+         "LESION (2026-09-12, the W5 fork item (a); design doc §17.17): when 1, the "
+         "controller's columns are held to the prior's OWN indices — after every update, "
+         "C(:, i) (and Cp's, in split mode) is zeroed for every state column i that is not a "
+         "resolved state_prior_indices entry. Measured motivation at the duck's intent boundary: "
+         "part 2's Gauss-Newton step writes the FULL outer product, C(j,:) += g·prev_xᵀ, so an "
+         "error on ONE index deposits content in EVERY column of every motor's row, with no "
+         "objective behind any of it. With the heading reference standing still (R38) the twist "
+         "brain's yaw row let go of the heading error altogether and settled on whatever else "
+         "moved at the gait frequency — the right ToF column at +1.97 against the heading's "
+         "−0.12 — a saturated 2.4 Hz oscillation with |vyaw| at 0.95 of range and the heading "
+         "error parked at 2 rad. This is the DIAGNOSTIC, not the fix: if straightness jumps with "
+         "it on, the swamping is proven and the mechanism is the prior's weight rather than a new "
+         "control law. h is untouched on purpose (h reaches, C balances — the measured role "
+         "dissociation; zeroing it would be a second lever). Per-leg path only, like the prior "
+         "itself. Read back as spIso in diag_lite (columns kept; -1 = off). 0 = off, "
+         "byte-identical (the gain-0 guard).",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1.0}},
+        {"state_prior_step_gain", ParamMutability::HotMutable,
+         "THE MODEL-IMPLIED STEP (2026-09-12, the W5 fork item (b); design doc §17.17, §17.26): "
+         "when > 0, the command gains a term COMPUTED from the identified model instead of "
+         "accumulated into C — the least-squares command that closes the prior's error in one "
+         "step, y* = argmin ||A_p·y − e||² + reg_eps·||y||², where A_p is the rows of A at "
+         "state_prior_indices and e their errors (x* − x). The ridge is the module's own "
+         "reg_eps, so there is no new constant and the gain is still the model's own authority — "
+         "discovered, never wired, exactly the justification part 2's Gauss-Newton descent has. "
+         "Clamped to ±1 per motor and added to the PRE-tanh operating point, so it rides the same "
+         "squash and the same rails as everything else. Measured motivation (§17.26): part 2 "
+         "spreads its aim over every column of C by construction (C(j,:) += g·prev_xᵀ), so the aim "
+         "is an accumulation over the whole state vector rather than a computation — a lesion that "
+         "removed the cross-talk removed the aim with it (68 % → 44 % of ticks opposing the "
+         "heading error). This is the same objective, computed. Independent of state_prior_gain "
+         "on purpose: a config may run the computed step INSTEAD of the descent (gain 0, step 1), "
+         "or both. The step the command carried is stored per leg and added back when the update "
+         "reconstructs its operating point, or G would lie about the rail the body actually ran. "
+         "Read back as spStep in diag_lite (|step|; -1 = off). 0 = off, byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{2.0}},
         {"consolidate_gain", ParamMutability::HotMutable,
          "EARNED CONSOLIDATION (2026-09-01): anneal ALL learning rates by a factor "
          "(1 − gain·c), where c ∈ [0,1] ramps up (τ ≈ 10 s) while BOTH hold — the state "
@@ -1103,6 +1140,8 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_calm"]    = state_prior_calm_;
     m["state_prior_calm_fixed"] = state_prior_calm_fixed_;
     m["state_prior_split"]   = state_prior_split_;
+    m["state_prior_isolate"] = state_prior_isolate_;
+    m["state_prior_step_gain"] = state_prior_step_gain_;
     m["state_prior_damping"] = state_prior_damping_;
     m["regime_topic"] = regime_topic_;
     m["babble_owns_a"] = babble_owns_a_;
@@ -1291,6 +1330,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_calm",    [&](auto const& v){ state_prior_calm_    = get_double(v, "state_prior_calm"); });
     apply_param(params, "state_prior_calm_fixed", [&](auto const& v){ state_prior_calm_fixed_ = get_double(v, "state_prior_calm_fixed"); });
     apply_param(params, "state_prior_split",   [&](auto const& v){ state_prior_split_   = get_double(v, "state_prior_split"); });
+    apply_param(params, "state_prior_isolate", [&](auto const& v){ state_prior_isolate_ = get_double(v, "state_prior_isolate"); });
+    apply_param(params, "state_prior_step_gain", [&](auto const& v){ state_prior_step_gain_ = get_double(v, "state_prior_step_gain"); });
     apply_param(params, "state_prior_damping", [&](auto const& v){ state_prior_damping_ = get_double(v, "state_prior_damping"); });
     apply_param(params, "regime_topic", [&](auto const& v){ if (auto p = std::get_if<std::string>(&v)) regime_topic_ = *p; });
     apply_param(params, "babble_owns_a", [&](auto const& v){ babble_owns_a_ = get_double(v, "babble_owns_a"); });
@@ -2699,6 +2740,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_calm")    state_prior_calm_    = get_double(value, "state_prior_calm");
     else if (key == "state_prior_calm_fixed") state_prior_calm_fixed_ = get_double(value, "state_prior_calm_fixed");
     else if (key == "state_prior_split")   state_prior_split_   = get_double(value, "state_prior_split");
+    else if (key == "state_prior_isolate") state_prior_isolate_ = get_double(value, "state_prior_isolate");
+    else if (key == "state_prior_step_gain") state_prior_step_gain_ = get_double(value, "state_prior_step_gain");
     else if (key == "state_prior_damping") state_prior_damping_ = get_double(value, "state_prior_damping");
     else if (key == "state_prior_calm_indices") state_prior_calm_indices_ = get_double_vec(value, "state_prior_calm_indices");
     else if (key == "state_model_lr")      state_model_lr_      = get_double(value, "state_model_lr");
@@ -4140,6 +4183,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     z.noalias() += L.Cphi * L.prev_phi_ctx;        // posture phase-conditioned bias at command time
                     z.noalias() += L.Cvel * L.prev_phi_ctx;        // velocity feed-forward bias (0 until the socket trains it)
                 }
+                // The model-implied step the LAST command carried (W5 fork item (b)).  G is the
+                // slope at the operating point the body actually ran; leaving this out would put
+                // the descent's Jacobian at a different point on the tanh than the command used —
+                // the same dishonest-G trap the split and squelch branches below document.
+                // Empty unless state_prior_step_gain > 0, so this is byte-identical when off.
+                if (L.prior_step.size() == m) z.noalias() += L.prior_step;
                 Eigen::MatrixXf G = Eigen::MatrixXf::Zero(m, m);
                 float sat = 0.0f;
                 for (int i = 0; i < m; ++i) {
@@ -4587,6 +4636,28 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     L.C *= (1.0f - d);
                     L.h *= (1.0f - d);
                 }
+                // STATE-PRIOR ISOLATION (the W5 lesion) — LAST writer of C in the update, so
+                // nothing downstream repopulates a column the lesion has taken out.  See the
+                // state_prior_isolate docstring for what it tests and why h is spared.
+                if (state_prior_isolate_ > 0.0 && !state_prior_indices_.empty()) {
+                    if (int(prior_col_keep_.size()) != n) prior_col_keep_.assign(size_t(n), 0);
+                    else std::fill(prior_col_keep_.begin(), prior_col_keep_.end(), 0);
+                    int kept = 0;
+                    for (double di : state_prior_indices_) {
+                        int idx = int(di);
+                        if (idx < 0) idx += n;
+                        if (idx < 0 || idx >= n) continue;          // out of range: skip, as part 2 does
+                        if (!prior_col_keep_[size_t(idx)]) { prior_col_keep_[size_t(idx)] = 1; ++kept; }
+                    }
+                    if (kept > 0) {                                  // every index out of range = no lesion
+                        for (int i = 0; i < n; ++i) {
+                            if (prior_col_keep_[size_t(i)]) continue;
+                            L.C.col(i).setZero();
+                            if (L.Cp.rows() == m && L.Cp.cols() == n) L.Cp.col(i).setZero();
+                        }
+                        state_prior_isolate_kept_ = kept;
+                    }
+                }
                 L.gain_ema = (1.0f - kTeleEmaAlpha) * L.gain_ema + kTeleEmaAlpha * Lp.norm();
                 L.sat_ema  = (1.0f - kTeleEmaAlpha) * L.sat_ema  + kTeleEmaAlpha * (sat / float(m));
             }
@@ -4881,6 +4952,40 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                 L.last_mult = mult;
             } else {
                 calm_mult_ = 1.0f;
+            }
+            // ── THE MODEL-IMPLIED STEP (W5 fork item (b)) ───────────────────────
+            // The command that closes the prior's error in one identified step, solved as a
+            // ridge least squares over the prior's own rows of A — what part 2's descent is
+            // meant to converge to and, at the duck's intent boundary, does not (§17.26).
+            // See the state_prior_step_gain docstring.  Pre-tanh, so it rides the same squash.
+            if (L.prior_step.size() != m) L.prior_step = Eigen::VectorXf::Zero(m);
+            else L.prior_step.setZero();
+            if (!wb_on && state_prior_step_gain_ > 0.0 && !state_prior_indices_.empty()
+                && state_prior_indices_.size() == state_prior_targets_.size()
+                && L.A.rows() == L.n && L.A.cols() == m) {
+                const int K = int(state_prior_indices_.size());
+                Eigen::MatrixXf Ap(K, m);
+                Eigen::VectorXf ep(K);
+                int kk = 0;
+                for (int k = 0; k < K; ++k) {
+                    int idx = int(state_prior_indices_[size_t(k)]);
+                    if (idx < 0) idx += L.n;
+                    if (idx < 0 || idx >= L.n) continue;      // out of range: skip, as the descent does
+                    Ap.row(kk) = L.A.row(idx);
+                    ep[kk] = float(state_prior_targets_[size_t(k)]) - L.x[idx];
+                    ++kk;
+                }
+                if (kk > 0) {
+                    const Eigen::MatrixXf Aps = Ap.topRows(kk);
+                    Eigen::MatrixXf H = Aps.transpose() * Aps;
+                    H.diagonal().array() += float(reg_eps_);  // the module's own ridge — no new constant
+                    Eigen::VectorXf step = H.ldlt().solve(Aps.transpose() * ep.head(kk));
+                    for (int j = 0; j < m; ++j)
+                        step[j] = float(state_prior_step_gain_) * std::clamp(step[j], -1.0f, 1.0f);
+                    y.noalias() += step;
+                    L.prior_step = step;
+                    state_prior_step_norm_ = step.norm();
+                }
             }
             for (int j = 0; j < m; ++j) y[j] = mg * ag * std::tanh(y[j]);
             // Phase-0 saturation instrument: HK's own contribution, BEFORE any of the
@@ -6234,6 +6339,8 @@ nlohmann::json MotorEPMv2::diag_lite() const {
         {"boredom",        boredom_},                       // sensorimotor predictability
         {"interest",       interest_},                      // curiosity drive
         {"hunger",         hunger_},                        // 0 sated → 1 starving
+        {"spIso",          state_prior_isolate_kept_},       // W5 lesion: columns C keeps; -1 = off
+        {"spStep",         state_prior_step_norm_},          // W5 (b): |the model-implied step|; -1 = off
     };
 }
 

@@ -60,6 +60,37 @@ Retargeting keeps the live subscription: the SUB socket is disconnected and
 reconnected rather than rebuilt, and ZMQ subscriptions belong to the socket, not
 the connection.
 
+## Static voxel viewer
+
+A standalone tool, no brain needed: the duck's **sweep clouds** in an interactive 3D view. It reads
+the `cloudv` records `ogma::CloudMap` files into a host run's JSONL — a run whose graph declares a
+`CloudMap` and whose host ran with `--cloud` — or a saved CloudMap snapshot (a JSON object with `vox`).
+
+```sh
+tools/run_voxel_viewer.sh RUN.jsonl                      # every filed cloud, laid out in the room
+tools/run_voxel_viewer.sh RUN.jsonl --place 8            # one place alone
+tools/run_voxel_viewer.sh RUN.jsonl --frame body --colour hits
+tools/run_voxel_viewer.sh RUN.jsonl --screenshot out.png # render once, print the readout, exit
+```
+
+- **Orbit** with the left mouse button, **pan** with the middle, **zoom** with the wheel. The list
+  shows every filed cloud by place and time, with its revisit judgement where one was made.
+- **World** lays clouds out at the world pose they were anchored on — instrumentation, the only way
+  to see a cloud beside the furniture it describes; no brain reads it. **Body** shows one cloud in its
+  own frame, which is what the duck actually has. A short line marks where the duck stood and which
+  way it faced (in the body frame, the origin facing +x). With every cloud shown, the selected one is
+  drawn at full size and colour and the rest recede as smaller, darker cubes: clouds of one wall
+  share voxel cells, and cubes of equal size would flicker into each other. Picking another cloud in
+  that view keeps the camera where you left it.
+- **Height bands** colour each voxel by the mean height of the points in it: grey floor (below 2 cm,
+  hidden by default), orange for something standing on the floor (2–20 cm), blue at furniture height
+  (20–45 cm), pale above. **Hits** colours by how many returns landed in a voxel, on a log scale.
+  `Min hits` drops thinly-supported voxels.
+- Logs written before 2026-09-13 carry no mean height; the viewer falls back to the voxel centre and
+  says so, and on those logs the floor reads as break (design doc §17.30).
+- `--screenshot` needs a display: this GL stack draws nothing on Qt's offscreen platform.
+- Needs **PyOpenGL** in the venv, which `requirements.txt` now lists.
+
 ## Module dispatch
 
 Each module type registers a widget class in

@@ -61,7 +61,7 @@ public:
     // v5.4.L Diagnostic B — winner-id histogram for GNG saturation check.
     std::unordered_map<int, int> const& winner_counts() const { return winner_counts_; }
 
-    enum class EncoderKind { JL, STFT, RBF, Identity };
+    enum class EncoderKind { JL, STFT, RBF, Identity, JLState };   // JLState: the JL projection over a ProprioToken vector (2026-09-11)
 
 private:
 

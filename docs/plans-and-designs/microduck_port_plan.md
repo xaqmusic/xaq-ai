@@ -20,7 +20,89 @@
 
 ## ▶ Resume here
 
-**State on 2026-09-02.** Branch **`microduck-lean-prior`**, committed through the (d) push test.
+**State on 2026-09-27: the things phase is closed. Start at [`microduck_things_phase.md`](microduck_things_phase.md) §10–13.**
+The duck sees a small thing in its cloud, walks to it, stops beside it with its head pitched onto it, kicks, pecks
+or pushes it, backs off to look at what it did, and learns per kind of thing what each intent does; a thing
+whose answers are known loses its pull. The operator promoted the stack by eye three times in the phase
+(`★ THINGS` R67 → R77 → R79 → R83, the last on their eye for R80's closer arrival; design doc §17.34–17.52).
+The launcher's preset list was pruned to the promoted stacks, the guard, and three arms for the eye
+(`tools/duck_launcher/presets_archive.json` keeps the rest). **The next push, in a fresh context, is
+chasing moving things:** the phase page's §13 lists what to carry into that design — what reaches and what
+does not, the walking cloud as a working sensor whose loops were built for a remembered thing (O55), the
+orienting reflex that refuses a sweeping gaze (T6), the balls that roll out of the match radius, and the
+moved-ball (d) tests the harness already has (§7). Design discussion first; the operator decides the fork.
+
+**State on 2026-09-15, later: the things phase is open. Start at [`microduck_things_phase.md`](microduck_things_phase.md).**
+The operator's direction: map-making is not the interesting thing; the duck should seek what is smaller than
+itself, interact with it, and be surprised when it answers. The plan reads the voxels at three timescales and
+builds the interaction cycle first: things as a `CloudMap` output and a thing EPM (T1, O45), the seek loop
+racing play (T2, O46), the gaze following the thing with an approach cloud and touch (T3, O47), the stop
+starting on error (T4, O43), then change per place (T5, O48) and within a stop (T6, O49).
+
+**State on 2026-09-15: the cloud phase is closed. Start at [`microduck_cloud_phase.md`](microduck_cloud_phase.md).**
+The duck now glances. At each stop the head sweeps at a steady 0.6 rad/s, the ToF's returns accumulate into
+a voxel cloud (`ogma::CloudMap`), the place map learns from that cloud's view, and the stop ends when the
+cloud stops growing: about 10 s, with the walls and the small things on the floor still found. The operator
+promoted it by eye as `★ CLOUD` (R56; design doc §17.28–17.33). The phase page carries the exact run, what was
+learned, the tools (the voxel viewer, `cloud_objects.py`), the traps, and the open questions: **when to stop
+(O43)** and **seeking small things (O44)**. The entries below are the history.
+
+**State on 2026-09-11, late — the walk-stop-look line.** The operator's verdict on the exploration
+line as watched: a Roomba. The redesign is in the [playroom plan §12](microduck_playroom_plan.md)
+— **a place is a stop** (the map inserts only while still; the head saccades to the max-residual
+bearing; the walk begins when nothing at the stop is left to bake), three modes with one learner
+(remote control / autonomous / skill; learning never stops, only driving changes), the sixteen
+built-ins as regime data, an expression layer over the catalog that actually exists on Pollen's
+wire, and a ten-minute instrument. W0 and W1 are built and measured (R39, design doc §17.18): the hand-back is loud (87/89 stands held, the
+stand stiller than the walker's), the gate deferred, a resume-from-still deadlock found for W5.
+W2 measured too (R40, §17.19): the saccade channel is live at stops and silent on the walk, 267/267
+stands held under a moving head, the head brain frozen through the stop. W3 measured (R41, §17.20): the map learns only at stops, a view is pose + gaze, the look holds unbaked
+views — the cleanest walk measured (5.4 walls/min); uncapped, the stop length is the map's: shorter as it
+bakes, longer at a moved chair (the (d), a signal). The operator's to-do on
+leaving a surface is §12.7b / O35. W3b (R42, §17.21): the gaze babbles at the stop with error-driven dwell, 65/66 stands at a small pitch, the
+stop ending on the map's word; full pitch tips the stand (O36); half the inserted views die unbaked (O37).
+Bake threshold 20 (R43, §17.22): the map keeps its views but the dwell's novelty saturates — `PARTIAL`.
+The dwell on learning progress + bake 20 (R43, §17.23) learns the place whole (42 baked views kept); the stop's
+ending rule is the open knob (53 % standing). W3d (R44, §17.24): the orienting reflex — a mover seen at a still gaze ends the stop and the duck walks to it
+(chair 57 %, ball 42 %, 95 % arrive, stand untouched). **Next: the place cloud (O38), then W5, W4.** Register O31–O38.
+
+**State on 2026-09-10, evening — the plan is written.** The behaviour set, the playroom, the camera
+path, the voice and play at the joints are in [`microduck_playroom_plan.md`](microduck_playroom_plan.md);
+its §9 is the build order (A1 the playroom generator first, then C1 the head-camera render, V1 the
+voice on the simulator). Register rows O25–O29. Nothing built yet.
+
+**State on 2026-09-10, morning.** Two threads, both waiting on a person.
+
+1. **The gift PR is open.** [pollen-robotics/microduck#260](https://github.com/pollen-robotics/microduck/pull/260)
+   — velocities and currents on `robot.state` — from the fork `xaqmusic/microduck`, re-vetted on
+   their 0.12.0 main with their whole `check` job and coverage job run here
+   ([outreach plan](microduck_outreach_plan.md) §2 carries the numbers and the harness notes). Their
+   CI waits on a maintainer's approval, as it does for every first-time fork. When the review lands:
+   draft the reply for the operator, change what is asked in the worktree `~/microduck-pr`, re-run
+   their gates, push on the operator's go. PR-2 (the design document, outreach plan §3) follows the
+   review.
+2. **The level-2 loops are measured and observed.** R26–R29 (design doc §17.5–17.7; n = 6, reproduced
+   at HEAD) were watched by the operator in the arena through launcher presets that mirror the
+   harness runs. The verdict: a good foundation; the next step is to **define the behaviour set** —
+   each behaviour as a loop in the recipe's five fields
+   ([recipe](loop_and_arbitration_recipe.md)), starting from Pollen's sixteen states
+   (§"The gap we fill") — and to **redesign the arena** so each behaviour has a stimulus and a
+   metric. A planning session first, then levers one at a time, each with a preset. Carried over:
+   the shifted scene's gap, node persistence (register O24), the "map too small to route" liveness
+   check (one seed identical across R27–R29 at 8 map nodes), the inert wander rule.
+
+**State on 2026-09-06.** Branch **`duck-l2`** (stacked on the Cell audit PRs #28 → #29). The
+level-2 line now has a seed-averaged harness (`mj_host/tools/l2_sweep.py`, design doc §17.5)
+and its first finding: R25's wall-riding regression reproduces on six of six seeds and the
+fork's first item (`babble_owns_a 0`, R26) removes it on every seed — 295 → 26 wall contacts
+per minute, one flag. The Cell campaign's lessons that bind here: read a base's module graph
+before measuring it; a harness prints every seed it sets; a lever whose control cannot be
+told from the lever has not operated; the loop unit and its currency (a heading and a
+confidence per loop; the arbiter's winner → the heading reference in sense slot 10) are what
+port, and the arbitration machinery (`LoopCompetence` → `LateralVoter` → `EFEArbiter`
+`scoring_mode precision`) ports gain-0 with the Cell's verdict on it attached.
+
+Earlier state (2026-09-02): Branch **`microduck-lean-prior`**, committed through the (d) push test.
 Simulation only — no hardware. Upstream lives *outside* this repo, on purpose:
 `/home/xaqmusic/microduck` (`590b986`) and `/home/xaqmusic/microduck_rl` (`d424a0c`).
 
@@ -65,7 +147,7 @@ mj_host/build/ogma_mjhost --brain --graph mj_host/configs/a1v2_r12c_whole.json -
 | **the intent boundary, phase 1** | ✅ **closed** (§16, 2026-09-03): 1a the hand-off fires on the brain's own attitude error; 1b a walk on request drives Pollen's `alpha_walking` as their runtime does (vendored by `scripts/fetch_scaffolds.sh`); 1c Pollen's contact odometry ported (`Odometry.*`, 4–6 % of distance); 1e the level-2 brain (`--level2`, `a1v2_r20_l2_ident.json`, `IntentAdapter`) identifies which twist moves the body which way — a positive dominant diagonal at every pulse length, failing only inside the walker's standing regime. Next: the first level-2 prior (walk straight) |
 | **level-2 control: heading regulation** | ✅ **LOUD** (§16.5–16.6, 2026-09-03): a prior on the sensed forward speed and on the heading (the odometry yaw's deviation from its own slow running average) walks at the walker's top speed and, shoved 2 N every 40 s, is back within 3° of its heading 20 s later, 20/20, no rescues; the open-loop walker ends 109° off. Homeokinetic learning at this level spins the body (the efference limit cycle one level up) — the prior alone is the controller. `a1v2_r22_l2_heading.json` |
 | **phase 1d, the ToF** | ✅ (§17.1): the 8×8 depth matrix cast with MuJoCo rays against world geometry, Pollen's classifier ported, gated on a wall ahead and the arena; beams drawn in the viewer; `scene_arena.xml` |
-| **phase 2, Wander/Chill** | ⚙ **the arbitration fork** (§17.2–17.4): avoidance priors give 0 wall contacts but an orbit (R23); the map EPM learns the arena (34 nodes ≈ 33 cells) but a surprise prior has no gradient (R24, NULL); heading + avoidance in one linear pull rides the walls at 297 contacts/min (R25, REGRESSION). Decide: online identification of the world channels (`babble_owns_a` 0 at level 2) and behaviours as voter-arbitrated loops, before the drive question |
+| **phase 2, Wander/Chill** | ⚙ **R28/R29: the Cell recipe's arbitration on the duck is `PARTIAL`** (§17.7, 2026-09-06): avoidance as a loop with need and competence; the bearing form fails because the heading reference is a slow regulator, the release form (avoid wins → yield to the reflex) trades steady-room contacts for a 40 % smaller collision burst at a moved wall; play alone remains the best avoider in a known room. Next: a competence signal that tells 'unvisited' from 'moved' (the map's node persistence). **R27: novelty is a direction** (§17.6): the Cell's play loop over the map sets the heading; coverage up, contacts down in the steady arena (`PARTIAL`, 5/6 tour); after a moved wall the map grows by half (the (d) re-inference half, present at last) and contacts explode (a learned direction beats the proximity priors) — item 2, arbitration between avoidance and novelty as loops, is next. **Item 1 is `WORKING` at n = 6** (§17.5): R26 keeps learning after the babble and the regression is gone (295 → 26 walls/min, 0+/6−); the harness `l2_sweep.py` exists; item 2 (arbitration) and the (d) moved-wall test are next. Earlier: **the arbitration fork** (§17.2–17.4): avoidance priors give 0 wall contacts but an orbit (R23); the map EPM learns the arena (34 nodes ≈ 33 cells) but a surprise prior has no gradient (R24, NULL); heading + avoidance in one linear pull rides the walls at 297 contacts/min (R25, REGRESSION). Decide: online identification of the world channels (`babble_owns_a` 0 at level 2) and behaviours as voter-arbitrated loops, before the drive question |
 | **the step (intent boundary phase 0)** | ✅ **the hand-off works** (§15, 2026-09-03): past 6.5° of rising lean the walker takes the joints and staggers through it — 3 N **36/36** upright across six brains (13/36 without), 5 N 6/6 (1/6 without), never fires at 1–2 N, the reflex unchanged after a 20-min soak. `--step-lean`; launcher preset "the step". Twist not load-bearing (default 0). Next: phase 1, the trigger as a brain-published scalar |
 | S2 / S3 / B1–B3 | not started |
 

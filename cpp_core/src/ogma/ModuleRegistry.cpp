@@ -19,8 +19,13 @@
 #include "ogma/modules/SaccadeReflex.hpp"
 #include "ogma/modules/CylinderBuilder.hpp"
 #include "ogma/modules/PlaceVectorBuilder.hpp"
+#include "ogma/modules/LoopCompetence.hpp"
+#include "ogma/modules/TofAvoidLoop.hpp"
+#include "ogma/modules/BearingSeekLoop.hpp"
+#include "ogma/modules/SkillOutcomeLoop.hpp"
 #include "ogma/modules/ColumnBuilder.hpp"
 #include "ogma/modules/PlaceGraphPlanner.hpp"
+#include "ogma/modules/CloudMap.hpp"
 #include "ogma/modules/PlayLoop.hpp"
 #include "ogma/modules/RunTumbleNav.hpp"
 #include "ogma/modules/RunTumbleNavV2.hpp"
@@ -136,6 +141,10 @@ ModuleRegistry& ModuleRegistry::instance() {
         reg.register_type("SaccadeReflex",         [](){ return std::make_unique<SaccadeReflex>(); });
         reg.register_type("CylinderBuilder",       [](){ return std::make_unique<CylinderBuilder>(); });
         reg.register_type("PlaceVectorBuilder",    [](){ return std::make_unique<PlaceVectorBuilder>(); });   // Cell round 2, lever A5
+        reg.register_type("LoopCompetence",        [](){ return std::make_unique<LoopCompetence>(); });       // Cell round 4, register O21
+        reg.register_type("TofAvoidLoop",          [](){ return std::make_unique<TofAvoidLoop>(); });         // duck §17.6: avoidance as a loop with a bearing
+        reg.register_type("BearingSeekLoop",       [](){ return std::make_unique<BearingSeekLoop>(); });      // duck things phase T2: seeking a thing seen only at stops
+        reg.register_type("SkillOutcomeLoop",      [](){ return std::make_unique<SkillOutcomeLoop>(); });     // duck things phase: learning what a kick does (O54)
         // 2026-06 — passive place-recorder (replaces saccade+cylinder mapping):
         // every record_every ticks publishes a column = view-feature + heading + IMU.
         reg.register_type("ColumnBuilder",         [](){ return std::make_unique<ColumnBuilder>(); });
@@ -144,6 +153,11 @@ ModuleRegistry& ModuleRegistry::instance() {
         // minus traverse" — GROWS the shared place-map by ascending novelty→frontier
         // (run-and-tumble beyond the mapped graph) instead of routing to remembered food.
         reg.register_type("PlayLoop",              [](){ return std::make_unique<PlayLoop>(); });
+        // 2026-09-13 — the microduck's sweep cloud, with a cache keyed by the map's own place.
+        // A small object is sub-pixel in one ToF cast and tens of points in a gaze sweep
+        // (design doc §17.28), so this is the level at which one exists; an EPM on its output
+        // earns the vocabulary.  Default-off: no input_topic, no accumulation, no publish.
+        reg.register_type("CloudMap",              [](){ return std::make_unique<CloudMap>(); });
         reg.register_type("RunTumbleNav",          [](){ return std::make_unique<RunTumbleNav>(); });
         reg.register_type("RunTumbleNavV2",        [](){ return std::make_unique<RunTumbleNavV2>(); });
         reg.register_type("VisualHomingNav",       [](){ return std::make_unique<VisualHomingNav>(); });
