@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xaq-inspector"
+version = "0.1.0"
+description = "xaq inspector — sidecar PyQt6 UI for a live xaq (ogma) C++ brain: control-socket client, diag subscriber and per-module widgets."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Joseph Butera III" }]
+dependencies = ["PyQt6>=6.4", "pyqtgraph>=0.13", "pyzmq>=25", "numpy>=1.23"]
+
+[project.scripts]
+xaq-inspector = "xaq_inspector.inspector:main"
+
+[tool.setuptools]
+# The package lives in this directory itself, so tools/run_inspector.sh (PYTHONPATH=tools)
+# keeps working unchanged alongside `pip install -e tools/xaq_inspector`.
+package-dir = { "xaq_inspector" = "." }
+packages = ["xaq_inspector", "xaq_inspector.widgets"]
