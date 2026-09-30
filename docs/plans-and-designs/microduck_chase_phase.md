@@ -383,6 +383,17 @@ the time the near field is full (30 → 16 s a run), cuts wall contact 27 → 16
 signal; the prior on the unlearned brain doubles the walls; a 1200 s babble loses the walk. `WORKING` — the first
 wall lever of the campaign that is not a tie. Arm: preset "R113 · the CONTACT prior on the CONTACT brain".
 
+**The head as the walker's motor (§17.86, 2026-09-30):** the walking policy takes the four head commands and was
+trained on them; given to the walker's identification, the head becomes a steering motor: turns toward a large
+heading error three to five times faster, closing 52–62 %, a fifth faster, half again the arrivals — the circling
+was the three-motor command's radius. Head yaw is held sideways by the controller whatever the prior's mask
+(the gaze stays the head brain's); the lean (neck pitch, head pitch, head roll) keeps the gains with the gaze
+straight. Every form falls four times as often as the control, backing up with the head pitched; amplitude,
+smoothing, a tilt objective and an open-first identification did not move it. `PARTIAL`; the falls are the next
+lever. Presets: "BABBLE ROOM · SEVEN motors", "R113 · SEVEN motors". The arm stays R113 on the three-motor
+contact brain.
+
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
