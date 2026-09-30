@@ -5563,3 +5563,24 @@ after the restore and at the end (the abs-sum of `A`'s row).
 **The first run did not babble.** The whole-body counter was set back and the per-leg path, which the duck
 runs, keeps its own (`steps_seen`): the run walked under control for 620 s — and still met contact 42 s in its
 second minute, since the model learns under control too. Fixed; the authority read from the per-leg `A`.
+
+**Making the room teach (2026-09-30, the liveness check doing its job).** Three babbles before one that met a
+wall face-on, each judged by the authority row and the contact seconds before any arm ran:
+- 2 m room, the arm's babble (1.5 s pulses): the pulses come in antisymmetric pairs that cancel their own drift
+  (`babble_isolate 1`: one motor at a time, a held pulse then its twin), so the duck babbled in place — 0 s of
+  contact in ten minutes, the contact authority 0.016 → 0.004 (the model relearned without a push).
+- 1.6 m room (a post and a box, the start keep-out cut to a body length), 3 s pulses: a forward pulse at the
+  walk's real 0.18 m/s covers 0.54 m and turns back 0.16 m short of the wall — 3 s of contact.
+- 1.6 m room, 6 s pulses at full scale: the walls touched 479 times, but backwards and sideways where the head's
+  sensor looks away; face-on for 3 s; the too-close share above a half for 17 s; the authority unmoved.
+- **1 m room, walls only, 6 s pulses**: every forward pulse a face-on push within two seconds — measured below.
+
+**The seek gate's contact cover alone** (`--seek-gate-contact 0.3` on R112, seeds 1–6, sweep 56): walls 17.8 →
+29.6, worse on every seed; zeroing a slot of the walker's sense changes the state its model sees. `REGRESSION`;
+it does not ride in the arms, and the arrival risk under the contact prior is measured bare.
+
+**The 1 m room's babble (the checkpoint the arms load, `duck_contact_s1`):** 52 s of contact in ten minutes
+(9, 11, 6, 2, 4, 2, 5, 4, 2, 6 by minute), 16 s of it face-on pushing, 615 wall touches, no falls; the walker's
+authority row over the contact slot 0.016 → 0.043, the left slot 0.022 → 0.031, and the ahead and right rows
+0.022 → 0.008 and 0.020 → 0.012 — the model relearned its near field in a room where the ahead range is always
+short. Liveness passed on contact; the walk itself is what the arms must also measure.

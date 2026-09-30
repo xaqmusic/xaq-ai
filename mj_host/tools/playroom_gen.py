@@ -147,7 +147,7 @@ class Room:
         lim = self.half - WALL_T - radius - margin
         for _ in range(tries):
             x, y = self.rng.uniform(-lim, lim), self.rng.uniform(-lim, lim)
-            if math.hypot(x, y) < DUCK_KEEPOUT + radius:
+            if math.hypot(x, y) < (0.35 if self.babble else DUCK_KEEPOUT) + radius:   # the babble room keeps only a body length clear
                 continue
             if self.track_pts and any(math.hypot(x - tx, y - ty) < radius + TRACK_CLEAR for tx, ty in self.track_pts):
                 continue   # the train's track was laid first (--train): nothing stands on or beside it
@@ -376,7 +376,8 @@ class Room:
         self.walls()
         if self.babble:
             # the contact room: walls, a post, a box, one chair; no rug, table, shelf, clock, toys or train
-            self.chair(0); self.box(); self.post()   # the largest first, so the small room places all three
+            if self.half >= 0.9: self.chair(0)       # the largest first, so the small room places all three; no chair under 1.8 m
+            if self.half >= 0.7: self.box(); self.post()   # under 1.4 m the walls are the obstacles: every forward pulse is a face-on push
             return
         if self.with_train:
             self.lay_track()
@@ -464,7 +465,7 @@ def main():
     if a.out is None:
         a.out = "scene_babble_room.xml" if a.babble_room else ("scene_playroom_train.xml" if a.train else "scene_playroom.xml")
     write_robot_overlay()
-    room = Room(a.seed, a.half, 0 if a.babble_room else a.balls, 0 if a.babble_room else a.blocks, 1 if a.babble_room else a.chairs, train=a.train and not a.babble_room, babble=a.babble_room)
+    room = Room(a.seed, a.half, 0 if a.babble_room else a.balls, 0 if a.babble_room else a.blocks, (1 if a.half >= 0.9 else 0) if a.babble_room else a.chairs, train=a.train and not a.babble_room, babble=a.babble_room)
     room.build()
     text = room.xml()
     out = Path(a.out) if Path(a.out).is_absolute() or "/" in a.out else MODEL_DIR / a.out
