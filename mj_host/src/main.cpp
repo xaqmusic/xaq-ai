@@ -1301,7 +1301,7 @@ bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
-double g_intent_head = 0.0;   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
+double g_intent_head = 0.0, g_intent_head_tau = 0.0;   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
 double g_rebabble_s = 0.0;   // --rebabble S: a restored brain reopens its babble window for S seconds (§17.85, the contact room)
 double g_stuck_cmd = 0.75;   // --stuck-cmd F: the forward command that counts as pushing (fraction of range) for the stuck stop
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
@@ -1542,7 +1542,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stuck_contact > 0.0) { brain.set_stuck_contact(g_stuck_contact); std::fprintf(stderr, "  stuck on contact: a forward push with the ToF's too-close share above %.2f for a second is a stall\n", g_stuck_contact); }
-    if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges; the head brain owns the head at stops\n", g_intent_head); }
+    if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
     if (g_seek_gate_contact > 0.0) { brain.set_seek_gate_contact(g_seek_gate_contact); std::fprintf(stderr, "  seek gate, contact: the too-close share reads 0 to the walker while seek's target is within %.2f m\n", g_seek_gate_contact); }
     if (g_contact_forget) std::fprintf(stderr, "  contact forget: a stall fired by contact drops the seek loop's target (the position the surface refutes)\n");
     if (g_contact_release) { brain.set_contact_release(true); std::fprintf(stderr, "  contact release: the heading reflex and the free-space gate take the ToF's too-close share as proximity\n"); }
@@ -3124,6 +3124,7 @@ int main(int argc, char** argv) {
             g_seek_gate_contact = std::stod(next("--seek-gate-contact"));
         } else if (a == "--intent-head") {
             g_intent_head = std::stod(next("--intent-head"));
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_intent_head_tau = std::stod(next("--intent-head"));
         } else if (a == "--rebabble") {
             g_rebabble_s = std::stod(next("--rebabble"));
         } else if (a == "--stuck-contact") {

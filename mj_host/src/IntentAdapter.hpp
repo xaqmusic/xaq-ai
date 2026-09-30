@@ -6,6 +6,7 @@
 // joint-level brain; only the topics and the body differ.  Egocentric throughout:
 // nothing here reads the simulator's world pose.
 #include <array>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
@@ -121,7 +122,7 @@ public:
     // THE SEVEN-MOTOR IDENTIFICATION (2026-09-30, §17.86): the walker's full command vector -- the twist and the four
     // head commands the policy was trained on -- as the intent's motors.  F = the fraction of the trained head ranges
     // (kHeadRange) the actions span; 0 = off (the head actions, if the graph publishes them, are ignored: byte-identical).
-    void set_intent_head(double f) { intent_head_frac_ = f; }
+    void set_intent_head(double f, double tau_s = 0.0) { intent_head_frac_ = f; intent_head_alpha_ = tau_s > 0.0 ? 1.0 - std::exp(-0.02 / tau_s) : 1.0; }
     bool intent_head() const { return intent_head_frac_ > 0.0; }
     std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
     void set_seek_gate(bool on) { seek_gate_ = on; }
@@ -336,7 +337,7 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
-    double intent_head_frac_ = 0.0; std::array<double, 4> last_head_{};
+    double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;
     bool ref_unwrap_ = false; double ref_free_ = 0.0; int ref_released_ = 0;
     double ref_hold_ = 0.0; int ref_hold_left_ = 0;

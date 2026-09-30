@@ -314,7 +314,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         static const char* const kHeadActions[4] = {"action.neck_pitch", "action.head_pitch", "action.head_yaw", "action.head_roll"};
         for (int i = 0; i < 4; ++i)
             if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kHeadActions[i])))
-                last_head_[size_t(i)] = intent_head_frac_ * kHeadRange[size_t(i)] * std::clamp(double(act->accel), -1.0, 1.0);
+                last_head_[size_t(i)] += intent_head_alpha_ * (intent_head_frac_ * kHeadRange[size_t(i)] * std::clamp(double(act->accel), -1.0, 1.0) - last_head_[size_t(i)]);
     }
     // STUCK (see the header): the stall run and its running median.  Read before the reflex so the
     // command it judges is the brain's own; the sensed velocity is the body's answer to last tick's.

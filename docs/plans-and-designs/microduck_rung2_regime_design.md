@@ -5641,3 +5641,71 @@ in the tail, a tie on the fresh twelve). **The arm is R113 on the contact brain*
 prior on the CONTACT brain", checkpoint `duck_contact_s1`); the regime is the room, `--rebabble 600` from the
 current identification, saved. Re-use: the room dose (the babble's duration and the room's size) is the knob to
 sweep next, and the prior's share to confirm at n ≥ 20 varied worlds.
+
+### 17.86 The seven-motor identification: the head as the walker's own motor (2026-09-30)
+
+**The operator's question**: can the brain babble neck and head positions for manoeuvrability, since a head
+offset changes the walk and the walk's turning radius circles? **Two facts.** Pollen's walking policy takes a
+command vector that carries the four head commands (neck pitch, head pitch, head yaw, head roll, as offsets from
+home) and was trained across their ranges (±1.10, ±1.10, ±1.40, ±0.31 rad, `kHeadRange`), so the gait
+compensates for the head because it learned to; and with `--head-joints` the head brain writes the joint targets
+directly while the policy's head command is zeroed — the walk never sees the head it carries. The walker's
+identification (`motor_epm_intent`, `MotorEPMv2` on the twist) has three motors and no authority over anything
+the head does. The earlier `--head-forward` lever (§17.60, null on speed, falls at 0.1 rad) was a constant
+imposed on a policy that treats the head as an input.
+
+**Built.** `--intent-head F`: the intent's action topics extended to the seven commands (`action.neck_pitch`,
+`action.head_pitch`, `action.head_yaw`, `action.head_roll` beside the twist; `motor_dim 7`); on the walk the four
+head actions are the policy's head command at F of the trained ranges, and the head brain's joint ownership
+waits for a stop (the gaze at stops unchanged). 0 = off, byte-identical. The host prints the model's authority
+table (rows: sensed vx, vy, wz, the heading error, the four ToF slots; columns: the motors) after the restore
+and at the end. The yaw cap (`kTwistRangeVyaw 1.0`) against the policy's trained yaw range is unverified
+(the scaffold notes do not state it) — the model's own column for `vyaw` is the measurement that matters.
+
+**The room identification (from scratch, since a three-motor checkpoint cannot restore into seven motors):**
+600 s of the structured babble cycling all seven motors in the 1 m room, the head at 0.4 of its ranges; 33 s of
+contact, 13 s of pushing, one fall. The authority table at the end, the rows that matter:
+
+| row \ motor | vx | vy | vyaw | neck_p | head_p | head_y | head_r |
+|---|---|---|---|---|---|---|---|
+| sensed wz | +0.001 | 0.000 | −0.009 | −0.003 | +0.003 | −0.004 | +0.001 |
+| heading error | −0.005 | −0.024 | **+0.025** | +0.005 | **+0.029** | **−0.027** | −0.002 |
+| tof left | −0.008 | −0.003 | +0.032 | +0.010 | +0.027 | −0.007 | −0.014 |
+| tof right | +0.034 | +0.033 | −0.021 | +0.014 | −0.029 | +0.009 | +0.036 |
+| contact | −0.015 | +0.007 | +0.008 | +0.001 | +0.002 | +0.002 | −0.021 |
+
+Head pitch and head yaw carry authority over the heading error on a par with the yaw command's own: the lean
+the operator saw is in the model. Head pitch also moves the ToF slots (it tilts the sensor), which is the cheat
+the mask guards against if the arms show it. The playroom arms: R113 on seven motors loading this brain, against
+R113 on three motors loading a three-motor identification from the same room from scratch (the fair control:
+continued against from-scratch is a confound the current-brain checkpoint would carry).
+
+**The playroom arms, seeds 1–6 (sweeps 62–63; R113 on the continued contact brain, sweep 58, beside them).**
+
+| seeds 1–6 | R113, three motors, continued brain (58) | R113, three motors, from-scratch room brain (63) | **R113, seven motors, seven-motor room brain (62)** |
+|---|---|---|---|
+| yaw rate toward the reference with \|err\| > 1 rad, median · p75 | 0.06 · 0.32 rad/s | 0.04 · 0.31 | **0.16 · 0.53** |
+| the error closed by 0.5 rad within 3 s | 38 % | 33 % | **46 %** |
+| closing · tangential · opening | 50 · 39 · 11 % | 46 · 43 · 11 % | **58 · 33 · 10 %** |
+| walk m/s · path m · arrival stops | — · — · 17.7 | 0.175 · 55 · 15.5 | **0.211 · 73 · 23.3** |
+| walls / min | 21.5 | 17.2 | 30.4 |
+| too-close share > ½, s a run · wall contact s | 21 · 17 | 22 · 16 | 43 · 32 |
+| rescues / min · falls a run | 0.15 · 1.5 | 0.30 · 3.0 | **1.33 · 13.3** |
+
+- **The head is a steering motor**, as the operator saw: the seven-motor walker turns toward a large heading
+  error four times as fast as the three-motor one, closes on its targets on 58 % of its seconds (the campaign's
+  best on eighteen or six seeds), walks a fifth faster and arrives half again as often. The turning radius that
+  circled is the three-motor command's, not the body's.
+- **It spends the head with no objective on balance**: thirteen falls a run against three, rescues ×4, twice the
+  contact. The prior descends the heading error through the head's authority as far as it will go; nothing in
+  the prior says stay upright. Two one-knob answers, each an arm: the head at a fifth of its ranges
+  (`--intent-head 0.2`), and the trunk's tilt (the sense's gravity x, y: state elements 3 and 4) held at zero in
+  the prior — the error a fall minimises, given to the module that owns the head (sweeps 64–65).
+
+**The balance arms, seeds 1–6 (sweeps 64–65).** The head at a fifth of its ranges: falls 13.3 → 11.5, turn 0.13 rad/s,
+closing 56 %, contact 45 s — the amplitude is not the cause. The tilt prior (state 3, 4 → 0): falls 10.5, contact
+43 → 21 s a run (halved), the turn 0.22 rad/s (the best), closing 58 %, walls 31. **The cause of the falls is in
+the head's motion, not its reach**: with the intent driving it the head joints move 0.05 rad a tick (2.5 rad/s,
+three times the head brain's 0.018) because the controller emits a fresh head command every 20 ms, which the
+policy was not trained to track and no servo could follow. The fix is the walker's own kind: a low-pass on the
+intent's head command (`--intent-head F TAU`, 0.3 s), measured with and without the tilt prior (sweeps 66–67).
