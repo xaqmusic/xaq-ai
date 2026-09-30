@@ -5798,3 +5798,28 @@ change where the head is when the stand begins. The second thing hidden in the h
 owning the joints, the policy's head command is zeroed ("the walker is told nothing about the head"), a choice
 from the level-head regime; the standing policy balances for a head at home while carrying one pitched back.
 `--tell-head`: the policy's head command is the head's own targets as offsets from home (sweep 76).
+
+**Telling the policy about the head (sweep 76, `--tell-head`):** falls 8.5 → 12.8, 11.2 of them at stops.
+`REGRESSION`, killed. **The anatomy at the stop's start**: the head arrives from the walk pitched down (p90
++0.37 rad), the head brain's level loop overshoots to −0.42 (pitched up) as it rings, and the duck goes over
+backwards. The slew bounds the speed of that, not the overshoot. The previous embodiment's still head at stops
+is the protocol to keep: `--head-home S` — for S seconds after a stop begins the head's targets are HOME
+(slewed), and the head brain's gaze takes over from level rather than from where the walk left the head
+(sweep 77, 1.5 s).
+
+**The head home at stops (sweep 77, `--head-slew 1.0 --head-home 1.5`, the six-motor arm, seeds 1–6):**
+
+| seeds 1–6 | control: 3 motors, room brain (63) | 6 motors, the lean (73) | + slew (75) | **+ slew + head home (77)** |
+|---|---|---|---|---|
+| falls a run · at stops | 3.0 · 0.3 | 11.7 · 9.5 | 8.5 · 8.0 | **2.7 · 2.2** |
+| rescues / min · down % | 0.30 · 0.82 | 1.17 · 2.75 | 0.85 · 1.97 | **0.27 · 0.47** |
+| head pitch speed in a stop's first 2 s | 0.33 rad/s | 1.64 | 1.01 | **0.79** |
+| yaw rate toward the reference, \|err\| > 1 rad · closed in 3 s | 0.04 · 33 % | 0.13 · 46 % | 0.12 · 48 % | **0.14 · 42 %** |
+| closing · walk m/s · arrivals a run | 46 % · 0.175 · 15.5 | 52 % · 0.206 · 21.2 | 53 % · 0.198 · 21.7 | **53 % · 0.197 · 22.5** |
+| walls / min | 17.2 | 31.0 | 29.9 | 27.1 |
+
+The falls return to the three-motor walker's rate with the lean's turning, closing and arrivals kept; the ringing
+is halved and the rare fall left is a different one (the head pitched down, +0.32). `WORKING` at n = 6 on the
+operator's request — the resonance damped, the feet kept — with the walls (27 against 17) the remaining cost and
+the confirmation on seeds 7–18 in flight (sweep 78). Preset "★ R113 · SIX motors, the LEAN, the head home at
+stops"; the seven-motor preset carries the same hand-off.

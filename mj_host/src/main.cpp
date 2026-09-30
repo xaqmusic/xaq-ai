@@ -1301,7 +1301,7 @@ bool g_ref_unwrap = false;   // --ref-unwrap (2026-09-19): the heading reference
 double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the ToF's too-close share above T is a stall (0 = off)
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
-double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0; bool g_tell_head = false;   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
+double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0, g_head_home_s = 0.0; bool g_tell_head = false;   // --head-home S: for S s after a stop begins the head's targets are HOME (slewed), then the head brain's   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
 double g_rebabble_s = 0.0;   // --rebabble S: a restored brain reopens its babble window for S seconds (§17.85, the contact room)
 double g_stuck_cmd = 0.75;   // --stuck-cmd F: the forward command that counts as pushing (fraction of range) for the stuck stop
 double g_ref_free = 0.0;     // --ref-free P (2026-09-19): a bearing into a ToF sector nearer than P is not held as the reference
@@ -1542,6 +1542,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_stop.on_chase) std::fprintf(stderr, "  stop on chase: a stop ends when the seek loop confirms a chase (the walker follows the mover)\n");
     if (g_stop.gaze_at_thing) std::fprintf(stderr, "  gaze at the thing: at an arrival stop the sweep's pitch band is centred on the reached thing's elevation (+-0.12 rad) and its bearing\n");
     if (g_stuck_contact > 0.0) { brain.set_stuck_contact(g_stuck_contact); std::fprintf(stderr, "  stuck on contact: a forward push with the ToF's too-close share above %.2f for a second is a stall\n", g_stuck_contact); }
+    if (g_head_home_s > 0.0) std::fprintf(stderr, "  head home: for %.1f s after a stop begins the head's targets are home (slewed), then the head brain's -- the level loop starts from level, not from where the walk left the head\n", g_head_home_s);
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
     if (g_intent_head > 0.0) { brain.set_intent_head(g_intent_head, g_intent_head_tau); std::fprintf(stderr, "  intent head: on the walk the intent's four head actions are the walker's head command, %.2f of the trained ranges, low-passed at %.2f s; the head brain owns the head at stops\n", g_intent_head, g_intent_head_tau); }
@@ -2420,10 +2421,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const auto qj = body.joint_positions();
             const double step = g_head_rate / kBrainHz;
             if (!slew_init) { for (int i = 0; i < 4; ++i) { slew_joint[size_t(i)] = qj[size_t(5 + i)]; slew_cmd[size_t(i)] = qj[size_t(5 + i)] - kHomePose[size_t(5 + i)]; } slew_init = true; }
+            static int home_left = 0;
             if (head_owns_joints != prev_owns) {   // an ownership change: both slews restart from where the head is
                 for (int i = 0; i < 4; ++i) { slew_joint[size_t(i)] = qj[size_t(5 + i)]; slew_cmd[size_t(i)] = qj[size_t(5 + i)] - kHomePose[size_t(5 + i)]; }
+                if (head_owns_joints && g_head_home_s > 0.0) home_left = int(g_head_home_s * kBrainHz);   // the head comes home first
                 prev_owns = head_owns_joints;
             }
+            if (home_left > 0 && head_owns_joints) { --home_left; for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)]; }
             for (int i = 0; i < 4; ++i) {
                 slew_joint[size_t(i)] += std::clamp(head_targets[size_t(i)] - slew_joint[size_t(i)], -step, step);
                 slew_cmd[size_t(i)]   += std::clamp(command.head[size_t(i)] - slew_cmd[size_t(i)], -step, step);
@@ -3146,6 +3150,8 @@ int main(int argc, char** argv) {
             g_stop.gaze_at_thing = true;
         } else if (a == "--seek-gate-contact") {
             g_seek_gate_contact = std::stod(next("--seek-gate-contact"));
+        } else if (a == "--head-home") {
+            g_head_home_s = std::stod(next("--head-home"));
         } else if (a == "--tell-head") {
             g_tell_head = true;
         } else if (a == "--head-slew") {
