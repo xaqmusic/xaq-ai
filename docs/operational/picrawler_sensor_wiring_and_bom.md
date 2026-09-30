@@ -946,7 +946,7 @@ path at once — divider, rail, reference, gain — and disagreement says *where
 |---|---|---|---|
 | **V1** | **Three ohm readings at the foot's own 3-pin connector**, power off and unplugged — see §5.7.4. This is the whole build as one unit | off | the table in §5.7.4, and the three readings **identify the pinout by themselves** |
 | **V2** | Plug in. Foot **in the air**, read A0 | on | **≲ 60 counts.** ⚠ Proves nothing on its own — §5.3: an open FSR reads the same. Anywhere from ~0 to ~100 is acceptable; what matters is low and *stable* |
-| **V3** | **Press the toe with a finger, release** | on | **counts jump past 2000 and return within a second.** This is the real end-to-end proof, and it costs nothing — do it before the scale comes out |
+| **V3** ✅ | **Press the toe with a finger, release** | on | ✅ **PASS 2026-09-30** (§5.7.6): 0–4 unloaded, ~1000 on a light touch, 3300 on a firm press |
 | **V4** | The mass series against the table above, one reading per mass at a **fixed dwell** | on | inverted `R_fsr` within a few % of the DMM curve |
 | **V5** | DMM on the ADC input pin while a steady load sits on the foot | on | `V_dmm` = counts × 3.3/4095 within ~1 %. **Separates "the divider made the wrong voltage" from "the ADC read it wrong"** — and it is the ratiometric check §5.1 owed |
 | **V6** | `adc.rate ms=20`, then `mark` + 60 s each of: unloaded/servos limp · 175 g/limp · 175 g/servos holding. Then `adc_fast_report.py --fft` | on | **`wander×` near 1 and no 0.05 Hz line.** This is E2/E2b run on the real channel instead of a resistor dummy, and it is what decides whether 1.0 µF is enough |
@@ -959,6 +959,33 @@ rail, not the foot.
 regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### 5.7.6 ✅ V1–V3 PASS 2026-09-30 — the channel is live on A0
+
+Rewired per §5.7.5 (`R_g`'s upper leg moved to NODE, `SIG` run to NODE). Observed on A0:
+
+| state | counts | implied `R_fsr` | implied load | `foot_load` |
+|---|---|---|---|---|
+| unloaded | **0–4** | ≥ **15 MΩ** | 0 g | 0.00 |
+| light touch | ~1000 | 46.4 kΩ | ~13 g | 0.02 |
+| firm press | up to **3300** | 3.61 kΩ | ~1030 g | 1.74 |
+
+**Monotone, correct polarity, and the whole span is in range.** Three things this settles:
+
+1. **The wire tie is not preloading the sensor.** §2 flagged wire tension as the zero offset,
+   and it reads **0–4 counts** — essentially nil. The 0.90 mm shoulder gap is real and the toe
+   hangs free.
+2. **No dead zone at first contact.** A light touch resolves at ~13 g, below the part's own
+   20 g floor, so the toe takes up no meaningful slack before the bump loads the film. Swing to
+   stance stays the 45 → 1874 separation of §5.6.
+3. **The port spec's claim is now measured: software discards the range before the sensor
+   does.** The 1180 g clamp sits at 3361 counts against a 4095 full scale, so **19 % of the ADC
+   range is still unused above the point the channel stops caring.** A firm thumb already
+   reaches `foot_load` 1.74 without clipping.
+
+**Next is V4** — the mass series against §5.7's predicted counts. It is the quantitative
+verification *and* the calibration data in one pass, so run it with a fixed dwell at each mass
+and keep the readings.
 
 ### 5.7.5 ✅ FOUND 2026-09-29 — the cap was built in series, and the doc caused it
 
