@@ -5609,3 +5609,35 @@ short. Liveness passed on contact; the walk itself is what the arms must also me
 outcome. What it wants is a richer room: 16 s of face-on pushing in ten minutes gave a contact row of 0.043
 against range rows of 0.02–0.03, and eroded the ahead row. Next: the pair and the contact brain on seeds 7–18,
 and a 1200 s babble's checkpoint on the pair (sweeps 59–61).
+
+**Eighteen seeds (sweeps 57–60 with 31–32 the control), and the 1200 s babble (sweep 61).**
+
+| n = 18 | R112, current brain | R112, contact brain | **R113 prior, contact brain** |
+|---|---|---|---|
+| walls / min, mean ± sd · median · max | 31.5 ± 23.4 · 27.0 · 90 | 24.4 ± 15.4 · 23.8 · 67 | **23.7 ± 17.9 · 19.7** · 71 |
+| runs over 60 | 2 | 1 | 1 |
+| the too-close share above ½ while walking, s a run | 30 | 17 | **16** |
+| wall contact, s a run · bursts ≥ 5 s · longest | 27 · 0.7 · 77 s | 18 · 1.1 · 24 s | **16 · 0.6 · 17 s** |
+| seeds 7–18: walls · contact s · longest burst | 38.4 · 36 · 77 s | 22.4 · 14 · 24 s | 24.8 · 14 · 10 s |
+| seeds 1–6: walls · contact s · longest burst | 17.8 · 17 · 8 s | 28.4 · 22 · 22 s | 21.5 · 21 · 17 s |
+| closing (1–6 · 7–18) · arrival stops | 55 · 48 % · 14.7 | 54 · 53 % · 19.0 | 50 · 52 % · 17.5 |
+| rescues / min (1–6 · 7–18) | 0.20 · 0.18 | 0.23 · 0.18 | 0.15 · 0.19 |
+
+- **The learned avoidance transfers.** A model that pushed walls for 16 s in a 1 m room, loaded into the playroom
+  with the train and the toys, halves the time the walker spends with its near field full (30 → 16 s a run),
+  cuts wall contact 27 → 16 s, takes the longest burst from 77 to 17 s and walls from 31.5 to 24 a minute, with
+  closing held and arrivals up. On the twelve seeds the babble never saw, the contact brain alone does most of it
+  (36 → 14 s of contact); the prior's share shows on seeds 1–6 (28 → 21 walls) and in the tail (the longest
+  burst 24 → 17 s, bursts of 5 s or more 1.1 → 0.6 a run).
+- **More room is not better.** The 1200 s babble (223 s of contact, 116 s of pushing) left the contact row at
+  0.021 and blew the range rows up (left 0.022 → 0.198); the pair on it keeps the near field clearest of all (11 s)
+  by standing sideways at walls (wall contact 39 s a run, the longest burst 64 s) and loses the walk (closing 55 →
+  40 %, arrivals 14.5 → 8.3). The room teaches a linear model what it can hold; ten minutes is the dose here.
+
+**Verdict, n = 18 (2026-09-30).** The contact regime `WORKING`: the sense the four imposed consumers could not
+use is now used by a model that learned it, and the outcome moved on every wall measure while the walk held —
+the first wall lever of the campaign that is not a tie. `PARTIAL` on the prior's share (a signal on six seeds and
+in the tail, a tie on the fresh twelve). **The arm is R113 on the contact brain** (preset "R113 · the CONTACT
+prior on the CONTACT brain", checkpoint `duck_contact_s1`); the regime is the room, `--rebabble 600` from the
+current identification, saved. Re-use: the room dose (the babble's duration and the room's size) is the knob to
+sweep next, and the prior's share to confirm at n ≥ 20 varied worlds.

@@ -375,6 +375,14 @@ cooperates, imposed fights: the walker carries the share as sense slot 15 and it
 saw a push. Next: a babble that includes contact, with the contact stall kept as the instrument. The arm stands:
 R112 on the reflex and seek gate.
 
+**The contact regime (§17.85, 2026-09-30, n = 18):** the walker's avoidance is a state prior descended through its
+model's authority, and the model babbled in the open never saw a push. A 1 m room, the current identification
+loaded, 600 s of 6 s babble pulses with learning on, saved: the contact brain, loaded into the playroom, halves
+the time the near field is full (30 → 16 s a run), cuts wall contact 27 → 16 s, the longest burst 77 → 17 s, walls
+31.5 → 24 a minute, closing held, arrivals up. The prior on the contact slot (R113) adds a tail and a six-seed
+signal; the prior on the unlearned brain doubles the walls; a 1200 s babble loses the walk. `WORKING` — the first
+wall lever of the campaign that is not a tie. Arm: preset "R113 · the CONTACT prior on the CONTACT brain".
+
 **The arms** (R94 on the loaded brain is the base; each arm one lever): `--stop-on-stuck 8 --stuck-escape 6` (the
 things phase's corner answer); R95 `chase_permanence_ticks 150` (a lost mover kept moving in mind for 3 s,
 re-acquired where predicted, the look when it runs out); R96 `chase_pull_decay 0.6` (a chase's need decays at
