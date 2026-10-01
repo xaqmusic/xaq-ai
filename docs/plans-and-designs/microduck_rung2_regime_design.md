@@ -6280,3 +6280,20 @@ command then points toward the reference 40–50 % of the time — part of it le
 duck and its target), the rest the orbit. **The orbit is the walker's heading authority under clutter, not the body's
 turning speed.** In flight: the heading prior's precision (`state_prior_weights` on index −6 at 3 and 10, range 1,
 sweep y2).
+
+**The heading prior's precision (sweeps y2, y3, n = 18).** At 10 on the range-1 walker: with the target 1–2 rad off the
+forward command falls to 0.13 m/s and at 2–4 rad to −0.17 m/s — **the walker sheds speed and backs when the target is
+behind**, the operator's "walk backwards and turn" from the heading error alone — but its yaw command (~0.8 rad/s) sits
+in the policy's in-place deadband, so the body turns at 0.25–0.29 rad/s; the aim 55 → 62 %, the error closed within 3 s
+34 → 45 %, walls 24 → 38, falls 2.2 → 2.5. At 3: the aim 60 %, falls 3.8. On the range-3 walker both precisions: the
+body yaws 0.07–0.10 rad/s, the aim 50 %, falls 3.7–4.9, arrivals 11–15. `PARTIAL` (the backing) / `REGRESSION`.
+
+**Why the yaw does not aim (the walker saved after 300 s, seed 1).** The yaw command flips sign every ~0.4 s (5 % of
+ticks at either range): a limit cycle. The walker's yaw row of C doubles in 300 s (|C| 9.7 → 22.4): −4.05 on its own
+sensed yaw rate, +2.85 on its own previous command, ±2.2 on the side ToF slots, −2.15 on the heading — the feedback half
+growing on large, step-like errors through the policy's lag, §17.90's disease in the walker. Its yaw tonic winds to
+the rail (h −0.93 → −2.88, tanh −0.99): a small yaw command turns nothing (the deadband), the heading error persists,
+the integrator pushes on. And at range ±3 the identification found the yaw's authority over the heading error with the
+WRONG sign (A −0.12; the range-1 identification +0.03): full-scale yaw pulses spin the body further than the heading
+sense (a deviation from a 60 s mean, clamped at ±π) can follow. **The turning radius is the walker's yaw loop — a
+deadband its linear model cannot see, a tonic that winds in it, a feedback half that grows — not the body.**
