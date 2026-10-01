@@ -200,6 +200,11 @@ def main():
     ap.add_argument("--dwell", type=float, default=2.0, help="seconds held before reading")
     ap.add_argument("--reads", type=int, default=12)
     ap.add_argument("--pose-suffix", default="_down")
+    ap.add_argument("--ref", type=int, default=None, metavar="US",
+                    help="after every step, return to this knee offset and read it again. "
+                         "The spread of those readings is mechanical repeatability with NO "
+                         "model in it -- no tilt, no interpolation, no force. Default: the "
+                         "middle step. Pass 99999 to disable")
     ap.add_argument("--via", default="toes_up",
                     help="pose to pass through before each <foot>_down; '' to go direct. "
                          "⚠ the toes drag on the way into a _down pose, and on a high-friction "
@@ -228,6 +233,11 @@ def main():
                  "\n  have: " + ", ".join(sorted(poses)))
     print(f"transit pose: {via or '(none — going direct, toes drag)'}")
 
+    ref = None if a.ref == 99999 else (a.ref if a.ref is not None else steps[len(steps) // 2])
+    if ref is not None and ref not in steps:
+        sys.exit(f"--ref {ref} is not one of the steps {steps}")
+    print(f"reference step: {'(disabled)' if ref is None else format(ref, '+d') + ' us'}")
+    ref_summary = {}
     threading.Thread(target=keepalive, daemon=True).start()
     rpc("adc.rate", ms=20)            # the full time series, settle transients included
     results = {}
@@ -252,7 +262,8 @@ def main():
                 time.sleep(0.6)
             print(f"    {'step us':>9}{'dir':>6}{'counts':>9}{'sd':>7}{'min':>7}{'max':>7}{'tilt°':>8}")
 
-            rows = []                 # (step, direction, mean, sd, min, max)
+            rows = []                 # (step, direction, mean, sd, min, max, tilt)
+            refs = []                 # readings taken back at the reference step
             order = [(s, "up") for s in steps] + [(s, "down") for s in reversed(steps[:-1])]
             for step, direction in order:
                 us = list(base)
@@ -271,12 +282,59 @@ def main():
                 sd = st.pstdev(v) if len(v) > 1 else 0.0
                 rows.append((step, direction, m, sd, min(v), max(v), tilt))
                 print(f"    {step:>+9}{direction:>6}{m:>9.1f}{sd:>7.2f}{min(v):>7}{max(v):>7}{tilt:>8.2f}")
+                # ⚠ Return to one fixed pose and read it again.  Everything else in this
+                # sweep compares readings taken at DIFFERENT poses, which needs tilt as a
+                # stand-in for load and an interpolation to line them up.  This does not:
+                # same commanded pose, same foot, minutes apart.  Whatever spread shows up
+                # here is mechanical and cannot be argued away.
+                if ref is not None and step != ref:
+                    us2 = list(base); us2[ch] = base[ch] + sign * ref
+                    rpc("mark", text=f"footcal {foot} ref{ref:+d}us after {step:+d} {direction}")
+                    r2 = rpc("pose.set", us=us2)
+                    settle(r2.get("eta_ms", 0))
+                    time.sleep(max(0.8, a.dwell * 0.6))
+                    v2, t2 = sample(adc_ch, max(6, a.reads // 2), 0.05)
+                    refs.append((step, direction, st.fmean(v2), t2))
             results[foot] = rows
+            if refs:
+                vals = [m for _, _, m, _ in refs]
+                tl = [t for *_, t in refs if t == t]
+                print(f"    --- back at {ref:+d} us, {len(vals)} returns: "
+                      f"mean {st.fmean(vals):.0f}  spread {max(vals) - min(vals):.0f}  "
+                      f"sd {st.pstdev(vals):.0f}" +
+                      (f"   tilt sd {st.pstdev(tl):.2f}°" if len(tl) > 1 else ""))
+                ref_summary[foot] = (st.fmean(vals), max(vals) - min(vals), st.pstdev(vals),
+                                     st.pstdev(tl) if len(tl) > 1 else float("nan"), len(vals))
     finally:
-        _stop.set()
+        # ⚠ DO NOT finish with `limp`.  It commands the saved RESCUE pose, whose toes sweep
+        # out far enough to catch on the wall of a safety box -- observed 2026-10-01, and the
+        # operator had to lift the robot clear several times.  Park on the transit pose
+        # instead: toes up, nothing to snag, and it is a pose this sweep already trusts.
+        #
+        # ⚠ This cannot cover being KILLED.  benchd's deadman commands rescue ~1 s after the
+        # keepalive stops, so an interrupted run ends in rescue no matter what is written
+        # here.  Let the run finish, or raise the timeout -- do not shorten it.
         rpc("adc.rate", ms=0, _allow_err=True)
-        rpc("limp", _allow_err=True)          # back to the saved rescue pose
-        print("\nsampler off, robot returned to rescue.")
+        parked = False
+        if via:
+            try:
+                pr = rpc("pose.set", us=rpc("pose.get", name=via)["us"])
+                settle(pr.get("eta_ms", 0))
+                parked = True
+            except Exception as e:
+                print(f"⚠ could not park on {via}: {e}")
+        _stop.set()
+        print(f"\nsampler off, robot parked on {via if parked else 'whatever it last held'}.")
+
+    if ref_summary:
+        print("\n=== mechanical repeatability: the SAME commanded pose, revisited\n")
+        print(f"    {'foot':<6}{'n':>4}{'mean':>9}{'spread':>9}{'sd':>8}{'tilt sd':>10}")
+        for f, (mn, sp, sd, tsd, n) in ref_summary.items():
+            print(f"    {f:<6}{n:>4}{mn:>9.0f}{sp:>9.0f}{sd:>8.0f}{tsd:>10.2f}")
+        print("\n    ⚠ No model in this table -- same pose, same foot, minutes apart.  Compare"
+              "\n    `sd` against the per-hold sd in the tables above: that is the electrical"
+              "\n    floor.  Anything well beyond it is the mechanics, and `tilt sd` says how"
+              "\n    much of it the body failed to return to.")
 
     report(results, steps, feet)
 

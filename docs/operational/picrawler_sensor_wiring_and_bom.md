@@ -961,6 +961,62 @@ regardless of what their own `R_fsr` turns out to be. Per-foot variation is what
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
 
+### ★★ 5.7.11 LOCALISED 2026-10-01c — it is the toe/FSR interface, and the proof has no model in it
+
+Every comparison up to here compared readings taken at **different** poses, which needs tilt as
+a stand-in for load and an interpolation to line them up. That is a lot of machinery to hang a
+verdict on. **So the sweep now returns to one fixed knee offset after every step and reads it
+again** — same commanded pose, same foot, minutes apart, nothing modelled.
+
+| foot | returns | mean | **spread** | sd | **tilt sd** | |
+|---|---|---|---|---|---|---|
+| FL | 11 | 2456 | **591** | 159 | **0.03°** | ✅ |
+| FR | 11 | 1917 | **805** | 214 | **0.06°** | ✅ |
+| RR | 11 | 3257 | **265** | 74 | **0.03°** | ✅ |
+| RL | 11 | 1340 | 574 | 194 | **3.14°** | ⚠ body was disturbed — not a measurement |
+
+**Against a per-hold electrical sd of 1–46 counts.** Three feet with the body returning to
+within **0.03–0.06°** of the same attitude, and the sensor reading **265–805 counts** apart.
+
+**That localises it, by elimination and without a model:**
+
+| | |
+|---|---|
+| not the pose, the servos or the floor | body attitude repeats to 0.03° |
+| not the divider or the ADC | per-hold sd is 1–46 counts, and §5.7.9 validated the path to 1.3 % |
+| not load sharing | only the foot under test ever reads, every other channel at 1–2 counts |
+| **⇒ the toe-to-FSR interface** | the only link left between a repeatable body pose and an irreproducible number |
+
+**§5.7.7's question is answered: it is slack, not a repeatable nonlinearity.** A per-foot
+calibration curve cannot be fitted through this, because the curve is a function of load alone
+and this is not.
+
+#### ⚠ Two operator corrections folded in
+
+**The script was ending on `limp`**, which commands the saved **rescue** pose — whose toes sweep
+far enough out to catch the wall of the safety box. The operator had to lift the robot clear
+several times. **It now parks on the transit pose (`toes_up`) instead**, and the keepalive is
+held until after the park move lands. ⚠ An *interrupted* run still ends in rescue: benchd's
+deadman fires ~1 s after the keepalive stops, which no change to the script can cover. Let runs
+finish rather than shortening the timeout — the log shows 8 watchdog trips across this
+session's aborted runs.
+
+**RL's row is the one that is contaminated**, and its own `tilt sd` says so: 3.14° against
+0.03° for the others. The disturbances happened at those rescue excursions, between legs; the
+three clean feet were not moved during their own returns.
+
+#### The bump-vs-cylinder question is now live, and it is measurable
+
+The operator chose the **spherical bump** partly for this reason: a small, nearly-rolling
+contact drags less film than a flat face pressed over Ø5. That is a real effect pulling the
+opposite way from §3.2's argument, which was about where the load *lands* (a 0.25 mm float is
+most of a 0.3 mm patch, but only 5 % of a Ø5 face). **Both arguments are sound and they point
+in opposite directions, so the question is empirical** — and the reference-return spread is
+exactly the number that settles it, because it needs no calibration and no geometry.
+
+**The A/B: fit one spherical-bump toe, re-run the returns on that foot, compare the spread.**
+One lever, assumption-free metric, ~4 minutes.
+
 ### ★ 5.7.10 RUN 2026-10-01b — rubber mat: the floor was NOT the cause
 
 §5.7.9's separating experiment, run: robot moved onto a **rubber mat** so the resting edge
