@@ -83,7 +83,7 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
     // trunk gyro; 11: spare.  The H2 prior is on slots 0, 1 (level) and 3, 4 (still).
     publish("head_sense", {float(hg[1]), float(hg[2]), float(hg[0] + 1.0), unit(0.3 * hw[0]), unit(0.3 * hw[1]), unit(0.3 * hw[2]),
                            float(g[0]), float(g[1]), unit(0.3 * w[0]), unit(0.3 * w[1]), unit(0.3 * w[2]),
-                           0.0f});
+                           gaze_sense_ ? unit(gaze_err_ / kHeadRange[2]) : 0.0f});   // 11: the gaze error (--head-gaze-sense), else spare
 
     instance_->tick();
 

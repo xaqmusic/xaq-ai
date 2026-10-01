@@ -73,6 +73,13 @@ public:
     void set_phase(double lead_ticks, double learn_s) { phase_lead_ = lead_ticks; phase_learn_s_ = learn_s; }
     std::vector<std::string> phase_report() const;
     std::array<double, 4> last_command() const { return last_cmd_; }
+    // THE LEARNED GAZE (2026-10-01, --head-gaze-sense): the spare 12th sense slot carries the gaze error -- the direction
+    // the walk is going (the seek target's body bearing while seek steers, straight ahead otherwise; + = left) minus the
+    // head's yaw -- in units of the yaw range (1.4 rad).  A graph that owns action.head_yaw identifies its authority
+    // over it in H1 and a prior on it (-> 0) turns the head to look where the walk is going, through the learned model.
+    // Off = the slot stays 0 (byte-identical).
+    void set_gaze_sense(bool on) { gaze_sense_ = on; }
+    void feed_gaze_error(double rad) { gaze_err_ = rad; }
     // W2: the yaw command is the given target while on (the stance-gated saccade channel: at a stop,
     // the head's yaw is the gaze axis; on the walk it follows the trunk as before). The loop does not
     // own yaw (its model is pitch and roll), so nothing it learns pairs with this command.
@@ -104,6 +111,7 @@ private:
     std::map<std::string, double> frozen_rates_;
     bool frozen_ = false;
     uint64_t babble_ticks_ = 0;                        // from the graph: the yaw command is masked after it
+    bool gaze_sense_ = false; double gaze_err_ = 0.0;
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
     bool yaw_override_ = false; double yaw_target_ = 0.0;
     bool pitch_override_ = false; double pitch_target_ = 0.0;
