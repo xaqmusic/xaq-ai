@@ -85,7 +85,7 @@ Metadata is not read by the host, so this never changes a run. Presets live in
 `presets.json` beside the launcher: a name, a hint, and the control values to
 set. Add an experiment there, not in the code. At a milestone the list is pruned to the `★` stacks,
 the guard, and the arms still waiting for the operator's eye; the retired presets go to
-`presets_archive.json` beside it (last pruned 2026-09-27, 82 → 13).
+`presets_archive.json` beside it (last pruned 2026-10-01, 93 → 18, at ★ BIRD; before that 2026-09-27, 82 → 13).
 
 ## Watching a level-2 run
 
