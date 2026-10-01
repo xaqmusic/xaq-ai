@@ -669,3 +669,10 @@ returns (`--tof-body 0.5`) let the head look away without turning the avoidance;
 view 86 % of seeking time (43), turns toward it five times as fast, closes the error within 3 s 46 % (34), falls 1.7
 (2.2), walls 22 (24) — `WORKING` against its own control, n = 18; the candidate for the eye is preset "GAZE · the
 body-slot brain + the GAZE leading the turn". On the column-slot brain the same gaze lost (a model mismatch).
+
+**The learned gaze (2026-10-01, design doc §17.90).** The head brain senses its gaze error (where the walk is going
+minus its yaw) and a prior drives it to zero: after four diagnosed failures (a feedback gain grown on a large error; a
+pure reach that is a velocity under the controller's identity hold; the level prior's tonic leaking into yaw; fixed by
+re-identifying with yaw last and masking the level priors), it looks — the target in view 90 % against 45 %, the yaw
+smooth — and does not yet help the walk (walls 33 against 24, falls 2.6 against 1.8). `PARTIAL`; the reflex stays the
+better walker. Preset "GAZE · LEARNED …".

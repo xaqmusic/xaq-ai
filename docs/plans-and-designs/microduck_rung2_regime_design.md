@@ -6164,3 +6164,49 @@ within 3 s 41 %) the gaze arm walls fewer and falls less, closes 6 points less a
 identifications differ by their babble as well as their sense, so the eye judges it. Re-use for the learned form:
 the gaze's error (the target's bearing in the head's frame) as the head brain's sense with a prior to zero, through
 the yaw it now owns on the walk. Presets "GAZE · the body-slot brain + …" (the candidate, its control, the bound).
+
+### 17.90 The gaze, learned in the head brain (2026-10-01)
+
+**The operator: "I like it. Make the gaze learned in the head brain."** The reflex (§17.89) pointed the head yaw at the
+seek target's bearing. The learned form gives the head brain the error and lets it find the motion:
+
+- **The sense** (host `--head-gaze-sense`): the head brain's spare 12th sense slot carries the gaze error — where the
+  walk is going (the seek target's body bearing while seek steers the reference, straight ahead otherwise) minus the
+  head's yaw, in units of the yaw range. Off = the slot stays 0 (★ BIRD byte-identical over 600 s, R83 `6b9a0b3a…`).
+- **The identification**: H1/3 (head pitch, roll, yaw) standing at the joints with the slot fed, 700 s, 0 rescues: the
+  gaze row is minus the yaw position row (yaw authority −0.063).
+- **The error**: an H2 prior driving the gaze error to zero beside the level prior, the model frozen as identified.
+
+**Four failures before it behaved, each diagnosed (n = 18 unless said; the body-slot walker `duck_forebody_s1`):**
+1. **Feedback growth.** With the prior's feedback (C) and tonic (h) halves both on, the yaw thrashed (p90 2.7 rad/s;
+   falls 4.9 / 7.1 at precision 1 / 3). The saved head brain after 300 s: a +2.41 feedback gain on the gaze error
+   (the row's size 1.15 → 7.28) — the descent writes C in proportion to a large, step-like error through a lagging
+   servo. A lower precision (0.3: falls 6.5), a head-still prior beside it (10.3) and a servo-rate slew on the head
+   joints (14.2, the slew worsened the stops) did not cure it.
+2. **A pure reach runs away.** `MotorEPMv2.state_prior_c_weights` (the feedback half's per-index weight; empty =
+   byte-identical; unit-tested) at 0 makes the gaze a pure reach through h, as the module's own role note prescribes
+   (C balances, h reaches). The yaw ran to its rail (1.3–1.4 rad): under the controller's identity hold on its own
+   position (an initialisation, never learned), a tonic is a VELOCITY.
+3. **The hold released, still at the rail** (`head3j_gaze_h1_s2_nohold`): the level priors' tonic leaked into yaw
+   through H1's cross-couplings (pitch row −0.024 on yaw). A two-seed probe with the level priors off: the target in
+   view 91 %, the yaw p90 0.41 rad/s.
+4. **Yaw last** (`head3o_gaze_h1_s2`, 0 rescues): the level priors masked to pitch and roll (`state_prior_motors 2`),
+   the gaze a pure reach, the yaw's hold released (`head3o_gaze_h1_s2_nohold`, config `head3o_h2_gaze_w10`).
+
+| n = 18 | the same head brain, no gaze (control) | **the learned gaze** | the reflex (§17.89) | the reflex's control |
+|---|---|---|---|---|
+| target in the ToF's field while seeking | 45 % | **90 %** | 86 % | 43 % |
+| yaw speed on the walk, p50 · p90 | 0.09 · 0.29 rad/s | 0.14 · 0.61 | 0.16 · 0.66 | — |
+| turn toward the target · the error closed within 3 s | 0.07 rad/s · 41 % | 0.16 · 40 % | 0.20 · 46 % | 0.04 · 34 % |
+| closing on the target | 56 % | 57 % | 57 % | 53 % |
+| falls a run · walls / min · arrivals | 1.8 · 24 · 17.6 | 2.6 · 33 · 17.4 | 1.7 · 22 · 17.8 | 2.2 · 24 · 18.6 |
+
+**Verdict (2026-10-01).** The learned gaze **looks**: the target in view twice as often as its control, the yaw as
+smooth as the reflex's, the head home when nothing is sought — the behaviour is the head brain's own, found through
+its identified authority. It does **not yet help the walk**: against its own control closing and the error closed
+within 3 s tie, walls +9 a minute, falls +0.8 (at stops 0.6 against 0.3). `PARTIAL`. The reflex remains the better
+walker (its control: the error closed +12 points, falls −0.5). What differs between them is the shape of the
+command: the reflex is a proportional position at a fixed rate; the learned reach is an integral one, which lags when
+the target switches and must unwind when seek lets go. Re-use: a proportional term the head brain can earn (the
+feedback half at a small weight, now that the level tonic no longer drives yaw), and the stop's take-over from a
+turned head (slewed from where the gaze left it). Presets "GAZE · LEARNED …" and its control.
