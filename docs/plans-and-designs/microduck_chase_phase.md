@@ -692,3 +692,9 @@ desired rate, the deadband compensated from the measured response) and re-identi
 on ★ GAZE's stack, n = 18, the time with the target well off the nose halved, the error closed within 3 s 40 → 55 %,
 walls 33 → 23 a minute, falls 2.6 → 2.9 — `WORKING`. The heading as a reach ties it; precision 10 regresses. Next: the
 speed prior gated by the heading error, so the walker stops and turns in place. Preset "TURN · ★ GAZE on the LINEAR yaw motor".
+
+**The walk that faces its thing (design doc §17.93):** the operator saw the linear yaw approach well and kick and peck
+less accurately — it arrived still turning, the thing 61° off the nose at the skill. The forward-speed prior's target
+gated by the heading error (`state_prior_target_gated_by`) makes the walk slow, turn in place and back to face the thing:
+n = 18, the thing 22–27° off the nose at the skill (★ GAZE 41–46°), the head touching the thing on 57 % of pecks (32 %),
+walls 14 a minute, falls 1.5, the error closed within 3 s 70 %; arrivals −13 %. `WORKING`; the candidate for the eye.

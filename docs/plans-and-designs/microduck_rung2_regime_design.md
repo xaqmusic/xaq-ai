@@ -6341,3 +6341,37 @@ the rail on 62–82 % of those ticks, and walking forward at the rail the calibr
 policy delivers more slowly than in place. Re-use: the speed prior's precision gated by the heading error (on when
 the target is ahead) would let the walker stop and turn in place — the backing §17.91's precision 10 found, without
 its falls. Presets "TURN · …".
+
+### 17.93 The walk that faces its thing: the speed target gated by the heading error (2026-10-01)
+
+**The operator, watching the linear yaw (§17.92):** it approaches well and is much less accurate with objects — in the
+previously promoted configuration it consistently kicked the ball or block, and a peck had a very good chance of the head
+touching the object, which is the goal. **Measured** (`mj_host/tools/skill_align.py`, the true bearing at each skill's
+start): the linear yaw arrived still turning (the body's yaw rate in the half second before an arrival stop 0.37 rad/s
+against 0.24) and the thing sat 61° off the nose at a kick or a peck (★ GAZE 41° / 46°); kicks started within 0.15 m and
+30° fell 38 → 13 %. The kick and the peck fire straight ahead; the arrival fired on range alone.
+
+**Built:** `MotorEPMv2.state_prior_target_gated_by` (a prior's TARGET scaled by `1 − |x_j| / rms_j`, rms_j the element's
+own running RMS; empty = byte-identical; unit-tested, 28/28). Config `a1v2_r113_fore_g10_facing`: the forward-speed
+prior's target gated by the heading error — the speed the walker asks for falls as the target leaves the nose (gating
+the precision instead would leave the speed tonic holding the command at the rail). The arrival rule is unchanged.
+Guards: ★ BIRD, the linear-yaw candidate and R83 reproduce.
+
+| n = 18 (sweep f9) | ★ GAZE | linear yaw | **+ facing** |
+|---|---|---|---|
+| the thing at a kick's · a peck's start, \|bearing\| median | 41° · 46° | 61° · 61° | **27° · 22°** |
+| kicks · pecks started within 0.15 m and 30° | 38 % · 28 % | 13 % · 24 % | **47 % · 48 %** |
+| the head (or body) touching the thing during a peck | 32 % | 38 % | **57 %** |
+| kicks · pushes that moved their thing > 5 cm | 31 % · 31 % | 26 % · 26 % | 33 % · 35 % |
+| walls / min · falls a run · rescues / min | 33 · 2.6 · 0.26 | 23 · 2.9 · 0.29 | **14 · 1.5 · 0.15** |
+| the error closed within 3 s · seconds with the target > 1 rad off | 40 % · 69 | 55 % · 34 | **70 % · 17** |
+| the target in the body's ToF field · bearing error median | 39 % · 28° | 60 % · 19° | **75 % · 15°** |
+| arrivals · walk m/s · closing | 17.4 · 0.176 · 57 % | 17.3 · 0.176 · 53 % | 15.2 · 0.163 · 36 % |
+
+With the target 1–4 rad off, the walker's forward command is −0.25 to −0.30 m/s: **it backs while it turns** (the
+operator's "walk backwards and turn", from the error alone), and the arrival stop catches a body that has stopped turning
+(0.24 rad/s, ★ GAZE's level). **Verdict: `WORKING`** — the alignment at the skill restored and beyond ★ GAZE's, the peck's
+touch 32 → 57 %, walls and falls the campaign's best on this stack; the cost a sixth fewer arrivals and a slower walk
+(more of it is turning in place: closing reads 36 % with 60 % tangential). The pecks still rarely MOVE their thing
+(16 %) — a peck reaches the thing, and the reach is by contact. Preset "TURN · the linear yaw + the walk that FACES its
+thing (the candidate)".
