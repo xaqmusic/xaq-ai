@@ -47,7 +47,7 @@ USAGE
 The poses must already exist (pose.save).  Each puts its own foot down and leaves the
 opposite side of the chassis flat on the ground as the lever.
 """
-import argparse, json, os, statistics as st, sys, threading, time
+import argparse, json, math, os, statistics as st, sys, threading, time
 import zmq
 
 ENDPOINT = "tcp://127.0.0.1:5590"
@@ -115,14 +115,35 @@ def knee_channel(mapping, physical):
     raise RuntimeError(f"no knee channel mapped for {physical} -- run cal.map first")
 
 
+def tilt_deg(st):
+    """Body tilt from vertical, out of the IMU's fused gravity estimate.
+
+    ⚠ THIS IS THE INSTRUMENT THAT SAYS WHETHER THE POSE STEP DID ANYTHING.  The first run
+    (2026-10-01) produced counts that were rock-steady at each hold and NOT monotone across
+    the sweep -- because a belly resting flat is an indeterminate contact and the body
+    re-seats between steps.  Counts alone cannot tell that apart from a bad sensor.  Tilt
+    can: if it does not climb with the step, the lever is not doing what the sweep assumes
+    and the numbers are the harness, not the feet."""
+    imu = st.get("imu") or {}
+    up = imu.get("up_fused")
+    if not up or len(up) != 3:
+        return None
+    n = math.sqrt(sum(c * c for c in up)) or 1.0
+    return math.degrees(math.acos(max(-1.0, min(1.0, up[1] / n))))
+
+
 def sample(ch, n, gap):
-    """n live ADC reads of one channel.  `status` rebuilds the frame, and frame() reads the
-    ADC, so every call is a fresh conversion rather than a cached one."""
-    vals = []
+    """n live ADC reads of one channel plus the body tilt.  `status` rebuilds the frame, and
+    frame() reads the ADC, so every call is a fresh conversion rather than a cached one."""
+    vals, tilts = [], []
     for _ in range(n):
-        vals.append(rpc("status")["adc"][ch])
+        st_ = rpc("status")
+        vals.append(st_["adc"][ch])
+        t = tilt_deg(st_)
+        if t is not None:
+            tilts.append(t)
         time.sleep(gap)
-    return vals
+    return vals, (st.fmean(tilts) if tilts else float("nan"))
 
 
 def report(results, steps, feet):
@@ -156,6 +177,19 @@ def report(results, steps, feet):
         print(f"    {s:>+7}{row}")
     print("\n    ⚠ These are counts, not grams.  The columns are comparable to each other"
           "\n    because the geometry is mirrored; none of them is an absolute force.")
+
+    print("\n=== did the lever actually move?  body tilt (deg from vertical), up sweep\n")
+    print(f"    {'step':>7}" + "".join(f"{f:>9}" for f in feet))
+    for s in steps:
+        row = ""
+        for f in feet:
+            t = next((r[6] for r in results[f]
+                      if r[0] == s and r[1] == "up" and len(r) > 6), None)
+            row += f"{'-':>9}" if t is None else f"{t:>9.2f}"
+        print(f"    {s:>+7}{row}")
+    print("\n    ⚠ Tilt must climb monotonically with the step, because that is the lever the"
+          "\n    whole method rests on.  If it does not, the body is re-seating between steps"
+          "\n    and the counts above are a measurement of the harness, not of the feet.")
 
 
 def main():
@@ -196,7 +230,7 @@ def main():
             ch, sign = knee_channel(mapping, foot)
             base = rpc("pose.get", name=pose_name)["us"]
             print(f"\n=== {foot}  pose {pose_name}  knee ch{ch} (sign {sign:+d})  ADC A{adc_ch}")
-            print(f"    {'step us':>9}{'dir':>6}{'counts':>9}{'sd':>7}{'min':>7}{'max':>7}")
+            print(f"    {'step us':>9}{'dir':>6}{'counts':>9}{'sd':>7}{'min':>7}{'max':>7}{'tilt°':>8}")
 
             rows = []                 # (step, direction, mean, sd, min, max)
             order = [(s, "up") for s in steps] + [(s, "down") for s in reversed(steps[:-1])]
@@ -212,11 +246,11 @@ def main():
                 if not settle(r.get("eta_ms", 0)):
                     print("    ⚠ move did not settle in time; reading anyway")
                 time.sleep(a.dwell)
-                v = sample(adc_ch, a.reads, 0.05)
+                v, tilt = sample(adc_ch, a.reads, 0.05)
                 m = st.fmean(v)
                 sd = st.pstdev(v) if len(v) > 1 else 0.0
-                rows.append((step, direction, m, sd, min(v), max(v)))
-                print(f"    {step:>+9}{direction:>6}{m:>9.1f}{sd:>7.2f}{min(v):>7}{max(v):>7}")
+                rows.append((step, direction, m, sd, min(v), max(v), tilt))
+                print(f"    {step:>+9}{direction:>6}{m:>9.1f}{sd:>7.2f}{min(v):>7}{max(v):>7}{tilt:>8.2f}")
             results[foot] = rows
     finally:
         _stop.set()

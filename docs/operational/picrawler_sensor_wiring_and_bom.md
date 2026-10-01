@@ -726,7 +726,7 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 
 | # | step | needs | pass condition |
 |---|---|---|---|
-| **E0** ✅ | **BUILT 2026-09-27 — `adc.rate` (PROTOCOL.md).** `frame()` reads A0–A4 at 10 Hz, which cannot characterise a tick-rate channel; the verb adds an **opt-in** sampler in `tick_thread` writing `adc_fast` records at up to 50 Hz. **Off by default** (`ms` = 0), so an un-called daemon runs the old path. ⚠ **Scripts must not poll the ADC themselves** — `rail_separation_test.py`'s own header records what two owners of one resource cost: six pose cycles reported as a clean PASS off a single sample | — | ⚠ **still to run on the robot:** `tick_hz` unmoved and `bus_errors` flat with `adc.rate ms=20`, i.e. 4× today's I²C load in the tick. Each record carries its own `us`, so the read cost is measured rather than assumed |
+| **E0** ✅✅ | **BUILT + VERIFIED ON THE ROBOT (§5.7.9).** — `adc.rate` (PROTOCOL.md).** `frame()` reads A0–A4 at 10 Hz, which cannot characterise a tick-rate channel; the verb adds an **opt-in** sampler in `tick_thread` writing `adc_fast` records at up to 50 Hz. **Off by default** (`ms` = 0), so an un-called daemon runs the old path. ⚠ **Scripts must not poll the ADC themselves** — `rail_separation_test.py`'s own header records what two owners of one resource cost: six pose cycles reported as a clean PASS off a single sample | — | ⚠ **still to run on the robot:** `tick_hz` unmoved and `bus_errors` flat with `adc.rate ms=20`, i.e. 4× today's I²C load in the tick. Each record carries its own `us`, so the read cost is measured rather than assumed |
 | **E1** ✅ | **Meter the ADC connector** | a meter | ✅ **DONE 2026-09-27 — VCC is 3.3 V, labelled on the PCB**, so the divider's top rail is the connector itself. Pin order still to be read off the same silkscreen |
 | **E2** | **Characterise the ADC into known impedance.** Fixed 1 % divider at ≈ half scale on A0; sweep `Z_src` ≈ 0.5 k / 5 k / 50 k / 500 k holding the ratio; record counts vs a DMM at the node, and σ over ≥1000 reads at three activity levels: servos limp, servos holding a pose, and a gait running | resistors | a **maximum usable `Z_src`** — the impedance past which counts droop from the DMM value or σ climbs. This is the number that bounds `R_g` from above |
 | **E2b** | **Cap sweep at the worst impedance from E2**: none / 0.1 / 1.0 µF, servos active | caps | `wander×` back to ~1 and `--fft` showing no line — **not just a smaller σ** (§5.2.1: the artifact to kill is slow, so σ alone will not see it). Plus the read cost from each record's `us` |
@@ -960,6 +960,62 @@ rail, not the foot.
 regardless of what their own `R_fsr` turns out to be. Per-foot variation is what the per-foot
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
+
+### ★ 5.7.9 RUN 2026-10-01 — the mechanics are not repeatable, and it is not the sensors
+
+All four feet swept, knee stepped ±150 µs about each `<foot>_down` pose, up and back down.
+
+**✅ What the run establishes.**
+
+| | |
+|---|---|
+| the electrical side is clean | **only the loaded foot reads anything** — the other three sit at 0–2 counts through every segment of every sweep. No crosstalk, no load sharing |
+| the geometry is determinate | that same fact confirms the two-support beam the method assumes: belly edge plus one foot, nothing else touching |
+| the lever works | body tilt climbs monotonically on all four, **19.5° → 25.3°**, and repeats to ~0.1° between the up and down halves |
+| each hold is quiet | within-hold sd is **1–46 counts** |
+
+**⚠ CORRECTION, recorded because it nearly produced a false verdict.** The first reading of
+this run was "tilt is monotone but counts are not, so the sensors are at fault." That is wrong.
+`F = W·a/b`, and tipping about the edge changes **both** `a` and `b` — **the force is not
+required to be monotone in the step at all.** Monotone tilt proves the lever moved. It proves
+nothing about the shape of the load.
+
+**The test that does not need force to be monotone.** Whatever `F(tilt)` is, it is a *fixed
+function* of the pose geometry: the robot's mass and shape do not change between the up and
+down halves of one sweep, seconds apart. **So counts must be the same function of tilt in both
+directions.** Interpolating the down sweep onto the up sweep's tilt values:
+
+| foot | residual at equal tilt | within-hold sd |
+|---|---|---|
+| FL | **rms 481**, worst 891 | 1–46 |
+| FR | **rms 268**, worst 371 | 1–13 |
+| RL | **rms 405**, worst 546 | 1–16 |
+| RR | **rms 457**, worst 801 | 1–32 |
+
+**10–50× the measurement noise, on every foot.** Needs no FK, no `L3`, no CoG — which is why
+it is the test worth having.
+
+**⚠ What it does NOT localize.** Two mechanisms produce this signature and the run cannot
+separate them:
+
+1. **Slack in the toe-to-foot linkage** — §5.7.7's hypothesis.
+2. **The belly stick-slipping on the floor.** Tilt alone does not pin the pivot: if the contact
+   edge creeps, then at the same tilt `a` and `b` differ, and so does the real force. The
+   sensor would be reporting correctly.
+
+Both are "the mechanics are not repeatable". Only the first is a sensor fault, and **a per-foot
+calibration curve is unfittable under either** until it is fixed.
+
+**The experiment that separates them, and it is cheap:** ⚠ **constrain the chassis so the pivot
+cannot move** — clamp or wedge the resting edge — and re-run. Residual collapses to the sd
+column ⇒ it was the floor contact, and the toes are fine. Residual persists ⇒ the linkage.
+
+**Also measured, closing E0's open item.** With a proper control: **0 new overruns in 20 s with
+`adc.rate` off, 1 in 20 s with it at 50 Hz**; `tick_hz` 50.0 either way, `bus_errors` flat. The
+four-channel read costs **1175 µs mean, 1211 µs p95, 2081 µs worst — 5.9 % of the 20 ms tick
+budget.** benchd's own comment estimated 1–2 ms; it is 1.18. **So moving the ADC read into the
+tick permanently is affordable**, which settles §5.2's open question in favour of the 50 Hz
+assumption and therefore of **`C` = 1.0 µF at f_c 25.1 Hz**, not the 10 Hz fallback.
 
 ### ★ 5.7.8 The robot probes its own feet — `foot_cal_sweep.py`
 
