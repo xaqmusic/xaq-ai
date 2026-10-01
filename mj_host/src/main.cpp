@@ -1304,7 +1304,7 @@ bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = fals
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
-double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0;   // --seek-gaze K [RATE]: on the walk the head yaw turns toward the seek loop's target
+double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0, g_seek_gaze_max = 0.7;   // --seek-gaze K [RATE [MAX]]: on the walk the head yaw turns toward the seek loop's target
 double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
 bool g_intent_head_sense = false;   // --intent-head-sense: the head's roll and pitch at the front of the walker's sense (the graph declares load_slots 18)
 double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0, g_head_home_s = 0.0; bool g_tell_head = false;   // --head-home S: for S s after a stop begins the head's targets are HOME (slewed), then the head brain's   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
@@ -1554,7 +1554,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_tof_body >= 0.0) std::fprintf(stderr, "  tof body: the walker's left / ahead / right ToF slots by BODY azimuth from the last %.2f s of returns, carried by the odometry (the too-close slot as before)\n", g_tof_body);
     if (g_seek_gaze > 0.0) {
         if (!g_head_joints) throw std::runtime_error("--seek-gaze turns the head brain's yaw joint: it needs --head-joints");
-        std::fprintf(stderr, "  seek gaze: on the walk the head yaw turns toward the seek loop's held target (gain %.2f, +-0.7 rad, at most %.2f rad/s), home at stops\n", g_seek_gaze, g_seek_gaze_rate);
+        std::fprintf(stderr, "  seek gaze: on the walk the head yaw turns toward the seek loop's held target (gain %.2f, +-%.2f rad, at most %.2f rad/s), home at stops\n", g_seek_gaze, g_seek_gaze_max, g_seek_gaze_rate);
     }
     if (g_translate > 0.0) {
         if (!g_head_joints) throw std::runtime_error("--intent-head-translate rides on the head brain's joints: it needs --head-joints");
@@ -2434,7 +2434,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // once the walker's slots no longer turn with the head (--tof-body)?
                 static double gaze = 0.0;
                 double want = 0.0;
-                if (stop_phase == StopPhase::None && brain.last_steer() == 3) want = std::clamp(-g_seek_gaze * brain.seek_ego(), -0.7, 0.7);   // only while seek holds the reference: its bearing is this tick's
+                if (stop_phase == StopPhase::None && brain.last_steer() == 3) want = std::clamp(-g_seek_gaze * brain.seek_ego(), -g_seek_gaze_max, g_seek_gaze_max);   // only while seek holds the reference: its bearing is this tick's
                 gaze += std::clamp(want - gaze, -g_seek_gaze_rate / kBrainHz, g_seek_gaze_rate / kBrainHz);
                 head_targets[2] += gaze;
             }
@@ -3242,6 +3242,7 @@ int main(int argc, char** argv) {
         } else if (a == "--seek-gaze") {
             g_seek_gaze = std::stod(next("--seek-gaze"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_seek_gaze_rate = std::stod(next("--seek-gaze"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_seek_gaze_max = std::stod(next("--seek-gaze"));
         } else if (a == "--intent-head-translate") {
             g_translate = std::stod(next("--intent-head-translate"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_translate_rate = std::stod(next("--intent-head-translate"));

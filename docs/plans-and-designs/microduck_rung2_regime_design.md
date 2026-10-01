@@ -6105,3 +6105,41 @@ cruise; the forward reach needs a body that credits it, which this policy does n
 on multiple fronts, including object seeking, voxel cloud clarity and escapes." ★ BIRD = R113 + the bird's neck + the
 pace-gated centring (`a1v2_r113_fore_g10`, `duck_fore_s1`, `--intent-head-translate 0.6 --intent-fore-sense`); the
 still-head R113 stays as the reference. The cold start is chase phase §11.
+
+### 17.89 Looking toward where the walk is going: the body-frame ToF slots and the gaze (2026-10-01)
+
+**The next move after ★ BIRD (chase phase §11's first open lever, the operator: "start the next move").** A walking
+bird holds its head still in space and glances. With ★ BIRD the walker owns the head's fore-aft translation and the
+head brain the tilt and yaw; the obstacle to letting the head look around was §17.86's sweep 80 — the walker's
+left/ahead/right ToF slots are the sensor's columns, so a turned head turns the walker's "ahead" (walls doubled).
+
+**Built** (host, off by default; the ★ BIRD sweep reproduces byte for byte over 600 s, R83 `6b9a0b3a…`):
+`--tof-body MEM` — the three proximity slots from every Hit return of the last MEM s, carried by the odometry into the
+current body frame and binned by BODY azimuth from the sensor into the sensor's own sector widths (left 5.6–22.5°,
+ahead ±5.6°, right); with the head straight they track the column slots (r 0.95–0.97, means within 0.015).
+`--seek-gaze K [RATE [MAX]]` — on the walk the head yaw turns toward the seek loop's target while seek holds the
+reference (rate-limited at RATE rad/s, at most MAX rad, home at stops; a first build held a stale bearing for 20 s
+when seek let go — fixed before any arm). Instrument `mj_host/tools/gaze_readout.py` (the target inside the ToF's
+±22.5° by the body and by the head).
+
+**Seeds 1–6 (sweep z1):** the gaze with the body slots kept the target in view 88 % of seeking time (49 %), turned
+toward it twice as fast, closed the error within 3 s 51 % (43), walls tied (26 / 24); the same gaze on the
+head-frame slots failed as sweep 80 did (walls 45, falls 3.5, arrivals 13.5) — **the body-frame slots are what make a
+turned head possible.**
+
+**Eighteen seeds (sweeps z1–z3, pooled; the ★ BIRD control reproduces byte for byte):**
+
+| n = 18 | ★ BIRD | body slots 0.5 s | body slots + gaze | body slots 0 s | body slots 0 s + gaze |
+|---|---|---|---|---|---|
+| target in the ToF's field while seeking (head) | 48 % | 40 % | **82 %** | 48 % | **83 %** |
+| walls / min | 34 | 28 | 43 | 32 | 54 |
+| closing · error closed within 3 s | 63 % · 41 % | 57 % · 38 % | 52 % · 41 % | 57 % · 39 % | 53 % · 39 % |
+| falls a run · arrivals | 1.9 · 18.1 | 2.3 · 16.9 | 2.0 · 16.2 | 3.1 · 15.3 | 2.1 · 16.7 |
+
+The seeds 1–6 signal did not hold: the gaze looks (the target in view 82 %) and the walk does not profit (walls up,
+closing down). Two causes, each a measurement before a verdict: (1) **the walker was identified on the column slots**
+and is being run on body-frame slots — with the head straight and no memory the body slots alone cost falls (1.9 →
+3.1) and closing (63 → 57), a model mismatch, not a property of the sense; (2) **geometry**: the gaze turns a median
+0.46 rad, and past 22.5° − 5.6° = 0.29 rad the body's own ahead sector leaves the ToF's field, so the avoidance runs on
+memory. In flight: ★ BIRD's identification redone with the body slots (`duck_forebody_s1`), then on it the body slots
+alone, the gaze bounded at 0.29 rad (`--seek-gaze 1.0 1.0 0.29`) and unbounded, n = 18 (sweep z4).
