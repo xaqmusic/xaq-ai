@@ -6100,3 +6100,8 @@ walker identified a forward head as slowing this policy, so nothing asks for it;
 head BACK as the body brakes and backs — the pendulum's move for a negative acceleration. Re-use: a sharper gate
 (the threshold at 2 RMS, or the gate on the speed error's change rather than the speed's) would centre harder at a
 cruise; the forward reach needs a body that credits it, which this policy does not.
+
+**Promoted (2026-10-01, the operator's eye):** "this method is promoted. The robot's use of its neck is an overall win
+on multiple fronts, including object seeking, voxel cloud clarity and escapes." ★ BIRD = R113 + the bird's neck + the
+pace-gated centring (`a1v2_r113_fore_g10`, `duck_fore_s1`, `--intent-head-translate 0.6 --intent-fore-sense`); the
+still-head R113 stays as the reference. The cold start is chase phase §11.

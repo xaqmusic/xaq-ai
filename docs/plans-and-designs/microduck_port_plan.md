@@ -20,10 +20,10 @@
 
 ## ▶ Resume here
 
-**2026-10-01: the head (chase phase §10, design doc §17.87).** The lean's head followed speed; with the head sensed
-(grown on restore) and a level prior it leans on acceleration, and falls drop to a third — for steering and, under
-the ToF's real frame timing (`--tof-real`), for the cloud: the cloud needs a head still in space, not a level one.
-Next levers are listed at the end of §10.3.
+**2026-10-01: ★ BIRD (chase phase §11, design doc §17.87–17.88).** The walker slides the head fore-aft with the neck
+and head pitch together (the view level), the head brain keeps the tilt, and a pace-gated centring prior holds the head
+home at a steady pace — promoted on the operator's eye ("an overall win: object seeking, voxel cloud clarity and
+escapes"). Start at chase phase §11; the open levers are at its end.
 
 **State on 2026-09-30 evening: the chase phase's campaign is at a resting point. Start at
 [`microduck_chase_phase.md`](microduck_chase_phase.md) §9 (the cold start: the arms, the numbers, the instruments,

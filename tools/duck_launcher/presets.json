@@ -1374,7 +1374,7 @@
   }
  },
  {
-  "name": "★ R113 · the CONTACT prior on the CONTACT brain: the learned avoidance (the campaign's arm, 2026-09-30)",
+  "name": "R113 · the CONTACT prior on the CONTACT brain (the still head; ★ until 2026-10-01): the learned avoidance (the campaign's arm, 2026-09-30)",
   "series": 113.3,
   "hint": "Arm 3 of §17.85: the room-babbled model with the too-close share held at zero in its prior. WATCH: the duck backing or turning off a wall it is pushing on, by itself; and the last 10 cm to a block (the seek gate covers the contact share within reach).",
   "state": {
@@ -2203,8 +2203,8 @@
   }
  },
  {
-  "name": "BIRD · PLAYROOM · the bird's neck + the PACE-GATED centring at 1 (the candidate)",
-  "hint": "The centring prior on where the head sits fore-aft, gated by the pace (on while the sensed speed holds, off while it changes; sweep g2). WATCH: the head centred at a steady pace, sliding back as the duck brakes or backs (the pendulum's move for a negative acceleration); the view level; over 18 seeds closing 63 % against the still head's 50 %, falls 1.9 against 2.0, walls 34 against 29 a minute.",
+  "name": "★ BIRD · the bird's neck + the PACE-GATED centring (promoted 2026-10-01): the head slides fore-aft, the view level",
+  "hint": "PROMOTED on the operator's eye (2026-10-01): 'an overall win on multiple fronts including object seeking, voxel cloud clarity and escapes'. R113 on duck_fore_s1: the walker's fourth motor slides the head fore-aft with the neck and head pitch together (the view unchanged; --intent-head-translate 0.6 --intent-fore-sense), the head brain keeps the tilt, and a centring prior on the head's fore-aft position gated by the pace (a1v2_r113_fore_g10). n = 18: closing 63 % against the still head's 50, the error closed within 3 s 41 % against 33, falls 1.9 against 2.0, walls 34 against 29 a minute, the walk +6 %; the ToF's registration error under the real timing the still head's. WATCH: the head sliding back as the duck brakes or backs, centred at a steady pace.",
   "state": {
    "config": "a1v2_r113_fore_g10.json",
    "mode": "level2",

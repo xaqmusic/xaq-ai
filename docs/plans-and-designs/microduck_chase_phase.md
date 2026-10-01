@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §9 (the resting point, 2026-09-30), then §10 (the head: the lean that settles and the ToF's real timing, 2026-10-01).**
+Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §11 (the resting point, 2026-10-01: ★ BIRD, the bird's neck), then §10 (how it was reached) and §9 (the arms before it).**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -609,3 +609,56 @@ the bird's steering (closing 63 % against the still head's 50) at the still head
 drift cut to −0.10 rad, the walk +6 %, walls +5 a minute; the head slides back as the duck brakes and backs, and does
 not reach forward into an acceleration (the walker credits a forward head with slowing). The candidate for the eye:
 preset "BIRD · PLAYROOM · the bird's neck + the PACE-GATED centring at 1 (the candidate)".
+
+## 11. Where we are (2026-10-01, for a cold start): ★ BIRD, the bird's neck
+
+**Read first:** this section, then §10 (the head's phase in order), then design doc §17.87–17.88.
+
+**★ BIRD — promoted on the operator's eye, 2026-10-01:** "this method is promoted. The robot's use of its neck is an
+overall win on multiple fronts, including object seeking, voxel cloud clarity and escapes." Preset "★ BIRD · the
+bird's neck + the PACE-GATED centring". What it is: everything ★ R113 carried (the progress forget, the heading reflex
+with the seek gate, the mover's priority and the yield that forgets, the contact-babbled identification with the
+too-close share in the prior), on a walker with a fourth motor that slides the head fore-aft —
+- `action.head_fore` moves neck pitch and head pitch TOGETHER, which leaves the view's attitude unchanged (forward
+  kinematics: the two joints tilt the view equally and oppositely) and moves the robot's centre of mass 0.76 cm at 0.44
+  rad; host `--intent-head-translate 0.6` (rate-limited at 1 rad/s, centred at stops, the walking policy told), written
+  on top of the head brain's joints — the head brain keeps the tilt (`--head-joints`);
+- the walker senses where the head sits fore-aft (`--intent-fore-sense`, load_slots 17);
+- a centring prior on that position (state 9 → 0) gated by the pace (`MotorEPMv2.state_prior_gated_by`: on while the
+  sensed speed holds, off while it changes), config `a1v2_r113_fore_g10.json`;
+- identified by the recipe: 600 s of babble on the open playroom, 600 s in the 2 m room (`scene_babble_room2m.xml`),
+  checkpoint `duck_fore_s1.brain.json`; the host line = the campaign base + `--stop-on-stuck 8 --stuck-escape 6
+  --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense`.
+
+**Numbers (n = 18, against the still head identified by the same recipe, `duck_ctrl3_s1`).** Closing on the target 63
+% (50), the heading error closed within 3 s 41 % (33), falls 1.9 (2.0), the walk 0.183 m/s (0.173), walls 34 (29) a
+minute; the view's pitch sd 0.03 rad (the still head's); the ToF's registration error under the real frame timing
+4.8–4.9 cm (4.7; the level lean of §17.87 10.7). The head: centred at a steady pace (−0.10 rad), sliding back as the
+body brakes (−0.13) and backs (−0.22); no forward reach into an acceleration — the walker identified a forward head as
+slowing this walking policy. Before it: the six-motor lean's head followed speed (45° down at the fast walk), the level
+prior cut its falls to a third and nodded at the stride (§17.87).
+
+**Built this phase** (all off by default, guards byte-identical): `MotorEPMv2.state_prior_weights` (per-index
+precision), `MotorEPMv2.state_grow_at` (grow on restore), `MotorEPMv2.state_prior_gated_by` (the pace gate); host
+`--intent-head-sense`, `--intent-head-translate F [RATE]`, `--intent-fore-sense`, `--tof-real SPREAD LAG` (the ToF's
+real frame timing, the `tre` field); `scene_babble_room2m.xml`. Unit tests in `test_state_prior.cpp` (26).
+
+**Instruments.** `mj_host/tools/lean_readout.py` (the view's pitch or, `--channel fore`, the head's fore-aft position
+against speed and acceleration, by phase, and the settle after an acceleration), `mj_host/tools/head_modes.py` (the
+head's motion split into translation and pitch, each mode's stride-band part: what nods), `mj_host/tools/tre_readout.py`
+(the registration error under `--tof-real`, by the head's angular speed), with `walk_closing.py` and the host's summary
+lines as before.
+
+**Traps recorded this phase.** The walker's state is `[pos, act, delta]` per twist joint, then the sense from index 9
+— the six/seven-motor "tilt prior" on state 3, 4 was lateral speed; the prior's model-implied step ignores
+`state_prior_motors`; `--head-forward` moved the head back; the neck servo sags ~0.14 rad under an extended head (the
+head brain levels it out); a 150 s guard run diverges from a 600 s sweep log where the host declines a stop with less
+than the stop's length left — compare up to that tick; the walker's sense insertions go at the FRONT of the load block
+so negative prior indices keep their elements; grow-on-restore handles new senses, not new motors (a new motor set is a
+new identification).
+
+**Open levers (the next move is planned from here).** Looking around while walking (the walker's ToF slots in the
+body frame first, then a gaze sweep on the walk — the head brain now owns the tilt and yaw on the walk, the walker the
+translation); the head still in space for the cloud (the gaze's angular rate, the H line's VOR, judged on `tre`); the
+nod or the neck's reach toward a small thing at an arrival (the bird's peck is a neck extension); a sharper pace gate;
+the prior's step honouring the motor mask; the pursuit's start (§9).
