@@ -961,6 +961,61 @@ regardless of what their own `R_fsr` turns out to be. Per-foot variation is what
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
 
+### ★★★ 5.7.12 SCOPE CHECK — nothing in the brain consumes the MAGNITUDE
+
+> **Operator, 2026-10-01:** *before we get too lost in the weeds with our toes, do we already
+> have enough sensitivity for the foot-contact requirement? In sim is foot contact binary or is
+> force part of the solution?*
+
+**Read from the deployed config and `GainEvolver.cpp`, not from memory.**
+
+**`foot_contact` is binary and it is not derived from `foot_load`.** `picrawler_body.gd:7059`
+publishes `1.0 if not _lowers[i].get_colliding_bodies().is_empty() else 0.0` — a physics
+collision test. `foot_load` is the separate graded channel (`:7352`, GRF EMA / body weight,
+clamped ±2.0).
+
+**Every consumer is a threshold. None reads the magnitude.**
+
+| consumer | channel | how it is used | threshold |
+|---|---|---|---|
+| **MotorEPMv2** | `foot_contact` | ⚠ **`contact_instrument_only = 1`** — it subscribes and nothing rides it | — |
+| **GainEvolver** `unloaded`, weight **1.0** | `foot_contact` + `foot_load` | touchdown from contact; `max(foot_load)` over the next **12 ticks** tested once against `load_thresh`; the term is a **ratio of touchdown counts** | **0.05** = **29.5 g** |
+| **GainEvolver** `loaded_min` (the G2 per-leg guard) | same | per-leg minimum of that same ratio | same |
+| **StrideOdometry** stance gate | `foot_load` | binary stance test, "gated on published `foot_load`" | **~0.2** = **118 g** |
+
+`w_unloaded = 1.0` weights a **rate**, not a force:
+`unl = unloaded[leg] / touchdowns[leg]`. The magnitude never enters `J`.
+
+#### ✅ So: do we already have the sensitivity?
+
+| | |
+|---|---|
+| unloaded | **0–4 counts** — and 1–2 counts on every idle channel across all 28 segments of a sweep |
+| 29.5 g (the `load_thresh` decision) | **≈ 1300–1500 counts** |
+| 118 g (the stance gate) | ≈ 2200 counts |
+| **separation, contact vs no contact** | **300–500×** |
+
+**The binary requirement is met with enormous margin, and the magnitude requirement does not
+exist.** The counts→grams calibration curve is **not on the critical path** — it is wanted for
+instrumentation and for the sim-honesty model, not by any consumer.
+
+#### ⚠ The one thing still unmeasured, and it is not a toe respin
+
+All the repeatability data in §5.7.9–11 was taken at **150–500 g**, where the curve is flat
+(~2 counts/g). **The decisions live at 29.5 g and 118 g, where it is steep (~19 counts/g)** — so
+the same mechanical slack costs far fewer grams there, and we have never measured it there.
+
+**The measurement that matters is the reference-return spread at a LIGHT load, near the
+thresholds.** That is a pose change, not a print.
+
+Two things make the requirement more forgiving still: the criterion term is a **ratio over
+≥ 3 touchdowns** (`min_touchdowns = 3`), so a misclassified touchdown moves a rate rather than
+a reading; and touchdown *timing* was already assigned to the accelerometer, not the FSR
+(ledger 2026-08-24 ★3).
+
+**Verdict: the toe geometry question (§5.7.11) is real but it is not blocking.** Park it behind
+the light-load repeatability check, and behind getting a loop closed on hardware at all.
+
 ### ★★ 5.7.11 LOCALISED 2026-10-01c — it is the toe/FSR interface, and the proof has no model in it
 
 Every comparison up to here compared readings taken at **different** poses, which needs tilt as
