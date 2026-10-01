@@ -733,7 +733,9 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 | ~~E3~~ | ~~bare-sensor bench estimate~~ | — | **skipped — overtaken by E4**, which the operator ran directly on the real assembly (§5.6). Better measurement, so the decade step was never needed |
 | **E6** | **The robot probes its own feet** — `foot_cal_sweep.py`, poses `<foot>_down`, knee stepped up and back down | the poses, benchd | a closing hysteresis loop on every foot, and four comparable curves. ⚠ **counts, not grams** (§5.7.8), and it does not reach below ~175 g |
 | **E4** ✅ | `R_g` = `R_fsr`(175 g) **in the assembled foot** | a finished foot, masses, scale, DMM | ✅ **DONE 2026-09-28 (§5.6): 11 kΩ → `C` = 1.5 µF.** One foot. ⚠ **Repeat on the other three** — `R_g` is one value for all four channels, so it comes from their median (§5.5) |
-| **E5** | Wire one foot, confirm counts rise monotonically with the mass series, then the other three | — | §6 step 5 |
+| **E5** ✅ | Wire one foot, then the rest | — | ✅ **ALL FOUR LIVE** (§5.7.14): every channel reads, and only the loaded foot reads — 1–2 counts on the idle three across every segment of every sweep |
+| **E6** ✅ | The robot probes its own feet — `foot_cal_sweep.py` | the poses | ✅ run; it answered the linkage question rather than the calibration one (§5.7.9–11) |
+| **E7** ✅ | **The touchdown decision, run many times** — `foot_tap_test.py` | the poses | ✅ **PASS, four feet, 128 taps, 1 miss** (§5.7.13–14). This is the step that actually gates using the sensors |
 
 **Reading the records:** `pi_host/tools/adc_fast_report.py` (newest log by default, `--fft`
 for spectral peaks, `--csv` to dump samples). Label the arms as you go — the physical ones
@@ -890,6 +892,35 @@ the size the area argument implied. FSR conductance does not simply follow conta
 spreading the load lowers the pressure, and the two effects substantially cancel. The practical
 consequence is the reassuring one — **actuator geometry moves the operating resistance far less
 than it moves the linearity**, so `R_g` is not fragile to a bump respin.
+
+### ✅ 5.7 THE FOOT CHANNEL — outcome first, then the evidence
+
+> **The FSR channel as built is good enough to drive the brain.** Four feet, 128 taps, one
+> miss. The brain's consumers are all thresholds — a ghost touch reads 0–5 counts against a
+> 1536-count line, a 148 g stance reads 2290 — and the channel is at its most repeatable
+> exactly where the decision lives: **20 σ to 90 σ of margin**, with relative spread falling
+> from 10–22 % at a few grams to 0.4–2 % above 40 g.
+>
+> **Still open, and none of it blocking:** the toe/FSR interface is irreproducible by hundreds
+> of counts at high load (§5.7.11); `rear_left_down` and `front_left_down` barely load their
+> feet; FSR creep has never been measured; and the counts→grams curve is instrumentation, not
+> a consumer requirement.
+
+⚠ **§5.7.1–14 below are in REVERSE chronological order, newest first.** Read by question:
+
+| question | answer | where |
+|---|---|---|
+| What is the circuit, and what are the parts? | 15 kΩ / 1 µF, f_c 25.1 Hz | **§5.7** (below), §5 |
+| How do I verify a channel I just built? | V1–V6, and the three readings that name their own pins | **§5.7.1**, **§5.7.4** |
+| Why does an unconnected ADC pin read ~3500? | the HAT's mux carries charge between channels | §5.7.2 |
+| A0 reads 0 and ignores a press — why? | the cap was in series, and this document caused it | §5.7.3, **§5.7.5** |
+| Does the finished channel work? | 0–4 counts unloaded, 3300 on a firm press | §5.7.6 |
+| Why run the mass series on every foot? | it is a **linkage test** — 6.6× spread across four feet | **★§5.7.7** |
+| Can the robot measure its own feet? | yes — `foot_cal_sweep.py` | ★§5.7.8 |
+| Is the irreproducibility the floor slipping? | no — a rubber mat did not help | ★§5.7.9, ★§5.7.10 |
+| Where is it, then? | the toe/FSR interface, proven with no model in it | **★★§5.7.11** |
+| Does the brain need force magnitude? | **no** — every consumer is a threshold | **★★★§5.7.12** |
+| Does it hold at the thresholds? | yes, on all four feet | **★★★§5.7.13**, **★★★§5.7.14** |
 
 ### 5.7 ⚠ AS BUILT: `R_g` = 15 kΩ, `C` = 1.0 µF — and why that is fine
 
@@ -1758,8 +1789,12 @@ reduces — and only after the authority check.
    but the brownout margin argues against it either way.
 4. ~~**Whether the chosen ICM-20948 breakout exposes SPI**~~ — ✅ **RESOLVED 2026-08-30**: the
    received board exposes `NCS` and `ADO`, so SPI is available. Pin map in §4.
-5. **FSR creep** — hold 175 g for 60 s and record the drift **before** the graded `unloaded`
-   criterion term is trusted. If it is large, that term wants the threshold, not the magnitude.
+5. **FSR creep** — hold 175 g for 60 s and record the drift. ⚠ **DOWNGRADED 2026-10-01:** this
+   was written when the `unloaded` term was thought to read a magnitude. §5.7.12 established it
+   does not — it tests `max(foot_load)` once against a threshold and scores a *ratio of
+   touchdown counts* — so creep has to move a reading across 1536 counts to matter at all.
+   Still worth measuring as instrumentation; no longer gates anything. Measure it on the
+   **assembled** foot (§2).
    ⚠ Measure it on the **assembled** foot: the wire preload and the unbacked socket floor are
    both in the path ([`picrawler_foot_fsr_mod.md`](picrawler_foot_fsr_mod.md) §2).
 6. **Ultrasonic mounting height and pitch** — the role is settled (forward, obstacle avoidance),

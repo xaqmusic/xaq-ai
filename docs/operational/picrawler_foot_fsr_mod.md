@@ -7,9 +7,16 @@
 > [`picrawler_sensor_wiring_and_bom.md`](picrawler_sensor_wiring_and_bom.md) §5.
 > **This file is the mechanical half, and it supersedes that spec's "Mounting" section.**
 
-**Status, 2026-09-28: the flat-bump toe is printed, the foot is glued to a leg, and the
-divider is sized from it** — `R_g` = 11 kΩ, `C` = 1.5 µF (wiring doc §5.6). §3.2's argument
-for flattening the bump is now backed by a measured curve as well: see §3.4. Everything below the
+**Status, 2026-10-01: all four feet are built, wired and measured, and the channel is good
+enough to drive the brain** — four feet, 128 taps, one miss, 20–90 σ of margin at the decision
+(wiring doc **§5.7**). Parts as built are `R_g` = 15 kΩ and `C` = 1.0 µF.
+
+⚠ **The toe geometry question below is still open and is NOT blocking.** §5.7.11 localised a
+real irreproducibility to the toe/FSR interface — hundreds of counts at high load — and
+§5.7.12 then established that nothing in the brain consumes the magnitude: every consumer is a
+threshold, and the channel is most repeatable exactly where those sit. **Fix the toe when it
+costs something.** Until then §3.2–3.4 are the standing argument, and the operator's
+counter-argument for the spherical bump (§3.4) is unsettled rather than refuted. Everything below the
 "Derived geometry" heading is measured off the CAD; everything under "Open at the bench" is not.
 
 ## Source files
@@ -270,6 +277,10 @@ shoulder-to-rim gap in §1.3 becomes 1.05 mm; nothing else in the stack moves.
 
 ### 3.4 ✅ Measured 2026-09-28 — the flat bump, on the real leg
 
+> ⚠ **Read with §3.5.** The flat face won the static curve. It has never been compared to the
+> spherical bump on the measurement that matters — the toe/FSR interface's repeatability under
+> shear — and the operator's reason for choosing the bump speaks directly to that.
+
 The flat Ø5 face was printed and the foot glued to a real leg; the load curve was taken by
 pressing it onto a scale (wiring doc §5.6). Against the spherical bump on the same masses:
 
@@ -291,6 +302,23 @@ implied: spreading the load also lowers the pressure, and the two effects largel
 useful consequence is that **actuator geometry moves the operating resistance far less than it
 moves the linearity** — so `R_g` is not fragile to a future bump respin, and §3.3's diameter
 question can be reopened without re-sizing the divider.
+
+### 3.5 ⚠ The bump-vs-flat question is unsettled, and the A/B is defined
+
+**The operator chose the spherical bump partly for shear**: a small, nearly-rolling contact
+drags less film than a flat face pressed over Ø5. §3.2's argument runs the other way and is
+about where the load *lands* — 0.25 mm of toe float is most of a 0.3 mm contact patch but only
+5 % of a Ø5 face. **Both are sound and they point in opposite directions, so argument cannot
+settle it.**
+
+**The measurement that can, and it needs no calibration or geometry:** `foot_tap_test.py`'s
+reference-return spread, or `foot_cal_sweep.py`'s. Fit one spherical-bump toe, re-run the
+returns on that foot, compare. One lever, assumption-free metric, ~4 minutes.
+
+⚠ **Not urgent.** §5.7.12 showed the brain reads thresholds, not magnitudes, and §5.7.14
+measured 20–90 σ of margin at those thresholds with the flat face fitted. A third geometry —
+a **large-radius crown** (R 25–40, nearly flat but able to roll a little) — is the one neither
+argument condemns, and it is the same print change.
 
 **The reprint is cheap and the question is measurable.** Print one toe of each, and run the
 creep test that is already open (wiring doc §8 item 5, §7 item 7 here): 175 g held for 60 s,
