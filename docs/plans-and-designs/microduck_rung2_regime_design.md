@@ -6297,3 +6297,8 @@ the integrator pushes on. And at range ±3 the identification found the yaw's au
 WRONG sign (A −0.12; the range-1 identification +0.03): full-scale yaw pulses spin the body further than the heading
 sense (a deviation from a 60 s mean, clamped at ±π) can follow. **The turning radius is the walker's yaw loop — a
 deadband its linear model cannot see, a tonic that winds in it, a feedback half that grows — not the body.**
+
+**★ GAZE promoted (2026-10-01, the operator's eye):** "the learned gaze is actually working well; it is an interesting
+behaviour, and we should continue with it." ★ GAZE = ★ BIRD's body-slot walker (`duck_forebody_s1`, `--tof-body 0.5`)
++ the learned gaze (`--head-graph head3o_h2_gaze_w10 --load-head head3o_gaze_h1_s2_nohold --head-gaze-sense`), §17.90's
+form (no stop slew). Preset "★ GAZE · the LEARNED gaze". The turning work of §17.91 builds on it.

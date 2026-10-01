@@ -479,8 +479,8 @@
   }
  },
  {
-  "name": "GAZE · LEARNED: the head brain turns to look where the walk is going (a prior on its gaze error, n = 18)",
-  "hint": "The head brain (three motors, yaw last, re-identified standing at the joints with the gaze error fed) with a prior driving the gaze error -- the seek target's bearing while seek steers, straight ahead otherwise, minus the head's yaw -- to zero as a pure reach; the level priors masked to pitch and roll. n = 18: the target in view 90 % (its control 45 %), the yaw smooth (p90 0.61 rad/s), the head home when not seeking -- and walls 33 against 24, falls 2.6 against 1.8, closing a tie. WATCH: the head turning on its own toward the target and back.",
+  "name": "★ GAZE · the LEARNED gaze (promoted 2026-10-01): the head brain looks where the walk is going, on ★ BIRD's body-slot walker",
+  "hint": "PROMOTED on the operator's eye (2026-10-01): 'the learned gaze is actually working well -- an interesting behaviour'. The head brain (three motors, yaw last, identified standing at the joints with the gaze error fed) drives its gaze error -- the seek target's bearing while seek steers, straight ahead otherwise, minus the head's yaw -- to zero as a pure reach; the level priors masked to pitch and roll; the walker ★ BIRD's, identified with the body-frame ToF slots (duck_forebody_s1, --tof-body 0.5). n = 18: the target in view 90 % (45 % with the head still), the yaw smooth. WATCH: the head turning on its own toward what the duck walks to, and home again.",
   "state": {
    "config": "a1v2_r113_fore_g10.json",
    "mode": "level2",

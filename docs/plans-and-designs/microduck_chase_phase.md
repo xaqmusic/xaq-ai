@@ -681,3 +681,7 @@ better walker. Preset "GAZE · LEARNED …".
 and lifts arrivals; the proportional term at 0.03 brings walls to the control's level, at 0.1 the yaw thrashes again;
 the two together keep neither gain. The learned gaze stays `PARTIAL`; the reflex stays the better walker. Next form to
 try: the model's own one-step correction (`state_prior_step_gain`) as the proportional term.
+
+**★ GAZE promoted (2026-10-01):** the learned gaze on ★ BIRD's body-slot walker, on the operator's eye ("working well, an
+interesting behaviour"). Preset "★ GAZE · the LEARNED gaze". The next push is the turning radius (design doc §17.91): the
+walking policy's in-place yaw deadband, a walker yaw loop that limit-cycles, and a heading tonic that winds.
