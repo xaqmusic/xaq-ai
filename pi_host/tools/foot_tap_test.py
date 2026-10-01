@@ -28,8 +28,16 @@ record -- 12 ticks is 12 samples at that rate, which is the criterion's own hori
 spread of those peaks across repeats, at a fixed command, IS the answer: no calibration, no
 geometry, no force model.
 
-⚠ THE ROBOT MOVES, and it drives a leg toward the floor.  The contact search is bounded
-(--max-travel, default 150 us) and stops the moment the foot registers.  ⚠ The keepalive is
+⚠ IT SEARCHES DOWNWARD FROM A LOADED POSE, NOT UPWARD FROM AN UNLOADED ONE, and that is a
+correction.  The first version started at `toes_up` and drove hip2 until the toe registered.
+It never did: `toes_up` parks FL's hip2 at 500 us -- ITS END STOP -- so the direction that
+would lower the toe had zero room, and 700 us the other way (74 degrees) never reached the
+ground.  Starting instead from `<foot>_down`, where the toe is known loaded, and searching
+for the RELEASE point brackets the light-load region by construction: load passes through
+0.05 and 0.2 on the way out.  The unload direction is detected rather than assumed.
+
+⚠ THE ROBOT MOVES.  Travel is bounded by --max-travel AND by the channel's own envelope,
+and the search stops the moment the foot releases.  ⚠ The keepalive is
 not optional -- see foot_cal_sweep.py's header for what benchd's deadman costs.
 """
 import argparse, json, os, statistics as st, subprocess, sys, threading, time
@@ -78,6 +86,16 @@ def hip2_channel(mapping, physical):
     raise RuntimeError(f"no hip2 channel mapped for {physical} -- run cal.map first")
 
 
+def knee_state(stt, ch):
+    """⚠ Only hip2 is ever commanded here, so a knee that MOVES is being back-driven by the
+    load, not driven by us.  Printing target vs current is what tells those apart."""
+    if ch is None: return "—"
+    sv = next((x for x in stt.get("servos", []) if x.get("ch") == ch), None)
+    if not sv: return "—"
+    t, c = sv.get("target_us"), sv.get("current_us")
+    return f"{c}us" + ("" if t == c else f" (cmd {t}, Δ{c - t:+d})")
+
+
 def read_adc(ch):
     return rpc("status")["adc"][ch]
 
@@ -93,16 +111,21 @@ def tilt_of(stt):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--foot", default="FL")
-    ap.add_argument("--base", default="toes_up", help="pose the leg returns to between taps")
-    ap.add_argument("--dir", type=int, default=1, choices=(1, -1),
-                    help="sign of the hip2 step that moves the toe DOWN, in the leg's own "
-                         "convention. If the search finds nothing, try the other one")
-    ap.add_argument("--probe-step", type=int, default=5, help="us per contact-search step")
-    ap.add_argument("--max-travel", type=int, default=150, help="us; the search gives up here")
-    ap.add_argument("--contact-counts", type=int, default=40,
-                    help="ADC counts that count as 'the toe is touching' during the search")
-    ap.add_argument("--over", default="0,5,10,20,40",
-                    help="us past first contact to tap at")
+    ap.add_argument("--base", default=None,
+                    help="loaded pose to search down from; default <foot>_down")
+    ap.add_argument("--dir", type=int, default=0, choices=(0, 1, -1),
+                    help="hip2 step direction that UNLOADS the toe. 0 = detect it")
+    ap.add_argument("--probe-step", type=int, default=10, help="us per release-search step")
+    ap.add_argument("--max-travel", type=int, default=400,
+                    help="us; the search gives up here. ⚠ Also bounded by the channel's own "
+                         "envelope, which is the real limit: in `toes_up` a hip2 can already "
+                         "sit AT its end stop, leaving travel in one direction only")
+    ap.add_argument("--contact-counts", type=int, default=60,
+                    help="ADC counts that count as the toe TOUCHING on the way back down")
+    ap.add_argument("--release-counts", type=int, default=30,
+                    help="ADC counts below which the toe counts as RELEASED")
+    ap.add_argument("--over", default="5,10,20,40",
+                    help="us back from the release point, toward load, to tap at")
     ap.add_argument("--taps", type=int, default=8, help="repeats per level")
     ap.add_argument("--hold", type=float, default=0.5, help="s held down per tap")
     a = ap.parse_args()
@@ -114,64 +137,139 @@ def main():
 
     stt = rpc("status"); mapping = stt.get("map", {})
     poses = rpc("pose.list")["poses"]
-    if a.base not in poses:
-        sys.exit(f"pose {a.base!r} not found; have: {', '.join(sorted(poses))}")
+    base_name = a.base or {"FL": "front_left_down", "FR": "front_right_down",
+                           "RL": "rear_left_down", "RR": "rear_right_down"}[foot]
+    if base_name not in poses:
+        sys.exit(f"pose {base_name!r} not found; have: {', '.join(sorted(poses))}")
     ch, sign = hip2_channel(mapping, foot)
-    base = rpc("pose.get", name=a.base)["us"]
-    print(f"{foot}: hip2 ch{ch} (map sign {sign:+d}) · ADC A{adc_ch} · base pose {a.base}")
+    knee_ch = next((sv.get("ch") for sv in mapping.get("servos", [])
+                    if sv.get("physical") == foot and sv.get("joint") == "knee"), None)
+    base = rpc("pose.get", name=base_name)["us"]
+    sv = next((x for x in stt.get("servos", []) if x.get("ch") == ch), {})
+    lo, hi = sv.get("min_us", 500), sv.get("max_us", 2500)
+    print(f"{foot}: hip2 ch{ch} (map sign {sign:+d}) · ADC A{adc_ch} · loaded pose {base_name}")
     print(f"tick_hz {stt.get('tick_hz')} · vbat {stt.get('vbat'):.2f}")
+    print(f"ch{ch} parks at {base[ch]} us, envelope {lo}-{hi}")
 
     threading.Thread(target=keepalive, daemon=True).start()
     rpc("adc.rate", ms=20)
     taps = []
     try:
-        def goto(off, eta_wait=True):
-            us = list(base); us[ch] = base[ch] + sign * a.dir * off
+        def goto(off):
+            us = list(base)
+            want = base[ch] + off
+            us[ch] = max(lo, min(hi, want))
+            if us[ch] != want:
+                print(f"    ⚠ clamped {want} -> {us[ch]} by the envelope")
             r = rpc("pose.set", us=us)
-            if eta_wait: settle(r.get("eta_ms", 0))
-            return r
+            settle(r.get("eta_ms", 0))
+            return us[ch]
 
-        goto(0); time.sleep(0.6)
-        rest = read_adc(adc_ch)
-        print(f"\nat rest on {a.base}: A{adc_ch} = {rest} counts")
+        goto(0); time.sleep(0.8)
+        loaded = read_adc(adc_ch)
+        print(f"\nloaded, on {base_name}: A{adc_ch} = {loaded} counts")
+        if loaded < a.release_counts * 3:
+            sys.exit(f"⚠ the foot is not meaningfully loaded in {base_name} "
+                     f"({loaded} counts). Re-pose it before measuring repeatability.")
 
-        # ---- bounded contact search ------------------------------------------
-        print(f"contact search: {a.probe_step} us steps, stop at {a.contact_counts} counts, "
-              f"give up at {a.max_travel} us")
-        contact = None
-        off = 0
-        while off < a.max_travel:
+        # ---- which way unloads?  Detect it; do not assume ----------------------
+        # ⚠ DETECT THE UNLOADING DIRECTION FROM TILT, NOT FROM COUNTS.  The first version
+        # compared ADC counts over a +-20 us probe and picked the direction whose reading was
+        # 46 counts lower -- on a channel §5.7.11 measured as irreproducible by 265-805
+        # counts.  It chose the direction that LOADS the foot and drove 42 degrees the wrong
+        # way.  Body tilt has sd 0.03 degrees and moves by whole degrees over the same probe:
+        # unloading lowers the propped corner, so the lower tilt is the way out.
+        probe = a.probe_step * 8
+        dirs = [a.dir] if a.dir else [+1, -1]
+        if not a.dir:
+            print(f"probing +-{probe} us; the direction that LOWERS TILT is the one that unloads:")
+            trial = {}
+            for dd in (+1, -1):
+                if not (lo <= base[ch] + dd * probe <= hi):
+                    print(f"   {dd:+d}: no envelope room"); continue
+                goto(dd * probe); time.sleep(0.5)
+                stp = rpc("status")
+                trial[dd] = tilt_of(stp)
+                print(f"   {dd * probe:>+5} us -> tilt {trial[dd]:6.2f}°   "
+                      f"(A{adc_ch} {stp['adc'][adc_ch]:>5} counts)")
+                goto(0); time.sleep(0.4)
+            trial = {k: v for k, v in trial.items() if v == v}
+            if not trial:
+                sys.exit("⚠ no usable tilt reading either way — is the IMU up?")
+            dirs = [min(trial, key=trial.get)]
+            print(f"   -> unloading direction is {dirs[0]:+d} "
+                  f"(tilt {trial[dirs[0]]:.2f}° against {max(trial.values()):.2f}°)")
+        d = dirs[0]
+        room = (hi - base[ch]) if d > 0 else (base[ch] - lo)
+        cap = min(a.max_travel, room)
+
+        # ---- A: lift until the belly is flat ----------------------------------
+        # Operator's protocol: go to <foot>_down, lift hip2 until the belly is flat, then
+        # come back down until the toe touches.  Approaching contact from UNLOADED is the
+        # direction a real touchdown happens in, and it gives an unambiguous first-contact
+        # edge instead of hunting for a release in a signal that is already loaded.
+        print(f"\nA: hip2 {d:+d} until the belly is flat  (step {a.probe_step} us, cap {cap} us)")
+        flat = None
+        off, prev_tilt = 0, None
+        while off + a.probe_step <= cap:
             off += a.probe_step
-            goto(off); time.sleep(0.25)
-            v = read_adc(adc_ch)
-            print(f"   {off:>4} us -> {v:>5} counts")
-            if v >= a.contact_counts:
-                contact = off; break
-        if contact is None:
+            goto(d * off); time.sleep(0.3)
+            stp = rpc("status")
+            v, tl = stp["adc"][adc_ch], tilt_of(stp)
+            kn = knee_state(stp, knee_ch)
+            print(f"   {d * off:>+5} us -> {v:>5} counts   tilt {tl:6.2f}°   knee {kn}")
+            settled = prev_tilt is not None and abs(prev_tilt - tl) < 0.05
+            if v < a.release_counts and settled:
+                flat = off; break
+            prev_tilt = tl
+        if flat is None:
             goto(0)
-            sys.exit(f"\n⚠ no contact within {a.max_travel} us. The toe never reached the "
-                     f"ground, or --dir {a.dir} drives it the wrong way. Try --dir {-a.dir}.")
-        print(f"\nfirst contact at {contact:+d} us past {a.base}")
-        goto(0); time.sleep(0.5)
+            sys.exit(f"\n⚠ the belly never went flat within {cap} us "
+                     f"(need counts < {a.release_counts} and tilt settling). "
+                     f"Raise --max-travel.")
+        print(f"   belly flat at {d * flat:+d} us")
 
-        # ---- the taps ---------------------------------------------------------
+        # ---- B: back down until the toe touches --------------------------------
+        fine = max(2, a.probe_step // 4)
+        print(f"\nB: back down in {fine} us steps until the toe contacts "
+              f"({a.contact_counts}+ counts)")
+        release = None
+        o = flat
+        while o - fine >= 0:
+            o -= fine
+            goto(d * o); time.sleep(0.3)
+            stp = rpc("status")
+            v, tl = stp["adc"][adc_ch], tilt_of(stp)
+            print(f"   {d * o:>+5} us -> {v:>5} counts   tilt {tl:6.2f}°   "
+                  f"knee {knee_state(stp, knee_ch)}")
+            if v >= a.contact_counts:
+                release = o; break
+        if release is None:
+            goto(0)
+            sys.exit("\n⚠ came all the way back to the loaded pose without a clean contact "
+                     "edge — the toe was never fully released.")
+        print(f"\nfirst contact at {d * release:+d} us; "
+              f"resting at {d * flat:+d} us between taps")
+
+        rest_off = d * flat                           # belly flat: the toe is clear
+
+        # ---- the taps ----------------------------------------------------------
         for over in overs:
-            print(f"\n--- {a.taps} taps at contact{over:+d} us")
+            tap_off = d * (release - over)            # back toward load by `over`
+            print(f"\n--- {a.taps} taps at release-{over} us  (ch4 offset {tap_off:+d})")
             for i in range(a.taps):
+                goto(rest_off); time.sleep(0.35)
                 rpc("mark", text=f"tap {foot} over{over:+d} n{i}")
-                goto(contact + over)
+                goto(tap_off)
                 time.sleep(a.hold)
-                stt2 = rpc("status")
-                taps.append({"over": over, "n": i, "tilt": tilt_of(stt2)})
+                taps.append({"over": over, "n": i, "tilt": tilt_of(rpc("status"))})
                 rpc("mark", text=f"tap {foot} over{over:+d} n{i} RELEASE")
-                goto(0)
-                time.sleep(0.35)
-            print(f"    done")
+            print("    done")
     finally:
         rpc("adc.rate", ms=0, _allow_err=True)
         try:
             r = rpc("pose.set", us=base); settle(r.get("eta_ms", 0))
-            print(f"\nparked on {a.base}.")
+            print(f"\nparked on {base_name}.")
         except Exception as e:
             print(f"⚠ could not park: {e}")
         _stop.set()

@@ -961,6 +961,75 @@ regardless of what their own `R_fsr` turns out to be. Per-foot variation is what
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
 
+### ★★★ 5.7.13 MEASURED AT THE THRESHOLD 2026-10-01 — the requirement is met
+
+§5.7.12's open item was repeatability **at the light loads the decisions actually live at**.
+Measured, with the operator's protocol: from `<foot>_down`, lift hip2 until the belly is flat,
+then come back down until the toe touches, and tap repeatedly from there.
+
+**Why that protocol and not the first two attempts.** `toes_up` parks FL's hip2 at **500 µs —
+its end stop** — so the direction that would lower the toe had no room, and 700 µs the other
+way (74°) never reached the ground. Searching for *release* from the loaded pose then failed
+too, because the direction was picked from a 46-count difference on a channel §5.7.11 measured
+as irreproducible by 265–805 counts: it chose the way that **loads** the foot and drove 42° the
+wrong way. **Direction is now taken from body tilt** (sd 0.03° against degrees of travel).
+
+**FL, 8 taps per level**, peaks over 12 ticks from the daemon's 50 Hz record, converted through
+FL's own DMM curve:
+
+| over | mean counts | → g | spread, counts | → g |
+|---|---|---|---|---|
+| release−5 µs | 480 | **4.1** | 304–548 | 2.1 – 5.0 |
+| release−10 µs | 863 | **10.3** | 552–1040 | 5.0 – 14.2 |
+| release−20 µs | 1017 | **13.6** | 798–1239 | 9.0 – 19.5 |
+| release−40 µs | 1560 | **31.0** | 874–2243 | 10.5 – 132.9 |
+
+**The taps span 2–130 g — the region that had never been measured — and the irreproducibility
+there is large in relative terms**, a factor of 2 at the lightest level and 12 at the heaviest.
+
+#### ✅ And it does not matter, because the decision is not made there
+
+**`load_thresh` exists to catch GHOST TOUCHES** — GainEvolver's own words, *"femur-lifted
+landings that earn no load"*. It separates a real stance from a landing that carries nothing,
+and **those two populations are nowhere near each other**:
+
+| | counts | |
+|---|---|---|
+| ghost touch, no load | **0–5** | measured: idle channels read 1–2 across every segment of every sweep |
+| **`load_thresh` 0.05 = 29.5 g** | **1536** | the decision line |
+| stance gate 0.2 = 118 g | 2191 | margin **+655** |
+| four feet down, 148 g | 2290 | margin **+754** |
+| three feet down, 197 g | 2416 | margin **+881** |
+
+Against the irreproducibility measured **at stance-level load** (§5.7.11's reference returns,
+sd 74–214 counts):
+
+| foot | sd | margin / sd |
+|---|---|---|
+| FL | 159 | **4.7 σ** |
+| FR | 214 | **3.5 σ** |
+| RR | 74 | **10.2 σ** |
+
+**A real stance cannot be misread as a ghost touch, and a ghost touch reads 0–5 counts against
+a 1536-count line.** The threshold sits in a wide empty gap, which is what it was designed to
+do. ⚠ A touchdown landing genuinely *at* 29.5 g is ambiguous — the release−40 level straddles
+it — but that is true of any threshold, and the criterion scores a **ratio over ≥ 3
+touchdowns**, not a single reading.
+
+**Verdict: the FSR channel as built is good enough to drive the brain.** The toe geometry
+question (§5.7.11) and the counts→grams curve are instrumentation work, not blockers.
+
+#### Two smaller results from the same run
+
+**The knee does not move.** `knee 1260 µs` constant through every step of both phases, target
+equal to current. Only hip2 is ever commanded; what is visible is the knee *joint* translating
+through space as hip2 swings the whole leg. Geometric, not a servo, and not back-drive.
+
+**Contact resolution is 2 µs.** Phase B went from **2 counts to 192 counts in one 2 µs step**,
+so the series compliance is stiff enough that first contact is found to within ~0.2° of hip2 —
+the concern that a single µs might span the whole light-load range was real but not fatal: 5 to
+40 µs of overtravel spans 4 to 31 g, which is usable resolution.
+
 ### ★★★ 5.7.12 SCOPE CHECK — nothing in the brain consumes the MAGNITUDE
 
 > **Operator, 2026-10-01:** *before we get too lost in the weeds with our toes, do we already
