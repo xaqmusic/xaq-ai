@@ -1574,6 +1574,7 @@ private:
     //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
     //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
     std::vector<double> state_prior_indices_;
+    std::vector<double> state_prior_c_weights_; // parallel: the weight on each prior index's C (feedback) descent only (empty = 1)
     std::vector<double> state_prior_gated_by_; // parallel: the state element whose steadiness gates each prior index (empty / >= 9999 = ungated)
     float gate_mean_ = 1.0f;                   // diag: the mean pace gate over the gated indices, last tick
     std::vector<double> state_prior_weights_;  // parallel: each prior index's precision (empty = 1)

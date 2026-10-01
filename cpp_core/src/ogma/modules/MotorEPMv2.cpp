@@ -174,6 +174,14 @@ ParamSchema MotorEPMv2::params_schema() const {
          "made in (the six-motor walker's head: the speed prior leans it, a level prior brings it home). Empty = all 1 "
          "(byte-identical).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_c_weights", ParamMutability::HotMutable,
+         "THE FEEDBACK HALF'S PER-INDEX WEIGHT (2026-10-01, the learned gaze): parallel to state_prior_indices, a weight on "
+         "the index's C (feedback) descent only; its h (tonic) descent is untouched. The roles this module documents: C "
+         "balances, h reaches a target away from the current state. A reach with a large, step-like error (the head's "
+         "gaze: where the walk is going minus where the head points) grew a feedback gain above one on its own error "
+         "through a lagging servo (+2.41 in 300 s: the yaw thrashed at 2.7 rad/s and the duck fell); 0 here makes that "
+         "index a pure reach. Empty = 1 everywhere (byte-identical).",
+         std::nullopt, std::nullopt, std::nullopt},
         {"state_prior_gated_by", ParamMutability::HotMutable,
          "THE PACE GATE (2026-10-01, the bird's neck): parallel to state_prior_indices, the state element whose STEADINESS "
          "gates that index's precision (>= 9999 = ungated). The element's change at the stride's timescale -- its 0.5 s "
@@ -1164,7 +1172,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["lookahead_mode"] = lookahead_mode_;
     m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
     m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
-    m["state_prior_gated_by"] = state_prior_gated_by_;
+    m["state_prior_gated_by"] = state_prior_gated_by_; m["state_prior_c_weights"] = state_prior_c_weights_;
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1358,6 +1366,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_motors", [&](auto const& v){ state_prior_motors_ = get_double_vec(v, "state_prior_motors"); });
     apply_param(params, "state_prior_weights", [&](auto const& v){ state_prior_weights_ = get_double_vec(v, "state_prior_weights"); });
     apply_param(params, "state_prior_gated_by", [&](auto const& v){ state_prior_gated_by_ = get_double_vec(v, "state_prior_gated_by"); });
+    apply_param(params, "state_prior_c_weights", [&](auto const& v){ state_prior_c_weights_ = get_double_vec(v, "state_prior_c_weights"); });
     apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
@@ -2772,6 +2781,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_motors") state_prior_motors_ = get_double_vec(value, "state_prior_motors");
     else if (key == "state_prior_weights") state_prior_weights_ = get_double_vec(value, "state_prior_weights");
     else if (key == "state_prior_gated_by") state_prior_gated_by_ = get_double_vec(value, "state_prior_gated_by");
+    else if (key == "state_prior_c_weights") state_prior_c_weights_ = get_double_vec(value, "state_prior_c_weights");
     else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
@@ -4615,7 +4625,12 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             for (int j = 0; j < m; ++j) {
                                 if (j >= motor_limit) continue;   // the prior's motor mask: this index does not descend through motor j
                                 const float g = lw_k * e * L.A(idx, j) * Gt[j] / anorm;
-                                Cdst.row(j).noalias() += g * L.prev_x.transpose();
+                                if (k < state_prior_c_weights_.size()) {   // the feedback half's own weight (the h half below uses g unscaled)
+                                    const float cw = float(state_prior_c_weights_[k]);
+                                    if (cw != 0.0f) Cdst.row(j).noalias() += (cw * g) * L.prev_x.transpose();
+                                } else {
+                                    Cdst.row(j).noalias() += g * L.prev_x.transpose();
+                                }
                                 // h with CONDITIONAL ANTI-WINDUP.  The roles dissociate
                                 // cleanly (measured, this lever's plant): C is what
                                 // BALANCES (feedback; C-only passed the unstable-plant

@@ -1145,3 +1145,38 @@ TEST(StatePrior, PaceGateUngatedIdenticalChangingElementGates) {
     EXPECT_LT(diag["state_prior_gate"].get<double>(), 1.0);
     EXPECT_GE(diag["state_prior_gate"].get<double>(), 0.0);
 }
+
+// =============================================================================
+// 13. state_prior_c_weights (2026-10-01, the learned gaze): weight 1 is byte-identical to none; weight 0 leaves the
+//     controller's feedback matrix where it started (a pure reach through h) while h still moves.
+// =============================================================================
+TEST(StatePrior, CWeightZeroMakesAPureReach) {
+    auto pe = base_params();
+    pe["state_prior_indices"] = std::vector<double>{-1.0};
+    pe["state_prior_targets"] = std::vector<double>{0.4};
+    pe["state_prior_gain"]    = 1.0;
+    pe["ctrl_lr"] = 0.0; pe["sat_lr"] = 0.0; pe["bias_lr"] = 0.0;   // the prior is C's only writer
+    auto p1 = pe; p1["state_prior_c_weights"] = std::vector<double>{1.0};
+    auto p0 = pe; p0["state_prior_c_weights"] = std::vector<double>{0.0};
+    Fixture E(pe), W1(p1), W0(p0);
+    double d1 = 0.0;
+    nlohmann::json c0_start;
+    for (uint64_t t = 0; t < 300; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); W1.run_tick(t, lean); W0.run_tick(t, lean);
+        if (t == 12) c0_start = W0.m.snapshot_state()["legs"][0]["C"];
+        for (int j = 0; j < kMotors; ++j) d1 = std::max(d1, double(std::fabs(E.accel(j) - W1.accel(j))));
+    }
+    EXPECT_EQ(d1, 0.0) << "c weight 1 must be byte-identical to none";
+    // with the prior C's only writer, weight 0 leaves C exactly where it was after the babble; weight 1 moves it
+    const auto cE = E.m.snapshot_state()["legs"][0]["C"].get<std::vector<float>>();
+    const auto c0 = W0.m.snapshot_state()["legs"][0]["C"].get<std::vector<float>>();
+    const auto cS = c0_start.get<std::vector<float>>();
+    double dE = 0.0, d0 = 0.0;
+    for (size_t i = 0; i < cS.size(); ++i) { dE += std::fabs(cE[i] - cS[i]); d0 += std::fabs(c0[i] - cS[i]); }
+    EXPECT_EQ(d0, 0.0) << "c weight 0: the feedback matrix untouched";
+    EXPECT_GT(dE, 1e-4) << "c weight 1: the descent writes C";
+    const auto h0 = W0.m.snapshot_state()["legs"][0]["h"].get<std::vector<float>>();
+    double hn = 0.0; for (float v : h0) hn += std::fabs(v);
+    EXPECT_GT(hn, 1e-4) << "the reach still moves h";
+}
