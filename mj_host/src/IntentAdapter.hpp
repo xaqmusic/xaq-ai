@@ -147,6 +147,13 @@ public:
     void set_fore_sense(bool on) { fore_sense_ = on; }
     void feed_head_fore(double unit) { head_fore_ = unit; }
     std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
+    // THE YAW RANGE (2026-10-01, --twist-yaw-range R): the walker's yaw command spans +-R rad/s (default the 1.0 the
+    // command ranges were taken to be).  Measured open-loop: the walking policy does not turn in place below ~1.25 rad/s
+    // (a standing deadband) and turns near-linearly above it to 2.2 rad/s at a command of 4, so +-1.0 left the walker
+    // only forward turns at <= ~0.5 rad/s -- the wide orbit.  Scales the command, the sensed yaw rate's unit, and the
+    // heading reflex's clamp.  1.0 = byte-identical.
+    void set_yaw_range(double r) { yaw_range_ = r; }
+    double yaw_range() const { return yaw_range_; }
     void set_seek_gate(bool on) { seek_gate_ = on; }
     // --seek-gate-contact R (§17.85): while seek holds the reference with its target within R metres, the ToF's too-close
     // share reads 0 to the walker's sense -- the thing walked onto fills the near field at the arrival.  0 = off.
@@ -359,6 +366,7 @@ private:
     int play_steers_ = 0;                     // ticks on which a loop's bearing set the heading reference
     int avoid_steers_ = 0;                    // of those, ticks the avoidance loop won
     int last_steer_ = 0;
+    double yaw_range_ = kTwistRangeVyaw;
     bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)

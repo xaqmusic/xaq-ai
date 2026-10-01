@@ -6233,3 +6233,50 @@ walk against its own control. What the series shows about the module, for the ne
 without a bound on a large error (0.1 thrashes, 0.03 is mild), so a learned proportional gain wants a bound the module
 can earn — the model's own one-step correction (`state_prior_step_gain`, the per-tick least-squares command) is that
 proportional form, and it is the lever not yet tried here.
+
+**The per-tick step as the gaze's proportional term (the operator: "the learned gaze is working well … try the
+per-tick step"; sweep z14, n = 18):** the model-implied step (`state_prior_step_gain` 1 / 0.3: each tick the
+least-squares command over the prior's rows of the identified model, added pre-tanh) on the learned gaze: falls 3.0 /
+3.2 (the learned gaze 2.6), walls 33 / 38 (33), closing 50 / 52 % (57), the error closed within 3 s 42 / 40 % (40),
+the target in view 93 / 91 %, the yaw p90 1.70 / 0.87 rad/s (0.61). `NULL`. The learned gaze stays as §17.90 left it
+(the pure reach; the stop slew the one follow-up that worked, at the stop).
+
+### 17.91 The turning radius: the body can turn; the walker does not aim its turn (2026-10-01)
+
+**The operator:** the bigger problem is the very wide turning radius of the walking intention — there is still a lot
+of orbiting while the duck homes in on an area of interest; it may need to walk backwards and turn, or something
+else; gains in wall avoidance and tracking may wait on it.
+
+**The walk's turning (`mj_host/tools/turning_readout.py`, the body-slot walker, n = 18).** With the reference more than
+1 rad off the nose the walker commands its forward speed at the rail (0.39 m/s on 64–83 % of ticks) and a yaw of
+0.73–0.78 rad/s; the body yaws at 0.19–0.22 rad/s, forward 0.04–0.06 m/s — a 0.27 m radius, a half turn in ~15 s.
+
+**The body's own turning, open loop** (the walker's command fixed by `--l2-twist`, 40 s each, the true yaw rate from the
+simulator; the odometry and the sensed rate agree with it to 0.01 rad/s):
+
+| forward \ yaw command (rad/s) | 0.5 | 1.0 | 1.25 | 1.5 | 2.0 | 2.5 | 3.0 | 4.0 |
+|---|---|---|---|---|---|---|---|---|
+| in place | 0.00 | **0.00** | 0.33 | 0.48 | 0.86 | 1.26 | 1.68 | 2.17 |
+| 0.1 m/s | 0.00 | 0.29 | 0.28 | 0.38 | 0.68 | 1.05 | 1.44 | 2.19 |
+| 0.2 m/s | 0.15 | 0.47 | 0.59 | 0.63 | 0.66 | 0.88 | 1.22 | 1.93 |
+| 0.4 m/s | 0.26 | 0.58 | 0.69 | 0.81 | 1.04 | 1.29 | 1.31 | 2.27 |
+| backing 0.2 m/s | 0.00 | 0.55 | 0.67 | 0.84 | 1.30 | 1.69 | 1.89 | 2.03 |
+
+No falls in any. **The walking policy does not turn in place below a yaw command of ~1.25 rad/s (a standing deadband)
+and turns near-linearly above it to 2.2 rad/s; the walker's yaw range of ±1.0 (`kTwistRangeVyaw`, §17.86's
+"unverified" cap) lies entirely inside the in-place deadband.** Backing, it turns at 1.0.
+
+**The range opened (`--twist-yaw-range R`; the command, the sensed yaw's unit and the heading reflex's clamp; 1.0 =
+byte-identical; ★ BIRD, the learned gaze and R83 reproduce):** ★ BIRD's body-slot walker re-identified at ±3.0 by the
+same recipe and seed (`duck_yaw3_s1`), n = 18 against the matched range-1 walker (`duck_forebody_s1`): the body yawed
+LESS (0.08–0.09 rad/s at large errors against 0.19–0.22), falls 3.9 against 2.2, walls 22 against 24, arrivals 15.4
+against 18.6. `REGRESSION` — and the reason is not jitter (the command flips sign on 4–5 % of ticks at either range):
+**with the reference more than 1 rad off, the yaw command points toward it only 52–58 % of the time.**
+
+**Where the aim is lost** (the matched range-1 walker): on those ticks the heading reflex (`--heading-reflex 1.0 0.3
+1.0`) has its full share on 20 % — and then the command points toward the reference 98 % of the time; on the other 80 %
+something is within the reflex's 1 m gate and the yaw is handed back (in part or whole) to the walker's brain, whose
+command then points toward the reference 40–50 % of the time — part of it legitimate avoidance (a wall between the
+duck and its target), the rest the orbit. **The orbit is the walker's heading authority under clutter, not the body's
+turning speed.** In flight: the heading prior's precision (`state_prior_weights` on index −6 at 3 and 10, range 1,
+sweep y2).

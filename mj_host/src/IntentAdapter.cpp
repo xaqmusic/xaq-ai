@@ -136,7 +136,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
 
     // The level-2 "joints": the body's velocity in the walker's own command units.
     last_sensed_ = {unit(vel_body[0] / kTwistRangeVx), unit(vel_body[1] / kTwistRangeVy),
-                    unit(vel_body[2] / kTwistRangeVyaw)};
+                    unit(vel_body[2] / yaw_range_)};
     publish("intent", {last_sensed_[0], last_sensed_[1], last_sensed_[2]});
     publish("imu", {float(g[0]), float(g[1]), float(g[2]), float(w[0]), float(w[1]), float(w[2])});
     // The 12-slot sense the bridge appends as load slots: attitude, rates, accel, the
@@ -311,7 +311,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
     }
 
     static const char* const kActions[3] = {"action.vx", "action.vy", "action.vyaw"};
-    static const double kRanges[3] = {kTwistRangeVx, kTwistRangeVy, kTwistRangeVyaw};
+    const double kRanges[3] = {kTwistRangeVx, kTwistRangeVy, yaw_range_};   // the yaw range: --twist-yaw-range (default kTwistRangeVyaw)
     for (int i = 0; i < 3; ++i) {
         if (auto act = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(kActions[i])))
             last_twist_[i] = kRanges[i] * std::clamp(double(act->accel), -1.0, 1.0);
@@ -365,7 +365,7 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         }
         // the yaw rate that closes the error in tau seconds, minus damping on the sensed rate, in rad/s
         const double want = -err / hr_tau_ - hr_damp_ * vel_body[2];
-        const double reflex = std::clamp(want, -kTwistRangeVyaw, kTwistRangeVyaw);
+        const double reflex = std::clamp(want, -yaw_range_, yaw_range_);
         // the share: 1 with nothing within the gate's reach, 0 at a wall (the brain's avoidance keeps the yaw)
         // the seek gate covers the reflex too (2026-09-29, sweep 19: the reflex closed on its target at 1-1.5 m and was
         // released within a metre of it -- the thing walked to is a ToF hit -- handing yaw to the avoidance that orbits it)

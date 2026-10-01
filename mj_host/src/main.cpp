@@ -1304,6 +1304,7 @@ bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = fals
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
 bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
+double g_yaw_range = 0.0;   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
 double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0, g_seek_gaze_max = 0.7;   // --seek-gaze K [RATE [MAX]]: on the walk the head yaw turns toward the seek loop's target
 double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
@@ -1553,6 +1554,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
+    if (g_yaw_range > 0.0) { brain.set_yaw_range(g_yaw_range); std::fprintf(stderr, "  twist yaw range: the walker's yaw command spans +-%.2f rad/s (the policy turns in place only above ~1.25)\n", g_yaw_range); }
     if (g_tof_body >= 0.0) std::fprintf(stderr, "  tof body: the walker's left / ahead / right ToF slots by BODY azimuth from the last %.2f s of returns, carried by the odometry (the too-close slot as before)\n", g_tof_body);
     if (g_seek_gaze > 0.0) {
         if (!g_head_joints) throw std::runtime_error("--seek-gaze turns the head brain's yaw joint: it needs --head-joints");
@@ -3262,6 +3264,8 @@ int main(int argc, char** argv) {
             g_head_stop_slew = std::stod(next("--head-stop-slew"));
         } else if (a == "--head-gaze-sense") {
             g_head_gaze_sense = true;
+        } else if (a == "--twist-yaw-range") {
+            g_yaw_range = std::stod(next("--twist-yaw-range"));
         } else if (a == "--tof-body") {
             g_tof_body = std::stod(next("--tof-body"));
         } else if (a == "--seek-gaze") {
