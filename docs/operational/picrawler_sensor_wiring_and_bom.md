@@ -961,6 +961,52 @@ regardless of what their own `R_fsr` turns out to be. Per-foot variation is what
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
 
+### ★ 5.7.10 RUN 2026-10-01b — rubber mat: the floor was NOT the cause
+
+§5.7.9's separating experiment, run: robot moved onto a **rubber mat** so the resting edge
+cannot creep, and the sweep now passes through **`toes_up`** before each `<foot>_down` so the
+long travel between stances happens with the toes unloaded (operator — going corner to corner
+drags a *loaded* toe, which on a high-friction surface strains the glued joint and the wire
+tie, and leaves the foot somewhere its own sweep did not put it).
+
+**The residual did not fall.**
+
+| foot | hard floor rms | rubber rms | change |
+|---|---|---|---|
+| FL | 481 | **676** | **+41 %** |
+| FR | 268 | — | ⚠ foot unloaded, see below |
+| RL | 405 | **402** | −1 % |
+| RR | 457 | **677** | **+48 %** |
+
+**If belly stick-slip were the dominant mechanism, removing it should have cut the residual
+substantially. It did not** — two feet got worse and one was unchanged. ⚠ **Two variables moved
+together** (surface *and* the transit pose) and the tilt spans shrank with them (4.0 → 2.9°,
+5.6 → 4.2°, 2.8 → 2.4°), so this is a signal rather than a finding. The direction is clear
+enough to act on.
+
+**The load path was re-confirmed:** only the foot under test reads anything, every other
+channel at 1–2 counts through all 28 segments. No sharing, no crosstalk.
+
+#### ⚠ FR's pose no longer loads its foot
+
+A1 reads 1808 and 1905 at the first two steps and then **1 count for the rest of the sweep**,
+while its tilt keeps climbing — so the foot left the ground and the belly took the load. **Not
+a sensor fault and not a measurement**; `front_right_down` needs re-posing on the mat before
+anything about FR means anything.
+
+#### The hypothesis this promotes
+
+**The toe's own float under shear.** §2 records that the toe floats **0.25 mm radially** before
+the boss bears on the bore, so the bump slides up to that far across the film on every change
+of load — and a high-friction surface *increases* the shear the toe is dragged through, which
+is the direction FL and RR moved. The boss/bore joint keeps shear off the film in the sense
+that the film carries no tangential *force*; it does not stop the contact point from moving.
+
+**The next test is cheap and it is a dose-response:** re-run with much smaller steps (±40 µs
+rather than ±150) so the foot drags a fraction as far, and compare residual against the count
+span it was earned over. **If the residual scales with how far the foot travels, it is shear at
+the toe.** If it does not, the mechanism is elsewhere and the float is exonerated.
+
 ### ★ 5.7.9 RUN 2026-10-01 — the mechanics are not repeatable, and it is not the sensors
 
 All four feet swept, knee stepped ±150 µs about each `<foot>_down` pose, up and back down.

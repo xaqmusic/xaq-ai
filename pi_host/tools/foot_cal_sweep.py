@@ -200,6 +200,10 @@ def main():
     ap.add_argument("--dwell", type=float, default=2.0, help="seconds held before reading")
     ap.add_argument("--reads", type=int, default=12)
     ap.add_argument("--pose-suffix", default="_down")
+    ap.add_argument("--via", default="toes_up",
+                    help="pose to pass through before each <foot>_down; '' to go direct. "
+                         "⚠ the toes drag on the way into a _down pose, and on a high-friction "
+                         "surface that is both a damage risk and a source of residual")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 
@@ -214,11 +218,15 @@ def main():
     poses = rpc("pose.list")["poses"]
     print(f"benchd up · body={st0.get('body')} · tick_hz={st0.get('tick_hz')} · vbat={st0.get('vbat')}")
 
+    via = (a.via or "").strip() or None
     missing = [FEET[f][0] + a.pose_suffix for f in feet
                if FEET[f][0] + a.pose_suffix not in poses]
+    if via and via not in poses:
+        missing.append(via)
     if missing:
         sys.exit("missing pose(s): " + ", ".join(missing) +
                  "\n  have: " + ", ".join(sorted(poses)))
+    print(f"transit pose: {via or '(none — going direct, toes drag)'}")
 
     threading.Thread(target=keepalive, daemon=True).start()
     rpc("adc.rate", ms=20)            # the full time series, settle transients included
@@ -230,6 +238,18 @@ def main():
             ch, sign = knee_channel(mapping, foot)
             base = rpc("pose.get", name=pose_name)["us"]
             print(f"\n=== {foot}  pose {pose_name}  knee ch{ch} (sign {sign:+d})  ADC A{adc_ch}")
+            # ⚠ Unload the toes before the long travel into the next _down pose.  Going
+            # straight from one corner-up stance to the next drags a LOADED toe across the
+            # surface, which on a high-friction mat strains the glued leg joint and the wire
+            # tie -- and leaves the foot somewhere its own sweep did not put it.
+            if via:
+                rpc("mark", text=f"footcal {foot} transit {via}")
+                vr = rpc("pose.set", us=rpc("pose.get", name=via)["us"])
+                settle(vr.get("eta_ms", 0))
+                time.sleep(0.6)
+                br = rpc("pose.set", us=base)      # then down onto this foot, toes unloaded
+                settle(br.get("eta_ms", 0))
+                time.sleep(0.6)
             print(f"    {'step us':>9}{'dir':>6}{'counts':>9}{'sd':>7}{'min':>7}{'max':>7}{'tilt°':>8}")
 
             rows = []                 # (step, direction, mean, sd, min, max)
