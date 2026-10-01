@@ -94,6 +94,10 @@ public:
     // pitch.  And the ToF studies (§17.28) need the gaze lower: floor objects are found in 3
     // sweeps of 11 because a 4.6 deg babble rarely dwells on the floor.  0 = step, byte-identical.
     void set_override_slew(double rad_per_s) { slew_ = rad_per_s; }
+    // THE STOP SLEW (2026-10-01, --head-stop-slew): when the yaw override releases, the yaw slews back to the head
+    // brain's own command at this rate instead of stepping (a learned gaze left turned at a stop's start must not jump
+    // when the walk resumes).  0 = the legacy step (byte-identical).
+    void set_release_slew(double rad_per_s) { release_slew_ = rad_per_s; }
     nlohmann::json brain_state() const;
     // Restore a saved head brain (every module's working state) into this instance — the
     // H2 protocol: identify standing (H1, saved), act walking (loaded here, the prior on).
@@ -115,6 +119,7 @@ private:
     bool mask_yaw_ = true;                             // false when the graph owns action.head_yaw
     bool yaw_override_ = false; double yaw_target_ = 0.0;
     bool pitch_override_ = false; double pitch_target_ = 0.0;
+    double release_slew_ = 0.0, out_yaw_ = 0.0, rel_yaw_ = 0.0; bool releasing_ = false, prev_yaw_override_ = false;
     double slew_ = 0.0;                      // rad/s cap on the override's own motion; 0 = step (legacy)
     double yaw_held_ = 0.0, pitch_held_ = 0.0;   // where the slewed override has actually got to
     bool   slew_primed_ = false;

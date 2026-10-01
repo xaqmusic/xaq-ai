@@ -1303,7 +1303,7 @@ double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the To
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
-bool g_head_gaze_sense = false;   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
+bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
 double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0, g_seek_gaze_max = 0.7;   // --seek-gaze K [RATE [MAX]]: on the walk the head yaw turns toward the seek loop's target
 double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
@@ -1684,6 +1684,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (!g_head_graph.empty()) {
         head = std::make_unique<HeadAdapter>(g_head_graph, seed);
         if (g_head_gaze_sense) head->set_gaze_sense(true);
+        if (g_head_stop_slew > 0.0) { head->set_release_slew(g_head_stop_slew);
+            std::fprintf(stderr, "  head stop slew: at a stop the yaw slews home at %.2f rad/s until the look takes it, and back to the head brain's command when the stop lets go\n", g_head_stop_slew); }
         if (g_head_joints) std::fprintf(stderr, "head joints: the head brain writes the four head joint targets (Track A at the head)\n");
         if (g_head_phase_lead > 0.0) { head->set_phase(g_head_phase_lead, g_head_phase_learn);
             std::fprintf(stderr, "head phase feed-forward: lead %.0f ticks, learning %.0f s after the babble\n", g_head_phase_lead, g_head_phase_learn); }
@@ -2420,6 +2422,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const auto q = body.joint_positions();
             std::array<double, 4> head_q{};
             for (int i = 0; i < 4; ++i) head_q[size_t(i)] = q[size_t(5 + i)] - kHomePose[size_t(5 + i)];
+            if (g_head_stop_slew > 0.0) {
+                // the stop slew: during a stop, until the look's own override takes the yaw, the yaw slews home
+                static bool home_on = false;
+                if (stop_phase != StopPhase::None && !looking && !scanning) { head->set_override_slew(g_head_stop_slew); head->set_yaw_override(true, 0.0); home_on = true; }
+                else if (stop_phase == StopPhase::None && home_on) { head->set_yaw_override(false, 0.0); home_on = false; }
+                else if (looking || scanning) home_on = false;
+            }
             if (g_head_gaze_sense) {
                 // the gaze error: where the walk is going (the seek target's body bearing while seek steers the reference;
                 // straight ahead otherwise), minus where the head points (its yaw joint from home), + = left
@@ -3249,6 +3258,8 @@ int main(int argc, char** argv) {
         } else if (a == "--tof-real") {
             g_tof_spread = std::stod(next("--tof-real"));
             g_tof_lag = std::stod(next("--tof-real"));
+        } else if (a == "--head-stop-slew") {
+            g_head_stop_slew = std::stod(next("--head-stop-slew"));
         } else if (a == "--head-gaze-sense") {
             g_head_gaze_sense = true;
         } else if (a == "--tof-body") {

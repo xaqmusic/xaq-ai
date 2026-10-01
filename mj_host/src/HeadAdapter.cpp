@@ -114,6 +114,18 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
         if (yaw_override_)   last_cmd_[2] = yt;
         if (pitch_override_) last_cmd_[1] = pt;
     }
+    if (release_slew_ > 0.0) {
+        // the stop slew: an override that lets go of the yaw hands it back at a servo's rate, from where it last was
+        if (prev_yaw_override_ && !yaw_override_) { releasing_ = true; rel_yaw_ = out_yaw_; }
+        if (yaw_override_) releasing_ = false;
+        if (releasing_) {
+            const double step = release_slew_ / kBrainHz;
+            rel_yaw_ += std::clamp(last_cmd_[2] - rel_yaw_, -step, step);
+            if (std::fabs(last_cmd_[2] - rel_yaw_) < 1e-3) releasing_ = false;
+            last_cmd_[2] = rel_yaw_;
+        }
+        prev_yaw_override_ = yaw_override_;
+    }
     if (vor_tau_ > 0.0 && tick_id_ >= babble_ticks_) {
         constexpr double dt = 1.0 / 50.0;
         vor_state_ += w[2] * dt;                        // the trunk's yaw increment this tick
@@ -173,6 +185,7 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
         rate_state_ -= rate_state_ * (dt / rate_tau_);   // the anchor: leak to centre
         last_cmd_[2] = std::clamp(-rate_k_ * rate_state_, -kHeadRange[2], kHeadRange[2]);
     }
+    out_yaw_ = last_cmd_[2];
     ++tick_id_;
     return last_cmd_;
 }
