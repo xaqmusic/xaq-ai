@@ -737,6 +737,30 @@ in the `bench` telemetry frame**. So steps E1–E3 need no new hardware and no f
 | **E6** ✅ | The robot probes its own feet — `foot_cal_sweep.py` | the poses | ✅ run; it answered the linkage question rather than the calibration one (§5.7.9–11) |
 | **E7** ✅ | **The touchdown decision, run many times** — `foot_tap_test.py` | the poses | ✅ **PASS, four feet, 128 taps, 1 miss** (§5.7.13–14). This is the step that actually gates using the sensors |
 
+#### The poses are part of the apparatus, and they are committed
+
+`foot_cal_sweep.py` and `foot_tap_test.py` both require **five poses, now in
+`pi_host/calib/poses.json`** — they are measurement apparatus, not scratch state, and the only
+copy lived on the robot until 2026-10-01.
+
+| pose | what it is |
+|---|---|
+| `toes_up` | all four hip1 at 2500, all four hip2 at **500**, knees 1385 / 1500 / 1310 / 1275. Belly down, every toe clear |
+| `front_left_down` | `toes_up` with FL's three channels (3, 4, 5) moved to prop that corner |
+| `rear_left_down` | ditto, channels 0, 1, 2 |
+| `rear_right_down` | ditto, channels 6, 7, 8 |
+| `front_right_down` | ⚠ **four channels, not three** — 9, 10, 11 *and* RR's knee (ch 6) nudged 2500 → 2355 |
+
+⚠ **`front_right_down`'s fourth channel is deliberate.** The operator found the chassis
+unbalanced entering that pose and trimmed the rear-right knee to sit it flat. It is a
+stabiliser, not a stray edit; regenerating these poses mechanically from a template would lose
+it and reintroduce the rock.
+
+⚠ **`toes_up` parks every hip2 at 500 µs — the end stop.** §5.7.13 records what that cost: a
+contact search starting there had no room in the direction that lowers the toe, and 700 µs the
+other way never reached the ground. Both tools now work *down* from a `<foot>_down` pose
+instead.
+
 **Reading the records:** `pi_host/tools/adc_fast_report.py` (newest log by default, `--fft`
 for spectral peaks, `--csv` to dump samples). Label the arms as you go — the physical ones
 leave no other trace:
