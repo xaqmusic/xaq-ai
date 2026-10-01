@@ -44,6 +44,7 @@ import argparse, json, os, statistics as st, subprocess, sys, threading, time
 import zmq
 
 ENDPOINT = "tcp://127.0.0.1:5590"
+TOUCHDOWN_FLOOR = 20     # counts; the edge the 12-tick horizon is measured from
 FEET = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 _ctx, _lock, _stop = zmq.Context(), threading.Lock(), threading.Event()
 
@@ -228,6 +229,11 @@ def main():
                      f"(need counts < {a.release_counts} and tilt settling). "
                      f"Raise --max-travel.")
         print(f"   belly flat at {d * flat:+d} us")
+        stp = rpc("status"); flat_tilt = tilt_of(stp)
+        if flat_tilt == flat_tilt and flat_tilt < 3.0:
+            print(f"   ⚠ tilt is {flat_tilt:.2f}° at 'flat' — the chassis is down on its belly,"
+                  f"\n     so this corner was barely propped and a tap has nothing to push"
+                  f"\n     against. Re-pose {base_name} so the corner lifts.")
 
         # ---- B: back down until the toe touches --------------------------------
         fine = max(2, a.probe_step // 4)
@@ -256,7 +262,7 @@ def main():
         # ---- the taps ----------------------------------------------------------
         for over in overs:
             tap_off = d * (release - over)            # back toward load by `over`
-            print(f"\n--- {a.taps} taps at release-{over} us  (ch4 offset {tap_off:+d})")
+            print(f"\n--- {a.taps} taps at release-{over} us  (ch{ch} offset {tap_off:+d})")
             for i in range(a.taps):
                 goto(rest_off); time.sleep(0.35)
                 rpc("mark", text=f"tap {foot} over{over:+d} n{i}")
@@ -277,7 +283,7 @@ def main():
     # ---- peaks, from the daemon's own 50 Hz record -------------------------
     logs = sorted(__import__("glob").glob(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "log", "benchd_*.jsonl")))
-    peaks = {}
+    peaks, seg_max, misses = {}, {}, {}
     if logs:
         cur = None; series = {}
         for line in open(logs[-1]):
@@ -290,21 +296,35 @@ def main():
                 if cur: series[cur] = []
             elif k == "adc_fast" and cur is not None:
                 series[cur].append(r["data"]["a"][adc_ch])
+        # ⚠ THE 12-TICK HORIZON STARTS AT TOUCHDOWN, NOT AT THE COMMAND.  The mark is written
+        # before pose.set, and pose.set staggers channels 100 ms apart, so the first 12 samples
+        # after a mark can land entirely before the leg has moved.  Taking them cost a whole
+        # FR run, which reported 1-3 counts on every tap and read as a foot that never touched
+        # -- the samples were there, 12 ticks too early.  Find the first sample above the floor,
+        # then take the max of the next 12, which is what GainEvolver does.
         for lbl, vals in series.items():
             if len(vals) < 4: continue
             over = int(lbl.split("over")[1].split()[0])
-            peaks.setdefault(over, []).append(max(vals[:12]) if len(vals) >= 12 else max(vals))
+            seg_max.setdefault(over, []).append(max(vals))
+            td = next((i for i, v in enumerate(vals) if v >= TOUCHDOWN_FLOOR), None)
+            if td is None:
+                misses[over] = misses.get(over, 0) + 1
+                continue
+            peaks.setdefault(over, []).append(max(vals[td:td + 12]))
 
     print("\n=== peak counts over the 12 ticks after touchdown — the criterion's own horizon\n")
-    print(f"    {'over us':>9}{'n':>4}{'mean':>9}{'sd':>8}{'min':>8}{'max':>8}{'spread':>9}")
+    print(f"    {'over us':>9}{'n':>4}{'miss':>6}{'mean':>9}{'sd':>8}{'min':>8}{'max':>8}"
+          f"{'spread':>9}{'segmax':>9}")
     for over in overs:
-        v = peaks.get(over, [])
+        v, sm = peaks.get(over, []), seg_max.get(over, [])
         if not v:
-            print(f"    {over:>+9}{0:>4}{'— no samples captured':>42}")
+            print(f"    {over:>+9}{0:>4}{misses.get(over, 0):>6}"
+                  f"{'— never reached the touchdown floor':>45}"
+                  f"{(max(sm) if sm else 0):>9}")
             continue
-        print(f"    {over:>+9}{len(v):>4}{st.fmean(v):>9.0f}"
+        print(f"    {over:>+9}{len(v):>4}{misses.get(over, 0):>6}{st.fmean(v):>9.0f}"
               f"{(st.pstdev(v) if len(v) > 1 else 0):>8.1f}{min(v):>8}{max(v):>8}"
-              f"{max(v) - min(v):>9}")
+              f"{max(v) - min(v):>9}{(max(sm) if sm else 0):>9}")
     tl = [t["tilt"] for t in taps if t["tilt"] == t["tilt"]]
     if len(tl) > 1:
         print(f"\n    body tilt across all taps: sd {st.pstdev(tl):.2f}°  "

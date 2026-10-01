@@ -961,6 +961,59 @@ regardless of what their own `R_fsr` turns out to be. Per-foot variation is what
 calibration curve is for — which is the design, not a compromise: the operator's decision not to
 re-run the curve on all four feet only defers the *curves*, not this resistor.
 
+### ★★★ 5.7.14 ALL FOUR FEET 2026-10-01 — repeatability improves with load, which is the shape the requirement needs
+
+128 taps, 8 per level, four levels, four feet. **One miss** (RL at release−40, one tap read
+22 counts). Converted through FL's DMM curve, so the gram column is indicative across feet:
+
+| foot | over | mean ct | → g | sd ct | **sd / mean** |
+|---|---|---|---|---|---|
+| **FL** | +5 / +10 / +20 / +40 | 480 / 863 / 1017 / 1560 | 4 / 10 / 14 / 31 | 80 / 142 / 116 / 574 | 17 % / 17 % / 11 % / **37 %** |
+| **FR** | +5 / +10 / +20 / +40 | 1232 / 1436 / 1577 / 1910 | 19 / 26 / 32 / 49 | 146 / 141 / 599 / **8** | 12 % / 10 % / 38 % / **0.4 %** |
+| **RL** | +5 / +10 / +20 / +40 | 605 / 608 / 683 / 500 | 6 / 6 / 7 / 4 | 136 / 46 / 62 / 238 | 22 % / 8 % / 9 % / 48 % |
+| **RR** | +5 / +10 / +20 / +40 | 1719 / 1958 / 2824 / 3106 | 38 / 57 / **423** / **691** | 243 / 42 / **38** / **18** | 14 % / 2.1 % / **1.3 %** / **0.6 %** |
+
+**Relative spread collapses as load rises: 10–22 % at a few grams, 0.4–2 % above 40 g.** RR
+reached stance-level load (423 g) at 1.3 % and 691 g at 0.6 %.
+
+**That is the shape the requirement wants.** The decision separates "carries nothing" from
+"carries the body", and the channel is at its most repeatable exactly where the second lives.
+
+| | |
+|---|---|
+| ghost touch | 0–5 counts |
+| **threshold, 29.5 g** | **1536 counts** |
+| four feet down, 148 g | 2290 counts — margin **+754** |
+| RR's sd at 423 g | 38 counts → **20 σ** |
+| FR's sd at 49 g | 8 counts → **90 σ** |
+| FL's sd at stance load (§5.7.11 returns) | 159 counts → **4.7 σ** |
+
+⚠ **The large sds are all at marginal levels, right at the contact edge** — FL +40 (37 %),
+FR +20 (38 %), RL +40 (48 %) — where a few µs of hip2 decides whether the toe is really
+bearing. A touchdown landing exactly on the line is ambiguous by definition, and the criterion
+scores a ratio over ≥ 3 touchdowns.
+
+⚠ **Two poses do not load their foot much.** `rear_left_down` tops out at 683 counts (~7 g) and
+`front_left_down` at 1560 (~31 g), so neither foot was tested at stance load by this protocol;
+their margins come from §5.7.11's reference returns instead. Worth re-posing both if the
+light-load numbers are ever wanted again.
+
+**Verdict unchanged and now on four feet: the FSR channel as built is good enough to drive the
+brain.**
+
+#### ⚠ A harness bug that cost a whole run, and nearly a false verdict
+
+The first FR run reported **1–3 counts on every tap** and read as a foot that never touched.
+The samples were there; the extraction took them 12 ticks too early. **The mark is written
+before `pose.set`, and `pose.set` staggers channels 100 ms apart**, so `max(vals[:12])` — the
+first 240 ms after the mark — can land entirely before the leg has moved. GainEvolver's horizon
+starts at **touchdown**, not at the command. Fixed by finding the first sample above a contact
+floor and taking the max of the next 12, and the corrected extraction recovered FR's run from
+the log already on disk, with no further robot time.
+
+**It also nearly produced a verdict on the robot.** The reading was "FR's foot does not reach
+the ground" — mechanical, specific, and wrong. What the tool measured was its own window.
+
 ### ★★★ 5.7.13 MEASURED AT THE THRESHOLD 2026-10-01 — the requirement is met
 
 §5.7.12's open item was repeatability **at the light loads the decisions actually live at**.
