@@ -685,3 +685,10 @@ try: the model's own one-step correction (`state_prior_step_gain`) as the propor
 **★ GAZE promoted (2026-10-01):** the learned gaze on ★ BIRD's body-slot walker, on the operator's eye ("working well, an
 interesting behaviour"). Preset "★ GAZE · the LEARNED gaze". The next push is the turning radius (design doc §17.91): the
 walking policy's in-place yaw deadband, a walker yaw loop that limit-cycles, and a heading tonic that winds.
+
+**The turning radius (design doc §17.91–17.92):** the walking policy has an in-place yaw deadband (no turn below a ~1.25
+rad/s command) and the walker's range sat inside it. Calibrating the yaw motor (`--yaw-linearize`: the walker's yaw a
+desired rate, the deadband compensated from the measured response) and re-identifying the walker on it (`duck_lin_s1`):
+on ★ GAZE's stack, n = 18, the time with the target well off the nose halved, the error closed within 3 s 40 → 55 %,
+walls 33 → 23 a minute, falls 2.6 → 2.9 — `WORKING`. The heading as a reach ties it; precision 10 regresses. Next: the
+speed prior gated by the heading error, so the walker stops and turns in place. Preset "TURN · ★ GAZE on the LINEAR yaw motor".

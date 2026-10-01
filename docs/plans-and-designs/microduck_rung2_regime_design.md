@@ -6302,3 +6302,42 @@ deadband its linear model cannot see, a tonic that winds in it, a feedback half 
 behaviour, and we should continue with it." ★ GAZE = ★ BIRD's body-slot walker (`duck_forebody_s1`, `--tof-body 0.5`)
 + the learned gaze (`--head-graph head3o_h2_gaze_w10 --load-head head3o_gaze_h1_s2_nohold --head-gaze-sense`), §17.90's
 form (no stop slew). Preset "★ GAZE · the LEARNED gaze". The turning work of §17.91 builds on it.
+
+### 17.92 The three steps on the turning radius: the yaw motor calibrated, the heading as a reach, the walker re-identified (2026-10-01)
+
+**The operator:** "consider the learned gaze promoted, then proceed with the next three steps; I'll review after you
+have results on all three."
+
+1. **The yaw motor's calibration** (host `--yaw-linearize`): the walker's yaw output is a DESIRED yaw rate, mapped
+   through the inverse of the walking policy's measured open-loop response (the §17.91 table, made monotone, interpolated
+   in the commanded forward speed) to the policy's yaw command — the in-place deadband compensated, an actuator
+   calibration taken from the body, not a behaviour. Open loop it delivers what is asked, in place 0.33 / 0.59 / 1.00
+   rad/s for 0.3 / 0.6 / 1.0, walking 0.31 / 0.61 / 0.99, backing 0.48 / 0.63 / 0.96, no falls. Off = byte-identical
+   (★ BIRD, ★ GAZE over 600 s, R83 `6b9a0b3a…`). The logged `twist` carries the policy's command (calibrated).
+2. **The heading as a pure reach** (`state_prior_c_weights` 0 on index −6), with a precision-10 variant.
+3. **The re-identification**: ★ BIRD's walker on the calibrated yaw, 3 s babble pulses (`a1v2_contact_room4t_h150`, a full
+   pulse turns ≤ ~3 rad, inside the heading sense's ±π), open then the 2 m room, 0 rescues (`duck_lin_s1`). The yaw's
+   authority over the sensed yaw rate +0.016 (the earlier walkers 0.002–0.003) and over the heading error +0.032 (the
+   right sign, its row's largest).
+
+**Results (sweep t1, n = 18, ★ GAZE's stack; the control ★ GAZE, sweep z10, the same seeds):**
+
+| n = 18 | ★ GAZE | **linear yaw** | + heading reach | + reach at precision 10 |
+|---|---|---|---|---|
+| seconds a run with the target > 1 rad off | 69 | **34** | 36 | 38 |
+| the error closed by 0.5 rad within 3 s | 40 % | **55 %** | 54 % | 54 % |
+| bearing error, median · the target in the body's ToF field | 28° · 39 % | **19° · 60 %** | 20° · 56 % | 20° · 56 % |
+| body yaw rate at 1–4 rad of error · radius | 0.24 rad/s · 0.30 m | **0.31–0.33 · 0.22 m** | 0.33–0.36 · 0.22 m | 0.32–0.41 · 0.22 m |
+| walls / min | 33 | **23** | 25 | 39 |
+| falls a run · arrivals · closing | 2.6 · 17.4 · 57 % | 2.9 · 17.3 · 53 % | 2.9 · 17.6 · 56 % | 4.3 · 16.3 · 47 % |
+
+**Verdicts.** The calibrated yaw motor with its re-identification: **`WORKING`** — the time spent with the target well
+off the nose halved, the error closed within 3 s +15 points, the bearing error a third smaller, the target in the
+body's own ToF field half again as often, walls −30 %; the cost a third of a fall a run and four points of closing.
+The heading as a pure reach: `NULL` on top of it (a tie: once the motor is linear the heading's feedback no longer
+runs away). Precision 10: `REGRESSION` (walls 39, falls 4.3). The body still yaws at ~0.3 rad/s at large errors
+against the 1 rad/s it can deliver: the walker asks for more (policy commands 1.4–1.7) but its forward command stays at
+the rail on 62–82 % of those ticks, and walking forward at the rail the calibrated map asks the policy for a turn the
+policy delivers more slowly than in place. Re-use: the speed prior's precision gated by the heading error (on when
+the target is ahead) would let the walker stop and turn in place — the backing §17.91's precision 10 found, without
+its falls. Presets "TURN · …".

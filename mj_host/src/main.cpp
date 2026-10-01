@@ -47,6 +47,41 @@
 #include "OgmaBrainAdapter.hpp"
 #include "StubBrain.hpp"
 
+
+// THE YAW MOTOR'S CALIBRATION (2026-10-01, --yaw-linearize, design doc §17.91).  The walking policy's yaw response,
+// measured open loop (--l2-twist VX 0 C, 40 s each, the true yaw rate from the simulator): it does not turn in place
+// below a command of ~1.25 rad/s (a standing deadband) and responds near-linearly above it; the response depends on the
+// forward command.  With the walker's yaw taken as a DESIRED yaw rate, the actuator delivers it by this table's inverse
+// at the commanded forward speed -- an actuator calibration measured from the body (like a servo's deadband
+// compensation), not a behaviour.  Rows: the forward command (m/s); columns: the yaw command (rad/s); cells: the
+// body's yaw rate (rad/s).  Made monotone in the command before inverting; symmetric in sign.
+static double yaw_calibrated(double want, double vx) {
+    static const double kVx[5] = {-0.2, 0.0, 0.1, 0.2, 0.4};
+    static const double kCmd[9] = {0.0, 0.5, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0};
+    static const double kRate[5][9] = {
+        {0.0, 0.00, 0.55, 0.67, 0.84, 1.30, 1.69, 1.89, 2.03},
+        {0.0, 0.00, 0.00, 0.33, 0.48, 0.86, 1.26, 1.68, 2.17},
+        {0.0, 0.00, 0.29, 0.28, 0.38, 0.68, 1.05, 1.44, 2.19},
+        {0.0, 0.15, 0.47, 0.59, 0.63, 0.66, 0.88, 1.22, 1.93},
+        {0.0, 0.26, 0.58, 0.69, 0.81, 1.04, 1.29, 1.31, 2.27}};
+    const double w = std::fabs(want);
+    if (w < 1e-6) return 0.0;
+    const double v = std::clamp(vx, kVx[0], kVx[4]);
+    int r = 0; while (r < 3 && v > kVx[r + 1]) ++r;
+    const double f = (v - kVx[r]) / (kVx[r + 1] - kVx[r]);
+    double row[9]; double run = 0.0;
+    for (int c = 0; c < 9; ++c) { run = std::max(run, (1.0 - f) * kRate[r][c] + f * kRate[r + 1][c]); row[c] = run; }   // monotone
+    double cmd = kCmd[8];
+    for (int c = 1; c < 9; ++c)
+        if (w <= row[c]) {
+            const double lo = row[c - 1], hi = row[c];
+            // inside a flat stretch (the deadband) the command jumps to the stretch's end: the first command that moves the body
+            cmd = hi > lo ? kCmd[c - 1] + (w - lo) / (hi - lo) * (kCmd[c] - kCmd[c - 1]) : kCmd[c];
+            break;
+        }
+    return want < 0.0 ? -cmd : cmd;
+}
+
 namespace {
 
 using namespace mjhost;
@@ -1304,7 +1339,7 @@ bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = fals
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
 bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
-double g_yaw_range = 0.0;   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
+double g_yaw_range = 0.0; bool g_yaw_lin = false;   // --yaw-linearize: the walker's yaw is a desired RATE, mapped through the body's measured response   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
 double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0, g_seek_gaze_max = 0.7;   // --seek-gaze K [RATE [MAX]]: on the walk the head yaw turns toward the seek loop's target
 double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
@@ -1554,6 +1589,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
+    if (g_yaw_lin) std::fprintf(stderr, "  yaw linearize: the walker's yaw command is a desired yaw rate, mapped through the walking policy's measured open-loop response (the in-place deadband compensated)\n");
     if (g_yaw_range > 0.0) { brain.set_yaw_range(g_yaw_range); std::fprintf(stderr, "  twist yaw range: the walker's yaw command spans +-%.2f rad/s (the policy turns in place only above ~1.25)\n", g_yaw_range); }
     if (g_tof_body >= 0.0) std::fprintf(stderr, "  tof body: the walker's left / ahead / right ToF slots by BODY azimuth from the last %.2f s of returns, carried by the odometry (the too-close slot as before)\n", g_tof_body);
     if (g_seek_gaze > 0.0) {
@@ -2001,6 +2037,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (g_body_pitch != 0.0 && driver == Driver::Brain) command.body_pitch = g_body_pitch;
         if (g_chase_vx > 0.0 && driver == Driver::Brain && chase_on && (brain.chase_active() || brain.chase_coasting()) && stop_phase == StopPhase::None)
             command.twist[0] = std::max(command.twist[0], g_chase_vx);     // the pursuit at speed
+        if (g_yaw_lin && driver == Driver::Brain) command.twist[2] = yaw_calibrated(command.twist[2], command.twist[0]);   // the yaw motor's calibration
         if (stop_on) {
             if (roll_on && !ball_stopped && t - last_roll_tick >= 75) { const auto b = body.body_xy("obj_ball0"); body.roll_body("obj_ball0", b[0], b[1], 0.0, 0.0); ball_stopped = true; }
             if (walk_on && walk_left > 0) {                       // the chair carried across, then put back home
@@ -3062,6 +3099,7 @@ void usage() {
 
 }  // namespace
 
+
 int main(int argc, char** argv) {
     std::string scene = kDefaultScene;
     std::string mode;
@@ -3264,6 +3302,8 @@ int main(int argc, char** argv) {
             g_head_stop_slew = std::stod(next("--head-stop-slew"));
         } else if (a == "--head-gaze-sense") {
             g_head_gaze_sense = true;
+        } else if (a == "--yaw-linearize") {
+            g_yaw_lin = true;
         } else if (a == "--twist-yaw-range") {
             g_yaw_range = std::stod(next("--twist-yaw-range"));
         } else if (a == "--tof-body") {
