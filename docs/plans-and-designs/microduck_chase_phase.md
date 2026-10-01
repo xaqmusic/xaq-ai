@@ -662,3 +662,10 @@ body frame first, then a gaze sweep on the walk — the head brain now owns the 
 translation); the head still in space for the cloud (the gaze's angular rate, the H line's VOR, judged on `tre`); the
 nod or the neck's reach toward a small thing at an arrival (the bird's peck is a neck extension); a sharper pace gate;
 the prior's step honouring the motor mask; the pursuit's start (§9).
+
+**The gaze (2026-10-01, design doc §17.89).** The walker's ToF slots taken in the body frame from the last 0.5 s of
+returns (`--tof-body 0.5`) let the head look away without turning the avoidance; on a walker identified with them
+(`duck_forebody_s1`), the head turning toward the seek loop's target on the walk (`--seek-gaze 1.0`) keeps the target in
+view 86 % of seeking time (43), turns toward it five times as fast, closes the error within 3 s 46 % (34), falls 1.7
+(2.2), walls 22 (24) — `WORKING` against its own control, n = 18; the candidate for the eye is preset "GAZE · the
+body-slot brain + the GAZE leading the turn". On the column-slot brain the same gaze lost (a model mismatch).

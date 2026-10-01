@@ -6143,3 +6143,24 @@ and is being run on body-frame slots — with the head straight and no memory th
 0.46 rad, and past 22.5° − 5.6° = 0.29 rad the body's own ahead sector leaves the ToF's field, so the avoidance runs on
 memory. In flight: ★ BIRD's identification redone with the body slots (`duck_forebody_s1`), then on it the body slots
 alone, the gaze bounded at 0.29 rad (`--seek-gaze 1.0 1.0 0.29`) and unbounded, n = 18 (sweep z4).
+
+**The fair test (sweep z4, n = 18):** ★ BIRD's identification redone with the body slots (`duck_forebody_s1`: 600 s
+open + 600 s in the 2 m room with `--tof-body 0.5`; the walker's ToF rows identified on the sense it acts on), then:
+
+| n = 18, the body-slot brain | slots alone | gaze bounded at 0.29 rad | **gaze unbounded** |
+|---|---|---|---|
+| target in the ToF's field while seeking | 43 % | 58 % | **86 %** |
+| turn toward it (median) · error closed within 3 s | 0.04 rad/s · 34 % | 0.04 · 33 % | **0.20 · 46 %** |
+| closing on the target | 53 % | 49 % | **57 %** |
+| walls / min · falls a run · arrivals · walk m/s | 24 · 2.2 · 18.6 · 0.175 | 30 · 2.1 · 15.7 · 0.174 | **22 · 1.7 · 17.8 · 0.181** |
+
+**Verdicts.** The gaze on the column-slot brain: `NULL`/`REGRESSION` — a model mismatch (the walker identified on one
+sense and run on another), not a verdict on the gaze. **The gaze on the brain identified with the body slots:
+`WORKING`** — better than the same brain without it on every row (the turn toward the target ×5, the error closed
+within 3 s +12 points, closing +4, falls −23 %, walls a tie or better), the target in view twice as often. The bound
+at 0.29 rad: `REGRESSION` (arrivals −15 %) — the geometric worry was wrong, the 0.5 s memory carries the ahead sector
+while the head looks. Against ★ BIRD (another identification, pooled n = 18: walls 34, falls 1.9, closing 63 %, closed
+within 3 s 41 %) the gaze arm walls fewer and falls less, closes 6 points less and turns faster; brains from two
+identifications differ by their babble as well as their sense, so the eye judges it. Re-use for the learned form:
+the gaze's error (the target's bearing in the head's frame) as the head brain's sense with a prior to zero, through
+the yaw it now owns on the walk. Presets "GAZE · the body-slot brain + …" (the candidate, its control, the bound).
