@@ -1114,3 +1114,34 @@ TEST(StatePrior, GrowOnRestoreInsertsUnidentifiedRows) {
     for (uint64_t t = 200; t < 205; ++t) tick_width(bus2, d, t, W, W - 1, wobble(t), 0.3f);
     EXPECT_EQ(d.state_dim(), kStateN);
 }
+
+// =============================================================================
+// 12. state_prior_gated_by (2026-10-01, the pace gate): the ungated sentinel is byte-identical to no gate; a gate
+//     on an element that keeps changing (the scripted joint 0, a sinusoid) lowers the index's precision -- the
+//     command differs and the diag's gate reads below 1.
+// =============================================================================
+TEST(StatePrior, PaceGateUngatedIdenticalChangingElementGates) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.0};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    auto pu = pe; pu["state_prior_gated_by"] = std::vector<double>{9999.0};
+    auto pg = pe; pg["state_prior_gated_by"] = std::vector<double>{0.0};
+    Fixture E(pe), U(pu), G(pg);
+    double du = 0.0, dg = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); U.run_tick(t, lean); G.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            du = std::max(du, double(std::fabs(E.accel(j) - U.accel(j))));
+            dg = std::max(dg, double(std::fabs(E.accel(j) - G.accel(j))));
+        }
+    }
+    EXPECT_EQ(du, 0.0) << "an ungated index must be byte-identical to no gate";
+    EXPECT_GT(dg, 1e-4) << "a gate on a changing element must change the command";
+    const auto diag = G.m.diag_snapshot();
+    ASSERT_TRUE(diag.contains("state_prior_gate"));
+    EXPECT_LT(diag["state_prior_gate"].get<double>(), 1.0);
+    EXPECT_GE(diag["state_prior_gate"].get<double>(), 0.0);
+}

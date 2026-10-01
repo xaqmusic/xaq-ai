@@ -174,6 +174,15 @@ ParamSchema MotorEPMv2::params_schema() const {
          "made in (the six-motor walker's head: the speed prior leans it, a level prior brings it home). Empty = all 1 "
          "(byte-identical).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_gated_by", ParamMutability::HotMutable,
+         "THE PACE GATE (2026-10-01, the bird's neck): parallel to state_prior_indices, the state element whose STEADINESS "
+         "gates that index's precision (>= 9999 = ungated). The element's change at the stride's timescale -- its 0.5 s "
+         "EMA minus its 2 s EMA -- is read against that difference's own running RMS (a 30 s EMA: adapted, not tuned), "
+         "and the gate is 1 - |d| / rms clamped to [0, 1]: full precision while the element holds, none while it is "
+         "changing by its typical amount. It multiplies the index's descent and its row in the model-implied step. The "
+         "use it was built for: a centring prior on where the head sits fore-aft, on at a steady pace and off while the "
+         "speed changes, so the head may reach into an acceleration and come home at a cruise. Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
         {"state_grow_at", ParamMutability::HotMutable,
          "GROW ON RESTORE (2026-10-01): a restored module whose state arrives WIDER than its snapshot inserts the new "
          "elements at this index of the new layout -- the model's rows, the controller's columns, the state model's "
@@ -1155,6 +1164,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["lookahead_mode"] = lookahead_mode_;
     m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
     m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
+    m["state_prior_gated_by"] = state_prior_gated_by_;
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1347,6 +1357,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_indices", [&](auto const& v){ state_prior_indices_ = get_double_vec(v, "state_prior_indices"); });
     apply_param(params, "state_prior_motors", [&](auto const& v){ state_prior_motors_ = get_double_vec(v, "state_prior_motors"); });
     apply_param(params, "state_prior_weights", [&](auto const& v){ state_prior_weights_ = get_double_vec(v, "state_prior_weights"); });
+    apply_param(params, "state_prior_gated_by", [&](auto const& v){ state_prior_gated_by_ = get_double_vec(v, "state_prior_gated_by"); });
     apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
@@ -2760,6 +2771,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_indices") state_prior_indices_ = get_double_vec(value, "state_prior_indices");
     else if (key == "state_prior_motors") state_prior_motors_ = get_double_vec(value, "state_prior_motors");
     else if (key == "state_prior_weights") state_prior_weights_ = get_double_vec(value, "state_prior_weights");
+    else if (key == "state_prior_gated_by") state_prior_gated_by_ = get_double_vec(value, "state_prior_gated_by");
     else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
@@ -3048,6 +3060,36 @@ void MotorEPMv2::ensure_leg_init(int leg, int n) {
     L.steps_seen = 0;
     L.babble_rng.seed(static_cast<uint32_t>(base_seed_ ^ (0x2545F491u + uint32_t(leg))));
     L.initialized = true;
+}
+
+// THE PACE GATE (state_prior_gated_by): once a tick, per prior index, the steadiness of its gating element.
+void MotorEPMv2::update_prior_gates(Leg& L) {
+    const size_t K = state_prior_indices_.size();
+    if (L.gate_g.size() != K) {
+        L.gate_fast.assign(K, 0.0f); L.gate_slow.assign(K, 0.0f); L.gate_var.assign(K, 0.0f); L.gate_g.assign(K, 1.0f);
+        for (size_t k = 0; k < K && k < state_prior_gated_by_.size(); ++k) {
+            int j = int(state_prior_gated_by_[k]);
+            if (j >= 9999) continue;
+            if (j < 0) j += L.n;
+            if (j >= 0 && j < L.n) { L.gate_fast[k] = L.gate_slow[k] = L.x[j]; }
+        }
+    }
+    float sum = 0.0f; int cnt = 0;
+    for (size_t k = 0; k < K; ++k) {
+        L.gate_g[k] = 1.0f;
+        if (k >= state_prior_gated_by_.size() || state_prior_gated_by_[k] >= 9999.0) continue;
+        int j = int(state_prior_gated_by_[k]);
+        if (j < 0) j += L.n;
+        if (j < 0 || j >= L.n) continue;
+        L.gate_fast[k] += (1.0f / 25.0f) * (L.x[j] - L.gate_fast[k]);     // 0.5 s: the stride averaged out
+        L.gate_slow[k] += (1.0f / 100.0f) * (L.x[j] - L.gate_slow[k]);    // 2 s
+        const float d = L.gate_fast[k] - L.gate_slow[k];
+        L.gate_var[k] += (1.0f / 1500.0f) * (d * d - L.gate_var[k]);      // 30 s: the change's own typical size
+        const float rms = std::sqrt(L.gate_var[k]) + 1e-6f;
+        L.gate_g[k] = std::clamp(1.0f - std::fabs(d) / rms, 0.0f, 1.0f);
+        sum += L.gate_g[k]; ++cnt;
+    }
+    gate_mean_ = cnt ? sum / float(cnt) : 1.0f;
 }
 
 // GROW ON RESTORE (state_grow_at): insert k zero state elements at index g of every n-sized member of the leg.
@@ -4419,6 +4461,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                        && state_prior_indices_.size() == state_prior_targets_.size();
                     float sp_err = 0.0f; int sp_n = 0;
                     float gate_err = 0.0f; int gate_n = 0;
+                    if (sp_ok && !state_prior_gated_by_.empty()) update_prior_gates(L);
                     if (sp_ok) {
                         // consolidate_spares_prior: the anneal stops the destroyer (HK),
                         // not the objective — the GN step self-terminates at e = 0.
@@ -4509,7 +4552,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             const float gw = (consolidate_n_ > 0.0 && int(k) < int(consolidate_n_))
                                              ? float(state_prior_gate_weight_) : 1.0f;
                             // state_prior_weights: this index's own precision (empty = 1, byte-identical)
-                            const float pw = (k < state_prior_weights_.size()) ? float(state_prior_weights_[k]) : 1.0f;
+                            float pw = (k < state_prior_weights_.size()) ? float(state_prior_weights_[k]) : 1.0f;
+                            if (k < L.gate_g.size() && !state_prior_gated_by_.empty()) pw *= L.gate_g[k];   // the pace gate
                             const float lw_k  = gw * lw_raw * pw;
                             const float hlw_k = gw * hlw_raw * pw;
                             if (reach_k) reach_lw_last_ = lw_k;
@@ -5037,8 +5081,10 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     ep[kk] = float(state_prior_targets_[size_t(k)]) - L.x[idx];
                     // state_prior_weights: a weighted least squares, the row and its error scaled by sqrt(w)
                     // (absent = 1, byte-identical; 0 = the row has no say in the step)
-                    if (size_t(k) < state_prior_weights_.size()) {
-                        const float sw = std::sqrt(std::max(0.0f, float(state_prior_weights_[size_t(k)])));
+                    if (size_t(k) < state_prior_weights_.size() || (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size())) {
+                        float wk = size_t(k) < state_prior_weights_.size() ? float(state_prior_weights_[size_t(k)]) : 1.0f;
+                        if (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size()) wk *= L.gate_g[size_t(k)];   // the pace gate
+                        const float sw = std::sqrt(std::max(0.0f, wk));
                         Ap.row(kk) *= sw; ep[kk] *= sw;
                     }
                     ++kk;
@@ -6475,6 +6521,7 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
     j["state_prior_w"]   = state_prior_gain_;
     j["state_prior_applied"] = state_prior_applied_;
+    if (!state_prior_gated_by_.empty()) j["state_prior_gate"] = gate_mean_;   // the pace gate (mean over gated indices)
     j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
     j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)
     j["consolidate_gate"] = state_prior_gate_ema_;  // the gate subset's own satisfaction EMA

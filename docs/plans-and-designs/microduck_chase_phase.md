@@ -603,3 +603,9 @@ centring prior the head reaches forward into an acceleration (+0.12 rad) and dri
 50 → 60 %, the walk +8 %, falls 2.0 → 2.6 (`PARTIAL`). With the centring prior at 1 the head is centred at a cruise and
 everything ties the control (`NULL`). Next: the centring prior gated by the pace — on at a steady pace, off while the
 speed error changes — to keep the reach and drop the drift. Presets "BIRD · ROOM · …", "BIRD · PLAYROOM · …".
+
+**The pace-gated centring (§17.88, n = 18):** the centring prior gated by the pace (`state_prior_gated_by`) at 1 keeps
+the bird's steering (closing 63 % against the still head's 50) at the still head's falls (1.9 against 2.0), the cruise
+drift cut to −0.10 rad, the walk +6 %, walls +5 a minute; the head slides back as the duck brakes and backs, and does
+not reach forward into an acceleration (the walker credits a forward head with slowing). The candidate for the eye:
+preset "BIRD · PLAYROOM · the bird's neck + the PACE-GATED centring at 1 (the candidate)".

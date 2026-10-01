@@ -1319,6 +1319,9 @@ private:
         Eigen::MatrixXf     Cdep;                 // m x n  accumulated Δy·Δxᵀ correlation
         Eigen::VectorXf     rest_pos;             // standing pose captured at spawn (m pos targets)
         bool                rest_captured = false;
+        // state_prior_gated_by (the pace gate, 2026-10-01): per prior index, the gating element's fast / slow EMAs, the
+        // running variance of their difference, and the gate itself (1 = steady).  Transient: not in the snapshot.
+        std::vector<float>  gate_fast, gate_slow, gate_var, gate_g;
         bool                have_prev   = false;
         bool                fresh       = false;  // new proprio arrived this tick
         int64_t             steps_seen  = 0;      // proprio frames processed (warmup counter)
@@ -1347,7 +1350,8 @@ private:
         bool                step_locked  = false; // false ⇒ the stroke falls back to L.phase
     };
     std::vector<Leg> legs_;
-    void grow_leg(Leg& L, int at, int k);        // state_grow_at: insert k unidentified state elements at `at`
+    void grow_leg(Leg& L, int at, int k);
+    void update_prior_gates(Leg& L);           // state_prior_gated_by: the pace gate of each prior index, once a tick        // state_grow_at: insert k unidentified state elements at `at`
 
     static constexpr float kTeleEmaAlpha   = 0.02f;
     static constexpr float kKneeEmaAlpha   = 0.01f;   // slow mean for the phase reference
@@ -1570,6 +1574,8 @@ private:
     //   1. ξ̃[idx] *= (1−w) — the sensitivity rule may REST on the prior-owned dim;
     //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
     std::vector<double> state_prior_indices_;
+    std::vector<double> state_prior_gated_by_; // parallel: the state element whose steadiness gates each prior index (empty / >= 9999 = ungated)
+    float gate_mean_ = 1.0f;                   // diag: the mean pace gate over the gated indices, last tick
     std::vector<double> state_prior_weights_;  // parallel: each prior index's precision (empty = 1)
     int state_grow_at_ = -1;                   // grow on restore: where a wider state's new elements go (-1 = off)
     std::vector<double> state_prior_motors_;   // parallel: leading motors each prior index may descend through (0 = all)   // state indices; NEGATIVE = from the end (−1 = last)

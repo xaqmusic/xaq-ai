@@ -6074,3 +6074,29 @@ the no-prior arm's acceleration phase without its cruise; between the two, the c
 in between. Re-use: the drift is the speed prior's unmet target (§17.87's rail); a centring prior gated by the pace
 (on at a cruise, off while the speed error is changing) is the form that would keep the reach and drop the drift —
 the same gate §17.87 names for the level prior. Presets "BIRD · …" for the eye.
+
+**The pace gate (2026-10-01, the operator: "proceed with the pace-gated centring").** Built
+`MotorEPMv2.state_prior_gated_by` (parallel to the prior's indices: the state element whose steadiness gates each
+index; the element's 0.5 s EMA minus its 2 s EMA against that difference's own 30 s RMS, gate = 1 − |d|/rms clamped;
+it multiplies the index's descent and its row in the step; empty = byte-identical; unit-tested, 26/26). Guards: R83
+`6b9a0b3a…`, six-motor `915e1391…`, and the bird's neck's config identical to the previous build's sweep for its
+first 4 847 ticks (the divergence after is the host declining a stop a 150 s run has no time for). Configs
+`a1v2_r113_fore_g10 / g30`: the centring prior at 1 / 3 gated by the sensed forward speed (state 0).
+
+| playroom, n = 18 | control | bird, no prior | centring 1 | **centring 1, pace-gated** | gated at 3 |
+|---|---|---|---|---|---|
+| falls a run | 2.0 | 2.6 | 1.8 | **1.9** | 3.2 |
+| closing · the error closed within 3 s | 50 % · 33 % | 60 % · 41 % | 52 % · 38 % | **63 % · 41 %** | 56 % · 40 % |
+| walls / min · walk m/s · arrivals | 29 · 0.173 · 17.6 | 32 · 0.187 · 18.5 | 36 · 0.173 · 16.8 | **34 · 0.183 · 18.1** | 33 · 0.179 · 17.1 |
+| head fore-aft: accelerating · cruise · decelerating · backing | ≈ 0 | +0.12 · −0.40 · −0.08 · −0.15 | −0.05 · −0.06 · −0.10 · −0.10 | −0.05 · **−0.10** · −0.13 · −0.22 | +0.01 · −0.04 · −0.06 · −0.09 |
+
+The gate reconstructed offline from the logged speed (six runs): open 0.46 on average at a cruise, 0.31 accelerating,
+0.20 decelerating — it discriminates, softly (closed on a third of cruise ticks), so the centring at a steady pace
+runs at about 0.4 of its weight. **Verdict: the pace-gated centring at 1 is the best bird's-neck arm on the full set
+— the steering gain of the no-prior arm (closing +13 points, the error closed within 3 s +8) at the still head's fall
+rate, the cruise drift a quarter of the no-prior arm's, the walk +6 %; walls +5 a minute against the control.
+`PARTIAL` leaning `WORKING`; the eye decides.** The forward reach into an acceleration did not survive the gate: the
+walker identified a forward head as slowing this policy, so nothing asks for it; what the gated arm does is slide the
+head BACK as the body brakes and backs — the pendulum's move for a negative acceleration. Re-use: a sharper gate
+(the threshold at 2 RMS, or the gate on the speed error's change rather than the speed's) would centre harder at a
+cruise; the forward reach needs a body that credits it, which this policy does not.
