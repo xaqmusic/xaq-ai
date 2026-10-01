@@ -1180,3 +1180,29 @@ TEST(StatePrior, CWeightZeroMakesAPureReach) {
     double hn = 0.0; for (float v : h0) hn += std::fabs(v);
     EXPECT_GT(hn, 1e-4) << "the reach still moves h";
 }
+
+// =============================================================================
+// 14. state_prior_target_gated_by (2026-10-01): the ungated sentinel is byte-identical to none; a target scaled by the
+//     size of an element that varies (the scripted joint 0) changes the command.
+// =============================================================================
+TEST(StatePrior, TargetGateUngatedIdenticalGatedActs) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.4};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    auto pu = pe; pu["state_prior_target_gated_by"] = std::vector<double>{9999.0};
+    auto pg = pe; pg["state_prior_target_gated_by"] = std::vector<double>{0.0};
+    Fixture E(pe), U(pu), G(pg);
+    double du = 0.0, dg = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); U.run_tick(t, lean); G.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            du = std::max(du, double(std::fabs(E.accel(j) - U.accel(j))));
+            dg = std::max(dg, double(std::fabs(E.accel(j) - G.accel(j))));
+        }
+    }
+    EXPECT_EQ(du, 0.0) << "an ungated target must be byte-identical to none";
+    EXPECT_GT(dg, 1e-4) << "a target gated by a varying element must change the command";
+}

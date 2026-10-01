@@ -182,6 +182,15 @@ ParamSchema MotorEPMv2::params_schema() const {
          "through a lagging servo (+2.41 in 300 s: the yaw thrashed at 2.7 rad/s and the duck fell); 0 here makes that "
          "index a pure reach. Empty = 1 everywhere (byte-identical).",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gated_by", ParamMutability::HotMutable,
+         "THE TARGET'S GATE (2026-10-01, the arrival that faces its thing): parallel to state_prior_indices, the state "
+         "element whose SIZE scales that index's target (>= 9999 = ungated): target x (1 - |x_j| / rms_j) clamped to "
+         "[0, 1], rms_j the element's own running RMS (a 30 s EMA of its square: adapted, not tuned). The use it was built "
+         "for: the walker's forward-speed prior scaled by the heading error -- full speed asked for while the target is "
+         "ahead, none once the error reaches its typical size -- so the walk slows and turns to face a thing instead of "
+         "carrying its turn into the arrival (the kick and peck fire straight ahead). Acts on the descent's error and on "
+         "the model-implied step's. Empty = byte-identical.",
+         std::nullopt, std::nullopt, std::nullopt},
         {"state_prior_gated_by", ParamMutability::HotMutable,
          "THE PACE GATE (2026-10-01, the bird's neck): parallel to state_prior_indices, the state element whose STEADINESS "
          "gates that index's precision (>= 9999 = ungated). The element's change at the stride's timescale -- its 0.5 s "
@@ -1173,6 +1182,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_indices"] = state_prior_indices_; m["state_prior_motors"] = state_prior_motors_;
     m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
     m["state_prior_gated_by"] = state_prior_gated_by_; m["state_prior_c_weights"] = state_prior_c_weights_;
+    m["state_prior_target_gated_by"] = state_prior_target_gated_by_;
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1367,6 +1377,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_weights", [&](auto const& v){ state_prior_weights_ = get_double_vec(v, "state_prior_weights"); });
     apply_param(params, "state_prior_gated_by", [&](auto const& v){ state_prior_gated_by_ = get_double_vec(v, "state_prior_gated_by"); });
     apply_param(params, "state_prior_c_weights", [&](auto const& v){ state_prior_c_weights_ = get_double_vec(v, "state_prior_c_weights"); });
+    apply_param(params, "state_prior_target_gated_by", [&](auto const& v){ state_prior_target_gated_by_ = get_double_vec(v, "state_prior_target_gated_by"); });
     apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
@@ -2782,6 +2793,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_weights") state_prior_weights_ = get_double_vec(value, "state_prior_weights");
     else if (key == "state_prior_gated_by") state_prior_gated_by_ = get_double_vec(value, "state_prior_gated_by");
     else if (key == "state_prior_c_weights") state_prior_c_weights_ = get_double_vec(value, "state_prior_c_weights");
+    else if (key == "state_prior_target_gated_by") state_prior_target_gated_by_ = get_double_vec(value, "state_prior_target_gated_by");
     else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
@@ -3100,6 +3112,21 @@ void MotorEPMv2::update_prior_gates(Leg& L) {
         sum += L.gate_g[k]; ++cnt;
     }
     gate_mean_ = cnt ? sum / float(cnt) : 1.0f;
+    // the target's gate (state_prior_target_gated_by): the gating element's size against its own running RMS
+    if (!state_prior_target_gated_by_.empty()) {
+        if (L.tgate.size() != K) { L.tgate.assign(K, 1.0f); L.tgate_var.assign(K, 0.0f); }
+        for (size_t k = 0; k < K; ++k) {
+            L.tgate[k] = 1.0f;
+            if (k >= state_prior_target_gated_by_.size() || state_prior_target_gated_by_[k] >= 9999.0) continue;
+            int j = int(state_prior_target_gated_by_[k]);
+            if (j < 0) j += L.n;
+            if (j < 0 || j >= L.n) continue;
+            const float v = L.x[j];
+            L.tgate_var[k] += (1.0f / 1500.0f) * (v * v - L.tgate_var[k]);
+            const float rms = std::sqrt(L.tgate_var[k]) + 1e-6f;
+            L.tgate[k] = std::clamp(1.0f - std::fabs(v) / rms, 0.0f, 1.0f);
+        }
+    }
 }
 
 // GROW ON RESTORE (state_grow_at): insert k zero state elements at index g of every n-sized member of the leg.
@@ -4471,7 +4498,7 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                                        && state_prior_indices_.size() == state_prior_targets_.size();
                     float sp_err = 0.0f; int sp_n = 0;
                     float gate_err = 0.0f; int gate_n = 0;
-                    if (sp_ok && !state_prior_gated_by_.empty()) update_prior_gates(L);
+                    if (sp_ok && (!state_prior_gated_by_.empty() || !state_prior_target_gated_by_.empty())) update_prior_gates(L);
                     if (sp_ok) {
                         // consolidate_spares_prior: the anneal stops the destroyer (HK),
                         // not the objective — the GN step self-terminates at e = 0.
@@ -4485,7 +4512,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                             int idx = int(state_prior_indices_[k]);
                             if (idx < 0) idx += n;
                             if (idx < 0 || idx >= n) continue;
-                            const float e = float(state_prior_targets_[k]) - L.x[idx];
+                            const float tg = (!state_prior_target_gated_by_.empty() && k < L.tgate.size()) ? L.tgate[k] : 1.0f;   // the target's gate
+                            const float e = float(state_prior_targets_[k]) * tg - L.x[idx];
                             // Gauss-Newton normalisation (§5.5: adapt to the signal's own
                             // scale, never tune to it): the raw gradient is DOUBLY small —
                             // e routed through a small-authority channel A(idx,j) — so the
@@ -5093,7 +5121,8 @@ void MotorEPMv2::tick(uint64_t tick_id) {
                     if (idx < 0) idx += L.n;
                     if (idx < 0 || idx >= L.n) continue;      // out of range: skip, as the descent does
                     Ap.row(kk) = L.A.row(idx);
-                    ep[kk] = float(state_prior_targets_[size_t(k)]) - L.x[idx];
+                    const float tgs = (!state_prior_target_gated_by_.empty() && size_t(k) < L.tgate.size()) ? L.tgate[size_t(k)] : 1.0f;
+                    ep[kk] = float(state_prior_targets_[size_t(k)]) * tgs - L.x[idx];
                     // state_prior_weights: a weighted least squares, the row and its error scaled by sqrt(w)
                     // (absent = 1, byte-identical; 0 = the row has no say in the step)
                     if (size_t(k) < state_prior_weights_.size() || (!state_prior_gated_by_.empty() && size_t(k) < L.gate_g.size())) {

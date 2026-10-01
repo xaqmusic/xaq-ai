@@ -1322,6 +1322,7 @@ private:
         // state_prior_gated_by (the pace gate, 2026-10-01): per prior index, the gating element's fast / slow EMAs, the
         // running variance of their difference, and the gate itself (1 = steady).  Transient: not in the snapshot.
         std::vector<float>  gate_fast, gate_slow, gate_var, gate_g;
+        std::vector<float>  tgate_var, tgate;           // state_prior_target_gated_by: the gating element's running mean square, the target's scale
         bool                have_prev   = false;
         bool                fresh       = false;  // new proprio arrived this tick
         int64_t             steps_seen  = 0;      // proprio frames processed (warmup counter)
@@ -1575,6 +1576,7 @@ private:
     //   2. C/h descend the prior's own error through the LEARNED model A(idx,·).
     std::vector<double> state_prior_indices_;
     std::vector<double> state_prior_c_weights_; // parallel: the weight on each prior index's C (feedback) descent only (empty = 1)
+    std::vector<double> state_prior_target_gated_by_; // parallel: the state element whose SIZE scales each prior index's target (empty / >= 9999 = ungated)
     std::vector<double> state_prior_gated_by_; // parallel: the state element whose steadiness gates each prior index (empty / >= 9999 = ungated)
     float gate_mean_ = 1.0f;                   // diag: the mean pace gate over the gated indices, last tick
     std::vector<double> state_prior_weights_;  // parallel: each prior index's precision (empty = 1)
