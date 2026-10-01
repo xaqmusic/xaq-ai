@@ -676,3 +676,8 @@ pure reach that is a velocity under the controller's identity hold; the level pr
 re-identifying with yaw last and masking the level priors), it looks — the target in view 90 % against 45 %, the yaw
 smooth — and does not yet help the walk (walls 33 against 24, falls 2.6 against 1.8). `PARTIAL`; the reflex stays the
 better walker. Preset "GAZE · LEARNED …".
+
+**The follow-ups (§17.90, n = 18):** the stop slew takes the falls at a stop's start 0.6 → 0.2 (under the control's 0.3)
+and lifts arrivals; the proportional term at 0.03 brings walls to the control's level, at 0.1 the yaw thrashes again;
+the two together keep neither gain. The learned gaze stays `PARTIAL`; the reflex stays the better walker. Next form to
+try: the model's own one-step correction (`state_prior_step_gain`) as the proportional term.

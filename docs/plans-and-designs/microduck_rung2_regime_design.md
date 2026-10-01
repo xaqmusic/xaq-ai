@@ -6210,3 +6210,26 @@ command: the reflex is a proportional position at a fixed rate; the learned reac
 the target switches and must unwind when seek lets go. Re-use: a proportional term the head brain can earn (the
 feedback half at a small weight, now that the level tonic no longer drives yaw), and the stop's take-over from a
 turned head (slewed from where the gaze left it). Presets "GAZE · LEARNED …" and its control.
+
+**The two follow-ups (the operator: "add the proportional term and the stop slew"; sweeps z12, z13, n = 18).**
+`--head-stop-slew RATE` (`HeadAdapter.set_release_slew`): during a stop, until the look's override takes the yaw, the
+yaw slews home at RATE; when an override lets go, the yaw slews back to the head brain's command instead of stepping
+(off = byte-identical; ★ BIRD and the learned gaze reproduce over 600 s). The proportional term: the gaze prior's
+feedback half at weight 0.03 / 0.1 (`head3o_h2_gaze_p03 / _p1`).
+
+| n = 18 | learned gaze | + stop slew | + P 0.03 | + P 0.1 | + P 0.1, slew | + P 0.03, slew | control (no gaze) |
+|---|---|---|---|---|---|---|---|
+| falls a run · within 3 s of a stop | 2.6 · 0.6 | 3.1 · **0.2** | 2.4 · 0.8 | 7.4 · 1.5 | 4.9 · 0.6 | 2.8 · 0.7 | 1.8 · 0.3 |
+| walls / min · arrivals | 33 · 17.4 | 34 · **19.0** | **26** · 16.7 | 37 · 15.9 | 37 · 16.0 | 34 · 16.7 | 24 · 17.6 |
+| closing · the error closed within 3 s | 57 · 40 % | 55 · 44 % | 52 · 41 % | 50 · 47 % | 49 · 36 % | 51 · 40 % | 56 · 41 % |
+| yaw speed p50 · p90 (rad/s) | 0.14 · 0.61 | 0.16 · 0.84 | 0.27 · 0.95 | 0.74 · 2.88 | 0.75 · 2.50 | 0.36 · 1.17 | 0.09 · 0.29 |
+
+**Verdicts.** The stop slew: `WORKING` on its own target (falls at a stop's start 0.6 → 0.2, under the control's 0.3;
+arrivals the best of any arm) and `NULL` on the walk (walk falls up). The proportional term at 0.1: `REGRESSION` — the
+gain grows again and the yaw thrashes, as in §17.90's first form. At 0.03: walls back to the control's level (26 against
+24), the rest a tie. The two together: `NULL` — neither keeps its gain (at n = 18 the stop-fall counts between 0.2 and
+0.8 are near the noise). **The learned gaze stays `PARTIAL`**: it looks as the reflex does and does not yet help the
+walk against its own control. What the series shows about the module, for the next form: the feedback half grows
+without a bound on a large error (0.1 thrashes, 0.03 is mild), so a learned proportional gain wants a bound the module
+can earn — the model's own one-step correction (`state_prior_step_gain`, the per-tick least-squares command) is that
+proportional form, and it is the lever not yet tried here.
