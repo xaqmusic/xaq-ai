@@ -17,6 +17,7 @@
 // than in somebody's memory.
 
 #include <algorithm>
+#include <deque>
 #include <sstream>
 #include <cmath>
 #include <functional>
@@ -1302,6 +1303,8 @@ double g_stuck_contact = 0.0;   // --stuck-contact T: a forward push with the To
 bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = false;   // --contact-forget: a contact stall drops the seek target (lever 1b)   // --contact-release, --contact-cloud (§17.84)
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
+double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
+double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0;   // --seek-gaze K [RATE]: on the walk the head yaw turns toward the seek loop's target
 double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
 bool g_intent_head_sense = false;   // --intent-head-sense: the head's roll and pitch at the front of the walker's sense (the graph declares load_slots 18)
 double g_intent_head = 0.0, g_intent_head_tau = 0.0, g_head_rate = 0.0, g_head_home_s = 0.0; bool g_tell_head = false;   // --head-home S: for S s after a stop begins the head's targets are HOME (slewed), then the head brain's   // --tell-head: while the head brain owns the joints the policy's head command is where the head IS (offsets from home), not zero   // --head-slew R: the head's joint targets and command slew at most R rad/s across an ownership hand-off (0 = off; --head-rate is the older head-brain lever)   // --intent-head F [TAU]: the head command's low-pass time constant (s), 0 = none   // --intent-head F: the intent's four head actions drive the walker's head command on the walk (a fraction F of the trained ranges)
@@ -1548,6 +1551,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_head_home_s > 0.0) std::fprintf(stderr, "  head home: for %.1f s after a stop begins the head's targets are home (slewed), then the head brain's -- the level loop starts from level, not from where the walk left the head\n", g_head_home_s);
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
+    if (g_tof_body >= 0.0) std::fprintf(stderr, "  tof body: the walker's left / ahead / right ToF slots by BODY azimuth from the last %.2f s of returns, carried by the odometry (the too-close slot as before)\n", g_tof_body);
+    if (g_seek_gaze > 0.0) {
+        if (!g_head_joints) throw std::runtime_error("--seek-gaze turns the head brain's yaw joint: it needs --head-joints");
+        std::fprintf(stderr, "  seek gaze: on the walk the head yaw turns toward the seek loop's held target (gain %.2f, +-0.7 rad, at most %.2f rad/s), home at stops\n", g_seek_gaze, g_seek_gaze_rate);
+    }
     if (g_translate > 0.0) {
         if (!g_head_joints) throw std::runtime_error("--intent-head-translate rides on the head brain's joints: it needs --head-joints");
         brain.set_intent_translate(g_translate);
@@ -2419,6 +2427,17 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             const auto hcmd = head->last_command();
             for (int i = 0; i < 4; ++i) head_targets[size_t(i)] = kHomePose[size_t(5 + i)] + hcmd[size_t(i)];
             head_targets[0] += g_head_forward; head_targets[1] += g_head_forward;   // the neck and head pitched forward
+            if (g_seek_gaze > 0.0) {
+                // THE GAZE LEADS THE TURN (--seek-gaze, 2026-10-01): on the walk the head yaw turns toward the target the
+                // seek loop holds (its body-frame bearing, + = right; the yaw joint is + left), rate-limited like a servo,
+                // home at stops (the stop's own gaze takes over there).  A reflex form first: does looking help at all
+                // once the walker's slots no longer turn with the head (--tof-body)?
+                static double gaze = 0.0;
+                double want = 0.0;
+                if (stop_phase == StopPhase::None && brain.last_steer() == 3) want = std::clamp(-g_seek_gaze * brain.seek_ego(), -0.7, 0.7);   // only while seek holds the reference: its bearing is this tick's
+                gaze += std::clamp(want - gaze, -g_seek_gaze_rate / kBrainHz, g_seek_gaze_rate / kBrainHz);
+                head_targets[2] += gaze;
+            }
             if (g_chase_gaze > 0.0 && chase_on && stop_phase == StopPhase::None) {
                 const double ge = brain.chase_gaze_ego();                    // + = right; the head yaw joint is + left
                 if (std::isfinite(ge)) head_targets[2] += std::clamp(-g_chase_gaze * ge, -0.7, 0.7);
@@ -2562,6 +2581,34 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             if (t % 4 == 0) {
                 tof.sense(body, p[2]);
                 tof_summary = tof.summary();
+                if (g_tof_body >= 0.0) {
+                    // THE BODY-FRAME SLOTS (--tof-body, 2026-10-01): the walker's avoidance read the sensor's columns, so a
+                    // head turned sideways pointed its "ahead" sideways (sweep 80: walls doubled).  Here every Hit return of
+                    // the last MEM s, carried by the odometry into the current body frame, is binned by its BODY azimuth from
+                    // the sensor into the sensor's own sector widths (left 5.6-22.5 deg, ahead +-5.6, right); a glance away
+                    // leaves the ahead sector holding what was seen a moment ago.  The too-close share stays the sensor's.
+                    struct BodyPt { int tick; double x, y; };          // the return in the odometry frame
+                    static std::deque<BodyPt> pts;
+                    const double yw = odom.yaw(), cy = std::cos(yw), sy = std::sin(yw);
+                    for (const auto& z : tof.zones()) {
+                        if (z.cls != TofZone::Hit) continue;
+                        pts.push_back({t, p[0] + cy * z.point_level[0] - sy * z.point_level[1], p[1] + sy * z.point_level[0] + cy * z.point_level[1]});
+                    }
+                    const int keep = int(std::lround(g_tof_body * kBrainHz));
+                    while (!pts.empty() && pts.front().tick < t - keep) pts.pop_front();
+                    const auto& so = tof.origin_level();
+                    const double half = 22.5 * M_PI / 180.0, mid = 5.625 * M_PI / 180.0;
+                    double rmin[3] = {Tof::kMaxRangeM, Tof::kMaxRangeM, Tof::kMaxRangeM};
+                    for (const auto& q : pts) {
+                        const double wx = q.x - p[0], wy = q.y - p[1];
+                        const double bx = cy * wx + sy * wy - so[0], by = -sy * wx + cy * wy - so[1];   // body frame, from the sensor
+                        const double az = std::atan2(by, bx), r = std::hypot(bx, by);
+                        if (std::fabs(az) > half) continue;
+                        const int sec = az > mid ? 0 : (az < -mid ? 2 : 1);
+                        rmin[sec] = std::min(rmin[sec], r);
+                    }
+                    for (int k = 0; k < 3; ++k) tof_summary[size_t(k)] = float(std::clamp(1.0 - rmin[k] / 1.0, 0.0, 1.0));
+                }
                 ++tof_ticks;
             }
             {
@@ -3190,6 +3237,11 @@ int main(int argc, char** argv) {
         } else if (a == "--tof-real") {
             g_tof_spread = std::stod(next("--tof-real"));
             g_tof_lag = std::stod(next("--tof-real"));
+        } else if (a == "--tof-body") {
+            g_tof_body = std::stod(next("--tof-body"));
+        } else if (a == "--seek-gaze") {
+            g_seek_gaze = std::stod(next("--seek-gaze"));
+            if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_seek_gaze_rate = std::stod(next("--seek-gaze"));
         } else if (a == "--intent-head-translate") {
             g_translate = std::stod(next("--intent-head-translate"));
             if (i + 1 < argc && std::strspn(argv[i + 1], "0123456789.") == std::strlen(argv[i + 1])) g_translate_rate = std::stod(next("--intent-head-translate"));
