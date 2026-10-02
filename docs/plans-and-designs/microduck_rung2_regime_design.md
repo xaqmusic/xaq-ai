@@ -6447,3 +6447,9 @@ walker (`duck_forebody_s1`, grown by the range sense) with the dynamic-range gat
 touches up across the run, the most arrivals of any arm, the speed kept; the cost half a fall a run (0.9 at stops). The
 linear-yaw walker: `REGRESSION` on the first approach (its gains elsewhere — walls 18 — stand, re-use: a heading loop
 damped for the calibrated motor). Preset "TURN · the dynamic range on ★ GAZE's walker (the candidate)".
+
+**★ TURN promoted (2026-10-02, the operator's eye):** "we can promote this approach. We still need to address underlying
+issues with navigation, but the current body mechanics seem to be the best so far." ★ TURN = ★ GAZE (★ BIRD's body-slot
+walker `duck_forebody_s1` with the learned gaze) + the walker's range sense (`--intent-range-sense`) + the dynamic-range
+speed target (`a1v2_r113_fore_g10_reach_gaze`: min(cos e, 0.64·range/|e|)) + the in-place deadband compensated only while
+slowed (`--yaw-linearize-below 0.15`). The cold start for the next push is chase phase §12.

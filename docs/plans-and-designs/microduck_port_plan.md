@@ -20,10 +20,10 @@
 
 ## ▶ Resume here
 
-**2026-10-01: ★ BIRD (chase phase §11, design doc §17.87–17.88).** The walker slides the head fore-aft with the neck
-and head pitch together (the view level), the head brain keeps the tilt, and a pace-gated centring prior holds the head
-home at a steady pace — promoted on the operator's eye ("an overall win: object seeking, voxel cloud clarity and
-escapes"). Start at chase phase §11; the open levers are at its end.
+**2026-10-02: ★ TURN (chase phase §12 — the cold start).** The body mechanics promoted: ★ BIRD's walker (the head slides
+fore-aft, the view level) with the learned gaze, a speed target that turns before it arrives, and the policy's in-place yaw
+deadband compensated when slowed. The operator judges the first minute. The next push is the NAVIGATION — the open items
+are listed at the end of §12.
 
 **State on 2026-09-30 evening: the chase phase's campaign is at a resting point. Start at
 [`microduck_chase_phase.md`](microduck_chase_phase.md) §9 (the cold start: the arms, the numbers, the instruments,

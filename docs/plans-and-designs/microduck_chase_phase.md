@@ -1,6 +1,6 @@
 # Microduck: the chase phase. Homing in on what moves
 
-Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §11 (the resting point, 2026-10-01: ★ BIRD, the bird's neck), then §10 (how it was reached) and §9 (the arms before it).**
+Status: **stages 0–1 measured 2026-09-27/29 (R84–R94)** (the stimulus, the instrument, the signal; the chase built, `WORKING` as a mechanism, `NULL` for the train in this room; the walking cloud's bearing fixed, the loud result); `★ THINGS` = R83 unchanged · Dates: 2026-09-27 → · Branch: `duck-l2` · Simulation only. **Picking the duck up cold? Start at §12 (the resting point, 2026-10-02: ★ TURN — the body mechanics; the navigation open), then §11 (★ BIRD) and §10.**
 
 *The phase after the things phase ([`microduck_things_phase.md`](microduck_things_phase.md) §10–13, `★ THINGS`
 R83). The operator's direction, the design discussion in the rewrite rule's terms, the stimulus built for it, and
@@ -709,3 +709,71 @@ start. Every linear-yaw walker arrived with the block 55–86° off (its calibra
 dynamic range on ★ GAZE's own walker, with the in-place deadband compensated only when slowed (`--yaw-linearize-below
 0.15`): the first minute ★ GAZE's or better (the block touched in 14/18 runs, the first skill touching it 10/14), pecks
 touching 51 %, kicks 49 %, arrivals 20.2, speed kept; falls 3.2 (2.6). Preset "TURN · the dynamic range on ★ GAZE's walker (the candidate)".
+
+## 12. Where we are (2026-10-02, for a cold start): ★ TURN — the body mechanics, and the navigation left open
+
+**Read first:** this section, then design doc §17.87–17.95 (the head, the gaze, the turning, the first minute), then §11.
+
+**The operator's verdict (2026-10-02):** "we can promote this approach. We still need to address underlying issues with
+navigation, but the current body mechanics seem to be the best so far." **The operator evaluates mostly the FIRST MINUTE**
+of the preset (seed 1): the walk to the green block 1.4 m ahead at the start, the kick, the peck. Check the first minute
+(`mj_host/tools/first_minute.py`) beside the current ★ before handing over any candidate — 600 s aggregates hid a
+first-minute regression once (§17.95).
+
+**★ TURN, layer by layer** (preset "★ TURN · the walk that turns before it arrives"; the host line = the campaign base +
+`--stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate` + the flags below):
+1. **★ BIRD's walker** — the twist + `action.head_fore` (the head slides fore-aft, the view level:
+   `--intent-head-translate 0.6 --intent-fore-sense`), the pace-gated centring prior; **identified with the walker's ToF
+   slots in the body frame** (`--tof-body 0.5`), checkpoint `duck_forebody_s1` (open 600 s + the 2 m room 600 s).
+2. **★ GAZE** — the head brain looks where the walk is going by a learned prior on its gaze error
+   (`--head-graph head3o_h2_gaze_w10 --load-head head3o_gaze_h1_s2_nohold --head-gaze-sense`; yaw last, the level
+   priors masked to pitch and roll, the gaze a pure reach, the yaw's identity hold released).
+3. **The dynamic range** — the walker senses the distance to its target (`--intent-range-sense`, grown on restore) and its
+   forward-speed target is min(cos e, 0.64·range/|e|): far away it keeps its speed and curves in, near a thing it slows
+   only as much as the remaining heading error needs (config `a1v2_r113_fore_g10_reach_gaze`).
+4. **The in-place deadband compensated only while slowed** (`--yaw-linearize-below 0.15`): the walking policy does not
+   turn in place below a ~1.25 rad/s yaw command; while walking, the raw yaw turns it — so ★ GAZE's walking yaw is untouched
+   and the slowed duck can square up.
+
+**Numbers (n = 18).** First minute: the green block touched in 14/18 runs (★ GAZE 13), the first skill at it 26° off the
+nose and touching on 10/14 (7/14). Over 600 s: the thing touched on 51 % of pecks (★ GAZE 32) and 49 % of kicks (37);
+arrivals 20.2 a run (17.4); walk 0.177 m/s; the target in the head's ToF field 91 % of seeking time; walls 33 a minute
+(a tie); falls 3.2 a run (2.6; 0.9 within 3 s of a stop's start).
+
+**Built in this push** (all off by default, byte-identical guards each time; MotorEPMv2 unit-tested, 30 tests in
+`test_state_prior.cpp`): MotorEPMv2 `state_prior_weights`, `state_grow_at`, `state_prior_gated_by` (the pace gate),
+`state_prior_c_weights` (a reach without feedback growth), `state_prior_target_gated_by` / `_gate_cos` / `_gate_pow` /
+`_gate_reach` / `_gate_reach_k`; host `--intent-head-sense`, `--intent-head-translate`, `--intent-fore-sense`,
+`--tof-real`, `--tof-body`, `--seek-gaze` (the reflex gaze, a scaffold), `--head-gaze-sense`, `--head-stop-slew`,
+`--twist-yaw-range`, `--yaw-linearize`, `--yaw-linearize-below`, `--intent-range-sense`; `scene_babble_room2m.xml`.
+
+**Instruments** (`mj_host/tools/`): `first_minute.py` (the operator's window), `skill_align.py` (the thing's true bearing
+and distance at every skill's start), `turning_readout.py` (the walk's turning: command, body, radius, orbiting),
+`gaze_readout.py` (the target in the ToF's field by body and head), `lean_readout.py` (`--channel fore`), `head_modes.py`,
+`tre_readout.py`. Touch, not displacement, scores a peck (the contact flag `obj` during the skill window).
+
+**The navigation, open (the operator's next push; the record's leads, in the order it suggests):**
+1. **The walker's yaw loop** (§17.91): it limit-cycles near 1 Hz, its yaw feedback row doubles in 300 s on large,
+   step-like errors (the heading jumps when the reference switches), its yaw tonic winds to the rail where small commands
+   turn nothing. The heading as a pure reach tied on the calibrated walker; on ★ TURN's walker it is untried.
+2. **The aim under clutter** (§17.91): the heading reflex aims the yaw at the reference 98 % of the time, and hands it
+   to the brain whenever something is within 1 m (80 % of large-error ticks in the playroom), where the brain aims
+   40–50 %. The reflex is a scaffold; the learned heading is the weak link.
+3. **The target belief near the target** (§17.95's trace): within half a metre the seek reference and the true bearing
+   part by 10–40° (a dead-reckoned position fixed from far sightings); a re-fix by sight in the last metre is O61's
+   standing re-use.
+4. **Walls** stay at ~33 a minute on ★ TURN (the linear-yaw walker reached 18 at the cost of the first approach);
+   the corner trap and the contact regime (§17.84–17.85) are the record's leads.
+5. **The speed prior's target is unreachable** (0.30 m/s against a ~0.2 m/s walk: the forward command sits at its rail
+   and its tonic drives every motor with authority over speed, §17.87).
+6. Smaller: the prior's model-implied step ignores `state_prior_motors` (§17.87); the six/seven-motor configs' "tilt
+   prior" is lateral speed (not in ★ TURN); ★ TURN at finding level (n ≥ 20 varied worlds + the (d) test) is unrun.
+
+**Traps recorded in this push.** The walker's state is `[pos, act, delta]` per twist joint, then the sense from index 9 —
+read the layout before indexing a prior; a new sense goes at the FRONT of the load block (negative indices keep their
+elements) or is grown in at a fixed index; identify a walker with the sense it acts on (the gaze on a column-slot brain
+lost; the same on a body-slot brain won); the MotorEPMv2 feedback half grows without bound on large step errors (the gaze
+thrash, the yaw limit cycle); under the controller's identity hold a tonic is a velocity; a self-scaled gate can tighten
+itself as performance improves (the facing walk's shuffle); the walking policy's yaw deadband is in place only; a 150 s
+guard run diverges from a 600 s sweep log where the host declines a stop near the end — guard at the sweep's own length;
+18 sweep jobs under a 10 G scope are OOM-killed (exit 143).
