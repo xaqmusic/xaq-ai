@@ -5366,3 +5366,83 @@ which reopens it:
 the robot as it will actually run. The sim's global default stays 6.0 so historical configs
 reproduce. The body's startup receipt and the bench dashboard now convert at the measured
 545.2 µs/rad. At 636.6, the dashboard's mirror of the robot's pose read ~14 % small.
+
+### ★★★ 2026-10-02 — WHY THE GAIT SHUFFLES AT THE ROBOT'S SERVO SPEED: nothing times the swing, four imposed terms jitter at full slew, and the "commanded" swing detector never sees a command
+
+**Verdict: diagnosis (attribution, single seed; not a lever verdict) + two harness defects.**
+P-e (FSR leg, raw boom), arena difficulty 0.3, seed 1, per-tick traces (`OGMA_PICRAWLER_TRACE`),
+ticks 900–3000/4000. Every arm used identical instrument settings.
+
+**1. Nothing sets swing length.** Swing (true contact) is about 6 ticks at both speeds, as
+2026-10-01/02 found, but chatter (<4 ticks) is 20 % of lift-offs at 6.0 rad/s and 51 % at
+3.668. Counting only real swings (≥4 ticks), the median is 7 vs 6 ticks. The difference is
+the count: 323 vs 73 in ~3100 ticks × 4 legs. Front and rear legs behave the same, so the
+rear legs' self-referential descent timer (`rear_land_gain`, half of an EMA of the leg's own
+past swings) is not the main cause.
+
+**2. The joint command reverses every 1–2 ticks, at full slew, at both speeds.** The knee's
+slew-limited target moves at the `MAX_SERVO_SPEED·TAU` cap on 95–97 % of ticks, hip1 on
+77–88 %. It reverses direction on 38–45 % (knee) and 53–55 % (hip2) of moving ticks, and the
+median same-direction run is 1–2 ticks. The achieved joints reverse on 21–39 % of ticks. A
+"swing" is a stretch where this jitter happens to drift one way long enough to unload a foot.
+At 3.668 rad/s the same drift covers about half the distance (knee excursion within a swing
+0.53 → 0.27 rad target, 0.41 → 0.24 achieved), so the toe stops clearing.
+⚠ **On hardware this is servo thrash from the first tick** — reversal at full slew every
+20–40 ms. benchd's 40 µs/tick limit caps speed, not reversals, so it passes it through.
+
+**3. Attribution: all command terms off, then one back at a time** (`SETPARAM_AT` at tick 1,
+16 MotorEPMv2 params; every patch confirmed by effect):
+
+| only this term on | knee rev | knee at cap | hip1 at cap | real swings |
+|---|---|---|---|---|
+| none | 0 % | 0 % | 0 % | 0 |
+| coupling (1.509) | 59 % | **92 %** | 0 % | 91 |
+| stroke (1.2 + heading) | 0 % | 0 % | **88 %** | 0 |
+| `stance_lift` (0.5 / 0.25) | 46 % | **100 %** | 0 % | 0 |
+| explore noise (0.05) | 60 % | **52 %** | 41 % | 0 |
+| postural (1.078) | 86 % | 0 % (small ringing) | 0 % | 0 |
+| learned HK (`motor_gain` 3) | 21 % | 3 % | 0 % | 73 |
+| swing tuck + rear land | 0 % | 0 % | 0 % | 0 |
+| height homeostat | 0 % | 0 % | 0 % | 10 |
+
+**Four imposed terms are each sufficient for full-slew jitter:**
+- **Coupling and stroke** are driven by `L.phase = atan2(15·Δknee, knee − ema)`, computed
+  from a one-tick velocity with no smoothing (`MotorEPMv2.cpp:2707-2733`). It flips ~180°
+  whenever the knee reverses, and the coupling closes the loop on its own input: a relay
+  limit cycle.
+- **`stance_lift`** toggles on a swing detector with no hysteresis (see 4).
+- **Explore noise** is white, fresh every tick, with a step equal to the slew cap.
+
+The **learned HK term is the only smooth one, but alone it does not walk**: its 73 "swings"
+are legs paddling with the belly on the floor (chassis y 24 mm, displacement 0.00 m). The
+imposed terms supply posture and propulsion, and the jitter along with them. Removing any
+single term from the full stack leaves knee reversals at 41–52 %. Learned cooperates,
+imposed fights, now with the mechanism in the trace.
+
+**4. Harness defect: the promoted swing detector never sees a command.**
+`feet_y_gravity_cmd_imu` / `_cmd_acc` are FK of `servo_targets[]`
+(`picrawler_body.gd` ~6940), which is written only in `_cpg_drive_calibrate`, the gang
+drive, and the operator's panels. **Verified live:** in a brain run the knee target swept
+−1.78 → +0.79 rad while `servo_targets` stayed at 0.0000. So the detector reads the
+construction pose rotated by the fused attitude estimate: it is an **attitude detector**, and
+`stance_lift` switches on body rocking. That is a legal signal, but not the one its name
+claims. It also re-reads 2026-07-25's "`feet_y_gravity` beats the oracle", which the oracle
+note already explained as body bounce. The ledger's `fk_cmd_err` is "construction pose vs
+achieved", not "commanded vs achieved". ⚠ A robot port computing a TRUE commanded-FK would
+not behave like the sim.
+
+**5. Harness defect: `SETPARAM_AT` reports "OK" for keys MotorEPMv2 cannot set live.**
+`phase_sym_smooth` is in the config-time `apply_param` set but not in the live `set_param`
+chain. The patch printed `-> OK` and the trace was byte-identical to the baseline. Any
+`SETPARAM_AT` arm must show an effect before it is believed.
+
+**What this means for the operator's plan** (servo speed and gait adapt to the robot's own
+confidence, slow and gentle first): the jitter comes from imposed terms running at full gain
+from tick 0, not from the servo speed. The levers, one at a time:
+- **(b)** smooth the phase that coupling and stroke ride on. ⚠ That family was refuted
+  2026-08-09 (repair plan P1 / P4 arms 1–2: "the phase is a STATE OBSERVATION and every
+  consumer needs it raw"). This is a re-test in a new context: robot servo speed, FSR body,
+  jitter as a hardware cost.
+- **(a)** temporally correlated exploration noise, scaled by learned confidence.
+- **(c)** feed the detector the real command, and give it hysteresis. That is a re-baseline
+  the robot port must match.
