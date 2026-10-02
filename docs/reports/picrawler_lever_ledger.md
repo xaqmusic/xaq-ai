@@ -5536,6 +5536,28 @@ reduced (reversals 43 % → 27 % at best) but not removed, because coupling, str
 
 ### ★★★ 2026-10-02 — THE FSR-LEG BODY LIFTS ITSELF UNTIL IT TIPS: the height ratchet is fed false "grounded" readings by the raw boom (and lever c's "0 falls" was a 6000-tick blind spot)
 
+> ⚠ **CORRECTED SAME DAY — the "false grounding" mechanism below is WRONG; the ablation
+> result stands.** The claim rested on comparing the boom's MINIMUM reading with the belly's
+> MEAN height, which shows nothing about the moment the boom reads zero. Checked properly
+> against the correct belly-centre ray (`gc_belly`, post-`2072f56`), on the same P-e logs:
+> - The boom reads < 3 mm on 1.9 % of samples, and at those moments the true belly-centre is
+>   **median 7 mm** (p10 0.8, p90 16).
+> - Across all samples the boom minus the true belly is **median −2.8 mm** (p05 −12, p95 +4).
+> - In P-e·c, most boom-zero samples come AFTER a tip (tilt median 1.5 rad), as a consequence.
+>
+> **The uncorrected boom, with its fitted offset, tracks the belly to a few millimetres, as
+> the operator said it should.** What stands: the height homeostat lifts the body until it
+> tips, and `height_ground_gain`=0 removes the tipping (0/8 seeds). WHY the controller over-lifts
+> on this configuration is open. A one-factor-at-a-time test (servo speed, FSR leg, tilt
+> compensation, each against P-e at 24 000 ticks) is running.
+>
+> **The proposed "grounding confirmed by foot load" lever is REJECTED by the operator, for
+> reasons that hold:**
+> - On terrain (the pyramid case) the belly can rest on an obstacle while the feet stay loaded.
+> - In splayed poses foot load redistributes without any belly contact.
+>
+> Total foot load is not a belly-contact observation. Re-use context: none proposed.
+
 **Verdict: diagnosis, confirmed by ablation (signal, n=4 × 24 000 ticks, every seed agrees).**
 Operator observation in the UI: *the robot elevates its body too far off the ground and tips
 over.* P-e and P-e·c, 3.668 rad/s, arena difficulty 0.3, seeds 1–4, 24 000 ticks (~8 min).
