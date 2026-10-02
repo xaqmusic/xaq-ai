@@ -5827,3 +5827,41 @@ i.e. joints from the servo forward model, with no encoders.
 then decides how much height control this body wants, from off to twice today's value,
 alongside `amp_target`, `coupling_gain` and `postural_gain`. Frozen-evolver control. 4 seeds
 × 200 000 ticks per arm.
+
+### ★★ 2026-10-02 — OPTION C, STEP 2: the live gain search does not beat frozen gains on the robot's inputs (truncated run)
+
+**Protocol:** P-e·h + `height_ground_gain` 0. Search arm: GainEvolver live, with
+`height_homeo_gain` added to its keys (seed 0.077, range 0–0.15). Control arm: same, evolver
+frozen (`mutation_sigma` 0). 4 seeds each. All 4 searched gains confirmed landing
+(`ga_app` 4, `ga_rej` 0).
+
+⚠ **HARNESS DEFECT: every seed was cut at 87–95k of the planned 200k ticks.** The runner's
+per-seed timeout (1500 s) was sized for short runs. Fixed (timeout now scales with steps).
+The data to ~90k is valid; the protocol is half-run. Also, per-segment displacement after the
+first 20k is the arena edge, not the gait.
+
+| | frozen gains | evolver searching |
+|---|---|---|
+| resets 0–40k ticks | 2 (both seed 2) | 2 |
+| resets 40–90k ticks | **0** | **6** (seeds 1, 2) |
+| tilt mean over time | 0.163 → 0.099 (settling) | 0.16–0.21 |
+| `height_bias` railed | ~0 % | 0–1.8 % |
+
+**Endpoints scatter:** [0.15, 1.85, 1.40, 0.06], [0.15, 1.20, 1.22, 0.10],
+[0.32, 1.50, 1.50, 0.03], [0.27, 0.70, 0.26, 0.12] (amp_target, coupling, postural,
+height_homeo_gain). 1–2 accepts per seed, so not converged, and "home is a region" again
+(2026-08-27).
+
+**Verdicts:**
+- **Frozen P-e·hr is the current-hardware candidate.** Its tips fall in the first ~40k ticks,
+  while the brain is still learning, and stop afterwards. Tilt keeps settling through online
+  learning alone.
+- **The live search is `NULL` leaning `REGRESSION` within 90k.** Every candidate window runs
+  an untested gain set on the body, and some tip it.
+
+**For hardware:** running the evolver live on the robot means exploring gains on a real body,
+and in the sim that costs falls. The early-learning tips are the operator's stated concern:
+slow and gentle while the brain knows little.
+
+Registered as **P-e·h r** in the launcher. Confirmation running: frozen, n=8 × 100 000,
+completed runs this time.
