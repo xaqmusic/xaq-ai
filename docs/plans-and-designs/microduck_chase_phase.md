@@ -703,3 +703,9 @@ walls 14 a minute, falls 1.5, the error closed within 3 s 70 %; arrivals −13 %
 The walker now senses the distance to its target, and its speed target obeys "turn before you arrive" — min(cos e, k·range/|e|),
 k from the measured turn rate: n = 18, ★ GAZE's speed and arrivals (0.174 m/s, 17.8) with the head touching on 56 % of pecks
 (★ GAZE 32 %), walls 18 a minute (33), falls 1.8 (2.6) — `WORKING`; preset "TURN · the walk's DYNAMIC RANGE …(the candidate)".
+
+**The first minute (design doc §17.95):** the operator judges the first minute — the walk to the green block ahead at the
+start. Every linear-yaw walker arrived with the block 55–86° off (its calibrated heading loop overshoots); ★ GAZE 26°. The
+dynamic range on ★ GAZE's own walker, with the in-place deadband compensated only when slowed (`--yaw-linearize-below
+0.15`): the first minute ★ GAZE's or better (the block touched in 14/18 runs, the first skill touching it 10/14), pecks
+touching 51 %, kicks 49 %, arrivals 20.2, speed kept; falls 3.2 (2.6). Preset "TURN · the dynamic range on ★ GAZE's walker (the candidate)".

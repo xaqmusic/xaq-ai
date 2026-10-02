@@ -6408,3 +6408,42 @@ arrivals with the facing walk's peck (the touch 32 → 56 %), walls about half, 
 calibrated yaw's open-loop capacity) is too lenient: the walker does not turn as fast as the motor can on the walk. The
 kicks' alignment is unchanged (the kick side follows the thing's bearing; touch and displacement tie ★ GAZE). Preset
 "TURN · the walk's DYNAMIC RANGE: turn before you arrive (the candidate)".
+
+### 17.95 The first minute: the green block, and the dynamic range on ★ GAZE's own walker (2026-10-02)
+
+**The operator:** "a lot of my evaluation is based on the first minute" — with ★ GAZE the duck walks forward confidently,
+engages the green block, comes very close to kicking it and pecks most of the time; with the dynamic range it misses
+most of the time. Study the first minute and the first interaction with the green block ahead at the start.
+
+**The instrument** `mj_host/tools/first_minute.py` (the first S seconds, one object by name — `obj_block0`, the green
+block 1.4 m ahead; the room is fixed, the seeds vary the start pose and the brain's randomness): the first stop at it, every
+skill begun with it the nearest movable within 0.35 m — its edge distance and true bearing, the robot's contact during
+the skill, its displacement.
+
+**The finding** (n = 18, the first 60 s; the bearing of the green block at the first skill begun at it): ★ BIRD 2°, ★ GAZE
+26° (the block touched in 13/18 runs), and **every arm on the linear-yaw walker 55–86°, always to the right** (the
+calibrated walker, the heading reach, cos, cos², the dynamic range at k 0.64 and 2.1); the facing walk reaches it in only
+3/18. Traced on seed 1 (identical until the walk begins at 14.7 s): the calibrated yaw makes the first correction a real
+turn twice as strong (+0.60 against +0.32), the error swings +18° → −24° and the recovery comes inside half a metre —
+the duck passes the block on its left. An underdamped heading loop: before the calibration the deadband swallowed the
+small commands. Damping the heading reflex (rate damping 1.0) took the first-minute bearing 69 → 43°; a 2 s time
+constant 59°.
+
+**The fix that kept ★ GAZE's approach:** the deadband exists only in place (walking, the raw yaw turns the body), so
+the calibration is applied only while the forward command is low — host `--yaw-linearize-below 0.15` — on ★ GAZE's own
+walker (`duck_forebody_s1`, grown by the range sense) with the dynamic-range gate (`a1v2_r113_fore_g10_reach_gaze`):
+★ GAZE's walking yaw is untouched; when the gate has slowed the duck to square up, the yaw turns it in place.
+
+| n = 18 (sweep f12, 600 s; first minute from the same runs) | ★ GAZE | the dynamic range, linear-yaw walker | **the dynamic range on ★ GAZE's walker** |
+|---|---|---|---|
+| first minute: runs touching the green block · moving it | 13 · 4 | 11 · 3 | **14 · 5** |
+| first minute: the first skill at it, bearing · touching | 26° · 7/14 | 69° · 6/14 | **26° · 10/14** |
+| the thing touched during pecks · kicks | 32 % · 37 % | 56 % · 36 % | **51 % · 49 %** |
+| kicks · pushes that moved their thing | 31 % · 31 % | 30 % · 36 % | 33 % · 43 % |
+| arrivals · walk m/s | 17.4 · 0.176 | 17.8 · 0.174 | **20.2 · 0.177** |
+| walls / min · falls a run | 33 · 2.6 | 18 · 1.8 | 33 · 3.2 |
+
+**Verdict: `WORKING`** — ★ GAZE's first minute kept and bettered (the first skill touching the block 7/14 → 10/14), the
+touches up across the run, the most arrivals of any arm, the speed kept; the cost half a fall a run (0.9 at stops). The
+linear-yaw walker: `REGRESSION` on the first approach (its gains elsewhere — walls 18 — stand, re-use: a heading loop
+damped for the calibrated motor). Preset "TURN · the dynamic range on ★ GAZE's walker (the candidate)".
