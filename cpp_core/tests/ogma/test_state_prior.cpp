@@ -1206,3 +1206,32 @@ TEST(StatePrior, TargetGateUngatedIdenticalGatedActs) {
     EXPECT_EQ(du, 0.0) << "an ungated target must be byte-identical to none";
     EXPECT_GT(dg, 1e-4) << "a target gated by a varying element must change the command";
 }
+
+// =============================================================================
+// 15. state_prior_target_gate_cos (2026-10-01): the geometric gate acts (differs from the ungated run) and differs from
+//     the RMS form; absent, the RMS form is unchanged (the facing config reproduces -- checked in the host guard).
+// =============================================================================
+TEST(StatePrior, TargetGateCosActsAndDiffersFromRms) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.4};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    pe["state_prior_target_gated_by"] = std::vector<double>{0.0};
+    auto pc = pe; pc["state_prior_target_gate_cos"] = std::vector<double>{3.14159265};
+    auto pn = base_params();
+    pn["state_prior_indices"] = std::vector<double>{-1.0}; pn["state_prior_targets"] = std::vector<double>{0.4};
+    pn["state_prior_gain"] = 0.8; pn["state_prior_step_gain"] = 1.0;
+    Fixture R(pe), C(pc), N(pn);
+    double drc = 0.0, dnc = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        R.run_tick(t, lean); C.run_tick(t, lean); N.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            drc = std::max(drc, double(std::fabs(R.accel(j) - C.accel(j))));
+            dnc = std::max(dnc, double(std::fabs(N.accel(j) - C.accel(j))));
+        }
+    }
+    EXPECT_GT(drc, 1e-4) << "the geometric gate differs from the RMS form";
+    EXPECT_GT(dnc, 1e-4) << "the geometric gate acts";
+}

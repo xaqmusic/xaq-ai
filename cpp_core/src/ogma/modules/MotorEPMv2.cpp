@@ -191,6 +191,17 @@ ParamSchema MotorEPMv2::params_schema() const {
          "carrying its turn into the arrival (the kick and peck fire straight ahead). Acts on the descent's error and on "
          "the model-implied step's. Empty = byte-identical.",
          std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_cos", ParamMutability::HotMutable,
+         "THE TARGET'S GATE, GEOMETRIC (2026-10-01, the operator: the facing walk shuffles in place): parallel to "
+         "state_prior_indices, > 0 replaces the RMS form of state_prior_target_gated_by for that index with "
+         "max(0, cos(x_j * value))^state_prior_target_gate_pow, value = radians per unit of the gating element (pi for the "
+         "walker's heading slot). For a forward-speed target gated by the heading error this is the speed that CLOSES on "
+         "the target (walking at angle e off the nose closes at v cos e): it cannot tighten itself as the RMS form did "
+         "(the error's RMS shrank 65 -> 35 deg as the walk improved, and the speed halved at 18 deg). Empty = the RMS form.",
+         std::nullopt, std::nullopt, std::nullopt},
+        {"state_prior_target_gate_pow", ParamMutability::HotMutable,
+         "The power on the geometric target gate (1 = the closing speed; 2 = stricter off the nose). Default 1.",
+         ParamValue{1.0}, ParamValue{0.0}, ParamValue{8.0}},
         {"state_prior_gated_by", ParamMutability::HotMutable,
          "THE PACE GATE (2026-10-01, the bird's neck): parallel to state_prior_indices, the state element whose STEADINESS "
          "gates that index's precision (>= 9999 = ungated). The element's change at the stride's timescale -- its 0.5 s "
@@ -1183,6 +1194,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["state_prior_weights"] = state_prior_weights_; m["state_grow_at"] = int64_t(state_grow_at_);
     m["state_prior_gated_by"] = state_prior_gated_by_; m["state_prior_c_weights"] = state_prior_c_weights_;
     m["state_prior_target_gated_by"] = state_prior_target_gated_by_;
+    m["state_prior_target_gate_cos"] = state_prior_target_gate_cos_; m["state_prior_target_gate_pow"] = state_prior_target_gate_pow_;
     m["state_prior_targets"] = state_prior_targets_;
     m["state_prior_gain"]    = state_prior_gain_;
     m["state_prior_lr"]      = state_prior_lr_;
@@ -1378,6 +1390,8 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "state_prior_gated_by", [&](auto const& v){ state_prior_gated_by_ = get_double_vec(v, "state_prior_gated_by"); });
     apply_param(params, "state_prior_c_weights", [&](auto const& v){ state_prior_c_weights_ = get_double_vec(v, "state_prior_c_weights"); });
     apply_param(params, "state_prior_target_gated_by", [&](auto const& v){ state_prior_target_gated_by_ = get_double_vec(v, "state_prior_target_gated_by"); });
+    apply_param(params, "state_prior_target_gate_cos", [&](auto const& v){ state_prior_target_gate_cos_ = get_double_vec(v, "state_prior_target_gate_cos"); });
+    apply_param(params, "state_prior_target_gate_pow", [&](auto const& v){ state_prior_target_gate_pow_ = get_double(v, "state_prior_target_gate_pow"); });
     apply_param(params, "state_grow_at", [&](auto const& v){ state_grow_at_ = int(get_double(v, "state_grow_at")); });
     apply_param(params, "state_prior_targets", [&](auto const& v){ state_prior_targets_ = get_double_vec(v, "state_prior_targets"); });
     apply_param(params, "state_prior_gain",    [&](auto const& v){ state_prior_gain_    = get_double(v, "state_prior_gain"); });
@@ -2794,6 +2808,8 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "state_prior_gated_by") state_prior_gated_by_ = get_double_vec(value, "state_prior_gated_by");
     else if (key == "state_prior_c_weights") state_prior_c_weights_ = get_double_vec(value, "state_prior_c_weights");
     else if (key == "state_prior_target_gated_by") state_prior_target_gated_by_ = get_double_vec(value, "state_prior_target_gated_by");
+    else if (key == "state_prior_target_gate_cos") state_prior_target_gate_cos_ = get_double_vec(value, "state_prior_target_gate_cos");
+    else if (key == "state_prior_target_gate_pow") state_prior_target_gate_pow_ = get_double(value, "state_prior_target_gate_pow");
     else if (key == "state_grow_at") state_grow_at_ = int(get_double(value, "state_grow_at"));
     else if (key == "state_prior_targets") state_prior_targets_ = get_double_vec(value, "state_prior_targets");
     else if (key == "state_prior_gain")    state_prior_gain_    = get_double(value, "state_prior_gain");
@@ -3123,8 +3139,14 @@ void MotorEPMv2::update_prior_gates(Leg& L) {
             if (j < 0 || j >= L.n) continue;
             const float v = L.x[j];
             L.tgate_var[k] += (1.0f / 1500.0f) * (v * v - L.tgate_var[k]);
-            const float rms = std::sqrt(L.tgate_var[k]) + 1e-6f;
-            L.tgate[k] = std::clamp(1.0f - std::fabs(v) / rms, 0.0f, 1.0f);
+            if (k < state_prior_target_gate_cos_.size() && state_prior_target_gate_cos_[k] > 0.0) {
+                // geometric: the closing speed's factor, cos of the error (in radians), floored at 0
+                const double c = std::max(0.0, std::cos(double(v) * state_prior_target_gate_cos_[k]));
+                L.tgate[k] = float(std::pow(c, state_prior_target_gate_pow_));
+            } else {
+                const float rms = std::sqrt(L.tgate_var[k]) + 1e-6f;
+                L.tgate[k] = std::clamp(1.0f - std::fabs(v) / rms, 0.0f, 1.0f);
+            }
         }
     }
 }
