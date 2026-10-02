@@ -5737,3 +5737,61 @@ contract"):
 with inputs the robot cannot produce. The gate before hardware is a sim arm in which every
 input is one the robot can actually publish ("P-e honest"), A/B'd against P-e and watched in
 the UI. The decisions it needs are listed in the port doc.
+
+### ★★★★ 2026-10-02 — ON THE INPUTS THE ROBOT CAN PUBLISH, P-e FLIPS OVER — and one input does it: joints from the servo forward model
+
+**Verdict: the hardware gate FAILED, and the cause is isolated (signal, every seed agrees).**
+3.668 rad/s, FSR leg, raw boom, arena difficulty 0.3, shaping events off (headless).
+Every arm's receipt was checked.
+
+**P-e·h — all robot-faithful inputs together** (`honest_joints`, `honest_imu`, `honest_upright`,
+`honest_distress`, `joint_torque_zero`, `tilt_topic` ""), n=8 × 24 000:
+
+| | P-e | P-e·h |
+|---|---|---|
+| resets (seeds tipped) | 2 (1/8) | **64 (8/8)** |
+| tilt max | 0.78 rad | **3.03 rad, inverted** |
+| height bias railed | 0.6 % | **54 %** |
+| `height_k_eff` max | 0.70 | 0.94 |
+| straight | 0.59 | 0.18 |
+| steps | 22 | 100 |
+
+**Each change added alone to P-e**, n=4 × 12 000, against P-e's first 12 000 ticks (0/8
+tipped, railed 0 %):
+
+| added alone | tipped | resets | railed | `height_k_eff` | displacement |
+|---|---|---|---|---|---|
+| **`honest_joints`** | **3/4** | **10** | **53 %** | **0.95** | **1.4 m** |
+| `honest_imu` | 0/4 | 0 | 0 % | 0.53 | 7.9 m |
+| `honest_upright` | 0/4 | 0 | 0 % | 0.61 | 7.3 m |
+| `honest_distress` | 1/4 | 1 | 0.5 % | 0.61 | 7.2 m |
+| `joint_torque_zero` / `tilt_topic` "" | 0/4 | 0 | 0 % | 0.61 | 7.3 m |
+
+Torque, tilt and upright reproduce the control exactly. Their consumers do not act inside
+12 000 ticks (GainEvolver's first mutation lands at ~22 000), or the sim never published the
+signal. They are inert here; that is not a claim about longer runs.
+
+**So the approved P-e behaviour depends on ACHIEVED joint angles,** which hobby servos cannot
+report. The brain needs a joint sense the robot does not have.
+
+**Mechanism — inferred, NOT verified:** with `joints` = the forward model of its own command,
+the brain cannot see its legs give under load. MotorEPMv2's postural term (−1.078·(x − rest))
+and the HK loop then act on the command they issued, a self-referential loop with no
+information about sag. The body settles lower than intended, the height homeostat sees the
+belly low, `height_bias` winds to its rail, the legs over-extend, and the body flips.
+
+**Re-reads P-c** (2026-09-11 "honest joints: WORKING, more rhythm, less straight"). That was
+n=6 × 6000 in the corridor on the 76.5 mm leg at 6.0 rad/s, boom off, so on the short belly ray
+(2026-10-02). On the robot's body and speed, over a long horizon, the same input is a
+**REGRESSION to repeated inversion**. Same lever, different context: §3.1.
+
+**Re-use contexts / what would fix it** (CLAUDE.md §1 rule 2: when the needed signal is not
+in the channel, the fix is a sensor, not a smarter policy):
+- (a) A real joint-angle observation: tap each servo's internal potentiometer into an
+  external ADC (the HAT's ADC is taken by the FSRs and the battery).
+- (b) An observation of the deflection the forward model misses. Body height and attitude
+  (ToF, IMU) and foot load (FSRs) constrain it; a learned correction graded by its own error.
+- (c) Re-settle the gains on the forward-model joints (the E3b searcher), with anti-windup on
+  `height_bias` itself.
+
+**The robot must not run P-e·h.**
