@@ -5446,3 +5446,90 @@ from tick 0, not from the servo speed. The levers, one at a time:
 - **(a)** temporally correlated exploration noise, scaled by learned confidence.
 - **(c)** feed the detector the real command, and give it hysteresis. That is a re-baseline
   the robot port must match.
+
+### ★★ 2026-10-02 — THREE JITTER LEVERS AT THE ROBOT'S SERVO SPEED: the swing can lengthen, the thrash is reduced but not removed
+
+**Protocol for all three:** P-e (FSR leg, raw boom), arena difficulty 0.3, n=6 × 6000 ticks,
+seeds 1–6, at **3.668 rad/s (robot)** and **6.0 rad/s (sim default)**. Per-seed traces in every
+arm (identical instrument settings). Standard metrics from `arenaavg.parse`; belly from
+chassis y − 26 mm. Jitter metrics from the trace: reversal fraction of the slew-limited target,
+knee ticks at the slew cap, real swings (true contact ≥ 4 ticks) per 1000 leg-ticks, and median
+real-swing length. Controls: 3.668 — net_disp 4.03 ± 0.32, steps 0, knee reversals 43 %,
+knee at cap 97 %, real swings 7.5, swing median 6.2, tilt_sd 0.052, straight 0.81. 6.0 — net_disp
+8.61 ± 0.57, steps 28, knee reversals 41 %, real swings 21.6, swing median 6.7, tilt_sd 0.066,
+straight 0.87. 0 falls in both.
+
+**(b) `phase_sym_smooth` — smooth the per-leg phase that coupling and stroke ride on.**
+A re-test of the family refuted 2026-08-09 (repair plan P1 / P4), in a new context: the robot's
+servo speed, the FSR body, jitter judged as a hardware cost. Config-time (it is not
+live-patchable; see the previous entry). Consumer check: `pretro` 0.61 → 0.86 (the filtered
+readout reads more retrograde, as P1 recorded), so the lever acted.
+
+| | 3.668 s=2 | 3.668 s=5 | 6.0 s=2 |
+|---|---|---|---|
+| net_disp | **5.59 ± 0.58** | 3.29 ± 1.98 | 5.22 ± 0.56 |
+| steps | 8.2 (5/6 seeds) | 23 | 82 |
+| real swings / swing median | 13.0 / **8** | 14.1 / 9 | 27.8 / 7.5 |
+| knee / hip1 reversals | **28 % / 23 %** | 27 % / 26 % | 30 % / 30 % |
+| knee at cap | 96 % | 96 % | 94 % |
+| tilt_sd / straight | 0.082 / 0.78 | 0.317 / 0.45 | **0.153 / 0.56** |
+| td_plv / falls | 0.10 / 0 | 0.12 / **1.7** | 0.19 / 0.17 |
+
+**Verdicts:**
+- **`PARTIAL` at 3.668, s=2.** The first lever to lengthen the swing toward a slower servo
+  (6 → 8 ticks). Real swings nearly double, distance rises 39 %, and reversals drop by a third.
+  It costs wobble (+58 %) and contact locking (td_plv 0.25 → 0.10, P1's prediction).
+- **`REGRESSION` at 6.0** (straight 0.87 → 0.56, distance −39 %, wobble ×2.3). Same direction as
+  the 08-09 refutation.
+- **s=5 is unstable** (2/6 seeds collapse).
+- **It does not remove the thrash:** the knee still sits at the slew cap 96 % of the time.
+
+Not promoted. Re-use context: combined with a lever that removes the `stance_lift` and noise
+jitter, so its contact-locking cost is judged against a smoother command; or wherever wobble is
+cheap.
+
+**(a1) `explore_noise_tau` — exploration noise as a per-joint Ornstein-Uhlenbeck process**
+(same stationary σ). New MotorEPMv2 param, default 0. **Byte-identical at 0, verified:**
+6000/6000 trace lines and 110/110 diag lines matched a pre-build control. Mechanism check
+(noise as the ONLY term, single seed): knee-at-cap 52 % → **15 %**, reversals 60 % → 49 %.
+**`NULL` in the full stack at both speeds**: τ=10 / 25 at 3.668 give net_disp 3.88 / 4.42,
+reversals 43 %, at-cap 97 %; τ=10 at 6.0 gives 8.13 ± 1.66, reversals 39 %. Two reasons, both
+measured:
+- Noise is not the dominant jitter source once coupling, stroke and `stance_lift` are on.
+- **⚠ A first-order OU is a weakened slice of "smooth noise" (§3.2 #6).** It shrinks each tick's
+  step, but its VELOCITY is still white, so it still reverses on ~half the ticks.
+
+Kept, default off. Re-use context: a second-order (cascaded) filter, so the noise is
+differentiable; and its confidence-scaled form (a2), once noise is a material share of the
+remaining jitter. a2 was **not built**, because it would scale a term that is not the thrash.
+
+**(c) `cmd_fk_source=1` — the promoted swing detector runs FK on the slew-limited targets.**
+It no longer reads `servo_targets`, which stays 0 in brain mode (previous entry). New body
+export / `OGMA_PICRAWLER_CMD_FK_SOURCE`, default 0. **Byte-identical at 0, verified** (6000/6000
+trace, 110/110 diag). Consumer check: `fk_cmd_err` moved (6.0: 18.6 → 14.1 mm).
+
+| | 3.668 | 6.0 |
+|---|---|---|
+| steps | **0 → 13.3** (6/6 seeds lift) | 28 → **143** |
+| real swings / swing median | 7.5 → 14.7 / 6.2 → **8.5** | 21.6 → 28.6 / 6.7 → **9.8** |
+| knee reversals | 43 % → **27 %** | 41 % → **22 %** |
+| net_disp | 4.03 → **5.14** | 8.61 → 7.02 |
+| tilt_sd / straight | 0.052 → **0.105** / 0.81 → 0.77 | 0.066 → **0.120** / 0.87 → **0.68** |
+| knee at cap / falls | 97 % / 0 | 95 % / 0 |
+
+**`PARTIAL`, a re-baseline candidate.** Stepping is the loud signal (CLAUDE.md §3.3
+"proto-gait steps"): feet lift on every seed at the robot's speed, 5× the steps at 6.0, longer
+swings, and fewer reversals. The costs are wobble (~2×) and straightness, with distance −18 % at
+6.0. The current gains were tuned against the attitude-driven detector, so this is the body
+without its matching gains. That is a reason to watch it and re-settle, not to judge it final.
+It is the same shape as P-c honest joints ("more rhythm, less straight"). Registered in the
+launcher as **P-e·c** for observation. A robot port must match whichever source is promoted.
+
+**Across all three:** the knee runs at the slew cap 94–97 % of ticks in every arm. The thrash is
+reduced (reversals 43 % → 27 % at best) but not removed, because coupling, stroke and
+`stance_lift` all still command far past what the servo can reach every tick. Next candidates:
+- `swing_hyst_frac` on the corrected detector. The 08-09 P2 deadband `NULL` was measured on the
+  attitude detector, so its context has changed.
+- b + c stacked.
+- An amplitude change: the command's distance from the slewed target, which is what puts the
+  knee at the cap.

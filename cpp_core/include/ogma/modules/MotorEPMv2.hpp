@@ -227,6 +227,16 @@ private:
     // sensitivity-seeking controller AMPLIFIES it into oscillation.  This is
     // the "playful" exploration drive, not a tuning knob.
     double  explore_noise_ = 0.05;                // per-tick Gaussian motor noise σ (always on)
+    // ── TEMPORALLY CORRELATED exploration (2026-10-02).  explore_noise is WHITE: a fresh
+    // draw every tick whose step (σ·RANGE ≈ 0.07 rad) equals the robot's slew cap at
+    // 3.668 rad/s, so on its own it reverses the joint command on ~60 % of ticks at full
+    // slew (ledger 2026-10-02, attribution table) — servo thrash on hardware, from tick 0.
+    // tau > 0 replaces it per joint with an Ornstein-Uhlenbeck process
+    //     n <- rho·n + sqrt(1 - rho²)·xi,  rho = exp(-1/tau),  y += sigma·n
+    // with the SAME stationary σ, so exploration keeps its size and loses its buzz: it
+    // wanders over ~tau ticks instead of flipping every tick.  0 = the white path, untouched
+    // (byte-identical).
+    double  explore_noise_tau_ = 0.0;
     // 2026-06-12 — spider-stance target (operator insight).  Standing tall is an
     // inverted-pendulum equilibrium that needs active balance we don't have; the
     // SPIDER stance (knees tucked up, chassis suspended below, CoG low + wide
@@ -1275,6 +1285,7 @@ private:
         bool                fresh       = false;  // new proprio arrived this tick
         int64_t             steps_seen  = 0;      // proprio frames processed (warmup counter)
         std::mt19937        babble_rng;           // per-leg babble stream
+        std::array<float, 8> noise_ou{};          // explore_noise_tau's OU state, per joint (unit variance)
         float               tle_ema     = 0.0f;
         float               gain_ema    = 1.0f;
         float               outmag_ema  = 0.0f;

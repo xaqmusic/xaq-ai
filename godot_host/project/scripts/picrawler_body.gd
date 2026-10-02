@@ -2470,6 +2470,9 @@ var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is o
 # 25.5 mm short on the measured bodies (see _compute_ground_clearance_centre).  Only for
 # reproducing earlier results; a no-op on cad.
 @export var belly_ray_legacy: bool = false
+# Source of the commanded angles behind the *_cmd foot-height signals (see _cmd_angle).
+# 0 = legacy servo_targets (stays 0 in brain mode — byte-identical), 1 = slew-limited targets.
+@export var cmd_fk_source: int = 0
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
 @export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
@@ -3336,6 +3339,8 @@ func _ready() -> void:
 	print("PicrawlerBody: belly_ray[%s belly %.1f mm below origin]" % [
 		"LEGACY CHASSIS_Y/2" if belly_ray_legacy else "belly-plane",
 		(CHASSIS_Y * 0.5 if belly_ray_legacy else -_chassis_bottom_local) * 1000.0])
+	print("PicrawlerBody: cmd_fk_source=%d (%s)" % [cmd_fk_source,
+		"slew-limited targets" if cmd_fk_source == 1 else "legacy servo_targets — 0 in brain mode"])
 	print("PicrawlerBody: honest[upright=%s joints=%s imu=%s]" % [
 		"ON" if honest_upright else "off",
 		"ON" if honest_joints else "off",
@@ -3423,6 +3428,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_TOF_BOOM",
 			  "OGMA_PICRAWLER_TOF_TILT_COMP",
 			  "OGMA_PICRAWLER_BELLY_RAY_LEGACY",
+			  "OGMA_PICRAWLER_CMD_FK_SOURCE",
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU"]:
@@ -3450,6 +3456,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_TOF_BOOM":          tof_boom          = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOF_TILT_COMP":     tof_tilt_comp     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_BELLY_RAY_LEGACY":  belly_ray_legacy  = (v != "0" and v != "")
+			"OGMA_PICRAWLER_CMD_FK_SOURCE":     cmd_fk_source     = clampi(v.to_int(), 0, 1)
 			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
@@ -6886,12 +6893,9 @@ func _step_one() -> void:
 		var toe_meas_b: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
 		for i in range(4):
 			# Effective joint-frame target: t = target*sign + origin (see servo_targets doc).
-			var c1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
-				+ servo_origins[servo_idx(i, 0)]
-			var c2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
-				+ servo_origins[servo_idx(i, 1)]
-			var c3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
-				+ servo_origins[servo_idx(i, 2)]
+			var c1: float = _cmd_angle(i, 0)
+			var c2: float = _cmd_angle(i, 1)
+			var c3: float = _cmd_angle(i, 2)
 			var lower_fk:  Transform3D = _fk_leg(i, hip1_angles[i], hip2_angles[i], knee_angles[i])[2]
 			var lower_cmd: Transform3D = _fk_leg(i, c1, c2, c3)[2]
 			fk_arr.append(_stridemath.feet_y_gravity(rest_inv * lower_fk.origin, up_body, L3))
@@ -6938,12 +6942,9 @@ func _step_one() -> void:
 		var acc_arr := PackedFloat64Array()
 		var imu_arr := PackedFloat64Array()
 		for i in range(4):
-			var d1: float = servo_targets[servo_idx(i, 0)] * servo_signs[servo_idx(i, 0)] \
-				+ servo_origins[servo_idx(i, 0)]
-			var d2: float = servo_targets[servo_idx(i, 1)] * servo_signs[servo_idx(i, 1)] \
-				+ servo_origins[servo_idx(i, 1)]
-			var d3: float = servo_targets[servo_idx(i, 2)] * servo_signs[servo_idx(i, 2)] \
-				+ servo_origins[servo_idx(i, 2)]
+			var d1: float = _cmd_angle(i, 0)
+			var d2: float = _cmd_angle(i, 1)
+			var d3: float = _cmd_angle(i, 2)
 			var foot_b: Vector3 = rest_inv * _fk_leg(i, d1, d2, d3)[2].origin
 			acc_arr.append(_stridemath.feet_y_gravity(foot_b, up_acc, L3))
 			imu_arr.append(_stridemath.feet_y_gravity(foot_b, _up_est_body, L3))
@@ -10829,6 +10830,26 @@ func _accum_grf() -> void:
 		_grf_up[i]  += up_acc[i]
 		_grf_nrm[i] += nrm_acc[i]
 		_foot_load_ema[i] = (1.0 - _FOOT_LOAD_ALPHA) * _foot_load_ema[i] + _FOOT_LOAD_ALPHA * nrm_acc[i]
+
+# The COMMANDED joint angle that the *_cmd foot-height signals run FK on.
+#
+# ⚠ 0 (legacy, default) reads servo_targets[], which is written ONLY in calibrate mode, the
+# gang drive and the operator's panels — never in brain mode, where it stays 0.0 (verified
+# live 2026-10-02: knee target swept -1.78..+0.79 rad, servo_targets stayed 0.0000).  So the
+# promoted swing detector feet_y_gravity_cmd_imu has been FK of the CONSTRUCTION POSE rotated
+# by the fused attitude: an attitude detector, gating stance_lift on body rocking.
+# 1 reads the slew-limited target the servo is actually being commanded to this tick
+# (_eff_target_*), which is also what the robot's driver knows (its slewed pulse, mapped to an
+# angle).  Changing it changes a promoted input, so it is a lever and a re-baseline, not a quiet
+# fix; a robot port must match whichever is promoted.
+func _cmd_angle(leg: int, joint: int) -> float:
+	if cmd_fk_source == 1:
+		match joint:
+			0: return _eff_target_hip1[leg]
+			1: return _eff_target_hip2[leg]
+			_: return _eff_target_knee[leg]
+	var k: int = servo_idx(leg, joint)
+	return servo_targets[k] * servo_signs[k] + servo_origins[k]
 
 # ---------------------------------------------------------------------------
 # Attribution trace — one JSON line per brain tick when OGMA_PICRAWLER_TRACE is set.

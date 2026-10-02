@@ -234,6 +234,9 @@ ParamSchema MotorEPMv2::params_schema() const {
         {"explore_noise", ParamMutability::HotMutable,
          "persistent Gaussian motor-noise σ added every tick. Keeps the prediction error ξ nonzero at fixed points so HK does not freeze; the sensitivity-seeking controller amplifies it into oscillation (the homeokinetic exploration drive).",
          ParamValue{0.05}, ParamValue{0.0}, ParamValue{1.0}},
+        {"explore_noise_tau", ParamMutability::HotMutable,
+         "Correlation time (ticks) of the exploration noise. 0 = white (a fresh draw every tick, which alone reverses the joint command on ~60% of ticks at full slew — servo thrash on hardware). >0 = per-joint Ornstein-Uhlenbeck with the SAME stationary sigma, so exploration keeps its size and wanders over ~tau ticks instead of flipping. 0 = byte-identical.",
+         ParamValue{0.0}, ParamValue{0.0}, ParamValue{1000.0}},
         {"knee_tuck_target", ParamMutability::HotMutable,
          "override the postural knee-rest target (proprio pos) to drive the statically-stable SPIDER stance (knees tucked, chassis suspended below). +0.7..+0.9 = strong tuck. -99 = use the captured spawn pose.",
          ParamValue{-99.0}, ParamValue{-99.0}, ParamValue{1.0}},
@@ -686,6 +689,7 @@ ParamMap MotorEPMv2::current_params() const {
     m["postural_gain"]    = postural_gain_;
     m["postural_gain_joints"] = postural_gain_joints_;
     m["explore_noise"]    = explore_noise_;
+    m["explore_noise_tau"] = explore_noise_tau_;
     m["knee_tuck_target"] = knee_tuck_target_;
     m["hip2_tuck_target"] = hip2_tuck_target_;
     m["motor_gain"]       = motor_gain_;
@@ -839,6 +843,7 @@ void MotorEPMv2::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "postural_gain", [&](auto const& v){ postural_gain_ = get_double(v, "postural_gain"); });
     apply_param(params, "postural_gain_joints", [&](auto const& v){ postural_gain_joints_ = get_double_vec(v, "postural_gain_joints"); });
     apply_param(params, "explore_noise", [&](auto const& v){ explore_noise_ = get_double(v, "explore_noise"); });
+    apply_param(params, "explore_noise_tau", [&](auto const& v){ explore_noise_tau_ = get_double(v, "explore_noise_tau"); });
     apply_param(params, "knee_tuck_target", [&](auto const& v){ knee_tuck_target_ = get_double(v, "knee_tuck_target"); });
     apply_param(params, "hip2_tuck_target", [&](auto const& v){ hip2_tuck_target_ = get_double(v, "hip2_tuck_target"); });
     apply_param(params, "motor_gain", [&](auto const& v){ motor_gain_ = get_double(v, "motor_gain"); });
@@ -2187,6 +2192,7 @@ void MotorEPMv2::on_param_change(std::string_view key, ParamValue const& value) 
     else if (key == "postural_gain") postural_gain_ = get_double(value, "postural_gain");
     else if (key == "postural_gain_joints") postural_gain_joints_ = get_double_vec(value, "postural_gain_joints");
     else if (key == "explore_noise") explore_noise_ = get_double(value, "explore_noise");
+    else if (key == "explore_noise_tau") explore_noise_tau_ = get_double(value, "explore_noise_tau");
     else if (key == "knee_tuck_target") knee_tuck_target_ = get_double(value, "knee_tuck_target");
     else if (key == "hip2_tuck_target") hip2_tuck_target_ = get_double(value, "hip2_tuck_target");
     else if (key == "motor_gain") motor_gain_ = get_double(value, "motor_gain");
@@ -3922,8 +3928,21 @@ void MotorEPMv2::tick(uint64_t tick_id) {
         float noise_sigma = float(explore_noise_) * (1.0f + float(stuck_explore_gain_) * stuck_boost_) * explore_mult
                           + pe * float(panic_noise_);   // C damps explore_noise (not panic)
         if (!warmup && noise_sigma > 0.0f) {
-            std::normal_distribution<float> nz(0.0f, noise_sigma);
-            for (int j = 0; j < m; ++j) y[j] += nz(L.babble_rng);
+            if (explore_noise_tau_ > 0.0) {
+                // OU per joint, unit stationary variance, scaled by the same sigma.  One draw
+                // per joint per tick from the same stream, so the white path's RNG use is
+                // matched in count; the values differ only by the filter.
+                const float rho = std::exp(-1.0f / float(explore_noise_tau_));
+                const float kin = std::sqrt(1.0f - rho * rho);
+                std::normal_distribution<float> nz(0.0f, 1.0f);
+                for (int j = 0; j < m && j < int(L.noise_ou.size()); ++j) {
+                    L.noise_ou[size_t(j)] = rho * L.noise_ou[size_t(j)] + kin * nz(L.babble_rng);
+                    y[j] += noise_sigma * L.noise_ou[size_t(j)];
+                }
+            } else {
+                std::normal_distribution<float> nz(0.0f, noise_sigma);
+                for (int j = 0; j < m; ++j) y[j] += nz(L.babble_rng);
+            }
         }
         // INTER-LEG PLV accumulation — one sample per tick per leg pair, over the whole run.
     // Placed after the phase pre-pass so every leg's phase is current.  Report-only.
