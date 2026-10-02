@@ -58,6 +58,24 @@ double ServoLag::get(int k) const {
 
 void ServoLag::reset() { m_.reset(); }
 
+// --- DistressNode ------------------------------------------------------------
+
+void DistressNode::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("step", "v_right", "v_fwd", "heading", "tilt", "dt", "tick"),
+                         &DistressNode::step);
+    ClassDB::bind_method(D_METHOD("value"), &DistressNode::value);
+    ClassDB::bind_method(D_METHOD("stuck_deficit"), &DistressNode::stuck_deficit);
+    ClassDB::bind_method(D_METHOD("reset"), &DistressNode::reset);
+}
+
+double DistressNode::step(double v_right, double v_fwd, double heading, double tilt, double dt,
+                          int64_t tick) {
+    return d_.step(v_right, v_fwd, heading, tilt, dt, tick);
+}
+double DistressNode::value() const         { return d_.value(); }
+double DistressNode::stuck_deficit() const { return d_.stuck_deficit(); }
+void   DistressNode::reset()               { d_.reset(); }
+
 // --- StrideVNode -------------------------------------------------------------
 
 void StrideVNode::_bind_methods() {

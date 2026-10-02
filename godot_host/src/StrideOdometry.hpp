@@ -32,6 +32,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include "ogma/body/StrideOdometry.hpp"
+#include "ogma/body/Distress.hpp"
 
 namespace godot {
 
@@ -81,6 +82,25 @@ protected:
 
 private:
     ogma::body::StrideV f_;
+};
+
+// The PERCH × STALL distress accumulator in the robot-computable form (odometry
+// displacement × fused tilt).  Shared with ogma_host; see ogma/body/Distress.hpp.
+class DistressNode : public RefCounted {
+    GDCLASS(DistressNode, RefCounted)
+
+public:
+    double step(double v_right, double v_fwd, double heading, double tilt, double dt,
+                int64_t tick);
+    double value() const;
+    double stuck_deficit() const;
+    void   reset();
+
+protected:
+    static void _bind_methods();
+
+private:
+    ogma::body::DistressAccumulator d_;
 };
 
 // Stateless helpers, shared by the ported channel and the sim-only diagnostics.

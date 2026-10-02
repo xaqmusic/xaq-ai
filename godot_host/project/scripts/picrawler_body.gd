@@ -2473,6 +2473,13 @@ var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is o
 # Source of the commanded angles behind the *_cmd foot-height signals (see _cmd_angle).
 # 0 = legacy servo_targets (stays 0 in brain mode — byte-identical), 1 = slew-limited targets.
 @export var cmd_fk_source: int = 0
+# Robot-faithful inputs the robot can actually compute (port doc "Brain input contract",
+# operator's decisions 2026-10-02).  Both default off: byte-identical.
+#   honest_distress   — distress from stride odometry × fused tilt (shared C++), not world
+#                       XZ position × the exact basis.
+#   joint_torque_zero — publish zeros: hobby servos report no torque.
+@export var honest_distress: bool = false
+@export var joint_torque_zero: bool = false
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
 @export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
@@ -2681,6 +2688,7 @@ const DISTRESS_PERCH_HI: float = 0.30         # rad — tilt_ema at/above this =
 const DISTRESS_RISE: float = 0.006            # accumulate rate × stuck_score
 const DISTRESS_DECAY: float = 0.004           # decay rate × (1 − stuck_score)
 var _distress_pos_history: Array = []         # ring of chassis XZ (Vector2)
+var _distress_node: RefCounted = null         # honest_distress: ogma::body::DistressAccumulator
 var _stuck_deficit: float = 0.0               # fast 2 s net-displacement deficit (stall, 0..1)
 var _tilt_ema: float = 0.0                    # smoothed |tilt| (perch evidence)
 var _distress: float = 0.0                    # slow PERCH×STALL accumulator (the panic signal)
@@ -3341,6 +3349,8 @@ func _ready() -> void:
 		(CHASSIS_Y * 0.5 if belly_ray_legacy else -_chassis_bottom_local) * 1000.0])
 	print("PicrawlerBody: cmd_fk_source=%d (%s)" % [cmd_fk_source,
 		"slew-limited targets" if cmd_fk_source == 1 else "legacy servo_targets — 0 in brain mode"])
+	print("PicrawlerBody: honest_distress=%s joint_torque_zero=%s" % [
+		"ON" if honest_distress else "off", "ON" if joint_torque_zero else "off"])
 	print("PicrawlerBody: honest[upright=%s joints=%s imu=%s]" % [
 		"ON" if honest_upright else "off",
 		"ON" if honest_joints else "off",
@@ -3429,6 +3439,8 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_TOF_TILT_COMP",
 			  "OGMA_PICRAWLER_BELLY_RAY_LEGACY",
 			  "OGMA_PICRAWLER_CMD_FK_SOURCE",
+			  "OGMA_PICRAWLER_HONEST_DISTRESS",
+			  "OGMA_PICRAWLER_JOINT_TORQUE_ZERO",
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU"]:
@@ -3457,6 +3469,8 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_TOF_TILT_COMP":     tof_tilt_comp     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_BELLY_RAY_LEGACY":  belly_ray_legacy  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_CMD_FK_SOURCE":     cmd_fk_source     = clampi(v.to_int(), 0, 1)
+			"OGMA_PICRAWLER_HONEST_DISTRESS":   honest_distress   = (v != "0" and v != "")
+			"OGMA_PICRAWLER_JOINT_TORQUE_ZERO": joint_torque_zero = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
@@ -3639,6 +3653,13 @@ func _resolve_env() -> void:
 	height_penalty_grace = ExperimentConfig.resolve_picrawler_height_penalty_grace(height_penalty_grace)
 	height_penalty_scale = ExperimentConfig.resolve_picrawler_height_penalty_scale(height_penalty_scale)
 	height_penalty_gain  = ExperimentConfig.resolve_picrawler_height_penalty_gain(height_penalty_gain)
+	# ⚠ RECEIPT, because these are honoured from config metadata ONLY when launched from the
+	# UI — headless falls through to the env var, then 0 — so one config name was two
+	# controllers (ledger 2026-10-02).  Any value > 0 emits events.miss, which MotorEPMv2
+	# treats as a respawn.
+	print("PicrawlerBody: shaping events: stability_gain=%.3f height_penalty_gain=%.3f (%s)" % [
+		stability_gain, height_penalty_gain,
+		"OFF" if stability_gain <= 0.0 and height_penalty_gain <= 0.0 else "ON — events.miss resets MotorEPMv2"])
 	reward_shape         = ExperimentConfig.resolve_picrawler_reward_shape(reward_shape)
 	peak_height          = ExperimentConfig.resolve_picrawler_peak_height(peak_height)
 	band_width           = ExperimentConfig.resolve_picrawler_band_width(band_width)
@@ -6646,32 +6667,49 @@ func _step_one() -> void:
 	# PERCHED one (tilt high + not translating) is.  Combine translation (2 s net
 	# deficit) AND tilt; accumulate SLOWLY so transient walking tilt-blips stay
 	# harmless while a sustained perch climbs to 1.  Warmup skips the first 10 s.
-	var ch_xz := Vector2(chassis_xform.origin.x, chassis_xform.origin.z)
-	_distress_pos_history.append(ch_xz)
-	if _distress_pos_history.size() > DISTRESS_WINDOW_TICKS:
-		_distress_pos_history.pop_front()
-	if _distress_pos_history.size() == DISTRESS_WINDOW_TICKS:
-		var disp: float = (_distress_pos_history[DISTRESS_WINDOW_TICKS - 1] as Vector2).distance_to(
-			_distress_pos_history[0] as Vector2)
-		var max_disp: float = DISTRESS_REF_SPEED * float(DISTRESS_WINDOW_TICKS) / float(physics_hz)
-		_stuck_deficit = clamp(1.0 - disp / max_disp, 0.0, 1.0) if max_disp > 0.0 else 0.0
-	# Graded PERCH × STALL score (smoothed tilt, not a flickering hard gate — the
-	# wedge tilt oscillates ~0.2-0.39 and dips would wipe a binary accumulator).
-	# perch ∈ [0,1] from smoothed |tilt|; stall = the 2 s deficit.  BOTH needed
-	# (product) → level slow-walking (perch≈0) does not accumulate, a perched stall
-	# does.  Rate scales with severity; slow climb (operator: slow is fine).
-	_tilt_ema = (1.0 - DISTRESS_TILT_EMA_ALPHA) * _tilt_ema \
-			  + DISTRESS_TILT_EMA_ALPHA * absf(_chassis_tilt(chassis_xform.basis))
-	var perch: float = clamp((_tilt_ema - DISTRESS_PERCH_LO) / (DISTRESS_PERCH_HI - DISTRESS_PERCH_LO), 0.0, 1.0)
-	var stuck_score: float = perch * _stuck_deficit
-	if tick_counter < DISTRESS_WARMUP_TICKS:
-		_distress = 0.0
+	if honest_distress:
+		# Robot-faithful form (shared C++, ogma::body::DistressAccumulator): the same
+		# accumulator, with displacement from stride odometry along the dead-reckoned
+		# heading and tilt from the FUSED attitude — no world position, no exact basis.
+		if _distress_node == null:
+			_distress_node = ClassDB.instantiate("DistressNode")
+		if _distress_node == null:
+			push_error("picrawler_body: DistressNode unavailable — honest_distress cannot run")
+		else:
+			var up_t: float = acos(clamp(_up_est_body.y, -1.0, 1.0)) if _up_est_body.length() > 0.5 else 0.0
+			_distress = _distress_node.step(_stridev_est.x, _stridev_est.y, _ego_heading, up_t,
+											TAU, tick_counter)
+			var dpkt := PackedFloat64Array()
+			dpkt.append(_distress)
+			brain.publish_proprio(dpkt, "distress")
+			_update_distress_hud()
 	else:
-		_distress = clamp(_distress + DISTRESS_RISE * stuck_score - DISTRESS_DECAY * (1.0 - stuck_score), 0.0, 1.0)
-	var distress_pkt := PackedFloat64Array()
-	distress_pkt.append(_distress)
-	brain.publish_proprio(distress_pkt, "distress")
-	_update_distress_hud()
+		var ch_xz := Vector2(chassis_xform.origin.x, chassis_xform.origin.z)
+		_distress_pos_history.append(ch_xz)
+		if _distress_pos_history.size() > DISTRESS_WINDOW_TICKS:
+			_distress_pos_history.pop_front()
+		if _distress_pos_history.size() == DISTRESS_WINDOW_TICKS:
+			var disp: float = (_distress_pos_history[DISTRESS_WINDOW_TICKS - 1] as Vector2).distance_to(
+				_distress_pos_history[0] as Vector2)
+			var max_disp: float = DISTRESS_REF_SPEED * float(DISTRESS_WINDOW_TICKS) / float(physics_hz)
+			_stuck_deficit = clamp(1.0 - disp / max_disp, 0.0, 1.0) if max_disp > 0.0 else 0.0
+		# Graded PERCH × STALL score (smoothed tilt, not a flickering hard gate — the
+		# wedge tilt oscillates ~0.2-0.39 and dips would wipe a binary accumulator).
+		# perch ∈ [0,1] from smoothed |tilt|; stall = the 2 s deficit.  BOTH needed
+		# (product) → level slow-walking (perch≈0) does not accumulate, a perched stall
+		# does.  Rate scales with severity; slow climb (operator: slow is fine).
+		_tilt_ema = (1.0 - DISTRESS_TILT_EMA_ALPHA) * _tilt_ema \
+				  + DISTRESS_TILT_EMA_ALPHA * absf(_chassis_tilt(chassis_xform.basis))
+		var perch: float = clamp((_tilt_ema - DISTRESS_PERCH_LO) / (DISTRESS_PERCH_HI - DISTRESS_PERCH_LO), 0.0, 1.0)
+		var stuck_score: float = perch * _stuck_deficit
+		if tick_counter < DISTRESS_WARMUP_TICKS:
+			_distress = 0.0
+		else:
+			_distress = clamp(_distress + DISTRESS_RISE * stuck_score - DISTRESS_DECAY * (1.0 - stuck_score), 0.0, 1.0)
+		var distress_pkt := PackedFloat64Array()
+		distress_pkt.append(_distress)
+		brain.publish_proprio(distress_pkt, "distress")
+		_update_distress_hud()
 
 	# Vision → brain: capture the shaded RGB at a subrate, publish the cached frame
 	# every tick (sub-rate publishes drop out of the voter trust map) so epm_color
@@ -7350,9 +7388,15 @@ func _step_one() -> void:
 	# behavior is bit-identical to pre-3.A.  Stage 3.A.2 wires CruseCoordinator
 	# to subscribe via a new `load_topic` param.
 	var jtorque := PackedFloat64Array()
-	for i in range(4): jtorque.append(clamp(_prev_torque_hip1[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
-	for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
-	for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
+	if joint_torque_zero:
+		# Robot-faithful: hobby servos report no torque, so the robot publishes zeros
+		# (operator's decision 2026-10-02; port doc "Brain input contract").  The one
+		# consumer, GainEvolver's energy term, goes inert in both bodies alike.
+		for k in range(12): jtorque.append(0.0)
+	else:
+		for i in range(4): jtorque.append(clamp(_prev_torque_hip1[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
+		for i in range(4): jtorque.append(clamp(_prev_torque_hip2[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
+		for i in range(4): jtorque.append(clamp(_prev_torque_knee[i] / MAX_SERVO_TORQUE, -1.0, 1.0))
 	brain.publish_proprio(jtorque, "joint_torque")
 	var jload := PackedFloat64Array()
 	for i in range(4): jload.append(_prev_load_hip1[i])

@@ -27,6 +27,7 @@ static void initialize_ami_ogma_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<LegKinematics>();
     ClassDB::register_class<ServoLag>();
     ClassDB::register_class<StrideVNode>();
+    ClassDB::register_class<DistressNode>();
     ClassDB::register_class<StrideMath>();
 }
 

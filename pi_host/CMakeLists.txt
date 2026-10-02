@@ -89,8 +89,11 @@ if(PI_HOST_BUILD_TESTS)
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
   enable_testing()
-  add_executable(test_hw tests/test_hw.cpp)
-  target_link_libraries(test_hw PRIVATE ogma_hw gtest_main)
+  add_executable(test_hw tests/test_hw.cpp tests/test_brain_inputs.cpp)
+  target_link_libraries(test_hw PRIVATE ogma_hw gtest_main nlohmann_json::nlohmann_json)
+  # The brain-input tests read the REAL calibration files (servo map, exported body), so a
+  # re-export or a re-calibration that breaks the contract fails here, not on the robot.
+  target_compile_definitions(test_hw PRIVATE PI_HOST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   if(PI_HOST_HAVE_SENSORS)
     target_link_libraries(test_hw PRIVATE ogma_sensors)
     target_compile_definitions(test_hw PRIVATE PI_HOST_HAVE_SENSORS=1)

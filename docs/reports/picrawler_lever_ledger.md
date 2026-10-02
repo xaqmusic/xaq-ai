@@ -5667,6 +5667,23 @@ Open, in order:
 
 ### ★★★ 2026-10-02 — P-e IS NOT PORTABLE AS-IS: legacy reward events reset the motor state on ≥39 % of ticks, plus a windup-guard NULL
 
+> ⚠ **CORRECTED SAME DAY — the events fire in the UI ONLY, not in headless runs.**
+> `stability_gain` and `height_penalty_gain` default to 0 in the body. P-e's 0.05 is metadata,
+> which `ExperimentConfig.resolve_picrawler_stab_gain()` honours only when `launched` (the UI);
+> headless falls through to the env var, then the 0 default.
+> - **Every headless P-e number in this ledger ran with NO shaping events**: the shuffle, the
+>   jitter levers, the tipping, the windup tests.
+> - **The operator's UI observation of P-e ran WITH them**: two controllers under one config
+>   name.
+> - The "≥ 39 %" below is how often the firing CONDITION holds in the headless traces, i.e.
+>   what the UI would emit.
+>
+> The body printed no receipt for these gains, which is how this went unseen. That is the same
+> UI/headless parity class as `metadata.body` (2026-08-28) and the 2026-08-05 joint backend.
+> **The operator's decision (2026-10-02): turn the events off in the robot-faithful arm.**
+> Headless P-e already matches that; the UI must be made to match, and the operator must watch
+> the events-off version.
+
 **1. `height_windup_guard` = 1 on P-e — `NULL`, leaning `REGRESSION` (n=8 × 24 000 ticks,
 3.668 rad/s, arena difficulty 0.3).**
 
