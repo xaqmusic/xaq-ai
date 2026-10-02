@@ -698,3 +698,8 @@ less accurately — it arrived still turning, the thing 61° off the nose at the
 gated by the heading error (`state_prior_target_gated_by`) makes the walk slow, turn in place and back to face the thing:
 n = 18, the thing 22–27° off the nose at the skill (★ GAZE 41–46°), the head touching the thing on 57 % of pecks (32 %),
 walls 14 a minute, falls 1.5, the error closed within 3 s 70 %; arrivals −13 %. `WORKING`; the candidate for the eye.
+
+**The walk's dynamic range (design doc §17.94):** the facing walk shuffled (its self-scaled gate tightened as it improved).
+The walker now senses the distance to its target, and its speed target obeys "turn before you arrive" — min(cos e, k·range/|e|),
+k from the measured turn rate: n = 18, ★ GAZE's speed and arrivals (0.174 m/s, 17.8) with the head touching on 56 % of pecks
+(★ GAZE 32 %), walls 18 a minute (33), falls 1.8 (2.6) — `WORKING`; preset "TURN · the walk's DYNAMIC RANGE …(the candidate)".

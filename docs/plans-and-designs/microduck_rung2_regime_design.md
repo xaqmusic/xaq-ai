@@ -6375,3 +6375,36 @@ touch 32 → 57 %, walls and falls the campaign's best on this stack; the cost a
 (more of it is turning in place: closing reads 36 % with 60 % tangential). The pecks still rarely MOVE their thing
 (16 %) — a peck reaches the thing, and the reach is by contact. Preset "TURN · the linear yaw + the walk that FACES its
 thing (the candidate)".
+
+### 17.94 The walk's dynamic range: turn before you arrive (2026-10-01)
+
+**The operator, watching §17.93's facing walk:** accurate, but it shuffles in place a lot — not as good as the promoted
+configuration; split the difference: keep the speed and the motion while closing in — "increase the dynamic range of its
+walking behaviour".
+
+**The shuffle's cause:** the RMS form of the target gate tightened itself — as the walk improved, the heading error's
+RMS shrank (65 → 35°) and the speed was halved at 18° and stopped at 35°; the body moved at 0.04 m/s with the target
+dead ahead (★ GAZE 0.11). **Geometric gates** (`state_prior_target_gate_cos` / `_pow`: the speed target × max(0, cos e)^p,
+the speed that closes on the target): cos restored the walk (0.175 m/s, arrivals 20.3, the campaign's most) and lost the
+alignment (the thing 48° off at a peck, touch 31 %); cos² sat between (touch 47 %, arrivals 17.6). Neither depends on how
+far the thing is, and a 30° error matters only close in.
+
+**Built:** the walker senses the distance to its target (host `--intent-range-sense`: the seek target's range / 2 m, 1 with
+no target, after the fore-aft slot; the linear-yaw brain grown on restore 26 → 27); `MotorEPMv2.state_prior_target_gate_reach`
+/ `_k`: the target's gate is min(cos e, clamp(k·range / |e|, 0, 1)) — the time to turn the error (|e| / ω) must not
+exceed the time to arrive (r / v), k = 2 m · ω / (π · 0.3 m/s). Unit-tested (30/30); ★ BIRD, the cos arm, R83 reproduce.
+
+| n = 18 (sweep f11) | ★ GAZE | facing (§17.93) | cos | **reach, k 0.64** | reach, k 2.1 |
+|---|---|---|---|---|---|
+| walk m/s · arrivals | 0.176 · 17.4 | 0.163 · 15.2 | 0.175 · 20.3 | **0.174 · 17.8** | 0.175 · 19.5 |
+| the head (or body) touching the thing during a peck | 32 % | 57 % | 31 % | **56 %** | 41 % |
+| the thing at a peck's start, \|bearing\| median | 46° | 22° | 48° | 37° | 38° |
+| kicks touching · moving their thing | 37 · 31 % | 25 · 33 % | 34 · 29 % | **36 · 30 %** | 24 · 29 % |
+| walls / min · falls a run | 33 · 2.6 | 14 · 1.5 | 24 · 2.1 | **18 · 1.8** | 24 · 1.9 |
+| the error closed within 3 s | 40 % | 70 % | 56 % | 56 % | 58 % |
+
+**Verdict: `WORKING`** at k 0.64 (ω = 0.3 rad/s, the turn the walker achieves at large errors): ★ GAZE's speed and
+arrivals with the facing walk's peck (the touch 32 → 56 %), walls about half, falls 2.6 → 1.8. k 2.1 (ω = 1 rad/s, the
+calibrated yaw's open-loop capacity) is too lenient: the walker does not turn as fast as the motor can on the walk. The
+kicks' alignment is unchanged (the kick side follows the thing's bearing; touch and displacement tie ★ GAZE). Preset
+"TURN · the walk's DYNAMIC RANGE: turn before you arrive (the candidate)".
