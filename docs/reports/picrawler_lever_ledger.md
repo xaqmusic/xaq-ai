@@ -5795,3 +5795,35 @@ in the channel, the fix is a sensor, not a smarter policy):
   `height_bias` itself.
 
 **The robot must not run P-e·h.**
+
+### ★★★ 2026-10-02 — OPTION C, STEP 1: on the robot's real inputs, the height RATCHET is what flips the body
+
+**Verdict: diagnosis by intervention (signal, n=4 × 12 000 per arm).** Base is P-e·h: every
+input is one the robot can publish, shaping events off, 3.668 rad/s, arena difficulty 0.3.
+The operator's goal (2026-10-02): *see what is possible with the robot's current hardware*,
+i.e. joints from the servo forward model, with no encoders.
+
+| P-e·h + one change | tipped | bias railed | tilt mean | belly | displacement | straight |
+|---|---|---|---|---|---|---|
+| none | 8/8 (8 seeds) | 54 % | 0.56 | 28 mm | 3.9 m | 0.18 |
+| **A `height_ground_gain` 0** (ratchet off) | **1/4** (1 reset) | **0 %** | 0.18 | 21 mm | 8.3 m | 0.62 |
+| B `height_unwind_free` 1 | 4/4 | 38 % | 0.42 | 25 mm | 5.0 m | 0.38 |
+| C `homeo_leak_cycles` 4 | 3/4 | 11 % | 0.38 | 25 mm | 4.5 m | 0.34 |
+| D `homeo_upright_gate` 0.8 | 4/4 | 49 % | 0.44 | 27 mm | 4.4 m | 0.34 |
+| **E `height_homeo_gain` 0** (homeostat off, a lesion TEST) | **0/4** | — | 0.14 | 23 mm | **10.3 m** | **0.78** |
+
+**Reading:**
+- The windup is the ratchet. With `height_k_eff` pinned at `height_k` (0.30), the homeostat
+  defends a fixed fraction of its ceiling and the body stops flipping.
+- Treating the integrator alone (B, C, D: faster unwinding, finite memory, freeze-when-tipped)
+  does not stop it. The setpoint keeps climbing past what the body can hold.
+- With the homeostat off entirely the body is steadiest and moves farthest. The belly still
+  rides 21–23 mm off the floor in every arm.
+- C and D re-test refuted members of the 2026-07-26 plasticity family. Refuted again here, in
+  the robot-faithful context.
+
+**Next (option c, step 2, running):** a GainEvolver re-settle from A, with
+`height_homeo_gain` added to the evolver's keys (range 0–0.15). The search, not a designer,
+then decides how much height control this body wants, from off to twice today's value,
+alongside `amp_target`, `coupling_gain` and `postural_gain`. Frozen-evolver control. 4 seeds
+× 200 000 ticks per arm.
