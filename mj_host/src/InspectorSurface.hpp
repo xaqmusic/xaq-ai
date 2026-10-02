@@ -25,8 +25,12 @@ public:
     // `mtx` is the lock the owner takes around every tick of `instance`; verbs take it too.
     // source_path: the config file the host loaded, reported to clients that
     // pull the live graph (the brain builder opens it for metadata and layout).
+    // port_offset / role (2026-10-02): the duck runs up to three brains -- the walker / intent brain (offset 0, the
+    // historical 7400/7401), the head brain (+2: 7402/7403) and the stand brain (+4: 7404/7405) -- and each serves its
+    // own surface, so the inspector reaches any of them by pointing its host field at that port.  Before this every
+    // brain asked for 7400 and the first one constructed won.
     InspectorSurface(ogma::OgmaInstance& instance, std::recursive_mutex& mtx,
-                     std::string source_path = std::string());
+                     std::string source_path = std::string(), int port_offset = 0, std::string role = std::string());
     ~InspectorSurface();
     void publish_tick(uint64_t tick_id);
     bool active() const { return active_; }

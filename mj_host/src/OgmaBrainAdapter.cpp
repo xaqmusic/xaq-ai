@@ -46,7 +46,8 @@ OgmaBrainAdapter::OgmaBrainAdapter(const DuckBody& body, Config config) : c_(std
 
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg),
                                                      std::make_unique<ogma::InProcessBus>());
-    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, c_.graph_path);
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, c_.graph_path, c_.inspector_offset,
+                                                    c_.inspector_role);
 
     // The action topics this host polls, one per policy joint, named after the
     // joint itself. The graph config must publish exactly these.

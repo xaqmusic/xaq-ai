@@ -1,6 +1,7 @@
 #include "ogma/modules/JointSensorimotorBridge.hpp"
 
 #include <algorithm>
+#include <nlohmann/json.hpp>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -408,6 +409,22 @@ void JointSensorimotorBridge::tick(uint64_t tick_id) {
     }
 
     prev_position_ = last_position_;
+}
+
+nlohmann::json JointSensorimotorBridge::diag_snapshot() const {
+    nlohmann::json joints = nlohmann::json::array();
+    for (size_t i = 0; i < action_topics_.size(); ++i) {
+        const float pos = i < last_position_.size() ? last_position_[i] : 0.0f;
+        const float act = i < last_action_.size() ? last_action_[i] : 0.0f;
+        const float prev = i < prev_position_.size() ? prev_position_[i] : pos;
+        std::string name = action_topics_[i];
+        if (name.rfind("action.", 0) == 0) name = name.substr(7);
+        joints.push_back({{"name", name}, {"pos", pos}, {"act", act}, {"delta", pos - prev}});
+    }
+    return nlohmann::json{{"joints", std::move(joints)}, {"sense", last_load_}, {"load_slots", load_topic_.empty() ? 0 : load_slots_},
+                          {"group_size", group_size_}, {"outputs", output_topics_}, {"load_topic", load_topic_},
+                          {"have_proprio", have_proprio_}, {"have_load", have_load_}, {"publishes", total_publishes_},
+                          {"proprio_in", total_proprio_in_}, {"action_in", total_action_in_}};
 }
 
 } // namespace ogma

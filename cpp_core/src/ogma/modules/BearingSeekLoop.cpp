@@ -583,6 +583,20 @@ nlohmann::json BearingSeekLoop::diag_lite() const {
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();
     j["cx"] = cx_; j["cy"] = cy_; j["tx"] = tx_; j["ty"] = ty_;
+    // for the inspector (2026-10-02): the pose, the chase, the memory, and every way a target ends.  Diagnostic only.
+    j["pose"] = {px_, py_, pyaw_};
+    j["conf"] = conf_; j["target_src"] = target_src_; j["pull"] = pull_;
+    j["chase"] = {{"chasing", chasing_}, {"coasting", coasting_}, {"have_cand", have_cand_}, {"mover_seen", mover_seen_},
+                  {"cand_n", cand_n_}, {"cand_x", cand_x_}, {"cand_y", cand_y_}, {"vx", cand_vx_}, {"vy", cand_vy_},
+                  {"have_memory", have_memory_}, {"mem_x", mem_x_}, {"mem_y", mem_y_},
+                  {"last_miss", last_miss_}, {"last_speed", last_speed_}, {"last_decision", last_decision_},
+                  {"lost_now", lost_now_}, {"yield_live", have_yield_}};
+    j["counts"] = {{"chases", chases_}, {"lost", chases_lost_}, {"stopped", chases_stopped_}, {"reacquired", chases_reacquired_},
+                   {"yielded", chases_yielded_}, {"yield_drops", yield_drops_}, {"cand_replaced", cand_replaced_},
+                   {"cand_fast", cand_fast_}, {"cand_still", cand_still_}, {"cand_timeout", cand_timeout_},
+                   {"progress_forgets", progress_forgets_}, {"contact_forgets", contact_forgets_},
+                   {"static_yielded", static_yielded_}, {"walk_takes", walk_takes_}};
+    j["progress"] = {{"walked", walked_}, {"best_range", best_range_ < 1e8 ? best_range_ : -1.0}};
     return j;
 }
 

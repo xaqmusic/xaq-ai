@@ -44,7 +44,10 @@ struct PlaceInputs {
     // ...then, appended (2026-09-27, the chase phase): the sensor's own origin [x, y, z] in the same frame, z above the
     // floor, so the cloud can tell which voxels a ray passed through (vacated voxels).  Old consumers read the first
     // 5 + 3 * 64 values as before.
-    std::array<float, 5 + 3 * 64 + 3> tof_points{};
+    // ...then (2026-10-02, the ten-minutes phase S1, --tof-free-rays): 64 x (x, y, z), every EMPTY zone's ray end at the
+    // sensor's maximum range in the same frame (NaN for a zone that returned, and for every zone without the flag), so the
+    // cloud can record the free space a ray that returned nothing passed through.  Old consumers read as before.
+    std::array<float, 5 + 3 * 64 + 3 + 3 * 64> tof_points{};
     bool tof_points_valid = false;
 };
 

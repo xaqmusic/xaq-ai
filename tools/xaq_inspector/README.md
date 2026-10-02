@@ -60,6 +60,21 @@ Retargeting keeps the live subscription: the SUB socket is disconnected and
 reconnected rather than rebuilt, and ZMQ subscriptions belong to the socket, not
 the connection.
 
+## The duck's three brains (2026-10-02)
+
+The MuJoCo host runs up to three brains, and each serves its own pair of ports from the base
+(`OGMA_INSPECTOR_PORT`, default 7400; diag = control + 1):
+
+| brain | control · diag | what is in it |
+|---|---|---|
+| intent / walker | 7400 · 7401 | the twist bridge, the walker's MotorEPMv2, the map, play, the cloud, the thing EPMs, seek, the competences, the voter, the arbiter, the outcome loop |
+| head | 7402 · 7403 | the head bridge and the head's MotorEPMv2 (the gaze) |
+| stand | 7404 · 7405 | the stop's stand brain (it ticks only during a stop) |
+
+The **brain** selector under the host fields re-points both fields and reconnects; the module list's header names
+the brain that answered. The host's stderr prints one `inspector (… brain): control … diag …` line per brain. Before
+2026-10-02 every brain asked for 7400 and the first constructed won.
+
 ## Static voxel viewer
 
 A standalone tool, no brain needed: the duck's **sweep clouds** in an interactive 3D view. It reads
@@ -105,6 +120,12 @@ Each module type registers a widget class in
 | `LateralVoter`  | `VoterInspector` — trust shares, consensus dynamics. |
 | `Premotor`      | `PremotorInspector` — intent distribution, policy outputs, W heatmap. |
 | `SequenceGNG`   | `SeqGNGInspector` — cluster-growth + match scalars + winner-window + per-node visits + transition matrix.  Use to gut-check whether SeqGNG is finding meaningful clusters or noise crystals. |
+| `MotorEPMv2`    | `MotorEpmV2Inspector` — **self-model & priors** tab (the identified A as a heatmap, the state against each prior's target and precision, the output, motor TLE and the prior's error) + the gait dashboard tab (a legged body opens on it). |
+| `CloudMap`      | `CloudMapInspector` — plan view of the duck's ToF cloud (voxels by height band; clusters: small, *top unseen*, structure; the attended thing; the mover; toggle the free-space "top seen" layer) + counts over time. |
+| `BearingSeekLoop` | `BearingSeekInspector` — body-frame plan of the held target (by source), the chase candidate and its velocity, the remembered mover; every way a target starts and ends. |
+| `SkillOutcomeLoop` | `SkillOutcomeInspector` — the outcome table, kind × intent (n · mean ± spread; known / tried / never asked), need and surprise. |
+| `LoopCompetence` | `LoopCompetenceInspector` — the Beta belief over a loop's success rate, competence, what is published, the gain it earns. |
+| `JointSensorimotorBridge` | `JointBridgeInspector` — per motor position / command / change, and the sense slots now and as a rolling heat strip: exactly what a motor brain gets to feel. |
 | reflexes / detectors | `ReflexInspector` — auto-fields. |
 | (anything else) | `RawPayloadView` — pretty-printed JSON of the live snapshot. |
 

@@ -73,6 +73,10 @@ public:
         // the sense channel publishes deviations FROM this, so the standing pose
         // is the origin of the head-CoM observation too.
         std::vector<double> head_com0;
+        // The inspector surface's port offset and role (2026-10-02): 0 = 7400/7401 (the level-1 brain, or the only
+        // one); the stop's stand brain serves at +4 (7404/7405) so it never contends with the walker's.
+        int inspector_offset = 0;
+        std::string inspector_role;
     };
 
     OgmaBrainAdapter(const DuckBody& body, Config config);

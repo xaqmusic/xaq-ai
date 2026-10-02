@@ -103,11 +103,16 @@ struct Rig {
 
     // the sensor origin appended to the cast (NaN = not carried); vacated voxels need it
     Pt origin{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
+    // the empty zones' ray ends appended after the origin (--tof-free-rays); empty = the block is not carried
+    std::vector<Pt> far_pts;
     void cast(bool still, double yaw, double ox, double oy, int winner, std::vector<Pt> const& pts) {
         bus.begin_tick(t);
         auto tok = std::make_shared<ogma::ProprioToken>();
-        tok->values = Eigen::VectorXf::Constant(kCast + 3, std::numeric_limits<float>::quiet_NaN());
+        tok->values = Eigen::VectorXf::Constant(kCast + 3 + (far_pts.empty() ? 0 : 3 * ogma::CloudMap::kZones),
+                                                std::numeric_limits<float>::quiet_NaN());
         for (int k = 0; k < 3; ++k) tok->values[kCast + k] = float(origin[size_t(k)]);
+        for (size_t i = 0; i < far_pts.size() && i < size_t(ogma::CloudMap::kZones); ++i)
+            for (int k = 0; k < 3; ++k) tok->values[int(kCast + 3 + 3 * i + k)] = float(far_pts[i][size_t(k)]);
         tok->values[0] = still ? 1.0f : 0.0f;
         tok->values[1] = float(yaw);
         tok->values[2] = 0.12f;
@@ -712,4 +717,48 @@ TEST(CloudMap, TallStructureAroundTheHeldTargetIsCounted) {
     // a target 1.6 m ahead-right: nothing tall near it
     const double n2 = std::hypot(1.4, 0.8);
     EXPECT_EQ(aim(0.8 / n2, 1.4 / n2, n2), 0);
+}
+
+// TOP SEEN (2026-10-02, the ten-minutes phase S1): with the head pitched down the stack rule sees no top and calls a
+// wall's foot small.  free_rays records the free space each ray passed through; small_needs_top asks that a ray went
+// at least a voxel above a cluster's top in its own columns.  The cube's own rays end on it (no seen top): not small;
+// an empty ray that passes level over it at the sensor's height (20 cm) sees its 11 cm top: small again.
+TEST(CloudMap, ACubeIsSmallOnlyOnceARayHasPassedOverItsTop) {
+    ParamMap p = things_params();
+    p["free_rays"] = true;
+    p["small_needs_top"] = true;
+    Rig r(p);
+    r.origin = {0.0, 0.0, 0.20};
+    for (int i = 0; i < 4; ++i) cast_world(r, 0.0, scene());
+    auto th = r.m.things();
+    ASSERT_EQ(th.size(), 2u);
+    EXPECT_LT(th[0].seen_above, th[0].top + 0.04) << "rays that end on the cube pass only just over its far columns";
+    EXPECT_FALSE(th[0].small) << "its top was never seen";
+    EXPECT_EQ(r.m.attended(), -1);
+    // empty rays, level at the sensor's height, straight over the cube to 4 m
+    // (zones 61-63: a zone either returns or is empty, and the scene's returns fill zones 0-44)
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    r.far_pts.assign(size_t(ogma::CloudMap::kZones), Pt{nan, nan, nan});
+    for (int j = 0; j < 3; ++j) r.far_pts[size_t(61 + j)] = {4.0, 4.0 * (-0.03 + 0.04 * j) / 0.85, 0.20};
+    for (int i = 0; i < 2; ++i) cast_world(r, 0.0, scene());
+    th = r.m.things();
+    ASSERT_EQ(th.size(), 2u);
+    EXPECT_NEAR(th[0].seen_above, 0.20, 0.01);
+    EXPECT_TRUE(th[0].small) << "a ray passed over it: its top is seen";
+    EXPECT_FALSE(th[1].small) << "the post still climbs past small_top";
+    EXPECT_EQ(r.m.attended(), 0);
+    // passive: free_rays alone records seen_above and changes no verdict
+    ParamMap q = things_params();
+    q["free_rays"] = true;
+    Rig s(q);
+    s.origin = {0.0, 0.0, 0.20};
+    for (int i = 0; i < 4; ++i) cast_world(s, 0.0, scene());
+    EXPECT_TRUE(s.m.things()[0].small);
+    EXPECT_GE(s.m.things()[0].seen_above, 0.0);
+    // off: no traversal, seen_above unset
+    Rig o(things_params());
+    o.origin = {0.0, 0.0, 0.20};
+    for (int i = 0; i < 4; ++i) cast_world(o, 0.0, scene());
+    EXPECT_TRUE(o.m.things()[0].small);
+    EXPECT_DOUBLE_EQ(o.m.things()[0].seen_above, -1.0);
 }

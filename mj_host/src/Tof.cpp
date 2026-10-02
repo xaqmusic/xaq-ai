@@ -115,7 +115,13 @@ void Tof::sense(const DuckBody& body, double trunk_height_m) {
         const auto dir_world = rot(real ? sub_mat[size_t(sub)].data() : smat.data(), beams_[i]);
         int geomid = -1;
         const mjtNum r = mj_ray(m, d, from, dir_world.data(), kWorldOnly, 1, -1, &geomid, nullptr);
-        if (r < 0.0 || r > kMaxRangeM) continue;             // Empty
+        if (r < 0.0 || r > kMaxRangeM) {                      // Empty
+            const auto dir = qrot(sensor_quat, beams_[i]);
+            const std::array<double, 3> far = {sensor_pos[0] + kMaxRangeM * dir[0], sensor_pos[1] + kMaxRangeM * dir[1],
+                                               sensor_pos[2] + kMaxRangeM * dir[2]};
+            z.far_level = qrot(level, far);
+            continue;
+        }
         z.range = r;
         if (real) {
             // composed with the current pose against the true return from the sub-frame's pose, in the world

@@ -24,6 +24,30 @@
   }
  },
  {
+  "name": "T1 · TOP SEEN · a cluster is small only once a ray has passed over its top (★ TURN + small_needs_top) -- the candidate",
+  "hint": "The ten-minutes phase S1 (2026-10-02, design doc §17.97): with the head pitched down the stack rule never sees a top and calls a wall's foot or a chair leg small -- 38 % of ★ TURN's arrivals were at structure. With the ToF's empty rays passed to the cloud (--tof-free-rays) a cluster is small only once a ray went over it. n = 18 against ★ TURN: walls 32.7 -> 15.4 a minute, boring time 43 -> 25 %, interesting 35 -> 47 %, arrivals at structure 94 -> 32, at things 136 -> 167, falls 3.2 -> 2.1; first minute a tie. WATCH: does the duck still stare into corners; does it ignore a ball by a wall.",
+  "state": {
+   "config": "a1v2_t1_top_seen.json",
+   "mode": "level2",
+   "start": "checkpoint",
+   "secs": 600.0,
+   "output": "watch",
+   "push": 0,
+   "save_brain": false,
+   "battery": false,
+   "step_lean": 0,
+   "walk_from": -1,
+   "scene": "scene_playroom_train.xml",
+   "noise": 0.05,
+   "seed": 1,
+   "seed_random": false,
+   "arena_shift": 0.0,
+   "host_args": "--head-graph mj_host/configs/head2_h2_level_slow.json --load-head mj_host/checkpoints/head2j_h1_s2.json --head-joints --stop-from 0 --stop-every 80 --stop-secs 60 --stop-brain mj_host/configs/a1v2_r19_settle_each.json --stop-load mj_host/checkpoints/duck_r19_s2.json --stop-keep-head --stop-freeze-head --map-on-stop --stop-gaze 0.35 0.08 1.0 6 6 --stop-gaze-residual 1.0 --stop-gaze-learn 0.5 --cloud --log-cloud-profile --stop-gaze-sweep 0.6 0.7 --stop-gaze-sweep-slow 1 --map-view cloud --stop-cloud-end 0.45 --stop-on-arrive --skill-unwind 0.3 1.5 --skill-unwind-aim 1.0 --log-com --stop-gaze-at-thing --train 0.2 8 8 --log-movers 0.5 --log-cloud-live --stop-on-chase --stop-on-lost --stop-on-stuck 8 --stuck-escape 6 --chase-vx 0.35 --heading-reflex 1.0 0.3 1.0 --seek-gate --intent-head-translate 0.6 --intent-fore-sense --tof-body 0.5 --head-graph mj_host/configs/head3o_h2_gaze_w10.json --load-head mj_host/checkpoints/head3o_gaze_h1_s2_nohold.json --head-gaze-sense --intent-range-sense --yaw-linearize-below 0.15 --tof-free-rays",
+   "fast_until": 0,
+   "checkpoint": "duck_forebody_s1.brain.json"
+  }
+ },
+ {
   "name": "★ GAZE · the LEARNED gaze (promoted 2026-10-01): the head brain looks where the walk is going, on ★ BIRD's body-slot walker",
   "hint": "PROMOTED on the operator's eye (2026-10-01): 'the learned gaze is actually working well -- an interesting behaviour'. The head brain (three motors, yaw last, identified standing at the joints with the gaze error fed) drives its gaze error -- the seek target's bearing while seek steers, straight ahead otherwise, minus the head's yaw -- to zero as a pure reach; the level priors masked to pitch and roll; the walker ★ BIRD's, identified with the body-frame ToF slots (duck_forebody_s1, --tof-body 0.5). n = 18: the target in view 90 % (45 % with the head still), the yaw smooth. WATCH: the head turning on its own toward what the duck walks to, and home again.",
   "state": {

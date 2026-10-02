@@ -24,6 +24,10 @@ struct TofZone {
     // sweep and the trunk may tilt a few degrees between casts and the points still compose, which
     // the raw trunk frame does not (2 m x sin 3 deg = 10 cm of apparent height, against a 4 cm block).
     std::array<double, 3> point_level{};
+    // An EMPTY zone's ray (2026-10-02, ten-minutes phase S1): the point kMaxRangeM along the beam in the same levelled
+    // frame -- a ray that returned nothing is free space along its whole length, which the cloud's "top seen" rule needs
+    // (a ray passing over a ball to beyond the sensor's range proves the ball's top).  Unset for the other classes.
+    std::array<double, 3> far_level{};
 };
 
 class Tof {

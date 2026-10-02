@@ -229,6 +229,15 @@ ParamSchema CloudMap::params_schema() const {
         {"mover_isolated", ParamMutability::HotMutable,
          "The mover candidate must be isolated (tall_near 0): a young fragment of a wall base or a chair is not a mover.",
          ParamValue{false}},
+        {"free_rays", ParamMutability::HotMutable,
+         "TOP SEEN (the ten-minutes phase S1): walk every ray of each cast from the sensor's origin -- returning rays to "
+         "1.5 voxels short of the return, empty rays (the host's --tof-free-rays block) to max_range -- and record per column "
+         "the highest free sample; each cluster carries seen_above.  Passive by itself.  Off = no traversal (byte-identical).",
+         ParamValue{false}},
+        {"small_needs_top", ParamMutability::HotMutable,
+         "A cluster is SMALL only if its top was SEEN: a ray passed through its columns at least one voxel above its stack "
+         "top (needs free_rays).  A wall's foot or a chair leg under a head pitched down has no seen top; a ball has.",
+         ParamValue{false}},
         {"things_isolated", ParamMutability::HotMutable,
          "The attended thing must be isolated (tall_near 0): a ball under a table is lost, a wall base is never a thing.",
          ParamValue{false}},
@@ -290,6 +299,7 @@ ParamMap CloudMap::current_params() const {
     m["target_tall_topic"] = ParamValue{target_tall_topic_}; m["target_iso_radius"] = target_iso_radius_;
     m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
     m["things_isolated"] = things_isolated_; m["things_age_dim"] = things_age_dim_;
+    m["free_rays"] = free_rays_; m["small_needs_top"] = small_needs_top_;
     m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
@@ -330,6 +340,8 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "iso_radius") iso_radius_ = get_d(one, "iso_radius", iso_radius_);
     else if (k == "mover_isolated") mover_isolated_ = get_d(one, "mover_isolated", 0.0) > 0.5;
     else if (k == "things_isolated") things_isolated_ = get_d(one, "things_isolated", 0.0) > 0.5;
+    else if (k == "free_rays") free_rays_ = get_d(one, "free_rays", 0.0) > 0.5;
+    else if (k == "small_needs_top") small_needs_top_ = get_d(one, "small_needs_top", 0.0) > 0.5;
     else if (k == "things_age_dim") things_age_dim_ = get_d(one, "things_age_dim", 0.0) > 0.5;
     else if (k == "things_skip_movers") things_skip_movers_ = get_d(one, "things_skip_movers", 0.0) > 0.5;
     else if (k == "target_iso_radius") target_iso_radius_ = get_d(one, "target_iso_radius", target_iso_radius_);
@@ -391,11 +403,14 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     mover_isolated_ = get_d(params, "mover_isolated", 0.0) > 0.5;
     things_isolated_ = get_d(params, "things_isolated", 0.0) > 0.5;
     things_age_dim_ = get_d(params, "things_age_dim", 0.0) > 0.5;
+    free_rays_ = get_d(params, "free_rays", 0.0) > 0.5;
+    small_needs_top_ = get_d(params, "small_needs_top", 0.0) > 0.5;
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
     vox_.clear();
     vacated_.clear();
+    free_col_.clear();
     mover_prev_ = false;
     winner_hist_.clear();
     anchor_yaw_ = anchor_yaw;
@@ -487,6 +502,40 @@ void CloudMap::add_cast(const Eigen::VectorXf& v, double yaw, double trunk_z, ui
         }
         while (!vacated_.empty() && vacated_.front().tick + uint64_t(vacate_window_) < tick) vacated_.pop_front();
     }
+    // FREE RAYS (S1): every ray, walked from the origin; per column the highest free sample above the floor band.  A
+    // returning ray stops 1.5 voxels short of its return (the surface's own voxel is not free); an empty ray runs to
+    // max_range.  Same frame as the points (de-rotated, and translated on a walking cloud).
+    if (free_rays_ && v.size() >= nb + 3 && std::isfinite(v[nb]) && std::isfinite(v[nb + 1]) && std::isfinite(v[nb + 2])) {
+        const double ox = c * double(v[nb]) - s * double(v[nb + 1]) + tx;
+        const double oy = s * double(v[nb]) + c * double(v[nb + 1]) + ty;
+        const double oz = double(v[nb + 2]);
+        const int nf = nb + 3;
+        const double step = voxel_m_ / 2.0, short_of = 1.5 * voxel_m_;
+        for (int i = 0; i < kZones; ++i) {
+            const int b = 5 + 3 * i, bf = nf + 3 * i;
+            double ex, ey, ez, cut;
+            if (std::isfinite(v[b]) && std::isfinite(v[b + 1]) && std::isfinite(v[b + 2])) {
+                ex = double(v[b]); ey = double(v[b + 1]); ez = double(v[b + 2]); cut = short_of;
+            } else if (int(v.size()) >= bf + 3 && std::isfinite(v[bf]) && std::isfinite(v[bf + 1]) && std::isfinite(v[bf + 2])) {
+                ex = double(v[bf]); ey = double(v[bf + 1]); ez = double(v[bf + 2]); cut = 0.0;
+            } else {
+                continue;
+            }
+            const double x1 = c * ex - s * ey + tx, y1 = s * ex + c * ey + ty;
+            const double dx = x1 - ox, dy = y1 - oy, dz = ez - oz;
+            const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (len <= cut + step) continue;
+            const double ux = dx / len, uy = dy / len, uz = dz / len;
+            for (double r = step; r < len - cut; r += step) {
+                const double x = ox + ux * r, y = oy + uy * r, z = oz + uz * r;
+                if (std::hypot(x - ox, y - oy) > max_range_) break;
+                if (z < break_lo_) break;                                    // into the floor: nothing beyond is free air
+                const int64_t k = key_of(int(std::floor(x / voxel_m_)), int(std::floor(y / voxel_m_)), 0);
+                auto [it, fresh] = free_col_.try_emplace(k, float(z));
+                if (!fresh && float(z) > it->second) it->second = float(z);
+            }
+        }
+    }
     (void)trunk_z;   // the host already folded it into z: the input's z IS height above the floor
 }
 
@@ -572,7 +621,7 @@ void CloudMap::tick(uint64_t tick_id) {
     const double yaw = double(pt->values[1]);
     const double trunk_z = double(pt->values[2]);
     const double ox = double(pt->values[3]), oy = double(pt->values[4]);
-    cur_x_ = ox; cur_y_ = oy;
+    cur_x_ = ox; cur_y_ = oy; cur_yaw_ = yaw;
 
     if (still) { ++still_run_; move_run_ = 0; } else { ++move_run_; still_run_ = 0; }
     if (walk_cloud_) {
@@ -767,6 +816,13 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
         }
         t.chain = int(std::lround((t.top - t.lo) / voxel_m_)) + 1;
         t.small = t.top < small_top_ && t.ext <= small_ext_ && t.ext >= small_ext_min_ - 1e-9;
+        if (free_rays_) {
+            for (int64_t k : comp) {
+                auto it = free_col_.find(k);
+                if (it != free_col_.end()) t.seen_above = std::max(t.seen_above, double(it->second));
+            }
+            if (small_needs_top_ && t.seen_above < t.top + voxel_m_) t.small = false;   // its top was never seen
+        }
         out.push_back(t);
     }
     std::sort(out.begin(), out.end(), [](const Thing& a, const Thing& b) { return a.rng < b.rng; });
@@ -1046,6 +1102,32 @@ nlohmann::json CloudMap::diag_snapshot() const {
         places.push_back(nlohmann::json{{"place", key}, {"voxels", int(c.vox.size())},
                                         {"filed", c.filed}, {"ax", c.ax}, {"ay", c.ay}, {"ayaw", c.ayaw}});
     j["cache"] = std::move(places);
+    // for the inspector (2026-10-02): the things reduction as the module holds it, the mover candidate, and the
+    // free-space record ("top seen").  Diagnostic only.
+    const auto thing_row = [](const Thing& t) {
+        return nlohmann::json::array({t.cx, t.cy, t.rng, t.ext, t.top, t.ncols, t.hits, t.small ? 1 : 0, t.seen_above,
+                                      t.tall_near, t.age_w});
+    };
+    nlohmann::json th = nlohmann::json::array();
+    for (auto const& t : things_) th.push_back(thing_row(t));
+    j["things_rows"] = std::move(th);   // [cx, cy, rng, ext, top, ncols, hits, small, seen_above, tall_near, age_w]
+    j["attended_i"] = attended_;
+    j["mover_row"] = (mover_ >= 0 && mover_ < int(recent_.size())) ? thing_row(recent_[size_t(mover_)]) : nlohmann::json(nullptr);
+    j["cfg"] = {{"max_range", max_range_}, {"small_top", small_top_}, {"small_ext", small_ext_}, {"walk_cloud", walk_cloud_},
+                {"free_rays", free_rays_}, {"small_needs_top", small_needs_top_}, {"mover_isolated", mover_isolated_},
+                {"things_isolated", things_isolated_}};
+    nlohmann::json fc = nlohmann::json::array();
+    for (auto const& [k, h] : free_col_) { int x, y, z; unkey(k, x, y, z); fc.push_back({x, y, int(std::lround(1000.0 * double(h)))}); }
+    j["free_cols"] = std::move(fc);     // [ix, iy, highest free ray sample mm]
+    {   // the body in the cloud's frame: [x, y, yaw] (a stop's cloud ignores translation: the body sits at its anchor)
+        double bx = 0.0, by = 0.0;
+        if (walking_cloud_) {
+            const double dx = cur_x_ - anchor_x_, dy = cur_y_ - anchor_y_;
+            const double ca = std::cos(-anchor_yaw_), sa = std::sin(-anchor_yaw_);
+            bx = ca * dx - sa * dy; by = sa * dx + ca * dy;
+        }
+        j["body"] = {bx, by, cur_yaw_ - anchor_yaw_};
+    }
     return j;
 }
 

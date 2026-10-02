@@ -289,8 +289,14 @@ nlohmann::json SkillOutcomeLoop::diag_lite() const {
 nlohmann::json SkillOutcomeLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();
     nlohmann::json st = nlohmann::json::object();
-    for (auto const& [k, s] : stats_) st[std::to_string(k / 2) + (k % 2 ? ":peck" : ":kick")] = {{"n", s.n}, {"mean", s.mean}, {"sd", std::sqrt(s.var())}};
+    // keyed "node:intent" (2026-10-02: it read k / 2 and k % 2, a two-intent leftover -- with kMaxIntents 4 every
+    // label was wrong; diagnostic only)
+    static const char* const kNames[kMaxIntents] = {"kick", "peck", "push", "intent3"};
+    for (auto const& [k, s] : stats_)
+        st[std::to_string(k / kMaxIntents) + ":" + kNames[k % kMaxIntents]] = {{"n", s.n}, {"mean", s.mean}, {"sd", std::sqrt(s.var())}};
     j["stats"] = st; j["tx"] = tx_; j["ty"] = ty_;
+    j["last"] = {{"node", last_node_}, {"pred", last_pred_}, {"obs", last_obs_}, {"surprise", last_surprise_}};
+    j["min_samples"] = min_samples_; j["kicked_node"] = knode_;
     return j;
 }
 

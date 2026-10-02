@@ -6614,6 +6614,11 @@ nlohmann::json MotorEPMv2::diag_snapshot() const {
     j["state_prior_err"] = state_prior_err_ema_;   // mean |x[idx] − x*| (EMA; decays when off)
     j["state_prior_w"]   = state_prior_gain_;
     j["state_prior_applied"] = state_prior_applied_;
+    // for the inspector (2026-10-02): the prior's own arrays, so the state bar chart can draw each prior index's
+    // nominal target and precision beside the state it pulls (gated targets move from these).  Diagnostic only.
+    j["state_prior_idx"] = state_prior_indices_;
+    j["state_prior_tgt"] = state_prior_targets_;
+    j["state_prior_wts"] = state_prior_weights_;
     if (!state_prior_gated_by_.empty()) j["state_prior_gate"] = gate_mean_;   // the pace gate (mean over gated indices)
     j["state_prior_calm_mult"] = calm_mult_;   // 1 = full storm; falls as the prior is satisfied
     j["consolidate_c"] = consolidate_c_;       // 1 = fully consolidated (earned slow plasticity)

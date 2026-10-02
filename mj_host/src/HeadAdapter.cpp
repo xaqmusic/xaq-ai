@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "DuckBody.hpp"          // kBrainHz
+#include "InspectorSurface.hpp"
 #include "ogma/GraphConfig.hpp"
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
@@ -41,8 +42,9 @@ HeadAdapter::HeadAdapter(const std::string& graph_path, uint64_t seed) {
         else if (auto d = std::get_if<double>(&it->second)) babble_ticks_ = uint64_t(std::max(0.0, *d));
     }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
-    // No inspector surface: the twist brain owns the host's inspector port. The head brain's
-    // diagnostics reach the log through diagnostics() and readback().
+    // Its own inspector surface at +2 (7402/7403, 2026-10-02): the walker's brain keeps 7400; the inspector reaches
+    // the head brain by pointing its host field at :7402.  Its diagnostics also reach the log through diagnostics().
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path, 2, "head");
 }
 
 HeadAdapter::~HeadAdapter() = default;
@@ -86,6 +88,7 @@ std::array<double, 4> HeadAdapter::tick(const std::array<double, 4>& head_q,
                            gaze_sense_ ? unit(gaze_err_ / kHeadRange[2]) : 0.0f});   // 11: the gaze error (--head-gaze-sense), else spare
 
     instance_->tick();
+    if (inspector_) inspector_->publish_tick(tick_id_);
 
     static const char* const kActions[4] = {"action.neck_pitch", "action.head_pitch", "action.head_yaw", "action.head_roll"};
     for (int i = 0; i < 4; ++i) {

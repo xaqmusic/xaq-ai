@@ -91,7 +91,7 @@ IntentAdapter::IntentAdapter(const std::string& graph_path, uint64_t seed) {
                                     + std::to_string(place_dims_) + "; the host builds 12 (pose + 8 column ranges), 13 (pose + head yaw + 8 column ranges), 68 (pose + 64 zone ranges) or 4 + a depth EPM's projection_dim");
     }
     instance_ = std::make_unique<ogma::OgmaInstance>(std::move(cfg), std::make_unique<ogma::InProcessBus>());
-    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path);
+    inspector_ = std::make_unique<InspectorSurface>(*instance_, instance_mtx_, graph_path, 0, "intent");
 }
 
 IntentAdapter::~IntentAdapter() = default;

@@ -48,6 +48,9 @@ public:
     int total_proprio_in() const { return total_proprio_in_; }
     int total_action_in()  const { return total_action_in_; }
 
+    // for the inspector (2026-10-02): per joint [position, action, delta] and the trailing sense slots.  Diagnostic only.
+    nlohmann::json diag_snapshot() const override;
+
 private:
     void handle_proprio(MessagePtr payload);
     void handle_action(int joint_idx, MessagePtr payload);

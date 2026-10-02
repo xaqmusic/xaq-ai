@@ -6453,3 +6453,85 @@ issues with navigation, but the current body mechanics seem to be the best so fa
 walker `duck_forebody_s1` with the learned gaze) + the walker's range sense (`--intent-range-sense`) + the dynamic-range
 speed target (`a1v2_r113_fore_g10_reach_gaze`: min(cos e, 0.64·range/|e|)) + the in-place deadband compensated only while
 slowed (`--yaw-linearize-below 0.15`). The cold start for the next push is chase phase §12.
+
+### 17.96 The ten-minutes phase opens: where ★ TURN's ten minutes go (phase 0, 2026-10-02)
+
+**The operator's direction** (`microduck_ten_minutes_phase.md` §1): ten minutes of interesting behaviour for the plan
+to Pollen; the run is boring when the duck gets stuck in corners and stares at the wall. Two pushes — tall structure
+consolidated as one immovable object, and the phantom (a lost mover held by a slow loop). Before any lever, the
+instrument: `mj_host/tools/ten_minutes.py` sorts every tick into one category (truth labels, scoring only) and traces
+every boring episode ≥ 3 s to what began it. On ★ TURN's own sweep (f12, n = 18 × 600 s, the train room, judged from
+30 s):
+
+| category | s a run (± sd) | share |
+|---|---|---|
+| **stare@structure** (standing, wall or furniture within 0.5 m along the view, nothing movable in the cone) | **104 ± 87** | 18 % |
+| **seek→structure** (walking to a held target that is a wall or furniture face) | **80 ± 33** | 14 % |
+| pinned (wall contact, or stalled by structure) | 49 ± 24 | 9 % |
+| seek→nothing | 13 ± 16 | 2 % |
+| stand@thing · seek→thing · skill · chase | 139 · 44 · 14 · **1.6** | 24 · 8 · 2.5 · 0.3 % |
+| stand-open · wander · down | 62 · 53 · 11 | 11 · 9 · 2 % |
+
+**Boring 43 % of the run (20–72 % by seed), interesting 35 % (15–56 %).** Contingency: skills touching a thing 57/161;
+stops begun at a thing 229/395.
+
+- **The seek loop's targets: 94 of 248 arrivals (38 %) are at a wall or furniture face**, 136 at a thing, 18 at
+  nothing (the believed target put into the world through the odometry's own pose; checked: the body-to-target
+  distance equals the logged seek range at every arrival). The walk to them is the 80 s of seek→structure, and the
+  stand at them 37 s of the stares (episodes begun by `stop:arrive`). The operator's diagnosis, measured: the
+  fragments of tall structure are the duck's targets four times in ten.
+- **The long stares are stops that run to the 60 s cap.** 30 stops of 395 reach the cap; stare episodes of 30 s or more
+  are 47 s a run, concentrated on five seeds (5, 11, 12, 13, 14: boring 55–72 %); the look after a skill (`stop:look`,
+  29 s a run of stares) and the timer stop (`stop:start`, 17 s) end facing structure as often as the arrival does. A
+  stop facing a wall does not end on the cloud's growth rule.
+- **The chase is nearly absent on ★ TURN: 1.6 s a run.** The phantom (phase 2) starts from a confirmed chase; its entry
+  must be re-measured before the phantom is built (the chase's start, §17.68, and whatever ★ TURN's walk changed).
+
+**Verdict: instrument `WORKING`; the baseline for the phase.** Phase 1's consumers, in the order these numbers rank them:
+the approach to a fragment (seek→structure + the arrival stares, ~80–120 s a run), then the stop that does not end facing
+structure (~47 s a run in long stares). Re-use: `ten_minutes.py --json` for every arm of the phase, beside the first
+minute.
+
+### 17.97 Structure, S0–S1: the fragments are clusters whose top was never seen; a small thing needs a seen top (2026-10-02)
+
+**S0, offline (`mj_host/tools/structure_rule.py`, the f12 logs, 942 small clusters on 1 018 filed clouds).** The operator's
+consolidation as built geometrically — the tall footprint closed with the ToF's zone spacing (0.098 rad × range) as the
+radius, a small cluster ON the closed line a fragment — keeps every open-floor thing and refuses only 25–47 % of the
+structure fragments (12 % of things by walls at its widest tolerance); R91's isolation on the same clusters refuses 55 %
+and half the things by walls. The missed fragments sit 2–3 voxels in FRONT of the tall line on walking clouds (the
+registration smear grows with range) — and on stop clouds **there is no tall line to find**: in 16 of 28 sampled stop
+clouds holding a fragment, nothing above 14 cm was ever seen (the stop's gaze pitched down at a thing). The stack rule
+calls a cluster small because its chain stops — and it stops where the field of view does. **A missing observation, not
+a missing consolidation** (CLAUDE.md §1 step 2): small should mean *a ray passed over it*. The offline proxy for that
+(farther voxels on the same bearing) cannot see the rays that returned nothing, so the rule went into the module.
+
+**S1, built (off by default, both guards byte-identical: the old and new binaries on ★ TURN's argv with every flag off —
+tick records identical; the passive arm reproduces f12 seed 5 tick for tick):** host `--tof-free-rays` (each EMPTY zone's
+ray end at 4 m appended to the cast, `TofZone::far_level`); `CloudMap.free_rays` (every ray walked from the origin — a
+returning ray to 1.5 voxels short of its return, an empty ray to `max_range` — and per column the highest free sample;
+each cluster carries `seen_above`; the filed `things` record its 10th value) and `CloudMap.small_needs_top` (small only
+if `seen_above ≥ top + one voxel`). Unit test `ACubeIsSmallOnlyOnceARayHasPassedOverItsTop` (25/25).
+
+**The module's own verdicts (passive arm, n = 18):** refused for an unseen top — structure fragments **65 % at stops**,
+32 % on the walk; open-floor things **0 % at stops**, 1.4 % on the walk; things within 0.3 m of structure 8 %.
+
+**The lever (sweep `log/ten/s1`, n = 18 × 600 s, ★ TURN's harness, against the passive arm = ★ TURN):**
+
+| | ★ TURN | **+ small needs a seen top** |
+|---|---|---|
+| walls / min (paired) | 32.7 ± 21.1 | **15.4 ± 16.9** (Δ −17.4, t −3.4, 12 of 18 seeds better) |
+| boring · interesting share of the run (`ten_minutes.py`) | 43 % · 35 % | **25 % · 47 %** |
+| boring by seed (min–max) | 20–72 % | 5–55 % |
+| stare@structure · seek→structure · pinned, s a run | 104 · 80 · 49 | **45 · 42 · 34** |
+| stand@thing · seek→thing, s a run | 139 · 44 | **183 · 64** |
+| arrivals at a thing · at structure · at nothing | 136 · 94 · 18 | **167 · 32** · 34 |
+| skills touching a thing · stops begun at a thing | 57/161 · 229/395 | 65/161 · 291/394 |
+| falls a run · chase s a run | 3.2 · 1.6 | 2.1 · 4.1 |
+| first minute: touched the green block · first skill touching | 14/18 · 10/14 | 14/18 · 9/14 (a tie) |
+
+**Verdict: `WORKING`, loud** — the operator's boring time nearly halved, arrivals at structure cut by two thirds with more
+at things, walls halved, falls down, the first minute kept. Blind metric read: arrivals at nothing rose 18 → 34 (a seen
+top on a fragment that is no longer there, or a dead-reckoned place); stand-open +20 s. Not promoted without the eye;
+preset "T1 · TOP SEEN". Next (one at a time): the walking cloud's 32 % (the smear in front of the line — the closing with a
+range-scaled tolerance, S0's numbers), then the stop that does not end facing structure (§17.96's long stares, 45 s a run
+left), then S3 (the outcome loop learns structure does not answer).

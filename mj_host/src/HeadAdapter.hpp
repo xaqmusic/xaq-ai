@@ -19,6 +19,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 namespace ogma { class OgmaInstance; }
+namespace mjhost { class InspectorSurface; }
 
 namespace mjhost {
 
@@ -110,6 +111,7 @@ public:
 private:
     std::unique_ptr<ogma::OgmaInstance> instance_;
     std::recursive_mutex instance_mtx_;
+    std::unique_ptr<InspectorSurface> inspector_;   // the head brain's own surface, 7402/7403 (2026-10-02)
     uint64_t tick_id_ = 0;
     std::array<double, 4> last_cmd_{};
     std::map<std::string, double> frozen_rates_;

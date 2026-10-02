@@ -1291,6 +1291,11 @@ double g_log_movers_s = 0.0;
 // evicts a remembered place; and "cloudv" gains "walking" (a walking cloud is forgotten on filing, a stop's is
 // remembered by place).  A viewer can then grow, age, forget and remember exactly as the module does.  Off = byte-identical.
 bool g_log_cloud_live = false;
+// --tof-free-rays (2026-10-02, the ten-minutes phase S1): the cast also carries every EMPTY zone's ray end at the sensor's
+// maximum range, so CloudMap's free_rays can record the free space a ray that returned nothing passed through (a ball's
+// top is SEEN when a ray passes over it to beyond the range).  The filed "things" record gains each cluster's seen_above
+// (the 10th value).  Off = byte-identical: the appended block is NaN and the record unchanged.
+bool g_tof_free_rays = false;
 // A closed track: an ellipse of semi-axes a (along yaw) and b about (cx, cy), walked by ARC LENGTH so the
 // train's speed is what the flag says everywhere on it.
 struct TrackPath {
@@ -1801,7 +1806,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         DuckBody probe(scene);
         std::vector<double> stand_home, stand_hcom;
         calibrate_stand_home(probe, seed, stand_home, stand_hcom);
-        stander = std::make_unique<OgmaBrainAdapter>(probe, OgmaBrainAdapter::Config{g_stop_brain, seed, 0.35, stand_home, stand_hcom});
+        OgmaBrainAdapter::Config sc{g_stop_brain, seed, 0.35, stand_home, stand_hcom};
+        sc.inspector_offset = 4; sc.inspector_role = "stand";
+        stander = std::make_unique<OgmaBrainAdapter>(probe, sc);
         if (g_servo_filter) stander->set_servo_filter(true);
         if (!g_stop_load.empty()) {
             std::ifstream in(g_stop_load);
@@ -2700,6 +2707,13 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     place.tof_points[size_t(5 + 3 * Tof::kZones + 0)] = float(og[0]);
                     place.tof_points[size_t(5 + 3 * Tof::kZones + 1)] = float(og[1]);
                     place.tof_points[size_t(5 + 3 * Tof::kZones + 2)] = float(og[2] + p[2]);
+                    for (int i = 0; i < Tof::kZones; ++i) {     // --tof-free-rays: the empty zones' rays, to max range
+                        const bool fr = g_tof_free_rays && zz[size_t(i)].cls == TofZone::Empty;
+                        const size_t b = size_t(5 + 3 * Tof::kZones + 3 + 3 * i);
+                        place.tof_points[b + 0] = fr ? float(zz[size_t(i)].far_level[0]) : std::numeric_limits<float>::quiet_NaN();
+                        place.tof_points[b + 1] = fr ? float(zz[size_t(i)].far_level[1]) : std::numeric_limits<float>::quiet_NaN();
+                        place.tof_points[b + 2] = fr ? float(zz[size_t(i)].far_level[2] + p[2]) : std::numeric_limits<float>::quiet_NaN();
+                    }
                 }
                 const auto col = tof.column_hit();
                 for (int i = 0; i < Tof::kCols; ++i) place.cols[size_t(i)] = float(col[size_t(i)] / Tof::kMaxRangeM);
@@ -2870,8 +2884,12 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     const auto th = brain.cloud_filed_things();
                     std::printf(",\"things\":[");
                     for (size_t k = 0; k < th.size(); ++k)
-                        std::printf("%s[%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%d]", k ? "," : "", th[k].cx, th[k].cy, th[k].rng,
+                    {
+                        std::printf("%s[%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.0f,%d,%d", k ? "," : "", th[k].cx, th[k].cy, th[k].rng,
                                     th[k].ext, th[k].top, th[k].ncols, th[k].hits, th[k].chain, th[k].small ? 1 : 0);
+                        if (g_tof_free_rays) std::printf(",%.3f", th[k].seen_above);
+                        std::printf("]");
+                    }
                     std::printf("]");
                 }
                 ++cloud_n; cloud_vox_sum += int(vx.size() / 5);
@@ -3075,6 +3093,8 @@ void usage() {
         "      --head-forward RAD offsets the neck and head pitch targets (the head over the feet); --body-pitch RAD\n"
         "      sets the walker's body_pitch command slot -- the speed levers, 0 = off.\n"
         "      --stop-on-lost starts a stop when a chase is lost, the sweep centred on where the thing went (a look, not a walk).\n"
+        "      --tof-free-rays passes the ToF's EMPTY zones' rays to the cloud (to max range) for CloudMap free_rays: a ball's\n"
+        "      top counts as seen when a ray passed over it; the filed things record gains seen_above.  Off = byte-identical.\n"
         "      --log-cloud-live logs the cloud as the module builds it: the voxels each cast touches, a cloud's opening\n"
         "      (with its anchor's world pose) and the places the cache forgets -- what the duck viewer draws as the live cloud.\n"
         "\n"
@@ -3385,6 +3405,8 @@ int main(int argc, char** argv) {
             g_train.phase_s = std::stod(next("--train-phase"));
         } else if (a == "--log-cloud-live") {
             g_log_cloud_live = true;
+        } else if (a == "--tof-free-rays") {
+            g_tof_free_rays = true;
         } else if (a == "--log-movers") {
             g_log_movers_s = std::stod(next("--log-movers"));
         } else if (a == "--l2-twist") {

@@ -20,6 +20,11 @@
 
 ## ▶ Resume here
 
+**2026-10-02 (later): the ten-minutes phase opened** — [`microduck_ten_minutes_phase.md`](microduck_ten_minutes_phase.md):
+the goal is ten minutes of interesting behaviour for the plan to Pollen. The instrument (`ten_minutes.py`) measured ★ TURN
+43 % boring; the fragments it walked to were clusters whose top was never seen, and "small needs a seen top" (preset
+"T1 · TOP SEEN") halves the walls and takes boring to 25 % — awaiting the eye. Then the phantom (a tunnel on the track).
+
 **2026-10-02: ★ TURN (chase phase §12 — the cold start).** The body mechanics promoted: ★ BIRD's walker (the head slides
 fore-aft, the view level) with the learned gaze, a speed target that turns before it arrives, and the policy's in-place yaw
 deadband compensated when slowed. The operator judges the first minute. The next push is the NAVIGATION — the open items

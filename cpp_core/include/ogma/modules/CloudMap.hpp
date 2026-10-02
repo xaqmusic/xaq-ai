@@ -106,6 +106,11 @@ public:
         // isolated into low blobs"): the voxels of the whole open cloud higher than iso_height within iso_radius of the
         // centroid.  A wall base has the wall above it, a chair leg its seat; a ball, a block or the train has none.
         int    tall_near = 0;
+        // TOP SEEN (2026-10-02, the ten-minutes phase S1): the highest point above the floor at which a ray of this cloud
+        // passed through the cluster's own columns without returning there (m; -1 = none, or free_rays off).  With the
+        // head pitched down, the stack rule sees no top and calls a wall's foot or a chair leg small; a ball's top is
+        // seen when a ray has passed over it.  small_needs_top requires seen_above >= top + one voxel.
+        double seen_above = -1.0;
     };
 
     CloudMap() = default;
@@ -314,11 +319,16 @@ private:
     int      still_run_ = 0, move_run_ = 0;
     double   anchor_yaw_ = 0.0, anchor_x_ = 0.0, anchor_y_ = 0.0;
     double   cur_x_ = 0.0, cur_y_ = 0.0;   // the body's odometry position this tick (the cast token's)
+    double   cur_yaw_ = 0.0;               // ...and its yaw (the inspector's body marker; read by nothing else)
     int      vacate_window_ = 0;           // vacate_window_ticks: 0 = no ray traversal (byte-identical)
     double   vacate_radius_ = 0.25;
     double   vacate_beyond_ = 0.20;        // the ray must reach at least this far beyond the voxel it passes through
     int      mover_vacated_ = 0;           // the candidate needs at least this many vacated voxels (0 = not required)
     std::deque<Vacated> vacated_;          // the recently vacated voxels, oldest first
+    // free_rays (S1): every ray of the cast, returning or not (the empty zones' rays from the cast's appended block),
+    // walked from the origin; per column the highest free sample above break_lo.  small_needs_top gates `small` on it.
+    bool     free_rays_ = false, small_needs_top_ = false;
+    std::unordered_map<int64_t, float> free_col_;   // keyed by (ix, iy, 0)
     uint64_t vacated_total_ = 0;
 public:
     uint64_t vacated_total() const { return vacated_total_; }
