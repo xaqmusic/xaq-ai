@@ -5613,3 +5613,54 @@ its recorded re-use condition ("a ratchet recurs") is now met.
 
 **For the hardware:** P-e IS the robot's configuration (raw boom, this homeostat). As shipped,
 it should be expected to do this after several minutes. Fix before the first hardware run.
+
+### ★★ 2026-10-02 — WHAT MAKES THE FSR-LEG BODY TIP: one factor at a time, and the operator's two observations
+
+**Verdict: the tipping the operator saw is lever c (P-e·c). P-e is operator-approved for its
+behaviour: "looks good, the robot is moving conservatively and there are no dangerous falls."**
+Supersedes the open question in the corrected entry above.
+
+**One factor at a time against P-e** (3.668 rad/s, FSR leg, raw boom), 4 seeds × 24 000 ticks,
+arena difficulty 0.3. Every arm's receipt was checked (servo speed, body, `tof[...]`).
+
+| arm | resets (seeds) | `height_bias` max | ticks railed (>1.4) | boom − true belly | tilt max |
+|---|---|---|---|---|---|
+| P-e | 2 (1/4) | 1.21 | 1.2 % | −2.8 mm | 1.14 |
+| servo 6.0 rad/s | 0 (0/4) | 0.61 | 0 % | −2.2 mm | 0.75 |
+| old 76.5 mm leg | 0 (0/4) | 0.73 | 0 % | −2.8 mm | 0.30 |
+| tilt compensation ON | 4 (2/4) | 0.75 | 0 % | +0.4 mm | 1.60 |
+| `height_ground_gain`=0 | 0 (0/4) | 0.52 | 0 % | −2.5 mm | 0.48 |
+| *P-e·c (lever c)* | *10 (3/4)* | *1.50* | *every seed* | *−2.3 mm* | *2.04* |
+
+**Findings:**
+- **The ToF is not the cause.** The raw boom reads within ~3 mm of the true belly in every arm.
+  Tilt compensation makes it more accurate (+0.4 mm) and does not reduce tipping.
+- **The mechanism is integrator windup in the height homeostat.**
+  - `height_k_eff` ratchets 0.3 → ~0.6 in every ratchet-on arm, on GENUINE near-grounding
+    (belly-centre median 7 mm when the boom reads < 3 mm).
+  - `chassis_h_max` sits at its 60 mm clamp, so the target is ≈ 36 mm.
+  - When the body cannot hold that, `height_bias` winds toward +1.5, the legs over-lift, and the
+    body tips.
+  - Railing is the readable precursor: every P-e·c seed, briefly in P-e, never elsewhere.
+- **Lever c is the operator-observed cause.** Its knee tuck now engages on genuinely planted
+  legs and stacks with the height bias. Stays NOT PROMOTED. Re-use context: with an anti-windup
+  on the height integrator, or with `stance_lift` re-tuned against the corrected detector.
+- **P-e at 3.668 with the FSR leg winds up occasionally** (1 seed). One tip-over across 4 seeds
+  cannot rank the arms against each other (a rare discrete count, as GainEvolver's own `w_falls`
+  note says), so the factor ranking is a lead, not a finding.
+
+**Operator UI observation of P-e** (rule 5): conservative movement, no dangerous falls, judged
+good. This sits beside the measurements, which still stand:
+- 0 lifts past the fixed `feet_y` step threshold.
+- True-contact swings at a quarter of the 6.0 rate.
+- 1 tip-over in 4 × 24 000 ticks.
+
+The conservative, slow gait at the robot's servo speed is what the operator wants first on
+hardware (servo safety before speed). This is the first configuration both measured and watched
+as the robot will run it.
+
+Open, in order:
+- (a) anti-windup on the height integrator (`height_windup_guard` re-test, judged on railing and
+  tilt at n ≥ 8, long runs);
+- (b) the adaptive height ceiling (`stand_m` / `chassis_h_max` pinned by the spawn pose);
+- (c) the remaining full-slew command jitter.
