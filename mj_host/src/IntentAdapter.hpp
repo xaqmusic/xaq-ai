@@ -247,6 +247,8 @@ public:
     double chase_vy()      const;
     bool   mover_seen()    const;
     int    mover_cands()   const;
+    int    cloud_target_tall()  const;   // the cloud's tall voxels around the seek target (CloudMap target_tall)
+    int    cloud_target_small() const;   // ...and the small things there (the impeded look's wall-or-thing)
     double chase_gaze_ego() const;
     std::array<int, 4> chase_cand_fates() const;   // replaced, too fast, still, timed out
     int    walk_takes() const;

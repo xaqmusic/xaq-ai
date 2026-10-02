@@ -79,6 +79,10 @@ private:
     // position between 1.5 x arrive_m and renew_range away re-arms it with confidence = need: the duck goes
     // back to a thing it does not yet understand and leaves one it does.  Empty = off (byte-identical).
     std::string renew_topic_;
+    // pull_topic (2026-10-02, S3): the outcome loop's [pull] -- the expected answer at the attended thing's cell.  A
+    // sighted thing's need (the confidence a sighting sets) is that pull instead of 1: a thing whose kind in its context
+    // has been tried and never moved is still seen, but no longer worth the walk.  Empty = 1 (byte-identical).
+    std::string pull_topic_;
     float  renew_min_       = 0.25f;
     double renew_range_     = 2.0;
     // the walk re-fix (2026-09-23, §17.47): a bearing flagged as seen from a WALKING cloud (the token's 4th

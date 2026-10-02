@@ -21,6 +21,7 @@
 namespace {
 struct Rig {
     ogma::InProcessBus bus; ogma::SkillOutcomeLoop m; uint64_t t = 0;
+    int ctx = -1;                                   // S3: the context EPM's winner published each tick (-1 = none)
     explicit Rig(ogma::ParamMap p = {}) { m.set_id("outcome"); m.on_setup(&bus, p); }
     // one tick: the body at (x, y, yaw), the thing bearing [vx, vy, prox] (prox 0 = unseen), node, the seek need and range
     void step(double x, double y, double yaw, float vx, float vy, float prox, int node, float need, float range) {
@@ -30,6 +31,7 @@ struct Rig {
         auto b = std::make_shared<ogma::ProprioToken>(); b->values = Eigen::VectorXf(3); b->values << vx, vy, prox;
         bus.publish("percept.thing_bearing", b);
         auto rt = std::make_shared<ogma::RealityToken>(); rt->winner_id = node; bus.publish("reality.cognitive.thing", rt);
+        if (ctx >= 0) { auto cx = std::make_shared<ogma::RealityToken>(); cx->winner_id = ctx; bus.publish("reality.cognitive.thing_context", cx); }
         auto sv = std::make_shared<ogma::ProprioToken>(); sv->values = Eigen::VectorXf::Constant(1, need); bus.publish("reality.cognitive.seek_value", sv);
         auto sr = std::make_shared<ogma::ProprioToken>(); sr->values = Eigen::VectorXf::Constant(1, range); bus.publish("reality.cognitive.seek_range", sr);
         m.tick(t); bus.end_tick(); ++t;
@@ -216,4 +218,73 @@ TEST(SkillOutcomeLoop, BeyondAKicksReachOnlyThePushIsAsked) {
     for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, 0.9f, 3, 0.0f, 0.2f);   // seen 0.25 m ahead: the kick's reach
     ASSERT_EQ(r.m.requests(), 2);
     EXPECT_NE(r.request_id(), 4) << "within reach the least-known of all three: the kick (the push has one answer)";
+}
+
+// S3 (2026-10-02, the ten-minutes phase): the outcome loop learns that STRUCTURE does not answer.  The context splits a
+// kind's cells; a cell tried min_samples times that never moved more than answer_m pulls (0 + 1) / (2 + 2) = 0.25; the
+// same kind in the other context is unknown and pulls 1; ANOTHER kind in the same context borrows the context's pooled
+// share (things standing on walls do not answer) -- and a cell whose thing moves pulls high.
+namespace {
+float pull_of(Rig& r) {
+    auto pp = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("reality.cognitive.outcome_pull"));
+    return pp ? pp->values[0] : -1.0f;
+}
+void kick_and_see(Rig& r, int node, float prox_after) {
+    r.see_then_arrive(node);
+    for (int i = 0; i < 40; ++i) r.step(0.8, 0, 0, 0, 0, 0, node, 0.0f, 0.2f);
+    for (int i = 0; i < 8; ++i) r.step(0.8, 0, 0, 0.0f, 1.0f, prox_after, node, 0.0f, 0.2f);
+    for (int i = 0; i < 10; ++i) r.step(0.8, 0, 0, 0, 0, 0, node, 0.0f, 0.2f);
+}
+}  // namespace
+
+TEST(SkillOutcomeLoop, StructureThatNeverAnswersLosesItsPullAndLendsItToItsContext) {
+    ogma::ParamMap p; p["min_samples"] = int64_t{2}; p["context_topic"] = std::string("reality.cognitive.thing_context");
+    p["context_n"] = int64_t{2}; p["pull_topic"] = std::string("reality.cognitive.outcome_pull");
+    Rig r(p);
+    r.ctx = 1;                                                   // on structure
+    for (int k = 0; k < 2; ++k) kick_and_see(r, 7, 0.92f);       // seen again where it was: no answer
+    ASSERT_EQ(r.m.observed(), 2);
+    const auto& st = r.m.stats().at(ogma::SkillOutcomeLoop::key_of(7 * 2 + 1, 0));
+    EXPECT_EQ(st.n, 2);
+    EXPECT_EQ(st.ans, 0);
+    for (int i = 0; i < 8; ++i) r.step(0, 0, 0, 0, 1.0f, 0.6f, 7, 1.0f, 1.0f);          // the same kind, seen on structure
+    EXPECT_NEAR(pull_of(r), 0.25f, 1e-4f) << "known, never moved: (0 + 1) / (2 + 2)";
+    r.ctx = 0;                                                   // the same kind in the open
+    for (int i = 0; i < 8; ++i) r.step(0, 0, 0, 0, 1.0f, 0.6f, 7, 1.0f, 1.0f);
+    EXPECT_FLOAT_EQ(pull_of(r), 1.0f) << "another context: not yet tried";
+    r.ctx = 1;                                                   // another kind, on structure
+    for (int i = 0; i < 8; ++i) r.step(0, 0, 0, 0, 1.0f, 0.6f, 5, 1.0f, 1.0f);
+    EXPECT_NEAR(pull_of(r), 0.25f, 1e-4f) << "an unknown cell borrows its context's pooled share";
+}
+
+TEST(SkillOutcomeLoop, AThingThatMovesKeepsItsPull) {
+    ogma::ParamMap p; p["min_samples"] = int64_t{2}; p["context_topic"] = std::string("reality.cognitive.thing_context");
+    p["context_n"] = int64_t{2}; p["pull_topic"] = std::string("reality.cognitive.outcome_pull");
+    Rig r(p);
+    r.ctx = 0;
+    for (int k = 0; k < 2; ++k) kick_and_see(r, 3, 0.8f);        // seen again 0.3 m on: an answer each time
+    EXPECT_EQ(r.m.stats().at(ogma::SkillOutcomeLoop::key_of(3 * 2 + 0, 0)).ans, 2);
+    for (int i = 0; i < 8; ++i) r.step(0, 0, 0, 0, 1.0f, 0.6f, 3, 1.0f, 1.0f);
+    EXPECT_NEAR(pull_of(r), 0.75f, 1e-4f) << "(2 + 1) / (2 + 2)";
+}
+
+TEST(SkillOutcomeLoop, WithoutTheS3TopicsTheKeyIsTheKindAlone) {
+    Rig r;                                                       // no context_topic, no pull_topic
+    r.ctx = 1;
+    kick_and_see(r, 7, 0.92f);
+    EXPECT_EQ(r.m.stats().count(ogma::SkillOutcomeLoop::key_of(7, 0)), 1u);
+    EXPECT_EQ(r.bus.last_value("reality.cognitive.outcome_pull"), nullptr);
+}
+
+// S3b: with context_pool_min 2, two answers in a context -- whatever the intent -- are enough for it to lend its share.
+TEST(SkillOutcomeLoop, ALowerPoolBarLendsAfterTwoAnswers) {
+    ogma::ParamMap p; p["min_samples"] = int64_t{2}; p["peck_id"] = int64_t{3}; p["push_id"] = int64_t{4};
+    p["context_topic"] = std::string("reality.cognitive.thing_context"); p["context_n"] = int64_t{2};
+    p["pull_topic"] = std::string("reality.cognitive.outcome_pull"); p["context_pool_min"] = int64_t{2};
+    Rig r(p);
+    r.ctx = 1;
+    for (int k = 0; k < 2; ++k) kick_and_see(r, 7, 0.92f);     // two answers at kind 7 on structure: never moved
+    r.ctx = 1;
+    for (int i = 0; i < 8; ++i) r.step(0, 0, 0, 0, 1.0f, 0.6f, 5, 1.0f, 1.0f);   // another kind on structure
+    EXPECT_NEAR(pull_of(r), 0.25f, 1e-4f) << "the context lends after two, though three intents are uncertain";
 }

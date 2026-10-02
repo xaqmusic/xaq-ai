@@ -589,3 +589,20 @@ TEST(BearingSeekLoop, AWalkThatDoesNotCloseForgetsItsTarget) {
     EXPECT_TRUE(r.m.have_target()) << "1.2 m walked toward it: still held";
     EXPECT_EQ(r.m.progress_forgets(), 1);
 }
+
+// S3 (2026-10-02, the ten-minutes phase): a sighted thing's need is the outcome loop's PULL -- the expected answer at its
+// cell -- instead of 1.  A thing tried and never moved (pull 0.25) is still fixed and homed to, at that need; play wins
+// the arbiter against it.  Without pull_topic the need stays 1.
+TEST(BearingSeekLoop, ASightedThingsNeedIsTheOutcomesPull) {
+    ogma::ParamMap p; p["proximity_range"] = 2.5; p["pull_topic"] = std::string("reality.cognitive.outcome_pull");
+    Rig r(p);
+    auto pull = std::make_shared<ogma::ProprioToken>();
+    pull->values = Eigen::VectorXf::Constant(1, 0.25f);
+    r.bus.publish("reality.cognitive.outcome_pull", pull);
+    r.step(0, 0, 0, 0.0f, 1.0f, 0.6f);
+    ASSERT_TRUE(r.m.have_target());
+    EXPECT_FLOAT_EQ(r.m.value(), 0.25f);
+    Rig q;                                                         // no pull topic
+    q.step(0, 0, 0, 0.0f, 1.0f, 0.6f);
+    EXPECT_FLOAT_EQ(q.m.value(), 1.0f);
+}

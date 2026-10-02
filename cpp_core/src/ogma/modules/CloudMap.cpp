@@ -1,6 +1,7 @@
 #include "ogma/modules/CloudMap.hpp"
 
 #include <algorithm>
+#include <unordered_set>
 #include <cmath>
 
 #include <nlohmann/json.hpp>
@@ -46,6 +47,7 @@ std::vector<TopicSpec> CloudMap::output_topics() const {
     if (!thing_bearing_topic_.empty()) t.emplace_back(thing_bearing_topic_, std::type_index(typeid(ProprioToken)));
     if (!mover_topic_.empty()) t.emplace_back(mover_topic_, std::type_index(typeid(ProprioToken)));
     if (!target_tall_topic_.empty()) t.emplace_back(target_tall_topic_, std::type_index(typeid(ProprioToken)));
+    if (!context_topic_.empty()) t.emplace_back(context_topic_, std::type_index(typeid(ProprioToken)));
     return t;
 }
 
@@ -238,6 +240,19 @@ ParamSchema CloudMap::params_schema() const {
          "A cluster is SMALL only if its top was SEEN: a ray passed through its columns at least one voxel above its stack "
          "top (needs free_rays).  A wall's foot or a chair leg under a head pitched down has no seen top; a ball has.",
          ParamValue{false}},
+        {"line_tol_k", ParamMutability::HotMutable,
+         "THE LINE (S1b): > 0 = a small cluster with half or more of its columns within max(1 voxel, this x range) of the "
+         "closed tall footprint (the columns reaching small_top, closed with line_close_k x range) is a fragment of "
+         "structure, not a thing.  Half the zone spacing (0.049) costs ~3 % of the balls and blocks by walls.  0 = off.",
+         ParamValue{0.0}},
+        {"context_topic", ParamMutability::ConstructionOnly,
+         "S3: the attended thing's surroundings, ProprioToken [on_line, near_tall] in [0,1] (the share of its columns on the "
+         "closed tall footprint; exp(-distance to the nearest tall column / (line_close_k x range))), for a context EPM. "
+         "Computed for small clusters whether or not line_tol_k refuses.  Empty = off.",
+         ParamValue{std::string("")}},
+        {"line_close_k", ParamMutability::HotMutable,
+         "The line's closing radius per metre of range (the ToF's zone spacing, 45 deg / 8 zones = 0.098 rad).",
+         ParamValue{0.0982}},
         {"things_isolated", ParamMutability::HotMutable,
          "The attended thing must be isolated (tall_near 0): a ball under a table is lost, a wall base is never a thing.",
          ParamValue{false}},
@@ -300,6 +315,7 @@ ParamMap CloudMap::current_params() const {
     m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
     m["things_isolated"] = things_isolated_; m["things_age_dim"] = things_age_dim_;
     m["free_rays"] = free_rays_; m["small_needs_top"] = small_needs_top_;
+    m["line_tol_k"] = line_tol_k_; m["line_close_k"] = line_close_k_; m["context_topic"] = ParamValue{context_topic_};
     m["walk_reset_m"] = walk_reset_m_;
     return m;
 }
@@ -342,6 +358,8 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "things_isolated") things_isolated_ = get_d(one, "things_isolated", 0.0) > 0.5;
     else if (k == "free_rays") free_rays_ = get_d(one, "free_rays", 0.0) > 0.5;
     else if (k == "small_needs_top") small_needs_top_ = get_d(one, "small_needs_top", 0.0) > 0.5;
+    else if (k == "line_tol_k") line_tol_k_ = get_d(one, "line_tol_k", line_tol_k_);
+    else if (k == "line_close_k") line_close_k_ = get_d(one, "line_close_k", line_close_k_);
     else if (k == "things_age_dim") things_age_dim_ = get_d(one, "things_age_dim", 0.0) > 0.5;
     else if (k == "things_skip_movers") things_skip_movers_ = get_d(one, "things_skip_movers", 0.0) > 0.5;
     else if (k == "target_iso_radius") target_iso_radius_ = get_d(one, "target_iso_radius", target_iso_radius_);
@@ -405,6 +423,9 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     things_age_dim_ = get_d(params, "things_age_dim", 0.0) > 0.5;
     free_rays_ = get_d(params, "free_rays", 0.0) > 0.5;
     small_needs_top_ = get_d(params, "small_needs_top", 0.0) > 0.5;
+    line_tol_k_ = get_d(params, "line_tol_k", line_tol_k_);
+    line_close_k_ = get_d(params, "line_close_k", line_close_k_);
+    context_topic_ = get_s(params, "context_topic");
 }
 
 void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick) {
@@ -676,6 +697,15 @@ void CloudMap::tick(uint64_t tick_id) {
             const auto d = thing_descriptor(things_[size_t(attended_)]);
             out->values = Eigen::VectorXf::Map(d.data(), long(d.size()));
             bus_->publish(things_topic_, out);
+            if (!context_topic_.empty()) {
+                const Thing& at = things_[size_t(attended_)];
+                auto cx = std::make_shared<ProprioToken>();
+                cx->tick_id = tick_id; cx->producer_id = std::string(id()); cx->sensor = "thing_context";
+                cx->values = Eigen::VectorXf(2);
+                cx->values[0] = float(std::clamp(at.on_line, 0.0, 1.0));
+                cx->values[1] = float(std::clamp(at.near_tall, 0.0, 1.0));
+                bus_->publish(context_topic_, cx);
+            }
         }
         publish_bearing(tick_id);
     }
@@ -728,6 +758,40 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
         c.age += double(vv.last - vv.first);
         c.agew += double(vv.hits) * double(vv.last - vv.first); c.nhits += double(vv.hits);
     }
+    // THE LINE (S1b): the tall footprint and its dilation, built once per call on the first cluster that needs it
+    std::unordered_set<int64_t> tall_cols, dilated;
+    bool line_built = false;
+    const auto disc = [](double r) {
+        std::vector<std::pair<int, int>> d;
+        const int k = int(std::ceil(r));
+        for (int dx = -k; dx <= k; ++dx)
+            for (int dy = -k; dy <= k; ++dy)
+                if (dx * dx + dy * dy <= r * r + 1e-9) d.emplace_back(dx, dy);
+        return d;
+    };
+    const auto close_r = [&](int x, int y) {
+        return std::max(1.0, line_close_k_ * std::hypot((x + 0.5) * voxel_m_, (y + 0.5) * voxel_m_) / voxel_m_);
+    };
+    const auto build_line = [&]() {
+        line_built = true;
+        for (auto const& [k, vv] : vox_) {
+            const double h = double(vv.zsum) / double(std::max<uint32_t>(1, vv.hits));
+            if (h < small_top_) continue;
+            int x, y, z; unkey(k, x, y, z);
+            tall_cols.insert(key_of(x, y, 0));
+        }
+        for (int64_t k : tall_cols) {
+            int x, y, z; unkey(k, x, y, z);
+            for (auto [dx, dy] : disc(close_r(x, y))) dilated.insert(key_of(x + dx, y + dy, 0));
+        }
+    };
+    const auto closed = [&](int x, int y) {
+        if (tall_cols.count(key_of(x, y, 0))) return true;
+        if (!dilated.count(key_of(x, y, 0))) return false;
+        for (auto [dx, dy] : disc(close_r(x, y)))
+            if (!dilated.count(key_of(x + dx, y + dy, 0))) return false;
+        return true;
+    };
     std::unordered_map<int64_t, bool> seen;
     for (auto const& [k0, c0] : cols) {
         if (!c0.seed || seen.count(k0)) continue;
@@ -822,6 +886,31 @@ std::vector<CloudMap::Thing> CloudMap::cluster_things(uint64_t since_tick) const
                 if (it != free_col_.end()) t.seen_above = std::max(t.seen_above, double(it->second));
             }
             if (small_needs_top_ && t.seen_above < t.top + voxel_m_) t.small = false;   // its top was never seen
+        }
+        if ((line_tol_k_ > 0.0 || !context_topic_.empty()) && t.small) {
+            if (!line_built) build_line();
+            const double tk = line_tol_k_ > 0.0 ? line_tol_k_ : 0.5 * line_close_k_;
+            const auto tol = disc(std::max(1.0, tk * t.rng / voxel_m_));
+            int on = 0;
+            for (int64_t k : comp) {
+                int x, y, z; unkey(k, x, y, z);
+                for (auto [dx, dy] : tol)
+                    if (closed(x + dx, y + dy)) { ++on; break; }
+            }
+            t.on_line = double(on) / double(comp.size());
+            if (!context_topic_.empty()) {
+                double d2 = 1e18;
+                for (int64_t k : comp) {
+                    int x, y, z; unkey(k, x, y, z);
+                    for (int64_t tc : tall_cols) {
+                        int a, b, cz; unkey(tc, a, b, cz);
+                        d2 = std::min(d2, double((a - x) * (a - x) + (b - y) * (b - y)));
+                    }
+                }
+                const double d = std::sqrt(d2) * voxel_m_, scale = std::max(voxel_m_, line_close_k_ * t.rng);
+                t.near_tall = tall_cols.empty() ? 0.0 : std::exp(-d / scale);
+            }
+            if (line_tol_k_ > 0.0 && 2 * on >= int(comp.size())) t.small = false;   // a fragment of the line, not a thing
         }
         out.push_back(t);
     }
@@ -934,7 +1023,7 @@ void CloudMap::update_movers(double yaw, uint64_t tick_id) {
 }
 
 void CloudMap::publish_target_tall(double yaw, uint64_t tick_id) {
-    target_tall_ = 0; double range = 0.0;
+    target_tall_ = 0; target_small_ = 0; double range = 0.0;
     float cx = 0.0f, cy = 0.0f, val = 0.0f;
     if (auto bt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_topic_)))
         if (bt->values.size() >= 3) { cx = bt->values[0]; cy = bt->values[1]; val = bt->values[2]; }
@@ -964,6 +1053,8 @@ void CloudMap::publish_target_tall(double yaw, uint64_t tick_id) {
             if (h < iso_height_) continue;
             if (std::hypot((ix + 0.5) * voxel_m_ - gx, (iy + 0.5) * voxel_m_ - gy) <= target_iso_radius_) ++target_tall_;
         }
+        const double rs = std::max(0.12, 0.5 * target_iso_radius_);
+        for (auto const& th : things_) if (th.small && std::hypot(th.cx - gx, th.cy - gy) <= rs) ++target_small_;
     }
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id;

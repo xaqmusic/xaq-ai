@@ -225,6 +225,59 @@ def score_module(paths, vm=0.04):
                 print(f"  {kk:20s} {100 * tab[(kk, 'unseen')] / n:5.1f} % of {n:5d}")
 
 
+def score_line_after_top(paths, tolks=(0.0, 0.05, 0.08, 0.12)):
+    """The line on what small_needs_top LEAVES: the module's small clusters (the filed "things" record, small = 1 after
+    the seen-top rule), matched to this file's clusters (their columns) by centroid, then the line's verdict by truth."""
+    half, lay, movable, furniture = co.load_scene()
+    inner = half - co.WALL_T
+
+    def struct_d(x, y):
+        d = inner - max(abs(x), abs(y))
+        for o in furniture:
+            d = min(d, math.hypot(x - o["x"], y - o["y"]) - o["extent"])
+        return d
+    tab = collections.Counter()
+    for p in paths:
+        for line in open(p):
+            if '"cloudv"' not in line:
+                continue
+            r = json.loads(line)
+            c = r["cloudv"]
+            if not c["vox"]:
+                continue
+            V, h = co.mean_heights(c)
+            vm = c["voxel_m"]
+            mine = small_clusters(V, h, vm)
+            if not mine:
+                continue
+            S, _ = closed_structure(V, h, vm, ZONE)
+            objs = co.objects_at(r, lay, movable)
+            tr = r.get("train")
+            if tr is not None:
+                objs = [o for o in objs if o[0] != "train"] + [("train", tr[0], tr[1], 0.09)]
+            w = "walk" if c.get("walking") else "stop"
+            for th in r.get("things", []):
+                if not th[8]:
+                    continue
+                cl = min(mine, key=lambda m: math.hypot(m["cx"] - th[0], m["cy"] - th[1]))
+                if math.hypot(cl["cx"] - th[0], cl["cy"] - th[1]) > 0.02:
+                    continue
+                wx, wy = co.to_world(c["anchor"], th[0], th[1])
+                lab = co.label(wx, wy, objs, half, furniture)
+                truth = "thing" if lab in ("ball", "block", "train") else ("structure" if lab in ("wall", "chair", "table", "shelf") else "other")
+                key = ("thing@struct" if truth == "thing" and struct_d(wx, wy) < 0.36 else truth) + "/" + w
+                tab[(key, "n")] += 1
+                for tk in tolks:
+                    on = near(cl["cols"], S, max(1.0, tk * cl["rng"] / vm))
+                    tab[(key, tk)] += sum(on) >= 0.5 * len(on)
+    print("the line on the module's SMALL clusters (after small_needs_top): refused share by truth")
+    for k in ("structure/stop", "structure/walk", "thing/stop", "thing/walk", "thing@struct/stop", "thing@struct/walk",
+              "other/stop", "other/walk"):
+        n = tab[(k, "n")]
+        if n:
+            print(f"  {k:20s} n {n:5d}  " + "  ".join(f"tolk {tk}: {100 * tab[(k, tk)] / n:5.1f} %" for tk in tolks))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("globs", nargs="+")
@@ -234,10 +287,14 @@ def main():
     ap.add_argument("--tolk", type=float, default=0.0, help="tolerance grows with range: max(tol, TOLK x range) (registration smear)")
     ap.add_argument("--sweep", action="store_true")
     ap.add_argument("--module", action="store_true", help="score the module's seen_above from the filed things record")
+    ap.add_argument("--line-after-top", action="store_true", help="the line on the module's small clusters (post seen-top)")
     a = ap.parse_args()
     paths = sorted(p for g in a.globs for p in glob.glob(g))
     if a.module:
         score_module(paths)
+        return
+    if a.line_after_top:
+        score_line_after_top(paths)
         return
     clouds = collect(paths)
     print(f"{len(paths)} logs, {len(clouds)} filed clouds, {sum(len(c['rows']) for c in clouds)} small clusters")

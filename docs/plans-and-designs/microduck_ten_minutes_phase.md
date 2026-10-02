@@ -1,6 +1,6 @@
 # Microduck: the ten-minutes phase. Structure, the phantom, and a run worth watching to the end
 
-Status: **opened 2026-10-02; phase 0 measured (★ TURN 43 % boring); S1 "top seen" `WORKING` (boring 25 %), awaiting the eye** · Branch: `duck-l2` · Simulation only · Base: `★ TURN`
+Status: **opened 2026-10-02; ★ TURN 43 % boring → **★ T4** 22 % (n = 18; design doc §17.96–17.99), promoted on the operator's eye; next: the phantom (§5)** · Branch: `duck-l2` · Simulation only · Base: `★ TURN`
 (chase phase §12). Every verdict goes to the rung-2 design doc §17 (from §17.96) and the
 [register](open_items_register.md) (O68–O70). Nothing here is measured unless a section says so.
 
@@ -109,6 +109,20 @@ things. On ★ TURN, n = 18: **walls 32.7 → 15.4 a minute, boring 43 → 25 %,
 94 → 32**, falls 3.2 → 2.1, the first minute a tie. `WORKING`; preset "T1 · TOP SEEN" for the eye. The line (the
 consolidation proper) stays the next lever for the walking cloud, where the fragments are registration smear in front of
 a seen wall.
+**S2c, the stop that stares (2026-10-02, design doc §17.98).** A stop facing a wall ran to the 60 s cap because its own
+cloud never opened: the gaze sweep rocks the stand past the 0.15 rad/s stillness bar, so a walking cloud stays open and
+the growth rule (which judges only a stop's cloud) never fires. `--stop-is-still` (the stop's standing phases count as
+still): capped stops 35 → 0, stares halved, the green block moved in the first minute 10/18 (4/18) — but boring 25 → 31 %,
+arrivals at structure 32 → 71: the stop's own cloud now opens every time and hands over the fragments `small_needs_top`
+leaves (35 % of a stop cloud's). `WORKING` mechanism, `REGRESSION` on the run at n = 18; preset for the eye. Retry on top
+of the next structure lever.
+**The levers on the base (T1 + stop-is-still, the operator's eye; design doc §17.99).** The line on a seen wall (S1b,
+`line_tol_k` 0.049 = half the zone spacing) `WORKING`: boring 30.5 → 23.9 %. The outcome loop learns that structure does not
+answer (S3: a context EPM over [on the line, near tall] keys the table; the cell's answered share is the seek loop's need for
+a sighted thing) `NULL` starved, then `PARTIAL` with the context pooled at two answers (S3b): arrivals at structure 71 → 40.
+The impeded look (the operator's: seek's range unclosed 3 s → back off, look up, a wall is forgotten and escaped) `PARTIAL`:
+arrivals at structure 71 → 31, a fall a run. **The stack T4: boring 22.3 %, worst run 41 %, walls 14.5 a minute** — the
+candidate for the eye, tied with the line alone on the mean, tighter in the tail.
 **S1 (as first planned):** the reduction in `CloudMap`, off by default, byte-identical when off, published as a topic.
 **S2, one consumer at a time:** (a) the things reduction does not attend an on-line fragment; (b) the seek loop yields
 its approach to an on-line target (R111's re-use); (c) a look ends when everything in view is known structure.

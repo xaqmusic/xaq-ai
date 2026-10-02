@@ -33,16 +33,19 @@ SkillOutcomeLoop::~SkillOutcomeLoop() = default;
 std::string_view SkillOutcomeLoop::type_name() const { return "SkillOutcomeLoop"; }
 
 std::vector<TopicSpec> SkillOutcomeLoop::input_topics() const {
-    return { TopicSpec{bearing_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
+    std::vector<TopicSpec> v{ TopicSpec{bearing_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
              TopicSpec{thing_topic_,      std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false},
              TopicSpec{seek_value_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
              TopicSpec{seek_range_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
              TopicSpec{pose_topic_,       std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
+    if (!context_topic_.empty()) v.push_back(TopicSpec{context_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
+    return v;
 }
 std::vector<TopicSpec> SkillOutcomeLoop::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{skill_topic_,   std::type_index(typeid(ProprioToken))},
                               TopicSpec{outcome_topic_, std::type_index(typeid(ProprioToken))} };
     if (!need_topic_.empty()) v.push_back(TopicSpec{need_topic_, std::type_index(typeid(ProprioToken))});
+    if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -70,6 +73,11 @@ ParamSchema SkillOutcomeLoop::params_schema() const {
         {"reach_short_m",    ParamMutability::HotMutable, "With reach_m: a kick or a peck is asked for only when the sighting is within this range; beyond it only the push (if present).", ParamValue{0.35}},
         {"reach_cos",        ParamMutability::HotMutable, "The bearing's forward component (cosine) a live sighting needs to count as ahead.", ParamValue{0.7}},
         {"armed_ticks",      ParamMutability::HotMutable, "How long after an arrival the loop stays armed for a sighting within reach (a miss is counted when it lapses).", ParamValue{int64_t{1500}}},
+        {"context_topic",    ParamMutability::ConstructionOnly, "S3: a context EPM's RealityToken; its winner splits each kind's cells (key = kind x context_n + ctx). Empty = kind only.", ParamValue{std::string("")}},
+        {"context_n",        ParamMutability::ConstructionOnly, "S3: the context vocabulary's size (the context EPM's max_nodes).", ParamValue{int64_t{4}}},
+        {"pull_topic",       ParamMutability::ConstructionOnly, "S3: [pull], the expected answer at the attended thing's cell -- 1 while uncertain, else its answered share (Laplace); a context whose pooled outcomes are known lends its share to its unknown cells. The seek loop's need for a sighted thing. Empty = not published.", ParamValue{std::string("")}},
+        {"context_pool_min", ParamMutability::HotMutable, "S3b: the pooled outcomes a context needs before it lends its answered share to an uncertain cell (whatever the intent: does anything standing here move?); 0 = min_samples x the intents.", ParamValue{int64_t{0}}},
+        {"answer_m",         ParamMutability::HotMutable, "S3: a displacement above this is an ANSWER (two voxels of the cloud).", ParamValue{0.08}},
         {"push_id",          ParamMutability::ConstructionOnly, "The id of the push (the walker into the thing for a window) on the boundary; -1 = absent.  A third intent in the same least-known rule.", ParamValue{int64_t{-1}}},
     };
 }
@@ -86,6 +94,9 @@ ParamMap SkillOutcomeLoop::current_params() const {
     m["peck_id"] = ParamValue{int64_t{peck_id_}}; m["push_id"] = ParamValue{int64_t{push_id_}};
     m["reach_m"] = ParamValue{reach_m_}; m["reach_cos"] = ParamValue{reach_cos_}; m["armed_ticks"] = ParamValue{int64_t{armed_ticks_}};
     m["reach_short_m"] = ParamValue{reach_short_m_};
+    m["context_topic"] = ParamValue{context_topic_}; m["context_n"] = ParamValue{int64_t{context_n_}};
+    m["pull_topic"] = ParamValue{pull_topic_}; m["answer_m"] = ParamValue{answer_m_};
+    m["context_pool_min"] = ParamValue{int64_t{context_pool_min_}};
     return m;
 }
 
@@ -115,6 +126,11 @@ void SkillOutcomeLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "reach_cos",        [&](auto const& v){ reach_cos_ = get_double(v,"reach_cos"); });
     apply_param(params, "reach_short_m",    [&](auto const& v){ reach_short_m_ = get_double(v,"reach_short_m"); });
     apply_param(params, "armed_ticks",      [&](auto const& v){ armed_ticks_ = int(get_double(v,"armed_ticks")); });
+    apply_param(params, "context_topic",    [&](auto const& v){ context_topic_ = get_string(v,"context_topic"); });
+    apply_param(params, "context_n",        [&](auto const& v){ context_n_ = std::max(1, int(get_double(v,"context_n"))); });
+    apply_param(params, "pull_topic",       [&](auto const& v){ pull_topic_ = get_string(v,"pull_topic"); });
+    apply_param(params, "answer_m",         [&](auto const& v){ answer_m_ = get_double(v,"answer_m"); });
+    apply_param(params, "context_pool_min", [&](auto const& v){ context_pool_min_ = int(get_double(v,"context_pool_min")); });
     last_intent_ = intents().back();
 }
 
@@ -131,6 +147,8 @@ void SkillOutcomeLoop::on_param_change(std::string_view key, ParamValue const& v
     else if (k == "reach_cos")       reach_cos_ = get_double(value, k);
     else if (k == "reach_short_m")   reach_short_m_ = get_double(value, k);
     else if (k == "armed_ticks")     armed_ticks_ = int(get_double(value, k));
+    else if (k == "answer_m")        answer_m_ = get_double(value, k);
+    else if (k == "context_pool_min") context_pool_min_ = int(get_double(value, k));
     else throw std::invalid_argument("SkillOutcomeLoop: param '" + k + "' is construction-only / unknown");
 }
 
@@ -142,6 +160,11 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
         if (pt->values.size() >= 3) { vx = pt->values[0]; vy = pt->values[1]; prox = pt->values[2]; }
     int node = -1;
     if (auto rt = std::dynamic_pointer_cast<const RealityToken>(bus_->last_value(thing_topic_))) node = rt->winner_id;
+    int ctx_now = -1;
+    if (!context_topic_.empty())
+        if (auto rt = std::dynamic_pointer_cast<const RealityToken>(bus_->last_value(context_topic_)))
+            ctx_now = std::clamp(rt->winner_id, 0, context_n_ - 1);
+    if (!context_topic_.empty() && node >= 0) node = node * context_n_ + std::max(0, ctx_now);
     float seek_v = 0.0f, seek_r = 9.0f;
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(seek_value_topic_))) if (pt->values.size() > 0) seek_v = pt->values[0];
     if (auto pt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(seek_range_topic_))) if (pt->values.size() > 0) seek_r = pt->values[0];
@@ -155,7 +178,7 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
         const double fwd = vy / n, left = -vx / n, range = std::max(0.0, 1.0 - double(prox)) * proximity_range_;
         const double bx = fwd * range, by = left * range, c = std::cos(pyaw_), s = std::sin(pyaw_);
         sx = px_ + c * bx - s * by; sy = py_ + s * bx + c * by; fixed = true;
-        seen_ = true; tx_ = sx; ty_ = sy; if (node >= 0) node_ = node;
+        seen_ = true; tx_ = sx; ty_ = sy; if (node >= 0) node_ = node; if (ctx_now >= 0) ctx_ = ctx_now;
     }
 
     // an outcome in flight: the same thing seen again within the radius is the answer
@@ -169,6 +192,8 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
             last_pred_ = pred; last_obs_ = disp; last_node_ = knode_;
             last_surprise_ = std::fabs(disp - pred) / (sd + 0.02);
             st.n += 1; const double d = disp - st.mean; st.mean += d / st.n; st.m2 += d * (disp - st.mean);
+            if (disp > answer_m_) ++st.ans;
+            if (!context_topic_.empty()) { Stat& cs = ctx_stats_[kctx_]; ++cs.n; if (disp > answer_m_) ++cs.ans; }
             ++observed_; pending_ = false; outcome_now = true;
         } else if (wait_ > observe_ticks_) { ++unknown_; pending_ = false; }
     }
@@ -219,7 +244,7 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
             const double by = -s * dx + c * dy;
             request_id_ = intent == 1 ? peck_id_ : intent == 2 ? push_id_ : (by >= 0.0 ? skill_left_ : skill_right_);
             request_now_ = true; ++requests_; last_intent_ = intent; kintent_ = intent;
-            pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; wait_ = 0; kicked_tick_ = now;
+            pending_ = true; kx_ = tx_; ky_ = ty_; knode_ = nd; kctx_ = ctx_; wait_ = 0; kicked_tick_ = now;
         }
     };
     // the arrival: the seek need falls to 0 with the range under arrive_range
@@ -259,6 +284,33 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
         int open = 0; for (int i : avail) if (uncertain_at(nd, i)) ++open;
         need_ = double(open) / double(avail.size());
     }
+    // S3: the pull -- the expected answer at the attended thing's cell
+    if (!pull_topic_.empty()) {
+        pull_ = 1.0;
+        if (seen_) {
+            const int nd = node_ < 0 ? 0 : node_;
+            const auto avail = intents();
+            bool open = false; int n = 0, ans = 0;
+            for (int i : avail) {
+                if (uncertain_at(nd, i)) open = true;
+                auto it = stats_.find(key_of(nd, i));
+                if (it != stats_.end()) { n += it->second.n; ans += it->second.ans; }
+            }
+            if (!open) pull_ = double(ans + 1) / double(n + 2);
+            else if (!context_topic_.empty()) {
+                // an uncertain cell in a context whose pooled outcomes already number a full vocabulary's worth: the
+                // context's answered share stands in ("things standing on walls do not answer")
+                auto it = ctx_stats_.find(ctx_);
+                const int bar = context_pool_min_ > 0 ? context_pool_min_ : min_samples_ * int(avail.size());
+                if (it != ctx_stats_.end() && it->second.n >= bar)
+                    pull_ = double(it->second.ans + 1) / double(it->second.n + 2);
+            }
+        }
+        auto pt = std::make_shared<ProprioToken>();
+        pt->tick_id = tick_id; pt->producer_id = sk->producer_id; pt->sensor = "outcome_pull";
+        pt->values = Eigen::VectorXf(1); pt->values[0] = float(pull_);
+        bus_->publish(pull_topic_, pt);
+    }
     if (!need_topic_.empty()) {
         auto nt = std::make_shared<ProprioToken>();
         nt->tick_id = tick_id; nt->producer_id = sk->producer_id; nt->sensor = "outcome_need";
@@ -269,8 +321,17 @@ void SkillOutcomeLoop::tick(uint64_t tick_id) {
 
 nlohmann::json SkillOutcomeLoop::snapshot_state() const {
     nlohmann::json st = nlohmann::json::object();
-    for (auto const& [k, s] : stats_) st[std::to_string(k)] = {{"n", s.n}, {"mean", s.mean}, {"m2", s.m2}};
-    return nlohmann::json{{"version", 1}, {"stats", st}, {"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}};
+    for (auto const& [k, s] : stats_) {
+        st[std::to_string(k)] = {{"n", s.n}, {"mean", s.mean}, {"m2", s.m2}};
+        if (s.ans > 0) st[std::to_string(k)]["ans"] = s.ans;     // S3; absent = 0 (older snapshots read unchanged)
+    }
+    nlohmann::json j{{"version", 1}, {"stats", st}, {"requests", requests_}, {"observed", observed_}, {"unknown", unknown_}};
+    if (!ctx_stats_.empty()) {
+        nlohmann::json cs = nlohmann::json::object();
+        for (auto const& [k, s] : ctx_stats_) cs[std::to_string(k)] = {{"n", s.n}, {"ans", s.ans}};
+        j["ctx_stats"] = cs;
+    }
+    return j;
 }
 void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
     if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
@@ -278,7 +339,11 @@ void SkillOutcomeLoop::restore_state(nlohmann::json const& s) {
     // a snapshot taken with no cell yet carries "stats": null (a default json is null, not {}); read it as empty
     const nlohmann::json stats = s.contains("stats") && s["stats"].is_object() ? s["stats"] : nlohmann::json::object();
     for (auto const& [k, v] : stats.items())
-        if (v.is_object()) stats_[std::stoi(k)] = Stat{v.value("n", 0), v.value("mean", 0.0), v.value("m2", 0.0)};
+        if (v.is_object()) stats_[std::stoi(k)] = Stat{v.value("n", 0), v.value("mean", 0.0), v.value("m2", 0.0), v.value("ans", 0)};
+    ctx_stats_.clear();
+    if (s.contains("ctx_stats") && s["ctx_stats"].is_object())
+        for (auto const& [k, v] : s["ctx_stats"].items())
+            if (v.is_object()) ctx_stats_[std::stoi(k)] = Stat{v.value("n", 0), 0.0, 0.0, v.value("ans", 0)};
     requests_ = s.value("requests", 0); observed_ = s.value("observed", 0); unknown_ = s.value("unknown", 0);
 }
 nlohmann::json SkillOutcomeLoop::diag_lite() const {
@@ -293,10 +358,14 @@ nlohmann::json SkillOutcomeLoop::diag_snapshot() const {
     // label was wrong; diagnostic only)
     static const char* const kNames[kMaxIntents] = {"kick", "peck", "push", "intent3"};
     for (auto const& [k, s] : stats_)
-        st[std::to_string(k / kMaxIntents) + ":" + kNames[k % kMaxIntents]] = {{"n", s.n}, {"mean", s.mean}, {"sd", std::sqrt(s.var())}};
+        st[std::to_string(k / kMaxIntents) + ":" + kNames[k % kMaxIntents]] = {{"n", s.n}, {"mean", s.mean}, {"sd", std::sqrt(s.var())}, {"ans", s.ans}};
     j["stats"] = st; j["tx"] = tx_; j["ty"] = ty_;
     j["last"] = {{"node", last_node_}, {"pred", last_pred_}, {"obs", last_obs_}, {"surprise", last_surprise_}};
     j["min_samples"] = min_samples_; j["kicked_node"] = knode_;
+    j["pull"] = pull_; j["context"] = ctx_; j["context_n"] = context_topic_.empty() ? 0 : context_n_;
+    nlohmann::json cs = nlohmann::json::object();
+    for (auto const& [k, c] : ctx_stats_) cs[std::to_string(k)] = {{"n", c.n}, {"ans", c.ans}};
+    j["ctx_stats"] = cs;
     return j;
 }
 

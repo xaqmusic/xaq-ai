@@ -6535,3 +6535,146 @@ top on a fragment that is no longer there, or a dead-reckoned place); stand-open
 preset "T1 · TOP SEEN". Next (one at a time): the walking cloud's 32 % (the smear in front of the line — the closing with a
 range-scaled tolerance, S0's numbers), then the stop that does not end facing structure (§17.96's long stares, 45 s a run
 left), then S3 (the outcome loop learns structure does not answer).
+
+### 17.98 The stop that stares at a wall: its own cloud never opened (S2c, `--stop-is-still`; 2026-10-02)
+
+**The operator's eye on T1 (§17.97):** seed 1 stuck against a wall, staring, from ~291 s. **Why a stop facing a wall runs
+to the cap:** all 41 stops of 40 s or more on the T1 sweep (34 of them the full 60 s) held a WALKING cloud for 99 % of
+their casts, against 59 % for the stops that ended. The growth rule (`--stop-cloud-end`) judges only a stop's own cloud
+(R74's lesson), and a stop's cloud opens only after 25 consecutive casts the host calls still: gravity level AND every
+trunk-gyro component under 0.15 rad/s. Replayed with the new instrument `--log-still` (seed 1, 288–350 s, reproducing
+the sweep tick for tick): the gaze sweep rocks the stand at a median 0.168 rad/s, 44 % of stop ticks read still, the
+longest still run 39 ticks — every run of 25 "moving" ticks files the stop's cloud for a walking one. The stop never
+gets a cloud whose growth can be judged.
+
+**The lever (host `--stop-is-still`, off by default; guard byte-identical to the T1 sweep's seed 5, 600 s):** during a
+stop's standing phases (the joint brain stands, or the walker holds) the cast is still whatever the gyro says — the
+body commanded the stop (efference, not an oracle).
+
+| T1 (n = 18 × 600 s, sweep `log/ten/s2`, the same seeds) | T1 · TOP SEEN | + the stop is still |
+|---|---|---|
+| stops a run · median · p90 length | 23.0 · 8.1 s · 37.8 s | 31.1 · 7.3 s · **11.2 s** |
+| stops at the 60 s cap (all runs) · stop-seconds a run | 35 · 304 | **0** · 208 |
+| stare@structure · seek→structure · pinned, s a run | 44 · 42 · 34 | **24** · 69 · 48 |
+| stand@thing · seek→thing · skill · wander, s a run | 183 · 64 · 15 · 75 | 119 · 92 · 20 · 111 |
+| boring · interesting (`ten_minutes.py`) | 25 % · 47 % | 31 % · 41 % (6 of 18 seeds less boring) |
+| arrivals at a thing · structure · nothing | 167 · 32 · 34 | 221 · **71** · 44 |
+| walls / min · falls a run | 15.4 · 2.1 | 17.4 · 2.2 |
+| first minute: touched · MOVED the green block · first skill bearing | 14/18 · 4/18 · 30° | 16/18 · **10/18** · 15° |
+
+**Verdict: `WORKING` as a mechanism (no stop reaches the cap; stares halved), `REGRESSION` on the boring share at this
+power, not promoted.** The time the stares gave back goes to walking — and much of it to structure: the stop's own cloud
+now opens on every stop, a stop's cloud is where 73 % of static targets come from (§17.78), and `small_needs_top` refuses
+65 % of a stop cloud's fragments, not all; the shorter stops let the remaining fragments become the next target. Seed 1
+(the preset's) is the loop in full: stares 93 → 152 s with no capped stop at all, seek→structure 22 → 120 s — stop briefly
+at a fragment, be handed the next. The first minute improves (the block moved in 10 of 18 runs). **Re-use:** once the stop
+cloud's remaining fragments are gone (the line on a seen wall, S0's tolerance; or S3, the outcome loop learning that
+structure does not answer), this lever's freed time should go to things — retry it on top of either.
+
+**The operator's test seed 2060249272 (one run per arm, a signal):** no stare at all (18 → 0 s), skills 8 → 17 (touching
+2 → 7), arrivals at things 11 → 23 with none at structure in either arm, interesting 56 → 55 %, boring 12 → 20 % (the walk
+to nothing and pinned time); chases 10 → 8.
+
+**The operator's eye (2026-10-02):** "the stop-is-still config is not a regression, but there is still long dwell time
+near walls" — the verdict on the eye is `PARTIAL`, and **T1 + `--stop-is-still` is the base for the next levers**. The
+operator's next three: the outcome loop learns that structure does not answer (S3); investigate the line rule; and the
+robot should learn to LOOK UP to see whether an obstacle impeding its movement is a wall, so it is backed away from.
+
+### 17.99 The line on a seen wall (S1b), the outcome loop that learns structure (S3), and the base T1 + the stop is still (2026-10-02)
+
+**The base** is T1 · TOP SEEN + `--stop-is-still` (§17.98, the operator's eye: not a regression), sweep `log/ten/s2`; every
+arm below is one lever on it, the same 18 seeds, 600 s.
+
+**S1b, the line — investigated offline on what `small_needs_top` leaves** (`structure_rule.py --line-after-top`, the base's
+filed clouds): the module's small clusters that are really structure are fragments whose top WAS seen — the wall is in the
+cloud, smeared two or three voxels in front of its tall line by registration (§17.97). The closed tall footprint with a
+tolerance of max(1 voxel, k × range) refuses them: k = 0.05 → 45 % at stops and 56 % on the walk, at a cost of 3.7 / 2.7 %
+of the balls and blocks by walls and 0 % of the open-floor things; k = 0.08 → 52 / 66 % at 8 / 6 %. Built:
+`CloudMap.line_tol_k` (0 = off) at half the ToF's zone spacing (0.049, from the sensor's geometry), `line_close_k` 0.098, a
+cluster's `on_line` share; unit test `AFragmentOnAClosedWallLineIsNotAThingButACubeBeforeItIs` (at 1.5 m the tolerance is 1.8
+voxels: the line catches a two-voxel smear from ~1.65 m out). Config `a1v2_t2_line`, sweep `log/ten/s3`:
+
+| | base | + the line |
+|---|---|---|
+| boring · interesting | 30.5 % · 41.1 % | **23.9 % · 48.1 %** (12 of 18 seeds less boring; paired t −1.7) |
+| worst run's boring share | 66 % | 41 % |
+| seed 1 (the preset's) boring · interesting | 66 % · 21 % | **21 % · 60 %** |
+| stare · seek→structure · pinned, s a run | 24 · 69 · 48 | 11 · 44 · 42 |
+| arrivals at a thing · structure · nothing | 221 · 71 · 44 | **274 · 38** · 46 |
+| skills touching a thing · walls / min | 78 / 234 · 17.4 | 99 / 259 · 15.8 |
+| falls a run · down s a run | 2.2 · 5.8 | 2.9 · 9.5 |
+| first minute: block moved · first skill touching | 10/18 · 7/16 | 8/18 · 5/16 |
+
+**Verdict: `WORKING` (a signal at n = 18), the cost three quarters of a fall a run**; preset for the eye.
+
+**S3, the outcome loop learns that structure does not answer.** The kind vocabulary does not separate fragments: on the base,
+the attended wall and furniture fragments fall into the same four kind nodes as the balls and blocks on every seed — so a
+peck at a fragment would teach "this kind does not move" and silence the blocks. Built (all off by default; unit tests
+`StructureThatNeverAnswersLosesItsPullAndLendsItToItsContext`, `AThingThatMovesKeepsItsPull`, `ASightedThingsNeedIsTheOutcomesPull`):
+`CloudMap.context_topic` (the attended thing's [on_line, near_tall], near_tall = exp(−d / (0.098 × range))), a context EPM
+(3 nodes) over it, `SkillOutcomeLoop.context_topic` (the table keyed kind × context), `answer_m` 0.08 (an answer is a
+displacement above two voxels; each cell counts its answers), `pull_topic` (the expected answer at the attended thing's cell:
+1 while uncertain, else (answers + 1) / (n + 2); an uncertain cell borrows its context's pooled share once the context holds
+min_samples × intents outcomes), and `BearingSeekLoop.pull_topic` (a sighted thing's need is the pull, not 1). Config
+`a1v2_t3_habit`, sweep `log/ten/s4`: boring 30.7 % (base 30.5), arrivals at structure 77 (71) — **`NULL`, starved**: a run
+asks ~15 times and sees ~10 answers, the cells known per run are 0–4 of twelve, and a context reaches its pooled bar of six
+answers late if at all. Not a verdict on the idea: the question it asks ("does anything standing here move?") does not depend
+on the intent, so the pooled bar should be min_samples, not min_samples × intents (S3b).
+
+**The impeded look (host `--look-up-when-impeded 3 -0.3 1.5 0.6`; the operator: "the robot should learn to look up to see if
+an obstacle that is impeding its movement is a wall, so it should be backed away from").** Measured first, on the line arm:
+58 s a run of dwelling at structure (episodes ≥ 5 s, under 10 cm net in 3 s, median 8 s), seek holding the reference on 68 %
+of those ticks, 4 of 112 episodes caught by the stall detector — whose stall needs a forward command above 75 % of range,
+which the dynamic-range walk's slowed approach never gives — and the progress forget (half a metre walked) never firing on
+a body that walks nowhere. Every stop's sweep looks DOWN (head pitch 0.29–0.51, positive = down): the tops are never in
+view. Built: IMPEDED = the seek loop's own prediction failing (it steers and its range has not closed 5 cm in 3 s); the duck
+backs off 0.6 s (the ToF's near field is too-close inside 10 cm), stops with the head held up (−0.3; it reaches about level
+in 1.5 s under the override's slew), and at the stop's end reads the cloud: tall voxels around the target and NO small thing
+within 12 cm of it (`CloudMap::target_small`, new) = a WALL → the target is forgotten and the escape turns the walk to the
+freest sector; else a THING → kept. Guard byte-identical (off). Sweep `log/ten/s5` against the base:
+
+| | base | + the impeded look |
+|---|---|---|
+| boring · interesting | 30.5 % · 41.1 % | 28.3 % · 44.3 % |
+| arrivals at a thing · structure · nothing | 221 · 71 · 44 | 215 · **31** · 42 |
+| seek→structure · pinned · stare, s a run | 69 · 48 · 24 | 54 · 43 · 28 |
+| walls / min · falls a run | 17.4 · 2.2 | 19.1 · 3.2 (11 of 58 falls within 5 s of a look) |
+| looks a run · judged wall · thing | — | 6.4 · 2.1 · 3.7 |
+
+Verdicts against truth (the target's true label at the look): structure → wall 28, thing 18; a real thing → thing 38, wall 8;
+nothing → wall 2, thing 10. **Verdict: `PARTIAL`** — arrivals at structure more than halved and the operator's sequence
+visible (impeded, back off, look up, turn away), the boring share a small move, a fall a run its cost (the back-off and the
+stand with the head moving, O36's old risk). The wrong "thing" verdicts at structure are mostly a fragment still reading small
+near the target — what the line removes: the two belong together. Preset for the eye.
+
+**S3b, the context pooled at two answers (`context_pool_min 2`, config `a1v2_t3b_pool`, sweep `log/ten/s6`; unit test
+`ALowerPoolBarLendsAfterTwoAnswers`):** a context lends its answered share once it holds two outcomes, whatever the intent.
+Against the base: arrivals at structure 71 → **40** (things 221 → 231), boring 30.5 → **27.2 %** (worst run 66 → 49 %),
+stares 24 → 16 s, seek→structure 69 → 65 s, walls 17.4 → 19.7 (a tie), observed answers 6–15 a run. **`PARTIAL`, the learned
+form works** — fewer walks to walls because the duck has learned that things standing there do not move. **Falls:** every arm
+since the base reads 2.9–3.2 a run (★ TURN 3.2, T1 2.1, the base 2.2); the base looks like the low draw, not the levers' cost.
+The three levers attack one failure from three sides — the sensor (the line), learning (S3b), an epistemic action (the impeded
+look) — and are stacked next (T4).
+
+**T4, the stack (config `a1v2_t4_stack` = T1 + the line + S3b, host `--stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6`;
+sweep `log/ten/s7`):**
+
+| n = 18 × 600 s | ★ TURN | base | the line | **T4 stack** |
+|---|---|---|---|---|
+| boring · interesting | 43 % · 35 % | 30.5 · 41.1 | 23.9 · 48.1 | **22.3 · 48.4** |
+| worst three runs' boring share | 61–72 % | 48 · 57 · 66 | 37 · 38 · 41 | **30 · 31 · 41** |
+| arrivals at a thing · structure · nothing | 136 · 94 · 18 | 221 · 71 · 44 | 274 · 38 · 46 | 222 · 34 · 30 |
+| walls / min | 32.7 | 17.4 | 15.8 | **14.5 ± 10.7** |
+| falls a run | 3.2 | 2.2 | 2.9 | 2.7 |
+| seed 1 boring · interesting | 36 · 30 | 66 · 21 | 21 · 60 | 29 · 46 |
+
+Paired against the base: boring −8.2 points (t −2.5, 13 of 18 seeds), interesting +7.4; against the line alone a tie (−1.6,
+t −0.5). The impeded looks fire 5.8 times a run and judge 1.1 walls, 4.2 things (the line has removed most fragments before
+the look). **Verdict: `WORKING` against the base; the line carries most of it, S3b and the look tighten the tail and the walls
+(ties at this power).** Fewer skills than the line alone (191 against 241 by the instrument's count) — the learned pull is
+also quieter on things it has tried. Preset "T4 · the STACK" for the eye; the line alone stands beside it.
+
+**★ T4 promoted (2026-10-02, the operator's eye):** "I agree. The stack is promoted." ★ T4 = ★ TURN + host `--tof-free-rays
+--stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6` + config `a1v2_t4_stack` (CloudMap `free_rays`, `small_needs_top`,
+`line_tol_k 0.049`, `context_topic`; the context EPM; SkillOutcomeLoop `context_topic`, `context_n 3`, `pull_topic`,
+`context_pool_min 2`; BearingSeekLoop `pull_topic`). The base for the phantom (phase 2).

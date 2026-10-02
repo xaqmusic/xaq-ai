@@ -111,6 +111,14 @@ public:
         // head pitched down, the stack rule sees no top and calls a wall's foot or a chair leg small; a ball's top is
         // seen when a ray has passed over it.  small_needs_top requires seen_above >= top + one voxel.
         double seen_above = -1.0;
+        // THE LINE (2026-10-02, the ten-minutes phase S1b): the share of the cluster's columns lying ON the closed tall
+        // footprint -- the open cloud's columns with a voxel at or above small_top, closed (dilated then eroded) with a
+        // radius of the ToF's zone spacing at their range, so a wall the sampling left dotted is a line again.  -1 =
+        // not computed (line_tol_k 0, or the cluster was not small by shape).
+        double on_line = -1.0;
+        // S3's context: exp(-d / (line_close_k x range)), d the distance from the cluster's columns to the nearest tall
+        // column -- 1 at the foot of something tall, ~0 in the open.  -1 = not computed.
+        double near_tall = -1.0;
     };
 
     CloudMap() = default;
@@ -287,10 +295,13 @@ private:
     // whose target stands at the foot of a wall is about to meet the wall the thing turned away from.  Empty = off.
     std::string target_topic_, target_range_topic_, target_tall_topic_;
     double target_iso_radius_ = 0.35;
-    int    target_tall_ = 0;
+    int    target_tall_ = 0, target_small_ = 0;
     void   publish_target_tall(double yaw, uint64_t tick_id);
 public:
     int target_tall() const { return target_tall_; }
+    // the small things within half target_iso_radius (at least 12 cm) of the seek target (2026-10-02, the impeded look:
+    // a wall is tall structure at the target with NO small thing there; a ball by a wall has both).  Not published.
+    int target_small() const { return target_small_; }
 private:
     // things_skip_movers (2026-09-28): the things reduction does not ATTEND a cluster whose voxels are young by the
     // mover rule (a passing thing's smear at a stop reads as a small thing, and the seek loop then fixes a place
@@ -328,6 +339,13 @@ private:
     // free_rays (S1): every ray of the cast, returning or not (the empty zones' rays from the cast's appended block),
     // walked from the origin; per column the highest free sample above break_lo.  small_needs_top gates `small` on it.
     bool     free_rays_ = false, small_needs_top_ = false;
+    // line_tol_k (S1b): > 0 = a small cluster with half or more of its columns within max(1 voxel, line_tol_k x range) of the
+    // closed tall footprint is a fragment of it, not a thing.  line_close_k: the closing radius per metre of range (the
+    // ToF's zone spacing, 45 deg / 8 = 0.098 rad).  0 = off, byte-identical.
+    double   line_tol_k_ = 0.0, line_close_k_ = 0.0982;
+    // context_topic (S3): the attended thing's surroundings, ProprioToken [on_line, near_tall] in [0, 1], for a context
+    // EPM whose winner the outcome loop keys its table by.  Empty = off.
+    std::string context_topic_;
     std::unordered_map<int64_t, float> free_col_;   // keyed by (ix, iy, 0)
     uint64_t vacated_total_ = 0;
 public:

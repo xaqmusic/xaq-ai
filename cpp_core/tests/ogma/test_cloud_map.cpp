@@ -762,3 +762,43 @@ TEST(CloudMap, ACubeIsSmallOnlyOnceARayHasPassedOverItsTop) {
     EXPECT_TRUE(o.m.things()[0].small);
     EXPECT_DOUBLE_EQ(o.m.things()[0].seen_above, -1.0);
 }
+
+// THE LINE (2026-10-02, the ten-minutes phase S1b): a wall seen as a DOTTED line of tall returns (3 of every 4 columns,
+// 25-35 cm up, x = 2.105 m) with a low fragment of its base smeared two voxels in front of it (x = 2.025 m, 3-7 cm) --
+// small by the stack rule, because its own footprint never meets the wall's tall columns.  With line_tol_k at half the
+// zone spacing the closed line reaches it at 2 m (2.5 voxels): a fragment.  A cube standing in front of the same wall
+// (x 1.95-2.03 m: a third of its columns within reach of the line) protrudes from it and stays a thing, as does the
+// open-floor cube.  At 1.5 m the same tolerance is 1.8 voxels: the line catches a two-voxel smear from ~1.65 m out.
+TEST(CloudMap, AFragmentOnAClosedWallLineIsNotAThingButACubeBeforeItIs) {
+    std::vector<Pt> w = cube();                                               // the open-floor cube, ~0.85 m
+    for (int j = -10; j <= 10; ++j) {
+        if ((j + 10) % 4 == 3) continue;                                     // the sampling's gaps
+        for (double z : {0.25, 0.30, 0.35}) w.push_back({2.105, 0.005 + 0.04 * j, z});
+    }
+    for (int j = 0; j < 2; ++j)
+        for (double z : {0.03, 0.07}) w.push_back({2.025, -0.195 + 0.04 * j, z});   // the base fragment
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            for (double z : {0.03, 0.07, 0.11}) w.push_back({1.945 + 0.04 * i, 0.165 + 0.04 * j, z});   // a cube by the wall
+
+    const auto at = [](const std::vector<ogma::CloudMap::Thing>& th, double x, double y) {
+        return *std::min_element(th.begin(), th.end(), [&](auto const& a, auto const& b) {
+            return std::hypot(a.cx - x, a.cy - y) < std::hypot(b.cx - x, b.cy - y); });
+    };
+    Rig off(things_params());
+    for (int i = 0; i < 3; ++i) cast_world(off, 0.0, w);
+    EXPECT_TRUE(at(off.m.things(), 2.045, -0.175).small) << "without the line the smeared base fragment reads small";
+    EXPECT_DOUBLE_EQ(at(off.m.things(), 2.045, -0.175).on_line, -1.0);
+
+    ParamMap p = things_params();
+    p["line_tol_k"] = 0.049;
+    Rig r(p);
+    for (int i = 0; i < 3; ++i) cast_world(r, 0.0, w);
+    const auto th = r.m.things();
+    const auto frag = at(th, 2.045, -0.175);
+    EXPECT_FALSE(frag.small) << "on the closed line: a fragment of the wall";
+    EXPECT_GE(frag.on_line, 0.5);
+    EXPECT_TRUE(at(th, 1.985, 0.205).small) << "the cube in front of the wall protrudes from the line";
+    EXPECT_LT(at(th, 1.985, 0.205).on_line, 0.5);
+    EXPECT_TRUE(at(th, 0.85, 0.01).small) << "the open-floor cube";
+}

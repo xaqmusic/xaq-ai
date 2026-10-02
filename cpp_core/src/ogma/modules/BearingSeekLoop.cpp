@@ -37,6 +37,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{bearing_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false},
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!mover_topic_.empty()) v.push_back(TopicSpec{mover_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!yield_topic_.empty()) v.push_back(TopicSpec{yield_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
@@ -76,6 +77,10 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "While the thing is unseen the confidence decays by 1/this per tick (about this many ticks of memory).", ParamValue{3000.0}},
         {"floor", ParamMutability::HotMutable,
             "Confidence below which the remembered target is dropped.", ParamValue{0.05}},
+        {"pull_topic", ParamMutability::ConstructionOnly,
+         "S3: the outcome loop's [pull] (the expected answer at the attended thing's cell); a sighting sets the need to it "
+         "instead of 1, so a thing that has been tried and never moved is seen but not walked to.  Empty = off.",
+         ParamValue{std::string("")}},
         {"renew_topic", ParamMutability::ConstructionOnly,
             "ProprioToken [need, x, y] (SkillOutcomeLoop need_topic): what is still unknown about the last attended thing and where it is. "
             "After an arrival, a need above renew_min re-arms the target there with confidence = need (the linger). Empty = off.",
@@ -158,6 +163,7 @@ ParamMap BearingSeekLoop::current_params() const {
     m["range_topic"] = ParamValue{range_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
+    m["pull_topic"] = ParamValue{pull_topic_};
     m["renew_topic"] = ParamValue{renew_topic_}; m["renew_min"] = ParamValue{double(renew_min_)}; m["renew_range"] = ParamValue{renew_range_};
     m["walk_refix_m"] = ParamValue{walk_refix_m_}; m["walk_take_range"] = ParamValue{walk_take_range_};
     m["mover_topic"] = ParamValue{mover_topic_}; m["chase_gate_m"] = ParamValue{chase_gate_m_};
@@ -187,6 +193,7 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "forget_ticks",    [&](auto const& v){ forget_ticks_  = std::max(1.0, get_double(v,"forget_ticks")); });
     apply_param(params, "floor",           [&](auto const& v){ floor_         = float(get_double(v,"floor")); });
     apply_param(params, "renew_topic",     [&](auto const& v){ renew_topic_   = get_string(v,"renew_topic"); });
+    apply_param(params, "pull_topic",      [&](auto const& v){ pull_topic_    = get_string(v,"pull_topic"); });
     apply_param(params, "renew_min",       [&](auto const& v){ renew_min_     = float(get_double(v,"renew_min")); });
     apply_param(params, "renew_range",     [&](auto const& v){ renew_range_   = get_double(v,"renew_range"); });
     apply_param(params, "walk_refix_m",    [&](auto const& v){ walk_refix_m_  = get_double(v,"walk_refix_m"); });
@@ -335,6 +342,9 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         target_px_ = tx_; target_py_ = ty_; target_src_ = 1;
         have_target_ = true;
         conf_ = 1.0f;
+        if (!pull_topic_.empty())                                         // S3: the expected answer at this thing
+            if (auto pp = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(pull_topic_)))
+                if (pp->values.size() > 0) conf_ = std::clamp(float(pp->values[0]), 0.0f, 1.0f);
         range_left_ = range;
         cx_ = vx / float(n); cy_ = vy / float(n);
     } else if (have_target_) {

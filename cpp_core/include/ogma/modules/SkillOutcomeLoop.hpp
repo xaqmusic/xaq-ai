@@ -58,7 +58,10 @@ public:
     nlohmann::json diag_lite() const override;
     void           restore_state(nlohmann::json const& s) override;
 
-    struct Stat { int n = 0; double mean = 0.0, m2 = 0.0; double var() const { return n > 1 ? m2 / (n - 1) : 0.0; } };
+    // ans (2026-10-02, S3): the outcomes in which the thing MOVED more than answer_m -- the cell's answered share
+    struct Stat { int n = 0; double mean = 0.0, m2 = 0.0; int ans = 0; double var() const { return n > 1 ? m2 / (n - 1) : 0.0; } };
+    double pull() const { return pull_; }
+    int context() const { return ctx_; }
     int    requests()  const { return requests_; }
     int    observed()  const { return observed_; }
     int    unknown()   const { return unknown_; }
@@ -81,6 +84,20 @@ private:
     // seen) and the thing's fixed position.  The seek loop's renew_topic reads it.  Empty = not published.
     std::string need_topic_;
     double need_ = 0.0;
+    // S3 (2026-10-02, the ten-minutes phase: the outcome loop learns that structure does not answer).
+    // context_topic: a context EPM's RealityToken (the attended thing's surroundings -- how much of it lies on the closed
+    // wall line, how near the nearest tall column is); its winner splits each kind's cells: key = kind x context_n + ctx.
+    // pull_topic: [pull] -- the expected answer at the attended thing's cell: 1 while any intent there is uncertain (a
+    // cell the context's pooled cells cover borrows their answered share instead), else the cell's answered share
+    // (Laplace: (ans + 1) / (n + 2)).  An answer is a displacement above answer_m (two voxels).  The seek loop's need for
+    // a sighted thing.  Both empty = off (byte-identical).
+    std::string context_topic_, pull_topic_;
+    int    context_n_ = 4, ctx_ = 0, kctx_ = 0;
+    // context_pool_min (S3b): the pooled outcomes a context needs before it lends its answered share to an uncertain cell;
+    // 0 = min_samples x the intents (S3 as first built, starved at ~10 answers a run, §17.99)
+    int    context_pool_min_ = 0;
+    double answer_m_ = 0.08, pull_ = 1.0;
+    std::unordered_map<int, Stat> ctx_stats_;     // pooled over kinds and intents, keyed by context
     double proximity_range_ = 2.5, arrive_range_ = 0.3, match_radius_ = 0.6;
     int    min_samples_ = 2, observe_ticks_ = 1500, min_conf_ticks_ = 5;
     double explore_gain_ = 1.0;

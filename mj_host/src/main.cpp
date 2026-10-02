@@ -1296,6 +1296,26 @@ bool g_log_cloud_live = false;
 // top is SEEN when a ray passes over it to beyond the range).  The filed "things" record gains each cluster's seen_above
 // (the 10th value).  Off = byte-identical: the appended block is NaN and the record unchanged.
 bool g_tof_free_rays = false;
+// --log-still (2026-10-02, the ten-minutes phase: why a stop facing a wall never opens its own cloud): the record gains
+// "still": [the cast's stillness flag, the trunk's measured gravity z, the trunk gyro's largest component] on every tick
+// the cloud is on.  Instrumentation only; off = byte-identical.
+// --stop-is-still (2026-10-02, the ten-minutes phase: the stare): during a stop's standing phases (the joint brain stands,
+// or the walker holds) the cast is STILL whatever the gyro says.  Measured on T1 seed 1's 60 s stare (288-350 s): the gaze
+// sweep rocks the stand at a median 0.168 rad/s against the 0.15 bar, only 44 % of stop ticks read still, every 25-tick
+// run of "moving" files the stop's cloud for a walking one, and the growth rule -- which judges the STOP's cloud only --
+// never fires: all 41 stops of 40 s or more on the T1 sweep held a walking cloud 99 % of the time and ran to the cap.  The
+// body knows it stopped (it commanded the stop: efference, not an oracle).  Off = byte-identical.
+bool g_stop_is_still = false;
+// --look-up-when-impeded IMPEDE_S PITCH LOOK_S BACK_S (2026-10-02, the ten-minutes phase; the operator: "the robot should
+// look up to see if an obstacle that is impeding its movement is a wall, so it should be backed away from").  IMPEDED is the
+// seek loop's own prediction failing: while seek steers, its range has not closed by 5 cm in IMPEDE_S seconds (on T1 + the
+// line, 58 s a run of dwelling at structure, 68 % of it under seek, 4 of 112 episodes caught by the stall detector, which
+// the dynamic-range walk's slowed command never trips).  The duck backs off BACK_S (inside 10 cm the ToF reads too-close),
+// stops with the head pitched to PITCH (negative = up; every stop's sweep looks DOWN, 0.29-0.51) for LOOK_S, and at the
+// stop's end reads its cloud: tall structure at the target and no small thing there = a WALL -> the target is forgotten and
+// the escape turns the walk to the freest sector; otherwise a THING -> the target is kept.  0 = off, byte-identical.
+double g_imp_s = 0.0, g_imp_pitch = -0.3, g_imp_look_s = 1.5, g_imp_back_s = 0.6;
+bool g_log_still = false; double g_still_gz = 0.0, g_still_w = 0.0; int g_still_flag = 0;
 // A closed track: an ellipse of semi-axes a (along yaw) and b about (cx, cy), walked by ARC LENGTH so the
 // train's speed is what the flag says everywhere on it.
 struct TrackPath {
@@ -1757,6 +1777,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     int skills_fired = 0, skills_requested = 0; bool skill_then_stop = false; std::string skill_pending;
     int approaches = 0;                              // --skill-approach: steps taken onto a thing before a kick or a peck
     int unwind_left = 0, unwinds = 0; bool unwind_then_stop = false;
+    // the impeded look (--look-up-when-impeded)
+    double imp_best = 1e9, imp_prev = -1.0; int imp_timer = 0, imp_back_left = 0, imp_look_left = 0;
+    bool imp_stop = false; int imp_n = 0, imp_wall = 0, imp_thing = 0;
     int down_skills = 0, down_rises = 0; bool down_skill_running = false; int down_rise_watch = 0;
     std::function<bool(const std::string&)> skill_start;
     skill_start = [&](const std::string& name) -> bool {
@@ -2120,6 +2143,21 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
             }
             const bool arrive_now = g_stop.on_arrive && stop_phase == StopPhase::None && t >= stop_from && !skill_active
                                     && (brain.seek_arrived() || skill_arrive_done);
+            if (g_imp_s > 0.0) {
+                // IMPEDED: seek steers and its range has not closed by 5 cm for g_imp_s
+                const bool driving = stop_phase == StopPhase::None && !skill_active && unwind_left == 0 && imp_back_left == 0
+                                     && orient == Orient::None && t >= stop_from && brain.last_steer() == 3 && brain.seek_value() > 0.0;
+                if (driving) {
+                    const double r = brain.seek_range();
+                    if (imp_prev < 0.0 || r > imp_prev + 0.2) { imp_best = r; imp_timer = 0; }        // a new target
+                    if (r < imp_best - 0.05) { imp_best = r; imp_timer = 0; } else ++imp_timer;
+                    imp_prev = r;
+                    if (imp_timer >= int(g_imp_s * kBrainHz) && (ticks - t) > stop_ticks) {
+                        imp_back_left = std::max(1, int(g_imp_back_s * kBrainHz)); imp_timer = 0; imp_best = 1e9; imp_prev = -1.0; ++imp_n;
+                        stop_event = "impeded:back";
+                    }
+                } else if (imp_back_left == 0) { imp_timer = 0; imp_best = 1e9; imp_prev = -1.0; }
+            }
             const bool stuck_now = g_stop.on_stuck > 0.0 && stop_phase == StopPhase::None && t >= stop_from && brain.stuck_now();
             if (g_contact_forget && brain.stuck_now() && brain.stuck_by_contact()) brain.forget_seek_target();
             const bool lost_now = g_stop.on_lost && chase_on && stop_phase == StopPhase::None && t >= stop_from && !skill_active && brain.chase_lost_now();
@@ -2411,6 +2449,23 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                         }
                         stop_is_stuck = false;
                     }
+                    if (imp_stop) {
+                        // the impeded look's verdict: tall structure at the target and no small thing there = a wall
+                        const bool wall = brain.cloud_target_tall() > 0 && brain.cloud_target_small() == 0;
+                        if (wall) {
+                            ++imp_wall; brain.forget_seek_target();
+                            const auto view = brain.cloud_view();
+                            if (view.size() == 8) {
+                                int best = -1; double bv = -1.0;
+                                for (int k = 0; k < 8; ++k) { const double v = view[size_t(k)] - 0.01 * std::fabs(k - 3.5); if (v > bv) { bv = v; best = k; } }
+                                const double bearing = (-64.0 + (best + 0.5) * 16.0) * M_PI / 180.0;
+                                brain.set_ref_hold(bearing, int((g_stuck_escape_s > 0.0 ? g_stuck_escape_s : 6.0) * kBrainHz)); ++escapes;
+                            }
+                            stop_event = "impeded:wall";
+                        } else { ++imp_thing; stop_event = "impeded:thing"; }
+                        imp_stop = false; imp_look_left = 0;
+                        if (head) head->set_pitch_override(false, 0.0);
+                    }
                     brain.set_learning(true);
                     if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) { head->on_reset(); head->set_learning(true); }
                 }
@@ -2428,6 +2483,18 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                     unwind_then_stop = false;
                     stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
                     ++stops_started; ++stops_arrive; stop_event = "stop:look"; stop_started_tick = t; stop_is_arrive = true; stop_is_look = true;
+                    if (stander) stander->on_reset();
+                    if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
+                }
+            }
+            if (imp_back_left > 0 && stop_phase != StopPhase::None) imp_back_left = 0;   // another stop took over: no look
+            if (imp_back_left > 0 && stop_phase == StopPhase::None) {
+                command.twist = {-std::fabs(g_skill_unwind_vx > 0.0 ? g_skill_unwind_vx : 0.3), 0.0, 0.0};   // back off the obstacle
+                brain.set_learning(false);
+                if (--imp_back_left == 0) {
+                    stop_phase = StopPhase::Settle; stop_left = stop_ticks; stop_settle_left = stop_settle_ticks;
+                    ++stops_started; stop_event = "stop:impeded"; stop_started_tick = t; stop_is_arrive = false; stop_is_look = false;
+                    imp_stop = true; imp_look_left = std::max(1, int(g_imp_look_s * kBrainHz));
                     if (stander) stander->on_reset();
                     if (head && ((stander && !g_stop.keep_head) || g_stop.freeze_head)) head->set_learning(false);
                 }
@@ -2478,6 +2545,11 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 if (stop_phase != StopPhase::None && !looking && !scanning) { head->set_override_slew(g_head_stop_slew); head->set_yaw_override(true, 0.0); home_on = true; }
                 else if (stop_phase == StopPhase::None && home_on) { head->set_yaw_override(false, 0.0); home_on = false; }
                 else if (looking || scanning) home_on = false;
+            }
+            if (imp_look_left > 0 && stop_phase != StopPhase::None) {
+                // the impeded look: the head up at the obstacle (straight ahead, where the seek was pushing)
+                head->set_pitch_override(true, g_imp_pitch); head->set_yaw_override(true, 0.0);
+                if (--imp_look_left == 0) head->set_pitch_override(false, 0.0);
             }
             if (g_head_gaze_sense) {
                 // the gaze error: where the walk is going (the seek target's body bearing while seek steers the reference;
@@ -2689,8 +2761,10 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 // the trunk height, then every return already levelled with z above the floor
                 place.tof_points_valid = cloud_on;
                 if (cloud_on) {
-                    const bool still = g[2] < -0.999 && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15;
+                    const bool still = (g_stop_is_still && (stop_phase == StopPhase::Brain || stop_phase == StopPhase::Walker))
+                                    || (g[2] < -0.999 && std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])}) < 0.15);
                     place.tof_points[0] = still ? 1.0f : 0.0f;
+                    g_still_flag = still ? 1 : 0; g_still_gz = g[2]; g_still_w = std::max({std::fabs(w[0]), std::fabs(w[1]), std::fabs(w[2])});
                     place.tof_points[1] = float(yaw);
                     place.tof_points[2] = float(p[2]);
                     place.tof_points[3] = float(p[0]);      // the dead-reckoned position: what lines
@@ -2812,6 +2886,7 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::printf("]");
             }
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
+            if (g_log_still && cloud_on) std::printf(",\"still\":[%d,%.4f,%.3f]", g_still_flag, g_still_gz, g_still_w);
             if (g_ref_free > 0.0 && t % 50 == 0) std::printf(",\"rfree\":%d", brain.ref_released());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
             if (skill_active) std::printf(",\"skill\":\"%s\"", skill_name.c_str());
@@ -2991,6 +3066,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
         if (chase_on) { const auto cf = brain.chase_cand_fates();
             std::fprintf(stderr, "  chases: %d started (%d re-acquired while coasting), %d mover candidates seen by the cloud; %d stops ended on a chase; %d stops started on a lost chase; candidates not chased: %d replaced (missed the gate), %d too fast, %d still, %d timed out; targets taken from the walk: %d; chases yielded near tall structure: %d, sightings dropped at a yielded place: %d; static targets yielded near tall structure: %d, sightings dropped there: %d; targets forgotten for no progress: %d\n",
                          brain.chases(), brain.chases_reacquired(), brain.mover_cands(), stops_chase_ended, stops_lost, cf[0], cf[1], cf[2], cf[3], brain.walk_takes(), brain.chases_yielded(), brain.yield_drops(), brain.static_yielded(), brain.static_yield_drops(), brain.progress_forgets()); }
+        if (g_imp_s > 0.0) std::fprintf(stderr, "  impeded looks: %d (seek's range unclosed %.1f s); walls %d (forgotten, escaped), things %d (kept)\n",
+                                        imp_n, g_imp_s, imp_wall, imp_thing);
         if (g_stop.on_stuck > 0.0) std::fprintf(stderr, "  stuck stops: %d of %d started when a forward stall exceeded %.1f x the body's own median stall; %d escapes; %d stalls fired by contact, %d seek targets dropped by them\n",
                      stops_stuck, stops_started, g_stop.on_stuck, escapes, brain.contact_stucks(), brain.contact_forgets());
         if (!g_skill_on_arrive.empty() || g_skill_at_s > 0.0 || skills_requested > 0) std::fprintf(stderr, "  skills: %d fired (%d requested by the graph), %d unwinds\n", skills_fired, skills_requested, unwinds);
@@ -3093,6 +3170,11 @@ void usage() {
         "      --head-forward RAD offsets the neck and head pitch targets (the head over the feet); --body-pitch RAD\n"
         "      sets the walker's body_pitch command slot -- the speed levers, 0 = off.\n"
         "      --stop-on-lost starts a stop when a chase is lost, the sweep centred on where the thing went (a look, not a walk).\n"
+        "      --look-up-when-impeded IMPEDE_S PITCH LOOK_S BACK_S: when seek's range has not closed 5 cm in IMPEDE_S, back off\n"
+        "      BACK_S, stop with the head pitched to PITCH (negative = up) for LOOK_S; at the stop's end a wall (tall at the\n"
+        "      target, nothing small there) is forgotten and escaped from, a thing is kept.  0 = off.\n"
+        "      --stop-is-still: during a stop's standing phases the cloud's cast is still whatever the gyro says (the stop's\n"
+        "      own cloud opens, so the growth rule can end a stop that faces a wall).  --log-still logs the stillness input.\n"
         "      --tof-free-rays passes the ToF's EMPTY zones' rays to the cloud (to max range) for CloudMap free_rays: a ball's\n"
         "      top counts as seen when a ray passed over it; the filed things record gains seen_above.  Off = byte-identical.\n"
         "      --log-cloud-live logs the cloud as the module builds it: the voxels each cast touches, a cloud's opening\n"
@@ -3407,6 +3489,13 @@ int main(int argc, char** argv) {
             g_log_cloud_live = true;
         } else if (a == "--tof-free-rays") {
             g_tof_free_rays = true;
+        } else if (a == "--log-still") {
+            g_log_still = true;
+        } else if (a == "--stop-is-still") {
+            g_stop_is_still = true;
+        } else if (a == "--look-up-when-impeded") {
+            g_imp_s = std::stod(next("--look-up-when-impeded")); g_imp_pitch = std::stod(next("--look-up-when-impeded"));
+            g_imp_look_s = std::stod(next("--look-up-when-impeded")); g_imp_back_s = std::stod(next("--look-up-when-impeded"));
         } else if (a == "--log-movers") {
             g_log_movers_s = std::stod(next("--log-movers"));
         } else if (a == "--l2-twist") {
