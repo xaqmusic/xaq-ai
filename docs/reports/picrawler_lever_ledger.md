@@ -4927,6 +4927,15 @@ promoted.
 
 ### ★★★ 2026-09-13 — THE MEASURED BODY'S CHASSIS LURCH IS A RATCHET, AND `height_k` CANNOT REACH IT
 
+> ⚠ **CORRECTED 2026-10-02 — the ratchet is real code, but on the measured body it was
+> triggered by a sensor bug.** The belly ray the brain read here (`ground_clearance`
+> with the boom off) subtracted `CHASSIS_Y/2` and read **25.5 mm short** on the measured body,
+> so it reported "grounded" while the belly was ~25 mm up, and `height_ground_gain` ratcheted on
+> that. With the ray fixed (n=6, arena, 6000 ticks): `height_k_eff` ends at **0.33** instead of
+> 0.83, peak chassis height is **79 mm** instead of 132, and **falls go from 7 to 0**. The
+> measured body does not "tip over more" once its belly sensor is right. See the
+> 2026-10-02 entry at the end of this ledger.
+
 **Verdict: diagnosis (`WORKING` as a diagnosis) + `PARTIAL` signal on the ablation.**
 Operator observation: the measured body sits higher than cad and tips over more, and the
 real robot has no roll cage. **The observation is right and the proposed lever is the
@@ -4997,6 +5006,17 @@ promote-or-kill run needs an arm long enough to produce falls, and the honest co
 to peak height is the fall count itself.
 
 ### ★★★ 2026-09-13 — THE AS-BUILT BELLY ToF CANNOT SEE THE BELLY, and the anti-windup fixed the wrong thing
+
+> ⚠ **RETRACTED 2026-10-02 — item 2 below is a harness artifact (`TAUTOLOGY`-class: it
+> measured the instrument).** The "belly truth" ray it scored the boom against read **25.5 mm
+> short** on the measured body (`CHASSIS_Y/2` where the belly is 26.0 mm below the origin, not
+> 51.5). The "+25.4 to +25.9 mm over-report" is that offset, and the "missed 21 of 21
+> groundings" were moments the belly was ~25 mm up. Against belly height from chassis geometry
+> the boom reads within **~1 mm**, compensated or not. The boom was telling the truth, and that is
+> why `height_k_eff` stopped climbing when it was switched on. Item 1's `NULL` on
+> `height_windup_guard` stands as measured, but against a baseline driven by the same bug, so
+> it is a `NULL`-against-a-broken-baseline. Re-use context: re-test only if a ratchet recurs on a
+> correctly-read belly.
 
 **Verdicts: `NULL` on `height_windup_guard` (mechanism fired, target unmoved);
 `WORKING` as a hardware finding on the boom ToF model.** Two levers, measured separately,
@@ -5236,3 +5256,113 @@ the sim and produces different bits. Re-use context: any future `ogma::body` hel
 covered by the flag, but a NEW cross-arch claim needs its own oracle replay — this one is
 evidence about float32 arithmetic, not about `libm` in general.
 
+
+### ★★★ 2026-10-02 — THE BELLY "TRUTH" RAY READ 25.5 mm SHORT ON THE MEASURED BODY: the lurch, the tipping and P-d's boom-blindness were one sensor bug
+
+**Verdict: harness defect, fixed; it retracts the 2026-09-13 boom finding and re-reads the
+ratchet entry.** Arena, difficulty 0.3, n=6 × 6000 ticks, measured body. The arms differ only
+in the belly ray.
+
+**The bug.** `_compute_ground_clearance_centre` subtracted `CHASSIS_Y/2 + 0.02` as the
+sensor-to-belly offset. That is right only for a single box centred on the origin (cad). The
+measured body's origin is not its centre: the belly is **26.0 mm** below it (`_chassis_bottom_local`),
+not 51.5. Every reading was 25.5 mm short and floored at 0 while the belly was still ~25 mm up.
+The boom function's own comment already said "NOT CHASSIS_Y/2"; the centre ray was never fixed
+to match. **Found by checking `gc_belly` against chassis `y`**: it tracked the `CHASSIS_Y/2`
+formula to ~3 mm, while the boom tracked `y − 26 mm` to ~1 mm.
+
+**What it reached.** With the boom off, this ray IS the brain's `ground_clearance`, so the
+promoted height homeostat on every measured-body config (`native_measured`, P-c honest joints)
+saw a belly ~25 mm lower than it was. With the boom on, it was the `gc_belly` truth proxy.
+
+| `native_measured`, measured body | legacy ray | **fixed ray** |
+|---|---|---|
+| falls | **1.17 ± 1.07** (7 in 6 seeds) | **0** |
+| tilt_sd | 0.277 ± 0.26 | 0.063 ± 0.010 |
+| straight | 0.60 ± 0.28 | 0.81 ± 0.06 |
+| net_disp | 5.70 ± 2.59 | 6.86 ± 1.38 |
+| `height_k_eff` at end | 0.83 | 0.33 |
+| peak chassis y | 132 mm | 79 mm |
+| steps / step_bal | 20 / 0.15 | 23 / 0.10 |
+
+**Gates.** The fixed form equals the old one exactly on cad (`bottom = −CHASSIS_Y/2`): a
+1500-tick cad run is identical in every diag field. On P-e (boom on) only `gc_belly` moves, by
+exactly +25.5 mm. `OGMA_PICRAWLER_BELLY_RAY_LEGACY=1` restores the old ray and reproduces the
+pre-fix `native_measured` run in every field. The body prints `belly_ray[...]` at startup.
+
+**Re-read of earlier entries.** 2026-09-13's boom-blindness finding is retracted (banner
+there). The ratchet mechanism is real, but on the measured body it was fed false "grounded"
+readings (banner there). ⚠ **Every measured-body number taken with the boom off before this date
+ran on the short ray**, and it was the brain's input, so those runs measured a different
+closed loop. That includes the `native_measured` benchmark and P-c. Re-measure before building
+on them.
+
+**A second confound, in the UI only: `body_env` leaked between launcher selections.** The
+launcher applies a config's `body_env` into the process when the config is *selected*, and
+"a pre-existing env var wins". It counted its own leftovers as the operator's, so selecting
+P-d and then P-e ran P-e with tilt compensation ON. Selecting `native_measured` after any boom
+config ran it **with the boom ToF and solid chassis switched on**. The launcher auto-selects its
+remembered config at startup, so this fired with no visible cause. Fixed: the launcher records
+what it set, overwrites only that, and unsets keys the new config does not declare. A
+command-line export still wins. Tested by driving the real selection handler
+P-d → P-e → `native_measured` → P-e, on the old code (leaks in both directions) and the new.
+Headless harnesses never applied `body_env` at all, so seed-averaged numbers are unaffected.
+**Any UI observation of a boom/non-boom config made after selecting the other kind may have shown
+the wrong arm.**
+
+### ★★★ 2026-10-01/02 — THE FSR LEG, THE RAW BOOM, AND THE ROBOT'S SERVO SPEED: at its real speed the robot does not lift its feet
+
+**Verdicts: FSR leg `WORKING` (signal); raw boom ties-or-beats the compensated one on flat
+ground (signal); the robot's servo speed is a `REGRESSION` to a shuffle (signal, loud).**
+Arena, difficulty 0.3, n=6 × 6000 ticks, `native_measured__tofboom` gains, same build and
+seeds throughout. Body and env passed explicitly per arm, and every log carries the receipt.
+
+**1. The FSR toe modules lengthen the lower leg to 87 mm (knee axis to toe tip, operator).**
+`body/measured_fsr.json`: L3 76.5 → 87 mm, `standing_y` 82.3 → 92.7 mm (`coxa_z_drop + L3·sin 80°`),
++2 g per foot. `stand_m` is deliberately unchanged, because it must match the robot. Against the
+76.5 mm leg (compensated boom): net_disp 6.37 ± 0.94 → 7.84 ± 1.63 (edge-censored), straight and
+tilt tie, 0 falls in both, belly ~+5 mm higher. The gait survives the leg with no retuning.
+
+**2. The robot publishes the UNCOMPENSATED boom** (`ogma_host`: raw − 64.8 mm; the compensated
+arm exists only in benchd telemetry). On the FSR leg, uncompensated vs compensated: net_disp
+8.61 ± 0.57 vs 7.84 ± 1.63, straight 0.87 vs 0.82, tilt_sd 0.066 vs 0.083, 0 falls. The raw boom
+reads within −1.1 ± 1.0 mm of belly height from chassis geometry. On flat ground pitch does not
+swamp it. Not a terrain result: on a slope the compensated arm is the wrong one (BOM §9.10.3).
+
+**3. ★ At the robot's servo speed the gait stops lifting its feet.** The operator kept the robot
+at its deployed 40 µs/tick, which is **3.668 rad/s at the MEASURED 545.2 µs/rad** (not the
+3.14 that the 636.6 hobby-servo standard gives). The sim's 6.0 rad/s default had never been
+matched to it.
+
+| P-e (FSR leg, raw boom) | 6.0 rad/s (sim default) | **3.668 rad/s (robot)** |
+|---|---|---|
+| steps | 28.2 ± 9.9 | **0 on all 6 seeds** |
+| net_disp | 8.61 ± 0.57 | 4.03 ± 0.32 |
+| straight | 0.87 | 0.81 |
+| tilt_sd | 0.066 | 0.052 |
+| scrub | 0.098 | 0.058 |
+| td_plv | 0.34 | 0.25 |
+| feet_y p99 / max | 50 / 70 mm | **−4 / 24 mm** |
+| falls | 0 | 0 |
+
+**Checked before recording it** (§3.2): the arm loaded (`max_servo_speed = 3.668` receipt, body
+`measured_fsr`, `tof[boom=ON tilt_comp=off]`). `steps` counts swing-detector lifts past a
+fixed `feet_y` threshold, identical in both arms. At 3.668 the toes never reach it, because
+99 % of samples sit below −4 mm. **The body still travels 4 m, so this is a shuffle: toes
+dragged rather than lifted.** That is the degenerate behaviour a distance metric rewards
+(CLAUDE.md §3.3). Same direction as 2026-09-13's sweep (13 steps vs 35 at this speed, on the
+measured body with the short belly ray), and stronger.
+
+**Why, most likely, and NOT verified:** these gains are the `native_measured` operating point,
+which the E3b searcher found at 6.0 rad/s. A body+gains pair is a unit (stage E3), and slowing
+the servos moves the body out from under the gains it was tuned with. Re-use contexts, any of
+which reopens it:
+- a native re-settle of the gains at 3.668 rad/s;
+- the robot at 50 µs/tick (4.59 rad/s), the ledger's best-behaved speed at no measured
+  current cost (BOM §3.8.4/§3.8.6);
+- a run long enough for the GainEvolver to re-adapt (6000 ticks may be too short).
+
+**Shipped:** P-e now declares `OGMA_PICRAWLER_MAX_SERVO_SPEED=3.668` in `body_env`, so it shows
+the robot as it will actually run. The sim's global default stays 6.0 so historical configs
+reproduce. The body's startup receipt and the bench dashboard now convert at the measured
+545.2 µs/rad. At 636.6, the dashboard's mirror of the robot's pose read ~14 % small.

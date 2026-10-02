@@ -185,8 +185,13 @@ const MAX_SERVO_TORQUE: float = 0.15      # Nm — gentle enough that motor reac
 # So the sim sits on the "at the edge" row, while the DEPLOYED ServoDriver default is
 # 40 us/tick = 3.14 rad/s — half the sim's speed.  Whatever gait the sim settles on is
 # therefore not the gait the robot will execute on first power-on.
-# ⚠ The us/rad scale is the STANDARD, not this robot's measured one; the servo map stores
-# a calibrated envelope, not an angle-per-microsecond, so it wants a bench check.
+# ⚠ The us/rad scale above is the STANDARD.  The bench check has since been done:
+# ROBOT_US_PER_RAD below is MEASURED (pi_host/calib/sensors.json, RL knee, 2026-09-13), and
+# at that scale the deployed 40 us/tick is 3.67 rad/s, not 3.14.  The operator's call
+# (2026-10-02): keep the robot at 40 us/tick and match the sim to it.  The robot-faithful
+# config (P-e, ..._tofboom__fsrleg) sets OGMA_PICRAWLER_MAX_SERVO_SPEED=3.668 in its
+# body_env; this default stays 6.0 so every historical config reproduces.
+const ROBOT_US_PER_RAD: float = 545.2      # measured; pi_host/calib/sensors.json servo.us_per_rad
 var MAX_SERVO_SPEED: float = 6.0          # rad/s — matches doc spec (6-10).  Now that joints
 										  # use right-handed bases (constraint solver stable)
 										  # and chassis is suspended during calibration,
@@ -2461,6 +2466,10 @@ var _dbg_gc_belly: float = -1.0   # belly-centre truth proxy while tof_boom is o
 # is exactly what the robot can compute.  0 = publish the raw along-ray reading (what a
 # naive driver would emit); 1 = resolve it to true belly clearance.
 @export var tof_tilt_comp: bool = false
+# Restore the pre-2026-10-02 belly-centre ray, which subtracted CHASSIS_Y/2 and read
+# 25.5 mm short on the measured bodies (see _compute_ground_clearance_centre).  Only for
+# reproducing earlier results; a no-op on cad.
+@export var belly_ray_legacy: bool = false
 @export var honest_upright: bool = false   # upright/tilt from the fused attitude estimate
 @export var honest_joints:  bool = false   # joints from the servo forward model
 @export var honest_imu:     bool = false   # imu from ego_heading / stride_v / body gyro
@@ -3319,11 +3328,14 @@ func _ready() -> void:
 	# silently did not load — CLAUDE.md §3.2's "did the arm you think you ran actually
 	# load?", which has produced a false verdict here before.  A run whose log does not
 	# say `honest[...]` is not evidence about anything.
-	print("PicrawlerBody: max_servo_speed = %.2f rad/s  (~%.0f us/tick at the 50 Hz tick; BOM §3.8.2 budget is <=50)"
-		% [MAX_SERVO_SPEED, MAX_SERVO_SPEED * (2000.0 / PI) / 50.0])
+	print("PicrawlerBody: max_servo_speed = %.3f rad/s  (~%.0f us/tick at the 50 Hz tick and the measured %.1f us/rad; robot ServoDriver = 40)"
+		% [MAX_SERVO_SPEED, MAX_SERVO_SPEED * ROBOT_US_PER_RAD / 50.0, ROBOT_US_PER_RAD])
 	print("PicrawlerBody: tof[boom=%s tilt_comp=%s z=%+.3f y=%+.3f]" % [
 		"ON" if tof_boom else "off", "ON" if tof_tilt_comp else "off",
 		tof_boom_z, tof_boom_y if tof_boom_y > 0.0 else _chassis_top_local])
+	print("PicrawlerBody: belly_ray[%s belly %.1f mm below origin]" % [
+		"LEGACY CHASSIS_Y/2" if belly_ray_legacy else "belly-plane",
+		(CHASSIS_Y * 0.5 if belly_ray_legacy else -_chassis_bottom_local) * 1000.0])
 	print("PicrawlerBody: honest[upright=%s joints=%s imu=%s]" % [
 		"ON" if honest_upright else "off",
 		"ON" if honest_joints else "off",
@@ -3410,6 +3422,7 @@ func _resolve_env() -> void:
 			  "OGMA_PICRAWLER_MAX_SERVO_SPEED",
 			  "OGMA_PICRAWLER_TOF_BOOM",
 			  "OGMA_PICRAWLER_TOF_TILT_COMP",
+			  "OGMA_PICRAWLER_BELLY_RAY_LEGACY",
 			  "OGMA_PICRAWLER_HONEST_UPRIGHT",
 			  "OGMA_PICRAWLER_HONEST_JOINTS",
 			  "OGMA_PICRAWLER_HONEST_IMU"]:
@@ -3436,6 +3449,7 @@ func _resolve_env() -> void:
 			"OGMA_PICRAWLER_MAX_SERVO_SPEED":   MAX_SERVO_SPEED   = max(0.1, v.to_float())
 			"OGMA_PICRAWLER_TOF_BOOM":          tof_boom          = (v != "0" and v != "")
 			"OGMA_PICRAWLER_TOF_TILT_COMP":     tof_tilt_comp     = (v != "0" and v != "")
+			"OGMA_PICRAWLER_BELLY_RAY_LEGACY":  belly_ray_legacy  = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_UPRIGHT":    honest_upright    = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_JOINTS":     honest_joints     = (v != "0" and v != "")
 			"OGMA_PICRAWLER_HONEST_IMU":        honest_imu        = (v != "0" and v != "")
@@ -10121,7 +10135,8 @@ func _compute_ground_clearance() -> float:
 	# Origin: chassis centre raised a further 2 cm along body-up, so the ray always
 	# starts with clear space above whatever the belly rests on (per the operator's
 	# note) and fires down THROUGH the chassis interior — it can never clip into the
-	# obstacle.  belly is CHASSIS_Y/2 below centre → total sensor-to-belly = that + 2cm.
+	# obstacle.  The belly is -_chassis_bottom_local below the origin → total
+	# sensor-to-belly = that + 2cm (see _compute_ground_clearance_centre).
 	# ---- BOOM MOUNT (tof_boom) --------------------------------------------------
 	# The as-built sensor is on a boom out the BACK of the robot, level with the top of
 	# the HAT — not under the belly centre.  Two consequences, and the second is the one
@@ -10146,9 +10161,25 @@ func _compute_ground_clearance() -> float:
 
 # The belly-CENTRE downward ray: the original model, and now also the truth proxy the
 # boom arm is scored against.
+#
+# ⚠ THE BELLY IS `_chassis_bottom_local` BELOW THE ORIGIN, NOT CHASSIS_Y/2 (fixed
+# 2026-10-02).  This used CHASSIS_Y/2, which is right only for a single box centred on
+# the origin (cad).  The measured body's origin is not its centre: its belly is 26.0 mm
+# below the origin, where CHASSIS_Y/2 says 51.5, so every reading was 25.5 mm SHORT and
+# floored at 0 while the belly was still ~25 mm up.  Found by checking gc_belly against
+# chassis y in the logs: it tracked the CHASSIS_Y/2 formula to ~3 mm, and the boom tracked
+# the geometry to ~1 mm.  Two consequences, both on measured bodies only:
+#   * WITHOUT tof_boom this ray IS the brain's ground_clearance — the promoted height
+#     homeostat saw a belly ~25 mm lower than it was (native_measured, honestjoints).
+#   * WITH tof_boom it is the gc_belly truth proxy, so P-d's "the boom over-reports by
+#     +25.9 mm and misses 21/21 groundings" measured this offset, not the boom.
+# On cad the two forms are the same number (bottom = -CHASSIS_Y/2 exactly), so cad runs
+# are byte-identical.  belly_ray_legacy restores the old form to reproduce pre-fix results.
 func _compute_ground_clearance_centre(space_state: PhysicsDirectSpaceState3D,
 									  down: Vector3) -> float:
-	var sensor_up: float = CHASSIS_Y * 0.5 + 0.02
+	var belly_below_origin: float = CHASSIS_Y * 0.5 if belly_ray_legacy \
+		else -_chassis_bottom_local
+	var sensor_up: float = belly_below_origin + 0.02
 	var origin: Vector3 = _chassis.global_transform.origin + (-down) * 0.02
 	var query := PhysicsRayQueryParameters3D.new()
 	query.from = origin

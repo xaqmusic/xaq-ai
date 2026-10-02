@@ -17,7 +17,10 @@ const PUB_PORT := 5591
 const VIDEO_PORT := 7402
 const PING_S   := 0.3
 const SEND_THROTTLE_S := 0.05
-const US_PER_RAD := 636.6            # 500–2500 µs ≙ ±π/2
+# MEASURED, not the 636.6 hobby-servo standard (500–2500 µs ≙ ±π/2): pi_host/calib/
+# sensors.json servo.us_per_rad, RL knee, 2026-09-13.  At 636.6 the mirrored pose read
+# ~14 % small.  One channel measured; part-to-part scale is unchecked.
+const US_PER_RAD := 545.2
 const VBAT_MIN := 6.0
 const VBAT_MAX := 8.4
 

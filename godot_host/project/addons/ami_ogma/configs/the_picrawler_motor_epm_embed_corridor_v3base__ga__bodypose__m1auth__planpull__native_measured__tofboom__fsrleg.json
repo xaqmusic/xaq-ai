@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "P-e\u00b7FSR LEG + RAW BOOM ToF \u2014 the robot as it will first run",
-    "description": "WATCH: does this body walk like the robot will have to? This is P-d (ToF boom) with the two changes the hardware forces: the 87 mm FSR lower leg (body measured_fsr: L3 76.5->87 mm knee-to-toe, standing_y 92.7 mm, +2 g per foot) and the boom read UNCORRECTED for pitch, because ogma_host publishes raw-minus-mount-offset to the brain and the tilt-corrected arm lives only in benchd telemetry. Signal, n=6 x 6000, arena diff 0.3, same build/seeds (2026-10-01): vs the same leg with the CORRECTED boom it ties or better -- net_disp 8.61+-0.57 vs 7.84+-1.63 (both censored by the arena edge, 5/6 and 4/6 seeds past r=8), straight 0.87 vs 0.82, tilt_sd 0.066 vs 0.083, steps 28 vs 26, 0 falls; the raw boom reads within -1.1+-1.0 mm of the belly height from chassis geometry (sd 5.6 mm), so on this floor pitch does not swamp it. vs the 76.5 mm leg (corrected boom): net_disp 6.37 -> 7.84, belly ~+5 mm, 0 falls both. WATCH step_bal: 0.04 here vs 0.18 -- check whether every leg is actually stepping. \u26a0 gc_belly in the diag is NOT truth on the measured bodies: _compute_ground_clearance_centre subtracts CHASSIS_Y/2 (51.5 mm) where the belly is 26 mm below the origin, so it under-reads by ~25.5 mm and shows 'grounded' while the belly is ~25 mm up. Belly height = chassis y - 26 mm. Neither leg grounds its belly in these runs. \u26a0 Not modelled: the R7 ball toe (point toe at L3), per-foot leg length, honest joints (the robot has no joint angle sense), ToF noise (sd 1.5-2 mm) and the robot's +3.2 mm belly-down offset error. NOT PROMOTED -- never yet watched.",
+    "name": "P-e\u00b7FSR LEG + RAW BOOM + ROBOT SERVO SPEED \u2014 the robot as it will first run",
+    "description": "WATCH THE FEET: at the robot's servo speed this gait SHUFFLES. P-d (ToF boom) with the three things the hardware forces: the 87 mm FSR lower leg (body measured_fsr), the boom UNCORRECTED for pitch (what ogma_host publishes), and MAX_SERVO_SPEED 3.668 rad/s = the robot's 40 us/tick at the MEASURED 545.2 us/rad. Signal, n=6 x 6000, arena diff 0.3 (ledger 2026-10-01/02): at 3.668 vs the sim's 6.0 default, steps 28 -> 0 ON ALL SIX SEEDS, net_disp 8.61 -> 4.03, feet_y max 70 -> 24 mm, td_plv 0.34 -> 0.25, tilt_sd 0.066 -> 0.052, 0 falls. The body still travels 4 m with its toes dragged, not lifted -- a distance metric would call that walking. Likely cause, NOT verified: these gains are the native_measured operating point, found at 6.0 rad/s. To see the stepping version, export OGMA_PICRAWLER_MAX_SERVO_SPEED=6.0 before launching (a command-line export wins over body_env). At 6.0 the raw boom ties-or-beats the corrected one (net_disp 8.61 vs 7.84, straight 0.87 vs 0.82). Belly height = chassis y - 26 mm; gc_belly is correct from 2026-10-02. Not modelled: the R7 ball toe, per-foot leg length, honest joints, ToF noise (sd 1.5-2 mm), the robot's +3.2 mm belly-down offset error. NOT PROMOTED.",
     "env_target": "picrawler",
     "gym_mode": "arena",
     "phase_tag": "motor-epm (minimal/deploy)",
@@ -35,7 +35,8 @@
     "body_env": {
       "OGMA_PICRAWLER_TOF_BOOM": "1",
       "OGMA_PICRAWLER_TOF_TILT_COMP": "0",
-      "OGMA_PICRAWLER_CHASSIS_COLLIDE": "1"
+      "OGMA_PICRAWLER_CHASSIS_COLLIDE": "1",
+      "OGMA_PICRAWLER_MAX_SERVO_SPEED": "3.668"
     }
   },
   "version": 1,
