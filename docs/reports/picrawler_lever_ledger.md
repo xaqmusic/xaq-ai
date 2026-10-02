@@ -5533,3 +5533,61 @@ reduced (reversals 43 % → 27 % at best) but not removed, because coupling, str
 - b + c stacked.
 - An amplitude change: the command's distance from the slewed target, which is what puts the
   knee at the cap.
+
+### ★★★ 2026-10-02 — THE FSR-LEG BODY LIFTS ITSELF UNTIL IT TIPS: the height ratchet is fed false "grounded" readings by the raw boom (and lever c's "0 falls" was a 6000-tick blind spot)
+
+**Verdict: diagnosis, confirmed by ablation (signal, n=4 × 24 000 ticks, every seed agrees).**
+Operator observation in the UI: *the robot elevates its body too far off the ground and tips
+over.* P-e and P-e·c, 3.668 rad/s, arena difficulty 0.3, seeds 1–4, 24 000 ticks (~8 min).
+Traces off, identically in every arm.
+
+| | P-e | P-e, `height_ground_gain`=0 | P-e·c | P-e·c, `height_ground_gain`=0 |
+|---|---|---|---|---|
+| resets (seeds tipped) | 2 (1/4) | **0 (0/4)** | **10 (3/4)** | **0 (0/4)** |
+| `height_k_eff` max | 0.69 | 0.30 | 0.83 (0.95 on 2) | 0.30 |
+| `height_bias` max | 1.21 | 0.52 | **1.50 (railed) on 4/4** | 0.10 |
+| tilt max, t ≥ 12 000 (rad) | 1.00 | 0.41 | 2.04 | 0.51 |
+| belly mean (y − 26 mm) | 37 mm | 24 mm | 37 mm | 25 mm |
+| peak belly before a tip | 89–109 mm | — | 102–121 mm | — |
+| displacement | 10.1 m | **10.3 m** | 6.4 m | 5.2 m |
+
+**Mechanism** (MotorEPMv2 ~2603–2660; constants in the header):
+- The target is `height_k_eff × chassis_h_max`.
+- **`chassis_h_max` is a never-decaying record, and it reads 1.00 (the 60 mm clamp) in every
+  window of every seed.** The FSR leg spawns the belly at 66.7 mm, above `stand_m` = 60 mm, and
+  the raw boom spikes high whenever the nose pitches down. This is the `stand_m` problem
+  `picrawler_foot_fsr_mod.md` §5.3 predicted, now with a consequence.
+- **"Grounded" is a raw reading below 0.05 (3 mm).** The UNCORRECTED boom reads **0 mm**
+  routinely while belly height from chassis geometry averages 25–45 mm: a nose-up pitch swings
+  the aft boom toward the floor.
+- Each false "grounded" raises `height_k_eff` by 1 % of its gap to 0.95. It decays 20× more
+  slowly. So the target climbs from 18 mm toward 51 mm, `height_bias` rails at +1.5, the chassis
+  lifts past 100 mm, and the body tips.
+- It is the 2026-09-13 ratchet again, with a different source of false grounding (the belly-ray
+  bug then, the boom's pitch error now).
+- P-e·c is worse because `stance_lift` now engages on genuinely planted legs, adding knee lift
+  to the same climb.
+- The GainEvolver is not the cause: its first mutation cannot land before ~t = 22 000, and the
+  climb starts earlier.
+
+**⚠ Correction to the lever-c entry above:** its "0 falls" was measured at 6000 ticks, and
+every tip here comes after t ≈ 12 000. Over a long horizon lever c raises tipping (3/4 seeds
+vs 1/4) through this ratchet. The stepping gain stands; the safety reading does not. **Any
+safety claim needs runs longer than the slowest integrator. 6000 ticks is shorter than this
+one's climb.**
+
+**This is not a refutation of `height_ground_gain`.** It is promoted `WORKING` (line 136: it
+made the setpoint discovered rather than asserted, and fixed belly grounding on the cad body).
+The ablation is a causal TEST. The lever is sound; its evidence is false. Two levers follow,
+one at a time:
+- **Grounding from an observation that sees it.** When the belly truly grounds, weight leaves
+  the feet. The foot-load channel (FSRs on the robot, contact normal force in the sim) measures
+  exactly that. Require low clearance **and** low total foot load, relative to its own running
+  level and not a fitted constant, before the ratchet climbs. The confound rides in the channel.
+- **An adaptive ceiling:** `chassis_h_max` / `stand_m` must not be pinned by the spawn pose.
+
+`height_windup_guard` (`NULL` on 2026-09-13, against a broken baseline) is a third candidate;
+its recorded re-use condition ("a ratchet recurs") is now met.
+
+**For the hardware:** P-e IS the robot's configuration (raw boom, this homeostat). As shipped,
+it should be expected to do this after several minutes. Fix before the first hardware run.
