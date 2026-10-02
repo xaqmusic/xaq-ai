@@ -1578,6 +1578,8 @@ private:
     std::vector<double> state_prior_c_weights_; // parallel: the weight on each prior index's C (feedback) descent only (empty = 1)
     std::vector<double> state_prior_target_gate_cos_; // parallel: > 0 = the target's gate is max(0, cos(x_j * this))^pow (radians per unit of x_j) instead of the RMS form
     double state_prior_target_gate_pow_ = 1.0;
+    std::vector<double> state_prior_target_gate_reach_; // parallel: the RANGE element of the turn-before-you-arrive gate (>= 9999 = none)
+    double state_prior_target_gate_reach_k_ = 2.0;
     std::vector<double> state_prior_target_gated_by_; // parallel: the state element whose SIZE scales each prior index's target (empty / >= 9999 = ungated)
     std::vector<double> state_prior_gated_by_; // parallel: the state element whose steadiness gates each prior index (empty / >= 9999 = ungated)
     float gate_mean_ = 1.0f;                   // diag: the mean pace gate over the gated indices, last tick

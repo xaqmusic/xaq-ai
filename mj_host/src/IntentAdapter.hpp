@@ -145,6 +145,10 @@ public:
     // --intent-fore-sense: where the head sits fore-aft (the measured synergy, in units of the motor's span) at the
     // FRONT of the walker's sense (the graph declares one more load slot).  Off = byte-identical.
     void set_fore_sense(bool on) { fore_sense_ = on; }
+    // --intent-range-sense (2026-10-01, the walk's dynamic range): the distance to the seek loop's target, in units of
+    // 2 m (capped at 1; 1 when the seek loop holds no target), right after the fore-aft slot (or first) -- so a prior's
+    // target can be gated by "turn before you arrive" (MotorEPMv2.state_prior_target_gate_reach).  Off = byte-identical.
+    void set_range_sense(bool on) { range_sense_ = on; }
     void feed_head_fore(double unit) { head_fore_ = unit; }
     std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
     // THE YAW RANGE (2026-10-01, --twist-yaw-range R): the walker's yaw command spans +-R rad/s (default the 1.0 the
@@ -368,6 +372,7 @@ private:
     int last_steer_ = 0;
     double yaw_range_ = kTwistRangeVyaw;
     bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
+    bool range_sense_ = false;
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;

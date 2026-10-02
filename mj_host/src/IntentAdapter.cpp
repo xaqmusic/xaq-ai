@@ -159,6 +159,10 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
         if (head_sense_) sense.insert(sense.begin(), {unit(head_g_[1]), unit(head_g_[2])});
         // --intent-fore-sense: where the head sits fore-aft, first of all (in front of the head sense if both are on)
         if (fore_sense_) sense.insert(sense.begin(), unit(head_fore_));
+        if (range_sense_) {   // the distance to the seek target, after the fore-aft slot
+            const double r = (seek_present_ && seek_value_ > 0.0 && seek_range_ > 0.0) ? seek_range_ : 2.0;
+            sense.insert(sense.begin() + (fore_sense_ ? 1 : 0), float(std::clamp(r / 2.0, 0.0, 1.0)));
+        }
         publish("sense", sense);
     }
     if (place) {

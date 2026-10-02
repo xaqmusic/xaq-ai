@@ -1235,3 +1235,31 @@ TEST(StatePrior, TargetGateCosActsAndDiffersFromRms) {
     EXPECT_GT(drc, 1e-4) << "the geometric gate differs from the RMS form";
     EXPECT_GT(dnc, 1e-4) << "the geometric gate acts";
 }
+
+// =============================================================================
+// 16. state_prior_target_gate_reach (2026-10-01): the turn-before-you-arrive gate acts on top of the target gate (the
+//     scripted joint 1 standing in for the range, joint 0 for the heading error); the ungated sentinel is identical.
+// =============================================================================
+TEST(StatePrior, TargetGateReachActsSentinelIdentical) {
+    auto pe = base_params();
+    pe["state_prior_indices"]   = std::vector<double>{-1.0};
+    pe["state_prior_targets"]   = std::vector<double>{0.4};
+    pe["state_prior_gain"]      = 0.8;
+    pe["state_prior_step_gain"] = 1.0;
+    pe["state_prior_target_gated_by"] = std::vector<double>{0.0};
+    pe["state_prior_target_gate_cos"] = std::vector<double>{3.14159265};
+    auto pu = pe; pu["state_prior_target_gate_reach"] = std::vector<double>{9999.0};
+    auto pr = pe; pr["state_prior_target_gate_reach"] = std::vector<double>{3.0}; pr["state_prior_target_gate_reach_k"] = 0.2;
+    Fixture E(pe), U(pu), R(pr);
+    double du = 0.0, dr = 0.0;
+    for (uint64_t t = 0; t < 400; ++t) {
+        const float lean = wobble(t);
+        E.run_tick(t, lean); U.run_tick(t, lean); R.run_tick(t, lean);
+        for (int j = 0; j < kMotors; ++j) {
+            du = std::max(du, double(std::fabs(E.accel(j) - U.accel(j))));
+            dr = std::max(dr, double(std::fabs(E.accel(j) - R.accel(j))));
+        }
+    }
+    EXPECT_EQ(du, 0.0) << "no reach element: byte-identical";
+    EXPECT_GT(dr, 1e-4) << "the reach gate acts";
+}
