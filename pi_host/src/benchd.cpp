@@ -125,6 +125,20 @@ double g_tof_offset_mm = 0.0;
 // for a third constant the robot has never measured (see ground_clearance_boom).
 double g_tof_boom_above_belly_m = 0.0648;   // = tof.mount_offset_mm, overridden from calib
 double g_tof_boom_z_m           = -0.070;   // 70 mm AFT; forward is +Z, so negative
+// ---- the brain's state feed (port doc SPEC §1/§2) ------------------------------------
+// ogma_host runs the brain; benchd owns the servos and the HAT's ADC, and the ADC's
+// select-then-read register protocol must have exactly ONE process on it -- two
+// interleaving would corrupt each other's reads.  So the brain's foot-load and commanded-
+// pulse inputs come from HERE, at the tick rate, on their own PUB socket.  One frame per
+// tick: "state " + JSON {seq, t, us[12] (driver output after slew, by HAT channel),
+// armed (bitmask), fsr[4] (A0-A3 = physical FL, FR, RL, RR; -1 on a failed read), fsr_ok}.
+// Raw channel order: the leg mapping (and the sim's leg-name mirror) belongs to the
+// consumer's calibration, not to the wire.  Read-only for the subscriber: this socket
+// carries no verbs, so it cannot become the brain-rate control path SPEC §1.1 forbids on
+// the calibration channel.  0 = off (default): no socket, no extra bus reads, byte-identical.
+int      g_state_pub_port = 0;
+void*    g_state_pub      = nullptr;
+uint64_t g_state_seq      = 0;
 // ⚠ DO NOT fsync() THE RECORD FROM record().  It was tried 2026-09-08 and MEASURED: at a
 // 1 s cadence, under the mutex the 50 Hz servo tick needs, an SD fsync costs ~80 ms and the
 // loop fell to 35.8 Hz with 54 overruns in 12 s (worst tick 419 % of the 20 ms budget, against
@@ -793,22 +807,46 @@ void tick_thread(State& S) {
         // land in tick_cost and tick_hz where it can be read.  Its own try/catch so an ADC
         // NACK is not filed as a servo one, and its own `us` so the read cost is measured
         // rather than assumed.
-        if (g_adc_poll_ms > 0 && ms >= S.adc_fast_next_ms) {
-            S.adc_fast_next_ms = ms + g_adc_poll_ms;
+        // The state feed reads the same four channels every tick, so when both are on the
+        // reads are shared: the bus never pays twice for one sample.
+        const bool want_fast  = g_adc_poll_ms > 0 && ms >= S.adc_fast_next_ms;
+        const bool want_state = g_state_pub != nullptr;
+        if (want_fast || want_state) {
+            if (want_fast) S.adc_fast_next_ms = ms + g_adc_poll_ms;
+            json a = json::array();
+            bool fsr_ok = true;
             try {
                 timespec r0, r1;
                 clock_gettime(CLOCK_MONOTONIC, &r0);
-                json a = json::array();
                 for (int c = 0; c < 4; ++c) a.push_back(S.hat.adc_raw(c));   // A0-A3, the feet
                 clock_gettime(CLOCK_MONOTONIC, &r1);
-                S.record("adc_fast", {{"a", a},
-                                      {"us", (r1.tv_sec - r0.tv_sec) * 1000000L
-                                             + (r1.tv_nsec - r0.tv_nsec) / 1000L}});
+                if (want_fast)
+                    S.record("adc_fast", {{"a", a},
+                                          {"us", (r1.tv_sec - r0.tv_sec) * 1000000L
+                                                 + (r1.tv_nsec - r0.tv_nsec) / 1000L}});
             } catch (const std::exception& e) {
+                fsr_ok = false;
                 ++S.bus_errors;
                 if (S.bus_errors % 50 == 1)
-                    S.record("bus_error", {{"where", "adc_fast"}, {"what", e.what()},
-                                           {"count", S.bus_errors}});
+                    S.record("bus_error", {{"where", want_fast ? "adc_fast" : "state"},
+                                           {"what", e.what()}, {"count", S.bus_errors}});
+            }
+            if (want_state) {
+                // A failed read publishes -1s with fsr_ok=false, never a stale or zero value:
+                // a confounded reading must say so in the channel.
+                json fsr = json::array();
+                for (int c = 0; c < 4; ++c)
+                    fsr.push_back(fsr_ok && c < int(a.size()) ? a[size_t(c)] : json(-1));
+                json us = json::array();
+                uint32_t armed = 0;
+                for (int c = 0; c < ServoDriver::N; ++c) {
+                    us.push_back(S.driver.current_us(c));
+                    if (S.driver.armed(c)) armed |= (1u << c);
+                }
+                const json f = {{"seq", ++g_state_seq}, {"t", ms}, {"us", us}, {"armed", armed},
+                                {"fsr", fsr}, {"fsr_ok", fsr_ok}};
+                const std::string msg = "state " + f.dump();
+                zmq_send(g_state_pub, msg.data(), msg.size(), ZMQ_DONTWAIT);   // drops, never stalls
             }
         }
         if (S.driver.watchdog_tripped()) { S.armed_ch = -1; S.end_cal("watchdog"); }   // after a rescue has landed
@@ -1149,6 +1187,7 @@ int main(int argc, char** argv) {
         else if (a == "--r-shunt") { g_r_shunt = std::atof(argv[i + 1]); g_r_shunt_override = true; }
         else if (a == "--tof-offset") { g_tof_offset_mm = std::atof(argv[i + 1]); g_tof_override = true; }
         else if (a == "--normal-slew") g_normal_slew_us = std::max(1, std::atoi(argv[i + 1]));
+        else if (a == "--state-pub") g_state_pub_port = std::max(0, std::atoi(argv[i + 1]));
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     // ---- fitted constants: the calib FILE is the source, flags are the override ----
@@ -1232,6 +1271,20 @@ int main(int argc, char** argv) {
         zmq_bind(pub, ("tcp://*:" + std::to_string(pub_port)).c_str()) != 0) {
         std::fprintf(stderr, "benchd: bind failed: %s\n", zmq_strerror(zmq_errno())); return 1;
     }
+    if (g_state_pub_port > 0) {
+        void* sp = zmq_socket(ctx, ZMQ_PUB);
+        int shwm = 8; zmq_setsockopt(sp, ZMQ_SNDHWM, &shwm, sizeof shwm);
+        if (zmq_bind(sp, ("tcp://*:" + std::to_string(g_state_pub_port)).c_str()) != 0) {
+            std::fprintf(stderr, "benchd: state-pub bind :%d failed: %s\n", g_state_pub_port,
+                         zmq_strerror(zmq_errno()));
+            return 1;
+        }
+        std::lock_guard<std::mutex> lk(S.m);   // the tick thread reads it under the lock
+        g_state_pub = sp;
+    }
+    std::printf("ogma_benchd: state feed %s\n", g_state_pub_port > 0
+                ? ("ON  pub :" + std::to_string(g_state_pub_port) + "  (50 Hz: us[12], fsr[4])").c_str()
+                : "off");
     std::printf("ogma_benchd: body=%s  rep :%d  pub :%d  vbat %.2f V  log %s\n", body.c_str(), rep_port, pub_port,
                 S.hat.battery_volts(), log_path.c_str());
     std::fflush(stdout);

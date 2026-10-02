@@ -1621,3 +1621,58 @@ have — and it is exactly what the (d) test is meant to measure properly once t
   top plate as CAD's "Top plate / battery" label suggests. Visual confirmation would firm up G1.
 - `KNEE_DROP_SIGN` (`:289`) has **zero use sites** — dead code. Out of Phase 0 scope
   deliberately (no opportunistic cleanup while the sprawl PR is open); revisit after the merge.
+
+---
+
+## SPEC — Brain input contract for P-e, and what the robot can publish (2026-10-02)
+
+The config being ported is **P-e** (`..._native_measured__tofboom__fsrleg.json`): FSR leg,
+raw boom ToF, `MAX_SERVO_SPEED` 3.668 rad/s. This is every input it reads from outside the
+graph, how the sim produces it, and the robot's source. Line refs are into
+`picrawler_body.gd` (pb), `MotorEPMv2.cpp` (M) and `GainEvolver.cpp` (GE) as of `3a4f453`.
+⚠ **Several consumers update per MESSAGE, not per tick** (MotorEPMv2's height EMA and running
+max, and its heading integral at 1/60 per `imu` message), so the robot must publish each of
+these **exactly once per 50 Hz tick**.
+
+| topic | read by (what) | P-e sim source | robot source | status |
+|---|---|---|---|---|
+| `joints` [12, joint-major] | Bridge, both body-pose EPMs, MotorPlanner | **achieved** hinge angle ÷1.4 / ÷1.4 / (knee+1.6)÷1, ±1 (pb ~6753) | ServoForwardModel (α 0.2) of the commanded angle, from benchd's `current_us` via the servo map at **545.2 µs/rad**, same normalisation. **= the sim's `honest_joints` form** | needs benchd feed ✅ (built) + port |
+| `imu` [4] | MotorEPMv2: [2] fwd_v → commit/height fade; [3] yaw rate → bearing hold | world yaw, world fwd_v (m/s), world ω_y (pb ~6420) | honest form: ego heading (gyro dead-reckoned), `stride_v.y`, body-up ω. **= `honest_imu`** | port |
+| `gyro` [3] | GainEvolver [1] → turn factor | body ω ÷π (exact physics) | ICM-20948 `gyro_body` ÷π | port (trivial) |
+| `stride_v` [2] | GainEvolver [1] → flow term | shared `StrideV` (stance-FK on servo-lag FK, accel, foot_load ≥ 0.2) | the same shared `StrideV`, with the FSR load | port |
+| `foot_contact` [4] | MotorEPMv2 swing tuck + rear landing (**control**); GainEvolver touchdowns | whole-shank physics contact | FSR counts ≥ the touchdown threshold (wiring doc §5.7: 30 g ≈ 1536 counts) | needs feed ✅ + port |
+| `foot_load` [4] | GainEvolver: 12-tick max after touchdown vs 0.05 | EMA(0.15 @ 240 Hz) of normal impulse ÷ body weight per substep | FSR counts → grams (§5.7 table, interpolated) ÷ 598 g | needs feed ✅ + port |
+| `joint_torque` [12] | GainEvolver energy term (w 1.0) | PD model of **achieved** angle & velocity (pb ~9858) | **no sensor on hobby servos** | ⚠ DECISION |
+| `feet_y_gravity_cmd_imu` [4] | MotorEPMv2: sign(value − own EMA) gates `stance_lift` | FK of the **zero pose** · `up_est` − L3/2 (`servo_targets` stays 0: ledger 2026-10-02). Closed form: `0.09936·(sₓ·up.x + s_z·up.z) − 0.04984·up.y − 0.0435` | the same closed form from the fused up vector, to MATCH P-e | port (parity with a known quirk) |
+| `ground_clearance` [1] | MotorEPMv2 height homeostat | raw boom, `clamp(max(0, d − 0.103)/0.06)`, every tick, miss → 1.0 | published, offset 64.8 mm; **valid readings only, ~30 Hz** | ⚠ rate/hold mismatch |
+| `upright` [1] | GainEvolver falls, tilt_sd | **exact** basis.y.y | fused `up.y` (already published). **= `honest_upright`** | published |
+| `distress` [1] | MotorEPMv2 panic; MotorPlanner plan cut | **world XZ displacement** × exact-tilt perch accumulator | no world position | ⚠ DECISION |
+| `tilt` [4] | MotorEPMv2 by **default** → coord-fitness wobble penalty | **not published** in P-e | ogma_host publishes it | ⚠ mismatch: set `tilt_topic: ""` |
+| `events.miss` / `reset` | MotorEPMv2 reset mask (any intensity) | **legacy reward shaping**: fires on ≥ 39 % of ticks at 3.668 (world height, world speed) | none | ⚠ DECISION — ledger 2026-10-02 |
+| `target_compass`, `lateral_v` | MotorEPMv2 | world-derived | — | inert in P-e; omit |
+
+**The gate before hardware is a sim arm whose inputs are all ones the robot can publish
+("P-e honest")**, A/B'd against P-e and watched in the UI. It needs:
+1. `honest_joints`, `honest_imu`, `honest_upright` = 1 (all exist, all gain-0).
+2. `tilt_topic: ""` on MotorEPMv2 in both sim and robot (byte-identical in the sim, which never
+   publishes `tilt` in P-e).
+3. **Events:** the robot cannot emit the reward-shaping misses. Options: switch them off in the
+   sim (`stability_gain` / `height_penalty_gain` = 0), or keep them as a robot-side scaffold
+   computed from what it can sense. The fall miss can use fused tilt; the world-height and
+   world-speed ones cannot be reproduced honestly.
+4. **`distress`:** needs an honest form (e.g. stride-odometry displacement × fused tilt), or
+   panic off.
+5. **`joint_torque`:** zeros (energy term inert), or a legal proxy. The INA219 on the servo
+   rail (Mod C, not fitted) would give a whole-rail current, not per joint.
+6. `ground_clearance`: publish every tick, holding the last valid reading (and saying so), so
+   the per-message EMA keeps the sim's time constant.
+
+**benchd state feed (built 2026-10-02, untested on hardware).** `--state-pub <port>` (default
+off) publishes `"state " + {seq, t, us[12], armed, fsr[4], fsr_ok}` on its own PUB socket
+every 50 Hz tick. The fields:
+- `us` = driver output after slew, in HAT channel order.
+- `fsr` = A0–A3 = physical FL, FR, RL, RR; −1 with `fsr_ok:false` on a failed read.
+
+The FSR reads are shared with `adc.rate` when both are on. The socket carries no verbs, so it
+cannot become the brain-rate control path §1.1 forbids. The leg mapping, including the sim's
+leg-name mirror, belongs to `ogma_host`'s calibration.

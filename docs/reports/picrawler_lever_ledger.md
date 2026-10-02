@@ -5664,3 +5664,59 @@ Open, in order:
   tilt at n ≥ 8, long runs);
 - (b) the adaptive height ceiling (`stand_m` / `chassis_h_max` pinned by the spawn pose);
 - (c) the remaining full-slew command jitter.
+
+### ★★★ 2026-10-02 — P-e IS NOT PORTABLE AS-IS: legacy reward events reset the motor state on ≥39 % of ticks, plus a windup-guard NULL
+
+**1. `height_windup_guard` = 1 on P-e — `NULL`, leaning `REGRESSION` (n=8 × 24 000 ticks,
+3.668 rad/s, arena difficulty 0.3).**
+
+| | control | guard |
+|---|---|---|
+| resets (seeds) | 2 (1/8) | 3 (2/8) |
+| bias railed | 0.6 % | 4.7 % |
+| `height_k_eff` max | 0.70 | 0.65 |
+| tilt mean | 0.11 | 0.22 |
+| displacement | 10.2 ± 0.3 | 9.4 ± 3.6 (one seed collapsed, 0.61 m) |
+
+The guard lowers the ratchet slightly, but the integrator still rails, more often than the
+control. It does not address windup on this body. Re-use context: an anti-windup on the
+integrator itself (`height_bias`), not on the setpoint ratchet. P-e's own tip rate is ~1 in
+8 seeds per 24 000 ticks.
+
+**2. ★ Hidden dependency: legacy reward-shaping events drive MotorEPMv2's reset mask.**
+- P-e's metadata sets `stability_gain` 0.05 (also `height_penalty_gain` 0.05,
+  `target_height` 0.085).
+- With `stability_gain` > 0 the body publishes `events.miss` on **every tick** where
+  `chassis_y / STANDING_CHASSIS_Y > 0.5` and world 3-D speed > 0.05 m/s
+  (`picrawler_body.gd` ~8045).
+- MotorEPMv2 treats ANY `miss` or `reset` as a respawn (`MotorEPMv2.cpp:1206-1218`). It zeroes
+  `heading_bearing_` (the gain-7.0 bearing hold), `fwd_progress_ema_` (commit, and the height
+  fade), commit, flow, the stuck state, and every per-leg step clock.
+- Measured lower bound from the traces (forward speed only, which understates 3-D speed):
+  **≥ 39 % of ticks at 3.668 rad/s, ≥ 69 % at 6.0. The median gap between resets is 0 ticks.**
+- So in the sim those states almost never accumulate while the body walks.
+- It is an RL-era reward event (CLAUDE.md §5.1 prohibits reward shaping), computed from world
+  height and world speed. **The robot cannot emit it.** On hardware the heading hold, commit
+  and height fade would accumulate freely: a different controller than the one validated.
+- The same reset path also takes the height-miss and fall-miss events (world height, exact
+  tilt).
+
+**3. Other sim-truth inputs in P-e** (full per-topic contract in the port doc, "Brain input
+contract"):
+- `joints` = achieved hinge angles (`honest_joints` off).
+- `imu` = world yaw, world forward velocity and world yaw rate (`honest_imu` off).
+  MotorEPMv2's commit (0.030 m/s) and height fade (0.025 m/s) thresholds are on the
+  true-velocity scale.
+- `upright` = exact basis (`honest_upright` off).
+- `joint_torque` = a PD model of achieved angle and velocity.
+- `distress` = world XZ displacement × exact tilt.
+- `foot_contact` = whole-shank physics contact.
+- `foot_load` = physics normal impulse.
+- Also: `tilt` is published by `ogma_host` but not by the P-e sim, and MotorEPMv2 subscribes
+  by DEFAULT, so on the robot it would switch on a coord-fitness wobble penalty the sim never
+  had.
+
+**Consequence:** the configuration the operator approved in the UI has been validated only
+with inputs the robot cannot produce. The gate before hardware is a sim arm in which every
+input is one the robot can actually publish ("P-e honest"), A/B'd against P-e and watched in
+the UI. The decisions it needs are listed in the port doc.
