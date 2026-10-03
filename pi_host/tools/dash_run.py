@@ -208,6 +208,9 @@ def preflight(io, pose: str) -> list[Check]:
     out.append(Check(st.get("mode") == "bench",
                      f"benchd in bench mode" if st.get("mode") == "bench"
                      else f"benchd is in '{st.get('mode')}' mode — another run may be live"))
+    out.append(Check(not st.get("stopped"),
+                     "benchd not STOPPED" if not st.get("stopped")
+                     else f"benchd is STOPPED ({st.get('stop_why')}) — SPACE in monitoring resumes, then R re-checks"))
     imu = st.get("imu") or {}
     out.append(Check(bool(imu.get("ok")) and bool(imu.get("up_fused")),
                      "benchd has attitude (the tilt guard can see)" if imu.get("ok")
