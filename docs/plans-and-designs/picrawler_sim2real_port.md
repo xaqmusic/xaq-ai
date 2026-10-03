@@ -1812,3 +1812,34 @@ sustained rule caught a REAL sustained overload, which is what it is for, and ig
 - The rail fell to 5.6–5.8 V (below the HAT's 6.0 V minimum) at a captured servo-branch peak
   of only 1.33 A (10 Hz samples). That is worth checking against the bench supply's current
   limit before judging brownout behaviour on it.
+
+### Held-pose shadow run (2026-10-03) — PASSED, with three findings
+
+`ogma_benchd --state-pub 5592` (12/12 seeded), `pose_hold stand` (ramped, no vbat dips), and
+`ogma_host --imu --brain-inputs --dump-inputs 250`, P-e·h0, 3000 ticks.
+- **3000/3000 ticks published.** 2990 frames, 2 superseded, 1944 ToF readings, 0 overruns.
+  Brain tick 1.5 % of budget (~0.3 ms).
+- **Inputs vs the still standing pose:**
+  - foot_contact [1,1,1,1];
+  - foot_load sum 1.03× body weight at tick 0, mirrored mapping checked against the raw counts;
+  - stride_v |v| < 0.001 m/s;
+  - heading drift 0.003 rad in 55 s;
+  - zero-pose foot heights −0.088…−0.098 (−0.093 level, ±tilt);
+  - upright 0.9994, distress 0;
+  - hips ≈ 0 (physical FL hip1 75 µs off origin → −0.098).
+
+**Findings:**
+1. **FSR creep, first measurement.** Counts rose over 55 s at constant load (physical FL 1677 →
+   2078, RL 1923 → 2120). Load sum went 1.03 → 1.39× body weight. The light feet (0.06–0.17)
+   are drifting toward the stride stance gate at 0.2. Wiring doc §8 item 5 asked for this.
+2. **Knees read +1, saturated, in `stand`.** The sim's own normalisation `clamp(knee + 1.6)`
+   saturates above −0.6 rad, and `stand` ≈ the construction pose (knee hinge ≈ 0). The sim
+   spawns the same way, so this is parity, but in `stand` the brain sees no knee motion until a
+   knee flexes past −0.6 rad.
+3. **The deadman did not fire on release.** Two `picrawler_dash.py` instances on the Pi poll
+   `status` at ~2 Hz, and benchd refreshes `last_client_ms` on EVERY verb. PROTOCOL.md says
+   only `ping` feeds the deadman. So any open dashboard keeps armed servos alive with no
+   controlling client. The robot was left standing on the HAT's held pulses, unsupervised,
+   until rescue was commanded by hand. ⚠ Nine bench tools hold poses while polling only
+   `status`, so making `status` non-feeding needs those tools to `ping`. Operator decision
+   pending.
