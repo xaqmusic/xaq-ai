@@ -462,6 +462,27 @@ TEST(ServoDriver, ChangingTheLagNeverJumpsTheOutput) {
     EXPECT_EQ(d.last_sent_us(0), out);
 }
 
+TEST(ServoDriver, AfterAnMcuResetArmedChannelsGetTheirTimerReprogrammedBeforeAnyPulse) {
+    // Robot, 2026-10-03: a HAT brownout reset the MCU mid-run; the driver kept writing pulses
+    // to still-armed channels whose timers the reset had unprogrammed — garbage PWM, servos
+    // to their end stops.  The timer must be set up again before the first pulse after it.
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(5, 1500); d.tick();                  // ch 5 is timer group 1
+    ASSERT_TRUE(d.armed(5));
+    d.forget_timers();                             // what benchd does after mcu->reset()
+    bus.writes.clear();
+    d.tick();                                      // still armed: writes its pulse...
+    ASSERT_FALSE(bus.writes.empty());
+    int psc = -1, chn = -1;
+    for (int i = 0; i < int(bus.writes.size()); ++i) {
+        if (bus.writes[size_t(i)][0] == RobotHat::REG_PSC + 1 && psc < 0) psc = i;
+        if (bus.writes[size_t(i)][0] == RobotHat::REG_CHN + 5 && chn < 0) chn = i;
+    }
+    EXPECT_GE(psc, 0) << "timer group 1 was never re-programmed";
+    EXPECT_GE(chn, 0);
+    EXPECT_LT(psc, chn) << "...and only after its timer is programmed again";
+}
+
 TEST(ServoDriver, WatchdogLimpsWhenCommandsStop) {
     FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 5, 50.0});
     d.command(2, 1500);

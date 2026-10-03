@@ -436,9 +436,19 @@ class RunController:
         return True
 
     def _running(self) -> None:
+        hat0 = None
         while not self._end.is_set():
             f = self._status()
             if f:
+                # benchd disarms everything and latches STOP on a HAT MCU reset (servo-current
+                # brownout); say so loudly — the robot just went slack, and only E recovers it.
+                hr = f.get("hat_resets")
+                if hr is not None:
+                    if hat0 is None:
+                        hat0 = hr
+                    elif hr > hat0:
+                        hat0 = hr
+                        self._ev("HAT RESET (servo-current brownout) — all servos disarmed, STOPPED. E ends the run")
                 imu = f.get("imu") or {}
                 tof = f.get("tof") or {}
                 up = imu.get("up_fused")

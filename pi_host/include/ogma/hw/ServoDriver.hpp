@@ -103,6 +103,16 @@ public:
     // After an MCU reset every timer is unprogrammed: the next command() re-programs it.
     // The reset also stops the PWM, so the last-sent pulses no longer describe the servos.
     void forget_timers() { timer_ready_.fill(false); known_.fill(0); }
+    // ⚠ A TIMER IS RE-PROGRAMMED WHENEVER IT IS NOT READY — ARMED CHANNELS INCLUDED.  It was
+    // programmed only when a channel was first ARMED, so after forget_timers() (an MCU
+    // reset) every still-armed channel had its pulse written into an unprogrammed timer:
+    // garbage PWM, servos driven to their end stops.  On the robot, 2026-10-03, a HAT
+    // brownout mid-run threw the legs into a "bad pose" and later the hip1s to an extreme.
+    void ensure_timer(int ch) {
+        if (timer_ready_[ch]) return;
+        hat_.setup_servo_timer(ch);
+        for (int c = (ch / 4) * 4; c < (ch / 4) * 4 + 4; ++c) timer_ready_[c] = true;
+    }
 
     // ⚠ THE FIRST COMMAND ON A CHANNEL MUST SLEW FROM WHERE THE SERVO IS, NOT JUMP.
     // An unarmed channel has no slew history, and command() used to start it AT the target —

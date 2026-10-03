@@ -23,11 +23,8 @@ void ServoDriver::command(int ch, int us) {
         current_[ch] = known_[ch] > 0 ? std::clamp(known_[ch], lim_[ch].min_us, lim_[ch].max_us)
                                       : clamped;
         out_[ch] = current_[ch];
-        if (!timer_ready_[ch]) {
-            hat_.setup_servo_timer(ch);
-            for (int c = (ch / 4) * 4; c < (ch / 4) * 4 + 4; ++c) timer_ready_[c] = true;
-        }
     }
+    ensure_timer(ch);
     target_[ch] = clamped;
     armed_[ch] = true;
     any_armed_ = true;
@@ -53,6 +50,7 @@ void ServoDriver::tick() {
             out_[ch] += lag_alpha_ * (double(current_[ch]) - out_[ch]);
             pulse = int(std::lround(out_[ch]));
         }
+        ensure_timer(ch);                      // a HAT reset unprograms it while armed
         hat_.set_pulse_us(ch, pulse);
         known_[ch] = pulse;
         if (current_[ch] <= lim_[ch].min_us || current_[ch] >= lim_[ch].max_us) ++at_limit_ticks_[ch];

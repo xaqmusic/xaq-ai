@@ -219,6 +219,9 @@ struct State {
     int64_t cal_until_ms = 0;
     int64_t last_client_ms = 0;
     int  watchdog_trips = 0;
+    int     hat_resets = 0;           // HAT MCU resets detected (brownout or ours)
+    int64_t last_hat_reset_ms = -100000;
+    int64_t last_mcu_reset_ms = -100000;   // when benchd itself last reset the MCU
     int  overruns = 0;
     int  bus_errors = 0;
     json last_adc = json::array({0, 0, 0, 0, 0});
@@ -631,6 +634,31 @@ struct State {
         return "";
     }
 
+    // ⚠ A HAT MCU RESET IS A FAULT, NOT A LOG LINE (robot, 2026-10-03).  Servo current spikes of
+    // 2.4-3.0 A browned out the HAT's own microcontroller mid-run.  Its servo timers came back
+    // unprogrammed, the driver kept writing pulses into them, and the servos were driven to their
+    // end stops — a "bad pose" 4 s into the run, and later every hip1 at an extreme.  So on a
+    // detected reset: forget the timers (ServoDriver re-programs a timer before its next pulse)
+    // and DISARM every channel, so nothing is written and the servos go unpowered rather than
+    // being driven anywhere; in a brain mode, also latch STOP (the brain's next command would
+    // otherwise re-arm a channel at full speed from an unknown position).  The operator recovers:
+    // E / a pose in bench mode re-arms, staggered.  Rate-limited: one reset is one event.
+    void on_hat_reset(const char* why) {
+        const int64_t now = mono_ms();
+        if (now - last_hat_reset_ms < 2000) return;
+        last_hat_reset_ms = now;
+        ++hat_resets;
+        pose_queue.clear();
+        if (pose_move_active) { pose_move_active = false; driver.set_slew_us_per_tick(g_normal_slew_us); }
+        rescue_until_ms = 0;
+        armed_ch = -1;
+        driver.forget_timers();
+        try { driver.limp_all(); } catch (...) {}
+        if (brain_mode()) latch_stop("HAT reset");
+        record("hat_reset", {{"why", why}, {"count", hat_resets}, {"mode", ogma::hw::brain::mode_name(mode)},
+                             {"action", "timers forgotten, all channels disarmed"}});
+    }
+
     void rescue(const char* why) {
         // In a brain mode a rescue also takes the servos from the brain until the operator
         // resumes: low battery, the rail guard and a lost stream must not hand control
@@ -713,7 +741,7 @@ struct State {
         try {
             for (int c = 0; c < RobotHat::N_ADC; ++c) adc.push_back(hat.adc_raw(c));
             const double v = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
-            if (v > 9.0) { record("adc_garbage", {{"vbat", v}}); adc = last_adc; }   // post-reset garbage
+            if (v > 9.0) { record("adc_garbage", {{"vbat", v}}); adc = last_adc; on_hat_reset("adc garbage (post-reset signature)"); }   // post-reset garbage
             else last_adc = adc;
         } catch (const std::exception& e) {
             ++bus_errors; adc = last_adc;                          // keep the last good reading
@@ -832,7 +860,7 @@ struct State {
                 {"stopped", stopped}, {"stop_why", stopped ? json(stop_why) : json(nullptr)},
                 {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
                 {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
-                {"servo_lag_alpha", driver.output_lag()},
+                {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
@@ -1087,9 +1115,14 @@ void tick_thread(State& S) {
             // the operator disconnected mid-calibration (2026-08-28).
             ++S.bus_errors;
             if (S.bus_errors % 50 == 1) S.record("bus_error", {{"where", "tick"}, {"what", e.what()}, {"count", S.bus_errors}});
-            if (S.bus_errors % 20 == 0 && S.mcu && S.mcu->ok()) {          // SunFounder's own recovery for a stuck MCU
-                S.mcu->reset(); S.driver.forget_timers();
+            // SunFounder's own recovery for a stuck MCU.  ⚠ RATE-LIMITED to one per 5 s: it fired
+            // every 20 bus errors, and during a brownout (2026-10-03) that was ~20 resets in 4 s,
+            // each restarting an MCU that was still coming up.
+            if (S.bus_errors % 20 == 0 && S.mcu && S.mcu->ok() && ms - S.last_mcu_reset_ms >= 5000) {
+                S.last_mcu_reset_ms = ms;
+                S.mcu->reset();
                 S.record("mcu_reset", {{"why", "persistent bus errors"}, {"count", S.bus_errors}});
+                S.on_hat_reset("benchd reset the MCU after persistent bus errors");
             }
         }
         // ---- fast ADC sampling ------------------------------------------------
