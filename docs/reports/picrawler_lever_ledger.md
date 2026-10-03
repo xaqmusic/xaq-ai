@@ -6070,3 +6070,35 @@ the operator saw, at the plant instead of the speed cap.
 **Re-use context:** a brain retuned at the lower speed (frozen gains were settled at 3.668), or the
 operator's confidence-gated speed (slow while the brain knows little, rising with confidence),
 which is a different mechanism from a fixed lower cap.
+
+### ★★ 2026-10-03 — 60 s BRAIN RUN ON THE ROBOT (lag 0.2): the belly comes up briefly, then settles on the floor; the sim never does
+
+**Run.** P-e·h0, `--servo-lag-alpha 0.2`, fresh brain, 60 s, safety box, battery, started from the
+**rescue pose**. Belly from the boom ToF at 50 Hz (100 % valid). Clean run: the IMU ended within
+0.28° of the accelerometer, 4196 commands sent, servo current 0.37 A mean / 2.06 A peak, A4 ≥ 7.12 V.
+
+| window | belly median (mm) | p90 | >10 mm | foot_load sum | contact | hip2 on the line (rad) |
+|---|---|---|---|---|---|---|
+| 0–10 s | 14.2 | 30.2 | 62 % | 1.76 | — | (from rescue, −1.8) |
+| 10–20 s | 5.2 | 20.2 | 32 % | 0.35 | — | |
+| 20–40 s | 3.2 | ~7 | 1–3 % | 0.05–0.08 | 0.4 / 4 | −0.67 |
+| 40–60 s | ~3 | 7–13 | 5–18 % | 0.16–0.94 | 1.2 / 4 | −0.70 |
+
+**The sim, same config, its first 60 s (6 seeds):** belly median 14–26 mm in EVERY 10 s window, hip2
+target +0.04 / achieved −0.08 rad, knee −0.71, foot_load sum 0.96, contact 3.5 / 4.
+
+**Where the robot departs:** the knees match the sim (−0.68 vs −0.71 rad); **hip2 does not**. The
+robot holds hip2 near −0.65 rad (legs pitched up, feet mostly off the floor, belly down) where the
+sim sits near 0. Nothing was at the envelope (0 % at min/max on every joint type in the last 40 s),
+so this is the brain's command, not a clamp.
+
+**Leading hypothesis — the start state, not the plant.** The sim spawns STANDING (belly ~26 mm,
+hip2 ≈ 0) and auto-resets to standing after a fall, so this brain has never had to raise its belly
+from the floor. The robot started in the rescue pose (hip2 −1.8 rad, folded). The brain brought hip2
+two-thirds of the way back and settled there. **Decisive test:** the same run started from the
+`stand` pose. If it holds the belly up from stand, the gap is stand-up-from-floor (a capability
+the sim never trained). If it sinks from stand too, it is a sim-to-real gap in holding posture.
+`IN_FLIGHT`.
+
+Note: `feet_y` reads a constant −0.093 m on the robot, as designed — with `cmd_fk_source = 0` it is
+the zero-pose foot height rotated by tilt, not the commanded FK (see the feet_y oracle doc).
