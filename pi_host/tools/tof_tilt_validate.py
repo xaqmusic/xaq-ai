@@ -25,6 +25,11 @@ STEPS = (0, 40, 80, 120, -40, -80, -120, 0)
 PITCH_ABORT_DEG, I_ABORT_A = 22.0, 2.6
 
 def rpc(verb, _allow_err=False, **kw):
+    if verb == "status":
+        # benchd: read-only verbs no longer feed the deadman (2026-10-03; PROTOCOL.md says
+        # only ping does).  This tool holds poses between status polls, so it pings to keep
+        # the hold alive EXPLICITLY -- before, the status poll did it by accident.
+        rpc("ping")
     s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 25000); s.setsockopt(zmq.LINGER, 0)
     s.connect(ENDPOINT); s.send_string(json.dumps({"verb": verb, **kw}))
     try: r = json.loads(s.recv_string())

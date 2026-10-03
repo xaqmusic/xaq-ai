@@ -18,6 +18,11 @@ N = int(sys.argv[1]) if len(sys.argv) > 1 else 20
 _ctx = zmq.Context()
 
 def rpc(verb, **kw):
+    if verb == "status":
+        # benchd: read-only verbs no longer feed the deadman (2026-10-03; PROTOCOL.md says
+        # only ping does).  This tool holds poses between status polls, so it pings to keep
+        # the hold alive EXPLICITLY -- before, the status poll did it by accident.
+        rpc("ping")
     s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 8000); s.setsockopt(zmq.LINGER, 0)
     s.connect(ENDPOINT); s.send_string(json.dumps({"verb": verb, **kw}))
     try:    return json.loads(s.recv_string())

@@ -32,6 +32,11 @@ def rpc(verb, _allow_err=False, **kw):
     moved -- through a separation test and three ceiling sweeps, all of which reported clean
     results measured on a stationary robot.  A harness that ignores error replies cannot detect
     that it is doing nothing."""
+    if verb == "status":
+        # benchd: read-only verbs no longer feed the deadman (2026-10-03; PROTOCOL.md says
+        # only ping does).  This tool holds poses between status polls, so it pings to keep
+        # the hold alive EXPLICITLY -- before, the status poll did it by accident.
+        rpc("ping")
     s = _ctx.socket(zmq.REQ); s.setsockopt(zmq.RCVTIMEO, 25000); s.setsockopt(zmq.LINGER, 0)
     s.connect(ENDPOINT); s.send_string(json.dumps({"verb": verb, **kw}))
     try:    r = json.loads(s.recv_string())

@@ -58,7 +58,7 @@ channel, and the deadman belongs to the calibration channel only. In `bench`:
 
 | verb | args | reply extras | notes |
 |---|---|---|---|
-| `ping` | — | `t_mono_ms` | feeds the deadman |
+| `ping` | — | `t_mono_ms` | feeds the deadman. ⚠ Read-only verbs (`status`, `pose.get`, `pose.list`, `pose.save`, `pose.delete`, `mark`, `adc.rate`) do NOT (since 2026-10-03; before that every verb did, so an open dashboard polling `status` kept armed servos alive with no controlling client). A client that holds a pose must `ping` |
 | `status` | — | the full telemetry frame + `map` | |
 | `limp` | — | `rescue_pose` | command the `rescue` pose on all 12 (see above); ends any widened state |
 | `servo.set` | `ch` 0–11, `us` | `clamped_us` | arms `ch`; clamped to its current limits; slewed by the driver |

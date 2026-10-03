@@ -37,6 +37,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <set>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -1004,7 +1005,16 @@ bool load_map(State& S, const std::string& path, std::string& why) {   // caller
 json handle(State& S, const json& req) {   // caller holds m
     const std::string verb = req.value("verb", "");
     const int64_t now = mono_ms();
-    S.last_client_ms = now;
+    // ⚠ ONLY A CONTROLLING CLIENT FEEDS THE DEADMAN.  This refreshed on EVERY verb, so a
+    // read-only observer — picrawler_dash.py polling `status` at 2 Hz — kept armed servos
+    // alive with no controlling client at all: on 2026-10-03 a released `stand` never went
+    // to rescue and the robot was left standing, unsupervised, on the HAT's held pulses.
+    // PROTOCOL.md always said `ping` feeds it.  Read-only verbs now do not; `ping` and every
+    // verb that commands or reconfigures the robot still do.  Tools that hold a pose while
+    // polling `status` were updated to `ping` explicitly.
+    static const std::set<std::string> kObserverVerbs = {
+        "status", "pose.get", "pose.list", "pose.save", "pose.delete", "mark", "adc.rate"};
+    if (!kObserverVerbs.count(verb)) S.last_client_ms = now;
     auto ok  = [](json extra = json::object()) { extra["ok"] = true; return extra; };
     auto err = [](const std::string& e) { return json{{"ok", false}, {"error", e}}; };
     auto ch_of = [&](const json& r, int& ch) -> bool { ch = r.value("ch", -1); return ch >= 0 && ch < ServoDriver::N; };

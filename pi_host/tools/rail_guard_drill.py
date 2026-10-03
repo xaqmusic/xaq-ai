@@ -15,6 +15,11 @@ GUARD_MS = 5000
 _ctx = zmq.Context()
 
 def rpc(verb, **kw):
+    if verb == "status":
+        # benchd: read-only verbs no longer feed the deadman (2026-10-03; PROTOCOL.md says
+        # only ping does).  This tool holds poses between status polls, so it pings to keep
+        # the hold alive EXPLICITLY -- before, the status poll did it by accident.
+        rpc("ping")
     # A fresh REQ per call: REQ enforces strict send/recv alternation and a single
     # timeout would poison a reused socket for every later check in the drill.
     s = _ctx.socket(zmq.REQ)
