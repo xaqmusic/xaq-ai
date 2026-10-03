@@ -5889,3 +5889,34 @@ Receipts checked.
 
 **Next candidate:** P-e·h + `height_homeo_gain` 0 (homeostat off). It tipped 0/4 at 12 000
 ticks, but has never had a long run.
+
+### ★★★★ 2026-10-02 — OVER 100k TICKS THE HEIGHT HOMEOSTAT IS WHAT TIPS THIS BODY — including in P-e itself; off, the robot-faithful brain is the safest config measured
+
+**Verdict: signal, n=8 × 100 000 per arm (every seed completed), gains frozen, 3.668 rad/s,
+arena difficulty 0.3.** Receipts checked (P-e: `honest[...]` off; the others on).
+
+| | resets (seeds) | per 100k | bias railed | stuck tipped | tilt mean | belly median | belly < 3 mm |
+|---|---|---|---|---|---|---|---|
+| **P-e** (sim-only inputs) | **67 (7/8)** | **8.4** | 13.7 % | 2 | 0.40 | 32 mm | 0.7 % |
+| P-e·hr (robot inputs, ratchet off) | 10 (5/8) | 1.25 | 2.4 % | 1 | 0.22 | 22 mm | 3.5 % |
+| **P-e·h0** (robot inputs, homeostat off) | **2 (2/8)** | **0.25** | 0 % | 0 | 0.16 | 26 mm | 0.5 % |
+
+**Findings:**
+- **P-e is not safe over a long horizon.** The 24 000-tick runs (1/8 tipped) were shorter than
+  the windup, and so was the operator's UI watch, which also ran a different controller (the
+  UI-only shaping events, entry above). A safety claim needs a run longer than the slowest integrator: 100k ticks shows
+  what 24k could not.
+- **On the robot's real inputs, switching the height homeostat off gives the lowest tip rate
+  measured:** 33× below P-e, 5× below P-e·hr. No seed got stuck. The belly rides HIGHER (26 mm)
+  with fewer near-ground samples than with the homeostat on.
+- **So the height homeostat, with or without its ratchet, is the destabiliser on this body
+  over long runs.** Its promotion (2026-08-27, `WORKING` signal) was cad body, corridor, 6000
+  ticks. Refuted in THIS context: FSR leg, robot servo speed, robot-faithful inputs, 100k ticks,
+  arena difficulty 0.3.
+- **Re-use context:** terrain. The homeostat exists to get the body over the hump (CLAUDE.md
+  §1, the belly ToF), and no terrain run has been made here. Also re-test it with an
+  anti-windup on `height_bias` itself.
+
+**Registered as P-e·h0.** Not promoted and not cleared for hardware. It needs the operator's
+watch, a terrain test, and the remaining safety items (servo jitter, the robot-side input port
+and the actuation path).
