@@ -3,7 +3,9 @@ extends Node3D
 ##
 ## Talks to ogma_benchd on the Pi through BenchClient (REQ verbs + CONFLATE'd telemetry).
 ## It speaks the CALIBRATION verb set only: there is no path from here to starting the
-## brain (port doc SPEC §1.1) and none may be added.  Everything a servo does goes
+## brain (port doc SPEC §1.1) and none may be added.  It can SEE the daemon's run mode and
+## STOP / resume the robot (SPACE, or the STOP button) — resume lifts a stop and nothing
+## else; the mode, and with it whether a brain may drive, is set on the robot.  Everything a servo does goes
 ## through the daemon's ServoDriver (clamp · slew · watchdog → pulse 0 · time-at-limit).
 ##
 ## The 3-D body below is the sim picrawler in calibrate mode, FK-written from the
@@ -87,6 +89,10 @@ var _body_lbl: Label
 var _tele_lbls: Dictionary = {}
 var _check_lbls: Dictionary = {}
 var _status_lbl: Label
+var _stop_btn: Button
+var _stop_lbl: Label
+var _stop_reply_ms: int = -1          # when a stop/resume reply last told us the state
+var _stop_reply_state := false
 var _widen_lbl: Label
 var _tick_meter: Control
 var _power_graph: Control
@@ -183,6 +189,12 @@ func _build_ui() -> void:
 	row.add_child(_lbl(":%d / :%d" % [REP_PORT, PUB_PORT]))
 	var cb := Button.new(); cb.text = "CONNECT"; cb.pressed.connect(_on_connect); row.add_child(cb)
 	var db := Button.new(); db.text = "DISCONNECT"; db.pressed.connect(_on_disconnect); row.add_child(db)
+	# STOP first and loudest: the operator's "do no more harm" control.  SPACE does the same
+	# from anywhere in this window (see _input).
+	_stop_btn = Button.new(); _stop_btn.text = "■ STOP  [space]"; _stop_btn.custom_minimum_size.x = 150
+	_stop_btn.add_theme_color_override("font_color", Color(1, 0.35, 0.35))
+	_stop_btn.focus_mode = Control.FOCUS_NONE     # SPACE must never also "press" a focused button
+	_stop_btn.pressed.connect(_toggle_stop); row.add_child(_stop_btn)
 	var lb := Button.new(); lb.text = "RESCUE POSE"; lb.pressed.connect(_on_limp); row.add_child(lb)
 	_imu_btn = Button.new()
 	_imu_btn.text = "IMU SCOPE"
@@ -203,6 +215,7 @@ func _build_ui() -> void:
 	prb.add_theme_color_override("font_color", Color(1, 0.8, 0.3))
 	var pdb := Button.new(); pdb.text = "delete"; pdb.pressed.connect(_on_pose_delete); prow.add_child(pdb)
 	var prf := Button.new(); prf.text = "⟳"; prf.pressed.connect(_refresh_poses); prow.add_child(prf)
+	_stop_lbl = _lbl("", 15); banner.add_child(_stop_lbl)
 	_mode_lbl = _lbl("MODE: —", 15); banner.add_child(_mode_lbl)
 	banner.add_child(_lbl("      "))
 	_body_lbl = _lbl("BODY: —", 15); banner.add_child(_body_lbl)
@@ -608,11 +621,58 @@ func _on_connect() -> void:
 func _on_disconnect() -> void:
 	# Disconnect is an ACTION, not a closed window (SPEC §4.2.2).  In bench mode the
 	# daemon's deadman limps the robot when the pings stop — say so.
+	var mode := str(_tele.get("mode", "bench"))     # read BEFORE the frame is cleared
 	_client.call("disconnect_from")
 	_connected = false
 	_tele = {}; _tele_ms = -1
 	for d in _rows: d["armed"] = false
-	_set_status("disconnected — bench deadman on the Pi sends the rescue pose within ~1 s")
+	if mode == "bench":
+		_set_status("disconnected — bench deadman on the Pi sends the rescue pose within ~1 s")
+	else:
+		_set_status("disconnected — %s mode has NO deadman: the robot carries on (SPEC §4.2)" % mode)
+
+# ======================================================================================
+# STOP / resume — SPACE
+# ======================================================================================
+# _input, not _unhandled_input: it runs BEFORE any control sees the key, so SPACE stops
+# the robot even while a text field or slider has focus.  The cost is that the pose-name
+# field cannot take a space, which is the right trade for a safety key.
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and (event as InputEventKey).keycode == KEY_SPACE:
+		get_viewport().set_input_as_handled()
+		_toggle_stop()
+
+# Is the robot KNOWN to be stopped right now?  Only fresh evidence counts: a stop/resume
+# reply in the last second, or telemetry under a second old.  Unknown is treated as
+# "not stopped", so an uncertain press always sends STOP and never RESUME.
+func _known_stopped() -> bool:
+	var now := Time.get_ticks_msec()
+	var tele_age: int = (now - _tele_ms) if _tele_ms >= 0 else 1 << 30
+	var reply_age: int = (now - _stop_reply_ms) if _stop_reply_ms >= 0 else 1 << 30
+	if reply_age < 1000 and (reply_age <= tele_age):
+		return _stop_reply_state
+	if tele_age < 1000:
+		return bool(_tele.get("stopped", false))
+	return false
+
+func _toggle_stop() -> void:
+	if not _connected:
+		_set_status("⚠ NOT CONNECTED — STOP cannot reach the robot. Connect, or cut power.")
+		return
+	var resuming := _known_stopped()
+	var rep := _call({"verb": "resume" if resuming else "stop"})
+	if bool(rep.get("ok", false)):
+		_stop_reply_ms = Time.get_ticks_msec()
+		_stop_reply_state = bool(rep.get("stopped", not resuming))
+		_pending.clear()
+		if resuming:
+			_set_status("RESUMED (%s mode)" % str(rep.get("mode", "?")))
+		else:
+			for d in _rows: d["armed"] = false
+			_set_status("STOPPED — every servo frozen where it is. SPACE to resume.")
+	elif not resuming:
+		_set_status("⚠ STOP FAILED: %s — cut power if the robot is at risk" % str(rep.get("error", "no reply")))
 
 func _on_limp() -> void:
 	var rep := _call({"verb": "limp"})
@@ -762,8 +822,32 @@ func _update_labels() -> void:
 		_link_lbl.text = "link: OK   telemetry age %d ms (1 s mean)" % int(_avg.get("age", age_ms))
 		_link_lbl.add_theme_color_override("font_color", Color(0.3, 1, 0.3))
 	var mode := str(_tele.get("mode", "—"))
-	_mode_lbl.text = "MODE: %s — link loss ⇒ RESCUE POSE (%s)" % [mode, "saved" if _tele.get("rescue_pose") != null else "NONE SAVED — save a pose named rescue"]
-	_mode_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	# SPEC §4.2.1: "am I in a mode where closing the laptop kills the robot?" must never be
+	# ambiguous.  bench = the deadman sends the rescue pose; dev/autonomous = it does not.
+	if mode == "bench" or mode == "—":
+		_mode_lbl.text = "MODE: %s — link loss ⇒ RESCUE POSE (%s)" % [mode, "saved" if _tele.get("rescue_pose") != null else "NONE SAVED — save a pose named rescue"]
+		_mode_lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	else:
+		var br: Variant = _tele.get("brain")
+		var br_txt := "no brain stream"
+		if br is Dictionary:
+			var d: Dictionary = br
+			br_txt = "brain %s, %d applied, age %s ms" % ["HOLDING (stream lost)" if bool(d.get("holding", false)) else ("streaming" if bool(d.get("have_stream", false)) else "silent"),
+				int(d.get("applied", 0)), str(d.get("age_ms", "—"))]
+		_mode_lbl.text = "MODE: %s — THE BRAIN DRIVES; closing this window does NOT stop it (%s)" % [mode.to_upper(), br_txt]
+		_mode_lbl.add_theme_color_override("font_color", Color(1, 0.4, 1))
+	var stopped := _known_stopped()
+	if not _connected or _tele.is_empty():
+		_stop_lbl.text = ""
+		_stop_btn.text = "■ STOP  [space]"
+	elif stopped:
+		_stop_lbl.text = "■ STOPPED (%s, %.0f s) — SPACE to resume      " % [str(_tele.get("stop_why", "?")), float(_tele.get("stopped_ms", 0)) / 1000.0]
+		_stop_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+		_stop_btn.text = "▶ RESUME  [space]"
+	else:
+		_stop_lbl.text = "● RUNNING      "
+		_stop_lbl.add_theme_color_override("font_color", Color(0.3, 1, 0.3))
+		_stop_btn.text = "■ STOP  [space]"
 	if _tele.is_empty():
 		_body_lbl.text = "BODY: — (no telemetry)"
 		_body_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
@@ -781,7 +865,9 @@ func _update_labels() -> void:
 	var vbat := float(_tele.get("vbat", 0.0))            # instantaneous, for the self-check below
 	var adc: Array = _tele.get("adc", [])
 	var sample := {"vbat": float(_tele.get("vbat", 0.0)), "tick_hz": float(_tele.get("tick_hz", 0.0)),
-				   "deadman": float(_tele.get("deadman_ms_left", 0.0)), "age": float(max(age_ms, 0))}
+				   # null in a brain mode: there is no deadman there (SPEC §4.2)
+				   "deadman": float(_tele.get("deadman_ms_left", 0.0)) if _tele.get("deadman_ms_left") != null else -1.0,
+				   "age": float(max(age_ms, 0))}
 	for i in range(adc.size()): sample["adc%d" % i] = float(adc[i])
 	for k in sample: _avg_sum[k] = float(_avg_sum.get(k, 0.0)) + sample[k]
 	_avg_n += 1
@@ -798,7 +884,7 @@ func _update_labels() -> void:
 			parts.append("A%d %4d/%.2fV" % [i, int(a), a * 3.3 / 4095.0])
 		_tele_lbls["adc"].text = "adc: " + ("  ".join(parts) if parts.size() else "—")
 		_tele_lbls["tick_hz"].text = "tick_hz: %.2f   (HAT frame 49.95 Hz — a different clock)" % float(_avg.get("tick_hz", 0.0))
-		_tele_lbls["deadman_ms_left"].text = "deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))
+		_tele_lbls["deadman_ms_left"].text = ("deadman_ms_left: %d" % int(_avg.get("deadman", 0.0))) if _tele.get("deadman_ms_left") != null else "deadman: none (brain mode — SPEC §4.2)"
 		_tele_lbls["age"].text = "frame seq %s   age %d ms (1 s mean)" % [str(_tele.get("seq", "—")), int(_avg.get("age", 0.0))]
 	_update_cost_rows()
 	_update_power_row()

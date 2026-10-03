@@ -12,7 +12,12 @@ allocates nothing, so the two tools cannot interfere no matter the order they st
 ControlServer already handles each client on its own thread, so a second connection is
 expected, not tolerated.
 
-Read-only throughout: no verb here can move a servo or change a parameter.
+Read-only, with ONE exception: SPACE stops the robot, and SPACE again resumes it
+(benchd's `stop` / `resume`).  STOP freezes every servo where it is; it moves nothing.
+Resume only lifts a stop -- the run mode, and with it whether a brain may drive, is set
+on the robot and cannot be changed from here (port doc SPEC §1.1).  The STOP request goes
+on its own socket and the screen polls on a background thread, so the key is never stuck
+behind a slow brain query.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import curses
 import json
 import os
 import socket
+import threading
 import time
 from typing import Any, Optional
 
@@ -99,17 +105,20 @@ class Bench:
             self._sock.close(0)
             self._sock = None
 
-    def status(self) -> Optional[dict]:
+    def call(self, verb: str, **kw: Any) -> Optional[dict]:
         if not zmq:
             return None
         try:
             self._connect()
-            self._sock.send_string(json.dumps({"verb": "status"}))
+            self._sock.send_string(json.dumps({"verb": verb, **kw}))
             return json.loads(self._sock.recv_string())
         except Exception:
             # A REQ that missed its reply is stuck by protocol; recreate it.
             self.close()
             return None
+
+    def status(self) -> Optional[dict]:
+        return self.call("status")
 
 
 # --------------------------------------------------------------------------- rendering
@@ -161,6 +170,14 @@ class Dash:
     def __init__(self, host: str, ctl_port: int, bench_port: int, interval: float):
         self.control = Control(host, ctl_port)
         self.bench = Bench(host, bench_port)
+        # STOP gets its OWN socket: a REQ waiting on a status reply cannot send, and the
+        # stop key must never queue behind the poller.
+        self.stopper = Bench(host, bench_port, timeout_ms=500)
+        self.st_time = 0.0                    # when self.st last arrived
+        self.stop_reply: Optional[dict] = None
+        self.stop_reply_time = 0.0
+        self.msg = ""                         # the last STOP/RESUME outcome, shown on screen
+        self.msg_bad = False
         self.interval = interval
         self.host = host
         self.modules: list[dict] = []
@@ -171,8 +188,35 @@ class Dash:
         self.info: Optional[dict] = None      # host_info: fetched once, it is static
         self.t0 = time.time()
 
+    def known_stopped(self) -> bool:
+        """Is the robot KNOWN to be stopped right now?  Only fresh evidence counts; when it
+        is unknown the answer is False, so an uncertain press sends STOP, never RESUME."""
+        now = time.time()
+        fresh = max(1.0, 1.5 * self.interval)
+        if self.stop_reply is not None and now - self.stop_reply_time < fresh \
+                and self.stop_reply_time >= self.st_time:
+            return bool(self.stop_reply.get("stopped"))
+        if self.st is not None and self.st.get("ok", True) and now - self.st_time < fresh:
+            return bool(self.st.get("stopped"))
+        return False
+
+    def toggle_stop(self) -> None:
+        resuming = self.known_stopped()
+        r = self.stopper.call("resume" if resuming else "stop")
+        if r is not None and r.get("ok"):
+            self.stop_reply, self.stop_reply_time = r, time.time()
+            self.msg = (f"RESUMED ({r.get('mode', '?')} mode)" if resuming
+                        else "STOPPED — every servo frozen where it is.  SPACE to resume.")
+            self.msg_bad = False
+        else:
+            err = (r or {}).get("error", "no reply from ogma_benchd")
+            self.msg = (f"resume refused: {err}" if resuming
+                        else f"STOP FAILED: {err} — cut power if the robot is at risk")
+            self.msg_bad = True
+
     def poll(self) -> None:
-        self.st = self.bench.status()
+        st = self.bench.status()
+        self.st, self.st_time = st, time.time()
         self.brain = self.control.call("ping")
         if self.brain is not None:
             # Static for the life of the process, so fetch it once — and re-fetch after a
@@ -221,9 +265,33 @@ class Dash:
         y += 1
         self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM)); y += 1
 
-        # ---- bench ----
+        # ---- STOP / mode: the first thing on the screen ----
         st = self.st
         ok = st is not None and st.get("ok", True)
+        if ok:
+            mode = str(st.get("mode", "?"))
+            if self.known_stopped():
+                txt = (f" ■ STOPPED ({st.get('stop_why', '?')}, {float(st.get('stopped_ms', 0)) / 1000:.0f} s)"
+                       f" — SPACE to resume ")
+                self._line(scr, y, 1, txt, C(BAD) | curses.A_BOLD | curses.A_REVERSE)
+            else:
+                self._line(scr, y, 1, " ● RUNNING — SPACE stops every servo where it is ", C(OK) | curses.A_BOLD)
+            if mode == "bench":
+                self._line(scr, y, 60, "MODE bench — link loss ⇒ rescue pose", C(WARN))
+            else:
+                br = st.get("brain") or {}
+                state = ("HOLDING (stream lost)" if br.get("holding")
+                         else "streaming" if br.get("have_stream") else "silent")
+                self._line(scr, y, 60, f"MODE {mode.upper()} — the brain drives, no deadman;"
+                                       f" brain {state}, {br.get('applied', 0)} applied", C(BAD) | curses.A_BOLD)
+        else:
+            self._line(scr, y, 1, " ⚠ benchd unreachable — SPACE cannot stop the robot from here ", C(BAD) | curses.A_BOLD)
+        y += 1
+        if self.msg:
+            self._line(scr, y, 1, self.msg, C(BAD if self.msg_bad else OK))
+        y += 1
+
+        # ---- bench ----
         self._line(scr, y, 1, "BENCH  ogma_benchd  ", C(HEAD))
         if not zmq:
             self._line(scr, y, 21, "no pyzmq — apt install python3-zmq", C(WARN))
@@ -414,7 +482,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"q quit   r refresh   every {self.interval:.1f}s"
+                   f"SPACE stop/resume   q quit   r refresh   every {self.interval:.1f}s"
                    f"   baked = visits >= baking_threshold", C(DIM))
         scr.refresh()
 
@@ -426,24 +494,53 @@ class Dash:
                      (WARN, curses.COLOR_YELLOW), (BAD, curses.COLOR_RED),
                      (HEAD, curses.COLOR_CYAN)):
             curses.init_pair(i, c, -1)
-        last = 0.0
-        while True:
-            now = time.time()
-            if now - last >= self.interval:
-                self.poll()
-                last = now
+        # The poll (benchd status + every EPM snapshot) can take seconds when the brain is
+        # slow or gone; on the key loop it would delay STOP by that much.  So it runs on its
+        # own thread and the key loop only draws and reads keys.
+        wake = threading.Event()
+        quit_ = threading.Event()
+
+        def poller() -> None:
+            while not quit_.is_set():
+                try:
+                    self.poll()
+                except Exception:
+                    pass
+                wake.wait(self.interval)
+                wake.clear()
+
+        threading.Thread(target=poller, daemon=True).start()
+
+        def draw() -> None:
+            # The poller mutates state while this reads it; a drawing glitch must never
+            # take the STOP key down with it.
+            try:
                 self.draw(scr)
+            except Exception:
+                pass
+
+        last_draw = 0.0
+        while True:
             try:
                 ch = scr.getch()
             except curses.error:
                 ch = -1
-            if ch in (ord("q"), ord("Q"), 27):
+            if ch == ord(" "):
+                self.toggle_stop()
+                wake.set()                       # re-poll now so the banner catches up
+                draw()
+            elif ch in (ord("q"), ord("Q"), 27):
+                quit_.set(); wake.set()
                 return
-            if ch in (ord("r"), ord("R")):
-                last = 0.0
+            elif ch in (ord("r"), ord("R")):
+                wake.set()
             elif ch == curses.KEY_RESIZE:
-                self.draw(scr)
-            time.sleep(0.05)
+                draw()
+            now = time.time()
+            if now - last_draw >= 0.25:
+                draw()
+                last_draw = now
+            time.sleep(0.02)
 
 
 def main() -> None:
@@ -477,6 +574,7 @@ def main() -> None:
                 print(f"  belly {float(_tof.get('m', 0)) * 1000:.1f} mm  ema30 {float(_tof.get('m_ema', 0)) * 1000:.1f}"
                       f"  worst60 {float(_tof.get('m_min', 0)) * 1000:.1f}"
                       f"  {_tof.get('status', '?')}  invalid {float(_tof.get('bad_frac', 0)) * 100:.0f}%")
+            print(f"  mode {st.get('mode', '?')}  {'STOPPED (' + str(st.get('stop_why')) + ')' if st.get('stopped') else 'running'}")
             print(f"  vbat {float(st.get('vbat', 0)):.2f} V  tick {float(st.get('tick_hz', 0)):.2f} Hz"
                   f"  overruns {st.get('overruns')}")
         if d.sensors:
@@ -495,6 +593,7 @@ def main() -> None:
     finally:
         d.control.close()
         d.bench.close()
+        d.stopper.close()
 
 
 if __name__ == "__main__":

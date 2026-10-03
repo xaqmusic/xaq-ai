@@ -89,7 +89,7 @@ if(PI_HOST_BUILD_TESTS)
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
   enable_testing()
-  add_executable(test_hw tests/test_hw.cpp tests/test_brain_inputs.cpp)
+  add_executable(test_hw tests/test_hw.cpp tests/test_brain_inputs.cpp tests/test_actuation.cpp)
   target_link_libraries(test_hw PRIVATE ogma_hw gtest_main nlohmann_json::nlohmann_json)
   # The brain-input tests read the REAL calibration files (servo map, exported body), so a
   # re-export or a re-calibration that breaks the contract fails here, not on the robot.

@@ -14,7 +14,15 @@
 // sampling it from the tick would put SPI inside the servo deadline.  Neither is right:
 // port doc sec 2, "fidelity high, transport 50 Hz, LOOP UNTOUCHED".
 // There is NO verb that starts a brain here, and none will be added (SPEC §1.1).
+//
+// THE BRAIN'S PATH TO THE SERVOS (2026-10-03) is not a verb on this channel either.  It is
+// a separate command socket (--cmd-port, a SUB bound to LOOPBACK ONLY, so nothing off the
+// robot can reach it) carrying ogma_host's 50 Hz pulse targets, applied only in the `dev`
+// or `autonomous` run mode, which is set on a second loopback-only socket (--ctl-port).
+// The calibration channel can see the mode, STOP the robot and resume it; it cannot set the
+// mode, and it refuses a brain-rate command stream outright.  PROTOCOL.md "Run modes".
 #include "ogma/hw/ServoDriver.hpp"
+#include "ogma/hw/Actuation.hpp"
 #include "ogma/hw/ResourceMonitor.hpp"
 #include "ogma/hw/McuReset.hpp"
 #include "ogma/hw/Ina219.hpp"
@@ -151,6 +159,18 @@ std::string read_boot_id() {
 int      g_state_pub_port = 0;
 void*    g_state_pub      = nullptr;
 uint64_t g_state_seq      = 0;
+// ---- the brain's command path (SPEC §1.1 / §4.2) ---------------------------------------
+// Both OFF by default: no socket, no new code path, and the daemon stays the bench daemon.
+// LOOPBACK ONLY, by bind address: ogma_host runs on this Pi, and nothing on the network —
+// the laptop's dashboard included — has any route to the servos through these.
+int   g_cmd_port = 0;            // SUB: "cmd " + {seq, tick, us[12]} from ogma_host, CONFLATE
+int   g_ctl_port = 0;            // REP: mode.get / mode.set / stop / resume / status
+void* g_cmd_sub  = nullptr;      // touched only by tick_thread once it starts
+ogma::hw::brain::RunMode g_start_mode = ogma::hw::brain::RunMode::Bench;
+// The calibration channel's stream guard: commanding verbs (servo.set, pose.set) per
+// second.  The bench dashboard throttles slider drags to 20 Hz; a brain is 600/s.
+constexpr int     CAL_STREAM_MAX       = 30;
+constexpr int64_t CAL_STREAM_WINDOW_MS = 1000;
 // ⚠ DO NOT fsync() THE RECORD FROM record().  It was tried 2026-09-08 and MEASURED: at a
 // 1 s cadence, under the mutex the 50 Hz servo tick needs, an SD fsync costs ~80 ms and the
 // loop fell to 35.8 Hz with 54 overruns in 12 s (worst tick 419 % of the 20 ms budget, against
@@ -215,6 +235,26 @@ struct State {
     int pose_stagger_left = 0;
     bool pose_move_active = false;
     bool deadman_tripped = false;
+    // ---- run mode, STOP, and the brain's stream (PROTOCOL.md "Run modes") -------------
+    // ⚠ STOP FREEZES; IT DOES NOT MOVE THE ROBOT.  Every armed channel's target becomes the
+    // pulse it is at NOW, any pose or rescue move is abandoned, and nothing commands a servo
+    // until `resume`.  It is the operator's "do no more harm" key (spacebar on both
+    // dashboards).  The rescue pose is a separate, deliberate act (`limp`), because a pose
+    // move is itself motion and can catch a leg on whatever caused the stop.
+    ogma::hw::brain::RunMode mode = ogma::hw::brain::RunMode::Bench;
+    bool        stopped = false;
+    std::string stop_why;
+    int64_t     stopped_at_ms = 0;
+    int         stops = 0;
+    ogma::hw::brain::BrainAuthority auth;
+    ogma::hw::brain::RateGuard cal_guard{CAL_STREAM_MAX, CAL_STREAM_WINDOW_MS};
+    // brain-stream accounting, published in the frame
+    long     cmd_frames = 0, cmd_applied = 0, cmd_blocked = 0, cmd_bad = 0, cmd_seq_gaps = 0;
+    uint64_t cmd_last_seq = 0;
+    int64_t  cmd_last_tick = -1;
+    json     cmd_last_us = json::array();      // what the brain last ASKED for (pre-envelope)
+    uint32_t cmd_clamped = 0;                  // channels the envelope clamped, last applied frame
+    bool brain_mode() const { return mode != ogma::hw::brain::RunMode::Bench; }
     std::string pi_throttled = "0x0";   // vcgencmd get_throttled, polled ~1 Hz
     // ---- 5 V RAIL GUARD (2026-09-13) -------------------------------------------------
     // ⚠ THE LOW-BATTERY AUTO-SAFE WATCHES THE WRONG RAIL.  Measured: the Pi hard-reset
@@ -517,7 +557,77 @@ struct State {
         }
     }
 
+    // Latch STOPPED without freezing (rescue() needs its move to run).  Callers hold m.
+    void latch_stop(const char* why) {
+        if (stopped) return;
+        stopped = true; stop_why = why; stopped_at_ms = mono_ms(); ++stops;
+        record("stop", {{"why", why}, {"mode", ogma::hw::brain::mode_name(mode)}, {"froze", false}});
+    }
+    // STOP: freeze every armed channel where it is now, abandon pose/rescue moves, latch.
+    void stop(const char* why) {
+        pose_queue.clear();
+        if (pose_move_active) { pose_move_active = false; driver.set_slew_us_per_tick(g_normal_slew_us); }
+        rescue_until_ms = 0;
+        int frozen = 0;
+        for (int c = 0; c < ServoDriver::N; ++c)
+            if (driver.armed(c)) { driver.command(c, driver.current_us(c)); ++frozen; }
+        const bool was = stopped;
+        stopped = true;
+        if (!was) { stop_why = why; stopped_at_ms = mono_ms(); ++stops; }
+        record("stop", {{"why", why}, {"mode", ogma::hw::brain::mode_name(mode)},
+                        {"froze", frozen}, {"already_stopped", was}});
+    }
+    // Returns "" on success, else why not.  Idempotent.
+    std::string resume(const char* who) {
+        if (!stopped) return "";
+        if (low_battery) return "battery low — resume refused until it recovers above " + std::to_string(VBAT_RECOVER_V) + " V";
+        const int64_t now = mono_ms();
+        if (now < rail_guard_until_ms) return "5 V rail under-voltage back-off — retry shortly";
+        // ⚠ A channel whose pulse benchd does not know would take the brain's first command
+        // at FULL servo speed (ServoDriver::command starts an unknown channel AT its target).
+        // So the brain gets the servos only once every channel's pulse is known — pose the
+        // robot first (e.g. pose.set rescue) and the ramp is from where it actually is.
+        if (brain_mode()) {
+            std::string unknown;
+            for (int c = 0; c < ServoDriver::N; ++c)
+                if (!driver.armed(c) && driver.last_sent_us(c) <= 0) unknown += (unknown.empty() ? "" : ",") + std::to_string(c);
+            if (!unknown.empty())
+                return "pulse unknown on channel(s) " + unknown + " — the brain's first command would move them at full speed; "
+                       "set a pose first (e.g. the rescue pose) so every servo ramps from where it is";
+        }
+        record("resume", {{"who", who}, {"held_ms", now - stopped_at_ms}, {"why_stopped", stop_why},
+                          {"mode", ogma::hw::brain::mode_name(mode)}});
+        stopped = false; stop_why.clear();
+        auth.grant(now);
+        return "";
+    }
+    // Returns "" on success, else why not.
+    std::string set_mode(ogma::hw::brain::RunMode m, const char* who) {
+        using ogma::hw::brain::RunMode;
+        if (m == mode) return "";
+        if (m != RunMode::Bench) {
+            if (!g_cmd_sub) return "no command socket — start benchd with --cmd-port to hear a brain";
+            if (cal_ch >= 0) return "channel " + std::to_string(cal_ch) + " is widened (cal.begin): cal.end first";
+        }
+        const RunMode from = mode;
+        // ⚠ ENTERING A BRAIN MODE LATCHES STOP.  The brain gets the servos only when the
+        // operator resumes (spacebar), watching — never as a side effect of a mode change.
+        // Leaving one freezes the body and starts the bench deadman's clock, so a robot
+        // switched back to bench with no dashboard attached goes to rescue in ~1 s, which is
+        // the bench contract.
+        if (m != RunMode::Bench) stop("mode change");
+        else { stop("mode change"); stopped = false; stop_why.clear(); last_client_ms = mono_ms(); }
+        mode = m;
+        auth.grant(mono_ms());
+        record("mode", {{"from", ogma::hw::brain::mode_name(from)}, {"to", ogma::hw::brain::mode_name(m)}, {"who", who}});
+        return "";
+    }
+
     void rescue(const char* why) {
+        // In a brain mode a rescue also takes the servos from the brain until the operator
+        // resumes: low battery, the rail guard and a lost stream must not hand control
+        // straight back once the pose lands.
+        if (brain_mode()) latch_stop(why);
         end_cal(why);
         armed_ch = -1;
         if (has_rescue()) {
@@ -694,8 +804,25 @@ struct State {
         }
         bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= driver.armed(c);
         if (!any_armed) armed_ch = -1;
-        const int64_t dm = any_armed ? std::max<int64_t>(0, DEADMAN_MS - (now - last_client_ms)) : 0;
-        return {{"seq", ++seq}, {"t_mono_ms", now}, {"uptime_s", (now - t0_ms) / 1000.0}, {"mode", "bench"},
+        // The deadman belongs to the calibration channel only (SPEC §4.2): in a brain mode
+        // there is none, and the frame says so with null rather than a countdown.
+        const json dm = brain_mode() ? json(nullptr)
+                      : json(any_armed ? std::max<int64_t>(0, DEADMAN_MS - (now - last_client_ms)) : 0);
+        json brain = nullptr;
+        if (g_cmd_sub) {
+            const auto& pol = auth.policy();
+            brain = {{"frames", cmd_frames}, {"applied", cmd_applied}, {"blocked", cmd_blocked},
+                     {"bad", cmd_bad}, {"seq_gaps", cmd_seq_gaps}, {"last_tick", cmd_last_tick},
+                     {"age_ms", auth.age_ms(now)}, {"have_stream", auth.have_stream()},
+                     {"holding", auth.holding()}, {"losses", auth.losses()}, {"regains", auth.regains()},
+                     {"clamped_mask", cmd_clamped}, {"last_us", cmd_last_us},
+                     {"hold_after_ms", pol.hold_after_ms}, {"rescue_after_ms", pol.rescue_after_ms}};
+        }
+        return {{"seq", ++seq}, {"t_mono_ms", now}, {"uptime_s", (now - t0_ms) / 1000.0},
+                {"mode", ogma::hw::brain::mode_name(mode)},
+                {"stopped", stopped}, {"stop_why", stopped ? json(stop_why) : json(nullptr)},
+                {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
+                {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
@@ -837,6 +964,19 @@ void tick_thread(State& S) {
         // The budget span starts at WAKE, not after the lock: waiting for the mutex
         // spends the tick's budget just as surely as working does.
         timespec cpu0; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
+        // The brain's newest command (CONFLATE keeps one), received and parsed BEFORE the
+        // lock so a malformed or slow frame never costs the bus its mutex.
+        bool got_cmd = false, cmd_unparsed = false;
+        json cmd;
+        if (g_cmd_sub) {
+            char cb[1024];
+            const int n = zmq_recv(g_cmd_sub, cb, sizeof cb - 1, ZMQ_DONTWAIT);
+            if (n > 4) {
+                cb[std::min(n, int(sizeof cb) - 1)] = 0;
+                try { cmd = json::parse(cb + 4); got_cmd = true; }      // after "cmd "
+                catch (const std::exception&) { cmd_unparsed = true; }
+            } else if (n >= 0) cmd_unparsed = true;
+        }
         std::lock_guard<std::mutex> lk(S.m);
         { timespec lk1; clock_gettime(CLOCK_MONOTONIC, &lk1);
           S.sp_lock_w.add((lk1.tv_sec - now.tv_sec) * 1e6 + (lk1.tv_nsec - now.tv_nsec) / 1e3); }
@@ -844,15 +984,87 @@ void tick_thread(State& S) {
         const int64_t ms = mono_ms();
         try {
             S.service_pose_move();
+            // ---- the brain's command stream (off unless --cmd-port) --------------------
+            if (g_cmd_sub) {
+                using ogma::hw::brain::BrainAuthority;
+                std::array<int, ServoDriver::N> want{};
+                bool valid = false;
+                if (cmd_unparsed) ++S.cmd_bad;
+                if (got_cmd) {
+                    ++S.cmd_frames;
+                    try {
+                        const json& us = cmd.at("us");
+                        if (!us.is_array() || us.size() != size_t(ServoDriver::N)) throw std::runtime_error("us must be 12");
+                        // ⚠ OUT-OF-TRAVEL IS NOT MALFORMED.  The sim's knee range runs past what
+                        // the servo can reach (u = -1 asks ~2836 us), so a frame is rejected
+                        // only for a nonsense value; range is the driver's envelope's job.
+                        valid = true;
+                        for (int c = 0; c < ServoDriver::N; ++c) {
+                            want[size_t(c)] = us[size_t(c)].get<int>();
+                            if (want[size_t(c)] <= 0 || want[size_t(c)] > 10000) valid = false;
+                        }
+                        const uint64_t sq = cmd.value("seq", uint64_t(0));
+                        if (S.cmd_last_seq && sq != S.cmd_last_seq + 1) ++S.cmd_seq_gaps;
+                        S.cmd_last_seq = sq;
+                        S.cmd_last_tick = cmd.value("tick", int64_t(-1));
+                        S.cmd_last_us = us;
+                    } catch (const std::exception&) { valid = false; }
+                    if (!valid) ++S.cmd_bad;
+                }
+                // Something else owns the servos right now.  A blocked tick never applies
+                // and never counts as the brain going quiet.
+                const bool blocked = S.stopped || S.low_battery || ms < S.rail_guard_until_ms ||
+                                     ms < S.rescue_until_ms || S.pose_move_active || S.cal_ch >= 0;
+                if (valid && blocked && S.brain_mode()) ++S.cmd_blocked;
+                const int regains_before = S.auth.regains();
+                switch (S.auth.tick(S.mode, ms, valid, blocked)) {
+                    case BrainAuthority::Event::Apply: {
+                        // The envelope and the slew limit are the DRIVER's: command() clamps
+                        // to the channel's calibrated range and tick() slews at the normal
+                        // rate.  Nothing here can widen either.
+                        uint32_t clamped = 0;
+                        for (int c = 0; c < ServoDriver::N; ++c) {
+                            S.driver.command(c, std::clamp(want[size_t(c)], FULL_MIN_US, FULL_MAX_US));
+                            if (S.driver.target_us(c) != want[size_t(c)]) clamped |= (1u << c);
+                        }
+                        S.cmd_clamped = clamped;
+                        ++S.cmd_applied;
+                        if (S.auth.regains() != regains_before)
+                            S.record("brain_stream_regained", {{"regains", S.auth.regains()}, {"tick", S.cmd_last_tick}});
+                        break;
+                    }
+                    case BrainAuthority::Event::Hold:
+                        for (int c = 0; c < ServoDriver::N; ++c)
+                            if (S.driver.armed(c)) S.driver.command(c, S.driver.current_us(c));
+                        S.record("brain_stream_lost", {{"action", "hold"}, {"last_tick", S.cmd_last_tick},
+                                                       {"losses", S.auth.losses()}});
+                        break;
+                    case BrainAuthority::Event::Fault:     // dev: freeze the evidence (§4.2.1)
+                        S.record("brain_stream_lost", {{"action", "stop"}, {"last_tick", S.cmd_last_tick},
+                                                       {"losses", S.auth.losses()}});
+                        S.stop("brain stream lost");
+                        break;
+                    case BrainAuthority::Event::Rescue:    // autonomous: still nothing after the hold
+                        S.record("brain_stream_lost", {{"action", "rescue"}, {"last_tick", S.cmd_last_tick},
+                                                       {"losses", S.auth.losses()}});
+                        S.rescue("brain stream lost");
+                        break;
+                    case BrainAuthority::Event::None: break;
+                }
+            }
             bool any_armed = false; for (int c = 0; c < ServoDriver::N; ++c) any_armed |= S.driver.armed(c);
             const bool client_fresh = ms - S.last_client_ms <= DEADMAN_MS;
-            if (any_armed && !client_fresh && !S.deadman_tripped && ms >= S.rescue_until_ms) {
+            // The deadman is the CALIBRATION channel's (SPEC §4.2): in a brain mode the
+            // dashboard is a viewer and closing it must not touch the robot.
+            if (!S.brain_mode() && any_armed && !client_fresh && !S.deadman_tripped && ms >= S.rescue_until_ms) {
                 S.deadman_tripped = true; ++S.watchdog_trips;
                 S.record("deadman", {{"trips", S.watchdog_trips}});
                 S.rescue("deadman");                                       // the safe action, once
             }
             if (client_fresh) S.deadman_tripped = false;
-            if (client_fresh || ms < S.rescue_until_ms || S.pose_move_active)   // keeps the driver watchdog fed
+            // keeps the driver watchdog fed.  In a brain mode the daemon itself holds authority,
+            // so armed channels are always fed — a STOPPED robot holds where it froze.
+            if (S.brain_mode() || client_fresh || ms < S.rescue_until_ms || S.pose_move_active)
                 for (int c = 0; c < ServoDriver::N; ++c)
                     if (S.driver.armed(c)) S.driver.command(c, S.driver.target_us(c));
             if (S.cal_ch >= 0 && ms > S.cal_until_ms) S.end_cal("timeout");
@@ -930,7 +1142,10 @@ void tick_thread(State& S) {
                 // tof_m is benchd's raw-minus-mount-offset clearance (the arm the promoted
                 // homeostat rides); tof_ms stamps the measurement so the consumer publishes
                 // each NEW valid reading once, and nothing when the reading is invalid.
+                // mode + stopped ride the feed so ogma_host can PAUSE the brain while the body
+                // is frozen, instead of letting it learn that its actions do nothing.
                 const json f = {{"seq", ++g_state_seq}, {"t", ms}, {"us", us}, {"armed", armed},
+                                {"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
                                 {"fsr", fsr}, {"fsr_ok", fsr_ok},
                                 {"tof_m", S.tof_m}, {"tof_valid", S.tof_ok && S.tof_valid},
                                 {"tof_ms", S.tof_last_ms}};
@@ -1023,7 +1238,49 @@ json handle(State& S, const json& req) {   // caller holds m
     if (verb == "ping")   return ok({{"t_mono_ms", now}});
     if (verb == "status") { json f = S.frame(); f["map"] = S.map; return ok(f); }
     if (verb == "limp")   { S.rescue("verb"); return ok({{"rescue_pose", S.has_rescue() ? json(S.rescue_name) : json(nullptr)}}); }
-    if (verb == "mode")   return req.value("mode", "") == "bench" ? ok({{"mode", "bench"}}) : err("only 'bench' exists here; the brain's modes live in ogma_host");
+    // ⚠ THE CALIBRATION CHANNEL CAN SEE THE MODE AND CANNOT SET IT (SPEC §1.1: no path from
+    // the dashboard to starting the brain).  The mode is set on the robot, over the
+    // loopback-only control socket (--ctl-port) or at start (--mode).
+    if (verb == "mode") {
+        const std::string want = req.value("mode", "");
+        const std::string cur = ogma::hw::brain::mode_name(S.mode);
+        if (want.empty() || want == cur) return ok({{"mode", cur}});
+        return err("the run mode is set on the robot (benchd --mode, or the loopback control socket), "
+                   "never from the calibration channel; it is '" + cur + "'");
+    }
+    // STOP / resume: the operator's spacebar.  Allowed in every mode and every state — the
+    // calibration channel must always be able to stop the robot.  Resume only lifts a stop;
+    // it cannot change the mode, so it cannot start a brain that is not already running.
+    if (verb == "stop") {
+        S.stop("operator");
+        return ok({{"stopped", true}, {"mode", ogma::hw::brain::mode_name(S.mode)}});
+    }
+    if (verb == "resume") {
+        const std::string why = S.resume("operator");
+        if (!why.empty()) return err(why);
+        return ok({{"stopped", false}, {"mode", ogma::hw::brain::mode_name(S.mode)}});
+    }
+    {
+        // While the brain holds the servos, the calibration channel's commanding and
+        // envelope-changing verbs are refused: two writers on one servo is a fight, and §4.4
+        // forbids widening the envelope while the control path is live.
+        static const std::set<std::string> kCommanding = {
+            "servo.set", "pose.set", "servo.limits", "cal.begin", "cal.map", "cal.load",
+            "limits.set", "load", "rail.inject", "tof.stall"};
+        if (S.brain_mode() && kCommanding.count(verb))
+            return err(std::string("refused in '") + ogma::hw::brain::mode_name(S.mode) +
+                       "' mode: the brain holds the servos (STOP, limp and status still work)");
+        if (S.stopped && (verb == "servo.set" || verb == "pose.set" || verb == "cal.begin"))
+            return err("STOPPED (" + S.stop_why + ") — resume first (spacebar on the dashboard)");
+        // A brain-rate stream on this channel is refused outright (SPEC §1.1).
+        if ((verb == "servo.set" || verb == "pose.set") && !S.cal_guard.admit(now)) {
+            if (S.cal_guard.refused() % 50 == 1)
+                S.record("cal_stream_refused", {{"verb", verb}, {"refused", S.cal_guard.refused()},
+                                                {"max_per_s", CAL_STREAM_MAX}});
+            return err("command stream refused: more than " + std::to_string(CAL_STREAM_MAX) +
+                       " commanding verbs per second is a brain-rate stream, and this is the calibration channel");
+        }
+    }
     if (verb == "servo.set" || verb == "pose.set") {
         // ⚠ Refuse to RE-LOAD a rail that just dipped.  The servos are the load, so the
         // back-off has to gate the two verbs that drive them; without this the guard drops
@@ -1272,6 +1529,37 @@ json handle(State& S, const json& req) {   // caller holds m
     return err("unknown verb '" + verb + "'");
 }
 
+// The CONTROL channel (--ctl-port, loopback only): the run mode, plus stop/resume so a
+// script on the robot can do what the spacebar does.  Disjoint from handle(): no servo,
+// pose or calibration verb exists here, and the mode verb exists nowhere else.
+json handle_ctl(State& S, const json& req) {   // caller holds m
+    const std::string verb = req.value("verb", "");
+    auto ok  = [](json extra = json::object()) { extra["ok"] = true; return extra; };
+    auto err = [](const std::string& e) { return json{{"ok", false}, {"error", e}}; };
+    auto summary = [&]() {
+        return json{{"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
+                    {"stop_why", S.stopped ? json(S.stop_why) : json(nullptr)},
+                    {"brain_age_ms", S.auth.age_ms(mono_ms())}, {"brain_applied", S.cmd_applied},
+                    {"brain_frames", S.cmd_frames}, {"holding", S.auth.holding()}};
+    };
+    if (verb == "ping" || verb == "mode.get") return ok(summary());
+    if (verb == "status") { json f = S.frame(); return ok(f); }
+    if (verb == "mode.set") {
+        ogma::hw::brain::RunMode m;
+        if (!ogma::hw::brain::parse_mode(req.value("mode", ""), m)) return err("mode must be bench, dev or autonomous");
+        const std::string why = S.set_mode(m, "ctl");
+        if (!why.empty()) return err(why);
+        return ok(summary());
+    }
+    if (verb == "stop") { S.stop("ctl"); return ok(summary()); }
+    if (verb == "resume") {
+        const std::string why = S.resume("ctl");
+        if (!why.empty()) return err(why);
+        return ok(summary());
+    }
+    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, status)");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1290,6 +1578,11 @@ int main(int argc, char** argv) {
         else if (a == "--normal-slew") g_normal_slew_us = std::max(1, std::atoi(argv[i + 1]));
         else if (a == "--state-pub") g_state_pub_port = std::max(0, std::atoi(argv[i + 1]));
         else if (a == "--vbat-sustain-ms") g_vbat_sustain_ms = std::max(0, std::atoi(argv[i + 1]));
+        else if (a == "--cmd-port") g_cmd_port = std::max(0, std::atoi(argv[i + 1]));
+        else if (a == "--ctl-port") g_ctl_port = std::max(0, std::atoi(argv[i + 1]));
+        else if (a == "--mode") {
+            if (!ogma::hw::brain::parse_mode(argv[i + 1], g_start_mode)) { std::fprintf(stderr, "--mode must be bench, dev or autonomous\n"); return 2; }
+        }
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
     }
     // ---- fitted constants: the calib FILE is the source, flags are the override ----
@@ -1384,6 +1677,33 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lk(S.m);   // the tick thread reads it under the lock
         g_state_pub = sp;
     }
+    // The brain's command path.  ⚠ BOUND TO 127.0.0.1, never *: only a process on this Pi
+    // (ogma_host) can reach the servos through it.
+    void* ctl = nullptr;
+    if (g_cmd_port > 0) {
+        void* cs = zmq_socket(ctx, ZMQ_SUB);
+        int conflate = 1, linger = 0;
+        zmq_setsockopt(cs, ZMQ_CONFLATE, &conflate, sizeof conflate);   // newest command only
+        zmq_setsockopt(cs, ZMQ_LINGER, &linger, sizeof linger);
+        zmq_setsockopt(cs, ZMQ_SUBSCRIBE, "cmd ", 4);
+        if (zmq_bind(cs, ("tcp://127.0.0.1:" + std::to_string(g_cmd_port)).c_str()) != 0) {
+            std::fprintf(stderr, "benchd: cmd bind 127.0.0.1:%d failed: %s\n", g_cmd_port, zmq_strerror(zmq_errno()));
+            return 1;
+        }
+        g_cmd_sub = cs;                        // tick_thread is not running yet
+    }
+    if (g_ctl_port > 0) {
+        ctl = zmq_socket(ctx, ZMQ_REP);
+        if (zmq_bind(ctl, ("tcp://127.0.0.1:" + std::to_string(g_ctl_port)).c_str()) != 0) {
+            std::fprintf(stderr, "benchd: ctl bind 127.0.0.1:%d failed: %s\n", g_ctl_port, zmq_strerror(zmq_errno()));
+            return 1;
+        }
+    }
+    if (g_start_mode != ogma::hw::brain::RunMode::Bench) {
+        std::lock_guard<std::mutex> lk(S.m);
+        const std::string why = S.set_mode(g_start_mode, "--mode");
+        if (!why.empty()) { std::fprintf(stderr, "benchd: --mode %s refused: %s\n", ogma::hw::brain::mode_name(g_start_mode), why.c_str()); return 2; }
+    }
     // Seed the driver with the pulses a previous benchd left on the HAT (same boot only).
     {
         std::lock_guard<std::mutex> lk(S.m);
@@ -1415,6 +1735,12 @@ int main(int argc, char** argv) {
     std::printf("ogma_benchd: state feed %s\n", g_state_pub_port > 0
                 ? ("ON  pub :" + std::to_string(g_state_pub_port) + "  (50 Hz: us[12], fsr[4], belly ToF)").c_str()
                 : "off");
+    std::printf("ogma_benchd: brain command path %s\n", g_cmd_port > 0
+                ? ("ON  cmd 127.0.0.1:" + std::to_string(g_cmd_port) + (g_ctl_port > 0 ? "  ctl 127.0.0.1:" + std::to_string(g_ctl_port) : std::string("  (no ctl socket: mode fixed by --mode)"))).c_str()
+                : "off (bench daemon only)");
+    std::printf("ogma_benchd: MODE %s%s\n", ogma::hw::brain::mode_name(S.mode),
+                S.mode == ogma::hw::brain::RunMode::Bench ? "  (calibration deadman ON)"
+                : "  — STOPPED until resumed; NO calibration deadman (SPEC §4.2)");
     std::printf("ogma_benchd: body=%s  rep :%d  pub :%d  vbat %.2f V  log %s\n", body.c_str(), rep_port, pub_port,
                 S.hat.battery_volts(), log_path.c_str());
     std::fflush(stdout);
@@ -1423,24 +1749,30 @@ int main(int argc, char** argv) {
     std::thread tl(telemetry_thread, std::ref(S), pub);
     std::thread ti(imu_thread, std::ref(S));
     while (g_run) {
-        zmq_pollitem_t items[] = {{rep, 0, ZMQ_POLLIN, 0}};
-        if (zmq_poll(items, 1, 100) <= 0) continue;
-        char buf[65536];
-        int n = zmq_recv(rep, buf, sizeof buf - 1, 0);
-        if (n < 0) continue;
-        buf[std::min(n, int(sizeof buf) - 1)] = 0;
-        json reply;
-        try {
-            json req = json::parse(buf);
-            std::lock_guard<std::mutex> lk(S.m);
-            try { reply = handle(S, req); }
-            catch (const std::exception& e) { ++S.bus_errors; reply = {{"ok", false}, {"error", std::string("bus: ") + e.what()}}; }
-            if (req.value("verb", "") != "ping") S.record("verb", {{"req", req}, {"reply", reply}});
-        } catch (const std::exception& e) {
-            reply = {{"ok", false}, {"error", std::string("bad request: ") + e.what()}};
+        zmq_pollitem_t items[] = {{rep, 0, ZMQ_POLLIN, 0}, {ctl, 0, ZMQ_POLLIN, 0}};
+        if (zmq_poll(items, ctl ? 2 : 1, 100) <= 0) continue;
+        for (int which = 0; which < (ctl ? 2 : 1); ++which) {
+            if (!(items[which].revents & ZMQ_POLLIN)) continue;
+            void* sock = which == 0 ? rep : ctl;
+            char buf[65536];
+            int n = zmq_recv(sock, buf, sizeof buf - 1, 0);
+            if (n < 0) continue;
+            buf[std::min(n, int(sizeof buf) - 1)] = 0;
+            json reply;
+            try {
+                json req = json::parse(buf);
+                std::lock_guard<std::mutex> lk(S.m);
+                try { reply = which == 0 ? handle(S, req) : handle_ctl(S, req); }
+                catch (const std::exception& e) { ++S.bus_errors; reply = {{"ok", false}, {"error", std::string("bus: ") + e.what()}}; }
+                const std::string v = req.value("verb", "");
+                if (v != "ping" && !(which == 1 && (v == "mode.get" || v == "status")))
+                    S.record(which == 0 ? "verb" : "ctl", {{"req", req}, {"reply", reply}});
+            } catch (const std::exception& e) {
+                reply = {{"ok", false}, {"error", std::string("bad request: ") + e.what()}};
+            }
+            std::string out = reply.dump();
+            zmq_send(sock, out.data(), out.size(), 0);
         }
-        std::string out = reply.dump();
-        zmq_send(rep, out.data(), out.size(), 0);
     }
     tt.join(); tl.join(); ti.join();
     {
@@ -1455,6 +1787,8 @@ int main(int argc, char** argv) {
     // state-feed socket was not (2026-10-03): a feed-enabled benchd hung forever on SIGTERM
     // while still holding /dev/i2c-1, so no replacement could start.
     if (g_state_pub) { zmq_close(g_state_pub); g_state_pub = nullptr; }
+    if (g_cmd_sub)   { zmq_close(g_cmd_sub);   g_cmd_sub = nullptr; }
+    if (ctl)         { zmq_close(ctl); }
     zmq_close(rep); zmq_close(pub); zmq_ctx_term(ctx);
     return 0;
 }

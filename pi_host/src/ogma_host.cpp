@@ -11,10 +11,13 @@
 // at a fixed rate, and exposes the inspector surfaces (control on OGMA_INSPECTOR_PORT,
 // diag on port+1) that xaq_inspector and xaq_voice already speak.
 //
-// ⚠ SPEC §1.1 — THE BOUNDARY IS STRUCTURAL.  This program does not drive servos and
-// has no path to.  Actuation is benchd's, over its own control verb set, and wiring it
-// is a separate deliberate step; a sensory host that cannot move the robot is also the
-// only kind that is safe to leave running unattended.
+// ⚠ SPEC §1.1 — THE BOUNDARY IS STRUCTURAL.  This program never touches a servo.  With
+// --actuate it PUBLISHES the brain's action channels, mapped to pulse targets exactly as
+// the sim maps them (Actuation.hpp), to benchd's loopback-only command socket; benchd owns
+// the HAT, the envelope, the slew limit and the decision to apply them (only in its `dev`
+// or `autonomous` run mode, and only while not STOPPED).  Without --actuate nothing is
+// sent, and a sensory host that cannot move the robot is the only kind that is safe to
+// leave running unattended.
 #include "ogma/GraphConfig.hpp"
 #include "ogma/InProcessBus.hpp"
 #include "ogma/OgmaInstance.hpp"
@@ -38,9 +41,12 @@
 #include "ogma/hw/SensorCalib.hpp"
 #include "ogma/body/StrideOdometry.hpp"
 #include "ogma/hw/BrainInputs.hpp"
+#include "ogma/hw/Actuation.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -95,6 +101,10 @@ struct Args {
     std::string body_calib     = "pi_host/calib/body_measured_fsr.json";
     std::string servo_map      = "pi_host/calib/servo_map.json";
     long        dump_inputs    = 0;   // print every brain-input topic every N ticks (0 = off)
+    // ⚠ OPT-IN: publish the brain's action channels as pulse targets to benchd's command
+    // socket.  Needs --brain-inputs (the state feed carries STOP, and the joints input is
+    // what the command path inverts).  Empty = off: nothing is sent.
+    std::string actuate;
 };
 
 void usage() {
@@ -104,10 +114,11 @@ void usage() {
         "                 [--imu --brain-inputs [--state-sub tcp://127.0.0.1:5592]\n"
         "                  [--body-calib pi_host/calib/body_measured_fsr.json] [--servo-map pi_host/calib/servo_map.json]]\n"
         "  --brain-inputs needs --imu and benchd started with --state-pub 5592; --dump-inputs N prints them\n"
+        "  --actuate tcp://127.0.0.1:5594 publishes the brain's actions to benchd (--cmd-port 5594); needs --brain-inputs\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
-        "  NO ACTUATION: this binary has no servo path (SPEC 1.1)\n");
+        "  no servo path here (SPEC 1.1): --actuate only publishes targets; benchd decides whether to apply them\n");
 }
 
 // SCHED_FIFO is a request, not a requirement: without CAP_SYS_NICE it fails and the
@@ -144,12 +155,18 @@ int main(int argc, char** argv) {
         else if (v == "--body-calib" && i + 1 < argc) a.body_calib = argv[++i];
         else if (v == "--servo-map" && i + 1 < argc)  a.servo_map = argv[++i];
         else if (v == "--dump-inputs" && i + 1 < argc) a.dump_inputs = std::atol(argv[++i]);
+        else if (v == "--actuate" && i + 1 < argc)     a.actuate = argv[++i];
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
     if (a.brain_inputs && a.tof) {
         std::fprintf(stderr, "ogma_host: --brain-inputs takes the belly ToF from benchd's state feed; "
                              "--tof would put a second process on /dev/i2c-1\n");
+        return 2;
+    }
+    if (!a.actuate.empty() && !a.brain_inputs) {
+        std::fprintf(stderr, "ogma_host: --actuate needs --brain-inputs (STOP rides the state feed, and a brain "
+                             "with no body inputs must not drive the body)\n");
         return 2;
     }
     if (a.brain_inputs && !a.imu) {
@@ -445,6 +462,40 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
+        // ---- actuation: the brain's actions -> pulse targets -> benchd ----------------
+        void* cmd_pub = nullptr;
+        ogma::hw::brain::ActionMap amap;
+        if (!a.actuate.empty()) {
+            amap = ogma::hw::brain::ActionMap::load(a.body_calib);
+            if (!amap.ok) { std::fprintf(stderr, "ogma_host: --actuate: %s\n", amap.why.c_str()); return 1; }
+            // Parity receipt, at start: the sim's own u -> target samples, re-run here.  A
+            // stale export or a drifted formula refuses to drive rather than drive wrong.
+            int checked = 0;
+            for (const auto& smp : amap.u_check) {
+                const auto t = ogma::hw::brain::leg_targets_from_u(smp.at("leg").get<int>(),
+                    smp.at("u")[0].get<double>(), smp.at("u")[1].get<double>(), smp.at("u")[2].get<double>(), amap);
+                for (int j = 0; j < 3; ++j)
+                    if (std::fabs(t[size_t(j)] - smp.at("t")[size_t(j)].get<double>()) > 1e-9) {
+                        std::fprintf(stderr, "ogma_host: --actuate: action map disagrees with the sim's u_check "
+                                             "(leg %d joint %d: %.6f vs %.6f) — re-export the body calib\n",
+                                     smp.at("leg").get<int>(), j, t[size_t(j)], smp.at("t")[size_t(j)].get<double>());
+                        return 1;
+                    }
+                ++checked;
+            }
+            if (checked == 0) { std::fprintf(stderr, "ogma_host: --actuate: no u_check samples in %s\n", a.body_calib.c_str()); return 1; }
+            cmd_pub = zmq_socket(zmq_ctx, ZMQ_PUB);
+            int hwm = 2, linger = 0;
+            zmq_setsockopt(cmd_pub, ZMQ_SNDHWM, &hwm, sizeof hwm);   // drop, never queue stale commands
+            zmq_setsockopt(cmd_pub, ZMQ_LINGER, &linger, sizeof linger);
+            if (zmq_connect(cmd_pub, a.actuate.c_str()) != 0) {
+                std::fprintf(stderr, "ogma_host: --actuate connect %s failed: %s\n", a.actuate.c_str(), zmq_strerror(errno));
+                return 1;
+            }
+            std::printf("ogma_host: ACTUATION ON — publishing pulse targets to %s (backend discrete, %d sim samples "
+                        "re-checked, %.1f us/rad); benchd applies them only in dev/autonomous mode and not STOPPED\n",
+                        a.actuate.c_str(), checked, calib.servo_us_per_rad);
+        }
 
         rt = a.realtime ? try_realtime() : false;
         std::printf("ogma_host: config=%s hz=%.2f diag=%u %s\n",
@@ -486,6 +537,13 @@ int main(int argc, char** argv) {
         int64_t bi_last_tof_ms = 0; long bi_tof_pub = 0;
         ogma::hw::brain::TickInputs bi_in;
         constexpr long kStateStaleTicks = 10;   // 200 ms at 50 Hz with no new frame -> withhold
+        bool bi_stopped = false;                // benchd's STOP, from the state feed
+        long bi_paused = 0;                     // ticks the graph did not run because benchd was STOPPED
+        // Actuation accounting (all zero without --actuate).
+        std::array<double, 12> act_u{};
+        std::array<bool, 12>   act_seen{};
+        uint64_t act_seq = 0;
+        long act_sent = 0, act_dropped = 0, act_unseen = 0, act_blind = 0, act_stale_ch = 0;
 
         while (g_run && (a.max_ticks == 0 || ticks < a.max_ticks)) {
             next.tv_nsec += period_ns;
@@ -497,6 +555,7 @@ int main(int argc, char** argv) {
             clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c0);
             const long late_ns = (w0.tv_sec - next.tv_sec) * 1000000000L + (w0.tv_nsec - next.tv_nsec);
             if (late_ns > period_ns) ++overruns;
+            bool brain_paused = false, inputs_this_tick = false;
 
             // Bridge whatever is NEW onto the Bus, then tick.  Nothing stale is
             // republished: feeding the GNG the same window twice would bake a
@@ -660,6 +719,7 @@ int main(int argc, char** argv) {
                         for (int k = 0; k < 12; ++k) bi_in.us[size_t(k)] = us[size_t(k)].get<int>();
                         for (int k = 0; k < 4; ++k)  bi_in.fsr[size_t(k)] = fs[size_t(k)].get<int>();
                         bi_in.fsr_ok = f.value("fsr_ok", false);
+                        bi_stopped = f.value("stopped", false);
                         const uint64_t seq = f.value("seq", uint64_t(0));
                         if (bi_last_seq && seq != bi_last_seq + 1) ++bi_seq_gaps;
                         bi_last_seq = seq;
@@ -684,8 +744,15 @@ int main(int argc, char** argv) {
                 // Publish only on a fresh IMU sample AND a frame no older than 200 ms.  A
                 // withheld tick is ABSENT on the bus, never a guessed value (the same rule
                 // the belly channel follows).
-                if (!imu_fresh) ++bi_no_imu;
-                else if (bi_last_frame_tick < 0 || ticks - bi_last_frame_tick > kStateStaleTicks) ++bi_stale;
+                // ⚠ STOPPED PAUSES THE BRAIN.  benchd froze the body; a brain that kept ticking
+                // would learn that its actions do nothing, and the EPMs would bake a frozen
+                // world.  So the graph does not tick at all until resume — the brain is held
+                // in time, never reset (SPEC §4.2.2).
+                const bool frame_fresh = bi_last_frame_tick >= 0 && ticks - bi_last_frame_tick <= kStateStaleTicks;
+                brain_paused = bi_stopped && frame_fresh;
+                if (brain_paused) ++bi_paused;
+                else if (!imu_fresh) ++bi_no_imu;
+                else if (!frame_fresh) ++bi_stale;
                 else if (!ogma::hw::brain::all_servos_commanded(bi_in.us, builder_map)) ++bi_uncommanded;
                 else {
                     for (int k = 0; k < 3; ++k) {
@@ -715,6 +782,7 @@ int main(int argc, char** argv) {
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
                     pub("distress", &t.distress, 1);
                     ++bi_published;
+                    inputs_this_tick = true;
                     // INSTRUMENT: the values themselves, not just the count, so a shadow run
                     // can be checked against what the pose says they must be.
                     if (a.dump_inputs > 0 && ticks % a.dump_inputs == 0) {
@@ -733,9 +801,32 @@ int main(int argc, char** argv) {
                 }
             }
 
-            {
+            if (!brain_paused) {
                 std::lock_guard<std::mutex> lk(inst_mtx);
+                const uint64_t tid = instance->tick_count();   // the id this tick's tokens carry
                 instance->tick();
+                if (cmd_pub) {
+                    // Same freshness rule as OgmaBrain: a channel not published THIS tick keeps
+                    // its cached value.  Nothing is sent until every channel has been fresh
+                    // once (an unset channel would read as u = 0, a real pose), and nothing on
+                    // a tick whose inputs were withheld: a blind brain must not drive the body.
+                    const auto& topics = ogma::hw::brain::action_topics();
+                    for (int k = 0; k < 12; ++k) {
+                        auto ao = std::dynamic_pointer_cast<const ogma::ActionOut>(bus->last_value(topics[size_t(k)]));
+                        if (ao && ao->tick_id == tid) { act_u[size_t(k)] = double(ao->accel); act_seen[size_t(k)] = true; }
+                        else ++act_stale_ch;
+                    }
+                    const bool all_seen = std::all_of(act_seen.begin(), act_seen.end(), [](bool b) { return b; });
+                    if (!all_seen) ++act_unseen;
+                    else if (!inputs_this_tick) ++act_blind;
+                    else {
+                        const auto tgt = ogma::hw::brain::joint_targets_from_u(act_u, amap);
+                        const auto us = ogma::hw::brain::us_from_hinge_angles(tgt, builder_map, calib.servo_us_per_rad);
+                        const nlohmann::json c = {{"seq", ++act_seq}, {"tick", long(tid)}, {"us", us}};
+                        const std::string msg = "cmd " + c.dump();
+                        if (zmq_send(cmd_pub, msg.data(), msg.size(), ZMQ_DONTWAIT) >= 0) ++act_sent; else ++act_dropped;
+                    }
+                }
             }
             ++ticks;
             if (diag.running()) diag.publish_tick(uint64_t(ticks), *instance);
@@ -825,6 +916,9 @@ int main(int argc, char** argv) {
         mic.stop(); cam.stop(); rangefinder.stop();
         if (vid_pub) zmq_close(vid_pub);
         if (state_sub) zmq_close(state_sub);
+        // ⚠ Every socket closed BEFORE zmq_ctx_term, which blocks until they are (the
+        // benchd shutdown hang of 2026-10-03 was exactly this).
+        if (cmd_pub) zmq_close(cmd_pub);
         if (zmq_ctx) zmq_ctx_term(zmq_ctx);
         if (!mic.last_error().empty())         std::fprintf(stderr, "ogma_host: mic died: %s\n", mic.last_error().c_str());
         if (!cam.last_error().empty())         std::fprintf(stderr, "ogma_host: camera died: %s\n", cam.last_error().c_str());
@@ -854,6 +948,12 @@ int main(int argc, char** argv) {
                         "%ld ticks on held FSR values; %ld ground_clearance readings from the feed\n",
                         bi_published, ticks, bi_no_imu, bi_stale, bi_uncommanded, bi_frames,
                         (unsigned long long)bi_seq_gaps, bi_bad, bi_fsr_stale, bi_tof_pub);
+            std::printf("ogma_host: STOP — %ld ticks paused (graph held, not reset) while benchd was STOPPED\n", bi_paused);
+        }
+        if (cmd_pub) {
+            std::printf("ogma_host: actuation — %ld commands sent, %ld dropped at the socket; not sent: %ld ticks before "
+                        "every action channel had been published, %ld ticks with withheld inputs; %ld stale channel-reads\n",
+                        act_sent, act_dropped, act_unseen, act_blind, act_stale_ch);
         }
         if (tof) {
             std::printf("ogma_host: belly ToF — %ld reads, %ld valid (%.1f%%), last "
