@@ -416,6 +416,7 @@ int main(int argc, char** argv) {
         // the failure shape that cannot be seen from outside.
         void* state_sub = nullptr;
         std::unique_ptr<ogma::hw::brain::BrainInputBuilder> builder;
+        ogma::hw::brain::ServoMapping builder_map;
         if (a.brain_inputs) {
             auto body = ogma::hw::brain::BodyCalib::load(a.body_calib);
             auto map  = ogma::hw::brain::ServoMapping::load(a.servo_map);
@@ -427,6 +428,7 @@ int main(int argc, char** argv) {
                         "%.1f us/rad, FSR contact >= %d counts, state feed %s\n",
                         body.geometry.c_str(), body.l3, fsr.body_mass_g, calib.servo_us_per_rad,
                         fsr.contact_counts, a.state_endpoint.c_str());
+            builder_map = map;   // kept for the commanded-servo check each tick
             builder = std::make_unique<ogma::hw::brain::BrainInputBuilder>(
                 std::move(body), std::move(map), fsr, calib.servo_us_per_rad);
             if (!zmq_ctx) zmq_ctx = zmq_ctx_new();
@@ -476,6 +478,7 @@ int main(int argc, char** argv) {
         ogma::hw::ImuSample imu_last{};
         // Brain-input accounting: frames in, ticks published, ticks withheld and why.
         long bi_frames = 0, bi_published = 0, bi_stale = 0, bi_no_imu = 0, bi_bad = 0, bi_fsr_stale = 0;
+        long bi_uncommanded = 0;   // a servo with no pulse (0 us): its angle is unknown
         uint64_t bi_last_seq = 0, bi_seq_gaps = 0;
         long bi_last_frame_tick = -1;
         int64_t bi_last_tof_ms = 0; long bi_tof_pub = 0;
@@ -681,6 +684,7 @@ int main(int argc, char** argv) {
                 // the belly channel follows).
                 if (!imu_fresh) ++bi_no_imu;
                 else if (bi_last_frame_tick < 0 || ticks - bi_last_frame_tick > kStateStaleTicks) ++bi_stale;
+                else if (!ogma::hw::brain::all_servos_commanded(bi_in.us, builder_map)) ++bi_uncommanded;
                 else {
                     for (int k = 0; k < 3; ++k) {
                         bi_in.accel_g[size_t(k)]  = imu_last.accel_body[size_t(k)];
@@ -828,9 +832,9 @@ int main(int argc, char** argv) {
         if (builder) {
             // From outside, a brain fed nothing looks like a brain fed well: say what reached it.
             std::printf("ogma_host: brain inputs — %ld/%ld ticks published; withheld: %ld no fresh IMU, "
-                        "%ld stale/absent state feed; %ld frames (%llu seq gaps, %ld unparseable), "
+                        "%ld stale/absent state feed, %ld servos not commanded (0 us); %ld frames (%llu seq gaps, %ld unparseable), "
                         "%ld ticks on held FSR values; %ld ground_clearance readings from the feed\n",
-                        bi_published, ticks, bi_no_imu, bi_stale, bi_frames,
+                        bi_published, ticks, bi_no_imu, bi_stale, bi_uncommanded, bi_frames,
                         (unsigned long long)bi_seq_gaps, bi_bad, bi_fsr_stale, bi_tof_pub);
         }
         if (tof) {

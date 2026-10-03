@@ -102,6 +102,17 @@ inline std::array<double, 12> hinge_angles_from_us(const std::array<int, 12>& us
     return a;
 }
 
+// A pulse of 0 µs is benchd's "never commanded / limp": the servo is unpowered and its
+// angle is UNKNOWN.  hinge_angles_from_us() would turn it into ±2.7 rad, clamped to the
+// joints topic's rails — a confident, plausible, wrong posture.  First seen on the robot
+// 2026-10-03 (fresh benchd, all channels unarmed).  So joints exist only when every channel
+// the map uses carries a real pulse; otherwise the tick is withheld, never guessed.
+inline bool all_servos_commanded(const std::array<int, 12>& us_by_channel, const ServoMapping& m) {
+    for (int k = 0; k < 12; ++k)
+        if (us_by_channel[size_t(m.by_lj[size_t(k)].ch)] <= 0) return false;
+    return true;
+}
+
 // ---- body calibration exported by the sim --------------------------------------------
 struct BodyCalib {
     std::string geometry;

@@ -233,3 +233,15 @@ TEST(BrainBuilder, AFailedFsrReadHoldsTheLastGoodValuesAndSaysSo) {
     }
     for (float v : bad.joint_torque) EXPECT_EQ(v, 0.0f);
 }
+
+TEST(BrainServoMap, AZeroPulseMeansUncommandedAndJointsAreWithheld) {
+    // Seen on the robot 2026-10-03: a fresh benchd reports 0 us on every unarmed channel.
+    const ServoMapping m = real_map();
+    ASSERT_TRUE(m.complete) << m.why;
+    std::array<int, 12> us{};
+    EXPECT_FALSE(all_servos_commanded(us, m));
+    for (int k = 0; k < 12; ++k) us[size_t(k)] = 1500;
+    EXPECT_TRUE(all_servos_commanded(us, m));
+    us[9] = 0;                                     // one limp channel (sim fl knee)
+    EXPECT_FALSE(all_servos_commanded(us, m));
+}
