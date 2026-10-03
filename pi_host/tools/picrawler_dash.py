@@ -12,23 +12,32 @@ allocates nothing, so the two tools cannot interfere no matter the order they st
 ControlServer already handles each client on its own thread, so a second connection is
 expected, not tolerated.
 
-Read-only, with ONE exception: SPACE stops the robot, and SPACE again resumes it
-(benchd's `stop` / `resume`).  STOP freezes every servo where it is; it moves nothing.
-Resume only lifts a stop -- the run mode, and with it whether a brain may drive, is set
-on the robot and cannot be changed from here (port doc SPEC §1.1).  The STOP request goes
-on its own socket and the screen polls on a background thread, so the key is never stuck
-behind a slow brain query.
+Monitoring by default.  Two ways it can act on the robot:
+
+- SPACE stops the robot, and SPACE again resumes it (benchd's `stop` / `resume`).  STOP
+  freezes every servo where it is; it moves nothing.  The STOP request goes on its own
+  socket and the screen polls on a background thread, so the key is never stuck behind a
+  slow brain query.
+- C "run config" (2026-10-03, operator): pick a brain config from the Godot launcher's
+  allowlist, confirm, and after a 10 s COUNTDOWN — any key aborts, and nothing reaches the
+  robot before it ends — the robot is posed and the brain gets the servos (dash_run.py).
+  E ends the run (rescue pose).  This works ONLY on the robot: it needs benchd's
+  loopback control socket, so a dash run over ssh from elsewhere cannot start a brain
+  (port doc SPEC §1.1 as amended 2026-10-03).
 """
 from __future__ import annotations
 
 import argparse
 import curses
 import json
+import math
 import os
 import socket
 import threading
 import time
 from typing import Any, Optional
+
+import dash_run  # beside this file
 
 try:
     import zmq
@@ -178,6 +187,14 @@ class Dash:
         self.stop_reply_time = 0.0
         self.msg = ""                         # the last STOP/RESUME outcome, shown on screen
         self.msg_bad = False
+        # ---- run config ----
+        self.ui = "monitor"                  # monitor | pick | confirm | run
+        self.configs: list = []
+        self.sel = 0
+        self.poses: list = ["stand"]
+        self.pose_idx = 0
+        self.checks: list = []
+        self.ctrl: Optional[dash_run.RunController] = None
         self.interval = interval
         self.host = host
         self.modules: list[dict] = []
@@ -247,11 +264,152 @@ class Dash:
             except curses.error:
                 pass
 
+    # ---------------------------------------------------------------- run config UI
+    def open_picker(self) -> None:
+        try:
+            self.configs = dash_run.list_configs()
+        except OSError as e:
+            self.msg, self.msg_bad = f"cannot read the config list: {e}", True
+            return
+        self.sel = 0
+        self.ui = "pick"
+
+    def open_confirm(self) -> None:
+        io = dash_run.RobotIo()
+        self.poses = (io.bench.call("pose.list") or {}).get("poses") or ["stand"]
+        self.pose_idx = self.poses.index("stand") if "stand" in self.poses else 0
+        self.checks = dash_run.preflight(io, self.poses[self.pose_idx])
+        io.bench.close(); io.ctl.close()
+        self.ui = "confirm"
+
+    def open_confirm_keep_pose(self) -> None:
+        io = dash_run.RobotIo()
+        self.checks = dash_run.preflight(io, self.poses[self.pose_idx])
+        io.bench.close(); io.ctl.close()
+
+    def start_run(self) -> None:
+        cfg = self.configs[self.sel]
+        self.ctrl = dash_run.RunController(dash_run.RobotIo(), cfg, self.poses[self.pose_idx])
+        self.ctrl.start()
+        self.ui = "run"
+
+    def handle_run_key(self, ch: int) -> bool:
+        """Keys while a run screen is up.  Returns True if the poller should refresh."""
+        if self.ui == "pick":
+            if ch in (curses.KEY_UP, ord("k")):
+                self.sel = max(0, self.sel - 1)
+            elif ch in (curses.KEY_DOWN, ord("j")):
+                self.sel = min(len(self.configs) - 1, self.sel + 1)
+            elif ch in (10, 13, curses.KEY_ENTER) and self.configs:
+                self.open_confirm()
+            elif ch in (27, ord("q")):
+                self.ui = "monitor"
+            return False
+        if self.ui == "confirm":
+            blocked = any(ck.blocking and not ck.ok for ck in self.checks)
+            faithful = self.configs[self.sel].faithful
+            if ch in (ord("p"), ord("P")) and self.poses:
+                self.pose_idx = (self.pose_idx + 1) % len(self.poses)
+                self.open_confirm_keep_pose()
+            elif ch in (ord("r"), ord("R")):
+                self.open_confirm_keep_pose()
+            elif not blocked and ((faithful and ch in (10, 13, curses.KEY_ENTER)) or (not faithful and ch == ord("Y"))):
+                self.start_run()
+            elif ch in (27, ord("q")):
+                self.ui = "pick"
+            return False
+        if self.ui == "run" and self.ctrl is not None:
+            ph = self.ctrl.st.phase
+            if ph == "countdown":
+                self.ctrl.abort()                       # ANY key: nothing has moved yet
+            elif ph in ("prepare", "running"):
+                if ch == ord(" "):
+                    self.toggle_stop()
+                    return True
+                if ch in (ord("e"), ord("E")):
+                    self.ctrl.end()
+                elif ch in (ord("q"), ord("Q")):
+                    self.msg, self.msg_bad = "a run is live: E ends it (rescue pose), then q quits", True
+            elif ph in ("done", "aborted"):
+                self.ui, self.ctrl = "monitor", None
+            return True
+        return False
+
+    def draw_pick(self, scr, C) -> None:
+        h, w = scr.getmaxyx()
+        self._line(scr, 0, 1, "RUN CONFIG — the Godot launcher's picrawler allowlist", C(HEAD) | curses.A_BOLD)
+        self._line(scr, 1, 1, "↑/↓ select   ENTER confirm   ESC back      ✓ ROBOT = robot-faithful inputs "
+                              "(the only kind validated on hardware)", C(DIM))
+        rows = max(1, h - 4)
+        top = max(0, min(self.sel - rows + 1, len(self.configs) - rows)) if self.sel >= rows else 0
+        for i, c in enumerate(self.configs[top:top + rows]):
+            k = top + i
+            tag = "✓ ROBOT " if c.faithful else "  sim   "
+            attr = (curses.A_REVERSE if k == self.sel else 0) | C(OK if c.faithful else WARN)
+            self._line(scr, 3 + i, 1, f"{tag} {c.name[:max(10, w - 12)]}", attr)
+
+    def draw_confirm(self, scr, C) -> None:
+        c = self.configs[self.sel]
+        y = 0
+        self._line(scr, y, 1, "RUN CONFIG — confirm", C(HEAD) | curses.A_BOLD); y += 2
+        self._line(scr, y, 3, c.name, C(OK if c.faithful else WARN) | curses.A_BOLD); y += 1
+        self._line(scr, y, 3, c.file, C(DIM)); y += 2
+        if not c.faithful:
+            self._line(scr, y, 3, "⚠ SIM INPUTS: tuned on inputs the robot cannot publish (achieved joint "
+                                  "angles, god's-eye signals). On hardware it runs partly blind.",
+                       C(BAD) | curses.A_BOLD); y += 2
+        self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
+        self._line(scr, y, 3, f"tilt guard: STOP past {dash_run.TILT_LIMIT_DEG:.0f}°    STOP/resume: SPACE    "
+                              f"end: E (rescue pose)", C(DIM)); y += 2
+        for ck in self.checks:
+            col = OK if ck.ok else (BAD if ck.blocking else WARN)
+            self._line(scr, y, 3, ("✓ " if ck.ok else ("✗ " if ck.blocking else "! ")) + ck.text, C(col)); y += 1
+        y += 1
+        if any(ck.blocking and not ck.ok for ck in self.checks):
+            self._line(scr, y, 3, "cannot run: fix the ✗ items (R re-checks)   ESC back", C(BAD) | curses.A_BOLD)
+        else:
+            go = "ENTER" if c.faithful else "Y (capital — sim-input config)"
+            self._line(scr, y, 3, f"{go}: start the {dash_run.COUNTDOWN_S:.0f} s countdown   R re-check   ESC back",
+                       C(HEAD) | curses.A_BOLD)
+
+    def draw_run_panel(self, scr, C, y: int) -> int:
+        st = self.ctrl.st
+        h, w = scr.getmaxyx()
+        if st.phase == "countdown":
+            n = int(math.ceil(st.countdown_left))
+            self._line(scr, y, 1, f" RUN {self.ctrl.cfg.name[:60]} ", C(HEAD) | curses.A_BOLD); y += 2
+            self._line(scr, y, 3, f"  STARTING IN  {n:2d} s  — the robot will move to '{self.ctrl.pose}' "
+                                  f"and the brain will take the servos  ",
+                       C(BAD) | curses.A_BOLD | curses.A_REVERSE); y += 2
+            self._line(scr, y, 3, "ANY KEY ABORTS — nothing has been sent to the robot yet", C(WARN) | curses.A_BOLD)
+            return y + 2
+        col = {"prepare": WARN, "running": OK, "ending": WARN, "done": HEAD, "aborted": WARN}.get(st.phase, DIM)
+        el = (time.monotonic() - st.started_at) if st.started_at and st.phase == "running" else 0
+        belly = f"{st.belly_mm:.0f} mm" if st.belly_mm is not None else "—"
+        tilt = f"{st.tilt_deg:.0f}°" if st.tilt_deg is not None else "—"
+        vb = f"{st.vbat:.2f} V" if st.vbat is not None else "—"
+        self._line(scr, y, 1, f" RUN {st.phase.upper():8} {self.ctrl.cfg.name[:44]}  {el:4.0f} s   "
+                              f"belly {belly}  tilt {tilt}  vbat {vb} ", C(col) | curses.A_BOLD | curses.A_REVERSE); y += 1
+        self._line(scr, y, 3, st.detail, C(col)); y += 1
+        keys = ("SPACE stop/resume   E end run (rescue pose)" if st.phase in ("prepare", "running")
+                else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
+        self._line(scr, y, 3, keys, C(DIM)); y += 1
+        self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM))
+        return y + 1
+
     def draw(self, scr) -> None:
         scr.erase()
         h, w = scr.getmaxyx()
         C = curses.color_pair
         y = 0
+        if self.ui == "pick":
+            self.draw_pick(scr, C); scr.refresh(); return
+        if self.ui == "confirm":
+            self.draw_confirm(scr, C); scr.refresh(); return
+        if self.ui == "run" and self.ctrl is not None:
+            y = self.draw_run_panel(scr, C, y)
+            if self.ctrl.st.phase == "countdown":
+                scr.refresh(); return
         # Uptimes that mean something: the daemons', not this viewer's.
         bench_up = float((self.st or {}).get("uptime_s", 0.0))
         brain_up = float((self.sensors or {}).get("uptime_s", 0.0))
@@ -482,7 +640,7 @@ class Dash:
         self._line(scr, h - 2, 36,
                    "— EPM amber = under 30% baked (still earning its vocabulary)", C(DIM))
         self._line(scr, h - 1, 1,
-                   f"SPACE stop/resume   q quit   r refresh   every {self.interval:.1f}s"
+                   f"SPACE stop/resume   C run config   q quit   r refresh   every {self.interval:.1f}s"
                    f"   baked = visits >= baking_threshold", C(DIM))
         scr.refresh()
 
@@ -525,9 +683,16 @@ class Dash:
                 ch = scr.getch()
             except curses.error:
                 ch = -1
-            if ch == ord(" "):
+            if ch != -1 and self.ui != "monitor":
+                if self.handle_run_key(ch):
+                    wake.set()
+                draw()
+            elif ch == ord(" "):
                 self.toggle_stop()
                 wake.set()                       # re-poll now so the banner catches up
+                draw()
+            elif ch in (ord("c"), ord("C")):
+                self.open_picker()
                 draw()
             elif ch in (ord("q"), ord("Q"), 27):
                 quit_.set(); wake.set()

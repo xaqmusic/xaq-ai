@@ -653,6 +653,14 @@ one step away — and it would quietly undo the parity rationale while looking l
 - **The daemon refuses a brain-rate command stream on the calibration channel** outright.
 - **The dashboard has no path to start the brain.** Not discouraged — absent.
 
+> **Amended by the operator, 2026-10-03.** `picrawler_dash` — the terminal console that runs ON the
+> Pi — may run a brain config (C "run config": pick from the Godot launcher's allowlist, confirm, a
+> 10 s countdown that sends nothing, then pose → `dev` → `ogma_host --actuate` → resume). What stays
+> structural: the brain still runs in `ogma_host` on the Pi, never in Godot, so parity is untouched;
+> the launch goes through benchd's control socket, which is bound to 127.0.0.1, so a dash started
+> anywhere else cannot start a brain; and the laptop's Godot dashboard remains calibration-only.
+> `pi_host/tools/dash_run.py`.
+
 ### 2. Rates — sampling and transport are different problems
 
 **Only one channel can exceed the tick, and only because of a decision already made.**
