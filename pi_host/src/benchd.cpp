@@ -204,6 +204,7 @@ struct State {
                    json out() const { return {{"mean_us", n ? sum / n : 0.0}, {"max_us", max}, {"n", n}}; } };
     Split sp_servo, sp_adc, sp_tof, sp_servo_w, sp_adc_w, sp_tof_w;   // *_w = the window being filled
     Split sp_lock, sp_feed, sp_lock_w, sp_feed_w;   // mutex wait at wake; the whole feed block
+    Split sp_pre, sp_total, sp_pre_w, sp_total_w;   // lock -> feed start; wake -> end (TickBudget's span)
     json last_saved_pulses;           // what save_known_pulses() last wrote
     int64_t vbat_low_since_ms = -1;   // start of the current below-limp stretch, -1 if none
     double  vbat_dip_min      = 99.0;
@@ -579,6 +580,7 @@ struct State {
         sp_servo = sp_servo_w; sp_adc = sp_adc_w; sp_tof = sp_tof_w;
         sp_servo_w = {}; sp_adc_w = {}; sp_tof_w = {};
         sp_lock = sp_lock_w; sp_feed = sp_feed_w; sp_lock_w = {}; sp_feed_w = {};
+        sp_pre = sp_pre_w; sp_total = sp_total_w; sp_pre_w = {}; sp_total_w = {};
         const int64_t now = mono_ms();
         json servos = json::array();
         for (int c = 0; c < ServoDriver::N; ++c) {
@@ -698,7 +700,8 @@ struct State {
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
                 {"overruns", overruns}, {"bus_errors", bus_errors},
                 {"tick_split", {{"servo", sp_servo.out()}, {"adc4", sp_adc.out()}, {"tof", sp_tof.out()},
-                                {"lock_wait", sp_lock.out()}, {"feed_total", sp_feed.out()}}},
+                                {"lock_wait", sp_lock.out()}, {"feed_total", sp_feed.out()},
+                                {"wake_to_feed", sp_pre.out()}, {"tick_total", sp_total.out()}}},
                 {"i2c_retries", {{"hat_0x14", bus.retries(0x14)}, {"tof_0x29", bus.retries(0x29)},
                                  {"ina_0x40", bus.retries(0x40)}}}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
                 {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
@@ -874,6 +877,7 @@ void tick_thread(State& S) {
         // The state feed reads the same four channels every tick, so when both are on the
         // reads are shared: the bus never pays twice for one sample.
         timespec feed0; clock_gettime(CLOCK_MONOTONIC, &feed0);
+        S.sp_pre_w.add((feed0.tv_sec - now.tv_sec) * 1e6 + (feed0.tv_nsec - now.tv_nsec) / 1e3);
         const bool want_fast  = g_adc_poll_ms > 0 && ms >= S.adc_fast_next_ms;
         const bool want_state = g_state_pub != nullptr;
         // The brain needs the belly ToF at its own ~30 Hz, not frame()'s 10 Hz, and in
@@ -938,6 +942,7 @@ void tick_thread(State& S) {
         timespec w1, c1;
         clock_gettime(CLOCK_MONOTONIC, &w1);
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1);
+        S.sp_total_w.add((w1.tv_sec - now.tv_sec) * 1e6 + (w1.tv_nsec - now.tv_nsec) / 1e3);
         if (S.budget.sample((w1.tv_sec - now.tv_sec) * 1000000000L + (w1.tv_nsec - now.tv_nsec),
                             (c1.tv_sec - cpu0.tv_sec) * 1000000000L + (c1.tv_nsec - cpu0.tv_nsec)))
             S.tick_cost = S.budget.last();
