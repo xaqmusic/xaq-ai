@@ -22,6 +22,7 @@ void ServoDriver::command(int ch, int us) {
         // start at the target: sweeping in from an arbitrary current_ would be no better.
         current_[ch] = known_[ch] > 0 ? std::clamp(known_[ch], lim_[ch].min_us, lim_[ch].max_us)
                                       : clamped;
+        out_[ch] = current_[ch];
         if (!timer_ready_[ch]) {
             hat_.setup_servo_timer(ch);
             for (int c = (ch / 4) * 4; c < (ch / 4) * 4 + 4; ++c) timer_ready_[c] = true;
@@ -47,8 +48,13 @@ void ServoDriver::tick() {
         const int delta = target_[ch] - current_[ch];
         const int step  = std::clamp(delta, -cfg_.slew_us_per_tick, cfg_.slew_us_per_tick);
         current_[ch] += step;
-        hat_.set_pulse_us(ch, current_[ch]);
-        known_[ch] = current_[ch];
+        int pulse = current_[ch];
+        if (lag_alpha_ > 0.0) {
+            out_[ch] += lag_alpha_ * (double(current_[ch]) - out_[ch]);
+            pulse = int(std::lround(out_[ch]));
+        }
+        hat_.set_pulse_us(ch, pulse);
+        known_[ch] = pulse;
         if (current_[ch] <= lim_[ch].min_us || current_[ch] >= lim_[ch].max_us) ++at_limit_ticks_[ch];
     }
 }

@@ -169,6 +169,10 @@ void* g_cmd_sub  = nullptr;      // touched only by tick_thread once it starts
 ogma::hw::brain::RunMode g_start_mode = ogma::hw::brain::RunMode::Bench;
 // The calibration channel's stream guard: commanding verbs (servo.set, pose.set) per
 // second.  The bench dashboard throttles slider drags to 20 Hz; a brain is 600/s.
+// First-order lag on the pulse the HAT gets, in brain modes only (ServoDriver::set_output_lag).
+// 0 = off, the default: byte-identical.  --servo-lag-alpha.  The sim's unloaded joint fits
+// 0.22-0.28 per tick; the brain's own servo forward model is 0.2.
+double g_lag_alpha = 0.0;
 constexpr int     CAL_STREAM_MAX       = 30;
 constexpr int64_t CAL_STREAM_WINDOW_MS = 1000;
 // ⚠ DO NOT fsync() THE RECORD FROM record().  It was tried 2026-09-08 and MEASURED: at a
@@ -570,7 +574,7 @@ struct State {
         rescue_until_ms = 0;
         int frozen = 0;
         for (int c = 0; c < ServoDriver::N; ++c)
-            if (driver.armed(c)) { driver.command(c, driver.current_us(c)); ++frozen; }
+            if (driver.armed(c)) { driver.freeze(c); ++frozen; }     // at the pulse ON THE LINE
         const bool was = stopped;
         stopped = true;
         if (!was) { stop_why = why; stopped_at_ms = mono_ms(); ++stops; }
@@ -619,6 +623,9 @@ struct State {
         if (m != RunMode::Bench) stop("mode change");
         else { stop("mode change"); stopped = false; stop_why.clear(); last_client_ms = mono_ms(); }
         mode = m;
+        // The output lag is a brain-mode property: calibration and pose moves stay unlagged.
+        // stop() above froze every channel at its output, so this cannot jump anything.
+        driver.set_output_lag(m != RunMode::Bench ? g_lag_alpha : 0.0);
         auth.grant(mono_ms());
         record("mode", {{"from", ogma::hw::brain::mode_name(from)}, {"to", ogma::hw::brain::mode_name(m)}, {"who", who}});
         return "";
@@ -698,6 +705,7 @@ struct State {
         for (int c = 0; c < ServoDriver::N; ++c) {
             auto lim = driver.limits(c);
             servos.push_back({{"ch", c}, {"target_us", driver.target_us(c)}, {"current_us", driver.current_us(c)},
+                              {"out_us", driver.output_us(c)},
                               {"armed", driver.armed(c)}, {"at_limit_s", driver.time_at_limit_s(c)},
                               {"min_us", lim.min_us}, {"max_us", lim.max_us}});
         }
@@ -824,6 +832,7 @@ struct State {
                 {"stopped", stopped}, {"stop_why", stopped ? json(stop_why) : json(nullptr)},
                 {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
                 {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
+                {"servo_lag_alpha", driver.output_lag()},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
@@ -1035,8 +1044,7 @@ void tick_thread(State& S) {
                         break;
                     }
                     case BrainAuthority::Event::Hold:
-                        for (int c = 0; c < ServoDriver::N; ++c)
-                            if (S.driver.armed(c)) S.driver.command(c, S.driver.current_us(c));
+                        for (int c = 0; c < ServoDriver::N; ++c) S.driver.freeze(c);
                         S.record("brain_stream_lost", {{"action", "hold"}, {"last_tick", S.cmd_last_tick},
                                                        {"losses", S.auth.losses()}});
                         break;
@@ -1134,9 +1142,10 @@ void tick_thread(State& S) {
                 json fsr = json::array();
                 for (int c = 0; c < 4; ++c)
                     fsr.push_back(fsr_ok && c < int(a.size()) ? a[size_t(c)] : json(-1));
-                json us = json::array();
+                json us = json::array(), out = json::array();
                 uint32_t armed = 0;
                 for (int c = 0; c < ServoDriver::N; ++c) {
+                    out.push_back(S.driver.output_us(c));   // the pulse on the line (== us, lag off)
                     us.push_back(S.driver.current_us(c));
                     if (S.driver.armed(c)) armed |= (1u << c);
                 }
@@ -1146,6 +1155,7 @@ void tick_thread(State& S) {
                 // mode + stopped ride the feed so ogma_host can PAUSE the brain while the body
                 // is frozen, instead of letting it learn that its actions do nothing.
                 const json f = {{"seq", ++g_state_seq}, {"t", ms}, {"us", us}, {"armed", armed},
+                                {"out", out},
                                 {"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
                                 {"fsr", fsr}, {"fsr_ok", fsr_ok},
                                 {"tof_m", S.tof_m}, {"tof_valid", S.tof_ok && S.tof_valid},
@@ -1580,6 +1590,7 @@ int main(int argc, char** argv) {
         else if (a == "--state-pub") g_state_pub_port = std::max(0, std::atoi(argv[i + 1]));
         else if (a == "--vbat-sustain-ms") g_vbat_sustain_ms = std::max(0, std::atoi(argv[i + 1]));
         else if (a == "--cmd-port") g_cmd_port = std::max(0, std::atoi(argv[i + 1]));
+        else if (a == "--servo-lag-alpha") g_lag_alpha = std::clamp(std::atof(argv[i + 1]), 0.0, 1.0);
         else if (a == "--ctl-port") g_ctl_port = std::max(0, std::atoi(argv[i + 1]));
         else if (a == "--mode") {
             if (!ogma::hw::brain::parse_mode(argv[i + 1], g_start_mode)) { std::fprintf(stderr, "--mode must be bench, dev or autonomous\n"); return 2; }
@@ -1739,6 +1750,8 @@ int main(int argc, char** argv) {
     std::printf("ogma_benchd: brain command path %s\n", g_cmd_port > 0
                 ? ("ON  cmd 127.0.0.1:" + std::to_string(g_cmd_port) + (g_ctl_port > 0 ? "  ctl 127.0.0.1:" + std::to_string(g_ctl_port) : std::string("  (no ctl socket: mode fixed by --mode)"))).c_str()
                 : "off (bench daemon only)");
+    std::printf("ogma_benchd: servo output lag %s\n", g_lag_alpha > 0.0
+                ? ("alpha " + std::to_string(g_lag_alpha) + " per tick, brain modes only").c_str() : "off");
     std::printf("ogma_benchd: MODE %s%s\n", ogma::hw::brain::mode_name(S.mode),
                 S.mode == ogma::hw::brain::RunMode::Bench ? "  (calibration deadman ON)"
                 : "  — STOPPED until resumed; NO calibration deadman (SPEC §4.2)");

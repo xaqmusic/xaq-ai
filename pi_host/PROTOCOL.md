@@ -17,7 +17,7 @@ socket (see [Run modes](#run-modes-and-the-brains-command-path-spec-41-42)). Bot
 |---|---|---|---|
 | verbs | `tcp://<pi>:5590` | ZMQ **REQ/REP** | one JSON object each way |
 | telemetry | `tcp://<pi>:5591` | ZMQ **PUB/SUB**, topic `bench` | **one single-part message per frame: the bytes `bench ` followed by the JSON**, at 10 Hz. Subscribers set `ZMQ_CONFLATE` (newest frame, never a backlog) — which is *why* it is single-part: CONFLATE does not support multi-part messages, and SUB filtering is a prefix match so the in-band topic still filters |
-| state feed (`--state-pub`) | `tcp://<pi>:5592` | PUB, topic `state` | 50 Hz, for `ogma_host`: `{seq, t, us[12], armed, mode, stopped, fsr[4], fsr_ok, tof_m, tof_valid, tof_ms}`. Read-only: it carries no verbs |
+| state feed (`--state-pub`) | `tcp://<pi>:5592` | PUB, topic `state` | 50 Hz, for `ogma_host`: `{seq, t, us[12], out[12] (pulse on the line), armed, mode, stopped, fsr[4], fsr_ok, tof_m, tof_valid, tof_ms}`. Read-only: it carries no verbs |
 | brain commands (`--cmd-port`) | **`tcp://127.0.0.1:5594`** | SUB (benchd binds, CONFLATE), topic `cmd` | from `ogma_host --actuate`: `cmd {"seq", "tick", "us": [12 by HAT channel]}`, one per brain tick. **Loopback only, by bind address** |
 | control (`--ctl-port`) | **`tcp://127.0.0.1:5593`** | REQ/REP | `mode.get`, `mode.set {mode}`, `stop`, `resume`, `status`, `ping`. **Loopback only**; `pi_host/tools/ogma_ctl.py` speaks it |
 
@@ -53,6 +53,12 @@ socket. The calibration channel can read the mode (`mode`) and cannot change it.
   slew (`--normal-slew`, 40 µs/tick = 3.67 rad/s) as everything else. Telemetry
   `brain.clamped_mask` says which channels the envelope clamped on the last applied frame, and
   `brain.last_us` is what the brain asked for before the clamp.
+- **Optional servo output lag (`--servo-lag-alpha`, default 0 = off).** In a brain mode only,
+  the HAT gets `out += α·(current − out)` each tick instead of the slewed pulse itself, so the
+  hobby servo moves like the sim's joint (unloaded sim joints fit α 0.22–0.28; the brain's own
+  servo model is 0.2). `servos[].current_us` and the state feed stay the slewed command (the
+  brain's efference copy); `servos[].out_us` is the pulse on the line; `servo_lag_alpha` echoes
+  the setting. STOP and a stream hold freeze at `out_us`, so a stop never coasts.
 - **A brain-rate stream on the calibration channel is refused** (SPEC §1.1): more than 30
   `servo.set` + `pose.set` in any second → `ok:false`, counted in `cal_stream_refused`. The
   dashboard throttles slider drags to 20 Hz on one channel; a brain is 600 commands/s.

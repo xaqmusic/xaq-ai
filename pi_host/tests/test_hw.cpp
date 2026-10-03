@@ -395,6 +395,73 @@ TEST(ServoDriver, AnMcuResetForgetsTheKnownPulse) {
     EXPECT_EQ(d.current_us(0), 1500);              // falls back to the legacy start
 }
 
+TEST(ServoDriver, OutputLagOffIsTheUnlaggedPulse) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    EXPECT_EQ(d.output_lag(), 0.0);
+    d.command(0, 1500); d.tick(); d.command(0, 1700); d.tick();
+    EXPECT_EQ(d.output_us(0), d.current_us(0));
+    EXPECT_EQ(d.last_sent_us(0), 1540);
+}
+
+TEST(ServoDriver, OutputLagFollowsTheSlewedPulseFirstOrder) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    d.command(0, 1700);
+    d.tick();                                      // current 1540; out 1500 + 0.2*40 = 1508
+    EXPECT_EQ(d.current_us(0), 1540);              // the efference copy is unchanged
+    EXPECT_EQ(d.output_us(0), 1508);
+    EXPECT_EQ(d.last_sent_us(0), 1508);            // and the HAT gets the lagged pulse
+    for (int i = 0; i < 60; ++i) d.tick();
+    EXPECT_EQ(d.output_us(0), 1700);               // converges on the target
+}
+
+TEST(ServoDriver, OutputLagSmoothsAFullSlewReversal) {
+    // The robot's thrash: the command reverses at full slew every tick or two.  The lagged
+    // output must move less than the slewed pulse does.
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    int cur_span = 0, out_span = 0, lo_c = 9999, hi_c = 0, lo_o = 9999, hi_o = 0;
+    for (int i = 0; i < 40; ++i) {
+        d.command(0, (i % 2) ? 1400 : 1600);
+        d.tick();
+        if (i < 20) continue;                      // steady oscillation only, not the rise
+        lo_c = std::min(lo_c, d.current_us(0)); hi_c = std::max(hi_c, d.current_us(0));
+        lo_o = std::min(lo_o, d.output_us(0));  hi_o = std::max(hi_o, d.output_us(0));
+    }
+    cur_span = hi_c - lo_c; out_span = hi_o - lo_o;
+    EXPECT_EQ(cur_span, 40);
+    EXPECT_LT(out_span, cur_span / 2);
+}
+
+TEST(ServoDriver, FreezeHoldsThePulseOnTheLineNotTheCommand) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    d.command(0, 2000);
+    for (int i = 0; i < 5; ++i) d.tick();          // current runs ahead of the output
+    ASSERT_GT(d.current_us(0), d.output_us(0));
+    const int on_line = d.output_us(0);
+    d.freeze(0);
+    for (int i = 0; i < 20; ++i) d.tick();
+    EXPECT_EQ(d.output_us(0), on_line);            // STOP stops where the servo IS
+    EXPECT_EQ(d.current_us(0), on_line);
+}
+
+TEST(ServoDriver, ChangingTheLagNeverJumpsTheOutput) {
+    FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 0, 50.0});
+    d.command(0, 1500); d.tick();
+    d.set_output_lag(0.2);
+    d.command(0, 2000);
+    for (int i = 0; i < 3; ++i) d.tick();
+    const int out = d.output_us(0);
+    d.freeze(0);                                   // benchd freezes before changing the lag
+    d.set_output_lag(0.0);
+    d.tick();
+    EXPECT_EQ(d.last_sent_us(0), out);
+}
+
 TEST(ServoDriver, WatchdogLimpsWhenCommandsStop) {
     FakeI2cBus bus; RobotHat hat(bus); ServoDriver d(hat, {40, 5, 50.0});
     d.command(2, 1500);

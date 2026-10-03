@@ -54,6 +54,7 @@
 #include <csignal>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <string>
@@ -529,6 +530,51 @@ int main(int argc, char** argv) {
         ogma::hw::Vl53l0x::Reading tof_last{};
         long imu_reads = 0;
         ogma::hw::ImuSample imu_last{};
+        // ⚠ THE IMU IS SAMPLED ON ITS OWN THREAD AT 225 Hz, NOT ONCE PER TICK.  It was
+        // per-tick (50 Hz) until 2026-10-03, and on the first brain-driven run the attitude
+        // filter ended 117 deg from the accelerometer with the robot resting upright.  The
+        // servos step at exactly the tick rate, so their vibration sits ON a 50 Hz sample
+        // rate and aliases toward DC — a gyro "bias" the filter integrates as tilt.  benchd
+        // samples on a 225 Hz thread for exactly this reason (its header).  The tick takes
+        // the newest fused attitude, and the MEAN gyro since the last tick: a box-filter
+        // decimation whose integral is the true rotation, so heading integrated per tick
+        // in the builder does not alias either.
+        struct ImuShared {
+            std::mutex m;
+            ogma::hw::ImuSample last{};
+            std::array<double, 3> gsum{};
+            int gn = 0;
+            uint64_t seq = 0;
+            long reads = 0, errors = 0;
+        } imu_sh;
+        std::atomic<bool> imu_run{true};
+        std::thread imu_thr;
+        uint64_t imu_seen_seq = 0;
+        if (imu) {
+            imu_thr = std::thread([&] {
+                const auto period = std::chrono::microseconds(1000000 / 225);
+                auto nxt = std::chrono::steady_clock::now();
+                while (imu_run && g_run) {
+                    nxt += period;
+                    ogma::hw::ImuSample m;
+                    const bool ok = imu->sample(m) && m.ok;
+                    {
+                        std::lock_guard<std::mutex> lk(imu_sh.m);
+                        if (ok) {
+                            imu_sh.last = m;
+                            for (int k = 0; k < 3; ++k) imu_sh.gsum[size_t(k)] += m.gyro_body[size_t(k)];
+                            ++imu_sh.gn; ++imu_sh.seq; ++imu_sh.reads;
+                        } else ++imu_sh.errors;
+                    }
+                    std::this_thread::sleep_until(nxt);
+                }
+            });
+        }
+        // An exception out of the loop must not destroy a joinable thread (std::terminate).
+        struct ImuJoiner {
+            std::atomic<bool>& run; std::thread& t;
+            ~ImuJoiner() { run = false; if (t.joinable()) t.join(); }
+        } imu_joiner{imu_run, imu_thr};
         // Brain-input accounting: frames in, ticks published, ticks withheld and why.
         long bi_frames = 0, bi_published = 0, bi_stale = 0, bi_no_imu = 0, bi_bad = 0, bi_fsr_stale = 0;
         long bi_uncommanded = 0;   // a servo with no pulse (0 us): its angle is unknown
@@ -660,8 +706,20 @@ int main(int argc, char** argv) {
             bool imu_fresh = false;
             if (imu) {
                 ogma::hw::ImuSample m;
-                if (imu->sample(m) && m.ok) {
-                    ++imu_reads;
+                bool got = false;
+                {
+                    std::lock_guard<std::mutex> lk(imu_sh.m);
+                    if (imu_sh.seq != imu_seen_seq) {
+                        m = imu_sh.last;
+                        if (imu_sh.gn > 0)
+                            for (int k = 0; k < 3; ++k) m.gyro_body[size_t(k)] = float(imu_sh.gsum[size_t(k)] / imu_sh.gn);
+                        imu_sh.gsum = {}; imu_sh.gn = 0;
+                        imu_seen_seq = imu_sh.seq;
+                        imu_reads = imu_sh.reads;
+                        got = true;
+                    }
+                }
+                if (got) {
                     imu_fresh = true;
                     imu_last = m;
                     const ogma::body::Vec3f up(m.up_fused[0], m.up_fused[1], m.up_fused[2]);
@@ -911,6 +969,10 @@ int main(int argc, char** argv) {
                 std::fflush(stdout);
             }
         }
+        imu_run = false;
+        if (imu_thr.joinable()) imu_thr.join();
+        if (imu) std::printf("ogma_host: IMU sampler — %ld samples at 225 Hz target, %ld read errors\n",
+                             imu_sh.reads, imu_sh.errors);
         // A channel that died mid-run must SAY so.  "0 windows" is indistinguishable
         // from a silent room, a lens cap, and an empty corridor unless the error shows.
         mic.stop(); cam.stop(); rangefinder.stop();

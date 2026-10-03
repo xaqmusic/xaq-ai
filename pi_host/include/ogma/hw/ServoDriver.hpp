@@ -20,6 +20,9 @@
 //                not go limp — and if that move is small it can pass for nothing
 //                happening, which is how it corrupts a measurement quietly.
 //                wire action and is never the safe one (SPEC §4.1)
+//   output lag   OPTIONAL (alpha 0 = off, the default, byte-identical): a first-order
+//                lag between the slewed pulse and the HAT, so the real servo moves the way
+//                the sim's joint moves (see set_output_lag)
 //   time-at-limit  per-channel seconds spent commanded AT a clamp bound — a
 //                sustained stall against carpet is invisible without current
 //                sensing and will cook a servo quietly
@@ -28,6 +31,7 @@
 #include "ogma/hw/RobotHat.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 namespace ogma::hw {
@@ -56,6 +60,35 @@ public:
     // True when every armed channel has reached its target.
     bool settled() const { for (int c = 0; c < N; ++c) if (armed_[c] && current_[c] != target_[c]) return false; return true; }
     ServoLimits limits(int ch) const { return lim_[ch]; }
+
+    // ⚠ THE SIM'S JOINT LAGS ITS TARGET; A HOBBY SERVO BARELY DOES.  In the sim the joint
+    // follows the slew-limited target through PD + a 30 ms torque lag + inertia: unloaded
+    // (swing) it fits a first-order lag of alpha 0.22-0.28 per tick (P-e.h0 trace, 2026-10-03),
+    // and that lag is what turns the brain's full-slew command reversals into motion.  A real
+    // servo tracks the 50 Hz staircase almost at once, so the robot showed the raw command:
+    // jerky, and faster than the sim.  With alpha > 0 the HAT gets
+    //     out += alpha * (current - out)
+    // each tick.  current_ (the slewed command) is unchanged and is still what current_us()
+    // reports — it is the brain's efference copy, and the brain's own servo forward model
+    // (alpha 0.2) is applied to THAT, so at alpha 0.2 the brain's joint model is the pulse
+    // the servo actually receives.  It does not reproduce stance: there the sim joint is held
+    // off target by load on a soft PD, which no filter on the command can mimic.
+    // Changing alpha snaps every channel's output to its current pulse: no jump either way.
+    void set_output_lag(double alpha) {
+        lag_alpha_ = std::clamp(alpha, 0.0, 1.0);
+        for (int c = 0; c < N; ++c) out_[c] = current_[c];
+    }
+    double output_lag() const { return lag_alpha_; }
+    // The pulse actually on the line (== current_us when the lag is off).
+    int output_us(int ch) const { return lag_alpha_ > 0.0 ? int(std::lround(out_[ch])) : current_[ch]; }
+    // STOP: hold the channel at the pulse on the line NOW.  With the lag on, current_ runs
+    // ahead of the output, so freezing at current_us would keep the servo moving for ~100 ms.
+    void freeze(int ch) {
+        if (ch < 0 || ch >= N || !armed_[ch]) return;
+        const int at = output_us(ch);
+        current_[ch] = at; out_[ch] = at;
+        command(ch, at);
+    }
 
     // Request a pulse width; it is clamped now and slewed by tick().
     // Also feeds the watchdog.
@@ -101,6 +134,8 @@ private:
     std::array<bool, N> timer_ready_{};
     std::array<int, N>  known_{};            // last pulse written to the HAT, 0 = unknown
     std::array<uint64_t, N> at_limit_ticks_{};
+    std::array<double, N> out_{};             // the lagged output (used only when lag_alpha_ > 0)
+    double lag_alpha_ = 0.0;
     uint64_t tick_count_ = 0;
     uint64_t last_cmd_tick_ = 0;
     bool any_armed_ = false;
