@@ -13,8 +13,12 @@ The sequence, and why each step is where it is:
            (which latches STOP) -> start ogma_host --actuate.  ⚠ ogma_host starts AFTER the
            mode change, so the brain is paused from its first tick: brain_run/arm.sh started
            it in bench mode, where it ticked ~12 s with its commands ignored.
-  run      resume.  A tilt guard (80 deg, the operator's limit) STOPs the robot; benchd
-           itself STOPs on a lost brain stream (dev mode) and handles low battery.  SPACE is
+  run      resume.  The run is AUTONOMOUS (operator, 2026-10-03): benchd recovers a HAT reset
+           by itself — disarm, wait for the HAT, re-arm one channel at a time, resume — and the
+           dashboard shows a warning each time.  A tilt guard (80 deg, the operator's limit)
+           STOPs the robot; benchd handles a lost brain stream (hold, then rescue) and low
+           battery.  Pause -> HAT off -> move the robot -> HAT on -> SPACE resumes (benchd
+           re-arms first).  SPACE is
            the dashboard's STOP/resume, on its own socket, independent of this thread.
   reset    R: stop -> benchd `pose.recall` of the start pose (control socket, STOPPED only).
            The body goes home; the brain stays paused, not reset, and SPACE resumes it once
@@ -242,6 +246,9 @@ class RunState:
     started_at: float = 0.0       # monotonic, when the brain got the servos
     events: list = field(default_factory=list)
     log_path: Optional[Path] = None
+    hat_resets: int = 0           # HAT outages seen during this run
+    hat_warning: str = ""         # the latest, shown persistently on the run panel
+    recovering: bool = False
     belly_mm: Optional[float] = None
     tilt_deg: Optional[float] = None
     vbat: Optional[float] = None
@@ -250,8 +257,9 @@ class RunState:
 
 class RunController:
     def __init__(self, io, cfg: ConfigEntry, pose: str = "stand",
-                 countdown_s: float = COUNTDOWN_S, ready_extra_s: float = 4.0):
-        self.io, self.cfg, self.pose = io, cfg, pose
+                 countdown_s: float = COUNTDOWN_S, ready_extra_s: float = 4.0,
+                 run_mode: str = "autonomous"):
+        self.io, self.cfg, self.pose, self.run_mode = io, cfg, pose, run_mode
         self.countdown_s, self.ready_extra_s = countdown_s, ready_extra_s
         self.st = RunState()
         self._abort = threading.Event()        # before the brain has the servos: abort
@@ -355,11 +363,15 @@ class RunController:
                 return True
             self.io.sleep(0.05)
 
-    def _wait(self, cond: Callable[[], bool], timeout: float, ping: bool = False) -> Optional[bool]:
-        """Poll cond until true; None if aborted, False on timeout."""
+    def _wait(self, cond: Callable[[], bool], timeout: float, ping: bool = False,
+              abortable: bool = True) -> Optional[bool]:
+        """Poll cond until true; None if aborted, False on timeout.  ⚠ The END sequence must
+        pass abortable=False: E sets the abort flag, so its waits used to return at once —
+        the rescue never got to land with the deadman pinged, and benchd's deadman fired a
+        second rescue on every run."""
         t_end = self.io.now() + timeout
         while self.io.now() < t_end:
-            if self._abort.is_set():
+            if abortable and self._abort.is_set():
                 return None
             if ping:
                 self.io.bench.call("ping")        # bench deadman: a controlling client
@@ -403,11 +415,11 @@ class RunController:
             self._ev("pose did not land" if landed is False else "aborted while posing")
             return False
         # ---- brain mode, latched STOP, then the brain ----
-        m = self.io.ctl.call("mode.set", mode="dev")
+        m = self.io.ctl.call("mode.set", mode=self.run_mode)
         if not m or not m.get("ok"):
-            self._ev(f"mode dev refused: {(m or {}).get('error', 'no reply')}")
+            self._ev(f"mode {self.run_mode} refused: {(m or {}).get('error', 'no reply')}")
             return False
-        self._ev("benchd in dev, STOPPED; starting the brain (paused until resume)")
+        self._ev(f"benchd in {self.run_mode}, STOPPED; starting the brain (paused until resume)")
         stamp = time.strftime("%Y%m%d_%H%M%S")
         self.st.log_path = LOG_DIR / f"dashrun_{stamp}_{Path(self.cfg.file).stem[-40:]}.log"
         self._host = self.io.spawn_host(self.cfg.path, self.st.log_path)
@@ -437,18 +449,34 @@ class RunController:
 
     def _running(self) -> None:
         hat0 = None
+        rec_prev = None
         while not self._end.is_set():
             f = self._status()
             if f:
-                # benchd disarms everything and latches STOP on a HAT MCU reset (servo-current
-                # brownout); say so loudly — the robot just went slack, and only E recovers it.
-                hr = f.get("hat_resets")
+                # HAT outages: benchd disarms, waits for the HAT, re-arms one channel at a time
+                # and (autonomous, the reset's own stop) resumes.  Say so every time.
+                hr, hat = f.get("hat_resets"), (f.get("hat") or {})
+                self.st.recovering = bool(hat.get("recovering"))
                 if hr is not None:
                     if hat0 is None:
                         hat0 = hr
                     elif hr > hat0:
+                        self.st.hat_resets += hr - hat0
                         hat0 = hr
-                        self._ev("HAT RESET (servo-current brownout) — all servos disarmed, STOPPED. E ends the run")
+                        auto = f.get("stopped") and f.get("stop_why") == "HAT reset" and hat.get("recover_resume")
+                        self.st.hat_warning = (f"⚠ HAT RESET #{self.st.hat_resets} at {time.strftime('%H:%M:%S')} — "
+                                               + ("auto-recovering: servos re-arm one at a time, then the run continues"
+                                                  if auto else "servos disarmed; SPACE re-arms and resumes, R stands, E ends"))
+                        self._ev(self.st.hat_warning)
+                    if rec_prev and not self.st.recovering and not f.get("stopped"):
+                        self._ev(f"recovered from HAT reset #{self.st.hat_resets} — run continues")
+                        self.st.hat_warning = f"⚠ {self.st.hat_resets} HAT reset(s) this run, last recovered at {time.strftime('%H:%M:%S')}"
+                    rec_prev = self.st.recovering
+                    if hat.get("outage") and f.get("stopped") and f.get("stop_why") == "HAT reset" \
+                            and not hat.get("recover_resume") and "backed off" not in self.st.hat_warning \
+                            and hat.get("outages_60s", 0) > 3:
+                        self.st.hat_warning = "⚠ HAT reset 3+ times in 60 s — auto-recovery backed off. SPACE re-arms and resumes"
+                        self._ev(self.st.hat_warning)
                 imu = f.get("imu") or {}
                 tof = f.get("tof") or {}
                 up = imu.get("up_fused")
@@ -488,9 +516,12 @@ class RunController:
                 except Exception:
                     pass
         self.io.ctl.call("mode.set", mode="bench")
+        # The rescue pose needs a live HAT; after an outage, wait for it rather than sending
+        # a pose into the void (the operator may be switching it back on).
+        self._wait(lambda: not (self._status().get("hat") or {}).get("outage"), 20.0, ping=True, abortable=False)
         r = self.io.bench.call("limp")
         self._ev("rescue pose commanded" if r and r.get("ok") else "rescue pose: no reply")
-        self._wait(lambda: not self._status().get("rescue_active"), 20.0, ping=True)
+        self._wait(lambda: not self._status().get("rescue_active"), 20.0, ping=True, abortable=False)
         if self._svc_was_active:
             ok = self.io.systemctl("start", "ogma-host")
             self._ev("ogma-host service restarted" if ok else "⚠ could not restart ogma-host")

@@ -219,7 +219,17 @@ struct State {
     int64_t cal_until_ms = 0;
     int64_t last_client_ms = 0;
     int  watchdog_trips = 0;
-    int     hat_resets = 0;           // HAT MCU resets detected (brownout or ours)
+    int     hat_resets = 0;           // HAT OUTAGES detected (a brownout reset, or the HAT switched off)
+    // ---- HAT outage + recovery (operator, 2026-10-03: "HAT reset is going to be a common
+    // theme on this robot — recover gracefully and continue the run") -------------------
+    bool    hat_outage = false;       // from detection until the HAT has answered sanely for 500 ms
+    int64_t last_bus_err_ms = -100000, last_garbage_ms = -100000;
+    std::vector<std::pair<int,int>> recover_targets;   // (ch, pulse on the line) at the reset
+    bool    recovering = false;       // staggered re-arm in progress
+    bool    recover_resume = false;   // resume the brain when the re-arm lands
+    int64_t recover_started_ms = 0;
+    std::vector<int64_t> outage_starts;                // for the backoff: 3 in 60 s
+    int     recoveries = 0;
     int64_t last_hat_reset_ms = -100000;
     int64_t last_mcu_reset_ms = -100000;   // when benchd itself last reset the MCU
     int  overruns = 0;
@@ -572,6 +582,7 @@ struct State {
     }
     // STOP: freeze every armed channel where it is now, abandon pose/rescue moves, latch.
     void stop(const char* why) {
+        if (recovering) { recovering = false; recover_resume = false; record("hat_recover_cancelled", {{"why", why}}); }
         pose_queue.clear();
         if (pose_move_active) { pose_move_active = false; driver.set_slew_us_per_tick(g_normal_slew_us); }
         rescue_until_ms = 0;
@@ -596,12 +607,21 @@ struct State {
         // brain never drives at all (measured on the robot 2026-10-03: resume was accepted
         // and nothing happened).  Pose the robot first (e.g. pose.set rescue in bench mode).
         if (brain_mode()) {
+            if (recovering) { recover_resume = true; return ""; }        // resumes when the re-arm lands
             std::string unarmed;
             for (int c = 0; c < ServoDriver::N; ++c)
                 if (!driver.armed(c)) unarmed += (unarmed.empty() ? "" : ",") + std::to_string(c);
-            if (!unarmed.empty())
+            if (!unarmed.empty()) {
+                // After a HAT outage: re-arm the remembered pulses one channel at a time, and
+                // resume the brain when they land.  The reply is ok with stopped still true.
+                if (!recover_targets.empty()) {
+                    if (!hat_healthy(now)) return "the HAT is not answering — is it switched on? (wait a moment after power-on)";
+                    start_recovery(true, who);
+                    return "";
+                }
                 return "channel(s) " + unarmed + " not armed — the brain cannot see or safely drive them; "
-                       "set a pose first in bench mode (e.g. the rescue pose), then switch to the brain mode";
+                       "set a pose first (R in a dash run, or pose.set in bench mode)";
+            }
         }
         record("resume", {{"who", who}, {"held_ms", now - stopped_at_ms}, {"why_stopped", stop_why},
                           {"mode", ogma::hw::brain::mode_name(mode)}});
@@ -626,6 +646,7 @@ struct State {
         if (m != RunMode::Bench) stop("mode change");
         else { stop("mode change"); stopped = false; stop_why.clear(); last_client_ms = mono_ms(); }
         mode = m;
+        recovering = false; recover_resume = false; recover_targets.clear();
         // The output lag is a brain-mode property: calibration and pose moves stay unlagged.
         // stop() above froze every channel at its output, so this cannot jump anything.
         driver.set_output_lag(m != RunMode::Bench ? g_lag_alpha : 0.0);
@@ -634,20 +655,43 @@ struct State {
         return "";
     }
 
+    void note_bus_error() { ++bus_errors; last_bus_err_ms = mono_ms(); }
+    bool hat_healthy(int64_t now) const { return now - std::max(last_bus_err_ms, last_garbage_ms) > 500; }
+    int  outages_last_60s(int64_t now) const {
+        int n = 0; for (int64_t t : outage_starts) if (now - t <= 60000) ++n; return n;
+    }
+
     // ⚠ A HAT MCU RESET IS A FAULT, NOT A LOG LINE (robot, 2026-10-03).  Servo current spikes of
     // 2.4-3.0 A browned out the HAT's own microcontroller mid-run.  Its servo timers came back
     // unprogrammed, the driver kept writing pulses into them, and the servos were driven to their
-    // end stops — a "bad pose" 4 s into the run, and later every hip1 at an extreme.  So on a
-    // detected reset: forget the timers (ServoDriver re-programs a timer before its next pulse)
-    // and DISARM every channel, so nothing is written and the servos go unpowered rather than
-    // being driven anywhere; in a brain mode, also latch STOP (the brain's next command would
-    // otherwise re-arm a channel at full speed from an unknown position).  The operator recovers:
-    // E / a pose in bench mode re-arms, staggered.  Rate-limited: one reset is one event.
-    void on_hat_reset(const char* why) {
+    // end stops.  So on a detected outage: remember the pulse each armed servo was last sent,
+    // forget the timers, DISARM every channel (nothing is written: the servos go unpowered rather
+    // than being driven anywhere) and, in a brain mode, latch STOP — which also pauses the brain.
+    //
+    // RECOVERY re-arms the remembered pulses ONE CHANNEL AT A TIME (the pose path's stagger):
+    // each servo crosses only the little it sagged while unpowered, and never twelve at once,
+    // which is the current spike that caused the reset.  Then the brain resumes, its learning
+    // intact.  When it runs:
+    //   - AUTONOMOUS, the stop came from the reset itself, fewer than 3 outages in 60 s:
+    //     automatically, once the HAT has answered sanely for 500 ms;
+    //   - otherwise when the operator resumes (SPACE).  So pause -> HAT off -> move the robot ->
+    //     HAT on -> SPACE re-arms and continues; R first returns to the start pose instead.
+    // One outage is one event however long it lasts: a HAT switched off for 30 s counts once.
+    void on_hat_reset(const char* why, bool injected = false) {
         const int64_t now = mono_ms();
-        if (now - last_hat_reset_ms < 2000) return;
+        if (hat_outage && !recovering) return;            // still the same outage
+        const bool had_armed = [&] { for (int c = 0; c < ServoDriver::N; ++c) if (driver.armed(c)) return true; return false; }();
+        if (had_armed && !recovering) {
+            recover_targets.clear();
+            for (int c = 0; c < ServoDriver::N; ++c)
+                if (driver.armed(c)) recover_targets.push_back({c, driver.output_us(c)});
+        }                                                 // a reset DURING recovery keeps the original targets
+        hat_outage = true;
         last_hat_reset_ms = now;
         ++hat_resets;
+        outage_starts.push_back(now);
+        while (outage_starts.size() > 16) outage_starts.erase(outage_starts.begin());
+        recovering = false;
         pose_queue.clear();
         if (pose_move_active) { pose_move_active = false; driver.set_slew_us_per_tick(g_normal_slew_us); }
         rescue_until_ms = 0;
@@ -655,8 +699,37 @@ struct State {
         driver.forget_timers();
         try { driver.limp_all(); } catch (...) {}
         if (brain_mode()) latch_stop("HAT reset");
-        record("hat_reset", {{"why", why}, {"count", hat_resets}, {"mode", ogma::hw::brain::mode_name(mode)},
+        const bool auto_ok = mode == ogma::hw::brain::RunMode::Autonomous && stopped && stop_why == "HAT reset"
+                             && outages_last_60s(now) <= 3 && !recover_targets.empty();
+        recover_resume = auto_ok;
+        record("hat_reset", {{"why", why}, {"injected", injected}, {"count", hat_resets},
+                             {"mode", ogma::hw::brain::mode_name(mode)}, {"saved_channels", recover_targets.size()},
+                             {"auto_recover", auto_ok}, {"outages_60s", outages_last_60s(now)},
                              {"action", "timers forgotten, all channels disarmed"}});
+    }
+    // Start the staggered re-arm.  Caller holds m; the HAT must be healthy.
+    bool start_recovery(bool resume_after, const char* who) {
+        if (recover_targets.empty() || recovering) return recovering;
+        begin_pose_move(recover_targets);
+        recovering = true; recover_resume = resume_after; recover_started_ms = mono_ms();
+        record("hat_recover_start", {{"who", who}, {"channels", recover_targets.size()}, {"resume_after", resume_after}});
+        return true;
+    }
+    // Per tick (caller holds m): end an outage once the HAT is healthy, start an automatic
+    // recovery, and resume when a re-arm has landed.
+    void service_recovery(int64_t now) {
+        if (hat_outage && hat_healthy(now)) {
+            hat_outage = false;
+            record("hat_back", {{"outage_ms", now - last_hat_reset_ms}});
+            if (recover_resume && stopped && stop_why == "HAT reset") start_recovery(true, "auto");
+        }
+        if (recovering && !pose_move_active && pose_queue.empty()) {
+            recovering = false;
+            ++recoveries;
+            record("hat_recovered", {{"took_ms", now - recover_started_ms}, {"recoveries", recoveries}});
+            recover_targets.clear();
+            if (recover_resume) { recover_resume = false; resume("hat recovery"); }
+        }
     }
 
     void rescue(const char* why) {
@@ -741,10 +814,14 @@ struct State {
         try {
             for (int c = 0; c < RobotHat::N_ADC; ++c) adc.push_back(hat.adc_raw(c));
             const double v = adc[4].get<int>() * RobotHat::ADC_VREF / RobotHat::ADC_MAX * RobotHat::VBAT_DIV;
-            if (v > 9.0) { record("adc_garbage", {{"vbat", v}}); adc = last_adc; on_hat_reset("adc garbage (post-reset signature)"); }   // post-reset garbage
+            if (v > 9.0) {                                                // post-reset / HAT-off garbage
+                last_garbage_ms = mono_ms();
+                if (!hat_outage) record("adc_garbage", {{"vbat", v}});
+                adc = last_adc; on_hat_reset("adc garbage (post-reset signature)");
+            }   // post-reset garbage
             else last_adc = adc;
         } catch (const std::exception& e) {
-            ++bus_errors; adc = last_adc;                          // keep the last good reading
+            note_bus_error(); adc = last_adc;                      // keep the last good reading
             if (bus_errors % 50 == 1) record("bus_error", {{"where", "adc"}, {"what", e.what()}, {"count", bus_errors}});
         }
         sample_ina();
@@ -861,6 +938,11 @@ struct State {
                 {"stopped_ms", stopped ? now - stopped_at_ms : 0}, {"stops", stops},
                 {"brain", brain}, {"cal_stream_refused", cal_guard.refused()},
                 {"servo_lag_alpha", driver.output_lag()}, {"hat_resets", hat_resets},
+                {"hat", {{"outage", hat_outage}, {"healthy", hat_healthy(now)}, {"recovering", recovering},
+                         {"recover_resume", recover_resume}, {"saved_channels", recover_targets.size()},
+                         {"outages_60s", outages_last_60s(now)}, {"recoveries", recoveries},
+                         {"auto_recover", mode == ogma::hw::brain::RunMode::Autonomous},
+                         {"last_reset_age_ms", hat_resets ? now - last_hat_reset_ms : -1}}},
                 {"body", body}, {"vbat", vbat}, {"adc", adc}, {"armed_ch", armed_ch}, {"cal_ch", cal_ch},
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
@@ -1022,6 +1104,7 @@ void tick_thread(State& S) {
         const int64_t ms = mono_ms();
         try {
             S.service_pose_move();
+            S.service_recovery(ms);
             // ---- the brain's command stream (off unless --cmd-port) --------------------
             if (g_cmd_sub) {
                 using ogma::hw::brain::BrainAuthority;
@@ -1113,7 +1196,7 @@ void tick_thread(State& S) {
             // A NACK that survived the bus retries.  Count it, log it, carry on: the next
             // tick rewrites every armed pulse anyway.  Dying here left the robot limp and
             // the operator disconnected mid-calibration (2026-08-28).
-            ++S.bus_errors;
+            S.note_bus_error();
             if (S.bus_errors % 50 == 1) S.record("bus_error", {{"where", "tick"}, {"what", e.what()}, {"count", S.bus_errors}});
             // SunFounder's own recovery for a stuck MCU.  ⚠ RATE-LIMITED to one per 5 s: it fired
             // every 20 bus errors, and during a brownout (2026-10-03) that was ~20 resets in 4 s,
@@ -1164,7 +1247,7 @@ void tick_thread(State& S) {
                                                  + (r1.tv_nsec - r0.tv_nsec) / 1000L}});
             } catch (const std::exception& e) {
                 fsr_ok = false;
-                ++S.bus_errors;
+                S.note_bus_error();
                 if (S.bus_errors % 50 == 1)
                     S.record("bus_error", {{"where", want_fast ? "adc_fast" : "state"},
                                            {"what", e.what()}, {"count", S.bus_errors}});
@@ -1302,7 +1385,7 @@ json handle(State& S, const json& req) {   // caller holds m
     if (verb == "resume") {
         const std::string why = S.resume("operator");
         if (!why.empty()) return err(why);
-        return ok({{"stopped", false}, {"mode", ogma::hw::brain::mode_name(S.mode)}});
+        return ok({{"stopped", S.stopped}, {"recovering", S.recovering}, {"mode", ogma::hw::brain::mode_name(S.mode)}});
     }
     {
         // While the brain holds the servos, the calibration channel's commanding and
@@ -1585,7 +1668,8 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
                     {"stop_why", S.stopped ? json(S.stop_why) : json(nullptr)},
                     {"brain_age_ms", S.auth.age_ms(mono_ms())}, {"brain_applied", S.cmd_applied},
                     {"brain_frames", S.cmd_frames}, {"holding", S.auth.holding()},
-                    {"pose_move_active", S.pose_move_active}};
+                    {"pose_move_active", S.pose_move_active}, {"recovering", S.recovering},
+                    {"hat_outage", S.hat_outage}};
     };
     if (verb == "ping" || verb == "mode.get") return ok(summary());
     if (verb == "status") { json f = S.frame(); return ok(f); }
@@ -1611,6 +1695,7 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
         if (!S.stopped) return err("STOP first: a pose move must not fight the brain");
         if (S.low_battery) return err("battery low");
         if (mono_ms() < S.rail_guard_until_ms) return err("5 V rail under-voltage back-off — retry shortly");
+        if (!S.hat_healthy(mono_ms())) return err("the HAT is not answering — is it switched on?");
         if (!S.poses.contains(name) || !S.poses[name].contains("us") || !S.poses[name]["us"].is_array() ||
             S.poses[name]["us"].size() != size_t(ServoDriver::N)) return err("no saved pose '" + name + "'");
         std::vector<std::pair<int,int>> targets;
@@ -1618,6 +1703,8 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
             const json& v = S.poses[name]["us"][size_t(c)];
             if (v.is_number() && v.get<int>() >= FULL_MIN_US && v.get<int>() <= FULL_MAX_US) targets.push_back({c, v.get<int>()});
         }
+        S.recover_targets.clear();          // the operator chose the start pose over the saved one
+        S.recovering = false; S.recover_resume = false;
         S.begin_pose_move(targets);
         S.record("pose.recall", {{"name", name}, {"mode", ogma::hw::brain::mode_name(S.mode)}, {"channels", targets.size()}});
         json o = summary();
@@ -1629,7 +1716,17 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
         if (!why.empty()) return err(why);
         return ok(summary());
     }
-    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, pose.recall, status)");
+    // FAULT INJECTION: reset the HAT's MCU through its GPIO line — the same event a brownout
+    // causes — so recovery can be proven on the robot without waiting for one.  Recorded as
+    // injected: a drill must never be mistaken for a real reset in the record.
+    if (verb == "hat.reset") {
+        if (req.value("confirm", false) != true) return err("fault injection: send confirm=true");
+        if (!S.mcu || !S.mcu->ok()) return err("no MCU reset line");
+        S.mcu->reset();
+        S.on_hat_reset("injected via ctl hat.reset", true);
+        return ok(summary());
+    }
+    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, pose.recall, hat.reset, status)");
 }
 
 } // namespace
@@ -1838,7 +1935,7 @@ int main(int argc, char** argv) {
                 json req = json::parse(buf);
                 std::lock_guard<std::mutex> lk(S.m);
                 try { reply = which == 0 ? handle(S, req) : handle_ctl(S, req); }
-                catch (const std::exception& e) { ++S.bus_errors; reply = {{"ok", false}, {"error", std::string("bus: ") + e.what()}}; }
+                catch (const std::exception& e) { S.note_bus_error(); reply = {{"ok", false}, {"error", std::string("bus: ") + e.what()}}; }
                 const std::string v = req.value("verb", "");
                 if (v != "ping" && !(which == 1 && (v == "mode.get" || v == "status")))
                     S.record(which == 0 ? "verb" : "ctl", {{"req", req}, {"reply", reply}});

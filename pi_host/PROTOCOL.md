@@ -65,6 +65,33 @@ socket. The calibration channel can read the mode (`mode`) and cannot change it.
 - **`ogma_host` pauses the brain while STOPPED** (the state feed carries `stopped`): the graph
   does not tick, so it neither learns that its actions do nothing nor resets (SPEC §4.2.2).
 
+### HAT outages and recovery (2026-10-03)
+
+Servo current above ~2.4 A browns out the HAT's own microcontroller, and switching the HAT off is
+an outage too. A reset unprograms the servo timers, so writing pulses into them drives the servos
+to their stops. benchd therefore treats an outage as a fault:
+
+- **Detection:** the post-reset ADC signature (A4 reads > 9 V), or benchd's own MCU reset after
+  persistent bus errors (at most one per 5 s). One outage is one event, however long it lasts; it
+  ends once the HAT has answered sanely for 500 ms. Frame: `hat_resets`, and `hat {outage, healthy,
+  recovering, recover_resume, saved_channels, outages_60s, recoveries, auto_recover,
+  last_reset_age_ms}`. Records: `hat_reset` (with `injected`), `hat_back`, `hat_recover_start`,
+  `hat_recovered`, `hat_recover_cancelled`.
+- **Response:** remember the pulse each armed servo was last sent, forget the timers, **disarm
+  every channel** (nothing is written: the servos go unpowered, not driven), and in a brain mode
+  latch STOP (which pauses ogma_host).
+- **Recovery:** re-arm the remembered pulses **one channel at a time** (the pose stagger — never
+  twelve at once, the spike that caused it), then resume the brain with its learning intact.
+  - `autonomous`, the stop came from the reset itself, ≤ 3 outages in 60 s: automatic, once the HAT
+    is healthy.
+  - Otherwise on `resume` (SPACE): the reply is `ok` with `stopped: true, recovering: true`, and
+    the brain resumes when the re-arm lands. While the HAT is still out, resume is refused.
+  - `pose.recall` (R) instead returns to a saved pose and discards the remembered pulses.
+  - `stop` during a recovery cancels it.
+- **Operator workflow:** SPACE (pause) → HAT off → move the robot → HAT on → SPACE.
+- **Fault injection:** control-socket `hat.reset {confirm: true}` resets the MCU through its GPIO
+  line, the same event a brownout causes, recorded `injected: true`.
+
 ### STOP and resume (the dashboards' SPACE)
 
 `stop` **freezes**: every armed channel's target becomes the pulse it is at now, any pose or

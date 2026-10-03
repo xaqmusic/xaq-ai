@@ -223,7 +223,9 @@ class Dash:
         r = self.stopper.call("resume" if resuming else "stop")
         if r is not None and r.get("ok"):
             self.stop_reply, self.stop_reply_time = r, time.time()
-            self.msg = (f"RESUMED ({r.get('mode', '?')} mode)" if resuming
+            self.msg = ("re-arming the servos one at a time after the HAT reset — the run resumes when they land"
+                        if resuming and r.get("recovering")
+                        else f"RESUMED ({r.get('mode', '?')} mode)" if resuming
                         else "STOPPED — every servo frozen where it is.  SPACE to resume.")
             self.msg_bad = False
         else:
@@ -368,8 +370,11 @@ class Dash:
                                   "angles, god's-eye signals). On hardware it runs partly blind.",
                        C(BAD) | curses.A_BOLD); y += 2
         self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
+        self._line(scr, y, 3, f"mode: autonomous — a HAT reset is recovered automatically (warning shown)", C(DIM)); y += 1
         self._line(scr, y, 3, f"tilt guard: STOP past {dash_run.TILT_LIMIT_DEG:.0f}°    STOP/resume: SPACE    "
-                              f"reset to start pose: R    end: E (rescue pose)", C(DIM)); y += 2
+                              f"reset to start pose: R    end: E (rescue pose)", C(DIM)); y += 1
+        self._line(scr, y, 3, "HAT off mid-run: SPACE (pause) → HAT off → move the robot → HAT on → SPACE "
+                              "(re-arms one servo at a time, then continues)", C(DIM)); y += 2
         for ck in self.checks:
             col = OK if ck.ok else (BAD if ck.blocking else WARN)
             self._line(scr, y, 3, ("✓ " if ck.ok else ("✗ " if ck.blocking else "! ")) + ck.text, C(col)); y += 1
@@ -400,6 +405,11 @@ class Dash:
         self._line(scr, y, 1, f" RUN {st.phase.upper():8} {self.ctrl.cfg.name[:44]}  {el:4.0f} s   "
                               f"belly {belly}  tilt {tilt}  vbat {vb} ", C(col) | curses.A_BOLD | curses.A_REVERSE); y += 1
         self._line(scr, y, 3, st.detail, C(col)); y += 1
+        if st.recovering:
+            self._line(scr, y, 3, " RECOVERING FROM A HAT RESET — re-arming servos one at a time ",
+                       C(WARN) | curses.A_BOLD | curses.A_REVERSE); y += 1
+        if st.hat_warning:
+            self._line(scr, y, 3, st.hat_warning, C(BAD) | curses.A_BOLD); y += 1
         keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)"
                 if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")

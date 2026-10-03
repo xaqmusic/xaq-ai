@@ -55,6 +55,8 @@ class FakeRobot:
         self.mode, self.stopped = "bench", False
         self.pose_ticks = 0
         self.up_y, self.imu_ok, self.ctl_ok, self.host_dies = up_y, imu_ok, ctl_ok, host_dies
+        self.hat_resets, self.hat = 0, {"outage": False, "recovering": False, "recover_resume": False, "outages_60s": 0}
+        self.stop_why = None
         self.tmp = tmp
         self.bench = FakeRpc(self, "bench")
         self.ctl = FakeRpc(self, "ctl")
@@ -88,6 +90,7 @@ class FakeRobot:
             if moving:
                 self.pose_ticks -= 1
             return {"ok": True, "mode": self.mode, "stopped": self.stopped, "brain": {"frames": 0},
+                    "hat_resets": self.hat_resets, "hat": dict(self.hat), "stop_why": self.stop_why,
                     "imu": {"ok": self.imu_ok, "up_fused": [0, self.up_y, 0]} if self.imu_ok else None,
                     "vbat": 7.8, "low_battery": False, "servo_lag_alpha": 0.0,
                     "tof": {"m": 0.03, "valid": True}, "pose_move_active": moving, "rescue_active": False}
@@ -174,18 +177,18 @@ def test_abort_during_the_countdown_sends_nothing_to_the_robot(tmp_path, monkeyp
     assert robot.calls == []
 
 
-def test_the_brain_starts_only_after_dev_and_the_end_sequence_is_ordered(tmp_path, monkeypatch):
+def test_the_brain_starts_only_after_the_brain_mode_and_the_end_sequence_is_ordered(tmp_path, monkeypatch):
     robot, ctrl = make(tmp_path, monkeypatch)
     ctrl.start()
     assert wait_phase(ctrl, {"running"}), ctrl.st.events
     ctrl.end()
     ctrl.join(10)
     c = robot.calls
-    order = ["systemctl stop ogma-host", "pose.set", "mode.set=dev", "spawn", "resume"]
+    order = ["systemctl stop ogma-host", "pose.set", "mode.set=autonomous", "spawn", "resume"]
     idx = [c.index(x) for x in order]
     assert idx == sorted(idx), c
-    # No bench pre-roll: the brain process exists only once benchd is in dev (STOPPED).
-    assert c.index("spawn") > c.index("mode.set=dev")
+    # No bench pre-roll: the brain process exists only once benchd is in the brain mode (STOPPED).
+    assert c.index("spawn") > c.index("mode.set=autonomous")
     end = c[c.index("resume") + 1:]
     eorder = ["stop", "mode.set=bench", "limp", "systemctl start ogma-host"]
     eidx = [end.index(x) for x in eorder]
@@ -287,3 +290,59 @@ def test_every_step_is_written_to_the_events_file(tmp_path, monkeypatch):
     text = ctrl.events_path.read_text()
     for needle in ("moving to 'stand'", "RUNNING", "E pressed", "rescue pose commanded", "done"):
         assert needle in text, needle
+
+
+def test_a_hat_reset_mid_run_is_announced_then_its_recovery(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    time.sleep(0.3)
+    # benchd detects an outage: disarmed, STOPPED by the reset, auto-recovery armed
+    robot.stopped, robot.stop_why = True, "HAT reset"
+    robot.hat.update(outage=True, recover_resume=True, outages_60s=1)
+    robot.hat_resets = 1
+    t_end = time.time() + 3
+    while time.time() < t_end and "HAT RESET" not in ctrl.st.hat_warning:
+        time.sleep(0.01)
+    assert "auto-recovering" in ctrl.st.hat_warning, ctrl.st.hat_warning
+    # the HAT is back, servos re-arm one at a time...
+    robot.hat.update(outage=False, recovering=True)
+    time.sleep(0.4)
+    assert ctrl.st.recovering
+    # ...and benchd resumes the brain
+    robot.hat.update(recovering=False, recover_resume=False); robot.stopped, robot.stop_why = False, None
+    t_end = time.time() + 3
+    while time.time() < t_end and "recovered" not in ctrl.st.detail:
+        time.sleep(0.01)
+    assert "recovered" in ctrl.st.detail
+    assert ctrl.st.phase == "running"
+    ctrl.end(); ctrl.join(10)
+
+
+def test_an_operator_paused_outage_waits_for_space(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    time.sleep(0.3)
+    robot.stopped, robot.stop_why = True, "operator"          # SPACE, then the HAT switched off
+    robot.hat.update(outage=True, recover_resume=False, outages_60s=1)
+    robot.hat_resets = 1
+    t_end = time.time() + 3
+    while time.time() < t_end and "HAT RESET" not in ctrl.st.hat_warning:
+        time.sleep(0.01)
+    assert "SPACE re-arms" in ctrl.st.hat_warning
+    assert "resume" not in robot.calls[robot.calls.index("resume") + 1:]   # the controller never resumes it
+    ctrl.end(); ctrl.join(10)
+
+
+def test_ending_during_an_outage_waits_for_the_hat_before_the_rescue_pose(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    robot.hat.update(outage=True)
+    ctrl.end()
+    time.sleep(0.6)
+    assert "limp" not in robot.calls                        # no pose into a dead HAT
+    robot.hat.update(outage=False)
+    ctrl.join(10)
+    assert "limp" in robot.calls and ctrl.st.phase == "done"
