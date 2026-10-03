@@ -16,6 +16,9 @@ The sequence, and why each step is where it is:
   run      resume.  A tilt guard (80 deg, the operator's limit) STOPs the robot; benchd
            itself STOPs on a lost brain stream (dev mode) and handles low battery.  SPACE is
            the dashboard's STOP/resume, on its own socket, independent of this thread.
+  reset    R: stop -> benchd `pose.recall` of the start pose (control socket, STOPPED only).
+           The body goes home; the brain stays paused, not reset, and SPACE resumes it once
+           the pose has landed — the robot version of the sim's body reset after a fall.
   end      stop -> SIGTERM ogma_host -> bench mode -> rescue pose -> restart ogma-host.
 
 Port doc SPEC §1.1, as amended by the operator 2026-10-03: the brain may be started from
@@ -139,6 +142,10 @@ class RobotIo:
         self.bench = Rpc(BENCH_PORT)
         self.ctl = Rpc(CTL_PORT)            # loopback-only by benchd's bind address
 
+    def new_ctl(self) -> "Rpc":
+        """A second control socket, for the UI thread (REQ sockets are single-threaded)."""
+        return Rpc(CTL_PORT)
+
     def systemctl(self, action: str, unit: str) -> bool:
         r = subprocess.run(["sudo", "-n", "systemctl", action, unit],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
@@ -249,6 +256,7 @@ class RunController:
         self._host = None
         self._svc_was_active = False
         self._thread: Optional[threading.Thread] = None
+        self.resets = 0
 
     # ---- operator actions (UI thread) ----
     def start(self) -> None:
@@ -261,6 +269,24 @@ class RunController:
     def end(self) -> None:
         self._end.set()
         self._abort.set()
+
+    def reset(self) -> bool:
+        """R: freeze, then move back to the start pose; stays STOPPED.  Called from the UI
+        thread, so it uses its own socket rather than the controller's."""
+        if self.st.phase not in ("running", "prepare") or not self.st.started_at:
+            self._ev("reset: only once the brain has the servos (E ends a run that has not started)")
+            return False
+        rpc = self.io.new_ctl()
+        rpc.call("stop")
+        r = rpc.call("pose.recall", name=self.pose)
+        rpc.close()
+        if r and r.get("ok"):
+            self.resets += 1
+            self._ev(f"RESET #{self.resets}: moving to '{self.pose}' — STOPPED, brain paused (not reset). "
+                     "SPACE resumes once it lands")
+            return True
+        self._ev(f"reset refused: {(r or {}).get('error', 'no reply')}")
+        return False
 
     def busy(self) -> bool:
         return self.st.phase in ("countdown", "prepare", "running", "ending")

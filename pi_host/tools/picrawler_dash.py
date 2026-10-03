@@ -324,9 +324,15 @@ class Dash:
                 self.ctrl.abort()                       # ANY key: nothing has moved yet
             elif ph in ("prepare", "running"):
                 if ch == ord(" "):
+                    # Resuming mid-reset would hand the brain a body that is still moving.
+                    if self.known_stopped() and (self.st or {}).get("pose_move_active"):
+                        self.msg, self.msg_bad = "wait: the reset pose is still moving (SPACE when it lands)", True
+                        return True
                     self.toggle_stop()
                     return True
-                if ch in (ord("e"), ord("E")):
+                if ch in (ord("r"), ord("R")):
+                    self.ctrl.reset()
+                elif ch in (ord("e"), ord("E")):
                     self.ctrl.end()
                 elif ch in (ord("q"), ord("Q")):
                     self.msg, self.msg_bad = "a run is live: E ends it (rescue pose), then q quits", True
@@ -360,7 +366,7 @@ class Dash:
                        C(BAD) | curses.A_BOLD); y += 2
         self._line(scr, y, 3, f"start pose: {self.poses[self.pose_idx]}   (P cycles saved poses)", C(OK)); y += 1
         self._line(scr, y, 3, f"tilt guard: STOP past {dash_run.TILT_LIMIT_DEG:.0f}°    STOP/resume: SPACE    "
-                              f"end: E (rescue pose)", C(DIM)); y += 2
+                              f"reset to start pose: R    end: E (rescue pose)", C(DIM)); y += 2
         for ck in self.checks:
             col = OK if ck.ok else (BAD if ck.blocking else WARN)
             self._line(scr, y, 3, ("✓ " if ck.ok else ("✗ " if ck.blocking else "! ")) + ck.text, C(col)); y += 1
@@ -391,7 +397,8 @@ class Dash:
         self._line(scr, y, 1, f" RUN {st.phase.upper():8} {self.ctrl.cfg.name[:44]}  {el:4.0f} s   "
                               f"belly {belly}  tilt {tilt}  vbat {vb} ", C(col) | curses.A_BOLD | curses.A_REVERSE); y += 1
         self._line(scr, y, 3, st.detail, C(col)); y += 1
-        keys = ("SPACE stop/resume   E end run (rescue pose)" if st.phase in ("prepare", "running")
+        keys = (f"SPACE stop/resume   R reset to '{self.ctrl.pose}' (stays stopped)   E end run (rescue pose)"
+                if st.phase in ("prepare", "running")
                 else "any key: back to monitoring" if st.phase in ("done", "aborted") else "ending…")
         self._line(scr, y, 3, keys, C(DIM)); y += 1
         self._line(scr, y, 0, "─" * max(0, w - 1), C(DIM))

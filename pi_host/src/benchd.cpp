@@ -1551,7 +1551,8 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
         return json{{"mode", ogma::hw::brain::mode_name(S.mode)}, {"stopped", S.stopped},
                     {"stop_why", S.stopped ? json(S.stop_why) : json(nullptr)},
                     {"brain_age_ms", S.auth.age_ms(mono_ms())}, {"brain_applied", S.cmd_applied},
-                    {"brain_frames", S.cmd_frames}, {"holding", S.auth.holding()}};
+                    {"brain_frames", S.cmd_frames}, {"holding", S.auth.holding()},
+                    {"pose_move_active", S.pose_move_active}};
     };
     if (verb == "ping" || verb == "mode.get") return ok(summary());
     if (verb == "status") { json f = S.frame(); return ok(f); }
@@ -1563,12 +1564,39 @@ json handle_ctl(State& S, const json& req) {   // caller holds m
         return ok(summary());
     }
     if (verb == "stop") { S.stop("ctl"); return ok(summary()); }
+    // RESET: move a STOPPED brain-mode robot back to a saved pose (operator, 2026-10-03: the
+    // robot froze in a bad pose and the only way out was to end the run).  The robot version
+    // of the sim's body reset: the body goes home, the brain is NOT reset — it stays paused
+    // (ogma_host does not tick while STOPPED) and resumes on `resume` with everything it
+    // learned.  ⚠ STOPPED ONLY, and brain modes only: a pose move while the brain drives
+    // would be two writers on one servo, and in bench mode pose.set already exists on the
+    // calibration channel.  Staggered and gentle, the same path as pose.set; a `stop`
+    // during the move abandons it.
+    if (verb == "pose.recall") {
+        const std::string name = req.value("name", "");
+        if (!S.brain_mode()) return err("bench mode: use pose.set on the calibration channel");
+        if (!S.stopped) return err("STOP first: a pose move must not fight the brain");
+        if (S.low_battery) return err("battery low");
+        if (mono_ms() < S.rail_guard_until_ms) return err("5 V rail under-voltage back-off — retry shortly");
+        if (!S.poses.contains(name) || !S.poses[name].contains("us") || !S.poses[name]["us"].is_array() ||
+            S.poses[name]["us"].size() != size_t(ServoDriver::N)) return err("no saved pose '" + name + "'");
+        std::vector<std::pair<int,int>> targets;
+        for (int c = 0; c < ServoDriver::N; ++c) {
+            const json& v = S.poses[name]["us"][size_t(c)];
+            if (v.is_number() && v.get<int>() >= FULL_MIN_US && v.get<int>() <= FULL_MAX_US) targets.push_back({c, v.get<int>()});
+        }
+        S.begin_pose_move(targets);
+        S.record("pose.recall", {{"name", name}, {"mode", ogma::hw::brain::mode_name(S.mode)}, {"channels", targets.size()}});
+        json o = summary();
+        o["eta_ms"] = int(targets.size()) * g_pose_stagger_ticks * 20 + 2000;
+        return ok(o);
+    }
     if (verb == "resume") {
         const std::string why = S.resume("ctl");
         if (!why.empty()) return err(why);
         return ok(summary());
     }
-    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, status)");
+    return err("unknown control verb '" + verb + "' (ping, mode.get, mode.set, stop, resume, pose.recall, status)");
 }
 
 } // namespace

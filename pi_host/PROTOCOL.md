@@ -19,7 +19,7 @@ socket (see [Run modes](#run-modes-and-the-brains-command-path-spec-41-42)). Bot
 | telemetry | `tcp://<pi>:5591` | ZMQ **PUB/SUB**, topic `bench` | **one single-part message per frame: the bytes `bench ` followed by the JSON**, at 10 Hz. Subscribers set `ZMQ_CONFLATE` (newest frame, never a backlog) — which is *why* it is single-part: CONFLATE does not support multi-part messages, and SUB filtering is a prefix match so the in-band topic still filters |
 | state feed (`--state-pub`) | `tcp://<pi>:5592` | PUB, topic `state` | 50 Hz, for `ogma_host`: `{seq, t, us[12], out[12] (pulse on the line), armed, mode, stopped, fsr[4], fsr_ok, tof_m, tof_valid, tof_ms}`. Read-only: it carries no verbs |
 | brain commands (`--cmd-port`) | **`tcp://127.0.0.1:5594`** | SUB (benchd binds, CONFLATE), topic `cmd` | from `ogma_host --actuate`: `cmd {"seq", "tick", "us": [12 by HAT channel]}`, one per brain tick. **Loopback only, by bind address** |
-| control (`--ctl-port`) | **`tcp://127.0.0.1:5593`** | REQ/REP | `mode.get`, `mode.set {mode}`, `stop`, `resume`, `status`, `ping`. **Loopback only**; `pi_host/tools/ogma_ctl.py` speaks it |
+| control (`--ctl-port`) | **`tcp://127.0.0.1:5593`** | REQ/REP | `mode.get`, `mode.set {mode}`, `stop`, `resume`, `pose.recall {name}`, `status`, `ping`. **Loopback only**; `pi_host/tools/ogma_ctl.py` and `picrawler_dash` speak it. `pose.recall` moves a STOPPED brain-mode robot to a saved pose (staggered, gentle) and leaves it stopped — the reset; refused unless stopped and in a brain mode |
 
 Request: `{"verb": "<name>", ...args}`. Reply: `{"ok": true, ...}` or `{"ok": false, "error": "<why>"}`.
 The client MUST use `ZMQ_RCVTIMEO` (≈500 ms) and recreate the REQ socket on timeout — a REQ

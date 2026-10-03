@@ -78,6 +78,11 @@ class FakeRobot:
                 self.stopped = True; return {"ok": True}
             if verb == "resume":
                 self.stopped = False; return {"ok": True}
+            if verb == "pose.recall":
+                if not self.stopped or self.mode == "bench":
+                    return {"ok": False, "error": "STOP first"}
+                self.pose_ticks = 3
+                return {"ok": True, "eta_ms": 100}
         if verb == "status":
             moving = self.pose_ticks > 0
             if moving:
@@ -100,6 +105,9 @@ class FakeRobot:
         return {"ok": True}
 
     # RobotIo surface
+    def new_ctl(self):
+        return FakeRpc(self, "ctl")
+
     def systemctl(self, action, unit):
         self.log(f"systemctl {action} {unit}"); return True
 
@@ -232,3 +240,27 @@ def test_a_brain_that_dies_at_start_is_cleaned_up(tmp_path, monkeypatch):
     assert "resume" not in robot.calls                    # it never got the servos
     after = robot.calls[robot.calls.index("spawn"):]
     assert "mode.set=bench" in after and "limp" in after and "systemctl start ogma-host" in after
+
+
+def test_reset_freezes_first_then_recalls_the_start_pose_and_stays_stopped(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    n = len(robot.calls)
+    assert ctrl.reset()
+    after = robot.calls[n:]
+    assert after[:2] == ["stop", "pose.recall"], after     # freeze BEFORE the pose move
+    assert robot.stopped                                   # the brain stays paused
+    assert "resume" not in after                           # only the operator resumes
+    assert ctrl.st.phase == "running"                      # the run (and the brain) continue
+    ctrl.end(); ctrl.join(10)
+
+
+def test_reset_before_the_brain_has_the_servos_is_refused(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.countdown_s = 5.0
+    ctrl.start()
+    assert wait_phase(ctrl, {"countdown"})
+    assert not ctrl.reset()
+    assert robot.calls == []                               # still nothing sent
+    ctrl.abort(); ctrl.join(5)
