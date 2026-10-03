@@ -6158,3 +6158,32 @@ tripped.
   A4 dipped to 6.58 V at peaks, from 7.39 V at rest after ~11 runs on one charge: close to the
   6.4 V limp line. The battery is the next run's limit.
 - IMU ended 0.28° from the accelerometer; 4198 commands, 0 dropped.
+
+### ★★★ 2026-10-03 — SERVO CURRENT ABOVE ~2.4 A RESETS THE HAT's MCU, AND THE DRIVER THEN DROVE THE SERVOS TO THEIR END STOPS (fixed in software; the power ceiling is open)
+
+**What the operator saw.** The first dash-launched run (P-e·h0, lag 0.2, from `stand`) went into a
+"bad pose" that STOP could only freeze. Later, after the run was ended, "something is throwing the
+hip1 joints to their rightmost extremes"; the operator cut HAT power.
+
+**What the record shows** (benchd_20261003_214658.jsonl):
+- **+234.6 s, 4 s after resume:** servo current jumped from ~1.3 A to 2.4–2.9 A during large, fast
+  moves. The battery channel read 8.23 / 8.91 V, ADC garbage, the post-reset signature: the HAT's
+  microcontroller had rebooted. There were no I²C errors.
+- **+513.9 s:** a 3.02 A spike, INA bus voltage reading 9.39 V (garbage), then I²C NACKs. benchd's
+  recovery reset the MCU every 20 bus errors, about 20 times in 4 s.
+- **Mechanism:** a HAT MCU reset unprograms its servo timers. `ServoDriver` programmed a timer only
+  when a channel was first ARMED, so every still-armed channel kept getting its pulse written into
+  an unprogrammed timer. Garbage PWM drove the servos to their stops. The brain ran on that body
+  from +234 s, the "bad pose".
+
+**Fixed (6f7254b):** timers are re-programmed before any pulse whenever not ready (a test proves the
+old driver failed this); a detected HAT reset disarms every channel (nothing written: the servos go
+unpowered instead of being driven) and latches STOP in brain modes; benchd's MCU reset is limited
+to one per 5 s; the dash announces it.
+
+**Open, and not a software problem:** the brain's moves, from `stand` with the belly up, draw
+2.4–3.0 A peaks, against the ~1.9 A budget measured 2026-09-13 for the HAT's 5 V / 3 A regulator.
+The earlier 60 s belly-up run drew 1.2–1.6 A mean without a reset, so the margin is small and
+depends on what the brain does. Options are hardware (a servo supply that is not the HAT's
+regulator), a current-aware reflex in benchd (a safety envelope like the low-battery limp, not a
+behaviour), or both.
