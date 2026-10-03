@@ -5907,6 +5907,26 @@ func _input(event: InputEvent) -> void:
 			gc.visible = not gc.visible
 			print("PicrawlerBody: [U] gain_evolver_panel = %s" % gc.visible)
 
+# The "discrete" actuation backend: joint-local u (hip1 already splay-signed) → the
+# target angle the PD chases.  Shared by the physics path and export_body_calib.gd, so the
+# robot's port (pi_host Actuation.hpp) is checked against numbers this function produced.
+# ⚠ Returns an Array, NOT a Vector3: Vector3 is float32 and would round the targets.
+func _discrete_joint_targets(u_hip1: float, u_hip2: float, u_knee: float) -> Array:
+	var t_hip1: float = u_hip1 * HIP1_TARGET_RANGE + HIP1_REST
+	var t_hip2: float = u_hip2 * HIP_TARGET_RANGE  + HIP2_REST
+	# 2026-06-03 — asymmetric knee mapping (see KNEE_RANGE_FOLD/HYPEREXT).
+	# u=+1 → max fold (~170° tuck, spider stance reachable).
+	# u=0  → REST = straight leg (KNEE_REST=-1.6 rad).
+	# u=-1 → max hyperextension past straight (-2.45 rad).
+	# knee_widening_enabled=false collapses to symmetric KNEE_RANGE_SYMMETRIC.
+	var discrete_knee_range: float
+	if knee_widening_enabled:
+		discrete_knee_range = KNEE_RANGE_FOLD if u_knee >= 0.0 else KNEE_RANGE_HYPEREXT
+	else:
+		discrete_knee_range = KNEE_RANGE_SYMMETRIC
+	var t_knee: float = u_knee * discrete_knee_range + KNEE_REST
+	return [t_hip1, t_hip2, t_knee]
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
@@ -8444,19 +8464,12 @@ func _step_one() -> void:
 				# trips back to the slider's commanded angle (modulo the
 				# SPLAY_OUT_SIGN cancellation), so discrete G mode behaves
 				# identically to its pre-unification version.
-				t_hip1_cmd = u_hip1 * HIP1_TARGET_RANGE + HIP1_REST
-				t_hip2_cmd = u_hip2 * HIP_TARGET_RANGE  + HIP2_REST
-				# 2026-06-03 — asymmetric knee mapping (see KNEE_RANGE_FOLD/HYPEREXT).
-				# u=+1 → max fold (~170° tuck, spider stance reachable).
-				# u=0  → REST = straight leg (KNEE_REST=-1.6 rad).
-				# u=-1 → max hyperextension past straight (-2.45 rad).
-				# knee_widening_enabled=false collapses to symmetric KNEE_RANGE_SYMMETRIC.
-				var discrete_knee_range: float
-				if knee_widening_enabled:
-					discrete_knee_range = KNEE_RANGE_FOLD if u_knee >= 0.0 else KNEE_RANGE_HYPEREXT
-				else:
-					discrete_knee_range = KNEE_RANGE_SYMMETRIC
-				t_knee_cmd = u_knee * discrete_knee_range + KNEE_REST
+				# The mapping itself lives in _discrete_joint_targets so the robot's
+				# export (export_body_calib.gd "u_check") is computed by THIS code.
+				var dt3: Array = _discrete_joint_targets(u_hip1, u_hip2, u_knee)
+				t_hip1_cmd = dt3[0]
+				t_hip2_cmd = dt3[1]
+				t_knee_cmd = dt3[2]
 			# Rate-limit the EFFECTIVE target (the value the PD chases) to
 			# MAX_SERVO_SPEED per brain tick.  This bounds how fast the
 			# joint can move regardless of how strong the PD is — exactly

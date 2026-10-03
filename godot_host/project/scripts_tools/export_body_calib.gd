@@ -59,6 +59,27 @@ func _process(_d: float) -> bool:
 				{"t": [-0.6, 0.4, -1.2], "toe": _v(rest_inv * ((body._fk_leg(i, -0.6, 0.4, -1.2)[2] as Transform3D) * body._toe_off_c[i]))},
 			],
 		})
+	# The brain's u -> joint target, for the robot's actuation path (pi_host Actuation.hpp).
+	# Constants read off the body, and u_check computed by the body's OWN mapping function
+	# with the brain path's clamp and splay sign applied, so the port is checked against
+	# this code's numbers.  Samples cover both knee branches and both rails.
+	var u_check := []
+	for i in range(4):
+		for u in [[0.0, 0.0, 0.0], [1.0, -1.0, 1.0], [-1.0, 1.0, -1.0], [0.37, -0.52, 0.81],
+				  [-0.25, 0.6, -0.4], [1.7, -2.0, 1.3]]:
+			var u1: float = clamp(float(u[0]), -1.0, 1.0) * float(body.HIP1_SPLAY_OUT_SIGN[i])
+			var u2: float = clamp(float(u[1]), -1.0, 1.0)
+			var u3: float = clamp(float(u[2]), -1.0, 1.0)
+			u_check.append({"leg": i, "u": u, "t": body._discrete_joint_targets(u1, u2, u3)})
+	var action_map := {
+		"backend": body.actuation_backend,
+		"knee_widening": body.knee_widening_enabled,
+		"hip1_range": body.HIP1_TARGET_RANGE, "hip2_range": body.HIP_TARGET_RANGE,
+		"knee_fold": body.KNEE_RANGE_FOLD, "knee_hyperext": body.KNEE_RANGE_HYPEREXT,
+		"knee_symmetric": body.KNEE_RANGE_SYMMETRIC,
+		"splay_out_sign": body.HIP1_SPLAY_OUT_SIGN,
+		"u_check": u_check,
+	}
 	var out := {
 		"_comment": "Exported by godot_host/project/scripts_tools/export_body_calib.gd. FK anchors for ogma::body::fk_leg, in the sim's leg order (fl, fr, rl, rr — the sim's names, which are MIRRORED from the physical legs: sim fl = physical FR). Do not hand-edit: re-export when the body JSON changes.",
 		"geometry": body._geometry_name,
@@ -69,6 +90,7 @@ func _process(_d: float) -> bool:
 		"chassis_rest_origin": _v(rest.origin),
 		"chassis_rest_basis": [_v(rest.basis.x), _v(rest.basis.y), _v(rest.basis.z)],
 		"legs": legs,
+		"action_map": action_map,
 	}
 	var path := OS.get_environment("OUT")
 	if path == "":
