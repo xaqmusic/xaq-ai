@@ -203,3 +203,40 @@ numbers and the method, without our vocabulary; the rescue cost is stated with i
 
 **What we do not ask.** Nothing about the legs, the policy, or the walking envelope; nothing
 that requires our daemon to exist.
+
+## 9. The camera: what to take to Pollen (2026-10-03)
+
+The second thing measured on their duck that needs something from their daemon (the first is §8's head joints). Written here
+in our terms; PR-2 and any follow-up carry it in theirs. Evidence: design doc §17.104–17.107.
+
+**The situation, in their terms.** A client that wants the robot to notice things that move (a toy train, a rolling ball, a
+person walking past) has one sensor it can read: the head's 8×8 depth array, a 45° cone. The camera already on the head is
+carried by the media pipeline for remote sessions, and its frames do not reach a client. Everything a client builds on the
+depth array, however good, can only react to what is inside those 45°.
+
+**The measurement that says what would help.** Ten-minute sessions in a simulated playroom on their MJCF, a toy train circling
+on a track, 18 seeds per arm:
+
+1. **The narrow cone is the limit, not the behaviour behind it.** With the train moving and within 1.5 m, it was inside the
+   depth array's cone 14–15 % of the time in every arm we built: a better motion detector on the depth frames, longer memory so
+   the head can glance away, the head turning toward detected motion, a learned choice of where to aim the chase, and the head
+   looking around on its own while walking. Each changed what the robot did after it saw the train; none changed how often it
+   saw it, because each of them needs the train in the cone first.
+2. **A wider field changes it in proportion.** Re-scoring the same sessions as if the sensor's field were wider: 45° 15 % ·
+   60° 19 % · 90° 27 % · 120° 36 % · 160° 47 %. A 120° view used only to notice motion would see the train 2.4× as often,
+   before the head does anything.
+3. **What it needs is small.** Motion detection by frame difference works on a 64 × 48 grey frame at the depth sensor's
+   12.5 Hz: about 3 KB a frame, 38 KB/s. No colour, no full resolution, no recording, nothing leaves the robot.
+
+**The ask, one thing.** A way for a local client to read camera frames: a subscribable stream of small grey frames (or the
+pipeline's own frames, with the client downsampling), alongside the depth frames the runtime already publishes. Off unless
+a client subscribes. If privacy is the reason it is closed today, a frame size small enough that it is a motion sense and not
+a picture (64 × 48) is a natural line to draw; the robot's owner opts in.
+
+**How it travels.** After PR-2 (the design document names the camera as the third seam, after the twist and the head joints),
+as an issue or a Discussion first, not a PR: we do not know their camera pipeline's constraints, and the shape of the stream is
+theirs to choose. With the video demonstrations of the ten-minute behaviour set as the reason it matters. Opening it is the
+operator's call (REPORTS.md §9.6).
+
+**Open for the operator:** the lens's field of view on the real duck (their MJCF marks the camera's pose, not its field) —
+it decides where on the curve above the robot would sit; and whether the request goes with PR-2 or after it.

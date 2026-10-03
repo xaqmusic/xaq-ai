@@ -171,6 +171,7 @@ add_library(ogma_core
     src/ogma/modules/NeurochemState.cpp
     src/ogma/modules/EPM.cpp
     src/ogma/modules/CloudMap.cpp
+    src/ogma/modules/MotionField.cpp
     src/ogma/modules/LateralVoter.cpp
     src/ogma/modules/HomeostaticDrive.cpp
     src/ogma/modules/ActionDecoder.cpp
@@ -604,6 +605,9 @@ gtest_discover_tests(test_skill_outcome_loop)
 add_executable(test_bearing_seek_loop tests/ogma/test_bearing_seek_loop.cpp)
 target_link_libraries(test_bearing_seek_loop PRIVATE ogma_core GTest::gtest_main pthread)
 gtest_discover_tests(test_bearing_seek_loop)
+add_executable(test_motion_field tests/ogma/test_motion_field.cpp)
+target_link_libraries(test_motion_field PRIVATE ogma_core GTest::gtest_main pthread)
+gtest_discover_tests(test_motion_field)
 add_executable(test_cloud_map tests/ogma/test_cloud_map.cpp)
 target_link_libraries(test_cloud_map PRIVATE ogma_core GTest::gtest_main pthread)
 gtest_discover_tests(test_cloud_map)

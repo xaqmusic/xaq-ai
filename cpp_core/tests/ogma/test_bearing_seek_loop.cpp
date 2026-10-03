@@ -15,6 +15,8 @@
 //      1.5 x arrive_m, and not when the need is under renew_min.
 // =============================================================================
 #include <gtest/gtest.h>
+#include <set>
+#include <nlohmann/json.hpp>
 #include <cmath>
 #include <memory>
 #include "ogma/InProcessBus.hpp"
@@ -605,4 +607,51 @@ TEST(BearingSeekLoop, ASightedThingsNeedIsTheOutcomesPull) {
     Rig q;                                                         // no pull topic
     q.step(0, 0, 0, 0.0f, 1.0f, 0.6f);
     EXPECT_FLOAT_EQ(q.m.value(), 1.0f);
+}
+
+// THE LEARNED LEAD (2026-10-03): a chase on a thing walking away records one outcome per lead_eval_ticks, cycling the options
+// while each is under lead_min_samples, and publishes its situation for the EPM; a restored table (lead-only) makes the chase
+// aim with its best option, and brings no held target with it.
+namespace {
+ogma::ParamMap lead_params() {
+    ogma::ParamMap p = chase_params();
+    p["lead_options"] = std::vector<double>{0.0, 1.0};
+    p["lead_eval_ticks"] = int64_t{20}; p["lead_min_samples"] = int64_t{1};
+    p["situation_out_topic"] = std::string("out.situation");
+    return p;
+}
+void walk_away_chase(Rig& r, int sightings) {
+    for (int k = 0; k < sightings; ++k) {
+        const double range = 1.0 + 0.2 * (4.0 * k / 50.0);
+        r.mover(0.0f, 1.0f, prox_of(range), double(r.t));
+        for (int i = 0; i < 4; ++i) r.step(0, 0, 0, 0.0f, 0.0f, 0.0f);
+    }
+}
+}  // namespace
+
+TEST(BearingSeekLoop, TheChaseLearnsWhereToAimFromItsOwnOutcomes) {
+    Rig r(lead_params());
+    walk_away_chase(r, 40);
+    ASSERT_TRUE(r.m.chasing());
+    int n = 0; std::set<int> tried;
+    for (auto const& [k, st] : r.m.lead_stats()) { n += st.n; tried.insert(k % 16); }
+    EXPECT_GE(n, 4) << "an outcome every 20 ticks of chasing";
+    EXPECT_EQ(tried.size(), 2u) << "both options tried";
+    for (auto const& [k, st] : r.m.lead_stats()) EXPECT_LT(st.mean, 0.0) << "the thing walks away: the range opens";
+    auto sit = std::dynamic_pointer_cast<const ogma::ProprioToken>(r.bus.last_value("out.situation"));
+    ASSERT_NE(sit, nullptr);
+    EXPECT_NEAR(sit->values[1], 0.0, 0.05) << "straight ahead";
+    EXPECT_GT(sit->values[3], 0.5) << "the range opening";
+}
+
+TEST(BearingSeekLoop, ARestoredLeadTableAimsWithItsBestOptionAndBringsNoTarget) {
+    ogma::ParamMap p = lead_params(); p["restore_lead_only"] = true; p["lead_min_samples"] = int64_t{2};
+    Rig r(p);
+    nlohmann::json snap{{"version", 1}, {"have_target", true}, {"tx", 5.0}, {"ty", 5.0}, {"conf", 1.0},
+                        {"lead_stats", {{"0", {{"n", 3}, {"mean", -0.1}, {"m2", 0.0}}}, {"1", {{"n", 3}, {"mean", 0.2}, {"m2", 0.0}}}}}};
+    r.m.restore_state(snap);
+    EXPECT_FALSE(r.m.have_target()) << "lead only: the practice's target stays behind";
+    walk_away_chase(r, 12);
+    ASSERT_TRUE(r.m.chasing());
+    EXPECT_EQ(r.m.lead_option(), 1) << "situation 0, both known: the best mean (1 s ahead)";
 }

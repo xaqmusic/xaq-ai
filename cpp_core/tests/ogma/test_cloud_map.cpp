@@ -802,3 +802,94 @@ TEST(CloudMap, AFragmentOnAClosedWallLineIsNotAThingButACubeBeforeItIs) {
     EXPECT_LT(at(th, 1.985, 0.205).on_line, 0.5);
     EXPECT_TRUE(at(th, 0.85, 0.01).small) << "the open-floor cube";
 }
+
+// THE CHASE PUSH (2026-10-02): the follow rests on the prediction.  A cube that moves is the mover (young voxels); then it
+// slows to a crawl, so its voxels are re-hit and age past the age gate.  Without mover_hold_any_age the followed cube stops
+// being the mover as it ages; with it, a cluster at the followed mover's predicted position stays the mover whatever its age.
+TEST(CloudMap, AFollowedMoverStaysTheMoverWhenItsVoxelsAgeWithTheHold) {
+    const auto run = [](bool any_age) {
+        ParamMap p = things_params();
+        p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+        p["mover_range"] = 1.2; p["mover_range_hold"] = 2.5;
+        if (any_age) { p["mover_hold_any_age"] = true; p["mover_hold_ticks"] = int64_t{50}; }
+        Rig r(p);
+        for (int i = 0; i < 60; ++i) cast_world(r, 0.0, cube());           // the standing cube (the oldest)
+        double x = 0.10;
+        for (int k = 0; k < 15; ++k) {                                      // moving, 2 cm a cast: young, the mover
+            std::vector<Pt> mover;
+            for (auto q : cube()) { q[0] += x; q[1] += 0.5; mover.push_back(q); }
+            cast_world(r, 0.0, cube()); cast_world(r, 0.0, mover); x += 0.02;
+        }
+        int held = 0;
+        for (int k = 0; k < 40; ++k) {                                      // a crawl, 2 mm a cast: its voxels age
+            std::vector<Pt> mover;
+            for (auto q : cube()) { q[0] += x; q[1] += 0.5; mover.push_back(q); }
+            cast_world(r, 0.0, cube()); cast_world(r, 0.0, mover); x += 0.002;
+            if (k >= 20 && r.m.mover_index() >= 0 && std::fabs(r.m.mover_clusters()[size_t(r.m.mover_index())].cy - 0.5) < 0.1) ++held;
+        }
+        return held;
+    };
+    const int without = run(false), with = run(true);
+    EXPECT_LT(without, 5) << "the age gate drops a followed mover whose voxels have aged";
+    EXPECT_GE(with, 15) << "with the hold, the prediction keeps it the mover";
+}
+
+// mover_hold_min_v: a followed mover that STOPS (a static cluster the prediction swept onto) loses the any-age exemption
+// after half a second and ages out under the youth gate; without the floor the hold keeps it the mover.
+TEST(CloudMap, AFollowedMoverThatStopsLosesTheAnyAgeHold) {
+    const auto run = [](double min_v) {
+        ParamMap p = things_params();
+        p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+        p["mover_range"] = 1.2; p["mover_range_hold"] = 2.5; p["mover_hold_any_age"] = true; p["mover_hold_ticks"] = int64_t{50};
+        p["mover_hold_min_v"] = min_v;
+        Rig r(p);
+        for (int i = 0; i < 60; ++i) cast_world(r, 0.0, cube());
+        double x = 0.10;
+        for (int k = 0; k < 15; ++k) {
+            std::vector<Pt> mover;
+            for (auto q : cube()) { q[0] += x; q[1] += 0.5; mover.push_back(q); }
+            cast_world(r, 0.0, cube()); cast_world(r, 0.0, mover); x += 0.02;
+        }
+        int held = 0;
+        for (int k = 0; k < 60; ++k) {                                      // it stops dead
+            std::vector<Pt> mover;
+            for (auto q : cube()) { q[0] += x; q[1] += 0.5; mover.push_back(q); }
+            cast_world(r, 0.0, cube()); cast_world(r, 0.0, mover);
+            if (k >= 40 && r.m.mover_index() >= 0 && std::fabs(r.m.mover_clusters()[size_t(r.m.mover_index())].cy - 0.5) < 0.1) ++held;
+        }
+        return held;
+    };
+    EXPECT_GE(run(0.0), 15) << "without the floor the stopped cube stays the mover";
+    EXPECT_LT(run(0.05), 3) << "with it the stopped cube ages out";
+}
+
+// mover_not_target_m: the thing the seek loop is walking to reads young as it comes into view; with the gate a young cube AT the
+// held target is not a mover, while the same cube elsewhere is; and a seek loop flagged as chasing lifts the gate.
+TEST(CloudMap, ANewMoverAtTheHeldStaticTargetIsRefused) {
+    const auto run = [](double gate, float tx, float chasing) {
+        ParamMap p = things_params();
+        p["mover_topic"] = std::string("out.mover"); p["mover_window_ticks"] = int64_t{25}; p["mover_age_k"] = 0.3;
+        p["target_topic"] = std::string("in.seek"); p["target_range_topic"] = std::string("in.seek_range");
+        p["mover_not_target_m"] = gate;
+        Rig r(p);
+        for (int i = 0; i < 60; ++i) cast_world(r, 0.0, cube());
+        int movers = 0;
+        for (int k = 0; k < 8; ++k) {
+            // the seek target: the moving cube's place (bearing to (1.25 + 0.02k, 0.5), range), or elsewhere (tx = -1)
+            const double gx = 1.25 + 0.02 * k, gy = 0.5;
+            const double rng = std::hypot(gx, gy);
+            auto sb = std::make_shared<ogma::ProprioToken>(); sb->values = Eigen::VectorXf(4);
+            sb->values << float(tx * -gy / rng), float(gx / rng), 1.0f, chasing;
+            auto sr = std::make_shared<ogma::ProprioToken>(); sr->values = Eigen::VectorXf::Constant(1, float(rng));
+            r.bus.publish("in.seek", sb); r.bus.publish("in.seek_range", sr);
+            std::vector<Pt> mover;
+            for (auto q : cube()) { q[0] += 0.4 + 0.02 * k; q[1] += 0.5; mover.push_back(q); }
+            cast_world(r, 0.0, cube()); cast_world(r, 0.0, mover);
+            movers += r.m.mover_index() >= 0;
+        }
+        return movers;
+    };
+    EXPECT_GT(run(0.0, 1.0f, 0.0f), 0) << "no gate: the young cube is the mover";
+    EXPECT_EQ(run(0.25, 1.0f, 0.0f), 0) << "the gate: it is the thing being walked to";
+    EXPECT_GT(run(0.25, 1.0f, 1.0f), 0) << "a chasing seek loop lifts the gate";
+}

@@ -154,3 +154,16 @@ vocabulary, Track B's intent boundary). Sending it is the operator's call.
 ## 7. Register rows
 
 O68 (structure), O69 (the phantom), O70 (the ten minutes). O63, O64, O67 carried.
+
+## The chase push, 2026-10-03: practice, the learned lead, coverage, looking around
+
+Design doc §17.104–17.107. **The train room** (`playroom_gen.py --train-room`) gives contact, but practice there reshapes the
+walker for a world without still things (first minute 0–5/18) and teaches the chase nothing: the walker is not where the chase
+lives (the operator: "chasing is a planning loop at the intent level"). **The learned lead** (the seek loop learns where to aim,
+per situation, from its own closing; walker frozen in practice, `--freeze-walker`) is built and tested but starves: 11–21
+outcomes in 20 min. **Coverage is the limit**: the train is in the 45° cone ~15 % of the time it is near, in every arm, because
+every mechanism needs it seen first. **Looking around while walking** (`--look-around 0.9 2.0`, LA1) ties T11 on every number
+with a livelier head: the candidate for the eye (preset beside T11). A 120° field would see the train 2.4× as often: **the
+case for camera access** is outreach plan §9 (the camera buffer is not in Pollen's API). Next: the operator's eye on LA1;
+the camera request travels with or after PR-2, the operator's call.
+**★ LA1 PROMOTED 2026-10-03** on the operator's eye (novelty in the behaviour): T11 + `--look-around 0.9 2.0`.

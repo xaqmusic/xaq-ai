@@ -25,6 +25,7 @@
 
 #include <deque>
 #include <limits>
+#include <map>
 #include <string>
 #include <nlohmann/json.hpp>
 #include "ogma/Module.hpp"
@@ -83,6 +84,35 @@ private:
     // sighted thing's need (the confidence a sighting sets) is that pull instead of 1: a thing whose kind in its context
     // has been tried and never moved is still seen, but no longer worth the walk.  Empty = 1 (byte-identical).
     std::string pull_topic_;
+    // publish_chase_flag (the chase push, 2026-10-02): the output token carries a 4th value, 1 while chasing or coasting --
+    // so CloudMap's mover_not_target_m gates only a STATIC held target.  false = three values (byte-identical).
+    bool publish_chase_flag_ = false;
+public:
+    // THE LEARNED LEAD (2026-10-03, the chase push; the operator: "chasing is a planning loop and exists at the intent level,
+    // strategic").  Where the chase aims is an OPTION learned from its own outcomes, as the outcome loop learns what a kick
+    // does: lead_options (seconds ahead along the mover's velocity, e.g. [0, 0.5, 1, 2]); the SITUATION -- the chase's view of
+    // the mover, published on situation_out_topic as [range / 2.5, |bearing| / pi, the bearing's drift outward (0.5 = none),
+    // the range rate (0.5 = none)] for an EPM whose winner comes back on situation_topic; every lead_eval_ticks of chasing the
+    // loop records how far the range to the mover's estimated position closed (m/s) for (situation, option), then chooses
+    // again: the least-tried option while any has fewer than lead_min_samples outcomes, else the best mean.  Empty options =
+    // the fixed chase_lead_s (byte-identical).  restore_lead_only: a restored snapshot brings the lead table and nothing else
+    // (a practice session's held target must not follow the brain into another room).
+    struct LeadStat { int n = 0; double mean = 0.0, m2 = 0.0; };
+    int lead_option() const { return lead_opt_; }
+    int lead_node() const { return lead_node_; }
+    const std::map<int, LeadStat>& lead_stats() const { return lead_stats_; }
+private:
+    std::vector<double> lead_options_;
+    std::string situation_out_topic_, situation_topic_;
+    int lead_eval_ticks_ = 50, lead_min_samples_ = 2;
+    bool restore_lead_only_ = false;
+    std::map<int, LeadStat> lead_stats_;
+    int lead_opt_ = -1, lead_node_ = 0, lead_last_opt_ = -1;
+    uint64_t lead_start_tick_ = 0; double lead_start_range_ = 0.0; bool lead_eval_on_ = false;
+    double prev_mover_bearing_ = 0.0, prev_mover_range_ = 0.0; bool have_prev_mover_ = false;
+    int lead_records_ = 0;
+    void lead_tick(uint64_t tick_id);
+    int  lead_choose(int node) const;
     float  renew_min_       = 0.25f;
     double renew_range_     = 2.0;
     // the walk re-fix (2026-09-23, §17.47): a bearing flagged as seen from a WALKING cloud (the token's 4th

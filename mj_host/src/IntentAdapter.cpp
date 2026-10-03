@@ -163,6 +163,15 @@ std::array<double, 3> IntentAdapter::tick(const std::array<double, 3>& vel_body,
             const double r = (seek_present_ && seek_value_ > 0.0 && seek_range_ > 0.0) ? seek_range_ : 2.0;
             sense.insert(sense.begin() + (fore_sense_ ? 1 : 0), float(std::clamp(r / 2.0, 0.0, 1.0)));
         }
+        if (mover_sense_) {   // the chased mover's velocity, body frame, after the range slot
+            float fwd = 0.0f, left = 0.0f;
+            if (chase_active() || chase_coasting()) {
+                const double vx = chase_vx(), vy = chase_vy(), c = std::cos(heading_), s = std::sin(heading_);
+                fwd = unit((c * vx + s * vy) / 0.6); left = unit((-s * vx + c * vy) / 0.6);
+            }
+            const int at = (fore_sense_ ? 1 : 0) + (range_sense_ ? 1 : 0);
+            sense.insert(sense.begin() + at, {fwd, left});
+        }
         publish("sense", sense);
     }
     if (place) {
@@ -399,6 +408,7 @@ void IntentAdapter::on_reset() {
 void IntentAdapter::set_learning(bool on) {
     // Freeze through parameters, as the joint-level adapter does: the brain keeps
     // observing while the rescue drives, but must not fit it.
+    if (on && walker_frozen_) return;                    // --freeze-walker: nothing turns it back on
     if (on == !frozen_) return;
     frozen_ = !on;
     static const char* const kRates[] = {"model_lr", "ctrl_lr", "bias_lr", "sat_lr",
@@ -497,6 +507,11 @@ double IntentAdapter::chase_vx()     const { auto* q = find_seek(*instance_); re
 double IntentAdapter::chase_vy()     const { auto* q = find_seek(*instance_); return q ? q->chase_vy() : 0.0; }
 bool   IntentAdapter::mover_seen()   const { auto* q = find_seek(*instance_); return q && q->mover_seen(); }
 int    IntentAdapter::mover_cands()  const { auto* c = find_cloud(*instance_); return c ? c->mover_candidates() : 0; }
+const ogma::MotionField* IntentAdapter::motion_field() const {
+    for (auto* m : instance_->modules())
+        if (auto* f = dynamic_cast<const ogma::MotionField*>(m)) return f;
+    return nullptr;
+}
 int    IntentAdapter::cloud_target_tall()  const { auto* c = find_cloud(*instance_); return c ? c->target_tall() : 0; }
 int    IntentAdapter::cloud_target_small() const { auto* c = find_cloud(*instance_); return c ? c->target_small() : 0; }
 std::array<int, 4> IntentAdapter::chase_cand_fates() const { auto* q = find_seek(*instance_); return q ? std::array<int, 4>{q->cand_replaced(), q->cand_fast(), q->cand_still(), q->cand_timeout()} : std::array<int, 4>{0, 0, 0, 0}; }
@@ -544,6 +559,8 @@ void IntentAdapter::print_authority_table(const char* when) const {
 int    IntentAdapter::contact_forgets() const { auto* q = find_seek(*instance_); return q ? q->contact_forgets() : 0; }
 int    IntentAdapter::walk_takes() const { auto* q = find_seek(*instance_); return q ? q->walk_takes() : 0; }
 double IntentAdapter::chase_gaze_ego() const { auto* q = find_seek(*instance_); return q ? q->chase_gaze_ego() : std::numeric_limits<double>::quiet_NaN(); }
+int    IntentAdapter::seek_lead_option() const { auto* q = find_seek(*instance_); return q ? q->lead_option() : -1; }
+int    IntentAdapter::seek_lead_node()   const { auto* q = find_seek(*instance_); return q ? q->lead_node() : 0; }
 bool   IntentAdapter::chase_coasting() const { auto* q = find_seek(*instance_); return q && q->coasting(); }
 int    IntentAdapter::chases_reacquired() const { auto* q = find_seek(*instance_); return q ? q->chases_reacquired() : 0; }
 void   IntentAdapter::restore_brain_state(nlohmann::json const& s) { instance_->restore_state(s); }

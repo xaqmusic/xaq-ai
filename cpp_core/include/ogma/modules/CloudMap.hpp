@@ -288,6 +288,21 @@ private:
     // its displacement per update) is published beyond mover_range.  The start of a chase is gated close; its
     // continuation is not.  0 = off.
     double mover_range_hold_ = 0.0, mover_hold_gate_ = 0.4;
+    // the chase push (2026-10-02): mover_hold_any_age -- a cluster within mover_hold_gate of the followed mover's predicted
+    // position is the mover WHATEVER its age (starting a chase needs surprise, young voxels; continuing it rests on the
+    // prediction: in a walking cloud re-filed every metre the oldest cluster is seconds old and the age gate rejects the
+    // train itself).  mover_hold_ticks -- the hold survives this many ticks of recomputes without a published mover, its
+    // point carried forward by the last displacement (a miss no longer ends the follow).  Both off = byte-identical.
+    bool   mover_hold_any_age_ = false; int mover_hold_ticks_ = 0, hold_left_ = 0, hold_miss_ = 0;
+    // mover_hold_min_v (the chase push, 2026-10-02): the any-age exemption holds only while the followed mover MOVES -- a
+    // held step under this speed (m/s) for half a second returns it to the youth gate (T6's hold latched static clusters the
+    // prediction swept over: 6 chases at structure in the first minute, §17.100).  0 = off.
+    double mover_hold_min_v_ = 0.0; int hold_still_ = 0;
+    // mover_not_target_m (the chase push, 2026-10-02): a NEW mover candidate within this of the seek loop's held target is
+    // refused -- the thing being walked to reads young as it comes into view, and T6's first-minute chases at the green block
+    // were exactly that (§17.103); the followed mover (the hold) is exempt.  Needs target_topic.  0 = off.
+    double mover_not_target_m_ = 0.0;
+    bool   target_in_cloud(double yaw, double& gx, double& gy) const;
     bool   mover_prev_ = false; double mover_px_ = 0.0, mover_py_ = 0.0, mover_dx_ = 0.0, mover_dy_ = 0.0;
     // THE TARGET'S SURROUNDINGS (2026-09-29, the pursuit that yields near tall structure): the seek loop's target
     // (its bearing and range, body frame) placed in the cloud's frame, and the open cloud's voxels at or above

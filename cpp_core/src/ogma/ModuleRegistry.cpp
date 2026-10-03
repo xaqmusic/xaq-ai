@@ -26,6 +26,7 @@
 #include "ogma/modules/ColumnBuilder.hpp"
 #include "ogma/modules/PlaceGraphPlanner.hpp"
 #include "ogma/modules/CloudMap.hpp"
+#include "ogma/modules/MotionField.hpp"
 #include "ogma/modules/PlayLoop.hpp"
 #include "ogma/modules/RunTumbleNav.hpp"
 #include "ogma/modules/RunTumbleNavV2.hpp"
@@ -158,6 +159,8 @@ ModuleRegistry& ModuleRegistry::instance() {
         // (design doc §17.28), so this is the level at which one exists; an EPM on its output
         // earns the vocabulary.  Default-off: no input_topic, no accumulation, no publish.
         reg.register_type("CloudMap",              [](){ return std::make_unique<CloudMap>(); });
+        // 2026-10-02 — the always-on motion loop's sensor: a return where a ray was just seen to pass (the chase push).
+        reg.register_type("MotionField",           [](){ return std::make_unique<MotionField>(); });
         reg.register_type("RunTumbleNav",          [](){ return std::make_unique<RunTumbleNav>(); });
         reg.register_type("RunTumbleNavV2",        [](){ return std::make_unique<RunTumbleNavV2>(); });
         reg.register_type("VisualHomingNav",       [](){ return std::make_unique<VisualHomingNav>(); });

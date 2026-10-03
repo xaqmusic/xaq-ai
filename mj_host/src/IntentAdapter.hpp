@@ -18,6 +18,7 @@
 
 #include "InspectorSurface.hpp"
 #include "ogma/modules/CloudMap.hpp"   // CloudMap::Thing, the things phase (T1)
+#include "ogma/modules/MotionField.hpp"   // the always-on motion loop (the chase push)
 
 namespace ogma { class OgmaInstance; }
 
@@ -152,6 +153,16 @@ public:
     // 2 m (capped at 1; 1 when the seek loop holds no target), right after the fore-aft slot (or first) -- so a prior's
     // target can be gated by "turn before you arrive" (MotorEPMv2.state_prior_target_gate_reach).  Off = byte-identical.
     void set_range_sense(bool on) { range_sense_ = on; }
+    // --intent-mover-sense (2026-10-03, the chase push: "give the robot a lot of contact with moving objects in order for it
+    // to learn how to chase them"): two slots after the range -- the chased mover's velocity in the body frame (forward,
+    // left) / 0.6 m/s, zero when nothing is chased or coasted -- so the walker's model can identify how a moving target's
+    // bearing and range evolve, and its priors lead the target through that model.
+    void set_mover_sense(bool on) { mover_sense_ = on; }
+    // --freeze-walker (2026-10-03, the learned chase's practice): the walker's MotorEPM learning is off for the whole run and
+    // nothing turns it back on -- practice in the train room teaches the chase's lead table, not the body model
+    void freeze_walker() { set_learning(false); walker_frozen_ = true; }
+    int  seek_lead_option() const;   // the learned lead's current option (-1 = none / off)
+    int  seek_lead_node() const;
     void feed_head_fore(double unit) { head_fore_ = unit; }
     std::array<double, 4> head_command() const { return last_head_; }   // radians from HOME: neck pitch, head pitch, head yaw, head roll
     // THE YAW RANGE (2026-10-01, --twist-yaw-range R): the walker's yaw command spans +-R rad/s (default the 1.0 the
@@ -247,6 +258,7 @@ public:
     double chase_vy()      const;
     bool   mover_seen()    const;
     int    mover_cands()   const;
+    const ogma::MotionField* motion_field() const;   // the graph's MotionField, or nullptr (--log-motion)
     int    cloud_target_tall()  const;   // the cloud's tall voxels around the seek target (CloudMap target_tall)
     int    cloud_target_small() const;   // ...and the small things there (the impeded look's wall-or-thing)
     double chase_gaze_ego() const;
@@ -378,6 +390,8 @@ private:
     double yaw_range_ = kTwistRangeVyaw;
     bool head_sense_ = false; std::array<double, 3> head_g_{-1.0, 0.0, 0.0};
     bool range_sense_ = false;
+    bool mover_sense_ = false;
+    bool walker_frozen_ = false;
     double translate_frac_ = 0.0, fore_target_ = 0.0, head_fore_ = 0.0; bool fore_sense_ = false;
     double intent_head_frac_ = 0.0, intent_head_alpha_ = 1.0; std::array<double, 4> last_head_{};   // alpha: the head command's low-pass (sweeps 62-65: a fresh head command every 20 ms thrashed the head at 2.5 rad/s, 13 falls a run)
     bool seek_gate_ = false; int seek_gated_ = 0; double seek_gate_contact_m_ = 0.0; int seek_gated_contact_ = 0;

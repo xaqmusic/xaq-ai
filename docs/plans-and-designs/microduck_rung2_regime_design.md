@@ -6678,3 +6678,306 @@ also quieter on things it has tried. Preset "T4 · the STACK" for the eye; the l
 --stop-is-still --look-up-when-impeded 3 -0.3 1.5 0.6` + config `a1v2_t4_stack` (CloudMap `free_rays`, `small_needs_top`,
 `line_tol_k 0.049`, `context_topic`; the context EPM; SkillOutcomeLoop `context_topic`, `context_n 3`, `pull_topic`,
 `context_pool_min 2`; BearingSeekLoop `pull_topic`). The base for the phantom (phase 2).
+
+### 17.100 The chase push: the pursuit replaces the look, and the follow rests on the prediction (2026-10-02)
+
+**The operator, on ★ T4:** "the chase loop, once arbitrated to enabled, needs to keep the robot moving. I am seeing the robot
+stop and look after doing a short chase, which breaks off the chasing behaviour." The tunnel can wait: the duck loses sight of
+the train often enough without one. **Instrument:** `mj_host/tools/chase_readout.py` (chases and their length, at the train,
+seconds on the moving train and the share closing on it, following, contacts, lost→stop, standing after a chase,
+re-acquisitions, pursuit seconds).
+
+**★ T4's chase (n = 18):** 4.5 chases a run, median 1.0 s, p90 1.8 s; 3.1 s a run on the moving train; at the end of a chase
+the train was still moving in 55 of 81 and in view in 34; 1.6 stops a run started by the loss (`--stop-on-lost`, R94) — the
+break-off the operator sees.
+
+**Lever 1 — the pursuit replaces the look** (`chase_permanence_ticks` 250 / 500, host without `--stop-on-lost`; configs
+`a1v2_t5_pursuit5` / `_pursuit10`; sweep `log/ten/c1`). No code: coasting (R95) already walks to the lost mover's predicted
+position with its need decaying linearly — the interest spends itself — and was a `REGRESSION` in R95 because the prediction
+led into walls; ★ T4's line, tall-structure yield and impeded look are its re-use context.
+
+| | ★ T4 | pursuit 5 s | pursuit 10 s |
+|---|---|---|---|
+| lost → stop a run · standing within 4 s after a chase | 1.6 · 4.6 s | 0 · 0.9 s | **0 · 1.2 s** |
+| pursuit s · re-acquired a run | — · 0.4 | 7.2 · 0.3 | 12.2 · **0.9** |
+| on the moving train s · closing share · contacts a run | 3.1 · 52 % · 1.7 | 3.0 · 53 % · 2.2 | 3.3 · 59 % · 2.2 |
+| boring · walls / min · falls | 22.3 % · 14.5 · 2.7 | 22.4 · 18.6 · 2.8 | 22.5 · 15.6 · 2.4 |
+
+`WORKING` on the operator's ask (no break-off, re-acquisitions doubled at 10 s, nothing paid). The chase itself still lasts
+a second.
+
+**Why a confirmed chase lasts a second:** in the last second before a chase drops into the pursuit, the cloud publishes no
+mover on 98 % of ticks (the tracker's 26 sightings all missed its gate). The train's own cluster in those seconds (52 drops):
+no cluster in the recent window on 25 (out of the sensor's view), **not young against the cloud's oldest on 21** — the age
+gate that starts a chase is also the only thing that continues one, and in a walking cloud re-filed every metre the oldest
+cluster is seconds old, so 6 % of it falls below the train's own voxel age (~0.26 s). Cloud re-anchors coincide with 22 % of
+drops.
+
+**Lever 2 — the follow rests on the prediction** (`CloudMap.mover_hold_any_age`, `mover_hold_ticks`, with the existing
+`mover_range_hold`; config `a1v2_t6_follow` = pursuit 10 s + range hold 2.5 m, any age, 50-tick hold; the hold point carried
+across the walking cloud's re-anchor and accepted during a new cloud's vouching window; unit test
+`AFollowedMoverStaysTheMoverWhenItsVoxelsAgeWithTheHold`; guard byte-identical; sweep `log/ten/c2`):
+
+| | pursuit 10 s | **+ the follow on the prediction** |
+|---|---|---|
+| chases a run (at the train) · median · p90 length | 4.9 (43/89) · 1.0 · 2.1 s | 11.2 (90/201) · 1.3 · **7.7 s** |
+| on the moving train s a run · closing share | 3.3 · 59 % | **15.2** · 48 % |
+| contacts with the train a run · pursuit s | 2.2 · 12.2 | **3.8** · 22.1 |
+| boring · interesting · walls / min | 22.5 % · 46 % · 15.6 | **18.2 % · 51 % · 13.3** |
+| arrivals at a thing · structure · nothing | 199 · 35 · 30 | 196 · 16 · 45 |
+| falls a run (within 3 s of a chase, all runs) | 2.4 (6) | 3.6 (15) |
+| first minute: block touched · moved · first skill touching | 16/18 · 8–10/18 · 5–7/16 | **11/18 · 5/18 · 3/13** |
+
+**Verdict: `WORKING` on the chase (the moving train chased 4.6× longer, contacts +70 %, the lowest boring share and walls of
+the phase), `REGRESSION` on the first minute and a fall a run.** The first minute's cost: 3.7 s of chasing in it (0.4 s
+before), 21 chases of which 7 at the train, 6 at structure, 6 at things — part wanted (the train passes early on many seeds),
+part the hold accepting a static cluster the prediction sweeps over. Next: a held cluster must still be moving (its own
+displacement), and the out-of-view drops (the gaze on the walk).
+
+### 17.101 The always-on motion loop, step 1: a motion sensor with its own memory (MotionField, passive; 2026-10-02)
+
+**The operator, watching T6 on the chase seed:** "at 150 seconds the robot loses track of where the train is … we need some
+type of motion-sensitive peripheral vision that is always active, as an ongoing loop separate from the others, looking for
+voxels moving relative to the world frame at all times; moving voxels should always capture the robot's attention."
+**At 150 s:** the train 0.6 m away, 11° off the head's axis, moving — its cluster in the walking cloud 7 cm from the truth,
+and rejected: the cloud had re-opened 1.7 s earlier, its oldest cluster was 1.04 s old, 6 % of that is 0.06 s, the train's
+voxels 0.9 s old. The cloud's notion of "new" is only as long as the cloud is old.
+
+**Built: `MotionField`** (cpp_core, off unless in the graph; passive without `output_topic`; host `--log-motion` logs evidence,
+tracks, the published track and each evidence point's vouching ray; instrument `mj_host/tools/motion_readout.py`; unit tests
+`test_motion_field` 3/3). Its own memory of every ray of the last 1.5 s in the odometry frame, never filed. A new off-floor
+return is evidence when a remembered ray passed within 2.5 cm of it and went on `beyond_m` past it; blobs of evidence within
+12 cm, tracked cast to cast, published after two casts. A cast is processed when its points' x and y change (the host's z
+carries the trunk's height of every tick — the first build processed 29 685 "casts" in 600 s instead of 7 435). Guards: the
+graph with MotionField passive equals T6 tick for tick (seeds 1, 5, 7, 13).
+
+**What it calls motion, and the layers that removed it (seed 5, 600 s):** the free-ray test alone — 244 false tracks a
+minute, the vouching rays showing why: SILHOUETTE EDGES (a table's or seat's top edge at 0.37 m, a wall's top, a ball's
+crown) where earlier rays skimmed within 2.5 cm and hit the wall a metre behind. A BACKGROUND (`bg_m` 0.04: a return with a
+remembered return within 4 cm, 1–10 s old, is the static world) → 54 a minute; a track must TRAVEL 10 cm (`min_travel_m`) →
+22; the vouching ray must go on 30 cm → 4.7. Standing or walking, head still or turning: the same false rate (not registration).
+
+**n = 18 (sweep `log/ten/m2`), the moving train in the ToF's cone within 2 m (5 % of casts):**
+
+| | background only (`bg_m` 0.04) | strict (+ travel 10 cm, beyond 30 cm) | the cloud's detector* |
+|---|---|---|---|
+| a track on the train, share of in-view casts | 35 % | 22 % | 47 % |
+| entries into view caught · median latency | 126/456 · 0.32 s | 68/456 · 1.12 s | 194/456 · 0.00 s |
+| false tracks a minute | 57 (structure 47, things 11) | 7.7 | — |
+
+*any mover the cloud published while the train was in view (an upper bound). Complementarity (background-only): both 27 %
+of in-view casts, the motion sensor only 6 %, the cloud only 19 %, **neither 45 %** (235 of 456 entries: brief glimpses at
+the cone's edge, too short for a two-cast confirmation). On the chase seed at 150 s it catches the train 0.4 s after it
+starts moving where the cloud sees nothing; from 151 s the train passes beside the duck at half a metre, outside the 45°
+cone. **Verdict: `PARTIAL` as a sensor — complementary to the cloud's detector (+27 entries, +6 % of in-view casts), not a
+replacement at this precision; the larger loss is COVERAGE (the train in view briefly, or not at all while it passes close),
+which is the gaze's business (step 2).**
+
+### 17.102 The motion loop, step 2: motion captures the gaze — `NULL` on the chase, `REGRESSION` on the walk (2026-10-02)
+
+**Built:** host `--gaze-to-motion` — the head's attention target is a mover whenever there is one (the chase's target, else
+MotionField's published track, else the cloud's unconfirmed candidate), otherwise where the walk is going; the learned gaze
+turns the head to it on the walk (the gaze-error sense), a stop gives it the yaw override; the record's `gm`. `--gaze-no-candidate`
+drops the cloud's unconfirmed candidate. Guards byte-identical. Sweeps `log/ten/g1`, `log/ten/g2`, n = 18, against T6:
+
+| | T6 | gaze: chase + candidate | + the motion sensor | gaze: chase + motion only |
+|---|---|---|---|---|
+| on the moving train s a run · contacts | 15.2 · 3.8 | 15.1 · 2.2 | 14.1 · 2.3 | 15.4 · 2.9 |
+| boring · walls / min · falls | 18.2 % · 13.3 · 3.6 | 24.7 · 19.9 · 2.4 | 23.6 · 16.5 · 2.5 | 23.0 · 22.2 · 3.5 |
+| first minute: the block touched | 11/18 | 12/18 | 13/18 | 12/18 |
+
+**The head does reach its target** (|want − head yaw| after a second of held attention: median 0.06–0.08 rad walking), but the
+attention target was mostly the cloud's unconfirmed candidate (15 % of ticks, mostly young static clusters), and the moving
+train within 1.5 m stayed in the 45° cone 16 → 18 % of the time. Without the candidate (chase + motion tracks only) the chase
+ties and the walk loses its forward view: walls 13 → 22 a minute. **Verdict: `NULL` on the chase, `REGRESSION` on the walk —
+not kept.** Re-use: a gaze that leaves the walk's direction needs the walk to keep its own forward view (a body-frame memory of
+what lies ahead long enough to cover the glance), or a glance only while standing.
+
+### 17.103 The motion loop, step 3: motion feeds the chase; and why T6's first minute is worse (2026-10-02)
+
+**T6's first-minute cost, traced** (the green block touched 11/18 against the pursuit's 16/18): in the seeds that lost it, a
+chase starts at ~10–12 s on a THING — the green block itself, young in the walking cloud as it comes into view — and the
+follow's hold keeps it at the chase's raised speed: the arrival comes with falls and skills at wild bearings (s15, s18, s5, s9);
+on s4 and s10 the early chase is the train (wanted). **T6b, the hold keeps only what moves** (`CloudMap.mover_hold_min_v` 0.05:
+the any-age exemption lapses when the followed mover's step stays under 5 cm/s for half a second; unit test
+`AFollowedMoverThatStopsLosesTheAnyAgeHold`; config `a1v2_t6b_follow_moving`, sweep `log/ten/c3`): the moving train 15.2 →
+11.1 s a run, contacts 3.8 → 2.8, walls 13 → 17, falls 3.6 → 2.9, the first minute unchanged (11/18) — `REGRESSION` on the
+chase, not the first minute's cause (the false START is). Not kept.
+
+**Step 3 — MotionField feeds the chase** (`cloud_mover_topic`: with no track of its own MotionField passes the cloud's sighting
+through, so the seek loop's `mover_topic` gets the union; unit test `WithoutItsOwnTrackTheCloudsMoverPassesThrough`). **Trap
+found:** the scheduler runs modules in the config's order — MotionField appended after the seek loop gave a token stamped a tick
+late, which the seek loop ignores: zero chases. MotionField must sit between CloudMap and the seek loop.
+
+| n = 18 | T6 | M3: the union (strict sensor + the cloud) | M4: the strict sensor only |
+|---|---|---|---|
+| chases a run · on the moving train s · contacts | 11.2 · 15.2 · 3.8 | 13.6 · **16.5** · 2.4 | 1.3 · 1.3 · 2.2 |
+| re-acquired · pursuit s | 0.4 · 22.1 | **0.8** · 21.9 | 0.1 · 1.8 |
+| boring · walls / min · falls | **18.2 %** · 13.3 · 3.6 | 21.7 · **11.7** · 3.6 | 21.2 · 14.8 · 2.8 |
+| first minute: the block touched | 11/18 | 12/18 | **15/18** |
+
+M3 `NULL` (the chase a little longer, the walk a little better, contacts and boring worse). M4 confirms the first minute's
+false starts come from the cloud's detector (a static block newly in view reads young; the motion sensor needs free space where
+a ray just passed and does not fire on it) — and that the strict sensor is too sparse to chase from (`REGRESSION` on the chase).
+Next: the background-only sensor (recall 35 %) as the chase's source, alone (M5) and in union with the cloud (M6), the chase's
+own prediction and speed tests as the second filter.
+
+**M5 / M6 — the background-only sensor (`bg_m` 0.04, no travel, beyond 8 cm; recall 35 %) as the chase's source** (configs
+`a1v2_t9b_motion_bg_only`, `a1v2_t8b_motion_bg_union`; sweep `log/ten/m5`): alone, the first minute is kept (15/18) but its
+chases are mostly false and drop at once (195 chases, 47 at the train, median 0.0 s; the moving train 5.2 s a run); in union
+with the cloud, everything but contacts is worse than T6 (boring 23.2 %, walls 19.8). Both `REGRESSION`.
+
+**M7 — the cloud follows, the motion sensor VOUCHES** (`MotionField.vouch_m` 0.3, `vouch_s` 0.6, `own_tracks` false: a cloud
+sighting passes to the chase only with motion evidence within 0.3 m in the last 0.6 s, or continuing a vouched mover; unit test
+`TheCloudsSightingPassesOnlyWhereMotionWasSeen`; config `a1v2_t10_vouch`, sweep `log/ten/m7`): chases 6.8 a run, half at the
+train (T6 45 %), the moving train 10.7 s a run (T6 15.2), contacts 2.8, boring 21.4 %, walls 15.0, falls 3.3, **the first minute
+14/18** (T6 11). `PARTIAL`: the precision and the first minute the division of labour was built for, at a third of T6's
+chasing; the continuation may starve (a vouched mover must re-appear within 0.25 m in 0.5 s). M7b loosens it (0.4 m, 1 s).
+
+**M7b, the vouch loosened** (0.4 m, 1 s of evidence, 1 s of continuation; `a1v2_t10b_vouch_loose`, sweep `log/ten/m8`): the moving
+train 9.4 s a run, falls 4.4 — no better; the vouch suppresses chase STARTS (the evidence lands on the train on half its
+casts), the continuation was not the limit. `NULL`.
+
+**T11 — the thing walked to is not a mover** (`CloudMap.mover_not_target_m` 0.25: a NEW mover candidate within 25 cm of the
+seek loop's held STATIC target is refused, the followed mover exempt; `BearingSeekLoop.publish_chase_flag` gives the seek
+token a 4th value, 1 while chasing or coasting, so a pursuit's predicted position is not gated; unit test
+`ANewMoverAtTheHeldStaticTargetIsRefused`; config `a1v2_t11_not_target`, sweep `log/ten/c4`):
+
+| n = 18 | T6 | T11 |
+|---|---|---|
+| the moving train s a run (sd) · contacts | 15.2 (11.8) · 3.8 | 11.1 (7.8) · 2.6 |
+| boring · walls / min · falls | 18.2 % · 13.3 · 3.6 | 21.4 % · 19.0 · **2.3** |
+| first minute: the block touched · the first skill touching | 11/18 · 3/13 | **15/18** · 3/15 |
+
+Paired on the moving train −4.2 s (t −1.7, a signal; the per-seed sd is 8–12 s, so every follow arm — T6, M3, M7, T11 — lands in
+10–17 s against the pursuit's 3.3). **`PARTIAL`, the balanced arm:** the first minute recovered and the fewest falls of the
+chasing arms, the chase at three times the pursuit's, boring and walls the cost. Preset for the eye beside T6.
+
+**T12 — T11 + the union with the strict motion sensor** (`a1v2_t12_gate_union`, sweep `log/ten/c5`): the moving train 10.0 s a
+run, boring 23.4 %, falls 3.6, the first minute 15/18 — `NULL` against T11. **On the chase seed 2060249272** (one run each): T6
+chases the moving train 7.1 s with no contact, T11 14.1 s with one.
+
+**Where the motion loop stands (2026-10-02):** the always-on sensor exists (MotionField, its own memory of rays, background and
+travel tests) and its best use found is as a precision instrument — it showed the first minute's false chases come from the
+cloud's detector, and its vouch recovers the first minute — but at 22–35 % recall on the 8 × 8, 45° sensor it cannot drive the
+chase by itself, and pointing the head at motion costs the walk its forward view. Every follow arm (T6, M3, M7, T11, T12) lands
+at 10–17 s a run on the moving train (the per-seed sd 8–12 s) against the pursuit's 3.3 and ★ T4's 3.1; the residual limit is
+COVERAGE: the moving train within 1.5 m is inside the cone 16–18 % of the time. The arms for the eye: **T6** (the most chasing,
+the lowest boring share and walls; the first minute and a fall a run its cost) and **T11** (the first minute recovered, the
+fewest falls, a third less chasing). Next leads, in order: a walk that keeps its forward view while the head glances (a
+body-frame memory long enough to cover a glance — the re-use context of the gaze's regression), then the gaze to motion
+retried; the head's free time at stops spent sweeping wider for motion.
+
+### 17.104 The train room: practice with something that moves (2026-10-03)
+
+**The operator:** "we need to keep iterating; perhaps a smaller room with only the train in it that runs continuously would
+help. You need to give the robot a lot of contact with moving objects in order for it to learn how to chase them."
+**Built:** `playroom_gen.py --train-room` (walls and the train on its oval, nothing else; half 1.25 m, the oval 0.875 × 0.8 m to
+0.35 m of the walls, the duck starting inside it; `scene_train_room.xml`; the plain and train playrooms regenerate
+byte-identical); the host's `--train 0.2 60 0` runs the train without stops.
+
+**The session (T11, learning on as on every walk, 3 seeds × 1200 s, brains saved; `log/ten/tr1`):** no learning curve —
+chase seconds per 200 s window 2–21 with no trend on any seed; the train inside the sensor's cone only 20–48 s of every 200
+even circling the duck; ~5 contacts per window. **What learns from the exposure:** the cloud's detector, MotionField and the
+chase are fixed rules; the walker's MotorEPMv2 is the one learner that senses the target (bearing, range). **Transfer** (the
+saved brain loaded into the train playroom, T11, n = 18):
+
+| | T11 (★ GAZE's walker) | 1200 s train-room walker | 300 s train-room walker |
+|---|---|---|---|
+| chases at the train · on the moving train s · closing | 34 % · 11.1 · 39 % | **51 %** · 12.0 · 39 % | **51 %** · 10.0 · **50 %** |
+| contacts a run | 2.6 | 3.3 | 3.3 |
+| first minute: the block touched | 15/18 | **0/18** | 10/18 |
+| arrivals at things · skills touching | 198 · 73/215 | 136 · 30/129 | 196 · 67/197 |
+| boring · walls / min · falls | 21.4 % · 19.0 · 2.3 | 25.3 % · 23.5 · 1.8 | 23.6 % · 16.0 · 2.7 |
+
+**Verdict: `PARTIAL` on the chase's precision and contacts, `REGRESSION` on the approach to still things** — the contact regime's
+lesson again (§17.85: a regime the brain never sees the others in overwrites them; 1200 s lost the walk there too): a walker
+identified only on a target that moves forgets how to arrive at one that does not, and the dose only scales the cost. The
+walker has nothing chase-specific to identify — it senses where the target is, not how it moves. Next: the mover sense (the
+chased mover's velocity in the walker's sense, `--intent-mover-sense`), so practice has a chase-specific thing to learn.
+
+**The mover sense** (host `--intent-mover-sense`: two walker sense slots after the range, the chased mover's velocity in the body
+frame / 0.6 m/s, zero when nothing is chased; `twist_bridge.load_slots` 20; ★ GAZE's walker grown 26 → 29 at 10; config
+`a1v2_t13_mover_sense`; guard byte-identical): from ★ GAZE's walker, its slots identified online (sweep `log/ten/ms1`) — chases at
+the train 49 %, the moving train 12.2 s, contacts 2.8, the first minute 14/18, boring 22.9 %, walls 16, falls 3.3: a tie with T11
+(`NULL`). Practised 600 s in the train room first (`duck_trainroom_mover_s1`, `log/ten/ms2`): the moving train 9.7 s, closing 35 %,
+**the first minute 1/18** — the train-only regime's loss again (`REGRESSION`). The mover sense did not make train-only practice
+safe: the walker still learns a world without still targets. A MIXED practice (1200 s in the train playroom with the train
+running continuously, `duck_mixedpractice_mover_s1`) shows no learning curve inside the session either (chase per 200 s: 12,
+11, 4, 9, 0, 10 s); its transfer in `log/ten/ms3`.
+
+### 17.105 The learned chase: where to aim, learned at the intent level (2026-10-03)
+
+**The operator:** "the body model is not at the layer where chasing would occur. Chasing is a planning loop and exists at the
+intent level. Strategic." — and "build it with the walker frozen during practice." **Built:** `BearingSeekLoop` THE LEARNED LEAD
+— `lead_options` (aim points 0 / 0.5 / 1 / 2 s ahead along the mover's velocity); the chase's SITUATION published on
+`situation_out_topic` ([range / 2.5, |bearing| / π, the bearing's drift outward, the range rate], in [0, 1]) for an EPM
+(`chase_situation_epm`, ≤ 6 nodes) whose winner keys the table; every `lead_eval_ticks` (1 s) of chasing, the closing speed of the
+range to the mover's estimated position is recorded for (situation, option), then the least-tried option (under
+`lead_min_samples` 2) or the best mean is chosen; the table snapshots and restores, `restore_lead_only` keeping a practice's held
+target out of the next room. Host `--freeze-walker` (the walker's MotorEPM learning off for the run; nothing re-enables it) and
+the record's `cl` (option, situation). Unit tests `TheChaseLearnsWhereToAimFromItsOwnOutcomes`,
+`ARestoredLeadTableAimsWithItsBestOptionAndBringsNoTarget` (26/26); guard byte-identical. Config `a1v2_t14_learned_lead`.
+
+**Practice (the train room, walker frozen, 3 seeds × 1200 s, `log/ten/ll1`):** the chase runs 1–12 s per 300 s window even with
+the train circling the duck; the tables hold **11–21 outcomes** over up to six situations and four options, and disagree across
+seeds (situation 0's best: 1 s ahead on s1 and s3, 2 s or none on s2). **The learner works and starves:** the experience the
+operator asked for is gated by the same thing the chase is — the duck sees the train in its 45° cone 10–17 % of the time and
+confirms a chase on a fraction of that. The playroom arm learning online (no practice) in `log/ten/ll2`.
+
+**The learned lead online** (T14 in the train playroom from ★ GAZE's walker, no practice, n = 18, `log/ten/ll2`): chases at the
+train 42 %, on the moving train 8.1 s (closing 49 %), the first minute 16/18, boring **19.3 %**, falls 2.6. The chase seconds
+fall (8.1 vs T11's 11.1) and the boring share falls (19.3 vs 21.4): the table spends its first outcomes on options that lose the
+mover. Within noise on both; `NULL` until the table has experience to act on, which the coverage below gates.
+
+### 17.106 Coverage: can the duck keep the train in view? (2026-10-03)
+
+**The operator** chose to fix coverage before feeding the learned chase. The measure: the share of ticks the moving train is
+within 1.5 m and inside the ToF's 45° cone (body yaw + head yaw). Two arms on T11, n = 18, the train playroom:
+
+| | T11 | C1: the walker's ToF memory 2 s (`--tof-body 2.0`) | C2: C1 + MotionField + the gaze to motion |
+|---|---|---|---|
+| the moving train near and in the cone | 15 % | 14 % | 14 % |
+| walking with the head ahead (\|head yaw\| < 0.4) | 67 % | 61 % | 62 % |
+| on the moving train s · closing · contacts | 11.1 · 39 % · 2.6 | 10.5 · 41 % · 3.0 | 8.6 · 41 % · 2.0 |
+| first minute · boring · falls | 15/18 · 21.4 % · 2.3 | 12/18 · 23.0 % · **3.7** | 12/18 · 23.3 % · **4.1** |
+
+**Verdict: `NULL` on coverage, `REGRESSION` on falls (both arms).** The diagnosis is structural, not a tuning miss: every
+mechanism tried for the chase (the cloud's mover, MotionField, the gaze to motion, the memory that lets the head look away)
+works on what is ALREADY in the 45° cone. Turning toward motion needs the motion seen first, so none of them can bring into
+view a train that is outside it — the share stays at the geometry's ~15 %. Rewrite rule step 2: the signal the error needs is
+not in any observation the duck has. **What would carry it:** a wide field, low resolution, motion-only sense — which is what
+peripheral vision is — i.e. the head camera (playroom plan C1, not yet rendered in the host; frame differencing over a wide
+lens); or an active one, a gaze that visits where the map is oldest (the cone made wide by time, at the forward view's cost,
+which the body-frame memory now protects). Re-use context for C1/C2: revisit once a wide sensor exists to point the gaze.
+
+### 17.107 Looking around while walking (2026-10-03)
+
+**The operator:** "let's try the feature of looking around while walking (it will make the robot more interesting to watch);
+we will then report the limitations and outline our case for camera access" (the camera buffer is not exposed in Pollen's
+API). **Built:** host `--look-around MAX_YAW STALE_S` — a TARGET for the head brain's learned gaze error, not a sweep: 24
+sectors of 15° in the odometry frame, each aged since it was last inside the 45° cone; on the walk, with no chase, no seek and
+no mover holding the gaze, the target is the stalest sector within MAX_YAW of the body's axis if older than STALE_S, else
+straight ahead. A sector seen is fresh, so the look moves on of itself. Logged as `la` [on, bearing]. Guard byte-identical.
+On T11, n = 18, the train playroom:
+
+| | T11 | LA1 (0.9 rad, 2 s) | LA2 (1.2 rad, 1 s) |
+|---|---|---|---|
+| look target active (share of walking) · \|head yaw\| median walking | — · 0.21 | 14 % · 0.33 | 25 % · 0.41 |
+| the moving train near and in the cone | 15.3 % | 14.2 % | 14.9 % |
+| on the moving train s · closing · contacts | 11.1 · 39 % · 2.6 | 11.0 · 44 % · 2.4 | 10.9 · 42 % · 2.5 |
+| first minute · boring · walls/min · falls | 15/18 · 21.4 % · 19.0 · 2.3 | 13/18 · 22.8 % · 15.1 · 2.4 | 13/18 · 21.7 % · 14.6 · **5.9** |
+
+**Verdict: LA1 ties T11 on every number (`NULL` on coverage, no cost) with a visibly livelier head — the candidate for the
+operator's eye, since the claim is "more interesting to watch"; LA2 `REGRESSION` (falls 2.5×).** Why coverage cannot move: a
+head that looks around changes WHICH 45° the duck sees, not HOW MUCH; at any moment a train at an unpredictable bearing is in
+view with the same ~15 % probability. Only a wider field changes that.
+
+**The field of view the case for the camera rests on** — the same T11 logs re-scored as if the sensor's cone were wider
+(the moving train within 1.5 m, ~107 s a run): 45° 15 % · 60° 19 % · 90° 27 % · **120° 36 %** · 160° 47 %. A 120° camera
+used only as a motion detector would put the train in view 2.4× as often as the ToF does, before any gaze helps.
+The case for camera access, in Pollen's terms: outreach plan §9.
+
+**★ LA1 PROMOTED on the operator's eye (2026-10-03):** "the robot actually looks quite interesting when it's looking around at
+areas that it hasn't seen before; it's novelty to the behaviour, and it is definitely moving in a direction that we want." The
+stack is now ★ LA1 = T11 (config `a1v2_t11_not_target`) + host `--look-around 0.9 2.0` (launcher preset, second row).

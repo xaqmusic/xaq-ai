@@ -1306,6 +1306,28 @@ bool g_tof_free_rays = false;
 // never fires: all 41 stops of 40 s or more on the T1 sweep held a walking cloud 99 % of the time and ran to the cap.  The
 // body knows it stopped (it commanded the stop: efference, not an oracle).  Off = byte-identical.
 bool g_stop_is_still = false;
+// --freeze-walker (2026-10-03): the walker's learning off for the whole run (the learned chase's practice)
+bool g_freeze_walker = false;
+// --log-motion (2026-10-02, the chase push): on every tick a new ToF cast reached the graph's MotionField, the record gains
+// "mot": {"e": [[x, y, z]...] the motion evidence points, "tr": [[id, x, y, vx, vy, casts, salience]...] the tracks,
+// "p": the published track's id or -1} -- odometry frame.  Instrumentation; off = byte-identical.
+bool g_log_motion = false;
+// --gaze-to-motion (2026-10-02, the motion loop step 2; the operator: "moving voxels should always capture the robot's
+// attention"): the head's attention target is a MOVER whenever there is one -- the chase's target (as before), else the
+// graph's MotionField published track, else the cloud's unconfirmed mover candidate -- and otherwise, as before, where the
+// walk is going.  The learned gaze turns the head to it on the walk (the gaze-error sense); at a stop the mover takes the
+// yaw override (a glance).  The record gains "gm": [source 0 none / 1 chase / 2 motion / 3 candidate, the bearing + left].
+// Off = byte-identical.
+bool g_gaze_motion = false;
+// --look-around MAX_YAW STALE_S (2026-10-03, the coverage push; the operator: "looking around while walking will make the robot
+// more interesting to watch"): the gaze error's target on the walk, when nothing else holds it (no chase, no seek, no mover),
+// is the bearing the head has gone longest without seeing -- 24 sectors of 15 deg in the odometry frame, each aged since it
+// was last inside the sensor's 45 deg cone -- the stalest within MAX_YAW of the body's axis, if older than STALE_S; else
+// straight ahead.  A target for the head brain's learned gaze, not a sweep: a sector seen is fresh, so the look moves on.
+double g_look_around = 0.0, g_look_stale_s = 2.0;
+// --gaze-no-candidate: the cloud's UNCONFIRMED mover candidate does not take the attention (measured: 15 % of ticks, mostly
+// young static clusters -- the head glanced at noise on the walk; §17.102)
+bool g_gaze_no_cand = false;
 // --look-up-when-impeded IMPEDE_S PITCH LOOK_S BACK_S (2026-10-02, the ten-minutes phase; the operator: "the robot should
 // look up to see if an obstacle that is impeding its movement is a wall, so it should be backed away from").  IMPEDED is the
 // seek loop's own prediction failing: while seek steers, its range has not closed by 5 cm in IMPEDE_S seconds (on T1 + the
@@ -1364,7 +1386,7 @@ bool g_contact_release = false, g_contact_cloud = false, g_contact_forget = fals
 double g_seek_gate_contact = 0.0;   // --seek-gate-contact R: the too-close share reads 0 to the walker while seek's target is within R m
 double g_tof_spread = 0.0, g_tof_lag = 0.0;   // --tof-real SPREAD LAG: the real sensor's frame timing (Tof::set_realism); 0 0 = off
 bool g_head_gaze_sense = false; double g_head_stop_slew = 0.0;   // --head-stop-slew RATE: at a stop the yaw slews home until the look takes it; on release it slews back   // --head-gaze-sense: the gaze error in the head brain's 12th sense slot
-double g_yaw_range = 0.0; bool g_yaw_lin = false; bool g_range_sense = false; double g_yaw_lin_below = 0.0;   // --yaw-linearize-below VX: the calibration only while |vx cmd| < VX (the in-place deadband)   // --intent-range-sense   // --yaw-linearize: the walker's yaw is a desired RATE, mapped through the body's measured response   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
+double g_yaw_range = 0.0; bool g_yaw_lin = false; bool g_range_sense = false; bool g_mover_sense = false; double g_yaw_lin_below = 0.0;   // --yaw-linearize-below VX: the calibration only while |vx cmd| < VX (the in-place deadband)   // --intent-range-sense   // --yaw-linearize: the walker's yaw is a desired RATE, mapped through the body's measured response   // --twist-yaw-range R: the walker's yaw command range (0 = the default 1.0)
 double g_tof_body = -1.0;   // --tof-body MEM: the walker's ToF slots in the BODY frame from the last MEM s of returns (-1 = off)
 double g_seek_gaze = 0.0, g_seek_gaze_rate = 1.0, g_seek_gaze_max = 0.7;   // --seek-gaze K [RATE [MAX]]: on the walk the head yaw turns toward the seek loop's target
 double g_translate = 0.0, g_translate_rate = 1.0; bool g_fore_sense = false;   // --intent-head-translate F [RATE] (the bird's neck), --intent-fore-sense
@@ -1614,6 +1636,9 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     if (g_tell_head) std::fprintf(stderr, "  tell head: while the head brain owns the joints, the policy's head command is the head's own targets as offsets from home (it balances for the head it carries)\n");
     if (g_head_rate > 0.0) std::fprintf(stderr, "  head slew: the head's joint targets and the walker's head command slew at most %.2f rad/s (the hand-offs between the head brain and the intent)\n", g_head_rate);
     if (g_head_gaze_sense) std::fprintf(stderr, "  head gaze sense: the head brain's 12th sense slot carries the gaze error (the seek target's bearing while seek steers, else straight ahead, minus the head's yaw)\n");
+    if (g_look_around > 0.0) std::fprintf(stderr, "  look around: on the walk, with nothing else holding the gaze, the head's target is the bearing least recently seen within %.2f rad, if older than %.1f s\n", g_look_around, g_look_stale_s);
+    if (g_freeze_walker) { brain.freeze_walker(); std::fprintf(stderr, "  walker frozen: its MotorEPM learning is off for the whole run\n"); }
+    if (g_mover_sense) { brain.set_mover_sense(true); std::fprintf(stderr, "  intent mover sense: the chased mover's velocity (body frame, forward and left, /0.6 m/s) follows the range slot in the walker's sense\n"); }
     if (g_range_sense) { brain.set_range_sense(true); std::fprintf(stderr, "  intent range sense: the distance to the seek target (/2 m) follows the fore-aft slot in the walker's sense\n"); }
     if (g_yaw_lin_below > 0.0) std::fprintf(stderr, "  yaw linearize below %.2f m/s: the in-place deadband compensated only while the forward command is under it; the walk's yaw passes through\n", g_yaw_lin_below);
     if (g_yaw_lin) std::fprintf(stderr, "  yaw linearize: the walker's yaw command is a desired yaw rate, mapped through the walking policy's measured open-loop response (the in-place deadband compensated)\n");
@@ -1780,6 +1805,8 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
     // the impeded look (--look-up-when-impeded)
     double imp_best = 1e9, imp_prev = -1.0; int imp_timer = 0, imp_back_left = 0, imp_look_left = 0;
     bool imp_stop = false; int imp_n = 0, imp_wall = 0, imp_thing = 0;
+    int gm_src = 0; double gm_want = 0.0;
+    std::array<int, 24> la_seen{}; la_seen.fill(0); double la_want = 0.0; int la_on = 0;   // --look-around                         // --gaze-to-motion: the attention's source and bearing
     int down_skills = 0, down_rises = 0; bool down_skill_running = false; int down_rise_watch = 0;
     std::function<bool(const std::string&)> skill_start;
     skill_start = [&](const std::string& name) -> bool {
@@ -2551,10 +2578,46 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 head->set_pitch_override(true, g_imp_pitch); head->set_yaw_override(true, 0.0);
                 if (--imp_look_left == 0) head->set_pitch_override(false, 0.0);
             }
+            // the mover the attention goes to (--gaze-to-motion): its bearing from the body, + = left
+            gm_src = 0; gm_want = 0.0;
+            if (g_gaze_motion) {
+                const auto op = odom.position(); const double oyaw = odom.yaw();
+                const auto rel = [&](double x, double y) { double a = std::atan2(y - op[1], x - op[0]) - oyaw;
+                    while (a > M_PI) a -= 2.0 * M_PI; while (a < -M_PI) a += 2.0 * M_PI; return a; };
+                if (brain.chase_active()) { gm_src = 1; gm_want = -brain.seek_ego(); }
+                else if (const auto* mf = brain.motion_field(); mf && mf->published() >= 0) {
+                    const auto& tr = mf->tracks()[size_t(mf->published())]; gm_src = 2; gm_want = rel(tr.x, tr.y);
+                } else if (!g_gaze_no_cand && brain.chase_have_cand()) { gm_src = 3; gm_want = rel(brain.chase_cand_x(), brain.chase_cand_y()); }
+                gm_want = std::clamp(gm_want, -1.2, 1.2);
+                // at a stop (and not in the impeded look) the mover takes the yaw override: a glance
+                if (gm_src >= 2 && stop_phase != StopPhase::None && imp_look_left == 0) head->set_yaw_override(true, gm_want);
+            }
             if (g_head_gaze_sense) {
                 // the gaze error: where the walk is going (the seek target's body bearing while seek steers the reference;
                 // straight ahead otherwise), minus where the head points (its yaw joint from home), + = left
-                const double want = brain.last_steer() == 3 ? -brain.seek_ego() : 0.0;
+                double want = gm_src > 0 ? gm_want : (brain.last_steer() == 3 ? -brain.seek_ego() : 0.0);
+                if (g_look_around > 0.0) {
+                    // the sectors the cone covers now are fresh; the stalest within reach is the target when nothing else is
+                    const double view = odom.yaw() + head_q[2];
+                    for (int k = 0; k < 24; ++k) {
+                        double d = (k + 0.5) * M_PI / 12.0 - view;
+                        while (d > M_PI) d -= 2.0 * M_PI; while (d < -M_PI) d += 2.0 * M_PI;
+                        if (std::fabs(d) < 22.5 * M_PI / 180.0) la_seen[size_t(k)] = t;
+                    }
+                    la_on = 0; la_want = 0.0;
+                    if (gm_src == 0 && brain.last_steer() != 3 && stop_phase == StopPhase::None && !brain.chase_active() && !brain.chase_coasting()) {
+                        int best = -1, best_age = -1;
+                        for (int k = 0; k < 24; ++k) {
+                            double b = (k + 0.5) * M_PI / 12.0 - odom.yaw();
+                            while (b > M_PI) b -= 2.0 * M_PI; while (b < -M_PI) b += 2.0 * M_PI;
+                            if (std::fabs(b) > g_look_around) continue;
+                            const int age = t - la_seen[size_t(k)];
+                            if (age > best_age) { best_age = age; best = k; la_want = b; }
+                        }
+                        if (best >= 0 && best_age >= int(g_look_stale_s * kBrainHz)) { la_on = 1; want = la_want; }
+                        else la_want = 0.0;
+                    }
+                }
                 double e = want - head_q[2];
                 while (e > M_PI) e -= 2.0 * M_PI;
                 while (e < -M_PI) e += 2.0 * M_PI;
@@ -2886,6 +2949,25 @@ int cmd_level2(const std::string& scene, const std::string& graph, double second
                 std::printf("]");
             }
             if (g_hr_tau > 0.0) std::printf(",\"hr\":%.2f", brain.heading_reflex_share());
+            if (g_gaze_motion) std::printf(",\"gm\":[%d,%.3f]", gm_src, gm_want);
+            if (g_look_around > 0.0) std::printf(",\"la\":[%d,%.3f]", la_on, la_want);
+            if (chase_on) { const int lo = brain.seek_lead_option(); if (lo >= 0) std::printf(",\"cl\":[%d,%d]", lo, brain.seek_lead_node()); }
+            if (g_log_motion) {
+                if (const auto* mf = brain.motion_field(); mf && mf->cast_now()) {
+                    std::printf(",\"mot\":{\"e\":[");
+                    const auto& ev = mf->last_evidence();
+                    for (size_t k = 0; k < ev.size(); ++k) std::printf("%s[%.3f,%.3f,%.3f]", k ? "," : "", ev[k][0], ev[k][1], ev[k][2]);
+                    std::printf("],\"tr\":[");
+                    const auto& trs = mf->tracks();
+                    for (size_t k = 0; k < trs.size(); ++k)
+                        std::printf("%s[%d,%.3f,%.3f,%.3f,%.3f,%d,%.1f]", k ? "," : "", trs[k].id, trs[k].x, trs[k].y, trs[k].vx, trs[k].vy, trs[k].casts, trs[k].salience);
+                    std::printf("],\"p\":%d,\"j\":[", mf->published() >= 0 ? trs[size_t(mf->published())].id : -1);
+                    const auto& jw = mf->last_justification();
+                    for (size_t k = 0; k < jw.size(); ++k)
+                        std::printf("%s[%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.0f]", k ? "," : "", jw[k][0], jw[k][1], jw[k][2], jw[k][3], jw[k][4], jw[k][5], jw[k][6]);
+                    std::printf("]}");
+                }
+            }
             if (g_log_still && cloud_on) std::printf(",\"still\":[%d,%.4f,%.3f]", g_still_flag, g_still_gz, g_still_w);
             if (g_ref_free > 0.0 && t % 50 == 0) std::printf(",\"rfree\":%d", brain.ref_released());
             if (g_stop.on_stuck > 0.0) std::printf(",\"stall\":[%.2f,%.2f]", brain.stall_s(), brain.stall_median_s());
@@ -3412,6 +3494,8 @@ int main(int argc, char** argv) {
             g_yaw_lin_below = std::stod(next("--yaw-linearize-below"));
         } else if (a == "--intent-range-sense") {
             g_range_sense = true;
+        } else if (a == "--intent-mover-sense") {
+            g_mover_sense = true;
         } else if (a == "--yaw-linearize") {
             g_yaw_lin = true;
         } else if (a == "--twist-yaw-range") {
@@ -3491,6 +3575,16 @@ int main(int argc, char** argv) {
             g_tof_free_rays = true;
         } else if (a == "--log-still") {
             g_log_still = true;
+        } else if (a == "--log-motion") {
+            g_log_motion = true;
+        } else if (a == "--gaze-to-motion") {
+            g_gaze_motion = true;
+        } else if (a == "--gaze-no-candidate") {
+            g_gaze_no_cand = true;
+        } else if (a == "--look-around") {
+            g_look_around = std::stod(next("--look-around")); g_look_stale_s = std::stod(next("--look-around"));
+        } else if (a == "--freeze-walker") {
+            g_freeze_walker = true;
         } else if (a == "--stop-is-still") {
             g_stop_is_still = true;
         } else if (a == "--look-up-when-impeded") {

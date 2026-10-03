@@ -38,6 +38,7 @@ std::vector<TopicSpec> BearingSeekLoop::input_topics() const {
                               TopicSpec{pose_topic_,    std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false} };
     if (!renew_topic_.empty()) v.push_back(TopicSpec{renew_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!pull_topic_.empty()) v.push_back(TopicSpec{pull_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
+    if (!situation_topic_.empty()) v.push_back(TopicSpec{situation_topic_, std::type_index(typeid(RealityToken)), SubscriptionKind::Direct, false});
     if (!mover_topic_.empty()) v.push_back(TopicSpec{mover_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     if (!yield_topic_.empty()) v.push_back(TopicSpec{yield_topic_, std::type_index(typeid(ProprioToken)), SubscriptionKind::Direct, false});
     return v;
@@ -46,6 +47,7 @@ std::vector<TopicSpec> BearingSeekLoop::output_topics() const {
     std::vector<TopicSpec> v{ TopicSpec{output_topic_, std::type_index(typeid(ProprioToken))},
                               TopicSpec{value_topic_,  std::type_index(typeid(ProprioToken))} };
     if (!range_topic_.empty()) v.push_back(TopicSpec{range_topic_, std::type_index(typeid(ProprioToken))});
+    if (!situation_out_topic_.empty()) v.push_back(TopicSpec{situation_out_topic_, std::type_index(typeid(ProprioToken))});
     return v;
 }
 
@@ -77,6 +79,17 @@ ParamSchema BearingSeekLoop::params_schema() const {
             "While the thing is unseen the confidence decays by 1/this per tick (about this many ticks of memory).", ParamValue{3000.0}},
         {"floor", ParamMutability::HotMutable,
             "Confidence below which the remembered target is dropped.", ParamValue{0.05}},
+        {"lead_options", ParamMutability::ConstructionOnly,
+         "THE LEARNED LEAD: the aim options, seconds ahead along the mover's velocity (e.g. [0, 0.5, 1, 2]); the chase learns per "
+         "situation which closes the range best.  Empty = the fixed chase_lead_s.", ParamValue{std::vector<double>{}}},
+        {"situation_out_topic", ParamMutability::ConstructionOnly, "The chase's situation while chasing, [range/2.5, |bearing|/pi, outward drift, range rate] in [0,1], for an EPM.", ParamValue{std::string("")}},
+        {"situation_topic", ParamMutability::ConstructionOnly, "The situation EPM's RealityToken: its winner keys the lead table.", ParamValue{std::string("")}},
+        {"lead_eval_ticks", ParamMutability::HotMutable, "How long one option is tried before its outcome is recorded (ticks).", ParamValue{int64_t{50}}},
+        {"lead_min_samples", ParamMutability::HotMutable, "An option with fewer outcomes than this in a situation is tried first.", ParamValue{int64_t{2}}},
+        {"restore_lead_only", ParamMutability::ConstructionOnly, "A restored snapshot brings the lead table and nothing else.", ParamValue{false}},
+        {"publish_chase_flag", ParamMutability::ConstructionOnly,
+         "The output token carries a 4th value: 1 while chasing or coasting (CloudMap's mover_not_target_m reads it).  false = off.",
+         ParamValue{false}},
         {"pull_topic", ParamMutability::ConstructionOnly,
          "S3: the outcome loop's [pull] (the expected answer at the attended thing's cell); a sighting sets the need to it "
          "instead of 1, so a thing that has been tried and never moved is seen but not walked to.  Empty = off.",
@@ -163,7 +176,10 @@ ParamMap BearingSeekLoop::current_params() const {
     m["range_topic"] = ParamValue{range_topic_};
     m["proximity_range"] = ParamValue{proximity_range_}; m["min_conf"] = ParamValue{double(min_conf_)};
     m["arrive_m"] = ParamValue{arrive_m_}; m["forget_ticks"] = ParamValue{forget_ticks_}; m["floor"] = ParamValue{double(floor_)};
-    m["pull_topic"] = ParamValue{pull_topic_};
+    m["pull_topic"] = ParamValue{pull_topic_}; m["publish_chase_flag"] = ParamValue{publish_chase_flag_};
+    m["lead_options"] = ParamValue{lead_options_}; m["situation_out_topic"] = ParamValue{situation_out_topic_};
+    m["situation_topic"] = ParamValue{situation_topic_}; m["lead_eval_ticks"] = ParamValue{int64_t(lead_eval_ticks_)};
+    m["lead_min_samples"] = ParamValue{int64_t(lead_min_samples_)}; m["restore_lead_only"] = ParamValue{restore_lead_only_};
     m["renew_topic"] = ParamValue{renew_topic_}; m["renew_min"] = ParamValue{double(renew_min_)}; m["renew_range"] = ParamValue{renew_range_};
     m["walk_refix_m"] = ParamValue{walk_refix_m_}; m["walk_take_range"] = ParamValue{walk_take_range_};
     m["mover_topic"] = ParamValue{mover_topic_}; m["chase_gate_m"] = ParamValue{chase_gate_m_};
@@ -194,6 +210,15 @@ void BearingSeekLoop::on_setup(Bus* bus, ParamMap const& params) {
     apply_param(params, "floor",           [&](auto const& v){ floor_         = float(get_double(v,"floor")); });
     apply_param(params, "renew_topic",     [&](auto const& v){ renew_topic_   = get_string(v,"renew_topic"); });
     apply_param(params, "pull_topic",      [&](auto const& v){ pull_topic_    = get_string(v,"pull_topic"); });
+    apply_param(params, "lead_options", [&](auto const& v){ if (auto p = std::get_if<std::vector<double>>(&v)) lead_options_ = *p; });
+    apply_param(params, "situation_out_topic", [&](auto const& v){ situation_out_topic_ = get_string(v,"situation_out_topic"); });
+    apply_param(params, "situation_topic", [&](auto const& v){ situation_topic_ = get_string(v,"situation_topic"); });
+    apply_param(params, "lead_eval_ticks", [&](auto const& v){ lead_eval_ticks_ = std::max(1, int(get_double(v,"lead_eval_ticks"))); });
+    apply_param(params, "lead_min_samples", [&](auto const& v){ lead_min_samples_ = std::max(1, int(get_double(v,"lead_min_samples"))); });
+    apply_param(params, "restore_lead_only", [&](auto const& v){
+        if (auto b = std::get_if<bool>(&v)) restore_lead_only_ = *b; else restore_lead_only_ = get_double(v,"restore_lead_only") > 0.5; });
+    apply_param(params, "publish_chase_flag", [&](auto const& v){
+        if (auto b = std::get_if<bool>(&v)) publish_chase_flag_ = *b; else publish_chase_flag_ = get_double(v,"publish_chase_flag") > 0.5; });
     apply_param(params, "renew_min",       [&](auto const& v){ renew_min_     = float(get_double(v,"renew_min")); });
     apply_param(params, "renew_range",     [&](auto const& v){ renew_range_   = get_double(v,"renew_range"); });
     apply_param(params, "walk_refix_m",    [&](auto const& v){ walk_refix_m_  = get_double(v,"walk_refix_m"); });
@@ -317,8 +342,10 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
         else mem_dt_ = double(tick_id - mem_tick_) / 50.0;
     }
     if (have_yield_ && tick_id - yield_tick_ > uint64_t(chase_memory_ticks_)) have_yield_ = false;
+    if (!lead_options_.empty()) lead_tick(tick_id);
     if (chasing_ || coasting_) {
-        const double dt = double(tick_id - cand_tick_) / 50.0 + chase_lead_s_;
+        const double lead = (!lead_options_.empty() && lead_opt_ >= 0) ? lead_options_[size_t(lead_opt_)] : chase_lead_s_;
+        const double dt = double(tick_id - cand_tick_) / 50.0 + lead;
         tx_ = cand_x_ + cand_vx_ * dt; ty_ = cand_y_ + cand_vy_ * dt;
         double need = pull_;
         if (coasting_) need *= std::max(0.0, 1.0 - double(tick_id - coast_from_) / double(std::max(1, chase_permanence_ticks_)));
@@ -406,8 +433,9 @@ void BearingSeekLoop::tick(uint64_t tick_id) {
 
     auto out = std::make_shared<ProprioToken>();
     out->tick_id = tick_id; out->producer_id = id_.empty() ? std::string("seek") : id_; out->sensor = "seek_bearing";
-    out->values = Eigen::VectorXf::Zero(3);
+    out->values = Eigen::VectorXf::Zero(publish_chase_flag_ ? 4 : 3);
     out->values[0] = cx_; out->values[1] = cy_; out->values[2] = value_;
+    if (publish_chase_flag_) out->values[3] = (chasing_ || coasting_) ? 1.0f : 0.0f;
     bus_->publish(output_topic_, out);
     auto v = std::make_shared<ProprioToken>();
     v->tick_id = tick_id; v->producer_id = out->producer_id; v->sensor = "seek_value";
@@ -577,12 +605,89 @@ void BearingSeekLoop::yield_to_structure(uint64_t tick_id) {
     chasing_ = false; coasting_ = false; have_cand_ = false; cand_n_ = 0; cand_vx_ = 0.0; cand_vy_ = 0.0;
 }
 
+// THE LEARNED LEAD (see the header): the option least tried in this situation, else the best mean closing
+int BearingSeekLoop::lead_choose(int node) const {
+    const int k = int(lead_options_.size());
+    const auto stat = [&](int o) { auto it = lead_stats_.find(node * 16 + o); return it == lead_stats_.end() ? LeadStat{} : it->second; };
+    int least = -1, least_n = 1 << 30;
+    for (int o = 0; o < k; ++o) {
+        const int n = stat(o).n;
+        // ties among the least tried: the one after the last chosen, so the options cycle
+        const int rank = (o - lead_last_opt_ - 1 + 2 * k) % k;
+        if (n < lead_min_samples_ && (n < least_n || (n == least_n && rank < ((least - lead_last_opt_ - 1 + 2 * k) % k)))) { least = o; least_n = n; }
+    }
+    if (least >= 0) return least;
+    int best = 0; double bm = -1e18;
+    for (int o = 0; o < k; ++o) if (stat(o).mean > bm) { bm = stat(o).mean; best = o; }
+    return best;
+}
+
+void BearingSeekLoop::lead_tick(uint64_t tick_id) {
+    if (!chasing_ || !have_pose_) { lead_eval_on_ = false; have_prev_mover_ = false; return; }
+    // the mover's estimated position now (no lead), relative to the body
+    const double dts = double(tick_id - cand_tick_) / 50.0;
+    const double mx = cand_x_ + cand_vx_ * dts, my = cand_y_ + cand_vy_ * dts;
+    const double dx = mx - px_, dy = my - py_;
+    const double c = std::cos(pyaw_), s = std::sin(pyaw_);
+    const double fwd = c * dx + s * dy, left = -s * dx + c * dy;
+    const double rng = std::hypot(fwd, left), bearing = std::atan2(left, fwd);   // + = left
+    // the situation, for the EPM: range, |bearing|, the bearing's drift outward, the range rate
+    double drift = 0.0, rrate = 0.0;
+    if (have_prev_mover_) {
+        double db = bearing - prev_mover_bearing_;
+        while (db > 3.14159265358979) db -= 6.28318530717959;
+        while (db < -3.14159265358979) db += 6.28318530717959;
+        drift = db * 50.0 * (bearing >= 0.0 ? 1.0 : -1.0);                     // rad/s, + = drifting away from straight ahead
+        rrate = (rng - prev_mover_range_) * 50.0;                              // m/s, - = closing
+    }
+    prev_mover_bearing_ = bearing; prev_mover_range_ = rng; have_prev_mover_ = true;
+    if (!situation_out_topic_.empty()) {
+        auto sit = std::make_shared<ProprioToken>();
+        sit->tick_id = tick_id; sit->producer_id = id_.empty() ? std::string("seek") : id_; sit->sensor = "chase_situation";
+        sit->values = Eigen::VectorXf(4);
+        sit->values[0] = float(std::clamp(rng / 2.5, 0.0, 1.0));
+        sit->values[1] = float(std::fabs(bearing) / 3.14159265358979);
+        sit->values[2] = float(std::clamp(0.5 + 0.5 * drift / 1.0, 0.0, 1.0));
+        sit->values[3] = float(std::clamp(0.5 + 0.5 * rrate / 0.6, 0.0, 1.0));
+        bus_->publish(situation_out_topic_, sit);
+    }
+    int node = 0;
+    if (!situation_topic_.empty())
+        if (auto rt = std::dynamic_pointer_cast<const RealityToken>(bus_->last_value(situation_topic_)))
+            if (rt->winner_id >= 0) node = std::min(rt->winner_id, 1023);
+    if (lead_eval_on_ && tick_id - lead_start_tick_ >= uint64_t(lead_eval_ticks_)) {
+        // the outcome: how fast the range to the mover closed under this option, in this situation
+        const double closing = (lead_start_range_ - rng) / (double(tick_id - lead_start_tick_) / 50.0);
+        LeadStat& st = lead_stats_[lead_node_ * 16 + lead_opt_];
+        st.n += 1; const double d = closing - st.mean; st.mean += d / st.n; st.m2 += d * (closing - st.mean);
+        ++lead_records_;
+        lead_eval_on_ = false;
+    }
+    if (!lead_eval_on_) {
+        lead_node_ = node;
+        lead_opt_ = lead_choose(node); lead_last_opt_ = lead_opt_;
+        lead_start_tick_ = tick_id; lead_start_range_ = rng; lead_eval_on_ = true;
+    }
+}
+
 nlohmann::json BearingSeekLoop::snapshot_state() const {
-    return nlohmann::json{{"version", 1}, {"have_target", have_target_}, {"tx", tx_}, {"ty", ty_}, {"conf", conf_},
-                          {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}};
+    nlohmann::json j{{"version", 1}, {"have_target", have_target_}, {"tx", tx_}, {"ty", ty_}, {"conf", conf_},
+                     {"arrivals", arrivals_}, {"forgets", forgets_}, {"renewals", renewals_}};
+    if (!lead_stats_.empty()) {
+        nlohmann::json ls = nlohmann::json::object();
+        for (auto const& [k, st] : lead_stats_) ls[std::to_string(k)] = {{"n", st.n}, {"mean", st.mean}, {"m2", st.m2}};
+        j["lead_stats"] = ls;
+    }
+    return j;
 }
 void BearingSeekLoop::restore_state(nlohmann::json const& s) {
     if (s.is_null() || s.empty() || s.value("version", 0) != 1) return;
+    if (s.contains("lead_stats") && s["lead_stats"].is_object()) {
+        lead_stats_.clear();
+        for (auto const& [k, v] : s["lead_stats"].items())
+            lead_stats_[std::stoi(k)] = LeadStat{v.value("n", 0), v.value("mean", 0.0), v.value("m2", 0.0)};
+    }
+    if (restore_lead_only_) return;                                       // the practice's table, nothing else
     have_target_ = s.value("have_target", false); tx_ = s.value("tx", 0.0); ty_ = s.value("ty", 0.0);
     conf_ = s.value("conf", 0.0f); arrivals_ = s.value("arrivals", 0); forgets_ = s.value("forgets", 0); renewals_ = s.value("renewals", 0);
 }
@@ -592,6 +697,11 @@ nlohmann::json BearingSeekLoop::diag_lite() const {
 }
 nlohmann::json BearingSeekLoop::diag_snapshot() const {
     nlohmann::json j = diag_lite();
+    if (!lead_options_.empty()) {
+        nlohmann::json ls = nlohmann::json::object();
+        for (auto const& [k, st] : lead_stats_) ls[std::to_string(k / 16) + ":" + std::to_string(lead_options_[size_t(k % 16)])] = {{"n", st.n}, {"mean", st.mean}};
+        j["lead"] = {{"option", lead_opt_}, {"node", lead_node_}, {"records", lead_records_}, {"table", ls}};
+    }
     j["cx"] = cx_; j["cy"] = cy_; j["tx"] = tx_; j["ty"] = ty_;
     // for the inspector (2026-10-02): the pose, the chase, the memory, and every way a target ends.  Diagnostic only.
     j["pose"] = {px_, py_, pyaw_};

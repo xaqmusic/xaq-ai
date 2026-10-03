@@ -124,8 +124,12 @@ def arena_keyframes():
 
 
 class Room:
-    def __init__(self, seed, half, n_balls, n_blocks, n_chairs, train=False, babble=False):
+    def __init__(self, seed, half, n_balls, n_blocks, n_chairs, train=False, babble=False, train_only=False):
         self.seed, self.half = seed, half
+        # THE TRAIN ROOM (2026-10-03, the operator: "a smaller room with only the train in it that runs continuously; give
+        # the robot a lot of contact with moving objects in order for it to learn how to chase them"): walls and the train
+        self.train_only = train_only
+        self.track_clear = 0.35 if train_only else TRACK_WALL_CLEAR
         self.babble = babble     # THE BABBLE ROOM (2026-09-29, §17.85): a small room with obstacles at ToF height and nothing else
         self.rng = random.Random(seed)
         self.n_balls, self.n_blocks, self.n_chairs = n_balls, n_blocks, n_chairs
@@ -313,7 +317,7 @@ class Room:
 
     def lay_track(self):
         """The oval, before anything is placed: centred on the room, long axis along y, to TRACK_WALL_CLEAR of the walls."""
-        a = self.half - WALL_T - TRACK_WALL_CLEAR
+        a = self.half - WALL_T - self.track_clear
         b = min(TRACK_HALF_WIDTH, a)
         cx, cy, yaw = 0.0, 0.0, math.pi / 2          # the +a end at +y: the green wall's side
         self.train_path = [cx, cy, round(a, 4), round(b, 4), round(yaw, 4)]
@@ -378,6 +382,11 @@ class Room:
             # the contact room: walls, a post, a box, one chair; no rug, table, shelf, clock, toys or train
             if self.half >= 0.9: self.chair(0)       # the largest first, so the small room places all three; no chair under 1.8 m
             if self.half >= 0.7: self.box(); self.post()   # under 1.4 m the walls are the obstacles: every forward pulse is a face-on push
+            return
+        if self.train_only:
+            # the train room: walls and the train on its oval, nothing else (no rug, furniture, clock or things)
+            self.lay_track()
+            self.train()
             return
         if self.with_train:
             self.lay_track()
@@ -456,16 +465,24 @@ def main():
     ap.add_argument("--chairs", type=int, default=2)
     ap.add_argument("--train", action="store_true", help="add the toy train on its oval track (default --out scene_playroom_train.xml)")
     ap.add_argument("--babble-room", action="store_true", help="the contact room (§17.85): walls, a post, a box, a chair, nothing else; default --half 1.0, --out scene_babble_room.xml")
+    ap.add_argument("--train-room", action="store_true", help="the train room (2026-10-03): walls and the train on its oval, nothing else; default --half 1.25, --out scene_train_room.xml")
     ap.add_argument("--out", default=None, help="file name in mj_host/models/microduck (or a path); default scene_playroom.xml")
     ap.add_argument("--check", action="store_true", help="load the result through the host when it is built")
     a = ap.parse_args()
 
     if a.babble_room and a.half == 2.0:
         a.half = 1.0
+    if a.train_room and a.half == 2.0:
+        a.half = 1.25
+    if a.train_room and a.out is None:
+        a.out = "scene_train_room.xml"
     if a.out is None:
         a.out = "scene_babble_room.xml" if a.babble_room else ("scene_playroom_train.xml" if a.train else "scene_playroom.xml")
     write_robot_overlay()
-    room = Room(a.seed, a.half, 0 if a.babble_room else a.balls, 0 if a.babble_room else a.blocks, (1 if a.half >= 0.9 else 0) if a.babble_room else a.chairs, train=a.train and not a.babble_room, babble=a.babble_room)
+    if a.train_room:
+        room = Room(a.seed, a.half, 0, 0, 0, train=True, babble=False, train_only=True)
+    else:
+        room = Room(a.seed, a.half, 0 if a.babble_room else a.balls, 0 if a.babble_room else a.blocks, (1 if a.half >= 0.9 else 0) if a.babble_room else a.chairs, train=a.train and not a.babble_room, babble=a.babble_room)
     room.build()
     text = room.xml()
     out = Path(a.out) if Path(a.out).is_absolute() or "/" in a.out else MODEL_DIR / a.out

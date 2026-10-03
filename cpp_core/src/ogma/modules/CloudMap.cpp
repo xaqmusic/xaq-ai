@@ -265,6 +265,20 @@ ParamSchema CloudMap::params_schema() const {
          "A mover already being followed stays a candidate out to this range (m): a young, isolated cluster within mover_hold_gate of "
          "where the last published mover would now be is published beyond mover_range.  0 = off.", ParamValue{0.0}},
         {"mover_hold_gate", ParamMutability::HotMutable, "...within this (m) of the last mover's predicted position.", ParamValue{0.4}},
+        {"mover_hold_any_age", ParamMutability::HotMutable,
+         "The chase push: a cluster within mover_hold_gate of the followed mover's predicted position is the mover whatever its "
+         "voxel age (the start needs surprise; the follow rests on the prediction).  Needs mover_range_hold.  false = off.",
+         ParamValue{false}},
+        {"mover_hold_min_v", ParamMutability::HotMutable,
+         "The any-age exemption holds only while the followed mover moves: a held step under this speed (m/s) for half a "
+         "second returns it to the youth gate.  0 = off.", ParamValue{0.0}},
+        {"mover_not_target_m", ParamMutability::HotMutable,
+         "A new mover candidate within this (m) of the seek loop's held target is refused (the thing walked to reads young as it "
+         "comes into view); the followed mover is exempt.  Needs target_topic.  0 = off.", ParamValue{0.0}},
+        {"mover_hold_ticks", ParamMutability::HotMutable,
+         "The follow's hold survives this many ticks without a published mover, its point carried forward by the last "
+         "displacement.  0 = the hold ends at the first miss (as before).",
+         ParamValue{int64_t{0}}},
         {"mover_ext_max", ParamMutability::HotMutable,
          "Candidates no wider than this footprint (m): a wall base's visible part slides with the view and reads young; "
          "0 = any size (the operator's 'any moving cluster' -- the size gate is a measured retreat, §17.55).",
@@ -310,6 +324,8 @@ ParamMap CloudMap::current_params() const {
     m["mover_age_k"] = mover_age_k_; m["mover_range"] = mover_range_; m["mover_weighted"] = mover_weighted_; m["mover_ext_max"] = mover_ext_max_;
     m["things_skip_movers"] = things_skip_movers_;
     m["mover_range_hold"] = mover_range_hold_; m["mover_hold_gate"] = mover_hold_gate_;
+    m["mover_hold_any_age"] = mover_hold_any_age_; m["mover_hold_ticks"] = int64_t(mover_hold_ticks_);
+    m["mover_hold_min_v"] = mover_hold_min_v_; m["mover_not_target_m"] = mover_not_target_m_;
     m["target_topic"] = ParamValue{target_topic_}; m["target_range_topic"] = ParamValue{target_range_topic_};
     m["target_tall_topic"] = ParamValue{target_tall_topic_}; m["target_iso_radius"] = target_iso_radius_;
     m["iso_height"] = iso_height_; m["iso_radius"] = iso_radius_; m["mover_isolated"] = mover_isolated_;
@@ -365,6 +381,10 @@ void CloudMap::on_param_change(std::string_view key, ParamValue const& value) {
     else if (k == "target_iso_radius") target_iso_radius_ = get_d(one, "target_iso_radius", target_iso_radius_);
     else if (k == "mover_range_hold") mover_range_hold_ = get_d(one, "mover_range_hold", mover_range_hold_);
     else if (k == "mover_hold_gate") mover_hold_gate_ = get_d(one, "mover_hold_gate", mover_hold_gate_);
+    else if (k == "mover_hold_any_age") mover_hold_any_age_ = get_d(one, "mover_hold_any_age", 0.0) > 0.5;
+    else if (k == "mover_hold_min_v") mover_hold_min_v_ = get_d(one, "mover_hold_min_v", 0.0);
+    else if (k == "mover_not_target_m") mover_not_target_m_ = get_d(one, "mover_not_target_m", 0.0);
+    else if (k == "mover_hold_ticks") mover_hold_ticks_ = std::max(0, int(get_d(one, "mover_hold_ticks", 0.0)));
     else if (k == "mover_ext_max") mover_ext_max_ = get_d(one, "mover_ext_max", mover_ext_max_);
     else if (k == "mover_weighted") mover_weighted_ = get_d(one, "mover_weighted", 1.0) > 0.5;
 }
@@ -415,6 +435,10 @@ void CloudMap::on_setup(Bus* bus, ParamMap const& params) {
     target_topic_ = get_s(params, "target_topic"); target_range_topic_ = get_s(params, "target_range_topic");
     target_tall_topic_ = get_s(params, "target_tall_topic"); target_iso_radius_ = get_d(params, "target_iso_radius", target_iso_radius_);
     mover_hold_gate_ = get_d(params, "mover_hold_gate", mover_hold_gate_);
+    mover_hold_any_age_ = get_d(params, "mover_hold_any_age", 0.0) > 0.5;
+    mover_hold_min_v_ = get_d(params, "mover_hold_min_v", 0.0);
+    mover_not_target_m_ = get_d(params, "mover_not_target_m", 0.0);
+    mover_hold_ticks_ = std::max(0, int(get_d(params, "mover_hold_ticks", 0.0)));
     things_skip_movers_ = get_d(params, "things_skip_movers", 0.0) > 0.5;
     iso_height_ = get_d(params, "iso_height", iso_height_);
     iso_radius_ = get_d(params, "iso_radius", iso_radius_);
@@ -432,6 +456,15 @@ void CloudMap::open_cloud(double anchor_yaw, double ax, double ay, uint64_t tick
     vox_.clear();
     vacated_.clear();
     free_col_.clear();
+    if (mover_hold_ticks_ > 0 && (mover_prev_ || hold_left_ > 0)) {
+        // the follow survives the re-anchor: its point and step carried from the old cloud's frame into the new one
+        const double c0 = std::cos(anchor_yaw_), s0 = std::sin(anchor_yaw_), c1 = std::cos(anchor_yaw), s1 = std::sin(anchor_yaw);
+        const double wx = anchor_x_ + c0 * mover_px_ - s0 * mover_py_, wy = anchor_y_ + s0 * mover_px_ + c0 * mover_py_;
+        const double wdx = c0 * mover_dx_ - s0 * mover_dy_, wdy = s0 * mover_dx_ + c0 * mover_dy_;
+        mover_px_ = c1 * (wx - ax) + s1 * (wy - ay); mover_py_ = -s1 * (wx - ax) + c1 * (wy - ay);
+        mover_dx_ = c1 * wdx + s1 * wdy; mover_dy_ = -s1 * wdx + c1 * wdy;
+        if (mover_prev_) { hold_left_ = mover_hold_ticks_; hold_miss_ = 0; }
+    } else { hold_left_ = 0; hold_miss_ = 0; }
     mover_prev_ = false;
     winner_hist_.clear();
     anchor_yaw_ = anchor_yaw;
@@ -985,28 +1018,64 @@ std::array<float, 3> CloudMap::bearing_of(const Thing& t, double yaw) const {
     return b;
 }
 
+bool CloudMap::target_in_cloud(double yaw, double& gx, double& gy) const {
+    float cx = 0.0f, cy = 0.0f, val = 0.0f; double range = 0.0;
+    if (target_topic_.empty() || target_range_topic_.empty()) return false;
+    if (auto bt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_topic_)))
+        if (bt->values.size() >= 3) { cx = bt->values[0]; cy = bt->values[1]; val = bt->values[2]; }
+    if (auto rt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_range_topic_)))
+        if (rt->values.size() >= 1) range = double(rt->values[0]);
+    if (!(val > 0.0f && (cx * cx + cy * cy) > 1e-6f && range > 0.0)) return false;
+    if (auto bt = std::dynamic_pointer_cast<const ProprioToken>(bus_->last_value(target_topic_)))
+        if (bt->values.size() >= 4 && bt->values[3] > 0.5f) return false;   // the seek loop is chasing: not a static target
+    const double n = std::sqrt(double(cx) * cx + double(cy) * cy);
+    const double bx = double(cy) / n * range, by = -double(cx) / n * range;
+    double d = yaw - anchor_yaw_;
+    while (d > kPi) d -= 2.0 * kPi;
+    while (d < -kPi) d += 2.0 * kPi;
+    const double c = std::cos(d), s = std::sin(d);
+    double tx = 0.0, ty = 0.0;
+    if (walking_cloud_) {
+        const double dx = cur_x_ - anchor_x_, dy = cur_y_ - anchor_y_;
+        const double ca = std::cos(-anchor_yaw_), sa = std::sin(-anchor_yaw_);
+        tx = ca * dx - sa * dy; ty = sa * dx + ca * dy;
+    }
+    gx = c * bx - s * by + tx; gy = s * bx + c * by + ty;
+    return true;
+}
+
 void CloudMap::update_movers(double yaw, uint64_t tick_id) {
     mover_ = -1; mover_bearing_ = {0.0f, 0.0f, 0.0f}; mover_age_s_ = 0.0; mover_oldest_s_ = 0.0; mover_tick_ = tick_id;
     recent_.clear();
     if (!open_) return;
-    // a cloud vouches for nothing until it has watched for two windows
-    if (tick_id < opened_tick_ + 2 * uint64_t(mover_window_)) return;
+    // a cloud vouches for nothing until it has watched for two windows -- except, with the follow's hold on, for the
+    // followed mover at its predicted position (the prediction vouches for it)
+    const bool follow = mover_hold_any_age_ && mover_range_hold_ > 0.0 && (mover_prev_ || hold_left_ > 0);
+    const bool vouching = tick_id < opened_tick_ + 2 * uint64_t(mover_window_);
+    if (vouching && !follow) return;
     recent_ = cluster_recent(uint64_t(mover_window_));
-    if (recent_.size() < 2) return;
+    if (recent_.size() < (follow ? 1u : 2u)) return;
     double oldest = 0.0;
     for (auto const& t : recent_) oldest = std::max(oldest, mover_weighted_ ? t.age_w : t.age);
-    if (oldest <= 0.0) return;
-    const double thr = mover_age_k_ * oldest;
+    if (oldest <= 0.0 && !follow) return;
+    const double thr = vouching ? -1.0 : mover_age_k_ * oldest;              // while vouching only the followed mover passes
     double best = 1e9;
-    // the last published mover, carried forward by its own displacement (cloud frame)
-    const double hx = mover_px_ + mover_dx_, hy = mover_py_ + mover_dy_;
+    // the last published mover, carried forward by its own displacement (cloud frame); with mover_hold_ticks, by as many
+    // displacements as recomputes have passed without one
+    const double hk = 1.0 + double(hold_miss_);
+    const double hx = mover_px_ + hk * mover_dx_, hy = mover_py_ + hk * mover_dy_;
+    const bool hold_live = mover_prev_ || hold_left_ > 0;
+    double tgx = 0.0, tgy = 0.0;
+    const bool have_tgt = mover_not_target_m_ > 0.0 && target_in_cloud(yaw, tgx, tgy);
     for (size_t i = 0; i < recent_.size(); ++i) {
         const Thing& t = recent_[i];
         const double age = mover_weighted_ ? t.age_w : t.age;
         double bx, by, rng; body_rel(t, yaw, bx, by, rng);                // the range from the BODY, not the anchor
-        const bool held = mover_range_hold_ > 0.0 && mover_prev_ && rng <= mover_range_hold_ && std::hypot(t.cx - hx, t.cy - hy) <= mover_hold_gate_;
-        if ((rng > mover_range_ && !held) || age >= thr) continue;
+        const bool held = mover_range_hold_ > 0.0 && hold_live && rng <= mover_range_hold_ && std::hypot(t.cx - hx, t.cy - hy) <= mover_hold_gate_;
+        const bool moving_hold = mover_hold_min_v_ <= 0.0 || hold_still_ * things_every_ < 25;      // still moving (or no test)
+        if ((rng > mover_range_ && !held) || (age >= thr && !(held && mover_hold_any_age_ && moving_hold))) continue;
         if (mover_vacated_ > 0 && t.vacated < mover_vacated_) continue;   // no trail, no mover
+        if (mover_not_target_m_ > 0.0 && !held && have_tgt && std::hypot(t.cx - tgx, t.cy - tgy) <= mover_not_target_m_) continue;
         if (mover_ext_max_ > 0.0 && t.ext > mover_ext_max_) continue;      // too wide to be a thing
         if (mover_isolated_ && t.tall_near > 0) continue;                  // at the foot of something tall: part of it
         ++mover_cands_;
@@ -1015,10 +1084,23 @@ void CloudMap::update_movers(double yaw, uint64_t tick_id) {
     if (mover_ >= 0) {
         mover_bearing_ = bearing_of(recent_[size_t(mover_)], yaw);
         const Thing& m = recent_[size_t(mover_)];
-        if (mover_prev_) { mover_dx_ = m.cx - mover_px_; mover_dy_ = m.cy - mover_py_; } else { mover_dx_ = 0.0; mover_dy_ = 0.0; }
+        if (mover_prev_) { mover_dx_ = m.cx - mover_px_; mover_dy_ = m.cy - mover_py_; }
+        else if (hold_left_ > 0) { const double k = 1.0 + double(hold_miss_); mover_dx_ = (m.cx - mover_px_) / k; mover_dy_ = (m.cy - mover_py_) / k; }
+        else { mover_dx_ = 0.0; mover_dy_ = 0.0; }
         mover_px_ = m.cx; mover_py_ = m.cy; mover_prev_ = true;
+        hold_left_ = mover_hold_ticks_; hold_miss_ = 0;
+        if (mover_hold_min_v_ > 0.0) {                                    // the followed mover's step against the floor
+            const double v = std::hypot(mover_dx_, mover_dy_) / (double(things_every_) / 50.0);
+            hold_still_ = v < mover_hold_min_v_ ? hold_still_ + 1 : 0;
+        }
     } else {
+        if (mover_prev_ || hold_left_ > 0) {                              // a miss: the hold carries on (mover_hold_ticks)
+            hold_left_ = mover_prev_ ? mover_hold_ticks_ : hold_left_;
+            hold_left_ = std::max(0, hold_left_ - things_every_);
+            if (hold_left_ > 0) ++hold_miss_; else hold_miss_ = 0;
+        }
         mover_prev_ = false;
+        if (hold_left_ == 0) hold_still_ = 0;
     }
 }
 
