@@ -1330,6 +1330,10 @@ int main(int argc, char** argv) {
         if (S.tof) { try { S.tof->stop_continuous(); } catch (const std::exception&) {} }
         S.record("shutdown", {});
     }
+    // ⚠ EVERY socket must be closed before zmq_ctx_term, which blocks until they are.  The
+    // state-feed socket was not (2026-10-03): a feed-enabled benchd hung forever on SIGTERM
+    // while still holding /dev/i2c-1, so no replacement could start.
+    if (g_state_pub) { zmq_close(g_state_pub); g_state_pub = nullptr; }
     zmq_close(rep); zmq_close(pub); zmq_ctx_term(ctx);
     return 0;
 }
