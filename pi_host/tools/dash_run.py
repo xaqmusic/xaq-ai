@@ -257,6 +257,13 @@ class RunController:
         self._svc_was_active = False
         self._thread: Optional[threading.Thread] = None
         self.resets = 0
+        # The end sequence runs exactly once, from whichever thread gets there first: the
+        # controller after E, or the dashboard's fallback if the controller does not respond.
+        self._cleanup_lock = threading.Lock()
+        self._cleanup_started = False
+        # ⚠ EVERY STEP IS WRITTEN TO DISK.  The first dash-launched run (2026-10-03) ignored E
+        # and nothing recorded what the controller was doing, so it could not be diagnosed.
+        self.events_path = LOG_DIR / f"dashrun_{time.strftime('%Y%m%d_%H%M%S')}.events"
 
     # ---- operator actions (UI thread) ----
     def start(self) -> None:
@@ -269,6 +276,17 @@ class RunController:
     def end(self) -> None:
         self._end.set()
         self._abort.set()
+        self._ev("E pressed: end requested")
+
+    def ending_started(self) -> bool:
+        return self._cleanup_started
+
+    def end_now(self) -> None:
+        """Run the end sequence in the CALLER's thread — the dashboard's fallback when the
+        controller has not started it after E.  A no-op if it already ran or is running."""
+        self._end.set(); self._abort.set()
+        self._ev("end sequence run by the dashboard (controller did not respond)")
+        self._cleanup()
 
     def reset(self) -> bool:
         """R: freeze, then move back to the start pose; stays STOPPED.  Called from the UI
@@ -299,6 +317,11 @@ class RunController:
     def _ev(self, text: str) -> None:
         self.st.detail = text
         self.st.events.append((round(self.io.now(), 2), text))
+        try:
+            with open(self.events_path, "a") as f:
+                f.write(f"{time.strftime('%H:%M:%S')} [{self.st.phase}] {text}\n")
+        except OSError:
+            pass                                  # a full disk must not stop a STOP
 
     def _run(self) -> None:
         try:
@@ -435,6 +458,10 @@ class RunController:
             self.io.sleep(0.2)
 
     def _cleanup(self) -> None:
+        with self._cleanup_lock:
+            if self._cleanup_started:
+                return
+            self._cleanup_started = True
         self.st.phase = "ending"
         self._ev("ending: stop, brain off, bench mode, rescue pose")
         self.io.ctl.call("stop")

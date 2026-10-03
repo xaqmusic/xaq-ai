@@ -264,3 +264,26 @@ def test_reset_before_the_brain_has_the_servos_is_refused(tmp_path, monkeypatch)
     assert not ctrl.reset()
     assert robot.calls == []                               # still nothing sent
     ctrl.abort(); ctrl.join(5)
+
+
+def test_the_end_sequence_runs_once_when_E_and_the_fallback_race(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    ctrl.end()
+    t = threading.Thread(target=ctrl.end_now); t.start()      # the dashboard's fallback
+    t.join(15); ctrl.join(15)
+    assert robot.calls.count("limp") == 1
+    assert robot.calls.count("mode.set=bench") == 1
+    assert robot.calls.count("systemctl start ogma-host") == 1
+    assert ctrl.st.phase == "done"
+
+
+def test_every_step_is_written_to_the_events_file(tmp_path, monkeypatch):
+    robot, ctrl = make(tmp_path, monkeypatch)
+    ctrl.start()
+    assert wait_phase(ctrl, {"running"})
+    ctrl.end(); ctrl.join(10)
+    text = ctrl.events_path.read_text()
+    for needle in ("moving to 'stand'", "RUNNING", "E pressed", "rescue pose commanded", "done"):
+        assert needle in text, needle

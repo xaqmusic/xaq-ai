@@ -195,6 +195,7 @@ class Dash:
         self.pose_idx = 0
         self.checks: list = []
         self.ctrl: Optional[dash_run.RunController] = None
+        self.end_requested_at = 0.0          # E pressed; the fallback fires if nothing happens
         self.interval = interval
         self.host = host
         self.modules: list[dict] = []
@@ -334,6 +335,8 @@ class Dash:
                     self.ctrl.reset()
                 elif ch in (ord("e"), ord("E")):
                     self.ctrl.end()
+                    self.end_requested_at = time.time()
+                    self.msg, self.msg_bad = "ending the run…", False
                 elif ch in (ord("q"), ord("Q")):
                     self.msg, self.msg_bad = "a run is live: E ends it (rescue pose), then q quits", True
             elif ph in ("done", "aborted"):
@@ -709,6 +712,14 @@ class Dash:
             elif ch == curses.KEY_RESIZE:
                 draw()
             now = time.time()
+            # E fallback: if the controller has not started the end sequence 2 s after E,
+            # run it from here.  It is guarded to run exactly once.
+            c = self.ctrl
+            if c is not None and self.end_requested_at and now - self.end_requested_at > 2.0:
+                self.end_requested_at = 0.0
+                if not c.ending_started():
+                    self.msg, self.msg_bad = "controller did not respond to E — ending the run from the dash", True
+                    threading.Thread(target=c.end_now, daemon=True).start()
             if now - last_draw >= 0.25:
                 draw()
                 last_draw = now
@@ -761,7 +772,11 @@ def main() -> None:
     try:
         curses.wrapper(d.run)
     except KeyboardInterrupt:
-        pass
+        # Ctrl-C must not leave a brain driving the robot with no console: end the run.
+        if d.ctrl is not None and d.ctrl.busy():
+            print("Ctrl-C during a live run: ending it (stop, brain off, bench, rescue pose)…", flush=True)
+            d.ctrl.end_now()
+            print(f"ended. events: {d.ctrl.events_path}", flush=True)
     finally:
         d.control.close()
         d.bench.close()
