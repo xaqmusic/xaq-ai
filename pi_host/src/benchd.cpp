@@ -203,6 +203,7 @@ struct State {
                    void add(double us) { sum += us; max = std::max(max, us); ++n; }
                    json out() const { return {{"mean_us", n ? sum / n : 0.0}, {"max_us", max}, {"n", n}}; } };
     Split sp_servo, sp_adc, sp_tof, sp_servo_w, sp_adc_w, sp_tof_w;   // *_w = the window being filled
+    Split sp_lock, sp_feed, sp_lock_w, sp_feed_w;   // mutex wait at wake; the whole feed block
     json last_saved_pulses;           // what save_known_pulses() last wrote
     int64_t vbat_low_since_ms = -1;   // start of the current below-limp stretch, -1 if none
     double  vbat_dip_min      = 99.0;
@@ -577,6 +578,7 @@ struct State {
         // Publish the tick split for the last ~100 ms window and start a new one.
         sp_servo = sp_servo_w; sp_adc = sp_adc_w; sp_tof = sp_tof_w;
         sp_servo_w = {}; sp_adc_w = {}; sp_tof_w = {};
+        sp_lock = sp_lock_w; sp_feed = sp_feed_w; sp_lock_w = {}; sp_feed_w = {};
         const int64_t now = mono_ms();
         json servos = json::array();
         for (int c = 0; c < ServoDriver::N; ++c) {
@@ -695,7 +697,8 @@ struct State {
                 {"cal_ms_left", cal_ch >= 0 ? std::max<int64_t>(0, cal_until_ms - now) : 0},
                 {"deadman_ms_left", dm}, {"watchdog_trips", watchdog_trips}, {"tick_hz", tick_hz_meas},
                 {"overruns", overruns}, {"bus_errors", bus_errors},
-                {"tick_split", {{"servo", sp_servo.out()}, {"adc4", sp_adc.out()}, {"tof", sp_tof.out()}}},
+                {"tick_split", {{"servo", sp_servo.out()}, {"adc4", sp_adc.out()}, {"tof", sp_tof.out()},
+                                {"lock_wait", sp_lock.out()}, {"feed_total", sp_feed.out()}}},
                 {"i2c_retries", {{"hat_0x14", bus.retries(0x14)}, {"tof_0x29", bus.retries(0x29)},
                                  {"ina_0x40", bus.retries(0x40)}}}, {"low_battery", low_battery}, {"rescue_pose", has_rescue() ? json(rescue_name) : json(nullptr)},
                 {"rescue_active", mono_ms() < rescue_until_ms}, {"pose_move_active", pose_move_active}, {"pose_queue", pose_queue.size()},
@@ -828,6 +831,8 @@ void tick_thread(State& S) {
         // spends the tick's budget just as surely as working does.
         timespec cpu0; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
         std::lock_guard<std::mutex> lk(S.m);
+        { timespec lk1; clock_gettime(CLOCK_MONOTONIC, &lk1);
+          S.sp_lock_w.add((lk1.tv_sec - now.tv_sec) * 1e6 + (lk1.tv_nsec - now.tv_nsec) / 1e3); }
         if (late_ns > period_ns) ++S.overruns;
         const int64_t ms = mono_ms();
         try {
@@ -868,6 +873,7 @@ void tick_thread(State& S) {
         // rather than assumed.
         // The state feed reads the same four channels every tick, so when both are on the
         // reads are shared: the bus never pays twice for one sample.
+        timespec feed0; clock_gettime(CLOCK_MONOTONIC, &feed0);
         const bool want_fast  = g_adc_poll_ms > 0 && ms >= S.adc_fast_next_ms;
         const bool want_state = g_state_pub != nullptr;
         // The brain needs the belly ToF at its own ~30 Hz, not frame()'s 10 Hz, and in
@@ -922,6 +928,8 @@ void tick_thread(State& S) {
                                 {"tof_ms", S.tof_last_ms}};
                 const std::string msg = "state " + f.dump();
                 zmq_send(g_state_pub, msg.data(), msg.size(), ZMQ_DONTWAIT);   // drops, never stalls
+                timespec feed1; clock_gettime(CLOCK_MONOTONIC, &feed1);
+                S.sp_feed_w.add((feed1.tv_sec - feed0.tv_sec) * 1e6 + (feed1.tv_nsec - feed0.tv_nsec) / 1e3);
             }
         }
         if (S.driver.watchdog_tripped()) { S.armed_ch = -1; S.end_cal("watchdog"); }   // after a rescue has landed
