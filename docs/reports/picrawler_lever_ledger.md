@@ -6102,3 +6102,33 @@ the sim never trained). If it sinks from stand too, it is a sim-to-real gap in h
 
 Note: `feet_y` reads a constant −0.093 m on the robot, as designed — with `cmd_fk_source = 0` it is
 the zero-pose foot height rotated by tilt, not the commanded FK (see the feet_y oracle doc).
+
+### ★★ 2026-10-03 — START POSE IS THE ROBOT'S hip2 CENTRE: from `stand` the belly stays up (24–51 mm) — then it tips sideways at 34 s
+
+**Run.** Identical to the 60 s rescue-start run (P-e·h0, lag 0.2, fresh brain, same 12 s bench
+pre-roll) except the start pose: the operator's `stand` (hip2 at centre, first frame hip2 −0.02…+0.01
+rad, belly 63 mm).
+
+| window | belly median (mm) | >10 mm | hip2 median (rad) | knee median | tilt max | contact |
+|---|---|---|---|---|---|---|
+| 0–5 s | 48 | 96 % | −0.13 | −0.39 | 29° | 4.0 |
+| 5–10 s | 51 | 88 % | +0.06 | −0.65 | 17° | 4.0 |
+| 10–20 s | 24–36 | 83–98 % | +0.02 | −0.70…−0.78 | 15–17° | 2.6–2.8 |
+| 20–30 s | 29–51 | 99–100 % | +0.03…+0.05 | −0.66…−0.73 | 14–34° | 2.8–3.0 |
+| 30–34.7 s | 32 | 100 % | +0.03 | −0.77 | **73° → tilt guard STOP** | 3.0 |
+
+- **Hypothesis confirmed (n=1 against n=1).** hip2 held at +0.02…+0.06 rad from `stand`, against
+  −0.65…−0.74 from rescue: the brain keeps hip2 near where the body starts. The sim's centre is
+  +0.04. The belly stayed off the floor 83–100 % of the time.
+- **New failure: it rolled.** At 34 s the body rolled toward +x (up.x 0.87) and the tilt guard
+  froze it at up.y 0.30 — the guard's first real trigger, and it worked. P-e·h0 tips about 0.25
+  times per 100k ticks in the sim; this tipped at ~1700 ticks.
+- **The robot stands TALLER than the sim at the same joint angles.** The belly sat at 24–51 mm, the
+  sim's at 14–26 mm, with matching hip2 (≈ 0) and knee (−0.7) commands. The sim's stance joints
+  sit off target under load (soft PD; its commanded-FK foot error is ~27 mm). Stiff hobby servos
+  do not sag, so the same command stands the robot ~15–25 mm higher, and its centre of mass is
+  higher. A plausible contributor to the roll; not measured.
+
+Open: is the roll repeatable (n=1)? Is the sim's stance compliance what the brain's posture was
+tuned on? The 12 s bench pre-roll (the brain ticks while its commands are not applied) is still in
+every run's protocol.
