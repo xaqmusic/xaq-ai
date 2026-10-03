@@ -1791,7 +1791,11 @@ the boot id.
 still dipped the HAT rail three times for ~100 ms each, to **6.37 / 5.80 / 5.89 V**, late in
 the move: load, not speed. The 1 s sustained rule absorbed them. Then, at REST in rescue after
 the release, the rail stayed below 6.4 V for 1058 ms (min **5.64 V**) and the sustained limp
-fired. The INA219 never showed more than **1.33 A** on the servo branch (10 Hz samples). A
-rail collapsing to 5.6 V at ~1.3 A reads like the bench supply's **current limit** (CC mode),
-not the robot: raise it well above the servos' stall draw (several A) before judging any
-brownout behaviour on this supply. 5.6–5.8 V is below the HAT's 6.0 V minimum.
+fired. ⚠ **Cause (operator): a leg caught on the silicone mat, stalling a servo.** So the
+sustained rule caught a REAL sustained overload, which is what it is for, and ignored the
+~100 ms move dips, which is also what it is for. Two notes stand:
+- Its response is the rescue pose, and this stall happened WHILE holding rescue. Rescue cannot
+  clear a stall caused by rescue itself; only less force or releasing the joint can.
+- The rail fell to 5.6–5.8 V (below the HAT's 6.0 V minimum) at a captured servo-branch peak
+  of only 1.33 A (10 Hz samples). That is worth checking against the bench supply's current
+  limit before judging brownout behaviour on it.
