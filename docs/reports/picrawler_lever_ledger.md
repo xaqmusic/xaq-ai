@@ -5956,3 +5956,44 @@ tie (h0 2, hr 3).
 100k safety run** (h0 0.25 tips per 100k vs hr 1.25), P-e·h0 is the operator's configuration
 on every axis measured. The height homeostat's re-use context stays OPEN for steeper terrain
 than difficulty 0.3.
+
+### ★ 2026-10-03 — FIRST BRAIN-DRIVEN RUN ON THE ROBOT: the path works; the thrash the sim predicted is visible and real
+
+**What ran.** P-e·h0 on the Pi (`ogma_host --imu --brain-inputs --actuate`), benchd in `dev`,
+30 s of brain control, robot loose in its safety box on a smooth floor, battery. Started from
+the rescue pose. Ended with STOP, then `bench` → deadman → rescue pose. Off-board telemetry
+record: `tele_20261003_124358_brainrun2.jsonl` (laptop).
+
+**Path verdict: `WORKING` (signal, n=1).**
+- 1495 commands applied in 30 s, 0 overruns, 0 bad frames, 4 sequence gaps.
+- STOP froze all 12 channels, and `ogma_host` paused the graph for 367 ticks (held, not reset).
+- The deadman sent the rescue pose after leaving `dev`.
+- Servo-branch current: mean 0.80 A, peak 2.49 A (10 Hz samples). A4 minimum 7.10 V; battery 7.78 V at rest.
+
+**The first attempt reset the Pi** the moment the brain took the servos. The robot was on the
+bench supply, which the operator says is only good for desk builds. The cause is NOT measured:
+benchd's record of that run is 0 bytes, because the page cache was lost in the reset. The retry
+on battery, with the off-board recorder running, did not reset. Re-use context: any power source
+change, and the soft-engage question below.
+
+**The thrash (operator: "faster than our sim, with rather jerky movements").** In the 10 Hz record:
+- knee and hip1 channels sit at full slew in 20–35 % of 100 ms windows;
+- every channel reverses 3–5 times a second (an undercount at 10 Hz).
+
+This is the 2026-10-02 finding arriving on hardware: in the sim the slew-limited knee target sits
+at the cap on 97 % of ticks and reverses on 43 %. The sim's joint follows it through PD, a 30 ms
+torque lag and inertia, so the achieved joints reverse less (21–39 %). The hobby servo tracks the
+50 Hz staircase almost at once, so the robot shows the raw command. Lowering the slew caps speed,
+not reversals, and in the sim 1.83 rad/s (20 µs/tick) stopped stepping (0 steps, tilt_sd doubled;
+2026-09-13 table).
+
+**Two instrument failures, both found after the run:**
+1. **My tilt guard was blind.** benchd failed its IMU probe at start (WHO_AM_I 0x00), so the frame
+   carried `imu: null`, and the logger's fallback read "upright" on every sample. The robot stayed
+   upright, but the guard proved nothing. The next run's guard must refuse to start without
+   attitude.
+2. **`ogma_host`'s attitude filter ended diverged.** Exit summary: disagree 116.7°, upright −0.45,
+   with the robot resting upright in the rescue pose and |a| 1.003 g. The brain's upright and
+   distress inputs may have been wrong for part of the run. When it diverged is unknown: inputs
+   were not dumped. The next run needs `--dump-inputs`. The held-pose shadow run ended at upright
+   0.9994, so this is new with motion.

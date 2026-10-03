@@ -1877,3 +1877,15 @@ Verified: `test_hw` 90/90 on the Pi (12 new). Not yet verified on the robot:
 - benchd's mode, STOP and stream-loss handling;
 - `ogma_host`'s pause;
 - the first brain-driven move.
+
+### First brain-driven run (2026-10-03) — the path works
+
+30 s on battery in the safety box. Path `WORKING`: commands applied at 50 Hz, STOP froze the
+servos and paused the brain, and the deadman rescue ran on exit. The first attempt, on the bench
+supply, reset the Pi; that record was lost, and the off-board recorder now runs for every brain
+run. Open:
+- the thrash the sim predicted, now visible on hardware;
+- a blind tilt guard in my harness;
+- `ogma_host`'s attitude filter ending 117° from the accelerometer.
+
+Ledger 2026-10-03 "FIRST BRAIN-DRIVEN RUN".
