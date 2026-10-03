@@ -5929,3 +5929,30 @@ beside the 100k-tick measurement (P-e·h0 0.25 tips per 100k vs P-e·hr 1.25) an
 same way. It is also the first observation on terrain, the height homeostat's stated re-use
 context. With the homeostat on (P-e·hr), the body binds on terrain; with it off (P-e·h0), it
 does not, in what the operator saw. A measured terrain A/B follows.
+
+### ★★ 2026-10-03 — TERRAIN A/B: dropping the height homeostat costs no hump traversal (P-e·h0 vs P-e·hr)
+
+**Verdict: P-e·h0 TIES P-e·hr on terrain and clears the hump farther (signal, n=6).** FSR leg,
+robot-faithful inputs, shaping events off, 3.668 rad/s, difficulty 0.3. Receipts checked.
+This answers the open re-use context from the 100k entry: the homeostat exists to get the body
+over the hump, and on this body it is not needed for that.
+
+| | P-e·h0 (homeostat off) | P-e·hr (ratchet off) |
+|---|---|---|
+| hump gate (`humpavg`, teleport onto the crest): cleared | **6/6** | 6/6 |
+| hump: final_z / gain past the crest | **6.29 / 3.68 ± 0.60** | 5.70 / 3.09 ± 0.33 |
+| hump: falls | 1/6 | 1/6 |
+| corridor 24 000 ticks: net_z | 7.09 ± 2.51 | 7.44 ± 2.33 |
+| corridor: straight | 0.38 | 0.44 |
+| corridor: unstable | **0.13** | 0.24 |
+| corridor: falls | 7 (4 on seed 2) | 3 |
+
+⚠ **Corridor falls are confounded by the gym edge.** The harness flagged 3/6 (h0) and 2/6 (hr)
+seeds past z = 8.5, where falls and chassis_y are not trustworthy. h0 seed 2 reached
+z = 10.05 and left the world (chassis_y −21.9 m). On the seeds that stayed inside, falls
+tie (h0 2, hr 3).
+
+**Together with the operator's UI read ("hr gets bound up on terrain in some cases") and the
+100k safety run** (h0 0.25 tips per 100k vs hr 1.25), P-e·h0 is the operator's configuration
+on every axis measured. The height homeostat's re-use context stays OPEN for steeper terrain
+than difficulty 0.3.
