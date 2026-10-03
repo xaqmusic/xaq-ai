@@ -40,9 +40,9 @@ socket. The calibration channel can read the mode (`mode`) and cannot change it.
 - **Entering `dev` or `autonomous` latches STOP.** The brain gets the servos only when someone
   resumes (the dashboards' SPACE, or `ogma_ctl.py resume`), watching. Leaving to `bench` freezes
   the body and starts the deadman's clock.
-- **Resume is refused in a brain mode while any channel's pulse is unknown** (fresh benchd, no
-  pose since boot): the brain's first command would move that servo at full speed. Set a pose
-  (e.g. `rescue`) first.
+- **Resume is refused in a brain mode while any channel is unarmed.** An unknown pulse would
+  take the brain's first command at full speed, and an unarmed channel reads 0 µs on the state
+  feed, so `ogma_host` withholds every tick. Set a pose (e.g. `rescue`) in `bench` first.
 - **Silence before the first command is not a loss.** Switching to `dev` before `ogma_host`
   starts does not trip anything; loss is counted only after a command has been applied.
 - **Blocked ticks.** A brain command is applied only when nothing else owns the servos: not
@@ -117,7 +117,7 @@ channel only. In `bench`:
 | `status` | — | the full telemetry frame + `map` | |
 | `limp` | — | `rescue_pose` | command the `rescue` pose on all 12 (see above); ends any widened state. Works while stopped and in every mode; in a brain mode it also latches STOP |
 | `stop` | — | `stopped`, `mode` | **freeze every servo where it is** and latch (see STOP above). Every mode, every state |
-| `resume` | — | `stopped`, `mode` | lift a stop. Refused on low battery, during a rail back-off, and in a brain mode while any channel's pulse is unknown |
+| `resume` | — | `stopped`, `mode` | lift a stop. Refused on low battery, during a rail back-off, and in a brain mode while any channel is unarmed |
 | `servo.set` | `ch` 0–11, `us` | `clamped_us` | arms `ch`; clamped to its current limits; slewed by the driver |
 | `servo.limits` | `ch`, `min_us`, `max_us` | — | sets the OPERATING limits (persisted by `cal.save`) |
 | `tof.stall` | `confirm` (must be `true`) | — | **FAULT INJECTION.** Stops the VL53L0X ranging so the stall-recovery path can be exercised on demand. The part stays addressable and simply stops producing measurements — the observed failure exactly. Needed because the natural rate is ~1 in 600 pose moves, so verifying recovery by waiting costs hours to test a few register writes. Refused without `confirm` |

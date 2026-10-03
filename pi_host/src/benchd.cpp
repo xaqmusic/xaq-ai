@@ -583,17 +583,18 @@ struct State {
         if (low_battery) return "battery low — resume refused until it recovers above " + std::to_string(VBAT_RECOVER_V) + " V";
         const int64_t now = mono_ms();
         if (now < rail_guard_until_ms) return "5 V rail under-voltage back-off — retry shortly";
-        // ⚠ A channel whose pulse benchd does not know would take the brain's first command
-        // at FULL servo speed (ServoDriver::command starts an unknown channel AT its target).
-        // So the brain gets the servos only once every channel's pulse is known — pose the
-        // robot first (e.g. pose.set rescue) and the ramp is from where it actually is.
+        // ⚠ EVERY CHANNEL MUST BE ARMED before the brain gets the servos.  An unknown pulse
+        // would take the brain's first command at FULL servo speed; and a known-but-unarmed
+        // one publishes 0 us on the state feed, so ogma_host withholds every tick and the
+        // brain never drives at all (measured on the robot 2026-10-03: resume was accepted
+        // and nothing happened).  Pose the robot first (e.g. pose.set rescue in bench mode).
         if (brain_mode()) {
-            std::string unknown;
+            std::string unarmed;
             for (int c = 0; c < ServoDriver::N; ++c)
-                if (!driver.armed(c) && driver.last_sent_us(c) <= 0) unknown += (unknown.empty() ? "" : ",") + std::to_string(c);
-            if (!unknown.empty())
-                return "pulse unknown on channel(s) " + unknown + " — the brain's first command would move them at full speed; "
-                       "set a pose first (e.g. the rescue pose) so every servo ramps from where it is";
+                if (!driver.armed(c)) unarmed += (unarmed.empty() ? "" : ",") + std::to_string(c);
+            if (!unarmed.empty())
+                return "channel(s) " + unarmed + " not armed — the brain cannot see or safely drive them; "
+                       "set a pose first in bench mode (e.g. the rescue pose), then switch to the brain mode";
         }
         record("resume", {{"who", who}, {"held_ms", now - stopped_at_ms}, {"why_stopped", stop_why},
                           {"mode", ogma::hw::brain::mode_name(mode)}});
