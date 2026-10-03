@@ -1749,8 +1749,9 @@ Robot on the stand, then the desk; DC bench supply. Shadow mode only: no actuati
 2. **A feed-enabled benchd hung forever on SIGTERM,** holding `/dev/i2c-1`, because the feed
    socket was never closed before `zmq_ctx_term`. Fixed and verified: exits cleanly, and a
    replacement starts (`69551f2`).
-3. **Stopping benchd commands the rescue pose.** It moved a leg onto the stand. Not a bug
-   (that is the designed safe exit), but it means **service stops are not motionless.**
+3. **A leg moved onto the stand when the services were stopped** (operator). ⚠ The mechanism is
+   NOT established: benchd's shutdown path commands no rescue (it joins its threads and stops
+   the ToF). Treat service stops as possibly-moving until it is understood.
 4. **The 6.4 V low-voltage limp tripped on a ~100 ms inrush dip to 6.21 V** from the bench
    supply, 0.6 s into a `stand` move. Per the operator (the Pi is on its own BEC now), the
    limp now needs a SUSTAINED drop: 1 s by default (`d999f17`). `pose_hold.py` labels every
@@ -1767,3 +1768,30 @@ Robot on the stand, then the desk; DC bench supply. Shadow mode only: no actuati
   records.
 - **FSR in-air baseline:** the 541 / 248 counts turned out to be real contact (a leg on the
   stand). The 200-count contact threshold is still unvalidated on free feet.
+
+### The full-speed first move, and the supply (2026-10-03, later)
+
+**Operator observation:** the first command after benchd starts moved the servos at FULL speed;
+only later commands moved at the slew rate.
+
+**Cause:** `ServoDriver` started an unarmed channel AT its target, a step the servo crosses at
+its own top speed, on all 12 at once.
+
+**Fixed (`09b25e1`):** the driver tracks the pulse last written to the HAT (`known_`). The HAT
+holds it; it survives `limp_all()` and is cleared by an MCU reset. A first command ramps from
+there. benchd carries it across restarts in `/dev/shm/ogma_benchd_pulses.json`, stamped with
+the boot id.
+
+**Verified on the robot:**
+- cold receipt "pulses UNKNOWN";
+- after one rescue command and a restart, the receipt reads "12/12 seeded";
+- the next `stand` move started from the seeded pulses.
+
+**The supply is still the limit.** The `stand` move from rescue (lifting the body off the desk)
+still dipped the HAT rail three times for ~100 ms each, to **6.37 / 5.80 / 5.89 V**, late in
+the move: load, not speed. The 1 s sustained rule absorbed them. Then, at REST in rescue after
+the release, the rail stayed below 6.4 V for 1058 ms (min **5.64 V**) and the sustained limp
+fired. The INA219 never showed more than **1.33 A** on the servo branch (10 Hz samples). A
+rail collapsing to 5.6 V at ~1.3 A reads like the bench supply's **current limit** (CC mode),
+not the robot: raise it well above the servos' stall draw (several A) before judging any
+brownout behaviour on this supply. 5.6–5.8 V is below the HAT's 6.0 V minimum.
