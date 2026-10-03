@@ -6040,3 +6040,33 @@ four ABBA runs, including the two no-lag arms that reproduce the earlier motion,
 within 0.35° of the accelerometer (upright 0.9999), with 0 read errors and ~12 860 samples per
 run. Mid-run upright minimum 0.81–0.91, consistent with the 24–33° tilts benchd's own IMU saw.
 Not proven causal (the old path was not re-run), but the motion that diverged it no longer does.
+
+### ★ 2026-10-03 — LOWER SLEW (30 µs/tick = 2.751 rad/s) for the robot's jerk: `REGRESSION` in the sim, not run on hardware
+
+**Why it was tested.** The operator saw jerky, faster-than-sim motion on the first brain-driven
+run and suggested dialling in the slew. Run in the sim first, because the brain was tuned at
+3.668 rad/s.
+
+**Protocol.** P-e·h0 (robot-faithful inputs, homeostat off), arena difficulty 0.3, n=6 × 12000
+ticks, seeds 1–6, gains frozen, identical instruments (`score.py`). Speed is the only difference.
+
+| | 3.668 rad/s (40 µs/tick, control) | 2.751 rad/s (30 µs/tick) |
+|---|---|---|
+| net_disp | 9.99 ± 0.83 | 5.17 ± 0.87 |
+| steps | 13.8 ± 4.5 | 4.2 ± 5.7 (3/6 seeds: 0) |
+| real swings / 1000 leg-ticks | 11.3 ± 0.6 | 6.1 ± 1.4 |
+| belly (mm) | 23.7 ± 2.0 | **15.9 ± 1.6** |
+| tilt_sd | 0.090 | 0.080 |
+| falls | 0.17 (1 in 6) | 0 |
+| knee reversal fraction | 0.34 | 0.37 |
+| knee ticks at the slew cap | 0.97 | 0.98 |
+
+**Verdict: `REGRESSION` (signal, n=6).** It halves the gait (distance, swings) and lowers the belly
+by 8 mm. It does **not** touch the thrash: reversals and cap time are unchanged, because the slew
+caps speed, not reversals (the 2026-10-02 finding again). The only gain is one fewer fall in six,
+inside noise. It was NOT run on the robot. The servo output lag (above) already addresses what
+the operator saw, at the plant instead of the speed cap.
+
+**Re-use context:** a brain retuned at the lower speed (frozen gains were settled at 3.668), or the
+operator's confidence-gated speed (slow while the brain knows little, rising with confidence),
+which is a different mechanism from a fixed lower cap.
