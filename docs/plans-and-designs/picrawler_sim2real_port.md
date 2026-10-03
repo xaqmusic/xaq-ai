@@ -1845,3 +1845,35 @@ sustained rule caught a REAL sustained overload, which is what it is for, and ig
    choice, `0f1f067`):** read-only verbs no longer feed the deadman, and the eight tools ping
    in their rpc helper. Verified on the robot with both dashboards polling: `pose_hold` holds
    on its pings, and the deadman fired 930 ms after release.
+
+### The actuation path, as built (2026-10-03) — built and unit-tested, NOT yet run on the robot
+
+The brain's actions reach benchd through a path that the calibration channel cannot reach.
+That keeps SPEC §1.1 structural rather than a matter of restraint. Wire details are in
+`pi_host/PROTOCOL.md` ("Run modes").
+- **Mapping.** `ogma_host --actuate` reads the 12 `action.<leg>_<joint>` topics. It keeps the
+  same per-tick freshness rule as `OgmaBrain`, and maps u → joint target with the sim's own
+  function (`_discrete_joint_targets`, exported with 24 `u_check` samples and re-checked at
+  start). The target is then converted to µs by the exact inverse of the `joints` input
+  (`hinge_angles_from_us`), so proprioception and the motor output agree on where a leg is.
+  Nothing is sent until every channel has been published once, and nothing is sent on a tick
+  whose inputs were withheld.
+- **Transport.** `cmd {seq, tick, us[12]}` over PUB→SUB (CONFLATE). benchd binds that socket
+  to **127.0.0.1**, and the run-mode socket too.
+- **Who applies it.** Only `dev` / `autonomous` (SPEC §4.2.1), and only while not STOPPED. The
+  command goes through the same driver clamp and the same 40 µs/tick slew as everything else.
+  The calibration deadman is gone in those modes (§4.2). A quiet brain freezes the body:
+  `dev` latches a stop, and `autonomous` holds, then goes to rescue after 5 s.
+- **Entering a brain mode latches STOP**, so the first brain-driven move is always an operator's
+  SPACE. Resume is refused while any channel's pulse is unknown.
+- **STOP freezes and pauses.** benchd holds every servo where it is, and `ogma_host` stops
+  ticking the graph (held, not reset, §4.2.2).
+- **Knee travel.** `u_knee = 0` is KNEE_REST −1.6 rad = origin + 872 µs on these sign −1 knees,
+  past the calibrated `max_us`. So at the rest command the knees sit on the envelope clamp.
+  This is the same saturation the held-pose run saw on the input side (finding 2 above).
+  `brain.clamped_mask` in telemetry shows it live.
+
+Verified: `test_hw` 90/90 on the Pi (12 new). Not yet verified on the robot:
+- benchd's mode, STOP and stream-loss handling;
+- `ogma_host`'s pause;
+- the first brain-driven move.
