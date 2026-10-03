@@ -94,6 +94,7 @@ struct Args {
     std::string state_endpoint = "tcp://127.0.0.1:5592";
     std::string body_calib     = "pi_host/calib/body_measured_fsr.json";
     std::string servo_map      = "pi_host/calib/servo_map.json";
+    long        dump_inputs    = 0;   // print every brain-input topic every N ticks (0 = off)
 };
 
 void usage() {
@@ -102,7 +103,7 @@ void usage() {
         "                 [--mic] [--camera] [--range] [--listen 0.0.0.0] [--video] [--video-mono]\n"
         "                 [--imu --brain-inputs [--state-sub tcp://127.0.0.1:5592]\n"
         "                  [--body-calib pi_host/calib/body_measured_fsr.json] [--servo-map pi_host/calib/servo_map.json]]\n"
-        "  --brain-inputs needs --imu and benchd started with --state-pub 5592\n"
+        "  --brain-inputs needs --imu and benchd started with --state-pub 5592; --dump-inputs N prints them\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
@@ -142,6 +143,7 @@ int main(int argc, char** argv) {
         else if (v == "--state-sub" && i + 1 < argc)  a.state_endpoint = argv[++i];
         else if (v == "--body-calib" && i + 1 < argc) a.body_calib = argv[++i];
         else if (v == "--servo-map" && i + 1 < argc)  a.servo_map = argv[++i];
+        else if (v == "--dump-inputs" && i + 1 < argc) a.dump_inputs = std::atol(argv[++i]);
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
@@ -713,6 +715,21 @@ int main(int argc, char** argv) {
                     pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
                     pub("distress", &t.distress, 1);
                     ++bi_published;
+                    // INSTRUMENT: the values themselves, not just the count, so a shadow run
+                    // can be checked against what the pose says they must be.
+                    if (a.dump_inputs > 0 && ticks % a.dump_inputs == 0) {
+                        auto v = [](const float* p, size_t n) { return std::vector<float>(p, p + n); };
+                        const nlohmann::json d = {
+                            {"kind", "brain_inputs"}, {"tick", ticks},
+                            {"joints", v(t.joints.data(), 12)}, {"imu", v(t.imu.data(), 4)},
+                            {"gyro", v(t.gyro.data(), 3)}, {"stride_v", v(t.stride_v.data(), 2)},
+                            {"foot_contact", v(t.foot_contact.data(), 4)},
+                            {"foot_load", v(t.foot_load.data(), 4)},
+                            {"feet_y", v(t.feet_y_gravity_cmd_imu.data(), 4)},
+                            {"distress", t.distress}, {"upright", t.upright},
+                            {"fsr_raw", bi_in.fsr}, {"us", bi_in.us}};
+                        std::printf("%s\n", d.dump().c_str());
+                    }
                 }
             }
 
