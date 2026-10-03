@@ -1728,3 +1728,42 @@ by the sim (`scripts_tools/export_body_calib.gd`); re-export when the body chang
 ogma_benchd --body measured --state-pub 5592
 ogma_host --config godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo.json --imu --brain-inputs --listen 0.0.0.0
 ```
+
+### First hardware run of the brain-input path (2026-10-03) — what the robot taught
+
+Robot on the stand, then the desk; DC bench supply. Shadow mode only: no actuation path exists.
+
+**Worked:**
+- the Pi build (P-e·h0 graph linked into `ogma_host`, `test_hw` 75/75);
+- the benchd state feed at 50 Hz;
+- `ogma_host --imu --brain-inputs` running the full P-e·h0 graph for 3000 ticks with **0
+  overruns**: tick wall p95 ~0.7 ms of 20;
+- IMU bias converged;
+- ground clearance from the feed at the sensor's ~31 Hz.
+
+**Found and fixed on the robot:**
+1. **0 µs means "not commanded by THIS benchd", not "limp".** A fresh benchd reports 0 on every
+   channel it has not commanded, while the HAT keeps holding the last pulse. The converter
+   would have published ±2.7 rad, clamped to the rails. Ticks with any uncommanded mapped
+   channel are now withheld (`f92b586`).
+2. **A feed-enabled benchd hung forever on SIGTERM,** holding `/dev/i2c-1`, because the feed
+   socket was never closed before `zmq_ctx_term`. Fixed and verified: exits cleanly, and a
+   replacement starts (`69551f2`).
+3. **Stopping benchd commands the rescue pose.** It moved a leg onto the stand. Not a bug
+   (that is the designed safe exit), but it means **service stops are not motionless.**
+4. **The 6.4 V low-voltage limp tripped on a ~100 ms inrush dip to 6.21 V** from the bench
+   supply, 0.6 s into a `stand` move. Per the operator (the Pi is on its own BEC now), the
+   limp now needs a SUSTAINED drop: 1 s by default (`d999f17`). `pose_hold.py` labels every
+   rescue "the deadman fired", which misread this one; benchd's own record said
+   "low battery".
+
+**Open, blocking a held-pose shadow run and any actuation:**
+- **I²C budget:** with the state feed on, benchd's tick waits a median **9.5 ms of 20** on the
+  bus with servos unarmed, and 16.6 ms with all 12 armed, with overruns. The four FSR reads
+  are **1.2 ms** (measured via `adc.rate`). Most of the rest is the belly-ToF poll moved into
+  the tick, which should be one status read. Needs a targeted timing, then a fix: a cheaper
+  poll, a slower ToF cadence, or the ToF's interrupt pin. The feed stays opt-in until then.
+- **The bench supply sags under inrush.** Raise its current limit, or expect `vbat_dip`
+  records.
+- **FSR in-air baseline:** the 541 / 248 counts turned out to be real contact (a leg on the
+  stand). The 200-count contact threshold is still unvalidated on free feet.
