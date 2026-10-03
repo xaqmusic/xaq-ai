@@ -1737,7 +1737,8 @@ Robot on the stand, then the desk; DC bench supply. Shadow mode only: no actuati
 - the Pi build (P-e·h0 graph linked into `ogma_host`, `test_hw` 75/75);
 - the benchd state feed at 50 Hz;
 - `ogma_host --imu --brain-inputs` running the full P-e·h0 graph for 3000 ticks with **0
-  overruns**: tick wall p95 ~0.7 ms of 20;
+  overruns**: tick wall p95 ~0.69 % of the 20 ms budget, i.e. **~0.14 ms** (first written as
+  "0.7 ms" by reading the percentage as milliseconds; see the correction below);
 - IMU bias converged;
 - ground clearance from the feed at the sensor's ~31 Hz.
 
@@ -1759,11 +1760,23 @@ Robot on the stand, then the desk; DC bench supply. Shadow mode only: no actuati
    "low battery".
 
 **Open, blocking a held-pose shadow run and any actuation:**
-- **I²C budget:** with the state feed on, benchd's tick waits a median **9.5 ms of 20** on the
-  bus with servos unarmed, and 16.6 ms with all 12 armed, with overruns. The four FSR reads
-  are **1.2 ms** (measured via `adc.rate`). Most of the rest is the belly-ToF poll moved into
-  the tick, which should be one status read. Needs a targeted timing, then a fix: a cheaper
-  poll, a slower ToF cadence, or the ToF's interrupt pin. The feed stays opt-in until then.
+- ~~I²C budget~~ ⚠ **RETRACTED (same day): there is no I²C budget problem.** benchd's
+  `cpu.wall_*` / `cpu_*` are **percent of the tick budget** (`TickBudget`), not milliseconds,
+  and were read as ms. "9.5" was 9.5 % (≈1.9 ms) and "16.6" was 16.6 % (≈3.3 ms). Measured
+  directly with per-block timers (`tick_split` in the telemetry, `a6165d4`…`776492c`), state
+  feed on:
+
+  | | unarmed | 12 servos armed |
+  |---|---|---|
+  | servo writes | 0 | 1.50 ms |
+  | four FSR reads | 1.18 ms | 1.18 ms |
+  | ToF poll | 0.46 ms | 0.46 ms |
+  | lock wait | 0.12 ms | 0.13 ms |
+  | **whole tick** | **1.75 ms** | **3.29 ms** of 20 |
+
+  Zero I²C retries on every address. The feed costs ~1.6 ms per tick; the ToF poll needs no
+  fix. Process note: the ToF was blamed twice, by subtraction from the misread number, before
+  it was timed. Both telemetry emitters now say `"units": "pct_of_budget"` in-band.
 - **The bench supply sags under inrush.** Raise its current limit, or expect `vbat_dip`
   records.
 - **FSR in-air baseline:** the 541 / 248 counts turned out to be real contact (a leg on the

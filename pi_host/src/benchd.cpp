@@ -784,7 +784,10 @@ struct State {
                 // the tick BUDGET, with the tail (max) beside the middle because a mean
                 // is blind to the spike that actually misses a deadline.  wall vs cpu
                 // separates "blocked on the bus" from "out of compute" (ResourceMonitor).
-                {"cpu", {{"budget_ms", tick_cost.budget_ms}, {"n", tick_cost.n},
+                // ⚠ wall_* / cpu_* are PERCENT OF budget_ms, not milliseconds (TickBudget).
+                // Misread as ms on 2026-10-03, a 1.9 ms tick looked like 9.4 ms and an I2C
+                // "problem" was chased that did not exist.  `units` says it in the frame.
+                {"cpu", {{"units", "pct_of_budget"}, {"budget_ms", tick_cost.budget_ms}, {"n", tick_cost.n},
                          {"wall_p50", tick_cost.wall_p50}, {"wall_p95", tick_cost.wall_p95},
                          {"wall_max", tick_cost.wall_max},
                          {"cpu_p50", tick_cost.cpu_p50}, {"cpu_p95", tick_cost.cpu_p95},

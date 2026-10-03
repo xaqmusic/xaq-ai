@@ -779,7 +779,8 @@ int main(int argc, char** argv) {
                               (c1.tv_sec - c0.tv_sec) * 1000000000L + (c1.tv_nsec - c0.tv_nsec))
                 && !a.quiet && (ticks % int(a.hz * 5) < 25)) {
                 const auto& s = budget.last();
-                std::printf("{\"kind\":\"host_cost\",\"tick\":%ld,\"budget_ms\":%.2f,"
+                // wall_* / cpu_* are PERCENT of budget_ms (TickBudget), not ms — say so in-band.
+                std::printf("{\"kind\":\"host_cost\",\"units\":\"pct_of_budget\",\"tick\":%ld,\"budget_ms\":%.2f,"
                             "\"wall_p50\":%.3f,\"wall_p95\":%.3f,\"wall_max\":%.3f,"
                             "\"cpu_p50\":%.3f,\"overruns\":%ld,"
                             "\"mic_windows\":%llu,\"mic_delivered\":%llu,"
