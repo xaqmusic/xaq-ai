@@ -811,6 +811,11 @@ void tick_thread(State& S) {
         // reads are shared: the bus never pays twice for one sample.
         const bool want_fast  = g_adc_poll_ms > 0 && ms >= S.adc_fast_next_ms;
         const bool want_state = g_state_pub != nullptr;
+        // The brain needs the belly ToF at its own ~30 Hz, not frame()'s 10 Hz, and in
+        // brain mode benchd owns the whole I2C bus (ToF included), so poll it from the
+        // tick.  read_ready() is non-blocking: a tick with no new measurement costs one
+        // status read.  Only with the state feed on; otherwise byte-identical.
+        if (want_state) S.sample_tof();
         if (want_fast || want_state) {
             if (want_fast) S.adc_fast_next_ms = ms + g_adc_poll_ms;
             json a = json::array();
@@ -843,8 +848,13 @@ void tick_thread(State& S) {
                     us.push_back(S.driver.current_us(c));
                     if (S.driver.armed(c)) armed |= (1u << c);
                 }
+                // tof_m is benchd's raw-minus-mount-offset clearance (the arm the promoted
+                // homeostat rides); tof_ms stamps the measurement so the consumer publishes
+                // each NEW valid reading once, and nothing when the reading is invalid.
                 const json f = {{"seq", ++g_state_seq}, {"t", ms}, {"us", us}, {"armed", armed},
-                                {"fsr", fsr}, {"fsr_ok", fsr_ok}};
+                                {"fsr", fsr}, {"fsr_ok", fsr_ok},
+                                {"tof_m", S.tof_m}, {"tof_valid", S.tof_ok && S.tof_valid},
+                                {"tof_ms", S.tof_last_ms}};
                 const std::string msg = "state " + f.dump();
                 zmq_send(g_state_pub, msg.data(), msg.size(), ZMQ_DONTWAIT);   // drops, never stalls
             }
@@ -1283,7 +1293,7 @@ int main(int argc, char** argv) {
         g_state_pub = sp;
     }
     std::printf("ogma_benchd: state feed %s\n", g_state_pub_port > 0
-                ? ("ON  pub :" + std::to_string(g_state_pub_port) + "  (50 Hz: us[12], fsr[4])").c_str()
+                ? ("ON  pub :" + std::to_string(g_state_pub_port) + "  (50 Hz: us[12], fsr[4], belly ToF)").c_str()
                 : "off");
     std::printf("ogma_benchd: body=%s  rep :%d  pub :%d  vbat %.2f V  log %s\n", body.c_str(), rep_port, pub_port,
                 S.hat.battery_volts(), log_path.c_str());

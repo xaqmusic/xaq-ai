@@ -1664,8 +1664,11 @@ these **exactly once per 50 Hz tick**.
    panic off.
 5. **`joint_torque`:** zeros (energy term inert), or a legal proxy. The INA219 on the servo
    rail (Mod C, not fitted) would give a whole-rail current, not per joint.
-6. `ground_clearance`: publish every tick, holding the last valid reading (and saying so), so
-   the per-message EMA keeps the sim's time constant.
+6. `ground_clearance`: ⚠ **NOT changed — the existing rule stands.** `ogma_host` publishes it only
+   on a valid reading and leaves it ABSENT otherwise ("never substitute a number for a missing
+   measurement"). The cost is known and recorded: the robot's ToF is ~30 Hz against the sim's
+   50 Hz, so MotorEPMv2's per-message EMA runs ~1.7× slower on the robot. An operator decision
+   if it matters.
 
 **benchd state feed (built 2026-10-02, untested on hardware).** `--state-pub <port>` (default
 off) publishes `"state " + {seq, t, us[12], armed, fsr[4], fsr_ok}` on its own PUB socket
@@ -1676,3 +1679,52 @@ every 50 Hz tick. The fields:
 The FSR reads are shared with `adc.rate` when both are on. The socket carries no verbs, so it
 cannot become the brain-rate control path §1.1 forbids. The leg mapping, including the sim's
 leg-name mirror, belongs to `ogma_host`'s calibration.
+
+### Robot side as built (2026-10-03) — brain inputs for P-e·h0, NOT yet run on hardware
+
+The operator chose **P-e·h0** (robot-faithful inputs, height homeostat off) as the target.
+
+**benchd** `--state-pub 5592` publishes the 50 Hz state frame: `us[12]`, `fsr[4]`, `fsr_ok`,
+`tof_m`, `tof_valid`, `tof_ms`. With the feed on, benchd also polls the belly ToF from the
+tick (non-blocking). In brain mode **benchd owns all of `/dev/i2c-1`**: the HAT, the FSRs and
+the ToF.
+
+**ogma_host** `--imu --brain-inputs` (refuses `--tof`, which would be a second process on the
+bus) subscribes to the feed and publishes, through `ogma/hw/BrainInputs.hpp`'s
+`BrainInputBuilder`:
+- `joints` (servo map + measured 545.2 µs/rad → shared ServoForwardModel);
+- `imu` (ego heading, previous stride_v, body-up yaw rate) and `gyro`;
+- `stride_v` (shared StrideV; stance = FSR load ≥ 0.2 of body weight at both ends of the tick);
+- `foot_contact` / `foot_load` (FSR counts, mirrored into sim leg order);
+- `joint_torque` (zeros);
+- `feet_y_gravity_cmd_imu` (the zero-pose form P-e uses);
+- `distress` (shared DistressAccumulator);
+- `ground_clearance`, once per NEW valid ToF reading from the feed.
+
+`upright` and `tilt` come from the existing IMU path; P-e·h0 sets `tilt_topic: ""`, so `tilt`
+is published but unread.
+
+A tick with no fresh IMU sample, or a state frame older than 200 ms, publishes NOTHING (absent,
+never guessed), and the exit report counts every withheld tick.
+
+**Calibration:** the leg geometry comes from `pi_host/calib/body_measured_fsr.json`, exported
+by the sim (`scripts_tools/export_body_calib.gd`); re-export when the body changes. Also
+`pi_host/calib/servo_map.json` and `sensors.json` (`servo.us_per_rad`).
+
+**Verified:**
+- `test_hw` 67/67 on x86. The shared FK reproduces the sim's own FK to 1e-6 at 8 non-zero
+  poses. The unit-conversion and lag tests were mutation-checked: the first versions passed
+  vacuously and were fixed.
+- `ogma_host.cpp` passes a `-Wall -Wextra -fsyntax-only` check.
+
+**NOT verified:**
+- `ogma_host` linked and run (needs the Pi's ALSA/gpiod);
+- the state feed on real hardware;
+- the FSR contact threshold (200 counts) on the bench;
+- the I²C budget with 4 ADC reads plus a ToF poll per tick.
+
+**Shadow-mode run (no actuation exists):**
+```
+ogma_benchd --body measured --state-pub 5592
+ogma_host --config godot_host/project/addons/ami_ogma/configs/the_picrawler_motor_epm_embed_corridor_v3base__ga__bodypose__m1auth__planpull__native_measured__tofboom__fsrleg__honest__nohomeo.json --imu --brain-inputs --listen 0.0.0.0
+```

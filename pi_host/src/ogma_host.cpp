@@ -37,6 +37,7 @@
 #include "ogma/hw/I2cBus.hpp"
 #include "ogma/hw/SensorCalib.hpp"
 #include "ogma/body/StrideOdometry.hpp"
+#include "ogma/hw/BrainInputs.hpp"
 
 #include <atomic>
 #include <cerrno>
@@ -85,12 +86,23 @@ struct Args {
     // same part today; both can hold /dev/spidev0.0 without interleaving because each
     // transfer is one full-duplex ioctl, not a pointer-write followed by a read.
     bool    imu        = false;
+    // ⚠ OPT-IN: the P-e·h0 brain inputs (port doc "Brain input contract").  Reads benchd's
+    // 50 Hz state feed (commanded pulses + FSR counts) and the IMU, and publishes joints,
+    // imu, gyro, stride_v, foot_contact, foot_load, joint_torque (zeros),
+    // feet_y_gravity_cmd_imu and distress.  Still NO ACTUATION: it only READS benchd.
+    bool        brain_inputs = false;
+    std::string state_endpoint = "tcp://127.0.0.1:5592";
+    std::string body_calib     = "pi_host/calib/body_measured_fsr.json";
+    std::string servo_map      = "pi_host/calib/servo_map.json";
 };
 
 void usage() {
     std::fprintf(stderr,
         "usage: ogma_host --config <graph.json> [--hz 50] [--ticks N] [--rt] [--quiet]\n"
         "                 [--mic] [--camera] [--range] [--listen 0.0.0.0] [--video] [--video-mono]\n"
+        "                 [--imu --brain-inputs [--state-sub tcp://127.0.0.1:5592]\n"
+        "                  [--body-calib pi_host/calib/body_measured_fsr.json] [--servo-map pi_host/calib/servo_map.json]]\n"
+        "  --brain-inputs needs --imu and benchd started with --state-pub 5592\n"
         "  sensors are opt-in, one at a time: an unattributable failure is worse than a slow bring-up\n"
         "  topics: sense.audio (RawAudioFrame) sense.camera (RawImageFrame) sense.range (ProprioToken)\n"
         "  inspector: control = $OGMA_INSPECTOR_PORT (default 7400), diag = port+1\n"
@@ -126,9 +138,23 @@ int main(int argc, char** argv) {
         else if (v == "--range")                  a.range = true;
         else if (v == "--tof")                    a.tof = true;
         else if (v == "--imu")                    a.imu = true;
+        else if (v == "--brain-inputs")           a.brain_inputs = true;
+        else if (v == "--state-sub" && i + 1 < argc)  a.state_endpoint = argv[++i];
+        else if (v == "--body-calib" && i + 1 < argc) a.body_calib = argv[++i];
+        else if (v == "--servo-map" && i + 1 < argc)  a.servo_map = argv[++i];
         else { usage(); return 2; }
     }
     if (a.config.empty() || a.hz <= 0.0) { usage(); return 2; }
+    if (a.brain_inputs && a.tof) {
+        std::fprintf(stderr, "ogma_host: --brain-inputs takes the belly ToF from benchd's state feed; "
+                             "--tof would put a second process on /dev/i2c-1\n");
+        return 2;
+    }
+    if (a.brain_inputs && !a.imu) {
+        std::fprintf(stderr, "ogma_host: --brain-inputs needs --imu (heading, stride_v, distress and the "
+                             "foot-height input are all computed from it)\n");
+        return 2;
+    }
 
     std::signal(SIGINT,  on_sig);
     std::signal(SIGTERM, on_sig);
@@ -384,6 +410,38 @@ int main(int argc, char** argv) {
             }
         }
 
+        // ---- brain inputs: benchd's state feed + the builder ----------------------
+        // Calibration is loaded and CHECKED before the loop: a partial servo map or a
+        // missing body export would publish plausible joints for the wrong legs, which is
+        // the failure shape that cannot be seen from outside.
+        void* state_sub = nullptr;
+        std::unique_ptr<ogma::hw::brain::BrainInputBuilder> builder;
+        if (a.brain_inputs) {
+            auto body = ogma::hw::brain::BodyCalib::load(a.body_calib);
+            auto map  = ogma::hw::brain::ServoMapping::load(a.servo_map);
+            if (!body.ok) { std::fprintf(stderr, "ogma_host: body calib %s: %s\n", a.body_calib.c_str(), body.why.c_str()); return 1; }
+            if (!map.complete) { std::fprintf(stderr, "ogma_host: servo map %s incomplete: %s\n", a.servo_map.c_str(), map.why.c_str()); return 1; }
+            ogma::hw::brain::FsrModel fsr;
+            fsr.body_mass_g = body.total_mass_kg * 1000.0;
+            std::printf("ogma_host: brain inputs ON — body '%s' (L3 %.4f m, %.0f g), servo map complete, "
+                        "%.1f us/rad, FSR contact >= %d counts, state feed %s\n",
+                        body.geometry.c_str(), body.l3, fsr.body_mass_g, calib.servo_us_per_rad,
+                        fsr.contact_counts, a.state_endpoint.c_str());
+            builder = std::make_unique<ogma::hw::brain::BrainInputBuilder>(
+                std::move(body), std::move(map), fsr, calib.servo_us_per_rad);
+            if (!zmq_ctx) zmq_ctx = zmq_ctx_new();
+            state_sub = zmq_socket(zmq_ctx, ZMQ_SUB);
+            int conflate = 1, linger = 0;
+            zmq_setsockopt(state_sub, ZMQ_CONFLATE, &conflate, sizeof conflate);   // newest frame only
+            zmq_setsockopt(state_sub, ZMQ_LINGER,   &linger,   sizeof linger);
+            zmq_setsockopt(state_sub, ZMQ_SUBSCRIBE, "state ", 6);
+            if (zmq_connect(state_sub, a.state_endpoint.c_str()) != 0) {
+                std::fprintf(stderr, "ogma_host: state feed connect %s failed: %s\n",
+                             a.state_endpoint.c_str(), zmq_strerror(errno));
+                return 1;
+            }
+        }
+
         rt = a.realtime ? try_realtime() : false;
         std::printf("ogma_host: config=%s hz=%.2f diag=%u %s\n",
                     a.config.c_str(), a.hz, unsigned(diag_port),
@@ -416,6 +474,13 @@ int main(int argc, char** argv) {
         ogma::hw::Vl53l0x::Reading tof_last{};
         long imu_reads = 0;
         ogma::hw::ImuSample imu_last{};
+        // Brain-input accounting: frames in, ticks published, ticks withheld and why.
+        long bi_frames = 0, bi_published = 0, bi_stale = 0, bi_no_imu = 0, bi_bad = 0, bi_fsr_stale = 0;
+        uint64_t bi_last_seq = 0, bi_seq_gaps = 0;
+        long bi_last_frame_tick = -1;
+        int64_t bi_last_tof_ms = 0; long bi_tof_pub = 0;
+        ogma::hw::brain::TickInputs bi_in;
+        constexpr long kStateStaleTicks = 10;   // 200 ms at 50 Hz with no new frame -> withhold
 
         while (g_run && (a.max_ticks == 0 || ticks < a.max_ticks)) {
             next.tv_nsec += period_ns;
@@ -528,10 +593,12 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+            bool imu_fresh = false;
             if (imu) {
                 ogma::hw::ImuSample m;
                 if (imu->sample(m) && m.ok) {
                     ++imu_reads;
+                    imu_fresh = true;
                     imu_last = m;
                     const ogma::body::Vec3f up(m.up_fused[0], m.up_fused[1], m.up_fused[2]);
 
@@ -572,6 +639,76 @@ int main(int argc, char** argv) {
                     h->values[3] = m.bias_valid ? 1.0f : 0.0f;
                     h->values[4] = float(m.bias_samples);
                     bus->publish("sense.imu_health", h);
+                }
+            }
+
+            if (builder) {
+                // Newest benchd frame, if one arrived since the last tick (CONFLATE keeps one).
+                char buf[2048];
+                const int n = zmq_recv(state_sub, buf, sizeof buf - 1, ZMQ_DONTWAIT);
+                if (n > 6) {
+                    buf[std::min(n, int(sizeof buf) - 1)] = 0;
+                    try {
+                        const auto f = nlohmann::json::parse(buf + 6);   // after "state "
+                        const auto& us = f.at("us"); const auto& fs = f.at("fsr");
+                        if (us.size() != 12 || fs.size() != 4) throw std::runtime_error("shape");
+                        for (int k = 0; k < 12; ++k) bi_in.us[size_t(k)] = us[size_t(k)].get<int>();
+                        for (int k = 0; k < 4; ++k)  bi_in.fsr[size_t(k)] = fs[size_t(k)].get<int>();
+                        bi_in.fsr_ok = f.value("fsr_ok", false);
+                        const uint64_t seq = f.value("seq", uint64_t(0));
+                        if (bi_last_seq && seq != bi_last_seq + 1) ++bi_seq_gaps;
+                        bi_last_seq = seq;
+                        bi_last_frame_tick = ticks;
+                        ++bi_frames;
+                        // ground_clearance: once per NEW valid ToF measurement, absent when
+                        // invalid — the same rule and formula as the --tof path above.
+                        const int64_t tms = f.value("tof_ms", int64_t(0));
+                        if (f.value("tof_valid", false) && tms != bi_last_tof_ms) {
+                            bi_last_tof_ms = tms;
+                            auto g = std::make_shared<ogma::ProprioToken>();
+                            g->tick_id = uint64_t(ticks); g->producer_id = "host";
+                            g->sensor = "ground_clearance";
+                            g->values.resize(1);
+                            g->values[0] = float(ogma::body::ground_clearance(
+                                               f.value("tof_m", 0.0), calib.gc_stand_m));
+                            bus->publish("reality.proprio.ground_clearance", g);
+                            ++bi_tof_pub;
+                        }
+                    } catch (const std::exception&) { ++bi_bad; }
+                }
+                // Publish only on a fresh IMU sample AND a frame no older than 200 ms.  A
+                // withheld tick is ABSENT on the bus, never a guessed value (the same rule
+                // the belly channel follows).
+                if (!imu_fresh) ++bi_no_imu;
+                else if (bi_last_frame_tick < 0 || ticks - bi_last_frame_tick > kStateStaleTicks) ++bi_stale;
+                else {
+                    for (int k = 0; k < 3; ++k) {
+                        bi_in.accel_g[size_t(k)]  = imu_last.accel_body[size_t(k)];
+                        bi_in.gyro_dps[size_t(k)] = imu_last.gyro_body[size_t(k)];
+                        bi_in.up[size_t(k)]       = imu_last.up_fused[size_t(k)];
+                    }
+                    bi_in.dt = 1.0 / a.hz;
+                    bi_in.tick = ticks;
+                    const auto t = builder->step(bi_in);
+                    if (t.fsr_stale) ++bi_fsr_stale;
+                    auto pub = [&](const char* name, const float* v, size_t n) {
+                        auto tok = std::make_shared<ogma::ProprioToken>();
+                        tok->tick_id = uint64_t(ticks); tok->producer_id = "host";
+                        tok->sensor = name;
+                        tok->values.resize(Eigen::Index(n));
+                        for (size_t k = 0; k < n; ++k) tok->values[Eigen::Index(k)] = v[k];
+                        bus->publish(std::string("reality.proprio.") + name, tok);
+                    };
+                    pub("joints", t.joints.data(), t.joints.size());
+                    pub("imu", t.imu.data(), t.imu.size());
+                    pub("gyro", t.gyro.data(), t.gyro.size());
+                    pub("stride_v", t.stride_v.data(), t.stride_v.size());
+                    pub("foot_contact", t.foot_contact.data(), t.foot_contact.size());
+                    pub("foot_load", t.foot_load.data(), t.foot_load.size());
+                    pub("joint_torque", t.joint_torque.data(), t.joint_torque.size());
+                    pub("feet_y_gravity_cmd_imu", t.feet_y_gravity_cmd_imu.data(), t.feet_y_gravity_cmd_imu.size());
+                    pub("distress", &t.distress, 1);
+                    ++bi_published;
                 }
             }
 
@@ -665,6 +802,7 @@ int main(int argc, char** argv) {
         // from a silent room, a lens cap, and an empty corridor unless the error shows.
         mic.stop(); cam.stop(); rangefinder.stop();
         if (vid_pub) zmq_close(vid_pub);
+        if (state_sub) zmq_close(state_sub);
         if (zmq_ctx) zmq_ctx_term(zmq_ctx);
         if (!mic.last_error().empty())         std::fprintf(stderr, "ogma_host: mic died: %s\n", mic.last_error().c_str());
         if (!cam.last_error().empty())         std::fprintf(stderr, "ogma_host: camera died: %s\n", cam.last_error().c_str());
@@ -686,6 +824,14 @@ int main(int argc, char** argv) {
                         imu_last.up_fused[0], imu_last.up_fused[1], imu_last.up_fused[2],
                         ogma::body::upright_from_up(ogma::body::Vec3f(
                             imu_last.up_fused[0], imu_last.up_fused[1], imu_last.up_fused[2])));
+        }
+        if (builder) {
+            // From outside, a brain fed nothing looks like a brain fed well: say what reached it.
+            std::printf("ogma_host: brain inputs — %ld/%ld ticks published; withheld: %ld no fresh IMU, "
+                        "%ld stale/absent state feed; %ld frames (%llu seq gaps, %ld unparseable), "
+                        "%ld ticks on held FSR values; %ld ground_clearance readings from the feed\n",
+                        bi_published, ticks, bi_no_imu, bi_stale, bi_frames,
+                        (unsigned long long)bi_seq_gaps, bi_bad, bi_fsr_stale, bi_tof_pub);
         }
         if (tof) {
             std::printf("ogma_host: belly ToF — %ld reads, %ld valid (%.1f%%), last "

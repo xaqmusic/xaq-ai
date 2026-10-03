@@ -30,6 +30,8 @@
 #include "ogma/body/GodotFloat.hpp"
 #include "ogma/body/LegKinematics.hpp"
 #include "ogma/body/StrideOdometry.hpp"
+#include "ogma/body/Distress.hpp"
+#include <algorithm>
 
 namespace ogma::hw::brain {
 
@@ -244,6 +246,145 @@ struct FsrModel {
         for (int i = 0; i < 4; ++i) o[size_t(i)] = contact(fsr[size_t(kFsrChannelForSimLeg[size_t(i)])]);
         return o;
     }
+};
+
+// ---- the per-tick builder ---------------------------------------------------------------
+// Everything P-e·h0 reads from outside the graph, computed from what the robot has, in the
+// order the sim computes it within a tick (port doc contract; picrawler_body.gd, honest
+// branches).  Inputs arrive in the ROBOT's units and are converted here, once:
+//   accel_g   — ImuSample::accel_body, in g (×9.81 -> m/s², as Icm20948 itself does);
+//   gyro_dps  — ImuSample::gyro_body, in deg/s (-> rad/s);
+//   up        — ImuSample::up_fused (body frame, +X left, +Y up, +Z forward = sim axes).
+// ⚠ ORDER MATTERS and mirrors the sim:
+//   * `imu`[2] and `distress` read the PREVIOUS tick's stride estimate (the sim publishes
+//     them before it steps StrideV);
+//   * the forward model steps BEFORE `joints` is published, and the toe FK for stride_v
+//     uses the same stepped angles.
+struct TickInputs {
+    std::array<int, 12> us{};          // benchd state feed: commanded pulse per HAT channel
+    std::array<int, 4>  fsr{};         // benchd state feed: A0-A3 counts (physical order)
+    bool   fsr_ok   = true;
+    std::array<float, 3> accel_g{};    // ImuSample::accel_body
+    std::array<float, 3> gyro_dps{};   // ImuSample::gyro_body
+    std::array<float, 3> up{0, 1, 0};  // ImuSample::up_fused
+    double  dt   = 0.02;
+    int64_t tick = 0;
+};
+
+struct BrainTopics {
+    std::array<float, 12> joints{};
+    std::array<float, 4>  imu{};
+    std::array<float, 3>  gyro{};
+    std::array<float, 2>  stride_v{};
+    std::array<float, 4>  foot_contact{};
+    std::array<float, 4>  foot_load{};
+    std::array<float, 12> joint_torque{};   // zeros: hobby servos report no torque
+    std::array<float, 4>  feet_y_gravity_cmd_imu{};
+    float distress = 0.0f;
+    float upright  = 1.0f;
+    bool  fsr_stale = false;                // fsr_ok was false: foot values are the last good ones
+};
+
+class BrainInputBuilder {
+public:
+    static constexpr double kServoLagAlpha   = 0.2;    // STRIDO_LP_ALPHA (picrawler_body.gd)
+    static constexpr double kStanceLoadFrac  = 0.2;    // STRIDE_V_LOAD_THRESH
+    static constexpr double kG               = 9.81;
+    static constexpr double kDeg2Rad         = 3.14159265358979323846 / 180.0;
+
+    BrainInputBuilder(BodyCalib body, ServoMapping map, FsrModel fsr, double us_per_rad)
+        : body_(std::move(body)), map_(std::move(map)), fsr_(std::move(fsr)),
+          us_per_rad_(us_per_rad),
+          sv_(ogma::body::StrideVParams{1.0, 0.1, 0.05, 0.005, kG}) {}
+
+    BrainTopics step(const TickInputs& in) {
+        using ogma::body::Vec3f;
+        BrainTopics t;
+        const Vec3f up(in.up[0], in.up[1], in.up[2]);
+        const Vec3f gyro(float(in.gyro_dps[0] * kDeg2Rad), float(in.gyro_dps[1] * kDeg2Rad),
+                         float(in.gyro_dps[2] * kDeg2Rad));
+        const Vec3f accel(float(in.accel_g[0] * kG), float(in.accel_g[1] * kG),
+                          float(in.accel_g[2] * kG));
+
+        // 1. Ego heading: dead-reckoned yaw about the body's up axis (sim: _ego_heading).
+        ego_heading_ = wrap_pi(ego_heading_ + double(gyro.y) * in.dt);
+
+        // 2. Joints: commanded pulse -> hinge angle -> servo forward model -> sim normalisation.
+        const std::array<double, 12> cmd = hinge_angles_from_us(in.us, map_, us_per_rad_);
+        if (!lag_.seeded()) lag_.seed(cmd.data());
+        lag_.step(cmd.data(), kServoLagAlpha);
+        std::array<double, 12> ang{};
+        for (int k = 0; k < 12; ++k) ang[size_t(k)] = lag_[k];
+        t.joints = joints_topic(ang, body_);
+
+        // 3. imu (honest): ego heading, the PREVIOUS stride estimate, body-up yaw rate.
+        auto cl1 = [](double v) { return float(v < -1.0 ? -1.0 : (v > 1.0 ? 1.0 : v)); };
+        t.imu = {float(std::sin(ego_heading_)), float(std::cos(ego_heading_)),
+                 cl1(sv_prev_y_), cl1(double(gyro.y) / 3.14159265358979323846)};
+        t.gyro = {cl1(double(gyro.x) / 3.14159265358979323846),
+                  cl1(double(gyro.y) / 3.14159265358979323846),
+                  cl1(double(gyro.z) / 3.14159265358979323846)};
+
+        // 4. distress (honest): odometry along the ego heading × fused tilt; previous estimate.
+        const double upy = std::max(-1.0, std::min(1.0, double(up.y)));
+        t.distress = float(dist_.step(sv_prev_x_, sv_prev_y_, ego_heading_, std::acos(upy),
+                                      in.dt, in.tick));
+
+        // 5. The zero-pose swing-detector input and the fused upright.
+        t.feet_y_gravity_cmd_imu = feet_y_gravity_zero_pose(body_, up);
+        t.upright = up.y;
+
+        // 6. Foot sensors.  A failed read holds the last good values and says so.
+        if (in.fsr_ok) last_fsr_ = in.fsr;
+        t.fsr_stale = !in.fsr_ok;
+        t.foot_load    = fsr_.loads_sim(last_fsr_);
+        t.foot_contact = fsr_.contacts_sim(last_fsr_);
+
+        // 7. stride_v: stance FK on the forward-model angles, feet loaded >= 0.2 of body
+        //    weight at BOTH ends of the tick, through the shared StrideV.
+        std::array<Vec3f, 4> toe{};
+        std::array<bool, 4> loaded{};
+        Vec3f stance_sum(0.0f, 0.0f, 0.0f);
+        int stance_n = 0;
+        for (int i = 0; i < 4; ++i) {
+            toe[size_t(i)] = body_.toe_body(i, ang[size_t(i * 3 + 0)], ang[size_t(i * 3 + 1)],
+                                            ang[size_t(i * 3 + 2)]);
+            loaded[size_t(i)] = double(t.foot_load[size_t(i)]) >= kStanceLoadFrac;
+            if (prev_valid_ && loaded[size_t(i)] && prev_loaded_[size_t(i)]) {
+                stance_sum = stance_sum + ogma::body::planted_foot_velocity(
+                                              toe[size_t(i)], prev_toe_[size_t(i)], gyro, in.dt);
+                ++stance_n;
+            }
+        }
+        prev_toe_ = toe; prev_loaded_ = loaded; prev_valid_ = true;
+        sv_.step(sv_.linear_accel(accel, up), stance_sum, stance_n, in.dt);
+        t.stride_v = {sv_.est().x, sv_.est().y};
+        sv_prev_x_ = sv_.est().x;
+        sv_prev_y_ = sv_.est().y;
+        return t;
+    }
+
+    double ego_heading() const { return ego_heading_; }
+
+private:
+    static double wrap_pi(double a) {
+        const double tp = 2.0 * 3.14159265358979323846;
+        a = std::fmod(a + 3.14159265358979323846, tp);
+        if (a < 0.0) a += tp;
+        return a - 3.14159265358979323846;
+    }
+    BodyCalib    body_;
+    ServoMapping map_;
+    FsrModel     fsr_;
+    double       us_per_rad_;
+    ogma::body::ServoForwardModel   lag_;
+    ogma::body::StrideV             sv_;
+    ogma::body::DistressAccumulator dist_;
+    double ego_heading_ = 0.0, sv_prev_x_ = 0.0, sv_prev_y_ = 0.0;
+    std::array<int, 4> last_fsr_{};
+    std::array<ogma::body::Vec3f, 4> prev_toe_{};
+    std::array<bool, 4> prev_loaded_{};
+    bool prev_valid_ = false;
 };
 
 }  // namespace ogma::hw::brain

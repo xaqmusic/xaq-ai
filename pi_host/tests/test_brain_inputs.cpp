@@ -141,3 +141,95 @@ TEST(BrainFsr, ChannelsAreRemappedIntoTheMirroredSimLegOrder) {
     const auto c2 = f.contacts_sim({0, 0, 2000, 0});   // A2 = physical RL = sim rr
     EXPECT_EQ(c2[3], 1.0f);
 }
+
+// ---- BrainInputBuilder ------------------------------------------------------------------
+namespace {
+BrainInputBuilder real_builder() {
+    return BrainInputBuilder(real_body(), real_map(), FsrModel{}, 545.2);
+}
+TickInputs standing(const ServoMapping& m) {
+    TickInputs in;
+    for (int k = 0; k < 12; ++k) in.us[size_t(m.by_lj[size_t(k)].ch)] = int(m.by_lj[size_t(k)].origin_us);
+    in.fsr = {2400, 2400, 2400, 2400};          // all four feet well loaded
+    in.accel_g = {0.0f, 1.0f, 0.0f};
+    in.up = {0.0f, 1.0f, 0.0f};
+    return in;
+}
+}
+
+TEST(BrainBuilder, TiltedAndStillReadsNoTravel_AccelIsConvertedFromG) {
+    // Gravity-inclusive accel in g, tilted 0.1 rad nose-down.  Converted correctly, the
+    // linear acceleration is zero and stride_v stays at rest; left in g, gravity's
+    // forward component (~0.9 m/s²) leaks into the estimate and it drifts.
+    // ⚠ FEET UNLOADED.  With feet loaded, stance FK corrects the estimate fully every tick
+    // (fuse_beta 1.0) and hides the accelerometer: a version of this test with loaded
+    // feet PASSED with the g -> m/s² conversion deleted (mutation-checked 2026-10-03).
+    BrainInputBuilder b = real_builder();
+    TickInputs in = standing(real_map());
+    in.fsr = {0, 0, 0, 0};
+    in.up = {0.0f, 0.99500f, 0.09983f};
+    in.accel_g = in.up;
+    BrainTopics t;
+    for (int k = 0; k < 200; ++k) { in.tick = k; t = b.step(in); }
+    EXPECT_NEAR(t.stride_v[0], 0.0f, 1e-3f);
+    EXPECT_NEAR(t.stride_v[1], 0.0f, 1e-3f);
+}
+
+TEST(BrainBuilder, GyroIsConvertedFromDegreesPerSecond) {
+    BrainInputBuilder b = real_builder();
+    TickInputs in = standing(real_map());
+    in.gyro_dps = {0.0f, 90.0f, 0.0f};
+    for (int k = 0; k < 50; ++k) { in.tick = k; b.step(in); }   // 50 x 20 ms = 1 s
+    EXPECT_NEAR(b.ego_heading(), 3.14159265358979 / 2.0, 1e-4);
+    in.gyro_dps = {0.0f, 0.0f, 0.0f};
+    const BrainTopics t = b.step(in);
+    EXPECT_NEAR(t.imu[0], 1.0f, 1e-4f);      // sin(heading)
+    EXPECT_NEAR(t.imu[3], 0.0f, 1e-6f);      // yaw rate now zero
+}
+
+TEST(BrainBuilder, JointsFollowTheCommandThroughTheServoLag) {
+    const ServoMapping m = real_map();
+    BrainInputBuilder b = real_builder();
+    TickInputs in = standing(m);
+    BrainTopics t0 = b.step(in);
+    EXPECT_NEAR(t0.joints[0 * 4 + 0], 0.0f, 1e-6f);             // fl hip1 at origin
+    // Step fl hip1 by +0.7 rad worth of pulse: the lag (alpha 0.2) shows 20 % on tick one.
+    const ServoChannel c = m.by_lj[0];
+    in.us[size_t(c.ch)] = int(c.origin_us + c.sign * 0.7 * 545.2);
+    const BrainTopics t1 = b.step(in);
+    const double a1 = double(c.sign) * (in.us[size_t(c.ch)] - c.origin_us) / 545.2;
+    EXPECT_NEAR(t1.joints[0], float(0.2 * a1 / 1.4), 1e-4f);
+}
+
+TEST(BrainBuilder, ImuForwardSpeedLagsStrideVByOneTick) {
+    // Feet unloaded so stance FK cannot pin stride_v at zero (that would make "lags by one
+    // tick" true whatever the code did — same trap as the accel test above).
+    BrainInputBuilder b = real_builder();
+    TickInputs in = standing(real_map());
+    in.fsr = {0, 0, 0, 0};
+    in.accel_g = {0.0f, 1.0f, 0.05f};       // a forward push: stride_v.y moves every tick
+    BrainTopics prev = b.step(in);
+    for (int k = 1; k < 20; ++k) {
+        in.tick = k;
+        const BrainTopics t = b.step(in);
+        ASSERT_NE(t.stride_v[1], prev.stride_v[1]) << "stride_v must move, or this proves nothing";
+        EXPECT_FLOAT_EQ(t.imu[2], prev.stride_v[1]) << "tick " << k;
+        EXPECT_NE(t.imu[2], t.stride_v[1]) << "tick " << k;
+        prev = t;
+    }
+}
+
+TEST(BrainBuilder, AFailedFsrReadHoldsTheLastGoodValuesAndSaysSo) {
+    BrainInputBuilder b = real_builder();
+    TickInputs in = standing(real_map());
+    const BrainTopics good = b.step(in);
+    in.fsr = {-1, -1, -1, -1};
+    in.fsr_ok = false;
+    const BrainTopics bad = b.step(in);
+    EXPECT_TRUE(bad.fsr_stale);
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_EQ(bad.foot_load[size_t(i)], good.foot_load[size_t(i)]);
+        EXPECT_EQ(bad.foot_contact[size_t(i)], 1.0f);
+    }
+    for (float v : bad.joint_torque) EXPECT_EQ(v, 0.0f);
+}

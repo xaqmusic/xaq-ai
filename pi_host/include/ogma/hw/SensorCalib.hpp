@@ -34,6 +34,8 @@ struct SensorCalib {
     double ina_r_shunt_ohm     = 0.01;   // INA219, trace+solder included
     double gc_stand_m          = 0.06;   // ground_clearance normalizer; matches the
                                          // sim's GROUND_CLEARANCE_STAND by contract
+    double servo_us_per_rad    = 545.2;  // MEASURED (RL knee, 2026-09-13); the brain-input
+                                         // port maps commanded pulse -> hinge angle with it
     // ICM-20948 chip-frame body-up, belly flat on a level floor.  Mount tilt + accel
     // bias, unsplit, accelerometer-only.  Default is the 2026-09-10 fit, which is also
     // Icm20948Config's default — so a missing calib file changes nothing here.
@@ -58,6 +60,8 @@ struct SensorCalib {
                 c.ina_r_shunt_ohm = j["ina219"]["r_shunt_ohm"].get<double>();
             if (j.contains("ground_clearance") && j["ground_clearance"].contains("stand_m"))
                 c.gc_stand_m = j["ground_clearance"]["stand_m"].get<double>();
+            if (j.contains("servo") && j["servo"].contains("us_per_rad"))
+                c.servo_us_per_rad = j["servo"]["us_per_rad"].get<double>();
             if (j.contains("imu") && j["imu"].contains("level_ref")) {
                 const auto& lr = j["imu"]["level_ref"];
                 if (lr.is_array() && lr.size() == 3)
