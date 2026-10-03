@@ -5830,6 +5830,9 @@ alongside `amp_target`, `coupling_gain` and `postural_gain`. Frozen-evolver cont
 
 ### ★★ 2026-10-02 — OPTION C, STEP 2: the live gain search does not beat frozen gains on the robot's inputs (truncated run)
 
+> ⚠ **CORRECTED SAME DAY by the completed confirmation (entry below): the tips are NOT confined
+> to the first 40k ticks.** The 4-seed truncated read below was too short and too small to see it.
+
 **Protocol:** P-e·h + `height_ground_gain` 0. Search arm: GainEvolver live, with
 `height_homeo_gain` added to its keys (seed 0.077, range 0–0.15). Control arm: same, evolver
 frozen (`mutation_sigma` 0). 4 seeds each. All 4 searched gains confirmed landing
@@ -5863,5 +5866,26 @@ height_homeo_gain). 1–2 accepts per seed, so not converged, and "home is a reg
 and in the sim that costs falls. The early-learning tips are the operator's stated concern:
 slow and gentle while the brain knows little.
 
-Registered as **P-e·h r** in the launcher. Confirmation running: frozen, n=8 × 100 000,
+Registered as **P-e·hr** in the launcher. Confirmation running: frozen, n=8 × 100 000,
 completed runs this time.
+
+### ★★ 2026-10-02 — P-e·hr CONFIRMATION (n=8 × 100 000, completed): ~1 tip per 80k ticks, spread through the run
+
+**Verdict: `PARTIAL` — a ~27× lower tip rate than P-e·h, not yet safe enough to call cleared.**
+P-e·hr, gains frozen, 3.668 rad/s, arena difficulty 0.3. Every seed ran all 100 000 ticks.
+Receipts checked.
+- **Resets: 10 on 5/8 seeds** (0, 2, 0, 0, 1, 5, 1, 1), at ticks 540, 8 580, 27 540, 29 580,
+  41 040, 41 400, 52 740, 64 860, 71 580, 93 960. **Spread through the run.** That retracts
+  step 2's "only early" read.
+- **Rate:** ≈ 1 per 80k ticks (~27 min of robot time at 50 Hz). P-e·h: 64 per 192k (1 per 3k).
+  P-e headless: 2 per 192k (1 per 96k). Same order as the configuration the operator approved,
+  but P-e has not been run to 100k, so that comparison is a lead, not a finding.
+- **3/8 seeds clean throughout,** tilt mean settling to ~0.09.
+- **Seed 6 ends tipped and STUCK:** over the last 20k ticks tilt mean 1.47 rad, `height_bias`
+  railed 70 %, `height_k_eff` still 0.30. The INTEGRATOR winds up on a body that cannot reach
+  its target, even with the ratchet off. Anti-windup on `height_bias` itself is still open;
+  B, C and D did not do it.
+- **Belly** median 22 mm (p05 3.8 mm); 3.5 % of samples under 3 mm.
+
+**Next candidate:** P-e·h + `height_homeo_gain` 0 (homeostat off). It tipped 0/4 at 12 000
+ticks, but has never had a long run.
