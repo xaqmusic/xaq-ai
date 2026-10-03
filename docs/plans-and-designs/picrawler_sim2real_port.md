@@ -1841,5 +1841,7 @@ sustained rule caught a REAL sustained overload, which is what it is for, and ig
    only `ping` feeds the deadman. So any open dashboard keeps armed servos alive with no
    controlling client. The robot was left standing on the HAT's held pulses, unsupervised,
    until rescue was commanded by hand. ⚠ Nine bench tools hold poses while polling only
-   `status`, so making `status` non-feeding needs those tools to `ping`. Operator decision
-   pending.
+   `status`, so making `status` non-feeding needs those tools to `ping`. **FIXED (operator's
+   choice, `0f1f067`):** read-only verbs no longer feed the deadman, and the eight tools ping
+   in their rpc helper. Verified on the robot with both dashboards polling: `pose_hold` holds
+   on its pings, and the deadman fired 930 ms after release.
